@@ -1,0 +1,216 @@
+/**
+ * Glove Manager – Rubber Glove & Sleeve Inventory System
+ *
+ * Google Apps Script foundation for automating and managing PPE inventory, assignments, swaps, compliance, and reporting.
+ *
+ * Sheet Interactions:
+ * - Employees feeds Gloves, Sleeves, Glove Swaps, Sleeve Swaps, Reclaims
+ * - Gloves/Sleeves feed Swaps, Purchase Needs, Inventory Reports, History, Reclaims
+ * - Swaps update Gloves/Sleeves, Employees, History
+ * - Purchase Needs and Inventory Reports aggregate/analyze inventory
+ * - Reclaims cross-checks assignments for compliance
+ * - History logs all changes
+ *
+ * Expand each placeholder as features are implemented. Logging and error handling included for maintainability.
+ */
+
+// Sheet/tab name constants
+const SHEET_EMPLOYEES = 'Employees';
+const SHEET_GLOVES = 'Gloves';
+const SHEET_SLEEVES = 'Sleeves';
+const SHEET_GLOVE_SWAPS = 'Glove Swaps';
+const SHEET_SLEEVE_SWAPS = 'Sleeve Swaps';
+const SHEET_PURCHASE_NEEDS = 'Purchase Needs';
+const SHEET_INVENTORY_REPORTS = 'Inventory Reports';
+const SHEET_RECLAIMS = 'Reclaims';
+const SHEET_HISTORY = 'History';
+
+/**
+ * Adds a custom menu to the Google Sheet for Glove Manager actions.
+ */
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('Glove Manager')
+    .addItem('Build Sheets', 'buildSheets')
+    .addItem('Generate All Reports', 'generateAllReports')
+    .addSeparator()
+    .addItem('Generate Glove Swaps', 'generateGloveSwaps')
+    .addItem('Generate Sleeve Swaps', 'generateSleeveSwaps')
+    .addItem('Update Purchase Needs', 'updatePurchaseNeeds')
+    .addItem('Update Inventory Reports', 'updateInventoryReports')
+    .addItem('Run Reclaims Check', 'runReclaimsCheck')
+    .addItem('View History', 'viewHistory')
+    .addToUi();
+}
+
+/**
+ * Logging utility for consistent logs and error tracking.
+ */
+function logEvent(message, level = 'INFO') {
+  const now = new Date();
+  Logger.log(`[${level}] [${now.toISOString()}] ${message}`);
+}
+
+/**
+ * Idempotently creates all required sheets/tabs and headers for the Glove Manager system.
+ */
+function buildSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetDefs = [
+    { name: SHEET_EMPLOYEES, headers: ['Name', 'Class', 'Location', 'Job Number', 'Phone Number', 'Notification Emails', 'MP Email', 'Email Address', 'Glove Size', 'Sleeve Size'] },
+    { name: SHEET_GLOVES, headers: ['Glove', 'Size', 'Class', 'Test Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Notes'] },
+    { name: SHEET_SLEEVES, headers: ['Sleeve', 'Size', 'Class', 'Test Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Notes'] },
+    { name: SHEET_GLOVE_SWAPS, headers: ['Employee', 'Item Number', 'Size', 'Date Assigned', 'Change Out Date', 'Days Left', 'Pick List', 'Status', 'Checkbox', 'Date Changed'] },
+    { name: SHEET_SLEEVE_SWAPS, headers: ['Employee', 'Item Number', 'Size', 'Date Assigned', 'Change Out Date', 'Days Left', 'Pick List', 'Status', 'Checkbox', 'Date Changed'] },
+    { name: SHEET_PURCHASE_NEEDS, headers: ['Item Type', 'Size', 'Class', 'Quantity Needed', 'Reason', 'Status/Notes'] },
+    { name: SHEET_INVENTORY_REPORTS, headers: ['Report Type', 'Class', 'Location', 'Count', 'Notes'] },
+    { name: SHEET_RECLAIMS, headers: ['Location', 'Approval Status', 'Employee', 'Item Number', 'Class', 'Action Needed'] },
+    { name: SHEET_HISTORY, headers: ['Timestamp', 'Action', 'Item Type', 'Item Number', 'Employee', 'Old Value', 'New Value', 'User', 'Source/Notes'] }
+  ];
+  sheetDefs.forEach(def => {
+    let sheet = ss.getSheetByName(def.name);
+    if (!sheet) {
+      sheet = ss.insertSheet(def.name);
+      sheet.getRange(1, 1, 1, def.headers.length).setValues([def.headers]);
+    } else if ([SHEET_EMPLOYEES, SHEET_GLOVES, SHEET_SLEEVES].includes(def.name)) {
+      // Only set headers if sheet is empty (no data)
+      if (sheet.getLastRow() === 0) {
+        sheet.getRange(1, 1, 1, def.headers.length).setValues([def.headers]);
+      }
+      // Do not clear or overwrite any data
+    } else {
+      sheet.clear();
+      sheet.getRange(1, 1, 1, def.headers.length).setValues([def.headers]);
+    }
+    // Formatting for Employees, Gloves, Sleeves
+    if ([SHEET_EMPLOYEES, SHEET_GLOVES, SHEET_SLEEVES].includes(def.name)) {
+      sheet.setFrozenRows(1);
+      sheet.setFrozenColumns(1);
+      var headerRange = sheet.getRange(1, 1, 1, def.headers.length);
+      headerRange.setBackground('#1565c0'); // Blue
+      headerRange.setFontColor('#ffffff'); // White
+      headerRange.setFontWeight('bold');
+      var lastRow = sheet.getLastRow();
+      var lastCol = def.headers.length;
+      if (lastRow > 1) {
+        sheet.getRange(2, 1, lastRow - 1, lastCol).setHorizontalAlignment('center');
+      }
+      // Center header row too
+      headerRange.setHorizontalAlignment('center');
+    }
+    // Formatting for Glove Swaps, Sleeve Swaps
+    if ([SHEET_GLOVE_SWAPS, SHEET_SLEEVE_SWAPS].includes(def.name)) {
+      var swapSheet = sheet;
+      var swapHeaders = def.headers.length;
+      swapSheet.getRange(1, 1, 1, swapHeaders).setHorizontalAlignment('center');
+      var swapLastRow = swapSheet.getLastRow();
+      if (swapLastRow > 1) {
+        swapSheet.getRange(2, 1, swapLastRow - 1, swapHeaders).setHorizontalAlignment('center');
+      }
+    }
+  });
+  logEvent('Sheets built or reset.');
+}
+
+/**
+ * Placeholder: Generate Glove Swaps report.
+ * Uses Employees and Gloves data to determine upcoming swaps.
+ */
+function generateGloveSwaps() {
+  try {
+    logEvent('Generating Glove Swaps report...');
+    // TODO: Implement logic
+  } catch (e) {
+    logEvent('Error in generateGloveSwaps: ' + e, 'ERROR');
+    throw e;
+  }
+}
+
+/**
+ * Placeholder: Generate Sleeve Swaps report.
+ * Uses Employees and Sleeves data to determine upcoming swaps.
+ */
+function generateSleeveSwaps() {
+  try {
+    logEvent('Generating Sleeve Swaps report...');
+    // TODO: Implement logic
+  } catch (e) {
+    logEvent('Error in generateSleeveSwaps: ' + e, 'ERROR');
+    throw e;
+  }
+}
+
+/**
+ * Placeholder: Update Purchase Needs report.
+ * Aggregates Gloves and Sleeves data to identify shortages.
+ */
+function updatePurchaseNeeds() {
+  try {
+    logEvent('Updating Purchase Needs report...');
+    // TODO: Implement logic
+  } catch (e) {
+    logEvent('Error in updatePurchaseNeeds: ' + e, 'ERROR');
+    throw e;
+  }
+}
+
+/**
+ * Placeholder: Update Inventory Reports.
+ * Summarizes inventory status from Gloves and Sleeves.
+ */
+function updateInventoryReports() {
+  try {
+    logEvent('Updating Inventory Reports...');
+    // TODO: Implement logic
+  } catch (e) {
+    logEvent('Error in updateInventoryReports: ' + e, 'ERROR');
+    throw e;
+  }
+}
+
+/**
+ * Placeholder: Run Reclaims check.
+ * Cross-checks assignments for compliance with location rules.
+ */
+function runReclaimsCheck() {
+  try {
+    logEvent('Running Reclaims check...');
+    // TODO: Implement logic
+  } catch (e) {
+    logEvent('Error in runReclaimsCheck: ' + e, 'ERROR');
+    throw e;
+  }
+}
+
+/**
+ * Placeholder: View History log.
+ * Displays or exports the audit trail of all changes.
+ */
+function viewHistory() {
+  try {
+    logEvent('Viewing History log...');
+    // TODO: Implement logic
+  } catch (e) {
+    logEvent('Error in viewHistory: ' + e, 'ERROR');
+    throw e;
+  }
+}
+
+/**
+ * Calls all report-generation/update functions to refresh all reports/tabs.
+ */
+function generateAllReports() {
+  try {
+    logEvent('Generating all reports...');
+    generateGloveSwaps();
+    generateSleeveSwaps();
+    updatePurchaseNeeds();
+    updateInventoryReports();
+    runReclaimsCheck();
+    viewHistory();
+    logEvent('All reports generated.');
+  } catch (e) {
+    logEvent('Error in generateAllReports: ' + e, 'ERROR');
+    throw e;
+  }
+}
