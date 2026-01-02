@@ -371,6 +371,9 @@ Change Out Date is automatically recalculated when:
 1. Pick List item in Gloves/Sleeves sheet is updated:
    - Status → "Ready For Delivery"
    - Assigned To → "Packed For Delivery"
+   - Date Assigned → Today's date
+   - Change Out Date → Calculated (3 months for gloves, 12 months for sleeves)
+   - Location → "Cody's Truck"
    - Picked For → "Employee Name Picked On YYYY-MM-DD"
 2. Stage 2 columns (Q-T) are populated with new state
 3. Swap sheet Status updates to "Ready For Delivery 🚚"
@@ -405,7 +408,7 @@ Change Out Date is automatically recalculated when:
    - Status → "Assigned"
    - Assigned To → Employee name
    - Date Assigned → Date Changed value
-   - Change Out Date → Calculated based on rules
+   - Change Out Date → Calculated based on employee location and item type
    - Location → Employee's location
    - Picked For → Cleared
 
@@ -413,6 +416,7 @@ Change Out Date is automatically recalculated when:
    - Status → "Ready For Test"
    - Assigned To → "Packed For Testing"
    - Date Assigned → Date Changed value
+   - Change Out Date → Calculated (3 months for gloves, 12 months for sleeves)
    - Location → "Cody's Truck"
 
 3. Stage 3 columns (U-W) populated with final assignment info
@@ -432,9 +436,22 @@ Change Out Date is automatically recalculated when:
 **Trigger**: User clears the Date Changed value
 
 **What Happens**:
-1. Pick List item reverts to Stage 2 state (Ready For Delivery, Packed For Delivery)
-2. Old item reverts to its Stage 1 state (Assigned to employee)
-3. Stage 3 columns cleared
+1. **Pick List item** reverts to Stage 2 state:
+   - Status → "Ready For Delivery"
+   - Assigned To → "Packed For Delivery"
+   - Date Assigned → Original Stage 2 date
+   - Change Out Date → Recalculated (3 months for gloves, 12 months for sleeves)
+   - Location → "Cody's Truck"
+   - Picked For → Restored
+   
+2. **Old item** reverts to Stage 1 state:
+   - Status → Original status (e.g., "Assigned")
+   - Assigned To → Employee name
+   - Date Assigned → Original date
+   - Change Out Date → Recalculated based on employee location
+   - Location → Employee's location
+   
+3. Stage 3 columns (U-W) cleared
 4. Swap visible columns revert to Stage 2 display
 
 ### Stage 5: Unpick (Picked Unchecked)
@@ -442,10 +459,17 @@ Change Out Date is automatically recalculated when:
 **Trigger**: User unchecks the Picked checkbox
 
 **What Happens**:
-1. Pick List item reverts to Stage 1 state (original status before picking)
-2. Picked For column cleared in inventory
-3. Stage 2 columns cleared
-4. Swap visible columns revert to Stage 1 display
+1. Pick List item reverts to Stage 1 state in inventory:
+   - Status → Original status (e.g., "On Shelf")
+   - Assigned To → Original value (e.g., "On Shelf")
+   - Date Assigned → Original date from Stage 1 columns
+   - Change Out Date → Recalculated based on reverted assignment
+   - Location → "Helena" (default for On Shelf items)
+   - Picked For → Cleared
+2. Stage 2 columns (Q-T) cleared
+3. Stage 3 columns (U-W) cleared (if Date Changed was set)
+4. Date Changed column cleared
+5. Swap visible columns revert to Stage 1 display
 
 ---
 
