@@ -3,7 +3,7 @@
 **Branch**: `refactor/split-code-files`  
 **Status**: Ready for Testing
 
-## ✅ Completed Phases (1-4)
+## ✅ Completed Phases (1-5)
 
 ### Phase 1: Constants
 - **File**: `00-Constants.gs` (134 lines)
@@ -34,16 +34,24 @@
   - `fixAllChangeOutDates()` - Batch recalculation utility
 - **Commit**: `0045f0e`
 
+### Phase 5: Menu & UI
+- **File**: `10-Menu.gs` (129 lines)
+- **Functions**:
+  - `onOpen()` - Creates Glove Manager menu
+  - `testEditTrigger()` - Debug trigger testing
+  - `recalcCurrentRow()` - Manual change out date recalculation
+- **Commit**: `6ccc5bb+`
+
 ---
 
 ## 📊 Statistics
 
 | Metric | Before | After | Improvement |
 |--------|--------|-------|-------------|
-| Code.gs size | 7,353 lines | ~6,840 lines | -513 lines (7%) |
-| Number of files | 2 (.gs) | 6 (.gs) | +4 files |
-| Largest file | 7,353 lines | ~6,840 lines | -7% |
-| Functions extracted | 0 | 9 functions | Modularized |
+| Code.gs size | 7,353 lines | ~6,710 lines | -643 lines (8.7%) |
+| Number of files | 2 (.gs) | 7 (.gs) | +5 files |
+| Largest file | 7,353 lines | ~6,710 lines | -9% |
+| Functions extracted | 0 | 12 functions | Modularized |
 
 ---
 
@@ -135,9 +143,10 @@ You may see ESLint warnings like:
 src/
 ├── 00-Constants.gs          ✅ Done (134 lines)
 ├── 01-Utilities.gs          ✅ Done (91 lines)
+├── 10-Menu.gs               ✅ Done (129 lines)
 ├── 21-ChangeOutDate.gs      ✅ Done (221 lines)
 ├── 90-Backup.gs             ✅ Done (110 lines)
-├── Code.gs                  🔄 In Progress (~6,840 lines)
+├── Code.gs                  🔄 In Progress (~6,710 lines)
 ├── Dashboard.html           (unchanged)
 └── TestRunner.gs            (unchanged)
 ```
