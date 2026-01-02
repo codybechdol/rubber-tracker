@@ -533,8 +533,7 @@ function processEdit(e) {
 function handleInventoryAssignedToChange(ss, sheet, sheetName, editedRow, newValue) {
   if (editedRow < 2) return; // Skip header row
 
-  // Clear schema cache to ensure fresh column mapping
-  SCHEMA = null;
+  // Schema cache was removed during refactoring (Jan 2026) - using COLS constants instead
 
   var lock = null;
   try {
@@ -2474,10 +2473,7 @@ function generateSwaps(itemType) {
 
     swapSheet.clear();
 
-    // Clear the schema cache for this sheet since we're rebuilding it with new headers
-    if (SCHEMA && SCHEMA[swapSheetName]) {
-      delete SCHEMA[swapSheetName];
-    }
+    // Schema cache removed during refactoring (Jan 2026)
 
     var currentRow = 1;
     var classes = isGloves ? [0, 2, 3] : [2, 3];  // Sleeves don't have Class 0
