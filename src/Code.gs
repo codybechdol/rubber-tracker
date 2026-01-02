@@ -1428,9 +1428,13 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
     var dateChangedFormatted = Utilities.formatDate(dateChanged, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
     Logger.log('Parsed date: ' + dateChangedFormatted);
 
-    // Calculate Change Out Date based on location
-    var changeOutDate = calculateChangeOutDate(dateChanged, employeeLocation);
-    var changeOutDateFormatted = changeOutDate ? Utilities.formatDate(changeOutDate, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy') : '';
+    // Calculate Change Out Date based on location, assignedTo, and item type
+    // Determine if this is a sleeve swap
+    var isSleeve = (swapSheet.getName() === SHEET_SLEEVE_SWAPS);
+    var changeOutDate = calculateChangeOutDate(dateChanged, employeeLocation, employeeName, isSleeve);
+    var changeOutDateFormatted = changeOutDate && changeOutDate !== 'N/A' 
+      ? Utilities.formatDate(changeOutDate, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy') 
+      : (changeOutDate === 'N/A' ? 'N/A' : '');
 
     // Store Stage 3 values in columns U-W (indices 20-22)
     var stage3Values = [
@@ -1444,13 +1448,17 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
     swapSheet.getRange(editedRow, 8).setValue('Assigned').setFontWeight('bold').setFontColor('#2e7d32');
     swapSheet.getRange(editedRow, 6).setValue('Assigned').setFontWeight('bold').setFontColor('#2e7d32');
 
-    // Update the Pick List item (NEW glove) - assign to employee
+    // Update the Pick List item (NEW glove/sleeve) in inventory - assign to employee
     inventorySheet.getRange(pickListRow, 7).setValue('Assigned');           // Status (G)
     inventorySheet.getRange(pickListRow, 8).setValue(employeeName);         // Assigned To (H)
-    inventorySheet.getRange(pickListRow, 5).setValue(dateChangedFormatted); // Date Assigned (E)
+    inventorySheet.getRange(pickListRow, 5).setNumberFormat('MM/dd/yyyy').setValue(dateChanged); // Date Assigned (E)
     inventorySheet.getRange(pickListRow, 6).setValue(employeeLocation);     // Location (F)
-    if (changeOutDateFormatted) {
-      inventorySheet.getRange(pickListRow, 9).setValue(changeOutDateFormatted); // Change Out Date (I)
+    // Write Change Out Date to inventory with proper formatting
+    var changeOutCell = inventorySheet.getRange(pickListRow, 9); // Column I
+    if (changeOutDate === 'N/A') {
+      changeOutCell.setNumberFormat('@').setValue('N/A');  // Plain text for N/A
+    } else if (changeOutDate) {
+      changeOutCell.setNumberFormat('MM/dd/yyyy').setValue(changeOutDate);  // Date object
     }
     inventorySheet.getRange(pickListRow, 10).setValue('');                  // Clear Picked For (J)
 
@@ -1458,7 +1466,7 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
     if (oldItemRow > 0) {
       inventorySheet.getRange(oldItemRow, 7).setValue('Ready For Test');    // Status (G)
       inventorySheet.getRange(oldItemRow, 8).setValue('Packed For Testing');// Assigned To (H)
-      inventorySheet.getRange(oldItemRow, 5).setValue(dateChangedFormatted);// Date Assigned (E)
+      inventorySheet.getRange(oldItemRow, 5).setNumberFormat('MM/dd/yyyy').setValue(dateChanged); // Date Assigned (E)
       inventorySheet.getRange(oldItemRow, 6).setValue("Cody's Truck");      // Location (F)
     }
 
