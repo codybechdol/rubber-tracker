@@ -6,131 +6,16 @@
  * Hidden columns (K–W) on Glove/Sleeve Swaps tabs store workflow state for Stage 1-5 processing.
  *
  * Expand each placeholder as features are implemented. Logging and error handling included for maintainability.
+ *
+ * NOTE: Constants (COLS, sheet names, etc.) are defined in 00-Constants.gs
+ * NOTE: Utility functions (logEvent, normalizeApprovalValue, etc.) are defined in 01-Utilities.gs
  */
 
-// Sheet/tab name constants
-const SHEET_EMPLOYEES = 'Employees';
-const SHEET_GLOVES = 'Gloves';
-const SHEET_SLEEVES = 'Sleeves';
-const SHEET_GLOVE_SWAPS = 'Glove Swaps';
-const SHEET_SLEEVE_SWAPS = 'Sleeve Swaps';
-const SHEET_PURCHASE_NEEDS = 'Purchase Needs';
-const SHEET_INVENTORY_REPORTS = 'Inventory Reports';
-const SHEET_RECLAIMS = 'Reclaims';
-const SHEET_ITEM_HISTORY_LOOKUP = 'Item History Lookup';
-const SHEET_GLOVES_HISTORY = 'Gloves History';
-const SHEET_SLEEVES_HISTORY = 'Sleeves History';
-
-// Header background color for swap tables
-const HEADER_BG_COLOR = '#1565c0';
-
-// Change-out intervals (months)
-const INTERVAL_HELENA = 3;
-const INTERVAL_DEFAULT = 6;
-
-// Alternating colors for history grouping
-const HISTORY_COLOR_GLOVE_1 = '#e3f2fd';  // Light blue
-const HISTORY_COLOR_GLOVE_2 = '#ffffff';  // White
-const HISTORY_COLOR_SLEEVE_1 = '#e8f5e9'; // Light green
-const HISTORY_COLOR_SLEEVE_2 = '#ffffff'; // White
-
-// Backup folder name in Google Drive
-var BACKUP_FOLDER_NAME = 'Glove Manager Backups';
-
-// =============================================================================
-// COLUMN CONSTANTS - Per Workflow_and_Sheet_Expectations.md
-// These columns are FIXED per the documentation and should be used directly
-// =============================================================================
-const COLS = {
-  // Gloves & Sleeves Sheet (identical structure)
-  INVENTORY: {
-    ITEM_NUM: 1,        // A - "Glove" or "Sleeve" (Item #)
-    SIZE: 2,            // B
-    CLASS: 3,           // C
-    TEST_DATE: 4,       // D
-    DATE_ASSIGNED: 5,   // E
-    LOCATION: 6,        // F
-    STATUS: 7,          // G
-    ASSIGNED_TO: 8,     // H
-    CHANGE_OUT_DATE: 9, // I
-    PICKED_FOR: 10,     // J
-    NOTES: 11           // K
-  },
-
-  // Glove/Sleeve Swaps Sheet (visible columns A-J)
-  SWAPS: {
-    EMPLOYEE: 1,        // A
-    CURRENT_ITEM: 2,    // B
-    SIZE: 3,            // C
-    DATE_ASSIGNED: 4,   // D
-    CHANGE_OUT_DATE: 5, // E
-    DAYS_LEFT: 6,       // F
-    PICK_LIST: 7,       // G
-    STATUS: 8,          // H
-    PICKED: 9,          // I
-    DATE_CHANGED: 10    // J
-  },
-
-  // Swaps Hidden Columns (Stage tracking K-W)
-  SWAPS_HIDDEN: {
-    STAGE1_PICK_STATUS: 11,      // K
-    STAGE1_PICK_ASSIGNED: 12,    // L
-    STAGE1_PICK_DATE: 13,        // M
-    STAGE1_OLD_STATUS: 14,       // N
-    STAGE1_OLD_ASSIGNED: 15,     // O
-    STAGE1_OLD_DATE: 16,         // P
-    STAGE2_STATUS: 17,           // Q
-    STAGE2_ASSIGNED: 18,         // R
-    STAGE2_DATE: 19,             // S
-    STAGE2_PICKED_FOR: 20,       // T
-    STAGE3_ASSIGNED: 21,         // U
-    STAGE3_DATE: 22,             // V
-    STAGE3_CHANGE_OUT: 23        // W
-  },
-
-  // Employees Sheet
-  EMPLOYEES: {
-    NAME: 1,              // A
-    CLASS: 2,             // B
-    LOCATION: 3,          // C
-    JOB_NUMBER: 4,        // D
-    PHONE: 5,             // E
-    NOTIFICATION_EMAILS: 6, // F
-    MP_EMAIL: 7,          // G
-    EMAIL: 8,             // H
-    GLOVE_SIZE: 9,        // I
-    SLEEVE_SIZE: 10,      // J
-    HIRE_DATE: 11,        // K
-    LAST_DAY: 12,         // L
-    LAST_DAY_REASON: 13   // M
-  },
-
-  // Employee History Sheet
-  EMPLOYEE_HISTORY: {
-    DATE: 1,              // A
-    NAME: 2,              // B
-    EVENT_TYPE: 3,        // C
-    LOCATION: 4,          // D
-    JOB_NUMBER: 5,        // E
-    HIRE_DATE: 6,         // F
-    LAST_DAY: 7,          // G
-    LAST_DAY_REASON: 8,   // H
-    REHIRE_DATE: 9,       // I
-    NOTES: 10             // J
-  }
-};
-
-/**
- * Global Schema mapping to avoid hardcoded column indices.
- * Loaded once per execution.
- * @deprecated Use COLS constants directly instead
- */
-var SCHEMA = null;
+// Local cache for getColumnMapping (deprecated function)
+var _columnMappingCache = {};
 
 function getColumnMapping(sheetName) {
-  if (SCHEMA && SCHEMA[sheetName]) return SCHEMA[sheetName];
-
-  if (!SCHEMA) SCHEMA = {};
+  if (_columnMappingCache[sheetName]) return _columnMappingCache[sheetName];
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(sheetName);
@@ -145,7 +30,7 @@ function getColumnMapping(sheetName) {
     }
   }
 
-  SCHEMA[sheetName] = mapping;
+  _columnMappingCache[sheetName] = mapping;
   return mapping;
 }
 
@@ -280,67 +165,6 @@ function recalcCurrentRow() {
   }
 }
 
-/**
- * Logging utility for consistent logs and error tracking.
- */
-function logEvent(message, level) {
-  level = level || 'INFO';
-  var now = new Date();
-  var logMessage = '[' + level + '] [' + now.toISOString() + '] ' + message;
-  Logger.log(logMessage);
-
-  if (level === 'ERROR') {
-    try {
-      SpreadsheetApp.getUi().alert('Error: ' + message);
-    } catch (e) {
-      // Ignore if no UI (e.g. trigger execution)
-    }
-  }
-}
-
-/**
- * Normalizes approval values to standard format.
- * Handles HTML entities and common variations.
- * Valid values: None, CL2, CL3, CL2 & CL3
- * @param {string} value - The approval value to normalize
- * @returns {string} - Normalized approval value
- */
-function normalizeApprovalValue(value) {
-  if (!value) return 'CL2'; // Default
-
-  // Clean the value - decode HTML entities and normalize
-  var cleaned = String(value).trim();
-  // Decode &amp; and &#38; to &
-  cleaned = cleaned.split('&amp;').join('&');
-  cleaned = cleaned.split('&#38;').join('&');
-  cleaned = cleaned.toUpperCase();
-
-  // Map to valid values
-  switch(cleaned) {
-    case 'NONE':
-      return 'None';
-    case 'CL2':
-    case 'CLASS 2':
-    case '2':
-      return 'CL2';
-    case 'CL3':
-    case 'CLASS 3':
-    case '3':
-      return 'CL3';
-    case 'CL2 & CL3':
-    case 'CL2 AND CL3':
-    case 'CL2&CL3':
-    case 'BOTH':
-    case '2 & 3':
-    case '2&3':
-      return 'CL2 & CL3';
-    default:
-      // Check if it's already a valid value (case-insensitive match)
-      if (cleaned === 'CL2 & CL3' || value === 'CL2 & CL3') return 'CL2 & CL3';
-      Logger.log('[WARN] Unrecognized approval value "' + value + '" - defaulting to CL2');
-      return 'CL2';
-  }
-}
 
 /**
  * Utility to ensure the 'Picked For' column exists in Gloves and Sleeves tabs.
@@ -709,8 +533,7 @@ function processEdit(e) {
 function handleInventoryAssignedToChange(ss, sheet, sheetName, editedRow, newValue) {
   if (editedRow < 2) return; // Skip header row
 
-  // Clear schema cache to ensure fresh column mapping
-  SCHEMA = null;
+  // Schema cache was removed during refactoring (Jan 2026) - using COLS constants instead
 
   var lock = null;
   try {
@@ -987,219 +810,9 @@ function handleNotesChange(ss, sheet, sheetName, editedRow, newValue) {
   }
 }
 
-/**
- * Calculates the Change Out Date based on Date Assigned, Location, Assigned To, and Item Type.
- *
- * GLOVES (per Workflow_and_Sheet_Expectations.md):
- * - On Shelf = 12 months
- * - Northern Lights location = 6 months
- * - In Testing / Packed For Delivery / Packed For Testing = 3 months (counts toward employee period)
- * - All other locations (employee assigned) = 3 months (default)
- * - Lost / Failed Rubber / Previous Employee = N/A
- *
- * SLEEVES:
- * - All items = 12 months (hardcoded, no exceptions)
- * - Lost / Failed Rubber = N/A
- *
- * @param {Date|number|string} dateAssigned - The date assigned
- * @param {string} location - The location
- * @param {string} [assignedTo] - Optional: Who/what the item is assigned to
- * @param {boolean} [isSleeve] - Optional: True if this is a sleeve (default: false = glove)
- * @return {Date|null|string} The calculated change out date, or 'N/A' for Lost/Failed Rubber/Previous Employee
- */
-function calculateChangeOutDate(dateAssigned, location, assignedTo, isSleeve) {
-  if (!dateAssigned) return null;
-
-  var assignedToLower = (assignedTo || '').toString().trim().toLowerCase();
-  var locationLower = (location || '').toString().trim().toLowerCase();
-
-  // SLEEVES: Always 12 months (hardcoded)
-  if (isSleeve) {
-    // Lost, Failed Rubber, and Previous Employee sleeves get N/A
-    if (assignedToLower === 'lost' || assignedToLower === 'failed rubber' ||
-        assignedToLower === 'not repairable' || locationLower === 'previous employee' ||
-        locationLower === 'destroyed' || locationLower === 'lost') {
-      return 'N/A';
-    }
-    var d = new Date(dateAssigned);
-    if (isNaN(d.getTime())) return null;
-    d.setMonth(d.getMonth() + 12);
-    return d;
-  }
-
-  // GLOVES:
-  // Lost, Failed Rubber, and Previous Employee items get N/A
-  if (assignedToLower === 'lost' || assignedToLower === 'failed rubber' ||
-      assignedToLower === 'not repairable' || locationLower === 'previous employee' ||
-      locationLower === 'destroyed' || locationLower === 'lost') {
-    return 'N/A';
-  }
-
-  var d = new Date(dateAssigned);
-  if (isNaN(d.getTime())) return null;
-
-  var months;
-
-  // On Shelf = 12 months (sitting on shelf, not actively used)
-  if (assignedToLower === 'on shelf') {
-    months = 12;
-  }
-  // Northern Lights = 6 months (exception for this location)
-  else if (locationLower === 'northern lights') {
-    months = 6;
-  }
-  // In Testing / Packed For Delivery / Packed For Testing = 3 months
-  // These count toward the employee period per workflow documentation
-  else if (assignedToLower === 'packed for delivery' ||
-           assignedToLower === 'packed for testing' ||
-           assignedToLower === 'in testing') {
-    months = 3;
-  }
-  // All other (employee assigned) = 3 months (default for gloves)
-  else {
-    months = 3;
-  }
-
-  d.setMonth(d.getMonth() + months);
-  return d;
-}
-
-/**
- * Recalculates all Change Out Dates in Gloves and Sleeves sheets.
- * Called from Glove Manager menu → 🔧 Utilities → Fix All Change Out Dates
- */
-// eslint-disable-next-line no-unused-vars
-function fixAllChangeOutDates() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var ui = SpreadsheetApp.getUi();
-
-  var result = ui.alert(
-    'Recalculate All Change Out Dates',
-    'This will recalculate ALL Change Out Dates in the Gloves and Sleeves sheets.\n\n' +
-    'GLOVES:\n' +
-    '• On Shelf = +12 months\n' +
-    '• Northern Lights = +6 months\n' +
-    '• In Testing / Packed For Delivery / Packed For Testing = +3 months\n' +
-    '• All other locations (employee) = +3 months (default)\n' +
-    '• Lost / Failed Rubber / Previous Employee = N/A\n\n' +
-    'SLEEVES:\n' +
-    '• All items = +12 months (hardcoded)\n' +
-    '• Lost / Failed Rubber / Previous Employee = N/A\n\n' +
-    'Continue?',
-    ui.ButtonSet.YES_NO
-  );
-
-  if (result !== ui.Button.YES) {
-    return;
-  }
-
-  var fixedCount = 0;
-  var sheetsToFix = [SHEET_GLOVES, SHEET_SLEEVES];
-
-  sheetsToFix.forEach(function(sheetName) {
-    var sheet = ss.getSheetByName(sheetName);
-    if (!sheet) return;
-
-    var data = sheet.getDataRange().getValues();
-    var headers = data[0];
-
-    // Find column indices (0-based for array access)
-    var colDateAssignedIdx = headers.indexOf('Date Assigned');
-    var colLocationIdx = headers.indexOf('Location');
-    var colChangeOutDateIdx = headers.indexOf('Change Out Date');
-    var colAssignedToIdx = headers.indexOf('Assigned To');
-
-    if (colDateAssignedIdx === -1 || colLocationIdx === -1 || colChangeOutDateIdx === -1 || colAssignedToIdx === -1) {
-      Logger.log('fixAllChangeOutDates: Missing columns in ' + sheetName +
-                 ' - DateAssigned=' + colDateAssignedIdx +
-                 ', Location=' + colLocationIdx +
-                 ', ChangeOutDate=' + colChangeOutDateIdx +
-                 ', AssignedTo=' + colAssignedToIdx);
-      return;
-    }
-
-    Logger.log('fixAllChangeOutDates: Processing ' + sheetName +
-               ' - DateAssigned col=' + (colDateAssignedIdx + 1) +
-               ', Location col=' + (colLocationIdx + 1) +
-               ', ChangeOutDate col=' + (colChangeOutDateIdx + 1) +
-               ', AssignedTo col=' + (colAssignedToIdx + 1));
-
-    for (var i = 1; i < data.length; i++) {
-      var row = data[i];
-      var dateAssigned = row[colDateAssignedIdx];
-      var location = row[colLocationIdx];
-      var currentChangeOut = row[colChangeOutDateIdx];
-      var assignedTo = row[colAssignedToIdx];
-
-      // Skip rows without Date Assigned
-      if (!dateAssigned) {
-        continue;
-      }
-
-      // Determine if this is a sleeve sheet
-      var isSleeve = (sheetName === SHEET_SLEEVES);
-
-      // Calculate the correct Change Out Date (pass assignedTo and isSleeve)
-      var correctChangeOut = calculateChangeOutDate(dateAssigned, location, assignedTo, isSleeve);
-
-      if (correctChangeOut) {
-        // Check if the current value is different from the correct value
-        var needsUpdate = false;
-        var currentChangeOutStr = '';
-
-        if (correctChangeOut === 'N/A') {
-          needsUpdate = (currentChangeOut !== 'N/A');
-          currentChangeOutStr = String(currentChangeOut);
-        } else if (correctChangeOut instanceof Date) {
-          // Compare dates
-          var correctDateStr = Utilities.formatDate(correctChangeOut, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
-
-          if (currentChangeOut instanceof Date) {
-            var currentDateStr = Utilities.formatDate(currentChangeOut, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
-            needsUpdate = (currentDateStr !== correctDateStr);
-            currentChangeOutStr = currentDateStr;
-          } else if (typeof currentChangeOut === 'number' && currentChangeOut > 0) {
-            // Serial date - convert and compare
-            var tempDate = new Date(1899, 11, 30);
-            tempDate.setDate(tempDate.getDate() + currentChangeOut);
-            var currentDateStr2 = Utilities.formatDate(tempDate, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
-            needsUpdate = (currentDateStr2 !== correctDateStr);
-            currentChangeOutStr = currentDateStr2 + ' (serial: ' + currentChangeOut + ')';
-          } else {
-            // No valid current date
-            needsUpdate = true;
-            currentChangeOutStr = String(currentChangeOut || '(empty)');
-          }
-        }
-
-        if (needsUpdate) {
-          var cell = sheet.getRange(i + 1, colChangeOutDateIdx + 1);  // +1 for 1-based column
-          if (correctChangeOut === 'N/A') {
-            cell.setNumberFormat('@');  // Plain text for N/A
-          } else {
-            cell.setNumberFormat('MM/dd/yyyy');
-          }
-          cell.setValue(correctChangeOut);
-          fixedCount++;
-
-          var newValueStr = (correctChangeOut === 'N/A') ? 'N/A' : Utilities.formatDate(correctChangeOut, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
-          Logger.log('Fixed row ' + (i + 1) + ' in ' + sheetName +
-                     ': DateAssigned=' + dateAssigned +
-                     ', Location=' + location +
-                     ', AssignedTo=' + assignedTo +
-                     ', Old=' + currentChangeOutStr +
-                     ', New=' + newValueStr);
-        }
-      } else {
-        Logger.log('Could not calculate Change Out Date for row ' + (i + 1) +
-                   ' in ' + sheetName + ': DateAssigned=' + dateAssigned);
-      }
-    }
-  });
-
-  ui.alert('✅ Fixed ' + fixedCount + ' Change Out Dates in Gloves and Sleeves sheets.');
-  Logger.log('fixAllChangeOutDates: Fixed ' + fixedCount + ' dates total');
-}
+// =============================================================================
+// CHANGE OUT DATE FUNCTIONS - See 21-ChangeOutDate.gs
+// =============================================================================
 
 /**
  * Handles manual edits to the Pick List Item # column (G) in Glove/Sleeve Swaps.
@@ -2860,10 +2473,7 @@ function generateSwaps(itemType) {
 
     swapSheet.clear();
 
-    // Clear the schema cache for this sheet since we're rebuilding it with new headers
-    if (SCHEMA && SCHEMA[swapSheetName]) {
-      delete SCHEMA[swapSheetName];
-    }
+    // Schema cache removed during refactoring (Jan 2026)
 
     var currentRow = 1;
     var classes = isGloves ? [0, 2, 3] : [2, 3];  // Sleeves don't have Class 0
@@ -4969,140 +4579,13 @@ function archivePreviousEmployees() {
 }
 
 // ============================================================================
-// BACKUP SNAPSHOT FUNCTIONS
+// BACKUP SNAPSHOT FUNCTIONS - See 90-Backup.gs
 // ============================================================================
 
-/**
- * Creates a backup snapshot of the entire workbook.
- * Saves a copy to a "Glove Manager Backups" folder in Google Drive with timestamp.
- */
-function createBackupSnapshot() {
-  var ui = SpreadsheetApp.getUi();
-
-  try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var ssName = ss.getName();
-
-    // Create timestamp for the backup name
-    var now = new Date();
-    var timestamp = Utilities.formatDate(now, ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd_HH-mm-ss');
-    var backupName = ssName + ' - Backup ' + timestamp;
-
-    // Show progress message
-    ui.alert('Creating Backup', 'Creating backup snapshot...\nThis may take a moment.', ui.ButtonSet.OK);
-
-    // Get or create the backup folder
-    var backupFolder = getOrCreateBackupFolder();
-
-    // Make a copy of the spreadsheet
-    var backupFile = DriveApp.getFileById(ss.getId()).makeCopy(backupName, backupFolder);
-
-    // Get the backup URL
-    var backupUrl = backupFile.getUrl();
-
-    // Log the backup
-    logEvent('Backup created: ' + backupName, 'INFO');
-
-    // Show success message with link
-    var htmlOutput = HtmlService
-      .createHtmlOutput(
-        '<div style="font-family: Arial, sans-serif; padding: 20px;">' +
-        '<h2 style="color: #2e7d32;">✅ Backup Created Successfully!</h2>' +
-        '<p><strong>Name:</strong> ' + backupName + '</p>' +
-        '<p><strong>Location:</strong> Google Drive > ' + BACKUP_FOLDER_NAME + '</p>' +
-        '<p><strong>Time:</strong> ' + Utilities.formatDate(now, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy hh:mm:ss a') + '</p>' +
-        '<br>' +
-        '<a href="' + backupUrl + '" target="_blank" style="background-color: #1a73e8; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">Open Backup</a>' +
-        '&nbsp;&nbsp;' +
-        '<a href="' + backupFolder.getUrl() + '" target="_blank" style="background-color: #5f6368; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px;">View All Backups</a>' +
-        '</div>'
-      )
-      .setWidth(450)
-      .setHeight(250);
-
-    ui.showModalDialog(htmlOutput, 'Backup Complete');
-
-    return backupFile;
-
-  } catch (e) {
-    logEvent('Backup failed: ' + e, 'ERROR');
-    ui.alert('❌ Backup Failed', 'Error creating backup: ' + e.message, ui.ButtonSet.OK);
-    return null;
-  }
-}
-
-/**
- * Gets the backup folder, creating it if it doesn't exist.
- * @return {Folder} The backup folder
- */
-function getOrCreateBackupFolder() {
-  var folders = DriveApp.getFoldersByName(BACKUP_FOLDER_NAME);
-
-  if (folders.hasNext()) {
-    return folders.next();
-  } else {
-    // Create the folder
-    var newFolder = DriveApp.createFolder(BACKUP_FOLDER_NAME);
-    Logger.log('Created backup folder: ' + BACKUP_FOLDER_NAME);
-    return newFolder;
-  }
-}
-
-/**
- * Opens the backup folder in a new tab.
- */
-function openBackupFolder() {
-  var ui = SpreadsheetApp.getUi();
-
-  try {
-    var backupFolder = getOrCreateBackupFolder();
-    var folderUrl = backupFolder.getUrl();
-
-    var htmlOutput = HtmlService
-      .createHtmlOutput(
-        '<script>window.open("' + folderUrl + '", "_blank");google.script.host.close();</script>' +
-        '<p>Opening backup folder...</p>' +
-        '<p>If the folder does not open, <a href="' + folderUrl + '" target="_blank">click here</a>.</p>'
-      )
-      .setWidth(300)
-      .setHeight(100);
-
-    ui.showModalDialog(htmlOutput, 'Opening Backup Folder');
-
-  } catch (e) {
-    ui.alert('❌ Error', 'Could not open backup folder: ' + e.message, ui.ButtonSet.OK);
-  }
-}
 
 // NOTE: listBackups() and formatFileSize() were removed during refactoring (Jan 2026)
 // They were never called from the menu or elsewhere in the code
-
-/**
- * Extracts the significant portion of a job number for comparison.
- * Only tracks changes to the ###-## or ###.## portion, not the .# suffix.
- * Examples:
- *   - "002-26.1" → "002-26"
- *   - "005-26.2" → "005-26"
- *   - "123.45.6" → "123.45"
- *   - "ABC-123" → "ABC-123"
- * @param {string} jobNumber - The full job number
- * @return {string} The significant portion for tracking
- */
-function getSignificantJobNumber(jobNumber) {
-  if (!jobNumber) return '';
-  var jobStr = String(jobNumber).trim();
-
-  // Pattern: Match ###-## or ###.## followed by optional .# or -# suffix
-  // We want to capture just the first two parts
-  var pattern = new RegExp('^([A-Za-z0-9]+[-\\.][A-Za-z0-9]+)(?:[-\\.]\\d+)?$');
-  var match = jobStr.match(pattern);
-  if (match && match[1]) {
-    return match[1];
-  }
-
-  // If no match, return original (handles simple job numbers)
-  return jobStr;
-}
+// NOTE: getSignificantJobNumber() moved to 01-Utilities.gs
 
 /**
  * Formats a date value for Employee History entries.
