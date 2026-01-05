@@ -59,8 +59,33 @@ git push origin master
 
 ---
 
-**Status**: Deployed & Ready for Testing  
-**Next**: Verify in Apps Script → Test → Merge to Master  
+## 🆕 NEW FEATURE PLANNING
+
+### **Crew Visit Scheduling & Training System**
+**Status**: Planning Complete  
+**Document**: `docs/SCHEDULING_IMPLEMENTATION_PLAN.md`
+
+**Features to Add:**
+- Monthly calendar view with crew visit schedule
+- Crew visit tracking by job number
+- Training schedule management
+- Drive time calculations
+- Route optimization
+- Integration with To-Do List
+
+**Next Steps:**
+1. Review implementation plan
+2. Gather configuration data (job numbers, visit frequencies, training topics)
+3. Create new sheets: Crew Visit Config, Training Config, Schedule
+4. Implement 75-Scheduling.gs module
+5. Enhance To-Do List with calendar view
+
+---
+
+**Status**: Deployed & Ready for Testing + New Feature Planned  
+**Next**: 
+1. Verify in Apps Script → Test → Merge to Master (Refactor)
+2. Review scheduling plan and begin implementation
 
 **Congratulations on completing this major refactor!** 🚀
 
