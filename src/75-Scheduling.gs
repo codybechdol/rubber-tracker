@@ -381,3 +381,181 @@ function getWeekdayName(date) {
   return days[date.getDay()];
 }
 
+// ============================================================================
+// SHEET SETUP FUNCTIONS
+// ============================================================================
+
+/**
+ * Creates and sets up the Crew Visit Config sheet with sample data.
+ * Menu item: Glove Manager → Schedule → Setup Crew Visit Config
+ */
+function setupCrewVisitConfig() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_CREW_VISIT_CONFIG);
+
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEET_CREW_VISIT_CONFIG);
+  }
+
+  sheet.clear();
+
+  // Headers
+  var headers = [
+    'Job Number',
+    'Location',
+    'Crew Lead',
+    'Crew Size',
+    'Visit Frequency',
+    'Est. Visit Time',
+    'Last Visit Date',
+    'Next Visit Date',
+    'Drive Time From Helena',
+    'Priority',
+    'Notes'
+  ];
+
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.getRange(1, 1, 1, headers.length)
+    .setFontWeight('bold')
+    .setBackground('#4285f4')
+    .setFontColor('white')
+    .setHorizontalAlignment('center');
+
+  // Sample data
+  var today = new Date();
+  var lastWeek = new Date(today);
+  lastWeek.setDate(lastWeek.getDate() - 7);
+
+  var sampleData = [
+    ['12345', 'Big Sky', 'John Smith', 8, 'Weekly', 45, lastWeek, calculateNextVisitDate(lastWeek, 'Weekly'), 90, 'High', 'Check arc flash equipment'],
+    ['12346', 'Missoula', 'Jane Doe', 12, 'Bi-Weekly', 60, lastWeek, calculateNextVisitDate(lastWeek, 'Bi-Weekly'), 120, 'High', 'Large crew, plan extra time'],
+    ['12347', 'Kalispell', 'Bob Johnson', 6, 'Monthly', 45, lastWeek, calculateNextVisitDate(lastWeek, 'Monthly'), 180, 'Medium', ''],
+    ['12348', 'Ennis', 'Mike Wilson', 4, 'Weekly', 30, lastWeek, calculateNextVisitDate(lastWeek, 'Weekly'), 60, 'Medium', 'Small crew, quick visit'],
+    ['12349', 'Butte', 'Tom Anderson', 10, 'Monthly', 45, lastWeek, calculateNextVisitDate(lastWeek, 'Monthly'), 90, 'Medium', '']
+  ];
+
+  sheet.getRange(2, 1, sampleData.length, headers.length).setValues(sampleData);
+
+  // Format dates
+  sheet.getRange(2, 7, sampleData.length, 2).setNumberFormat('mm/dd/yyyy');
+
+  // Add data validation for frequency
+  var frequencyRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['Weekly', 'Bi-Weekly', 'Monthly'], true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, 5, 100, 1).setDataValidation(frequencyRule);
+
+  // Add data validation for priority
+  var priorityRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['High', 'Medium', 'Low'], true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, 10, 100, 1).setDataValidation(priorityRule);
+
+  // Auto-resize columns
+  for (var i = 1; i <= headers.length; i++) {
+    sheet.autoResizeColumn(i);
+  }
+
+  // Set minimum widths
+  sheet.setColumnWidth(1, 100);  // Job Number
+  sheet.setColumnWidth(2, 120);  // Location
+  sheet.setColumnWidth(3, 120);  // Crew Lead
+  sheet.setColumnWidth(11, 200); // Notes
+
+  sheet.setFrozenRows(1);
+
+  SpreadsheetApp.getUi().alert('✅ Crew Visit Config sheet created with sample data!');
+}
+
+/**
+ * Creates and sets up the Training Config sheet with sample data.
+ * Menu item: Glove Manager → Schedule → Setup Training Config
+ */
+function setupTrainingConfig() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_TRAINING_CONFIG);
+
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEET_TRAINING_CONFIG);
+  }
+
+  sheet.clear();
+
+  // Headers
+  var headers = [
+    'Training Topic',
+    'Required For',
+    'Duration (Hours)',
+    'Frequency',
+    'Last Training Date',
+    'Next Training Date',
+    'Required Attendees',
+    'Completion Status',
+    'Notes'
+  ];
+
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.getRange(1, 1, 1, headers.length)
+    .setFontWeight('bold')
+    .setBackground('#0f9d58')
+    .setFontColor('white')
+    .setHorizontalAlignment('center');
+
+  // Sample data
+  var today = new Date();
+  var lastMonth = new Date(today);
+  lastMonth.setMonth(lastMonth.getMonth() - 1);
+
+  var lastQuarter = new Date(today);
+  lastQuarter.setMonth(lastQuarter.getMonth() - 3);
+
+  var lastYear = new Date(today);
+  lastYear.setFullYear(lastYear.getFullYear() - 1);
+
+  var sampleData = [
+    ['Arc Flash Safety', 'All', 2, 'Quarterly', lastQuarter, calculateNextTrainingDate(lastQuarter, 'Quarterly'), 87, '0%', 'Annual OSHA requirement'],
+    ['Glove Testing Procedures', 'Helena, Missoula', 1, 'Monthly', lastMonth, calculateNextTrainingDate(lastMonth, 'Monthly'), 25, '0%', 'For test technicians only'],
+    ['Class 3 Equipment Handling', 'All', 1.5, 'Quarterly', lastQuarter, calculateNextTrainingDate(lastQuarter, 'Quarterly'), 87, '0%', 'Safety certification'],
+    ['Regulatory Compliance Update', 'All', 3, 'Annual', lastYear, calculateNextTrainingDate(lastYear, 'Annual'), 87, '0%', 'Required annual training'],
+    ['Emergency Response Procedures', 'All', 1, 'Quarterly', lastQuarter, calculateNextTrainingDate(lastQuarter, 'Quarterly'), 87, '0%', 'Safety requirement']
+  ];
+
+  sheet.getRange(2, 1, sampleData.length, headers.length).setValues(sampleData);
+
+  // Format dates
+  sheet.getRange(2, 5, sampleData.length, 2).setNumberFormat('mm/dd/yyyy');
+
+  // Add data validation for frequency
+  var frequencyRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['Monthly', 'Quarterly', 'Annual'], true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, 4, 100, 1).setDataValidation(frequencyRule);
+
+  // Auto-resize columns
+  for (var i = 1; i <= headers.length; i++) {
+    sheet.autoResizeColumn(i);
+  }
+
+  // Set minimum widths
+  sheet.setColumnWidth(1, 200);  // Training Topic
+  sheet.setColumnWidth(2, 150);  // Required For
+  sheet.setColumnWidth(9, 200);  // Notes
+
+  sheet.setFrozenRows(1);
+
+  SpreadsheetApp.getUi().alert('✅ Training Config sheet created with sample data!');
+}
+
+/**
+ * Creates and sets up all scheduling sheets with sample data.
+ * Menu item: Glove Manager → Schedule → Setup All Schedule Sheets
+ */
+function setupAllScheduleSheets() {
+  setupCrewVisitConfig();
+  setupTrainingConfig();
+  SpreadsheetApp.getUi().alert('✅ All scheduling configuration sheets created!\n\nCreated:\n- Crew Visit Config\n- Training Config');
+}
+
