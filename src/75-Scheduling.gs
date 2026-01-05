@@ -503,23 +503,20 @@ function setupTrainingConfig() {
     .setFontColor('white')
     .setHorizontalAlignment('center');
 
-  // Sample data
-  var today = new Date();
-  var lastMonth = new Date(today);
-  lastMonth.setMonth(lastMonth.getMonth() - 1);
-
-  var lastQuarter = new Date(today);
-  lastQuarter.setMonth(lastQuarter.getMonth() - 3);
-
-  var lastYear = new Date(today);
-  lastYear.setFullYear(lastYear.getFullYear() - 1);
-
+  // NECA/IBEW Monthly Safety Training Schedule 2026
   var sampleData = [
-    ['Arc Flash Safety', 'All', 2, 'Quarterly', lastQuarter, calculateNextTrainingDate(lastQuarter, 'Quarterly'), 87, '0%', 'Annual OSHA requirement'],
-    ['Glove Testing Procedures', 'Helena, Missoula', 1, 'Monthly', lastMonth, calculateNextTrainingDate(lastMonth, 'Monthly'), 25, '0%', 'For test technicians only'],
-    ['Class 3 Equipment Handling', 'All', 1.5, 'Quarterly', lastQuarter, calculateNextTrainingDate(lastQuarter, 'Quarterly'), 87, '0%', 'Safety certification'],
-    ['Regulatory Compliance Update', 'All', 3, 'Annual', lastYear, calculateNextTrainingDate(lastYear, 'Annual'), 87, '0%', 'Required annual training'],
-    ['Emergency Response Procedures', 'All', 1, 'Quarterly', lastQuarter, calculateNextTrainingDate(lastQuarter, 'Quarterly'), 87, '0%', 'Safety requirement']
+    ['January: Respectful Workplace – Anti Harassment Training', 'All', 2, 'Monthly', new Date(2026, 0, 15), new Date(2026, 1, 15), 0, '0%', 'Required monthly safety training'],
+    ['February: Job Briefings / JHA\'s / Emergency Action Plans', 'All', 2, 'Monthly', new Date(2026, 1, 15), new Date(2026, 2, 15), 0, '0%', 'Required monthly safety training'],
+    ['March: OSHA ET&D 10 HR Refresher 1st Quarter', 'All', 10, 'Quarterly', new Date(2026, 2, 15), new Date(2026, 5, 15), 0, '0%', 'OSHA Certification - Q1'],
+    ['April: Trenching & Shoring / Haz-Com Awareness', 'All', 2, 'Monthly', new Date(2026, 3, 15), new Date(2026, 4, 15), 0, '0%', 'Required monthly safety training'],
+    ['May: Heat Stress & Wildfire Smoke', 'All', 2, 'Monthly', new Date(2026, 4, 15), new Date(2026, 5, 15), 0, '0%', 'Required monthly safety training'],
+    ['June: OSHA ET&D 10 HR Refresher 2nd Quarter', 'All', 10, 'Quarterly', new Date(2026, 5, 15), new Date(2026, 8, 15), 0, '0%', 'OSHA Certification - Q2'],
+    ['July: Rescue', 'All', 2, 'Monthly', new Date(2026, 6, 15), new Date(2026, 7, 15), 0, '0%', 'Emergency Response Training'],
+    ['August: Rescue (continued)', 'All', 2, 'Monthly', new Date(2026, 7, 15), new Date(2026, 8, 15), 0, '0%', 'Emergency Response Training'],
+    ['September: OSHA ET&D 10 HR Refresher 3rd Quarter', 'All', 10, 'Quarterly', new Date(2026, 8, 15), new Date(2026, 10, 15), 0, '0%', 'OSHA Certification - Q3'],
+    ['October: Back Feed / Winter Driving', 'All', 2, 'Monthly', new Date(2026, 9, 15), new Date(2026, 10, 15), 0, '0%', 'Operational Safety'],
+    ['November: OSHA ET&D 10 HR Refresher 4th Quarter', 'All', 10, 'Quarterly', new Date(2026, 10, 15), new Date(2027, 0, 15), 0, '0%', 'OSHA Certification - Q4'],
+    ['December: Catch up month', 'All', 2, 'Monthly', new Date(2026, 11, 15), new Date(2027, 0, 15), 0, '0%', 'Complete any missed training']
   ];
 
   sheet.getRange(2, 1, sampleData.length, headers.length).setValues(sampleData);
@@ -556,6 +553,235 @@ function setupTrainingConfig() {
 function setupAllScheduleSheets() {
   setupCrewVisitConfig();
   setupTrainingConfig();
-  SpreadsheetApp.getUi().alert('✅ All scheduling configuration sheets created!\n\nCreated:\n- Crew Visit Config\n- Training Config');
+  setupTrainingTracking();
+  SpreadsheetApp.getUi().alert('✅ All scheduling configuration sheets created!\n\nCreated:\n- Crew Visit Config\n- Training Config\n- Training Tracking');
+}
+
+// ============================================================================
+// TRAINING TRACKING BY JOB NUMBER
+// ============================================================================
+
+var SHEET_TRAINING_TRACKING = 'Training Tracking';
+
+/**
+ * Creates and sets up the Training Tracking sheet for job number compliance.
+ * Menu item: Glove Manager → Schedule → Setup Training Tracking
+ */
+function setupTrainingTracking() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_TRAINING_TRACKING);
+
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEET_TRAINING_TRACKING);
+  }
+
+  sheet.clear();
+
+  // Title row
+  sheet.getRange(1, 1, 1, 10).merge()
+    .setValue('NECA/IBEW Monthly Safety Training Tracking 2026')
+    .setFontWeight('bold').setFontSize(14).setBackground('#0f9d58').setFontColor('white').setHorizontalAlignment('center');
+  sheet.setRowHeight(1, 35);
+
+  // Headers
+  var headers = [
+    'Month',
+    'Training Topic',
+    'Job Number',
+    'Completion Date',
+    'Attendees',
+    'Hours',
+    'Trainer',
+    'Status',
+    'Verified By',
+    'Notes'
+  ];
+
+  sheet.getRange(2, 1, 1, headers.length).setValues([headers]);
+  sheet.getRange(2, 1, 1, headers.length)
+    .setFontWeight('bold')
+    .setBackground('#0f9d58')
+    .setFontColor('white')
+    .setHorizontalAlignment('center');
+
+  // Sample data showing tracking structure
+  var sampleData = [
+    ['January', 'Respectful Workplace – Anti Harassment Training', '123.45', '', '', 2, '', 'Pending', '', 'Required for all jobs'],
+    ['January', 'Respectful Workplace – Anti Harassment Training', '456.78', '', '', 2, '', 'Pending', '', 'Required for all jobs'],
+    ['February', 'Job Briefings / JHA\'s / Emergency Action Plans', '123.45', '', '', 2, '', 'Pending', '', 'Required for all jobs'],
+    ['March', 'OSHA ET&D 10 HR Refresher 1st Quarter', '123.45', '', '', 10, '', 'Pending', '', 'Quarterly OSHA - Q1'],
+    ['March', 'OSHA ET&D 10 HR Refresher 1st Quarter', '456.78', '', '', 10, '', 'Pending', '', 'Quarterly OSHA - Q1']
+  ];
+
+  sheet.getRange(3, 1, sampleData.length, headers.length).setValues(sampleData);
+
+  // Format dates
+  sheet.getRange(3, 4, 100, 1).setNumberFormat('mm/dd/yyyy');
+
+  // Add data validation for Status
+  var statusRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['Pending', 'In Progress', 'Complete', 'Overdue', 'N/A'], true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(3, 8, 100, 1).setDataValidation(statusRule);
+
+  // Add data validation for Month
+  var months = ['January', 'February', 'March', 'April', 'May', 'June',
+                'July', 'August', 'September', 'October', 'November', 'December'];
+  var monthRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(months, true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(3, 1, 100, 1).setDataValidation(monthRule);
+
+  // Conditional formatting for Status
+  var completeRange = sheet.getRange(3, 8, 100, 1);
+  var completeRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo('Complete')
+    .setBackground('#d9ead3')
+    .setFontColor('#38761d')
+    .setRanges([completeRange])
+    .build();
+
+  var overdueRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo('Overdue')
+    .setBackground('#f4cccc')
+    .setFontColor('#cc0000')
+    .setRanges([completeRange])
+    .build();
+
+  var inProgressRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo('In Progress')
+    .setBackground('#fff2cc')
+    .setFontColor('#bf9000')
+    .setRanges([completeRange])
+    .build();
+
+  var rules = sheet.getConditionalFormatRules();
+  rules.push(completeRule, overdueRule, inProgressRule);
+  sheet.setConditionalFormatRules(rules);
+
+  // Auto-resize columns
+  for (var i = 1; i <= headers.length; i++) {
+    sheet.autoResizeColumn(i);
+  }
+
+  // Set minimum widths
+  sheet.setColumnWidth(1, 100);  // Month
+  sheet.setColumnWidth(2, 300);  // Training Topic
+  sheet.setColumnWidth(3, 100);  // Job Number
+  sheet.setColumnWidth(5, 150);  // Attendees
+  sheet.setColumnWidth(10, 200); // Notes
+
+  sheet.setFrozenRows(2);
+
+  SpreadsheetApp.getUi().alert('✅ Training Tracking sheet created!\n\nThis sheet tracks training completion by job number.\nAdd your job numbers and update completion dates as training is completed.');
+}
+
+/**
+ * Gets training compliance status for a specific job number.
+ *
+ * @param {string} jobNumber - Job number (format: ###.##)
+ * @param {string} month - Month name (e.g., 'January')
+ * @return {Object} Compliance status object
+ */
+function getTrainingComplianceStatus(jobNumber, month) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var trackingSheet = ss.getSheetByName(SHEET_TRAINING_TRACKING);
+
+  if (!trackingSheet) {
+    return {found: false, status: 'No tracking sheet'};
+  }
+
+  var data = trackingSheet.getDataRange().getValues();
+  var headers = data[1]; // Row 2 (index 1) has headers due to title row
+
+  // Find column indices
+  var colIndices = {};
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'month') colIndices.month = h;
+    if (header === 'job number') colIndices.jobNumber = h;
+    if (header === 'status') colIndices.status = h;
+    if (header === 'completion date') colIndices.completionDate = h;
+    if (header === 'training topic') colIndices.topic = h;
+  }
+
+  // Search for this job number and month
+  for (var i = 2; i < data.length; i++) { // Start at row 3 (index 2) - skip title and headers
+    var row = data[i];
+    var rowMonth = String(row[colIndices.month]).trim();
+    var rowJobNum = String(row[colIndices.jobNumber]).trim();
+
+    if (rowMonth === month && rowJobNum === jobNumber) {
+      return {
+        found: true,
+        status: row[colIndices.status] || 'Pending',
+        completionDate: row[colIndices.completionDate],
+        topic: row[colIndices.topic]
+      };
+    }
+  }
+
+  return {found: false, status: 'Not tracked'};
+}
+
+/**
+ * Generates a compliance report showing training status for all job numbers.
+ * Menu item: Glove Manager → Schedule → Generate Training Compliance Report
+ */
+function generateTrainingComplianceReport() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var trackingSheet = ss.getSheetByName(SHEET_TRAINING_TRACKING);
+
+  if (!trackingSheet) {
+    SpreadsheetApp.getUi().alert('❌ Training Tracking sheet not found!\n\nPlease run "Setup Training Tracking" first.');
+    return;
+  }
+
+  var data = trackingSheet.getDataRange().getValues();
+  var headers = data[1];
+
+  // Count completions by job number
+  var jobStats = {};
+  var totalRequired = 12; // 12 months of training in 2026
+
+  for (var i = 2; i < data.length; i++) {
+    var row = data[i];
+    var jobNum = String(row[2]).trim(); // Column C - Job Number
+    var status = String(row[7]).trim(); // Column H - Status
+
+    if (!jobNum) continue;
+
+    if (!jobStats[jobNum]) {
+      jobStats[jobNum] = {complete: 0, pending: 0, overdue: 0, total: 0};
+    }
+
+    jobStats[jobNum].total++;
+
+    if (status === 'Complete') {
+      jobStats[jobNum].complete++;
+    } else if (status === 'Overdue') {
+      jobStats[jobNum].overdue++;
+    } else {
+      jobStats[jobNum].pending++;
+    }
+  }
+
+  // Build report
+  var report = 'Training Compliance Report\n';
+  report += '==========================\n\n';
+
+  for (var job in jobStats) {
+    var stats = jobStats[job];
+    var percentComplete = stats.total > 0 ? ((stats.complete / totalRequired) * 100).toFixed(1) : 0;
+
+    report += 'Job #' + job + ':\n';
+    report += '  Complete: ' + stats.complete + '/' + totalRequired + ' (' + percentComplete + '%)\n';
+    report += '  Pending: ' + stats.pending + '\n';
+    report += '  Overdue: ' + stats.overdue + '\n\n';
+  }
+
+  SpreadsheetApp.getUi().alert('📊 Training Compliance Report', report, SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
