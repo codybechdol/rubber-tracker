@@ -31,7 +31,7 @@ Items are grouped by **Class** (Class 0, Class 2, Class 3), and within each clas
 - "Picked" is checked when the glove is physically picked.
 - "Picked For" is set in the Gloves tab for the Pick List glove.
 - Hidden columns K–M and N–P store pre-swap state.
-- **Picked items are preserved across Build Sheets/Generate Swaps runs** until Date Changed is entered.
+- **Picked items are preserved across Generate Swaps/Generate All Reports runs** until Date Changed is entered.
 
 ### Stage 2: Swap Completion
 - "Date Changed" date is entered (e.g., 12/30/2025) to finalize the swap.
@@ -45,7 +45,7 @@ Items are grouped by **Class** (Class 0, Class 2, Class 3), and within each clas
 - Status and assignments revert to Stage 1 values as needed.
 
 ## Picked Item Preservation
-When "Generate Glove Swaps" or "Build Sheets" is run:
+When "Generate Glove Swaps" or "Generate All Reports" is run:
 - The system checks the **Picked For** column in the Gloves inventory sheet
 - If an item has a "Picked For" value containing an employee's name, that item is automatically:
   - Used as the Pick List Item # for that employee

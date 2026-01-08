@@ -120,7 +120,7 @@ The Rubber Tracker system manages the lifecycle of rubber gloves and sleeves use
   1. Creates a "Terminated" entry in Employee History
   2. Changes Location to "Previous Employee"
   3. Removes the employee row from the Employees sheet
-- Missing headers are automatically added by Build Sheets
+- Missing headers (like "Picked For") are automatically added by Generate All Reports
 
 ---
 
@@ -336,11 +336,10 @@ The Rubber Tracker system manages the lifecycle of rubber gloves and sleeves use
 Change Out Date is automatically recalculated when:
 1. **Date Assigned** column is edited (via installable trigger)
 2. **Assigned To** column is edited (via installable trigger)
-3. **Build Sheets** is run (automatic fix for all rows)
-4. **Generate All Reports** is run (automatic fix for all rows)
-5. **Fix All Change Out Dates** utility is run manually
+3. **Generate All Reports** is run (automatic fix for all rows)
+4. **Fix All Change Out Dates** utility is run manually
 
-> **Note**: If the edit trigger doesn't fire (e.g., paste operations), the Change Out Date will be corrected automatically when you run Build Sheets or Generate All Reports.
+> **Note**: If the edit trigger doesn't fire (e.g., paste operations), the Change Out Date will be corrected automatically when you run Generate All Reports.
 
 ---
 
@@ -348,7 +347,7 @@ Change Out Date is automatically recalculated when:
 
 ### Stage 1: Initial State (Swap Generated)
 
-**Trigger**: Build Sheets or Generate Swaps is run
+**Trigger**: Generate Swaps or Generate All Reports is run
 
 **What Happens**:
 1. System identifies employees with items approaching change out (≤31 days or overdue)
@@ -383,7 +382,7 @@ Change Out Date is automatically recalculated when:
 - Status = "Ready For Delivery 🚚"
 - Date Changed = still empty
 
-**Preservation**: Items with Picked=TRUE survive Build Sheets/Generate Reports because:
+**Preservation**: Items with Picked=TRUE survive Generate Reports because:
 - The **Picked For** column (Column J) in Gloves/Sleeves sheet stores "Employee Name Picked On YYYY-MM-DD"
 - When `generateSwaps()` runs, it:
   1. Pre-collects all items with Picked For values from the inventory sheet
@@ -751,22 +750,23 @@ The `autoBackup` function:
 
 Recalculates ALL Change Out Dates in Gloves and Sleeves sheets based on current rules.
 
-### Build Sheets
-
-**Menu**: Glove Manager → Build Sheets
-
-Regenerates Glove Swaps and Sleeve Swaps sheets, preserving picked items.
-
 ### Generate All Reports
 
 **Menu**: Glove Manager → Generate All Reports
 
-Runs all report generation functions:
-- Generate Glove Swaps
-- Generate Sleeve Swaps
-- Update Purchase Needs
-- Update Inventory Reports
-- Update Reclaims Sheet
+This is the main function that runs all report generation:
+- **Fix All Change Out Dates** - Ensures all dates are current
+- **Generate Glove Swaps** - Creates glove swap recommendations
+- **Generate Sleeve Swaps** - Creates sleeve swap recommendations  
+- **Update Purchase Needs** - Identifies items to order
+- **Update Inventory Reports** - Updates inventory summaries
+- **Update Reclaims Sheet** - Identifies class changes needed
+
+**Features**:
+- Automatically ensures "Picked For" column exists in inventory sheets
+- Preserves picked items and manual picks during regeneration
+- Fixes all change out dates before generating reports
+- Comprehensive one-click solution for all reports
 
 ### Update Purchase Needs
 
@@ -866,6 +866,7 @@ Before approving any code changes:
 ### Pick List Not Preserving After Regeneration
 - Check that Picked For column in Gloves/Sleeves sheet has correct value
 - Format should be: "Employee Name Picked On YYYY-MM-DD"
+- Run "Generate All Reports" to ensure proper regeneration
 
 ### Change Out Date Wrong
 - Run "Fix All Change Out Dates" utility
@@ -877,7 +878,7 @@ Before approving any code changes:
 - Check script execution logs for errors
 
 ### Days Left Showing as Date
-- Run "Build Sheets" to regenerate with correct formatting
+- Run "Generate All Reports" to regenerate with correct formatting
 - Days Left column should have plain text format (@)
 
 ---

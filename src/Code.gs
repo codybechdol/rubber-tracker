@@ -51,7 +51,6 @@ function onOpen() {
   ensurePickedForColumn();
   var ui = SpreadsheetApp.getUi();
   ui.createMenu('Glove Manager')
-    .addItem('Build Sheets', 'buildSheets')
     .addItem('Generate All Reports', 'generateAllReports')
     .addSeparator()
     .addItem('📱 Open Dashboard', 'openDashboardSidebar')

@@ -44,6 +44,9 @@ function generateAllReports() {
   try {
     logEvent('Generating all reports...');
 
+    // Ensure Picked For column exists (safety check)
+    ensurePickedForColumn();
+
     fixChangeOutDatesSilent();
 
     generateGloveSwaps();

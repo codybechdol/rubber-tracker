@@ -1,52 +1,40 @@
 /**
  * Glove Manager – Build Sheets
  *
- * Functions for building and initializing all sheets.
- * Sets up structure, headers, and formatting.
+ * DEPRECATED: This function has been consolidated into generateAllReports().
+ * Keeping this as a wrapper for backward compatibility.
  */
 
 /**
+ * @deprecated Use generateAllReports() instead.
+ * This function is kept for backward compatibility only.
+ *
  * Builds or resets all swap and report sheets.
- * Menu item: Glove Manager → Build Sheets
+ * Menu item: Glove Manager → Build Sheets (DEPRECATED - use Generate All Reports)
  */
 function buildSheets() {
   try {
-    logEvent('[INFO] Building/resetting sheets...');
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    logEvent('[INFO] buildSheets() called - redirecting to generateAllReports()...');
 
-    // Build or reset Glove Swaps sheet
-    var gloveSwapsSheet = ss.getSheetByName(SHEET_GLOVE_SWAPS) || ss.insertSheet(SHEET_GLOVE_SWAPS);
-    gloveSwapsSheet.clear();
+    // Show deprecation notice
+    var ui = SpreadsheetApp.getUi();
+    var response = ui.alert(
+      '⚠️ Deprecated Function',
+      'The "Build Sheets" function has been consolidated into "Generate All Reports".\n\n' +
+      'Would you like to run "Generate All Reports" instead?\n\n' +
+      'This will generate all swap reports, purchase needs, inventory reports, and reclaims.',
+      ui.ButtonSet.YES_NO
+    );
 
-    // Build or reset Sleeve Swaps sheet
-    var sleeveSwapsSheet = ss.getSheetByName(SHEET_SLEEVE_SWAPS) || ss.insertSheet(SHEET_SLEEVE_SWAPS);
-    sleeveSwapsSheet.clear();
-
-    // Build or reset Purchase Needs
-    var purchaseSheet = ss.getSheetByName('Purchase Needs') || ss.insertSheet('Purchase Needs');
-    purchaseSheet.clear();
-
-    // Build or reset Reclaims
-    var reclaimsSheet = ss.getSheetByName('Reclaims') || ss.insertSheet('Reclaims');
-    reclaimsSheet.clear();
-
-    // Build or reset Inventory Reports
-    var inventoryReportsSheet = ss.getSheetByName('Inventory Reports') || ss.insertSheet('Inventory Reports');
-    inventoryReportsSheet.clear();
-
-    // Build or reset To Do List
-    var todoSheet = ss.getSheetByName('To Do List') || ss.insertSheet('To Do List');
-    todoSheet.clear();
-
-    // Ensure Picked For column exists in Gloves and Sleeves
-    ensurePickedForColumn();
-
-    logEvent('[INFO] Sheets built or reset.');
-    SpreadsheetApp.getUi().alert('✅ Sheets built/reset successfully!');
+    if (response === ui.Button.YES) {
+      generateAllReports();
+    } else {
+      ui.alert('Operation cancelled. Please use "Generate All Reports" from the menu in the future.');
+    }
 
   } catch (e) {
     logEvent('[ERROR] buildSheets: ' + e, 'ERROR');
-    SpreadsheetApp.getUi().alert('❌ Error building sheets: ' + e);
+    SpreadsheetApp.getUi().alert('❌ Error: ' + e);
   }
 }
 

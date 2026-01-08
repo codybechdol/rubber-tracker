@@ -14,7 +14,6 @@ function forceCreateMenu() {
 
     // Create the full menu structure
     ui.createMenu('Glove Manager')
-      .addItem('Build Sheets', 'buildSheets')
       .addItem('Generate All Reports', 'generateAllReports')
       .addSeparator()
       .addItem('📱 Open Dashboard', 'openDashboardSidebar')
