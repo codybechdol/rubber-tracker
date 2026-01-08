@@ -1,172 +1,155 @@
-# Deploy Split Files to Apps Script
+# DEPLOYMENT INSTRUCTIONS - Sleeve Size Normalization Fix
 
-**The refactored files exist in Git but need to be deployed to Apps Script**
+## Current Status
+✅ **Local files are updated and ready**
+❌ **Google Apps Script has NOT been updated yet** - still running old code
 
----
+## Evidence
+Your latest swap sheet output shows:
+```
+Waco Worts	108	X-Large	2/4/2025	2/4/2026	30	—	Need to Purchase ❌
+```
 
-## 🚨 Critical Fix Applied
-
-✅ **SCHEMA error fixed!** - Removed remaining SCHEMA references from Code.gs
-
-The `ReferenceError: SCHEMA is not defined` error has been resolved. You need to deploy the updated Code.gs to Apps Script.
-
----
-
-## 📂 Files That Need Deployment
-
-These files are in your Git repo but not yet in Apps Script:
-
-1. ✅ `00-Constants.gs` (134 lines)
-2. ✅ `01-Utilities.gs` (91 lines)
-3. ✅ `10-Menu.gs` (129 lines)
-4. ✅ `21-ChangeOutDate.gs` (221 lines)
-5. ✅ `90-Backup.gs` (110 lines)
-6. ✅ `Code.gs` (updated - SCHEMA references removed)
+This confirms the old code is still running (without normalization).
 
 ---
 
-## 🚀 Deployment Methods
+## How to Deploy to Google Apps Script
 
-### Method 1: Using Clasp (Automated)
+### Method 1: Manual Copy-Paste (Recommended for Single File)
+
+1. **Open Google Sheets**
+   - Open your Rubber Tracker spreadsheet
+
+2. **Open Script Editor**
+   - Click **Extensions** → **Apps Script**
+
+3. **Find the File**
+   - In the left sidebar, click on **30-SwapGeneration.gs**
+
+4. **Replace Content**
+   - Select ALL the content in the editor (Ctrl+A)
+   - Delete it
+   - Open your local file: `C:\Users\codyb\WebstormProjects\Rubber Tracker\src\30-SwapGeneration.gs`
+   - Copy ALL content (Ctrl+A, Ctrl+C)
+   - Paste into Google Apps Script editor (Ctrl+V)
+
+5. **Save**
+   - Click the **Save** icon (💾) or press Ctrl+S
+   - Wait for "Saved" confirmation
+
+6. **Deploy the Diagnostic Tool (Optional but Recommended)**
+   - In left sidebar, click the **+** next to "Files"
+   - Select **Script**
+   - Name it: `99-DiagnosticTool`
+   - Copy content from `C:\Users\codyb\WebstormProjects\Rubber Tracker\src\99-DiagnosticTool.gs`
+   - Paste and Save
+
+7. **Test**
+   - Go back to your spreadsheet
+   - Run **Glove Manager** → **Generate All Reports**
+   - Check Sleeve Swaps sheet - Waco Worts should now show "In Stock ✅"
+
+---
+
+### Method 2: clasp Push (If You Have clasp Configured)
+
+If you have clasp (Google's command-line tool) set up:
 
 ```powershell
-# From project root
 cd "C:\Users\codyb\WebstormProjects\Rubber Tracker"
-
-# Push all files to Apps Script
-npx @google/clasp push
+clasp push
 ```
 
-### Method 2: Manual Copy-Paste (Reliable)
-
-1. **Open Apps Script Editor**
-   - Go to your Google Sheet
-   - Click **Extensions → Apps Script**
-
-2. **For Each New File** (00-Constants.gs, 01-Utilities.gs, 10-Menu.gs, 21-ChangeOutDate.gs, 90-Backup.gs):
-   
-   a. Click **➕** (plus icon) next to "Files"
-   b. Select **Script**
-   c. Name it exactly (e.g., `00-Constants`)
-   d. Open the file in your local editor (VS Code/WebStorm)
-   e. Copy ALL content
-   f. Paste into Apps Script
-   g. Click **Save** (Ctrl+S)
-
-3. **Update Code.gs**:
-   - Open `Code.gs` in Apps Script
-   - Open `src/Code.gs` in your local editor
-   - **Copy ALL content** from local file
-   - **Paste into Apps Script** (replace everything)
-   - Click **Save** (Ctrl+S)
+Then refresh your Google Sheets and run the reports.
 
 ---
 
-## ✅ Verification Steps
+## Expected Result After Deployment
 
-After deploying, verify:
-
-1. **Files Panel** (left sidebar in Apps Script):
-   ```
-   ✅ 00-Constants.gs
-   ✅ 01-Utilities.gs
-   ✅ 10-Menu.gs
-   ✅ 21-ChangeOutDate.gs
-   ✅ 90-Backup.gs
-   ✅ Code.gs
-   ✅ Dashboard.html
-   ✅ TestRunner.gs
-   ```
-
-2. **Test Generate All Reports**:
-   - Go to Google Sheet
-   - Click **Glove Manager → Generate All Reports**
-   - Should work WITHOUT the SCHEMA error
-   - Should generate all reports successfully
-
-3. **Test Menu**:
-   - Close and reopen sheet
-   - Verify **Glove Manager** menu appears
-   - All items and submenus present
-
----
-
-## 🐛 If Clasp Doesn't Work
-
-**Problem**: Clasp might not be configured or authenticated
-
-**Solution**: Use Manual Method (Method 2 above)
-
-**Why Manual is Better**:
-- ✅ More reliable
-- ✅ Can see exactly what's deployed
-- ✅ No authentication issues
-- ✅ Direct control
-
----
-
-## 📝 Quick Copy-Paste Guide
-
-### File Order (for manual deployment):
-
-1. **00-Constants.gs** → Copy from `src/00-Constants.gs`
-2. **01-Utilities.gs** → Copy from `src/01-Utilities.gs`
-3. **10-Menu.gs** → Copy from `src/10-Menu.gs`
-4. **21-ChangeOutDate.gs** → Copy from `src/21-ChangeOutDate.gs`
-5. **90-Backup.gs** → Copy from `src/90-Backup.gs`
-6. **Code.gs** → Copy from `src/Code.gs` (REPLACE existing)
-
-**Time needed**: ~5 minutes
-
----
-
-## ⚠️ Important Notes
-
-1. **Don't delete Code.gs** - Update it, don't delete
-2. **Save each file** - Click Save or Ctrl+S after pasting
-3. **Keep exact names** - Use `00-Constants` not `00-Constants.gs` in Apps Script
-4. **Test after deployment** - Run Generate All Reports to verify
-
----
-
-## 🎯 Expected Result
-
-After deployment:
-
-✅ **Generate All Reports works** (no SCHEMA error)  
-✅ **All menu items function**  
-✅ **Backup creates successfully**  
-✅ **Change out dates auto-update**  
-✅ **Fix All Change Out Dates works**  
-
----
-
-## 🚨 What Got Fixed
-
-**Before**:
+**Before** (current):
 ```
-Error: ReferenceError: SCHEMA is not defined
+Waco Worts	108	X-Large	...	—	Need to Purchase ❌
 ```
 
-**After** (with updated Code.gs):
+**After** (with fix):
 ```
-✅ All reports generate successfully
+Waco Worts	108	X-Large	...	104	In Stock ✅
 ```
-
-**Changed**:
-- Removed `SCHEMA = null;` from line 537
-- Removed `if (SCHEMA && SCHEMA[swapSheetName]) { delete SCHEMA[swapSheetName]; }` from line 2478
+or
+```
+Waco Worts	108	X-Large	...	2050	In Stock ✅
+```
 
 ---
 
-## 📞 Need Help?
+## Verification Steps
 
-If deployment fails:
-1. Check you're in correct Apps Script project (scriptId: `12U9JReRFpWfYVAx7jLuK7n-RyIT2Gb28I_hBKzm-vsh1bgbxRZFN0Doq`)
-2. Try manual copy-paste method
-3. Report any error messages from Apps Script
+After deployment, verify the fix worked:
+
+1. **Run Reports**
+   - In Google Sheets: **Glove Manager** → **Generate All Reports**
+
+2. **Check Sleeve Swaps**
+   - Open the "Sleeve Swaps" sheet
+   - Find Waco Worts
+   - Should show: "104" or "2050" in Pick List Item # column
+   - Should show: "In Stock ✅" in Status column
+
+3. **Check Chandler Reel Too**
+   - He also has "XL" for sleeve size
+   - Should also now match correctly
+
+4. **Run Diagnostic (Optional)**
+   - In Apps Script editor, run `diagnosePickListIssue()`
+   - View → Logs
+   - Should show "✓✓✓ ITEMS ARE AVAILABLE" and list item 104 or 2050
 
 ---
 
-**After deployment, test using MENU_TESTING_CHECKLIST.md**
+## Files That Need Deployment
+
+### Required:
+- ✅ `src/30-SwapGeneration.gs` - Contains the normalization fix
+
+### Optional but Recommended:
+- ✅ `src/99-DiagnosticTool.gs` - Helps diagnose future issues
+
+### For Reference Only (Don't Deploy):
+- ℹ️ `docs/Workflow_and_Sheet_Expectations.md` - Documentation
+- ℹ️ `FIX_SLEEVE_SIZE_MATCHING.md` - Fix summary
+- ℹ️ `SLEEVE_NORMALIZATION_SUMMARY.md` - This summary
+
+---
+
+## Troubleshooting
+
+### If Still Shows "Need to Purchase" After Deployment:
+
+1. **Clear Cache**
+   - In Google Sheets, press Ctrl+Shift+R (hard refresh)
+   - Close and reopen the spreadsheet
+
+2. **Verify Deployment**
+   - Open Apps Script editor
+   - Check line 15-37 of `30-SwapGeneration.gs`
+   - Should see `function normalizeSleeveSize(size) {`
+   - If not, the deployment didn't work
+
+3. **Check Employee Data**
+   - Verify Waco Worts still has "XL" in Sleeve Size column
+   - Verify items 104 and 2050 are still "On Shelf" status
+
+4. **Run Diagnostic**
+   - Run `diagnosePickListIssue()` function
+   - Check logs for detailed matching information
+
+---
+
+## Need Help?
+
+If you encounter issues during deployment, share:
+1. Screenshot of the Apps Script editor showing the file list
+2. Any error messages
+3. The output of running "Generate All Reports"
 

@@ -74,6 +74,27 @@ function handlePickedCheckboxChange(ss, swapSheet, inventorySheet, editedRow, ne
       // STAGE 2: Picked checkbox checked
       logEvent('Stage 2: Picked checked for row ' + editedRow + ', Pick List: ' + pickListNum);
 
+      // VALIDATION: Check if item is "In Testing" - if so, BLOCK the action
+      var currentInvStatus = inventorySheet.getRange(pickListRow, invColStatus).getValue();
+      var isInTesting = currentInvStatus && currentInvStatus.toString().trim().toLowerCase() === 'in testing';
+
+      if (isInTesting) {
+        // CANNOT pick items that are In Testing
+        logEvent('Stage 2 BLOCKED: Cannot pick item ' + pickListNum + ' - status is "In Testing"', 'WARNING');
+
+        // Uncheck the checkbox
+        swapSheet.getRange(editedRow, 9).setValue(false);
+
+        // Show error message to user
+        SpreadsheetApp.getUi().alert(
+          '⚠️ Cannot Pick Item',
+          'Item ' + pickListNum + ' is currently "In Testing" and cannot be picked for delivery.\n\n' +
+          'Please wait until testing is complete and the item status changes to "Ready For Delivery".',
+          SpreadsheetApp.getUi().ButtonSet.OK
+        );
+        return;
+      }
+
       swapSheet.getRange(editedRow, 8).setValue('Ready For Delivery 🚚');
 
       var stage2Values = [

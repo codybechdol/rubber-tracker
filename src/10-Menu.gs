@@ -7,7 +7,11 @@
 /**
  * Creates the Glove Manager menu when the spreadsheet opens.
  * This is a simple trigger that runs automatically.
+ *
+ * NOTE: This function is defined in Code.gs to maintain compatibility.
+ * Keeping this version commented out to prevent duplicate function conflicts.
  */
+/*
 function onOpen() {
   ensurePickedForColumn();
   var ui = SpreadsheetApp.getUi();
@@ -39,11 +43,16 @@ function onOpen() {
       .addItem('Setup Training Config', 'setupTrainingConfig')
       .addItem('Setup Training Tracking', 'setupTrainingTracking')
       .addSeparator()
+      .addItem('Refresh Training Attendees', 'refreshTrainingAttendees')
+      .addSeparator()
       .addItem('📊 Generate Compliance Report', 'generateTrainingComplianceReport'))
     .addSubMenu(ui.createMenu('🔧 Utilities')
       .addItem('Fix All Change Out Dates', 'fixAllChangeOutDates')
       .addItem('⚡ Setup Auto Change Out Dates', 'createEditTrigger')
       .addItem('📤 Archive Previous Employees', 'archivePreviousEmployees')
+      .addSeparator()
+      .addItem('📥 Import Data', 'showImportDialog')
+      .addItem('📥 Quick Import (1084)', 'importProvidedData')
       .addSeparator()
       .addItem('💾 Create Backup Snapshot', 'createBackupSnapshot')
       .addItem('📂 View Backup Folder', 'openBackupFolder'))
@@ -61,6 +70,7 @@ function onOpen() {
   // Reset the previous sheet tracker for this session
   PropertiesService.getUserProperties().setProperty('previousSheet', '');
 }
+*/
 
 /**
  * Test function to verify the edit trigger is working.

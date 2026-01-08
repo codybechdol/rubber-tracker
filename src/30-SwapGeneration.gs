@@ -6,6 +6,37 @@
  */
 
 /**
+ * Normalizes sleeve size strings to handle common variations.
+ * Converts "XL" to "X-Large", "L" to "Large", "Reg" to "Regular", etc.
+ *
+ * @param {string} size - The size string to normalize
+ * @return {string} Normalized size string (lowercase)
+ */
+function normalizeSleeveSize(size) {
+  if (!size) return '';
+
+  var normalized = size.toString().trim().toLowerCase();
+
+  // Handle common abbreviations
+  var sizeMap = {
+    'xl': 'x-large',
+    'x-l': 'x-large',
+    'xlarge': 'x-large',
+    'extra large': 'x-large',
+    'extralarge': 'x-large',
+    'l': 'large',
+    'lg': 'large',
+    'reg': 'regular',
+    'regular': 'regular',
+    'm': 'regular',
+    'med': 'regular',
+    'medium': 'regular'
+  };
+
+  return sizeMap[normalized] || normalized;
+}
+
+/**
  * Generates all reports: Glove Swaps, Sleeve Swaps, Purchase Needs, Inventory Reports, and Reclaims.
  * Menu item: Glove Manager → Generate All Reports
  */
@@ -53,9 +84,19 @@ function generateSleeveSwaps() {
  */
 function generateSwaps(itemType) {
   try {
+    Logger.log('*** generateSwaps START - itemType=' + itemType + ' ***');
     var isGloves = (itemType === 'Gloves');
     logEvent('Generating ' + itemType + ' Swaps report...');
     var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    // IMMEDIATE DEBUG: Write to a specific cell to confirm code is running
+    var testSheet = ss.getSheetByName('Sleeves');
+    if (testSheet && !isGloves) {
+      // Write debug marker to a far column temporarily
+      testSheet.getRange('Z1').setValue('DEBUG: Swap gen ran at ' + new Date().toString());
+    }
+
+    Logger.log('*** generateSwaps - got spreadsheet, isGloves=' + isGloves + ' ***');
     var swapSheetName = isGloves ? SHEET_GLOVE_SWAPS : SHEET_SLEEVE_SWAPS;
     var inventorySheetName = isGloves ? SHEET_GLOVES : SHEET_SLEEVES;
     var swapSheet = ss.getSheetByName(swapSheetName);
@@ -71,6 +112,26 @@ function generateSwaps(itemType) {
     logEvent('Preserved ' + Object.keys(manualPicks).length + ' manual pick list entries');
 
     swapSheet.clear();
+
+    // Create debug sheet for logging - only for Sleeves to avoid duplicate creation
+    var debugSheet = null;
+    var debugRow = 1;
+    if (!isGloves) {
+      try {
+        debugSheet = ss.getSheetByName('DEBUG_SWAP_GENERATION');
+        if (!debugSheet) {
+          debugSheet = ss.insertSheet('DEBUG_SWAP_GENERATION');
+        }
+        debugSheet.clear();
+        debugSheet.getRange(debugRow++, 1).setValue('=== SWAP GENERATION DEBUG LOG ===');
+        debugSheet.getRange(debugRow++, 1).setValue('Timestamp: ' + new Date().toString());
+        debugSheet.getRange(debugRow++, 1).setValue('Item Type: ' + itemType);
+        SpreadsheetApp.flush();
+      } catch (debugErr) {
+        Logger.log('Error creating debug sheet: ' + debugErr);
+        debugSheet = null;
+      }
+    }
 
     var currentRow = 1;
     var classes = isGloves ? [0, 2, 3] : [2, 3];
@@ -102,8 +163,27 @@ function generateSwaps(itemType) {
 
     var empMap = {};
     var empLocationMap = {};
+
+    // Debug: Log first few employees to verify structure
+    logEvent('=== EMPLOYEE SHEET STRUCTURE CHECK ===', 'INFO');
+    logEvent('Headers: ' + empHeaders.join(' | '), 'INFO');
+    logEvent('First employee row (raw): ' + (empData.length > 0 ? JSON.stringify(empData[0].slice(0, 5)) : 'NO DATA'), 'INFO');
+
+    debugSheet && debugSheet.getRange(debugRow++, 1).setValue('=== EMPLOYEE SHEET CHECK ===');
+    debugSheet && debugSheet.getRange(debugRow++, 1).setValue('Headers: ' + empHeaders.join(' | '));
+    if (empData.length > 0 && debugSheet) {
+      debugSheet.getRange(debugRow++, 1).setValue('First employee: ' + JSON.stringify(empData[0].slice(0, 5)));
+    }
+
     empData.forEach(function(row) {
       var name = (row[0] || '').toString().trim().toLowerCase();
+
+      // Debug: Log if this is Waco
+      if (name.indexOf('waco') !== -1 || (row[1] && row[1].toString().toLowerCase().indexOf('waco') !== -1)) {
+        logEvent('FOUND WACO in employees: row[0]="' + row[0] + '" row[1]="' + row[1] + '" row[2]="' + row[2] + '"', 'INFO');
+        debugSheet && debugSheet.getRange(debugRow++, 1).setValue('FOUND WACO: row[0]="' + row[0] + '" row[1]="' + row[1] + '" row[2]="' + row[2] + '"');
+      }
+
       if (name && ignoreNames.indexOf(name) === -1) {
         empMap[name] = row;
         empLocationMap[name] = (row[locationColIdx] || 'Unknown').toString().trim();
@@ -149,7 +229,18 @@ function generateSwaps(itemType) {
       inventoryData.forEach(function(item) {
         if (parseInt(item[2], 10) !== itemClass) return;
         var assignedTo = (item[7] || '').toString().trim().toLowerCase();
-        if (!assignedTo || ignoreNames.indexOf(assignedTo) === -1 || !empMap[assignedTo]) {
+
+        // Debug: Log if this is Waco's item
+        if (item[0] === 108 || item[0] === '108') {
+          logEvent('DEBUG: Found Item #108 in inventory loop - assignedTo="' + assignedTo + '" class=' + item[2], 'INFO');
+          debugSheet && debugSheet.getRange(debugRow++, 1).setValue('Found Item #108: assignedTo="' + assignedTo + '" class=' + item[2]);
+        }
+
+        if (!assignedTo || ignoreNames.indexOf(assignedTo) !== -1 || !empMap[assignedTo]) {
+          if (item[0] === 108 || item[0] === '108') {
+            logEvent('DEBUG: Item #108 FILTERED OUT - assignedTo=' + assignedTo + ', in ignoreNames=' + (ignoreNames.indexOf(assignedTo) !== -1) + ', in empMap=' + !!empMap[assignedTo], 'INFO');
+            debugSheet && debugSheet.getRange(debugRow++, 1).setValue('Item #108 FILTERED: assignedTo=' + assignedTo + ', inIgnore=' + (ignoreNames.indexOf(assignedTo) !== -1) + ', inEmpMap=' + !!empMap[assignedTo]);
+          }
           return;
         }
         var emp = empMap[assignedTo];
@@ -177,6 +268,12 @@ function generateSwaps(itemType) {
         }
 
         if (dateAssigned && changeOutDate && daysLeft !== '' && ((typeof daysLeft === 'number' && daysLeft < 32) || daysLeft === 'OVERDUE')) {
+          // Debug: Log if this is Waco's item
+          if (itemNum === 108 || itemNum === '108') {
+            logEvent('DEBUG: Item #108 PASSED 31-day filter - daysLeft=' + daysLeft + ', adding to swapMeta for employee: ' + emp[0], 'INFO');
+            debugSheet && debugSheet.getRange(debugRow++, 1).setValue('Item #108 PASSED filter: daysLeft=' + daysLeft + ', employee=' + emp[0]);
+          }
+
           swapMeta.push({
             emp: emp,
             employeeLocation: empLocationMap[assignedTo] || 'Unknown',
@@ -204,6 +301,23 @@ function generateSwaps(itemType) {
       });
 
       var assignedItemNums = new Set();
+
+      // Helper function to normalize item numbers to strings for consistent comparison
+      var normalizeItemNum = function(num) {
+        return (num || '').toString().trim();
+      };
+
+      // Log how many swaps found for this class
+      logEvent('Found ' + swapMeta.length + ' employees needing ' + classNames[itemClass] + ' ' + itemLabel + ' swaps', 'INFO');
+      debugSheet && debugSheet.getRange(debugRow++, 1).setValue('=== CLASS ' + itemClass + ' ===');
+      debugSheet && debugSheet.getRange(debugRow++, 1).setValue('Found ' + swapMeta.length + ' employees needing swaps');
+
+      // Helper function to check if item has LOST-LOCATE marker
+      var isLostLocate = function(item) {
+        var notes = (item[10] || '').toString().trim().toUpperCase();
+        return notes.indexOf('LOST-LOCATE') !== -1;
+      };
+
       swapMeta.forEach(function(meta) {
         var useSize = isGloves ?
           (!isNaN(parseFloat(meta.empPreferredSize)) ? parseFloat(meta.empPreferredSize) : meta.itemSize) :
@@ -216,12 +330,71 @@ function generateSwaps(itemType) {
         var isAlreadyPicked = false;
         var employeeName = meta.emp[0];
 
+        // Debug logging for problematic cases
+        var debugEmployee = (employeeName.toLowerCase().indexOf('waco') !== -1);
+
+        // Write to debug sheet for Waco
+        if (debugEmployee && !isGloves && debugSheet) {
+          debugSheet.getRange(debugRow++, 1).setValue('=== PROCESSING WACO ===');
+          debugSheet.getRange(debugRow++, 1).setValue('Employee: ' + employeeName);
+          debugSheet.getRange(debugRow++, 1).setValue('empPreferredSize: "' + meta.empPreferredSize + '"');
+          debugSheet.getRange(debugRow++, 1).setValue('itemSize: "' + meta.itemSize + '"');
+          debugSheet.getRange(debugRow++, 1).setValue('useSize: "' + useSize + '"');
+          debugSheet.getRange(debugRow++, 1).setValue('useSize normalized: "' + normalizeSleeveSize(useSize) + '"');
+          debugSheet.getRange(debugRow++, 1).setValue('Looking for Class: ' + meta.itemClass);
+          SpreadsheetApp.flush();
+        }
+
+        // Log all sleeve employees to see if Waco is being processed
+        if (!isGloves && meta.itemClass === 2) {
+          logEvent('Processing sleeve swap for: "' + employeeName + '" (lowercase: "' + employeeName.toLowerCase() + '") - debugEmployee=' + debugEmployee, 'INFO');
+        }
+
+        if (debugEmployee) {
+          Logger.log('=== DEBUG for ' + employeeName + ' ===');
+          Logger.log('Item type: ' + itemType);
+          Logger.log('meta.empPreferredSize (raw from employee): "' + meta.empPreferredSize + '"');
+          Logger.log('meta.itemSize (from current item): "' + meta.itemSize + '"');
+          Logger.log('useSize (what we will search for): "' + useSize + '"');
+          Logger.log('useSize normalized: "' + normalizeSleeveSize(useSize) + '"');
+          Logger.log('Looking for Class ' + meta.itemClass);
+
+          // Show all items of this class and size in inventory
+          Logger.log('\n--- ALL Class ' + meta.itemClass + ' items in inventory (size matching) ---');
+          var debugCount = 0;
+          inventoryData.forEach(function(item) {
+            if (parseInt(item[2], 10) !== meta.itemClass) return;
+            var itemSize = item[1];
+            var sizeMatch = false;
+            if (isGloves) {
+              sizeMatch = parseFloat(itemSize) === useSize || parseFloat(itemSize) === useSize + 0.5;
+            } else {
+              sizeMatch = normalizeSleeveSize(itemSize) === normalizeSleeveSize(useSize);
+            }
+            if (sizeMatch) {
+              debugCount++;
+              var pickedFor = (item[9] || '').toString().trim();
+              var notes = (item[10] || '').toString().trim();
+              var isInAssignedSet = assignedItemNums.has(item[0]);
+              Logger.log('  [' + debugCount + '] Item #' + item[0] +
+                         ' | Size: "' + itemSize + '"' +
+                         ' | Status: "' + item[6] + '"' +
+                         ' | Assigned To: "' + item[7] + '"' +
+                         (pickedFor ? ' | Picked For: "' + pickedFor + '"' : '') +
+                         (notes ? ' | Notes: "' + notes + '"' : '') +
+                         (isInAssignedSet ? ' | [ALREADY IN assignedItemNums]' : ''));
+            }
+          });
+          Logger.log('--- Total matching items found: ' + debugCount + ' ---\n');
+        }
+
         var pickedForMatch = inventoryData.find(function(item) {
           var pickedFor = (item[9] || '').toString().trim();
           var classMatch = parseInt(item[2], 10) === meta.itemClass;
           var pickedForEmployee = pickedFor.toLowerCase().indexOf(employeeName.toLowerCase()) !== -1;
-          var notAlreadyUsed = !assignedItemNums.has(item[0]);
-          return classMatch && pickedForEmployee && notAlreadyUsed;
+          var notAlreadyUsed = !assignedItemNums.has(normalizeItemNum(item[0]));
+          var notLost = !isLostLocate(item);
+          return classMatch && pickedForEmployee && notAlreadyUsed && notLost;
         });
 
         if (pickedForMatch) {
@@ -229,7 +402,7 @@ function generateSwaps(itemType) {
           pickListStatusRaw = (pickedForMatch[6] || '').toString().trim().toLowerCase();
           pickListItemData = pickedForMatch;
           isAlreadyPicked = true;
-          assignedItemNums.add(pickedForMatch[0]);
+          assignedItemNums.add(normalizeItemNum(pickedForMatch[0]));
 
           var pickedSize = isGloves ? parseFloat(pickedForMatch[1]) : pickedForMatch[1];
           if (isGloves && !isNaN(pickedSize) && !isNaN(useSize) && pickedSize > useSize) {
@@ -243,17 +416,57 @@ function generateSwaps(itemType) {
             var classMatch = parseInt(item[2], 10) === meta.itemClass;
             var sizeMatch = isGloves ?
               parseFloat(item[1]) === useSize :
-              (item[1] && useSize && item[1].toString().trim().toLowerCase() === useSize.toString().trim().toLowerCase());
-            var notAssigned = !assignedItemNums.has(item[0]);
+              (item[1] && useSize && normalizeSleeveSize(item[1]) === normalizeSleeveSize(useSize));
+            var notAssigned = !assignedItemNums.has(normalizeItemNum(item[0]));
             var pickedFor = (item[9] || '').toString().trim();
             var isReservedForOther = pickedFor !== '' && pickedFor.toLowerCase().indexOf(employeeName.toLowerCase()) === -1;
-            return statusMatch && classMatch && sizeMatch && notAssigned && !isReservedForOther;
+            var notLost = !isLostLocate(item);
+
+            if (debugEmployee && classMatch) {
+              Logger.log('Checking item ' + item[0] + ': Size="' + item[1] + '" Status="' + item[6] + '"');
+              Logger.log('  Item normalized: "' + normalizeSleeveSize(item[1]) + '" vs useSize normalized: "' + normalizeSleeveSize(useSize) + '"');
+              Logger.log('  statusMatch=' + statusMatch + ', classMatch=' + classMatch + ', sizeMatch=' + sizeMatch);
+              Logger.log('  notAssigned=' + notAssigned + ', pickedFor="' + pickedFor + '"');
+              Logger.log('  isReservedForOther=' + isReservedForOther + ', notLost=' + notLost);
+              Logger.log('  ALL CONDITIONS: ' + (statusMatch && classMatch && sizeMatch && notAssigned && !isReservedForOther && notLost));
+            }
+
+            return statusMatch && classMatch && sizeMatch && notAssigned && !isReservedForOther && notLost;
           });
           if (match) {
             pickListValue = match[0];
             pickListStatusRaw = 'on shelf';
             pickListItemData = match;
-            assignedItemNums.add(match[0]);
+            assignedItemNums.add(normalizeItemNum(match[0]));
+            if (debugEmployee) {
+              Logger.log('✓✓✓ FOUND On Shelf match: ' + match[0]);
+              if (debugSheet) debugSheet.getRange(debugRow++, 1).setValue('✓✓✓ FOUND On Shelf match: ' + match[0]);
+            }
+          } else if (debugEmployee) {
+            Logger.log('✗✗✗ No On Shelf exact size match found');
+            if (debugSheet) {
+              debugSheet.getRange(debugRow++, 1).setValue('✗✗✗ No On Shelf exact size match found');
+
+              // Show what items exist for debugging
+              var onShelfItems = inventoryData.filter(function(item) {
+                return parseInt(item[2], 10) === meta.itemClass &&
+                       item[6] && item[6].toString().trim().toLowerCase() === 'on shelf';
+              });
+              debugSheet.getRange(debugRow++, 1).setValue('On Shelf items for Class ' + meta.itemClass + ': ' + onShelfItems.length);
+              onShelfItems.forEach(function(item, idx) {
+                if (idx < 10) { // Limit to 10 items
+                  var itemNormalized = normalizeSleeveSize(item[1]);
+                  var useSizeNormalized = normalizeSleeveSize(useSize);
+                  var sizeMatch = itemNormalized === useSizeNormalized;
+                  debugSheet.getRange(debugRow++, 1).setValue(
+                    '  Item #' + item[0] + ' | Size: "' + item[1] + '" -> "' + itemNormalized +
+                    '" | sizeMatch=' + sizeMatch + ' (vs "' + useSizeNormalized + '")' +
+                    ' | inAssigned=' + assignedItemNums.has(normalizeItemNum(item[0])) +
+                    ' | pickedFor="' + (item[9] || '') + '"'
+                  );
+                }
+              });
+            }
           }
         }
 
@@ -261,18 +474,20 @@ function generateSwaps(itemType) {
           var match = inventoryData.find(function(item) {
             var pickedFor = (item[9] || '').toString().trim();
             var isReservedForOther = pickedFor !== '' && pickedFor.toLowerCase().indexOf(employeeName.toLowerCase()) === -1;
+            var notLost = !isLostLocate(item);
             return item[6] && item[6].toString().trim().toLowerCase() === 'on shelf' &&
                    parseInt(item[2], 10) === meta.itemClass &&
                    parseFloat(item[1]) === useSize + 0.5 &&
-                   !assignedItemNums.has(item[0]) &&
-                   !isReservedForOther;
+                   !assignedItemNums.has(normalizeItemNum(item[0])) &&
+                   !isReservedForOther &&
+                   notLost;
           });
           if (match) {
             pickListValue = match[0];
             pickListStatusRaw = 'on shelf';
             pickListSizeUp = true;
             pickListItemData = match;
-            assignedItemNums.add(match[0]);
+            assignedItemNums.add(normalizeItemNum(match[0]));
           }
         }
 
@@ -283,17 +498,18 @@ function generateSwaps(itemType) {
             var classMatch = parseInt(item[2], 10) === meta.itemClass;
             var sizeMatch = isGloves ?
               parseFloat(item[1]) === useSize :
-              (item[1] && item[1].toString().trim().toLowerCase() === useSize.toString().trim().toLowerCase());
-            var notAssigned = !assignedItemNums.has(item[0]);
+              (item[1] && useSize && normalizeSleeveSize(item[1]) === normalizeSleeveSize(useSize));
+            var notAssigned = !assignedItemNums.has(normalizeItemNum(item[0]));
             var pickedFor = (item[9] || '').toString().trim();
             var isReservedForOther = pickedFor !== '' && pickedFor.toLowerCase().indexOf(employeeName.toLowerCase()) === -1;
-            return statusMatch && classMatch && sizeMatch && notAssigned && !isReservedForOther;
+            var notLost = !isLostLocate(item);
+            return statusMatch && classMatch && sizeMatch && notAssigned && !isReservedForOther && notLost;
           });
           if (match) {
             pickListValue = match[0];
             pickListStatusRaw = match[6].toString().trim().toLowerCase();
             pickListItemData = match;
-            assignedItemNums.add(match[0]);
+            assignedItemNums.add(normalizeItemNum(match[0]));
           }
         }
 
@@ -302,29 +518,81 @@ function generateSwaps(itemType) {
             var stat = item[6] && item[6].toString().trim().toLowerCase();
             var pickedFor = (item[9] || '').toString().trim();
             var isReservedForOther = pickedFor !== '' && pickedFor.toLowerCase().indexOf(employeeName.toLowerCase()) === -1;
+            var notLost = !isLostLocate(item);
             return (stat === 'ready for delivery' || stat === 'in testing') &&
                    parseInt(item[2], 10) === meta.itemClass &&
                    parseFloat(item[1]) === useSize + 0.5 &&
-                   !assignedItemNums.has(item[0]) &&
-                   !isReservedForOther;
+                   !assignedItemNums.has(normalizeItemNum(item[0])) &&
+                   !isReservedForOther &&
+                   notLost;
           });
           if (match) {
             pickListValue = match[0];
             pickListStatusRaw = match[6].toString().trim().toLowerCase();
             pickListSizeUp = true;
             pickListItemData = match;
-            assignedItemNums.add(match[0]);
+            assignedItemNums.add(normalizeItemNum(match[0]));
           }
         }
 
         if (pickListValue === '—') {
+          // Enhanced logging to understand WHY no match was found
+          var debugReason = [];
+
+          // Check if there are items of this class and size that are filtered out
+          var potentialItems = inventoryData.filter(function(item) {
+            return parseInt(item[2], 10) === meta.itemClass;
+          });
+
+          var sizeMatchItems = potentialItems.filter(function(item) {
+            if (isGloves) {
+              return parseFloat(item[1]) === useSize || parseFloat(item[1]) === useSize + 0.5;
+            } else {
+              return normalizeSleeveSize(item[1]) === normalizeSleeveSize(useSize);
+            }
+          });
+
+          if (sizeMatchItems.length > 0) {
+            var alreadyUsedCount = 0;
+            var reservedCount = 0;
+            var lostLocateCount = 0;
+            var wrongStatusCount = 0;
+
+            sizeMatchItems.forEach(function(item) {
+              if (isLostLocate(item)) {
+                lostLocateCount++;
+              } else if (assignedItemNums.has(normalizeItemNum(item[0]))) {
+                alreadyUsedCount++;
+              } else {
+                var pickedFor = (item[9] || '').toString().trim();
+                var isReservedForOther = pickedFor !== '' && pickedFor.toLowerCase().indexOf(employeeName.toLowerCase()) === -1;
+                if (isReservedForOther) {
+                  reservedCount++;
+                } else {
+                  var stat = (item[6] || '').toString().trim().toLowerCase();
+                  if (stat !== 'on shelf' && stat !== 'in testing' && stat !== 'ready for delivery') {
+                    wrongStatusCount++;
+                  }
+                }
+              }
+            });
+
+            if (alreadyUsedCount > 0) debugReason.push(alreadyUsedCount + ' already used in other swaps');
+            if (reservedCount > 0) debugReason.push(reservedCount + ' reserved for others');
+            if (lostLocateCount > 0) debugReason.push(lostLocateCount + ' marked LOST-LOCATE');
+            if (wrongStatusCount > 0) debugReason.push(wrongStatusCount + ' wrong status');
+          }
+
           pickListStatus = 'Need to Purchase ❌';
+          if (debugReason.length > 0) {
+            Logger.log('RESULT: Need to Purchase for ' + employeeName + ' - Filtered out: ' + debugReason.join(', '));
+          } else if (debugEmployee) {
+            Logger.log('RESULT: Need to Purchase - no matches found in any search');
+          }
         } else if (pickListStatusRaw === 'on shelf') {
           pickListStatus = pickListSizeUp ? 'In Stock (Size Up) ⚠️' : 'In Stock ✅';
         } else if (pickListStatusRaw === 'ready for delivery') {
           pickListStatus = pickListSizeUp ? 'Ready For Delivery (Size Up) ⚠️' : 'Ready For Delivery 🚚';
-        } else if (pickListStatusRaw === 'in testing') {
-          pickListStatus = pickListSizeUp ? 'In Testing (Size Up) ⚠️' : 'In Testing ⏳';
         } else {
           pickListStatus = meta.status;
         }
@@ -332,7 +600,9 @@ function generateSwaps(itemType) {
         var finalPickListValue = pickListValue;
         var finalPickListStatus = pickListStatus;
 
-        if (isAlreadyPicked) {
+        // Keep the actual status for already-picked items
+        // Don't override "In Testing" with "Ready For Delivery"
+        if (isAlreadyPicked && pickListStatusRaw !== 'in testing') {
           finalPickListStatus = pickListSizeUp ? 'Ready For Delivery (Size Up) ⚠️' : 'Ready For Delivery 🚚';
         }
 

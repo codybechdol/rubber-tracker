@@ -11,8 +11,6 @@ function forceCreateMenu() {
   try {
     var ui = SpreadsheetApp.getUi();
 
-    // Remove any existing menu
-    var menus = ui.getMenus();
 
     // Create the full menu structure
     ui.createMenu('Glove Manager')
@@ -42,6 +40,8 @@ function forceCreateMenu() {
         .addItem('Setup Crew Visit Config', 'setupCrewVisitConfig')
         .addItem('Setup Training Config', 'setupTrainingConfig')
         .addItem('Setup Training Tracking', 'setupTrainingTracking')
+        .addSeparator()
+        .addItem('Refresh Training Attendees', 'refreshTrainingAttendees')
         .addSeparator()
         .addItem('📊 Generate Compliance Report', 'generateTrainingComplianceReport'))
       .addSubMenu(ui.createMenu('🔧 Utilities')

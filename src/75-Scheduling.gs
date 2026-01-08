@@ -6,6 +6,135 @@
  */
 
 // ============================================================================
+
+/**
+ * DEBUG: Test function to diagnose Crew Visit Config auto-population issues.
+ * Run this directly from Apps Script editor to see detailed logs.
+ * Menu item: Can be run manually from script editor
+ */
+function debugAutoPopulateCrewVisitConfig() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+
+  var debugInfo = [];
+  debugInfo.push('=== DEBUG: Auto-Populate Crew Visit Config ===');
+  debugInfo.push('');
+
+  // Check To-Do List
+  var todoSheet = ss.getSheetByName('To Do List');
+  if (!todoSheet) {
+    debugInfo.push('❌ To-Do List sheet NOT FOUND');
+    ui.alert('Debug Results', debugInfo.join('\n'), ui.ButtonSet.OK);
+    return;
+  }
+
+  debugInfo.push('✅ To-Do List exists');
+  debugInfo.push('   Total rows: ' + todoSheet.getLastRow());
+  debugInfo.push('   Total columns: ' + todoSheet.getLastColumn());
+  debugInfo.push('');
+
+  // Check if has task data
+  if (todoSheet.getLastRow() < 14) {
+    debugInfo.push('❌ To-Do List has no task data (needs row 14+)');
+    ui.alert('Debug Results', debugInfo.join('\n'), ui.ButtonSet.OK);
+    return;
+  }
+
+  debugInfo.push('✅ To-Do List has task data');
+  debugInfo.push('');
+
+  // Read and display headers
+  var todoData = todoSheet.getDataRange().getValues();
+  var todoHeaders = todoData[12]; // Row 13
+
+  debugInfo.push('Headers (Row 13):');
+  for (var h = 0; h < Math.min(todoHeaders.length, 19); h++) {
+    debugInfo.push('   Col ' + (h + 1) + ': "' + todoHeaders[h] + '"');
+  }
+  debugInfo.push('');
+
+  // Find key columns
+  var locationCol = -1;
+  var employeeCol = -1;
+
+  for (var h = 0; h < todoHeaders.length; h++) {
+    var header = String(todoHeaders[h]).toLowerCase().trim();
+    if (header === 'location') locationCol = h;
+    if (header === 'employee/crew') employeeCol = h;
+  }
+
+  debugInfo.push('Key columns found:');
+  debugInfo.push('   Location: ' + (locationCol >= 0 ? 'Column ' + (locationCol + 1) : 'NOT FOUND'));
+  debugInfo.push('   Employee/Crew: ' + (employeeCol >= 0 ? 'Column ' + (employeeCol + 1) : 'NOT FOUND'));
+  debugInfo.push('');
+
+  if (locationCol === -1) {
+    debugInfo.push('❌ PROBLEM: Location column not found!');
+    debugInfo.push('   Expected header: "Location"');
+    ui.alert('Debug Results', debugInfo.join('\n'), ui.ButtonSet.OK);
+    return;
+  }
+
+  // Sample first 5 task rows
+  debugInfo.push('Sample task data (first 5 rows):');
+  for (var i = 13; i < Math.min(todoData.length, 18); i++) {
+    var row = todoData[i];
+    var location = row[locationCol] || '(empty)';
+    var employee = employeeCol >= 0 ? (row[employeeCol] || '(empty)') : 'N/A';
+    debugInfo.push('   Row ' + (i + 1) + ': Location="' + location + '", Employee="' + employee + '"');
+  }
+  debugInfo.push('');
+
+  // Count unique locations
+  var locations = {};
+  for (var i = 13; i < todoData.length; i++) {
+    var loc = String(todoData[i][locationCol] || '').trim();
+    if (loc && loc !== 'Unknown') {
+      locations[loc] = (locations[loc] || 0) + 1;
+    }
+  }
+
+  var locationCount = Object.keys(locations).length;
+  debugInfo.push('Unique locations found: ' + locationCount);
+
+  if (locationCount > 0) {
+    debugInfo.push('');
+    debugInfo.push('Location breakdown:');
+    for (var loc in locations) {
+      debugInfo.push('   ' + loc + ': ' + locations[loc] + ' task(s)');
+    }
+  } else {
+    debugInfo.push('');
+    debugInfo.push('❌ PROBLEM: No valid locations found in tasks!');
+    debugInfo.push('   Check if Location column has data');
+  }
+
+  // Try running auto-populate
+  debugInfo.push('');
+  debugInfo.push('--- Running autoPopulateCrewVisitConfigFromToDo ---');
+
+  var result = autoPopulateCrewVisitConfigFromToDo(ss);
+
+  debugInfo.push('Result: ' + (result || 'undefined'));
+  debugInfo.push('');
+
+  // Check Crew Visit Config after
+  var configSheet = ss.getSheetByName('Crew Visit Config');
+  if (configSheet) {
+    debugInfo.push('✅ Crew Visit Config exists after auto-populate');
+    debugInfo.push('   Rows: ' + configSheet.getLastRow());
+  } else {
+    debugInfo.push('❌ Crew Visit Config NOT created');
+  }
+
+  // Show results
+  ui.alert('Debug Results', debugInfo.join('\n'), ui.ButtonSet.OK);
+
+  // Also log to console
+  Logger.log(debugInfo.join('\n'));
+}
+
+// ============================================================================
 // SHEET NAMES
 // ============================================================================
 
@@ -70,6 +199,272 @@ function calculateNextTrainingDate(lastDate, frequency) {
 }
 
 // ============================================================================
+// CREW EXTRACTION FUNCTIONS
+// ============================================================================
+
+/**
+ * Extracts unique crew numbers from Employees sheet.
+ * Converts job numbers like "009-26.1" → "009-26" (removes employee suffix).
+ *
+ * @return {Array} Array of unique crew numbers sorted
+ */
+function getActiveCrews() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+
+  if (!employeesSheet || employeesSheet.getLastRow() < 2) {
+    return [];
+  }
+
+  var data = employeesSheet.getDataRange().getValues();
+  var headers = data[0];
+  var jobNumCol = -1;
+  var lastDayCol = -1;
+
+  // Find Job Number column (D) and Last Day column (L)
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'job number') jobNumCol = h;
+    if (header === 'last day') lastDayCol = h;
+  }
+
+  if (jobNumCol === -1) {
+    logEvent('getActiveCrews: Job Number column not found in Employees sheet', 'ERROR');
+    return [];
+  }
+
+  var crewSet = {};
+
+  // Process each employee
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var jobNumber = String(row[jobNumCol]).trim();
+    var lastDay = lastDayCol !== -1 ? row[lastDayCol] : '';
+
+    // Skip if no job number or employee has left
+    if (!jobNumber || lastDay) continue;
+
+    // Extract crew prefix (e.g., "009-26.1" → "009-26")
+    var crewNumber = extractCrewNumber(jobNumber);
+    if (crewNumber) {
+      crewSet[crewNumber] = true;
+    }
+  }
+
+  // Convert to sorted array
+  var crews = Object.keys(crewSet).sort();
+  return crews;
+}
+
+/**
+ * Extracts crew number from full job number.
+ * Example: "009-26.1" → "009-26"
+ *
+ * @param {string} jobNumber - Full job number
+ * @return {string} Crew number prefix
+ */
+function extractCrewNumber(jobNumber) {
+  var jobStr = String(jobNumber).trim();
+  if (!jobStr) return '';
+
+  // Find last dot and remove everything after it
+  var lastDotIndex = jobStr.lastIndexOf('.');
+  if (lastDotIndex !== -1) {
+    return jobStr.substring(0, lastDotIndex);
+  }
+
+  return jobStr; // Return as-is if no dot found
+}
+
+/**
+ * Gets crew lead/foreman information for a crew.
+ * Looks for employee with matching crew and Job Classification containing "Foreman" or "Lead".
+ *
+ * @param {string} crewNumber - Crew number (e.g., "009-26")
+ * @return {Object} {name: string, jobNumber: string, classification: string} or null
+ */
+function getCrewLead(crewNumber) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+
+  if (!employeesSheet || employeesSheet.getLastRow() < 2) {
+    return null;
+  }
+
+  var data = employeesSheet.getDataRange().getValues();
+  var headers = data[0];
+  var nameCol = -1;
+  var jobNumCol = -1;
+  var classificationCol = -1;
+  var lastDayCol = -1;
+
+  // Find columns
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'name') nameCol = h;
+    if (header === 'job number') jobNumCol = h;
+    if (header === 'job classification') classificationCol = h;
+    if (header === 'last day') lastDayCol = h;
+  }
+
+  if (nameCol === -1 || jobNumCol === -1) {
+    return null;
+  }
+
+  // Look for crew lead
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var employeeJobNum = String(row[jobNumCol]).trim();
+    var employeeCrew = extractCrewNumber(employeeJobNum);
+    var lastDay = lastDayCol !== -1 ? row[lastDayCol] : '';
+
+    // Skip if not in this crew or has left
+    if (employeeCrew !== crewNumber || lastDay) continue;
+
+    // Check if this is a crew lead
+    if (classificationCol !== -1) {
+      var classification = String(row[classificationCol]).trim();
+
+      // Only F and GTO F are crew leads for training tracking
+      if (classification === 'F' || classification === 'GTO F') {
+        return {
+          name: row[nameCol],
+          jobNumber: employeeJobNum,
+          classification: row[classificationCol]
+        };
+      }
+    }
+  }
+
+  // If no lead found, return first employee in crew
+  for (var j = 1; j < data.length; j++) {
+    var row2 = data[j];
+    var employeeJobNum2 = String(row2[jobNumCol]).trim();
+    var employeeCrew2 = extractCrewNumber(employeeJobNum2);
+    var lastDay2 = lastDayCol !== -1 ? row2[lastDayCol] : '';
+
+    if (employeeCrew2 === crewNumber && !lastDay2) {
+      return {
+        name: row2[nameCol],
+        jobNumber: employeeJobNum2,
+        classification: classificationCol !== -1 ? row2[classificationCol] : ''
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Gets crew size (count of active employees in crew).
+ *
+ * @param {string} crewNumber - Crew number (e.g., "009-26")
+ * @return {number} Number of active employees
+ */
+function getCrewSize(crewNumber) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+
+  if (!employeesSheet || employeesSheet.getLastRow() < 2) {
+    return 0;
+  }
+
+  var data = employeesSheet.getDataRange().getValues();
+  var headers = data[0];
+  var jobNumCol = -1;
+  var lastDayCol = -1;
+
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'job number') jobNumCol = h;
+    if (header === 'last day') lastDayCol = h;
+  }
+
+  if (jobNumCol === -1) return 0;
+
+  var count = 0;
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var employeeJobNum = String(row[jobNumCol]).trim();
+    var employeeCrew = extractCrewNumber(employeeJobNum);
+    var lastDay = lastDayCol !== -1 ? row[lastDayCol] : '';
+
+    if (employeeCrew === crewNumber && !lastDay) {
+      count++;
+    }
+  }
+
+  return count;
+}
+
+/**
+ * Checks if a crew should be excluded from training tracking.
+ * Excludes crews where the foreman (F or GTO F) has:
+ * - Job Number = "N/A"
+ * - Location = "weeds" (case-insensitive)
+ *
+ * @param {string} crewNumber - Crew number (e.g., "009-26")
+ * @return {boolean} True if crew should be excluded
+ */
+function shouldExcludeCrew(crewNumber) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+
+  if (!employeesSheet || employeesSheet.getLastRow() < 2) {
+    return false;
+  }
+
+  var data = employeesSheet.getDataRange().getValues();
+  var headers = data[0];
+  var jobNumCol = -1;
+  var locationCol = -1;
+  var classificationCol = -1;
+  var lastDayCol = -1;
+
+  // Find columns
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'job number') jobNumCol = h;
+    if (header === 'location') locationCol = h;
+    if (header === 'job classification') classificationCol = h;
+    if (header === 'last day') lastDayCol = h;
+  }
+
+  if (jobNumCol === -1 || locationCol === -1) {
+    return false;
+  }
+
+  // Look for foreman in this crew
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var employeeJobNum = String(row[jobNumCol]).trim();
+    var employeeCrew = extractCrewNumber(employeeJobNum);
+    var lastDay = lastDayCol !== -1 ? row[lastDayCol] : '';
+
+    // Skip if not in this crew or has left
+    if (employeeCrew !== crewNumber || lastDay) continue;
+
+    // Check if this is a foreman
+    if (classificationCol !== -1) {
+      var classification = String(row[classificationCol]).trim();
+
+      if (classification === 'F' || classification === 'GTO F') {
+        // Found the foreman - check exclusion criteria
+        var jobNumberValue = String(row[jobNumCol]).trim().toUpperCase();
+        var locationValue = String(row[locationCol]).trim().toLowerCase();
+
+        // Exclude if job number is N/A or location is weeds
+        if (jobNumberValue === 'N/A' || locationValue === 'weeds') {
+          return true; // Exclude this crew
+        }
+      }
+    }
+  }
+
+  return false; // Don't exclude
+}
+
+// ============================================================================
 // CREW VISIT FUNCTIONS
 // ============================================================================
 
@@ -116,10 +511,55 @@ function getCrewVisitsForMonth(year, month) {
     if (!jobNumber) continue;
 
     var lastVisit = row[colIndices.lastVisit];
+    var nextVisit = row[colIndices.nextVisit];
     var frequency = row[colIndices.frequency] || 'Monthly';
 
-    // Calculate all visit dates for this month
-    var visitDates = calculateVisitDatesForMonth(lastVisit, frequency, year, month);
+    var visitDates = [];
+
+    // If Next Visit Date is set and in this month, use it directly
+    // Handle both Date objects and string dates
+    var nextVisitDate = null;
+    if (nextVisit) {
+      if (nextVisit instanceof Date) {
+        nextVisitDate = nextVisit;
+      } else if (typeof nextVisit === 'string' && nextVisit.trim() !== '') {
+        // Try to parse string date
+        nextVisitDate = new Date(nextVisit);
+      } else if (typeof nextVisit === 'number') {
+        // Excel serial date number
+        nextVisitDate = new Date(nextVisit);
+      }
+
+      // Validate the parsed date
+      if (nextVisitDate && isNaN(nextVisitDate.getTime())) {
+        Logger.log('Invalid date for ' + jobNumber + ': ' + nextVisit);
+        nextVisitDate = null;
+      }
+    }
+
+    if (nextVisitDate) {
+      var nextVisitMonth = nextVisitDate.getMonth() + 1; // 1-12
+      var nextVisitYear = nextVisitDate.getFullYear();
+
+      Logger.log('Checking ' + jobNumber + ': Next Visit Date = ' + nextVisitDate + ', Month = ' + nextVisitMonth + ', Year = ' + nextVisitYear + ', Target = ' + month + '/' + year);
+
+      if (nextVisitMonth === month && nextVisitYear === year) {
+        visitDates.push(new Date(nextVisitDate));
+        Logger.log('✓ Using Next Visit Date directly for ' + jobNumber + ': ' + nextVisitDate);
+      } else {
+        Logger.log('✗ Next Visit Date for ' + jobNumber + ' is in ' + nextVisitMonth + '/' + nextVisitYear + ', not ' + month + '/' + year);
+      }
+    }
+
+    // If no visit found from Next Visit Date, try calculating from Last Visit
+    if (visitDates.length === 0 && lastVisit) {
+      visitDates = calculateVisitDatesForMonth(lastVisit, frequency, year, month);
+    }
+
+    // If still no visits and we have a next visit date (just in wrong month), log it
+    if (visitDates.length === 0 && nextVisitDate) {
+      Logger.log('No visits scheduled for ' + jobNumber + ' in ' + month + '/' + year + ' - Next Visit Date is: ' + nextVisitDate);
+    }
 
     // Create a visit object for each date
     visitDates.forEach(function(date) {
@@ -386,7 +826,8 @@ function getWeekdayName(date) {
 // ============================================================================
 
 /**
- * Creates and sets up the Crew Visit Config sheet with sample data.
+ * Creates and sets up the Crew Visit Config sheet with data auto-populated from Employees sheet.
+ * Pulls crew numbers, locations, leads, and sizes automatically.
  * Menu item: Glove Manager → Schedule → Setup Crew Visit Config
  */
 function setupCrewVisitConfig() {
@@ -421,37 +862,104 @@ function setupCrewVisitConfig() {
     .setFontColor('white')
     .setHorizontalAlignment('center');
 
-  // Sample data
+  // Get active crews from Employees sheet
+  var crews = getActiveCrews();
+
+  if (crews.length === 0) {
+    SpreadsheetApp.getUi().alert('⚠️ No Active Crews Found\n\nPlease add employees with job numbers to the Employees sheet first.\n\nJob numbers should be in format: XXX-YY.Z (e.g., 009-26.1)');
+    return;
+  }
+
+  // Build crew data automatically
+  var crewData = [];
   var today = new Date();
   var lastWeek = new Date(today);
   lastWeek.setDate(lastWeek.getDate() - 7);
 
-  var sampleData = [
-    ['12345', 'Big Sky', 'John Smith', 8, 'Weekly', 45, lastWeek, calculateNextVisitDate(lastWeek, 'Weekly'), 90, 'High', 'Check arc flash equipment'],
-    ['12346', 'Missoula', 'Jane Doe', 12, 'Bi-Weekly', 60, lastWeek, calculateNextVisitDate(lastWeek, 'Bi-Weekly'), 120, 'High', 'Large crew, plan extra time'],
-    ['12347', 'Kalispell', 'Bob Johnson', 6, 'Monthly', 45, lastWeek, calculateNextVisitDate(lastWeek, 'Monthly'), 180, 'Medium', ''],
-    ['12348', 'Ennis', 'Mike Wilson', 4, 'Weekly', 30, lastWeek, calculateNextVisitDate(lastWeek, 'Weekly'), 60, 'Medium', 'Small crew, quick visit'],
-    ['12349', 'Butte', 'Tom Anderson', 10, 'Monthly', 45, lastWeek, calculateNextVisitDate(lastWeek, 'Monthly'), 90, 'Medium', '']
-  ];
+  // Default drive times by location (can be customized)
+  var driveTimesByLocation = {
+    'helena': 0,
+    'ennis': 60,
+    'butte': 90,
+    'big sky': 90,
+    'bozeman': 90,
+    'missoula': 120,
+    'great falls': 90,
+    'kalispell': 180,
+    'billings': 180,
+    'miles city': 240,
+    'sidney': 300,
+    'glendive': 270
+  };
 
-  sheet.getRange(2, 1, sampleData.length, headers.length).setValues(sampleData);
+  for (var i = 0; i < crews.length; i++) {
+    var crewNumber = crews[i];
+    var lead = getCrewLead(crewNumber);
+    var size = getCrewSize(crewNumber);
 
-  // Format dates
-  sheet.getRange(2, 7, sampleData.length, 2).setNumberFormat('mm/dd/yyyy');
+    // Get location from first crew member
+    var location = getCrewLocation(crewNumber);
+
+    // Estimate visit time based on crew size
+    var estimatedTime = calculateCrewVisitTime(size);
+
+    // Get drive time based on location
+    var driveTime = 0;
+    if (location) {
+      var locationLower = location.toLowerCase();
+      for (var loc in driveTimesByLocation) {
+        if (locationLower.indexOf(loc) !== -1) {
+          driveTime = driveTimesByLocation[loc];
+          break;
+        }
+      }
+    }
+
+    // Determine default priority based on location class
+    var priority = 'Medium';
+    if (location && location.toLowerCase().indexOf('helena') !== -1) {
+      priority = 'High'; // Helena crews are high priority
+    }
+
+    // Default frequency is Monthly for most crews
+    var frequency = 'Monthly';
+
+    crewData.push([
+      crewNumber,
+      location || '',
+      lead ? lead.name : '',
+      size,
+      frequency,
+      estimatedTime,
+      lastWeek,
+      calculateNextVisitDate(lastWeek, frequency),
+      driveTime,
+      priority,
+      '' // Notes - user can fill in
+    ]);
+  }
+
+  // Write crew data
+  if (crewData.length > 0) {
+    sheet.getRange(2, 1, crewData.length, headers.length).setValues(crewData);
+
+    // Format dates
+    sheet.getRange(2, 7, crewData.length, 2).setNumberFormat('mm/dd/yyyy');
+  }
 
   // Add data validation for frequency
   var frequencyRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(['Weekly', 'Bi-Weekly', 'Monthly'], true)
     .setAllowInvalid(false)
     .build();
-  sheet.getRange(2, 5, 100, 1).setDataValidation(frequencyRule);
+  sheet.getRange(2, 5, Math.max(crewData.length, 100), 1).setDataValidation(frequencyRule);
 
   // Add data validation for priority
   var priorityRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(['High', 'Medium', 'Low'], true)
     .setAllowInvalid(false)
     .build();
-  sheet.getRange(2, 10, 100, 1).setDataValidation(priorityRule);
+  sheet.getRange(2, 10, Math.max(crewData.length, 100), 1).setDataValidation(priorityRule);
 
   // Auto-resize columns
   for (var i = 1; i <= headers.length; i++) {
@@ -466,7 +974,69 @@ function setupCrewVisitConfig() {
 
   sheet.setFrozenRows(1);
 
-  SpreadsheetApp.getUi().alert('✅ Crew Visit Config sheet created with sample data!');
+  var message = '✅ Crew Visit Config sheet created!\n\n';
+  message += 'Auto-populated with ' + crewData.length + ' crews from Employees sheet:\n\n';
+  message += '📋 Data includes:\n';
+  message += '• Job Numbers (from Employees)\n';
+  message += '• Locations (from Employees)\n';
+  message += '• Crew Leads (auto-detected)\n';
+  message += '• Crew Sizes (counted)\n';
+  message += '• Estimated Visit Times (calculated)\n';
+  message += '• Drive Times (estimated by location)\n\n';
+  message += '✏️ Review and adjust:\n';
+  message += '• Visit Frequency (defaults to Monthly)\n';
+  message += '• Drive Times (verify accuracy)\n';
+  message += '• Priority levels\n';
+  message += '• Add any notes';
+
+  SpreadsheetApp.getUi().alert(message);
+}
+
+/**
+ * Gets the location for a crew by finding the first crew member's location.
+ *
+ * @param {string} crewNumber - Crew number (e.g., "009-26")
+ * @return {string} Location name
+ */
+function getCrewLocation(crewNumber) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+
+  if (!employeesSheet || employeesSheet.getLastRow() < 2) {
+    return '';
+  }
+
+  var data = employeesSheet.getDataRange().getValues();
+  var headers = data[0];
+  var jobNumCol = -1;
+  var locationCol = -1;
+  var lastDayCol = -1;
+
+  // Find columns
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'job number') jobNumCol = h;
+    if (header === 'location') locationCol = h;
+    if (header === 'last day') lastDayCol = h;
+  }
+
+  if (jobNumCol === -1 || locationCol === -1) {
+    return '';
+  }
+
+  // Find first crew member
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var employeeJobNum = String(row[jobNumCol]).trim();
+    var employeeCrew = extractCrewNumber(employeeJobNum);
+    var lastDay = lastDayCol !== -1 ? row[lastDayCol] : '';
+
+    if (employeeCrew === crewNumber && !lastDay) {
+      return String(row[locationCol]).trim();
+    }
+  }
+
+  return '';
 }
 
 /**
@@ -506,16 +1076,16 @@ function setupTrainingConfig() {
   // NECA/IBEW Monthly Safety Training Schedule 2026
   var sampleData = [
     ['January: Respectful Workplace – Anti Harassment Training', 'All', 2, 'Monthly', new Date(2026, 0, 15), new Date(2026, 1, 15), 0, '0%', 'Required monthly safety training'],
-    ['February: Job Briefings / JHA\'s / Emergency Action Plans', 'All', 2, 'Monthly', new Date(2026, 1, 15), new Date(2026, 2, 15), 0, '0%', 'Required monthly safety training'],
-    ['March: OSHA ET&D 10 HR Refresher 1st Quarter', 'All', 10, 'Quarterly', new Date(2026, 2, 15), new Date(2026, 5, 15), 0, '0%', 'OSHA Certification - Q1'],
+    ['February: Job Briefings/ JHA\'s/ Emergency Action Plans', 'All', 2, 'Monthly', new Date(2026, 1, 15), new Date(2026, 2, 15), 0, '0%', 'Required monthly safety training'],
+    ['March: OSHA ET&D 10 HR Refresher 1st Quarter', 'All', 10, 'Quarterly', new Date(2026, 2, 15), new Date(2026, 5, 15), 0, '0%', 'OSHA Certification - Q1 (full title TBD)'],
     ['April: Trenching & Shoring / Haz-Com Awareness', 'All', 2, 'Monthly', new Date(2026, 3, 15), new Date(2026, 4, 15), 0, '0%', 'Required monthly safety training'],
     ['May: Heat Stress & Wildfire Smoke', 'All', 2, 'Monthly', new Date(2026, 4, 15), new Date(2026, 5, 15), 0, '0%', 'Required monthly safety training'],
-    ['June: OSHA ET&D 10 HR Refresher 2nd Quarter', 'All', 10, 'Quarterly', new Date(2026, 5, 15), new Date(2026, 8, 15), 0, '0%', 'OSHA Certification - Q2'],
+    ['June: OSHA ET&D 10 HR Refresher 2nd Quarter', 'All', 10, 'Quarterly', new Date(2026, 5, 15), new Date(2026, 8, 15), 0, '0%', 'OSHA Certification - Q2 (full title TBD)'],
     ['July: Rescue', 'All', 2, 'Monthly', new Date(2026, 6, 15), new Date(2026, 7, 15), 0, '0%', 'Emergency Response Training'],
-    ['August: Rescue (continued)', 'All', 2, 'Monthly', new Date(2026, 7, 15), new Date(2026, 8, 15), 0, '0%', 'Emergency Response Training'],
-    ['September: OSHA ET&D 10 HR Refresher 3rd Quarter', 'All', 10, 'Quarterly', new Date(2026, 8, 15), new Date(2026, 10, 15), 0, '0%', 'OSHA Certification - Q3'],
+    ['August: Rescue', 'All', 2, 'Monthly', new Date(2026, 7, 15), new Date(2026, 8, 15), 0, '0%', 'Emergency Response Training - continued'],
+    ['September: OSHA ET&D 10 HR Refresher 3rd Quarter', 'All', 10, 'Quarterly', new Date(2026, 8, 15), new Date(2026, 10, 15), 0, '0%', 'OSHA Certification - Q3 (full title TBD)'],
     ['October: Back Feed / Winter Driving', 'All', 2, 'Monthly', new Date(2026, 9, 15), new Date(2026, 10, 15), 0, '0%', 'Operational Safety'],
-    ['November: OSHA ET&D 10 HR Refresher 4th Quarter', 'All', 10, 'Quarterly', new Date(2026, 10, 15), new Date(2027, 0, 15), 0, '0%', 'OSHA Certification - Q4'],
+    ['November: OSHA ET&D 10 HR Refresher 4th Quarter', 'All', 10, 'Quarterly', new Date(2026, 10, 15), new Date(2027, 0, 15), 0, '0%', 'OSHA Certification - Q4 (full title TBD)'],
     ['December: Catch up month', 'All', 2, 'Monthly', new Date(2026, 11, 15), new Date(2027, 0, 15), 0, '0%', 'Complete any missed training']
   ];
 
@@ -564,12 +1134,40 @@ function setupAllScheduleSheets() {
 var SHEET_TRAINING_TRACKING = 'Training Tracking';
 
 /**
- * Creates and sets up the Training Tracking sheet for job number compliance.
+ * Creates and sets up the Training Tracking sheet for crew-based compliance.
+ * Auto-generates rows for all active crews × all 2026 training topics.
  * Menu item: Glove Manager → Schedule → Setup Training Tracking
  */
 function setupTrainingTracking() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(SHEET_TRAINING_TRACKING);
+
+  // Preserve existing Status and Completion Date data before clearing
+  var existingData = {};
+  if (sheet && sheet.getLastRow() > 2) {
+    var data = sheet.getDataRange().getValues();
+    // Skip title (row 0) and headers (row 1)
+    for (var i = 2; i < data.length; i++) {
+      var row = data[i];
+      var month = String(row[0]).trim();
+      var crew = String(row[2]).trim();
+      var completionDate = row[5];
+      var status = String(row[9]).trim();
+
+      // Create unique key for this training record
+      var key = month + '|' + crew;
+
+      // Only preserve if status is not Pending (meaning user changed it)
+      if (status && status !== 'Pending') {
+        existingData[key] = {
+          completionDate: completionDate,
+          status: status,
+          attendees: row[6],
+          trainer: row[8]
+        };
+      }
+    }
+  }
 
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_TRAINING_TRACKING);
@@ -578,7 +1176,7 @@ function setupTrainingTracking() {
   sheet.clear();
 
   // Title row
-  sheet.getRange(1, 1, 1, 10).merge()
+  sheet.getRange(1, 1, 1, 11).merge()
     .setValue('NECA/IBEW Monthly Safety Training Tracking 2026')
     .setFontWeight('bold').setFontSize(14).setBackground('#0f9d58').setFontColor('white').setHorizontalAlignment('center');
   sheet.setRowHeight(1, 35);
@@ -587,13 +1185,14 @@ function setupTrainingTracking() {
   var headers = [
     'Month',
     'Training Topic',
-    'Job Number',
+    'Crew #',
+    'Crew Lead',
+    'Crew Size',
     'Completion Date',
     'Attendees',
     'Hours',
     'Trainer',
     'Status',
-    'Verified By',
     'Notes'
   ];
 
@@ -604,26 +1203,159 @@ function setupTrainingTracking() {
     .setFontColor('white')
     .setHorizontalAlignment('center');
 
-  // Sample data showing tracking structure
-  var sampleData = [
-    ['January', 'Respectful Workplace – Anti Harassment Training', '123.45', '', '', 2, '', 'Pending', '', 'Required for all jobs'],
-    ['January', 'Respectful Workplace – Anti Harassment Training', '456.78', '', '', 2, '', 'Pending', '', 'Required for all jobs'],
-    ['February', 'Job Briefings / JHA\'s / Emergency Action Plans', '123.45', '', '', 2, '', 'Pending', '', 'Required for all jobs'],
-    ['March', 'OSHA ET&D 10 HR Refresher 1st Quarter', '123.45', '', '', 10, '', 'Pending', '', 'Quarterly OSHA - Q1'],
-    ['March', 'OSHA ET&D 10 HR Refresher 1st Quarter', '456.78', '', '', 10, '', 'Pending', '', 'Quarterly OSHA - Q1']
+  // Get active crews from Employees sheet
+  var crews = getActiveCrews();
+
+  if (crews.length === 0) {
+    SpreadsheetApp.getUi().alert('⚠️ No Active Crews Found\n\nPlease add employees with job numbers to the Employees sheet first.\n\nJob numbers should be in format: XXX-YY.Z (e.g., 009-26.1)');
+    return;
+  }
+
+  // Hardcoded exclusions (e.g., management/office staff)
+  var manualExclusions = ['002-26']; // Add crew numbers here to manually exclude them
+
+  // Filter out excluded crews (both manual and automatic)
+  var filteredCrews = [];
+  var excludedCrews = [];
+  var autoExcludedCrews = [];
+
+  for (var i = 0; i < crews.length; i++) {
+    var crew = crews[i];
+
+    // Check manual exclusions
+    if (manualExclusions.indexOf(crew) !== -1) {
+      excludedCrews.push(crew + ' (manual)');
+      continue;
+    }
+
+    // Check automatic exclusions (foreman with N/A or weeds)
+    if (shouldExcludeCrew(crew)) {
+      excludedCrews.push(crew + ' (auto)');
+      autoExcludedCrews.push(crew);
+      continue;
+    }
+
+    // Crew is not excluded
+    filteredCrews.push(crew);
+  }
+
+  if (filteredCrews.length === 0) {
+    SpreadsheetApp.getUi().alert('⚠️ No Crews to Track\n\nAll active crews are excluded.\n\n' +
+                                  'Excluded: ' + excludedCrews.join(', '));
+    return;
+  }
+
+  // 2026 Training Topics (January - November only, December handled separately)
+  var trainingTopics = [
+    {month: 'January', topic: 'Respectful Workplace – Anti Harassment Training', hours: 2},
+    {month: 'February', topic: 'Job Briefings/ JHA\'s/ Emergency Action Plans', hours: 2},
+    {month: 'March', topic: 'OSHA ET&D 10 HR Refresher 1st Quarter', hours: 10},
+    {month: 'April', topic: 'Trenching & Shoring / Haz-Com Awareness', hours: 2},
+    {month: 'May', topic: 'Heat Stress & Wildfire Smoke', hours: 2},
+    {month: 'June', topic: 'OSHA ET&D 10 HR Refresher 2nd Quarter', hours: 10},
+    {month: 'July', topic: 'Rescue', hours: 2},
+    {month: 'August', topic: 'Rescue', hours: 2},
+    {month: 'September', topic: 'OSHA ET&D 10 HR Refresher 3rd Quarter', hours: 10},
+    {month: 'October', topic: 'Back Feed / Winter Driving', hours: 2},
+    {month: 'November', topic: 'OSHA ET&D 10 HR Refresher 4th Quarter', hours: 10}
   ];
 
-  sheet.getRange(3, 1, sampleData.length, headers.length).setValues(sampleData);
+  // Generate all rows: each crew × each month's training (Jan-Nov)
+  var dataRows = [];
+  var crewTrainingMap = {}; // Track training records by crew for catch-up logic
+
+  for (var t = 0; t < trainingTopics.length; t++) {
+    var training = trainingTopics[t];
+
+    for (var c = 0; c < filteredCrews.length; c++) {
+      var crew = filteredCrews[c];
+      var lead = getCrewLead(crew);
+      var size = getCrewSize(crew);
+
+      // Check if we have preserved data for this training record
+      var key = training.month + '|' + crew;
+      var preserved = existingData[key];
+
+      var row = [
+        training.month,
+        training.topic,
+        crew,
+        lead ? lead.name : '',
+        size,
+        preserved ? preserved.completionDate : '', // Completion Date - preserved if exists
+        preserved ? preserved.attendees : '', // Attendees - preserved if exists
+        training.hours,
+        preserved ? preserved.trainer : '', // Trainer - preserved if exists
+        preserved ? preserved.status : 'Pending', // Status - preserved if exists, otherwise Pending
+        '' // Notes
+      ];
+
+      dataRows.push(row);
+
+      // Track this training for catch-up logic
+      if (!crewTrainingMap[crew]) {
+        crewTrainingMap[crew] = [];
+      }
+      crewTrainingMap[crew].push({
+        month: training.month,
+        topic: training.topic,
+        hours: training.hours,
+        rowIndex: dataRows.length - 1
+      });
+    }
+  }
+
+  // Generate December catch-up rows
+  // December automatically includes any incomplete training from Jan-Nov
+  for (var c = 0; c < filteredCrews.length; c++) {
+    var crew = filteredCrews[c];
+    var lead = getCrewLead(crew);
+    var size = getCrewSize(crew);
+    var crewMembers = getCrewMembers(crew); // Get all crew member names
+
+    // Get all training topics for this crew from Jan-Nov
+    var crewTraining = crewTrainingMap[crew] || [];
+
+    if (crewTraining.length > 0) {
+      // Check if we have preserved data for December
+      var decemberKey = 'December|' + crew;
+      var decemberPreserved = existingData[decemberKey];
+
+      // Add December catch-up row with note about incomplete training
+      var catchupNote = 'Catch-up month: Complete any missed training from Jan-Nov';
+
+      var decemberRow = [
+        'December',
+        'Catch Up - All Incomplete Training',
+        crew,
+        lead ? lead.name : '',
+        size,
+        decemberPreserved ? decemberPreserved.completionDate : '', // Completion Date - preserved
+        decemberPreserved ? decemberPreserved.attendees : crewMembers, // Attendees - preserved if exists, otherwise auto-populate
+        2,  // Default hours
+        decemberPreserved ? decemberPreserved.trainer : '', // Trainer - preserved
+        decemberPreserved ? decemberPreserved.status : 'Pending', // Status - preserved
+        catchupNote
+      ];
+
+      dataRows.push(decemberRow);
+    }
+  }
+
+  // Write all data at once
+  if (dataRows.length > 0) {
+    sheet.getRange(3, 1, dataRows.length, headers.length).setValues(dataRows);
+  }
 
   // Format dates
-  sheet.getRange(3, 4, 100, 1).setNumberFormat('mm/dd/yyyy');
+  sheet.getRange(3, 6, dataRows.length, 1).setNumberFormat('mm/dd/yyyy');
 
   // Add data validation for Status
   var statusRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(['Pending', 'In Progress', 'Complete', 'Overdue', 'N/A'], true)
     .setAllowInvalid(false)
     .build();
-  sheet.getRange(3, 8, 100, 1).setDataValidation(statusRule);
+  sheet.getRange(3, 10, Math.max(dataRows.length, 100), 1).setDataValidation(statusRule);
 
   // Add data validation for Month
   var months = ['January', 'February', 'March', 'April', 'May', 'June',
@@ -632,10 +1364,10 @@ function setupTrainingTracking() {
     .requireValueInList(months, true)
     .setAllowInvalid(false)
     .build();
-  sheet.getRange(3, 1, 100, 1).setDataValidation(monthRule);
+  sheet.getRange(3, 1, Math.max(dataRows.length, 100), 1).setDataValidation(monthRule);
 
   // Conditional formatting for Status
-  var completeRange = sheet.getRange(3, 8, 100, 1);
+  var completeRange = sheet.getRange(3, 10, Math.max(dataRows.length, 100), 1);
   var completeRule = SpreadsheetApp.newConditionalFormatRule()
     .whenTextEqualTo('Complete')
     .setBackground('#d9ead3')
@@ -661,6 +1393,35 @@ function setupTrainingTracking() {
   rules.push(completeRule, overdueRule, inProgressRule);
   sheet.setConditionalFormatRules(rules);
 
+  // Add visual separation between months for easier reading
+  if (dataRows.length > 0) {
+    var currentRow = 3;
+    var monthColors = ['#e8f4f8', '#ffffff']; // Alternating light blue and white
+    var colorIndex = 0;
+
+    for (var m = 0; m < trainingTopics.length; m++) {
+      var monthName = trainingTopics[m].month;
+      var crewCount = filteredCrews.length;
+
+      if (crewCount > 0) {
+        var monthRange = sheet.getRange(currentRow, 1, crewCount, headers.length);
+
+        // Set alternating background color for entire month group
+        monthRange.setBackground(monthColors[colorIndex % 2]);
+
+        // Add thick border at bottom of each month group for separation
+        monthRange.setBorder(null, null, true, null, null, null, '#666666', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+
+        // Make month name bold and slightly larger for first row of each month
+        var firstRowRange = sheet.getRange(currentRow, 1, 1, headers.length);
+        firstRowRange.setFontWeight('bold');
+
+        currentRow += crewCount;
+        colorIndex++;
+      }
+    }
+  }
+
   // Auto-resize columns
   for (var i = 1; i <= headers.length; i++) {
     sheet.autoResizeColumn(i);
@@ -668,15 +1429,648 @@ function setupTrainingTracking() {
 
   // Set minimum widths
   sheet.setColumnWidth(1, 100);  // Month
-  sheet.setColumnWidth(2, 300);  // Training Topic
-  sheet.setColumnWidth(3, 100);  // Job Number
-  sheet.setColumnWidth(5, 150);  // Attendees
-  sheet.setColumnWidth(10, 200); // Notes
+  sheet.setColumnWidth(2, 350);  // Training Topic
+  sheet.setColumnWidth(3, 100);  // Crew #
+  sheet.setColumnWidth(4, 150);  // Crew Lead
+  sheet.setColumnWidth(5, 80);   // Crew Size
+  sheet.setColumnWidth(7, 150);  // Attendees
+  sheet.setColumnWidth(11, 200); // Notes
 
   sheet.setFrozenRows(2);
 
-  SpreadsheetApp.getUi().alert('✅ Training Tracking sheet created!\n\nThis sheet tracks training completion by job number.\nAdd your job numbers and update completion dates as training is completed.');
+  var message = '✅ Training Tracking sheet created!\n\n';
+  message += 'Generated ' + dataRows.length + ' training records for:\n';
+  message += '• ' + filteredCrews.length + ' active crews (tracked)\n';
+
+  if (excludedCrews.length > 0) {
+    message += '• ' + excludedCrews.length + ' crew(s) excluded:\n';
+    if (manualExclusions.length > 0) {
+      message += '  - Manual: ' + manualExclusions.join(', ') + '\n';
+    }
+    if (autoExcludedCrews.length > 0) {
+      message += '  - Auto (N/A or weeds): ' + autoExcludedCrews.join(', ') + '\n';
+    }
+  }
+
+  message += '• 12 months of 2026 training topics\n\n';
+  message += 'Update completion dates and status as training is completed.\n\n';
+  message += '💡 TIP: Crews with foreman (F/GTO F) having job# N/A or location "weeds" are auto-excluded.';
+
+  SpreadsheetApp.getUi().alert(message);
 }
+
+/**
+ * Handles changes to Training Tracking sheet.
+ * Protects status selections and automatically updates completion dates.
+ * Auto-populates Attendees when status changes to "Complete" (one time only).
+ * Updates Training Config Completion Status % when training is completed.
+ * Called by onEdit trigger.
+ */
+function handleTrainingTrackingEdit(e) {
+  if (!e || !e.range) return;
+
+  var sheet = e.range.getSheet();
+  if (sheet.getName() !== SHEET_TRAINING_TRACKING) return;
+
+  var row = e.range.getRow();
+  var col = e.range.getColumn();
+
+  // Skip header rows (row 1 = title, row 2 = headers)
+  if (row < 3) return;
+
+  // Column definitions
+  var monthCol = 1;           // Column A - Month
+  var topicCol = 2;           // Column B - Training Topic
+  var crewCol = 3;            // Column C - Crew #
+  var completionDateCol = 6;  // Column F - Completion Date
+  var attendeesCol = 7;       // Column G - Attendees
+  var statusCol = 10;         // Column J - Status
+
+  // If Status was changed to Complete
+  if (col === statusCol) {
+    var status = e.range.getValue();
+    if (status === 'Complete') {
+      // Auto-fill completion date if empty
+      var dateCell = sheet.getRange(row, completionDateCol);
+      if (!dateCell.getValue()) {
+        dateCell.setValue(new Date());
+      }
+
+      // Auto-populate Attendees if empty (one time only)
+      var attendeesCell = sheet.getRange(row, attendeesCol);
+      var currentAttendees = attendeesCell.getValue();
+
+      if (!currentAttendees || String(currentAttendees).trim() === '') {
+        // Get crew number for this training record
+        var crewCell = sheet.getRange(row, crewCol);
+        var crewNumber = String(crewCell.getValue()).trim();
+
+        if (crewNumber) {
+          // Fetch crew members from Employees sheet
+          var crewMembers = getCrewMembers(crewNumber);
+
+          if (crewMembers) {
+            attendeesCell.setValue(crewMembers);
+            Logger.log('Auto-populated attendees for crew ' + crewNumber + ': ' + crewMembers);
+          } else {
+            Logger.log('No crew members found for crew ' + crewNumber);
+          }
+        }
+      } else {
+        Logger.log('Attendees already populated, skipping auto-fill');
+      }
+
+      // Update Training Config completion status
+      var monthCell = sheet.getRange(row, monthCol);
+      var topicCell = sheet.getRange(row, topicCol);
+      var month = String(monthCell.getValue()).trim();
+      var topic = String(topicCell.getValue()).trim();
+
+      updateTrainingConfigCompletionStatus(month, topic);
+    }
+  }
+
+  // If Completion Date was filled in, auto-change Status to Complete if Pending
+  if (col === completionDateCol) {
+    var dateValue = e.range.getValue();
+    if (dateValue) {
+      var statusCell = sheet.getRange(row, statusCol);
+      var currentStatus = statusCell.getValue();
+      if (currentStatus === 'Pending' || currentStatus === '') {
+        statusCell.setValue('Complete');
+
+        // Also trigger the attendees population since status is now Complete
+        var attendeesCell = sheet.getRange(row, attendeesCol);
+        var currentAttendees = attendeesCell.getValue();
+
+        if (!currentAttendees || String(currentAttendees).trim() === '') {
+          var crewCell = sheet.getRange(row, crewCol);
+          var crewNumber = String(crewCell.getValue()).trim();
+
+          if (crewNumber) {
+            var crewMembers = getCrewMembers(crewNumber);
+
+            if (crewMembers) {
+              attendeesCell.setValue(crewMembers);
+              Logger.log('Auto-populated attendees for crew ' + crewNumber + ': ' + crewMembers);
+            }
+          }
+        }
+
+        // Update Training Config completion status
+        var monthCell = sheet.getRange(row, monthCol);
+        var topicCell = sheet.getRange(row, topicCol);
+        var month = String(monthCell.getValue()).trim();
+        var topic = String(topicCell.getValue()).trim();
+
+        updateTrainingConfigCompletionStatus(month, topic);
+      }
+    }
+  }
+}
+
+/**
+ * Updates the Completion Status % in Training Config sheet based on completed training.
+ * Calculates percentage of crews that have completed a specific training topic.
+ *
+ * @param {string} month - Month name (e.g., "January")
+ * @param {string} topic - Training topic name
+ */
+function updateTrainingConfigCompletionStatus(month, topic) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var trackingSheet = ss.getSheetByName(SHEET_TRAINING_TRACKING);
+    var configSheet = ss.getSheetByName(SHEET_TRAINING_CONFIG);
+
+    if (!trackingSheet || !configSheet) {
+      Logger.log('updateTrainingConfigCompletionStatus: Required sheets not found');
+      return;
+    }
+
+    // Get all training records for this month/topic
+    var trackingData = trackingSheet.getDataRange().getValues();
+    var totalCrews = 0;
+    var completedCrews = 0;
+
+    // Count total crews and completed crews for this training
+    for (var i = 2; i < trackingData.length; i++) { // Start at row 3 (index 2)
+      var row = trackingData[i];
+      var rowMonth = String(row[0]).trim();
+      var rowTopic = String(row[1]).trim();
+      var status = String(row[9]).trim();
+
+      // Match by topic (handle December catch-up topics that start with month name)
+      var isMatch = false;
+      if (rowMonth === month && rowTopic === topic) {
+        isMatch = true;
+      } else if (rowMonth === 'December' && rowTopic.indexOf(topic) !== -1) {
+        // December catch-up topics include original topic name
+        isMatch = true;
+      }
+
+      if (isMatch) {
+        totalCrews++;
+        if (status === 'Complete') {
+          completedCrews++;
+        }
+      }
+    }
+
+    // Calculate percentage
+    var percentage = totalCrews > 0 ? Math.round((completedCrews / totalCrews) * 100) : 0;
+    var percentageString = percentage + '%';
+
+    Logger.log('Training completion: ' + topic + ' = ' + completedCrews + '/' + totalCrews + ' = ' + percentageString);
+
+    // Update Training Config sheet
+    var configData = configSheet.getDataRange().getValues();
+
+    // Find the matching training row in Training Config
+    for (var c = 1; c < configData.length; c++) { // Start at row 2 (index 1)
+      var configRow = configData[c];
+      var configTopic = String(configRow[0]).trim();
+
+      // Match by topic name (Training Config has format "Month: Topic")
+      if (configTopic.indexOf(month) !== -1 && configTopic.indexOf(topic) !== -1) {
+        // Column H (index 7) is Completion Status
+        configSheet.getRange(c + 1, 8).setValue(percentageString);
+        Logger.log('Updated Training Config row ' + (c + 1) + ' with ' + percentageString);
+        break;
+      }
+    }
+
+  } catch (e) {
+    Logger.log('updateTrainingConfigCompletionStatus error: ' + e.toString());
+  }
+}
+
+/**
+ * Manually recalculates all completion status percentages in Training Config.
+ * Useful for bulk updates or fixing discrepancies.
+ * Menu item: Glove Manager → Schedule → Recalculate Training Completion %
+ */
+function recalculateAllTrainingCompletionStatus() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var configSheet = ss.getSheetByName(SHEET_TRAINING_CONFIG);
+
+  if (!configSheet || configSheet.getLastRow() < 2) {
+    SpreadsheetApp.getUi().alert('❌ Training Config sheet not found or empty!');
+    return;
+  }
+
+  var configData = configSheet.getDataRange().getValues();
+  var monthMap = {
+    'January': 'January', 'February': 'February', 'March': 'March',
+    'April': 'April', 'May': 'May', 'June': 'June',
+    'July': 'July', 'August': 'August', 'September': 'September',
+    'October': 'October', 'November': 'November', 'December': 'December'
+  };
+
+  var updatedCount = 0;
+
+  // Process each training topic in Training Config
+  for (var i = 1; i < configData.length; i++) { // Start at row 2 (index 1)
+    var configTopic = String(configData[i][0]).trim();
+
+    // Extract month from topic (format: "Month: Topic Name")
+    var month = '';
+    for (var monthName in monthMap) {
+      if (configTopic.indexOf(monthName) === 0) {
+        month = monthName;
+        break;
+      }
+    }
+
+    // Extract the actual topic name (after the colon)
+    var colonIndex = configTopic.indexOf(':');
+    var topic = colonIndex !== -1 ? configTopic.substring(colonIndex + 1).trim() : configTopic;
+
+    if (month && topic) {
+      updateTrainingConfigCompletionStatus(month, topic);
+      updatedCount++;
+    }
+  }
+
+  SpreadsheetApp.getUi().alert(
+    '✅ Training Completion Status Recalculated!\n\n' +
+    'Updated ' + updatedCount + ' training topics.\n\n' +
+    'All completion percentages have been refreshed based on current Training Tracking data.'
+  );
+}
+
+/**
+ * Automatically checks and updates December catch-ups based on current month.
+ * Runs on the 1st of each month via time-based trigger.
+ * Can also be called manually.
+ */
+function autoUpdateDecemberCatchUps() {
+  var today = new Date();
+  var currentMonth = today.getMonth() + 1; // 1-12
+
+  // Only run from February onwards (month 2+)
+  // This gives crews a chance to complete January training
+  if (currentMonth < 2) {
+    return;
+  }
+
+  // Run the update
+  try {
+    updateDecemberCatchUps();
+  } catch (e) {
+    Logger.log('autoUpdateDecemberCatchUps error: ' + e);
+  }
+}
+
+/**
+ * Gets all crew member names for a given crew number.
+ * Returns a comma-separated list of employee names whose job numbers match the crew.
+ *
+ * @param {string} crewNumber - Crew number (e.g., "009-26")
+ * @return {string} Comma-separated list of employee names (e.g., "John Doe, Jane Smith")
+ */
+function getCrewMembers(crewNumber) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+
+    if (!employeesSheet || employeesSheet.getLastRow() < 2) {
+      Logger.log('getCrewMembers: Employees sheet not found or empty');
+      return '';
+    }
+
+    var data = employeesSheet.getDataRange().getValues();
+    var headers = data[0];
+    var nameCol = -1;
+    var jobNumCol = -1;
+    var lastDayCol = -1;
+
+    // Find columns
+    for (var h = 0; h < headers.length; h++) {
+      var header = String(headers[h]).toLowerCase().trim();
+      if (header === 'name') nameCol = h;
+      if (header === 'job number') jobNumCol = h;
+      if (header === 'last day') lastDayCol = h;
+    }
+
+    if (nameCol === -1 || jobNumCol === -1) {
+      Logger.log('getCrewMembers: Required columns not found (Name or Job Number)');
+      return '';
+    }
+
+    var crewMembers = [];
+
+    // Process each employee
+    for (var i = 1; i < data.length; i++) {
+      var row = data[i];
+      var employeeName = String(row[nameCol]).trim();
+      var employeeJobNum = String(row[jobNumCol]).trim();
+      var lastDay = lastDayCol !== -1 ? row[lastDayCol] : '';
+
+      // Skip if no name, no job number, or has left
+      if (!employeeName || !employeeJobNum || lastDay) continue;
+
+      // Extract crew number from job number
+      var employeeCrew = extractCrewNumber(employeeJobNum);
+
+      // If this employee belongs to the requested crew, add them
+      if (employeeCrew === crewNumber) {
+        crewMembers.push(employeeName);
+      }
+    }
+
+    // Return comma-separated list
+    var result = crewMembers.join(', ');
+    Logger.log('getCrewMembers(' + crewNumber + '): Found ' + crewMembers.length + ' members - ' + result);
+    return result;
+
+  } catch (e) {
+    Logger.log('getCrewMembers error: ' + e.toString());
+    return '';
+  }
+}
+
+/**
+ * Refreshes the Attendees column in Training Tracking with current crew member names.
+ * Only updates rows where Attendees is empty or matches previous crew roster.
+ * Does NOT overwrite manually edited attendee lists.
+ * Menu item: Glove Manager → Schedule → Refresh Training Attendees
+ */
+function refreshTrainingAttendees() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_TRAINING_TRACKING);
+
+  if (!sheet || sheet.getLastRow() < 3) {
+    SpreadsheetApp.getUi().alert('❌ Training Tracking sheet not found or empty!\n\nPlease run "Setup Training Tracking" first.');
+    return;
+  }
+
+  var data = sheet.getDataRange().getValues();
+  var headers = data[1]; // Row 2 is headers (row 1 is title)
+
+  // Find column indices
+  var crewCol = -1;
+  var attendeesCol = -1;
+  var statusCol = -1;
+
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'crew #') crewCol = h;
+    if (header === 'attendees') attendeesCol = h;
+    if (header === 'status') statusCol = h;
+  }
+
+  if (crewCol === -1 || attendeesCol === -1) {
+    SpreadsheetApp.getUi().alert('❌ Required columns not found in Training Tracking sheet!');
+    return;
+  }
+
+  var updatedCount = 0;
+  var skippedCount = 0;
+
+  // Process each training record (start from row 3, skip title and headers)
+  for (var i = 2; i < data.length; i++) {
+    var row = data[i];
+    var crew = String(row[crewCol]).trim();
+    var currentAttendees = String(row[attendeesCol] || '').trim();
+    var status = String(row[statusCol] || '').trim();
+
+    if (!crew) continue;
+
+    // Skip if status is Complete (don't change historical records)
+    if (status === 'Complete') {
+      skippedCount++;
+      continue;
+    }
+
+    // Get current crew members
+    var crewMembers = getCrewMembers(crew);
+
+    // Only update if:
+    // 1. Attendees is empty, OR
+    // 2. Current attendees matches the full crew roster (not manually edited)
+    if (!currentAttendees || currentAttendees === crewMembers) {
+      // Update the cell
+      sheet.getRange(i + 1, attendeesCol + 1).setValue(crewMembers);
+      updatedCount++;
+    } else {
+      // Skip - appears to be manually edited
+      skippedCount++;
+    }
+  }
+
+  SpreadsheetApp.getUi().alert(
+    '✅ Training Attendees Refreshed!\n\n' +
+    'Updated: ' + updatedCount + ' record(s)\n' +
+    'Skipped: ' + skippedCount + ' record(s) (completed or manually edited)\n\n' +
+    '💡 TIP: Completed training records are not modified to preserve historical data.'
+  );
+}
+
+/**
+ * Creates a monthly trigger to auto-update December catch-ups.
+ * Runs on the 1st of each month.
+ * Menu item: Glove Manager → Schedule → Setup Auto December Updates
+ */
+function setupAutoDecemberUpdates() {
+  // Delete existing triggers for this function
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === 'autoUpdateDecemberCatchUps') {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+
+  // Create new monthly trigger (1st of each month at 6 AM)
+  ScriptApp.newTrigger('autoUpdateDecemberCatchUps')
+    .timeBased()
+    .onMonthDay(1)
+    .atHour(6)
+    .create();
+
+  SpreadsheetApp.getUi().alert(
+    '✅ Auto December Updates Enabled!\n\n' +
+    'System will automatically update December catch-ups on the 1st of each month.\n\n' +
+    'This ensures incomplete training is always tracked in December.\n\n' +
+    '💡 You can still manually run "Update December Catch-Ups" anytime.'
+  );
+}
+
+/**
+ * Updates December catch-up training based on incomplete training from Jan-Nov.
+ * Only adds entries for COMPLETED months with incomplete training.
+ * Creates one December entry per crew per incomplete month/topic.
+ * Removes crews that no longer exist on Employees sheet.
+ * Menu item: Glove Manager → Schedule → Update December Catch-Ups
+ */
+function updateDecemberCatchUps() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_TRAINING_TRACKING);
+
+  if (!sheet || sheet.getLastRow() < 3) {
+    SpreadsheetApp.getUi().alert('❌ Training Tracking sheet not found or empty!\n\nPlease run "Setup Training Tracking" first.');
+    return;
+  }
+
+  var data = sheet.getDataRange().getValues();
+  var headers = data[1]; // Row 2 is headers
+
+  // Find columns
+  var monthCol = 0;      // A
+  var topicCol = 1;      // B
+  var crewCol = 2;       // C
+  var leadCol = 3;       // D
+  var sizeCol = 4;       // E
+  var dateCol = 5;       // F
+  var attendeesCol = 6;  // G
+  var hoursCol = 7;      // H
+  var trainerCol = 8;    // I
+  var statusCol = 9;     // J
+  var notesCol = 10;     // K
+
+  // Get current month to determine which months are "complete" (past)
+  var today = new Date();
+  var currentMonth = today.getMonth() + 1; // 1-12
+
+  // Month name to number mapping
+  var monthNumbers = {
+    'January': 1, 'February': 2, 'March': 3, 'April': 4,
+    'May': 5, 'June': 6, 'July': 7, 'August': 8,
+    'September': 9, 'October': 10, 'November': 11, 'December': 12
+  };
+
+  // Get list of active crews from Employees sheet
+  var activeCrews = getActiveCrews();
+  var activeCrewsSet = {};
+  for (var ac = 0; ac < activeCrews.length; ac++) {
+    activeCrewsSet[activeCrews[ac]] = true;
+  }
+
+  // Track incomplete training by crew (only for completed months)
+  var incompleteByCrewMap = {};
+  var decemberRowsToDelete = [];
+
+  // Scan all training records
+  for (var i = 2; i < data.length; i++) {
+    var row = data[i];
+    var month = String(row[monthCol]).trim();
+    var topic = String(row[topicCol]).trim();
+    var crew = String(row[crewCol]).trim();
+    var status = String(row[statusCol]).trim();
+    var completionDate = row[dateCol];
+
+    // Track December rows for deletion
+    if (month === 'December') {
+      decemberRowsToDelete.push(i + 1); // +1 for 1-based row numbers
+      continue;
+    }
+
+    // Only process months that have already passed (completed)
+    var monthNum = monthNumbers[month];
+    if (!monthNum || monthNum >= currentMonth) {
+      continue; // Skip current and future months
+    }
+
+    // Check if crew still exists on Employees sheet
+    if (!activeCrewsSet[crew]) {
+      Logger.log('Skipping inactive crew: ' + crew);
+      continue;
+    }
+
+    // Check if training is incomplete (past months only)
+    if (crew) {
+      var isIncomplete = (!completionDate || completionDate === '') &&
+                        (status !== 'Complete' && status !== 'N/A');
+
+      if (isIncomplete) {
+        if (!incompleteByCrewMap[crew]) {
+          incompleteByCrewMap[crew] = {
+            lead: row[leadCol],
+            size: row[sizeCol],
+            topics: []
+          };
+        }
+
+        // Create descriptive topic name with month and original topic
+        var decemberTopicName = month + ': ' + topic;
+
+        incompleteByCrewMap[crew].topics.push({
+          month: month,
+          topic: topic,
+          decemberTopicName: decemberTopicName,
+          hours: row[hoursCol]
+        });
+      }
+    }
+  }
+
+  // Delete existing December rows (in reverse order to maintain indices)
+  for (var d = decemberRowsToDelete.length - 1; d >= 0; d--) {
+    sheet.deleteRow(decemberRowsToDelete[d]);
+  }
+
+  // Add new December catch-up rows based on incomplete training
+  var newDecemberRows = [];
+  var totalIncomplete = 0;
+
+  for (var crew in incompleteByCrewMap) {
+    var crewData = incompleteByCrewMap[crew];
+
+    // Create one row per incomplete topic (each month shows separately)
+    for (var t = 0; t < crewData.topics.length; t++) {
+      var incompleteTopic = crewData.topics[t];
+      var catchupNote = 'Makeup training from ' + incompleteTopic.month;
+
+      newDecemberRows.push([
+        'December',
+        incompleteTopic.decemberTopicName, // e.g., "January: Respectful Workplace Training"
+        crew,
+        crewData.lead,
+        crewData.size,
+        '', // Completion Date
+        '', // Attendees
+        incompleteTopic.hours,
+        '', // Trainer
+        'Pending', // Status
+        catchupNote
+      ]);
+      totalIncomplete++;
+    }
+  }
+
+  // Append December rows to sheet
+  if (newDecemberRows.length > 0) {
+    var lastRow = sheet.getLastRow();
+    sheet.getRange(lastRow + 1, 1, newDecemberRows.length, 11).setValues(newDecemberRows);
+
+    // Apply December formatting
+    var decemberRange = sheet.getRange(lastRow + 1, 1, newDecemberRows.length, 11);
+    decemberRange.setBackground('#fff3cd'); // Light yellow for December catch-ups
+    decemberRange.setBorder(null, null, true, null, null, null, '#666666', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+  }
+
+  // Show summary
+  var crewCount = Object.keys(incompleteByCrewMap).length;
+  var message = '✅ December Catch-Ups Updated!\n\n';
+  message += 'Current Month: ' + getMonthName(currentMonth) + '\n';
+  message += 'Processing months: January - ' + getMonthName(currentMonth - 1) + '\n\n';
+
+  if (totalIncomplete > 0) {
+    message += 'Added ' + totalIncomplete + ' catch-up training record(s) for ' + crewCount + ' crew(s).\n\n';
+    message += 'Crews with incomplete training:\n';
+    for (var crew in incompleteByCrewMap) {
+      var topics = incompleteByCrewMap[crew].topics;
+      message += '• ' + crew + ': ' + topics.length + ' topic(s)\n';
+    }
+    message += '\n💡 TIP: Complete these in December or mark as N/A if not required.';
+  } else {
+    message += 'No incomplete training found!\n\n';
+    message += 'All active crews are up-to-date on completed months.\n';
+    message += 'December catch-up section is empty.';
+  }
+
+  SpreadsheetApp.getUi().alert(message);
+}
+
 
 /**
  * Gets training compliance status for a specific job number.
@@ -727,7 +2121,7 @@ function getTrainingComplianceStatus(jobNumber, month) {
 }
 
 /**
- * Generates a compliance report showing training status for all job numbers.
+ * Generates a compliance report showing training status for all crews.
  * Menu item: Glove Manager → Schedule → Generate Training Compliance Report
  */
 function generateTrainingComplianceReport() {
@@ -740,48 +2134,845 @@ function generateTrainingComplianceReport() {
   }
 
   var data = trackingSheet.getDataRange().getValues();
-  var headers = data[1];
+  if (data.length < 3) {
+    SpreadsheetApp.getUi().alert('⚠️ No training data found!\n\nPlease run "Setup Training Tracking" to generate training records.');
+    return;
+  }
 
-  // Count completions by job number
-  var jobStats = {};
+  // Count completions by crew
+  var crewStats = {};
   var totalRequired = 12; // 12 months of training in 2026
+  var allMonths = ['January', 'February', 'March', 'April', 'May', 'June',
+                   'July', 'August', 'September', 'October', 'November', 'December'];
 
   for (var i = 2; i < data.length; i++) {
     var row = data[i];
-    var jobNum = String(row[2]).trim(); // Column C - Job Number
-    var status = String(row[7]).trim(); // Column H - Status
+    var month = String(row[0]).trim();      // Column A - Month
+    var crewNum = String(row[2]).trim();     // Column C - Crew #
+    var crewLead = String(row[3]).trim();    // Column D - Crew Lead
+    var status = String(row[9]).trim();      // Column J - Status
 
-    if (!jobNum) continue;
+    if (!crewNum) continue;
 
-    if (!jobStats[jobNum]) {
-      jobStats[jobNum] = {complete: 0, pending: 0, overdue: 0, total: 0};
+    if (!crewStats[crewNum]) {
+      crewStats[crewNum] = {
+        lead: crewLead,
+        complete: 0,
+        pending: 0,
+        overdue: 0,
+        inProgress: 0,
+        total: 0,
+        missingMonths: []
+      };
     }
 
-    jobStats[jobNum].total++;
+    crewStats[crewNum].total++;
 
     if (status === 'Complete') {
-      jobStats[jobNum].complete++;
+      crewStats[crewNum].complete++;
     } else if (status === 'Overdue') {
-      jobStats[jobNum].overdue++;
+      crewStats[crewNum].overdue++;
+      crewStats[crewNum].missingMonths.push(month);
+    } else if (status === 'In Progress') {
+      crewStats[crewNum].inProgress++;
     } else {
-      jobStats[jobNum].pending++;
+      crewStats[crewNum].pending++;
     }
   }
 
-  // Build report
-  var report = 'Training Compliance Report\n';
-  report += '==========================\n\n';
+  // Sort crews into categories
+  var compliantCrews = [];
+  var partialCrews = [];
+  var nonCompliantCrews = [];
 
-  for (var job in jobStats) {
-    var stats = jobStats[job];
-    var percentComplete = stats.total > 0 ? ((stats.complete / totalRequired) * 100).toFixed(1) : 0;
+  for (var crew in crewStats) {
+    var stats = crewStats[crew];
+    var percentComplete = stats.total > 0 ? ((stats.complete / totalRequired) * 100) : 0;
 
-    report += 'Job #' + job + ':\n';
-    report += '  Complete: ' + stats.complete + '/' + totalRequired + ' (' + percentComplete + '%)\n';
-    report += '  Pending: ' + stats.pending + '\n';
-    report += '  Overdue: ' + stats.overdue + '\n\n';
+    stats.percentComplete = percentComplete;
+    stats.crewNum = crew;
+
+    if (percentComplete === 100) {
+      compliantCrews.push(stats);
+    } else if (percentComplete >= 50) {
+      partialCrews.push(stats);
+    } else {
+      nonCompliantCrews.push(stats);
+    }
   }
 
+  // Build formatted report
+  var report = 'Training Compliance Report - 2026\n';
+  report += '═════════════════════════════════════════\n\n';
+
+  // Compliant crews
+  if (compliantCrews.length > 0) {
+    report += '✅ COMPLIANT CREWS (' + compliantCrews.length + '):\n';
+    report += '─────────────────────────────────────────\n';
+    compliantCrews.forEach(function(stats) {
+      report += '  ' + stats.crewNum + ' - ' + (stats.lead || 'No lead assigned');
+      report += ' (' + stats.complete + '/' + totalRequired + ' complete)\n';
+    });
+    report += '\n';
+  }
+
+  // Partially compliant crews
+  if (partialCrews.length > 0) {
+    report += '⚠️ PARTIALLY COMPLIANT (' + partialCrews.length + '):\n';
+    report += '─────────────────────────────────────────\n';
+    partialCrews.forEach(function(stats) {
+      report += '  ' + stats.crewNum + ' - ' + (stats.lead || 'No lead assigned') + '\n';
+      report += '    Complete: ' + stats.complete + '/' + totalRequired + ' (' + stats.percentComplete.toFixed(0) + '%)\n';
+      report += '    In Progress: ' + stats.inProgress + ', Pending: ' + stats.pending;
+      if (stats.overdue > 0) {
+        report += ', Overdue: ' + stats.overdue;
+      }
+      report += '\n';
+      if (stats.missingMonths.length > 0) {
+        report += '    Missing: ' + stats.missingMonths.join(', ') + '\n';
+      }
+      report += '\n';
+    });
+  }
+
+  // Non-compliant crews
+  if (nonCompliantCrews.length > 0) {
+    report += '🔴 NON-COMPLIANT (' + nonCompliantCrews.length + '):\n';
+    report += '─────────────────────────────────────────\n';
+    nonCompliantCrews.forEach(function(stats) {
+      report += '  ' + stats.crewNum + ' - ' + (stats.lead || 'No lead assigned') + '\n';
+      report += '    Complete: ' + stats.complete + '/' + totalRequired + ' (' + stats.percentComplete.toFixed(0) + '%)\n';
+      report += '    In Progress: ' + stats.inProgress + ', Pending: ' + stats.pending;
+      if (stats.overdue > 0) {
+        report += ', Overdue: ' + stats.overdue;
+      }
+      report += '\n';
+      if (stats.missingMonths.length > 0) {
+        report += '    Missing: ' + stats.missingMonths.join(', ') + '\n';
+      }
+      report += '\n';
+    });
+  }
+
+  // Summary
+  var totalCrews = compliantCrews.length + partialCrews.length + nonCompliantCrews.length;
+  var overallCompliance = totalCrews > 0 ? ((compliantCrews.length / totalCrews) * 100).toFixed(1) : 0;
+
+  report += '═════════════════════════════════════════\n';
+  report += 'SUMMARY:\n';
+  report += '  Total Crews: ' + totalCrews + '\n';
+  report += '  Overall Compliance: ' + overallCompliance + '%\n';
+  report += '  Date: ' + Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy') + '\n';
+
   SpreadsheetApp.getUi().alert('📊 Training Compliance Report', report, SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+// ============================================================================
+// ROUTE OPTIMIZATION & TASK SCHEDULING
+// ============================================================================
+
+/**
+ * Generates a monthly schedule with optimized routes for crew visits.
+ * Menu item: Glove Manager → Schedule → Generate Monthly Schedule
+ *
+ * Auto-populates Crew Visit Config from To-Do List if not already configured.
+ */
+function generateMonthlySchedule() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+
+  var today = new Date();
+  var currentYear = today.getFullYear();
+  var currentMonth = today.getMonth() + 1; // 1-12
+
+  var result = ui.alert(
+    'Generate Monthly Schedule',
+    'Generate schedule for ' + getMonthName(currentMonth) + ' ' + currentYear + '?\n\n' +
+    'This will:\n' +
+    '• Auto-create crew visits from To-Do List\n' +
+    '• Schedule based on due dates\n' +
+    '• Optimize routes by location\n' +
+    '• Calculate drive times\n' +
+    '• Flag overnight stays required',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (result !== ui.Button.YES) {
+    return;
+  }
+
+  try {
+    // Auto-populate Crew Visit Config from To-Do List if needed
+    var populationResult = autoPopulateCrewVisitConfigFromToDo(ss);
+
+    // Check if Crew Visit Config was created
+    var configSheet = ss.getSheetByName(SHEET_CREW_VISIT_CONFIG);
+    if (!configSheet || configSheet.getLastRow() < 2) {
+      ui.alert('⚠️ Could not create Crew Visit Config.\n\n' +
+               'Debug Info:\n' +
+               '• To-Do List exists: ' + (ss.getSheetByName('To Do List') ? 'Yes' : 'No') + '\n' +
+               '• To-Do List rows: ' + (ss.getSheetByName('To Do List') ? ss.getSheetByName('To Do List').getLastRow() : 0) + '\n' +
+               '• Population result: ' + (populationResult || 'No data returned') + '\n\n' +
+               'Please check if To-Do List has tasks (should have rows 14+).');
+      return;
+    }
+
+    // Get all crew visits for the month
+    var visits = getCrewVisitsForMonth(currentYear, currentMonth);
+
+    if (visits.length === 0) {
+      // If still no visits, check why
+      var configRowCount = configSheet.getLastRow();
+      ui.alert('⚠️ No crew visits scheduled for ' + getMonthName(currentMonth) + ' ' + currentYear + '.\n\n' +
+               'Debug Info:\n' +
+               '• Crew Visit Config has ' + (configRowCount - 1) + ' crew(s)\n' +
+               '• Next Visit Dates may be in different months\n\n' +
+               'Check Crew Visit Config sheet "Next Visit Date" column.\n' +
+               'Dates should be in January 2026 to appear on this month\'s calendar.');
+      return;
+    }
+
+    // Optimize daily routes
+    var optimizedSchedule = optimizeMonthlyRoutes(visits);
+
+    // Update To-Do List calendar with scheduled visits
+    updateToDoListWithSchedule(ss, visits, currentYear, currentMonth);
+
+    ui.alert('✅ Monthly Schedule Generated!\n\n' +
+      visits.length + ' crew visits scheduled\n' +
+      optimizedSchedule.overnightCount + ' overnight stays required\n\n' +
+      'Check the To-Do List calendar for scheduled visits.');
+
+    logEvent('Monthly schedule generated for ' + getMonthName(currentMonth) + ' ' + currentYear, 'INFO');
+  } catch (e) {
+    ui.alert('❌ Error generating schedule:\n\n' + e.toString());
+    Logger.log('Error in generateMonthlySchedule: ' + e.toString());
+  }
+}
+
+/**
+ * Optimizes crew visit routes for the month by grouping by location and date.
+ * Calculates optimal visit sequences to minimize drive time.
+ *
+ * @param {Array} visits - Array of visit objects
+ * @return {Object} Optimized schedule object with routes and statistics
+ */
+function optimizeMonthlyRoutes(visits) {
+  var routesByDate = {};
+  var overnightCount = 0;
+
+  // Group visits by date
+  visits.forEach(function(visit) {
+    var dateKey = Utilities.formatDate(visit.date, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+
+    if (!routesByDate[dateKey]) {
+      routesByDate[dateKey] = [];
+    }
+
+    routesByDate[dateKey].push(visit);
+
+    // Check if overnight required
+    var overnightInfo = detectOvernightRequirement(visit);
+    if (overnightInfo.overnightRequired) {
+      overnightCount++;
+    }
+  });
+
+  // Optimize each day's route
+  var optimizedDays = [];
+  for (var dateKey in routesByDate) {
+    var dayVisits = routesByDate[dateKey];
+    var optimizedDay = optimizeDailyRoute(dateKey, dayVisits);
+    optimizedDays.push(optimizedDay);
+  }
+
+  return {
+    days: optimizedDays,
+    totalVisits: visits.length,
+    overnightCount: overnightCount
+  };
+}
+
+/**
+ * Optimizes the route for a single day's crew visits.
+ * Orders visits by proximity to minimize total drive time.
+ *
+ * @param {string} dateKey - Date in 'yyyy-MM-dd' format
+ * @param {Array} visits - Array of visit objects for this date
+ * @return {Object} Optimized daily route object
+ */
+function optimizeDailyRoute(dateKey, visits) {
+  if (!visits || visits.length === 0) {
+    return {
+      date: dateKey,
+      visits: [],
+      totalDriveTime: 0,
+      totalVisitTime: 0,
+      overnightRequired: false
+    };
+  }
+
+  // Sort visits by drive time from Helena (closest first)
+  var sortedVisits = visits.slice().sort(function(a, b) {
+    return (a.driveTime || 0) - (b.driveTime || 0);
+  });
+
+  // Calculate total times
+  var totalDriveTime = 0;
+  var totalVisitTime = 0;
+  var overnightRequired = false;
+
+  sortedVisits.forEach(function(visit) {
+    totalDriveTime += (visit.driveTime || 0);
+    totalVisitTime += (visit.visitTime || 0);
+
+    var overnightInfo = detectOvernightRequirement(visit);
+    if (overnightInfo.overnightRequired) {
+      overnightRequired = true;
+    }
+  });
+
+  // Add return drive time for last location
+  if (sortedVisits.length > 0) {
+    var lastVisit = sortedVisits[sortedVisits.length - 1];
+    totalDriveTime += (lastVisit.driveTime || 0);
+  }
+
+  return {
+    date: dateKey,
+    visits: sortedVisits,
+    totalDriveTime: totalDriveTime,
+    totalVisitTime: totalVisitTime,
+    totalTime: totalDriveTime + totalVisitTime,
+    overnightRequired: overnightRequired
+  };
+}
+
+/**
+ * Calculates estimated crew visit time based on crew size.
+ * Base time + (time per employee × crew size).
+ *
+ * @param {number} crewSize - Number of crew members
+ * @return {number} Estimated visit time in minutes
+ */
+function calculateCrewVisitTime(crewSize) {
+  var baseTime = 15; // Base overhead time (setup, wrap up)
+  var timePerEmployee = 5; // Minutes per employee (check gloves/sleeves)
+
+  return baseTime + (timePerEmployee * (crewSize || 5));
+}
+
+/**
+ * Marks a crew visit as complete and updates the next visit date.
+ * Menu item: Glove Manager → Schedule → Mark Visit Complete
+ */
+function markVisitComplete() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+  var activeSheet = ss.getActiveSheet();
+
+  // Check if we're on the To Do List sheet
+  if (activeSheet.getName() !== 'To Do List') {
+    ui.alert('Please select a task from the To Do List sheet first.');
+    return;
+  }
+
+  var activeRow = ss.getActiveCell().getRow();
+
+  // Check if it's a data row (row 14+)
+  if (activeRow < 14) {
+    ui.alert('Please select a task row (not header or calendar).');
+    return;
+  }
+
+  // Get task details
+  var taskType = activeSheet.getRange(activeRow, 4).getValue(); // Sheet column
+  var taskName = activeSheet.getRange(activeRow, 2).getValue(); // Task column
+
+  // Check if it's a crew visit
+  if (taskType !== 'Crew Visit Config') {
+    ui.alert('This function only works for Crew Visit tasks.\n\nSelected task type: ' + taskType);
+    return;
+  }
+
+  // Extract job number from task name
+  var jobNumberMatch = String(taskName).match(/Job\s*#(\S+)/);
+  if (!jobNumberMatch) {
+    ui.alert('Could not find job number in task: ' + taskName);
+    return;
+  }
+
+  var jobNumber = jobNumberMatch[1];
+  var visitDate = activeSheet.getRange(activeRow, 6).getValue(); // Scheduled Date column
+
+  if (!visitDate) {
+    visitDate = new Date();
+  }
+
+  // Update the visit in Crew Visit Config
+  updateCrewVisit(jobNumber, visitDate);
+
+  // Mark task as completed
+  activeSheet.getRange(activeRow, 12).setValue(true); // Completed checkbox
+
+  ui.alert('✅ Visit Complete!\n\n' +
+    'Job #' + jobNumber + '\n' +
+    'Last Visit Date updated\n' +
+    'Next Visit Date calculated\n\n' +
+    'Task marked as completed.');
+
+  logEvent('Crew visit completed: Job #' + jobNumber, 'INFO');
+}
+
+/**
+ * Refreshes the calendar and schedule in the To-Do List.
+ * Menu item: Glove Manager → Schedule → Refresh Calendar
+ */
+function refreshCalendar() {
+  var ui = SpreadsheetApp.getUi();
+
+  var result = ui.alert(
+    'Refresh Calendar',
+    'This will regenerate the To-Do List with updated schedule.\n\nContinue?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (result === ui.Button.YES) {
+    generateToDoList();
+  }
+}
+
+// ============================================================================
+// AUTO-POPULATION FUNCTIONS
+// ============================================================================
+
+/**
+ * Sets up headers for Crew Visit Config sheet.
+ * Helper function to avoid code duplication.
+ *
+ * @param {Sheet} configSheet - Crew Visit Config sheet
+ */
+function setupCrewVisitConfigHeaders(configSheet) {
+  var headers = [
+    'Job Number',
+    'Location',
+    'Crew Lead',
+    'Crew Size',
+    'Visit Frequency',
+    'Est. Visit Time',
+    'Last Visit Date',
+    'Next Visit Date',
+    'Drive Time From Helena',
+    'Priority',
+    'Notes'
+  ];
+
+  configSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  configSheet.getRange(1, 1, 1, headers.length)
+    .setFontWeight('bold')
+    .setBackground('#4285f4')
+    .setFontColor('white')
+    .setHorizontalAlignment('center');
+
+  // Set column widths
+  configSheet.setColumnWidth(1, 120); // Job Number
+  configSheet.setColumnWidth(2, 120); // Location
+  configSheet.setColumnWidth(3, 150); // Crew Lead
+  configSheet.setColumnWidth(4, 80);  // Crew Size
+  configSheet.setColumnWidth(5, 120); // Visit Frequency
+  configSheet.setColumnWidth(6, 120); // Est. Visit Time
+  configSheet.setColumnWidth(7, 120); // Last Visit Date
+  configSheet.setColumnWidth(8, 120); // Next Visit Date
+  configSheet.setColumnWidth(9, 150); // Drive Time
+  configSheet.setColumnWidth(10, 80); // Priority
+  configSheet.setColumnWidth(11, 200); // Notes
+
+  Logger.log('Crew Visit Config headers created');
+}
+
+/**
+ * Gets the job number (crew number) for an employee from the Employees sheet.
+ * Looks up by employee name and optionally location.
+ * Returns the crew number prefix (e.g., "009-26" from "009-26.1").
+ *
+ * @param {string} employeeName - Employee name to look up
+ * @param {string} location - Optional location to match
+ * @return {string} Crew job number or empty string if not found
+ */
+function getJobNumberForEmployee(employeeName, location) {
+  if (!employeeName) return '';
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+
+  if (!employeesSheet || employeesSheet.getLastRow() < 2) {
+    return '';
+  }
+
+  var data = employeesSheet.getDataRange().getValues();
+  var headers = data[0];
+  var nameCol = -1;
+  var jobNumCol = -1;
+  var locationCol = -1;
+  var lastDayCol = -1;
+
+  // Find columns
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'name') nameCol = h;
+    if (header === 'job number') jobNumCol = h;
+    if (header === 'location') locationCol = h;
+    if (header === 'last day') lastDayCol = h;
+  }
+
+  if (nameCol === -1 || jobNumCol === -1) {
+    return '';
+  }
+
+  // Search for the employee
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var name = String(row[nameCol]).trim();
+    var lastDay = lastDayCol !== -1 ? row[lastDayCol] : '';
+
+    // Skip if employee has left
+    if (lastDay) continue;
+
+    // Match by name
+    if (name === employeeName) {
+      // If location specified, also match location
+      if (location && locationCol !== -1) {
+        var empLocation = String(row[locationCol]).trim();
+        if (empLocation.toLowerCase() !== location.toLowerCase()) {
+          continue; // Location doesn't match, keep looking
+        }
+      }
+
+      // Found the employee - extract crew number
+      var jobNumber = String(row[jobNumCol]).trim();
+      var crewNumber = extractCrewNumber(jobNumber);
+
+      Logger.log('Found job number for ' + employeeName + ': ' + crewNumber + ' (full: ' + jobNumber + ')');
+      return crewNumber;
+    }
+  }
+
+  Logger.log('No job number found for employee: ' + employeeName);
+  return '';
+}
+
+/**
+ * Auto-populates Crew Visit Config from To-Do List tasks.
+ * Groups tasks by location, defaults to monthly frequency.
+ * Only creates entries if Crew Visit Config is empty or missing.
+ *
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @return {string} Status message
+ */
+function autoPopulateCrewVisitConfigFromToDo(ss) {
+  var configSheet = ss.getSheetByName(SHEET_CREW_VISIT_CONFIG);
+
+  // Create sheet if it doesn't exist
+  if (!configSheet) {
+    configSheet = ss.insertSheet(SHEET_CREW_VISIT_CONFIG);
+    Logger.log('Created new Crew Visit Config sheet');
+  }
+
+  // Check if already populated (has data beyond header row)
+  // If sheet has more than 1 row, it means headers + data exist
+  if (configSheet.getLastRow() > 1) {
+    Logger.log('Crew Visit Config already populated with ' + (configSheet.getLastRow() - 1) + ' rows, skipping auto-population');
+    return 'Already populated'; // Already has data, don't overwrite
+  }
+
+  // Get To-Do List
+  var todoSheet = ss.getSheetByName('To Do List');
+  if (!todoSheet) {
+    Logger.log('To-Do List sheet not found');
+
+    // Set up headers even if no data
+    if (configSheet.getLastRow() === 0) {
+      setupCrewVisitConfigHeaders(configSheet);
+    }
+
+    return 'To-Do List not found';
+  }
+
+  var todoLastRow = todoSheet.getLastRow();
+  Logger.log('To-Do List found with ' + todoLastRow + ' rows');
+
+  if (todoLastRow < 14) {
+    Logger.log('To-Do List has no task data (needs row 14+)');
+
+    // Set up headers even if no data
+    if (configSheet.getLastRow() === 0) {
+      setupCrewVisitConfigHeaders(configSheet);
+    }
+
+    return 'To-Do List empty (no tasks)';
+  }
+
+  // Read To-Do List tasks (starts at row 14 after calendar)
+  var todoData = todoSheet.getDataRange().getValues();
+  var todoHeaders = todoData[12]; // Row 13, index 12
+
+  Logger.log('To-Do List headers found: ' + JSON.stringify(todoHeaders));
+
+  // Find column indices in To-Do List
+  var colIndices = {
+    location: -1,
+    employee: -1,
+    dueDate: -1,
+    estimatedTime: -1,
+    driveTime: -1
+  };
+
+  for (var h = 0; h < todoHeaders.length; h++) {
+    var header = String(todoHeaders[h]).toLowerCase().trim();
+    Logger.log('Header ' + h + ': "' + header + '"');
+
+    // Match location column (index 4, column E)
+    if (header === 'location') {
+      colIndices.location = h;
+      Logger.log('Found Location at index ' + h);
+    }
+    // Match employee/crew column (index 3, column D)
+    if (header === 'employee/crew') {
+      colIndices.employee = h;
+      Logger.log('Found Employee/Crew at index ' + h);
+    }
+    // Match due date column (index 9, column J)
+    if (header === 'due date') {
+      colIndices.dueDate = h;
+      Logger.log('Found Due Date at index ' + h);
+    }
+    // Match estimated time column (index 13, column N)
+    if (header === 'estimated time (min)') {
+      colIndices.estimatedTime = h;
+      Logger.log('Found Estimated Time at index ' + h);
+    }
+    // Match drive time column (index 16, column Q)
+    if (header === 'drive time (min)') {
+      colIndices.driveTime = h;
+      Logger.log('Found Drive Time at index ' + h);
+    }
+  }
+
+  Logger.log('Column indices found: ' + JSON.stringify(colIndices));
+
+  // Check if we found the required Location column
+  if (colIndices.location === -1) {
+    Logger.log('ERROR: Location column not found in To-Do List headers');
+
+    // Set up headers even if no data
+    if (configSheet.getLastRow() === 0) {
+      setupCrewVisitConfigHeaders(configSheet);
+    }
+
+    return 'Location column not found in To-Do List';
+  }
+
+  // Group tasks by location
+  var locationGroups = {};
+  var processedRows = 0;
+  var skippedRows = 0;
+
+  Logger.log('Starting to process task rows from index 13 to ' + (todoData.length - 1));
+
+  for (var i = 13; i < todoData.length; i++) { // Start from row 14, index 13
+    var row = todoData[i];
+    var location = String(row[colIndices.location] || '').trim();
+
+    // Log first few rows for debugging
+    if (i < 18) {
+      Logger.log('Row ' + (i + 1) + ': Location="' + location + '", Employee="' + (row[colIndices.employee] || '') + '"');
+    }
+
+    if (!location || location === 'Unknown') {
+      skippedRows++;
+      continue;
+    }
+
+    processedRows++;
+
+    if (!locationGroups[location]) {
+      locationGroups[location] = {
+        employees: [],
+        totalTime: 0,
+        driveTime: row[colIndices.driveTime] || 0,
+        earliestDueDate: null,
+        taskCount: 0
+      };
+    }
+
+    var employee = String(row[colIndices.employee] || '').trim();
+    if (employee && locationGroups[location].employees.indexOf(employee) === -1) {
+      locationGroups[location].employees.push(employee);
+    }
+
+    locationGroups[location].totalTime += (row[colIndices.estimatedTime] || 0);
+    locationGroups[location].taskCount++;
+
+    // Track earliest due date
+    var dueDate = row[colIndices.dueDate];
+    if (dueDate instanceof Date) {
+      if (!locationGroups[location].earliestDueDate || dueDate < locationGroups[location].earliestDueDate) {
+        locationGroups[location].earliestDueDate = dueDate;
+      }
+    }
+  }
+
+  Logger.log('Processing complete: ' + processedRows + ' rows processed, ' + skippedRows + ' rows skipped');
+  Logger.log('Location groups found: ' + Object.keys(locationGroups).length);
+  Logger.log('Locations: ' + Object.keys(locationGroups).join(', '));
+
+  // If no locations found, exit
+  if (Object.keys(locationGroups).length === 0) {
+    Logger.log('No valid location groups found in To-Do List');
+
+    // Set up headers even if no data
+    if (configSheet.getLastRow() === 0) {
+      setupCrewVisitConfigHeaders(configSheet);
+    }
+
+    return 'No location groups found (processed ' + processedRows + ' rows, skipped ' + skippedRows + ')';
+  }
+
+  // Set up Crew Visit Config headers
+  configSheet.clear();
+  setupCrewVisitConfigHeaders(configSheet);
+
+  // Create crew visit entries from location groups
+  var configData = [];
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  for (var location in locationGroups) {
+    var group = locationGroups[location];
+
+    // Determine priority based on due dates
+    var priority = 'Medium';
+    if (group.earliestDueDate) {
+      var daysTillDue = Math.ceil((group.earliestDueDate - today) / (1000 * 60 * 60 * 24));
+      if (daysTillDue < 0) {
+        priority = 'High'; // Overdue
+      } else if (daysTillDue <= 7) {
+        priority = 'High'; // Due within a week
+      }
+    }
+
+    // Calculate next visit date - MUST be in current month for calendar to show it
+    // Use earliest due date if it's in current month, otherwise use a date in current month
+    var currentMonth = today.getMonth();
+    var currentYear = today.getFullYear();
+    var nextVisitDate;
+
+    if (group.earliestDueDate) {
+      var dueDateMonth = group.earliestDueDate.getMonth();
+      var dueDateYear = group.earliestDueDate.getFullYear();
+
+      // If due date is in current month or past, use it (or tomorrow if overdue)
+      if (dueDateYear < currentYear || (dueDateYear === currentYear && dueDateMonth <= currentMonth)) {
+        // If overdue, schedule for tomorrow
+        var daysTillDue = Math.ceil((group.earliestDueDate - today) / (1000 * 60 * 60 * 24));
+        if (daysTillDue < 0) {
+          // Overdue - schedule tomorrow
+          nextVisitDate = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+        } else {
+          // Due this month - use the due date
+          nextVisitDate = new Date(group.earliestDueDate);
+        }
+      } else {
+        // Due date is in future month - schedule for mid-current-month
+        nextVisitDate = new Date(currentYear, currentMonth, 15);
+      }
+    } else {
+      // No due date - schedule for next week (but in current month)
+      nextVisitDate = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+      // Make sure it's not past end of month
+      if (nextVisitDate.getMonth() !== currentMonth) {
+        nextVisitDate = new Date(currentYear, currentMonth + 1, 0); // Last day of current month
+      }
+    }
+
+    Logger.log('Location ' + location + ': Next visit date = ' + nextVisitDate + ' (due date was: ' + group.earliestDueDate + ')');
+
+    // Look up the actual job number from the crew lead
+    var crewLead = group.employees[0] || '';
+    var jobNumber = getJobNumberForEmployee(crewLead, location);
+
+    // If no job number found, use location-based placeholder
+    if (!jobNumber) {
+      jobNumber = 'AUTO-' + location.substring(0, 3).toUpperCase();
+    }
+
+    configData.push([
+      jobNumber, // Actual Job Number from Employees sheet
+      location, // Location
+      crewLead, // Crew Lead (first employee in list)
+      group.employees.length, // Crew Size
+      'Monthly', // Visit Frequency - DEFAULT TO MONTHLY
+      Math.max(45, group.totalTime), // Est. Visit Time (minimum 45 min)
+      '', // Last Visit Date (empty initially)
+      nextVisitDate, // Next Visit Date (based on due date)
+      group.driveTime, // Drive Time From Helena
+      priority, // Priority
+      group.taskCount + ' tasks from To-Do List' // Notes
+    ]);
+  }
+
+  // Write data to sheet
+  if (configData.length > 0) {
+    configSheet.getRange(2, 1, configData.length, 11).setValues(configData);
+
+    // Format date columns
+    configSheet.getRange(2, 7, configData.length, 1).setNumberFormat('mm/dd/yyyy'); // Last Visit Date
+    configSheet.getRange(2, 8, configData.length, 1).setNumberFormat('mm/dd/yyyy'); // Next Visit Date
+
+    Logger.log('Auto-populated Crew Visit Config with ' + configData.length + ' locations from To-Do List');
+    return 'Success: Created ' + configData.length + ' crew visits';
+  } else {
+    Logger.log('No config data to write');
+    return 'No data generated';
+  }
+}
+
+/**
+ * Updates the To-Do List calendar with scheduled crew visits.
+ * Highlights dates on the calendar when visits are scheduled.
+ *
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @param {Array} visits - Array of visit objects
+ * @param {number} year - Year
+ * @param {number} month - Month (1-12)
+ */
+function updateToDoListWithSchedule(ss, visits, year, month) {
+  var todoSheet = ss.getSheetByName('To Do List');
+  if (!todoSheet) return;
+
+  // Group visits by date
+  var visitsByDate = {};
+  visits.forEach(function(visit) {
+    var dateKey = Utilities.formatDate(visit.date, Session.getScriptTimeZone(), 'd');
+    if (!visitsByDate[dateKey]) {
+      visitsByDate[dateKey] = [];
+    }
+    visitsByDate[dateKey].push(visit);
+  });
+
+  // Find calendar cells (rows 4-9, columns 1-7) and highlight scheduled dates
+  var calendarData = todoSheet.getRange(4, 1, 6, 7).getValues();
+
+  for (var r = 0; r < calendarData.length; r++) {
+    for (var c = 0; c < calendarData[r].length; c++) {
+      var dayNum = calendarData[r][c];
+      if (dayNum && visitsByDate[String(dayNum)]) {
+        // Highlight this date with blue background
+        todoSheet.getRange(4 + r, 1 + c).setBackground('#bbdefb').setNote('Scheduled: ' + visitsByDate[String(dayNum)].length + ' visit(s)');
+      }
+    }
+  }
+
+  Logger.log('Updated To-Do List calendar with ' + visits.length + ' scheduled visits');
 }
 

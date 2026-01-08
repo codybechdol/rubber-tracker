@@ -108,7 +108,8 @@ const COLS = {
     SLEEVE_SIZE: 10,      // J
     HIRE_DATE: 11,        // K
     LAST_DAY: 12,         // L
-    LAST_DAY_REASON: 13   // M
+    LAST_DAY_REASON: 13,  // M
+    JOB_CLASSIFICATION: 14 // N - e.g., "Foreman", "Lead", "Journeyman", "Apprentice"
   },
 
   // Employee History Sheet

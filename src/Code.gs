@@ -71,10 +71,34 @@ function onOpen() {
     .addSubMenu(ui.createMenu('📝 To-Do List')
       .addItem('Generate To-Do List', 'generateToDoList')
       .addItem('Clear Completed Tasks', 'clearCompletedTasks'))
+    .addSubMenu(ui.createMenu('📅 Schedule')
+      .addItem('🎯 Generate Smart Schedule', 'generateSmartSchedule')
+      .addItem('📅 Generate Monthly Schedule', 'generateMonthlySchedule')
+      .addItem('🔄 Refresh Calendar', 'refreshCalendar')
+      .addItem('✅ Mark Visit Complete', 'markVisitComplete')
+      .addSeparator()
+      .addItem('Setup All Schedule Sheets', 'setupAllScheduleSheets')
+      .addSeparator()
+      .addItem('Setup Crew Visit Config', 'setupCrewVisitConfig')
+      .addItem('Setup Training Config', 'setupTrainingConfig')
+      .addItem('Setup Training Tracking', 'setupTrainingTracking')
+      .addSeparator()
+      .addItem('Refresh Training Attendees', 'refreshTrainingAttendees')
+      .addItem('🔄 Update December Catch-Ups', 'updateDecemberCatchUps')
+      .addItem('⏰ Setup Auto December Updates', 'setupAutoDecemberUpdates')
+      .addSeparator()
+      .addItem('📊 Recalculate Training Completion %', 'recalculateAllTrainingCompletionStatus')
+      .addItem('📊 Generate Compliance Report', 'generateTrainingComplianceReport'))
     .addSubMenu(ui.createMenu('🔧 Utilities')
       .addItem('Fix All Change Out Dates', 'fixAllChangeOutDates')
       .addItem('⚡ Setup Auto Change Out Dates', 'createEditTrigger')
       .addItem('📤 Archive Previous Employees', 'archivePreviousEmployees')
+      .addSeparator()
+      .addItem('👷 Setup Job Classification Dropdown', 'setupJobClassificationDropdown')
+      .addItem('📖 View Classification Guide', 'showClassificationGuide')
+      .addSeparator()
+      .addItem('📥 Import Data', 'showImportDialog')
+      .addItem('📥 Quick Import (1084)', 'importProvidedData')
       .addSeparator()
       .addItem('💾 Create Backup Snapshot', 'createBackupSnapshot')
       .addItem('📂 View Backup Folder', 'openBackupFolder'))
@@ -84,7 +108,11 @@ function onOpen() {
       .addItem('Remove Scheduled Email', 'removeEmailTrigger'))
     .addSubMenu(ui.createMenu('🔍 Debug')
       .addItem('Test Edit Trigger', 'testEditTrigger')
-      .addItem('Recalc Current Row', 'recalcCurrentRow'))
+      .addItem('Recalc Current Row', 'recalcCurrentRow')
+      .addSeparator()
+      .addItem('🔍 Diagnose Employee Pick List', 'runDiagnostic')
+      .addItem('📊 Show All Sleeve Swaps', 'runSleeveSwapDiagnostic')
+      .addItem('📊 Show All Glove Swaps', 'runGloveSwapDiagnostic'))
     .addSeparator()
     .addItem('Close & Save History', 'closeAndSaveHistory')
     .addToUi();
@@ -604,6 +632,27 @@ function handlePickedCheckboxChange(ss, swapSheet, inventorySheet, editedRow, ne
     if (isChecked) {
       // STAGE 2: Picked checkbox checked
       logEvent('Stage 2: Picked checked for row ' + editedRow + ', Pick List: ' + pickListNum);
+
+      // VALIDATION: Check if item is "In Testing" - if so, BLOCK the action
+      var currentInvStatus = inventorySheet.getRange(pickListRow, invColStatus).getValue();
+      var isInTesting = currentInvStatus && currentInvStatus.toString().trim().toLowerCase() === 'in testing';
+
+      if (isInTesting) {
+        // CANNOT pick items that are In Testing
+        logEvent('Stage 2 BLOCKED: Cannot pick item ' + pickListNum + ' - status is "In Testing"', 'WARNING');
+
+        // Uncheck the checkbox
+        swapSheet.getRange(editedRow, 9).setValue(false);
+
+        // Show error message to user
+        SpreadsheetApp.getUi().alert(
+          '⚠️ Cannot Pick Item',
+          'Item ' + pickListNum + ' is currently "In Testing" and cannot be picked for delivery.\n\n' +
+          'Please wait until testing is complete and the item status changes to "Ready For Delivery".',
+          SpreadsheetApp.getUi().ButtonSet.OK
+        );
+        return;
+      }
 
       // Update visible Status column (H = column 8, 1-based)
       swapSheet.getRange(editedRow, 8).setValue('Ready For Delivery 🚚');
@@ -1756,7 +1805,7 @@ function buildSheets() {
   ensureSeparateHistorySheets(); // Remove old History tab and ensure separate history sheets
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheetDefs = [
-    { name: SHEET_EMPLOYEES, headers: ['Name', 'Class', 'Location', 'Job Number', 'Phone Number', 'Notification Emails', 'MP Email', 'Email Address', 'Glove Size', 'Sleeve Size', 'Hire Date', 'Last Day', 'Last Day Reason'] },
+    { name: SHEET_EMPLOYEES, headers: ['Name', 'Class', 'Location', 'Job Number', 'Phone Number', 'Notification Emails', 'MP Email', 'Email Address', 'Glove Size', 'Sleeve Size', 'Hire Date', 'Last Day', 'Last Day Reason', 'Job Classification'] },
     { name: 'Employee History', headers: null, customSetup: true },
     { name: SHEET_GLOVES, headers: ['Glove', 'Size', 'Class', 'Test Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'] },
     { name: SHEET_SLEEVES, headers: ['Sleeve', 'Size', 'Class', 'Test Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'] },
@@ -2292,6 +2341,13 @@ function generateSwaps(itemType) {
       });
 
       var assignedItemNums = new Set();
+
+      // Helper function to check if item has LOST-LOCATE marker
+      var isLostLocate = function(item) {
+        var notes = (item[10] || '').toString().trim().toUpperCase();
+        return notes.indexOf('LOST-LOCATE') !== -1;
+      };
+
       swapMeta.forEach(function(meta) {
         var useSize = isGloves ?
           (!isNaN(parseFloat(meta.empPreferredSize)) ? parseFloat(meta.empPreferredSize) : meta.itemSize) :
@@ -2313,7 +2369,8 @@ function generateSwaps(itemType) {
           // Check if Picked For contains this employee's name (case-insensitive)
           var pickedForEmployee = pickedFor.toLowerCase().indexOf(employeeName.toLowerCase()) !== -1;
           var notAlreadyUsed = !assignedItemNums.has(item[0]);
-          return classMatch && pickedForEmployee && notAlreadyUsed;
+          var notLost = !isLostLocate(item);
+          return classMatch && pickedForEmployee && notAlreadyUsed && notLost;
         });
 
         if (pickedForMatch) {
@@ -2347,7 +2404,8 @@ function generateSwaps(itemType) {
             // Check if this item is reserved for someone else via Picked For
             var pickedFor = (item[9] || '').toString().trim();
             var isReservedForOther = pickedFor !== '' && pickedFor.toLowerCase().indexOf(employeeName.toLowerCase()) === -1;
-            return statusMatch && classMatch && sizeMatch && notAssigned && !isReservedForOther;
+            var notLost = !isLostLocate(item);
+            return statusMatch && classMatch && sizeMatch && notAssigned && !isReservedForOther && notLost;
           });
           if (match) {
             pickListValue = match[0];
@@ -2362,11 +2420,13 @@ function generateSwaps(itemType) {
           var match = inventoryData.find(function(item) {
             var pickedFor = (item[9] || '').toString().trim();
             var isReservedForOther = pickedFor !== '' && pickedFor.toLowerCase().indexOf(employeeName.toLowerCase()) === -1;
+            var notLost = !isLostLocate(item);
             return item[6] && item[6].toString().trim().toLowerCase() === 'on shelf' &&
                    parseInt(item[2], 10) === meta.itemClass &&
                    parseFloat(item[1]) === useSize + 0.5 &&
                    !assignedItemNums.has(item[0]) &&
-                   !isReservedForOther;
+                   !isReservedForOther &&
+                   notLost;
           });
           if (match) {
             pickListValue = match[0];
@@ -2390,7 +2450,8 @@ function generateSwaps(itemType) {
             // Check if this item is reserved for someone else via Picked For
             var pickedFor = (item[9] || '').toString().trim();
             var isReservedForOther = pickedFor !== '' && pickedFor.toLowerCase().indexOf(employeeName.toLowerCase()) === -1;
-            return statusMatch && classMatch && sizeMatch && notAssigned && !isReservedForOther;
+            var notLost = !isLostLocate(item);
+            return statusMatch && classMatch && sizeMatch && notAssigned && !isReservedForOther && notLost;
           });
           if (match) {
             pickListValue = match[0];
@@ -2406,11 +2467,13 @@ function generateSwaps(itemType) {
             var stat = item[6] && item[6].toString().trim().toLowerCase();
             var pickedFor = (item[9] || '').toString().trim();
             var isReservedForOther = pickedFor !== '' && pickedFor.toLowerCase().indexOf(employeeName.toLowerCase()) === -1;
+            var notLost = !isLostLocate(item);
             return (stat === 'ready for delivery' || stat === 'in testing') &&
                    parseInt(item[2], 10) === meta.itemClass &&
                    parseFloat(item[1]) === useSize + 0.5 &&
                    !assignedItemNums.has(item[0]) &&
-                   !isReservedForOther;
+                   !isReservedForOther &&
+                   notLost;
           });
           if (match) {
             pickListValue = match[0];
@@ -2438,8 +2501,9 @@ function generateSwaps(itemType) {
         var finalPickListValue = pickListValue;
         var finalPickListStatus = pickListStatus;
 
-        // If already picked, use the "Ready For Delivery" status
-        if (isAlreadyPicked) {
+        // Keep the actual status for already-picked items
+        // Don't override "In Testing" with "Ready For Delivery"
+        if (isAlreadyPicked && pickListStatusRaw !== 'in testing') {
           finalPickListStatus = pickListSizeUp ? 'Ready For Delivery (Size Up) ⚠️' : 'Ready For Delivery 🚚';
         }
 
@@ -5207,11 +5271,12 @@ function setupToDoListSheet(sheet) {
 }
 
 /**
- * Generates the To-Do List from Glove Swaps, Sleeve Swaps, and Reclaims.
- * Preserves user checkmarks and notes from previous generation.
- * Groups items by location for weekly route planning.
+ * Legacy To-Do List generator from Code.gs.
+ * @deprecated Use generateSmartSchedule() from 76-SmartScheduling.gs instead.
+ * This function is kept for reference but should not be called directly.
+ * The main generateToDoList() in 70-ToDoList.gs now calls generateSmartSchedule().
  */
-function generateToDoList() {
+function generateToDoListLegacyCode() {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var todoSheet = ss.getSheetByName('To Do List');
@@ -5226,6 +5291,14 @@ function generateToDoList() {
 
     // COMPLETELY clear the sheet and rebuild headers (fixes the range error)
     todoSheet.clear();
+
+    // Clear all data validations (removes any residual checkboxes)
+    var maxRows = todoSheet.getMaxRows();
+    var maxCols = todoSheet.getMaxColumns();
+    if (maxRows > 0 && maxCols > 0) {
+      todoSheet.getRange(1, 1, maxRows, maxCols).clearDataValidations();
+    }
+
     setupToDoListSheet(todoSheet);
 
     var today = new Date();
@@ -5287,13 +5360,112 @@ function generateToDoList() {
       collectReclaimTasks(reclaimsSheet, todoItems, today, empLocationMap);
     }
 
-    // Sort by Location (for route planning), then by Priority, then by Days Left
+    // Collect pending/incomplete training from Training Tracking
+    var trainingSheet = ss.getSheetByName('Training Tracking');
+    if (trainingSheet && trainingSheet.getLastRow() > 2) {
+      var trainingData = trainingSheet.getDataRange().getValues();
+
+      // Headers are in row 2 (index 1), data starts at row 3 (index 2)
+      var monthCol = 0;      // A: Month
+      var topicCol = 1;      // B: Training Topic
+      var crewCol = 2;       // C: Crew #
+      var leadCol = 3;       // D: Crew Lead
+      var dateCol = 5;       // F: Completion Date
+      var statusCol = 9;     // J: Status
+
+      // Get current month for priority determination
+      var currentMonth = today.getMonth() + 1; // 1-12
+      var currentMonthName = ['January', 'February', 'March', 'April', 'May', 'June',
+                              'July', 'August', 'September', 'October', 'November', 'December'][currentMonth - 1];
+
+      for (var t = 2; t < trainingData.length; t++) {
+        var tRow = trainingData[t];
+        var month = String(tRow[monthCol]).trim();
+        var topic = String(tRow[topicCol]).trim();
+        var crew = String(tRow[crewCol]).trim();
+        var crewLead = String(tRow[leadCol]).trim();
+        var status = String(tRow[statusCol]).trim();
+
+        // Only include current month training (and December catch-ups if it's December)
+        var includeTraining = false;
+        if (month === currentMonthName) {
+          includeTraining = true; // Current month training
+        } else if (month === 'December' && currentMonthName === 'December') {
+          includeTraining = true; // December catch-ups (only show in December)
+        } else if (status === 'Overdue') {
+          includeTraining = true; // Always show overdue training regardless of month
+        }
+
+        // Add task if training is incomplete and should be included
+        if (includeTraining && month && crew && status !== 'Complete' && status !== 'N/A') {
+          // Determine priority based on status
+          var priority = 1; // High priority for current month and overdue
+          if (status === 'Overdue') {
+            priority = 1; // High - Overdue training is always high priority
+          } else if (month === 'December') {
+            priority = 2; // Medium - December catch-ups
+          } else {
+            priority = 1; // High - Current month training
+          }
+
+          var taskDescription = 'Training: ' + topic;
+          if (crewLead) {
+            taskDescription = taskDescription + ' - ' + crewLead;
+          }
+
+          // Calculate days left until end of current month
+          var endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0); // Last day of current month
+          var daysLeftNum = Math.ceil((endOfMonth - today) / (1000 * 60 * 60 * 24));
+
+          var daysLeftText = daysLeftNum + ' days';
+          if (status === 'In Progress') {
+            daysLeftText = daysLeftNum + ' days (In Progress)';
+          } else if (status === 'Overdue') {
+            daysLeftText = 'OVERDUE';
+            daysLeftNum = -1; // Negative for sorting overdue first
+          }
+
+          // Get location from crew lead name if possible
+          var trainingLocation = 'All Locations';
+          if (crewLead) {
+            var leadNameLower = crewLead.toLowerCase().trim();
+            if (empLocationMap[leadNameLower]) {
+              trainingLocation = empLocationMap[leadNameLower];
+            }
+          }
+
+          todoItems.push({
+            done: false,
+            priority: priority,
+            taskType: 'Training',
+            employee: crewLead || crew,
+            location: trainingLocation,
+            currentItemNum: crew,
+            pickListNum: '',
+            itemType: topic,
+            itemClass: '', // Leave empty for Training tasks (not a rubber class)
+            dueDate: '',
+            daysLeft: daysLeftText,
+            daysLeftNum: daysLeftNum,
+            status: status === 'Overdue' ? 'Overdue' : 'Pending'
+          });
+        }
+      }
+    }
+
+    // Sort by Location (for route planning), then by Task Type (group like items), then by Priority, then by Days Left
     todoItems.sort(function(a, b) {
       // First sort by location
       var locCompare = (a.location || 'ZZZ').localeCompare(b.location || 'ZZZ');
       if (locCompare !== 0) return locCompare;
+
+      // Then by task type (groups Training, Glove, Sleeve, Reclaim together)
+      var taskTypeCompare = (a.taskType || '').localeCompare(b.taskType || '');
+      if (taskTypeCompare !== 0) return taskTypeCompare;
+
       // Then by priority
       if (a.priority !== b.priority) return a.priority - b.priority;
+
       // Then by days left (most urgent first)
       return (a.daysLeftNum || 999) - (b.daysLeftNum || 999);
     });
@@ -5331,7 +5503,7 @@ function generateToDoList() {
       var preserved = preservedData[preserveKey] || {};
 
       var rowData = [
-        preserved.done || false,    // Done
+        '',    // Done - leave empty, checkbox will be added later for all tasks
         item.priority,              // Priority
         item.taskType,              // Task Type
         item.employee,              // Employee
@@ -5348,7 +5520,7 @@ function generateToDoList() {
 
       todoSheet.getRange(currentRow, 1, 1, 13).setValues([rowData]);
 
-      // Track this as a data row that needs a checkbox
+      // Track this as a data row that needs a checkbox (all tasks)
       dataRows.push(currentRow);
 
       // Apply styling
@@ -5377,9 +5549,23 @@ function generateToDoList() {
       currentRow++;
     }
 
-    // Add checkboxes only to data rows (not location headers)
+    // Add checkboxes only to data rows (not location headers or Training tasks)
     for (var dr = 0; dr < dataRows.length; dr++) {
-      todoSheet.getRange(dataRows[dr], 1).insertCheckboxes();
+      var row = dataRows[dr];
+      todoSheet.getRange(row, 1).insertCheckboxes();
+
+      // Set preserved checked state if exists
+      var rowData = todoSheet.getRange(row, 1, 1, 13).getValues()[0];
+      var taskType = rowData[2]; // Task Type column
+      var employee = rowData[3];  // Employee column
+      var currentItemNum = rowData[5]; // Current Item # column
+
+      var preserveKey = taskType + '|' + employee + '|' + currentItemNum;
+      var preserved = preservedData[preserveKey] || {};
+
+      if (preserved.done === true) {
+        todoSheet.getRange(row, 1).setValue(true);
+      }
     }
 
     // Add summary at the top
@@ -5410,8 +5596,9 @@ function generateToDoList() {
  * @param {Array} todoItems - Array to add tasks to
  * @param {Date} today - Today's date
  * @param {Object} empLocationMap - Map of employee name (lowercase) to location for fallback
+ * @deprecated Use collectSwapTasks in 76-SmartScheduling.gs instead
  */
-function collectSwapTasks(swapData, itemType, todoItems, today, empLocationMap) {
+function collectSwapTasksLegacy(swapData, itemType, todoItems, today, empLocationMap) {
   var currentClass = null;
   var currentLocation = null;
 
@@ -5518,8 +5705,9 @@ function collectSwapTasks(swapData, itemType, todoItems, today, empLocationMap) 
  * @param {Array} todoItems - Array to add tasks to
  * @param {Date} today - Today's date
  * @param {Object} empLocationMap - Map of employee name (lowercase) to location
+ * @deprecated Use collectReclaimTasks in 76-SmartScheduling.gs instead
  */
-function collectReclaimTasks(reclaimsSheet, todoItems, today, empLocationMap) {
+function collectReclaimTasksLegacy(reclaimsSheet, todoItems, today, empLocationMap) {
   var data = reclaimsSheet.getDataRange().getValues();
   var inClass3Table = false;
   var inClass2Table = false;

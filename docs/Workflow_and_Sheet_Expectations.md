@@ -503,10 +503,19 @@ When generating swaps, the system searches for replacement items in this order:
 3. **Exact size, Ready For Delivery or In Testing** - In pipeline
 4. **Size up (+0.5), Ready For Delivery or In Testing** - In pipeline, larger
 
+**Size Matching**: Glove sizes use numeric comparison (9, 9.5, 10, 10.5, 11, etc.). Size-up logic allows matching +0.5 size larger if exact size is not available.
+
 ### Search Priority (Sleeves)
 
 1. **Exact size, On Shelf** - Best match
 2. **Exact size, Ready For Delivery or In Testing** - In pipeline
+
+**Size Matching**: Sleeve sizes are normalized to handle common abbreviations:
+- "XL", "X-L", "XLarge" → "X-Large"
+- "L", "Lg" → "Large"
+- "Reg", "M", "Med", "Medium" → "Regular"
+
+This means an employee with "XL" in their Sleeve Size will correctly match inventory items labeled "X-Large".
 
 ### Reservation System
 

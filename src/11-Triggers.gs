@@ -132,6 +132,12 @@ function onEditHandler(e) {
 
     Logger.log('onEditHandler fired: sheet=' + sheetName + ', row=' + editedRow + ', col=' + editedCol);
 
+    // Handle Training Tracking sheet edits (Status and Completion Date columns)
+    if (sheetName === 'Training Tracking') {
+      handleTrainingTrackingEdit(e);
+      return;  // Handled - don't continue to processEdit
+    }
+
     // Handle Date Assigned changes in Gloves/Sleeves directly
     if ((sheetName === 'Gloves' || sheetName === 'Sleeves') && editedCol === 5 && editedRow >= 2) {
       Logger.log('Date Assigned change detected in ' + sheetName + ' row ' + editedRow);
