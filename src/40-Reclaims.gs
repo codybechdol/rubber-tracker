@@ -21,14 +21,27 @@ function runReclaimsCheck() {
 }
 
 /**
- * Updates the Reclaims sheet with items that need reclaiming.
- * Checks for:
+ * ⚠️ DEPRECATED - DO NOT USE
+ *
+ * This incomplete version was overriding the complete implementation in Code.gs.
+ * The complete version (Code.gs line 3543) includes:
  * - Previous Employee items
- * - Class 3 items in non-approved locations
- * - Class 2 items in Class 3-only locations
- * - Lost items
+ * - Class 3 items in non-approved locations (with auto pick list for Class 2 replacements)
+ * - Class 2 items in Class 3-only locations (with auto pick list for Class 3 replacements)
+ * - Lost items (LOST-LOCATE marker detection)
+ * - Auto pick list generation that respects swap priorities
+ * - Location approval checking
+ * - Smart matching of available inventory to reclaim needs
+ *
+ * This function has been renamed to prevent override. The complete version in Code.gs
+ * is now the active implementation.
+ *
+ * BUG FIX: This resolves the issue where "Need to Purchase ❌" was shown for reclaims
+ * even when items were available "On Shelf" in inventory.
+ *
+ * Fixed: January 7, 2026
  */
-function updateReclaimsSheet() {
+function updateReclaimsSheet_INCOMPLETE_DEPRECATED() {
   try {
     logEvent('Updating Reclaims sheet...');
     var ss = SpreadsheetApp.getActiveSpreadsheet();
