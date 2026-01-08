@@ -67,14 +67,12 @@ function onOpen() {
       .addItem('Import Legacy History', 'showImportLegacyHistoryDialog')
       .addItem('Item History Lookup', 'showItemHistoryLookup')
       .addItem('View Full History', 'viewFullHistory'))
-    .addSubMenu(ui.createMenu('📝 To-Do List')
-      .addItem('Generate To-Do List', 'generateToDoList')
-      .addItem('Clear Completed Tasks', 'clearCompletedTasks'))
-    .addSubMenu(ui.createMenu('📅 Schedule')
+    .addSubMenu(ui.createMenu('📅 Schedule & To-Do')
       .addItem('🎯 Generate Smart Schedule', 'generateSmartSchedule')
       .addItem('📅 Generate Monthly Schedule', 'generateMonthlySchedule')
       .addItem('🔄 Refresh Calendar', 'refreshCalendar')
       .addItem('✅ Mark Visit Complete', 'markVisitComplete')
+      .addItem('🧹 Clear Completed Tasks', 'clearCompletedTasks')
       .addSeparator()
       .addItem('Setup All Schedule Sheets', 'setupAllScheduleSheets')
       .addSeparator()
@@ -2030,6 +2028,9 @@ function generateAllReports() {
     // First, ensure all Change Out Dates are correct (in case triggers didn't fire)
     fixChangeOutDatesSilent();
 
+    // Sync inventory locations with current employee data
+    syncInventoryLocations();
+
     generateGloveSwaps();
     generateSleeveSwaps();
     updatePurchaseNeeds();
@@ -2692,7 +2693,8 @@ function updatePurchaseNeeds() {
     // Table headers
     var tableHeaders = ['Severity', 'Timeframe', 'Item Type', 'Size', 'Class', 'Quantity Needed', 'Reason', 'Status', 'Notes'];
 
-    // Table definitions with clear reasons - ordered by severity (1=most urgent, 5=least urgent)
+    // Table definitions - ordered by severity (1=most urgent, 4=least urgent)
+    // ONLY tracks items that need purchasing: either no inventory or only size-up available
     var tables = [
       {
         title: '🛒 NEED TO ORDER',
@@ -2703,16 +2705,6 @@ function updatePurchaseNeeds() {
         titleBg: '#ef9a9a',
         headerBg: '#ffcdd2',
         match: function(status) { return status === 'Need to Purchase ❌'; }
-      },
-      {
-        title: '📦 READY FOR DELIVERY',
-        reason: 'Ready For Delivery',
-        status: 'Packed For Delivery',
-        severity: 2,
-        timeframe: 'In 2 Weeks',
-        titleBg: '#a5d6a7',
-        headerBg: '#c8e6c9',
-        match: function(status) { return status && status.indexOf('Ready For Delivery') === 0 && status.indexOf('Size Up') === -1; }
       },
       {
         title: '📦⚠️ READY FOR DELIVERY (SIZE UP)',
@@ -2735,20 +2727,10 @@ function updatePurchaseNeeds() {
         match: function(status) { return status && status.indexOf('In Testing (Size Up)') === 0; }
       },
       {
-        title: '⏳ IN TESTING',
-        reason: 'In Testing',
-        status: 'Awaiting Test Results',
-        severity: 4,
-        timeframe: 'Within Month',
-        titleBg: '#90caf9',
-        headerBg: '#bbdefb',
-        match: function(status) { return status && status.indexOf('In Testing') === 0 && status.indexOf('Size Up') === -1; }
-      },
-      {
         title: '⚠️ SIZE UP ASSIGNMENTS',
         reason: 'Size Up',
         status: 'Assigned (Size Up)',
-        severity: 5,
+        severity: 4,
         timeframe: 'Consider',
         titleBg: '#ffcc80',
         headerBg: '#ffe0b2',
@@ -2805,7 +2787,7 @@ function updatePurchaseNeeds() {
       }
     }
 
-    var allRows = [{}, {}, {}, {}, {}, {}];
+    var allRows = [{}, {}, {}, {}];
     processSwapTab('Glove Swaps', 'Glove', allRows);
     processSwapTab('Sleeve Swaps', 'Sleeve', allRows);
 
@@ -2859,10 +2841,8 @@ function updatePurchaseNeeds() {
 
     var grandTotals = {
       needToOrder: 0,
-      readyForDelivery: 0,
       readyForDeliverySizeUp: 0,
       inTestingSizeUp: 0,
-      inTesting: 0,
       sizeUp: 0
     };
 
@@ -2871,11 +2851,9 @@ function updatePurchaseNeeds() {
       for (var k = 0; k < keys.length; k++) {
         var qty = allRows[t][keys[k]].qty;
         if (t === 0) grandTotals.needToOrder += qty;
-        else if (t === 1) grandTotals.readyForDelivery += qty;
-        else if (t === 2) grandTotals.readyForDeliverySizeUp += qty;
-        else if (t === 3) grandTotals.inTestingSizeUp += qty;
-        else if (t === 4) grandTotals.inTesting += qty;
-        else if (t === 5) grandTotals.sizeUp += qty;
+        else if (t === 1) grandTotals.readyForDeliverySizeUp += qty;
+        else if (t === 2) grandTotals.inTestingSizeUp += qty;
+        else if (t === 3) grandTotals.sizeUp += qty;
       }
     }
 
@@ -2889,10 +2867,10 @@ function updatePurchaseNeeds() {
     // Summary stats row (9 columns)
     var topSummaryData = [
       ['1️⃣ Immediate: ' + grandTotals.needToOrder,
-       '2️⃣ 2 Weeks: ' + (grandTotals.readyForDelivery + grandTotals.readyForDeliverySizeUp),
-       '3️⃣ 3 Weeks: ' + grandTotals.inTestingSizeUp,
-       '4️⃣ Month: ' + grandTotals.inTesting,
-       '5️⃣ Consider: ' + grandTotals.sizeUp,
+       '2️⃣ In 2 Weeks: ' + grandTotals.readyForDeliverySizeUp,
+       '3️⃣ In 3 Weeks: ' + grandTotals.inTestingSizeUp,
+       '4️⃣ Consider: ' + grandTotals.sizeUp,
+       '',
        '', '', '', '']
     ];
     purchaseSheet.getRange(rowIdx, 1, 1, 9).setValues(topSummaryData)
@@ -2974,10 +2952,9 @@ function updatePurchaseNeeds() {
 
     var summaryData = [
       ['1️⃣ Immediate', grandTotals.needToOrder, '#ef9a9a'],
-      ['2️⃣ In 2 Weeks', grandTotals.readyForDelivery + grandTotals.readyForDeliverySizeUp, '#a5d6a7'],
+      ['2️⃣ In 2 Weeks', grandTotals.readyForDeliverySizeUp, '#80cbc4'],
       ['3️⃣ In 3 Weeks', grandTotals.inTestingSizeUp, '#ce93d8'],
-      ['4️⃣ Within Month', grandTotals.inTesting, '#90caf9'],
-      ['5️⃣ Consider', grandTotals.sizeUp, '#ffcc80']
+      ['4️⃣ Consider', grandTotals.sizeUp, '#ffcc80']
     ];
 
     for (var s = 0; s < summaryData.length; s++) {
@@ -2988,8 +2965,8 @@ function updatePurchaseNeeds() {
         .setBackground(summaryData[s][2]).setFontColor('#333333').setFontWeight('bold').setHorizontalAlignment('center');
     }
 
-    var totalRow = summaryStartRow + 6;
-    var grandTotal = grandTotals.needToOrder + grandTotals.sizeUp + grandTotals.inTesting + grandTotals.inTestingSizeUp + grandTotals.readyForDelivery + grandTotals.readyForDeliverySizeUp;
+    var totalRow = summaryStartRow + 5;
+    var grandTotal = grandTotals.needToOrder + grandTotals.readyForDeliverySizeUp + grandTotals.inTestingSizeUp + grandTotals.sizeUp;
     purchaseSheet.getRange(totalRow, summaryCol).setValue('TOTAL')
       .setBackground('#cfd8dc').setFontColor('#333333').setFontWeight('bold');
     purchaseSheet.getRange(totalRow, summaryCol + 1).setValue(grandTotal)
@@ -3393,13 +3370,13 @@ function setupReclaimsSheet(sheet, savedApprovals, prevEmpCount) {
     var currentRow = 1;
 
     // Table 1: Previous Employee Reclaims
-    sheet.getRange(currentRow, 1, 1, 8).merge()
+    sheet.getRange(currentRow, 1, 1, 10).merge()
       .setValue('Previous Employee Reclaims')
       .setFontWeight('bold').setFontSize(14).setBackground('#ffcdd2').setHorizontalAlignment('center');
     currentRow++;
 
-    // Headers for Previous Employee table
-    var prevEmpHeaders = ['Item Type', 'Item #', 'Size', 'Class', 'Location', 'Status', 'Assigned To', 'Date Assigned'];
+    // Headers for Previous Employee table (10 columns with empty column J for alignment)
+    var prevEmpHeaders = ['Item Type', 'Item #', 'Size', 'Class', 'Location', 'Status', 'Assigned To', 'Date Assigned', 'Last Day', ''];
     sheet.getRange(currentRow, 1, 1, prevEmpHeaders.length).setValues([prevEmpHeaders]).setFontWeight('bold').setBackground('#ef9a9a').setHorizontalAlignment('center');
     currentRow++;
 
@@ -3637,6 +3614,7 @@ function updateReclaimsSheet() {
     // Build set of Previous Employee names from Employee History sheet
     // Only include employees who are NOT currently active on the Employees sheet
     var previousEmployeeNames = new Set();
+    var previousEmployeeLastDay = {};  // Map of employee name -> Last Day date
     var employeeHistorySheet = ss.getSheetByName('Employee History');
     if (employeeHistorySheet && employeeHistorySheet.getLastRow() > 2) {
       var historyData = employeeHistorySheet.getRange(3, 1, employeeHistorySheet.getLastRow() - 2, 10).getValues();
@@ -3648,6 +3626,7 @@ function updateReclaimsSheet() {
         var histDate = historyData[hi][0];  // Date column
         var histLocation = (historyData[hi][3] || '').toString().trim();
         var histEventType = (historyData[hi][2] || '').toString().trim();
+        var histLastDay = historyData[hi][6];  // Column G - Last Day
 
         if (!histName) continue;
 
@@ -3661,7 +3640,8 @@ function updateReclaimsSheet() {
           employeeLatestEntry[histNameLower] = {
             date: entryDate,
             location: histLocation,
-            eventType: histEventType
+            eventType: histEventType,
+            lastDay: histLastDay
           };
         }
       }
@@ -3682,6 +3662,8 @@ function updateReclaimsSheet() {
           // Also check that they haven't been rehired (no "Rehired" event after the Terminated)
           if (latestEventTypeLower !== 'rehired') {
             previousEmployeeNames.add(empNameKey);
+            // Store the Last Day date for this employee
+            previousEmployeeLastDay[empNameKey] = latestEntry.lastDay || '';
           }
         }
       }
@@ -3708,7 +3690,8 @@ function updateReclaimsSheet() {
       if (locationLower === 'previous employee' || previousEmployeeNames.has(assignedToLower)) {
         if (assignedTo && assignedToLower !== 'on shelf' && assignedToLower !== 'in testing' &&
             assignedToLower !== 'packed for delivery' && assignedToLower !== 'packed for testing') {
-          prevEmpItems.push(['Glove', row[0], row[1], row[2], location, row[6], assignedTo, row[4]]);
+          var lastDayValue = previousEmployeeLastDay[assignedToLower] || '';
+          prevEmpItems.push(['Glove', row[0], row[1], row[2], location, row[6], assignedTo, row[4], lastDayValue]);
         }
       }
     });
@@ -3726,7 +3709,8 @@ function updateReclaimsSheet() {
       if (locationLower === 'previous employee' || previousEmployeeNames.has(assignedToLower)) {
         if (assignedTo && assignedToLower !== 'on shelf' && assignedToLower !== 'in testing' &&
             assignedToLower !== 'packed for delivery' && assignedToLower !== 'packed for testing') {
-          prevEmpItems.push(['Sleeve', row[0], row[1], row[2], location, row[6], assignedTo, row[4]]);
+          var lastDayValue = previousEmployeeLastDay[assignedToLower] || '';
+          prevEmpItems.push(['Sleeve', row[0], row[1], row[2], location, row[6], assignedTo, row[4], lastDayValue]);
         }
       }
     });
@@ -3978,10 +3962,15 @@ function updateReclaimsSheet() {
 
     // Write Previous Employee data (row 3 = after title and headers)
     if (prevEmpItems.length > 0) {
+      // Add empty column J to each row for alignment
+      var prevEmpItemsWithCol = prevEmpItems.map(function(row) {
+        return row.concat(['']);  // Add empty column J
+      });
+
       // Clear any data validation on these rows first (in case of overlap with previous structure)
-      var prevEmpRange = reclaimsSheet.getRange(3, 1, prevEmpItems.length, 8);
+      var prevEmpRange = reclaimsSheet.getRange(3, 1, prevEmpItemsWithCol.length, 10);
       prevEmpRange.clearDataValidations();
-      prevEmpRange.setValues(prevEmpItems);
+      prevEmpRange.setValues(prevEmpItemsWithCol);
     }
 
     // Find where to start Class 3 table (after Approved Locations table)
@@ -3989,24 +3978,48 @@ function updateReclaimsSheet() {
     var currentRow = sheetLastRow + 2;
 
     // --- Create Class 3 Reclaims Table ---
-    var reclaimsHeaders = ['Employee', 'Item Type', 'Item #', 'Size', 'Class', 'Location', 'Pick List Item #', 'Pick List Status'];
+    var reclaimsHeaders = ['Employee', 'Item Type', 'Item #', 'Size', 'Class', 'Location', 'Pick List Item #', 'Pick List Status', 'Picked', 'Date Changed'];
+    var hiddenHeaders = ['Status', 'Assigned To', 'Date Assigned', 'Status', 'Assigned To', 'Date Assigned', 'Status', 'Assigned To', 'Date Assigned', 'Picked For', 'Assigned To', 'Date Assigned', 'Change Out Date'];
 
-    reclaimsSheet.getRange(currentRow, 1, 1, 8).merge()
+    reclaimsSheet.getRange(currentRow, 1, 1, 23).merge()
       .setValue('⚠️ Class 3 Reclaims - Need Downgrade to Class 2')
       .setFontWeight('bold').setFontSize(14).setBackground('#bbdefb').setHorizontalAlignment('center');
     currentRow++;
 
-    reclaimsSheet.getRange(currentRow, 1, 1, reclaimsHeaders.length).setValues([reclaimsHeaders])
-      .setFontWeight('bold').setBackground('#90caf9').setHorizontalAlignment('center');
+    // Add STAGE headers
+    reclaimsSheet.getRange(currentRow, 11, 1, 3).merge().setValue('STAGE 1').setBackground('#e0e0e0').setFontWeight('bold').setHorizontalAlignment('center');
+    reclaimsSheet.getRange(currentRow, 14, 1, 3).merge().setValue('STAGE 1').setBackground('#e0e0e0').setFontWeight('bold').setHorizontalAlignment('center');
+    reclaimsSheet.getRange(currentRow, 17, 1, 4).merge().setValue('STAGE 2').setBackground('#e0e0e0').setFontWeight('bold').setHorizontalAlignment('center');
+    reclaimsSheet.getRange(currentRow, 21, 1, 3).merge().setValue('STAGE 3').setBackground('#e0e0e0').setFontWeight('bold').setHorizontalAlignment('center');
+    currentRow++;
+
+    // Add stage descriptions
+    reclaimsSheet.getRange(currentRow, 11, 1, 3).merge().setValue('Pick List Item Before Check').setBackground('#bdbdbd').setFontWeight('bold').setHorizontalAlignment('center').setFontSize(9);
+    reclaimsSheet.getRange(currentRow, 14, 1, 3).merge().setValue('Old Item Assignment').setBackground('#bdbdbd').setFontWeight('bold').setHorizontalAlignment('center').setFontSize(9);
+    reclaimsSheet.getRange(currentRow, 17, 1, 4).merge().setValue('Pick List Item After Check').setBackground('#bdbdbd').setFontWeight('bold').setHorizontalAlignment('center').setFontSize(9);
+    reclaimsSheet.getRange(currentRow, 21, 1, 3).merge().setValue('Pick List Item New Assignment').setBackground('#bdbdbd').setFontWeight('bold').setHorizontalAlignment('center').setFontSize(9);
+    currentRow++;
+
+    var allHeaders = reclaimsHeaders.concat(hiddenHeaders);
+    reclaimsSheet.getRange(currentRow, 1, 1, allHeaders.length).setValues([allHeaders]);
+    reclaimsSheet.getRange(currentRow, 1, 1, 10).setFontWeight('bold').setBackground('#90caf9').setHorizontalAlignment('center');
+    reclaimsSheet.getRange(currentRow, 11, 1, 13).setFontWeight('bold').setBackground('#9e9e9e').setFontColor('#ffffff').setHorizontalAlignment('center').setFontSize(9);
     currentRow++;
 
     if (class3Reclaims.length > 0) {
       var class3Data = class3Reclaims.map(function(r) {
-        return [r.employee, r.itemType, r.itemNum, r.size, r.itemClass, r.location,
-                r.pickListNum || '—', r.pickListStatus || 'Need to Purchase ❌'];
+        return [
+          r.employee, r.itemType, r.itemNum, r.size, r.itemClass, r.location,
+          r.pickListNum || '—', r.pickListStatus || 'Need to Purchase ❌',
+          false, '',  // Picked checkbox, Date Changed
+          '', '', '', '', '', '', '', '', '', '', '', '', ''  // 13 hidden columns (K-W)
+        ];
       });
-      reclaimsSheet.getRange(currentRow, 1, class3Data.length, 8).setValues(class3Data);
-      reclaimsSheet.getRange(currentRow, 1, class3Data.length, 8).setHorizontalAlignment('center');
+      reclaimsSheet.getRange(currentRow, 1, class3Data.length, 23).setValues(class3Data);
+      reclaimsSheet.getRange(currentRow, 1, class3Data.length, 10).setHorizontalAlignment('center');
+
+      // Hide columns K-W (STAGE data)
+      reclaimsSheet.hideColumns(11, 13);
 
       // Apply conditional formatting to Pick List Status column
       for (var ci = 0; ci < class3Data.length; ci++) {
@@ -4027,7 +4040,7 @@ function updateReclaimsSheet() {
 
       currentRow += class3Data.length;
     } else {
-      reclaimsSheet.getRange(currentRow, 1, 1, 8).merge()
+      reclaimsSheet.getRange(currentRow, 1, 1, 23).merge()
         .setValue('✅ No Class 3 reclaims needed')
         .setFontStyle('italic').setHorizontalAlignment('center').setBackground('#c8e6c9');
       currentRow++;
@@ -4036,22 +4049,44 @@ function updateReclaimsSheet() {
     currentRow += 2;
 
     // --- Create Class 2 Reclaims Table ---
-    reclaimsSheet.getRange(currentRow, 1, 1, 8).merge()
+    reclaimsSheet.getRange(currentRow, 1, 1, 23).merge()
       .setValue('⚠️ Class 2 Reclaims - Need Upgrade to Class 3')
       .setFontWeight('bold').setFontSize(14).setBackground('#ffe0b2').setHorizontalAlignment('center');
     currentRow++;
 
-    reclaimsSheet.getRange(currentRow, 1, 1, reclaimsHeaders.length).setValues([reclaimsHeaders])
-      .setFontWeight('bold').setBackground('#ffcc80').setHorizontalAlignment('center');
+    // Add STAGE headers
+    reclaimsSheet.getRange(currentRow, 11, 1, 3).merge().setValue('STAGE 1').setBackground('#e0e0e0').setFontWeight('bold').setHorizontalAlignment('center');
+    reclaimsSheet.getRange(currentRow, 14, 1, 3).merge().setValue('STAGE 1').setBackground('#e0e0e0').setFontWeight('bold').setHorizontalAlignment('center');
+    reclaimsSheet.getRange(currentRow, 17, 1, 4).merge().setValue('STAGE 2').setBackground('#e0e0e0').setFontWeight('bold').setHorizontalAlignment('center');
+    reclaimsSheet.getRange(currentRow, 21, 1, 3).merge().setValue('STAGE 3').setBackground('#e0e0e0').setFontWeight('bold').setHorizontalAlignment('center');
+    currentRow++;
+
+    // Add stage descriptions
+    reclaimsSheet.getRange(currentRow, 11, 1, 3).merge().setValue('Pick List Item Before Check').setBackground('#bdbdbd').setFontWeight('bold').setHorizontalAlignment('center').setFontSize(9);
+    reclaimsSheet.getRange(currentRow, 14, 1, 3).merge().setValue('Old Item Assignment').setBackground('#bdbdbd').setFontWeight('bold').setHorizontalAlignment('center').setFontSize(9);
+    reclaimsSheet.getRange(currentRow, 17, 1, 4).merge().setValue('Pick List Item After Check').setBackground('#bdbdbd').setFontWeight('bold').setHorizontalAlignment('center').setFontSize(9);
+    reclaimsSheet.getRange(currentRow, 21, 1, 3).merge().setValue('Pick List Item New Assignment').setBackground('#bdbdbd').setFontWeight('bold').setHorizontalAlignment('center').setFontSize(9);
+    currentRow++;
+
+    reclaimsSheet.getRange(currentRow, 1, 1, allHeaders.length).setValues([allHeaders]);
+    reclaimsSheet.getRange(currentRow, 1, 1, 10).setFontWeight('bold').setBackground('#ffcc80').setHorizontalAlignment('center');
+    reclaimsSheet.getRange(currentRow, 11, 1, 13).setFontWeight('bold').setBackground('#9e9e9e').setFontColor('#ffffff').setHorizontalAlignment('center').setFontSize(9);
     currentRow++;
 
     if (class2Reclaims.length > 0) {
       var class2Data = class2Reclaims.map(function(r) {
-        return [r.employee, r.itemType, r.itemNum, r.size, r.itemClass, r.location,
-                r.pickListNum || '—', r.pickListStatus || 'Need to Purchase ❌'];
+        return [
+          r.employee, r.itemType, r.itemNum, r.size, r.itemClass, r.location,
+          r.pickListNum || '—', r.pickListStatus || 'Need to Purchase ❌',
+          false, '',  // Picked checkbox, Date Changed
+          '', '', '', '', '', '', '', '', '', '', '', '', ''  // 13 hidden columns (K-W)
+        ];
       });
-      reclaimsSheet.getRange(currentRow, 1, class2Data.length, 8).setValues(class2Data);
-      reclaimsSheet.getRange(currentRow, 1, class2Data.length, 8).setHorizontalAlignment('center');
+      reclaimsSheet.getRange(currentRow, 1, class2Data.length, 23).setValues(class2Data);
+      reclaimsSheet.getRange(currentRow, 1, class2Data.length, 10).setHorizontalAlignment('center');
+
+      // Hide columns K-W (STAGE data)
+      reclaimsSheet.hideColumns(11, 13);
 
       // Apply conditional formatting to Pick List Status column
       for (var cj = 0; cj < class2Data.length; cj++) {
@@ -4072,7 +4107,7 @@ function updateReclaimsSheet() {
 
       currentRow += class2Data.length;
     } else {
-      reclaimsSheet.getRange(currentRow, 1, 1, 8).merge()
+      reclaimsSheet.getRange(currentRow, 1, 1, 23).merge()
         .setValue('✅ No Class 2 reclaims needed')
         .setFontStyle('italic').setHorizontalAlignment('center').setBackground('#c8e6c9');
       currentRow++;
@@ -5069,10 +5104,16 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
     var classMatch = (itemClass === targetClass);
     var statusMatch = (itemStatus === 'on shelf');
     var notAssigned = !assignedItems.has(itemNum);
+    var notLost = !isLostLocate(item);
     var sizeMatch = isGlove ? (itemSize === useSizeNum) :
                     (item[1] && item[1].toString().trim().toLowerCase() === useSize.toString().trim().toLowerCase());
 
-    return classMatch && statusMatch && notAssigned && sizeMatch;
+    // Debug logging when filtering due to LOST-LOCATE
+    if (classMatch && statusMatch && !notAssigned && sizeMatch && !notLost) {
+      Logger.log('findReclaimPickListItem: Filtered item #' + itemNum + ' for ' + employeeName + ' - LOST-LOCATE marker found');
+    }
+
+    return classMatch && statusMatch && notAssigned && notLost && sizeMatch;
   });
 
   if (match) {
@@ -5088,10 +5129,17 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
       var itemStatus = (item[6] || '').toString().trim().toLowerCase();
       var itemNum = item[0].toString().trim();
       var itemSize = parseFloat(item[1]);
+      var notLost = !isLostLocate(item);
+
+      // Debug logging when filtering due to LOST-LOCATE
+      if (itemClass === targetClass && itemStatus === 'on shelf' && !assignedItems.has(itemNum) && itemSize === useSizeNum + 0.5 && !notLost) {
+        Logger.log('findReclaimPickListItem: Filtered item #' + itemNum + ' (size up) for ' + employeeName + ' - LOST-LOCATE marker found');
+      }
 
       return itemClass === targetClass &&
              itemStatus === 'on shelf' &&
              !assignedItems.has(itemNum) &&
+             notLost &&
              itemSize === useSizeNum + 0.5;
     });
 
@@ -5112,10 +5160,16 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
     var classMatch = (itemClass === targetClass);
     var statusMatch = (itemStatus === 'ready for delivery');
     var notAssigned = !assignedItems.has(itemNum);
+    var notLost = !isLostLocate(item);
     var sizeMatch = isGlove ? (itemSize === useSizeNum) :
                     (item[1] && item[1].toString().trim().toLowerCase() === useSize.toString().trim().toLowerCase());
 
-    return classMatch && statusMatch && notAssigned && sizeMatch;
+    // Debug logging when filtering due to LOST-LOCATE
+    if (classMatch && statusMatch && !notAssigned && sizeMatch && !notLost) {
+      Logger.log('findReclaimPickListItem: Filtered item #' + itemNum + ' (ready for delivery) for ' + employeeName + ' - LOST-LOCATE marker found');
+    }
+
+    return classMatch && statusMatch && notAssigned && notLost && sizeMatch;
   });
 
   if (match) {
@@ -5131,10 +5185,17 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
       var itemStatus = (item[6] || '').toString().trim().toLowerCase();
       var itemNum = item[0].toString().trim();
       var itemSize = parseFloat(item[1]);
+      var notLost = !isLostLocate(item);
+
+      // Debug logging when filtering due to LOST-LOCATE
+      if (itemClass === targetClass && itemStatus === 'ready for delivery' && !assignedItems.has(itemNum) && itemSize === useSizeNum + 0.5 && !notLost) {
+        Logger.log('findReclaimPickListItem: Filtered item #' + itemNum + ' (ready for delivery size up) for ' + employeeName + ' - LOST-LOCATE marker found');
+      }
 
       return itemClass === targetClass &&
              itemStatus === 'ready for delivery' &&
              !assignedItems.has(itemNum) &&
+             notLost &&
              itemSize === useSizeNum + 0.5;
     });
 
@@ -5155,10 +5216,16 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
     var classMatch = (itemClass === targetClass);
     var statusMatch = (itemStatus === 'in testing');
     var notAssigned = !assignedItems.has(itemNum);
+    var notLost = !isLostLocate(item);
     var sizeMatch = isGlove ? (itemSize === useSizeNum) :
                     (item[1] && item[1].toString().trim().toLowerCase() === useSize.toString().trim().toLowerCase());
 
-    return classMatch && statusMatch && notAssigned && sizeMatch;
+    // Debug logging when filtering due to LOST-LOCATE
+    if (classMatch && statusMatch && !notAssigned && sizeMatch && !notLost) {
+      Logger.log('findReclaimPickListItem: Filtered item #' + itemNum + ' (in testing) for ' + employeeName + ' - LOST-LOCATE marker found');
+    }
+
+    return classMatch && statusMatch && notAssigned && notLost && sizeMatch;
   });
 
   if (match) {
@@ -5174,10 +5241,17 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
       var itemStatus = (item[6] || '').toString().trim().toLowerCase();
       var itemNum = item[0].toString().trim();
       var itemSize = parseFloat(item[1]);
+      var notLost = !isLostLocate(item);
+
+      // Debug logging when filtering due to LOST-LOCATE
+      if (itemClass === targetClass && itemStatus === 'in testing' && !assignedItems.has(itemNum) && itemSize === useSizeNum + 0.5 && !notLost) {
+        Logger.log('findReclaimPickListItem: Filtered item #' + itemNum + ' (in testing size up) for ' + employeeName + ' - LOST-LOCATE marker found');
+      }
 
       return itemClass === targetClass &&
              itemStatus === 'in testing' &&
              !assignedItems.has(itemNum) &&
+             notLost &&
              itemSize === useSizeNum + 0.5;
     });
 
@@ -5978,7 +6052,8 @@ function buildEmailReportHtml() {
   html += '<p style="margin: 10px 0 0 0; opacity: 0.9;">' + dateStr + '</p>';
   html += '</div>';
 
-  // Build each section
+  // Build each section - Calendar at top, then other reports
+  html += buildScheduleCalendarSection(ss, styles);
   html += buildInventoryReportSection(ss, styles);
   html += buildPurchaseNeedsSection(ss, styles);
   html += buildToDoListSection(ss, styles);
@@ -6225,6 +6300,134 @@ function buildPurchaseTable(title, data, styles) {
   });
 
   html += '</table></div>';
+  return html;
+}
+
+/**
+ * Builds the Schedule Calendar section for the email report.
+ * Reads the calendar data from the To-Do List sheet (rows 1-9, columns A-G).
+ */
+function buildScheduleCalendarSection(ss, styles) {
+  var sheet = ss.getSheetByName('To Do List');
+  if (!sheet || sheet.getLastRow() < 9) {
+    return buildEmptySection('📅 Monthly Schedule', 'No schedule calendar available. Run "Generate Smart Schedule" first.', styles);
+  }
+
+  var timezone = ss.getSpreadsheetTimeZone();
+  var now = new Date();
+  var currentMonth = now.getMonth();
+  var currentYear = now.getFullYear();
+  var todayDate = now.getDate();
+
+  var monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                    'July', 'August', 'September', 'October', 'November', 'December'];
+
+  var html = '<div style="background: white; border-radius: 8px; margin-bottom: 20px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">';
+  html += '<div style="background: #1565c0; color: ' + styles.headerColor + '; padding: 12px 15px; font-weight: bold; font-size: 16px;">📅 ' + monthNames[currentMonth] + ' ' + currentYear + ' Schedule</div>';
+  html += '<div style="padding: 15px;">';
+
+  // Read calendar data from sheet (rows 3-9 contain day headers and calendar grid)
+  var calendarData = sheet.getRange(3, 1, 7, 7).getDisplayValues();
+
+  // Build calendar HTML table
+  html += '<table style="width: 100%; border-collapse: collapse; font-size: 11px; table-layout: fixed;">';
+
+  // Day headers row
+  var dayHeaders = calendarData[0];
+  html += '<tr>';
+  for (var d = 0; d < 7; d++) {
+    var dayName = dayHeaders[d] || ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][d];
+    var isWeekend = (d === 0 || d === 6);
+    var headerBg = isWeekend ? '#ff9800' : '#42a5f5';
+    html += '<th style="padding: 8px; border: 1px solid #ddd; background: ' + headerBg + '; color: white; text-align: center; width: 14.28%;">' + dayName + '</th>';
+  }
+  html += '</tr>';
+
+  // Calendar weeks (rows 1-6 of calendarData after headers)
+  for (var week = 1; week < 7; week++) {
+    html += '<tr>';
+    for (var day = 0; day < 7; day++) {
+      var cellContent = calendarData[week][day] || '';
+      var isWeekend = (day === 0 || day === 6);
+
+      // Parse cell content to extract date number and tasks
+      var cellLines = cellContent.split('\n');
+      var dateNumber = '';
+      var tasks = [];
+
+      if (cellLines.length > 0) {
+        // First line contains the date number (format: "━━ X ━━")
+        var firstLine = cellLines[0];
+        var digitPattern = new RegExp('[0-9]+');
+        var dateMatch = firstLine.match(digitPattern);
+        if (dateMatch) {
+          dateNumber = dateMatch[0];
+        }
+
+        // Remaining lines are task info
+        for (var l = 1; l < cellLines.length; l++) {
+          var line = cellLines[l].trim();
+          if (line) {
+            tasks.push(line);
+          }
+        }
+      }
+
+      // Determine cell styling
+      var cellBg = '#ffffff';
+      var hasTasks = tasks.length > 0;
+      var isToday = (dateNumber && parseInt(dateNumber, 10) === todayDate);
+
+      if (cellContent === '') {
+        cellBg = '#f5f5f5'; // Empty cell (other month)
+      } else if (isToday) {
+        cellBg = '#fff9c4'; // Yellow for today
+      } else if (hasTasks) {
+        cellBg = isWeekend ? '#ffe0b2' : '#e3f2fd'; // Orange for weekend with tasks, blue for weekday with tasks
+      } else if (isWeekend) {
+        cellBg = '#fff3e0'; // Light orange for empty weekend
+      }
+
+      html += '<td style="padding: 6px; border: 1px solid #ddd; background: ' + cellBg + '; vertical-align: top; height: 70px;">';
+
+      if (dateNumber) {
+        var dateStyle = isToday ? 'font-weight: bold; color: #f57c00; font-size: 14px;' : 'font-weight: bold; color: #333; font-size: 12px;';
+        html += '<div style="' + dateStyle + '">' + dateNumber + '</div>';
+
+        if (hasTasks) {
+          html += '<div style="font-size: 9px; color: #555; margin-top: 4px; line-height: 1.3;">';
+          // Show first 3 task lines max
+          var maxLines = Math.min(tasks.length, 3);
+          for (var t = 0; t < maxLines; t++) {
+            var taskLine = tasks[t];
+            // Truncate long lines
+            if (taskLine.length > 25) {
+              taskLine = taskLine.substring(0, 22) + '...';
+            }
+            html += taskLine + '<br>';
+          }
+          if (tasks.length > 3) {
+            html += '<span style="color: #999;">+' + (tasks.length - 3) + ' more</span>';
+          }
+          html += '</div>';
+        }
+      }
+
+      html += '</td>';
+    }
+    html += '</tr>';
+  }
+
+  html += '</table>';
+
+  // Add legend
+  html += '<div style="margin-top: 10px; font-size: 10px; color: #666;">';
+  html += '<span style="display: inline-block; width: 12px; height: 12px; background: #fff9c4; border: 1px solid #ddd; margin-right: 4px; vertical-align: middle;"></span> Today &nbsp;&nbsp;';
+  html += '<span style="display: inline-block; width: 12px; height: 12px; background: #e3f2fd; border: 1px solid #ddd; margin-right: 4px; vertical-align: middle;"></span> Scheduled Tasks &nbsp;&nbsp;';
+  html += '<span style="display: inline-block; width: 12px; height: 12px; background: #ffe0b2; border: 1px solid #ddd; margin-right: 4px; vertical-align: middle;"></span> Weekend Tasks';
+  html += '</div>';
+
+  html += '</div></div>';
   return html;
 }
 

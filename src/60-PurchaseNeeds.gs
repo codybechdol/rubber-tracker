@@ -9,6 +9,7 @@
  * Updates the Purchase Needs sheet with items that need ordering.
  * Consolidates data from Glove Swaps, Sleeve Swaps, and Reclaims sheets.
  * Creates prioritized tables based on urgency and timeframe.
+ * ONLY shows items needing purchase: no inventory available OR only size-up available (+1 sleeve/+0.5 glove).
  *
  * Menu item: Glove Manager → Update Purchase Needs
  */
@@ -22,7 +23,8 @@ function updatePurchaseNeeds() {
     // Table headers
     var tableHeaders = ['Severity', 'Timeframe', 'Item Type', 'Size', 'Class', 'Quantity Needed', 'Reason', 'Status', 'Notes'];
 
-    // Table definitions with clear reasons - ordered by severity (1=most urgent, 5=least urgent)
+    // Table definitions - ordered by severity (1=most urgent, 4=least urgent)
+    // ONLY tracks items that need purchasing: either no inventory or only size-up available
     var tables = [
       {
         title: '🛒 NEED TO ORDER',
@@ -33,16 +35,6 @@ function updatePurchaseNeeds() {
         titleBg: '#ef9a9a',
         headerBg: '#ffcdd2',
         match: function(status) { return status === 'Need to Purchase ❌'; }
-      },
-      {
-        title: '📦 READY FOR DELIVERY',
-        reason: 'Ready For Delivery',
-        status: 'Packed For Delivery',
-        severity: 2,
-        timeframe: 'In 2 Weeks',
-        titleBg: '#a5d6a7',
-        headerBg: '#c8e6c9',
-        match: function(status) { return status && status.indexOf('Ready For Delivery') === 0 && status.indexOf('Size Up') === -1; }
       },
       {
         title: '📦⚠️ READY FOR DELIVERY (SIZE UP)',
@@ -65,20 +57,10 @@ function updatePurchaseNeeds() {
         match: function(status) { return status && status.indexOf('In Testing (Size Up)') === 0; }
       },
       {
-        title: '⏳ IN TESTING',
-        reason: 'In Testing',
-        status: 'Awaiting Test Results',
-        severity: 4,
-        timeframe: 'Within Month',
-        titleBg: '#90caf9',
-        headerBg: '#bbdefb',
-        match: function(status) { return status && status.indexOf('In Testing') === 0 && status.indexOf('Size Up') === -1; }
-      },
-      {
         title: '⚠️ SIZE UP ASSIGNMENTS',
         reason: 'Size Up',
         status: 'Assigned (Size Up)',
-        severity: 5,
+        severity: 4,
         timeframe: 'Consider',
         titleBg: '#ffcc80',
         headerBg: '#ffe0b2',
@@ -135,7 +117,7 @@ function updatePurchaseNeeds() {
       }
     }
 
-    var allRows = [{}, {}, {}, {}, {}, {}];
+    var allRows = [{}, {}, {}, {}];
     processSwapTab('Glove Swaps', 'Glove', allRows);
     processSwapTab('Sleeve Swaps', 'Sleeve', allRows);
 
@@ -188,10 +170,8 @@ function updatePurchaseNeeds() {
 
     var grandTotals = {
       needToOrder: 0,
-      readyForDelivery: 0,
       readyForDeliverySizeUp: 0,
       inTestingSizeUp: 0,
-      inTesting: 0,
       sizeUp: 0
     };
 
@@ -200,11 +180,9 @@ function updatePurchaseNeeds() {
       for (var k = 0; k < keys.length; k++) {
         var qty = allRows[t][keys[k]].qty;
         if (t === 0) grandTotals.needToOrder += qty;
-        else if (t === 1) grandTotals.readyForDelivery += qty;
-        else if (t === 2) grandTotals.readyForDeliverySizeUp += qty;
-        else if (t === 3) grandTotals.inTestingSizeUp += qty;
-        else if (t === 4) grandTotals.inTesting += qty;
-        else if (t === 5) grandTotals.sizeUp += qty;
+        else if (t === 1) grandTotals.readyForDeliverySizeUp += qty;
+        else if (t === 2) grandTotals.inTestingSizeUp += qty;
+        else if (t === 3) grandTotals.sizeUp += qty;
       }
     }
 
@@ -218,10 +196,10 @@ function updatePurchaseNeeds() {
     // Summary stats row
     var topSummaryData = [
       ['1️⃣ Immediate: ' + grandTotals.needToOrder,
-       '2️⃣ 2 Weeks: ' + (grandTotals.readyForDelivery + grandTotals.readyForDeliverySizeUp),
-       '3️⃣ 3 Weeks: ' + grandTotals.inTestingSizeUp,
-       '4️⃣ Month: ' + grandTotals.inTesting,
-       '5️⃣ Consider: ' + grandTotals.sizeUp,
+       '2️⃣ In 2 Weeks: ' + grandTotals.readyForDeliverySizeUp,
+       '3️⃣ In 3 Weeks: ' + grandTotals.inTestingSizeUp,
+       '4️⃣ Consider: ' + grandTotals.sizeUp,
+       '',
        '', '', '', '']
     ];
     purchaseSheet.getRange(rowIdx, 1, 1, 9).setValues(topSummaryData)
@@ -288,7 +266,7 @@ function updatePurchaseNeeds() {
     }
 
     // If no data at all, show message
-    var totalItems = grandTotals.needToOrder + grandTotals.sizeUp + grandTotals.inTesting + grandTotals.inTestingSizeUp + grandTotals.readyForDelivery + grandTotals.readyForDeliverySizeUp;
+    var totalItems = grandTotals.needToOrder + grandTotals.readyForDeliverySizeUp + grandTotals.inTestingSizeUp + grandTotals.sizeUp;
     if (totalItems === 0) {
       purchaseSheet.getRange(rowIdx, 1, 1, 9).merge().setValue('✅ No purchase needs at this time!')
         .setFontWeight('bold').setFontSize(12).setBackground('#4caf50').setFontColor('white').setHorizontalAlignment('center');
@@ -303,10 +281,9 @@ function updatePurchaseNeeds() {
 
     var summaryData = [
       ['1️⃣ Immediate', grandTotals.needToOrder, '#ef9a9a'],
-      ['2️⃣ In 2 Weeks', grandTotals.readyForDelivery + grandTotals.readyForDeliverySizeUp, '#a5d6a7'],
+      ['2️⃣ In 2 Weeks', grandTotals.readyForDeliverySizeUp, '#80cbc4'],
       ['3️⃣ In 3 Weeks', grandTotals.inTestingSizeUp, '#ce93d8'],
-      ['4️⃣ Within Month', grandTotals.inTesting, '#90caf9'],
-      ['5️⃣ Consider', grandTotals.sizeUp, '#ffcc80']
+      ['4️⃣ Consider', grandTotals.sizeUp, '#ffcc80']
     ];
 
     for (var s = 0; s < summaryData.length; s++) {
@@ -317,8 +294,8 @@ function updatePurchaseNeeds() {
         .setBackground(summaryData[s][2]).setFontColor('#333333').setFontWeight('bold').setHorizontalAlignment('center');
     }
 
-    var totalRow = summaryStartRow + 6;
-    var grandTotal = grandTotals.needToOrder + grandTotals.sizeUp + grandTotals.inTesting + grandTotals.inTestingSizeUp + grandTotals.readyForDelivery + grandTotals.readyForDeliverySizeUp;
+    var totalRow = summaryStartRow + 5;
+    var grandTotal = grandTotals.needToOrder + grandTotals.readyForDeliverySizeUp + grandTotals.inTestingSizeUp + grandTotals.sizeUp;
     purchaseSheet.getRange(totalRow, summaryCol).setValue('TOTAL')
       .setBackground('#cfd8dc').setFontColor('#333333').setFontWeight('bold');
     purchaseSheet.getRange(totalRow, summaryCol + 1).setValue(grandTotal)

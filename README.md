@@ -60,8 +60,10 @@ Detailed documentation for individual functions is available in the `docs/functi
 
 ### 8. Reclaims
 - **Purpose:** Manages and tracks items needing reclaim or replacement based on location approval rules.
-- **Tables:** Previous Employee Reclaims, Approved Class 3 Locations, Class 3 Reclaims (Need Downgrade), Class 2 Reclaims (Need Upgrade), Lost Items - Need to Locate
-- **Features:** Auto Pick List for replacement items, integrated with Purchase Needs
+- **Columns:** Employee, Item Type, Item #, Size, Class, Location, Pick List Item #, Pick List Status, Picked (checkbox), Date Changed, (hidden STAGE 1/2/3 columns)
+- **Tables:** Previous Employee Reclaims, Class Location Approvals, Class 3 Reclaims (Need Downgrade to CL2), Class 2 Reclaims (Need Upgrade to CL3), Lost Items - Need to Locate
+- **Features:** Auto Pick List for replacement items (excludes LOST-LOCATE items), integrated with Purchase Needs, Picked/Date Changed workflow matching Swap sheets
+- **Documentation:** See [docs/tabs/Reclaims.md](docs/tabs/Reclaims.md) and [docs/LOST_LOCATE_EXCLUSION_POLICY.md](docs/LOST_LOCATE_EXCLUSION_POLICY.md)
 
 ### 9. Purchase Needs
 - **Purpose:** Lists items that need to be purchased, based on inventory and upcoming needs.
