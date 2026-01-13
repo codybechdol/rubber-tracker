@@ -347,14 +347,14 @@ function updateInventoryReports() {
     var totalPurchased = glovesPurchased + sleevesPurchased;
     var totalReclaimed = glovesReclaimed + sleevesReclaimed;
 
-    inventorySheet.getRange(row, 1, 1, 9).merge()
+    inventorySheet.getRange(row, 1, 1, 7).merge()
       .setValue('📦 NEW ITEMS LOG - ' + currentYear + ' (Total: ' + totalNew + ' | Purchased: ' + totalPurchased + ' | Reclaimed: ' + totalReclaimed + ')')
       .setFontWeight('bold').setFontSize(14).setBackground('#6a1b9a').setFontColor('white').setHorizontalAlignment('center');
     inventorySheet.setRowHeight(row, 35);
     row++;
 
-    var logHeaders = ['Date Added', 'Item #', 'Item Type', 'Class', 'Size', 'Source', 'Original Item #s', 'Cost', 'Notes'];
-    inventorySheet.getRange(row, 1, 1, 9).setValues([logHeaders])
+    var logHeaders = ['Date Added', 'Item #', 'Item Type', 'Class', 'Size', 'Source', 'Cost'];
+    inventorySheet.getRange(row, 1, 1, 7).setValues([logHeaders])
       .setFontWeight('bold').setBackground('#9c27b0').setFontColor('white').setHorizontalAlignment('center');
     row++;
 
@@ -368,10 +368,10 @@ function updateInventoryReports() {
       var logDataRows = currentYearLogData.map(function(item) {
         return [
           item.dateAdded, item.itemNum, item.itemType, item.itemClass,
-          item.size, item.source, item.originalItems, item.cost, item.notes
+          item.size, item.source, item.cost
         ];
       });
-      inventorySheet.getRange(row, 1, logDataRows.length, 9).setValues(logDataRows).setHorizontalAlignment('center');
+      inventorySheet.getRange(row, 1, logDataRows.length, 7).setValues(logDataRows).setHorizontalAlignment('center');
 
       for (var i = 0; i < logDataRows.length; i++) {
         var source = logDataRows[i][5];
@@ -835,9 +835,7 @@ function getNewItemsLogDataFromSheet(sheet) {
         itemClass: data[i][3],
         size: data[i][4],
         source: data[i][5],
-        originalItems: data[i][6],
-        cost: data[i][7],
-        notes: data[i][8]
+        cost: data[i][6]
       });
     }
   }
@@ -1249,13 +1247,11 @@ function logNewItem(itemData) {
     itemData.itemClass || '',
     itemData.size || '',
     itemData.source || 'Purchased',
-    itemData.originalItems || '',
-    itemData.cost || '',
-    itemData.notes || ''
+    itemData.cost || ''
   ];
 
-  inventorySheet.getRange(insertRow, 1, 1, 9).setValues([rowData]);
-  inventorySheet.getRange(insertRow, 1, 1, 9).setHorizontalAlignment('center');
+  inventorySheet.getRange(insertRow, 1, 1, 7).setValues([rowData]);
+  inventorySheet.getRange(insertRow, 1, 1, 7).setHorizontalAlignment('center');
 
   // Color code source column
   if (itemData.source === 'Reclaimed') {
