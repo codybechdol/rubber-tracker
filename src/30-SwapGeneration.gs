@@ -106,7 +106,13 @@ function generateSwaps(itemType) {
     var inventorySheet = ss.getSheetByName(inventorySheetName);
     var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
 
-    if (!swapSheet || !inventorySheet || !employeesSheet) {
+    // Create swap sheet if it doesn't exist
+    if (!swapSheet) {
+      swapSheet = ss.insertSheet(swapSheetName);
+      logEvent('Created new ' + swapSheetName + ' sheet');
+    }
+
+    if (!inventorySheet || !employeesSheet) {
       logEvent('Required sheets not found for ' + itemType + ' Swaps');
       return;
     }
@@ -310,10 +316,30 @@ function generateSwaps(itemType) {
         return (num || '').toString().trim();
       };
 
+      // PRE-POPULATE assignedItemNums with manual picks to prevent duplicates
+      // Check if any employees in this class have manual picks
+      Object.keys(manualPicks).forEach(function(empKey) {
+        var manualPick = manualPicks[empKey];
+        if (manualPick && manualPick.pickListNum && manualPick.pickListNum !== '—') {
+          // Check if this employee is in the current class being processed
+          var isInCurrentClass = swapMeta.some(function(meta) {
+            return meta.emp[0].toLowerCase() === empKey;
+          });
+
+          if (isInCurrentClass) {
+            assignedItemNums.add(normalizeItemNum(manualPick.pickListNum));
+            Logger.log('Pre-assigned item ' + manualPick.pickListNum + ' from manual pick for ' + empKey);
+          }
+        }
+      });
+
       // Log how many swaps found for this class
       logEvent('Found ' + swapMeta.length + ' employees needing ' + classNames[itemClass] + ' ' + itemLabel + ' swaps', 'INFO');
       debugSheet && debugSheet.getRange(debugRow++, 1).setValue('=== CLASS ' + itemClass + ' ===');
       debugSheet && debugSheet.getRange(debugRow++, 1).setValue('Found ' + swapMeta.length + ' employees needing swaps');
+      if (assignedItemNums.size > 0) {
+        debugSheet && debugSheet.getRange(debugRow++, 1).setValue('Pre-assigned ' + assignedItemNums.size + ' items from manual picks');
+      }
 
       // Helper function to check if item has LOST-LOCATE marker
       var isLostLocate = function(item) {
@@ -332,6 +358,42 @@ function generateSwaps(itemType) {
         var pickListItemData = null;
         var isAlreadyPicked = false;
         var employeeName = meta.emp[0];
+        var employeeKey = employeeName.toLowerCase();
+
+        // CHECK FOR MANUAL PICK FIRST - Skip automatic assignment if manual pick exists
+        var hasManualPick = manualPicks[employeeKey] &&
+                           manualPicks[employeeKey].pickListNum &&
+                           manualPicks[employeeKey].pickListNum !== '—';
+
+        if (hasManualPick) {
+          // Employee has a manual pick - we'll restore it later, skip automatic assignment
+          Logger.log('Skipping automatic assignment for ' + employeeName + ' - has manual pick: ' + manualPicks[employeeKey].pickListNum);
+
+          // Set placeholder values that will be overwritten by restoreManualPickLists
+          pickListValue = '—';
+          pickListStatus = 'Need to Purchase ❌';
+
+          // Build the row and continue to next employee
+          var rowData = [
+            meta.emp[0], meta.itemNum, meta.size, meta.dateAssigned, meta.changeOutDate, meta.daysLeft,
+            pickListValue,
+            pickListStatus,
+            false,
+            '',
+            '', '', '',
+            meta.oldStatus || '', meta.oldAssignedTo || '', meta.oldDateAssigned || '',
+            '', '', '', '',
+            '', '', ''
+          ];
+
+          swapRows.push({
+            data: rowData,
+            location: meta.employeeLocation,
+            daysLeftCell: meta.daysLeftCell
+          });
+
+          return; // Skip to next employee
+        }
 
         // Debug logging for problematic cases
         var debugEmployee = (employeeName.toLowerCase().indexOf('waco') !== -1);
@@ -798,6 +860,7 @@ function preserveManualPickLists(swapSheet) {
 
 /**
  * Restores manual Pick List edits after regenerating swap sheets.
+ * Also populates Stage 1 columns with current inventory data for the manual pick.
  *
  * @param {Sheet} swapSheet - The regenerated Glove/Sleeve Swaps sheet
  * @param {Object} manualPicks - Map from preserveManualPickLists
@@ -810,6 +873,18 @@ function restoreManualPickLists(swapSheet, manualPicks, startRow, endRow) {
   }
 
   try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheetName = swapSheet.getName();
+    var isGloveSwaps = (sheetName === SHEET_GLOVE_SWAPS);
+    var inventorySheetName = isGloveSwaps ? SHEET_GLOVES : SHEET_SLEEVES;
+    var inventorySheet = ss.getSheetByName(inventorySheetName);
+
+    if (!inventorySheet) {
+      Logger.log('restoreManualPickLists: Inventory sheet not found');
+      return;
+    }
+
+    var inventoryData = inventorySheet.getDataRange().getValues();
     var manualEditColor = '#e3f2fd';
     var numRows = endRow - startRow + 1;
 
@@ -837,9 +912,29 @@ function restoreManualPickLists(swapSheet, manualPicks, startRow, endRow) {
         var actualRow = startRow + i;
         var preserved = manualPicks[empKey];
 
+        // Restore Pick List # and Status
         swapSheet.getRange(actualRow, 7).setValue(preserved.pickListNum);
         swapSheet.getRange(actualRow, 8).setValue(preserved.status);
         swapSheet.getRange(actualRow, 7).setBackground(manualEditColor);
+
+        // Look up item in inventory to populate Stage 1 columns
+        var itemData = null;
+        for (var j = 1; j < inventoryData.length; j++) {
+          if (String(inventoryData[j][0]).trim() === String(preserved.pickListNum).trim()) {
+            itemData = inventoryData[j];
+            break;
+          }
+        }
+
+        if (itemData) {
+          // Populate Stage 1 columns (K, L, M) with current inventory state
+          var stage1Data = [[
+            itemData[6] || '',    // K - Status
+            itemData[7] || '',    // L - Assigned To
+            itemData[4] || ''     // M - Date Assigned
+          ]];
+          swapSheet.getRange(actualRow, 11, 1, 3).setValues(stage1Data);
+        }
 
         Logger.log('Restored manual pick for ' + employeeName + ': ' + preserved.pickListNum);
         restoredCount++;

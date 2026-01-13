@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 15px;
+      margin: 0;
+    }
+    h2 {
+      color: #1565c0;
+      margin-top: 0;
+    }
+    .form-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      font-weight: bold;
+      margin-bottom: 5px;
+      color: #333;
+    }
+    input, select {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      box-sizing: border-box;
+      font-size: 14px;
+    }
+    input:focus, select:focus {
+      border-color: #1565c0;
+      outline: none;
+    }
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-right: 10px;
+    }
+    .btn-primary {
+      background-color: #1565c0;
+      color: white;
+    }
+    .btn-secondary {
+      background-color: #757575;
+      color: white;
+    }
+    .btn:hover {
+      opacity: 0.9;
+    }
+    .item-info {
+      background-color: #e3f2fd;
+      padding: 10px;
+      border-radius: 4px;
+      margin-bottom: 15px;
+    }
+    .radio-group {
+      margin-top: 5px;
+    }
+    .radio-group label {
+      display: inline;
+      font-weight: normal;
+      margin-right: 15px;
+    }
+    .radio-group input[type="radio"] {
+      width: auto;
+      margin-right: 5px;
+    }
+  </style>
+</head>
+<body>
+  <h2>📦 New <?= itemType ?> Detected</h2>
+
+  <div class="item-info">
+    <strong>Item #:</strong> <?= itemNum ?><br>
+    <strong>Sheet:</strong> <?= sheetName ?>
+  </div>
+
+  <form id="newItemForm">
+    <div class="form-group">
+      <label>Size:</label>
+      <? if (sheetName === 'Gloves') { ?>
+      <select id="size" name="size">
+        <option value="">Select size...</option>
+        <option value="8">8</option>
+        <option value="8.5">8.5</option>
+        <option value="9">9</option>
+        <option value="9.5">9.5</option>
+        <option value="10">10</option>
+        <option value="10.5">10.5</option>
+        <option value="11">11</option>
+        <option value="11.5">11.5</option>
+        <option value="12">12</option>
+      </select>
+      <? } else { ?>
+      <select id="size" name="size">
+        <option value="">Select size...</option>
+        <option value="Regular">Regular</option>
+        <option value="Large">Large</option>
+        <option value="X-Large">X-Large</option>
+      </select>
+      <? } ?>
+    </div>
+
+    <div class="form-group">
+      <label>Class:</label>
+      <select id="itemClass" name="itemClass">
+        <option value="">Select class...</option>
+        <option value="0">Class 0</option>
+        <option value="2">Class 2</option>
+        <option value="3">Class 3</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>Test Date:</label>
+      <input type="date" id="testDate" name="testDate">
+    </div>
+
+    <div class="form-group">
+      <label>Location:</label>
+      <input type="text" id="location" name="location" placeholder="Enter location (e.g., Helena)">
+    </div>
+
+    <div class="form-group">
+      <label>Status:</label>
+      <select id="status" name="status">
+        <option value="On Shelf">On Shelf</option>
+        <option value="In Testing">In Testing</option>
+        <option value="Assigned">Assigned</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>Assigned To (optional):</label>
+      <input type="text" id="assignedTo" name="assignedTo" placeholder="Employee name if assigned">
+    </div>
+
+    <hr style="margin: 20px 0;">
+
+    <div class="form-group">
+      <label>Item Source:</label>
+      <div class="radio-group">
+        <label><input type="radio" name="itemSource" value="1" checked> New Purchase</label>
+        <label><input type="radio" name="itemSource" value="2"> Reclaimed</label>
+        <label><input type="radio" name="itemSource" value="3"> Not a new item</label>
+      </div>
+    </div>
+
+    <div style="margin-top: 20px;">
+      <button type="button" class="btn btn-primary" onclick="submitForm()">Save</button>
+      <button type="button" class="btn btn-secondary" onclick="google.script.host.close()">Cancel</button>
+    </div>
+  </form>
+
+  <script>
+    function submitForm() {
+      var formData = {
+        size: document.getElementById('size').value,
+        itemClass: document.getElementById('itemClass').value,
+        testDate: document.getElementById('testDate').value,
+        location: document.getElementById('location').value,
+        status: document.getElementById('status').value,
+        assignedTo: document.getElementById('assignedTo').value,
+        itemSource: document.querySelector('input[name="itemSource"]:checked').value
+      };
+
+      google.script.run
+        .withSuccessHandler(function() {
+          google.script.host.close();
+        })
+        .withFailureHandler(function(err) {
+          alert('Error: ' + err);
+        })
+        .processNewItemDialogSubmit(formData, '<?= itemNum ?>', '<?= sheetName ?>', <?= rowNum ?>);
+    }
+  </script>
+</body>
+</html>
+

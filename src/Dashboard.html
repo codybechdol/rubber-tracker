@@ -331,6 +331,30 @@
         </div>
       </div>
 
+      <!-- Reclaims & To-Do Summary Row -->
+      <div class="row g-3 mt-2">
+        <div class="col-12 col-md-6">
+          <div class="card table-card">
+            <div class="card-header" style="background: linear-gradient(90deg, #e65100 0%, #ff9800 100%); border-bottom: 3px solid #ffcc80;"><i class="bi bi-arrow-repeat"></i> Reclaims Summary</div>
+            <div class="card-body p-0">
+              <table class="table table-sm mb-0">
+                <tbody id="reclaims-summary-table"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="col-12 col-md-6">
+          <div class="card table-card">
+            <div class="card-header" style="background: linear-gradient(90deg, #7b1fa2 0%, #ab47bc 100%); border-bottom: 3px solid #ce93d8;"><i class="bi bi-list-check"></i> To-Do Summary</div>
+            <div class="card-body p-0">
+              <table class="table table-sm mb-0">
+                <tbody id="todo-summary-table"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Refresh Button -->
       <div class="row mt-3">
         <div class="col text-center">
@@ -586,6 +610,58 @@
       showDetailModal('both', status);
     }
 
+    function updateReclaimsSummaryTable(reclaimsData) {
+      var tbody = document.getElementById('reclaims-summary-table');
+      tbody.innerHTML = '';
+      if (!reclaimsData || reclaimsData.total === 0) {
+        tbody.innerHTML = '<tr><td colspan="2" class="text-success text-center p-3"><i class="bi bi-check-circle"></i> No reclaims needed!</td></tr>';
+        return;
+      }
+      var rows = [
+        { label: '⚠️ Class 3 Reclaims (Need CL2)', count: reclaimsData.class3 || 0, color: '#fff3e0' },
+        { label: '⚠️ Class 2 Reclaims (Need CL3)', count: reclaimsData.class2 || 0, color: '#e3f2fd' },
+        { label: '👤 Previous Employee Items', count: reclaimsData.prevEmployee || 0, color: '#fce4ec' },
+        { label: '🔍 Lost Items', count: reclaimsData.lost || 0, color: '#ffebee' }
+      ];
+      rows.forEach(function(row) {
+        if (row.count > 0) {
+          tbody.innerHTML += '<tr style="background: ' + row.color + ';">' +
+            '<td style="padding: 8px;">' + row.label + '</td>' +
+            '<td style="padding: 8px; text-align: center; font-weight: bold;">' + row.count + '</td>' +
+            '</tr>';
+        }
+      });
+      tbody.innerHTML += '<tr style="background: #e0e0e0; font-weight: bold;">' +
+        '<td style="padding: 8px;">Total Reclaims</td>' +
+        '<td style="padding: 8px; text-align: center;">' + reclaimsData.total + '</td>' +
+        '</tr>';
+    }
+
+    function updateTodoSummaryTable(todoData) {
+      var tbody = document.getElementById('todo-summary-table');
+      tbody.innerHTML = '';
+      if (!todoData || todoData.total === 0) {
+        tbody.innerHTML = '<tr><td colspan="2" class="text-success text-center p-3"><i class="bi bi-check-circle"></i> All tasks complete!</td></tr>';
+        return;
+      }
+      var rows = [
+        { label: '🔴 High Priority', count: todoData.high || 0, color: '#ffcdd2' },
+        { label: '🟠 Medium Priority', count: todoData.medium || 0, color: '#ffe0b2' },
+        { label: '🟢 Low Priority', count: todoData.low || 0, color: '#c8e6c9' },
+        { label: '✅ Completed', count: todoData.completed || 0, color: '#e8f5e9' }
+      ];
+      rows.forEach(function(row) {
+        tbody.innerHTML += '<tr style="background: ' + row.color + ';">' +
+          '<td style="padding: 8px;">' + row.label + '</td>' +
+          '<td style="padding: 8px; text-align: center; font-weight: bold;">' + row.count + '</td>' +
+          '</tr>';
+      });
+      tbody.innerHTML += '<tr style="background: #e0e0e0; font-weight: bold;">' +
+        '<td style="padding: 8px;">Pending Tasks</td>' +
+        '<td style="padding: 8px; text-align: center;">' + todoData.total + '</td>' +
+        '</tr>';
+    }
+
     function refreshDashboard() {
       document.getElementById('loading').style.display = 'block';
       document.getElementById('error').style.display = 'none';
@@ -612,6 +688,8 @@
           updateLocationTable(data.locationData);
           updateSwapsTable('glove-swaps-table', data.gloveSwaps, 'gloves');
           updateSwapsTable('sleeve-swaps-table', data.sleeveSwaps, 'sleeves');
+          updateReclaimsSummaryTable(data.reclaimsSummary);
+          updateTodoSummaryTable(data.todoSummary);
         })
         .withFailureHandler(function(err) {
           document.getElementById('loading').style.display = 'none';

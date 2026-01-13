@@ -30,6 +30,10 @@ function handleLastDayChange(ss, sheet, editedRow, newValue) {
     var lastDayReasonColIdx = -1;
     var hireDateColIdx = -1;
     var lastDayColIdx = -1;
+    var phoneNumberColIdx = -1;
+    var emailAddressColIdx = -1;
+    var gloveSizeColIdx = -1;
+    var sleeveSizeColIdx = -1;
 
     for (var h = 0; h < empHeaders.length; h++) {
       var header = String(empHeaders[h]).toLowerCase().trim();
@@ -38,6 +42,10 @@ function handleLastDayChange(ss, sheet, editedRow, newValue) {
       if (header === 'hire date') hireDateColIdx = h;
       if (header === 'last day') lastDayColIdx = h;
       if (header === 'last day reason') lastDayReasonColIdx = h;
+      if (header === 'phone number') phoneNumberColIdx = h;
+      if (header === 'email address') emailAddressColIdx = h;
+      if (header === 'glove size') gloveSizeColIdx = h;
+      if (header === 'sleeve size') sleeveSizeColIdx = h;
     }
 
     var empName = empData[nameColIdx] || '';
@@ -45,6 +53,10 @@ function handleLastDayChange(ss, sheet, editedRow, newValue) {
     var jobNumber = jobNumberColIdx !== -1 ? empData[jobNumberColIdx] : '';
     var lastDayReason = lastDayReasonColIdx !== -1 ? empData[lastDayReasonColIdx] : '';
     var hireDate = hireDateColIdx !== -1 ? empData[hireDateColIdx] : '';
+    var phoneNumber = phoneNumberColIdx !== -1 ? empData[phoneNumberColIdx] : '';
+    var emailAddress = emailAddressColIdx !== -1 ? empData[emailAddressColIdx] : '';
+    var gloveSize = gloveSizeColIdx !== -1 ? empData[gloveSizeColIdx] : '';
+    var sleeveSize = sleeveSizeColIdx !== -1 ? empData[sleeveSizeColIdx] : '';
 
     var lastDayStr = '';
     if (newValue instanceof Date) {
@@ -77,16 +89,20 @@ function handleLastDayChange(ss, sheet, editedRow, newValue) {
     }
 
     var historyRow = [
-      lastDayStr,
-      empName,
-      'Terminated',
-      location,
-      jobNumber,
-      hireDateStr,
-      lastDayStr,
-      lastDayReason,
-      '',
-      ''
+      lastDayStr,      // Date
+      empName,         // Employee Name
+      'Terminated',    // Event Type
+      location,        // Location
+      jobNumber,       // Job Number
+      hireDateStr,     // Hire Date
+      lastDayStr,      // Last Day
+      lastDayReason,   // Last Day Reason
+      '',              // Rehire Date
+      '',              // Notes
+      phoneNumber,     // Phone Number
+      emailAddress,    // Email Address
+      gloveSize,       // Glove Size
+      sleeveSize       // Sleeve Size
     ];
     historySheet.appendRow(historyRow);
 
@@ -209,6 +225,20 @@ function handleRehireDateChange(ss, sheet, editedRow, newValue) {
 
     var newJobNumber = jobNumberResponse.getResponseText().trim();
 
+    // Prompt for Job Classification
+    var jobClassificationResponse = ui.prompt(
+      '👷 Enter Job Classification',
+      'Employee: ' + empName + '\nLocation: ' + newLocation + '\nJob Number: ' + (newJobNumber || 'N/A') + '\n\nEnter the job classification (or leave blank):',
+      ui.ButtonSet.OK_CANCEL
+    );
+
+    if (jobClassificationResponse.getSelectedButton() !== ui.Button.OK) {
+      sheet.getRange(editedRow, rehireDateColIdx + 1).setValue('');
+      return;
+    }
+
+    var newJobClassification = jobClassificationResponse.getResponseText().trim();
+
     if (!employeesSheet) {
       employeesSheet = ss.insertSheet(SHEET_EMPLOYEES);
     }
@@ -218,12 +248,14 @@ function handleRehireDateChange(ss, sheet, editedRow, newValue) {
     var empLocationColIdx = -1;
     var empJobNumberColIdx = -1;
     var empHireDateColIdx = -1;
+    var empJobClassificationColIdx = -1;
 
     for (var eh = 0; eh < empHeaders.length; eh++) {
       var empHeader = String(empHeaders[eh]).toLowerCase().trim();
       if (empHeader === 'location') empLocationColIdx = eh;
       if (empHeader === 'job number') empJobNumberColIdx = eh;
       if (empHeader === 'hire date') empHireDateColIdx = eh;
+      if (empHeader === 'job classification') empJobClassificationColIdx = eh;
     }
 
     var newEmpRow = [];
@@ -235,21 +267,26 @@ function handleRehireDateChange(ss, sheet, editedRow, newValue) {
     if (empLocationColIdx !== -1) newEmpRow[empLocationColIdx] = newLocation;
     if (empJobNumberColIdx !== -1) newEmpRow[empJobNumberColIdx] = newJobNumber;
     if (empHireDateColIdx !== -1) newEmpRow[empHireDateColIdx] = rehireDateStr;
+    if (empJobClassificationColIdx !== -1) newEmpRow[empJobClassificationColIdx] = newJobClassification;
 
     employeesSheet.appendRow(newEmpRow);
 
     var todayStr = Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
     var rehiredHistoryRow = [
-      todayStr,
-      empName,
-      'Rehired',
-      newLocation,
-      newJobNumber,
-      originalHireDate,
-      '',
-      '',
-      rehireDateStr,
-      'Rehired from Previous Employee'
+      todayStr,                             // Date
+      empName,                              // Employee Name
+      'Rehired',                            // Event Type
+      newLocation,                          // Location
+      newJobNumber,                         // Job Number
+      originalHireDate,                     // Hire Date
+      '',                                   // Last Day
+      '',                                   // Last Day Reason
+      rehireDateStr,                        // Rehire Date
+      'Rehired from Previous Employee',    // Notes
+      '',                                   // Phone Number
+      '',                                   // Email Address
+      '',                                   // Glove Size
+      ''                                    // Sleeve Size
     ];
     sheet.appendRow(rehiredHistoryRow);
 
@@ -257,6 +294,7 @@ function handleRehireDateChange(ss, sheet, editedRow, newValue) {
       'Employee: ' + empName + '\n' +
       'Location: ' + newLocation + '\n' +
       'Job Number: ' + (newJobNumber || 'N/A') + '\n' +
+      'Job Classification: ' + (newJobClassification || 'N/A') + '\n' +
       'Rehire Date: ' + rehireDateStr,
       ui.ButtonSet.OK);
 
@@ -331,16 +369,20 @@ function trackEmployeeChange(ss, sheet, editedRow, editedCol, newValue, oldValue
     }
 
     var historyRow = [
-      todayStr,
-      empName,
-      changeType,
-      location,
-      jobNumber,
-      hireDateStr,
-      '',
-      '',
-      '',
-      changeNotes
+      todayStr,        // Date
+      empName,         // Employee Name
+      changeType,      // Event Type
+      location,        // Location
+      jobNumber,       // Job Number
+      hireDateStr,     // Hire Date
+      '',              // Last Day
+      '',              // Last Day Reason
+      '',              // Rehire Date
+      changeNotes,     // Notes
+      '',              // Phone Number
+      '',              // Email Address
+      '',              // Glove Size
+      ''               // Sleeve Size
     ];
     historySheet.appendRow(historyRow);
 
@@ -352,8 +394,9 @@ function trackEmployeeChange(ss, sheet, editedRow, editedCol, newValue, oldValue
 }
 
 /**
- * Saves employee location and job number changes to Employee History.
- * Tracks every change in location and/or job number.
+ * Saves employee changes to Employee History.
+ * Tracks: new employees, location changes, job number changes, phone/email/size changes.
+ * Captures all employee data (phone, email, sizes) for each entry.
  * Called from saveHistory().
  *
  * @return {number} Number of new entries added
@@ -369,30 +412,56 @@ function saveEmployeeHistory() {
   var empData = employeesSheet.getDataRange().getValues();
   var empHeaders = empData[0];
 
+  // Find all column indices dynamically
   var nameColIdx = 0;
   var locationColIdx = -1;
   var jobNumberColIdx = -1;
   var hireDateColIdx = -1;
+  var phoneNumberColIdx = -1;
+  var emailAddressColIdx = -1;
+  var gloveSizeColIdx = -1;
+  var sleeveSizeColIdx = -1;
+  var jobClassificationColIdx = -1;
 
   for (var h = 0; h < empHeaders.length; h++) {
     var header = String(empHeaders[h]).toLowerCase().trim();
     if (header === 'location') locationColIdx = h;
     if (header === 'job number') jobNumberColIdx = h;
     if (header === 'hire date') hireDateColIdx = h;
+    if (header === 'phone number') phoneNumberColIdx = h;
+    if (header === 'email address') emailAddressColIdx = h;
+    if (header === 'glove size') gloveSizeColIdx = h;
+    if (header === 'sleeve size') sleeveSizeColIdx = h;
+    if (header === 'job classification') jobClassificationColIdx = h;
   }
 
+  // Get existing history to find last known state for each employee
   var historyData = [];
   if (historySheet.getLastRow() > 2) {
-    historyData = historySheet.getRange(3, 1, historySheet.getLastRow() - 2, 10).getValues();
+    historyData = historySheet.getRange(3, 1, historySheet.getLastRow() - 2, 14).getValues();
   }
 
+  // Build map of last known state for each employee (most recent entry)
+  // Also track Last Day, Last Day Reason, and Rehire Date to preserve them
   var lastKnownState = {};
   for (var hi = 0; hi < historyData.length; hi++) {
     var histName = (historyData[hi][1] || '').toString().trim().toLowerCase();
     if (histName) {
+      // Get current stored values
+      var existing = lastKnownState[histName] || {};
+
+      // Always update to the latest entry for this employee
       lastKnownState[histName] = {
-        location: historyData[hi][3] || '',
-        jobNumber: historyData[hi][4] || ''
+        location: (historyData[hi][3] || '').toString().trim(),
+        jobNumber: (historyData[hi][4] || '').toString().trim(),
+        // Preserve Last Day, Last Day Reason, Rehire Date if they exist (don't overwrite with empty)
+        lastDay: (historyData[hi][6] || existing.lastDay || '').toString().trim(),
+        lastDayReason: (historyData[hi][7] || existing.lastDayReason || '').toString().trim(),
+        rehireDate: (historyData[hi][8] || existing.rehireDate || '').toString().trim(),
+        phoneNumber: (historyData[hi][10] || '').toString().trim(),
+        emailAddress: (historyData[hi][11] || '').toString().trim(),
+        gloveSize: (historyData[hi][12] || '').toString().trim(),
+        sleeveSize: (historyData[hi][13] || '').toString().trim()
       };
     }
   }
@@ -400,19 +469,28 @@ function saveEmployeeHistory() {
   var todayStr = Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
   var newEntries = 0;
 
+  // Check each employee for changes
   for (var i = 1; i < empData.length; i++) {
     var name = (empData[i][nameColIdx] || '').toString().trim();
     if (!name) continue;
 
     var nameLower = name.toLowerCase();
+
+    // Get current values from Employees sheet
     var currentLocation = locationColIdx !== -1 ? (empData[i][locationColIdx] || '').toString().trim() : '';
     var currentJobNumber = jobNumberColIdx !== -1 ? (empData[i][jobNumberColIdx] || '').toString().trim() : '';
     var hireDate = hireDateColIdx !== -1 ? empData[i][hireDateColIdx] : '';
+    var phoneNumber = phoneNumberColIdx !== -1 ? (empData[i][phoneNumberColIdx] || '').toString().trim() : '';
+    var emailAddress = emailAddressColIdx !== -1 ? (empData[i][emailAddressColIdx] || '').toString().trim() : '';
+    var gloveSize = gloveSizeColIdx !== -1 ? (empData[i][gloveSizeColIdx] || '').toString().trim() : '';
+    var sleeveSize = sleeveSizeColIdx !== -1 ? (empData[i][sleeveSizeColIdx] || '').toString().trim() : '';
 
+    // Skip Previous Employee locations (already handled by handleLastDayChange)
     if (currentLocation.toLowerCase() === 'previous employee') continue;
 
     var last = lastKnownState[nameLower];
 
+    // Format hire date
     var hireDateStr = '';
     if (hireDate) {
       if (hireDate instanceof Date) {
@@ -425,39 +503,114 @@ function saveEmployeeHistory() {
       }
     }
 
+    // If no history exists for this employee, add initial "New Employee" entry
     if (!last) {
-      var eventType = 'Current State';
-      historySheet.appendRow([todayStr, name, eventType, currentLocation, currentJobNumber, hireDateStr, '', '', '', '']);
+      var eventType = 'New Employee';
+      historySheet.appendRow([
+        todayStr,           // Date
+        name,               // Employee Name
+        eventType,          // Event Type
+        currentLocation,    // Location
+        currentJobNumber,   // Job Number
+        hireDateStr,        // Hire Date
+        '',                 // Last Day (new employee, no last day yet)
+        '',                 // Last Day Reason
+        '',                 // Rehire Date
+        'Added to system',  // Notes
+        phoneNumber,        // Phone Number
+        emailAddress,       // Email Address
+        gloveSize,          // Glove Size
+        sleeveSize          // Sleeve Size
+      ]);
       newEntries++;
-      lastKnownState[nameLower] = { location: currentLocation, jobNumber: currentJobNumber };
+      lastKnownState[nameLower] = {
+        location: currentLocation,
+        jobNumber: currentJobNumber,
+        lastDay: '',
+        lastDayReason: '',
+        rehireDate: '',
+        phoneNumber: phoneNumber,
+        emailAddress: emailAddress,
+        gloveSize: gloveSize,
+        sleeveSize: sleeveSize
+      };
       continue;
     }
 
+    // Check for any changes
     var locationChanged = last.location !== currentLocation;
     var jobNumberChanged = last.jobNumber !== currentJobNumber;
+    var phoneChanged = last.phoneNumber !== phoneNumber;
+    var emailChanged = last.emailAddress !== emailAddress;
+    var gloveSizeChanged = last.gloveSize !== gloveSize;
+    var sleeveSizeChanged = last.sleeveSize !== sleeveSize;
 
-    if (locationChanged || jobNumberChanged) {
-      var changeType = '';
-      if (locationChanged && jobNumberChanged) {
-        changeType = 'Location & Job # Change';
-      } else if (locationChanged) {
-        changeType = 'Location Change';
-      } else {
-        changeType = 'Job Number Change';
-      }
+    // Only log if something significant changed
+    if (locationChanged || jobNumberChanged || phoneChanged || emailChanged || gloveSizeChanged || sleeveSizeChanged) {
 
-      var changeNotes = '';
+      // Build change type and notes
+      var changeTypes = [];
+      var changeNotes = [];
+
       if (locationChanged) {
-        changeNotes += 'From: ' + (last.location || 'N/A') + ' → ' + currentLocation;
+        changeTypes.push('Location');
+        changeNotes.push('Location: ' + (last.location || 'N/A') + ' → ' + currentLocation);
       }
       if (jobNumberChanged) {
-        if (changeNotes) changeNotes += '; ';
-        changeNotes += 'Job#: ' + (last.jobNumber || 'N/A') + ' → ' + currentJobNumber;
+        changeTypes.push('Job #');
+        changeNotes.push('Job#: ' + (last.jobNumber || 'N/A') + ' → ' + currentJobNumber);
+      }
+      if (phoneChanged) {
+        changeTypes.push('Phone');
+        changeNotes.push('Phone: ' + (last.phoneNumber || 'N/A') + ' → ' + phoneNumber);
+      }
+      if (emailChanged) {
+        changeTypes.push('Email');
+        changeNotes.push('Email: ' + (last.emailAddress || 'N/A') + ' → ' + emailAddress);
+      }
+      if (gloveSizeChanged) {
+        changeTypes.push('Glove Size');
+        changeNotes.push('Glove: ' + (last.gloveSize || 'N/A') + ' → ' + gloveSize);
+      }
+      if (sleeveSizeChanged) {
+        changeTypes.push('Sleeve Size');
+        changeNotes.push('Sleeve: ' + (last.sleeveSize || 'N/A') + ' → ' + sleeveSize);
       }
 
-      historySheet.appendRow([todayStr, name, changeType, currentLocation, currentJobNumber, hireDateStr, '', '', '', changeNotes]);
+      var changeType = changeTypes.length > 2 ? 'Multiple Changes' : changeTypes.join(' & ') + ' Change';
+      var notesText = changeNotes.join('; ');
+
+      // Preserve Last Day, Last Day Reason, and Rehire Date from previous entries
+      historySheet.appendRow([
+        todayStr,               // Date
+        name,                   // Employee Name
+        changeType,             // Event Type
+        currentLocation,        // Location
+        currentJobNumber,       // Job Number
+        hireDateStr,            // Hire Date
+        last.lastDay || '',     // Last Day (preserved from history)
+        last.lastDayReason || '',// Last Day Reason (preserved from history)
+        last.rehireDate || '',  // Rehire Date (preserved from history)
+        notesText,              // Notes
+        phoneNumber,            // Phone Number
+        emailAddress,           // Email Address
+        gloveSize,              // Glove Size
+        sleeveSize              // Sleeve Size
+      ]);
       newEntries++;
-      lastKnownState[nameLower] = { location: currentLocation, jobNumber: currentJobNumber };
+
+      // Update last known state
+      lastKnownState[nameLower] = {
+        location: currentLocation,
+        jobNumber: currentJobNumber,
+        lastDay: last.lastDay || '',
+        lastDayReason: last.lastDayReason || '',
+        rehireDate: last.rehireDate || '',
+        phoneNumber: phoneNumber,
+        emailAddress: emailAddress,
+        gloveSize: gloveSize,
+        sleeveSize: sleeveSize
+      };
     }
   }
 

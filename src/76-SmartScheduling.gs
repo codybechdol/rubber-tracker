@@ -79,15 +79,19 @@ function collectAndGroupTasks(ss) {
   var employeeLocations = getEmployeeLocationMap(ss);
   Logger.log('collectAndGroupTasks: Found ' + Object.keys(employeeLocations).length + ' employee locations');
 
+  // Get foreman lookup from Employees sheet
+  var employeeForemen = getEmployeeForemanMap(ss);
+  Logger.log('collectAndGroupTasks: Found ' + Object.keys(employeeForemen).length + ' employee foremen');
+
   // Collect from Glove Swaps
   var beforeGlove = countTasks(tasksByLocation);
-  collectSwapTasks(ss, 'Glove Swaps', 'Glove', tasksByLocation, employeeLocations, today);
+  collectSwapTasks(ss, 'Glove Swaps', 'Glove', tasksByLocation, employeeLocations, employeeForemen, today);
   var afterGlove = countTasks(tasksByLocation);
   Logger.log('collectAndGroupTasks: Glove Swaps added ' + (afterGlove - beforeGlove) + ' tasks');
 
   // Collect from Sleeve Swaps
   var beforeSleeve = countTasks(tasksByLocation);
-  collectSwapTasks(ss, 'Sleeve Swaps', 'Sleeve', tasksByLocation, employeeLocations, today);
+  collectSwapTasks(ss, 'Sleeve Swaps', 'Sleeve', tasksByLocation, employeeLocations, employeeForemen, today);
   var afterSleeve = countTasks(tasksByLocation);
   Logger.log('collectAndGroupTasks: Sleeve Swaps added ' + (afterSleeve - beforeSleeve) + ' tasks');
 
@@ -99,16 +103,20 @@ function collectAndGroupTasks(ss) {
 
   // Collect from Reclaims
   var beforeReclaims = countTasks(tasksByLocation);
-  collectReclaimTasks(ss, tasksByLocation, employeeLocations, today);
+  collectReclaimTasks(ss, tasksByLocation, employeeLocations, employeeForemen, today);
   var afterReclaims = countTasks(tasksByLocation);
   Logger.log('collectAndGroupTasks: Reclaims added ' + (afterReclaims - beforeReclaims) + ' tasks');
 
   Logger.log('collectAndGroupTasks: TOTAL tasks = ' + countTasks(tasksByLocation));
 
-  // Sort tasks within each location by due date (overdue first, then earliest)
+  // Sort tasks within each location by foreman, then by due date
   for (var location in tasksByLocation) {
     tasksByLocation[location].sort(function(a, b) {
-      // Overdue tasks first
+      // First sort by foreman (groups crew members together)
+      var foremanCompare = (a.foreman || 'ZZZ').localeCompare(b.foreman || 'ZZZ');
+      if (foremanCompare !== 0) return foremanCompare;
+
+      // Overdue tasks first within foreman group
       if (a.isOverdue && !b.isOverdue) return -1;
       if (!a.isOverdue && b.isOverdue) return 1;
 
@@ -171,6 +179,98 @@ function getEmployeeLocationMap(ss) {
 }
 
 /**
+ * Creates employee name to foreman map from Employees sheet.
+ * Groups employees by crew (extracted from job number) and finds foreman (F or GTO F classification).
+ *
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @return {Object} Map of employee name (lowercase) to foreman name
+ */
+function getEmployeeForemanMap(ss) {
+  var employeesSheet = ss.getSheetByName('Employees');
+  if (!employeesSheet || employeesSheet.getLastRow() < 2) {
+    return {};
+  }
+
+  var data = employeesSheet.getDataRange().getValues();
+  var headers = data[0];
+  var nameCol = -1;
+  var locationCol = -1;
+  var jobNumCol = -1;
+  var classificationCol = -1;
+
+  // Find columns
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'name') nameCol = h;
+    if (header === 'location') locationCol = h;
+    if (header === 'job number') jobNumCol = h;
+    if (header === 'job classification') classificationCol = h;
+  }
+
+  if (nameCol === -1) {
+    return {};
+  }
+
+  // Helper to extract crew number from job number (e.g., "009-26.04" -> "009-26")
+  function extractCrewNum(jobNum) {
+    if (!jobNum) return '';
+    var jobStr = String(jobNum).trim();
+    var lastDotIndex = jobStr.lastIndexOf('.');
+    if (lastDotIndex !== -1) {
+      return jobStr.substring(0, lastDotIndex);
+    }
+    return jobStr;
+  }
+
+  // Build maps for location, job number, and classification
+  var empLocationMap = {};
+  var empJobNumMap = {};
+  var empClassificationMap = {};
+  var empNames = {}; // lowercase -> proper case
+
+  for (var i = 1; i < data.length; i++) {
+    var name = String(data[i][nameCol]).trim();
+    var nameLower = name.toLowerCase();
+    if (name) {
+      empNames[nameLower] = name;
+      empLocationMap[nameLower] = locationCol !== -1 ? String(data[i][locationCol]).trim() : '';
+      empJobNumMap[nameLower] = jobNumCol !== -1 ? String(data[i][jobNumCol]).trim() : '';
+      empClassificationMap[nameLower] = classificationCol !== -1 ? String(data[i][classificationCol]).trim() : '';
+    }
+  }
+
+  // Find foreman for each employee based on same location and crew
+  var foremanMap = {};
+  Object.keys(empNames).forEach(function(nameLower) {
+    var empLocation = empLocationMap[nameLower];
+    var empCrew = extractCrewNum(empJobNumMap[nameLower]);
+
+    if (!empCrew || !empLocation) {
+      foremanMap[nameLower] = empCrew || 'Unknown';
+      return;
+    }
+
+    // Search for foreman in same location and crew
+    var foremanName = null;
+    Object.keys(empNames).forEach(function(otherName) {
+      if (empLocationMap[otherName] === empLocation) {
+        var theirCrew = extractCrewNum(empJobNumMap[otherName]);
+        if (theirCrew === empCrew) {
+          var classification = empClassificationMap[otherName];
+          if (classification === 'F' || classification === 'GTO F') {
+            foremanName = empNames[otherName]; // Use proper-case name
+          }
+        }
+      }
+    });
+
+    foremanMap[nameLower] = foremanName || empCrew || 'Unknown';
+  });
+
+  return foremanMap;
+}
+
+/**
  * Collects swap tasks from Glove Swaps or Sleeve Swaps sheet.
  *
  * Sheet structure:
@@ -185,9 +285,10 @@ function getEmployeeLocationMap(ss) {
  * @param {string} itemType - 'Glove' or 'Sleeve'
  * @param {Object} tasksByLocation - Object to add tasks to
  * @param {Object} employeeLocations - Employee to location map
+ * @param {Object} employeeForemen - Employee to foreman map
  * @param {Date} today - Today's date
  */
-function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLocations, today) {
+function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLocations, employeeForemen, today) {
   Logger.log('*** collectSwapTasks CALLED for ' + sheetName + ' ***');
 
   var sheet = ss.getSheetByName(sheetName);
@@ -343,12 +444,16 @@ function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLoca
         isOverdue = true;
       }
 
+      // Get foreman for this employee
+      var foreman = employeeForemen[employee.toLowerCase()] || 'Unknown';
+
       // Create task object
       var task = {
         type: 'Swap',
         itemType: itemType,
         employee: employee,
         location: location,
+        foreman: foreman,
         currentItem: currentItem,
         pickListItem: pickListItem,
         size: size,
@@ -468,6 +573,7 @@ function collectTrainingTasks(ss, tasksByLocation, today) {
       employee: crewLead || crew, // Use crew lead as employee, or crew number
       crew: crew,
       crewLead: crewLead,
+      foreman: crewLead || crew, // Crew lead is the foreman for training tasks
       location: location,
       month: month,
       currentItem: '', // No current item for training
@@ -514,9 +620,10 @@ function collectTrainingTasks(ss, tasksByLocation, today) {
  * @param {Spreadsheet} ss - Active spreadsheet
  * @param {Object} tasksByLocation - Object to add tasks to
  * @param {Object} employeeLocations - Employee to location map
+ * @param {Object} employeeForemen - Employee to foreman map
  * @param {Date} today - Today's date
  */
-function collectReclaimTasks(ss, tasksByLocation, employeeLocations, today) {
+function collectReclaimTasks(ss, tasksByLocation, employeeLocations, employeeForemen, today) {
   var reclaimsSheet = ss.getSheetByName('Reclaims');
   if (!reclaimsSheet || reclaimsSheet.getLastRow() < 3) {
     Logger.log('collectReclaimTasks: Reclaims sheet not found or empty');
@@ -621,12 +728,16 @@ function collectReclaimTasks(ss, tasksByLocation, employeeLocations, today) {
       location = employeeLocations[employee.toLowerCase()] || 'Unknown';
     }
 
+    // Get foreman for this employee
+    var foreman = employeeForemen[employee.toLowerCase()] || 'Unknown';
+
     // Reclaims are always high priority (ASAP)
     var task = {
       type: currentReclaimType, // 'Reclaim CL3→CL2' or 'Reclaim CL2→CL3'
       itemType: itemType,
       employee: employee,
       location: location,
+      foreman: foreman,
       currentItem: itemNum,
       pickListItem: pickListItem,
       size: size,
@@ -803,25 +914,52 @@ function createSmartScheduleToDoList(ss, tasksByLocation) {
     });
     var overnightRequired = overnightInfo.overnightRequired;
 
-    // Add each task for this location
+    // Group tasks by foreman within this location
+    var foremanGroups = {};
     for (var j = 0; j < locationTasks.length; j++) {
       var task = locationTasks[j];
-
-      // Check if user had previously set a scheduled date for this task
-      var taskKey = location + '|' + (task.employee || task.crewLead || task.crew) + '|' + task.type;
-      var finalScheduledDate = existingScheduledDates[taskKey] || suggestedDate;
-
-      var daysTillDueDisplay = '';
-      if (task.isOverdue) {
-        daysTillDueDisplay = 'OVERDUE';
-      } else if (task.daysTillDue !== null) {
-        daysTillDueDisplay = task.daysTillDue;
+      var foreman = task.foreman || 'Unknown';
+      if (!foremanGroups[foreman]) {
+        foremanGroups[foreman] = [];
       }
+      foremanGroups[foreman].push(task);
+    }
 
-      var locationVisitLabel = '📍 ' + location;
+    // Sort foremen alphabetically
+    var sortedForemen = Object.keys(foremanGroups).sort();
 
-      tasks.push([
-        locationVisitLabel, // Location Visit
+    // Add tasks grouped by foreman
+    for (var fi = 0; fi < sortedForemen.length; fi++) {
+      var foreman = sortedForemen[fi];
+      var foremanTasks = foremanGroups[foreman];
+
+      // Add each task for this foreman
+      for (var j = 0; j < foremanTasks.length; j++) {
+        var task = foremanTasks[j];
+
+        // Check if user had previously set a scheduled date for this task
+        var taskKey = location + '|' + (task.employee || task.crewLead || task.crew) + '|' + task.type;
+        var finalScheduledDate = existingScheduledDates[taskKey] || suggestedDate;
+
+        var daysTillDueDisplay = '';
+        if (task.isOverdue) {
+          daysTillDueDisplay = 'OVERDUE';
+        } else if (task.daysTillDue !== null) {
+          daysTillDueDisplay = task.daysTillDue;
+        }
+
+        // Include foreman info in the location label for first task in each foreman group
+        var locationVisitLabel = '📍 ' + location;
+        if (j === 0 && sortedForemen.length > 1) {
+          // Multiple foremen in this location - show foreman name
+          locationVisitLabel = '📍 ' + location + ' (👷 ' + foreman + ')';
+        } else if (j === 0 && foreman !== 'Unknown') {
+          // Single foreman group - show foreman name on first task
+          locationVisitLabel = '📍 ' + location + ' (👷 ' + foreman + ')';
+        }
+
+        tasks.push([
+          locationVisitLabel, // Location Visit with foreman info
         task.priority, // Priority
         task.type, // Task Type (Swap or Training)
         task.employee || task.crewLead || task.crew, // Employee/Crew
@@ -863,7 +1001,8 @@ function createSmartScheduleToDoList(ss, tasksByLocation) {
           });
         }
       }
-    }
+      } // End foremanTasks for loop
+    } // End sortedForemen for loop
   }
 
   // Now build calendar with task data
@@ -913,12 +1052,16 @@ function createSmartScheduleToDoList(ss, tasksByLocation) {
     .setFontWeight('bold')
     .setBackground('#4285f4')
     .setFontColor('white')
-    .setHorizontalAlignment('center');
+    .setHorizontalAlignment('center')
+    .setWrap(true);
 
   // Write tasks to sheet
   if (tasks.length > 0) {
     var dataStartRow = 14;
     todoSheet.getRange(dataStartRow, 1, tasks.length, headers.length).setValues(tasks);
+
+    // Enable text wrapping for all data cells
+    todoSheet.getRange(dataStartRow, 1, tasks.length, headers.length).setWrap(true);
 
     // Format columns - ONLY columns 8+ (don't override calendar columns 1-7)
     // Columns 1-7 are set by buildToDoListCalendar to 200px each

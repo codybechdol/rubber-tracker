@@ -407,7 +407,7 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
 /**
  * Handles manual edits to the Pick List Item # column (G) in Glove/Sleeve Swaps.
  * Applies light blue background (#e3f2fd) to indicate manual entry.
- * Appends "(Manual)" to the status column if not already present.
+ * Updates status based on inventory item status and populates Stage 1 columns.
  *
  * @param {Spreadsheet} ss - The active spreadsheet
  * @param {Sheet} swapSheet - The Glove/Sleeve Swaps sheet
@@ -423,17 +423,70 @@ function handlePickListManualEdit(ss, swapSheet, inventorySheet, editedRow, newV
 
     logEvent('Manual Pick List edit at row ' + editedRow + ': ' + newValue, 'DEBUG');
 
+    // Mark with blue background
     var editedCell = swapSheet.getRange(editedRow, 7);
     editedCell.setBackground('#e3f2fd');
 
-    var statusCell = swapSheet.getRange(editedRow, 8);
-    var currentStatus = statusCell.getValue().toString();
-
-    if (currentStatus && currentStatus.indexOf('(Manual)') === -1) {
-      statusCell.setValue(currentStatus + ' (Manual)');
+    // If newValue is empty or '—', clear the status and Stage 1 data
+    if (!newValue || newValue === '—' || newValue.toString().trim() === '') {
+      swapSheet.getRange(editedRow, 8).setValue('Need to Purchase ❌');
+      swapSheet.getRange(editedRow, 11, 1, 3).clearContent(); // Clear Stage 1 columns K, L, M
+      logEvent('Pick List cleared for row ' + editedRow, 'INFO');
+      return;
     }
 
-    logEvent('Manual Pick List entry marked with blue background for row ' + editedRow, 'INFO');
+    // Look up the item in inventory
+    var inventoryData = inventorySheet.getDataRange().getValues();
+    var itemRow = -1;
+    var itemData = null;
+
+    for (var i = 1; i < inventoryData.length; i++) {
+      if (String(inventoryData[i][0]).trim() === String(newValue).trim()) {
+        itemRow = i;
+        itemData = inventoryData[i];
+        break;
+      }
+    }
+
+    if (!itemData) {
+      // Item not found in inventory
+      swapSheet.getRange(editedRow, 8).setValue('Item Not Found ❌ (Manual)');
+      swapSheet.getRange(editedRow, 11, 1, 3).clearContent();
+      logEvent('Manual Pick List item ' + newValue + ' not found in inventory', 'WARNING');
+      return;
+    }
+
+    // Get item data from inventory
+    var itemStatus = (itemData[6] || '').toString().trim();
+    var itemAssignedTo = (itemData[7] || '').toString().trim();
+    var itemDateAssigned = itemData[4] || '';
+    var itemStatusLower = itemStatus.toLowerCase();
+    var pickedFor = (itemData[9] || '').toString().trim();
+
+    // Determine the status for column H
+    var displayStatus = '';
+    if (itemStatusLower === 'on shelf') {
+      displayStatus = 'In Stock ✅ (Manual)';
+    } else if (itemStatusLower === 'ready for delivery') {
+      displayStatus = 'Ready For Delivery 🚚 (Manual)';
+    } else if (itemStatusLower === 'in testing') {
+      displayStatus = 'In Testing ⏳ (Manual)';
+    } else {
+      displayStatus = itemStatus + ' (Manual)';
+    }
+
+    // Update Status column (H)
+    swapSheet.getRange(editedRow, 8).setValue(displayStatus);
+
+    // Populate Stage 1 columns (K, L, M) with current inventory state
+    var stage1Data = [[
+      itemStatus,        // K - Status
+      itemAssignedTo,    // L - Assigned To
+      itemDateAssigned   // M - Date Assigned
+    ]];
+    swapSheet.getRange(editedRow, 11, 1, 3).setValues(stage1Data);
+
+    logEvent('Manual Pick List entry updated for row ' + editedRow + ': Item #' + newValue + ', Status: ' + displayStatus, 'INFO');
 
   } catch (e) {
     logEvent('handlePickListManualEdit error: ' + e, 'ERROR');

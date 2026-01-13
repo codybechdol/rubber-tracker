@@ -60,8 +60,118 @@ function onChangeHandler(e) {
 
     // If it's an EDIT change type, the onEditHandler should have caught it
     // This is mainly for INSERT_ROW, INSERT_COLUMN, REMOVE_ROW, REMOVE_COLUMN, FORMAT, OTHER
+
+    // Handle row deletion in Gloves/Sleeves sheets
+    if (e.changeType === 'REMOVE_ROW') {
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      var activeSheet = ss.getActiveSheet();
+      var activeSheetName = activeSheet ? activeSheet.getName() : '';
+
+      // If a row was deleted from Gloves or Sleeves, sync the New Items Log
+      if (activeSheetName === 'Gloves' || activeSheetName === 'Sleeves') {
+        Logger.log('Row deleted from ' + activeSheetName + ' - syncing New Items Log');
+
+        // Use a slight delay to ensure the deletion is complete before syncing
+        // Since we can't use Utilities.sleep in triggers reliably, we'll sync immediately
+        syncNewItemsLogSilent();
+      }
+    }
   } catch (err) {
     Logger.log('Error in onChangeHandler: ' + err);
+  }
+}
+
+/**
+ * Silent version of syncNewItemsLogWithInventory - doesn't show UI alerts.
+ * Used for automatic sync when rows are deleted.
+ */
+function syncNewItemsLogSilent() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var glovesSheet = ss.getSheetByName('Gloves');
+    var sleevesSheet = ss.getSheetByName('Sleeves');
+    var inventorySheet = ss.getSheetByName('Inventory Reports');
+
+    if (!inventorySheet) return;
+
+    // Build sets of current item numbers
+    var currentGloves = new Set();
+    var currentSleeves = new Set();
+
+    if (glovesSheet && glovesSheet.getLastRow() > 1) {
+      var gloveData = glovesSheet.getRange(2, 1, glovesSheet.getLastRow() - 1, 1).getValues();
+      gloveData.forEach(function(row) {
+        var itemNum = String(row[0]).trim();
+        if (itemNum) currentGloves.add(itemNum);
+      });
+    }
+
+    if (sleevesSheet && sleevesSheet.getLastRow() > 1) {
+      var sleeveData = sleevesSheet.getRange(2, 1, sleevesSheet.getLastRow() - 1, 1).getValues();
+      sleeveData.forEach(function(row) {
+        var itemNum = String(row[0]).trim();
+        if (itemNum) currentSleeves.add(itemNum);
+      });
+    }
+
+    // Check New Items Log entries against current inventory
+    var data = inventorySheet.getDataRange().getValues();
+    var inLogSection = false;
+    var headerFound = false;
+    var rowsToDelete = [];
+    var removedItems = [];
+
+    for (var i = 0; i < data.length; i++) {
+      var firstCell = String(data[i][0]).trim();
+
+      if (firstCell.indexOf('NEW ITEMS LOG') !== -1) {
+        inLogSection = true;
+        continue;
+      }
+
+      if (inLogSection && firstCell === 'Date Added') {
+        headerFound = true;
+        continue;
+      }
+
+      if (inLogSection && headerFound && firstCell && firstCell !== '') {
+        var logItemNum = String(data[i][1]).trim();
+        var logItemType = String(data[i][2]).trim();
+
+        // Check if item still exists in inventory
+        var exists = false;
+        if (logItemType === 'Glove') {
+          exists = currentGloves.has(logItemNum);
+        } else if (logItemType === 'Sleeve') {
+          exists = currentSleeves.has(logItemNum);
+        }
+
+        if (!exists && logItemNum) {
+          rowsToDelete.push(i + 1);
+          removedItems.push(logItemNum);
+        }
+      }
+    }
+
+    // Delete orphaned entries (from bottom to top)
+    if (rowsToDelete.length > 0) {
+      rowsToDelete.reverse();
+      for (var r = 0; r < rowsToDelete.length; r++) {
+        inventorySheet.deleteRow(rowsToDelete[r]);
+      }
+
+      // Also reinitialize known item numbers
+      initializeKnownItemNumbers('Gloves');
+      initializeKnownItemNumbers('Sleeves');
+
+      // Update the inventory reports
+      updateInventoryReports();
+
+      ss.toast('Removed ' + removedItems.length + ' item(s) from New Items Log', '🗑️ Auto-Synced', 3);
+      logEvent('Auto-synced New Items Log: removed items ' + removedItems.join(', '));
+    }
+  } catch (err) {
+    Logger.log('Error in syncNewItemsLogSilent: ' + err);
   }
 }
 
@@ -136,6 +246,29 @@ function onEditHandler(e) {
     if (sheetName === 'Training Tracking') {
       handleTrainingTrackingEdit(e);
       return;  // Handled - don't continue to processEdit
+    }
+
+    // Handle new item number detection in Gloves/Sleeves (Column A = item number)
+    if ((sheetName === 'Gloves' || sheetName === 'Sleeves') && editedCol === 1 && editedRow >= 2) {
+      var newItemNum = e.range.getValue();
+      var oldItemNum = e.oldValue;
+      var itemNumStr = String(newItemNum).trim();
+
+      // Check if an item number was REMOVED (cleared or changed)
+      if (oldItemNum && String(oldItemNum).trim() !== '' &&
+          (!newItemNum || String(newItemNum).trim() === '')) {
+        // Item number was cleared - trigger removal handling
+        Logger.log('Item number cleared: ' + oldItemNum + ' from ' + sheetName);
+        handleItemRemoval(String(oldItemNum).trim(), sheetName);
+      }
+      // Check if this is a new item number
+      else if (newItemNum && itemNumStr !== '') {
+        if (isNewItemNumber(itemNumStr, sheetName)) {
+          Logger.log('New item number detected: ' + itemNumStr + ' in ' + sheetName);
+          promptNewItemSource(itemNumStr, sheetName, editedRow);
+        }
+      }
+      // Don't return - allow other processing to continue
     }
 
     // Handle Date Assigned changes in Gloves/Sleeves directly
@@ -263,11 +396,12 @@ function processEdit(e) {
     return;
   }
 
-  // Handle Gloves/Sleeves tab edits (Assigned To, Date Assigned, or Notes columns)
+  // Handle Gloves/Sleeves tab edits (Assigned To, Date Assigned, Status, or Notes columns)
   if (sheetName === SHEET_GLOVES || sheetName === SHEET_SLEEVES) {
     // Use COLS constants for reliable column indices
     var assignedToCol = COLS.INVENTORY.ASSIGNED_TO;     // Column H = 8
     var dateAssignedCol = COLS.INVENTORY.DATE_ASSIGNED; // Column E = 5
+    var statusCol = COLS.INVENTORY.STATUS;              // Column G = 7
     var notesCol = COLS.INVENTORY.NOTES;                // Column K = 11
 
     logEvent('processEdit: sheetName=' + sheetName + ', editedCol=' + editedCol + ', assignedToCol=' + assignedToCol + ', dateAssignedCol=' + dateAssignedCol, 'DEBUG');
@@ -276,6 +410,7 @@ function processEdit(e) {
       handleInventoryAssignedToChange(ss, sheet, sheetName, editedRow, newValue);
       return;
     }
+
 
     if (editedCol === dateAssignedCol) {
       // Direct inline handling for Date Assigned changes - more reliable than separate function
