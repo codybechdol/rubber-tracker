@@ -763,6 +763,7 @@ function mergeAnnualHistory(sheetHistory, propsHistory) {
 
 /**
  * Gets the New Items Log data directly from a sheet (used during report generation).
+ * Uses dynamic header matching to handle column position changes.
  * @param {Sheet} sheet - The Inventory Reports sheet
  * @return {Array} Array of logged item objects
  */
@@ -772,7 +773,8 @@ function getNewItemsLogDataFromSheet(sheet) {
   var data = sheet.getDataRange().getValues();
   var items = [];
   var inLogSection = false;
-  var headerFound = false;
+  var headerRow = null;
+  var colMap = {};
 
   for (var i = 0; i < data.length; i++) {
     var firstCell = String(data[i][0]).trim();
@@ -782,20 +784,39 @@ function getNewItemsLogDataFromSheet(sheet) {
       continue;
     }
 
+    // Detect header row and build column map
     if (inLogSection && firstCell === 'Date Added') {
-      headerFound = true;
+      headerRow = data[i];
+      // Build column index map from headers
+      for (var h = 0; h < headerRow.length; h++) {
+        var header = String(headerRow[h]).trim().toLowerCase();
+        if (header === 'date added') colMap.dateAdded = h;
+        else if (header === 'item #') colMap.itemNum = h;
+        else if (header === 'item type') colMap.itemType = h;
+        else if (header === 'class') colMap.itemClass = h;
+        else if (header === 'size') colMap.size = h;
+        else if (header === 'source') colMap.source = h;
+        else if (header === 'cost') colMap.cost = h;
+      }
       continue;
     }
 
-    if (inLogSection && headerFound && firstCell && firstCell !== '') {
+    // Read data rows using the column map
+    if (inLogSection && headerRow && firstCell && firstCell !== '' &&
+        firstCell !== 'ANNUAL HISTORY' && firstCell.indexOf('📅') === -1) {
+      // Stop if we hit the next section
+      if (firstCell.indexOf('ANNUAL') !== -1 || firstCell.indexOf('Year') === 0) {
+        break;
+      }
+
       items.push({
-        dateAdded: data[i][0],
-        itemNum: data[i][1],
-        itemType: data[i][2],
-        itemClass: data[i][3],
-        size: data[i][4],
-        source: data[i][5],
-        cost: data[i][6]
+        dateAdded: colMap.dateAdded !== undefined ? data[i][colMap.dateAdded] : '',
+        itemNum: colMap.itemNum !== undefined ? data[i][colMap.itemNum] : '',
+        itemType: colMap.itemType !== undefined ? data[i][colMap.itemType] : '',
+        itemClass: colMap.itemClass !== undefined ? data[i][colMap.itemClass] : '',
+        size: colMap.size !== undefined ? data[i][colMap.size] : '',
+        source: colMap.source !== undefined ? data[i][colMap.source] : '',
+        cost: colMap.cost !== undefined ? data[i][colMap.cost] : ''
       });
     }
   }
