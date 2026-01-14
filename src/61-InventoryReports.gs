@@ -170,12 +170,6 @@ function updateInventoryReports() {
       }
     });
 
-    // Current status counts (for display in status tables)
-    var currentGlovesLost = gloveStatusCounts['Lost'] || 0;
-    var currentGlovesFailed = gloveStatusCounts['Failed Rubber'] || 0;
-    var currentSleevesLost = sleeveStatusCounts['Lost'] || 0;
-    var currentSleevesFailed = sleeveStatusCounts['Failed Rubber'] || 0;
-
 
     var gloveAssigned = gloveStatusCounts['Assigned'] || 0;
     var sleeveAssigned = sleeveStatusCounts['Assigned'] || 0;
@@ -517,40 +511,6 @@ function updatePeakCounts(currentGloves, currentSleeves) {
   }
 }
 
-/**
- * Gets YTD stats from Script Properties.
- */
-function getYTDStats() {
-  var props = PropertiesService.getScriptProperties();
-  return {
-    glovesLost: parseInt(props.getProperty('ytdGlovesLost')) || 0,
-    glovesFailed: parseInt(props.getProperty('ytdGlovesFailed')) || 0,
-    sleevesLost: parseInt(props.getProperty('ytdSleevesLost')) || 0,
-    sleevesFailed: parseInt(props.getProperty('ytdSleevesFailed')) || 0
-  };
-}
-
-/**
- * Increments YTD Lost count for gloves or sleeves.
- * Called when an item status changes to "Lost".
- */
-function incrementYTDLost(itemType) {
-  var props = PropertiesService.getScriptProperties();
-  var key = itemType === 'Glove' ? 'ytdGlovesLost' : 'ytdSleevesLost';
-  var current = parseInt(props.getProperty(key)) || 0;
-  props.setProperty(key, String(current + 1));
-}
-
-/**
- * Increments YTD Failed count for gloves or sleeves.
- * Called when an item status changes to "Failed Rubber".
- */
-function incrementYTDFailed(itemType) {
-  var props = PropertiesService.getScriptProperties();
-  var key = itemType === 'Glove' ? 'ytdGlovesFailed' : 'ytdSleevesFailed';
-  var current = parseInt(props.getProperty(key)) || 0;
-  props.setProperty(key, String(current + 1));
-}
 
 /**
  * Resets year-to-date stats for a new year.
