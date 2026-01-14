@@ -1061,60 +1061,119 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
   // Handle Assigned To - this triggers location/status updates and Change Out Date calculation
   if (formData.assignedTo && formData.assignedTo.trim() !== '') {
     var assignedTo = formData.assignedTo.trim();
+    var assignedToLower = assignedTo.toLowerCase();
 
-    // Set Assigned To
-    sheet.getRange(rowNum, 8).setValue(assignedTo);  // Column H = Assigned To
+    // Check if "Assigned To" is a status value (On Shelf, In Testing, etc.) rather than an employee name
+    var statusValues = ['on shelf', 'in testing', 'ready for delivery', 'ready for test', 'lost', 'failed rubber'];
+    var isStatusValue = statusValues.indexOf(assignedToLower) !== -1;
 
-    // Set Date Assigned to today
-    var today = new Date();
-    var dateAssignedCell = sheet.getRange(rowNum, 5);  // Column E = Date Assigned
-    dateAssignedCell.setValue(today);
-    dateAssignedCell.setNumberFormat('MM/dd/yyyy');
+    if (isStatusValue) {
+      // This is a status value, not an employee assignment
+      // Set Assigned To and Status to match
+      sheet.getRange(rowNum, 8).setValue(assignedTo);  // Column H = Assigned To
 
-    // Set Status to Assigned
-    sheet.getRange(rowNum, 7).setValue('Assigned');  // Column G = Status
+      // Set Status based on the Assigned To value
+      var statusToSet = assignedTo;
+      if (assignedToLower === 'on shelf') {
+        statusToSet = 'On Shelf';
+      } else if (assignedToLower === 'in testing') {
+        statusToSet = 'In Testing';
+      } else if (assignedToLower === 'ready for delivery') {
+        statusToSet = 'Ready For Delivery';
+      } else if (assignedToLower === 'ready for test') {
+        statusToSet = 'Ready For Test';
+      } else if (assignedToLower === 'lost') {
+        statusToSet = 'Lost';
+      } else if (assignedToLower === 'failed rubber') {
+        statusToSet = 'Failed Rubber';
+      }
+      sheet.getRange(rowNum, 7).setValue(statusToSet);  // Column G = Status
 
-    // Look up employee's location from Employees sheet
-    var employeesSheet = ss.getSheetByName('Employees');
-    if (employeesSheet && employeesSheet.getLastRow() > 1) {
-      var empData = employeesSheet.getDataRange().getValues();
-      var empHeaders = empData[0];
-      var nameCol = -1;
-      var locCol = -1;
-
-      for (var h = 0; h < empHeaders.length; h++) {
-        var hdr = String(empHeaders[h]).toLowerCase().trim();
-        if (hdr === 'name') nameCol = h;
-        if (hdr === 'location') locCol = h;
+      // Set Location from form or default to Helena for On Shelf items
+      if (formData.location && formData.location.trim() !== '') {
+        sheet.getRange(rowNum, 6).setValue(formData.location.trim());  // Column F = Location
+      } else if (assignedToLower === 'on shelf') {
+        sheet.getRange(rowNum, 6).setValue('Helena');  // Default location for On Shelf items
       }
 
-      if (nameCol !== -1 && locCol !== -1) {
-        for (var i = 1; i < empData.length; i++) {
-          var empName = String(empData[i][nameCol]).trim().toLowerCase();
-          if (empName === assignedTo.toLowerCase()) {
-            var empLocation = String(empData[i][locCol]).trim();
-            if (empLocation) {
-              sheet.getRange(rowNum, 6).setValue(empLocation);  // Column F = Location
+      // Set Date Assigned to today for tracking purposes
+      var today = new Date();
+      var dateAssignedCell = sheet.getRange(rowNum, 5);  // Column E = Date Assigned
+      dateAssignedCell.setValue(today);
+      dateAssignedCell.setNumberFormat('MM/dd/yyyy');
+
+      // Calculate Change Out Date based on test date
+      if (formData.testDate) {
+        var isSleeve = (sheetName === 'Sleeves');
+        var location = sheet.getRange(rowNum, 6).getValue();
+        var changeOutDate = calculateChangeOutDate(today, location, assignedTo, isSleeve);
+        if (changeOutDate) {
+          var changeOutCell = sheet.getRange(rowNum, 9);  // Column I = Change Out Date
+          if (changeOutDate === 'N/A') {
+            changeOutCell.setNumberFormat('@');
+          } else {
+            changeOutCell.setNumberFormat('MM/dd/yyyy');
+          }
+          changeOutCell.setValue(changeOutDate);
+        }
+      }
+
+    } else {
+      // This is an actual employee assignment
+      // Set Assigned To
+      sheet.getRange(rowNum, 8).setValue(assignedTo);  // Column H = Assigned To
+
+      // Set Date Assigned to today
+      var today = new Date();
+      var dateAssignedCell = sheet.getRange(rowNum, 5);  // Column E = Date Assigned
+      dateAssignedCell.setValue(today);
+      dateAssignedCell.setNumberFormat('MM/dd/yyyy');
+
+      // Set Status to Assigned
+      sheet.getRange(rowNum, 7).setValue('Assigned');  // Column G = Status
+
+      // Look up employee's location from Employees sheet
+      var employeesSheet = ss.getSheetByName('Employees');
+      if (employeesSheet && employeesSheet.getLastRow() > 1) {
+        var empData = employeesSheet.getDataRange().getValues();
+        var empHeaders = empData[0];
+        var nameCol = -1;
+        var locCol = -1;
+
+        for (var h = 0; h < empHeaders.length; h++) {
+          var hdr = String(empHeaders[h]).toLowerCase().trim();
+          if (hdr === 'name') nameCol = h;
+          if (hdr === 'location') locCol = h;
+        }
+
+        if (nameCol !== -1 && locCol !== -1) {
+          for (var i = 1; i < empData.length; i++) {
+            var empName = String(empData[i][nameCol]).trim().toLowerCase();
+            if (empName === assignedTo.toLowerCase()) {
+              var empLocation = String(empData[i][locCol]).trim();
+              if (empLocation) {
+                sheet.getRange(rowNum, 6).setValue(empLocation);  // Column F = Location
+              }
+              break;
             }
-            break;
           }
         }
       }
-    }
 
-    // Calculate and set Change Out Date
-    var isSleeve = (sheetName === 'Sleeves');
-    var location = sheet.getRange(rowNum, 6).getValue();  // Get location (may have been auto-filled)
-    var changeOutDate = calculateChangeOutDate(today, location, assignedTo, isSleeve);
+      // Calculate and set Change Out Date
+      var isSleeve = (sheetName === 'Sleeves');
+      var location = sheet.getRange(rowNum, 6).getValue();  // Get location (may have been auto-filled)
+      var changeOutDate = calculateChangeOutDate(today, location, assignedTo, isSleeve);
 
-    if (changeOutDate) {
-      var changeOutCell = sheet.getRange(rowNum, 9);  // Column I = Change Out Date
-      if (changeOutDate === 'N/A') {
-        changeOutCell.setNumberFormat('@');
-      } else {
-        changeOutCell.setNumberFormat('MM/dd/yyyy');
+      if (changeOutDate) {
+        var changeOutCell = sheet.getRange(rowNum, 9);  // Column I = Change Out Date
+        if (changeOutDate === 'N/A') {
+          changeOutCell.setNumberFormat('@');
+        } else {
+          changeOutCell.setNumberFormat('MM/dd/yyyy');
+        }
+        changeOutCell.setValue(changeOutDate);
       }
-      changeOutCell.setValue(changeOutDate);
     }
 
   } else {
