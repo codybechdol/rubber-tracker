@@ -2622,56 +2622,9 @@ function generateSwaps(itemType) {
           return classMatch && pickedForEmployee && notAlreadyUsed && notLost;
         });
 
-        // UPGRADE CHECK: Before using a "Picked For" item, check if there's a better "On Shelf" option
-        // If the picked item is NOT "On Shelf" (e.g., "In Testing" or "Ready For Delivery"),
-        // look for a better "On Shelf" item with the correct size
-        var upgradedFromPickedFor = false;
+        // Use the picked-for match if found
+        // NOTE: Upgrades from "In Testing" to "On Shelf" are handled by upgradePickListItems() post-generation
         if (pickedForMatch) {
-          var pickedStatus = (pickedForMatch[6] || '').toString().trim().toLowerCase();
-
-          // Only look for upgrade if picked item is NOT already "On Shelf"
-          if (pickedStatus !== 'on shelf') {
-            // Look for a better "On Shelf" item
-            var betterOnShelfItem = inventoryData.find(function(item) {
-              var statusMatch = item[6] && item[6].toString().trim().toLowerCase() === 'on shelf';
-              var classMatch = parseInt(item[2], 10) === meta.itemClass;
-              var sizeMatch = isGloves ?
-                parseFloat(item[1]) === useSize :
-                (item[1] && useSize && item[1].toString().trim().toLowerCase() === useSize.toString().trim().toLowerCase());
-              var notAssigned = !assignedItemNums.has(item[0]);
-              var pickedFor = (item[9] || '').toString().trim();
-              // Item must either not be reserved, or reserved for this employee
-              var notReservedForOther = pickedFor === '' || pickedFor.toLowerCase().indexOf(employeeName.toLowerCase()) !== -1;
-              var notLost = !isLostLocate(item);
-              // Don't select the same item as the picked match
-              var notSameItem = String(item[0]) !== String(pickedForMatch[0]);
-
-              return statusMatch && classMatch && sizeMatch && notAssigned && notReservedForOther && notLost && notSameItem;
-            });
-
-            if (betterOnShelfItem) {
-              // Found a better "On Shelf" item - use it instead!
-              logEvent('UPGRADE: Employee ' + employeeName + ' - switching from ' + pickedStatus + ' item #' + pickedForMatch[0] + ' to On Shelf item #' + betterOnShelfItem[0], 'INFO');
-              Logger.log('🔄 UPGRADE: Found better On Shelf item #' + betterOnShelfItem[0] + ' instead of ' + pickedStatus + ' #' + pickedForMatch[0] + ' for ' + employeeName);
-
-              // Use the better item
-              pickListValue = betterOnShelfItem[0];
-              pickListStatusRaw = 'on shelf';
-              pickListItemData = betterOnShelfItem;
-              isAlreadyPicked = false; // Not already picked - this is a new assignment
-              assignedItemNums.add(betterOnShelfItem[0]);
-              upgradedFromPickedFor = true;
-
-              var betterSize = isGloves ? parseFloat(betterOnShelfItem[1]) : betterOnShelfItem[1];
-              if (isGloves && !isNaN(betterSize) && !isNaN(useSize) && betterSize > useSize) {
-                pickListSizeUp = true;
-              }
-            }
-          }
-        }
-
-        // If we didn't upgrade, use the original picked-for match
-        if (pickedForMatch && !upgradedFromPickedFor) {
           // Found an item already picked for this employee!
           pickListValue = pickedForMatch[0];
           pickListStatusRaw = (pickedForMatch[6] || '').toString().trim().toLowerCase();
