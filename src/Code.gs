@@ -133,8 +133,9 @@ function onOpen() {
   // Reset the previous sheet tracker for this session
   PropertiesService.getUserProperties().setProperty('previousSheet', '');
 
-  // Automatically open the Quick Actions sidebar
-  openQuickActionsSidebar();
+  // Note: Cannot auto-open sidebar from onOpen() due to Google Apps Script restrictions
+  // Simple triggers cannot call services that require authorization (like showSidebar)
+  // Users can click "Glove Manager → Quick Actions" to open the sidebar
 }
 
 /**

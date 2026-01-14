@@ -67,30 +67,41 @@ function getStatusPriority(status) {
  * Menu item: Glove Manager → Generate All Reports
  */
 function generateAllReports() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
   try {
     logEvent('Generating all reports...');
 
     // Ensure Picked For column exists (safety check)
     ensurePickedForColumn();
 
+    ss.toast('Fixing change out dates...', '📊 Generate All Reports', 3);
     fixChangeOutDatesSilent();
 
+    ss.toast('Generating Glove Swaps...', '📊 Generate All Reports', 5);
     generateGloveSwaps();
+
+    ss.toast('Generating Sleeve Swaps...', '📊 Generate All Reports', 5);
     generateSleeveSwaps();
 
     // Ensure all data is written before running upgrades
     SpreadsheetApp.flush();
 
     // Run pick list upgrades AFTER generating swap reports
-    // This checks for better "On Shelf" options for items that got assigned "In Testing" status
+    ss.toast('Checking for pick list upgrades...', '📊 Generate All Reports', 3);
     var upgradeResults = upgradePickListItems();
     if (upgradeResults && upgradeResults.totalUpgrades > 0) {
       logEvent('Pick List Upgrades: ' + upgradeResults.totalUpgrades + ' items upgraded to better options');
     }
 
+    ss.toast('Updating Purchase Needs...', '📊 Generate All Reports', 3);
     updatePurchaseNeeds();
+
+    ss.toast('Updating Inventory Reports...', '📊 Generate All Reports', 3);
     updateInventoryReports();
+
+    ss.toast('Updating Reclaims...', '📊 Generate All Reports', 3);
     updateReclaimsSheet();
+
     logEvent('All reports generated.');
     SpreadsheetApp.getUi().alert('✅ All reports generated successfully!' +
       (upgradeResults && upgradeResults.totalUpgrades > 0 ?
