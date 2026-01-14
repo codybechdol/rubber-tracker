@@ -1730,53 +1730,200 @@ function importLegacyHistoryData(itemType, itemNum, itemSize, itemClass, legacyD
 }
 
 /**
- * Shows dialog to look up history for a specific item.
+ * Shows the enhanced lookup dialog with Employee and Item search tabs.
  */
 function showItemHistoryLookup() {
-  ensureSeparateHistorySheets(); // Always ensure correct sheets before lookup
-  var html = HtmlService.createHtmlOutput(
-    '<style>' +
-    '  body { font-family: Arial, sans-serif; padding: 15px; }' +
-    '  label { display: block; margin-top: 10px; font-weight: bold; }' +
-    '  select, input { width: 100%; padding: 8px; margin-top: 5px; box-sizing: border-box; }' +
-    '  button { margin-top: 15px; padding: 10px 20px; background: #1565c0; color: white; border: none; cursor: pointer; }' +
-    '  button:hover { background: #0d47a1; }' +
-    '</style>' +
-    '<label>Item Type:</label>' +
-    '<select id="itemType">' +
-    '  <option value="glove">Glove</option>' +
-    '  <option value="sleeve">Sleeve</option>' +
-    '</select>' +
-    '<label>Item Number:</label>' +
-    '<input type="text" id="itemNum" placeholder="e.g., 667">' +
-    '<button onclick="lookupItem()">Look Up Item History</button>' +
-    '<script>' +
-    '  function lookupItem() {' +
-    '    var itemType = document.getElementById("itemType").value;' +
-    '    var itemNum = document.getElementById("itemNum").value;' +
-    '    if (!itemNum) {' +
-    '      alert("Please enter an Item Number");' +
-    '      return;' +
-    '    }' +
-    '    google.script.run' +
-    '      .withSuccessHandler(function(result) {' +
-    '        alert(result);' +
-    '        google.script.host.close();' +
-    '      })' +
-    '      .withFailureHandler(function(error) {' +
-    '        alert("Error: " + error);' +
-    '      })' +
-    '      .generateItemHistoryLookup(itemType, itemNum);' +
-    '  }' +
-    '</script>'
-  )
-  .setWidth(350)
-  .setHeight(250);
-
-  SpreadsheetApp.getUi().showModalDialog(html, 'Item History Lookup');
+  var html = HtmlService.createHtmlOutputFromFile('LookupDialog')
+    .setWidth(450)
+    .setHeight(550);
+  SpreadsheetApp.getUi().showModalDialog(html, '🔍 Lookup');
 }
 
 /**
+ * Looks up an employee by name and returns their info and current assignments.
+ * @param {string} name - Employee name to search for
+ * @return {Object} Employee data with assignments
+ */
+function lookupEmployee(name) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+  var glovesSheet = ss.getSheetByName(SHEET_GLOVES);
+  var sleevesSheet = ss.getSheetByName(SHEET_SLEEVES);
+
+  if (!employeesSheet) {
+    return { found: false };
+  }
+
+  var empData = employeesSheet.getDataRange().getValues();
+  var empHeaders = empData[0];
+
+  // Find column indices
+  var cols = {};
+  empHeaders.forEach(function(h, i) {
+    var header = String(h).toLowerCase().trim();
+    if (header === 'name') cols.name = i;
+    if (header === 'location') cols.location = i;
+    if (header === 'job number') cols.jobNumber = i;
+    if (header === 'job classification') cols.jobClassification = i;
+    if (header === 'glove size') cols.gloveSize = i;
+    if (header === 'sleeve size') cols.sleeveSize = i;
+  });
+
+  // Search for employee (case-insensitive partial match)
+  var searchName = name.toLowerCase().trim();
+  var employee = null;
+
+  for (var i = 1; i < empData.length; i++) {
+    var empName = String(empData[i][cols.name] || '').toLowerCase().trim();
+    if (empName.indexOf(searchName) !== -1 || searchName.indexOf(empName) !== -1) {
+      employee = empData[i];
+      break;
+    }
+  }
+
+  if (!employee) {
+    return { found: false };
+  }
+
+  var result = {
+    found: true,
+    name: employee[cols.name] || '',
+    location: employee[cols.location] || '',
+    jobNumber: employee[cols.jobNumber] || '',
+    jobClassification: employee[cols.jobClassification] || '',
+    gloveSize: employee[cols.gloveSize] || '',
+    sleeveSize: employee[cols.sleeveSize] || '',
+    gloves: [],
+    sleeves: []
+  };
+
+  // Find assigned gloves
+  if (glovesSheet && glovesSheet.getLastRow() > 1) {
+    var gloveData = glovesSheet.getDataRange().getValues();
+    for (var g = 1; g < gloveData.length; g++) {
+      var assignedTo = String(gloveData[g][7] || '').toLowerCase().trim(); // Column H = Assigned To
+      if (assignedTo.indexOf(searchName) !== -1) {
+        result.gloves.push({
+          itemNum: gloveData[g][0] || '',
+          size: gloveData[g][1] || '',
+          itemClass: gloveData[g][2] || '',
+          dateAssigned: formatDateForDisplay(gloveData[g][4]),
+          changeOutDate: formatDateForDisplay(gloveData[g][8]),
+          status: gloveData[g][6] || ''
+        });
+      }
+    }
+  }
+
+  // Find assigned sleeves
+  if (sleevesSheet && sleevesSheet.getLastRow() > 1) {
+    var sleeveData = sleevesSheet.getDataRange().getValues();
+    for (var s = 1; s < sleeveData.length; s++) {
+      var sleeveAssignedTo = String(sleeveData[s][7] || '').toLowerCase().trim();
+      if (sleeveAssignedTo.indexOf(searchName) !== -1) {
+        result.sleeves.push({
+          itemNum: sleeveData[s][0] || '',
+          size: sleeveData[s][1] || '',
+          itemClass: sleeveData[s][2] || '',
+          dateAssigned: formatDateForDisplay(sleeveData[s][4]),
+          changeOutDate: formatDateForDisplay(sleeveData[s][8]),
+          status: sleeveData[s][6] || ''
+        });
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Looks up an item by number and returns current info plus history.
+ * @param {string} itemType - 'glove' or 'sleeve'
+ * @param {string} itemNum - Item number to search for
+ * @return {Object} Item data with history
+ */
+function lookupItem(itemType, itemNum) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetName = (itemType === 'sleeve') ? SHEET_SLEEVES : SHEET_GLOVES;
+  var historySheetName = (itemType === 'sleeve') ? SHEET_SLEEVES_HISTORY : SHEET_GLOVES_HISTORY;
+
+  var sheet = ss.getSheetByName(sheetName);
+  var historySheet = ss.getSheetByName(historySheetName);
+
+  if (!sheet) {
+    return { found: false };
+  }
+
+  var data = sheet.getDataRange().getValues();
+  var item = null;
+
+  // Find the item
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === String(itemNum).trim()) {
+      item = data[i];
+      break;
+    }
+  }
+
+  if (!item) {
+    return { found: false };
+  }
+
+  var result = {
+    found: true,
+    itemNum: item[0] || '',
+    size: item[1] || '',
+    itemClass: item[2] || '',
+    testDate: formatDateForDisplay(item[3]),
+    dateAssigned: formatDateForDisplay(item[4]),
+    location: item[5] || '',
+    status: item[6] || '',
+    assignedTo: item[7] || '',
+    changeOutDate: formatDateForDisplay(item[8]),
+    notes: item[10] || '',
+    history: []
+  };
+
+  // Get history if available
+  if (historySheet && historySheet.getLastRow() > 1) {
+    var historyData = historySheet.getDataRange().getValues();
+    for (var h = 1; h < historyData.length; h++) {
+      if (String(historyData[h][1]).trim() === String(itemNum).trim()) {
+        result.history.push({
+          date: formatDateForDisplay(historyData[h][0]),
+          assignedTo: historyData[h][5] || '',
+          location: historyData[h][4] || ''
+        });
+      }
+    }
+    // Sort by date descending (most recent first)
+    result.history.sort(function(a, b) {
+      return new Date(b.date) - new Date(a.date);
+    });
+  }
+
+  return result;
+}
+
+/**
+ * Helper function to format dates for display.
+ * @param {Date|string} date - Date to format
+ * @return {string} Formatted date string
+ */
+function formatDateForDisplay(date) {
+  if (!date) return 'N/A';
+  if (date === 'N/A') return 'N/A';
+  try {
+    var d = new Date(date);
+    if (isNaN(d.getTime())) return String(date);
+    return Utilities.formatDate(d, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+  } catch (e) {
+    return String(date);
+  }
+}
+
+/**
+ * @deprecated Use lookupItem() instead - kept for backward compatibility
  * Generates the Item History Lookup sheet for a specific item.
  */
 function generateItemHistoryLookup(itemType, itemNum) {

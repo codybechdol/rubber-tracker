@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    * { box-sizing: border-box; font-family: 'Google Sans', Arial, sans-serif; }
+    body { margin: 0; padding: 20px; background: #f8f9fa; }
+    h2 { color: #1a73e8; margin: 0 0 16px 0; font-size: 18px; }
+
+    .tabs {
+      display: flex;
+      border-bottom: 2px solid #dadce0;
+      margin-bottom: 16px;
+    }
+
+    .tab {
+      padding: 10px 20px;
+      cursor: pointer;
+      border: none;
+      background: none;
+      font-size: 14px;
+      font-weight: 500;
+      color: #5f6368;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+    }
+
+    .tab.active {
+      color: #1a73e8;
+      border-bottom-color: #1a73e8;
+    }
+
+    .tab:hover:not(.active) {
+      background: #f1f3f4;
+    }
+
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    label {
+      display: block;
+      margin-top: 12px;
+      font-weight: 500;
+      color: #202124;
+      font-size: 13px;
+    }
+
+    select, input[type="text"] {
+      width: 100%;
+      padding: 10px 12px;
+      margin-top: 6px;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+
+    select:focus, input:focus {
+      outline: none;
+      border-color: #1a73e8;
+    }
+
+    .btn {
+      margin-top: 16px;
+      padding: 10px 24px;
+      background: #1a73e8;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .btn:hover { background: #1557b0; }
+    .btn:disabled { background: #dadce0; cursor: not-allowed; }
+
+    .results {
+      margin-top: 20px;
+      max-height: 350px;
+      overflow-y: auto;
+    }
+
+    .result-card {
+      background: white;
+      border: 1px solid #dadce0;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 10px;
+    }
+
+    .result-card h3 {
+      margin: 0 0 8px 0;
+      font-size: 14px;
+      color: #1a73e8;
+    }
+
+    .result-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 0;
+      font-size: 13px;
+      border-bottom: 1px solid #f1f3f4;
+    }
+
+    .result-row:last-child { border-bottom: none; }
+    .result-label { color: #5f6368; }
+    .result-value { font-weight: 500; color: #202124; }
+
+    .no-results {
+      text-align: center;
+      padding: 20px;
+      color: #5f6368;
+      font-style: italic;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 20px;
+      color: #1a73e8;
+    }
+
+    .section-header {
+      background: #e8f0fe;
+      padding: 8px 12px;
+      margin: 16px -12px 12px -12px;
+      font-weight: 500;
+      color: #1a73e8;
+      font-size: 13px;
+    }
+
+    .item-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 500;
+      margin-left: 8px;
+    }
+
+    .badge-glove { background: #e3f2fd; color: #1565c0; }
+    .badge-sleeve { background: #e8f5e9; color: #2e7d32; }
+  </style>
+</head>
+<body>
+  <h2>🔍 Lookup</h2>
+
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('employee')">👤 Employee</button>
+    <button class="tab" onclick="switchTab('item')">📦 Item</button>
+  </div>
+
+  <!-- Employee Search Tab -->
+  <div id="employeeTab" class="tab-content active">
+    <label>Employee Name:</label>
+    <input type="text" id="employeeName" placeholder="Enter employee name..." onkeypress="if(event.key==='Enter')searchEmployee()">
+    <button class="btn" onclick="searchEmployee()">Search Employee</button>
+    <div id="employeeResults" class="results"></div>
+  </div>
+
+  <!-- Item Search Tab -->
+  <div id="itemTab" class="tab-content">
+    <label>Item Type:</label>
+    <select id="itemType">
+      <option value="glove">🧤 Glove</option>
+      <option value="sleeve">💪 Sleeve</option>
+    </select>
+    <label>Item Number:</label>
+    <input type="text" id="itemNum" placeholder="e.g., 667" onkeypress="if(event.key==='Enter')searchItem()">
+    <button class="btn" onclick="searchItem()">Search Item</button>
+    <div id="itemResults" class="results"></div>
+  </div>
+
+  <script>
+    function switchTab(tab) {
+      document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+      document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
+
+      if (tab === 'employee') {
+        document.querySelector('.tab:first-child').classList.add('active');
+        document.getElementById('employeeTab').classList.add('active');
+      } else {
+        document.querySelector('.tab:last-child').classList.add('active');
+        document.getElementById('itemTab').classList.add('active');
+      }
+    }
+
+    function searchEmployee() {
+      var name = document.getElementById('employeeName').value.trim();
+      if (!name) {
+        alert('Please enter an employee name');
+        return;
+      }
+
+      var resultsDiv = document.getElementById('employeeResults');
+      resultsDiv.innerHTML = '<div class="loading">⏳ Searching...</div>';
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          displayEmployeeResults(result);
+        })
+        .withFailureHandler(function(error) {
+          resultsDiv.innerHTML = '<div class="no-results">Error: ' + error + '</div>';
+        })
+        .lookupEmployee(name);
+    }
+
+    function displayEmployeeResults(data) {
+      var resultsDiv = document.getElementById('employeeResults');
+
+      if (!data || !data.found) {
+        resultsDiv.innerHTML = '<div class="no-results">No employee found matching that name</div>';
+        return;
+      }
+
+      var html = '<div class="result-card">';
+      html += '<h3>👤 ' + data.name + '</h3>';
+      html += '<div class="result-row"><span class="result-label">Location:</span><span class="result-value">' + (data.location || 'N/A') + '</span></div>';
+      html += '<div class="result-row"><span class="result-label">Job Number:</span><span class="result-value">' + (data.jobNumber || 'N/A') + '</span></div>';
+      html += '<div class="result-row"><span class="result-label">Job Classification:</span><span class="result-value">' + (data.jobClassification || 'N/A') + '</span></div>';
+      html += '<div class="result-row"><span class="result-label">Glove Size:</span><span class="result-value">' + (data.gloveSize || 'N/A') + '</span></div>';
+      html += '<div class="result-row"><span class="result-label">Sleeve Size:</span><span class="result-value">' + (data.sleeveSize || 'N/A') + '</span></div>';
+      html += '</div>';
+
+      // Current Assignments
+      if (data.gloves && data.gloves.length > 0) {
+        html += '<div class="section-header">🧤 Current Gloves (' + data.gloves.length + ')</div>';
+        data.gloves.forEach(function(g) {
+          html += '<div class="result-card">';
+          html += '<h3>Glove #' + g.itemNum + '<span class="item-badge badge-glove">Class ' + g.itemClass + '</span></h3>';
+          html += '<div class="result-row"><span class="result-label">Size:</span><span class="result-value">' + g.size + '</span></div>';
+          html += '<div class="result-row"><span class="result-label">Date Assigned:</span><span class="result-value">' + g.dateAssigned + '</span></div>';
+          html += '<div class="result-row"><span class="result-label">Change Out Date:</span><span class="result-value">' + g.changeOutDate + '</span></div>';
+          html += '<div class="result-row"><span class="result-label">Status:</span><span class="result-value">' + g.status + '</span></div>';
+          html += '</div>';
+        });
+      }
+
+      if (data.sleeves && data.sleeves.length > 0) {
+        html += '<div class="section-header">💪 Current Sleeves (' + data.sleeves.length + ')</div>';
+        data.sleeves.forEach(function(s) {
+          html += '<div class="result-card">';
+          html += '<h3>Sleeve #' + s.itemNum + '<span class="item-badge badge-sleeve">Class ' + s.itemClass + '</span></h3>';
+          html += '<div class="result-row"><span class="result-label">Size:</span><span class="result-value">' + s.size + '</span></div>';
+          html += '<div class="result-row"><span class="result-label">Date Assigned:</span><span class="result-value">' + s.dateAssigned + '</span></div>';
+          html += '<div class="result-row"><span class="result-label">Change Out Date:</span><span class="result-value">' + s.changeOutDate + '</span></div>';
+          html += '<div class="result-row"><span class="result-label">Status:</span><span class="result-value">' + s.status + '</span></div>';
+          html += '</div>';
+        });
+      }
+
+      if ((!data.gloves || data.gloves.length === 0) && (!data.sleeves || data.sleeves.length === 0)) {
+        html += '<div class="no-results">No items currently assigned</div>';
+      }
+
+      resultsDiv.innerHTML = html;
+    }
+
+    function searchItem() {
+      var itemType = document.getElementById('itemType').value;
+      var itemNum = document.getElementById('itemNum').value.trim();
+
+      if (!itemNum) {
+        alert('Please enter an item number');
+        return;
+      }
+
+      var resultsDiv = document.getElementById('itemResults');
+      resultsDiv.innerHTML = '<div class="loading">⏳ Searching...</div>';
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          displayItemResults(result, itemType);
+        })
+        .withFailureHandler(function(error) {
+          resultsDiv.innerHTML = '<div class="no-results">Error: ' + error + '</div>';
+        })
+        .lookupItem(itemType, itemNum);
+    }
+
+    function displayItemResults(data, itemType) {
+      var resultsDiv = document.getElementById('itemResults');
+
+      if (!data || !data.found) {
+        resultsDiv.innerHTML = '<div class="no-results">Item not found</div>';
+        return;
+      }
+
+      var typeLabel = itemType === 'sleeve' ? '💪 Sleeve' : '🧤 Glove';
+      var badgeClass = itemType === 'sleeve' ? 'badge-sleeve' : 'badge-glove';
+
+      var html = '<div class="result-card">';
+      html += '<h3>' + typeLabel + ' #' + data.itemNum + '<span class="item-badge ' + badgeClass + '">Class ' + data.itemClass + '</span></h3>';
+      html += '<div class="result-row"><span class="result-label">Size:</span><span class="result-value">' + data.size + '</span></div>';
+      html += '<div class="result-row"><span class="result-label">Status:</span><span class="result-value">' + data.status + '</span></div>';
+      html += '<div class="result-row"><span class="result-label">Location:</span><span class="result-value">' + data.location + '</span></div>';
+      html += '<div class="result-row"><span class="result-label">Assigned To:</span><span class="result-value">' + data.assignedTo + '</span></div>';
+      html += '<div class="result-row"><span class="result-label">Test Date:</span><span class="result-value">' + data.testDate + '</span></div>';
+      html += '<div class="result-row"><span class="result-label">Date Assigned:</span><span class="result-value">' + data.dateAssigned + '</span></div>';
+      html += '<div class="result-row"><span class="result-label">Change Out Date:</span><span class="result-value">' + data.changeOutDate + '</span></div>';
+      if (data.notes) {
+        html += '<div class="result-row"><span class="result-label">Notes:</span><span class="result-value">' + data.notes + '</span></div>';
+      }
+      html += '</div>';
+
+      // History section
+      if (data.history && data.history.length > 0) {
+        html += '<div class="section-header">📜 Assignment History (' + data.history.length + ' entries)</div>';
+        data.history.forEach(function(h) {
+          html += '<div class="result-card">';
+          html += '<div class="result-row"><span class="result-label">Date:</span><span class="result-value">' + h.date + '</span></div>';
+          html += '<div class="result-row"><span class="result-label">Assigned To:</span><span class="result-value">' + h.assignedTo + '</span></div>';
+          html += '<div class="result-row"><span class="result-label">Location:</span><span class="result-value">' + h.location + '</span></div>';
+          html += '</div>';
+        });
+      }
+
+      resultsDiv.innerHTML = html;
+    }
+  </script>
+</body>
+</html>
+
