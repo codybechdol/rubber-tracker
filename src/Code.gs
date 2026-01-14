@@ -45,6 +45,17 @@ function getCol(sheetName, headerName) {
 }
 
 /**
+ * Opens the Quick Actions sidebar for step-by-step workflow.
+ * Menu item: Glove Manager → Quick Actions
+ */
+function openQuickActionsSidebar() {
+  var html = HtmlService.createHtmlOutputFromFile('QuickActions')
+    .setTitle('Quick Actions')
+    .setWidth(280);
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+/**
  * Adds a custom menu to the Google Sheet for Glove Manager actions.
  */
 function onOpen() {
@@ -53,7 +64,7 @@ function onOpen() {
   ui.createMenu('Glove Manager')
     .addItem('Generate All Reports', 'generateAllReports')
     .addSeparator()
-    .addItem('📱 Open Dashboard', 'openDashboardSidebar')
+    .addItem('📱 Quick Actions', 'openQuickActionsSidebar')
     .addSeparator()
     .addItem('Generate Glove Swaps', 'generateGloveSwaps')
     .addItem('Generate Sleeve Swaps', 'generateSleeveSwaps')
