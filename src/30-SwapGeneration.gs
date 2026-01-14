@@ -120,10 +120,13 @@ function upgradePickListItems() {
         var notes = (item[10] || '').toString().trim().toUpperCase();
 
         // Only consider "On Shelf" items that aren't reserved or lost
-        if (status === 'on shelf' &&
-            !assignedTo &&
+        // Note: "On Shelf" items may have "On Shelf" in the Assigned To column, or be empty
+        var isAvailable = status === 'on shelf' &&
+            (assignedTo === '' || assignedTo === 'on shelf') &&
             !pickedFor &&
-            notes.indexOf('LOST-LOCATE') === -1) {
+            notes.indexOf('LOST-LOCATE') === -1;
+
+        if (isAvailable) {
           var itemClass = parseInt(item[2], 10);
           var itemSize = config.isGloves ? parseFloat(item[1]) : normalizeSleeveSize(item[1]);
           var key = itemClass + '_' + itemSize;
@@ -140,10 +143,18 @@ function upgradePickListItems() {
         }
       }
 
+      // Log available items for debugging
+      Logger.log('UPGRADE: Available On Shelf items for ' + config.swapSheet + ':');
+      Object.keys(availableItems).forEach(function(key) {
+        Logger.log('  ' + key + ': ' + availableItems[key].map(function(x) { return x.itemNum; }).join(', '));
+      });
+
       // Track which items we've already assigned as upgrades
       var usedUpgradeItems = new Set();
 
       // Scan swap sheet for items that could be upgraded
+      Logger.log('UPGRADE: Scanning ' + config.swapSheet + ' for items needing upgrade...');
+
       for (var row = 1; row < swapData.length; row++) {
         var employeeName = (swapData[row][0] || '').toString().trim();
         var pickListNum = (swapData[row][6] || '').toString().trim();
@@ -160,14 +171,23 @@ function upgradePickListItems() {
 
         // Check if this is an "In Testing" or other non-ready item that could be upgraded
         // These statuses indicate items that are NOT immediately available
-        var needsUpgrade = pickListStatus.indexOf('in testing') !== -1 ||
-                          pickListStatus.indexOf('testing') !== -1 ||
-                          pickListStatus.indexOf('⏳') !== -1;
+        // Handle various formats: "In Testing", "In Testing ⏳", "In Testing ✓", etc.
+        var statusLower = pickListStatus.toLowerCase();
+        var needsUpgrade = statusLower.indexOf('in testing') !== -1 ||
+                          statusLower.indexOf('testing') !== -1;
 
-        // Skip items that are already "In Stock" (On Shelf)
-        if (pickListStatus.indexOf('in stock') !== -1 || !needsUpgrade) {
+        // Also skip if already in stock or ready for delivery (these are already good)
+        var alreadyGood = statusLower.indexOf('in stock') !== -1 ||
+                         statusLower.indexOf('ready for delivery') !== -1;
+
+        Logger.log('UPGRADE CHECK: ' + employeeName + ' | Item: ' + pickListNum + ' | Status: "' + pickListStatus + '" | needsUpgrade: ' + needsUpgrade + ' | alreadyGood: ' + alreadyGood);
+
+        // Skip items that are already good or don't need upgrade
+        if (alreadyGood || !needsUpgrade) {
           continue;
         }
+
+        Logger.log('UPGRADE: ' + employeeName + ' needs upgrade from item ' + pickListNum);
 
         // Find the current pick list item in inventory to get its class and size
         var currentItem = null;
@@ -178,11 +198,17 @@ function upgradePickListItems() {
           }
         }
 
-        if (!currentItem) continue;
+        if (!currentItem) {
+          Logger.log('UPGRADE: Could not find item ' + pickListNum + ' in inventory');
+          continue;
+        }
 
         var currItemClass = parseInt(currentItem[2], 10);
         var currItemSize = config.isGloves ? parseFloat(currentItem[1]) : normalizeSleeveSize(currentItem[1]);
         var lookupKey = currItemClass + '_' + currItemSize;
+
+        Logger.log('UPGRADE: Looking for Class ' + currItemClass + ' Size ' + currItemSize + ' (key: ' + lookupKey + ')');
+        Logger.log('UPGRADE: Available keys: ' + Object.keys(availableItems).join(', '));
 
         // Look for available "On Shelf" item of same class and size
         if (availableItems[lookupKey] && availableItems[lookupKey].length > 0) {
@@ -199,6 +225,8 @@ function upgradePickListItems() {
           if (upgradeItem) {
             // Found a better item! Update the swap sheet
             var actualRow = row + 1; // Convert to 1-based row number
+
+            Logger.log('UPGRADE SUCCESS: ' + employeeName + ' -> Item ' + upgradeItem.itemNum + ' (was ' + pickListNum + ')');
 
             // Update Pick List Item # (column G = 7)
             swapSheet.getRange(actualRow, 7).setValue(upgradeItem.itemNum);
@@ -236,7 +264,11 @@ function upgradePickListItems() {
 
             logEvent('UPGRADE: ' + employeeName + ' - Changed from ' + pickListNum +
                     ' (' + pickListStatus + ') to ' + upgradeItem.itemNum + ' (On Shelf)', 'INFO');
+          } else {
+            Logger.log('UPGRADE: No available upgrade item for ' + employeeName + ' (all same-size items already used)');
           }
+        } else {
+          Logger.log('UPGRADE: No On Shelf items available for key ' + lookupKey);
         }
       }
     });
