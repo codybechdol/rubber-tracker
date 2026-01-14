@@ -2096,8 +2096,8 @@ function buildSheets() {
     { name: SHEET_SLEEVE_SWAPS, headers: ['Employee', 'Item Number', 'Size', 'Date Assigned', 'Change Out Date', 'Days Left', 'Pick List', 'Status', 'Picked', 'Date Changed'] },
     { name: SHEET_PURCHASE_NEEDS, headers: ['Item Type', 'Size', 'Class', 'Quantity Needed', 'Reason', 'Status/Notes'] },
     { name: SHEET_INVENTORY_REPORTS, headers: null, customSetup: true },
-    { name: SHEET_RECLAIMS, headers: null, customSetup: true },
-    { name: SHEET_ITEM_HISTORY_LOOKUP, headers: null, customSetup: true }
+    { name: SHEET_RECLAIMS, headers: null, customSetup: true }
+    // Note: Item History Lookup sheet removed - lookup now displays in popup dialog
   ];
   sheetDefs.forEach(function(def) {
     var sheet = ss.getSheetByName(def.name);
@@ -2189,11 +2189,6 @@ function buildSheets() {
   // Ensure Picked For column exists on Gloves and Sleeves tabs
   ensurePickedForColumn();
 
-  // Custom setup for Item History Lookup sheet
-  var lookupSheet = ss.getSheetByName(SHEET_ITEM_HISTORY_LOOKUP);
-  if (lookupSheet && lookupSheet.getLastRow() < 3) {
-    setupItemHistoryLookupSheet(lookupSheet);
-  }
 
   // Custom setup for Reclaims sheet - set up all required tables
   var reclaimsSheet = ss.getSheetByName(SHEET_RECLAIMS);
