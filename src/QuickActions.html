@@ -81,10 +81,10 @@
   <div class="divider"></div>
   <div class="section-title">Quick Actions</div>
   <div>
-    <button class="quick-btn" onclick="runQuick('generateGloveSwaps')">🧤 Gloves</button>
-    <button class="quick-btn" onclick="runQuick('generateSleeveSwaps')">💪 Sleeves</button>
-    <button class="quick-btn" onclick="runQuick('updatePurchaseNeeds')">🛒 Purchase</button>
-    <button class="quick-btn" onclick="runQuick('showItemHistoryLookup')">🔍 Lookup</button>
+    <button class="quick-btn" onclick="runQuick('generateGloveSwaps', 'Generate Glove Swaps', 'Updating Glove Swaps report...')">🧤 Gloves</button>
+    <button class="quick-btn" onclick="runQuick('generateSleeveSwaps', 'Generate Sleeve Swaps', 'Updating Sleeve Swaps report...')">💪 Sleeves</button>
+    <button class="quick-btn" onclick="runQuick('updatePurchaseNeeds', 'Update Purchase Needs', 'Calculating purchase requirements...')">🛒 Purchase</button>
+    <button class="quick-btn" onclick="runQuick('showItemHistoryLookup', 'Item History Lookup', 'Opening history lookup dialog...')">🔍 Lookup</button>
   </div>
 
   <div id="statusBar" class="status-bar"></div>
@@ -103,12 +103,12 @@
         showStatus('Error: ' + e, 'error');
       })[func]();
     }
-    function runQuick(func) {
+    function runQuick(func, title, message) {
       document.querySelectorAll('.quick-btn').forEach(function(b){b.disabled=true;});
-      showStatus('Running...');
+      showStatus('⏳ ' + message);
       google.script.run.withSuccessHandler(function() {
         document.querySelectorAll('.quick-btn').forEach(function(b){b.disabled=false;});
-        showStatus('✓ Done!', 'success'); setTimeout(hideStatus, 2000);
+        showStatus('✓ ' + title + ' complete!', 'success'); setTimeout(hideStatus, 2000);
       }).withFailureHandler(function(e) {
         document.querySelectorAll('.quick-btn').forEach(function(b){b.disabled=false;});
         showStatus('Error: ' + e, 'error');
