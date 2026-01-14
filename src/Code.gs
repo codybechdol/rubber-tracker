@@ -57,6 +57,7 @@ function openQuickActionsSidebar() {
 
 /**
  * Adds a custom menu to the Google Sheet for Glove Manager actions.
+ * Also automatically opens the Quick Actions sidebar.
  */
 function onOpen() {
   ensurePickedForColumn();
@@ -131,6 +132,9 @@ function onOpen() {
 
   // Reset the previous sheet tracker for this session
   PropertiesService.getUserProperties().setProperty('previousSheet', '');
+
+  // Automatically open the Quick Actions sidebar
+  openQuickActionsSidebar();
 }
 
 /**
