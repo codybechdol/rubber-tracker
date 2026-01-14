@@ -52,6 +52,9 @@ function generateAllReports() {
     generateGloveSwaps();
     generateSleeveSwaps();
 
+    // Ensure all data is written before running upgrades
+    SpreadsheetApp.flush();
+
     // Run pick list upgrades AFTER generating swap reports
     // This checks for better "On Shelf" options for items that got assigned "In Testing" status
     var upgradeResults = upgradePickListItems();
@@ -75,8 +78,12 @@ function generateAllReports() {
 /**
  * Upgrades pick list items to better available options.
  * Checks both Glove Swaps and Sleeve Swaps for items that are "In Testing"
- * or "Ready For Delivery" and looks for available "On Shelf" items that could replace them.
- * This ensures employees always get the best available item.
+ * and looks for available "On Shelf" items that could replace them.
+ *
+ * STRATEGY:
+ * 1. First, find all employees with "In Testing" assignments
+ * 2. Find all unused "On Shelf" items of matching size/class
+ * 3. Assign "On Shelf" items to employees with "In Testing", prioritizing by urgency (change out date)
  *
  * @return {Object} Results object with upgrade counts
  */
@@ -109,56 +116,17 @@ function upgradePickListItems() {
       var swapData = swapSheet.getDataRange().getValues();
       var inventoryData = inventorySheet.getDataRange().getValues();
 
-      // Build a map of available "On Shelf" items by class and size
-      var availableItems = {};
-
-      for (var i = 1; i < inventoryData.length; i++) {
-        var item = inventoryData[i];
-        var status = (item[6] || '').toString().trim().toLowerCase();
-        var assignedTo = (item[7] || '').toString().trim().toLowerCase();
-        var pickedFor = (item[9] || '').toString().trim();
-        var notes = (item[10] || '').toString().trim().toUpperCase();
-
-        // Only consider "On Shelf" items that aren't reserved or lost
-        // Note: "On Shelf" items may have "On Shelf" in the Assigned To column, or be empty
-        var isAvailable = status === 'on shelf' &&
-            (assignedTo === '' || assignedTo === 'on shelf') &&
-            !pickedFor &&
-            notes.indexOf('LOST-LOCATE') === -1;
-
-        if (isAvailable) {
-          var itemClass = parseInt(item[2], 10);
-          var itemSize = config.isGloves ? parseFloat(item[1]) : normalizeSleeveSize(item[1]);
-          var key = itemClass + '_' + itemSize;
-
-          if (!availableItems[key]) {
-            availableItems[key] = [];
-          }
-          availableItems[key].push({
-            itemNum: item[0],
-            size: item[1],
-            class: itemClass,
-            rowIndex: i
-          });
-        }
-      }
-
-      // Log available items for debugging
-      Logger.log('UPGRADE: Available On Shelf items for ' + config.swapSheet + ':');
-      Object.keys(availableItems).forEach(function(key) {
-        Logger.log('  ' + key + ': ' + availableItems[key].map(function(x) { return x.itemNum; }).join(', '));
-      });
-
-      // Track which items we've already assigned as upgrades
-      var usedUpgradeItems = new Set();
-
-      // Scan swap sheet for items that could be upgraded
-      Logger.log('UPGRADE: Scanning ' + config.swapSheet + ' for items needing upgrade...');
+      // Collect all "In Testing" employees who need upgrades
+      var needsUpgrade = [];
+      // Collect all pick list items currently assigned (to avoid reassigning)
+      var assignedPickListItems = new Set();
 
       for (var row = 1; row < swapData.length; row++) {
         var employeeName = (swapData[row][0] || '').toString().trim();
         var pickListNum = (swapData[row][6] || '').toString().trim();
-        var pickListStatus = (swapData[row][7] || '').toString().trim().toLowerCase();
+        var pickListStatus = (swapData[row][7] || '').toString().trim();
+        var changeOutDate = swapData[row][4]; // Column E - Change Out Date
+        var employeeSize = (swapData[row][2] || '').toString().trim(); // Column C - Size
 
         // Skip header rows and empty rows
         if (!employeeName || employeeName === 'Employee' ||
@@ -169,114 +137,145 @@ function upgradePickListItems() {
           continue;
         }
 
-        // Check if this is an "In Testing" or other non-ready item that could be upgraded
-        // These statuses indicate items that are NOT immediately available
-        // Handle various formats: "In Testing", "In Testing ⏳", "In Testing ✓", etc.
+        // Track all assigned items
+        assignedPickListItems.add(pickListNum);
+
+        // Check if this employee has an "In Testing" item
         var statusLower = pickListStatus.toLowerCase();
-        var needsUpgrade = statusLower.indexOf('in testing') !== -1 ||
-                          statusLower.indexOf('testing') !== -1;
-
-        // Also skip if already in stock or ready for delivery (these are already good)
-        var alreadyGood = statusLower.indexOf('in stock') !== -1 ||
-                         statusLower.indexOf('ready for delivery') !== -1;
-
-        Logger.log('UPGRADE CHECK: ' + employeeName + ' | Item: ' + pickListNum + ' | Status: "' + pickListStatus + '" | needsUpgrade: ' + needsUpgrade + ' | alreadyGood: ' + alreadyGood);
-
-        // Skip items that are already good or don't need upgrade
-        if (alreadyGood || !needsUpgrade) {
-          continue;
-        }
-
-        Logger.log('UPGRADE: ' + employeeName + ' needs upgrade from item ' + pickListNum);
-
-        // Find the current pick list item in inventory to get its class and size
-        var currentItem = null;
-        for (var j = 1; j < inventoryData.length; j++) {
-          if (String(inventoryData[j][0]).trim() === pickListNum) {
-            currentItem = inventoryData[j];
-            break;
-          }
-        }
-
-        if (!currentItem) {
-          Logger.log('UPGRADE: Could not find item ' + pickListNum + ' in inventory');
-          continue;
-        }
-
-        var currItemClass = parseInt(currentItem[2], 10);
-        var currItemSize = config.isGloves ? parseFloat(currentItem[1]) : normalizeSleeveSize(currentItem[1]);
-        var lookupKey = currItemClass + '_' + currItemSize;
-
-        Logger.log('UPGRADE: Looking for Class ' + currItemClass + ' Size ' + currItemSize + ' (key: ' + lookupKey + ')');
-        Logger.log('UPGRADE: Available keys: ' + Object.keys(availableItems).join(', '));
-
-        // Look for available "On Shelf" item of same class and size
-        if (availableItems[lookupKey] && availableItems[lookupKey].length > 0) {
-          // Find an item that hasn't been used as an upgrade yet
-          var upgradeItem = null;
-          for (var k = 0; k < availableItems[lookupKey].length; k++) {
-            var candidate = availableItems[lookupKey][k];
-            if (!usedUpgradeItems.has(candidate.itemNum)) {
-              upgradeItem = candidate;
+        if (statusLower.indexOf('in testing') !== -1 || statusLower.indexOf('testing') !== -1) {
+          // Get the item's class from inventory
+          var itemClass = null;
+          for (var j = 1; j < inventoryData.length; j++) {
+            if (String(inventoryData[j][0]).trim() === pickListNum) {
+              itemClass = parseInt(inventoryData[j][2], 10);
               break;
             }
           }
 
-          if (upgradeItem) {
-            // Found a better item! Update the swap sheet
-            var actualRow = row + 1; // Convert to 1-based row number
-
-            Logger.log('UPGRADE SUCCESS: ' + employeeName + ' -> Item ' + upgradeItem.itemNum + ' (was ' + pickListNum + ')');
-
-            // Update Pick List Item # (column G = 7)
-            swapSheet.getRange(actualRow, 7).setValue(upgradeItem.itemNum);
-
-            // Update Status (column H = 8) to "In Stock ✅"
-            var sizeMatch = config.isGloves ?
-              parseFloat(upgradeItem.size) === currItemSize :
-              normalizeSleeveSize(upgradeItem.size) === currItemSize;
-            var newStatus = sizeMatch ? 'In Stock ✅' : 'In Stock (Size Up) ⚠️';
-            swapSheet.getRange(actualRow, 8).setValue(newStatus);
-
-            // Mark with upgrade indicator background color (light green)
-            swapSheet.getRange(actualRow, 7).setBackground('#c8e6c9');
-            swapSheet.getRange(actualRow, 8).setBackground('#c8e6c9');
-
-            // Mark this item as used
-            usedUpgradeItems.add(upgradeItem.itemNum);
-
-            // Log the upgrade
-            var detail = {
-              employee: employeeName,
-              oldItem: pickListNum,
-              oldStatus: pickListStatus,
-              newItem: upgradeItem.itemNum,
-              newStatus: newStatus
-            };
-            results.details.push(detail);
-
-            if (config.isGloves) {
-              results.gloveUpgrades++;
-            } else {
-              results.sleeveUpgrades++;
-            }
-            results.totalUpgrades++;
-
-            logEvent('UPGRADE: ' + employeeName + ' - Changed from ' + pickListNum +
-                    ' (' + pickListStatus + ') to ' + upgradeItem.itemNum + ' (On Shelf)', 'INFO');
-          } else {
-            Logger.log('UPGRADE: No available upgrade item for ' + employeeName + ' (all same-size items already used)');
-          }
-        } else {
-          Logger.log('UPGRADE: No On Shelf items available for key ' + lookupKey);
+          needsUpgrade.push({
+            row: row,
+            actualRow: row + 1,
+            employeeName: employeeName,
+            currentItem: pickListNum,
+            size: config.isGloves ? parseFloat(employeeSize) : normalizeSleeveSize(employeeSize),
+            itemClass: itemClass,
+            changeOutDate: changeOutDate ? new Date(changeOutDate) : new Date('2099-12-31')
+          });
         }
       }
+
+      Logger.log('UPGRADE: Found ' + needsUpgrade.length + ' employees with In Testing items in ' + config.swapSheet);
+
+      // Build a map of available "On Shelf" items by class and size
+      // These are items that are On Shelf and NOT currently assigned to anyone on the swap sheet
+      var availableItems = {};
+
+      for (var i = 1; i < inventoryData.length; i++) {
+        var item = inventoryData[i];
+        var itemNum = String(item[0]).trim();
+        var status = (item[6] || '').toString().trim().toLowerCase();
+        var assignedTo = (item[7] || '').toString().trim().toLowerCase();
+        var pickedFor = (item[9] || '').toString().trim();
+        var notes = (item[10] || '').toString().trim().toUpperCase();
+
+        // Only consider "On Shelf" items that aren't already assigned on the swap sheet
+        var isOnShelf = status === 'on shelf';
+        var notAlreadyAssigned = !assignedPickListItems.has(itemNum);
+        var notReserved = !pickedFor; // No Picked For reservation
+        var notLost = notes.indexOf('LOST-LOCATE') === -1;
+        // Assigned To can be empty or "On Shelf" for available items
+        var assignedToOk = (assignedTo === '' || assignedTo === 'on shelf');
+
+        if (isOnShelf && notAlreadyAssigned && notReserved && notLost && assignedToOk) {
+          var invItemClass = parseInt(item[2], 10);
+          var invItemSize = config.isGloves ? parseFloat(item[1]) : normalizeSleeveSize(item[1]);
+          var key = invItemClass + '_' + invItemSize;
+
+          if (!availableItems[key]) {
+            availableItems[key] = [];
+          }
+          availableItems[key].push({
+            itemNum: itemNum,
+            size: item[1],
+            class: invItemClass,
+            rowIndex: i
+          });
+        }
+      }
+
+      // Log available items
+      Logger.log('UPGRADE: Available On Shelf items (not assigned):');
+      Object.keys(availableItems).forEach(function(key) {
+        Logger.log('  ' + key + ': ' + availableItems[key].map(function(x) { return x.itemNum; }).join(', '));
+      });
+
+      // Sort employees by urgency (earliest change out date first)
+      needsUpgrade.sort(function(a, b) {
+        return a.changeOutDate - b.changeOutDate;
+      });
+
+      // Track which items we've used as upgrades
+      var usedUpgradeItems = new Set();
+
+      // Assign available On Shelf items to employees with In Testing
+      needsUpgrade.forEach(function(emp) {
+        var lookupKey = emp.itemClass + '_' + emp.size;
+
+        Logger.log('UPGRADE: Checking ' + emp.employeeName + ' (Class ' + emp.itemClass + ' Size ' + emp.size + ')');
+
+        if (!availableItems[lookupKey] || availableItems[lookupKey].length === 0) {
+          Logger.log('UPGRADE: No available On Shelf items for key ' + lookupKey);
+          return;
+        }
+
+        // Find an available item
+        var upgradeItem = null;
+        for (var k = 0; k < availableItems[lookupKey].length; k++) {
+          var candidate = availableItems[lookupKey][k];
+          if (!usedUpgradeItems.has(candidate.itemNum)) {
+            upgradeItem = candidate;
+            usedUpgradeItems.add(candidate.itemNum);
+            break;
+          }
+        }
+
+        if (upgradeItem) {
+          Logger.log('UPGRADE SUCCESS: ' + emp.employeeName + ' -> Item ' + upgradeItem.itemNum + ' (was ' + emp.currentItem + ')');
+
+          // Update the swap sheet
+          swapSheet.getRange(emp.actualRow, 7).setValue(upgradeItem.itemNum);
+          swapSheet.getRange(emp.actualRow, 8).setValue('In Stock ✅');
+
+          // Highlight the upgrade
+          swapSheet.getRange(emp.actualRow, 7).setBackground('#c8e6c9');
+          swapSheet.getRange(emp.actualRow, 8).setBackground('#c8e6c9');
+
+          // Track the upgrade
+          results.details.push({
+            employee: emp.employeeName,
+            oldItem: emp.currentItem,
+            newItem: upgradeItem.itemNum
+          });
+
+          if (config.isGloves) {
+            results.gloveUpgrades++;
+          } else {
+            results.sleeveUpgrades++;
+          }
+          results.totalUpgrades++;
+
+          logEvent('UPGRADE: ' + emp.employeeName + ' - Changed from ' + emp.currentItem + ' (In Testing) to ' + upgradeItem.itemNum + ' (On Shelf)', 'INFO');
+        } else {
+          Logger.log('UPGRADE: No unused On Shelf items available for ' + emp.employeeName);
+        }
+      });
     });
 
     return results;
 
   } catch (e) {
     logEvent('Error in upgradePickListItems: ' + e, 'ERROR');
+    Logger.log('Error in upgradePickListItems: ' + e);
     return results;
   }
 }
