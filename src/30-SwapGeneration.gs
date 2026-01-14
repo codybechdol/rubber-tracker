@@ -49,15 +49,16 @@ function generateAllReports() {
 
     fixChangeOutDatesSilent();
 
-    // Run pick list upgrades BEFORE generating swap reports
-    // This checks for better "On Shelf" options for items currently "In Testing" or other statuses
+    generateGloveSwaps();
+    generateSleeveSwaps();
+
+    // Run pick list upgrades AFTER generating swap reports
+    // This checks for better "On Shelf" options for items that got assigned "In Testing" status
     var upgradeResults = upgradePickListItems();
     if (upgradeResults && upgradeResults.totalUpgrades > 0) {
       logEvent('Pick List Upgrades: ' + upgradeResults.totalUpgrades + ' items upgraded to better options');
     }
 
-    generateGloveSwaps();
-    generateSleeveSwaps();
     updatePurchaseNeeds();
     updateInventoryReports();
     updateReclaimsSheet();
@@ -157,10 +158,11 @@ function upgradePickListItems() {
           continue;
         }
 
-        // Check if this is an "In Testing" or "Ready For Delivery" item that could be upgraded
+        // Check if this is an "In Testing" or other non-ready item that could be upgraded
+        // These statuses indicate items that are NOT immediately available
         var needsUpgrade = pickListStatus.indexOf('in testing') !== -1 ||
-                          pickListStatus.indexOf('ready for delivery') !== -1 ||
-                          pickListStatus.indexOf('packed') !== -1;
+                          pickListStatus.indexOf('testing') !== -1 ||
+                          pickListStatus.indexOf('⏳') !== -1;
 
         // Skip items that are already "In Stock" (On Shelf)
         if (pickListStatus.indexOf('in stock') !== -1 || !needsUpgrade) {
@@ -895,8 +897,11 @@ function generateSwaps(itemType) {
           pickListStatus = pickListSizeUp ? 'In Stock (Size Up) ⚠️' : 'In Stock ✅';
         } else if (pickListStatusRaw === 'ready for delivery') {
           pickListStatus = pickListSizeUp ? 'Ready For Delivery (Size Up) ⚠️' : 'Ready For Delivery 🚚';
+        } else if (pickListStatusRaw === 'in testing') {
+          pickListStatus = pickListSizeUp ? 'In Testing (Size Up) ⏳' : 'In Testing ⏳';
         } else {
-          pickListStatus = meta.status;
+          // Fallback for any other status
+          pickListStatus = pickListStatusRaw || meta.status;
         }
 
         var finalPickListValue = pickListValue;
