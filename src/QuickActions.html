@@ -43,6 +43,16 @@
     .status-bar.error { background: #fce8e6; color: #c5221f; }
     .status-bar.success { background: #e6f4ea; color: #137333; }
     .reset-link { display: block; text-align: center; margin-top: 12px; font-size: 11px; color: #5f6368; cursor: pointer; }
+    .form-group { margin-bottom: 10px; }
+    .form-label { display: block; font-size: 11px; font-weight: 500; color: #5f6368; margin-bottom: 4px; }
+    .form-input {
+      width: 100%; padding: 8px 10px; border: 1px solid #dadce0; border-radius: 4px;
+      font-size: 13px; background: #f8f9fa;
+    }
+    .form-input:focus { outline: none; border-color: #1a73e8; background: #fff; }
+    .btn { margin-top: 8px; padding: 10px 24px; background: #1a73e8; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; }
+    .btn:hover { background: #1557b0; }
+    .btn:disabled { background: #dadce0; cursor: not-allowed; }
   </style>
 </head>
 <body>
@@ -79,12 +89,75 @@
   <div class="reset-link" onclick="resetSteps()">↺ Reset workflow</div>
 
   <div class="divider"></div>
+  <div class="section-title">As Needed</div>
+  <div>
+    <button class="quick-btn" onclick="runQuick('setupCrewVisitConfig', 'Setup Crew Visit Config', 'Setting up Crew Visit Config...')">👷 Crew Visit Config</button>
+    <button class="quick-btn" onclick="runQuick('setupTrainingConfig', 'Setup Training Config', 'Setting up Training Config...')">📚 Training Config</button>
+    <button class="quick-btn" onclick="runQuick('setupTrainingTracking', 'Setup Training Tracking', 'Setting up Training Tracking...')">📋 Training Tracking</button>
+    <button class="quick-btn" onclick="runQuick('setupExpiringCertsSheet', 'Setup Expiring Certs', 'Setting up Expiring Certs sheet...')">📜 Expiring Certs</button>
+  </div>
+
+  <div class="divider"></div>
   <div class="section-title">Quick Actions</div>
   <div>
     <button class="quick-btn" onclick="runQuick('generateGloveSwaps', 'Generate Glove Swaps', 'Updating Glove Swaps report...')">🧤 Gloves</button>
     <button class="quick-btn" onclick="runQuick('generateSleeveSwaps', 'Generate Sleeve Swaps', 'Updating Sleeve Swaps report...')">💪 Sleeves</button>
     <button class="quick-btn" onclick="runQuick('updatePurchaseNeeds', 'Update Purchase Needs', 'Calculating purchase requirements...')">🛒 Purchase</button>
     <button class="quick-btn" onclick="runQuick('showItemHistoryLookup', 'Item History Lookup', 'Opening history lookup dialog...')">🔍 Lookup</button>
+    <button class="quick-btn" onclick="openToDoSchedule()">📅 To Do Schedule</button>
+    <button class="quick-btn" onclick="openToDoConfig()">⚙️ To Do Config</button>
+  </div>
+
+  <div class="divider"></div>
+  <div class="section-title" onclick="toggleManualTask()" style="cursor:pointer;">
+    📅 Add Manual Schedule Item <span id="expandIcon">▼</span>
+  </div>
+  <div id="manualTaskForm" style="display:none; background:#fff; padding:12px; border-radius:8px; border:1px solid #dadce0;">
+    <div class="form-group">
+      <label class="form-label">Location</label>
+      <input type="text" id="mtLocation" class="form-input" placeholder="e.g., Office, Home, Client Site">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Priority</label>
+      <select id="mtPriority" class="form-input">
+        <option value="High">🔴 High</option>
+        <option value="Medium" selected>🟡 Medium</option>
+        <option value="Low">🟢 Low</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Task Type / Title</label>
+      <input type="text" id="mtTaskType" class="form-input" placeholder="e.g., Meeting with John, Doctor Appointment">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Scheduled Date</label>
+      <input type="date" id="mtScheduledDate" class="form-input">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Start Time</label>
+      <input type="time" id="mtStartTime" class="form-input">
+    </div>
+    <div class="form-group">
+      <label class="form-label">End Time (optional)</label>
+      <input type="time" id="mtEndTime" class="form-input">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Estimated Time (hours)</label>
+      <input type="number" id="mtEstimatedTime" class="form-input" placeholder="e.g., 4" step="0.5" min="0.5">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Start Location</label>
+      <input type="text" id="mtStartLocation" class="form-input" placeholder="Where you're coming from">
+    </div>
+    <div class="form-group">
+      <label class="form-label">End Location</label>
+      <input type="text" id="mtEndLocation" class="form-input" placeholder="Where you're going after">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Notes (optional)</label>
+      <input type="text" id="mtNotes" class="form-input" placeholder="Additional details...">
+    </div>
+    <button class="btn" onclick="addManualTask()" style="width:100%;">➕ Add to Schedule</button>
   </div>
 
   <div id="statusBar" class="status-bar"></div>
@@ -120,6 +193,91 @@
     }
     function showStatus(m, t) { var s=document.getElementById('statusBar'); s.textContent=m; s.className='status-bar show '+(t||''); }
     function hideStatus() { document.getElementById('statusBar').className='status-bar'; }
+
+    function openToDoConfig() {
+      showStatus('⏳ Opening To Do Config...');
+      google.script.run.withSuccessHandler(function() {
+        hideStatus();
+      }).withFailureHandler(function(e) {
+        showStatus('Error: ' + e, 'error');
+      }).showToDoConfig();
+    }
+
+    function openToDoSchedule() {
+      showStatus('⏳ Opening To Do Schedule...');
+      google.script.run.withSuccessHandler(function() {
+        hideStatus();
+      }).withFailureHandler(function(e) {
+        showStatus('Error: ' + e, 'error');
+      }).showToDoSchedule();
+    }
+
+    function toggleManualTask() {
+      var form = document.getElementById('manualTaskForm');
+      var icon = document.getElementById('expandIcon');
+      if (form.style.display === 'none') {
+        form.style.display = 'block';
+        icon.textContent = '▲';
+        // Set default date to today
+        var today = new Date().toISOString().split('T')[0];
+        document.getElementById('mtScheduledDate').value = today;
+      } else {
+        form.style.display = 'none';
+        icon.textContent = '▼';
+      }
+    }
+
+    function addManualTask() {
+      var location = document.getElementById('mtLocation').value.trim();
+      var priority = document.getElementById('mtPriority').value;
+      var taskType = document.getElementById('mtTaskType').value;
+      var scheduledDate = document.getElementById('mtScheduledDate').value;
+      var startTime = document.getElementById('mtStartTime').value;
+      var endTime = document.getElementById('mtEndTime').value;
+      var estimatedTime = document.getElementById('mtEstimatedTime').value;
+      var startLocation = document.getElementById('mtStartLocation').value.trim();
+      var endLocation = document.getElementById('mtEndLocation').value.trim();
+      var notes = document.getElementById('mtNotes').value.trim();
+
+      // Validation
+      if (!location) { alert('Please enter a location'); return; }
+      if (!taskType) { alert('Please enter a task type/title'); return; }
+      if (!scheduledDate) { alert('Please select a scheduled date'); return; }
+      if (!startTime) { alert('Please enter a start time'); return; }
+      if (!estimatedTime || estimatedTime <= 0) { alert('Please enter estimated time (hours)'); return; }
+
+      var taskData = {
+        location: location,
+        priority: priority,
+        taskType: taskType,
+        scheduledDate: scheduledDate,
+        startTime: startTime,
+        endTime: endTime || '',
+        estimatedTime: parseFloat(estimatedTime),
+        startLocation: startLocation,
+        endLocation: endLocation,
+        notes: notes
+      };
+
+      showStatus('⏳ Adding to schedule...');
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          showStatus('✓ Added to Smart Schedule!', 'success');
+          setTimeout(hideStatus, 2000);
+          // Clear form
+          document.getElementById('mtLocation').value = '';
+          document.getElementById('mtTaskType').value = '';
+          document.getElementById('mtEstimatedTime').value = '';
+          document.getElementById('mtStartLocation').value = '';
+          document.getElementById('mtEndLocation').value = '';
+          document.getElementById('mtNotes').value = '';
+        })
+        .withFailureHandler(function(error) {
+          showStatus('Error: ' + error, 'error');
+        })
+        .addManualScheduleTask(taskData);
+    }
   </script>
 </body>
 </html>

@@ -56,6 +56,108 @@ function openQuickActionsSidebar() {
 }
 
 /**
+ * Opens the To Do Schedule dialog
+ * Called from QuickActions sidebar
+ */
+function showToDoSchedule() {
+  var html = HtmlService.createHtmlOutputFromFile('ToDoSchedule')
+    .setWidth(1200)
+    .setHeight(800);
+  SpreadsheetApp.getUi().showModalDialog(html, '📅 To Do Schedule');
+}
+
+/**
+ * Opens the To Do Config dialog
+ * Called from QuickActions sidebar
+ */
+function showToDoConfig() {
+  var html = HtmlService.createHtmlOutputFromFile('ToDoConfig')
+    .setWidth(1200)
+    .setHeight(800);
+  SpreadsheetApp.getUi().showModalDialog(html, '⚙️ To Do Config');
+}
+
+/**
+ * Adds a manual task to the Smart Schedule
+ * Called from the QuickActions sidebar.
+ *
+ * @param {Object} taskData - The task data from the form
+ * @param {string} taskData.location - Location of the task
+ * @param {string} taskData.priority - Priority level (High, Medium, Low)
+ * @param {string} taskData.taskType - Type of task (Meeting, Training, etc.)
+ * @param {string} taskData.scheduledDate - Date in YYYY-MM-DD format
+ * @param {string} taskData.startTime - Start time in HH:MM format
+ * @param {string} taskData.endTime - End time in HH:MM format (optional)
+ * @param {number} taskData.estimatedTime - Estimated time in hours
+ * @param {string} taskData.startLocation - Where traveling from
+ * @param {string} taskData.endLocation - Where traveling to after
+ * @param {string} taskData.notes - Optional notes
+ * @return {Object} Result with success status
+ */
+function addManualScheduleTask(taskData) {
+  Logger.log('=== addManualScheduleTask START ===');
+  Logger.log('Task data: ' + JSON.stringify(taskData));
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Get or create Manual Tasks sheet
+  var manualSheet = ss.getSheetByName('Manual Tasks');
+  if (!manualSheet) {
+    manualSheet = ss.insertSheet('Manual Tasks');
+    // Set up headers
+    var headers = [
+      'Location', 'Priority', 'Task Type', 'Scheduled Date', 'Start Time', 'End Time',
+      'Estimated Time (hrs)', 'Start Location', 'End Location',
+      'Notes', 'Date Added', 'Status'
+    ];
+    manualSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    manualSheet.getRange(1, 1, 1, headers.length)
+      .setBackground('#1a73e8')
+      .setFontColor('#ffffff')
+      .setFontWeight('bold');
+    manualSheet.setFrozenRows(1);
+    Logger.log('Created Manual Tasks sheet with headers');
+  }
+
+  // Check if headers need to be updated (existing sheet without time columns)
+  var existingHeaders = manualSheet.getRange(1, 1, 1, manualSheet.getLastColumn()).getValues()[0];
+  if (existingHeaders.indexOf('Start Time') === -1) {
+    // Need to add Start Time and End Time columns - insert after Scheduled Date (column 4)
+    manualSheet.insertColumnAfter(4);
+    manualSheet.insertColumnAfter(4);
+    manualSheet.getRange(1, 5).setValue('Start Time');
+    manualSheet.getRange(1, 6).setValue('End Time');
+    manualSheet.getRange(1, 5, 1, 2)
+      .setBackground('#1a73e8')
+      .setFontColor('#ffffff')
+      .setFontWeight('bold');
+    Logger.log('Updated headers to include Start Time and End Time columns');
+  }
+
+  // Add new row with task data
+  var newRow = [
+    taskData.location,
+    taskData.priority,
+    taskData.taskType,
+    taskData.scheduledDate,
+    taskData.startTime,
+    taskData.endTime || '',
+    taskData.estimatedTime,
+    taskData.startLocation,
+    taskData.endLocation,
+    taskData.notes,
+    new Date(),
+    'Pending'
+  ];
+
+  manualSheet.appendRow(newRow);
+  Logger.log('Added task to Manual Tasks sheet');
+
+  Logger.log('=== addManualScheduleTask END ===');
+  return { success: true, message: 'Task added successfully' };
+}
+
+/**
  * Adds a custom menu to the Google Sheet for Glove Manager actions.
  * Also automatically opens the Quick Actions sidebar.
  */
