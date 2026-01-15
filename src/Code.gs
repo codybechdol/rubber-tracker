@@ -1571,15 +1571,9 @@ function saveCurrentStateToHistorySilent() {
   saveHistory(true);
 }
 
-/**
- * Helper to format date for history display
- */
-function formatDateForHistory(dateVal) {
-  if (!dateVal) return '';
-  var d = parseDateFlexible(dateVal);
-  if (!d) return String(dateVal);
-  return Utilities.formatDate(d, SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone(), 'MM/dd/yyyy');
-}
+// NOTE: formatDateForHistory() is defined later in this file (around line 4826)
+// with better error handling (try-catch). The duplicate version that was here
+// has been removed during the Option B safe cleanup on Jan 15, 2026.
 
 /**
  * Flexible date parser that handles various date formats
