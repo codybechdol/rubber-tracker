@@ -12,6 +12,8 @@
     .header h1 { color: #1a73e8; font-size: 24px; margin: 0; }
     .btn-primary { background: #1a73e8; border-color: #1a73e8; }
     .btn-primary:hover { background: #1557b0; border-color: #1557b0; }
+    .nav-tabs .nav-link { color: #5f6368; }
+    .nav-tabs .nav-link.active { color: #1a73e8; border-color: #1a73e8; border-bottom-color: white; }
     .card { border: none; box-shadow: 0 1px 3px rgba(0,0,0,0.12); margin-bottom: 16px; }
     .card-header { background: #1a73e8; color: white; font-weight: 500; }
     .task-row { padding: 12px; border-bottom: 1px solid #e0e0e0; }
@@ -22,76 +24,222 @@
     .priority-low { border-left: 4px solid #34a853; }
     .task-date { font-size: 12px; color: #5f6368; }
     .task-location { font-weight: 500; color: #202124; }
-    .task-type { color: #5f6368; }
+    .task-type { color: #5f6368; font-size: 13px; }
+    .task-source { font-size: 11px; color: #9aa0a6; }
     .loading { text-align: center; padding: 40px; }
     .empty-state { text-align: center; padding: 60px; color: #5f6368; }
-    .date-input { border: 1px solid #dadce0; border-radius: 4px; padding: 4px 8px; font-size: 13px; }
+    .date-input { border: 1px solid #dadce0; border-radius: 4px; padding: 4px 8px; font-size: 13px; width: 130px; }
     .date-input:focus { outline: none; border-color: #1a73e8; }
     .status-badge { font-size: 11px; padding: 2px 8px; border-radius: 12px; }
     .status-pending { background: #fef7e0; color: #b06000; }
     .status-complete { background: #e6f4ea; color: #137333; }
+    .status-overdue { background: #fce8e6; color: #c5221f; }
+    .status-scheduled { background: #e8f0fe; color: #1967d2; }
     .filter-bar { background: white; padding: 12px; border-radius: 8px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+
+    /* Calendar Styles */
+    .calendar-container { background: white; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .calendar-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .calendar-title { font-size: 18px; font-weight: 500; color: #202124; }
+    .calendar-nav { display: flex; gap: 8px; }
+    .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+    .calendar-day-header { text-align: center; font-weight: 500; color: #5f6368; padding: 8px; font-size: 12px; }
+    .calendar-day { min-height: 80px; border: 1px solid #e0e0e0; border-radius: 4px; padding: 4px; background: #fff; cursor: pointer; }
+    .calendar-day:hover { background: #f1f3f4; }
+    .calendar-day.today { background: #fff59d; border-color: #f57c00; }
+    .calendar-day.other-month { background: #f5f5f5; color: #9e9e9e; }
+    .calendar-day.has-tasks { background: #e3f2fd; }
+    .calendar-day-number { font-weight: 500; font-size: 14px; margin-bottom: 4px; }
+    .calendar-task-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 2px; }
+    .calendar-task-dot.high { background: #ea4335; }
+    .calendar-task-dot.medium { background: #fbbc04; }
+    .calendar-task-dot.low { background: #34a853; }
+    .calendar-task-preview { font-size: 10px; color: #5f6368; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .calendar-task-location { font-size: 9px; color: #1a73e8; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .day-detail-popup { position: fixed; background: white; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); padding: 16px; z-index: 1000; max-width: 450px; max-height: 500px; overflow-y: auto; }
+    .day-detail-task { border: 1px solid #e0e0e0; border-radius: 6px; padding: 10px; margin-bottom: 8px; }
+    .day-detail-task.priority-high { border-left: 4px solid #ea4335; }
+    .day-detail-task.priority-medium { border-left: 4px solid #fbbc04; }
+    .day-detail-task.priority-low { border-left: 4px solid #34a853; }
+    .unsaved-indicator { display: none; color: #dc3545; font-size: 12px; margin-left: 8px; }
+    .unsaved-indicator.show { display: inline; }
+    .date-input.changed { background: #fff3cd; border-color: #ffc107; }
   </style>
 </head>
 <body>
   <div class="header">
-    <h1><i class="bi bi-calendar-check"></i> To Do Schedule</h1>
+    <h1><i class="bi bi-calendar-check"></i> To Do Schedule <span class="unsaved-indicator" id="unsavedIndicator">● Unsaved changes</span></h1>
     <div>
+      <button class="btn btn-success btn-sm me-2" onclick="saveAllChanges()">
+        <i class="bi bi-check-lg"></i> Save
+      </button>
       <button class="btn btn-outline-secondary btn-sm me-2" onclick="refreshData()">
         <i class="bi bi-arrow-clockwise"></i> Refresh
       </button>
-      <button class="btn btn-primary btn-sm" onclick="google.script.host.close()">
+      <button class="btn btn-primary btn-sm" onclick="closeDialog()">
         <i class="bi bi-x-lg"></i> Close
       </button>
     </div>
   </div>
 
-  <div class="filter-bar">
-    <div class="row align-items-center">
-      <div class="col-auto">
-        <label class="form-label mb-0 me-2">Filter:</label>
+  <ul class="nav nav-tabs mb-3" id="scheduleTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="calendar-tab" data-bs-toggle="tab" data-bs-target="#calendar" type="button">
+        <i class="bi bi-calendar3"></i> Calendar
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tasklist-tab" data-bs-toggle="tab" data-bs-target="#tasklist" type="button">
+        <i class="bi bi-list-check"></i> Task List
+      </button>
+    </li>
+  </ul>
+
+  <div class="tab-content" id="scheduleTabContent">
+    <!-- Calendar Tab -->
+    <div class="tab-pane fade show active" id="calendar" role="tabpanel">
+      <div class="calendar-container">
+        <div class="calendar-header">
+          <button class="btn btn-outline-secondary btn-sm" onclick="changeMonth(-1)">
+            <i class="bi bi-chevron-left"></i>
+          </button>
+          <span class="calendar-title" id="calendarTitle">January 2026</span>
+          <button class="btn btn-outline-secondary btn-sm" onclick="changeMonth(1)">
+            <i class="bi bi-chevron-right"></i>
+          </button>
+        </div>
+        <div class="calendar-grid" id="calendarGrid">
+          <!-- Calendar will be rendered here -->
+        </div>
+        <div class="mt-3 text-muted small">
+          <span class="calendar-task-dot high"></span> High Priority
+          <span class="calendar-task-dot medium ms-2"></span> Medium Priority
+          <span class="calendar-task-dot low ms-2"></span> Low Priority
+        </div>
       </div>
-      <div class="col-auto">
-        <select id="filterPriority" class="form-select form-select-sm" onchange="applyFilters()">
-          <option value="">All Priorities</option>
-          <option value="High">🔴 High</option>
-          <option value="Medium">🟡 Medium</option>
-          <option value="Low">🟢 Low</option>
-        </select>
+    </div>
+
+    <!-- Task List Tab -->
+    <div class="tab-pane fade" id="tasklist" role="tabpanel">
+      <div class="filter-bar">
+        <div class="row align-items-center">
+          <div class="col-auto">
+            <label class="form-label mb-0 me-2">Filter:</label>
+          </div>
+          <div class="col-auto">
+            <select id="filterPriority" class="form-select form-select-sm" onchange="applyFilters()">
+              <option value="">All Priorities</option>
+              <option value="High">🔴 High</option>
+              <option value="Medium">🟡 Medium</option>
+              <option value="Low">🟢 Low</option>
+            </select>
+          </div>
+          <div class="col-auto">
+            <select id="filterStatus" class="form-select form-select-sm" onchange="applyFilters()">
+              <option value="">All Status</option>
+              <option value="Pending">Pending</option>
+              <option value="Complete">Complete</option>
+              <option value="Scheduled">Scheduled</option>
+              <option value="Overdue">Overdue</option>
+            </select>
+          </div>
+          <div class="col-auto">
+            <select id="filterSource" class="form-select form-select-sm" onchange="applyFilters()">
+              <option value="">All Sources</option>
+              <option value="Manual Tasks">Manual Tasks</option>
+              <option value="Training Tracking">Training</option>
+              <option value="Crew Visit Config">Crew Visits</option>
+              <option value="Expiring Certs">Expiring Certs</option>
+              <option value="Glove Swaps">Glove Swaps</option>
+              <option value="Sleeve Swaps">Sleeve Swaps</option>
+            </select>
+          </div>
+          <div class="col-auto">
+            <input type="date" id="filterDate" class="form-control form-control-sm" onchange="applyFilters()">
+          </div>
+          <div class="col-auto">
+            <button class="btn btn-outline-secondary btn-sm" onclick="clearFilters()">Clear</button>
+          </div>
+        </div>
       </div>
-      <div class="col-auto">
-        <select id="filterStatus" class="form-select form-select-sm" onchange="applyFilters()">
-          <option value="">All Status</option>
-          <option value="Pending">Pending</option>
-          <option value="Complete">Complete</option>
-        </select>
-      </div>
-      <div class="col-auto">
-        <input type="date" id="filterDate" class="form-control form-control-sm" onchange="applyFilters()">
-      </div>
-      <div class="col-auto">
-        <button class="btn btn-outline-secondary btn-sm" onclick="clearFilters()">Clear</button>
+
+      <div id="taskContainer">
+        <div class="loading">
+          <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+          <p class="mt-3">Loading tasks...</p>
+        </div>
       </div>
     </div>
   </div>
 
-  <div id="taskContainer">
-    <div class="loading">
-      <div class="spinner-border text-primary" role="status">
-        <span class="visually-hidden">Loading...</span>
-      </div>
-      <p class="mt-3">Loading tasks...</p>
-    </div>
-  </div>
+  <!-- Day Detail Popup -->
+  <div id="dayDetailPopup" class="day-detail-popup" style="display: none;"></div>
 
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   <script>
     var allTasks = [];
+    var currentMonth = new Date().getMonth();
+    var currentYear = new Date().getFullYear();
+    var monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                      'July', 'August', 'September', 'October', 'November', 'December'];
+    var hasUnsavedChanges = false;
+    var pendingDateChanges = {}; // Track changes by task index
+
+    function setUnsaved(value) {
+      hasUnsavedChanges = value;
+      var indicator = document.getElementById('unsavedIndicator');
+      if (value) {
+        indicator.classList.add('show');
+      } else {
+        indicator.classList.remove('show');
+      }
+    }
+
+    function closeDialog() {
+      if (hasUnsavedChanges) {
+        if (confirm('You have unsaved changes. Are you sure you want to close without saving?')) {
+          google.script.host.close();
+        }
+      } else {
+        google.script.host.close();
+      }
+    }
+
+    function saveAllChanges() {
+      var changes = Object.keys(pendingDateChanges).map(function(key) {
+        return pendingDateChanges[key];
+      });
+
+      if (changes.length === 0) {
+        showToast('No changes to save');
+        return;
+      }
+
+      showToast('Saving ' + changes.length + ' change(s)...');
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          pendingDateChanges = {};
+          setUnsaved(false);
+          // Remove changed styling from inputs
+          var inputs = document.querySelectorAll('.date-input.changed');
+          inputs.forEach(function(input) { input.classList.remove('changed'); });
+          showToast('✓ Saved ' + changes.length + ' change(s) successfully!');
+        })
+        .withFailureHandler(function(error) {
+          showToast('Error saving: ' + error, 'error');
+        })
+        .saveScheduleTaskDateChanges(changes);
+    }
 
     function loadTasks() {
       google.script.run
         .withSuccessHandler(function(tasks) {
           allTasks = tasks || [];
           renderTasks(allTasks);
+          renderCalendar();
         })
         .withFailureHandler(function(error) {
           document.getElementById('taskContainer').innerHTML =
@@ -100,71 +248,460 @@
         .getScheduleTasks();
     }
 
+    // ================== CALENDAR FUNCTIONS ==================
+    function renderCalendar() {
+      var grid = document.getElementById('calendarGrid');
+      var title = document.getElementById('calendarTitle');
+      title.textContent = monthNames[currentMonth] + ' ' + currentYear;
+
+      var firstDay = new Date(currentYear, currentMonth, 1);
+      var lastDay = new Date(currentYear, currentMonth + 1, 0);
+      var startDay = firstDay.getDay();
+      var daysInMonth = lastDay.getDate();
+
+      var today = new Date();
+      var todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+
+      // Group tasks by date
+      var tasksByDate = {};
+      allTasks.forEach(function(task) {
+        if (task.scheduledDate) {
+          if (!tasksByDate[task.scheduledDate]) tasksByDate[task.scheduledDate] = [];
+          tasksByDate[task.scheduledDate].push(task);
+        }
+      });
+
+      var html = '';
+
+      // Day headers
+      var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      dayNames.forEach(function(day) {
+        html += '<div class="calendar-day-header">' + day + '</div>';
+      });
+
+      // Days from previous month
+      var prevMonth = new Date(currentYear, currentMonth, 0);
+      var prevMonthDays = prevMonth.getDate();
+      for (var i = startDay - 1; i >= 0; i--) {
+        var dayNum = prevMonthDays - i;
+        html += '<div class="calendar-day other-month"><div class="calendar-day-number">' + dayNum + '</div></div>';
+      }
+
+      // Days in current month
+      for (var day = 1; day <= daysInMonth; day++) {
+        var dateStr = currentYear + '-' + String(currentMonth + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+        var dayTasks = tasksByDate[dateStr] || [];
+        var isToday = dateStr === todayStr;
+        var hasTasks = dayTasks.length > 0;
+
+        var classes = 'calendar-day';
+        if (isToday) classes += ' today';
+        if (hasTasks) classes += ' has-tasks';
+
+        html += '<div class="' + classes + '" onclick="showDayDetail(\'' + dateStr + '\', event)">';
+        html += '<div class="calendar-day-number">' + day + '</div>';
+
+        if (hasTasks) {
+          // Show priority dots
+          var highCount = dayTasks.filter(function(t) { return t.priority === 'High'; }).length;
+          var medCount = dayTasks.filter(function(t) { return t.priority === 'Medium'; }).length;
+          var lowCount = dayTasks.filter(function(t) { return t.priority === 'Low'; }).length;
+
+          html += '<div>';
+          for (var h = 0; h < Math.min(highCount, 3); h++) html += '<span class="calendar-task-dot high"></span>';
+          for (var m = 0; m < Math.min(medCount, 3); m++) html += '<span class="calendar-task-dot medium"></span>';
+          for (var l = 0; l < Math.min(lowCount, 3); l++) html += '<span class="calendar-task-dot low"></span>';
+          html += '</div>';
+
+          // Group tasks by location and count
+          var locationCounts = {};
+          dayTasks.forEach(function(t) {
+            var loc = t.location || 'No Location';
+            if (!locationCounts[loc]) locationCounts[loc] = 0;
+            locationCounts[loc]++;
+          });
+
+          // Sort locations by task count (most tasks first)
+          var sortedLocations = Object.keys(locationCounts).sort(function(a, b) {
+            return locationCounts[b] - locationCounts[a];
+          });
+
+          // Show first 2 locations with counts
+          for (var loc = 0; loc < Math.min(sortedLocations.length, 2); loc++) {
+            var locName = sortedLocations[loc];
+            var count = locationCounts[locName];
+            html += '<div class="calendar-task-location">📍 ' + locName;
+            if (count > 1) html += ' (' + count + ')';
+            html += '</div>';
+          }
+          if (sortedLocations.length > 2) {
+            html += '<div class="calendar-task-preview">+' + (sortedLocations.length - 2) + ' more</div>';
+          }
+        }
+        html += '</div>';
+      }
+
+      // Days from next month
+      var totalCells = startDay + daysInMonth;
+      var remainingCells = 7 - (totalCells % 7);
+      if (remainingCells < 7) {
+        for (var n = 1; n <= remainingCells; n++) {
+          html += '<div class="calendar-day other-month"><div class="calendar-day-number">' + n + '</div></div>';
+        }
+      }
+
+      grid.innerHTML = html;
+    }
+
+    function changeMonth(delta) {
+      currentMonth += delta;
+      if (currentMonth < 0) { currentMonth = 11; currentYear--; }
+      if (currentMonth > 11) { currentMonth = 0; currentYear++; }
+      renderCalendar();
+    }
+
+    function showDayDetail(dateStr, event) {
+      var popup = document.getElementById('dayDetailPopup');
+      var dayTasks = allTasks.filter(function(t) { return t.scheduledDate === dateStr; });
+
+      if (dayTasks.length === 0) {
+        popup.style.display = 'none';
+        return;
+      }
+
+      var date = new Date(dateStr + 'T12:00:00');
+      var dateDisplay = monthNames[date.getMonth()] + ' ' + date.getDate() + ', ' + date.getFullYear();
+
+      // Group tasks by location
+      var tasksByLoc = {};
+      dayTasks.forEach(function(task) {
+        var loc = task.location || 'No Location';
+        if (!tasksByLoc[loc]) tasksByLoc[loc] = [];
+        tasksByLoc[loc].push(task);
+      });
+
+      var html = '<div class="d-flex justify-content-between align-items-center mb-3" style="border-bottom: 2px solid #1a73e8; padding-bottom: 8px;">';
+      html += '<div><strong style="font-size: 16px;">📅 ' + dateDisplay + '</strong>';
+      html += '<div class="text-muted small">' + dayTasks.length + ' task(s)</div></div>';
+      html += '<button class="btn btn-sm btn-outline-secondary" onclick="closeDayDetail()"><i class="bi bi-x-lg"></i></button>';
+      html += '</div>';
+
+      // Render by location
+      var locations = Object.keys(tasksByLoc).sort();
+      locations.forEach(function(location) {
+        var locTasks = tasksByLoc[location];
+        html += '<div class="mb-3">';
+        html += '<div style="font-weight: 600; color: #1a73e8; font-size: 13px; margin-bottom: 6px;"><i class="bi bi-geo-alt-fill"></i> ' + location + ' <span class="badge bg-secondary">' + locTasks.length + '</span></div>';
+
+        locTasks.forEach(function(task) {
+          var priorityClass = 'priority-' + (task.priority || 'medium').toLowerCase();
+          var statusClass = getStatusClass(task.status);
+
+          html += '<div class="day-detail-task ' + priorityClass + '">';
+          html += '<div class="d-flex justify-content-between align-items-start">';
+          html += '<div><strong style="font-size: 13px;">' + (task.taskType || 'Task') + '</strong>';
+          if (task.employee) html += '<div class="text-muted" style="font-size: 11px;">👤 ' + task.employee + '</div>';
+          html += '</div>';
+          html += '<span class="status-badge ' + statusClass + '">' + (task.status || 'Pending') + '</span>';
+          html += '</div>';
+
+          html += '<div style="font-size: 11px; color: #5f6368; margin-top: 4px;">';
+          html += '<i class="bi bi-box-arrow-in-right"></i> ' + (task.source || 'Unknown');
+          if (task.startTime) {
+            html += ' &nbsp;|&nbsp; <i class="bi bi-clock"></i> ' + task.startTime;
+            if (task.endTime) html += ' - ' + task.endTime;
+          }
+          html += '</div>';
+
+          if (task.notes) {
+            html += '<div class="text-muted" style="font-size: 11px; margin-top: 4px; font-style: italic;"><i class="bi bi-info-circle"></i> ' + task.notes + '</div>';
+          }
+          html += '</div>';
+        });
+
+        html += '</div>';
+      });
+
+      popup.innerHTML = html;
+      popup.style.display = 'block';
+
+      // Position popup - center it better
+      var popupWidth = 450;
+      var popupHeight = Math.min(500, dayTasks.length * 120 + 100);
+      var left = Math.min(Math.max(event.clientX - popupWidth/2, 10), window.innerWidth - popupWidth - 10);
+      var top = Math.min(Math.max(event.clientY - 50, 10), window.innerHeight - popupHeight - 10);
+
+      popup.style.left = left + 'px';
+      popup.style.top = top + 'px';
+    }
+
+    function closeDayDetail() {
+      document.getElementById('dayDetailPopup').style.display = 'none';
+    }
+
+    // Close popup when clicking outside
+    document.addEventListener('click', function(e) {
+      var popup = document.getElementById('dayDetailPopup');
+      if (!popup.contains(e.target) && !e.target.classList.contains('calendar-day')) {
+        popup.style.display = 'none';
+      }
+    });
+
+    // ================== TASK LIST FUNCTIONS ==================
     function renderTasks(tasks) {
       var container = document.getElementById('taskContainer');
 
       if (!tasks || tasks.length === 0) {
-        container.innerHTML = '<div class="empty-state"><i class="bi bi-calendar-x" style="font-size: 48px;"></i><p class="mt-3">No tasks found</p><p class="text-muted">Add tasks from the Quick Actions sidebar</p></div>';
+        container.innerHTML = '<div class="empty-state"><i class="bi bi-calendar-x" style="font-size: 48px;"></i><p class="mt-3">No tasks found</p><p class="text-muted">Tasks will appear from Manual Tasks, Training, Crew Visits, Expiring Certs, and Swaps</p></div>';
         return;
       }
 
-      var html = '<div class="card"><div class="card-header"><i class="bi bi-list-task"></i> Scheduled Tasks (' + tasks.length + ')</div><div class="card-body p-0">';
-
+      // Group tasks by location
+      var tasksByLocation = {};
       tasks.forEach(function(task, index) {
-        var priorityClass = 'priority-' + (task.priority || 'medium').toLowerCase();
-        var statusClass = task.status === 'Complete' ? 'status-complete' : 'status-pending';
-
-        html += '<div class="task-row ' + priorityClass + '">';
-        html += '<div class="row align-items-center">';
-        html += '<div class="col-md-3">';
-        html += '<div class="task-location">' + (task.location || 'No Location') + '</div>';
-        html += '<div class="task-type">' + (task.taskType || 'Task') + '</div>';
-        html += '</div>';
-        html += '<div class="col-md-2">';
-        html += '<input type="date" class="date-input" value="' + (task.scheduledDate || '') + '" onchange="updateTaskDate(' + index + ', this.value)">';
-        html += '</div>';
-        html += '<div class="col-md-2">';
-        html += '<span class="task-date">' + (task.startTime || '') + (task.endTime ? ' - ' + task.endTime : '') + '</span>';
-        html += '</div>';
-        html += '<div class="col-md-2">';
-        html += '<span class="status-badge ' + statusClass + '">' + (task.status || 'Pending') + '</span>';
-        html += '</div>';
-        html += '<div class="col-md-3 text-end">';
-        html += '<button class="btn btn-outline-success btn-sm me-1" onclick="markComplete(' + index + ')" title="Mark Complete"><i class="bi bi-check-lg"></i></button>';
-        html += '<button class="btn btn-outline-danger btn-sm" onclick="deleteTask(' + index + ')" title="Delete"><i class="bi bi-trash"></i></button>';
-        html += '</div>';
-        html += '</div>';
-        html += '</div>';
+        var loc = task.location || 'No Location';
+        if (!tasksByLocation[loc]) tasksByLocation[loc] = [];
+        task._originalIndex = index; // Store original index for actions
+        tasksByLocation[loc].push(task);
       });
 
-      html += '</div></div>';
+      // Sort locations alphabetically
+      var locations = Object.keys(tasksByLocation).sort();
+
+      var html = '';
+
+      locations.forEach(function(location, locIndex) {
+        var locTasks = tasksByLocation[location];
+        var highCount = locTasks.filter(function(t) { return t.priority === 'High'; }).length;
+        var medCount = locTasks.filter(function(t) { return t.priority === 'Medium'; }).length;
+        var lowCount = locTasks.filter(function(t) { return t.priority === 'Low'; }).length;
+
+        html += '<div class="card mb-2">';
+        html += '<div class="card-header location-header" onclick="toggleLocationGroup(' + locIndex + ')" style="cursor: pointer; background: #f8f9fa; color: #202124;">';
+        html += '<div class="d-flex justify-content-between align-items-center">';
+        html += '<div><i class="bi bi-chevron-down me-2" id="loc-chevron-' + locIndex + '"></i>';
+        html += '<i class="bi bi-geo-alt me-1"></i><strong>' + location + '</strong>';
+        html += '<span class="badge bg-secondary ms-2">' + locTasks.length + ' tasks</span></div>';
+        html += '<div>';
+        if (highCount > 0) html += '<span class="badge bg-danger me-1">' + highCount + ' High</span>';
+        if (medCount > 0) html += '<span class="badge bg-warning text-dark me-1">' + medCount + ' Med</span>';
+        if (lowCount > 0) html += '<span class="badge bg-success">' + lowCount + ' Low</span>';
+        html += '</div></div></div>';
+
+        html += '<div class="card-body p-0 location-body show" id="loc-body-' + locIndex + '">';
+
+        // Table headers
+        html += '<div class="task-row bg-light" style="font-weight: 600; font-size: 12px; padding: 8px 12px;">';
+        html += '<div class="row align-items-center">';
+        html += '<div class="col-md-3">Task / Source</div>';
+        html += '<div class="col-md-2">Scheduled Date</div>';
+        html += '<div class="col-md-2">Time</div>';
+        html += '<div class="col-md-2">Status</div>';
+        html += '<div class="col-md-3 text-end">Actions</div>';
+        html += '</div></div>';
+
+        locTasks.forEach(function(task) {
+          var priorityClass = 'priority-' + (task.priority || 'medium').toLowerCase();
+          var statusClass = getStatusClass(task.status);
+
+          html += '<div class="task-row ' + priorityClass + '">';
+          html += '<div class="row align-items-center">';
+
+          // Task Type & Source
+          html += '<div class="col-md-3">';
+          html += '<div class="task-type" style="font-weight: 500;">' + (task.taskType || 'Task') + '</div>';
+          html += '<div class="task-source"><i class="bi bi-box-arrow-in-right"></i> ' + (task.source || 'Unknown') + '</div>';
+          if (task.employee) html += '<div class="text-muted small">' + task.employee + '</div>';
+          html += '</div>';
+
+          // Scheduled Date (editable)
+          html += '<div class="col-md-2">';
+          html += '<input type="date" class="date-input" value="' + (task.scheduledDate || '') + '" onchange="updateTaskDate(' + task._originalIndex + ', this.value, this)">';
+          html += '</div>';
+
+          // Time
+          html += '<div class="col-md-2">';
+          if (task.startTime) {
+            html += '<span class="task-date">' + task.startTime;
+            if (task.endTime) html += ' - ' + task.endTime;
+            html += '</span>';
+          } else {
+            html += '<span class="text-muted small">No time</span>';
+          }
+          html += '</div>';
+
+          // Status
+          html += '<div class="col-md-2">';
+          html += '<span class="status-badge ' + statusClass + '">' + (task.status || 'Pending') + '</span>';
+          html += '</div>';
+
+          // Actions
+          html += '<div class="col-md-3 text-end">';
+          html += '<button class="btn btn-outline-success btn-sm me-1" onclick="markComplete(' + task._originalIndex + ')" title="Mark Complete"><i class="bi bi-check-lg"></i></button>';
+          if (task.source === 'Manual Tasks') {
+            html += '<button class="btn btn-outline-danger btn-sm" onclick="deleteTask(' + task._originalIndex + ')" title="Delete"><i class="bi bi-trash"></i></button>';
+          }
+          html += '</div>';
+
+          html += '</div>'; // row
+
+          // Notes row
+          if (task.notes) {
+            html += '<div class="text-muted small mt-1"><i class="bi bi-info-circle"></i> ' + task.notes + '</div>';
+          }
+
+          html += '</div>'; // task-row
+        });
+
+        html += '</div></div>'; // card-body and card
+      });
+
       container.innerHTML = html;
     }
 
-    function updateTaskDate(index, newDate) {
-      google.script.run
-        .withSuccessHandler(function() {
-          allTasks[index].scheduledDate = newDate;
-          showToast('Date updated successfully');
-        })
-        .withFailureHandler(function(error) {
-          showToast('Error updating date: ' + error, 'error');
-          loadTasks(); // Reload to restore correct state
-        })
-        .updateScheduleTaskDate(index, newDate);
+    function getStatusClass(status) {
+      var statusLower = (status || 'pending').toLowerCase();
+      if (statusLower.indexOf('complete') !== -1) return 'status-complete';
+      if (statusLower.indexOf('overdue') !== -1) return 'status-overdue';
+      if (statusLower.indexOf('scheduled') !== -1) return 'status-scheduled';
+      return 'status-pending';
+    }
+
+    function toggleLocationGroup(locIndex) {
+      var body = document.getElementById('loc-body-' + locIndex);
+      var chevron = document.getElementById('loc-chevron-' + locIndex);
+      if (body.classList.contains('show')) {
+        body.classList.remove('show');
+        body.style.display = 'none';
+        chevron.className = 'bi bi-chevron-right me-2';
+      } else {
+        body.classList.add('show');
+        body.style.display = 'block';
+        chevron.className = 'bi bi-chevron-down me-2';
+      }
+    }
+
+    function updateTaskDate(index, newDate, inputElement) {
+      // Update local data immediately
+      var task = allTasks[index];
+      var oldDate = task.scheduledDate;
+      task.scheduledDate = newDate;
+
+      // Track the change for batch saving
+      pendingDateChanges[index] = {
+        index: index,
+        task: task,
+        oldDate: oldDate,
+        newDate: newDate
+      };
+
+      // Mark input as changed
+      if (inputElement) {
+        inputElement.classList.add('changed');
+      }
+
+      // Update calendar view immediately
+      renderCalendar();
+
+      // Show unsaved indicator
+      setUnsaved(true);
+      showToast('Date changed - click Save to apply');
     }
 
     function markComplete(index) {
+      var task = allTasks[index];
+
+      // Check if this is a cert renewal task
+      if (task.taskType && task.taskType.toLowerCase().indexOf('renew') !== -1) {
+        // Extract cert type and employee from task
+        var certType = task.taskType.replace(/renew\s*/i, '').trim();
+        var employee = task.notes ? extractEmployeeFromNotes(task.notes) : task.employee || '';
+
+        if (employee && certType) {
+          showCertExpirationModal(employee, certType, index);
+          return;
+        }
+      }
+
+      // Regular task completion
       google.script.run
         .withSuccessHandler(function() {
           allTasks[index].status = 'Complete';
           renderTasks(allTasks);
+          renderCalendar();
           showToast('Task marked complete');
         })
         .withFailureHandler(function(error) {
           showToast('Error: ' + error, 'error');
         })
-        .markScheduleTaskComplete(index);
+        .markScheduleTaskComplete(allTasks[index]);
+    }
+
+    function extractEmployeeFromNotes(notes) {
+      // Extract employee name from notes like "Employee: John Smith | ..."
+      var match = notes.match(/Employee:\s*([^|]+)/i);
+      return match ? match[1].trim() : '';
+    }
+
+    function showCertExpirationModal(employee, certType, taskIndex) {
+      // Calculate default expiration based on cert type
+      var today = new Date();
+      var defaultYears = 1;
+
+      if (certType.toLowerCase().indexOf('dl') !== -1 || certType.toLowerCase().indexOf('driver') !== -1) {
+        defaultYears = 2;
+      } else if (certType.toLowerCase().indexOf('mec') !== -1 || certType.toLowerCase().indexOf('medical') !== -1) {
+        defaultYears = 3;
+      }
+
+      var defaultDate = new Date(today.getFullYear() + defaultYears, today.getMonth(), today.getDate());
+      var defaultDateStr = defaultDate.toISOString().split('T')[0];
+
+      var modalHtml = '<div class="modal fade" id="certExpirationModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">';
+      modalHtml += '<div class="modal-header"><h5 class="modal-title">📅 Update Certification Expiration</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>';
+      modalHtml += '<div class="modal-body">';
+      modalHtml += '<p><strong>Employee:</strong> ' + employee + '</p>';
+      modalHtml += '<p><strong>Certification:</strong> ' + certType + '</p>';
+      modalHtml += '<div class="mb-3"><label class="form-label">New Expiration Date *</label>';
+      modalHtml += '<input type="date" class="form-control" id="newCertExpiration" value="' + defaultDateStr + '" required></div>';
+      modalHtml += '<p class="text-muted small">This will update the expiration date in the Expiring Certs sheet.</p>';
+      modalHtml += '</div><div class="modal-footer">';
+      modalHtml += '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>';
+      modalHtml += '<button type="button" class="btn btn-success" onclick="saveCertExpiration(\'' + employee + '\', \'' + certType + '\', ' + taskIndex + ')">Save & Complete Task</button>';
+      modalHtml += '</div></div></div></div>';
+
+      var existingModal = document.getElementById('certExpirationModal');
+      if (existingModal) existingModal.remove();
+
+      document.body.insertAdjacentHTML('beforeend', modalHtml);
+      var modal = new bootstrap.Modal(document.getElementById('certExpirationModal'));
+      modal.show();
+    }
+
+    function saveCertExpiration(employee, certType, taskIndex) {
+      var newExpiration = document.getElementById('newCertExpiration').value;
+
+      if (!newExpiration) {
+        alert('Please enter an expiration date');
+        return;
+      }
+
+      // Close modal
+      var modal = bootstrap.Modal.getInstance(document.getElementById('certExpirationModal'));
+      modal.hide();
+
+      // Update cert and mark task complete
+      google.script.run
+        .withSuccessHandler(function(result) {
+          allTasks[taskIndex].status = 'Complete';
+          renderTasks(allTasks);
+          renderCalendar();
+          showToast('✓ Certification updated and task completed!');
+        })
+        .withFailureHandler(function(error) {
+          showToast('Error: ' + error, 'error');
+        })
+        .updateCertExpirationFromTask(employee, certType, newExpiration, allTasks[taskIndex]);
     }
 
     function deleteTask(index) {
@@ -174,6 +711,7 @@
         .withSuccessHandler(function() {
           allTasks.splice(index, 1);
           renderTasks(allTasks);
+          renderCalendar();
           showToast('Task deleted');
         })
         .withFailureHandler(function(error) {
@@ -185,11 +723,13 @@
     function applyFilters() {
       var priority = document.getElementById('filterPriority').value;
       var status = document.getElementById('filterStatus').value;
+      var source = document.getElementById('filterSource').value;
       var date = document.getElementById('filterDate').value;
 
       var filtered = allTasks.filter(function(task) {
         if (priority && task.priority !== priority) return false;
         if (status && task.status !== status) return false;
+        if (source && task.source !== source) return false;
         if (date && task.scheduledDate !== date) return false;
         return true;
       });
@@ -200,6 +740,7 @@
     function clearFilters() {
       document.getElementById('filterPriority').value = '';
       document.getElementById('filterStatus').value = '';
+      document.getElementById('filterSource').value = '';
       document.getElementById('filterDate').value = '';
       renderTasks(allTasks);
     }

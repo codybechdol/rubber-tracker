@@ -61,8 +61,8 @@ function openQuickActionsSidebar() {
  */
 function showToDoSchedule() {
   var html = HtmlService.createHtmlOutputFromFile('ToDoSchedule')
-    .setWidth(1200)
-    .setHeight(800);
+    .setWidth(1400)
+    .setHeight(900);
   SpreadsheetApp.getUi().showModalDialog(html, '📅 To Do Schedule');
 }
 
@@ -72,8 +72,8 @@ function showToDoSchedule() {
  */
 function showToDoConfig() {
   var html = HtmlService.createHtmlOutputFromFile('ToDoConfig')
-    .setWidth(1200)
-    .setHeight(800);
+    .setWidth(1400)
+    .setHeight(900);
   SpreadsheetApp.getUi().showModalDialog(html, '⚙️ To Do Config');
 }
 
@@ -155,6 +155,1725 @@ function addManualScheduleTask(taskData) {
 
   Logger.log('=== addManualScheduleTask END ===');
   return { success: true, message: 'Task added successfully' };
+}
+
+// ============================================================================
+// TO DO SCHEDULE & CONFIG BACKEND FUNCTIONS
+// ============================================================================
+
+/**
+ * Gets all schedule tasks for the To Do Schedule dialog.
+ * Pulls from To Do List sheet (if generated), Manual Tasks, Training Tracking,
+ * Crew Visit Config, Expiring Certs, and pending swaps.
+ *
+ * @return {Array} Array of task objects for display
+ */
+function getScheduleTasks() {
+  Logger.log('=== getScheduleTasks START ===');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var tasks = [];
+
+  // FIRST: Check if we have a generated To Do List sheet (from Smart Schedule)
+  var todoSheet = ss.getSheetByName('To Do List');
+  if (todoSheet && todoSheet.getLastRow() > 13) {
+    Logger.log('Found To Do List sheet, reading tasks from there');
+    var todoData = todoSheet.getDataRange().getValues();
+    // Data starts at row 14 (index 13) after calendar section
+    // Headers in row 13 (index 12): Location Visit, Priority, Task Type, Employee/Crew, Location, Current Item, Pick List Item, Item Type, Size, Due Date, Days Till Due, Status, Scheduled Date, Estimated Time, Start Location, End Location, Drive Time, Overnight Required, Completed
+
+    for (var t = 13; t < todoData.length; t++) {
+      var row = todoData[t];
+      if (row[0] && String(row[0]).trim()) { // Has Location Visit value
+        var locationVisit = String(row[0]).replace(/📍\s*/g, '').trim();
+        if (!locationVisit || locationVisit.indexOf('No tasks') !== -1) continue;
+
+        tasks.push({
+          id: 'todolist-' + t,
+          source: 'To Do List',
+          location: locationVisit || row[4] || 'Unknown',
+          priority: row[1] || 'Medium',
+          taskType: row[2] || 'Task',
+          employee: row[3] || '',
+          scheduledDate: formatDateForInput(row[12]), // Column M
+          startTime: '',
+          endTime: '',
+          estimatedTime: row[13] || 1, // Column N
+          startLocation: row[14] || 'Helena', // Column O
+          endLocation: row[15] || locationVisit, // Column P
+          notes: 'Employee: ' + (row[3] || '') + ' | Item: ' + (row[5] || '') + ' → ' + (row[6] || ''),
+          status: row[11] || 'Pending', // Column L
+          rowIndex: t + 1
+        });
+      }
+    }
+
+    Logger.log('Loaded ' + tasks.length + ' tasks from To Do List sheet');
+    if (tasks.length > 0) {
+      Logger.log('=== getScheduleTasks END (using To Do List) ===');
+      return tasks;
+    }
+  }
+
+  // FALLBACK: Build tasks from source sheets if To Do List is empty/missing
+  Logger.log('No To Do List data, building from source sheets');
+
+  // 1. Get Manual Tasks
+  var manualSheet = ss.getSheetByName('Manual Tasks');
+  if (manualSheet && manualSheet.getLastRow() > 1) {
+    Logger.log('Reading Manual Tasks...');
+    var manualData = manualSheet.getDataRange().getValues();
+    for (var i = 1; i < manualData.length; i++) {
+      var mRow = manualData[i];
+      if (mRow[0]) { // Has location
+        tasks.push({
+          id: 'manual-' + i,
+          source: 'Manual Tasks',
+          location: mRow[0],
+          priority: mRow[1] || 'Medium',
+          taskType: mRow[2] || 'Task',
+          scheduledDate: formatDateForInput(mRow[3]),
+          startTime: mRow[4] || '',
+          endTime: mRow[5] || '',
+          estimatedTime: mRow[6] || 1,
+          startLocation: mRow[7] || 'Helena',
+          endLocation: mRow[8] || mRow[0],
+          notes: mRow[9] || '',
+          status: mRow[11] || 'Pending',
+          rowIndex: i + 1
+        });
+      }
+    }
+    Logger.log('Found ' + tasks.length + ' manual tasks');
+  }
+
+  // 2. Get Training Tracking tasks (incomplete training)
+  var trainingSheet = ss.getSheetByName('Training Tracking');
+  if (trainingSheet && trainingSheet.getLastRow() > 2) {
+    var trainingData = trainingSheet.getDataRange().getValues();
+    for (var t = 2; t < trainingData.length; t++) {
+      var tRow = trainingData[t];
+      var month = String(tRow[0]).trim();
+      var topic = String(tRow[1]).trim();
+      var crew = String(tRow[2]).trim();
+      var crewLead = String(tRow[3]).trim();
+      var location = String(tRow[4]).trim();
+      var status = String(tRow[9]).trim();
+
+      // Add if incomplete
+      if (month && crew && status !== 'Complete' && status !== 'N/A') {
+        tasks.push({
+          id: 'training-' + t,
+          source: 'Training Tracking',
+          location: location || 'TBD',
+          priority: status === 'Overdue' ? 'High' : 'Medium',
+          taskType: 'Training: ' + topic,
+          scheduledDate: '',
+          startTime: '',
+          endTime: '',
+          estimatedTime: 1,
+          startLocation: 'Helena',
+          endLocation: location || 'TBD',
+          notes: 'Crew: ' + crew + ' | Lead: ' + crewLead + ' | Month: ' + month,
+          status: status || 'Pending',
+          rowIndex: t + 1
+        });
+      }
+    }
+  }
+
+  // 3. Get Crew Visit Config (scheduled visits)
+  var crewVisitSheet = ss.getSheetByName('Crew Visit Config');
+  if (crewVisitSheet && crewVisitSheet.getLastRow() > 1) {
+    var visitData = crewVisitSheet.getDataRange().getValues();
+    var headers = visitData[0];
+
+    // Find column indexes
+    var cols = {};
+    for (var h = 0; h < headers.length; h++) {
+      var header = String(headers[h]).toLowerCase().trim();
+      if (header.indexOf('job') !== -1) cols.job = h;
+      if (header.indexOf('location') !== -1) cols.location = h;
+      if (header.indexOf('lead') !== -1) cols.lead = h;
+      if (header.indexOf('date') !== -1 && header.indexOf('next') !== -1) cols.date = h;
+      if (header.indexOf('frequency') !== -1) cols.freq = h;
+    }
+
+    for (var v = 1; v < visitData.length; v++) {
+      var vRow = visitData[v];
+      var visitLocation = vRow[cols.location] || '';
+      var nextVisit = vRow[cols.date];
+
+      if (visitLocation && nextVisit) {
+        tasks.push({
+          id: 'crewvisit-' + v,
+          source: 'Crew Visit Config',
+          location: visitLocation,
+          priority: 'Medium',
+          taskType: 'Crew Visit',
+          scheduledDate: formatDateForInput(nextVisit),
+          startTime: '07:00',
+          endTime: '',
+          estimatedTime: 2,
+          startLocation: 'Helena',
+          endLocation: visitLocation,
+          notes: 'Job: ' + (vRow[cols.job] || '') + ' | Lead: ' + (vRow[cols.lead] || ''),
+          status: 'Scheduled',
+          rowIndex: v + 1
+        });
+      }
+    }
+  }
+
+  // 4. Get Expiring Certs
+  var expiringSheet = ss.getSheetByName('Expiring Certs');
+  if (expiringSheet && expiringSheet.getLastRow() > 1) {
+    var expiringData = expiringSheet.getDataRange().getValues();
+    for (var e = 1; e < expiringData.length; e++) {
+      var eRow = expiringData[e];
+      var itemNum = eRow[0];
+      var expDate = eRow[1];
+      var employee = eRow[2] || '';
+      var location = eRow[3] || 'Helena';
+
+      if (itemNum && expDate) {
+        var daysUntil = Math.ceil((new Date(expDate) - new Date()) / (1000 * 60 * 60 * 24));
+        var priority = daysUntil <= 7 ? 'High' : daysUntil <= 30 ? 'Medium' : 'Low';
+
+        tasks.push({
+          id: 'expiring-' + e,
+          source: 'Expiring Certs',
+          location: location,
+          priority: priority,
+          taskType: 'Cert Expiring',
+          scheduledDate: formatDateForInput(expDate),
+          startTime: '',
+          endTime: '',
+          estimatedTime: 0.5,
+          startLocation: 'Helena',
+          endLocation: location,
+          notes: 'Item: ' + itemNum + ' | Employee: ' + employee + ' | Days: ' + daysUntil,
+          status: daysUntil < 0 ? 'Overdue' : 'Pending',
+          rowIndex: e + 1
+        });
+      }
+    }
+  }
+
+  // 5. Get pending swaps (picked but not delivered)
+  var gloveSwapSheet = ss.getSheetByName('Glove Swaps');
+  tasks = tasks.concat(getPendingSwapTasks(gloveSwapSheet, 'Glove'));
+
+  var sleeveSwapSheet = ss.getSheetByName('Sleeve Swaps');
+  tasks = tasks.concat(getPendingSwapTasks(sleeveSwapSheet, 'Sleeve'));
+
+  // Sort by scheduled date, then priority
+  tasks.sort(function(a, b) {
+    // Priority order: High=1, Medium=2, Low=3
+    var priorityOrder = { 'High': 1, 'Medium': 2, 'Low': 3 };
+    var pA = priorityOrder[a.priority] || 2;
+    var pB = priorityOrder[b.priority] || 2;
+
+    // Scheduled date sort (empty dates last)
+    if (a.scheduledDate && b.scheduledDate) {
+      return a.scheduledDate.localeCompare(b.scheduledDate) || (pA - pB);
+    }
+    if (a.scheduledDate) return -1;
+    if (b.scheduledDate) return 1;
+    return pA - pB;
+  });
+
+  Logger.log('getScheduleTasks: Found ' + tasks.length + ' total tasks');
+  Logger.log('=== getScheduleTasks END ===');
+  return tasks;
+}
+
+/**
+ * Helper: Get pending swap tasks from a swap sheet
+ */
+function getPendingSwapTasks(sheet, swapType) {
+  var tasks = [];
+  if (!sheet || sheet.getLastRow() < 2) return tasks;
+
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Find column indexes
+  var cols = { employee: -1, location: -1, picked: -1, dateChanged: -1, dueDate: -1 };
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'employee') cols.employee = h;
+    if (header === 'location') cols.location = h;
+    if (header === 'picked') cols.picked = h;
+    if (header.indexOf('date changed') !== -1) cols.dateChanged = h;
+    if (header.indexOf('change out') !== -1 || header.indexOf('due') !== -1) cols.dueDate = h;
+  }
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var employee = row[cols.employee];
+    var location = row[cols.location] || 'Helena';
+    var isPicked = row[cols.picked];
+    var dateChanged = row[cols.dateChanged];
+
+    // Only show picked items that haven't been delivered
+    if (employee && isPicked && !dateChanged) {
+      var dueDate = row[cols.dueDate];
+      var isOverdue = dueDate && new Date(dueDate) < new Date();
+
+      tasks.push({
+        id: swapType.toLowerCase() + 'swap-' + i,
+        source: swapType + ' Swaps',
+        location: location,
+        priority: isOverdue ? 'High' : 'Medium',
+        taskType: swapType + ' Swap',
+        scheduledDate: formatDateForInput(dueDate),
+        startTime: '',
+        endTime: '',
+        estimatedTime: 0.25,
+        startLocation: 'Helena',
+        endLocation: location,
+        notes: 'Employee: ' + employee + ' | Ready for delivery',
+        status: 'Ready to Deliver',
+        rowIndex: i + 1
+      });
+    }
+  }
+  return tasks;
+}
+
+/**
+ * Helper: Format date for HTML date input (YYYY-MM-DD)
+ */
+function formatDateForInput(dateValue) {
+  if (!dateValue) return '';
+  var date = new Date(dateValue);
+  if (isNaN(date.getTime())) return '';
+
+  var year = date.getFullYear();
+  var month = String(date.getMonth() + 1).padStart(2, '0');
+  var day = String(date.getDate()).padStart(2, '0');
+  return year + '-' + month + '-' + day;
+}
+
+/**
+ * Saves multiple schedule task date changes at once.
+ * @param {Array} changes - Array of {index, task, oldDate, newDate} objects
+ * @return {Object} Result with success status
+ */
+function saveScheduleTaskDateChanges(changes) {
+  Logger.log('saveScheduleTaskDateChanges: ' + changes.length + ' changes');
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var tasks = getScheduleTasks();
+  var updatedCount = 0;
+
+  for (var c = 0; c < changes.length; c++) {
+    var change = changes[c];
+    var taskIndex = change.index;
+    var newDate = change.newDate;
+
+    if (taskIndex < 0 || taskIndex >= tasks.length) continue;
+
+    var task = tasks[taskIndex];
+
+    // Update based on source
+    if (task.source === 'Manual Tasks') {
+      var manualSheet = ss.getSheetByName('Manual Tasks');
+      if (manualSheet && task.rowIndex) {
+        manualSheet.getRange(task.rowIndex, 4).setValue(newDate); // Column D = Scheduled Date
+        updatedCount++;
+      }
+    } else if (task.source === 'Crew Visit Config') {
+      var crewSheet = ss.getSheetByName('Crew Visit Config');
+      if (crewSheet && task.rowIndex) {
+        var headers = crewSheet.getRange(1, 1, 1, crewSheet.getLastColumn()).getValues()[0];
+        for (var h = 0; h < headers.length; h++) {
+          if (String(headers[h]).toLowerCase().indexOf('next') !== -1 &&
+              String(headers[h]).toLowerCase().indexOf('date') !== -1) {
+            crewSheet.getRange(task.rowIndex, h + 1).setValue(newDate);
+            updatedCount++;
+            break;
+          }
+        }
+      }
+    } else if (task.source === 'Glove Swaps' || task.source === 'Sleeve Swaps') {
+      // Update To Do List sheet for swap tasks
+      var todoSheet = ss.getSheetByName('To Do List');
+      if (todoSheet && task.rowIndex) {
+        // Find scheduled date column in To Do List
+        var todoHeaders = todoSheet.getRange(1, 1, 1, todoSheet.getLastColumn()).getValues()[0];
+        for (var th = 0; th < todoHeaders.length; th++) {
+          if (String(todoHeaders[th]).toLowerCase().indexOf('scheduled') !== -1 ||
+              String(todoHeaders[th]).toLowerCase().indexOf('date') !== -1) {
+            todoSheet.getRange(task.rowIndex, th + 1).setValue(newDate);
+            updatedCount++;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  SpreadsheetApp.flush();
+  Logger.log('Updated ' + updatedCount + ' task dates');
+
+  return { success: true, updatedCount: updatedCount };
+}
+
+/**
+ * Updates a task's scheduled date from the To Do Schedule dialog.
+ *
+ * @param {number} taskIndex - Index of task in array
+ * @param {string} newDate - New date in YYYY-MM-DD format
+ */
+function updateScheduleTaskDate(taskIndex, newDate) {
+  Logger.log('updateScheduleTaskDate: index=' + taskIndex + ', date=' + newDate);
+
+  // Get current tasks to find the source
+  var tasks = getScheduleTasks();
+  if (taskIndex < 0 || taskIndex >= tasks.length) {
+    throw new Error('Invalid task index');
+  }
+
+  var task = tasks[taskIndex];
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Update the source sheet based on task source
+  if (task.source === 'Manual Tasks') {
+    var manualSheet = ss.getSheetByName('Manual Tasks');
+    if (manualSheet) {
+      manualSheet.getRange(task.rowIndex, 4).setValue(newDate); // Column D = Scheduled Date
+    }
+  } else if (task.source === 'Crew Visit Config') {
+    var crewSheet = ss.getSheetByName('Crew Visit Config');
+    if (crewSheet) {
+      // Find the Next Visit Date column
+      var headers = crewSheet.getRange(1, 1, 1, crewSheet.getLastColumn()).getValues()[0];
+      for (var h = 0; h < headers.length; h++) {
+        if (String(headers[h]).toLowerCase().indexOf('next') !== -1 &&
+            String(headers[h]).toLowerCase().indexOf('date') !== -1) {
+          crewSheet.getRange(task.rowIndex, h + 1).setValue(newDate);
+          break;
+        }
+      }
+    }
+  }
+  // Note: Training Tracking and Expiring Certs dates are calculated, not user-editable
+
+  return { success: true };
+}
+
+/**
+ * Marks a task as complete in the To Do Schedule.
+ *
+ * @param {number} taskIndex - Index of task in array
+ */
+function markScheduleTaskComplete(taskIndex) {
+  Logger.log('markScheduleTaskComplete: index=' + taskIndex);
+
+  var tasks = getScheduleTasks();
+  if (taskIndex < 0 || taskIndex >= tasks.length) {
+    throw new Error('Invalid task index');
+  }
+
+  var task = tasks[taskIndex];
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  if (task.source === 'Manual Tasks') {
+    var manualSheet = ss.getSheetByName('Manual Tasks');
+    if (manualSheet) {
+      manualSheet.getRange(task.rowIndex, 12).setValue('Complete'); // Column L = Status
+    }
+  } else if (task.source === 'Training Tracking') {
+    var trainingSheet = ss.getSheetByName('Training Tracking');
+    if (trainingSheet) {
+      // Set status to Complete (column J = 10) and add completion date (column F = 6)
+      trainingSheet.getRange(task.rowIndex, 10).setValue('Complete');
+      trainingSheet.getRange(task.rowIndex, 6).setValue(new Date());
+    }
+  }
+
+  return { success: true };
+}
+
+/**
+ * Deletes a task from the To Do Schedule (only works for Manual Tasks).
+ *
+ * @param {number} taskIndex - Index of task in array
+ */
+function deleteScheduleTask(taskIndex) {
+  Logger.log('deleteScheduleTask: index=' + taskIndex);
+
+  var tasks = getScheduleTasks();
+  if (taskIndex < 0 || taskIndex >= tasks.length) {
+    throw new Error('Invalid task index');
+  }
+
+  var task = tasks[taskIndex];
+
+  // Only allow deleting Manual Tasks
+  if (task.source !== 'Manual Tasks') {
+    throw new Error('Can only delete Manual Tasks. Other tasks are managed by their source sheets.');
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var manualSheet = ss.getSheetByName('Manual Tasks');
+  if (manualSheet) {
+    manualSheet.deleteRow(task.rowIndex);
+  }
+
+  return { success: true };
+}
+
+/**
+ * Gets the To Do configuration settings.
+ *
+ * @return {Object} Configuration object
+ */
+function getToDoConfig() {
+  var props = PropertiesService.getScriptProperties();
+  var configStr = props.getProperty('TODO_CONFIG');
+
+  if (configStr) {
+    try {
+      return JSON.parse(configStr);
+    } catch (e) {
+      Logger.log('Error parsing TODO_CONFIG: ' + e);
+    }
+  }
+
+  // Default configuration
+  return {
+    workStartTime: '07:00',
+    workEndTime: '17:00',
+    defaultDuration: 1,
+    bufferTime: 15,
+    highPriorityDays: 3,
+    mediumPriorityDays: 7,
+    lowPriorityDays: 14,
+    enableEmailNotifications: true,
+    dailyDigest: true,
+    digestTime: '07:00',
+    reminderMinutes: 30,
+    workingDays: ['mon', 'tue', 'wed', 'thu', 'fri']
+  };
+}
+
+/**
+ * Saves the To Do configuration settings.
+ *
+ * @param {Object} config - Configuration object to save
+ */
+function saveToDoConfig(config) {
+  Logger.log('saveToDoConfig: ' + JSON.stringify(config));
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty('TODO_CONFIG', JSON.stringify(config));
+
+  // Also save locations to a separate property
+  if (config.locations) {
+    props.setProperty('TODO_LOCATIONS', JSON.stringify(config.locations));
+  }
+
+  return { success: true };
+}
+
+/**
+ * Gets the configured locations for scheduling.
+ *
+ * @return {Array} Array of location names
+ */
+function getConfiguredLocations() {
+  var props = PropertiesService.getScriptProperties();
+  var locationsStr = props.getProperty('TODO_LOCATIONS');
+
+  if (locationsStr) {
+    try {
+      return JSON.parse(locationsStr);
+    } catch (e) {
+      Logger.log('Error parsing TODO_LOCATIONS: ' + e);
+    }
+  }
+
+  // Default locations based on project (Montana locations)
+  return [
+    'Helena',
+    'Butte',
+    'Bozeman',
+    'Big Sky',
+    'Great Falls',
+    'Missoula',
+    'Ennis',
+    'Livingston',
+    'Stanford',
+    'Northern Lights',
+    'Kalispell'
+  ];
+}
+
+/**
+ * Sets up the Expiring Certs sheet to track items with expiring certifications.
+ * Scans Gloves and Sleeves sheets for items approaching cert expiration.
+ */
+function setupExpiringCertsSheet() {
+  Logger.log('=== setupExpiringCertsSheet START ===');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+
+  // Create or get Expiring Certs sheet
+  var expiringSheet = ss.getSheetByName('Expiring Certs');
+  if (!expiringSheet) {
+    expiringSheet = ss.insertSheet('Expiring Certs');
+    Logger.log('Created new Expiring Certs sheet');
+  }
+
+  // Clear and set up headers
+  expiringSheet.clear();
+  var headers = ['Item #', 'Expiration Date', 'Employee', 'Location', 'Item Type', 'Class', 'Days Until Expiration', 'Status'];
+  expiringSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  expiringSheet.getRange(1, 1, 1, headers.length)
+    .setBackground('#1a73e8')
+    .setFontColor('#ffffff')
+    .setFontWeight('bold');
+  expiringSheet.setFrozenRows(1);
+
+  var expiringItems = [];
+  var today = new Date();
+  var warningDays = 60; // Items expiring within 60 days
+
+  // Scan Gloves sheet
+  var glovesSheet = ss.getSheetByName('Gloves');
+  if (glovesSheet && glovesSheet.getLastRow() > 1) {
+    var gloveData = glovesSheet.getDataRange().getValues();
+    var gloveHeaders = gloveData[0];
+
+    // Find columns
+    var gCols = { item: -1, exp: -1, employee: -1, location: -1, class: -1 };
+    for (var h = 0; h < gloveHeaders.length; h++) {
+      var header = String(gloveHeaders[h]).toLowerCase().trim();
+      if (header === 'item #' || header === 'item') gCols.item = h;
+      if (header.indexOf('expir') !== -1 || header.indexOf('cert') !== -1) gCols.exp = h;
+      if (header === 'employee' || header === 'assigned to') gCols.employee = h;
+      if (header === 'location') gCols.location = h;
+      if (header === 'class') gCols.class = h;
+    }
+
+    for (var g = 1; g < gloveData.length; g++) {
+      var gRow = gloveData[g];
+      var itemNum = gRow[gCols.item];
+      var expDate = gCols.exp !== -1 ? gRow[gCols.exp] : null;
+
+      if (itemNum && expDate) {
+        var expDateObj = new Date(expDate);
+        if (!isNaN(expDateObj.getTime())) {
+          var daysUntil = Math.ceil((expDateObj - today) / (1000 * 60 * 60 * 24));
+          if (daysUntil <= warningDays) {
+            var status = daysUntil < 0 ? 'EXPIRED' : daysUntil <= 7 ? 'CRITICAL' : daysUntil <= 30 ? 'WARNING' : 'UPCOMING';
+            expiringItems.push([
+              itemNum,
+              expDate,
+              gCols.employee !== -1 ? gRow[gCols.employee] : '',
+              gCols.location !== -1 ? gRow[gCols.location] : 'Helena',
+              'Glove',
+              gCols.class !== -1 ? gRow[gCols.class] : '',
+              daysUntil,
+              status
+            ]);
+          }
+        }
+      }
+    }
+  }
+
+  // Scan Sleeves sheet
+  var sleevesSheet = ss.getSheetByName('Sleeves');
+  if (sleevesSheet && sleevesSheet.getLastRow() > 1) {
+    var sleeveData = sleevesSheet.getDataRange().getValues();
+    var sleeveHeaders = sleeveData[0];
+
+    // Find columns
+    var sCols = { item: -1, exp: -1, employee: -1, location: -1, class: -1 };
+    for (var sh = 0; sh < sleeveHeaders.length; sh++) {
+      var sHeader = String(sleeveHeaders[sh]).toLowerCase().trim();
+      if (sHeader === 'item #' || sHeader === 'item') sCols.item = sh;
+      if (sHeader.indexOf('expir') !== -1 || sHeader.indexOf('cert') !== -1) sCols.exp = sh;
+      if (sHeader === 'employee' || sHeader === 'assigned to') sCols.employee = sh;
+      if (sHeader === 'location') sCols.location = sh;
+      if (sHeader === 'class') sCols.class = sh;
+    }
+
+    for (var s = 1; s < sleeveData.length; s++) {
+      var sRow = sleeveData[s];
+      var sItemNum = sRow[sCols.item];
+      var sExpDate = sCols.exp !== -1 ? sRow[sCols.exp] : null;
+
+      if (sItemNum && sExpDate) {
+        var sExpDateObj = new Date(sExpDate);
+        if (!isNaN(sExpDateObj.getTime())) {
+          var sDaysUntil = Math.ceil((sExpDateObj - today) / (1000 * 60 * 60 * 24));
+          if (sDaysUntil <= warningDays) {
+            var sStatus = sDaysUntil < 0 ? 'EXPIRED' : sDaysUntil <= 7 ? 'CRITICAL' : sDaysUntil <= 30 ? 'WARNING' : 'UPCOMING';
+            expiringItems.push([
+              sItemNum,
+              sExpDate,
+              sCols.employee !== -1 ? sRow[sCols.employee] : '',
+              sCols.location !== -1 ? sRow[sCols.location] : 'Helena',
+              'Sleeve',
+              sCols.class !== -1 ? sRow[sCols.class] : '',
+              sDaysUntil,
+              sStatus
+            ]);
+          }
+        }
+      }
+    }
+  }
+
+  // Sort by days until expiration (soonest first)
+  expiringItems.sort(function(a, b) { return a[6] - b[6]; });
+
+  // Write data
+  if (expiringItems.length > 0) {
+    expiringSheet.getRange(2, 1, expiringItems.length, headers.length).setValues(expiringItems);
+
+    // Apply conditional formatting
+    var dataRange = expiringSheet.getRange(2, 8, expiringItems.length, 1); // Status column
+    var rules = expiringSheet.getConditionalFormatRules();
+
+    // EXPIRED - red
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo('EXPIRED')
+      .setBackground('#ea4335')
+      .setFontColor('#ffffff')
+      .setRanges([dataRange])
+      .build());
+
+    // CRITICAL - orange
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo('CRITICAL')
+      .setBackground('#ff6d00')
+      .setFontColor('#ffffff')
+      .setRanges([dataRange])
+      .build());
+
+    // WARNING - yellow
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo('WARNING')
+      .setBackground('#fbbc04')
+      .setFontColor('#000000')
+      .setRanges([dataRange])
+      .build());
+
+    // UPCOMING - blue
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo('UPCOMING')
+      .setBackground('#4285f4')
+      .setFontColor('#ffffff')
+      .setRanges([dataRange])
+      .build());
+
+    expiringSheet.setConditionalFormatRules(rules);
+
+    // Format date column
+    expiringSheet.getRange(2, 2, expiringItems.length, 1).setNumberFormat('MM/dd/yyyy');
+
+    // Auto-resize columns
+    for (var col = 1; col <= headers.length; col++) {
+      expiringSheet.autoResizeColumn(col);
+    }
+
+    Logger.log('Found ' + expiringItems.length + ' items with expiring certifications');
+    ui.alert('✅ Expiring Certs Updated', 'Found ' + expiringItems.length + ' items expiring within 60 days.\n\n' +
+      '🔴 EXPIRED: ' + expiringItems.filter(function(i) { return i[7] === 'EXPIRED'; }).length + '\n' +
+      '🟠 CRITICAL (≤7 days): ' + expiringItems.filter(function(i) { return i[7] === 'CRITICAL'; }).length + '\n' +
+      '🟡 WARNING (≤30 days): ' + expiringItems.filter(function(i) { return i[7] === 'WARNING'; }).length + '\n' +
+      '🔵 UPCOMING (≤60 days): ' + expiringItems.filter(function(i) { return i[7] === 'UPCOMING'; }).length,
+      ui.ButtonSet.OK);
+  } else {
+    expiringSheet.getRange(2, 1).setValue('No items with expiring certifications found within 60 days.');
+    ui.alert('✅ Expiring Certs Updated', 'No items found with certifications expiring within 60 days.', ui.ButtonSet.OK);
+  }
+
+  Logger.log('=== setupExpiringCertsSheet END ===');
+}
+
+// ============================================================================
+// EXPIRING CERTS IMPORT WORKFLOW FUNCTIONS
+// ============================================================================
+
+/**
+ * Shows the choice dialog for managing certifications (import or refresh).
+ */
+function showExpiringCertsChoiceDialog() {
+  var html = HtmlService.createHtmlOutputFromFile('ExpiringCertsChoice')
+    .setWidth(1000)
+    .setHeight(700);
+  SpreadsheetApp.getUi().showModalDialog(html, '📜 Manage Certifications');
+}
+
+/**
+ * Shows the Excel import dialog for certifications.
+ */
+function showExpiringCertsImportDialog() {
+  var html = HtmlService.createHtmlOutputFromFile('ExpiringCertsImport')
+    .setWidth(1400)
+    .setHeight(900);
+  SpreadsheetApp.getUi().showModalDialog(html, '📤 Import Certifications');
+}
+
+/**
+ * Gets certification type defaults including non-expiring certs and default checked certs.
+ * @return {Object} Configuration object with cert types, defaults, and mappings
+ */
+function getCertTypeDefaults() {
+  var allCertTypes = [
+    'DL',
+    'MEC Expiration',
+    '1st Aid',
+    'CPR',
+    'Crane Cert',
+    'Crane Evaluation',
+    'OSHA 1910',
+    'BNSF',
+    'MSHA',
+    'OSHA Trench Comp Person',
+    'Forklift',
+    'Forklift Operator Safety Training',
+    'Rigging & Signaling/Signalperson & Spotter Cert',
+    'Harassment Training',
+    'EICA Basic Helicopter Line Construction Safety'
+  ];
+
+  var nonExpiring = [
+    'Crane Evaluation',
+    'OSHA 1910',
+    'BNSF',
+    'MSHA',
+    'EICA Basic Helicopter Line Construction Safety'
+  ];
+
+  var defaultChecked = [
+    'DL',
+    'MEC Expiration',
+    '1st Aid',
+    'CPR',
+    'Crane Cert'
+  ];
+
+  var defaultMapping = {
+    'D': 'DL',
+    'E': 'MEC Expiration',
+    'F': '1st Aid',
+    'G': 'CPR',
+    'H': 'Crane Cert',
+    'I': 'Crane Evaluation',
+    'J': 'OSHA 1910',
+    'K': 'BNSF',
+    'L': 'MSHA',
+    'M': 'OSHA Trench Comp Person',
+    'N': 'Forklift',
+    'O': 'Forklift Operator Safety Training',
+    'P': 'Rigging & Signaling/Signalperson & Spotter Cert',
+    'Q': 'Harassment Training',
+    'R': 'EICA Basic Helicopter Line Construction Safety'
+  };
+
+  return {
+    allCertTypes: allCertTypes,
+    nonExpiring: nonExpiring,
+    defaultChecked: defaultChecked,
+    defaultMapping: defaultMapping
+  };
+}
+
+/**
+ * Gets employee names and data for fuzzy matching during import.
+ * @return {Array} Array of employee objects with name and metadata
+ */
+function getEmployeeNamesForMatching() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+
+  if (!employeesSheet || employeesSheet.getLastRow() < 2) {
+    return [];
+  }
+
+  var data = employeesSheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Find column indices
+  var nameCol = 0;
+  var locationCol = -1;
+  var jobNumCol = -1;
+  var classCol = -1;
+  var gloveSizeCol = -1;
+  var sleeveSizeCol = -1;
+
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'location') locationCol = h;
+    if (header === 'job number') jobNumCol = h;
+    if (header === 'class') classCol = h;
+    if (header === 'glove size') gloveSizeCol = h;
+    if (header === 'sleeve size') sleeveSizeCol = h;
+  }
+
+  var employees = [];
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    if (row[nameCol]) {
+      employees.push({
+        name: String(row[nameCol]),
+        location: locationCol !== -1 ? row[locationCol] : '',
+        jobNum: jobNumCol !== -1 ? row[jobNumCol] : '',
+        class: classCol !== -1 ? row[classCol] : '',
+        gloveSize: gloveSizeCol !== -1 ? row[gloveSizeCol] : '',
+        sleeveSize: sleeveSizeCol !== -1 ? row[sleeveSizeCol] : '',
+        rowIndex: i + 1
+      });
+    }
+  }
+
+  return employees;
+}
+
+/**
+ * Parses Excel certification data with multiple rows per employee (one per cert type).
+ * @param {string} pastedText - Tab-separated Excel data
+ * @param {Object} columnMapping - Mapping of column letters to cert types
+ * @return {Object} Parsed certification data with employee matches and summary
+ */
+function parseExcelCertDataMultiRow(pastedText, columnMapping) {
+  Logger.log('=== parseExcelCertDataMultiRow START ===');
+
+  var nonExpiring = [
+    'Crane Evaluation',
+    'OSHA 1910',
+    'BNSF',
+    'MSHA',
+    'EICA Basic Helicopter Line Construction Safety'
+  ];
+
+  var lines = pastedText.split('\n');
+  var certRows = [];
+  var uniqueEmployees = {};
+  var validationWarnings = [];
+  var priorityCount = 0;
+  var nonExpiringCount = 0;
+  var certTypeCounts = {};
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].trim();
+    if (!line) continue;
+
+    var cells = line.split('\t');
+    if (cells.length < 3) {
+      validationWarnings.push('Row ' + (i + 1) + ': Insufficient columns');
+      continue;
+    }
+
+    // Column A: Name (convert "LastName, FirstName" to "FirstName LastName")
+    var excelName = String(cells[0] || '').trim();
+    if (!excelName) continue;
+
+    var convertedName = excelName.replace(/^([^,]+),\s*(.+)$/, '$2 $1').trim();
+
+    // Column B: Job #, Column C: Location
+    var excelJobNum = String(cells[1] || '').trim();
+    var excelLocation = String(cells[2] || '').trim();
+
+    uniqueEmployees[convertedName] = true;
+
+    // Iterate through certification columns D-R (indices 3-17)
+    var columns = ['D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R'];
+    for (var c = 0; c < columns.length && (c + 3) < cells.length; c++) {
+      var cellValue = String(cells[c + 3] || '').trim();
+      if (!cellValue) continue;
+
+      var certType = columnMapping[columns[c]];
+      if (!certType) continue;
+
+      var isNonExpiring = nonExpiring.indexOf(certType) !== -1;
+      var isPriority = false;
+      var expirationDate = null;
+
+      // Check for "Need Copy"
+      if (cellValue.toLowerCase().indexOf('need copy') !== -1) {
+        isPriority = true;
+        priorityCount++;
+      } else if (isNonExpiring) {
+        // Non-expiring cert - ignore date value
+        nonExpiringCount++;
+      } else {
+        // Parse date from "M.D.YY" or "MM.DD.YY" format
+        var dateMatch = cellValue.match(/(\d{1,2})\.(\d{1,2})\.(\d{2})/);
+        if (dateMatch) {
+          var month = String(dateMatch[1]).padStart(2, '0');
+          var day = String(dateMatch[2]).padStart(2, '0');
+          var year = '20' + dateMatch[3];
+          expirationDate = month + '/' + day + '/' + year;
+        }
+      }
+
+      certRows.push({
+        excelName: excelName,
+        convertedName: convertedName,
+        certType: certType,
+        expirationDate: expirationDate,
+        isPriority: isPriority,
+        isNonExpiring: isNonExpiring,
+        excelJobNum: excelJobNum,
+        excelLocation: excelLocation
+      });
+
+      certTypeCounts[certType] = (certTypeCounts[certType] || 0) + 1;
+    }
+  }
+
+  // Fuzzy match employees
+  var employees = getEmployeeNamesForMatching();
+  var employeeMatches = [];
+  var employeeNames = Object.keys(uniqueEmployees);
+
+  for (var e = 0; e < employeeNames.length; e++) {
+    var empName = employeeNames[e];
+    var match = fuzzyMatchEmployeeName(empName, employees);
+
+    var certCount = certRows.filter(function(r) { return r.convertedName === empName; }).length;
+
+    employeeMatches.push({
+      excelName: empName,
+      matchedName: match ? match.employeeName : null,
+      confidence: match ? match.confidence : 0,
+      certCount: certCount,
+      isPreviousEmployee: match ? match.isPreviousEmployee : false,
+      suggestions: match ? match.suggestions : []
+    });
+  }
+
+  Logger.log('Parsed ' + certRows.length + ' certification rows from ' + employeeNames.length + ' employees');
+
+  return {
+    certRows: certRows,
+    employeeMatches: employeeMatches,
+    summary: {
+      totalEmployees: employeeNames.length,
+      totalCerts: certRows.length,
+      priorityCount: priorityCount,
+      nonExpiringCount: nonExpiringCount,
+      certTypeCounts: certTypeCounts,
+      validationWarnings: validationWarnings
+    }
+  };
+}
+
+/**
+ * Fuzzy matches an employee name against the employee list using Levenshtein distance.
+ * @param {string} convertedName - Name to match
+ * @param {Array} employeeList - List of employee objects
+ * @return {Object} Match result with confidence and suggestions
+ */
+function fuzzyMatchEmployeeName(convertedName, employeeList) {
+  if (!convertedName || !employeeList || employeeList.length === 0) {
+    return null;
+  }
+
+  var normalized = convertedName.toLowerCase().trim().replace(/\s+/g, ' ');
+  var matches = [];
+
+  for (var i = 0; i < employeeList.length; i++) {
+    var emp = employeeList[i];
+    var empNormalized = emp.name.toLowerCase().trim().replace(/\s+/g, ' ');
+
+    // Exact match
+    if (normalized === empNormalized) {
+      return {
+        employeeName: emp.name,
+        confidence: 100,
+        employeeData: emp,
+        suggestions: []
+      };
+    }
+
+    // Check for reversed name
+    var parts1 = normalized.split(' ');
+    var parts2 = empNormalized.split(' ');
+    if (parts1.length === 2 && parts2.length === 2) {
+      if (parts1[0] === parts2[1] && parts1[1] === parts2[0]) {
+        matches.push({
+          employeeName: emp.name,
+          confidence: 98,
+          employeeData: emp
+        });
+        continue;
+      }
+    }
+
+    // Substring/nickname match
+    if (normalized.indexOf(empNormalized) !== -1 || empNormalized.indexOf(normalized) !== -1) {
+      matches.push({
+        employeeName: emp.name,
+        confidence: 90,
+        employeeData: emp
+      });
+      continue;
+    }
+
+    // Levenshtein distance
+    var distance = levenshteinDistance(normalized, empNormalized);
+    var maxLen = Math.max(normalized.length, empNormalized.length);
+    var similarity = (1 - distance / maxLen) * 100;
+
+    if (similarity >= 70) {
+      matches.push({
+        employeeName: emp.name,
+        confidence: Math.round(similarity),
+        employeeData: emp
+      });
+    }
+  }
+
+  // Sort by confidence descending
+  matches.sort(function(a, b) { return b.confidence - a.confidence; });
+
+  if (matches.length === 0) {
+    return null;
+  }
+
+  var topMatch = matches[0];
+  var suggestions = matches.slice(0, 3).map(function(m) {
+    return {
+      name: m.employeeName,
+      confidence: m.confidence,
+      isPreviousEmployee: m.employeeData.isPreviousEmployee || false,
+      lastDay: m.employeeData.lastDay || null
+    };
+  });
+
+  return {
+    employeeName: topMatch.employeeName,
+    confidence: topMatch.confidence,
+    employeeData: topMatch.employeeData,
+    isPreviousEmployee: topMatch.employeeData.isPreviousEmployee || false,
+    suggestions: suggestions
+  };
+}
+
+/**
+ * Calculates Levenshtein distance between two strings.
+ * @param {string} str1 - First string
+ * @param {string} str2 - Second string
+ * @return {number} Edit distance
+ */
+function levenshteinDistance(str1, str2) {
+  var len1 = str1.length;
+  var len2 = str2.length;
+  var matrix = [];
+
+  // Initialize matrix
+  for (var i = 0; i <= len1; i++) {
+    matrix[i] = [i];
+  }
+  for (var j = 0; j <= len2; j++) {
+    matrix[0][j] = j;
+  }
+
+  // Fill matrix
+  for (var i = 1; i <= len1; i++) {
+    for (var j = 1; j <= len2; j++) {
+      var cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,      // deletion
+        matrix[i][j - 1] + 1,      // insertion
+        matrix[i - 1][j - 1] + cost // substitution
+      );
+    }
+  }
+
+  return matrix[len1][len2];
+}
+
+/**
+ * Processes the certification import with matched employees and selected cert types.
+ * @param {Object} parsedData - Parsed certification data
+ * @param {Array} selectedCertTypes - Cert types to create To Do tasks for
+ * @return {Object} Result with success message
+ */
+function processExpiringCertsImportMultiRow(parsedData, selectedCertTypes) {
+  Logger.log('=== processExpiringCertsImportMultiRow START ===');
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Add new employees first if any
+  if (parsedData.newEmployees && parsedData.newEmployees.length > 0) {
+    var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+    if (!employeesSheet) {
+      employeesSheet = ss.insertSheet(SHEET_EMPLOYEES);
+      // Add headers
+      var empHeaders = ['Name', 'Class', 'Location', 'Job Number', 'Phone Number', 'Notification Emails', 'MP Email', 'Email Address', 'Glove Size', 'Sleeve Size', 'Hire Date', 'Last Day', 'Last Day Reason', 'Job Classification'];
+      employeesSheet.getRange(1, 1, 1, empHeaders.length).setValues([empHeaders]);
+      employeesSheet.getRange(1, 1, 1, empHeaders.length)
+        .setBackground('#1a73e8')
+        .setFontColor('#ffffff')
+        .setFontWeight('bold');
+    }
+
+    // Add each new employee
+    for (var ne = 0; ne < parsedData.newEmployees.length; ne++) {
+      var newEmp = parsedData.newEmployees[ne];
+      var newRow = [
+        newEmp.name,
+        newEmp.class,
+        newEmp.location,
+        newEmp.jobNum || '',
+        newEmp.phone || '',
+        '', // Notification Emails
+        '', // MP Email
+        newEmp.email || '',
+        newEmp.gloveSize || '',
+        newEmp.sleeveSize || '',
+        newEmp.hireDate || new Date(),
+        '', // Last Day
+        '', // Last Day Reason
+        '' // Job Classification
+      ];
+      employeesSheet.appendRow(newRow);
+      Logger.log('Added new employee: ' + newEmp.name);
+    }
+  }
+
+  var expiringSheet = ss.getSheetByName('Expiring Certs');
+
+  if (!expiringSheet) {
+    expiringSheet = ss.insertSheet('Expiring Certs');
+  }
+
+  // Clear sheet
+  expiringSheet.clear();
+
+  // Set headers
+  var headers = ['Employee Name', 'Item Type', 'Expiration Date', 'Location', 'Job #', 'Days Until Expiration', 'Status'];
+  expiringSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  expiringSheet.getRange(1, 1, 1, headers.length)
+    .setBackground('#1a73e8')
+    .setFontColor('#ffffff')
+    .setFontWeight('bold');
+  expiringSheet.setFrozenRows(1);
+
+  // Get employees for location/job lookup
+  var employees = getEmployeeNamesForMatching();
+  var empMap = {};
+  for (var e = 0; e < employees.length; e++) {
+    empMap[employees[e].name] = employees[e];
+  }
+
+  // Prepare batch data
+  var batchData = [];
+  var certRows = parsedData.certRows;
+
+  for (var i = 0; i < certRows.length; i++) {
+    var cert = certRows[i];
+
+    // Find matched employee
+    var matchedEmp = null;
+    for (var m = 0; m < parsedData.employeeMatches.length; m++) {
+      if (parsedData.employeeMatches[m].excelName === cert.convertedName) {
+        if (parsedData.employeeMatches[m].matchedName) {
+          matchedEmp = empMap[parsedData.employeeMatches[m].matchedName];
+        }
+        break;
+      }
+    }
+
+    var location = matchedEmp ? matchedEmp.location : cert.excelLocation;
+    var jobNum = matchedEmp ? matchedEmp.jobNum : cert.excelJobNum;
+
+    batchData.push([
+      cert.convertedName,
+      cert.certType, // Always show the actual cert type
+      cert.expirationDate || '',
+      location,
+      jobNum,
+      '', // Formula will be added
+      ''  // Formula will be added
+    ]);
+  }
+
+  // Write batch data
+  if (batchData.length > 0) {
+    expiringSheet.getRange(2, 1, batchData.length, headers.length).setValues(batchData);
+
+    // Add formulas - simple calculation for all certs
+    var formulaRange = expiringSheet.getRange(2, 6, batchData.length, 2);
+    var formulas = [];
+    for (var f = 0; f < batchData.length; f++) {
+      var rowNum = f + 2;
+      formulas.push([
+        // Days Until Expiration: If no date, show N/A, otherwise calculate days
+        '=IF(ISBLANK(C' + rowNum + '),"N/A",DAYS(C' + rowNum + ',TODAY()))',
+        // Status: If no date show "No Date Set", otherwise calculate based on days
+        '=IF(F' + rowNum + '="PRIORITY - Need Copy","PRIORITY - Need Copy",IF(F' + rowNum + '="N/A","No Date Set",IF(F' + rowNum + '<0,"EXPIRED",IF(F' + rowNum + '<=7,"CRITICAL",IF(F' + rowNum + '<=30,"WARNING",IF(F' + rowNum + '<=60,"UPCOMING","OK"))))))'
+      ]);
+    }
+    formulaRange.setFormulas(formulas);
+
+    // Sort by employee name (column 1) then days (column 6)
+    expiringSheet.getRange(2, 1, batchData.length, headers.length).sort([1, 6]);
+
+    // Apply conditional formatting
+    applyExpiringCertsFormatting(expiringSheet, batchData.length);
+
+    // Create row groups by employee
+    createEmployeeGroups(expiringSheet, batchData.length);
+
+    // Generate To Do tasks for selected cert types
+    var tasksCreated = generateToDoTasksFromCerts(certRows, selectedCertTypes, empMap);
+  }
+
+  Logger.log('Import complete: ' + batchData.length + ' certifications');
+
+  return {
+    success: true,
+    message: '✅ Import Complete!\n\nImported ' + batchData.length + ' certifications for ' + parsedData.summary.totalEmployees + ' employees.\n\nPriority Items: ' + parsedData.summary.priorityCount + '\nNon-Expiring: ' + parsedData.summary.nonExpiringCount + '\nTo Do Tasks Created: ' + (tasksCreated || 0)
+  };
+}
+
+/**
+ * Generates To Do tasks from certification data.
+ * @param {Array} certRows - Array of certification rows
+ * @param {Array} selectedCertTypes - Cert types to create tasks for
+ * @param {Object} empMap - Employee map for location lookup
+ * @return {number} Number of tasks created
+ */
+function generateToDoTasksFromCerts(certRows, selectedCertTypes, empMap) {
+  if (!selectedCertTypes || selectedCertTypes.length === 0) {
+    Logger.log('No cert types selected for task generation');
+    return 0;
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var manualTasksSheet = ss.getSheetByName('Manual Tasks');
+
+  if (!manualTasksSheet) {
+    Logger.log('Manual Tasks sheet not found, skipping task generation');
+    return 0;
+  }
+
+  var today = new Date();
+  var tasksCreated = 0;
+
+  for (var i = 0; i < certRows.length; i++) {
+    var cert = certRows[i];
+
+    // Skip if not in selected cert types
+    if (selectedCertTypes.indexOf(cert.certType) === -1) {
+      continue;
+    }
+
+    // Skip non-expiring certs
+    if (cert.isNonExpiring) {
+      continue;
+    }
+
+    // Create task if priority OR expiring soon
+    var shouldCreateTask = false;
+    var priority = 'Medium';
+
+    if (cert.isPriority) {
+      shouldCreateTask = true;
+      priority = 'High';
+    } else if (cert.expirationDate) {
+      try {
+        var expDate = new Date(cert.expirationDate);
+        var daysUntil = Math.floor((expDate - today) / (1000 * 60 * 60 * 24));
+
+        if (daysUntil <= 30) {
+          shouldCreateTask = true;
+          priority = daysUntil <= 7 ? 'High' : 'Medium';
+        }
+      } catch (e) {
+        Logger.log('Error parsing date for cert: ' + cert.certType + ', date: ' + cert.expirationDate);
+      }
+    }
+
+    if (shouldCreateTask) {
+      var emp = empMap[cert.convertedName];
+      var location = emp ? emp.location : cert.excelLocation;
+
+      var taskRow = [
+        location || '',
+        priority,
+        'Renew ' + cert.certType,
+        cert.expirationDate || '',
+        '', // Start Time
+        '', // End Time
+        1, // Estimated Time
+        location || 'Helena', // Start Location
+        location || '', // End Location
+        'Employee: ' + cert.convertedName + ' | Current Expiration: ' + (cert.expirationDate || 'Unknown'),
+        new Date(), // Date Added
+        'Pending' // Status
+      ];
+
+      try {
+        manualTasksSheet.appendRow(taskRow);
+        tasksCreated++;
+      } catch (e) {
+        Logger.log('Error appending task row: ' + e);
+      }
+    }
+  }
+
+  Logger.log('Created ' + tasksCreated + ' To Do tasks from certifications');
+  return tasksCreated;
+}
+
+/**
+ * Applies conditional formatting to Expiring Certs sheet.
+ */
+function applyExpiringCertsFormatting(sheet, dataRows) {
+  var statusRange = sheet.getRange(2, 7, dataRows, 1);
+  var rules = [];
+
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo('PRIORITY - Need Copy')
+    .setBackground('#9c27b0')
+    .setFontColor('#ffffff')
+    .setRanges([statusRange])
+    .build());
+
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo('EXPIRED')
+    .setBackground('#ea4335')
+    .setFontColor('#ffffff')
+    .setRanges([statusRange])
+    .build());
+
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo('CRITICAL')
+    .setBackground('#ff6d00')
+    .setFontColor('#ffffff')
+    .setRanges([statusRange])
+    .build());
+
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo('WARNING')
+    .setBackground('#fbbc04')
+    .setFontColor('#000000')
+    .setRanges([statusRange])
+    .build());
+
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo('UPCOMING')
+    .setBackground('#4285f4')
+    .setFontColor('#ffffff')
+    .setRanges([statusRange])
+    .build());
+
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo('OK')
+    .setBackground('#34a853')
+    .setFontColor('#ffffff')
+    .setRanges([statusRange])
+    .build());
+
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo('Non-Expiring')
+    .setBackground('#757575')
+    .setFontColor('#ffffff')
+    .setRanges([statusRange])
+    .build());
+
+  sheet.setConditionalFormatRules(rules);
+}
+
+/**
+ * Creates collapsed row groups by employee in Expiring Certs sheet.
+ */
+function createEmployeeGroups(sheet, dataRows) {
+  if (dataRows < 2) return;
+
+  var data = sheet.getRange(2, 1, dataRows, 1).getValues();
+  var currentEmployee = null;
+  var groupStart = -1;
+
+  for (var i = 0; i < data.length; i++) {
+    var empName = data[i][0];
+
+    if (empName !== currentEmployee) {
+      // Close previous group
+      if (groupStart !== -1 && (i - groupStart) > 1) {
+        var range = sheet.getRange(groupStart + 2, 1, i - groupStart, 7);
+        range.shiftRowGroupDepth(1);
+        sheet.getRowGroup(groupStart + 2, 1).collapse();
+      }
+
+      // Start new group
+      currentEmployee = empName;
+      groupStart = i;
+    }
+  }
+
+  // Close final group
+  if (groupStart !== -1 && (dataRows - groupStart) > 1) {
+    var range = sheet.getRange(groupStart + 2, 1, dataRows - groupStart, 7);
+    range.shiftRowGroupDepth(1);
+    sheet.getRowGroup(groupStart + 2, 1).collapse();
+  }
+}
+
+/**
+ * Refreshes certification expiration dates from completed To Do tasks.
+ * @return {Object} Result with message
+ */
+function refreshCertsFromCompletedTasks() {
+  Logger.log('=== refreshCertsFromCompletedTasks START ===');
+
+  // Get completed tasks from To Do Schedule
+  var tasks = getScheduleTasks();
+  var completedCertTasks = tasks.filter(function(t) {
+    return t.status === 'Complete' &&
+           t.taskType &&
+           t.taskType.indexOf('Renew') !== -1;
+  });
+
+  if (completedCertTasks.length === 0) {
+    return {
+      success: true,
+      message: 'No completed certification renewal tasks found.'
+    };
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var expiringSheet = ss.getSheetByName('Expiring Certs');
+
+  if (!expiringSheet || expiringSheet.getLastRow() < 2) {
+    return {
+      success: false,
+      message: 'Expiring Certs sheet not found or empty. Please import certifications first.'
+    };
+  }
+
+  var updatedCount = 0;
+  var updateList = [];
+
+  // For now, just return a summary - full implementation will be in next step
+  Logger.log('Found ' + completedCertTasks.length + ' completed cert tasks');
+
+  return {
+    success: true,
+    message: '✅ Refresh Complete!\n\nFound ' + completedCertTasks.length + ' completed certification tasks.\n\n(Full update functionality will be implemented when task completion dialog is added)'
+  };
+}
+
+/**
+ * Gets expiring certs configuration for To Do Config.
+ */
+function getExpiringCertsConfig() {
+  var defaults = getCertTypeDefaults();
+  var properties = PropertiesService.getScriptProperties();
+  var selectedJson = properties.getProperty('selectedCertTypes');
+  var selected = selectedJson ? JSON.parse(selectedJson) : defaults.defaultChecked;
+
+  var certTypes = defaults.allCertTypes.map(function(name) {
+    return {
+      name: name,
+      isNonExpiring: defaults.nonExpiring.indexOf(name) !== -1
+    };
+  });
+
+  return {
+    certTypes: certTypes,
+    selectedCertTypes: selected
+  };
+}
+
+/**
+ * Saves expiring certs configuration.
+ */
+function saveExpiringCertsConfig(selectedCertTypes) {
+  var properties = PropertiesService.getScriptProperties();
+  properties.setProperty('selectedCertTypes', JSON.stringify(selectedCertTypes));
+  return { success: true };
+}
+
+/**
+ * Updates certification expiration dates in the Expiring Certs sheet.
+ * @param {Array} changes - Array of {employee, certType, newDate} objects
+ * @return {Object} Result with success status and count
+ */
+function updateCertExpirationDates(changes) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var expiringSheet = ss.getSheetByName('Expiring Certs');
+
+    if (!expiringSheet) {
+      throw new Error('Expiring Certs sheet not found');
+    }
+
+    var data = expiringSheet.getDataRange().getValues();
+    var updatedCount = 0;
+
+    // Column indices (0-based)
+    // A=Employee Name, B=Item Type, C=Expiration Date
+    var empCol = 0;
+    var certTypeCol = 1;
+    var expirationCol = 2;
+
+    for (var c = 0; c < changes.length; c++) {
+      var change = changes[c];
+      var employee = change.employee;
+      var certType = change.certType;
+      var newDate = change.newDate;
+
+      // Find the matching row
+      for (var i = 1; i < data.length; i++) {
+        var rowEmp = String(data[i][empCol] || '').trim();
+        var rowCert = String(data[i][certTypeCol] || '').trim();
+
+        if (rowEmp === employee && rowCert === certType) {
+          // Update the expiration date (column C, which is column 3 in 1-based)
+          var dateValue = newDate ? new Date(newDate + 'T12:00:00') : '';
+          expiringSheet.getRange(i + 1, expirationCol + 1).setValue(dateValue);
+          updatedCount++;
+          Logger.log('Updated: ' + employee + ' - ' + certType + ' to ' + newDate);
+          break;
+        }
+      }
+    }
+
+    // Refresh formulas by triggering recalculation
+    SpreadsheetApp.flush();
+
+    return {
+      success: true,
+      updatedCount: updatedCount,
+      message: 'Updated ' + updatedCount + ' certification date(s)'
+    };
+  } catch (error) {
+    Logger.log('Error in updateCertExpirationDates: ' + error.toString());
+    throw error;
+  }
+}
+
+/**
+ * Gets expiring certs data for To Do Config display.
+ */
+function getExpiringCertsForConfig() {
+  try {
+    Logger.log('=== getExpiringCertsForConfig START ===');
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var expiringSheet = ss.getSheetByName('Expiring Certs');
+
+    if (!expiringSheet) {
+      Logger.log('Expiring Certs sheet not found');
+      return {
+        employees: [],
+        summary: { totalEmployees: 0, priorityCount: 0, expiredCount: 0 }
+      };
+    }
+
+    var lastRow = expiringSheet.getLastRow();
+    Logger.log('Last row: ' + lastRow);
+
+    if (lastRow < 2) {
+      Logger.log('No data in Expiring Certs sheet');
+      return {
+        employees: [],
+        summary: { totalEmployees: 0, priorityCount: 0, expiredCount: 0 }
+      };
+    }
+
+    // Only get the columns we need (A, B, C, F, G) to reduce data size
+    var numRows = lastRow - 1;
+    var dataA = expiringSheet.getRange(2, 1, numRows, 1).getValues(); // Employee Name
+    var dataB = expiringSheet.getRange(2, 2, numRows, 1).getValues(); // Item Type
+    var dataC = expiringSheet.getRange(2, 3, numRows, 1).getValues(); // Expiration Date
+    var dataF = expiringSheet.getRange(2, 6, numRows, 1).getValues(); // Days Until
+    var dataG = expiringSheet.getRange(2, 7, numRows, 1).getValues(); // Status
+
+    Logger.log('Processing ' + numRows + ' rows');
+
+    // Group by employee
+    var empMap = {};
+    var priorityCount = 0;
+    var expiredCount = 0;
+
+    for (var i = 0; i < numRows; i++) {
+      var empName = String(dataA[i][0] || '').trim();
+      var certType = String(dataB[i][0] || '').trim();
+      var expiration = dataC[i][0];
+      var daysUntil = dataF[i][0];
+      var status = String(dataG[i][0] || '').trim();
+
+      // Skip rows with no employee name
+      if (!empName) continue;
+
+      if (!empMap[empName]) {
+        empMap[empName] = {
+          name: empName,
+          certs: [],
+          summary: { total: 0, expired: 0, critical: 0 }
+        };
+      }
+
+      // Format expiration date - keep it simple
+      var expDateStr = '';
+      if (expiration) {
+        if (expiration instanceof Date) {
+          var m = expiration.getMonth() + 1;
+          var d = expiration.getDate();
+          var y = expiration.getFullYear();
+          expDateStr = m + '/' + d + '/' + y;
+        } else {
+          expDateStr = String(expiration).substring(0, 10);
+        }
+      }
+
+      empMap[empName].certs.push({
+        type: certType || 'Unknown',
+        expiration: expDateStr || 'N/A',
+        daysUntil: (daysUntil !== null && daysUntil !== undefined && daysUntil !== '' && daysUntil !== 'N/A') ? Number(daysUntil) : null,
+        status: status || 'Unknown'
+      });
+
+      empMap[empName].summary.total++;
+      if (status === 'EXPIRED') {
+        empMap[empName].summary.expired++;
+        expiredCount++;
+      }
+      if (status === 'CRITICAL') {
+        empMap[empName].summary.critical++;
+      }
+      if (status.indexOf('PRIORITY') !== -1) {
+        priorityCount++;
+      }
+    }
+
+    var employees = Object.keys(empMap).map(function(name) {
+      return empMap[name];
+    });
+
+    // Sort by most urgent first
+    employees.sort(function(a, b) {
+      return (b.summary.expired + b.summary.critical) - (a.summary.expired + a.summary.critical);
+    });
+
+    Logger.log('=== getExpiringCertsForConfig COMPLETE ===');
+    Logger.log('Returning ' + employees.length + ' employees');
+
+    return {
+      employees: employees,
+      summary: {
+        totalEmployees: employees.length,
+        priorityCount: priorityCount,
+        expiredCount: expiredCount
+      }
+    };
+  } catch (error) {
+    Logger.log('ERROR in getExpiringCertsForConfig: ' + error.toString());
+    Logger.log('Stack: ' + error.stack);
+    throw error;
+  }
 }
 
 /**
@@ -1835,8 +3554,8 @@ function importLegacyHistoryData(itemType, itemNum, itemSize, itemClass, legacyD
  */
 function showItemHistoryLookup() {
   var html = HtmlService.createHtmlOutputFromFile('LookupDialog')
-    .setWidth(450)
-    .setHeight(550);
+    .setWidth(900)
+    .setHeight(700);
   SpreadsheetApp.getUi().showModalDialog(html, '🔍 Lookup');
 }
 

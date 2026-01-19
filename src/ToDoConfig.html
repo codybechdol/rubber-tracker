@@ -30,16 +30,43 @@
     .nav-tabs .nav-link { color: #5f6368; }
     .nav-tabs .nav-link.active { color: #1a73e8; border-color: #1a73e8; border-bottom-color: white; }
     .loading { text-align: center; padding: 40px; }
+    .cert-table { font-size: 12px; margin-bottom: 0; }
+    .cert-table th { font-size: 11px; padding: 4px 8px !important; }
+    .cert-table td { padding: 4px 8px !important; }
+    .cert-checkboxes-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .cert-overview-card { border: 1px solid #e0e0e0; border-radius: 8px; padding: 10px; margin-bottom: 6px; }
+    .cert-overview-card h6 { margin: 0 0 6px 0; font-size: 13px; font-weight: 600; }
+    .cert-overview-stats { display: flex; gap: 6px; flex-wrap: wrap; }
+    .cert-stat { font-size: 11px; padding: 2px 6px; border-radius: 4px; }
+    .cert-stat-expired { background: #fce8e6; color: #c5221f; }
+    .cert-stat-critical { background: #fef7e0; color: #b06000; }
+    .cert-stat-warning { background: #fff3cd; color: #856404; }
+    .cert-stat-ok { background: #e6f4ea; color: #137333; }
+    .cert-stat-total { background: #e8eaed; color: #5f6368; }
+    .employee-cert-card { border: 1px solid #e0e0e0; border-radius: 6px; margin-bottom: 8px; overflow: hidden; }
+    .employee-cert-header { padding: 8px 12px; background: #f8f9fa; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+    .employee-cert-header:hover { background: #e8eaed; }
+    .employee-cert-body { padding: 8px 12px; display: none; }
+    .employee-cert-body.show { display: block; }
+    .cert-badge { font-size: 10px; padding: 2px 6px; border-radius: 10px; margin-left: 6px; }
+    .cert-badge-expired { background: #fce8e6; color: #c5221f; }
+    .cert-badge-critical { background: #fef7e0; color: #b06000; }
+    .cert-badge-ok { background: #e6f4ea; color: #137333; }
+    .date-input-small { border: 1px solid #dadce0; border-radius: 4px; padding: 2px 4px; font-size: 11px; width: 110px; }
+    .date-input-small:focus { outline: none; border-color: #1a73e8; }
+    .date-input-small.changed { background: #fff3cd; border-color: #ffc107; }
+    .unsaved-indicator { display: none; color: #dc3545; font-size: 12px; margin-left: 8px; }
+    .unsaved-indicator.show { display: inline; }
   </style>
 </head>
 <body>
   <div class="header">
-    <h1><i class="bi bi-gear"></i> To Do Config</h1>
+    <h1><i class="bi bi-gear"></i> To Do Config <span class="unsaved-indicator" id="unsavedIndicator">● Unsaved changes</span></h1>
     <div>
       <button class="btn btn-success btn-sm me-2" onclick="saveConfig()">
         <i class="bi bi-check-lg"></i> Save Changes
       </button>
-      <button class="btn btn-primary btn-sm" onclick="google.script.host.close()">
+      <button class="btn btn-primary btn-sm" onclick="closeDialog()">
         <i class="bi bi-x-lg"></i> Close
       </button>
     </div>
@@ -64,6 +91,11 @@
     <li class="nav-item" role="presentation">
       <button class="nav-link" id="notifications-tab" data-bs-toggle="tab" data-bs-target="#notifications" type="button">
         <i class="bi bi-bell"></i> Notifications
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="certs-tab" data-bs-toggle="tab" data-bs-target="#certs" type="button">
+        <i class="bi bi-file-earmark-medical"></i> Expiring Certs
       </button>
     </li>
   </ul>
@@ -203,12 +235,95 @@
         </div>
       </div>
     </div>
+
+    <!-- Expiring Certs Tab -->
+    <div class="tab-pane fade" id="certs" role="tabpanel">
+      <div class="config-section">
+        <h3><i class="bi bi-list-check"></i> 🎯 Create To Do Tasks For:</h3>
+        <p class="text-muted mb-3">Select which certification types should generate tasks in your To Do list.</p>
+        <div id="certTypeCheckboxes" class="row">
+          <div class="col-12 text-center">
+            <div class="spinner-border spinner-border-sm text-primary"></div>
+            <p class="text-muted small mt-2">Loading certification types...</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="config-section">
+        <h3><i class="bi bi-bar-chart"></i> 📊 Certification Status Overview</h3>
+        <p class="text-muted mb-3">Status breakdown by certification type.</p>
+        <div id="certStatusOverview">
+          <div class="text-center py-3">
+            <div class="spinner-border spinner-border-sm text-primary"></div>
+            <p class="text-muted small mt-2">Loading status overview...</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="config-section">
+        <h3><i class="bi bi-people"></i> Employee Certification Status</h3>
+        <p class="text-muted mb-3">View and manage certification status by employee. Click to expand/collapse employee details.</p>
+        <div id="employeeCertsContainer">
+          <div class="text-center py-4">
+            <div class="spinner-border text-primary"></div>
+            <p class="text-muted mt-2">Loading employee certifications...</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="config-section">
+        <h3><i class="bi bi-graph-up"></i> Summary Statistics</h3>
+        <div id="certsSummary" class="row g-3">
+          <div class="col-md-4">
+            <div class="text-center p-3 bg-light rounded">
+              <h4 class="mb-1" id="totalCertHolders">-</h4>
+              <small class="text-muted">Total Cert Holders</small>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="text-center p-3 bg-light rounded">
+              <h4 class="mb-1 text-danger" id="priorityCount">-</h4>
+              <small class="text-muted">Priority Items</small>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="text-center p-3 bg-light rounded">
+              <h4 class="mb-1 text-warning" id="expiredCount">-</h4>
+              <small class="text-muted">Expired</small>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   <script>
     var configData = {};
     var locations = [];
+    var hasUnsavedChanges = false;
+    var certDateChanges = {}; // Track changed cert expiration dates
+    var allEmployeesData = []; // Store employee data for saving
+
+    function setUnsaved(value) {
+      hasUnsavedChanges = value;
+      var indicator = document.getElementById('unsavedIndicator');
+      if (value) {
+        indicator.classList.add('show');
+      } else {
+        indicator.classList.remove('show');
+      }
+    }
+
+    function closeDialog() {
+      if (hasUnsavedChanges) {
+        if (confirm('You have unsaved changes. Are you sure you want to close without saving?')) {
+          google.script.host.close();
+        }
+      } else {
+        google.script.host.close();
+      }
+    }
 
     function loadConfig() {
       google.script.run
@@ -307,14 +422,49 @@
         workingDays: getWorkingDays()
       };
 
+      // Save general config
       google.script.run
         .withSuccessHandler(function() {
-          showToast('Configuration saved successfully!', 'success');
+          // If there are cert date changes, save those too
+          if (Object.keys(certDateChanges).length > 0) {
+            saveCertDateChanges();
+          } else {
+            setUnsaved(false);
+            showToast('Configuration saved successfully!', 'success');
+          }
         })
         .withFailureHandler(function(error) {
           showToast('Error saving config: ' + error, 'error');
         })
         .saveToDoConfig(config);
+    }
+
+    function saveCertDateChanges() {
+      var changes = Object.keys(certDateChanges).map(function(key) {
+        return certDateChanges[key];
+      });
+
+      if (changes.length === 0) {
+        setUnsaved(false);
+        showToast('Configuration saved!', 'success');
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          certDateChanges = {};
+          setUnsaved(false);
+          // Remove changed styling from inputs
+          var inputs = document.querySelectorAll('.date-input-small.changed');
+          inputs.forEach(function(input) { input.classList.remove('changed'); });
+          showToast('Saved ' + changes.length + ' cert date change(s) and configuration!', 'success');
+          // Reload to refresh data
+          loadEmployeeCertsData();
+        })
+        .withFailureHandler(function(error) {
+          showToast('Error saving cert dates: ' + error, 'error');
+        })
+        .updateCertExpirationDates(changes);
     }
 
     function getWorkingDays() {
@@ -336,8 +486,267 @@
       setTimeout(function() { toast.remove(); }, 3000);
     }
 
+    // Load expiring certs config
+    function loadExpiringCertsConfig() {
+      google.script.run
+        .withSuccessHandler(function(config) {
+          renderCertTypeCheckboxes(config.certTypes, config.selectedCertTypes);
+        })
+        .withFailureHandler(function(error) {
+          document.getElementById('certTypeCheckboxes').innerHTML = '<div class="col-12"><div class="alert alert-danger">Error loading cert types: ' + error + '</div></div>';
+        })
+        .getExpiringCertsConfig();
+
+      loadEmployeeCertsData();
+    }
+
+    function renderCertTypeCheckboxes(allCertTypes, selectedCertTypes) {
+      var container = document.getElementById('certTypeCheckboxes');
+      var html = '';
+      allCertTypes.forEach(function(cert) {
+        var checked = selectedCertTypes.includes(cert.name) ? 'checked' : '';
+        var label = cert.name + (cert.isNonExpiring ? ' (Non-Expiring)' : '');
+        html += '<div class="col-md-4"><div class="form-check">';
+        html += '<input class="form-check-input" type="checkbox" id="cert-' + cert.name.replace(/[^a-zA-Z0-9]/g, '') + '" value="' + cert.name + '" ' + checked + ' onchange="saveCertTypeSelection()">';
+        html += '<label class="form-check-label" for="cert-' + cert.name.replace(/[^a-zA-Z0-9]/g, '') + '">' + label + '</label>';
+        html += '</div></div>';
+      });
+      container.innerHTML = html;
+    }
+
+    function saveCertTypeSelection() {
+      var selected = [];
+      var checkboxes = document.querySelectorAll('#certTypeCheckboxes input[type="checkbox"]');
+      checkboxes.forEach(function(cb) {
+        if (cb.checked) {
+          selected.push(cb.value);
+        }
+      });
+
+      google.script.run
+        .withSuccessHandler(function() {
+          showToast('Cert type selection saved', 'success');
+        })
+        .withFailureHandler(function(error) {
+          showToast('Error saving: ' + error, 'error');
+        })
+        .saveExpiringCertsConfig(selected);
+    }
+
+    function loadEmployeeCertsData() {
+      console.log('loadEmployeeCertsData called');
+
+      // Set a timeout to show a message if it takes too long
+      var timeoutId = setTimeout(function() {
+        var container = document.getElementById('employeeCertsContainer');
+        if (container.innerHTML.indexOf('Loading') !== -1) {
+          container.innerHTML = '<div class="alert alert-warning">Loading is taking longer than expected. Please wait or try refreshing the page.</div>';
+        }
+      }, 15000);
+
+      google.script.run
+        .withSuccessHandler(function(data) {
+          clearTimeout(timeoutId);
+          console.log('getExpiringCertsForConfig SUCCESS:', data);
+          if (data && data.employees) {
+            renderCertStatusOverview(data.employees);
+            renderEmployeeCerts(data.employees);
+            updateCertsSummary(data.summary);
+          } else {
+            document.getElementById('certStatusOverview').innerHTML = '<div class="alert alert-warning">No data available.</div>';
+            document.getElementById('employeeCertsContainer').innerHTML = '<div class="alert alert-warning">No data returned. Please check if the Expiring Certs sheet has data.</div>';
+          }
+        })
+        .withFailureHandler(function(error) {
+          clearTimeout(timeoutId);
+          console.error('getExpiringCertsForConfig ERROR:', error);
+          document.getElementById('certStatusOverview').innerHTML = '<div class="alert alert-danger">Error loading data: ' + error + '</div>';
+          document.getElementById('employeeCertsContainer').innerHTML = '<div class="alert alert-danger">Error loading data: ' + error + '</div>';
+        })
+        .getExpiringCertsForConfig();
+    }
+
+    function renderCertStatusOverview(employees) {
+      var container = document.getElementById('certStatusOverview');
+
+      // Aggregate stats by cert type
+      var certStats = {};
+
+      employees.forEach(function(emp) {
+        if (emp.certs) {
+          emp.certs.forEach(function(cert) {
+            var type = cert.type || 'Unknown';
+            if (!certStats[type]) {
+              certStats[type] = { total: 0, expired: 0, critical: 0, warning: 0, ok: 0 };
+            }
+            certStats[type].total++;
+            var status = (cert.status || '').toUpperCase();
+            if (status === 'EXPIRED' || status.indexOf('EXPIRED') !== -1) {
+              certStats[type].expired++;
+            } else if (status === 'CRITICAL') {
+              certStats[type].critical++;
+            } else if (status === 'WARNING') {
+              certStats[type].warning++;
+            } else if (status === 'OK' || status === 'NO DATE SET' || status.indexOf('NON-EXPIRING') !== -1) {
+              certStats[type].ok++;
+            }
+          });
+        }
+      });
+
+      // Sort cert types by urgency (most expired/critical first)
+      var sortedTypes = Object.keys(certStats).sort(function(a, b) {
+        var urgencyA = certStats[a].expired * 100 + certStats[a].critical * 10;
+        var urgencyB = certStats[b].expired * 100 + certStats[b].critical * 10;
+        return urgencyB - urgencyA;
+      });
+
+      if (sortedTypes.length === 0) {
+        container.innerHTML = '<p class="text-muted text-center">No certification data available.</p>';
+        return;
+      }
+
+      var html = '<div class="row">';
+      sortedTypes.forEach(function(type) {
+        var stats = certStats[type];
+        html += '<div class="col-md-6 col-lg-4 mb-2">';
+        html += '<div class="cert-overview-card">';
+        html += '<h6>' + type + '</h6>';
+        html += '<div class="cert-overview-stats">';
+        if (stats.expired > 0) html += '<span class="cert-stat cert-stat-expired">🔴 ' + stats.expired + ' Expired</span>';
+        if (stats.critical > 0) html += '<span class="cert-stat cert-stat-critical">🟠 ' + stats.critical + ' Critical</span>';
+        if (stats.warning > 0) html += '<span class="cert-stat cert-stat-warning">🟡 ' + stats.warning + ' Warning</span>';
+        if (stats.ok > 0) html += '<span class="cert-stat cert-stat-ok">🟢 ' + stats.ok + ' OK</span>';
+        html += '<span class="cert-stat cert-stat-total">' + stats.total + ' Total</span>';
+        html += '</div></div></div>';
+      });
+      html += '</div>';
+
+      container.innerHTML = html;
+    }
+
+    function renderEmployeeCerts(employees) {
+      var container = document.getElementById('employeeCertsContainer');
+      allEmployeesData = employees; // Store for later use
+
+      if (!employees || employees.length === 0) {
+        container.innerHTML = '<p class="text-muted text-center">No certification data found. Import certifications to get started.</p>';
+        return;
+      }
+
+      var html = '';
+      employees.forEach(function(emp, index) {
+        var badges = '';
+        if (emp.summary.expired > 0) badges += '<span class="cert-badge cert-badge-expired">' + emp.summary.expired + ' Exp</span>';
+        if (emp.summary.critical > 0) badges += '<span class="cert-badge cert-badge-critical">' + emp.summary.critical + ' Crit</span>';
+        badges += '<span class="cert-badge cert-badge-ok">' + emp.summary.total + '</span>';
+
+        html += '<div class="employee-cert-card">';
+        html += '<div class="employee-cert-header" onclick="toggleEmployeeCerts(' + index + ')">';
+        html += '<div><strong style="font-size: 13px;">' + emp.name + '</strong>' + badges + '</div>';
+        html += '<i class="bi bi-chevron-down" id="chevron-' + index + '" style="font-size: 12px;"></i>';
+        html += '</div>';
+        html += '<div class="employee-cert-body" id="certs-' + index + '">';
+
+        if (emp.certs && emp.certs.length > 0) {
+          html += '<table class="table table-sm cert-table">';
+          html += '<thead><tr><th>Cert</th><th>Expiration</th><th>Days</th><th>Status</th></tr></thead>';
+          html += '<tbody>';
+          emp.certs.forEach(function(cert, certIndex) {
+            var dateValue = formatDateForInput(cert.expiration);
+            var certKey = emp.name + '|' + cert.type;
+
+            html += '<tr>';
+            html += '<td style="font-size: 11px;">' + cert.type + '</td>';
+            html += '<td><input type="date" class="date-input-small" value="' + dateValue + '" onchange="onCertDateChange(\'' + escapeQuotes(emp.name) + '\', \'' + escapeQuotes(cert.type) + '\', this.value, this)">';
+            html += '</td>';
+            html += '<td style="font-size: 11px;">' + (cert.daysUntil !== null ? cert.daysUntil : '-') + '</td>';
+            html += '<td><span class="badge bg-' + getStatusColor(cert.status) + '" style="font-size: 9px;">' + cert.status + '</span></td>';
+            html += '</tr>';
+          });
+          html += '</tbody></table>';
+        } else {
+          html += '<p class="text-muted small">No certifications found</p>';
+        }
+
+        html += '</div>';
+        html += '</div>';
+      });
+
+      container.innerHTML = html;
+    }
+
+    function escapeQuotes(str) {
+      return str.replace(/'/g, "\\'").replace(/"/g, '\\"');
+    }
+
+    function formatDateForInput(dateStr) {
+      if (!dateStr || dateStr === 'N/A' || dateStr === 'Non-Expiring') return '';
+      // Try to convert MM/DD/YYYY or other formats to YYYY-MM-DD
+      try {
+        var parts = dateStr.split('/');
+        if (parts.length === 3) {
+          var month = parts[0].padStart(2, '0');
+          var day = parts[1].padStart(2, '0');
+          var year = parts[2];
+          if (year.length === 2) year = '20' + year;
+          return year + '-' + month + '-' + day;
+        }
+        // If already in YYYY-MM-DD format
+        if (dateStr.indexOf('-') !== -1) return dateStr.substring(0, 10);
+      } catch(e) {}
+      return '';
+    }
+
+    function onCertDateChange(employeeName, certType, newDate, inputElement) {
+      var key = employeeName + '|' + certType;
+      certDateChanges[key] = {
+        employee: employeeName,
+        certType: certType,
+        newDate: newDate
+      };
+      inputElement.classList.add('changed');
+      setUnsaved(true);
+    }
+
+    function toggleEmployeeCerts(index) {
+      var body = document.getElementById('certs-' + index);
+      var chevron = document.getElementById('chevron-' + index);
+      if (body.classList.contains('show')) {
+        body.classList.remove('show');
+        chevron.className = 'bi bi-chevron-down';
+      } else {
+        body.classList.add('show');
+        chevron.className = 'bi bi-chevron-up';
+      }
+    }
+
+    function updateCertsSummary(summary) {
+      document.getElementById('totalCertHolders').textContent = summary.totalEmployees || 0;
+      document.getElementById('priorityCount').textContent = summary.priorityCount || 0;
+      document.getElementById('expiredCount').textContent = summary.expiredCount || 0;
+    }
+
+    function getStatusColor(status) {
+      var colors = {
+        'EXPIRED': 'danger',
+        'CRITICAL': 'warning',
+        'WARNING': 'warning',
+        'UPCOMING': 'info',
+        'OK': 'success',
+        'Non-Expiring': 'secondary',
+        'PRIORITY - Need Copy': 'danger'
+      };
+      return colors[status] || 'secondary';
+    }
+
     // Load config on page load
     loadConfig();
+
+    // Load certs config when tab is shown
+    document.getElementById('certs-tab').addEventListener('shown.bs.tab', function() {
+      loadExpiringCertsConfig();
+    });
   </script>
 </body>
 </html>
