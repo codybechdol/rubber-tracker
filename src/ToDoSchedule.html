@@ -541,14 +541,34 @@
     }
 
     function loadTasks() {
+      console.log('loadTasks: Starting...');
       google.script.run
         .withSuccessHandler(function(tasks) {
+          console.log('loadTasks: Received ' + (tasks ? tasks.length : 0) + ' tasks');
           allTasks = tasks || [];
-          renderTasks(allTasks);
-          renderCalendar();
-          renderPersonalChecklist();
+          try {
+            renderTasks(allTasks);
+            console.log('loadTasks: renderTasks completed');
+          } catch (e) {
+            console.error('loadTasks: renderTasks error:', e);
+            document.getElementById('taskContainer').innerHTML =
+              '<div class="alert alert-danger">Error rendering tasks: ' + e.message + '</div>';
+          }
+          try {
+            renderCalendar();
+            console.log('loadTasks: renderCalendar completed');
+          } catch (e) {
+            console.error('loadTasks: renderCalendar error:', e);
+          }
+          try {
+            renderPersonalChecklist();
+            console.log('loadTasks: renderPersonalChecklist completed');
+          } catch (e) {
+            console.error('loadTasks: renderPersonalChecklist error:', e);
+          }
         })
         .withFailureHandler(function(error) {
+          console.error('loadTasks: Server error:', error);
           document.getElementById('taskContainer').innerHTML =
             '<div class="alert alert-danger">Error loading tasks: ' + error + '</div>';
         })

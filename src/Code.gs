@@ -169,9 +169,10 @@ function addManualScheduleTask(taskData) {
  * @return {Array} Array of task objects for display
  */
 function getScheduleTasks() {
-  Logger.log('=== getScheduleTasks START ===');
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var tasks = [];
+  try {
+    Logger.log('=== getScheduleTasks START ===');
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var tasks = [];
 
   // FIRST: Check if we have a generated To Do List sheet (from Smart Schedule)
   var todoSheet = ss.getSheetByName('To Do List');
@@ -431,6 +432,11 @@ function getScheduleTasks() {
   Logger.log('getScheduleTasks: Found ' + tasks.length + ' total tasks');
   Logger.log('=== getScheduleTasks END ===');
   return tasks;
+  } catch (error) {
+    Logger.log('ERROR in getScheduleTasks: ' + error.message);
+    Logger.log('Stack: ' + error.stack);
+    throw error;
+  }
 }
 
 /**
