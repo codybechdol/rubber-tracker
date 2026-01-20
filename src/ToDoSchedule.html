@@ -9,13 +9,13 @@
   <style>
     body { font-family: 'Google Sans', Arial, sans-serif; background: #f8f9fa; margin: 0; padding: 20px; }
     .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-    .header h1 { color: #1a73e8; font-size: 24px; margin: 0; }
-    .btn-primary { background: #1a73e8; border-color: #1a73e8; }
-    .btn-primary:hover { background: #1557b0; border-color: #1557b0; }
+    .header h1 { color: #5f6368; font-size: 24px; margin: 0; }
+    .btn-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; }
+    .btn-primary:hover { background: linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%); border: none; }
     .nav-tabs .nav-link { color: #5f6368; }
-    .nav-tabs .nav-link.active { color: #1a73e8; border-color: #1a73e8; border-bottom-color: white; }
-    .card { border: none; box-shadow: 0 1px 3px rgba(0,0,0,0.12); margin-bottom: 16px; }
-    .card-header { background: #1a73e8; color: white; font-weight: 500; }
+    .nav-tabs .nav-link.active { color: #667eea; border-color: #667eea; border-bottom-color: white; }
+    .card { border: none; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 16px; border-radius: 12px; overflow: hidden; }
+    .card-header { background: #667eea; color: white; font-weight: 500; }
     .task-row { padding: 12px; border-bottom: 1px solid #e0e0e0; }
     .task-row:last-child { border-bottom: none; }
     .task-row:hover { background: #f1f3f4; }
@@ -55,7 +55,7 @@
     .calendar-task-dot.medium { background: #fbbc04; }
     .calendar-task-dot.low { background: #34a853; }
     .calendar-task-preview { font-size: 10px; color: #5f6368; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .calendar-task-location { font-size: 9px; color: #1a73e8; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .calendar-task-location { font-size: 9px; color: #667eea; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .day-detail-popup { position: fixed; background: white; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); padding: 16px; z-index: 1000; max-width: 450px; max-height: 500px; overflow-y: auto; }
     .day-detail-task { border: 1px solid #e0e0e0; border-radius: 6px; padding: 10px; margin-bottom: 8px; }
     .day-detail-task.priority-high { border-left: 4px solid #ea4335; }
@@ -64,6 +64,23 @@
     .unsaved-indicator { display: none; color: #dc3545; font-size: 12px; margin-left: 8px; }
     .unsaved-indicator.show { display: inline; }
     .date-input.changed { background: #fff3cd; border-color: #ffc107; }
+
+    /* Personal Checklist Styles */
+    .list-group-item { transition: all 0.2s ease; }
+    .list-group-item:hover { background: #f8f9fa; }
+    .list-group-item-success { background: #d4edda !important; }
+    #checklistBadge { font-size: 10px; padding: 2px 6px; margin-left: 4px; }
+
+    /* Time Input Styles */
+    .time-input { border: 1px solid #dadce0; border-radius: 4px; padding: 4px 8px; font-size: 12px; width: 85px; }
+    .time-input:focus { outline: none; border-color: #1a73e8; }
+    .time-input.changed { background: #fff3cd; border-color: #ffc107; }
+
+    /* Bulk Edit Button Styles */
+    .bulk-edit-btn { font-size: 11px; padding: 2px 8px; }
+    .location-edit-section { background: #f8f9fa; border-radius: 8px; padding: 12px; margin: 8px 16px 16px 16px; border: 1px dashed #667eea; }
+    .location-edit-section .form-label { font-size: 12px; font-weight: 500; margin-bottom: 4px; }
+    .location-edit-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
   </style>
 </head>
 <body>
@@ -91,6 +108,11 @@
     <li class="nav-item" role="presentation">
       <button class="nav-link" id="tasklist-tab" data-bs-toggle="tab" data-bs-target="#tasklist" type="button">
         <i class="bi bi-list-check"></i> Task List
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="mycheckllist-tab" data-bs-toggle="tab" data-bs-target="#mychecklist" type="button">
+        <i class="bi bi-clipboard-check"></i> My Checklist <span class="badge bg-primary" id="checklistBadge" style="display: none;">0</span>
       </button>
     </li>
   </ul>
@@ -172,10 +194,115 @@
         </div>
       </div>
     </div>
+
+    <!-- My Personal Checklist Tab -->
+    <div class="tab-pane fade" id="mychecklist" role="tabpanel">
+      <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center" style="background: linear-gradient(135deg, #34a853 0%, #1e8e3e 100%); color: white;">
+          <div>
+            <i class="bi bi-clipboard-check"></i> My Personal Checklist
+            <span class="badge bg-white text-dark ms-2" id="checklistCount">0 items</span>
+          </div>
+          <button class="btn btn-light btn-sm" onclick="showAddManualItemModal()">
+            <i class="bi bi-plus-lg"></i> Add Manual Item
+          </button>
+        </div>
+        <div class="card-body" id="personalChecklistContainer">
+          <div class="empty-state" id="emptyChecklist">
+            <i class="bi bi-clipboard-plus" style="font-size: 48px; color: #5f6368;"></i>
+            <p class="mt-3">No items in your checklist</p>
+            <p class="text-muted">Add items from the Task List using <i class="bi bi-plus-circle"></i> or click "Add Manual Item" above</p>
+          </div>
+          <div id="checklistItems" style="display: none;">
+            <!-- Checklist items will be rendered here -->
+          </div>
+        </div>
+      </div>
+      <div class="mt-3 text-muted small">
+        <i class="bi bi-info-circle"></i> Manual items added here will also appear on the calendar view.
+      </div>
+    </div>
   </div>
 
-  <!-- Day Detail Popup -->
-  <div id="dayDetailPopup" class="day-detail-popup" style="display: none;"></div>
+  <!-- Day Detail Modal -->
+  <div class="modal fade" id="dayDetailModal" tabindex="-1" aria-labelledby="dayDetailModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+          <h5 class="modal-title" id="dayDetailModalLabel">📅 Day Details</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body" id="dayDetailModalBody">
+          <!-- Content will be populated dynamically -->
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Manual Item Modal -->
+  <div class="modal fade" id="addManualItemModal" tabindex="-1" aria-labelledby="addManualItemModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header" style="background: linear-gradient(135deg, #34a853 0%, #1e8e3e 100%); color: white;">
+          <h5 class="modal-title" id="addManualItemModalLabel"><i class="bi bi-plus-circle"></i> Add Manual Scheduled Item</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label">Task Title *</label>
+            <input type="text" class="form-control" id="manualTaskTitle" placeholder="e.g., Schedule 1st Aid Training">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Description / Notes</label>
+            <textarea class="form-control" id="manualTaskNotes" rows="2" placeholder="Optional notes or details"></textarea>
+          </div>
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label">Scheduled Date</label>
+              <input type="date" class="form-control" id="manualTaskDate">
+            </div>
+            <div class="col-md-6 mb-3">
+              <label class="form-label">Location</label>
+              <input type="text" class="form-control" id="manualTaskLocation" placeholder="e.g., Helena">
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label">Start Time</label>
+              <input type="time" class="form-control" id="manualTaskStartTime">
+            </div>
+            <div class="col-md-6 mb-3">
+              <label class="form-label">End Time</label>
+              <input type="time" class="form-control" id="manualTaskEndTime">
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Priority</label>
+            <select class="form-select" id="manualTaskPriority">
+              <option value="Medium">Medium</option>
+              <option value="High">High</option>
+              <option value="Low">Low</option>
+            </select>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="manualTaskAddToCalendar" checked>
+            <label class="form-check-label" for="manualTaskAddToCalendar">
+              Also add to main Task List & Calendar
+            </label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-success" onclick="saveManualItem()">
+            <i class="bi bi-check-lg"></i> Add Item
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   <script>
@@ -184,8 +311,177 @@
     var currentYear = new Date().getFullYear();
     var monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
                       'July', 'August', 'September', 'October', 'November', 'December'];
+    var openLocationGroups = {}; // Track which location groups are open
+    var personalChecklist = []; // Personal checklist for training items
     var hasUnsavedChanges = false;
     var pendingDateChanges = {}; // Track changes by task index
+
+    // Helper: Format task type with item type (Glove/Sleeve) and item number
+    function formatTaskType(task) {
+      var taskType = task.taskType || 'Task';
+      var itemType = task.itemType || '';
+      var currentItem = task.currentItem || '';
+
+      // Determine if it's a Glove or Sleeve based on itemType
+      var itemLabel = '';
+      if (itemType) {
+        var itemTypeLower = itemType.toLowerCase();
+        if (itemTypeLower.indexOf('glove') !== -1) {
+          itemLabel = 'Glove';
+        } else if (itemTypeLower.indexOf('sleeve') !== -1) {
+          itemLabel = 'Sleeve';
+        }
+      }
+
+      // Format based on task type
+      if (taskType === 'Swap') {
+        var swapLabel = itemLabel ? itemLabel + ' Swap' : 'Swap';
+        if (currentItem) {
+          swapLabel += ' (#' + currentItem + ')';
+        }
+        return swapLabel;
+      } else if (taskType.indexOf('Reclaim') !== -1) {
+        var reclaimLabel = itemLabel ? itemLabel + ' Reclaim' : 'Reclaim';
+        if (currentItem) {
+          reclaimLabel += ' (#' + currentItem + ')';
+        }
+        // Add class transition info if available
+        if (taskType.indexOf('CL3→CL2') !== -1) {
+          reclaimLabel += ' (CL3→CL2)';
+        } else if (taskType.indexOf('CL2→CL3') !== -1) {
+          reclaimLabel += ' (CL2→CL3)';
+        }
+        return reclaimLabel;
+      } else if (taskType.indexOf('Training') !== -1) {
+        // Show training topic if available
+        if (itemType && itemType !== 'Training') {
+          return 'Training: ' + itemType;
+        }
+        return taskType;
+      } else if (taskType === 'Cert Expiring' || taskType.indexOf('Renew') !== -1) {
+        // Show cert type if available
+        if (itemType) {
+          return 'Renew ' + itemType;
+        }
+        return taskType;
+      }
+
+      return taskType;
+    }
+
+    // Helper: Extract foreman from location string (handles "Location (👷 Foreman)" format)
+    function extractForemanFromLocation(loc) {
+      if (!loc) return null;
+      var match = loc.match(/\(([^)]+)\)$/);
+      if (match) {
+        var foreman = match[1].trim();
+        // Remove emoji prefix if present (👷)
+        if (foreman.indexOf('👷') !== -1) {
+          foreman = foreman.replace('👷', '').trim();
+        }
+        return foreman;
+      }
+      return null;
+    }
+
+    // Helper: Get the group name (foreman/supervisor) for a task
+    // Groups all crew members under their foreman/supervisor (F, GTO F, GF, SUP classifications)
+    function getTaskGroupName(task) {
+      var loc = task.location || '';
+
+      // FIRST: Always try to extract foreman from location (this groups all crew members under their foreman)
+      var foremanFromLocation = extractForemanFromLocation(loc);
+      if (foremanFromLocation) {
+        return foremanFromLocation;
+      }
+
+      // For Training and Cert tasks, use the employee name (crew lead) as the foreman
+      var taskType = (task.taskType || '').toLowerCase();
+      if (taskType.indexOf('training') !== -1 || taskType.indexOf('cert') !== -1) {
+        if (task.employee && task.employee.trim()) {
+          var empName = task.employee.trim();
+          var parenIndex = empName.indexOf(' (');
+          if (parenIndex !== -1) {
+            return empName.substring(0, parenIndex);
+          }
+          return empName;
+        }
+      }
+
+      // Fall back to employee name if available
+      if (task.employee && task.employee.trim()) {
+        var empName = task.employee.trim();
+        var parenIndex = empName.indexOf(' (');
+        if (parenIndex !== -1) {
+          return empName.substring(0, parenIndex);
+        }
+        return empName;
+      }
+
+      return 'Unassigned';
+    }
+
+    // Helper: Get the task category for sub-grouping under foreman
+    // Categories: Training, Rubber Changes (swaps/reclaims), Expiring Certs, Other
+    function getTaskCategory(task) {
+      var taskType = (task.taskType || '').toLowerCase();
+      var source = (task.source || '').toLowerCase();
+
+      // Training tasks - from Training Tracking source OR has "training" in taskType
+      // This includes "Renew Harassment Training", "Training: Topic", etc.
+      if (source.indexOf('training tracking') !== -1 ||
+          taskType.indexOf('training') !== -1) {
+        return 'Training';
+      }
+
+      // Rubber Changes (Swaps and Reclaims)
+      if (taskType.indexOf('swap') !== -1 || taskType.indexOf('reclaim') !== -1 ||
+          source.indexOf('swap') !== -1 || source.indexOf('reclaim') !== -1) {
+        return 'Rubber Changes';
+      }
+
+      // Expiring Certs - certification renewals (NOT training)
+      // Includes: "Renew 1st Aid", "Renew CPR", "Renew Crane Cert", "Cert Expiring", etc.
+      // Check for cert-related keywords in taskType
+      var certKeywords = ['cert', 'expir', '1st aid', 'first aid', 'cpr', 'crane', 'cdl', 'mec', 'dl'];
+      var isCertTask = false;
+      for (var i = 0; i < certKeywords.length; i++) {
+        if (taskType.indexOf(certKeywords[i]) !== -1) {
+          isCertTask = true;
+          break;
+        }
+      }
+      // Also check source
+      if (source.indexOf('cert') !== -1 || source.indexOf('expir') !== -1) {
+        isCertTask = true;
+      }
+      // "Renew X" where X is not training-related is a cert
+      if (taskType.indexOf('renew') !== -1 && taskType.indexOf('training') === -1) {
+        isCertTask = true;
+      }
+
+      if (isCertTask) {
+        return 'Expiring Certs';
+      }
+
+      // Everything else goes to Other
+      return 'Other';
+    }
+
+    // Category display order and icons
+    var categoryOrder = ['Training', 'Rubber Changes', 'Expiring Certs', 'Other'];
+    var categoryIcons = {
+      'Training': 'bi-mortarboard',
+      'Rubber Changes': 'bi-arrow-left-right',
+      'Expiring Certs': 'bi-file-earmark-medical',
+      'Other': 'bi-three-dots'
+    };
+    var categoryColors = {
+      'Training': '#1a73e8',
+      'Rubber Changes': '#34a853',
+      'Expiring Certs': '#ea4335',
+      'Other': '#5f6368'
+    };
 
     function setUnsaved(value) {
       hasUnsavedChanges = value;
@@ -199,12 +495,10 @@
 
     function closeDialog() {
       if (hasUnsavedChanges) {
-        if (confirm('You have unsaved changes. Are you sure you want to close without saving?')) {
-          google.script.host.close();
-        }
-      } else {
-        google.script.host.close();
+        alert('You have unsaved changes. Please click Save before closing, or click Refresh to discard changes.');
+        return; // Don't allow closing
       }
+      google.script.host.close();
     }
 
     function saveAllChanges() {
@@ -240,6 +534,7 @@
           allTasks = tasks || [];
           renderTasks(allTasks);
           renderCalendar();
+          renderPersonalChecklist();
         })
         .withFailureHandler(function(error) {
           document.getElementById('taskContainer').innerHTML =
@@ -361,91 +656,80 @@
     }
 
     function showDayDetail(dateStr, event) {
-      var popup = document.getElementById('dayDetailPopup');
-      var dayTasks = allTasks.filter(function(t) { return t.scheduledDate === dateStr; });
+      event.stopPropagation();
 
-      if (dayTasks.length === 0) {
-        popup.style.display = 'none';
-        return;
-      }
+      var dayTasks = allTasks.filter(function(t) { return t.scheduledDate === dateStr; });
 
       var date = new Date(dateStr + 'T12:00:00');
       var dateDisplay = monthNames[date.getMonth()] + ' ' + date.getDate() + ', ' + date.getFullYear();
 
-      // Group tasks by location
-      var tasksByLoc = {};
-      dayTasks.forEach(function(task) {
-        var loc = task.location || 'No Location';
-        if (!tasksByLoc[loc]) tasksByLoc[loc] = [];
-        tasksByLoc[loc].push(task);
-      });
+      // Update modal title
+      document.getElementById('dayDetailModalLabel').innerHTML = '📅 ' + dateDisplay + ' <span class="badge bg-light text-dark ms-2">' + dayTasks.length + ' task(s)</span>';
 
-      var html = '<div class="d-flex justify-content-between align-items-center mb-3" style="border-bottom: 2px solid #1a73e8; padding-bottom: 8px;">';
-      html += '<div><strong style="font-size: 16px;">📅 ' + dateDisplay + '</strong>';
-      html += '<div class="text-muted small">' + dayTasks.length + ' task(s)</div></div>';
-      html += '<button class="btn btn-sm btn-outline-secondary" onclick="closeDayDetail()"><i class="bi bi-x-lg"></i></button>';
-      html += '</div>';
+      var modalBody = document.getElementById('dayDetailModalBody');
 
-      // Render by location
-      var locations = Object.keys(tasksByLoc).sort();
-      locations.forEach(function(location) {
-        var locTasks = tasksByLoc[location];
-        html += '<div class="mb-3">';
-        html += '<div style="font-weight: 600; color: #1a73e8; font-size: 13px; margin-bottom: 6px;"><i class="bi bi-geo-alt-fill"></i> ' + location + ' <span class="badge bg-secondary">' + locTasks.length + '</span></div>';
+      if (dayTasks.length === 0) {
+        modalBody.innerHTML = '<div class="text-center text-muted py-4"><i class="bi bi-calendar-x" style="font-size: 48px;"></i><p class="mt-3">No tasks scheduled for this day.</p></div>';
+      } else {
+        // Group tasks by location
+        var tasksByLoc = {};
+        dayTasks.forEach(function(task) {
+          var loc = task.location || 'No Location';
+          if (!tasksByLoc[loc]) tasksByLoc[loc] = [];
+          tasksByLoc[loc].push(task);
+        });
 
-        locTasks.forEach(function(task) {
-          var priorityClass = 'priority-' + (task.priority || 'medium').toLowerCase();
-          var statusClass = getStatusClass(task.status);
+        var html = '';
 
-          html += '<div class="day-detail-task ' + priorityClass + '">';
-          html += '<div class="d-flex justify-content-between align-items-start">';
-          html += '<div><strong style="font-size: 13px;">' + (task.taskType || 'Task') + '</strong>';
-          if (task.employee) html += '<div class="text-muted" style="font-size: 11px;">👤 ' + task.employee + '</div>';
-          html += '</div>';
-          html += '<span class="status-badge ' + statusClass + '">' + (task.status || 'Pending') + '</span>';
-          html += '</div>';
+        // Render by location
+        var locations = Object.keys(tasksByLoc).sort();
+        locations.forEach(function(location) {
+          var locTasks = tasksByLoc[location];
+          html += '<div class="mb-4">';
+          html += '<h6 style="color: #667eea; border-bottom: 1px solid #e0e0e0; padding-bottom: 8px;"><i class="bi bi-geo-alt-fill"></i> ' + location + ' <span class="badge bg-secondary">' + locTasks.length + '</span></h6>';
 
-          html += '<div style="font-size: 11px; color: #5f6368; margin-top: 4px;">';
-          html += '<i class="bi bi-box-arrow-in-right"></i> ' + (task.source || 'Unknown');
-          if (task.startTime) {
-            html += ' &nbsp;|&nbsp; <i class="bi bi-clock"></i> ' + task.startTime;
-            if (task.endTime) html += ' - ' + task.endTime;
-          }
-          html += '</div>';
+          locTasks.forEach(function(task) {
+            var priorityClass = 'priority-' + (task.priority || 'medium').toLowerCase();
+            var statusClass = getStatusClass(task.status);
+            var displayTaskType = formatTaskType(task);
 
-          if (task.notes) {
-            html += '<div class="text-muted" style="font-size: 11px; margin-top: 4px; font-style: italic;"><i class="bi bi-info-circle"></i> ' + task.notes + '</div>';
-          }
+            html += '<div class="day-detail-task ' + priorityClass + ' mb-2">';
+            html += '<div class="d-flex justify-content-between align-items-start">';
+            html += '<div><strong>' + displayTaskType + '</strong>';
+            if (task.employee) html += '<div class="text-muted small">👤 ' + task.employee + '</div>';
+            html += '</div>';
+            html += '<span class="status-badge ' + statusClass + '">' + (task.status || 'Pending') + '</span>';
+            html += '</div>';
+
+            html += '<div class="small text-muted mt-1">';
+            html += '<i class="bi bi-box-arrow-in-right"></i> ' + (task.source || 'Unknown');
+            if (task.startTime) {
+              html += ' &nbsp;|&nbsp; <i class="bi bi-clock"></i> ' + task.startTime;
+              if (task.endTime) html += ' - ' + task.endTime;
+            }
+            html += '</div>';
+
+            if (task.notes) {
+              html += '<div class="text-muted small mt-1 fst-italic"><i class="bi bi-info-circle"></i> ' + task.notes + '</div>';
+            }
+            html += '</div>';
+          });
+
           html += '</div>';
         });
 
-        html += '</div>';
-      });
+        modalBody.innerHTML = html;
+      }
 
-      popup.innerHTML = html;
-      popup.style.display = 'block';
-
-      // Position popup - center it better
-      var popupWidth = 450;
-      var popupHeight = Math.min(500, dayTasks.length * 120 + 100);
-      var left = Math.min(Math.max(event.clientX - popupWidth/2, 10), window.innerWidth - popupWidth - 10);
-      var top = Math.min(Math.max(event.clientY - 50, 10), window.innerHeight - popupHeight - 10);
-
-      popup.style.left = left + 'px';
-      popup.style.top = top + 'px';
+      // Show the modal
+      var modal = new bootstrap.Modal(document.getElementById('dayDetailModal'));
+      modal.show();
     }
 
     function closeDayDetail() {
-      document.getElementById('dayDetailPopup').style.display = 'none';
+      var modal = bootstrap.Modal.getInstance(document.getElementById('dayDetailModal'));
+      if (modal) modal.hide();
     }
-
-    // Close popup when clicking outside
-    document.addEventListener('click', function(e) {
-      var popup = document.getElementById('dayDetailPopup');
-      if (!popup.contains(e.target) && !e.target.classList.contains('calendar-day')) {
-        popup.style.display = 'none';
-      }
-    });
 
     // ================== TASK LIST FUNCTIONS ==================
     function renderTasks(tasks) {
@@ -456,107 +740,237 @@
         return;
       }
 
-      // Group tasks by location
-      var tasksByLocation = {};
-      tasks.forEach(function(task, index) {
-        var loc = task.location || 'No Location';
-        if (!tasksByLocation[loc]) tasksByLocation[loc] = [];
-        task._originalIndex = index; // Store original index for actions
-        tasksByLocation[loc].push(task);
+      // Filter out tasks that have been added to personal checklist (1st Aid/CPR items)
+      var filteredTasks = tasks.filter(function(task, index) {
+        task._originalIndex = index; // Preserve original index for actions
+        return !isTaskInChecklist(task);
       });
 
-      // Sort locations alphabetically
-      var locations = Object.keys(tasksByLocation).sort();
+      if (filteredTasks.length === 0) {
+        container.innerHTML = '<div class="empty-state"><i class="bi bi-calendar-check" style="font-size: 48px;"></i><p class="mt-3">All tasks handled</p><p class="text-muted">Some tasks may have been moved to your personal checklist</p></div>';
+        return;
+      }
+
+      // Extract base location from location string (remove foreman parentheses)
+      function parseLocation(locString) {
+        var loc = locString || 'No Location';
+        var match = loc.match(/^([^(]+)\s*\(([^)]+)\)$/);
+        if (match) {
+          return { baseLocation: match[1].trim(), foreman: match[2].trim() };
+        }
+        return { baseLocation: loc.trim(), foreman: '' };
+      }
+
+      // Group tasks: Location > Foreman > Category
+      var tasksByBaseLocation = {};
+      filteredTasks.forEach(function(task) {
+        var parsed = parseLocation(task.location);
+        var baseLoc = parsed.baseLocation;
+        var groupName = getTaskGroupName(task);
+        var category = getTaskCategory(task);
+
+        if (!tasksByBaseLocation[baseLoc]) {
+          tasksByBaseLocation[baseLoc] = {};
+        }
+        if (!tasksByBaseLocation[baseLoc][groupName]) {
+          tasksByBaseLocation[baseLoc][groupName] = {};
+        }
+        if (!tasksByBaseLocation[baseLoc][groupName][category]) {
+          tasksByBaseLocation[baseLoc][groupName][category] = [];
+        }
+        tasksByBaseLocation[baseLoc][groupName][category].push(task);
+      });
+
+      // Sort base locations alphabetically
+      var baseLocations = Object.keys(tasksByBaseLocation).sort();
 
       var html = '';
 
-      locations.forEach(function(location, locIndex) {
-        var locTasks = tasksByLocation[location];
-        var highCount = locTasks.filter(function(t) { return t.priority === 'High'; }).length;
-        var medCount = locTasks.filter(function(t) { return t.priority === 'Medium'; }).length;
-        var lowCount = locTasks.filter(function(t) { return t.priority === 'Low'; }).length;
-
-        html += '<div class="card mb-2">';
-        html += '<div class="card-header location-header" onclick="toggleLocationGroup(' + locIndex + ')" style="cursor: pointer; background: #f8f9fa; color: #202124;">';
-        html += '<div class="d-flex justify-content-between align-items-center">';
-        html += '<div><i class="bi bi-chevron-down me-2" id="loc-chevron-' + locIndex + '"></i>';
-        html += '<i class="bi bi-geo-alt me-1"></i><strong>' + location + '</strong>';
-        html += '<span class="badge bg-secondary ms-2">' + locTasks.length + ' tasks</span></div>';
-        html += '<div>';
-        if (highCount > 0) html += '<span class="badge bg-danger me-1">' + highCount + ' High</span>';
-        if (medCount > 0) html += '<span class="badge bg-warning text-dark me-1">' + medCount + ' Med</span>';
-        if (lowCount > 0) html += '<span class="badge bg-success">' + lowCount + ' Low</span>';
-        html += '</div></div></div>';
-
-        html += '<div class="card-body p-0 location-body show" id="loc-body-' + locIndex + '">';
-
-        // Table headers
-        html += '<div class="task-row bg-light" style="font-weight: 600; font-size: 12px; padding: 8px 12px;">';
-        html += '<div class="row align-items-center">';
-        html += '<div class="col-md-3">Task / Source</div>';
-        html += '<div class="col-md-2">Scheduled Date</div>';
-        html += '<div class="col-md-2">Time</div>';
-        html += '<div class="col-md-2">Status</div>';
-        html += '<div class="col-md-3 text-end">Actions</div>';
-        html += '</div></div>';
-
-        locTasks.forEach(function(task) {
-          var priorityClass = 'priority-' + (task.priority || 'medium').toLowerCase();
-          var statusClass = getStatusClass(task.status);
-
-          html += '<div class="task-row ' + priorityClass + '">';
-          html += '<div class="row align-items-center">';
-
-          // Task Type & Source
-          html += '<div class="col-md-3">';
-          html += '<div class="task-type" style="font-weight: 500;">' + (task.taskType || 'Task') + '</div>';
-          html += '<div class="task-source"><i class="bi bi-box-arrow-in-right"></i> ' + (task.source || 'Unknown') + '</div>';
-          if (task.employee) html += '<div class="text-muted small">' + task.employee + '</div>';
-          html += '</div>';
-
-          // Scheduled Date (editable)
-          html += '<div class="col-md-2">';
-          html += '<input type="date" class="date-input" value="' + (task.scheduledDate || '') + '" onchange="updateTaskDate(' + task._originalIndex + ', this.value, this)">';
-          html += '</div>';
-
-          // Time
-          html += '<div class="col-md-2">';
-          if (task.startTime) {
-            html += '<span class="task-date">' + task.startTime;
-            if (task.endTime) html += ' - ' + task.endTime;
-            html += '</span>';
-          } else {
-            html += '<span class="text-muted small">No time</span>';
-          }
-          html += '</div>';
-
-          // Status
-          html += '<div class="col-md-2">';
-          html += '<span class="status-badge ' + statusClass + '">' + (task.status || 'Pending') + '</span>';
-          html += '</div>';
-
-          // Actions
-          html += '<div class="col-md-3 text-end">';
-          html += '<button class="btn btn-outline-success btn-sm me-1" onclick="markComplete(' + task._originalIndex + ')" title="Mark Complete"><i class="bi bi-check-lg"></i></button>';
-          if (task.source === 'Manual Tasks') {
-            html += '<button class="btn btn-outline-danger btn-sm" onclick="deleteTask(' + task._originalIndex + ')" title="Delete"><i class="bi bi-trash"></i></button>';
-          }
-          html += '</div>';
-
-          html += '</div>'; // row
-
-          // Notes row
-          if (task.notes) {
-            html += '<div class="text-muted small mt-1"><i class="bi bi-info-circle"></i> ' + task.notes + '</div>';
-          }
-
-          html += '</div>'; // task-row
+      baseLocations.forEach(function(baseLocation, locIndex) {
+        var foremanGroups = tasksByBaseLocation[baseLocation];
+        var foremen = Object.keys(foremanGroups).sort(function(a, b) {
+          if (a === 'Unassigned') return 1;
+          if (b === 'Unassigned') return -1;
+          return a.localeCompare(b);
         });
 
-        html += '</div></div>'; // card-body and card
+        // Count totals for this location
+        var totalTasks = 0;
+        var highCount = 0, medCount = 0, lowCount = 0;
+        foremen.forEach(function(f) {
+          var categories = foremanGroups[f];
+          Object.keys(categories).forEach(function(cat) {
+            categories[cat].forEach(function(t) {
+              totalTasks++;
+              if (t.priority === 'High') highCount++;
+              else if (t.priority === 'Medium') medCount++;
+              else lowCount++;
+            });
+          });
+        });
+
+        html += '<div class="card mb-2">';
+        html += '<div class="card-header location-header" style="cursor: pointer; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">';
+        html += '<div class="d-flex justify-content-between align-items-center">';
+        var isOpen = openLocationGroups[locIndex] === true;
+        html += '<div onclick="toggleLocationGroup(' + locIndex + ')" style="flex: 1;"><i class="bi ' + (isOpen ? 'bi-chevron-down' : 'bi-chevron-right') + ' me-2" id="loc-chevron-' + locIndex + '"></i>';
+        html += '<i class="bi bi-geo-alt me-1"></i><strong>' + baseLocation + '</strong>';
+        html += '<span class="badge bg-white text-dark ms-2" style="opacity: 0.9;">' + totalTasks + ' tasks</span></div>';
+        html += '<div class="d-flex align-items-center">';
+        html += '<button class="btn btn-sm btn-light bulk-edit-btn me-2" onclick="event.stopPropagation(); toggleLocationEdit(' + locIndex + ', \'' + escapeHtml(baseLocation) + '\')" title="Edit all tasks for this location"><i class="bi bi-pencil-square"></i> Bulk Edit</button>';
+        if (highCount > 0) html += '<span class="badge me-1" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3);">' + highCount + ' High</span>';
+        if (medCount > 0) html += '<span class="badge me-1" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3);">' + medCount + ' Med</span>';
+        if (lowCount > 0) html += '<span class="badge" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3);">' + lowCount + ' Low</span>';
+        html += '</div></div></div>';
+
+        // Location body - respect saved open/closed state
+        html += '<div class="card-body p-0 location-body" id="loc-body-' + locIndex + '" style="display: ' + (isOpen ? 'block' : 'none') + ';">';
+
+        // Bulk Edit Section (hidden by default)
+        html += '<div class="location-edit-section" id="loc-edit-' + locIndex + '" style="display: none;">';
+        html += '<div class="d-flex justify-content-between align-items-center mb-2">';
+        html += '<strong><i class="bi bi-pencil-square text-primary"></i> Bulk Edit: ' + baseLocation + '</strong>';
+        html += '<button class="btn btn-sm btn-outline-secondary" onclick="toggleLocationEdit(' + locIndex + ')"><i class="bi bi-x"></i></button>';
+        html += '</div>';
+        html += '<div class="location-edit-row">';
+        html += '<div><label class="form-label">Set Date for All</label><input type="date" class="form-control form-control-sm" id="bulk-date-' + locIndex + '" style="width: 140px;"></div>';
+        html += '<div><label class="form-label">Start Time</label><input type="time" class="form-control form-control-sm" id="bulk-start-' + locIndex + '" style="width: 110px;"></div>';
+        html += '<div><label class="form-label">End Time</label><input type="time" class="form-control form-control-sm" id="bulk-end-' + locIndex + '" style="width: 110px;"></div>';
+        html += '<div class="d-flex align-items-end"><button class="btn btn-primary btn-sm" onclick="applyBulkEdit(' + locIndex + ', \'' + escapeHtml(baseLocation) + '\')"><i class="bi bi-check-lg"></i> Apply to All</button></div>';
+        html += '</div>';
+        html += '<div class="text-muted small mt-2"><i class="bi bi-info-circle"></i> This will update the date and time for all ' + totalTasks + ' tasks at this location.</div>';
+        html += '</div>';
+
+        // Render each foreman group
+        foremen.forEach(function(foreman, foremanIndex) {
+          var categoryGroups = foremanGroups[foreman];
+
+          // Count total tasks for this foreman
+          var foremanTaskCount = 0;
+          Object.keys(categoryGroups).forEach(function(cat) {
+            foremanTaskCount += categoryGroups[cat].length;
+          });
+
+          // Show foreman sub-header
+          if (foremen.length > 1 || foreman !== 'Unassigned') {
+            html += '<div class="foreman-header" style="background: #e8eaed; padding: 10px 16px; border-bottom: 1px solid #dadce0;">';
+            html += '<i class="bi bi-person-badge me-2" style="color: #667eea;"></i>';
+            html += '<strong>' + foreman + '</strong>';
+            html += '<span class="badge bg-secondary ms-2">' + foremanTaskCount + ' task(s)</span>';
+            html += '</div>';
+          }
+
+          // Table headers
+          html += '<div class="task-row bg-light" style="font-weight: 600; font-size: 12px; padding: 8px 12px;">';
+          html += '<div class="row align-items-center">';
+          html += '<div class="col-md-3">Task / Source</div>';
+          html += '<div class="col-md-2">Scheduled Date</div>';
+          html += '<div class="col-md-2">Start / End Time</div>';
+          html += '<div class="col-md-2">Status</div>';
+          html += '<div class="col-md-3 text-end">Actions</div>';
+          html += '</div></div>';
+
+          // Render each category in order: Training, Rubber Changes, Expiring Certs, Other
+          categoryOrder.forEach(function(category) {
+            var categoryTasks = categoryGroups[category];
+            if (!categoryTasks || categoryTasks.length === 0) return;
+
+            // Sort tasks by employee name within category
+            categoryTasks.sort(function(a, b) {
+              var empA = (a.employee || '').toLowerCase();
+              var empB = (b.employee || '').toLowerCase();
+              return empA.localeCompare(empB);
+            });
+
+            // Category sub-header
+            var icon = categoryIcons[category] || 'bi-list';
+            var color = categoryColors[category] || '#5f6368';
+            html += '<div class="category-subheader" style="background: #f8f9fa; padding: 6px 16px; border-bottom: 1px solid #dadce0; font-size: 12px; margin-left: 20px;">';
+            html += '<i class="bi ' + icon + ' me-1" style="color: ' + color + ';"></i>';
+            html += '<strong>' + category + '</strong>';
+            html += '<span class="badge ms-2" style="background: ' + color + '; color: white;">' + categoryTasks.length + '</span>';
+            html += '</div>';
+
+            categoryTasks.forEach(function(task) {
+              html += renderTaskRow(task);
+            });
+          });
+        });
+
+        html += '</div></div>'; // location-body and card
       });
 
       container.innerHTML = html;
+    }
+
+    // Helper function to render a single task row
+    function renderTaskRow(task) {
+      var priorityClass = 'priority-' + (task.priority || 'medium').toLowerCase();
+      var statusClass = getStatusClass(task.status);
+      var displayTaskType = formatTaskType(task);
+      var html = '';
+
+      html += '<div class="task-row ' + priorityClass + '">';
+      html += '<div class="row align-items-center">';
+
+      // Task Type & Source
+      html += '<div class="col-md-3">';
+      html += '<div class="task-type" style="font-weight: 500;">' + displayTaskType + '</div>';
+      html += '<div class="task-source"><i class="bi bi-box-arrow-in-right"></i> ' + (task.source || 'Unknown') + '</div>';
+      if (task.employee) html += '<div class="text-muted small"><i class="bi bi-person"></i> ' + task.employee + '</div>';
+      html += '</div>';
+
+      // Scheduled Date (editable)
+      html += '<div class="col-md-2">';
+      html += '<input type="date" class="date-input" value="' + (task.scheduledDate || '') + '" onchange="updateTaskDate(' + task._originalIndex + ', this.value, this)">';
+      html += '</div>';
+
+      // Time (editable start and end)
+      html += '<div class="col-md-2">';
+      html += '<div class="d-flex gap-1 align-items-center">';
+      html += '<input type="time" class="time-input" value="' + (task.startTime || '') + '" onchange="updateTaskTime(' + task._originalIndex + ', \'start\', this.value, this)" placeholder="Start">';
+      html += '<span class="text-muted">-</span>';
+      html += '<input type="time" class="time-input" value="' + (task.endTime || '') + '" onchange="updateTaskTime(' + task._originalIndex + ', \'end\', this.value, this)" placeholder="End">';
+      html += '</div>';
+      html += '</div>';
+
+      // Status
+      html += '<div class="col-md-2">';
+      html += '<span class="status-badge ' + statusClass + '">' + (task.status || 'Pending') + '</span>';
+      html += '</div>';
+
+      // Actions
+      html += '<div class="col-md-3 text-end">';
+
+      // Add to checklist button for 1st Aid and CPR tasks
+      var taskTypeLower = (task.taskType || '').toLowerCase();
+      var itemTypeLower = (task.itemType || '').toLowerCase();
+      var isTrainingCert = taskTypeLower.indexOf('1st aid') !== -1 ||
+                           taskTypeLower.indexOf('first aid') !== -1 ||
+                           taskTypeLower.indexOf('cpr') !== -1 ||
+                           itemTypeLower.indexOf('1st aid') !== -1 ||
+                           itemTypeLower.indexOf('first aid') !== -1 ||
+                           itemTypeLower.indexOf('cpr') !== -1;
+
+      if (isTrainingCert) {
+        html += '<button class="btn btn-outline-primary btn-sm me-1" onclick="event.stopPropagation(); addToChecklist(' + task._originalIndex + ')" title="Add to My Checklist"><i class="bi bi-plus-circle"></i></button>';
+      }
+
+      html += '<button class="btn btn-outline-success btn-sm me-1" onclick="event.stopPropagation(); markComplete(' + task._originalIndex + ')" title="Mark Complete"><i class="bi bi-check-lg"></i></button>';
+      if (task.source === 'Manual Tasks') {
+        html += '<button class="btn btn-outline-danger btn-sm" onclick="event.stopPropagation(); deleteTask(' + task._originalIndex + ')" title="Delete"><i class="bi bi-trash"></i></button>';
+      }
+      html += '</div>';
+
+      html += '</div>'; // row
+
+      // Notes row
+      if (task.notes) {
+        html += '<div class="text-muted small mt-1"><i class="bi bi-info-circle"></i> ' + task.notes + '</div>';
+      }
+
+      html += '</div>'; // task-row
+      return html;
     }
 
     function getStatusClass(status) {
@@ -570,16 +984,17 @@
     function toggleLocationGroup(locIndex) {
       var body = document.getElementById('loc-body-' + locIndex);
       var chevron = document.getElementById('loc-chevron-' + locIndex);
-      if (body.classList.contains('show')) {
-        body.classList.remove('show');
-        body.style.display = 'none';
-        chevron.className = 'bi bi-chevron-right me-2';
-      } else {
-        body.classList.add('show');
+      if (body.style.display === 'none') {
         body.style.display = 'block';
         chevron.className = 'bi bi-chevron-down me-2';
+        openLocationGroups[locIndex] = true;
+      } else {
+        body.style.display = 'none';
+        chevron.className = 'bi bi-chevron-right me-2';
+        openLocationGroups[locIndex] = false;
       }
     }
+
 
     function updateTaskDate(index, newDate, inputElement) {
       // Update local data immediately
@@ -588,12 +1003,11 @@
       task.scheduledDate = newDate;
 
       // Track the change for batch saving
-      pendingDateChanges[index] = {
-        index: index,
-        task: task,
-        oldDate: oldDate,
-        newDate: newDate
-      };
+      if (!pendingDateChanges[index]) {
+        pendingDateChanges[index] = { index: index, task: task };
+      }
+      pendingDateChanges[index].oldDate = oldDate;
+      pendingDateChanges[index].newDate = newDate;
 
       // Mark input as changed
       if (inputElement) {
@@ -606,6 +1020,119 @@
       // Show unsaved indicator
       setUnsaved(true);
       showToast('Date changed - click Save to apply');
+    }
+
+    function updateTaskTime(index, timeType, newTime, inputElement) {
+      // Update local data immediately
+      var task = allTasks[index];
+
+      if (timeType === 'start') {
+        task.startTime = newTime;
+      } else {
+        task.endTime = newTime;
+      }
+
+      // Track the change for batch saving
+      if (!pendingDateChanges[index]) {
+        pendingDateChanges[index] = { index: index, task: task };
+      }
+      pendingDateChanges[index].startTime = task.startTime;
+      pendingDateChanges[index].endTime = task.endTime;
+
+      // Mark input as changed
+      if (inputElement) {
+        inputElement.classList.add('changed');
+      }
+
+      // Show unsaved indicator
+      setUnsaved(true);
+      showToast('Time changed - click Save to apply');
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function toggleLocationEdit(locIndex, locationName) {
+      var editSection = document.getElementById('loc-edit-' + locIndex);
+      var body = document.getElementById('loc-body-' + locIndex);
+
+      // Make sure location is expanded
+      if (body.style.display === 'none') {
+        body.style.display = 'block';
+        var chevron = document.getElementById('loc-chevron-' + locIndex);
+        if (chevron) chevron.className = 'bi bi-chevron-down me-2';
+        openLocationGroups[locIndex] = true;
+      }
+
+      if (editSection.style.display === 'none') {
+        editSection.style.display = 'block';
+      } else {
+        editSection.style.display = 'none';
+      }
+    }
+
+    function applyBulkEdit(locIndex, locationName) {
+      var dateInput = document.getElementById('bulk-date-' + locIndex);
+      var startInput = document.getElementById('bulk-start-' + locIndex);
+      var endInput = document.getElementById('bulk-end-' + locIndex);
+
+      var newDate = dateInput ? dateInput.value : '';
+      var newStart = startInput ? startInput.value : '';
+      var newEnd = endInput ? endInput.value : '';
+
+      if (!newDate && !newStart && !newEnd) {
+        showToast('Please enter at least one value to apply', 'error');
+        return;
+      }
+
+      var updatedCount = 0;
+
+      // Find all tasks at this location and update them
+      allTasks.forEach(function(task, index) {
+        // Parse location to get base location
+        var taskLoc = task.location || '';
+        var match = taskLoc.match(/^([^(]+)/);
+        var baseTaskLoc = match ? match[1].trim() : taskLoc.trim();
+
+        if (baseTaskLoc === locationName) {
+          // Update task
+          if (newDate) {
+            task.scheduledDate = newDate;
+          }
+          if (newStart) {
+            task.startTime = newStart;
+          }
+          if (newEnd) {
+            task.endTime = newEnd;
+          }
+
+          // Track for saving
+          if (!pendingDateChanges[index]) {
+            pendingDateChanges[index] = { index: index, task: task };
+          }
+          pendingDateChanges[index].newDate = task.scheduledDate;
+          pendingDateChanges[index].startTime = task.startTime;
+          pendingDateChanges[index].endTime = task.endTime;
+
+          updatedCount++;
+        }
+      });
+
+      if (updatedCount > 0) {
+        setUnsaved(true);
+        renderTasks(allTasks);
+        renderCalendar();
+        showToast('Updated ' + updatedCount + ' task(s) - click Save to apply');
+
+        // Clear bulk edit inputs
+        if (dateInput) dateInput.value = '';
+        if (startInput) startInput.value = '';
+        if (endInput) endInput.value = '';
+      } else {
+        showToast('No tasks found for this location', 'error');
+      }
     }
 
     function markComplete(index) {
@@ -759,7 +1286,267 @@
       setTimeout(function() { toast.remove(); }, 3000);
     }
 
+    // ================== PERSONAL CHECKLIST FUNCTIONS ==================
+    function isTaskInChecklist(task) {
+      return personalChecklist.some(function(item) {
+        return item.employee === task.employee &&
+               item.taskType === task.taskType &&
+               item.itemType === task.itemType;
+      });
+    }
+
+    function addToChecklist(index) {
+      var task = allTasks[index];
+      if (!isTaskInChecklist(task)) {
+        var checklistItem = {
+          id: Date.now(),
+          employee: task.employee || '',
+          taskType: task.taskType || '',
+          itemType: task.itemType || '',
+          location: task.location || '',
+          scheduledDate: task.scheduledDate || '',
+          source: task.source || '',
+          subject: 'Add to upcoming training',
+          addedDate: new Date().toISOString().split('T')[0],
+          completed: false
+        };
+        personalChecklist.push(checklistItem);
+        saveChecklistToStorage();
+        updateChecklistBadge();
+        renderPersonalChecklist();
+        renderTasks(allTasks); // Re-render to remove from foreman's list
+        showToast('✓ Moved to your personal checklist');
+      }
+    }
+
+    function removeFromChecklist(index) {
+      var task = allTasks[index];
+      personalChecklist = personalChecklist.filter(function(item) {
+        return !(item.employee === task.employee &&
+                 item.taskType === task.taskType &&
+                 item.itemType === task.itemType);
+      });
+      saveChecklistToStorage();
+      updateChecklistBadge();
+      renderPersonalChecklist();
+      renderTasks(allTasks); // Re-render to show back in foreman's list
+      showToast('Returned to foreman\'s checklist');
+    }
+
+    function removeChecklistItemById(id) {
+      personalChecklist = personalChecklist.filter(function(item) {
+        return item.id !== id;
+      });
+      saveChecklistToStorage();
+      updateChecklistBadge();
+      renderPersonalChecklist();
+      renderTasks(allTasks); // Re-render to show back in foreman's list
+      showToast('Returned to foreman\'s checklist');
+    }
+
+    function toggleChecklistItemComplete(id) {
+      personalChecklist.forEach(function(item) {
+        if (item.id === id) {
+          item.completed = !item.completed;
+        }
+      });
+      saveChecklistToStorage();
+      renderPersonalChecklist();
+    }
+
+    function saveChecklistToStorage() {
+      try {
+        localStorage.setItem('rubberTracker_personalChecklist', JSON.stringify(personalChecklist));
+      } catch (e) {
+        console.log('Could not save to localStorage:', e);
+      }
+    }
+
+    function loadChecklistFromStorage() {
+      try {
+        var stored = localStorage.getItem('rubberTracker_personalChecklist');
+        if (stored) {
+          personalChecklist = JSON.parse(stored);
+        }
+      } catch (e) {
+        console.log('Could not load from localStorage:', e);
+        personalChecklist = [];
+      }
+      updateChecklistBadge();
+    }
+
+    function updateChecklistBadge() {
+      var badge = document.getElementById('checklistBadge');
+      var countSpan = document.getElementById('checklistCount');
+      var count = personalChecklist.length;
+
+      if (badge) {
+        if (count > 0) {
+          badge.textContent = count;
+          badge.style.display = 'inline';
+        } else {
+          badge.style.display = 'none';
+        }
+      }
+
+      if (countSpan) {
+        countSpan.textContent = count + ' item' + (count !== 1 ? 's' : '');
+      }
+    }
+
+    function renderPersonalChecklist() {
+      var container = document.getElementById('checklistItems');
+      var emptyState = document.getElementById('emptyChecklist');
+
+      if (personalChecklist.length === 0) {
+        container.style.display = 'none';
+        emptyState.style.display = 'block';
+        return;
+      }
+
+      container.style.display = 'block';
+      emptyState.style.display = 'none';
+
+      var html = '<div class="list-group">';
+
+      personalChecklist.forEach(function(item) {
+        var completedClass = item.completed ? 'list-group-item-success' : '';
+        var strikethrough = item.completed ? 'text-decoration: line-through;' : '';
+
+        html += '<div class="list-group-item ' + completedClass + '">';
+        html += '<div class="d-flex justify-content-between align-items-start">';
+        html += '<div class="form-check">';
+        html += '<input class="form-check-input" type="checkbox" ' + (item.completed ? 'checked' : '') + ' onchange="toggleChecklistItemComplete(' + item.id + ')">';
+        html += '<label class="form-check-label" style="' + strikethrough + '">';
+        html += '<strong>' + (item.title || item.employee || 'Unknown Item') + '</strong>';
+        html += '</label>';
+        html += '</div>';
+        html += '<button class="btn btn-outline-danger btn-sm" onclick="removeChecklistItemById(' + item.id + ')" title="Remove"><i class="bi bi-x-lg"></i></button>';
+        html += '</div>';
+
+        html += '<div class="ms-4 mt-1">';
+        if (item.taskType || item.itemType) {
+          html += '<div class="text-muted small"><i class="bi bi-card-checklist"></i> ' + (item.taskType || item.itemType || 'Task') + '</div>';
+        }
+        if (item.notes) {
+          html += '<div class="text-muted small"><i class="bi bi-info-circle"></i> ' + item.notes + '</div>';
+        }
+        if (item.location) {
+          html += '<div class="text-muted small"><i class="bi bi-geo-alt"></i> ' + item.location + '</div>';
+        }
+        if (item.scheduledDate) {
+          html += '<div class="text-muted small"><i class="bi bi-calendar"></i> Scheduled: ' + item.scheduledDate;
+          if (item.startTime) {
+            html += ' at ' + item.startTime;
+            if (item.endTime) html += ' - ' + item.endTime;
+          }
+          html += '</div>';
+        }
+        html += '<div class="text-muted small"><i class="bi bi-plus-circle"></i> Added: ' + item.addedDate + '</div>';
+        html += '</div>';
+
+        html += '</div>';
+      });
+
+      html += '</div>';
+      container.innerHTML = html;
+    }
+
+    // ================== MANUAL ITEM FUNCTIONS ==================
+    function showAddManualItemModal() {
+      // Set default date to today
+      var today = new Date().toISOString().split('T')[0];
+      document.getElementById('manualTaskDate').value = today;
+      document.getElementById('manualTaskTitle').value = '';
+      document.getElementById('manualTaskNotes').value = '';
+      document.getElementById('manualTaskLocation').value = '';
+      document.getElementById('manualTaskStartTime').value = '';
+      document.getElementById('manualTaskEndTime').value = '';
+      document.getElementById('manualTaskPriority').value = 'Medium';
+      document.getElementById('manualTaskAddToCalendar').checked = true;
+
+      var modal = new bootstrap.Modal(document.getElementById('addManualItemModal'));
+      modal.show();
+    }
+
+    function saveManualItem() {
+      var title = document.getElementById('manualTaskTitle').value.trim();
+      var notes = document.getElementById('manualTaskNotes').value.trim();
+      var scheduledDate = document.getElementById('manualTaskDate').value;
+      var location = document.getElementById('manualTaskLocation').value.trim();
+      var startTime = document.getElementById('manualTaskStartTime').value;
+      var endTime = document.getElementById('manualTaskEndTime').value;
+      var priority = document.getElementById('manualTaskPriority').value;
+      var addToCalendar = document.getElementById('manualTaskAddToCalendar').checked;
+
+      if (!title) {
+        alert('Please enter a task title');
+        return;
+      }
+
+      // Create checklist item
+      var checklistItem = {
+        id: Date.now(),
+        title: title,
+        taskType: 'Manual Task',
+        notes: notes,
+        location: location,
+        scheduledDate: scheduledDate,
+        startTime: startTime,
+        endTime: endTime,
+        priority: priority,
+        addedDate: new Date().toISOString().split('T')[0],
+        completed: false,
+        isManual: true
+      };
+
+      // Add to personal checklist
+      personalChecklist.push(checklistItem);
+      saveChecklistToStorage();
+      updateChecklistBadge();
+      renderPersonalChecklist();
+
+      // Also add to main task list if checkbox is checked
+      if (addToCalendar) {
+        var manualTask = {
+          taskType: title,
+          source: 'Manual Tasks',
+          employee: '',
+          location: location || 'No Location',
+          scheduledDate: scheduledDate,
+          startTime: startTime,
+          endTime: endTime,
+          priority: priority,
+          status: 'Pending',
+          notes: notes,
+          itemType: 'Manual'
+        };
+
+        // Save to server
+        google.script.run
+          .withSuccessHandler(function(result) {
+            // Add to local allTasks array
+            manualTask._originalIndex = allTasks.length;
+            allTasks.push(manualTask);
+            renderTasks(allTasks);
+            renderCalendar();
+            showToast('✓ Item added to checklist and calendar!');
+          })
+          .withFailureHandler(function(error) {
+            showToast('Added to checklist. Error adding to calendar: ' + error, 'error');
+          })
+          .addManualScheduleTask(manualTask);
+      } else {
+        showToast('✓ Item added to your checklist!');
+      }
+
+      // Close modal
+      var modal = bootstrap.Modal.getInstance(document.getElementById('addManualItemModal'));
+      modal.hide();
+    }
+
     // Load tasks on page load
+    loadChecklistFromStorage();
     loadTasks();
   </script>
 </body>

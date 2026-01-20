@@ -57,6 +57,58 @@
     .date-input-small.changed { background: #fff3cd; border-color: #ffc107; }
     .unsaved-indicator { display: none; color: #dc3545; font-size: 12px; margin-left: 8px; }
     .unsaved-indicator.show { display: inline; }
+    .crew-visit-table { font-size: 12px; }
+    .crew-visit-table th { font-size: 11px; background: #f8f9fa; position: sticky; top: 0; z-index: 1; }
+    .crew-visit-table td { vertical-align: middle; padding: 6px 8px !important; }
+    .crew-visit-table input, .crew-visit-table select { font-size: 11px; padding: 2px 6px; }
+    .crew-visit-table .form-control-sm { height: 28px; }
+    .crew-visit-table .form-select-sm { height: 28px; }
+    .crew-input { width: 70px; }
+    .crew-input-date { width: 120px; }
+    .training-config-table { font-size: 12px; }
+    .training-config-table th { font-size: 11px; background: #e8f5e9; position: sticky; top: 0; z-index: 1; }
+    .training-config-table td { vertical-align: middle; padding: 6px 8px !important; }
+    .training-config-table input, .training-config-table select { font-size: 11px; padding: 2px 6px; }
+    .training-config-table .form-control-sm { height: 28px; }
+    .training-input-topic { width: 100%; min-width: 200px; }
+    .training-input-hours { width: 60px; }
+    .training-input-status { width: 70px; }
+    .completion-bar { height: 6px; background: #e0e0e0; border-radius: 3px; overflow: hidden; }
+    .completion-bar-fill { height: 100%; background: #34a853; transition: width 0.3s; }
+    .training-tracking-table { font-size: 11px; }
+    .training-tracking-table th { font-size: 10px; background: #fff3e0; position: sticky; top: 0; z-index: 1; white-space: nowrap; }
+    .training-tracking-table td { vertical-align: middle; padding: 4px 6px !important; }
+    .training-tracking-table .form-control-sm, .training-tracking-table .form-select-sm { font-size: 10px; padding: 1px 4px; height: 24px; }
+    .status-pending { background: #fff3e0; }
+    .status-complete { background: #e8f5e9; }
+    .status-overdue { background: #ffebee; }
+    .status-na { background: #f5f5f5; }
+    .training-tracking-table input[type="number"] { width: 50px; }
+    .training-tracking-table input[type="date"] { width: 110px; }
+    .attendees-cell { cursor: help; position: relative; }
+    .attendees-cell:hover { background: #e3f2fd; }
+    .crew-tooltip {
+      position: absolute;
+      background: #333;
+      color: white;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 11px;
+      z-index: 1000;
+      max-width: 250px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      white-space: normal;
+      line-height: 1.4;
+    }
+    .crew-tooltip::before {
+      content: '';
+      position: absolute;
+      top: -6px;
+      left: 20px;
+      border-width: 0 6px 6px 6px;
+      border-style: solid;
+      border-color: transparent transparent #333 transparent;
+    }
   </style>
 </head>
 <body>
@@ -79,18 +131,13 @@
       </button>
     </li>
     <li class="nav-item" role="presentation">
-      <button class="nav-link" id="priorities-tab" data-bs-toggle="tab" data-bs-target="#priorities" type="button">
-        <i class="bi bi-flag"></i> Priorities
-      </button>
-    </li>
-    <li class="nav-item" role="presentation">
       <button class="nav-link" id="schedule-tab" data-bs-toggle="tab" data-bs-target="#schedule" type="button">
         <i class="bi bi-clock"></i> Schedule Settings
       </button>
     </li>
     <li class="nav-item" role="presentation">
-      <button class="nav-link" id="notifications-tab" data-bs-toggle="tab" data-bs-target="#notifications" type="button">
-        <i class="bi bi-bell"></i> Notifications
+      <button class="nav-link" id="tasksources-tab" data-bs-toggle="tab" data-bs-target="#tasksources" type="button">
+        <i class="bi bi-list-check"></i> Task Sources
       </button>
     </li>
     <li class="nav-item" role="presentation">
@@ -127,39 +174,7 @@
       </div>
     </div>
 
-    <!-- Priorities Tab -->
-    <div class="tab-pane fade" id="priorities" role="tabpanel">
-      <div class="config-section">
-        <h3><i class="bi bi-flag"></i> Priority Settings</h3>
-        <p class="text-muted mb-3">Configure how tasks are prioritized and sorted.</p>
-
-        <div class="priority-config">
-          <div class="priority-card priority-high">
-            <h5>🔴 High Priority</h5>
-            <div class="form-group mt-3">
-              <label class="form-label">Max Days Before Due</label>
-              <input type="number" class="form-control form-control-sm" id="highPriorityDays" value="3">
-            </div>
-          </div>
-          <div class="priority-card priority-medium">
-            <h5>🟡 Medium Priority</h5>
-            <div class="form-group mt-3">
-              <label class="form-label">Max Days Before Due</label>
-              <input type="number" class="form-control form-control-sm" id="mediumPriorityDays" value="7">
-            </div>
-          </div>
-          <div class="priority-card priority-low">
-            <h5>🟢 Low Priority</h5>
-            <div class="form-group mt-3">
-              <label class="form-label">Max Days Before Due</label>
-              <input type="number" class="form-control form-control-sm" id="lowPriorityDays" value="14">
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Schedule Settings Tab -->
+    <!-- Schedule Settings Tab (now includes Priority Settings) -->
     <div class="tab-pane fade" id="schedule" role="tabpanel">
       <div class="config-section">
         <h3><i class="bi bi-clock"></i> Schedule Settings</h3>
@@ -206,41 +221,86 @@
           <label class="btn btn-outline-primary" for="day-sat">Sat</label>
         </div>
       </div>
-    </div>
 
-    <!-- Notifications Tab -->
-    <div class="tab-pane fade" id="notifications" role="tabpanel">
+      <!-- Priority Settings (merged from old Priorities tab) -->
       <div class="config-section">
-        <h3><i class="bi bi-bell"></i> Notification Settings</h3>
-        <p class="text-muted mb-3">Configure email notifications and reminders.</p>
+        <h3><i class="bi bi-flag"></i> Priority Thresholds</h3>
+        <p class="text-muted mb-3">Configure how tasks are prioritized based on due date.</p>
 
-        <div class="form-check form-switch mb-3">
-          <input class="form-check-input" type="checkbox" id="enableEmailNotifications" checked>
-          <label class="form-check-label" for="enableEmailNotifications">Enable Email Notifications</label>
+        <div class="priority-config">
+          <div class="priority-card priority-high">
+            <h5>🔴 High Priority</h5>
+            <div class="form-group mt-3">
+              <label class="form-label">Max Days Before Due</label>
+              <input type="number" class="form-control form-control-sm" id="highPriorityDays" value="3">
+            </div>
+          </div>
+          <div class="priority-card priority-medium">
+            <h5>🟡 Medium Priority</h5>
+            <div class="form-group mt-3">
+              <label class="form-label">Max Days Before Due</label>
+              <input type="number" class="form-control form-control-sm" id="mediumPriorityDays" value="7">
+            </div>
+          </div>
+          <div class="priority-card priority-low">
+            <h5>🟢 Low Priority</h5>
+            <div class="form-group mt-3">
+              <label class="form-label">Max Days Before Due</label>
+              <input type="number" class="form-control form-control-sm" id="lowPriorityDays" value="14">
+            </div>
+          </div>
         </div>
+      </div>
 
-        <div class="form-check form-switch mb-3">
-          <input class="form-check-input" type="checkbox" id="dailyDigest" checked>
-          <label class="form-check-label" for="dailyDigest">Send Daily Task Digest</label>
-        </div>
+      <!-- Crew Visit Config -->
+      <div class="config-section">
+        <h3><i class="bi bi-truck"></i> Crew Visit Schedule</h3>
+        <p class="text-muted mb-3">Configure visit frequency, drive times, and priorities for each crew.</p>
 
         <div class="mb-3">
-          <label class="form-label">Daily Digest Time</label>
-          <input type="time" class="form-control" id="digestTime" value="07:00" style="max-width: 200px;">
+          <button class="btn btn-outline-primary btn-sm me-2" onclick="refreshCrewVisitConfig()">
+            <i class="bi bi-arrow-clockwise"></i> Refresh from Employees
+          </button>
+          <button class="btn btn-success btn-sm" onclick="saveCrewVisitConfig()">
+            <i class="bi bi-check-lg"></i> Save Changes
+          </button>
         </div>
 
-        <div class="mb-3">
-          <label class="form-label">Reminder Before Task (minutes)</label>
-          <input type="number" class="form-control" id="reminderMinutes" value="30" style="max-width: 200px;">
+        <div id="crewVisitContainer" style="max-height: 400px; overflow-y: auto;">
+          <div class="text-center py-3">
+            <div class="spinner-border spinner-border-sm text-primary"></div>
+            <p class="text-muted small mt-2">Loading crew visit config...</p>
+          </div>
         </div>
       </div>
     </div>
 
-    <!-- Expiring Certs Tab -->
-    <div class="tab-pane fade" id="certs" role="tabpanel">
+    <!-- Task Sources Tab (combined Training + Cert Types) -->
+    <div class="tab-pane fade" id="tasksources" role="tabpanel">
       <div class="config-section">
-        <h3><i class="bi bi-list-check"></i> 🎯 Create To Do Tasks For:</h3>
-        <p class="text-muted mb-3">Select which certification types should generate tasks in your To Do list.</p>
+        <h3><i class="bi bi-mortarboard"></i> 🎯 Training: Select Crews</h3>
+        <p class="text-muted mb-3">Select which crews should have training tasks in the To Do List.</p>
+
+        <div class="mb-3">
+          <button class="btn btn-outline-primary btn-sm me-2" onclick="selectAllCrews()">
+            <i class="bi bi-check-all"></i> Select All
+          </button>
+          <button class="btn btn-outline-secondary btn-sm" onclick="deselectAllCrews()">
+            <i class="bi bi-x-lg"></i> Deselect All
+          </button>
+        </div>
+
+        <div id="crewCheckboxes" class="row">
+          <div class="col-12 text-center">
+            <div class="spinner-border spinner-border-sm text-primary"></div>
+            <p class="text-muted small mt-2">Loading crews from Employees sheet...</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="config-section">
+        <h3><i class="bi bi-file-earmark-medical"></i> 🎯 Certifications: Select Types</h3>
+        <p class="text-muted mb-3">Select which certification types should generate tasks in the To Do List.</p>
         <div id="certTypeCheckboxes" class="row">
           <div class="col-12 text-center">
             <div class="spinner-border spinner-border-sm text-primary"></div>
@@ -248,6 +308,138 @@
           </div>
         </div>
       </div>
+
+      <div class="config-section">
+        <h3><i class="bi bi-info-circle"></i> How Task Sources Work</h3>
+        <div class="alert alert-info">
+          <i class="bi bi-lightbulb"></i> <strong>Your To Do List pulls from these sources:</strong>
+          <ul class="mb-0 mt-2">
+            <li><strong>Glove/Sleeve Swaps</strong> - Auto-detected from swap sheets (always included)</li>
+            <li><strong>Training Tasks</strong> - Only crews checked above appear in To Do</li>
+            <li><strong>Expiring Certs</strong> - Only cert types checked above appear in To Do</li>
+            <li><strong>Manual Tasks</strong> - Tasks you add manually (always included)</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="config-section">
+        <h3><i class="bi bi-people"></i> Crew Summary</h3>
+        <p class="text-muted mb-3">Overview of crews and their employee counts.</p>
+        <div id="crewSummary">
+          <div class="text-center py-3">
+            <div class="spinner-border spinner-border-sm text-primary"></div>
+            <p class="text-muted small mt-2">Loading crew data...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Training Completion Summary -->
+      <div class="config-section">
+        <h3><i class="bi bi-graph-up-arrow"></i> 📊 Training Completion Status</h3>
+        <p class="text-muted mb-3">Overall training completion progress for 2026.</p>
+
+        <div id="trainingCompletionSummary" class="row g-3 mb-3">
+          <div class="col-md-6">
+            <div class="p-3 rounded" style="background: #e8f5e9; border: 2px solid #4caf50;">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <strong class="text-success" id="currentMonthLabel">January</strong>
+                <span class="badge bg-success" id="currentMonthPercent">0%</span>
+              </div>
+              <div class="progress" style="height: 20px;">
+                <div class="progress-bar bg-success" id="currentMonthProgressBar" role="progressbar" style="width: 0%">0%</div>
+              </div>
+              <small class="text-muted mt-1 d-block"><span id="currentMonthComplete">0</span> of <span id="currentMonthTotal">0</span> crews completed</small>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="p-3 rounded" style="background: #e3f2fd; border: 2px solid #2196f3;">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <strong class="text-primary">Year-to-Date Progress</strong>
+                <span class="badge bg-primary" id="trainingOverallPercent">0%</span>
+              </div>
+              <div class="progress" style="height: 20px;">
+                <div class="progress-bar bg-primary" id="trainingProgressBar" role="progressbar" style="width: 0%">0%</div>
+              </div>
+              <small class="text-muted mt-1 d-block"><span id="yearCompleteCount">0</span> of <span id="yearTotalCount">0</span> total training sessions</small>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Training Config Section -->
+      <div class="config-section">
+        <h3><i class="bi bi-calendar-check"></i> 📅 Training Schedule (2026)</h3>
+        <p class="text-muted mb-3">Edit training topics, duration, and completion status for the year.</p>
+
+        <div class="mb-3">
+          <button class="btn btn-success btn-sm" onclick="saveTrainingConfigData()">
+            <i class="bi bi-check-lg"></i> Save Training Config
+          </button>
+        </div>
+
+        <div id="trainingConfigContainer" style="max-height: 400px; overflow-y: auto;">
+          <div class="text-center py-3">
+            <div class="spinner-border spinner-border-sm text-primary"></div>
+            <p class="text-muted small mt-2">Loading training config...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Training Tracking Section (per-crew completion) -->
+      <div class="config-section">
+        <h3><i class="bi bi-clipboard-check"></i> 📋 Training Tracking (By Crew)</h3>
+        <p class="text-muted mb-3">Track training completion for each crew. Status updates automatically when training is marked complete in To Do Schedule.</p>
+
+        <div class="row mb-3">
+          <div class="col-md-4">
+            <label class="form-label small">Filter by Month</label>
+            <select class="form-select form-select-sm" id="trainingMonthFilter" onchange="filterTrainingTracking()">
+              <option value="">All Months</option>
+              <option value="January">January</option>
+              <option value="February">February</option>
+              <option value="March">March</option>
+              <option value="April">April</option>
+              <option value="May">May</option>
+              <option value="June">June</option>
+              <option value="July">July</option>
+              <option value="August">August</option>
+              <option value="September">September</option>
+              <option value="October">October</option>
+              <option value="November">November</option>
+              <option value="December">December</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small">Filter by Status</label>
+            <select class="form-select form-select-sm" id="trainingStatusFilter" onchange="filterTrainingTracking()">
+              <option value="">All Statuses</option>
+              <option value="Pending">Pending</option>
+              <option value="Complete">Complete</option>
+              <option value="Overdue">Overdue</option>
+              <option value="N/A">N/A</option>
+            </select>
+          </div>
+          <div class="col-md-4 d-flex align-items-end">
+            <button class="btn btn-success btn-sm me-2" onclick="saveTrainingTrackingData()">
+              <i class="bi bi-check-lg"></i> Save Changes
+            </button>
+            <button class="btn btn-outline-secondary btn-sm" onclick="loadTrainingTrackingData()">
+              <i class="bi bi-arrow-clockwise"></i> Refresh
+            </button>
+          </div>
+        </div>
+
+        <div id="trainingTrackingContainer" style="max-height: 500px; overflow-y: auto;">
+          <div class="text-center py-3">
+            <div class="spinner-border spinner-border-sm text-primary"></div>
+            <p class="text-muted small mt-2">Loading training tracking data...</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Expiring Certs Tab (view/edit cert dates and status) -->
+    <div class="tab-pane fade" id="certs" role="tabpanel">
 
       <div class="config-section">
         <h3><i class="bi bi-bar-chart"></i> 📊 Certification Status Overview</h3>
@@ -396,6 +588,8 @@
     }
 
     function applyConfig() {
+      console.log('Applying config:', configData);
+
       if (configData.workStartTime) document.getElementById('workStartTime').value = configData.workStartTime;
       if (configData.workEndTime) document.getElementById('workEndTime').value = configData.workEndTime;
       if (configData.defaultDuration) document.getElementById('defaultDuration').value = configData.defaultDuration;
@@ -403,40 +597,116 @@
       if (configData.highPriorityDays) document.getElementById('highPriorityDays').value = configData.highPriorityDays;
       if (configData.mediumPriorityDays) document.getElementById('mediumPriorityDays').value = configData.mediumPriorityDays;
       if (configData.lowPriorityDays) document.getElementById('lowPriorityDays').value = configData.lowPriorityDays;
+
+      // Apply working days - first uncheck all, then check the saved ones
+      var allDays = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+      var savedDays = configData.workingDays || ['mon', 'tue', 'wed', 'thu', 'fri']; // Default to Mon-Fri
+
+      console.log('Applying working days:', savedDays);
+
+      allDays.forEach(function(day) {
+        var checkbox = document.getElementById('day-' + day);
+        if (checkbox) {
+          checkbox.checked = savedDays.indexOf(day) !== -1;
+        }
+      });
     }
 
     function saveConfig() {
+      // Get existing config to preserve notification settings (if any)
+      var existingConfig = {};
+
+      // Build config from existing form elements
       var config = {
         workStartTime: document.getElementById('workStartTime').value,
         workEndTime: document.getElementById('workEndTime').value,
-        defaultDuration: parseFloat(document.getElementById('defaultDuration').value),
-        bufferTime: parseInt(document.getElementById('bufferTime').value),
-        highPriorityDays: parseInt(document.getElementById('highPriorityDays').value),
-        mediumPriorityDays: parseInt(document.getElementById('mediumPriorityDays').value),
-        lowPriorityDays: parseInt(document.getElementById('lowPriorityDays').value),
-        enableEmailNotifications: document.getElementById('enableEmailNotifications').checked,
-        dailyDigest: document.getElementById('dailyDigest').checked,
-        digestTime: document.getElementById('digestTime').value,
-        reminderMinutes: parseInt(document.getElementById('reminderMinutes').value),
+        defaultDuration: parseFloat(document.getElementById('defaultDuration').value) || 1,
+        bufferTime: parseInt(document.getElementById('bufferTime').value) || 15,
+        highPriorityDays: parseInt(document.getElementById('highPriorityDays').value) || 3,
+        mediumPriorityDays: parseInt(document.getElementById('mediumPriorityDays').value) || 7,
+        lowPriorityDays: parseInt(document.getElementById('lowPriorityDays').value) || 14,
         locations: locations,
         workingDays: getWorkingDays()
       };
 
+      console.log('Saving config:', config);
+
+      var errors = [];
+
       // Save general config
       google.script.run
         .withSuccessHandler(function() {
-          // If there are cert date changes, save those too
-          if (Object.keys(certDateChanges).length > 0) {
-            saveCertDateChanges();
+          console.log('General config saved successfully');
+          // Save Crew Visit Config if there's data
+          if (crewVisitData && crewVisitData.length > 0) {
+            google.script.run
+              .withSuccessHandler(function() {
+                // Continue with training config
+                saveTrainingIfNeeded();
+              })
+              .withFailureHandler(function(error) {
+                errors.push('Crew Visit: ' + error);
+                saveTrainingIfNeeded();
+              })
+              .saveCrewVisitConfig(crewVisitData);
           } else {
-            setUnsaved(false);
-            showToast('Configuration saved successfully!', 'success');
+            saveTrainingIfNeeded();
           }
         })
         .withFailureHandler(function(error) {
+          console.error('Error saving config:', error);
           showToast('Error saving config: ' + error, 'error');
         })
         .saveToDoConfig(config);
+
+      function saveTrainingIfNeeded() {
+        // Save Training Config if there's data
+        if (trainingConfigData && trainingConfigData.length > 0) {
+          google.script.run
+            .withSuccessHandler(function() {
+              // Continue with training tracking
+              saveTrainingTrackingIfNeeded();
+            })
+            .withFailureHandler(function(error) {
+              errors.push('Training Config: ' + error);
+              saveTrainingTrackingIfNeeded();
+            })
+            .saveTrainingConfigData(trainingConfigData);
+        } else {
+          saveTrainingTrackingIfNeeded();
+        }
+      }
+
+      function saveTrainingTrackingIfNeeded() {
+        // Save Training Tracking if there's data
+        if (trainingTrackingData && trainingTrackingData.length > 0) {
+          google.script.run
+            .withSuccessHandler(function() {
+              finalizeSave();
+            })
+            .withFailureHandler(function(error) {
+              errors.push('Training Tracking: ' + error);
+              finalizeSave();
+            })
+            .saveTrainingTrackingData(trainingTrackingData);
+        } else {
+          finalizeSave();
+        }
+      }
+
+      function finalizeSave() {
+        // Handle cert date changes
+        if (Object.keys(certDateChanges).length > 0) {
+          saveCertDateChanges();
+        } else {
+          setUnsaved(false);
+          if (errors.length > 0) {
+            showToast('Saved with warnings: ' + errors.join('; '), 'warning');
+          } else {
+            showToast('All configuration saved successfully!', 'success');
+          }
+        }
+      }
     }
 
     function saveCertDateChanges() {
@@ -486,7 +756,7 @@
       setTimeout(function() { toast.remove(); }, 3000);
     }
 
-    // Load expiring certs config
+    // Load expiring certs config (just the cert type checkboxes for Task Sources tab)
     function loadExpiringCertsConfig() {
       google.script.run
         .withSuccessHandler(function(config) {
@@ -496,8 +766,6 @@
           document.getElementById('certTypeCheckboxes').innerHTML = '<div class="col-12"><div class="alert alert-danger">Error loading cert types: ' + error + '</div></div>';
         })
         .getExpiringCertsConfig();
-
-      loadEmployeeCertsData();
     }
 
     function renderCertTypeCheckboxes(allCertTypes, selectedCertTypes) {
@@ -680,10 +948,25 @@
       return str.replace(/'/g, "\\'").replace(/"/g, '\\"');
     }
 
-    function formatDateForInput(dateStr) {
-      if (!dateStr || dateStr === 'N/A' || dateStr === 'Non-Expiring') return '';
-      // Try to convert MM/DD/YYYY or other formats to YYYY-MM-DD
+    function formatDateForInput(dateVal) {
+      if (!dateVal || dateVal === 'N/A' || dateVal === 'Non-Expiring') return '';
+
       try {
+        // If it's a Date object (from Google Sheets)
+        if (dateVal instanceof Date || (typeof dateVal === 'object' && dateVal.getTime)) {
+          var d = new Date(dateVal);
+          if (!isNaN(d.getTime())) {
+            var year = d.getFullYear();
+            var month = String(d.getMonth() + 1).padStart(2, '0');
+            var day = String(d.getDate()).padStart(2, '0');
+            return year + '-' + month + '-' + day;
+          }
+        }
+
+        // If it's a string
+        var dateStr = String(dateVal);
+
+        // Try to convert MM/DD/YYYY or other formats to YYYY-MM-DD
         var parts = dateStr.split('/');
         if (parts.length === 3) {
           var month = parts[0].padStart(2, '0');
@@ -694,7 +977,18 @@
         }
         // If already in YYYY-MM-DD format
         if (dateStr.indexOf('-') !== -1) return dateStr.substring(0, 10);
-      } catch(e) {}
+
+        // Try parsing as ISO string (from JSON serialization)
+        var parsed = new Date(dateStr);
+        if (!isNaN(parsed.getTime())) {
+          var year = parsed.getFullYear();
+          var month = String(parsed.getMonth() + 1).padStart(2, '0');
+          var day = String(parsed.getDate()).padStart(2, '0');
+          return year + '-' + month + '-' + day;
+        }
+      } catch(e) {
+        console.log('formatDateForInput error:', e, dateVal);
+      }
       return '';
     }
 
@@ -743,11 +1037,702 @@
     // Load config on page load
     loadConfig();
 
-    // Load certs config when tab is shown
-    document.getElementById('certs-tab').addEventListener('shown.bs.tab', function() {
-      loadExpiringCertsConfig();
+    // Note: Tab event listeners are defined at the bottom of the script to ensure all functions exist
+
+    // ================== TRAINING CONFIG FUNCTIONS ==================
+    function loadTrainingConfig() {
+      google.script.run
+        .withSuccessHandler(function(config) {
+          renderCrewCheckboxes(config.crews, config.selectedCrews);
+          renderCrewSummary(config.crewDetails);
+        })
+        .withFailureHandler(function(error) {
+          document.getElementById('crewCheckboxes').innerHTML =
+            '<div class="col-12"><div class="alert alert-danger">Error loading training config: ' + error + '</div></div>';
+        })
+        .getTrainingConfig();
+    }
+
+    function renderCrewCheckboxes(allCrews, selectedCrews) {
+      var container = document.getElementById('crewCheckboxes');
+      var html = '';
+
+      if (!allCrews || allCrews.length === 0) {
+        container.innerHTML = '<div class="col-12"><p class="text-muted">No crews found in Employees sheet.</p></div>';
+        return;
+      }
+
+      allCrews.forEach(function(crew) {
+        var checked = selectedCrews.indexOf(crew.number) !== -1 ? 'checked' : '';
+        var safeId = 'crew-' + crew.number.replace(/[^a-zA-Z0-9]/g, '');
+
+        html += '<div class="col-md-4 col-sm-6 mb-2"><div class="form-check p-2 border rounded" style="background: ' + (checked ? '#e8f5e9' : '#fff') + ';">';
+        html += '<input class="form-check-input" type="checkbox" id="' + safeId + '" value="' + crew.number + '" ' + checked + ' onchange="saveCrewSelection()">';
+        html += '<label class="form-check-label" for="' + safeId + '">';
+        html += '<strong>' + crew.number + '</strong>';
+        if (crew.foreman) {
+          html += '<br><small class="text-muted">👷 ' + crew.foreman + '</small>';
+        }
+        html += '<br><small class="text-muted">📍 ' + (crew.location || 'Unknown') + ' • ' + crew.employeeCount + ' employees</small>';
+        html += '</label>';
+        html += '</div></div>';
+      });
+
+      container.innerHTML = html;
+    }
+
+    function renderCrewSummary(crewDetails) {
+      var container = document.getElementById('crewSummary');
+
+      if (!crewDetails || crewDetails.length === 0) {
+        container.innerHTML = '<p class="text-muted text-center">No crew data available.</p>';
+        return;
+      }
+
+      var html = '<table class="table table-sm table-hover">';
+      html += '<thead class="table-light"><tr><th>Crew #</th><th>Foreman</th><th>Location</th><th>Employees</th></tr></thead>';
+      html += '<tbody>';
+
+      crewDetails.forEach(function(crew) {
+        html += '<tr>';
+        html += '<td><strong>' + crew.number + '</strong></td>';
+        html += '<td>' + (crew.foreman || '-') + '</td>';
+        html += '<td>' + (crew.location || '-') + '</td>';
+        html += '<td><span class="badge bg-secondary">' + crew.employeeCount + '</span></td>';
+        html += '</tr>';
+      });
+
+      html += '</tbody></table>';
+      container.innerHTML = html;
+    }
+
+    function selectAllCrews() {
+      var checkboxes = document.querySelectorAll('#crewCheckboxes input[type="checkbox"]');
+      checkboxes.forEach(function(cb) { cb.checked = true; });
+      saveCrewSelection();
+    }
+
+    function deselectAllCrews() {
+      var checkboxes = document.querySelectorAll('#crewCheckboxes input[type="checkbox"]');
+      checkboxes.forEach(function(cb) { cb.checked = false; });
+      saveCrewSelection();
+    }
+
+    function saveCrewSelection() {
+      var selected = [];
+      var checkboxes = document.querySelectorAll('#crewCheckboxes input[type="checkbox"]');
+      checkboxes.forEach(function(cb) {
+        if (cb.checked) {
+          selected.push(cb.value);
+        }
+      });
+
+      // Update checkbox styling
+      checkboxes.forEach(function(cb) {
+        var container = cb.closest('.form-check');
+        if (container) {
+          container.style.background = cb.checked ? '#e8f5e9' : '#fff';
+        }
+      });
+
+      google.script.run
+        .withSuccessHandler(function() {
+          showToast('Crew selection saved (' + selected.length + ' crews selected)', 'success');
+        })
+        .withFailureHandler(function(error) {
+          showToast('Error saving: ' + error, 'error');
+        })
+        .saveTrainingConfig(selected);
+    }
+
+    // ================== CREW VISIT CONFIG FUNCTIONS ==================
+    var crewVisitData = [];
+
+    function loadCrewVisitConfig() {
+      google.script.run
+        .withSuccessHandler(function(data) {
+          crewVisitData = data || [];
+          renderCrewVisitTable(crewVisitData);
+        })
+        .withFailureHandler(function(error) {
+          document.getElementById('crewVisitContainer').innerHTML =
+            '<div class="alert alert-danger">Error loading crew visit config: ' + error + '</div>';
+        })
+        .getCrewVisitConfig();
+    }
+
+    function renderCrewVisitTable(crews) {
+      var container = document.getElementById('crewVisitContainer');
+
+      if (!crews || crews.length === 0) {
+        container.innerHTML = '<div class="alert alert-warning">No crews found. Click "Refresh from Employees" to populate.</div>';
+        return;
+      }
+
+      var html = '<table class="table table-sm table-hover crew-visit-table">';
+      html += '<thead><tr>';
+      html += '<th>Crew #</th>';
+      html += '<th>Location</th>';
+      html += '<th>Crew Lead</th>';
+      html += '<th>Size</th>';
+      html += '<th>Frequency</th>';
+      html += '<th>Est. Time</th>';
+      html += '<th>Last Visit</th>';
+      html += '<th>Next Visit</th>';
+      html += '<th>Drive Time</th>';
+      html += '<th>Priority</th>';
+      html += '</tr></thead>';
+      html += '<tbody>';
+
+      crews.forEach(function(crew, index) {
+        html += '<tr data-index="' + index + '">';
+        html += '<td><strong>' + (crew.jobNumber || '') + '</strong></td>';
+        html += '<td>' + (crew.location || '') + '</td>';
+        html += '<td>' + (crew.crewLead || '') + '</td>';
+        html += '<td>' + (crew.crewSize || '') + '</td>';
+
+        // Frequency dropdown
+        html += '<td><select class="form-select form-select-sm" onchange="onCrewVisitChange(' + index + ', \'frequency\', this.value)">';
+        ['Weekly', 'Bi-Weekly', 'Monthly', 'Quarterly'].forEach(function(freq) {
+          var selected = (crew.frequency === freq) ? 'selected' : '';
+          html += '<option value="' + freq + '" ' + selected + '>' + freq + '</option>';
+        });
+        html += '</select></td>';
+
+        // Est. Visit Time
+        html += '<td><input type="number" class="form-control form-control-sm crew-input" value="' + (crew.estVisitTime || 60) + '" min="15" step="15" onchange="onCrewVisitChange(' + index + ', \'estVisitTime\', this.value)"></td>';
+
+        // Last Visit Date
+        html += '<td><input type="date" class="form-control form-control-sm crew-input-date" value="' + formatDateForInput(crew.lastVisit) + '" onchange="onCrewVisitChange(' + index + ', \'lastVisit\', this.value)"></td>';
+
+        // Next Visit Date
+        html += '<td><input type="date" class="form-control form-control-sm crew-input-date" value="' + formatDateForInput(crew.nextVisit) + '" onchange="onCrewVisitChange(' + index + ', \'nextVisit\', this.value)"></td>';
+
+        // Drive Time
+        html += '<td><input type="number" class="form-control form-control-sm crew-input" value="' + (crew.driveTime || 0) + '" min="0" step="15" onchange="onCrewVisitChange(' + index + ', \'driveTime\', this.value)"></td>';
+
+        // Priority dropdown
+        html += '<td><select class="form-select form-select-sm" onchange="onCrewVisitChange(' + index + ', \'priority\', this.value)">';
+        ['High', 'Medium', 'Low'].forEach(function(pri) {
+          var selected = (crew.priority === pri) ? 'selected' : '';
+          html += '<option value="' + pri + '" ' + selected + '>' + pri + '</option>';
+        });
+        html += '</select></td>';
+
+        html += '</tr>';
+      });
+
+      html += '</tbody></table>';
+      container.innerHTML = html;
+    }
+
+    function onCrewVisitChange(index, field, value) {
+      if (crewVisitData[index]) {
+        crewVisitData[index][field] = value;
+        setUnsaved(true);
+      }
+    }
+
+    function saveCrewVisitConfig() {
+      google.script.run
+        .withSuccessHandler(function(result) {
+          setUnsaved(false);
+          showToast('Crew visit config saved!', 'success');
+        })
+        .withFailureHandler(function(error) {
+          showToast('Error saving crew visit config: ' + error, 'error');
+        })
+        .saveCrewVisitConfig(crewVisitData);
+    }
+
+    function refreshCrewVisitConfig() {
+      if (confirm('This will refresh crew data from the Employees sheet. Any unsaved changes will be lost. Continue?')) {
+        document.getElementById('crewVisitContainer').innerHTML =
+          '<div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div><p class="text-muted small mt-2">Refreshing...</p></div>';
+
+        google.script.run
+          .withSuccessHandler(function(data) {
+            crewVisitData = data || [];
+            renderCrewVisitTable(crewVisitData);
+            showToast('Crew visit config refreshed!', 'success');
+          })
+          .withFailureHandler(function(error) {
+            showToast('Error refreshing: ' + error, 'error');
+            loadCrewVisitConfig(); // Try to reload existing data
+          })
+          .refreshCrewVisitConfigFromEmployees();
+      }
+    }
+
+    // Load crew visit config when schedule tab is shown
+    document.getElementById('schedule-tab').addEventListener('shown.bs.tab', function() {
+      loadCrewVisitConfig();
     });
+
+    // ================== TRAINING CONFIG FUNCTIONS ==================
+    var trainingConfigData = [];
+
+    function loadTrainingConfigData() {
+      google.script.run
+        .withSuccessHandler(function(data) {
+          trainingConfigData = data || [];
+          renderTrainingConfigTable(trainingConfigData);
+          updateTrainingCompletionSummary(trainingConfigData);
+        })
+        .withFailureHandler(function(error) {
+          document.getElementById('trainingConfigContainer').innerHTML =
+            '<div class="alert alert-danger">Error loading training config: ' + error + '</div>';
+        })
+        .getTrainingConfigData();
+    }
+
+    function updateTrainingCompletionSummary(trainings) {
+      // NOTE: This function used to update the Completion Status cards, but now
+      // that's handled by updateTrainingTrackingSummary() which has the actual
+      // per-crew completion data. This function is kept for potential future use
+      // or can be used for Training Schedule specific stats.
+
+      // The Completion Status cards are now ONLY updated by updateTrainingTrackingSummary()
+      // which is called when Training Tracking data loads.
+    }
+
+    function renderTrainingConfigTable(trainings) {
+      var container = document.getElementById('trainingConfigContainer');
+
+      if (!trainings || trainings.length === 0) {
+        container.innerHTML = '<div class="alert alert-warning">No training topics found. Run "Setup Training Config" from the menu first.</div>';
+        return;
+      }
+
+      var html = '<table class="table table-sm table-hover training-config-table">';
+      html += '<thead><tr>';
+      html += '<th>Training Topic</th>';
+      html += '<th>Required For</th>';
+      html += '<th>Hours</th>';
+      html += '<th>Frequency</th>';
+      html += '<th>Last Training</th>';
+      html += '<th>Next Training</th>';
+      html += '<th>Attendees</th>';
+      html += '<th>Status</th>';
+      html += '</tr></thead>';
+      html += '<tbody>';
+
+      trainings.forEach(function(training, index) {
+        // Parse completion status - handle both decimal (0.69) and percentage (69%) formats
+        var statusValue = training.completionStatus;
+        var statusPercent = 0;
+        if (typeof statusValue === 'string' && statusValue.includes('%')) {
+          statusPercent = parseInt(statusValue) || 0;
+        } else if (typeof statusValue === 'number' || !isNaN(parseFloat(statusValue))) {
+          var numVal = parseFloat(statusValue);
+          // If it's a decimal like 0.69, convert to percentage
+          if (numVal > 0 && numVal < 1) {
+            statusPercent = Math.round(numVal * 100);
+          } else {
+            statusPercent = Math.round(numVal);
+          }
+        }
+
+        html += '<tr data-index="' + index + '">';
+
+        // Training Topic (editable)
+        html += '<td><input type="text" class="form-control form-control-sm training-input-topic" value="' + escapeHtml(training.topic || '') + '" onchange="onTrainingConfigChange(' + index + ', \'topic\', this.value)"></td>';
+
+        // Required For (editable)
+        html += '<td><select class="form-select form-select-sm" onchange="onTrainingConfigChange(' + index + ', \'requiredFor\', this.value)">';
+        ['All', 'Foremen', 'Linemen', 'Apprentices', 'GTO'].forEach(function(req) {
+          var selected = (training.requiredFor === req) ? 'selected' : '';
+          html += '<option value="' + req + '" ' + selected + '>' + req + '</option>';
+        });
+        html += '</select></td>';
+
+        // Duration Hours
+        html += '<td><input type="number" class="form-control form-control-sm training-input-hours" value="' + (training.duration || 2) + '" min="1" step="1" onchange="onTrainingConfigChange(' + index + ', \'duration\', this.value)"></td>';
+
+        // Frequency
+        html += '<td><select class="form-select form-select-sm" onchange="onTrainingConfigChange(' + index + ', \'frequency\', this.value)">';
+        ['Monthly', 'Quarterly', 'Annual'].forEach(function(freq) {
+          var selected = (training.frequency === freq) ? 'selected' : '';
+          html += '<option value="' + freq + '" ' + selected + '>' + freq + '</option>';
+        });
+        html += '</select></td>';
+
+        // Last Training Date
+        html += '<td><input type="date" class="form-control form-control-sm" value="' + formatDateForInput(training.lastTraining) + '" onchange="onTrainingConfigChange(' + index + ', \'lastTraining\', this.value)"></td>';
+
+        // Next Training Date
+        html += '<td><input type="date" class="form-control form-control-sm" value="' + formatDateForInput(training.nextTraining) + '" onchange="onTrainingConfigChange(' + index + ', \'nextTraining\', this.value)"></td>';
+
+        // Required Attendees
+        html += '<td><input type="number" class="form-control form-control-sm training-input-hours" value="' + (training.requiredAttendees || 0) + '" min="0" onchange="onTrainingConfigChange(' + index + ', \'requiredAttendees\', this.value)"></td>';
+
+        // Completion Status with progress bar - always show as percentage
+        html += '<td>';
+        html += '<input type="text" class="form-control form-control-sm training-input-status mb-1" value="' + statusPercent + '%' + '" onchange="onTrainingConfigChange(' + index + ', \'completionStatus\', this.value)">';
+        html += '<div class="completion-bar"><div class="completion-bar-fill" style="width: ' + statusPercent + '%"></div></div>';
+        html += '</td>';
+
+        html += '</tr>';
+      });
+
+      html += '</tbody></table>';
+      container.innerHTML = html;
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function onTrainingConfigChange(index, field, value) {
+      if (trainingConfigData[index]) {
+        trainingConfigData[index][field] = value;
+        setUnsaved(true);
+
+        // Update progress bar if status changed
+        if (field === 'completionStatus') {
+          var row = document.querySelector('tr[data-index="' + index + '"]');
+          if (row) {
+            var bar = row.querySelector('.completion-bar-fill');
+            if (bar) {
+              var percent = parseInt(value) || 0;
+              bar.style.width = percent + '%';
+            }
+          }
+          // Also update the overall summary
+          updateTrainingCompletionSummary(trainingConfigData);
+        }
+      }
+    }
+
+    function saveTrainingConfigData() {
+      google.script.run
+        .withSuccessHandler(function(result) {
+          setUnsaved(false);
+          showToast('Training config saved!', 'success');
+        })
+        .withFailureHandler(function(error) {
+          showToast('Error saving training config: ' + error, 'error');
+        })
+        .saveTrainingConfigData(trainingConfigData);
+    }
+
+    // ================== TRAINING TRACKING FUNCTIONS ==================
+    var trainingTrackingData = [];
+    var filteredTrainingData = [];
+
+    function loadTrainingTrackingData() {
+      google.script.run
+        .withSuccessHandler(function(data) {
+          trainingTrackingData = data || [];
+          filteredTrainingData = trainingTrackingData;
+          renderTrainingTrackingTable(filteredTrainingData);
+          updateTrainingTrackingSummary(trainingTrackingData);
+        })
+        .withFailureHandler(function(error) {
+          document.getElementById('trainingTrackingContainer').innerHTML =
+            '<div class="alert alert-danger">Error loading training tracking: ' + error + '</div>';
+        })
+        .getTrainingTrackingData();
+    }
+
+    function filterTrainingTracking() {
+      var monthFilter = document.getElementById('trainingMonthFilter').value;
+      var statusFilter = document.getElementById('trainingStatusFilter').value;
+
+      filteredTrainingData = trainingTrackingData.filter(function(item) {
+        var matchMonth = !monthFilter || item.month === monthFilter;
+        var matchStatus = !statusFilter || item.status === statusFilter;
+        return matchMonth && matchStatus;
+      });
+
+      renderTrainingTrackingTable(filteredTrainingData);
+    }
+
+    function renderTrainingTrackingTable(data) {
+      var container = document.getElementById('trainingTrackingContainer');
+
+      if (!data || data.length === 0) {
+        container.innerHTML = '<div class="alert alert-warning">No training records found. Run "Setup Training Tracking" from the menu first.</div>';
+        return;
+      }
+
+      var html = '<table class="table table-sm table-hover training-tracking-table">';
+      html += '<thead><tr>';
+      html += '<th>Month</th>';
+      html += '<th>Training Topic</th>';
+      html += '<th>Crew #</th>';
+      html += '<th>Crew Lead</th>';
+      html += '<th>Size</th>';
+      html += '<th>Completion Date</th>';
+      html += '<th>Attendees</th>';
+      html += '<th>Trainer</th>';
+      html += '<th>Status</th>';
+      html += '</tr></thead>';
+      html += '<tbody>';
+
+      data.forEach(function(record, index) {
+        var statusClass = 'status-' + (record.status || 'pending').toLowerCase().replace(/\s+/g, '');
+        var originalIndex = trainingTrackingData.indexOf(record);
+
+        html += '<tr class="' + statusClass + '" data-index="' + originalIndex + '">';
+        html += '<td><strong>' + (record.month || '') + '</strong></td>';
+        html += '<td style="max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="' + escapeHtml(record.topic || '') + '">' + escapeHtml(record.topic || '') + '</td>';
+        html += '<td>' + (record.crew || '') + '</td>';
+        html += '<td>' + (record.crewLead || '') + '</td>';
+        // Size column - clickable to show crew members
+        html += '<td class="attendees-cell" data-crew="' + escapeHtml(record.crew || '') + '" onmouseenter="showCrewTooltip(this)" onmouseleave="hideCrewTooltip()">' + (record.crewSize || '') + '</td>';
+
+        // Completion Date (editable)
+        html += '<td><input type="date" class="form-control form-control-sm" value="' + formatDateForInput(record.completionDate) + '" onchange="onTrainingTrackingChange(' + originalIndex + ', \'completionDate\', this.value)"></td>';
+
+        // Attendees (editable)
+        html += '<td><input type="number" class="form-control form-control-sm" value="' + (record.attendees || '') + '" min="0" onchange="onTrainingTrackingChange(' + originalIndex + ', \'attendees\', this.value)"></td>';
+
+        // Trainer (editable)
+        html += '<td><input type="text" class="form-control form-control-sm" value="' + escapeHtml(record.trainer || '') + '" style="width: 80px;" onchange="onTrainingTrackingChange(' + originalIndex + ', \'trainer\', this.value)"></td>';
+
+        // Status (editable dropdown)
+        html += '<td><select class="form-select form-select-sm" onchange="onTrainingTrackingChange(' + originalIndex + ', \'status\', this.value)">';
+        ['Pending', 'Complete', 'Overdue', 'N/A'].forEach(function(s) {
+          var selected = (record.status === s) ? 'selected' : '';
+          html += '<option value="' + s + '" ' + selected + '>' + s + '</option>';
+        });
+        html += '</select></td>';
+
+        html += '</tr>';
+      });
+
+      html += '</tbody></table>';
+      html += '<div class="text-muted small mt-2">Showing ' + data.length + ' of ' + trainingTrackingData.length + ' records</div>';
+      container.innerHTML = html;
+    }
+
+    function onTrainingTrackingChange(index, field, value) {
+      if (trainingTrackingData[index]) {
+        trainingTrackingData[index][field] = value;
+        setUnsaved(true);
+
+        // If status changed, update row styling and summary
+        if (field === 'status') {
+          var row = document.querySelector('tr[data-index="' + index + '"]');
+          if (row) {
+            row.className = 'status-' + value.toLowerCase().replace(/\s+/g, '');
+          }
+          updateTrainingTrackingSummary(trainingTrackingData);
+        }
+
+        // If status changed to Complete and no completion date, set today
+        if (field === 'status' && value === 'Complete') {
+          if (!trainingTrackingData[index].completionDate) {
+            var today = new Date().toISOString().split('T')[0];
+            trainingTrackingData[index].completionDate = today;
+            // Update the date input
+            var row = document.querySelector('tr[data-index="' + index + '"]');
+            if (row) {
+              var dateInput = row.querySelector('input[type="date"]');
+              if (dateInput) dateInput.value = today;
+            }
+          }
+        }
+      }
+    }
+
+    function updateTrainingTrackingSummary(data) {
+      if (!data || data.length === 0) return;
+
+      // Get current month name
+      var monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                        'July', 'August', 'September', 'October', 'November', 'December'];
+      var currentMonth = monthNames[new Date().getMonth()];
+
+      // Count current month stats
+      var currentMonthComplete = 0;
+      var currentMonthTotal = 0;
+
+      // Count year stats
+      var yearComplete = 0;
+      var yearTotal = data.length;
+
+      data.forEach(function(record) {
+        var status = (record.status || 'Pending').toLowerCase();
+        var recordMonth = (record.month || '').trim();
+
+        // Check if this is current month
+        if (recordMonth.toLowerCase() === currentMonth.toLowerCase()) {
+          currentMonthTotal++;
+          if (status === 'complete') {
+            currentMonthComplete++;
+          }
+        }
+
+        // Count year totals
+        if (status === 'complete') {
+          yearComplete++;
+        }
+      });
+
+      var currentMonthPercent = currentMonthTotal > 0 ? Math.round((currentMonthComplete / currentMonthTotal) * 100) : 0;
+      var yearPercent = yearTotal > 0 ? Math.round((yearComplete / yearTotal) * 100) : 0;
+
+      // Update current month display
+      document.getElementById('currentMonthLabel').textContent = currentMonth;
+      document.getElementById('currentMonthPercent').textContent = currentMonthPercent + '%';
+      document.getElementById('currentMonthComplete').textContent = currentMonthComplete;
+      document.getElementById('currentMonthTotal').textContent = currentMonthTotal;
+
+      var monthBar = document.getElementById('currentMonthProgressBar');
+      monthBar.style.width = currentMonthPercent + '%';
+      monthBar.textContent = currentMonthPercent + '%';
+
+      // Color the month bar
+      monthBar.className = 'progress-bar';
+      if (currentMonthPercent >= 75) {
+        monthBar.classList.add('bg-success');
+      } else if (currentMonthPercent >= 50) {
+        monthBar.classList.add('bg-info');
+      } else if (currentMonthPercent >= 25) {
+        monthBar.classList.add('bg-warning');
+      } else {
+        monthBar.classList.add('bg-danger');
+      }
+
+      // Update year progress display
+      document.getElementById('trainingOverallPercent').textContent = yearPercent + '%';
+      document.getElementById('yearCompleteCount').textContent = yearComplete;
+      document.getElementById('yearTotalCount').textContent = yearTotal;
+
+      var progressBar = document.getElementById('trainingProgressBar');
+      progressBar.style.width = yearPercent + '%';
+      progressBar.textContent = yearPercent + '%';
+
+      // Change color based on progress
+      progressBar.className = 'progress-bar';
+      if (yearPercent >= 75) {
+        progressBar.classList.add('bg-primary');
+      } else if (yearPercent >= 50) {
+        progressBar.classList.add('bg-info');
+      } else if (yearPercent >= 25) {
+        progressBar.classList.add('bg-warning');
+      } else {
+        progressBar.classList.add('bg-danger');
+      }
+    }
+
+    function saveTrainingTrackingData() {
+      google.script.run
+        .withSuccessHandler(function(result) {
+          setUnsaved(false);
+          showToast('Training tracking saved! (' + result.updatedCount + ' records)', 'success');
+          // Refresh to show updated data
+          loadTrainingTrackingData();
+        })
+        .withFailureHandler(function(error) {
+          showToast('Error saving training tracking: ' + error, 'error');
+        })
+        .saveTrainingTrackingData(trainingTrackingData);
+    }
+
+    // ================== CREW TOOLTIP FUNCTIONS ==================
+    var crewMembersCache = {}; // Cache to avoid repeated server calls
+    var activeTooltip = null;
+
+    function showCrewTooltip(cell) {
+      var crewNumber = cell.getAttribute('data-crew');
+      if (!crewNumber) return;
+
+      // Check cache first
+      if (crewMembersCache[crewNumber] !== undefined) {
+        displayCrewTooltip(cell, crewMembersCache[crewNumber]);
+        return;
+      }
+
+      // Show loading indicator
+      displayCrewTooltip(cell, 'Loading...');
+
+      // Fetch crew members from server
+      google.script.run
+        .withSuccessHandler(function(members) {
+          crewMembersCache[crewNumber] = members || 'No crew members found';
+          // Only update if still hovering over the same cell
+          if (activeTooltip && activeTooltip.cell === cell) {
+            displayCrewTooltip(cell, crewMembersCache[crewNumber]);
+          }
+        })
+        .withFailureHandler(function(error) {
+          crewMembersCache[crewNumber] = 'Error loading crew';
+          if (activeTooltip && activeTooltip.cell === cell) {
+            displayCrewTooltip(cell, 'Error loading crew');
+          }
+        })
+        .getCrewMembersForDisplay(crewNumber);
+    }
+
+    function displayCrewTooltip(cell, content) {
+      hideCrewTooltip(); // Remove any existing tooltip
+
+      var tooltip = document.createElement('div');
+      tooltip.className = 'crew-tooltip';
+
+      // Format content: split by comma and show as list
+      var members = content.split(', ').filter(function(m) { return m.trim(); });
+      if (members.length > 0 && content !== 'Loading...' && content !== 'Error loading crew' && content !== 'No crew members found') {
+        tooltip.innerHTML = '<strong>Crew Members:</strong><br>' + members.map(function(m) { return '• ' + m; }).join('<br>');
+      } else {
+        tooltip.textContent = content;
+      }
+
+      // Position the tooltip below the cell
+      var rect = cell.getBoundingClientRect();
+      tooltip.style.position = 'fixed';
+      tooltip.style.top = (rect.bottom + 5) + 'px';
+      tooltip.style.left = rect.left + 'px';
+
+      document.body.appendChild(tooltip);
+      activeTooltip = { element: tooltip, cell: cell };
+    }
+
+    function hideCrewTooltip() {
+      if (activeTooltip && activeTooltip.element) {
+        activeTooltip.element.remove();
+      }
+      activeTooltip = null;
+    }
+
+    // ================== TAB EVENT LISTENERS ==================
+    // Schedule Settings tab - load Crew Visit Config
+    document.getElementById('schedule-tab').addEventListener('shown.bs.tab', function() {
+      loadCrewVisitConfig();
+    });
+
+    // Task Sources tab - load all training-related data
+    document.getElementById('tasksources-tab').addEventListener('shown.bs.tab', function() {
+      loadTrainingConfig();
+      loadExpiringCertsConfig();
+      loadTrainingConfigData();
+      loadTrainingTrackingData();
+    });
+
+    // Expiring Certs tab - load employee cert data
+    document.getElementById('certs-tab').addEventListener('shown.bs.tab', function() {
+      loadEmployeeCertsData();
+    });
+
+    // ================== INITIAL DATA LOAD ==================
+    // Preload data for all tabs when the dialog opens
+    // This ensures data is available even if the user hasn't clicked on a tab yet
+    setTimeout(function() {
+      // Load Schedule Settings tab data (Crew Visit Config)
+      loadCrewVisitConfig();
+
+      // Load Task Sources tab data
+      loadTrainingConfig();
+      loadExpiringCertsConfig();
+      loadTrainingConfigData();
+      loadTrainingTrackingData();
+
+      // Note: Expiring Certs tab data loads on demand (large dataset)
+    }, 100);
   </script>
 </body>
 </html>
-

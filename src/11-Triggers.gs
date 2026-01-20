@@ -248,6 +248,28 @@ function onEditHandler(e) {
       return;  // Handled - don't continue to processEdit
     }
 
+    // Handle To Do List Completed checkbox - auto-remove completed tasks
+    if (sheetName === 'To Do List' && editedRow >= 14 && editedCol === 12) {
+      // Column 12 (L) is the Completed checkbox column, data starts at row 14
+      var isCompleted = e.range.getValue();
+      if (isCompleted === true) {
+        // Ask user if they want to remove the completed task
+        var ui = SpreadsheetApp.getUi();
+        var response = ui.alert(
+          '✅ Task Completed',
+          'Remove this completed task from the To Do List?',
+          ui.ButtonSet.YES_NO
+        );
+
+        if (response === ui.Button.YES) {
+          sheet.deleteRow(editedRow);
+          SpreadsheetApp.getActiveSpreadsheet().toast('Task removed from To Do List', '✅ Removed', 3);
+          Logger.log('Removed completed task from To Do List row ' + editedRow);
+        }
+      }
+      return;  // Handled - don't continue to processEdit
+    }
+
     // Handle new item number detection in Gloves/Sleeves (Column A = item number)
     if ((sheetName === 'Gloves' || sheetName === 'Sleeves') && editedCol === 1 && editedRow >= 2) {
       var newItemNum = e.range.getValue();
@@ -266,6 +288,31 @@ function onEditHandler(e) {
         if (isNewItemNumber(itemNumStr, sheetName)) {
           Logger.log('New item number detected: ' + itemNumStr + ' in ' + sheetName);
           promptNewItemSource(itemNumStr, sheetName, editedRow);
+        }
+      }
+      // Don't return - allow other processing to continue
+    }
+
+    // Handle new employee name detection in Employees sheet (Column A = Name)
+    if (sheetName === 'Employees' && editedCol === 1 && editedRow >= 2) {
+      var newName = e.range.getValue();
+      var oldName = e.oldValue;
+      var nameStr = String(newName).trim();
+
+      // Check if a new name was added (not edited)
+      if (nameStr !== '' && (!oldName || String(oldName).trim() === '')) {
+        Logger.log('New employee name detected: ' + nameStr + ' in row ' + editedRow);
+
+        // Show the new employee dialog
+        try {
+          showNewEmployeeDialog(nameStr, editedRow);
+        } catch (dialogErr) {
+          Logger.log('Could not show new employee dialog: ' + dialogErr);
+          // Fall back to toast notification
+          SpreadsheetApp.getActiveSpreadsheet().toast(
+            'New employee "' + nameStr + '" added. Fill in their details in the row.',
+            '👤 New Employee', 5
+          );
         }
       }
       // Don't return - allow other processing to continue
@@ -337,10 +384,11 @@ function processEdit(e) {
   // Ignore header rows
   if (editedRow < 2) return;
 
-  // Only process edits in Glove Swaps, Sleeve Swaps, Gloves, Sleeves, Employees, or Employee History tabs
+  // Only process edits in Glove Swaps, Sleeve Swaps, Gloves, Sleeves, Employees, Employee History, or Reclaims tabs
   if (sheetName !== SHEET_GLOVE_SWAPS && sheetName !== SHEET_SLEEVE_SWAPS &&
       sheetName !== SHEET_GLOVES && sheetName !== SHEET_SLEEVES &&
-      sheetName !== SHEET_EMPLOYEES && sheetName !== 'Employee History') {
+      sheetName !== SHEET_EMPLOYEES && sheetName !== 'Employee History' &&
+      sheetName !== SHEET_RECLAIMS) {
     return;
   }
 
@@ -366,19 +414,21 @@ function processEdit(e) {
     return;
   }
 
-  // Handle Employees sheet edits (Last Day, Location, or Job Number columns)
+  // Handle Employees sheet edits (Last Day, Location, Job Number, or Hire Date columns)
   if (sheetName === SHEET_EMPLOYEES) {
     // Get column indices dynamically
     var empHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     var lastDayColIdx = -1;
     var locationColIdx = -1;
     var jobNumberColIdx = -1;
+    var hireDateColIdx = -1;
 
     for (var h = 0; h < empHeaders.length; h++) {
       var headerLower = String(empHeaders[h]).toLowerCase().trim();
       if (headerLower === 'last day') lastDayColIdx = h + 1;  // 1-based
       if (headerLower === 'location') locationColIdx = h + 1;
       if (headerLower === 'job number') jobNumberColIdx = h + 1;
+      if (headerLower === 'hire date') hireDateColIdx = h + 1;
     }
 
     // Handle Last Day change - terminate employee
@@ -387,11 +437,12 @@ function processEdit(e) {
       return;
     }
 
-    // Handle Location or Job Number change - track in history
+    // Handle Location, Job Number, or Hire Date change - track in history
     if ((locationColIdx !== -1 && editedCol === locationColIdx) ||
-        (jobNumberColIdx !== -1 && editedCol === jobNumberColIdx)) {
+        (jobNumberColIdx !== -1 && editedCol === jobNumberColIdx) ||
+        (hireDateColIdx !== -1 && editedCol === hireDateColIdx)) {
       var oldValue = e.oldValue || '';
-      trackEmployeeChange(ss, sheet, editedRow, editedCol, newValue, oldValue, locationColIdx, jobNumberColIdx);
+      trackEmployeeChange(ss, sheet, editedRow, editedCol, newValue, oldValue, locationColIdx, jobNumberColIdx, hireDateColIdx);
     }
     return;
   }
@@ -448,6 +499,46 @@ function processEdit(e) {
     }
   }
 
+  // Handle Reclaims sheet edits (Pick List Item #, Picked checkbox and Date Changed)
+  if (sheetName === SHEET_RECLAIMS) {
+    // Reclaims sheet has multiple sections - we need to handle the Class 2/3 Reclaims sections
+    // Columns for reclaim rows: G (7) = Pick List Item #, I (9) = Picked checkbox, J (10) = Date Changed
+    // But first, check if this row is in a reclaim section (has Item Type in column B)
+
+    var rowData = sheet.getRange(editedRow, 1, 1, 10).getValues()[0];
+    var itemType = String(rowData[1] || '').trim();  // Column B = Item Type
+    var pickListNum = rowData[6];  // Column G = Pick List Item #
+
+    // Only process if this is a reclaim data row (has Item Type: Glove or Sleeve)
+    if (itemType === 'Glove' || itemType === 'Sleeve') {
+      var isGlove = (itemType === 'Glove');
+      var inventorySheetName = isGlove ? SHEET_GLOVES : SHEET_SLEEVES;
+      var inventorySheet = ss.getSheetByName(inventorySheetName);
+
+      if (!inventorySheet) {
+        logEvent('processEdit: Inventory sheet not found for Reclaims: ' + inventorySheetName, 'ERROR');
+        return;
+      }
+
+      // Column G (7) = Pick List Item # (manual edit), Column I (9) = Picked checkbox, Column J (10) = Date Changed
+      if (editedCol === 7) {
+        // Pick List Item # manually edited
+        logEvent('Reclaims Pick List Item # manual edit: row=' + editedRow + ', itemType=' + itemType + ', newValue=' + newValue);
+        handleReclaimsPickListManualEdit(ss, sheet, inventorySheet, editedRow, newValue, isGlove);
+      } else if (editedCol === 9 && pickListNum) {
+        // Picked checkbox changed (only if there's a pick list item)
+        logEvent('Reclaims Picked checkbox changed: row=' + editedRow + ', itemType=' + itemType + ', pickList=' + pickListNum);
+        handleReclaimsPickedCheckbox(ss, sheet, inventorySheet, editedRow, newValue, isGlove);
+      } else if (editedCol === 10 && pickListNum) {
+        // Date Changed column edited (only if there's a pick list item)
+        var cellValue = sheet.getRange(editedRow, 10).getValue();
+        logEvent('Reclaims Date Changed: row=' + editedRow + ', itemType=' + itemType + ', pickList=' + pickListNum);
+        handleReclaimsDateChanged(ss, sheet, inventorySheet, editedRow, cellValue, isGlove);
+      }
+    }
+    return;
+  }
+
   // Handle Glove Swaps or Sleeve Swaps tab edits
   if (sheetName === SHEET_GLOVE_SWAPS || sheetName === SHEET_SLEEVE_SWAPS) {
     var isGloveSwaps = (sheetName === SHEET_GLOVE_SWAPS);
@@ -473,4 +564,3 @@ function processEdit(e) {
     }
   }
 }
-

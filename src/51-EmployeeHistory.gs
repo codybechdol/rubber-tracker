@@ -6,6 +6,111 @@
  */
 
 /**
+ * Standardized event types for Employee History entries.
+ * Use these constants instead of raw strings to ensure consistency.
+ */
+var EMPLOYEE_EVENT_TYPES = {
+  TERMINATED: 'Terminated',
+  REHIRED: 'Rehired',
+  NEW_EMPLOYEE: 'New Employee',
+  LOCATION_CHANGE: 'Location Change',
+  JOB_NUMBER_CHANGE: 'Job Number Change',
+  HIRE_DATE_CHANGE: 'Hire Date Change',
+  CURRENT_STATE: 'Current State',
+  MULTIPLE_CHANGES: 'Multiple Changes'
+};
+
+/**
+ * Checks if a duplicate Employee History entry already exists.
+ * Matches on employee name (case-insensitive), event type, and date.
+ *
+ * @param {Sheet} historySheet - The Employee History sheet
+ * @param {string} employeeName - Employee's name
+ * @param {string} eventType - Event type (e.g., 'Terminated', 'Rehired')
+ * @param {string} dateStr - Date string (MM/dd/yyyy format)
+ * @return {boolean} True if duplicate exists, false otherwise
+ */
+function isDuplicateEmployeeHistoryEntry(historySheet, employeeName, eventType, dateStr) {
+  if (!historySheet || historySheet.getLastRow() <= 2) return false;
+
+  var data = historySheet.getRange(3, 1, historySheet.getLastRow() - 2, 3).getDisplayValues();
+  var empNameLower = String(employeeName).toLowerCase().trim();
+  var eventTypeLower = String(eventType).toLowerCase().trim();
+  var dateStrNorm = String(dateStr).trim();
+
+  for (var i = 0; i < data.length; i++) {
+    var rowDate = String(data[i][0]).trim();
+    var rowName = String(data[i][1]).toLowerCase().trim();
+    var rowEvent = String(data[i][2]).toLowerCase().trim();
+
+    if (rowName === empNameLower && rowEvent === eventTypeLower && rowDate === dateStrNorm) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Cleans up duplicate entries in Employee History.
+ * Keeps the most recent entry (last occurrence) for each employee+event+date combo.
+ * Can be run from menu: Utilities > Clean Up Duplicate History Entries
+ *
+ * @return {number} Number of duplicates removed
+ */
+function cleanupDuplicateEmployeeHistoryEntries() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var historySheet = ss.getSheetByName('Employee History');
+
+  if (!historySheet || historySheet.getLastRow() <= 2) {
+    Logger.log('No Employee History data to clean up');
+    return 0;
+  }
+
+  var lastRow = historySheet.getLastRow();
+  var data = historySheet.getRange(3, 1, lastRow - 2, historySheet.getLastColumn()).getDisplayValues();
+
+  // Track seen entries and rows to delete
+  var seen = {};
+  var rowsToDelete = [];
+
+  // Process from bottom to top to keep the LAST (most recent) occurrence
+  for (var i = data.length - 1; i >= 0; i--) {
+    var date = String(data[i][0]).trim();
+    var name = String(data[i][1]).toLowerCase().trim();
+    var eventType = String(data[i][2]).toLowerCase().trim();
+
+    // Skip empty rows
+    if (!name) continue;
+
+    var key = name + '|' + eventType + '|' + date;
+
+    if (seen[key]) {
+      // This is a duplicate (earlier occurrence) - mark for deletion
+      rowsToDelete.push(i + 3);  // +3 because data starts at row 3
+    } else {
+      seen[key] = true;
+    }
+  }
+
+  // Delete rows from bottom to top to preserve row numbers
+  rowsToDelete.sort(function(a, b) { return b - a; });
+  for (var d = 0; d < rowsToDelete.length; d++) {
+    historySheet.deleteRow(rowsToDelete[d]);
+  }
+
+  if (rowsToDelete.length > 0) {
+    Logger.log('Removed ' + rowsToDelete.length + ' duplicate Employee History entries');
+    SpreadsheetApp.getActiveSpreadsheet().toast(
+      'Removed ' + rowsToDelete.length + ' duplicate entries from Employee History',
+      '🧹 Cleanup Complete', 5
+    );
+  }
+
+  return rowsToDelete.length;
+}
+
+/**
  * Handles Last Day changes in the Employees sheet.
  * When Last Day is entered:
  * 1. Adds "Terminated" entry to Employee History
@@ -58,6 +163,27 @@ function handleLastDayChange(ss, sheet, editedRow, newValue) {
     var gloveSize = gloveSizeColIdx !== -1 ? empData[gloveSizeColIdx] : '';
     var sleeveSize = sleeveSizeColIdx !== -1 ? empData[sleeveSizeColIdx] : '';
 
+    // Show confirmation dialog before proceeding
+    var ui = SpreadsheetApp.getUi();
+    var response = ui.alert(
+      '⚠️ Confirm Employee Termination',
+      'Move "' + empName + '" to Employee History and remove from Employees sheet?\n\n' +
+      'This action will:\n' +
+      '• Add a "Terminated" entry to Employee History\n' +
+      '• Remove the employee from the Employees sheet\n\n' +
+      'Click YES to proceed or NO to cancel.',
+      ui.ButtonSet.YES_NO
+    );
+
+    if (response !== ui.Button.YES) {
+      // User cancelled - clear the Last Day cell
+      if (lastDayColIdx !== -1) {
+        sheet.getRange(editedRow, lastDayColIdx + 1).setValue('');
+      }
+      ss.toast('Termination cancelled. Last Day cleared.', '❌ Cancelled', 3);
+      return;
+    }
+
     var lastDayStr = '';
     if (newValue instanceof Date) {
       lastDayStr = Utilities.formatDate(newValue, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
@@ -88,23 +214,28 @@ function handleLastDayChange(ss, sheet, editedRow, newValue) {
       setupEmployeeHistorySheet(historySheet);
     }
 
-    var historyRow = [
-      lastDayStr,      // Date
-      empName,         // Employee Name
-      'Terminated',    // Event Type
-      location,        // Location
-      jobNumber,       // Job Number
-      hireDateStr,     // Hire Date
-      lastDayStr,      // Last Day
-      lastDayReason,   // Last Day Reason
-      '',              // Rehire Date
-      '',              // Notes
-      phoneNumber,     // Phone Number
-      emailAddress,    // Email Address
-      gloveSize,       // Glove Size
-      sleeveSize       // Sleeve Size
-    ];
-    historySheet.appendRow(historyRow);
+    // Check for duplicate before adding
+    if (!isDuplicateEmployeeHistoryEntry(historySheet, empName, EMPLOYEE_EVENT_TYPES.TERMINATED, lastDayStr)) {
+      var historyRow = [
+        lastDayStr,                        // Date
+        empName,                           // Employee Name
+        EMPLOYEE_EVENT_TYPES.TERMINATED,   // Event Type
+        location,                          // Location
+        jobNumber,                         // Job Number
+        hireDateStr,                       // Hire Date
+        lastDayStr,                        // Last Day
+        lastDayReason,                     // Last Day Reason
+        '',                                // Rehire Date
+        '',                                // Notes
+        phoneNumber,                       // Phone Number
+        emailAddress,                      // Email Address
+        gloveSize,                         // Glove Size
+        sleeveSize                         // Sleeve Size
+      ];
+      historySheet.appendRow(historyRow);
+    } else {
+      Logger.log('Skipped duplicate Terminated entry for ' + empName);
+    }
 
     if (locationColIdx !== -1) {
       sheet.getRange(editedRow, locationColIdx + 1).setValue('Previous Employee');
@@ -114,6 +245,7 @@ function handleLastDayChange(ss, sheet, editedRow, newValue) {
     sheet.deleteRow(editedRow);
 
     Logger.log('Employee "' + empName + '" terminated and moved to history');
+    ss.toast('Employee "' + empName + '" moved to Employee History.', '✅ Terminated', 5);
 
   } catch (e) {
     Logger.log('[ERROR] handleLastDayChange: ' + e);
@@ -167,7 +299,7 @@ function handleRehireDateChange(ss, sheet, editedRow, newValue) {
       return;
     }
 
-    var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+    var employeesSheet = ss.getSheetByName('Employees');
     if (employeesSheet) {
       var empSheetData = employeesSheet.getDataRange().getValues();
       for (var i = 1; i < empSheetData.length; i++) {
@@ -240,7 +372,7 @@ function handleRehireDateChange(ss, sheet, editedRow, newValue) {
     var newJobClassification = jobClassificationResponse.getResponseText().trim();
 
     if (!employeesSheet) {
-      employeesSheet = ss.insertSheet(SHEET_EMPLOYEES);
+      employeesSheet = ss.insertSheet('Employees');
     }
 
     var empHeaders = employeesSheet.getRange(1, 1, 1, employeesSheet.getLastColumn()).getValues()[0];
@@ -272,23 +404,29 @@ function handleRehireDateChange(ss, sheet, editedRow, newValue) {
     employeesSheet.appendRow(newEmpRow);
 
     var todayStr = Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
-    var rehiredHistoryRow = [
-      todayStr,                             // Date
-      empName,                              // Employee Name
-      'Rehired',                            // Event Type
-      newLocation,                          // Location
-      newJobNumber,                         // Job Number
-      originalHireDate,                     // Hire Date
-      '',                                   // Last Day
-      '',                                   // Last Day Reason
-      rehireDateStr,                        // Rehire Date
-      'Rehired from Previous Employee',    // Notes
-      '',                                   // Phone Number
-      '',                                   // Email Address
-      '',                                   // Glove Size
-      ''                                    // Sleeve Size
-    ];
-    sheet.appendRow(rehiredHistoryRow);
+
+    // Check for duplicate before adding Rehired entry
+    if (!isDuplicateEmployeeHistoryEntry(sheet, empName, EMPLOYEE_EVENT_TYPES.REHIRED, todayStr)) {
+      var rehiredHistoryRow = [
+        todayStr,                             // Date
+        empName,                              // Employee Name
+        EMPLOYEE_EVENT_TYPES.REHIRED,         // Event Type
+        newLocation,                          // Location
+        newJobNumber,                         // Job Number
+        originalHireDate,                     // Hire Date
+        '',                                   // Last Day
+        '',                                   // Last Day Reason
+        rehireDateStr,                        // Rehire Date
+        'Rehired from Previous Employee',     // Notes
+        '',                                   // Phone Number
+        '',                                   // Email Address
+        '',                                   // Glove Size
+        ''                                    // Sleeve Size
+      ];
+      sheet.appendRow(rehiredHistoryRow);
+    } else {
+      Logger.log('Skipped duplicate Rehired entry for ' + empName);
+    }
 
     ui.alert('✅ Employee Rehired!',
       'Employee: ' + empName + '\n' +
@@ -316,26 +454,27 @@ function handleRehireDateChange(ss, sheet, editedRow, newValue) {
  * @param {number} editedCol - Column number
  * @param {*} newValue - New value
  * @param {*} oldValue - Old value
- * @param {number} locationColIdx - Location column index
- * @param {number} jobNumberColIdx - Job Number column index
+ * @param {number} locationColIdx - Location column index (1-based)
+ * @param {number} jobNumberColIdx - Job Number column index (1-based)
+ * @param {number} hireDateColIdx - Hire Date column index (1-based, optional)
  */
-function trackEmployeeChange(ss, sheet, editedRow, editedCol, newValue, oldValue, locationColIdx, jobNumberColIdx) {
+function trackEmployeeChange(ss, sheet, editedRow, editedCol, newValue, oldValue, locationColIdx, jobNumberColIdx, hireDateColIdx) {
   try {
     var empData = sheet.getRange(editedRow, 1, 1, sheet.getLastColumn()).getValues()[0];
     var empHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
 
     var nameColIdx = 0;
-    var hireDateColIdx = -1;
+    var foundHireDateColIdx = -1;
 
     for (var h = 0; h < empHeaders.length; h++) {
       var header = String(empHeaders[h]).toLowerCase().trim();
-      if (header === 'hire date') hireDateColIdx = h;
+      if (header === 'hire date') foundHireDateColIdx = h;
     }
 
     var empName = empData[nameColIdx] || '';
-    var location = locationColIdx !== -1 ? empData[locationColIdx] : '';
-    var jobNumber = jobNumberColIdx !== -1 ? empData[jobNumberColIdx] : '';
-    var hireDate = hireDateColIdx !== -1 ? empData[hireDateColIdx] : '';
+    var location = locationColIdx > 0 ? empData[locationColIdx - 1] : '';
+    var jobNumber = jobNumberColIdx > 0 ? empData[jobNumberColIdx - 1] : '';
+    var hireDate = foundHireDateColIdx !== -1 ? empData[foundHireDateColIdx] : '';
 
     var todayStr = Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
 
@@ -360,12 +499,26 @@ function trackEmployeeChange(ss, sheet, editedRow, editedCol, newValue, oldValue
     var changeType = '';
     var changeNotes = '';
 
-    if (editedCol === locationColIdx + 1) {
-      changeType = 'Location Change';
+    if (editedCol === locationColIdx) {
+      changeType = EMPLOYEE_EVENT_TYPES.LOCATION_CHANGE;
       changeNotes = 'From: ' + (oldValue || 'N/A') + ' → ' + (newValue || 'N/A');
-    } else if (editedCol === jobNumberColIdx + 1) {
-      changeType = 'Job Number Change';
+    } else if (editedCol === jobNumberColIdx) {
+      changeType = EMPLOYEE_EVENT_TYPES.JOB_NUMBER_CHANGE;
       changeNotes = 'From: ' + (oldValue || 'N/A') + ' → ' + (newValue || 'N/A');
+    } else if (hireDateColIdx && editedCol === hireDateColIdx) {
+      changeType = EMPLOYEE_EVENT_TYPES.HIRE_DATE_CHANGE;
+      changeNotes = 'From: ' + (oldValue || 'N/A') + ' → ' + (newValue || 'N/A');
+    }
+
+    if (!changeType) {
+      Logger.log('trackEmployeeChange: Unknown column edited: ' + editedCol);
+      return;
+    }
+
+    // Check for duplicate before adding
+    if (isDuplicateEmployeeHistoryEntry(historySheet, empName, changeType, todayStr)) {
+      Logger.log('Skipped duplicate ' + changeType + ' entry for ' + empName);
+      return;
     }
 
     var historyRow = [
@@ -403,7 +556,7 @@ function trackEmployeeChange(ss, sheet, editedRow, editedCol, newValue, oldValue
  */
 function saveEmployeeHistory() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+  var employeesSheet = ss.getSheetByName('Employees');
   var historySheet = ss.getSheetByName('Employee History');
 
   if (!employeesSheet || !historySheet) return 0;
@@ -505,24 +658,28 @@ function saveEmployeeHistory() {
 
     // If no history exists for this employee, add initial "New Employee" entry
     if (!last) {
-      var eventType = 'New Employee';
-      historySheet.appendRow([
-        todayStr,           // Date
-        name,               // Employee Name
-        eventType,          // Event Type
-        currentLocation,    // Location
-        currentJobNumber,   // Job Number
-        hireDateStr,        // Hire Date
-        '',                 // Last Day (new employee, no last day yet)
-        '',                 // Last Day Reason
-        '',                 // Rehire Date
-        'Added to system',  // Notes
-        phoneNumber,        // Phone Number
-        emailAddress,       // Email Address
-        gloveSize,          // Glove Size
-        sleeveSize          // Sleeve Size
-      ]);
-      newEntries++;
+      // Check for duplicate before adding
+      if (!isDuplicateEmployeeHistoryEntry(historySheet, name, EMPLOYEE_EVENT_TYPES.NEW_EMPLOYEE, todayStr)) {
+        historySheet.appendRow([
+          todayStr,                           // Date
+          name,                               // Employee Name
+          EMPLOYEE_EVENT_TYPES.NEW_EMPLOYEE,  // Event Type
+          currentLocation,                    // Location
+          currentJobNumber,                   // Job Number
+          hireDateStr,                        // Hire Date
+          '',                                 // Last Day (new employee, no last day yet)
+          '',                                 // Last Day Reason
+          '',                                 // Rehire Date
+          'Added to system',                  // Notes
+          phoneNumber,                        // Phone Number
+          emailAddress,                       // Email Address
+          gloveSize,                          // Glove Size
+          sleeveSize                          // Sleeve Size
+        ]);
+        newEntries++;
+      } else {
+        Logger.log('Skipped duplicate New Employee entry for ' + name);
+      }
       lastKnownState[nameLower] = {
         location: currentLocation,
         jobNumber: currentJobNumber,
@@ -577,8 +734,14 @@ function saveEmployeeHistory() {
         changeNotes.push('Sleeve: ' + (last.sleeveSize || 'N/A') + ' → ' + sleeveSize);
       }
 
-      var changeType = changeTypes.length > 2 ? 'Multiple Changes' : changeTypes.join(' & ') + ' Change';
+      var changeType = changeTypes.length > 2 ? EMPLOYEE_EVENT_TYPES.MULTIPLE_CHANGES : changeTypes.join(' & ') + ' Change';
       var notesText = changeNotes.join('; ');
+
+      // Check for duplicate before adding
+      if (isDuplicateEmployeeHistoryEntry(historySheet, name, changeType, todayStr)) {
+        Logger.log('Skipped duplicate ' + changeType + ' entry for ' + name);
+        continue;
+      }
 
       // Preserve Last Day, Last Day Reason, and Rehire Date from previous entries
       historySheet.appendRow([

@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  <style>
+    body { font-family: 'Google Sans', Arial, sans-serif; padding: 20px; background: #f8f9fa; }
+    .header { text-align: center; margin-bottom: 20px; }
+    .header h2 { color: #1a73e8; margin-bottom: 5px; }
+    .header .employee-name { font-size: 24px; font-weight: bold; color: #202124; }
+    .form-section { background: white; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .form-section h5 { color: #5f6368; margin-bottom: 12px; font-size: 14px; border-bottom: 1px solid #e0e0e0; padding-bottom: 8px; }
+    .form-label { font-weight: 500; color: #3c4043; font-size: 13px; }
+    .form-control, .form-select { font-size: 14px; }
+    .btn-primary { background: #1a73e8; border-color: #1a73e8; }
+    .btn-primary:hover { background: #1557b0; border-color: #1557b0; }
+    .required-star { color: #ea4335; }
+    .info-text { font-size: 12px; color: #5f6368; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h2><i class="bi bi-person-plus"></i> New Employee</h2>
+    <div class="employee-name" id="employeeName"></div>
+  </div>
+
+  <form id="employeeForm">
+    <!-- Location & Job Info -->
+    <div class="form-section">
+      <h5><i class="bi bi-geo-alt"></i> Location & Job Info</h5>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Location <span class="required-star">*</span></label>
+          <select class="form-select" id="location" required>
+            <option value="">Select location...</option>
+          </select>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Job Number <span class="required-star">*</span></label>
+          <input type="text" class="form-control" id="jobNumber" placeholder="e.g., 005-26.1" required>
+          <div class="info-text">Format: XXX-YY.Z (e.g., 005-26.1)</div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Job Classification <span class="required-star">*</span></label>
+          <select class="form-select" id="jobClassification" required>
+            <option value="">Select classification...</option>
+            <option value="F">F - Foreman</option>
+            <option value="GTO F">GTO F - GTO Foreman</option>
+            <option value="GF">GF - General Foreman</option>
+            <option value="JL">JL - Journeyman Lineman</option>
+            <option value="JRY">JRY - Journeyman</option>
+            <option value="JRY OP">JRY OP - Journeyman Operator</option>
+            <option value="O">O - Operator</option>
+            <option value="GTO O">GTO O - GTO Operator</option>
+            <option value="EO 2">EO 2 - Equipment Operator 2</option>
+            <option value="AP 1">AP 1 - Apprentice 1</option>
+            <option value="AP 2">AP 2 - Apprentice 2</option>
+            <option value="AP 3">AP 3 - Apprentice 3</option>
+            <option value="AP 4">AP 4 - Apprentice 4</option>
+            <option value="AP 5">AP 5 - Apprentice 5</option>
+            <option value="AP 6">AP 6 - Apprentice 6</option>
+            <option value="AP 7">AP 7 - Apprentice 7</option>
+            <option value="GTO">GTO - Groundman</option>
+            <option value="A">A - Apprentice (General)</option>
+          </select>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Hire Date</label>
+          <input type="date" class="form-control" id="hireDate">
+        </div>
+      </div>
+    </div>
+
+    <!-- Contact Info -->
+    <div class="form-section">
+      <h5><i class="bi bi-telephone"></i> Contact Info</h5>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Phone Number</label>
+          <input type="tel" class="form-control" id="phoneNumber" placeholder="(XXX) XXX-XXXX">
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Email Address</label>
+          <input type="email" class="form-control" id="emailAddress" placeholder="employee@email.com">
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label">MP Email</label>
+          <input type="email" class="form-control" id="mpEmail" placeholder="team##@MountainPower.com">
+          <div class="info-text">MountainPower work email</div>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Notification Emails</label>
+          <input type="email" class="form-control" id="notificationEmails" placeholder="Email for notifications">
+        </div>
+      </div>
+    </div>
+
+    <!-- Equipment Sizes -->
+    <div class="form-section">
+      <h5><i class="bi bi-hand-index"></i> Equipment Sizes</h5>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Glove Size</label>
+          <select class="form-select" id="gloveSize">
+            <option value="">Select size...</option>
+            <option value="8">8</option>
+            <option value="8.5">8.5</option>
+            <option value="9">9</option>
+            <option value="9.5">9.5</option>
+            <option value="10">10</option>
+            <option value="10.5">10.5</option>
+            <option value="11">11</option>
+            <option value="11.5">11.5</option>
+            <option value="12">12</option>
+            <option value="N/A">N/A</option>
+          </select>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Sleeve Size</label>
+          <select class="form-select" id="sleeveSize">
+            <option value="">Select size...</option>
+            <option value="Regular">Regular</option>
+            <option value="Large">Large</option>
+            <option value="X-Large">X-Large</option>
+            <option value="N/A">N/A</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Buttons -->
+    <div class="d-flex justify-content-end gap-2 mt-3">
+      <button type="button" class="btn btn-outline-secondary" onclick="skipForNow()">
+        <i class="bi bi-x-lg"></i> Skip for Now
+      </button>
+      <button type="submit" class="btn btn-primary">
+        <i class="bi bi-check-lg"></i> Save Employee
+      </button>
+    </div>
+  </form>
+
+  <script>
+    // Get data passed from the template
+    var employeeName = <?= JSON.stringify(employeeName || '') ?>;
+    var rowIndex = <?= rowIndex || 0 ?>;
+    var passedLocations = <?= locations || '[]' ?>;
+
+    // Initialize dialog on load
+    document.addEventListener('DOMContentLoaded', function() {
+      // Set the employee name display
+      document.getElementById('employeeName').textContent = employeeName;
+
+      // Set today as default hire date
+      var today = new Date().toISOString().split('T')[0];
+      document.getElementById('hireDate').value = today;
+
+      // Populate locations dropdown
+      var locationSelect = document.getElementById('location');
+      var locations = typeof passedLocations === 'string' ? JSON.parse(passedLocations) : passedLocations;
+
+      if (locations && locations.length > 0) {
+        locations.forEach(function(loc) {
+          var option = document.createElement('option');
+          option.value = loc;
+          option.textContent = loc;
+          locationSelect.appendChild(option);
+        });
+      }
+
+      console.log('Dialog initialized: name=' + employeeName + ', rowIndex=' + rowIndex);
+    });
+
+
+    // Form submission
+    document.getElementById('employeeForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+
+      var employeeData = {
+        name: employeeName,
+        rowIndex: rowIndex,
+        location: document.getElementById('location').value,
+        jobNumber: document.getElementById('jobNumber').value,
+        jobClassification: document.getElementById('jobClassification').value,
+        hireDate: document.getElementById('hireDate').value,
+        phoneNumber: document.getElementById('phoneNumber').value,
+        emailAddress: document.getElementById('emailAddress').value,
+        mpEmail: document.getElementById('mpEmail').value,
+        notificationEmails: document.getElementById('notificationEmails').value,
+        gloveSize: document.getElementById('gloveSize').value,
+        sleeveSize: document.getElementById('sleeveSize').value
+      };
+
+      // Disable submit button
+      var submitBtn = document.querySelector('button[type="submit"]');
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saving...';
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          google.script.host.close();
+        })
+        .withFailureHandler(function(error) {
+          alert('Error saving employee: ' + error);
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '<i class="bi bi-check-lg"></i> Save Employee';
+        })
+        .saveNewEmployeeData(employeeData);
+    });
+
+    function skipForNow() {
+      google.script.host.close();
+    }
+  </script>
+</body>
+</html>

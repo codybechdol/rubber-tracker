@@ -107,6 +107,18 @@ function collectAndGroupTasks(ss) {
   var afterReclaims = countTasks(tasksByLocation);
   Logger.log('collectAndGroupTasks: Reclaims added ' + (afterReclaims - beforeReclaims) + ' tasks');
 
+  // Collect from Expiring Certs (based on selected cert types in ToDoConfig)
+  var beforeCerts = countTasks(tasksByLocation);
+  collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employeeForemen, today);
+  var afterCerts = countTasks(tasksByLocation);
+  Logger.log('collectAndGroupTasks: Expiring Certs added ' + (afterCerts - beforeCerts) + ' tasks');
+
+  // Collect from Manual Tasks
+  var beforeManual = countTasks(tasksByLocation);
+  collectManualTasks(ss, tasksByLocation, today);
+  var afterManual = countTasks(tasksByLocation);
+  Logger.log('collectAndGroupTasks: Manual Tasks added ' + (afterManual - beforeManual) + ' tasks');
+
   Logger.log('collectAndGroupTasks: TOTAL tasks = ' + countTasks(tasksByLocation));
 
   // Sort tasks within each location by foreman, then by due date
@@ -482,6 +494,7 @@ function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLoca
 
 /**
  * Collects training tasks from Training Tracking sheet.
+ * Filters crews based on job classifications selected in Training Config.
  *
  * @param {Spreadsheet} ss - Active spreadsheet
  * @param {Object} tasksByLocation - Object to add tasks to
@@ -496,6 +509,21 @@ function collectTrainingTasks(ss, tasksByLocation, today) {
 
   var data = trainingSheet.getDataRange().getValues();
   Logger.log('collectTrainingTasks: Processing Training Tracking with ' + data.length + ' rows');
+
+  // Get selected crews from config
+  var properties = PropertiesService.getScriptProperties();
+  var selectedJson = properties.getProperty('trainingCrews');
+  var selectedCrews = null; // null means all crews are selected (default)
+
+  if (selectedJson) {
+    try {
+      selectedCrews = JSON.parse(selectedJson);
+      Logger.log('collectTrainingTasks: Selected crews: ' + selectedCrews.join(', '));
+    } catch (e) {
+      Logger.log('collectTrainingTasks: Error parsing trainingCrews: ' + e);
+      selectedCrews = null; // Default to all crews
+    }
+  }
 
   // Headers are in row 2 (index 1), data starts at row 3 (index 2)
   var monthCol = 0;      // A: Month
@@ -517,6 +545,7 @@ function collectTrainingTasks(ss, tasksByLocation, today) {
   var currentYear = today.getFullYear();
   var currentMonth = today.getMonth();
   var taskCount = 0;
+  var skippedCrews = 0;
 
   for (var i = 2; i < data.length; i++) {
     var row = data[i];
@@ -530,6 +559,13 @@ function collectTrainingTasks(ss, tasksByLocation, today) {
     // Skip if complete, N/A, or already has completion date
     if (!crew || status === 'Complete' || status === 'N/A') continue;
     if (completionDate && completionDate instanceof Date) continue;
+
+    // Skip if this crew is NOT in the selected crews list (if a list is configured)
+    if (selectedCrews !== null && selectedCrews.indexOf(crew) === -1) {
+      skippedCrews++;
+      Logger.log('collectTrainingTasks: Skipping crew ' + crew + ' (' + crewLead + ') - not in selected crews');
+      continue;
+    }
 
     var location = crewLocations[crew] || 'Unknown';
 
@@ -604,7 +640,58 @@ function collectTrainingTasks(ss, tasksByLocation, today) {
     taskCount++;
   }
 
-  Logger.log('collectTrainingTasks: Added ' + taskCount + ' training tasks');
+  Logger.log('collectTrainingTasks: Added ' + taskCount + ' training tasks, skipped ' + skippedCrews + ' crews (not in selected list)');
+}
+
+/**
+ * Builds a map of crew numbers to whether they have employees with selected job classifications.
+ *
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @param {Array} selectedClassifications - Array of job classification codes to include
+ * @return {Object} Map of crew number to true (if has selected employees)
+ */
+function getCrewClassificationMap(ss, selectedClassifications) {
+  var employeesSheet = ss.getSheetByName('Employees');
+  if (!employeesSheet || employeesSheet.getLastRow() < 2) {
+    return {};
+  }
+
+  var data = employeesSheet.getDataRange().getValues();
+  var headers = data[0];
+  var jobNumCol = -1;
+  var classificationCol = -1;
+
+  // Find columns
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'job number') jobNumCol = h;
+    if (header === 'job classification') classificationCol = h;
+  }
+
+  if (jobNumCol === -1 || classificationCol === -1) {
+    Logger.log('getCrewClassificationMap: Could not find required columns');
+    return {};
+  }
+
+  var crewMap = {};
+
+  for (var i = 1; i < data.length; i++) {
+    var jobNumber = String(data[i][jobNumCol]).trim();
+    var classification = String(data[i][classificationCol]).trim();
+
+    if (!jobNumber) continue;
+
+    // Extract crew number (e.g., "009-26.1" → "009-26")
+    var crew = extractCrewNumber(jobNumber);
+    if (!crew) continue;
+
+    // If this employee has a selected classification, mark the crew
+    if (selectedClassifications.indexOf(classification) !== -1) {
+      crewMap[crew] = true;
+    }
+  }
+
+  return crewMap;
 }
 
 /**
@@ -763,6 +850,303 @@ function collectReclaimTasks(ss, tasksByLocation, employeeLocations, employeeFor
   }
 
   Logger.log('collectReclaimTasks: Added ' + taskCount + ' reclaim tasks total');
+}
+
+/**
+ * Collects expiring certification tasks based on selected cert types in ToDoConfig.
+ * Only creates tasks for cert types that are checked in the "Create To Do Tasks For" section.
+ *
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @param {Object} tasksByLocation - Object to add tasks to
+ * @param {Object} employeeLocations - Employee to location map
+ * @param {Object} employeeForemen - Employee to foreman map
+ * @param {Date} today - Today's date
+ */
+function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employeeForemen, today) {
+  var expiringSheet = ss.getSheetByName('Expiring Certs');
+  if (!expiringSheet || expiringSheet.getLastRow() < 2) {
+    Logger.log('collectExpiringCertTasks: Expiring Certs sheet not found or empty');
+    return;
+  }
+
+  // Get selected cert types from config
+  var properties = PropertiesService.getScriptProperties();
+  var selectedJson = properties.getProperty('selectedCertTypes');
+  var selectedCertTypes = [];
+
+  if (selectedJson) {
+    try {
+      selectedCertTypes = JSON.parse(selectedJson);
+    } catch (e) {
+      Logger.log('collectExpiringCertTasks: Error parsing selectedCertTypes: ' + e);
+      // Use defaults if parse fails - must match defaults in Code.gs getExpiringCertsMapping()
+      selectedCertTypes = ['DL', 'MEC Expiration', '1st Aid', 'CPR', 'Crane Cert'];
+    }
+  } else {
+    // Default cert types if none configured - must match defaults in Code.gs getExpiringCertsMapping()
+    selectedCertTypes = ['DL', 'MEC Expiration', '1st Aid', 'CPR', 'Crane Cert'];
+  }
+
+  Logger.log('collectExpiringCertTasks: Selected cert types: ' + selectedCertTypes.join(', '));
+
+  var data = expiringSheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Find column indices
+  var empCol = -1;
+  var certTypeCol = -1;
+  var expirationCol = -1;
+  var locationCol = -1;
+
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'employee name' || header === 'employee') empCol = h;
+    if (header === 'item type' || header === 'cert type' || header === 'certification') certTypeCol = h;
+    if (header === 'expiration date' || header === 'expiration') expirationCol = h;
+    if (header === 'location') locationCol = h;
+  }
+
+  // Fallback to positional columns (A=Employee, B=Cert Type, C=Expiration)
+  if (empCol === -1) empCol = 0;
+  if (certTypeCol === -1) certTypeCol = 1;
+  if (expirationCol === -1) expirationCol = 2;
+
+  Logger.log('collectExpiringCertTasks: empCol=' + empCol + ', certTypeCol=' + certTypeCol + ', expirationCol=' + expirationCol);
+
+  var taskCount = 0;
+  var thirtyDaysFromNow = new Date(today);
+  thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var employee = String(row[empCol] || '').trim();
+    var certType = String(row[certTypeCol] || '').trim();
+    var expirationDate = row[expirationCol];
+
+    // Skip if no employee or cert type
+    if (!employee || !certType) continue;
+
+    // Skip if this cert type is NOT selected in config
+    if (selectedCertTypes.indexOf(certType) === -1) {
+      continue;
+    }
+
+    // Parse expiration date
+    var expDate = null;
+    if (expirationDate instanceof Date) {
+      expDate = new Date(expirationDate);
+    } else if (expirationDate && typeof expirationDate === 'string') {
+      expDate = new Date(expirationDate);
+      if (isNaN(expDate.getTime())) {
+        expDate = null;
+      }
+    }
+
+    // Skip if no valid expiration date (non-expiring certs)
+    if (!expDate) continue;
+
+    expDate.setHours(0, 0, 0, 0);
+
+    // Calculate days until expiration
+    var daysTillDue = Math.ceil((expDate - today) / (1000 * 60 * 60 * 24));
+
+    // Only include certs that are expired or expiring within 30 days
+    if (daysTillDue > 30) continue;
+
+    var isOverdue = daysTillDue < 0;
+
+    // Determine priority
+    var priority = 'Low';
+    if (isOverdue) {
+      priority = 'High';
+    } else if (daysTillDue <= 7) {
+      priority = 'High';
+    } else if (daysTillDue <= 14) {
+      priority = 'Medium';
+    }
+
+    // Get location from row or employee lookup
+    var location = locationCol !== -1 ? String(row[locationCol] || '').trim() : '';
+    if (!location) {
+      location = employeeLocations[employee.toLowerCase()] || 'Unknown';
+    }
+
+    // Get foreman for this employee
+    var foreman = employeeForemen[employee.toLowerCase()] || 'Unassigned';
+
+    // Determine status
+    var status = isOverdue ? 'Expired' : 'Expiring Soon';
+
+    var task = {
+      type: 'Cert Expiring',
+      itemType: certType,
+      employee: employee,
+      location: location,
+      foreman: foreman, // Use actual foreman from employee lookup
+      currentItem: '', // No item number for certs
+      pickListItem: '',
+      size: '',
+      dueDate: expDate,
+      isOverdue: isOverdue,
+      daysTillDue: daysTillDue,
+      status: status,
+      estimatedTime: 0, // No time for cert tasks - they're reminders
+      priority: priority,
+      sheetName: 'Expiring Certs',
+      rowIndex: i + 1
+    };
+
+    // Add to location group
+    if (!tasksByLocation[location]) {
+      tasksByLocation[location] = [];
+    }
+    tasksByLocation[location].push(task);
+    taskCount++;
+
+    Logger.log('collectExpiringCertTasks: Added ' + certType + ' task for ' + employee + ' at ' + location + ' (days=' + daysTillDue + ')');
+  }
+
+  Logger.log('collectExpiringCertTasks: Added ' + taskCount + ' expiring cert tasks total');
+}
+
+/**
+ * Collects manually added tasks from the Manual Tasks sheet.
+ *
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @param {Object} tasksByLocation - Object to add tasks to
+ * @param {Date} today - Today's date
+ */
+function collectManualTasks(ss, tasksByLocation, today) {
+  var manualSheet = ss.getSheetByName('Manual Tasks');
+  if (!manualSheet || manualSheet.getLastRow() < 2) {
+    Logger.log('collectManualTasks: Manual Tasks sheet not found or empty');
+    return;
+  }
+
+  var data = manualSheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Find column indices from headers
+  // Expected: Location, Priority, Task Type, Scheduled Date, Start Time, End Time,
+  //           Estimated Time (hrs), Start Location, End Location, Notes, Date Added, Status
+  var locationCol = -1;
+  var priorityCol = -1;
+  var taskTypeCol = -1;
+  var scheduledDateCol = -1;
+  var startTimeCol = -1;
+  var endTimeCol = -1;
+  var estimatedTimeCol = -1;
+  var startLocationCol = -1;
+  var endLocationCol = -1;
+  var notesCol = -1;
+  var statusCol = -1;
+
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'location') locationCol = h;
+    if (header === 'priority') priorityCol = h;
+    if (header === 'task type') taskTypeCol = h;
+    if (header === 'scheduled date') scheduledDateCol = h;
+    if (header === 'start time') startTimeCol = h;
+    if (header === 'end time') endTimeCol = h;
+    if (header.indexOf('estimated time') !== -1) estimatedTimeCol = h;
+    if (header === 'start location') startLocationCol = h;
+    if (header === 'end location') endLocationCol = h;
+    if (header === 'notes') notesCol = h;
+    if (header === 'status') statusCol = h;
+  }
+
+  // Fallbacks for column positions
+  if (locationCol === -1) locationCol = 0;
+  if (priorityCol === -1) priorityCol = 1;
+  if (taskTypeCol === -1) taskTypeCol = 2;
+  if (scheduledDateCol === -1) scheduledDateCol = 3;
+  if (startTimeCol === -1) startTimeCol = 4;
+  if (endTimeCol === -1) endTimeCol = 5;
+  if (estimatedTimeCol === -1) estimatedTimeCol = 6;
+  if (statusCol === -1) statusCol = 11;
+
+  var taskCount = 0;
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var location = String(row[locationCol] || '').trim();
+    var priority = String(row[priorityCol] || 'Medium').trim();
+    var taskType = String(row[taskTypeCol] || 'Task').trim();
+    var scheduledDate = row[scheduledDateCol];
+    var startTime = row[startTimeCol] || '';
+    var estimatedTime = parseFloat(row[estimatedTimeCol]) || 1;
+    var notes = notesCol !== -1 ? String(row[notesCol] || '').trim() : '';
+    var status = statusCol !== -1 ? String(row[statusCol] || 'Pending').trim() : 'Pending';
+
+    // Skip if no location
+    if (!location) {
+      Logger.log('collectManualTasks: Skipping row ' + (i+1) + ' - no location');
+      continue;
+    }
+
+    // Skip if already complete
+    if (status.toLowerCase() === 'complete' || status.toLowerCase() === 'completed') {
+      Logger.log('collectManualTasks: Skipping row ' + (i+1) + ' - already complete');
+      continue;
+    }
+
+    // Parse scheduled date
+    var dueDate = null;
+    if (scheduledDate instanceof Date) {
+      dueDate = new Date(scheduledDate);
+      dueDate.setHours(0, 0, 0, 0);
+    } else if (scheduledDate && typeof scheduledDate === 'string') {
+      dueDate = new Date(scheduledDate);
+      if (isNaN(dueDate.getTime())) {
+        dueDate = null;
+      } else {
+        dueDate.setHours(0, 0, 0, 0);
+      }
+    }
+
+    // Calculate days until due
+    var daysTillDue = null;
+    var isOverdue = false;
+    if (dueDate) {
+      daysTillDue = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
+      isOverdue = daysTillDue < 0;
+    }
+
+    // Build task object
+    var task = {
+      type: taskType,
+      itemType: taskType, // Use task type as item type for manual tasks
+      employee: '', // Manual tasks may not have an employee
+      location: location,
+      foreman: 'Manual', // Indicate this is a manual task
+      currentItem: '',
+      pickListItem: '',
+      size: '',
+      dueDate: dueDate,
+      isOverdue: isOverdue,
+      daysTillDue: daysTillDue,
+      status: status,
+      estimatedTime: estimatedTime,
+      priority: priority,
+      startTime: startTime,
+      notes: notes,
+      sheetName: 'Manual Tasks',
+      rowIndex: i + 1
+    };
+
+    // Add to location group
+    if (!tasksByLocation[location]) {
+      tasksByLocation[location] = [];
+    }
+    tasksByLocation[location].push(task);
+    taskCount++;
+
+    Logger.log('collectManualTasks: Added ' + taskType + ' task at ' + location +
+               (dueDate ? ' (scheduled: ' + dueDate.toDateString() + ')' : ' (no date)'));
+  }
+
+  Logger.log('collectManualTasks: Added ' + taskCount + ' manual tasks total');
 }
 
 /**
@@ -948,13 +1332,9 @@ function createSmartScheduleToDoList(ss, tasksByLocation) {
           daysTillDueDisplay = task.daysTillDue;
         }
 
-        // Include foreman info in the location label for first task in each foreman group
+        // Include foreman info in the location label for ALL tasks (so frontend can group properly)
         var locationVisitLabel = '📍 ' + location;
-        if (j === 0 && sortedForemen.length > 1) {
-          // Multiple foremen in this location - show foreman name
-          locationVisitLabel = '📍 ' + location + ' (👷 ' + foreman + ')';
-        } else if (j === 0 && foreman !== 'Unknown') {
-          // Single foreman group - show foreman name on first task
+        if (foreman && foreman !== 'Unknown') {
           locationVisitLabel = '📍 ' + location + ' (👷 ' + foreman + ')';
         }
 

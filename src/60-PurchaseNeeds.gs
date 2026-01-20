@@ -23,8 +23,8 @@ function updatePurchaseNeeds() {
     // Table headers
     var tableHeaders = ['Severity', 'Timeframe', 'Item Type', 'Size', 'Class', 'Quantity Needed', 'Reason', 'Status', 'Notes'];
 
-    // Table definitions - ordered by severity (1=most urgent, 4=least urgent)
-    // ONLY tracks items that need purchasing: either no inventory or only size-up available
+    // Table definitions - ordered by severity (1=most urgent, 5=least urgent)
+    // Tracks items that need purchasing or are awaiting testing
     var tables = [
       {
         title: '🛒 NEED TO ORDER',
@@ -47,10 +47,27 @@ function updatePurchaseNeeds() {
         match: function(status) { return status && status.indexOf('Ready For Delivery (Size Up)') === 0; }
       },
       {
+        title: '⏳ IN TESTING',
+        reason: 'In Testing',
+        status: 'Awaiting Test',
+        severity: 3,
+        timeframe: 'In 3 Weeks',
+        titleBg: '#fff9c4',
+        headerBg: '#fffde7',
+        // Match "In Testing ⏳" but NOT "In Testing (Size Up)"
+        match: function(status) {
+          if (!status) return false;
+          // Check if status contains "In Testing" anywhere (handles emoji prefix/suffix)
+          var hasInTesting = status.indexOf('In Testing') !== -1;
+          var hasSizeUp = status.indexOf('Size Up') !== -1;
+          return hasInTesting && !hasSizeUp;
+        }
+      },
+      {
         title: '⏳⚠️ IN TESTING (SIZE UP)',
         reason: 'In Testing + Size Up',
         status: 'Awaiting Test (Size Up)',
-        severity: 3,
+        severity: 4,
         timeframe: 'In 3 Weeks',
         titleBg: '#ce93d8',
         headerBg: '#e1bee7',
@@ -60,7 +77,7 @@ function updatePurchaseNeeds() {
         title: '⚠️ SIZE UP ASSIGNMENTS',
         reason: 'Size Up',
         status: 'Assigned (Size Up)',
-        severity: 4,
+        severity: 5,
         timeframe: 'Consider',
         titleBg: '#ffcc80',
         headerBg: '#ffe0b2',
@@ -117,60 +134,124 @@ function updatePurchaseNeeds() {
       }
     }
 
-    var allRows = [{}, {}, {}, {}];
+    var allRows = [{}, {}, {}, {}, {}];
     processSwapTab('Glove Swaps', 'Glove', allRows);
     processSwapTab('Sleeve Swaps', 'Sleeve', allRows);
 
-    // Also process Reclaims sheet for "Need to Purchase" items
+    // Also process Reclaims sheet for "Need to Purchase" and "In Testing" items
+    // Only process "Class X Reclaims" sections (active employees with pick list items)
+    // Skip "Previous Employee Reclaims" since those don't have pick list assignments
     var reclaimsSheet = ss.getSheetByName('Reclaims');
     if (reclaimsSheet && reclaimsSheet.getLastRow() > 1) {
       var reclaimsData = reclaimsSheet.getDataRange().getValues();
+      var inReclaimSection = false;
+      var headerRowFound = false;
+
+      // Column indices (will be set when we find header row)
+      var employeeCol = -1;
+      var itemTypeCol = -1;
+      var sizeCol = -1;
+      var classCol = -1;
+      var statusCol = -1;
+
+      console.log('DEBUG: Processing Reclaims sheet, ' + reclaimsData.length + ' rows');
 
       for (var ri = 0; ri < reclaimsData.length; ri++) {
         var rRow = reclaimsData[ri];
-        var rFirstCell = (rRow[0] || '').toString().trim();
+        var rFirstCell = String(rRow[0] || '').trim();
+        var firstCellLower = rFirstCell.toLowerCase();
 
-        // Skip headers, titles, location rows
-        if (!rFirstCell || rFirstCell === 'Employee' ||
-            rFirstCell.indexOf('⚠️') !== -1 ||
-            rFirstCell.indexOf('📍') !== -1 ||
-            rFirstCell.indexOf('Previous') !== -1 ||
-            rFirstCell.indexOf('Lost Items') !== -1 ||
-            rFirstCell === 'Item Type' ||
-            rFirstCell === 'Location') {
+        // Detect section headers using lowercase comparison (handles emoji prefixes)
+        // Class 3 Reclaims contains "downgrade", Class 2 Reclaims contains "upgrade"
+        if ((firstCellLower.indexOf('reclaims') !== -1 && firstCellLower.indexOf('downgrade') !== -1) ||
+            (firstCellLower.indexOf('reclaims') !== -1 && firstCellLower.indexOf('upgrade') !== -1)) {
+          inReclaimSection = true;
+          headerRowFound = false; // Reset to find new header
+          console.log('DEBUG Row ' + (ri+1) + ': Found Class Reclaims section: "' + rFirstCell.substring(0,50) + '"');
           continue;
         }
 
-        // Check if this is a reclaim data row with "Need to Purchase" status
-        var rItemType = (rRow[1] || '').toString().trim();
-        var rSize = (rRow[3] || '').toString().trim();
-        var rClass = (rRow[4] || '').toString().trim();
-        var rPickListStatus = (rRow[7] || '').toString().trim();
+        // Exit section when we hit other headers
+        if (firstCellLower.indexOf('previous employee') !== -1 ||
+            firstCellLower.indexOf('class location approvals') !== -1 ||
+            firstCellLower.indexOf('location approvals') !== -1 ||
+            firstCellLower.indexOf('lost items') !== -1) {
+          if (inReclaimSection) {
+            console.log('DEBUG Row ' + (ri+1) + ': Exiting reclaim section');
+          }
+          inReclaimSection = false;
+          headerRowFound = false;
+          continue;
+        }
+
+        // Skip if not in a reclaim section
+        if (!inReclaimSection) continue;
+
+        // Find header row within reclaim section
+        if (firstCellLower === 'employee') {
+          headerRowFound = true;
+          // Find column indices dynamically
+          for (var h = 0; h < rRow.length; h++) {
+            var header = String(rRow[h]).toLowerCase().trim();
+            if (header === 'employee') employeeCol = h;
+            if (header === 'item type') itemTypeCol = h;
+            if (header === 'size') sizeCol = h;
+            if (header === 'class') classCol = h;
+            if (header.indexOf('pick list') !== -1 && header.indexOf('status') !== -1) statusCol = h;
+          }
+          console.log('DEBUG Row ' + (ri+1) + ': Header found. statusCol=' + statusCol);
+          continue;
+        }
+
+        // Skip if we haven't found header row yet or columns not found
+        if (!headerRowFound || employeeCol === -1) continue;
+
+        // Skip empty rows, stage rows, or location headers
+        if (!rFirstCell || rFirstCell.indexOf('📍') !== -1 ||
+            rFirstCell.indexOf('⚠️') !== -1 || firstCellLower.indexOf('stage') !== -1) {
+          continue;
+        }
+
+        // Read data from columns
         var rEmployee = rFirstCell;
+        var rItemType = itemTypeCol !== -1 ? String(rRow[itemTypeCol] || '').trim() : '';
+        var rSize = sizeCol !== -1 ? String(rRow[sizeCol] || '').trim() : '';
+        var rClass = classCol !== -1 ? String(rRow[classCol] || '').trim() : '';
+        var rPickListStatus = statusCol !== -1 ? String(rRow[statusCol] || '').trim() : '';
 
-        // Only process if it's a valid reclaim row with Need to Purchase status
-        if ((rItemType === 'Glove' || rItemType === 'Sleeve') &&
-            rSize && rClass &&
-            rPickListStatus.indexOf('Need to Purchase') !== -1) {
+        console.log('DEBUG Row ' + (ri+1) + ': ' + rEmployee + ', ' + rItemType + ', Size=' + rSize + ', Class=' + rClass + ', Status="' + rPickListStatus + '"');
 
+        // Process valid reclaim rows with relevant statuses
+        if ((rItemType === 'Glove' || rItemType === 'Sleeve') && rSize && rClass) {
           var classNum = parseInt(rClass, 10);
+          if (isNaN(classNum)) continue;
           var key = rItemType + '|' + rSize + '|' + classNum;
 
-          // Add to the "Need to Order" table (index 0)
-          if (!allRows[0][key]) {
-            allRows[0][key] = { itemType: rItemType, size: rSize, class: classNum, qty: 0, employees: [] };
-          }
-          allRows[0][key].qty++;
-          if (rEmployee && allRows[0][key].employees.indexOf(rEmployee + ' (Reclaim)') === -1) {
-            allRows[0][key].employees.push(rEmployee + ' (Reclaim)');
+          // Match against each table type
+          for (var t = 0; t < tables.length; t++) {
+            var matchResult = tables[t].match(rPickListStatus);
+            if (matchResult) {
+              console.log('DEBUG: MATCHED! ' + rEmployee + ' status "' + rPickListStatus + '" -> ' + tables[t].title);
+              if (!allRows[t][key]) {
+                allRows[t][key] = { itemType: rItemType, size: rSize, class: classNum, qty: 0, employees: [] };
+              }
+              allRows[t][key].qty++;
+              var employeeLabel = rEmployee + ' (Reclaim)';
+              if (allRows[t][key].employees.indexOf(employeeLabel) === -1) {
+                allRows[t][key].employees.push(employeeLabel);
+              }
+              break;
+            }
           }
         }
       }
+      console.log('DEBUG: Finished processing Reclaims');
     }
 
     var grandTotals = {
       needToOrder: 0,
       readyForDeliverySizeUp: 0,
+      inTesting: 0,
       inTestingSizeUp: 0,
       sizeUp: 0
     };
@@ -181,8 +262,9 @@ function updatePurchaseNeeds() {
         var qty = allRows[t][keys[k]].qty;
         if (t === 0) grandTotals.needToOrder += qty;
         else if (t === 1) grandTotals.readyForDeliverySizeUp += qty;
-        else if (t === 2) grandTotals.inTestingSizeUp += qty;
-        else if (t === 3) grandTotals.sizeUp += qty;
+        else if (t === 2) grandTotals.inTesting += qty;
+        else if (t === 3) grandTotals.inTestingSizeUp += qty;
+        else if (t === 4) grandTotals.sizeUp += qty;
       }
     }
 
@@ -193,11 +275,12 @@ function updatePurchaseNeeds() {
       .setFontWeight('bold').setFontSize(14).setBackground('#b0bec5').setFontColor('#333333').setHorizontalAlignment('center');
     rowIdx++;
 
-    // Summary stats row
+    // Summary stats row - combine In Testing counts for the "In 3 Weeks" timeframe
+    var in3WeeksTotal = grandTotals.inTesting + grandTotals.inTestingSizeUp;
     var topSummaryData = [
       ['1️⃣ Immediate: ' + grandTotals.needToOrder,
        '2️⃣ In 2 Weeks: ' + grandTotals.readyForDeliverySizeUp,
-       '3️⃣ In 3 Weeks: ' + grandTotals.inTestingSizeUp,
+       '3️⃣ In 3 Weeks: ' + in3WeeksTotal,
        '4️⃣ Consider: ' + grandTotals.sizeUp,
        '',
        '', '', '', '']
@@ -266,7 +349,7 @@ function updatePurchaseNeeds() {
     }
 
     // If no data at all, show message
-    var totalItems = grandTotals.needToOrder + grandTotals.readyForDeliverySizeUp + grandTotals.inTestingSizeUp + grandTotals.sizeUp;
+    var totalItems = grandTotals.needToOrder + grandTotals.readyForDeliverySizeUp + grandTotals.inTesting + grandTotals.inTestingSizeUp + grandTotals.sizeUp;
     if (totalItems === 0) {
       purchaseSheet.getRange(rowIdx, 1, 1, 9).merge().setValue('✅ No purchase needs at this time!')
         .setFontWeight('bold').setFontSize(12).setBackground('#4caf50').setFontColor('white').setHorizontalAlignment('center');
@@ -279,10 +362,11 @@ function updatePurchaseNeeds() {
     purchaseSheet.getRange(summaryStartRow, summaryCol, 1, 2).merge().setValue('📊 SUMMARY BY TIMEFRAME')
       .setFontWeight('bold').setBackground('#b0bec5').setFontColor('#333333').setHorizontalAlignment('center');
 
+    // Combine In Testing counts for summary (both are "In 3 Weeks")
     var summaryData = [
       ['1️⃣ Immediate', grandTotals.needToOrder, '#ef9a9a'],
       ['2️⃣ In 2 Weeks', grandTotals.readyForDeliverySizeUp, '#80cbc4'],
-      ['3️⃣ In 3 Weeks', grandTotals.inTestingSizeUp, '#ce93d8'],
+      ['3️⃣ In 3 Weeks', grandTotals.inTesting + grandTotals.inTestingSizeUp, '#ce93d8'],
       ['4️⃣ Consider', grandTotals.sizeUp, '#ffcc80']
     ];
 
@@ -295,7 +379,7 @@ function updatePurchaseNeeds() {
     }
 
     var totalRow = summaryStartRow + 5;
-    var grandTotal = grandTotals.needToOrder + grandTotals.readyForDeliverySizeUp + grandTotals.inTestingSizeUp + grandTotals.sizeUp;
+    var grandTotal = grandTotals.needToOrder + grandTotals.readyForDeliverySizeUp + grandTotals.inTesting + grandTotals.inTestingSizeUp + grandTotals.sizeUp;
     purchaseSheet.getRange(totalRow, summaryCol).setValue('TOTAL')
       .setBackground('#cfd8dc').setFontColor('#333333').setFontWeight('bold');
     purchaseSheet.getRange(totalRow, summaryCol + 1).setValue(grandTotal)

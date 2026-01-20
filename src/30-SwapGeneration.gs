@@ -93,14 +93,16 @@ function generateAllReports() {
       logEvent('Pick List Upgrades: ' + upgradeResults.totalUpgrades + ' items upgraded to better options');
     }
 
+    // Update Reclaims BEFORE Purchase Needs so reclaim data is available
+    ss.toast('Updating Reclaims...', '📊 Generate All Reports', 3);
+    updateReclaimsSheet();
+
     ss.toast('Updating Purchase Needs...', '📊 Generate All Reports', 3);
     updatePurchaseNeeds();
 
     ss.toast('Updating Inventory Reports...', '📊 Generate All Reports', 3);
     updateInventoryReports();
 
-    ss.toast('Updating Reclaims...', '📊 Generate All Reports', 3);
-    updateReclaimsSheet();
 
     logEvent('All reports generated.');
     SpreadsheetApp.getUi().alert('✅ All reports generated successfully!' +
