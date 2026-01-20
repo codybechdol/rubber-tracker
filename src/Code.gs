@@ -594,6 +594,39 @@ function addManualScheduleTask(task) {
 }
 
 /**
+ * Updates the status of a manual task.
+ * @param {number} taskIndex - Index of task in getScheduleTasks() array
+ * @param {string} newStatus - New status ('Complete' or 'Pending')
+ * @return {Object} Result with success status
+ */
+function updateManualTaskStatus(taskIndex, newStatus) {
+  Logger.log('updateManualTaskStatus: index=' + taskIndex + ', status=' + newStatus);
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var tasks = getScheduleTasks();
+
+  if (taskIndex < 0 || taskIndex >= tasks.length) {
+    throw new Error('Invalid task index');
+  }
+
+  var task = tasks[taskIndex];
+
+  if (task.source !== 'Manual Tasks') {
+    throw new Error('Can only update status for Manual Tasks');
+  }
+
+  var manualSheet = ss.getSheetByName('Manual Tasks');
+  if (!manualSheet || !task.rowIndex) {
+    throw new Error('Manual Tasks sheet not found or invalid row');
+  }
+
+  // Column G = Status (column 7)
+  manualSheet.getRange(task.rowIndex, 7).setValue(newStatus);
+
+  return { success: true };
+}
+
+/**
  * Updates a task's scheduled date from the To Do Schedule dialog.
  *
  * @param {number} taskIndex - Index of task in array

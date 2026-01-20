@@ -81,6 +81,21 @@
     .location-edit-section { background: #f8f9fa; border-radius: 8px; padding: 12px; margin: 8px 16px 16px 16px; border: 1px dashed #667eea; }
     .location-edit-section .form-label { font-size: 12px; font-weight: 500; margin-bottom: 4px; }
     .location-edit-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+
+    /* Checklist Category Styles */
+    .checklist-category { margin-bottom: 12px; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden; }
+    .checklist-category-header { background: #f8f9fa; padding: 10px 12px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e0e0e0; }
+    .checklist-category-header:hover { background: #e8eaed; }
+    .checklist-category-header.collapsed { border-bottom: none; }
+    .checklist-category-title { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+    .checklist-category-body { display: block; }
+    .checklist-category-body.collapsed { display: none; }
+    .category-cert { border-left: 4px solid #ea4335; }
+    .category-cert .checklist-category-header { background: #fce8e6; }
+    .category-manual { border-left: 4px solid #1a73e8; }
+    .category-manual .checklist-category-header { background: #e8f0fe; }
+    .category-other { border-left: 4px solid #5f6368; }
+    .category-other .checklist-category-header { background: #f5f5f5; }
   </style>
 </head>
 <body>
@@ -287,11 +302,8 @@
               <option value="Low">Low</option>
             </select>
           </div>
-          <div class="form-check">
-            <input class="form-check-input" type="checkbox" id="manualTaskAddToCalendar" checked>
-            <label class="form-check-label" for="manualTaskAddToCalendar">
-              Also add to main Task List & Calendar
-            </label>
+          <div class="alert alert-info small mb-0">
+            <i class="bi bi-info-circle"></i> This item will be saved to the Manual Tasks sheet and appear in both the Calendar and My Checklist.
           </div>
         </div>
         <div class="modal-footer">
@@ -1334,6 +1346,26 @@
     }
 
     function removeChecklistItemById(id) {
+      // Check if it's a server-side item
+      if (typeof id === 'string' && id.startsWith('server_')) {
+        var serverIndex = parseInt(id.replace('server_', ''));
+        // Delete from server
+        google.script.run
+          .withSuccessHandler(function() {
+            allTasks.splice(serverIndex, 1);
+            renderPersonalChecklist();
+            renderTasks(allTasks);
+            renderCalendar();
+            showToast('Task deleted');
+          })
+          .withFailureHandler(function(error) {
+            showToast('Error deleting: ' + error, 'error');
+          })
+          .deleteScheduleTask(serverIndex);
+        return;
+      }
+
+      // Local storage item
       personalChecklist = personalChecklist.filter(function(item) {
         return item.id !== id;
       });
@@ -1341,13 +1373,40 @@
       updateChecklistBadge();
       renderPersonalChecklist();
       renderTasks(allTasks); // Re-render to show back in foreman's list
-      showToast('Returned to foreman\'s checklist');
+      showToast('Item removed from checklist');
     }
 
     function toggleChecklistItemComplete(id) {
+      // Check if it's a server-side item
+      if (typeof id === 'string' && id.startsWith('server_')) {
+        var serverIndex = parseInt(id.replace('server_', ''));
+        var task = allTasks[serverIndex];
+        if (task) {
+          // Toggle status and save to server
+          var newStatus = task.status === 'Complete' ? 'Pending' : 'Complete';
+          google.script.run
+            .withSuccessHandler(function() {
+              task.status = newStatus;
+              renderPersonalChecklist();
+              renderTasks(allTasks);
+              showToast(newStatus === 'Complete' ? '✓ Task marked complete' : 'Task marked pending');
+            })
+            .withFailureHandler(function(error) {
+              showToast('Error updating: ' + error, 'error');
+            })
+            .updateManualTaskStatus(serverIndex, newStatus);
+        }
+        return;
+      }
+
+      // Local storage item
       personalChecklist.forEach(function(item) {
         if (item.id === id) {
           item.completed = !item.completed;
+        }
+      });
+      saveChecklistToStorage();
+      renderPersonalChecklist();
         }
       });
       saveChecklistToStorage();
@@ -1398,7 +1457,38 @@
       var container = document.getElementById('checklistItems');
       var emptyState = document.getElementById('emptyChecklist');
 
-      if (personalChecklist.length === 0) {
+      // Combine localStorage checklist with manual tasks from server
+      var combinedChecklist = personalChecklist.slice(); // Clone localStorage items
+
+      // Add manual tasks from allTasks that aren't already in the checklist
+      allTasks.forEach(function(task, index) {
+        if (task.source === 'Manual Tasks') {
+          var alreadyExists = combinedChecklist.some(function(item) {
+            return item.isFromServer && item.serverIndex === index;
+          });
+          if (!alreadyExists) {
+            combinedChecklist.push({
+              id: 'server_' + index,
+              title: task.taskType || task.employee || 'Manual Task',
+              taskType: task.taskType || 'Manual Task',
+              itemType: task.itemType || '',
+              employee: task.employee || '',
+              location: task.location || '',
+              scheduledDate: task.scheduledDate || '',
+              startTime: task.startTime || '',
+              endTime: task.endTime || '',
+              notes: task.notes || '',
+              source: 'Manual Tasks',
+              addedDate: task.scheduledDate || new Date().toISOString().split('T')[0],
+              completed: task.status === 'Complete',
+              isFromServer: true,
+              serverIndex: index
+            });
+          }
+        }
+      });
+
+      if (combinedChecklist.length === 0) {
         container.style.display = 'none';
         emptyState.style.display = 'block';
         return;
@@ -1407,49 +1497,129 @@
       container.style.display = 'block';
       emptyState.style.display = 'none';
 
-      var html = '<div class="list-group">';
+      // Group items by category
+      var categories = {
+        'cert': { title: '🏥 1st Aid / CPR Renewals', items: [], icon: 'bi-heart-pulse' },
+        'manual': { title: '📝 Manual Tasks', items: [], icon: 'bi-pencil-square' },
+        'other': { title: '📋 Other Items', items: [], icon: 'bi-list-task' }
+      };
 
-      personalChecklist.forEach(function(item) {
-        var completedClass = item.completed ? 'list-group-item-success' : '';
-        var strikethrough = item.completed ? 'text-decoration: line-through;' : '';
-
-        html += '<div class="list-group-item ' + completedClass + '">';
-        html += '<div class="d-flex justify-content-between align-items-start">';
-        html += '<div class="form-check">';
-        html += '<input class="form-check-input" type="checkbox" ' + (item.completed ? 'checked' : '') + ' onchange="toggleChecklistItemComplete(' + item.id + ')">';
-        html += '<label class="form-check-label" style="' + strikethrough + '">';
-        html += '<strong>' + (item.title || item.employee || 'Unknown Item') + '</strong>';
-        html += '</label>';
-        html += '</div>';
-        html += '<button class="btn btn-outline-danger btn-sm" onclick="removeChecklistItemById(' + item.id + ')" title="Remove"><i class="bi bi-x-lg"></i></button>';
-        html += '</div>';
-
-        html += '<div class="ms-4 mt-1">';
-        if (item.taskType || item.itemType) {
-          html += '<div class="text-muted small"><i class="bi bi-card-checklist"></i> ' + (item.taskType || item.itemType || 'Task') + '</div>';
-        }
-        if (item.notes) {
-          html += '<div class="text-muted small"><i class="bi bi-info-circle"></i> ' + item.notes + '</div>';
-        }
-        if (item.location) {
-          html += '<div class="text-muted small"><i class="bi bi-geo-alt"></i> ' + item.location + '</div>';
-        }
-        if (item.scheduledDate) {
-          html += '<div class="text-muted small"><i class="bi bi-calendar"></i> Scheduled: ' + item.scheduledDate;
-          if (item.startTime) {
-            html += ' at ' + item.startTime;
-            if (item.endTime) html += ' - ' + item.endTime;
-          }
-          html += '</div>';
-        }
-        html += '<div class="text-muted small"><i class="bi bi-plus-circle"></i> Added: ' + item.addedDate + '</div>';
-        html += '</div>';
-
-        html += '</div>';
+      combinedChecklist.forEach(function(item) {
+        var category = getChecklistItemCategory(item);
+        categories[category].items.push(item);
       });
 
-      html += '</div>';
+      var html = '';
+
+      // Render each category
+      ['cert', 'manual', 'other'].forEach(function(catKey) {
+        var cat = categories[catKey];
+        if (cat.items.length === 0) return;
+
+        var isCollapsed = checklistCategoryState[catKey] === false;
+
+        html += '<div class="checklist-category category-' + catKey + '">';
+        html += '<div class="checklist-category-header ' + (isCollapsed ? 'collapsed' : '') + '" onclick="toggleChecklistCategory(\'' + catKey + '\')">';
+        html += '<div class="checklist-category-title"><i class="bi ' + cat.icon + '"></i> ' + cat.title + '</div>';
+        html += '<div><span class="badge bg-secondary me-2">' + cat.items.length + '</span>';
+        html += '<i class="bi ' + (isCollapsed ? 'bi-chevron-right' : 'bi-chevron-down') + '" id="cat-chevron-' + catKey + '"></i></div>';
+        html += '</div>';
+        html += '<div class="checklist-category-body ' + (isCollapsed ? 'collapsed' : '') + '" id="cat-body-' + catKey + '">';
+        html += '<div class="list-group list-group-flush">';
+
+        cat.items.forEach(function(item) {
+          html += renderChecklistItem(item);
+        });
+
+        html += '</div></div></div>';
+      });
+
       container.innerHTML = html;
+    }
+
+    // Track which categories are expanded/collapsed
+    var checklistCategoryState = { cert: true, manual: true, other: true };
+
+    function toggleChecklistCategory(catKey) {
+      checklistCategoryState[catKey] = !checklistCategoryState[catKey];
+      var body = document.getElementById('cat-body-' + catKey);
+      var chevron = document.getElementById('cat-chevron-' + catKey);
+      var header = body.previousElementSibling;
+
+      if (checklistCategoryState[catKey]) {
+        body.classList.remove('collapsed');
+        header.classList.remove('collapsed');
+        chevron.className = 'bi bi-chevron-down';
+      } else {
+        body.classList.add('collapsed');
+        header.classList.add('collapsed');
+        chevron.className = 'bi bi-chevron-right';
+      }
+    }
+
+    function getChecklistItemCategory(item) {
+      var taskType = (item.taskType || item.itemType || '').toLowerCase();
+      var title = (item.title || '').toLowerCase();
+      var source = (item.source || '').toLowerCase();
+
+      // 1st Aid / CPR category
+      if (taskType.indexOf('1st aid') !== -1 || taskType.indexOf('first aid') !== -1 ||
+          taskType.indexOf('cpr') !== -1 || title.indexOf('1st aid') !== -1 ||
+          title.indexOf('first aid') !== -1 || title.indexOf('cpr') !== -1 ||
+          taskType.indexOf('cert') !== -1 || taskType.indexOf('renew') !== -1) {
+        return 'cert';
+      }
+
+      // Manual Tasks category
+      if (source === 'manual tasks' || item.isManual || item.isFromServer) {
+        return 'manual';
+      }
+
+      return 'other';
+    }
+
+    function renderChecklistItem(item) {
+      var completedClass = item.completed ? 'list-group-item-success' : '';
+      var strikethrough = item.completed ? 'text-decoration: line-through;' : '';
+      var itemId = item.isFromServer ? "'" + item.id + "'" : item.id;
+
+      var html = '<div class="list-group-item ' + completedClass + '">';
+      html += '<div class="d-flex justify-content-between align-items-start">';
+      html += '<div class="form-check">';
+      html += '<input class="form-check-input" type="checkbox" ' + (item.completed ? 'checked' : '') + ' onchange="toggleChecklistItemComplete(' + itemId + ')">';
+      html += '<label class="form-check-label" style="' + strikethrough + '">';
+      html += '<strong>' + (item.title || item.employee || 'Unknown Item') + '</strong>';
+      html += '</label>';
+      html += '</div>';
+      html += '<button class="btn btn-outline-danger btn-sm" onclick="removeChecklistItemById(' + itemId + ')" title="Remove"><i class="bi bi-x-lg"></i></button>';
+      html += '</div>';
+
+      html += '<div class="ms-4 mt-1">';
+      if (item.taskType && item.taskType !== item.title) {
+        html += '<div class="text-muted small"><i class="bi bi-card-checklist"></i> ' + item.taskType + '</div>';
+      }
+      if (item.employee && item.employee !== item.title) {
+        html += '<div class="text-muted small"><i class="bi bi-person"></i> ' + item.employee + '</div>';
+      }
+      if (item.notes) {
+        html += '<div class="text-muted small"><i class="bi bi-info-circle"></i> ' + item.notes + '</div>';
+      }
+      if (item.location) {
+        html += '<div class="text-muted small"><i class="bi bi-geo-alt"></i> ' + item.location + '</div>';
+      }
+      if (item.scheduledDate) {
+        html += '<div class="text-muted small"><i class="bi bi-calendar"></i> Scheduled: ' + item.scheduledDate;
+        if (item.startTime) {
+          html += ' at ' + item.startTime;
+          if (item.endTime) html += ' - ' + item.endTime;
+        }
+        html += '</div>';
+      }
+      html += '<div class="text-muted small"><i class="bi bi-plus-circle"></i> Added: ' + item.addedDate + '</div>';
+      html += '</div>';
+
+      html += '</div>';
+      return html;
     }
 
     // ================== MANUAL ITEM FUNCTIONS ==================
@@ -1477,68 +1647,42 @@
       var startTime = document.getElementById('manualTaskStartTime').value;
       var endTime = document.getElementById('manualTaskEndTime').value;
       var priority = document.getElementById('manualTaskPriority').value;
-      var addToCalendar = document.getElementById('manualTaskAddToCalendar').checked;
 
       if (!title) {
         alert('Please enter a task title');
         return;
       }
 
-      // Create checklist item
-      var checklistItem = {
-        id: Date.now(),
-        title: title,
-        taskType: 'Manual Task',
-        notes: notes,
-        location: location,
+      // Create task object for server
+      var manualTask = {
+        taskType: title,
+        source: 'Manual Tasks',
+        employee: '',
+        location: location || 'No Location',
         scheduledDate: scheduledDate,
         startTime: startTime,
         endTime: endTime,
         priority: priority,
-        addedDate: new Date().toISOString().split('T')[0],
-        completed: false,
-        isManual: true
+        status: 'Pending',
+        notes: notes,
+        itemType: 'Manual'
       };
 
-      // Add to personal checklist
-      personalChecklist.push(checklistItem);
-      saveChecklistToStorage();
-      updateChecklistBadge();
-      renderPersonalChecklist();
-
-      // Also add to main task list if checkbox is checked
-      if (addToCalendar) {
-        var manualTask = {
-          taskType: title,
-          source: 'Manual Tasks',
-          employee: '',
-          location: location || 'No Location',
-          scheduledDate: scheduledDate,
-          startTime: startTime,
-          endTime: endTime,
-          priority: priority,
-          status: 'Pending',
-          notes: notes,
-          itemType: 'Manual'
-        };
-
-        // Save to server
-        google.script.run
-          .withSuccessHandler(function(result) {
-            // Add to local allTasks array
-            manualTask._originalIndex = allTasks.length;
-            allTasks.push(manualTask);
-            renderTasks(allTasks);
-            renderCalendar();
-            showToast('✓ Item added to checklist and calendar!');
-          })
-          .withFailureHandler(function(error) {
-            showToast('Added to checklist. Error adding to calendar: ' + error, 'error');
-          })
-          .addManualScheduleTask(manualTask);
-      } else {
-        showToast('✓ Item added to your checklist!');
-      }
+      // Always save to Manual Tasks sheet - this makes it appear in calendar and checklist
+      google.script.run
+        .withSuccessHandler(function(result) {
+          // Add to local allTasks array
+          manualTask._originalIndex = allTasks.length;
+          allTasks.push(manualTask);
+          renderTasks(allTasks);
+          renderCalendar();
+          renderPersonalChecklist(); // Refresh checklist to show the new item
+          showToast('✓ Manual task added!');
+        })
+        .withFailureHandler(function(error) {
+          showToast('Error adding task: ' + error, 'error');
+        })
+        .addManualScheduleTask(manualTask);
 
       // Close modal
       var modal = bootstrap.Modal.getInstance(document.getElementById('addManualItemModal'));
