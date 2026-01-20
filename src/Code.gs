@@ -216,43 +216,52 @@ function getScheduleTasks() {
     }
 
     Logger.log('Loaded ' + tasks.length + ' tasks from To Do List sheet');
-    if (tasks.length > 0) {
-      Logger.log('=== getScheduleTasks END (using To Do List) ===');
-      return tasks;
-    }
+    // Don't return early - also need to add Manual Tasks below
   }
 
-  // FALLBACK: Build tasks from source sheets if To Do List is empty/missing
-  Logger.log('No To Do List data, building from source sheets');
-
-  // 1. Get Manual Tasks
+  // ALWAYS load Manual Tasks (they should appear in My Checklist even when To Do List exists)
+  // Headers: Task, Priority, Location, Scheduled Date, Start Time, End Time, Status, Notes
   var manualSheet = ss.getSheetByName('Manual Tasks');
   if (manualSheet && manualSheet.getLastRow() > 1) {
     Logger.log('Reading Manual Tasks...');
     var manualData = manualSheet.getDataRange().getValues();
-    for (var i = 1; i < manualData.length; i++) {
-      var mRow = manualData[i];
-      if (mRow[0]) { // Has location
+    var manualCount = 0;
+    for (var mi = 1; mi < manualData.length; mi++) {
+      var mRow = manualData[mi];
+      if (mRow[0]) { // Has task name
         tasks.push({
-          id: 'manual-' + i,
+          id: 'manual-' + mi,
           source: 'Manual Tasks',
-          location: mRow[0],
-          priority: mRow[1] || 'Medium',
-          taskType: mRow[2] || 'Task',
-          scheduledDate: formatDateForInput(mRow[3]),
-          startTime: mRow[4] || '',
-          endTime: mRow[5] || '',
-          estimatedTime: mRow[6] || 1,
-          startLocation: mRow[7] || 'Helena',
-          endLocation: mRow[8] || mRow[0],
-          notes: mRow[9] || '',
-          status: mRow[11] || 'Pending',
-          rowIndex: i + 1
+          taskType: mRow[0] || 'Task',        // Column A - Task
+          priority: mRow[1] || 'Medium',       // Column B - Priority
+          location: mRow[2] || 'No Location',  // Column C - Location
+          scheduledDate: formatDateForInput(mRow[3]), // Column D - Scheduled Date
+          startTime: mRow[4] || '',            // Column E - Start Time
+          endTime: mRow[5] || '',              // Column F - End Time
+          status: mRow[6] || 'Pending',        // Column G - Status
+          notes: mRow[7] || '',                // Column H - Notes
+          estimatedTime: 1,
+          startLocation: 'Helena',
+          endLocation: mRow[2] || 'Helena',
+          employee: '',
+          itemType: 'Manual',
+          rowIndex: mi + 1
         });
+        manualCount++;
       }
     }
-    Logger.log('Found ' + tasks.length + ' manual tasks');
+    Logger.log('Added ' + manualCount + ' manual tasks');
   }
+
+  // If we already have tasks from To Do List (plus any manual tasks), return now
+  if (tasks.length > 0) {
+    Logger.log('getScheduleTasks: Found ' + tasks.length + ' total tasks');
+    Logger.log('=== getScheduleTasks END ===');
+    return tasks;
+  }
+
+  // FALLBACK: Build tasks from other source sheets if nothing loaded yet
+  Logger.log('No To Do List data, building from other source sheets');
 
   // 2. Get Training Tracking tasks (incomplete training)
   var trainingSheet = ss.getSheetByName('Training Tracking');
