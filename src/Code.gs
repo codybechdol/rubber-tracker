@@ -227,61 +227,57 @@ function getScheduleTasks() {
     var manualHeaders = manualData[0];
 
     // Find columns dynamically based on headers
-    var mTaskCol = -1, mPriorityCol = -1, mLocationCol = -1, mScheduledDateCol = -1;
-    var mStartTimeCol = -1, mEndTimeCol = -1, mStatusCol = -1, mNotesCol = -1;
-
+    var colIndices = {};
     for (var mh = 0; mh < manualHeaders.length; mh++) {
       var header = String(manualHeaders[mh]).toLowerCase().trim();
-      if (header === 'task' || header === 'task type') mTaskCol = mh;
-      if (header === 'priority') mPriorityCol = mh;
-      if (header === 'location') mLocationCol = mh;
-      if (header === 'scheduled date' || header === 'date') mScheduledDateCol = mh;
-      if (header === 'start time') mStartTimeCol = mh;
-      if (header === 'end time') mEndTimeCol = mh;
-      if (header === 'status') mStatusCol = mh;
-      if (header === 'notes') mNotesCol = mh;
+      if (header === 'location') colIndices.location = mh;
+      if (header === 'priority') colIndices.priority = mh;
+      if (header === 'task' || header === 'task type') colIndices.taskType = mh;
+      if (header === 'scheduled date') colIndices.scheduledDate = mh;
+      if (header === 'start time') colIndices.startTime = mh;
+      if (header === 'end time') colIndices.endTime = mh;
+      if (header === 'status') colIndices.status = mh;
+      if (header === 'notes') colIndices.notes = mh;
     }
 
-    Logger.log('Manual Tasks columns: task=' + mTaskCol + ', priority=' + mPriorityCol +
-               ', location=' + mLocationCol + ', scheduledDate=' + mScheduledDateCol +
-               ', status=' + mStatusCol);
+    Logger.log('Manual Tasks column indices: ' + JSON.stringify(colIndices));
 
     var manualCount = 0;
     for (var mi = 1; mi < manualData.length; mi++) {
       var mRow = manualData[mi];
-      // Check if row has data (either task name or location)
-      var hasData = (mTaskCol >= 0 && mRow[mTaskCol]) || (mLocationCol >= 0 && mRow[mLocationCol]);
-      if (hasData) {
-        var taskName = mTaskCol >= 0 ? (mRow[mTaskCol] || 'Task') : 'Task';
-        var location = mLocationCol >= 0 ? (mRow[mLocationCol] || 'No Location') : 'No Location';
 
-        // If task column is "Location" (old format), swap them
-        if (mTaskCol === 0 && mLocationCol === -1 && taskName && !mRow[2]) {
-          // Old format: Location, Priority, Task Type...
-          location = taskName;
-          taskName = mRow[2] || 'Task';
-        }
+      // Get values with fallbacks
+      var location = colIndices.location !== undefined ? (mRow[colIndices.location] || '') : '';
+      var taskType = colIndices.taskType !== undefined ? (mRow[colIndices.taskType] || 'Task') : 'Task';
+      var priority = colIndices.priority !== undefined ? (mRow[colIndices.priority] || 'Medium') : 'Medium';
+      var scheduledDate = colIndices.scheduledDate !== undefined ? mRow[colIndices.scheduledDate] : '';
+      var startTime = colIndices.startTime !== undefined ? (mRow[colIndices.startTime] || '') : '';
+      var endTime = colIndices.endTime !== undefined ? (mRow[colIndices.endTime] || '') : '';
+      var status = colIndices.status !== undefined ? (mRow[colIndices.status] || 'Pending') : 'Pending';
+      var notes = colIndices.notes !== undefined ? (mRow[colIndices.notes] || '') : '';
 
-        tasks.push({
-          id: 'manual-' + mi,
-          source: 'Manual Tasks',
-          taskType: taskName,
-          priority: mPriorityCol >= 0 ? (mRow[mPriorityCol] || 'Medium') : 'Medium',
-          location: location,
-          scheduledDate: mScheduledDateCol >= 0 ? formatDateForInput(mRow[mScheduledDateCol]) : '',
-          startTime: mStartTimeCol >= 0 ? (mRow[mStartTimeCol] || '') : '',
-          endTime: mEndTimeCol >= 0 ? (mRow[mEndTimeCol] || '') : '',
-          status: mStatusCol >= 0 ? (mRow[mStatusCol] || 'Pending') : 'Pending',
-          notes: mNotesCol >= 0 ? (mRow[mNotesCol] || '') : '',
-          estimatedTime: 1,
-          startLocation: 'Helena',
-          endLocation: location,
-          employee: '',
-          itemType: 'Manual',
-          rowIndex: mi + 1
-        });
-        manualCount++;
-      }
+      // Skip empty rows - check first few columns
+      if (!location && !taskType) continue;
+
+      tasks.push({
+        id: 'manual-' + mi,
+        source: 'Manual Tasks',
+        taskType: taskType || 'Manual Task',
+        priority: priority,
+        location: location || 'No Location',
+        scheduledDate: formatDateForInput(scheduledDate),
+        startTime: startTime,
+        endTime: endTime,
+        status: status,
+        notes: notes,
+        estimatedTime: 1,
+        startLocation: 'Helena',
+        endLocation: location || 'Helena',
+        employee: '',
+        itemType: 'Manual',
+        rowIndex: mi + 1
+      });
+      manualCount++;
     }
     Logger.log('Added ' + manualCount + ' manual tasks');
   }
@@ -611,22 +607,25 @@ function addManualScheduleTask(task) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var manualSheet = ss.getSheetByName('Manual Tasks');
 
-  // Create sheet if it doesn't exist
+  // Create sheet if it doesn't exist with standard headers
   if (!manualSheet) {
     manualSheet = ss.insertSheet('Manual Tasks');
-    manualSheet.getRange(1, 1, 1, 8).setValues([['Task', 'Priority', 'Location', 'Scheduled Date', 'Start Time', 'End Time', 'Status', 'Notes']]);
-    manualSheet.getRange(1, 1, 1, 8).setFontWeight('bold').setBackground('#667eea').setFontColor('white');
+    manualSheet.getRange(1, 1, 1, 14).setValues([[
+      'Location', 'Priority', 'Task Type', 'Scheduled Date', 'Start Time', 'End Time',
+      'Estimated Time', 'Start Location', 'End Location', 'Notes', 'Date Added', '', '', 'Status'
+    ]]);
+    manualSheet.getRange(1, 1, 1, 14).setFontWeight('bold').setBackground('#667eea').setFontColor('white');
   }
 
-  // Detect existing column structure
+  // Read existing headers to find column positions
   var headers = manualSheet.getRange(1, 1, 1, manualSheet.getLastColumn()).getValues()[0];
   var colMap = {};
 
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'task' || header === 'task type') colMap.task = h;
-    if (header === 'priority') colMap.priority = h;
     if (header === 'location') colMap.location = h;
+    if (header === 'priority') colMap.priority = h;
+    if (header === 'task' || header === 'task type') colMap.taskType = h;
     if (header === 'scheduled date') colMap.scheduledDate = h;
     if (header === 'start time') colMap.startTime = h;
     if (header === 'end time') colMap.endTime = h;
@@ -635,17 +634,18 @@ function addManualScheduleTask(task) {
     if (header === 'date added') colMap.dateAdded = h;
   }
 
-  Logger.log('Column map: ' + JSON.stringify(colMap));
+  Logger.log('addManualScheduleTask column map: ' + JSON.stringify(colMap));
 
-  // Build new row based on existing columns
+  // Build new row - initialize with empty values (ES5 compatible)
   var newRow = [];
-  for (var c = 0; c < headers.length; c++) {
+  for (var nr = 0; nr < headers.length; nr++) {
     newRow.push('');
   }
 
-  if (colMap.task !== undefined) newRow[colMap.task] = task.taskType || 'Manual Task';
-  if (colMap.priority !== undefined) newRow[colMap.priority] = task.priority || 'Medium';
+  // Set values in appropriate columns
   if (colMap.location !== undefined) newRow[colMap.location] = task.location || '';
+  if (colMap.priority !== undefined) newRow[colMap.priority] = task.priority || 'Medium';
+  if (colMap.taskType !== undefined) newRow[colMap.taskType] = task.taskType || 'Manual Task';
   if (colMap.scheduledDate !== undefined) newRow[colMap.scheduledDate] = task.scheduledDate || '';
   if (colMap.startTime !== undefined) newRow[colMap.startTime] = task.startTime || '';
   if (colMap.endTime !== undefined) newRow[colMap.endTime] = task.endTime || '';
@@ -656,6 +656,7 @@ function addManualScheduleTask(task) {
   }
 
   manualSheet.appendRow(newRow);
+  Logger.log('Added manual task row');
 
   return { success: true };
 }
