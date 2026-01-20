@@ -1711,6 +1711,12 @@
 
     // Load tasks on page load
     loadChecklistFromStorage();
+
+    // Show loading indicator
+    document.getElementById('taskContainer').innerHTML =
+      '<div class="loading"><div class="spinner-border text-primary"></div><p>Loading tasks...</p></div>';
+
+    // Load tasks from server
     loadTasks();
   </script>
 </body>
