@@ -220,29 +220,62 @@ function getScheduleTasks() {
   }
 
   // ALWAYS load Manual Tasks (they should appear in My Checklist even when To Do List exists)
-  // Headers: Task, Priority, Location, Scheduled Date, Start Time, End Time, Status, Notes
   var manualSheet = ss.getSheetByName('Manual Tasks');
   if (manualSheet && manualSheet.getLastRow() > 1) {
     Logger.log('Reading Manual Tasks...');
     var manualData = manualSheet.getDataRange().getValues();
+    var manualHeaders = manualData[0];
+
+    // Find columns dynamically based on headers
+    var mTaskCol = -1, mPriorityCol = -1, mLocationCol = -1, mScheduledDateCol = -1;
+    var mStartTimeCol = -1, mEndTimeCol = -1, mStatusCol = -1, mNotesCol = -1;
+
+    for (var mh = 0; mh < manualHeaders.length; mh++) {
+      var header = String(manualHeaders[mh]).toLowerCase().trim();
+      if (header === 'task' || header === 'task type') mTaskCol = mh;
+      if (header === 'priority') mPriorityCol = mh;
+      if (header === 'location') mLocationCol = mh;
+      if (header === 'scheduled date' || header === 'date') mScheduledDateCol = mh;
+      if (header === 'start time') mStartTimeCol = mh;
+      if (header === 'end time') mEndTimeCol = mh;
+      if (header === 'status') mStatusCol = mh;
+      if (header === 'notes') mNotesCol = mh;
+    }
+
+    Logger.log('Manual Tasks columns: task=' + mTaskCol + ', priority=' + mPriorityCol +
+               ', location=' + mLocationCol + ', scheduledDate=' + mScheduledDateCol +
+               ', status=' + mStatusCol);
+
     var manualCount = 0;
     for (var mi = 1; mi < manualData.length; mi++) {
       var mRow = manualData[mi];
-      if (mRow[0]) { // Has task name
+      // Check if row has data (either task name or location)
+      var hasData = (mTaskCol >= 0 && mRow[mTaskCol]) || (mLocationCol >= 0 && mRow[mLocationCol]);
+      if (hasData) {
+        var taskName = mTaskCol >= 0 ? (mRow[mTaskCol] || 'Task') : 'Task';
+        var location = mLocationCol >= 0 ? (mRow[mLocationCol] || 'No Location') : 'No Location';
+
+        // If task column is "Location" (old format), swap them
+        if (mTaskCol === 0 && mLocationCol === -1 && taskName && !mRow[2]) {
+          // Old format: Location, Priority, Task Type...
+          location = taskName;
+          taskName = mRow[2] || 'Task';
+        }
+
         tasks.push({
           id: 'manual-' + mi,
           source: 'Manual Tasks',
-          taskType: mRow[0] || 'Task',        // Column A - Task
-          priority: mRow[1] || 'Medium',       // Column B - Priority
-          location: mRow[2] || 'No Location',  // Column C - Location
-          scheduledDate: formatDateForInput(mRow[3]), // Column D - Scheduled Date
-          startTime: mRow[4] || '',            // Column E - Start Time
-          endTime: mRow[5] || '',              // Column F - End Time
-          status: mRow[6] || 'Pending',        // Column G - Status
-          notes: mRow[7] || '',                // Column H - Notes
+          taskType: taskName,
+          priority: mPriorityCol >= 0 ? (mRow[mPriorityCol] || 'Medium') : 'Medium',
+          location: location,
+          scheduledDate: mScheduledDateCol >= 0 ? formatDateForInput(mRow[mScheduledDateCol]) : '',
+          startTime: mStartTimeCol >= 0 ? (mRow[mStartTimeCol] || '') : '',
+          endTime: mEndTimeCol >= 0 ? (mRow[mEndTimeCol] || '') : '',
+          status: mStatusCol >= 0 ? (mRow[mStatusCol] || 'Pending') : 'Pending',
+          notes: mNotesCol >= 0 ? (mRow[mNotesCol] || '') : '',
           estimatedTime: 1,
           startLocation: 'Helena',
-          endLocation: mRow[2] || 'Helena',
+          endLocation: location,
           employee: '',
           itemType: 'Manual',
           rowIndex: mi + 1
@@ -585,17 +618,42 @@ function addManualScheduleTask(task) {
     manualSheet.getRange(1, 1, 1, 8).setFontWeight('bold').setBackground('#667eea').setFontColor('white');
   }
 
-  // Add the new task row
-  var newRow = [
-    task.taskType || 'Manual Task',
-    task.priority || 'Medium',
-    task.location || '',
-    task.scheduledDate || '',
-    task.startTime || '',
-    task.endTime || '',
-    'Pending',
-    task.notes || ''
-  ];
+  // Detect existing column structure
+  var headers = manualSheet.getRange(1, 1, 1, manualSheet.getLastColumn()).getValues()[0];
+  var colMap = {};
+
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'task' || header === 'task type') colMap.task = h;
+    if (header === 'priority') colMap.priority = h;
+    if (header === 'location') colMap.location = h;
+    if (header === 'scheduled date') colMap.scheduledDate = h;
+    if (header === 'start time') colMap.startTime = h;
+    if (header === 'end time') colMap.endTime = h;
+    if (header === 'status') colMap.status = h;
+    if (header === 'notes') colMap.notes = h;
+    if (header === 'date added') colMap.dateAdded = h;
+  }
+
+  Logger.log('Column map: ' + JSON.stringify(colMap));
+
+  // Build new row based on existing columns
+  var newRow = [];
+  for (var c = 0; c < headers.length; c++) {
+    newRow.push('');
+  }
+
+  if (colMap.task !== undefined) newRow[colMap.task] = task.taskType || 'Manual Task';
+  if (colMap.priority !== undefined) newRow[colMap.priority] = task.priority || 'Medium';
+  if (colMap.location !== undefined) newRow[colMap.location] = task.location || '';
+  if (colMap.scheduledDate !== undefined) newRow[colMap.scheduledDate] = task.scheduledDate || '';
+  if (colMap.startTime !== undefined) newRow[colMap.startTime] = task.startTime || '';
+  if (colMap.endTime !== undefined) newRow[colMap.endTime] = task.endTime || '';
+  if (colMap.status !== undefined) newRow[colMap.status] = 'Pending';
+  if (colMap.notes !== undefined) newRow[colMap.notes] = task.notes || '';
+  if (colMap.dateAdded !== undefined) {
+    newRow[colMap.dateAdded] = Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy HH:mm');
+  }
 
   manualSheet.appendRow(newRow);
 
