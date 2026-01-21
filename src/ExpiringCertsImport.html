@@ -278,9 +278,19 @@
           statusText = '❌ Unmatched';
         }
 
+        // Add match type badge
+        var matchTypeBadge = '';
+        if (match.matchType === 'phonetic') {
+          matchTypeBadge = '<span class="badge bg-info ms-1" title="Matched by sound (phonetic)">🔊 Sounds Like</span>';
+        } else if (match.matchType === 'combined') {
+          matchTypeBadge = '<span class="badge bg-secondary ms-1" title="Matched by spelling + sound">📝🔊</span>';
+        } else if (match.matchType === 'reversed') {
+          matchTypeBadge = '<span class="badge bg-secondary ms-1" title="Name parts reversed">↔️ Reversed</span>';
+        }
+
         tableHtml += '<tr class="' + rowClass + '">';
         tableHtml += '<td>' + match.excelName + '</td>';
-        tableHtml += '<td>' + (match.matchedName || 'No match') + '</td>';
+        tableHtml += '<td>' + (match.matchedName || 'No match') + matchTypeBadge + '</td>';
         tableHtml += '<td>' + (match.confidence ? match.confidence + '%' : 'N/A') + '</td>';
         tableHtml += '<td>' + match.certCount + '</td>';
         tableHtml += '<td>' + statusText + '</td>';
@@ -357,27 +367,40 @@
 
     function displayUnmatchedResolution(unmatched) {
       var html = '<div class="config-section"><h3><i class="bi bi-person-x"></i> Resolve Unmatched Employees</h3>';
-      html += '<p class="text-muted small">The following employees need to be matched or added as new employees.</p>';
+      html += '<p class="text-muted small">The following employees from Excel could not be automatically matched. They may have spelling variations or be new employees.</p>';
 
       unmatched.forEach(function(emp, index) {
-        html += '<div class="card mb-3">';
-        html += '<div class="card-header"><strong>' + emp.excelName + '</strong></div>';
+        html += '<div class="card mb-3" id="unmatched-card-' + index + '">';
+        html += '<div class="card-header bg-danger bg-opacity-10"><strong>📋 Excel: "' + emp.excelName + '"</strong></div>';
         html += '<div class="card-body">';
 
         if (emp.suggestions && emp.suggestions.length > 0) {
-          html += '<label class="form-label small">Suggested matches:</label>';
-          html += '<select class="form-select form-select-sm mb-2" id="match-' + index + '">';
-          html += '<option value="">-- Select employee --</option>';
+          html += '<label class="form-label small fw-bold">🔍 Possible Matches Found:</label>';
+          html += '<select class="form-select form-select-sm mb-2" id="match-' + index + '" onchange="updateMatchSelection(' + index + ')">';
+          html += '<option value="">-- Select a match --</option>';
           emp.suggestions.forEach(function(sug) {
-            var previousBadge = sug.isPreviousEmployee ? ' [PREVIOUS EMPLOYEE]' : '';
-            html += '<option value="' + sug.name + '" data-previous="' + (sug.isPreviousEmployee || false) + '">' + sug.name + ' (' + sug.confidence + '% match)' + previousBadge + '</option>';
+            var previousBadge = sug.isPreviousEmployee ? ' [PREVIOUS]' : '';
+            var matchInfo = '';
+            if (sug.matchType === 'phonetic') {
+              matchInfo = ' 🔊 sounds like';
+            } else if (sug.matchType === 'combined') {
+              matchInfo = ' 📝🔊 similar';
+            } else if (sug.matchType === 'levenshtein') {
+              matchInfo = ' 📝 spelling';
+            }
+            html += '<option value="' + sug.name + '" data-previous="' + (sug.isPreviousEmployee || false) + '" data-match-type="' + (sug.matchType || '') + '">' + sug.name + ' (' + sug.confidence + '%' + matchInfo + ')' + previousBadge + '</option>';
           });
           html += '</select>';
+          html += '<div id="match-info-' + index + '" class="small text-muted mb-2"></div>';
+        } else {
+          html += '<p class="text-muted small mb-2">No similar employees found in the system.</p>';
         }
 
         html += '<div class="btn-group btn-group-sm w-100" role="group">';
-        html += '<button class="btn btn-outline-primary" onclick="updateEmployeeName(\'' + emp.excelName + '\', ' + index + ')">✏️ Update Employee Sheet</button>';
-        html += '<button class="btn btn-outline-success" onclick="addNewEmployee(\'' + emp.excelName + '\', ' + index + ')">➕ Add New Employee</button>';
+        if (emp.suggestions && emp.suggestions.length > 0) {
+          html += '<button class="btn btn-outline-primary" id="btn-use-match-' + index + '" onclick="useSelectedMatch(\'' + escapeQuotes(emp.excelName) + '\', ' + index + ')" disabled title="Select a match above first">✓ Use Selected Match</button>';
+        }
+        html += '<button class="btn btn-outline-success" onclick="addNewEmployee(\'' + escapeQuotes(emp.excelName) + '\', ' + index + ')">➕ Add as New Employee</button>';
         html += '<button class="btn btn-outline-secondary" onclick="skipEmployee(' + index + ')">⏭️ Skip</button>';
         html += '</div>';
         html += '</div></div>';
@@ -387,34 +410,132 @@
       document.getElementById('unmatchedSection').innerHTML = html;
     }
 
+    function escapeQuotes(str) {
+      return str.replace(/'/g, "\\'").replace(/"/g, '\\"');
+    }
+
+    function updateMatchSelection(index) {
+      var select = document.getElementById('match-' + index);
+      var btn = document.getElementById('btn-use-match-' + index);
+      var infoDiv = document.getElementById('match-info-' + index);
+
+      if (select && select.value) {
+        if (btn) btn.disabled = false;
+        var selectedOption = select.options[select.selectedIndex];
+        var matchType = selectedOption.getAttribute('data-match-type');
+        var isPrevious = selectedOption.getAttribute('data-previous') === 'true';
+
+        var infoText = '';
+        if (matchType === 'phonetic') {
+          infoText = '🔊 <strong>Phonetic match</strong> - Names sound similar (e.g., "Massen" ≈ "Masen")';
+        } else if (matchType === 'combined') {
+          infoText = '📝🔊 <strong>Combined match</strong> - Similar spelling and pronunciation';
+        } else if (matchType === 'levenshtein') {
+          infoText = '📝 <strong>Spelling match</strong> - Names have similar spelling';
+        }
+        if (isPrevious) {
+          infoText += '<br>⚠️ This is a <strong>Previous Employee</strong> (no longer active)';
+        }
+        if (infoDiv) infoDiv.innerHTML = infoText;
+      } else {
+        if (btn) btn.disabled = true;
+        if (infoDiv) infoDiv.innerHTML = '';
+      }
+    }
+
     var resolvedEmployees = {};
 
+    function useSelectedMatch(excelName, index) {
+      var select = document.getElementById('match-' + index);
+      if (!select || !select.value) {
+        alert('Please select a match first');
+        return;
+      }
+
+      var selectedName = select.value;
+      var selectedOption = select.options[select.selectedIndex];
+      var isPrevious = selectedOption.getAttribute('data-previous') === 'true';
+
+      // Show confirmation dialog
+      var confirmMsg = '📝 Confirm Name Match\n\n';
+      confirmMsg += 'Excel name: "' + excelName + '"\n';
+      confirmMsg += 'Match to: "' + selectedName + '"\n\n';
+      if (isPrevious) {
+        confirmMsg += '⚠️ Note: This is a Previous Employee (no longer active)\n\n';
+      }
+      confirmMsg += 'The certifications from Excel will be associated with "' + selectedName + '".\n\n';
+      confirmMsg += 'Do you want to proceed?';
+
+      if (!confirm(confirmMsg)) {
+        return;
+      }
+
+      // Mark as resolved with the selected match
+      resolvedEmployees[excelName] = {
+        action: 'match',
+        matchedName: selectedName,
+        isPreviousEmployee: isPrevious
+      };
+
+      // Update parsedData to use the matched name
+      if (parsedData && parsedData.employeeMatches) {
+        for (var i = 0; i < parsedData.employeeMatches.length; i++) {
+          if (parsedData.employeeMatches[i].excelName === excelName) {
+            parsedData.employeeMatches[i].matchedName = selectedName;
+            parsedData.employeeMatches[i].confidence = 100; // User confirmed
+            parsedData.employeeMatches[i].userConfirmed = true;
+            break;
+          }
+        }
+      }
+
+      showStatus('✓ Matched "' + excelName + '" → "' + selectedName + '"', 'success');
+      removeCardByIndex(index);
+      checkAllResolved();
+    }
+
     function updateEmployeeName(excelName, index) {
-      // For now, just mark as resolved and remove card
-      resolvedEmployees[excelName] = { action: 'update', newName: excelName };
-      removeCardAndCheckCompletion(index);
+      // This function is now replaced by useSelectedMatch
+      // Kept for backward compatibility
+      useSelectedMatch(excelName, index);
     }
 
     function addNewEmployee(excelName, index) {
+      // Show confirmation first
+      var confirmMsg = '➕ Add New Employee\n\n';
+      confirmMsg += 'Employee name: "' + excelName + '"\n\n';
+      confirmMsg += 'This will create a new employee in the system.\n';
+      confirmMsg += 'You\'ll be asked for additional details (location, class, etc.)\n\n';
+      confirmMsg += 'Continue?';
+
+      if (!confirm(confirmMsg)) {
+        return;
+      }
+
       // Show modal to collect new employee data
       showNewEmployeeModal(excelName, index);
     }
 
     function skipEmployee(index) {
-      var cards = document.querySelectorAll('#unmatchedSection .card');
-      if (cards[index]) {
-        var excelName = cards[index].querySelector('.card-header strong').textContent.trim();
+      var card = document.getElementById('unmatched-card-' + index);
+      if (card) {
+        var headerStrong = card.querySelector('.card-header strong');
+        var excelName = headerStrong ? headerStrong.textContent.replace('📋 Excel: "', '').replace('"', '') : '';
         resolvedEmployees[excelName] = { action: 'skip' };
-        cards[index].remove();
+        card.remove();
       }
       checkAllResolved();
     }
 
-    function removeCardAndCheckCompletion(index) {
-      var cards = document.querySelectorAll('#unmatchedSection .card');
-      if (cards[index]) {
-        cards[index].remove();
+    function removeCardByIndex(index) {
+      var card = document.getElementById('unmatched-card-' + index);
+      if (card) {
+        card.remove();
       }
+    }
+
+    function removeCardAndCheckCompletion(index) {
+      removeCardByIndex(index);
       checkAllResolved();
     }
 
@@ -483,6 +604,24 @@
         sleeveSize: document.getElementById('newEmpSleeveSize').value,
         hireDate: document.getElementById('newEmpHireDate').value
       };
+
+      // Final confirmation showing what will be added
+      var confirmMsg = '✅ Confirm New Employee\n\n';
+      confirmMsg += 'The following employee will be added to the Employees sheet:\n\n';
+      confirmMsg += '👤 Name: ' + name + '\n';
+      confirmMsg += '📍 Location: ' + location + '\n';
+      confirmMsg += '🏷️ Class: ' + empClass + '\n';
+      if (newEmpData.jobNum) confirmMsg += '🔢 Job #: ' + newEmpData.jobNum + '\n';
+      if (newEmpData.phone) confirmMsg += '📞 Phone: ' + newEmpData.phone + '\n';
+      if (newEmpData.email) confirmMsg += '📧 Email: ' + newEmpData.email + '\n';
+      if (newEmpData.gloveSize) confirmMsg += '🧤 Glove Size: ' + newEmpData.gloveSize + '\n';
+      if (newEmpData.sleeveSize) confirmMsg += '👕 Sleeve Size: ' + newEmpData.sleeveSize + '\n';
+      confirmMsg += '\nThis will also be logged in Employee History.\n\n';
+      confirmMsg += 'Proceed?';
+
+      if (!confirm(confirmMsg)) {
+        return;
+      }
 
       // Store new employee data
       if (!parsedData.newEmployees) {

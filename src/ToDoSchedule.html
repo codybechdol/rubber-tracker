@@ -56,11 +56,13 @@
     .calendar-task-dot.low { background: #34a853; }
     .calendar-task-preview { font-size: 10px; color: #5f6368; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .calendar-task-location { font-size: 9px; color: #667eea; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .calendar-task-location.my-task { background: #e3f2fd; color: #1565c0; padding: 1px 4px; border-radius: 3px; }
     .day-detail-popup { position: fixed; background: white; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); padding: 16px; z-index: 1000; max-width: 450px; max-height: 500px; overflow-y: auto; }
     .day-detail-task { border: 1px solid #e0e0e0; border-radius: 6px; padding: 10px; margin-bottom: 8px; }
     .day-detail-task.priority-high { border-left: 4px solid #ea4335; }
     .day-detail-task.priority-medium { border-left: 4px solid #fbbc04; }
     .day-detail-task.priority-low { border-left: 4px solid #34a853; }
+    .day-detail-task.my-task { background: #e8f4fd; border-color: #90caf9; }
     .unsaved-indicator { display: none; color: #dc3545; font-size: 12px; margin-left: 8px; }
     .unsaved-indicator.show { display: inline; }
     .date-input.changed { background: #fff3cd; border-color: #ffc107; }
@@ -96,6 +98,36 @@
     .category-manual .checklist-category-header { background: #e8f0fe; }
     .category-other { border-left: 4px solid #5f6368; }
     .category-other .checklist-category-header { background: #f5f5f5; }
+
+    /* Notified Status Styles */
+    .notified-badge { background: #fff3e0; color: #e65100; font-size: 11px; padding: 2px 8px; border-radius: 12px; margin-left: 6px; }
+    .btn-notified { background: #fff3e0; border-color: #ffb74d; color: #e65100; }
+    .btn-notified:hover { background: #ffe0b2; border-color: #ffa726; color: #bf360c; }
+    .notified-indicator { color: #e65100; font-size: 12px; margin-top: 4px; }
+
+    /* Scheduled Status Styles */
+    .scheduled-badge { background: #e8f5e9; color: #2e7d32; font-size: 11px; padding: 2px 8px; border-radius: 12px; margin-left: 6px; }
+    .btn-scheduled { background: #e8f5e9; border-color: #81c784; color: #2e7d32; }
+    .btn-scheduled:hover { background: #c8e6c9; border-color: #66bb6a; color: #1b5e20; }
+
+    /* SMS Button Styles */
+    .btn-sms { background: #e3f2fd; border-color: #64b5f6; color: #1565c0; }
+    .btn-sms:hover { background: #bbdefb; border-color: #42a5f5; color: #0d47a1; }
+    .btn-sms:disabled { background: #f5f5f5; border-color: #e0e0e0; color: #9e9e9e; }
+    .char-count { font-size: 11px; color: #5f6368; }
+    .char-count.warning { color: #f57c00; }
+    .char-count.danger { color: #d32f2f; }
+
+    /* Office Status Styles */
+    .office-badge { background: #e3f2fd; color: #1565c0; font-size: 11px; padding: 2px 8px; border-radius: 12px; margin-left: 6px; }
+    .btn-office { background: #e3f2fd; border-color: #64b5f6; color: #1565c0; }
+    .btn-office:hover { background: #bbdefb; border-color: #42a5f5; color: #0d47a1; }
+
+    /* Class Type Badge Styles */
+    .classtype-badge { font-size: 10px; padding: 2px 6px; border-radius: 10px; margin-left: 4px; white-space: nowrap; }
+    .classtype-online { background: #e8f5e9; color: #2e7d32; }
+    .classtype-inperson-mpc { background: #fff3e0; color: #e65100; }
+    .classtype-inperson-mslcat { background: #e3f2fd; color: #1565c0; }
   </style>
 </head>
 <body>
@@ -183,7 +215,6 @@
           <div class="col-auto">
             <select id="filterSource" class="form-select form-select-sm" onchange="applyFilters()">
               <option value="">All Sources</option>
-              <option value="Manual Tasks">Manual Tasks</option>
               <option value="Training Tracking">Training</option>
               <option value="Crew Visit Config">Crew Visits</option>
               <option value="Expiring Certs">Expiring Certs</option>
@@ -212,29 +243,58 @@
 
     <!-- My Personal Checklist Tab -->
     <div class="tab-pane fade" id="mychecklist" role="tabpanel">
-      <div class="card">
-        <div class="card-header d-flex justify-content-between align-items-center" style="background: linear-gradient(135deg, #34a853 0%, #1e8e3e 100%); color: white;">
-          <div>
-            <i class="bi bi-clipboard-check"></i> My Personal Checklist
-            <span class="badge bg-white text-dark ms-2" id="checklistCount">0 items</span>
+      <div class="filter-bar">
+        <div class="row align-items-center">
+          <div class="col-auto">
+            <label class="form-label mb-0 me-2">Filter:</label>
           </div>
-          <button class="btn btn-light btn-sm" onclick="showAddManualItemModal()">
-            <i class="bi bi-plus-lg"></i> Add Manual Item
-          </button>
-        </div>
-        <div class="card-body" id="personalChecklistContainer">
-          <div class="empty-state" id="emptyChecklist">
-            <i class="bi bi-clipboard-plus" style="font-size: 48px; color: #5f6368;"></i>
-            <p class="mt-3">No items in your checklist</p>
-            <p class="text-muted">Add items from the Task List using <i class="bi bi-plus-circle"></i> or click "Add Manual Item" above</p>
+          <div class="col-auto">
+            <select id="checklistFilterPriority" class="form-select form-select-sm" onchange="applyChecklistFilters()">
+              <option value="">All Priorities</option>
+              <option value="High">🔴 High</option>
+              <option value="Medium">🟡 Medium</option>
+              <option value="Low">🟢 Low</option>
+            </select>
           </div>
-          <div id="checklistItems" style="display: none;">
-            <!-- Checklist items will be rendered here -->
+          <div class="col-auto">
+            <select id="checklistFilterStatus" class="form-select form-select-sm" onchange="applyChecklistFilters()">
+              <option value="">All Status</option>
+              <option value="Pending">Pending</option>
+              <option value="Complete">Complete</option>
+              <option value="Notified">Notified</option>
+              <option value="Office">Office</option>
+            </select>
+          </div>
+          <div class="col-auto">
+            <select id="checklistFilterSource" class="form-select form-select-sm" onchange="applyChecklistFilters()">
+              <option value="">All Sources</option>
+              <option value="Manual Tasks">Manual Tasks</option>
+              <option value="Expiring Certs">Expiring Certs</option>
+            </select>
+          </div>
+          <div class="col-auto">
+            <input type="date" id="checklistFilterDate" class="form-control form-control-sm" onchange="applyChecklistFilters()">
+          </div>
+          <div class="col-auto">
+            <button class="btn btn-outline-secondary btn-sm" onclick="clearChecklistFilters()">Clear</button>
+          </div>
+          <div class="col-auto ms-auto">
+            <button class="btn btn-success btn-sm" onclick="showAddManualItemModal()">
+              <i class="bi bi-plus-lg"></i> Add Manual Item
+            </button>
           </div>
         </div>
       </div>
-      <div class="mt-3 text-muted small">
-        <i class="bi bi-info-circle"></i> Manual items added here will also appear on the calendar view.
+
+      <div id="personalChecklistContainer">
+        <div class="empty-state" id="emptyChecklist">
+          <i class="bi bi-clipboard-plus" style="font-size: 48px; color: #5f6368;"></i>
+          <p class="mt-3">No items in your checklist</p>
+          <p class="text-muted">Add items from the Task List using <i class="bi bi-plus-circle"></i> or click "Add Manual Item" above</p>
+        </div>
+        <div id="checklistItems" style="display: none;">
+          <!-- Checklist items will be rendered here -->
+        </div>
       </div>
     </div>
   </div>
@@ -316,9 +376,225 @@
     </div>
   </div>
 
+  <!-- SMS Notify Modal (Stage 1 - Initial Contact with Class Options) -->
+  <div class="modal fade" id="smsNotifyModal" tabindex="-1" aria-labelledby="smsNotifyModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header" style="background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%); color: white;">
+          <h5 class="modal-title" id="smsNotifyModalLabel"><i class="bi bi-chat-text"></i> Send Notification</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="alert alert-info small">
+            <strong><i class="bi bi-person"></i> <span id="notifyEmployeeName">Employee</span></strong><br>
+            <span id="notifyCertInfo">Cert info will appear here</span><br>
+            <small class="text-muted"><i class="bi bi-telephone"></i> <span id="notifyPhoneDisplay"></span></small>
+          </div>
+
+          <!-- 1st Aid/CPR Options Section -->
+          <div id="firstAidCprOptions">
+            <h6 class="mb-2"><i class="bi bi-list-check"></i> Class Options (select which to offer)</h6>
+            <div class="alert alert-danger small" id="noOptionWarning" style="display: none;">
+              <i class="bi bi-exclamation-triangle"></i> Please select at least one class option.
+            </div>
+
+            <!-- Online Class Option -->
+            <div class="card mb-2">
+              <div class="card-body p-2">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="notifyOptionOnline" onchange="updateNotifyMessage()">
+                  <label class="form-check-label fw-bold" for="notifyOptionOnline">
+                    <i class="bi bi-laptop"></i> Online Class
+                  </label>
+                  <span class="text-muted small ms-2">(no date/time needed)</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- In Person with Me Option -->
+            <div class="card mb-2">
+              <div class="card-body p-2">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="notifyOptionInPerson" onchange="updateNotifyMessage()">
+                  <label class="form-check-label fw-bold" for="notifyOptionInPerson">
+                    <i class="bi bi-person-workspace"></i> In Person with Me
+                  </label>
+                </div>
+                <div class="row mt-2 ms-4" id="notifyInPersonDetails" style="display: none;">
+                  <div class="col-md-3 mb-2">
+                    <label class="form-label small">Date</label>
+                    <input type="date" class="form-control form-control-sm" id="notifyInPersonDate" onchange="updateNotifyMessage()">
+                  </div>
+                  <div class="col-md-3 mb-2">
+                    <label class="form-label small">Start Time</label>
+                    <input type="time" class="form-control form-control-sm" id="notifyInPersonStartTime" onchange="updateNotifyMessage()">
+                  </div>
+                  <div class="col-md-3 mb-2">
+                    <label class="form-label small">End Time</label>
+                    <input type="time" class="form-control form-control-sm" id="notifyInPersonEndTime" onchange="updateNotifyMessage()">
+                  </div>
+                  <div class="col-md-3 mb-2">
+                    <label class="form-label small">Location</label>
+                    <input type="text" class="form-control form-control-sm" id="notifyInPersonLocation" placeholder="e.g., Bozeman" onkeyup="updateNotifyMessage()">
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- MSLCAT Helena Option -->
+            <div class="card mb-2">
+              <div class="card-body p-2">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="notifyOptionMSLCAT" onchange="updateNotifyMessage()">
+                  <label class="form-check-label fw-bold" for="notifyOptionMSLCAT">
+                    <i class="bi bi-building"></i> In Person at MSLCAT (Helena)
+                  </label>
+                </div>
+                <div class="row mt-2 ms-4" id="notifyMSLCATDetails" style="display: none;">
+                  <div class="col-md-4">
+                    <label class="form-label small">Date</label>
+                    <input type="date" class="form-control form-control-sm" id="notifyMSLCATDate" onchange="updateNotifyMessage()">
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Crane Cert Options Section -->
+          <div id="craneCertOptions" style="display: none;">
+            <h6 class="mb-2"><i class="bi bi-gear"></i> MSLCAT Crane Training Details</h6>
+            <div class="card mb-2">
+              <div class="card-body">
+                <div class="row">
+                  <div class="col-md-6 mb-2">
+                    <label class="form-label small fw-bold">Training Start Date</label>
+                    <input type="date" class="form-control form-control-sm" id="notifyCraneStartDate" onchange="updateNotifyMessage()">
+                  </div>
+                  <div class="col-md-6 mb-2">
+                    <label class="form-label small fw-bold">Training End Date</label>
+                    <input type="date" class="form-control form-control-sm" id="notifyCraneEndDate" onchange="updateNotifyMessage()">
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- DL/MEC/Harassment Options Section (simple - no options needed) -->
+          <div id="simpleCertOptions" style="display: none;">
+            <div class="alert alert-secondary small">
+              <i class="bi bi-info-circle"></i> This notification will ask the employee to send you a picture of their updated certification.
+            </div>
+          </div>
+
+          <div class="mb-3 mt-3">
+            <div class="d-flex justify-content-between align-items-center">
+              <label class="form-label mb-0">Message Preview <span class="char-count" id="notifyCharCount">(0 characters)</span></label>
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="notifyEditMode" onchange="toggleNotifyEditMode()">
+                <label class="form-check-label small" for="notifyEditMode">Edit manually</label>
+              </div>
+            </div>
+            <textarea class="form-control mt-1" id="notifyMessage" rows="5" onkeyup="updateNotifyCharCount()" readonly></textarea>
+          </div>
+
+          <div class="alert alert-warning small mb-0">
+            <i class="bi bi-info-circle"></i> This will open your messaging app with the message pre-filled. You can edit before sending.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-primary" id="addToTaskListBtn" onclick="addCurrentTaskToChecklist()">
+            <i class="bi bi-plus-circle"></i> Add to My Checklist
+          </button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-warning text-white" id="sendNotifyBtn" onclick="sendNotifySMS()">
+            <i class="bi bi-send"></i> Send Text
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SMS Scheduled Modal (Stage 2 - Class Registration Confirmation) -->
+  <div class="modal fade" id="smsScheduledModal" tabindex="-1" aria-labelledby="smsScheduledModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header" style="background: linear-gradient(135deg, #4caf50 0%, #2e7d32 100%); color: white;">
+          <h5 class="modal-title" id="smsScheduledModalLabel"><i class="bi bi-calendar-check"></i> Send Class Registration</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="alert alert-info small">
+            <strong><i class="bi bi-person"></i> <span id="scheduledEmployeeName">Employee</span></strong><br>
+            <span id="scheduledCertInfo">Cert info will appear here</span><br>
+            <small class="text-muted"><i class="bi bi-telephone"></i> <span id="scheduledPhoneDisplay"></span></small>
+          </div>
+
+          <h6 class="mb-2"><i class="bi bi-mortarboard"></i> Class Type & Registration Details</h6>
+
+          <div class="card mb-3">
+            <div class="card-body">
+              <!-- Class Type Selection -->
+              <div class="row mb-3">
+                <div class="col-12">
+                  <label class="form-label small fw-bold">Class Type *</label>
+                  <div class="btn-group w-100" role="group">
+                    <input type="radio" class="btn-check" name="scheduledClassType" id="classTypeOnline" value="Online" checked onchange="updateScheduledMessage()">
+                    <label class="btn btn-outline-success" for="classTypeOnline"><i class="bi bi-laptop"></i> Online</label>
+
+                    <input type="radio" class="btn-check" name="scheduledClassType" id="classTypeInPersonMPC" value="InPersonMPC" onchange="updateScheduledMessage()">
+                    <label class="btn btn-outline-warning" for="classTypeInPersonMPC"><i class="bi bi-person-workspace"></i> In Person MPC</label>
+
+                    <input type="radio" class="btn-check" name="scheduledClassType" id="classTypeInPersonMSLCAT" value="InPersonMSLCAT" onchange="updateScheduledMessage()">
+                    <label class="btn btn-outline-primary" for="classTypeInPersonMSLCAT"><i class="bi bi-building"></i> In Person MSLCAT</label>
+                  </div>
+                </div>
+              </div>
+              <div class="row">
+                <div class="col-md-4 mb-3">
+                  <label class="form-label small fw-bold">Class Start Date *</label>
+                  <input type="date" class="form-control form-control-sm" id="scheduledStartDate" onchange="updateScheduledMessage()">
+                </div>
+                <div class="col-md-4 mb-3">
+                  <label class="form-label small fw-bold">Class End Date *</label>
+                  <input type="date" class="form-control form-control-sm" id="scheduledEndDate" onchange="updateScheduledMessage()">
+                </div>
+                <div class="col-md-4 mb-3" id="classSizeContainer">
+                  <label class="form-label small fw-bold">Total Employees in Class *</label>
+                  <input type="number" class="form-control form-control-sm" id="scheduledClassSize" min="1" value="1" onchange="updateScheduledMessage()">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <div class="d-flex justify-content-between align-items-center">
+              <label class="form-label mb-0">Message Preview <span class="char-count" id="scheduledCharCount">(0 characters)</span></label>
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="scheduledEditMode" onchange="toggleScheduledEditMode()">
+                <label class="form-check-label small" for="scheduledEditMode">Edit manually</label>
+              </div>
+            </div>
+            <textarea class="form-control mt-1" id="scheduledMessage" rows="8" onkeyup="updateScheduledCharCount()" readonly></textarea>
+          </div>
+
+          <div class="alert alert-warning small mb-0">
+            <i class="bi bi-info-circle"></i> This will open your messaging app with the message pre-filled. You can edit before sending.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-success" id="sendScheduledBtn" onclick="sendScheduledSMS()">
+            <i class="bi bi-send"></i> Send Text
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   <script>
     var allTasks = [];
+    var employeePhoneMap = {}; // Map of employee names to phone numbers
     var currentMonth = new Date().getMonth();
     var currentYear = new Date().getFullYear();
     var monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
@@ -327,8 +603,14 @@
     var personalChecklist = []; // Personal checklist for training items
     var hasUnsavedChanges = false;
     var pendingDateChanges = {}; // Track changes by task index
+    var notifiedTasks = {}; // Track notified status by task key
+    var scheduledTasks = {}; // Track scheduled status by task key (Stage 2)
+    var classTypeTasks = {}; // Track class type by task key (Online, InPersonMPC, InPersonMSLCAT)
+    var officeTasks = {}; // Track office status by task key
+    var currentSmsTask = null; // Currently selected task for SMS
 
     // Helper: Format task type with item type (Glove/Sleeve) and item number
+    // Also shows cert expiration date for cert tasks
     function formatTaskType(task) {
       var taskType = task.taskType || 'Task';
       var itemType = task.itemType || '';
@@ -371,14 +653,63 @@
         }
         return taskType;
       } else if (taskType === 'Cert Expiring' || taskType.indexOf('Renew') !== -1) {
-        // Show cert type if available
+        // Show cert type and expiration date
+        var certLabel = 'Renew';
         if (itemType) {
-          return 'Renew ' + itemType;
+          certLabel += ' ' + itemType;
+        } else {
+          certLabel = taskType;
         }
-        return taskType;
+
+        // Add expiration date from notes or dueDate if available
+        var expDate = '';
+        if (task.notes) {
+          // Extract expiration date from notes (format: "... expires: MM/DD/YYYY" or "Due: MM/DD/YYYY")
+          var expiresMatch = task.notes.match(/expires?[:\s]+(\d{1,2}\/\d{1,2}\/\d{4})/i);
+          var dueMatch = task.notes.match(/due[:\s]+(\d{1,2}\/\d{1,2}\/\d{4})/i);
+          if (expiresMatch) {
+            expDate = expiresMatch[1];
+          } else if (dueMatch) {
+            expDate = dueMatch[1];
+          }
+        }
+        // Also check dueDate field directly
+        if (!expDate && task.dueDate) {
+          expDate = formatDisplayDate(task.dueDate);
+        }
+
+        if (expDate) {
+          certLabel += ' (exp: ' + expDate + ')';
+        }
+
+        return certLabel;
       }
 
       return taskType;
+    }
+
+    // Helper: Format date for display (MM/DD/YYYY)
+    function formatDisplayDate(dateVal) {
+      if (!dateVal) return '';
+
+      // If it's already a formatted string, return it
+      if (typeof dateVal === 'string' && dateVal.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/)) {
+        return dateVal;
+      }
+
+      // Parse YYYY-MM-DD format
+      if (typeof dateVal === 'string' && dateVal.match(/^\d{4}-\d{2}-\d{2}/)) {
+        var parts = dateVal.split('-');
+        return parseInt(parts[1], 10) + '/' + parseInt(parts[2], 10) + '/' + parts[0];
+      }
+
+      // Try to parse as date
+      var date = new Date(dateVal);
+      if (!isNaN(date.getTime())) {
+        return (date.getMonth() + 1) + '/' + date.getDate() + '/' + date.getFullYear();
+      }
+
+      return '';
     }
 
     // Helper: Extract foreman from location string (handles "Location (👷 Foreman)" format)
@@ -400,6 +731,21 @@
     // Groups all crew members under their foreman/supervisor (F, GTO F, GF, SUP classifications)
     function getTaskGroupName(task) {
       var loc = task.location || '';
+      var locLower = loc.toLowerCase();
+
+      // Special handling for "Weeds" location - employees at home with no work
+      // For Weeds, use employee name as the group (no foreman structure)
+      if (locLower === 'weeds' || locLower.indexOf('weeds') === 0) {
+        if (task.employee && task.employee.trim()) {
+          var empName = task.employee.trim();
+          var parenIndex = empName.indexOf(' (');
+          if (parenIndex !== -1) {
+            return empName.substring(0, parenIndex);
+          }
+          return empName;
+        }
+        return 'Weeds';
+      }
 
       // FIRST: Always try to extract foreman from location (this groups all crew members under their foreman)
       var foremanFromLocation = extractForemanFromLocation(loc);
@@ -532,6 +878,10 @@
           // Remove changed styling from inputs
           var inputs = document.querySelectorAll('.date-input.changed');
           inputs.forEach(function(input) { input.classList.remove('changed'); });
+          var timeInputs = document.querySelectorAll('.time-input.changed');
+          timeInputs.forEach(function(input) { input.classList.remove('changed'); });
+          // Re-render calendar to reflect saved changes
+          renderCalendar();
           showToast('✓ Saved ' + changes.length + ' change(s) successfully!');
         })
         .withFailureHandler(function(error) {
@@ -546,6 +896,11 @@
         .withSuccessHandler(function(tasks) {
           console.log('loadTasks: Received ' + (tasks ? tasks.length : 0) + ' tasks');
           allTasks = tasks || [];
+
+          // Build employee phone map for checklist items
+          buildEmployeePhoneMap();
+          console.log('loadTasks: Built phone map with ' + Object.keys(employeePhoneMap).length + ' entries');
+
           try {
             renderTasks(allTasks);
             console.log('loadTasks: renderTasks completed');
@@ -579,15 +934,33 @@
     function renderCalendar() {
       var grid = document.getElementById('calendarGrid');
       var title = document.getElementById('calendarTitle');
-      title.textContent = monthNames[currentMonth] + ' ' + currentYear;
-
-      var firstDay = new Date(currentYear, currentMonth, 1);
-      var lastDay = new Date(currentYear, currentMonth + 1, 0);
-      var startDay = firstDay.getDay();
-      var daysInMonth = lastDay.getDate();
 
       var today = new Date();
+      today.setHours(0, 0, 0, 0);
       var todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+
+      // Calculate the start of the current week (Sunday)
+      var currentWeekStart = new Date(today);
+      currentWeekStart.setDate(today.getDate() - today.getDay());
+      currentWeekStart.setHours(0, 0, 0, 0);
+
+      // For rolling calendar: start from current week's Sunday and show 5 weeks
+      var calendarStart = new Date(currentWeekStart);
+      var weeksToShow = 5;
+      var totalDays = weeksToShow * 7;
+
+      // Calculate the end date for title purposes
+      var calendarEnd = new Date(calendarStart);
+      calendarEnd.setDate(calendarStart.getDate() + totalDays - 1);
+
+      // Update title to show date range
+      var startMonthYear = monthNames[calendarStart.getMonth()] + ' ' + calendarStart.getFullYear();
+      var endMonthYear = monthNames[calendarEnd.getMonth()] + ' ' + calendarEnd.getFullYear();
+      if (startMonthYear === endMonthYear) {
+        title.textContent = startMonthYear;
+      } else {
+        title.textContent = monthNames[calendarStart.getMonth()] + ' - ' + monthNames[calendarEnd.getMonth()] + ' ' + calendarEnd.getFullYear();
+      }
 
       // Group tasks by date
       var tasksByDate = {};
@@ -606,27 +979,35 @@
         html += '<div class="calendar-day-header">' + day + '</div>';
       });
 
-      // Days from previous month
-      var prevMonth = new Date(currentYear, currentMonth, 0);
-      var prevMonthDays = prevMonth.getDate();
-      for (var i = startDay - 1; i >= 0; i--) {
-        var dayNum = prevMonthDays - i;
-        html += '<div class="calendar-day other-month"><div class="calendar-day-number">' + dayNum + '</div></div>';
-      }
+      // Render each day in the 5-week rolling window
+      for (var d = 0; d < totalDays; d++) {
+        var currentDate = new Date(calendarStart);
+        currentDate.setDate(calendarStart.getDate() + d);
 
-      // Days in current month
-      for (var day = 1; day <= daysInMonth; day++) {
-        var dateStr = currentYear + '-' + String(currentMonth + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+        var day = currentDate.getDate();
+        var month = currentDate.getMonth();
+        var year = currentDate.getFullYear();
+        var dateStr = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+
         var dayTasks = tasksByDate[dateStr] || [];
         var isToday = dateStr === todayStr;
         var hasTasks = dayTasks.length > 0;
+
+        // Check if this is the first day of a month (show month indicator)
+        var isFirstOfMonth = (day === 1);
 
         var classes = 'calendar-day';
         if (isToday) classes += ' today';
         if (hasTasks) classes += ' has-tasks';
 
         html += '<div class="' + classes + '" onclick="showDayDetail(\'' + dateStr + '\', event)">';
-        html += '<div class="calendar-day-number">' + day + '</div>';
+
+        // Show month name on the 1st of each month
+        if (isFirstOfMonth) {
+          html += '<div class="calendar-day-number" style="font-weight: bold;">' + monthNames[month].substring(0, 3) + ' ' + day + '</div>';
+        } else {
+          html += '<div class="calendar-day-number">' + day + '</div>';
+        }
 
         if (hasTasks) {
           // Show priority dots
@@ -640,12 +1021,20 @@
           for (var l = 0; l < Math.min(lowCount, 3); l++) html += '<span class="calendar-task-dot low"></span>';
           html += '</div>';
 
-          // Group tasks by location and count
+          // Group tasks by location and count, tracking My Tasks status
           var locationCounts = {};
+          var locationIsMyTask = {};
           dayTasks.forEach(function(t) {
             var loc = t.location || 'No Location';
-            if (!locationCounts[loc]) locationCounts[loc] = 0;
+            if (!locationCounts[loc]) {
+              locationCounts[loc] = 0;
+              locationIsMyTask[loc] = false;
+            }
             locationCounts[loc]++;
+            // Check if this task is from My Checklist (Manual Tasks or in personalChecklist)
+            if (t.source === 'Manual Tasks' || isTaskInChecklist(t)) {
+              locationIsMyTask[loc] = true;
+            }
           });
 
           // Sort locations by task count (most tasks first)
@@ -653,11 +1042,12 @@
             return locationCounts[b] - locationCounts[a];
           });
 
-          // Show first 2 locations with counts
+          // Show first 2 locations with counts and My Task indicator
           for (var loc = 0; loc < Math.min(sortedLocations.length, 2); loc++) {
             var locName = sortedLocations[loc];
             var count = locationCounts[locName];
-            html += '<div class="calendar-task-location">📍 ' + locName;
+            var myTaskClass = locationIsMyTask[locName] ? ' my-task' : '';
+            html += '<div class="calendar-task-location' + myTaskClass + '">📍 ' + locName;
             if (count > 1) html += ' (' + count + ')';
             html += '</div>';
           }
@@ -668,23 +1058,27 @@
         html += '</div>';
       }
 
-      // Days from next month
-      var totalCells = startDay + daysInMonth;
-      var remainingCells = 7 - (totalCells % 7);
-      if (remainingCells < 7) {
-        for (var n = 1; n <= remainingCells; n++) {
-          html += '<div class="calendar-day other-month"><div class="calendar-day-number">' + n + '</div></div>';
-        }
-      }
-
       grid.innerHTML = html;
     }
 
     function changeMonth(delta) {
-      currentMonth += delta;
-      if (currentMonth < 0) { currentMonth = 11; currentYear--; }
-      if (currentMonth > 11) { currentMonth = 0; currentYear++; }
-      renderCalendar();
+      // For rolling calendar, this now shifts weeks instead of months
+      // Each click moves 2 weeks forward or back
+      var today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      // Calculate current week start
+      var currentWeekStart = new Date(today);
+      currentWeekStart.setDate(today.getDate() - today.getDay());
+
+      // Don't allow going before current week
+      if (delta < 0) {
+        showToast('Cannot view past weeks - calendar starts from current week', 'info');
+        return;
+      }
+
+      // For forward navigation, we could extend the view, but for now just show a message
+      showToast('Showing 5 weeks from current week. Tasks beyond this range are still tracked.', 'info');
     }
 
     function showDayDetail(dateStr, event) {
@@ -724,10 +1118,14 @@
             var priorityClass = 'priority-' + (task.priority || 'medium').toLowerCase();
             var statusClass = getStatusClass(task.status);
             var displayTaskType = formatTaskType(task);
+            var taskIsOffice = isTaskOffice(task);
 
             html += '<div class="day-detail-task ' + priorityClass + ' mb-2">';
             html += '<div class="d-flex justify-content-between align-items-start">';
             html += '<div><strong>' + displayTaskType + '</strong>';
+            if (taskIsOffice) {
+              html += '<span class="office-badge"><i class="bi bi-building"></i> Office</span>';
+            }
             if (task.employee) html += '<div class="text-muted small">👤 ' + task.employee + '</div>';
             html += '</div>';
             html += '<span class="status-badge ' + statusClass + '">' + (task.status || 'Pending') + '</span>';
@@ -768,13 +1166,24 @@
       var container = document.getElementById('taskContainer');
 
       if (!tasks || tasks.length === 0) {
-        container.innerHTML = '<div class="empty-state"><i class="bi bi-calendar-x" style="font-size: 48px;"></i><p class="mt-3">No tasks found</p><p class="text-muted">Tasks will appear from Manual Tasks, Training, Crew Visits, Expiring Certs, and Swaps</p></div>';
+        container.innerHTML = '<div class="empty-state"><i class="bi bi-calendar-x" style="font-size: 48px;"></i><p class="mt-3">No tasks found</p><p class="text-muted">Tasks will appear from Training, Crew Visits, Expiring Certs, and Swaps</p></div>';
         return;
       }
 
-      // Filter out tasks that have been added to personal checklist (1st Aid/CPR items)
+      // Filter out tasks that have been added to personal checklist AND Manual Tasks (which go to My Checklist only)
       var filteredTasks = tasks.filter(function(task, index) {
         task._originalIndex = index; // Preserve original index for actions
+        // Exclude Manual Tasks source - they only appear in My Checklist
+        if (task.source === 'Manual Tasks') return false;
+        // Also exclude tasks with itemType of "Manual" - they belong in My Checklist only
+        var itemType = (task.itemType || '').toLowerCase();
+        if (itemType === 'manual') return false;
+        // Also check taskType for "Manual" or "Manual Task"
+        var taskType = (task.taskType || '').toLowerCase();
+        if (taskType === 'manual' || taskType === 'manual task') return false;
+        // Exclude tasks with foreman "Manual" extracted from location string (e.g., "Billings (👷 Manual)")
+        var foremanFromLoc = extractForemanFromLocation(task.location);
+        if (foremanFromLoc && foremanFromLoc.toLowerCase() === 'manual') return false;
         return !isTaskInChecklist(task);
       });
 
@@ -849,7 +1258,6 @@
         html += '<i class="bi bi-geo-alt me-1"></i><strong>' + baseLocation + '</strong>';
         html += '<span class="badge bg-white text-dark ms-2" style="opacity: 0.9;">' + totalTasks + ' tasks</span></div>';
         html += '<div class="d-flex align-items-center">';
-        html += '<button class="btn btn-sm btn-light bulk-edit-btn me-2" onclick="event.stopPropagation(); toggleLocationEdit(' + locIndex + ', \'' + escapeHtml(baseLocation) + '\')" title="Edit all tasks for this location"><i class="bi bi-pencil-square"></i> Bulk Edit</button>';
         if (highCount > 0) html += '<span class="badge me-1" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3);">' + highCount + ' High</span>';
         if (medCount > 0) html += '<span class="badge me-1" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3);">' + medCount + ' Med</span>';
         if (lowCount > 0) html += '<span class="badge" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3);">' + lowCount + ' Low</span>';
@@ -969,10 +1377,47 @@
       // Status
       html += '<div class="col-md-2">';
       html += '<span class="status-badge ' + statusClass + '">' + (task.status || 'Pending') + '</span>';
+      if ( isTaskNotified(task)) {
+        html += '<span class="notified-badge"><i class="bi bi-bell-fill"></i> Notified</span>';
+      }
+      if (isTaskScheduled(task)) {
+        html += '<span class="scheduled-badge"><i class="bi bi-calendar-check-fill"></i> Scheduled</span>';
+        // Show class type badge
+        html += getClassTypeBadgeHtml(getTaskClassType(task));
+      }
+      if (isTaskOffice(task)) {
+        html += '<span class="office-badge"><i class="bi bi-building"></i> Office</span>';
+      }
       html += '</div>';
 
       // Actions
       html += '<div class="col-md-3 text-end">';
+
+      // Check if this is a cert task with a phone number
+      var isCertWithPhone = isCertTask(task) && hasPhoneNumber(task);
+
+      if (isCertWithPhone) {
+        // SMS Notify button (Stage 1)
+        var notifyBtnClass = isTaskNotified(task) ? 'btn-notified' : 'btn-sms';
+        var notifyIcon = isTaskNotified(task) ? 'bi-chat-fill' : 'bi-chat-text';
+        var notifyTitle = isTaskNotified(task) ? 'Resend notification' : 'Send notification text';
+        html += '<button class="btn ' + notifyBtnClass + ' btn-sm me-1" onclick="event.stopPropagation(); openNotifyModal(' + task._originalIndex + ')" title="' + notifyTitle + '"><i class="bi ' + notifyIcon + '"></i></button>';
+
+        // SMS Scheduled button (Stage 2) - only show if notified
+        if (isTaskNotified(task)) {
+          var scheduledBtnClass = isTaskScheduled(task) ? 'btn-scheduled' : 'btn-sms';
+          var scheduledIcon = isTaskScheduled(task) ? 'bi-calendar-check-fill' : 'bi-calendar-plus';
+          var scheduledTitle = isTaskScheduled(task) ? 'Resend class schedule' : 'Send class schedule text';
+          html += '<button class="btn ' + scheduledBtnClass + ' btn-sm me-1" onclick="event.stopPropagation(); openScheduledModal(' + task._originalIndex + ')" title="' + scheduledTitle + '"><i class="bi ' + scheduledIcon + '"></i></button>';
+        }
+      } else {
+
+        // Notified toggle button (for non-cert tasks)
+        var notifiedBtnClass = isTaskNotified(task) ? 'btn-notified' : 'btn-outline-secondary';
+        var notifiedIcon = isTaskNotified(task) ? 'bi-bell-fill' : 'bi-bell';
+        var notifiedTitle = isTaskNotified(task) ? 'Click to clear notified status' : 'Mark as notified';
+        html += '<button class="btn ' + notifiedBtnClass + ' btn-sm me-1" onclick="event.stopPropagation(); toggleNotified(' + task._originalIndex + ')" title="' + notifiedTitle + '"><i class="bi ' + notifiedIcon + '"></i></button>';
+      }
 
       // Add to checklist button for 1st Aid and CPR tasks
       var taskTypeLower = (task.taskType || '').toLowerCase();
@@ -1079,6 +1524,91 @@
       // Show unsaved indicator
       setUnsaved(true);
       showToast('Time changed - click Save to apply');
+    }
+
+    // ================== CHECKLIST DATE/TIME UPDATE FUNCTIONS ==================
+
+    // Update date for a checklist item that maps to an allTasks entry
+    function updateChecklistTaskDate(taskIndex, newDate, inputElement) {
+      // Use the regular updateTaskDate which handles allTasks items
+      updateTaskDate(taskIndex, newDate, inputElement);
+
+      // Also update the personalChecklist item if it exists
+      var task = allTasks[taskIndex];
+      if (task) {
+        var checklistItem = personalChecklist.find(function(item) {
+          return item.employee === task.employee &&
+                 item.taskType === task.taskType &&
+                 (item.itemType === task.itemType || (!item.itemType && !task.itemType));
+        });
+        if (checklistItem) {
+          checklistItem.scheduledDate = newDate;
+          saveChecklistToStorage();
+        }
+      }
+    }
+
+    // Update time for a checklist item that maps to an allTasks entry
+    function updateChecklistTaskTime(taskIndex, timeType, newTime, inputElement) {
+      // Use the regular updateTaskTime which handles allTasks items
+      updateTaskTime(taskIndex, timeType, newTime, inputElement);
+
+      // Also update the personalChecklist item if it exists
+      var task = allTasks[taskIndex];
+      if (task) {
+        var checklistItem = personalChecklist.find(function(item) {
+          return item.employee === task.employee &&
+                 item.taskType === task.taskType &&
+                 (item.itemType === task.itemType || (!item.itemType && !task.itemType));
+        });
+        if (checklistItem) {
+          if (timeType === 'start') {
+            checklistItem.startTime = newTime;
+          } else {
+            checklistItem.endTime = newTime;
+          }
+          saveChecklistToStorage();
+        }
+      }
+    }
+
+    // Update date for a localStorage-only checklist item (no matching allTasks entry)
+    function updateChecklistItemDate(itemId, newDate, inputElement) {
+      var item = personalChecklist.find(function(i) { return i.id === itemId; });
+      if (item) {
+        item.scheduledDate = newDate;
+        saveChecklistToStorage();
+
+        // Mark input as changed
+        if (inputElement) {
+          inputElement.classList.add('changed');
+        }
+
+        // Update calendar view
+        renderCalendar();
+
+        showToast('✓ Date updated');
+      }
+    }
+
+    // Update time for a localStorage-only checklist item (no matching allTasks entry)
+    function updateChecklistItemTime(itemId, timeType, newTime, inputElement) {
+      var item = personalChecklist.find(function(i) { return i.id === itemId; });
+      if (item) {
+        if (timeType === 'start') {
+          item.startTime = newTime;
+        } else {
+          item.endTime = newTime;
+        }
+        saveChecklistToStorage();
+
+        // Mark input as changed
+        if (inputElement) {
+          inputElement.classList.add('changed');
+        }
+
+        showToast('✓ Time updated');
+      }
     }
 
     function escapeHtml(str) {
@@ -1351,6 +1881,51 @@
       }
     }
 
+    function addCurrentTaskToChecklist() {
+      if (!currentSmsTask) return;
+
+      var task = currentSmsTask.task;
+      var index = currentSmsTask.index;
+
+      // Check if already in checklist - show warning and prevent duplicate
+      if (isTaskInChecklist(task)) {
+        showToast('⚠️ This item is already in your checklist!', 'warning');
+        return;
+      }
+
+      // Add to personal checklist
+      var checklistItem = {
+        id: Date.now(),
+        employee: task.employee || '',
+        taskType: task.taskType || '',
+        itemType: task.itemType || '',
+        location: task.location || '',
+        scheduledDate: task.scheduledDate || '',
+        source: task.source || '',
+        subject: 'Follow up on ' + (task.itemType || task.certType || 'certification'),
+        addedDate: new Date().toISOString().split('T')[0],
+        completed: false
+      };
+      personalChecklist.push(checklistItem);
+      saveChecklistToStorage();
+
+      // Auto-mark as Office status for expiring certs
+      var key = getTaskKey(task);
+      officeTasks[key] = true;
+      saveOfficeToStorage();
+
+      updateChecklistBadge();
+      renderPersonalChecklist();
+      renderTasks(allTasks); // Re-render to update task list
+      renderCalendar();
+
+      // Close the modal
+      var modal = bootstrap.Modal.getInstance(document.getElementById('smsNotifyModal'));
+      if (modal) modal.hide();
+
+      showToast('✓ Added to My Checklist with Office status');
+    }
+
     function removeFromChecklist(index) {
       var task = allTasks[index];
       personalChecklist = personalChecklist.filter(function(item) {
@@ -1427,10 +2002,6 @@
       });
       saveChecklistToStorage();
       renderPersonalChecklist();
-        }
-      });
-      saveChecklistToStorage();
-      renderPersonalChecklist();
     }
 
     function saveChecklistToStorage() {
@@ -1454,10 +2025,144 @@
       updateChecklistBadge();
     }
 
+    // ================== NOTIFIED STATUS FUNCTIONS ==================
+    function getTaskKey(task) {
+      // Create a unique key for each task based on its identifying properties
+      // NOTE: Do NOT include scheduledDate - if the date changes, we still want to track notified/scheduled status
+      return (task.employee || '') + '_' + (task.taskType || '') + '_' + (task.itemType || '') + '_' + (task.location || '');
+    }
+
+    function saveNotifiedToStorage() {
+      try {
+        localStorage.setItem('rubberTracker_notifiedTasks', JSON.stringify(notifiedTasks));
+      } catch (e) {
+        console.log('Could not save notified to localStorage:', e);
+      }
+    }
+
+    function loadNotifiedFromStorage() {
+      try {
+        var stored = localStorage.getItem('rubberTracker_notifiedTasks');
+        if (stored) {
+          notifiedTasks = JSON.parse(stored);
+        }
+      } catch (e) {
+        console.log('Could not load notified from localStorage:', e);
+        notifiedTasks = {};
+      }
+    }
+
+    function isTaskNotified(task) {
+      var key = getTaskKey(task);
+      return notifiedTasks[key] === true;
+    }
+
+    function toggleNotified(index) {
+      var task = allTasks[index];
+      var key = getTaskKey(task);
+
+      if (notifiedTasks[key]) {
+        delete notifiedTasks[key];
+        showToast('Notification status cleared');
+      } else {
+        notifiedTasks[key] = true;
+        showToast('✓ Marked as notified');
+      }
+
+      saveNotifiedToStorage();
+      renderTasks(allTasks);
+      renderPersonalChecklist();
+    }
+
+    function toggleChecklistNotified(itemId) {
+      // Handle server-side items
+      if (typeof itemId === 'string' && itemId.startsWith('server_')) {
+        var serverIndex = parseInt(itemId.replace('server_', ''));
+        var task = allTasks[serverIndex];
+        if (task) {
+          var key = getTaskKey(task);
+          if (notifiedTasks[key]) {
+            delete notifiedTasks[key];
+            showToast('Notification status cleared');
+          } else {
+            notifiedTasks[key] = true;
+            showToast('✓ Marked as notified');
+          }
+          saveNotifiedToStorage();
+          renderTasks(allTasks);
+          renderPersonalChecklist();
+        }
+        return;
+      }
+
+      // Handle localStorage checklist items
+      var item = personalChecklist.find(function(i) { return i.id === itemId; });
+      if (item) {
+        item.notified = !item.notified;
+        saveChecklistToStorage();
+        renderPersonalChecklist();
+        showToast(item.notified ? '✓ Marked as notified' : 'Notification status cleared');
+      }
+    }
+
+    function isChecklistItemNotified(item) {
+      if (item.isFromServer) {
+        var serverIndex = parseInt(item.id.replace('server_', ''));
+        var task = allTasks[serverIndex];
+        if (task) {
+          return isTaskNotified(task);
+        }
+      }
+      // For localStorage items, find matching task in allTasks and check notifiedTasks
+      var taskIndex = findTaskIndexForChecklistItem(item);
+      if (taskIndex !== -1) {
+        return isTaskNotified(allTasks[taskIndex]);
+      }
+      // Fallback: also check item.notified directly
+      return item.notified === true;
+    }
+
+    function isChecklistItemScheduled(item) {
+      if (item.isFromServer) {
+        var serverIndex = parseInt(item.id.replace('server_', ''));
+        var task = allTasks[serverIndex];
+        if (task) {
+          return isTaskScheduled(task);
+        }
+      }
+      // For localStorage items, find matching task in allTasks and check scheduledTasks
+      var taskIndex = findTaskIndexForChecklistItem(item);
+      if (taskIndex !== -1) {
+        return isTaskScheduled(allTasks[taskIndex]);
+      }
+      // Fallback: also check item.scheduled directly
+      return item.scheduled === true;
+    }
+
+    // Helper function to find task index for a checklist item (declared early for use above)
+    function findTaskIndexForChecklistItem(item) {
+      for (var i = 0; i < allTasks.length; i++) {
+        var task = allTasks[i];
+        if (task.employee === item.employee &&
+            task.taskType === item.taskType &&
+            (task.itemType === item.itemType || (!task.itemType && !item.itemType))) {
+          return i;
+        }
+      }
+      return -1;
+    }
+
     function updateChecklistBadge() {
       var badge = document.getElementById('checklistBadge');
       var countSpan = document.getElementById('checklistCount');
+
+      // Count both localStorage items and Manual Tasks from server
       var count = personalChecklist.length;
+      if (allTasks && allTasks.length > 0) {
+        allTasks.forEach(function(task) {
+          if (task.source === 'Manual Tasks') count++;
+        });
+      }
 
       if (badge) {
         if (count > 0) {
@@ -1473,14 +2178,1004 @@
       }
     }
 
+    // ================== OFFICE TASK FUNCTIONS ==================
+    function loadOfficeFromStorage() {
+      try {
+        var stored = localStorage.getItem('rubberTracker_officeTasks');
+        if (stored) {
+          officeTasks = JSON.parse(stored);
+        }
+      } catch (e) {
+        console.log('Could not load office tasks from localStorage:', e);
+        officeTasks = {};
+      }
+    }
+
+    function saveOfficeToStorage() {
+      try {
+        localStorage.setItem('rubberTracker_officeTasks', JSON.stringify(officeTasks));
+      } catch (e) {
+        console.log('Could not save office tasks to localStorage:', e);
+      }
+    }
+
+    function isTaskOffice(task) {
+      var key = getTaskKey(task);
+      return officeTasks[key] === true;
+    }
+
+    function toggleOffice(index) {
+      var task = allTasks[index];
+      var key = getTaskKey(task);
+
+      if (officeTasks[key]) {
+        delete officeTasks[key];
+        showToast('Office status cleared');
+      } else {
+        officeTasks[key] = true;
+        showToast('✓ Marked as office task');
+      }
+
+      saveOfficeToStorage();
+      renderTasks(allTasks);
+      renderCalendar();
+      renderPersonalChecklist();
+    }
+
+    function toggleChecklistOffice(itemId) {
+      // Handle server-side items
+      if (typeof itemId === 'string' && itemId.startsWith('server_')) {
+        var serverIndex = parseInt(itemId.replace('server_', ''));
+        var task = allTasks[serverIndex];
+        if (task) {
+          var key = getTaskKey(task);
+          if (officeTasks[key]) {
+            delete officeTasks[key];
+            showToast('Office status cleared');
+          } else {
+            officeTasks[key] = true;
+            showToast('✓ Marked as office task');
+          }
+          saveOfficeToStorage();
+          renderTasks(allTasks);
+          renderCalendar();
+          renderPersonalChecklist();
+        }
+        return;
+      }
+
+      // Handle localStorage checklist items
+      var item = personalChecklist.find(function(i) { return i.id === itemId; });
+      if (item) {
+        item.office = !item.office;
+        saveChecklistToStorage();
+        renderCalendar();
+        renderPersonalChecklist();
+        showToast(item.office ? '✓ Marked as office task' : 'Office status cleared');
+      }
+    }
+
+    function isChecklistItemOffice(item) {
+      if (item.isFromServer) {
+        var serverIndex = parseInt(item.id.replace('server_', ''));
+        var task = allTasks[serverIndex];
+        if (task) {
+          return isTaskOffice(task);
+        }
+      }
+      return item.office === true;
+    }
+
+    // ================== SMS NOTIFICATION FUNCTIONS ==================
+
+    function saveScheduledToStorage() {
+      try {
+        localStorage.setItem('rubberTracker_scheduledTasks', JSON.stringify(scheduledTasks));
+      } catch (e) {
+        console.log('Could not save scheduled to localStorage:', e);
+      }
+    }
+
+    function loadScheduledFromStorage() {
+      try {
+        var stored = localStorage.getItem('rubberTracker_scheduledTasks');
+        if (stored) {
+          scheduledTasks = JSON.parse(stored);
+        }
+      } catch (e) {
+        console.log('Could not load scheduled from localStorage:', e);
+        scheduledTasks = {};
+      }
+    }
+
+    function saveClassTypeToStorage() {
+      try {
+        localStorage.setItem('rubberTracker_classTypeTasks', JSON.stringify(classTypeTasks));
+      } catch (e) {
+        console.log('Could not save class types to localStorage:', e);
+      }
+    }
+
+    function loadClassTypeFromStorage() {
+      try {
+        var stored = localStorage.getItem('rubberTracker_classTypeTasks');
+        if (stored) {
+          classTypeTasks = JSON.parse(stored);
+        }
+      } catch (e) {
+        console.log('Could not load class types from localStorage:', e);
+        classTypeTasks = {};
+      }
+    }
+
+    function getTaskClassType(task) {
+      var key = getTaskKey(task);
+      return classTypeTasks[key] || '';
+    }
+
+    function getClassTypeBadgeHtml(classType) {
+      if (!classType) return '';
+      if (classType === 'Online') {
+        return '<span class="classtype-badge classtype-online"><i class="bi bi-laptop"></i> Online</span>';
+      } else if (classType === 'InPersonMPC') {
+        return '<span class="classtype-badge classtype-inperson-mpc"><i class="bi bi-person-workspace"></i> In Person MPC</span>';
+      } else if (classType === 'InPersonMSLCAT') {
+        return '<span class="classtype-badge classtype-inperson-mslcat"><i class="bi bi-building"></i> MSLCAT</span>';
+      }
+      return '';
+    }
+
+    function getChecklistItemClassType(item) {
+      if (item.isFromServer) {
+        var serverIndex = parseInt(item.id.replace('server_', ''));
+        var task = allTasks[serverIndex];
+        if (task) {
+          return getTaskClassType(task);
+        }
+      }
+      // For localStorage items, find matching task
+      var taskIndex = findTaskIndexForChecklistItem(item);
+      if (taskIndex !== -1) {
+        return getTaskClassType(allTasks[taskIndex]);
+      }
+      return item.classType || '';
+    }
+
+    function isTaskScheduled(task) {
+      var key = getTaskKey(task);
+      return scheduledTasks[key] === true;
+    }
+
+    function isCertTask(task) {
+      var taskType = (task.type || task.taskType || '').toLowerCase();
+      var source = (task.source || task.sheetName || '').toLowerCase();
+      return taskType.indexOf('cert') !== -1 || source.indexOf('cert') !== -1;
+    }
+
+    // Detect specific cert types for different notification messages
+    function getCertCategory(task) {
+      var itemType = (task.itemType || task.certType || '').toLowerCase();
+
+      // 1st Aid / CPR
+      if (itemType.indexOf('1st aid') !== -1 || itemType.indexOf('first aid') !== -1 || itemType.indexOf('cpr') !== -1) {
+        return 'firstaid_cpr';
+      }
+
+      // Driver's License
+      if (itemType.indexOf('dl') !== -1 || itemType.indexOf('driver') !== -1 || itemType.indexOf('license') !== -1) {
+        return 'dl';
+      }
+
+      // MEC (Medical Examiner's Certificate)
+      if (itemType.indexOf('mec') !== -1 || itemType.indexOf('medical exam') !== -1 || itemType.indexOf('dot physical') !== -1) {
+        return 'mec';
+      }
+
+      // Crane Cert
+      if (itemType.indexOf('crane') !== -1) {
+        return 'crane';
+      }
+
+      // Harassment Training
+      if (itemType.indexOf('harassment') !== -1) {
+        return 'harassment';
+      }
+
+      // Default - other certs
+      return 'other';
+    }
+
+    function hasPhoneNumber(task) {
+      return task.phoneNumber && task.phoneNumber.length >= 10;
+    }
+
+    // Build a map of employee names to phone numbers from allTasks
+    function buildEmployeePhoneMap() {
+      employeePhoneMap = {};
+      allTasks.forEach(function(task) {
+        if (task.employee && task.phoneNumber && task.phoneNumber.length >= 10) {
+          var empName = task.employee.toLowerCase().trim();
+          if (!employeePhoneMap[empName]) {
+            employeePhoneMap[empName] = task.phoneNumber;
+          }
+        }
+      });
+    }
+
+    // Look up phone number for a checklist item by employee name
+    function getPhoneForChecklistItem(item) {
+      // First check if item has phone number directly
+      if (item.phoneNumber && item.phoneNumber.length >= 10) {
+        return item.phoneNumber;
+      }
+      // Look up by employee name
+      if (item.employee) {
+        var empName = item.employee.toLowerCase().trim();
+        return employeePhoneMap[empName] || '';
+      }
+      return '';
+    }
+
+    // Check if a checklist item is a cert task
+    function isChecklistCertTask(item) {
+      var source = (item.source || '').toLowerCase();
+      var taskType = (item.taskType || '').toLowerCase();
+      var itemType = (item.itemType || '').toLowerCase();
+      return source.indexOf('cert') !== -1 ||
+             taskType.indexOf('cert') !== -1 ||
+             taskType.indexOf('renew') !== -1 ||
+             itemType.indexOf('cpr') !== -1 ||
+             itemType.indexOf('1st aid') !== -1 ||
+             itemType.indexOf('first aid') !== -1;
+    }
+
+    function formatPhoneForDisplay(phone) {
+      if (!phone) return '';
+      var digits = phone.replace(/\D/g, '');
+      if (digits.length === 11 && digits.startsWith('1')) {
+        digits = digits.substring(1);
+      }
+      if (digits.length === 10) {
+        return '(' + digits.substring(0,3) + ') ' + digits.substring(3,6) + '-' + digits.substring(6);
+      }
+      return phone;
+    }
+
+    function formatDateForMessage(dateStr) {
+      if (!dateStr) return '';
+      var date = new Date(dateStr + 'T00:00:00');
+      var options = { weekday: 'short', month: 'short', day: 'numeric' };
+      return date.toLocaleDateString('en-US', options);
+    }
+
+    function formatTimeForMessage(timeStr) {
+      if (!timeStr) return '';
+      var parts = timeStr.split(':');
+      var hours = parseInt(parts[0]);
+      var minutes = parts[1];
+      var ampm = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12 || 12;
+      return hours + ':' + minutes + ' ' + ampm;
+    }
+
+    function getCertInfoText(task) {
+      var certTypes = [];
+      var expirationDates = [];
+      var earliestExpDate = null;
+
+      // Check for related certs (1st Aid + CPR grouped together)
+      if (task.relatedCerts && task.relatedCerts.length > 1) {
+        task.relatedCerts.forEach(function(rc) {
+          certTypes.push(rc.certType);
+          if (rc.expirationDate) {
+            var expDate = new Date(rc.expirationDate);
+            expirationDates.push(rc.certType + ' expires ' + expDate.toLocaleDateString());
+            if (!earliestExpDate || expDate < earliestExpDate) {
+              earliestExpDate = expDate;
+            }
+          }
+        });
+      } else {
+        certTypes.push(task.itemType || task.certType || 'Certification');
+        if (task.dueDate) {
+          var dueDate = task.dueDate instanceof Date ? task.dueDate : new Date(task.dueDate);
+          expirationDates.push('Expires ' + dueDate.toLocaleDateString());
+          earliestExpDate = dueDate;
+        }
+      }
+
+      return {
+        types: certTypes.join(' & '),
+        details: expirationDates.join(', '),
+        expirationDate: earliestExpDate
+      };
+    }
+
+    function formatDateMMDDYYYY(date) {
+      if (!date) return '';
+      var d = date instanceof Date ? date : new Date(date);
+      var month = String(d.getMonth() + 1).padStart(2, '0');
+      var day = String(d.getDate()).padStart(2, '0');
+      var year = d.getFullYear();
+      return month + '/' + day + '/' + year;
+    }
+
+    function formatTimeAMPM(timeStr) {
+      if (!timeStr) return '';
+      var parts = timeStr.split(':');
+      var hours = parseInt(parts[0]);
+      var minutes = parts[1];
+      var ampm = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12 || 12;
+      return hours + ':' + minutes + ' ' + ampm;
+    }
+
+    function openNotifyModal(index) {
+      var task = allTasks[index];
+      if (!task) return;
+
+      currentSmsTask = { task: task, index: index };
+
+      var certInfo = getCertInfoText(task);
+      var employeeName = task.employee || 'Employee';
+      var phoneNumber = task.phoneNumber || '';
+      var certCategory = getCertCategory(task);
+
+      // Store cert info for message building
+      currentSmsTask.certInfo = certInfo;
+      currentSmsTask.firstName = employeeName.split(' ')[0];
+      currentSmsTask.expirationDate = certInfo.expirationDate;
+      currentSmsTask.certCategory = certCategory;
+      currentSmsTask.certType = task.itemType || task.certType || 'Certification';
+
+      document.getElementById('notifyEmployeeName').textContent = employeeName;
+      document.getElementById('notifyCertInfo').innerHTML = '<strong>' + certInfo.types + '</strong><br>' + certInfo.details;
+      document.getElementById('notifyPhoneDisplay').textContent = formatPhoneForDisplay(phoneNumber);
+
+      // Hide all option sections first
+      document.getElementById('firstAidCprOptions').style.display = 'none';
+      document.getElementById('craneCertOptions').style.display = 'none';
+      document.getElementById('simpleCertOptions').style.display = 'none';
+
+      // Show appropriate section based on cert type
+      if (certCategory === 'firstaid_cpr') {
+        document.getElementById('firstAidCprOptions').style.display = 'block';
+        // Reset 1st Aid/CPR options
+        document.getElementById('notifyOptionOnline').checked = false;
+        document.getElementById('notifyOptionInPerson').checked = false;
+        document.getElementById('notifyOptionMSLCAT').checked = false;
+        document.getElementById('notifyInPersonDetails').style.display = 'none';
+        document.getElementById('notifyMSLCATDetails').style.display = 'none';
+        document.getElementById('notifyInPersonDate').value = '';
+        document.getElementById('notifyInPersonStartTime').value = '';
+        document.getElementById('notifyInPersonEndTime').value = '';
+        document.getElementById('notifyInPersonLocation').value = '';
+        document.getElementById('notifyMSLCATDate').value = '';
+        document.getElementById('noOptionWarning').style.display = 'none';
+      } else if (certCategory === 'crane') {
+        document.getElementById('craneCertOptions').style.display = 'block';
+        // Reset crane options
+        document.getElementById('notifyCraneStartDate').value = '';
+        document.getElementById('notifyCraneEndDate').value = '';
+      } else {
+        // DL, MEC, Harassment - simple notification
+        document.getElementById('simpleCertOptions').style.display = 'block';
+      }
+
+      document.getElementById('notifyEditMode').checked = false;
+      document.getElementById('notifyMessage').readOnly = true;
+
+      updateNotifyMessage();
+
+      var modal = new bootstrap.Modal(document.getElementById('smsNotifyModal'));
+      modal.show();
+    }
+
+    function updateNotifyMessage() {
+      // Skip if in manual edit mode
+      if (document.getElementById('notifyEditMode').checked) {
+        updateNotifyCharCount();
+        return;
+      }
+
+      if (!currentSmsTask) return;
+
+      var firstName = currentSmsTask.firstName;
+      var certType = currentSmsTask.certType;
+      var expDate = currentSmsTask.expirationDate;
+      var certCategory = currentSmsTask.certCategory;
+
+      // Determine expiration status
+      var today = new Date();
+      today.setHours(0, 0, 0, 0);
+      var isExpired = expDate && expDate < today;
+      var expirationStatus = isExpired
+        ? 'expired on ' + formatDateMMDDYYYY(expDate)
+        : 'will expire on ' + formatDateMMDDYYYY(expDate);
+
+      var message = '';
+
+      // Build message based on cert category
+      if (certCategory === 'firstaid_cpr') {
+        // Show/hide input fields based on checkbox state
+        document.getElementById('notifyInPersonDetails').style.display =
+          document.getElementById('notifyOptionInPerson').checked ? 'flex' : 'none';
+        document.getElementById('notifyMSLCATDetails').style.display =
+          document.getElementById('notifyOptionMSLCAT').checked ? 'block' : 'none';
+
+        var onlineChecked = document.getElementById('notifyOptionOnline').checked;
+        var inPersonChecked = document.getElementById('notifyOptionInPerson').checked;
+        var mslcatChecked = document.getElementById('notifyOptionMSLCAT').checked;
+
+        // Show/hide warning
+        var hasOption = onlineChecked || inPersonChecked || mslcatChecked;
+        document.getElementById('noOptionWarning').style.display = hasOption ? 'none' : 'block';
+
+        var expStatusForFirstAid = isExpired ? 'is expired' : 'will expire on ' + formatDateMMDDYYYY(expDate);
+        message = 'Hi ' + firstName + ', your 1st Aid/CPR certification ' + expStatusForFirstAid + '. ';
+
+        // Build options array
+        var options = [];
+
+        if (onlineChecked) {
+          options.push('get into my next Online Class');
+        }
+
+        if (inPersonChecked) {
+          var ipDate = document.getElementById('notifyInPersonDate').value;
+          var ipStartTime = document.getElementById('notifyInPersonStartTime').value;
+          var ipEndTime = document.getElementById('notifyInPersonEndTime').value;
+          var ipLocation = document.getElementById('notifyInPersonLocation').value.trim();
+
+          var inPersonText = 'take my next In Person class';
+          if (ipDate) {
+            inPersonText += ' on ' + formatDateMMDDYYYY(ipDate);
+            if (ipStartTime) {
+              inPersonText += ' from ' + formatTimeAMPM(ipStartTime);
+              if (ipEndTime) {
+                inPersonText += ' - ' + formatTimeAMPM(ipEndTime);
+              }
+            }
+            if (ipLocation) {
+              inPersonText += ' in ' + ipLocation;
+            }
+          }
+          options.push(inPersonText);
+        }
+
+        if (mslcatChecked) {
+          var mslcatDate = document.getElementById('notifyMSLCATDate').value;
+          var mslcatText = 'let Tim know that you are taking the one in Helena at the MSLCAT Training Center';
+          if (mslcatDate) {
+            mslcatText += ' on ' + formatDateMMDDYYYY(mslcatDate);
+          }
+          options.push(mslcatText);
+        }
+
+        // Combine options with proper grammar
+        if (options.length === 0) {
+          message += 'Please let me know your availability for a renewal class.';
+        } else if (options.length === 1) {
+          message += 'Would you like to ' + options[0] + '?';
+        } else if (options.length === 2) {
+          message += 'Would you like to ' + options[0] + ' or ' + options[1] + '?';
+        } else if (options.length === 3) {
+          message += 'Would you like to ' + options[0] + ', ' + options[1] + ', or ' + options[2] + '?';
+        }
+
+      } else if (certCategory === 'crane') {
+        // Crane cert message
+        var craneStartDate = document.getElementById('notifyCraneStartDate').value;
+        var craneEndDate = document.getElementById('notifyCraneEndDate').value;
+
+        message = 'Hi ' + firstName + ', your Crane Cert ' + expirationStatus + '. ';
+        message += 'There is a class scheduled at the MSLCAT Training Center. ';
+        if (craneStartDate && craneEndDate) {
+          message += 'It starts on ' + formatDateMMDDYYYY(craneStartDate) + ' and ends on ' + formatDateMMDDYYYY(craneEndDate) + '. ';
+        } else {
+          message += 'It starts on (start date) and ends on (end date). ';
+        }
+        message += 'Let me know if you can attend.';
+
+      } else if (certCategory === 'dl') {
+        // Driver's License message
+        message = 'Hi ' + firstName + ', your Driver\'s License ' + expirationStatus + '. ';
+        message += 'Can you send me a picture (front and back) of your new one?';
+
+      } else if (certCategory === 'mec') {
+        // MEC (DOT Medical Card) message
+        var mecStatus = isExpired ? 'is expired' : 'will expire';
+        message = 'Hi ' + firstName + ', your DOT Medical Card ' + mecStatus + ' on ' + formatDateMMDDYYYY(expDate) + '. ';
+        message += 'Can you send me a picture of your new one?';
+
+      } else if (certCategory === 'harassment') {
+        // Harassment Training message
+        message = 'Hi ' + firstName + ', your Harassment Training ' + expirationStatus + '. ';
+        message += 'Can you let me know when you get it done? This is required by the NJATC if you are going to be assigned apprentices and the Federal Govt in general. ';
+        message += 'Go to SafetyWallet.org or the mobile app, sign in with your last name and phone number, upper left is a menu with Training and then On Line Training. ';
+        message += 'Make sure you take the 65 minute class and not the 120 minute class. ';
+        message += 'If you have trouble logging in call Safety Wallet at 424-342-7233 and they can get you straightened out.';
+
+      } else {
+        // Other cert types - generic message
+        message = 'Hi ' + firstName + ', your ' + certType + ' ' + expirationStatus + '. ';
+        message += 'Can you send me a picture of your new one?';
+      }
+
+      document.getElementById('notifyMessage').value = message;
+      updateNotifyCharCount();
+    }
+
+    function toggleNotifyEditMode() {
+      var editMode = document.getElementById('notifyEditMode').checked;
+      document.getElementById('notifyMessage').readOnly = !editMode;
+
+      // If switching back to auto mode, regenerate message
+      if (!editMode) {
+        updateNotifyMessage();
+      }
+    }
+
+    function updateNotifyCharCount() {
+      var message = document.getElementById('notifyMessage').value;
+      var count = message.length;
+      var countEl = document.getElementById('notifyCharCount');
+      countEl.textContent = '(' + count + ' characters)';
+      countEl.className = 'char-count' + (count > 160 ? (count > 320 ? ' danger' : ' warning') : '');
+    }
+
+    // ================== ADD MANUAL ITEM FUNCTIONS ==================
+
+    function showAddManualItemModal() {
+      // Reset form fields
+      document.getElementById('manualTaskTitle').value = '';
+      document.getElementById('manualTaskNotes').value = '';
+      document.getElementById('manualTaskDate').value = '';
+      document.getElementById('manualTaskLocation').value = '';
+      document.getElementById('manualTaskStartTime').value = '';
+      document.getElementById('manualTaskEndTime').value = '';
+      document.getElementById('manualTaskPriority').value = 'Medium';
+
+      // Show modal
+      var modal = new bootstrap.Modal(document.getElementById('addManualItemModal'));
+      modal.show();
+    }
+
+    function saveManualItem() {
+      var title = document.getElementById('manualTaskTitle').value.trim();
+      var notes = document.getElementById('manualTaskNotes').value.trim();
+      var scheduledDate = document.getElementById('manualTaskDate').value;
+      var location = document.getElementById('manualTaskLocation').value.trim();
+      var startTime = document.getElementById('manualTaskStartTime').value;
+      var endTime = document.getElementById('manualTaskEndTime').value;
+      var priority = document.getElementById('manualTaskPriority').value;
+
+      if (!title) {
+        showToast('Please enter a task title', 'error');
+        return;
+      }
+
+      // Save to server via Google Apps Script
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            // Close modal
+            var modal = bootstrap.Modal.getInstance(document.getElementById('addManualItemModal'));
+            modal.hide();
+
+            showToast('✓ Manual item added successfully');
+
+            // Refresh data to show the new item
+            refreshData();
+          } else {
+            showToast('Error: ' + (result.error || 'Could not save item'), 'error');
+          }
+        })
+        .withFailureHandler(function(error) {
+          showToast('Error saving item: ' + error, 'error');
+        })
+        .addManualScheduledItem({
+          title: title,
+          notes: notes,
+          scheduledDate: scheduledDate,
+          location: location,
+          startTime: startTime,
+          endTime: endTime,
+          priority: priority
+        });
+    }
+
+    // ================== STAGE 2 - SCHEDULED SMS FUNCTIONS ==================
+
+    function openScheduledModal(index) {
+      var task = allTasks[index];
+      if (!task) return;
+
+      currentSmsTask = { task: task, index: index };
+
+      var certInfo = getCertInfoText(task);
+      var employeeName = task.employee || 'Employee';
+      var phoneNumber = task.phoneNumber || '';
+
+      currentSmsTask.certInfo = certInfo;
+      currentSmsTask.firstName = employeeName.split(' ')[0];
+      currentSmsTask.certType = task.itemType || task.certType || 'Certification';
+
+      document.getElementById('scheduledEmployeeName').textContent = employeeName;
+      document.getElementById('scheduledCertInfo').innerHTML = '<strong>' + certInfo.types + '</strong><br>' + certInfo.details;
+      document.getElementById('scheduledPhoneDisplay').textContent = formatPhoneForDisplay(phoneNumber);
+
+      // Reset form fields
+      document.getElementById('classTypeOnline').checked = true;
+      document.getElementById('scheduledStartDate').value = '';
+      document.getElementById('scheduledEndDate').value = '';
+      document.getElementById('scheduledClassSize').value = '1';
+      document.getElementById('scheduledEditMode').checked = false;
+      document.getElementById('scheduledMessage').readOnly = true;
+
+      updateScheduledMessage();
+
+      var modal = new bootstrap.Modal(document.getElementById('smsScheduledModal'));
+      modal.show();
+    }
+
+    function getSelectedClassType() {
+      if (document.getElementById('classTypeOnline').checked) return 'Online';
+      if (document.getElementById('classTypeInPersonMPC').checked) return 'InPersonMPC';
+      if (document.getElementById('classTypeInPersonMSLCAT').checked) return 'InPersonMSLCAT';
+      return 'Online';
+    }
+
+    function updateScheduledMessage() {
+      // Skip if in manual edit mode
+      if (document.getElementById('scheduledEditMode').checked) {
+        updateScheduledCharCount();
+        return;
+      }
+
+      if (!currentSmsTask) return;
+
+      var firstName = currentSmsTask.firstName;
+      var startDate = document.getElementById('scheduledStartDate').value;
+      var endDate = document.getElementById('scheduledEndDate').value;
+      var classSize = document.getElementById('scheduledClassSize').value || '1';
+      var classType = getSelectedClassType();
+
+      var message = '';
+
+      if (classType === 'Online') {
+        message = 'Hi ' + firstName + ', I have you registered for the Online Class. ';
+        if (startDate && endDate) {
+          message += 'Class starts on ' + formatDateMMDDYYYY(startDate) + ' and the last day is ' + formatDateMMDDYYYY(endDate) + '. ';
+        } else {
+          message += 'Class starts on (start date) and the last day is (end date). ';
+        }
+        message += 'There will be ' + classSize + ' other employee' + (parseInt(classSize) > 1 ? 's' : '') + ' in the class with you so you guys will need to work out a time to run the skills portion when you are done. ';
+        message += 'Let me know if you have any questions!';
+      } else if (classType === 'InPersonMPC') {
+        message = 'Hi ' + firstName + ', I have you scheduled for the In Person class with me. ';
+        if (startDate) {
+          message += 'Class is on ' + formatDateMMDDYYYY(startDate) + '. ';
+        } else {
+          message += 'Class is on (date). ';
+        }
+        message += 'Let me know if you have any questions!';
+      } else if (classType === 'InPersonMSLCAT') {
+        message = 'Hi ' + firstName + ', I have you registered for the In Person class at the MSLCAT Training Center in Helena. ';
+        if (startDate && endDate) {
+          message += 'Class starts on ' + formatDateMMDDYYYY(startDate) + ' and ends on ' + formatDateMMDDYYYY(endDate) + '. ';
+        } else if (startDate) {
+          message += 'Class is on ' + formatDateMMDDYYYY(startDate) + '. ';
+        } else {
+          message += 'Class is on (date). ';
+        }
+        message += 'Let me know if you have any questions!';
+      }
+
+      document.getElementById('scheduledMessage').value = message;
+      updateScheduledCharCount();
+    }
+
+    function toggleScheduledEditMode() {
+      var editMode = document.getElementById('scheduledEditMode').checked;
+      document.getElementById('scheduledMessage').readOnly = !editMode;
+
+      // If switching back to auto mode, regenerate message
+      if (!editMode) {
+        updateScheduledMessage();
+      }
+    }
+
+    function updateScheduledCharCount() {
+      var message = document.getElementById('scheduledMessage').value;
+      var count = message.length;
+      var countEl = document.getElementById('scheduledCharCount');
+      countEl.textContent = '(' + count + ' characters)';
+      countEl.className = 'char-count' + (count > 160 ? (count > 320 ? ' danger' : ' warning') : '');
+    }
+
+    function sendScheduledSMS() {
+      if (!currentSmsTask) return;
+
+      var task = currentSmsTask.task;
+      var phoneNumber = task.phoneNumber || getPhoneForChecklistItem(task);
+      var message = document.getElementById('scheduledMessage').value;
+      var classType = getSelectedClassType();
+
+      if (!phoneNumber) {
+        showToast('No phone number available', 'error');
+        return;
+      }
+
+      // Mark as scheduled - also mark related 1st Aid/CPR certs for same employee
+      var key = getTaskKey(task);
+      scheduledTasks[key] = true;
+      classTypeTasks[key] = classType;
+      markRelatedCertsScheduled(task, classType);
+      saveScheduledToStorage();
+      saveClassTypeToStorage();
+
+      // Open SMS link
+      var smsUrl = 'sms:' + phoneNumber + '?body=' + encodeURIComponent(message);
+      window.open(smsUrl, '_blank');
+
+      // Close modal and refresh
+      var modal = bootstrap.Modal.getInstance(document.getElementById('smsScheduledModal'));
+      modal.hide();
+
+      showToast('✓ Opening messaging app for class registration...');
+      renderTasks(allTasks);
+      renderPersonalChecklist();
+    }
+
+    // Helper function to mark related 1st Aid and CPR certs for the same employee
+    function markRelatedCertsNotified(task) {
+      var employee = (task.employee || '').toLowerCase();
+      var taskItemType = (task.itemType || '').toLowerCase();
+
+      // Check if this is a 1st Aid or CPR cert
+      var is1stAidOrCPR = taskItemType.indexOf('1st aid') !== -1 ||
+                          taskItemType.indexOf('first aid') !== -1 ||
+                          taskItemType.indexOf('cpr') !== -1;
+
+      if (!is1stAidOrCPR || !employee) return;
+
+      // Find all related cert tasks for this employee and mark them as notified
+      allTasks.forEach(function(t) {
+        var tEmployee = (t.employee || '').toLowerCase();
+        var tItemType = (t.itemType || '').toLowerCase();
+        var tSource = (t.source || '').toLowerCase();
+
+        // Check if same employee and is a cert task
+        if (tEmployee === employee && tSource.indexOf('cert') !== -1) {
+          // Check if it's a 1st Aid or CPR cert
+          var tIs1stAidOrCPR = tItemType.indexOf('1st aid') !== -1 ||
+                               tItemType.indexOf('first aid') !== -1 ||
+                               tItemType.indexOf('cpr') !== -1;
+
+          if (tIs1stAidOrCPR) {
+            var key = getTaskKey(t);
+            notifiedTasks[key] = true;
+          }
+        }
+      });
+    }
+
+    // Helper function to mark related 1st Aid and CPR certs for the same employee as scheduled
+    function markRelatedCertsScheduled(task, classType) {
+      var employee = (task.employee || '').toLowerCase();
+      var taskItemType = (task.itemType || '').toLowerCase();
+
+      // Check if this is a 1st Aid or CPR cert
+      var is1stAidOrCPR = taskItemType.indexOf('1st aid') !== -1 ||
+                          taskItemType.indexOf('first aid') !== -1 ||
+                          taskItemType.indexOf('cpr') !== -1;
+
+      if (!is1stAidOrCPR || !employee) return;
+
+      // Find all related cert tasks for this employee and mark them as scheduled
+      allTasks.forEach(function(t) {
+        var tEmployee = (t.employee || '').toLowerCase();
+        var tItemType = (t.itemType || '').toLowerCase();
+        var tSource = (t.source || '').toLowerCase();
+
+        // Check if same employee and is a cert task
+        if (tEmployee === employee && tSource.indexOf('cert') !== -1) {
+          // Check if it's a 1st Aid or CPR cert
+          var tIs1stAidOrCPR = tItemType.indexOf('1st aid') !== -1 ||
+                               tItemType.indexOf('first aid') !== -1 ||
+                               tItemType.indexOf('cpr') !== -1;
+
+          if (tIs1stAidOrCPR) {
+            var key = getTaskKey(t);
+            scheduledTasks[key] = true;
+            if (classType) {
+              classTypeTasks[key] = classType;
+            }
+          }
+        }
+      });
+    }
+
+    function sendNotifySMS() {
+      if (!currentSmsTask) return;
+
+      var certCategory = currentSmsTask.certCategory;
+
+      // Only require class options for 1st Aid/CPR certs
+      if (certCategory === 'firstaid_cpr') {
+        var onlineChecked = document.getElementById('notifyOptionOnline').checked;
+        var inPersonChecked = document.getElementById('notifyOptionInPerson').checked;
+        var mslcatChecked = document.getElementById('notifyOptionMSLCAT').checked;
+
+        if (!onlineChecked && !inPersonChecked && !mslcatChecked) {
+          document.getElementById('noOptionWarning').style.display = 'block';
+          showToast('Please select at least one class option', 'error');
+          return;
+        }
+      }
+
+      var task = currentSmsTask.task;
+      var phoneNumber = task.phoneNumber || getPhoneForChecklistItem(task);
+      var message = document.getElementById('notifyMessage').value;
+
+      if (!phoneNumber) {
+        showToast('No phone number available', 'error');
+        return;
+      }
+
+      // Mark as notified - also mark related 1st Aid/CPR certs for same employee
+      var key = getTaskKey(task);
+      notifiedTasks[key] = true;
+      markRelatedCertsNotified(task);
+      saveNotifiedToStorage();
+
+      // Open SMS link
+      var smsUrl = 'sms:' + phoneNumber + '?body=' + encodeURIComponent(message);
+      window.open(smsUrl, '_blank');
+
+      // Close modal and refresh
+      var modal = bootstrap.Modal.getInstance(document.getElementById('smsNotifyModal'));
+      modal.hide();
+
+      showToast('✓ Opening messaging app...');
+      renderTasks(allTasks);
+      renderPersonalChecklist();
+    }
+
+    // Open notify modal for a localStorage checklist item
+    function openChecklistNotifyModal(itemId) {
+      var item = personalChecklist.find(function(i) { return i.id === itemId; });
+      if (!item) return;
+
+      // Get phone number from employee map
+      var phoneNumber = getPhoneForChecklistItem(item);
+      if (!phoneNumber) {
+        showToast('No phone number found for ' + (item.employee || 'this employee'), 'error');
+        return;
+      }
+
+      // Create a task-like object for the modal
+      var taskLike = {
+        employee: item.employee || '',
+        phoneNumber: phoneNumber,
+        itemType: item.itemType || item.taskType || '',
+        certType: item.itemType || item.taskType || '',
+        taskType: item.taskType || '',
+        dueDate: item.scheduledDate || '',
+        source: item.source || 'My Checklist',
+        location: item.location || ''
+      };
+
+      // Find if there's a matching task in allTasks to get more details
+      var matchingTask = allTasks.find(function(t) {
+        return t.employee && t.employee.toLowerCase() === (item.employee || '').toLowerCase() &&
+               (t.itemType === item.itemType || t.taskType === item.taskType);
+      });
+
+      if (matchingTask) {
+        taskLike = matchingTask;
+        taskLike.phoneNumber = phoneNumber;
+      }
+
+      currentSmsTask = { task: taskLike, index: -1 };
+
+      var certInfo = getCertInfoText(taskLike);
+      var employeeName = taskLike.employee || 'Employee';
+      var certCategory = getCertCategory(taskLike);
+
+      currentSmsTask.certInfo = certInfo;
+      currentSmsTask.firstName = employeeName.split(' ')[0];
+      currentSmsTask.expirationDate = certInfo.expirationDate;
+      currentSmsTask.certCategory = certCategory;
+      currentSmsTask.certType = taskLike.itemType || taskLike.certType || 'Certification';
+
+      document.getElementById('notifyEmployeeName').textContent = employeeName;
+      document.getElementById('notifyCertInfo').innerHTML = '<strong>' + certInfo.types + '</strong><br>' + certInfo.details;
+      document.getElementById('notifyPhoneDisplay').textContent = formatPhoneForDisplay(phoneNumber);
+
+      // Hide all option sections first
+      document.getElementById('firstAidCprOptions').style.display = 'none';
+      document.getElementById('craneCertOptions').style.display = 'none';
+      document.getElementById('simpleCertOptions').style.display = 'none';
+
+      // Show appropriate section based on cert type
+      if (certCategory === 'firstaid_cpr') {
+        document.getElementById('firstAidCprOptions').style.display = 'block';
+        document.getElementById('notifyOptionOnline').checked = false;
+        document.getElementById('notifyOptionInPerson').checked = false;
+        document.getElementById('notifyOptionMSLCAT').checked = false;
+        document.getElementById('notifyInPersonDetails').style.display = 'none';
+        document.getElementById('notifyMSLCATDetails').style.display = 'none';
+        document.getElementById('noOptionWarning').style.display = 'none';
+      } else if (certCategory === 'crane') {
+        document.getElementById('craneCertOptions').style.display = 'block';
+      } else {
+        document.getElementById('simpleCertOptions').style.display = 'block';
+      }
+
+      document.getElementById('notifyEditMode').checked = false;
+      document.getElementById('notifyMessage').readOnly = true;
+
+      updateNotifyMessage();
+
+      var modal = new bootstrap.Modal(document.getElementById('smsNotifyModal'));
+      modal.show();
+    }
+
+    // Store current checklist filter state
+    var checklistFilterState = { priority: '', status: '', source: '', date: '' };
+
+    function applyChecklistFilters() {
+      checklistFilterState.priority = document.getElementById('checklistFilterPriority').value;
+      checklistFilterState.status = document.getElementById('checklistFilterStatus').value;
+      checklistFilterState.source = document.getElementById('checklistFilterSource').value;
+      checklistFilterState.date = document.getElementById('checklistFilterDate').value;
+      renderPersonalChecklist();
+    }
+
+    function clearChecklistFilters() {
+      document.getElementById('checklistFilterPriority').value = '';
+      document.getElementById('checklistFilterStatus').value = '';
+      document.getElementById('checklistFilterSource').value = '';
+      document.getElementById('checklistFilterDate').value = '';
+      checklistFilterState = { priority: '', status: '', source: '', date: '' };
+      renderPersonalChecklist();
+    }
+
+    // Track which checklist category and location groups are open (default to open)
+    var openChecklistCategoryGroups = { 'Expiring Certs': true, 'Manual Tasks': true };
+    var openChecklistLocationGroups = {};
+
+    function toggleChecklistCategoryGroup(categoryName) {
+      openChecklistCategoryGroups[categoryName] = !openChecklistCategoryGroups[categoryName];
+      // Find the category body by iterating (since we can't easily map name to index)
+      renderPersonalChecklist();
+    }
+
+    function toggleChecklistLocationGroup(locKey) {
+      openChecklistLocationGroups[locKey] = !openChecklistLocationGroups[locKey];
+      var body = document.getElementById('checklist-loc-body-' + locKey);
+      var chevron = document.getElementById('checklist-loc-chevron-' + locKey);
+      if (body && chevron) {
+        if (openChecklistLocationGroups[locKey]) {
+          body.style.display = 'block';
+          chevron.className = 'bi bi-chevron-down me-2';
+        } else {
+          body.style.display = 'none';
+          chevron.className = 'bi bi-chevron-right me-2';
+        }
+      }
+    }
+
     function renderPersonalChecklist() {
       var container = document.getElementById('checklistItems');
       var emptyState = document.getElementById('emptyChecklist');
 
       // Combine localStorage checklist with manual tasks from server
-      var combinedChecklist = personalChecklist.slice(); // Clone localStorage items
+      var combinedChecklist = personalChecklist.slice();
 
-      // Add manual tasks from allTasks that aren't already in the checklist
+      // Add manual tasks from allTasks
       allTasks.forEach(function(task, index) {
         if (task.source === 'Manual Tasks') {
           var alreadyExists = combinedChecklist.some(function(item) {
@@ -1499,6 +3194,8 @@
               endTime: task.endTime || '',
               notes: task.notes || '',
               source: 'Manual Tasks',
+              priority: task.priority || 'Medium',
+              status: task.status || 'Pending',
               addedDate: task.scheduledDate || new Date().toISOString().split('T')[0],
               completed: task.status === 'Complete',
               isFromServer: true,
@@ -1508,7 +3205,23 @@
         }
       });
 
-      if (combinedChecklist.length === 0) {
+      // Apply filters
+      var filteredChecklist = combinedChecklist.filter(function(item) {
+        if (checklistFilterState.priority && item.priority !== checklistFilterState.priority) return false;
+        if (checklistFilterState.status) {
+          var isNotified = isChecklistItemNotified(item);
+          var isOffice = isChecklistItemOffice(item);
+          if (checklistFilterState.status === 'Notified' && !isNotified) return false;
+          if (checklistFilterState.status === 'Office' && !isOffice) return false;
+          if (checklistFilterState.status === 'Complete' && !item.completed) return false;
+          if (checklistFilterState.status === 'Pending' && item.completed) return false;
+        }
+        if (checklistFilterState.source && item.source !== checklistFilterState.source) return false;
+        if (checklistFilterState.date && item.scheduledDate !== checklistFilterState.date) return false;
+        return true;
+      });
+
+      if (filteredChecklist.length === 0) {
         container.style.display = 'none';
         emptyState.style.display = 'block';
         return;
@@ -1517,206 +3230,229 @@
       container.style.display = 'block';
       emptyState.style.display = 'none';
 
-      // Group items by category
+      // Group items by category first, then by location within each category
       var categories = {
-        'cert': { title: '🏥 1st Aid / CPR Renewals', items: [], icon: 'bi-heart-pulse' },
-        'manual': { title: '📝 Manual Tasks', items: [], icon: 'bi-pencil-square' },
-        'other': { title: '📋 Other Items', items: [], icon: 'bi-list-task' }
+        'Expiring Certs': [],
+        'Manual Tasks': []
       };
 
-      combinedChecklist.forEach(function(item) {
-        var category = getChecklistItemCategory(item);
-        categories[category].items.push(item);
+      filteredChecklist.forEach(function(item, index) {
+        item._checklistIndex = index;
+        if (item.source === 'Expiring Certs' || item.taskType === 'Cert Expiring') {
+          categories['Expiring Certs'].push(item);
+        } else {
+          categories['Manual Tasks'].push(item);
+        }
       });
 
       var html = '';
+      var categoryIndex = 0;
 
       // Render each category
-      ['cert', 'manual', 'other'].forEach(function(catKey) {
-        var cat = categories[catKey];
-        if (cat.items.length === 0) return;
+      ['Expiring Certs', 'Manual Tasks'].forEach(function(categoryName) {
+        var categoryItems = categories[categoryName];
+        if (categoryItems.length === 0) return;
 
-        var isCollapsed = checklistCategoryState[catKey] === false;
+        var catIcon = categoryName === 'Expiring Certs' ? 'bi-file-earmark-medical' : 'bi-pencil-square';
+        var catColor = categoryName === 'Expiring Certs' ? '#ea4335' : '#1a73e8';
+        var catBg = categoryName === 'Expiring Certs' ? 'linear-gradient(135deg, #ea4335 0%, #c5221f 100%)' : 'linear-gradient(135deg, #1a73e8 0%, #1557b0 100%)';
 
-        html += '<div class="checklist-category category-' + catKey + '">';
-        html += '<div class="checklist-category-header ' + (isCollapsed ? 'collapsed' : '') + '" onclick="toggleChecklistCategory(\'' + catKey + '\')">';
-        html += '<div class="checklist-category-title"><i class="bi ' + cat.icon + '"></i> ' + cat.title + '</div>';
-        html += '<div><span class="badge bg-secondary me-2">' + cat.items.length + '</span>';
-        html += '<i class="bi ' + (isCollapsed ? 'bi-chevron-right' : 'bi-chevron-down') + '" id="cat-chevron-' + catKey + '"></i></div>';
-        html += '</div>';
-        html += '<div class="checklist-category-body ' + (isCollapsed ? 'collapsed' : '') + '" id="cat-body-' + catKey + '">';
-        html += '<div class="list-group list-group-flush">';
+        var isCatOpen = openChecklistCategoryGroups[categoryName] === true;
 
-        cat.items.forEach(function(item) {
-          html += renderChecklistItem(item);
+        html += '<div class="card mb-3">';
+        html += '<div class="card-header" style="cursor: pointer; background: ' + catBg + '; color: white;" onclick="toggleChecklistCategoryGroup(\'' + categoryName + '\')">';
+        html += '<div class="d-flex justify-content-between align-items-center">';
+        html += '<div style="flex: 1;">';
+        html += '<i class="bi ' + (isCatOpen ? 'bi-chevron-down' : 'bi-chevron-right') + ' me-2" id="checklist-cat-chevron-' + categoryIndex + '"></i>';
+        html += '<i class="bi ' + catIcon + ' me-1"></i><strong>' + categoryName + '</strong>';
+        html += '<span class="badge bg-white text-dark ms-2" style="opacity: 0.9;">' + categoryItems.length + ' items</span>';
+        html += '</div></div></div>';
+
+        html += '<div class="card-body p-0" id="checklist-cat-body-' + categoryIndex + '" style="display: ' + (isCatOpen ? 'block' : 'none') + ';">';
+
+        // Group by location within category
+        var itemsByLocation = {};
+        categoryItems.forEach(function(item) {
+          var loc = item.location || 'No Location';
+          if (!itemsByLocation[loc]) itemsByLocation[loc] = [];
+          itemsByLocation[loc].push(item);
         });
 
-        html += '</div></div></div>';
+        var locations = Object.keys(itemsByLocation).sort();
+
+        locations.forEach(function(location, locIndex) {
+          var items = itemsByLocation[location];
+          var locKey = categoryIndex + '_' + locIndex;
+          var isLocOpen = openChecklistLocationGroups[locKey] === true;
+
+          html += '<div class="location-subgroup" style="border-bottom: 1px solid #e0e0e0;">';
+          html += '<div class="location-subheader" style="background: #f8f9fa; padding: 8px 16px; cursor: pointer;" onclick="toggleChecklistLocationGroup(\'' + locKey + '\')">';
+          html += '<i class="bi ' + (isLocOpen ? 'bi-chevron-down' : 'bi-chevron-right') + ' me-2" id="checklist-loc-chevron-' + locKey + '"></i>';
+          html += '<i class="bi bi-geo-alt me-1" style="color: ' + catColor + ';"></i>';
+          html += '<strong>' + location + '</strong>';
+          html += '<span class="badge bg-secondary ms-2">' + items.length + '</span>';
+          html += '</div>';
+
+          html += '<div id="checklist-loc-body-' + locKey + '" style="display: ' + (isLocOpen ? 'block' : 'none') + ';">';
+
+          // Table header
+          html += '<div class="task-row bg-light" style="font-weight: 600; font-size: 12px; padding: 8px 12px;">';
+          html += '<div class="row align-items-center">';
+          html += '<div class="col-md-3">Task / Source</div>';
+          html += '<div class="col-md-2">Scheduled Date</div>';
+          html += '<div class="col-md-2">Start / End Time</div>';
+          html += '<div class="col-md-2">Status</div>';
+          html += '<div class="col-md-3 text-end">Actions</div>';
+          html += '</div></div>';
+
+          items.forEach(function(item) {
+            html += renderChecklistTaskRow(item);
+          });
+
+          html += '</div></div>';
+        });
+
+        html += '</div></div>';
+        categoryIndex++;
       });
 
       container.innerHTML = html;
     }
 
-    // Track which categories are expanded/collapsed
-    var checklistCategoryState = { cert: true, manual: true, other: true };
 
-    function toggleChecklistCategory(catKey) {
-      checklistCategoryState[catKey] = !checklistCategoryState[catKey];
-      var body = document.getElementById('cat-body-' + catKey);
-      var chevron = document.getElementById('cat-chevron-' + catKey);
-      var header = body.previousElementSibling;
-
-      if (checklistCategoryState[catKey]) {
-        body.classList.remove('collapsed');
-        header.classList.remove('collapsed');
-        chevron.className = 'bi bi-chevron-down';
-      } else {
-        body.classList.add('collapsed');
-        header.classList.add('collapsed');
-        chevron.className = 'bi bi-chevron-right';
-      }
-    }
-
-    function getChecklistItemCategory(item) {
-      var taskType = (item.taskType || item.itemType || '').toLowerCase();
-      var title = (item.title || '').toLowerCase();
-      var source = (item.source || '').toLowerCase();
-
-      // 1st Aid / CPR category
-      if (taskType.indexOf('1st aid') !== -1 || taskType.indexOf('first aid') !== -1 ||
-          taskType.indexOf('cpr') !== -1 || title.indexOf('1st aid') !== -1 ||
-          title.indexOf('first aid') !== -1 || title.indexOf('cpr') !== -1 ||
-          taskType.indexOf('cert') !== -1 || taskType.indexOf('renew') !== -1) {
-        return 'cert';
-      }
-
-      // Manual Tasks category
-      if (source === 'manual tasks' || item.isManual || item.isFromServer) {
-        return 'manual';
-      }
-
-      return 'other';
-    }
-
-    function renderChecklistItem(item) {
-      var completedClass = item.completed ? 'list-group-item-success' : '';
-      var strikethrough = item.completed ? 'text-decoration: line-through;' : '';
+    function renderChecklistTaskRow(item) {
       var itemId = item.isFromServer ? "'" + item.id + "'" : item.id;
+      var itemNotified = isChecklistItemNotified(item);
+      var itemOffice = isChecklistItemOffice(item);
+      var taskIndex = item.isFromServer ? item.serverIndex : findTaskIndexForChecklistItem(item);
+      var priorityClass = 'priority-' + (item.priority || 'medium').toLowerCase();
+      var completedClass = item.completed ? 'opacity-50' : '';
 
-      var html = '<div class="list-group-item ' + completedClass + '">';
-      html += '<div class="d-flex justify-content-between align-items-start">';
-      html += '<div class="form-check">';
-      html += '<input class="form-check-input" type="checkbox" ' + (item.completed ? 'checked' : '') + ' onchange="toggleChecklistItemComplete(' + itemId + ')">';
-      html += '<label class="form-check-label" style="' + strikethrough + '">';
-      html += '<strong>' + (item.title || item.employee || 'Unknown Item') + '</strong>';
-      html += '</label>';
-      html += '</div>';
-      html += '<button class="btn btn-outline-danger btn-sm" onclick="removeChecklistItemById(' + itemId + ')" title="Remove"><i class="bi bi-x-lg"></i></button>';
+      var html = '<div class="task-row ' + priorityClass + ' ' + completedClass + '">';
+      html += '<div class="row align-items-center">';
+
+      // Task Type & Source
+      html += '<div class="col-md-3">';
+      html += '<div class="task-type d-flex align-items-center" style="font-weight: 500;">';
+      html += '<input class="form-check-input me-2" type="checkbox" ' + (item.completed ? 'checked' : '') + ' onchange="toggleChecklistItemComplete(' + itemId + ')" style="margin-top: 0;">';
+      html += '<span style="' + (item.completed ? 'text-decoration: line-through;' : '') + '">' + (item.itemType || item.taskType || 'Task') + '</span></div>';
+      html += '<div class="task-source"><i class="bi bi-box-arrow-in-right"></i> ' + (item.source || 'My Checklist') + '</div>';
+      if (item.employee) html += '<div class="text-muted small"><i class="bi bi-person"></i> ' + item.employee + '</div>';
       html += '</div>';
 
-      html += '<div class="ms-4 mt-1">';
-      if (item.taskType && item.taskType !== item.title) {
-        html += '<div class="text-muted small"><i class="bi bi-card-checklist"></i> ' + item.taskType + '</div>';
+      // Scheduled Date
+      html += '<div class="col-md-2">';
+      if (taskIndex !== -1) {
+        html += '<input type="date" class="date-input" value="' + (item.scheduledDate || '') + '" onchange="updateChecklistTaskDate(' + taskIndex + ', this.value, this)">';
+      } else {
+        html += '<input type="date" class="date-input" value="' + (item.scheduledDate || '') + '" onchange="updateChecklistItemDate(' + itemId + ', this.value, this)">';
       }
-      if (item.employee && item.employee !== item.title) {
-        html += '<div class="text-muted small"><i class="bi bi-person"></i> ' + item.employee + '</div>';
+      html += '</div>';
+
+      // Time
+      html += '<div class="col-md-2"><div class="d-flex gap-1 align-items-center">';
+      if (taskIndex !== -1) {
+        html += '<input type="time" class="time-input" value="' + (item.startTime || '') + '" onchange="updateChecklistTaskTime(' + taskIndex + ', \'start\', this.value, this)">';
+        html += '<span class="text-muted">-</span>';
+        html += '<input type="time" class="time-input" value="' + (item.endTime || '') + '" onchange="updateChecklistTaskTime(' + taskIndex + ', \'end\', this.value, this)">';
+      } else {
+        html += '<input type="time" class="time-input" value="' + (item.startTime || '') + '" onchange="updateChecklistItemTime(' + itemId + ', \'start\', this.value, this)">';
+        html += '<span class="text-muted">-</span>';
+        html += '<input type="time" class="time-input" value="' + (item.endTime || '') + '" onchange="updateChecklistItemTime(' + itemId + ', \'end\', this.value, this)">';
       }
-      if (item.notes) {
-        html += '<div class="text-muted small"><i class="bi bi-info-circle"></i> ' + item.notes + '</div>';
+      html += '</div></div>';
+
+      // Status
+      html += '<div class="col-md-2">';
+      var statusText = item.completed ? 'Complete' : (item.status || 'Pending');
+      var statusClass = item.completed ? 'status-complete' : 'status-pending';
+      html += '<span class="status-badge ' + statusClass + '">' + statusText + '</span>';
+      if (itemNotified) html += '<span class="notified-badge"><i class="bi bi-bell-fill"></i> Notified</span>';
+      var itemScheduled = isChecklistItemScheduled(item);
+      if (itemScheduled) {
+        html += '<span class="scheduled-badge"><i class="bi bi-calendar-check-fill"></i> Scheduled</span>';
+        // Show class type badge if scheduled
+        var itemClassType = getChecklistItemClassType(item);
+        html += getClassTypeBadgeHtml(itemClassType);
       }
-      if (item.location) {
-        html += '<div class="text-muted small"><i class="bi bi-geo-alt"></i> ' + item.location + '</div>';
-      }
-      if (item.scheduledDate) {
-        html += '<div class="text-muted small"><i class="bi bi-calendar"></i> Scheduled: ' + item.scheduledDate;
-        if (item.startTime) {
-          html += ' at ' + item.startTime;
-          if (item.endTime) html += ' - ' + item.endTime;
+      if (itemOffice) html += '<span class="office-badge"><i class="bi bi-building"></i> Office</span>';
+      html += '</div>';
+
+      // Actions
+      html += '<div class="col-md-3 text-end">';
+
+      // Check if this is a cert item with a phone number
+      var itemPhone = getPhoneForChecklistItem(item);
+      var isCertWithPhone = isChecklistCertTask(item) && itemPhone && itemPhone.length >= 10;
+
+      if (isCertWithPhone) {
+        // SMS Notify button for cert items with phone
+        var notifyBtnClass = itemNotified ? 'btn-notified' : 'btn-sms';
+        var notifyIcon = itemNotified ? 'bi-chat-fill' : 'bi-chat-text';
+        var notifyTitle = itemNotified ? 'Resend notification' : 'Send notification text';
+        // Use taskIndex if available, otherwise need to find the task
+        if (taskIndex !== -1) {
+          html += '<button class="btn ' + notifyBtnClass + ' btn-sm me-1" onclick="event.stopPropagation(); openNotifyModal(' + taskIndex + ')" title="' + notifyTitle + '"><i class="bi ' + notifyIcon + '"></i></button>';
+
+          // SMS Scheduled button (Stage 2) - only show if notified
+          if (itemNotified) {
+            var itemScheduled = isChecklistItemScheduled(item);
+            var scheduledBtnClass = itemScheduled ? 'btn-scheduled' : 'btn-sms';
+            var scheduledIcon = itemScheduled ? 'bi-calendar-check-fill' : 'bi-calendar-plus';
+            var scheduledTitle = itemScheduled ? 'Resend class schedule' : 'Send class schedule text';
+            html += '<button class="btn ' + scheduledBtnClass + ' btn-sm me-1" onclick="event.stopPropagation(); openScheduledModal(' + taskIndex + ')" title="' + scheduledTitle + '"><i class="bi ' + scheduledIcon + '"></i></button>';
+          }
+        } else {
+          // For localStorage items, open modal with item data
+          html += '<button class="btn ' + notifyBtnClass + ' btn-sm me-1" onclick="event.stopPropagation(); openChecklistNotifyModal(' + itemId + ')" title="' + notifyTitle + '"><i class="bi ' + notifyIcon + '"></i></button>';
         }
-        html += '</div>';
+      } else {
+        // Regular notified toggle button for items without phone
+        var notifiedBtnClass = itemNotified ? 'btn-notified' : 'btn-outline-secondary';
+        var notifiedIcon = itemNotified ? 'bi-bell-fill' : 'bi-bell';
+        html += '<button class="btn ' + notifiedBtnClass + ' btn-sm me-1" onclick="event.stopPropagation(); toggleChecklistNotified(' + itemId + ')" title="Toggle notified status"><i class="bi ' + notifiedIcon + '"></i></button>';
       }
-      html += '<div class="text-muted small"><i class="bi bi-plus-circle"></i> Added: ' + item.addedDate + '</div>';
-      html += '</div>';
 
+      html += '<button class="btn btn-outline-success btn-sm me-1" onclick="event.stopPropagation(); toggleChecklistItemComplete(' + itemId + ')" title="Toggle complete"><i class="bi bi-check-lg"></i></button>';
+      html += '<button class="btn btn-outline-danger btn-sm" onclick="event.stopPropagation(); removeChecklistItemById(' + itemId + ')" title="Remove"><i class="bi bi-x-lg"></i></button>';
+      html += '</div></div>';
+
+      if (item.notes) html += '<div class="text-muted small mt-1 ms-4"><i class="bi bi-info-circle"></i> ' + item.notes + '</div>';
       html += '</div>';
       return html;
     }
 
-    // ================== MANUAL ITEM FUNCTIONS ==================
-    function showAddManualItemModal() {
-      // Set default date to today
-      var today = new Date().toISOString().split('T')[0];
-      document.getElementById('manualTaskDate').value = today;
-      document.getElementById('manualTaskTitle').value = '';
-      document.getElementById('manualTaskNotes').value = '';
-      document.getElementById('manualTaskLocation').value = '';
-      document.getElementById('manualTaskStartTime').value = '';
-      document.getElementById('manualTaskEndTime').value = '';
-      document.getElementById('manualTaskPriority').value = 'Medium';
-      document.getElementById('manualTaskAddToCalendar').checked = true;
+    // Track which categories are expanded/collapsed (default to closed)
+    var checklistCategoryState = { cert: false, manual: false, other: false };
 
-      var modal = new bootstrap.Modal(document.getElementById('addManualItemModal'));
-      modal.show();
-    }
-
-    function saveManualItem() {
-      var title = document.getElementById('manualTaskTitle').value.trim();
-      var notes = document.getElementById('manualTaskNotes').value.trim();
-      var scheduledDate = document.getElementById('manualTaskDate').value;
-      var location = document.getElementById('manualTaskLocation').value.trim();
-      var startTime = document.getElementById('manualTaskStartTime').value;
-      var endTime = document.getElementById('manualTaskEndTime').value;
-      var priority = document.getElementById('manualTaskPriority').value;
-
-      if (!title) {
-        alert('Please enter a task title');
-        return;
-      }
-
-      // Create task object for server
-      var manualTask = {
-        taskType: title,
-        source: 'Manual Tasks',
-        employee: '',
-        location: location || 'No Location',
-        scheduledDate: scheduledDate,
-        startTime: startTime,
-        endTime: endTime,
-        priority: priority,
-        status: 'Pending',
-        notes: notes,
-        itemType: 'Manual'
-      };
-
-      // Always save to Manual Tasks sheet - this makes it appear in calendar and checklist
-      google.script.run
-        .withSuccessHandler(function(result) {
-          // Add to local allTasks array
-          manualTask._originalIndex = allTasks.length;
-          allTasks.push(manualTask);
-          renderTasks(allTasks);
-          renderCalendar();
-          renderPersonalChecklist(); // Refresh checklist to show the new item
-          showToast('✓ Manual task added!');
-        })
-        .withFailureHandler(function(error) {
-          showToast('Error adding task: ' + error, 'error');
-        })
-        .addManualScheduleTask(manualTask);
-
-      // Close modal
-      var modal = bootstrap.Modal.getInstance(document.getElementById('addManualItemModal'));
-      modal.hide();
-    }
-
-    // Load tasks on page load
+    // Initialize on page load
     loadChecklistFromStorage();
+    loadNotifiedFromStorage();
+    loadScheduledFromStorage();
+    loadClassTypeFromStorage();
+    loadOfficeFromStorage();
 
-    // Show loading indicator
-    document.getElementById('taskContainer').innerHTML =
-      '<div class="loading"><div class="spinner-border text-primary"></div><p>Loading tasks...</p></div>';
+    // One-time initialization: Set class types for existing scheduled 1st Aid/CPR certs
+    // Everyone is "Online" except Conner Kendall who is "InPersonMSLCAT"
+    (function initializeClassTypes() {
+      var needsSave = false;
+      for (var key in scheduledTasks) {
+        if (scheduledTasks[key] && !classTypeTasks[key]) {
+          // Check if this is Conner Kendall
+          if (key.toLowerCase().indexOf('conner kendall') !== -1) {
+            classTypeTasks[key] = 'InPersonMSLCAT';
+          } else {
+            classTypeTasks[key] = 'Online';
+          }
+          needsSave = true;
+        }
+      }
+      if (needsSave) {
+        saveClassTypeToStorage();
+        console.log('Initialized class types for existing scheduled tasks');
+      }
+    })();
 
-    // Load tasks from server
     loadTasks();
   </script>
 </body>

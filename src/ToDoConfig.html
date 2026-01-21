@@ -34,15 +34,24 @@
     .cert-table th { font-size: 11px; padding: 4px 8px !important; }
     .cert-table td { padding: 4px 8px !important; }
     .cert-checkboxes-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-    .cert-overview-card { border: 1px solid #e0e0e0; border-radius: 8px; padding: 10px; margin-bottom: 6px; }
+    .cert-overview-card { border: 1px solid #e0e0e0; border-radius: 8px; padding: 10px; margin-bottom: 6px; transition: all 0.2s; }
+    .cert-overview-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
     .cert-overview-card h6 { margin: 0 0 6px 0; font-size: 13px; font-weight: 600; }
     .cert-overview-stats { display: flex; gap: 6px; flex-wrap: wrap; }
-    .cert-stat { font-size: 11px; padding: 2px 6px; border-radius: 4px; }
+    .cert-stat { font-size: 11px; padding: 2px 6px; border-radius: 4px; cursor: pointer; transition: all 0.2s; }
+    .cert-stat:hover { transform: scale(1.05); box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
     .cert-stat-expired { background: #fce8e6; color: #c5221f; }
     .cert-stat-critical { background: #fef7e0; color: #b06000; }
     .cert-stat-warning { background: #fff3cd; color: #856404; }
     .cert-stat-ok { background: #e6f4ea; color: #137333; }
     .cert-stat-total { background: #e8eaed; color: #5f6368; }
+    .cert-employee-list { max-height: 400px; overflow-y: auto; }
+    .cert-employee-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid #e0e0e0; }
+    .cert-employee-item:last-child { border-bottom: none; }
+    .cert-employee-item:hover { background: #f5f5f5; }
+    .cert-employee-name { font-weight: 500; }
+    .cert-employee-location { font-size: 12px; color: #5f6368; }
+    .cert-employee-date { font-size: 12px; }
     .employee-cert-card { border: 1px solid #e0e0e0; border-radius: 6px; margin-bottom: 8px; overflow: hidden; }
     .employee-cert-header { padding: 8px 12px; background: #f8f9fa; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
     .employee-cert-header:hover { background: #e8eaed; }
@@ -489,6 +498,26 @@
     </div>
   </div>
 
+  <!-- Cert Employee List Modal -->
+  <div class="modal fade" id="certEmployeeModal" tabindex="-1" aria-labelledby="certEmployeeModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header" id="certEmployeeModalHeader" style="color: white;">
+          <h5 class="modal-title" id="certEmployeeModalLabel">Employees</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div id="certEmployeeList" class="cert-employee-list">
+            <!-- Employee list will be populated here -->
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   <script>
     var configData = {};
@@ -496,6 +525,7 @@
     var hasUnsavedChanges = false;
     var certDateChanges = {}; // Track changed cert expiration dates
     var allEmployeesData = []; // Store employee data for saving
+    var currentCertModalInfo = null; // Store current cert modal info for add to checklist
 
     function setUnsaved(value) {
       hasUnsavedChanges = value;
@@ -834,11 +864,15 @@
         .getExpiringCertsForConfig();
     }
 
+    // Global storage for employees by cert type and status
+    var certEmployeesByTypeStatus = {};
+
     function renderCertStatusOverview(employees) {
       var container = document.getElementById('certStatusOverview');
 
-      // Aggregate stats by cert type
+      // Aggregate stats by cert type AND store employee lists
       var certStats = {};
+      certEmployeesByTypeStatus = {}; // Reset
 
       employees.forEach(function(emp) {
         if (emp.certs) {
@@ -846,17 +880,31 @@
             var type = cert.type || 'Unknown';
             if (!certStats[type]) {
               certStats[type] = { total: 0, expired: 0, critical: 0, warning: 0, ok: 0 };
+              certEmployeesByTypeStatus[type] = { expired: [], critical: [], warning: [], ok: [] };
             }
             certStats[type].total++;
             var status = (cert.status || '').toUpperCase();
+
+            var empInfo = {
+              name: emp.name,
+              location: emp.location || '',
+              expiration: cert.expiration,
+              daysUntil: cert.daysUntil,
+              status: cert.status
+            };
+
             if (status === 'EXPIRED' || status.indexOf('EXPIRED') !== -1) {
               certStats[type].expired++;
+              certEmployeesByTypeStatus[type].expired.push(empInfo);
             } else if (status === 'CRITICAL') {
               certStats[type].critical++;
+              certEmployeesByTypeStatus[type].critical.push(empInfo);
             } else if (status === 'WARNING') {
               certStats[type].warning++;
+              certEmployeesByTypeStatus[type].warning.push(empInfo);
             } else if (status === 'OK' || status === 'NO DATE SET' || status.indexOf('NON-EXPIRING') !== -1) {
               certStats[type].ok++;
+              certEmployeesByTypeStatus[type].ok.push(empInfo);
             }
           });
         }
@@ -877,20 +925,183 @@
       var html = '<div class="row">';
       sortedTypes.forEach(function(type) {
         var stats = certStats[type];
+        var escapedType = type.replace(/'/g, "\\'");
         html += '<div class="col-md-6 col-lg-4 mb-2">';
         html += '<div class="cert-overview-card">';
         html += '<h6>' + type + '</h6>';
         html += '<div class="cert-overview-stats">';
-        if (stats.expired > 0) html += '<span class="cert-stat cert-stat-expired">🔴 ' + stats.expired + ' Expired</span>';
-        if (stats.critical > 0) html += '<span class="cert-stat cert-stat-critical">🟠 ' + stats.critical + ' Critical</span>';
-        if (stats.warning > 0) html += '<span class="cert-stat cert-stat-warning">🟡 ' + stats.warning + ' Warning</span>';
-        if (stats.ok > 0) html += '<span class="cert-stat cert-stat-ok">🟢 ' + stats.ok + ' OK</span>';
+        if (stats.expired > 0) html += '<span class="cert-stat cert-stat-expired" onclick="showCertEmployees(\'' + escapedType + '\', \'expired\')">🔴 ' + stats.expired + ' Expired</span>';
+        if (stats.critical > 0) html += '<span class="cert-stat cert-stat-critical" onclick="showCertEmployees(\'' + escapedType + '\', \'critical\')">🟠 ' + stats.critical + ' Critical</span>';
+        if (stats.warning > 0) html += '<span class="cert-stat cert-stat-warning" onclick="showCertEmployees(\'' + escapedType + '\', \'warning\')">🟡 ' + stats.warning + ' Warning</span>';
+        if (stats.ok > 0) html += '<span class="cert-stat cert-stat-ok" onclick="showCertEmployees(\'' + escapedType + '\', \'ok\')">🟢 ' + stats.ok + ' OK</span>';
         html += '<span class="cert-stat cert-stat-total">' + stats.total + ' Total</span>';
         html += '</div></div></div>';
       });
       html += '</div>';
 
       container.innerHTML = html;
+    }
+
+    function showCertEmployees(certType, status) {
+      var employees = certEmployeesByTypeStatus[certType] && certEmployeesByTypeStatus[certType][status];
+
+      if (!employees || employees.length === 0) {
+        return;
+      }
+
+      // Store current cert info for add to checklist feature
+      currentCertModalInfo = {
+        certType: certType,
+        status: status,
+        employees: employees
+      };
+
+      // Set modal header color and title based on status
+      var headerEl = document.getElementById('certEmployeeModalHeader');
+      var titleEl = document.getElementById('certEmployeeModalLabel');
+      var statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+
+      titleEl.textContent = certType + ' - ' + statusLabel + ' (' + employees.length + ')';
+
+      if (status === 'expired') {
+        headerEl.style.background = 'linear-gradient(135deg, #c5221f 0%, #ea4335 100%)';
+      } else if (status === 'critical') {
+        headerEl.style.background = 'linear-gradient(135deg, #b06000 0%, #f9ab00 100%)';
+      } else if (status === 'warning') {
+        headerEl.style.background = 'linear-gradient(135deg, #856404 0%, #ffc107 100%)';
+      } else {
+        headerEl.style.background = 'linear-gradient(135deg, #137333 0%, #34a853 100%)';
+      }
+
+      // Sort employees by days until expiration (most urgent first)
+      employees.sort(function(a, b) {
+        if (a.daysUntil === null) return 1;
+        if (b.daysUntil === null) return -1;
+        return a.daysUntil - b.daysUntil;
+      });
+
+      // Build employee list HTML
+      var html = '';
+      employees.forEach(function(emp, index) {
+        var dateStr = '';
+        if (emp.expiration) {
+          try {
+            var d = new Date(emp.expiration);
+            if (!isNaN(d.getTime())) {
+              dateStr = (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
+            } else {
+              dateStr = String(emp.expiration);
+            }
+          } catch(e) {
+            dateStr = String(emp.expiration);
+          }
+        }
+
+        var daysText = '';
+        if (emp.daysUntil !== null && emp.daysUntil !== undefined) {
+          if (emp.daysUntil < 0) {
+            daysText = '<span class="text-danger">(' + Math.abs(emp.daysUntil) + ' days ago)</span>';
+          } else if (emp.daysUntil === 0) {
+            daysText = '<span class="text-danger">(Today)</span>';
+          } else {
+            daysText = '<span class="text-muted">(' + emp.daysUntil + ' days)</span>';
+          }
+        }
+
+        html += '<div class="cert-employee-item">';
+        html += '<div style="flex: 1;">';
+        html += '<div class="cert-employee-name">' + emp.name + '</div>';
+        if (emp.location) {
+          html += '<div class="cert-employee-location">' + emp.location + '</div>';
+        }
+        html += '</div>';
+        html += '<div class="text-end me-2">';
+        if (dateStr) {
+          html += '<div class="cert-employee-date">' + dateStr + '</div>';
+        }
+        if (daysText) {
+          html += '<div class="cert-employee-days">' + daysText + '</div>';
+        }
+        html += '</div>';
+        html += '<div>';
+        html += '<button class="btn btn-sm btn-outline-primary" onclick="addCertToChecklist(' + index + ')" title="Add to My Checklist"><i class="bi bi-plus-circle"></i></button>';
+        html += '</div>';
+        html += '</div>';
+      });
+
+      document.getElementById('certEmployeeList').innerHTML = html;
+
+      // Show the modal
+      var modal = new bootstrap.Modal(document.getElementById('certEmployeeModal'));
+      modal.show();
+    }
+
+    function addCertToChecklist(empIndex) {
+      if (!currentCertModalInfo || !currentCertModalInfo.employees[empIndex]) {
+        showToast('Error: Could not find employee data', 'error');
+        return;
+      }
+
+      var emp = currentCertModalInfo.employees[empIndex];
+      var certType = currentCertModalInfo.certType;
+      var status = currentCertModalInfo.status;
+
+      // Create a unique key for this cert task
+      var taskKey = emp.name + '|' + certType;
+
+      // Check if already in checklist (stored in localStorage)
+      var existingChecklist = [];
+      try {
+        var stored = localStorage.getItem('toDoScheduleChecklist');
+        if (stored) {
+          existingChecklist = JSON.parse(stored);
+        }
+      } catch(e) {
+        existingChecklist = [];
+      }
+
+      // Check for duplicate
+      var isDuplicate = existingChecklist.some(function(item) {
+        return item.employee === emp.name && item.itemType === certType;
+      });
+
+      if (isDuplicate) {
+        showToast('⚠️ ' + emp.name + ' - ' + certType + ' is already in your checklist!', 'warning');
+        return;
+      }
+
+      // Create checklist item
+      var checklistItem = {
+        id: Date.now(),
+        employee: emp.name,
+        taskType: 'Cert Expiring',
+        itemType: certType,
+        location: emp.location || '',
+        scheduledDate: '',
+        source: 'Expiring Certs',
+        subject: 'Follow up on ' + certType,
+        addedDate: new Date().toISOString().split('T')[0],
+        completed: false
+      };
+
+      // Add to checklist
+      existingChecklist.push(checklistItem);
+      localStorage.setItem('toDoScheduleChecklist', JSON.stringify(existingChecklist));
+
+      // Also mark as office task
+      var officeTasks = {};
+      try {
+        var storedOffice = localStorage.getItem('toDoScheduleOfficeTasks');
+        if (storedOffice) {
+          officeTasks = JSON.parse(storedOffice);
+        }
+      } catch(e) {
+        officeTasks = {};
+      }
+      officeTasks[taskKey] = true;
+      localStorage.setItem('toDoScheduleOfficeTasks', JSON.stringify(officeTasks));
+
+      showToast('✓ Added ' + emp.name + ' - ' + certType + ' to My Checklist with Office status');
     }
 
     function renderEmployeeCerts(employees) {

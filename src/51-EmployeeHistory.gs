@@ -13,6 +13,8 @@ var EMPLOYEE_EVENT_TYPES = {
   TERMINATED: 'Terminated',
   REHIRED: 'Rehired',
   NEW_EMPLOYEE: 'New Employee',
+  NEW_EMPLOYEE_IMPORT: 'New Employee (Import)',
+  NAME_CORRECTED: 'Name Corrected',
   LOCATION_CHANGE: 'Location Change',
   JOB_NUMBER_CHANGE: 'Job Number Change',
   HIRE_DATE_CHANGE: 'Hire Date Change',
@@ -108,6 +110,136 @@ function cleanupDuplicateEmployeeHistoryEntries() {
   }
 
   return rowsToDelete.length;
+}
+
+/**
+ * Logs a name correction to Employee History.
+ * Called when an employee's name is updated during Excel import.
+ *
+ * @param {string} oldName - The old/incorrect name
+ * @param {string} newName - The new/corrected name
+ * @param {string} location - Employee's location (optional)
+ * @param {string} jobNumber - Employee's job number (optional)
+ * @return {boolean} Success status
+ */
+function logNameCorrection(oldName, newName, location, jobNumber) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var historySheet = ss.getSheetByName('Employee History');
+
+    if (!historySheet) {
+      Logger.log('logNameCorrection: Employee History sheet not found');
+      return false;
+    }
+
+    var today = new Date();
+    var todayStr = Utilities.formatDate(today, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+
+    // Check for duplicate entry
+    if (isDuplicateEmployeeHistoryEntry(historySheet, newName, EMPLOYEE_EVENT_TYPES.NAME_CORRECTED, todayStr)) {
+      Logger.log('logNameCorrection: Duplicate entry exists for ' + newName);
+      return true; // Not an error, just skip
+    }
+
+    var historyRow = [
+      todayStr,                              // Date
+      newName,                               // Employee Name (new/corrected)
+      EMPLOYEE_EVENT_TYPES.NAME_CORRECTED,   // Event Type
+      location || '',                        // Location
+      jobNumber || '',                       // Job Number
+      '',                                    // Hire Date
+      '',                                    // Last Day
+      '',                                    // Last Day Reason
+      '',                                    // Rehire Date
+      'Name corrected from: ' + oldName,     // Notes
+      '',                                    // Phone Number
+      '',                                    // Email Address
+      '',                                    // Glove Size
+      ''                                     // Sleeve Size
+    ];
+
+    historySheet.appendRow(historyRow);
+    Logger.log('logNameCorrection: Logged name change from "' + oldName + '" to "' + newName + '"');
+    return true;
+
+  } catch (e) {
+    Logger.log('logNameCorrection ERROR: ' + e.toString());
+    return false;
+  }
+}
+
+/**
+ * Logs a new employee added during Excel import to Employee History.
+ *
+ * @param {Object} empData - Employee data object
+ * @param {string} empData.name - Employee name
+ * @param {string} empData.class - Employee class
+ * @param {string} empData.location - Employee location
+ * @param {string} empData.jobNum - Job number (optional)
+ * @param {string} empData.phone - Phone number (optional)
+ * @param {string} empData.email - Email address (optional)
+ * @param {string} empData.gloveSize - Glove size (optional)
+ * @param {string} empData.sleeveSize - Sleeve size (optional)
+ * @param {string} empData.hireDate - Hire date (optional)
+ * @return {boolean} Success status
+ */
+function logNewEmployeeFromImport(empData) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var historySheet = ss.getSheetByName('Employee History');
+
+    if (!historySheet) {
+      Logger.log('logNewEmployeeFromImport: Employee History sheet not found');
+      return false;
+    }
+
+    var today = new Date();
+    var todayStr = Utilities.formatDate(today, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+
+    // Format hire date if provided
+    var hireDateStr = '';
+    if (empData.hireDate) {
+      if (empData.hireDate instanceof Date) {
+        hireDateStr = Utilities.formatDate(empData.hireDate, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+      } else {
+        var hDate = new Date(empData.hireDate);
+        if (!isNaN(hDate.getTime())) {
+          hireDateStr = Utilities.formatDate(hDate, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+        }
+      }
+    }
+
+    // Check for duplicate entry
+    if (isDuplicateEmployeeHistoryEntry(historySheet, empData.name, EMPLOYEE_EVENT_TYPES.NEW_EMPLOYEE_IMPORT, todayStr)) {
+      Logger.log('logNewEmployeeFromImport: Duplicate entry exists for ' + empData.name);
+      return true; // Not an error, just skip
+    }
+
+    var historyRow = [
+      todayStr,                                   // Date
+      empData.name,                               // Employee Name
+      EMPLOYEE_EVENT_TYPES.NEW_EMPLOYEE_IMPORT,   // Event Type
+      empData.location || '',                     // Location
+      empData.jobNum || '',                       // Job Number
+      hireDateStr,                                // Hire Date
+      '',                                         // Last Day
+      '',                                         // Last Day Reason
+      '',                                         // Rehire Date
+      'Added via Excel certification import',    // Notes
+      empData.phone || '',                        // Phone Number
+      empData.email || '',                        // Email Address
+      empData.gloveSize || '',                    // Glove Size
+      empData.sleeveSize || ''                    // Sleeve Size
+    ];
+
+    historySheet.appendRow(historyRow);
+    Logger.log('logNewEmployeeFromImport: Logged new employee "' + empData.name + '"');
+    return true;
+
+  } catch (e) {
+    Logger.log('logNewEmployeeFromImport ERROR: ' + e.toString());
+    return false;
+  }
 }
 
 /**

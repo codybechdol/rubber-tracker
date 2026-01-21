@@ -9,6 +9,95 @@
 /* eslint-disable no-redeclare, no-unused-vars */
 
 // ============================================================================
+// PHONE NUMBER FORMATTING
+// ============================================================================
+
+/**
+ * Formats all phone numbers in the Employees sheet to a consistent format.
+ * Converts various formats to (XXX) XXX-XXXX format.
+ * Menu item: Glove Manager → Utilities → Format Phone Numbers
+ */
+function formatEmployeePhoneNumbers() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var employeesSheet = ss.getSheetByName('Employees');
+
+  if (!employeesSheet || employeesSheet.getLastRow() < 2) {
+    SpreadsheetApp.getUi().alert('No Employees sheet found or sheet is empty.');
+    return;
+  }
+
+  var data = employeesSheet.getDataRange().getValues();
+  var headers = data[0];
+  var phoneCol = -1;
+
+  // Find Phone Number column
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'phone number' || header === 'phone') {
+      phoneCol = h;
+      break;
+    }
+  }
+
+  if (phoneCol === -1) {
+    SpreadsheetApp.getUi().alert('Could not find Phone Number column in Employees sheet.');
+    return;
+  }
+
+  var updatedCount = 0;
+  var updates = [];
+
+  for (var i = 1; i < data.length; i++) {
+    var phone = String(data[i][phoneCol] || '').trim();
+
+    if (phone && phone !== 'N/A' && phone !== '') {
+      // Extract only digits
+      var digits = '';
+      for (var c = 0; c < phone.length; c++) {
+        var char = phone.charAt(c);
+        if (char >= '0' && char <= '9') {
+          digits += char;
+        }
+      }
+
+      // Format as (XXX) XXX-XXXX if we have 10 or 11 digits
+      var formatted = '';
+      if (digits.length === 11 && digits.charAt(0) === '1') {
+        // Remove leading 1 for US numbers
+        digits = digits.substring(1);
+      }
+
+      if (digits.length === 10) {
+        formatted = '(' + digits.substring(0, 3) + ') ' + digits.substring(3, 6) + '-' + digits.substring(6);
+      } else if (digits.length > 0) {
+        // Keep as-is if not 10 digits (might be international)
+        formatted = digits;
+      }
+
+      if (formatted && formatted !== phone) {
+        updates.push({
+          row: i + 1,
+          col: phoneCol + 1,
+          oldValue: phone,
+          newValue: formatted
+        });
+      }
+    }
+  }
+
+  // Apply updates
+  for (var u = 0; u < updates.length; u++) {
+    employeesSheet.getRange(updates[u].row, updates[u].col).setValue(updates[u].newValue);
+    updatedCount++;
+  }
+
+  SpreadsheetApp.getUi().alert('✅ Phone Number Formatting Complete!\n\n' +
+    updatedCount + ' phone number(s) formatted to (XXX) XXX-XXXX format.');
+
+  Logger.log('formatEmployeePhoneNumbers: Updated ' + updatedCount + ' phone numbers');
+}
+
+// ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 
@@ -83,6 +172,10 @@ function collectAndGroupTasks(ss) {
   var employeeForemen = getEmployeeForemanMap(ss);
   Logger.log('collectAndGroupTasks: Found ' + Object.keys(employeeForemen).length + ' employee foremen');
 
+  // Get phone number lookup from Employees sheet
+  var employeePhones = getEmployeePhoneMap(ss);
+  Logger.log('collectAndGroupTasks: Found ' + Object.keys(employeePhones).length + ' employee phones');
+
   // Collect from Glove Swaps
   var beforeGlove = countTasks(tasksByLocation);
   collectSwapTasks(ss, 'Glove Swaps', 'Glove', tasksByLocation, employeeLocations, employeeForemen, today);
@@ -109,7 +202,7 @@ function collectAndGroupTasks(ss) {
 
   // Collect from Expiring Certs (based on selected cert types in ToDoConfig)
   var beforeCerts = countTasks(tasksByLocation);
-  collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employeeForemen, today);
+  collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employeeForemen, employeePhones, today);
   var afterCerts = countTasks(tasksByLocation);
   Logger.log('collectAndGroupTasks: Expiring Certs added ' + (afterCerts - beforeCerts) + ' tasks');
 
@@ -191,6 +284,63 @@ function getEmployeeLocationMap(ss) {
 }
 
 /**
+ * Creates employee name to phone number map from Employees sheet.
+ *
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @return {Object} Map of employee name (lowercase) to phone number (digits only)
+ */
+function getEmployeePhoneMap(ss) {
+  var employeesSheet = ss.getSheetByName('Employees');
+  if (!employeesSheet || employeesSheet.getLastRow() < 2) {
+    return {};
+  }
+
+  var data = employeesSheet.getDataRange().getValues();
+  var headers = data[0];
+  var nameCol = -1;
+  var phoneCol = -1;
+
+  // Find columns
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'name') nameCol = h;
+    if (header === 'phone number' || header === 'phone') phoneCol = h;
+  }
+
+  if (nameCol === -1 || phoneCol === -1) {
+    Logger.log('getEmployeePhoneMap: Could not find name or phone column');
+    return {};
+  }
+
+  var phoneMap = {};
+  for (var i = 1; i < data.length; i++) {
+    var name = String(data[i][nameCol]).trim();
+    var phone = String(data[i][phoneCol] || '').trim();
+
+    if (name && phone) {
+      // Clean up phone number - keep only digits
+      var cleanPhone = '';
+      for (var c = 0; c < phone.length; c++) {
+        var char = phone.charAt(c);
+        if (char >= '0' && char <= '9') {
+          cleanPhone += char;
+        }
+      }
+      // If 10 digits, assume US number and add country code
+      if (cleanPhone.length === 10) {
+        cleanPhone = '1' + cleanPhone;
+      }
+      if (cleanPhone.length >= 10) {
+        phoneMap[name.toLowerCase()] = cleanPhone;
+      }
+    }
+  }
+
+  Logger.log('getEmployeePhoneMap: Found ' + Object.keys(phoneMap).length + ' employee phone numbers');
+  return phoneMap;
+}
+
+/**
  * Creates employee name to foreman map from Employees sheet.
  * Groups employees by crew (extracted from job number) and finds foreman (F or GTO F classification).
  *
@@ -256,6 +406,13 @@ function getEmployeeForemanMap(ss) {
   Object.keys(empNames).forEach(function(nameLower) {
     var empLocation = empLocationMap[nameLower];
     var empCrew = extractCrewNum(empJobNumMap[nameLower]);
+
+    // Special handling for "Weeds" location - employees at home with no work
+    // Group all Weeds employees under "Weeds" as the foreman/group name
+    if (empLocation && empLocation.toLowerCase() === 'weeds') {
+      foremanMap[nameLower] = 'Weeds';
+      return;
+    }
 
     if (!empCrew || !empLocation) {
       foremanMap[nameLower] = empCrew || 'Unknown';
@@ -860,14 +1017,63 @@ function collectReclaimTasks(ss, tasksByLocation, employeeLocations, employeeFor
  * @param {Object} tasksByLocation - Object to add tasks to
  * @param {Object} employeeLocations - Employee to location map
  * @param {Object} employeeForemen - Employee to foreman map
+ * @param {Object} employeePhones - Employee to phone number map
  * @param {Date} today - Today's date
  */
-function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employeeForemen, today) {
+function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employeeForemen, employeePhones, today) {
   var expiringSheet = ss.getSheetByName('Expiring Certs');
   if (!expiringSheet || expiringSheet.getLastRow() < 2) {
     Logger.log('collectExpiringCertTasks: Expiring Certs sheet not found or empty');
     return;
   }
+
+  // Build set of previous/terminated employee names to exclude
+  var previousEmployeeNames = new Set();
+
+  // Check Employee History for terminated employees
+  var employeeHistorySheet = ss.getSheetByName('Employee History');
+  if (employeeHistorySheet && employeeHistorySheet.getLastRow() > 2) {
+    var historyData = employeeHistorySheet.getRange(3, 1, employeeHistorySheet.getLastRow() - 2, 10).getValues();
+    // Employee History columns: A=Date, B=Employee Name, C=Event Type, D=Location
+    for (var hi = 0; hi < historyData.length; hi++) {
+      var histEventType = (historyData[hi][2] || '').toString().trim().toLowerCase();
+      var histName = (historyData[hi][1] || '').toString().trim().toLowerCase();
+
+      // If employee was terminated or marked as previous employee
+      if (histEventType === 'terminated' || histEventType === 'previous employee') {
+        if (histName) {
+          previousEmployeeNames.add(histName);
+        }
+      }
+    }
+  }
+
+  // Also check Employees sheet for "Previous Employee" location
+  var employeesSheet = ss.getSheetByName('Employees');
+  if (employeesSheet && employeesSheet.getLastRow() > 1) {
+    var empData = employeesSheet.getDataRange().getValues();
+    var empHeaders = empData[0];
+    var empNameCol = -1;
+    var empLocCol = -1;
+
+    for (var eh = 0; eh < empHeaders.length; eh++) {
+      var hdr = String(empHeaders[eh]).toLowerCase().trim();
+      if (hdr === 'name') empNameCol = eh;
+      if (hdr === 'location') empLocCol = eh;
+    }
+
+    if (empNameCol !== -1 && empLocCol !== -1) {
+      for (var ei = 1; ei < empData.length; ei++) {
+        var empName = (empData[ei][empNameCol] || '').toString().trim().toLowerCase();
+        var empLoc = (empData[ei][empLocCol] || '').toString().trim().toLowerCase();
+        if (empName && empLoc === 'previous employee') {
+          previousEmployeeNames.add(empName);
+        }
+      }
+    }
+  }
+
+  Logger.log('collectExpiringCertTasks: Found ' + previousEmployeeNames.size + ' previous/terminated employees to exclude');
 
   // Get selected cert types from config
   var properties = PropertiesService.getScriptProperties();
@@ -926,6 +1132,12 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
     // Skip if no employee or cert type
     if (!employee || !certType) continue;
 
+    // Skip if employee is a previous/terminated employee
+    if (previousEmployeeNames.has(employee.toLowerCase())) {
+      Logger.log('collectExpiringCertTasks: Skipping ' + certType + ' for previous employee: ' + employee);
+      continue;
+    }
+
     // Skip if this cert type is NOT selected in config
     if (selectedCertTypes.indexOf(certType) === -1) {
       continue;
@@ -965,14 +1177,19 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
       priority = 'Medium';
     }
 
-    // Get location from row or employee lookup
-    var location = locationCol !== -1 ? String(row[locationCol] || '').trim() : '';
+    // ALWAYS use employee's current location from Employees sheet (not stale data in Expiring Certs)
+    // This ensures employees who moved (e.g., to "Weeds") show up under their current location
+    var location = employeeLocations[employee.toLowerCase()] || '';
     if (!location) {
-      location = employeeLocations[employee.toLowerCase()] || 'Unknown';
+      // Fallback to location in Expiring Certs row if employee not found in Employees sheet
+      location = locationCol !== -1 ? String(row[locationCol] || '').trim() : 'Unknown';
     }
 
     // Get foreman for this employee
     var foreman = employeeForemen[employee.toLowerCase()] || 'Unassigned';
+
+    // Get phone number for this employee
+    var phoneNumber = employeePhones[employee.toLowerCase()] || '';
 
     // Determine status
     var status = isOverdue ? 'Expired' : 'Expiring Soon';
@@ -983,6 +1200,7 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
       employee: employee,
       location: location,
       foreman: foreman, // Use actual foreman from employee lookup
+      phoneNumber: phoneNumber, // For SMS notifications
       currentItem: '', // No item number for certs
       pickListItem: '',
       size: '',
@@ -1004,6 +1222,57 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
     taskCount++;
 
     Logger.log('collectExpiringCertTasks: Added ' + certType + ' task for ' + employee + ' at ' + location + ' (days=' + daysTillDue + ')');
+  }
+
+  // Post-process: Group 1st Aid and CPR certs for same employee
+  // This allows sending a single notification for both certs
+  for (var loc in tasksByLocation) {
+    var tasks = tasksByLocation[loc];
+    var certTasksByEmployee = {};
+
+    // Group cert tasks by employee
+    for (var t = 0; t < tasks.length; t++) {
+      var task = tasks[t];
+      if (task.type === 'Cert Expiring') {
+        var empKey = task.employee.toLowerCase();
+        if (!certTasksByEmployee[empKey]) {
+          certTasksByEmployee[empKey] = [];
+        }
+        certTasksByEmployee[empKey].push(task);
+      }
+    }
+
+    // For each employee with multiple cert tasks, link them via relatedCerts
+    for (var empKey in certTasksByEmployee) {
+      var empCertTasks = certTasksByEmployee[empKey];
+      if (empCertTasks.length > 1) {
+        // Check if employee has both 1st Aid and CPR type certs
+        var certTypes = empCertTasks.map(function(t) { return t.itemType; });
+        var has1stAid = certTypes.some(function(ct) {
+          return ct.toLowerCase().indexOf('1st aid') !== -1 || ct.toLowerCase().indexOf('first aid') !== -1;
+        });
+        var hasCPR = certTypes.some(function(ct) {
+          return ct.toLowerCase().indexOf('cpr') !== -1;
+        });
+
+        // If employee has related certs (1st Aid + CPR), add relatedCerts array to each task
+        if (has1stAid && hasCPR) {
+          var relatedCertInfo = empCertTasks.map(function(t) {
+            return {
+              certType: t.itemType,
+              expirationDate: t.dueDate ? t.dueDate.toISOString() : null,
+              daysTillDue: t.daysTillDue
+            };
+          });
+
+          for (var rt = 0; rt < empCertTasks.length; rt++) {
+            empCertTasks[rt].relatedCerts = relatedCertInfo;
+            empCertTasks[rt].hasRelatedCerts = true;
+          }
+          Logger.log('collectExpiringCertTasks: Grouped ' + empCertTasks.length + ' related certs for ' + empCertTasks[0].employee);
+        }
+      }
+    }
   }
 
   Logger.log('collectExpiringCertTasks: Added ' + taskCount + ' expiring cert tasks total');

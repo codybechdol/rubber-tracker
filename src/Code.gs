@@ -77,89 +77,66 @@ function showToDoConfig() {
   SpreadsheetApp.getUi().showModalDialog(html, '⚙️ To Do Config');
 }
 
-/**
- * Adds a manual task to the Smart Schedule
- * Called from the QuickActions sidebar.
- *
- * @param {Object} taskData - The task data from the form
- * @param {string} taskData.location - Location of the task
- * @param {string} taskData.priority - Priority level (High, Medium, Low)
- * @param {string} taskData.taskType - Type of task (Meeting, Training, etc.)
- * @param {string} taskData.scheduledDate - Date in YYYY-MM-DD format
- * @param {string} taskData.startTime - Start time in HH:MM format
- * @param {string} taskData.endTime - End time in HH:MM format (optional)
- * @param {number} taskData.estimatedTime - Estimated time in hours
- * @param {string} taskData.startLocation - Where traveling from
- * @param {string} taskData.endLocation - Where traveling to after
- * @param {string} taskData.notes - Optional notes
- * @return {Object} Result with success status
- */
-function addManualScheduleTask(taskData) {
-  Logger.log('=== addManualScheduleTask START ===');
-  Logger.log('Task data: ' + JSON.stringify(taskData));
-
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-
-  // Get or create Manual Tasks sheet
-  var manualSheet = ss.getSheetByName('Manual Tasks');
-  if (!manualSheet) {
-    manualSheet = ss.insertSheet('Manual Tasks');
-    // Set up headers
-    var headers = [
-      'Location', 'Priority', 'Task Type', 'Scheduled Date', 'Start Time', 'End Time',
-      'Estimated Time (hrs)', 'Start Location', 'End Location',
-      'Notes', 'Date Added', 'Status'
-    ];
-    manualSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    manualSheet.getRange(1, 1, 1, headers.length)
-      .setBackground('#1a73e8')
-      .setFontColor('#ffffff')
-      .setFontWeight('bold');
-    manualSheet.setFrozenRows(1);
-    Logger.log('Created Manual Tasks sheet with headers');
-  }
-
-  // Check if headers need to be updated (existing sheet without time columns)
-  var existingHeaders = manualSheet.getRange(1, 1, 1, manualSheet.getLastColumn()).getValues()[0];
-  if (existingHeaders.indexOf('Start Time') === -1) {
-    // Need to add Start Time and End Time columns - insert after Scheduled Date (column 4)
-    manualSheet.insertColumnAfter(4);
-    manualSheet.insertColumnAfter(4);
-    manualSheet.getRange(1, 5).setValue('Start Time');
-    manualSheet.getRange(1, 6).setValue('End Time');
-    manualSheet.getRange(1, 5, 1, 2)
-      .setBackground('#1a73e8')
-      .setFontColor('#ffffff')
-      .setFontWeight('bold');
-    Logger.log('Updated headers to include Start Time and End Time columns');
-  }
-
-  // Add new row with task data
-  var newRow = [
-    taskData.location,
-    taskData.priority,
-    taskData.taskType,
-    taskData.scheduledDate,
-    taskData.startTime,
-    taskData.endTime || '',
-    taskData.estimatedTime,
-    taskData.startLocation,
-    taskData.endLocation,
-    taskData.notes,
-    new Date(),
-    'Pending'
-  ];
-
-  manualSheet.appendRow(newRow);
-  Logger.log('Added task to Manual Tasks sheet');
-
-  Logger.log('=== addManualScheduleTask END ===');
-  return { success: true, message: 'Task added successfully' };
-}
 
 // ============================================================================
 // TO DO SCHEDULE & CONFIG BACKEND FUNCTIONS
 // ============================================================================
+
+/**
+ * Creates employee name to phone number map from Employees sheet.
+ * Used by getScheduleTasks to provide phone numbers for SMS notifications.
+ *
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @return {Object} Map of employee name (lowercase) to phone number (digits only)
+ */
+function getEmployeePhoneMapForTasks(ss) {
+  var employeesSheet = ss.getSheetByName('Employees');
+  if (!employeesSheet || employeesSheet.getLastRow() < 2) {
+    return {};
+  }
+
+  var data = employeesSheet.getDataRange().getValues();
+  var headers = data[0];
+  var nameCol = -1;
+  var phoneCol = -1;
+
+  // Find columns
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'name') nameCol = h;
+    if (header === 'phone number' || header === 'phone') phoneCol = h;
+  }
+
+  if (nameCol === -1 || phoneCol === -1) {
+    return {};
+  }
+
+  var phoneMap = {};
+  for (var i = 1; i < data.length; i++) {
+    var name = String(data[i][nameCol]).trim();
+    var phone = String(data[i][phoneCol] || '').trim();
+
+    if (name && phone) {
+      // Clean up phone number - keep only digits
+      var cleanPhone = '';
+      for (var c = 0; c < phone.length; c++) {
+        var char = phone.charAt(c);
+        if (char >= '0' && char <= '9') {
+          cleanPhone += char;
+        }
+      }
+      // If 10 digits, assume US number and add country code
+      if (cleanPhone.length === 10) {
+        cleanPhone = '1' + cleanPhone;
+      }
+      if (cleanPhone.length >= 10) {
+        phoneMap[name.toLowerCase()] = cleanPhone;
+      }
+    }
+  }
+
+  return phoneMap;
+}
 
 /**
  * Gets all schedule tasks for the To Do Schedule dialog.
@@ -173,46 +150,112 @@ function getScheduleTasks() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var tasks = [];
 
+  // Load employee phone numbers for SMS functionality
+  var employeePhones = getEmployeePhoneMapForTasks(ss);
+  Logger.log('Loaded ' + Object.keys(employeePhones).length + ' employee phone numbers');
+
   // FIRST: Check if we have a generated To Do List sheet (from Smart Schedule)
   var todoSheet = ss.getSheetByName('To Do List');
+  Logger.log('To Do List sheet exists: ' + (todoSheet !== null));
+  if (todoSheet) {
+    Logger.log('To Do List lastRow: ' + todoSheet.getLastRow());
+  }
+
   if (todoSheet && todoSheet.getLastRow() > 13) {
     Logger.log('Found To Do List sheet, reading tasks from there');
-    var todoData = todoSheet.getDataRange().getValues();
-    // Data starts at row 14 (index 13) after calendar section
-    // Headers in row 13 (index 12): Location Visit, Priority, Task Type, Employee/Crew, Location, Current Item, Pick List Item, Item Type, Size, Due Date, Days Till Due, Status, Scheduled Date, Estimated Time, Start Location, End Location, Drive Time, Overnight Required, Completed
+    try {
+      var todoData = todoSheet.getDataRange().getValues();
+      Logger.log('To Do List data rows: ' + todoData.length);
 
-    for (var t = 13; t < todoData.length; t++) {
-      var row = todoData[t];
-      if (row[0] && String(row[0]).trim()) { // Has Location Visit value
-        var locationVisit = String(row[0]).replace(/📍\s*/g, '').trim();
-        if (!locationVisit || locationVisit.indexOf('No tasks') !== -1) continue;
-
-        var rawTaskType = row[2] || 'Task';
-        var itemType = row[7] || ''; // Column H - Item Type (Glove/Sleeve) or Training Topic
-        var currentItem = row[5] || ''; // Column F - Current Item #
-        var pickListItem = row[6] || ''; // Column G - Pick List Item #
-
-        tasks.push({
-          id: 'todolist-' + t,
-          source: 'To Do List',
-          location: locationVisit || row[4] || 'Unknown',
-          priority: row[1] || 'Medium',
-          taskType: rawTaskType,
-          itemType: itemType, // Glove, Sleeve, or Training Topic
-          currentItem: currentItem,
-          pickListItem: pickListItem,
-          employee: row[3] || '',
-          scheduledDate: formatDateForInput(row[12]), // Column M
-          startTime: '',
-          endTime: '',
-          estimatedTime: row[13] || 1, // Column N
-          startLocation: row[14] || 'Helena', // Column O
-          endLocation: row[15] || locationVisit, // Column P
-          notes: 'Employee: ' + (row[3] || '') + ' | Item: ' + (currentItem || '') + ' → ' + (pickListItem || ''),
-          status: row[11] || 'Pending', // Column L
-          rowIndex: t + 1
-        });
+      // Read header row to find column indexes dynamically
+      var headerRow = todoData[12] || []; // Row 13 (index 12) contains headers
+      var colIndex = {};
+      for (var h = 0; h < headerRow.length; h++) {
+        var header = String(headerRow[h]).toLowerCase().trim();
+        if (header.indexOf('location visit') !== -1) colIndex.locationVisit = h;
+        if (header === 'priority') colIndex.priority = h;
+        if (header.indexOf('task type') !== -1) colIndex.taskType = h;
+        if (header.indexOf('employee') !== -1 || header.indexOf('crew') !== -1) colIndex.employee = h;
+        if (header === 'location') colIndex.location = h;
+        if (header.indexOf('current item') !== -1) colIndex.currentItem = h;
+        if (header.indexOf('pick list') !== -1) colIndex.pickListItem = h;
+        if (header.indexOf('item type') !== -1) colIndex.itemType = h;
+        if (header === 'size') colIndex.size = h;
+        if (header.indexOf('due date') !== -1) colIndex.dueDate = h;
+        if (header.indexOf('days') !== -1) colIndex.daysTillDue = h;
+        if (header === 'status') colIndex.status = h;
+        if (header.indexOf('scheduled date') !== -1) colIndex.scheduledDate = h;
+        if (header.indexOf('estimated time') !== -1) colIndex.estimatedTime = h;
+        if (header.indexOf('start location') !== -1) colIndex.startLocation = h;
+        if (header.indexOf('end location') !== -1) colIndex.endLocation = h;
       }
+      Logger.log('To Do List column indexes: ' + JSON.stringify(colIndex));
+
+      // Data starts at row 14 (index 13) after calendar section and headers
+      for (var t = 13; t < todoData.length; t++) {
+        var row = todoData[t];
+        var locationVisitVal = colIndex.locationVisit !== undefined ? row[colIndex.locationVisit] : row[0];
+
+        if (locationVisitVal && String(locationVisitVal).trim()) {
+          var locationVisit = String(locationVisitVal).replace(/📍\s*/g, '').trim();
+          if (!locationVisit || locationVisit.indexOf('No tasks') !== -1) continue;
+
+          var rawTaskType = colIndex.taskType !== undefined ? (row[colIndex.taskType] || 'Task') : (row[2] || 'Task');
+          var itemType = colIndex.itemType !== undefined ? (row[colIndex.itemType] || '') : (row[7] || '');
+          var currentItem = colIndex.currentItem !== undefined ? (row[colIndex.currentItem] || '') : (row[5] || '');
+          var pickListItem = colIndex.pickListItem !== undefined ? (row[colIndex.pickListItem] || '') : (row[6] || '');
+          var employee = colIndex.employee !== undefined ? (row[colIndex.employee] || '') : (row[3] || '');
+          var scheduledDate = colIndex.scheduledDate !== undefined ? row[colIndex.scheduledDate] : row[12];
+          var dueDate = colIndex.dueDate !== undefined ? row[colIndex.dueDate] : row[9]; // Due Date column
+          var estimatedTime = colIndex.estimatedTime !== undefined ? (row[colIndex.estimatedTime] || 1) : (row[13] || 1);
+          var startLoc = colIndex.startLocation !== undefined ? (row[colIndex.startLocation] || 'Helena') : (row[14] || 'Helena');
+          var endLoc = colIndex.endLocation !== undefined ? (row[colIndex.endLocation] || locationVisit) : (row[15] || locationVisit);
+          var status = colIndex.status !== undefined ? (row[colIndex.status] || 'Pending') : (row[11] || 'Pending');
+          var priority = colIndex.priority !== undefined ? (row[colIndex.priority] || 'Medium') : (row[1] || 'Medium');
+
+          // Determine source based on task type for proper filtering
+          var taskSource = 'To Do List';
+          var taskTypeLower = String(rawTaskType).toLowerCase();
+          if (taskTypeLower.indexOf('swap') !== -1) {
+            taskSource = String(itemType).toLowerCase().indexOf('sleeve') !== -1 ? 'Sleeve Swaps' : 'Glove Swaps';
+          } else if (taskTypeLower.indexOf('training') !== -1) {
+            taskSource = 'Training Tracking';
+          } else if (taskTypeLower.indexOf('cert') !== -1 || taskTypeLower.indexOf('expir') !== -1 || taskTypeLower.indexOf('renew') !== -1) {
+            taskSource = 'Expiring Certs';
+          } else if (taskTypeLower.indexOf('reclaim') !== -1) {
+            taskSource = 'Reclaims';
+          }
+
+          // Get phone number for this employee
+          var empNameLower = String(employee).toLowerCase().trim();
+          var phoneNumber = employeePhones[empNameLower] || '';
+
+          tasks.push({
+            id: 'todolist-' + t,
+            source: taskSource,
+            location: locationVisit || (colIndex.location !== undefined ? row[colIndex.location] : row[4]) || 'Unknown',
+            priority: String(priority),
+            taskType: String(rawTaskType),
+            itemType: String(itemType),
+            currentItem: String(currentItem),
+            pickListItem: String(pickListItem),
+            employee: String(employee),
+            phoneNumber: phoneNumber,
+            scheduledDate: formatDateForInput(scheduledDate),
+            dueDate: formatDateForInput(dueDate), // Cert expiration / due date
+            startTime: '',
+            endTime: '',
+            estimatedTime: Number(estimatedTime) || 1,
+            startLocation: String(startLoc),
+            endLocation: String(endLoc),
+            notes: 'Employee: ' + String(employee) + ' | Item: ' + String(currentItem) + (pickListItem ? ' → ' + String(pickListItem) : ''),
+            status: String(status),
+            rowIndex: t + 1
+          });
+        }
+      }
+    } catch (e) {
+      Logger.log('Error reading To Do List: ' + e.message);
     }
 
     Logger.log('Loaded ' + tasks.length + ' tasks from To Do List sheet');
@@ -226,13 +269,14 @@ function getScheduleTasks() {
     var manualData = manualSheet.getDataRange().getValues();
     var manualHeaders = manualData[0];
 
-    // Find columns dynamically based on headers
+    // Find columns dynamically based on headers (supports both old and new structures)
     var colIndices = {};
     for (var mh = 0; mh < manualHeaders.length; mh++) {
       var header = String(manualHeaders[mh]).toLowerCase().trim();
       if (header === 'location') colIndices.location = mh;
       if (header === 'priority') colIndices.priority = mh;
       if (header === 'task' || header === 'task type') colIndices.taskType = mh;
+      if (header === 'employee') colIndices.employee = mh;
       if (header === 'scheduled date') colIndices.scheduledDate = mh;
       if (header === 'start time') colIndices.startTime = mh;
       if (header === 'end time') colIndices.endTime = mh;
@@ -250,9 +294,10 @@ function getScheduleTasks() {
       var location = colIndices.location !== undefined ? (mRow[colIndices.location] || '') : '';
       var taskType = colIndices.taskType !== undefined ? (mRow[colIndices.taskType] || 'Task') : 'Task';
       var priority = colIndices.priority !== undefined ? (mRow[colIndices.priority] || 'Medium') : 'Medium';
+      var employee = colIndices.employee !== undefined ? (mRow[colIndices.employee] || '') : '';
       var scheduledDate = colIndices.scheduledDate !== undefined ? mRow[colIndices.scheduledDate] : '';
-      var startTime = colIndices.startTime !== undefined ? (mRow[colIndices.startTime] || '') : '';
-      var endTime = colIndices.endTime !== undefined ? (mRow[colIndices.endTime] || '') : '';
+      var startTime = colIndices.startTime !== undefined ? formatTimeForInput(mRow[colIndices.startTime]) : '';
+      var endTime = colIndices.endTime !== undefined ? formatTimeForInput(mRow[colIndices.endTime]) : '';
       var status = colIndices.status !== undefined ? (mRow[colIndices.status] || 'Pending') : 'Pending';
       var notes = colIndices.notes !== undefined ? (mRow[colIndices.notes] || '') : '';
 
@@ -273,7 +318,7 @@ function getScheduleTasks() {
         estimatedTime: 1,
         startLocation: 'Helena',
         endLocation: location || 'Helena',
-        employee: '',
+        employee: employee,
         itemType: 'Manual',
         rowIndex: mi + 1
       });
@@ -370,9 +415,50 @@ function getScheduleTasks() {
     }
   }
 
-  // 4. Get Expiring Certs
+  // 4. Get Expiring Certs (excluding previous/terminated employees)
   var expiringSheet = ss.getSheetByName('Expiring Certs');
   if (expiringSheet && expiringSheet.getLastRow() > 1) {
+    // Build set of previous/terminated employee names to exclude
+    var previousEmployeeNames = {};
+
+    // Check Employee History for terminated employees
+    var employeeHistorySheet = ss.getSheetByName('Employee History');
+    if (employeeHistorySheet && employeeHistorySheet.getLastRow() > 2) {
+      var historyData = employeeHistorySheet.getRange(3, 1, employeeHistorySheet.getLastRow() - 2, 10).getValues();
+      for (var hi = 0; hi < historyData.length; hi++) {
+        var histEventType = (historyData[hi][2] || '').toString().trim().toLowerCase();
+        var histName = (historyData[hi][1] || '').toString().trim().toLowerCase();
+        if ((histEventType === 'terminated' || histEventType === 'previous employee') && histName) {
+          previousEmployeeNames[histName] = true;
+        }
+      }
+    }
+
+    // Also check Employees sheet for "Previous Employee" location
+    var employeesSheetCheck = ss.getSheetByName('Employees');
+    if (employeesSheetCheck && employeesSheetCheck.getLastRow() > 1) {
+      var empCheckData = employeesSheetCheck.getDataRange().getValues();
+      var empCheckHeaders = empCheckData[0];
+      var empCheckNameCol = -1;
+      var empCheckLocCol = -1;
+
+      for (var ech = 0; ech < empCheckHeaders.length; ech++) {
+        var echdr = String(empCheckHeaders[ech]).toLowerCase().trim();
+        if (echdr === 'name') empCheckNameCol = ech;
+        if (echdr === 'location') empCheckLocCol = ech;
+      }
+
+      if (empCheckNameCol !== -1 && empCheckLocCol !== -1) {
+        for (var eci = 1; eci < empCheckData.length; eci++) {
+          var ecName = (empCheckData[eci][empCheckNameCol] || '').toString().trim().toLowerCase();
+          var ecLoc = (empCheckData[eci][empCheckLocCol] || '').toString().trim().toLowerCase();
+          if (ecName && ecLoc === 'previous employee') {
+            previousEmployeeNames[ecName] = true;
+          }
+        }
+      }
+    }
+
     var expiringData = expiringSheet.getDataRange().getValues();
     for (var e = 1; e < expiringData.length; e++) {
       var eRow = expiringData[e];
@@ -380,6 +466,12 @@ function getScheduleTasks() {
       var expDate = eRow[1];
       var employee = eRow[2] || '';
       var location = eRow[3] || 'Helena';
+
+      // Skip if employee is a previous/terminated employee
+      if (employee && previousEmployeeNames[employee.toLowerCase()]) {
+        Logger.log('getScheduleTasks: Skipping cert for previous employee: ' + employee);
+        continue;
+      }
 
       if (itemNum && expDate) {
         var daysUntil = Math.ceil((new Date(expDate) - new Date()) / (1000 * 60 * 60 * 24));
@@ -502,6 +594,40 @@ function formatDateForInput(dateValue) {
 }
 
 /**
+ * Helper: Format time for HTML time input (HH:MM)
+ * Google Sheets stores times as Date objects - extract just the time portion
+ */
+function formatTimeForInput(timeValue) {
+  if (!timeValue) return '';
+
+  // If it's already a string in HH:MM format, return it
+  if (typeof timeValue === 'string') {
+    var match = timeValue.match(/^(\d{1,2}):(\d{2})/);
+    if (match) {
+      return String(match[1]).padStart(2, '0') + ':' + match[2];
+    }
+    return '';
+  }
+
+  // If it's a Date object (Google Sheets stores times as dates)
+  if (timeValue instanceof Date || (typeof timeValue === 'object' && timeValue.getHours)) {
+    var hours = String(timeValue.getHours()).padStart(2, '0');
+    var minutes = String(timeValue.getMinutes()).padStart(2, '0');
+    return hours + ':' + minutes;
+  }
+
+  // Try to parse as date
+  var date = new Date(timeValue);
+  if (!isNaN(date.getTime())) {
+    var hours = String(date.getHours()).padStart(2, '0');
+    var minutes = String(date.getMinutes()).padStart(2, '0');
+    return hours + ':' + minutes;
+  }
+
+  return '';
+}
+
+/**
  * Saves multiple schedule task date and time changes at once.
  * @param {Array} changes - Array of {index, task, oldDate, newDate, startTime, endTime} objects
  * @return {Object} Result with success status
@@ -551,27 +677,35 @@ function saveScheduleTaskDateChanges(changes) {
         }
         updatedCount++;
       }
-    } else if (task.source === 'Glove Swaps' || task.source === 'Sleeve Swaps') {
-      // Update To Do List sheet for swap tasks
+    } else if (task.source === 'Glove Swaps' || task.source === 'Sleeve Swaps' ||
+               task.source === 'Expiring Certs' || task.source === 'Reclaims' ||
+               task.source === 'To Do List' || task.source === 'Training Tracking') {
+      // Update To Do List sheet for tasks loaded from there
+      // These tasks all come from To Do List sheet regardless of original source type
       var todoSheet = ss.getSheetByName('To Do List');
       if (todoSheet && task.rowIndex) {
-        // Find scheduled date column in To Do List
-        var todoHeaders = todoSheet.getRange(1, 1, 1, todoSheet.getLastColumn()).getValues()[0];
+        // Headers are in row 13 (index 12) after calendar section
+        var todoHeaders = todoSheet.getRange(13, 1, 1, todoSheet.getLastColumn()).getValues()[0];
+        Logger.log('To Do List headers: ' + JSON.stringify(todoHeaders));
+
         for (var th = 0; th < todoHeaders.length; th++) {
           var thLower = String(todoHeaders[th]).toLowerCase();
           if (newDate && (thLower.indexOf('scheduled') !== -1 || thLower === 'date')) {
             todoSheet.getRange(task.rowIndex, th + 1).setValue(newDate);
+            Logger.log('Updated scheduled date at row ' + task.rowIndex + ', col ' + (th + 1) + ' to ' + newDate);
           }
           if (startTime !== undefined && thLower.indexOf('start') !== -1 && thLower.indexOf('time') !== -1) {
             todoSheet.getRange(task.rowIndex, th + 1).setValue(startTime);
+            Logger.log('Updated start time at row ' + task.rowIndex + ', col ' + (th + 1) + ' to ' + startTime);
           }
           if (endTime !== undefined && thLower.indexOf('end') !== -1 && thLower.indexOf('time') !== -1) {
             todoSheet.getRange(task.rowIndex, th + 1).setValue(endTime);
+            Logger.log('Updated end time at row ' + task.rowIndex + ', col ' + (th + 1) + ' to ' + endTime);
           }
         }
         updatedCount++;
       }
-    } else if (task.source === 'Training Tracking') {
+    } else if (task.source === 'Training Tracking Original') {
       // Update Training Tracking sheet
       var trainingSheet = ss.getSheetByName('Training Tracking');
       if (trainingSheet && task.rowIndex) {
@@ -597,7 +731,37 @@ function saveScheduleTaskDateChanges(changes) {
 }
 
 /**
+ * Wrapper function for adding a manual scheduled item from the To Do Schedule dialog.
+ * Called from ToDoSchedule.html when user clicks "Add Item" in the Add Manual Item modal.
+ * @param {Object} data - Data from the form with title, notes, scheduledDate, location, startTime, endTime, priority
+ * @return {Object} Result with success status
+ */
+function addManualScheduledItem(data) {
+  Logger.log('addManualScheduledItem: ' + JSON.stringify(data));
+
+  try {
+    // Map the form data to the task structure expected by addManualScheduleTask
+    var task = {
+      taskType: data.title || 'Manual Task',
+      notes: data.notes || '',
+      scheduledDate: data.scheduledDate || '',
+      location: data.location || '',
+      startTime: data.startTime || '',
+      endTime: data.endTime || '',
+      priority: data.priority || 'Medium',
+      employee: ''  // Manual items don't have an employee by default
+    };
+
+    return addManualScheduleTask(task);
+  } catch (e) {
+    Logger.log('Error in addManualScheduledItem: ' + e.toString());
+    return { success: false, error: e.toString() };
+  }
+}
+
+/**
  * Adds a manual schedule task to the Manual Tasks sheet.
+ * Uses unified column structure matching To Do List for consistency.
  * @param {Object} task - Task object with taskType, location, scheduledDate, startTime, endTime, priority, notes
  * @return {Object} Result with success status
  */
@@ -607,17 +771,33 @@ function addManualScheduleTask(task) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var manualSheet = ss.getSheetByName('Manual Tasks');
 
+  // Unified headers matching To Do List structure (simplified for manual tasks)
+  var standardHeaders = [
+    'Location',           // A - 0
+    'Priority',           // B - 1
+    'Task Type',          // C - 2
+    'Employee',           // D - 3
+    'Scheduled Date',     // E - 4
+    'Start Time',         // F - 5
+    'End Time',           // G - 6
+    'Status',             // H - 7
+    'Notes',              // I - 8
+    'Date Added'          // J - 9
+  ];
+
   // Create sheet if it doesn't exist with standard headers
   if (!manualSheet) {
     manualSheet = ss.insertSheet('Manual Tasks');
-    manualSheet.getRange(1, 1, 1, 14).setValues([[
-      'Location', 'Priority', 'Task Type', 'Scheduled Date', 'Start Time', 'End Time',
-      'Estimated Time', 'Start Location', 'End Location', 'Notes', 'Date Added', '', '', 'Status'
-    ]]);
-    manualSheet.getRange(1, 1, 1, 14).setFontWeight('bold').setBackground('#667eea').setFontColor('white');
+    manualSheet.getRange(1, 1, 1, standardHeaders.length).setValues([standardHeaders]);
+    manualSheet.getRange(1, 1, 1, standardHeaders.length)
+      .setFontWeight('bold')
+      .setBackground('#667eea')
+      .setFontColor('white');
+    manualSheet.setFrozenRows(1);
+    Logger.log('Created Manual Tasks sheet with unified headers');
   }
 
-  // Read existing headers to find column positions
+  // Read existing headers to find column positions (handles both old and new structures)
   var headers = manualSheet.getRange(1, 1, 1, manualSheet.getLastColumn()).getValues()[0];
   var colMap = {};
 
@@ -626,6 +806,7 @@ function addManualScheduleTask(task) {
     if (header === 'location') colMap.location = h;
     if (header === 'priority') colMap.priority = h;
     if (header === 'task' || header === 'task type') colMap.taskType = h;
+    if (header === 'employee') colMap.employee = h;
     if (header === 'scheduled date') colMap.scheduledDate = h;
     if (header === 'start time') colMap.startTime = h;
     if (header === 'end time') colMap.endTime = h;
@@ -646,6 +827,7 @@ function addManualScheduleTask(task) {
   if (colMap.location !== undefined) newRow[colMap.location] = task.location || '';
   if (colMap.priority !== undefined) newRow[colMap.priority] = task.priority || 'Medium';
   if (colMap.taskType !== undefined) newRow[colMap.taskType] = task.taskType || 'Manual Task';
+  if (colMap.employee !== undefined) newRow[colMap.employee] = task.employee || '';
   if (colMap.scheduledDate !== undefined) newRow[colMap.scheduledDate] = task.scheduledDate || '';
   if (colMap.startTime !== undefined) newRow[colMap.startTime] = task.startTime || '';
   if (colMap.endTime !== undefined) newRow[colMap.endTime] = task.endTime || '';
@@ -659,6 +841,115 @@ function addManualScheduleTask(task) {
   Logger.log('Added manual task row');
 
   return { success: true };
+}
+
+/**
+ * Migrates the Manual Tasks sheet to the new unified column structure.
+ * Call this once to update an existing sheet to the new format.
+ * Menu: Glove Manager → Utilities → Migrate Manual Tasks Sheet
+ */
+function migrateManualTasksSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var manualSheet = ss.getSheetByName('Manual Tasks');
+
+  if (!manualSheet) {
+    SpreadsheetApp.getUi().alert('Manual Tasks sheet not found. It will be created with the correct structure when you add your first task.');
+    return;
+  }
+
+  // Read existing data
+  var existingData = manualSheet.getDataRange().getValues();
+  var oldHeaders = existingData[0];
+
+  // Map old column positions
+  var oldColMap = {};
+  for (var h = 0; h < oldHeaders.length; h++) {
+    var header = String(oldHeaders[h]).toLowerCase().trim();
+    if (header === 'location') oldColMap.location = h;
+    if (header === 'priority') oldColMap.priority = h;
+    if (header === 'task' || header === 'task type') oldColMap.taskType = h;
+    if (header === 'employee') oldColMap.employee = h;
+    if (header === 'scheduled date') oldColMap.scheduledDate = h;
+    if (header === 'start time') oldColMap.startTime = h;
+    if (header === 'end time') oldColMap.endTime = h;
+    if (header === 'status') oldColMap.status = h;
+    if (header === 'notes') oldColMap.notes = h;
+    if (header === 'date added') oldColMap.dateAdded = h;
+  }
+
+  Logger.log('Old column map: ' + JSON.stringify(oldColMap));
+
+  // New unified headers
+  var newHeaders = [
+    'Location',           // A - 0
+    'Priority',           // B - 1
+    'Task Type',          // C - 2
+    'Employee',           // D - 3
+    'Scheduled Date',     // E - 4
+    'Start Time',         // F - 5
+    'End Time',           // G - 6
+    'Status',             // H - 7
+    'Notes',              // I - 8
+    'Date Added'          // J - 9
+  ];
+
+  // Convert existing data to new format
+  var newData = [newHeaders];
+
+  for (var i = 1; i < existingData.length; i++) {
+    var oldRow = existingData[i];
+
+    // Skip empty rows
+    var location = oldColMap.location !== undefined ? oldRow[oldColMap.location] : '';
+    var taskType = oldColMap.taskType !== undefined ? oldRow[oldColMap.taskType] : '';
+    if (!location && !taskType) continue;
+
+    var newRow = [
+      oldColMap.location !== undefined ? oldRow[oldColMap.location] : '',
+      oldColMap.priority !== undefined ? oldRow[oldColMap.priority] : 'Medium',
+      oldColMap.taskType !== undefined ? oldRow[oldColMap.taskType] : '',
+      oldColMap.employee !== undefined ? oldRow[oldColMap.employee] : '',
+      oldColMap.scheduledDate !== undefined ? oldRow[oldColMap.scheduledDate] : '',
+      oldColMap.startTime !== undefined ? oldRow[oldColMap.startTime] : '',
+      oldColMap.endTime !== undefined ? oldRow[oldColMap.endTime] : '',
+      oldColMap.status !== undefined ? oldRow[oldColMap.status] : 'Pending',
+      oldColMap.notes !== undefined ? oldRow[oldColMap.notes] : '',
+      oldColMap.dateAdded !== undefined ? oldRow[oldColMap.dateAdded] : ''
+    ];
+
+    newData.push(newRow);
+  }
+
+  // Clear and rewrite sheet
+  manualSheet.clear();
+  manualSheet.getRange(1, 1, newData.length, newHeaders.length).setValues(newData);
+
+  // Format headers
+  manualSheet.getRange(1, 1, 1, newHeaders.length)
+    .setFontWeight('bold')
+    .setBackground('#667eea')
+    .setFontColor('white');
+  manualSheet.setFrozenRows(1);
+
+  // Format date column
+  if (newData.length > 1) {
+    manualSheet.getRange(2, 5, newData.length - 1, 1).setNumberFormat('mm/dd/yyyy'); // Scheduled Date
+  }
+
+  // Set column widths
+  manualSheet.setColumnWidth(1, 120); // Location
+  manualSheet.setColumnWidth(2, 80);  // Priority
+  manualSheet.setColumnWidth(3, 180); // Task Type
+  manualSheet.setColumnWidth(4, 120); // Employee
+  manualSheet.setColumnWidth(5, 110); // Scheduled Date
+  manualSheet.setColumnWidth(6, 90);  // Start Time
+  manualSheet.setColumnWidth(7, 90);  // End Time
+  manualSheet.setColumnWidth(8, 80);  // Status
+  manualSheet.setColumnWidth(9, 200); // Notes
+  manualSheet.setColumnWidth(10, 130); // Date Added
+
+  SpreadsheetApp.getUi().alert('✅ Manual Tasks sheet migrated to new format!\n\nOld rows: ' + (existingData.length - 1) + '\nNew rows: ' + (newData.length - 1));
+  Logger.log('Migration complete: ' + (newData.length - 1) + ' tasks migrated');
 }
 
 /**
@@ -1329,6 +1620,114 @@ function getEmployeeNamesForMatching() {
 }
 
 /**
+ * Updates an employee's name on the Employees sheet and logs to Employee History.
+ * Called when user confirms a name correction during Excel import.
+ *
+ * @param {string} oldName - The old/incorrect name (what's in Excel)
+ * @param {string} newName - The correct name to update to (from Employees sheet match)
+ * @return {Object} Result with success status and message
+ */
+function updateEmployeeNameOnSheet(oldName, newName) {
+  try {
+    Logger.log('updateEmployeeNameOnSheet: Updating "' + oldName + '" to "' + newName + '"');
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+
+    if (!employeesSheet) {
+      return {
+        success: false,
+        message: 'Employees sheet not found'
+      };
+    }
+
+    var data = employeesSheet.getDataRange().getValues();
+    var nameCol = 0; // Name is always column A
+    var locationCol = -1;
+    var jobNumCol = -1;
+    var headers = data[0];
+
+    // Find column indices
+    for (var h = 0; h < headers.length; h++) {
+      var header = String(headers[h]).toLowerCase().trim();
+      if (header === 'location') locationCol = h;
+      if (header === 'job number') jobNumCol = h;
+    }
+
+    // Find the row with the matching name (case-insensitive)
+    var targetRow = -1;
+    var location = '';
+    var jobNumber = '';
+    var newNameLower = newName.toLowerCase().trim();
+
+    for (var i = 1; i < data.length; i++) {
+      var rowName = String(data[i][nameCol] || '').toLowerCase().trim();
+      if (rowName === newNameLower) {
+        targetRow = i + 1; // 1-based row number
+        location = locationCol !== -1 ? data[i][locationCol] : '';
+        jobNumber = jobNumCol !== -1 ? data[i][jobNumCol] : '';
+        break;
+      }
+    }
+
+    if (targetRow === -1) {
+      // The "newName" should be the one that already exists, but if not found,
+      // this means we're updating FROM an existing employee TO the Excel name
+      // Let's search for the oldName instead
+      var oldNameLower = oldName.toLowerCase().trim();
+      for (var j = 1; j < data.length; j++) {
+        var rowName2 = String(data[j][nameCol] || '').toLowerCase().trim();
+        if (rowName2 === oldNameLower) {
+          targetRow = j + 1;
+          location = locationCol !== -1 ? data[j][locationCol] : '';
+          jobNumber = jobNumCol !== -1 ? data[j][jobNumCol] : '';
+          break;
+        }
+      }
+
+      if (targetRow === -1) {
+        return {
+          success: false,
+          message: 'Employee not found on Employees sheet: "' + oldName + '" or "' + newName + '"'
+        };
+      }
+
+      // Update the name cell to the new name
+      employeesSheet.getRange(targetRow, nameCol + 1).setValue(newName);
+
+      // Log to Employee History
+      logNameCorrection(oldName, newName, location, jobNumber);
+
+      Logger.log('updateEmployeeNameOnSheet: Updated row ' + targetRow + ' from "' + oldName + '" to "' + newName + '"');
+
+      return {
+        success: true,
+        message: 'Updated employee name from "' + oldName + '" to "' + newName + '"',
+        updatedRow: targetRow
+      };
+    }
+
+    // If we found by newName, that means newName already exists - no update needed
+    // Just log that we're associating oldName (Excel) with newName (Employees sheet)
+    Logger.log('updateEmployeeNameOnSheet: Employee "' + newName + '" already exists at row ' + targetRow + ', no update needed');
+
+    return {
+      success: true,
+      message: 'Employee "' + newName + '" found (Excel had: "' + oldName + '")',
+      matchedRow: targetRow,
+      noUpdateNeeded: true
+    };
+
+  } catch (e) {
+    Logger.log('updateEmployeeNameOnSheet ERROR: ' + e.toString());
+    return {
+      success: false,
+      message: 'Error updating employee: ' + e.toString()
+    };
+  }
+}
+
+/**
  * Parses Excel certification data with multiple rows per employee (one per cert type).
  * @param {string} pastedText - Tab-separated Excel data
  * @param {Object} columnMapping - Mapping of column letters to cert types
@@ -1438,7 +1837,8 @@ function parseExcelCertDataMultiRow(pastedText, columnMapping) {
       confidence: match ? match.confidence : 0,
       certCount: certCount,
       isPreviousEmployee: match ? match.isPreviousEmployee : false,
-      suggestions: match ? match.suggestions : []
+      suggestions: match ? match.suggestions : [],
+      matchType: match ? match.matchType : null
     });
   }
 
@@ -1482,7 +1882,8 @@ function fuzzyMatchEmployeeName(convertedName, employeeList) {
         employeeName: emp.name,
         confidence: 100,
         employeeData: emp,
-        suggestions: []
+        suggestions: [],
+        matchType: 'exact'
       };
     }
 
@@ -1494,7 +1895,8 @@ function fuzzyMatchEmployeeName(convertedName, employeeList) {
         matches.push({
           employeeName: emp.name,
           confidence: 98,
-          employeeData: emp
+          employeeData: emp,
+          matchType: 'reversed'
         });
         continue;
       }
@@ -1505,21 +1907,48 @@ function fuzzyMatchEmployeeName(convertedName, employeeList) {
       matches.push({
         employeeName: emp.name,
         confidence: 90,
-        employeeData: emp
+        employeeData: emp,
+        matchType: 'substring'
       });
       continue;
     }
 
-    // Levenshtein distance
+    // Calculate Levenshtein similarity
     var distance = levenshteinDistance(normalized, empNormalized);
     var maxLen = Math.max(normalized.length, empNormalized.length);
-    var similarity = (1 - distance / maxLen) * 100;
+    var levenshteinSimilarity = (1 - distance / maxLen) * 100;
 
-    if (similarity >= 70) {
+    // Calculate Metaphone (phonetic) similarity
+    var phoneticSimilarity = metaphoneNameSimilarity(normalized, empNormalized);
+
+    // Combine scores: use weighted average if both have matches
+    // Phonetic matching helps catch spelling variants like "Massen" vs "Masen"
+    var combinedScore = levenshteinSimilarity;
+    var matchType = 'levenshtein';
+
+    if (phoneticSimilarity > 0) {
+      // If phonetic match is strong, boost the score
+      if (phoneticSimilarity >= 90) {
+        // Strong phonetic match - boost significantly
+        combinedScore = Math.max(levenshteinSimilarity, phoneticSimilarity * 0.95);
+        matchType = 'phonetic';
+      } else if (phoneticSimilarity >= 75) {
+        // Moderate phonetic match - use weighted average
+        combinedScore = (levenshteinSimilarity * 0.6) + (phoneticSimilarity * 0.4);
+        matchType = 'combined';
+      }
+      // For weak phonetic matches, stick with Levenshtein
+    }
+
+    // Lower threshold to 60% to catch more potential matches for user review
+    if (combinedScore >= 60) {
       matches.push({
         employeeName: emp.name,
-        confidence: Math.round(similarity),
-        employeeData: emp
+        confidence: Math.round(combinedScore),
+        employeeData: emp,
+        matchType: matchType,
+        phoneticScore: Math.round(phoneticSimilarity),
+        levenshteinScore: Math.round(levenshteinSimilarity)
       });
     }
   }
@@ -1532,12 +1961,15 @@ function fuzzyMatchEmployeeName(convertedName, employeeList) {
   }
 
   var topMatch = matches[0];
-  var suggestions = matches.slice(0, 3).map(function(m) {
+  var suggestions = matches.slice(0, 5).map(function(m) {
     return {
       name: m.employeeName,
       confidence: m.confidence,
       isPreviousEmployee: m.employeeData.isPreviousEmployee || false,
-      lastDay: m.employeeData.lastDay || null
+      lastDay: m.employeeData.lastDay || null,
+      matchType: m.matchType,
+      phoneticScore: m.phoneticScore,
+      levenshteinScore: m.levenshteinScore
     };
   });
 
@@ -1546,7 +1978,8 @@ function fuzzyMatchEmployeeName(convertedName, employeeList) {
     confidence: topMatch.confidence,
     employeeData: topMatch.employeeData,
     isPreviousEmployee: topMatch.employeeData.isPreviousEmployee || false,
-    suggestions: suggestions
+    suggestions: suggestions,
+    matchType: topMatch.matchType
   };
 }
 
@@ -1582,6 +2015,441 @@ function levenshteinDistance(str1, str2) {
   }
 
   return matrix[len1][len2];
+}
+
+/**
+ * Double Metaphone algorithm for phonetic matching.
+ * Returns primary and secondary phonetic codes for a string.
+ * Based on Lawrence Philips' Double Metaphone algorithm.
+ * @param {string} str - String to encode
+ * @return {Object} Object with primary and secondary codes
+ */
+function doubleMetaphone(str) {
+  if (!str || typeof str !== 'string') {
+    return { primary: '', secondary: '' };
+  }
+
+  var primary = '';
+  var secondary = '';
+  var current = 0;
+  var length = str.length;
+  var last = length - 1;
+  var original = (str.toUpperCase() + '     ').split('');
+
+  // Helper functions
+  function isVowel(c) {
+    return 'AEIOU'.indexOf(c) !== -1;
+  }
+
+  function slavoGermanic() {
+    return str.indexOf('W') !== -1 || str.indexOf('K') !== -1 ||
+           str.indexOf('CZ') !== -1 || str.indexOf('WITZ') !== -1;
+  }
+
+  function charAt(pos) {
+    return original[pos] || '';
+  }
+
+  function stringAt(start, len, list) {
+    if (start < 0) return false;
+    var target = original.slice(start, start + len).join('');
+    return list.indexOf(target) !== -1;
+  }
+
+  // Skip initial silent letters
+  if (stringAt(0, 2, ['GN', 'KN', 'PN', 'WR', 'PS'])) {
+    current++;
+  }
+
+  // Initial X is pronounced Z
+  if (charAt(0) === 'X') {
+    primary += 'S';
+    secondary += 'S';
+    current++;
+  }
+
+  while (current < length) {
+    var c = charAt(current);
+
+    switch (c) {
+      case 'A':
+      case 'E':
+      case 'I':
+      case 'O':
+      case 'U':
+      case 'Y':
+        if (current === 0) {
+          primary += 'A';
+          secondary += 'A';
+        }
+        current++;
+        break;
+
+      case 'B':
+        primary += 'P';
+        secondary += 'P';
+        current += (charAt(current + 1) === 'B') ? 2 : 1;
+        break;
+
+      case 'C':
+        if (stringAt(current, 2, ['CH'])) {
+          primary += 'X';
+          secondary += 'X';
+          current += 2;
+        } else if (stringAt(current, 2, ['CI', 'CE', 'CY'])) {
+          primary += 'S';
+          secondary += 'S';
+          current += 2;
+        } else {
+          primary += 'K';
+          secondary += 'K';
+          current += (stringAt(current, 2, ['CK', 'CQ', 'CZ'])) ? 2 : 1;
+        }
+        break;
+
+      case 'D':
+        if (stringAt(current, 2, ['DG'])) {
+          if (stringAt(current + 2, 1, ['I', 'E', 'Y'])) {
+            primary += 'J';
+            secondary += 'J';
+            current += 3;
+          } else {
+            primary += 'TK';
+            secondary += 'TK';
+            current += 2;
+          }
+        } else {
+          primary += 'T';
+          secondary += 'T';
+          current += (stringAt(current, 2, ['DT', 'DD'])) ? 2 : 1;
+        }
+        break;
+
+      case 'F':
+        primary += 'F';
+        secondary += 'F';
+        current += (charAt(current + 1) === 'F') ? 2 : 1;
+        break;
+
+      case 'G':
+        if (charAt(current + 1) === 'H') {
+          if (current > 0 && !isVowel(charAt(current - 1))) {
+            current += 2;
+            break;
+          }
+          if (current === 0) {
+            if (charAt(current + 2) === 'I') {
+              primary += 'J';
+              secondary += 'J';
+            } else {
+              primary += 'K';
+              secondary += 'K';
+            }
+            current += 2;
+            break;
+          }
+          primary += 'K';
+          secondary += 'K';
+          current += 2;
+        } else if (charAt(current + 1) === 'N') {
+          if (current === 1 && isVowel(charAt(0)) && !slavoGermanic()) {
+            primary += 'KN';
+            secondary += 'N';
+          } else if (!stringAt(current + 2, 2, ['EY']) && charAt(current + 1) !== 'Y' && !slavoGermanic()) {
+            primary += 'N';
+            secondary += 'KN';
+          } else {
+            primary += 'KN';
+            secondary += 'KN';
+          }
+          current += 2;
+        } else if (stringAt(current + 1, 2, ['LI']) && !slavoGermanic()) {
+          primary += 'KL';
+          secondary += 'L';
+          current += 2;
+        } else if (current === 0 && (charAt(current + 1) === 'Y' || stringAt(current + 1, 2, ['ES', 'EP', 'EB', 'EL', 'EY', 'IB', 'IL', 'IN', 'IE', 'EI', 'ER']))) {
+          primary += 'K';
+          secondary += 'J';
+          current += 2;
+        } else if ((stringAt(current + 1, 2, ['ER']) || charAt(current + 1) === 'Y') && !stringAt(0, 6, ['DANGER', 'RANGER', 'MANGER']) && !stringAt(current - 1, 1, ['E', 'I']) && !stringAt(current - 1, 3, ['RGY', 'OGY'])) {
+          primary += 'K';
+          secondary += 'J';
+          current += 2;
+        } else if (stringAt(current + 1, 1, ['E', 'I', 'Y']) || stringAt(current - 1, 4, ['AGGI', 'OGGI'])) {
+          if (stringAt(0, 4, ['VAN ', 'VON ']) || stringAt(0, 3, ['SCH']) || stringAt(current + 1, 2, ['ET'])) {
+            primary += 'K';
+            secondary += 'K';
+          } else if (stringAt(current + 1, 4, ['IER '])) {
+            primary += 'J';
+            secondary += 'J';
+          } else {
+            primary += 'J';
+            secondary += 'K';
+          }
+          current += 2;
+        } else {
+          primary += 'K';
+          secondary += 'K';
+          current += (charAt(current + 1) === 'G') ? 2 : 1;
+        }
+        break;
+
+      case 'H':
+        if ((current === 0 || isVowel(charAt(current - 1))) && isVowel(charAt(current + 1))) {
+          primary += 'H';
+          secondary += 'H';
+          current += 2;
+        } else {
+          current++;
+        }
+        break;
+
+      case 'J':
+        if (stringAt(current, 4, ['JOSE']) || stringAt(0, 4, ['SAN '])) {
+          primary += 'H';
+          secondary += 'H';
+        } else {
+          primary += 'J';
+          secondary += 'J';
+        }
+        current += (charAt(current + 1) === 'J') ? 2 : 1;
+        break;
+
+      case 'K':
+        primary += 'K';
+        secondary += 'K';
+        current += (charAt(current + 1) === 'K') ? 2 : 1;
+        break;
+
+      case 'L':
+        primary += 'L';
+        secondary += 'L';
+        current += (charAt(current + 1) === 'L') ? 2 : 1;
+        break;
+
+      case 'M':
+        primary += 'M';
+        secondary += 'M';
+        if (stringAt(current - 1, 3, ['UMB']) && (current + 1 === last || stringAt(current + 2, 2, ['ER']))) {
+          current += 2;
+        } else {
+          current += (charAt(current + 1) === 'M') ? 2 : 1;
+        }
+        break;
+
+      case 'N':
+        primary += 'N';
+        secondary += 'N';
+        current += (charAt(current + 1) === 'N') ? 2 : 1;
+        break;
+
+      case 'P':
+        if (charAt(current + 1) === 'H') {
+          primary += 'F';
+          secondary += 'F';
+          current += 2;
+        } else {
+          primary += 'P';
+          secondary += 'P';
+          current += (stringAt(current + 1, 1, ['P', 'B'])) ? 2 : 1;
+        }
+        break;
+
+      case 'Q':
+        primary += 'K';
+        secondary += 'K';
+        current += (charAt(current + 1) === 'Q') ? 2 : 1;
+        break;
+
+      case 'R':
+        primary += 'R';
+        secondary += 'R';
+        current += (charAt(current + 1) === 'R') ? 2 : 1;
+        break;
+
+      case 'S':
+        if (stringAt(current, 2, ['SH'])) {
+          primary += 'X';
+          secondary += 'X';
+          current += 2;
+        } else if (stringAt(current, 3, ['SIO', 'SIA'])) {
+          primary += 'S';
+          secondary += 'X';
+          current += 3;
+        } else if (stringAt(current, 2, ['SC'])) {
+          if (charAt(current + 2) === 'H') {
+            primary += 'SK';
+            secondary += 'SK';
+            current += 3;
+          } else if (stringAt(current + 2, 1, ['I', 'E', 'Y'])) {
+            primary += 'S';
+            secondary += 'S';
+            current += 3;
+          } else {
+            primary += 'SK';
+            secondary += 'SK';
+            current += 3;
+          }
+        } else {
+          primary += 'S';
+          secondary += 'S';
+          current += (stringAt(current + 1, 1, ['S', 'Z'])) ? 2 : 1;
+        }
+        break;
+
+      case 'T':
+        if (stringAt(current, 4, ['TION'])) {
+          primary += 'X';
+          secondary += 'X';
+          current += 3;
+        } else if (stringAt(current, 3, ['TIA', 'TCH'])) {
+          primary += 'X';
+          secondary += 'X';
+          current += 3;
+        } else if (stringAt(current, 2, ['TH'])) {
+          primary += '0';  // theta
+          secondary += 'T';
+          current += 2;
+        } else {
+          primary += 'T';
+          secondary += 'T';
+          current += (stringAt(current + 1, 1, ['T', 'D'])) ? 2 : 1;
+        }
+        break;
+
+      case 'V':
+        primary += 'F';
+        secondary += 'F';
+        current += (charAt(current + 1) === 'V') ? 2 : 1;
+        break;
+
+      case 'W':
+        if (charAt(current + 1) === 'R') {
+          primary += 'R';
+          secondary += 'R';
+          current += 2;
+        } else if (current === 0 && (isVowel(charAt(current + 1)) || charAt(current + 1) === 'H')) {
+          if (isVowel(charAt(current + 1))) {
+            primary += 'A';
+            secondary += 'F';
+          } else {
+            primary += 'A';
+            secondary += 'A';
+          }
+          current++;
+        } else if ((current === last && isVowel(charAt(current - 1))) || stringAt(current - 1, 5, ['EWSKI', 'EWSKY', 'OWSKI', 'OWSKY']) || stringAt(0, 3, ['SCH'])) {
+          secondary += 'F';
+          current++;
+        } else if (stringAt(current, 4, ['WICZ', 'WITZ'])) {
+          primary += 'TS';
+          secondary += 'FX';
+          current += 4;
+        } else {
+          current++;
+        }
+        break;
+
+      case 'X':
+        if (!((current === last) && (stringAt(current - 3, 3, ['IAU', 'EAU']) || stringAt(current - 2, 2, ['AU', 'OU'])))) {
+          primary += 'KS';
+          secondary += 'KS';
+        }
+        current += (stringAt(current + 1, 1, ['C', 'X'])) ? 2 : 1;
+        break;
+
+      case 'Z':
+        if (charAt(current + 1) === 'H') {
+          primary += 'J';
+          secondary += 'J';
+          current += 2;
+        } else {
+          primary += 'S';
+          secondary += 'S';
+          current += (charAt(current + 1) === 'Z') ? 2 : 1;
+        }
+        break;
+
+      default:
+        current++;
+    }
+  }
+
+  return {
+    primary: primary.substring(0, 4),
+    secondary: secondary.substring(0, 4)
+  };
+}
+
+/**
+ * Compares two strings using Double Metaphone and returns similarity score.
+ * @param {string} str1 - First string
+ * @param {string} str2 - Second string
+ * @return {number} Similarity score (0-100)
+ */
+function metaphoneSimilarity(str1, str2) {
+  if (!str1 || !str2) return 0;
+
+  var m1 = doubleMetaphone(str1);
+  var m2 = doubleMetaphone(str2);
+
+  // Check all combinations of primary/secondary codes
+  if (m1.primary === m2.primary && m1.primary !== '') return 100;
+  if (m1.primary === m2.secondary && m1.primary !== '') return 95;
+  if (m1.secondary === m2.primary && m1.secondary !== '') return 95;
+  if (m1.secondary === m2.secondary && m1.secondary !== '') return 90;
+
+  // Partial match - check if one code starts with the other
+  if (m1.primary.length > 0 && m2.primary.length > 0) {
+    if (m1.primary.indexOf(m2.primary) === 0 || m2.primary.indexOf(m1.primary) === 0) {
+      return 75;
+    }
+  }
+
+  return 0;
+}
+
+/**
+ * Compares two full names using Metaphone on each part.
+ * @param {string} name1 - First full name
+ * @param {string} name2 - Second full name
+ * @return {number} Similarity score (0-100)
+ */
+function metaphoneNameSimilarity(name1, name2) {
+  if (!name1 || !name2) return 0;
+
+  var parts1 = name1.toLowerCase().trim().split(/\s+/);
+  var parts2 = name2.toLowerCase().trim().split(/\s+/);
+
+  // Compare each part of the name
+  var totalScore = 0;
+  var comparisons = 0;
+
+  // Compare first names
+  if (parts1[0] && parts2[0]) {
+    totalScore += metaphoneSimilarity(parts1[0], parts2[0]);
+    comparisons++;
+  }
+
+  // Compare last names (assume last element)
+  if (parts1.length > 1 && parts2.length > 1) {
+    var last1 = parts1[parts1.length - 1];
+    var last2 = parts2[parts2.length - 1];
+    totalScore += metaphoneSimilarity(last1, last2);
+    comparisons++;
+  }
+
+  // Check for reversed names (first/last swapped)
+  if (parts1.length === 2 && parts2.length === 2) {
+    var reversedScore = 0;
+    reversedScore += metaphoneSimilarity(parts1[0], parts2[1]);
+    reversedScore += metaphoneSimilarity(parts1[1], parts2[0]);
+    var reversedAvg = reversedScore / 2;
+    if (reversedAvg > totalScore / comparisons) {
+      return reversedAvg * 0.95; // Slight penalty for reversed name
+    }
+  }
+
+  return comparisons > 0 ? totalScore / comparisons : 0;
 }
 
 /**
@@ -1630,6 +2498,9 @@ function processExpiringCertsImportMultiRow(parsedData, selectedCertTypes) {
       ];
       employeesSheet.appendRow(newRow);
       Logger.log('Added new employee: ' + newEmp.name);
+
+      // Log to Employee History
+      logNewEmployeeFromImport(newEmp);
     }
   }
 
@@ -2853,6 +3724,7 @@ function onOpen() {
       .addItem('📤 Archive Previous Employees', 'archivePreviousEmployees')
       .addItem('🔄 Update Employee History Headers', 'updateEmployeeHistoryHeaders')
       .addItem('🧹 Clean Up Duplicate History Entries', 'cleanupDuplicateEmployeeHistoryEntries')
+      .addItem('📱 Format Phone Numbers', 'formatEmployeePhoneNumbers')
       .addSeparator()
       .addItem('📦 Reset Known Item Numbers', 'resetKnownItemNumbers')
       .addItem('🔄 Sync New Items Log', 'syncNewItemsLogWithInventory')
