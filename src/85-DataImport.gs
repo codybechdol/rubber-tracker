@@ -24,6 +24,7 @@ function showCrewImportDialog() {
 /**
  * Applies crew changes to the Employees sheet.
  * Called from CrewImport.html when user confirms changes.
+ * Updates: Location, Job Number, and Job Classification (column N)
  *
  * @param {Array} changes - Array of change objects with employee info and new values
  * @return {Object} Result with success message
@@ -46,15 +47,23 @@ function applyCrewChanges(changes) {
   var nameCol = 0;
   var locationCol = -1;
   var jobNumCol = -1;
+  var jobClassificationCol = -1;
 
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
     if (header === 'location') locationCol = h;
     if (header === 'job number') jobNumCol = h;
+    if (header === 'job classification') jobClassificationCol = h;
   }
 
   if (locationCol === -1 || jobNumCol === -1) {
     return { success: false, message: 'Could not find Location or Job Number columns in Employees sheet' };
+  }
+
+  // If Job Classification column doesn't exist, it's column N (index 13)
+  if (jobClassificationCol === -1) {
+    jobClassificationCol = 13; // Column N = index 13 (0-based)
+    Logger.log('Job Classification column not found by header, using column N (index 13)');
   }
 
   var updatedCount = 0;
@@ -90,6 +99,7 @@ function applyCrewChanges(changes) {
 
       var locationChanged = false;
       var jobChanged = false;
+      var classificationChanged = false;
 
       // Update Location
       if (change.newLocation && change.newLocation !== change.oldLocation) {
@@ -97,23 +107,34 @@ function applyCrewChanges(changes) {
         locationChanged = true;
       }
 
-      // Update Job Number
+      // Update Job Number (with position, e.g., 013-26.1)
       if (change.newJobNumber && change.newJobNumber !== change.oldJobNumber) {
         employeesSheet.getRange(rowIndex, jobNumCol + 1).setValue(change.newJobNumber);
         jobChanged = true;
       }
 
-      if (locationChanged || jobChanged) {
+      // Update Job Classification (column N)
+      if (change.newClassification && change.newClassification !== change.oldClassification) {
+        employeesSheet.getRange(rowIndex, jobClassificationCol + 1).setValue(change.newClassification);
+        classificationChanged = true;
+      }
+
+      if (locationChanged || jobChanged || classificationChanged) {
         updatedCount++;
 
         // Log to Employee History
         if (historySheet) {
-          var eventType = locationChanged && jobChanged ? 'Multiple Changes' :
-                          (locationChanged ? 'Location Change' : 'Job Number Change');
+          var changesArr = [];
+          if (locationChanged) changesArr.push('Location');
+          if (jobChanged) changesArr.push('Job Number');
+          if (classificationChanged) changesArr.push('Classification');
+
+          var eventType = changesArr.length > 1 ? 'Multiple Changes' : changesArr[0] + ' Change';
 
           var notes = 'Crew Makeup Import: ';
           if (locationChanged) notes += 'Location: ' + (change.oldLocation || 'None') + ' → ' + change.newLocation + '. ';
-          if (jobChanged) notes += 'Job #: ' + (change.oldJobNumber || 'None') + ' → ' + change.newJobNumber + '.';
+          if (jobChanged) notes += 'Job #: ' + (change.oldJobNumber || 'None') + ' → ' + change.newJobNumber + '. ';
+          if (classificationChanged) notes += 'Role: ' + (change.oldClassification || 'None') + ' → ' + change.newClassification + '.';
 
           var historyRow = [
             todayStr,                    // Date
@@ -138,7 +159,8 @@ function applyCrewChanges(changes) {
 
         Logger.log('Updated employee: ' + change.employeeName +
                    ' | Location: ' + (locationChanged ? change.oldLocation + ' → ' + change.newLocation : 'unchanged') +
-                   ' | Job #: ' + (jobChanged ? change.oldJobNumber + ' → ' + change.newJobNumber : 'unchanged'));
+                   ' | Job #: ' + (jobChanged ? change.oldJobNumber + ' → ' + change.newJobNumber : 'unchanged') +
+                   ' | Classification: ' + (classificationChanged ? change.oldClassification + ' → ' + change.newClassification : 'unchanged'));
       }
 
     } catch (e) {

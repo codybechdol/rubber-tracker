@@ -1590,6 +1590,7 @@ function getEmployeeNamesForMatching() {
   var classCol = -1;
   var gloveSizeCol = -1;
   var sleeveSizeCol = -1;
+  var jobClassificationCol = -1;
 
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
@@ -1598,6 +1599,7 @@ function getEmployeeNamesForMatching() {
     if (header === 'class') classCol = h;
     if (header === 'glove size') gloveSizeCol = h;
     if (header === 'sleeve size') sleeveSizeCol = h;
+    if (header === 'job classification') jobClassificationCol = h;
   }
 
   var employees = [];
@@ -1606,11 +1608,12 @@ function getEmployeeNamesForMatching() {
     if (row[nameCol]) {
       employees.push({
         name: String(row[nameCol]),
-        location: locationCol !== -1 ? row[locationCol] : '',
-        jobNum: jobNumCol !== -1 ? row[jobNumCol] : '',
+        location: locationCol !== -1 ? String(row[locationCol] || '') : '',
+        jobNum: jobNumCol !== -1 ? String(row[jobNumCol] || '') : '',
         class: classCol !== -1 ? row[classCol] : '',
         gloveSize: gloveSizeCol !== -1 ? row[gloveSizeCol] : '',
         sleeveSize: sleeveSizeCol !== -1 ? row[sleeveSizeCol] : '',
+        jobClassification: jobClassificationCol !== -1 ? String(row[jobClassificationCol] || '') : '',
         rowIndex: i + 1
       });
     }

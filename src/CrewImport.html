@@ -15,29 +15,17 @@
     .config-section { padding: 20px; background: white; border-radius: 8px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
     .config-section h3 { color: #202124; font-size: 16px; margin-bottom: 16px; border-bottom: 1px solid #e0e0e0; padding-bottom: 8px; }
     textarea { font-family: 'Courier New', monospace; font-size: 11px; }
-    .preview-table { font-size: 13px; }
-    .match-exact { background-color: #e6f4ea; }
-    .match-phonetic { background-color: #e8f0fe; }
-    .match-fuzzy { background-color: #fef7e0; }
-    .match-none { background-color: #fce8e6; }
+    .preview-table { font-size: 12px; }
+    .preview-table th { font-size: 11px; background: #f8f9fa; }
     .change-row { background-color: #fff3cd; }
     .no-change-row { background-color: #f8f9fa; color: #6c757d; }
-    .summary-card { background: #e8f0fe; border-left: 4px solid #1a73e8; padding: 16px; margin-bottom: 16px; }
-    .crew-card { border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 12px; overflow: hidden; }
-    .crew-header { background: #1a73e8; color: white; padding: 10px 15px; font-weight: 500; }
-    .crew-header.inactive { background: #6c757d; }
-    .crew-body { padding: 10px 15px; }
-    .employee-row { padding: 6px 0; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
-    .employee-row:last-child { border-bottom: none; }
-    .employee-name { font-weight: 500; }
-    .employee-role { color: #5f6368; font-size: 12px; }
-    .employee-status { font-size: 11px; padding: 2px 8px; border-radius: 12px; }
-    .status-match { background: #e6f4ea; color: #137333; }
-    .status-new { background: #fef7e0; color: #b06000; }
-    .status-changed { background: #e8f0fe; color: #1967d2; }
-    .location-map { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-    .location-map-item { display: flex; align-items: center; gap: 8px; padding: 4px 8px; background: #f8f9fa; border-radius: 4px; font-size: 12px; }
-    .loading { text-align: center; padding: 40px; }
+    .summary-card { background: #e8f0fe; border-left: 4px solid #1a73e8; padding: 16px; margin-bottom: 16px; border-radius: 8px; }
+    .location-map { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; max-height: 200px; overflow-y: auto; }
+    .location-map-item { display: flex; align-items: center; gap: 6px; padding: 3px 6px; background: #f8f9fa; border-radius: 4px; font-size: 11px; }
+    .unknown-location { background: #fce8e6; border: 1px solid #ea4335; padding: 12px; border-radius: 8px; margin-bottom: 12px; }
+    .badge-role { font-size: 10px; }
+    .text-changed { color: #1a73e8; font-weight: 500; }
+    .text-unchanged { color: #9e9e9e; }
   </style>
 </head>
 <body>
@@ -47,7 +35,7 @@
       <button class="btn btn-success btn-sm me-2" id="btnApplyChanges" onclick="applyChanges()" disabled>
         <i class="bi bi-check-lg"></i> Apply Changes
       </button>
-      <button class="btn btn-primary btn-sm" onclick="google.script.host.close()">
+      <button class="btn btn-secondary btn-sm" onclick="google.script.host.close()">
         <i class="bi bi-x-lg"></i> Close
       </button>
     </div>
@@ -57,31 +45,44 @@
   <div class="config-section">
     <h3><i class="bi bi-info-circle"></i> Instructions</h3>
     <p class="text-muted small mb-2">Paste the crew makeup data from the superintendent's Excel spreadsheet.</p>
-    <p class="text-muted small mb-0">The system will automatically:</p>
+    <p class="text-muted small mb-0">The system will update:</p>
     <ul class="text-muted small mb-0">
-      <li>Parse job numbers and locations from headers (e.g., "Belgrade Dock 013-26")</li>
-      <li>Match employee names using phonetic matching</li>
-      <li>Show you proposed changes before applying</li>
-      <li>Update Location and Job Number on the Employees sheet</li>
+      <li><strong>Location</strong> - Mapped from job header (Belgrade Dock → Bozeman)</li>
+      <li><strong>Job Number</strong> - Base job number (e.g., 013-26) + individual position (.1, .2, etc.)</li>
+      <li><strong>Job Classification</strong> - Based on role (Foreman, JL, Apprentice, GTO, etc.)</li>
     </ul>
+    <div class="alert alert-info small mt-3 mb-0">
+      <i class="bi bi-lightbulb"></i> <strong>Note:</strong> Gray/future assignments in the spreadsheet will be ignored. Only active (colored) crews are imported.
+    </div>
   </div>
 
   <!-- Location Mapping -->
   <div class="config-section">
-    <h3><i class="bi bi-geo-alt"></i> Location Mapping</h3>
-    <p class="text-muted small mb-3">Map spreadsheet location names to your Google Sheet locations.</p>
-    <div class="location-map" id="locationMapContainer">
-      <!-- Will be populated by JavaScript -->
-    </div>
+    <h3><i class="bi bi-geo-alt"></i> Location Mapping <span class="badge bg-secondary" id="mappingCount">0</span></h3>
+    <p class="text-muted small mb-2">Spreadsheet locations are mapped to your standard location names.</p>
+    <div class="location-map" id="locationMapContainer"></div>
     <button class="btn btn-outline-secondary btn-sm mt-3" onclick="addLocationMapping()">
       <i class="bi bi-plus"></i> Add Mapping
     </button>
   </div>
 
+  <!-- Unknown Locations Section -->
+  <div id="unknownLocationsSection" class="config-section" style="display: none;">
+    <h3><i class="bi bi-exclamation-triangle text-warning"></i> Unknown Locations</h3>
+    <p class="text-muted small mb-3">These locations weren't recognized. Please provide the correct mapping.</p>
+    <div id="unknownLocationsContainer"></div>
+  </div>
+
   <!-- Paste Area -->
   <div class="config-section">
     <h3><i class="bi bi-clipboard"></i> Paste Crew Data</h3>
-    <textarea class="form-control" id="crewData" rows="15" placeholder="Paste the crew makeup spreadsheet data here (Ctrl+V)..."></textarea>
+    <textarea class="form-control" id="crewData" rows="12" placeholder="Copy the crew makeup from Excel and paste here (Ctrl+V)...
+
+Example format:
+Belgrade Dock  013-26  5 8's M-F    Belgrade Dock  029-26  5 8's M-F
+Darrell Swann F                      Waco Worts F
+Dustin Graham JL                     Jimmy Bailey JL
+..."></textarea>
     <div class="mt-3">
       <button class="btn btn-primary" onclick="parseCrewData()">
         <i class="bi bi-search"></i> Parse & Preview Changes
@@ -93,27 +94,63 @@
   <div id="previewSection" style="display: none;">
     <!-- Summary Statistics -->
     <div class="summary-card">
-      <h4 class="mb-3"><i class="bi bi-graph-up"></i> 📊 Import Summary</h4>
-      <div id="summaryStats">
-        <!-- Will be populated by JavaScript -->
+      <div class="row">
+        <div class="col-md-2 text-center"><strong id="statCrews">0</strong><br><small>Crews</small></div>
+        <div class="col-md-2 text-center"><strong id="statEmployees">0</strong><br><small>Employees</small></div>
+        <div class="col-md-2 text-center"><strong id="statMatched">0</strong><br><small>Matched</small></div>
+        <div class="col-md-2 text-center"><strong id="statChanges" class="text-primary">0</strong><br><small>Changes</small></div>
+        <div class="col-md-2 text-center"><strong id="statUnmatched" class="text-danger">0</strong><br><small>Unmatched</small></div>
+        <div class="col-md-2 text-center"><strong id="statSkipped" class="text-muted">0</strong><br><small>No Change</small></div>
       </div>
     </div>
 
     <!-- Changes Preview -->
     <div class="config-section">
-      <h3><i class="bi bi-pencil-square"></i> Proposed Changes</h3>
-      <p class="text-muted small mb-3">Review the changes below. Only checked items will be applied.</p>
-      <div id="changesContainer">
-        <!-- Will be populated by JavaScript -->
+      <h3><i class="bi bi-pencil-square"></i> Proposed Changes <button class="btn btn-outline-primary btn-sm float-end" onclick="toggleSelectAll()"><i class="bi bi-check-all"></i> Toggle All</button></h3>
+      <div class="table-responsive">
+        <table class="table table-sm preview-table" id="changesTable">
+          <thead>
+            <tr>
+              <th style="width: 30px;"><input type="checkbox" id="selectAll" checked onchange="toggleAllChanges(this)"></th>
+              <th>Employee</th>
+              <th>Role/Classification</th>
+              <th>Location</th>
+              <th>Job Number</th>
+            </tr>
+          </thead>
+          <tbody id="changesTableBody"></tbody>
+        </table>
       </div>
     </div>
 
     <!-- Unmatched Employees -->
     <div id="unmatchedSection" class="config-section" style="display: none;">
-      <h3><i class="bi bi-person-x"></i> Unmatched Employees</h3>
-      <p class="text-muted small mb-3">These employees from the spreadsheet couldn't be matched to your Employees sheet.</p>
-      <div id="unmatchedContainer">
-        <!-- Will be populated by JavaScript -->
+      <h3><i class="bi bi-person-x text-danger"></i> Unmatched Employees</h3>
+      <p class="text-muted small mb-3">These employees couldn't be matched. They may need to be added to the Employees sheet first.</p>
+      <div id="unmatchedContainer"></div>
+    </div>
+  </div>
+
+  <!-- Location Mapping Modal -->
+  <div class="modal fade" id="locationModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="bi bi-geo-alt"></i> Map Unknown Location</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p>The location "<strong id="unknownLocationName"></strong>" wasn't recognized.</p>
+          <div class="mb-3">
+            <label class="form-label">Map to standard location:</label>
+            <input type="text" class="form-control" id="mappedLocationInput" placeholder="e.g., Bozeman, Helena, Great Falls...">
+          </div>
+          <div class="form-text">This mapping will be remembered for future imports.</div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Skip This Location</button>
+          <button type="button" class="btn btn-primary" onclick="saveLocationMapping()">Save Mapping</button>
+        </div>
       </div>
     </div>
   </div>
@@ -124,43 +161,76 @@
     var locationMappings = {
       'Belgrade Dock': 'Bozeman',
       'Belgrade': 'Bozeman',
+      'Big Sky Dock': 'Big Sky',
+      'Big Sky': 'Big Sky',
       'Helena Trans Dock': 'Helena',
       'Helena Trans': 'Helena',
       'Helena': 'Helena',
       'Great Falls Dock': 'Great Falls',
       'Great Falls': 'Great Falls',
       'G Falls': 'Great Falls',
+      'G Falls ZIPLY Poles': 'Great Falls',
       'Butte Dock': 'Butte',
       'Butte': 'Butte',
       'Livingston Dock': 'Livingston',
       'Livingston': 'Livingston',
       'Ennis Dock': 'Ennis',
       'Ennis': 'Ennis',
+      'Ennis/Lone Mtn Trans': 'Ennis',
       'Stanford Trans Dock': 'Stanford',
       'Stanford': 'Stanford',
       'South Dakota Dock': 'South Dakota',
       'Lolo Sub Dock': 'Lolo',
+      'Lolo Sub': 'Lolo',
       'Msla': 'Missoula',
+      'Msla ZIPLY Poles': 'Missoula',
       'Missoula': 'Missoula',
       'Elliston Distro Poles': 'Elliston',
+      'Elliston': 'Elliston',
+      'Alkali/Rapelje Trans': 'Alkali',
       'Alkali': 'Alkali',
+      'Rapelje/Greycliff Trans': 'Rapelje',
       'Rapelje': 'Rapelje',
       'Greycliff': 'Greycliff',
       'Manhattan Sub': 'Manhattan',
       'Mill Crk Sub': 'Mill Creek',
+      'Mill Crk Sub Anaconda Dock': 'Anaconda',
       'Anaconda': 'Anaconda',
+      'Northern Lights Dock': 'Northern Lights',
       'Northern Lights': 'Northern Lights',
       'CA Sub Foundation': 'California',
-      'Weeds Hot Apes': 'Weeds - Hot',
-      'Weeds Cold Apes': 'Weeds - Cold',
-      'Weeds Gas': 'Weeds - Gas',
-      'Weeds Operators': 'Weeds - Operators',
-      'Gas OQ Testing': 'Helena'
+      'Weeds Hot Apes': 'Weeds',
+      'Weeds Cold Apes': 'Weeds',
+      'Weeds Gas': 'Weeds',
+      'Weeds Operators': 'Weeds',
+      'Gas OQ Testing': 'Helena',
+      'Gas Fusion Testing': 'Helena'
+    };
+
+    // Role to Job Classification mapping
+    var roleToClassification = {
+      'Foreman': 'Foreman',
+      'Journeyman Lineman': 'Journeyman Lineman',
+      'JL': 'Journeyman Lineman',
+      'Apprentice Year 1': '1st Year Apprentice',
+      'Apprentice Year 2': '2nd Year Apprentice',
+      'Apprentice Year 3': '3rd Year Apprentice',
+      'Apprentice Year 4': '4th Year Apprentice',
+      'Apprentice Year 5': '5th Year Apprentice',
+      'Apprentice Year 6': '6th Year Apprentice',
+      'Journey Operator': 'Journey Operator',
+      'Jry Op': 'Journey Operator',
+      'GTO': 'GTO',
+      'GTO F': 'GTO Foreman',
+      'EO2': 'Equipment Operator 2',
+      'WT': 'Working Tech'
     };
 
     var currentEmployees = [];
     var parsedCrews = [];
     var proposedChanges = [];
+    var unknownLocations = [];
+    var currentUnknownLocation = null;
 
     function init() {
       renderLocationMappings();
@@ -180,24 +250,571 @@
     function renderLocationMappings() {
       var container = document.getElementById('locationMapContainer');
       var html = '';
-      var count = 0;
-      for (var key in locationMappings) {
-        if (count < 12) { // Show first 12 mappings
-          html += '<div class="location-map-item">';
-          html += '<span class="text-muted">' + key + '</span>';
-          html += '<i class="bi bi-arrow-right"></i>';
-          html += '<strong>' + locationMappings[key] + '</strong>';
-          html += '</div>';
-          count++;
-        }
-      }
-      if (Object.keys(locationMappings).length > 12) {
-        html += '<div class="location-map-item text-muted">...and ' + (Object.keys(locationMappings).length - 12) + ' more</div>';
+      var keys = Object.keys(locationMappings).sort();
+      for (var i = 0; i < keys.length; i++) {
+        var key = keys[i];
+        html += '<div class="location-map-item">';
+        html += '<span class="text-muted text-truncate" style="max-width: 100px;" title="' + key + '">' + key + '</span>';
+        html += '<i class="bi bi-arrow-right-short"></i>';
+        html += '<strong class="text-truncate" style="max-width: 80px;" title="' + locationMappings[key] + '">' + locationMappings[key] + '</strong>';
+        html += '</div>';
       }
       container.innerHTML = html;
+      document.getElementById('mappingCount').textContent = keys.length;
     }
 
     function addLocationMapping() {
+      var fromName = prompt('Enter spreadsheet location name (e.g., "Belgrade Dock"):');
+      if (!fromName) return;
+      var toName = prompt('Enter Google Sheet location name (e.g., "Bozeman"):');
+      if (!toName) return;
+      locationMappings[fromName.trim()] = toName.trim();
+      renderLocationMappings();
+    }
+
+    function parseCrewData() {
+      var text = document.getElementById('crewData').value.trim();
+      if (!text) {
+        alert('Please paste crew data first');
+        return;
+      }
+
+      // Reset
+      parsedCrews = [];
+      proposedChanges = [];
+      unknownLocations = [];
+
+      var lines = text.split('\n');
+      var crewsByColumn = {}; // Track crew for each column
+
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i];
+        if (!line.trim()) continue;
+
+        var cells = line.split('\t');
+
+        // First pass: find job headers in this line
+        for (var c = 0; c < cells.length; c++) {
+          var cell = cells[c].trim();
+          if (!cell) continue;
+
+          // Check if this is a job header (contains job number pattern like "013-26" or "052-25")
+          var jobMatch = cell.match(/^(.+?)\s+(\d{3}-\d{2})\s*(.*)$/);
+          if (jobMatch) {
+            var locationName = jobMatch[1].trim();
+            var jobNumber = jobMatch[2].trim();
+            var schedule = jobMatch[3].trim();
+
+            // Map location (or flag as unknown)
+            var mappedLocation = mapLocation(locationName);
+            var isUnknown = mappedLocation === locationName && !locationMappings[locationName];
+
+            if (isUnknown && unknownLocations.indexOf(locationName) === -1) {
+              unknownLocations.push(locationName);
+            }
+
+            var crew = {
+              originalLocation: locationName,
+              mappedLocation: mappedLocation,
+              jobNumber: jobNumber,
+              schedule: schedule,
+              employees: [],
+              column: c,
+              isUnknownLocation: isUnknown
+            };
+            parsedCrews.push(crew);
+            crewsByColumn[c] = crew;
+          }
+        }
+
+        // Second pass: find employees in this line
+        for (var c = 0; c < cells.length; c++) {
+          var cell = cells[c].trim();
+          if (!cell) continue;
+
+          // Skip headers, notes, dates
+          if (cell.match(/^\d{3}-\d{2}/) || cell.match(/Dock|Trans|Sub|Testing|Weeds|Time off/i)) continue;
+          if (cell.match(/^(NWE|Aprox|Tentative|Completed|On Hold|PT Arrival|Install|Project|BID|\d+\.\d+\.\d+)/i)) continue;
+          if (cell.match(/schedule start|Released|No Crane Cert/i)) continue;
+
+          // Find the crew this column belongs to
+          var targetCrew = findCrewForColumn(c, crewsByColumn);
+
+          if (targetCrew && isEmployeeName(cell)) {
+            var empInfo = parseEmployeeName(cell);
+            empInfo.position = targetCrew.employees.length + 1;
+            empInfo.fullJobNumber = targetCrew.jobNumber + '.' + empInfo.position;
+            empInfo.baseJobNumber = targetCrew.jobNumber;
+            targetCrew.employees.push(empInfo);
+          }
+        }
+      }
+
+      // Check for unknown locations
+      if (unknownLocations.length > 0) {
+        showUnknownLocations();
+        return;
+      }
+
+      // Match employees and display preview
+      matchEmployeesToSheet();
+      displayPreview();
+    }
+
+    function findCrewForColumn(col, crewsByColumn) {
+      // Find the crew that owns this column (same column or nearest crew to the left)
+      if (crewsByColumn[col]) return crewsByColumn[col];
+
+      var bestCrew = null;
+      var bestCol = -1;
+      for (var c in crewsByColumn) {
+        var crewCol = parseInt(c);
+        if (crewCol <= col && crewCol > bestCol) {
+          bestCol = crewCol;
+          bestCrew = crewsByColumn[c];
+        }
+      }
+      return bestCrew;
+    }
+
+    function mapLocation(locationName) {
+      // Try exact match first
+      if (locationMappings[locationName]) {
+        return locationMappings[locationName];
+      }
+
+      // Try partial match (location name contains a key or vice versa)
+      var lowerName = locationName.toLowerCase();
+      for (var key in locationMappings) {
+        var lowerKey = key.toLowerCase();
+        if (lowerName.indexOf(lowerKey) !== -1 || lowerKey.indexOf(lowerName) !== -1) {
+          return locationMappings[key];
+        }
+      }
+
+      // No match found - return original (will be flagged as unknown)
+      return locationName;
+    }
+
+    function showUnknownLocations() {
+      document.getElementById('unknownLocationsSection').style.display = 'block';
+      var container = document.getElementById('unknownLocationsContainer');
+      var html = '';
+
+      for (var i = 0; i < unknownLocations.length; i++) {
+        var loc = unknownLocations[i];
+        html += '<div class="unknown-location" id="unknown-' + i + '">';
+        html += '<div class="d-flex justify-content-between align-items-center">';
+        html += '<div><strong>' + loc + '</strong><br><small class="text-muted">Not in location mappings</small></div>';
+        html += '<div>';
+        html += '<input type="text" class="form-control form-control-sm d-inline-block" style="width: 150px;" id="mapping-' + i + '" placeholder="Map to...">';
+        html += '<button class="btn btn-sm btn-primary ms-2" onclick="saveUnknownMapping(' + i + ', \'' + escapeQuotes(loc) + '\')">Save</button>';
+        html += '<button class="btn btn-sm btn-outline-secondary ms-1" onclick="skipUnknownLocation(' + i + ')">Skip</button>';
+        html += '</div>';
+        html += '</div>';
+        html += '</div>';
+      }
+
+      container.innerHTML = html;
+    }
+
+    function escapeQuotes(str) {
+      return str.replace(/'/g, "\\'").replace(/"/g, '\\"');
+    }
+
+    function saveUnknownMapping(index, locationName) {
+      var mappedTo = document.getElementById('mapping-' + index).value.trim();
+      if (!mappedTo) {
+        alert('Please enter a location name to map to');
+        return;
+      }
+
+      locationMappings[locationName] = mappedTo;
+      unknownLocations.splice(unknownLocations.indexOf(locationName), 1);
+      document.getElementById('unknown-' + index).remove();
+      renderLocationMappings();
+
+      if (unknownLocations.length === 0) {
+        document.getElementById('unknownLocationsSection').style.display = 'none';
+        // Re-parse with new mappings
+        parseCrewData();
+      }
+    }
+
+    function skipUnknownLocation(index) {
+      var loc = unknownLocations[index];
+      // Use original name as mapping
+      locationMappings[loc] = loc;
+      unknownLocations.splice(index, 1);
+      document.getElementById('unknown-' + index).remove();
+
+      if (unknownLocations.length === 0) {
+        document.getElementById('unknownLocationsSection').style.display = 'none';
+        parseCrewData();
+      }
+    }
+
+    function isEmployeeName(text) {
+      if (!text || text.length < 4) return false;
+      if (text.match(/^\d/)) return false;
+      if (text.match(/^(NWE|Aprox|Tentative|Completed|On Hold|BID|No CDL|layoff|off |back on|thru|Wk \d)/i)) return false;
+      if (text.match(/schedule|Released|Crane Cert|Summer|Fall|Start|weeks? work|Project|Install|Arrival/i)) return false;
+      if (!text.match(/[a-zA-Z]{2,}\s+[a-zA-Z]/)) return false; // Must have first and last name
+      return true;
+    }
+
+    function parseEmployeeName(text) {
+      var result = {
+        originalText: text,
+        name: text,
+        role: '',
+        jobClassification: '',
+        isForeman: false,
+        apprenticeYear: null
+      };
+
+      // Clean up the text and detect role
+      var cleanText = text.trim();
+
+      // Check for Foreman (F suffix, but not GTO F)
+      if (cleanText.match(/\sF$/i) && !cleanText.match(/GTO\s*F$/i)) {
+        result.isForeman = true;
+        result.role = 'Foreman';
+        result.jobClassification = 'Foreman';
+        result.name = cleanText.replace(/\s+F$/i, '').trim();
+      }
+      // GTO Foreman
+      else if (cleanText.match(/\sGTO\s*F$/i)) {
+        result.isForeman = true;
+        result.role = 'GTO Foreman';
+        result.jobClassification = 'GTO';
+        result.name = cleanText.replace(/\s+GTO\s*F$/i, '').trim();
+      }
+      // Journeyman Lineman
+      else if (cleanText.match(/\sJL$/i)) {
+        result.role = 'Journeyman Lineman';
+        result.jobClassification = 'Journeyman Lineman';
+        result.name = cleanText.replace(/\s+JL$/i, '').trim();
+      }
+      // Apprentice (various formats: "5 ap", "5ap", "5 Ap")
+      else if (cleanText.match(/\s(\d)\s*ap$/i)) {
+        var apMatch = cleanText.match(/\s(\d)\s*ap$/i);
+        result.apprenticeYear = parseInt(apMatch[1]);
+        result.role = result.apprenticeYear + ' Year Apprentice';
+        result.jobClassification = getOrdinal(result.apprenticeYear) + ' Year Apprentice';
+        result.name = cleanText.replace(/\s+\d\s*ap$/i, '').trim();
+      }
+      // Journey Operator
+      else if (cleanText.match(/\sJry\s*Op$/i) || cleanText.match(/\sJourney\s*Op/i)) {
+        result.role = 'Journey Operator';
+        result.jobClassification = 'Journey Operator';
+        result.name = cleanText.replace(/\s+(Jry|Journey)\s*Op.*$/i, '').trim();
+      }
+      // GTO (Gas Tech Operator)
+      else if (cleanText.match(/\sGTO$/i)) {
+        result.role = 'GTO';
+        result.jobClassification = 'GTO';
+        result.name = cleanText.replace(/\s+GTO$/i, '').trim();
+      }
+      // EO2 (Equipment Operator 2)
+      else if (cleanText.match(/\sEO2$/i)) {
+        result.role = 'EO2';
+        result.jobClassification = 'Equipment Operator 2';
+        result.name = cleanText.replace(/\s+EO2$/i, '').trim();
+      }
+      // WT (Working Tech)
+      else if (cleanText.match(/\sWT$/i)) {
+        result.role = 'Working Tech';
+        result.jobClassification = 'Working Tech';
+        result.name = cleanText.replace(/\s+WT$/i, '').trim();
+      }
+      // CDL note (not a role, just clean it)
+      else if (cleanText.match(/\s*(CDL-B|No CDL)$/i)) {
+        result.name = cleanText.replace(/\s*(CDL-B|No CDL)$/i, '').trim();
+      }
+
+      return result;
+    }
+
+    function getOrdinal(n) {
+      var s = ['th', 'st', 'nd', 'rd'];
+      var v = n % 100;
+      return n + (s[(v - 20) % 10] || s[v] || s[0]);
+    }
+
+    function matchEmployeesToSheet() {
+      proposedChanges = [];
+
+      for (var i = 0; i < parsedCrews.length; i++) {
+        var crew = parsedCrews[i];
+
+        for (var j = 0; j < crew.employees.length; j++) {
+          var emp = crew.employees[j];
+
+          // Try to match to current employees using the name matching from Code.gs
+          var match = findBestMatch(emp.name, currentEmployees);
+
+          if (match && match.confidence >= 60) {
+            emp.matchedEmployee = match;
+
+            // Check what changed
+            var oldLocation = match.employeeData.location || '';
+            var oldJobNum = match.employeeData.jobNum || '';
+            var oldClassification = match.employeeData.jobClassification || '';
+
+            var locationChanged = oldLocation !== crew.mappedLocation;
+            var jobChanged = oldJobNum !== emp.fullJobNumber;
+            var classificationChanged = emp.jobClassification && oldClassification !== emp.jobClassification;
+
+            if (locationChanged || jobChanged || classificationChanged) {
+              proposedChanges.push({
+                employee: emp,
+                crew: crew,
+                match: match,
+                oldLocation: oldLocation,
+                newLocation: crew.mappedLocation,
+                oldJobNumber: oldJobNum,
+                newJobNumber: emp.fullJobNumber,
+                oldClassification: oldClassification,
+                newClassification: emp.jobClassification,
+                locationChanged: locationChanged,
+                jobChanged: jobChanged,
+                classificationChanged: classificationChanged,
+                apply: true
+              });
+            } else {
+              emp.noChanges = true;
+            }
+          } else {
+            emp.unmatched = true;
+          }
+        }
+      }
+    }
+
+    function findBestMatch(name, employeeList) {
+      if (!name || !employeeList || employeeList.length === 0) return null;
+
+      var normalizedName = name.toLowerCase().trim();
+      var matches = [];
+
+      for (var i = 0; i < employeeList.length; i++) {
+        var emp = employeeList[i];
+        var empName = (emp.name || '').toLowerCase().trim();
+
+        // Exact match
+        if (normalizedName === empName) {
+          return { employeeName: emp.name, confidence: 100, employeeData: emp };
+        }
+
+        // Partial/contains match
+        if (normalizedName.indexOf(empName) !== -1 || empName.indexOf(normalizedName) !== -1) {
+          matches.push({ employeeName: emp.name, confidence: 90, employeeData: emp });
+          continue;
+        }
+
+        // Fuzzy match using simple similarity
+        var similarity = calculateSimilarity(normalizedName, empName);
+        if (similarity >= 60) {
+          matches.push({ employeeName: emp.name, confidence: Math.round(similarity), employeeData: emp });
+        }
+      }
+
+      matches.sort(function(a, b) { return b.confidence - a.confidence; });
+      return matches.length > 0 ? matches[0] : null;
+    }
+
+    function calculateSimilarity(str1, str2) {
+      var len1 = str1.length, len2 = str2.length;
+      var matrix = [];
+      for (var i = 0; i <= len1; i++) { matrix[i] = [i]; }
+      for (var j = 0; j <= len2; j++) { matrix[0][j] = j; }
+      for (var i = 1; i <= len1; i++) {
+        for (var j = 1; j <= len2; j++) {
+          var cost = str1[i-1] === str2[j-1] ? 0 : 1;
+          matrix[i][j] = Math.min(matrix[i-1][j] + 1, matrix[i][j-1] + 1, matrix[i-1][j-1] + cost);
+        }
+      }
+      return (1 - matrix[len1][len2] / Math.max(len1, len2)) * 100;
+    }
+
+    function displayPreview() {
+      document.getElementById('previewSection').style.display = 'block';
+
+      // Calculate stats
+      var totalEmployees = 0, matchedCount = 0, unmatchedCount = 0, noChangeCount = 0;
+      for (var i = 0; i < parsedCrews.length; i++) {
+        var crew = parsedCrews[i];
+        for (var j = 0; j < crew.employees.length; j++) {
+          totalEmployees++;
+          var emp = crew.employees[j];
+          if (emp.matchedEmployee) matchedCount++;
+          if (emp.unmatched) unmatchedCount++;
+          if (emp.noChanges) noChangeCount++;
+        }
+      }
+
+      document.getElementById('statCrews').textContent = parsedCrews.length;
+      document.getElementById('statEmployees').textContent = totalEmployees;
+      document.getElementById('statMatched').textContent = matchedCount;
+      document.getElementById('statChanges').textContent = proposedChanges.length;
+      document.getElementById('statUnmatched').textContent = unmatchedCount;
+      document.getElementById('statSkipped').textContent = noChangeCount;
+
+      // Build changes table
+      var tbody = document.getElementById('changesTableBody');
+      var html = '';
+
+      if (proposedChanges.length === 0) {
+        html = '<tr><td colspan="5" class="text-center text-muted py-4">No changes detected. All employees are up to date.</td></tr>';
+      } else {
+        for (var i = 0; i < proposedChanges.length; i++) {
+          var ch = proposedChanges[i];
+          html += '<tr class="change-row">';
+          html += '<td><input type="checkbox" checked data-index="' + i + '" onchange="toggleChange(' + i + ', this)"></td>';
+          html += '<td><strong>' + ch.match.employeeName + '</strong>';
+          if (ch.match.confidence < 100) {
+            html += ' <span class="badge bg-warning text-dark badge-role">' + ch.match.confidence + '%</span>';
+          }
+          if (ch.employee.isForeman) {
+            html += ' <span class="badge bg-primary badge-role">Foreman</span>';
+          }
+          html += '</td>';
+
+          // Classification
+          html += '<td>';
+          if (ch.classificationChanged) {
+            html += '<span class="text-unchanged">' + (ch.oldClassification || 'None') + '</span> → <span class="text-changed">' + ch.newClassification + '</span>';
+          } else if (ch.newClassification) {
+            html += '<span class="text-muted">' + ch.newClassification + '</span>';
+          } else {
+            html += '<span class="text-muted">-</span>';
+          }
+          html += '</td>';
+
+          // Location
+          html += '<td>';
+          if (ch.locationChanged) {
+            html += '<span class="text-unchanged">' + (ch.oldLocation || 'None') + '</span> → <span class="text-changed">' + ch.newLocation + '</span>';
+          } else {
+            html += '<span class="text-muted">' + ch.newLocation + '</span>';
+          }
+          html += '</td>';
+
+          // Job Number
+          html += '<td>';
+          if (ch.jobChanged) {
+            html += '<span class="text-unchanged">' + (ch.oldJobNumber || 'None') + '</span> → <span class="text-changed">' + ch.newJobNumber + '</span>';
+          } else {
+            html += '<span class="text-muted">' + ch.newJobNumber + '</span>';
+          }
+          html += '</td>';
+
+          html += '</tr>';
+        }
+      }
+
+      tbody.innerHTML = html;
+
+      // Show unmatched
+      var unmatchedEmps = [];
+      for (var i = 0; i < parsedCrews.length; i++) {
+        for (var j = 0; j < parsedCrews[i].employees.length; j++) {
+          if (parsedCrews[i].employees[j].unmatched) {
+            unmatchedEmps.push({ emp: parsedCrews[i].employees[j], crew: parsedCrews[i] });
+          }
+        }
+      }
+
+      if (unmatchedEmps.length > 0) {
+        document.getElementById('unmatchedSection').style.display = 'block';
+        var unmatchedHtml = '<div class="list-group">';
+        for (var i = 0; i < unmatchedEmps.length; i++) {
+          var u = unmatchedEmps[i];
+          unmatchedHtml += '<div class="list-group-item d-flex justify-content-between">';
+          unmatchedHtml += '<div><strong>' + u.emp.originalText + '</strong><br><small class="text-muted">' + u.crew.mappedLocation + ' - ' + u.crew.jobNumber + '</small></div>';
+          unmatchedHtml += '<span class="badge bg-danger">Not Found</span>';
+          unmatchedHtml += '</div>';
+        }
+        unmatchedHtml += '</div>';
+        document.getElementById('unmatchedContainer').innerHTML = unmatchedHtml;
+      } else {
+        document.getElementById('unmatchedSection').style.display = 'none';
+      }
+
+      // Enable apply button
+      document.getElementById('btnApplyChanges').disabled = proposedChanges.length === 0;
+    }
+
+    function toggleAllChanges(checkbox) {
+      var checkboxes = document.querySelectorAll('#changesTableBody input[type="checkbox"]');
+      for (var i = 0; i < checkboxes.length; i++) {
+        checkboxes[i].checked = checkbox.checked;
+        var idx = parseInt(checkboxes[i].getAttribute('data-index'));
+        if (!isNaN(idx)) proposedChanges[idx].apply = checkbox.checked;
+      }
+    }
+
+    function toggleSelectAll() {
+      var selectAll = document.getElementById('selectAll');
+      selectAll.checked = !selectAll.checked;
+      toggleAllChanges(selectAll);
+    }
+
+    function toggleChange(index, checkbox) {
+      proposedChanges[index].apply = checkbox.checked;
+    }
+
+    function applyChanges() {
+      var changesToApply = proposedChanges.filter(function(c) { return c.apply; });
+
+      if (changesToApply.length === 0) {
+        alert('No changes selected to apply.');
+        return;
+      }
+
+      var msg = 'Apply ' + changesToApply.length + ' change(s) to the Employees sheet?\n\n';
+      msg += 'This will update:\n';
+      msg += '• Location\n• Job Number (with position)\n• Job Classification\n\n';
+      msg += 'All changes will be logged to Employee History.';
+
+      if (!confirm(msg)) return;
+
+      document.getElementById('btnApplyChanges').disabled = true;
+      document.getElementById('btnApplyChanges').innerHTML = '<span class="spinner-border spinner-border-sm"></span> Applying...';
+
+      var changes = changesToApply.map(function(c) {
+        return {
+          employeeName: c.match.employeeName,
+          rowIndex: c.match.employeeData.rowIndex,
+          newLocation: c.newLocation,
+          newJobNumber: c.newJobNumber,
+          newClassification: c.newClassification || '',
+          oldLocation: c.oldLocation,
+          oldJobNumber: c.oldJobNumber,
+          oldClassification: c.oldClassification,
+          isForeman: c.employee.isForeman
+        };
+      });
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          alert(result.message);
+          google.script.host.close();
+        })
+        .withFailureHandler(function(error) {
+          alert('Error: ' + error);
+          document.getElementById('btnApplyChanges').disabled = false;
+          document.getElementById('btnApplyChanges').innerHTML = '<i class="bi bi-check-lg"></i> Apply Changes';
+        })
+        .applyCrewChanges(changes);
+    }
+
+    // Initialize on load
+    init();
+  </script>
+</body>
+</html>
       var fromName = prompt('Enter spreadsheet location name (e.g., "Belgrade Dock"):');
       if (!fromName) return;
       var toName = prompt('Enter Google Sheet location name (e.g., "Bozeman"):');
