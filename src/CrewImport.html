@@ -286,9 +286,22 @@ Dustin Graham JL                     Jimmy Bailey JL
 
       var lines = text.split('\n');
 
-      // First, scan all lines to find job headers and their column positions
-      // Build a map of which columns have which crews
-      var crewColumns = []; // Array of {column: N, crew: crewObj}
+      // DEBUG: Log first few lines to understand structure
+      console.log('=== PARSING DEBUG ===');
+      console.log('Total lines:', lines.length);
+      for (var d = 0; d < Math.min(5, lines.length); d++) {
+        var debugCells = lines[d].split('\t');
+        console.log('Line ' + d + ': ' + debugCells.length + ' cells');
+        for (var dc = 0; dc < debugCells.length; dc++) {
+          if (debugCells[dc].trim()) {
+            console.log('  Col ' + dc + ': "' + debugCells[dc].trim().substring(0, 40) + '"');
+          }
+        }
+      }
+
+      // First pass: find all job headers and their positions (line AND column)
+      // Build a list of crews with their line/column positions
+      var allCrews = []; // Array of crew objects with line and column
 
       for (var i = 0; i < lines.length; i++) {
         var line = lines[i];
@@ -316,6 +329,8 @@ Dustin Graham JL                     Jimmy Bailey JL
               unknownLocations.push(locationName);
             }
 
+            console.log('Found crew: "' + locationName + '" job=' + jobNumber + ' at column ' + c + ' line ' + i);
+
             var crew = {
               originalLocation: locationName,
               mappedLocation: mappedLocation,
@@ -327,15 +342,38 @@ Dustin Graham JL                     Jimmy Bailey JL
               isUnknownLocation: isUnknown
             };
             parsedCrews.push(crew);
-            crewColumns.push({ column: c, crew: crew, headerLine: i });
+            allCrews.push(crew);
           }
         }
       }
 
-      // Sort crewColumns by column position for proper assignment
-      crewColumns.sort(function(a, b) { return a.column - b.column; });
+      // For each column, find the header lines where new crews start
+      // This lets us determine which crew an employee on a given line belongs to
+      var headerLinesByColumn = {}; // column -> [line numbers where headers appear]
+      for (var ci = 0; ci < allCrews.length; ci++) {
+        var crew = allCrews[ci];
+        if (!headerLinesByColumn[crew.column]) {
+          headerLinesByColumn[crew.column] = [];
+        }
+        headerLinesByColumn[crew.column].push({ line: crew.headerLine, crew: crew });
+      }
+
+      // Sort each column's headers by line number
+      for (var col in headerLinesByColumn) {
+        headerLinesByColumn[col].sort(function(a, b) { return a.line - b.line; });
+      }
+
+      console.log('=== HEADER LINES BY COLUMN ===');
+      for (var col in headerLinesByColumn) {
+        var headers = headerLinesByColumn[col];
+        console.log('Column ' + col + ':');
+        for (var hi = 0; hi < headers.length; hi++) {
+          console.log('  Line ' + headers[hi].line + ': ' + headers[hi].crew.jobNumber + ' (' + headers[hi].crew.mappedLocation + ')');
+        }
+      }
 
       // Second pass: find employees and assign to correct crews
+      // An employee belongs to the crew in their column that has the highest header line <= employee's line
       for (var i = 0; i < lines.length; i++) {
         var line = lines[i];
         if (!line.trim()) continue;
@@ -350,11 +388,10 @@ Dustin Graham JL                     Jimmy Bailey JL
           // Skip headers, notes, dates
           if (cell.match(/^\d{3}-\d{2}/) || cell.match(/Dock|Trans|Sub|Testing|Weeds|Time off/i)) continue;
           if (cell.match(/^(NWE|Aprox|Tentative|Completed|On Hold|PT Arrival|Install|Project|BID|\d+\.\d+\.\d+)/i)) continue;
-          if (cell.match(/schedule start|Released|No Crane Cert/i)) continue;
+          if (cell.match(/schedule start|Released|No Crane Cert|layoff|off \d|thru)/i)) continue;
 
-          // Find the crew this column belongs to
-          // Use the crew whose column matches exactly, or the crew with the nearest column to the left
-          var targetCrew = findCrewForColumn(c, crewColumns);
+          // Find the crew this employee belongs to
+          var targetCrew = findCrewForPosition(c, i, headerLinesByColumn);
 
           if (targetCrew && isEmployeeName(cell)) {
             var empInfo = parseEmployeeName(cell);
@@ -362,6 +399,8 @@ Dustin Graham JL                     Jimmy Bailey JL
             empInfo.fullJobNumber = targetCrew.jobNumber + '.' + empInfo.position;
             empInfo.baseJobNumber = targetCrew.jobNumber;
             empInfo.sourceColumn = c;
+            empInfo.sourceLine = i;
+            console.log('Employee "' + empInfo.name + '" at col ' + c + ' line ' + i + ' -> crew ' + targetCrew.jobNumber + ' (' + targetCrew.mappedLocation + ')');
             targetCrew.employees.push(empInfo);
           }
         }
@@ -378,37 +417,37 @@ Dustin Graham JL                     Jimmy Bailey JL
       displayPreview();
     }
 
-    function findCrewForColumn(col, crewColumns) {
-      // Find the crew that owns this column
-      // Exact match first
-      for (var i = 0; i < crewColumns.length; i++) {
-        if (crewColumns[i].column === col) {
-          return crewColumns[i].crew;
-        }
-      }
+    function findCrewForPosition(col, line, headerLinesByColumn) {
+      // Find the crew for a given column and line
+      // The crew is the one with the highest header line that is <= the employee's line
 
-      // Find the crew with the nearest column to the left, but not crossing into another crew's territory
-      var bestCrew = null;
-      var bestCol = -1;
-
-      for (var i = 0; i < crewColumns.length; i++) {
-        var crewCol = crewColumns[i].column;
-
-        // This crew's column must be <= our column
-        if (crewCol <= col) {
-          // Check if there's another crew between this one and our column
-          var nextCrewCol = (i + 1 < crewColumns.length) ? crewColumns[i + 1].column : Infinity;
-
-          // If our column is between this crew and the next, this is the right crew
-          if (col < nextCrewCol && crewCol > bestCol) {
-            bestCol = crewCol;
-            bestCrew = crewColumns[i].crew;
+      var columnHeaders = headerLinesByColumn[col];
+      if (!columnHeaders || columnHeaders.length === 0) {
+        // No headers in this exact column, try to find nearest column to the left
+        var bestCol = -1;
+        for (var c in headerLinesByColumn) {
+          var colNum = parseInt(c);
+          if (colNum <= col && colNum > bestCol) {
+            bestCol = colNum;
           }
         }
+        if (bestCol === -1) return null;
+        columnHeaders = headerLinesByColumn[bestCol];
       }
 
-      return bestCrew;
+      // Find the header with the highest line number that is still <= our line
+      var targetCrew = null;
+      for (var i = 0; i < columnHeaders.length; i++) {
+        if (columnHeaders[i].line <= line) {
+          targetCrew = columnHeaders[i].crew;
+        } else {
+          break; // Headers are sorted, so we can stop
+        }
+      }
+
+      return targetCrew;
     }
+
 
     function mapLocation(locationName) {
       // Try exact match first
