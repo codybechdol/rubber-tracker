@@ -388,7 +388,7 @@ Dustin Graham JL                     Jimmy Bailey JL
           // Skip headers, notes, dates
           if (cell.match(/^\d{3}-\d{2}/) || cell.match(/Dock|Trans|Sub|Testing|Weeds|Time off/i)) continue;
           if (cell.match(/^(NWE|Aprox|Tentative|Completed|On Hold|PT Arrival|Install|Project|BID|\d+\.\d+\.\d+)/i)) continue;
-          if (cell.match(/schedule start|Released|No Crane Cert|layoff|off \d|thru)/i)) continue;
+          if (cell.match(/schedule start|Released|No Crane Cert|layoff|off \d|thru/i)) continue;
 
           // Find the crew this employee belongs to
           var targetCrew = findCrewForPosition(c, i, headerLinesByColumn);
