@@ -30,7 +30,7 @@
 ---
 
 ## Phase 1: Crew Makeup Spreadsheet Import
-**Status:** 🔲 NOT STARTED
+**Status:** 🔄 IN PROGRESS
 
 **Goal:** Import superintendent's weekly crew structure spreadsheet to update Employees sheet.
 
@@ -42,22 +42,50 @@
 - Log changes to Employee History
 
 **Key files to create/modify:**
-- `85-DataImport.gs` - Add crew import functions
-- `51-EmployeeHistory.gs` - Log location/job changes
-- NEW: `CrewImport.html` - UI for importing crew data
+- `85-DataImport.gs` - Add crew import functions ✅
+- `51-EmployeeHistory.gs` - Log location/job changes ✅
+- NEW: `CrewImport.html` - UI for importing crew data ✅
+
+**Spreadsheet Format (from superintendent):**
+- Excel spreadsheet, weekly update
+- Header format: `Belgrade Dock 013-26 5 8's M-F` where:
+  - `Belgrade Dock` = Location name (maps to `Bozeman` in Google Sheet)
+  - `013-26` = Job Number
+  - `5 8's M-F` = Schedule info
+- Employee rows under each job header:
+  - `F` suffix = Foreman
+  - `JL` suffix = Journeyman Lineman
+  - `# ap` suffix = Apprentice (e.g., `5 ap` = 5th year)
+  - `Jry Op` = Journey Operator
+  - `GTO` = Gas Tech Operator
+  - `EO2` = Equipment Operator 2
+  - `WT` = Working Tech
+- Job number assignment: First employee = `.1`, second = `.2`, etc.
+
+**Location Mappings:**
+- Belgrade Dock → Bozeman
+- Helena Trans Dock → Helena
+- Great Falls Dock → Great Falls
+- Butte Dock → Butte
+- Livingston Dock → Livingston
+- Ennis Dock → Ennis
+- Msla → Missoula
+- (more in CrewImport.html)
 
 **Questions to resolve:**
-- [ ] What format is the superintendent's spreadsheet? (columns, structure)
-- [ ] What fields need updating? (Location, Job Number, Crew, Foreman?)
+- [x] What format is the superintendent's spreadsheet? (columns, structure) ✅ ANSWERED
+- [x] What fields need updating? (Location, Job Number) ✅ ANSWERED
 
 **Implementation tasks:**
-- [ ] Create CrewImport.html dialog
-- [ ] Add parseCrewSpreadsheet() function
-- [ ] Add matchCrewToEmployees() using Metaphone
-- [ ] Add confirmation UI for changes
-- [ ] Add updateEmployeesFromCrew() function
-- [ ] Log changes to Employee History
-- [ ] Add menu item
+- [x] Create CrewImport.html dialog ✅
+- [x] Add parseCrewSpreadsheet() function ✅
+- [x] Add matchCrewToEmployees() using name matching ✅
+- [x] Add confirmation UI for changes ✅
+- [x] Add applyCrewChanges() function ✅
+- [x] Log changes to Employee History ✅
+- [x] Add menu item ✅
+- [ ] Test with real data
+- [ ] Deploy with push.bat
 
 ---
 

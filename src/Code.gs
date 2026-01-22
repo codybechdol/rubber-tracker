@@ -3732,6 +3732,7 @@ function onOpen() {
       .addItem('👷 Setup Job Classification Dropdown', 'setupJobClassificationDropdown')
       .addItem('📖 View Classification Guide', 'showClassificationGuide')
       .addSeparator()
+      .addItem('👥 Import Crew Makeup', 'showCrewImportDialog')
       .addItem('📥 Import Data', 'showImportDialog')
       .addItem('📥 Quick Import (1084)', 'importProvidedData')
       .addSeparator()

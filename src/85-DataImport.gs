@@ -4,7 +4,163 @@
  * Functions to help import external data into the Rubber Tracker system.
  */
 
-/* global COLS, SHEET_GLOVES, SHEET_SLEEVES, logEvent, SpreadsheetApp, HtmlService */
+/* global COLS, SHEET_GLOVES, SHEET_SLEEVES, SHEET_EMPLOYEES, logEvent */
+
+// ============================================================================
+// CREW MAKEUP IMPORT FUNCTIONS
+// ============================================================================
+
+/**
+ * Shows the Crew Makeup Import dialog.
+ * Menu item: Glove Manager → Data Import → Import Crew Makeup
+ */
+function showCrewImportDialog() {
+  var html = HtmlService.createHtmlOutputFromFile('CrewImport')
+    .setWidth(900)
+    .setHeight(700);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Import Crew Makeup');
+}
+
+/**
+ * Applies crew changes to the Employees sheet.
+ * Called from CrewImport.html when user confirms changes.
+ *
+ * @param {Array} changes - Array of change objects with employee info and new values
+ * @return {Object} Result with success message
+ */
+function applyCrewChanges(changes) {
+  Logger.log('=== applyCrewChanges START ===');
+  Logger.log('Applying ' + changes.length + ' changes');
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+
+  if (!employeesSheet) {
+    return { success: false, message: 'Employees sheet not found' };
+  }
+
+  var data = employeesSheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Find column indices
+  var nameCol = 0;
+  var locationCol = -1;
+  var jobNumCol = -1;
+
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'location') locationCol = h;
+    if (header === 'job number') jobNumCol = h;
+  }
+
+  if (locationCol === -1 || jobNumCol === -1) {
+    return { success: false, message: 'Could not find Location or Job Number columns in Employees sheet' };
+  }
+
+  var updatedCount = 0;
+  var historyLogged = 0;
+  var timezone = ss.getSpreadsheetTimeZone();
+  var today = new Date();
+  var todayStr = Utilities.formatDate(today, timezone, 'MM/dd/yyyy');
+
+  // Get or create Employee History sheet
+  var historySheet = ss.getSheetByName('Employee History');
+
+  for (var i = 0; i < changes.length; i++) {
+    var change = changes[i];
+
+    try {
+      var rowIndex = change.rowIndex;
+
+      if (!rowIndex || rowIndex < 2) {
+        // Try to find by name
+        var empNameLower = change.employeeName.toLowerCase().trim();
+        for (var r = 1; r < data.length; r++) {
+          if (String(data[r][nameCol]).toLowerCase().trim() === empNameLower) {
+            rowIndex = r + 1;
+            break;
+          }
+        }
+      }
+
+      if (!rowIndex || rowIndex < 2) {
+        Logger.log('Could not find row for employee: ' + change.employeeName);
+        continue;
+      }
+
+      var locationChanged = false;
+      var jobChanged = false;
+
+      // Update Location
+      if (change.newLocation && change.newLocation !== change.oldLocation) {
+        employeesSheet.getRange(rowIndex, locationCol + 1).setValue(change.newLocation);
+        locationChanged = true;
+      }
+
+      // Update Job Number
+      if (change.newJobNumber && change.newJobNumber !== change.oldJobNumber) {
+        employeesSheet.getRange(rowIndex, jobNumCol + 1).setValue(change.newJobNumber);
+        jobChanged = true;
+      }
+
+      if (locationChanged || jobChanged) {
+        updatedCount++;
+
+        // Log to Employee History
+        if (historySheet) {
+          var eventType = locationChanged && jobChanged ? 'Multiple Changes' :
+                          (locationChanged ? 'Location Change' : 'Job Number Change');
+
+          var notes = 'Crew Makeup Import: ';
+          if (locationChanged) notes += 'Location: ' + (change.oldLocation || 'None') + ' → ' + change.newLocation + '. ';
+          if (jobChanged) notes += 'Job #: ' + (change.oldJobNumber || 'None') + ' → ' + change.newJobNumber + '.';
+
+          var historyRow = [
+            todayStr,                    // Date
+            change.employeeName,         // Employee Name
+            eventType,                   // Event Type
+            change.newLocation || '',    // Location
+            change.newJobNumber || '',   // Job Number
+            '',                          // Hire Date
+            '',                          // Last Day
+            '',                          // Last Day Reason
+            '',                          // Rehire Date
+            notes.trim(),                // Notes
+            '',                          // Phone Number
+            '',                          // Email Address
+            '',                          // Glove Size
+            ''                           // Sleeve Size
+          ];
+
+          historySheet.appendRow(historyRow);
+          historyLogged++;
+        }
+
+        Logger.log('Updated employee: ' + change.employeeName +
+                   ' | Location: ' + (locationChanged ? change.oldLocation + ' → ' + change.newLocation : 'unchanged') +
+                   ' | Job #: ' + (jobChanged ? change.oldJobNumber + ' → ' + change.newJobNumber : 'unchanged'));
+      }
+
+    } catch (e) {
+      Logger.log('Error updating employee ' + change.employeeName + ': ' + e.toString());
+    }
+  }
+
+  Logger.log('=== applyCrewChanges END ===');
+  Logger.log('Updated: ' + updatedCount + ', History logged: ' + historyLogged);
+
+  var message = '✅ Crew Makeup Import Complete!\n\n';
+  message += '📝 Updated: ' + updatedCount + ' employee(s)\n';
+  message += '📋 History logged: ' + historyLogged + ' entries';
+
+  logEvent('Crew Makeup Import: Updated ' + updatedCount + ' employees, logged ' + historyLogged + ' history entries');
+
+  return { success: true, message: message };
+}
+
+// ============================================================================
+// INVENTORY IMPORT FUNCTIONS
+// ============================================================================
 
 /**
  * Import a single inventory item from parsed data
