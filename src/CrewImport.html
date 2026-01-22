@@ -285,7 +285,10 @@ Dustin Graham JL                     Jimmy Bailey JL
       unknownLocations = [];
 
       var lines = text.split('\n');
-      var crewsByColumn = {}; // Track crew for each column
+
+      // First, scan all lines to find job headers and their column positions
+      // Build a map of which columns have which crews
+      var crewColumns = []; // Array of {column: N, crew: crewObj}
 
       for (var i = 0; i < lines.length; i++) {
         var line = lines[i];
@@ -293,7 +296,7 @@ Dustin Graham JL                     Jimmy Bailey JL
 
         var cells = line.split('\t');
 
-        // First pass: find job headers in this line
+        // Find job headers in this line
         for (var c = 0; c < cells.length; c++) {
           var cell = cells[c].trim();
           if (!cell) continue;
@@ -320,14 +323,26 @@ Dustin Graham JL                     Jimmy Bailey JL
               schedule: schedule,
               employees: [],
               column: c,
+              headerLine: i,
               isUnknownLocation: isUnknown
             };
             parsedCrews.push(crew);
-            crewsByColumn[c] = crew;
+            crewColumns.push({ column: c, crew: crew, headerLine: i });
           }
         }
+      }
 
-        // Second pass: find employees in this line
+      // Sort crewColumns by column position for proper assignment
+      crewColumns.sort(function(a, b) { return a.column - b.column; });
+
+      // Second pass: find employees and assign to correct crews
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i];
+        if (!line.trim()) continue;
+
+        var cells = line.split('\t');
+
+        // Find employees in this line
         for (var c = 0; c < cells.length; c++) {
           var cell = cells[c].trim();
           if (!cell) continue;
@@ -338,13 +353,15 @@ Dustin Graham JL                     Jimmy Bailey JL
           if (cell.match(/schedule start|Released|No Crane Cert/i)) continue;
 
           // Find the crew this column belongs to
-          var targetCrew = findCrewForColumn(c, crewsByColumn);
+          // Use the crew whose column matches exactly, or the crew with the nearest column to the left
+          var targetCrew = findCrewForColumn(c, crewColumns);
 
           if (targetCrew && isEmployeeName(cell)) {
             var empInfo = parseEmployeeName(cell);
             empInfo.position = targetCrew.employees.length + 1;
             empInfo.fullJobNumber = targetCrew.jobNumber + '.' + empInfo.position;
             empInfo.baseJobNumber = targetCrew.jobNumber;
+            empInfo.sourceColumn = c;
             targetCrew.employees.push(empInfo);
           }
         }
@@ -361,19 +378,35 @@ Dustin Graham JL                     Jimmy Bailey JL
       displayPreview();
     }
 
-    function findCrewForColumn(col, crewsByColumn) {
-      // Find the crew that owns this column (same column or nearest crew to the left)
-      if (crewsByColumn[col]) return crewsByColumn[col];
-
-      var bestCrew = null;
-      var bestCol = -1;
-      for (var c in crewsByColumn) {
-        var crewCol = parseInt(c);
-        if (crewCol <= col && crewCol > bestCol) {
-          bestCol = crewCol;
-          bestCrew = crewsByColumn[c];
+    function findCrewForColumn(col, crewColumns) {
+      // Find the crew that owns this column
+      // Exact match first
+      for (var i = 0; i < crewColumns.length; i++) {
+        if (crewColumns[i].column === col) {
+          return crewColumns[i].crew;
         }
       }
+
+      // Find the crew with the nearest column to the left, but not crossing into another crew's territory
+      var bestCrew = null;
+      var bestCol = -1;
+
+      for (var i = 0; i < crewColumns.length; i++) {
+        var crewCol = crewColumns[i].column;
+
+        // This crew's column must be <= our column
+        if (crewCol <= col) {
+          // Check if there's another crew between this one and our column
+          var nextCrewCol = (i + 1 < crewColumns.length) ? crewColumns[i + 1].column : Infinity;
+
+          // If our column is between this crew and the next, this is the right crew
+          if (col < nextCrewCol && crewCol > bestCol) {
+            bestCol = crewCol;
+            bestCrew = crewColumns[i].crew;
+          }
+        }
+      }
+
       return bestCrew;
     }
 
@@ -564,7 +597,15 @@ Dustin Graham JL                     Jimmy Bailey JL
 
             var locationChanged = oldLocation !== crew.mappedLocation;
             var jobChanged = oldJobNum !== emp.fullJobNumber;
-            var classificationChanged = emp.jobClassification && oldClassification !== emp.jobClassification;
+
+            // ONLY update classification if it's currently EMPTY
+            // This preserves existing abbreviations like "JRY"
+            var classificationChanged = false;
+            var newClassification = '';
+            if (emp.jobClassification && !oldClassification) {
+              classificationChanged = true;
+              newClassification = emp.jobClassification;
+            }
 
             if (locationChanged || jobChanged || classificationChanged) {
               proposedChanges.push({
@@ -576,7 +617,7 @@ Dustin Graham JL                     Jimmy Bailey JL
                 oldJobNumber: oldJobNum,
                 newJobNumber: emp.fullJobNumber,
                 oldClassification: oldClassification,
-                newClassification: emp.jobClassification,
+                newClassification: newClassification,
                 locationChanged: locationChanged,
                 jobChanged: jobChanged,
                 classificationChanged: classificationChanged,
