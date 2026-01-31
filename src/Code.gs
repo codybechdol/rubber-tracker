@@ -6499,23 +6499,39 @@ function generateTaskMetadata() {
 
   Logger.log('generateTaskMetadata: Created ' + metadataRecords.length + ' metadata records');
 
-  // Check for existing metadata to avoid duplicates
+  // Check for existing metadata to preserve user edits (scheduled dates/times)
   var existingData = metadataSheet.getDataRange().getValues();
-  var existingKeys = {};
+  var existingMap = {};
 
   if (existingData.length > 1) {
-    // Build map of existing sourceSheet_sourceRow keys
+    // Build map of existing sourceSheet_sourceRow keys with their data
     for (var i = 1; i < existingData.length; i++) {
-      var existingSourceSheet = existingData[i][1]; // Column B
-      var existingSourceRow = existingData[i][2];   // Column C
+      var existingSourceSheet = existingData[i][1]; // Column B: SourceSheet
+      var existingSourceRow = existingData[i][2];   // Column C: SourceRow
       var key = existingSourceSheet + '_' + existingSourceRow;
-      existingKeys[key] = true;
+      existingMap[key] = {
+        rowIndex: i + 1, // 1-based row number
+        scheduledDate: existingData[i][11],    // Column L: ScheduledDate
+        startTime: existingData[i][12],        // Column M: StartTime
+        endTime: existingData[i][13],          // Column N: EndTime
+        status: existingData[i][14],           // Column O: Status
+        notifiedDate: existingData[i][15],     // Column P: NotifiedDate
+        scheduledClassDate: existingData[i][16], // Column Q: ScheduledClassDate
+        classType: existingData[i][17],        // Column R: ClassType
+        isOffice: existingData[i][18],         // Column S: IsOffice
+        isRegistered: existingData[i][19],     // Column T: IsRegistered
+        isDeclined: existingData[i][20],       // Column U: IsDeclined
+        completedDate: existingData[i][21],    // Column V: CompletedDate
+        notes: existingData[i][22],            // Column W: Notes
+        createdDate: existingData[i][23]       // Column X: CreatedDate
+      };
     }
   }
 
-  // Filter out duplicates
+  // Separate new vs update records
   var newRecords = [];
-  var skippedCount = 0;
+  var updateRecords = [];
+  var updatedCount = 0;
 
   for (var r = 0; r < metadataRecords.length; r++) {
     var rec = metadataRecords[r];
@@ -6523,14 +6539,62 @@ function generateTaskMetadata() {
     var recSourceRow = rec[2];
     var recKey = recSourceSheet + '_' + recSourceRow;
 
-    if (!existingKeys[recKey]) {
-      newRecords.push(rec);
+    if (existingMap[recKey]) {
+      // Task exists - PRESERVE user-edited fields, UPDATE source fields
+      var existing = existingMap[recKey];
+
+      // Update columns A-K (source-derived data) and Y (LastModified)
+      // Preserve columns L-X (user-edited scheduling state)
+      var updatedRecord = [
+        rec[0],  // A: TaskID (regenerate)
+        rec[1],  // B: SourceSheet
+        rec[2],  // C: SourceRow
+        rec[3],  // D: Employee (from source)
+        rec[4],  // E: TaskType (from source)
+        rec[5],  // F: ItemType (from source)
+        rec[6],  // G: CurrentItem (from source)
+        rec[7],  // H: Location (from source)
+        rec[8],  // I: Foreman (from source)
+        rec[9],  // J: PhoneNumber (from source)
+        rec[10], // K: DueDate (from source)
+        existing.scheduledDate || '',      // L: PRESERVE ScheduledDate
+        existing.startTime || '',          // M: PRESERVE StartTime
+        existing.endTime || '',            // N: PRESERVE EndTime
+        existing.status || rec[14],        // O: PRESERVE Status (or use new if empty)
+        existing.notifiedDate || '',       // P: PRESERVE NotifiedDate
+        existing.scheduledClassDate || '', // Q: PRESERVE ScheduledClassDate
+        existing.classType || '',          // R: PRESERVE ClassType
+        existing.isOffice || 'FALSE',      // S: PRESERVE IsOffice
+        existing.isRegistered || 'FALSE',  // T: PRESERVE IsRegistered
+        existing.isDeclined || 'FALSE',    // U: PRESERVE IsDeclined
+        existing.completedDate || '',      // V: PRESERVE CompletedDate
+        existing.notes || rec[22],         // W: PRESERVE Notes (or use new if empty)
+        existing.createdDate || rec[23],   // X: PRESERVE CreatedDate
+        rec[24]  // Y: UPDATE LastModified (new timestamp)
+      ];
+
+      updateRecords.push({
+        rowIndex: existing.rowIndex,
+        data: updatedRecord
+      });
+      updatedCount++;
+
     } else {
-      skippedCount++;
+      // New task - add to sheet
+      newRecords.push(rec);
     }
   }
 
-  Logger.log('generateTaskMetadata: ' + newRecords.length + ' new records, ' + skippedCount + ' duplicates skipped');
+  Logger.log('generateTaskMetadata: ' + newRecords.length + ' new records, ' + updatedCount + ' existing records to update');
+
+  // Write updates to existing rows
+  if (updateRecords.length > 0) {
+    for (var u = 0; u < updateRecords.length; u++) {
+      var update = updateRecords[u];
+      metadataSheet.getRange(update.rowIndex, 1, 1, 25).setValues([update.data]);
+    }
+    Logger.log('generateTaskMetadata: Updated ' + updateRecords.length + ' existing records');
+  }
 
   // Write new records to sheet
   if (newRecords.length > 0) {
@@ -6544,9 +6608,7 @@ function generateTaskMetadata() {
   message += '📊 Statistics:\n';
   message += '• Total tasks found: ' + totalTasks + '\n';
   message += '• New metadata records: ' + newRecords.length + '\n';
-  if (skippedCount > 0) {
-    message += '• Duplicates skipped: ' + skippedCount + '\n';
-  }
+  message += '• Updated existing records: ' + updatedCount + '\n';
   message += '\n';
   message += '📍 Sources:\n';
 
@@ -6561,6 +6623,10 @@ function generateTaskMetadata() {
   }
 
   message += '\n✅ Task Metadata sheet is ready for scheduling!';
+
+  if (updatedCount > 0) {
+    message += '\n\n💡 Note: Existing tasks were updated with fresh source data while preserving your scheduled dates, times, and completion status.';
+  }
 
   ui.alert('Generate Task Metadata Complete', message, ui.ButtonSet.OK);
   Logger.log('=== generateTaskMetadata END ===');
