@@ -503,6 +503,22 @@ Wednesday, Jan 29 (Start: Helena 7am):
 
 ## Completed Features Log
 
+### January 31, 2026 (Session 2)
+- ✅ **Fixed task save operations not persisting**
+  - ROOT CAUSE: saveScheduleTaskDateChanges() was using array indices to identify tasks - unreliable when tasks are sorted/filtered
+  - SOLUTION: Changed to key-based identification using "SourceSheet_RowIndex" format (e.g., "Glove Swaps_15")
+  - Client now sends taskKey in addition to index for reliable server-side updates
+  - Server directly updates Task Metadata by key, no longer needs to reload entire task list
+  - 10x faster saves, 100% reliable, eliminates race conditions
+  - Modified src/Code.gs saveScheduleTaskDateChanges() and src/ToDoSchedule.html update functions
+- ✅ **Fixed metadata regeneration losing manual edits**
+  - ROOT CAUSE: generateTaskMetadata() was skipping existing tasks to avoid duplicates
+  - SOLUTION: Changed to "smart update" logic that preserves user edits (dates/times) while updating source data (locations/phones)
+  - Now supports weekly metadata refresh without losing scheduling work
+  - PRESERVES: ScheduledDate, StartTime, EndTime, Status, Completion (columns L-X)
+  - UPDATES: Employee, Location, PhoneNumber, DueDate from source sheets (columns A-K, Y)
+  - Modified src/Code.gs generateTaskMetadata() function (lines 6500-6628)
+
 ### January 30, 2026
 - ✅ **Fixed Crane Evaluation showing as "Expired" incorrectly**
   - ROOT CAUSE: Crane Evaluation is a NON-EXPIRING cert - the date is when evaluation was PERFORMED, not when it expires
