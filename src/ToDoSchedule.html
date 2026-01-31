@@ -653,6 +653,24 @@
     var officeTasks = {}; // Track office status by task key
     var currentSmsTask = null; // Currently selected task for SMS
 
+    // Helper: Format Date object to YYYY-MM-DD string
+    function formatDate(date) {
+      if (!date) return '';
+      if (typeof date === 'string') {
+        // If already a YYYY-MM-DD string, return as-is (don't re-parse)
+        if (/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) {
+          return date.trim();
+        }
+        // Otherwise try to parse and reformat
+        date = new Date(date);
+      }
+      if (!(date instanceof Date) || isNaN(date.getTime())) return '';
+      var year = date.getFullYear();
+      var month = String(date.getMonth() + 1).padStart(2, '0');
+      var day = String(date.getDate()).padStart(2, '0');
+      return year + '-' + month + '-' + day;
+    }
+
     // Helper: Format task type with item type (Glove/Sleeve) and item number
     // Also shows cert expiration date for cert tasks
     function formatTaskType(task) {
@@ -935,15 +953,49 @@
     }
 
     function loadTasks() {
-      console.log('loadTasks: Starting...');
+      console.log('loadTasks: Starting (using Task Metadata)...');
       google.script.run
-        .withSuccessHandler(function(tasks) {
-          console.log('loadTasks: Received ' + (tasks ? tasks.length : 0) + ' tasks');
-          allTasks = tasks || [];
+        .withSuccessHandler(function(data) {
+          console.log('loadTasks: Received data:', data);
+          // New architecture: data is {tasks: [...], lastGenerated: date, totalTasks: number}
+          allTasks = data.tasks || [];
+          console.log('loadTasks: Total tasks loaded:', allTasks.length);
+
+          // Normalize dates to YYYY-MM-DD string format
+          allTasks.forEach(function(task, index) {
+            // Convert scheduledDate to string format
+            if (task.scheduledDate) {
+              if (task.scheduledDate instanceof Date) {
+                task.scheduledDate = formatDate(task.scheduledDate);
+              } else if (typeof task.scheduledDate === 'string') {
+                // Already a string, ensure it's in YYYY-MM-DD format
+                task.scheduledDate = formatDate(new Date(task.scheduledDate));
+              }
+            }
+            // Convert dueDate to string format
+            if (task.dueDate) {
+              if (task.dueDate instanceof Date) {
+                task.dueDate = formatDate(task.dueDate);
+              } else if (typeof task.dueDate === 'string') {
+                task.dueDate = formatDate(new Date(task.dueDate));
+              }
+            }
+            // Preserve task source for filtering
+            if (!task.source && task.sheetName) {
+              task.source = task.sheetName;
+            }
+            if (!task.taskType && task.type) {
+              task.taskType = task.type;
+            }
+          });
+          console.log('loadTasks: Normalized dates for ' + allTasks.length + ' tasks');
 
           // Build employee phone map for checklist items
           buildEmployeePhoneMap();
           console.log('loadTasks: Built phone map with ' + Object.keys(employeePhoneMap).length + ' entries');
+
+          // Update localStorage checklist items with phone numbers if missing
+          updateChecklistPhoneNumbers();
 
           try {
             renderTasks(allTasks);
@@ -968,10 +1020,20 @@
         })
         .withFailureHandler(function(error) {
           console.error('loadTasks: Server error:', error);
-          document.getElementById('taskContainer').innerHTML =
-            '<div class="alert alert-danger">Error loading tasks: ' + error + '</div>';
+          // Check for specific Task Metadata errors
+          var errorMsg = error.message || error.toString();
+          if (errorMsg.indexOf('TASK_METADATA_NOT_FOUND') !== -1) {
+            document.getElementById('taskContainer').innerHTML =
+              '<div class="alert alert-warning"><strong>Task Metadata Not Found</strong><br>Please run <strong>Glove Manager → Schedule & To-Do → Generate Task Metadata</strong> first.</div>';
+          } else if (errorMsg.indexOf('TASK_METADATA_EMPTY') !== -1) {
+            document.getElementById('taskContainer').innerHTML =
+              '<div class="alert alert-warning"><strong>Task Metadata Empty</strong><br>Please run <strong>Glove Manager → Schedule & To-Do → Generate Task Metadata</strong> to populate data.</div>';
+          } else {
+            document.getElementById('taskContainer').innerHTML =
+              '<div class="alert alert-danger">Error loading tasks: ' + errorMsg + '</div>';
+          }
         })
-        .getScheduleTasks();
+        .getTasksWithMetadata();
     }
 
     // ================== CALENDAR FUNCTIONS ==================
@@ -1912,6 +1974,7 @@
           location: task.location || '',
           scheduledDate: task.scheduledDate || '',
           source: task.source || '',
+          phoneNumber: task.phoneNumber || '',
           subject: 'Add to upcoming training',
           addedDate: new Date().toISOString().split('T')[0],
           completed: false
@@ -1946,6 +2009,7 @@
         location: task.location || '',
         scheduledDate: task.scheduledDate || '',
         source: task.source || '',
+        phoneNumber: task.phoneNumber || '',
         subject: 'Follow up on ' + (task.itemType || task.certType || 'certification'),
         addedDate: new Date().toISOString().split('T')[0],
         completed: false
@@ -2446,6 +2510,28 @@
       });
     }
 
+    // Update localStorage checklist items with phone numbers from employeePhoneMap
+    function updateChecklistPhoneNumbers() {
+      var updated = false;
+      personalChecklist.forEach(function(item) {
+        if (!item.phoneNumber || item.phoneNumber.length < 10) {
+          if (item.employee) {
+            var empName = item.employee.toLowerCase().trim();
+            var phone = employeePhoneMap[empName];
+            if (phone && phone.length >= 10) {
+              item.phoneNumber = phone;
+              updated = true;
+              console.log('Updated phone for ' + item.employee + ': ' + phone);
+            }
+          }
+        }
+      });
+      if (updated) {
+        saveChecklistToStorage();
+        console.log('Saved updated checklist with phone numbers');
+      }
+    }
+
     // Look up phone number for a checklist item by employee name
     function getPhoneForChecklistItem(item) {
       // First check if item has phone number directly
@@ -2468,9 +2554,13 @@
       return source.indexOf('cert') !== -1 ||
              taskType.indexOf('cert') !== -1 ||
              taskType.indexOf('renew') !== -1 ||
+             itemType.indexOf('cert') !== -1 ||
              itemType.indexOf('cpr') !== -1 ||
              itemType.indexOf('1st aid') !== -1 ||
-             itemType.indexOf('first aid') !== -1;
+             itemType.indexOf('first aid') !== -1 ||
+             itemType.indexOf('mec') !== -1 ||
+             itemType.indexOf('harassment') !== -1 ||
+             itemType.indexOf('dl expir') !== -1;
     }
 
     function formatPhoneForDisplay(phone) {
@@ -3430,7 +3520,19 @@
 
       // Check if this is a cert item with a phone number
       var itemPhone = getPhoneForChecklistItem(item);
-      var isCertWithPhone = isChecklistCertTask(item) && itemPhone && itemPhone.length >= 10;
+      var isCertTask = isChecklistCertTask(item);
+      var isCertWithPhone = isCertTask && itemPhone && itemPhone.length >= 10;
+
+      // Debug logging for cert tasks
+      if (item.source === 'Expiring Certs' || (item.itemType && item.itemType.toLowerCase().indexOf('cert') !== -1)) {
+        console.log('DEBUG Checklist Item:', item.employee, '- itemType:', item.itemType, '- source:', item.source);
+        console.log('  isCertTask:', isCertTask, '- itemPhone:', itemPhone, '- isCertWithPhone:', isCertWithPhone);
+        console.log('  employeePhoneMap keys:', Object.keys(employeePhoneMap).slice(0, 5));
+        if (item.employee) {
+          var empLower = item.employee.toLowerCase().trim();
+          console.log('  Looking for:', empLower, '- found:', employeePhoneMap[empLower]);
+        }
+      }
 
       if (isCertWithPhone) {
         // SMS Notify button for cert items with phone
@@ -3469,6 +3571,373 @@
       return html;
     }
 
+    // ================== EXPIRING CERTS TAB FUNCTIONS ==================
+    var allExpiringCerts = [];
+    var certFilterState = { status: '', type: '', location: '' };
+
+    function loadExpiringCerts() {
+      console.log('loadExpiringCerts: Starting...');
+      google.script.run
+        .withSuccessHandler(function(result) {
+          console.log('loadExpiringCerts: Received ' + (result && result.certs ? result.certs.length : 0) + ' certs');
+          allExpiringCerts = (result && result.certs) || [];
+
+          // Add phone numbers from expiring certs to employeePhoneMap
+          allExpiringCerts.forEach(function(cert) {
+            if (cert.employee && cert.phoneNumber && cert.phoneNumber.length >= 10) {
+              var empName = cert.employee.toLowerCase().trim();
+              if (!employeePhoneMap[empName]) {
+                employeePhoneMap[empName] = cert.phoneNumber;
+                console.log('Added phone for ' + cert.employee + ' from certs: ' + cert.phoneNumber);
+              }
+            }
+          });
+
+          // Also update localStorage checklist items with these phone numbers
+          updateChecklistPhoneNumbers();
+
+          populateCertFilters();
+          renderExpiringCerts();
+
+          // Re-render checklist in case phone numbers were added
+          renderPersonalChecklist();
+        })
+        .withFailureHandler(function(error) {
+          console.error('loadExpiringCerts: Error:', error);
+          document.getElementById('expiringCertsContainer').innerHTML =
+            '<div class="alert alert-danger m-3"><i class="bi bi-exclamation-triangle"></i> Error loading expiring certs: ' + error + '</div>';
+        })
+        .getExpiringCertsForSchedule();
+    }
+
+    function populateCertFilters() {
+      // Populate cert type filter
+      var certTypes = new Set();
+      var locations = new Set();
+      allExpiringCerts.forEach(function(cert) {
+        if (cert.certType) certTypes.add(cert.certType);
+        if (cert.location) locations.add(cert.location);
+      });
+
+      var typeSelect = document.getElementById('certFilterType');
+      typeSelect.innerHTML = '<option value="">All Cert Types</option>';
+      Array.from(certTypes).sort().forEach(function(type) {
+        typeSelect.innerHTML += '<option value="' + type + '">' + type + '</option>';
+      });
+
+      var locSelect = document.getElementById('certFilterLocation');
+      locSelect.innerHTML = '<option value="">All Locations</option>';
+      Array.from(locations).sort().forEach(function(loc) {
+        locSelect.innerHTML += '<option value="' + loc + '">' + loc + '</option>';
+      });
+    }
+
+    function applyCertFilters() {
+      certFilterState.status = document.getElementById('certFilterStatus').value;
+      certFilterState.type = document.getElementById('certFilterType').value;
+      certFilterState.location = document.getElementById('certFilterLocation').value;
+      renderExpiringCerts();
+    }
+
+    function clearCertFilters() {
+      document.getElementById('certFilterStatus').value = '';
+      document.getElementById('certFilterType').value = '';
+      document.getElementById('certFilterLocation').value = '';
+      certFilterState = { status: '', type: '', location: '' };
+      renderExpiringCerts();
+    }
+
+    function getCertStatus(cert) {
+      // Special handling for non-expiring certs like Crane Evaluation
+      if (cert.isNonExpiring) {
+        return cert.expirationDate ? 'OK' : 'Missing';
+      }
+      var days = cert.daysUntilExpiration;
+      if (days === null || days === undefined) return 'OK';
+      if (days < 0) return 'Expired';
+      if (days <= 30) return 'Critical';
+      if (days <= 60) return 'Warning';
+      return 'OK';
+    }
+
+    function renderExpiringCerts() {
+      var container = document.getElementById('expiringCertsContainer');
+
+      // Apply filters
+      var filteredCerts = allExpiringCerts.filter(function(cert) {
+        var status = getCertStatus(cert);
+        if (certFilterState.status && status !== certFilterState.status) return false;
+        if (certFilterState.type && cert.certType !== certFilterState.type) return false;
+        if (certFilterState.location && cert.location !== certFilterState.location) return false;
+        return true;
+      });
+
+      // Update badge
+      var badge = document.getElementById('certsBadge');
+      var expiredCount = allExpiringCerts.filter(function(c) {
+        var s = getCertStatus(c);
+        return s === 'Expired' || s === 'Critical';
+      }).length;
+      if (expiredCount > 0) {
+        badge.textContent = expiredCount;
+        badge.style.display = 'inline';
+      } else {
+        badge.style.display = 'none';
+      }
+
+      if (filteredCerts.length === 0) {
+        container.innerHTML = '<div class="empty-state"><i class="bi bi-shield-check" style="font-size: 48px; color: #34a853;"></i><p class="mt-3">No expiring certifications found</p></div>';
+        return;
+      }
+
+      // Group by location
+      var certsByLocation = {};
+      filteredCerts.forEach(function(cert) {
+        var loc = cert.location || 'Unknown';
+        if (!certsByLocation[loc]) certsByLocation[loc] = [];
+        certsByLocation[loc].push(cert);
+      });
+
+      var html = '';
+      var locations = Object.keys(certsByLocation).sort();
+
+      locations.forEach(function(location, locIndex) {
+        var certs = certsByLocation[location];
+        html += '<div class="card mb-2">';
+        html += '<div class="card-header location-header" style="cursor: pointer; background: linear-gradient(135deg, #ea4335 0%, #c5221f 100%); color: white;" onclick="toggleCertLocationGroup(' + locIndex + ')">';
+        html += '<i class="bi bi-chevron-down me-2" id="cert-loc-chevron-' + locIndex + '"></i>';
+        html += '<i class="bi bi-geo-alt me-1"></i><strong>' + location + '</strong>';
+        html += '<span class="badge bg-white text-dark ms-2">' + certs.length + '</span>';
+        html += '</div>';
+
+        html += '<div id="cert-loc-body-' + locIndex + '">';
+        certs.forEach(function(cert) {
+          html += renderCertRow(cert);
+        });
+        html += '</div></div>';
+      });
+
+      container.innerHTML = html;
+    }
+
+    function toggleCertLocationGroup(locIndex) {
+      var body = document.getElementById('cert-loc-body-' + locIndex);
+      var chevron = document.getElementById('cert-loc-chevron-' + locIndex);
+      if (body.style.display === 'none') {
+        body.style.display = 'block';
+        chevron.className = 'bi bi-chevron-down me-2';
+      } else {
+        body.style.display = 'none';
+        chevron.className = 'bi bi-chevron-right me-2';
+      }
+    }
+
+    function renderCertRow(cert) {
+      var status = getCertStatus(cert);
+      var statusClass = status === 'Expired' ? 'status-overdue' :
+                        status === 'Critical' ? 'status-overdue' :
+                        status === 'Warning' ? 'status-pending' :
+                        status === 'Missing' ? 'status-overdue' : 'status-complete';
+      var statusIcon = status === 'Expired' ? '🔴' :
+                       status === 'Critical' ? '🟠' :
+                       status === 'Warning' ? '🟡' :
+                       status === 'Missing' ? '❌' : '🟢';
+
+      // Check if this cert is already in checklist
+      var isInChecklist = personalChecklist.some(function(item) {
+        return item.employee === cert.employee &&
+               (item.itemType === cert.certType || item.certType === cert.certType) &&
+               !item.completed;
+      });
+
+      // Check notified/scheduled status
+      var certKey = (cert.employee + '_' + cert.certType).toLowerCase().replace(/\s+/g, '_');
+      var isNotified = notifiedTasks[certKey] === true;
+      var isScheduled = scheduledTasks[certKey] === true;
+
+      // Get phone number for this employee
+      var empNameLower = cert.employee.toLowerCase().trim();
+      var phoneNumber = employeePhoneMap[empNameLower] || '';
+      var hasPhone = phoneNumber && phoneNumber.length >= 10;
+
+      var html = '<div class="task-row" style="border-left: 4px solid ' + (status === 'OK' ? '#34a853' : status === 'Warning' ? '#fbbc04' : '#ea4335') + ';">';
+      html += '<div class="row align-items-center">';
+
+      // Cert Type & Employee
+      html += '<div class="col-md-4">';
+      html += '<div class="task-type" style="font-weight: 500;">' + cert.certType + '</div>';
+      html += '<div class="text-primary small"><i class="bi bi-person-fill"></i> <strong>' + cert.employee + '</strong></div>';
+      if (cert.isNonExpiring && cert.expirationDate) {
+        html += '<div class="text-muted small"><i class="bi bi-calendar-check"></i> Completed: ' + cert.expirationDate + '</div>';
+      } else if (cert.expirationDate) {
+        html += '<div class="text-muted small"><i class="bi bi-calendar"></i> Expires: ' + cert.expirationDate + '</div>';
+      }
+      html += '</div>';
+
+      // Days Until / Status
+      html += '<div class="col-md-3">';
+      if (cert.isNonExpiring) {
+        html += '<span class="status-badge ' + statusClass + '">' + statusIcon + ' ' + status + '</span>';
+      } else if (cert.daysUntilExpiration !== null) {
+        var daysText = cert.daysUntilExpiration < 0 ? Math.abs(cert.daysUntilExpiration) + ' days overdue' :
+                       cert.daysUntilExpiration === 0 ? 'Expires today' :
+                       cert.daysUntilExpiration + ' days left';
+        html += '<span class="status-badge ' + statusClass + '">' + statusIcon + ' ' + daysText + '</span>';
+      } else {
+        html += '<span class="status-badge status-complete">🟢 OK</span>';
+      }
+      if (isNotified) {
+        html += '<span class="notified-badge ms-1"><i class="bi bi-bell-fill"></i></span>';
+      }
+      if (isScheduled) {
+        html += '<span class="scheduled-badge ms-1"><i class="bi bi-calendar-check-fill"></i></span>';
+      }
+      html += '</div>';
+
+      // Actions
+      html += '<div class="col-md-5 text-end">';
+
+      // Only show action buttons for certs that need attention (not OK status)
+      if (status !== 'OK') {
+        if (hasPhone) {
+          // Stage 1: SMS Notify button
+          var notifyBtnClass = isNotified ? 'btn-notified' : 'btn-sms';
+          var notifyIcon = isNotified ? 'bi-chat-fill' : 'bi-chat-text';
+          html += '<button class="btn ' + notifyBtnClass + ' btn-sm me-1" onclick="event.stopPropagation(); openCertNotifyModal(\'' + escapeQuotes(cert.employee) + '\', \'' + escapeQuotes(cert.certType) + '\', \'' + escapeQuotes(cert.expirationDate) + '\', \'' + phoneNumber + '\')" title="Send notification"><i class="bi ' + notifyIcon + '"></i></button>';
+
+          // Stage 2: Schedule button (only if notified and not MEC)
+          if (isNotified && cert.certType !== 'MEC Expiration' && cert.certType !== 'MEC') {
+            var scheduledBtnClass = isScheduled ? 'btn-scheduled' : 'btn-sms';
+            var scheduledIcon = isScheduled ? 'bi-calendar-check-fill' : 'bi-calendar-plus';
+            html += '<button class="btn ' + scheduledBtnClass + ' btn-sm me-1" onclick="event.stopPropagation(); openCertScheduleModal(\'' + escapeQuotes(cert.employee) + '\', \'' + escapeQuotes(cert.certType) + '\', \'' + escapeQuotes(cert.expirationDate) + '\', \'' + phoneNumber + '\')" title="Send class schedule"><i class="bi ' + scheduledIcon + '"></i></button>';
+          }
+        }
+
+        // Add to Checklist button
+        if (!isInChecklist) {
+          html += '<button class="btn btn-outline-primary btn-sm me-1" onclick="event.stopPropagation(); addCertToChecklist(\'' + escapeQuotes(cert.employee) + '\', \'' + escapeQuotes(cert.certType) + '\', \'' + escapeQuotes(cert.expirationDate) + '\', \'' + escapeQuotes(cert.location) + '\', \'' + phoneNumber + '\')" title="Add to My Checklist"><i class="bi bi-plus-circle"></i></button>';
+        } else {
+          html += '<span class="badge bg-info text-dark me-1"><i class="bi bi-clipboard-check"></i> In Checklist</span>';
+        }
+      }
+
+      // Mark Complete button
+      html += '<button class="btn btn-outline-success btn-sm" onclick="event.stopPropagation(); markCertComplete(\'' + escapeQuotes(cert.employee) + '\', \'' + escapeQuotes(cert.certType) + '\')" title="Mark as renewed/complete"><i class="bi bi-check-lg"></i></button>';
+
+      html += '</div></div></div>';
+      return html;
+    }
+
+    function escapeQuotes(str) {
+      return (str || '').replace(/'/g, "\\'").replace(/"/g, '\\"');
+    }
+
+    function addCertToChecklist(employee, certType, expDate, location, phone) {
+      var checklistItem = {
+        id: Date.now(),
+        employee: employee,
+        taskType: 'Cert Expiring',
+        itemType: certType,
+        location: location,
+        scheduledDate: '',
+        source: 'Expiring Certs',
+        phoneNumber: phone || '',
+        subject: 'Renew ' + certType,
+        addedDate: new Date().toISOString().split('T')[0],
+        completed: false,
+        notes: 'Expires: ' + expDate
+      };
+      personalChecklist.push(checklistItem);
+      saveChecklistToStorage();
+      updateChecklistBadge();
+      renderExpiringCerts();
+      renderPersonalChecklist();
+      showToast('✓ Added to My Checklist');
+    }
+
+    function openCertNotifyModal(employee, certType, expDate, phone) {
+      // Find matching task in allTasks or create a temporary one
+      var taskIndex = -1;
+      for (var i = 0; i < allTasks.length; i++) {
+        if (allTasks[i].employee === employee &&
+            (allTasks[i].itemType === certType || allTasks[i].certType === certType)) {
+          taskIndex = i;
+          break;
+        }
+      }
+
+      if (taskIndex !== -1) {
+        openNotifyModal(taskIndex);
+      } else {
+        // Create a temporary task object for the modal
+        var tempTask = {
+          employee: employee,
+          itemType: certType,
+          certType: certType,
+          dueDate: expDate,
+          phoneNumber: phone,
+          source: 'Expiring Certs',
+          taskType: 'Cert Expiring'
+        };
+        // Add to allTasks temporarily
+        var tempIndex = allTasks.length;
+        allTasks.push(tempTask);
+        openNotifyModal(tempIndex);
+      }
+    }
+
+    function openCertScheduleModal(employee, certType, expDate, phone) {
+      var taskIndex = -1;
+      for (var i = 0; i < allTasks.length; i++) {
+        if (allTasks[i].employee === employee &&
+            (allTasks[i].itemType === certType || allTasks[i].certType === certType)) {
+          taskIndex = i;
+          break;
+        }
+      }
+
+      if (taskIndex !== -1) {
+        openScheduledModal(taskIndex);
+      } else {
+        var tempTask = {
+          employee: employee,
+          itemType: certType,
+          certType: certType,
+          dueDate: expDate,
+          phoneNumber: phone,
+          source: 'Expiring Certs',
+          taskType: 'Cert Expiring'
+        };
+        var tempIndex = allTasks.length;
+        allTasks.push(tempTask);
+        openScheduledModal(tempIndex);
+      }
+    }
+
+    function markCertComplete(employee, certType) {
+      if (!confirm('Mark ' + certType + ' for ' + employee + ' as renewed/complete?\n\nThis will update the expiration date in the Expiring Certs sheet.')) {
+        return;
+      }
+
+      showToast('Updating certification...');
+      google.script.run
+        .withSuccessHandler(function() {
+          showToast('✓ Certification marked as complete');
+          // Remove from checklist if present
+          personalChecklist = personalChecklist.filter(function(item) {
+            return !(item.employee === employee && (item.itemType === certType || item.certType === certType));
+          });
+          saveChecklistToStorage();
+          // Reload certs
+          loadExpiringCerts();
+          renderPersonalChecklist();
+        })
+        .withFailureHandler(function(error) {
+          showToast('Error: ' + error, 'error');
+        })
+        .markCertAsRenewed(employee, certType);
+    }
+
     // Track which categories are expanded/collapsed (default to closed)
     var checklistCategoryState = { cert: false, manual: false, other: false };
 
@@ -3501,6 +3970,7 @@
     })();
 
     loadTasks();
+    loadExpiringCerts();
   </script>
 </body>
 </html>

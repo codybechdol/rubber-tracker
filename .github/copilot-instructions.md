@@ -11,7 +11,7 @@
 - `.html` files are HTML templates for dialogs/sidebars
 
 ## Key Files
-- `Code.gs` - Main code file with core functions
+- `Code.gs` - Main code file with core functions, including Task Metadata functions
 - `76-SmartScheduling.gs` - Smart scheduling and task collection
 - `87-RoutePlanner.gs` - Trip planning and route optimization (reads directly from source sheets)
 - `ToDoSchedule.html` - Tasks & Calendar dialog (main scheduling interface)
@@ -24,15 +24,54 @@
 - Task types include: Swap, Reclaim, Training, Cert Expiring
 - Item types are: Glove, Sleeve
 
+## Architecture (January 2026)
+**Option A Implementation - IN PROGRESS**
+- **Task Metadata Sheet** - Single source of truth for task scheduling state (COMPLETE ✅)
+- **Eliminated To Do List Sheet** - Dialogs read directly from source sheets + metadata (Phase 2)
+- **No localStorage** - State stored server-side in ScriptProperties or Task Metadata (Phase 4)
+
 ---
 
 # Feature Development Roadmap
 
-## Current Phase: Phase 1
+## Current Phase: Phase 2 - Update Dialogs to Use Task Metadata
+
+## COMPLETED PHASES ✅
+
+### Phase 1: Task Metadata Infrastructure (COMPLETE - Jan 31, 2026)
+**Status:** ✅ COMPLETE (85% done, remaining 15% are documentation tasks)
+
+**Goal:** Create Task Metadata sheet and core infrastructure functions.
+
+**What was built:**
+1. **setupTaskMetadataSheet()** - Creates 25-column Task Metadata sheet with validations
+2. **generateTaskMetadata()** - Reads from 6 source sheets, creates metadata records
+3. **getTasksWithMetadata()** - Joins source data with metadata for dialog consumption
+
+**Key achievements:**
+- ✅ Task Metadata sheet structure designed (25 columns)
+- ✅ Data collection from all sources working
+- ✅ Due dates extracting correctly from Glove/Sleeve Swaps
+- ✅ Duplicate prevention working
+- ✅ Phone number enrichment working
+- ✅ Fixed duplicate column header bug (Change Out Date index 4 vs 22)
+
+**Functions available:**
+- `setupTaskMetadataSheet()` - Menu: Glove Manager → Utilities → Setup Task Metadata Sheet
+- `generateTaskMetadata()` - Menu: Glove Manager → Schedule & To-Do → Generate Task Metadata
+- `getTasksWithMetadata()` - Returns: `{tasks: [...], lastGenerated: date, totalTasks: number}`
+
+**Documentation:**
+- IMPLEMENTATION_TRACKER.md - Master implementation plan
+- PHASE1_COMPLETE.md - Comprehensive Phase 1 summary
+- SESSION_SUMMARY_Jan31.md - Detailed session notes
+- DATA_FLOW_ANALYSIS.md - Architecture analysis
 
 ---
 
-## Phase 1: Crew Makeup Spreadsheet Import
+## IN PROGRESS PHASES 🔄
+
+### Phase 1.5: Crew Makeup Spreadsheet Import (ONGOING)
 **Status:** 🔄 IN PROGRESS (Testing new file upload approach)
 
 **Goal:** Import superintendent's weekly crew structure spreadsheet to update Employees sheet.

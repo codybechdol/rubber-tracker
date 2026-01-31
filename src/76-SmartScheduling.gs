@@ -517,14 +517,19 @@ function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLoca
       if (header === 'employee') employeeCol = h;
       if (header.indexOf('current') !== -1 && header.indexOf('#') !== -1) currentItemCol = h;
       if (header === 'size') sizeCol = h;
-      // Match "change out date" or "change out date assigned"
-      if (header.indexOf('change out date') !== -1) changeOutCol = h;
+      // Match "change out date" - USE FIRST OCCURRENCE ONLY (visible column, not hidden)
+      if (header.indexOf('change out date') !== -1 && changeOutCol === -1) {
+        changeOutCol = h;
+        Logger.log('collectSwapTasks: Found Change Out Date column at index ' + h + ', header="' + headers[h] + '"');
+      }
       if (header === 'days left') daysLeftCol = h;
       if (header.indexOf('pick list') !== -1 && header.indexOf('#') !== -1) pickListCol = h;
       if (header === 'status') statusCol = h;
       if (header === 'picked') pickedCol = h;
       if (header === 'date changed') dateChangedCol = h;
     }
+
+    Logger.log('collectSwapTasks: Section ' + section + ' column mapping - changeOutCol=' + changeOutCol + ', pickedCol=' + pickedCol + ', dateChangedCol=' + dateChangedCol);
 
     if (employeeCol === -1) {
       Logger.log('collectSwapTasks: Could not find Employee column in section ' + section);
@@ -583,9 +588,24 @@ function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLoca
       var daysLeftValue = daysLeftCol !== -1 ? row[daysLeftCol] : '';
       var status = statusCol !== -1 ? String(row[statusCol]).trim() : '';
 
-      // Debug log changeout date for first few rows
-      if (rowsNotDelivered <= 3) {
-        Logger.log('collectSwapTasks: Row ' + (i+1) + ' Employee="' + employee + '" changeOutDate=' + changeOutDate + ' (type=' + typeof changeOutDate + ')');
+      // DETAILED DEBUG LOGGING for employees we care about
+      var isDebugEmployee = (employee.toLowerCase().indexOf('cody lund') !== -1 ||
+                            employee.toLowerCase().indexOf('benjamin lapka') !== -1);
+
+      if (isDebugEmployee) {
+        Logger.log('=== DEBUG: Employee ' + employee + ' ===');
+        Logger.log('  Row: ' + (i+1));
+        Logger.log('  changeOutCol index: ' + changeOutCol);
+        Logger.log('  changeOutDate raw value: ' + changeOutDate);
+        Logger.log('  changeOutDate type: ' + typeof changeOutDate);
+        Logger.log('  changeOutDate instanceof Date: ' + (changeOutDate instanceof Date));
+        if (changeOutDate instanceof Date) {
+          Logger.log('  changeOutDate as Date: ' + changeOutDate.toString());
+        }
+        Logger.log('  currentItem: ' + currentItem);
+        Logger.log('  pickListItem: ' + pickListItem);
+        Logger.log('  isPicked: ' + isPicked);
+        Logger.log('  dateChanged: ' + dateChanged);
       }
 
       // Get location for this employee
@@ -602,6 +622,12 @@ function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLoca
           dueDate.setHours(0, 0, 0, 0);
           daysTillDue = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
           isOverdue = daysTillDue < 0;
+
+          if (isDebugEmployee) {
+            Logger.log('  PARSED dueDate: ' + dueDate.toString());
+            Logger.log('  daysTillDue: ' + daysTillDue);
+            Logger.log('  isOverdue: ' + isOverdue);
+          }
         } else if (typeof changeOutDate === 'string' && changeOutDate.trim() !== '') {
           // Try to parse string date
           dueDate = new Date(changeOutDate);
@@ -609,9 +635,25 @@ function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLoca
             dueDate.setHours(0, 0, 0, 0);
             daysTillDue = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
             isOverdue = daysTillDue < 0;
+
+            if (isDebugEmployee) {
+              Logger.log('  PARSED dueDate from string: ' + dueDate.toString());
+              Logger.log('  daysTillDue: ' + daysTillDue);
+            }
           } else {
+            if (isDebugEmployee) {
+              Logger.log('  FAILED to parse date from string');
+            }
             dueDate = null;
           }
+        } else {
+          if (isDebugEmployee) {
+            Logger.log('  changeOutDate was not Date or valid string');
+          }
+        }
+      } else {
+        if (isDebugEmployee) {
+          Logger.log('  changeOutDate was empty/null');
         }
       }
 
@@ -642,6 +684,18 @@ function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLoca
         sheetName: sheetName,
         rowIndex: i + 1 // 1-based row number
       };
+
+      if (isDebugEmployee) {
+        Logger.log('  CREATED TASK with dueDate: ' + (task.dueDate ? task.dueDate.toString() : 'NULL'));
+        Logger.log('  Task object: ' + JSON.stringify({
+          employee: task.employee,
+          dueDate: task.dueDate ? task.dueDate.toString() : null,
+          location: task.location,
+          currentItem: task.currentItem,
+          sheetName: task.sheetName,
+          rowIndex: task.rowIndex
+        }));
+      }
 
       // Add to location group
       if (!tasksByLocation[location]) {
