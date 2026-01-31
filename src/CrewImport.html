@@ -6,6 +6,8 @@
   <title>Import Crew Makeup</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  <!-- SheetJS for Excel parsing -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
   <style>
     body { font-family: 'Google Sans', Arial, sans-serif; background: #f8f9fa; margin: 0; padding: 20px; }
     .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
@@ -14,11 +16,9 @@
     .btn-primary:hover { background: #1557b0; border-color: #1557b0; }
     .config-section { padding: 20px; background: white; border-radius: 8px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
     .config-section h3 { color: #202124; font-size: 16px; margin-bottom: 16px; border-bottom: 1px solid #e0e0e0; padding-bottom: 8px; }
-    textarea { font-family: 'Courier New', monospace; font-size: 11px; }
     .preview-table { font-size: 12px; }
     .preview-table th { font-size: 11px; background: #f8f9fa; }
     .change-row { background-color: #fff3cd; }
-    .no-change-row { background-color: #f8f9fa; color: #6c757d; }
     .summary-card { background: #e8f0fe; border-left: 4px solid #1a73e8; padding: 16px; margin-bottom: 16px; border-radius: 8px; }
     .location-map { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; max-height: 200px; overflow-y: auto; }
     .location-map-item { display: flex; align-items: center; gap: 6px; padding: 3px 6px; background: #f8f9fa; border-radius: 4px; font-size: 11px; }
@@ -26,6 +26,20 @@
     .badge-role { font-size: 10px; }
     .text-changed { color: #1a73e8; font-weight: 500; }
     .text-unchanged { color: #9e9e9e; }
+    .upload-area { border: 2px dashed #1a73e8; border-radius: 8px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.2s; }
+    .upload-area:hover { background: #e8f0fe; }
+    .upload-area.dragover { background: #e8f0fe; border-color: #1557b0; }
+    .crew-card { border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; margin-bottom: 12px; background: white; }
+    .crew-card-header { font-weight: bold; color: #1a73e8; margin-bottom: 8px; border-bottom: 1px solid #e8f0fe; padding-bottom: 8px; }
+    .crew-card-employees { font-size: 12px; }
+    .crew-card-employee { padding: 2px 0; }
+    .sheet-tabs { margin-bottom: 16px; }
+    .sheet-tab { display: inline-block; padding: 8px 16px; margin-right: 4px; border: 1px solid #e0e0e0; border-radius: 4px 4px 0 0; cursor: pointer; background: #f8f9fa; }
+    .sheet-tab.active { background: white; border-bottom-color: white; font-weight: bold; }
+    .duplicate-card { border-left: 4px solid #ffc107; }
+    .form-check { padding: 8px 8px 8px 32px; margin: 4px 0; border-radius: 4px; }
+    .form-check:hover { background: #f8f9fa; }
+    .form-check-input:checked + .form-check-label { font-weight: 500; color: #1a73e8; }
   </style>
 </head>
 <body>
@@ -44,16 +58,40 @@
   <!-- Instructions -->
   <div class="config-section">
     <h3><i class="bi bi-info-circle"></i> Instructions</h3>
-    <p class="text-muted small mb-2">Paste the crew makeup data from the superintendent's Excel spreadsheet.</p>
+    <p class="text-muted small mb-2">Upload the crew structure Excel file from the superintendent.</p>
     <p class="text-muted small mb-0">The system will update:</p>
     <ul class="text-muted small mb-0">
       <li><strong>Location</strong> - Mapped from job header (Belgrade Dock → Bozeman)</li>
-      <li><strong>Job Number</strong> - Base job number (e.g., 013-26) + individual position (.1, .2, etc.)</li>
-      <li><strong>Job Classification</strong> - Based on role (Foreman, JL, Apprentice, GTO, etc.)</li>
+      <li><strong>Job Number</strong> - Base job number + position (013-26.1, 013-26.2, etc.)</li>
+      <li><strong>Job Classification</strong> - F → JL becomes F → JRY, AP levels (1 ap → AP 1), etc.</li>
     </ul>
     <div class="alert alert-info small mt-3 mb-0">
-      <i class="bi bi-lightbulb"></i> <strong>Note:</strong> Gray/future assignments in the spreadsheet will be ignored. Only active (colored) crews are imported.
+      <i class="bi bi-lightbulb"></i> <strong>Classification Mapping:</strong> F=F, JL=JRY, 1-7 ap=AP 1-7, Jry Op=JRY OP, GTO=GTO
     </div>
+  </div>
+
+  <!-- File Upload -->
+  <div class="config-section">
+    <h3><i class="bi bi-file-earmark-excel"></i> Upload Excel File</h3>
+    <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+      <i class="bi bi-cloud-upload" style="font-size: 48px; color: #1a73e8;"></i>
+      <p class="mt-3 mb-0"><strong>Click to select</strong> or drag & drop the Excel file</p>
+      <p class="text-muted small mb-0">Supports .xlsx and .xls files</p>
+    </div>
+    <input type="file" id="fileInput" accept=".xlsx,.xls" style="display: none;" onchange="handleFileSelect(event)">
+    <div id="fileInfo" class="mt-3" style="display: none;">
+      <div class="alert alert-success mb-0">
+        <i class="bi bi-check-circle"></i> <strong id="fileName">File loaded</strong>
+        <span class="float-end text-muted" id="fileSheets"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sheet Selection -->
+  <div id="sheetSelection" class="config-section" style="display: none;">
+    <h3><i class="bi bi-table"></i> Select Sheet</h3>
+    <p class="text-muted small mb-2">Choose the sheet tab that contains the current week's crew assignments.</p>
+    <div class="sheet-tabs" id="sheetTabs"></div>
   </div>
 
   <!-- Location Mapping -->
@@ -73,19 +111,31 @@
     <div id="unknownLocationsContainer"></div>
   </div>
 
-  <!-- Paste Area -->
-  <div class="config-section">
-    <h3><i class="bi bi-clipboard"></i> Paste Crew Data</h3>
-    <textarea class="form-control" id="crewData" rows="12" placeholder="Copy the crew makeup from Excel and paste here (Ctrl+V)...
+  <!-- Parsed Crews Preview -->
+  <div id="crewsPreview" class="config-section" style="display: none;">
+    <h3><i class="bi bi-diagram-3"></i> Detected Crews <span class="badge bg-primary" id="crewCount">0</span></h3>
+    <p class="text-muted small mb-3">Verify that crews and employees are correctly identified.</p>
+    <div id="crewCardsContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px;"></div>
+  </div>
 
-Example format:
-Belgrade Dock  013-26  5 8's M-F    Belgrade Dock  029-26  5 8's M-F
-Darrell Swann F                      Waco Worts F
-Dustin Graham JL                     Jimmy Bailey JL
-..."></textarea>
+  <!-- Duplicate Employee Selection -->
+  <div id="duplicateSection" class="config-section" style="display: none;">
+    <h3><i class="bi bi-people text-warning"></i> Employees in Multiple Crews <span class="badge bg-warning text-dark" id="duplicateCount">0</span></h3>
+    <p class="text-muted small mb-3">These employees appear in more than one crew. Select which assignment to use for each.</p>
+    <div id="duplicateContainer"></div>
+    <button class="btn btn-primary mt-3" onclick="resolveDuplicates()">
+      <i class="bi bi-check-lg"></i> Confirm Selections & Continue
+    </button>
+  </div>
+
+  <!-- Special Circumstances Section (Layoffs, Resigned, Light Duty) -->
+  <div id="specialSection" class="config-section" style="display: none;">
+    <h3><i class="bi bi-exclamation-circle text-info"></i> Special Circumstances <span class="badge bg-info" id="specialCount">0</span></h3>
+    <p class="text-muted small mb-3">These employees have special status (Layoff, Resigned, Light Duty, etc.). Choose how to handle each one.</p>
+    <div id="specialContainer"></div>
     <div class="mt-3">
-      <button class="btn btn-primary" onclick="parseCrewData()">
-        <i class="bi bi-search"></i> Parse & Preview Changes
+      <button class="btn btn-secondary btn-sm" onclick="skipAllSpecial()">
+        <i class="bi bi-skip-forward"></i> Skip All Special Cases
       </button>
     </div>
   </div>
@@ -125,31 +175,146 @@ Dustin Graham JL                     Jimmy Bailey JL
 
     <!-- Unmatched Employees -->
     <div id="unmatchedSection" class="config-section" style="display: none;">
-      <h3><i class="bi bi-person-x text-danger"></i> Unmatched Employees</h3>
-      <p class="text-muted small mb-3">These employees couldn't be matched. They may need to be added to the Employees sheet first.</p>
+      <h3><i class="bi bi-person-x text-danger"></i> Unmatched Employees <span class="badge bg-danger" id="unmatchedCount">0</span></h3>
+      <p class="text-muted small mb-3">These employees couldn't be matched automatically. You can <strong>add them as new employees</strong> (new hires), match them to existing employees, or skip them.</p>
       <div id="unmatchedContainer"></div>
+      <div class="mt-3">
+        <button class="btn btn-secondary btn-sm" onclick="skipAllUnmatched()">
+          <i class="bi bi-skip-forward"></i> Skip All Unmatched
+        </button>
+      </div>
     </div>
   </div>
 
-  <!-- Location Mapping Modal -->
-  <div class="modal fade" id="locationModal" tabindex="-1">
-    <div class="modal-dialog">
+  <!-- New Employee Modal -->
+  <div class="modal fade" id="newEmployeeModal" tabindex="-1" aria-labelledby="newEmployeeModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
       <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title"><i class="bi bi-geo-alt"></i> Map Unknown Location</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        <div class="modal-header" style="background: #e8f0fe; border-bottom: 2px solid #1a73e8;">
+          <h5 class="modal-title" id="newEmployeeModalLabel">
+            <i class="bi bi-person-plus text-primary"></i> Add New Employee
+          </h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          <p>The location "<strong id="unknownLocationName"></strong>" wasn't recognized.</p>
-          <div class="mb-3">
-            <label class="form-label">Map to standard location:</label>
-            <input type="text" class="form-control" id="mappedLocationInput" placeholder="e.g., Bozeman, Helena, Great Falls...">
+          <div class="mb-3 p-3" style="background: #f8f9fa; border-radius: 8px;">
+            <strong id="newEmpNameDisplay" style="font-size: 18px;"></strong>
+            <br><small class="text-muted">From Excel: <span id="newEmpOriginalText"></span></small>
           </div>
-          <div class="form-text">This mapping will be remembered for future imports.</div>
+
+          <form id="newEmployeeForm">
+            <!-- Location & Job Info -->
+            <div class="row mb-3">
+              <div class="col-md-6">
+                <label class="form-label small"><strong>Location</strong> <span class="text-danger">*</span></label>
+                <select class="form-select form-select-sm" id="newEmpLocation" required>
+                  <option value="">Select location...</option>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small"><strong>Job Number</strong> <span class="text-danger">*</span></label>
+                <input type="text" class="form-control form-control-sm" id="newEmpJobNumber" placeholder="e.g., 013-26.1" required>
+              </div>
+            </div>
+
+            <div class="row mb-3">
+              <div class="col-md-6">
+                <label class="form-label small"><strong>Job Classification</strong> <span class="text-danger">*</span></label>
+                <select class="form-select form-select-sm" id="newEmpClassification" required>
+                  <option value="">Select classification...</option>
+                  <option value="AP 1">AP 1 - Apprentice 1st Year</option>
+                  <option value="AP 2">AP 2 - Apprentice 2nd Year</option>
+                  <option value="AP 3">AP 3 - Apprentice 3rd Year</option>
+                  <option value="AP 4">AP 4 - Apprentice 4th Year</option>
+                  <option value="AP 5">AP 5 - Apprentice 5th Year</option>
+                  <option value="AP 6">AP 6 - Apprentice 6th Year</option>
+                  <option value="AP 7">AP 7 - Apprentice 7th Year</option>
+                  <option value="JRY">JRY - Journeyman Lineman</option>
+                  <option value="WT">WT - White Ticket Lineman</option>
+                  <option value="F">F - Foreman</option>
+                  <option value="GF">GF - General Foreman</option>
+                  <option value="SUP">SUP - Supervisor</option>
+                  <option value="JRY OP">JRY OP - Journeyman Operator</option>
+                  <option value="OP">OP - Operator</option>
+                  <option value="GTO F">GTO F - GTO Foreman</option>
+                  <option value="GTO">GTO - General Trade Operator</option>
+                  <option value="EO 1">EO 1 - Equipment Operator 1</option>
+                  <option value="EO 2">EO 2 - Equipment Operator 2</option>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small"><strong>Hire Date</strong></label>
+                <input type="date" class="form-control form-control-sm" id="newEmpHireDate">
+              </div>
+            </div>
+
+            <!-- Contact Info -->
+            <hr class="my-3">
+            <h6 class="text-muted mb-3"><i class="bi bi-telephone"></i> Contact Info</h6>
+
+            <div class="row mb-3">
+              <div class="col-md-6">
+                <label class="form-label small">Phone Number</label>
+                <input type="tel" class="form-control form-control-sm" id="newEmpPhone" placeholder="(XXX) XXX-XXXX">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small">Email Address</label>
+                <input type="email" class="form-control form-control-sm" id="newEmpEmail" placeholder="employee@email.com">
+              </div>
+            </div>
+
+            <div class="row mb-3">
+              <div class="col-md-6">
+                <label class="form-label small">MP Email</label>
+                <input type="email" class="form-control form-control-sm" id="newEmpMPEmail" placeholder="team##@MountainPower.com">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small">Notification Emails</label>
+                <input type="email" class="form-control form-control-sm" id="newEmpNotificationEmails" placeholder="Email for notifications">
+              </div>
+            </div>
+
+            <!-- Equipment Sizes -->
+            <hr class="my-3">
+            <h6 class="text-muted mb-3"><i class="bi bi-hand-index"></i> Equipment Sizes</h6>
+
+            <div class="row mb-3">
+              <div class="col-md-6">
+                <label class="form-label small">Glove Size</label>
+                <select class="form-select form-select-sm" id="newEmpGloveSize">
+                  <option value="">Select size...</option>
+                  <option value="8">8</option>
+                  <option value="8.5">8.5</option>
+                  <option value="9">9</option>
+                  <option value="9.5">9.5</option>
+                  <option value="10">10</option>
+                  <option value="10.5">10.5</option>
+                  <option value="11">11</option>
+                  <option value="11.5">11.5</option>
+                  <option value="12">12</option>
+                  <option value="N/A">N/A</option>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small">Sleeve Size</label>
+                <select class="form-select form-select-sm" id="newEmpSleeveSize">
+                  <option value="">Select size...</option>
+                  <option value="Regular">Regular</option>
+                  <option value="Large">Large</option>
+                  <option value="X-Large">X-Large</option>
+                  <option value="N/A">N/A</option>
+                </select>
+              </div>
+            </div>
+
+            <input type="hidden" id="newEmpUnmatchedIndex">
+          </form>
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Skip This Location</button>
-          <button type="button" class="btn btn-primary" onclick="saveLocationMapping()">Save Mapping</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-success" onclick="submitNewEmployee()">
+            <i class="bi bi-person-plus"></i> Add Employee
+          </button>
         </div>
       </div>
     </div>
@@ -164,6 +329,7 @@ Dustin Graham JL                     Jimmy Bailey JL
       'Big Sky Dock': 'Big Sky',
       'Big Sky': 'Big Sky',
       'Helena Trans Dock': 'Helena',
+      'Helena Dock': 'Helena',
       'Helena Trans': 'Helena',
       'Helena': 'Helena',
       'Great Falls Dock': 'Great Falls',
@@ -178,10 +344,13 @@ Dustin Graham JL                     Jimmy Bailey JL
       'Ennis': 'Ennis',
       'Ennis/Lone Mtn Trans': 'Ennis',
       'Stanford Trans Dock': 'Stanford',
+      'Stanford Trans': 'Stanford',
       'Stanford': 'Stanford',
       'South Dakota Dock': 'South Dakota',
+      'South Dakota': 'South Dakota',
       'Lolo Sub Dock': 'Lolo',
       'Lolo Sub': 'Lolo',
+      'Lolo': 'Lolo',
       'Msla': 'Missoula',
       'Msla ZIPLY Poles': 'Missoula',
       'Missoula': 'Missoula',
@@ -193,47 +362,32 @@ Dustin Graham JL                     Jimmy Bailey JL
       'Rapelje': 'Rapelje',
       'Greycliff': 'Greycliff',
       'Manhattan Sub': 'Manhattan',
+      'Manhattan': 'Manhattan',
       'Mill Crk Sub': 'Mill Creek',
       'Mill Crk Sub Anaconda Dock': 'Anaconda',
       'Anaconda': 'Anaconda',
       'Northern Lights Dock': 'Northern Lights',
       'Northern Lights': 'Northern Lights',
       'CA Sub Foundation': 'California',
-      'Weeds Hot Apes': 'Weeds',
-      'Weeds Cold Apes': 'Weeds',
-      'Weeds Gas': 'Weeds',
-      'Weeds Operators': 'Weeds',
-      'Gas OQ Testing': 'Helena',
-      'Gas Fusion Testing': 'Helena'
-    };
-
-    // Role to Job Classification mapping
-    var roleToClassification = {
-      'Foreman': 'Foreman',
-      'Journeyman Lineman': 'Journeyman Lineman',
-      'JL': 'Journeyman Lineman',
-      'Apprentice Year 1': '1st Year Apprentice',
-      'Apprentice Year 2': '2nd Year Apprentice',
-      'Apprentice Year 3': '3rd Year Apprentice',
-      'Apprentice Year 4': '4th Year Apprentice',
-      'Apprentice Year 5': '5th Year Apprentice',
-      'Apprentice Year 6': '6th Year Apprentice',
-      'Journey Operator': 'Journey Operator',
-      'Jry Op': 'Journey Operator',
-      'GTO': 'GTO',
-      'GTO F': 'GTO Foreman',
-      'EO2': 'Equipment Operator 2',
-      'WT': 'Working Tech'
+      'CA Sub Foundation Bid': 'California',
+      'CA Sub': 'California',
+      'Gold Creek Trans Dock': 'Gold Creek',
+      'Gold Creek Dock': 'Gold Creek',
+      'Gold Creek': 'Gold Creek'
     };
 
     var currentEmployees = [];
     var parsedCrews = [];
     var proposedChanges = [];
     var unknownLocations = [];
-    var currentUnknownLocation = null;
+    var specialCircumstances = []; // Employees with Layoff, Resigned, Light Duty, etc.
+    var workbook = null;
+    var selectedSheet = null;
 
     function init() {
       renderLocationMappings();
+      setupDragDrop();
+      setupPotentialMatchClickHandler();
 
       // Load current employees from sheet
       google.script.run
@@ -245,6 +399,1298 @@ Dustin Graham JL                     Jimmy Bailey JL
           console.error('Failed to load employees:', error);
         })
         .getEmployeeNamesForMatching();
+    }
+
+    // Delegated event handler for potential match buttons (more robust than inline onclick)
+    function setupPotentialMatchClickHandler() {
+      document.addEventListener('click', function(e) {
+        var btn = e.target.closest('.potential-match-btn');
+        if (btn) {
+          console.log('Clicked potential match button:', btn);
+          console.log('Button classes:', btn.className);
+          console.log('Is disabled:', btn.classList.contains('disabled'));
+
+          if (!btn.classList.contains('disabled')) {
+            var unmatchedIndex = parseInt(btn.getAttribute('data-unmatched-index'));
+            var employeeRow = parseInt(btn.getAttribute('data-employee-row'));
+            var employeeName = btn.getAttribute('data-employee-name');
+
+            console.log('Data attributes:', { unmatchedIndex: unmatchedIndex, employeeRow: employeeRow, employeeName: employeeName });
+
+            if (!isNaN(unmatchedIndex) && !isNaN(employeeRow) && employeeName) {
+              console.log('Calling manuallyMatchEmployee...');
+              manuallyMatchEmployee(unmatchedIndex, employeeRow, employeeName);
+            } else {
+              console.error('Invalid data attributes on button');
+            }
+          }
+        }
+      });
+    }
+
+    function setupDragDrop() {
+      var uploadArea = document.getElementById('uploadArea');
+
+      uploadArea.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        uploadArea.classList.add('dragover');
+      });
+
+      uploadArea.addEventListener('dragleave', function(e) {
+        e.preventDefault();
+        uploadArea.classList.remove('dragover');
+      });
+
+      uploadArea.addEventListener('drop', function(e) {
+        e.preventDefault();
+        uploadArea.classList.remove('dragover');
+        var files = e.dataTransfer.files;
+        if (files.length > 0) {
+          processFile(files[0]);
+        }
+      });
+    }
+
+    function handleFileSelect(event) {
+      var file = event.target.files[0];
+      if (file) {
+        processFile(file);
+      }
+    }
+
+    function processFile(file) {
+      console.log('Processing file:', file.name);
+
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          var data = new Uint8Array(e.target.result);
+          // Enable cellStyles to detect greyed-out cells
+          workbook = XLSX.read(data, { type: 'array', cellStyles: true });
+
+          console.log('Workbook loaded. Sheets:', workbook.SheetNames);
+
+          document.getElementById('fileInfo').style.display = 'block';
+          document.getElementById('fileName').textContent = file.name;
+          document.getElementById('fileSheets').textContent = workbook.SheetNames.length + ' sheet(s)';
+
+          // Show sheet selection
+          showSheetSelection();
+
+        } catch (err) {
+          console.error('Error parsing Excel file:', err);
+          alert('Error reading Excel file: ' + err.message);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function showSheetSelection() {
+      var container = document.getElementById('sheetTabs');
+      var html = '';
+
+      for (var i = 0; i < workbook.SheetNames.length; i++) {
+        var sheetName = workbook.SheetNames[i];
+        var isActive = i === 0 ? 'active' : '';
+        html += '<span class="sheet-tab ' + isActive + '" onclick="selectSheet(\'' + escapeQuotes(sheetName) + '\', this)">' + sheetName + '</span>';
+      }
+
+      container.innerHTML = html;
+      document.getElementById('sheetSelection').style.display = 'block';
+
+      // Auto-select first sheet
+      if (workbook.SheetNames.length > 0) {
+        selectSheet(workbook.SheetNames[0], container.querySelector('.sheet-tab'));
+      }
+    }
+
+    function selectSheet(sheetName, tabElement) {
+      // Update tab UI
+      document.querySelectorAll('.sheet-tab').forEach(function(tab) {
+        tab.classList.remove('active');
+      });
+      if (tabElement) tabElement.classList.add('active');
+
+      selectedSheet = sheetName;
+      console.log('Selected sheet:', sheetName);
+
+      // Parse the selected sheet
+      parseSheet(sheetName);
+    }
+
+    // Check if a row is hidden in the Excel sheet
+    function isRowHidden(sheet, rowIndex) {
+      if (!sheet['!rows']) return false;
+      var rowInfo = sheet['!rows'][rowIndex];
+      return rowInfo && rowInfo.hidden === true;
+    }
+
+    // Check if a column is hidden in the Excel sheet
+    function isColHidden(sheet, colIndex) {
+      if (!sheet['!cols']) return false;
+      var colInfo = sheet['!cols'][colIndex];
+      return colInfo && colInfo.hidden === true;
+    }
+
+    function parseSheet(sheetName) {
+      var sheet = workbook.Sheets[sheetName];
+      if (!sheet) {
+        alert('Sheet not found: ' + sheetName);
+        return;
+      }
+
+      // Convert to array of arrays (preserving empty cells)
+      // Also track which cells are greyed-out
+      // Skip hidden rows and columns
+      var range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
+      var data = [];
+      var cellStyles = {}; // Track cell styles by "r,c" key
+      var hiddenRowCount = 0;
+      var hiddenColCount = 0;
+
+      // Build list of visible column indices
+      var visibleCols = [];
+      for (var c = range.s.c; c <= range.e.c; c++) {
+        if (!isColHidden(sheet, c)) {
+          visibleCols.push(c);
+        } else {
+          hiddenColCount++;
+        }
+      }
+
+      // Track mapping from visible index to original column for cell styles
+      var visibleRowIndex = 0;
+
+      for (var r = range.s.r; r <= range.e.r; r++) {
+        // Skip hidden rows
+        if (isRowHidden(sheet, r)) {
+          hiddenRowCount++;
+          continue;
+        }
+
+        var row = [];
+        var visibleColIndex = 0;
+
+        for (var i = 0; i < visibleCols.length; i++) {
+          var c = visibleCols[i];
+          var cellAddr = XLSX.utils.encode_cell({ r: r, c: c });
+          var cell = sheet[cellAddr];
+          row.push(cell ? String(cell.v || '').trim() : '');
+
+          // Check if cell has style info indicating it's greyed-out
+          // Use visible row/col indices for cellStyles (data array indices)
+          if (cell && cell.s) {
+            var isGreyed = isCellGreyedOut(cell.s);
+            if (isGreyed) {
+              cellStyles[visibleRowIndex + ',' + visibleColIndex] = { greyed: true };
+            }
+          }
+          visibleColIndex++;
+        }
+        data.push(row);
+        visibleRowIndex++;
+      }
+
+      // Store cell styles globally for parseCrewCards to use
+      window.parsedCellStyles = cellStyles;
+
+      console.log('Sheet data: ' + data.length + ' visible rows (skipped ' + hiddenRowCount + ' hidden rows, ' + hiddenColCount + ' hidden cols)');
+      console.log('Found ' + Object.keys(cellStyles).length + ' greyed-out cells');
+
+      // Parse crews using the card-based approach
+      parseCrewCards(data);
+    }
+
+    // Check if a cell style indicates the cell is greyed-out
+    function isCellGreyedOut(style) {
+      if (!style) return false;
+
+      // Check font color (grey text)
+      if (style.fgColor) {
+        var color = style.fgColor;
+        // Grey colors typically have similar RGB values or a theme of grey
+        if (color.rgb) {
+          var rgb = color.rgb;
+          // Check if it's a grey-ish color (hex like "808080", "A0A0A0", "C0C0C0")
+          if (rgb && rgb.length >= 6) {
+            var r = parseInt(rgb.substring(0, 2), 16);
+            var g = parseInt(rgb.substring(2, 4), 16);
+            var b = parseInt(rgb.substring(4, 6), 16);
+            // Grey if all values are similar and in the mid-range (not black, not white)
+            if (Math.abs(r - g) < 30 && Math.abs(g - b) < 30 && r > 100 && r < 200) {
+              return true;
+            }
+          }
+        }
+      }
+
+      // Check font.color as well (different structure in some Excel files)
+      if (style.font && style.font.color) {
+        var fontColor = style.font.color;
+        if (fontColor.rgb) {
+          var rgb = fontColor.rgb;
+          if (rgb && rgb.length >= 6) {
+            var r = parseInt(rgb.substring(0, 2), 16);
+            var g = parseInt(rgb.substring(2, 4), 16);
+            var b = parseInt(rgb.substring(4, 6), 16);
+            if (Math.abs(r - g) < 30 && Math.abs(g - b) < 30 && r > 100 && r < 200) {
+              return true;
+            }
+          }
+        }
+        // Some files use theme indices - theme 0 is often grey
+        if (fontColor.theme !== undefined && fontColor.theme === 0 && fontColor.tint) {
+          return true; // Tinted theme 0 is often light grey
+        }
+      }
+
+      return false;
+    }
+
+    // Helper to check if a specific cell is greyed out
+    function isCellAtPositionGreyed(row, col) {
+      return window.parsedCellStyles && window.parsedCellStyles[row + ',' + col] && window.parsedCellStyles[row + ',' + col].greyed;
+    }
+
+    function parseCrewCards(data) {
+      parsedCrews = [];
+      unknownLocations = [];
+      specialCircumstances = []; // Track employees with special status
+
+      // Find all crew headers (cells with job number pattern XXX-XX)
+      // A crew header is a cell containing something like "Belgrade Dock 013-26 5 8's M-F"
+      var crewHeaders = [];
+
+      // Also look for special sections like "Time off/Quit/Other"
+      var specialSectionHeaders = [];
+
+      for (var r = 0; r < data.length; r++) {
+        for (var c = 0; c < data[r].length; c++) {
+          var cell = data[r][c];
+          if (!cell) continue;
+
+          // Check for special section headers
+          if (cell.match(/Time\s*off|Quit|Other|Layoff|Resign|Leave/i) && !cell.match(/\d{3}-\d{2}/)) {
+            console.log('Found special section header at [' + r + ',' + c + ']: ' + cell);
+            specialSectionHeaders.push({
+              row: r,
+              col: c,
+              headerText: cell
+            });
+            continue;
+          }
+
+          // Look for job number pattern: XXX-XX (3 digits, dash, 2 digits)
+          var match = cell.match(/^(.+?)\s+(\d{3}-\d{2})\b/);
+          if (match) {
+            var locationName = match[1].trim();
+            var jobNumber = match[2];
+
+            // Skip BID items that are greyed out/future planning
+            if (cell.match(/BID\s*$/i)) {
+              console.log('Skipping BID item: ' + cell);
+              continue;
+            }
+
+            // Skip greyed-out cells (inactive/future jobs)
+            if (isCellAtPositionGreyed(r, c)) {
+              console.log('Skipping greyed-out crew: ' + cell);
+              continue;
+            }
+
+            console.log('Found crew header at [' + r + ',' + c + ']: ' + locationName + ' ' + jobNumber);
+
+            crewHeaders.push({
+              row: r,
+              col: c,
+              locationName: locationName,
+              jobNumber: jobNumber,
+              fullText: cell
+            });
+          }
+        }
+      }
+
+      console.log('Found ' + crewHeaders.length + ' crew headers');
+      console.log('Found ' + specialSectionHeaders.length + ' special section headers');
+
+      // Parse special sections (Time off/Quit/Other)
+      for (var s = 0; s < specialSectionHeaders.length; s++) {
+        var specialHeader = specialSectionHeaders[s];
+        parseSpecialSection(data, specialHeader);
+      }
+
+      // For each crew header, find employees below it (in the same column)
+      // until we hit another header, an empty cell, or reach the next section
+
+      for (var i = 0; i < crewHeaders.length; i++) {
+        var header = crewHeaders[i];
+        var employees = [];
+
+        // Find where this crew's employees end
+        // They end when we hit:
+        // 1. Another crew header in the same column
+        // 2. A cell with a job number pattern (new crew)
+        // 3. Too many empty rows (section break)
+
+        var nextHeaderRow = findNextHeaderRow(crewHeaders, header.col, header.row);
+        var emptyRowCount = 0;
+        var maxEmpty = 2; // Allow 1-2 empty rows within a crew
+
+        for (var r = header.row + 1; r < data.length && r < nextHeaderRow; r++) {
+          var cell = data[r][header.col];
+
+          if (!cell || cell.trim() === '') {
+            emptyRowCount++;
+            if (emptyRowCount > maxEmpty) break;
+            continue;
+          }
+
+          emptyRowCount = 0;
+
+          // Skip non-employee content
+          if (cell.match(/\d{3}-\d{2}/)) break; // Another job number
+          if (cell.match(/^(NWE|Aprox|Tentative|Completed|On Hold)/i)) continue;
+          if (cell.match(/schedule|Released|layoff|weeks? work/i)) continue;
+          if (cell.match(/^\d+\s*10\/\d+\s*10\s+schedule/i)) continue; // "4 10/5 10 schedule..."
+
+          // Check if this looks like an employee name
+          if (isEmployeeName(cell)) {
+            var empInfo = parseEmployeeName(cell);
+            empInfo.sourceRow = r;
+            empInfo.sourceCol = header.col;
+            employees.push(empInfo);
+            console.log('  Employee: ' + empInfo.name + ' (' + empInfo.role + ')');
+          }
+        }
+
+        // Map location
+        var mappedLocation = mapLocation(header.locationName);
+        var isUnknown = mappedLocation === header.locationName && !locationMappings[header.locationName];
+
+        if (isUnknown && unknownLocations.indexOf(header.locationName) === -1) {
+          unknownLocations.push(header.locationName);
+        }
+
+        // Assign position numbers to employees
+        for (var e = 0; e < employees.length; e++) {
+          employees[e].position = e + 1;
+          employees[e].fullJobNumber = header.jobNumber + '.' + (e + 1);
+        }
+
+        parsedCrews.push({
+          originalLocation: header.locationName,
+          mappedLocation: mappedLocation,
+          jobNumber: header.jobNumber,
+          employees: employees,
+          headerRow: header.row,
+          headerCol: header.col,
+          isUnknownLocation: isUnknown
+        });
+      }
+
+      console.log('Parsed ' + parsedCrews.length + ' crews with employees');
+
+      // Check for unknown locations first
+      if (unknownLocations.length > 0) {
+        showUnknownLocations();
+        return;
+      }
+
+      // Show crew preview and match employees
+      showCrewPreview();
+      matchEmployeesToSheet();
+      // Note: if there are duplicates, matchEmployeesToSheet will show the duplicate UI
+      // and displayPreview will be called after user resolves duplicates
+      if (duplicateEmployees.length === 0) {
+        displayPreview();
+      }
+    }
+
+    // Parse employees in special sections (Time off/Quit/Other)
+    function parseSpecialSection(data, header) {
+      console.log('Parsing special section starting at row ' + header.row + ': ' + header.headerText);
+
+      var maxRows = 20; // Don't look too far down
+      var emptyRowCount = 0;
+      var maxEmpty = 2;
+
+      for (var r = header.row + 1; r < data.length && r < header.row + maxRows; r++) {
+        var cell = data[r][header.col];
+
+        if (!cell || cell.trim() === '') {
+          emptyRowCount++;
+          if (emptyRowCount > maxEmpty) break;
+          continue;
+        }
+
+        emptyRowCount = 0;
+
+        // Skip if it looks like another header
+        if (cell.match(/\d{3}-\d{2}/)) break;
+        if (cell.match(/^(Time\s*off|Quit|Other|Dock|Trans|Sub)\b/i)) break;
+
+        // Parse the special employee entry
+        var specialInfo = parseSpecialEmployee(cell);
+        if (specialInfo) {
+          specialInfo.sourceRow = r;
+          specialInfo.sourceCol = header.col;
+          specialInfo.sectionHeader = header.headerText;
+          specialCircumstances.push(specialInfo);
+          console.log('  Special: ' + specialInfo.name + ' - ' + specialInfo.status + (specialInfo.date ? ' (' + specialInfo.date + ')' : '') + (specialInfo.notes ? ' [' + specialInfo.notes + ']' : ''));
+        }
+      }
+    }
+
+    // Parse a special employee entry like "Charles Daniel 1 ap Resigned from MSLCAT 1-6-26"
+    function parseSpecialEmployee(text) {
+      if (!text || text.length < 4) return null;
+
+      var result = {
+        originalText: text,
+        name: '',
+        classification: '',
+        status: '',       // Resigned, Layoff, Light Duty, Time Off, etc.
+        date: '',         // Date of event if present
+        notes: '',        // Additional notes
+        company: ''       // Company name if mentioned (e.g., MSLCAT)
+      };
+
+      var cleanText = text.trim();
+
+      // ============================================================
+      // STEP 1: Extract dates first (various formats)
+      // Patterns: "1-12", "1-12-26", "01/12/26", "Mon 1-12", etc.
+      // ============================================================
+
+      // Look for date patterns and extract them
+      // Format: M-D, M-D-YY, M-D-YYYY, or with Mon/Tue prefix
+      var datePatterns = [
+        /\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)?\s*(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/gi
+      ];
+
+      for (var dp = 0; dp < datePatterns.length; dp++) {
+        var dateMatch = cleanText.match(datePatterns[dp]);
+        if (dateMatch) {
+          // Extract the date parts
+          var fullMatch = dateMatch[0];
+          var month = dateMatch[2] || '';
+          var day = dateMatch[3] || '';
+          var year = dateMatch[4] || '26'; // Default to current year
+
+          if (month && day) {
+            // Format as MM-DD-YY
+            result.date = month + '-' + day + '-' + year;
+          }
+          // Remove the date from cleanText
+          cleanText = cleanText.replace(fullMatch, ' ').trim();
+          break;
+        }
+      }
+
+      // Also check for standalone short dates like "1-12" at end
+      var shortDateMatch = cleanText.match(/\s+(\d{1,2})-(\d{1,2})$/);
+      if (shortDateMatch && !result.date) {
+        result.date = shortDateMatch[1] + '-' + shortDateMatch[2] + '-26';
+        cleanText = cleanText.replace(shortDateMatch[0], '').trim();
+      }
+
+      // ============================================================
+      // STEP 2: Extract status keywords
+      // ============================================================
+
+      // Check for Resigned (with optional company)
+      var resignedMatch = cleanText.match(/\b(Resigned?)\s*(from\s+(\S+))?/i);
+      if (resignedMatch) {
+        result.status = 'Resigned';
+        result.company = resignedMatch[3] || '';
+        cleanText = cleanText.replace(resignedMatch[0], ' ').trim();
+      }
+
+      // Check for Layoff (various spellings)
+      if (cleanText.match(/\b(Layoff|Laid\s*Off|lay\s*off)\b/i)) {
+        result.status = 'Layoff';
+        cleanText = cleanText.replace(/\b(Layoff|Laid\s*Off|lay\s*off)\b/i, ' ').trim();
+      }
+
+      // Check for Quit
+      if (cleanText.match(/\bQuit\b/i)) {
+        result.status = 'Quit';
+        cleanText = cleanText.replace(/\bQuit\b/i, ' ').trim();
+      }
+
+      // Check for Vacation or Time Off
+      if (cleanText.match(/\b(Vacation|Time\s*Off)\b/i)) {
+        result.status = 'Time Off';
+        cleanText = cleanText.replace(/\b(Vacation|Time\s*Off)\b/i, ' ').trim();
+      }
+
+      // Check for Light Duty
+      if (cleanText.match(/\bLight\s*Duty\b/i)) {
+        result.status = 'Light Duty';
+        cleanText = cleanText.replace(/\bLight\s*Duty\b/i, ' ').trim();
+      }
+
+      // Check for MT Misc
+      if (cleanText.match(/\bMT\s*Misc\b/i)) {
+        result.status = result.status || 'MT Misc';
+        if (result.status && result.status !== 'MT Misc') {
+          result.notes = (result.notes ? result.notes + ', ' : '') + 'MT Misc';
+        }
+        cleanText = cleanText.replace(/\bMT\s*Misc\b/i, ' ').trim();
+      }
+
+      // Check for FMLA/Leave
+      if (cleanText.match(/\b(FMLA|Leave|Medical)\b/i)) {
+        result.status = result.status || 'Leave';
+        cleanText = cleanText.replace(/\b(FMLA|On\s*Leave|Medical\s*Leave|Leave)\b/i, ' ').trim();
+      }
+
+      // Check for Suspended Driver License
+      if (cleanText.match(/\bSuspended\s*(Driver\s*)?(License)?\b/i)) {
+        result.notes = (result.notes ? result.notes + ', ' : '') + 'Suspended Driver License';
+        cleanText = cleanText.replace(/\bSuspended\s*(Driver\s*)?(License)?\b/i, ' ').trim();
+      }
+
+      // ============================================================
+      // STEP 3: Extract classification from remaining text
+      // Handle typos like "3 ap" or "3ap" or "ap3"
+      // ============================================================
+
+      // Look for apprentice pattern (handles "3 ap", "3ap", "ap 3", "ap3")
+      var apMatch = cleanText.match(/\b(\d)\s*ap\b|\bap\s*(\d)\b/i);
+      if (apMatch) {
+        var apLevel = apMatch[1] || apMatch[2];
+        result.classification = 'AP ' + apLevel;
+        cleanText = cleanText.replace(apMatch[0], ' ').trim();
+      }
+
+      // Look for other classifications
+      if (!result.classification) {
+        if (cleanText.match(/\bJL\b/i)) {
+          result.classification = 'JRY';
+          cleanText = cleanText.replace(/\bJL\b/i, ' ').trim();
+        } else if (cleanText.match(/\bF\b/) && cleanText.match(/\bGTO\b/i)) {
+          result.classification = 'GTO F';
+          cleanText = cleanText.replace(/\bGTO\s*F\b/i, ' ').trim();
+        } else if (cleanText.match(/\s+F$/)) {
+          result.classification = 'F';
+          cleanText = cleanText.replace(/\s+F$/, '').trim();
+        } else if (cleanText.match(/\bGTO\b/i)) {
+          result.classification = 'GTO';
+          cleanText = cleanText.replace(/\bGTO\b/i, ' ').trim();
+        } else if (cleanText.match(/\bJry\s*Op\b/i)) {
+          result.classification = 'JRY OP';
+          cleanText = cleanText.replace(/\bJry\s*Op\b/i, ' ').trim();
+        } else if (cleanText.match(/\bEO2\b/i)) {
+          result.classification = 'EO 2';
+          cleanText = cleanText.replace(/\bEO2\b/i, ' ').trim();
+        }
+      }
+
+      // ============================================================
+      // STEP 4: Clean up remaining text to get the name
+      // Remove day names, extra spaces, stray fragments
+      // ============================================================
+
+      // Remove any remaining day names (Mon, Tue, Wed, Thu, Thurs, Fri, Sat, Sun)
+      cleanText = cleanText.replace(/\b(Mon|Tues?|Wed|Thur?s?|Fri|Sat|Sun)(day)?\b/gi, ' ').trim();
+
+      // Remove "off" if it's standalone (from "time off" or "laid off")
+      cleanText = cleanText.replace(/\boff\b/gi, ' ').trim();
+
+      // Remove "thru" (as in "Wed thru Fri")
+      cleanText = cleanText.replace(/\bthru\b/gi, ' ').trim();
+
+      // Clean up multiple spaces
+      cleanText = cleanText.replace(/\s+/g, ' ').trim();
+
+      // Remove any remaining single letters or short fragments at the end
+      cleanText = cleanText.replace(/\s+[a-z]{1,2}$/i, '').trim();
+
+      result.name = cleanText;
+
+      // ============================================================
+      // STEP 5: Validate and return
+      // ============================================================
+
+      // Only return if we found a valid name and status
+      if (result.name && result.name.length > 2 && result.status) {
+        return result;
+      }
+
+      // If we have a name but no status was detected, this might be
+      // an employee listed under a section header like "Time off/Quit/Other"
+      // Return with a generic status that will be edited by user
+      if (result.name && result.name.length > 2) {
+        result.status = 'Unknown';
+        return result;
+      }
+
+      return null;
+    }
+
+    function findNextHeaderRow(crewHeaders, col, currentRow) {
+      var nextRow = 9999;
+      for (var i = 0; i < crewHeaders.length; i++) {
+        if (crewHeaders[i].col === col && crewHeaders[i].row > currentRow) {
+          if (crewHeaders[i].row < nextRow) {
+            nextRow = crewHeaders[i].row;
+          }
+        }
+      }
+      return nextRow;
+    }
+
+    function isEmployeeName(text) {
+      if (!text || text.length < 4) return false;
+      if (text.match(/^\d/)) return false; // Starts with number
+      if (text.match(/^(NWE|Aprox|Tentative|Completed|On Hold|BID)/i)) return false;
+      if (text.match(/schedule|Released|Crane Cert|Summer|Fall|Start|weeks? work|Project|Install|Arrival/i)) return false;
+      if (!text.match(/[a-zA-Z]{2,}\s+[a-zA-Z]/)) return false; // Must have first and last name
+      return true;
+    }
+
+    // Map Excel roles to Google Sheet Job Classification values
+    var roleToClassification = {
+      'Foreman': 'F',
+      'GTO Foreman': 'GTO F',
+      'JL': 'JRY',           // Journeyman Lineman -> JRY
+      '1 ap': 'AP 1',
+      '2 ap': 'AP 2',
+      '3 ap': 'AP 3',
+      '4 ap': 'AP 4',
+      '5 ap': 'AP 5',
+      '6 ap': 'AP 6',
+      '7 ap': 'AP 7',
+      'Jry Op': 'JRY OP',
+      'GTO': 'GTO',
+      'EO2': 'EO 2',
+      'WT': 'WT'             // White Ticket Lineman
+    };
+
+    function parseEmployeeName(text) {
+      var result = {
+        originalText: text,
+        name: text,
+        role: '',
+        classification: '',  // The Google Sheet classification value
+        isForeman: false
+      };
+
+      var cleanText = text.trim();
+
+      // First, strip any CDL notes from the end (they're not roles)
+      cleanText = cleanText.replace(/\s+(CDL-[AB]|No CDL)\s*$/i, '').trim();
+
+      // Check for Foreman (F suffix)
+      if (cleanText.match(/\sF$/i) && !cleanText.match(/GTO\s*F$/i)) {
+        result.isForeman = true;
+        result.role = 'Foreman';
+        result.classification = 'F';
+        result.name = cleanText.replace(/\s+F$/i, '').trim();
+      }
+      // GTO Foreman
+      else if (cleanText.match(/\sGTO\s*F$/i)) {
+        result.isForeman = true;
+        result.role = 'GTO Foreman';
+        result.classification = 'GTO F';
+        result.name = cleanText.replace(/\s+GTO\s*F$/i, '').trim();
+      }
+      // Journeyman Lineman (check for JL anywhere, not just at end)
+      else if (cleanText.match(/\sJL\b/i)) {
+        result.role = 'JL';
+        result.classification = 'JRY';
+        result.name = cleanText.replace(/\s+JL\b.*$/i, '').trim();
+      }
+      // Apprentice (various formats: "5 ap", "5ap")
+      else if (cleanText.match(/\s(\d)\s*ap$/i)) {
+        var apMatch = cleanText.match(/\s(\d)\s*ap$/i);
+        result.role = apMatch[1] + ' ap';
+        result.classification = 'AP ' + apMatch[1];
+        result.name = cleanText.replace(/\s+\d\s*ap$/i, '').trim();
+      }
+      // Journey Operator
+      else if (cleanText.match(/\sJry\s*Op$/i) || cleanText.match(/\sJourney\s*Op/i)) {
+        result.role = 'Jry Op';
+        result.classification = 'JRY OP';
+        result.name = cleanText.replace(/\s+(Jry|Journey)\s*Op.*$/i, '').trim();
+      }
+      // GTO
+      else if (cleanText.match(/\sGTO$/i)) {
+        result.role = 'GTO';
+        result.classification = 'GTO';
+        result.name = cleanText.replace(/\s+GTO$/i, '').trim();
+      }
+      // EO2
+      else if (cleanText.match(/\sEO2$/i)) {
+        result.role = 'EO2';
+        result.classification = 'EO 2';
+        result.name = cleanText.replace(/\s+EO2$/i, '').trim();
+      }
+      // WT (Working Tech)
+      else if (cleanText.match(/\sWT$/i)) {
+        result.role = 'WT';
+        result.classification = 'WT';
+        result.name = cleanText.replace(/\s+WT$/i, '').trim();
+      }
+      // No role detected - classification stays empty (won't update existing)
+
+      return result;
+    }
+
+    function mapLocation(locationName) {
+      if (locationMappings[locationName]) {
+        return locationMappings[locationName];
+      }
+      var lowerName = locationName.toLowerCase();
+      for (var key in locationMappings) {
+        var lowerKey = key.toLowerCase();
+        if (lowerName.indexOf(lowerKey) !== -1 || lowerKey.indexOf(lowerName) !== -1) {
+          return locationMappings[key];
+        }
+      }
+      return locationName;
+    }
+
+    function showCrewPreview() {
+      document.getElementById('crewsPreview').style.display = 'block';
+      document.getElementById('crewCount').textContent = parsedCrews.length;
+
+      var container = document.getElementById('crewCardsContainer');
+      var html = '';
+
+      for (var i = 0; i < parsedCrews.length; i++) {
+        var crew = parsedCrews[i];
+        html += '<div class="crew-card">';
+        html += '<div class="crew-card-header">';
+        html += '<i class="bi bi-geo-alt"></i> ' + crew.mappedLocation + ' <span class="text-muted">(' + crew.jobNumber + ')</span>';
+        html += '</div>';
+        html += '<div class="crew-card-employees">';
+
+        if (crew.employees.length === 0) {
+          html += '<div class="text-muted fst-italic">No employees detected</div>';
+        } else {
+          for (var e = 0; e < crew.employees.length; e++) {
+            var emp = crew.employees[e];
+            html += '<div class="crew-card-employee">';
+            html += emp.fullJobNumber + '. ' + emp.name;
+            if (emp.isForeman) {
+              html += ' <span class="badge bg-primary badge-role">F</span>';
+            } else if (emp.role) {
+              html += ' <span class="badge bg-secondary badge-role">' + emp.role + '</span>';
+            }
+            html += '</div>';
+          }
+        }
+
+        html += '</div></div>';
+      }
+
+      container.innerHTML = html;
+
+      // Show special circumstances section if any found
+      if (specialCircumstances.length > 0) {
+        showSpecialSection();
+      }
+    }
+
+    function showSpecialSection() {
+      document.getElementById('specialSection').style.display = 'block';
+      document.getElementById('specialCount').textContent = specialCircumstances.length;
+
+      // Build list of all known locations for dropdown
+      var allLocations = Object.values(locationMappings).filter(function(v, i, self) {
+        return self.indexOf(v) === i; // unique values only
+      }).sort();
+
+      var container = document.getElementById('specialContainer');
+      var html = '';
+
+      for (var i = 0; i < specialCircumstances.length; i++) {
+        var spec = specialCircumstances[i];
+
+        // Determine suggested action based on status
+        var suggestedLocation = '';
+        var suggestedAction = 'update';
+        var statusBadgeClass = 'bg-secondary';
+        var statusIcon = 'bi-question-circle';
+
+        if (spec.status === 'Resigned' || spec.status === 'Quit') {
+          suggestedLocation = 'Previous Employee';
+          suggestedAction = 'previous';
+          statusBadgeClass = 'bg-danger';
+          statusIcon = 'bi-door-open';
+        } else if (spec.status === 'Layoff') {
+          suggestedLocation = 'Previous Employee';
+          suggestedAction = 'previous';
+          statusBadgeClass = 'bg-warning text-dark';
+          statusIcon = 'bi-pause-circle';
+        } else if (spec.status === 'Light Duty') {
+          suggestedLocation = ''; // Keep current location
+          suggestedAction = 'update';
+          statusBadgeClass = 'bg-info';
+          statusIcon = 'bi-bandaid';
+        } else if (spec.status === 'Leave' || spec.status === 'Time Off' || spec.status === 'Vacation') {
+          suggestedLocation = 'Vacation';
+          suggestedAction = 'vacation';
+          statusBadgeClass = 'bg-primary';
+          statusIcon = 'bi-calendar-x';
+        } else if (spec.status === 'MT Misc') {
+          suggestedLocation = ''; // Keep current
+          suggestedAction = 'update';
+          statusBadgeClass = 'bg-secondary';
+          statusIcon = 'bi-tools';
+        }
+
+        // Convert parsed date to YYYY-MM-DD format for date input
+        var dateValue = '';
+        if (spec.date) {
+          var dateParts = spec.date.split(/[-\/]/);
+          if (dateParts.length >= 2) {
+            var month = dateParts[0].padStart(2, '0');
+            var day = dateParts[1].padStart(2, '0');
+            var year = dateParts[2] || '26';
+            if (year.length === 2) year = '20' + year;
+            dateValue = year + '-' + month + '-' + day;
+          }
+        }
+
+        html += '<div class="card mb-3" id="special-card-' + i + '">';
+        html += '<div class="card-header d-flex justify-content-between align-items-center">';
+        html += '<div>';
+        html += '<strong>' + escapeHtml(spec.name) + '</strong>';
+        if (spec.classification) {
+          html += ' <span class="badge bg-secondary badge-role">' + spec.classification + '</span>';
+        }
+        html += '<br><small class="text-muted">' + escapeHtml(spec.originalText) + '</small>';
+        html += '</div>';
+        html += '<span class="badge ' + statusBadgeClass + '"><i class="bi ' + statusIcon + '"></i> ' + spec.status + '</span>';
+        html += '</div>';
+        html += '<div class="card-body">';
+
+        // Editable form fields - Row 1
+        html += '<div class="row g-2 mb-2">';
+
+        // Name field
+        html += '<div class="col-md-6">';
+        html += '<label class="form-label small mb-1">Employee Name</label>';
+        html += '<input type="text" class="form-control form-control-sm" id="spec-name-' + i + '" value="' + escapeHtml(spec.name) + '">';
+        html += '</div>';
+
+        // Job Classification field
+        html += '<div class="col-md-3">';
+        html += '<label class="form-label small mb-1">Job Classification</label>';
+        html += '<select class="form-select form-select-sm" id="spec-classification-' + i + '">';
+        html += '<option value="">-- No Change --</option>';
+        var classifications = ['F', 'JRY', 'AP 1', 'AP 2', 'AP 3', 'AP 4', 'AP 5', 'AP 6', 'AP 7', 'GTO', 'GTO F', 'JRY OP', 'EO 2', 'WT'];
+        for (var c = 0; c < classifications.length; c++) {
+          var isSelected = spec.classification === classifications[c] ? ' selected' : '';
+          html += '<option value="' + classifications[c] + '"' + isSelected + '>' + classifications[c] + '</option>';
+        }
+        html += '</select>';
+        html += '</div>';
+
+        // Status/Reason field
+        html += '<div class="col-md-3">';
+        html += '<label class="form-label small mb-1">Status/Reason</label>';
+        html += '<select class="form-select form-select-sm" id="spec-status-' + i + '">';
+        var statuses = ['Layoff', 'Resigned', 'Quit', 'Time Off', 'Vacation', 'Light Duty', 'Leave', 'FMLA', 'MT Misc', 'Unknown'];
+        for (var s = 0; s < statuses.length; s++) {
+          var isSelected = spec.status === statuses[s] ? ' selected' : '';
+          html += '<option value="' + statuses[s] + '"' + isSelected + '>' + statuses[s] + '</option>';
+        }
+        html += '</select>';
+        html += '</div>';
+
+        html += '</div>'; // end row 1
+
+        // Row 2 - Location, Date, Job Number
+        html += '<div class="row g-2 mb-2">';
+
+        // New Location field - includes all known locations
+        html += '<div class="col-md-4">';
+        html += '<label class="form-label small mb-1">New Location</label>';
+        html += '<select class="form-select form-select-sm" id="spec-location-' + i + '">';
+        html += '<option value="">-- Keep Current --</option>';
+        html += '<option value="Previous Employee"' + (suggestedLocation === 'Previous Employee' ? ' selected' : '') + '>Previous Employee</option>';
+        html += '<option value="Vacation"' + (suggestedLocation === 'Vacation' ? ' selected' : '') + '>Vacation</option>';
+        html += '<option value="Light Duty">Light Duty</option>';
+        html += '<option value="Leave">Leave</option>';
+        html += '<option disabled>──────────</option>';
+        for (var l = 0; l < allLocations.length; l++) {
+          html += '<option value="' + allLocations[l] + '">' + allLocations[l] + '</option>';
+        }
+        html += '</select>';
+        html += '</div>';
+
+        // Date field with date picker
+        html += '<div class="col-md-4">';
+        html += '<label class="form-label small mb-1">Date</label>';
+        html += '<input type="date" class="form-control form-control-sm" id="spec-date-' + i + '" value="' + dateValue + '">';
+        html += '</div>';
+
+        // Job Number field with clear checkbox
+        html += '<div class="col-md-4">';
+        html += '<label class="form-label small mb-1">Job Number</label>';
+        html += '<div class="input-group input-group-sm">';
+        html += '<input type="text" class="form-control form-control-sm" id="spec-jobnum-' + i + '" placeholder="e.g., 013-26.1">';
+        html += '<div class="input-group-text">';
+        html += '<input type="checkbox" class="form-check-input mt-0 me-1" id="spec-clearjob-' + i + '"' + (suggestedAction === 'previous' ? ' checked' : '') + ' onchange="toggleJobNumField(' + i + ')">';
+        html += '<label class="form-check-label small" for="spec-clearjob-' + i + '">Clear</label>';
+        html += '</div>';
+        html += '</div>';
+        html += '</div>';
+
+        html += '</div>'; // end row 2
+
+        // Row 3 - Notes
+        html += '<div class="row g-2 mb-2">';
+        html += '<div class="col-12">';
+        html += '<label class="form-label small mb-1">Notes</label>';
+        html += '<input type="text" class="form-control form-control-sm" id="spec-notes-' + i + '" value="' + escapeHtml(spec.notes || '') + '" placeholder="Additional notes...">';
+        html += '</div>';
+        html += '</div>';
+
+        // Action buttons
+        html += '<div class="mt-2">';
+        html += '<button class="btn btn-primary btn-sm me-2" onclick="applySpecialUpdate(' + i + ')">';
+        html += '<i class="bi bi-check-lg"></i> Apply Changes';
+        html += '</button>';
+        html += '<button class="btn btn-outline-secondary btn-sm" onclick="skipSpecialEmployee(' + i + ')">';
+        html += '<i class="bi bi-x"></i> Skip';
+        html += '</button>';
+        html += '</div>';
+
+        html += '</div>';
+        html += '</div>';
+      }
+
+      container.innerHTML = html;
+
+      // Disable job number input if clear is checked
+      for (var j = 0; j < specialCircumstances.length; j++) {
+        toggleJobNumField(j);
+      }
+    }
+
+    function toggleJobNumField(index) {
+      var clearCheckbox = document.getElementById('spec-clearjob-' + index);
+      var jobNumInput = document.getElementById('spec-jobnum-' + index);
+      if (clearCheckbox && jobNumInput) {
+        jobNumInput.disabled = clearCheckbox.checked;
+        if (clearCheckbox.checked) {
+          jobNumInput.value = '';
+          jobNumInput.placeholder = '(Will be cleared)';
+        } else {
+          jobNumInput.placeholder = 'e.g., 013-26.1';
+        }
+      }
+    }
+
+    function applySpecialUpdate(specIndex) {
+      var spec = specialCircumstances[specIndex];
+      if (!spec) return;
+
+      // Get values from form fields
+      var name = document.getElementById('spec-name-' + specIndex).value.trim();
+      var newLocation = document.getElementById('spec-location-' + specIndex).value;
+      var classification = document.getElementById('spec-classification-' + specIndex).value;
+      var status = document.getElementById('spec-status-' + specIndex).value;
+      var date = document.getElementById('spec-date-' + specIndex).value.trim();
+      var jobNumber = document.getElementById('spec-jobnum-' + specIndex).value.trim();
+      var clearJobNumber = document.getElementById('spec-clearjob-' + specIndex).checked;
+      var notes = document.getElementById('spec-notes-' + specIndex).value.trim();
+
+      if (!name) {
+        alert('Please enter an employee name');
+        return;
+      }
+
+      // Format date for display (convert from YYYY-MM-DD to MM/DD/YYYY)
+      var displayDate = '';
+      if (date) {
+        var dateParts = date.split('-');
+        if (dateParts.length === 3) {
+          displayDate = dateParts[1] + '/' + dateParts[2] + '/' + dateParts[0];
+        }
+      }
+
+      // Confirm the action
+      var msg = 'Apply changes for "' + name + '"?\n\n';
+      if (newLocation) msg += '• Location: ' + newLocation + '\n';
+      if (classification) msg += '• Classification: ' + classification + '\n';
+      if (jobNumber) msg += '• Job Number: ' + jobNumber + '\n';
+      if (clearJobNumber) msg += '• Clear Job Number\n';
+      msg += '• Status: ' + status + '\n';
+      if (displayDate) msg += '• Date: ' + displayDate + '\n';
+      if (notes) msg += '• Notes: ' + notes + '\n';
+      msg += '\nThis will be logged to Employee History.';
+
+      if (!confirm(msg)) return;
+
+      // Disable the card
+      var card = document.getElementById('special-card-' + specIndex);
+      if (card) {
+        card.style.opacity = '0.5';
+        card.querySelectorAll('button, input, select').forEach(function(el) { el.disabled = true; });
+      }
+
+      var updateData = {
+        name: name,
+        newLocation: newLocation,
+        classification: classification,
+        status: status,
+        date: displayDate || date, // Use formatted date if available
+        jobNumber: jobNumber,
+        clearJobNumber: clearJobNumber,
+        notes: notes,
+        company: spec.company || ''
+      };
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            alert('✓ Updated ' + name);
+            removeSpecialCard(specIndex);
+          } else {
+            alert('Error: ' + result.message);
+            if (card) {
+              card.style.opacity = '1';
+              card.querySelectorAll('button, input, select').forEach(function(el) { el.disabled = false; });
+            }
+          }
+        })
+        .withFailureHandler(function(error) {
+          alert('Error: ' + error);
+          if (card) {
+            card.style.opacity = '1';
+            card.querySelectorAll('button, input, select').forEach(function(el) { el.disabled = false; });
+          }
+        })
+        .applySpecialCircumstanceUpdate(updateData);
+    }
+
+    function markAsPreviousEmployee(specIndex) {
+      var spec = specialCircumstances[specIndex];
+      if (!spec) return;
+
+      var msg = 'Mark "' + spec.name + '" as Previous Employee?\n\n';
+      msg += 'Status: ' + spec.status + '\n';
+      if (spec.date) msg += 'Date: ' + spec.date + '\n';
+      if (spec.notes) msg += 'Notes: ' + spec.notes + '\n';
+      msg += '\nThis will:\n';
+      msg += '• Set their Location to "Previous Employee"\n';
+      msg += '• Clear their Job Number\n';
+      msg += '• Log to Employee History';
+
+      if (!confirm(msg)) return;
+
+      // Disable the card
+      var card = document.getElementById('special-card-' + specIndex);
+      if (card) {
+        card.style.opacity = '0.5';
+        card.querySelectorAll('button').forEach(function(btn) { btn.disabled = true; });
+      }
+
+      var updateData = {
+        name: spec.name,
+        status: spec.status,
+        date: spec.date,
+        notes: spec.notes,
+        company: spec.company
+      };
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            alert('✓ ' + spec.name + ' marked as Previous Employee');
+            removeSpecialCard(specIndex);
+          } else {
+            alert('Error: ' + result.message);
+            if (card) {
+              card.style.opacity = '1';
+              card.querySelectorAll('button').forEach(function(btn) { btn.disabled = false; });
+            }
+          }
+        })
+        .withFailureHandler(function(error) {
+          alert('Error: ' + error);
+          if (card) {
+            card.style.opacity = '1';
+            card.querySelectorAll('button').forEach(function(btn) { btn.disabled = false; });
+          }
+        })
+        .markEmployeeAsPrevious(updateData);
+    }
+
+    function updateEmployeeNotes(specIndex) {
+      var spec = specialCircumstances[specIndex];
+      if (!spec) return;
+
+      var notes = prompt('Enter notes for ' + spec.name + ':', spec.status + (spec.notes ? ' - ' + spec.notes : ''));
+      if (notes === null) return;
+
+      var card = document.getElementById('special-card-' + specIndex);
+      if (card) {
+        card.style.opacity = '0.5';
+        card.querySelectorAll('button').forEach(function(btn) { btn.disabled = true; });
+      }
+
+      var updateData = {
+        name: spec.name,
+        notes: notes
+      };
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            alert('✓ Notes updated for ' + spec.name);
+            removeSpecialCard(specIndex);
+          } else {
+            alert('Error: ' + result.message);
+            if (card) {
+              card.style.opacity = '1';
+              card.querySelectorAll('button').forEach(function(btn) { btn.disabled = false; });
+            }
+          }
+        })
+        .withFailureHandler(function(error) {
+          alert('Error: ' + error);
+          if (card) {
+            card.style.opacity = '1';
+            card.querySelectorAll('button').forEach(function(btn) { btn.disabled = false; });
+          }
+        })
+        .updateEmployeeStatusNotes(updateData);
+    }
+
+    function skipSpecialEmployee(specIndex) {
+      removeSpecialCard(specIndex);
+    }
+
+    function removeSpecialCard(specIndex) {
+      var card = document.getElementById('special-card-' + specIndex);
+      if (card) {
+        card.remove();
+      }
+      specialCircumstances[specIndex] = null;
+
+      // Update count
+      var remaining = specialCircumstances.filter(function(s) { return s !== null; }).length;
+      document.getElementById('specialCount').textContent = remaining;
+
+      if (remaining === 0) {
+        document.getElementById('specialSection').style.display = 'none';
+      }
+    }
+
+    function skipAllSpecial() {
+      specialCircumstances = [];
+      document.getElementById('specialSection').style.display = 'none';
+    }
+
+    function showUnknownLocations() {
+      document.getElementById('unknownLocationsSection').style.display = 'block';
+      var container = document.getElementById('unknownLocationsContainer');
+      var html = '';
+
+      // Get unique existing locations for dropdown
+      var existingLocations = Object.values(locationMappings).filter(function(v, i, self) {
+        return self.indexOf(v) === i;
+      }).sort();
+
+      for (var i = 0; i < unknownLocations.length; i++) {
+        var loc = unknownLocations[i];
+        html += '<div class="unknown-location" id="unknown-' + i + '">';
+        html += '<div class="d-flex justify-content-between align-items-center flex-wrap gap-2">';
+        html += '<div><strong>' + escapeHtml(loc) + '</strong><br><small class="text-muted">Not in location mappings</small></div>';
+        html += '<div class="d-flex align-items-center gap-2">';
+
+        // Dropdown for existing locations
+        html += '<select class="form-select form-select-sm" id="mapping-select-' + i + '" style="width: 150px;" onchange="onMappingSelectChange(' + i + ')">';
+        html += '<option value="">Select existing...</option>';
+        for (var j = 0; j < existingLocations.length; j++) {
+          html += '<option value="' + escapeHtml(existingLocations[j]) + '">' + escapeHtml(existingLocations[j]) + '</option>';
+        }
+        html += '<option value="__NEW__">➕ Add new location...</option>';
+        html += '</select>';
+
+        // Text input for new location (hidden by default)
+        html += '<input type="text" class="form-control form-control-sm" id="mapping-new-' + i + '" style="width: 130px; display: none;" placeholder="New location name">';
+
+        html += '<button class="btn btn-sm btn-primary" onclick="saveUnknownMapping(' + i + ', \'' + escapeQuotes(loc) + '\')">Save</button>';
+        html += '<button class="btn btn-sm btn-outline-secondary" onclick="skipUnknownLocation(' + i + ')">Skip</button>';
+        html += '</div>';
+        html += '</div>';
+        html += '</div>';
+      }
+
+      container.innerHTML = html;
+    }
+
+    function onMappingSelectChange(index) {
+      var select = document.getElementById('mapping-select-' + index);
+      var newInput = document.getElementById('mapping-new-' + index);
+
+      if (select.value === '__NEW__') {
+        newInput.style.display = 'inline-block';
+        newInput.focus();
+      } else {
+        newInput.style.display = 'none';
+        newInput.value = '';
+      }
+    }
+
+    function escapeQuotes(str) {
+      return str.replace(/'/g, "\\'").replace(/"/g, '\\"');
+    }
+
+    function saveUnknownMapping(index, locationName) {
+      var select = document.getElementById('mapping-select-' + index);
+      var newInput = document.getElementById('mapping-new-' + index);
+      var mappedTo = '';
+
+      if (select.value === '__NEW__') {
+        mappedTo = newInput.value.trim();
+        if (!mappedTo) {
+          alert('Please enter a new location name');
+          newInput.focus();
+          return;
+        }
+      } else if (select.value) {
+        mappedTo = select.value;
+      } else {
+        alert('Please select an existing location or add a new one');
+        return;
+      }
+
+      locationMappings[locationName] = mappedTo;
+      unknownLocations.splice(unknownLocations.indexOf(locationName), 1);
+      document.getElementById('unknown-' + index).remove();
+      renderLocationMappings();
+
+      if (unknownLocations.length === 0) {
+        document.getElementById('unknownLocationsSection').style.display = 'none';
+        // Re-parse with new mappings
+        if (selectedSheet) {
+          parseSheet(selectedSheet);
+        }
+      }
+    }
+
+    function skipUnknownLocation(index) {
+      var loc = unknownLocations[index];
+      locationMappings[loc] = loc;
+      unknownLocations.splice(index, 1);
+      document.getElementById('unknown-' + index).remove();
+
+      if (unknownLocations.length === 0) {
+        document.getElementById('unknownLocationsSection').style.display = 'none';
+        if (selectedSheet) {
+          parseSheet(selectedSheet);
+        }
+      }
     }
 
     function renderLocationMappings() {
@@ -272,217 +1718,38 @@ Dustin Graham JL                     Jimmy Bailey JL
       renderLocationMappings();
     }
 
-    function parseCrewData() {
-      var text = document.getElementById('crewData').value.trim();
-      if (!text) {
-        alert('Please paste crew data first');
-        return;
-      }
+    function showDuplicateSelectionUI() {
+      document.getElementById('duplicateSection').style.display = 'block';
+      document.getElementById('duplicateCount').textContent = duplicateEmployees.length;
 
-      // Reset
-      parsedCrews = [];
-      proposedChanges = [];
-      unknownLocations = [];
-
-      var lines = text.split('\n');
-
-      // DEBUG: Log first few lines to understand structure
-      console.log('=== PARSING DEBUG ===');
-      console.log('Total lines:', lines.length);
-      for (var d = 0; d < Math.min(5, lines.length); d++) {
-        var debugCells = lines[d].split('\t');
-        console.log('Line ' + d + ': ' + debugCells.length + ' cells');
-        for (var dc = 0; dc < debugCells.length; dc++) {
-          if (debugCells[dc].trim()) {
-            console.log('  Col ' + dc + ': "' + debugCells[dc].trim().substring(0, 40) + '"');
-          }
-        }
-      }
-
-      // First pass: find all job headers and their positions (line AND column)
-      // Build a list of crews with their line/column positions
-      var allCrews = []; // Array of crew objects with line and column
-
-      for (var i = 0; i < lines.length; i++) {
-        var line = lines[i];
-        if (!line.trim()) continue;
-
-        var cells = line.split('\t');
-
-        // Find job headers in this line
-        for (var c = 0; c < cells.length; c++) {
-          var cell = cells[c].trim();
-          if (!cell) continue;
-
-          // Check if this is a job header (contains job number pattern like "013-26" or "052-25")
-          var jobMatch = cell.match(/^(.+?)\s+(\d{3}-\d{2})\s*(.*)$/);
-          if (jobMatch) {
-            var locationName = jobMatch[1].trim();
-            var jobNumber = jobMatch[2].trim();
-            var schedule = jobMatch[3].trim();
-
-            // Map location (or flag as unknown)
-            var mappedLocation = mapLocation(locationName);
-            var isUnknown = mappedLocation === locationName && !locationMappings[locationName];
-
-            if (isUnknown && unknownLocations.indexOf(locationName) === -1) {
-              unknownLocations.push(locationName);
-            }
-
-            console.log('Found crew: "' + locationName + '" job=' + jobNumber + ' at column ' + c + ' line ' + i);
-
-            var crew = {
-              originalLocation: locationName,
-              mappedLocation: mappedLocation,
-              jobNumber: jobNumber,
-              schedule: schedule,
-              employees: [],
-              column: c,
-              headerLine: i,
-              isUnknownLocation: isUnknown
-            };
-            parsedCrews.push(crew);
-            allCrews.push(crew);
-          }
-        }
-      }
-
-      // For each column, find the header lines where new crews start
-      // This lets us determine which crew an employee on a given line belongs to
-      var headerLinesByColumn = {}; // column -> [line numbers where headers appear]
-      for (var ci = 0; ci < allCrews.length; ci++) {
-        var crew = allCrews[ci];
-        if (!headerLinesByColumn[crew.column]) {
-          headerLinesByColumn[crew.column] = [];
-        }
-        headerLinesByColumn[crew.column].push({ line: crew.headerLine, crew: crew });
-      }
-
-      // Sort each column's headers by line number
-      for (var col in headerLinesByColumn) {
-        headerLinesByColumn[col].sort(function(a, b) { return a.line - b.line; });
-      }
-
-      console.log('=== HEADER LINES BY COLUMN ===');
-      for (var col in headerLinesByColumn) {
-        var headers = headerLinesByColumn[col];
-        console.log('Column ' + col + ':');
-        for (var hi = 0; hi < headers.length; hi++) {
-          console.log('  Line ' + headers[hi].line + ': ' + headers[hi].crew.jobNumber + ' (' + headers[hi].crew.mappedLocation + ')');
-        }
-      }
-
-      // Second pass: find employees and assign to correct crews
-      // An employee belongs to the crew in their column that has the highest header line <= employee's line
-      for (var i = 0; i < lines.length; i++) {
-        var line = lines[i];
-        if (!line.trim()) continue;
-
-        var cells = line.split('\t');
-
-        // Find employees in this line
-        for (var c = 0; c < cells.length; c++) {
-          var cell = cells[c].trim();
-          if (!cell) continue;
-
-          // Skip headers, notes, dates
-          if (cell.match(/^\d{3}-\d{2}/) || cell.match(/Dock|Trans|Sub|Testing|Weeds|Time off/i)) continue;
-          if (cell.match(/^(NWE|Aprox|Tentative|Completed|On Hold|PT Arrival|Install|Project|BID|\d+\.\d+\.\d+)/i)) continue;
-          if (cell.match(/schedule start|Released|No Crane Cert|layoff|off \d|thru/i)) continue;
-
-          // Find the crew this employee belongs to
-          var targetCrew = findCrewForPosition(c, i, headerLinesByColumn);
-
-          if (targetCrew && isEmployeeName(cell)) {
-            var empInfo = parseEmployeeName(cell);
-            empInfo.position = targetCrew.employees.length + 1;
-            empInfo.fullJobNumber = targetCrew.jobNumber + '.' + empInfo.position;
-            empInfo.baseJobNumber = targetCrew.jobNumber;
-            empInfo.sourceColumn = c;
-            empInfo.sourceLine = i;
-            console.log('Employee "' + empInfo.name + '" at col ' + c + ' line ' + i + ' -> crew ' + targetCrew.jobNumber + ' (' + targetCrew.mappedLocation + ')');
-            targetCrew.employees.push(empInfo);
-          }
-        }
-      }
-
-      // Check for unknown locations
-      if (unknownLocations.length > 0) {
-        showUnknownLocations();
-        return;
-      }
-
-      // Match employees and display preview
-      matchEmployeesToSheet();
-      displayPreview();
-    }
-
-    function findCrewForPosition(col, line, headerLinesByColumn) {
-      // Find the crew for a given column and line
-      // The crew is the one with the highest header line that is <= the employee's line
-
-      var columnHeaders = headerLinesByColumn[col];
-      if (!columnHeaders || columnHeaders.length === 0) {
-        // No headers in this exact column, try to find nearest column to the left
-        var bestCol = -1;
-        for (var c in headerLinesByColumn) {
-          var colNum = parseInt(c);
-          if (colNum <= col && colNum > bestCol) {
-            bestCol = colNum;
-          }
-        }
-        if (bestCol === -1) return null;
-        columnHeaders = headerLinesByColumn[bestCol];
-      }
-
-      // Find the header with the highest line number that is still <= our line
-      var targetCrew = null;
-      for (var i = 0; i < columnHeaders.length; i++) {
-        if (columnHeaders[i].line <= line) {
-          targetCrew = columnHeaders[i].crew;
-        } else {
-          break; // Headers are sorted, so we can stop
-        }
-      }
-
-      return targetCrew;
-    }
-
-
-    function mapLocation(locationName) {
-      // Try exact match first
-      if (locationMappings[locationName]) {
-        return locationMappings[locationName];
-      }
-
-      // Try partial match (location name contains a key or vice versa)
-      var lowerName = locationName.toLowerCase();
-      for (var key in locationMappings) {
-        var lowerKey = key.toLowerCase();
-        if (lowerName.indexOf(lowerKey) !== -1 || lowerKey.indexOf(lowerName) !== -1) {
-          return locationMappings[key];
-        }
-      }
-
-      // No match found - return original (will be flagged as unknown)
-      return locationName;
-    }
-
-    function showUnknownLocations() {
-      document.getElementById('unknownLocationsSection').style.display = 'block';
-      var container = document.getElementById('unknownLocationsContainer');
+      var container = document.getElementById('duplicateContainer');
       var html = '';
 
-      for (var i = 0; i < unknownLocations.length; i++) {
-        var loc = unknownLocations[i];
-        html += '<div class="unknown-location" id="unknown-' + i + '">';
-        html += '<div class="d-flex justify-content-between align-items-center">';
-        html += '<div><strong>' + loc + '</strong><br><small class="text-muted">Not in location mappings</small></div>';
-        html += '<div>';
-        html += '<input type="text" class="form-control form-control-sm d-inline-block" style="width: 150px;" id="mapping-' + i + '" placeholder="Map to...">';
-        html += '<button class="btn btn-sm btn-primary ms-2" onclick="saveUnknownMapping(' + i + ', \'' + escapeQuotes(loc) + '\')">Save</button>';
-        html += '<button class="btn btn-sm btn-outline-secondary ms-1" onclick="skipUnknownLocation(' + i + ')">Skip</button>';
+      for (var d = 0; d < duplicateEmployees.length; d++) {
+        var dup = duplicateEmployees[d];
+        html += '<div class="card mb-3">';
+        html += '<div class="card-header bg-warning bg-opacity-25">';
+        html += '<strong>' + dup.employeeName + '</strong>';
+        html += '<span class="badge bg-secondary ms-2">' + dup.occurrences.length + ' assignments</span>';
         html += '</div>';
+        html += '<div class="card-body">';
+        html += '<p class="small text-muted mb-2">Select which crew assignment to use:</p>';
+
+        for (var o = 0; o < dup.occurrences.length; o++) {
+          var occ = dup.occurrences[o];
+          var isSelected = o === dup.selectedIndex ? 'checked' : '';
+          var roleText = occ.employee.role || 'Unknown';
+          var isForeman = occ.employee.isForeman ? '<span class="badge bg-primary ms-1">Foreman</span>' : '';
+
+          html += '<div class="form-check">';
+          html += '<input class="form-check-input" type="radio" name="dup-' + d + '" id="dup-' + d + '-' + o + '" value="' + o + '" ' + isSelected + ' onchange="selectDuplicateOption(' + d + ', ' + o + ')">';
+          html += '<label class="form-check-label" for="dup-' + d + '-' + o + '">';
+          html += '<strong>' + occ.crew.mappedLocation + '</strong> - Job #' + occ.employee.fullJobNumber;
+          html += ' <span class="text-muted">(' + roleText + ')' + isForeman + '</span>';
+          html += '</label>';
+          html += '</div>';
+        }
+
         html += '</div>';
         html += '</div>';
       }
@@ -490,132 +1757,74 @@ Dustin Graham JL                     Jimmy Bailey JL
       container.innerHTML = html;
     }
 
-    function escapeQuotes(str) {
-      return str.replace(/'/g, "\\'").replace(/"/g, '\\"');
+    function selectDuplicateOption(dupIndex, optionIndex) {
+      duplicateEmployees[dupIndex].selectedIndex = optionIndex;
     }
 
-    function saveUnknownMapping(index, locationName) {
-      var mappedTo = document.getElementById('mapping-' + index).value.trim();
-      if (!mappedTo) {
-        alert('Please enter a location name to map to');
-        return;
-      }
-
-      locationMappings[locationName] = mappedTo;
-      unknownLocations.splice(unknownLocations.indexOf(locationName), 1);
-      document.getElementById('unknown-' + index).remove();
-      renderLocationMappings();
-
-      if (unknownLocations.length === 0) {
-        document.getElementById('unknownLocationsSection').style.display = 'none';
-        // Re-parse with new mappings
-        parseCrewData();
-      }
+    function resolveDuplicates() {
+      document.getElementById('duplicateSection').style.display = 'none';
+      finishMatching();
+      displayPreview();
     }
 
-    function skipUnknownLocation(index) {
-      var loc = unknownLocations[index];
-      // Use original name as mapping
-      locationMappings[loc] = loc;
-      unknownLocations.splice(index, 1);
-      document.getElementById('unknown-' + index).remove();
-
-      if (unknownLocations.length === 0) {
-        document.getElementById('unknownLocationsSection').style.display = 'none';
-        parseCrewData();
-      }
-    }
-
-    function isEmployeeName(text) {
-      if (!text || text.length < 4) return false;
-      if (text.match(/^\d/)) return false;
-      if (text.match(/^(NWE|Aprox|Tentative|Completed|On Hold|BID|No CDL|layoff|off |back on|thru|Wk \d)/i)) return false;
-      if (text.match(/schedule|Released|Crane Cert|Summer|Fall|Start|weeks? work|Project|Install|Arrival/i)) return false;
-      if (!text.match(/[a-zA-Z]{2,}\s+[a-zA-Z]/)) return false; // Must have first and last name
-      return true;
-    }
-
-    function parseEmployeeName(text) {
-      var result = {
-        originalText: text,
-        name: text,
-        role: '',
-        jobClassification: '',
-        isForeman: false,
-        apprenticeYear: null
-      };
-
-      // Clean up the text and detect role
-      var cleanText = text.trim();
-
-      // Check for Foreman (F suffix, but not GTO F)
-      if (cleanText.match(/\sF$/i) && !cleanText.match(/GTO\s*F$/i)) {
-        result.isForeman = true;
-        result.role = 'Foreman';
-        result.jobClassification = 'Foreman';
-        result.name = cleanText.replace(/\s+F$/i, '').trim();
-      }
-      // GTO Foreman
-      else if (cleanText.match(/\sGTO\s*F$/i)) {
-        result.isForeman = true;
-        result.role = 'GTO Foreman';
-        result.jobClassification = 'GTO';
-        result.name = cleanText.replace(/\s+GTO\s*F$/i, '').trim();
-      }
-      // Journeyman Lineman
-      else if (cleanText.match(/\sJL$/i)) {
-        result.role = 'Journeyman Lineman';
-        result.jobClassification = 'Journeyman Lineman';
-        result.name = cleanText.replace(/\s+JL$/i, '').trim();
-      }
-      // Apprentice (various formats: "5 ap", "5ap", "5 Ap")
-      else if (cleanText.match(/\s(\d)\s*ap$/i)) {
-        var apMatch = cleanText.match(/\s(\d)\s*ap$/i);
-        result.apprenticeYear = parseInt(apMatch[1]);
-        result.role = result.apprenticeYear + ' Year Apprentice';
-        result.jobClassification = getOrdinal(result.apprenticeYear) + ' Year Apprentice';
-        result.name = cleanText.replace(/\s+\d\s*ap$/i, '').trim();
-      }
-      // Journey Operator
-      else if (cleanText.match(/\sJry\s*Op$/i) || cleanText.match(/\sJourney\s*Op/i)) {
-        result.role = 'Journey Operator';
-        result.jobClassification = 'Journey Operator';
-        result.name = cleanText.replace(/\s+(Jry|Journey)\s*Op.*$/i, '').trim();
-      }
-      // GTO (Gas Tech Operator)
-      else if (cleanText.match(/\sGTO$/i)) {
-        result.role = 'GTO';
-        result.jobClassification = 'GTO';
-        result.name = cleanText.replace(/\s+GTO$/i, '').trim();
-      }
-      // EO2 (Equipment Operator 2)
-      else if (cleanText.match(/\sEO2$/i)) {
-        result.role = 'EO2';
-        result.jobClassification = 'Equipment Operator 2';
-        result.name = cleanText.replace(/\s+EO2$/i, '').trim();
-      }
-      // WT (Working Tech)
-      else if (cleanText.match(/\sWT$/i)) {
-        result.role = 'Working Tech';
-        result.jobClassification = 'Working Tech';
-        result.name = cleanText.replace(/\s+WT$/i, '').trim();
-      }
-      // CDL note (not a role, just clean it)
-      else if (cleanText.match(/\s*(CDL-B|No CDL)$/i)) {
-        result.name = cleanText.replace(/\s*(CDL-B|No CDL)$/i, '').trim();
-      }
-
-      return result;
-    }
-
-    function getOrdinal(n) {
-      var s = ['th', 'st', 'nd', 'rd'];
-      var v = n % 100;
-      return n + (s[(v - 20) % 10] || s[v] || s[0]);
-    }
+    // Track which Google Sheet employees have already been matched
+    var matchedSheetEmployees = {};
+    var duplicateEmployees = []; // Employees that appear in multiple crews
 
     function matchEmployeesToSheet() {
       proposedChanges = [];
+      matchedSheetEmployees = {}; // Reset for each parse
+      duplicateEmployees = []; // Reset duplicates
+
+      // First pass: find all matches and detect duplicates
+      var employeeOccurrences = {}; // Track where each employee appears
+
+      for (var i = 0; i < parsedCrews.length; i++) {
+        var crew = parsedCrews[i];
+        for (var j = 0; j < crew.employees.length; j++) {
+          var emp = crew.employees[j];
+          var match = findBestMatchWithoutSkip(emp.name, currentEmployees);
+
+          if (match && match.confidence >= 60) {
+            var key = match.employeeName.toLowerCase();
+            if (!employeeOccurrences[key]) {
+              employeeOccurrences[key] = [];
+            }
+            employeeOccurrences[key].push({
+              employee: emp,
+              crew: crew,
+              match: match,
+              crewIndex: i,
+              empIndex: j
+            });
+          }
+        }
+      }
+
+      // Identify duplicates and let user choose
+      for (var key in employeeOccurrences) {
+        if (employeeOccurrences[key].length > 1) {
+          duplicateEmployees.push({
+            employeeName: employeeOccurrences[key][0].match.employeeName,
+            occurrences: employeeOccurrences[key],
+            selectedIndex: 0 // Default to first occurrence
+          });
+        }
+      }
+
+      // If there are duplicates, show selection UI
+      if (duplicateEmployees.length > 0) {
+        showDuplicateSelectionUI();
+        return; // Wait for user to resolve duplicates
+      }
+
+      // No duplicates - proceed with normal matching
+      finishMatching();
+    }
+
+    function finishMatching() {
+      proposedChanges = [];
+      matchedSheetEmployees = {};
 
       for (var i = 0; i < parsedCrews.length; i++) {
         var crew = parsedCrews[i];
@@ -623,13 +1832,30 @@ Dustin Graham JL                     Jimmy Bailey JL
         for (var j = 0; j < crew.employees.length; j++) {
           var emp = crew.employees[j];
 
-          // Try to match to current employees using the name matching from Code.gs
+          // Check if this is a duplicate that wasn't selected
+          var isDuplicateNotSelected = false;
+          for (var d = 0; d < duplicateEmployees.length; d++) {
+            var dup = duplicateEmployees[d];
+            for (var o = 0; o < dup.occurrences.length; o++) {
+              var occ = dup.occurrences[o];
+              if (occ.crewIndex === i && occ.empIndex === j && o !== dup.selectedIndex) {
+                isDuplicateNotSelected = true;
+                emp.skippedDuplicate = true;
+                break;
+              }
+            }
+            if (isDuplicateNotSelected) break;
+          }
+
+          if (isDuplicateNotSelected) continue;
+
           var match = findBestMatch(emp.name, currentEmployees);
 
           if (match && match.confidence >= 60) {
             emp.matchedEmployee = match;
+            // Mark this Google Sheet employee as matched
+            matchedSheetEmployees[match.employeeName.toLowerCase()] = emp.name;
 
-            // Check what changed
             var oldLocation = match.employeeData.location || '';
             var oldJobNum = match.employeeData.jobNum || '';
             var oldClassification = match.employeeData.jobClassification || '';
@@ -637,13 +1863,12 @@ Dustin Graham JL                     Jimmy Bailey JL
             var locationChanged = oldLocation !== crew.mappedLocation;
             var jobChanged = oldJobNum !== emp.fullJobNumber;
 
-            // ONLY update classification if it's currently EMPTY
-            // This preserves existing abbreviations like "JRY"
+            // Classification changes only if:
+            // 1. The Excel has a role detected (emp.classification is set)
+            // 2. It's different from current value
             var classificationChanged = false;
-            var newClassification = '';
-            if (emp.jobClassification && !oldClassification) {
+            if (emp.classification && emp.classification !== oldClassification) {
               classificationChanged = true;
-              newClassification = emp.jobClassification;
             }
 
             if (locationChanged || jobChanged || classificationChanged) {
@@ -656,7 +1881,7 @@ Dustin Graham JL                     Jimmy Bailey JL
                 oldJobNumber: oldJobNum,
                 newJobNumber: emp.fullJobNumber,
                 oldClassification: oldClassification,
-                newClassification: newClassification,
+                newClassification: emp.classification || '',
                 locationChanged: locationChanged,
                 jobChanged: jobChanged,
                 classificationChanged: classificationChanged,
@@ -672,36 +1897,233 @@ Dustin Graham JL                     Jimmy Bailey JL
       }
     }
 
-    function findBestMatch(name, employeeList) {
+    // Same as findBestMatch but doesn't skip already-matched employees (for duplicate detection)
+    function findBestMatchWithoutSkip(name, employeeList) {
       if (!name || !employeeList || employeeList.length === 0) return null;
 
       var normalizedName = name.toLowerCase().trim();
+      var nameParts = normalizedName.split(/\s+/);
+      var searchFirst = nameParts[0] || '';
+      var searchLast = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
+
       var matches = [];
 
       for (var i = 0; i < employeeList.length; i++) {
         var emp = employeeList[i];
         var empName = (emp.name || '').toLowerCase().trim();
 
-        // Exact match
+        // Exact match - highest priority
         if (normalizedName === empName) {
           return { employeeName: emp.name, confidence: 100, employeeData: emp };
         }
 
-        // Partial/contains match
-        if (normalizedName.indexOf(empName) !== -1 || empName.indexOf(normalizedName) !== -1) {
-          matches.push({ employeeName: emp.name, confidence: 90, employeeData: emp });
-          continue;
+        // Parse employee name into first/last
+        var empParts = empName.split(/\s+/);
+        var empFirst = empParts[0] || '';
+        var empLast = empParts.length > 1 ? empParts[empParts.length - 1] : '';
+
+        // Check last name first - must be at least 80% similar
+        var lastNameSim = calculateSimilarity(searchLast, empLast);
+        if (lastNameSim < 80) continue;
+
+        // Check first name - with nickname support
+        var firstNameSim;
+        if (firstNamesMatch(searchFirst, empFirst)) {
+          firstNameSim = 95;
+        } else {
+          firstNameSim = calculateSimilarity(searchFirst, empFirst);
+          if (firstNameSim < 65) continue;
         }
 
-        // Fuzzy match using simple similarity
-        var similarity = calculateSimilarity(normalizedName, empName);
-        if (similarity >= 60) {
-          matches.push({ employeeName: emp.name, confidence: Math.round(similarity), employeeData: emp });
-        }
+        var confidence = (firstNameSim * 0.6) + (lastNameSim * 0.4);
+
+        matches.push({
+          employeeName: emp.name,
+          confidence: Math.round(confidence),
+          employeeData: emp
+        });
       }
 
       matches.sort(function(a, b) { return b.confidence - a.confidence; });
-      return matches.length > 0 ? matches[0] : null;
+
+      if (matches.length > 0 && matches[0].confidence >= 70) {
+        return matches[0];
+      }
+
+      return null;
+    }
+
+    function findBestMatch(name, employeeList) {
+      if (!name || !employeeList || employeeList.length === 0) return null;
+
+      var normalizedName = name.toLowerCase().trim();
+      var nameParts = normalizedName.split(/\s+/);
+      var searchFirst = nameParts[0] || '';
+      var searchLast = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
+
+      var matches = [];
+
+      for (var i = 0; i < employeeList.length; i++) {
+        var emp = employeeList[i];
+        var empName = (emp.name || '').toLowerCase().trim();
+
+        // Skip if this employee was already matched to someone else
+        if (matchedSheetEmployees[empName]) {
+          continue;
+        }
+
+        // Exact match - highest priority
+        if (normalizedName === empName) {
+          return { employeeName: emp.name, confidence: 100, employeeData: emp };
+        }
+
+        // Parse employee name into first/last
+        var empParts = empName.split(/\s+/);
+        var empFirst = empParts[0] || '';
+        var empLast = empParts.length > 1 ? empParts[empParts.length - 1] : '';
+
+        // Check last name first - must be at least 80% similar
+        var lastNameSim = calculateSimilarity(searchLast, empLast);
+        if (lastNameSim < 80) continue;
+
+        // Check first name - with nickname support
+        var firstNameSim;
+        if (firstNamesMatch(searchFirst, empFirst)) {
+          firstNameSim = 95;
+        } else {
+          firstNameSim = calculateSimilarity(searchFirst, empFirst);
+          if (firstNameSim < 65) continue;
+        }
+
+        // Combined confidence: weight first name more heavily for disambiguation
+        var confidence = (firstNameSim * 0.6) + (lastNameSim * 0.4);
+
+        matches.push({
+          employeeName: emp.name,
+          confidence: Math.round(confidence),
+          employeeData: emp,
+          firstNameSim: firstNameSim,
+          lastNameSim: lastNameSim
+        });
+      }
+
+      // Sort by confidence descending
+      matches.sort(function(a, b) { return b.confidence - a.confidence; });
+
+      // Only return match if confidence is high enough
+      if (matches.length > 0 && matches[0].confidence >= 70) {
+        return matches[0];
+      }
+
+      return null;
+    }
+
+    // Common nickname mappings
+    var nicknameMap = {
+      'ben': ['benjamin', 'benny', 'benji'],
+      'benjamin': ['ben', 'benny', 'benji'],
+      'mike': ['michael', 'mick', 'mikey'],
+      'michael': ['mike', 'mick', 'mikey'],
+      'jim': ['james', 'jimmy', 'jamey'],
+      'james': ['jim', 'jimmy', 'jamey'],
+      'bill': ['william', 'will', 'billy', 'willy'],
+      'william': ['bill', 'will', 'billy', 'willy'],
+      'bob': ['robert', 'rob', 'bobby', 'robbie'],
+      'robert': ['bob', 'rob', 'bobby', 'robbie'],
+      'dick': ['richard', 'rick', 'rich', 'ricky'],
+      'richard': ['dick', 'rick', 'rich', 'ricky'],
+      'tom': ['thomas', 'tommy'],
+      'thomas': ['tom', 'tommy'],
+      'dan': ['daniel', 'danny'],
+      'daniel': ['dan', 'danny'],
+      'joe': ['joseph', 'joey'],
+      'joseph': ['joe', 'joey'],
+      'dave': ['david', 'davy'],
+      'david': ['dave', 'davy'],
+      'steve': ['steven', 'stephen', 'stevie'],
+      'steven': ['steve', 'stephen', 'stevie'],
+      'stephen': ['steve', 'steven', 'stevie'],
+      'chris': ['christopher', 'christian', 'christy'],
+      'christopher': ['chris', 'christy'],
+      'christian': ['chris'],
+      'matt': ['matthew', 'matty'],
+      'matthew': ['matt', 'matty'],
+      'tony': ['anthony', 'anton'],
+      'anthony': ['tony', 'anton'],
+      'jeff': ['jeffrey', 'geoffrey', 'geoff'],
+      'jeffrey': ['jeff', 'geoff'],
+      'nate': ['nathan', 'nathaniel', 'nathen'],
+      'nathan': ['nate', 'nathaniel', 'nathen'],
+      'nathaniel': ['nate', 'nathan'],
+      'geoffrey': ['jeff', 'geoff'],
+      'nick': ['nicholas', 'nicky'],
+      'nicholas': ['nick', 'nicky'],
+      'ted': ['theodore', 'teddy', 'edward', 'ed'],
+      'theodore': ['ted', 'teddy'],
+      'ed': ['edward', 'eddie', 'ted'],
+      'edward': ['ed', 'eddie', 'ted'],
+      'sam': ['samuel', 'sammy'],
+      'samuel': ['sam', 'sammy'],
+      'pat': ['patrick', 'patty'],
+      'patrick': ['pat', 'patty'],
+      'alex': ['alexander', 'alexandra'],
+      'alexander': ['alex'],
+      'alexandra': ['alex'],
+      'zach': ['zachary', 'zack'],
+      'zachary': ['zach', 'zack'],
+      'josh': ['joshua'],
+      'joshua': ['josh'],
+      'andy': ['andrew', 'drew'],
+      'andrew': ['andy', 'drew'],
+      'charlie': ['charles', 'chuck'],
+      'charles': ['charlie', 'chuck'],
+      'chuck': ['charles', 'charlie'],
+      'jerry': ['gerald', 'jeremiah', 'jerred', 'jared'],
+      'gerald': ['jerry', 'gerry'],
+      'jerred': ['jerry', 'jared', 'jarred'],
+      'jared': ['jerry', 'jerred', 'jarred'],
+      'greg': ['gregory'],
+      'gregory': ['greg'],
+      'ken': ['kenneth', 'kenny'],
+      'kenneth': ['ken', 'kenny'],
+      'larry': ['lawrence', 'laurence'],
+      'lawrence': ['larry'],
+      'ray': ['raymond'],
+      'raymond': ['ray'],
+      'ron': ['ronald', 'ronnie'],
+      'ronald': ['ron', 'ronnie'],
+      'tim': ['timothy', 'timmy'],
+      'timothy': ['tim', 'timmy'],
+      'will': ['william', 'bill', 'willy', 'billy'],
+      'john': ['jonathan', 'johnny', 'jon'],
+      'jonathan': ['john', 'johnny', 'jon'],
+      'jon': ['john', 'jonathan', 'johnny']
+    };
+
+    function firstNamesMatch(name1, name2) {
+      if (!name1 || !name2) return false;
+      name1 = name1.toLowerCase().trim();
+      name2 = name2.toLowerCase().trim();
+
+      // Exact match
+      if (name1 === name2) return true;
+
+      // Check nickname mapping
+      var nicknames1 = nicknameMap[name1] || [];
+      var nicknames2 = nicknameMap[name2] || [];
+
+      // Check if name2 is a nickname of name1
+      if (nicknames1.indexOf(name2) !== -1) return true;
+
+      // Check if name1 is a nickname of name2
+      if (nicknames2.indexOf(name1) !== -1) return true;
+
+      // Check if they share a common full name (e.g., both are nicknames of same name)
+      for (var i = 0; i < nicknames1.length; i++) {
+        if (nicknames2.indexOf(nicknames1[i]) !== -1) return true;
+      }
+
+      return false;
     }
 
     function calculateSimilarity(str1, str2) {
@@ -721,7 +2143,6 @@ Dustin Graham JL                     Jimmy Bailey JL
     function displayPreview() {
       document.getElementById('previewSection').style.display = 'block';
 
-      // Calculate stats
       var totalEmployees = 0, matchedCount = 0, unmatchedCount = 0, noChangeCount = 0;
       for (var i = 0; i < parsedCrews.length; i++) {
         var crew = parsedCrews[i];
@@ -741,7 +2162,6 @@ Dustin Graham JL                     Jimmy Bailey JL
       document.getElementById('statUnmatched').textContent = unmatchedCount;
       document.getElementById('statSkipped').textContent = noChangeCount;
 
-      // Build changes table
       var tbody = document.getElementById('changesTableBody');
       var html = '';
 
@@ -761,7 +2181,7 @@ Dustin Graham JL                     Jimmy Bailey JL
           }
           html += '</td>';
 
-          // Classification
+          // Classification column - show changes
           html += '<td>';
           if (ch.classificationChanged) {
             html += '<span class="text-unchanged">' + (ch.oldClassification || 'None') + '</span> → <span class="text-changed">' + ch.newClassification + '</span>';
@@ -772,7 +2192,6 @@ Dustin Graham JL                     Jimmy Bailey JL
           }
           html += '</td>';
 
-          // Location
           html += '<td>';
           if (ch.locationChanged) {
             html += '<span class="text-unchanged">' + (ch.oldLocation || 'None') + '</span> → <span class="text-changed">' + ch.newLocation + '</span>';
@@ -781,7 +2200,6 @@ Dustin Graham JL                     Jimmy Bailey JL
           }
           html += '</td>';
 
-          // Job Number
           html += '<td>';
           if (ch.jobChanged) {
             html += '<span class="text-unchanged">' + (ch.oldJobNumber || 'None') + '</span> → <span class="text-changed">' + ch.newJobNumber + '</span>';
@@ -796,34 +2214,516 @@ Dustin Graham JL                     Jimmy Bailey JL
 
       tbody.innerHTML = html;
 
-      // Show unmatched
+      // Show unmatched - filter out garbage entries (dates, notes, etc.)
       var unmatchedEmps = [];
       for (var i = 0; i < parsedCrews.length; i++) {
         for (var j = 0; j < parsedCrews[i].employees.length; j++) {
-          if (parsedCrews[i].employees[j].unmatched) {
-            unmatchedEmps.push({ emp: parsedCrews[i].employees[j], crew: parsedCrews[i] });
+          var emp = parsedCrews[i].employees[j];
+          if (emp.unmatched) {
+            // Filter out entries that don't look like real names
+            // Real names should have at least 2 words and not start with common non-name patterns
+            var name = (emp.name || '').trim();
+            var nameParts = name.split(/\s+/);
+
+            // Skip if less than 2 parts (first + last name minimum)
+            if (nameParts.length < 2) continue;
+
+            // Skip if it looks like a date or note (starts with common patterns)
+            var firstWord = nameParts[0].toLowerCase();
+            var skipPatterns = ['or', 'and', 'the', 'for', 'with', 'from', 'at', 'on', 'in',
+                               'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+                               'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun',
+                               'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+            if (skipPatterns.indexOf(firstWord) !== -1) continue;
+
+            // Skip if name is mostly numbers
+            var letterCount = (name.match(/[a-zA-Z]/g) || []).length;
+            if (letterCount < 3) continue;
+
+            unmatchedEmps.push({
+              emp: emp,
+              crew: parsedCrews[i],
+              crewIndex: i,
+              empIndex: j
+            });
           }
         }
       }
 
       if (unmatchedEmps.length > 0) {
         document.getElementById('unmatchedSection').style.display = 'block';
-        var unmatchedHtml = '<div class="list-group">';
-        for (var i = 0; i < unmatchedEmps.length; i++) {
-          var u = unmatchedEmps[i];
-          unmatchedHtml += '<div class="list-group-item d-flex justify-content-between">';
-          unmatchedHtml += '<div><strong>' + u.emp.originalText + '</strong><br><small class="text-muted">' + u.crew.mappedLocation + ' - ' + u.crew.jobNumber + '</small></div>';
-          unmatchedHtml += '<span class="badge bg-danger">Not Found</span>';
-          unmatchedHtml += '</div>';
-        }
-        unmatchedHtml += '</div>';
-        document.getElementById('unmatchedContainer').innerHTML = unmatchedHtml;
+        document.getElementById('unmatchedCount').textContent = unmatchedEmps.length;
+        renderUnmatchedEmployees(unmatchedEmps);
       } else {
         document.getElementById('unmatchedSection').style.display = 'none';
       }
 
-      // Enable apply button
       document.getElementById('btnApplyChanges').disabled = proposedChanges.length === 0;
+    }
+
+    // Store unmatched employees globally for manual matching
+    var unmatchedList = [];
+
+    function renderUnmatchedEmployees(unmatchedEmps) {
+      unmatchedList = unmatchedEmps;
+      var container = document.getElementById('unmatchedContainer');
+      var html = '';
+
+      for (var i = 0; i < unmatchedEmps.length; i++) {
+        var u = unmatchedEmps[i];
+
+        // Find potential matches (employees not yet matched, using loose criteria)
+        var potentialMatches = findPotentialMatches(u.emp.name, 5);
+
+        html += '<div class="card mb-3" id="unmatched-card-' + i + '">';
+        html += '<div class="card-header d-flex justify-content-between align-items-center">';
+        html += '<div>';
+        html += '<strong>' + escapeHtml(u.emp.originalText) + '</strong>';
+        html += '<br><small class="text-muted"><i class="bi bi-geo-alt"></i> ' + u.crew.mappedLocation + ' &bull; Job #' + u.emp.fullJobNumber + '</small>';
+        html += '</div>';
+        html += '<span class="badge bg-danger">Unmatched</span>';
+        html += '</div>';
+        html += '<div class="card-body">';
+
+        if (potentialMatches.length > 0) {
+          html += '<p class="small text-muted mb-2">Potential matches found. Select one to assign:</p>';
+          html += '<div class="list-group list-group-flush">';
+          for (var m = 0; m < potentialMatches.length; m++) {
+            var match = potentialMatches[m];
+            var isAlreadyMatched = matchedSheetEmployees[match.name.toLowerCase()];
+            var disabledClass = isAlreadyMatched ? 'disabled text-muted' : '';
+            var matchedNote = isAlreadyMatched ? ' <span class="badge bg-secondary">Already assigned</span>' : '';
+
+            html += '<button type="button" class="list-group-item list-group-item-action potential-match-btn ' + disabledClass + '" ';
+            if (!isAlreadyMatched) {
+              html += 'data-unmatched-index="' + i + '" ';
+              html += 'data-employee-row="' + match.rowIndex + '" ';
+              html += 'data-employee-name="' + escapeAttr(match.name) + '"';
+            }
+            html += '>';
+            html += '<div class="d-flex justify-content-between align-items-center">';
+            html += '<div>';
+            html += '<strong>' + escapeHtml(match.name) + '</strong>';
+            html += matchedNote;
+            html += '<br><small class="text-muted">' + (match.location || 'No location') + ' - ' + (match.jobNum || 'No job#') + '</small>';
+            html += '</div>';
+            html += '<span class="badge bg-info">' + match.similarity + '%</span>';
+            html += '</div>';
+            html += '</button>';
+          }
+          html += '</div>';
+        } else {
+          html += '<p class="small text-muted mb-2">No potential matches found.</p>';
+        }
+
+        html += '<div class="mt-3">';
+        html += '<button class="btn btn-success btn-sm me-2" onclick="addAsNewEmployee(' + i + ')">';
+        html += '<i class="bi bi-person-plus"></i> Add as New Employee';
+        html += '</button>';
+        html += '<button class="btn btn-outline-secondary btn-sm me-2" onclick="showAllEmployeesDropdown(' + i + ')">';
+        html += '<i class="bi bi-search"></i> Search Existing';
+        html += '</button>';
+        html += '<button class="btn btn-outline-danger btn-sm" onclick="skipUnmatchedEmployee(' + i + ')">';
+        html += '<i class="bi bi-x"></i> Skip';
+        html += '</button>';
+        html += '</div>';
+        html += '<div id="all-employees-dropdown-' + i + '" style="display: none;" class="mt-2"></div>';
+        html += '</div>';
+        html += '</div>';
+      }
+
+      container.innerHTML = html;
+    }
+
+    function escapeHtml(text) {
+      var div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Escape for use in HTML attributes (data-* attributes)
+    function escapeAttr(text) {
+      if (!text) return '';
+      return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
+
+    function findPotentialMatches(name, maxResults) {
+      if (!name || !currentEmployees || currentEmployees.length === 0) return [];
+
+      var normalizedName = name.toLowerCase().trim();
+      var nameParts = normalizedName.split(/\s+/);
+      var searchFirst = nameParts[0] || '';
+      var searchLast = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
+
+      var matches = [];
+
+      for (var i = 0; i < currentEmployees.length; i++) {
+        var emp = currentEmployees[i];
+        var empName = (emp.name || '').toLowerCase().trim();
+
+        // Skip Previous Employees
+        if ((emp.location || '').toLowerCase() === 'previous employee') continue;
+
+        // Parse employee name
+        var empParts = empName.split(/\s+/);
+        var empFirst = empParts[0] || '';
+        var empLast = empParts.length > 1 ? empParts[empParts.length - 1] : '';
+
+        // Calculate similarity with looser criteria for suggestions
+        var lastNameSim = calculateSimilarity(searchLast, empLast);
+        var firstNameSim;
+
+        if (firstNamesMatch(searchFirst, empFirst)) {
+          firstNameSim = 95;
+        } else {
+          firstNameSim = calculateSimilarity(searchFirst, empFirst);
+        }
+
+        // Use looser threshold for potential matches
+        if (lastNameSim >= 60 || firstNameSim >= 60) {
+          var confidence = (firstNameSim * 0.5) + (lastNameSim * 0.5);
+          matches.push({
+            name: emp.name,
+            location: emp.location,
+            jobNum: emp.jobNum,
+            rowIndex: emp.rowIndex,
+            similarity: Math.round(confidence),
+            employeeData: emp
+          });
+        }
+      }
+
+      // Sort by similarity descending
+      matches.sort(function(a, b) { return b.similarity - a.similarity; });
+
+      return matches.slice(0, maxResults);
+    }
+
+    function showAllEmployeesDropdown(unmatchedIndex) {
+      var container = document.getElementById('all-employees-dropdown-' + unmatchedIndex);
+
+      if (container.style.display === 'block') {
+        container.style.display = 'none';
+        return;
+      }
+
+      // Build searchable dropdown
+      var html = '<div class="input-group mb-2">';
+      html += '<input type="text" class="form-control form-control-sm" id="employee-search-' + unmatchedIndex + '" placeholder="Type to search..." onkeyup="filterEmployeeList(' + unmatchedIndex + ')">';
+      html += '</div>';
+      html += '<div class="list-group" id="employee-list-' + unmatchedIndex + '" style="max-height: 200px; overflow-y: auto;">';
+
+      // Show all non-matched employees, sorted alphabetically
+      var availableEmps = currentEmployees.filter(function(emp) {
+        var isMatched = matchedSheetEmployees[emp.name.toLowerCase()];
+        var isPrevious = (emp.location || '').toLowerCase() === 'previous employee';
+        return !isMatched && !isPrevious;
+      }).sort(function(a, b) {
+        return a.name.localeCompare(b.name);
+      });
+
+      for (var i = 0; i < availableEmps.length; i++) {
+        var emp = availableEmps[i];
+        html += '<button type="button" class="list-group-item list-group-item-action py-1 employee-option" ';
+        html += 'data-name="' + escapeHtml(emp.name.toLowerCase()) + '" ';
+        html += 'onclick="manuallyMatchEmployee(' + unmatchedIndex + ', ' + emp.rowIndex + ', \'' + escapeQuotes(emp.name) + '\')">';
+        html += '<small>' + escapeHtml(emp.name) + '</small>';
+        html += '</button>';
+      }
+
+      html += '</div>';
+      container.innerHTML = html;
+      container.style.display = 'block';
+      document.getElementById('employee-search-' + unmatchedIndex).focus();
+    }
+
+    function filterEmployeeList(unmatchedIndex) {
+      var searchText = document.getElementById('employee-search-' + unmatchedIndex).value.toLowerCase();
+      var items = document.querySelectorAll('#employee-list-' + unmatchedIndex + ' .employee-option');
+
+      for (var i = 0; i < items.length; i++) {
+        var name = items[i].getAttribute('data-name');
+        if (name.indexOf(searchText) !== -1) {
+          items[i].style.display = '';
+        } else {
+          items[i].style.display = 'none';
+        }
+      }
+    }
+
+    function manuallyMatchEmployee(unmatchedIndex, employeeRowIndex, employeeName) {
+      console.log('=== manuallyMatchEmployee START ===');
+      console.log('Parameters:', { unmatchedIndex: unmatchedIndex, employeeRowIndex: employeeRowIndex, employeeName: employeeName });
+      console.log('unmatchedList length:', unmatchedList.length);
+      console.log('unmatchedList names:', unmatchedList.map(function(u) { return u.emp.name; }));
+
+      var unmatched = unmatchedList[unmatchedIndex];
+      if (!unmatched) {
+        console.error('ERROR: No unmatched employee at index ' + unmatchedIndex + '. List only has ' + unmatchedList.length + ' items.');
+        alert('Error: Could not find unmatched employee at index ' + unmatchedIndex + '. Please close and reopen the dialog to refresh.');
+        return;
+      }
+
+      console.log('Found unmatched employee:', unmatched.emp.name);
+
+      // Find the employee data
+      var empData = null;
+      for (var i = 0; i < currentEmployees.length; i++) {
+        if (currentEmployees[i].rowIndex === employeeRowIndex) {
+          empData = currentEmployees[i];
+          break;
+        }
+      }
+
+      if (!empData) {
+        console.error('ERROR: Employee not found with rowIndex:', employeeRowIndex);
+        alert('Employee not found in the sheet. They may have been removed.');
+        return;
+      }
+
+      console.log('Found employee data:', empData.name, 'at row', employeeRowIndex);
+
+      // Mark as matched
+      var emp = unmatched.emp;
+      var crew = unmatched.crew;
+
+      emp.unmatched = false;
+      emp.matchedEmployee = {
+        employeeName: employeeName,
+        confidence: 100, // Manual match
+        employeeData: empData
+      };
+
+      matchedSheetEmployees[employeeName.toLowerCase()] = emp.name;
+      console.log('Marked as matched. matchedSheetEmployees now has:', Object.keys(matchedSheetEmployees).length, 'entries');
+
+      // Determine changes
+      var oldLocation = empData.location || '';
+      var oldJobNum = empData.jobNum || '';
+      var oldClassification = empData.jobClassification || '';
+
+      var locationChanged = oldLocation !== crew.mappedLocation;
+      var jobChanged = oldJobNum !== emp.fullJobNumber;
+      var classificationChanged = emp.classification && emp.classification !== oldClassification;
+
+      console.log('Change detection:', { locationChanged: locationChanged, jobChanged: jobChanged, classificationChanged: classificationChanged });
+
+      if (locationChanged || jobChanged || classificationChanged) {
+        proposedChanges.push({
+          employee: emp,
+          crew: crew,
+          match: emp.matchedEmployee,
+          oldLocation: oldLocation,
+          newLocation: crew.mappedLocation,
+          oldJobNumber: oldJobNum,
+          newJobNumber: emp.fullJobNumber,
+          oldClassification: oldClassification,
+          newClassification: emp.classification || '',
+          locationChanged: locationChanged,
+          jobChanged: jobChanged,
+          classificationChanged: classificationChanged,
+          apply: true
+        });
+        console.log('Added to proposedChanges. Total:', proposedChanges.length);
+      } else {
+        emp.noChanges = true;
+        console.log('No changes detected for this employee');
+      }
+
+      // Remove from unmatched list and refresh display
+      console.log('Splicing unmatchedList at index', unmatchedIndex);
+      unmatchedList.splice(unmatchedIndex, 1);
+      console.log('unmatchedList now has', unmatchedList.length, 'items');
+
+      // Re-render displays
+      console.log('Calling displayPreview()...');
+      displayPreview();
+      console.log('=== manuallyMatchEmployee END ===');
+    }
+
+    function skipUnmatchedEmployee(unmatchedIndex) {
+      var card = document.getElementById('unmatched-card-' + unmatchedIndex);
+      if (card) {
+        card.remove();
+      }
+
+      unmatchedList.splice(unmatchedIndex, 1);
+
+      if (unmatchedList.length === 0) {
+        document.getElementById('unmatchedSection').style.display = 'none';
+      } else {
+        document.getElementById('unmatchedCount').textContent = unmatchedList.length;
+      }
+    }
+
+    function skipAllUnmatched() {
+      unmatchedList = [];
+      document.getElementById('unmatchedSection').style.display = 'none';
+    }
+
+    function addAsNewEmployee(unmatchedIndex) {
+      var unmatched = unmatchedList[unmatchedIndex];
+      if (!unmatched) return;
+
+      var emp = unmatched.emp;
+      var crew = unmatched.crew;
+
+      // Populate the modal with pre-filled data
+      document.getElementById('newEmpNameDisplay').textContent = emp.name;
+      document.getElementById('newEmpOriginalText').textContent = emp.originalName || emp.name;
+      document.getElementById('newEmpUnmatchedIndex').value = unmatchedIndex;
+
+      // Pre-fill location dropdown
+      var locationSelect = document.getElementById('newEmpLocation');
+      locationSelect.innerHTML = '<option value="">Select location...</option>';
+      var allLocations = Object.values(locationMappings).filter(function(v, i, self) {
+        return self.indexOf(v) === i;
+      }).sort();
+      allLocations.forEach(function(loc) {
+        var opt = document.createElement('option');
+        opt.value = loc;
+        opt.textContent = loc;
+        if (loc === crew.mappedLocation) opt.selected = true;
+        locationSelect.appendChild(opt);
+      });
+
+      // Pre-fill job number
+      document.getElementById('newEmpJobNumber').value = emp.fullJobNumber || '';
+
+      // Pre-fill classification
+      var classSelect = document.getElementById('newEmpClassification');
+      if (emp.classification) {
+        for (var i = 0; i < classSelect.options.length; i++) {
+          if (classSelect.options[i].value === emp.classification) {
+            classSelect.selectedIndex = i;
+            break;
+          }
+        }
+      } else {
+        classSelect.selectedIndex = 0;
+      }
+
+      // Set today as default hire date
+      var today = new Date().toISOString().split('T')[0];
+      document.getElementById('newEmpHireDate').value = today;
+
+      // Clear other fields
+      document.getElementById('newEmpPhone').value = '';
+      document.getElementById('newEmpEmail').value = '';
+      document.getElementById('newEmpMPEmail').value = '';
+      document.getElementById('newEmpNotificationEmails').value = '';
+      document.getElementById('newEmpGloveSize').selectedIndex = 0;
+      document.getElementById('newEmpSleeveSize').selectedIndex = 0;
+
+      // Show the modal
+      var modal = new bootstrap.Modal(document.getElementById('newEmployeeModal'));
+      modal.show();
+    }
+
+    function submitNewEmployee() {
+      // Validate required fields
+      var name = document.getElementById('newEmpNameDisplay').textContent;
+      var location = document.getElementById('newEmpLocation').value;
+      var jobNumber = document.getElementById('newEmpJobNumber').value.trim();
+      var classification = document.getElementById('newEmpClassification').value;
+      var unmatchedIndex = parseInt(document.getElementById('newEmpUnmatchedIndex').value);
+
+      if (!location) {
+        alert('Please select a location');
+        return;
+      }
+      if (!jobNumber) {
+        alert('Please enter a job number');
+        return;
+      }
+      if (!classification) {
+        alert('Please select a job classification');
+        return;
+      }
+
+      var unmatched = unmatchedList[unmatchedIndex];
+      var emp = unmatched ? unmatched.emp : null;
+      var crew = unmatched ? unmatched.crew : null;
+
+      // Collect all form data
+      var newEmployeeData = {
+        name: name,
+        location: location,
+        jobNumber: jobNumber,
+        classification: classification,
+        hireDate: document.getElementById('newEmpHireDate').value,
+        phoneNumber: document.getElementById('newEmpPhone').value.trim(),
+        emailAddress: document.getElementById('newEmpEmail').value.trim(),
+        mpEmail: document.getElementById('newEmpMPEmail').value.trim(),
+        notificationEmails: document.getElementById('newEmpNotificationEmails').value.trim(),
+        gloveSize: document.getElementById('newEmpGloveSize').value,
+        sleeveSize: document.getElementById('newEmpSleeveSize').value
+      };
+
+      // Disable the submit button while processing
+      var submitBtn = document.querySelector('#newEmployeeModal .btn-success');
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Adding...';
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '<i class="bi bi-person-plus"></i> Add Employee';
+
+          if (result.success) {
+            // Close the modal
+            var modal = bootstrap.Modal.getInstance(document.getElementById('newEmployeeModal'));
+            modal.hide();
+
+            // Add to currentEmployees list so it can be matched
+            currentEmployees.push({
+              name: result.employeeName,
+              location: location,
+              jobNum: jobNumber,
+              jobClassification: classification,
+              rowIndex: result.rowIndex
+            });
+
+            // Update the unmatched employee entry
+            if (emp) {
+              emp.unmatched = false;
+              emp.noChanges = true;
+              emp.matchedEmployee = {
+                employeeName: result.employeeName,
+                confidence: 100,
+                employeeData: {
+                  name: result.employeeName,
+                  location: location,
+                  jobNum: jobNumber,
+                  rowIndex: result.rowIndex
+                }
+              };
+              matchedSheetEmployees[result.employeeName.toLowerCase()] = emp.name;
+            }
+
+            // Remove from unmatched list
+            unmatchedList.splice(unmatchedIndex, 1);
+
+            // Show success message
+            alert('✓ Added "' + result.employeeName + '" to Employees sheet!');
+
+            // Refresh display
+            displayPreview();
+          } else {
+            alert('Error: ' + result.message);
+          }
+        })
+        .withFailureHandler(function(error) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '<i class="bi bi-person-plus"></i> Add Employee';
+          alert('Error adding employee: ' + error);
+        })
+        .addNewEmployeeFromImport(newEmployeeData);
     }
 
     function toggleAllChanges(checkbox) {
@@ -855,7 +2755,7 @@ Dustin Graham JL                     Jimmy Bailey JL
 
       var msg = 'Apply ' + changesToApply.length + ' change(s) to the Employees sheet?\n\n';
       msg += 'This will update:\n';
-      msg += '• Location\n• Job Number (with position)\n• Job Classification\n\n';
+      msg += '• Location\n• Job Number (with position)\n• Job Classification (F, JRY, AP 1-7, etc.)\n\n';
       msg += 'All changes will be logged to Employee History.';
 
       if (!confirm(msg)) return;
@@ -872,7 +2772,7 @@ Dustin Graham JL                     Jimmy Bailey JL
           newClassification: c.newClassification || '',
           oldLocation: c.oldLocation,
           oldJobNumber: c.oldJobNumber,
-          oldClassification: c.oldClassification,
+          oldClassification: c.oldClassification || '',
           isForeman: c.employee.isForeman
         };
       });
@@ -884,463 +2784,6 @@ Dustin Graham JL                     Jimmy Bailey JL
         })
         .withFailureHandler(function(error) {
           alert('Error: ' + error);
-          document.getElementById('btnApplyChanges').disabled = false;
-          document.getElementById('btnApplyChanges').innerHTML = '<i class="bi bi-check-lg"></i> Apply Changes';
-        })
-        .applyCrewChanges(changes);
-    }
-
-    // Initialize on load
-    init();
-  </script>
-</body>
-</html>
-      var fromName = prompt('Enter spreadsheet location name (e.g., "Belgrade Dock"):');
-      if (!fromName) return;
-      var toName = prompt('Enter Google Sheet location name (e.g., "Bozeman"):');
-      if (!toName) return;
-      locationMappings[fromName.trim()] = toName.trim();
-      renderLocationMappings();
-    }
-
-    function parseCrewData() {
-      var text = document.getElementById('crewData').value.trim();
-      if (!text) {
-        alert('Please paste crew data first');
-        return;
-      }
-
-      // Parse the pasted data
-      var lines = text.split('\n');
-      parsedCrews = [];
-      var currentCrew = null;
-      var employeePosition = 0;
-
-      for (var i = 0; i < lines.length; i++) {
-        var line = lines[i].trim();
-        if (!line) continue;
-
-        var cells = line.split('\t');
-
-        // Check each cell for job headers
-        for (var c = 0; c < cells.length; c++) {
-          var cell = cells[c].trim();
-          if (!cell) continue;
-
-          // Check if this is a job header (contains job number pattern like "013-26")
-          var jobMatch = cell.match(/^(.+?)\s+(\d{3}-\d{2})\s*(.*)$/);
-          if (jobMatch) {
-            // This is a job header
-            var locationName = jobMatch[1].trim();
-            var jobNumber = jobMatch[2].trim();
-            var schedule = jobMatch[3].trim();
-
-            // Map location
-            var mappedLocation = mapLocation(locationName);
-
-            currentCrew = {
-              originalLocation: locationName,
-              mappedLocation: mappedLocation,
-              jobNumber: jobNumber,
-              schedule: schedule,
-              employees: [],
-              column: c
-            };
-            parsedCrews.push(currentCrew);
-            employeePosition = 0;
-          }
-        }
-
-        // If we have crews, try to assign employees to them based on column position
-        if (parsedCrews.length > 0) {
-          for (var c = 0; c < cells.length; c++) {
-            var cell = cells[c].trim();
-            if (!cell) continue;
-
-            // Skip if this looks like a header or note
-            if (cell.match(/^\d{3}-\d{2}/) || cell.match(/Dock|Trans|Sub|Testing|Weeds|Time off/i)) continue;
-            if (cell.match(/^(NWE|Aprox|Tentative|Completed|On Hold|PT Arrival|Install|Project)/i)) continue;
-            if (cell.match(/^\d+\.\d+\.\d+$/)) continue; // Date like 1.19.26
-
-            // Find which crew this column belongs to
-            var targetCrew = null;
-            for (var cr = parsedCrews.length - 1; cr >= 0; cr--) {
-              if (parsedCrews[cr].column === c ||
-                  (parsedCrews[cr].column <= c && (cr === parsedCrews.length - 1 || parsedCrews[cr + 1].column > c))) {
-                targetCrew = parsedCrews[cr];
-                break;
-              }
-            }
-
-            if (targetCrew && isEmployeeName(cell)) {
-              var empInfo = parseEmployeeName(cell);
-              empInfo.position = targetCrew.employees.length + 1;
-              empInfo.fullJobNumber = targetCrew.jobNumber + '.' + empInfo.position;
-              targetCrew.employees.push(empInfo);
-            }
-          }
-        }
-      }
-
-      // Match employees to current sheet
-      matchEmployeesToSheet();
-
-      // Display preview
-      displayPreview();
-    }
-
-    function mapLocation(locationName) {
-      // Try exact match first
-      if (locationMappings[locationName]) {
-        return locationMappings[locationName];
-      }
-
-      // Try partial match
-      for (var key in locationMappings) {
-        if (locationName.toLowerCase().indexOf(key.toLowerCase()) !== -1 ||
-            key.toLowerCase().indexOf(locationName.toLowerCase()) !== -1) {
-          return locationMappings[key];
-        }
-      }
-
-      // Return original if no mapping found
-      return locationName;
-    }
-
-    function isEmployeeName(text) {
-      // Check if this looks like an employee name
-      // Should have at least first and last name, may have suffix like F, JL, ap, etc.
-      if (!text || text.length < 3) return false;
-      if (text.match(/^\d/)) return false; // Starts with number
-      if (text.match(/^(NWE|Aprox|Tentative|Completed|On Hold|BID|No CDL|layoff|off)/i)) return false;
-
-      // Should contain letters and possibly spaces
-      if (!text.match(/[a-zA-Z]{2,}/)) return false;
-
-      return true;
-    }
-
-    function parseEmployeeName(text) {
-      var result = {
-        originalText: text,
-        name: text,
-        role: 'Unknown',
-        isForeman: false,
-        apprenticeYear: null
-      };
-
-      // Check for role suffixes
-      if (text.match(/\sF$/i) || text.match(/\sF\s/i)) {
-        result.isForeman = true;
-        result.role = 'Foreman';
-        result.name = text.replace(/\s+F$/i, '').replace(/\s+F\s+/i, ' ').trim();
-      } else if (text.match(/\sJL$/i) || text.match(/\sJL\s/i)) {
-        result.role = 'Journeyman Lineman';
-        result.name = text.replace(/\s+JL$/i, '').replace(/\s+JL\s+/i, ' ').trim();
-      } else if (text.match(/\s(\d)\s*ap$/i)) {
-        var apMatch = text.match(/\s(\d)\s*ap$/i);
-        result.apprenticeYear = parseInt(apMatch[1]);
-        result.role = 'Apprentice Year ' + result.apprenticeYear;
-        result.name = text.replace(/\s+\d\s*ap$/i, '').trim();
-      } else if (text.match(/\sJry\s*Op$/i) || text.match(/\sJourney\s*Op/i)) {
-        result.role = 'Journey Operator';
-        result.name = text.replace(/\s+Jry\s*Op$/i, '').replace(/\s+Journey\s*Op.*$/i, '').trim();
-      } else if (text.match(/\sGTO$/i)) {
-        result.role = 'GTO';
-        result.name = text.replace(/\s+GTO$/i, '').trim();
-      } else if (text.match(/\sEO2$/i)) {
-        result.role = 'Equipment Operator 2';
-        result.name = text.replace(/\s+EO2$/i, '').trim();
-      } else if (text.match(/\sWT$/i)) {
-        result.role = 'Working Tech';
-        result.name = text.replace(/\s+WT$/i, '').trim();
-      }
-
-      return result;
-    }
-
-    function matchEmployeesToSheet() {
-      proposedChanges = [];
-      var unmatchedEmployees = [];
-
-      for (var i = 0; i < parsedCrews.length; i++) {
-        var crew = parsedCrews[i];
-
-        for (var j = 0; j < crew.employees.length; j++) {
-          var emp = crew.employees[j];
-
-          // Try to match to current employees
-          var match = findBestMatch(emp.name, currentEmployees);
-
-          if (match && match.confidence >= 70) {
-            emp.matchedEmployee = match;
-
-            // Check if anything changed
-            var locationChanged = match.employeeData.location !== crew.mappedLocation;
-            var jobChanged = match.employeeData.jobNum !== crew.jobNumber;
-
-            if (locationChanged || jobChanged) {
-              proposedChanges.push({
-                employee: emp,
-                crew: crew,
-                match: match,
-                oldLocation: match.employeeData.location,
-                newLocation: crew.mappedLocation,
-                oldJobNumber: match.employeeData.jobNum,
-                newJobNumber: crew.jobNumber,
-                locationChanged: locationChanged,
-                jobChanged: jobChanged,
-                apply: true // Default to applying
-              });
-            } else {
-              emp.noChanges = true;
-            }
-          } else {
-            emp.unmatched = true;
-            unmatchedEmployees.push({
-              employee: emp,
-              crew: crew,
-              suggestions: match ? match.suggestions : []
-            });
-          }
-        }
-      }
-
-      return unmatchedEmployees;
-    }
-
-    function findBestMatch(name, employeeList) {
-      if (!name || !employeeList || employeeList.length === 0) return null;
-
-      var normalizedName = name.toLowerCase().trim();
-      var matches = [];
-
-      for (var i = 0; i < employeeList.length; i++) {
-        var emp = employeeList[i];
-        var empName = emp.name.toLowerCase().trim();
-
-        // Exact match
-        if (normalizedName === empName) {
-          return {
-            employeeName: emp.name,
-            confidence: 100,
-            employeeData: emp,
-            matchType: 'exact'
-          };
-        }
-
-        // Check if one contains the other
-        if (normalizedName.indexOf(empName) !== -1 || empName.indexOf(normalizedName) !== -1) {
-          matches.push({
-            employeeName: emp.name,
-            confidence: 90,
-            employeeData: emp,
-            matchType: 'partial'
-          });
-          continue;
-        }
-
-        // Simple similarity check (for fuzzy matching)
-        var similarity = calculateSimilarity(normalizedName, empName);
-        if (similarity >= 60) {
-          matches.push({
-            employeeName: emp.name,
-            confidence: Math.round(similarity),
-            employeeData: emp,
-            matchType: 'fuzzy'
-          });
-        }
-      }
-
-      matches.sort(function(a, b) { return b.confidence - a.confidence; });
-
-      if (matches.length > 0) {
-        var result = matches[0];
-        result.suggestions = matches.slice(0, 3);
-        return result;
-      }
-
-      return null;
-    }
-
-    function calculateSimilarity(str1, str2) {
-      // Simple Levenshtein-based similarity
-      var len1 = str1.length;
-      var len2 = str2.length;
-      var matrix = [];
-
-      for (var i = 0; i <= len1; i++) {
-        matrix[i] = [i];
-      }
-      for (var j = 0; j <= len2; j++) {
-        matrix[0][j] = j;
-      }
-
-      for (var i = 1; i <= len1; i++) {
-        for (var j = 1; j <= len2; j++) {
-          var cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
-          matrix[i][j] = Math.min(
-            matrix[i - 1][j] + 1,
-            matrix[i][j - 1] + 1,
-            matrix[i - 1][j - 1] + cost
-          );
-        }
-      }
-
-      var distance = matrix[len1][len2];
-      var maxLen = Math.max(len1, len2);
-      return (1 - distance / maxLen) * 100;
-    }
-
-    function displayPreview() {
-      document.getElementById('previewSection').style.display = 'block';
-
-      // Summary stats
-      var totalEmployees = 0;
-      var matchedCount = 0;
-      var changesCount = proposedChanges.length;
-      var unmatchedCount = 0;
-
-      for (var i = 0; i < parsedCrews.length; i++) {
-        totalEmployees += parsedCrews[i].employees.length;
-        for (var j = 0; j < parsedCrews[i].employees.length; j++) {
-          if (parsedCrews[i].employees[j].matchedEmployee) matchedCount++;
-          if (parsedCrews[i].employees[j].unmatched) unmatchedCount++;
-        }
-      }
-
-      var statsHtml = '<div class="row">';
-      statsHtml += '<div class="col-md-3"><strong>' + parsedCrews.length + '</strong><br><small>Crews Found</small></div>';
-      statsHtml += '<div class="col-md-3"><strong>' + totalEmployees + '</strong><br><small>Employees Parsed</small></div>';
-      statsHtml += '<div class="col-md-3"><strong>' + matchedCount + '</strong><br><small>Matched</small></div>';
-      statsHtml += '<div class="col-md-3"><strong class="text-primary">' + changesCount + '</strong><br><small>Changes to Apply</small></div>';
-      statsHtml += '</div>';
-      document.getElementById('summaryStats').innerHTML = statsHtml;
-
-      // Changes table
-      var changesHtml = '';
-      if (proposedChanges.length === 0) {
-        changesHtml = '<div class="alert alert-info">No changes detected. All employees are already up to date.</div>';
-      } else {
-        changesHtml = '<div class="table-responsive"><table class="table table-sm preview-table">';
-        changesHtml += '<thead><tr><th><input type="checkbox" checked onchange="toggleAllChanges(this)"></th><th>Employee</th><th>Role</th><th>Location Change</th><th>Job # Change</th></tr></thead>';
-        changesHtml += '<tbody>';
-
-        for (var i = 0; i < proposedChanges.length; i++) {
-          var change = proposedChanges[i];
-          changesHtml += '<tr class="change-row">';
-          changesHtml += '<td><input type="checkbox" checked onchange="toggleChange(' + i + ', this)" id="change-' + i + '"></td>';
-          changesHtml += '<td><strong>' + change.match.employeeName + '</strong>';
-          if (change.match.confidence < 100) {
-            changesHtml += ' <span class="badge bg-warning text-dark">' + change.match.confidence + '%</span>';
-          }
-          changesHtml += '</td>';
-          changesHtml += '<td>' + change.employee.role + '</td>';
-          changesHtml += '<td>';
-          if (change.locationChanged) {
-            changesHtml += '<span class="text-muted">' + (change.oldLocation || 'None') + '</span> → <strong class="text-primary">' + change.newLocation + '</strong>';
-          } else {
-            changesHtml += '<span class="text-muted">No change</span>';
-          }
-          changesHtml += '</td>';
-          changesHtml += '<td>';
-          if (change.jobChanged) {
-            changesHtml += '<span class="text-muted">' + (change.oldJobNumber || 'None') + '</span> → <strong class="text-primary">' + change.newJobNumber + '</strong>';
-          } else {
-            changesHtml += '<span class="text-muted">No change</span>';
-          }
-          changesHtml += '</td>';
-          changesHtml += '</tr>';
-        }
-
-        changesHtml += '</tbody></table></div>';
-      }
-      document.getElementById('changesContainer').innerHTML = changesHtml;
-
-      // Unmatched employees
-      var unmatchedEmps = [];
-      for (var i = 0; i < parsedCrews.length; i++) {
-        for (var j = 0; j < parsedCrews[i].employees.length; j++) {
-          if (parsedCrews[i].employees[j].unmatched) {
-            unmatchedEmps.push({
-              employee: parsedCrews[i].employees[j],
-              crew: parsedCrews[i]
-            });
-          }
-        }
-      }
-
-      if (unmatchedEmps.length > 0) {
-        document.getElementById('unmatchedSection').style.display = 'block';
-        var unmatchedHtml = '<ul class="list-group">';
-        for (var i = 0; i < unmatchedEmps.length; i++) {
-          var emp = unmatchedEmps[i];
-          unmatchedHtml += '<li class="list-group-item d-flex justify-content-between align-items-center">';
-          unmatchedHtml += '<div><strong>' + emp.employee.originalText + '</strong>';
-          unmatchedHtml += '<br><small class="text-muted">' + emp.crew.originalLocation + ' - ' + emp.crew.jobNumber + '</small></div>';
-          unmatchedHtml += '<span class="badge bg-danger">Not Found</span>';
-          unmatchedHtml += '</li>';
-        }
-        unmatchedHtml += '</ul>';
-        document.getElementById('unmatchedContainer').innerHTML = unmatchedHtml;
-      } else {
-        document.getElementById('unmatchedSection').style.display = 'none';
-      }
-
-      // Enable apply button if there are changes
-      document.getElementById('btnApplyChanges').disabled = proposedChanges.length === 0;
-    }
-
-    function toggleAllChanges(checkbox) {
-      for (var i = 0; i < proposedChanges.length; i++) {
-        proposedChanges[i].apply = checkbox.checked;
-        var cb = document.getElementById('change-' + i);
-        if (cb) cb.checked = checkbox.checked;
-      }
-    }
-
-    function toggleChange(index, checkbox) {
-      proposedChanges[index].apply = checkbox.checked;
-    }
-
-    function applyChanges() {
-      var changesToApply = proposedChanges.filter(function(c) { return c.apply; });
-
-      if (changesToApply.length === 0) {
-        alert('No changes selected to apply.');
-        return;
-      }
-
-      var confirmMsg = 'Apply ' + changesToApply.length + ' change(s) to the Employees sheet?\n\n';
-      confirmMsg += 'This will update Location and Job Number for the selected employees.\n';
-      confirmMsg += 'Changes will be logged to Employee History.';
-
-      if (!confirm(confirmMsg)) {
-        return;
-      }
-
-      document.getElementById('btnApplyChanges').disabled = true;
-      document.getElementById('btnApplyChanges').innerHTML = '<span class="spinner-border spinner-border-sm"></span> Applying...';
-
-      // Format changes for backend
-      var changes = changesToApply.map(function(c) {
-        return {
-          employeeName: c.match.employeeName,
-          rowIndex: c.match.employeeData.rowIndex,
-          newLocation: c.newLocation,
-          newJobNumber: c.newJobNumber,
-          oldLocation: c.oldLocation,
-          oldJobNumber: c.oldJobNumber
-        };
-      });
-
-      google.script.run
-        .withSuccessHandler(function(result) {
-          alert(result.message);
-          google.script.host.close();
-        })
-        .withFailureHandler(function(error) {
-          alert('Error applying changes: ' + error);
           document.getElementById('btnApplyChanges').disabled = false;
           document.getElementById('btnApplyChanges').innerHTML = '<i class="bi bi-check-lg"></i> Apply Changes';
         })

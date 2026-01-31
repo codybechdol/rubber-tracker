@@ -6,6 +6,8 @@
   <title>Import Certifications</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  <!-- SheetJS for Excel parsing -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
   <style>
     body { font-family: 'Google Sans', Arial, sans-serif; background: #f8f9fa; margin: 0; padding: 20px; }
     .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
@@ -27,6 +29,17 @@
     .summary-stat strong { color: #1a73e8; }
     .alert-validation { font-size: 13px; }
     .loading { text-align: center; padding: 40px; }
+    .upload-area { border: 2px dashed #1a73e8; border-radius: 8px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.2s; }
+    .upload-area:hover { background: #e8f0fe; }
+    .upload-area.dragover { background: #e8f0fe; border-color: #1557b0; }
+    .sheet-tabs { margin-bottom: 16px; }
+    .sheet-tab { display: inline-block; padding: 8px 16px; margin-right: 4px; border: 1px solid #e0e0e0; border-radius: 4px 4px 0 0; cursor: pointer; background: #f8f9fa; }
+    .sheet-tab.active { background: white; border-bottom-color: white; font-weight: bold; color: #1a73e8; }
+    .import-method-tabs { display: flex; margin-bottom: 16px; }
+    .import-method-tab { flex: 1; text-align: center; padding: 12px; border: 1px solid #e0e0e0; cursor: pointer; background: #f8f9fa; }
+    .import-method-tab:first-child { border-radius: 8px 0 0 8px; }
+    .import-method-tab:last-child { border-radius: 0 8px 8px 0; }
+    .import-method-tab.active { background: #1a73e8; color: white; border-color: #1a73e8; }
   </style>
 </head>
 <body>
@@ -54,15 +67,51 @@
   <!-- Instructions -->
   <div class="config-section">
     <h3><i class="bi bi-info-circle"></i> Instructions</h3>
-    <p class="text-muted small mb-2">Paste tab-separated data from Excel starting with employee names (no headers).</p>
+    <p class="text-muted small mb-2">Upload an Excel file or paste tab-separated data from Excel starting with employee names (no headers).</p>
     <p class="text-muted small mb-0"><strong>Expected format:</strong> Column A=Name (LastName, FirstName), B=Job#, C=Location, then D=DL, E=Med, F=1st Aid, G=CPR, H=Crane Cert, I=Crane Evaluation, J=OSHA 1910, K=BNSF, L=MSHA, M=OSHA Trench Comp Person, N=Forklift, O=Forklift Operator Safety Training, P=Rigging & Signaling, Q=Harassment Training, R=EICA Basic Helo</p>
     <p class="text-muted small mt-2"><strong>Non-expiring certs:</strong> Crane Evaluation, OSHA 1910, BNSF, MSHA, EICA Basic Helo (dates will be ignored)</p>
   </div>
 
-  <!-- Paste Area -->
+  <!-- Import Method Selection -->
   <div class="config-section">
-    <h3><i class="bi bi-clipboard"></i> Paste Excel Data</h3>
-    <textarea class="form-control" id="excelData" rows="12" placeholder="Paste Excel data here (Ctrl+V)..."></textarea>
+    <h3><i class="bi bi-upload"></i> Import Data</h3>
+    <div class="import-method-tabs">
+      <div class="import-method-tab active" onclick="switchImportMethod('file')" id="methodFileTab">
+        <i class="bi bi-file-earmark-excel"></i> Upload Excel File
+      </div>
+      <div class="import-method-tab" onclick="switchImportMethod('paste')" id="methodPasteTab">
+        <i class="bi bi-clipboard"></i> Paste Data
+      </div>
+    </div>
+
+    <!-- File Upload Area -->
+    <div id="fileUploadArea">
+      <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+        <i class="bi bi-cloud-upload" style="font-size: 48px; color: #1a73e8;"></i>
+        <p class="mt-3 mb-0"><strong>Click to select</strong> or drag & drop the Excel file</p>
+        <p class="text-muted small mb-0">Supports .xlsx and .xls files</p>
+      </div>
+      <input type="file" id="fileInput" accept=".xlsx,.xls" style="display: none;" onchange="handleFileSelect(event)">
+      <div id="fileInfo" class="mt-3" style="display: none;">
+        <div class="alert alert-success mb-0">
+          <i class="bi bi-check-circle"></i> <strong id="fileName">File loaded</strong>
+          <span class="float-end text-muted" id="fileSheets"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sheet Selection (shown after file upload) -->
+    <div id="sheetSelection" class="mt-3" style="display: none;">
+      <label class="form-label"><i class="bi bi-table"></i> Select Sheet:</label>
+      <p class="text-muted small mb-2">Choose the sheet tab that contains the certification data.</p>
+      <div class="sheet-tabs" id="sheetTabs"></div>
+    </div>
+
+    <!-- Paste Area (hidden by default) -->
+    <div id="pasteArea" style="display: none;">
+      <textarea class="form-control" id="excelData" rows="12" placeholder="Paste Excel data here (Ctrl+V)..."></textarea>
+    </div>
+
     <div class="mt-3">
       <button class="btn btn-primary" onclick="parseData()">
         <i class="bi bi-search"></i> Parse & Preview
@@ -137,6 +186,9 @@
     var columnMapping = {};
     var parsedData = null;
     var employees = [];
+    var workbook = null;
+    var currentSheetName = null;
+    var importMethod = 'file'; // 'file' or 'paste'
 
     function init() {
       google.script.run
@@ -155,6 +207,217 @@
           employees = empList;
         })
         .getEmployeeNamesForMatching();
+
+      // Setup drag and drop
+      setupDragAndDrop();
+    }
+
+    // ================== IMPORT METHOD SWITCHING ==================
+    function switchImportMethod(method) {
+      importMethod = method;
+      document.getElementById('methodFileTab').classList.toggle('active', method === 'file');
+      document.getElementById('methodPasteTab').classList.toggle('active', method === 'paste');
+      document.getElementById('fileUploadArea').style.display = method === 'file' ? 'block' : 'none';
+      document.getElementById('pasteArea').style.display = method === 'paste' ? 'block' : 'none';
+      document.getElementById('sheetSelection').style.display = 'none';
+    }
+
+    // ================== FILE UPLOAD FUNCTIONS ==================
+    function setupDragAndDrop() {
+      var uploadArea = document.getElementById('uploadArea');
+
+      uploadArea.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        uploadArea.classList.add('dragover');
+      });
+
+      uploadArea.addEventListener('dragleave', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        uploadArea.classList.remove('dragover');
+      });
+
+      uploadArea.addEventListener('drop', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        uploadArea.classList.remove('dragover');
+        var files = e.dataTransfer.files;
+        if (files.length > 0) {
+          processFile(files[0]);
+        }
+      });
+    }
+
+    function handleFileSelect(event) {
+      var file = event.target.files[0];
+      if (file) {
+        processFile(file);
+      }
+    }
+
+    function processFile(file) {
+      if (!file.name.match(/\.(xlsx|xls)$/i)) {
+        alert('Please select an Excel file (.xlsx or .xls)');
+        return;
+      }
+
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          var data = new Uint8Array(e.target.result);
+          // Enable cellStyles to get hidden row/column metadata (!rows, !cols)
+          workbook = XLSX.read(data, { type: 'array', cellDates: true, cellStyles: true });
+
+          // Show file info
+          document.getElementById('fileName').textContent = file.name;
+          document.getElementById('fileSheets').textContent = workbook.SheetNames.length + ' sheet(s)';
+          document.getElementById('fileInfo').style.display = 'block';
+
+          // Show sheet selection
+          if (workbook.SheetNames.length > 1) {
+            renderSheetTabs();
+            document.getElementById('sheetSelection').style.display = 'block';
+          } else {
+            // Single sheet - auto-select it
+            currentSheetName = workbook.SheetNames[0];
+            document.getElementById('sheetSelection').style.display = 'none';
+          }
+
+          console.log('File loaded: ' + file.name + ', sheets: ' + workbook.SheetNames.join(', '));
+        } catch (err) {
+          alert('Error reading file: ' + err.message);
+          console.error(err);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function renderSheetTabs() {
+      var container = document.getElementById('sheetTabs');
+      var html = '';
+
+      workbook.SheetNames.forEach(function(name, index) {
+        var isActive = index === 0 ? ' active' : '';
+        html += '<div class="sheet-tab' + isActive + '" onclick="selectSheet(\'' + name + '\', this)">' + name + '</div>';
+      });
+
+      container.innerHTML = html;
+      currentSheetName = workbook.SheetNames[0];
+    }
+
+    function selectSheet(sheetName, element) {
+      currentSheetName = sheetName;
+
+      // Update tab styling
+      var tabs = document.querySelectorAll('.sheet-tab');
+      tabs.forEach(function(tab) {
+        tab.classList.remove('active');
+      });
+      element.classList.add('active');
+
+      console.log('Selected sheet: ' + sheetName);
+    }
+
+    // Check if a row is hidden in the Excel sheet
+    function isRowHidden(sheet, rowIndex) {
+      if (!sheet['!rows']) return false;
+      var rowInfo = sheet['!rows'][rowIndex];
+      return rowInfo && rowInfo.hidden === true;
+    }
+
+    // Check if a column is hidden in the Excel sheet
+    function isColHidden(sheet, colIndex) {
+      if (!sheet['!cols']) return false;
+      var colInfo = sheet['!cols'][colIndex];
+      return colInfo && colInfo.hidden === true;
+    }
+
+    function getExcelDataFromFile() {
+      if (!workbook || !currentSheetName) {
+        return null;
+      }
+
+      var sheet = workbook.Sheets[currentSheetName];
+      if (!sheet) {
+        return null;
+      }
+
+      // Get the sheet range
+      var range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
+      var data = [];
+      var hiddenRowCount = 0;
+      var hiddenColCount = 0;
+
+      // Build list of visible column indices
+      var visibleCols = [];
+      for (var c = range.s.c; c <= range.e.c; c++) {
+        if (!isColHidden(sheet, c)) {
+          visibleCols.push(c);
+        } else {
+          hiddenColCount++;
+        }
+      }
+
+      // Iterate through rows, skipping hidden ones
+      for (var r = range.s.r; r <= range.e.r; r++) {
+        // Skip hidden rows
+        if (isRowHidden(sheet, r)) {
+          hiddenRowCount++;
+          continue;
+        }
+
+        var row = [];
+        // Only include visible columns
+        for (var i = 0; i < visibleCols.length; i++) {
+          var c = visibleCols[i];
+          var cellAddr = XLSX.utils.encode_cell({ r: r, c: c });
+          var cell = sheet[cellAddr];
+          var value = '';
+
+          if (cell) {
+            // Handle dates
+            if (cell.t === 'd' || (cell.t === 'n' && cell.w && cell.w.match(/\d+\/\d+\/\d+/))) {
+              // Date cell - use formatted value or parse the number
+              if (cell.w) {
+                value = cell.w;
+              } else if (cell.v instanceof Date) {
+                value = formatExcelDate(cell.v);
+              } else if (typeof cell.v === 'number') {
+                // Excel date serial number - convert to date
+                var date = XLSX.SSF.parse_date_code(cell.v);
+                if (date) {
+                  value = String(date.m).padStart(2, '0') + '/' + String(date.d).padStart(2, '0') + '/' + date.y;
+                }
+              }
+            } else {
+              value = String(cell.v || '');
+            }
+          }
+
+          row.push(value.trim());
+        }
+        data.push(row);
+      }
+
+      console.log('Excel data extracted: ' + data.length + ' visible rows (skipped ' + hiddenRowCount + ' hidden rows, ' + hiddenColCount + ' hidden cols)');
+
+      // Convert to tab-separated text (to reuse existing parsing logic)
+      var text = data.map(function(row) {
+        return row.join('\t');
+      }).join('\n');
+
+      return text;
+    }
+
+    function formatExcelDate(date) {
+      if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
+        return '';
+      }
+      var month = String(date.getMonth() + 1).padStart(2, '0');
+      var day = String(date.getDate()).padStart(2, '0');
+      var year = date.getFullYear();
+      return month + '/' + day + '/' + year;
     }
 
     function renderCertCheckboxes() {
@@ -214,10 +477,26 @@
     }
 
     function parseData() {
-      var text = document.getElementById('excelData').value.trim();
-      if (!text) {
-        alert('Please paste Excel data first');
-        return;
+      var text = '';
+
+      if (importMethod === 'file') {
+        // Get data from uploaded file
+        if (!workbook) {
+          alert('Please upload an Excel file first');
+          return;
+        }
+        text = getExcelDataFromFile();
+        if (!text) {
+          alert('Could not read data from the selected sheet');
+          return;
+        }
+      } else {
+        // Get data from paste area
+        text = document.getElementById('excelData').value.trim();
+        if (!text) {
+          alert('Please paste Excel data first');
+          return;
+        }
       }
 
       var mapping = getColumnMapping();
@@ -555,8 +834,28 @@
 
       modalHtml += '<div class="row g-3">';
       modalHtml += '<div class="col-md-6"><label class="form-label">Name *</label><input type="text" class="form-control" id="newEmpName" value="' + excelName + '"></div>';
-      modalHtml += '<div class="col-md-3"><label class="form-label">Class *</label><select class="form-select" id="newEmpClass"><option value="">Select...</option><option value="00">00</option><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></div>';
-      modalHtml += '<div class="col-md-3"><label class="form-label">Location *</label><input type="text" class="form-control" id="newEmpLocation" placeholder="e.g., Helena"></div>';
+      modalHtml += '<div class="col-md-6"><label class="form-label">Job Classification *</label><select class="form-select" id="newEmpClass">';
+      modalHtml += '<option value="">Select...</option>';
+      modalHtml += '<option value="AP 1">AP 1 - Apprentice 1st Year</option>';
+      modalHtml += '<option value="AP 2">AP 2 - Apprentice 2nd Year</option>';
+      modalHtml += '<option value="AP 3">AP 3 - Apprentice 3rd Year</option>';
+      modalHtml += '<option value="AP 4">AP 4 - Apprentice 4th Year</option>';
+      modalHtml += '<option value="AP 5">AP 5 - Apprentice 5th Year</option>';
+      modalHtml += '<option value="AP 6">AP 6 - Apprentice 6th Year</option>';
+      modalHtml += '<option value="AP 7">AP 7 - Apprentice 7th Year</option>';
+      modalHtml += '<option value="JRY">JRY - Journeyman Lineman</option>';
+      modalHtml += '<option value="WT">WT - White Ticket Lineman</option>';
+      modalHtml += '<option value="F">F - Foreman</option>';
+      modalHtml += '<option value="GF">GF - General Foreman</option>';
+      modalHtml += '<option value="SUP">SUP - Supervisor</option>';
+      modalHtml += '<option value="JRY OP">JRY OP - Journeyman Operator</option>';
+      modalHtml += '<option value="OP">OP - Operator</option>';
+      modalHtml += '<option value="GTO F">GTO F - GTO Foreman</option>';
+      modalHtml += '<option value="GTO">GTO - General Trade Operator</option>';
+      modalHtml += '<option value="EO 1">EO 1 - Equipment Operator 1</option>';
+      modalHtml += '<option value="EO 2">EO 2 - Equipment Operator 2</option>';
+      modalHtml += '</select></div>';
+      modalHtml += '<div class="col-md-6"><label class="form-label">Location *</label><input type="text" class="form-control" id="newEmpLocation" placeholder="e.g., Helena"></div>';
       modalHtml += '<div class="col-md-6"><label class="form-label">Job Number</label><input type="text" class="form-control" id="newEmpJobNum" placeholder="Optional"></div>';
       modalHtml += '<div class="col-md-6"><label class="form-label">Phone</label><input type="tel" class="form-control" id="newEmpPhone" placeholder="(123) 456-7890"></div>';
       modalHtml += '<div class="col-md-6"><label class="form-label">Email</label><input type="email" class="form-control" id="newEmpEmail" placeholder="employee@example.com"></div>';

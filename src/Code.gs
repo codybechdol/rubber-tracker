@@ -77,6 +77,64 @@ function showToDoConfig() {
   SpreadsheetApp.getUi().showModalDialog(html, '⚙️ To Do Config');
 }
 
+/**
+ * Opens the unified Schedule dialog with tabs for Tasks, Trip Planner, and Config
+ * This is the main scheduling interface that combines ToDoSchedule, TripPlanner, and ToDoConfig
+ * @param {string} initialTab - Optional tab to open: 'schedule', 'trip', or 'config'
+ */
+function showScheduleDialog(initialTab) {
+  var html = HtmlService.createHtmlOutputFromFile('Schedule')
+    .setWidth(1400)
+    .setHeight(900);
+  SpreadsheetApp.getUi().showModalDialog(html, '📅 Schedule');
+}
+
+/**
+ * Returns the HTML content of a specified file for embedding in Schedule dialog.
+ * Used by Schedule.html to load ToDoSchedule, TripPlanner, and ToDoConfig as embedded content.
+ *
+ * NOTE: When HTML is loaded via iframe with document.write(), the google.script.run
+ * context is lost. This function now returns content wrapped with the Apps Script
+ * client library to restore functionality.
+ *
+ * @param {string} fileName - The HTML file name (without .html extension)
+ * @return {string} The HTML content as a string with google.script.run support
+ */
+function getEmbeddedHtmlContent(fileName) {
+  try {
+    // Use createHtmlOutputFromFile which includes the Apps Script client library
+    var htmlOutput = HtmlService.createHtmlOutputFromFile(fileName);
+
+    // Get the content - this includes the necessary script tags for google.script.run
+    var content = htmlOutput.getContent();
+
+    return content;
+  } catch (e) {
+    Logger.log('Error loading embedded HTML ' + fileName + ': ' + e.toString());
+    throw new Error('Could not load ' + fileName + ': ' + e.message);
+  }
+}
+
+/**
+ * Shows a specific embedded dialog by name.
+ * This opens the dialog directly (not as iframe content), preserving google.script.run functionality.
+ * Used as a workaround for iframe embedding limitations.
+ * @param {string} dialogName - The dialog to show: 'ToDoSchedule', 'TripPlanner', or 'ToDoConfig'
+ */
+function showEmbeddedDialog(dialogName) {
+  var ui = SpreadsheetApp.getUi();
+  var titles = {
+    'ToDoSchedule': 'Tasks',
+    'TripPlanner': 'Trip Planner',
+    'ToDoConfig': 'Configuration'
+  };
+
+  var html = HtmlService.createHtmlOutputFromFile(dialogName)
+    .setWidth(1100)
+    .setHeight(700);
+
+  ui.showModalDialog(html, titles[dialogName] || dialogName);
+}
 
 // ============================================================================
 // TO DO SCHEDULE & CONFIG BACKEND FUNCTIONS
@@ -90,8 +148,10 @@ function showToDoConfig() {
  * @return {Object} Map of employee name (lowercase) to phone number (digits only)
  */
 function getEmployeePhoneMapForTasks(ss) {
+  Logger.log('=== getEmployeePhoneMapForTasks START ===');
   var employeesSheet = ss.getSheetByName('Employees');
   if (!employeesSheet || employeesSheet.getLastRow() < 2) {
+    Logger.log('ERROR: Employees sheet not found or empty');
     return {};
   }
 
@@ -100,20 +160,27 @@ function getEmployeePhoneMapForTasks(ss) {
   var nameCol = -1;
   var phoneCol = -1;
 
-  // Find columns
+  // Find columns - log all headers for debugging
+  Logger.log('Employees sheet headers: ' + JSON.stringify(headers));
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
     if (header === 'name') nameCol = h;
     if (header === 'phone number' || header === 'phone') phoneCol = h;
   }
 
+  Logger.log('Found columns - nameCol: ' + nameCol + ', phoneCol: ' + phoneCol);
+
   if (nameCol === -1 || phoneCol === -1) {
+    Logger.log('ERROR: Could not find Name or Phone Number column');
     return {};
   }
 
   var phoneMap = {};
+  var foundCount = 0;
+  var skippedCount = 0;
+
   for (var i = 1; i < data.length; i++) {
-    var name = String(data[i][nameCol]).trim();
+    var name = String(data[i][nameCol]).trim().replace(/\s+/g, ' '); // Normalize whitespace
     var phone = String(data[i][phoneCol] || '').trim();
 
     if (name && phone) {
@@ -131,37 +198,110 @@ function getEmployeePhoneMapForTasks(ss) {
       }
       if (cleanPhone.length >= 10) {
         phoneMap[name.toLowerCase()] = cleanPhone;
+        foundCount++;
+        // Log first 5 entries for debugging
+        if (foundCount <= 5) {
+          Logger.log('Phone map entry: "' + name.toLowerCase() + '" => ' + cleanPhone);
+        }
+      } else {
+        skippedCount++;
+        if (skippedCount <= 3) {
+          Logger.log('Skipped invalid phone for "' + name + '": "' + phone + '" (cleaned: ' + cleanPhone + ')');
+        }
       }
+    } else if (name && !phone) {
+      skippedCount++;
     }
   }
 
+  Logger.log('Phone map complete: ' + foundCount + ' valid phones, ' + skippedCount + ' skipped');
+  Logger.log('=== getEmployeePhoneMapForTasks END ===');
   return phoneMap;
+}
+
+/**
+ * Gets employee phone map - called from frontend dialogs.
+ * Returns map of employee name (lowercase) to phone number.
+ * @return {Object} Phone map
+ */
+function getEmployeePhoneMap() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  return getEmployeePhoneMapForTasks(ss);
 }
 
 /**
  * Gets all schedule tasks for the To Do Schedule dialog.
  * Pulls from To Do List sheet (if generated), Manual Tasks, Training Tracking,
  * Crew Visit Config, Expiring Certs, and pending swaps.
+ * Auto-generates Smart Schedule if To Do List is empty.
  *
  * @return {Array} Array of task objects for display
  */
 function getScheduleTasks() {
-  Logger.log('=== getScheduleTasks START ===');
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var tasks = [];
+  try {
+    Logger.log('=== getScheduleTasks START ===');
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var tasks = [];
 
-  // Load employee phone numbers for SMS functionality
-  var employeePhones = getEmployeePhoneMapForTasks(ss);
-  Logger.log('Loaded ' + Object.keys(employeePhones).length + ' employee phone numbers');
+    // Load employee phone numbers for SMS functionality
+    var employeePhones = getEmployeePhoneMapForTasks(ss);
+    Logger.log('Loaded ' + Object.keys(employeePhones).length + ' employee phone numbers');
 
-  // FIRST: Check if we have a generated To Do List sheet (from Smart Schedule)
-  var todoSheet = ss.getSheetByName('To Do List');
-  Logger.log('To Do List sheet exists: ' + (todoSheet !== null));
-  if (todoSheet) {
-    Logger.log('To Do List lastRow: ' + todoSheet.getLastRow());
-  }
+    // FIRST: Check if we have a generated To Do List sheet (from Smart Schedule)
+    var todoSheet = ss.getSheetByName('To Do List');
+    var todoLastRow = todoSheet ? todoSheet.getLastRow() : 0;
+    Logger.log('To Do List sheet exists: ' + (todoSheet !== null) + ', lastRow: ' + todoLastRow);
 
-  if (todoSheet && todoSheet.getLastRow() > 13) {
+    // If To Do List is empty, read directly from source sheets using collectAndGroupTasks
+    if (!todoSheet || todoLastRow <= 13) {
+    Logger.log('To Do List is empty - reading directly from source sheets...');
+    try {
+      var tasksByLocation = collectAndGroupTasks(ss);
+      Logger.log('collectAndGroupTasks returned ' + Object.keys(tasksByLocation).length + ' locations');
+
+      // Convert to the format expected by ToDoSchedule.html
+      var taskId = 1;
+      for (var location in tasksByLocation) {
+        var locationTasks = tasksByLocation[location];
+        for (var t = 0; t < locationTasks.length; t++) {
+          var srcTask = locationTasks[t];
+
+          // Get phone number for this employee
+          var empNameLower = (srcTask.employee || '').toLowerCase().trim();
+          var phoneNumber = employeePhones[empNameLower] || '';
+
+          // Determine source based on task type
+          var taskSource = srcTask.source || 'To Do List';
+
+          tasks.push({
+            id: 'direct-' + taskId++,
+            source: taskSource,
+            location: location,
+            priority: srcTask.priority || 'Medium',
+            taskType: srcTask.taskType || 'Task',
+            itemType: srcTask.itemType || '',
+            currentItem: srcTask.currentItem || '',
+            pickListItem: srcTask.pickListItem || '',
+            employee: srcTask.employee || '',
+            phoneNumber: phoneNumber,
+            scheduledDate: srcTask.scheduledDate ? formatDateForInput(srcTask.scheduledDate) : '',
+            dueDate: srcTask.dueDate ? formatDateForInput(srcTask.dueDate) : '',
+            startTime: srcTask.startTime || '',
+            endTime: srcTask.endTime || '',
+            estimatedTime: srcTask.estimatedTime || 1,
+            startLocation: srcTask.startLocation || 'Helena',
+            endLocation: srcTask.endLocation || location,
+            notes: srcTask.notes || '',
+            status: srcTask.status || 'Pending',
+            rowIndex: srcTask.rowIndex || taskId
+          });
+        }
+      }
+      Logger.log('Converted ' + tasks.length + ' tasks from direct source reading');
+    } catch (e) {
+      Logger.log('Error reading from source sheets: ' + e.toString());
+    }
+  } else if (todoSheet && todoLastRow > 13) {
     Logger.log('Found To Do List sheet, reading tasks from there');
     try {
       var todoData = todoSheet.getDataRange().getValues();
@@ -226,9 +366,52 @@ function getScheduleTasks() {
             taskSource = 'Reclaims';
           }
 
-          // Get phone number for this employee
-          var empNameLower = String(employee).toLowerCase().trim();
+          // Get phone number for this employee - try multiple name matching strategies
+          var empNameRaw = String(employee);
+          var empNameLower = empNameRaw.toLowerCase().trim().replace(/\s+/g, ' '); // Normalize whitespace
           var phoneNumber = employeePhones[empNameLower] || '';
+
+          // Debug: Log first few cert task lookups
+          if (taskSource === 'Expiring Certs' && tasks.length < 10) {
+            Logger.log('Phone lookup for cert task: employee="' + empNameRaw + '", normalized="' + empNameLower + '", found=' + (phoneNumber ? 'YES' : 'NO'));
+          }
+
+          // If no match, try removing extra info in parentheses (e.g., "John Smith (AP 3)" -> "John Smith")
+          if (!phoneNumber && empNameLower.indexOf('(') !== -1) {
+            var cleanName = empNameLower.replace(/\s*\([^)]*\)\s*/g, '').trim();
+            phoneNumber = employeePhones[cleanName] || '';
+            if (phoneNumber) {
+              Logger.log('Phone found after removing parentheses: "' + cleanName + '"');
+            }
+          }
+
+          // If still no match, try partial matching on first and last name
+          if (!phoneNumber) {
+            var nameParts = empNameLower.split(/\s+/);
+            if (nameParts.length >= 2) {
+              var firstName = nameParts[0];
+              var lastName = nameParts[nameParts.length - 1];
+              for (var empKey in employeePhones) {
+                if (empKey.indexOf(firstName) !== -1 && empKey.indexOf(lastName) !== -1) {
+                  phoneNumber = employeePhones[empKey];
+                  Logger.log('Phone found via partial match: employee="' + empNameLower + '" matched key="' + empKey + '"');
+                  break;
+                }
+              }
+            }
+          }
+
+          // Debug logging for failed lookups on cert tasks
+          if (!phoneNumber && taskSource === 'Expiring Certs') {
+            Logger.log('Phone lookup FAILED for cert task: employee="' + empNameRaw + '" (normalized: "' + empNameLower + '")');
+            // Log some sample keys from phoneMap for comparison
+            var sampleKeys = Object.keys(employeePhones).slice(0, 5);
+            Logger.log('Sample phone map keys: ' + JSON.stringify(sampleKeys));
+          }
+
+          // NOTE: We NO LONGER skip cert tasks without scheduled date
+          // They need to be in the task list for My Checklist to have phone numbers
+          // The calendar/task list views will filter them out as needed
 
           tasks.push({
             id: 'todolist-' + t,
@@ -259,13 +442,14 @@ function getScheduleTasks() {
     }
 
     Logger.log('Loaded ' + tasks.length + ' tasks from To Do List sheet');
-    // Don't return early - also need to add Manual Tasks below
   }
 
-  // ALWAYS load Manual Tasks (they should appear in My Checklist even when To Do List exists)
+  // Load Manual Tasks ONLY for My Checklist section
+  // These should NOT appear in Calendar or Task List (they're personal checklist items)
+  // The My Checklist tab in ToDoSchedule.html will load these separately
   var manualSheet = ss.getSheetByName('Manual Tasks');
   if (manualSheet && manualSheet.getLastRow() > 1) {
-    Logger.log('Reading Manual Tasks...');
+    Logger.log('Reading Manual Tasks for My Checklist...');
     var manualData = manualSheet.getDataRange().getValues();
     var manualHeaders = manualData[0];
 
@@ -282,6 +466,7 @@ function getScheduleTasks() {
       if (header === 'end time') colIndices.endTime = mh;
       if (header === 'status') colIndices.status = mh;
       if (header === 'notes') colIndices.notes = mh;
+      if (header === 'manually created') colIndices.manuallyCreated = mh;
     }
 
     Logger.log('Manual Tasks column indices: ' + JSON.stringify(colIndices));
@@ -300,9 +485,42 @@ function getScheduleTasks() {
       var endTime = colIndices.endTime !== undefined ? formatTimeForInput(mRow[colIndices.endTime]) : '';
       var status = colIndices.status !== undefined ? (mRow[colIndices.status] || 'Pending') : 'Pending';
       var notes = colIndices.notes !== undefined ? (mRow[colIndices.notes] || '') : '';
+      // Check for manuallyCreated - handle all forms: boolean true, string 'TRUE', string 'true'
+      // If column doesn't exist (old sheet), default to TRUE since all pre-migration tasks were user-created
+      var manuallyCreatedRaw;
+      if (colIndices.manuallyCreated !== undefined) {
+        manuallyCreatedRaw = mRow[colIndices.manuallyCreated];
+      } else {
+        // Column doesn't exist - default to TRUE (user-created)
+        manuallyCreatedRaw = true;
+        Logger.log('Manual Tasks sheet missing "Manually Created" column - defaulting to TRUE');
+      }
+      var manuallyCreated = manuallyCreatedRaw === true || String(manuallyCreatedRaw).toUpperCase() === 'TRUE';
+
+      // Debug logging for manual tasks
+      Logger.log('Manual Task row ' + mi + ': location=' + location + ', taskType=' + taskType +
+                 ', scheduledDate=' + scheduledDate + ', manuallyCreatedRaw=' + manuallyCreatedRaw +
+                 ' (type: ' + typeof manuallyCreatedRaw + '), manuallyCreated=' + manuallyCreated);
 
       // Skip empty rows - check first few columns
       if (!location && !taskType) continue;
+
+      // Skip completed tasks
+      var statusLower = String(status).toLowerCase().trim();
+      if (statusLower === 'complete' || statusLower === 'completed' || statusLower === 'done') {
+        Logger.log('Skipping completed manual task: ' + taskType + ' at ' + location);
+        continue;
+      }
+
+      // Skip trip summary entries (combined locations created by Trip Planner)
+      // These have "+" in location (e.g., "Billings + Livingston") OR
+      // taskType starts with "🗺️ Trip:" prefix
+      var locationStr = String(location);
+      var taskTypeStr = String(taskType);
+      if (locationStr.indexOf(' + ') !== -1 || taskTypeStr.indexOf('🗺️ Trip:') !== -1) {
+        Logger.log('Skipping trip summary entry: ' + location);
+        continue;
+      }
 
       tasks.push({
         id: 'manual-' + mi,
@@ -320,14 +538,18 @@ function getScheduleTasks() {
         endLocation: location || 'Helena',
         employee: employee,
         itemType: 'Manual',
-        rowIndex: mi + 1
+        rowIndex: mi + 1,
+        manuallyCreated: manuallyCreated  // TRUE if user-created via "Add Manual Item"
       });
       manualCount++;
     }
-    Logger.log('Added ' + manualCount + ' manual tasks');
+    Logger.log('Added ' + manualCount + ' manual tasks (for My Checklist only)');
   }
 
-  // If we already have tasks from To Do List (plus any manual tasks), return now
+  // Manual Tasks are included in the tasks array but will be filtered out
+  // by Calendar/Task List views - they only appear in My Checklist tab
+
+  // If we already have tasks from To Do List (plus manual tasks for checklist), return now
   if (tasks.length > 0) {
     Logger.log('getScheduleTasks: Found ' + tasks.length + ' total tasks');
     Logger.log('=== getScheduleTasks END ===');
@@ -523,6 +745,13 @@ function getScheduleTasks() {
   Logger.log('getScheduleTasks: Found ' + tasks.length + ' total tasks');
   Logger.log('=== getScheduleTasks END ===');
   return tasks;
+
+  } catch (e) {
+    Logger.log('ERROR in getScheduleTasks: ' + e.toString());
+    Logger.log('Stack: ' + e.stack);
+    // Return empty array on error so dialog doesn't hang forever
+    return [];
+  }
 }
 
 /**
@@ -584,7 +813,28 @@ function getPendingSwapTasks(sheet, swapType) {
  */
 function formatDateForInput(dateValue) {
   if (!dateValue) return '';
-  var date = new Date(dateValue);
+
+  // If already in YYYY-MM-DD format, return as-is
+  if (typeof dateValue === 'string') {
+    var isoMatch = dateValue.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoMatch) {
+      return isoMatch[1] + '-' + isoMatch[2] + '-' + isoMatch[3];
+    }
+    // Try MM/DD/YYYY format
+    var usMatch = dateValue.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (usMatch) {
+      return usMatch[3] + '-' + String(usMatch[1]).padStart(2, '0') + '-' + String(usMatch[2]).padStart(2, '0');
+    }
+  }
+
+  // For Date objects, use local timezone methods to avoid UTC conversion issues
+  var date;
+  if (dateValue instanceof Date) {
+    date = dateValue;
+  } else {
+    date = new Date(dateValue);
+  }
+
   if (isNaN(date.getTime())) return '';
 
   var year = date.getFullYear();
@@ -634,6 +884,7 @@ function formatTimeForInput(timeValue) {
  */
 function saveScheduleTaskDateChanges(changes) {
   Logger.log('saveScheduleTaskDateChanges: ' + changes.length + ' changes');
+  Logger.log('Changes received: ' + JSON.stringify(changes));
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var tasks = getScheduleTasks();
@@ -646,6 +897,8 @@ function saveScheduleTaskDateChanges(changes) {
     var startTime = change.startTime;
     var endTime = change.endTime;
 
+    Logger.log('Processing change ' + c + ': index=' + taskIndex + ', newDate=' + newDate + ', startTime=' + startTime + ', endTime=' + endTime);
+
     if (taskIndex < 0 || taskIndex >= tasks.length) continue;
 
     var task = tasks[taskIndex];
@@ -654,9 +907,10 @@ function saveScheduleTaskDateChanges(changes) {
     if (task.source === 'Manual Tasks') {
       var manualSheet = ss.getSheetByName('Manual Tasks');
       if (manualSheet && task.rowIndex) {
-        if (newDate) manualSheet.getRange(task.rowIndex, 4).setValue(newDate); // Column D = Scheduled Date
-        if (startTime !== undefined) manualSheet.getRange(task.rowIndex, 5).setValue(startTime); // Column E = Start Time
-        if (endTime !== undefined) manualSheet.getRange(task.rowIndex, 6).setValue(endTime); // Column F = End Time
+        // Manual Tasks columns: A=Location, B=Priority, C=Task Type, D=Employee, E=Scheduled Date, F=Start Time, G=End Time
+        if (newDate) manualSheet.getRange(task.rowIndex, 5).setValue(newDate); // Column E = Scheduled Date
+        if (startTime !== undefined) manualSheet.getRange(task.rowIndex, 6).setValue(startTime); // Column F = Start Time
+        if (endTime !== undefined) manualSheet.getRange(task.rowIndex, 7).setValue(endTime); // Column G = End Time
         updatedCount++;
       }
     } else if (task.source === 'Crew Visit Config') {
@@ -733,7 +987,7 @@ function saveScheduleTaskDateChanges(changes) {
 /**
  * Wrapper function for adding a manual scheduled item from the To Do Schedule dialog.
  * Called from ToDoSchedule.html when user clicks "Add Item" in the Add Manual Item modal.
- * @param {Object} data - Data from the form with title, notes, scheduledDate, location, startTime, endTime, priority
+ * @param {Object} data - Data from the form with title, notes, scheduledDate, location, startTime, endTime, priority, and flexibility options
  * @return {Object} Result with success status
  */
 function addManualScheduledItem(data) {
@@ -749,7 +1003,14 @@ function addManualScheduledItem(data) {
       startTime: data.startTime || '',
       endTime: data.endTime || '',
       priority: data.priority || 'Medium',
-      employee: ''  // Manual items don't have an employee by default
+      employee: '',  // Manual items don't have an employee by default
+      // Flexibility options for Trip Planner
+      locked: data.locked !== false ? true : false,  // Default to locked
+      allowDayChange: data.allowDayChange === true,
+      allowWeekChange: data.allowWeekChange === true,
+      allowTimeChange: data.allowTimeChange === true,
+      // Mark as user-created (not system-generated like Trip Planner entries)
+      manuallyCreated: true
     };
 
     return addManualScheduleTask(task);
@@ -772,6 +1033,7 @@ function addManualScheduleTask(task) {
   var manualSheet = ss.getSheetByName('Manual Tasks');
 
   // Unified headers matching To Do List structure (simplified for manual tasks)
+  // Includes flexibility options for Trip Planner scheduling
   var standardHeaders = [
     'Location',           // A - 0
     'Priority',           // B - 1
@@ -782,7 +1044,12 @@ function addManualScheduleTask(task) {
     'End Time',           // G - 6
     'Status',             // H - 7
     'Notes',              // I - 8
-    'Date Added'          // J - 9
+    'Date Added',         // J - 9
+    'Allow Day Change',   // K - 10: Can move within same week? (TRUE/FALSE)
+    'Allow Week Change',  // L - 11: Can move to different week? (TRUE/FALSE)
+    'Allow Time Change',  // M - 12: Can adjust time within scheduled day? (TRUE/FALSE)
+    'Locked',             // N - 13: Completely locked - no changes allowed (TRUE/FALSE)
+    'Manually Created'    // O - 14: TRUE if user-created via "Add Manual Item", FALSE if system-generated
   ];
 
   // Create sheet if it doesn't exist with standard headers
@@ -813,6 +1080,42 @@ function addManualScheduleTask(task) {
     if (header === 'status') colMap.status = h;
     if (header === 'notes') colMap.notes = h;
     if (header === 'date added') colMap.dateAdded = h;
+    if (header === 'allow day change') colMap.allowDayChange = h;
+    if (header === 'allow week change') colMap.allowWeekChange = h;
+    if (header === 'allow time change') colMap.allowTimeChange = h;
+    if (header === 'locked') colMap.locked = h;
+    if (header === 'manually created') colMap.manuallyCreated = h;
+  }
+
+  // Auto-add missing columns for flexibility options and manually created flag
+  var missingColumns = [];
+  if (colMap.manuallyCreated === undefined) missingColumns.push('Manually Created');
+  if (colMap.locked === undefined) missingColumns.push('Locked');
+  if (colMap.allowDayChange === undefined) missingColumns.push('Allow Day Change');
+  if (colMap.allowWeekChange === undefined) missingColumns.push('Allow Week Change');
+  if (colMap.allowTimeChange === undefined) missingColumns.push('Allow Time Change');
+
+  if (missingColumns.length > 0) {
+    Logger.log('Auto-adding missing columns to Manual Tasks: ' + missingColumns.join(', '));
+    var lastCol = manualSheet.getLastColumn();
+    for (var mc = 0; mc < missingColumns.length; mc++) {
+      var newColIndex = lastCol + mc;
+      manualSheet.getRange(1, newColIndex + 1).setValue(missingColumns[mc])
+        .setFontWeight('bold')
+        .setBackground('#667eea')
+        .setFontColor('white');
+
+      // Update colMap with new column position
+      var colKey = missingColumns[mc].toLowerCase().replace(/ /g, '');
+      if (missingColumns[mc] === 'Manually Created') colMap.manuallyCreated = newColIndex;
+      if (missingColumns[mc] === 'Locked') colMap.locked = newColIndex;
+      if (missingColumns[mc] === 'Allow Day Change') colMap.allowDayChange = newColIndex;
+      if (missingColumns[mc] === 'Allow Week Change') colMap.allowWeekChange = newColIndex;
+      if (missingColumns[mc] === 'Allow Time Change') colMap.allowTimeChange = newColIndex;
+    }
+    // Re-read headers after adding columns
+    headers = manualSheet.getRange(1, 1, 1, manualSheet.getLastColumn()).getValues()[0];
+    Logger.log('Added missing columns. New headers: ' + headers.join(', '));
   }
 
   Logger.log('addManualScheduleTask column map: ' + JSON.stringify(colMap));
@@ -836,6 +1139,13 @@ function addManualScheduleTask(task) {
   if (colMap.dateAdded !== undefined) {
     newRow[colMap.dateAdded] = Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy HH:mm');
   }
+  // Flexibility options - default to locked (no changes allowed) unless explicitly set
+  if (colMap.allowDayChange !== undefined) newRow[colMap.allowDayChange] = task.allowDayChange === true ? true : false;
+  if (colMap.allowWeekChange !== undefined) newRow[colMap.allowWeekChange] = task.allowWeekChange === true ? true : false;
+  if (colMap.allowTimeChange !== undefined) newRow[colMap.allowTimeChange] = task.allowTimeChange === true ? true : false;
+  if (colMap.locked !== undefined) newRow[colMap.locked] = task.locked !== false ? true : false; // Default to locked
+  // Mark as manually created (true for user-created, false for system-generated)
+  if (colMap.manuallyCreated !== undefined) newRow[colMap.manuallyCreated] = task.manuallyCreated === true ? true : false;
 
   manualSheet.appendRow(newRow);
   Logger.log('Added manual task row');
@@ -875,11 +1185,16 @@ function migrateManualTasksSheet() {
     if (header === 'status') oldColMap.status = h;
     if (header === 'notes') oldColMap.notes = h;
     if (header === 'date added') oldColMap.dateAdded = h;
+    if (header === 'allow day change') oldColMap.allowDayChange = h;
+    if (header === 'allow week change') oldColMap.allowWeekChange = h;
+    if (header === 'allow time change') oldColMap.allowTimeChange = h;
+    if (header === 'locked') oldColMap.locked = h;
+    if (header === 'manually created') oldColMap.manuallyCreated = h;
   }
 
   Logger.log('Old column map: ' + JSON.stringify(oldColMap));
 
-  // New unified headers
+  // New unified headers with flexibility options and manually created flag
   var newHeaders = [
     'Location',           // A - 0
     'Priority',           // B - 1
@@ -890,7 +1205,12 @@ function migrateManualTasksSheet() {
     'End Time',           // G - 6
     'Status',             // H - 7
     'Notes',              // I - 8
-    'Date Added'          // J - 9
+    'Date Added',         // J - 9
+    'Allow Day Change',   // K - 10
+    'Allow Week Change',  // L - 11
+    'Allow Time Change',  // M - 12
+    'Locked',             // N - 13
+    'Manually Created'    // O - 14: TRUE if user-created, FALSE if system-generated
   ];
 
   // Convert existing data to new format
@@ -904,6 +1224,13 @@ function migrateManualTasksSheet() {
     var taskType = oldColMap.taskType !== undefined ? oldRow[oldColMap.taskType] : '';
     if (!location && !taskType) continue;
 
+    // Determine if this is a user-created manual task
+    // Tasks with "🗺️ Trip:" prefix are system-generated by Trip Planner
+    var taskTypeStr = String(taskType);
+    var isUserCreated = oldColMap.manuallyCreated !== undefined
+      ? (oldRow[oldColMap.manuallyCreated] === true || oldRow[oldColMap.manuallyCreated] === 'TRUE')
+      : (taskTypeStr.indexOf('🗺️ Trip:') === -1);  // Legacy: assume non-trip tasks were user-created
+
     var newRow = [
       oldColMap.location !== undefined ? oldRow[oldColMap.location] : '',
       oldColMap.priority !== undefined ? oldRow[oldColMap.priority] : 'Medium',
@@ -914,7 +1241,13 @@ function migrateManualTasksSheet() {
       oldColMap.endTime !== undefined ? oldRow[oldColMap.endTime] : '',
       oldColMap.status !== undefined ? oldRow[oldColMap.status] : 'Pending',
       oldColMap.notes !== undefined ? oldRow[oldColMap.notes] : '',
-      oldColMap.dateAdded !== undefined ? oldRow[oldColMap.dateAdded] : ''
+      oldColMap.dateAdded !== undefined ? oldRow[oldColMap.dateAdded] : '',
+      // Flexibility options - preserve if they exist, default to locked for existing tasks
+      oldColMap.allowDayChange !== undefined ? oldRow[oldColMap.allowDayChange] : false,
+      oldColMap.allowWeekChange !== undefined ? oldRow[oldColMap.allowWeekChange] : false,
+      oldColMap.allowTimeChange !== undefined ? oldRow[oldColMap.allowTimeChange] : false,
+      oldColMap.locked !== undefined ? oldRow[oldColMap.locked] : true,  // Default to locked
+      isUserCreated  // Manually Created flag
     ];
 
     newData.push(newRow);
@@ -947,9 +1280,244 @@ function migrateManualTasksSheet() {
   manualSheet.setColumnWidth(8, 80);  // Status
   manualSheet.setColumnWidth(9, 200); // Notes
   manualSheet.setColumnWidth(10, 130); // Date Added
+  manualSheet.setColumnWidth(11, 110); // Allow Day Change
+  manualSheet.setColumnWidth(12, 120); // Allow Week Change
+  manualSheet.setColumnWidth(13, 115); // Allow Time Change
+  manualSheet.setColumnWidth(14, 70);  // Locked
+  manualSheet.setColumnWidth(15, 115); // Manually Created
 
-  SpreadsheetApp.getUi().alert('✅ Manual Tasks sheet migrated to new format!\n\nOld rows: ' + (existingData.length - 1) + '\nNew rows: ' + (newData.length - 1));
+  SpreadsheetApp.getUi().alert('✅ Manual Tasks sheet migrated to new format!\n\n' +
+    'Old rows: ' + (existingData.length - 1) + '\n' +
+    'New rows: ' + (newData.length - 1) + '\n\n' +
+    'New columns:\n' +
+    '• Allow Day Change - Can move within same week\n' +
+    '• Allow Week Change - Can move to different week\n' +
+    '• Allow Time Change - Can adjust time within day\n' +
+    '• Locked - Completely locked (no changes allowed)\n' +
+    '• Manually Created - TRUE if you created it, FALSE if system-generated\n\n' +
+    'Tasks with "🗺️ Trip:" prefix are marked as NOT manually created.');
   Logger.log('Migration complete: ' + (newData.length - 1) + ' tasks migrated');
+}
+
+/**
+ * Prompts user for a location name and purges all tasks for that location.
+ * Menu: Glove Manager → Utilities → Purge Stuck Task by Location
+ */
+function promptPurgeTaskByLocation() {
+  var ui = SpreadsheetApp.getUi();
+
+  var response = ui.prompt(
+    '🗑️ Purge Tasks by Location',
+    'Enter the location name to purge (e.g., "Billings"):\n\n' +
+    'This will remove ALL tasks for this location from:\n' +
+    '• To Do List sheet\n' +
+    '• Manual Tasks sheet\n' +
+    '• Saved Trip Plan\n\n' +
+    'This action cannot be undone!',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (response.getSelectedButton() === ui.Button.OK) {
+    var locationName = response.getResponseText().trim();
+    if (locationName) {
+      // Confirm before purging
+      var confirm = ui.alert(
+        'Confirm Purge',
+        'Are you sure you want to purge ALL tasks for "' + locationName + '"?',
+        ui.ButtonSet.YES_NO
+      );
+
+      if (confirm === ui.Button.YES) {
+        purgeTasksByLocation(locationName);
+      }
+    } else {
+      ui.alert('No location entered. Purge cancelled.');
+    }
+  }
+}
+
+/**
+ * Fixes the manuallyCreated flag for existing manual tasks.
+ * Sets manuallyCreated = TRUE for tasks that look like user-created manual tasks.
+ * Run this once to fix existing data.
+ */
+function fixManuallyCreatedFlags() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var manualSheet = ss.getSheetByName('Manual Tasks');
+
+  if (!manualSheet || manualSheet.getLastRow() < 2) {
+    SpreadsheetApp.getUi().alert('Manual Tasks sheet not found or empty.');
+    return;
+  }
+
+  var data = manualSheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Find column indices
+  var colMap = {};
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'task' || header === 'task type') colMap.taskType = h;
+    if (header === 'manually created') colMap.manuallyCreated = h;
+  }
+
+  if (colMap.manuallyCreated === undefined) {
+    SpreadsheetApp.getUi().alert('Manually Created column not found. Please run "Migrate Manual Tasks Sheet" first.');
+    return;
+  }
+
+  var updatedCount = 0;
+
+  for (var i = 1; i < data.length; i++) {
+    var taskType = String(data[i][colMap.taskType] || '').toLowerCase().trim();
+    var currentValue = data[i][colMap.manuallyCreated];
+
+    // If already set to TRUE, skip
+    if (currentValue === true || currentValue === 'TRUE') continue;
+
+    // Skip system-generated tasks (Trip Planner entries)
+    if (taskType.indexOf('🗺️ trip:') !== -1 || taskType.indexOf('trip:') !== -1) continue;
+
+    // Set to TRUE for all other tasks
+    manualSheet.getRange(i + 1, colMap.manuallyCreated + 1).setValue(true);
+    updatedCount++;
+  }
+
+  SpreadsheetApp.getUi().alert('Fixed ' + updatedCount + ' task(s) - set manuallyCreated = TRUE');
+  Logger.log('fixManuallyCreatedFlags: Updated ' + updatedCount + ' rows');
+}
+
+/**
+ * Cleans up duplicate/non-manual entries from the Manual Tasks sheet.
+ * Removes tasks that were NOT created manually (i.e., don't have "Manual" in task type
+ * and don't look like legitimate manual tasks).
+ *
+ * Menu: Glove Manager → Utilities → Clean Up Manual Tasks
+ * @return {Object} Result with count of removed tasks
+ */
+function cleanupDuplicateManualTasks() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var manualSheet = ss.getSheetByName('Manual Tasks');
+
+  if (!manualSheet || manualSheet.getLastRow() < 2) {
+    SpreadsheetApp.getUi().alert('Manual Tasks sheet not found or empty.');
+    return { removed: 0, message: 'Sheet not found or empty' };
+  }
+
+  var data = manualSheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Find column indices
+  var colMap = {};
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'location') colMap.location = h;
+    if (header === 'task' || header === 'task type') colMap.taskType = h;
+    if (header === 'employee') colMap.employee = h;
+    if (header === 'notes') colMap.notes = h;
+  }
+
+  Logger.log('cleanupDuplicateManualTasks - columns: ' + JSON.stringify(colMap));
+
+  // Identify rows that are NOT legitimate manual tasks
+  // Legitimate manual tasks have:
+  // - Task Type contains "Manual", "Trip", "Visit", "Meeting", "Call", or similar
+  // - OR Task Type matches location (indicating placeholder entry from Trip Planner)
+  // Non-manual (duplicates to remove):
+  // - Task Type is just a location name
+  // - Task Type contains "Swap", "Cert", "Expir", "Reclaim", "Training"
+
+  var rowsToDelete = [];
+  var taskTypesToRemove = ['swap', 'cert', 'expir', 'reclaim', 'glove', 'sleeve'];
+  var locationNames = ['bozeman', 'billings', 'helena', 'great falls', 'missoula',
+                       'butte', 'livingston', 'california', 'lolo', 'ennis',
+                       'stanford', 'big sky', 'kalispell', 'south dakota', 'rapelje',
+                       'gold creek', 'elliston', 'weeds', 'northern lights'];
+
+  for (var i = data.length - 1; i >= 1; i--) {
+    var row = data[i];
+    var location = String(row[colMap.location] || '').toLowerCase().trim();
+    var taskType = String(row[colMap.taskType] || '').toLowerCase().trim();
+    var employee = String(row[colMap.employee] || '').toLowerCase().trim();
+    var notes = String(row[colMap.notes] || '').toLowerCase().trim();
+
+    // Skip empty rows
+    if (!location && !taskType) continue;
+
+    var shouldRemove = false;
+    var reason = '';
+
+    // Check if task type is a swap/cert/reclaim task (these shouldn't be in Manual Tasks)
+    for (var t = 0; t < taskTypesToRemove.length; t++) {
+      if (taskType.indexOf(taskTypesToRemove[t]) !== -1) {
+        shouldRemove = true;
+        reason = 'Contains "' + taskTypesToRemove[t] + '"';
+        break;
+      }
+    }
+
+    // Check if task type is just a location name (placeholder from incorrect scheduling)
+    if (!shouldRemove) {
+      for (var l = 0; l < locationNames.length; l++) {
+        if (taskType === locationNames[l] ||
+            (taskType.indexOf(locationNames[l]) !== -1 && taskType.length < locationNames[l].length + 5)) {
+          shouldRemove = true;
+          reason = 'Task type is just location name: "' + taskType + '"';
+          break;
+        }
+      }
+    }
+
+    // Check if it's a multi-location entry without proper task type (from Trip Planner)
+    if (!shouldRemove && taskType.indexOf('+') !== -1) {
+      // Multi-location entries like "Bozeman + Livingston" that aren't trips
+      var hasManualKeyword = taskType.indexOf('trip') !== -1 ||
+                             taskType.indexOf('visit') !== -1 ||
+                             taskType.indexOf('manual') !== -1;
+      if (!hasManualKeyword) {
+        shouldRemove = true;
+        reason = 'Multi-location without trip keyword';
+      }
+    }
+
+    if (shouldRemove) {
+      rowsToDelete.push({ row: i + 1, location: location, taskType: taskType, reason: reason });
+      Logger.log('Flagged for removal: Row ' + (i + 1) + ' - "' + location + '" / "' + taskType + '" - ' + reason);
+    }
+  }
+
+  // Confirm before deleting
+  if (rowsToDelete.length === 0) {
+    SpreadsheetApp.getUi().alert('✅ No duplicate entries found!\n\nYour Manual Tasks sheet is clean.');
+    return { removed: 0, message: 'No duplicates found' };
+  }
+
+  var confirmMsg = 'Found ' + rowsToDelete.length + ' non-manual entries to remove:\n\n';
+  for (var r = 0; r < Math.min(rowsToDelete.length, 10); r++) {
+    confirmMsg += '• ' + rowsToDelete[r].location + ' - ' + rowsToDelete[r].taskType + '\n';
+  }
+  if (rowsToDelete.length > 10) {
+    confirmMsg += '... and ' + (rowsToDelete.length - 10) + ' more\n';
+  }
+  confirmMsg += '\nProceed with removal?';
+
+  var response = SpreadsheetApp.getUi().alert('Clean Up Manual Tasks', confirmMsg, SpreadsheetApp.getUi().ButtonSet.YES_NO);
+
+  if (response !== SpreadsheetApp.getUi().Button.YES) {
+    return { removed: 0, message: 'Cancelled by user' };
+  }
+
+  // Delete rows from bottom to top to maintain indices
+  var removed = 0;
+  for (var d = 0; d < rowsToDelete.length; d++) {
+    manualSheet.deleteRow(rowsToDelete[d].row);
+    removed++;
+  }
+
+  SpreadsheetApp.getUi().alert('✅ Cleanup Complete!\n\nRemoved ' + removed + ' non-manual entries from Manual Tasks sheet.');
+  Logger.log('cleanupDuplicateManualTasks: Removed ' + removed + ' entries');
+
+  return { removed: removed, message: 'Removed ' + removed + ' entries' };
 }
 
 /**
@@ -979,8 +1547,8 @@ function updateManualTaskStatus(taskIndex, newStatus) {
     throw new Error('Manual Tasks sheet not found or invalid row');
   }
 
-  // Column G = Status (column 7)
-  manualSheet.getRange(task.rowIndex, 7).setValue(newStatus);
+  // Manual Tasks columns: A=Location, B=Priority, C=Task Type, D=Employee, E=Scheduled Date, F=Start Time, G=End Time, H=Status
+  manualSheet.getRange(task.rowIndex, 8).setValue(newStatus); // Column H = Status
 
   return { success: true };
 }
@@ -1007,7 +1575,8 @@ function updateScheduleTaskDate(taskIndex, newDate) {
   if (task.source === 'Manual Tasks') {
     var manualSheet = ss.getSheetByName('Manual Tasks');
     if (manualSheet) {
-      manualSheet.getRange(task.rowIndex, 4).setValue(newDate); // Column D = Scheduled Date
+      // Manual Tasks columns: A=Location, B=Priority, C=Task Type, D=Employee, E=Scheduled Date
+      manualSheet.getRange(task.rowIndex, 5).setValue(newDate); // Column E = Scheduled Date
     }
   } else if (task.source === 'Crew Visit Config') {
     var crewSheet = ss.getSheetByName('Crew Visit Config');
@@ -1035,7 +1604,7 @@ function updateScheduleTaskDate(taskIndex, newDate) {
  * @param {number|Object} taskIndexOrTask - Index of task in array OR the task object itself
  */
 function markScheduleTaskComplete(taskIndexOrTask) {
-  Logger.log('markScheduleTaskComplete called');
+  Logger.log('markScheduleTaskComplete called with: ' + JSON.stringify(taskIndexOrTask));
 
   var task;
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1051,19 +1620,63 @@ function markScheduleTaskComplete(taskIndexOrTask) {
     task = taskIndexOrTask;
   }
 
-  Logger.log('markScheduleTaskComplete: source=' + task.source + ', rowIndex=' + task.rowIndex);
+  // Determine source if not provided
+  var source = task.source;
+  if (!source) {
+    // Try to infer source from other properties
+    if (task.isManualTask) {
+      source = 'Manual Tasks';
+    } else {
+      source = 'To Do List'; // Default assumption
+    }
+    Logger.log('Source not provided, inferred as: ' + source);
+  }
 
-  if (task.source === 'Manual Tasks') {
+  Logger.log('markScheduleTaskComplete: source=' + source + ', rowIndex=' + task.rowIndex);
+
+  if (!task.rowIndex) {
+    Logger.log('ERROR: No rowIndex provided for task');
+    throw new Error('Task rowIndex is required');
+  }
+
+  var updated = false;
+
+  if (source === 'Manual Tasks') {
     var manualSheet = ss.getSheetByName('Manual Tasks');
     if (manualSheet) {
-      manualSheet.getRange(task.rowIndex, 12).setValue('Complete'); // Column L = Status
+      Logger.log('Marking Manual Tasks row ' + task.rowIndex + ' as Complete');
+
+      // Find Status column dynamically
+      var headers = manualSheet.getRange(1, 1, 1, manualSheet.getLastColumn()).getValues()[0];
+      var statusCol = -1;
+      for (var h = 0; h < headers.length; h++) {
+        if (String(headers[h]).toLowerCase().trim() === 'status') {
+          statusCol = h + 1; // Convert to 1-based
+          break;
+        }
+      }
+
+      if (statusCol > 0) {
+        manualSheet.getRange(task.rowIndex, statusCol).setValue('Complete');
+        Logger.log('Set Status to Complete in column ' + statusCol);
+        updated = true;
+      } else {
+        // Fallback to column H (8) based on new structure
+        manualSheet.getRange(task.rowIndex, 8).setValue('Complete');
+        Logger.log('Set Status to Complete in column 8 (fallback)');
+        updated = true;
+      }
+    } else {
+      Logger.log('ERROR: Manual Tasks sheet not found');
     }
-  } else if (task.source === 'Training Tracking') {
+  } else if (source === 'Training Tracking') {
     var trainingSheet = ss.getSheetByName('Training Tracking');
     if (trainingSheet) {
+      Logger.log('Marking Training Tracking row ' + task.rowIndex + ' as Complete');
       // Set status to Complete (column J = 10) and add completion date (column F = 6)
       trainingSheet.getRange(task.rowIndex, 10).setValue('Complete');
       trainingSheet.getRange(task.rowIndex, 6).setValue(new Date());
+      updated = true;
 
       // Update Training Config completion status
       try {
@@ -1072,21 +1685,37 @@ function markScheduleTaskComplete(taskIndexOrTask) {
       } catch (e) {
         Logger.log('Error updating Training Config: ' + e);
       }
+    } else {
+      Logger.log('ERROR: Training Tracking sheet not found');
     }
-  } else if (task.source === 'To Do List') {
-    // Handle To Do List tasks (from Smart Schedule)
+  } else if (source === 'To Do List' || !source) {
+    // Handle To Do List tasks (from Smart Schedule) - this is the default
     var todoSheet = ss.getSheetByName('To Do List');
     if (todoSheet && task.rowIndex) {
+      Logger.log('Marking To Do List row ' + task.rowIndex + ' as Complete');
       todoSheet.getRange(task.rowIndex, 12).setValue('Complete'); // Column L = Status
+      updated = true;
 
       // If this is a training task, also update Training Tracking
       if (task.taskType && task.taskType.indexOf('Training') !== -1) {
         updateTrainingTrackingFromToDo(task);
       }
+    } else {
+      Logger.log('ERROR: To Do List sheet not found or no rowIndex');
+    }
+  } else {
+    Logger.log('WARNING: Unrecognized source: ' + source + ', attempting To Do List');
+    // Try To Do List as fallback
+    var todoSheet = ss.getSheetByName('To Do List');
+    if (todoSheet && task.rowIndex) {
+      Logger.log('Marking To Do List row ' + task.rowIndex + ' as Complete (fallback)');
+      todoSheet.getRange(task.rowIndex, 12).setValue('Complete');
+      updated = true;
     }
   }
 
-  return { success: true };
+  Logger.log('markScheduleTaskComplete completed, updated=' + updated);
+  return { success: updated };
 }
 
 /**
@@ -1539,7 +2168,8 @@ function getCertTypeDefaults() {
     'MEC Expiration',
     '1st Aid',
     'CPR',
-    'Crane Cert'
+    'Crane Cert',
+    'Harassment Training'
   ];
 
   var defaultMapping = {
@@ -1606,9 +2236,14 @@ function getEmployeeNamesForMatching() {
   for (var i = 1; i < data.length; i++) {
     var row = data[i];
     if (row[nameCol]) {
+      var location = locationCol !== -1 ? String(row[locationCol] || '') : '';
+      // Skip employees marked as "Previous Employee"
+      if (location.toLowerCase() === 'previous employee') {
+        continue;
+      }
       employees.push({
         name: String(row[nameCol]),
-        location: locationCol !== -1 ? String(row[locationCol] || '') : '',
+        location: location,
         jobNum: jobNumCol !== -1 ? String(row[jobNumCol] || '') : '',
         class: classCol !== -1 ? row[classCol] : '',
         gloveSize: gloveSizeCol !== -1 ? row[gloveSizeCol] : '',
@@ -1747,6 +2382,14 @@ function parseExcelCertDataMultiRow(pastedText, columnMapping) {
     'EICA Basic Helicopter Line Construction Safety'
   ];
 
+  // Header keywords to skip - these are not employee names
+  var headerKeywords = [
+    'name', 'expires', 'job #', 'job#', 'location', 'issued', 'eval date',
+    'about to expire', 'expired', 'driver', 'license', 'medical', 'card',
+    '1st aid', 'cpr', 'crane cert', 'crane evaluation', 'osha', 'bnsf',
+    'msha', 'forklift', 'rigging', 'harassment', 'eica', 'helicopter'
+  ];
+
   var lines = pastedText.split('\n');
   var certRows = [];
   var uniqueEmployees = {};
@@ -1754,6 +2397,7 @@ function parseExcelCertDataMultiRow(pastedText, columnMapping) {
   var priorityCount = 0;
   var nonExpiringCount = 0;
   var certTypeCounts = {};
+  var skippedHeaders = 0;
 
   for (var i = 0; i < lines.length; i++) {
     var line = lines[i].trim();
@@ -1768,6 +2412,31 @@ function parseExcelCertDataMultiRow(pastedText, columnMapping) {
     // Column A: Name (convert "LastName, FirstName" to "FirstName LastName")
     var excelName = String(cells[0] || '').trim();
     if (!excelName) continue;
+
+    // Skip header rows - check if the name looks like a header keyword
+    var nameLower = excelName.toLowerCase();
+    var isHeader = false;
+    for (var h = 0; h < headerKeywords.length; h++) {
+      if (nameLower === headerKeywords[h] || nameLower.indexOf(headerKeywords[h]) === 0) {
+        isHeader = true;
+        break;
+      }
+    }
+
+    // Also skip if the "name" doesn't look like a person's name (no comma for "Last, First" format)
+    // and it's a single word that matches common headers
+    if (!isHeader && excelName.indexOf(',') === -1) {
+      var singleWordHeaders = ['name', 'expires', 'issued', 'location'];
+      if (singleWordHeaders.indexOf(nameLower) !== -1) {
+        isHeader = true;
+      }
+    }
+
+    if (isHeader) {
+      skippedHeaders++;
+      Logger.log('Skipping header row: ' + excelName);
+      continue;
+    }
 
     var convertedName = excelName.replace(/^([^,]+),\s*(.+)$/, '$2 $1').trim();
 
@@ -1845,7 +2514,7 @@ function parseExcelCertDataMultiRow(pastedText, columnMapping) {
     });
   }
 
-  Logger.log('Parsed ' + certRows.length + ' certification rows from ' + employeeNames.length + ' employees');
+  Logger.log('Parsed ' + certRows.length + ' certification rows from ' + employeeNames.length + ' employees (skipped ' + skippedHeaders + ' header rows)');
 
   return {
     certRows: certRows,
@@ -3585,6 +4254,34 @@ function getExpiringCertsForConfig() {
       };
     }
 
+    // Build set of CURRENT employees from Employees sheet (exclude Previous Employee locations)
+    var currentEmployees = new Set();
+    var employeesSheet = ss.getSheetByName('Employees');
+    if (employeesSheet && employeesSheet.getLastRow() > 1) {
+      var empData = employeesSheet.getDataRange().getValues();
+      var empHeaders = empData[0];
+      var empNameCol = -1;
+      var empLocCol = -1;
+
+      for (var eh = 0; eh < empHeaders.length; eh++) {
+        var hdr = String(empHeaders[eh]).toLowerCase().trim();
+        if (hdr === 'name') empNameCol = eh;
+        if (hdr === 'location') empLocCol = eh;
+      }
+
+      if (empNameCol !== -1) {
+        for (var ei = 1; ei < empData.length; ei++) {
+          var empName = (empData[ei][empNameCol] || '').toString().trim();
+          var empLoc = empLocCol !== -1 ? (empData[ei][empLocCol] || '').toString().trim().toLowerCase() : '';
+          // Only include employees who are NOT "Previous Employee"
+          if (empName && empLoc !== 'previous employee') {
+            currentEmployees.add(empName.toLowerCase());
+          }
+        }
+      }
+    }
+    Logger.log('Found ' + currentEmployees.size + ' current employees');
+
     // Only get the columns we need (A, B, C, F, G) to reduce data size
     var numRows = lastRow - 1;
     var dataA = expiringSheet.getRange(2, 1, numRows, 1).getValues(); // Employee Name
@@ -3599,6 +4296,7 @@ function getExpiringCertsForConfig() {
     var empMap = {};
     var priorityCount = 0;
     var expiredCount = 0;
+    var skippedPrevious = 0;
 
     for (var i = 0; i < numRows; i++) {
       var empName = String(dataA[i][0] || '').trim();
@@ -3609,6 +4307,12 @@ function getExpiringCertsForConfig() {
 
       // Skip rows with no employee name
       if (!empName) continue;
+
+      // Skip employees who are NOT current employees (filters out Previous Employees)
+      if (!currentEmployees.has(empName.toLowerCase())) {
+        skippedPrevious++;
+        continue;
+      }
 
       if (!empMap[empName]) {
         empMap[empName] = {
@@ -3631,22 +4335,41 @@ function getExpiringCertsForConfig() {
         }
       }
 
+      // Special handling for Crane Evaluation:
+      // Crane Evaluation is a non-expiring cert - the date is when evaluation was PERFORMED, not expiration
+      // If the row exists with a date, the evaluation is complete and status should be "OK"
+      // The evaluation never "expires" - it's a one-time requirement for employees with Crane Cert
+      var adjustedStatus = status;
+      var adjustedDaysUntil = (daysUntil !== null && daysUntil !== undefined && daysUntil !== '' && daysUntil !== 'N/A') ? Number(daysUntil) : null;
+
+      if (certType === 'Crane Evaluation') {
+        // If there's a date, the evaluation is complete - show as OK
+        if (expiration && expDateStr !== 'N/A') {
+          adjustedStatus = 'OK';
+          adjustedDaysUntil = null; // No "days until" for non-expiring cert
+        } else {
+          // No date means evaluation is missing/needed
+          adjustedStatus = 'MISSING';
+        }
+      }
+
       empMap[empName].certs.push({
         type: certType || 'Unknown',
         expiration: expDateStr || 'N/A',
-        daysUntil: (daysUntil !== null && daysUntil !== undefined && daysUntil !== '' && daysUntil !== 'N/A') ? Number(daysUntil) : null,
-        status: status || 'Unknown'
+        daysUntil: adjustedDaysUntil,
+        status: adjustedStatus || 'Unknown',
+        isNonExpiring: certType === 'Crane Evaluation' // Flag for UI
       });
 
       empMap[empName].summary.total++;
-      if (status === 'EXPIRED') {
+      if (adjustedStatus === 'EXPIRED') {
         empMap[empName].summary.expired++;
         expiredCount++;
       }
-      if (status === 'CRITICAL') {
+      if (adjustedStatus === 'CRITICAL') {
         empMap[empName].summary.critical++;
       }
-      if (status.indexOf('PRIORITY') !== -1) {
+      if (adjustedStatus.indexOf('PRIORITY') !== -1) {
         priorityCount++;
       }
     }
@@ -3661,7 +4384,7 @@ function getExpiringCertsForConfig() {
     });
 
     Logger.log('=== getExpiringCertsForConfig COMPLETE ===');
-    Logger.log('Returning ' + employees.length + ' employees');
+    Logger.log('Returning ' + employees.length + ' employees, skipped ' + skippedPrevious + ' previous employees');
 
     return {
       employees: employees,
@@ -3674,6 +4397,110 @@ function getExpiringCertsForConfig() {
   } catch (error) {
     Logger.log('ERROR in getExpiringCertsForConfig: ' + error.toString());
     Logger.log('Stack: ' + error.stack);
+    throw error;
+  }
+}
+
+/**
+ * Gets expiring certs data formatted for the To Do Schedule expiring certs tab.
+ * Returns a flat list of certs with employee, type, expiration, and location.
+ */
+function getExpiringCertsForSchedule() {
+  try {
+    Logger.log('=== getExpiringCertsForSchedule START ===');
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var expiringSheet = ss.getSheetByName('Expiring Certs');
+
+    if (!expiringSheet || expiringSheet.getLastRow() < 2) {
+      return { certs: [] };
+    }
+
+    // Build current employee map with locations
+    var employeeLocations = {};
+    var currentEmployees = new Set();
+    var employeesSheet = ss.getSheetByName('Employees');
+    if (employeesSheet && employeesSheet.getLastRow() > 1) {
+      var empData = employeesSheet.getDataRange().getValues();
+      var empHeaders = empData[0];
+      var empNameCol = -1, empLocCol = -1;
+
+      for (var eh = 0; eh < empHeaders.length; eh++) {
+        var hdr = String(empHeaders[eh]).toLowerCase().trim();
+        if (hdr === 'name') empNameCol = eh;
+        if (hdr === 'location') empLocCol = eh;
+      }
+
+      if (empNameCol !== -1) {
+        for (var ei = 1; ei < empData.length; ei++) {
+          var empName = (empData[ei][empNameCol] || '').toString().trim();
+          var empLoc = empLocCol !== -1 ? (empData[ei][empLocCol] || '').toString().trim() : '';
+          if (empName && empLoc.toLowerCase() !== 'previous employee') {
+            currentEmployees.add(empName.toLowerCase());
+            employeeLocations[empName.toLowerCase()] = empLoc;
+          }
+        }
+      }
+    }
+
+    var numRows = expiringSheet.getLastRow() - 1;
+    var dataA = expiringSheet.getRange(2, 1, numRows, 1).getValues(); // Employee Name
+    var dataB = expiringSheet.getRange(2, 2, numRows, 1).getValues(); // Cert Type
+    var dataC = expiringSheet.getRange(2, 3, numRows, 1).getValues(); // Expiration Date
+    var dataF = expiringSheet.getRange(2, 6, numRows, 1).getValues(); // Days Until
+
+    var certs = [];
+    for (var i = 0; i < numRows; i++) {
+      var empName = String(dataA[i][0] || '').trim();
+      var certType = String(dataB[i][0] || '').trim();
+      var expDate = dataC[i][0];
+      var daysUntil = dataF[i][0];
+
+      if (!empName || !certType) continue;
+      if (!currentEmployees.has(empName.toLowerCase())) continue;
+
+      var expDateStr = '';
+      if (expDate instanceof Date && !isNaN(expDate.getTime())) {
+        expDateStr = Utilities.formatDate(expDate, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+      } else if (expDate) {
+        expDateStr = String(expDate);
+      }
+
+      // Special handling for Crane Evaluation:
+      // It's a non-expiring cert - the date is when evaluation was PERFORMED, not expiration
+      // If date exists, it's complete (status OK), otherwise it's missing
+      var adjustedDaysUntil = typeof daysUntil === 'number' ? daysUntil : null;
+      var isNonExpiring = false;
+
+      if (certType === 'Crane Evaluation') {
+        isNonExpiring = true;
+        // If there's a date, evaluation is complete - don't treat as "expired"
+        if (expDateStr) {
+          adjustedDaysUntil = null; // No "days until" for completed non-expiring cert
+        }
+      }
+
+      certs.push({
+        employee: empName,
+        certType: certType,
+        expirationDate: expDateStr,
+        daysUntilExpiration: adjustedDaysUntil,
+        location: employeeLocations[empName.toLowerCase()] || 'Unknown',
+        isNonExpiring: isNonExpiring
+      });
+    }
+
+    // Sort by days until expiration (expired/soonest first)
+    certs.sort(function(a, b) {
+      var daysA = a.daysUntilExpiration !== null ? a.daysUntilExpiration : 9999;
+      var daysB = b.daysUntilExpiration !== null ? b.daysUntilExpiration : 9999;
+      return daysA - daysB;
+    });
+
+    Logger.log('=== getExpiringCertsForSchedule COMPLETE: ' + certs.length + ' certs ===');
+    return { certs: certs };
+
+  } catch (error) {
+    Logger.log('ERROR in getExpiringCertsForSchedule: ' + error.toString());
     throw error;
   }
 }
@@ -3703,7 +4530,12 @@ function onOpen() {
       .addItem('Item History Lookup', 'showItemHistoryLookup')
       .addItem('View Full History', 'viewFullHistory'))
     .addSubMenu(ui.createMenu('📅 Schedule & To-Do')
+      .addItem('📋 Tasks & Calendar', 'showToDoSchedule')
+      .addItem('🗺️ Trip Planner', 'showTripPlannerDialog')
+      .addItem('⚙️ Schedule Config', 'showToDoConfig')
+      .addSeparator()
       .addItem('🎯 Generate Smart Schedule', 'generateSmartSchedule')
+      .addSeparator()
       .addItem('📅 Generate Monthly Schedule', 'generateMonthlySchedule')
       .addItem('🔄 Refresh Calendar', 'refreshCalendar')
       .addItem('✅ Mark Visit Complete', 'markVisitComplete')
@@ -3735,9 +4567,14 @@ function onOpen() {
       .addItem('👷 Setup Job Classification Dropdown', 'setupJobClassificationDropdown')
       .addItem('📖 View Classification Guide', 'showClassificationGuide')
       .addSeparator()
+      .addItem('📅 Fiscal Year Config', 'showFiscalYearConfig')
       .addItem('👥 Import Crew Makeup', 'showCrewImportDialog')
       .addItem('📥 Import Data', 'showImportDialog')
       .addItem('📥 Quick Import (1084)', 'importProvidedData')
+      .addSeparator()
+      .addItem('🔄 Migrate Manual Tasks Sheet', 'migrateManualTasksSheet')
+      .addItem('🧹 Clean Up Manual Tasks', 'cleanupDuplicateManualTasks')
+      .addItem('🗑️ Purge Stuck Task by Location', 'promptPurgeTaskByLocation')
       .addSeparator()
       .addItem('💾 Create Backup Snapshot', 'createBackupSnapshot')
       .addItem('📂 View Backup Folder', 'openBackupFolder'))
@@ -3745,13 +4582,18 @@ function onOpen() {
       .addItem('Send Report Now', 'sendEmailReport')
       .addItem('Set Up Weekly Email (Mon 12 PM)', 'createWeeklyEmailTrigger')
       .addItem('Remove Scheduled Email', 'removeEmailTrigger'))
+    .addSubMenu(ui.createMenu('📊 Reports')
+      .addItem('📝 Daily Accomplishments', 'showTimeBreakdownDialog'))
     .addSubMenu(ui.createMenu('🔍 Debug')
       .addItem('Test Edit Trigger', 'testEditTrigger')
       .addItem('Recalc Current Row', 'recalcCurrentRow')
       .addSeparator()
       .addItem('🔍 Diagnose Employee Pick List', 'runDiagnostic')
       .addItem('📊 Show All Sleeve Swaps', 'runSleeveSwapDiagnostic')
-      .addItem('📊 Show All Glove Swaps', 'runGloveSwapDiagnostic'))
+      .addItem('📊 Show All Glove Swaps', 'runGloveSwapDiagnostic')
+      .addSeparator()
+      .addItem('🔄 Migrate Manual Tasks Sheet', 'migrateManualTasksSheet')
+      .addItem('🧪 Test Trip Planner Data', 'debugTripPlannerData'))
     .addSeparator()
     .addItem('Close & Save History', 'closeAndSaveHistory')
     .addToUi();

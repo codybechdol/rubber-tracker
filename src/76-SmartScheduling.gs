@@ -313,8 +313,9 @@ function getEmployeePhoneMap(ss) {
   }
 
   var phoneMap = {};
+  var whitespaceRegex = new RegExp('\\s+', 'g');
   for (var i = 1; i < data.length; i++) {
-    var name = String(data[i][nameCol]).trim();
+    var name = String(data[i][nameCol]).trim().replace(whitespaceRegex, ' '); // Normalize whitespace
     var phone = String(data[i][phoneCol] || '').trim();
 
     if (name && phone) {
@@ -516,7 +517,8 @@ function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLoca
       if (header === 'employee') employeeCol = h;
       if (header.indexOf('current') !== -1 && header.indexOf('#') !== -1) currentItemCol = h;
       if (header === 'size') sizeCol = h;
-      if (header === 'change out date') changeOutCol = h;
+      // Match "change out date" or "change out date assigned"
+      if (header.indexOf('change out date') !== -1) changeOutCol = h;
       if (header === 'days left') daysLeftCol = h;
       if (header.indexOf('pick list') !== -1 && header.indexOf('#') !== -1) pickListCol = h;
       if (header === 'status') statusCol = h;
@@ -529,7 +531,7 @@ function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLoca
       continue;
     }
 
-    Logger.log('collectSwapTasks: Section ' + section + ' - Processing rows ' + (headerRowIndex + 2) + ' to ' + nextHeaderIndex + ', pickedCol=' + pickedCol + ', dateChangedCol=' + dateChangedCol);
+    Logger.log('collectSwapTasks: Section ' + section + ' - Processing rows ' + (headerRowIndex + 2) + ' to ' + nextHeaderIndex + ', pickedCol=' + pickedCol + ', dateChangedCol=' + dateChangedCol + ', changeOutCol=' + changeOutCol);
 
     // Process data rows in this section
     var rowsChecked = 0;
@@ -580,6 +582,11 @@ function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLoca
       var changeOutDate = changeOutCol !== -1 ? row[changeOutCol] : '';
       var daysLeftValue = daysLeftCol !== -1 ? row[daysLeftCol] : '';
       var status = statusCol !== -1 ? String(row[statusCol]).trim() : '';
+
+      // Debug log changeout date for first few rows
+      if (rowsNotDelivered <= 3) {
+        Logger.log('collectSwapTasks: Row ' + (i+1) + ' Employee="' + employee + '" changeOutDate=' + changeOutDate + ' (type=' + typeof changeOutDate + ')');
+      }
 
       // Get location for this employee
       var location = employeeLocations[employee.toLowerCase()] || 'Unknown';
@@ -699,10 +706,64 @@ function collectTrainingTasks(ss, tasksByLocation, today) {
 
   // Get crew locations
   var crewLocations = getCrewLocationMap(ss);
+
+  // Job number prefixes to exclude from training (e.g., Light Duty, Vacation, etc.)
+  var excludedJobPrefixes = ['002', '005'];
+
+  // Build map of crew numbers to first employee (for crews without a designated foreman)
+  // Exclude employees with job numbers starting with excluded prefixes (002, 005)
+  var crewFirstEmployee = {};
+  var employeesSheet = ss.getSheetByName('Employees');
+  if (employeesSheet && employeesSheet.getLastRow() > 1) {
+    var empData = employeesSheet.getDataRange().getValues();
+    var empHeaders = empData[0];
+    var empNameCol = -1;
+    var empJobNumCol = -1;
+
+    for (var eh = 0; eh < empHeaders.length; eh++) {
+      var hdr = String(empHeaders[eh]).toLowerCase().trim();
+      if (hdr === 'name') empNameCol = eh;
+      if (hdr === 'job number') empJobNumCol = eh;
+    }
+
+    if (empNameCol !== -1 && empJobNumCol !== -1) {
+      for (var ei = 1; ei < empData.length; ei++) {
+        var empName = (empData[ei][empNameCol] || '').toString().trim();
+        var jobNum = (empData[ei][empJobNumCol] || '').toString().trim();
+
+        // Skip employees with excluded job number prefixes (002-xx, 005-xx)
+        var shouldSkip = false;
+        for (var p = 0; p < excludedJobPrefixes.length; p++) {
+          if (jobNum.indexOf(excludedJobPrefixes[p] + '-') === 0) {
+            shouldSkip = true;
+            break;
+          }
+        }
+        if (shouldSkip) continue;
+
+        // Extract base crew number (e.g., "039-26" from "039-26.1")
+        var crewNum = jobNum.split('.')[0];
+
+        // Only store the first employee found for each crew
+        if (empName && crewNum && !crewFirstEmployee[crewNum]) {
+          crewFirstEmployee[crewNum] = empName;
+        }
+      }
+    }
+    Logger.log('collectTrainingTasks: Built crew-to-first-employee map with ' + Object.keys(crewFirstEmployee).length + ' crews (excluding job prefixes: ' + excludedJobPrefixes.join(', ') + ')');
+  }
+
   var currentYear = today.getFullYear();
   var currentMonth = today.getMonth();
   var taskCount = 0;
   var skippedCrews = 0;
+  var skippedComplete = 0;
+  var skippedFutureMonth = 0;
+  var skippedNoAssignee = 0;
+
+  Logger.log('collectTrainingTasks: DEBUG - currentMonth=' + currentMonth + ' (' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][currentMonth] + '), currentYear=' + currentYear);
+  Logger.log('collectTrainingTasks: DEBUG - selectedCrews=' + (selectedCrews ? JSON.stringify(selectedCrews) : 'null (all crews)'));
+  Logger.log('collectTrainingTasks: DEBUG - crewLocations keys=' + Object.keys(crewLocations).join(', '));
 
   for (var i = 2; i < data.length; i++) {
     var row = data[i];
@@ -714,13 +775,28 @@ function collectTrainingTasks(ss, tasksByLocation, today) {
     var completionDate = row[dateCol];
 
     // Skip if complete, N/A, or already has completion date
-    if (!crew || status === 'Complete' || status === 'N/A') continue;
-    if (completionDate && completionDate instanceof Date) continue;
+    if (!crew || status === 'Complete' || status === 'N/A') {
+      if (month.toLowerCase() === 'february') {
+        Logger.log('collectTrainingTasks: DEBUG - Skipping Feb row ' + (i+1) + ' crew=' + crew + ' status=' + status + ' (complete/N/A)');
+        skippedComplete++;
+      }
+      continue;
+    }
+    if (completionDate && completionDate instanceof Date) {
+      if (month.toLowerCase() === 'february') {
+        Logger.log('collectTrainingTasks: DEBUG - Skipping Feb row ' + (i+1) + ' crew=' + crew + ' (has completion date)');
+        skippedComplete++;
+      }
+      continue;
+    }
 
     // Skip if this crew is NOT in the selected crews list (if a list is configured)
-    if (selectedCrews !== null && selectedCrews.indexOf(crew) === -1) {
+    // NOTE: null OR empty array means "all crews" - only filter if array has items
+    if (selectedCrews !== null && selectedCrews.length > 0 && selectedCrews.indexOf(crew) === -1) {
       skippedCrews++;
-      Logger.log('collectTrainingTasks: Skipping crew ' + crew + ' (' + crewLead + ') - not in selected crews');
+      if (month.toLowerCase() === 'february') {
+        Logger.log('collectTrainingTasks: DEBUG - Skipping Feb row ' + (i+1) + ' crew=' + crew + ' - not in selected crews');
+      }
       continue;
     }
 
@@ -759,14 +835,37 @@ function collectTrainingTasks(ss, tasksByLocation, today) {
       priority = 'Low';
     }
 
+    // Determine who to assign the training to:
+    // 1. If crewLead is specified, use them
+    // 2. If no crewLead, use the first employee of the crew (from Employees sheet)
+    // 3. As last resort, skip this crew (no one to assign to)
+    var assignee = crewLead;
+    if (!assignee) {
+      // Try to find first employee for this crew
+      assignee = crewFirstEmployee[crew];
+      if (assignee) {
+        Logger.log('collectTrainingTasks: No foreman for crew ' + crew + ', assigning to first employee: ' + assignee);
+      }
+    }
+
+    // Skip if we still don't have anyone to assign to
+    if (!assignee) {
+      Logger.log('collectTrainingTasks: Skipping crew ' + crew + ' - no foreman and no employees found');
+      skippedNoAssignee++;
+      if (month.toLowerCase() === 'february') {
+        Logger.log('collectTrainingTasks: DEBUG - Skipping Feb row ' + (i+1) + ' crew=' + crew + ' - no assignee');
+      }
+      continue;
+    }
+
     var task = {
       type: 'Training',
-      itemType: topic, // Use topic as item type for training
+      itemType: 'Monthly Training: ' + topic, // Add "Monthly Training:" prefix for clarity
       topic: topic,
-      employee: crewLead || crew, // Use crew lead as employee, or crew number
+      employee: assignee, // Use determined assignee
       crew: crew,
-      crewLead: crewLead,
-      foreman: crewLead || crew, // Crew lead is the foreman for training tasks
+      crewLead: crewLead || assignee, // Use assignee if no official crew lead
+      foreman: assignee, // Use assignee as foreman for grouping
       location: location,
       month: month,
       currentItem: '', // No current item for training
@@ -782,11 +881,20 @@ function collectTrainingTasks(ss, tasksByLocation, today) {
       rowIndex: i + 1
     };
 
-    // Only include training for current month or past months (not future)
-    // For January, monthNum = 0, currentMonth = 0, so we include January
-    if (monthNum !== undefined && monthNum > currentMonth) {
-      // Skip future month training
+    // Only include training for current month or next month (not further in future)
+    // For January, monthNum = 0, currentMonth = 0, so we include January and February (1)
+    if (monthNum !== undefined && monthNum > currentMonth + 1) {
+      // Skip training beyond next month
+      skippedFutureMonth++;
+      if (month.toLowerCase() === 'february') {
+        Logger.log('collectTrainingTasks: DEBUG - UNEXPECTED! Feb row ' + (i+1) + ' skipped as future month! monthNum=' + monthNum + ' currentMonth=' + currentMonth);
+      }
       continue;
+    }
+
+    // DEBUG: Log every February task that passes all filters
+    if (month.toLowerCase() === 'february') {
+      Logger.log('collectTrainingTasks: DEBUG - ADDING Feb task! row=' + (i+1) + ' crew=' + crew + ' assignee=' + assignee + ' location=' + location);
     }
 
     // Add to location group
@@ -797,7 +905,8 @@ function collectTrainingTasks(ss, tasksByLocation, today) {
     taskCount++;
   }
 
-  Logger.log('collectTrainingTasks: Added ' + taskCount + ' training tasks, skipped ' + skippedCrews + ' crews (not in selected list)');
+  Logger.log('collectTrainingTasks: Added ' + taskCount + ' training tasks');
+  Logger.log('collectTrainingTasks: Skipped: ' + skippedComplete + ' complete/N/A, ' + skippedCrews + ' not in selected crews, ' + skippedNoAssignee + ' no assignee, ' + skippedFutureMonth + ' future month');
 }
 
 /**
@@ -1086,11 +1195,11 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
     } catch (e) {
       Logger.log('collectExpiringCertTasks: Error parsing selectedCertTypes: ' + e);
       // Use defaults if parse fails - must match defaults in Code.gs getExpiringCertsMapping()
-      selectedCertTypes = ['DL', 'MEC Expiration', '1st Aid', 'CPR', 'Crane Cert'];
+      selectedCertTypes = ['DL', 'MEC Expiration', '1st Aid', 'CPR', 'Crane Cert', 'Harassment Training'];
     }
   } else {
     // Default cert types if none configured - must match defaults in Code.gs getExpiringCertsMapping()
-    selectedCertTypes = ['DL', 'MEC Expiration', '1st Aid', 'CPR', 'Crane Cert'];
+    selectedCertTypes = ['DL', 'MEC Expiration', '1st Aid', 'CPR', 'Crane Cert', 'Harassment Training'];
   }
 
   Logger.log('collectExpiringCertTasks: Selected cert types: ' + selectedCertTypes.join(', '));
@@ -1123,6 +1232,10 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
   var thirtyDaysFromNow = new Date(today);
   thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
 
+  // Track added certs to prevent duplicates (employee + cert type combination)
+  var addedCerts = new Set();
+  var duplicateCount = 0;
+
   for (var i = 1; i < data.length; i++) {
     var row = data[i];
     var employee = String(row[empCol] || '').trim();
@@ -1143,6 +1256,20 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
       continue;
     }
 
+    // Enhanced logging for Crane Cert specifically
+    if (certType === 'Crane Cert') {
+      Logger.log('collectExpiringCertTasks: Processing Crane Cert for ' + employee + ', expiration: ' + expirationDate);
+    }
+
+    // Special handling for Crane Evaluation:
+    // Crane Evaluation is a non-expiring cert - the date is when evaluation was performed
+    // If row exists, employee is in compliance - skip it
+    // Missing Crane Evaluations are detected via special check later (employees with Crane Cert but no Crane Evaluation row)
+    if (certType === 'Crane Evaluation') {
+      Logger.log('collectExpiringCertTasks: Skipping Crane Evaluation for ' + employee + ' - evaluation completed (non-expiring)');
+      continue;
+    }
+
     // Parse expiration date
     var expDate = null;
     if (expirationDate instanceof Date) {
@@ -1154,9 +1281,17 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
       }
     }
 
-    // Skip if no valid expiration date (non-expiring certs)
-    if (!expDate) continue;
+    // Handle other non-expiring certs (OSHA 1910, BNSF, MSHA, etc.)
+    // If row exists but no expiration date, treat as completed/compliant
+    var isNonExpiringCert = !expDate;
 
+    if (isNonExpiringCert) {
+      // Non-expiring cert with a row in sheet = employee has it, skip
+      Logger.log('collectExpiringCertTasks: Skipping non-expiring cert ' + certType + ' for ' + employee + ' - has cert (non-expiring)');
+      continue;
+    }
+
+    // Regular expiring cert - check if expired or expiring soon
     expDate.setHours(0, 0, 0, 0);
 
     // Calculate days until expiration
@@ -1185,14 +1320,49 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
       location = locationCol !== -1 ? String(row[locationCol] || '').trim() : 'Unknown';
     }
 
+    // Enhanced logging for Crane Cert
+    if (certType === 'Crane Cert') {
+      Logger.log('collectExpiringCertTasks: Crane Cert for ' + employee + ' - Location: ' + location + ', Days till due: ' + daysTillDue + ', Overdue: ' + isOverdue);
+    }
+
     // Get foreman for this employee
     var foreman = employeeForemen[employee.toLowerCase()] || 'Unassigned';
 
-    // Get phone number for this employee
-    var phoneNumber = employeePhones[employee.toLowerCase()] || '';
+    // Get phone number for this employee - try multiple matching strategies
+    var empNameLower = employee.toLowerCase().trim().replace(/\s+/g, ' '); // Normalize whitespace
+    var phoneNumber = employeePhones[empNameLower] || '';
+
+    // If no direct match, try partial matching on first and last name
+    if (!phoneNumber) {
+      var nameParts = empNameLower.split(' ');
+      if (nameParts.length >= 2) {
+        var firstName = nameParts[0];
+        var lastName = nameParts[nameParts.length - 1];
+        for (var empKey in employeePhones) {
+          if (empKey.indexOf(firstName) !== -1 && empKey.indexOf(lastName) !== -1) {
+            phoneNumber = employeePhones[empKey];
+            break;
+          }
+        }
+      }
+    }
+
+    // Log if phone not found for debugging
+    if (!phoneNumber && taskCount < 10) {
+      Logger.log('collectExpiringCertTasks: No phone found for "' + employee + '" (normalized: "' + empNameLower + '")');
+    }
 
     // Determine status
     var status = isOverdue ? 'Expired' : 'Expiring Soon';
+
+    // Check for duplicate (same employee + cert type already added)
+    var certKey = employee.toLowerCase() + '|' + certType;
+    if (addedCerts.has(certKey)) {
+      Logger.log('collectExpiringCertTasks: Skipping duplicate ' + certType + ' for ' + employee);
+      duplicateCount++;
+      continue;
+    }
+    addedCerts.add(certKey);
 
     var task = {
       type: 'Cert Expiring',
@@ -1223,6 +1393,138 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
 
     Logger.log('collectExpiringCertTasks: Added ' + certType + ' task for ' + employee + ' at ' + location + ' (days=' + daysTillDue + ')');
   }
+
+  // Count Crane Cert tasks specifically
+  var craneCertCount = 0;
+  for (var loc in tasksByLocation) {
+    for (var t = 0; t < tasksByLocation[loc].length; t++) {
+      if (tasksByLocation[loc][t].itemType === 'Crane Cert' && tasksByLocation[loc][t].type === 'Cert Expiring') {
+        craneCertCount++;
+      }
+    }
+  }
+
+  Logger.log('collectExpiringCertTasks: Added ' + taskCount + ' expiring cert tasks from Expiring Certs sheet (including ' + craneCertCount + ' Crane Cert tasks)');
+
+  if (duplicateCount > 0) {
+    Logger.log('collectExpiringCertTasks: Skipped ' + duplicateCount + ' duplicate cert tasks');
+  }
+
+  // === CRANE EVALUATION CHECK ===
+  // Special logic: Check if employees have Crane Cert but are missing Crane Evaluation
+  if (selectedCertTypes.indexOf('Crane Evaluation') !== -1) {
+    Logger.log('collectExpiringCertTasks: Checking for missing Crane Evaluations...');
+
+    // Build map of employees who have each cert type
+    var employeeCerts = {}; // { employeeName: { 'Crane Cert': true, 'Crane Evaluation': true, ... } }
+
+    for (var i = 1; i < data.length; i++) {
+      var row = data[i];
+      var employee = String(row[empCol] || '').trim();
+      var certType = String(row[certTypeCol] || '').trim();
+
+      if (!employee || !certType) continue;
+
+      // Skip previous employees
+      if (previousEmployeeNames.has(employee.toLowerCase())) continue;
+
+      if (!employeeCerts[employee.toLowerCase()]) {
+        employeeCerts[employee.toLowerCase()] = {};
+      }
+      employeeCerts[employee.toLowerCase()][certType] = true;
+    }
+
+    // Check for employees with Crane Cert but no Crane Evaluation
+    var missingEvalCount = 0;
+    for (var empName in employeeCerts) {
+      var certs = employeeCerts[empName];
+
+      if (certs['Crane Cert'] && !certs['Crane Evaluation']) {
+        // Employee has Crane Cert but is missing Crane Evaluation
+        var properName = empName.charAt(0).toUpperCase() + empName.slice(1);
+
+        // Find proper capitalization from Employees sheet
+        for (var empKey in employeeLocations) {
+          if (empKey.toLowerCase() === empName) {
+            var employeesSheet = ss.getSheetByName('Employees');
+            if (employeesSheet) {
+              var empData = employeesSheet.getDataRange().getValues();
+              var empHeaders = empData[0];
+              var empNameCol = -1;
+              for (var eh = 0; eh < empHeaders.length; eh++) {
+                if (String(empHeaders[eh]).toLowerCase().trim() === 'name') {
+                  empNameCol = eh;
+                  break;
+                }
+              }
+              if (empNameCol !== -1) {
+                for (var ei = 1; ei < empData.length; ei++) {
+                  if (String(empData[ei][empNameCol]).trim().toLowerCase() === empName) {
+                    properName = String(empData[ei][empNameCol]).trim();
+                    break;
+                  }
+                }
+              }
+            }
+            break;
+          }
+        }
+
+        var location = employeeLocations[empName] || 'Unknown';
+        var foreman = employeeForemen[empName] || 'Unassigned';
+
+        // Get phone number - try direct match first, then partial match
+        var phoneNumber = employeePhones[empName] || '';
+        if (!phoneNumber) {
+          var nameParts = empName.split(' ');
+          if (nameParts.length >= 2) {
+            var firstName = nameParts[0];
+            var lastName = nameParts[nameParts.length - 1];
+            for (var pk in employeePhones) {
+              if (pk.indexOf(firstName) !== -1 && pk.indexOf(lastName) !== -1) {
+                phoneNumber = employeePhones[pk];
+                break;
+              }
+            }
+          }
+        }
+
+        var task = {
+          type: 'Cert Expiring',
+          itemType: 'Crane Evaluation',
+          employee: properName,
+          location: location,
+          foreman: foreman,
+          phoneNumber: phoneNumber,
+          currentItem: '',
+          pickListItem: '',
+          size: '',
+          dueDate: null,
+          isOverdue: true,
+          daysTillDue: -1,
+          status: 'Missing',
+          estimatedTime: 0,
+          priority: 'High',
+          sheetName: 'Expiring Certs',
+          rowIndex: 0,
+          isMissingCert: true
+        };
+
+        if (!tasksByLocation[location]) {
+          tasksByLocation[location] = [];
+        }
+        tasksByLocation[location].push(task);
+        missingEvalCount++;
+
+        Logger.log('collectExpiringCertTasks: Added missing Crane Evaluation for ' + properName + ' at ' + location);
+      }
+    }
+
+    Logger.log('collectExpiringCertTasks: Added ' + missingEvalCount + ' missing Crane Evaluation tasks');
+    taskCount += missingEvalCount;
+  }
+
+  Logger.log('collectExpiringCertTasks: TOTAL cert tasks = ' + taskCount);
 
   // Post-process: Group 1st Aid and CPR certs for same employee
   // This allows sending a single notification for both certs
@@ -1354,6 +1656,14 @@ function collectManualTasks(ss, tasksByLocation, today) {
       continue;
     }
 
+    // Skip trip summary entries (combined locations created by Trip Planner)
+    // These have "+" in location (e.g., "Billings + Livingston") OR
+    // taskType starts with "🗺️ Trip:" prefix
+    if (location.indexOf(' + ') !== -1 || taskType.indexOf('🗺️ Trip:') !== -1) {
+      Logger.log('collectManualTasks: Skipping row ' + (i+1) + ' - trip summary entry: ' + location);
+      continue;
+    }
+
     // Skip if already complete
     if (status.toLowerCase() === 'complete' || status.toLowerCase() === 'completed') {
       Logger.log('collectManualTasks: Skipping row ' + (i+1) + ' - already complete');
@@ -1393,6 +1703,7 @@ function collectManualTasks(ss, tasksByLocation, today) {
       pickListItem: '',
       size: '',
       dueDate: dueDate,
+      scheduledDate: dueDate, // Manual tasks use their scheduled date directly
       isOverdue: isOverdue,
       daysTillDue: daysTillDue,
       status: status,
@@ -1401,7 +1712,8 @@ function collectManualTasks(ss, tasksByLocation, today) {
       startTime: startTime,
       notes: notes,
       sheetName: 'Manual Tasks',
-      rowIndex: i + 1
+      rowIndex: i + 1,
+      isManualTask: true // Flag to identify manual tasks
     };
 
     // Add to location group
@@ -1412,7 +1724,8 @@ function collectManualTasks(ss, tasksByLocation, today) {
     taskCount++;
 
     Logger.log('collectManualTasks: Added ' + taskType + ' task at ' + location +
-               (dueDate ? ' (scheduled: ' + dueDate.toDateString() + ')' : ' (no date)'));
+               (dueDate ? ' (scheduled: ' + dueDate.toDateString() + ')' : ' (no date)') +
+               ' - isManualTask: ' + task.isManualTask + ', type: ' + task.type);
   }
 
   Logger.log('collectManualTasks: Added ' + taskCount + ' manual tasks total');
@@ -1515,6 +1828,23 @@ function createSmartScheduleToDoList(ss, tasksByLocation) {
   // Track which dates are already scheduled (ONE location per day)
   var scheduledDates = {};
 
+  // FIRST: Pre-populate scheduledDates with manual tasks that have specific dates
+  // This ensures manual task dates are respected and not overwritten
+  for (var loc in tasksByLocation) {
+    var locTasks = tasksByLocation[loc];
+    for (var t = 0; t < locTasks.length; t++) {
+      var task = locTasks[t];
+      if (task.isManualTask && task.scheduledDate) {
+        var dateKey = formatDateKey(task.scheduledDate);
+        if (dateKey) {
+          scheduledDates[dateKey] = loc + ' (Manual)';
+          Logger.log('Pre-blocked ' + dateKey + ' for manual task at ' + loc);
+        }
+      }
+    }
+  }
+  Logger.log('Pre-populated scheduledDates with ' + Object.keys(scheduledDates).length + ' manual task dates');
+
   // Process each location
   var locationNames = Object.keys(tasksByLocation).sort(function(a, b) {
     // Sort by priority: locations with overdue tasks first
@@ -1592,7 +1922,25 @@ function createSmartScheduleToDoList(ss, tasksByLocation) {
 
         // Check if user had previously set a scheduled date for this task
         var taskKey = location + '|' + (task.employee || task.crewLead || task.crew) + '|' + task.type;
-        var finalScheduledDate = existingScheduledDates[taskKey] || suggestedDate;
+
+        // For manual tasks with their own scheduled date, ALWAYS use that date
+        var finalScheduledDate;
+        if (task.isManualTask && task.scheduledDate) {
+          finalScheduledDate = task.scheduledDate;
+          Logger.log('Using manual task scheduled date for ' + task.type + ' at ' + location + ': ' + formatDateKey(finalScheduledDate));
+        } else if (task.type === 'Cert Expiring') {
+          // For cert tasks, ONLY use a scheduled date if the user has explicitly set one
+          // Do NOT assign a suggested date - cert tasks should not appear on calendar until user schedules them
+          finalScheduledDate = existingScheduledDates[taskKey] || ''; // Empty string if not scheduled by user
+          if (finalScheduledDate) {
+            Logger.log('Using user-set scheduled date for cert task: ' + task.employee + ' - ' + task.itemType + ' on ' + formatDateKey(finalScheduledDate));
+          } else {
+            Logger.log('Cert task not scheduled by user: ' + task.employee + ' - ' + task.itemType + ' (will not appear on calendar)');
+          }
+        } else {
+          // For other tasks (swaps, training, etc.), check if user previously edited the date, otherwise use suggested
+          finalScheduledDate = existingScheduledDates[taskKey] || suggestedDate;
+        }
 
         var daysTillDueDisplay = '';
         if (task.isOverdue) {
@@ -1910,32 +2258,127 @@ function formatDateKey(date) {
 }
 
 /**
- * Gets drive time map for common locations.
+ * Gets location coordinates (latitude, longitude) for drive time calculations.
+ * Coordinates are approximate centers for each work area.
  *
- * @return {Object} Location (lowercase) to drive time (minutes)
+ * @return {Object} Location (lowercase) to {lat, lng, driveTimeFromHelena}
+ */
+function getLocationCoordinates() {
+  return {
+    // Home base
+    'helena': { lat: 46.5958, lng: -112.0270, driveTimeFromHelena: 0 },
+
+    // East/Southeast Montana (Bozeman area)
+    'bozeman': { lat: 45.6770, lng: -111.0429, driveTimeFromHelena: 90 },
+    'livingston': { lat: 45.6616, lng: -110.5609, driveTimeFromHelena: 120 },
+    'big sky': { lat: 45.2618, lng: -111.4018, driveTimeFromHelena: 90 },
+    'ennis': { lat: 45.3491, lng: -111.7310, driveTimeFromHelena: 60 },
+
+    // Far East Montana (Billings area)
+    'billings': { lat: 45.7833, lng: -108.5007, driveTimeFromHelena: 240 },
+    'rapelje': { lat: 45.9583, lng: -109.4167, driveTimeFromHelena: 180 }, // Between Billings and Livingston
+    'miles city': { lat: 46.4083, lng: -105.8406, driveTimeFromHelena: 300 },
+    'sidney': { lat: 47.7167, lng: -104.1561, driveTimeFromHelena: 360 },
+    'glendive': { lat: 47.1053, lng: -104.7124, driveTimeFromHelena: 330 },
+
+    // North Montana
+    'great falls': { lat: 47.5002, lng: -111.3008, driveTimeFromHelena: 90 },
+    'stanford': { lat: 47.1533, lng: -110.2181, driveTimeFromHelena: 120 },
+
+    // West Montana
+    'missoula': { lat: 46.8721, lng: -114.0063, driveTimeFromHelena: 120 },
+    'lolo': { lat: 46.7585, lng: -114.0881, driveTimeFromHelena: 130 },
+    'kalispell': { lat: 48.1920, lng: -114.3167, driveTimeFromHelena: 180 },
+
+    // Southwest Montana
+    'butte': { lat: 46.0038, lng: -112.5348, driveTimeFromHelena: 65 },
+    'anaconda': { lat: 46.1282, lng: -112.9439, driveTimeFromHelena: 75 },
+    'dillon': { lat: 45.2166, lng: -112.6377, driveTimeFromHelena: 120 },
+    'deer lodge': { lat: 46.3988, lng: -112.7330, driveTimeFromHelena: 60 },
+
+    // Helena area
+    'elliston': { lat: 46.5747, lng: -112.4461, driveTimeFromHelena: 30 },
+    'townsend': { lat: 46.3191, lng: -111.5206, driveTimeFromHelena: 30 },
+    'boulder': { lat: 46.2366, lng: -112.1213, driveTimeFromHelena: 45 },
+    'gold creek': { lat: 46.5411, lng: -113.0858, driveTimeFromHelena: 60 },
+    'weeds': { lat: 46.5958, lng: -112.0270, driveTimeFromHelena: 0 }, // Same as Helena (phone work)
+
+    // Far locations
+    'northern lights': { lat: 48.6910, lng: -116.3163, driveTimeFromHelena: 420 }, // Bonner's Ferry, ID
+    'bonner\'s ferry': { lat: 48.6910, lng: -116.3163, driveTimeFromHelena: 420 },
+    'california': { lat: 37.7749, lng: -122.4194, driveTimeFromHelena: 960 }, // San Francisco area
+    'ca sub': { lat: 37.7749, lng: -122.4194, driveTimeFromHelena: 960 },
+    'south dakota': { lat: 44.3668, lng: -100.3538, driveTimeFromHelena: 600 }, // Central SD
+    'south dakota dock': { lat: 44.3668, lng: -100.3538, driveTimeFromHelena: 600 },
+
+    // Additional Montana locations
+    'whitehall': { lat: 45.8708, lng: -112.0974, driveTimeFromHelena: 60 },
+    'three forks': { lat: 45.8922, lng: -111.5519, driveTimeFromHelena: 75 },
+    'manhattan': { lat: 45.8566, lng: -111.3324, driveTimeFromHelena: 80 },
+    'belgrade': { lat: 45.7758, lng: -111.1761, driveTimeFromHelena: 85 }
+  };
+}
+
+/**
+ * Calculates estimated drive time between two locations using coordinates.
+ * Uses Haversine formula for distance, then estimates time based on average speed.
+ *
+ * @param {string} fromLocation - From location name
+ * @param {string} toLocation - To location name
+ * @return {number} Estimated drive time in minutes
+ */
+function calculateDriveTimeBetween(fromLocation, toLocation) {
+  var coords = getLocationCoordinates();
+  var fromLoc = coords[fromLocation.toLowerCase()];
+  var toLoc = coords[toLocation.toLowerCase()];
+
+  // If either location not found, use fallback from driveTimeFromHelena
+  if (!fromLoc || !toLoc) {
+    var driveMap = getDriveTimeMap();
+    var fromTime = driveMap[fromLocation.toLowerCase()] || 120;
+    var toTime = driveMap[toLocation.toLowerCase()] || 120;
+
+    // Rough estimate: if going same direction, use difference; otherwise sum
+    return Math.abs(toTime - fromTime) + 15;
+  }
+
+  // Same location
+  if (fromLocation.toLowerCase() === toLocation.toLowerCase()) {
+    return 0;
+  }
+
+  // Calculate distance using Haversine formula
+  var R = 3959; // Earth's radius in miles
+  var dLat = (toLoc.lat - fromLoc.lat) * Math.PI / 180;
+  var dLng = (toLoc.lng - fromLoc.lng) * Math.PI / 180;
+  var a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+          Math.cos(fromLoc.lat * Math.PI / 180) * Math.cos(toLoc.lat * Math.PI / 180) *
+          Math.sin(dLng/2) * Math.sin(dLng/2);
+  var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  var distanceMiles = R * c;
+
+  // Estimate drive time: Montana roads average ~50-60 mph, use 55 mph
+  // Add 10% for road curves, stops, etc.
+  var driveTimeMinutes = Math.round((distanceMiles / 55) * 60 * 1.1);
+
+  // Minimum 15 minutes between any two different locations
+  return Math.max(15, driveTimeMinutes);
+}
+
+/**
+ * Gets drive time map for common locations (legacy function for backward compatibility).
+ * Now returns drive times FROM HELENA for each location.
+ *
+ * @return {Object} Location (lowercase) to drive time from Helena (minutes)
  */
 function getDriveTimeMap() {
-  return {
-    'helena': 0,
-    'ennis': 60,
-    'butte': 90,
-    'big sky': 90,
-    'bozeman': 90,
-    'livingston': 60, // Livingston, MT
-    'missoula': 120,
-    'great falls': 90,
-    'stanford': 120, // Stanford, MT (2 hrs from Helena)
-    'kalispell': 180,
-    'billings': 180,
-    'miles city': 240,
-    'sidney': 300,
-    'glendive': 270,
-    'northern lights': 420, // Bonner\'s Ferry, ID (~7 hours from Helena)
-    'bonner\'s ferry': 420, // Alternative name
-    'ca sub': 960, // California (16 hours driving - likely fly)
-    'california': 960,
-    'south dakota dock': 600, // Eastern South Dakota (~10 hours)
-    'south dakota': 600
-  };
+  var coords = getLocationCoordinates();
+  var map = {};
+
+  for (var loc in coords) {
+    map[loc] = coords[loc].driveTimeFromHelena;
+  }
+
+  return map;
 }
 

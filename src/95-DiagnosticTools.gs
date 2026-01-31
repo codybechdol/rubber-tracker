@@ -4,7 +4,7 @@
  * Dependencies: Requires constants from 00-Constants.gs and normalizeSleeveSize from 30-SwapGeneration.gs
  */
 
-/* global SHEET_GLOVES, SHEET_SLEEVES, SHEET_GLOVE_SWAPS, SHEET_SLEEVE_SWAPS, SHEET_EMPLOYEES, normalizeSleeveSize */
+/* global SHEET_GLOVES, SHEET_SLEEVES, SHEET_GLOVE_SWAPS, SHEET_SLEEVE_SWAPS, SHEET_EMPLOYEES, normalizeSleeveSize, Session */
 
 /**
  * Diagnoses why an employee is showing "Need to Purchase" when items appear available.
@@ -435,3 +435,197 @@ function runGloveSwapDiagnostic() {
   SpreadsheetApp.getUi().alert('Diagnostic complete. Check the execution log:\nExtensions → Apps Script → View Logs');
 }
 
+/**
+ * Quick check for a specific item number in inventory
+ * Change itemNum and itemType before running
+ */
+// eslint-disable-next-line no-unused-vars
+function checkSpecificItem() {
+  var itemNum = 108; // Change this to any item number
+  var itemType = 'Sleeves'; // 'Gloves' or 'Sleeves'
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var inventorySheet = ss.getSheetByName(itemType);
+
+  if (!inventorySheet) {
+    Logger.log('ERROR: Sheet "' + itemType + '" not found');
+    return;
+  }
+
+  var invData = inventorySheet.getDataRange().getValues();
+
+  for (var i = 1; i < invData.length; i++) {
+    if (invData[i][0].toString() === itemNum.toString()) {
+      Logger.log('Found Item #' + itemNum + ':');
+      Logger.log('  Size: ' + invData[i][1]);
+      Logger.log('  Class: ' + invData[i][2]);
+      Logger.log('  Test Date: ' + invData[i][3]);
+      Logger.log('  Date Assigned: ' + invData[i][4]);
+      Logger.log('  Location: ' + invData[i][5]);
+      Logger.log('  Status: ' + invData[i][6]);
+      Logger.log('  Assigned To: ' + invData[i][7]);
+      Logger.log('  Change Out Date: ' + invData[i][8]);
+      Logger.log('  Picked For: ' + invData[i][9]);
+      Logger.log('  Notes: ' + invData[i][10]);
+      return;
+    }
+  }
+
+  Logger.log('Item #' + itemNum + ' not found in ' + itemType + ' sheet');
+}
+
+/**
+ * Diagnostic: Analyze Crane Cert vs Crane Evaluation data
+ * Run this from Script Editor (Run > analyzeCraneCertData) to see results in Logs
+ *
+ * Shows:
+ * - Employees with both Crane Cert AND Crane Evaluation (compliant)
+ * - Employees with Crane Cert but NO Crane Evaluation (needs attention)
+ * - Employees with Crane Evaluation but NO Crane Cert (unusual)
+ */
+// eslint-disable-next-line no-unused-vars
+function analyzeCraneCertData() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var expiringSheet = ss.getSheetByName('Expiring Certs');
+  var employeesSheet = ss.getSheetByName('Employees');
+
+  if (!expiringSheet) {
+    Logger.log('ERROR: Expiring Certs sheet not found');
+    return;
+  }
+
+  // Build set of previous employees to exclude
+  var previousEmployees = new Set();
+  if (employeesSheet && employeesSheet.getLastRow() > 1) {
+    var empData = employeesSheet.getDataRange().getValues();
+    var empHeaders = empData[0];
+    var nameCol = -1, locCol = -1;
+    for (var h = 0; h < empHeaders.length; h++) {
+      var hdr = String(empHeaders[h]).toLowerCase().trim();
+      if (hdr === 'name') nameCol = h;
+      if (hdr === 'location') locCol = h;
+    }
+    if (nameCol !== -1 && locCol !== -1) {
+      for (var i = 1; i < empData.length; i++) {
+        var loc = String(empData[i][locCol] || '').trim().toLowerCase();
+        if (loc === 'previous employee') {
+          previousEmployees.add(String(empData[i][nameCol]).trim().toLowerCase());
+        }
+      }
+    }
+  }
+  Logger.log('Found ' + previousEmployees.size + ' previous employees to exclude');
+
+  var data = expiringSheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Find column indices
+  var empCol = 0, certTypeCol = 1, expDateCol = 2;
+  for (var hIdx = 0; hIdx < headers.length; hIdx++) {
+    var header = String(headers[hIdx]).toLowerCase().trim();
+    if (header === 'employee name' || header === 'employee') empCol = hIdx;
+    if (header === 'item type' || header === 'cert type') certTypeCol = hIdx;
+    if (header === 'expiration date' || header === 'expiration') expDateCol = hIdx;
+  }
+
+  // Build map of employees and their crane-related certs
+  var employeeCerts = {};
+
+  for (var rowIdx = 1; rowIdx < data.length; rowIdx++) {
+    var employee = String(data[rowIdx][empCol] || '').trim();
+    var certType = String(data[rowIdx][certTypeCol] || '').trim();
+    var expDate = data[rowIdx][expDateCol];
+
+    if (!employee) continue;
+    if (previousEmployees.has(employee.toLowerCase())) continue;
+
+    var empKey = employee.toLowerCase();
+    if (!employeeCerts[empKey]) {
+      employeeCerts[empKey] = {
+        name: employee,
+        hasCraneCert: false,
+        hasCraneEval: false,
+        craneCertDate: null,
+        craneEvalDate: null
+      };
+    }
+
+    if (certType === 'Crane Cert') {
+      employeeCerts[empKey].hasCraneCert = true;
+      employeeCerts[empKey].craneCertDate = expDate;
+    } else if (certType === 'Crane Evaluation') {
+      employeeCerts[empKey].hasCraneEval = true;
+      employeeCerts[empKey].craneEvalDate = expDate;
+    }
+  }
+
+  // Analyze results
+  var hasBoth = [];
+  var hasCertOnly = [];
+  var hasEvalOnly = [];
+
+  for (var key in employeeCerts) {
+    var emp = employeeCerts[key];
+    if (emp.hasCraneCert && emp.hasCraneEval) {
+      hasBoth.push(emp);
+    } else if (emp.hasCraneCert && !emp.hasCraneEval) {
+      hasCertOnly.push(emp);
+    } else if (!emp.hasCraneCert && emp.hasCraneEval) {
+      hasEvalOnly.push(emp);
+    }
+  }
+
+  Logger.log('');
+  Logger.log('================================================================================');
+  Logger.log('CRANE CERT / CRANE EVALUATION ANALYSIS');
+  Logger.log('================================================================================');
+  Logger.log('');
+
+  Logger.log('✅ EMPLOYEES WITH BOTH CRANE CERT AND CRANE EVALUATION (' + hasBoth.length + '):');
+  Logger.log('------------------------------------------------------------');
+  hasBoth.forEach(function(emp) {
+    var certDate = emp.craneCertDate instanceof Date ? Utilities.formatDate(emp.craneCertDate, Session.getScriptTimeZone(), 'MM/dd/yyyy') : emp.craneCertDate;
+    var evalDate = emp.craneEvalDate instanceof Date ? Utilities.formatDate(emp.craneEvalDate, Session.getScriptTimeZone(), 'MM/dd/yyyy') : emp.craneEvalDate;
+    Logger.log('  ' + emp.name + ' - Cert: ' + certDate + ', Eval: ' + evalDate);
+  });
+  Logger.log('');
+
+  Logger.log('⚠️ EMPLOYEES WITH CRANE CERT BUT NO CRANE EVALUATION (' + hasCertOnly.length + '):');
+  Logger.log('------------------------------------------------------------');
+  if (hasCertOnly.length === 0) {
+    Logger.log('  None - All crane cert holders have evaluations!');
+  } else {
+    hasCertOnly.forEach(function(emp) {
+      var certDate = emp.craneCertDate instanceof Date ? Utilities.formatDate(emp.craneCertDate, Session.getScriptTimeZone(), 'MM/dd/yyyy') : emp.craneCertDate;
+      Logger.log('  ⚠️ ' + emp.name + ' - Cert: ' + certDate + ' (MISSING EVALUATION)');
+    });
+  }
+  Logger.log('');
+
+  Logger.log('❓ EMPLOYEES WITH CRANE EVALUATION BUT NO CRANE CERT (' + hasEvalOnly.length + '):');
+  Logger.log('------------------------------------------------------------');
+  if (hasEvalOnly.length === 0) {
+    Logger.log('  None - Good! All evaluations have matching certs.');
+  } else {
+    hasEvalOnly.forEach(function(emp) {
+      var evalDate = emp.craneEvalDate instanceof Date ? Utilities.formatDate(emp.craneEvalDate, Session.getScriptTimeZone(), 'MM/dd/yyyy') : emp.craneEvalDate;
+      Logger.log('  ❓ ' + emp.name + ' - Eval: ' + evalDate + ' (NO CRANE CERT - UNUSUAL)');
+    });
+  }
+  Logger.log('');
+
+  Logger.log('================================================================================');
+  Logger.log('SUMMARY:');
+  Logger.log('  Total with Crane Cert: ' + (hasBoth.length + hasCertOnly.length));
+  Logger.log('  Total with Crane Evaluation: ' + (hasBoth.length + hasEvalOnly.length));
+  Logger.log('  Both Cert + Eval: ' + hasBoth.length);
+  Logger.log('  Missing Evaluation: ' + hasCertOnly.length);
+  Logger.log('  Eval without Cert: ' + hasEvalOnly.length);
+  Logger.log('================================================================================');
+
+  return {
+    hasBoth: hasBoth,
+    hasCertOnly: hasCertOnly,
+    hasEvalOnly: hasEvalOnly
+  };
+}

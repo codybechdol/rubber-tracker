@@ -53,6 +53,9 @@
     .btn { margin-top: 8px; padding: 10px 24px; background: #1a73e8; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; }
     .btn:hover { background: #1557b0; }
     .btn:disabled { background: #dadce0; cursor: not-allowed; }
+    .sub-actions { margin: 6px 0 0 36px; padding-left: 0; }
+    .sub-actions .sub-btn { font-size: 11px; padding: 6px 10px; margin: 2px 4px 2px 0; background: #f1f3f4; border-color: #c9cccf; }
+    .sub-actions .sub-btn:hover:not(:disabled) { background: #e8f0fe; border-color: #1a73e8; }
   </style>
 </head>
 <body>
@@ -63,6 +66,10 @@
       <span class="step-num"><span>1</span></span>
       <div class="step-text">Generate All Reports<div class="step-subtitle">Swaps, Purchase Needs, Reclaims</div></div>
     </button>
+    <div class="sub-actions">
+      <button class="quick-btn sub-btn" onclick="runQuick('showCrewImportDialog', 'Import Crew Makeup', 'Opening Crew Import dialog...')">👷 Import Crew Makeup</button>
+      <button class="quick-btn sub-btn" onclick="runQuick('showExpiringCertsChoiceDialog', 'Manage Certs', 'Opening certification management...')">📜 Manage Certs</button>
+    </div>
   </div>
 
   <div class="step-container">
@@ -70,6 +77,9 @@
       <span class="step-num"><span>2</span></span>
       <div class="step-text">Create Smart Schedule<div class="step-subtitle">To-Do List by location</div></div>
     </button>
+    <div class="sub-actions">
+      <button class="quick-btn sub-btn" onclick="openToDoSchedule()">📅 Schedule</button>
+    </div>
   </div>
 
   <div class="step-container">
@@ -94,7 +104,6 @@
     <button class="quick-btn" onclick="runQuick('setupCrewVisitConfig', 'Setup Crew Visit Config', 'Setting up Crew Visit Config...')">👷 Crew Visit Config</button>
     <button class="quick-btn" onclick="runQuick('setupTrainingConfig', 'Setup Training Config', 'Setting up Training Config...')">📚 Training Config</button>
     <button class="quick-btn" onclick="runQuick('setupTrainingTracking', 'Setup Training Tracking', 'Setting up Training Tracking...')">📋 Training Tracking</button>
-    <button class="quick-btn" onclick="runQuick('showExpiringCertsChoiceDialog', 'Manage Certs', 'Opening certification management...')">📜 Manage Certs</button>
   </div>
 
   <div class="divider"></div>
@@ -104,8 +113,6 @@
     <button class="quick-btn" onclick="runQuick('generateSleeveSwaps', 'Generate Sleeve Swaps', 'Updating Sleeve Swaps report...')">💪 Sleeves</button>
     <button class="quick-btn" onclick="runQuick('updatePurchaseNeeds', 'Update Purchase Needs', 'Calculating purchase requirements...')">🛒 Purchase</button>
     <button class="quick-btn" onclick="runQuick('showItemHistoryLookup', 'Item History Lookup', 'Opening history lookup dialog...')">🔍 Lookup</button>
-    <button class="quick-btn" onclick="openToDoSchedule()">📅 To Do Schedule</button>
-    <button class="quick-btn" onclick="openToDoConfig()">⚙️ To Do Config</button>
   </div>
 
   <div class="divider"></div>
@@ -212,6 +219,15 @@
       }).showToDoSchedule();
     }
 
+    function openScheduleDialog(tab) {
+      showStatus('⏳ Opening Schedule...');
+      google.script.run.withSuccessHandler(function() {
+        hideStatus();
+      }).withFailureHandler(function(e) {
+        showStatus('Error: ' + e, 'error');
+      }).showScheduleDialog(tab || 'schedule');
+    }
+
     function toggleManualTask() {
       var form = document.getElementById('manualTaskForm');
       var icon = document.getElementById('expandIcon');
@@ -256,7 +272,8 @@
         estimatedTime: parseFloat(estimatedTime),
         startLocation: startLocation,
         endLocation: endLocation,
-        notes: notes
+        notes: notes,
+        manuallyCreated: true  // Flag this as user-created manual task
       };
 
       showStatus('⏳ Adding to schedule...');

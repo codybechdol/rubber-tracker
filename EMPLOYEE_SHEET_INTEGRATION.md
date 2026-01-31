@@ -38,7 +38,13 @@ This document analyzes the impact of the **Crew Import** and **Expiring Certs Im
 ### Crew Import (Phase 1) - Modifies:
 1. **Location (Column B)** - Maps from superintendent's spreadsheet
 2. **Job Number (Column C)** - Full job number with position (e.g., 013-26.1)
-3. **Job Classification (Column N)** - Role: Foreman, Journeyman Lineman, Apprentice Year X, etc.
+3. **Job Classification (Column N)** - Role mapped to standard values:
+   - F (Foreman) → F
+   - JL (Journeyman Lineman) → JRY
+   - 1-7 ap → AP 1-7
+   - Jry Op → JRY OP
+   - GTO → GTO, GTO F → GTO F
+   - EO2 → EO 2
 
 ### Expiring Certs Import - Modifies:
 1. **Adds NEW employees** if they don't exist (via "Add New Employee" button)

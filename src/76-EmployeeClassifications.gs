@@ -22,6 +22,7 @@ function setupJobClassificationDropdown() {
   // Job Classifications
   // AP = Apprentice, JRY = Journeyman, F = Foreman, OP = Operator
   // GF = General Foreman, GTO = General Trade Operator, SUP = Supervisor, EO = Equipment Operator
+  // WT = White Ticket Lineman
   var classifications = [
     'AP 1',
     'AP 2',
@@ -31,6 +32,7 @@ function setupJobClassificationDropdown() {
     'AP 6',
     'AP 7',
     'JRY',
+    'WT',
     'F',
     'GF',
     'SUP',
@@ -72,11 +74,11 @@ function setupJobClassificationDropdown() {
       .setFontColor('white');
   }
 
-  // Create data validation rule with dropdown
+  // Create data validation rule with dropdown - STRICT (no invalid entries allowed)
   var rule = SpreadsheetApp.newDataValidation()
     .requireValueInList(classifications, true)
-    .setAllowInvalid(true) // Allow manual entry for flexibility
-    .setHelpText('Select employee job classification. F = Foreman for training tracking.')
+    .setAllowInvalid(false) // Only allow approved classifications
+    .setHelpText('Select employee job classification. Only approved values allowed.')
     .build();
 
   // Apply to column N, rows 2 onwards (skip header)
@@ -87,7 +89,8 @@ function setupJobClassificationDropdown() {
   SpreadsheetApp.getUi().alert(
     '✅ Job Classification Dropdown Created!\n\n' +
     'Column: N (Job Classification)\n' +
-    'Values: AP 1-7, JRY, F, GF, SUP, JRY OP, OP, GTO F, GTO, EO 1-2\n\n' +
+    'Values: AP 1-7, JRY, WT, F, GF, SUP, JRY OP, OP, GTO F, GTO, EO 1-2\n\n' +
+    '⚠️ Only approved classifications allowed (strict validation)\n' +
     '⭐ Only "F" and "GTO F" are recognized as crew leads for training tracking'
   );
 }
@@ -120,7 +123,8 @@ function isCrewLead(classification) {
 function getClassificationDescriptions() {
   var descriptions = 'Job Classification Reference:\n\n';
   descriptions += 'AP 1-7 = Apprentice (1st through 7th year)\n';
-  descriptions += 'JRY = Journeyman\n';
+  descriptions += 'JRY = Journeyman Lineman\n';
+  descriptions += 'WT = White Ticket Lineman\n';
   descriptions += 'F = Foreman (Crew Lead) ⭐\n';
   descriptions += 'GF = General Foreman\n';
   descriptions += 'SUP = Supervisor\n';

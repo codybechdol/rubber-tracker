@@ -140,13 +140,8 @@
       </button>
     </li>
     <li class="nav-item" role="presentation">
-      <button class="nav-link" id="schedule-tab" data-bs-toggle="tab" data-bs-target="#schedule" type="button">
-        <i class="bi bi-clock"></i> Schedule Settings
-      </button>
-    </li>
-    <li class="nav-item" role="presentation">
-      <button class="nav-link" id="tasksources-tab" data-bs-toggle="tab" data-bs-target="#tasksources" type="button">
-        <i class="bi bi-list-check"></i> Task Sources
+      <button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings" type="button">
+        <i class="bi bi-gear"></i> Settings
       </button>
     </li>
     <li class="nav-item" role="presentation">
@@ -183,8 +178,8 @@
       </div>
     </div>
 
-    <!-- Schedule Settings Tab (now includes Priority Settings) -->
-    <div class="tab-pane fade" id="schedule" role="tabpanel">
+    <!-- Settings Tab (merged Schedule Settings + Task Sources) -->
+    <div class="tab-pane fade" id="settings" role="tabpanel">
       <div class="config-section">
         <h3><i class="bi bi-clock"></i> Schedule Settings</h3>
         <p class="text-muted mb-3">Configure working hours and scheduling preferences.</p>
@@ -282,10 +277,8 @@
           </div>
         </div>
       </div>
-    </div>
 
-    <!-- Task Sources Tab (combined Training + Cert Types) -->
-    <div class="tab-pane fade" id="tasksources" role="tabpanel">
+      <!-- Task Sources Section (merged from Task Sources tab) -->
       <div class="config-section">
         <h3><i class="bi bi-mortarboard"></i> 🎯 Training: Select Crews</h3>
         <p class="text-muted mb-3">Select which crews should have training tasks in the To Do List.</p>
@@ -540,10 +533,18 @@
     function closeDialog() {
       if (hasUnsavedChanges) {
         if (confirm('You have unsaved changes. Are you sure you want to close without saving?')) {
-          google.script.host.close();
+          // Return to Schedule Hub
+          google.script.run
+            .withSuccessHandler(function() {})
+            .withFailureHandler(function() { google.script.host.close(); })
+            .showScheduleDialog();
         }
       } else {
-        google.script.host.close();
+        // Return to Schedule Hub
+        google.script.run
+          .withSuccessHandler(function() {})
+          .withFailureHandler(function() { google.script.host.close(); })
+          .showScheduleDialog();
       }
     }
 
@@ -1911,13 +1912,9 @@
     }
 
     // ================== TAB EVENT LISTENERS ==================
-    // Schedule Settings tab - load Crew Visit Config
-    document.getElementById('schedule-tab').addEventListener('shown.bs.tab', function() {
+    // Settings tab - load Crew Visit Config and Training data
+    document.getElementById('settings-tab').addEventListener('shown.bs.tab', function() {
       loadCrewVisitConfig();
-    });
-
-    // Task Sources tab - load all training-related data
-    document.getElementById('tasksources-tab').addEventListener('shown.bs.tab', function() {
       loadTrainingConfig();
       loadExpiringCertsConfig();
       loadTrainingConfigData();
@@ -1933,10 +1930,8 @@
     // Preload data for all tabs when the dialog opens
     // This ensures data is available even if the user hasn't clicked on a tab yet
     setTimeout(function() {
-      // Load Schedule Settings tab data (Crew Visit Config)
+      // Load Settings tab data (Crew Visit Config + Training)
       loadCrewVisitConfig();
-
-      // Load Task Sources tab data
       loadTrainingConfig();
       loadExpiringCertsConfig();
       loadTrainingConfigData();

@@ -24,7 +24,7 @@ function showCrewImportDialog() {
 /**
  * Applies crew changes to the Employees sheet.
  * Called from CrewImport.html when user confirms changes.
- * Updates: Location, Job Number, and Job Classification (column N)
+ * Updates: Location, Job Number, and Job Classification
  *
  * @param {Array} changes - Array of change objects with employee info and new values
  * @return {Object} Result with success message
@@ -113,7 +113,7 @@ function applyCrewChanges(changes) {
         jobChanged = true;
       }
 
-      // Update Job Classification (column N)
+      // Update Job Classification (e.g., F, JRY, AP 1, AP 2, etc.)
       if (change.newClassification && change.newClassification !== change.oldClassification) {
         employeesSheet.getRange(rowIndex, jobClassificationCol + 1).setValue(change.newClassification);
         classificationChanged = true;
@@ -178,6 +178,587 @@ function applyCrewChanges(changes) {
   logEvent('Crew Makeup Import: Updated ' + updatedCount + ' employees, logged ' + historyLogged + ' history entries');
 
   return { success: true, message: message };
+}
+
+/**
+ * Adds a new employee from the Crew Import dialog.
+ * Used when an employee from Excel is not found in the Employees sheet (new hire).
+ *
+ * @param {Object} employeeData - Object with name, location, jobNumber, classification
+ * @return {Object} Result with success status, message, and row info
+ */
+function addNewEmployeeFromImport(employeeData) {
+  Logger.log('=== addNewEmployeeFromImport START ===');
+  Logger.log('Adding new employee: ' + JSON.stringify(employeeData));
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+
+    if (!employeesSheet) {
+      return { success: false, message: 'Employees sheet not found' };
+    }
+
+    var data = employeesSheet.getDataRange().getValues();
+    var headers = data[0];
+
+    // Find all column indices - match headers case-insensitively
+    var colIndices = {
+      name: 0,
+      location: -1,
+      jobNumber: -1,
+      jobClassification: -1,
+      hireDate: -1,
+      phoneNumber: -1,
+      emailAddress: -1,
+      mpEmail: -1,
+      notificationEmails: -1,
+      gloveSize: -1,
+      sleeveSize: -1
+    };
+
+    for (var h = 0; h < headers.length; h++) {
+      var header = String(headers[h]).toLowerCase().trim();
+      if (header === 'location') colIndices.location = h;
+      if (header === 'job number') colIndices.jobNumber = h;
+      if (header === 'job classification') colIndices.jobClassification = h;
+      if (header === 'hire date') colIndices.hireDate = h;
+      if (header === 'phone number' || header === 'phone') colIndices.phoneNumber = h;
+      if (header === 'email address' || header === 'email') colIndices.emailAddress = h;
+      if (header === 'mp email') colIndices.mpEmail = h;
+      if (header === 'notification emails' || header === 'notification email') colIndices.notificationEmails = h;
+      if (header === 'glove size') colIndices.gloveSize = h;
+      if (header === 'sleeve size') colIndices.sleeveSize = h;
+    }
+
+    if (colIndices.location === -1 || colIndices.jobNumber === -1) {
+      return { success: false, message: 'Could not find required columns in Employees sheet' };
+    }
+
+    // Check for duplicate name
+    var nameLower = employeeData.name.toLowerCase().trim();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][colIndices.name]).toLowerCase().trim() === nameLower) {
+        return { success: false, message: 'An employee with this name already exists' };
+      }
+    }
+
+    // Create new row with employee data
+    var newRow = new Array(headers.length).fill('');
+    newRow[colIndices.name] = employeeData.name;
+    newRow[colIndices.location] = employeeData.location;
+    newRow[colIndices.jobNumber] = employeeData.jobNumber;
+
+    // Set optional fields if columns exist and data provided
+    if (colIndices.jobClassification !== -1 && employeeData.classification) {
+      newRow[colIndices.jobClassification] = employeeData.classification;
+    }
+    if (colIndices.hireDate !== -1 && employeeData.hireDate) {
+      // Convert YYYY-MM-DD to MM/DD/YYYY format (date only, no time)
+      var hireDateParts = employeeData.hireDate.split('-');
+      if (hireDateParts.length === 3) {
+        // Format as MM/DD/YYYY string to avoid time component
+        newRow[colIndices.hireDate] = hireDateParts[1] + '/' + hireDateParts[2] + '/' + hireDateParts[0];
+      }
+    }
+    if (colIndices.phoneNumber !== -1 && employeeData.phoneNumber) {
+      newRow[colIndices.phoneNumber] = employeeData.phoneNumber;
+    }
+    if (colIndices.emailAddress !== -1 && employeeData.emailAddress) {
+      newRow[colIndices.emailAddress] = employeeData.emailAddress;
+    }
+    if (colIndices.mpEmail !== -1 && employeeData.mpEmail) {
+      newRow[colIndices.mpEmail] = employeeData.mpEmail;
+    }
+    if (colIndices.notificationEmails !== -1 && employeeData.notificationEmails) {
+      newRow[colIndices.notificationEmails] = employeeData.notificationEmails;
+    }
+    if (colIndices.gloveSize !== -1 && employeeData.gloveSize) {
+      newRow[colIndices.gloveSize] = employeeData.gloveSize;
+    }
+    if (colIndices.sleeveSize !== -1 && employeeData.sleeveSize) {
+      newRow[colIndices.sleeveSize] = employeeData.sleeveSize;
+    }
+
+    // Add to sheet
+    employeesSheet.appendRow(newRow);
+    var newRowIndex = employeesSheet.getLastRow();
+
+    // Log to Employee History
+    var historySheet = ss.getSheetByName('Employee History');
+    if (historySheet) {
+      var timezone = ss.getSpreadsheetTimeZone();
+      var todayStr = Utilities.formatDate(new Date(), timezone, 'MM/dd/yyyy');
+
+      var notes = 'New Employee from Crew Makeup Import. ';
+      notes += 'Location: ' + employeeData.location + '. ';
+      notes += 'Job #: ' + employeeData.jobNumber + '.';
+      if (employeeData.classification) {
+        notes += ' Classification: ' + employeeData.classification + '.';
+      }
+      if (employeeData.gloveSize) {
+        notes += ' Glove: ' + employeeData.gloveSize + '.';
+      }
+      if (employeeData.sleeveSize) {
+        notes += ' Sleeve: ' + employeeData.sleeveSize + '.';
+      }
+
+      var historyRow = [
+        todayStr,                         // Date
+        employeeData.name,                // Employee Name
+        'NEW_EMPLOYEE_IMPORT',            // Event Type
+        employeeData.location,            // Location
+        employeeData.jobNumber,           // Job Number
+        employeeData.hireDate || todayStr, // Hire Date
+        '',                               // Last Day
+        '',                               // Last Day Reason
+        '',                               // Rehire Date
+        notes,                            // Notes
+        employeeData.phoneNumber || '',   // Phone Number
+        employeeData.emailAddress || '',  // Email Address
+        employeeData.gloveSize || '',     // Glove Size
+        employeeData.sleeveSize || ''     // Sleeve Size
+      ];
+
+      historySheet.appendRow(historyRow);
+    }
+
+    Logger.log('Added new employee: ' + employeeData.name + ' at row ' + newRowIndex);
+    logEvent('New Employee Import: Added ' + employeeData.name + ' from Crew Makeup Import');
+
+    return {
+      success: true,
+      message: 'Employee added successfully',
+      employeeName: employeeData.name,
+      rowIndex: newRowIndex
+    };
+
+  } catch (error) {
+    Logger.log('Error adding new employee: ' + error.toString());
+    return { success: false, message: 'Error: ' + error.toString() };
+  }
+}
+
+/**
+ * Marks an employee as Previous Employee (for Resigned, Quit, Layoff)
+ * Sets Location to "Previous Employee", clears Job Number, logs to Employee History
+ *
+ * @param {Object} data - Object with name, status, date, notes, company
+ * @return {Object} Result with success status and message
+ */
+function markEmployeeAsPrevious(data) {
+  Logger.log('=== markEmployeeAsPrevious START ===');
+  Logger.log('Data: ' + JSON.stringify(data));
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+
+    if (!employeesSheet) {
+      return { success: false, message: 'Employees sheet not found' };
+    }
+
+    var sheetData = employeesSheet.getDataRange().getValues();
+    var headers = sheetData[0];
+
+    // Find column indices
+    var nameCol = 0;
+    var locationCol = -1;
+    var jobNumCol = -1;
+
+    for (var h = 0; h < headers.length; h++) {
+      var header = String(headers[h]).toLowerCase().trim();
+      if (header === 'location') locationCol = h;
+      if (header === 'job number') jobNumCol = h;
+    }
+
+    if (locationCol === -1 || jobNumCol === -1) {
+      return { success: false, message: 'Could not find required columns in Employees sheet' };
+    }
+
+    // Find the employee by name
+    var nameLower = data.name.toLowerCase().trim();
+    var rowIndex = -1;
+    var oldLocation = '';
+    var oldJobNum = '';
+
+    for (var i = 1; i < sheetData.length; i++) {
+      if (String(sheetData[i][nameCol]).toLowerCase().trim() === nameLower) {
+        rowIndex = i + 1;
+        oldLocation = String(sheetData[i][locationCol] || '');
+        oldJobNum = String(sheetData[i][jobNumCol] || '');
+        break;
+      }
+    }
+
+    if (rowIndex === -1) {
+      return { success: false, message: 'Employee "' + data.name + '" not found on Employees sheet' };
+    }
+
+    // Update the employee
+    employeesSheet.getRange(rowIndex, locationCol + 1).setValue('Previous Employee');
+    employeesSheet.getRange(rowIndex, jobNumCol + 1).setValue('');
+
+    // Log to Employee History
+    var historySheet = ss.getSheetByName('Employee History');
+    if (historySheet) {
+      var timezone = ss.getSpreadsheetTimeZone();
+      var todayStr = Utilities.formatDate(new Date(), timezone, 'MM/dd/yyyy');
+
+      // Determine event type based on status
+      var eventType = 'SEPARATED';
+      if (data.status === 'Resigned') eventType = 'RESIGNED';
+      else if (data.status === 'Quit') eventType = 'QUIT';
+      else if (data.status === 'Layoff') eventType = 'LAYOFF';
+
+      var notes = 'Crew Makeup Import: ' + data.status;
+      if (data.company) notes += ' from ' + data.company;
+      if (data.date) notes += ' on ' + data.date;
+      if (data.notes) notes += '. ' + data.notes;
+      notes += '. Previous Location: ' + oldLocation + ', Job #: ' + oldJobNum;
+
+      var historyRow = [
+        todayStr,                         // Date
+        data.name,                        // Employee Name
+        eventType,                        // Event Type
+        'Previous Employee',              // Location
+        '',                               // Job Number
+        '',                               // Hire Date
+        data.date || todayStr,            // Last Day
+        data.status,                      // Last Day Reason
+        '',                               // Rehire Date
+        notes,                            // Notes
+        '',                               // Phone Number
+        '',                               // Email Address
+        '',                               // Glove Size
+        ''                                // Sleeve Size
+      ];
+
+      historySheet.appendRow(historyRow);
+    }
+
+    Logger.log('Marked ' + data.name + ' as Previous Employee');
+    logEvent('Crew Import: Marked ' + data.name + ' as Previous Employee (' + data.status + ')');
+
+    return { success: true, message: 'Employee marked as Previous Employee' };
+
+  } catch (error) {
+    Logger.log('Error marking employee as previous: ' + error.toString());
+    return { success: false, message: 'Error: ' + error.toString() };
+  }
+}
+
+/**
+ * Updates employee status notes (for Light Duty, Leave, etc.)
+ * Does not change location, just logs notes to Employee History
+ *
+ * @param {Object} data - Object with name, notes
+ * @return {Object} Result with success status and message
+ */
+function updateEmployeeStatusNotes(data) {
+  Logger.log('=== updateEmployeeStatusNotes START ===');
+  Logger.log('Data: ' + JSON.stringify(data));
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+
+    if (!employeesSheet) {
+      return { success: false, message: 'Employees sheet not found' };
+    }
+
+    var sheetData = employeesSheet.getDataRange().getValues();
+    var headers = sheetData[0];
+    var nameCol = 0;
+
+    // Find the employee by name
+    var nameLower = data.name.toLowerCase().trim();
+    var found = false;
+
+    for (var i = 1; i < sheetData.length; i++) {
+      if (String(sheetData[i][nameCol]).toLowerCase().trim() === nameLower) {
+        found = true;
+        break;
+      }
+    }
+
+    if (!found) {
+      return { success: false, message: 'Employee "' + data.name + '" not found on Employees sheet' };
+    }
+
+    // Log to Employee History
+    var historySheet = ss.getSheetByName('Employee History');
+    if (historySheet) {
+      var timezone = ss.getSpreadsheetTimeZone();
+      var todayStr = Utilities.formatDate(new Date(), timezone, 'MM/dd/yyyy');
+
+      var historyRow = [
+        todayStr,                         // Date
+        data.name,                        // Employee Name
+        'STATUS_UPDATE',                  // Event Type
+        '',                               // Location (unchanged)
+        '',                               // Job Number (unchanged)
+        '',                               // Hire Date
+        '',                               // Last Day
+        '',                               // Last Day Reason
+        '',                               // Rehire Date
+        'Crew Makeup Import: ' + data.notes,  // Notes
+        '',                               // Phone Number
+        '',                               // Email Address
+        '',                               // Glove Size
+        ''                                // Sleeve Size
+      ];
+
+      historySheet.appendRow(historyRow);
+    }
+
+    Logger.log('Updated status notes for ' + data.name);
+    logEvent('Crew Import: Updated status notes for ' + data.name + ' - ' + data.notes);
+
+    return { success: true, message: 'Status notes updated' };
+
+  } catch (error) {
+    Logger.log('Error updating status notes: ' + error.toString());
+    return { success: false, message: 'Error: ' + error.toString() };
+  }
+}
+
+/**
+ * Applies a special circumstance update with user-editable fields.
+ * Handles Vacation, Previous Employee, Light Duty, Leave, Layoff, Resigned, Quit
+ *
+ * @param {Object} data - Object with name, newLocation, classification, status, date, jobNumber, clearJobNumber, notes, company
+ * @return {Object} Result with success status and message
+ */
+function applySpecialCircumstanceUpdate(data) {
+  Logger.log('=== applySpecialCircumstanceUpdate START ===');
+  Logger.log('Data: ' + JSON.stringify(data));
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+
+    if (!employeesSheet) {
+      return { success: false, message: 'Employees sheet not found' };
+    }
+
+    var sheetData = employeesSheet.getDataRange().getValues();
+    var headers = sheetData[0];
+
+    // Find column indices
+    var nameCol = 0;
+    var locationCol = -1;
+    var jobNumCol = -1;
+    var jobClassificationCol = -1;
+    var lastDayCol = -1;
+    var lastDayReasonCol = -1;
+
+    for (var h = 0; h < headers.length; h++) {
+      var header = String(headers[h]).toLowerCase().trim();
+      if (header === 'location') locationCol = h;
+      if (header === 'job number') jobNumCol = h;
+      if (header === 'job classification') jobClassificationCol = h;
+      if (header === 'last day') lastDayCol = h;
+      if (header === 'last day reason') lastDayReasonCol = h;
+    }
+
+    if (locationCol === -1 || jobNumCol === -1) {
+      return { success: false, message: 'Could not find required columns in Employees sheet' };
+    }
+
+    // Default job classification column if not found
+    if (jobClassificationCol === -1) {
+      jobClassificationCol = 13; // Column N
+    }
+
+    // Find the employee by name
+    var nameLower = data.name.toLowerCase().trim();
+    var rowIndex = -1;
+    var oldLocation = '';
+    var oldJobNum = '';
+    var oldClassification = '';
+
+    for (var i = 1; i < sheetData.length; i++) {
+      if (String(sheetData[i][nameCol]).toLowerCase().trim() === nameLower) {
+        rowIndex = i + 1;
+        oldLocation = String(sheetData[i][locationCol] || '');
+        oldJobNum = String(sheetData[i][jobNumCol] || '');
+        oldClassification = String(sheetData[i][jobClassificationCol] || '');
+        break;
+      }
+    }
+
+    if (rowIndex === -1) {
+      return { success: false, message: 'Employee "' + data.name + '" not found on Employees sheet' };
+    }
+
+    // Get timezone for date formatting
+    var timezone = ss.getSpreadsheetTimeZone();
+    var todayStr = Utilities.formatDate(new Date(), timezone, 'MM/dd/yyyy');
+
+    // Apply updates
+    var locationChanged = false;
+    var jobChanged = false;
+    var classificationChanged = false;
+    var newJobNumber = data.jobNumber || '';
+
+    // Special handling for Light Duty - auto-assign job number 005-26.#
+    if (data.newLocation === 'Light Duty' && !data.clearJobNumber && !data.jobNumber) {
+      newJobNumber = getNextLightDutyJobNumber(sheetData, jobNumCol);
+      Logger.log('Auto-assigned Light Duty job number: ' + newJobNumber);
+    }
+
+    // Update Location if specified
+    if (data.newLocation) {
+      employeesSheet.getRange(rowIndex, locationCol + 1).setValue(data.newLocation);
+      locationChanged = (oldLocation !== data.newLocation);
+    }
+
+    // Update Job Number - either set new value, auto-assigned value, or clear
+    if (data.clearJobNumber) {
+      employeesSheet.getRange(rowIndex, jobNumCol + 1).setValue('');
+      jobChanged = (oldJobNum !== '');
+    } else if (newJobNumber) {
+      employeesSheet.getRange(rowIndex, jobNumCol + 1).setValue(newJobNumber);
+      jobChanged = (oldJobNum !== newJobNumber);
+    }
+
+    // Update Classification if specified
+    if (data.classification) {
+      employeesSheet.getRange(rowIndex, jobClassificationCol + 1).setValue(data.classification);
+      classificationChanged = (oldClassification !== data.classification);
+    }
+
+    // For Previous Employee, also set Last Day and Last Day Reason columns
+    if (data.newLocation === 'Previous Employee') {
+      // Format the date for display (convert from YYYY-MM-DD to MM/DD/YYYY if needed)
+      var lastDayDate = data.date || todayStr;
+      if (data.date && data.date.indexOf('-') !== -1 && data.date.length === 10) {
+        // Convert YYYY-MM-DD to MM/DD/YYYY
+        var dateParts = data.date.split('-');
+        if (dateParts.length === 3) {
+          lastDayDate = dateParts[1] + '/' + dateParts[2] + '/' + dateParts[0];
+        }
+      }
+
+      // Set Last Day column
+      if (lastDayCol !== -1) {
+        employeesSheet.getRange(rowIndex, lastDayCol + 1).setValue(lastDayDate);
+        Logger.log('Set Last Day to: ' + lastDayDate);
+      }
+
+      // Set Last Day Reason column
+      if (lastDayReasonCol !== -1) {
+        employeesSheet.getRange(rowIndex, lastDayReasonCol + 1).setValue(data.status);
+        Logger.log('Set Last Day Reason to: ' + data.status);
+      }
+    }
+
+    // Determine event type for history
+    var eventType = 'STATUS_UPDATE';
+    var statusLower = (data.status || '').toLowerCase();
+    if (statusLower === 'resigned') eventType = 'RESIGNED';
+    else if (statusLower === 'quit') eventType = 'QUIT';
+    else if (statusLower === 'layoff') eventType = 'LAYOFF';
+    else if (statusLower === 'vacation' || statusLower === 'time off') eventType = 'VACATION';
+    else if (statusLower === 'leave' || statusLower === 'fmla') eventType = 'LEAVE';
+    else if (statusLower === 'light duty') eventType = 'LIGHT_DUTY';
+
+    // Log to Employee History
+    var historySheet = ss.getSheetByName('Employee History');
+    if (historySheet) {
+
+      var notes = 'Crew Makeup Import: ' + data.status;
+      if (data.company) notes += ' from ' + data.company;
+      if (data.date) notes += ' on ' + data.date;
+      if (data.notes) notes += '. ' + data.notes;
+      if (locationChanged) notes += '. Location: ' + oldLocation + ' → ' + data.newLocation;
+      if (jobChanged) {
+        if (data.clearJobNumber) {
+          notes += '. Job # cleared (was: ' + oldJobNum + ')';
+        } else {
+          notes += '. Job #: ' + oldJobNum + ' → ' + newJobNumber;
+        }
+      }
+      if (classificationChanged) notes += '. Classification: ' + oldClassification + ' → ' + data.classification;
+
+      // Determine Last Day value
+      var lastDay = '';
+      var lastDayReason = '';
+      if (data.newLocation === 'Previous Employee') {
+        lastDay = data.date || todayStr;
+        lastDayReason = data.status;
+      }
+
+      var historyRow = [
+        todayStr,                         // Date
+        data.name,                        // Employee Name
+        eventType,                        // Event Type
+        data.newLocation || oldLocation,  // Location
+        data.clearJobNumber ? '' : (newJobNumber || oldJobNum),  // Job Number
+        '',                               // Hire Date
+        lastDay,                          // Last Day
+        lastDayReason,                    // Last Day Reason
+        '',                               // Rehire Date
+        notes,                            // Notes
+        '',                               // Phone Number
+        '',                               // Email Address
+        '',                               // Glove Size
+        ''                                // Sleeve Size
+      ];
+
+      historySheet.appendRow(historyRow);
+    }
+
+    Logger.log('Applied special update for ' + data.name + ': ' + data.status);
+    logEvent('Crew Import: Special update for ' + data.name + ' - ' + data.status +
+             (locationChanged ? ', Location → ' + data.newLocation : '') +
+             (jobChanged ? (data.clearJobNumber ? ', Job # cleared' : ', Job # → ' + newJobNumber) : '') +
+             (classificationChanged ? ', Classification → ' + data.classification : ''));
+
+    // NOTE: Do NOT delete the row when setting to Previous Employee
+    // The employee should remain on the Employees sheet with Location = "Previous Employee"
+    // This matches the behavior when manually changing location on the sheet
+
+    return { success: true, message: 'Update applied successfully' };
+
+  } catch (error) {
+    Logger.log('Error applying special update: ' + error.toString());
+    return { success: false, message: 'Error: ' + error.toString() };
+  }
+}
+
+/**
+ * Gets the next available Light Duty job number (005-26.#)
+ * Scans existing job numbers to find the highest used position number
+ *
+ * @param {Array} sheetData - 2D array of employee sheet data
+ * @param {number} jobNumCol - Index of the job number column
+ * @return {string} Next available Light Duty job number (e.g., "005-26.3")
+ */
+function getNextLightDutyJobNumber(sheetData, jobNumCol) {
+  var lightDutyPrefix = '005-26';
+  var maxPosition = 0;
+
+  // Scan all rows for existing 005-26.# job numbers
+  for (var i = 1; i < sheetData.length; i++) {
+    var jobNum = String(sheetData[i][jobNumCol] || '').trim();
+
+    // Check if this is a Light Duty job number (005-26.#)
+    if (jobNum.indexOf(lightDutyPrefix) === 0) {
+      var match = jobNum.match(/005-26\.(\d+)/);
+      if (match) {
+        var position = parseInt(match[1], 10);
+        if (position > maxPosition) {
+          maxPosition = position;
+        }
+      }
+    }
+  }
+
+  // Return the next available number
+  var nextPosition = maxPosition + 1;
+  return lightDutyPrefix + '.' + nextPosition;
 }
 
 // ============================================================================
@@ -350,5 +931,260 @@ function showImportDialog() {
   ).setWidth(600).setHeight(400);
 
   SpreadsheetApp.getUi().showModalDialog(html, 'Import Data');
+}
+
+// ============================================================================
+// FISCAL YEAR MANAGEMENT FUNCTIONS
+// ============================================================================
+
+/**
+ * Shows the Fiscal Year Configuration dialog.
+ * Menu item: Glove Manager → Utilities → Fiscal Year Config
+ */
+function showFiscalYearConfig() {
+  var html = HtmlService.createHtmlOutputFromFile('FiscalYearConfig')
+    .setWidth(700)
+    .setHeight(750);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Fiscal Year Configuration');
+}
+
+/**
+ * Gets the current fiscal year settings from script properties.
+ *
+ * @return {Object} Object with currentFY and newFY values
+ */
+function getFiscalYearSettings() {
+  var props = PropertiesService.getScriptProperties();
+  return {
+    currentFY: props.getProperty('fiscalYearCurrent') || '26',
+    newFY: props.getProperty('fiscalYearNew') || '27'
+  };
+}
+
+/**
+ * Saves fiscal year settings to script properties.
+ *
+ * @param {string} currentFY - Current fiscal year suffix (e.g., "26")
+ * @param {string} newFY - New fiscal year suffix (e.g., "27")
+ */
+function saveFiscalYearSettings(currentFY, newFY) {
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty('fiscalYearCurrent', currentFY);
+  props.setProperty('fiscalYearNew', newFY);
+  Logger.log('Saved fiscal year settings: current=' + currentFY + ', new=' + newFY);
+}
+
+/**
+ * Gets all unique crew job numbers (base numbers without position) for fiscal year transition.
+ * Groups by job number and counts employees.
+ *
+ * @return {Array} Array of crew objects with jobNumber, location, employeeCount, willTransition
+ */
+function getCrewsForFiscalYearTransition() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+
+  if (!employeesSheet || employeesSheet.getLastRow() < 2) {
+    return [];
+  }
+
+  var data = employeesSheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Find column indices
+  var nameCol = 0;
+  var locationCol = -1;
+  var jobNumCol = -1;
+
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'location') locationCol = h;
+    if (header === 'job number') jobNumCol = h;
+  }
+
+  if (jobNumCol === -1) {
+    Logger.log('getCrewsForFiscalYearTransition: Job Number column not found');
+    return [];
+  }
+
+  // Group employees by base job number (e.g., "013-26" from "013-26.1")
+  var crewMap = {};
+
+  for (var i = 1; i < data.length; i++) {
+    var jobNum = String(data[i][jobNumCol] || '').trim();
+    var location = locationCol !== -1 ? String(data[i][locationCol] || '').trim() : '';
+
+    if (!jobNum) continue;
+
+    // Skip special locations
+    if (location.toLowerCase() === 'previous employee') continue;
+
+    // Extract base crew number (e.g., "013-26" from "013-26.1")
+    var baseJobNum = jobNum.split('.')[0];
+
+    if (!baseJobNum || !baseJobNum.match(/^\d{3}-\d{2}$/)) continue;
+
+    if (!crewMap[baseJobNum]) {
+      crewMap[baseJobNum] = {
+        jobNumber: baseJobNum,
+        location: location,
+        employeeCount: 0,
+        willTransition: true // Default to will transition
+      };
+    }
+    crewMap[baseJobNum].employeeCount++;
+
+    // Use the first non-empty location found
+    if (!crewMap[baseJobNum].location && location) {
+      crewMap[baseJobNum].location = location;
+    }
+  }
+
+  // Convert to array and sort by job number
+  var crews = Object.values(crewMap);
+  crews.sort(function(a, b) {
+    return a.jobNumber.localeCompare(b.jobNumber);
+  });
+
+  Logger.log('getCrewsForFiscalYearTransition: Found ' + crews.length + ' unique crews');
+  return crews;
+}
+
+/**
+ * Applies the fiscal year transition to selected crews.
+ * Updates job numbers from old fiscal year suffix to new one.
+ *
+ * @param {string} oldFY - Old fiscal year suffix (e.g., "26")
+ * @param {string} newFY - New fiscal year suffix (e.g., "27")
+ * @param {Array} crewsToTransition - Array of base job numbers to transition (e.g., ["013-26", "029-26"])
+ * @return {Object} Result with success status and message
+ */
+function applyFiscalYearTransition(oldFY, newFY, crewsToTransition) {
+  Logger.log('=== applyFiscalYearTransition START ===');
+  Logger.log('Old FY: ' + oldFY + ', New FY: ' + newFY);
+  Logger.log('Crews to transition: ' + crewsToTransition.join(', '));
+
+  if (!oldFY || !newFY || !crewsToTransition || crewsToTransition.length === 0) {
+    return { success: false, message: 'Invalid parameters' };
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+
+  if (!employeesSheet) {
+    return { success: false, message: 'Employees sheet not found' };
+  }
+
+  var data = employeesSheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Find job number column
+  var jobNumCol = -1;
+  var nameCol = 0;
+
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'job number') jobNumCol = h;
+  }
+
+  if (jobNumCol === -1) {
+    return { success: false, message: 'Job Number column not found' };
+  }
+
+  // Build set of base job numbers to transition for faster lookup
+  var transitionSet = {};
+  for (var c = 0; c < crewsToTransition.length; c++) {
+    transitionSet[crewsToTransition[c]] = true;
+  }
+
+  var updatedCount = 0;
+  var updatedEmployees = [];
+  var timezone = ss.getSpreadsheetTimeZone();
+  var todayStr = Utilities.formatDate(new Date(), timezone, 'MM/dd/yyyy');
+
+  // Process each employee
+  for (var i = 1; i < data.length; i++) {
+    var jobNum = String(data[i][jobNumCol] || '').trim();
+    var empName = String(data[i][nameCol] || '').trim();
+
+    if (!jobNum) continue;
+
+    // Extract base crew number
+    var baseJobNum = jobNum.split('.')[0];
+
+    // Check if this crew should transition
+    if (!transitionSet[baseJobNum]) continue;
+
+    // Replace old FY suffix with new one
+    // e.g., "013-26.1" -> "013-27.1"
+    var newJobNum = jobNum.replace('-' + oldFY, '-' + newFY);
+
+    if (newJobNum !== jobNum) {
+      // Update the cell
+      employeesSheet.getRange(i + 1, jobNumCol + 1).setValue(newJobNum);
+      updatedCount++;
+      updatedEmployees.push({
+        name: empName,
+        oldJobNum: jobNum,
+        newJobNum: newJobNum
+      });
+    }
+  }
+
+  // Log to Employee History
+  var historySheet = ss.getSheetByName('Employee History');
+  if (historySheet && updatedEmployees.length > 0) {
+    for (var e = 0; e < updatedEmployees.length; e++) {
+      var emp = updatedEmployees[e];
+      var historyRow = [
+        todayStr,                                // Date
+        emp.name,                                // Employee Name
+        'FISCAL_YEAR_TRANSITION',                // Event Type
+        '',                                      // Location (unchanged)
+        emp.newJobNum,                           // Job Number (new)
+        '',                                      // Hire Date
+        '',                                      // Last Day
+        '',                                      // Last Day Reason
+        '',                                      // Rehire Date
+        'Fiscal Year Transition: ' + emp.oldJobNum + ' → ' + emp.newJobNum,  // Notes
+        '',                                      // Phone Number
+        '',                                      // Email Address
+        '',                                      // Glove Size
+        ''                                       // Sleeve Size
+      ];
+      historySheet.appendRow(historyRow);
+    }
+  }
+
+  // Also update Training Tracking if it exists
+  var trainingSheet = ss.getSheetByName('Training Tracking');
+  var trainingUpdated = 0;
+  if (trainingSheet && trainingSheet.getLastRow() > 2) {
+    var trainingData = trainingSheet.getDataRange().getValues();
+    var trainingCrewCol = 2; // Column C = Crew #
+
+    for (var t = 2; t < trainingData.length; t++) {
+      var trainCrew = String(trainingData[t][trainingCrewCol] || '').trim();
+      if (transitionSet[trainCrew]) {
+        var newTrainCrew = trainCrew.replace('-' + oldFY, '-' + newFY);
+        if (newTrainCrew !== trainCrew) {
+          trainingSheet.getRange(t + 1, trainingCrewCol + 1).setValue(newTrainCrew);
+          trainingUpdated++;
+        }
+      }
+    }
+  }
+
+  Logger.log('=== applyFiscalYearTransition END ===');
+  Logger.log('Updated ' + updatedCount + ' employees, ' + trainingUpdated + ' training rows');
+
+  logEvent('Fiscal Year Transition: -' + oldFY + ' to -' + newFY + ', ' + updatedCount + ' employees updated');
+
+  var message = '✅ Fiscal Year Transition Complete!\n\n';
+  message += '📝 Updated ' + updatedCount + ' employee job number(s)\n';
+  message += '📋 Updated ' + trainingUpdated + ' training tracking row(s)\n';
+  message += '📋 Logged ' + updatedEmployees.length + ' history entries';
+
+  return { success: true, message: message };
 }
 
