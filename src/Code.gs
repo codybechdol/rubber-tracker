@@ -488,7 +488,20 @@ function saveScheduleTaskDateChanges(changes) {
 
     var task = tasks[taskIndex];
 
-    // Update based on source
+    // Phase 3: Update Task Metadata first (single source of truth)
+    if (task.source && task.rowIndex) {
+      var taskKey = task.source + '_' + task.rowIndex;
+      var metadataUpdates = {};
+      if (newDate) metadataUpdates.ScheduledDate = newDate;
+      if (startTime !== undefined) metadataUpdates.StartTime = startTime;
+      if (endTime !== undefined) metadataUpdates.EndTime = endTime;
+      if (Object.keys(metadataUpdates).length > 0) {
+        updateTaskMetadata(taskKey, metadataUpdates);
+        Logger.log('Updated Task Metadata for: ' + taskKey);
+      }
+    }
+
+    // Update based on source (legacy support for source sheets)
     if (task.source === 'Manual Tasks') {
       var manualSheet = ss.getSheetByName('Manual Tasks');
       if (manualSheet && task.rowIndex) {
@@ -1222,6 +1235,18 @@ function markScheduleTaskComplete(taskIndexOrTask) {
   if (!task.rowIndex) {
     Logger.log('ERROR: No rowIndex provided for task');
     throw new Error('Task rowIndex is required');
+  }
+
+  // Phase 3: Update Task Metadata first (single source of truth)
+  if (source && task.rowIndex) {
+    var taskKey = source + '_' + task.rowIndex;
+    try {
+      markTaskComplete(taskKey, { syncToSource: false }); // We'll update source below
+      Logger.log('Updated Task Metadata for: ' + taskKey);
+    } catch (metaErr) {
+      Logger.log('Warning: Could not update Task Metadata: ' + metaErr);
+      // Continue with source update
+    }
   }
 
   var updated = false;
@@ -6815,6 +6840,297 @@ function getTasksWithMetadata() {
     Logger.log('getTasksWithMetadata: Stack: ' + e.stack);
     throw e;
   }
+}
+
+/**
+ * Updates task metadata for a specific task.
+ * Phase 3: Task State Updates
+ *
+ * @param {string} taskKey - The task key in format "SourceSheet_SourceRow" OR the TaskID
+ * @param {Object} updates - Object with fields to update (e.g., {status: 'Complete', completedDate: new Date()})
+ * @return {Object} Result with success status and updated task
+ */
+function updateTaskMetadata(taskKey, updates) {
+  Logger.log('=== updateTaskMetadata START ===');
+  Logger.log('taskKey: ' + taskKey);
+  Logger.log('updates: ' + JSON.stringify(updates));
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var metadataSheet = ss.getSheetByName('Task Metadata');
+
+  if (!metadataSheet) {
+    return { success: false, error: 'Task Metadata sheet not found' };
+  }
+
+  var data = metadataSheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Build column index map
+  var colMap = {};
+  for (var h = 0; h < headers.length; h++) {
+    colMap[headers[h]] = h;
+  }
+
+  // Find the row to update
+  var targetRow = -1;
+  var taskIdCol = colMap['TaskID'];
+  var sourceSheetCol = colMap['SourceSheet'];
+  var sourceRowCol = colMap['SourceRow'];
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+
+    // Match by TaskID
+    if (row[taskIdCol] === taskKey) {
+      targetRow = i + 1; // 1-based row number
+      break;
+    }
+
+    // Match by SourceSheet_SourceRow key
+    var rowKey = row[sourceSheetCol] + '_' + row[sourceRowCol];
+    if (rowKey === taskKey) {
+      targetRow = i + 1;
+      break;
+    }
+  }
+
+  if (targetRow === -1) {
+    Logger.log('updateTaskMetadata: Task not found for key: ' + taskKey);
+    return { success: false, error: 'Task not found: ' + taskKey };
+  }
+
+  Logger.log('updateTaskMetadata: Found task at row ' + targetRow);
+
+  // Apply updates
+  var updatedFields = [];
+  for (var field in updates) {
+    if (updates.hasOwnProperty(field) && colMap.hasOwnProperty(field)) {
+      var colIndex = colMap[field] + 1; // 1-based column
+      var value = updates[field];
+
+      // Format dates properly
+      if (value instanceof Date) {
+        value = Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      }
+
+      metadataSheet.getRange(targetRow, colIndex).setValue(value);
+      updatedFields.push(field);
+      Logger.log('updateTaskMetadata: Set ' + field + ' = ' + value);
+    }
+  }
+
+  // Always update LastModified
+  if (colMap['LastModified'] !== undefined) {
+    var now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+    metadataSheet.getRange(targetRow, colMap['LastModified'] + 1).setValue(now);
+    updatedFields.push('LastModified');
+  }
+
+  Logger.log('updateTaskMetadata: Updated fields: ' + updatedFields.join(', '));
+  Logger.log('=== updateTaskMetadata END ===');
+
+  return {
+    success: true,
+    taskKey: taskKey,
+    row: targetRow,
+    updatedFields: updatedFields
+  };
+}
+
+/**
+ * Marks a task as complete in Task Metadata.
+ * Phase 3: Task State Updates
+ *
+ * @param {string} taskKey - The task key in format "SourceSheet_SourceRow"
+ * @param {Object} options - Optional settings (e.g., {syncToSource: true})
+ * @return {Object} Result with success status
+ */
+function markTaskComplete(taskKey, options) {
+  options = options || {};
+
+  var result = updateTaskMetadata(taskKey, {
+    Status: 'Complete',
+    CompletedDate: new Date()
+  });
+
+  if (result.success && options.syncToSource) {
+    // Optionally sync completion to source sheet
+    syncTaskCompletionToSource(taskKey);
+  }
+
+  return result;
+}
+
+/**
+ * Records that a notification was sent for a task.
+ * Phase 3: Task State Updates
+ *
+ * @param {string} taskKey - The task key
+ * @param {string} notificationType - Type of notification ('sms', 'email', 'schedule')
+ * @return {Object} Result with success status
+ */
+function recordTaskNotification(taskKey, notificationType) {
+  var updates = {
+    NotifiedDate: new Date()
+  };
+
+  // If scheduling a class, also record that
+  if (notificationType === 'schedule') {
+    updates.ScheduledClassDate = new Date();
+  }
+
+  return updateTaskMetadata(taskKey, updates);
+}
+
+/**
+ * Updates the scheduled date/time for a task.
+ * Phase 3: Task State Updates
+ *
+ * @param {string} taskKey - The task key
+ * @param {string} scheduledDate - Date in YYYY-MM-DD format
+ * @param {string} startTime - Optional start time in HH:MM format
+ * @param {string} endTime - Optional end time in HH:MM format
+ * @return {Object} Result with success status
+ */
+function scheduleTask(taskKey, scheduledDate, startTime, endTime) {
+  var updates = {
+    ScheduledDate: scheduledDate,
+    Status: 'Scheduled'
+  };
+
+  if (startTime) updates.StartTime = startTime;
+  if (endTime) updates.EndTime = endTime;
+
+  return updateTaskMetadata(taskKey, updates);
+}
+
+/**
+ * Marks a task as declined (employee declined training/class).
+ * Phase 3: Task State Updates
+ *
+ * @param {string} taskKey - The task key
+ * @param {string} reason - Optional reason for decline
+ * @return {Object} Result with success status
+ */
+function markTaskDeclined(taskKey, reason) {
+  var updates = {
+    IsDeclined: true,
+    Status: 'Declined'
+  };
+
+  if (reason) {
+    updates.Notes = 'Declined: ' + reason;
+  }
+
+  return updateTaskMetadata(taskKey, updates);
+}
+
+/**
+ * Marks a task as registered (employee registered for class).
+ * Phase 3: Task State Updates
+ *
+ * @param {string} taskKey - The task key
+ * @param {string} classDate - The class date in YYYY-MM-DD format
+ * @param {string} classType - Type of class (e.g., 'CPR', 'First Aid')
+ * @return {Object} Result with success status
+ */
+function markTaskRegistered(taskKey, classDate, classType) {
+  var updates = {
+    IsRegistered: true,
+    ScheduledClassDate: classDate,
+    Status: 'Registered'
+  };
+
+  if (classType) {
+    updates.ClassType = classType;
+  }
+
+  return updateTaskMetadata(taskKey, updates);
+}
+
+/**
+ * Syncs task completion status to the source sheet.
+ * Called after marking a task complete in metadata.
+ *
+ * @param {string} taskKey - The task key in format "SourceSheet_SourceRow"
+ */
+function syncTaskCompletionToSource(taskKey) {
+  Logger.log('syncTaskCompletionToSource: ' + taskKey);
+
+  var parts = taskKey.split('_');
+  if (parts.length < 2) {
+    Logger.log('syncTaskCompletionToSource: Invalid key format');
+    return;
+  }
+
+  var sourceSheetName = parts[0];
+  var sourceRow = parseInt(parts[1], 10);
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sourceSheet = ss.getSheetByName(sourceSheetName);
+
+  if (!sourceSheet) {
+    Logger.log('syncTaskCompletionToSource: Source sheet not found: ' + sourceSheetName);
+    return;
+  }
+
+  // Update based on sheet type
+  if (sourceSheetName === 'Training Tracking') {
+    // Find Status column and update
+    var headers = sourceSheet.getRange(1, 1, 1, sourceSheet.getLastColumn()).getValues()[0];
+    for (var h = 0; h < headers.length; h++) {
+      if (String(headers[h]).toLowerCase() === 'status') {
+        sourceSheet.getRange(sourceRow, h + 1).setValue('Complete');
+        Logger.log('syncTaskCompletionToSource: Updated Training Tracking row ' + sourceRow);
+        break;
+      }
+    }
+  } else if (sourceSheetName === 'Glove Swaps' || sourceSheetName === 'Sleeve Swaps') {
+    // For swaps, the "Date Changed" column indicates completion
+    var headers = sourceSheet.getRange(1, 1, 1, sourceSheet.getLastColumn()).getValues()[0];
+    for (var h = 0; h < headers.length; h++) {
+      if (String(headers[h]).toLowerCase().indexOf('date changed') !== -1) {
+        sourceSheet.getRange(sourceRow, h + 1).setValue(new Date());
+        Logger.log('syncTaskCompletionToSource: Updated ' + sourceSheetName + ' row ' + sourceRow);
+        break;
+      }
+    }
+  }
+  // Note: Expiring Certs don't have a "complete" status in source - they're handled by updating the cert date
+}
+
+/**
+ * Batch update multiple tasks at once.
+ * Phase 3: Task State Updates
+ *
+ * @param {Array} taskUpdates - Array of {taskKey: string, updates: Object}
+ * @return {Object} Result with success counts
+ */
+function batchUpdateTaskMetadata(taskUpdates) {
+  Logger.log('batchUpdateTaskMetadata: Processing ' + taskUpdates.length + ' updates');
+
+  var successCount = 0;
+  var failCount = 0;
+  var results = [];
+
+  for (var i = 0; i < taskUpdates.length; i++) {
+    var update = taskUpdates[i];
+    var result = updateTaskMetadata(update.taskKey, update.updates);
+
+    if (result.success) {
+      successCount++;
+    } else {
+      failCount++;
+    }
+    results.push(result);
+  }
+
+  return {
+    success: failCount === 0,
+    successCount: successCount,
+    failCount: failCount,
+    results: results
+  };
 }
 
 function buildSheets() {

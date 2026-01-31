@@ -1,13 +1,13 @@
-# Phase 2 Progress - January 31, 2026
+# Phase 2 & 3 Progress - January 31, 2026
 
-## Status: ✅ READY FOR TESTING
+## Status: ✅ PHASE 2 & 3 COMPLETE - READY FOR TESTING
 
 ## Summary
-Successfully refactored `getScheduleTasks()` in Code.gs to use Task Metadata as the single source of truth.
+Successfully refactored `getScheduleTasks()` in Code.gs to use Task Metadata as the single source of truth, and implemented all Phase 3 task state update functions.
 
 ## Changes Made
 
-### Code.gs - getScheduleTasks() Refactoring
+### Phase 2: Code.gs - getScheduleTasks() Refactoring
 
 **Before (Old Architecture):**
 - Read from To Do List sheet as primary source
@@ -19,6 +19,22 @@ Successfully refactored `getScheduleTasks()` in Code.gs to use Task Metadata as 
 - Loads Manual Tasks for My Checklist section (~70 lines)
 - Sorts and returns tasks
 - Total: ~150 lines (62% reduction)
+
+### Phase 3: Task State Update Functions
+
+**New functions added:**
+1. `updateTaskMetadata(taskKey, updates)` - Core function to update any metadata field
+2. `markTaskComplete(taskKey, options)` - Marks task complete with optional source sync
+3. `recordTaskNotification(taskKey, notificationType)` - Records SMS/email/schedule notifications
+4. `scheduleTask(taskKey, scheduledDate, startTime, endTime)` - Sets scheduled date/time
+5. `markTaskDeclined(taskKey, reason)` - Marks task as declined
+6. `markTaskRegistered(taskKey, classDate, classType)` - Marks task as registered for class
+7. `syncTaskCompletionToSource(taskKey)` - Syncs completion to source sheet
+8. `batchUpdateTaskMetadata(taskUpdates)` - Batch update multiple tasks
+
+**Updated existing functions:**
+- `saveScheduleTaskDateChanges()` - Now writes to Task Metadata first
+- `markScheduleTaskComplete()` - Now updates Task Metadata first
 
 ### Key Changes:
 1. ✅ **Removed dual-path logic** - No more To Do List fallback
