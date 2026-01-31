@@ -231,227 +231,32 @@ function getEmployeePhoneMap() {
 
 /**
  * Gets all schedule tasks for the To Do Schedule dialog.
- * Pulls from To Do List sheet (if generated), Manual Tasks, Training Tracking,
- * Crew Visit Config, Expiring Certs, and pending swaps.
- * Auto-generates Smart Schedule if To Do List is empty.
+ * **Phase 2 Implementation** - Reads directly from source sheets via Task Metadata.
+ * No longer uses deprecated To Do List sheet.
  *
  * @return {Array} Array of task objects for display
  */
 function getScheduleTasks() {
   try {
-    Logger.log('=== getScheduleTasks START ===');
+    Logger.log('=== getScheduleTasks START (Phase 2 - Task Metadata) ===');
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var tasks = [];
 
-    // Load employee phone numbers for SMS functionality
-    var employeePhones = getEmployeePhoneMapForTasks(ss);
-    Logger.log('Loaded ' + Object.keys(employeePhones).length + ' employee phone numbers');
+    // Get tasks with metadata - this is our new single source of truth
+    var metadataResult = getTasksWithMetadata();
+    Logger.log('getTasksWithMetadata returned ' + metadataResult.totalTasks + ' tasks');
 
-    // FIRST: Check if we have a generated To Do List sheet (from Smart Schedule)
-    var todoSheet = ss.getSheetByName('To Do List');
-    var todoLastRow = todoSheet ? todoSheet.getLastRow() : 0;
-    Logger.log('To Do List sheet exists: ' + (todoSheet !== null) + ', lastRow: ' + todoLastRow);
+    // The tasks from getTasksWithMetadata already have all the fields we need
+    var tasks = metadataResult.tasks || [];
+    Logger.log('Loaded ' + tasks.length + ' tasks from Task Metadata');
 
-    // If To Do List is empty, read directly from source sheets using collectAndGroupTasks
-    if (!todoSheet || todoLastRow <= 13) {
-    Logger.log('To Do List is empty - reading directly from source sheets...');
-    try {
-      var tasksByLocation = collectAndGroupTasks(ss);
-      Logger.log('collectAndGroupTasks returned ' + Object.keys(tasksByLocation).length + ' locations');
-
-      // Convert to the format expected by ToDoSchedule.html
-      var taskId = 1;
-      for (var location in tasksByLocation) {
-        var locationTasks = tasksByLocation[location];
-        for (var t = 0; t < locationTasks.length; t++) {
-          var srcTask = locationTasks[t];
-
-          // Get phone number for this employee
-          var empNameLower = (srcTask.employee || '').toLowerCase().trim();
-          var phoneNumber = employeePhones[empNameLower] || '';
-
-          // Determine source based on task type
-          var taskSource = srcTask.source || 'To Do List';
-
-          tasks.push({
-            id: 'direct-' + taskId++,
-            source: taskSource,
-            location: location,
-            priority: srcTask.priority || 'Medium',
-            taskType: srcTask.taskType || 'Task',
-            itemType: srcTask.itemType || '',
-            currentItem: srcTask.currentItem || '',
-            pickListItem: srcTask.pickListItem || '',
-            employee: srcTask.employee || '',
-            phoneNumber: phoneNumber,
-            scheduledDate: srcTask.scheduledDate ? formatDateForInput(srcTask.scheduledDate) : '',
-            dueDate: srcTask.dueDate ? formatDateForInput(srcTask.dueDate) : '',
-            startTime: srcTask.startTime || '',
-            endTime: srcTask.endTime || '',
-            estimatedTime: srcTask.estimatedTime || 1,
-            startLocation: srcTask.startLocation || 'Helena',
-            endLocation: srcTask.endLocation || location,
-            notes: srcTask.notes || '',
-            status: srcTask.status || 'Pending',
-            rowIndex: srcTask.rowIndex || taskId
-          });
-        }
-      }
-      Logger.log('Converted ' + tasks.length + ' tasks from direct source reading');
-    } catch (e) {
-      Logger.log('Error reading from source sheets: ' + e.toString());
-    }
-  } else if (todoSheet && todoLastRow > 13) {
-    Logger.log('Found To Do List sheet, reading tasks from there');
-    try {
-      var todoData = todoSheet.getDataRange().getValues();
-      Logger.log('To Do List data rows: ' + todoData.length);
-
-      // Read header row to find column indexes dynamically
-      var headerRow = todoData[12] || []; // Row 13 (index 12) contains headers
-      var colIndex = {};
-      for (var h = 0; h < headerRow.length; h++) {
-        var header = String(headerRow[h]).toLowerCase().trim();
-        if (header.indexOf('location visit') !== -1) colIndex.locationVisit = h;
-        if (header === 'priority') colIndex.priority = h;
-        if (header.indexOf('task type') !== -1) colIndex.taskType = h;
-        if (header.indexOf('employee') !== -1 || header.indexOf('crew') !== -1) colIndex.employee = h;
-        if (header === 'location') colIndex.location = h;
-        if (header.indexOf('current item') !== -1) colIndex.currentItem = h;
-        if (header.indexOf('pick list') !== -1) colIndex.pickListItem = h;
-        if (header.indexOf('item type') !== -1) colIndex.itemType = h;
-        if (header === 'size') colIndex.size = h;
-        if (header.indexOf('due date') !== -1) colIndex.dueDate = h;
-        if (header.indexOf('days') !== -1) colIndex.daysTillDue = h;
-        if (header === 'status') colIndex.status = h;
-        if (header.indexOf('scheduled date') !== -1) colIndex.scheduledDate = h;
-        if (header.indexOf('estimated time') !== -1) colIndex.estimatedTime = h;
-        if (header.indexOf('start location') !== -1) colIndex.startLocation = h;
-        if (header.indexOf('end location') !== -1) colIndex.endLocation = h;
-      }
-      Logger.log('To Do List column indexes: ' + JSON.stringify(colIndex));
-
-      // Data starts at row 14 (index 13) after calendar section and headers
-      for (var t = 13; t < todoData.length; t++) {
-        var row = todoData[t];
-        var locationVisitVal = colIndex.locationVisit !== undefined ? row[colIndex.locationVisit] : row[0];
-
-        if (locationVisitVal && String(locationVisitVal).trim()) {
-          var locationVisit = String(locationVisitVal).replace(/📍\s*/g, '').trim();
-          if (!locationVisit || locationVisit.indexOf('No tasks') !== -1) continue;
-
-          var rawTaskType = colIndex.taskType !== undefined ? (row[colIndex.taskType] || 'Task') : (row[2] || 'Task');
-          var itemType = colIndex.itemType !== undefined ? (row[colIndex.itemType] || '') : (row[7] || '');
-          var currentItem = colIndex.currentItem !== undefined ? (row[colIndex.currentItem] || '') : (row[5] || '');
-          var pickListItem = colIndex.pickListItem !== undefined ? (row[colIndex.pickListItem] || '') : (row[6] || '');
-          var employee = colIndex.employee !== undefined ? (row[colIndex.employee] || '') : (row[3] || '');
-          var scheduledDate = colIndex.scheduledDate !== undefined ? row[colIndex.scheduledDate] : row[12];
-          var dueDate = colIndex.dueDate !== undefined ? row[colIndex.dueDate] : row[9]; // Due Date column
-          var estimatedTime = colIndex.estimatedTime !== undefined ? (row[colIndex.estimatedTime] || 1) : (row[13] || 1);
-          var startLoc = colIndex.startLocation !== undefined ? (row[colIndex.startLocation] || 'Helena') : (row[14] || 'Helena');
-          var endLoc = colIndex.endLocation !== undefined ? (row[colIndex.endLocation] || locationVisit) : (row[15] || locationVisit);
-          var status = colIndex.status !== undefined ? (row[colIndex.status] || 'Pending') : (row[11] || 'Pending');
-          var priority = colIndex.priority !== undefined ? (row[colIndex.priority] || 'Medium') : (row[1] || 'Medium');
-
-          // Determine source based on task type for proper filtering
-          var taskSource = 'To Do List';
-          var taskTypeLower = String(rawTaskType).toLowerCase();
-          if (taskTypeLower.indexOf('swap') !== -1) {
-            taskSource = String(itemType).toLowerCase().indexOf('sleeve') !== -1 ? 'Sleeve Swaps' : 'Glove Swaps';
-          } else if (taskTypeLower.indexOf('training') !== -1) {
-            taskSource = 'Training Tracking';
-          } else if (taskTypeLower.indexOf('cert') !== -1 || taskTypeLower.indexOf('expir') !== -1 || taskTypeLower.indexOf('renew') !== -1) {
-            taskSource = 'Expiring Certs';
-          } else if (taskTypeLower.indexOf('reclaim') !== -1) {
-            taskSource = 'Reclaims';
-          }
-
-          // Get phone number for this employee - try multiple name matching strategies
-          var empNameRaw = String(employee);
-          var empNameLower = empNameRaw.toLowerCase().trim().replace(/\s+/g, ' '); // Normalize whitespace
-          var phoneNumber = employeePhones[empNameLower] || '';
-
-          // Debug: Log first few cert task lookups
-          if (taskSource === 'Expiring Certs' && tasks.length < 10) {
-            Logger.log('Phone lookup for cert task: employee="' + empNameRaw + '", normalized="' + empNameLower + '", found=' + (phoneNumber ? 'YES' : 'NO'));
-          }
-
-          // If no match, try removing extra info in parentheses (e.g., "John Smith (AP 3)" -> "John Smith")
-          if (!phoneNumber && empNameLower.indexOf('(') !== -1) {
-            var cleanName = empNameLower.replace(/\s*\([^)]*\)\s*/g, '').trim();
-            phoneNumber = employeePhones[cleanName] || '';
-            if (phoneNumber) {
-              Logger.log('Phone found after removing parentheses: "' + cleanName + '"');
-            }
-          }
-
-          // If still no match, try partial matching on first and last name
-          if (!phoneNumber) {
-            var nameParts = empNameLower.split(/\s+/);
-            if (nameParts.length >= 2) {
-              var firstName = nameParts[0];
-              var lastName = nameParts[nameParts.length - 1];
-              for (var empKey in employeePhones) {
-                if (empKey.indexOf(firstName) !== -1 && empKey.indexOf(lastName) !== -1) {
-                  phoneNumber = employeePhones[empKey];
-                  Logger.log('Phone found via partial match: employee="' + empNameLower + '" matched key="' + empKey + '"');
-                  break;
-                }
-              }
-            }
-          }
-
-          // Debug logging for failed lookups on cert tasks
-          if (!phoneNumber && taskSource === 'Expiring Certs') {
-            Logger.log('Phone lookup FAILED for cert task: employee="' + empNameRaw + '" (normalized: "' + empNameLower + '")');
-            // Log some sample keys from phoneMap for comparison
-            var sampleKeys = Object.keys(employeePhones).slice(0, 5);
-            Logger.log('Sample phone map keys: ' + JSON.stringify(sampleKeys));
-          }
-
-          // NOTE: We NO LONGER skip cert tasks without scheduled date
-          // They need to be in the task list for My Checklist to have phone numbers
-          // The calendar/task list views will filter them out as needed
-
-          tasks.push({
-            id: 'todolist-' + t,
-            source: taskSource,
-            location: locationVisit || (colIndex.location !== undefined ? row[colIndex.location] : row[4]) || 'Unknown',
-            priority: String(priority),
-            taskType: String(rawTaskType),
-            itemType: String(itemType),
-            currentItem: String(currentItem),
-            pickListItem: String(pickListItem),
-            employee: String(employee),
-            phoneNumber: phoneNumber,
-            scheduledDate: formatDateForInput(scheduledDate),
-            dueDate: formatDateForInput(dueDate), // Cert expiration / due date
-            startTime: '',
-            endTime: '',
-            estimatedTime: Number(estimatedTime) || 1,
-            startLocation: String(startLoc),
-            endLocation: String(endLoc),
-            notes: 'Employee: ' + String(employee) + ' | Item: ' + String(currentItem) + (pickListItem ? ' → ' + String(pickListItem) : ''),
-            status: String(status),
-            rowIndex: t + 1
-          });
-        }
-      }
-    } catch (e) {
-      Logger.log('Error reading To Do List: ' + e.message);
-    }
-
-    Logger.log('Loaded ' + tasks.length + ' tasks from To Do List sheet');
-  }
-
-  // Load Manual Tasks ONLY for My Checklist section
-  // These should NOT appear in Calendar or Task List (they're personal checklist items)
-  // The My Checklist tab in ToDoSchedule.html will load these separately
-  var manualSheet = ss.getSheetByName('Manual Tasks');
-  if (manualSheet && manualSheet.getLastRow() > 1) {
-    Logger.log('Reading Manual Tasks for My Checklist...');
-    var manualData = manualSheet.getDataRange().getValues();
-    var manualHeaders = manualData[0];
+    // Load Manual Tasks ONLY for My Checklist section
+    // These should NOT appear in Calendar or Task List (they're personal checklist items)
+    // The My Checklist tab in ToDoSchedule.html will load these separately
+    var manualSheet = ss.getSheetByName('Manual Tasks');
+    if (manualSheet && manualSheet.getLastRow() > 1) {
+      Logger.log('Reading Manual Tasks for My Checklist...');
+      var manualData = manualSheet.getDataRange().getValues();
+      var manualHeaders = manualData[0];
 
     // Find columns dynamically based on headers (supports both old and new structures)
     var colIndices = {};
@@ -549,183 +354,6 @@ function getScheduleTasks() {
   // Manual Tasks are included in the tasks array but will be filtered out
   // by Calendar/Task List views - they only appear in My Checklist tab
 
-  // If we already have tasks from To Do List (plus manual tasks for checklist), return now
-  if (tasks.length > 0) {
-    Logger.log('getScheduleTasks: Found ' + tasks.length + ' total tasks');
-    Logger.log('=== getScheduleTasks END ===');
-    return tasks;
-  }
-
-  // FALLBACK: Build tasks from other source sheets if nothing loaded yet
-  Logger.log('No To Do List data, building from other source sheets');
-
-  // 2. Get Training Tracking tasks (incomplete training)
-  var trainingSheet = ss.getSheetByName('Training Tracking');
-  if (trainingSheet && trainingSheet.getLastRow() > 2) {
-    var trainingData = trainingSheet.getDataRange().getValues();
-    for (var t = 2; t < trainingData.length; t++) {
-      var tRow = trainingData[t];
-      var month = String(tRow[0]).trim();
-      var topic = String(tRow[1]).trim();
-      var crew = String(tRow[2]).trim();
-      var crewLead = String(tRow[3]).trim();
-      var location = String(tRow[4]).trim();
-      var status = String(tRow[9]).trim();
-
-      // Add if incomplete
-      if (month && crew && status !== 'Complete' && status !== 'N/A') {
-        tasks.push({
-          id: 'training-' + t,
-          source: 'Training Tracking',
-          location: location || 'TBD',
-          priority: status === 'Overdue' ? 'High' : 'Medium',
-          taskType: 'Training: ' + topic,
-          scheduledDate: '',
-          startTime: '',
-          endTime: '',
-          estimatedTime: 1,
-          startLocation: 'Helena',
-          endLocation: location || 'TBD',
-          notes: 'Crew: ' + crew + ' | Lead: ' + crewLead + ' | Month: ' + month,
-          status: status || 'Pending',
-          rowIndex: t + 1
-        });
-      }
-    }
-  }
-
-  // 3. Get Crew Visit Config (scheduled visits)
-  var crewVisitSheet = ss.getSheetByName('Crew Visit Config');
-  if (crewVisitSheet && crewVisitSheet.getLastRow() > 1) {
-    var visitData = crewVisitSheet.getDataRange().getValues();
-    var headers = visitData[0];
-
-    // Find column indexes
-    var cols = {};
-    for (var h = 0; h < headers.length; h++) {
-      var header = String(headers[h]).toLowerCase().trim();
-      if (header.indexOf('job') !== -1) cols.job = h;
-      if (header.indexOf('location') !== -1) cols.location = h;
-      if (header.indexOf('lead') !== -1) cols.lead = h;
-      if (header.indexOf('date') !== -1 && header.indexOf('next') !== -1) cols.date = h;
-      if (header.indexOf('frequency') !== -1) cols.freq = h;
-    }
-
-    for (var v = 1; v < visitData.length; v++) {
-      var vRow = visitData[v];
-      var visitLocation = vRow[cols.location] || '';
-      var nextVisit = vRow[cols.date];
-
-      if (visitLocation && nextVisit) {
-        tasks.push({
-          id: 'crewvisit-' + v,
-          source: 'Crew Visit Config',
-          location: visitLocation,
-          priority: 'Medium',
-          taskType: 'Crew Visit',
-          scheduledDate: formatDateForInput(nextVisit),
-          startTime: '07:00',
-          endTime: '',
-          estimatedTime: 2,
-          startLocation: 'Helena',
-          endLocation: visitLocation,
-          notes: 'Job: ' + (vRow[cols.job] || '') + ' | Lead: ' + (vRow[cols.lead] || ''),
-          status: 'Scheduled',
-          rowIndex: v + 1
-        });
-      }
-    }
-  }
-
-  // 4. Get Expiring Certs (excluding previous/terminated employees)
-  var expiringSheet = ss.getSheetByName('Expiring Certs');
-  if (expiringSheet && expiringSheet.getLastRow() > 1) {
-    // Build set of previous/terminated employee names to exclude
-    var previousEmployeeNames = {};
-
-    // Check Employee History for terminated employees
-    var employeeHistorySheet = ss.getSheetByName('Employee History');
-    if (employeeHistorySheet && employeeHistorySheet.getLastRow() > 2) {
-      var historyData = employeeHistorySheet.getRange(3, 1, employeeHistorySheet.getLastRow() - 2, 10).getValues();
-      for (var hi = 0; hi < historyData.length; hi++) {
-        var histEventType = (historyData[hi][2] || '').toString().trim().toLowerCase();
-        var histName = (historyData[hi][1] || '').toString().trim().toLowerCase();
-        if ((histEventType === 'terminated' || histEventType === 'previous employee') && histName) {
-          previousEmployeeNames[histName] = true;
-        }
-      }
-    }
-
-    // Also check Employees sheet for "Previous Employee" location
-    var employeesSheetCheck = ss.getSheetByName('Employees');
-    if (employeesSheetCheck && employeesSheetCheck.getLastRow() > 1) {
-      var empCheckData = employeesSheetCheck.getDataRange().getValues();
-      var empCheckHeaders = empCheckData[0];
-      var empCheckNameCol = -1;
-      var empCheckLocCol = -1;
-
-      for (var ech = 0; ech < empCheckHeaders.length; ech++) {
-        var echdr = String(empCheckHeaders[ech]).toLowerCase().trim();
-        if (echdr === 'name') empCheckNameCol = ech;
-        if (echdr === 'location') empCheckLocCol = ech;
-      }
-
-      if (empCheckNameCol !== -1 && empCheckLocCol !== -1) {
-        for (var eci = 1; eci < empCheckData.length; eci++) {
-          var ecName = (empCheckData[eci][empCheckNameCol] || '').toString().trim().toLowerCase();
-          var ecLoc = (empCheckData[eci][empCheckLocCol] || '').toString().trim().toLowerCase();
-          if (ecName && ecLoc === 'previous employee') {
-            previousEmployeeNames[ecName] = true;
-          }
-        }
-      }
-    }
-
-    var expiringData = expiringSheet.getDataRange().getValues();
-    for (var e = 1; e < expiringData.length; e++) {
-      var eRow = expiringData[e];
-      var itemNum = eRow[0];
-      var expDate = eRow[1];
-      var employee = eRow[2] || '';
-      var location = eRow[3] || 'Helena';
-
-      // Skip if employee is a previous/terminated employee
-      if (employee && previousEmployeeNames[employee.toLowerCase()]) {
-        Logger.log('getScheduleTasks: Skipping cert for previous employee: ' + employee);
-        continue;
-      }
-
-      if (itemNum && expDate) {
-        var daysUntil = Math.ceil((new Date(expDate) - new Date()) / (1000 * 60 * 60 * 24));
-        var priority = daysUntil <= 7 ? 'High' : daysUntil <= 30 ? 'Medium' : 'Low';
-
-        tasks.push({
-          id: 'expiring-' + e,
-          source: 'Expiring Certs',
-          location: location,
-          priority: priority,
-          taskType: 'Cert Expiring',
-          scheduledDate: formatDateForInput(expDate),
-          startTime: '',
-          endTime: '',
-          estimatedTime: 0.5,
-          startLocation: 'Helena',
-          endLocation: location,
-          notes: 'Item: ' + itemNum + ' | Employee: ' + employee + ' | Days: ' + daysUntil,
-          status: daysUntil < 0 ? 'Overdue' : 'Pending',
-          rowIndex: e + 1
-        });
-      }
-    }
-  }
-
-  // 5. Get pending swaps (picked but not delivered)
-  var gloveSwapSheet = ss.getSheetByName('Glove Swaps');
-  tasks = tasks.concat(getPendingSwapTasks(gloveSwapSheet, 'Glove'));
-
-  var sleeveSwapSheet = ss.getSheetByName('Sleeve Swaps');
-  tasks = tasks.concat(getPendingSwapTasks(sleeveSwapSheet, 'Sleeve'));
-
   // Sort by scheduled date, then priority
   tasks.sort(function(a, b) {
     // Priority order: High=1, Medium=2, Low=3
@@ -754,59 +382,16 @@ function getScheduleTasks() {
   }
 }
 
+
 /**
- * Helper: Get pending swap tasks from a swap sheet
+ * Helper: Get pending swap tasks from a swap sheet (LEGACY - kept for compatibility)
  */
 function getPendingSwapTasks(sheet, swapType) {
-  var tasks = [];
-  if (!sheet || sheet.getLastRow() < 2) return tasks;
-
-  var data = sheet.getDataRange().getValues();
-  var headers = data[0];
-
-  // Find column indexes
-  var cols = { employee: -1, location: -1, picked: -1, dateChanged: -1, dueDate: -1 };
-  for (var h = 0; h < headers.length; h++) {
-    var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'employee') cols.employee = h;
-    if (header === 'location') cols.location = h;
-    if (header === 'picked') cols.picked = h;
-    if (header.indexOf('date changed') !== -1) cols.dateChanged = h;
-    if (header.indexOf('change out') !== -1 || header.indexOf('due') !== -1) cols.dueDate = h;
-  }
-
-  for (var i = 1; i < data.length; i++) {
-    var row = data[i];
-    var employee = row[cols.employee];
-    var location = row[cols.location] || 'Helena';
-    var isPicked = row[cols.picked];
-    var dateChanged = row[cols.dateChanged];
-
-    // Only show picked items that haven't been delivered
-    if (employee && isPicked && !dateChanged) {
-      var dueDate = row[cols.dueDate];
-      var isOverdue = dueDate && new Date(dueDate) < new Date();
-
-      tasks.push({
-        id: swapType.toLowerCase() + 'swap-' + i,
-        source: swapType + ' Swaps',
-        location: location,
-        priority: isOverdue ? 'High' : 'Medium',
-        taskType: swapType + ' Swap',
-        scheduledDate: formatDateForInput(dueDate),
-        startTime: '',
-        endTime: '',
-        estimatedTime: 0.25,
-        startLocation: 'Helena',
-        endLocation: location,
-        notes: 'Employee: ' + employee + ' | Ready for delivery',
-        status: 'Ready to Deliver',
-        rowIndex: i + 1
-      });
-    }
-  }
-  return tasks;
+  // This function is no longer used since we get swap tasks from Task Metadata
+  // Keeping for backwards compatibility
+  return [];
 }
+
 
 /**
  * Helper: Format date for HTML date input (YYYY-MM-DD)

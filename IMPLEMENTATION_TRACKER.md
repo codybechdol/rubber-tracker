@@ -52,8 +52,8 @@
 
 #### Tasks:
 - [x] 2.1: Update `getScheduleTasks()` to call `getTasksWithMetadata()` ✅
-- [ ] 2.2: Remove dual-path logic (To Do List fallback)
-- [ ] 2.3: Update task object structure (add metadataRow reference)
+- [x] 2.2: Remove dual-path logic (To Do List fallback) ✅
+- [x] 2.3: Update task object structure (add metadataRow reference) ✅
 - [ ] 2.4: Test ToDoSchedule dialog loads correctly (NEXT - USER TESTING)
 - [ ] 2.5: Checkpoint: Verify dialog displays tasks
 
