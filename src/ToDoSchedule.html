@@ -1585,12 +1585,23 @@
       var oldDate = task.scheduledDate;
       task.scheduledDate = newDate;
 
+      // Build task key for server-side update
+      var taskKey = null;
+      if (task.source && task.rowIndex) {
+        taskKey = task.source + '_' + task.rowIndex;
+      }
+
       // Track the change for batch saving
       if (!pendingDateChanges[index]) {
-        pendingDateChanges[index] = { index: index, task: task };
+        pendingDateChanges[index] = {
+          index: index,
+          task: task,
+          taskKey: taskKey  // NEW: Include task key for reliable server-side lookup
+        };
       }
       pendingDateChanges[index].oldDate = oldDate;
       pendingDateChanges[index].newDate = newDate;
+      pendingDateChanges[index].taskKey = taskKey; // Update taskKey in case it changed
 
       // Mark input as changed
       if (inputElement) {
@@ -1615,12 +1626,23 @@
         task.endTime = newTime;
       }
 
+      // Build task key for server-side update
+      var taskKey = null;
+      if (task.source && task.rowIndex) {
+        taskKey = task.source + '_' + task.rowIndex;
+      }
+
       // Track the change for batch saving
       if (!pendingDateChanges[index]) {
-        pendingDateChanges[index] = { index: index, task: task };
+        pendingDateChanges[index] = {
+          index: index,
+          task: task,
+          taskKey: taskKey  // NEW: Include task key for reliable server-side lookup
+        };
       }
       pendingDateChanges[index].startTime = task.startTime;
       pendingDateChanges[index].endTime = task.endTime;
+      pendingDateChanges[index].taskKey = taskKey; // Update taskKey in case it changed
 
       // Mark input as changed
       if (inputElement) {
@@ -1776,13 +1798,24 @@
             task.endTime = newEnd;
           }
 
+          // Build task key
+          var taskKey = null;
+          if (task.source && task.rowIndex) {
+            taskKey = task.source + '_' + task.rowIndex;
+          }
+
           // Track for saving
           if (!pendingDateChanges[index]) {
-            pendingDateChanges[index] = { index: index, task: task };
+            pendingDateChanges[index] = {
+              index: index,
+              task: task,
+              taskKey: taskKey  // NEW: Include task key
+            };
           }
           pendingDateChanges[index].newDate = task.scheduledDate;
           pendingDateChanges[index].startTime = task.startTime;
           pendingDateChanges[index].endTime = task.endTime;
+          pendingDateChanges[index].taskKey = taskKey; // Update taskKey
 
           updatedCount++;
         }

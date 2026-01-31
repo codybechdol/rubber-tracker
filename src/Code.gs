@@ -486,93 +486,54 @@ function saveScheduleTaskDateChanges(changes) {
 
     if (taskIndex < 0 || taskIndex >= tasks.length) continue;
 
-    var task = tasks[taskIndex];
+      var task = tasks[taskIndex];
 
-    // Phase 3: Update Task Metadata first (single source of truth)
-    if (task.source && task.rowIndex) {
-      var taskKey = task.source + '_' + task.rowIndex;
-      var metadataUpdates = {};
-      if (newDate) metadataUpdates.ScheduledDate = newDate;
-      if (startTime !== undefined) metadataUpdates.StartTime = startTime;
-      if (endTime !== undefined) metadataUpdates.EndTime = endTime;
-      if (Object.keys(metadataUpdates).length > 0) {
-        updateTaskMetadata(taskKey, metadataUpdates);
-        Logger.log('Updated Task Metadata for: ' + taskKey);
-      }
-    }
+      // Try to update Task Metadata using task key
+      if (task.source && task.rowIndex) {
+        taskKey = task.source + '_' + task.rowIndex;
+        metadataUpdates = {};
+        if (newDate) metadataUpdates.ScheduledDate = newDate;
+        if (startTime !== undefined) metadataUpdates.StartTime = startTime;
+        if (endTime !== undefined) metadataUpdates.EndTime = endTime;
+        if (newDate) metadataUpdates.Status = 'Scheduled';
 
-    // Update based on source (legacy support for source sheets)
-    if (task.source === 'Manual Tasks') {
-      var manualSheet = ss.getSheetByName('Manual Tasks');
-      if (manualSheet && task.rowIndex) {
-        // Manual Tasks columns: A=Location, B=Priority, C=Task Type, D=Employee, E=Scheduled Date, F=Start Time, G=End Time
-        if (newDate) manualSheet.getRange(task.rowIndex, 5).setValue(newDate); // Column E = Scheduled Date
-        if (startTime !== undefined) manualSheet.getRange(task.rowIndex, 6).setValue(startTime); // Column F = Start Time
-        if (endTime !== undefined) manualSheet.getRange(task.rowIndex, 7).setValue(endTime); // Column G = End Time
-        updatedCount++;
-      }
-    } else if (task.source === 'Crew Visit Config') {
-      var crewSheet = ss.getSheetByName('Crew Visit Config');
-      if (crewSheet && task.rowIndex) {
-        var headers = crewSheet.getRange(1, 1, 1, crewSheet.getLastColumn()).getValues()[0];
-        for (var h = 0; h < headers.length; h++) {
-          var headerLower = String(headers[h]).toLowerCase();
-          if (newDate && headerLower.indexOf('next') !== -1 && headerLower.indexOf('date') !== -1) {
-            crewSheet.getRange(task.rowIndex, h + 1).setValue(newDate);
-          }
-          if (startTime !== undefined && headerLower.indexOf('start') !== -1 && headerLower.indexOf('time') !== -1) {
-            crewSheet.getRange(task.rowIndex, h + 1).setValue(startTime);
-          }
-          if (endTime !== undefined && headerLower.indexOf('end') !== -1 && headerLower.indexOf('time') !== -1) {
-            crewSheet.getRange(task.rowIndex, h + 1).setValue(endTime);
-          }
+        if (Object.keys(metadataUpdates).length > 0) {
+          updateTaskMetadata(taskKey, metadataUpdates);
+          Logger.log('Updated Task Metadata for: ' + taskKey);
         }
-        updatedCount++;
       }
-    } else if (task.source === 'Glove Swaps' || task.source === 'Sleeve Swaps' ||
-               task.source === 'Expiring Certs' || task.source === 'Reclaims' ||
-               task.source === 'To Do List' || task.source === 'Training Tracking') {
-      // Update To Do List sheet for tasks loaded from there
-      // These tasks all come from To Do List sheet regardless of original source type
-      var todoSheet = ss.getSheetByName('To Do List');
-      if (todoSheet && task.rowIndex) {
-        // Headers are in row 13 (index 12) after calendar section
-        var todoHeaders = todoSheet.getRange(13, 1, 1, todoSheet.getLastColumn()).getValues()[0];
-        Logger.log('To Do List headers: ' + JSON.stringify(todoHeaders));
 
-        for (var th = 0; th < todoHeaders.length; th++) {
-          var thLower = String(todoHeaders[th]).toLowerCase();
-          if (newDate && (thLower.indexOf('scheduled') !== -1 || thLower === 'date')) {
-            todoSheet.getRange(task.rowIndex, th + 1).setValue(newDate);
-            Logger.log('Updated scheduled date at row ' + task.rowIndex + ', col ' + (th + 1) + ' to ' + newDate);
-          }
-          if (startTime !== undefined && thLower.indexOf('start') !== -1 && thLower.indexOf('time') !== -1) {
-            todoSheet.getRange(task.rowIndex, th + 1).setValue(startTime);
-            Logger.log('Updated start time at row ' + task.rowIndex + ', col ' + (th + 1) + ' to ' + startTime);
-          }
-          if (endTime !== undefined && thLower.indexOf('end') !== -1 && thLower.indexOf('time') !== -1) {
-            todoSheet.getRange(task.rowIndex, th + 1).setValue(endTime);
-            Logger.log('Updated end time at row ' + task.rowIndex + ', col ' + (th + 1) + ' to ' + endTime);
-          }
+      // Update based on source (legacy support for source sheets)
+      if (task.source === 'Manual Tasks') {
+        var manualSheet = ss.getSheetByName('Manual Tasks');
+        if (manualSheet && task.rowIndex) {
+          // Manual Tasks columns: A=Location, B=Priority, C=Task Type, D=Employee, E=Scheduled Date, F=Start Time, G=End Time
+          if (newDate) manualSheet.getRange(task.rowIndex, 5).setValue(newDate); // Column E = Scheduled Date
+          if (startTime !== undefined) manualSheet.getRange(task.rowIndex, 6).setValue(startTime); // Column F = Start Time
+          if (endTime !== undefined) manualSheet.getRange(task.rowIndex, 7).setValue(endTime); // Column G = End Time
+          updatedCount++;
         }
-        updatedCount++;
-      }
-    } else if (task.source === 'Training Tracking Original') {
-      // Update Training Tracking sheet
-      var trainingSheet = ss.getSheetByName('Training Tracking');
-      if (trainingSheet && task.rowIndex) {
-        var trainingHeaders = trainingSheet.getRange(1, 1, 1, trainingSheet.getLastColumn()).getValues()[0];
-        for (var trh = 0; trh < trainingHeaders.length; trh++) {
-          var trhLower = String(trainingHeaders[trh]).toLowerCase();
-          if (startTime !== undefined && trhLower.indexOf('start') !== -1 && trhLower.indexOf('time') !== -1) {
-            trainingSheet.getRange(task.rowIndex, trh + 1).setValue(startTime);
+      } else if (task.source === 'Crew Visit Config') {
+        var crewSheet = ss.getSheetByName('Crew Visit Config');
+        if (crewSheet && task.rowIndex) {
+          var headers = crewSheet.getRange(1, 1, 1, crewSheet.getLastColumn()).getValues()[0];
+          for (var h = 0; h < headers.length; h++) {
+            var headerLower = String(headers[h]).toLowerCase();
+            if (newDate && headerLower.indexOf('next') !== -1 && headerLower.indexOf('date') !== -1) {
+              crewSheet.getRange(task.rowIndex, h + 1).setValue(newDate);
+            }
+            if (startTime !== undefined && headerLower.indexOf('start') !== -1 && headerLower.indexOf('time') !== -1) {
+              crewSheet.getRange(task.rowIndex, h + 1).setValue(startTime);
+            }
+            if (endTime !== undefined && headerLower.indexOf('end') !== -1 && headerLower.indexOf('time') !== -1) {
+              crewSheet.getRange(task.rowIndex, h + 1).setValue(endTime);
+            }
           }
-          if (endTime !== undefined && trhLower.indexOf('end') !== -1 && trhLower.indexOf('time') !== -1) {
-            trainingSheet.getRange(task.rowIndex, trh + 1).setValue(endTime);
-          }
+          updatedCount++;
         }
-        updatedCount++;
       }
+      // NOTE: No longer updating To Do List or Training Tracking sheets
+      // Task Metadata is the single source of truth for scheduling state
     }
   }
 
