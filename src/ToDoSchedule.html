@@ -961,9 +961,29 @@
           inputs.forEach(function(input) { input.classList.remove('changed'); });
           var timeInputs = document.querySelectorAll('.time-input.changed');
           timeInputs.forEach(function(input) { input.classList.remove('changed'); });
-          // Re-render calendar to reflect saved changes
-          renderCalendar();
-          showToast('✓ Saved ' + changes.length + ' change(s) successfully!');
+
+          // DON'T auto-reload to avoid timeout issues
+          // Instead, show success message with manual refresh option
+          showToast('✓ Saved ' + changes.length + ' change(s) successfully! Click Refresh to see updates.', 'success', 5000);
+
+          // Update the local task data without reloading from server
+          // This keeps the UI responsive while saving
+          changes.forEach(function(change) {
+            if (change.index >= 0 && change.index < allTasks.length) {
+              var task = allTasks[change.index];
+              if (change.newDate) task.scheduledDate = change.newDate;
+              if (change.startTime !== undefined) task.startTime = change.startTime;
+              if (change.endTime !== undefined) task.endTime = change.endTime;
+              task.status = 'Scheduled';
+            }
+          });
+
+          // Re-render calendar with updated local data (no server call)
+          try {
+            renderCalendar();
+          } catch (e) {
+            console.error('Error re-rendering calendar:', e);
+          }
         })
         .withFailureHandler(function(error) {
           console.error('=== SAVE FAILED ===');
@@ -1999,13 +2019,13 @@
       loadTasks();
     }
 
-    function showToast(message, type) {
+    function showToast(message, type, duration) {
       var toast = document.createElement('div');
       toast.className = 'alert alert-' + (type === 'error' ? 'danger' : 'success') + ' position-fixed';
       toast.style.cssText = 'bottom: 20px; right: 20px; z-index: 9999; animation: fadeIn 0.3s;';
       toast.textContent = message;
       document.body.appendChild(toast);
-      setTimeout(function() { toast.remove(); }, 3000);
+      setTimeout(function() { toast.remove(); }, duration || 3000);
     }
 
     // ================== PERSONAL CHECKLIST FUNCTIONS ==================
