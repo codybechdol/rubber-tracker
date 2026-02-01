@@ -6922,11 +6922,6 @@ function getTasksWithMetadata() {
     Logger.log('getTasksWithMetadata: Returning ' + result.totalTasks + ' tasks directly');
     Logger.log('=== getTasksWithMetadata END ===');
     return result;
-    };
-
-    Logger.log('getTasksWithMetadata: Returning cache key to client');
-    Logger.log('=== getTasksWithMetadata END ===');
-    return result;
 
   } catch (e) {
     Logger.log('getTasksWithMetadata: ERROR creating return object: ' + e);
