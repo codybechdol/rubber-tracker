@@ -243,7 +243,14 @@ function getScheduleTasks() {
 
     // Get tasks with metadata - this is our new single source of truth
     var metadataResult = getTasksWithMetadata();
-    Logger.log('getTasksWithMetadata returned ' + metadataResult.totalTasks + ' tasks');
+
+    // Check if metadataResult is null or invalid
+    if (!metadataResult) {
+      Logger.log('ERROR: getTasksWithMetadata returned null!');
+      return null;
+    }
+
+    Logger.log('getTasksWithMetadata returned ' + (metadataResult.totalTasks || 0) + ' tasks');
 
     // The tasks from getTasksWithMetadata already have all the fields we need
     var tasks = metadataResult.tasks || [];
@@ -377,8 +384,10 @@ function getScheduleTasks() {
   } catch (e) {
     Logger.log('ERROR in getScheduleTasks: ' + e.toString());
     Logger.log('Stack: ' + e.stack);
-    // Return empty array on error so dialog doesn't hang forever
-    return [];
+    Logger.log('Error occurred at line: ' + e.lineNumber);
+    // Return null instead of empty array to signal error condition
+    // This allows the client to show a proper error message
+    return null;
   }
 }
 
