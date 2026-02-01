@@ -6902,13 +6902,35 @@ function getTasksWithMetadata() {
 
     Logger.log('getTasksWithMetadata: Serialized ' + serializedTasks.length + ' tasks');
 
-    var result = {
+    // Store in cache to avoid 50KB transfer limit
+    var cache = CacheService.getScriptCache();
+    var cacheKey = 'tasks_' + new Date().getTime();
+
+    // Store full task data in cache (expires in 10 minutes)
+    var fullData = {
       tasks: serializedTasks,
-      lastGenerated: formatDate(lastGenerated), // Convert to string
+      lastGenerated: formatDate(lastGenerated),
       totalTasks: serializedTasks.length
     };
 
-    Logger.log('getTasksWithMetadata: Result object created successfully');
+    try {
+      cache.put(cacheKey, JSON.stringify(fullData), 600); // 10 min expiry
+      Logger.log('getTasksWithMetadata: Stored in cache with key: ' + cacheKey);
+    } catch (cacheErr) {
+      Logger.log('getTasksWithMetadata: Cache storage failed: ' + cacheErr);
+      // Fall back to direct return (may fail if too large)
+      return fullData;
+    }
+
+    // Return lightweight object with cache key
+    var result = {
+      usesCache: true,
+      cacheKey: cacheKey,
+      totalTasks: serializedTasks.length,
+      lastGenerated: formatDate(lastGenerated)
+    };
+
+    Logger.log('getTasksWithMetadata: Returning cache key to client');
     Logger.log('=== getTasksWithMetadata END ===');
     return result;
 
@@ -6920,12 +6942,53 @@ function getTasksWithMetadata() {
 }
 
 /**
+ * Retrieves cached task data by cache key.
+ * Used to avoid 50KB transfer limit for large task lists.
+ *
+ * @param {string} cacheKey - The cache key returned by getTasksWithMetadata()
+ * @return {Object} Full task data object with tasks array
+ */
+function getTasksFromCache(cacheKey) {
+  try {
+    Logger.log('=== getTasksFromCache START ===');
+    Logger.log('Cache key: ' + cacheKey);
+
+    var cache = CacheService.getScriptCache();
+    var cached = cache.get(cacheKey);
+
+    if (!cached) {
+      Logger.log('ERROR: Cache key not found or expired: ' + cacheKey);
+      return {
+        error: true,
+        message: 'Cache expired. Please refresh to reload tasks.'
+      };
+    }
+
+    Logger.log('Cache hit! Parsing cached data...');
+    var data = JSON.parse(cached);
+    Logger.log('Successfully loaded ' + data.totalTasks + ' tasks from cache');
+    Logger.log('=== getTasksFromCache END ===');
+
+    return data;
+
+  } catch (e) {
+    Logger.log('ERROR in getTasksFromCache: ' + e);
+    Logger.log('Stack: ' + e.stack);
+    return {
+      error: true,
+      message: 'Cache read failed: ' + e.toString()
+    };
+  }
+}
+
+/**
  * Updates task metadata for a specific task.
  * Phase 3: Task State Updates
  *
  * @param {string} taskKey - The task key in format "SourceSheet_SourceRow" OR the TaskID
  * @param {Object} updates - Object with fields to update (e.g., {status: 'Complete', completedDate: new Date()})
  * @return {Object} Result with success status and updated task
+ */
  */
 function updateTaskMetadata(taskKey, updates) {
   Logger.log('=== updateTaskMetadata START ===');

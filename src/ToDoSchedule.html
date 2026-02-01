@@ -1014,6 +1014,40 @@
             return;
           }
 
+          // Check if using cache (new system)
+          if (data.usesCache && data.cacheKey) {
+            console.log('loadTasks: Got cache key, fetching full data...');
+            console.log('Cache key:', data.cacheKey, 'Total tasks:', data.totalTasks);
+
+            // Fetch full data from cache
+            google.script.run
+              .withSuccessHandler(function(cachedData) {
+                console.log('loadTasks: Loaded from cache:', cachedData);
+
+                if (cachedData.error) {
+                  console.error('Cache error:', cachedData.message);
+                  document.getElementById('taskContainer').innerHTML =
+                    '<div class="alert alert-warning">' + cachedData.message +
+                    '<br><button class="btn btn-primary mt-2" onclick="refreshData()">Refresh Now</button></div>';
+                  return;
+                }
+
+                // Process cached data
+                processTaskData(cachedData);
+              })
+              .withFailureHandler(function(error) {
+                console.error('Cache fetch failed:', error);
+                document.getElementById('taskContainer').innerHTML =
+                  '<div class="alert alert-danger">Cache read error: ' + error + '</div>';
+              })
+              .getTasksFromCache(data.cacheKey);
+
+            return;
+          }
+
+          // Legacy path: direct data (no cache)
+          console.log('loadTasks: Using direct data (no cache)');
+
           // Check if data.tasks exists
           if (!data.tasks) {
             console.error('loadTasks: Data has no tasks property:', data);
@@ -1021,6 +1055,30 @@
               '<div class="alert alert-warning">Invalid data format received. Please refresh.</div>';
             return;
           }
+
+          processTaskData(data);
+        })
+        .withFailureHandler(function(error) {
+          console.error('loadTasks: Server error:', error);
+          // Check for specific Task Metadata errors
+          var errorMsg = error.message || error.toString();
+          if (errorMsg.indexOf('TASK_METADATA_NOT_FOUND') !== -1) {
+            document.getElementById('taskContainer').innerHTML =
+              '<div class="alert alert-warning"><strong>Task Metadata Not Found</strong><br>Please run <strong>Glove Manager → Schedule & To-Do → Generate Task Metadata</strong> first.</div>';
+          } else if (errorMsg.indexOf('TASK_METADATA_EMPTY') !== -1) {
+            document.getElementById('taskContainer').innerHTML =
+              '<div class="alert alert-warning"><strong>Task Metadata Empty</strong><br>Please run <strong>Glove Manager → Schedule & To-Do → Generate Task Metadata</strong> to populate data.</div>';
+          } else {
+            document.getElementById('taskContainer').innerHTML =
+              '<div class="alert alert-danger">Error loading tasks: ' + errorMsg + '</div>';
+          }
+        })
+        .getTasksWithMetadata();
+    }
+
+    // Process task data (used by both cache and direct paths)
+    function processTaskData(data) {
+      console.log('processTaskData: Processing', data.totalTasks, 'tasks');
           // New architecture: data is {tasks: [...], lastGenerated: date, totalTasks: number}
           allTasks = data.tasks || [];
           console.log('loadTasks: Total tasks loaded:', allTasks.length);
