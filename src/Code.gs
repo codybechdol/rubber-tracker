@@ -6874,60 +6874,54 @@ function getTasksWithMetadata() {
     }
 
     // Convert Date objects to ISO strings for safe serialization
-    var serializedTasks = enrichedTasks.map(function(task) {
+    // MINIMAL task objects to stay under 50KB transfer limit (45 tasks × ~500 bytes each = ~22KB)
+    var serializedTasks = enrichedTasks.map(function(task, index) {
       return {
-        taskId: task.taskId,
-        employee: task.employee,
-        taskType: task.taskType,
-        itemType: task.itemType,
-        location: task.location,
-        foreman: task.foreman,
-        phoneNumber: task.phoneNumber,
-        dueDate: task.dueDate ? formatDate(task.dueDate) : null, // Convert to string
-        scheduledDate: task.scheduledDate ? formatDate(task.scheduledDate) : null,
-        startTime: task.startTime || null,
-        endTime: task.endTime || null,
-        status: task.status,
-        notifiedDate: task.notifiedDate ? formatDate(task.notifiedDate) : null,
-        isOverdue: task.isOverdue || false,
-        daysTillDue: task.daysTillDue || 0,
-        sheetName: task.sheetName,
-        rowIndex: task.rowIndex,
-        source: task.source,
-        currentItem: task.currentItem,
-        crew: task.crew,
-        isManualTask: task.isManualTask || false
+        // Identity (for saves/updates)
+        taskKey: task.sheetName + '_' + task.rowIndex,
+        idx: index,
+        // Display fields
+        emp: task.employee || '',
+        type: task.taskType || '',
+        item: task.itemType || '',
+        loc: task.location || '',
+        phone: task.phoneNumber || '',
+        // Dates
+        due: task.dueDate ? formatDate(task.dueDate) : '',
+        sched: task.scheduledDate ? formatDate(task.scheduledDate) : '',
+        start: task.startTime || '',
+        end: task.endTime || '',
+        // Status
+        stat: task.status || 'Pending',
+        over: task.isOverdue ? 1 : 0,
+        days: task.daysTillDue || 0,
+        // Source info
+        src: task.sheetName || '',
+        row: task.rowIndex || 0,
+        manual: task.isManualTask ? 1 : 0
       };
     });
 
     Logger.log('getTasksWithMetadata: Serialized ' + serializedTasks.length + ' tasks');
 
-    // Store in cache to avoid 50KB transfer limit
-    var cache = CacheService.getScriptCache();
-    var cacheKey = 'tasks_' + new Date().getTime();
-
-    // Store full task data in cache (expires in 10 minutes)
-    var fullData = {
+    // Return data directly - keep task objects minimal to stay under 50KB limit
+    var result = {
       tasks: serializedTasks,
       lastGenerated: formatDate(lastGenerated),
       totalTasks: serializedTasks.length
     };
 
+    // Log the approximate size
     try {
-      cache.put(cacheKey, JSON.stringify(fullData), 600); // 10 min expiry
-      Logger.log('getTasksWithMetadata: Stored in cache with key: ' + cacheKey);
-    } catch (cacheErr) {
-      Logger.log('getTasksWithMetadata: Cache storage failed: ' + cacheErr);
-      // Fall back to direct return (may fail if too large)
-      return fullData;
+      var jsonStr = JSON.stringify(result);
+      Logger.log('getTasksWithMetadata: Result size ~' + Math.round(jsonStr.length / 1024) + 'KB');
+    } catch (e) {
+      Logger.log('getTasksWithMetadata: Could not measure size');
     }
 
-    // Return lightweight object with cache key
-    var result = {
-      usesCache: true,
-      cacheKey: cacheKey,
-      totalTasks: serializedTasks.length,
-      lastGenerated: formatDate(lastGenerated)
+    Logger.log('getTasksWithMetadata: Returning ' + result.totalTasks + ' tasks directly');
+    Logger.log('=== getTasksWithMetadata END ===');
+    return result;
     };
 
     Logger.log('getTasksWithMetadata: Returning cache key to client');

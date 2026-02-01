@@ -1005,48 +1005,13 @@
             document.getElementById('taskContainer').innerHTML =
               '<div class="alert alert-danger">' +
               '<strong>Data Load Error</strong><br>' +
-              'Server returned no data. This usually means:<br>' +
-              '• Task collection took too long (>30 seconds)<br>' +
-              '• Try clicking <strong>Refresh</strong> button<br>' +
+              'Server returned no data. Please try:<br>' +
+              '• Click <strong>Refresh</strong> button<br>' +
               '• Or close and reopen the dialog<br>' +
               '<button class="btn btn-primary mt-2" onclick="refreshData()">Try Again</button>' +
               '</div>';
             return;
           }
-
-          // Check if using cache (new system)
-          if (data.usesCache && data.cacheKey) {
-            console.log('loadTasks: Got cache key, fetching full data...');
-            console.log('Cache key:', data.cacheKey, 'Total tasks:', data.totalTasks);
-
-            // Fetch full data from cache
-            google.script.run
-              .withSuccessHandler(function(cachedData) {
-                console.log('loadTasks: Loaded from cache:', cachedData);
-
-                if (cachedData.error) {
-                  console.error('Cache error:', cachedData.message);
-                  document.getElementById('taskContainer').innerHTML =
-                    '<div class="alert alert-warning">' + cachedData.message +
-                    '<br><button class="btn btn-primary mt-2" onclick="refreshData()">Refresh Now</button></div>';
-                  return;
-                }
-
-                // Process cached data
-                processTaskData(cachedData);
-              })
-              .withFailureHandler(function(error) {
-                console.error('Cache fetch failed:', error);
-                document.getElementById('taskContainer').innerHTML =
-                  '<div class="alert alert-danger">Cache read error: ' + error + '</div>';
-              })
-              .getTasksFromCache(data.cacheKey);
-
-            return;
-          }
-
-          // Legacy path: direct data (no cache)
-          console.log('loadTasks: Using direct data (no cache)');
 
           // Check if data.tasks exists
           if (!data.tasks) {
@@ -1056,11 +1021,11 @@
             return;
           }
 
+          // Process the task data
           processTaskData(data);
         })
         .withFailureHandler(function(error) {
           console.error('loadTasks: Server error:', error);
-          // Check for specific Task Metadata errors
           var errorMsg = error.message || error.toString();
           if (errorMsg.indexOf('TASK_METADATA_NOT_FOUND') !== -1) {
             document.getElementById('taskContainer').innerHTML =
@@ -1079,12 +1044,41 @@
     // Process task data (used by both cache and direct paths)
     function processTaskData(data) {
       console.log('processTaskData: Processing', data.totalTasks, 'tasks');
-          // New architecture: data is {tasks: [...], lastGenerated: date, totalTasks: number}
-          allTasks = data.tasks || [];
-          console.log('loadTasks: Total tasks loaded:', allTasks.length);
 
-          // Normalize dates to YYYY-MM-DD string format
-          allTasks.forEach(function(task, index) {
+      // Expand shortened property names from server (for smaller transfer size)
+      var rawTasks = data.tasks || [];
+      allTasks = rawTasks.map(function(t) {
+        // If using shortened names, expand them
+        if (t.emp !== undefined || t.taskKey !== undefined) {
+          return {
+            taskKey: t.taskKey,
+            _originalIndex: t.idx,
+            employee: t.emp,
+            taskType: t.type,
+            itemType: t.item,
+            location: t.loc,
+            phoneNumber: t.phone,
+            dueDate: t.due || null,
+            scheduledDate: t.sched || null,
+            startTime: t.start || null,
+            endTime: t.end || null,
+            status: t.stat,
+            isOverdue: t.over === 1,
+            daysTillDue: t.days,
+            sheetName: t.src,
+            source: t.src,
+            rowIndex: t.row,
+            isManualTask: t.manual === 1
+          };
+        }
+        // Otherwise use as-is (legacy format)
+        return t;
+      });
+
+      console.log('processTaskData: Expanded ' + allTasks.length + ' tasks');
+
+      // Normalize dates to YYYY-MM-DD string format
+      allTasks.forEach(function(task, index) {
             // Convert scheduledDate to string format
             if (task.scheduledDate) {
               if (task.scheduledDate instanceof Date) {
