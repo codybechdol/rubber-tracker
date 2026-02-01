@@ -998,6 +998,29 @@
       google.script.run
         .withSuccessHandler(function(data) {
           console.log('loadTasks: Received data:', data);
+
+          // Check if data is null
+          if (!data || data === null) {
+            console.error('loadTasks: Received NULL data from server!');
+            document.getElementById('taskContainer').innerHTML =
+              '<div class="alert alert-danger">' +
+              '<strong>Data Load Error</strong><br>' +
+              'Server returned no data. This usually means:<br>' +
+              '• Task collection took too long (>30 seconds)<br>' +
+              '• Try clicking <strong>Refresh</strong> button<br>' +
+              '• Or close and reopen the dialog<br>' +
+              '<button class="btn btn-primary mt-2" onclick="refreshData()">Try Again</button>' +
+              '</div>';
+            return;
+          }
+
+          // Check if data.tasks exists
+          if (!data.tasks) {
+            console.error('loadTasks: Data has no tasks property:', data);
+            document.getElementById('taskContainer').innerHTML =
+              '<div class="alert alert-warning">Invalid data format received. Please refresh.</div>';
+            return;
+          }
           // New architecture: data is {tasks: [...], lastGenerated: date, totalTasks: number}
           allTasks = data.tasks || [];
           console.log('loadTasks: Total tasks loaded:', allTasks.length);
