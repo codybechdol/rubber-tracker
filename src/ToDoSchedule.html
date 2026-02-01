@@ -931,10 +931,29 @@
         return;
       }
 
+      // DEBUG: Log what we're sending
+      console.log('=== SAVING CHANGES ===');
+      console.log('Total changes:', changes.length);
+      changes.forEach(function(change, i) {
+        console.log('Change ' + i + ':', {
+          index: change.index,
+          taskKey: change.taskKey,
+          newDate: change.newDate,
+          startTime: change.startTime,
+          endTime: change.endTime,
+          hasSource: !!change.task.source,
+          hasRowIndex: !!change.task.rowIndex,
+          source: change.task.source,
+          rowIndex: change.task.rowIndex
+        });
+      });
+
       showToast('Saving ' + changes.length + ' change(s)...');
 
       google.script.run
         .withSuccessHandler(function(result) {
+          console.log('=== SAVE SUCCESS ===');
+          console.log('Result:', result);
           pendingDateChanges = {};
           setUnsaved(false);
           // Remove changed styling from inputs
@@ -947,6 +966,8 @@
           showToast('✓ Saved ' + changes.length + ' change(s) successfully!');
         })
         .withFailureHandler(function(error) {
+          console.error('=== SAVE FAILED ===');
+          console.error('Error:', error);
           showToast('Error saving: ' + error, 'error');
         })
         .saveScheduleTaskDateChanges(changes);

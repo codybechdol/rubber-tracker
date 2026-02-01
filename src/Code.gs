@@ -468,77 +468,118 @@ function formatTimeForInput(timeValue) {
  * @return {Object} Result with success status
  */
 function saveScheduleTaskDateChanges(changes) {
-  Logger.log('saveScheduleTaskDateChanges: ' + changes.length + ' changes');
-  Logger.log('Changes received: ' + JSON.stringify(changes));
+  Logger.log('=== saveScheduleTaskDateChanges START ===');
+  Logger.log('Received ' + changes.length + ' changes');
+  Logger.log('Changes: ' + JSON.stringify(changes, null, 2));
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var tasks = getScheduleTasks();
   var updatedCount = 0;
 
   for (var c = 0; c < changes.length; c++) {
     var change = changes[c];
-    var taskIndex = change.index;
+
+    // NEW: Accept either taskKey OR index (for backwards compatibility)
+    var taskKey = change.taskKey;
     var newDate = change.newDate;
     var startTime = change.startTime;
     var endTime = change.endTime;
 
-    Logger.log('Processing change ' + c + ': index=' + taskIndex + ', newDate=' + newDate + ', startTime=' + startTime + ', endTime=' + endTime);
+    Logger.log('--- Processing change ' + (c + 1) + '/' + changes.length + ' ---');
+    Logger.log('taskKey: ' + taskKey);
+    Logger.log('newDate: ' + newDate);
+    Logger.log('startTime: ' + startTime);
+    Logger.log('endTime: ' + endTime);
 
-    if (taskIndex < 0 || taskIndex >= tasks.length) continue;
+    // If taskKey is provided, use it directly (preferred - fast & reliable)
+    if (taskKey) {
+      var metadataUpdates = {};
+      if (newDate) metadataUpdates.ScheduledDate = newDate;
+      if (startTime !== undefined && startTime !== null) metadataUpdates.StartTime = startTime;
+      if (endTime !== undefined && endTime !== null) metadataUpdates.EndTime = endTime;
+
+      // Also update Status to "Scheduled" when scheduling
+      if (newDate) metadataUpdates.Status = 'Scheduled';
+
+      if (Object.keys(metadataUpdates).length > 0) {
+        Logger.log('Updating Task Metadata with: ' + JSON.stringify(metadataUpdates));
+        var result = updateTaskMetadata(taskKey, metadataUpdates);
+        if (result.success) {
+          Logger.log('✓ Updated Task Metadata for: ' + taskKey);
+          updatedCount++;
+
+          // Also update Manual Tasks sheet if applicable
+          if (taskKey.indexOf('Manual Tasks_') === 0) {
+            var manualSheet = ss.getSheetByName('Manual Tasks');
+            var rowIndex = parseInt(taskKey.split('_')[1]);
+            if (manualSheet && rowIndex) {
+              // Manual Tasks columns: E=Scheduled Date, F=Start Time, G=End Time
+              if (newDate) manualSheet.getRange(rowIndex, 5).setValue(newDate);
+              if (startTime !== undefined && startTime !== null) manualSheet.getRange(rowIndex, 6).setValue(startTime);
+              if (endTime !== undefined && endTime !== null) manualSheet.getRange(rowIndex, 7).setValue(endTime);
+              Logger.log('✓ Also updated Manual Tasks sheet row ' + rowIndex);
+            }
+          }
+        } else {
+          Logger.log('✗ Failed to update Task Metadata for: ' + taskKey + ' - ' + result.error);
+        }
+      } else {
+        Logger.log('⚠️ No updates to apply for taskKey: ' + taskKey);
+      }
+      continue; // Skip to next change
+    }
+
+    // LEGACY FALLBACK: If no taskKey, try to use index (old behavior - less reliable)
+    Logger.log('⚠️ WARNING: No taskKey provided for change ' + (c + 1) + ', attempting legacy index-based update');
+    var taskIndex = change.index;
+    if (taskIndex >= 0) {
+      var tasks = getScheduleTasks();
+      if (taskIndex >= tasks.length) {
+        Logger.log('✗ Invalid task index: ' + taskIndex + ' (tasks.length=' + tasks.length + ')');
+        continue;
+      }
 
       var task = tasks[taskIndex];
+      Logger.log('Legacy: Found task at index ' + taskIndex + ': ' + task.taskType + ' (' + task.employee + ')');
 
-      // Try to update Task Metadata using task key
+      // Try to update Task Metadata using task key extracted from task
       if (task.source && task.rowIndex) {
         taskKey = task.source + '_' + task.rowIndex;
-        metadataUpdates = {};
+        Logger.log('Legacy: Extracted taskKey from task: ' + taskKey);
+        var metadataUpdates = {};
         if (newDate) metadataUpdates.ScheduledDate = newDate;
-        if (startTime !== undefined) metadataUpdates.StartTime = startTime;
-        if (endTime !== undefined) metadataUpdates.EndTime = endTime;
+        if (startTime !== undefined && startTime !== null) metadataUpdates.StartTime = startTime;
+        if (endTime !== undefined && endTime !== null) metadataUpdates.EndTime = endTime;
         if (newDate) metadataUpdates.Status = 'Scheduled';
 
         if (Object.keys(metadataUpdates).length > 0) {
-          updateTaskMetadata(taskKey, metadataUpdates);
-          Logger.log('Updated Task Metadata for: ' + taskKey);
+          var result = updateTaskMetadata(taskKey, metadataUpdates);
+          if (result.success) {
+            Logger.log('✓ Legacy: Updated Task Metadata for: ' + taskKey);
+            updatedCount++;
+          }
         }
+      } else {
+        Logger.log('✗ Legacy: Task has no source or rowIndex - cannot update');
       }
 
-      // Update based on source (legacy support for source sheets)
-      if (task.source === 'Manual Tasks') {
+      // Update Manual Tasks sheet if applicable
+      if (task.source === 'Manual Tasks' && task.rowIndex) {
         var manualSheet = ss.getSheetByName('Manual Tasks');
-        if (manualSheet && task.rowIndex) {
-          // Manual Tasks columns: A=Location, B=Priority, C=Task Type, D=Employee, E=Scheduled Date, F=Start Time, G=End Time
-          if (newDate) manualSheet.getRange(task.rowIndex, 5).setValue(newDate); // Column E = Scheduled Date
-          if (startTime !== undefined) manualSheet.getRange(task.rowIndex, 6).setValue(startTime); // Column F = Start Time
-          if (endTime !== undefined) manualSheet.getRange(task.rowIndex, 7).setValue(endTime); // Column G = End Time
-          updatedCount++;
-        }
-      } else if (task.source === 'Crew Visit Config') {
-        var crewSheet = ss.getSheetByName('Crew Visit Config');
-        if (crewSheet && task.rowIndex) {
-          var headers = crewSheet.getRange(1, 1, 1, crewSheet.getLastColumn()).getValues()[0];
-          for (var h = 0; h < headers.length; h++) {
-            var headerLower = String(headers[h]).toLowerCase();
-            if (newDate && headerLower.indexOf('next') !== -1 && headerLower.indexOf('date') !== -1) {
-              crewSheet.getRange(task.rowIndex, h + 1).setValue(newDate);
-            }
-            if (startTime !== undefined && headerLower.indexOf('start') !== -1 && headerLower.indexOf('time') !== -1) {
-              crewSheet.getRange(task.rowIndex, h + 1).setValue(startTime);
-            }
-            if (endTime !== undefined && headerLower.indexOf('end') !== -1 && headerLower.indexOf('time') !== -1) {
-              crewSheet.getRange(task.rowIndex, h + 1).setValue(endTime);
-            }
-          }
-          updatedCount++;
+        if (manualSheet) {
+          if (newDate) manualSheet.getRange(task.rowIndex, 5).setValue(newDate);
+          if (startTime !== undefined && startTime !== null) manualSheet.getRange(task.rowIndex, 6).setValue(startTime);
+          if (endTime !== undefined && endTime !== null) manualSheet.getRange(task.rowIndex, 7).setValue(endTime);
+          Logger.log('✓ Legacy: Updated Manual Tasks sheet row ' + task.rowIndex);
         }
       }
-      // NOTE: No longer updating To Do List or Training Tracking sheets
-      // Task Metadata is the single source of truth for scheduling state
+    } else {
+      Logger.log('✗ No taskKey AND no valid index - cannot process change');
     }
   }
 
   SpreadsheetApp.flush();
-  Logger.log('Updated ' + updatedCount + ' task dates/times');
+  Logger.log('=== saveScheduleTaskDateChanges END ===');
+  Logger.log('Updated ' + updatedCount + ' task(s)');
 
   return { success: true, updatedCount: updatedCount };
 }
