@@ -996,16 +996,16 @@
     function loadTasks() {
       console.log('loadTasks: Starting (using Task Metadata)...');
       google.script.run
-        .withSuccessHandler(function(data) {
-          console.log('loadTasks: Received data:', data);
+        .withSuccessHandler(function(response) {
+          console.log('loadTasks: Server response:', response);
 
-          // Check if data is null
-          if (!data || data === null) {
-            console.error('loadTasks: Received NULL data from server!');
+          // Check if response is null
+          if (!response) {
+            console.error('loadTasks: Received NULL response from server!');
             document.getElementById('taskContainer').innerHTML =
               '<div class="alert alert-danger">' +
               '<strong>Data Load Error</strong><br>' +
-              'Server returned no data. Please try:<br>' +
+              'Server returned no response. Please try:<br>' +
               '• Click <strong>Refresh</strong> button<br>' +
               '• Or close and reopen the dialog<br>' +
               '<button class="btn btn-primary mt-2" onclick="refreshData()">Try Again</button>' +
@@ -1013,16 +1013,48 @@
             return;
           }
 
-          // Check if data.tasks exists
-          if (!data.tasks) {
-            console.error('loadTasks: Data has no tasks property:', data);
-            document.getElementById('taskContainer').innerHTML =
-              '<div class="alert alert-warning">Invalid data format received. Please refresh.</div>';
+          // Check if data was stored (new approach)
+          if (response.stored === true) {
+            console.log('loadTasks: Data stored in ScriptProperties, fetching...');
+            console.log('Total tasks:', response.totalTasks);
+
+            // Fetch the stored data
+            google.script.run
+              .withSuccessHandler(function(data) {
+                console.log('loadTasks: Retrieved stored data:', data);
+
+                if (data.error) {
+                  console.error('Storage error:', data.message);
+                  document.getElementById('taskContainer').innerHTML =
+                    '<div class="alert alert-warning">' + data.message +
+                    '<br><button class="btn btn-primary mt-2" onclick="refreshData()">Refresh Now</button></div>';
+                  return;
+                }
+
+                // Process the data
+                processTaskData(data);
+              })
+              .withFailureHandler(function(error) {
+                console.error('Failed to retrieve stored data:', error);
+                document.getElementById('taskContainer').innerHTML =
+                  '<div class="alert alert-danger">Storage read error: ' + error + '</div>';
+              })
+              .getStoredTasks();
+
             return;
           }
 
-          // Process the task data
-          processTaskData(data);
+          // Direct data (fallback path)
+          if (response.tasks) {
+            console.log('loadTasks: Using direct data');
+            processTaskData(response);
+            return;
+          }
+
+          // Unknown response format
+          console.error('loadTasks: Unknown response format:', response);
+          document.getElementById('taskContainer').innerHTML =
+            '<div class="alert alert-warning">Unexpected data format. Please refresh.</div>';
         })
         .withFailureHandler(function(error) {
           console.error('loadTasks: Server error:', error);

@@ -6904,7 +6904,7 @@ function getTasksWithMetadata() {
 
     Logger.log('getTasksWithMetadata: Serialized ' + serializedTasks.length + ' tasks');
 
-    // Return data directly - keep task objects minimal to stay under 50KB limit
+    // Build result object
     var result = {
       tasks: serializedTasks,
       lastGenerated: formatDate(lastGenerated),
@@ -6912,29 +6912,84 @@ function getTasksWithMetadata() {
     };
 
     // Log the approximate size
+    var jsonStr;
     try {
-      var jsonStr = JSON.stringify(result);
+      jsonStr = JSON.stringify(result);
       Logger.log('getTasksWithMetadata: Result size ~' + Math.round(jsonStr.length / 1024) + 'KB');
     } catch (e) {
-      Logger.log('getTasksWithMetadata: Could not measure size');
+      Logger.log('getTasksWithMetadata: Could not measure size: ' + e);
+      throw new Error('Failed to serialize task data');
     }
 
-    Logger.log('getTasksWithMetadata: Returning ' + result.totalTasks + ' tasks directly');
+    // Store in ScriptProperties (500KB limit) to bypass transfer limit
+    try {
+      var props = PropertiesService.getScriptProperties();
+      props.setProperty('TASKS_DATA', jsonStr);
+      props.setProperty('TASKS_TIMESTAMP', new Date().toISOString());
+      Logger.log('getTasksWithMetadata: Stored ' + result.totalTasks + ' tasks in ScriptProperties');
+    } catch (propErr) {
+      Logger.log('getTasksWithMetadata: ScriptProperties storage failed: ' + propErr);
+      // Fall back to direct return
+      Logger.log('getTasksWithMetadata: Attempting direct return...');
+      return result;
+    }
+
+    // Return a small confirmation object - client will fetch data from properties
+    Logger.log('getTasksWithMetadata: Returning confirmation to client');
     Logger.log('=== getTasksWithMetadata END ===');
-    return result;
+    return {
+      stored: true,
+      totalTasks: result.totalTasks,
+      lastGenerated: result.lastGenerated
+    };
 
   } catch (e) {
-    Logger.log('getTasksWithMetadata: ERROR creating return object: ' + e);
+    Logger.log('getTasksWithMetadata: ERROR: ' + e);
     Logger.log('getTasksWithMetadata: Stack: ' + e.stack);
     throw e;
   }
 }
 
 /**
- * Retrieves cached task data by cache key.
- * Used to avoid 50KB transfer limit for large task lists.
+ * Retrieves task data stored in ScriptProperties.
+ * Called by client after getTasksWithMetadata() confirms data is stored.
  *
- * @param {string} cacheKey - The cache key returned by getTasksWithMetadata()
+ * @return {Object} Full task data object with tasks array
+ */
+function getStoredTasks() {
+  try {
+    Logger.log('=== getStoredTasks START ===');
+
+    var props = PropertiesService.getScriptProperties();
+    var jsonStr = props.getProperty('TASKS_DATA');
+
+    if (!jsonStr) {
+      Logger.log('getStoredTasks: No data found in ScriptProperties');
+      return {
+        error: true,
+        message: 'No task data found. Please refresh.'
+      };
+    }
+
+    var data = JSON.parse(jsonStr);
+    Logger.log('getStoredTasks: Retrieved ' + data.totalTasks + ' tasks from ScriptProperties');
+    Logger.log('=== getStoredTasks END ===');
+
+    return data;
+
+  } catch (e) {
+    Logger.log('getStoredTasks: ERROR: ' + e);
+    return {
+      error: true,
+      message: 'Failed to read task data: ' + e.toString()
+    };
+  }
+}
+
+/**
+ * Retrieves cached task data by cache key (legacy - may be removed).
+ *
+ * @param {string} cacheKey - The cache key
  * @return {Object} Full task data object with tasks array
  */
 function getTasksFromCache(cacheKey) {
