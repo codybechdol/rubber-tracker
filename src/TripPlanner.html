@@ -568,7 +568,7 @@
     }
 
     .unassigned-list {
-      max-height: 200px;
+      max-height: 400px;
       overflow-y: auto;
     }
 
@@ -579,6 +579,12 @@
       padding: 6px 8px;
       margin-bottom: 5px;
       cursor: grab;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .unassigned-card:active {
+      cursor: grabbing;
     }
 
     .unassigned-card:hover {
@@ -1253,8 +1259,8 @@
           <h3 style="margin: 10px 0; color: #333;">No Pending Tasks to Plan</h3>
           ${errorContent}
           <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: center;">
-            <button class="btn btn-primary" onclick="google.script.run.withSuccessHandler(function(){ location.reload(); }).generateSmartSchedule()">
-              Generate Smart Schedule
+            <button class="btn btn-primary" onclick="google.script.run.withSuccessHandler(function(){ location.reload(); }).generateTaskMetadata()">
+              Generate Task Metadata
             </button>
             <button class="btn btn-secondary" onclick="google.script.host.close()">
               Close
@@ -1773,7 +1779,8 @@
             employee: task.employee,
             itemType: task.itemType,
             location: task.location,
-            urgencyLabel: task.urgencyLabel
+            urgencyLabel: task.urgencyLabel,
+            dueDate: task.dueDate
           });
         });
       } else if (loc.isManualTask) {
@@ -1821,12 +1828,26 @@
           var icon = getTaskIcon(task.taskType || task.itemType);
           var urgencyLabel = task.urgencyLabel || '';
 
+          // Format task title - for cert tasks, show "Renew [CertType]" instead of "Cert Expiring"
+          var taskTitle = task.taskType || task.itemType || 'Task';
+          if ((task.taskType === 'Cert Expiring' || (task.taskType && task.taskType.indexOf('Cert') !== -1)) && task.itemType) {
+            taskTitle = 'Renew ' + task.itemType;
+          }
+
+          // Show due date for cert tasks
+          var dueDateHtml = '';
+          if (task.dueDate) {
+            var dateLabel = task.taskType === 'Cert Expiring' ? 'Expires' : 'Due';
+            dueDateHtml = '<div class="task-employee">📅 ' + dateLabel + ': ' + task.dueDate + '</div>';
+          }
+
           tasksHtml += '<div class="task-popup-item" data-task-index="' + i + '">' +
             '<input type="checkbox" class="task-checkbox" id="task-cb-' + i + '">' +
             '<div class="task-type-icon">' + icon + '</div>' +
             '<div class="task-details">' +
-              '<div class="task-title">' + (task.taskType || task.itemType || 'Task') + '</div>' +
+              '<div class="task-title">' + taskTitle + '</div>' +
               (task.employee ? '<div class="task-employee">👤 ' + task.employee + '</div>' : '') +
+              dueDateHtml +
               (urgencyLabel ? '<div class="task-urgency">' + urgencyLabel + '</div>' : '') +
             '</div>' +
           '</div>';
@@ -2221,11 +2242,61 @@
         var officeCard = document.createElement('div');
         officeCard.className = 'unassigned-card office-card';
         officeCard.dataset.isOfficeCard = 'true';
+        officeCard.dataset.location = 'Office';
+        officeCard.draggable = true; // Make Office card draggable
 
-        // Make it clickable to show office tasks
-        officeCard.addEventListener('click', function() {
-          showOfficeTasksPopup(officeTasks);
+        // Track mousedown time to differentiate click vs drag
+        var officeMouseDownTime = 0;
+        officeCard.addEventListener('mousedown', function() {
+          officeMouseDownTime = Date.now();
         });
+
+        // Make it clickable to show office tasks (only if not dragging)
+        officeCard.addEventListener('click', function() {
+          var clickDuration = Date.now() - officeMouseDownTime;
+          if (clickDuration < 200) { // Quick click = show popup
+            showOfficeTasksPopup(officeTasks);
+          }
+        });
+
+        // Add drag handlers for Office card
+        officeCard.addEventListener('dragstart', function(e) {
+          console.log('Office card dragstart triggered');
+          draggedElement = e.target;
+          draggedElement.classList.add('dragging');
+
+          // Create a virtual "Office" location object
+          draggedLocationData = {
+            type: 'office',
+            index: -1, // Special index for office
+            location: {
+              location: 'Helena',
+              name: 'Office Work',
+              direction: 'Home Base',
+              taskCount: officeTasks.length,
+              maxUrgency: maxOfficeUrgency,
+              estimatedTime: officeTasks.length * 15, // 15 min per office task
+              tasks: officeTasks.map(function(t) {
+                return {
+                  rowIndex: t.rowIndex,
+                  source: t.source || 'Task Metadata',
+                  taskType: t.taskType || 'Office',
+                  employee: t.employee || '',
+                  itemType: t.itemType || '',
+                  location: 'Helena',
+                  urgencyLabel: t.urgencyLabel || ''
+                };
+              }),
+              isOfficeCard: true
+            }
+          };
+          console.log('Office draggedLocationData set:', draggedLocationData);
+
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', 'Office');
+        });
+
+        officeCard.addEventListener('dragend', handleDragEnd);
 
         // Calculate max urgency for office tasks
         var maxOfficeUrgency = 0;
@@ -2257,17 +2328,26 @@
         card.className = 'unassigned-card';
         card.draggable = true;
         card.dataset.unassignedIndex = idx;
-        card.dataset.location = loc.name;
+        var locationName = loc.location || loc.name; // Use standardized 'location' property
+        card.dataset.location = locationName;
+
+        // Debug: Log card creation
+        console.log('Creating unassigned card:', idx, locationName, 'draggable:', card.draggable);
 
         card.addEventListener('dragstart', handleUnassignedDragStart);
         card.addEventListener('dragend', handleDragEnd);
+
+        // Also add mousedown listener to debug if clicks are registering
+        card.addEventListener('mousedown', function(e) {
+          console.log('Mousedown on unassigned card:', idx, locationName);
+        });
 
         var urgencyClass = getUrgencyClass(loc.maxUrgency);
         var taskCount = loc.tasks ? loc.tasks.length : (loc.taskCount || 0);
 
         card.innerHTML = '<div class="location-name">' +
           '<span class="urgency-dot ' + urgencyClass + '"></span>' +
-          loc.name +
+          locationName +
           '<span class="task-count">' + taskCount + '</span>' +
           '</div>' +
           '<div class="location-direction">' + loc.direction + '</div>';
@@ -2484,11 +2564,13 @@
 
     // Drag and drop handlers
     function handleDragStart(e) {
+      console.log('handleDragStart triggered (assigned card)');
       draggedElement = e.target;
       draggedElement.classList.add('dragging');
 
       var dayIdx = parseInt(e.target.dataset.dayIndex);
       var locIdx = parseInt(e.target.dataset.locIndex);
+      console.log('Dragging from day:', dayIdx, 'location index:', locIdx);
 
       draggedLocationData = {
         type: 'assigned',
@@ -2496,23 +2578,38 @@
         locIndex: locIdx,
         location: tripPlan.workDays[dayIdx].assignedLocations[locIdx]
       };
+      console.log('draggedLocationData set:', draggedLocationData);
 
       e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', draggedLocationData.location.location || 'unknown');
     }
 
     function handleUnassignedDragStart(e) {
+      console.log('handleUnassignedDragStart triggered');
       draggedElement = e.target;
       draggedElement.classList.add('dragging');
 
       const idx = parseInt(e.target.dataset.unassignedIndex);
+      console.log('Dragging unassigned index:', idx);
+
+      var loc = tripPlan.unassignedLocations[idx];
+      console.log('Location data:', loc);
+
+      // Ensure location object has standardized 'location' property
+      if (loc && !loc.location && loc.name) {
+        loc.location = loc.name;
+        console.log('Set location from name:', loc.location);
+      }
 
       draggedLocationData = {
         type: 'unassigned',
         index: idx,
-        location: tripPlan.unassignedLocations[idx]
+        location: loc
       };
+      console.log('draggedLocationData set:', draggedLocationData);
 
       e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', loc.location || loc.name || 'unknown');
     }
 
     function handleDragEnd(e) {
@@ -2573,6 +2670,7 @@
 
     function handleDrop(e) {
       e.preventDefault();
+      console.log('handleDrop triggered');
 
       var dropZone = e.currentTarget;
       dropZone.closest('.day-card').classList.remove('drag-over');
@@ -2582,8 +2680,9 @@
         card.classList.remove('drag-over-above', 'drag-over-below');
       });
 
+      console.log('draggedLocationData:', draggedLocationData);
       if (!draggedLocationData || !draggedLocationData.location) {
-        console.log('No dragged location data');
+        console.log('No dragged location data - aborting drop');
         return;
       }
 
@@ -2617,8 +2716,8 @@
       // Determine drop position within the day (for reordering)
       var dropIndex = getDropIndex(e, dropZone, targetDayIndex);
 
-      // Get the location name to use
-      var locationName = draggedLocationData.location.name || draggedLocationData.location.location || 'Unknown';
+      // Get the location name to use (prefer 'location' for consistency)
+      var locationName = draggedLocationData.location.location || draggedLocationData.location.name || 'Unknown';
       var sourceDayIdx = draggedLocationData.dayIndex;
 
 
@@ -2669,6 +2768,10 @@
         if (sourceDayIdx >= 0 && sourceDayIdx < tripPlan.workDays.length) {
           tripPlan.workDays[sourceDayIdx].assignedLocations.splice(draggedLocationData.locIndex, 1);
         }
+      } else if (draggedLocationData.type === 'office') {
+        // Office card - clear office tasks (they're all being moved as one block)
+        tripPlan.officeTasks = [];
+        console.log('Cleared officeTasks array after dropping Office card');
       } else {
         // From unassigned
         if (draggedLocationData.index >= 0 && draggedLocationData.index < tripPlan.unassignedLocations.length) {

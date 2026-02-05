@@ -800,6 +800,10 @@
       // Show crew preview and match employees
       showCrewPreview();
       matchEmployeesToSheet();
+
+      // Filter out special circumstances that are already matched as Previous Employees
+      filterSpecialCircumstancesAlreadyMatched();
+
       // Note: if there are duplicates, matchEmployeesToSheet will show the duplicate UI
       // and displayPreview will be called after user resolves duplicates
       if (duplicateEmployees.length === 0) {
@@ -1221,6 +1225,11 @@
           suggestedAction = 'previous';
           statusBadgeClass = 'bg-danger';
           statusIcon = 'bi-door-open';
+        } else if (spec.status === 'Fired') {
+          suggestedLocation = 'Previous Employee';
+          suggestedAction = 'previous';
+          statusBadgeClass = 'bg-danger';
+          statusIcon = 'bi-x-circle';
         } else if (spec.status === 'Layoff') {
           suggestedLocation = 'Previous Employee';
           suggestedAction = 'previous';
@@ -1295,7 +1304,7 @@
         html += '<div class="col-md-3">';
         html += '<label class="form-label small mb-1">Status/Reason</label>';
         html += '<select class="form-select form-select-sm" id="spec-status-' + i + '">';
-        var statuses = ['Layoff', 'Resigned', 'Quit', 'Time Off', 'Vacation', 'Light Duty', 'Leave', 'FMLA', 'MT Misc', 'Unknown'];
+        var statuses = ['Layoff', 'Fired', 'Resigned', 'Quit', 'Time Off', 'Vacation', 'Light Duty', 'Leave', 'FMLA', 'MT Misc', 'Unknown'];
         for (var s = 0; s < statuses.length; s++) {
           var isSelected = spec.status === statuses[s] ? ' selected' : '';
           html += '<option value="' + statuses[s] + '"' + isSelected + '>' + statuses[s] + '</option>';
@@ -1427,6 +1436,12 @@
       if (notes) msg += '• Notes: ' + notes + '\n';
       msg += '\nThis will be logged to Employee History.';
 
+      // Add warning if marking as Previous Employee
+      if (newLocation === 'Previous Employee') {
+        msg += '\n\n⚠️ WARNING: This will REMOVE the employee from the Employees sheet.';
+        msg += '\nThey will only exist in Employee History.';
+      }
+
       if (!confirm(msg)) return;
 
       // Disable the card
@@ -1482,7 +1497,9 @@
       msg += '\nThis will:\n';
       msg += '• Set their Location to "Previous Employee"\n';
       msg += '• Clear their Job Number\n';
-      msg += '• Log to Employee History';
+      msg += '• Log to Employee History\n';
+      msg += '• REMOVE them from the Employees sheet\n';
+      msg += '\n⚠️ The employee will only exist in Employee History after this action.';
 
       if (!confirm(msg)) return;
 
@@ -1820,6 +1837,52 @@
 
       // No duplicates - proceed with normal matching
       finishMatching();
+    }
+
+    function filterSpecialCircumstancesAlreadyMatched() {
+      // Remove special circumstances for employees that are already matched as Previous Employees
+      // from Employee History (they'll be handled as rehires, not special circumstances)
+
+      if (specialCircumstances.length === 0) return;
+
+      var filtered = [];
+      var removedCount = 0;
+
+      for (var i = 0; i < specialCircumstances.length; i++) {
+        var spec = specialCircumstances[i];
+        var specNameLower = spec.name.toLowerCase().trim();
+
+        // Check if this special circumstance matches any Previous Employee from Employee History
+        var matchedAsPreviousEmployee = false;
+
+        for (var e = 0; e < currentEmployees.length; e++) {
+          var emp = currentEmployees[e];
+
+          // Check if this is a Previous Employee from Employee History
+          if (emp.source === 'Employee History' && emp.location === 'Previous Employee') {
+            var empNameLower = emp.name.toLowerCase().trim();
+
+            // Check for name match (exact or very close)
+            if (specNameLower === empNameLower || calculateSimilarity(specNameLower, empNameLower) >= 85) {
+              matchedAsPreviousEmployee = true;
+              console.log('Special circumstance "' + spec.name + '" matches Previous Employee "' + emp.name + '" from Employee History - will be handled as REHIRE');
+              removedCount++;
+              break;
+            }
+          }
+        }
+
+        // Only keep special circumstances that DON'T match Previous Employees
+        if (!matchedAsPreviousEmployee) {
+          filtered.push(spec);
+        }
+      }
+
+      specialCircumstances = filtered;
+
+      if (removedCount > 0) {
+        console.log('Filtered out ' + removedCount + ' special circumstances that are already matched as Previous Employees');
+      }
     }
 
     function finishMatching() {
@@ -2173,6 +2236,12 @@
           html += '<tr class="change-row">';
           html += '<td><input type="checkbox" checked data-index="' + i + '" onchange="toggleChange(' + i + ', this)"></td>';
           html += '<td><strong>' + ch.match.employeeName + '</strong>';
+
+          // Show badge if employee is being rehired from Employee History
+          if (ch.match.source === 'Employee History') {
+            html += ' <span class="badge bg-success" title="Rehiring from Employee History">🔄 REHIRE</span>';
+          }
+
           if (ch.match.confidence < 100) {
             html += ' <span class="badge bg-warning text-dark badge-role">' + ch.match.confidence + '%</span>';
           }

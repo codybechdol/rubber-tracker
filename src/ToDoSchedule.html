@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- Updated Feb 1, 2026 - Fixed cert tasks in Task List, fixed phone number handling (numeric vs string) -->
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -157,11 +158,7 @@
         <i class="bi bi-list-check"></i> Task List
       </button>
     </li>
-    <li class="nav-item" role="presentation">
-      <button class="nav-link" id="mycheckllist-tab" data-bs-toggle="tab" data-bs-target="#mychecklist" type="button">
-        <i class="bi bi-clipboard-check"></i> My Checklist <span class="badge bg-primary" id="checklistBadge" style="display: none;">0</span>
-      </button>
-    </li>
+    <!-- My Checklist tab removed - content merged into Task List (Phase 5) -->
     <li class="nav-item" role="presentation">
       <button class="nav-link" id="expiringcerts-tab" data-bs-toggle="tab" data-bs-target="#expiringcerts" type="button">
         <i class="bi bi-file-earmark-medical"></i> Expiring Certs <span class="badge bg-danger" id="certsBadge" style="display: none;">0</span>
@@ -222,9 +219,10 @@
               <option value="">All Sources</option>
               <option value="Training Tracking">Training</option>
               <option value="Crew Visit Config">Crew Visits</option>
-              <option value="Expiring Certs">Expiring Certs</option>
+              <option value="Expiring Certs">Certs (from Expiring Certs)</option>
               <option value="Glove Swaps">Glove Swaps</option>
               <option value="Sleeve Swaps">Sleeve Swaps</option>
+              <option value="Manual Tasks">Manual Tasks</option>
             </select>
           </div>
           <div class="col-auto">
@@ -232,6 +230,11 @@
           </div>
           <div class="col-auto">
             <button class="btn btn-outline-secondary btn-sm" onclick="clearFilters()">Clear</button>
+          </div>
+          <div class="col-auto ms-auto">
+            <button class="btn btn-success btn-sm" onclick="showAddManualItemModal()">
+              <i class="bi bi-plus-lg"></i> Add Manual Task
+            </button>
           </div>
         </div>
       </div>
@@ -246,8 +249,8 @@
       </div>
     </div>
 
-    <!-- My Personal Checklist Tab -->
-    <div class="tab-pane fade" id="mychecklist" role="tabpanel">
+    <!-- My Personal Checklist Tab - HIDDEN (Phase 5: merged into Task List) -->
+    <div class="tab-pane fade" id="mychecklist" role="tabpanel" style="display: none;">
       <div class="filter-bar">
         <div class="row align-items-center">
           <div class="col-auto">
@@ -558,6 +561,45 @@
     </div>
   </div>
 
+  <!-- Crane Cert Registration Modal (Stage 2 - No SMS, just tracking) -->
+  <div class="modal fade" id="craneCertModal" tabindex="-1" aria-labelledby="craneCertModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header" style="background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%); color: white;">
+          <h5 class="modal-title" id="craneCertModalLabel"><i class="bi bi-award"></i> Crane Cert Registration</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="alert alert-info small">
+            <strong><i class="bi bi-person"></i> <span id="craneEmployeeName">Employee</span></strong><br>
+            <span id="craneCertInfo">Crane Cert info</span><br>
+            <small class="text-muted"><i class="bi bi-telephone"></i> <span id="cranePhoneDisplay"></span></small>
+          </div>
+
+          <div class="text-center mb-3">
+            <p class="mb-3">Track whether the employee has registered for their Crane Cert renewal:</p>
+
+            <div class="d-flex justify-content-center gap-3">
+              <button type="button" class="btn btn-success btn-lg" onclick="markCraneRegistered()">
+                <i class="bi bi-check-circle"></i> Registered
+              </button>
+              <button type="button" class="btn btn-danger btn-lg" onclick="markCraneDeclined()">
+                <i class="bi bi-x-circle"></i> Declined
+              </button>
+            </div>
+          </div>
+
+          <div class="alert alert-secondary small mb-0">
+            <i class="bi bi-info-circle"></i> This is for your records only - no SMS will be sent.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- SMS Scheduled Modal (Stage 2 - Class Registration Confirmation) -->
   <div class="modal fade" id="smsScheduledModal" tabindex="-1" aria-labelledby="smsScheduledModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
@@ -671,6 +713,59 @@
       return year + '-' + month + '-' + day;
     }
 
+    // Helper: Convert 12-hour time (1:30 PM) to 24-hour (13:30) for time input value
+    function convertTo24Hour(timeStr) {
+      if (!timeStr) return '';
+      timeStr = String(timeStr).trim();
+
+      // Already in 24-hour HH:MM format
+      if (/^\d{1,2}:\d{2}$/.test(timeStr) && timeStr.indexOf('AM') === -1 && timeStr.indexOf('PM') === -1) {
+        // Pad hours if needed
+        var parts = timeStr.split(':');
+        return String(parts[0]).padStart(2, '0') + ':' + parts[1];
+      }
+
+      // Parse 12-hour format (e.g., "1:30 PM", "12:00 AM")
+      var match = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)?$/i);
+      if (!match) return '';
+
+      var hours = parseInt(match[1], 10);
+      var minutes = match[2];
+      var period = (match[3] || '').toUpperCase();
+
+      if (period === 'PM' && hours < 12) {
+        hours += 12;
+      } else if (period === 'AM' && hours === 12) {
+        hours = 0;
+      }
+
+      return String(hours).padStart(2, '0') + ':' + minutes;
+    }
+
+    // Helper: Convert 24-hour time (13:30) to 12-hour (1:30 PM) for display
+    function convertTo12Hour(timeStr) {
+      if (!timeStr) return '';
+      timeStr = String(timeStr).trim();
+
+      // Already has AM/PM, return as-is
+      if (/AM|PM/i.test(timeStr)) {
+        return timeStr;
+      }
+
+      // Parse 24-hour format
+      var match = timeStr.match(/^(\d{1,2}):(\d{2})/);
+      if (!match) return timeStr;
+
+      var hours = parseInt(match[1], 10);
+      var minutes = match[2];
+      var period = hours >= 12 ? 'PM' : 'AM';
+
+      hours = hours % 12;
+      if (hours === 0) hours = 12;
+
+      return hours + ':' + minutes + ' ' + period;
+    }
+
     // Helper: Format task type with item type (Glove/Sleeve) and item number
     // Also shows cert expiration date for cert tasks
     function formatTaskType(task) {
@@ -745,6 +840,51 @@
         }
 
         return certLabel;
+      } else if (taskType === 'Missing Safety Report') {
+        // Show missing report type (JHA, Weekly Meeting, or both)
+        var reportLabel = '⚠️ Missing: ';
+        if (itemType === 'JHA + Weekly Meeting') {
+          reportLabel += 'JHA & Weekly Meeting';
+        } else if (itemType === 'JHA') {
+          reportLabel += 'JHA';
+        } else if (itemType === 'Weekly Meeting') {
+          reportLabel += 'Weekly Meeting';
+        } else {
+          reportLabel += 'Safety Report';
+        }
+        return reportLabel;
+      } else if (taskType === 'Safety Equipment') {
+        // Show safety equipment type (Hot Sticks, Fire Extinguisher, Mileage Books, etc.)
+        var equipLabel = '🔧 ';
+        if (itemType) {
+          equipLabel += itemType;
+        } else {
+          equipLabel += 'Safety Equipment';
+        }
+        // Add vehicle/equipment number if available (from vehicleNumber field or notes)
+        var vehicleNum = task.vehicleNumber || '';
+        // Also check notes field for "Vehicle #XXXX" format
+        if (!vehicleNum && task.notes) {
+          var vehicleMatch = task.notes.match(/Vehicle\s*#?\s*(\d+)/i);
+          if (vehicleMatch) {
+            vehicleNum = vehicleMatch[1];
+          }
+        }
+        if (vehicleNum) {
+          equipLabel += ' <span style="color:#666;font-weight:bold;">(#' + vehicleNum + ')</span>';
+        }
+        // Add description excerpt if available
+        if (currentItem && currentItem.length > 0) {
+          // Truncate long descriptions
+          var desc = currentItem.length > 40 ? currentItem.substring(0, 37) + '...' : currentItem;
+          equipLabel += '<br><span style="font-size:11px;color:#555;">' + desc + '</span>';
+        }
+        // Add email subject if available (helps identify source email when data is missing)
+        if (task.emailSubject) {
+          var subjectDisplay = task.emailSubject.length > 60 ? task.emailSubject.substring(0, 57) + '...' : task.emailSubject;
+          equipLabel += '<br><span style="font-size:10px;color:#888;font-style:italic;">📧 ' + subjectDisplay + '</span>';
+        }
+        return equipLabel;
       }
 
       return taskType;
@@ -815,7 +955,18 @@
         return foremanFromLocation;
       }
 
-      // For Training and Cert tasks, use the employee name (crew lead) as the foreman
+      // SECOND: Use task.foreman property if available (from employee lookup)
+      // This ensures crew members are grouped under their actual foreman
+      if (task.foreman && task.foreman.trim() && task.foreman.toLowerCase() !== 'unassigned') {
+        var foremanName = task.foreman.trim();
+        var parenIndex = foremanName.indexOf(' (');
+        if (parenIndex !== -1) {
+          return foremanName.substring(0, parenIndex);
+        }
+        return foremanName;
+      }
+
+      // For Training and Cert tasks WITHOUT a foreman, use the employee name (crew lead) as the foreman
       var taskType = (task.taskType || '').toLowerCase();
       if (taskType.indexOf('training') !== -1 || taskType.indexOf('cert') !== -1) {
         if (task.employee && task.employee.trim()) {
@@ -842,10 +993,16 @@
     }
 
     // Helper: Get the task category for sub-grouping under foreman
-    // Categories: Training, Rubber Changes (swaps/reclaims), Expiring Certs, Other
+    // Categories: Training, Rubber Changes (swaps/reclaims), Certs (added from Expiring Certs), Manual Tasks, Other
     function getTaskCategory(task) {
       var taskType = (task.taskType || '').toLowerCase();
       var source = (task.source || '').toLowerCase();
+
+      // Manual Tasks - from Manual Tasks source or has "manual" in taskType
+      if (source === 'manual tasks' || source.indexOf('manual') !== -1 ||
+          taskType === 'manual' || taskType === 'manual task') {
+        return 'Manual Tasks';
+      }
 
       // Training tasks - from Training Tracking source OR has "training" in taskType
       // This includes "Renew Harassment Training", "Training: Topic", etc.
@@ -860,7 +1017,8 @@
         return 'Rubber Changes';
       }
 
-      // Expiring Certs - certification renewals (NOT training)
+      // Certs - certification renewals (NOT training)
+      // These are certs added from Expiring Certs tab (inTaskList=true)
       // Includes: "Renew 1st Aid", "Renew CPR", "Renew Crane Cert", "Cert Expiring", etc.
       // Check for cert-related keywords in taskType
       var certKeywords = ['cert', 'expir', '1st aid', 'first aid', 'cpr', 'crane', 'cdl', 'mec', 'dl'];
@@ -881,7 +1039,7 @@
       }
 
       if (isCertTask) {
-        return 'Expiring Certs';
+        return 'Certs';
       }
 
       // Everything else goes to Other
@@ -889,17 +1047,21 @@
     }
 
     // Category display order and icons
-    var categoryOrder = ['Training', 'Rubber Changes', 'Expiring Certs', 'Other'];
+    // Note: "Certs" = certs added from Expiring Certs tab (inTaskList=true)
+    // Note: "Manual Tasks" = user-created tasks
+    var categoryOrder = ['Training', 'Rubber Changes', 'Certs', 'Manual Tasks', 'Other'];
     var categoryIcons = {
       'Training': 'bi-mortarboard',
       'Rubber Changes': 'bi-arrow-left-right',
-      'Expiring Certs': 'bi-file-earmark-medical',
+      'Certs': 'bi-file-earmark-medical',
+      'Manual Tasks': 'bi-pencil-square',
       'Other': 'bi-three-dots'
     };
     var categoryColors = {
       'Training': '#1a73e8',
       'Rubber Changes': '#34a853',
-      'Expiring Certs': '#ea4335',
+      'Certs': '#ea4335',
+      'Manual Tasks': '#9c27b0',
       'Other': '#5f6368'
     };
 
@@ -999,17 +1161,42 @@
         .withSuccessHandler(function(response) {
           console.log('loadTasks: Server response:', response);
 
-          // Check if response is null
+          // Check if response is null - try fetching from ScriptProperties as fallback
           if (!response) {
-            console.error('loadTasks: Received NULL response from server!');
-            document.getElementById('taskContainer').innerHTML =
-              '<div class="alert alert-danger">' +
-              '<strong>Data Load Error</strong><br>' +
-              'Server returned no response. Please try:<br>' +
-              '• Click <strong>Refresh</strong> button<br>' +
-              '• Or close and reopen the dialog<br>' +
-              '<button class="btn btn-primary mt-2" onclick="refreshData()">Try Again</button>' +
-              '</div>';
+            console.warn('loadTasks: Received NULL response - trying ScriptProperties fallback...');
+
+            // The server may have stored data but failed to return confirmation
+            // Try fetching directly from ScriptProperties
+            google.script.run
+              .withSuccessHandler(function(storedData) {
+                console.log('loadTasks: Fallback fetch result:', storedData);
+
+                if (storedData && storedData.tasks && !storedData.error) {
+                  console.log('loadTasks: Fallback succeeded! Found ' + storedData.totalTasks + ' tasks');
+                  processTaskData(storedData);
+                } else {
+                  console.error('loadTasks: Fallback also failed');
+                  document.getElementById('taskContainer').innerHTML =
+                    '<div class="alert alert-danger">' +
+                    '<strong>Data Load Error</strong><br>' +
+                    'Server returned no data. This usually means:<br>' +
+                    '• Task collection took too long (>30 seconds)<br>' +
+                    '• Try clicking <strong>Refresh</strong> button<br>' +
+                    '• Or close and reopen the dialog<br>' +
+                    '<button class="btn btn-primary mt-2" onclick="refreshData()">Try Again</button>' +
+                    '</div>';
+                }
+              })
+              .withFailureHandler(function(error) {
+                console.error('loadTasks: Fallback fetch error:', error);
+                document.getElementById('taskContainer').innerHTML =
+                  '<div class="alert alert-danger">' +
+                  '<strong>Data Load Error</strong><br>' +
+                  'Could not load task data: ' + error + '<br>' +
+                  '<button class="btn btn-primary mt-2" onclick="refreshData()">Try Again</button>' +
+                  '</div>';
+              })
+              .getStoredTasks();
             return;
           }
 
@@ -1100,7 +1287,9 @@
             sheetName: t.src,
             source: t.src,
             rowIndex: t.row,
-            isManualTask: t.manual === 1
+            isManualTask: t.manual === 1,
+            inTaskList: t.inList === 1,  // Phase 5: Task List flag
+            isRegistered: t.reg === 1    // Phase 5: Registration flag for green highlight
           };
         }
         // Otherwise use as-is (legacy format)
@@ -1116,8 +1305,8 @@
               if (task.scheduledDate instanceof Date) {
                 task.scheduledDate = formatDate(task.scheduledDate);
               } else if (typeof task.scheduledDate === 'string') {
-                // Already a string, ensure it's in YYYY-MM-DD format
-                task.scheduledDate = formatDate(new Date(task.scheduledDate));
+                // Already a string - use formatDate which handles YYYY-MM-DD strings without re-parsing
+                task.scheduledDate = formatDate(task.scheduledDate);
               }
             }
             // Convert dueDate to string format
@@ -1125,7 +1314,8 @@
               if (task.dueDate instanceof Date) {
                 task.dueDate = formatDate(task.dueDate);
               } else if (typeof task.dueDate === 'string') {
-                task.dueDate = formatDate(new Date(task.dueDate));
+                // Already a string - use formatDate which handles YYYY-MM-DD strings without re-parsing
+                task.dueDate = formatDate(task.dueDate);
               }
             }
             // Preserve task source for filtering
@@ -1136,52 +1326,35 @@
               task.taskType = task.type;
             }
           });
-          console.log('loadTasks: Normalized dates for ' + allTasks.length + ' tasks');
+          console.log('processTaskData: Normalized dates for ' + allTasks.length + ' tasks');
 
           // Build employee phone map for checklist items
           buildEmployeePhoneMap();
-          console.log('loadTasks: Built phone map with ' + Object.keys(employeePhoneMap).length + ' entries');
+          console.log('processTaskData: Built phone map with ' + Object.keys(employeePhoneMap).length + ' entries');
 
           // Update localStorage checklist items with phone numbers if missing
           updateChecklistPhoneNumbers();
 
           try {
             renderTasks(allTasks);
-            console.log('loadTasks: renderTasks completed');
+            console.log('processTaskData: renderTasks completed');
           } catch (e) {
-            console.error('loadTasks: renderTasks error:', e);
+            console.error('processTaskData: renderTasks error:', e);
             document.getElementById('taskContainer').innerHTML =
               '<div class="alert alert-danger">Error rendering tasks: ' + e.message + '</div>';
           }
           try {
             renderCalendar();
-            console.log('loadTasks: renderCalendar completed');
+            console.log('processTaskData: renderCalendar completed');
           } catch (e) {
-            console.error('loadTasks: renderCalendar error:', e);
+            console.error('processTaskData: renderCalendar error:', e);
           }
           try {
             renderPersonalChecklist();
-            console.log('loadTasks: renderPersonalChecklist completed');
+            console.log('processTaskData: renderPersonalChecklist completed');
           } catch (e) {
-            console.error('loadTasks: renderPersonalChecklist error:', e);
+            console.error('processTaskData: renderPersonalChecklist error:', e);
           }
-        })
-        .withFailureHandler(function(error) {
-          console.error('loadTasks: Server error:', error);
-          // Check for specific Task Metadata errors
-          var errorMsg = error.message || error.toString();
-          if (errorMsg.indexOf('TASK_METADATA_NOT_FOUND') !== -1) {
-            document.getElementById('taskContainer').innerHTML =
-              '<div class="alert alert-warning"><strong>Task Metadata Not Found</strong><br>Please run <strong>Glove Manager → Schedule & To-Do → Generate Task Metadata</strong> first.</div>';
-          } else if (errorMsg.indexOf('TASK_METADATA_EMPTY') !== -1) {
-            document.getElementById('taskContainer').innerHTML =
-              '<div class="alert alert-warning"><strong>Task Metadata Empty</strong><br>Please run <strong>Glove Manager → Schedule & To-Do → Generate Task Metadata</strong> to populate data.</div>';
-          } else {
-            document.getElementById('taskContainer').innerHTML =
-              '<div class="alert alert-danger">Error loading tasks: ' + errorMsg + '</div>';
-          }
-        })
-        .getTasksWithMetadata();
     }
 
     // ================== CALENDAR FUNCTIONS ==================
@@ -1388,8 +1561,8 @@
             html += '<div class="small text-muted mt-1">';
             html += '<i class="bi bi-box-arrow-in-right"></i> ' + (task.source || 'Unknown');
             if (task.startTime) {
-              html += ' &nbsp;|&nbsp; <i class="bi bi-clock"></i> ' + task.startTime;
-              if (task.endTime) html += ' - ' + task.endTime;
+              html += ' &nbsp;|&nbsp; <i class="bi bi-clock"></i> ' + convertTo12Hour(task.startTime);
+              if (task.endTime) html += ' - ' + convertTo12Hour(task.endTime);
             }
             html += '</div>';
 
@@ -1424,21 +1597,47 @@
         return;
       }
 
-      // Filter out tasks that have been added to personal checklist AND Manual Tasks (which go to My Checklist only)
+      // Phase 5: Unified Task List
+      // - Include Manual Tasks (grouped by location/foreman like other tasks)
+      // - Include Cert tasks that have inTaskList=true (added from Expiring Certs tab)
+      // - Exclude cert tasks that have NOT been added to checklist (they stay in Expiring Certs tab)
       var filteredTasks = tasks.filter(function(task, index) {
         task._originalIndex = index; // Preserve original index for actions
-        // Exclude Manual Tasks source - they only appear in My Checklist
-        if (task.source === 'Manual Tasks') return false;
-        // Also exclude tasks with itemType of "Manual" - they belong in My Checklist only
-        var itemType = (task.itemType || '').toLowerCase();
-        if (itemType === 'manual') return false;
-        // Also check taskType for "Manual" or "Manual Task"
+
+        // Get task type/source info
         var taskType = (task.taskType || '').toLowerCase();
-        if (taskType === 'manual' || taskType === 'manual task') return false;
-        // Exclude tasks with foreman "Manual" extracted from location string (e.g., "Billings (👷 Manual)")
+        var source = (task.source || '').toLowerCase();
+        var itemType = (task.itemType || '').toLowerCase();
+
+        // INCLUDE: Manual Tasks - they now appear in Task List
+        if (source === 'manual tasks' || itemType === 'manual' ||
+            taskType === 'manual' || taskType === 'manual task') {
+          // Skip completed manual tasks
+          if (task.status === 'Complete' || task.completed) return false;
+          return true;
+        }
+
+        // INCLUDE: Cert tasks that are in Task List (inTaskList=true)
+        // These were added from the Expiring Certs tab
+        if (taskType === 'cert expiring' || source === 'expiring certs') {
+          // Only show if user added it to their Task List
+          if (task.inTaskList === true) {
+            // Skip completed cert tasks
+            if (task.status === 'Complete' || task.completed) return false;
+            return true;
+          }
+          // Cert tasks NOT in checklist stay in Expiring Certs tab only
+          return false;
+        }
+
+        // Exclude tasks with foreman "Manual" extracted from location string
         var foremanFromLoc = extractForemanFromLocation(task.location);
         if (foremanFromLoc && foremanFromLoc.toLowerCase() === 'manual') return false;
-        return !isTaskInChecklist(task);
+
+        // Include other task types (Training, Swaps, etc.)
+        // Skip if completed
+        if (task.status === 'Complete' || task.completed) return false;
+        return true;
       });
 
       if (filteredTasks.length === 0) {
@@ -1528,8 +1727,8 @@
         html += '</div>';
         html += '<div class="location-edit-row">';
         html += '<div><label class="form-label">Set Date for All</label><input type="date" class="form-control form-control-sm" id="bulk-date-' + locIndex + '" style="width: 140px;"></div>';
-        html += '<div><label class="form-label">Start Time</label><input type="time" class="form-control form-control-sm" id="bulk-start-' + locIndex + '" style="width: 110px;"></div>';
-        html += '<div><label class="form-label">End Time</label><input type="time" class="form-control form-control-sm" id="bulk-end-' + locIndex + '" style="width: 110px;"></div>';
+        html += '<div><label class="form-label">Start Time</label><input type="time" class="form-control form-control-sm" id="bulk-start-' + locIndex + '" style="width: 100px;"></div>';
+        html += '<div><label class="form-label">End Time</label><input type="time" class="form-control form-control-sm" id="bulk-end-' + locIndex + '" style="width: 100px;"></div>';
         html += '<div class="d-flex align-items-end"><button class="btn btn-primary btn-sm" onclick="applyBulkEdit(' + locIndex + ', \'' + escapeHtml(baseLocation) + '\')"><i class="bi bi-check-lg"></i> Apply to All</button></div>';
         html += '</div>';
         html += '<div class="text-muted small mt-2"><i class="bi bi-info-circle"></i> This will update the date and time for all ' + totalTasks + ' tasks at this location.</div>';
@@ -1602,9 +1801,17 @@
       var priorityClass = 'priority-' + (task.priority || 'medium').toLowerCase();
       var statusClass = getStatusClass(task.status);
       var displayTaskType = formatTaskType(task);
+
+      // Check if task is registered (green highlight)
+      var isRegistered = task.isRegistered === true || task.status === 'Registered';
+      var rowStyle = '';
+      if (isRegistered) {
+        rowStyle = 'background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); border-left-color: #4caf50 !important;';
+      }
+
       var html = '';
 
-      html += '<div class="task-row ' + priorityClass + '">';
+      html += '<div class="task-row ' + priorityClass + '" style="' + rowStyle + '">';
       html += '<div class="row align-items-center">';
 
       // Task Type & Source
@@ -1619,12 +1826,16 @@
       html += '<input type="date" class="date-input" value="' + (task.scheduledDate || '') + '" onchange="updateTaskDate(' + task._originalIndex + ', this.value, this)">';
       html += '</div>';
 
-      // Time (editable start and end)
+      // Time (editable start and end) - display in 12-hour format
       html += '<div class="col-md-2">';
+      var startTime24 = convertTo24Hour(task.startTime);
+      var endTime24 = convertTo24Hour(task.endTime);
+      var startDisplay = task.startTime ? convertTo12Hour(task.startTime) : '';
+      var endDisplay = task.endTime ? convertTo12Hour(task.endTime) : '';
       html += '<div class="d-flex gap-1 align-items-center">';
-      html += '<input type="time" class="time-input" value="' + (task.startTime || '') + '" onchange="updateTaskTime(' + task._originalIndex + ', \'start\', this.value, this)" placeholder="Start">';
+      html += '<input type="time" class="time-input" value="' + startTime24 + '" onchange="updateTaskTime(' + task._originalIndex + ', \'start\', this.value, this)" title="' + (startDisplay || 'Set start time') + '">';
       html += '<span class="text-muted">-</span>';
-      html += '<input type="time" class="time-input" value="' + (task.endTime || '') + '" onchange="updateTaskTime(' + task._originalIndex + ', \'end\', this.value, this)" placeholder="End">';
+      html += '<input type="time" class="time-input" value="' + endTime24 + '" onchange="updateTaskTime(' + task._originalIndex + ', \'end\', this.value, this)" title="' + (endDisplay || 'Set end time') + '">';
       html += '</div>';
       html += '</div>';
 
@@ -1648,9 +1859,26 @@
       html += '<div class="col-md-3 text-end">';
 
       // Check if this is a cert task with a phone number
-      var isCertWithPhone = isCertTask(task) && hasPhoneNumber(task);
+      // Also look up phone from employeePhoneMap if not directly on the task
+      var taskPhone = task.phoneNumber;
+      if ((!taskPhone || String(taskPhone).length < 10) && task.employee) {
+        var empLower = task.employee.toLowerCase().trim();
+        taskPhone = employeePhoneMap[empLower] || '';
+      }
+      // Also try to find from allExpiringCerts if still no phone
+      if ((!taskPhone || String(taskPhone).length < 10) && task.employee) {
+        var matchingCert = allExpiringCerts.find(function(c) {
+          return c.employee && c.employee.toLowerCase() === task.employee.toLowerCase();
+        });
+        if (matchingCert && matchingCert.phoneNumber) {
+          taskPhone = matchingCert.phoneNumber;
+        }
+      }
+      var isCertWithPhone = isCertTask(task) && taskPhone && String(taskPhone).length >= 10;
 
       if (isCertWithPhone) {
+        // Store the phone on the task for later use
+        task.phoneNumber = taskPhone;
         // SMS Notify button (Stage 1)
         var notifyBtnClass = isTaskNotified(task) ? 'btn-notified' : 'btn-sms';
         var notifyIcon = isTaskNotified(task) ? 'bi-chat-fill' : 'bi-chat-text';
@@ -1664,6 +1892,9 @@
           var scheduledTitle = isTaskScheduled(task) ? 'Resend class schedule' : 'Send class schedule text';
           html += '<button class="btn ' + scheduledBtnClass + ' btn-sm me-1" onclick="event.stopPropagation(); openScheduledModal(' + task._originalIndex + ')" title="' + scheduledTitle + '"><i class="bi ' + scheduledIcon + '"></i></button>';
         }
+
+        // Remove from Task List button for cert tasks (added from Expiring Certs tab)
+        html += '<button class="btn btn-outline-warning btn-sm me-1" onclick="event.stopPropagation(); removeFromTaskList(' + task._originalIndex + ')" title="Remove from Task List"><i class="bi bi-x-circle"></i></button>';
       } else {
 
         // Notified toggle button (for non-cert tasks)
@@ -1673,24 +1904,12 @@
         html += '<button class="btn ' + notifiedBtnClass + ' btn-sm me-1" onclick="event.stopPropagation(); toggleNotified(' + task._originalIndex + ')" title="' + notifiedTitle + '"><i class="bi ' + notifiedIcon + '"></i></button>';
       }
 
-      // Add to checklist button for 1st Aid and CPR tasks
-      var taskTypeLower = (task.taskType || '').toLowerCase();
-      var itemTypeLower = (task.itemType || '').toLowerCase();
-      var isTrainingCert = taskTypeLower.indexOf('1st aid') !== -1 ||
-                           taskTypeLower.indexOf('first aid') !== -1 ||
-                           taskTypeLower.indexOf('cpr') !== -1 ||
-                           itemTypeLower.indexOf('1st aid') !== -1 ||
-                           itemTypeLower.indexOf('first aid') !== -1 ||
-                           itemTypeLower.indexOf('cpr') !== -1;
-
-      if (isTrainingCert) {
-        html += '<button class="btn btn-outline-primary btn-sm me-1" onclick="event.stopPropagation(); addToChecklist(' + task._originalIndex + ')" title="Add to My Checklist"><i class="bi bi-plus-circle"></i></button>';
-      }
-
+      // Mark Complete button
       html += '<button class="btn btn-outline-success btn-sm me-1" onclick="event.stopPropagation(); markComplete(' + task._originalIndex + ')" title="Mark Complete"><i class="bi bi-check-lg"></i></button>';
-      if (task.source === 'Manual Tasks') {
-        html += '<button class="btn btn-outline-danger btn-sm" onclick="event.stopPropagation(); deleteTask(' + task._originalIndex + ')" title="Delete"><i class="bi bi-trash"></i></button>';
-      }
+
+      // Delete button - available for all tasks now
+      var taskKeyAttr = task.taskKey ? ' data-taskkey="' + task.taskKey + '"' : '';
+      html += '<button class="btn btn-outline-danger btn-sm" onclick="event.stopPropagation(); deleteTask(' + task._originalIndex + ', \'' + (task.taskKey || '') + '\')" title="Delete"' + taskKeyAttr + '><i class="bi bi-trash"></i></button>';
       html += '</div>';
 
       html += '</div>'; // row
@@ -2080,7 +2299,7 @@
         .updateCertExpirationFromTask(employee, certType, newExpiration, allTasks[taskIndex]);
     }
 
-    function deleteTask(index) {
+    function deleteTask(index, taskKey) {
       if (!confirm('Are you sure you want to delete this task?')) return;
 
       google.script.run
@@ -2093,7 +2312,7 @@
         .withFailureHandler(function(error) {
           showToast('Error: ' + error, 'error');
         })
-        .deleteScheduleTask(index);
+        .deleteScheduleTask(index, taskKey);
     }
 
     function applyFilters() {
@@ -2135,8 +2354,14 @@
       setTimeout(function() { toast.remove(); }, duration || 3000);
     }
 
-    // ================== PERSONAL CHECKLIST FUNCTIONS ==================
+    // ================== TASK LIST FUNCTIONS (Phase 5) ==================
     function isTaskInChecklist(task) {
+      // First check Task Metadata inTaskList (Phase 5: unified Task List)
+      // Also check old property name inMyChecklist for backwards compatibility
+      if (task.inTaskList === true || task.inMyChecklist === true) {
+        return true;
+      }
+      // Fallback to localStorage (will be removed after migration verified)
       return personalChecklist.some(function(item) {
         return item.employee === task.employee &&
                item.taskType === task.taskType &&
@@ -2144,28 +2369,103 @@
       });
     }
 
+    // Phase 5: Remove cert task from Task List (returns it to Expiring Certs tab only)
+    function removeFromTaskList(index) {
+      var task = allTasks[index];
+      if (!task) {
+        showToast('❌ Task not found', 'error');
+        return;
+      }
+
+      // Build taskKey for server update
+      var taskKey = '';
+      if (task.sheetName && task.rowIndex) {
+        taskKey = task.sheetName + '_' + task.rowIndex;
+      } else if (task.source && task.serverIndex !== undefined) {
+        taskKey = task.source + '_' + task.serverIndex;
+      }
+
+      if (!taskKey) {
+        showToast('❌ Cannot identify task for removal', 'error');
+        return;
+      }
+
+      // Update Task Metadata on server - set inTaskList to false
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result && result.success) {
+            // Update local state
+            task.inTaskList = false;
+            task.inMyChecklist = false; // Also clear old property for compatibility
+
+            // Remove from localStorage backup
+            personalChecklist = personalChecklist.filter(function(item) {
+              return !(item.employee === task.employee &&
+                       (item.itemType === task.itemType || item.certType === task.certType) &&
+                       item.taskType === task.taskType);
+            });
+            saveChecklistToStorage();
+
+            // Re-render UI
+            updateChecklistBadge();
+            renderTasks(allTasks);
+            renderExpiringCerts();
+            renderCalendar();
+            showToast('✓ Removed from Task List');
+          } else {
+            showToast('❌ Failed to remove: ' + (result ? result.error : 'Unknown error'), 'error');
+          }
+        })
+        .withFailureHandler(function(err) {
+          showToast('❌ Error: ' + err.message, 'error');
+        })
+        .toggleTaskChecklist(taskKey, false);
+    }
+
     function addToChecklist(index) {
       var task = allTasks[index];
       if (!isTaskInChecklist(task)) {
-        var checklistItem = {
-          id: Date.now(),
-          employee: task.employee || '',
-          taskType: task.taskType || '',
-          itemType: task.itemType || '',
-          location: task.location || '',
-          scheduledDate: task.scheduledDate || '',
-          source: task.source || '',
-          phoneNumber: task.phoneNumber || '',
-          subject: 'Add to upcoming training',
-          addedDate: new Date().toISOString().split('T')[0],
-          completed: false
-        };
-        personalChecklist.push(checklistItem);
-        saveChecklistToStorage();
-        updateChecklistBadge();
-        renderPersonalChecklist();
-        renderTasks(allTasks); // Re-render to remove from foreman's list
-        showToast('✓ Moved to your personal checklist');
+        var taskKey = task.sheetName + '_' + task.rowIndex;
+
+        // Update Task Metadata on server
+        google.script.run
+          .withSuccessHandler(function(result) {
+            if (result && result.success) {
+              // Update local state
+              task.inTaskList = true;
+
+              // Also add to localStorage as backup during migration
+              var checklistItem = {
+                id: Date.now(),
+                employee: task.employee || '',
+                taskType: task.taskType || '',
+                itemType: task.itemType || '',
+                location: task.location || '',
+                scheduledDate: task.scheduledDate || '',
+                source: task.source || '',
+                phoneNumber: task.phoneNumber || '',
+                subject: 'Add to upcoming training',
+                addedDate: new Date().toISOString().split('T')[0],
+                completed: false,
+                taskKey: taskKey  // Track task key for server reference
+              };
+              personalChecklist.push(checklistItem);
+              saveChecklistToStorage();
+
+              updateChecklistBadge();
+              renderPersonalChecklist();
+              renderTasks(allTasks);
+              showToast('✓ Added to Task List');
+            } else {
+              showToast('❌ Failed to add: ' + (result ? result.error : 'Unknown error'), 'error');
+            }
+          })
+          .withFailureHandler(function(err) {
+            showToast('❌ Error: ' + err.message, 'error');
+          })
+          .toggleTaskChecklist(taskKey, true);
+      } else {
+        showToast('⚠️ Already in Task List', 'warning');
       }
     }
 
@@ -2181,19 +2481,28 @@
         return;
       }
 
-      // Add to personal checklist
+      // Build taskKey from task data
+      var taskKey = '';
+      if (task.sheetName && task.rowIndex) {
+        taskKey = task.sheetName + '_' + task.rowIndex;
+      } else if (task.source && task.serverIndex) {
+        taskKey = task.source + '_' + task.serverIndex;
+      }
+
+      // Add to personal checklist (localStorage backup during migration)
       var checklistItem = {
         id: Date.now(),
         employee: task.employee || '',
         taskType: task.taskType || '',
-        itemType: task.itemType || '',
+        itemType: task.itemType || task.certType || '',
         location: task.location || '',
         scheduledDate: task.scheduledDate || '',
-        source: task.source || '',
+        source: task.source || task.sheetName || '',
         phoneNumber: task.phoneNumber || '',
         subject: 'Follow up on ' + (task.itemType || task.certType || 'certification'),
         addedDate: new Date().toISOString().split('T')[0],
-        completed: false
+        completed: false,
+        taskKey: taskKey  // Track task key for server reference
       };
       personalChecklist.push(checklistItem);
       saveChecklistToStorage();
@@ -2202,6 +2511,23 @@
       var key = getTaskKey(task);
       officeTasks[key] = true;
       saveOfficeToStorage();
+
+      // Update Task Metadata on server if we have a taskKey
+      if (taskKey) {
+        google.script.run
+          .withSuccessHandler(function(result) {
+            if (result && result.success) {
+              task.inTaskList = true;
+              console.log('Task Metadata updated for: ' + taskKey);
+            } else {
+              console.log('Failed to update Task Metadata: ' + (result ? result.error : 'Unknown'));
+            }
+          })
+          .withFailureHandler(function(err) {
+            console.log('Error updating Task Metadata: ' + err.message);
+          })
+          .toggleTaskChecklist(taskKey, true);
+      }
 
       updateChecklistBadge();
       renderPersonalChecklist();
@@ -2212,7 +2538,7 @@
       var modal = bootstrap.Modal.getInstance(document.getElementById('smsNotifyModal'));
       if (modal) modal.hide();
 
-      showToast('✓ Added to My Checklist with Office status');
+      showToast('✓ Added to Task List with Office status');
     }
 
     function removeFromChecklist(index) {
@@ -2302,6 +2628,46 @@
     }
 
     function loadChecklistFromStorage() {
+      // Phase 4: First try to load from Task Metadata on server
+      google.script.run
+        .withSuccessHandler(function(serverChecklist) {
+          if (serverChecklist && serverChecklist.length > 0) {
+            console.log('Loaded ' + serverChecklist.length + ' checklist items from Task Metadata');
+            // Convert server format to client format
+            personalChecklist = serverChecklist.map(function(item) {
+              return {
+                id: item.taskKey || Date.now(),
+                employee: item.employee,
+                taskType: item.taskType,
+                itemType: item.itemType,
+                location: item.location,
+                scheduledDate: item.scheduledDate || '',
+                source: item.sourceSheet || 'Task Metadata',
+                phoneNumber: item.phoneNumber || '',
+                subject: 'Renew ' + item.itemType,
+                addedDate: new Date().toISOString().split('T')[0],
+                completed: item.status === 'Completed',
+                notified: !!item.notifiedDate,
+                notes: item.dueDate ? 'Expires: ' + item.dueDate : '',
+                taskKey: item.taskKey,
+                serverLoaded: true
+              };
+            });
+            updateChecklistBadge();
+            renderPersonalChecklist();
+          } else {
+            // Fallback to localStorage if no server data
+            loadChecklistFromLocalStorage();
+          }
+        })
+        .withFailureHandler(function(err) {
+          console.log('Could not load from server, falling back to localStorage:', err);
+          loadChecklistFromLocalStorage();
+        })
+        .getChecklistTasks();
+    }
+
+    function loadChecklistFromLocalStorage() {
       try {
         var stored = localStorage.getItem('rubberTracker_personalChecklist');
         if (stored) {
@@ -2342,25 +2708,63 @@
     }
 
     function isTaskNotified(task) {
+      // First check Task Metadata notifiedDate (Phase 4: server-side)
+      if (task.notifiedDate) {
+        return true;
+      }
+      // Fallback to localStorage (will be removed after migration verified)
       var key = getTaskKey(task);
       return notifiedTasks[key] === true;
     }
 
     function toggleNotified(index) {
       var task = allTasks[index];
-      var key = getTaskKey(task);
+      var taskKey = task.sheetName + '_' + task.rowIndex;
 
-      if (notifiedTasks[key]) {
-        delete notifiedTasks[key];
-        showToast('Notification status cleared');
+      // Check if already notified (from Task Metadata)
+      var wasNotified = isTaskNotified(task);
+
+      if (wasNotified) {
+        // Clear notification - update Task Metadata
+        google.script.run
+          .withSuccessHandler(function(result) {
+            if (result && result.success) {
+              // Clear local state
+              task.notifiedDate = null;
+              var key = getTaskKey(task);
+              delete notifiedTasks[key];
+              showToast('Notification status cleared');
+              renderTasks(allTasks);
+              renderPersonalChecklist();
+            } else {
+              showToast('❌ Failed to update: ' + (result ? result.error : 'Unknown error'), 'error');
+            }
+          })
+          .withFailureHandler(function(err) {
+            showToast('❌ Error: ' + err.message, 'error');
+          })
+          .updateTaskMetadata(taskKey, { NotifiedDate: '' });
       } else {
-        notifiedTasks[key] = true;
-        showToast('✓ Marked as notified');
+        // Set notification - update Task Metadata
+        google.script.run
+          .withSuccessHandler(function(result) {
+            if (result && result.success) {
+              // Update local state
+              task.notifiedDate = new Date().toISOString().split('T')[0];
+              var key = getTaskKey(task);
+              notifiedTasks[key] = true;
+              showToast('✓ Marked as notified');
+              renderTasks(allTasks);
+              renderPersonalChecklist();
+            } else {
+              showToast('❌ Failed to update: ' + (result ? result.error : 'Unknown error'), 'error');
+            }
+          })
+          .withFailureHandler(function(err) {
+            showToast('❌ Error: ' + err.message, 'error');
+          })
+          .recordTaskNotification(taskKey, 'manual');
       }
-
-      saveNotifiedToStorage();
-      renderTasks(allTasks);
-      renderPersonalChecklist();
     }
 
     function toggleChecklistNotified(itemId) {
@@ -2489,26 +2893,47 @@
     }
 
     function isTaskOffice(task) {
+      // First check Task Metadata isOffice (Phase 4: server-side)
+      if (task.isOffice === true) {
+        return true;
+      }
+      // Fallback to localStorage (will be removed after migration verified)
       var key = getTaskKey(task);
       return officeTasks[key] === true;
     }
 
     function toggleOffice(index) {
       var task = allTasks[index];
-      var key = getTaskKey(task);
+      var taskKey = task.sheetName + '_' + task.rowIndex;
 
-      if (officeTasks[key]) {
-        delete officeTasks[key];
-        showToast('Office status cleared');
-      } else {
-        officeTasks[key] = true;
-        showToast('✓ Marked as office task');
-      }
+      // Check if already marked as office (from Task Metadata)
+      var wasOffice = isTaskOffice(task);
 
-      saveOfficeToStorage();
-      renderTasks(allTasks);
-      renderCalendar();
-      renderPersonalChecklist();
+      // Update server-side via Task Metadata
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result && result.success) {
+            // Update local state
+            task.isOffice = !wasOffice;
+            var key = getTaskKey(task);
+            if (wasOffice) {
+              delete officeTasks[key];
+              showToast('Office status cleared');
+            } else {
+              officeTasks[key] = true;
+              showToast('✓ Marked as office task');
+            }
+            renderTasks(allTasks);
+            renderCalendar();
+            renderPersonalChecklist();
+          } else {
+            showToast('❌ Failed to update: ' + (result ? result.error : 'Unknown error'), 'error');
+          }
+        })
+        .withFailureHandler(function(err) {
+          showToast('❌ Error: ' + err.message, 'error');
+        })
+        .toggleTaskOffice(taskKey, !wasOffice);
     }
 
     function toggleChecklistOffice(itemId) {
@@ -2638,12 +3063,21 @@
     function isCertTask(task) {
       var taskType = (task.type || task.taskType || '').toLowerCase();
       var source = (task.source || task.sheetName || '').toLowerCase();
-      return taskType.indexOf('cert') !== -1 || source.indexOf('cert') !== -1;
+      // Include cert tasks AND missing safety report tasks (both use SMS notification)
+      return taskType.indexOf('cert') !== -1 ||
+             source.indexOf('cert') !== -1 ||
+             taskType.indexOf('missing safety report') !== -1;
     }
 
     // Detect specific cert types for different notification messages
     function getCertCategory(task) {
       var itemType = (task.itemType || task.certType || '').toLowerCase();
+      var taskType = (task.taskType || '').toLowerCase();
+
+      // Missing Safety Report (JHA / Weekly Meeting)
+      if (taskType === 'missing safety report' || taskType.indexOf('missing safety') !== -1) {
+        return 'missing_safety_report';
+      }
 
       // 1st Aid / CPR
       if (itemType.indexOf('1st aid') !== -1 || itemType.indexOf('first aid') !== -1 || itemType.indexOf('cpr') !== -1) {
@@ -2675,17 +3109,23 @@
     }
 
     function hasPhoneNumber(task) {
-      return task.phoneNumber && task.phoneNumber.length >= 10;
+      var phone = task.phoneNumber;
+      if (!phone) return false;
+      var phoneStr = String(phone);
+      return phoneStr.length >= 10;
     }
 
     // Build a map of employee names to phone numbers from allTasks
     function buildEmployeePhoneMap() {
       employeePhoneMap = {};
       allTasks.forEach(function(task) {
-        if (task.employee && task.phoneNumber && task.phoneNumber.length >= 10) {
-          var empName = task.employee.toLowerCase().trim();
-          if (!employeePhoneMap[empName]) {
-            employeePhoneMap[empName] = task.phoneNumber;
+        if (task.employee && task.phoneNumber) {
+          var phoneStr = String(task.phoneNumber);
+          if (phoneStr.length >= 10) {
+            var empName = task.employee.toLowerCase().trim();
+            if (!employeePhoneMap[empName]) {
+              employeePhoneMap[empName] = phoneStr;
+            }
           }
         }
       });
@@ -2695,12 +3135,13 @@
     function updateChecklistPhoneNumbers() {
       var updated = false;
       personalChecklist.forEach(function(item) {
-        if (!item.phoneNumber || item.phoneNumber.length < 10) {
+        var itemPhone = item.phoneNumber ? String(item.phoneNumber) : '';
+        if (!itemPhone || itemPhone.length < 10) {
           if (item.employee) {
             var empName = item.employee.toLowerCase().trim();
             var phone = employeePhoneMap[empName];
-            if (phone && phone.length >= 10) {
-              item.phoneNumber = phone;
+            if (phone && String(phone).length >= 10) {
+              item.phoneNumber = String(phone);
               updated = true;
               console.log('Updated phone for ' + item.employee + ': ' + phone);
             }
@@ -2716,8 +3157,9 @@
     // Look up phone number for a checklist item by employee name
     function getPhoneForChecklistItem(item) {
       // First check if item has phone number directly
-      if (item.phoneNumber && item.phoneNumber.length >= 10) {
-        return item.phoneNumber;
+      var itemPhone = item.phoneNumber ? String(item.phoneNumber) : '';
+      if (itemPhone && itemPhone.length >= 10) {
+        return itemPhone;
       }
       // Look up by employee name
       if (item.employee) {
@@ -2746,14 +3188,16 @@
 
     function formatPhoneForDisplay(phone) {
       if (!phone) return '';
-      var digits = phone.replace(/\D/g, '');
+      // Convert to string if it's a number
+      var phoneStr = String(phone);
+      var digits = phoneStr.replace(/\D/g, '');
       if (digits.length === 11 && digits.startsWith('1')) {
         digits = digits.substring(1);
       }
       if (digits.length === 10) {
         return '(' + digits.substring(0,3) + ') ' + digits.substring(3,6) + '-' + digits.substring(6);
       }
-      return phone;
+      return phoneStr;
     }
 
     function formatDateForMessage(dateStr) {
@@ -2826,8 +3270,13 @@
     }
 
     function openNotifyModal(index) {
+      console.log('openNotifyModal called with index:', index);
       var task = allTasks[index];
-      if (!task) return;
+      if (!task) {
+        console.log('openNotifyModal: No task found at index', index);
+        return;
+      }
+      console.log('openNotifyModal: Task found:', task);
 
       currentSmsTask = { task: task, index: index };
 
@@ -2872,6 +3321,23 @@
         // Reset crane options
         document.getElementById('notifyCraneStartDate').value = '';
         document.getElementById('notifyCraneEndDate').value = '';
+      } else if (certCategory === 'missing_safety_report') {
+        // Missing Safety Report - show simple notification section
+        document.getElementById('simpleCertOptions').style.display = 'block';
+        // Update the cert info display for safety reports
+        var itemType = task.itemType || '';
+        var infoText = '<strong>⚠️ Missing Safety Report</strong><br>';
+        if (itemType === 'JHA + Weekly Meeting') {
+          infoText += 'Missing JHA(s) and Weekly Safety Meeting';
+        } else if (itemType === 'JHA') {
+          infoText += 'Missing JHA submission(s)';
+        } else if (itemType === 'Weekly Meeting') {
+          infoText += 'Missing Weekly Safety Meeting';
+        }
+        if (task.notes) {
+          infoText += '<br><small class="text-muted">' + task.notes + '</small>';
+        }
+        document.getElementById('notifyCertInfo').innerHTML = infoText;
       } else {
         // DL, MEC, Harassment - simple notification
         document.getElementById('simpleCertOptions').style.display = 'block';
@@ -2983,14 +3449,23 @@
         var craneStartDate = document.getElementById('notifyCraneStartDate').value;
         var craneEndDate = document.getElementById('notifyCraneEndDate').value;
 
-        message = 'Hi ' + firstName + ', your Crane Cert ' + expirationStatus + '. ';
-        message += 'There is a class scheduled at the MSLCAT Training Center. ';
-        if (craneStartDate && craneEndDate) {
-          message += 'It starts on ' + formatDateMMDDYYYY(craneStartDate) + ' and ends on ' + formatDateMMDDYYYY(craneEndDate) + '. ';
+        message = 'Hi ' + firstName + ', your Crane Cert is expiring and needs to be renewed. ';
+        message += 'There is a class at MSLCAT starting ';
+        if (craneStartDate) {
+          message += formatDateMMDDYYYY(craneStartDate);
         } else {
-          message += 'It starts on (start date) and ends on (end date). ';
+          message += '[start date]';
         }
-        message += 'Let me know if you can attend.';
+        message += ' and ending ';
+        if (craneEndDate) {
+          message += formatDateMMDDYYYY(craneEndDate);
+        } else {
+          message += '[end date]';
+        }
+        message += '. You will need to contact MSLCAT directly to register: ';
+        message += 'Phone: (801) 562-2929 Email: office@mslcat.org Website: mslcat.org (Mon-Fri 7:30am-4pm MT). ';
+        message += 'Have your Name, Email Address, and last 4 of your SSN ready when you call. ';
+        message += 'Let me know when you get signed up!';
 
       } else if (certCategory === 'dl') {
         // Driver's License message
@@ -3010,6 +3485,10 @@
         message += 'Go to SafetyWallet.org or the mobile app, sign in with your last name and phone number, upper left is a menu with Training and then On Line Training. ';
         message += 'Make sure you take the 65 minute class and not the 120 minute class. ';
         message += 'If you have trouble logging in call Safety Wallet at 424-342-7233 and they can get you straightened out.';
+
+      } else if (certCategory === 'missing_safety_report') {
+        // Missing Safety Report (JHA / Weekly Meeting) message
+        message = buildMissingSafetyReportMessage(currentSmsTask.task);
 
       } else {
         // Other cert types - generic message
@@ -3037,6 +3516,38 @@
       var countEl = document.getElementById('notifyCharCount');
       countEl.textContent = '(' + count + ' characters)';
       countEl.className = 'char-count' + (count > 160 ? (count > 320 ? ' danger' : ' warning') : '');
+    }
+
+    // Build SMS message for missing JHA/Weekly Safety Meeting reports
+    function buildMissingSafetyReportMessage(task) {
+      var itemType = task.itemType || task.ItemType || '';
+      var notes = task.notes || task.Notes || '';
+
+      // Extract dates from notes
+      // Notes format: "Missing JHA: 02/03/2026, 02/04/2026; Missing Weekly Safety Meeting for week of 02/02/2026"
+      var jhaDateMatch = notes.match(/Missing JHA:\s*([^;]+)/);
+      var weekOfMatch = notes.match(/week of\s+(\d{2}\/\d{2}\/\d{4})/i);
+
+      var jhaDates = jhaDateMatch ? jhaDateMatch[1].trim() : '';
+      var weekOf = weekOfMatch ? weekOfMatch[1] : '';
+
+      // Count JHA dates for grammar
+      var jhaDateCount = jhaDates ? jhaDates.split(',').length : 0;
+      var itThem = jhaDateCount > 1 ? 'them' : 'it';
+
+      var message = '';
+
+      if (itemType === 'JHA + Weekly Meeting') {
+        message = 'We did not receive a JHA for ' + jhaDates + ' or a Weekly Safety Meeting for the week of ' + weekOf + ' from your crew. This is just a reminder not to miss them this week. Was there an issue turning them in that you need help with?';
+      } else if (itemType === 'JHA') {
+        message = 'We did not receive a JHA for ' + jhaDates + ' from your crew. This is just a reminder not to miss ' + itThem + ' this week. Was there an issue turning ' + itThem + ' in that you need help with?';
+      } else if (itemType === 'Weekly Meeting') {
+        message = 'We did not receive a Weekly Safety Meeting for the week of ' + weekOf + ' from your crew. This is just a reminder not to miss it this week. Was there an issue turning it in that you need help with?';
+      } else {
+        message = 'We did not receive a safety report from your crew. This is just a reminder not to miss it this week. Was there an issue turning it in that you need help with?';
+      }
+
+      return message;
     }
 
     // ================== ADD MANUAL ITEM FUNCTIONS ==================
@@ -3116,6 +3627,20 @@
       currentSmsTask.firstName = employeeName.split(' ')[0];
       currentSmsTask.certType = task.itemType || task.certType || 'Certification';
 
+      // Check if this is a Crane Cert - use different modal (no SMS, just tracking)
+      var itemType = (task.itemType || task.certType || '').toLowerCase();
+      if (itemType === 'crane cert' || itemType === 'crane certification') {
+        // Open Crane Cert modal (Registered/Declined buttons, no SMS)
+        document.getElementById('craneEmployeeName').textContent = employeeName;
+        document.getElementById('craneCertInfo').innerHTML = '<strong>' + certInfo.types + '</strong><br>' + certInfo.details;
+        document.getElementById('cranePhoneDisplay').textContent = formatPhoneForDisplay(phoneNumber);
+
+        var modal = new bootstrap.Modal(document.getElementById('craneCertModal'));
+        modal.show();
+        return;
+      }
+
+      // For other certs (1st Aid, CPR, etc.), show SMS class registration modal
       document.getElementById('scheduledEmployeeName').textContent = employeeName;
       document.getElementById('scheduledCertInfo').innerHTML = '<strong>' + certInfo.types + '</strong><br>' + certInfo.details;
       document.getElementById('scheduledPhoneDisplay').textContent = formatPhoneForDisplay(phoneNumber);
@@ -3241,6 +3766,97 @@
       showToast('✓ Opening messaging app for class registration...');
       renderTasks(allTasks);
       renderPersonalChecklist();
+    }
+
+    // Mark Crane Cert as Registered (employee will attend class)
+    function markCraneRegistered() {
+      if (!currentSmsTask) return;
+
+      var task = currentSmsTask.task;
+      var key = getTaskKey(task);
+
+      // Mark as registered in local state
+      scheduledTasks[key] = true;
+      saveScheduledToStorage();
+
+      // Update Task Metadata on server if we have a taskKey
+      if (task.taskKey) {
+        google.script.run
+          .withSuccessHandler(function() {
+            console.log('Crane cert marked as registered on server');
+          })
+          .withFailureHandler(function(err) {
+            console.log('Error updating Task Metadata:', err);
+          })
+          .scheduleTask(task.taskKey, '', 'Registered');
+      }
+
+      // Close modal and refresh
+      var modal = bootstrap.Modal.getInstance(document.getElementById('craneCertModal'));
+      modal.hide();
+
+      showToast('✓ Crane Cert marked as REGISTERED');
+      renderTasks(allTasks);
+      renderPersonalChecklist();
+      renderExpiringCerts();
+    }
+
+    // Mark Crane Cert as Declined (employee will not attend class)
+    function markCraneDeclined() {
+      if (!currentSmsTask) return;
+
+      var task = currentSmsTask.task;
+      var key = getTaskKey(task);
+
+      // Mark as declined in local state (use a different object for declined)
+      if (!window.declinedTasks) window.declinedTasks = {};
+      window.declinedTasks[key] = true;
+
+      // Update Task Metadata on server - mark as declined AND remove from Task List
+      if (task.taskKey) {
+        google.script.run
+          .withSuccessHandler(function(result) {
+            console.log('Crane cert marked as declined on server:', result);
+
+            // Update local task state
+            task.isDeclined = true;
+            task.inTaskList = false;
+            task.status = 'Declined';
+
+            // Remove from allTasks if it's a cert added to Task List
+            if (task.source === 'Expiring Certs') {
+              allTasks = allTasks.filter(function(t) {
+                return !(t.employee === task.employee &&
+                        t.itemType === task.itemType &&
+                        t.source === 'Expiring Certs');
+              });
+            }
+
+            // Also remove from personalChecklist localStorage
+            personalChecklist = personalChecklist.filter(function(item) {
+              return !(item.employee === task.employee &&
+                      (item.itemType === task.itemType || item.certType === task.itemType));
+            });
+            saveChecklistToStorage();
+
+            // Refresh UI
+            renderTasks(allTasks);
+            renderPersonalChecklist();
+            renderExpiringCerts();
+            renderCalendar();
+          })
+          .withFailureHandler(function(err) {
+            console.log('Error updating Task Metadata:', err);
+            showToast('❌ Error: ' + err.message, 'error');
+          })
+          .markCertDeclinedAndRemove(task.taskKey, task.employee, task.itemType);
+      }
+
+      // Close modal
+      var modal = bootstrap.Modal.getInstance(document.getElementById('craneCertModal'));
+      modal.hide();
+
+      showToast('✓ Crane Cert marked as DECLINED');
     }
 
     // Helper function to mark related 1st Aid and CPR certs for the same employee
@@ -3670,13 +4286,13 @@
       // Time
       html += '<div class="col-md-2"><div class="d-flex gap-1 align-items-center">';
       if (taskIndex !== -1) {
-        html += '<input type="time" class="time-input" value="' + (item.startTime || '') + '" onchange="updateChecklistTaskTime(' + taskIndex + ', \'start\', this.value, this)">';
+        html += '<input type="time" class="time-input" value="' + convertTo24Hour(item.startTime) + '" onchange="updateChecklistTaskTime(' + taskIndex + ', \'start\', this.value, this)">';
         html += '<span class="text-muted">-</span>';
-        html += '<input type="time" class="time-input" value="' + (item.endTime || '') + '" onchange="updateChecklistTaskTime(' + taskIndex + ', \'end\', this.value, this)">';
+        html += '<input type="time" class="time-input" value="' + convertTo24Hour(item.endTime) + '" onchange="updateChecklistTaskTime(' + taskIndex + ', \'end\', this.value, this)">';
       } else {
-        html += '<input type="time" class="time-input" value="' + (item.startTime || '') + '" onchange="updateChecklistItemTime(' + itemId + ', \'start\', this.value, this)">';
+        html += '<input type="time" class="time-input" value="' + convertTo24Hour(item.startTime) + '" onchange="updateChecklistItemTime(' + itemId + ', \'start\', this.value, this)">';
         html += '<span class="text-muted">-</span>';
-        html += '<input type="time" class="time-input" value="' + (item.endTime || '') + '" onchange="updateChecklistItemTime(' + itemId + ', \'end\', this.value, this)">';
+        html += '<input type="time" class="time-input" value="' + convertTo24Hour(item.endTime) + '" onchange="updateChecklistItemTime(' + itemId + ', \'end\', this.value, this)">';
       }
       html += '</div></div>';
 
@@ -3755,6 +4371,36 @@
     // ================== EXPIRING CERTS TAB FUNCTIONS ==================
     var allExpiringCerts = [];
     var certFilterState = { status: '', type: '', location: '' };
+    var declinedCertsMap = {};  // Cache of declined certs from Task Metadata
+
+    // Enrich certs with declined status from Task Metadata
+    // This handles certs that were declined before the Expiring Certs sheet had "Declined Date" column
+    function enrichCertsWithMetadataStatus() {
+      // Build map of declined certs from allTasks (loaded from Task Metadata)
+      allTasks.forEach(function(task) {
+        if (task.source === 'Expiring Certs' &&
+            (task.status === 'Declined' || task.isDeclined === true)) {
+          var key = (task.employee + '_' + task.itemType).toLowerCase();
+          declinedCertsMap[key] = {
+            isDeclined: true,
+            declinedDate: task.completedDate || task.scheduledDate || 'Unknown'
+          };
+          console.log('enrichCertsWithMetadataStatus: Found declined cert - ' + task.employee + ' ' + task.itemType);
+        }
+      });
+
+      // Update allExpiringCerts with declined status from Task Metadata
+      allExpiringCerts.forEach(function(cert) {
+        if (!cert.isDeclined) {
+          var key = (cert.employee + '_' + cert.certType).toLowerCase();
+          if (declinedCertsMap[key]) {
+            cert.isDeclined = true;
+            cert.declinedDate = declinedCertsMap[key].declinedDate;
+            console.log('enrichCertsWithMetadataStatus: Updated ' + cert.employee + ' ' + cert.certType + ' as declined');
+          }
+        }
+      });
+    }
 
     function loadExpiringCerts() {
       console.log('loadExpiringCerts: Starting...');
@@ -3762,6 +4408,9 @@
         .withSuccessHandler(function(result) {
           console.log('loadExpiringCerts: Received ' + (result && result.certs ? result.certs.length : 0) + ' certs');
           allExpiringCerts = (result && result.certs) || [];
+
+          // Enrich certs with Task Metadata status (for certs declined before sheet update)
+          enrichCertsWithMetadataStatus();
 
           // Add phone numbers from expiring certs to employeePhoneMap
           allExpiringCerts.forEach(function(cert) {
@@ -3777,8 +4426,15 @@
           // Also update localStorage checklist items with these phone numbers
           updateChecklistPhoneNumbers();
 
+          // Phase 5: Add certs that are in personalChecklist to allTasks for Task List display
+          addChecklistCertsToAllTasks();
+
           populateCertFilters();
           renderExpiringCerts();
+
+          // Re-render Task List with any added certs
+          renderTasks(allTasks);
+          renderCalendar();
 
           // Re-render checklist in case phone numbers were added
           renderPersonalChecklist();
@@ -3789,6 +4445,89 @@
             '<div class="alert alert-danger m-3"><i class="bi bi-exclamation-triangle"></i> Error loading expiring certs: ' + error + '</div>';
         })
         .getExpiringCertsForSchedule();
+    }
+
+    // Phase 5: Add certs from personalChecklist to allTasks so they appear in Task List
+    // Also syncs localStorage items to Task Metadata on server
+    function addChecklistCertsToAllTasks() {
+      var certsAdded = 0;
+      var certsToSync = [];
+
+      // Find certs that are in personalChecklist (added via "Add to Task List")
+      personalChecklist.forEach(function(item) {
+        // Only process cert items
+        if (item.source !== 'Expiring Certs' && item.taskType !== 'Cert Expiring') return;
+        if (item.completed) return;
+
+        // Check if already in allTasks
+        var alreadyExists = allTasks.some(function(task) {
+          return task.employee === item.employee &&
+                 (task.itemType === item.itemType || task.certType === item.itemType);
+        });
+
+        if (!alreadyExists) {
+          // Find matching cert in allExpiringCerts to get full data
+          var certData = allExpiringCerts.find(function(cert) {
+            return cert.employee === item.employee &&
+                   (cert.certType === item.itemType || cert.certType === item.certType);
+          });
+
+          // Build taskKey for server sync
+          var rowIndex = certData ? certData.rowIndex : (item.taskKey ? parseInt(item.taskKey.split('_')[1]) : -1);
+          var taskKey = rowIndex !== -1 ? 'Expiring Certs_' + rowIndex : '';
+
+          // Create task object from cert
+          var certTask = {
+            _originalIndex: allTasks.length,
+            employee: item.employee,
+            taskType: 'Cert Expiring',
+            itemType: item.itemType || item.certType,
+            certType: item.itemType || item.certType,
+            location: item.location || (certData ? certData.location : ''),
+            phoneNumber: item.phoneNumber || (certData ? certData.phoneNumber : ''),
+            dueDate: certData ? certData.expirationDate : item.notes,
+            scheduledDate: item.scheduledDate || '',
+            startTime: item.startTime || '',
+            endTime: item.endTime || '',
+            status: item.status || 'Pending',
+            source: 'Expiring Certs',
+            sheetName: 'Expiring Certs',
+            rowIndex: rowIndex,
+            inTaskList: true,
+            priority: certData && certData.daysUntilExpiration < 0 ? 'High' :
+                      certData && certData.daysUntilExpiration <= 30 ? 'High' :
+                      certData && certData.daysUntilExpiration <= 60 ? 'Medium' : 'Low'
+          };
+
+          allTasks.push(certTask);
+          certsAdded++;
+          console.log('Added cert to allTasks: ' + item.employee + ' - ' + item.itemType);
+
+          // Queue for server sync if we have a valid taskKey
+          if (taskKey) {
+            certsToSync.push(taskKey);
+          }
+        }
+      });
+
+      console.log('addChecklistCertsToAllTasks: Added ' + certsAdded + ' certs to allTasks');
+
+      // Sync localStorage certs to Task Metadata on server (background, don't wait)
+      if (certsToSync.length > 0) {
+        console.log('addChecklistCertsToAllTasks: Syncing ' + certsToSync.length + ' certs to Task Metadata');
+        certsToSync.forEach(function(taskKey) {
+          google.script.run
+            .withSuccessHandler(function(result) {
+              if (result && result.success) {
+                console.log('Synced to Task Metadata: ' + taskKey);
+              }
+            })
+            .withFailureHandler(function(err) {
+              console.log('Failed to sync to Task Metadata: ' + taskKey + ' - ' + err.message);
+            })
+            .toggleTaskChecklist(taskKey, true);
+        });
+      }
     }
 
     function populateCertFilters() {
@@ -3915,14 +4654,49 @@
 
     function renderCertRow(cert) {
       var status = getCertStatus(cert);
-      var statusClass = status === 'Expired' ? 'status-overdue' :
-                        status === 'Critical' ? 'status-overdue' :
-                        status === 'Warning' ? 'status-pending' :
-                        status === 'Missing' ? 'status-overdue' : 'status-complete';
-      var statusIcon = status === 'Expired' ? '🔴' :
-                       status === 'Critical' ? '🟠' :
-                       status === 'Warning' ? '🟡' :
-                       status === 'Missing' ? '❌' : '🟢';
+
+      // Override status if cert is declined
+      if (cert.isDeclined) {
+        status = 'Declined';
+      }
+
+      // Determine color based on days until expiration (not status)
+      // Red = Expired (< 0 days)
+      // Orange = < 185 days
+      // Yellow = < 365 days
+      // Green = 365+ days or OK
+      var daysLeft = cert.daysUntilExpiration;
+      var statusClass, statusIcon;
+
+      if (status === 'Declined') {
+        statusClass = 'status-declined';
+        statusIcon = '🚫';
+      } else if (status === 'Missing') {
+        statusClass = 'status-overdue';
+        statusIcon = '❌';
+      } else if (daysLeft !== null && daysLeft !== undefined) {
+        if (daysLeft < 0) {
+          // Expired
+          statusClass = 'status-overdue';
+          statusIcon = '🔴';
+        } else if (daysLeft < 185) {
+          // Less than 185 days - Orange
+          statusClass = 'status-overdue';
+          statusIcon = '🟠';
+        } else if (daysLeft < 365) {
+          // Less than 365 days - Yellow
+          statusClass = 'status-pending';
+          statusIcon = '🟡';
+        } else {
+          // 365+ days - Green
+          statusClass = 'status-complete';
+          statusIcon = '🟢';
+        }
+      } else {
+        // No expiration date or non-expiring cert
+        statusClass = 'status-complete';
+        statusIcon = '🟢';
+      }
 
       // Check if this cert is already in checklist
       var isInChecklist = personalChecklist.some(function(item) {
@@ -3937,18 +4711,26 @@
       var isScheduled = scheduledTasks[certKey] === true;
 
       // Get phone number for this employee
+      // First use cert.phoneNumber from server (most reliable), then fallback to employeePhoneMap
       var empNameLower = cert.employee.toLowerCase().trim();
-      var phoneNumber = employeePhoneMap[empNameLower] || '';
+      var phoneNumber = cert.phoneNumber || employeePhoneMap[empNameLower] || '';
       var hasPhone = phoneNumber && phoneNumber.length >= 10;
 
-      var html = '<div class="task-row" style="border-left: 4px solid ' + (status === 'OK' ? '#34a853' : status === 'Warning' ? '#fbbc04' : '#ea4335') + ';">';
+      // Set border color based on status
+      var borderColor = status === 'OK' ? '#34a853' :
+                        status === 'Warning' ? '#fbbc04' :
+                        status === 'Declined' ? '#9e9e9e' : '#ea4335';
+
+      var html = '<div class="task-row" style="border-left: 4px solid ' + borderColor + ';' + (cert.isDeclined ? ' opacity: 0.7; background: #f5f5f5;' : '') + '">';
       html += '<div class="row align-items-center">';
 
       // Cert Type & Employee
       html += '<div class="col-md-4">';
       html += '<div class="task-type" style="font-weight: 500;">' + cert.certType + '</div>';
       html += '<div class="text-primary small"><i class="bi bi-person-fill"></i> <strong>' + cert.employee + '</strong></div>';
-      if (cert.isNonExpiring && cert.expirationDate) {
+      if (cert.isDeclined && cert.declinedDate) {
+        html += '<div class="text-danger small"><i class="bi bi-x-circle"></i> Declined: ' + cert.declinedDate + '</div>';
+      } else if (cert.isNonExpiring && cert.expirationDate) {
         html += '<div class="text-muted small"><i class="bi bi-calendar-check"></i> Completed: ' + cert.expirationDate + '</div>';
       } else if (cert.expirationDate) {
         html += '<div class="text-muted small"><i class="bi bi-calendar"></i> Expires: ' + cert.expirationDate + '</div>';
@@ -3957,7 +4739,16 @@
 
       // Days Until / Status
       html += '<div class="col-md-3">';
-      if (cert.isNonExpiring) {
+      if (cert.isDeclined) {
+        // Show both days overdue AND declined badge with tooltip
+        if (cert.daysUntilExpiration !== null && cert.daysUntilExpiration < 0) {
+          var daysText = Math.abs(cert.daysUntilExpiration) + ' days overdue';
+          html += '<span class="status-badge ' + statusClass + '" style="margin-right: 4px;">' + statusIcon + ' ' + daysText + '</span>';
+        }
+        // Declined badge with tooltip showing date
+        var declinedTooltip = cert.declinedDate ? 'Declined on ' + cert.declinedDate : 'Employee declined training';
+        html += '<span class="status-badge" style="background: #ffebee; color: #c62828; cursor: help;" title="' + declinedTooltip + '">🚫 DECLINED</span>';
+      } else if (cert.isNonExpiring) {
         html += '<span class="status-badge ' + statusClass + '">' + statusIcon + ' ' + status + '</span>';
       } else if (cert.daysUntilExpiration !== null) {
         var daysText = cert.daysUntilExpiration < 0 ? Math.abs(cert.daysUntilExpiration) + ' days overdue' :
@@ -3967,10 +4758,10 @@
       } else {
         html += '<span class="status-badge status-complete">🟢 OK</span>';
       }
-      if (isNotified) {
+      if (isNotified && !cert.isDeclined) {
         html += '<span class="notified-badge ms-1"><i class="bi bi-bell-fill"></i></span>';
       }
-      if (isScheduled) {
+      if (isScheduled && !cert.isDeclined) {
         html += '<span class="scheduled-badge ms-1"><i class="bi bi-calendar-check-fill"></i></span>';
       }
       html += '</div>';
@@ -3978,8 +4769,13 @@
       // Actions
       html += '<div class="col-md-5 text-end">';
 
-      // Only show action buttons for certs that need attention (not OK status)
-      if (status !== 'OK') {
+      // If declined, show option to re-add to Task List for future class
+      if (cert.isDeclined) {
+        html += '<span class="text-muted small me-2">Employee declined training</span>';
+        // Re-add to Task List button - allows scheduling for a future class
+        html += '<button class="btn btn-outline-primary btn-sm" onclick="event.stopPropagation(); reAddDeclinedCertToTaskList(\'' + escapeQuotes(cert.employee) + '\', \'' + escapeQuotes(cert.certType) + '\', \'' + escapeQuotes(cert.expirationDate) + '\', \'' + escapeQuotes(cert.location) + '\', \'' + phoneNumber + '\', ' + cert.rowIndex + ')" title="Re-add for future class"><i class="bi bi-arrow-counterclockwise"></i> Re-add</button>';
+      } else {
+        // Show action buttons for ALL certs (not just expired/expiring)
         if (hasPhone) {
           // Stage 1: SMS Notify button
           var notifyBtnClass = isNotified ? 'btn-notified' : 'btn-sms';
@@ -3994,16 +4790,16 @@
           }
         }
 
-        // Add to Checklist button
+        // Add to Task List button (Phase 5: unified Task List) - now available for ALL certs
         if (!isInChecklist) {
-          html += '<button class="btn btn-outline-primary btn-sm me-1" onclick="event.stopPropagation(); addCertToChecklist(\'' + escapeQuotes(cert.employee) + '\', \'' + escapeQuotes(cert.certType) + '\', \'' + escapeQuotes(cert.expirationDate) + '\', \'' + escapeQuotes(cert.location) + '\', \'' + phoneNumber + '\')" title="Add to My Checklist"><i class="bi bi-plus-circle"></i></button>';
+          html += '<button class="btn btn-outline-primary btn-sm me-1" onclick="event.stopPropagation(); addCertToChecklist(\'' + escapeQuotes(cert.employee) + '\', \'' + escapeQuotes(cert.certType) + '\', \'' + escapeQuotes(cert.expirationDate) + '\', \'' + escapeQuotes(cert.location) + '\', \'' + phoneNumber + '\')" title="Add to Task List"><i class="bi bi-plus-circle"></i></button>';
         } else {
-          html += '<span class="badge bg-info text-dark me-1"><i class="bi bi-clipboard-check"></i> In Checklist</span>';
+          html += '<span class="badge bg-info text-dark me-1"><i class="bi bi-list-check"></i> In Task List</span>';
         }
-      }
 
-      // Mark Complete button
-      html += '<button class="btn btn-outline-success btn-sm" onclick="event.stopPropagation(); markCertComplete(\'' + escapeQuotes(cert.employee) + '\', \'' + escapeQuotes(cert.certType) + '\')" title="Mark as renewed/complete"><i class="bi bi-check-lg"></i></button>';
+        // Mark Complete button (show for all non-declined certs)
+        html += '<button class="btn btn-outline-success btn-sm" onclick="event.stopPropagation(); markCertComplete(\'' + escapeQuotes(cert.employee) + '\', \'' + escapeQuotes(cert.certType) + '\')" title="Mark as renewed/complete"><i class="bi bi-check-lg"></i></button>';
+      }
 
       html += '</div></div></div>';
       return html;
@@ -4014,6 +4810,13 @@
     }
 
     function addCertToChecklist(employee, certType, expDate, location, phone) {
+      // Find the cert in allExpiringCerts to get the rowIndex
+      var certData = allExpiringCerts.find(function(c) {
+        return c.employee === employee && c.certType === certType;
+      });
+      var rowIndex = certData && certData.rowIndex ? certData.rowIndex : -1;
+      var taskKey = rowIndex !== -1 ? 'Expiring Certs_' + rowIndex : '';
+
       var checklistItem = {
         id: Date.now(),
         employee: employee,
@@ -4026,17 +4829,170 @@
         subject: 'Renew ' + certType,
         addedDate: new Date().toISOString().split('T')[0],
         completed: false,
-        notes: 'Expires: ' + expDate
+        notes: 'Expires: ' + expDate,
+        taskKey: taskKey
       };
       personalChecklist.push(checklistItem);
       saveChecklistToStorage();
+
+      // Update Task Metadata on server if we have a taskKey
+      // Pass task info so server can create record if it doesn't exist
+      if (taskKey) {
+        var taskInfo = {
+          employee: employee,
+          certType: certType,
+          location: location,
+          phoneNumber: phone,
+          dueDate: expDate
+        };
+        google.script.run
+          .withSuccessHandler(function(result) {
+            if (result && result.success) {
+              console.log('Task Metadata updated for: ' + taskKey);
+            } else {
+              console.log('Task Metadata update result: ' + JSON.stringify(result));
+            }
+          })
+          .withFailureHandler(function(err) {
+            console.log('Error updating Task Metadata: ' + err.message);
+          })
+          .toggleTaskChecklist(taskKey, true, taskInfo);
+      }
+
+      // Phase 5: Immediately add cert to allTasks so it appears in Task List
+      var alreadyInAllTasks = allTasks.some(function(task) {
+        return task.employee === employee &&
+               (task.itemType === certType || task.certType === certType) &&
+               task.source === 'Expiring Certs';
+      });
+
+      if (!alreadyInAllTasks) {
+        var certTask = {
+          _originalIndex: allTasks.length,
+          employee: employee,
+          taskType: 'Cert Expiring',
+          itemType: certType,
+          certType: certType,
+          location: location,
+          phoneNumber: phone || '',
+          dueDate: expDate,
+          scheduledDate: '',
+          startTime: '',
+          endTime: '',
+          status: 'Pending',
+          source: 'Expiring Certs',
+          sheetName: 'Expiring Certs',
+          rowIndex: rowIndex,
+          inTaskList: true,
+          priority: certData && certData.daysUntilExpiration < 0 ? 'High' :
+                    certData && certData.daysUntilExpiration <= 30 ? 'High' :
+                    certData && certData.daysUntilExpiration <= 60 ? 'Medium' : 'Low'
+        };
+        allTasks.push(certTask);
+        console.log('Added cert to allTasks: ' + employee + ' - ' + certType);
+      } else {
+        // Update existing task to have inTaskList = true
+        for (var i = 0; i < allTasks.length; i++) {
+          if (allTasks[i].employee === employee &&
+              (allTasks[i].itemType === certType || allTasks[i].certType === certType)) {
+            allTasks[i].inTaskList = true;
+            break;
+          }
+        }
+      }
+
+      // Re-render Task List to show the new cert
+      renderTasks(allTasks);
+      renderCalendar();
+
       updateChecklistBadge();
       renderExpiringCerts();
       renderPersonalChecklist();
-      showToast('✓ Added to My Checklist');
+      showToast('✓ Added to Task List');
+    }
+
+    // Re-add a declined cert to Task List for a future class
+    // This resets the declined status and notification workflow
+    function reAddDeclinedCertToTaskList(employee, certType, expDate, location, phone, rowIndex) {
+      console.log('reAddDeclinedCertToTaskList:', employee, certType);
+
+      var taskKey = rowIndex ? 'Expiring Certs_' + rowIndex : '';
+
+      if (!taskKey) {
+        showToast('❌ Cannot identify cert for re-adding', 'error');
+        return;
+      }
+
+      // Call server to reset declined status and add back to Task List
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result && result.success) {
+            console.log('Cert re-added to Task List:', result);
+
+            // Update local cert data
+            var cert = allExpiringCerts.find(function(c) {
+              return c.employee === employee && c.certType === certType;
+            });
+            if (cert) {
+              cert.isDeclined = false;
+              cert.declinedDate = null;
+            }
+
+            // Remove from declinedCertsMap
+            var key = (employee + '_' + certType).toLowerCase();
+            delete declinedCertsMap[key];
+
+            // Clear notified/scheduled status for fresh start
+            var certKey = (employee + '_' + certType).toLowerCase().replace(/\s+/g, '_');
+            delete notifiedTasks[certKey];
+            delete scheduledTasks[certKey];
+            saveNotifiedToStorage();
+            saveScheduledToStorage();
+
+            // Add to Task List (similar to addCertToChecklist)
+            var certTask = {
+              _originalIndex: allTasks.length,
+              employee: employee,
+              taskType: 'Cert Expiring',
+              itemType: certType,
+              certType: certType,
+              location: location,
+              phoneNumber: phone || '',
+              dueDate: expDate,
+              scheduledDate: '',
+              startTime: '',
+              endTime: '',
+              status: 'Pending',
+              source: 'Expiring Certs',
+              sheetName: 'Expiring Certs',
+              rowIndex: rowIndex,
+              inTaskList: true,
+              isDeclined: false,
+              priority: 'High'
+            };
+            allTasks.push(certTask);
+
+            // Re-render everything
+            renderTasks(allTasks);
+            renderCalendar();
+            renderExpiringCerts();
+            updateChecklistBadge();
+
+            showToast('✓ ' + employee + ' re-added to Task List for future class');
+          } else {
+            showToast('❌ Failed to re-add: ' + (result ? result.error : 'Unknown error'), 'error');
+          }
+        })
+        .withFailureHandler(function(err) {
+          console.log('Error re-adding cert:', err);
+          showToast('❌ Error: ' + err.message, 'error');
+        })
+        .reAddDeclinedCertToTaskList(taskKey, employee, certType);
     }
 
     function openCertNotifyModal(employee, certType, expDate, phone) {
+      console.log('openCertNotifyModal called:', { employee: employee, certType: certType, expDate: expDate, phone: phone });
+
       // Find matching task in allTasks or create a temporary one
       var taskIndex = -1;
       for (var i = 0; i < allTasks.length; i++) {
@@ -4047,9 +5003,19 @@
         }
       }
 
+      console.log('openCertNotifyModal: taskIndex =', taskIndex);
+
       if (taskIndex !== -1) {
+        console.log('openCertNotifyModal: Found existing task, opening modal');
         openNotifyModal(taskIndex);
       } else {
+        // Find the cert in allExpiringCerts to get the serverIndex
+        var certData = allExpiringCerts.find(function(c) {
+          return c.employee === employee && c.certType === certType;
+        });
+        var serverIndex = certData && certData.rowIndex ? certData.rowIndex : -1;
+        console.log('openCertNotifyModal: Creating temp task, serverIndex =', serverIndex);
+
         // Create a temporary task object for the modal
         var tempTask = {
           employee: employee,
@@ -4058,11 +5024,15 @@
           dueDate: expDate,
           phoneNumber: phone,
           source: 'Expiring Certs',
+          sheetName: 'Expiring Certs',
+          rowIndex: serverIndex,
+          serverIndex: serverIndex,
           taskType: 'Cert Expiring'
         };
         // Add to allTasks temporarily
         var tempIndex = allTasks.length;
         allTasks.push(tempTask);
+        console.log('openCertNotifyModal: Added temp task at index', tempIndex, tempTask);
         openNotifyModal(tempIndex);
       }
     }
@@ -4080,6 +5050,12 @@
       if (taskIndex !== -1) {
         openScheduledModal(taskIndex);
       } else {
+        // Find the cert in allExpiringCerts to get the serverIndex
+        var certData = allExpiringCerts.find(function(c) {
+          return c.employee === employee && c.certType === certType;
+        });
+        var serverIndex = certData && certData.rowIndex ? certData.rowIndex : -1;
+
         var tempTask = {
           employee: employee,
           itemType: certType,
@@ -4087,6 +5063,9 @@
           dueDate: expDate,
           phoneNumber: phone,
           source: 'Expiring Certs',
+          sheetName: 'Expiring Certs',
+          rowIndex: serverIndex,
+          serverIndex: serverIndex,
           taskType: 'Cert Expiring'
         };
         var tempIndex = allTasks.length;

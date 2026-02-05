@@ -73,12 +73,13 @@
   </div>
 
   <div class="step-container">
-    <button class="step-btn" id="step2" onclick="runStep(2, 'generateSmartSchedule')">
+    <button class="step-btn" id="step2" onclick="runStep(2, 'generateTaskMetadata')">
       <span class="step-num"><span>2</span></span>
-      <div class="step-text">Create Smart Schedule<div class="step-subtitle">To-Do List by location</div></div>
+      <div class="step-text">Generate Task Metadata<div class="step-subtitle">Update task database</div></div>
     </button>
     <div class="sub-actions">
-      <button class="quick-btn sub-btn" onclick="openToDoSchedule()">📅 Schedule</button>
+      <button class="quick-btn sub-btn" onclick="openToDoSchedule()">📅 Tasks & Calendar</button>
+      <button class="quick-btn sub-btn" onclick="runQuick('showTripPlannerDialog', 'Trip Planner', 'Opening Trip Planner...')">🗺️ Trip Planner</button>
     </div>
   </div>
 

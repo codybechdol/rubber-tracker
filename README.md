@@ -35,7 +35,7 @@ Detailed documentation for individual functions is available in the `docs/functi
 ### 2. Employees
 - **Purpose:** Stores all employee information, including names, locations, and glove/sleeve size preferences. Source for assignment and swap logic.
 - **Columns:** Name, Class, Location, Job Number, Phone Number, Notification Emails, MP Email, Email Address, Glove Size, Sleeve Size, Hire Date, Last Day, Last Day Reason
-- **Last Day Reason:** Dropdown with Quit, Fired, Laid Off options
+- **Last Day Reason:** Dropdown with Quit, Fired, Layoff, Resigned options
 
 ### 3. Employee History
 - **Purpose:** Tracks the complete lifecycle of employees - hire dates, location/job changes, and terminations.

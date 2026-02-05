@@ -414,26 +414,26 @@ function processEdit(e) {
     return;
   }
 
-  // Handle Employees sheet edits (Last Day, Location, Job Number, or Hire Date columns)
+  // Handle Employees sheet edits (Last Day Reason, Location, Job Number, or Hire Date columns)
   if (sheetName === SHEET_EMPLOYEES) {
     // Get column indices dynamically
     var empHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    var lastDayColIdx = -1;
+    var lastDayReasonColIdx = -1;
     var locationColIdx = -1;
     var jobNumberColIdx = -1;
     var hireDateColIdx = -1;
 
     for (var h = 0; h < empHeaders.length; h++) {
       var headerLower = String(empHeaders[h]).toLowerCase().trim();
-      if (headerLower === 'last day') lastDayColIdx = h + 1;  // 1-based
+      if (headerLower === 'last day reason') lastDayReasonColIdx = h + 1;  // 1-based
       if (headerLower === 'location') locationColIdx = h + 1;
       if (headerLower === 'job number') jobNumberColIdx = h + 1;
       if (headerLower === 'hire date') hireDateColIdx = h + 1;
     }
 
-    // Handle Last Day change - terminate employee
-    if (lastDayColIdx !== -1 && editedCol === lastDayColIdx) {
-      handleLastDayChange(ss, sheet, editedRow, newValue);
+    // Handle Last Day Reason change - terminate employee
+    if (lastDayReasonColIdx !== -1 && editedCol === lastDayReasonColIdx) {
+      handleLastDayReasonChange(ss, sheet, editedRow, newValue);
       return;
     }
 

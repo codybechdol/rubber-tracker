@@ -212,6 +212,12 @@ function collectAndGroupTasks(ss) {
   var afterManual = countTasks(tasksByLocation);
   Logger.log('collectAndGroupTasks: Manual Tasks added ' + (afterManual - beforeManual) + ' tasks');
 
+  // Collect from Safety Reports (Needs Attention items only)
+  var beforeSafety = countTasks(tasksByLocation);
+  collectSafetyReportsTasks(ss, tasksByLocation, employeeLocations, today);
+  var afterSafety = countTasks(tasksByLocation);
+  Logger.log('collectAndGroupTasks: Safety Reports added ' + (afterSafety - beforeSafety) + ' tasks');
+
   Logger.log('collectAndGroupTasks: TOTAL tasks = ' + countTasks(tasksByLocation));
 
   // Sort tasks within each location by foreman, then by due date
@@ -1383,7 +1389,8 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
     var foreman = employeeForemen[employee.toLowerCase()] || 'Unassigned';
 
     // Get phone number for this employee - try multiple matching strategies
-    var empNameLower = employee.toLowerCase().trim().replace(/\s+/g, ' '); // Normalize whitespace
+    var whitespaceRegex = new RegExp('\\s+', 'g');
+    var empNameLower = employee.toLowerCase().trim().replace(whitespaceRegex, ' '); // Normalize whitespace
     var phoneNumber = employeePhones[empNameLower] || '';
 
     // If no direct match, try partial matching on first and last name
@@ -1718,6 +1725,13 @@ function collectManualTasks(ss, tasksByLocation, today) {
       continue;
     }
 
+    // Skip Safety Equipment tasks - these are now collected directly from Safety Reports sheet
+    // to avoid duplicate entries (old workflow created them here via createTasksFromSafetyIssues)
+    if (taskType === 'Safety Equipment' || taskType.indexOf('🔧') !== -1) {
+      Logger.log('collectManualTasks: Skipping row ' + (i+1) + ' - Safety Equipment task (handled by Safety Reports)');
+      continue;
+    }
+
     // Skip if already complete
     if (status.toLowerCase() === 'complete' || status.toLowerCase() === 'completed') {
       Logger.log('collectManualTasks: Skipping row ' + (i+1) + ' - already complete');
@@ -1783,6 +1797,159 @@ function collectManualTasks(ss, tasksByLocation, today) {
   }
 
   Logger.log('collectManualTasks: Added ' + taskCount + ' manual tasks total');
+}
+
+/**
+ * Collects safety equipment issues from the Safety Reports sheet.
+ * Only includes "Needs Attention" items with valid job numbers.
+ * Excludes vehicle mechanical items (brakes, wipers, etc.)
+ *
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @param {Object} tasksByLocation - Object to add tasks to
+ * @param {Object} employeeLocations - Map of employee names to locations
+ * @param {Date} today - Today's date
+ */
+function collectSafetyReportsTasks(ss, tasksByLocation, employeeLocations, today) {
+  var safetySheet = ss.getSheetByName('Safety Reports');
+  if (!safetySheet || safetySheet.getLastRow() < 2) {
+    Logger.log('collectSafetyReportsTasks: Safety Reports sheet not found or empty');
+    return;
+  }
+
+  var data = safetySheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Get crew-to-location map for job number lookups
+  var crewLocationMap = getCrewLocationMap(ss);
+
+  // Find column indices
+  var colIdx = {};
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'report date') colIdx.reportDate = h;
+    if (header === 'report type') colIdx.reportType = h;
+    if (header === 'job number') colIdx.jobNumber = h;
+    if (header === 'foreman') colIdx.foreman = h;
+    if (header === 'vehicle number') colIdx.vehicleNumber = h;
+    if (header === 'equipment type') colIdx.equipmentType = h;
+    if (header === 'issue description') colIdx.issueDescription = h;
+    if (header === 'status') colIdx.status = h;
+    if (header === 'fe test date') colIdx.feTestDate = h;
+    if (header === 'email subject') colIdx.emailSubject = h;
+  }
+
+  // Equipment types to EXCLUDE (vehicle mechanical items)
+  var excludedEquipmentTypes = [
+    'wipers', 'horn', 'reflectors', 'warning lights', 'brakes',
+    'lights', 'mirrors', 'windshield', 'defrost', 'windows',
+    'heater', 'seat belts', 'misc comment', 'tires', 'battery',
+    'engine', 'oil', 'transmission', 'clutch', 'alternator',
+    'starter', 'radiator', 'suspension', 'exhaust', 'fuel', 'coolant', 'filter'
+  ];
+
+  var taskCount = 0;
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var status = String(row[colIdx.status] || '').trim();
+    var jobNumber = String(row[colIdx.jobNumber] || '').trim();
+    var equipmentType = String(row[colIdx.equipmentType] || '').trim();
+    var foreman = String(row[colIdx.foreman] || '').trim();
+    var vehicleNumber = String(row[colIdx.vehicleNumber] || '').trim();
+    var issueDescription = String(row[colIdx.issueDescription] || '').trim();
+    var reportDate = row[colIdx.reportDate];
+    var emailSubject = colIdx.emailSubject !== undefined ? String(row[colIdx.emailSubject] || '').trim() : '';
+
+    // Skip if not "Needs Attention"
+    if (status !== 'Needs Attention') {
+      continue;
+    }
+
+    // Skip if no job number (can't determine location for trip planning)
+    if (!jobNumber) {
+      Logger.log('collectSafetyReportsTasks: Skipping row ' + (i + 1) + ' - no job number');
+      continue;
+    }
+
+    // Skip excluded equipment types (vehicle mechanical items)
+    var equipLower = equipmentType.toLowerCase();
+    var isExcluded = false;
+    for (var e = 0; e < excludedEquipmentTypes.length; e++) {
+      if (equipLower.indexOf(excludedEquipmentTypes[e]) !== -1) {
+        isExcluded = true;
+        break;
+      }
+    }
+    if (isExcluded) {
+      Logger.log('collectSafetyReportsTasks: Skipping row ' + (i + 1) + ' - excluded equipment type: ' + equipmentType);
+      continue;
+    }
+
+    // Lookup location from job number using crew map
+    // Extract base crew number (e.g., "013-26" from "013-26.1")
+    var crewNumber = jobNumber.split('.')[0];
+    var location = crewLocationMap[crewNumber] || jobNumber;
+
+    // Parse report date as due date
+    var dueDate = null;
+    if (reportDate instanceof Date) {
+      dueDate = new Date(reportDate);
+      dueDate.setHours(0, 0, 0, 0);
+    } else if (reportDate && typeof reportDate === 'string') {
+      dueDate = new Date(reportDate);
+      if (isNaN(dueDate.getTime())) {
+        dueDate = new Date(); // Default to today if invalid
+      }
+      dueDate.setHours(0, 0, 0, 0);
+    } else {
+      dueDate = new Date();
+      dueDate.setHours(0, 0, 0, 0);
+    }
+
+    // Calculate days until due (safety issues are immediate priority)
+    var daysTillDue = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
+    var isOverdue = daysTillDue < 0;
+
+    // Build notes with vehicle number for persistence to Task Metadata
+    var notes = '';
+    if (vehicleNumber) {
+      notes = 'Vehicle #' + vehicleNumber;
+    }
+
+    // Build task object
+    var task = {
+      type: 'Safety Equipment',
+      taskType: 'Safety Equipment',
+      itemType: equipmentType,
+      employee: foreman, // Foreman is the point of contact
+      location: location,
+      foreman: foreman,
+      currentItem: issueDescription,
+      vehicleNumber: vehicleNumber,
+      emailSubject: emailSubject,
+      notes: notes,
+      dueDate: dueDate,
+      scheduledDate: null,
+      isOverdue: isOverdue,
+      daysTillDue: daysTillDue,
+      status: status,
+      sheetName: 'Safety Reports',
+      source: 'Safety Reports',
+      rowIndex: i + 1
+    };
+
+    // Add to location group
+    if (!tasksByLocation[location]) {
+      tasksByLocation[location] = [];
+    }
+    tasksByLocation[location].push(task);
+    taskCount++;
+
+    Logger.log('collectSafetyReportsTasks: Added ' + equipmentType + ' task at ' + location +
+               ' (job: ' + jobNumber + ', vehicle: ' + vehicleNumber + ')');
+  }
+
+  Logger.log('collectSafetyReportsTasks: Added ' + taskCount + ' safety report tasks total');
 }
 
 /**

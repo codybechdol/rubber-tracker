@@ -111,7 +111,7 @@ The Rubber Tracker system manages the lifecycle of rubber gloves and sleeves use
 | J | Sleeve Size | Preferred sleeve size |
 | K | Hire Date | Date employee was hired |
 | L | Last Day | Date employee left (triggers auto-archive) |
-| M | Last Day Reason | Dropdown: Quit, Fired, Laid Off |
+| M | Last Day Reason | Dropdown: Quit, Fired, Layoff, Resigned |
 
 **Key Behaviors**:
 - Used to look up employee locations when assigning items
@@ -137,7 +137,7 @@ The Rubber Tracker system manages the lifecycle of rubber gloves and sleeves use
 | E | Job Number | Job number at time of event |
 | F | Hire Date | Employee's original hire date |
 | G | Last Day | Employee's last day (only for Terminated events) |
-| H | Last Day Reason | Quit, Fired, or Laid Off (only for Terminated events) |
+| H | Last Day Reason | Quit, Fired, Layoff, or Resigned (only for Terminated events) |
 | I | Rehire Date | Date employee was rehired (triggers re-add to Employees sheet) |
 | J | Notes | Additional notes (e.g., "From: Helena → Butte") |
 

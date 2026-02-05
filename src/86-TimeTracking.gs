@@ -30,6 +30,7 @@ function showTimeBreakdownDialog() {
 
 /**
  * Gets completed tasks for a date range.
+ * Phase 6: Now uses Task Metadata as single source of truth.
  * Called from TimeBreakdown.html
  *
  * @param {string} startDateStr - Start date string (YYYY-MM-DD)
@@ -37,7 +38,7 @@ function showTimeBreakdownDialog() {
  * @return {Object} Completed tasks grouped by date with summary
  */
 function getCompletedTasksForPeriod(startDateStr, endDateStr) {
-  Logger.log('=== getCompletedTasksForPeriod: ' + startDateStr + ' to ' + endDateStr + ' ===');
+  Logger.log('=== getCompletedTasksForPeriod (Phase 6): ' + startDateStr + ' to ' + endDateStr + ' ===');
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var startDate = new Date(startDateStr);
@@ -47,17 +48,17 @@ function getCompletedTasksForPeriod(startDateStr, endDateStr) {
 
   var allTasks = [];
 
-  // Collect from To Do List (Completed = TRUE)
-  var todoTasks = collectCompletedFromToDoList(ss, startDate, endDate);
-  allTasks = allTasks.concat(todoTasks);
-  Logger.log('Collected ' + todoTasks.length + ' tasks from To Do List');
+  // Phase 6: Primary source is Task Metadata
+  var metadataTasks = collectCompletedFromTaskMetadata(ss, startDate, endDate);
+  allTasks = allTasks.concat(metadataTasks);
+  Logger.log('Collected ' + metadataTasks.length + ' tasks from Task Metadata');
 
-  // Collect from Manual Tasks (Status = Complete)
+  // Also collect from Manual Tasks (these may not all be in Task Metadata)
   var manualTasks = collectCompletedFromManualTasks(ss, startDate, endDate);
   allTasks = allTasks.concat(manualTasks);
   Logger.log('Collected ' + manualTasks.length + ' tasks from Manual Tasks');
 
-  // Collect from Training Tracking (Completion Date set)
+  // Also collect from Training Tracking (completion dates)
   var trainingTasks = collectCompletedFromTrainingTracking(ss, startDate, endDate);
   allTasks = allTasks.concat(trainingTasks);
   Logger.log('Collected ' + trainingTasks.length + ' tasks from Training Tracking');
@@ -77,7 +78,132 @@ function getCompletedTasksForPeriod(startDateStr, endDateStr) {
 }
 
 /**
- * Collects completed tasks from To Do List sheet.
+ * Phase 6: Collects completed tasks from Task Metadata sheet.
+ * This is now the primary source for completed tasks.
+ */
+function collectCompletedFromTaskMetadata(ss, startDate, endDate) {
+  var tasks = [];
+  var metadataSheet = ss.getSheetByName('Task Metadata');
+
+  if (!metadataSheet || metadataSheet.getLastRow() <= 1) {
+    Logger.log('Task Metadata sheet not found or empty - falling back to To Do List');
+    return collectCompletedFromToDoList(ss, startDate, endDate);
+  }
+
+  var data = metadataSheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Build column index map
+  var colMap = {};
+  for (var h = 0; h < headers.length; h++) {
+    colMap[headers[h]] = h;
+  }
+
+  // Required columns
+  var statusCol = colMap['Status'];
+  var completedDateCol = colMap['CompletedDate'];
+  var scheduledDateCol = colMap['ScheduledDate'];
+  var locationCol = colMap['Location'];
+  var taskTypeCol = colMap['TaskType'];
+  var employeeCol = colMap['Employee'];
+  var itemTypeCol = colMap['ItemType'];
+  var foremanCol = colMap['Foreman'];
+  var startTimeCol = colMap['StartTime'];
+  var endTimeCol = colMap['EndTime'];
+  var notesCol = colMap['Notes'];
+  var sourceSheetCol = colMap['SourceSheet'];
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+
+    // Check if completed
+    var status = statusCol !== undefined ? String(row[statusCol] || '').toLowerCase() : '';
+    if (status !== 'complete' && status !== 'completed') {
+      continue;
+    }
+
+    // Get completed date (prefer CompletedDate, fall back to ScheduledDate)
+    var taskDate = null;
+    if (completedDateCol !== undefined && row[completedDateCol]) {
+      taskDate = row[completedDateCol] instanceof Date ? row[completedDateCol] : new Date(row[completedDateCol]);
+    } else if (scheduledDateCol !== undefined && row[scheduledDateCol]) {
+      taskDate = row[scheduledDateCol] instanceof Date ? row[scheduledDateCol] : new Date(row[scheduledDateCol]);
+    }
+
+    if (!taskDate || isNaN(taskDate.getTime())) continue;
+    taskDate.setHours(0, 0, 0, 0);
+
+    // Check if within date range
+    if (taskDate < startDate || taskDate > endDate) continue;
+
+    var location = locationCol !== undefined ? String(row[locationCol] || '') : '';
+    var taskType = taskTypeCol !== undefined ? String(row[taskTypeCol] || '') : '';
+    var employee = employeeCol !== undefined ? String(row[employeeCol] || '') : '';
+    var itemType = itemTypeCol !== undefined ? String(row[itemTypeCol] || '') : '';
+    var foreman = foremanCol !== undefined ? String(row[foremanCol] || '') : '';
+    var startTime = startTimeCol !== undefined ? formatTimeValueForBreakdown(row[startTimeCol]) : '';
+    var endTime = endTimeCol !== undefined ? formatTimeValueForBreakdown(row[endTimeCol]) : '';
+    var notes = notesCol !== undefined ? String(row[notesCol] || '') : '';
+    var sourceSheet = sourceSheetCol !== undefined ? String(row[sourceSheetCol] || '') : '';
+
+    // Estimate time based on task type
+    var estimatedTime = getTaskEstimatedTime(taskType);
+
+    tasks.push({
+      date: formatDateKey(taskDate),
+      dateObj: taskDate,
+      location: location || 'Helena',
+      taskType: taskType,
+      employee: employee,
+      itemType: itemType,
+      foreman: foreman,
+      crew: '',
+      estimatedTime: estimatedTime,
+      startTime: startTime,
+      endTime: endTime,
+      notes: notes,
+      source: 'Task Metadata (' + sourceSheet + ')'
+    });
+  }
+
+  return tasks;
+}
+
+/**
+ * Helper function to format time values for breakdown.
+ */
+function formatTimeValueForBreakdown(timeVal) {
+  if (!timeVal) return '';
+  if (timeVal instanceof Date) {
+    var hours = timeVal.getHours();
+    var mins = timeVal.getMinutes();
+    return String(hours).padStart(2, '0') + ':' + String(mins).padStart(2, '0');
+  }
+  var timeStr = String(timeVal).trim();
+  if (/^\d{1,2}:\d{2}/.test(timeStr)) {
+    var parts = timeStr.match(/^(\d{1,2}):(\d{2})/);
+    if (parts) {
+      return String(parseInt(parts[1])).padStart(2, '0') + ':' + parts[2];
+    }
+  }
+  return timeStr;
+}
+
+/**
+ * Gets estimated time for a task type in minutes.
+ */
+function getTaskEstimatedTime(taskType) {
+  var type = (taskType || '').toLowerCase();
+  if (type.indexOf('training') !== -1) return 60;
+  if (type.indexOf('swap') !== -1 || type.indexOf('change') !== -1) return 10;
+  if (type.indexOf('cert') !== -1) return 15;
+  if (type.indexOf('reclaim') !== -1) return 15;
+  return 30; // Default
+}
+
+/**
+ * Legacy function: Collects completed tasks from To Do List sheet.
+ * Kept as fallback if Task Metadata is not available.
  */
 function collectCompletedFromToDoList(ss, startDate, endDate) {
   var tasks = [];

@@ -9,9 +9,11 @@
  * - Monday-Thursday preferred, Friday only if necessary
  * - Tuesday nights: MUST return to Helena
  * - Overnight stays OK on Mon/Wed/Thu if saves significant time
+ *
+ * Phase 6 Update: Now uses Task Metadata as single source of truth.
  */
 
-/* global getDriveTimeMap, calculateDriveTimeBetween */
+/* global getDriveTimeMap, calculateDriveTimeBetween, collectAndGroupTasks, getTasksWithMetadata */
 /* eslint-disable no-unused-vars */
 
 // ============================================================================
@@ -33,10 +35,9 @@ var URGENCY_LATER = 10;
 var CREW_BASE_TIME = 15;  // 15 min base per location
 var CREW_PER_TASK = 10;   // 10 min per task
 
-// Non-drivable locations (office/phone work only - excluded from trip planning)
-// These are handled in getPendingTasksWithLocations()
+// Non-field locations (office/phone work only - excluded from trip planning)
+// Note: Helena is NOT included here - Helena crews need field visits for training/swaps
 var OFFICE_ONLY_LOCATIONS = [
-  'helena',           // Home base
   'weeds',            // Employees waiting for job to start (phone work only)
   'previous employee',// No longer with company
   'light duty',       // Office-based employees
@@ -55,6 +56,27 @@ var DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday
  */
 function getDayName(dayOfWeek) {
   return DAY_NAMES[dayOfWeek] || 'Unknown';
+}
+
+/**
+ * Formats a date as YYYY-MM-DD for use as object key.
+ * Local implementation to avoid cross-file dependency.
+ */
+function formatDateKeyForRoute(date) {
+  return date.getFullYear() + '-' +
+         String(date.getMonth() + 1).padStart(2, '0') + '-' +
+         String(date.getDate()).padStart(2, '0');
+}
+
+/**
+ * Formats a date for display (e.g., "01/15/2026").
+ * Local implementation to avoid cross-file dependency.
+ */
+function formatDateForDisplayRoute(date) {
+  if (!(date instanceof Date) || isNaN(date.getTime())) return '';
+  return String(date.getMonth() + 1).padStart(2, '0') + '/' +
+         String(date.getDate()).padStart(2, '0') + '/' +
+         date.getFullYear();
 }
 
 // ============================================================================
@@ -164,7 +186,7 @@ function getLocationDirection(location) {
   if (!location) return 'Unknown';
 
   var loc = location.toLowerCase().trim();
-  if (loc === 'helena') return 'Local';
+  if (loc === 'helena' || loc === 'office') return 'Local';
 
   var groups = getLocationDirectionGroups();
   for (var direction in groups) {
@@ -339,7 +361,7 @@ function getManualTasksWithFlexibility() {
       dateObj = scheduledDate instanceof Date ? scheduledDate : new Date(scheduledDate);
       if (!isNaN(dateObj.getTime())) {
         dateObj.setHours(0, 0, 0, 0);
-        dateKey = formatDateKey(dateObj);
+        dateKey = formatDateKeyForRoute(dateObj);
       }
     }
 
@@ -490,27 +512,90 @@ function debugTripPlannerData() {
 
 
 /**
- * Collects tasks directly from source sheets (Glove Swaps, Sleeve Swaps, etc.)
- * and formats them for Trip Planner use. This bypasses the To Do List sheet entirely.
+ * Collects tasks for Trip Planner using Task Metadata as single source of truth.
+ * Phase 6: Now uses getTasksWithMetadata() instead of reading source sheets directly.
  *
  * @return {Object} Tasks formatted for Trip Planner {tasks: [], byLocation: {}, byDirection: {}, officeTasks: []}
  */
 function collectTasksForTripPlanner() {
-  Logger.log('=== collectTasksForTripPlanner (Direct Source Reading) ===');
+  Logger.log('=== collectTasksForTripPlanner (Using Task Metadata - Phase 6) ===');
 
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
   var today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // Use collectAndGroupTasks from 76-SmartScheduling.gs to get all pending tasks
-  var tasksByLocation = collectAndGroupTasks(ss);
+  // Phase 6: Use getTasksWithMetadata() for all task data
+  var metadataResult;
+  try {
+    metadataResult = getTasksWithMetadata();
+    Logger.log('getTasksWithMetadata returned ' + (metadataResult.tasks ? metadataResult.tasks.length : 0) + ' tasks');
 
-  Logger.log('collectAndGroupTasks returned ' + Object.keys(tasksByLocation).length + ' locations');
+    // Check if data was stored in ScriptProperties (server-to-server call)
+    if (metadataResult.stored === true && !metadataResult.tasks) {
+      Logger.log('Data stored in ScriptProperties, fetching via getStoredTasks...');
+      metadataResult = getStoredTasks();
+      Logger.log('getStoredTasks returned ' + (metadataResult.tasks ? metadataResult.tasks.length : 0) + ' tasks');
+
+      // Deserialize compressed tasks
+      if (metadataResult.tasks && metadataResult.tasks.length > 0) {
+        var firstTask = metadataResult.tasks[0];
+        // Check if tasks are in compressed format (abbreviated field names)
+        if (firstTask.emp !== undefined || firstTask.loc !== undefined) {
+          Logger.log('Deserializing compressed task format...');
+          metadataResult.tasks = metadataResult.tasks.map(function(t) {
+            return {
+              taskKey: t.taskKey,
+              employee: t.emp || '',
+              taskType: t.type || '',
+              type: t.type || '', // Alias
+              itemType: t.item || '',
+              location: t.loc || '',
+              phoneNumber: t.phone || '',
+              dueDate: t.due || '',
+              scheduledDate: t.sched || '',
+              startTime: t.start || '',
+              endTime: t.end || '',
+              status: t.stat || 'Pending',
+              isOverdue: t.over === 1,
+              daysTillDue: t.days || 0,
+              sheetName: t.src || '',
+              source: t.src || '',
+              rowIndex: t.row || 0,
+              isManualTask: t.manual === 1,
+              inTaskList: t.inList === 1,
+              isRegistered: t.reg === 1
+            };
+          });
+          Logger.log('Deserialized ' + metadataResult.tasks.length + ' tasks');
+        }
+      }
+    }
+  } catch (e) {
+    Logger.log('ERROR calling getTasksWithMetadata: ' + e.message);
+    // Fall back to old method if Task Metadata not available
+    Logger.log('Falling back to collectAndGroupTasks...');
+    return collectTasksForTripPlannerLegacy();
+  }
+
+  // Group tasks by location from the metadata result
+  var tasksByLocation = {};
+  var allTasks = metadataResult.tasks || [];
+
+  for (var i = 0; i < allTasks.length; i++) {
+    var task = allTasks[i];
+    var location = task.location || 'Unknown';
+    if (!tasksByLocation[location]) {
+      tasksByLocation[location] = [];
+    }
+    tasksByLocation[location].push(task);
+  }
+
+  Logger.log('Grouped tasks into ' + Object.keys(tasksByLocation).length + ' locations');
 
   var tasks = [];
   var byLocation = {};
   var byDirection = {};
   var officeTasks = []; // NEW: Track office work tasks separately
+  var scheduledTasks = {}; // NEW: Track tasks already scheduled by date key
   var skippedCount = { helena: 0, certExpiring: 0, futureScheduled: 0 };
   var trainingCount = 0; // Track training tasks specifically
   var rowCounter = 1; // Virtual row counter for tasks that don't have real row indices
@@ -518,18 +603,18 @@ function collectTasksForTripPlanner() {
   for (var locationName in tasksByLocation) {
     var locationTasks = tasksByLocation[locationName];
 
-    // Skip non-drivable locations (office work only) - BUT collect them for office tasks
     var locLower = locationName.toLowerCase();
-    var isOfficeLocation = (locLower === 'helena' ||
-        locLower === 'weeds' ||
+
+    // Check if this is a non-field location (but NOT Helena - Helena crews need field visits)
+    var isNonFieldLocation = (locLower === 'weeds' ||
         locLower === 'unknown' ||
         locLower === 'previous employee' ||
         locLower === 'light duty' ||
         locLower === 'vacation' ||
         locLower === 'leave');
 
-    if (isOfficeLocation) {
-      // Collect these as office tasks instead of skipping entirely
+    if (isNonFieldLocation) {
+      // Collect these as office tasks - they can't be visited in the field
       for (var ot = 0; ot < locationTasks.length; ot++) {
         var officeTask = locationTasks[ot];
         var taskType = officeTask.type || officeTask.taskType || '';
@@ -589,7 +674,8 @@ function collectTasksForTripPlanner() {
           location: locationName,
           taskType: taskType,
           employee: sourceTask.employee || '',
-          certType: sourceTask.certType || '',
+          certType: sourceTask.itemType || sourceTask.certType || '',
+          itemType: sourceTask.itemType || sourceTask.certType || '',
           dueDate: certDueDate ? formatDateForDisplay(certDueDate instanceof Date ? certDueDate : new Date(certDueDate)) : null,
           daysTillDue: certDaysTillDue,
           urgency: calculateUrgencyScore(certDaysTillDue),
@@ -603,13 +689,53 @@ function collectTasksForTripPlanner() {
         continue;
       }
 
-      // Skip tasks already scheduled for a future date
+      // Handle tasks already scheduled for a future date - collect them by date
+      // so Trip Planner can show them on their scheduled days
       if (sourceTask.scheduledDate) {
         var scheduledDateObj = sourceTask.scheduledDate instanceof Date ?
             sourceTask.scheduledDate : new Date(sourceTask.scheduledDate);
         if (!isNaN(scheduledDateObj.getTime())) {
           scheduledDateObj.setHours(0, 0, 0, 0);
-          if (scheduledDateObj > today) {
+          if (scheduledDateObj >= today) {
+            // Collect this task for its scheduled day instead of skipping
+            var scheduledDateKey = formatDateKeyForRoute(scheduledDateObj);
+
+            // Calculate urgency based on due date (not scheduled date)
+            var taskDueDate = sourceTask.dueDate || sourceTask.changeOutDate || null;
+            var taskDaysTillDue = null;
+            if (taskDueDate) {
+              var taskDueDateObj = taskDueDate instanceof Date ? taskDueDate : new Date(taskDueDate);
+              if (!isNaN(taskDueDateObj.getTime())) {
+                taskDueDateObj.setHours(0, 0, 0, 0);
+                taskDaysTillDue = Math.ceil((taskDueDateObj - today) / (1000 * 60 * 60 * 24));
+              }
+            }
+            var scheduledUrgency = calculateUrgencyScore(taskDaysTillDue);
+
+            var scheduledTask = {
+              rowIndex: sourceTask.rowIndex || rowCounter++,
+              location: locationName,
+              direction: getLocationDirection(locationName),
+              taskType: sourceTask.type || sourceTask.taskType || '',
+              employee: sourceTask.employee || '',
+              itemType: sourceTask.itemType || '',
+              crew: sourceTask.crew || '',
+              foreman: sourceTask.foreman || '',
+              dueDate: taskDueDate ? formatDateForDisplay(taskDueDate instanceof Date ? taskDueDate : new Date(taskDueDate)) : null,
+              scheduledDate: scheduledDateKey,
+              daysTillDue: taskDaysTillDue,
+              urgency: scheduledUrgency,
+              urgencyLabel: getUrgencyLabel(scheduledUrgency),
+              source: sourceTask.sheetName || sourceTask.source || '',
+              startTime: sourceTask.startTime || '',
+              endTime: sourceTask.endTime || ''
+            };
+
+            if (!scheduledTasks[scheduledDateKey]) {
+              scheduledTasks[scheduledDateKey] = [];
+            }
+            scheduledTasks[scheduledDateKey].push(scheduledTask);
+
             skippedCount.futureScheduled++;
             continue;
           }
@@ -682,35 +808,155 @@ function collectTasksForTripPlanner() {
     }
   }
 
-  Logger.log('=== DIRECT READ SUMMARY ===');
+  Logger.log('=== TASK METADATA SUMMARY (Phase 6) ===');
   Logger.log('Found ' + tasks.length + ' pending tasks in ' + Object.keys(byLocation).length + ' locations');
   Logger.log('Task breakdown: ' + trainingCount + ' training, ' + (tasks.length - trainingCount) + ' other');
   Logger.log('Office tasks collected: ' + officeTasks.length);
-  Logger.log('Skipped from field trips: ' + skippedCount.helena + ' Helena/office, ' + skippedCount.certExpiring + ' cert expiring (phone), ' + skippedCount.futureScheduled + ' future scheduled');
+  Logger.log('Pre-scheduled tasks by date: ' + Object.keys(scheduledTasks).length + ' dates, ' + skippedCount.futureScheduled + ' total tasks');
+  Logger.log('Skipped from field trips: ' + skippedCount.helena + ' Helena/office, ' + skippedCount.certExpiring + ' cert expiring (phone)');
 
   return {
     tasks: tasks,
     byLocation: byLocation,
     byDirection: byDirection,
-    officeTasks: officeTasks, // NEW: Include office tasks
-    directRead: true // Flag to indicate this used direct source reading
+    officeTasks: officeTasks,
+    scheduledTasks: scheduledTasks, // NEW: Tasks pre-assigned to specific dates
+    fromTaskMetadata: true // Flag to indicate this used Task Metadata (Phase 6)
+  };
+}
+
+/**
+ * Legacy fallback function - uses collectAndGroupTasks directly.
+ * Only used if Task Metadata sheet is not available.
+ * @private
+ */
+function collectTasksForTripPlannerLegacy() {
+  Logger.log('=== collectTasksForTripPlannerLegacy (Fallback Mode) ===');
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Use collectAndGroupTasks from 76-SmartScheduling.gs to get all pending tasks
+  var tasksByLocation = collectAndGroupTasks(ss);
+
+  Logger.log('collectAndGroupTasks returned ' + Object.keys(tasksByLocation).length + ' locations');
+
+  var tasks = [];
+  var byLocation = {};
+  var byDirection = {};
+  var officeTasks = [];
+  var skippedCount = { helena: 0, certExpiring: 0, futureScheduled: 0 };
+  var rowCounter = 1;
+
+  for (var locationName in tasksByLocation) {
+    var locationTasks = tasksByLocation[locationName];
+    var locLower = locationName.toLowerCase();
+    var isOfficeLocation = (locLower === 'helena' || locLower === 'weeds' || locLower === 'unknown' ||
+        locLower === 'previous employee' || locLower === 'light duty' || locLower === 'vacation' || locLower === 'leave');
+
+    if (isOfficeLocation) {
+      skippedCount.helena += locationTasks.length;
+      continue;
+    }
+
+    for (var t = 0; t < locationTasks.length; t++) {
+      var sourceTask = locationTasks[t];
+      var taskType = sourceTask.type || sourceTask.taskType || '';
+      var taskTypeLower = taskType.toLowerCase();
+
+      // Skip cert tasks
+      if (taskTypeLower.indexOf('cert expir') !== -1) {
+        skippedCount.certExpiring++;
+        continue;
+      }
+
+      // Skip future scheduled tasks
+      if (sourceTask.scheduledDate) {
+        var scheduledDateObj = new Date(sourceTask.scheduledDate);
+        if (!isNaN(scheduledDateObj.getTime()) && scheduledDateObj > today) {
+          skippedCount.futureScheduled++;
+          continue;
+        }
+      }
+
+      var dueDate = sourceTask.dueDate || sourceTask.changeOutDate || null;
+      var daysTillDue = null;
+      if (dueDate) {
+        var dueDateObj = dueDate instanceof Date ? dueDate : new Date(dueDate);
+        if (!isNaN(dueDateObj.getTime())) {
+          dueDateObj.setHours(0, 0, 0, 0);
+          daysTillDue = Math.ceil((dueDateObj - today) / (1000 * 60 * 60 * 24));
+        }
+      }
+
+      var urgency = calculateUrgencyScore(daysTillDue);
+      var task = {
+        rowIndex: sourceTask.rowIndex || rowCounter++,
+        location: locationName,
+        direction: getLocationDirection(locationName),
+        taskType: taskType,
+        employee: sourceTask.employee || '',
+        itemType: sourceTask.itemType || '',
+        crew: sourceTask.crew || '',
+        foreman: sourceTask.foreman || '',
+        dueDate: dueDate ? formatDateForDisplay(dueDate instanceof Date ? dueDate : new Date(dueDate)) : null,
+        daysTillDue: daysTillDue,
+        urgency: urgency,
+        urgencyLabel: getUrgencyLabel(urgency),
+        isNew: false,
+        source: sourceTask.sheetName || sourceTask.source || ''
+      };
+
+      tasks.push(task);
+
+      var locKey = locationName.toLowerCase();
+      if (!byLocation[locKey]) {
+        byLocation[locKey] = {
+          name: locationName,
+          direction: task.direction,
+          tasks: [],
+          totalUrgency: 0,
+          maxUrgency: 0,
+          estimatedTime: CREW_BASE_TIME
+        };
+      }
+      byLocation[locKey].tasks.push(task);
+      byLocation[locKey].totalUrgency += urgency;
+      byLocation[locKey].maxUrgency = Math.max(byLocation[locKey].maxUrgency, urgency);
+      byLocation[locKey].estimatedTime = CREW_BASE_TIME + (byLocation[locKey].tasks.length * CREW_PER_TASK);
+
+      if (!byDirection[task.direction]) byDirection[task.direction] = [];
+      if (byDirection[task.direction].indexOf(locKey) === -1) {
+        byDirection[task.direction].push(locKey);
+      }
+    }
+  }
+
+  Logger.log('Legacy mode found ' + tasks.length + ' tasks');
+
+  return {
+    tasks: tasks,
+    byLocation: byLocation,
+    byDirection: byDirection,
+    officeTasks: officeTasks,
+    legacyMode: true
   };
 }
 
 /**
  * Gets all pending tasks with locations for Trip Planner.
- * Now reads directly from source sheets (Glove Swaps, Sleeve Swaps, etc.)
- * instead of relying on the To Do List sheet.
+ * Phase 6: Now uses Task Metadata as single source of truth.
  *
  * Called from TripPlanner.html
  *
  * @return {Object} Tasks grouped by location with urgency scores
  */
 function getPendingTasksWithLocations() {
-  Logger.log('=== getPendingTasksWithLocations (Using Direct Source Reading) ===');
+  Logger.log('=== getPendingTasksWithLocations (Using Task Metadata - Phase 6) ===');
 
   try {
-    // Use direct source reading - no need for To Do List sheet
+    // Phase 6: Use Task Metadata as single source of truth
     var result = collectTasksForTripPlanner();
 
     // Add drive time map and overnight cities for the Trip Planner UI
@@ -952,6 +1198,54 @@ function calculateDayPlan(startLocation, destinations, startHour, endLocation) {
 }
 
 /**
+ * Recalculates a day plan based on updated parameters.
+ * Called from TripPlanner.html when locations are dragged to new days.
+ *
+ * @param {Object} params - Day plan parameters
+ * @param {string} params.startLocation - Starting location (e.g., 'Helena')
+ * @param {Array} params.assignedLocations - Array of assigned location objects
+ * @param {boolean} params.arriveFirstBy7am - Whether to arrive at first stop by 7am
+ * @param {string} params.endLocation - Ending location (default 'Helena')
+ * @return {Object} Recalculated day plan
+ */
+function recalculateDayPlan(params) {
+  Logger.log('recalculateDayPlan called with: ' + JSON.stringify(params));
+
+  var startLocation = params.startLocation || 'Helena';
+  var endLocation = params.endLocation || 'Helena';
+  var assignedLocations = params.assignedLocations || [];
+  var arriveFirstBy7am = params.arriveFirstBy7am || false;
+
+  // Convert assignedLocations to the format expected by calculateDayPlan
+  var destinations = assignedLocations.map(function(loc) {
+    return {
+      location: loc.location || loc.name || 'Unknown',
+      taskCount: loc.taskCount || (loc.tasks ? loc.tasks.length : 0),
+      estimatedTime: loc.estimatedTime || 25,
+      tasks: loc.tasks || []
+    };
+  });
+
+  // Calculate the plan
+  var plan = calculateDayPlan(startLocation, destinations, WORK_START_HOUR, endLocation);
+
+  // Handle early arrival option
+  if (arriveFirstBy7am && destinations.length > 0) {
+    var driveTimeMap = getDriveTimeMap();
+    var firstDestLower = (destinations[0].location || '').toLowerCase();
+    var earlyDriveMinutes = getDriveTimeBetweenLocations(startLocation.toLowerCase(), firstDestLower, driveTimeMap);
+
+    plan.earlyDriveMinutes = earlyDriveMinutes;
+    plan.arriveFirstBy7am = true;
+    // Note: Early drive time is NOT counted against the 10-hour workday
+  }
+
+  Logger.log('recalculateDayPlan result: totalMinutes=' + plan.totalMinutes + ', stops=' + plan.stops.length);
+
+  return plan;
+}
+
+/**
  * Gets drive time between two locations using coordinates.
  * Uses the calculateDriveTimeBetween function from 76-SmartScheduling.gs
  * which calculates actual distance-based drive times.
@@ -1084,7 +1378,7 @@ function suggestOptimalTrips(daysAhead) {
 
       // Skip Saturday (6) and Sunday (0)
       if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-        var dateKey = formatDateKey(currentDate);
+        var dateKey = formatDateKeyForRoute(currentDate);
 
         // Check for locked manual tasks on this date
         var manualTasksOnDay = manualData.byDate[dateKey] || [];
@@ -1149,6 +1443,86 @@ function suggestOptimalTrips(daysAhead) {
       }
     }
     Logger.log('Step 5 done: ' + Object.keys(assignedLocations).length + ' locations from manual tasks');
+
+    // Pre-assign tasks that were scheduled via Task List (Step 5.5)
+    Logger.log('Step 5.5: Pre-assigning scheduled tasks from Task List...');
+    var scheduledTasks = pendingData.scheduledTasks || {};
+    var scheduledTaskCount = 0;
+
+    for (var d = 0; d < workDays.length; d++) {
+      var day = workDays[d];
+      var tasksOnDate = scheduledTasks[day.dateKey] || [];
+
+      if (tasksOnDate.length > 0) {
+        // Group tasks by location for this day
+        var locationGroups = {};
+        for (var st = 0; st < tasksOnDate.length; st++) {
+          var scheduledTask = tasksOnDate[st];
+          var locName = scheduledTask.location || 'Unknown';
+          var locKey = locName.toLowerCase();
+
+          if (!locationGroups[locKey]) {
+            locationGroups[locKey] = {
+              location: locName,
+              tasks: [],
+              maxUrgency: 0,
+              direction: scheduledTask.direction || getLocationDirection(locName)
+            };
+          }
+          locationGroups[locKey].tasks.push(scheduledTask);
+          locationGroups[locKey].maxUrgency = Math.max(
+            locationGroups[locKey].maxUrgency,
+            scheduledTask.urgency || 0
+          );
+        }
+
+        // Add each location group to this day's assigned locations
+        for (var locKey in locationGroups) {
+          var group = locationGroups[locKey];
+
+          // Check if this location is already assigned to this day (from manual tasks)
+          var alreadyOnDay = day.assignedLocations.some(function(loc) {
+            return (loc.location || '').toLowerCase() === locKey;
+          });
+
+          if (!alreadyOnDay) {
+            var estimatedTime = CREW_BASE_TIME + (group.tasks.length * CREW_PER_TASK);
+
+            day.assignedLocations.push({
+              location: group.location,
+              taskCount: group.tasks.length,
+              estimatedTime: estimatedTime,
+              maxUrgency: group.maxUrgency,
+              tasks: group.tasks,
+              direction: group.direction,
+              isManualTask: false,
+              isLocked: false, // Scheduled tasks from Task List can be moved
+              isScheduledTask: true // Flag to indicate these came from Task List scheduling
+            });
+
+            scheduledTaskCount += group.tasks.length;
+            Logger.log('Pre-assigned scheduled location: ' + group.location + ' (' + group.tasks.length + ' tasks) on ' + day.dateKey);
+          } else {
+            // Merge tasks into existing location on this day
+            var existingLoc = day.assignedLocations.find(function(loc) {
+              return (loc.location || '').toLowerCase() === locKey;
+            });
+            if (existingLoc) {
+              existingLoc.tasks = (existingLoc.tasks || []).concat(group.tasks);
+              existingLoc.taskCount = existingLoc.tasks.length;
+              existingLoc.estimatedTime = CREW_BASE_TIME + (existingLoc.tasks.length * CREW_PER_TASK);
+              existingLoc.maxUrgency = Math.max(existingLoc.maxUrgency, group.maxUrgency);
+              scheduledTaskCount += group.tasks.length;
+              Logger.log('Merged scheduled tasks into existing: ' + group.location + ' on ' + day.dateKey);
+            }
+          }
+
+          // Mark this location as assigned for this date (but not globally -
+          // same location can appear on multiple days with different tasks)
+        }
+      }
+    }
+    Logger.log('Step 5.5 done: Pre-assigned ' + scheduledTaskCount + ' scheduled tasks');
 
     // Sort locations by urgency (highest first)
     Logger.log('Step 6: Sorting locations...');
@@ -1446,11 +1820,24 @@ function suggestOptimalTrips(daysAhead) {
 
     var cleanUnassigned = unassigned.map(function(loc) {
       return {
-        name: loc.name,
+        location: loc.name, // Standardized: use 'location' consistently
+        name: loc.name, // Keep for backward compatibility
         direction: loc.direction,
         taskCount: loc.tasks ? loc.tasks.length : 0,
         maxUrgency: loc.maxUrgency || 0,
-        estimatedTime: loc.estimatedTime || 0
+        estimatedTime: loc.estimatedTime || 0,
+        // Include minimal task data for drag-drop and completion
+        tasks: (loc.tasks || []).map(function(t) {
+          return {
+            rowIndex: t.rowIndex,
+            source: t.source || 'To Do List',
+            taskType: t.taskType || '',
+            employee: t.employee || '',
+            itemType: t.itemType || '',
+            location: t.location || loc.name,
+            urgencyLabel: t.urgencyLabel || ''
+          };
+        })
       };
     });
 
@@ -1548,500 +1935,217 @@ function hasAnyOfficeTasks() {
 }
 
 // ============================================================================
-// DAY PLAN ADJUSTMENTS
+// APPLY TO SCHEDULE - Phase 6
 // ============================================================================
 
-
 /**
- * Recalculates day plan when user makes changes.
- * Called from TripPlanner.html when user drags locations.
+ * Applies trip plan to Task Metadata by updating scheduled dates and times.
+ * Phase 6: Updates Task Metadata sheet (not To Do List).
  *
- * @param {Object} dayData - Day data with startLocation, assignedLocations, and arriveAt7am flag
- * @return {Object} Updated day plan
- */
-function recalculateDayPlan(dayData) {
-  var startLocation = dayData.startLocation || 'Helena';
-  var assignedLocations = dayData.assignedLocations || [];
-  var arriveFirstBy7am = dayData.arriveFirstBy7am || false;
-  var endLocation = dayData.endLocation || 'Helena'; // Where user wants to end up
-
-  // Calculate the regular day plan starting from the start location at 7am
-  var plan = calculateDayPlan(
-    startLocation,
-    assignedLocations,
-    WORK_START_HOUR,
-    endLocation // Pass the desired end location
-  );
-
-  // If "arrive first stop by 7am" mode, calculate early drive time from start location to first stop
-  // This drive time is tracked but NOT counted against the 10-hour limit
-  if (arriveFirstBy7am && assignedLocations && assignedLocations.length > 0) {
-    var driveTimeMap = getDriveTimeMap();
-    var firstStop = assignedLocations[0].location;
-
-    // Calculate drive time from start location to first stop
-    var earlyDriveMinutes = getDriveTimeBetweenLocations(
-      startLocation.toLowerCase(),
-      firstStop.toLowerCase(),
-      driveTimeMap
-    );
-
-    plan.earlyDriveMinutes = earlyDriveMinutes;
-    plan.earlyDriveFrom = startLocation;
-    plan.arriveFirstBy7am = true;
-    plan.firstStop = firstStop;
-
-    // The early drive is NOT added to totalMinutes (doesn't count against 10hr)
-    // But we track it separately for reporting
-    plan.totalDriveIncludingEarly = plan.driveMinutes + earlyDriveMinutes;
-
-    // Recalculate exceeds limit WITHOUT the early drive
-    plan.exceedsLimit = plan.totalMinutes > MAX_WORK_MINUTES;
-
-    Logger.log('Arrive first stop by 7am: ' + earlyDriveMinutes + ' min early drive from ' + startLocation + ' to ' + firstStop + ' (not counted in 10hr)');
-  }
-
-  return plan;
-}
-
-/**
- * Updates overnight city for a day and recalculates subsequent day's start.
+ * Called from TripPlanner.html when user clicks "Apply to Schedule"
  *
- * @param {string} dayKey - Date key of the day
- * @param {string} overnightCity - City to stay overnight
- * @return {Object} Updated plan data
+ * @param {Array} daysToApply - Array of work day objects with assignedLocations
+ * @return {Object} Result with success status and message
  */
-function updateOvernightCity(dayKey, overnightCity) {
-  // This would need to update the saved plan if persistence is active
-  Logger.log('Updating overnight city for ' + dayKey + ' to ' + overnightCity);
-  return { success: true, overnightCity: overnightCity };
-}
+function applyTripToSchedule(daysToApply) {
+  Logger.log('=== applyTripToSchedule (Phase 6 - Task Metadata) ===');
+  Logger.log('Days to apply: ' + daysToApply.length);
 
-/**
- * Simple test - just checks if sheets exist
- * Run from Extensions > Apps Script > select testTripPlannerSheets > Run
- */
-function testTripPlannerSheets() {
-  var ui = SpreadsheetApp.getUi();
   var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var metadataSheet = ss.getSheetByName('Task Metadata');
 
-  var todoSheet = ss.getSheetByName('To Do List');
-  var manualSheet = ss.getSheetByName('Manual Tasks');
-
-  var msg = '=== Sheet Check ===\n\n';
-
-  if (todoSheet) {
-    msg += '✅ To Do List sheet exists\n';
-    msg += '   Rows: ' + todoSheet.getLastRow() + '\n';
-    msg += '   Cols: ' + todoSheet.getLastColumn() + '\n';
-  } else {
-    msg += '❌ To Do List sheet NOT FOUND\n';
-    msg += '   Run "Generate Smart Schedule" first!\n';
+  if (!metadataSheet) {
+    return { success: false, message: 'Task Metadata sheet not found. Please run Generate Task Metadata first.' };
   }
 
-  msg += '\n';
+  var metadataData = metadataSheet.getDataRange().getValues();
+  var headers = metadataData[0];
 
-  if (manualSheet) {
-    msg += '✅ Manual Tasks sheet exists\n';
-    msg += '   Rows: ' + manualSheet.getLastRow() + '\n';
-    msg += '   Cols: ' + manualSheet.getLastColumn() + '\n';
+  // Build column index map
+  var colMap = {};
+  for (var h = 0; h < headers.length; h++) {
+    colMap[headers[h]] = h;
+  }
 
-    // Check headers
-    if (manualSheet.getLastRow() > 0) {
-      var headers = manualSheet.getRange(1, 1, 1, manualSheet.getLastColumn()).getValues()[0];
-      msg += '   Headers: ' + headers.join(', ') + '\n';
+  Logger.log('Task Metadata columns: ' + JSON.stringify(colMap));
 
-      // Check if new columns exist
-      var hasLocked = headers.some(function(h) { return String(h).toLowerCase() === 'locked'; });
-      if (hasLocked) {
-        msg += '   ✅ Has flexibility columns\n';
+  // Required columns
+  var sourceSheetCol = colMap['SourceSheet'];
+  var sourceRowCol = colMap['SourceRow'];
+  var locationCol = colMap['Location'];
+  var scheduledDateCol = colMap['ScheduledDate'];
+  var startTimeCol = colMap['StartTime'];
+  var endTimeCol = colMap['EndTime'];
+  var lastModifiedCol = colMap['LastModified'];
+  var statusCol = colMap['Status'];
+
+  if (scheduledDateCol === undefined) {
+    return { success: false, message: 'ScheduledDate column not found in Task Metadata' };
+  }
+
+  if (locationCol === undefined) {
+    return { success: false, message: 'Location column not found in Task Metadata' };
+  }
+
+  // Log all unique locations in Task Metadata for debugging
+  var metadataLocations = {};
+  for (var m = 1; m < metadataData.length; m++) {
+    var loc = String(metadataData[m][locationCol] || '').toLowerCase().trim();
+    if (loc && !metadataLocations[loc]) {
+      metadataLocations[loc] = 0;
+    }
+    if (loc) metadataLocations[loc]++;
+  }
+  Logger.log('Unique locations in Task Metadata: ' + JSON.stringify(metadataLocations));
+
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  var updatedCount = 0;
+  var skippedCount = 0;
+  var skippedComplete = 0;
+  var errorCount = 0;
+  var noMatchCount = 0;
+
+  // Process each day
+  for (var d = 0; d < daysToApply.length; d++) {
+    var day = daysToApply[d];
+    var dateKey = day.dateKey;
+    var locations = day.assignedLocations || [];
+
+    if (!dateKey || locations.length === 0) continue;
+
+    // Parse the target date
+    var targetDate = new Date(dateKey + 'T12:00:00'); // Use noon to avoid timezone issues
+    if (isNaN(targetDate.getTime())) {
+      Logger.log('Invalid date: ' + dateKey);
+      continue;
+    }
+
+    Logger.log('Processing ' + day.dayName + ' (' + dateKey + ') with ' + locations.length + ' locations');
+
+    // Get arrival times from day plan
+    var arrivalTimes = {};
+    if (day.plan && day.plan.stops) {
+      for (var s = 0; s < day.plan.stops.length; s++) {
+        var stop = day.plan.stops[s];
+        if (stop.location && stop.arrivalTime) {
+          arrivalTimes[stop.location.toLowerCase()] = stop.arrivalTime;
+        }
+      }
+    }
+
+    // Process each location on this day
+    for (var loc = 0; loc < locations.length; loc++) {
+      var locData = locations[loc];
+      var locationName = locData.name || locData.location || '';
+
+      if (!locationName) {
+        Logger.log('  WARNING: Location has no name: ' + JSON.stringify(locData));
+        continue;
+      }
+
+      // Skip manual tasks (they're already in Manual Tasks sheet)
+      if (locData.isManualTask) {
+        Logger.log('  Skipping manual task: ' + locationName);
+        continue;
+      }
+
+      // Get arrival time for this location
+      var arrivalTime = arrivalTimes[locationName.toLowerCase()] || locData.arrivalTime || '';
+
+      // Find matching tasks in Task Metadata by location
+      var locLower = locationName.toLowerCase();
+      var matchedForThisLocation = 0;
+
+      Logger.log('  Looking for location: "' + locLower + '" (taskCount: ' + (locData.taskCount || locData.tasks?.length || 'unknown') + ')');
+
+      for (var row = 1; row < metadataData.length; row++) {
+        var rowData = metadataData[row];
+        var rowLocation = locationCol !== undefined ? String(rowData[locationCol] || '').toLowerCase().trim() : '';
+
+        // Match location
+        if (rowLocation !== locLower) continue;
+
+        // Skip completed tasks
+        var status = statusCol !== undefined ? String(rowData[statusCol] || '').toLowerCase() : '';
+        if (status === 'complete' || status === 'completed') {
+          skippedComplete++;
+          continue;
+        }
+
+        // Check if already scheduled for a future date (don't override)
+        var existingScheduledDate = rowData[scheduledDateCol];
+        if (existingScheduledDate) {
+          var existingDate = existingScheduledDate instanceof Date ?
+            existingScheduledDate : new Date(existingScheduledDate);
+          if (!isNaN(existingDate.getTime())) {
+            existingDate.setHours(0, 0, 0, 0);
+            if (existingDate > today) {
+              Logger.log('    Skipping row ' + (row + 1) + ' - already scheduled for ' + existingDate.toDateString());
+              skippedCount++;
+              continue;
+            }
+          }
+        }
+
+        // Update the task
+        try {
+          // Set scheduled date
+          metadataSheet.getRange(row + 1, scheduledDateCol + 1).setValue(targetDate);
+
+          // Set start time if available
+          if (startTimeCol !== undefined && arrivalTime) {
+            metadataSheet.getRange(row + 1, startTimeCol + 1).setValue(arrivalTime);
+          }
+
+          // Update last modified
+          if (lastModifiedCol !== undefined) {
+            metadataSheet.getRange(row + 1, lastModifiedCol + 1).setValue(new Date());
+          }
+
+          updatedCount++;
+          matchedForThisLocation++;
+          Logger.log('    Updated row ' + (row + 1) + ' (' + rowLocation + ') to ' + dateKey + (arrivalTime ? ' @ ' + arrivalTime : ''));
+
+        } catch (e) {
+          Logger.log('    Error updating row ' + (row + 1) + ': ' + e);
+          errorCount++;
+        }
+      }
+
+      if (matchedForThisLocation === 0) {
+        Logger.log('  WARNING: No matching tasks found for location "' + locLower + '"');
+        noMatchCount++;
       } else {
-        msg += '   ⚠️ Missing flexibility columns - run Migrate Manual Tasks Sheet\n';
+        Logger.log('  Matched ' + matchedForThisLocation + ' tasks for "' + locLower + '"');
       }
     }
-  } else {
-    msg += '⚠️ Manual Tasks sheet NOT FOUND (will be created when you add first task)\n';
   }
 
-  ui.alert('Trip Planner Sheet Check', msg, ui.ButtonSet.OK);
-}
-
-/**
- * Removes a manual task from the Manual Tasks sheet.
- * Called from TripPlanner.html when user removes a manual task.
- *
- * @param {number} rowIndex - The row index (1-based) of the task to remove
- * @return {Object} Result with success flag and message
- */
-function removeManualTaskFromSheet(rowIndex) {
-  Logger.log('removeManualTaskFromSheet called with rowIndex: ' + rowIndex);
-
-  if (!rowIndex || rowIndex < 2) {
-    return { success: false, error: 'Invalid row index: ' + rowIndex };
+  var message = 'Updated ' + updatedCount + ' task(s) in Task Metadata';
+  if (skippedCount > 0) {
+    message += ', skipped ' + skippedCount + ' (already scheduled)';
+  }
+  if (skippedComplete > 0) {
+    message += ', skipped ' + skippedComplete + ' (completed)';
+  }
+  if (noMatchCount > 0) {
+    message += ', ' + noMatchCount + ' location(s) had no matching tasks';
+  }
+  if (errorCount > 0) {
+    message += ', ' + errorCount + ' error(s)';
   }
 
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var manualSheet = ss.getSheetByName('Manual Tasks');
+  Logger.log('=== applyTripToSchedule COMPLETE: ' + message + ' ===');
 
-  if (!manualSheet) {
-    return { success: false, error: 'Manual Tasks sheet not found' };
-  }
-
-  var lastRow = manualSheet.getLastRow();
-  if (rowIndex > lastRow) {
-    return { success: false, error: 'Row ' + rowIndex + ' does not exist (last row is ' + lastRow + ')' };
-  }
-
-  try {
-    // Get task info before deleting for logging
-    var taskData = manualSheet.getRange(rowIndex, 1, 1, manualSheet.getLastColumn()).getValues()[0];
-    var headers = manualSheet.getRange(1, 1, 1, manualSheet.getLastColumn()).getValues()[0];
-
-    var colIndex = {};
-    for (var h = 0; h < headers.length; h++) {
-      var header = String(headers[h]).toLowerCase().trim();
-      if (header === 'location') colIndex.location = h;
-      if (header === 'task' || header === 'task type') colIndex.taskType = h;
-      if (header === 'employee') colIndex.employee = h;
-    }
-
-    var taskInfo = (colIndex.taskType !== undefined ? taskData[colIndex.taskType] : 'Task') +
-                   ' at ' + (colIndex.location !== undefined ? taskData[colIndex.location] : 'Unknown');
-
-    Logger.log('Deleting manual task: ' + taskInfo + ' at row ' + rowIndex);
-
-    // Delete the row
-    manualSheet.deleteRow(rowIndex);
-
-    return { success: true, message: 'Removed: ' + taskInfo };
-  } catch (e) {
-    Logger.log('Error removing manual task: ' + e.toString());
-    return { success: false, error: e.toString() };
-  }
-}
-
-/**
- * Removes a completed task from the current trip plan view (locally).
- * Updates the To Do List or Manual Tasks sheet to mark as complete.
- * This is called when marking tasks complete in Trip Planner.
- *
- * @param {Object} task - Task object with source and rowIndex
- * @return {Object} Result with success flag
- */
-function removeTaskFromTripPlan(task) {
-  if (!task || !task.rowIndex) {
-    return { success: false, error: 'Invalid task data' };
-  }
-
-  // The actual completion is handled by markScheduleTaskComplete
-  // This function is here for any additional cleanup if needed
-  return { success: true };
-}
-
-/**
- * Test function to run suggestOptimalTrips directly
- * Run this from Apps Script editor to see the logs
- */
-function testSuggestOptimalTrips() {
-  var ui = SpreadsheetApp.getUi();
-  ui.alert('Starting...', 'Running suggestOptimalTrips(14)...', ui.ButtonSet.OK);
-
-  var startTime = new Date();
-  var result = suggestOptimalTrips(14);
-  var endTime = new Date();
-  var duration = (endTime - startTime) / 1000;
-
-  var msg = 'Completed in ' + duration + ' seconds\n\n';
-
-  if (result.error) {
-    msg += '❌ Error: ' + result.error;
-  } else {
-    msg += '✅ Success!\n';
-    msg += 'Work days: ' + result.workDays.length + '\n';
-
-    var daysWithTasks = result.workDays.filter(function(d) {
-      return d.assignedLocations && d.assignedLocations.length > 0;
-    }).length;
-    msg += 'Days with tasks: ' + daysWithTasks + '\n';
-    msg += 'Unassigned locations: ' + result.unassignedLocations.length + '\n';
-
-    if (result.manualTasksSummary) {
-      msg += '\nManual tasks: ' + result.manualTasksSummary.total + ' (locked: ' + result.manualTasksSummary.locked + ')';
-    }
-  }
-
-  ui.alert('suggestOptimalTrips Result', msg, ui.ButtonSet.OK);
-  return result;
-}
-
-/**
- * Purges all tasks for a specific location from all storage.
- * Use this to completely remove stuck tasks.
- *
- * Menu: Run from Apps Script editor or call purgeBillingsTask()
- *
- * @param {string} locationName - Location to purge (e.g., "Billings")
- * @return {Object} Summary of what was deleted
- */
-function purgeTasksByLocation(locationName) {
-  if (!locationName) {
-    locationName = 'Billings'; // Default for the stuck task
-  }
-
-  var ui = SpreadsheetApp.getUi();
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var summary = {
-    toDoListDeleted: 0,
-    manualTasksDeleted: 0,
-    savedPlanCleared: false
+  return {
+    success: true,
+    message: message,
+    updated: updatedCount,
+    skipped: skippedCount,
+    noMatch: noMatchCount,
+    errors: errorCount
   };
-
-  var locationLower = locationName.toLowerCase().trim();
-
-  // 1. Delete from To Do List sheet
-  var todoSheet = ss.getSheetByName('To Do List');
-  if (todoSheet && todoSheet.getLastRow() > 13) {
-    var todoData = todoSheet.getDataRange().getValues();
-    var rowsToDelete = [];
-
-    // Find location column (usually column E or "Location")
-    var headers = todoData[12] || []; // Row 13 has headers
-    var locCol = -1;
-    for (var h = 0; h < headers.length; h++) {
-      if (String(headers[h]).toLowerCase().indexOf('location') !== -1) {
-        locCol = h;
-        break;
-      }
-    }
-
-    if (locCol >= 0) {
-      // Find rows to delete (from bottom up to avoid index shifting)
-      for (var i = todoData.length - 1; i >= 13; i--) {
-        var rowLoc = String(todoData[i][locCol] || '').toLowerCase().trim();
-        if (rowLoc === locationLower || rowLoc.indexOf(locationLower) !== -1) {
-          rowsToDelete.push(i + 1); // Convert to 1-based row number
-        }
-      }
-
-      // Delete rows from bottom up
-      rowsToDelete.forEach(function(rowNum) {
-        todoSheet.deleteRow(rowNum);
-        summary.toDoListDeleted++;
-      });
-    }
-    Logger.log('Deleted ' + summary.toDoListDeleted + ' rows from To Do List');
-  }
-
-  // 2. Delete from Manual Tasks sheet
-  var manualSheet = ss.getSheetByName('Manual Tasks');
-  if (manualSheet && manualSheet.getLastRow() > 1) {
-    var manualData = manualSheet.getDataRange().getValues();
-    var manualHeaders = manualData[0];
-    var manualLocCol = -1;
-
-    for (var mh = 0; mh < manualHeaders.length; mh++) {
-      if (String(manualHeaders[mh]).toLowerCase().trim() === 'location') {
-        manualLocCol = mh;
-        break;
-      }
-    }
-
-    if (manualLocCol >= 0) {
-      var manualRowsToDelete = [];
-      for (var mi = manualData.length - 1; mi >= 1; mi--) {
-        var manualLoc = String(manualData[mi][manualLocCol] || '').toLowerCase().trim();
-        if (manualLoc === locationLower || manualLoc.indexOf(locationLower) !== -1) {
-          manualRowsToDelete.push(mi + 1);
-        }
-      }
-
-      manualRowsToDelete.forEach(function(rowNum) {
-        manualSheet.deleteRow(rowNum);
-        summary.manualTasksDeleted++;
-      });
-    }
-    Logger.log('Deleted ' + summary.manualTasksDeleted + ' rows from Manual Tasks');
-  }
-
-  // 3. Clear saved trip plan from UserProperties
-  var userProps = PropertiesService.getUserPropertiesService.getUserProperties();
-  userProps.deleteProperty('tripPlan');
-  summary.savedPlanCleared = true;
-  Logger.log('Cleared saved trip plan from UserProperties');
-
-  // Show summary
-  var msg = '=== PURGE COMPLETE: ' + locationName + ' ===\n\n';
-  msg += '📋 To Do List: Deleted ' + summary.toDoListDeleted + ' row(s)\n';
-  msg += '📝 Manual Tasks: Deleted ' + summary.manualTasksDeleted + ' row(s)\n';
-  msg += '💾 Saved Trip Plan: Cleared\n\n';
-  msg += 'NEXT STEPS:\n';
-  msg += '1. Close and reopen Trip Planner\n';
-  msg += '2. The task should be gone\n';
-  msg += '3. Run "Generate Smart Schedule" to refresh To Do List';
-
-  ui.alert('Purge Complete', msg, ui.ButtonSet.OK);
-
-  return summary;
-}
-
-/**
- * Quick function to purge the stuck Billings task.
- * Run this from Apps Script editor: purgeBillingsTask()
- */
-function purgeBillingsTask() {
-  return purgeTasksByLocation('Billings');
-}
-
-// ============================================================================
-// OFFICE TASKS MANAGEMENT
-// ============================================================================
-
-/**
- * Saves office tasks to Manual Tasks sheet for a specific date.
- * Called when dragging the "Office" card to a day in Trip Planner.
- *
- * @param {string} dateKey - Date key (YYYY-MM-DD)
- * @param {Array} officeTasks - Array of office task descriptions
- * @return {Object} Result with success flag and message
- */
-function saveOfficeTasks(dateKey, officeTasks) {
-  Logger.log('=== saveOfficeTasks: ' + dateKey + ' ===');
-  Logger.log('Tasks: ' + JSON.stringify(officeTasks));
-
-  try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var manualSheet = ss.getSheetByName('Manual Tasks');
-
-    if (!manualSheet) {
-      return { success: false, error: 'Manual Tasks sheet not found' };
-    }
-
-    var taskDate = new Date(dateKey);
-    var rowsAdded = 0;
-
-    // Add each office task as a separate row in Manual Tasks
-    for (var i = 0; i < officeTasks.length; i++) {
-      var task = officeTasks[i];
-      if (!task || !task.description || task.description.trim() === '') continue;
-
-      // Append row: Location, Task Type, Employee, Scheduled Date, Start Time, End Time, Status, Notes
-      var newRow = [
-        'Helena',                           // Location
-        'Office Work',                      // Task Type
-        '',                                 // Employee (empty)
-        taskDate,                          // Scheduled Date
-        task.startTime || '',              // Start Time
-        task.endTime || '',                // End Time
-        'Pending',                         // Status
-        task.description,                  // Notes
-        false,                             // Locked
-        false,                             // Allow Day Change
-        false,                             // Allow Week Change
-        false                              // Allow Time Change
-      ];
-
-      manualSheet.appendRow(newRow);
-      rowsAdded++;
-    }
-
-    Logger.log('Added ' + rowsAdded + ' office tasks to Manual Tasks sheet');
-
-    return {
-      success: true,
-      message: 'Added ' + rowsAdded + ' office task(s)',
-      rowsAdded: rowsAdded
-    };
-
-  } catch (e) {
-    Logger.log('Error saving office tasks: ' + e);
-    return {
-      success: false,
-      error: e.toString()
-    };
-  }
-}
-
-/**
- * Gets office tasks for a specific date from Manual Tasks sheet.
- * Used to display existing office tasks when user clicks on an Office card.
- *
- * @param {string} dateKey - Date key (YYYY-MM-DD)
- * @return {Array} Array of office task objects
- */
-function getOfficeTasksForDate(dateKey) {
-  Logger.log('=== getOfficeTasksForDate: ' + dateKey + ' ===');
-
-  try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var manualSheet = ss.getSheetByName('Manual Tasks');
-
-    if (!manualSheet || manualSheet.getLastRow() < 2) {
-      return [];
-    }
-
-    var data = manualSheet.getDataRange().getValues();
-    var headers = data[0];
-
-    // Find column indices
-    var colIndex = {};
-    for (var h = 0; h < headers.length; h++) {
-      var header = String(headers[h]).toLowerCase().trim();
-      if (header === 'location') colIndex.location = h;
-      if (header === 'task type' || header === 'task') colIndex.taskType = h;
-      if (header === 'scheduled date') colIndex.scheduledDate = h;
-      if (header === 'start time') colIndex.startTime = h;
-      if (header === 'end time') colIndex.endTime = h;
-      if (header === 'notes') colIndex.notes = h;
-      if (header === 'status') colIndex.status = h;
-    }
-
-    var targetDate = new Date(dateKey);
-    targetDate.setHours(0, 0, 0, 0);
-
-    var officeTasks = [];
-
-    for (var i = 1; i < data.length; i++) {
-      var row = data[i];
-
-      // Check if this is a Helena/Office task
-      var location = colIndex.location !== undefined ? String(row[colIndex.location] || '').toLowerCase().trim() : '';
-      if (location !== 'helena') continue;
-
-      // Check if task type is Office Work
-      var taskType = colIndex.taskType !== undefined ? String(row[colIndex.taskType] || '').toLowerCase().trim() : '';
-      if (taskType !== 'office work') continue;
-
-      // Check if scheduled for this date
-      var scheduledDate = colIndex.scheduledDate !== undefined ? row[colIndex.scheduledDate] : null;
-      if (!scheduledDate) continue;
-
-      var taskDate = scheduledDate instanceof Date ? scheduledDate : new Date(scheduledDate);
-      if (isNaN(taskDate.getTime())) continue;
-      taskDate.setHours(0, 0, 0, 0);
-
-      if (taskDate.getTime() !== targetDate.getTime()) continue;
-
-      // This is an office task for this date
-      var startTime = colIndex.startTime !== undefined ? formatTimeValue(row[colIndex.startTime]) : '';
-      var endTime = colIndex.endTime !== undefined ? formatTimeValue(row[colIndex.endTime]) : '';
-      var notes = colIndex.notes !== undefined ? String(row[colIndex.notes] || '') : '';
-      var status = colIndex.status !== undefined ? String(row[colIndex.status] || '').toLowerCase() : '';
-
-      officeTasks.push({
-        description: notes,
-        startTime: startTime,
-        endTime: endTime,
-        status: status,
-        rowIndex: i + 1
-      });
-    }
-
-    Logger.log('Found ' + officeTasks.length + ' office tasks for ' + dateKey);
-    return officeTasks;
-
-  } catch (e) {
-    Logger.log('Error getting office tasks: ' + e);
-    return [];
-  }
 }
 

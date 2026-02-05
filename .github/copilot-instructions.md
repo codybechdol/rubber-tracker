@@ -4,6 +4,37 @@
 - **ALWAYS use `.\push.bat`** to deploy changes to Google Apps Script
 - Do NOT use `clasp push` directly - use the batch file instead
 - The project uses clasp for Google Apps Script deployment
+- **push.bat now includes automatic syntax validation** (added Feb 1, 2026)
+
+### Pre-Push Validation (NEW - Feb 1, 2026)
+The `push.bat` script now runs `validate-syntax.js` BEFORE pushing to catch errors early:
+1. **Duplicate JSDoc closers** - Catches `*/` appearing twice (the Feb 1 bug)
+2. **Duplicate .js/.gs files** - Auto-removes .js files if .gs exists
+3. **ES6+ syntax warnings** - Warns about `const`, `let`, arrow functions, template literals
+4. **Unmatched braces** - Warns about mismatched `{}`, `[]`, `()`
+
+To run validation manually: `node validate-syntax.js`
+
+### Troubleshooting Clasp Issues
+If clasp appears to hang or fail silently:
+1. **Check for syntax errors** - Most "clasp issues" are actually code syntax errors
+2. Run `clasp push > push_output.txt 2>&1` to capture the real error message
+3. Common causes: duplicate `*/` in JSDoc comments, missing semicolons, invalid JS syntax
+4. Google Apps Script doesn't support modern ES6+ features (no `const`, `let`, arrow functions, template literals in .gs files)
+
+### Duplicate File Errors
+If you see "A file with this name already exists" error:
+1. **Check for duplicate .js and .gs files** - The src folder should only have `.gs` files, not both `.js` and `.gs` with the same name
+2. Run `Remove-Item src/*.js -Force` to delete all .js files (they're auto-generated and not needed)
+3. Ensure `.clasp.json` only has `.gs` in `scriptExtensions`, not both `.js` and `.gs`
+4. After cleaning, run `clasp push` again
+
+### Data Transfer Limit Issues (NULL Response)
+If the dialog receives `null` from server but logs show function completed:
+1. **Google Apps Script has ~50KB return limit** - Large data sets fail silently
+2. **Solution:** Store data in ScriptProperties (500KB limit), return small confirmation, then client fetches separately
+3. The `getTasksWithMetadata()` function uses this pattern - stores in `TASKS_DATA` property, client calls `getStoredTasks()`
+4. If client gets `null`, it should fallback to calling `getStoredTasks()` directly
 
 ## Project Structure
 - Source files are in the `src/` folder
@@ -24,19 +55,75 @@
 - Task types include: Swap, Reclaim, Training, Cert Expiring
 - Item types are: Glove, Sleeve
 
-## Architecture (January 2026)
-**Option A Implementation - IN PROGRESS**
+## Architecture (February 2026)
+**Option A Implementation - Phase 6 COMPLETE**
 - **Task Metadata Sheet** - Single source of truth for task scheduling state (COMPLETE ✅)
-- **Eliminated To Do List Sheet** - Dialogs read directly from source sheets + metadata (Phase 2)
-- **No localStorage** - State stored server-side in ScriptProperties or Task Metadata (Phase 4)
+- **Eliminated To Do List Sheet** - Trip Planner and Time Tracking now use Task Metadata (Phase 6 COMPLETE ✅)
+- **No localStorage** - State stored server-side in ScriptProperties or Task Metadata (COMPLETE ✅)
+- **To Do List archived** - Legacy sheet can be archived via menu, no longer needed
+- **Phase 7 Optimization** - Garbage collection, caching, dashboard, health checks (COMPLETE ✅)
 
 ---
 
 # Feature Development Roadmap
 
-## Current Phase: Phase 2 - Update Dialogs to Use Task Metadata
+## Current Phase: Phase 7 - Cleanup & Optimization (COMPLETE)
 
 ## COMPLETED PHASES ✅
+
+### Phase 7: Cleanup & Optimization (COMPLETE - Feb 3, 2026)
+**Status:** ✅ COMPLETE
+
+**Goal:** Performance optimization, garbage collection, and maintenance tools.
+
+**What was built:**
+
+1. **Garbage Collection (Task 7.1)**
+   - `archiveOldCompletedTasks(daysOld)` - Archives completed tasks to "Task Metadata Archive" sheet
+   - `showArchiveCompletedTasksDialog()` - Menu UI for archiving
+   - `cleanupOrphanedTaskMetadata()` - Removes orphaned metadata records
+   - Menu: Glove Manager → Schedule & To-Do → 🗄️ Archive Completed Tasks
+   - Menu: Glove Manager → Utilities → 🧽 Cleanup Orphaned Metadata
+
+2. **Phone Number Caching (Task 7.2)**
+   - `getEmployeePhonesCached(forceRefresh)` - 6-hour cache for employee phones
+   - `clearPhoneCache()` - Clears cache when data changes
+   - `getEmployeePhoneCached(employeeName)` - Single lookup with cache
+   - Cache Key: `EMPLOYEE_PHONES`, TTL: 6 hours
+
+3. **Task State Dashboard (Task 7.3)**
+   - `getTaskStatistics()` - Returns comprehensive metrics
+   - `showTaskDashboard()` - Interactive dashboard dialog
+   - Menu: Glove Manager → Schedule & To-Do → 📊 Task Dashboard
+   - Shows: Total tasks, pending, overdue, scheduled this week, completed this week
+   - Breakdowns by status, type, and location
+
+4. **Health Check & Cleanup (Task 7.4)**
+   - `performTaskMetadataHealthCheck()` - Analyzes Task Metadata for issues
+   - `showTaskMetadataHealthCheck()` - Menu UI for health check
+   - `removeDuplicateTaskMetadata()` - Removes duplicate records
+   - Menu: Glove Manager → Utilities → 🏥 Task Metadata Health Check
+   - Menu: Glove Manager → Utilities → 🧹 Remove Duplicate Task Metadata
+
+**Key files modified:**
+- `Code.gs` - Added ~500 lines of Phase 7 functions
+- Menu structure updated with new items
+
+### Phase 6: Remove To Do List Sheet Dependencies (COMPLETE - Feb 1, 2026)
+**Status:** ✅ COMPLETE
+
+**Goal:** Eliminate dependency on the To Do List sheet - use Task Metadata as single source of truth.
+
+**What was changed:**
+1. **87-RoutePlanner.gs** - `collectTasksForTripPlanner()` now uses `getTasksWithMetadata()`
+2. **86-TimeTracking.gs** - `getCompletedTasksForPeriod()` now uses Task Metadata first
+3. **Code.gs** - Added `archiveToDoListSheet()` function
+4. **Menu** - Replaced "Generate Smart Schedule" with "Archive Old To Do List (Legacy)"
+5. **QuickActions.html** - Step 2 now uses `generateTaskMetadata`
+6. **TripPlanner.html** - Empty state button uses `generateTaskMetadata`
+
+**Functions available:**
+- `archiveToDoListSheet()` - Menu: Glove Manager → Schedule & To-Do → Archive Old To Do List (Legacy)
 
 ### Phase 1: Task Metadata Infrastructure (COMPLETE - Jan 31, 2026)
 **Status:** ✅ COMPLETE (85% done, remaining 15% are documentation tasks)
@@ -397,64 +484,159 @@ Wednesday, Jan 29 (Start: Helena 7am):
 ---
 
 ## Phase 3: Enhanced HTML Email Reports
-**Status:** 🔲 NOT STARTED
+**Status:** ✅ COMPLETE (Feb 3, 2026)
 
-**Goal:** Create beautiful HTML email reports with tables, charts, and task summaries.
+**Goal:** Create premium HTML email reports with Google Charts visualizations and admin-controlled per-recipient customization.
 
 **What it does:**
-- Create HTML email templates with:
-  - My Checklist items (pending/overdue)
-  - Task Items by priority
-  - Calendar view (upcoming 2 weeks)
-  - Tables with conditional formatting
-  - Charts (inventory levels, task completion trends)
-- Schedule options: Daily summary, Weekly full report, On-demand
+- **Admin-controlled recipient configuration** - You choose which report sections each recipient receives
+- **Premium HTML email template** with gradient headers, card-based sections, shadow effects
+- **Google Charts visualizations** - Pie charts, bar charts rendered as embedded images (flashiest option)
+- **Personalized emails** - Each recipient only gets the sections you've enabled for them
+- **Weekly schedule** - Monday 12 PM using existing trigger system
+
+**Report Sections Available:**
+1. **📊 Inventory Summary** - Stock levels by size, status breakdown
+2. **🛒 Purchase Needs** - Items needing order, quantities
+3. **🧤 Glove Swaps** - Upcoming swaps, overdue count
+4. **💪 Sleeve Swaps** - Upcoming swaps, overdue count
+5. **📜 Expiring Certs** - Color-coded urgency (red/orange/yellow/green)
+6. **📅 Training** - Upcoming training, completion rates
+7. **✅ Task Summary** - Pending/overdue counts by type
+8. **🗓️ 2-Week Calendar** - Visual calendar grid with task indicators
+9. **📈 Charts** - Pie chart (task status), bar chart (tasks by location)
 
 **Key files to create/modify:**
-- `80-EmailReports.gs` - Enhance existing email system
-- NEW: `EmailTemplates.html` - HTML email templates
+- `80-EmailReports.gs` - Enhance with new section builders and config support
+- NEW: "Email Report Config" sheet - Admin config for recipient preferences
 
-**Questions to resolve:**
-- [ ] Who receives reports? (Same Notification Emails column, or separate list?)
-- [ ] Daily + weekly, or just one schedule?
-- [ ] What charts/visualizations needed?
+**Email Report Config Sheet Structure:**
+| Email Address | Inventory | Purchase Needs | Glove Swaps | Sleeve Swaps | Certs | Training | Tasks | Calendar | Charts |
+|---------------|-----------|----------------|-------------|--------------|-------|----------|-------|----------|--------|
+| boss@company.com | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| manager@company.com | | | ✓ | ✓ | ✓ | | | | |
+| safety@company.com | | | | | ✓ | ✓ | | | |
 
 **Implementation tasks:**
-- [ ] Design HTML email template
-- [ ] Add buildChecklistSection() function
-- [ ] Add buildTaskTableSection() function
-- [ ] Add buildCalendarSection() function
-- [ ] Add chart generation (using Google Charts or inline SVG)
-- [ ] Add scheduling options
-- [ ] Update menu items
+- [x] Create `setupEmailReportConfig()` - Creates config sheet, auto-imports existing Notification Emails with all sections enabled
+- [x] Create `buildPremiumEmailHtml(recipientEmail)` - Builds personalized email based on config
+- [x] Implement `buildInventorySummarySection(styles)` - Stock levels with color coding
+- [x] Implement `buildPurchaseNeedsSection(styles)` - Items to order
+- [x] Implement `buildSwapsSummarySection(sheetName, styles)` - Glove/Sleeve swaps
+- [x] Implement `buildExpiringCertsSection(styles)` - Certs with urgency colors
+- [x] Implement `buildTrainingSummarySection(styles)` - Training status
+- [x] Implement `buildTaskSummarySection(styles)` - Task counts from Task Metadata
+- [x] Implement `buildCalendarSection(styles)` - 2-week HTML calendar grid
+- [x] Implement `buildChartsSection()` - Google Charts pie/bar charts as images
+- [x] Update `sendEmailReport()` - Loop through config, send personalized emails
+- [x] Add menu item: "⚙️ Configure Email Reports" - Opens config sheet
+- [x] Add menu item: "👁️ Preview My Report" - Shows what your email looks like
+
+**Google Charts Approach:**
+- Use `Charts.newPieChart()` and `Charts.newBarChart()` from Apps Script Charts service
+- Render charts as Blob images
+- Embed in email as base64 data URLs or CID attachments
+- Maximum visual impact with gradients, shadows, 3D effects
 
 ---
 
-## Phase 4: Gmail Inbox Filter/Processing
-**Status:** 🔲 NOT STARTED
+## Phase 4: Gmail Safety Report Processing
+**Status:** 🔄 IN PROGRESS (Implementation complete, PDF extraction added, ready for testing)
 
-**Goal:** Automatically filter and process Gmail for JHAs, Safety Meetings, and Fleet Checklists.
+**Goal:** Automatically filter and process Gmail for JHAs, Safety Meetings, and Fleet Checklists. Extract equipment issues (fire extinguishers, hot sticks, rubber goods, etc.) and track in Safety Reports sheet.
 
 **What it does:**
 - Search Gmail for:
-  - JHAs (Job Hazard Analyses)
-  - Weekly Safety Meetings
-  - Fleet Safety Checklists
-- Auto-organize into labels/folders
-- Optionally extract data and log to tracking sheet
-- Create tasks for follow-ups
+  - **JHAs** (Job Hazard Analyses) - Subject: "Job Hazard Report" from mptablets@mountainpower.com
+  - **Weekly Safety Meetings** - Subject: "Safety Meeting Report" from mptablets@mountainpower.com
+  - **Fleet Safety Checklists** - Subject: "Weekly Safety Repairs" from fleet@mountainpower.com
+- **PDF Attachment Processing** - Extracts text from PDF attachments using Drive API + OCR (most reports are PDFs)
+- Extract key information:
+  - Job number (e.g., "013-26")
+  - Foreman name (looked up from Employees sheet)
+  - Vehicle number (from fleet checklists)
+  - Equipment issues (fire extinguishers, hot sticks, rubber goods, signs, wheel chocks, inspection tags)
+  - Test/expiration dates
+- Log to "Safety Reports" sheet with status tracking
+- Auto-create tasks in Manual Tasks sheet for "Needs Attention" items
+- Ignore mechanical issues (brakes, engine, etc.)
 
-**Key files to create/modify:**
-- NEW: `87-GmailIntegration.gs` - Gmail processing functions
-- `appsscript.json` - Add Gmail API scope
+**Key files created:**
+- NEW: `88-SafetyReports.gs` - Complete Gmail processing, PDF extraction, and parsing logic (700+ lines)
+- NEW: "Safety Reports" sheet - Tracks equipment issues with 11 columns
 
-**Questions to resolve:**
-- [ ] What subject lines/senders identify JHAs?
-- [ ] What subject lines/senders identify Safety Meetings?
-- [ ] What subject lines/senders identify Fleet Checklists?
-- [ ] Just label, or extract data too?
+**Safety Reports Sheet Structure:**
+1. **Report Date** - Date of safety meeting/fleet checklist
+2. **Report Type** - "JHA" | "Safety Meeting" | "Fleet Checklist"
+3. **Job Number** - Extracted from subject line (e.g., "013-26")
+4. **Foreman** - Name of foreman (looked up from Employees sheet)
+5. **Vehicle Number** - Extracted from fleet checklist
+6. **Equipment Type** - "Fire Extinguisher" | "Hot Stick" | "Rubber Goods" | "Signs" | "Wheel Chocks" | "Inspection Tag"
+7. **Issue Description** - Full text of issue reported
+8. **Status** - "Needs Attention" | "Resolved" | "Ordered" | "Replaced"
+9. **Test/Expiration Date** - Extracted date when applicable
+10. **Source Email ID** - Gmail message ID for reference
+11. **Notes** - Additional context
+
+**Email Subject Line Patterns:**
+- JHA: `Job Hazard Report  02-04-2026_009-26_24193847_HEL EZ 1210 WINSTON ST A,B,C HSE CC CUTT (Modified-1)`
+- Safety Meeting: `Safety Meeting Report  Week of 02-02-2026 Safety Topic 015-26`
+- Fleet Checklist: `Weekly Safety Repairs 12.12.25`
+
+**Equipment Keywords Detected:**
+- Fire extinguisher / extinguisher
+- Hot stick / hotstick
+- Rubber goods / rubber glove / rubber sleeve
+- Signs / sign
+- Wheel chock / chock
+- Inspection tag / tag
+
+**Mechanical Keywords Ignored:**
+- brake, brakes, engine, oil, tire, tires, battery, transmission, clutch, alternator, starter, radiator, suspension, exhaust, fuel, coolant, filter
+
+**Functions Available:**
+- `setupSafetyReportsSheet()` - Creates/recreates Safety Reports sheet
+- `processSafetyEmails(daysBack)` - Searches and processes emails from last X days
+- `showProcessSafetyEmailsDialog()` - UI to select date range (7/14/30/60/90 days)
+- `createTasksFromSafetyIssues()` - Creates Manual Tasks for "Needs Attention" items
+- `openSafetyReports()` - Opens Safety Reports sheet
+
+**Menu Items:**
+- Glove Manager → 🛡️ Safety Reports → ⚙️ Setup Safety Reports Sheet
+- Glove Manager → 🛡️ Safety Reports → 📥 Process Safety Emails
+- Glove Manager → 🛡️ Safety Reports → 📋 Create Tasks from Issues
+- Glove Manager → 🛡️ Safety Reports → 📊 View Safety Reports
 
 **Implementation tasks:**
+- [x] Create `88-SafetyReports.gs` with all functions ✅
+- [x] Add Gmail API scope to `appsscript.json` ✅
+- [x] Add Drive API scope for PDF extraction ✅
+- [x] Add Safety Reports submenu to main menu ✅
+- [x] Implement email parsing with job number extraction ✅
+- [x] Implement PDF attachment text extraction using Drive API + OCR ✅
+- [x] Implement foreman lookup by job number ✅
+- [x] Implement vehicle number extraction ✅
+- [x] Implement equipment keyword detection ✅
+- [x] Implement date extraction from text ✅
+- [x] Implement duplicate prevention ✅
+- [x] Implement conditional formatting for status ✅
+- [x] Implement task creation from issues ✅
+- [x] Implement batch processing (50 per batch) ✅
+- [x] Fix forwarded email sender issue (search by subject only) ✅
+- [x] **Deployed with `clasp push`** 🚀 (3 deployments Feb 4, 2026)
+- [ ] **Test with real emails** 📧 (Next: Grant Drive permissions, process 7 days)
+- [ ] **Grant Gmail + Drive permissions** 🔐
+
+**Future Enhancements (Phase 2):**
+- AI-powered summary generation (Google Gemini API)
+- Crew-specific safety issue tracking
+- Pattern detection (e.g., "Crew 009-26 has had 3 fire extinguisher issues this quarter")
+- Automated equipment replacement scheduling
+
+---
+
+## Phase 5: Purchase Order Generation
+**Status:** 🔲 NOT STARTED
 - [ ] Add Gmail API scope to appsscript.json
 - [ ] Create searchAndLabelEmails() function
 - [ ] Create JHA processing function
@@ -502,6 +684,232 @@ Wednesday, Jan 29 (Start: Helena 7am):
 ---
 
 ## Completed Features Log
+
+### February 5, 2026
+- ✅ **Safety Report Completion Sync**
+  - When Safety Equipment tasks are marked complete in Task List, Safety Reports sheet status is automatically updated to "Resolved"
+  - `syncSafetyReportCompletion(taskKey)` - Syncs individual task completion to Safety Reports sheet
+  - `syncAllCompletedSafetyTasks()` - Bulk sync all completed safety tasks (for fixing mismatches)
+  - `refreshSafetySheets()` - Combined function that syncs completed tasks AND recalculates current week's Safety Compliance
+  - Modified `markTaskComplete()` in Code.gs to auto-sync Safety Equipment tasks
+  - New Menu: Glove Manager → Safety Reports → 🔄 Refresh Safety Sheets
+  - Modified `src/88-SafetyReports.gs` - Added ~200 lines of sync functions
+  - Modified `src/Code.gs` - Updated markTaskComplete() and added menu item
+- ✅ **Smart Email Processing (Only New Emails)**
+  - `processSafetyEmails()` now supports `newOnlyMode` parameter (default: true)
+  - Stores `LAST_SAFETY_EMAIL_DATE` in ScriptProperties after successful processing
+  - On next run, uses Gmail `after:YYYY/MM/DD` filter to only fetch emails since last run
+  - Dialog shows "Last processed: [date]" and checkbox "Only process new emails since last run"
+  - Unchecking the box uses the day range dropdown instead (for full rescan)
+  - Dramatically reduces processing time on subsequent runs
+  - Modified `src/88-SafetyReports.gs` - Updated dialog UI and processSafetyEmails function
+- ✅ **X# Vehicle Number Format Support**
+  - `extractVehicleNumber()` now recognizes "X1", "X2", "X3" format vehicle numbers
+  - Returns full format "X1" (not just "1") for clarity
+  - Common for spare/extra vehicles in fleet
+  - Modified `src/88-SafetyReports.gs` - Updated extractVehicleNumber() function
+
+### February 3, 2026
+- ✅ **Phase 3: Enhanced HTML Email Reports - COMPLETE**
+  - Premium HTML email reports with Google Charts visualizations
+  - Admin-controlled per-recipient customization (you choose which reports each person gets)
+  - 9 report sections: Inventory, Purchase Needs, Glove Swaps, Sleeve Swaps, Certs, Training, Tasks, Calendar, Charts
+  - New "Email Report Config" sheet - checkboxes to control which sections each recipient receives
+  - Auto-imports existing Notification Emails with all sections enabled by default
+  - Google Charts integration: 3D pie charts, bar charts embedded as images
+  - Quick stats summary bar at top: Pending Tasks, Overdue, Swaps Due, Certs Expiring
+  - 2-week calendar grid showing scheduled tasks
+  - Color-coded urgency indicators throughout (red=expired, orange=soon, green=ok)
+  - New menu items:
+    - Glove Manager → Email Reports → 📤 Send Report Now
+    - Glove Manager → Email Reports → 👁️ Preview My Report
+    - Glove Manager → Email Reports → ⚙️ Configure Email Reports
+  - Modified `src/80-EmailReports.gs` - Complete rewrite (~1450 lines)
+  - See: copilot-instructions.md Phase 3 section for full details
+- ✅ **Phase 7: Cleanup & Optimization - COMPLETE**
+  - **Task 7.1: Garbage Collection**
+    - `archiveOldCompletedTasks(daysOld)` - Archives completed tasks older than X days to "Task Metadata Archive" sheet
+    - `showArchiveCompletedTasksDialog()` - Menu UI for archiving with customizable days
+    - `cleanupOrphanedTaskMetadata()` - Removes metadata records where source task no longer exists
+    - Menu: Glove Manager → Schedule & To-Do → 🗄️ Archive Completed Tasks
+    - Menu: Glove Manager → Utilities → 🧽 Cleanup Orphaned Metadata
+  - **Task 7.2: Phone Number Caching**
+    - `getEmployeePhonesCached(forceRefresh)` - 6-hour cache for employee phone numbers
+    - `clearPhoneCache()` - Clears cache when employee data is updated
+    - `getEmployeePhoneCached(employeeName)` - Single employee lookup with caching
+    - Cache Key: `EMPLOYEE_PHONES`, TTL: 6 hours (21600 seconds)
+  - **Task 7.3: Task State Dashboard**
+    - `getTaskStatistics()` - Returns comprehensive task metrics
+    - `showTaskDashboard()` - Interactive dashboard dialog with stats
+    - `buildTaskDashboardHtml(stats)` - HTML builder for dashboard
+    - Menu: Glove Manager → Schedule & To-Do → 📊 Task Dashboard
+    - Shows: Total tasks, pending, overdue, scheduled/completed this week, breakdowns by status/type/location
+  - **Task 7.4: Health Check & Performance**
+    - `performTaskMetadataHealthCheck()` - Analyzes Task Metadata for issues
+    - `showTaskMetadataHealthCheck()` - Menu UI for health check results
+    - `removeDuplicateTaskMetadata()` - Removes duplicate records (keeps newest)
+    - Menu: Glove Manager → Utilities → 🏥 Task Metadata Health Check
+    - Menu: Glove Manager → Utilities → 🧹 Remove Duplicate Task Metadata
+  - Modified `src/Code.gs` - Added ~500 lines of Phase 7 functions
+  - Modified menu structure to include new items
+- ✅ **Trip Planner Drag-and-Drop Fixes**
+  - **Issue 1:** Could not drag location cards from Unassigned to days or between days
+  - **Issue 2:** Not all unassigned locations were showing in the Unassigned Locations panel
+  - **Issue 3:** Unassigned locations list was too small to scroll through all items
+  - **ROOT CAUSE:** Data structure inconsistency - unassigned cards used `loc.name` while assigned cards used `loc.location`
+  - **SOLUTION:**
+    1. Standardized `cleanUnassigned` in `suggestOptimalTrips()` to use `location` property (keeping `name` for backward compatibility)
+    2. Added minimal `tasks` array to unassigned locations for drag-drop completion data
+    3. Fixed `handleUnassignedDragStart()` to ensure `location` property exists
+    4. Fixed `handleDrop()` to prefer `location` over `name` when getting location name
+    5. Updated `renderUnassigned()` to use standardized `location` property
+    6. Increased `.unassigned-list` max-height from 200px to 400px for better scrollability
+  - Modified `src/87-RoutePlanner.gs` - `cleanUnassigned` mapping (lines 1649-1667)
+  - Modified `src/TripPlanner.html` - `handleUnassignedDragStart()`, `handleDrop()`, `renderUnassigned()`, CSS
+  - **Workflow Verified:**
+    - Step 1: Generate Task Metadata → populates Task Metadata sheet
+    - Step 2: Tasks & Calendar pulls from Task Metadata
+    - Step 3: Tasks without dates → Unassigned; Tasks with dates → Calendar + Trip Planner
+    - Step 4: Assign dates via Task List OR drag in Trip Planner
+    - Step 5: Task List auto-saves; Trip Planner uses Apply button for batch updates
+    - Step 6: Completions set CompletedDate → flows to Daily Accomplishments
+- ✅ **Color-Coded Days Left Display with Extended Thresholds**
+  - GOAL: Provide better advance warning for upcoming cert expirations
+  - Updated color thresholds for "days left" badges in Expiring Certs tab:
+    - 🔴 Red: Expired (< 0 days)
+    - 🟠 Orange: Less than 185 days (6 months)
+    - 🟡 Yellow: Less than 365 days (1 year)
+    - 🟢 Green: 365+ days
+  - Previously: Red/Orange/Yellow were only for 0-60 day range
+  - Benefits: Earlier visibility, better planning window, clear priority hierarchy
+  - Modified `src/ToDoSchedule.html` - `renderCertRow()` function (line 4529)
+  - See: FIX_CERT_COLOR_THRESHOLDS.md for details
+- ✅ **All Certs Now Actionable in Expiring Certs Tab**
+  - ROOT CAUSE: Only expired/expiring certs (status !== 'OK') showed SMS and "Add to Task List" buttons
+  - SOLUTION: Removed the `status !== 'OK'` condition in `renderCertRow()` function
+  - ALL certs now show action buttons regardless of expiration status:
+    - 💬 Send SMS Notification (if phone number exists)
+    - 📅 Send Class Schedule (after Stage 1 notification, except MEC certs)
+    - ➕ Add to Task List
+    - ✅ Mark Complete
+  - Benefits: Proactive planning, consistent UI, can schedule renewals months in advance
+  - Modified `src/ToDoSchedule.html` - line 4633
+  - See: FIX_ALL_CERTS_ACTIONABLE.md for details
+
+### February 4, 2026
+- ✅ **JHA/Safety Meeting Compliance Tracking System**
+  - **Goal:** Track daily JHA submissions and weekly Safety Meeting compliance per crew
+  - **Week:** Sunday to Saturday, Deadline: Saturday 11:59 PM
+  - **New Sheets Created:**
+    - **Safety Compliance** - Historical tracking of each crew's JHA/Weekly Meeting submissions per week
+    - **Safety Compliance Config** - Configure which days/crews to skip (Sat/Sun default to N/A)
+  - **New Functions in `88-SafetyReports.gs`:**
+    - `setupSafetyComplianceSheet()` - Creates compliance tracking sheet
+    - `setupSafetyComplianceConfig()` - Creates exclusion config sheet with all active crews
+    - `extractReportDateFromSubject(subject, reportType)` - Parses date from JHA/Safety Meeting email subjects
+    - `getWeekBoundaries(date)` - Returns Sunday/Saturday boundaries for any date
+    - `isReportLate(message, reportDate, isForwarded)` - Detects late submissions (after Saturday 11:59 PM)
+    - `loadComplianceConfig()` - Loads exclusion settings
+    - `calculateSafetyCompliance(weekStartDate)` - Calculates compliance for all crews for a week
+    - `updateComplianceSheet(complianceData)` - Upserts compliance data to sheet
+    - `createMissingReportTasks(complianceData)` - Creates Task Metadata entries for missing reports
+    - `getCrewComplianceTrend(jobNumber, weeksBack)` - Gets 4-week trend stats for a crew
+    - `getAllCrewComplianceTrends(weeksBack)` - Gets trends for all crews (sorted by worst compliance first)
+    - `showComplianceDashboard()` - Interactive dashboard with current week + 4-week trends
+    - `buildMissingSafetyReportSmsMessage(task)` - Builds SMS message for missing reports
+  - **Integration with `processSafetyEmails()`:**
+    - After email processing completes, compliance is automatically calculated
+    - Safety Compliance sheet updated with ✅/❌/N/A/⏳ status per day per crew
+    - If past deadline, missing report tasks created in Task Metadata
+    - Dialog shows compliance grid after processing
+  - **Missing Report Tasks in Task Metadata:**
+    - TaskType: `Missing Safety Report`
+    - ItemType: `JHA`, `Weekly Meeting`, or `JHA + Weekly Meeting` (combined if crew missing both)
+    - SMS button on Task List with appropriate message:
+      - JHA only: "We did not receive a JHA for [dates] from your crew..."
+      - Weekly Meeting only: "We did not receive a Weekly Safety Meeting..."
+      - Both: Combined message mentioning both missing items
+  - **Late Detection Logic:**
+    - JHA email received after Saturday 11:59 PM of report's week = LATE (doesn't count)
+    - Forwarded emails (subject starts with "Fwd:") = assumed on time (can't detect actual received date)
+  - **New Menu Items (Glove Manager → 🛡️ Safety Reports):**
+    - "📊 Compliance Dashboard" - Visual grid + 4-week trends
+    - "⚙️ Configure Exclusions" - Opens config sheet
+    - "📈 Compliance History" - Opens compliance sheet
+  - **Modified Files:**
+    - `src/88-SafetyReports.gs` - Added ~700 lines of compliance tracking code
+    - `src/ToDoSchedule.html` - Added SMS handling for Missing Safety Report tasks
+    - `src/Code.gs` - Added 3 menu items under Safety Reports submenu
+
+### February 2, 2026
+- ✅ **Fixed Last Day Reason validation (Layoff issue)**
+  - ROOT CAUSE: `handleLastDayChange()` was not validating that Last Day Reason was filled in before proceeding
+  - SOLUTION: Added validation checks to require Last Day Reason and validate it's one of 4 allowed values
+  - Created `fixLastDayReasonValidation()` utility function to fix dropdown validation
+  - Added menu item: Glove Manager → 🔧 Utilities → ✅ Fix Last Day Reason Dropdown
+  - Standardized all documentation to use "Layoff" (not "Laid Off")
+  - Modified `src/51-EmployeeHistory.gs` - Added validation before termination confirmation
+  - Created `src/22-EmployeeValidation.gs` - New utility file for employee sheet validation
+  - See: FIX_LAYOFF_VALIDATION.md and LAYOFF_USER_GUIDE.md for details
+- ✅ **Fixed Trip Planner Breaking After Reset Button**
+  - ROOT CAUSE: When `suggestOptimalTrips()` called `getTasksWithMetadata()` from server-side, it received a confirmation object `{stored: true}` instead of actual tasks
+  - SOLUTION: Added logic to detect confirmation response and fetch actual data via `getStoredTasks()`, then deserialize compressed task format
+  - Modified `87-RoutePlanner.gs` - `collectTasksForTripPlanner()` now handles both client and server-side calls
+  - Added deserialization for abbreviated field names (emp→employee, loc→location, type→taskType, etc.)
+  - Trip Planner now correctly loads 45 tasks after reset instead of showing "No Pending Tasks"
+  - See: FIX_TRIP_PLANNER_RESET.md for detailed breakdown
+- ✅ **Fixed Helena Location vs Office Work Distinction**
+  - ROOT CAUSE: Trip Planner was treating ALL Helena location tasks as "Office Work / Phone Tasks", including training and swap tasks that require field visits
+  - SOLUTION: Removed Helena from non-field locations list - Helena crews need actual field visits for training/swaps
+  - **Office Work now includes:** Cert Expiring tasks (phone-only) + employees in Weeds/Light Duty/Vacation/Leave/Previous Employee/Unknown
+  - **Helena Field Tasks now include:** Training tasks for Helena crews + Swap tasks for Helena employees
+  - Modified `87-RoutePlanner.gs` - Updated `OFFICE_ONLY_LOCATIONS` constant and `collectTasksForTripPlanner()` logic
+  - Training tasks for Helena-based crews now correctly appear as draggable location cards in Trip Planner
+  - See: FIX_HELENA_OFFICE_DISTINCTION.md for detailed breakdown
+
+### February 1, 2026
+- ✅ **Fixed clasp deployment issue**
+  - ROOT CAUSE: Not a clasp issue - syntax error in Code.gs at line 7046 (duplicate `*/` comment closer)
+  - SOLUTION: Removed duplicate `*/` in updateTaskMetadata() JSDoc comment
+  - Updated push.bat to capture stderr (`2>&1`) so syntax errors are visible
+  - Added troubleshooting section to copilot-instructions.md
+- ✅ **Fixed duplicate .js/.gs file conflict**
+  - ROOT CAUSE: src/ folder had both `.js` and `.gs` files with same names (e.g., `00-Constants.js` AND `00-Constants.gs`)
+  - SOLUTION: Removed all `.js` files from src/ folder, updated `.clasp.json` to only use `.gs` extension
+  - The `.js` files were auto-generated residuals that conflicted with clasp push
+  - Command to fix: `Remove-Item src/*.js -Force`
+- ✅ **Fixed Schedule dialog returning NULL on second open**
+  - ROOT CAUSE: Google Apps Script has ~50KB return limit - `getTasksWithMetadata()` was failing to return data to client
+  - SOLUTION: Added fallback in ToDoSchedule.html - when server returns `null`, client automatically calls `getStoredTasks()` to fetch from ScriptProperties
+  - Server stores data in ScriptProperties (500KB limit) which is more reliable than direct return
+  - This two-step approach bypasses the transfer limit issue
+- ✅ **Fixed date showing wrong on dialog reopen**
+  - ROOT CAUSE: Date parsing was using local timezone, causing off-by-one-day errors
+  - SOLUTION: Parse date strings as UTC to avoid timezone shifts
+  - Modified `getTasksWithMetadata()` to use UTC parsing for scheduled dates
+  - Dates now correctly persist and display across dialog close/reopen cycles
+- ✅ **Fixed time showing wrong on dialog reopen**
+  - ROOT CAUSE: Time strings being converted to Date objects then back to time strings caused 2-hour offset
+  - SOLUTION: Store and retrieve time as HH:MM strings, never convert to Date objects
+  - Server returns times in 24-hour format (13:00), client formats for display
+  - Times now correctly persist across dialog close/reopen cycles
+- ✅ **Added 12-hour time format display**
+  - Time inputs now display in 12-hour format with AM/PM (e.g., "1:30 PM" instead of "13:30")
+  - Added `formatTimeFor12Hour()` function to convert 24-hour to 12-hour format
+  - Task List and Calendar both now show times in user-friendly format
+- ✅ **Phase 4: Migrated localStorage to Task Metadata (IN PROGRESS)**
+  - Added `InMyChecklist` column to Task Metadata schema (column Z)
+  - Created `toggleTaskChecklist()` function - sets InMyChecklist flag in Task Metadata
+  - Created `toggleTaskOffice()` function - sets IsOffice flag in Task Metadata
+  - Created `getChecklistTasks()` function - retrieves all tasks where InMyChecklist=TRUE
+  - Updated `isTaskNotified()` to check Task Metadata NotifiedDate first
+  - Updated `isTaskOffice()` to check Task Metadata IsOffice first
+  - Updated `isTaskInChecklist()` to check Task Metadata InMyChecklist first
+  - Updated `addToChecklist()` to call server `toggleTaskChecklist()`
+  - Updated `toggleNotified()` to call server `recordTaskNotification()`
+  - Updated `toggleOffice()` to call server `toggleTaskOffice()`
+  - State now persists in Task Metadata sheet instead of localStorage
+  - Migration function `migrateTaskMetadataAddChecklistColumn()` available for existing sheets
 
 ### January 31, 2026 (Session 2)
 - ✅ **Fixed task save operations not persisting**

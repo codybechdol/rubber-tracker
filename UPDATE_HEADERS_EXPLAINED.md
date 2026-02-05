@@ -54,7 +54,7 @@ New Row in Employee History:
 ### Scenario 2: Existing Records
 ```
 Existing Employee History record for John Doe (from before the update):
-[01/15/2025 | John Doe | Terminated | Stanford | 328.02 | 06/01/2024 | 01/15/2025 | Laid Off | | | | | | ]
+[01/15/2025 | John Doe | Terminated | Stanford | 328.02 | 06/01/2024 | 01/15/2025 | Layoff | | | | | | ]
                                                                                                    ↑ ↑ ↑ ↑
                                                                                           NEW COLUMNS EMPTY (not backfilled)
 ```

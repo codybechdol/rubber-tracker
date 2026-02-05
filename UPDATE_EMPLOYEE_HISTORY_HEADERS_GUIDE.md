@@ -28,7 +28,7 @@ The Employee History system now tracks **all changes** to employee data, not jus
 | E | Job Number | Current job number at time of event |
 | F | Hire Date | Original hire date |
 | G | Last Day | Employee's last day (terminations only) |
-| H | Last Day Reason | Quit/Fired/Laid Off |
+| H | Last Day Reason | Quit, Fired, Layoff, Resigned |
 | I | Rehire Date | Date employee was rehired |
 | J | Notes | Details about the change |
 | K | Phone Number | Employee's phone number |

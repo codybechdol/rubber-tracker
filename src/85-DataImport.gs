@@ -81,6 +81,51 @@ function applyCrewChanges(changes) {
     try {
       var rowIndex = change.rowIndex;
 
+      // Check if this is a Previous Employee being rehired (rowIndex = -1)
+      if (rowIndex === -1) {
+        // This employee exists only in Employee History - REHIRE them
+        Logger.log('Rehiring Previous Employee: ' + change.employeeName);
+
+        // Add new row to Employees sheet
+        var newRow = [];
+        for (var col = 0; col < headers.length; col++) {
+          var header = String(headers[col]).toLowerCase().trim();
+          if (col === nameCol) newRow.push(change.employeeName);
+          else if (header === 'location') newRow.push(change.newLocation || '');
+          else if (header === 'job number') newRow.push(change.newJobNumber || '');
+          else if (header === 'job classification') newRow.push(change.newClassification || '');
+          else newRow.push(''); // Empty for other columns
+        }
+
+        employeesSheet.appendRow(newRow);
+        updatedCount++;
+
+        // Log rehire to Employee History
+        if (historySheet) {
+          var historyRow = [
+            todayStr,                    // Date
+            change.employeeName,         // Employee Name
+            'Rehired',                   // Event Type
+            change.newLocation || '',    // Location
+            change.newJobNumber || '',   // Job Number
+            '',                          // Hire Date
+            '',                          // Last Day
+            '',                          // Last Day Reason
+            todayStr,                    // Rehire Date
+            'Crew Makeup Import: Rehired from Previous Employee. Location: ' + change.newLocation + ', Job #: ' + change.newJobNumber,
+            '',                          // Phone Number
+            '',                          // Email Address
+            '',                          // Glove Size
+            ''                           // Sleeve Size
+          ];
+          historySheet.appendRow(historyRow);
+          historyLogged++;
+        }
+
+        Logger.log('Rehired employee: ' + change.employeeName + ' | Location: ' + change.newLocation + ' | Job #: ' + change.newJobNumber);
+        continue; // Skip to next employee
+      }
+
       if (!rowIndex || rowIndex < 2) {
         // Try to find by name
         var empNameLower = change.employeeName.toLowerCase().trim();
@@ -409,6 +454,7 @@ function markEmployeeAsPrevious(data) {
       var eventType = 'SEPARATED';
       if (data.status === 'Resigned') eventType = 'RESIGNED';
       else if (data.status === 'Quit') eventType = 'QUIT';
+      else if (data.status === 'Fired') eventType = 'FIRED';
       else if (data.status === 'Layoff') eventType = 'LAYOFF';
 
       var notes = 'Crew Makeup Import: ' + data.status;
@@ -437,10 +483,14 @@ function markEmployeeAsPrevious(data) {
       historySheet.appendRow(historyRow);
     }
 
-    Logger.log('Marked ' + data.name + ' as Previous Employee');
+    // Delete employee from Employees sheet
+    Utilities.sleep(500);
+    employeesSheet.deleteRow(rowIndex);
+
+    Logger.log('Marked ' + data.name + ' as Previous Employee and deleted from sheet');
     logEvent('Crew Import: Marked ' + data.name + ' as Previous Employee (' + data.status + ')');
 
-    return { success: true, message: 'Employee marked as Previous Employee' };
+    return { success: true, message: 'Employee marked as Previous Employee and removed from sheet' };
 
   } catch (error) {
     Logger.log('Error marking employee as previous: ' + error.toString());
@@ -659,6 +709,7 @@ function applySpecialCircumstanceUpdate(data) {
     var statusLower = (data.status || '').toLowerCase();
     if (statusLower === 'resigned') eventType = 'RESIGNED';
     else if (statusLower === 'quit') eventType = 'QUIT';
+    else if (statusLower === 'fired') eventType = 'FIRED';
     else if (statusLower === 'layoff') eventType = 'LAYOFF';
     else if (statusLower === 'vacation' || statusLower === 'time off') eventType = 'VACATION';
     else if (statusLower === 'leave' || statusLower === 'fmla') eventType = 'LEAVE';
@@ -716,9 +767,12 @@ function applySpecialCircumstanceUpdate(data) {
              (jobChanged ? (data.clearJobNumber ? ', Job # cleared' : ', Job # → ' + newJobNumber) : '') +
              (classificationChanged ? ', Classification → ' + data.classification : ''));
 
-    // NOTE: Do NOT delete the row when setting to Previous Employee
-    // The employee should remain on the Employees sheet with Location = "Previous Employee"
-    // This matches the behavior when manually changing location on the sheet
+    // Delete employee from Employees sheet if marked as Previous Employee
+    if (data.newLocation === 'Previous Employee') {
+      Utilities.sleep(500);
+      employeesSheet.deleteRow(rowIndex);
+      Logger.log('Deleted employee row ' + rowIndex + ' for ' + data.name);
+    }
 
     return { success: true, message: 'Update applied successfully' };
 

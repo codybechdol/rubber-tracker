@@ -3,7 +3,6 @@
   "rootDir": "./src",
   "parentId": "1MqqJdQ5rFW8VN-ZlCebJ7dbzEfc0NoX32RXtBdkEJKg",
   "scriptExtensions": [
-    ".js",
     ".gs"
   ],
   "htmlExtensions": [

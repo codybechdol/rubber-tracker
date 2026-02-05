@@ -8,6 +8,8 @@
  * Expand each placeholder as features are implemented. Logging and error handling included for maintainability.
  *
  * NOTE: Constants (COLS, sheet names, etc.) are defined in 00-Constants.gs
+ *
+ * UPDATE Feb 1, 2026: Phase 4 - Migrated localStorage to Task Metadata sheet
  * NOTE: Utility functions (logEvent, normalizeApprovalValue, etc.) are defined in 01-Utilities.gs
  */
 
@@ -1381,12 +1383,43 @@ function updateTrainingTrackingFromToDo(task) {
 }
 
 /**
- * Deletes a task from the To Do Schedule (only works for Manual Tasks).
+ * Deletes a task from the To Do Schedule.
+ * Works for Manual Tasks (deletes from sheet) and Task Metadata tasks (marks as deleted or removes).
  *
  * @param {number} taskIndex - Index of task in array
+ * @param {string} taskKey - Optional: Task key in format "SourceSheet_RowIndex" for direct deletion
  */
-function deleteScheduleTask(taskIndex) {
-  Logger.log('deleteScheduleTask: index=' + taskIndex);
+function deleteScheduleTask(taskIndex, taskKey) {
+  Logger.log('deleteScheduleTask: index=' + taskIndex + ', key=' + taskKey);
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // If taskKey is provided, use it for direct Task Metadata deletion
+  if (taskKey) {
+    var taskMetaSheet = ss.getSheetByName('Task Metadata');
+    if (taskMetaSheet) {
+      var data = taskMetaSheet.getDataRange().getValues();
+      var headers = data[0];
+      var taskKeyCol = -1;
+
+      for (var h = 0; h < headers.length; h++) {
+        if (String(headers[h]).toLowerCase() === 'taskkey') {
+          taskKeyCol = h;
+          break;
+        }
+      }
+
+      if (taskKeyCol !== -1) {
+        for (var i = data.length - 1; i >= 1; i--) {
+          if (data[i][taskKeyCol] === taskKey) {
+            taskMetaSheet.deleteRow(i + 1);
+            Logger.log('Deleted task from Task Metadata: ' + taskKey);
+            return { success: true, deleted: 'Task Metadata', key: taskKey };
+          }
+        }
+      }
+    }
+  }
 
   var tasks = getScheduleTasks();
   if (taskIndex < 0 || taskIndex >= tasks.length) {
@@ -1394,16 +1427,79 @@ function deleteScheduleTask(taskIndex) {
   }
 
   var task = tasks[taskIndex];
+  Logger.log('Task to delete: source=' + task.source + ', rowIndex=' + task.rowIndex);
 
-  // Only allow deleting Manual Tasks
-  if (task.source !== 'Manual Tasks') {
-    throw new Error('Can only delete Manual Tasks. Other tasks are managed by their source sheets.');
-  }
+  // Handle deletion based on source
+  if (task.source === 'Manual Tasks') {
+    var manualSheet = ss.getSheetByName('Manual Tasks');
+    if (manualSheet && task.rowIndex) {
+      manualSheet.deleteRow(task.rowIndex);
+      Logger.log('Deleted from Manual Tasks sheet');
+      return { success: true, deleted: 'Manual Tasks' };
+    }
+  } else if (task.source === 'Task Metadata' || task.taskKey) {
+    // Delete from Task Metadata sheet
+    var taskMetaSheet = ss.getSheetByName('Task Metadata');
+    if (taskMetaSheet) {
+      var data = taskMetaSheet.getDataRange().getValues();
+      var headers = data[0];
+      var taskKeyCol = -1;
 
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var manualSheet = ss.getSheetByName('Manual Tasks');
-  if (manualSheet) {
-    manualSheet.deleteRow(task.rowIndex);
+      for (var h = 0; h < headers.length; h++) {
+        if (String(headers[h]).toLowerCase() === 'taskkey') {
+          taskKeyCol = h;
+          break;
+        }
+      }
+
+      // Try to find by taskKey first
+      var keyToFind = task.taskKey || (task.source + '_' + task.rowIndex);
+      if (taskKeyCol !== -1) {
+        for (var i = data.length - 1; i >= 1; i--) {
+          if (data[i][taskKeyCol] === keyToFind) {
+            taskMetaSheet.deleteRow(i + 1);
+            Logger.log('Deleted from Task Metadata by key: ' + keyToFind);
+            return { success: true, deleted: 'Task Metadata', key: keyToFind };
+          }
+        }
+      }
+
+      // Fallback: delete by row index if we have it
+      if (task.rowIndex && task.rowIndex > 1) {
+        taskMetaSheet.deleteRow(task.rowIndex);
+        Logger.log('Deleted from Task Metadata by rowIndex: ' + task.rowIndex);
+        return { success: true, deleted: 'Task Metadata', rowIndex: task.rowIndex };
+      }
+    }
+    throw new Error('Could not find task in Task Metadata to delete');
+  } else {
+    // For other sources (Glove Swaps, Sleeve Swaps, etc.), just remove from Task Metadata if present
+    var taskMetaSheet = ss.getSheetByName('Task Metadata');
+    if (taskMetaSheet && task.taskKey) {
+      var data = taskMetaSheet.getDataRange().getValues();
+      var headers = data[0];
+      var taskKeyCol = -1;
+
+      for (var h = 0; h < headers.length; h++) {
+        if (String(headers[h]).toLowerCase() === 'taskkey') {
+          taskKeyCol = h;
+          break;
+        }
+      }
+
+      if (taskKeyCol !== -1) {
+        for (var i = data.length - 1; i >= 1; i--) {
+          if (data[i][taskKeyCol] === task.taskKey) {
+            taskMetaSheet.deleteRow(i + 1);
+            Logger.log('Deleted from Task Metadata: ' + task.taskKey);
+            return { success: true, deleted: 'Task Metadata', key: task.taskKey };
+          }
+        }
+      }
+    }
+
+    // If we can't delete from Task Metadata, inform the user
+    throw new Error('Cannot delete this task type (' + task.source + '). Please delete it from the source sheet or Task Metadata directly.');
   }
 
   return { success: true };
@@ -1826,55 +1922,161 @@ function getCertTypeDefaults() {
 function getEmployeeNamesForMatching() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
-
-  if (!employeesSheet || employeesSheet.getLastRow() < 2) {
-    return [];
-  }
-
-  var data = employeesSheet.getDataRange().getValues();
-  var headers = data[0];
-
-  // Find column indices
-  var nameCol = 0;
-  var locationCol = -1;
-  var jobNumCol = -1;
-  var classCol = -1;
-  var gloveSizeCol = -1;
-  var sleeveSizeCol = -1;
-  var jobClassificationCol = -1;
-
-  for (var h = 0; h < headers.length; h++) {
-    var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'location') locationCol = h;
-    if (header === 'job number') jobNumCol = h;
-    if (header === 'class') classCol = h;
-    if (header === 'glove size') gloveSizeCol = h;
-    if (header === 'sleeve size') sleeveSizeCol = h;
-    if (header === 'job classification') jobClassificationCol = h;
-  }
-
   var employees = [];
-  for (var i = 1; i < data.length; i++) {
-    var row = data[i];
-    if (row[nameCol]) {
-      var location = locationCol !== -1 ? String(row[locationCol] || '') : '';
-      // Skip employees marked as "Previous Employee"
-      if (location.toLowerCase() === 'previous employee') {
-        continue;
+
+  // ===== PART 1: Read from Employees sheet (active employees) =====
+  if (employeesSheet && employeesSheet.getLastRow() >= 2) {
+    var data = employeesSheet.getDataRange().getValues();
+    var headers = data[0];
+
+    // Find column indices
+    var nameCol = 0;
+    var locationCol = -1;
+    var jobNumCol = -1;
+    var classCol = -1;
+    var gloveSizeCol = -1;
+    var sleeveSizeCol = -1;
+    var jobClassificationCol = -1;
+
+    for (var h = 0; h < headers.length; h++) {
+      var header = String(headers[h]).toLowerCase().trim();
+      if (header === 'location') locationCol = h;
+      if (header === 'job number') jobNumCol = h;
+      if (header === 'class') classCol = h;
+      if (header === 'glove size') gloveSizeCol = h;
+      if (header === 'sleeve size') sleeveSizeCol = h;
+      if (header === 'job classification') jobClassificationCol = h;
+    }
+
+    for (var i = 1; i < data.length; i++) {
+      var row = data[i];
+      if (row[nameCol]) {
+        var location = locationCol !== -1 ? String(row[locationCol] || '') : '';
+        // Include all employees, even "Previous Employee" (they may be on crew temporarily)
+        employees.push({
+          name: String(row[nameCol]),
+          location: location,
+          jobNum: jobNumCol !== -1 ? String(row[jobNumCol] || '') : '',
+          class: classCol !== -1 ? row[classCol] : '',
+          gloveSize: gloveSizeCol !== -1 ? row[gloveSizeCol] : '',
+          sleeveSize: sleeveSizeCol !== -1 ? row[sleeveSizeCol] : '',
+          jobClassification: jobClassificationCol !== -1 ? String(row[jobClassificationCol] || '') : '',
+          rowIndex: i + 1,
+          source: 'Employees'
+        });
       }
-      employees.push({
-        name: String(row[nameCol]),
-        location: location,
-        jobNum: jobNumCol !== -1 ? String(row[jobNumCol] || '') : '',
-        class: classCol !== -1 ? row[classCol] : '',
-        gloveSize: gloveSizeCol !== -1 ? row[gloveSizeCol] : '',
-        sleeveSize: sleeveSizeCol !== -1 ? row[sleeveSizeCol] : '',
-        jobClassification: jobClassificationCol !== -1 ? String(row[jobClassificationCol] || '') : '',
-        rowIndex: i + 1
-      });
     }
   }
 
+  // ===== PART 2: Read from Employee History (terminated employees) =====
+  var historySheet = ss.getSheetByName('Employee History');
+  if (historySheet && historySheet.getLastRow() >= 3) {
+    var histData = historySheet.getDataRange().getValues();
+    var histHeaders = histData[0];
+
+    // Find column indices in Employee History
+    var histNameCol = -1;
+    var histDateCol = -1;
+    var histLocationCol = -1;
+    var histJobNumCol = -1;
+    var histLastDayCol = -1;
+    var histLastDayReasonCol = -1;
+
+    for (var hh = 0; hh < histHeaders.length; hh++) {
+      var histHeader = String(histHeaders[hh]).toLowerCase().trim();
+      if (histHeader === 'employee name') histNameCol = hh;
+      if (histHeader === 'date') histDateCol = hh;
+      if (histHeader === 'location') histLocationCol = hh;
+      if (histHeader === 'job number') histJobNumCol = hh;
+      if (histHeader === 'last day') histLastDayCol = hh;
+      if (histHeader === 'last day reason') histLastDayReasonCol = hh;
+    }
+
+    if (histNameCol === -1 || histDateCol === -1) {
+      Logger.log('getEmployeeNamesForMatching: Could not find required columns in Employee History');
+    } else {
+      // Group all entries by employee name
+      var employeeEntries = {};
+
+      for (var hi = 2; hi < histData.length; hi++) {
+        var histRow = histData[hi];
+        var empName = String(histRow[histNameCol] || '').trim();
+        var entryDate = histRow[histDateCol];
+
+        if (!empName) continue;
+
+        var empKey = empName.toLowerCase();
+        if (!employeeEntries[empKey]) {
+          employeeEntries[empKey] = [];
+        }
+
+        employeeEntries[empKey].push({
+          name: empName,
+          date: entryDate,
+          lastDay: histLastDayCol !== -1 ? String(histRow[histLastDayCol] || '').trim() : '',
+          lastDayReason: histLastDayReasonCol !== -1 ? String(histRow[histLastDayReasonCol] || '').trim() : '',
+          location: histLocationCol !== -1 ? String(histRow[histLocationCol] || '').trim() : ''
+        });
+      }
+
+      // For each employee, find the most recent entry and check if it's a termination
+      var terminatedEmployees = {};
+
+      for (var empKey in employeeEntries) {
+        var entries = employeeEntries[empKey];
+
+        // Find most recent entry by Date
+        var mostRecentEntry = null;
+        var mostRecentDate = null;
+
+        for (var ei = 0; ei < entries.length; ei++) {
+          var entry = entries[ei];
+          var entryDate = entry.date;
+
+          // Parse date for comparison
+          var parsedDate = null;
+          if (entryDate instanceof Date) {
+            parsedDate = entryDate;
+          } else if (entryDate) {
+            parsedDate = new Date(entryDate);
+          }
+
+          if (parsedDate && !isNaN(parsedDate.getTime())) {
+            if (!mostRecentDate || parsedDate > mostRecentDate) {
+              mostRecentDate = parsedDate;
+              mostRecentEntry = entry;
+            }
+          }
+        }
+
+        // Check if most recent entry is a termination (has Last Day + Last Day Reason)
+        if (mostRecentEntry && mostRecentEntry.lastDay && mostRecentEntry.lastDayReason) {
+          terminatedEmployees[empKey] = {
+            name: mostRecentEntry.name,
+            location: 'Previous Employee',
+            jobNum: '',
+            class: '',
+            gloveSize: '',
+            sleeveSize: '',
+            jobClassification: '',
+            rowIndex: -1, // No row index (not on Employees sheet)
+            source: 'Employee History',
+            lastDay: mostRecentEntry.lastDay,
+            lastDayReason: mostRecentEntry.lastDayReason
+          };
+        }
+      }
+
+      // Add terminated employees to the list
+      for (var termKey in terminatedEmployees) {
+        employees.push(terminatedEmployees[termKey]);
+      }
+
+      Logger.log('getEmployeeNamesForMatching: Found ' + Object.keys(terminatedEmployees).length + ' terminated employees in Employee History');
+    }
+  }
+
+  Logger.log('getEmployeeNamesForMatching: Returning ' + employees.length + ' total employees');
   return employees;
 }
 
@@ -4080,6 +4282,18 @@ function getExpiringCertsForSchedule() {
     var dataC = expiringSheet.getRange(2, 3, numRows, 1).getValues(); // Expiration Date
     var dataF = expiringSheet.getRange(2, 6, numRows, 1).getValues(); // Days Until
 
+    // Check for Declined Date column
+    var headers = expiringSheet.getRange(1, 1, 1, expiringSheet.getLastColumn()).getValues()[0];
+    var declinedColIndex = -1;
+    for (var h = 0; h < headers.length; h++) {
+      if (String(headers[h]).toLowerCase().trim() === 'declined date') {
+        declinedColIndex = h;
+        break;
+      }
+    }
+    var declinedData = declinedColIndex >= 0 ?
+      expiringSheet.getRange(2, declinedColIndex + 1, numRows, 1).getValues() : null;
+
     var certs = [];
     for (var i = 0; i < numRows; i++) {
       var empName = String(dataA[i][0] || '').trim();
@@ -4095,6 +4309,20 @@ function getExpiringCertsForSchedule() {
         expDateStr = Utilities.formatDate(expDate, Session.getScriptTimeZone(), 'MM/dd/yyyy');
       } else if (expDate) {
         expDateStr = String(expDate);
+      }
+
+      // Check if this cert was declined
+      var declinedDate = null;
+      var isDeclined = false;
+      if (declinedData && declinedData[i][0]) {
+        var decVal = declinedData[i][0];
+        if (decVal instanceof Date && !isNaN(decVal.getTime())) {
+          declinedDate = Utilities.formatDate(decVal, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+          isDeclined = true;
+        } else if (decVal) {
+          declinedDate = String(decVal);
+          isDeclined = true;
+        }
       }
 
       // Special handling for Crane Evaluation:
@@ -4118,7 +4346,10 @@ function getExpiringCertsForSchedule() {
         daysUntilExpiration: adjustedDaysUntil,
         location: employeeLocations[empName.toLowerCase()] || 'Unknown',
         phoneNumber: employeePhones[empName.toLowerCase()] || '',
-        isNonExpiring: isNonExpiring
+        isNonExpiring: isNonExpiring,
+        rowIndex: i + 2,  // Row number in Expiring Certs sheet (1-based, +1 for header)
+        isDeclined: isDeclined,
+        declinedDate: declinedDate
       });
     }
 
@@ -4240,9 +4471,11 @@ function onOpen() {
       .addItem('📋 Tasks & Calendar', 'showToDoSchedule')
       .addItem('🗺️ Trip Planner', 'showTripPlannerDialog')
       .addItem('⚙️ Schedule Config', 'showToDoConfig')
+      .addItem('📊 Task Dashboard', 'showTaskDashboard')
       .addSeparator()
       .addItem('🎯 Generate Task Metadata', 'generateTaskMetadata')
-      .addItem('🎯 Generate Smart Schedule', 'generateSmartSchedule')
+      .addItem('🗄️ Archive Completed Tasks', 'showArchiveCompletedTasksDialog')
+      .addItem('🗑️ Archive Old To Do List (Legacy)', 'archiveToDoListSheet')
       .addSeparator()
       .addItem('📅 Generate Monthly Schedule', 'generateMonthlySchedule')
       .addItem('🔄 Refresh Calendar', 'refreshCalendar')
@@ -4268,6 +4501,7 @@ function onOpen() {
       .addItem('🔄 Update Employee History Headers', 'updateEmployeeHistoryHeaders')
       .addItem('🧹 Clean Up Duplicate History Entries', 'cleanupDuplicateEmployeeHistoryEntries')
       .addItem('📱 Format Phone Numbers', 'formatEmployeePhoneNumbers')
+      .addItem('✅ Fix Last Day Reason Dropdown', 'fixLastDayReasonValidation')
       .addSeparator()
       .addItem('📦 Reset Known Item Numbers', 'resetKnownItemNumbers')
       .addItem('🔄 Sync New Items Log', 'syncNewItemsLogWithInventory')
@@ -4281,6 +4515,10 @@ function onOpen() {
       .addItem('📥 Quick Import (1084)', 'importProvidedData')
       .addSeparator()
       .addItem('📋 Setup Task Metadata Sheet', 'setupTaskMetadataSheet')
+      .addItem('🏥 Task Metadata Health Check', 'showTaskMetadataHealthCheck')
+      .addItem('🧹 Remove Duplicate Task Metadata', 'removeDuplicateTaskMetadata')
+      .addItem('🧽 Cleanup Orphaned Metadata', 'cleanupOrphanedTaskMetadata')
+      .addItem('🧹 Cleanup Incorrect Safety Tasks', 'cleanupIncorrectSafetyReportTasks')
       .addSeparator()
       .addItem('🔄 Migrate Manual Tasks Sheet', 'migrateManualTasksSheet')
       .addItem('🧹 Clean Up Manual Tasks', 'cleanupDuplicateManualTasks')
@@ -4289,11 +4527,27 @@ function onOpen() {
       .addItem('💾 Create Backup Snapshot', 'createBackupSnapshot')
       .addItem('📂 View Backup Folder', 'openBackupFolder'))
     .addSubMenu(ui.createMenu('📧 Email Reports')
-      .addItem('Send Report Now', 'sendEmailReport')
-      .addItem('Set Up Weekly Email (Mon 12 PM)', 'createWeeklyEmailTrigger')
-      .addItem('Remove Scheduled Email', 'removeEmailTrigger'))
+      .addItem('📤 Send Report Now', 'sendEmailReport')
+      .addItem('👁️ Preview My Report', 'previewEmailReport')
+      .addSeparator()
+      .addItem('⚙️ Configure Email Reports', 'openEmailReportConfig')
+      .addSeparator()
+      .addItem('🕐 Set Up Weekly Email (Mon 12 PM)', 'createWeeklyEmailTrigger')
+      .addItem('🚫 Remove Scheduled Email', 'removeEmailTrigger'))
     .addSubMenu(ui.createMenu('📊 Reports')
       .addItem('📝 Daily Accomplishments', 'showTimeBreakdownDialog'))
+    .addSubMenu(ui.createMenu('🛡️ Safety Reports')
+      .addItem('⚙️ Setup Safety Reports Sheet', 'setupSafetyReportsSheet')
+      .addItem('📥 Process Safety Emails', 'showProcessSafetyEmailsDialog')
+      .addItem('📋 Create Tasks from Issues', 'createTasksFromSafetyIssues')
+      .addItem('📊 View Safety Reports', 'openSafetyReports')
+      .addSeparator()
+      .addItem('🔄 Refresh Safety Sheets', 'refreshSafetySheets')
+      .addSeparator()
+      .addItem('📊 Compliance Dashboard', 'showComplianceDashboard')
+      .addItem('⚙️ Configure Exclusions', 'openComplianceConfig')
+      .addItem('🔄 Refresh Foreman Names', 'refreshComplianceConfigForemen')
+      .addItem('📈 Compliance History', 'openComplianceSheet'))
     .addSubMenu(ui.createMenu('🔍 Debug')
       .addItem('Test Edit Trigger', 'testEditTrigger')
       .addItem('Recalc Current Row', 'recalcCurrentRow')
@@ -5408,7 +5662,7 @@ function setupEmployeeHistorySheet(sheet) {
     'Job Number',     // E - Job number at time of event
     'Hire Date',      // F - Original hire date
     'Last Day',       // G - Employee's last day (for Terminated events)
-    'Last Day Reason',// H - Only populated for Terminated events (Quit, Fired, Laid Off)
+    'Last Day Reason',// H - Only populated for Terminated events (Quit, Fired, Layoff, Resigned)
     'Rehire Date',    // I - Date employee was rehired (triggers re-add to Employees sheet)
     'Notes',          // J - Additional notes
     'Phone Number',   // K - Employee phone number
@@ -6294,7 +6548,8 @@ function setupTaskMetadataSheet() {
     'CurrentItem', 'Location', 'Foreman', 'PhoneNumber', 'DueDate',
     'ScheduledDate', 'StartTime', 'EndTime', 'Status', 'NotifiedDate',
     'ScheduledClassDate', 'ClassType', 'IsOffice', 'IsRegistered',
-    'IsDeclined', 'CompletedDate', 'Notes', 'CreatedDate', 'LastModified'
+    'IsDeclined', 'CompletedDate', 'Notes', 'CreatedDate', 'LastModified',
+    'InTaskList'  // Column Z - Flag for items added to Task List (Phase 5)
   ];
 
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
@@ -6335,6 +6590,7 @@ function setupTaskMetadataSheet() {
   sheet.setColumnWidth(23, 200); // Notes
   sheet.setColumnWidth(24, 140); // CreatedDate
   sheet.setColumnWidth(25, 160); // LastModified
+  sheet.setColumnWidth(26, 100); // InTaskList
 
   // Add data validation for Status column (column O = 15)
   var statusValues = ['Pending', 'Scheduled', 'Complete', 'Overdue', 'Declined'];
@@ -6352,13 +6608,13 @@ function setupTaskMetadataSheet() {
     .build();
   sheet.getRange(2, 18, sheet.getMaxRows() - 1, 1).setDataValidation(classTypeRule);
 
-  // Add data validation for boolean columns (IsOffice, IsRegistered, IsDeclined)
+  // Add data validation for boolean columns (IsOffice, IsRegistered, IsDeclined, InTaskList)
   var booleanValues = ['TRUE', 'FALSE', ''];
   var booleanRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(booleanValues)
     .setAllowInvalid(true)
     .build();
-  sheet.getRange(2, 19, sheet.getMaxRows() - 1, 3).setDataValidation(booleanRule);
+  sheet.getRange(2, 19, sheet.getMaxRows() - 1, 4).setDataValidation(booleanRule); // columns S-Z (19-22, but also 26)
 
   // Format date columns
   var dateColumns = [11, 12, 16, 17, 22, 24, 25]; // K, L, P, Q, V, X, Y
@@ -6389,6 +6645,55 @@ function setupTaskMetadataSheet() {
   );
 
   Logger.log('setupTaskMetadataSheet: Complete');
+}
+
+/**
+ * Migrates Task Metadata sheet to add InTaskList column if it doesn't exist.
+ * Call this to update existing Task Metadata sheets without losing data.
+ * Note: Previously named InMyChecklist, renamed to InTaskList in Phase 5.
+ */
+function migrateTaskMetadataAddChecklistColumn() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Task Metadata');
+
+  if (!sheet) {
+    Logger.log('migrateTaskMetadataAddChecklistColumn: Task Metadata sheet not found');
+    return { success: false, message: 'Task Metadata sheet not found' };
+  }
+
+  // Check if InTaskList column already exists (or old InMyChecklist name)
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var checklistColIndex = headers.indexOf('InTaskList');
+
+  // Also check for old column name and rename it
+  var oldColIndex = headers.indexOf('InMyChecklist');
+  if (oldColIndex >= 0) {
+    // Rename old column to new name
+    sheet.getRange(1, oldColIndex + 1).setValue('InTaskList');
+    Logger.log('migrateTaskMetadataAddChecklistColumn: Renamed InMyChecklist to InTaskList at column ' + (oldColIndex + 1));
+    return { success: true, message: 'Renamed InMyChecklist to InTaskList' };
+  }
+
+  if (checklistColIndex >= 0) {
+    Logger.log('migrateTaskMetadataAddChecklistColumn: InTaskList column already exists at column ' + (checklistColIndex + 1));
+    return { success: true, message: 'InTaskList column already exists' };
+  }
+
+  // Add the column after LastModified (column Y = 25)
+  var newColIndex = headers.length + 1;
+  sheet.getRange(1, newColIndex).setValue('InTaskList');
+  sheet.setColumnWidth(newColIndex, 100);
+
+  // Add data validation for boolean
+  var booleanValues = ['TRUE', 'FALSE', ''];
+  var booleanRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(booleanValues)
+    .setAllowInvalid(true)
+    .build();
+  sheet.getRange(2, newColIndex, sheet.getMaxRows() - 1, 1).setDataValidation(booleanRule);
+
+  Logger.log('migrateTaskMetadataAddChecklistColumn: Added InTaskList column at column ' + newColIndex);
+  return { success: true, message: 'Added InTaskList column at column ' + newColIndex };
 }
 
 /**
@@ -6556,6 +6861,13 @@ function generateTaskMetadata() {
 
       // Update columns A-K (source-derived data) and Y (LastModified)
       // Preserve columns L-X (user-edited scheduling state)
+      // For Safety Equipment tasks, always update notes to include vehicle number
+      var taskType = rec[4]; // TaskType from source
+      var notesToUse = existing.notes || rec[22];
+      if (taskType === 'Safety Equipment' && rec[22]) {
+        notesToUse = rec[22]; // Always use source notes for Safety Equipment (contains vehicle #)
+      }
+
       var updatedRecord = [
         rec[0],  // A: TaskID (regenerate)
         rec[1],  // B: SourceSheet
@@ -6579,7 +6891,7 @@ function generateTaskMetadata() {
         existing.isRegistered || 'FALSE',  // T: PRESERVE IsRegistered
         existing.isDeclined || 'FALSE',    // U: PRESERVE IsDeclined
         existing.completedDate || '',      // V: PRESERVE CompletedDate
-        existing.notes || rec[22],         // W: PRESERVE Notes (or use new if empty)
+        notesToUse,                        // W: Notes (use vehicle # for Safety Equipment)
         existing.createdDate || rec[23],   // X: PRESERVE CreatedDate
         rec[24]  // Y: UPDATE LastModified (new timestamp)
       ];
@@ -6650,6 +6962,7 @@ function generateTaskMetadata() {
  *
  * @return {Object} Object with tasks array and metadata: {tasks: [...], lastGenerated: date}
  */
+// Last updated: 2026-02-01 12:22 - Added formatTime function for time serialization
 /**
  * Helper: Format Date object to YYYY-MM-DD string for JSON serialization
  * Google Apps Script cannot serialize Date objects to HTML client
@@ -6676,6 +6989,66 @@ function formatDate(dateValue) {
   var month = String(date.getMonth() + 1).padStart(2, '0');
   var day = String(date.getDate()).padStart(2, '0');
   return year + '-' + month + '-' + day;
+}
+
+/**
+ * Formats a time value to HH:MM string format.
+ * Handles Date objects (from spreadsheet time cells) and strings.
+ *
+ * @param {Date|string|null} timeValue - The time to format
+ * @return {string|null} Time in HH:MM format or null if invalid
+ */
+function formatTime(timeValue) {
+  if (!timeValue) return null;
+
+  // Debug: log input type and value
+  Logger.log('formatTime input: ' + timeValue + ' (type: ' + typeof timeValue + ')');
+
+  // If already a string, check format
+  if (typeof timeValue === 'string') {
+    var trimmed = timeValue.trim();
+
+    // If already in 12-hour format with AM/PM, return as-is
+    if (/^\d{1,2}:\d{2}\s*(AM|PM|am|pm)$/i.test(trimmed)) {
+      Logger.log('formatTime: already 12-hour format, returning: ' + trimmed);
+      return trimmed;
+    }
+
+    // If in HH:MM 24-hour format, convert to 12-hour
+    if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(trimmed)) {
+      var parts = trimmed.split(':');
+      var hours = parseInt(parts[0], 10);
+      var minutes = parts[1];
+      var ampm = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12;
+      if (hours === 0) hours = 12;
+      var result = hours + ':' + minutes + ' ' + ampm;
+      Logger.log('formatTime: converted 24hr to 12hr: ' + result);
+      return result;
+    }
+
+    // Try to parse as date string
+    timeValue = new Date(timeValue);
+  }
+
+  // For Date objects, extract hours and minutes using SPREADSHEET timezone
+  var date;
+  if (timeValue instanceof Date) {
+    date = timeValue;
+  } else {
+    date = new Date(timeValue);
+  }
+
+  if (isNaN(date.getTime())) {
+    Logger.log('formatTime: invalid date, returning null');
+    return null;
+  }
+
+  // Use Utilities.formatDate with SPREADSHEET timezone and 12-hour format
+  var spreadsheetTz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+  var result = Utilities.formatDate(date, spreadsheetTz, 'h:mm a');
+  Logger.log('formatTime: Date object with spreadsheet timezone ' + spreadsheetTz + ', returning: ' + result);
+  return result;
 }
 
 function getTasksWithMetadata() {
@@ -6732,19 +7105,22 @@ function getTasksWithMetadata() {
       phoneNumber: row[colMap['PhoneNumber']],
       dueDate: row[colMap['DueDate']],
       scheduledDate: row[colMap['ScheduledDate']],
-      startTime: row[colMap['StartTime']],
-      endTime: row[colMap['EndTime']],
+      startTime: formatTime(row[colMap['StartTime']]),
+      endTime: formatTime(row[colMap['EndTime']]),
       status: row[colMap['Status']],
       notifiedDate: row[colMap['NotifiedDate']],
       scheduledClassDate: row[colMap['ScheduledClassDate']],
       classType: row[colMap['ClassType']],
-      isOffice: row[colMap['IsOffice']],
+      isOffice: row[colMap['IsOffice']] === true || row[colMap['IsOffice']] === 'TRUE',
       isRegistered: row[colMap['IsRegistered']],
       isDeclined: row[colMap['IsDeclined']],
       completedDate: row[colMap['CompletedDate']],
       notes: row[colMap['Notes']],
       createdDate: row[colMap['CreatedDate']],
       lastModified: row[colMap['LastModified']],
+      // Support both old (InMyChecklist) and new (InTaskList) column names for backwards compatibility
+      inTaskList: row[colMap['InTaskList']] === true || row[colMap['InTaskList']] === 'TRUE' ||
+                  row[colMap['InMyChecklist']] === true || row[colMap['InMyChecklist']] === 'TRUE',
       metadataRow: i + 1, // 1-based row number for updates
       sourceSheet: sourceSheet,
       sourceRow: sourceRow
@@ -6796,6 +7172,8 @@ function getTasksWithMetadata() {
           sheetName: sourceSheet,
           rowIndex: sourceRow,
           source: sourceSheet, // Also map sheetName to source
+          vehicleNumber: task.vehicleNumber || '',      // Pass vehicle number for Safety Equipment tasks
+          emailSubject: task.emailSubject || '',        // Pass email subject for Safety Equipment tasks
 
           // Metadata (state information)
           taskID: metadata.taskID,
@@ -6808,12 +7186,13 @@ function getTasksWithMetadata() {
           notifiedDate: metadata.notifiedDate,
           scheduledClassDate: metadata.scheduledClassDate,
           classType: metadata.classType,
-          isOffice: metadata.isOffice === 'TRUE',
-          isRegistered: metadata.isRegistered === 'TRUE',
-          isDeclined: metadata.isDeclined === 'TRUE',
+          isOffice: metadata.isOffice,
+          isRegistered: metadata.isRegistered === 'TRUE' || metadata.isRegistered === true,
+          isDeclined: metadata.isDeclined === 'TRUE' || metadata.isDeclined === true,
           completedDate: metadata.completedDate,
           notes: metadata.notes,
           metadataRow: metadata.metadataRow,
+          inTaskList: metadata.inTaskList,
 
           // Computed fields
           isOverdue: task.isOverdue,
@@ -6839,12 +7218,84 @@ function getTasksWithMetadata() {
           sheetName: sourceSheet,
           rowIndex: sourceRow,
           source: sourceSheet, // Also map sheetName to source
+          vehicleNumber: task.vehicleNumber || '',      // Pass vehicle number for Safety Equipment tasks
+          emailSubject: task.emailSubject || '',        // Pass email subject for Safety Equipment tasks
           isOverdue: task.isOverdue,
           daysTillDue: task.daysTillDue,
           needsMetadata: true // Flag for regeneration
         });
       }
     }
+  }
+
+  // Phase 5: Include Task Metadata records with InTaskList=TRUE that weren't collected from source sheets
+  // This ensures certs added to Task List appear even if not expiring within 30 days
+  var includedKeys = {};
+  enrichedTasks.forEach(function(task) {
+    var key = task.sheetName + '_' + task.rowIndex;
+    includedKeys[key] = true;
+  });
+
+  var taskListAdditions = 0;
+  for (var metaKey in metadataLookup) {
+    var metadata = metadataLookup[metaKey];
+
+    // Skip if already included from source collection
+    if (includedKeys[metaKey]) continue;
+
+    // Only include if InTaskList is TRUE
+    if (!metadata.inTaskList) continue;
+
+    // Skip completed tasks
+    if (metadata.status === 'Complete') continue;
+
+    // Create task object from metadata (source data not available)
+    var taskFromMetadata = {
+      taskType: metadata.taskType || 'Cert Expiring',
+      itemType: metadata.itemType,
+      employee: metadata.employee,
+      location: metadata.location,
+      foreman: metadata.foreman,
+      currentItem: metadata.currentItem || '',
+      pickListItem: '',
+      size: '',
+      estimatedTime: 0,
+      priority: 'Medium',
+      sheetName: metadata.sourceSheet,
+      rowIndex: metadata.sourceRow,
+      source: metadata.sourceSheet,
+
+      // Metadata (state information)
+      taskID: metadata.taskID,
+      dueDate: metadata.dueDate,
+      scheduledDate: metadata.scheduledDate,
+      startTime: metadata.startTime,
+      endTime: metadata.endTime,
+      status: metadata.status || 'Pending',
+      phoneNumber: metadata.phoneNumber,
+      notifiedDate: metadata.notifiedDate,
+      scheduledClassDate: metadata.scheduledClassDate,
+      classType: metadata.classType,
+      isOffice: metadata.isOffice,
+      isRegistered: metadata.isRegistered === 'TRUE' || metadata.isRegistered === true,
+      isDeclined: metadata.isDeclined === 'TRUE' || metadata.isDeclined === true,
+      completedDate: metadata.completedDate,
+      notes: metadata.notes,
+      metadataRow: metadata.metadataRow,
+      inTaskList: true,
+
+      // Computed fields
+      isOverdue: false,
+      daysTillDue: 0
+    };
+
+    enrichedTasks.push(taskFromMetadata);
+    taskListAdditions++;
+    Logger.log('getTasksWithMetadata: Added InTaskList item: ' + metadata.employee + ' - ' + metadata.itemType);
+  }
+
+  if (taskListAdditions > 0) {
+    Logger.log('getTasksWithMetadata: Added ' + taskListAdditions + ' tasks from InTaskList flag');
   }
 
   Logger.log('getTasksWithMetadata: Returning ' + enrichedTasks.length + ' enriched tasks');
@@ -6898,7 +7349,11 @@ function getTasksWithMetadata() {
         // Source info
         src: task.sheetName || '',
         row: task.rowIndex || 0,
-        manual: task.isManualTask ? 1 : 0
+        manual: task.isManualTask ? 1 : 0,
+        // Task List flag (Phase 5)
+        inList: task.inTaskList ? 1 : 0,
+        // Registration flag (Phase 5)
+        reg: task.isRegistered ? 1 : 0
       };
     });
 
@@ -7033,7 +7488,6 @@ function getTasksFromCache(cacheKey) {
  * @param {Object} updates - Object with fields to update (e.g., {status: 'Complete', completedDate: new Date()})
  * @return {Object} Result with success status and updated task
  */
- */
 function updateTaskMetadata(taskKey, updates) {
   Logger.log('=== updateTaskMetadata START ===');
   Logger.log('taskKey: ' + taskKey);
@@ -7125,6 +7579,8 @@ function updateTaskMetadata(taskKey, updates) {
  * Marks a task as complete in Task Metadata.
  * Phase 3: Task State Updates
  *
+ * Also syncs Safety Equipment tasks to Safety Reports sheet (status → Resolved)
+ *
  * @param {string} taskKey - The task key in format "SourceSheet_SourceRow"
  * @param {Object} options - Optional settings (e.g., {syncToSource: true})
  * @return {Object} Result with success status
@@ -7137,9 +7593,25 @@ function markTaskComplete(taskKey, options) {
     CompletedDate: new Date()
   });
 
-  if (result.success && options.syncToSource) {
-    // Optionally sync completion to source sheet
-    syncTaskCompletionToSource(taskKey);
+  if (result.success) {
+    // For Safety Equipment tasks, sync completion to Safety Reports sheet
+    // This updates the source row status from "Needs Attention" to "Resolved"
+    if (taskKey && (taskKey.indexOf('SafetyReports') === 0 || taskKey.indexOf('Safety Reports') === 0)) {
+      try {
+        var syncResult = syncSafetyReportCompletion(taskKey);
+        if (syncResult && syncResult.synced) {
+          Logger.log('markTaskComplete: Synced Safety Report to Resolved for ' + taskKey);
+        }
+      } catch (syncError) {
+        Logger.log('markTaskComplete: Error syncing Safety Report: ' + syncError.toString());
+        // Don't fail the main completion - just log the error
+      }
+    }
+
+    if (options.syncToSource) {
+      // Optionally sync completion to other source sheets
+      syncTaskCompletionToSource(taskKey);
+    }
   }
 
   return result;
@@ -7210,6 +7682,154 @@ function markTaskDeclined(taskKey, reason) {
 }
 
 /**
+ * Marks a cert as declined, removes from Task List, and updates Expiring Certs sheet with declined date.
+ * Phase 5: Full declined workflow
+ *
+ * @param {string} taskKey - The task key in format "Expiring Certs_rowNumber"
+ * @param {string} employee - Employee name
+ * @param {string} certType - Certificate type (e.g., 'Crane Cert')
+ * @return {Object} Result with success status
+ */
+function markCertDeclinedAndRemove(taskKey, employee, certType) {
+  Logger.log('markCertDeclinedAndRemove: ' + taskKey + ' for ' + employee + ' - ' + certType);
+
+  var today = new Date();
+  var declinedDate = Utilities.formatDate(today, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+
+  // 1. Update Task Metadata - mark as declined and remove from Task List
+  var metadataResult = updateTaskMetadata(taskKey, {
+    IsDeclined: 'TRUE',
+    Status: 'Declined',
+    InTaskList: '',  // Remove from Task List
+    CompletedDate: declinedDate,  // Use CompletedDate to store the declined date
+    Notes: 'Declined on ' + declinedDate
+  });
+
+  if (!metadataResult.success) {
+    Logger.log('markCertDeclinedAndRemove: Failed to update Task Metadata: ' + metadataResult.error);
+  }
+
+  // 2. Update Expiring Certs sheet - add declined date to column
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var expiringSheet = ss.getSheetByName('Expiring Certs');
+
+  if (expiringSheet) {
+    // Find or create "Declined Date" column
+    var headers = expiringSheet.getRange(1, 1, 1, expiringSheet.getLastColumn()).getValues()[0];
+    var declinedColIndex = -1;
+
+    for (var h = 0; h < headers.length; h++) {
+      if (String(headers[h]).toLowerCase().trim() === 'declined date') {
+        declinedColIndex = h + 1;
+        break;
+      }
+    }
+
+    // If column doesn't exist, create it
+    if (declinedColIndex === -1) {
+      declinedColIndex = headers.length + 1;
+      expiringSheet.getRange(1, declinedColIndex).setValue('Declined Date');
+      expiringSheet.getRange(1, declinedColIndex).setFontWeight('bold');
+      Logger.log('markCertDeclinedAndRemove: Created Declined Date column at ' + declinedColIndex);
+    }
+
+    // Find the row for this employee + cert type
+    var data = expiringSheet.getDataRange().getValues();
+    var empCol = 0;  // Column A - Employee Name
+    var certCol = 1; // Column B - Cert Type
+
+    for (var i = 1; i < data.length; i++) {
+      var rowEmployee = String(data[i][empCol] || '').trim();
+      var rowCertType = String(data[i][certCol] || '').trim();
+
+      if (rowEmployee.toLowerCase() === employee.toLowerCase() &&
+          rowCertType.toLowerCase() === certType.toLowerCase()) {
+        // Found the row - write declined date
+        expiringSheet.getRange(i + 1, declinedColIndex).setValue(today);
+        expiringSheet.getRange(i + 1, declinedColIndex).setNumberFormat('yyyy-mm-dd');
+        Logger.log('markCertDeclinedAndRemove: Set declined date at row ' + (i + 1));
+        break;
+      }
+    }
+  }
+
+  Logger.log('markCertDeclinedAndRemove: Complete');
+  return { success: true, declinedDate: declinedDate };
+}
+
+/**
+ * Re-adds a previously declined cert back to Task List for a future class.
+ * Resets declined status, clears notification history, ready for fresh workflow.
+ * Phase 5: Declined cert re-add workflow
+ *
+ * @param {string} taskKey - The task key in format "Expiring Certs_rowNumber"
+ * @param {string} employee - Employee name
+ * @param {string} certType - Certificate type (e.g., 'Crane Cert')
+ * @return {Object} Result with success status
+ */
+function reAddDeclinedCertToTaskList(taskKey, employee, certType) {
+  Logger.log('reAddDeclinedCertToTaskList: ' + taskKey + ' for ' + employee + ' - ' + certType);
+
+  // 1. Update Task Metadata - reset declined status, add back to Task List, clear notifications
+  var metadataResult = updateTaskMetadata(taskKey, {
+    IsDeclined: 'FALSE',
+    Status: 'Pending',
+    InTaskList: 'TRUE',
+    NotifiedDate: '',           // Clear notification date for fresh start
+    ScheduledClassDate: '',     // Clear scheduled class date
+    ClassType: '',              // Clear class type
+    IsRegistered: 'FALSE',      // Clear registered flag
+    CompletedDate: '',          // Clear completed/declined date
+    Notes: 'Re-added to Task List on ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd')
+  });
+
+  if (!metadataResult.success) {
+    Logger.log('reAddDeclinedCertToTaskList: Failed to update Task Metadata: ' + metadataResult.error);
+    return { success: false, error: metadataResult.error };
+  }
+
+  // 2. Clear declined date from Expiring Certs sheet
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var expiringSheet = ss.getSheetByName('Expiring Certs');
+
+  if (expiringSheet) {
+    // Find "Declined Date" column
+    var headers = expiringSheet.getRange(1, 1, 1, expiringSheet.getLastColumn()).getValues()[0];
+    var declinedColIndex = -1;
+
+    for (var h = 0; h < headers.length; h++) {
+      if (String(headers[h]).toLowerCase().trim() === 'declined date') {
+        declinedColIndex = h + 1;
+        break;
+      }
+    }
+
+    if (declinedColIndex !== -1) {
+      // Find the row for this employee + cert type
+      var data = expiringSheet.getDataRange().getValues();
+      var empCol = 0;  // Column A - Employee Name
+      var certCol = 1; // Column B - Cert Type
+
+      for (var i = 1; i < data.length; i++) {
+        var rowEmployee = String(data[i][empCol] || '').trim();
+        var rowCertType = String(data[i][certCol] || '').trim();
+
+        if (rowEmployee.toLowerCase() === employee.toLowerCase() &&
+            rowCertType.toLowerCase() === certType.toLowerCase()) {
+          // Found the row - clear declined date
+          expiringSheet.getRange(i + 1, declinedColIndex).setValue('');
+          Logger.log('reAddDeclinedCertToTaskList: Cleared declined date at row ' + (i + 1));
+          break;
+        }
+      }
+    }
+  }
+
+  Logger.log('reAddDeclinedCertToTaskList: Complete - ' + employee + ' re-added for future class');
+  return { success: true };
+}
+
+/**
  * Marks a task as registered (employee registered for class).
  * Phase 3: Task State Updates
  *
@@ -7230,6 +7850,271 @@ function markTaskRegistered(taskKey, classDate, classType) {
   }
 
   return updateTaskMetadata(taskKey, updates);
+}
+
+/**
+ * Toggles a task's "In Task List" status (Phase 5: unified Task List).
+ * If the task doesn't exist in Task Metadata, creates a new record for it.
+ *
+ * @param {string} taskKey - The task key in format "SourceSheet_SourceRow"
+ * @param {boolean} inTaskList - Whether to add or remove from Task List
+ * @param {Object} taskInfo - Optional task info for creating new record (employee, certType, location, etc.)
+ * @return {Object} Result with success status
+ */
+function toggleTaskChecklist(taskKey, inTaskList, taskInfo) {
+  Logger.log('toggleTaskChecklist: ' + taskKey + ' -> ' + inTaskList);
+
+  // Try to update existing record first
+  var result = updateTaskMetadata(taskKey, {
+    InTaskList: inTaskList ? 'TRUE' : ''
+  });
+
+  // If task not found and we're adding to Task List, try to create the record
+  if (!result.success && result.error && result.error.indexOf('Task not found') !== -1 && inTaskList) {
+    Logger.log('toggleTaskChecklist: Task not found, attempting to create record for: ' + taskKey);
+
+    // Parse taskKey to get source sheet and row
+    var parts = taskKey.split('_');
+    if (parts.length >= 2) {
+      var sourceSheet = parts.slice(0, -1).join('_'); // Handle "Expiring Certs_123" format
+      var sourceRow = parseInt(parts[parts.length - 1]);
+
+      // Try to create a minimal Task Metadata record
+      var createResult = createTaskMetadataRecord(sourceSheet, sourceRow, taskInfo);
+      if (createResult.success) {
+        Logger.log('toggleTaskChecklist: Created new Task Metadata record, now setting InTaskList');
+        // Now try to update again
+        result = updateTaskMetadata(taskKey, {
+          InTaskList: 'TRUE'
+        });
+      } else {
+        Logger.log('toggleTaskChecklist: Failed to create record: ' + createResult.error);
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Creates a new Task Metadata record for a task that doesn't have one.
+ * Used when adding certs from Expiring Certs tab to Task List.
+ *
+ * @param {string} sourceSheet - Source sheet name (e.g., "Expiring Certs")
+ * @param {number} sourceRow - Row number in source sheet
+ * @param {Object} taskInfo - Optional task info (employee, certType, location, phoneNumber, dueDate)
+ * @return {Object} Result with success status
+ */
+function createTaskMetadataRecord(sourceSheet, sourceRow, taskInfo) {
+  Logger.log('createTaskMetadataRecord: ' + sourceSheet + '_' + sourceRow);
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var metadataSheet = ss.getSheetByName('Task Metadata');
+
+  if (!metadataSheet) {
+    return { success: false, error: 'Task Metadata sheet not found' };
+  }
+
+  taskInfo = taskInfo || {};
+
+  // For Expiring Certs, try to read data from the source sheet
+  if (sourceSheet === 'Expiring Certs' && !taskInfo.employee) {
+    var expiringSheet = ss.getSheetByName('Expiring Certs');
+    if (expiringSheet && sourceRow >= 2) {
+      try {
+        var rowData = expiringSheet.getRange(sourceRow, 1, 1, 6).getValues()[0];
+        taskInfo.employee = rowData[0] || '';
+        taskInfo.certType = rowData[1] || '';
+        taskInfo.dueDate = rowData[2] || '';
+        Logger.log('createTaskMetadataRecord: Read from Expiring Certs - ' + taskInfo.employee + ', ' + taskInfo.certType);
+      } catch (e) {
+        Logger.log('createTaskMetadataRecord: Error reading Expiring Certs row: ' + e);
+      }
+    }
+  }
+
+  // Get employee phone/location if not provided
+  if (taskInfo.employee && (!taskInfo.location || !taskInfo.phoneNumber)) {
+    var employeesSheet = ss.getSheetByName('Employees');
+    if (employeesSheet) {
+      var empData = employeesSheet.getDataRange().getValues();
+      var empHeaders = empData[0];
+      var nameCol = -1, locCol = -1, phoneCol = -1, foremanCol = -1;
+
+      for (var h = 0; h < empHeaders.length; h++) {
+        var hdr = String(empHeaders[h]).toLowerCase().trim();
+        if (hdr === 'name') nameCol = h;
+        if (hdr === 'location') locCol = h;
+        if (hdr === 'phone number' || hdr === 'phone') phoneCol = h;
+        if (hdr === 'foreman') foremanCol = h;
+      }
+
+      var empNameLower = (taskInfo.employee || '').toLowerCase().trim();
+      for (var i = 1; i < empData.length; i++) {
+        var rowName = (empData[i][nameCol] || '').toString().toLowerCase().trim();
+        if (rowName === empNameLower) {
+          if (!taskInfo.location && locCol !== -1) taskInfo.location = empData[i][locCol] || '';
+          if (!taskInfo.phoneNumber && phoneCol !== -1) {
+            var phone = (empData[i][phoneCol] || '').toString().replace(/\D/g, '');
+            if (phone.length === 10) phone = '1' + phone;
+            if (phone.length >= 10) taskInfo.phoneNumber = phone;
+          }
+          if (!taskInfo.foreman && foremanCol !== -1) taskInfo.foreman = empData[i][foremanCol] || '';
+          break;
+        }
+      }
+    }
+  }
+
+  // Build TaskID
+  var timestamp = new Date();
+  var dateCreated = Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'yyyyMMdd');
+  var taskID = sourceSheet.replace(/\s+/g, '') + '_' + sourceRow + '_' + dateCreated;
+
+  // Format due date
+  var dueDate = '';
+  if (taskInfo.dueDate instanceof Date) {
+    dueDate = Utilities.formatDate(taskInfo.dueDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  } else if (taskInfo.dueDate) {
+    dueDate = String(taskInfo.dueDate);
+  }
+
+  // Build record
+  var newRecord = [
+    taskID,                           // TaskID
+    sourceSheet,                      // SourceSheet
+    sourceRow,                        // SourceRow
+    taskInfo.employee || '',          // Employee
+    'Cert Expiring',                  // TaskType
+    taskInfo.certType || '',          // ItemType
+    '',                               // CurrentItem
+    taskInfo.location || '',          // Location
+    taskInfo.foreman || '',           // Foreman
+    taskInfo.phoneNumber || '',       // PhoneNumber
+    dueDate,                          // DueDate
+    '',                               // ScheduledDate
+    '',                               // StartTime
+    '',                               // EndTime
+    'Pending',                        // Status
+    '',                               // NotifiedDate
+    '',                               // ScheduledClassDate
+    '',                               // ClassType
+    'FALSE',                          // IsOffice
+    'FALSE',                          // IsRegistered
+    'FALSE',                          // IsDeclined
+    '',                               // CompletedDate
+    '',                               // Notes
+    Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'yyyy-MM-dd'),  // CreatedDate
+    Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss'),  // LastModified
+    'TRUE'                            // InTaskList
+  ];
+
+  // Append to sheet
+  var lastRow = metadataSheet.getLastRow();
+  metadataSheet.getRange(lastRow + 1, 1, 1, newRecord.length).setValues([newRecord]);
+
+  Logger.log('createTaskMetadataRecord: Created new record at row ' + (lastRow + 1));
+  return { success: true, row: lastRow + 1 };
+}
+
+/**
+ * Toggles a task's "Is Office" status (handled via phone/office work).
+ * Phase 4: localStorage Migration
+ *
+ * @param {string} taskKey - The task key in format "SourceSheet_SourceRow"
+ * @param {boolean} isOffice - Whether this is an office/phone task
+ * @return {Object} Result with success status
+ */
+function toggleTaskOffice(taskKey, isOffice) {
+  Logger.log('toggleTaskOffice: ' + taskKey + ' -> ' + isOffice);
+  return updateTaskMetadata(taskKey, {
+    IsOffice: isOffice ? 'TRUE' : ''
+  });
+}
+
+/**
+ * Gets all tasks that are in the user's Task List.
+ * Phase 5: Renamed from "My Checklist" to "Task List"
+ *
+ * @return {Array} Array of tasks where InTaskList = TRUE
+ */
+function getChecklistTasks() {
+  Logger.log('=== getChecklistTasks START ===');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var metadataSheet = ss.getSheetByName('Task Metadata');
+
+  if (!metadataSheet || metadataSheet.getLastRow() <= 1) {
+    return [];
+  }
+
+  var data = metadataSheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Build column index map
+  var colMap = {};
+  for (var h = 0; h < headers.length; h++) {
+    colMap[headers[h]] = h;
+  }
+
+  // Check for InTaskList column (new name) or InMyChecklist (old name)
+  var inTaskListCol = colMap['InTaskList'];
+  if (inTaskListCol === undefined) {
+    // Check for old column name
+    inTaskListCol = colMap['InMyChecklist'];
+    if (inTaskListCol !== undefined) {
+      // Rename it to InTaskList
+      metadataSheet.getRange(1, inTaskListCol + 1).setValue('InTaskList');
+      Logger.log('getChecklistTasks: Renamed InMyChecklist to InTaskList');
+    }
+  }
+
+  // If column doesn't exist at all, add it
+  if (inTaskListCol === undefined) {
+    Logger.log('getChecklistTasks: InTaskList column not found, adding it now...');
+    var newColIndex = headers.length + 1;
+    metadataSheet.getRange(1, newColIndex).setValue('InTaskList');
+    metadataSheet.setColumnWidth(newColIndex, 100);
+
+    // Add TRUE/FALSE data validation
+    var lastRow = metadataSheet.getLastRow();
+    if (lastRow > 1) {
+      var validation = SpreadsheetApp.newDataValidation()
+        .requireValueInList(['TRUE', ''], true)
+        .setAllowInvalid(false)
+        .build();
+      metadataSheet.getRange(2, newColIndex, lastRow - 1, 1).setDataValidation(validation);
+    }
+    Logger.log('getChecklistTasks: Added InTaskList column at column ' + newColIndex);
+    return []; // Return empty for this call, next call will work
+  }
+
+  var checklistTasks = [];
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    if (row[inTaskListCol] === true || row[inTaskListCol] === 'TRUE') {
+      checklistTasks.push({
+        taskKey: row[colMap['SourceSheet']] + '_' + row[colMap['SourceRow']],
+        taskID: row[colMap['TaskID']],
+        employee: row[colMap['Employee']],
+        taskType: row[colMap['TaskType']],
+        itemType: row[colMap['ItemType']],
+        location: row[colMap['Location']],
+        dueDate: formatDate(row[colMap['DueDate']]),
+        scheduledDate: formatDate(row[colMap['ScheduledDate']]),
+        status: row[colMap['Status']],
+        notifiedDate: formatDate(row[colMap['NotifiedDate']]),
+        isOffice: row[colMap['IsOffice']] === true || row[colMap['IsOffice']] === 'TRUE',
+        phoneNumber: row[colMap['PhoneNumber']] || '',
+        sourceSheet: row[colMap['SourceSheet']],
+        sourceRow: row[colMap['SourceRow']]
+      });
+    }
+  }
+
+  Logger.log('getChecklistTasks: Found ' + checklistTasks.length + ' task list items');
+  Logger.log('=== getChecklistTasks END ===');
+  return checklistTasks;
 }
 
 /**
@@ -7314,6 +8199,858 @@ function batchUpdateTaskMetadata(taskUpdates) {
     successCount: successCount,
     failCount: failCount,
     results: results
+  };
+}
+
+// ============================================================================
+// PHASE 7: CLEANUP & OPTIMIZATION FUNCTIONS
+// ============================================================================
+
+/**
+ * Archives old completed tasks from Task Metadata to Task Metadata Archive sheet.
+ * Tasks completed more than X days ago are moved to archive to keep the main sheet performant.
+ * Phase 7: Cleanup & Optimization - Task 7.1
+ *
+ * @param {number} daysOld - Number of days after completion to archive (default: 30)
+ * @return {Object} Result with counts of archived tasks
+ */
+function archiveOldCompletedTasks(daysOld) {
+  daysOld = daysOld || 30;
+  Logger.log('=== archiveOldCompletedTasks START (daysOld=' + daysOld + ') ===');
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var metadataSheet = ss.getSheetByName('Task Metadata');
+
+  if (!metadataSheet) {
+    return { success: false, error: 'Task Metadata sheet not found' };
+  }
+
+  // Get or create archive sheet
+  var archiveSheet = ss.getSheetByName('Task Metadata Archive');
+  if (!archiveSheet) {
+    archiveSheet = ss.insertSheet('Task Metadata Archive');
+    // Copy headers from metadata sheet
+    var headers = metadataSheet.getRange(1, 1, 1, metadataSheet.getLastColumn()).getValues();
+    archiveSheet.getRange(1, 1, 1, headers[0].length).setValues(headers);
+    archiveSheet.getRange(1, 1, 1, headers[0].length)
+      .setFontWeight('bold')
+      .setBackground('#6aa84f')
+      .setFontColor('white');
+    archiveSheet.setFrozenRows(1);
+    Logger.log('archiveOldCompletedTasks: Created Task Metadata Archive sheet');
+  }
+
+  var data = metadataSheet.getDataRange().getValues();
+  if (data.length <= 1) {
+    return { success: true, archivedCount: 0, message: 'No tasks to archive' };
+  }
+
+  var headers = data[0];
+
+  // Find column indices
+  var colMap = {};
+  for (var h = 0; h < headers.length; h++) {
+    colMap[headers[h]] = h;
+  }
+
+  var statusCol = colMap['Status'];
+  var completedDateCol = colMap['CompletedDate'];
+
+  if (statusCol === undefined || completedDateCol === undefined) {
+    return { success: false, error: 'Required columns (Status, CompletedDate) not found' };
+  }
+
+  var cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - daysOld);
+  cutoffDate.setHours(0, 0, 0, 0);
+
+  var rowsToArchive = [];
+  var rowIndicesToDelete = [];
+
+  // Scan from bottom to top for safe deletion
+  for (var i = data.length - 1; i >= 1; i--) {
+    var row = data[i];
+    var status = row[statusCol];
+    var completedDate = row[completedDateCol];
+
+    // Only archive completed tasks
+    if (status !== 'Complete') continue;
+    if (!completedDate) continue;
+
+    // Check if completed before cutoff
+    var completedDateObj;
+    if (completedDate instanceof Date) {
+      completedDateObj = completedDate;
+    } else {
+      completedDateObj = new Date(completedDate);
+    }
+
+    if (isNaN(completedDateObj.getTime())) continue;
+
+    if (completedDateObj < cutoffDate) {
+      rowsToArchive.unshift(row); // Add to beginning to maintain order
+      rowIndicesToDelete.unshift(i + 1); // 1-based row number
+    }
+  }
+
+  Logger.log('archiveOldCompletedTasks: Found ' + rowsToArchive.length + ' tasks to archive');
+
+  if (rowsToArchive.length === 0) {
+    return { success: true, archivedCount: 0, message: 'No tasks older than ' + daysOld + ' days to archive' };
+  }
+
+  // Append rows to archive sheet
+  var archiveLastRow = archiveSheet.getLastRow();
+  archiveSheet.getRange(archiveLastRow + 1, 1, rowsToArchive.length, rowsToArchive[0].length)
+    .setValues(rowsToArchive);
+
+  // Delete rows from metadata sheet (from bottom to top)
+  for (var d = rowIndicesToDelete.length - 1; d >= 0; d--) {
+    metadataSheet.deleteRow(rowIndicesToDelete[d]);
+  }
+
+  Logger.log('archiveOldCompletedTasks: Archived ' + rowsToArchive.length + ' tasks');
+  Logger.log('=== archiveOldCompletedTasks END ===');
+
+  return {
+    success: true,
+    archivedCount: rowsToArchive.length,
+    cutoffDate: Utilities.formatDate(cutoffDate, Session.getScriptTimeZone(), 'yyyy-MM-dd'),
+    message: 'Archived ' + rowsToArchive.length + ' tasks completed before ' +
+             Utilities.formatDate(cutoffDate, Session.getScriptTimeZone(), 'MMM d, yyyy')
+  };
+}
+
+/**
+ * Shows archive completed tasks dialog.
+ * Menu item: Glove Manager → Utilities → Archive Old Completed Tasks
+ * Phase 7: Cleanup & Optimization - Task 7.1
+ */
+function showArchiveCompletedTasksDialog() {
+  var ui = SpreadsheetApp.getUi();
+  var response = ui.prompt(
+    '🗄️ Archive Completed Tasks',
+    'Enter number of days (tasks completed more than X days ago will be archived):\n\n' +
+    'Default: 30 days\nRecommended: 30-90 days',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (response.getSelectedButton() !== ui.Button.OK) {
+    return;
+  }
+
+  var daysStr = response.getResponseText().trim();
+  var days = parseInt(daysStr, 10);
+
+  if (isNaN(days) || days < 1) {
+    days = 30;
+  }
+
+  var result = archiveOldCompletedTasks(days);
+
+  if (result.success) {
+    ui.alert('✅ Archive Complete', result.message, ui.ButtonSet.OK);
+  } else {
+    ui.alert('❌ Archive Failed', result.error || 'Unknown error', ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * Cleans up orphaned Task Metadata records where the source task no longer exists.
+ * Phase 7: Cleanup & Optimization - Task 7.1
+ *
+ * @return {Object} Result with counts of cleaned up records
+ */
+function cleanupOrphanedTaskMetadata() {
+  Logger.log('=== cleanupOrphanedTaskMetadata START ===');
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var metadataSheet = ss.getSheetByName('Task Metadata');
+
+  if (!metadataSheet) {
+    return { success: false, error: 'Task Metadata sheet not found' };
+  }
+
+  var data = metadataSheet.getDataRange().getValues();
+  if (data.length <= 1) {
+    return { success: true, cleanedCount: 0, message: 'No records to check' };
+  }
+
+  var headers = data[0];
+  var colMap = {};
+  for (var h = 0; h < headers.length; h++) {
+    colMap[headers[h]] = h;
+  }
+
+  var sourceSheetCol = colMap['SourceSheet'];
+  var sourceRowCol = colMap['SourceRow'];
+  var statusCol = colMap['Status'];
+
+  // Build cache of source sheet row counts
+  var sourceSheets = {};
+  var sheetNames = ['Glove Swaps', 'Sleeve Swaps', 'Training Tracking', 'Reclaims', 'Expiring Certs', 'Manual Tasks'];
+
+  sheetNames.forEach(function(name) {
+    var sheet = ss.getSheetByName(name);
+    if (sheet) {
+      sourceSheets[name] = sheet.getLastRow();
+    }
+  });
+
+  var rowsToDelete = [];
+
+  // Check each metadata record
+  for (var i = data.length - 1; i >= 1; i--) {
+    var row = data[i];
+    var sourceSheet = row[sourceSheetCol];
+    var sourceRow = row[sourceRowCol];
+    var status = row[statusCol];
+
+    // Skip completed/archived tasks - they may reference old rows
+    if (status === 'Complete' || status === 'Archived') continue;
+
+    // Skip if source sheet not tracked
+    if (!sourceSheets.hasOwnProperty(sourceSheet)) continue;
+
+    // Check if source row exists
+    var maxRow = sourceSheets[sourceSheet];
+    if (sourceRow > maxRow) {
+      Logger.log('cleanupOrphanedTaskMetadata: Orphaned record - ' + sourceSheet + ' row ' + sourceRow + ' (max: ' + maxRow + ')');
+      rowsToDelete.unshift(i + 1);
+    }
+  }
+
+  Logger.log('cleanupOrphanedTaskMetadata: Found ' + rowsToDelete.length + ' orphaned records');
+
+  if (rowsToDelete.length === 0) {
+    return { success: true, cleanedCount: 0, message: 'No orphaned records found' };
+  }
+
+  // Delete orphaned rows (from bottom to top)
+  for (var d = rowsToDelete.length - 1; d >= 0; d--) {
+    metadataSheet.deleteRow(rowsToDelete[d]);
+  }
+
+  Logger.log('cleanupOrphanedTaskMetadata: Deleted ' + rowsToDelete.length + ' orphaned records');
+  Logger.log('=== cleanupOrphanedTaskMetadata END ===');
+
+  return {
+    success: true,
+    cleanedCount: rowsToDelete.length,
+    message: 'Removed ' + rowsToDelete.length + ' orphaned metadata records'
+  };
+}
+
+// ============================================================================
+// PHASE 7.2: PHONE NUMBER CACHING
+// ============================================================================
+
+/**
+ * Cache key for employee phone numbers
+ */
+var PHONE_CACHE_KEY = 'EMPLOYEE_PHONES';
+
+/**
+ * Gets employee phone numbers with caching for performance.
+ * Phase 7: Cleanup & Optimization - Task 7.2
+ *
+ * @param {boolean} forceRefresh - If true, bypasses cache and reads fresh data
+ * @return {Object} Map of employee names (lowercase) to phone numbers
+ */
+function getEmployeePhonesCached(forceRefresh) {
+  Logger.log('=== getEmployeePhonesCached START (forceRefresh=' + forceRefresh + ') ===');
+
+  var cache = CacheService.getScriptCache();
+
+  // Try to get from cache first
+  if (!forceRefresh) {
+    var cached = cache.get(PHONE_CACHE_KEY);
+    if (cached) {
+      try {
+        var phones = JSON.parse(cached);
+        Logger.log('getEmployeePhonesCached: Cache hit - ' + Object.keys(phones).length + ' entries');
+        return phones;
+      } catch (e) {
+        Logger.log('getEmployeePhonesCached: Cache parse error: ' + e);
+      }
+    }
+  }
+
+  // Read from sheet
+  Logger.log('getEmployeePhonesCached: Cache miss - reading from Employees sheet');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var empSheet = ss.getSheetByName('Employees');
+
+  if (!empSheet) {
+    Logger.log('getEmployeePhonesCached: Employees sheet not found');
+    return {};
+  }
+
+  var data = empSheet.getDataRange().getValues();
+  if (data.length <= 1) {
+    return {};
+  }
+
+  var headers = data[0];
+  var nameCol = -1, phoneCol = -1;
+
+  for (var h = 0; h < headers.length; h++) {
+    var hdr = String(headers[h]).toLowerCase().trim();
+    if (hdr === 'name') nameCol = h;
+    if (hdr === 'phone number' || hdr === 'phone') phoneCol = h;
+  }
+
+  if (nameCol === -1 || phoneCol === -1) {
+    Logger.log('getEmployeePhonesCached: Required columns not found');
+    return {};
+  }
+
+  var phones = {};
+  for (var i = 1; i < data.length; i++) {
+    var name = (data[i][nameCol] || '').toString().toLowerCase().trim();
+    var phone = (data[i][phoneCol] || '').toString().replace(/\D/g, '');
+
+    if (name && phone.length >= 10) {
+      if (phone.length === 10) phone = '1' + phone;
+      phones[name] = phone;
+    }
+  }
+
+  // Store in cache (6 hours = 21600 seconds)
+  try {
+    cache.put(PHONE_CACHE_KEY, JSON.stringify(phones), 21600);
+    Logger.log('getEmployeePhonesCached: Cached ' + Object.keys(phones).length + ' phone numbers');
+  } catch (e) {
+    Logger.log('getEmployeePhonesCached: Cache store error: ' + e);
+  }
+
+  Logger.log('=== getEmployeePhonesCached END ===');
+  return phones;
+}
+
+/**
+ * Clears the employee phone cache.
+ * Call this when employee data is updated.
+ */
+function clearPhoneCache() {
+  var cache = CacheService.getScriptCache();
+  cache.remove(PHONE_CACHE_KEY);
+  Logger.log('clearPhoneCache: Phone cache cleared');
+}
+
+/**
+ * Gets phone number for a specific employee using cached data.
+ * Phase 7: Cleanup & Optimization - Task 7.2
+ *
+ * @param {string} employeeName - Employee name to look up
+ * @return {string} Phone number or empty string if not found
+ */
+function getEmployeePhoneCached(employeeName) {
+  if (!employeeName) return '';
+
+  var phones = getEmployeePhonesCached(false);
+  var nameLower = employeeName.toLowerCase().trim();
+
+  return phones[nameLower] || '';
+}
+
+// ============================================================================
+// PHASE 7.3: TASK STATE DASHBOARD
+// ============================================================================
+
+/**
+ * Gets task statistics for dashboard display.
+ * Phase 7: Cleanup & Optimization - Task 7.3
+ *
+ * @return {Object} Statistics about tasks in the system
+ */
+function getTaskStatistics() {
+  Logger.log('=== getTaskStatistics START ===');
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var metadataSheet = ss.getSheetByName('Task Metadata');
+
+  if (!metadataSheet) {
+    return {
+      error: true,
+      message: 'Task Metadata sheet not found. Run "Generate Task Metadata" first.'
+    };
+  }
+
+  var data = metadataSheet.getDataRange().getValues();
+  if (data.length <= 1) {
+    return {
+      totalTasks: 0,
+      byStatus: {},
+      byType: {},
+      byLocation: {},
+      overdueTasks: 0,
+      scheduledThisWeek: 0,
+      completedThisWeek: 0,
+      lastGenerated: null
+    };
+  }
+
+  var headers = data[0];
+  var colMap = {};
+  for (var h = 0; h < headers.length; h++) {
+    colMap[headers[h]] = h;
+  }
+
+  var stats = {
+    totalTasks: data.length - 1,
+    byStatus: {},
+    byType: {},
+    byLocation: {},
+    overdueTasks: 0,
+    scheduledThisWeek: 0,
+    completedThisWeek: 0,
+    inTaskList: 0,
+    notified: 0,
+    lastGenerated: null
+  };
+
+  // Calculate date ranges
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  var weekStart = new Date(today);
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay()); // Start of current week (Sunday)
+
+  var weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekEnd.getDate() + 6);
+
+  // Process each row
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+
+    // Status counts
+    var status = row[colMap['Status']] || 'Pending';
+    stats.byStatus[status] = (stats.byStatus[status] || 0) + 1;
+
+    // Type counts
+    var taskType = row[colMap['TaskType']] || 'Unknown';
+    stats.byType[taskType] = (stats.byType[taskType] || 0) + 1;
+
+    // Location counts (only for non-completed)
+    if (status !== 'Complete') {
+      var location = row[colMap['Location']] || 'Unknown';
+      stats.byLocation[location] = (stats.byLocation[location] || 0) + 1;
+    }
+
+    // Overdue check
+    var dueDate = row[colMap['DueDate']];
+    if (dueDate && status !== 'Complete') {
+      var dueDateObj = dueDate instanceof Date ? dueDate : new Date(dueDate);
+      if (!isNaN(dueDateObj.getTime()) && dueDateObj < today) {
+        stats.overdueTasks++;
+      }
+    }
+
+    // Scheduled this week check
+    var scheduledDate = row[colMap['ScheduledDate']];
+    if (scheduledDate) {
+      var schedDateObj = scheduledDate instanceof Date ? scheduledDate : new Date(scheduledDate);
+      if (!isNaN(schedDateObj.getTime()) && schedDateObj >= weekStart && schedDateObj <= weekEnd) {
+        stats.scheduledThisWeek++;
+      }
+    }
+
+    // Completed this week check
+    var completedDate = row[colMap['CompletedDate']];
+    if (completedDate && status === 'Complete') {
+      var compDateObj = completedDate instanceof Date ? completedDate : new Date(completedDate);
+      if (!isNaN(compDateObj.getTime()) && compDateObj >= weekStart && compDateObj <= weekEnd) {
+        stats.completedThisWeek++;
+      }
+    }
+
+    // In Task List count
+    var inTaskList = row[colMap['InTaskList']];
+    if (inTaskList === true || inTaskList === 'TRUE') {
+      stats.inTaskList++;
+    }
+
+    // Notified count
+    var notifiedDate = row[colMap['NotifiedDate']];
+    if (notifiedDate) {
+      stats.notified++;
+    }
+
+    // Get last generated date from first row
+    if (i === 1) {
+      var createdDate = row[colMap['CreatedDate']];
+      if (createdDate) {
+        stats.lastGenerated = createdDate instanceof Date ?
+          Utilities.formatDate(createdDate, Session.getScriptTimeZone(), 'MMM d, yyyy h:mm a') :
+          String(createdDate);
+      }
+    }
+  }
+
+  // Calculate pending (not completed, not declined)
+  stats.pendingTasks = (stats.byStatus['Pending'] || 0) + (stats.byStatus['Scheduled'] || 0) + (stats.byStatus['Overdue'] || 0);
+
+  Logger.log('getTaskStatistics: Total=' + stats.totalTasks + ', Pending=' + stats.pendingTasks + ', Overdue=' + stats.overdueTasks);
+  Logger.log('=== getTaskStatistics END ===');
+
+  return stats;
+}
+
+/**
+ * Shows the Task State Dashboard dialog.
+ * Menu item: Glove Manager → Schedule & To-Do → 📊 Task Dashboard
+ * Phase 7: Cleanup & Optimization - Task 7.3
+ */
+function showTaskDashboard() {
+  var stats = getTaskStatistics();
+
+  if (stats.error) {
+    SpreadsheetApp.getUi().alert('Error', stats.message, SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+
+  // Build HTML dashboard
+  var html = HtmlService.createHtmlOutput(buildTaskDashboardHtml(stats))
+    .setWidth(600)
+    .setHeight(500);
+
+  SpreadsheetApp.getUi().showModalDialog(html, '📊 Task Dashboard');
+}
+
+/**
+ * Builds HTML content for task dashboard.
+ */
+function buildTaskDashboardHtml(stats) {
+  var html = '<style>';
+  html += 'body { font-family: Arial, sans-serif; padding: 16px; }';
+  html += '.stat-card { background: #f5f5f5; border-radius: 8px; padding: 12px; margin: 8px 0; }';
+  html += '.stat-card h3 { margin: 0 0 8px 0; color: #333; font-size: 14px; }';
+  html += '.stat-value { font-size: 24px; font-weight: bold; color: #1a73e8; }';
+  html += '.stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }';
+  html += '.stat-mini { text-align: center; padding: 8px; background: #fff; border-radius: 4px; }';
+  html += '.stat-mini .label { font-size: 11px; color: #666; }';
+  html += '.stat-mini .value { font-size: 18px; font-weight: bold; }';
+  html += '.overdue { color: #d93025 !important; }';
+  html += '.completed { color: #1e8e3e !important; }';
+  html += '.scheduled { color: #f9ab00 !important; }';
+  html += '.section { margin-top: 16px; }';
+  html += '.section h4 { margin: 0 0 8px 0; color: #555; font-size: 13px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }';
+  html += '.breakdown { font-size: 12px; color: #666; }';
+  html += '.breakdown div { padding: 2px 0; }';
+  html += '.btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; margin: 4px; }';
+  html += '.btn-primary { background: #1a73e8; color: white; }';
+  html += '.btn-secondary { background: #e8eaed; color: #333; }';
+  html += '</style>';
+
+  html += '<div class="stat-grid">';
+  html += '<div class="stat-mini"><div class="value">' + stats.totalTasks + '</div><div class="label">Total Tasks</div></div>';
+  html += '<div class="stat-mini"><div class="value">' + stats.pendingTasks + '</div><div class="label">Pending</div></div>';
+  html += '<div class="stat-mini"><div class="value overdue">' + stats.overdueTasks + '</div><div class="label">Overdue</div></div>';
+  html += '</div>';
+
+  html += '<div class="stat-grid">';
+  html += '<div class="stat-mini"><div class="value scheduled">' + stats.scheduledThisWeek + '</div><div class="label">Scheduled This Week</div></div>';
+  html += '<div class="stat-mini"><div class="value completed">' + stats.completedThisWeek + '</div><div class="label">Completed This Week</div></div>';
+  html += '<div class="stat-mini"><div class="value">' + stats.inTaskList + '</div><div class="label">In Task List</div></div>';
+  html += '</div>';
+
+  // Status breakdown
+  html += '<div class="section"><h4>Status Breakdown</h4><div class="breakdown">';
+  for (var status in stats.byStatus) {
+    html += '<div>' + status + ': <strong>' + stats.byStatus[status] + '</strong></div>';
+  }
+  html += '</div></div>';
+
+  // Task type breakdown
+  html += '<div class="section"><h4>By Task Type</h4><div class="breakdown">';
+  for (var taskType in stats.byType) {
+    html += '<div>' + taskType + ': <strong>' + stats.byType[taskType] + '</strong></div>';
+  }
+  html += '</div></div>';
+
+  // Top locations
+  html += '<div class="section"><h4>Pending Tasks by Location</h4><div class="breakdown">';
+  var sortedLocs = Object.keys(stats.byLocation).sort(function(a, b) {
+    return stats.byLocation[b] - stats.byLocation[a];
+  }).slice(0, 5);
+  for (var l = 0; l < sortedLocs.length; l++) {
+    var loc = sortedLocs[l];
+    html += '<div>' + loc + ': <strong>' + stats.byLocation[loc] + '</strong></div>';
+  }
+  html += '</div></div>';
+
+  // Footer with last generated
+  if (stats.lastGenerated) {
+    html += '<div style="margin-top: 16px; font-size: 11px; color: #999;">Last Generated: ' + stats.lastGenerated + '</div>';
+  }
+
+  // Action buttons
+  html += '<div style="margin-top: 16px; text-align: center;">';
+  html += '<button class="btn btn-primary" onclick="google.script.run.showToDoSchedule(); google.script.host.close();">Open Tasks & Calendar</button>';
+  html += '<button class="btn btn-secondary" onclick="google.script.run.generateTaskMetadata(); google.script.host.close();">Refresh Data</button>';
+  html += '</div>';
+
+  return html;
+}
+
+// ============================================================================
+// PHASE 7.4: PERFORMANCE OPTIMIZATION
+// ============================================================================
+
+/**
+ * Performs health check on Task Metadata sheet.
+ * Phase 7: Cleanup & Optimization - Task 7.4
+ *
+ * @return {Object} Health check results
+ */
+function performTaskMetadataHealthCheck() {
+  Logger.log('=== performTaskMetadataHealthCheck START ===');
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var metadataSheet = ss.getSheetByName('Task Metadata');
+
+  var results = {
+    healthy: true,
+    issues: [],
+    suggestions: [],
+    metrics: {}
+  };
+
+  if (!metadataSheet) {
+    results.healthy = false;
+    results.issues.push('Task Metadata sheet not found');
+    return results;
+  }
+
+  var data = metadataSheet.getDataRange().getValues();
+  results.metrics.totalRows = data.length - 1;
+
+  if (data.length <= 1) {
+    results.issues.push('No task data found');
+    results.suggestions.push('Run "Generate Task Metadata" to populate data');
+    return results;
+  }
+
+  var headers = data[0];
+  var colMap = {};
+  for (var h = 0; h < headers.length; h++) {
+    colMap[headers[h]] = h;
+  }
+
+  // Check expected columns exist
+  var expectedCols = ['TaskID', 'SourceSheet', 'SourceRow', 'Employee', 'Status', 'DueDate', 'ScheduledDate'];
+  var missingCols = [];
+  expectedCols.forEach(function(col) {
+    if (colMap[col] === undefined) missingCols.push(col);
+  });
+
+  if (missingCols.length > 0) {
+    results.healthy = false;
+    results.issues.push('Missing columns: ' + missingCols.join(', '));
+    results.suggestions.push('Re-run "Setup Task Metadata Sheet" to fix columns');
+  }
+
+  // Count statuses
+  var statusCounts = {};
+  var completedOlderThan30 = 0;
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+  var thirtyDaysAgo = new Date(today);
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+  var orphanedCount = 0;
+  var duplicateKeys = {};
+  var duplicateCount = 0;
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+
+    // Status counts
+    var status = row[colMap['Status']] || 'Unknown';
+    statusCounts[status] = (statusCounts[status] || 0) + 1;
+
+    // Old completed tasks
+    if (status === 'Complete') {
+      var completedDate = row[colMap['CompletedDate']];
+      if (completedDate) {
+        var compDate = completedDate instanceof Date ? completedDate : new Date(completedDate);
+        if (!isNaN(compDate.getTime()) && compDate < thirtyDaysAgo) {
+          completedOlderThan30++;
+        }
+      }
+    }
+
+    // Check for duplicates
+    var sourceSheet = row[colMap['SourceSheet']];
+    var sourceRow = row[colMap['SourceRow']];
+    var key = sourceSheet + '_' + sourceRow;
+
+    if (duplicateKeys[key]) {
+      duplicateCount++;
+    } else {
+      duplicateKeys[key] = true;
+    }
+  }
+
+  results.metrics.statusCounts = statusCounts;
+  results.metrics.completedOlderThan30 = completedOlderThan30;
+  results.metrics.duplicateCount = duplicateCount;
+
+  // Generate suggestions
+  if (completedOlderThan30 > 10) {
+    results.suggestions.push('Consider archiving ' + completedOlderThan30 + ' completed tasks older than 30 days');
+  }
+
+  if (duplicateCount > 0) {
+    results.issues.push(duplicateCount + ' duplicate task records found');
+    results.suggestions.push('Run cleanup to remove duplicate records');
+  }
+
+  if (results.metrics.totalRows > 1000) {
+    results.suggestions.push('Large dataset (' + results.metrics.totalRows + ' rows) - consider archiving old tasks for better performance');
+  }
+
+  Logger.log('performTaskMetadataHealthCheck: ' + JSON.stringify(results));
+  Logger.log('=== performTaskMetadataHealthCheck END ===');
+
+  return results;
+}
+
+/**
+ * Shows health check results dialog.
+ * Menu item: Glove Manager → Utilities → 🏥 Task Metadata Health Check
+ */
+function showTaskMetadataHealthCheck() {
+  var results = performTaskMetadataHealthCheck();
+
+  var message = '📊 Task Metadata Health Check\n\n';
+
+  if (results.healthy) {
+    message += '✅ Status: Healthy\n\n';
+  } else {
+    message += '⚠️ Status: Issues Found\n\n';
+  }
+
+  message += '📈 Metrics:\n';
+  message += '• Total Tasks: ' + (results.metrics.totalRows || 0) + '\n';
+
+  if (results.metrics.statusCounts) {
+    for (var status in results.metrics.statusCounts) {
+      message += '  - ' + status + ': ' + results.metrics.statusCounts[status] + '\n';
+    }
+  }
+
+  if (results.metrics.completedOlderThan30 > 0) {
+    message += '• Old completed (>30 days): ' + results.metrics.completedOlderThan30 + '\n';
+  }
+
+  if (results.metrics.duplicateCount > 0) {
+    message += '• Duplicate records: ' + results.metrics.duplicateCount + '\n';
+  }
+
+  if (results.issues.length > 0) {
+    message += '\n❌ Issues:\n';
+    results.issues.forEach(function(issue) {
+      message += '• ' + issue + '\n';
+    });
+  }
+
+  if (results.suggestions.length > 0) {
+    message += '\n💡 Suggestions:\n';
+    results.suggestions.forEach(function(suggestion) {
+      message += '• ' + suggestion + '\n';
+    });
+  }
+
+  SpreadsheetApp.getUi().alert('Health Check Results', message, SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+/**
+ * Removes duplicate Task Metadata records (keeps the newest one).
+ * Phase 7: Cleanup & Optimization
+ */
+function removeDuplicateTaskMetadata() {
+  Logger.log('=== removeDuplicateTaskMetadata START ===');
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var metadataSheet = ss.getSheetByName('Task Metadata');
+
+  if (!metadataSheet) {
+    return { success: false, error: 'Task Metadata sheet not found' };
+  }
+
+  var data = metadataSheet.getDataRange().getValues();
+  if (data.length <= 1) {
+    return { success: true, removedCount: 0, message: 'No data to check' };
+  }
+
+  var headers = data[0];
+  var colMap = {};
+  for (var h = 0; h < headers.length; h++) {
+    colMap[headers[h]] = h;
+  }
+
+  var sourceSheetCol = colMap['SourceSheet'];
+  var sourceRowCol = colMap['SourceRow'];
+  var lastModifiedCol = colMap['LastModified'];
+
+  // Find duplicates (keep the one with newest LastModified)
+  var seen = {};
+  var rowsToDelete = [];
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var key = row[sourceSheetCol] + '_' + row[sourceRowCol];
+    var lastMod = row[lastModifiedCol];
+
+    if (seen[key]) {
+      // Duplicate found - compare dates
+      var existingMod = seen[key].lastMod;
+      var existingRow = seen[key].row;
+
+      var existingDate = existingMod instanceof Date ? existingMod : new Date(existingMod);
+      var newDate = lastMod instanceof Date ? lastMod : new Date(lastMod);
+
+      if (!isNaN(newDate.getTime()) && !isNaN(existingDate.getTime())) {
+        if (newDate > existingDate) {
+          // New row is newer - delete old row
+          rowsToDelete.push(existingRow);
+          seen[key] = { row: i + 1, lastMod: lastMod };
+        } else {
+          // Existing is newer - delete new row
+          rowsToDelete.push(i + 1);
+        }
+      } else {
+        // Can't compare dates - delete the later one
+        rowsToDelete.push(i + 1);
+      }
+    } else {
+      seen[key] = { row: i + 1, lastMod: lastMod };
+    }
+  }
+
+  Logger.log('removeDuplicateTaskMetadata: Found ' + rowsToDelete.length + ' duplicates to remove');
+
+  if (rowsToDelete.length === 0) {
+    return { success: true, removedCount: 0, message: 'No duplicates found' };
+  }
+
+  // Sort descending for safe deletion
+  rowsToDelete.sort(function(a, b) { return b - a; });
+
+  // Delete duplicates
+  for (var d = 0; d < rowsToDelete.length; d++) {
+    metadataSheet.deleteRow(rowsToDelete[d]);
+  }
+
+  Logger.log('removeDuplicateTaskMetadata: Removed ' + rowsToDelete.length + ' duplicate records');
+  Logger.log('=== removeDuplicateTaskMetadata END ===');
+
+  return {
+    success: true,
+    removedCount: rowsToDelete.length,
+    message: 'Removed ' + rowsToDelete.length + ' duplicate records'
   };
 }
 
@@ -7457,7 +9194,7 @@ function buildSheets() {
       var lastRow = Math.max(employeesSheet.getLastRow(), 100);  // At least 100 rows
       var reasonRange = employeesSheet.getRange(2, lastDayReasonColIdx, lastRow - 1, 1);
       var reasonRule = SpreadsheetApp.newDataValidation()
-        .requireValueInList(['Quit', 'Fired', 'Laid Off'], true)
+        .requireValueInList(['Quit', 'Fired', 'Layoff', 'Resigned'], true)
         .setAllowInvalid(false)
         .build();
       reasonRange.setDataValidation(reasonRule);
@@ -10373,6 +12110,70 @@ function addPreviousEmployeePickListToToDo(ss, items) {
 }
 
 /**
+ * Phase 6: Archives the old To Do List sheet.
+ * Renames it to "To Do List (Archive)" and hides it.
+ * The system now uses Task Metadata as the single source of truth.
+ *
+ * Menu item: Glove Manager → Schedule & To-Do → Archive Old To Do List (Legacy)
+ */
+function archiveToDoListSheet() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var todoSheet = ss.getSheetByName('To Do List');
+
+  if (!todoSheet) {
+    ui.alert('ℹ️ Info', 'No "To Do List" sheet found. It may have already been archived or doesn\'t exist.', ui.ButtonSet.OK);
+    return;
+  }
+
+  // Check if Task Metadata exists first
+  var metadataSheet = ss.getSheetByName('Task Metadata');
+  if (!metadataSheet || metadataSheet.getLastRow() <= 1) {
+    ui.alert('⚠️ Warning',
+      'Task Metadata sheet is empty or missing.\n\n' +
+      'Please run "Generate Task Metadata" first before archiving the To Do List.\n\n' +
+      'The system now uses Task Metadata as the single source of truth.',
+      ui.ButtonSet.OK);
+    return;
+  }
+
+  // Confirm with user
+  var response = ui.alert('📦 Archive To Do List?',
+    'This will:\n' +
+    '1. Rename "To Do List" to "To Do List (Archive)"\n' +
+    '2. Hide the archived sheet\n\n' +
+    'The system now uses Task Metadata as the single source of truth.\n' +
+    'The archived sheet will be preserved for reference but hidden from view.\n\n' +
+    'Continue?',
+    ui.ButtonSet.YES_NO);
+
+  if (response !== ui.Button.YES) {
+    return;
+  }
+
+  try {
+    // Rename and hide
+    todoSheet.setName('To Do List (Archive)');
+    todoSheet.hideSheet();
+
+    ui.alert('✅ Archived',
+      'The To Do List has been archived and hidden.\n\n' +
+      'The system now uses Task Metadata for all task management.\n\n' +
+      'To unhide the archived sheet:\n' +
+      '1. Right-click any sheet tab\n' +
+      '2. Select "Show more sheets..."\n' +
+      '3. Click "To Do List (Archive)"',
+      ui.ButtonSet.OK);
+
+    Logger.log('To Do List archived successfully');
+
+  } catch (e) {
+    ui.alert('❌ Error', 'Failed to archive To Do List: ' + e.message, ui.ButtonSet.OK);
+    Logger.log('Error archiving To Do List: ' + e);
+  }
+}
+
+/**
  * Archives employees with "Previous Employee" location to the Employee History sheet.
  * Searches the Employees sheet for all rows where Location = "Previous Employee",
  * adds a "Terminated" entry to Employee History (if not already present), and
@@ -12805,4 +14606,140 @@ function removeEmailTrigger(silent) {
     }
   }
 }
+
+
+/**
+ * Cleans up incorrect Safety Report tasks from Task Metadata and Manual Tasks.
+ * These were accidentally created as "Manual Tasks" with descriptions containing
+ * Wipers, Brakes, Misc Comment, Defrost, Heater, etc.
+ *
+ * Menu: Glove Manager → Utilities → 🧹 Cleanup Incorrect Safety Tasks
+ */
+function cleanupIncorrectSafetyReportTasks() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+
+  // Patterns to match for incorrect safety report tasks
+  var incorrectPatterns = [
+    /wipers/i,
+    /brakes/i,
+    /misc\s*comment/i,
+    /defrost/i,
+    /heater/i,
+    /reflectors/i,
+    /warning\s*lights/i,
+    /mirrors/i,
+    /windshield/i,
+    /windows/i,
+    /seat\s*belts/i,
+    /horn\s*-/i,
+    /lights\s*-\s*(no|yes)/i
+  ];
+
+  function matchesIncorrectPattern(text) {
+    if (!text) return false;
+    var str = String(text);
+    for (var p = 0; p < incorrectPatterns.length; p++) {
+      if (incorrectPatterns[p].test(str)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  var totalDeleted = 0;
+  var taskMetaDeleted = 0;
+  var manualTasksDeleted = 0;
+
+  // Clean up Task Metadata sheet
+  var taskMetaSheet = ss.getSheetByName('Task Metadata');
+  if (taskMetaSheet && taskMetaSheet.getLastRow() > 1) {
+    var data = taskMetaSheet.getDataRange().getValues();
+    var headers = data[0];
+
+    // Find column indices
+    var taskTypeCol = -1, currentItemCol = -1, sourceSheetCol = -1;
+    for (var h = 0; h < headers.length; h++) {
+      var header = String(headers[h]).toLowerCase().trim();
+      if (header === 'tasktype') taskTypeCol = h;
+      if (header === 'currentitem') currentItemCol = h;
+      if (header === 'sourcesheet') sourceSheetCol = h;
+    }
+
+    var rowsToDelete = [];
+
+    // Find rows to delete (skip header row)
+    for (var i = 1; i < data.length; i++) {
+      var taskType = String(data[i][taskTypeCol] || '');
+      var currentItem = String(data[i][currentItemCol] || '');
+      var sourceSheet = String(data[i][sourceSheetCol] || '');
+
+      // Check if this looks like an incorrect safety report task
+      if (sourceSheet === 'Manual Tasks') {
+        if (matchesIncorrectPattern(taskType) || matchesIncorrectPattern(currentItem)) {
+          rowsToDelete.push(i + 1); // 1-based row number
+          Logger.log('Task Metadata - will delete row ' + (i + 1) + ': ' + taskType + ' | ' + currentItem);
+        }
+      }
+    }
+
+    // Delete rows from bottom to top
+    rowsToDelete.sort(function(a, b) { return b - a; });
+    for (var r = 0; r < rowsToDelete.length; r++) {
+      taskMetaSheet.deleteRow(rowsToDelete[r]);
+      taskMetaDeleted++;
+    }
+  }
+
+  // Clean up Manual Tasks sheet
+  var manualSheet = ss.getSheetByName('Manual Tasks');
+  if (manualSheet && manualSheet.getLastRow() > 1) {
+    var manualData = manualSheet.getDataRange().getValues();
+    var manualHeaders = manualData[0];
+
+    // Find task type column (column C or "Task Type")
+    var taskTypeColManual = 2; // Default column C
+    for (var mh = 0; mh < manualHeaders.length; mh++) {
+      var mheader = String(manualHeaders[mh]).toLowerCase().trim();
+      if (mheader === 'task' || mheader === 'task type') {
+        taskTypeColManual = mh;
+        break;
+      }
+    }
+
+    var manualRowsToDelete = [];
+
+    for (var mi = 1; mi < manualData.length; mi++) {
+      var mTaskType = String(manualData[mi][taskTypeColManual] || '');
+
+      if (matchesIncorrectPattern(mTaskType)) {
+        manualRowsToDelete.push(mi + 1);
+        Logger.log('Manual Tasks - will delete row ' + (mi + 1) + ': ' + mTaskType);
+      }
+    }
+
+    // Delete rows from bottom to top
+    manualRowsToDelete.sort(function(a, b) { return b - a; });
+    for (var mr = 0; mr < manualRowsToDelete.length; mr++) {
+      manualSheet.deleteRow(manualRowsToDelete[mr]);
+      manualTasksDeleted++;
+    }
+  }
+
+  totalDeleted = taskMetaDeleted + manualTasksDeleted;
+
+  if (totalDeleted === 0) {
+    ui.alert('✅ No Cleanup Needed', 'No incorrect safety report tasks found to clean up.', ui.ButtonSet.OK);
+  } else {
+    ui.alert('✅ Cleanup Complete',
+      'Deleted ' + totalDeleted + ' incorrect task(s):\n\n' +
+      '• Task Metadata: ' + taskMetaDeleted + ' row(s)\n' +
+      '• Manual Tasks: ' + manualTasksDeleted + ' row(s)\n\n' +
+      'These were vehicle maintenance items (Wipers, Brakes, Defrost, etc.) that were incorrectly added as tasks.',
+      ui.ButtonSet.OK);
+  }
+
+  Logger.log('cleanupIncorrectSafetyReportTasks: Deleted ' + totalDeleted + ' rows total');
+}
+
 

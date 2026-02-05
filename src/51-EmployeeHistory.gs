@@ -254,10 +254,26 @@ function logNewEmployeeFromImport(empData) {
  * @param {number} editedRow - Row number that was edited
  * @param {*} newValue - The Last Day value
  */
-function handleLastDayChange(ss, sheet, editedRow, newValue) {
+/**
+ * Handles Last Day Reason changes in the Employees sheet.
+ * Triggered when user selects a reason (Quit, Fired, Layoff, Resigned).
+ *
+ * When Last Day Reason is selected:
+ * 1. Validates that Last Day date is filled in
+ * 2. Shows confirmation popup
+ * 3. Adds "Terminated" entry to Employee History
+ * 4. Removes employee from Employees sheet
+ *
+ * @param {Spreadsheet} ss - The active spreadsheet
+ * @param {Sheet} sheet - The Employees sheet
+ * @param {number} editedRow - Row number that was edited
+ * @param {*} newValue - The Last Day Reason value selected
+ */
+function handleLastDayReasonChange(ss, sheet, editedRow, newValue) {
   if (!newValue || newValue === '') return;
 
   try {
+    var ui = SpreadsheetApp.getUi();
     var empData = sheet.getRange(editedRow, 1, 1, sheet.getLastColumn()).getValues()[0];
     var empHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
 
@@ -288,43 +304,68 @@ function handleLastDayChange(ss, sheet, editedRow, newValue) {
     var empName = empData[nameColIdx] || '';
     var location = locationColIdx !== -1 ? empData[locationColIdx] : '';
     var jobNumber = jobNumberColIdx !== -1 ? empData[jobNumberColIdx] : '';
-    var lastDayReason = lastDayReasonColIdx !== -1 ? empData[lastDayReasonColIdx] : '';
+    var lastDay = lastDayColIdx !== -1 ? empData[lastDayColIdx] : '';
+    var lastDayReason = newValue;
     var hireDate = hireDateColIdx !== -1 ? empData[hireDateColIdx] : '';
     var phoneNumber = phoneNumberColIdx !== -1 ? empData[phoneNumberColIdx] : '';
     var emailAddress = emailAddressColIdx !== -1 ? empData[emailAddressColIdx] : '';
     var gloveSize = gloveSizeColIdx !== -1 ? empData[gloveSizeColIdx] : '';
     var sleeveSize = sleeveSizeColIdx !== -1 ? empData[sleeveSizeColIdx] : '';
 
+    // Validate that Last Day Reason is one of the allowed values
+    var validReasons = ['Quit', 'Fired', 'Layoff', 'Resigned'];
+    if (validReasons.indexOf(lastDayReason) === -1) {
+      // Not a termination reason - ignore (might be clearing the field or invalid value)
+      return;
+    }
+
+    // Validate that Last Day date is filled in
+    if (!lastDay || lastDay === '') {
+      ui.alert(
+        '⚠️ Missing Last Day Date',
+        'Please fill in the "Last Day" date for "' + empName + '" before selecting a reason.\n\n' +
+        'Fill in the "Last Day" column first, then select the reason.',
+        ui.ButtonSet.OK
+      );
+      // Clear the Last Day Reason cell
+      if (lastDayReasonColIdx !== -1) {
+        sheet.getRange(editedRow, lastDayReasonColIdx + 1).setValue('');
+      }
+      return;
+    }
+
     // Show confirmation dialog before proceeding
-    var ui = SpreadsheetApp.getUi();
     var response = ui.alert(
       '⚠️ Confirm Employee Termination',
-      'Move "' + empName + '" to Employee History and remove from Employees sheet?\n\n' +
+      'Remove "' + empName + '" from the Employees sheet?\n\n' +
       'This action will:\n' +
-      '• Add a "Terminated" entry to Employee History\n' +
-      '• Remove the employee from the Employees sheet\n\n' +
+      '• REMOVE the employee from the Employees sheet\n' +
+      '• ADD them to the Employee History sheet as a Previous Employee\n\n' +
+      'Last Day: ' + lastDay + '\n' +
+      'Reason: ' + lastDayReason + '\n\n' +
       'Click YES to proceed or NO to cancel.',
       ui.ButtonSet.YES_NO
     );
 
     if (response !== ui.Button.YES) {
-      // User cancelled - clear the Last Day cell
-      if (lastDayColIdx !== -1) {
-        sheet.getRange(editedRow, lastDayColIdx + 1).setValue('');
+      // User cancelled - clear the Last Day Reason cell
+      if (lastDayReasonColIdx !== -1) {
+        sheet.getRange(editedRow, lastDayReasonColIdx + 1).setValue('');
       }
-      ss.toast('Termination cancelled. Last Day cleared.', '❌ Cancelled', 3);
+      ss.toast('Termination cancelled. Last Day Reason cleared.', '❌ Cancelled', 3);
       return;
     }
 
+    // Format Last Day date
     var lastDayStr = '';
-    if (newValue instanceof Date) {
-      lastDayStr = Utilities.formatDate(newValue, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+    if (lastDay instanceof Date) {
+      lastDayStr = Utilities.formatDate(lastDay, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
     } else {
-      var lastDayDate = new Date(newValue);
+      var lastDayDate = new Date(lastDay);
       if (!isNaN(lastDayDate.getTime())) {
         lastDayStr = Utilities.formatDate(lastDayDate, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
       } else {
-        lastDayStr = String(newValue);
+        lastDayStr = String(lastDay);
       }
     }
 
@@ -352,13 +393,13 @@ function handleLastDayChange(ss, sheet, editedRow, newValue) {
         lastDayStr,                        // Date
         empName,                           // Employee Name
         EMPLOYEE_EVENT_TYPES.TERMINATED,   // Event Type
-        location,                          // Location
-        jobNumber,                         // Job Number
+        'Previous Employee',               // Location (set to Previous Employee)
+        '',                                // Job Number (cleared)
         hireDateStr,                       // Hire Date
         lastDayStr,                        // Last Day
         lastDayReason,                     // Last Day Reason
         '',                                // Rehire Date
-        '',                                // Notes
+        'Previous Location: ' + location + ', Job #: ' + jobNumber,  // Notes
         phoneNumber,                       // Phone Number
         emailAddress,                      // Email Address
         gloveSize,                         // Glove Size
@@ -369,19 +410,26 @@ function handleLastDayChange(ss, sheet, editedRow, newValue) {
       Logger.log('Skipped duplicate Terminated entry for ' + empName);
     }
 
-    if (locationColIdx !== -1) {
-      sheet.getRange(editedRow, locationColIdx + 1).setValue('Previous Employee');
-    }
-
+    // Delete the employee row from Employees sheet
     Utilities.sleep(500);
     sheet.deleteRow(editedRow);
 
     Logger.log('Employee "' + empName + '" terminated and moved to history');
-    ss.toast('Employee "' + empName + '" moved to Employee History.', '✅ Terminated', 5);
+    ss.toast('Employee "' + empName + '" removed from Employees sheet and added to Employee History.', '✅ Terminated', 5);
 
   } catch (e) {
-    Logger.log('[ERROR] handleLastDayChange: ' + e);
+    Logger.log('[ERROR] handleLastDayReasonChange: ' + e);
   }
+}
+
+/**
+ * DEPRECATED: handleLastDayChange - No longer used
+ * Kept for reference. The trigger now fires on Last Day Reason, not Last Day.
+ * See handleLastDayReasonChange() above.
+ */
+function handleLastDayChange(ss, sheet, editedRow, newValue) {
+  // This function is no longer called - trigger moved to Last Day Reason column
+  Logger.log('handleLastDayChange called but deprecated - use handleLastDayReasonChange');
 }
 
 /**
