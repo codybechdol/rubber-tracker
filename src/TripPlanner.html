@@ -2381,7 +2381,13 @@
         officeTasks.forEach(function(task, i) {
           var icon = task.isCertTask ? '📜' : '📋';
           var urgencyLabel = task.urgencyLabel || '';
+
+          // Build task label - for cert tasks, show "Renew [CertType]" instead of "Cert Expiring"
           var taskLabel = task.taskType || 'Office Task';
+          if (task.isCertTask && (task.certType || task.itemType)) {
+            var certName = task.certType || task.itemType;
+            taskLabel = 'Renew ' + certName;
+          }
 
           // Show employee for cert tasks
           var employeeHtml = task.employee ? '<div class="task-employee">👤 ' + task.employee + '</div>' : '';
@@ -2390,8 +2396,12 @@
           var locationHtml = task.location && task.location.toLowerCase() !== 'helena' ?
             '<div class="task-employee">📍 ' + task.location + '</div>' : '';
 
-          // Show due date
-          var dueDateHtml = task.dueDate ? '<div class="task-employee">📅 Due: ' + task.dueDate + '</div>' : '';
+          // Show expiration date for cert tasks, due date for others
+          var dueDateHtml = '';
+          if (task.dueDate) {
+            var dateLabel = task.isCertTask ? 'Expires' : 'Due';
+            dueDateHtml = '<div class="task-employee">📅 ' + dateLabel + ': ' + task.dueDate + '</div>';
+          }
 
           tasksHtml += '<div class="task-popup-item" data-task-index="' + i + '">' +
             '<div class="task-type-icon">' + icon + '</div>' +
