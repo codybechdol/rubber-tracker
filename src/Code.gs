@@ -6786,8 +6786,8 @@ function generateTaskMetadata() {
         sourceSheet,               // B: SourceSheet
         sourceRow,                 // C: SourceRow
         task.employee || '',       // D: Employee
-        task.taskType || '',       // E: TaskType
-        task.itemType || '',       // F: ItemType
+        task.type || task.taskType || '',       // E: TaskType (cert tasks use 'type', others use 'taskType')
+        task.itemType || '',       // F: ItemType (cert name for certs, Glove/Sleeve for swaps)
         task.currentItem || '',    // G: CurrentItem
         location,                  // H: Location
         task.foreman || '',        // I: Foreman
@@ -7158,9 +7158,9 @@ function getTasksWithMetadata() {
       if (metadata) {
         // Merge task with metadata (metadata takes precedence for state fields)
         var enrichedTask = {
-          // Source data
-          taskType: task.type || task.taskType, // Map 'type' to 'taskType' for frontend
-          itemType: task.itemType,
+          // Source data - use task data first, fallback to metadata
+          taskType: task.type || task.taskType || metadata.taskType, // Map 'type' to 'taskType' for frontend
+          itemType: task.itemType || metadata.itemType || '', // Cert name for certs, Glove/Sleeve for swaps
           employee: task.employee,
           location: task.location,
           foreman: task.foreman,
@@ -7207,7 +7207,7 @@ function getTasksWithMetadata() {
         // Include task anyway with basic info
         enrichedTasks.push({
           taskType: task.type || task.taskType, // Map 'type' to 'taskType' for frontend
-          itemType: task.itemType,
+          itemType: task.itemType || '', // Cert name for certs, Glove/Sleeve for swaps
           employee: task.employee,
           location: task.location,
           foreman: task.foreman,
