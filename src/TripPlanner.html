@@ -2379,6 +2379,9 @@
         '</div>';
       } else {
         officeTasks.forEach(function(task, i) {
+          // DEBUG: Log task data to see what's actually there
+          console.log('Office task ' + i + ':', JSON.stringify(task));
+
           var icon = task.isCertTask ? '📜' : '📋';
           var urgencyLabel = task.urgencyLabel || '';
 
@@ -2388,6 +2391,9 @@
             var certName = task.certType || task.itemType;
             taskLabel = 'Renew ' + certName;
           }
+
+          // DEBUG: Log the condition results
+          console.log('  isCertTask:', task.isCertTask, 'certType:', task.certType, 'itemType:', task.itemType, 'taskLabel:', taskLabel);
 
           // Show employee for cert tasks
           var employeeHtml = task.employee ? '<div class="task-employee">👤 ' + task.employee + '</div>' : '';

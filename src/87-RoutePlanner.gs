@@ -591,6 +591,22 @@ function collectTasksForTripPlanner() {
 
   Logger.log('Grouped tasks into ' + Object.keys(tasksByLocation).length + ' locations');
 
+  // Pre-load cert types from Expiring Certs sheet for lookup (cached by row number)
+  var certTypesByRow = {};
+  try {
+    var expiringSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Expiring Certs');
+    if (expiringSheet) {
+      var certData = expiringSheet.getDataRange().getValues();
+      for (var r = 1; r < certData.length; r++) {
+        // Column B (index 1) has cert type
+        certTypesByRow[r + 1] = String(certData[r][1] || '').trim();
+      }
+      Logger.log('Pre-loaded ' + Object.keys(certTypesByRow).length + ' cert types from Expiring Certs');
+    }
+  } catch (e) {
+    Logger.log('Error pre-loading cert types: ' + e);
+  }
+
   var tasks = [];
   var byLocation = {};
   var byDirection = {};
@@ -669,13 +685,24 @@ function collectTasksForTripPlanner() {
           }
         }
 
+        // Get cert type - try multiple sources
+        var certTypeName = sourceTask.itemType || sourceTask.certType || sourceTask.item || '';
+
+        // If still empty, look it up from cached cert types
+        if (!certTypeName && sourceTask.rowIndex && (sourceTask.source === 'Expiring Certs' || sourceTask.sheetName === 'Expiring Certs')) {
+          certTypeName = certTypesByRow[sourceTask.rowIndex] || '';
+          if (certTypeName) {
+            Logger.log('Used cached cert type for row ' + sourceTask.rowIndex + ': ' + certTypeName);
+          }
+        }
+
         officeTasks.push({
           rowIndex: sourceTask.rowIndex || rowCounter++,
           location: locationName,
           taskType: taskType,
           employee: sourceTask.employee || '',
-          certType: sourceTask.itemType || sourceTask.certType || '',
-          itemType: sourceTask.itemType || sourceTask.certType || '',
+          certType: certTypeName,
+          itemType: certTypeName,
           dueDate: certDueDate ? formatDateForDisplay(certDueDate instanceof Date ? certDueDate : new Date(certDueDate)) : null,
           daysTillDue: certDaysTillDue,
           urgency: calculateUrgencyScore(certDaysTillDue),
