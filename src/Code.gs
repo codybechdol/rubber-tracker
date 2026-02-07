@@ -4536,11 +4536,16 @@ function onOpen() {
       .addItem('🚫 Remove Scheduled Email', 'removeEmailTrigger'))
     .addSubMenu(ui.createMenu('📊 Reports')
       .addItem('📝 Daily Accomplishments', 'showTimeBreakdownDialog'))
+    .addSubMenu(ui.createMenu('🛒 Purchase Orders')
+      .addItem('📝 Create Purchase Order', 'showPurchaseOrderDialog')
+      .addItem('📋 Order History', 'openPurchaseOrdersSheet')
+      .addItem('⚙️ Manage Vendors', 'showVendorConfigDialog'))
     .addSubMenu(ui.createMenu('🛡️ Safety Reports')
       .addItem('⚙️ Setup Safety Reports Sheet', 'setupSafetyReportsSheet')
       .addItem('📥 Process Safety Emails', 'showProcessSafetyEmailsDialog')
       .addItem('📋 Create Tasks from Issues', 'createTasksFromSafetyIssues')
       .addItem('📊 View Safety Reports', 'openSafetyReports')
+      .addItem('🎨 Apply Resolved Formatting', 'addResolvedFormattingToSafetyReports')
       .addSeparator()
       .addItem('🔄 Refresh Safety Sheets', 'refreshSafetySheets')
       .addSeparator()
@@ -6003,6 +6008,34 @@ function saveCurrentStateToHistorySilent() {
   saveHistory(true);
 }
 
+/**
+ * Combined Save & Backup function for the Monday Workflow sidebar.
+ * Runs both saveHistory() and createBackupSnapshot() in sequence.
+ * Called from QuickActions sidebar Step 6.
+ */
+function saveAndBackup() {
+  try {
+    // Step 1: Save to history (silent mode to avoid extra popups)
+    saveHistory(true);
+    Logger.log('saveAndBackup: History saved');
+
+    // Step 2: Create backup snapshot
+    createBackupSnapshot();
+    Logger.log('saveAndBackup: Backup snapshot created');
+
+    // Show combined success message
+    SpreadsheetApp.getActiveSpreadsheet().toast(
+      'History saved and backup created successfully!',
+      '✅ Save & Backup Complete',
+      5
+    );
+  } catch (e) {
+    Logger.log('Error in saveAndBackup: ' + e.toString());
+    SpreadsheetApp.getUi().alert('Error during Save & Backup: ' + e.message);
+    throw e;
+  }
+}
+
 // NOTE: formatDateForHistory() is defined later in this file (around line 4826)
 // with better error handling (try-catch). The duplicate version that was here
 // has been removed during the Option B safe cleanup on Jan 15, 2026.
@@ -7156,6 +7189,11 @@ function getTasksWithMetadata() {
       var metadata = metadataLookup[key];
 
       if (metadata) {
+        // DEBUG: Log cert tasks to see if itemType is present
+        if ((task.type || task.taskType || '').toLowerCase().indexOf('cert') !== -1) {
+          Logger.log('CERT DEBUG: key=' + key + ' task.itemType=' + task.itemType + ' metadata.itemType=' + metadata.itemType);
+        }
+
         // Merge task with metadata (metadata takes precedence for state fields)
         var enrichedTask = {
           // Source data - use task data first, fallback to metadata

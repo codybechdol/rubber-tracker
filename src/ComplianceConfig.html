@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    * { box-sizing: border-box; font-family: 'Google Sans', Arial, sans-serif; }
+    body { margin: 0; padding: 20px; background: #f8f9fa; }
+    h2 { margin: 0 0 5px 0; color: #1a73e8; font-size: 20px; }
+    .subtitle { color: #5f6368; font-size: 12px; margin-bottom: 15px; }
+    .loading { text-align: center; padding: 40px; color: #5f6368; }
+    .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #1a73e8; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 0 auto 15px; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+    table { width: 100%; border-collapse: collapse; font-size: 12px; background: white; }
+    th { background: #34A853; color: white; padding: 10px 6px; text-align: center; position: sticky; top: 0; z-index: 10; }
+    th.job { text-align: left; width: 80px; }
+    th.foreman { text-align: left; width: 120px; }
+    th.day { width: 45px; }
+    th.meeting { width: 70px; }
+    th.notes { width: 150px; }
+    td { padding: 8px 6px; text-align: center; border-bottom: 1px solid #e0e0e0; }
+    td.job { text-align: left; font-weight: 600; }
+    td.foreman { text-align: left; color: #5f6368; }
+    td.notes input { width: 100%; border: 1px solid #dadce0; border-radius: 4px; padding: 4px 6px; font-size: 11px; }
+    tr:hover { background: #f5f5f5; }
+
+    input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+
+    .table-container { max-height: 680px; overflow-y: auto; border: 1px solid #dadce0; border-radius: 8px; }
+
+    .button-bar { margin-top: 15px; display: flex; gap: 10px; justify-content: flex-end; }
+    button { padding: 10px 20px; border-radius: 6px; font-size: 14px; cursor: pointer; border: none; }
+    button.primary { background: #1a73e8; color: white; }
+    button.primary:hover { background: #1557b0; }
+    button.secondary { background: #f1f3f4; color: #5f6368; border: 1px solid #dadce0; }
+    button.secondary:hover { background: #e8eaed; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .status { padding: 10px; border-radius: 6px; margin-top: 10px; display: none; }
+    .status.show { display: block; }
+    .status.success { background: #d4edda; color: #155724; }
+    .status.error { background: #f8d7da; color: #721c24; }
+
+    .legend { font-size: 11px; color: #5f6368; margin-top: 10px; }
+    .legend span { margin-right: 15px; }
+  </style>
+</head>
+<body>
+  <h2>🛡️ Safety Compliance Config</h2>
+  <div class="subtitle">Configure which days/meetings to skip for each crew</div>
+
+  <div id="loading" class="loading">
+    <div class="spinner"></div>
+    Loading crew configuration...
+  </div>
+
+  <div id="content" style="display: none;">
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th class="job">Crew</th>
+            <th class="foreman">Foreman</th>
+            <th class="day">Sun</th>
+            <th class="day">Mon</th>
+            <th class="day">Tue</th>
+            <th class="day">Wed</th>
+            <th class="day">Thu</th>
+            <th class="day">Fri</th>
+            <th class="day">Sat</th>
+            <th class="meeting">Weekly Mtg</th>
+            <th class="meeting">Monthly</th>
+            <th class="notes">Notes</th>
+          </tr>
+        </thead>
+        <tbody id="crewTableBody">
+        </tbody>
+      </table>
+    </div>
+
+    <div class="legend">
+      <span>✓ Checked = Skip (no JHA required)</span>
+      <span>☐ Unchecked = Required</span>
+    </div>
+
+    <div class="button-bar">
+      <button class="secondary" onclick="google.script.host.close()">Cancel</button>
+      <button class="primary" id="saveBtn" onclick="saveConfig()">💾 Save Changes</button>
+    </div>
+
+    <div id="status" class="status"></div>
+  </div>
+
+  <script>
+    var crewData = [];
+
+    // Load config on page load
+    google.script.run
+      .withSuccessHandler(function(data) {
+        crewData = data || [];
+        renderTable();
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('content').style.display = 'block';
+      })
+      .withFailureHandler(function(e) {
+        document.getElementById('loading').innerHTML =
+          '<div style="color: #c5221f;">Error loading config: ' + e + '</div>';
+      })
+      .getComplianceConfigData();
+
+    function renderTable() {
+      var tbody = document.getElementById('crewTableBody');
+      tbody.innerHTML = '';
+
+      for (var i = 0; i < crewData.length; i++) {
+        var crew = crewData[i];
+        var row = document.createElement('tr');
+        row.setAttribute('data-index', i);
+
+        row.innerHTML =
+          '<td class="job">' + escapeHtml(crew.jobNumber) + '</td>' +
+          '<td class="foreman">' + escapeHtml(crew.foreman || '') + '</td>' +
+          '<td><input type="checkbox" data-field="skipSun" ' + (crew.skipSun ? 'checked' : '') + '></td>' +
+          '<td><input type="checkbox" data-field="skipMon" ' + (crew.skipMon ? 'checked' : '') + '></td>' +
+          '<td><input type="checkbox" data-field="skipTue" ' + (crew.skipTue ? 'checked' : '') + '></td>' +
+          '<td><input type="checkbox" data-field="skipWed" ' + (crew.skipWed ? 'checked' : '') + '></td>' +
+          '<td><input type="checkbox" data-field="skipThu" ' + (crew.skipThu ? 'checked' : '') + '></td>' +
+          '<td><input type="checkbox" data-field="skipFri" ' + (crew.skipFri ? 'checked' : '') + '></td>' +
+          '<td><input type="checkbox" data-field="skipSat" ' + (crew.skipSat ? 'checked' : '') + '></td>' +
+          '<td><input type="checkbox" data-field="skipWeeklyMeeting" ' + (crew.skipWeeklyMeeting ? 'checked' : '') + '></td>' +
+          '<td><input type="checkbox" data-field="skipMonthlyChecklist" ' + (crew.skipMonthlyChecklist ? 'checked' : '') + '></td>' +
+          '<td class="notes"><input type="text" data-field="notes" value="' + escapeHtml(crew.notes || '') + '"></td>';
+
+        tbody.appendChild(row);
+      }
+    }
+
+    function escapeHtml(text) {
+      var div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function collectData() {
+      var rows = document.querySelectorAll('#crewTableBody tr');
+      var result = [];
+
+      rows.forEach(function(row, i) {
+        var crew = crewData[i];
+        result.push({
+          jobNumber: crew.jobNumber,
+          foreman: crew.foreman,
+          skipSun: row.querySelector('[data-field="skipSun"]').checked,
+          skipMon: row.querySelector('[data-field="skipMon"]').checked,
+          skipTue: row.querySelector('[data-field="skipTue"]').checked,
+          skipWed: row.querySelector('[data-field="skipWed"]').checked,
+          skipThu: row.querySelector('[data-field="skipThu"]').checked,
+          skipFri: row.querySelector('[data-field="skipFri"]').checked,
+          skipSat: row.querySelector('[data-field="skipSat"]').checked,
+          skipWeeklyMeeting: row.querySelector('[data-field="skipWeeklyMeeting"]').checked,
+          skipMonthlyChecklist: row.querySelector('[data-field="skipMonthlyChecklist"]').checked,
+          notes: row.querySelector('[data-field="notes"]').value
+        });
+      });
+
+      return result;
+    }
+
+    function saveConfig() {
+      var btn = document.getElementById('saveBtn');
+      btn.disabled = true;
+      btn.textContent = 'Saving...';
+      showStatus('Saving changes...', '');
+
+      var data = collectData();
+
+      google.script.run
+        .withSuccessHandler(function() {
+          btn.disabled = false;
+          btn.textContent = '💾 Save Changes';
+          showStatus('✅ Configuration saved successfully!', 'success');
+          setTimeout(function() { google.script.host.close(); }, 1500);
+        })
+        .withFailureHandler(function(e) {
+          btn.disabled = false;
+          btn.textContent = '💾 Save Changes';
+          showStatus('Error saving: ' + e, 'error');
+        })
+        .saveComplianceConfigData(data);
+    }
+
+    function showStatus(msg, type) {
+      var status = document.getElementById('status');
+      status.textContent = msg;
+      status.className = 'status show' + (type ? ' ' + type : '');
+    }
+  </script>
+</body>
+</html>

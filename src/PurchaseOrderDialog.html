@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    * { box-sizing: border-box; font-family: 'Google Sans', Arial, sans-serif; }
+    body { margin: 0; padding: 20px; background: #f8f9fa; }
+    h2 { margin: 0 0 5px 0; color: #1a73e8; font-size: 20px; }
+    .subtitle { color: #5f6368; font-size: 12px; margin-bottom: 15px; }
+    .loading { text-align: center; padding: 40px; color: #5f6368; }
+    .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #1a73e8; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 0 auto 15px; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+    .po-header { display: flex; align-items: center; gap: 20px; margin-bottom: 15px; padding: 12px 15px; background: white; border-radius: 8px; border: 1px solid #dadce0; }
+    .po-number { font-size: 18px; font-weight: 600; color: #1a73e8; }
+    .po-number span { background: #e8f0fe; padding: 4px 12px; border-radius: 4px; }
+
+    .form-row { display: flex; gap: 15px; margin-bottom: 15px; }
+    .form-group { flex: 1; }
+    .form-group label { display: block; font-weight: 600; margin-bottom: 5px; font-size: 13px; color: #333; }
+    .form-group select, .form-group input, .form-group textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+    .form-group select:focus, .form-group input:focus, .form-group textarea:focus {
+      border-color: #1a73e8;
+      outline: none;
+    }
+    .form-group textarea { resize: vertical; min-height: 60px; }
+
+    .vendor-info { font-size: 11px; color: #5f6368; margin-top: 4px; }
+
+    .table-container { max-height: 280px; overflow-y: auto; border: 1px solid #dadce0; border-radius: 8px; background: white; margin-bottom: 15px; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { background: #34A853; color: white; padding: 10px 8px; text-align: center; position: sticky; top: 0; z-index: 10; }
+    th.check { width: 40px; }
+    th.qty { width: 60px; }
+    th.item { text-align: left; }
+    th.price { width: 90px; }
+    th.total { width: 90px; }
+
+    td { padding: 8px; text-align: center; border-bottom: 1px solid #e0e0e0; }
+    td.item { text-align: left; }
+    td input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; }
+    td input[type="number"] { width: 50px; padding: 4px; text-align: center; border: 1px solid #dadce0; border-radius: 4px; }
+    tr:hover { background: #f5f5f5; }
+    tr.selected { background: #e8f5e9; }
+    tr.disabled { opacity: 0.5; }
+    tr.category-header:hover { background: inherit; }
+    tr.category-header td { border-bottom: none; }
+
+    .totals-row { display: flex; justify-content: flex-end; gap: 20px; padding: 10px 15px; background: #e8f5e9; border-radius: 6px; margin-bottom: 15px; }
+    .totals-row .total-item { font-size: 14px; }
+    .totals-row .total-item strong { color: #1a73e8; }
+
+    .po-text-section { margin-bottom: 15px; }
+    .po-text-section label { display: block; font-weight: 600; margin-bottom: 5px; font-size: 13px; }
+    .po-text-section textarea {
+      width: 100%;
+      height: 180px;
+      padding: 12px;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 12px;
+      background: #fff;
+      resize: vertical;
+    }
+
+    .button-bar { display: flex; gap: 10px; justify-content: space-between; }
+    .button-bar .left { display: flex; gap: 10px; }
+    .button-bar .right { display: flex; gap: 10px; }
+
+    button { padding: 10px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; border: none; }
+    button.primary { background: #1a73e8; color: white; }
+    button.primary:hover { background: #1557b0; }
+    button.success { background: #34A853; color: white; }
+    button.success:hover { background: #2d8f47; }
+    button.secondary { background: #f1f3f4; color: #5f6368; border: 1px solid #dadce0; }
+    button.secondary:hover { background: #e8eaed; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .status { padding: 10px; border-radius: 6px; margin-top: 10px; display: none; }
+    .status.show { display: block; }
+    .status.success { background: #d4edda; color: #155724; }
+    .status.error { background: #f8d7da; color: #721c24; }
+    .status.info { background: #e3f2fd; color: #0d47a1; }
+
+    .empty-state { text-align: center; padding: 30px; color: #5f6368; background: white; border-radius: 8px; border: 1px solid #dadce0; }
+    .empty-state p { margin: 10px 0; }
+
+    .no-vendors-warning { background: #fff3cd; border: 1px solid #ffc107; color: #856404; padding: 12px; border-radius: 6px; margin-bottom: 15px; }
+    .no-vendors-warning a { color: #0d6efd; cursor: pointer; text-decoration: underline; }
+
+    .copy-success { position: fixed; top: 20px; right: 20px; background: #34A853; color: white; padding: 12px 20px; border-radius: 6px; display: none; z-index: 1000; animation: fadeIn 0.3s; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</head>
+<body>
+  <h2>🛒 Create Purchase Order</h2>
+  <div class="subtitle">Select items to order and generate PO text for email</div>
+
+  <div id="loading" class="loading">
+    <div class="spinner"></div>
+    Loading purchase order data...
+  </div>
+
+  <div id="copySuccess" class="copy-success">📋 Copied to clipboard!</div>
+
+  <div id="content" style="display: none;">
+    <!-- PO Number Header -->
+    <div class="po-header">
+      <div class="po-number">PO #: <span id="poNumber">002-26</span></div>
+    </div>
+
+    <!-- No Vendors Warning -->
+    <div id="noVendorsWarning" class="no-vendors-warning" style="display: none;">
+      ⚠️ No vendors configured. <a onclick="openVendorConfig()">Click here to add vendors</a> with pricing information.
+    </div>
+
+    <!-- Vendor & Delivery Row -->
+    <div class="form-row">
+      <div class="form-group">
+        <label>Vendor</label>
+        <select id="vendorSelect" onchange="onVendorChange()">
+          <option value="">Select a vendor...</option>
+        </select>
+        <div id="vendorInfo" class="vendor-info"></div>
+      </div>
+      <div class="form-group" style="max-width: 180px;">
+        <label>Expected Delivery</label>
+        <input type="date" id="expectedDelivery">
+      </div>
+    </div>
+
+    <!-- Items Table -->
+    <div id="itemsContainer">
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th class="check">☑️</th>
+              <th class="qty">Qty</th>
+              <th class="item">Item</th>
+              <th style="width: 100px;">Timeframe</th>
+              <th class="price">Price</th>
+              <th class="total">Total</th>
+            </tr>
+          </thead>
+          <tbody id="itemsTableBody">
+          </tbody>
+        </table>
+      </div>
+
+      <div id="emptyItems" class="empty-state" style="display: none;">
+        <p>✅ No items currently need ordering!</p>
+        <p>Run "Update Purchase Needs" to refresh the list.</p>
+      </div>
+    </div>
+
+    <!-- Totals -->
+    <div id="totalsRow" class="totals-row">
+      <div class="total-item">Selected: <strong id="selectedCount">0</strong> items</div>
+      <div class="total-item">Total Qty: <strong id="totalQty">0</strong></div>
+      <div class="total-item">Est. Total: <strong id="totalPrice">$0.00</strong></div>
+    </div>
+
+    <!-- Notes -->
+    <div class="form-group">
+      <label>Notes (optional)</label>
+      <textarea id="notes" placeholder="Any additional notes for this order..."></textarea>
+    </div>
+
+    <!-- Generated PO Text -->
+    <div id="poTextSection" class="po-text-section" style="display: none;">
+      <label>📧 PO Text (copy and paste into email)</label>
+      <textarea id="poText" readonly></textarea>
+    </div>
+
+    <!-- Buttons -->
+    <div class="button-bar">
+      <div class="left">
+        <button class="primary" onclick="generatePOText()">📝 Generate PO Text</button>
+        <button class="secondary" id="copyBtn" onclick="copyToClipboard()" style="display: none;">📋 Copy</button>
+        <button class="success" id="sendEmailBtn" onclick="sendEmail()" style="display: none;">📧 Send Email</button>
+      </div>
+      <div class="right">
+        <button class="secondary" onclick="google.script.host.close()">Cancel</button>
+        <button class="success" id="orderBtn" onclick="markAsOrdered()">✅ Mark as Ordered</button>
+      </div>
+    </div>
+
+    <div id="status" class="status"></div>
+  </div>
+
+  <script>
+    var vendors = [];
+    var items = [];
+    var poNumber = '';
+    var selectedVendor = null;
+
+    // Load data on page load
+    google.script.run
+      .withSuccessHandler(function(data) {
+        vendors = data.vendors || [];
+        items = data.itemsToOrder || [];
+        poNumber = data.poNumber || '002-26';
+
+        document.getElementById('poNumber').textContent = poNumber;
+
+        populateVendorDropdown();
+        renderItemsTable();
+        updateTotals();
+
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('content').style.display = 'block';
+
+        if (vendors.length === 0) {
+          document.getElementById('noVendorsWarning').style.display = 'block';
+        }
+      })
+      .withFailureHandler(function(e) {
+        document.getElementById('loading').innerHTML =
+          '<div style="color: #c5221f;">Error loading data: ' + e + '</div>';
+      })
+      .getPurchaseOrderDialogData();
+
+    function populateVendorDropdown() {
+      var select = document.getElementById('vendorSelect');
+      select.innerHTML = '<option value="">Select a vendor...</option>';
+
+      for (var i = 0; i < vendors.length; i++) {
+        var opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = vendors[i].vendorName;
+        select.appendChild(opt);
+      }
+    }
+
+    function onVendorChange() {
+      var select = document.getElementById('vendorSelect');
+      var index = parseInt(select.value);
+
+      if (isNaN(index) || index < 0) {
+        selectedVendor = null;
+        document.getElementById('vendorInfo').textContent = '';
+        updateItemPrices();
+        return;
+      }
+
+      selectedVendor = vendors[index];
+
+      // Show vendor contact info
+      var info = [];
+      if (selectedVendor.contactName) info.push(selectedVendor.contactName);
+      if (selectedVendor.email) info.push(selectedVendor.email);
+      if (selectedVendor.phone) info.push(selectedVendor.phone);
+      document.getElementById('vendorInfo').textContent = info.join(' • ');
+
+      updateItemPrices();
+    }
+
+    function updateItemPrices() {
+      for (var i = 0; i < items.length; i++) {
+        var item = items[i];
+        var price = getItemPrice(item);
+        item.price = price;
+
+        var priceCell = document.querySelector('[data-index="' + i + '"] .price-cell');
+        if (priceCell) {
+          priceCell.textContent = price > 0 ? '$' + price.toFixed(2) : '-';
+        }
+        updateRowTotal(i);
+      }
+      updateTotals();
+    }
+
+    function getItemPrice(item) {
+      if (!selectedVendor) return 0;
+
+      var key = 'class' + item.classNum + (item.itemType === 'Glove' ? 'GlovePrice' : 'SleevePrice');
+      return parseFloat(selectedVendor[key]) || 0;
+    }
+
+    function renderItemsTable() {
+      var tbody = document.getElementById('itemsTableBody');
+      tbody.innerHTML = '';
+
+      if (items.length === 0) {
+        document.querySelector('.table-container').style.display = 'none';
+        document.getElementById('emptyItems').style.display = 'block';
+        document.getElementById('totalsRow').style.display = 'none';
+        document.getElementById('orderBtn').style.display = 'none';
+        return;
+      }
+
+      // Group items by category
+      var categories = {};
+      for (var i = 0; i < items.length; i++) {
+        var cat = items[i].category || 'Unknown';
+        if (!categories[cat]) categories[cat] = [];
+        categories[cat].push({ item: items[i], index: i });
+      }
+
+      // Category styling
+      var categoryStyles = {
+        'NEED TO ORDER': { bg: '#ffcdd2', color: '#b71c1c', badge: '🛒', selected: true },
+        'READY FOR DELIVERY (SIZE UP)': { bg: '#b2dfdb', color: '#00695c', badge: '📦⚠️', selected: false },
+        'IN TESTING': { bg: '#fff9c4', color: '#f57f17', badge: '⏳', selected: false },
+        'IN TESTING (SIZE UP)': { bg: '#e1bee7', color: '#6a1b9a', badge: '⏳⚠️', selected: false },
+        'SIZE UP ASSIGNMENTS': { bg: '#ffe0b2', color: '#e65100', badge: '⚠️', selected: false }
+      };
+
+      for (var cat in categories) {
+        var style = categoryStyles[cat] || { bg: '#e0e0e0', color: '#333', badge: '', selected: false };
+        var catItems = categories[cat];
+
+        // Add category header row
+        var headerRow = document.createElement('tr');
+        headerRow.className = 'category-header';
+        headerRow.innerHTML = '<td colspan="6" style="background: ' + style.bg + '; color: ' + style.color + '; font-weight: bold; text-align: left; padding: 8px 12px;">' +
+          style.badge + ' ' + cat + ' (' + catItems.length + ' items)</td>';
+        tbody.appendChild(headerRow);
+
+        for (var j = 0; j < catItems.length; j++) {
+          var item = catItems[j].item;
+          var idx = catItems[j].index;
+
+          // Default selection based on category
+          if (item.selected === undefined) {
+            item.selected = style.selected;
+          }
+
+          var price = getItemPrice(item);
+          item.price = price;
+
+          var row = document.createElement('tr');
+          row.setAttribute('data-index', idx);
+          row.className = item.selected ? 'selected' : '';
+
+          var itemDesc = 'Class ' + item.classNum + ' ' + item.itemType + ', Size ' + item.size;
+          if (item.isSizeUp) {
+            itemDesc += ' <span style="color: #ff9800; font-size: 10px;">(SIZE UP)</span>';
+          }
+          var totalVal = price * item.quantity;
+
+          // Timeframe badge styling
+          var timeframeBadge = '';
+          if (item.timeframe === 'Immediate') {
+            timeframeBadge = '<span style="background: #ef5350; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">Immediate</span>';
+          } else if (item.timeframe === 'In 2 Weeks') {
+            timeframeBadge = '<span style="background: #66bb6a; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">In 2 Weeks</span>';
+          } else if (item.timeframe === 'In 3 Weeks') {
+            timeframeBadge = '<span style="background: #ffa726; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">In 3 Weeks</span>';
+          } else if (item.timeframe === 'Consider') {
+            timeframeBadge = '<span style="background: #bdbdbd; color: #333; padding: 2px 6px; border-radius: 3px; font-size: 10px;">Consider</span>';
+          } else {
+            timeframeBadge = '<span style="color: #999; font-size: 10px;">' + (item.timeframe || '-') + '</span>';
+          }
+
+          var checkedAttr = item.selected ? 'checked' : '';
+          row.innerHTML =
+            '<td><input type="checkbox" ' + checkedAttr + ' onchange="toggleItem(' + idx + ')"></td>' +
+            '<td><input type="number" min="1" value="' + item.quantity + '" onchange="updateQty(' + idx + ', this.value)"></td>' +
+            '<td class="item">' + itemDesc + '</td>' +
+            '<td style="text-align: center;">' + timeframeBadge + '</td>' +
+            '<td class="price-cell">' + (price > 0 ? '$' + price.toFixed(2) : '-') + '</td>' +
+            '<td class="total-cell">' + (totalVal > 0 ? '$' + totalVal.toFixed(2) : '-') + '</td>';
+
+          tbody.appendChild(row);
+        }
+      }
+    }
+
+    function escapeHtml(text) {
+      var div = document.createElement('div');
+      div.textContent = text || '';
+      return div.innerHTML;
+    }
+
+    function toggleItem(index) {
+      items[index].selected = !items[index].selected;
+      var row = document.querySelector('[data-index="' + index + '"]');
+      row.className = items[index].selected ? 'selected' : '';
+      updateTotals();
+    }
+
+    function updateQty(index, value) {
+      var qty = parseInt(value) || 1;
+      if (qty < 1) qty = 1;
+      items[index].quantity = qty;
+      updateRowTotal(index);
+      updateTotals();
+    }
+
+    function updateRowTotal(index) {
+      var item = items[index];
+      var total = (item.price || 0) * item.quantity;
+      var totalCell = document.querySelector('[data-index="' + index + '"] .total-cell');
+      if (totalCell) {
+        totalCell.textContent = total > 0 ? '$' + total.toFixed(2) : '-';
+      }
+    }
+
+    function updateTotals() {
+      var selectedCount = 0;
+      var totalQty = 0;
+      var totalPrice = 0;
+
+      for (var i = 0; i < items.length; i++) {
+        if (items[i].selected) {
+          selectedCount++;
+          totalQty += items[i].quantity;
+          totalPrice += (items[i].price || 0) * items[i].quantity;
+        }
+      }
+
+      document.getElementById('selectedCount').textContent = selectedCount;
+      document.getElementById('totalQty').textContent = totalQty;
+      document.getElementById('totalPrice').textContent = '$' + totalPrice.toFixed(2);
+    }
+
+    function getSelectedItems() {
+      return items.filter(function(item) { return item.selected; });
+    }
+
+    function generatePOText() {
+      var selectedItems = getSelectedItems();
+
+      if (selectedItems.length === 0) {
+        showStatus('Please select at least one item.', 'error');
+        return;
+      }
+
+      var expectedDelivery = document.getElementById('expectedDelivery').value;
+      var deliveryStr = '???';
+      if (expectedDelivery) {
+        var d = new Date(expectedDelivery + 'T00:00:00');
+        deliveryStr = (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
+      }
+
+      var notes = document.getElementById('notes').value.trim();
+
+      // Build PO text
+      var lines = [];
+      lines.push('I need to Order the following:');
+      lines.push('');
+
+      for (var i = 0; i < selectedItems.length; i++) {
+        var item = selectedItems[i];
+        var line = '- (' + item.quantity + ') Class ' + item.classNum + ' ' + item.itemType + ', Size ' + item.size;
+        if (item.price && item.price > 0) {
+          line += ' @ $' + parseFloat(item.price).toFixed(2);
+        }
+        lines.push(line);
+      }
+
+      lines.push('');
+      lines.push('Are these prices still correct?');
+      lines.push('');
+      lines.push('Expected Delivery: ' + deliveryStr);
+
+      if (notes) {
+        lines.push('');
+        lines.push('Notes: ' + notes);
+      }
+
+      var poText = lines.join('\n');
+      document.getElementById('poText').value = poText;
+      document.getElementById('poTextSection').style.display = 'block';
+      document.getElementById('copyBtn').style.display = 'inline-block';
+
+      // Show send email button only if vendor has email
+      if (selectedVendor && selectedVendor.email) {
+        document.getElementById('sendEmailBtn').style.display = 'inline-block';
+      } else {
+        document.getElementById('sendEmailBtn').style.display = 'none';
+      }
+
+      showStatus('PO text generated! Copy to clipboard or send email directly.', 'info');
+    }
+
+    function copyToClipboard() {
+      var textarea = document.getElementById('poText');
+      textarea.select();
+      textarea.setSelectionRange(0, 99999); // For mobile
+
+      try {
+        document.execCommand('copy');
+        var copySuccess = document.getElementById('copySuccess');
+        copySuccess.style.display = 'block';
+        setTimeout(function() {
+          copySuccess.style.display = 'none';
+        }, 2000);
+      } catch (e) {
+        showStatus('Failed to copy. Please select and copy manually.', 'error');
+      }
+    }
+
+    function markAsOrdered() {
+      var selectedItems = getSelectedItems();
+
+      if (selectedItems.length === 0) {
+        showStatus('Please select at least one item.', 'error');
+        return;
+      }
+
+      var vendorSelect = document.getElementById('vendorSelect');
+      var vendorName = '';
+      if (vendorSelect.value !== '' && selectedVendor) {
+        vendorName = selectedVendor.vendorName;
+      }
+
+      var expectedDelivery = document.getElementById('expectedDelivery').value;
+      var deliveryStr = '';
+      if (expectedDelivery) {
+        var d = new Date(expectedDelivery + 'T00:00:00');
+        deliveryStr = (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
+      }
+
+      var notes = document.getElementById('notes').value.trim();
+
+      var orderData = {
+        items: selectedItems.map(function(item) {
+          return {
+            itemType: item.itemType,
+            size: item.size,
+            classNum: item.classNum,
+            quantity: item.quantity,
+            price: item.price || 0
+          };
+        }),
+        vendor: vendorName,
+        expectedDelivery: deliveryStr,
+        notes: notes
+      };
+
+      var btn = document.getElementById('orderBtn');
+      btn.disabled = true;
+      btn.textContent = 'Processing...';
+      showStatus('Logging order and updating Purchase Needs...', '');
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          btn.disabled = false;
+          btn.textContent = '✅ Mark as Ordered';
+
+          if (result.success) {
+            showStatus('✅ ' + result.message, 'success');
+            setTimeout(function() { google.script.host.close(); }, 2000);
+          } else {
+            showStatus('Error: ' + result.message, 'error');
+          }
+        })
+        .withFailureHandler(function(e) {
+          btn.disabled = false;
+          btn.textContent = '✅ Mark as Ordered';
+          showStatus('Error: ' + e, 'error');
+        })
+        .processPurchaseOrder(orderData);
+    }
+
+    function openVendorConfig() {
+      google.script.run.showVendorConfigDialog();
+      google.script.host.close();
+    }
+
+    function sendEmail() {
+      if (!selectedVendor || !selectedVendor.email) {
+        showStatus('No vendor email address. Please select a vendor with an email.', 'error');
+        return;
+      }
+
+      var poText = document.getElementById('poText').value;
+      if (!poText) {
+        showStatus('Please generate PO text first.', 'error');
+        return;
+      }
+
+      var selectedItems = getSelectedItems();
+      if (selectedItems.length === 0) {
+        showStatus('Please select at least one item.', 'error');
+        return;
+      }
+
+      // Build order data for logging
+      var expectedDelivery = document.getElementById('expectedDelivery').value;
+      var deliveryStr = '';
+      if (expectedDelivery) {
+        var d = new Date(expectedDelivery + 'T00:00:00');
+        deliveryStr = (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
+      }
+      var notes = document.getElementById('notes').value.trim();
+
+      var orderData = {
+        items: selectedItems.map(function(item) {
+          return {
+            itemType: item.itemType,
+            size: item.size,
+            classNum: item.classNum,
+            quantity: item.quantity,
+            price: item.price || 0
+          };
+        }),
+        vendor: selectedVendor.vendorName,
+        expectedDelivery: deliveryStr,
+        notes: notes
+      };
+
+      var emailData = {
+        vendorEmail: selectedVendor.email,
+        subject: 'Purchase Order ' + poNumber + ' - ' + selectedVendor.vendorName,
+        body: poText,
+        orderData: orderData
+      };
+
+      // Confirm before sending
+      var confirmMsg = 'Send this purchase order to:\n\n' +
+        selectedVendor.vendorName + '\n' +
+        selectedVendor.email + '\n\n' +
+        'Items: ' + selectedItems.length + '\n\n' +
+        'This will also log the order and mark items as ordered.';
+
+      if (!confirm(confirmMsg)) {
+        return;
+      }
+
+      var btn = document.getElementById('sendEmailBtn');
+      btn.disabled = true;
+      btn.textContent = 'Sending...';
+      showStatus('Sending email to ' + selectedVendor.email + '...', '');
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          btn.disabled = false;
+          btn.textContent = '📧 Send Email';
+
+          if (result.success) {
+            showStatus('✅ ' + result.message, 'success');
+            setTimeout(function() { google.script.host.close(); }, 2500);
+          } else {
+            showStatus('Error: ' + result.message, 'error');
+          }
+        })
+        .withFailureHandler(function(e) {
+          btn.disabled = false;
+          btn.textContent = '📧 Send Email';
+          showStatus('Error: ' + e, 'error');
+        })
+        .sendPurchaseOrderEmail(emailData);
+    }
+
+    function showStatus(msg, type) {
+      var status = document.getElementById('status');
+      status.textContent = msg;
+      status.className = 'status show' + (type ? ' ' + type : '');
+    }
+  </script>
+</body>
+</html>

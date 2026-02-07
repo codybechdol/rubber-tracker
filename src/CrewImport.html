@@ -652,6 +652,47 @@
       return window.parsedCellStyles && window.parsedCellStyles[row + ',' + col] && window.parsedCellStyles[row + ',' + col].greyed;
     }
 
+    /**
+     * Extracts schedule type from crew header text.
+     * @param {string} headerText - The full crew header text (e.g., "Belgrade Dock 013-26 5 8's M-F")
+     * @returns {Object} { type: 'Primary'|'Secondary'|'Split'|'', label: 'M-Th'|'M-F'|'Fri-Sat'|etc, badgeColor: 'bg-success'|etc }
+     */
+    function getScheduleTypeFromHeader(headerText) {
+      if (!headerText) return { type: '', label: '', badgeColor: 'bg-secondary' };
+
+      var text = headerText.toString();
+
+      // M-Th or M-T schedule is primary
+      if (text.match(/M-Th|M-T\b|Mon-Thu|Monday.*Thursday/i)) {
+        return { type: 'Primary', label: 'M-Th', badgeColor: 'bg-success' };
+      }
+      // M-F schedule is also primary
+      if (text.match(/M-F|Mon-Fri|Monday.*Friday/i)) {
+        return { type: 'Primary', label: 'M-F', badgeColor: 'bg-success' };
+      }
+      // Fri & Sat is secondary
+      if (text.match(/Fri\s*&\s*Sat|Fri.*Sat|Friday.*Saturday/i)) {
+        return { type: 'Secondary', label: 'Fri-Sat', badgeColor: 'bg-warning text-dark' };
+      }
+      // Weekend work is secondary
+      if (text.match(/Sat\s*&\s*Sun|weekend|Saturday.*Sunday/i)) {
+        return { type: 'Secondary', label: 'Weekend', badgeColor: 'bg-warning text-dark' };
+      }
+      // Partial week patterns
+      if (text.match(/Mon-Wed|Monday.*Wednesday/i)) {
+        return { type: 'Split', label: 'Mon-Wed', badgeColor: 'bg-info' };
+      }
+      if (text.match(/Thu-Fri|Thursday.*Friday/i)) {
+        return { type: 'Split', label: 'Thu-Fri', badgeColor: 'bg-info' };
+      }
+      // Standard workweek patterns (4 10's, 5 8's) without weekend mention
+      if (text.match(/[45]\s*(10|8)'?s/i) && !text.match(/Fri\s*&\s*Sat|Sat\s*&\s*Sun|weekend/i)) {
+        return { type: 'Primary', label: 'Standard', badgeColor: 'bg-success' };
+      }
+
+      return { type: '', label: '', badgeColor: 'bg-secondary' };
+    }
+
     function parseCrewCards(data) {
       parsedCrews = [];
       unknownLocations = [];
@@ -754,13 +795,24 @@
           if (cell.match(/schedule|Released|layoff|weeks? work/i)) continue;
           if (cell.match(/^\d+\s*10\/\d+\s*10\s+schedule/i)) continue; // "4 10/5 10 schedule..."
 
+          // Break on section markers (these indicate a new section/job, not an employee)
+          if (cell.match(/\b(Dock|Sub|Trans)\b/i) && cell.match(/\b(City|Three|Rattlesnake|Ennis|Lone|Alkali)\b/i)) {
+            console.log('  Breaking at section marker: ' + cell);
+            break;
+          }
+          // Break on "Starts in" type entries (future assignments)
+          if (cell.match(/^Starts\s+in\s+/i)) {
+            console.log('  Breaking at future assignment marker: ' + cell);
+            break;
+          }
+
           // Check if this looks like an employee name
           if (isEmployeeName(cell)) {
             var empInfo = parseEmployeeName(cell);
             empInfo.sourceRow = r;
             empInfo.sourceCol = header.col;
             employees.push(empInfo);
-            console.log('  Employee: ' + empInfo.name + ' (' + empInfo.role + ')');
+            console.log('  Employee: ' + empInfo.name + ' (' + empInfo.role + ') from cell: "' + cell + '"');
           }
         }
 
@@ -772,11 +824,19 @@
           unknownLocations.push(header.locationName);
         }
 
-        // Assign position numbers to employees
+        // Sort employees by classification hierarchy before assigning positions
+        employees.sort(function(a, b) {
+          return getRolePriority(a.role) - getRolePriority(b.role);
+        });
+
+        // Assign position numbers to employees (now in correct order)
         for (var e = 0; e < employees.length; e++) {
           employees[e].position = e + 1;
           employees[e].fullJobNumber = header.jobNumber + '.' + (e + 1);
         }
+
+        // Get schedule type from the crew header
+        var scheduleInfo = getScheduleTypeFromHeader(header.fullText);
 
         parsedCrews.push({
           originalLocation: header.locationName,
@@ -785,7 +845,11 @@
           employees: employees,
           headerRow: header.row,
           headerCol: header.col,
-          isUnknownLocation: isUnknown
+          isUnknownLocation: isUnknown,
+          fullHeaderText: header.fullText,
+          scheduleType: scheduleInfo.type,       // 'Primary', 'Secondary', 'Split', or ''
+          scheduleLabel: scheduleInfo.label,     // 'M-Th', 'M-F', 'Fri-Sat', etc.
+          scheduleBadgeColor: scheduleInfo.badgeColor  // CSS class for badge
         });
       }
 
@@ -1051,6 +1115,10 @@
       if (text.match(/^\d/)) return false; // Starts with number
       if (text.match(/^(NWE|Aprox|Tentative|Completed|On Hold|BID)/i)) return false;
       if (text.match(/schedule|Released|Crane Cert|Summer|Fall|Start|weeks? work|Project|Install|Arrival/i)) return false;
+      // Skip location-like text (Dock, Sub, Trans, Poles, etc.)
+      if (text.match(/\b(Dock|Sub|Trans|Poles|Distro|Foundation|Cleanup|Northern|Lights)\b/i)) return false;
+      // Skip "Another Operator??" and similar notes
+      if (text.match(/^Another\s/i) || text.match(/\?\?/)) return false;
       if (!text.match(/[a-zA-Z]{2,}\s+[a-zA-Z]/)) return false; // Must have first and last name
       return true;
     }
@@ -1143,6 +1211,82 @@
       return result;
     }
 
+    /**
+     * Gets the priority order for a role/classification.
+     * Lower number = higher priority (comes first in crew list).
+     * Order: SUP → GF → F → JRY/JL → WT → JRY OP → OP → AP 7→1 → GTO F → GTO → EO1/EO2
+     */
+    function getRolePriority(role) {
+      if (!role) return 999; // Unknown roles at the end
+
+      var roleUpper = role.toUpperCase().trim();
+
+      // Priority order for crew hierarchy (per user specification)
+      var priorities = {
+        'SUP': 1,         // Supervisor - first
+        'GF': 2,          // General Foreman - second
+        'F': 3,           // Foreman - third
+        'JL': 4,          // Journeyman Lineman
+        'JRY': 4,         // Journeyman (same as JL)
+        'WT': 5,          // Working Tech
+        'JRY OP': 6,      // Journeyman Operator
+        'OP': 7,          // Operator
+        '7 AP': 10,       // 7th year apprentice (most senior apprentice)
+        '6 AP': 11,
+        '5 AP': 12,
+        '4 AP': 13,
+        '3 AP': 14,
+        '2 AP': 15,
+        '1 AP': 16,       // 1st year apprentice (least senior apprentice)
+        'GTO F': 20,      // GTO Foreman
+        'GTO': 21,        // General Trade Operator
+        'EO 1': 22,       // Equipment Operator 1
+        'EO1': 22,        // Alternative format
+        'EO 2': 23,       // Equipment Operator 2
+        'EO2': 23         // Alternative format
+      };
+
+      // Direct match
+      if (priorities[roleUpper] !== undefined) {
+        return priorities[roleUpper];
+      }
+
+      // Handle variations
+      if (roleUpper.match(/^SUP/i)) return 1;
+      if (roleUpper.match(/^GF$/)) return 2;
+      if (roleUpper.match(/^F$/)) return 3;
+      if (roleUpper.match(/FOREMAN/i) && !roleUpper.match(/GTO/i)) return 3;
+      if (roleUpper.match(/^JL$/)) return 4;
+      if (roleUpper.match(/^JRY$/) || (roleUpper.match(/JOURNEY/i) && !roleUpper.match(/OP/i))) return 4;
+      if (roleUpper.match(/^WT$/)) return 5;
+      if (roleUpper.match(/JRY\s*OP/i) || roleUpper.match(/JOURNEY.*OP/i)) return 6;
+      if (roleUpper.match(/^OP$/)) return 7;
+
+      // Apprentice levels - extract number
+      var apMatch = roleUpper.match(/(\d)\s*AP/);
+      if (apMatch) {
+        var level = parseInt(apMatch[1]);
+        return 17 - level; // 7 ap = 10, 1 ap = 16
+      }
+
+      // Alternative apprentice format: "AP 3", "AP3"
+      var apMatch2 = roleUpper.match(/AP\s*(\d)/);
+      if (apMatch2) {
+        var level2 = parseInt(apMatch2[1]);
+        return 17 - level2;
+      }
+
+      // GTO variations
+      if (roleUpper.match(/GTO\s*F/i)) return 20;
+      if (roleUpper.match(/^GTO$/i)) return 21;
+
+      // EO variations
+      if (roleUpper.match(/EO\s*1/i)) return 22;
+      if (roleUpper.match(/EO\s*2/i)) return 23;
+
+      return 999; // Unknown
+    }
+
     function mapLocation(locationName) {
       if (locationMappings[locationName]) {
         return locationMappings[locationName];
@@ -1161,14 +1305,60 @@
       document.getElementById('crewsPreview').style.display = 'block';
       document.getElementById('crewCount').textContent = parsedCrews.length;
 
+      // First, detect duplicate names across crews
+      var nameOccurrences = {};
+      for (var i = 0; i < parsedCrews.length; i++) {
+        var crew = parsedCrews[i];
+        for (var e = 0; e < crew.employees.length; e++) {
+          var empName = crew.employees[e].name.toLowerCase().trim();
+          if (!nameOccurrences[empName]) {
+            nameOccurrences[empName] = [];
+          }
+          nameOccurrences[empName].push({
+            crewIndex: i,
+            empIndex: e,
+            location: crew.mappedLocation,
+            jobNumber: crew.jobNumber,
+            role: crew.employees[e].role
+          });
+        }
+      }
+
       var container = document.getElementById('crewCardsContainer');
       var html = '';
 
       for (var i = 0; i < parsedCrews.length; i++) {
         var crew = parsedCrews[i];
-        html += '<div class="crew-card">';
-        html += '<div class="crew-card-header">';
+        html += '<div class="crew-card" id="crew-card-' + i + '">';
+        html += '<div class="crew-card-header d-flex justify-content-between align-items-start">';
+        html += '<div>';
         html += '<i class="bi bi-geo-alt"></i> ' + crew.mappedLocation + ' <span class="text-muted">(' + crew.jobNumber + ')</span>';
+        html += '</div>';
+
+        // Schedule type badge with dropdown to change
+        html += '<div class="dropdown">';
+        var badgeColor = crew.scheduleBadgeColor || 'bg-secondary';
+        var badgeLabel = crew.scheduleLabel || 'Unknown';
+        var scheduleType = crew.scheduleType || '';
+        html += '<button class="btn btn-sm ' + badgeColor + ' dropdown-toggle" type="button" id="scheduleDropdown-' + i + '" data-bs-toggle="dropdown" aria-expanded="false" style="font-size: 10px; padding: 2px 6px;">';
+        if (scheduleType) {
+          html += scheduleType + ' (' + badgeLabel + ')';
+        } else {
+          html += '<i class="bi bi-question-circle"></i> Set Schedule';
+        }
+        html += '</button>';
+        html += '<ul class="dropdown-menu dropdown-menu-end" aria-labelledby="scheduleDropdown-' + i + '">';
+        html += '<li><a class="dropdown-item" href="#" onclick="setCrewSchedule(' + i + ', \'Primary\', \'M-Th\'); return false;"><span class="badge bg-success me-1">Primary</span> M-Th</a></li>';
+        html += '<li><a class="dropdown-item" href="#" onclick="setCrewSchedule(' + i + ', \'Primary\', \'M-F\'); return false;"><span class="badge bg-success me-1">Primary</span> M-F</a></li>';
+        html += '<li><hr class="dropdown-divider"></li>';
+        html += '<li><a class="dropdown-item" href="#" onclick="setCrewSchedule(' + i + ', \'Secondary\', \'Fri-Sat\'); return false;"><span class="badge bg-warning text-dark me-1">Secondary</span> Fri-Sat</a></li>';
+        html += '<li><a class="dropdown-item" href="#" onclick="setCrewSchedule(' + i + ', \'Secondary\', \'Weekend\'); return false;"><span class="badge bg-warning text-dark me-1">Secondary</span> Weekend</a></li>';
+        html += '<li><hr class="dropdown-divider"></li>';
+        html += '<li><a class="dropdown-item" href="#" onclick="setCrewSchedule(' + i + ', \'Split\', \'Mon-Wed\'); return false;"><span class="badge bg-info me-1">Split</span> Mon-Wed</a></li>';
+        html += '<li><a class="dropdown-item" href="#" onclick="setCrewSchedule(' + i + ', \'Split\', \'Thu-Fri\'); return false;"><span class="badge bg-info me-1">Split</span> Thu-Fri</a></li>';
+        html += '</ul>';
+        html += '</div>';
+
         html += '</div>';
         html += '<div class="crew-card-employees">';
 
@@ -1177,13 +1367,26 @@
         } else {
           for (var e = 0; e < crew.employees.length; e++) {
             var emp = crew.employees[e];
-            html += '<div class="crew-card-employee">';
-            html += emp.fullJobNumber + '. ' + emp.name;
+            var empNameLower = emp.name.toLowerCase().trim();
+            var isDuplicate = nameOccurrences[empNameLower] && nameOccurrences[empNameLower].length > 1;
+
+            var rowStyle = isDuplicate ? ' style="color: #dc3545; font-weight: 500;"' : '';
+            var dupIcon = isDuplicate ? '<i class="bi bi-exclamation-triangle text-warning" title="Appears in multiple crews"></i> ' : '';
+
+            html += '<div class="crew-card-employee"' + rowStyle + '>';
+            html += dupIcon + emp.fullJobNumber + '. ' + emp.name;
             if (emp.isForeman) {
               html += ' <span class="badge bg-primary badge-role">F</span>';
             } else if (emp.role) {
               html += ' <span class="badge bg-secondary badge-role">' + emp.role + '</span>';
             }
+
+            // Debug: show source row/col and original text
+            html += ' <small class="text-muted" style="font-size: 9px;">[R' + (emp.sourceRow + 1) + 'C' + (emp.sourceCol + 1) + ']</small>';
+            if (isDuplicate) {
+              html += ' <small class="text-danger">("' + escapeHtml(emp.originalText || '') + '")</small>';
+            }
+
             html += '</div>';
           }
         }
@@ -1197,6 +1400,40 @@
       if (specialCircumstances.length > 0) {
         showSpecialSection();
       }
+    }
+
+    /**
+     * Sets the schedule type for a crew (called from dropdown in crew card)
+     * @param {number} crewIndex - Index in parsedCrews array
+     * @param {string} scheduleType - 'Primary', 'Secondary', or 'Split'
+     * @param {string} scheduleLabel - 'M-Th', 'M-F', 'Fri-Sat', etc.
+     */
+    function setCrewSchedule(crewIndex, scheduleType, scheduleLabel) {
+      if (!parsedCrews[crewIndex]) return;
+
+      var crew = parsedCrews[crewIndex];
+      crew.scheduleType = scheduleType;
+      crew.scheduleLabel = scheduleLabel;
+
+      // Set badge color based on type
+      if (scheduleType === 'Primary') {
+        crew.scheduleBadgeColor = 'bg-success';
+      } else if (scheduleType === 'Secondary') {
+        crew.scheduleBadgeColor = 'bg-warning text-dark';
+      } else if (scheduleType === 'Split') {
+        crew.scheduleBadgeColor = 'bg-info';
+      } else {
+        crew.scheduleBadgeColor = 'bg-secondary';
+      }
+
+      // Update the dropdown button text
+      var btn = document.getElementById('scheduleDropdown-' + crewIndex);
+      if (btn) {
+        btn.className = 'btn btn-sm ' + crew.scheduleBadgeColor + ' dropdown-toggle';
+        btn.innerHTML = scheduleType + ' (' + scheduleLabel + ')';
+      }
+
+      console.log('Set crew ' + crew.jobNumber + ' schedule to ' + scheduleType + ' (' + scheduleLabel + ')');
     }
 
     function showSpecialSection() {
@@ -1236,7 +1473,7 @@
           statusBadgeClass = 'bg-warning text-dark';
           statusIcon = 'bi-pause-circle';
         } else if (spec.status === 'Light Duty') {
-          suggestedLocation = ''; // Keep current location
+          suggestedLocation = 'Light Duty'; // Set location to Light Duty
           suggestedAction = 'update';
           statusBadgeClass = 'bg-info';
           statusIcon = 'bi-bandaid';
@@ -1322,7 +1559,7 @@
         html += '<label class="form-label small mb-1">New Location</label>';
         html += '<select class="form-select form-select-sm" id="spec-location-' + i + '">';
         html += '<option value="">-- Keep Current --</option>';
-        html += '<option value="Previous Employee"' + (suggestedLocation === 'Previous Employee' ? ' selected' : '') + '>Previous Employee</option>';
+        html += '<option value="Previous Employee"' + ( suggestedLocation === 'Previous Employee' ? ' selected' : '') + '>Previous Employee</option>';
         html += '<option value="Vacation"' + (suggestedLocation === 'Vacation' ? ' selected' : '') + '>Vacation</option>';
         html += '<option value="Light Duty">Light Duty</option>';
         html += '<option value="Leave">Leave</option>';
@@ -1748,9 +1985,12 @@
         html += '<div class="card-header bg-warning bg-opacity-25">';
         html += '<strong>' + dup.employeeName + '</strong>';
         html += '<span class="badge bg-secondary ms-2">' + dup.occurrences.length + ' assignments</span>';
+        if (dup.autoSelected) {
+          html += '<span class="badge bg-info ms-2">Auto-selected</span>';
+        }
         html += '</div>';
         html += '<div class="card-body">';
-        html += '<p class="small text-muted mb-2">Select which crew assignment to use:</p>';
+        html += '<p class="small text-muted mb-2">Select which crew assignment to use (primary job auto-selected based on M-Th/M-F schedule). You can also change the schedule type for each assignment:</p>';
 
         for (var o = 0; o < dup.occurrences.length; o++) {
           var occ = dup.occurrences[o];
@@ -1758,12 +1998,41 @@
           var roleText = occ.employee.role || 'Unknown';
           var isForeman = occ.employee.isForeman ? '<span class="badge bg-primary ms-1">Foreman</span>' : '';
 
-          html += '<div class="form-check">';
+          // Schedule type badge with dropdown
+          var badgeColor = 'bg-secondary';
+          var scheduleType = occ.scheduleType || '';
+          if (scheduleType.indexOf('Primary') !== -1) {
+            badgeColor = 'bg-success';
+          } else if (scheduleType.indexOf('Secondary') !== -1) {
+            badgeColor = 'bg-warning text-dark';
+          } else if (scheduleType.indexOf('Split') !== -1) {
+            badgeColor = 'bg-info';
+          }
+
+          html += '<div class="form-check d-flex align-items-center gap-2 py-2" style="border-bottom: 1px solid #eee;">';
           html += '<input class="form-check-input" type="radio" name="dup-' + d + '" id="dup-' + d + '-' + o + '" value="' + o + '" ' + isSelected + ' onchange="selectDuplicateOption(' + d + ', ' + o + ')">';
-          html += '<label class="form-check-label" for="dup-' + d + '-' + o + '">';
+          html += '<label class="form-check-label flex-grow-1" for="dup-' + d + '-' + o + '">';
           html += '<strong>' + occ.crew.mappedLocation + '</strong> - Job #' + occ.employee.fullJobNumber;
           html += ' <span class="text-muted">(' + roleText + ')' + isForeman + '</span>';
           html += '</label>';
+
+          // Schedule type dropdown for this occurrence
+          html += '<div class="dropdown">';
+          html += '<button class="btn btn-sm ' + badgeColor + ' dropdown-toggle" type="button" id="dupSchedule-' + d + '-' + o + '" data-bs-toggle="dropdown" aria-expanded="false" style="font-size: 10px; padding: 2px 6px;">';
+          html += scheduleType || '<i class="bi bi-question-circle"></i> Set';
+          html += '</button>';
+          html += '<ul class="dropdown-menu dropdown-menu-end" aria-labelledby="dupSchedule-' + d + '-' + o + '">';
+          html += '<li><a class="dropdown-item" href="#" onclick="setDuplicateSchedule(' + d + ', ' + o + ', \'Primary (M-Th)\', \'bg-success\'); return false;">🟢 Primary (M-Th)</a></li>';
+          html += '<li><a class="dropdown-item" href="#" onclick="setDuplicateSchedule(' + d + ', ' + o + ', \'Primary (M-F)\', \'bg-success\'); return false;">🟢 Primary (M-F)</a></li>';
+          html += '<li><hr class="dropdown-divider"></li>';
+          html += '<li><a class="dropdown-item" href="#" onclick="setDuplicateSchedule(' + d + ', ' + o + ', \'Secondary (Fri-Sat)\', \'bg-warning text-dark\'); return false;">🟡 Secondary (Fri-Sat)</a></li>';
+          html += '<li><a class="dropdown-item" href="#" onclick="setDuplicateSchedule(' + d + ', ' + o + ', \'Secondary (Weekend)\', \'bg-warning text-dark\'); return false;">🟡 Secondary (Weekend)</a></li>';
+          html += '<li><hr class="dropdown-divider"></li>';
+          html += '<li><a class="dropdown-item" href="#" onclick="setDuplicateSchedule(' + d + ', ' + o + ', \'Split (Mon-Wed)\', \'bg-info\'); return false;">🔵 Split (Mon-Wed)</a></li>';
+          html += '<li><a class="dropdown-item" href="#" onclick="setDuplicateSchedule(' + d + ', ' + o + ', \'Split (Thu-Fri)\', \'bg-info\'); return false;">🔵 Split (Thu-Fri)</a></li>';
+          html += '</ul>';
+          html += '</div>';
+
           html += '</div>';
         }
 
@@ -1776,6 +2045,109 @@
 
     function selectDuplicateOption(dupIndex, optionIndex) {
       duplicateEmployees[dupIndex].selectedIndex = optionIndex;
+    }
+
+    /**
+     * Sets the schedule type for a duplicate employee occurrence
+     * @param {number} dupIndex - Index in duplicateEmployees array
+     * @param {number} occIndex - Index in occurrences array
+     * @param {string} scheduleType - 'Primary (M-Th)', 'Secondary (Fri-Sat)', etc.
+     * @param {string} badgeColor - CSS class for badge color
+     */
+    function setDuplicateSchedule(dupIndex, occIndex, scheduleType, badgeColor) {
+      if (!duplicateEmployees[dupIndex] || !duplicateEmployees[dupIndex].occurrences[occIndex]) return;
+
+      var occ = duplicateEmployees[dupIndex].occurrences[occIndex];
+      occ.scheduleType = scheduleType;
+
+      // Update the dropdown button
+      var btn = document.getElementById('dupSchedule-' + dupIndex + '-' + occIndex);
+      if (btn) {
+        btn.className = 'btn btn-sm ' + badgeColor + ' dropdown-toggle';
+        btn.innerHTML = scheduleType;
+      }
+
+      console.log('Set duplicate employee ' + duplicateEmployees[dupIndex].employeeName +
+                  ' occurrence ' + occIndex + ' schedule to ' + scheduleType);
+
+      // If user set a Primary schedule, auto-select that option
+      if (scheduleType.indexOf('Primary') !== -1) {
+        selectDuplicateOption(dupIndex, occIndex);
+        // Update the radio button
+        var radio = document.getElementById('dup-' + dupIndex + '-' + occIndex);
+        if (radio) {
+          radio.checked = true;
+        }
+      }
+    }
+
+    /**
+     * Selects the primary job for an employee who appears in multiple crews.
+     * Primary job = M-Th or M-F (standard workweek)
+     * Secondary job = Fri & Sat, weekends, or partial weeks with fewer days
+     * @param {Array} occurrences - Array of crew occurrences for this employee
+     * @returns {number} Index of the primary job
+     */
+    function selectPrimaryJob(occurrences) {
+      var bestIndex = 0;
+      var bestScore = -999;
+
+      for (var i = 0; i < occurrences.length; i++) {
+        var occ = occurrences[i];
+        var score = 0;
+        var fullText = occ.crew.originalLocation || '';
+
+        // M-Th or M-T schedule is primary (+100 points)
+        if (fullText.match(/M-Th|M-T\b|Mon-Thu|Monday.*Thursday/i)) {
+          score += 100;
+          occ.scheduleType = 'Primary (M-Th)';
+        }
+        // M-F schedule is also primary (+100 points)
+        else if (fullText.match(/M-F|Mon-Fri|Monday.*Friday/i)) {
+          score += 100;
+          occ.scheduleType = 'Primary (M-F)';
+        }
+        // Standard workweek patterns (4 10's, 5 8's) without weekend mention (+50)
+        else if (fullText.match(/[45]\s*(10|8)'?s/i) && !fullText.match(/Fri\s*&\s*Sat|Sat\s*&\s*Sun|weekend/i)) {
+          score += 50;
+          occ.scheduleType = 'Primary';
+        }
+        // Fri & Sat is secondary (-100 points)
+        else if (fullText.match(/Fri\s*&\s*Sat|Fri.*Sat|Friday.*Saturday/i)) {
+          score -= 100;
+          occ.scheduleType = 'Secondary (Fri-Sat)';
+        }
+        // Weekend work is secondary (-50 points)
+        else if (fullText.match(/Sat\s*&\s*Sun|weekend|Saturday.*Sunday/i)) {
+          score -= 50;
+          occ.scheduleType = 'Secondary (Weekend)';
+        }
+        // Partial week patterns - count days
+        else if (fullText.match(/Mon-Wed|Monday.*Wednesday/i)) {
+          score += 30; // 3 days
+          occ.scheduleType = 'Split (Mon-Wed)';
+        }
+        else if (fullText.match(/Thu-Fri|Thursday.*Friday/i)) {
+          score += 20; // 2 days
+          occ.scheduleType = 'Split (Thu-Fri)';
+        }
+        else {
+          occ.scheduleType = ''; // No schedule detected
+        }
+
+        // Tie-breaker: more employees = likely main crew (+1 per employee, max 10)
+        score += Math.min(occ.crew.employees.length, 10);
+
+        console.log('  Job ' + occ.crew.jobNumber + ' (' + fullText + ') score: ' + score);
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestIndex = i;
+        }
+      }
+
+      console.log('  Auto-selected primary: index ' + bestIndex + ' (' + occurrences[bestIndex].crew.jobNumber + ')');
+      return bestIndex;
     }
 
     function resolveDuplicates() {
@@ -1818,18 +2190,22 @@
         }
       }
 
-      // Identify duplicates and let user choose
+      // Identify duplicates and auto-select primary job
       for (var key in employeeOccurrences) {
         if (employeeOccurrences[key].length > 1) {
+          // Auto-select the primary job based on schedule (M-Th/M-F = primary)
+          var primaryIndex = selectPrimaryJob(employeeOccurrences[key]);
+
           duplicateEmployees.push({
             employeeName: employeeOccurrences[key][0].match.employeeName,
             occurrences: employeeOccurrences[key],
-            selectedIndex: 0 // Default to first occurrence
+            selectedIndex: primaryIndex, // Auto-selected based on schedule
+            autoSelected: true
           });
         }
       }
 
-      // If there are duplicates, show selection UI
+      // If there are duplicates, show selection UI (user can override auto-selection)
       if (duplicateEmployees.length > 0) {
         showDuplicateSelectionUI();
         return; // Wait for user to resolve duplicates
@@ -2030,10 +2406,8 @@
         var emp = employeeList[i];
         var empName = (emp.name || '').toLowerCase().trim();
 
-        // Skip if this employee was already matched to someone else
-        if (matchedSheetEmployees[empName]) {
-          continue;
-        }
+        // Skip Previous Employees
+        if ((emp.location || '').toLowerCase() === 'previous employee') continue;
 
         // Exact match - highest priority
         if (normalizedName === empName) {

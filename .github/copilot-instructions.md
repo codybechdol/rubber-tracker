@@ -649,43 +649,164 @@ Wednesday, Jan 29 (Start: Helena 7am):
 ---
 
 ## Phase 5: Purchase Order Generation
-**Status:** 🔲 NOT STARTED
+**Status:** ✅ COMPLETE (Feb 5, 2026)
 
 **Goal:** Generate purchase orders from Purchase Needs and track order status.
 
 **What it does:**
-- Take "Need to Order" items from Purchase Needs sheet
-- Generate formatted Purchase Order document (Google Doc or PDF)
-- Track PO number, vendor, date ordered, expected delivery
-- New "Purchase Orders" sheet to track status
-- Update Purchase Needs when items are received
+- Read "NEED TO ORDER" items from Purchase Needs sheet
+- Manage vendors with contact info and item pricing
+- Generate plain text PO for copy/paste into email
+- Track PO number `002-##` (based on fiscal year, e.g., 002-26)
+- Log orders to Purchase Orders sheet for history
+- Update Purchase Needs status to "ORDERED! Est. Receive date (MM/DD/YYYY)"
 
-**Key files to create/modify:**
-- `60-PurchaseNeeds.gs` - Link to PO system
-- NEW: `62-PurchaseOrders.gs` - PO generation and tracking
-- NEW: `PurchaseOrderDialog.html` - UI for creating POs
+**Key files created:**
+- `62-PurchaseOrders.gs` - Backend PO functions (~600 lines)
+- `PurchaseOrderDialog.html` - Main PO creation dialog
+- `VendorConfig.html` - Vendor management with pricing
 
-**Questions to resolve:**
-- [ ] Specific vendor(s) used?
-- [ ] PO number format?
-- [ ] Approval workflow needed?
-- [ ] Output format? (Google Doc, PDF, Email?)
+**PO Text Format:**
+```
+I need to Order the following:
+
+- (2) Class 2 Gloves, Size 10 @ $45.00
+- (1) Class 2 Sleeves, Size 18 @ $65.00
+- (3) Class 0 Gloves, Size 9.5 @ $35.00
+
+Are these prices still correct?
+
+Expected Delivery: ???
+
+Notes: [Any notes]
+```
+
+**Vendors Sheet Structure:**
+| Vendor Name | Contact Name | Email | Phone | Notes | Class 0 Glove | Class 2 Glove | Class 3 Glove | Class 0 Sleeve | Class 2 Sleeve | Class 3 Sleeve |
+
+**Purchase Orders Sheet Structure:**
+| Date | PO Number | Vendor | Items | Total Price | Expected Delivery | Status | Notes |
+
+**Menu Items:**
+- Glove Manager → 🛒 Purchase Orders → 📝 Create Purchase Order
+- Glove Manager → 🛒 Purchase Orders → 📋 Order History
+- Glove Manager → 🛒 Purchase Orders → ⚙️ Manage Vendors
+
+**Functions Available:**
+- `showPurchaseOrderDialog()` - Opens main PO creation dialog
+- `showVendorConfigDialog()` - Opens vendor management dialog
+- `openPurchaseOrdersSheet()` - Opens Purchase Orders sheet
+- `setupPurchaseOrdersSheet()` - Creates Purchase Orders sheet structure
+- `setupVendorsSheet()` - Creates Vendors sheet structure
+- `getPurchaseOrderNumber()` - Returns `002-##` based on fiscal year
+- `getVendors()` / `saveVendors()` - CRUD for vendor data
+- `getItemsToOrder()` - Reads "NEED TO ORDER" items from Purchase Needs
+- `generatePurchaseOrderText()` - Creates plain text PO for email
+- `logPurchaseOrder()` - Logs order to Purchase Orders sheet
+- `markItemsAsOrdered()` - Updates Purchase Needs status column
+- `processPurchaseOrder()` - Combined function for dialog (logs + marks ordered)
+- `getPurchaseOrderDialogData()` - Returns data for dialog initialization
 
 **Implementation tasks:**
-- [ ] Create Purchase Orders sheet structure
-- [ ] Create PurchaseOrderDialog.html
-- [ ] Add generatePurchaseOrder() function
-- [ ] Add PO number generation
-- [ ] Add Google Doc/PDF generation
-- [ ] Add status tracking (Ordered, Shipped, Received)
-- [ ] Add receiveItems() function to update inventory
-- [ ] Add menu items
+- [x] Create Purchase Orders sheet structure
+- [x] Create Vendors sheet structure with pricing columns
+- [x] Create PurchaseOrderDialog.html
+- [x] Create VendorConfig.html
+- [x] Add PO number generation (002-## format)
+- [x] Add vendor management with CRUD
+- [x] Add item price lookup from vendor
+- [x] Add PO text generation for email copy/paste
+- [x] Add status tracking (Ordered, Shipped, Received)
+- [x] Update Purchase Needs with "ORDERED!" status
+- [x] Add menu items
+- [x] Deploy with `.\push.bat`
 
 ---
 
 ## Completed Features Log
 
+### February 7, 2026
+- ✅ **Crew Import - Auto-Select Primary Job for Duplicate Employees**
+  - When an employee appears in multiple crews, system now auto-selects the primary job assignment
+  - **Primary Job Detection Logic:**
+    - M-Th or M-F schedules = Primary (+100 points)
+    - Standard workweek patterns (4 10's, 5 8's) without weekend mention = Primary (+50 points)
+    - Fri & Sat schedules = Secondary (-100 points)
+    - Weekend work = Secondary (-50 points)
+    - Partial weeks (Mon-Wed) = Split (+30 points)
+    - Partial weeks (Thu-Fri) = Split (+20 points)
+    - Tie-breaker: More employees in crew = higher score (+1 per employee, max 10)
+  - **UI Enhancements:**
+    - Shows "Auto-selected" badge on cards with auto-selection
+    - Schedule type badges: 🟢 Primary (M-Th), 🟢 Primary (M-F), 🟡 Secondary (Fri-Sat), 🔵 Split (Mon-Wed)
+    - User can still override auto-selection by clicking different radio button
+  - **New Functions:**
+    - `selectPrimaryJob(occurrences)` - Scores each job and returns index of primary
+  - Modified `src/CrewImport.html`:
+    - Added `selectPrimaryJob()` function (~50 lines)
+    - Updated `matchEmployeesToSheet()` to call `selectPrimaryJob()` instead of defaulting to index 0
+    - Updated `showDuplicateSelectionUI()` to display schedule type badges and auto-selected indicator
+  - **Use Case:** Employee works M-Th on crew 013-26 and Fri-Sat on crew 015-26 → System auto-selects 013-26
+- ✅ **Crew Import - Interactive Schedule Type Marking**
+  - **Detected Crews Section:** Each crew card now has a dropdown to mark Primary/Secondary/Split schedule
+    - Dropdown button shows current schedule type with color badge
+    - Options: Primary (M-Th), Primary (M-F), Secondary (Fri-Sat), Secondary (Weekend), Split (Mon-Wed), Split (Thu-Fri)
+    - Changes persist to parsedCrews array for accurate duplicate detection
+  - **Employees in Multiple Crews Section:** Each occurrence has its own schedule dropdown
+    - Allows marking specific crew assignments as Primary/Secondary
+    - When user marks an occurrence as "Primary", that option is auto-selected
+    - Dropdown shows current schedule type with appropriate color
+  - **New Functions:**
+    - `getScheduleTypeFromHeader(headerText)` - Detects schedule from crew header text
+    - `setCrewSchedule(crewIndex, scheduleType, scheduleLabel)` - Updates crew schedule
+    - `setDuplicateSchedule(dupIndex, occIndex, scheduleType, badgeColor)` - Updates occurrence schedule
+  - **Use Case:** User can manually correct schedule detection when auto-detection is wrong
+
+### February 6, 2026
+- ✅ **Crew Import - Employee Ordering by Classification**
+  - Employees are now sorted by classification hierarchy BEFORE assigning job number suffixes
+  - Order: SUP → GF → F → JRY/JL → WT → JRY OP → OP → AP 7→1 (7 ap first, 1 ap last) → GTO F → GTO → EO1/EO2
+  - Job numbers now correctly reflect crew positions (e.g., Foreman gets .1, not the first person listed in Excel)
+  - Added `getRolePriority(role)` function to define classification hierarchy
+  - Modified `src/CrewImport.html` - Added sorting before position assignment
+- ✅ **Purchase Order Dialog - All Sections Support**
+  - PO dialog now shows items from ALL Purchase Needs sections, not just "Need to Order"
+  - Sections displayed: 🛒 NEED TO ORDER, 📦⚠️ READY FOR DELIVERY (SIZE UP), ⏳ IN TESTING, ⏳⚠️ IN TESTING (SIZE UP), ⚠️ SIZE UP ASSIGNMENTS
+  - Items grouped by category with colored header rows
+  - Timeframe badges: Immediate (red), In 2 Weeks (green), In 3 Weeks (orange), Consider (gray)
+  - "NEED TO ORDER" items checked by default, other sections unchecked
+  - User can check/uncheck any item to include in PO
+  - Use case: Order items in testing now to have them ready when testing completes
+  - Modified `src/62-PurchaseOrders.gs` - `getItemsToOrder()` now reads all sections
+  - Modified `src/PurchaseOrderDialog.html` - New grouped table layout with category headers
+- ✅ **Send Email Directly from PO Dialog**
+  - New "📧 Send Email" button appears after generating PO text (if vendor has email)
+  - Sends email directly to vendor via Gmail
+  - Confirmation prompt shows vendor name, email, and item count
+  - Auto-logs order and marks items as ordered after sending
+  - New function: `sendPurchaseOrderEmail(emailData)` in `62-PurchaseOrders.gs`
+  - Modified `src/PurchaseOrderDialog.html` - Added sendEmail() function and button
+- ✅ **Create PO Button in Quick Actions**
+  - Added "📝 Create PO" sub-button under Step 2 (Generate All Reports)
+  - Quick access to Purchase Order dialog from Monday workflow sidebar
+  - Modified `src/QuickActions.html`
+
 ### February 5, 2026
+- ✅ **Phase 5: Purchase Order Generation - COMPLETE**
+  - Generate purchase orders from Purchase Needs "NEED TO ORDER" items
+  - Manage vendors with contact info and item pricing (Class 0/2/3 Glove/Sleeve prices)
+  - Generate plain text PO for copy/paste into email with pricing and "Are these prices still correct?" prompt
+  - PO number format: `002-##` based on fiscal year (e.g., 002-26)
+  - Log orders to Purchase Orders sheet for history tracking
+  - Update Purchase Needs status to "ORDERED! Est. Receive date (MM/DD/YYYY)"
+  - New files created:
+    - `src/62-PurchaseOrders.gs` - Backend PO functions (~600 lines)
+    - `src/PurchaseOrderDialog.html` - Main PO creation dialog
+    - `src/VendorConfig.html` - Vendor management with pricing
+  - New menu items:
+    - Glove Manager → 🛒 Purchase Orders → 📝 Create Purchase Order
+    - Glove Manager → 🛒 Purchase Orders → 📋 Order History
+    - Glove Manager → 🛒 Purchase Orders → ⚙️ Manage Vendors
 - ✅ **Safety Report Completion Sync**
   - When Safety Equipment tasks are marked complete in Task List, Safety Reports sheet status is automatically updated to "Resolved"
   - `syncSafetyReportCompletion(taskKey)` - Syncs individual task completion to Safety Reports sheet
@@ -795,6 +916,61 @@ Wednesday, Jan 29 (Start: Helena 7am):
   - Benefits: Proactive planning, consistent UI, can schedule renewals months in advance
   - Modified `src/ToDoSchedule.html` - line 4633
   - See: FIX_ALL_CERTS_ACTIONABLE.md for details
+
+### February 5, 2026
+- ✅ **Quick Actions Sidebar Redesign - Monday Workflow**
+  - **Goal:** Create a clear, sequential 6-step workflow for every Monday
+  - **New Workflow Steps:**
+    1. 📥 **Import Crew Makeup** - Upload weekly crew assignments (was sub-action, now Step 1)
+    2. 📊 **Generate All Reports** - Swaps, Purchase Needs, Reclaims
+    3. 🛡️ **Process Safety Emails** - JHAs, Meetings, Fleet Checklists (NEW step)
+    4. 🎯 **Generate Task Metadata** - Build task database
+    5. 📅 **Review & Schedule** - Tasks & Trip Planner
+    6. 💾 **Save & Backup** - History + Drive backup (combined from 2 separate steps)
+  - **New Sub-Actions:**
+    - Step 2: 🧤 Gloves, 💪 Sleeves, 🛒 Purchase
+    - Step 3: 📊 Compliance Dashboard
+    - Step 5: 📋 Tasks & Calendar, 🗺️ Trip Planner
+    - Step 6: 📧 Send Email Report
+  - **"As Needed (Monthly/Setup)" Section:**
+    - 📜 Manage Certs (moved from weekly workflow - monthly task)
+    - 👷 Crew Visit Config
+    - 📚 Training Config
+    - 📋 Training Tracking
+    - 🛡️ Compliance Config (NEW)
+  - **"Quick Actions" Section:**
+    - 🔍 Item Lookup
+    - 📊 Task Dashboard
+    - 📝 Accomplishments
+  - **New Functions:**
+    - `saveAndBackup()` - Combined function for Step 6 (calls saveHistory + createBackupSnapshot)
+  - **Modified Files:**
+    - `src/QuickActions.html` - Complete redesign with 6-step workflow
+    - `src/Code.gs` - Added saveAndBackup() function
+  - **New Documentation:**
+    - `WEEKLY_WORKFLOW.md` - Step-by-step user guide for Monday workflow
+- ✅ **Safety Report Completion Sync**
+  - When Safety Equipment tasks are marked complete in Task List, Safety Reports sheet status is automatically updated to "Resolved"
+  - `syncSafetyReportCompletion(taskKey)` - Syncs individual task completion to Safety Reports sheet
+  - `syncAllCompletedSafetyTasks()` - Bulk sync all completed safety tasks (for fixing mismatches)
+  - `refreshSafetySheets()` - Combined function that syncs completed tasks AND recalculates current week's Safety Compliance
+  - Modified `markTaskComplete()` in Code.gs to auto-sync Safety Equipment tasks
+  - New Menu: Glove Manager → Safety Reports → 🔄 Refresh Safety Sheets
+  - Modified `src/88-SafetyReports.gs` - Added ~200 lines of sync functions
+  - Modified `src/Code.gs` - Updated markTaskComplete() and added menu item
+- ✅ **Smart Email Processing (Only New Emails)**
+  - `processSafetyEmails()` now supports `newOnlyMode` parameter (default: true)
+  - Stores `LAST_SAFETY_EMAIL_DATE` in ScriptProperties after successful processing
+  - On next run, uses Gmail `after:YYYY/MM/DD` filter to only fetch emails since last run
+  - Dialog shows "Last processed: [date]" and checkbox "Only process new emails since last run"
+  - Unchecking the box uses the day range dropdown instead (for full rescan)
+  - Dramatically reduces processing time on subsequent runs
+  - Modified `src/88-SafetyReports.gs` - Updated dialog UI and processSafetyEmails function
+- ✅ **X# Vehicle Number Format Support**
+  - `extractVehicleNumber()` now recognizes "X1", "X2", "X3" format vehicle numbers
+  - Returns full format "X1" (not just "1") for clarity
+  - Common for spare/extra vehicles in fleet
+  - Modified `src/88-SafetyReports.gs` - Updated extractVehicleNumber() function
 
 ### February 4, 2026
 - ✅ **JHA/Safety Meeting Compliance Tracking System**

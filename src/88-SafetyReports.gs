@@ -121,8 +121,70 @@ function setupSafetyReportsSheet() {
   sheet.setConditionalFormatRules(rules);
   Logger.log("Added FE Test Date conditional formatting (Red=Expired, Orange=<3mo, Yellow=<6mo)");
 
+  // Add conditional formatting for Resolved status - grey out entire row
+  addResolvedRowFormatting(sheet);
+
   Browser.msgBox("✅ Safety Reports sheet created successfully!");
   Logger.log("Safety Reports sheet created");
+}
+
+/**
+ * Adds conditional formatting to grey out rows where Status = "Resolved"
+ * Can be called on existing sheets to add the formatting
+ * @param {Sheet} sheet - Optional sheet parameter, defaults to Safety Reports
+ */
+function addResolvedRowFormatting(sheet) {
+  if (!sheet) {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    sheet = ss.getSheetByName("Safety Reports");
+    if (!sheet) {
+      Logger.log("Safety Reports sheet not found");
+      return;
+    }
+  }
+
+  var rules = sheet.getConditionalFormatRules();
+
+  // Check if rule already exists (avoid duplicates)
+  var hasResolvedRule = rules.some(function(rule) {
+    var criteria = rule.getBooleanCondition();
+    if (criteria && criteria.getCriteriaType() === SpreadsheetApp.BooleanCriteria.CUSTOM_FORMULA) {
+      var formula = criteria.getCriteriaValues()[0];
+      return formula && formula.indexOf('$H') !== -1 && formula.indexOf('Resolved') !== -1;
+    }
+    return false;
+  });
+
+  if (hasResolvedRule) {
+    Logger.log("Resolved row formatting already exists");
+    return;
+  }
+
+  // Apply to entire row range (A2:L1001)
+  var dataRange = sheet.getRange("A2:L1001");
+
+  // Rule: Grey out entire row when Status (column H) = "Resolved"
+  // Formula uses $H2 with $ to lock column H, but row 2 is relative so it applies per row
+  var resolvedRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied('=$H2="Resolved"')
+    .setBackground("#E0E0E0")  // Light grey
+    .setFontColor("#9E9E9E")   // Medium grey text
+    .setRanges([dataRange])
+    .build();
+
+  // Add at the beginning so it takes priority
+  rules.unshift(resolvedRule);
+  sheet.setConditionalFormatRules(rules);
+
+  Logger.log("Added Resolved row formatting (grey background)");
+}
+
+/**
+ * Menu function to add resolved formatting to existing Safety Reports sheet
+ */
+function addResolvedFormattingToSafetyReports() {
+  addResolvedRowFormatting();
+  SpreadsheetApp.getUi().alert("✅ Resolved row formatting added!\n\nRows with Status = 'Resolved' will now appear in light grey.");
 }
 
 /**
@@ -2576,7 +2638,8 @@ function getCrewComplianceTrend(jobNumber, weeksBack) {
 }
 
 /**
- * Gets all crew compliance trends for dashboard
+ * Gets all crew compliance trends for dashboard - OPTIMIZED
+ * Reads Safety Compliance sheet once and processes all crews in a single pass
  *
  * @param {number} weeksBack - Number of weeks to analyze (default 4)
  * @returns {Array} - Array of {jobNumber, foreman, missedJhaCount, missedMeetingCount, complianceRate}
@@ -2584,16 +2647,89 @@ function getCrewComplianceTrend(jobNumber, weeksBack) {
 function getAllCrewComplianceTrends(weeksBack) {
   if (!weeksBack) weeksBack = 4;
 
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Safety Compliance");
   var crews = getActiveCrews();
-  var trends = [];
 
+  // Build foreman map in one batch call
+  var foremanMap = {};
   for (var i = 0; i < crews.length; i++) {
-    var jobNumber = crews[i];
-    var trend = getCrewComplianceTrend(jobNumber, weeksBack);
-    trend.jobNumber = jobNumber;
-    var foremanResult = lookupForemanByJobNumber(jobNumber);
-    trend.foreman = foremanResult.name || "";
-    trends.push(trend);
+    var foremanResult = lookupForemanByJobNumber(crews[i]);
+    foremanMap[crews[i]] = foremanResult.name || "";
+  }
+
+  // Initialize trend data for all crews
+  var trendData = {};
+  for (var i = 0; i < crews.length; i++) {
+    trendData[crews[i]] = {
+      jobNumber: crews[i],
+      foreman: foremanMap[crews[i]],
+      missedJhaCount: 0,
+      missedMeetingCount: 0,
+      totalWeeks: 0,
+      totalRequiredJhas: 0,
+      receivedJhas: 0
+    };
+  }
+
+  // If no sheet or no data, return empty trends
+  if (!sheet || sheet.getLastRow() < 2) {
+    return crews.map(function(jobNumber) {
+      return {
+        jobNumber: jobNumber,
+        foreman: foremanMap[jobNumber],
+        missedJhaCount: 0,
+        missedMeetingCount: 0,
+        totalWeeks: 0,
+        complianceRate: 100
+      };
+    });
+  }
+
+  // Read all data once
+  var data = sheet.getDataRange().getValues();
+  var cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - (weeksBack * 7));
+
+  // Process all rows in a single pass
+  for (var i = 1; i < data.length; i++) {
+    var rowJobNumber = String(data[i][2]).trim();
+    var weekStart = data[i][0];
+
+    // Skip if not an active crew or too old
+    if (!trendData[rowJobNumber]) continue;
+    if (!weekStart || new Date(weekStart) < cutoffDate) continue;
+
+    var crewTrend = trendData[rowJobNumber];
+    crewTrend.totalWeeks++;
+
+    // Count JHA status (columns E-K = indices 4-10)
+    for (var day = 4; day <= 10; day++) {
+      var status = data[i][day];
+      if (status === "❌") {
+        crewTrend.missedJhaCount++;
+        crewTrend.totalRequiredJhas++;
+      } else if (status === "✅") {
+        crewTrend.receivedJhas++;
+        crewTrend.totalRequiredJhas++;
+      }
+      // N/A doesn't count toward totals
+    }
+
+    // Check weekly meeting (column L = index 11)
+    if (data[i][11] === "❌") {
+      crewTrend.missedMeetingCount++;
+    }
+  }
+
+  // Calculate compliance rates and build result array
+  var trends = [];
+  for (var jobNumber in trendData) {
+    var t = trendData[jobNumber];
+    t.complianceRate = t.totalRequiredJhas > 0
+      ? Math.round((t.receivedJhas / t.totalRequiredJhas) * 100)
+      : 100;
+    trends.push(t);
   }
 
   // Sort by compliance rate (worst first)
@@ -2617,29 +2753,31 @@ function showComplianceDashboard() {
   var weekEndStr = Utilities.formatDate(complianceData.weekEnd, Session.getScriptTimeZone(), "MM/dd/yyyy");
 
   var html = '<style>' +
-    'body { font-family: Arial, sans-serif; padding: 15px; margin: 0; }' +
-    'h2 { margin-top: 0; color: #1a73e8; }' +
-    'h3 { margin: 20px 0 10px 0; color: #333; border-bottom: 2px solid #1a73e8; padding-bottom: 5px; }' +
-    '.summary { display: flex; gap: 15px; margin-bottom: 20px; }' +
-    '.stat-box { background: #f8f9fa; border-radius: 8px; padding: 15px; text-align: center; flex: 1; }' +
-    '.stat-box.good { background: #d4edda; border: 1px solid #28a745; }' +
-    '.stat-box.bad { background: #f8d7da; border: 1px solid #dc3545; }' +
-    '.stat-box.pending { background: #fff3cd; border: 1px solid #ffc107; }' +
-    '.stat-number { font-size: 28px; font-weight: bold; }' +
-    '.stat-label { font-size: 12px; color: #666; margin-top: 5px; }' +
-    'table { width: 100%; border-collapse: collapse; font-size: 12px; }' +
-    'th { background: #1a73e8; color: white; padding: 8px 4px; text-align: center; }' +
-    'td { padding: 6px 4px; text-align: center; border-bottom: 1px solid #ddd; }' +
+    'body { font-family: Arial, sans-serif; padding: 20px; margin: 0; }' +
+    'h2 { margin-top: 0; color: #1a73e8; font-size: 24px; }' +
+    'h3 { margin: 25px 0 12px 0; color: #333; border-bottom: 2px solid #1a73e8; padding-bottom: 8px; font-size: 18px; }' +
+    '.summary { display: flex; gap: 20px; margin-bottom: 25px; }' +
+    '.stat-box { background: #f8f9fa; border-radius: 10px; padding: 20px; text-align: center; flex: 1; }' +
+    '.stat-box.good { background: #d4edda; border: 2px solid #28a745; }' +
+    '.stat-box.bad { background: #f8d7da; border: 2px solid #dc3545; }' +
+    '.stat-box.pending { background: #fff3cd; border: 2px solid #ffc107; }' +
+    '.stat-number { font-size: 36px; font-weight: bold; }' +
+    '.stat-label { font-size: 14px; color: #666; margin-top: 8px; }' +
+    'table { width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 20px; }' +
+    'th { background: #1a73e8; color: white; padding: 12px 8px; text-align: center; }' +
+    'td { padding: 10px 8px; text-align: center; border-bottom: 1px solid #ddd; }' +
     'tr:hover { background: #f5f5f5; }' +
-    '.status-ok { color: #28a745; }' +
-    '.status-missing { color: #dc3545; font-weight: bold; }' +
-    '.status-pending { color: #ffc107; }' +
+    '.status-ok { color: #28a745; font-size: 18px; }' +
+    '.status-missing { color: #dc3545; font-weight: bold; font-size: 18px; }' +
+    '.status-pending { color: #ffc107; font-size: 18px; }' +
     '.status-na { color: #999; }' +
     '.trend-bad { background: #ffebee; }' +
     '.trend-warning { background: #fff8e1; }' +
-    'button { background: #1a73e8; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin: 5px; }' +
+    'button { background: #1a73e8; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; margin: 5px; font-size: 14px; }' +
     'button:hover { background: #1557b0; }' +
     'button.secondary { background: #6c757d; }' +
+    '.scroll-container { max-height: 350px; overflow-y: auto; border: 1px solid #ddd; border-radius: 8px; }' +
+    '.scroll-container table { margin-bottom: 0; }' +
     '</style>';
 
   html += '<h2>📊 Safety Compliance Dashboard</h2>';
@@ -2661,6 +2799,7 @@ function showComplianceDashboard() {
 
   // Current week compliance grid
   html += '<h3>Current Week Status</h3>';
+  html += '<div class="scroll-container">';
   html += '<table>';
   html += '<tr><th>Crew</th><th>Foreman</th><th>Sun</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th><th>Weekly Mtg</th></tr>';
 
@@ -2692,6 +2831,7 @@ function showComplianceDashboard() {
     html += '</tr>';
   }
   html += '</table>';
+  html += '</div>'; // Close scroll-container
 
   // Trend analysis (crews with issues in last 4 weeks)
   var problemCrews = trends.filter(function(t) { return t.missedJhaCount > 0 || t.missedMeetingCount > 0; });
@@ -2727,8 +2867,8 @@ function showComplianceDashboard() {
   html += '</div>';
 
   var output = HtmlService.createHtmlOutput(html)
-    .setWidth(900)
-    .setHeight(650);
+    .setWidth(1200)
+    .setHeight(800);
 
   SpreadsheetApp.getUi().showModalDialog(output, "Safety Compliance Dashboard");
 }
@@ -2737,17 +2877,105 @@ function showComplianceDashboard() {
  * Opens the Safety Compliance Config sheet
  */
 function openComplianceConfig() {
+  var html = HtmlService.createHtmlOutputFromFile('ComplianceConfig')
+    .setWidth(1200)
+    .setHeight(800);
+  SpreadsheetApp.getUi().showModalDialog(html, '🛡️ Safety Compliance Config');
+}
+
+/**
+ * Gets the compliance config data for the HTML dialog
+ * @returns {Array} Array of crew config objects
+ */
+function getComplianceConfigData() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Safety Compliance Config");
 
+  // If sheet doesn't exist, create it first
   if (!sheet) {
     setupSafetyComplianceConfig();
     sheet = ss.getSheetByName("Safety Compliance Config");
   }
 
-  if (sheet) {
-    sheet.activate();
+  if (!sheet || sheet.getLastRow() < 2) {
+    return [];
   }
+
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 12).getValues();
+  var result = [];
+
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    if (!row[0]) continue; // Skip empty rows
+
+    result.push({
+      jobNumber: String(row[0]).trim(),
+      foreman: String(row[1] || '').trim(),
+      skipSun: row[2] === true,
+      skipMon: row[3] === true,
+      skipTue: row[4] === true,
+      skipWed: row[5] === true,
+      skipThu: row[6] === true,
+      skipFri: row[7] === true,
+      skipSat: row[8] === true,
+      skipWeeklyMeeting: row[9] === true,
+      skipMonthlyChecklist: row[10] === true,
+      notes: String(row[11] || '').trim()
+    });
+  }
+
+  return result;
+}
+
+/**
+ * Saves the compliance config data from the HTML dialog
+ * @param {Array} configData - Array of crew config objects
+ */
+function saveComplianceConfigData(configData) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Safety Compliance Config");
+
+  if (!sheet) {
+    throw new Error("Safety Compliance Config sheet not found");
+  }
+
+  // Clear existing data (keep headers)
+  if (sheet.getLastRow() > 1) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, 12).clearContent();
+  }
+
+  if (!configData || configData.length === 0) {
+    return;
+  }
+
+  // Build rows array
+  var rows = [];
+  for (var i = 0; i < configData.length; i++) {
+    var crew = configData[i];
+    rows.push([
+      crew.jobNumber,
+      crew.foreman,
+      crew.skipSun === true,
+      crew.skipMon === true,
+      crew.skipTue === true,
+      crew.skipWed === true,
+      crew.skipThu === true,
+      crew.skipFri === true,
+      crew.skipSat === true,
+      crew.skipWeeklyMeeting === true,
+      crew.skipMonthlyChecklist === true,
+      crew.notes || ''
+    ]);
+  }
+
+  // Write data
+  sheet.getRange(2, 1, rows.length, 12).setValues(rows);
+
+  // Re-add checkboxes for skip columns (C-K = columns 3-11)
+  var checkboxRange = sheet.getRange(2, 3, rows.length, 9);
+  checkboxRange.insertCheckboxes();
+
+  Logger.log("Saved compliance config for " + rows.length + " crews");
 }
 
 /**

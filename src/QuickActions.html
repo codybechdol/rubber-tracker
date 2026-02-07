@@ -5,11 +5,12 @@
   <style>
     * { box-sizing: border-box; font-family: 'Google Sans', Arial, sans-serif; }
     body { margin: 0; padding: 12px; background: #f8f9fa; }
-    h2 { color: #1a73e8; margin: 0 0 12px 0; font-size: 16px; font-weight: 500; }
-    .step-container { margin-bottom: 8px; }
+    h2 { color: #1a73e8; margin: 0 0 8px 0; font-size: 16px; font-weight: 500; }
+    .workflow-desc { font-size: 11px; color: #5f6368; margin-bottom: 12px; }
+    .step-container { margin-bottom: 6px; }
     .step-btn {
-      display: flex; align-items: center; width: 100%; padding: 14px 12px;
-      border: 1px solid #dadce0; border-radius: 8px; font-size: 14px; font-weight: 500;
+      display: flex; align-items: center; width: 100%; padding: 12px 10px;
+      border: 1px solid #dadce0; border-radius: 8px; font-size: 13px; font-weight: 500;
       cursor: pointer; text-align: left; background: white; color: #202124;
     }
     .step-btn:hover:not(:disabled) { background: #e8f0fe; border-color: #1a73e8; }
@@ -17,20 +18,20 @@
     .step-btn.running { background: #e8f0fe; border-color: #1a73e8; }
     .step-btn.done { background: #e6f4ea; border-color: #34a853; }
     .step-num {
-      width: 24px; height: 24px; background: #1a73e8; color: white; border-radius: 50%;
+      width: 22px; height: 22px; background: #1a73e8; color: white; border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
-      font-size: 12px; font-weight: 600; margin-right: 12px;
+      font-size: 11px; font-weight: 600; margin-right: 10px; flex-shrink: 0;
     }
     .step-btn.done .step-num { background: #34a853; }
     .step-btn.done .step-num::after { content: '✓'; }
     .step-btn.done .step-num span { display: none; }
     .step-text { flex: 1; }
-    .step-subtitle { font-size: 11px; color: #5f6368; margin-top: 2px; }
-    .divider { height: 1px; background: #dadce0; margin: 16px 0; }
+    .step-subtitle { font-size: 10px; color: #5f6368; margin-top: 1px; }
+    .divider { height: 1px; background: #dadce0; margin: 14px 0; }
     .section-title { font-size: 11px; font-weight: 600; color: #5f6368; text-transform: uppercase; margin-bottom: 8px; }
     .quick-btn {
-      display: inline-block; padding: 8px 12px; margin: 4px 4px 4px 0;
-      border: 1px solid #dadce0; border-radius: 16px; font-size: 12px;
+      display: inline-block; padding: 6px 10px; margin: 3px 3px 3px 0;
+      border: 1px solid #dadce0; border-radius: 16px; font-size: 11px;
       cursor: pointer; background: white; color: #5f6368;
     }
     .quick-btn:hover:not(:disabled) { background: #f1f3f4; }
@@ -42,7 +43,7 @@
     .status-bar.show { display: block; }
     .status-bar.error { background: #fce8e6; color: #c5221f; }
     .status-bar.success { background: #e6f4ea; color: #137333; }
-    .reset-link { display: block; text-align: center; margin-top: 12px; font-size: 11px; color: #5f6368; cursor: pointer; }
+    .reset-link { display: block; text-align: center; margin-top: 10px; font-size: 11px; color: #5f6368; cursor: pointer; }
     .form-group { margin-bottom: 10px; }
     .form-label { display: block; font-size: 11px; font-weight: 500; color: #5f6368; margin-bottom: 4px; }
     .form-input {
@@ -53,67 +54,98 @@
     .btn { margin-top: 8px; padding: 10px 24px; background: #1a73e8; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; }
     .btn:hover { background: #1557b0; }
     .btn:disabled { background: #dadce0; cursor: not-allowed; }
-    .sub-actions { margin: 6px 0 0 36px; padding-left: 0; }
-    .sub-actions .sub-btn { font-size: 11px; padding: 6px 10px; margin: 2px 4px 2px 0; background: #f1f3f4; border-color: #c9cccf; }
+    .sub-actions { margin: 4px 0 0 32px; padding-left: 0; }
+    .sub-actions .sub-btn { font-size: 10px; padding: 5px 8px; margin: 2px 3px 2px 0; background: #f1f3f4; border-color: #c9cccf; }
     .sub-actions .sub-btn:hover:not(:disabled) { background: #e8f0fe; border-color: #1a73e8; }
   </style>
 </head>
 <body>
-  <h2>🧤 Workflow Steps</h2>
+  <h2>🧤 Monday Workflow</h2>
+  <div class="workflow-desc">Complete these steps every Monday to start your week</div>
 
+  <!-- STEP 1: Import Crew Makeup -->
   <div class="step-container">
-    <button class="step-btn" id="step1" onclick="runStep(1, 'generateAllReports')">
+    <button class="step-btn" id="step1" onclick="openCrewImport()">
       <span class="step-num"><span>1</span></span>
-      <div class="step-text">Generate All Reports<div class="step-subtitle">Swaps, Purchase Needs, Reclaims</div></div>
+      <div class="step-text">📥 Import Crew Makeup<div class="step-subtitle">Upload weekly crew assignments</div></div>
     </button>
     <div class="sub-actions">
-      <button class="quick-btn sub-btn" onclick="runQuick('showCrewImportDialog', 'Import Crew Makeup', 'Opening Crew Import dialog...')">👷 Import Crew Makeup</button>
-      <button class="quick-btn sub-btn" onclick="runQuick('showExpiringCertsChoiceDialog', 'Manage Certs', 'Opening certification management...')">📜 Manage Certs</button>
+      <button class="quick-btn sub-btn" onclick="runQuick('showExpiringCertsImportDialog', 'Import Expiring Certs', 'Opening Certs Import...')">📜 Import Expiring Certs</button>
     </div>
   </div>
 
+  <!-- STEP 2: Generate All Reports -->
   <div class="step-container">
-    <button class="step-btn" id="step2" onclick="runStep(2, 'generateTaskMetadata')">
+    <button class="step-btn" id="step2" onclick="runStep(2, 'generateAllReports')">
       <span class="step-num"><span>2</span></span>
-      <div class="step-text">Generate Task Metadata<div class="step-subtitle">Update task database</div></div>
+      <div class="step-text">📊 Generate All Reports<div class="step-subtitle">Swaps, Purchase Needs, Reclaims</div></div>
     </button>
     <div class="sub-actions">
-      <button class="quick-btn sub-btn" onclick="openToDoSchedule()">📅 Tasks & Calendar</button>
+      <button class="quick-btn sub-btn" onclick="runQuick('generateGloveSwaps', 'Glove Swaps', 'Generating...')">🧤 Gloves</button>
+      <button class="quick-btn sub-btn" onclick="runQuick('generateSleeveSwaps', 'Sleeve Swaps', 'Generating...')">💪 Sleeves</button>
+      <button class="quick-btn sub-btn" onclick="runQuick('updatePurchaseNeeds', 'Purchase Needs', 'Calculating...')">🛒 Purchase</button>
+      <button class="quick-btn sub-btn" onclick="runQuick('showPurchaseOrderDialog', 'Purchase Order', 'Opening...')">📝 Create PO</button>
+    </div>
+  </div>
+
+  <!-- STEP 3: Process Safety Emails -->
+  <div class="step-container">
+    <button class="step-btn" id="step3" onclick="openSafetyEmails()">
+      <span class="step-num"><span>3</span></span>
+      <div class="step-text">🛡️ Process Safety Emails<div class="step-subtitle">JHAs, Meetings, Fleet Checklists</div></div>
+    </button>
+    <div class="sub-actions">
+      <button class="quick-btn sub-btn" onclick="runQuick('showComplianceDashboard', 'Compliance Dashboard', 'Opening dashboard...')">📊 Compliance Dashboard</button>
+    </div>
+  </div>
+
+  <!-- STEP 4: Generate Task Metadata -->
+  <div class="step-container">
+    <button class="step-btn" id="step4" onclick="runStep(4, 'generateTaskMetadata')">
+      <span class="step-num"><span>4</span></span>
+      <div class="step-text">🎯 Generate Task Metadata<div class="step-subtitle">Build task database</div></div>
+    </button>
+  </div>
+
+  <!-- STEP 5: Review & Schedule -->
+  <div class="step-container">
+    <button class="step-btn" id="step5" onclick="openToDoSchedule()">
+      <span class="step-num"><span>5</span></span>
+      <div class="step-text">📅 Review & Schedule<div class="step-subtitle">Tasks & Trip Planner</div></div>
+    </button>
+    <div class="sub-actions">
       <button class="quick-btn sub-btn" onclick="runQuick('showTripPlannerDialog', 'Trip Planner', 'Opening Trip Planner...')">🗺️ Trip Planner</button>
     </div>
   </div>
 
+  <!-- STEP 6: Save & Backup -->
   <div class="step-container">
-    <button class="step-btn" id="step3" onclick="runStep(3, 'saveHistory')">
-      <span class="step-num"><span>3</span></span>
-      <div class="step-text">Save to History<div class="step-subtitle">Record current state</div></div>
+    <button class="step-btn" id="step6" onclick="runStep(6, 'saveAndBackup')">
+      <span class="step-num"><span>6</span></span>
+      <div class="step-text">💾 Save & Backup<div class="step-subtitle">History + Drive backup</div></div>
     </button>
-  </div>
-
-  <div class="step-container">
-    <button class="step-btn" id="step4" onclick="runStep(4, 'createBackupSnapshot')">
-      <span class="step-num"><span>4</span></span>
-      <div class="step-text">Create Backup<div class="step-subtitle">Save to Drive</div></div>
-    </button>
+    <div class="sub-actions">
+      <button class="quick-btn sub-btn" onclick="runQuick('sendEmailReport', 'Email Report', 'Sending report...')">📧 Send Email Report</button>
+    </div>
   </div>
 
   <div class="reset-link" onclick="resetSteps()">↺ Reset workflow</div>
 
   <div class="divider"></div>
-  <div class="section-title">As Needed</div>
+  <div class="section-title">As Needed (Monthly/Setup)</div>
   <div>
-    <button class="quick-btn" onclick="runQuick('setupCrewVisitConfig', 'Setup Crew Visit Config', 'Setting up Crew Visit Config...')">👷 Crew Visit Config</button>
-    <button class="quick-btn" onclick="runQuick('setupTrainingConfig', 'Setup Training Config', 'Setting up Training Config...')">📚 Training Config</button>
-    <button class="quick-btn" onclick="runQuick('setupTrainingTracking', 'Setup Training Tracking', 'Setting up Training Tracking...')">📋 Training Tracking</button>
+    <button class="quick-btn" onclick="runQuick('setupCrewVisitConfig', 'Crew Visit Config', 'Setting up...')">👷 Crew Visit Config</button>
+    <button class="quick-btn" onclick="runQuick('setupTrainingConfig', 'Training Config', 'Setting up...')">📚 Training Config</button>
+    <button class="quick-btn" onclick="runQuick('setupTrainingTracking', 'Training Tracking', 'Setting up...')">📋 Training Tracking</button>
+    <button class="quick-btn" onclick="runQuick('openComplianceConfig', 'Safety Compliance Config', 'Opening config...')">🛡️ Compliance Config</button>
   </div>
 
   <div class="divider"></div>
   <div class="section-title">Quick Actions</div>
   <div>
-    <button class="quick-btn" onclick="runQuick('generateGloveSwaps', 'Generate Glove Swaps', 'Updating Glove Swaps report...')">🧤 Gloves</button>
-    <button class="quick-btn" onclick="runQuick('generateSleeveSwaps', 'Generate Sleeve Swaps', 'Updating Sleeve Swaps report...')">💪 Sleeves</button>
-    <button class="quick-btn" onclick="runQuick('updatePurchaseNeeds', 'Update Purchase Needs', 'Calculating purchase requirements...')">🛒 Purchase</button>
-    <button class="quick-btn" onclick="runQuick('showItemHistoryLookup', 'Item History Lookup', 'Opening history lookup dialog...')">🔍 Lookup</button>
+    <button class="quick-btn" onclick="runQuick('showItemHistoryLookup', 'Item History Lookup', 'Opening...')">🔍 Item Lookup</button>
+    <button class="quick-btn" onclick="runQuick('showTaskDashboard', 'Task Dashboard', 'Opening...')">📊 Task Dashboard</button>
+    <button class="quick-btn" onclick="runQuick('showTimeBreakdownDialog', 'Daily Accomplishments', 'Opening...')">📝 Accomplishments</button>
   </div>
 
   <div class="divider"></div>
@@ -184,6 +216,7 @@
         showStatus('Error: ' + e, 'error');
       })[func]();
     }
+
     function runQuick(func, title, message) {
       document.querySelectorAll('.quick-btn').forEach(function(b){b.disabled=true;});
       showStatus('⏳ ' + message);
@@ -195,39 +228,53 @@
         showStatus('Error: ' + e, 'error');
       })[func]();
     }
-    function resetSteps() {
-      for(var i=1;i<=4;i++){var b=document.getElementById('step'+i);b.classList.remove('done','running');b.disabled=false;}
-      showStatus('Reset', 'success'); setTimeout(hideStatus, 1500);
-    }
-    function showStatus(m, t) { var s=document.getElementById('statusBar'); s.textContent=m; s.className='status-bar show '+(t||''); }
-    function hideStatus() { document.getElementById('statusBar').className='status-bar'; }
 
-    function openToDoConfig() {
-      showStatus('⏳ Opening To Do Config...');
+    function openCrewImport() {
+      var btn = document.getElementById('step1');
+      btn.classList.add('running');
+      showStatus('⏳ Opening Crew Import...');
       google.script.run.withSuccessHandler(function() {
+        btn.classList.remove('running'); btn.classList.add('done');
         hideStatus();
       }).withFailureHandler(function(e) {
+        btn.classList.remove('running');
         showStatus('Error: ' + e, 'error');
-      }).showToDoConfig();
+      }).showCrewImportDialog();
+    }
+
+    function openSafetyEmails() {
+      var btn = document.getElementById('step3');
+      btn.classList.add('running');
+      showStatus('⏳ Opening Safety Emails...');
+      google.script.run.withSuccessHandler(function() {
+        btn.classList.remove('running'); btn.classList.add('done');
+        hideStatus();
+      }).withFailureHandler(function(e) {
+        btn.classList.remove('running');
+        showStatus('Error: ' + e, 'error');
+      }).showProcessSafetyEmailsDialog();
     }
 
     function openToDoSchedule() {
-      showStatus('⏳ Opening To Do Schedule...');
+      var btn = document.getElementById('step5');
+      if (btn) btn.classList.add('running');
+      showStatus('⏳ Opening Tasks & Calendar...');
       google.script.run.withSuccessHandler(function() {
+        if (btn) { btn.classList.remove('running'); btn.classList.add('done'); }
         hideStatus();
       }).withFailureHandler(function(e) {
+        if (btn) btn.classList.remove('running');
         showStatus('Error: ' + e, 'error');
       }).showToDoSchedule();
     }
 
-    function openScheduleDialog(tab) {
-      showStatus('⏳ Opening Schedule...');
-      google.script.run.withSuccessHandler(function() {
-        hideStatus();
-      }).withFailureHandler(function(e) {
-        showStatus('Error: ' + e, 'error');
-      }).showScheduleDialog(tab || 'schedule');
+    function resetSteps() {
+      for(var i=1;i<=6;i++){var b=document.getElementById('step'+i);if(b){b.classList.remove('done','running');b.disabled=false;}}
+      showStatus('Reset', 'success'); setTimeout(hideStatus, 1500);
     }
+
+    function showStatus(m, t) { var s=document.getElementById('statusBar'); s.textContent=m; s.className='status-bar show '+(t||''); }
+    function hideStatus() { document.getElementById('statusBar').className='status-bar'; }
 
     function toggleManualTask() {
       var form = document.getElementById('manualTaskForm');

@@ -1,0 +1,221 @@
+# Weekly Workflow Guide
+
+## 🧤 Monday Morning Workflow
+
+Complete these 6 steps every Monday to start your week organized and up-to-date.
+
+**Access the Workflow:** `Glove Manager` → `📱 Quick Actions` (opens sidebar)
+
+---
+
+## Step 1: 📥 Import Crew Makeup
+
+**What it does:** Updates employee locations and job numbers based on the superintendent's weekly crew assignment spreadsheet.
+
+**How to do it:**
+1. Click **Step 1: Import Crew Makeup** in the sidebar
+2. Drag & drop or select the Excel file from the superintendent
+3. Select the sheet tab for the current week (e.g., "2.3.26")
+4. Review the detected crews and proposed changes
+5. Click **Apply Changes** to update the Employees sheet
+
+**Expected outcome:** 
+- Employee locations updated to match crew assignments
+- Job numbers assigned with positions (e.g., 013-26.1, 013-26.2)
+- Changes logged to Employee History
+
+**Troubleshooting:**
+- If employees aren't matched, check for name spelling differences
+- Hidden rows in Excel are automatically skipped
+- Special statuses (Vacation, Light Duty, Layoff) are detected automatically
+
+---
+
+## Step 2: 📊 Generate All Reports
+
+**What it does:** Updates all swap reports and purchase needs based on current inventory and employee assignments.
+
+**How to do it:**
+1. Click **Step 2: Generate All Reports** in the sidebar
+2. Wait for completion (usually 10-30 seconds)
+
+**Expected outcome:**
+- Glove Swaps sheet updated with upcoming changeouts
+- Sleeve Swaps sheet updated with upcoming changeouts
+- Purchase Needs calculated based on inventory levels
+- Reclaims checked for returned items
+
+**Sub-actions available:**
+- 🧤 **Gloves** - Run only glove swaps report
+- 💪 **Sleeves** - Run only sleeve swaps report
+- 🛒 **Purchase** - Run only purchase needs calculation
+
+---
+
+## Step 3: 🛡️ Process Safety Emails
+
+**What it does:** Scans Gmail for JHAs, Safety Meeting Reports, and Fleet Checklists. Extracts equipment issues and tracks crew compliance.
+
+**How to do it:**
+1. Click **Step 3: Process Safety Emails** in the sidebar
+2. Select date range (default: 7 days, or use "Only new emails since last run")
+3. Click **Process Emails**
+4. Review the compliance grid that appears
+
+**Expected outcome:**
+- Safety Reports sheet updated with equipment issues (fire extinguishers, hot sticks, etc.)
+- Safety Compliance sheet updated with ✅/❌ for each crew's JHAs and weekly meetings
+- Missing report tasks created in Task Metadata for crews past deadline
+
+**Sub-actions available:**
+- 📊 **Compliance Dashboard** - View current week + 4-week compliance trends
+
+**First-time setup:**
+- Run `Glove Manager → 🛡️ Safety Reports → ⚙️ Setup Safety Reports Sheet` first
+- Grant Gmail and Drive permissions when prompted
+
+---
+
+## Step 4: 🎯 Generate Task Metadata
+
+**What it does:** Consolidates all pending tasks from multiple sources into the Task Metadata sheet - your single source of truth.
+
+**How to do it:**
+1. Click **Step 4: Generate Task Metadata** in the sidebar
+2. Wait for completion (usually 5-15 seconds)
+
+**Expected outcome:**
+- Task Metadata sheet updated with tasks from:
+  - Glove Swaps (pending changeouts)
+  - Sleeve Swaps (pending changeouts)
+  - Reclaims (pending pickups)
+  - Training Tracking (monthly training)
+  - Manual Tasks (your custom tasks)
+  - Expiring Certs (certifications needing renewal)
+  - Safety Reports (equipment issues)
+- Existing scheduled dates/times preserved
+- Phone numbers enriched from Employees sheet
+
+**Note:** This step uses "smart update" logic - it won't overwrite your scheduling work, just refreshes source data.
+
+---
+
+## Step 5: 📅 Review & Schedule
+
+**What it does:** Opens the Tasks & Calendar dialog where you can review, schedule, and manage all your tasks for the week.
+
+**How to do it:**
+1. Click **Step 5: Review & Schedule** in the sidebar
+2. Use the **Task List** tab to see all pending tasks
+3. Drag tasks to calendar dates or use the date picker
+4. Set start/end times for scheduled tasks
+5. Use the **Trip Planner** to optimize multi-location routes
+
+**Expected outcome:**
+- Tasks assigned to specific dates
+- Start/end times set for day planning
+- Route optimized to minimize drive time
+
+**Sub-actions available:**
+- 📋 **Tasks & Calendar** - Full scheduling interface
+- 🗺️ **Trip Planner** - Route optimization for field trips
+
+**Tips:**
+- Overdue tasks show with 🔴 red indicator
+- Due this week shows 🟠 orange indicator
+- Use Trip Planner for days with multiple locations
+- Cert tasks can be handled by phone (office work)
+
+---
+
+## Step 6: 💾 Save & Backup
+
+**What it does:** Saves current state to history sheets and creates a backup snapshot in Google Drive.
+
+**How to do it:**
+1. Click **Step 6: Save & Backup** in the sidebar
+2. Wait for completion confirmation
+
+**Expected outcome:**
+- Gloves History updated with any changes
+- Sleeves History updated with any changes
+- Backup file created in the Backups folder on Drive
+
+**Sub-actions available:**
+- 📧 **Send Email Report** - Manually trigger weekly email report (auto-sends Monday 12 PM if configured)
+
+---
+
+## "As Needed" Actions
+
+These are monthly or setup tasks, not part of the weekly workflow:
+
+| Action | When to Use |
+|--------|-------------|
+| 📜 **Manage Certs** | Monthly - Import cert expiration dates from Excel |
+| 👷 **Crew Visit Config** | Setup - Configure which crews to visit and frequency |
+| 📚 **Training Config** | Setup - Configure monthly training topics |
+| 📋 **Training Tracking** | Setup - Initialize training tracking sheet |
+| 🛡️ **Compliance Config** | Setup - Configure which crews/days to exclude from compliance |
+
+---
+
+## Quick Actions
+
+Always-available utilities:
+
+| Action | Purpose |
+|--------|---------|
+| 🔍 **Item Lookup** | Search for glove/sleeve history by item number |
+| 📊 **Task Dashboard** | View task statistics and health metrics |
+| 📝 **Accomplishments** | Generate daily/weekly accomplishment summaries for timesheets |
+
+---
+
+## Troubleshooting
+
+### "Dialog shows NULL or no data"
+- This usually means the data transfer limit was hit
+- Click the refresh button in the dialog
+- If persists, run Generate Task Metadata again
+
+### "Clasp push hangs or fails"
+1. Run `node validate-syntax.js` to check for syntax errors
+2. Check for duplicate `*/` in JSDoc comments
+3. Run `Remove-Item src/*.js -Force` to remove duplicate files
+
+### "Safety emails not processing"
+1. Ensure Gmail permissions are granted
+2. Check that emails match expected subject patterns
+3. Try increasing the date range
+
+### "Crew import not matching employees"
+1. Check for name spelling differences in Excel
+2. Hidden rows in Excel are skipped - unhide if needed
+3. Use the "Add New Employee" option for genuinely new hires
+
+---
+
+## Weekly Checklist
+
+Copy this checklist to track your Monday workflow:
+
+```
+□ Step 1: Import Crew Makeup (upload superintendent's Excel)
+□ Step 2: Generate All Reports (update swaps and purchase needs)
+□ Step 3: Process Safety Emails (check JHAs and compliance)
+□ Step 4: Generate Task Metadata (refresh task database)
+□ Step 5: Review & Schedule (plan your week)
+□ Step 6: Save & Backup (preserve current state)
+```
+
+---
+
+## Version History
+
+- **February 5, 2026** - Initial workflow documentation created
+- Reorganized sidebar from 4 steps to 6 steps
+- Added Safety Reports as Step 3
+- Moved Crew Import to Step 1 (weekly task)
+- Moved Cert Import to "As Needed" (monthly task)
+- Added Compliance Dashboard visibility

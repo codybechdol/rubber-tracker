@@ -89,8 +89,8 @@ function formatDateForDisplayRoute(date) {
  */
 function showTripPlannerDialog() {
   var html = HtmlService.createHtmlOutputFromFile('TripPlanner')
-    .setWidth(1100)
-    .setHeight(750)
+    .setWidth(1400)
+    .setHeight(900)
     .setTitle('Trip Planner');
   SpreadsheetApp.getUi().showModalDialog(html, '🗺️ Trip Planner');
 }
@@ -597,11 +597,21 @@ function collectTasksForTripPlanner() {
     var expiringSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Expiring Certs');
     if (expiringSheet) {
       var certData = expiringSheet.getDataRange().getValues();
+      Logger.log('Expiring Certs sheet has ' + certData.length + ' rows');
       for (var r = 1; r < certData.length; r++) {
         // Column B (index 1) has cert type
-        certTypesByRow[r + 1] = String(certData[r][1] || '').trim();
+        var certType = String(certData[r][1] || '').trim();
+        certTypesByRow[r + 1] = certType;
+        // Log a few samples
+        if (r <= 5 || r === 533 || r === 534 || r === 535) {
+          Logger.log('certTypesByRow[' + (r+1) + '] = "' + certType + '" (employee: ' + certData[r][0] + ')');
+        }
       }
       Logger.log('Pre-loaded ' + Object.keys(certTypesByRow).length + ' cert types from Expiring Certs');
+      // Log specific rows we're looking for
+      Logger.log('Row 534 cert type: ' + certTypesByRow[534]);
+      Logger.log('Row 251 cert type: ' + certTypesByRow[251]);
+      Logger.log('Row 140 cert type: ' + certTypesByRow[140]);
     }
   } catch (e) {
     Logger.log('Error pre-loading cert types: ' + e);
@@ -689,11 +699,10 @@ function collectTasksForTripPlanner() {
         var certTypeName = sourceTask.itemType || sourceTask.certType || sourceTask.item || '';
 
         // If still empty, look it up from cached cert types
-        if (!certTypeName && sourceTask.rowIndex && (sourceTask.source === 'Expiring Certs' || sourceTask.sheetName === 'Expiring Certs')) {
+        var taskSource = (sourceTask.source || sourceTask.sheetName || '').toLowerCase();
+        if (!certTypeName && sourceTask.rowIndex && taskSource.indexOf('expiring') !== -1) {
           certTypeName = certTypesByRow[sourceTask.rowIndex] || '';
-          if (certTypeName) {
-            Logger.log('Used cached cert type for row ' + sourceTask.rowIndex + ': ' + certTypeName);
-          }
+          Logger.log('Cert lookup: row=' + sourceTask.rowIndex + ' source=' + taskSource + ' result=' + certTypeName);
         }
 
         officeTasks.push({
