@@ -178,7 +178,7 @@
         .withSuccessHandler(function() {
           btn.disabled = false;
           btn.textContent = '💾 Save Changes';
-          showStatus('✅ Configuration saved successfully!', 'success');
+          showStatus('✅ Configuration saved & current week updated!', 'success');
           setTimeout(function() { google.script.host.close(); }, 1500);
         })
         .withFailureHandler(function(e) {

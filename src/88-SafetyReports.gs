@@ -363,6 +363,10 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode) {
         tasksCreated = createMissingReportTasks(complianceData);
       }
 
+      // Also finalize any past weeks that still show "Pending"
+      var pastWeekResult = finalizePastWeeksCompliance();
+      tasksCreated += pastWeekResult.tasksCreated;
+
       // Add compliance stats to result
       result.compliance = {
         weekStart: Utilities.formatDate(complianceData.weekStart, Session.getScriptTimeZone(), "MM/dd"),
@@ -1310,6 +1314,56 @@ function lookupForemanPhoneByJobNumber(jobNumber) {
 }
 
 /**
+ * Looks up location for a crew by job number
+ * Uses classification priority to find the foreman/lead and get their location
+ *
+ * @param {string} jobNumber - Job number (e.g., "013-26")
+ * @returns {string} - Location or empty string
+ */
+function lookupLocationByJobNumber(jobNumber) {
+  if (!jobNumber) return "";
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var employeeSheet = ss.getSheetByName("Employees");
+  if (!employeeSheet) return "";
+
+  var data = employeeSheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Find column indices dynamically
+  var jobCol = -1, classCol = -1, locationCol = -1;
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === "job number") jobCol = h;
+    if (header === "job classification" || header === "classification") classCol = h;
+    if (header === "location") locationCol = h;
+  }
+
+  if (jobCol === -1 || classCol === -1 || locationCol === -1) return "";
+
+  // Find all employees for this job number and pick the highest priority
+  var bestLocation = "";
+  var bestPriority = 999;
+
+  for (var i = 1; i < data.length; i++) {
+    var empJobNumber = String(data[i][jobCol]).trim();
+    var classification = String(data[i][classCol]).trim();
+    var location = data[i][locationCol] || "";
+
+    // Match job number prefix
+    if (empJobNumber && empJobNumber.indexOf(jobNumber) === 0) {
+      var priority = getClassificationPriority(classification);
+      if (priority < bestPriority) {
+        bestPriority = priority;
+        bestLocation = location;
+      }
+    }
+  }
+
+  return bestLocation;
+}
+
+/**
  * Extracts vehicle number from fleet checklist body
  * Supports formats: numeric (578), X# format (X1, X2), and labeled patterns
  *
@@ -1754,6 +1808,68 @@ function refreshSafetySheets() {
 // JHA (daily) and Weekly Safety Meeting compliance per crew
 // Week = Sunday to Saturday, Deadline = Saturday 11:59 PM
 // ============================================================================
+
+/**
+ * Backfills compliance data for past weeks
+ * Useful after rebuilding the Safety Compliance sheet
+ *
+ * @param {number} weeksBack - Number of past weeks to calculate (default 4)
+ */
+function backfillComplianceData(weeksBack) {
+  weeksBack = weeksBack || 4;
+
+  var today = new Date();
+  var tz = Session.getScriptTimeZone();
+  var weeksProcessed = 0;
+
+  Logger.log("=== Backfilling compliance data for " + weeksBack + " weeks ===");
+
+  // Start with current week and go backwards
+  for (var w = 0; w <= weeksBack; w++) {
+    var targetDate = new Date(today);
+    targetDate.setDate(today.getDate() - (w * 7));
+
+    var weekBounds = getWeekBoundaries(targetDate);
+    var weekStartStr = Utilities.formatDate(weekBounds.weekStart, tz, "MM/dd/yyyy");
+
+    Logger.log("Processing week " + (w + 1) + ": " + weekStartStr);
+
+    try {
+      var complianceData = calculateSafetyCompliance(weekBounds.weekStart);
+      updateComplianceSheet(complianceData);
+
+      // Create missing report tasks for past weeks
+      if (complianceData.isPastDeadline) {
+        createMissingReportTasks(complianceData);
+      }
+
+      weeksProcessed++;
+      Logger.log("  - Processed: " + complianceData.compliantCount + " compliant, " +
+                 complianceData.missingCount + " missing out of " + complianceData.totalCrews + " crews");
+    } catch (e) {
+      Logger.log("  - Error: " + e.toString());
+    }
+  }
+
+  // Apply formatting
+  formatComplianceSheetByWeek();
+
+  Logger.log("=== Backfill complete. Processed " + weeksProcessed + " weeks ===");
+
+  return weeksProcessed;
+}
+
+/**
+ * Menu function to backfill compliance data after rebuilding the sheet
+ */
+function menuBackfillComplianceData() {
+  var weeksBack = 4; // Process current week + 4 past weeks
+  var weeksProcessed = backfillComplianceData(weeksBack);
+
+  Browser.msgBox("✅ Backfill complete!\n\n" +
+    "Processed " + weeksProcessed + " weeks of compliance data.\n\n" +
+    "The sheet now contains compliance records for the current week and " + weeksBack + " previous weeks.");
+}
 
 /**
  * Creates the Safety Compliance tracking sheet for historical data
@@ -2450,6 +2566,448 @@ function updateComplianceSheet(complianceData) {
   }
 
   Logger.log("Updated Safety Compliance sheet for week of " + weekStartStr);
+
+  // Apply visual formatting to make weeks easier to see
+  formatComplianceSheetByWeek();
+}
+
+/**
+ * Formats the Safety Compliance sheet with alternating colors for each work week
+ * and adds visual separators between weeks for easier reading
+ */
+function formatComplianceSheetByWeek() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Safety Compliance");
+
+  if (!sheet || sheet.getLastRow() < 2) {
+    Logger.log("Safety Compliance sheet empty or not found");
+    return;
+  }
+
+  var data = sheet.getDataRange().getValues();
+  var tz = Session.getScriptTimeZone();
+
+  // Define alternating week colors
+  var weekColors = [
+    "#FFFFFF",  // White
+    "#E3F2FD"   // Light blue
+  ];
+
+  // Track weeks and assign colors
+  var weekColorMap = {};
+  var colorIndex = 0;
+  var lastWeekKey = null;
+
+  // First pass: identify unique weeks and assign colors
+  for (var i = 1; i < data.length; i++) {
+    var weekStart = data[i][0];
+    if (!weekStart) continue;
+
+    var weekKey = Utilities.formatDate(new Date(weekStart), tz, "yyyy-MM-dd");
+
+    if (weekKey !== lastWeekKey) {
+      if (!weekColorMap[weekKey]) {
+        weekColorMap[weekKey] = weekColors[colorIndex % 2];
+        colorIndex++;
+      }
+      lastWeekKey = weekKey;
+    }
+  }
+
+  // Second pass: apply colors and borders
+  lastWeekKey = null;
+  var weekStartRows = []; // Track where each new week starts
+
+  for (var i = 1; i < data.length; i++) {
+    var weekStart = data[i][0];
+    if (!weekStart) continue;
+
+    var weekKey = Utilities.formatDate(new Date(weekStart), tz, "yyyy-MM-dd");
+    var rowNum = i + 1; // 1-based
+
+    // Apply background color for this row
+    var bgColor = weekColorMap[weekKey] || "#FFFFFF";
+    sheet.getRange(rowNum, 1, 1, 15).setBackground(bgColor);
+
+    // If this is a new week, add a top border
+    if (weekKey !== lastWeekKey) {
+      weekStartRows.push(rowNum);
+
+      // Add thick top border to separate from previous week
+      sheet.getRange(rowNum, 1, 1, 15).setBorder(
+        true,   // top
+        null,   // left
+        null,   // bottom
+        null,   // right
+        null,   // vertical
+        null,   // horizontal
+        "#1565C0", // color (blue)
+        SpreadsheetApp.BorderStyle.SOLID_MEDIUM // style
+      );
+
+      lastWeekKey = weekKey;
+    }
+  }
+
+  // Sort by Week Start descending (most recent first) then by Job Number
+  if (sheet.getLastRow() > 1) {
+    var dataRange = sheet.getRange(2, 1, sheet.getLastRow() - 1, 15);
+    dataRange.sort([
+      {column: 1, ascending: false},  // Week Start descending
+      {column: 3, ascending: true}     // Job Number ascending
+    ]);
+
+    // Re-apply formatting after sort
+    applyWeekColorsAfterSort(sheet);
+  }
+
+  Logger.log("Applied week formatting to Safety Compliance sheet");
+}
+
+/**
+ * Re-applies week colors after sorting the sheet
+ */
+function applyWeekColorsAfterSort(sheet) {
+  var data = sheet.getDataRange().getValues();
+  var tz = Session.getScriptTimeZone();
+
+  var weekColors = ["#FFFFFF", "#E3F2FD"];
+  var colorIndex = 0;
+  var lastWeekKey = null;
+
+  for (var i = 1; i < data.length; i++) {
+    var weekStart = data[i][0];
+    if (!weekStart) continue;
+
+    var weekKey = Utilities.formatDate(new Date(weekStart), tz, "yyyy-MM-dd");
+    var rowNum = i + 1;
+
+    // Check if this is a new week
+    if (weekKey !== lastWeekKey) {
+      colorIndex++;
+      lastWeekKey = weekKey;
+
+      // Add separator border
+      sheet.getRange(rowNum, 1, 1, 15).setBorder(
+        true, null, null, null, null, null,
+        "#1565C0",
+        SpreadsheetApp.BorderStyle.SOLID_MEDIUM
+      );
+    }
+
+    // Apply alternating background
+    var bgColor = weekColors[colorIndex % 2];
+    sheet.getRange(rowNum, 1, 1, 15).setBackground(bgColor);
+  }
+}
+
+/**
+ * Fixes the Safety Compliance sheet headers if columns are misaligned
+ * This repairs sheets where headers don't match the data columns
+ */
+function fixSafetyComplianceHeaders() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Safety Compliance");
+
+  if (!sheet) {
+    Browser.msgBox("❌ Safety Compliance sheet not found.");
+    return;
+  }
+
+  // Expected headers (15 columns: A-O)
+  var expectedHeaders = [
+    "Week Start", "Week End", "Job Number", "Foreman",
+    "JHA Sun", "JHA Mon", "JHA Tue", "JHA Wed", "JHA Thu", "JHA Fri", "JHA Sat",
+    "Weekly Meeting", "Monthly Checklist", "Status", "Created Date"
+  ];
+
+  // Get current headers
+  var currentHeaders = sheet.getRange(1, 1, 1, 16).getValues()[0];
+  Logger.log("Current headers: " + JSON.stringify(currentHeaders));
+
+  // Check if column M (13) says "Status" instead of "Monthly Checklist"
+  var colMHeader = String(currentHeaders[12] || "").toLowerCase().trim();
+  var colNHeader = String(currentHeaders[13] || "").toLowerCase().trim();
+
+  Logger.log("Column M (13) header: " + colMHeader);
+  Logger.log("Column N (14) header: " + colNHeader);
+
+  // Case 1: Headers are only 14 columns (missing Monthly Checklist)
+  // Column M = "Status", Column N = "Created Date"
+  if (colMHeader.indexOf("status") !== -1 && colNHeader.indexOf("created") !== -1) {
+    Logger.log("Detected: Headers missing Monthly Checklist column. Need to insert column M.");
+
+    // Insert a new column at position 13 (column M)
+    sheet.insertColumnAfter(12); // Insert after Weekly Meeting (column L)
+
+    // Set the correct headers for columns M, N, O
+    sheet.getRange(1, 13).setValue("Monthly Checklist");
+    sheet.getRange(1, 14).setValue("Status");
+    sheet.getRange(1, 15).setValue("Created Date");
+
+    // Format the header row
+    sheet.getRange(1, 13, 1, 3)
+      .setFontWeight("bold")
+      .setBackground("#4A86E8")
+      .setFontColor("white");
+
+    // Set column widths
+    sheet.setColumnWidth(13, 110);
+    sheet.setColumnWidth(14, 100);
+    sheet.setColumnWidth(15, 110);
+
+    // Fill new Monthly Checklist column with N/A for existing rows
+    var lastRow = sheet.getLastRow();
+    if (lastRow > 1) {
+      sheet.getRange(2, 13, lastRow - 1, 1).setValue("N/A");
+    }
+
+    // Delete column P if it's now empty or duplicate
+    var colPData = sheet.getRange(1, 16, 1, 1).getValue();
+    if (!colPData || colPData === "") {
+      // Column P is empty, we can delete it
+      sheet.deleteColumn(16);
+    }
+
+    Browser.msgBox("✅ Fixed! Inserted 'Monthly Checklist' column (M).\n\n" +
+      "- Column M: Monthly Checklist (set to N/A for existing rows)\n" +
+      "- Column N: Status\n" +
+      "- Column O: Created Date");
+  } else {
+    // Case 2: Just rewrite all headers to be correct
+    sheet.getRange(1, 1, 1, expectedHeaders.length).setValues([expectedHeaders]);
+    sheet.getRange(1, 1, 1, expectedHeaders.length)
+      .setFontWeight("bold")
+      .setBackground("#4A86E8")
+      .setFontColor("white");
+
+    // Set column widths
+    sheet.setColumnWidth(1, 100);  // Week Start
+    sheet.setColumnWidth(2, 100);  // Week End
+    sheet.setColumnWidth(3, 90);   // Job Number
+    sheet.setColumnWidth(4, 120);  // Foreman
+    for (var i = 5; i <= 11; i++) {
+      sheet.setColumnWidth(i, 70); // JHA columns
+    }
+    sheet.setColumnWidth(12, 100); // Weekly Meeting
+    sheet.setColumnWidth(13, 110); // Monthly Checklist
+    sheet.setColumnWidth(14, 100); // Status
+    sheet.setColumnWidth(15, 110); // Created Date
+
+    Browser.msgBox("✅ Headers have been corrected to 15 columns (A-O).");
+  }
+
+  Logger.log("Headers fixed successfully");
+}
+
+/**
+ * Menu function to manually reformat the Safety Compliance sheet
+ */
+function reformatSafetyComplianceSheet() {
+  formatComplianceSheetByWeek();
+  Browser.msgBox("✅ Safety Compliance sheet reformatted with work week separators!");
+}
+
+/**
+ * Finalizes past weeks in Safety Compliance sheet that still show "Pending" status
+ * Updates ⏳ to ❌ for any past-deadline items and creates missing report tasks
+ *
+ * @returns {Object} - Summary of what was updated
+ */
+function finalizePastWeeksCompliance() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Safety Compliance");
+
+  if (!sheet || sheet.getLastRow() < 2) {
+    Logger.log("Safety Compliance sheet not found or empty");
+    return { updatedRows: 0, tasksCreated: 0 };
+  }
+
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+  var tz = Session.getScriptTimeZone();
+
+  var data = sheet.getDataRange().getValues();
+  var updatedRows = 0;
+  var rowsToUpdate = [];
+
+  Logger.log("=== finalizePastWeeksCompliance ===");
+  Logger.log("Today: " + today.toDateString());
+
+  // Scan for past weeks with Pending status
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var weekEnd = row[1]; // Column B: Week End
+    var status = row[13]; // Column N: Status
+
+    if (!weekEnd) continue;
+
+    var weekEndDate = new Date(weekEnd);
+    weekEndDate.setHours(23, 59, 59, 999);
+
+    // Check if this week has passed its deadline but still shows Pending
+    if (weekEndDate < today && status === "Pending") {
+      var rowNum = i + 1;
+      var jobNumber = row[2];
+      var foreman = row[3];
+
+      Logger.log("Found past week needing update: Row " + rowNum + ", Job " + jobNumber + ", Week End " + weekEndDate.toDateString());
+
+      // Check each JHA column (E-K, indices 4-10)
+      var hasMissing = false;
+      var updatedJha = [];
+      for (var d = 4; d <= 10; d++) {
+        var jhaStatus = row[d];
+        if (jhaStatus === "⏳") {
+          updatedJha.push({ col: d + 1, value: "❌" }); // Convert to 1-based column
+          hasMissing = true;
+        }
+      }
+
+      // Check Weekly Meeting (Column L, index 11)
+      var weeklyMeeting = row[11];
+      var updatedMeeting = null;
+      if (weeklyMeeting === "⏳") {
+        updatedMeeting = "❌";
+        hasMissing = true;
+      }
+
+      // Determine new status
+      var newStatus = hasMissing ? "Missing Reports" : "Complete";
+
+      rowsToUpdate.push({
+        rowNum: rowNum,
+        jobNumber: jobNumber,
+        foreman: foreman,
+        weekStart: row[0],
+        weekEnd: weekEnd,
+        jhaUpdates: updatedJha,
+        meetingUpdate: updatedMeeting,
+        newStatus: newStatus,
+        hasMissing: hasMissing
+      });
+    }
+  }
+
+  // Apply updates
+  for (var u = 0; u < rowsToUpdate.length; u++) {
+    var update = rowsToUpdate[u];
+
+    // Update JHA columns
+    for (var j = 0; j < update.jhaUpdates.length; j++) {
+      sheet.getRange(update.rowNum, update.jhaUpdates[j].col).setValue(update.jhaUpdates[j].value);
+    }
+
+    // Update Weekly Meeting
+    if (update.meetingUpdate) {
+      sheet.getRange(update.rowNum, 12).setValue(update.meetingUpdate); // Column L
+    }
+
+    // Update Status
+    sheet.getRange(update.rowNum, 14).setValue(update.newStatus); // Column N
+
+    updatedRows++;
+    Logger.log("Updated row " + update.rowNum + ": " + update.jobNumber + " -> " + update.newStatus);
+  }
+
+  // Now create tasks for missing reports
+  var tasksCreated = 0;
+  var taskSheet = ss.getSheetByName("Task Metadata");
+
+  if (taskSheet) {
+    var existingTasks = {};
+    var taskData = taskSheet.getDataRange().getValues();
+    for (var t = 1; t < taskData.length; t++) {
+      var taskKey = taskData[t][0]; // TaskKey column
+      if (taskKey) existingTasks[taskKey] = true;
+    }
+
+    for (var m = 0; m < rowsToUpdate.length; m++) {
+      var missingRow = rowsToUpdate[m];
+      if (!missingRow.hasMissing) continue;
+
+      var weekStartStr = Utilities.formatDate(new Date(missingRow.weekStart), tz, "MM-dd-yyyy");
+      var taskKey = "SafetyCompliance_" + missingRow.jobNumber + "_" + weekStartStr;
+
+      if (existingTasks[taskKey]) {
+        Logger.log("Task already exists: " + taskKey);
+        continue;
+      }
+
+      // Build task description
+      var missingItems = [];
+      if (missingRow.jhaUpdates.length > 0) {
+        missingItems.push(missingRow.jhaUpdates.length + " JHA(s)");
+      }
+      if (missingRow.meetingUpdate) {
+        missingItems.push("Weekly Meeting");
+      }
+
+      var weekStartDisplay = Utilities.formatDate(new Date(missingRow.weekStart), tz, "MM/dd/yyyy");
+      var taskDescription = "Missing: " + missingItems.join(" + ") + " (Week of " + weekStartDisplay + ")";
+
+      // Look up foreman phone
+      var phone = lookupForemanPhoneByJobNumber(missingRow.jobNumber);
+
+      // Create task in Task Metadata
+      var now = new Date();
+      var newTask = [
+        taskKey,                           // A: TaskKey
+        missingRow.jobNumber,              // B: Employee (using job number as identifier)
+        "Missing Safety Report",           // C: TaskType
+        missingItems.join(" + "),          // D: ItemType
+        "",                                // E: ItemDetails
+        lookupLocationByJobNumber(missingRow.jobNumber), // F: Location
+        phone || "",                       // G: PhoneNumber
+        now,                               // H: DueDate (immediate)
+        "",                                // I: ScheduledDate
+        "",                                // J: StartTime
+        "",                                // K: EndTime
+        "Pending",                         // L: Status
+        "High",                            // M: Priority
+        taskDescription,                   // N: Notes
+        now,                               // O: CreatedDate
+        "",                                // P: CompletedDate
+        "Safety Compliance",               // Q: SourceSheet
+        missingRow.rowNum,                 // R: RowIndex
+        "FALSE",                           // S: IsOffice
+        "FALSE",                           // T: NotifiedDate
+        "FALSE",                           // U: IsDeleted
+        "",                                // V: UpdatedDate
+        missingRow.foreman || ""           // W: Foreman
+      ];
+
+      taskSheet.appendRow(newTask);
+      tasksCreated++;
+      Logger.log("Created task: " + taskKey);
+    }
+  }
+
+  Logger.log("Summary: Updated " + updatedRows + " rows, created " + tasksCreated + " tasks");
+
+  return {
+    updatedRows: updatedRows,
+    tasksCreated: tasksCreated,
+    details: rowsToUpdate
+  };
+}
+
+/**
+ * Menu function to finalize past weeks and create missing report tasks
+ */
+function menuFinalizePastWeeks() {
+  var result = finalizePastWeeksCompliance();
+
+  if (result.updatedRows === 0 && result.tasksCreated === 0) {
+    Browser.msgBox("✅ All past weeks are already finalized. No updates needed.");
+  } else {
+    Browser.msgBox("✅ Finalized " + result.updatedRows + " rows and created " + result.tasksCreated + " missing report tasks.");
+  }
+
+  // Re-apply formatting
+  if (result.updatedRows > 0) {
+    formatComplianceSheetByWeek();
+  }
 }
 
 /**
@@ -2741,6 +3299,106 @@ function getAllCrewComplianceTrends(weeksBack) {
 }
 
 /**
+ * Gets compliance history organized by week for dashboard display
+ * @param {number} weeksBack - Number of past weeks to retrieve (excluding current week)
+ * @returns {Array} Array of week objects with crews data
+ */
+function getComplianceHistoryByWeek(weeksBack) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Safety Compliance");
+
+  if (!sheet || sheet.getLastRow() < 2) {
+    return [];
+  }
+
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  var tz = Session.getScriptTimeZone();
+
+  // Get current week boundaries to exclude
+  var today = new Date();
+  var currentWeekBounds = getWeekBoundaries(today);
+
+  // Calculate cutoff date
+  var cutoffDate = new Date(currentWeekBounds.weekStart);
+  cutoffDate.setDate(cutoffDate.getDate() - (weeksBack * 7));
+
+  // Group data by week
+  var weekMap = {};
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var weekStart = row[0]; // Column A: Week Start
+    var weekEnd = row[1];   // Column B: Week End
+    var jobNumber = row[2]; // Column C: Job Number
+    var foreman = row[3];   // Column D: Foreman
+
+    if (!weekStart || !jobNumber) continue;
+
+    // Skip current week
+    var rowWeekStart = new Date(weekStart);
+    if (rowWeekStart >= currentWeekBounds.weekStart) continue;
+
+    // Skip weeks before cutoff
+    if (rowWeekStart < cutoffDate) continue;
+
+    var weekKey = Utilities.formatDate(new Date(weekStart), tz, "yyyy-MM-dd");
+
+    if (!weekMap[weekKey]) {
+      weekMap[weekKey] = {
+        weekStart: new Date(weekStart),
+        weekEnd: new Date(weekEnd),
+        weekStartStr: Utilities.formatDate(new Date(weekStart), tz, "MMM d"),
+        weekEndStr: Utilities.formatDate(new Date(weekEnd), tz, "MMM d, yyyy"),
+        crews: [],
+        compliantCount: 0,
+        missingCount: 0,
+        totalCrews: 0
+      };
+    }
+
+    var crewData = {
+      jobNumber: jobNumber,
+      foreman: foreman || '',
+      jha: [],
+      weeklyMeeting: row[11] || 'N/A', // Column L
+      hasMissing: false
+    };
+
+    // JHA columns E-K (indices 4-10)
+    for (var d = 4; d <= 10; d++) {
+      var status = row[d] || 'N/A';
+      crewData.jha.push(status);
+      if (status === '❌') crewData.hasMissing = true;
+    }
+
+    // Check weekly meeting
+    if (crewData.weeklyMeeting === '❌') crewData.hasMissing = true;
+
+    weekMap[weekKey].crews.push(crewData);
+    weekMap[weekKey].totalCrews++;
+
+    if (crewData.hasMissing) {
+      weekMap[weekKey].missingCount++;
+    } else {
+      weekMap[weekKey].compliantCount++;
+    }
+  }
+
+  // Convert to array and sort by date (most recent first)
+  var weeks = [];
+  for (var key in weekMap) {
+    weeks.push(weekMap[key]);
+  }
+
+  weeks.sort(function(a, b) {
+    return b.weekStart - a.weekStart;
+  });
+
+  return weeks;
+}
+
+/**
  * Shows the Compliance Dashboard dialog
  */
 function showComplianceDashboard() {
@@ -2749,67 +3407,122 @@ function showComplianceDashboard() {
   var complianceData = calculateSafetyCompliance(weekBounds.weekStart);
   var trends = getAllCrewComplianceTrends(4);
 
-  var weekStartStr = Utilities.formatDate(complianceData.weekStart, Session.getScriptTimeZone(), "MM/dd");
-  var weekEndStr = Utilities.formatDate(complianceData.weekEnd, Session.getScriptTimeZone(), "MM/dd/yyyy");
+  var weekStartStr = Utilities.formatDate(complianceData.weekStart, Session.getScriptTimeZone(), "MMM d");
+  var weekEndStr = Utilities.formatDate(complianceData.weekEnd, Session.getScriptTimeZone(), "MMM d, yyyy");
+
+  // Get historical weeks data for collapsible sections
+  var historicalWeeks = getComplianceHistoryByWeek(4);
 
   var html = '<style>' +
-    'body { font-family: Arial, sans-serif; padding: 20px; margin: 0; }' +
+    'body { font-family: Arial, sans-serif; padding: 20px; margin: 0; background: #f5f5f5; }' +
     'h2 { margin-top: 0; color: #1a73e8; font-size: 24px; }' +
-    'h3 { margin: 25px 0 12px 0; color: #333; border-bottom: 2px solid #1a73e8; padding-bottom: 8px; font-size: 18px; }' +
-    '.summary { display: flex; gap: 20px; margin-bottom: 25px; }' +
-    '.stat-box { background: #f8f9fa; border-radius: 10px; padding: 20px; text-align: center; flex: 1; }' +
-    '.stat-box.good { background: #d4edda; border: 2px solid #28a745; }' +
-    '.stat-box.bad { background: #f8d7da; border: 2px solid #dc3545; }' +
-    '.stat-box.pending { background: #fff3cd; border: 2px solid #ffc107; }' +
+    'h3 { margin: 20px 0 12px 0; color: #333; font-size: 18px; }' +
+    '.summary { display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }' +
+    '.stat-box { background: white; border-radius: 10px; padding: 20px; text-align: center; flex: 1; min-width: 120px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }' +
+    '.stat-box.good { background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%); border: 2px solid #28a745; }' +
+    '.stat-box.bad { background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%); border: 2px solid #dc3545; }' +
+    '.stat-box.pending { background: linear-gradient(135deg, #fff3cd 0%, #ffeeba 100%); border: 2px solid #ffc107; }' +
     '.stat-number { font-size: 36px; font-weight: bold; }' +
-    '.stat-label { font-size: 14px; color: #666; margin-top: 8px; }' +
-    'table { width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 20px; }' +
-    'th { background: #1a73e8; color: white; padding: 12px 8px; text-align: center; }' +
-    'td { padding: 10px 8px; text-align: center; border-bottom: 1px solid #ddd; }' +
-    'tr:hover { background: #f5f5f5; }' +
-    '.status-ok { color: #28a745; font-size: 18px; }' +
-    '.status-missing { color: #dc3545; font-weight: bold; font-size: 18px; }' +
-    '.status-pending { color: #ffc107; font-size: 18px; }' +
-    '.status-na { color: #999; }' +
-    '.trend-bad { background: #ffebee; }' +
-    '.trend-warning { background: #fff8e1; }' +
+    '.stat-label { font-size: 13px; color: #555; margin-top: 8px; }' +
+
+    // Week card styles
+    '.week-card { background: white; border-radius: 10px; margin-bottom: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); overflow: hidden; }' +
+    '.week-header { padding: 15px 20px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: background 0.2s; }' +
+    '.week-header:hover { filter: brightness(95%); }' +
+    '.week-header.current { background: linear-gradient(135deg, #1a73e8 0%, #0d47a1 100%); color: white; }' +
+    '.week-header.past { background: linear-gradient(135deg, #6c757d 0%, #495057 100%); color: white; }' +
+    '.week-header.problem { background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); color: white; }' +
+    '.week-header.good { background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%); color: white; }' +
+    '.week-title { font-size: 16px; font-weight: bold; display: flex; align-items: center; gap: 10px; }' +
+    '.week-title i { font-style: normal; }' +
+    '.week-badges { display: flex; gap: 8px; align-items: center; }' +
+    '.week-badge { background: rgba(255,255,255,0.25); padding: 4px 10px; border-radius: 15px; font-size: 12px; }' +
+    '.week-badge.good { background: rgba(40,167,69,0.9); }' +
+    '.week-badge.bad { background: rgba(220,53,69,0.9); }' +
+    '.week-body { display: none; padding: 0; }' +
+    '.week-body.show { display: block; }' +
+    '.chevron { transition: transform 0.2s; font-size: 12px; }' +
+    '.chevron.open { transform: rotate(90deg); }' +
+
+    // Table styles
+    'table { width: 100%; border-collapse: collapse; font-size: 13px; }' +
+    'th { background: #f8f9fa; color: #333; padding: 10px 6px; text-align: center; border-bottom: 2px solid #dee2e6; font-weight: 600; }' +
+    'td { padding: 8px 6px; text-align: center; border-bottom: 1px solid #eee; }' +
+    'tr:hover { background: #f8f9fa; }' +
+    '.crew-name { text-align: left; font-weight: 600; }' +
+    '.foreman-name { text-align: left; color: #666; font-size: 12px; }' +
+    '.status-ok { color: #28a745; font-size: 16px; }' +
+    '.status-missing { color: #dc3545; font-weight: bold; font-size: 16px; }' +
+    '.status-pending { color: #ffc107; font-size: 16px; }' +
+    '.status-na { color: #aaa; font-size: 14px; }' +
+    '.row-problem { background: #fff5f5; }' +
+
+    // Trend section
+    '.trend-section { background: white; border-radius: 10px; padding: 20px; margin-top: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }' +
+    '.trend-row-bad { background: #ffebee; }' +
+    '.trend-row-warning { background: #fff8e1; }' +
+
+    // Buttons
     'button { background: #1a73e8; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; margin: 5px; font-size: 14px; }' +
     'button:hover { background: #1557b0; }' +
     'button.secondary { background: #6c757d; }' +
-    '.scroll-container { max-height: 350px; overflow-y: auto; border: 1px solid #ddd; border-radius: 8px; }' +
-    '.scroll-container table { margin-bottom: 0; }' +
     '</style>';
 
-  html += '<h2>📊 Safety Compliance Dashboard</h2>';
-  html += '<p><strong>Week of ' + weekStartStr + ' - ' + weekEndStr + '</strong></p>';
+  // Add JavaScript for collapsible weeks
+  html += '<script>' +
+    'function toggleWeek(weekIndex) {' +
+    '  var body = document.getElementById("week-body-" + weekIndex);' +
+    '  var chevron = document.getElementById("week-chevron-" + weekIndex);' +
+    '  if (body.classList.contains("show")) {' +
+    '    body.classList.remove("show");' +
+    '    chevron.classList.remove("open");' +
+    '  } else {' +
+    '    body.classList.add("show");' +
+    '    chevron.classList.add("open");' +
+    '  }' +
+    '}' +
+    '</script>';
 
-  // Summary boxes
+  html += '<h2>📊 Safety Compliance Dashboard</h2>';
+
+  // Summary boxes for current week
   html += '<div class="summary">';
-  html += '<div class="stat-box good"><div class="stat-number">' + complianceData.compliantCount + '</div><div class="stat-label">Compliant</div></div>';
+  html += '<div class="stat-box good"><div class="stat-number">' + complianceData.compliantCount + '</div><div class="stat-label">✅ Compliant</div></div>';
 
   if (complianceData.isPastDeadline) {
-    html += '<div class="stat-box bad"><div class="stat-number">' + complianceData.missingCount + '</div><div class="stat-label">Missing Reports</div></div>';
+    html += '<div class="stat-box bad"><div class="stat-number">' + complianceData.missingCount + '</div><div class="stat-label">❌ Missing</div></div>';
   } else {
     var pendingCount = complianceData.totalCrews - complianceData.compliantCount - complianceData.missingCount;
-    html += '<div class="stat-box pending"><div class="stat-number">' + pendingCount + '</div><div class="stat-label">Pending</div></div>';
+    html += '<div class="stat-box pending"><div class="stat-number">' + pendingCount + '</div><div class="stat-label">⏳ Pending</div></div>';
   }
 
   html += '<div class="stat-box"><div class="stat-number">' + complianceData.totalCrews + '</div><div class="stat-label">Total Crews</div></div>';
   html += '</div>';
 
-  // Current week compliance grid
-  html += '<h3>Current Week Status</h3>';
-  html += '<div class="scroll-container">';
+  // CURRENT WEEK - Always expanded
+  html += '<div class="week-card">';
+  html += '<div class="week-header current" onclick="toggleWeek(0)">';
+  html += '<div class="week-title"><span class="chevron open" id="week-chevron-0">▶</span><i>📅</i> Week of ' + weekStartStr + ' - ' + weekEndStr + ' <span style="font-size:12px; opacity:0.8;">(Current Week)</span></div>';
+  html += '<div class="week-badges">';
+  if (complianceData.missingCount > 0) {
+    html += '<span class="week-badge bad">' + complianceData.missingCount + ' missing</span>';
+  }
+  html += '<span class="week-badge">' + complianceData.compliantCount + '/' + complianceData.totalCrews + ' compliant</span>';
+  html += '</div>';
+  html += '</div>';
+
+  // Current week table - starts visible
+  html += '<div class="week-body show" id="week-body-0">';
   html += '<table>';
-  html += '<tr><th>Crew</th><th>Foreman</th><th>Sun</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th><th>Weekly Mtg</th></tr>';
+  html += '<tr><th style="text-align:left; width:80px;">Crew</th><th style="text-align:left; width:120px;">Foreman</th><th>Sun</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th><th>Weekly Mtg</th></tr>';
 
   for (var jobNumber in complianceData.crews) {
     var crew = complianceData.crews[jobNumber];
-    var rowClass = crew.status === "Missing Reports" ? ' class="trend-bad"' : '';
+    var rowClass = crew.status === "Missing Reports" ? ' class="row-problem"' : '';
 
     html += '<tr' + rowClass + '>';
-    html += '<td><strong>' + jobNumber + '</strong></td>';
-    html += '<td>' + (crew.foreman || '-') + '</td>';
+    html += '<td class="crew-name">' + jobNumber + '</td>';
+    html += '<td class="foreman-name">' + (crew.foreman || '-') + '</td>';
 
     for (var day = 0; day < 7; day++) {
       var status = crew.jha[day];
@@ -2831,32 +3544,95 @@ function showComplianceDashboard() {
     html += '</tr>';
   }
   html += '</table>';
-  html += '</div>'; // Close scroll-container
+  html += '</div></div>'; // Close week-body and week-card
+
+  // HISTORICAL WEEKS - Collapsible
+  if (historicalWeeks && historicalWeeks.length > 0) {
+    html += '<h3 style="margin-top: 25px;">📜 Previous Weeks</h3>';
+
+    for (var w = 0; w < historicalWeeks.length; w++) {
+      var week = historicalWeeks[w];
+      var weekIdx = w + 1; // offset by 1 since current week is 0
+
+      var headerClass = 'past';
+      if (week.missingCount > 0) headerClass = 'problem';
+      else if (week.compliantCount === week.totalCrews) headerClass = 'good';
+
+      html += '<div class="week-card">';
+      html += '<div class="week-header ' + headerClass + '" onclick="toggleWeek(' + weekIdx + ')">';
+      html += '<div class="week-title"><span class="chevron" id="week-chevron-' + weekIdx + '">▶</span><i>📅</i> Week of ' + week.weekStartStr + ' - ' + week.weekEndStr + '</div>';
+      html += '<div class="week-badges">';
+      if (week.missingCount > 0) {
+        html += '<span class="week-badge bad">' + week.missingCount + ' missing</span>';
+      }
+      html += '<span class="week-badge">' + week.compliantCount + '/' + week.totalCrews + ' compliant</span>';
+      html += '</div>';
+      html += '</div>';
+
+      // Week body - starts collapsed
+      html += '<div class="week-body" id="week-body-' + weekIdx + '">';
+      html += '<table>';
+      html += '<tr><th style="text-align:left; width:80px;">Crew</th><th style="text-align:left; width:120px;">Foreman</th><th>Sun</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th><th>Weekly Mtg</th></tr>';
+
+      for (var c = 0; c < week.crews.length; c++) {
+        var crewData = week.crews[c];
+        var crewRowClass = crewData.hasMissing ? ' class="row-problem"' : '';
+
+        html += '<tr' + crewRowClass + '>';
+        html += '<td class="crew-name">' + crewData.jobNumber + '</td>';
+        html += '<td class="foreman-name">' + (crewData.foreman || '-') + '</td>';
+
+        for (var d = 0; d < 7; d++) {
+          var dayStatus = crewData.jha[d] || 'N/A';
+          var dayCssClass = '';
+          if (dayStatus === '✅') dayCssClass = 'status-ok';
+          else if (dayStatus === '❌') dayCssClass = 'status-missing';
+          else dayCssClass = 'status-na';
+          html += '<td class="' + dayCssClass + '">' + dayStatus + '</td>';
+        }
+
+        var mtgStatus = crewData.weeklyMeeting || 'N/A';
+        var mtgCssClass = '';
+        if (mtgStatus === '✅') mtgCssClass = 'status-ok';
+        else if (mtgStatus === '❌') mtgCssClass = 'status-missing';
+        else mtgCssClass = 'status-na';
+        html += '<td class="' + mtgCssClass + '">' + mtgStatus + '</td>';
+
+        html += '</tr>';
+      }
+      html += '</table>';
+      html += '</div></div>'; // Close week-body and week-card
+    }
+  }
 
   // Trend analysis (crews with issues in last 4 weeks)
   var problemCrews = trends.filter(function(t) { return t.missedJhaCount > 0 || t.missedMeetingCount > 0; });
 
   if (problemCrews.length > 0) {
-    html += '<h3>⚠️ Crews with Issues (Last 4 Weeks)</h3>';
+    html += '<div class="trend-section">';
+    html += '<h3 style="margin-top:0;">⚠️ Crews with Issues (Last 4 Weeks)</h3>';
     html += '<table>';
-    html += '<tr><th>Crew</th><th>Foreman</th><th>Missed JHAs</th><th>Missed Meetings</th><th>Compliance Rate</th></tr>';
+    html += '<tr><th style="text-align:left;">Crew</th><th style="text-align:left;">Foreman</th><th>Missed JHAs</th><th>Missed Meetings</th><th>Compliance Rate</th></tr>';
 
     for (var i = 0; i < problemCrews.length; i++) {
       var t = problemCrews[i];
-      var rowClass = t.complianceRate < 80 ? ' class="trend-bad"' : (t.complianceRate < 95 ? ' class="trend-warning"' : '');
+      var trendRowClass = t.complianceRate < 80 ? ' class="trend-row-bad"' : (t.complianceRate < 95 ? ' class="trend-row-warning"' : '');
 
-      html += '<tr' + rowClass + '>';
-      html += '<td><strong>' + t.jobNumber + '</strong></td>';
-      html += '<td>' + (t.foreman || '-') + '</td>';
+      html += '<tr' + trendRowClass + '>';
+      html += '<td style="text-align:left; font-weight:600;">' + t.jobNumber + '</td>';
+      html += '<td style="text-align:left;">' + (t.foreman || '-') + '</td>';
       html += '<td>' + t.missedJhaCount + '</td>';
       html += '<td>' + t.missedMeetingCount + '</td>';
       html += '<td>' + t.complianceRate + '%</td>';
       html += '</tr>';
     }
     html += '</table>';
+    html += '</div>';
   } else {
-    html += '<h3>✅ All Crews Compliant (Last 4 Weeks)</h3>';
-    html += '<p style="color: #28a745;">No crews have missed any JHAs or Weekly Safety Meetings in the last 4 weeks.</p>';
+    html += '<div class="trend-section" style="text-align:center; color: #28a745;">';
+    html += '<h3 style="margin-top:0;">✅ All Crews Compliant (Last 4 Weeks)</h3>';
+    html += '<p>No crews have missed any JHAs or Weekly Safety Meetings in the last 4 weeks.</p>';
+    html += '</div>';
   }
 
   // Action buttons
@@ -2867,7 +3643,7 @@ function showComplianceDashboard() {
   html += '</div>';
 
   var output = HtmlService.createHtmlOutput(html)
-    .setWidth(1200)
+    .setWidth(1000)
     .setHeight(800);
 
   SpreadsheetApp.getUi().showModalDialog(output, "Safety Compliance Dashboard");
@@ -2976,6 +3752,20 @@ function saveComplianceConfigData(configData) {
   checkboxRange.insertCheckboxes();
 
   Logger.log("Saved compliance config for " + rows.length + " crews");
+
+  // IMPORTANT: Recalculate CURRENT WEEK compliance to apply N/A changes immediately
+  // This updates the Safety Compliance sheet for the current week only, not past weeks
+  try {
+    var today = new Date();
+    var weekBounds = getWeekBoundaries(today);
+    Logger.log("Recalculating current week compliance after config change...");
+    var complianceData = calculateSafetyCompliance(weekBounds.weekStart);
+    updateComplianceSheet(complianceData);
+    Logger.log("Current week compliance updated successfully");
+  } catch (e) {
+    Logger.log("Warning: Could not recalculate current week compliance: " + e.toString());
+    // Don't throw - config was saved successfully, just log the warning
+  }
 }
 
 /**

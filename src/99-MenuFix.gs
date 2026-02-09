@@ -57,6 +57,7 @@ function forceCreateMenu() {
         .addSeparator()
         .addItem('📥 Import Data', 'showImportDialog')
         .addItem('📥 Quick Import (1084)', 'importProvidedData')
+        .addItem('🔍 View Crew Import Saved Settings', 'showCrewImportSavedSettings')
         .addSeparator()
         .addItem('💾 Create Backup Snapshot', 'createBackupSnapshot')
         .addItem('📂 View Backup Folder', 'openBackupFolder'))
@@ -67,6 +68,8 @@ function forceCreateMenu() {
       .addSubMenu(ui.createMenu('🔍 Debug')
         .addItem('Test Edit Trigger', 'testEditTrigger')
         .addItem('Recalc Current Row', 'recalcCurrentRow'))
+      .addSeparator()
+      .addSeparator()
       .addSeparator()
       .addItem('Close & Save History', 'closeAndSaveHistory')
       .addToUi();

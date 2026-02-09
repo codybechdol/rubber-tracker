@@ -4610,39 +4610,195 @@
         return;
       }
 
-      // Group by location
-      var certsByLocation = {};
+      // Helper function to get work week key and label for a date
+      function getWorkWeekInfo(dateStr) {
+        if (!dateStr) return { key: '9999-99', label: 'No Expiration Date', weekStart: null };
+
+        var date = new Date(dateStr);
+        if (isNaN(date.getTime())) return { key: '9999-99', label: 'No Expiration Date', weekStart: null };
+
+        var today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        // Check if expired
+        if (date < today) {
+          return { key: '0000-00', label: '🔴 EXPIRED / OVERDUE', weekStart: null, isExpired: true };
+        }
+
+        // Get Monday of the week containing this date
+        var dayOfWeek = date.getDay();
+        var mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek; // Sunday = go back 6 days, else go back to Monday
+        var monday = new Date(date);
+        monday.setDate(date.getDate() + mondayOffset);
+        monday.setHours(0, 0, 0, 0);
+
+        var friday = new Date(monday);
+        friday.setDate(monday.getDate() + 4);
+
+        // Format as YYYY-WW for sorting
+        var weekNum = getWeekNumber(monday);
+        var key = monday.getFullYear() + '-' + String(weekNum).padStart(2, '0');
+
+        // Format label: "Week of Feb 10 - Feb 14, 2026"
+        var options = { month: 'short', day: 'numeric' };
+        var yearOptions = { month: 'short', day: 'numeric', year: 'numeric' };
+        var label = 'Week of ' + monday.toLocaleDateString('en-US', options) + ' - ' + friday.toLocaleDateString('en-US', yearOptions);
+
+        return { key: key, label: label, weekStart: monday };
+      }
+
+      // Helper to get ISO week number
+      function getWeekNumber(date) {
+        var d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+        var dayNum = d.getUTCDay() || 7;
+        d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+        var yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+        return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+      }
+
+      // Group certs by work week, then by cert type within each week
+      var certsByWeek = {};
       filteredCerts.forEach(function(cert) {
-        var loc = cert.location || 'Unknown';
-        if (!certsByLocation[loc]) certsByLocation[loc] = [];
-        certsByLocation[loc].push(cert);
+        var weekInfo = getWorkWeekInfo(cert.expirationDate);
+        var weekKey = weekInfo.key;
+
+        if (!certsByWeek[weekKey]) {
+          certsByWeek[weekKey] = {
+            label: weekInfo.label,
+            weekStart: weekInfo.weekStart,
+            isExpired: weekInfo.isExpired || false,
+            certTypes: {}
+          };
+        }
+
+        var certType = cert.certType || 'Unknown';
+        if (!certsByWeek[weekKey].certTypes[certType]) {
+          certsByWeek[weekKey].certTypes[certType] = [];
+        }
+        certsByWeek[weekKey].certTypes[certType].push(cert);
       });
 
-      var html = '';
-      var locations = Object.keys(certsByLocation).sort();
+      // Sort weeks chronologically
+      var sortedWeekKeys = Object.keys(certsByWeek).sort();
 
-      locations.forEach(function(location, locIndex) {
-        var certs = certsByLocation[location];
-        html += '<div class="card mb-2">';
-        html += '<div class="card-header location-header" style="cursor: pointer; background: linear-gradient(135deg, #ea4335 0%, #c5221f 100%); color: white;" onclick="toggleCertLocationGroup(' + locIndex + ')">';
-        html += '<i class="bi bi-chevron-down me-2" id="cert-loc-chevron-' + locIndex + '"></i>';
-        html += '<i class="bi bi-geo-alt me-1"></i><strong>' + location + '</strong>';
-        html += '<span class="badge bg-white text-dark ms-2">' + certs.length + '</span>';
+      var html = '';
+      var weekIndex = 0;
+
+      sortedWeekKeys.forEach(function(weekKey) {
+        var weekData = certsByWeek[weekKey];
+        var sortedCertTypes = Object.keys(weekData.certTypes).sort();
+
+        // Count totals for this week
+        var totalCertsInWeek = 0;
+        var expiredInWeek = 0;
+        var criticalInWeek = 0;
+
+        sortedCertTypes.forEach(function(certType) {
+          var certs = weekData.certTypes[certType];
+          totalCertsInWeek += certs.length;
+          certs.forEach(function(c) {
+            var s = getCertStatus(c);
+            if (s === 'Expired') expiredInWeek++;
+            if (s === 'Critical') criticalInWeek++;
+          });
+        });
+
+        // Determine week header color
+        var weekHeaderGradient;
+        if (weekData.isExpired || expiredInWeek > 0) {
+          weekHeaderGradient = 'linear-gradient(135deg, #b71c1c 0%, #880e0e 100%)'; // Dark red for expired
+        } else if (criticalInWeek > 0) {
+          weekHeaderGradient = 'linear-gradient(135deg, #e65100 0%, #bf360c 100%)'; // Orange for critical
+        } else {
+          weekHeaderGradient = 'linear-gradient(135deg, #1565c0 0%, #0d47a1 100%)'; // Blue for future weeks
+        }
+
+        // Week header (outer dropdown)
+        html += '<div class="card mb-3" style="border: 2px solid #1565c0;">';
+        html += '<div class="card-header" style="cursor: pointer; background: ' + weekHeaderGradient + '; color: white; padding: 12px 16px;" onclick="toggleWeekGroup(' + weekIndex + ')">';
+        html += '<div style="display: flex; justify-content: space-between; align-items: center;">';
+        html += '<div>';
+        html += '<i class="bi bi-chevron-right me-2" id="week-chevron-' + weekIndex + '"></i>';
+        html += '<i class="bi bi-calendar-week me-2"></i><strong>' + weekData.label + '</strong>';
+        html += '</div>';
+        html += '<div>';
+        html += '<span class="badge bg-white text-dark">' + totalCertsInWeek + ' cert' + (totalCertsInWeek !== 1 ? 's' : '') + '</span>';
+        if (expiredInWeek > 0) {
+          html += '<span class="badge bg-danger ms-1">' + expiredInWeek + ' expired</span>';
+        }
+        if (criticalInWeek > 0) {
+          html += '<span class="badge bg-warning text-dark ms-1">' + criticalInWeek + ' critical</span>';
+        }
+        html += '</div>';
+        html += '</div>';
         html += '</div>';
 
-        html += '<div id="cert-loc-body-' + locIndex + '">';
-        certs.forEach(function(cert) {
-          html += renderCertRow(cert);
+        // Week body (contains cert type dropdowns)
+        html += '<div id="week-body-' + weekIndex + '" style="display: none; padding: 10px;">';
+
+        var certTypeIndex = 0;
+        sortedCertTypes.forEach(function(certType) {
+          var certs = weekData.certTypes[certType];
+
+          // Sort employees by expiration date within cert type
+          certs.sort(function(a, b) {
+            var dateA = a.expirationDate ? new Date(a.expirationDate) : new Date('9999-12-31');
+            var dateB = b.expirationDate ? new Date(b.expirationDate) : new Date('9999-12-31');
+            return dateA - dateB;
+          });
+
+          // Count for this cert type
+          var expiredInType = certs.filter(function(c) { return getCertStatus(c) === 'Expired'; }).length;
+          var criticalInType = certs.filter(function(c) { return getCertStatus(c) === 'Critical'; }).length;
+          var warningInType = certs.filter(function(c) { return getCertStatus(c) === 'Warning'; }).length;
+
+          // Cert type header color
+          var certHeaderGradient;
+          if (expiredInType > 0) {
+            certHeaderGradient = 'linear-gradient(135deg, #d32f2f 0%, #b71c1c 100%)';
+          } else if (criticalInType > 0) {
+            certHeaderGradient = 'linear-gradient(135deg, #ea4335 0%, #c5221f 100%)';
+          } else if (warningInType > 0) {
+            certHeaderGradient = 'linear-gradient(135deg, #ff9800 0%, #e65100 100%)';
+          } else {
+            certHeaderGradient = 'linear-gradient(135deg, #4caf50 0%, #2e7d32 100%)';
+          }
+
+          var uniqueId = weekIndex + '-' + certTypeIndex;
+
+          html += '<div class="card mb-2">';
+          html += '<div class="card-header cert-type-header" style="cursor: pointer; background: ' + certHeaderGradient + '; color: white; padding: 8px 12px;" onclick="toggleCertTypeGroup(\'' + uniqueId + '\')">';
+          html += '<i class="bi bi-chevron-right me-2" id="cert-type-chevron-' + uniqueId + '"></i>';
+          html += '<i class="bi bi-award me-1"></i><strong>' + certType + '</strong>';
+          html += '<span class="badge bg-white text-dark ms-2">' + certs.length + '</span>';
+          if (expiredInType > 0) {
+            html += '<span class="badge bg-danger ms-1">' + expiredInType + ' expired</span>';
+          }
+          if (criticalInType > 0) {
+            html += '<span class="badge bg-warning text-dark ms-1">' + criticalInType + ' critical</span>';
+          }
+          html += '</div>';
+
+          html += '<div id="cert-type-body-' + uniqueId + '" style="display: none;">';
+          certs.forEach(function(cert) {
+            html += renderCertRow(cert);
+          });
+          html += '</div></div>';
+
+          certTypeIndex++;
         });
+
         html += '</div></div>';
+        weekIndex++;
       });
 
       container.innerHTML = html;
     }
 
-    function toggleCertLocationGroup(locIndex) {
-      var body = document.getElementById('cert-loc-body-' + locIndex);
-      var chevron = document.getElementById('cert-loc-chevron-' + locIndex);
+    // Toggle week group (outer dropdown)
+    function toggleWeekGroup(weekIndex) {
+      var body = document.getElementById('week-body-' + weekIndex);
+      var chevron = document.getElementById('week-chevron-' + weekIndex);
       if (body.style.display === 'none') {
         body.style.display = 'block';
         chevron.className = 'bi bi-chevron-down me-2';
@@ -4650,6 +4806,24 @@
         body.style.display = 'none';
         chevron.className = 'bi bi-chevron-right me-2';
       }
+    }
+
+    // Toggle cert type group (inner dropdown)
+    function toggleCertTypeGroup(typeId) {
+      var body = document.getElementById('cert-type-body-' + typeId);
+      var chevron = document.getElementById('cert-type-chevron-' + typeId);
+      if (body.style.display === 'none') {
+        body.style.display = 'block';
+        chevron.className = 'bi bi-chevron-down me-2';
+      } else {
+        body.style.display = 'none';
+        chevron.className = 'bi bi-chevron-right me-2';
+      }
+    }
+
+    // Keep old function for backward compatibility (in case any code references it)
+    function toggleCertLocationGroup(locIndex) {
+      toggleCertTypeGroup(locIndex);
     }
 
     function renderCertRow(cert) {
@@ -4724,10 +4898,13 @@
       var html = '<div class="task-row" style="border-left: 4px solid ' + borderColor + ';' + (cert.isDeclined ? ' opacity: 0.7; background: #f5f5f5;' : '') + '">';
       html += '<div class="row align-items-center">';
 
-      // Cert Type & Employee
+      // Cert Type & Employee - Since we're grouped by cert type, show EMPLOYEE name prominently with their LOCATION
       html += '<div class="col-md-4">';
-      html += '<div class="task-type" style="font-weight: 500;">' + cert.certType + '</div>';
-      html += '<div class="text-primary small"><i class="bi bi-person-fill"></i> <strong>' + cert.employee + '</strong></div>';
+      html += '<div class="text-primary"><i class="bi bi-person-fill"></i> <strong>' + cert.employee + '</strong></div>';
+      // Show location since we're grouped by cert type now
+      if (cert.location) {
+        html += '<div class="text-muted small"><i class="bi bi-geo-alt"></i> ' + cert.location + '</div>';
+      }
       if (cert.isDeclined && cert.declinedDate) {
         html += '<div class="text-danger small"><i class="bi bi-x-circle"></i> Declined: ' + cert.declinedDate + '</div>';
       } else if (cert.isNonExpiring && cert.expirationDate) {

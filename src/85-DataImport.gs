@@ -1242,3 +1242,209 @@ function applyFiscalYearTransition(oldFY, newFY, crewsToTransition) {
   return { success: true, message: message };
 }
 
+// ============================================================================
+// CREW IMPORT SETTINGS PERSISTENCE
+// ============================================================================
+
+/**
+ * Saves custom location mappings for crew import.
+ * These are additional mappings the user has added beyond the defaults.
+ *
+ * @param {Object} customMappings - Object with location name -> mapped name
+ * @return {Object} Result with success status
+ */
+function saveCrewImportLocationMappings(customMappings) {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    props.setProperty('CREW_IMPORT_LOCATION_MAPPINGS', JSON.stringify(customMappings));
+    Logger.log('Saved ' + Object.keys(customMappings).length + ' custom location mappings');
+    return { success: true };
+  } catch (e) {
+    Logger.log('Error saving location mappings: ' + e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Loads custom location mappings for crew import.
+ *
+ * @return {Object} Custom mappings object (empty if none saved)
+ */
+function getCrewImportLocationMappings() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var saved = props.getProperty('CREW_IMPORT_LOCATION_MAPPINGS');
+    if (saved) {
+      return JSON.parse(saved);
+    }
+  } catch (e) {
+    Logger.log('Error loading location mappings: ' + e.message);
+  }
+  return {};
+}
+
+/**
+ * Saves duplicate employee selections for crew import.
+ * Format: { "Employee Name": { selectedCrewIndex: 0, selectedJobNumber: "013-26" } }
+ *
+ * @param {Object} selections - Object with employee name -> selection info
+ * @return {Object} Result with success status
+ */
+function saveCrewImportDuplicateSelections(selections) {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    props.setProperty('CREW_IMPORT_DUPLICATE_SELECTIONS', JSON.stringify(selections));
+    Logger.log('Saved ' + Object.keys(selections).length + ' duplicate employee selections');
+    return { success: true };
+  } catch (e) {
+    Logger.log('Error saving duplicate selections: ' + e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Loads duplicate employee selections for crew import.
+ *
+ * @return {Object} Selections object (empty if none saved)
+ */
+function getCrewImportDuplicateSelections() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var saved = props.getProperty('CREW_IMPORT_DUPLICATE_SELECTIONS');
+    if (saved) {
+      return JSON.parse(saved);
+    }
+  } catch (e) {
+    Logger.log('Error loading duplicate selections: ' + e.message);
+  }
+  return {};
+}
+
+/**
+ * Saves special circumstance selections for crew import.
+ * Format: { "Employee Name": { status: "Light Duty", location: "Light Duty", skip: false } }
+ *
+ * @param {Object} selections - Object with employee name -> selection info
+ * @return {Object} Result with success status
+ */
+function saveCrewImportSpecialSelections(selections) {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    props.setProperty('CREW_IMPORT_SPECIAL_SELECTIONS', JSON.stringify(selections));
+    Logger.log('Saved ' + Object.keys(selections).length + ' special circumstance selections');
+    return { success: true };
+  } catch (e) {
+    Logger.log('Error saving special selections: ' + e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Loads special circumstance selections for crew import.
+ *
+ * @return {Object} Selections object (empty if none saved)
+ */
+function getCrewImportSpecialSelections() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var saved = props.getProperty('CREW_IMPORT_SPECIAL_SELECTIONS');
+    if (saved) {
+      return JSON.parse(saved);
+    }
+  } catch (e) {
+    Logger.log('Error loading special selections: ' + e.message);
+  }
+  return {};
+}
+
+/**
+ * Gets all crew import settings at once (for dialog initialization).
+ *
+ * @return {Object} Object with locationMappings, duplicateSelections, and specialSelections
+ */
+function getCrewImportSettings() {
+  return {
+    locationMappings: getCrewImportLocationMappings(),
+    duplicateSelections: getCrewImportDuplicateSelections(),
+    specialSelections: getCrewImportSpecialSelections()
+  };
+}
+
+/**
+ * Clears all saved crew import settings.
+ *
+ * @return {Object} Result with success status
+ */
+function clearCrewImportSettings() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    props.deleteProperty('CREW_IMPORT_LOCATION_MAPPINGS');
+    props.deleteProperty('CREW_IMPORT_DUPLICATE_SELECTIONS');
+    props.deleteProperty('CREW_IMPORT_SPECIAL_SELECTIONS');
+    Logger.log('Cleared crew import settings');
+    return { success: true };
+  } catch (e) {
+    Logger.log('Error clearing settings: ' + e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Shows what's currently saved in crew import settings.
+ * Use this to debug why certain employees are being auto-applied.
+ */
+function showCrewImportSavedSettings() {
+  var settings = getCrewImportSettings();
+  var html = '<h3>Saved Crew Import Settings</h3>';
+
+  html += '<h4>Location Mappings (' + Object.keys(settings.locationMappings || {}).length + ')</h4>';
+  html += '<pre>' + JSON.stringify(settings.locationMappings, null, 2) + '</pre>';
+
+  html += '<h4>Duplicate Selections (' + Object.keys(settings.duplicateSelections || {}).length + ')</h4>';
+  html += '<pre>' + JSON.stringify(settings.duplicateSelections, null, 2) + '</pre>';
+
+  html += '<h4>Special Selections (' + Object.keys(settings.specialSelections || {}).length + ')</h4>';
+  html += '<pre>' + JSON.stringify(settings.specialSelections, null, 2) + '</pre>';
+
+  html += '<br><button onclick="google.script.run.withSuccessHandler(function() { alert(\'Settings cleared!\'); google.script.host.close(); }).clearCrewImportSettings()">Clear All Saved Settings</button>';
+
+  var output = HtmlService.createHtmlOutput(html)
+    .setWidth(600)
+    .setHeight(500);
+  SpreadsheetApp.getUi().showModalDialog(output, 'Crew Import Saved Settings');
+}
+
+/**
+ * Removes a specific employee from saved special selections.
+ * @param {string} employeeName - Name to remove
+ */
+function removeSpecialSelection(employeeName) {
+  var selections = getCrewImportSpecialSelections();
+  var removed = false;
+
+  // Try exact match
+  if (selections[employeeName]) {
+    delete selections[employeeName];
+    removed = true;
+  }
+
+  // Try case-insensitive match
+  if (!removed) {
+    var nameLower = employeeName.toLowerCase();
+    for (var key in selections) {
+      if (key.toLowerCase() === nameLower) {
+        delete selections[key];
+        removed = true;
+        break;
+      }
+    }
+  }
+
+  if (removed) {
+    saveCrewImportSpecialSelections(selections);
+    Logger.log('Removed special selection for: ' + employeeName);
+  }
+
+  return { success: removed, removed: employeeName };
+}
+

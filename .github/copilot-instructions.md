@@ -67,7 +67,9 @@ If the dialog receives `null` from server but logs show function completed:
 
 # Feature Development Roadmap
 
-## Current Phase: Phase 7 - Cleanup & Optimization (COMPLETE)
+## Current Status: All Phases Complete ✅ (Feb 7, 2026)
+
+All major development phases are complete. See "Completed Features Log" for recent enhancements.
 
 ## COMPLETED PHASES ✅
 
@@ -156,10 +158,10 @@ If the dialog receives `null` from server but logs show function completed:
 
 ---
 
-## IN PROGRESS PHASES 🔄
+## ADDITIONAL COMPLETED PHASES ✅
 
-### Phase 1.5: Crew Makeup Spreadsheet Import (ONGOING)
-**Status:** 🔄 IN PROGRESS (Testing new file upload approach)
+### Phase 1.5: Crew Makeup Spreadsheet Import (COMPLETE - Feb 7, 2026)
+**Status:** ✅ COMPLETE
 
 **Goal:** Import superintendent's weekly crew structure spreadsheet to update Employees sheet.
 
@@ -242,13 +244,13 @@ If the dialog receives `null` from server but logs show function completed:
 - [x] Add applyCrewChanges() function (Location + Job Number only) ✅
 - [x] Log changes to Employee History ✅
 - [x] Add menu item ✅
-- [ ] Test with real Excel file
-- [ ] Deploy with push.bat ✅
+- [x] Test with real Excel file ✅
+- [x] Deploy with push.bat ✅
 
 ---
 
 ## Phase 2: Daily Accomplishment Breakdown
-**Status:** 🔄 IN PROGRESS
+**Status:** ✅ COMPLETE
 
 **Goal:** Generate formatted daily breakdown of completed tasks for timesheet copy/paste.
 
@@ -311,13 +313,13 @@ Tasks Completed: 23 swaps, 2 trainings, 5 reclaims
 - [x] Create `TimeBreakdown.html` dialog ✅
 - [x] Add `showTimeBreakdownDialog()` function ✅
 - [x] Add menu item: Glove Manager → Reports → 📝 Daily Accomplishments ✅
-- [ ] Test with completed tasks
-- [ ] Deploy with `.\push.bat` ✅
+- [x] Test with completed tasks ✅
+- [x] Deploy with `.\push.bat` ✅
 
 ---
 
 ## Phase 2B: Smart Route Optimizer
-**Status:** 🔄 IN PROGRESS
+**Status:** ✅ COMPLETE
 
 **Goal:** Calculate optimal travel routes based on pending tasks, due dates, and work schedule constraints (10-hr days Mon-Thu, Tuesday must-return, avoid Fridays).
 
@@ -469,7 +471,7 @@ Wednesday, Jan 29 (Start: Helena 7am):
 - [x] Add "Office" card to unassigned pool for office work tracking ✅
 - [x] Office tasks dialog with description, start/end time fields ✅
 - [x] Office tasks saved to Manual Tasks sheet and appear in Daily Accomplishments ✅
-- [ ] Test with pending tasks
+- [x] Test with pending tasks ✅
 - [x] Deploy with `.\push.bat` ✅
 
 **Office Card Feature:**
@@ -541,7 +543,7 @@ Wednesday, Jan 29 (Start: Helena 7am):
 ---
 
 ## Phase 4: Gmail Safety Report Processing
-**Status:** 🔄 IN PROGRESS (Implementation complete, PDF extraction added, ready for testing)
+**Status:** ✅ COMPLETE (Feb 7, 2026)
 
 **Goal:** Automatically filter and process Gmail for JHAs, Safety Meetings, and Fleet Checklists. Extract equipment issues (fire extinguishers, hot sticks, rubber goods, etc.) and track in Safety Reports sheet.
 
@@ -624,8 +626,8 @@ Wednesday, Jan 29 (Start: Helena 7am):
 - [x] Implement batch processing (50 per batch) ✅
 - [x] Fix forwarded email sender issue (search by subject only) ✅
 - [x] **Deployed with `clasp push`** 🚀 (3 deployments Feb 4, 2026)
-- [ ] **Test with real emails** 📧 (Next: Grant Drive permissions, process 7 days)
-- [ ] **Grant Gmail + Drive permissions** 🔐
+- [x] **Test with real emails** ✅
+- [x] **Grant Gmail + Drive permissions** ✅
 
 **Future Enhancements (Phase 2):**
 - AI-powered summary generation (Google Gemini API)
@@ -635,18 +637,6 @@ Wednesday, Jan 29 (Start: Helena 7am):
 
 ---
 
-## Phase 5: Purchase Order Generation
-**Status:** 🔲 NOT STARTED
-- [ ] Add Gmail API scope to appsscript.json
-- [ ] Create searchAndLabelEmails() function
-- [ ] Create JHA processing function
-- [ ] Create Safety Meeting processing function
-- [ ] Create Fleet Checklist processing function
-- [ ] Add tracking sheet (optional)
-- [ ] Add scheduled trigger
-- [ ] Add menu items
-
----
 
 ## Phase 5: Purchase Order Generation
 **Status:** ✅ COMPLETE (Feb 5, 2026)
@@ -725,7 +715,101 @@ Notes: [Any notes]
 
 ## Completed Features Log
 
+### February 9, 2026
+- ✅ **Compliance Config Save Fix - Auto-Recalculate Current Week**
+  - **Problem:** When saving Compliance Config (e.g., unchecking Monday for crew 039-26), changes saved to config sheet but Safety Compliance sheet was not updated
+  - **Solution:** `saveComplianceConfigData()` now automatically recalculates current week's compliance after saving
+  - **Behavior:**
+    - When you uncheck a day (e.g., Monday), it immediately shows N/A in Safety Compliance sheet for current week only
+    - Past weeks remain unchanged (preserves historical data)
+    - Success message: "Configuration saved & current week updated!"
+  - **Technical Changes:**
+    - Added auto-recalculation in `saveComplianceConfigData()` function
+    - Calls `calculateSafetyCompliance()` + `updateComplianceSheet()` for current week
+    - Wrapped in try-catch to ensure config save succeeds even if recalculation fails
+  - **Files Modified:**
+    - `src/88-SafetyReports.gs` - Added recalculation logic, fixed syntax error (removed stray `?)` on line 1811)
+    - `src/ComplianceConfig.html` - Updated success message
+  - See: `FIX_COMPLIANCE_CONFIG_SAVE.md` for detailed documentation
+
+### February 8, 2026
+- ✅ **Expiring Certs Tab - Work Week Grouping**
+  - **Change:** Expiring Certs now organized with TWO levels of dropdowns:
+    1. **Outer dropdown:** Work weeks (e.g., "Week of Feb 10 - Feb 14, 2026")
+    2. **Inner dropdown:** Cert types within each week (e.g., "CPR", "Forklift")
+  - **Week Organization:**
+    - 🔴 EXPIRED / OVERDUE - Red header, all expired certs grouped first
+    - Future weeks shown in blue headers, sorted chronologically
+    - Each week shows total cert count + expired/critical badges
+  - **Benefits:**
+    - Plan training by week - see what's due each week at a glance
+    - Batch similar certs in the same week for efficiency
+    - Easier to schedule classes for multiple employees needing same cert
+  - **All groups collapsed by default** - click to expand
+  - **Color coding:**
+    - Week headers: Dark red (expired), Orange (critical), Blue (future)
+    - Cert type headers: Red/Orange/Yellow/Green based on urgency
+  - Modified `src/ToDoSchedule.html`:
+    - Rewrote `renderExpiringCerts()` with week-based grouping
+    - Added `getWorkWeekInfo()` helper to calculate week boundaries
+    - Added `getWeekNumber()` helper for ISO week numbering
+    - Added `toggleWeekGroup()` for outer dropdown
+    - Updated `toggleCertTypeGroup()` to handle nested IDs
+- ✅ **Safety Compliance Dashboard - Work Week Improvements**
+  - **Change:** Compliance Dashboard now shows work weeks as collapsible cards
+  - **New Layout:**
+    - **Current Week** - Blue header, expanded by default with crew grid
+    - **Previous Weeks** - Collapsible cards, sorted most recent first
+    - Each week card shows: date range, compliant/missing counts, color-coded header
+  - **Visual Improvements:**
+    - Card-based UI with shadow effects and rounded corners
+    - Week headers: 🟢 Green (all compliant), 🔴 Red (has missing), ⚪ Gray (past)
+    - Click to expand/collapse week to see crew-by-crew breakdown
+    - Trend analysis section at bottom for 4-week overview
+  - **New Function:** `getComplianceHistoryByWeek(weeksBack)` - Retrieves historical compliance data organized by week
+  - Modified `src/88-SafetyReports.gs`:
+    - Rewrote `showComplianceDashboard()` with collapsible week cards
+    - Added JavaScript `toggleWeek()` function for expand/collapse
+    - Improved styling with gradients, badges, and modern card layout
+- ✅ **Safety Compliance Sheet - Work Week Formatting**
+  - **Change:** Safety Compliance sheet now has visual formatting to separate work weeks
+  - **Formatting applied:**
+    - **Alternating row colors** - White and light blue backgrounds for alternating weeks
+    - **Blue separator lines** - Thick blue border between each week for easy visual scanning
+    - **Auto-sorted** - Most recent week at top, then by job number within each week
+  - **Auto-applied** when compliance data is updated via `updateComplianceSheet()`
+  - **Manual reformat option:** Glove Manager → 🛡️ Safety Reports → 🎨 Reformat by Week
+  - **New Functions:**
+    - `formatComplianceSheetByWeek()` - Applies alternating colors and week separators
+    - `applyWeekColorsAfterSort()` - Re-applies colors after sorting
+    - `reformatSafetyComplianceSheet()` - Menu function for manual reformatting
+    - `finalizePastWeeksCompliance()` - Scans for past weeks with "Pending" status, updates to ❌, creates tasks
+    - `menuFinalizePastWeeks()` - Menu function to manually run finalization
+  - **New Menu Items:**
+    - Glove Manager → 🛡️ Safety Reports → 🎨 Reformat by Week
+    - Glove Manager → 🛡️ Safety Reports → ✅ Finalize Past Weeks
+  - **Auto-finalization:** Past weeks are now automatically finalized when processing safety emails
+  - Modified `src/88-SafetyReports.gs` - Added ~200 lines of formatting and finalization functions
+  - Modified `src/Code.gs` - Added menu items
+
 ### February 7, 2026
+- ✅ **Expiring Certs Tab - Reorganized by Cert Type**
+  - **Change:** Expiring Certs tab now groups by CERT TYPE instead of LOCATION
+  - **Benefits:**
+    - Easier to see all employees needing same certification at a glance
+    - Employees sorted by expiration date within each cert type (most urgent first)
+    - Better for batch scheduling same-type training sessions
+  - **Visual Changes:**
+    - Header icon changed from 📍 (location) to 🏆 (award/cert)
+    - Header color based on urgency: 🔴 Red (expired), 🟠 Orange (critical), 🟡 Yellow (warning), 🟢 Green (OK)
+    - Badge shows counts: "3 expired", "2 critical" next to cert type name
+    - Each employee row now shows their LOCATION below their name
+  - **Sorting:** Within each cert type, employees sorted by expiration date (soonest first)
+  - Modified `src/ToDoSchedule.html`:
+    - Rewrote `renderExpiringCerts()` to group by `cert.certType` instead of `cert.location`
+    - Added sorting by expiration date within groups
+    - Added `toggleCertTypeGroup()` function
+    - Updated `renderCertRow()` to display location for each employee
 - ✅ **Crew Import - Auto-Select Primary Job for Duplicate Employees**
   - When an employee appears in multiple crews, system now auto-selects the primary job assignment
   - **Primary Job Detection Logic:**
@@ -894,6 +978,58 @@ Notes: [Any notes]
     - Step 4: Assign dates via Task List OR drag in Trip Planner
     - Step 5: Task List auto-saves; Trip Planner uses Apply button for batch updates
     - Step 6: Completions set CompletedDate → flows to Daily Accomplishments
+- ✅ **Crew Import Remembers Previous Selections**
+  - **Problem:** When importing weekly crew makeup, duplicate employee selections (employees in multiple crews) were not saved between sessions
+  - **Solution:** Added server-side persistence using ScriptProperties
+  - **What's saved:**
+    - **Location Mappings** - Custom mappings for unknown locations (e.g., "New Location Dock" → "New Location")
+    - **Duplicate Selections** - Which crew assignment to use when an employee appears in multiple crews
+    - **Special Circumstance Selections** - Employees in Time off/Quit/Other sections (JT = Light Duty, Owen = Light Duty, etc.)
+  - **New Functions in `85-DataImport.gs`:**
+    - `saveCrewImportLocationMappings(customMappings)` - Saves custom location mappings
+    - `getCrewImportLocationMappings()` - Loads saved location mappings
+    - `saveCrewImportDuplicateSelections(selections)` - Saves duplicate employee selections
+    - `getCrewImportDuplicateSelections()` - Loads saved selections
+    - `saveCrewImportSpecialSelections(selections)` - Saves special circumstance selections
+    - `getCrewImportSpecialSelections()` - Loads saved special selections
+    - `getCrewImportSettings()` - Returns all settings for dialog init
+    - `clearCrewImportSettings()` - Clears all saved settings
+  - **UI Enhancements:**
+    - **Duplicate Employees:** Remembered selections are auto-applied and skipped (not shown in UI)
+    - **Special Circumstances:** Remembered selections are auto-applied and skipped
+    - Shows green alert: "X employee(s) had remembered settings and were auto-applied: JT Kale (Light Duty), Owen Canavan (Light Duty)"
+    - Duplicate employee selection now shows clear **PRIMARY** (green) vs **Secondary** (yellow) labels
+    - Selecting a different radio button refreshes UI to update Primary/Secondary labels
+  - **Storage Keys:**
+    - `CREW_IMPORT_LOCATION_MAPPINGS` - JSON object of custom location mappings
+    - `CREW_IMPORT_DUPLICATE_SELECTIONS` - JSON object with employee name → { selectedJobNumber, scheduleType, savedAt }
+    - `CREW_IMPORT_SPECIAL_SELECTIONS` - JSON object with employee name → { status, location, skip, savedAt }
+  - Modified `src/CrewImport.html` - Added init loading, save functions, auto-apply logic
+  - Modified `src/85-DataImport.gs` - Added ~150 lines of persistence functions
+- ✅ **Crew Import Cross-References Employee Sheet for Name Matching**
+  - **Problem:** Excel cells in "Time off/Quit/Other" sections contain employee names mixed with random info (e.g., "JT Kale , MT Misc, Light Duty")
+  - **Solution:** Cross-reference cell text against Employees sheet to find exact name matches
+  - **How it works:**
+    1. For each cell in special sections, scan for any employee name from Employees sheet
+    2. If found (confidence ≥70%), use the exact name from sheet (not parsed text)
+    3. If no match and doesn't look like a name, skip the entry
+  - **Benefits:**
+    - "JT Kale ," → becomes "JT Kale" (exact match from sheet)
+    - "Owen Canavan with injury" → becomes "Owen Canavan" (matched)
+    - "Next Appointment 9am" → No match → Skipped automatically
+  - **New Function:**
+    - `findBestMatchInCell(cellText, employees)` - Finds best employee match within cell text
+  - Modified `src/CrewImport.html` - Added cross-reference in parseSpecialSection()
+- ✅ **Crew Import Injury Detection**
+  - Text containing "with injury", "injured", or "injury" now sets status to **Light Duty**
+  - Adds "Injury" to notes field
+  - Example: "Owen Canavan JL off with injury" → Status: Light Duty, Notes: "Injury"
+- ✅ **Crew Import Improved Name Cleanup**
+  - Removes trailing commas and punctuation
+  - Removes "with" leftover from "with injury"
+  - Skips entries containing "Appointment", "Meeting", "Call"
+  - Skips time patterns like "9am", "10:30am"
+  - Skips text starting with "Next"
 - ✅ **Color-Coded Days Left Display with Extended Thresholds**
   - GOAL: Provide better advance warning for upcoming cert expirations
   - Updated color thresholds for "days left" badges in Expiring Certs tab:
