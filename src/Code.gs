@@ -4548,16 +4548,19 @@ function onOpen() {
       .addItem('🎨 Apply Resolved Formatting', 'addResolvedFormattingToSafetyReports')
       .addSeparator()
       .addItem('🔄 Refresh Safety Sheets', 'refreshSafetySheets')
+      .addItem('🧹 Clear Saved Job Corrections', 'clearJobNumberCorrections')
       .addSeparator()
       .addItem('📊 Compliance Dashboard', 'showComplianceDashboard')
       .addItem('⚙️ Configure Exclusions', 'openComplianceConfig')
       .addItem('🔄 Refresh Foreman Names', 'refreshComplianceConfigForemen')
+      .addItem('⬆️ Upgrade Config Columns', 'migrateComplianceConfig')
       .addItem('📈 Compliance History', 'openComplianceSheet')
       .addItem('🎨 Reformat by Week', 'reformatSafetyComplianceSheet')
       .addItem('✅ Finalize Past Weeks', 'menuFinalizePastWeeks')
       .addItem('📥 Backfill Past Weeks', 'menuBackfillComplianceData')
       .addItem('🔧 Fix Headers', 'fixSafetyComplianceHeaders')
-      .addItem('🔄 Rebuild Sheet', 'setupSafetyComplianceSheet'))
+      .addItem('🔄 Rebuild Sheet', 'setupSafetyComplianceSheet')
+      .addItem('🧹 Clear & Rebuild Data', 'rebuildSafetyComplianceSheet'))
     .addSubMenu(ui.createMenu('🔍 Debug')
       .addItem('Test Edit Trigger', 'testEditTrigger')
       .addItem('Recalc Current Row', 'recalcCurrentRow')
@@ -7279,6 +7282,18 @@ function getTasksWithMetadata() {
     includedKeys[key] = true;
   });
 
+  // Calculate previous work week boundaries for filtering Missing Safety Report tasks
+  var today = new Date();
+  var dayOfWeek = today.getDay(); // 0 = Sunday
+  var currentWeekStart = new Date(today);
+  currentWeekStart.setDate(today.getDate() - dayOfWeek);
+  currentWeekStart.setHours(0, 0, 0, 0);
+  var previousWeekStart = new Date(currentWeekStart);
+  previousWeekStart.setDate(currentWeekStart.getDate() - 7);
+  var previousWeekEnd = new Date(currentWeekStart);
+  previousWeekEnd.setDate(currentWeekStart.getDate() - 1); // Saturday
+  previousWeekEnd.setHours(23, 59, 59, 999);
+
   var taskListAdditions = 0;
   for (var metaKey in metadataLookup) {
     var metadata = metadataLookup[metaKey];
@@ -7291,6 +7306,26 @@ function getTasksWithMetadata() {
 
     // Skip completed tasks
     if (metadata.status === 'Complete') continue;
+
+    // FILTER: Missing Safety Report tasks - only include from PREVIOUS work week
+    if (metadata.taskType === 'Missing Safety Report') {
+      var taskDueDate = metadata.dueDate;
+      if (taskDueDate) {
+        var dueDateObj;
+        if (taskDueDate instanceof Date) {
+          dueDateObj = new Date(taskDueDate);
+        } else {
+          dueDateObj = new Date(taskDueDate);
+        }
+        dueDateObj.setHours(0, 0, 0, 0);
+
+        // Skip if not from previous week
+        if (dueDateObj < previousWeekStart || dueDateObj > previousWeekEnd) {
+          Logger.log('getTasksWithMetadata: Skipping old Missing Safety Report task for ' + metadata.employee + ' (due: ' + dueDateObj.toDateString() + ')');
+          continue;
+        }
+      }
+    }
 
     // Create task object from metadata (source data not available)
     var taskFromMetadata = {
@@ -8298,6 +8333,8 @@ function archiveOldCompletedTasks(daysOld) {
 
   var statusCol = colMap['Status'];
   var completedDateCol = colMap['CompletedDate'];
+  var taskTypeCol = colMap['TaskType'];
+  var dueDateCol = colMap['DueDate'];
 
   if (statusCol === undefined || completedDateCol === undefined) {
     return { success: false, error: 'Required columns (Status, CompletedDate) not found' };
@@ -8307,39 +8344,77 @@ function archiveOldCompletedTasks(daysOld) {
   cutoffDate.setDate(cutoffDate.getDate() - daysOld);
   cutoffDate.setHours(0, 0, 0, 0);
 
+  // Calculate previous work week boundaries for Safety Compliance tasks
+  var now = new Date();
+  var dayOfWeek = now.getDay();
+  var currentWeekStart = new Date(now);
+  currentWeekStart.setDate(now.getDate() - dayOfWeek);
+  currentWeekStart.setHours(0, 0, 0, 0);
+  var previousWeekStart = new Date(currentWeekStart);
+  previousWeekStart.setDate(currentWeekStart.getDate() - 7);
+
+  Logger.log('archiveOldCompletedTasks: Previous week start = ' + previousWeekStart.toDateString());
+
   var rowsToArchive = [];
   var rowIndicesToDelete = [];
+  var safetyComplianceArchived = 0;
+  var completedTasksArchived = 0;
 
   // Scan from bottom to top for safe deletion
   for (var i = data.length - 1; i >= 1; i--) {
     var row = data[i];
     var status = row[statusCol];
     var completedDate = row[completedDateCol];
+    var taskType = taskTypeCol !== undefined ? row[taskTypeCol] : '';
+    var dueDate = dueDateCol !== undefined ? row[dueDateCol] : null;
 
-    // Only archive completed tasks
-    if (status !== 'Complete') continue;
-    if (!completedDate) continue;
+    var shouldArchive = false;
 
-    // Check if completed before cutoff
-    var completedDateObj;
-    if (completedDate instanceof Date) {
-      completedDateObj = completedDate;
-    } else {
-      completedDateObj = new Date(completedDate);
+    // Case 1: Archive completed tasks older than cutoff
+    if (status === 'Complete' && completedDate) {
+      var completedDateObj;
+      if (completedDate instanceof Date) {
+        completedDateObj = completedDate;
+      } else {
+        completedDateObj = new Date(completedDate);
+      }
+
+      if (!isNaN(completedDateObj.getTime()) && completedDateObj < cutoffDate) {
+        shouldArchive = true;
+        completedTasksArchived++;
+      }
     }
 
-    if (isNaN(completedDateObj.getTime())) continue;
+    // Case 2: Archive Safety Compliance tasks older than previous work week
+    // These are "Missing Safety Report" tasks from weeks before the previous week
+    if (taskType === 'Missing Safety Report' && dueDate) {
+      var dueDateObj;
+      if (dueDate instanceof Date) {
+        dueDateObj = dueDate;
+      } else {
+        dueDateObj = new Date(dueDate);
+      }
 
-    if (completedDateObj < cutoffDate) {
+      if (!isNaN(dueDateObj.getTime()) && dueDateObj < previousWeekStart) {
+        // This task is from a week older than the previous week - archive it
+        shouldArchive = true;
+        safetyComplianceArchived++;
+        Logger.log('Archiving old Safety Compliance task with due date: ' + dueDateObj.toDateString());
+      }
+    }
+
+    if (shouldArchive) {
       rowsToArchive.unshift(row); // Add to beginning to maintain order
       rowIndicesToDelete.unshift(i + 1); // 1-based row number
     }
   }
 
   Logger.log('archiveOldCompletedTasks: Found ' + rowsToArchive.length + ' tasks to archive');
+  Logger.log('  - Completed tasks: ' + completedTasksArchived);
+  Logger.log('  - Old Safety Compliance tasks: ' + safetyComplianceArchived);
 
   if (rowsToArchive.length === 0) {
-    return { success: true, archivedCount: 0, message: 'No tasks older than ' + daysOld + ' days to archive' };
+    return { success: true, archivedCount: 0, message: 'No tasks to archive' };
   }
 
   // Append rows to archive sheet
@@ -8358,9 +8433,12 @@ function archiveOldCompletedTasks(daysOld) {
   return {
     success: true,
     archivedCount: rowsToArchive.length,
+    completedTasksArchived: completedTasksArchived,
+    safetyComplianceArchived: safetyComplianceArchived,
     cutoffDate: Utilities.formatDate(cutoffDate, Session.getScriptTimeZone(), 'yyyy-MM-dd'),
-    message: 'Archived ' + rowsToArchive.length + ' tasks completed before ' +
-             Utilities.formatDate(cutoffDate, Session.getScriptTimeZone(), 'MMM d, yyyy')
+    message: 'Archived ' + rowsToArchive.length + ' tasks:\n' +
+             '• ' + completedTasksArchived + ' completed tasks (older than ' + daysOld + ' days)\n' +
+             '• ' + safetyComplianceArchived + ' old Safety Compliance tasks'
   };
 }
 

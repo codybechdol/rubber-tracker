@@ -52,7 +52,7 @@ If the dialog receives `null` from server but logs show function completed:
 
 ## Conventions
 - Use `Logger.log()` for debugging in Google Apps Script
-- Task types include: Swap, Reclaim, Training, Cert Expiring
+- Task types include: Swap, Reclaim, Training, Cert Expiring, Missing Safety Report
 - Item types are: Glove, Sleeve
 
 ## Architecture (February 2026)
@@ -715,22 +715,100 @@ Notes: [Any notes]
 
 ## Completed Features Log
 
-### February 9, 2026
-- ✅ **Compliance Config Save Fix - Auto-Recalculate Current Week**
-  - **Problem:** When saving Compliance Config (e.g., unchecking Monday for crew 039-26), changes saved to config sheet but Safety Compliance sheet was not updated
-  - **Solution:** `saveComplianceConfigData()` now automatically recalculates current week's compliance after saving
-  - **Behavior:**
-    - When you uncheck a day (e.g., Monday), it immediately shows N/A in Safety Compliance sheet for current week only
-    - Past weeks remain unchanged (preserves historical data)
-    - Success message: "Configuration saved & current week updated!"
-  - **Technical Changes:**
-    - Added auto-recalculation in `saveComplianceConfigData()` function
-    - Calls `calculateSafetyCompliance()` + `updateComplianceSheet()` for current week
-    - Wrapped in try-catch to ensure config save succeeds even if recalculation fails
+### February 10, 2026
+- ✅ **Fixed Process Safety Emails - Job Number Normalization**
+  - **Problem 1:** `testDate is not defined` runtime error caused by duplicate code block (lines 1096-1107 were copy of 1083-1094)
+  - **Problem 2:** Malformed job numbers from OCR errors (e.g., `332-6` instead of `033-26`) caused reports to be skipped
+  - **Solution:** 
+    1. Removed duplicate code block and fixed indentation
+    2. Added job number normalization with interactive approval dialog
+  - **New Functions in `88-SafetyReports.gs`:**
+    - `normalizeJobNumber(jobNumber)` - Auto-corrects malformed job numbers (NNN-YY format)
+    - `getSavedJobNumberCorrections()` - Gets remembered corrections from ScriptProperties
+    - `saveJobNumberCorrection(original, corrected)` - Saves correction for future auto-apply
+    - `clearJobNumberCorrections()` - Menu function to clear saved corrections
+    - `applyJobNumberNormalization(jobNumber)` - Checks saved corrections first, then auto-normalizes
+    - `applyJobNumberCorrections(approvalsJson)` - Applies user-approved corrections and logs to sheet
+    - `cancelPendingCorrections()` - Cancels batch and discards pending data
+  - **Normalization Examples:**
+    - `332-6` → `033-26` (missing leading zero, truncated year)
+    - `33-26` → `033-26` (missing leading zero)
+    - `013-6` → `013-26` (truncated year)
+  - **Interactive Approval Dialog:**
+    - Shows when corrections are detected (not remembered)
+    - Table with: Report Type | Original (red) | Corrected (editable) | Remember? | Skip?
+    - "Remember" checkbox saves correction for future auto-apply
+    - "Cancel" discards entire batch (safe option)
+    - If NO corrections needed → logs immediately (no dialog)
+  - **New Menu Item:** Glove Manager → 🛡️ Safety Reports → 🧹 Clear Saved Job Corrections
   - **Files Modified:**
-    - `src/88-SafetyReports.gs` - Added recalculation logic, fixed syntax error (removed stray `?)` on line 1811)
-    - `src/ComplianceConfig.html` - Updated success message
-  - See: `FIX_COMPLIANCE_CONFIG_SAVE.md` for detailed documentation
+    - `src/88-SafetyReports.gs` - Added ~250 lines of normalization and approval functions
+    - `src/Code.gs` - Added menu item
+  - **Documentation:** `FIX_SAFETY_EMAILS_JOB_NORMALIZATION.md`
+
+### February 9, 2026
+- ✅ **Fixed Missing Safety Report Tasks Not Appearing in Task List**
+  - **Problem:** Tasks were created in Task Metadata but didn't show in Task List dialog
+  - **Root Cause:** `collectAndGroupTasks()` had no collection function for Missing Safety Report tasks
+  - **Solution:** Added `collectMissingSafetyReportTasks()` function to read tasks from Task Metadata
+  - **What Was Added:**
+    - New function in `76-SmartScheduling.gs`: `collectMissingSafetyReportTasks()` (~140 lines)
+    - Collection call added to `collectAndGroupTasks()` pipeline
+    - Reads TaskType = "Missing Safety Report" from Task Metadata
+    - Filters out completed tasks
+    - Groups by location like other task types
+  - **Task Properties:**
+    - TaskType: "Missing Safety Report"
+    - ItemType: "JHA", "Weekly Meeting", or "JHA + Weekly Meeting"
+    - Employee: Foreman name
+    - Priority: High if overdue, Medium otherwise
+    - EstimatedTime: 15 minutes (phone call)
+    - Source: "Safety Compliance"
+  - **Files Modified:**
+    - `src/76-SmartScheduling.gs` - Added collection function and pipeline call
+  - **Documentation:**
+    - `FIX_MISSING_SAFETY_REPORTS_NOT_SHOWING.md` - Detailed fix explanation
+    - `TEST_MISSING_SAFETY_REPORTS.md` - Testing guide
+  - **Impact:** Missing Safety Report tasks now appear in Task List, Calendar, and Trip Planner views
+- ✅ **Fixed Safety Compliance Category and Due Date Display**
+  - **Problem:** Missing Safety Report tasks showed under "Other" category instead of "Safety Compliance", and lacked due date display
+  - **Solution:** Added proper category detection and due date formatting
+  - **What Was Changed:**
+    - Added "Safety Compliance" category detection in `getTaskCategory()`
+    - Added "Safety Equipment" category for Safety Reports equipment issues
+    - Updated category order, icons, and colors
+    - Added due date display under employee name for Safety Compliance tasks
+    - Due dates show in red if overdue, gray if current/future
+  - **New Categories:**
+    - 🛡️ Safety Compliance (amber #f9ab00) - Missing Safety Reports
+    - 🔧 Safety Equipment (orange #ff6d00) - Safety Reports equipment issues
+  - **Category Order:** Training → Rubber Changes → Certs → Safety Compliance → Safety Equipment → Manual Tasks → Other
+  - **Files Modified:**
+    - `src/ToDoSchedule.html` - Category detection, configuration, and due date display (~30 lines)
+  - **Documentation:**
+    - `FIX_SAFETY_COMPLIANCE_CATEGORY.md` - Detailed fix explanation
+  - **Visual Changes:** Tasks now properly grouped under Safety Compliance with amber header, showing "Due: MM/DD/YYYY" below employee name
+
+### February 10, 2026
+- ✅ **Fixed Safety Compliance Task Details Not Showing**
+  - **Problem:** Ben Lapka had 3 Safety Compliance tasks but no identification of what items were missing (JHA dates, Weekly Meeting)
+  - **Root Cause:** Line 1929 in `ToDoSchedule.html` was checking `if (weekOfMatch)` (the week date string) instead of checking if notes contained "Missing Weekly Safety Meeting"
+  - **Solution:** Changed to check `notes.indexOf('Missing Weekly Safety Meeting') !== -1`
+  - **What Tasks Show Now:**
+    - Employee Name in bold
+    - Week of MM/DD/YYYY (blue text with calendar icon 📅)
+    - Missing: [Details] showing what's missing:
+      - JHA: Full week (if all 5 days)
+      - JHA: 02/03, 02/04 (specific dates if 2 or fewer)
+      - JHA: 3 days missing (count if more than 2)
+      - Weekly Meeting (if meeting is missing)
+  - **Example Display:** "Ben Lapka | 📅 Week of 02/01/2026 | Missing: JHA: 02/03/2026, 02/04/2026, Weekly Meeting"
+  - **Files Modified:**
+    - `src/ToDoSchedule.html` - Line 1929 - Fixed Weekly Meeting detection
+  - **Documentation:**
+    - `FIX_SAFETY_TASK_DETAILS_DISPLAY.md` - Technical explanation
+    - `SAFETY_COMPLIANCE_TASK_DISPLAY_FIXED.md` - User-facing summary
+  - **Note:** Modified emails (Modified-##) were already being handled correctly by the system - no changes needed
 
 ### February 8, 2026
 - ✅ **Expiring Certs Tab - Work Week Grouping**
@@ -1251,7 +1329,7 @@ Notes: [Any notes]
   - ROOT CAUSE: The checklist check wasn't filtering out completed items
   - Now checks `item.completed === true` or `item.status === 'completed'` and excludes those
   - After completing a cert task, the "Add to My Checklist" button appears again
-  - Modified ToDoSchedule.html `renderExpiringCerts()` function
+  - Modified ToDoSchedule.html `renderPersonalChecklist()` function
 - ✅ **Office Work Card in Trip Planner**
   - Added "🏢 Office Work" card to the unassigned locations panel
   - Shows count of office/phone tasks (cert expiring tasks + Helena location tasks)
@@ -1403,75 +1481,6 @@ Notes: [Any notes]
   - Prevents duplicate logging of completed tasks
   - Use case: Track administrative work like "Updated inventory records", "Processed purchase orders", "Responded to emails"
 
-### January 26, 2026
-- ✅ **Fixed changeout date not showing for swap tasks**
-  - Column header detection was looking for exact match "change out date"
-  - Actual header is "Change Out Date Assigned" 
-  - Changed to partial match: `header.indexOf('change out date') !== -1`
-  - Added debug logging to show detected column index and date values
-  - Now correctly reads changeout dates from Glove Swaps / Sleeve Swaps column E
-  - Modified `76-SmartScheduling.gs` collectSwapTasks() function
-- ✅ **Swap task employee names now bold and green with changeout dates**
-  - Employee names for glove/sleeve swap tasks display in bold green text (cert tasks remain blue)
-  - Changeout date (from column E of swap sheets) now displays under employee name
-  - Format: "Change Out: MM/DD/YYYY" with red text if overdue
-  - Provides visual consistency with cert task formatting while distinguishing task types
-  - Modified `ToDoSchedule.html` employee name and due date display logic
-- ✅ **MEC Expiration certs excluded from "Send Class Schedule" action**
-  - MEC (Medical Examiner's Certificate) certs now skip the Stage 2 SMS button
-  - They only show Stage 1 "Send notification" button
-  - Reason: MEC certs are renewed via DOT physical, not class attendance
-  - Modified `ToDoSchedule.html` to check cert category before showing schedule button
-- ✅ **Manage Certs button relocated in Quick Actions sidebar**
-  - Moved from "As Needed" section to be a sub-action under Step 1 "Generate All Reports"
-  - Now appears alongside "Import Crew Makeup" button
-  - More logical placement since cert management relates to report generation workflow
-- ✅ **Split Tasks Feature** - Divide tasks for the same location across multiple days
-  - Click location card with multiple tasks → "✂️ Split Tasks..." button in footer
-  - Select which tasks to move to a different day with checkboxes
-  - Choose target day from dropdown
-  - Tasks are split - location appears on both days with different task subsets
-  - Smart merging if location already exists on target day
-  - Automatic cleanup if all tasks moved from original day
-  - Real-time task count and estimated time updates
-  - Right-click context menu as alternative access method
-  - Use case: Schedule 3 urgent swaps for Monday, 2 non-urgent swaps for Thursday
-- ✅ **Fixed tasks already scheduled for future dates showing in Trip Planner**
-  - Tasks with a Scheduled Date in the future are now filtered out of the pending tasks list
-  - Urgency calculation now uses actual Due Date (cert expiration/change out date) instead of Scheduled Date
-  - This prevents scheduled tasks like Tristin and Logan's CPR on 01/29 from showing as "due today"
-- ✅ **Made cert holder names bold in task list**
-  - Employee names for cert tasks now display in bold blue text with filled person icon
-  - Makes it easier to identify who the cert holder is at a glance
-- ✅ **Added due date display for all tasks**
-  - Cert tasks show "Expires: MM/DD/YYYY" 
-  - Swap tasks show "Due: MM/DD/YYYY" (the change out date)
-  - Displayed below employee name in task row
-- ✅ **Unified Schedule Dialog** - Combined ToDoSchedule, TripPlanner, and ToDoConfig into one tabbed interface
-  - New file: `Schedule.html` with 3 tabs: Tasks, Trip Planner, Config
-  - Accessible via: Glove Manager → Schedule & To-Do → 📅 Schedule
-  - Also from QuickActions sidebar under Step 2
-  - Lazy-loads each tab content for optimal performance
-  - Context-aware "Apply" button changes based on active tab
-  - Legacy dialogs (ToDoSchedule, ToDoConfig, TripPlanner) still available
-- ✅ **Apply Trip to Schedule** - Now updates existing tasks in To-Do List with dates AND times
-  - No longer creates duplicate trip summary entries in Manual Tasks
-  - Uses arrival times from route calculation for each location
-  - Updates both Scheduled Date and Start Time columns
-- ✅ **Trip Planner UI improvements**
-  - Changed "Start:" to "Start from:" for clarity
-  - Changed "End:" to "End at:" for clarity  
-  - Overnight checkbox now shows location name: "🏨 Overnight in [Location]"
-  - Better flow between End location and Overnight selection
-- ✅ **Office Card in Trip Planner & Daily Accomplishments Integration**
-  - Added a special "Office" card to the unassigned pool in Trip Planner (green styling, 🏢 icon)
-  - Dragging Office to a day opens a dialog to enter office work tasks (with optional start/end times)
-  - Office tasks are saved as "Office Work" in the Manual Tasks sheet (Location = Helena)
-  - Completed office tasks automatically appear in the Daily Accomplishments report
-  - Multiple office tasks can be added per day
-  - Prevents duplicate logging of completed tasks
-  - Use case: Track administrative work like "Updated inventory records", "Processed purchase orders", "Responded to emails"
-
 ### January 25, 2026
 - ✅ **Unified Schedule Dialog** - Combined ToDoSchedule, TripPlanner, and ToDoConfig into one tabbed interface
   - New file: `Schedule.html` with 3 tabs: Tasks, Trip Planner, Config
@@ -1490,44 +1499,3 @@ Notes: [Any notes]
   - Overnight checkbox now shows location name: "🏨 Overnight in [Location]"
   - Better flow between End location and Overnight selection
 
-### January 22, 2026
-- ✅ Added Harassment Training to default cert types (now shows with SMS notification)
-- ✅ ExpiringCertsImport.html now supports file upload (like CrewImport.html)
-  - Drag & drop or click to select Excel file
-  - Sheet tab selection for multi-sheet workbooks
-  - Can still use paste method as alternative
-  - Consistent workflow with Crew Import
-- ✅ Fixed Previous Employees showing in To Do Config cert status
-  - Now only shows employees currently on Employees sheet (not "Previous Employee" location)
-- ✅ Monthly Training tasks now show "Monthly Training: [Topic]" prefix
-  - Distinguishes from cert expiration tasks
-- ✅ Training tasks now assign to first crew employee when no foreman is listed
-  - Looks up employees by job number to find crew members
-  - Falls back to first employee found for that crew
-  - Skips crew if no foreman AND no employees found
-- ✅ **Crew Import Special Circumstances** - Handle Layoff, Resigned, Light Duty, Vacation, etc.
-  - Detects "Time off/Quit/Other" sections in Excel
-  - Parses messy text (e.g., "Jorden Cumer 3 apMon 1-12") into name, classification, status, date
-  - Fully editable form: Name, Location, Classification, Status, Date picker, Job Number, Notes
-  - Auto-assigns Light Duty job number (005-26.#) to next available position
-  - Special locations: Previous Employee, Vacation, Light Duty, Leave
-  - Logs all changes to Employee History
-- ✅ **Add New Employee from Import** - Unmatched employees can be added as new hires directly
-- ✅ **Monthly Training Exclusions** - Employees with job numbers starting with 002 or 005 are excluded
-  - 002-xx = Safety Manager (you)
-  - 005-xx = Light Duty employees
-- ✅ **Fiscal Year Configuration** - Manage job number transitions between fiscal years
-  - Menu: Glove Manager → Utilities → Fiscal Year Config
-  - Set current/new fiscal year suffix (e.g., "26" → "27")
-  - Select which crews should transition vs. stay on current FY
-  - Preview shows all crews with employee counts
-  - Apply transition updates all employee job numbers
-  - Also updates Training Tracking sheet
-  - Logs all changes to Employee History as FISCAL_YEAR_TRANSITION
-
-### January 21, 2026
-- ✅ Double Metaphone phonetic matching for Excel import
-- ✅ NAME_CORRECTED and NEW_EMPLOYEE_IMPORT event types
-- ✅ Enhanced fuzzy name matching (Levenshtein + Metaphone)
-- ✅ Confirmation dialogs for all Employees/History changes
-- ✅ logNameCorrection() and logNewEmployeeFromImport() functions

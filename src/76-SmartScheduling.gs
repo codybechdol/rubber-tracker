@@ -218,6 +218,12 @@ function collectAndGroupTasks(ss) {
   var afterSafety = countTasks(tasksByLocation);
   Logger.log('collectAndGroupTasks: Safety Reports added ' + (afterSafety - beforeSafety) + ' tasks');
 
+  // Collect Missing Safety Report tasks from Task Metadata (JHA/Weekly Meeting compliance)
+  var beforeMissingSafety = countTasks(tasksByLocation);
+  collectMissingSafetyReportTasks(ss, tasksByLocation, employeeLocations, employeeForemen, employeePhones, today);
+  var afterMissingSafety = countTasks(tasksByLocation);
+  Logger.log('collectAndGroupTasks: Missing Safety Reports added ' + (afterMissingSafety - beforeMissingSafety) + ' tasks');
+
   Logger.log('collectAndGroupTasks: TOTAL tasks = ' + countTasks(tasksByLocation));
 
   // Sort tasks within each location by foreman, then by due date
@@ -1950,6 +1956,174 @@ function collectSafetyReportsTasks(ss, tasksByLocation, employeeLocations, today
   }
 
   Logger.log('collectSafetyReportsTasks: Added ' + taskCount + ' safety report tasks total');
+}
+
+/**
+ * Collects Missing Safety Report tasks directly from Task Metadata.
+ * These tasks are created by the compliance tracking system when crews
+ * miss JHAs or Weekly Safety Meetings.
+ *
+ * Only includes tasks from the PREVIOUS work week (not current week, not older weeks).
+ *
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @param {Object} tasksByLocation - Object to add tasks to
+ * @param {Object} employeeLocations - Map of employee names to locations
+ * @param {Object} employeeForemen - Map of employee names to foremen
+ * @param {Object} employeePhones - Map of employee names to phone numbers
+ * @param {Date} today - Today's date
+ */
+function collectMissingSafetyReportTasks(ss, tasksByLocation, employeeLocations, employeeForemen, employeePhones, today) {
+  var taskMetadataSheet = ss.getSheetByName('Task Metadata');
+  if (!taskMetadataSheet || taskMetadataSheet.getLastRow() < 2) {
+    Logger.log('collectMissingSafetyReportTasks: Task Metadata sheet not found or empty');
+    return;
+  }
+
+  var data = taskMetadataSheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Find column indices
+  var colIdx = {};
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'taskid') colIdx.taskID = h;
+    if (header === 'sourcesheet') colIdx.sourceSheet = h;
+    if (header === 'sourcerow') colIdx.sourceRow = h;
+    if (header === 'employee') colIdx.employee = h;
+    if (header === 'tasktype') colIdx.taskType = h;
+    if (header === 'itemtype') colIdx.itemType = h;
+    if (header === 'location') colIdx.location = h;
+    if (header === 'foreman') colIdx.foreman = h;
+    if (header === 'phonenumber') colIdx.phoneNumber = h;
+    if (header === 'duedate') colIdx.dueDate = h;
+    if (header === 'status') colIdx.status = h;
+    if (header === 'notes') colIdx.notes = h;
+    if (header === 'createddate') colIdx.createdDate = h;
+  }
+
+  // Calculate PREVIOUS work week boundaries
+  // Only show tasks from the previous week (not current week, not older weeks)
+  var dayOfWeek = today.getDay(); // 0 = Sunday
+  var currentWeekStart = new Date(today);
+  currentWeekStart.setDate(today.getDate() - dayOfWeek);
+  currentWeekStart.setHours(0, 0, 0, 0);
+
+  var previousWeekStart = new Date(currentWeekStart);
+  previousWeekStart.setDate(currentWeekStart.getDate() - 7);
+
+  var previousWeekEnd = new Date(currentWeekStart);
+  previousWeekEnd.setDate(currentWeekStart.getDate() - 1); // Saturday
+  previousWeekEnd.setHours(23, 59, 59, 999);
+
+  Logger.log('collectMissingSafetyReportTasks: Only collecting tasks for previous week ' +
+    Utilities.formatDate(previousWeekStart, Session.getScriptTimeZone(), 'MM/dd/yyyy') + ' to ' +
+    Utilities.formatDate(previousWeekEnd, Session.getScriptTimeZone(), 'MM/dd/yyyy'));
+
+  var taskCount = 0;
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var taskType = String(row[colIdx.taskType] || '').trim();
+    var status = String(row[colIdx.status] || '').trim();
+
+    // Only collect "Missing Safety Report" tasks
+    if (taskType !== 'Missing Safety Report') {
+      continue;
+    }
+
+    // Skip completed tasks
+    if (status === 'Complete' || status === 'Completed') {
+      continue;
+    }
+
+    // Filter to only PREVIOUS work week using DueDate
+    var dueDateVal = row[colIdx.dueDate];
+    if (dueDateVal) {
+      var taskDueDate;
+      if (dueDateVal instanceof Date) {
+        taskDueDate = new Date(dueDateVal);
+      } else {
+        taskDueDate = new Date(dueDateVal);
+      }
+      taskDueDate.setHours(0, 0, 0, 0);
+
+      // Skip if not from previous week (due date should be the Saturday of that week)
+      if (taskDueDate < previousWeekStart || taskDueDate > previousWeekEnd) {
+        continue; // Silently skip tasks not from previous week
+      }
+    }
+
+    var employee = String(row[colIdx.employee] || '').trim();
+    var location = String(row[colIdx.location] || '').trim();
+    var foreman = String(row[colIdx.foreman] || '').trim();
+    var phoneNumber = String(row[colIdx.phoneNumber] || '').trim();
+    var itemType = String(row[colIdx.itemType] || '').trim(); // "JHA", "Weekly Meeting", or "JHA + Weekly Meeting"
+    var notes = String(row[colIdx.notes] || '').trim();
+    var sourceSheet = String(row[colIdx.sourceSheet] || '').trim();
+    var sourceRow = row[colIdx.sourceRow];
+
+    // Parse due date
+    var dueDate = null;
+    var dueDateValue = row[colIdx.dueDate];
+    if (dueDateValue instanceof Date) {
+      dueDate = new Date(dueDateValue);
+      dueDate.setHours(0, 0, 0, 0);
+    } else if (dueDateValue && typeof dueDateValue === 'string') {
+      dueDate = new Date(dueDateValue);
+      if (isNaN(dueDate.getTime())) {
+        dueDate = new Date(); // Default to today if invalid
+      }
+      dueDate.setHours(0, 0, 0, 0);
+    } else {
+      dueDate = new Date();
+      dueDate.setHours(0, 0, 0, 0);
+    }
+
+    // Calculate days until due
+    var daysTillDue = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
+    var isOverdue = daysTillDue < 0;
+
+    // Use location from metadata, fallback to employee lookup
+    if (!location && employee) {
+      var empKey = employee.toLowerCase();
+      location = employeeLocations[empKey] || 'Unknown';
+    }
+    if (!location) {
+      location = 'Unknown';
+    }
+
+    // Build task object
+    var task = {
+      employee: employee, // This is the foreman for Missing Safety Reports
+      foreman: foreman,
+      location: location,
+      type: taskType, // "Missing Safety Report"
+      taskType: taskType,
+      itemType: itemType, // "JHA", "Weekly Meeting", or "JHA + Weekly Meeting"
+      phoneNumber: phoneNumber,
+      dueDate: dueDate,
+      daysTillDue: daysTillDue,
+      isOverdue: isOverdue,
+      priority: isOverdue ? 'High' : 'Medium',
+      estimatedTime: 0.25, // 15 minutes for a phone call
+      notes: notes,
+      source: sourceSheet || 'Safety Compliance',
+      sheetName: sourceSheet || 'Safety Compliance',
+      rowIndex: sourceRow || (i + 1)
+    };
+
+    // Add to location
+    if (!tasksByLocation[location]) {
+      tasksByLocation[location] = [];
+    }
+    tasksByLocation[location].push(task);
+    taskCount++;
+
+    Logger.log('collectMissingSafetyReportTasks: Added ' + itemType + ' task for ' + employee +
+               ' at ' + location + ' (overdue: ' + isOverdue + ')');
+  }
+
+  Logger.log('collectMissingSafetyReportTasks: Added ' + taskCount + ' missing safety report tasks total');
 }
 
 /**

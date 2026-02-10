@@ -677,9 +677,45 @@
     </div>
   </div>
 
+  <!-- Safety Compliance Completion Modal -->
+  <div class="modal fade" id="safetyComplianceModal" tabindex="-1" aria-labelledby="safetyComplianceModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header" style="background: linear-gradient(135deg, #ea4335 0%, #c5221f 100%); color: white;">
+          <h5 class="modal-title" id="safetyComplianceModalLabel"><i class="bi bi-shield-check"></i> Complete Missing Report Task</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="alert alert-info small">
+            <strong><i class="bi bi-person-badge"></i> <span id="safetyEmployeeName">Foreman</span></strong><br>
+            <strong>Missing:</strong> <span id="safetyItemType">Report Type</span><br>
+            <span id="safetyDetails"></span>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" style="font-weight: 600;">Why wasn't this report received? *</label>
+            <textarea class="form-control" id="safetyResolutionNotes" rows="4" placeholder="Example reasons:&#10;- Crew was off due to weather&#10;- Crew was in Light Duty status&#10;- Report was submitted late and already addressed&#10;- Employee called in sick"></textarea>
+            <div class="form-text">These notes will be saved with the task completion record.</div>
+          </div>
+
+          <div class="alert alert-warning small mb-0">
+            <i class="bi bi-info-circle"></i> Marking this as complete means you've addressed why the report wasn't received. The task will remain in the completed list for historical tracking.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-success" onclick="completeSafetyComplianceTask()">
+            <i class="bi bi-check-lg"></i> Mark Complete
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   <script>
     var allTasks = [];
+    var safetyComplianceTasks = []; // Missing safety report tasks from previous week
     var employeePhoneMap = {}; // Map of employee names to phone numbers
     var currentMonth = new Date().getMonth();
     var currentYear = new Date().getFullYear();
@@ -1042,6 +1078,18 @@
         return 'Certs';
       }
 
+      // Safety Compliance - Missing Safety Reports (JHA/Weekly Meeting)
+      if (taskType === 'missing safety report' || taskType.indexOf('missing safety') !== -1 ||
+          source === 'safety compliance' || source.indexOf('safety compliance') !== -1) {
+        return 'Safety Compliance';
+      }
+
+      // Safety Equipment - from Safety Reports sheet
+      if (taskType === 'safety equipment' || taskType.indexOf('safety equipment') !== -1 ||
+          source === 'safety reports' || source.indexOf('safety reports') !== -1) {
+        return 'Safety Equipment';
+      }
+
       // Everything else goes to Other
       return 'Other';
     }
@@ -1049,11 +1097,15 @@
     // Category display order and icons
     // Note: "Certs" = certs added from Expiring Certs tab (inTaskList=true)
     // Note: "Manual Tasks" = user-created tasks
-    var categoryOrder = ['Training', 'Rubber Changes', 'Certs', 'Manual Tasks', 'Other'];
+    // Note: "Safety Compliance" = Missing Safety Reports (JHA/Weekly Meeting)
+    // Note: "Safety Equipment" = Safety Reports equipment issues
+    var categoryOrder = ['Training', 'Rubber Changes', 'Certs', 'Safety Compliance', 'Safety Equipment', 'Manual Tasks', 'Other'];
     var categoryIcons = {
       'Training': 'bi-mortarboard',
       'Rubber Changes': 'bi-arrow-left-right',
       'Certs': 'bi-file-earmark-medical',
+      'Safety Compliance': 'bi-shield-check',
+      'Safety Equipment': 'bi-wrench',
       'Manual Tasks': 'bi-pencil-square',
       'Other': 'bi-three-dots'
     };
@@ -1061,6 +1113,8 @@
       'Training': '#1a73e8',
       'Rubber Changes': '#34a853',
       'Certs': '#ea4335',
+      'Safety Compliance': '#f9ab00',
+      'Safety Equipment': '#ff6d00',
       'Manual Tasks': '#9c27b0',
       'Other': '#5f6368'
     };
@@ -1334,6 +1388,24 @@
 
           // Update localStorage checklist items with phone numbers if missing
           updateChecklistPhoneNumbers();
+
+          // Load safety compliance tasks (missing reports from previous week)
+          google.script.run
+            .withSuccessHandler(function(tasks) {
+              safetyComplianceTasks = tasks || [];
+              console.log('Loaded ' + safetyComplianceTasks.length + ' safety compliance tasks from previous week');
+              // Re-render personal checklist to include safety tasks
+              try {
+                renderPersonalChecklist();
+                console.log('Re-rendered personal checklist with safety compliance tasks');
+              } catch (e) {
+                console.error('Error re-rendering checklist:', e);
+              }
+            })
+            .withFailureHandler(function(e) {
+              console.error('Failed to load safety compliance tasks:', e);
+            })
+            .getMissingSafetyReportTasks();
 
           try {
             renderTasks(allTasks);
@@ -1818,7 +1890,56 @@
       html += '<div class="col-md-3">';
       html += '<div class="task-type" style="font-weight: 500;">' + displayTaskType + '</div>';
       html += '<div class="task-source"><i class="bi bi-box-arrow-in-right"></i> ' + (task.source || 'Unknown') + '</div>';
-      if (task.employee) html += '<div class="text-muted small"><i class="bi bi-person"></i> ' + task.employee + '</div>';
+      if (task.employee) {
+        html += '<div class="text-muted small"><i class="bi bi-person"></i> ' + task.employee + '</div>';
+
+        // Show report dates for Safety Compliance tasks (Missing Safety Reports)
+        var taskType = (task.taskType || '').toLowerCase();
+        if (taskType === 'missing safety report' || taskType.indexOf('missing safety') !== -1) {
+          // Parse notes to extract missing dates
+          var notes = task.notes || '';
+          var displayParts = [];
+
+          // Extract Week of date from notes (this identifies which week the task is for)
+          var weekOfMatch = notes.match(/week of\s+(\d{2}\/\d{2}\/\d{4})/i);
+          var weekOfDate = weekOfMatch ? weekOfMatch[1] : '';
+
+          // Show WEEK prominently first
+          if (weekOfDate) {
+            html += '<div class="text-primary small" style="margin-left: 20px; font-weight: 600;"><i class="bi bi-calendar-week"></i> Week of ' + weekOfDate + '</div>';
+          }
+
+          // Extract JHA dates
+          var jhaMatch = notes.match(/Missing JHA:\s*([^;]+)/);
+          if (jhaMatch) {
+            var jhaDates = jhaMatch[1].trim().split(',');
+            if (jhaDates.length === 5) {
+              displayParts.push('JHA: Full week');
+            } else if (jhaDates.length <= 2) {
+              // Show specific dates if 2 or fewer
+              displayParts.push('JHA: ' + jhaDates.map(function(d) { return d.trim(); }).join(', '));
+            } else {
+              // Show count
+              displayParts.push('JHA: ' + jhaDates.length + ' days missing');
+            }
+          }
+
+          // Show if Weekly Meeting is missing
+          if (notes.indexOf('Missing Weekly Safety Meeting') !== -1) {
+            displayParts.push('Weekly Meeting');
+          }
+
+          if (displayParts.length > 0) {
+            var today = new Date();
+            today.setHours(0, 0, 0, 0);
+            var dueDate = task.dueDate ? new Date(task.dueDate) : null;
+            if (dueDate) dueDate.setHours(0, 0, 0, 0);
+            var isOverdue = dueDate && dueDate < today;
+            var dueDateColor = isOverdue ? '#d32f2f' : '#5f6368';
+            html += '<div class="text-muted small" style="color: ' + dueDateColor + '; margin-left: 20px;">Missing: ' + displayParts.join(', ') + '</div>';
+          }
+        }
+      }
       html += '</div>';
 
       // Scheduled Date (editable)
@@ -4074,8 +4195,144 @@
       renderPersonalChecklist();
     }
 
+    // ================== SAFETY COMPLIANCE FUNCTIONS ==================
+    var currentSafetyTask = null; // Currently selected safety task for completion
+
+    function openSafetyComplianceModal(taskId) {
+      // Find the task in safetyComplianceTasks
+      var task = safetyComplianceTasks.find(function(t) { return t.taskId === taskId; });
+      if (!task) {
+        showToast('Task not found', 'error');
+        return;
+      }
+
+      currentSafetyTask = task;
+
+      // Populate modal
+      document.getElementById('safetyEmployeeName').textContent = task.foreman || 'Unknown Foreman';
+      document.getElementById('safetyItemType').textContent = task.itemType || 'Unknown';
+
+      // Extract details from notes
+      var detailsHtml = '';
+      if (task.notes) {
+        var weekMatch = task.notes.match(/week of\s+(\d{2}\/\d{2}\/\d{4})/i);
+        if (weekMatch) {
+          detailsHtml += '<strong>Week:</strong> ' + weekMatch[1] + '<br>';
+        }
+        var jhaMatch = task.notes.match(/Missing JHA:\s*([^;]+)/);
+        if (jhaMatch) {
+          detailsHtml += '<strong>Missing JHA Dates:</strong> ' + jhaMatch[1] + '<br>';
+        }
+      }
+      if (task.location) {
+        detailsHtml += '<strong>Location:</strong> ' + task.location;
+      }
+      document.getElementById('safetyDetails').innerHTML = detailsHtml;
+
+      // Clear previous notes
+      document.getElementById('safetyResolutionNotes').value = '';
+
+      // Show modal
+      var modal = new bootstrap.Modal(document.getElementById('safetyComplianceModal'));
+      modal.show();
+    }
+
+    function completeSafetyComplianceTask() {
+      if (!currentSafetyTask) return;
+
+      var notes = document.getElementById('safetyResolutionNotes').value.trim();
+      if (!notes) {
+        showToast('Please provide a reason why the report was not received', 'error');
+        return;
+      }
+
+      // Call server to mark complete
+      google.script.run
+        .withSuccessHandler(function(success) {
+          if (success) {
+            showToast('✓ Safety compliance task marked complete');
+
+            // Update local state
+            var task = safetyComplianceTasks.find(function(t) { return t.taskId === currentSafetyTask.taskId; });
+            if (task) {
+              task.completed = true;
+              task.status = 'Complete';
+              task.completedDate = new Date().toISOString();
+              task.notes = task.notes + '\n\n=== RESOLUTION ===\n' + notes;
+            }
+
+            // Close modal and refresh
+            var modal = bootstrap.Modal.getInstance(document.getElementById('safetyComplianceModal'));
+            modal.hide();
+            currentSafetyTask = null;
+
+            // Re-render checklist
+            renderPersonalChecklist();
+          } else {
+            showToast('❌ Error marking task complete', 'error');
+          }
+        })
+        .withFailureHandler(function(err) {
+          showToast('❌ Error: ' + err.message, 'error');
+        })
+        .completeMissingSafetyReportTask(currentSafetyTask.taskId, notes);
+    }
+
+    function viewSafetyComplianceResolution(taskId) {
+      var task = safetyComplianceTasks.find(function(t) { return t.taskId === taskId; });
+      if (!task || !task.notes) return;
+
+      // Extract resolution notes
+      var resolutionMatch = task.notes.match(/=== RESOLUTION ===\n([\s\S]+)/);
+      var resolutionText = resolutionMatch ? resolutionMatch[1] : 'No resolution notes found';
+
+      // Show in modal
+      currentSafetyTask = task;
+      document.getElementById('safetyEmployeeName').textContent = task.foreman || 'Unknown Foreman';
+      document.getElementById('safetyItemType').textContent = task.itemType || 'Unknown';
+
+      var detailsHtml = '<strong>Status:</strong> <span style="color: green;">Complete</span><br>';
+      if (task.completedDate) {
+        detailsHtml += '<strong>Completed:</strong> ' + new Date(task.completedDate).toLocaleString() + '<br>';
+      }
+      document.getElementById('safetyDetails').innerHTML = detailsHtml;
+
+      document.getElementById('safetyResolutionNotes').value = resolutionText;
+      document.getElementById('safetyResolutionNotes').readOnly = true;
+
+      var modal = new bootstrap.Modal(document.getElementById('safetyComplianceModal'));
+      modal.show();
+    }
+
+    function sendSafetyComplianceSms(taskId) {
+      var task = safetyComplianceTasks.find(function(t) { return t.taskId === taskId; });
+      if (!task) return;
+
+      var phoneNumber = task.phoneNumber;
+      if (!phoneNumber || phoneNumber.length < 10) {
+        showToast('No phone number available', 'error');
+        return;
+      }
+
+      // Build SMS message using server function
+      google.script.run
+        .withSuccessHandler(function(message) {
+          if (message) {
+            var smsUrl = 'sms:' + phoneNumber + '?body=' + encodeURIComponent(message);
+            window.open(smsUrl, '_blank');
+            showToast('✓ Opening messaging app...');
+          } else {
+            showToast('❌ Error building message', 'error');
+          }
+        })
+        .withFailureHandler(function(err) {
+          showToast('❌ Error: ' + err.message, 'error');
+        })
+        .buildMissingSafetyReportSmsMessage(task);
+    }
+
     // Track which checklist category and location groups are open (default to open)
-    var openChecklistCategoryGroups = { 'Expiring Certs': true, 'Manual Tasks': true };
+    var openChecklistCategoryGroups = { 'Expiring Certs': true, 'Manual Tasks': true, 'Safety Compliance': true };
     var openChecklistLocationGroups = {};
 
     function toggleChecklistCategoryGroup(categoryName) {
@@ -4167,7 +4424,8 @@
       // Group items by category first, then by location within each category
       var categories = {
         'Expiring Certs': [],
-        'Manual Tasks': []
+        'Manual Tasks': [],
+        'Safety Compliance': []
       };
 
       filteredChecklist.forEach(function(item, index) {
@@ -4179,17 +4437,40 @@
         }
       });
 
+      // Add safety compliance tasks (always show, not in filteredChecklist)
+      safetyComplianceTasks.forEach(function(task) {
+        var checklistItem = {
+          id: 'safety_' + task.taskId,
+          taskId: task.taskId,
+          title: task.itemType, // "JHA", "Weekly Meeting", or "JHA + Weekly Meeting"
+          employee: task.foreman,
+          location: task.location || '',
+          notes: task.notes,
+          status: task.status,
+          source: 'Safety Compliance',
+          priority: 'High', // All safety compliance is high priority
+          completed: task.completed,
+          completedDate: task.completedDate || '',
+          phoneNumber: task.phoneNumber || '',
+          dueDate: task.dueDate || '',
+          itemType: task.itemType,
+          isFromServer: true,
+          isSafetyTask: true
+        };
+        categories['Safety Compliance'].push(checklistItem);
+      });
+
       var html = '';
       var categoryIndex = 0;
 
       // Render each category
-      ['Expiring Certs', 'Manual Tasks'].forEach(function(categoryName) {
+      ['Expiring Certs', 'Manual Tasks', 'Safety Compliance'].forEach(function(categoryName) {
         var categoryItems = categories[categoryName];
         if (categoryItems.length === 0) return;
 
-        var catIcon = categoryName === 'Expiring Certs' ? 'bi-file-earmark-medical' : 'bi-pencil-square';
-        var catColor = categoryName === 'Expiring Certs' ? '#ea4335' : '#1a73e8';
-        var catBg = categoryName === 'Expiring Certs' ? 'linear-gradient(135deg, #ea4335 0%, #c5221f 100%)' : 'linear-gradient(135deg, #1a73e8 0%, #1557b0 100%)';
+        var catIcon = categoryName === 'Expiring Certs' ? 'bi-file-earmark-medical' : (categoryName === 'Safety Compliance' ? 'bi-shield-check' : 'bi-pencil-square');
+        var catColor = categoryName === 'Expiring Certs' ? '#ea4335' : (categoryName === 'Safety Compliance' ? '#ea4335' : '#1a73e8');
+        var catBg = categoryName === 'Expiring Certs' ? 'linear-gradient(135deg, #ea4335 0%, #c5221f 100%)' : (categoryName === 'Safety Compliance' ? 'linear-gradient(135deg, #ea4335 0%, #c5221f 100%)' : 'linear-gradient(135deg, #1a73e8 0%, #1557b0 100%)');
 
         var isCatOpen = openChecklistCategoryGroups[categoryName] === true;
 
@@ -4204,12 +4485,19 @@
 
         html += '<div class="card-body p-0" id="checklist-cat-body-' + categoryIndex + '" style="display: ' + (isCatOpen ? 'block' : 'none') + ';">';
 
-        // Group by location within category
+        // Group by location within category (or by foreman for Safety Compliance)
         var itemsByLocation = {};
         categoryItems.forEach(function(item) {
-          var loc = item.location || 'No Location';
-          if (!itemsByLocation[loc]) itemsByLocation[loc] = [];
-          itemsByLocation[loc].push(item);
+          var groupKey;
+          if (categoryName === 'Safety Compliance') {
+            // Group by foreman (employee) for safety compliance
+            groupKey = item.employee || 'Unknown Foreman';
+          } else {
+            // Group by location for other categories
+            groupKey = item.location || 'No Location';
+          }
+          if (!itemsByLocation[groupKey]) itemsByLocation[groupKey] = [];
+          itemsByLocation[groupKey].push(item);
         });
 
         var locations = Object.keys(itemsByLocation).sort();
@@ -4222,7 +4510,13 @@
           html += '<div class="location-subgroup" style="border-bottom: 1px solid #e0e0e0;">';
           html += '<div class="location-subheader" style="background: #f8f9fa; padding: 8px 16px; cursor: pointer;" onclick="toggleChecklistLocationGroup(\'' + locKey + '\')">';
           html += '<i class="bi ' + (isLocOpen ? 'bi-chevron-down' : 'bi-chevron-right') + ' me-2" id="checklist-loc-chevron-' + locKey + '"></i>';
-          html += '<i class="bi bi-geo-alt me-1" style="color: ' + catColor + ';"></i>';
+
+          // Different icon for Safety Compliance (person icon)
+          if (categoryName === 'Safety Compliance') {
+            html += '<i class="bi bi-person-badge me-1" style="color: ' + catColor + ';"></i>';
+          } else {
+            html += '<i class="bi bi-geo-alt me-1" style="color: ' + catColor + ';"></i>';
+          }
           html += '<strong>' + location + '</strong>';
           html += '<span class="badge bg-secondary ms-2">' + items.length + '</span>';
           html += '</div>';
@@ -4253,8 +4547,82 @@
       container.innerHTML = html;
     }
 
+    function renderSafetyComplianceTaskRow(item) {
+      var completedClass = item.completed ? 'opacity-50' : '';
+      var taskId = item.taskId;
+
+      var html = '<div class="task-row priority-high ' + completedClass + '">';
+      html += '<div class="row align-items-center">';
+
+      // Task Type & Source
+      html += '<div class="col-md-3">';
+      html += '<div class="task-type d-flex align-items-center" style="font-weight: 500;">';
+      html += '<input class="form-check-input me-2" type="checkbox" ' + (item.completed ? 'checked disabled' : '') + ' onclick="openSafetyComplianceModal(\'' + taskId + '\')" style="margin-top: 0;">';
+      html += '<span style="' + (item.completed ? 'text-decoration: line-through;' : '') + '">' + item.itemType + '</span></div>';
+      html += '<div class="task-source"><i class="bi bi-shield-check"></i> Missing Report</div>';
+      html += '<div class="text-muted small"><i class="bi bi-person-badge"></i> ' + item.employee + '</div>';
+      html += '</div>';
+
+      // Week Info (from notes)
+      html += '<div class="col-md-2">';
+      if (item.notes) {
+        var weekMatch = item.notes.match(/week of\s+(\d{2}\/\d{2}\/\d{4})/i);
+        if (weekMatch) {
+          html += '<div class="small text-muted"><i class="bi bi-calendar-week"></i> Week of ' + weekMatch[1] + '</div>';
+        }
+      }
+      html += '</div>';
+
+      // Dates (from notes)
+      html += '<div class="col-md-2">';
+      if (item.itemType && item.itemType.indexOf('JHA') !== -1 && item.notes) {
+        var jhaMatch = item.notes.match(/Missing JHA:\s*([^;]+)/);
+        if (jhaMatch) {
+          var dates = jhaMatch[1].trim();
+          html += '<div class="small text-danger"><strong>Missing:</strong> ' + dates + '</div>';
+        }
+      }
+      html += '</div>';
+
+      // Status
+      html += '<div class="col-md-2">';
+      var statusText = item.completed ? 'Complete' : 'Pending';
+      var statusClass = item.completed ? 'status-complete' : 'status-pending';
+      html += '<span class="status-badge ' + statusClass + '">' + statusText + '</span>';
+      html += '</div>';
+
+      // Actions
+      html += '<div class="col-md-3 text-end">';
+
+      // SMS button if phone number available
+      if (item.phoneNumber && item.phoneNumber.length >= 10) {
+        html += '<button class="btn btn-outline-primary btn-sm me-1" onclick="event.stopPropagation(); sendSafetyComplianceSms(\'' + taskId + '\')" title="Send SMS reminder"><i class="bi bi-chat-text"></i></button>';
+      }
+
+      if (!item.completed) {
+        html += '<button class="btn btn-outline-success btn-sm me-1" onclick="event.stopPropagation(); openSafetyComplianceModal(\'' + taskId + '\')" title="Mark complete with notes"><i class="bi bi-check-lg"></i> Complete</button>';
+      } else {
+        html += '<button class="btn btn-outline-secondary btn-sm me-1" onclick="event.stopPropagation(); viewSafetyComplianceResolution(\'' + taskId + '\')" title="View resolution"><i class="bi bi-eye"></i> View</button>';
+      }
+
+      html += '</div></div>';
+
+      // Show full notes if available
+      if (item.notes) {
+        html += '<div class="text-muted small mt-1 ms-4" style="max-width: 600px; white-space: pre-wrap;"><i class="bi bi-info-circle"></i> ' + item.notes + '</div>';
+      }
+
+      html += '</div>';
+      return html;
+    }
+
 
     function renderChecklistTaskRow(item) {
+      // Special rendering for Safety Compliance tasks
+      if (item.isSafetyTask) {
+        return renderSafetyComplianceTaskRow(item);
+      }
+
       var itemId = item.isFromServer ? "'" + item.id + "'" : item.id;
       var itemNotified = isChecklistItemNotified(item);
       var itemOffice = isChecklistItemOffice(item);
