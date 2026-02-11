@@ -6,6 +6,7 @@
  * Logs to Safety Reports sheet for tracking and task creation
  *
  * Created: February 4, 2026
+ * Updated: February 10, 2026 - Fixed column structure (removed Week End, fixed column indices)
  */
 
 /**
@@ -188,6 +189,56 @@ function addResolvedFormattingToSafetyReports() {
 }
 
 /**
+ * Applies conditional formatting to status column for new rows
+ *
+ * @param {Sheet} sheet - Safety Reports sheet
+ * @param {number} startRow - Starting row for new data
+ * @param {number} numRows - Number of rows to format
+ */
+function applyStatusFormatting(sheet, startRow, numRows) {
+  if (!sheet || !startRow || !numRows || numRows < 1) return;
+
+  var statusRange = sheet.getRange(startRow, 8, numRows, 1); // Column H = Status
+
+  var rules = sheet.getConditionalFormatRules();
+
+  // Red for "Needs Attention"
+  var needsAttentionRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo("Needs Attention")
+    .setBackground("#F4CCCC")
+    .setFontColor("#CC0000")
+    .setRanges([statusRange])
+    .build();
+
+  // Green for "Resolved"
+  var resolvedRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo("Resolved")
+    .setBackground("#D9EAD3")
+    .setFontColor("#38761D")
+    .setRanges([statusRange])
+    .build();
+
+  // Yellow for "Ordered"
+  var orderedRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo("Ordered")
+    .setBackground("#FFF2CC")
+    .setFontColor("#BF9000")
+    .setRanges([statusRange])
+    .build();
+
+  // Blue for "Replaced"
+  var replacedRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo("Replaced")
+    .setBackground("#CFE2F3")
+    .setFontColor("#1155CC")
+    .setRanges([statusRange])
+    .build();
+
+  rules.push(needsAttentionRule, resolvedRule, orderedRule, replacedRule);
+  sheet.setConditionalFormatRules(rules);
+}
+
+/**
  * Searches Gmail for JHAs, Safety Meetings, and Fleet Checklists
  * Parses them and logs equipment issues to Safety Reports sheet
  *
@@ -204,8 +255,14 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Safety Reports");
   if (!sheet) {
-    Browser.msgBox("❌ Safety Reports sheet not found. Run 'Setup Safety Reports Sheet' first.");
-    return { complete: true, error: "Sheet not found" };
+    // Auto-create the sheet
+    Logger.log("Safety Reports sheet not found - creating it now");
+    setupSafetyReportsSheet();
+    sheet = ss.getSheetByName("Safety Reports");
+    if (!sheet) {
+      Browser.msgBox("❌ Failed to create Safety Reports sheet.");
+      return { complete: true, error: "Failed to create sheet" };
+    }
   }
 
   var props = PropertiesService.getScriptProperties();
@@ -606,7 +663,7 @@ function showProcessSafetyEmailsDialog() {
     '    } else if (result && result.complete) {' +
     '      progressBar.style.width = "100%";' +
     '      progressBar.textContent = "100%";' +
-    '      progressBar.style.background = "linear-gradient(90deg, #34a853, #137333)";' +
+    '      progressBar.style.background = "linear-gradient(90deg, #34A853, #137333)";' +
     '      var modeInfo = result.newOnlyMode ? " (new only since " + result.lastProcessedDate + ")" : " (last " + currentDays + " days)";' +
     '      var complianceInfo = result.complianceRecordsAdded ? "<div class=\\"info\\">📋 JHA/Safety Meeting records logged: " + result.complianceRecordsAdded + "</div>" : "";' +
     '      status.innerHTML = ' +
@@ -1733,63 +1790,71 @@ function extractSafetyChecklistIssues(pdfText, context) {
   return issues;
 }
 
-/**
- * Priority order for job classifications (who is in charge of the crew)
- * Higher priority = more responsible for safety items
- * Note: JRY OP and GTO are equivalent priority
- */
-var CLASSIFICATION_PRIORITY = [
-  'SUP',      // Superintendent - highest priority
-  'GF',       // General Foreman
-  'F',        // Foreman
-  'GTO F',    // GTO Foreman
-  'GTO',      // Gas Tech Operator
-  'JRY OP',   // Journey Operator (equal to GTO)
-  'AP 7',     // Apprentice 7th year
-  'AP 6',     // Apprentice 6th year
-  'AP 5',     // Apprentice 5th year
-  'AP 4',     // Apprentice 4th year
-  'AP 3',     // Apprentice 3rd year
-  'AP 2',     // Apprentice 2nd year
-  'AP 1'      // Apprentice 1st year - lowest priority
-];
+// ============================================================================
+// FOREMAN LOOKUP FUNCTIONS
+// ============================================================================
 
 /**
- * Gets the priority index for a job classification (lower = higher priority)
- * @param {string} classification - Job classification string
- * @returns {number} - Priority index (0 = highest, 999 = not found)
+ * Gets classification priority for determining who is in charge of a crew
+ * Lower number = higher priority
+ *
+ * @param {string} classification - Employee classification (e.g., "F", "GF", "JRY")
+ * @returns {number} - Priority (lower = higher priority)
  */
 function getClassificationPriority(classification) {
-  if (!classification) return 999;
-  var classUpper = String(classification).trim().toUpperCase();
+  var classLower = String(classification).toLowerCase().trim();
 
-  for (var i = 0; i < CLASSIFICATION_PRIORITY.length; i++) {
-    if (classUpper === CLASSIFICATION_PRIORITY[i]) {
-      return i;
-    }
-  }
-
-  // Handle variations (AP7, AP 7, JRYOP, JRY OP, etc.)
-  var classNoSpaces = classUpper.replace(/\s+/g, '');
-  for (var i = 0; i < CLASSIFICATION_PRIORITY.length; i++) {
-    var priority = CLASSIFICATION_PRIORITY[i];
-    // Remove spaces for comparison (AP 7 vs AP7, JRY OP vs JRYOP)
-    if (classNoSpaces === priority.replace(/\s+/g, '')) {
-      return i;
-    }
-  }
-
-  // GTO and JRY OP are equivalent - if one matches, use that priority
-  if (classNoSpaces === 'JRYOP' || classUpper === 'JRY OP') {
-    return 5; // Same priority as GTO
-  }
-
-  return 999; // Not found in priority list
+  // Superintendent = highest
+  if (classLower === 'sup') return 1;
+  // General Foreman
+  if (classLower === 'gf') return 2;
+  // Foreman
+  if (classLower === 'f') return 3;
+  // GTO Foreman
+  if (classLower === 'gto f') return 4;
+  // GTO
+  if (classLower === 'gto') return 5;
+  // Journeyman
+  if (classLower === 'jry' || classLower === 'jl') return 6;
+  // Journey Operator
+  if (classLower === 'jry op') return 7;
+  // Working Technician
+  if (classLower === 'wt') return 8;
+  // Equipment Operators
+  if (classLower === 'eo 1' || classLower === 'eo1') return 9;
+  if (classLower === 'eo 2' || classLower === 'eo2') return 10;
+  // Apprentices (7th year = highest, 1st year = lowest)
+  if (classLower.match(/^ap\s*7/)) return 20;
+  if (classLower.match(/^ap\s*6/)) return 21;
+  if (classLower.match(/^ap\s*5/)) return 22;
+  if (classLower.match(/^ap\s*4/)) return 23;
+  if (classLower.match(/^ap\s*3/)) return 24;
+  if (classLower.match(/^ap\s*2/)) return 25;
+  if (classLower.match(/^ap\s*1/)) return 26;
+  // All others
+  return 99;
 }
 
 /**
- * Looks up the person in charge of a crew by job number from Employees sheet
- * Uses classification priority: Sup > GF > F > GTO F > GTO > AP7-1
+ * Extracts the position suffix from a job number (e.g., "039-26.1" returns 1)
+ * Lower suffix = higher priority (foreman is .1)
+ *
+ * @param {string} jobNumber - Full job number with suffix
+ * @returns {number} - Position number (1 = foreman), 999 if no suffix
+ */
+function getJobPositionSuffix(jobNumber) {
+  if (!jobNumber) return 999;
+  var parts = String(jobNumber).split('.');
+  if (parts.length === 2) {
+    var suffix = parseInt(parts[1]);
+    if (!isNaN(suffix)) return suffix;
+  }
+  return 999; // No suffix = lowest priority
+}
+
+/**
+ * Looks up the foreman (person in charge) for a crew by job number
+ * Priority: 1) Job number suffix (.1 = foreman), 2) Classification
  *
  * @param {string} jobNumber - Job number (e.g., "013-26")
  * @returns {Object} - {name: string, jobExists: boolean}
@@ -1813,37 +1878,50 @@ function lookupForemanByJobNumber(jobNumber) {
     if (header === "job classification" || header === "classification") classCol = h;
   }
 
-  // Fallback to first column for name if not found
   if (nameCol === -1) nameCol = 0;
-  if (jobCol === -1 || classCol === -1) return { name: "", jobExists: false };
+  if (jobCol === -1) return { name: "", jobExists: false };
 
-  // Find all employees for this job number and pick the highest priority
-  var bestEmployee = null;
-  var bestPriority = 999;
+  // Collect all employees for this crew
+  var crewMembers = [];
   var jobExists = false;
 
   for (var i = 1; i < data.length; i++) {
     var empJobNumber = String(data[i][jobCol]).trim();
-    var classification = String(data[i][classCol]).trim();
-    var empName = data[i][nameCol] || "";
+    var empName = String(data[i][nameCol]).trim();
+    var classification = classCol !== -1 ? String(data[i][classCol]).trim() : "";
 
-    // Match job number prefix (e.g., "013-26" matches "013-26.1", "013-26.2", etc.)
+    // Match job number prefix (e.g., "013-26" matches "013-26.1", "013-26.2")
     if (empJobNumber && empJobNumber.indexOf(jobNumber) === 0) {
       jobExists = true;
-      var priority = getClassificationPriority(classification);
-      if (priority < bestPriority) {
-        bestPriority = priority;
-        bestEmployee = empName;
-      }
+      crewMembers.push({
+        name: empName,
+        jobNumber: empJobNumber,
+        positionSuffix: getJobPositionSuffix(empJobNumber),
+        classificationPriority: getClassificationPriority(classification)
+      });
     }
   }
 
-  return { name: bestEmployee || "", jobExists: jobExists };
+  if (crewMembers.length === 0) {
+    return { name: "", jobExists: jobExists };
+  }
+
+  // Sort by: 1) Position suffix (lower = foreman), 2) Classification priority
+  crewMembers.sort(function(a, b) {
+    // First, check for .1 suffix (foreman position)
+    if (a.positionSuffix !== b.positionSuffix) {
+      return a.positionSuffix - b.positionSuffix;
+    }
+    // If same position, use classification
+    return a.classificationPriority - b.classificationPriority;
+  });
+
+  return { name: crewMembers[0].name, jobExists: true };
 }
 
 /**
  * Looks up phone number for the person in charge of a crew by job number
- * Uses classification priority: Sup > GF > F > GTO F > GTO > AP7-1
+ * Priority: 1) Job number suffix (.1 = foreman), 2) Classification
  *
  * @param {string} jobNumber - Job number (e.g., "013-26")
  * @returns {string} - Phone number or empty string
@@ -1869,33 +1947,43 @@ function lookupForemanPhoneByJobNumber(jobNumber) {
   }
 
   if (nameCol === -1) nameCol = 0;
-  if (jobCol === -1 || classCol === -1 || phoneCol === -1) return "";
+  if (jobCol === -1 || phoneCol === -1) return "";
 
-  // Find all employees for this job number and pick the highest priority
-  var bestPhone = "";
-  var bestPriority = 999;
+  // Collect all employees for this crew
+  var crewMembers = [];
 
   for (var i = 1; i < data.length; i++) {
     var empJobNumber = String(data[i][jobCol]).trim();
-    var classification = String(data[i][classCol]).trim();
+    var classification = classCol !== -1 ? String(data[i][classCol]).trim() : "";
     var phone = data[i][phoneCol] || "";
 
     // Match job number prefix
     if (empJobNumber && empJobNumber.indexOf(jobNumber) === 0) {
-      var priority = getClassificationPriority(classification);
-      if (priority < bestPriority) {
-        bestPriority = priority;
-        bestPhone = phone;
-      }
+      crewMembers.push({
+        jobNumber: empJobNumber,
+        phone: phone,
+        positionSuffix: getJobPositionSuffix(empJobNumber),
+        classificationPriority: getClassificationPriority(classification)
+      });
     }
   }
 
-  return bestPhone;
+  if (crewMembers.length === 0) return "";
+
+  // Sort by: 1) Position suffix (lower = foreman), 2) Classification priority
+  crewMembers.sort(function(a, b) {
+    if (a.positionSuffix !== b.positionSuffix) {
+      return a.positionSuffix - b.positionSuffix;
+    }
+    return a.classificationPriority - b.classificationPriority;
+  });
+
+  return crewMembers[0].phone;
 }
 
 /**
  * Looks up location for a crew by job number
- * Uses classification priority to find the foreman/lead and get their location
+ * Uses the foreman's location (person with .1 suffix or highest classification)
  *
  * @param {string} jobNumber - Job number (e.g., "013-26")
  * @returns {string} - Location or empty string
@@ -1919,1022 +2007,62 @@ function lookupLocationByJobNumber(jobNumber) {
     if (header === "location") locationCol = h;
   }
 
-  if (jobCol === -1 || classCol === -1 || locationCol === -1) return "";
+  if (jobCol === -1 || locationCol === -1) return "";
 
-  // Find all employees for this job number and pick the highest priority
-  var bestLocation = "";
-  var bestPriority = 999;
+  // Collect all employees for this crew
+  var crewMembers = [];
 
   for (var i = 1; i < data.length; i++) {
     var empJobNumber = String(data[i][jobCol]).trim();
-    var classification = String(data[i][classCol]).trim();
+    var classification = classCol !== -1 ? String(data[i][classCol]).trim() : "";
     var location = data[i][locationCol] || "";
 
     // Match job number prefix
     if (empJobNumber && empJobNumber.indexOf(jobNumber) === 0) {
-      var priority = getClassificationPriority(classification);
-      if (priority < bestPriority) {
-        bestPriority = priority;
-        bestLocation = location;
-      }
+      crewMembers.push({
+        jobNumber: empJobNumber,
+        location: location,
+        positionSuffix: getJobPositionSuffix(empJobNumber),
+        classificationPriority: getClassificationPriority(classification)
+      });
     }
   }
 
-  return bestLocation;
-}
+  if (crewMembers.length === 0) return "";
 
-/**
- * Extracts vehicle number from fleet checklist body
- * Supports formats: numeric (578), X# format (X1, X2), and labeled patterns
- *
- * @param {string} body - Email body text
- * @returns {string} - Vehicle number or empty string
- */
-function extractVehicleNumber(body) {
-  // Try multiple patterns - order matters, more specific first
-  var patterns = [
-    // X# format (X1, X2, X3, etc.) - spare/extra vehicles
-    { regex: /\bX(\d+)\b/i, keepPrefix: true },
-    // Labeled patterns
-    { regex: /vehicle\s*#?\s*:?\s*(\d+)/i, keepPrefix: false },
-    { regex: /truck\s*#?\s*:?\s*(\d+)/i, keepPrefix: false },
-    { regex: /unit\s*#?\s*:?\s*(\d+)/i, keepPrefix: false },
-    // Generic number with 3-5 digits
-    { regex: /#(\d{3,5})/, keepPrefix: false }
-  ];
-
-  for (var i = 0; i < patterns.length; i++) {
-    var pattern = patterns[i];
-    var match = body.match(pattern.regex);
-    if (match) {
-      if (pattern.keepPrefix) {
-        // Return full match for X# format (e.g., "X1" not just "1")
-        return match[0].toUpperCase();
-      }
-      return match[1];
+  // Sort by: 1) Position suffix (lower = foreman), 2) Classification priority
+  crewMembers.sort(function(a, b) {
+    if (a.positionSuffix !== b.positionSuffix) {
+      return a.positionSuffix - b.positionSuffix;
     }
-  }
-
-  return "";
-}
-
-/**
- * Applies conditional formatting to status column
- *
- * @param {Sheet} sheet - Safety Reports sheet
- * @param {number} startRow - Starting row for new data
- * @param {number} numRows - Number of rows to format
- */
-function applyStatusFormatting(sheet, startRow, numRows) {
-  var statusRange = sheet.getRange(startRow, 8, numRows, 1); // Column H = Status
-
-  var rules = sheet.getConditionalFormatRules();
-
-  // Red for "Needs Attention"
-  var needsAttentionRule = SpreadsheetApp.newConditionalFormatRule()
-    .whenTextEqualTo("Needs Attention")
-    .setBackground("#F4CCCC")
-    .setFontColor("#CC0000")
-    .setRanges([statusRange])
-    .build();
-
-  // Green for "Resolved"
-  var resolvedRule = SpreadsheetApp.newConditionalFormatRule()
-    .whenTextEqualTo("Resolved")
-    .setBackground("#D9EAD3")
-    .setFontColor("#38761D")
-    .setRanges([statusRange])
-    .build();
-
-  // Yellow for "Ordered"
-  var orderedRule = SpreadsheetApp.newConditionalFormatRule()
-    .whenTextEqualTo("Ordered")
-    .setBackground("#FFF2CC")
-    .setFontColor("#BF9000")
-    .setRanges([statusRange])
-    .build();
-
-  // Blue for "Replaced"
-  var replacedRule = SpreadsheetApp.newConditionalFormatRule()
-    .whenTextEqualTo("Replaced")
-    .setBackground("#CFE2F3")
-    .setFontColor("#1155CC")
-    .setRanges([statusRange])
-    .build();
-
-  rules.push(needsAttentionRule, resolvedRule, orderedRule, replacedRule);
-  sheet.setConditionalFormatRules(rules);
-}
-
-/**
- * Opens the Safety Reports sheet
- */
-function openSafetyReports() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Safety Reports");
-  if (sheet) {
-    sheet.activate();
-  } else {
-    Browser.msgBox("❌ Safety Reports sheet not found. Run 'Setup Safety Reports Sheet' first.");
-  }
-}
-
-/**
- * Resets the batch processing progress
- * Use this if you want to restart processing from the beginning
- */
-function resetSafetyEmailBatchProgress() {
-  var props = PropertiesService.getScriptProperties();
-  props.deleteProperty('SAFETY_BATCH_START');
-  Browser.msgBox("✅ Batch progress reset. Next run will start from the beginning.");
-  Logger.log("Safety email batch progress reset");
-}
-
-/**
- * Creates safety equipment tasks from "Needs Attention" items
- * Adds them to Manual Tasks sheet for scheduling
- */
-function createTasksFromSafetyIssues() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var safetySheet = ss.getSheetByName("Safety Reports");
-  var manualTasksSheet = ss.getSheetByName("Manual Tasks");
-
-  if (!safetySheet) {
-    Browser.msgBox("❌ Safety Reports sheet not found.");
-    return;
-  }
-
-  if (!manualTasksSheet) {
-    Browser.msgBox("❌ Manual Tasks sheet not found.");
-    return;
-  }
-
-  var data = safetySheet.getDataRange().getValues();
-  var tasksCreated = 0;
-
-  // Get existing manual tasks to avoid duplicates
-  var manualData = manualTasksSheet.getDataRange().getValues();
-  var existingTasks = {};
-  for (var i = 1; i < manualData.length; i++) {
-    var key = manualData[i][0] + "|" + manualData[i][2]; // Employee + Description
-    existingTasks[key] = true;
-  }
-
-  // Equipment types to EXCLUDE (vehicle mechanical items - not safety equipment)
-  var excludedEquipmentTypes = [
-    'wipers', 'horn', 'reflectors', 'warning lights', 'brakes',
-    'lights', 'mirrors', 'windshield', 'defrost', 'windows',
-    'heater', 'seat belts', 'misc comment', 'tires', 'battery',
-    'engine', 'oil', 'transmission', 'clutch', 'alternator',
-    'starter', 'radiator', 'suspension', 'exhaust', 'fuel', 'coolant', 'filter'
-  ];
-
-  var skippedNoJobNumber = 0;
-  var skippedExcludedType = 0;
-
-  for (var i = 1; i < data.length; i++) {
-    var status = data[i][7]; // Column H
-
-    if (status === "Needs Attention") {
-      var foreman = data[i][3];
-      var jobNumber = String(data[i][2] || '').trim();
-      var equipmentType = String(data[i][5] || '').trim();
-      var description = data[i][6];
-      var expirationDate = data[i][8];
-
-      // Skip if no job number (can't determine location for trip planning)
-      if (!jobNumber) {
-        Logger.log('createTasksFromSafetyIssues: Skipping row ' + (i + 1) + ' - no job number');
-        skippedNoJobNumber++;
-        continue;
-      }
-
-      // Skip excluded equipment types (vehicle mechanical items)
-      var equipLower = equipmentType.toLowerCase();
-      var isExcluded = false;
-      for (var e = 0; e < excludedEquipmentTypes.length; e++) {
-        if (equipLower.indexOf(excludedEquipmentTypes[e]) !== -1) {
-          isExcluded = true;
-          break;
-        }
-      }
-      if (isExcluded) {
-        Logger.log('createTasksFromSafetyIssues: Skipping row ' + (i + 1) + ' - excluded equipment type: ' + equipmentType);
-        skippedExcludedType++;
-        continue;
-      }
-
-      // Create task description
-      var taskDesc = "🔧 " + equipmentType + " - " + jobNumber + ": " + description;
-
-      // Check for duplicate
-      var taskKey = foreman + "|" + taskDesc;
-      if (existingTasks[taskKey]) {
-        continue; // Skip duplicate
-      }
-
-      // Add to Manual Tasks
-      var lastRow = manualTasksSheet.getLastRow();
-      manualTasksSheet.getRange(lastRow + 1, 1, 1, 11).setValues([[
-        foreman,                    // Employee
-        jobNumber,                  // Location (using job number)
-        taskDesc,                   // Description
-        expirationDate || "",       // Scheduled Date
-        "",                         // Start Time
-        "",                         // End Time
-        30,                         // Estimated Time (minutes)
-        "Safety Equipment",         // Type
-        "Pending",                  // Status
-        "",                         // Completed Date
-        ""                          // Notes
-      ]]);
-
-      tasksCreated++;
-    }
-  }
-
-  Logger.log('createTasksFromSafetyIssues: Skipped ' + skippedNoJobNumber + ' rows (no job number), ' + skippedExcludedType + ' rows (excluded equipment type)');
-
-  if (tasksCreated > 0) {
-    Browser.msgBox("✅ Created " + tasksCreated + " safety equipment tasks in Manual Tasks sheet.");
-  } else {
-    Browser.msgBox("No new tasks to create. All 'Needs Attention' items already have tasks.");
-  }
-}
-
-// ============================================================================
-// SAFETY REPORT COMPLETION SYNC
-// Syncs task completion from Task Metadata to Safety Reports sheet
-// ============================================================================
-
-/**
- * Syncs a completed Safety Equipment task to Safety Reports sheet.
- * Updates the Status column to "Resolved" when task is marked complete.
- *
- * @param {string} taskKey - Task key in format "SourceSheet_SourceRow" (e.g., "SafetyReports_5")
- * @returns {Object} - {success: boolean, synced: boolean, error?: string}
- */
-function syncSafetyReportCompletion(taskKey) {
-  try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var taskMetadataSheet = ss.getSheetByName('Task Metadata');
-    var safetySheet = ss.getSheetByName('Safety Reports');
-
-    if (!taskMetadataSheet) {
-      return { success: false, synced: false, error: 'Task Metadata sheet not found' };
-    }
-    if (!safetySheet) {
-      return { success: false, synced: false, error: 'Safety Reports sheet not found' };
-    }
-
-    // Find the task in Task Metadata by TaskID
-    var metaData = taskMetadataSheet.getDataRange().getValues();
-    var metaHeaders = metaData[0];
-
-    // Find column indices
-    var taskIdCol = -1, sourceSheetCol = -1, sourceRowCol = -1;
-    for (var h = 0; h < metaHeaders.length; h++) {
-      var header = String(metaHeaders[h]).toLowerCase().trim();
-      if (header === 'taskid') taskIdCol = h;
-      if (header === 'sourcesheet') sourceSheetCol = h;
-      if (header === 'sourcerow') sourceRowCol = h;
-    }
-
-    if (taskIdCol === -1 || sourceSheetCol === -1 || sourceRowCol === -1) {
-      return { success: false, synced: false, error: 'Required columns not found in Task Metadata' };
-    }
-
-    // Find the task row
-    var sourceRow = -1;
-    for (var i = 1; i < metaData.length; i++) {
-      if (String(metaData[i][taskIdCol]).trim() === taskKey) {
-        var sourceSheet = String(metaData[i][sourceSheetCol]).trim();
-        // Check if it's a Safety Reports task
-        if (sourceSheet === 'Safety Reports' || sourceSheet === 'SafetyReports') {
-          sourceRow = parseInt(metaData[i][sourceRowCol]);
-          break;
-        } else {
-          // Not a Safety Reports task, nothing to sync
-          return { success: true, synced: false };
-        }
-      }
-    }
-
-    if (sourceRow <= 0) {
-      Logger.log('syncSafetyReportCompletion: Task not found or invalid source row: ' + taskKey);
-      return { success: true, synced: false };
-    }
-
-    // Update the Safety Reports sheet Status column (H = 8)
-    var currentStatus = safetySheet.getRange(sourceRow, 8).getValue();
-    if (currentStatus === 'Needs Attention') {
-      safetySheet.getRange(sourceRow, 8).setValue('Resolved');
-      Logger.log('syncSafetyReportCompletion: Updated Safety Reports row ' + sourceRow + ' to Resolved');
-      return { success: true, synced: true };
-    } else {
-      Logger.log('syncSafetyReportCompletion: Row ' + sourceRow + ' already has status: ' + currentStatus);
-      return { success: true, synced: false };
-    }
-
-  } catch (e) {
-    Logger.log('syncSafetyReportCompletion error: ' + e.toString());
-    return { success: false, synced: false, error: e.toString() };
-  }
-}
-
-/**
- * Syncs ALL completed Safety Equipment tasks from Task Metadata to Safety Reports.
- * Useful for fixing mismatches where tasks were completed but Safety Reports wasn't updated.
- *
- * @returns {Object} - {success: boolean, synced: number, total: number, error?: string}
- */
-function syncAllCompletedSafetyTasks() {
-  try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var taskMetadataSheet = ss.getSheetByName('Task Metadata');
-    var safetySheet = ss.getSheetByName('Safety Reports');
-
-    if (!taskMetadataSheet) {
-      return { success: false, synced: 0, total: 0, error: 'Task Metadata sheet not found' };
-    }
-    if (!safetySheet) {
-      return { success: false, synced: 0, total: 0, error: 'Safety Reports sheet not found' };
-    }
-
-    var metaData = taskMetadataSheet.getDataRange().getValues();
-    var metaHeaders = metaData[0];
-
-    // Find column indices in Task Metadata
-    var colMap = {};
-    for (var h = 0; h < metaHeaders.length; h++) {
-      var header = String(metaHeaders[h]).toLowerCase().trim();
-      colMap[header] = h;
-    }
-
-    var sourceSheetCol = colMap['sourcesheet'];
-    var sourceRowCol = colMap['sourcerow'];
-    var statusCol = colMap['status'];
-    var taskTypeCol = colMap['tasktype'];
-
-    if (sourceSheetCol === undefined || sourceRowCol === undefined || statusCol === undefined) {
-      return { success: false, synced: 0, total: 0, error: 'Required columns not found' };
-    }
-
-    // Find all completed Safety Equipment tasks
-    var syncedCount = 0;
-    var totalFound = 0;
-
-    for (var i = 1; i < metaData.length; i++) {
-      var row = metaData[i];
-      var sourceSheet = String(row[sourceSheetCol] || '').trim();
-      var status = String(row[statusCol] || '').trim();
-      var taskType = taskTypeCol !== undefined ? String(row[taskTypeCol] || '').trim() : '';
-
-      // Check if this is a completed Safety Reports task
-      var isSafetyReports = (sourceSheet === 'Safety Reports' || sourceSheet === 'SafetyReports');
-      var isCompleted = (status === 'Complete' || status === 'Completed');
-
-      if (isSafetyReports && isCompleted) {
-        totalFound++;
-        var sourceRow = parseInt(row[sourceRowCol]);
-
-        if (sourceRow > 1) {
-          // Check current status in Safety Reports sheet
-          var currentStatus = safetySheet.getRange(sourceRow, 8).getValue();
-          if (currentStatus === 'Needs Attention') {
-            safetySheet.getRange(sourceRow, 8).setValue('Resolved');
-            syncedCount++;
-            Logger.log('syncAllCompletedSafetyTasks: Updated row ' + sourceRow + ' to Resolved');
-          }
-        }
-      }
-    }
-
-    Logger.log('syncAllCompletedSafetyTasks: Synced ' + syncedCount + ' of ' + totalFound + ' completed safety tasks');
-    return { success: true, synced: syncedCount, total: totalFound };
-
-  } catch (e) {
-    Logger.log('syncAllCompletedSafetyTasks error: ' + e.toString());
-    return { success: false, synced: 0, total: 0, error: e.toString() };
-  }
-}
-
-/**
- * Refreshes Safety sheets:
- * 1. Syncs all completed Safety Equipment tasks to Safety Reports (status → Resolved)
- * 2. Recalculates current week's Safety Compliance based on config
- *
- * Called from menu: Glove Manager → Safety Reports → 🔄 Refresh Safety Sheets
- */
-function refreshSafetySheets() {
-  var results = {
-    tasksSynced: 0,
-    totalCompleted: 0,
-    complianceUpdated: false,
-    crewsChecked: 0,
-    errors: []
-  };
-
-  // Step 1: Sync completed tasks to Safety Reports sheet
-  try {
-    var syncResult = syncAllCompletedSafetyTasks();
-    if (syncResult.success) {
-      results.tasksSynced = syncResult.synced;
-      results.totalCompleted = syncResult.total;
-    } else {
-      results.errors.push('Task sync: ' + (syncResult.error || 'Unknown error'));
-    }
-  } catch (e) {
-    results.errors.push('Task sync error: ' + e.toString());
-  }
-
-  // Step 2: Recalculate current week's Safety Compliance
-  try {
-    var today = new Date();
-    var weekBounds = getWeekBoundaries(today);
-    var complianceData = calculateSafetyCompliance(weekBounds.weekStart);
-
-    if (complianceData && complianceData.crews) {
-      updateComplianceSheet(complianceData);
-      results.complianceUpdated = true;
-      results.crewsChecked = complianceData.totalCrews || Object.keys(complianceData.crews).length;
-    }
-  } catch (e) {
-    results.errors.push('Compliance update error: ' + e.toString());
-  }
-
-  // Show summary
-  var message = '🔄 Safety Sheets Refreshed\n\n';
-  message += '✅ Tasks synced to "Resolved": ' + results.tasksSynced + ' of ' + results.totalCompleted + ' completed\n';
-
-  if (results.complianceUpdated) {
-    message += '✅ Compliance updated for ' + results.crewsChecked + ' crews (current week)\n';
-  } else {
-    message += '⚠️ Compliance update skipped\n';
-  }
-
-  if (results.errors.length > 0) {
-    message += '\n⚠️ Errors:\n' + results.errors.join('\n');
-  }
-
-  Browser.msgBox(message);
-  Logger.log('refreshSafetySheets complete: ' + JSON.stringify(results));
-
-  return results;
-}
-
-// ============================================================================
-// SAFETY COMPLIANCE TRACKING SYSTEM
-// JHA (daily) and Weekly Safety Meeting compliance per crew
-// Week = Sunday to Saturday, Deadline = Saturday 11:59 PM
-// ============================================================================
-
-/**
- * Backfills compliance data for past weeks
- * Useful after rebuilding the Safety Compliance sheet
- *
- * @param {number} weeksBack - Number of past weeks to calculate (default 4)
- */
-function backfillComplianceData(weeksBack) {
-  weeksBack = weeksBack || 4;
-
-  var today = new Date();
-  var tz = Session.getScriptTimeZone();
-  var weeksProcessed = 0;
-
-  Logger.log("=== Backfilling compliance data for " + weeksBack + " weeks ===");
-
-  // Start with current week and go backwards
-  for (var w = 0; w <= weeksBack; w++) {
-    var targetDate = new Date(today);
-    targetDate.setDate(today.getDate() - (w * 7));
-
-    var weekBounds = getWeekBoundaries(targetDate);
-    var weekStartStr = Utilities.formatDate(weekBounds.weekStart, tz, "MM/dd/yyyy");
-
-    Logger.log("Processing week " + (w + 1) + ": " + weekStartStr);
-
-    try {
-      var complianceData = calculateSafetyCompliance(weekBounds.weekStart);
-      updateComplianceSheet(complianceData);
-
-      // Create missing report tasks for past weeks
-      if (complianceData.isPastDeadline) {
-        createMissingReportTasks(complianceData);
-      }
-
-      weeksProcessed++;
-      Logger.log("  - Processed: " + complianceData.compliantCount + " compliant, " +
-                 complianceData.missingCount + " missing out of " + complianceData.totalCrews + " crews");
-    } catch (e) {
-      Logger.log("  - Error: " + e.toString());
-    }
-  }
-
-  // Apply formatting
-  formatComplianceSheetByWeek();
-
-  Logger.log("=== Backfill complete. Processed " + weeksProcessed + " weeks ===");
-
-  return weeksProcessed;
-}
-
-/**
- * Cleans up duplicate rows in Safety Compliance sheet and rebuilds with correct data
- * Call this after fixing date format issues
- */
-function rebuildSafetyComplianceSheet() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Safety Compliance");
-
-  if (!sheet) {
-    Browser.msgBox("❌ Safety Compliance sheet not found. Run 'Setup Safety Compliance Sheet' first.");
-    return;
-  }
-
-  // Clear all data rows (keep header)
-  var lastRow = sheet.getLastRow();
-  if (lastRow > 1) {
-    sheet.deleteRows(2, lastRow - 1);
-  }
-
-  Logger.log("Cleared Safety Compliance sheet, rebuilding...");
-
-  // Backfill with correct data
-  var weeksProcessed = backfillComplianceData(4);
-
-  Browser.msgBox("✅ Safety Compliance sheet rebuilt!\n\n" +
-    "• Deleted all existing rows (they had format issues)\n" +
-    "• Regenerated " + weeksProcessed + " weeks of compliance data\n\n" +
-    "All dates are now in consistent M/d/yyyy format.");
-}
-
-/**
- * Menu function to backfill compliance data after rebuilding the sheet
- */
-function menuBackfillComplianceData() {
-  var weeksBack = 4; // Process current week + 4 past weeks
-  var weeksProcessed = backfillComplianceData(weeksBack);
-
-  Browser.msgBox("✅ Backfill complete!\n\n" +
-    "Processed " + weeksProcessed + " weeks of compliance data.\n\n" +
-    "The sheet now contains compliance records for the current week and " + weeksBack + " previous weeks.");
-}
-
-/**
- * Creates the Safety Compliance tracking sheet for historical data
- */
-function setupSafetyComplianceSheet() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Safety Compliance");
-
-  if (sheet) {
-    var response = Browser.msgBox(
-      "Safety Compliance sheet already exists",
-      "Do you want to recreate it? This will DELETE all existing compliance history.",
-      Browser.Buttons.YES_NO
-    );
-    if (response === "no") return;
-    ss.deleteSheet(sheet);
-  }
-
-  sheet = ss.insertSheet("Safety Compliance");
-
-  // Set up headers
-  var headers = [
-    "Week Start", "Week End", "Job Number", "Foreman",
-    "JHA Sun", "JHA Mon", "JHA Tue", "JHA Wed", "JHA Thu", "JHA Fri", "JHA Sat",
-    "Weekly Meeting", "Monthly Checklist", "Status", "Created Date"
-  ];
-  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-  sheet.getRange(1, 1, 1, headers.length)
-    .setFontWeight("bold")
-    .setBackground("#4A86E8")
-    .setFontColor("white");
-  sheet.setFrozenRows(1);
-
-  // Set column widths
-  sheet.setColumnWidth(1, 100);  // Week Start
-  sheet.setColumnWidth(2, 100);  // Week End
-  sheet.setColumnWidth(3, 90);   // Job Number
-  sheet.setColumnWidth(4, 120);  // Foreman
-  // JHA columns (5-11)
-  for (var i = 5; i <= 11; i++) {
-    sheet.setColumnWidth(i, 70);
-  }
-  sheet.setColumnWidth(12, 100); // Weekly Meeting
-  sheet.setColumnWidth(13, 110); // Monthly Checklist
-  sheet.setColumnWidth(14, 100); // Status
-  sheet.setColumnWidth(15, 110); // Created Date
-
-  // Format dates
-  sheet.getRange(2, 1, 1000, 2).setNumberFormat("MM/dd/yyyy");
-  sheet.getRange(2, 15, 1000, 1).setNumberFormat("MM/dd/yyyy HH:mm");
-
-  // Add conditional formatting for status icons
-  applyComplianceFormatting(sheet);
-
-  Browser.msgBox("✅ Safety Compliance sheet created successfully!");
-  Logger.log("Safety Compliance sheet created");
-}
-
-/**
- * Creates the Safety Compliance Config sheet for exclusions
- */
-function setupSafetyComplianceConfig() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Safety Compliance Config");
-
-  if (sheet) {
-    var response = Browser.msgBox(
-      "Safety Compliance Config sheet already exists",
-      "Do you want to recreate it? This will reset all exclusion settings.",
-      Browser.Buttons.YES_NO
-    );
-    if (response === "no") return;
-    ss.deleteSheet(sheet);
-  }
-
-  sheet = ss.insertSheet("Safety Compliance Config");
-
-  // Set up headers
-  var headers = [
-    "Job Number", "Foreman", "Skip Sun", "Skip Mon", "Skip Tue",
-    "Skip Wed", "Skip Thu", "Skip Fri", "Skip Sat", "Skip Weekly Meeting", "Skip Monthly Checklist", "Notes"
-  ];
-  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-  sheet.getRange(1, 1, 1, headers.length)
-    .setFontWeight("bold")
-    .setBackground("#34A853")
-    .setFontColor("white");
-  sheet.setFrozenRows(1);
-
-  // Set column widths
-  sheet.setColumnWidth(1, 90);   // Job Number
-  sheet.setColumnWidth(2, 120);  // Foreman
-  for (var i = 3; i <= 11; i++) {
-    sheet.setColumnWidth(i, 75);
-  }
-  sheet.setColumnWidth(12, 200); // Notes
-
-  // Get active crews and populate
-  var crews = getActiveCrews();
-  if (crews.length > 0) {
-    var rows = [];
-    for (var i = 0; i < crews.length; i++) {
-      var jobNumber = crews[i];
-      var foremanResult = lookupForemanByJobNumber(jobNumber);
-      var foreman = foremanResult.name || "";
-      // Default: Skip Sun and Sat (weekend), don't skip weekdays, weekly meeting, or monthly checklist
-      rows.push([
-        jobNumber, foreman,
-        true,   // Skip Sun (default checked)
-        false,  // Skip Mon
-        false,  // Skip Tue
-        false,  // Skip Wed
-        false,  // Skip Thu
-        false,  // Skip Fri
-        true,   // Skip Sat (default checked)
-        false,  // Skip Weekly Meeting
-        false,  // Skip Monthly Checklist
-        ""      // Notes
-      ]);
-    }
-    sheet.getRange(2, 1, rows.length, 12).setValues(rows);
-
-    // Add checkboxes for skip columns (C-K = columns 3-11)
-    var checkboxRange = sheet.getRange(2, 3, rows.length, 9);
-    checkboxRange.insertCheckboxes();
-  }
-
-  Browser.msgBox("✅ Safety Compliance Config created with " + crews.length + " crews.\n\n" +
-    "Sat/Sun are skipped by default. Uncheck to require JHA on those days.");
-  Logger.log("Safety Compliance Config created with " + crews.length + " crews");
-}
-
-/**
- * Opens the Safety Compliance Config sheet
- * Creates it first if it doesn't exist
- */
-function openComplianceConfig() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Safety Compliance Config");
-
-  if (!sheet) {
-    // Create the sheet if it doesn't exist
-    setupSafetyComplianceConfig();
-    sheet = ss.getSheetByName("Safety Compliance Config");
-  }
-
-  if (sheet) {
-    ss.setActiveSheet(sheet);
-    SpreadsheetApp.flush();
-  }
-}
-
-/**
- * Refreshes foreman names in the Safety Compliance Config sheet
- * Preserves all existing checkbox selections
- */
-function refreshComplianceConfigForemen() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Safety Compliance Config");
-
-  if (!sheet) {
-    Browser.msgBox("❌ Safety Compliance Config sheet not found. Run 'Configure Exclusions' first.");
-    return;
-  }
-
-  var data = sheet.getDataRange().getValues();
-  var updatedCount = 0;
-
-  for (var i = 1; i < data.length; i++) {
-    var jobNumber = String(data[i][0]).trim();
-    if (!jobNumber) continue;
-
-    var currentForeman = data[i][1] || "";
-    var foremanResult = lookupForemanByJobNumber(jobNumber);
-    var newForeman = foremanResult.name || "";
-
-    if (newForeman && newForeman !== currentForeman) {
-      sheet.getRange(i + 1, 2).setValue(newForeman);
-      updatedCount++;
-      Logger.log("Updated foreman for " + jobNumber + ": " + currentForeman + " → " + newForeman);
-    }
-  }
-
-  if (updatedCount > 0) {
-    Browser.msgBox("✅ Updated " + updatedCount + " foreman name(s).\n\nYour checkbox selections have been preserved.");
-  } else {
-    Browser.msgBox("All foreman names are already up to date.");
-  }
-}
-
-/**
- * Migrates existing Safety Compliance Config sheet to add missing columns
- * Preserves all existing data and checkbox selections
- */
-function migrateComplianceConfig() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Safety Compliance Config");
-
-  if (!sheet) {
-    Browser.msgBox("Safety Compliance Config sheet not found. Use 'Configure Exclusions' to create it.");
-    return;
-  }
-
-  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  var changes = [];
-
-  // Check if "Skip Monthly Checklist" column exists (should be column K = index 10)
-  var hasMonthlyChecklist = headers.some(function(h) {
-    return String(h).toLowerCase().indexOf('monthly') !== -1;
+    return a.classificationPriority - b.classificationPriority;
   });
 
-  // Check if "Skip Weekly Meeting" column exists
-  var hasWeeklyMeeting = headers.some(function(h) {
-    return String(h).toLowerCase().indexOf('weekly') !== -1;
-  });
-
-  // Find the Notes column or last column
-  var notesColIndex = -1;
-  for (var i = 0; i < headers.length; i++) {
-    if (String(headers[i]).toLowerCase() === 'notes') {
-      notesColIndex = i;
-      break;
-    }
-  }
-
-  var lastCol = sheet.getLastColumn();
-  var lastRow = sheet.getLastRow();
-
-  // Add Skip Weekly Meeting column if missing
-  if (!hasWeeklyMeeting) {
-    // Insert before Notes column or at end
-    var insertCol = notesColIndex >= 0 ? notesColIndex + 1 : lastCol + 1;
-    sheet.insertColumnAfter(insertCol - 1);
-    sheet.getRange(1, insertCol).setValue("Skip Weekly Meeting");
-    sheet.getRange(1, insertCol).setFontWeight("bold").setBackground("#34A853").setFontColor("white");
-    sheet.setColumnWidth(insertCol, 75);
-
-    // Add checkboxes (default unchecked)
-    if (lastRow > 1) {
-      var checkRange = sheet.getRange(2, insertCol, lastRow - 1, 1);
-      checkRange.insertCheckboxes();
-      checkRange.setValue(false);
-    }
-
-    changes.push("Skip Weekly Meeting");
-    lastCol++;
-    if (notesColIndex >= 0) notesColIndex++;
-  }
-
-  // Add Skip Monthly Checklist column if missing
-  if (!hasMonthlyChecklist) {
-    // Insert before Notes column or at end
-    var insertCol = notesColIndex >= 0 ? notesColIndex + 1 : lastCol + 1;
-    sheet.insertColumnAfter(insertCol - 1);
-    sheet.getRange(1, insertCol).setValue("Skip Monthly Checklist");
-    sheet.getRange(1, insertCol).setFontWeight("bold").setBackground("#34A853").setFontColor("white");
-    sheet.setColumnWidth(insertCol, 75);
-
-    // Add checkboxes (default unchecked)
-    if (lastRow > 1) {
-      var checkRange = sheet.getRange(2, insertCol, lastRow - 1, 1);
-      checkRange.insertCheckboxes();
-      checkRange.setValue(false);
-    }
-
-    changes.push("Skip Monthly Checklist");
-  }
-
-  if (changes.length > 0) {
-    Browser.msgBox("✅ Added missing columns:\n\n• " + changes.join("\n• ") +
-      "\n\nAll existing data has been preserved. New columns default to unchecked (not skipped).");
-  } else {
-    Browser.msgBox("Safety Compliance Config sheet is already up to date. No changes needed.");
-  }
+  return crewMembers[0].location;
 }
 
-/**
- * Applies conditional formatting to Safety Compliance sheet
- */
-function applyComplianceFormatting(sheet) {
-  var dataRange = sheet.getRange(2, 5, 1000, 8); // JHA Sun through Weekly Meeting
 
-  var rules = [];
-
-  // Green for ✅
-  rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenTextEqualTo("✅")
-    .setBackground("#D9EAD3")
-    .setFontColor("#38761D")
-    .setRanges([dataRange])
-    .build());
-
-  // Red for ❌
-  rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenTextEqualTo("❌")
-    .setBackground("#F4CCCC")
-    .setFontColor("#CC0000")
-    .setRanges([dataRange])
-    .build());
-
-  // Gray for N/A
-  rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenTextEqualTo("N/A")
-    .setBackground("#EEEEEE")
-    .setFontColor("#999999")
-    .setRanges([dataRange])
-    .build());
-
-  // Yellow for ⏳ (pending)
-  rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenTextEqualTo("⏳")
-    .setBackground("#FFF2CC")
-    .setFontColor("#BF9000")
-    .setRanges([dataRange])
-    .build());
-
-  // Status column formatting
-  var statusRange = sheet.getRange(2, 13, 1000, 1);
-  rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenTextContains("Complete")
-    .setBackground("#D9EAD3")
-    .setFontColor("#38761D")
-    .setRanges([statusRange])
-    .build());
-
-  rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenTextContains("Missing")
-    .setBackground("#F4CCCC")
-    .setFontColor("#CC0000")
-    .setRanges([statusRange])
-    .build());
-
-  rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenTextContains("Pending")
-    .setBackground("#FFF2CC")
-    .setFontColor("#BF9000")
-    .setRanges([statusRange])
-    .build());
-
-  sheet.setConditionalFormatRules(rules);
-}
+// ============================================================================
+// SAFETY COMPLIANCE TRACKING
+// Tracks JHA submissions and Weekly Safety Meeting compliance per crew
+// ============================================================================
 
 /**
- * Opens the Safety Compliance sheet (history)
- */
-function openComplianceSheet() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Safety Compliance");
-
-  if (!sheet) {
-    setupSafetyComplianceSheet();
-    sheet = ss.getSheetByName("Safety Compliance");
-  }
-
-  if (sheet) {
-    sheet.activate();
-  }
-}
-
-/**
- * Formats the Safety Compliance sheet with alternating colors by week
- * and separator lines between weeks
- */
-function formatComplianceSheetByWeek() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Safety Compliance");
-
-  if (!sheet) {
-    Logger.log("formatComplianceSheetByWeek: Safety Compliance sheet not found");
-    return;
-  }
-
-  var lastRow = sheet.getLastRow();
-  var lastCol = sheet.getLastColumn();
-
-  if (lastRow < 2) {
-    Logger.log("formatComplianceSheetByWeek: No data rows to format");
-    return;
-  }
-
-  // Sort by Week Start descending (most recent first), then by Job Number
-  var dataRange = sheet.getRange(2, 1, lastRow - 1, lastCol);
-  dataRange.sort([
-    {column: 1, ascending: false},  // Week Start descending
-    {column: 3, ascending: true}    // Job Number ascending
-  ]);
-
-  // Get the data to identify week boundaries
-  var data = sheet.getRange(2, 1, lastRow - 1, 1).getValues(); // Column A = Week Start
-
-  // Define alternating colors
-  var color1 = '#FFFFFF'; // White
-  var color2 = '#E3F2FD'; // Light blue
-  var separatorColor = '#1565C0'; // Blue for separator
-
-  var currentWeek = null;
-  var colorIndex = 0;
-  var weekStartRows = []; // Track where each week starts for separator lines
-
-  for (var i = 0; i < data.length; i++) {
-    var weekStart = data[i][0];
-    var weekKey = weekStart instanceof Date ? weekStart.toDateString() : String(weekStart);
-
-    if (weekKey !== currentWeek) {
-      // New week started
-      currentWeek = weekKey;
-      colorIndex = 1 - colorIndex; // Toggle between 0 and 1
-      if (i > 0) {
-        weekStartRows.push(i + 2); // Row number (1-based, +1 for header, +1 for current row)
-      }
-    }
-
-    // Apply background color to entire row
-    var rowNum = i + 2; // +2 for header row and 0-based index
-    var rowRange = sheet.getRange(rowNum, 1, 1, lastCol);
-    rowRange.setBackground(colorIndex === 0 ? color1 : color2);
-  }
-
-  // Add thick blue border between weeks (top border of each new week's first row)
-  for (var j = 0; j < weekStartRows.length; j++) {
-    var separatorRow = weekStartRows[j];
-    var borderRange = sheet.getRange(separatorRow, 1, 1, lastCol);
-    borderRange.setBorder(true, null, null, null, null, null, separatorColor, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
-  }
-
-  Logger.log("formatComplianceSheetByWeek: Formatted " + (lastRow - 1) + " rows with " + (weekStartRows.length + 1) + " weeks");
-}
-
-/**
- * Menu function to manually reformat the Safety Compliance sheet by week
- */
-function reformatSafetyComplianceSheet() {
-  formatComplianceSheetByWeek();
-  Browser.msgBox("✅ Safety Compliance sheet reformatted!\n\n" +
-    "• Sorted by week (most recent first)\n" +
-    "• Alternating row colors by week\n" +
-    "• Blue separator lines between weeks");
-}
-
-/**
- * Gets week boundaries (Sunday to Saturday) for any given date
+ * Gets the week boundaries (Sunday to Saturday) for a given date
  *
  * @param {Date} date - Any date within the week
- * @returns {Object} - {weekStart: Date (Sunday 00:00), weekEnd: Date (Saturday 23:59:59)}
+ * @returns {Object} - {weekStart: Date (Sunday), weekEnd: Date (Saturday)}
  */
 function getWeekBoundaries(date) {
-  var targetDate = new Date(date);
-  var dayOfWeek = targetDate.getDay(); // 0 = Sunday, 6 = Saturday
+  var d = new Date(date);
+  var day = d.getDay(); // 0 = Sunday
 
-  // Calculate Sunday of this week (week start)
-  var weekStart = new Date(targetDate);
-  weekStart.setDate(targetDate.getDate() - dayOfWeek);
+  // Get Sunday (start of week)
+  var weekStart = new Date(d);
+  weekStart.setDate(d.getDate() - day);
   weekStart.setHours(0, 0, 0, 0);
 
-  // Calculate Saturday of this week (week end)
+  // Get Saturday (end of week)
   var weekEnd = new Date(weekStart);
   weekEnd.setDate(weekStart.getDate() + 6);
   weekEnd.setHours(23, 59, 59, 999);
@@ -2946,415 +2074,858 @@ function getWeekBoundaries(date) {
 }
 
 /**
- * Gets all active crews from Employees sheet (unique job numbers)
+ * Gets list of active crews (unique job numbers) from Employees sheet
+ * Excludes employees in Weeds, Previous Employee, Light Duty, Vacation, Leave, Unknown
  *
- * @returns {Array} - Array of job numbers (e.g., ["009-26", "013-26", ...])
+ * @returns {Array<string>} - Array of unique job numbers (e.g., ["013-26", "015-26"])
  */
 function getActiveCrews() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var employeeSheet = ss.getSheetByName("Employees");
-
-  if (!employeeSheet) {
-    Logger.log("getActiveCrews: Employees sheet not found");
-    return [];
-  }
+  if (!employeeSheet) return [];
 
   var data = employeeSheet.getDataRange().getValues();
   var headers = data[0];
 
-  // Find Job Number column
-  var jobCol = -1;
+  // Find column indices
+  var jobCol = -1, locationCol = -1;
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'job number') {
-      jobCol = h;
-      break;
-    }
+    if (header === "job number") jobCol = h;
+    if (header === "location") locationCol = h;
   }
 
-  if (jobCol === -1) {
-    Logger.log("getActiveCrews: Job Number column not found");
-    return [];
-  }
+  if (jobCol === -1) return [];
 
-  // Extract unique job number prefixes (e.g., "013-26" from "013-26.1")
-  var crewsMap = {};
-  for (var i = 1; i < data.length; i++) {
-    var jobFull = String(data[i][jobCol] || '').trim();
-    if (jobFull) {
-      // Extract base job number (before the period)
-      var baseJob = jobFull.split('.')[0];
-      if (baseJob.match(/^\d{3}-\d{2}$/)) {
-        crewsMap[baseJob] = true;
-      }
-    }
-  }
+  // Office-only locations to exclude
+  var excludedLocations = ["weeds", "previous employee", "light duty", "vacation", "leave", "unknown"];
 
-  var crews = Object.keys(crewsMap).sort();
-  Logger.log("getActiveCrews: Found " + crews.length + " active crews");
-  return crews;
-}
-
-/**
- * Calculates safety compliance for a specific week by reading Safety Reports sheet
- * Checks which JHAs and Weekly Meetings were received for each crew
- *
- * @param {Date} weekStart - Sunday date for the week
- * @returns {Object} - Compliance data with crews, counts, and isPastDeadline flag
- */
-function calculateSafetyCompliance(weekStart) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var safetyReportsSheet = ss.getSheetByName("Safety Reports");
-
-  if (!safetyReportsSheet) {
-    Logger.log("calculateSafetyCompliance: Safety Reports sheet not found");
-    return null;
-  }
-
-  var weekBounds = getWeekBoundaries(weekStart);
-  var weekEnd = weekBounds.weekEnd;
-  var now = new Date();
-  var isPastDeadline = now > weekEnd;
-
-  // Check if this is the first week of the month (for monthly checklist)
-  var isFirstWeekOfMonth = weekBounds.weekStart.getDate() <= 7;
-
-  var tz = Session.getScriptTimeZone();
-  var weekStartStr = Utilities.formatDate(weekStart, tz, 'MM/dd/yyyy');
-  Logger.log("calculateSafetyCompliance for week: " + weekStartStr + ", isPastDeadline: " + isPastDeadline);
-
-  // Load exclusion config
-  var config = loadComplianceConfig();
-
-  // Get all active crews
-  var activeCrews = getActiveCrews();
-
-  // Initialize crews object
   var crews = {};
-  for (var c = 0; c < activeCrews.length; c++) {
-    var jobNumber = activeCrews[c];
-    var foremanResult = lookupForemanByJobNumber(jobNumber);
-
-    crews[jobNumber] = {
-      foreman: foremanResult.name || '',
-      jhaSun: 'N/A', // Default to N/A (weekend)
-      jhaMon: isPastDeadline ? '❌' : '⏳', // Default missing if past deadline, pending otherwise
-      jhaTue: isPastDeadline ? '❌' : '⏳',
-      jhaWed: isPastDeadline ? '❌' : '⏳',
-      jhaThu: isPastDeadline ? '❌' : '⏳',
-      jhaFri: isPastDeadline ? '❌' : '⏳',
-      jhaSat: 'N/A', // Default to N/A (weekend)
-      weeklyMeeting: isPastDeadline ? '❌' : '⏳',
-      monthlyChecklist: isPastDeadline ? '❌' : '⏳', // Required every week now
-      status: 'Pending'
-    };
-
-    // Apply config exclusions
-    var crewConfig = config[jobNumber];
-    if (crewConfig) {
-      if (crewConfig.skipSun) crews[jobNumber].jhaSun = 'N/A';
-      if (crewConfig.skipMon) crews[jobNumber].jhaMon = 'N/A';
-      if (crewConfig.skipTue) crews[jobNumber].jhaTue = 'N/A';
-      if (crewConfig.skipWed) crews[jobNumber].jhaWed = 'N/A';
-      if (crewConfig.skipThu) crews[jobNumber].jhaThu = 'N/A';
-      if (crewConfig.skipFri) crews[jobNumber].jhaFri = 'N/A';
-      if (crewConfig.skipSat) crews[jobNumber].jhaSat = 'N/A';
-      if (crewConfig.skipWeeklyMeeting) crews[jobNumber].weeklyMeeting = 'N/A';
-      if (crewConfig.skipMonthlyChecklist) crews[jobNumber].monthlyChecklist = 'N/A';
-    }
-  }
-
-
-  // Read Safety Reports sheet to mark received reports
-  var data = safetyReportsSheet.getDataRange().getValues();
-  var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
   for (var i = 1; i < data.length; i++) {
-    var reportDate = data[i][0]; // Column A: Report Date
-    var reportType = data[i][1]; // Column B: Report Type
-    var jobNumber = String(data[i][2] || '').trim(); // Column C: Job Number
+    var jobNumber = String(data[i][jobCol] || '').trim();
+    var location = String(data[i][locationCol] || '').toLowerCase().trim();
 
-    if (!reportDate || !jobNumber || !crews[jobNumber]) continue;
+    // Skip if no job number or excluded location
+    if (!jobNumber) continue;
+    if (locationCol !== -1 && excludedLocations.indexOf(location) !== -1) continue;
 
-    var reportDateObj = new Date(reportDate);
-
-    // Check if this report is within the target week
-    if (reportDateObj >= weekBounds.weekStart && reportDateObj <= weekBounds.weekEnd) {
-
-      if (reportType === 'JHA' || reportType === 'Job Hazard Report') {
-        // Mark the specific day as received
-        var dayOfWeek = reportDateObj.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-        var dayName = dayNames[dayOfWeek];
-        var jhaKey = 'jha' + dayName;
-
-        if (crews[jobNumber][jhaKey] !== 'N/A') {
-          crews[jobNumber][jhaKey] = '✅';
-        }
-      }
-      else if (reportType === 'Safety Meeting' || reportType === 'Weekly Safety Meeting') {
-        // Mark weekly meeting as received
-        if (crews[jobNumber].weeklyMeeting !== 'N/A') {
-          crews[jobNumber].weeklyMeeting = '✅';
-        }
-      }
-      else if (reportType === 'Safety Checklist' || reportType === 'Fleet Checklist') {
-        // Mark monthly checklist as received (if it's first week)
-        if (isFirstWeekOfMonth && crews[jobNumber].monthlyChecklist !== 'N/A') {
-          crews[jobNumber].monthlyChecklist = '✅';
-        }
-      }
+    // Extract base job number (remove position suffix like .1, .2)
+    var baseJob = jobNumber.split('.')[0];
+    if (baseJob.match(/^\d{3}-\d{2}$/)) {
+      crews[baseJob] = true;
     }
   }
 
-  // Calculate final status for each crew
-  var compliantCount = 0;
-  var missingCount = 0;
-
-  for (var jobNumber in crews) {
-    var crew = crews[jobNumber];
-    var hasMissing = false;
-
-    // Check if any required items are missing (❌)
-    if (crew.jhaSun === '❌') hasMissing = true;
-    if (crew.jhaMon === '❌') hasMissing = true;
-    if (crew.jhaTue === '❌') hasMissing = true;
-    if (crew.jhaWed === '❌') hasMissing = true;
-    if (crew.jhaThu === '❌') hasMissing = true;
-    if (crew.jhaf === '❌') hasMissing = true;
-    if (crew.jhaSat === '❌') hasMissing = true;
-    if (crew.weeklyMeeting === '❌') hasMissing = true;
-    if (crew.monthlyChecklist === '❌') hasMissing = true;
-
-    if (isPastDeadline) {
-      // Week is over - determine final status
-      if (hasMissing) {
-        crew.status = 'Missing Reports';
-        missingCount++;
-      } else {
-        crew.status = 'Complete';
-        compliantCount++;
-      }
-    } else {
-      // Week is ongoing
-      crew.status = 'Pending';
-    }
-  }
-
-  var totalCrews = Object.keys(crews).length;
-
-  return {
-    weekStart: weekBounds.weekStart,
-    weekEnd: weekBounds.weekEnd,
-    isPastDeadline: isPastDeadline,
-    crews: crews,
-    totalCrews: totalCrews,
-    compliantCount: compliantCount,
-    missingCount: missingCount
-  };
+  return Object.keys(crews).sort();
 }
 
 /**
- * Loads Safety Compliance Config sheet settings
+ * Creates the Safety Compliance sheet for tracking JHA/Meeting submissions
+ */
+function setupSafetyComplianceSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Safety Compliance");
+
+  if (sheet) {
+    var response = Browser.msgBox(
+      "Safety Compliance sheet already exists",
+      "Do you want to recreate it? This will DELETE all existing data.",
+      Browser.Buttons.YES_NO
+    );
+    if (response === "no") return sheet;
+    ss.deleteSheet(sheet);
+  }
+
+  sheet = ss.insertSheet("Safety Compliance");
+
+  // Headers: Week Start | Job Number | Foreman | Sun | Mon | Tue | Wed | Thu | Fri | Sat | Weekly Meeting | Monthly Checklist | Status | Updated
+  var headers = [
+    "Week Start", "Job Number", "Foreman",
+    "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat",
+    "Weekly Meeting", "Monthly Checklist", "Status", "Updated"
+  ];
+
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.getRange(1, 1, 1, headers.length)
+    .setFontWeight("bold")
+    .setBackground("#4A86E8")
+    .setFontColor("white");
+  sheet.setFrozenRows(1);
+
+  // Column widths
+  sheet.setColumnWidth(1, 100);  // Week Start
+  sheet.setColumnWidth(2, 80);   // Job Number
+  sheet.setColumnWidth(3, 120);  // Foreman
+  for (var i = 4; i <= 10; i++) {
+    sheet.setColumnWidth(i, 50); // Day columns
+  }
+  sheet.setColumnWidth(11, 100); // Weekly Meeting
+  sheet.setColumnWidth(12, 110); // Monthly Checklist
+  sheet.setColumnWidth(13, 120); // Status
+  sheet.setColumnWidth(14, 150); // Updated
+
+  // Date format for Week Start
+  sheet.getRange(2, 1, 1000, 1).setNumberFormat("MM/dd/yyyy");
+
+  // Add conditional formatting for status icons
+  var dayRange = sheet.getRange("D2:L1001");
+  var rules = sheet.getConditionalFormatRules();
+
+  // Green for ✅
+  var checkRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenTextContains("✅")
+    .setBackground("#D9EAD3")
+    .setRanges([dayRange])
+    .build();
+  rules.push(checkRule);
+
+  // Red for ❌
+  var xRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenTextContains("❌")
+    .setBackground("#F4CCCC")
+    .setRanges([dayRange])
+    .build();
+  rules.push(xRule);
+
+  // Yellow for ⏳
+  var pendingRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenTextContains("⏳")
+    .setBackground("#FFF2CC")
+    .setRanges([dayRange])
+    .build();
+  rules.push(pendingRule);
+
+  // Gray for N/A
+  var naRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenTextContains("N/A")
+    .setBackground("#EFEFEF")
+    .setRanges([dayRange])
+    .build();
+  rules.push(naRule);
+
+  sheet.setConditionalFormatRules(rules);
+
+  Logger.log("setupSafetyComplianceSheet: Created Safety Compliance sheet");
+  return sheet;
+}
+
+/**
+ * Creates the Safety Compliance Config sheet for exclusion settings
+ */
+function setupSafetyComplianceConfig() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Safety Compliance Config");
+
+  if (sheet) {
+    var response = Browser.msgBox(
+      "Safety Compliance Config sheet already exists",
+      "Do you want to recreate it? This will DELETE all existing settings.",
+      Browser.Buttons.YES_NO
+    );
+    if (response === "no") return sheet;
+    ss.deleteSheet(sheet);
+  }
+
+  sheet = ss.insertSheet("Safety Compliance Config");
+
+  // Headers
+  var headers = [
+    "Job Number", "Foreman",
+    "Skip Sun", "Skip Mon", "Skip Tue", "Skip Wed", "Skip Thu", "Skip Fri", "Skip Sat",
+    "Skip Weekly Meeting", "Notes"
+  ];
+
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.getRange(1, 1, 1, headers.length)
+    .setFontWeight("bold")
+    .setBackground("#93C47D")
+    .setFontColor("white");
+  sheet.setFrozenRows(1);
+
+  // Get active crews and populate
+  var crews = getActiveCrews();
+  if (crews.length > 0) {
+    var rows = [];
+    for (var i = 0; i < crews.length; i++) {
+      var foreman = lookupForemanByJobNumber(crews[i]);
+      var foremanName = (foreman && foreman.name) ? foreman.name : "";
+      // Default: Skip Sun and Sat (weekends)
+      rows.push([
+        crews[i], foremanName,
+        true, false, false, false, false, false, true, // Sun=skip, Sat=skip
+        false, "" // Don't skip weekly meeting, no notes
+      ]);
+    }
+    sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
+
+    // Add checkboxes for skip columns (C-J = columns 3-10)
+    var checkboxRange = sheet.getRange(2, 3, rows.length, 8);
+    checkboxRange.insertCheckboxes();
+  }
+
+  // Column widths
+  sheet.setColumnWidth(1, 80);   // Job Number
+  sheet.setColumnWidth(2, 120);  // Foreman
+  for (var j = 3; j <= 10; j++) {
+    sheet.setColumnWidth(j, 70); // Skip columns
+  }
+  sheet.setColumnWidth(11, 200); // Notes
+
+  Logger.log("setupSafetyComplianceConfig: Created config with " + crews.length + " crews");
+  return sheet;
+}
+
+/**
+ * Opens the Safety Compliance sheet (creates if doesn't exist)
+ */
+function openComplianceSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Safety Compliance");
+
+  if (!sheet) {
+    sheet = setupSafetyComplianceSheet();
+  }
+
+  if (sheet) {
+    sheet.activate();
+  }
+}
+
+/**
+ * Opens the Safety Compliance Config sheet (creates if doesn't exist)
+ */
+function openComplianceConfig() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Safety Compliance Config");
+
+  if (!sheet) {
+    sheet = setupSafetyComplianceConfig();
+  }
+
+  if (sheet) {
+    sheet.activate();
+  }
+}
+
+/**
+ * Loads compliance config settings for crews
  *
- * @returns {Object} - Map of job numbers to config settings
+ * @returns {Object} - Map of job number to config settings
  */
 function loadComplianceConfig() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var configSheet = ss.getSheetByName("Safety Compliance Config");
+  var sheet = ss.getSheetByName("Safety Compliance Config");
 
-  if (!configSheet) {
-    Logger.log("loadComplianceConfig: Config sheet not found, using defaults");
-    return {};
-  }
+  if (!sheet) return {};
 
-  var data = configSheet.getDataRange().getValues();
+  var data = sheet.getDataRange().getValues();
   var config = {};
 
-  // Skip header row (row 0)
   for (var i = 1; i < data.length; i++) {
     var jobNumber = String(data[i][0] || '').trim();
-    if (jobNumber) {
-      config[jobNumber] = {
-        skipSun: data[i][2] === true,
-        skipMon: data[i][3] === true,
-        skipTue: data[i][4] === true,
-        skipWed: data[i][5] === true,
-        skipThu: data[i][6] === true,
-        skipFri: data[i][7] === true,
-        skipSat: data[i][8] === true,
-        skipWeeklyMeeting: data[i][9] === true,
-        skipMonthlyChecklist: data[i][10] === true
-      };
-    }
+    if (!jobNumber) continue;
+
+    config[jobNumber] = {
+      foreman: data[i][1] || '',
+      skipDays: [
+        !!data[i][2],  // Sun
+        !!data[i][3],  // Mon
+        !!data[i][4],  // Tue
+        !!data[i][5],  // Wed
+        !!data[i][6],  // Thu
+        !!data[i][7],  // Fri
+        !!data[i][8]   // Sat
+      ],
+      skipWeeklyMeeting: !!data[i][9],
+      notes: data[i][10] || ''
+    };
   }
 
   return config;
 }
 
 /**
- * Updates Safety Compliance sheet with compliance data for a week
+ * Calculates safety compliance for all crews for a given week
  *
- * @param {Object} complianceData - Output from calculateSafetyCompliance()
+ * @param {Date} weekStartDate - The Sunday of the week to calculate
+ * @returns {Object} - Compliance data for all crews
+ */
+function calculateSafetyCompliance(weekStartDate) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var safetySheet = ss.getSheetByName("Safety Reports");
+
+  if (!safetySheet) {
+    Logger.log("calculateSafetyCompliance: Safety Reports sheet not found");
+    return null;
+  }
+
+  var config = loadComplianceConfig();
+  var crews = getActiveCrews();
+
+  if (crews.length === 0) {
+    Logger.log("calculateSafetyCompliance: No active crews found");
+    return null;
+  }
+
+  var weekBounds = getWeekBoundaries(weekStartDate);
+  var today = new Date();
+  var isPastDeadline = today > weekBounds.weekEnd;
+
+  // Read all Safety Reports data
+  var reportData = safetySheet.getDataRange().getValues();
+
+  // Build lookup: jobNumber -> { jhaByDay: [0..6], weeklyMeeting: boolean }
+  var crewReports = {};
+  for (var c = 0; c < crews.length; c++) {
+    crewReports[crews[c]] = {
+      jhaByDay: [false, false, false, false, false, false, false], // Sun-Sat
+      weeklyMeeting: false
+    };
+  }
+
+  // Scan Safety Reports for this week
+  for (var i = 1; i < reportData.length; i++) {
+    var reportDate = reportData[i][0]; // Column A: Report Date
+    var reportType = String(reportData[i][1] || '').trim(); // Column B: Report Type
+    var jobNumber = String(reportData[i][2] || '').trim(); // Column C: Job Number
+
+    if (!reportDate || !jobNumber) continue;
+
+    // Extract base job number
+    var baseJob = jobNumber.split('.')[0];
+    if (!crewReports[baseJob]) continue;
+
+    // Check if report is within this week
+    var reportDateObj = new Date(reportDate);
+    if (reportDateObj < weekBounds.weekStart || reportDateObj > weekBounds.weekEnd) continue;
+
+    var dayOfWeek = reportDateObj.getDay(); // 0=Sun, 6=Sat
+
+    if (reportType === 'JHA' || reportType.indexOf('Job Hazard') !== -1) {
+      crewReports[baseJob].jhaByDay[dayOfWeek] = true;
+    } else if (reportType === 'Safety Meeting' || reportType.indexOf('Safety Meeting') !== -1) {
+      crewReports[baseJob].weeklyMeeting = true;
+    }
+  }
+
+  // Build compliance data for each crew
+  var complianceData = {
+    weekStart: weekBounds.weekStart,
+    weekEnd: weekBounds.weekEnd,
+    isPastDeadline: isPastDeadline,
+    crews: {},
+    totalCrews: crews.length
+  };
+
+  var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  for (var c = 0; c < crews.length; c++) {
+    var crew = crews[c];
+    var crewConfig = config[crew] || { skipDays: [true, false, false, false, false, false, true], skipWeeklyMeeting: false };
+    var reports = crewReports[crew];
+    var foremanResult = lookupForemanByJobNumber(crew);
+    var foremanName = (foremanResult && foremanResult.name) ? foremanResult.name : "";
+
+    var crewData = {
+      jobNumber: crew,
+      foreman: foremanName,
+      days: {},
+      weeklyMeeting: '',
+      status: 'Complete',
+      missingItems: []
+    };
+
+    // Check each day
+    for (var d = 0; d < 7; d++) {
+      var dayName = dayNames[d];
+
+      if (crewConfig.skipDays[d]) {
+        crewData.days[dayName] = 'N/A';
+      } else if (reports.jhaByDay[d]) {
+        crewData.days[dayName] = '✅';
+      } else if (isPastDeadline) {
+        crewData.days[dayName] = '❌';
+        crewData.status = 'Missing Reports';
+        crewData.missingItems.push('JHA (' + dayName + ')');
+      } else {
+        crewData.days[dayName] = '⏳';
+        crewData.status = 'Pending';
+      }
+    }
+
+    // Check weekly meeting
+    if (crewConfig.skipWeeklyMeeting) {
+      crewData.weeklyMeeting = 'N/A';
+    } else if (reports.weeklyMeeting) {
+      crewData.weeklyMeeting = '✅';
+    } else if (isPastDeadline) {
+      crewData.weeklyMeeting = '❌';
+      crewData.status = 'Missing Reports';
+      crewData.missingItems.push('Weekly Meeting');
+    } else {
+      crewData.weeklyMeeting = '⏳';
+      if (crewData.status === 'Complete') crewData.status = 'Pending';
+    }
+
+    complianceData.crews[crew] = crewData;
+  }
+
+  return complianceData;
+}
+
+/**
+ * Updates the Safety Compliance sheet with calculated data
+ *
+ * @param {Object} complianceData - Data from calculateSafetyCompliance()
  */
 function updateComplianceSheet(complianceData) {
+  if (!complianceData || !complianceData.crews) {
+    Logger.log("updateComplianceSheet: No compliance data");
+    return;
+  }
+
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Safety Compliance");
 
   if (!sheet) {
-    Logger.log("updateComplianceSheet: Safety Compliance sheet not found");
-    return;
+    sheet = setupSafetyComplianceSheet();
   }
 
-  var tz = Session.getScriptTimeZone();
-  var weekStartStr = Utilities.formatDate(complianceData.weekStart, tz, 'M/d/yyyy');
-  Logger.log("updateComplianceSheet for week: " + weekStartStr);
-
-  var data = sheet.getDataRange().getValues();
+  var weekStartStr = Utilities.formatDate(complianceData.weekStart, Session.getScriptTimeZone(), "MM/dd/yyyy");
   var now = new Date();
+  var nowStr = Utilities.formatDate(now, Session.getScriptTimeZone(), "MM/dd/yyyy HH:mm");
 
-  // Update existing rows or append new rows
-  for (var jobNumber in complianceData.crews) {
-    var crew = complianceData.crews[jobNumber];
-
-    // Find existing row for this job/week
-    var rowIndex = -1;
-    for (var i = 1; i < data.length; i++) {
-      var rowWeekStart = String(data[i][0]).trim();
-      var rowJobNumber = String(data[i][2]).trim();
-
-      if (rowWeekStart === weekStartStr && rowJobNumber === jobNumber) {
-        rowIndex = i + 1; // Convert to 1-based row number
-        break;
-      }
+  // Get existing data to check for updates
+  var existingData = sheet.getDataRange().getValues();
+  var existingRows = {};
+  for (var i = 1; i < existingData.length; i++) {
+    var existingDate = existingData[i][0];
+    var existingJob = String(existingData[i][1] || '').trim();
+    if (existingDate && existingJob) {
+      var dateStr = Utilities.formatDate(new Date(existingDate), Session.getScriptTimeZone(), "MM/dd/yyyy");
+      existingRows[dateStr + '|' + existingJob] = i + 1; // Row number (1-based)
     }
+  }
+
+  // Update or insert rows for each crew
+  var crewKeys = Object.keys(complianceData.crews);
+  for (var c = 0; c < crewKeys.length; c++) {
+    var crew = complianceData.crews[crewKeys[c]];
+    var rowKey = weekStartStr + '|' + crew.jobNumber;
 
     var rowData = [
-      Utilities.formatDate(complianceData.weekStart, tz, 'M/d/yyyy'), // A: Week Start (date only)
-      Utilities.formatDate(complianceData.weekEnd, tz, 'M/d/yyyy'), // B: Week End (date only)
-      jobNumber, // C: Job Number
-      crew.foreman, // D: Foreman
-      crew.jhaSun || '', // E: JHA Sun
-      crew.jhaMon || '', // F: JHA Mon
-      crew.jhaTue || '', // G: JHA Tue
-      crew.jhaWed || '', // H: JHA Wed
-      crew.jhaThu || '', // I: JHA Thu
-      crew.jhaFri || '', // J: JHA Fri
-      crew.jhaSat || '', // K: JHA Sat
-      crew.weeklyMeeting || '', // L: Weekly Meeting
-      crew.monthlyChecklist || '', // M: Monthly Checklist
-      crew.status || 'Pending', // N: Status
-      now // O: Created Date
+      weekStartStr,  // Store as formatted string to avoid time component
+      crew.jobNumber,
+      crew.foreman,
+      crew.days['Sun'] || '',
+      crew.days['Mon'] || '',
+      crew.days['Tue'] || '',
+      crew.days['Wed'] || '',
+      crew.days['Thu'] || '',
+      crew.days['Fri'] || '',
+      crew.days['Sat'] || '',
+      crew.weeklyMeeting || '',
+      '', // Monthly Checklist (not implemented yet)
+      crew.status,
+      nowStr
     ];
 
-    if (rowIndex > 0) {
+    if (existingRows[rowKey]) {
       // Update existing row
-      sheet.getRange(rowIndex, 1, 1, rowData.length).setValues([rowData]);
-      Logger.log("Updated row " + rowIndex + " for " + jobNumber);
+      sheet.getRange(existingRows[rowKey], 1, 1, rowData.length).setValues([rowData]);
     } else {
       // Append new row
       sheet.appendRow(rowData);
-      Logger.log("Appended new row for " + jobNumber);
     }
   }
 
-  Logger.log("updateComplianceSheet complete");
+  Logger.log("updateComplianceSheet: Updated " + crewKeys.length + " crew records for week of " + weekStartStr);
 }
 
 /**
- * Finalizes the PREVIOUS work week only (not all past weeks).
- * Updates status to "Complete" or "Missing Reports" and creates tasks for that week.
- * Tasks for older weeks are NOT created - those should be archived.
- *
- * Previous week = the Sunday-Saturday that ended most recently
- * Current week = the Sunday-Saturday we are currently in
- *
- * @returns {Object} - {weeksFinalized: number, tasksCreated: number, previousWeekStart: string}
+ * Applies visual formatting to Safety Compliance sheet to separate weeks
+ * Adds alternating background colors and thick borders between week groups
  */
-function finalizePastWeeksCompliance() {
+function formatComplianceSheetByWeek() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var complianceSheet = ss.getSheetByName("Safety Compliance");
+  var sheet = ss.getSheetByName("Safety Compliance");
 
-  if (!complianceSheet) {
-    Logger.log("finalizePastWeeksCompliance: Safety Compliance sheet not found");
-    return { weeksFinalized: 0, tasksCreated: 0 };
+  if (!sheet) {
+    Logger.log("formatComplianceSheetByWeek: Sheet not found");
+    return;
   }
 
-  var now = new Date();
-  var dayOfWeek = now.getDay(); // 0 = Sunday
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return;
 
-  // Calculate PREVIOUS work week boundaries
-  // Current week starts on Sunday
-  var currentWeekStart = new Date(now);
-  currentWeekStart.setDate(now.getDate() - dayOfWeek);
-  currentWeekStart.setHours(0, 0, 0, 0);
-
-  // Previous week is 7 days before current week
-  var previousWeekStart = new Date(currentWeekStart);
-  previousWeekStart.setDate(currentWeekStart.getDate() - 7);
-
-  var previousWeekEnd = new Date(currentWeekStart);
-  previousWeekEnd.setDate(currentWeekStart.getDate() - 1); // Saturday
-  previousWeekEnd.setHours(23, 59, 59, 999);
-
-  Logger.log("finalizePastWeeksCompliance: Previous week is " +
-    Utilities.formatDate(previousWeekStart, Session.getScriptTimeZone(), "MM/dd/yyyy") + " to " +
-    Utilities.formatDate(previousWeekEnd, Session.getScriptTimeZone(), "MM/dd/yyyy"));
-
-  var data = complianceSheet.getDataRange().getValues();
-  var weeksFinalized = 0;
-  var totalTasksCreated = 0;
-
-  // Find the row for the PREVIOUS week only
+  // Sort by Week Start (descending - most recent first) then by Job Number
+  var dataRows = [];
   for (var i = 1; i < data.length; i++) {
-    var weekStart = data[i][0]; // Column A: Week Start
-    var status = data[i][13];   // Column N: Status
+    dataRows.push({ row: i + 1, data: data[i] });
+  }
 
-    if (!weekStart) continue;
+  dataRows.sort(function(a, b) {
+    var dateA = new Date(a.data[0]);
+    var dateB = new Date(b.data[0]);
+    if (dateB.getTime() !== dateA.getTime()) {
+      return dateB.getTime() - dateA.getTime(); // Most recent first
+    }
+    // Same week - sort by job number
+    return String(a.data[1]).localeCompare(String(b.data[1]));
+  });
 
-    var rowWeekStart = new Date(weekStart);
-    rowWeekStart.setHours(0, 0, 0, 0);
+  // Rewrite sorted data
+  var sortedData = dataRows.map(function(r) { return r.data; });
+  sheet.getRange(2, 1, sortedData.length, sortedData[0].length).setValues(sortedData);
 
-    // Check if this row is for the PREVIOUS week
-    var prevWeekStartTime = previousWeekStart.getTime();
-    var rowWeekStartTime = rowWeekStart.getTime();
+  // Now apply week coloring
+  var lastWeek = "";
+  var weekIndex = 0;
+  var weekColors = ['#ffffff', '#e3f2fd']; // White, Light Blue alternating
 
-    // Match by comparing week start dates (within 1 day tolerance for timezone issues)
-    var dayDiff = Math.abs(prevWeekStartTime - rowWeekStartTime) / (1000 * 60 * 60 * 24);
+  for (var i = 0; i < sortedData.length; i++) {
+    var weekStr = String(sortedData[i][0]);
+    var rowNum = i + 2; // 1-based, skip header
 
-    if (dayDiff < 1) {
-      Logger.log("Found previous week row: " + Utilities.formatDate(rowWeekStart, Session.getScriptTimeZone(), "MM/dd/yyyy"));
-
-      // Only process if status is still Pending or Missing Reports
-      if (status === 'Pending' || status === 'Missing Reports') {
-        // Recalculate compliance for previous week
-        var complianceData = calculateSafetyCompliance(previousWeekStart);
-
-        if (complianceData) {
-          // Update the compliance sheet
-          updateComplianceSheet(complianceData);
-
-          // Create tasks for missing reports (only for previous week)
-          var tasksCreated = createMissingReportTasks(complianceData);
-          totalTasksCreated = tasksCreated;
-          weeksFinalized = 1;
-
-          Logger.log("Finalized previous week " +
-            Utilities.formatDate(previousWeekStart, Session.getScriptTimeZone(), "MM/dd/yyyy") +
-            " - Created " + tasksCreated + " tasks");
-        }
-      } else {
-        Logger.log("Previous week already finalized with status: " + status);
+    if (weekStr !== lastWeek) {
+      // New week - add thick border above this row (if not first row)
+      if (i > 0) {
+        var borderRange = sheet.getRange(rowNum, 1, 1, 14);
+        borderRange.setBorder(true, null, null, null, null, null, '#1565c0', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
       }
+      weekIndex++;
+      lastWeek = weekStr;
+    }
 
-      break; // Only process the previous week, not others
+    // Apply alternating background color for this week
+    var color = weekColors[weekIndex % 2];
+    sheet.getRange(rowNum, 1, 1, 14).setBackground(color);
+  }
+
+  Logger.log("formatComplianceSheetByWeek: Applied week formatting to " + sortedData.length + " rows");
+}
+
+/**
+ * Menu function to manually reformat the compliance sheet by week
+ */
+function menuReformatComplianceSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Safety Compliance");
+
+  if (!sheet) {
+    Browser.msgBox("❌ Safety Compliance sheet not found. Run 'Backfill Past Weeks' first.");
+    return;
+  }
+
+  formatComplianceSheetByWeek();
+  Browser.msgBox("✅ Applied week-based formatting.\n\n- Sorted by week (most recent first)\n- Alternating colors for each week\n- Blue borders between weeks");
+}
+
+/**
+ * Backfills compliance data for past weeks based on Safety Reports data
+ * Scans all Safety Reports and populates Safety Compliance for each week found
+ */
+function menuBackfillPastWeeks() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var safetySheet = ss.getSheetByName("Safety Reports");
+
+  if (!safetySheet) {
+    Browser.msgBox("❌ Safety Reports sheet not found. Run 'Process Safety Emails' first.");
+    return;
+  }
+
+  // Ensure compliance sheet exists
+  var complianceSheet = ss.getSheetByName("Safety Compliance");
+  if (!complianceSheet) {
+    complianceSheet = setupSafetyComplianceSheet();
+  }
+
+  // Ensure config sheet exists
+  var configSheet = ss.getSheetByName("Safety Compliance Config");
+  if (!configSheet) {
+    configSheet = setupSafetyComplianceConfig();
+  }
+
+  // Get all unique weeks from Safety Reports
+  var reportData = safetySheet.getDataRange().getValues();
+  var weeks = {};
+
+  for (var i = 1; i < reportData.length; i++) {
+    var reportDate = reportData[i][0];
+    if (!reportDate) continue;
+
+    var bounds = getWeekBoundaries(new Date(reportDate));
+    var weekKey = Utilities.formatDate(bounds.weekStart, Session.getScriptTimeZone(), "yyyy-MM-dd");
+    weeks[weekKey] = bounds.weekStart;
+  }
+
+  var weekKeys = Object.keys(weeks).sort().reverse(); // Most recent first
+
+  if (weekKeys.length === 0) {
+    Browser.msgBox("ℹ️ No report dates found in Safety Reports sheet.");
+    return;
+  }
+
+  // Process each week
+  var processed = 0;
+  for (var w = 0; w < weekKeys.length; w++) {
+    var weekStart = weeks[weekKeys[w]];
+    var complianceData = calculateSafetyCompliance(weekStart);
+    if (complianceData) {
+      updateComplianceSheet(complianceData);
+      processed++;
     }
   }
 
-  Logger.log("finalizePastWeeksCompliance: Finalized " + weeksFinalized + " week(s), created " + totalTasksCreated + " tasks");
+  // Apply visual formatting to separate weeks
+  formatComplianceSheetByWeek();
+
+  Browser.msgBox("✅ Backfilled compliance data for " + processed + " weeks.\n\nWeeks are now color-coded for easy viewing.");
+  Logger.log("menuBackfillPastWeeks: Processed " + processed + " weeks");
+}
+
+/**
+ * Removes duplicate rows from Safety Compliance sheet
+ * Keeps the most recently updated row for each Week+Job combination
+ */
+function menuCleanupDuplicateComplianceRows() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Safety Compliance");
+
+  if (!sheet) {
+    Browser.msgBox("❌ Safety Compliance sheet not found.");
+    return;
+  }
+
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) {
+    Browser.msgBox("ℹ️ No data rows to clean up.");
+    return;
+  }
+
+  // Find duplicates (keep last occurrence = most recent)
+  var seen = {};
+  var rowsToDelete = [];
+
+  for (var i = data.length - 1; i >= 1; i--) {
+    var weekDate = data[i][0];
+    var jobNumber = String(data[i][1] || '').trim();
+
+    if (!weekDate || !jobNumber) continue;
+
+    var dateStr = Utilities.formatDate(new Date(weekDate), Session.getScriptTimeZone(), "yyyy-MM-dd");
+    var key = dateStr + '|' + jobNumber;
+
+    if (seen[key]) {
+      rowsToDelete.push(i + 1); // Row number (1-based)
+    } else {
+      seen[key] = true;
+    }
+  }
+
+  if (rowsToDelete.length === 0) {
+    Browser.msgBox("✅ No duplicate rows found.");
+    return;
+  }
+
+  // Delete rows from bottom to top to avoid index shifting
+  rowsToDelete.sort(function(a, b) { return b - a; });
+  for (var r = 0; r < rowsToDelete.length; r++) {
+    sheet.deleteRow(rowsToDelete[r]);
+  }
+
+  Browser.msgBox("✅ Removed " + rowsToDelete.length + " duplicate rows.");
+  Logger.log("menuCleanupDuplicateComplianceRows: Removed " + rowsToDelete.length + " rows");
+}
+
+/**
+ * Creates tasks in Task Metadata for missing JHA/Safety Meeting reports
+ *
+ * @param {Object} complianceData - Data from calculateSafetyCompliance()
+ * @returns {number} - Number of tasks created
+ */
+function createMissingReportTasks(complianceData) {
+  if (!complianceData || !complianceData.crews) return 0;
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var taskSheet = ss.getSheetByName("Task Metadata");
+
+  if (!taskSheet) {
+    Logger.log("createMissingReportTasks: Task Metadata sheet not found");
+    return 0;
+  }
+
+  var weekStartStr = Utilities.formatDate(complianceData.weekStart, Session.getScriptTimeZone(), "MM/dd/yyyy");
+
+  // Get existing tasks to avoid duplicates
+  var existingData = taskSheet.getDataRange().getValues();
+  var existingKeys = {};
+  for (var i = 1; i < existingData.length; i++) {
+    var taskType = String(existingData[i][3] || '').trim(); // TaskType column
+    var notes = String(existingData[i][24] || '').trim(); // Notes column (Y)
+    if (taskType === 'Missing Safety Report') {
+      existingKeys[notes] = true;
+    }
+  }
+
+  var tasksCreated = 0;
+  var now = new Date();
+  var nowStr = Utilities.formatDate(now, Session.getScriptTimeZone(), "MM/dd/yyyy HH:mm");
+
+  for (var jobNumber in complianceData.crews) {
+    var crew = complianceData.crews[jobNumber];
+
+    if (crew.status !== 'Missing Reports' || crew.missingItems.length === 0) continue;
+
+    // Build description of what's missing
+    var missingJHA = [];
+    var missingMeeting = false;
+
+    for (var m = 0; m < crew.missingItems.length; m++) {
+      var item = crew.missingItems[m];
+      if (item.indexOf('JHA') !== -1) {
+        missingJHA.push(item.replace('JHA (', '').replace(')', ''));
+      } else if (item === 'Weekly Meeting') {
+        missingMeeting = true;
+      }
+    }
+
+    // Create task key for duplicate checking
+    var taskKey = jobNumber + "|" + weekStartStr;
+    if (existingKeys[taskKey]) continue;
+
+    // Determine item type (JHA, Weekly Meeting, or both)
+    var itemType = '';
+    if (missingJHA.length > 0 && missingMeeting) {
+      itemType = 'JHA + Weekly Meeting';
+    } else if (missingJHA.length > 0) {
+      itemType = 'JHA';
+    } else if (missingMeeting) {
+      itemType = 'Weekly Meeting';
+    }
+
+    // Build description
+    var description = 'Week of ' + weekStartStr + ': ';
+    if (missingJHA.length > 0) {
+      description += 'Missing JHA for ' + missingJHA.join(', ');
+      if (missingMeeting) description += '; ';
+    }
+    if (missingMeeting) {
+      description += 'Missing Weekly Safety Meeting';
+    }
+
+    // Get foreman phone for SMS
+    var foremanPhone = lookupForemanPhoneByJobNumber(jobNumber);
+
+    // Create task row
+    // Columns: TaskID, SourceSheet, SourceRow, TaskType, ItemType, Employee, Location, PhoneNumber,
+    //          DueDate, Priority, EstimatedTime, ScheduledDate, StartTime, EndTime, Status,
+    //          CompletedDate, CompletedBy, NotifiedDate, NotifiedMethod, ReminderDates,
+    //          CreatedDate, ModifiedDate, ChangeOutDate, ClaimedBy, Notes
+    var taskRow = [
+      'SafetyCompliance_' + jobNumber + '_' + weekStartStr.replace(/\//g, '-'), // TaskID
+      'Safety Compliance',    // SourceSheet
+      '',                     // SourceRow (N/A for generated tasks)
+      'Missing Safety Report',// TaskType
+      itemType,               // ItemType
+      crew.foreman || jobNumber, // Employee (foreman name or job number)
+      lookupLocationByJobNumber(jobNumber), // Location
+      foremanPhone,           // PhoneNumber
+      complianceData.weekEnd, // DueDate (Saturday of that week)
+      'High',                 // Priority
+      15,                     // EstimatedTime (phone call)
+      '',                     // ScheduledDate
+      '',                     // StartTime
+      '',                     // EndTime
+      'Pending',              // Status
+      '',                     // CompletedDate
+      '',                     // CompletedBy
+      '',                     // NotifiedDate
+      '',                     // NotifiedMethod
+      '',                     // ReminderDates
+      now,                    // CreatedDate
+      now,                    // ModifiedDate
+      '',                     // ChangeOutDate
+      '',                     // ClaimedBy
+      taskKey                 // Notes (used for duplicate detection)
+    ];
+
+    taskSheet.appendRow(taskRow);
+    tasksCreated++;
+    Logger.log("Created missing report task for " + jobNumber + ": " + description);
+  }
+
+  return tasksCreated;
+}
+
+/**
+ * Finalizes past weeks that still show "Pending" status
+ * Changes pending items to ❌ and creates tasks for missing reports
+ *
+ * @returns {Object} - {weeksFinalized: number, tasksCreated: number}
+ */
+function finalizePastWeeksCompliance() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Safety Compliance");
+
+  if (!sheet) {
+    return { weeksFinalized: 0, tasksCreated: 0 };
+  }
+
+  var data = sheet.getDataRange().getValues();
+  var today = new Date();
+  var currentWeekBounds = getWeekBoundaries(today);
+  var currentWeekStr = Utilities.formatDate(currentWeekBounds.weekStart, Session.getScriptTimeZone(), "yyyy-MM-dd");
+
+  var weeksToUpdate = {};
+  var rowsToUpdate = [];
+
+  for (var i = 1; i < data.length; i++) {
+    var weekDate = data[i][0];
+    var status = String(data[i][12] || '').trim(); // Status column (M = 13, 0-indexed = 12)
+
+    if (!weekDate || status !== 'Pending') continue;
+
+    var weekDateObj = new Date(weekDate);
+    var weekBounds = getWeekBoundaries(weekDateObj);
+    var weekStr = Utilities.formatDate(weekBounds.weekStart, Session.getScriptTimeZone(), "yyyy-MM-dd");
+
+    // Skip current week (still in progress)
+    if (weekStr === currentWeekStr) continue;
+
+    // Skip future weeks
+    if (weekBounds.weekEnd > today) continue;
+
+    // This is a past week with pending status - needs finalization
+    weeksToUpdate[weekStr] = weekBounds.weekStart;
+    rowsToUpdate.push({
+      row: i + 1,
+      weekStart: weekBounds.weekStart
+    });
+  }
+
+  if (Object.keys(weeksToUpdate).length === 0) {
+    return { weeksFinalized: 0, tasksCreated: 0 };
+  }
+
+  // Re-calculate compliance for each past week (will mark pending as ❌)
+  var totalTasksCreated = 0;
+  for (var weekStr in weeksToUpdate) {
+    var weekStart = weeksToUpdate[weekStr];
+    var complianceData = calculateSafetyCompliance(weekStart);
+
+    if (complianceData) {
+      updateComplianceSheet(complianceData);
+      var tasksCreated = createMissingReportTasks(complianceData);
+      totalTasksCreated += tasksCreated;
+    }
+  }
+
+  Logger.log("finalizePastWeeksCompliance: Finalized " + Object.keys(weeksToUpdate).length + " weeks, created " + totalTasksCreated + " tasks");
+
   return {
-    weeksFinalized: weeksFinalized,
-    tasksCreated: totalTasksCreated,
-    previousWeekStart: Utilities.formatDate(previousWeekStart, Session.getScriptTimeZone(), "MM/dd/yyyy")
+    weeksFinalized: Object.keys(weeksToUpdate).length,
+    tasksCreated: totalTasksCreated
   };
 }
 
@@ -3364,380 +2935,115 @@ function finalizePastWeeksCompliance() {
 function menuFinalizePastWeeks() {
   var result = finalizePastWeeksCompliance();
 
-  if (result.weeksFinalized > 0) {
-    Browser.msgBox("✅ Finalized " + result.weeksFinalized + " past week(s).\n\n" +
-                   "Created " + result.tasksCreated + " missing report task(s).");
+  if (result.weeksFinalized === 0) {
+    Browser.msgBox("✅ No past weeks needed finalization. All are up to date.");
   } else {
-    Browser.msgBox("All past weeks are already finalized.");
+    Browser.msgBox("✅ Finalized " + result.weeksFinalized + " past week(s).\n\nCreated " + result.tasksCreated + " missing report tasks.");
   }
 }
 
 /**
- * Creates missing safety report tasks in Task Metadata.
- * Combines all missing items for a crew/week into ONE task.
- *
- * @param {Object} complianceData - Compliance data from calculateSafetyCompliance()
- * @returns {number} - Number of tasks created
+ * Shows the Safety Compliance Dashboard with current week stats and trends
  */
-function createMissingReportTasks(complianceData) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var taskMetaSheet = ss.getSheetByName('Task Metadata');
-  var employeesSheet = ss.getSheetByName('Employees');
+function showComplianceDashboard() {
+  var today = new Date();
+  var weekBounds = getWeekBoundaries(today);
+  var complianceData = calculateSafetyCompliance(weekBounds.weekStart);
 
-  if (!taskMetaSheet || !employeesSheet) {
-    Logger.log('createMissingReportTasks: Required sheets not found');
-    return 0;
+  if (!complianceData || !complianceData.crews) {
+    Browser.msgBox("❌ Could not calculate compliance data. Make sure Safety Reports and Safety Compliance Config sheets exist.");
+    return;
   }
 
-  // Get foreman phone numbers
-  var empData = employeesSheet.getDataRange().getValues();
-  var empHeaders = empData[0];
-  var nameCol = -1, phoneCol = -1, locationCol = -1;
-  for (var h = 0; h < empHeaders.length; h++) {
-    var header = String(empHeaders[h]).toLowerCase().trim();
-    if (header === 'name') nameCol = h;
-    if (header === 'phone') phoneCol = h;
-    if (header === 'location') locationCol = h;
-  }
+  var weekStartStr = Utilities.formatDate(complianceData.weekStart, Session.getScriptTimeZone(), "MM/dd");
+  var weekEndStr = Utilities.formatDate(complianceData.weekEnd, Session.getScriptTimeZone(), "MM/dd/yyyy");
 
-  var phoneMap = {};
-  var locationMap = {};
-  for (var i = 1; i < empData.length; i++) {
-    var name = String(empData[i][nameCol]).trim().toLowerCase();
-    if (name && phoneCol >= 0) {
-      phoneMap[name] = String(empData[i][phoneCol]).trim();
-    }
-    if (name && locationCol >= 0) {
-      locationMap[name] = String(empData[i][locationCol]).trim();
-    }
-  }
+  // Count compliant and missing
+  var compliantCount = 0;
+  var missingCount = 0;
+  var pendingCount = 0;
 
-  var tasksCreated = 0;
-  var now = new Date();
-  var weekEnd = complianceData.weekEnd;
-
-  // Process each crew
   for (var jobNumber in complianceData.crews) {
     var crew = complianceData.crews[jobNumber];
-    if (crew.status === 'Complete' || crew.status === 'N/A') continue;
-
-    var foreman = crew.foreman;
-    var foremanKey = foreman ? foreman.toLowerCase().trim() : '';
-    var phone = phoneMap[foremanKey] || '';
-    var location = locationMap[foremanKey] || '';
-
-    // Collect all missing items
-    var missingJHAs = [];
-    var missingWeekly = false;
-    var missingMonthly = false;
-
-    // Check JHA columns (Mon-Fri, skip Sun/Sat)
-    var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    for (var d = 1; d <= 5; d++) { // Monday = 1, Friday = 5
-      var jhaStatus = crew['jha' + dayNames[d]];
-      if (jhaStatus === '❌' || jhaStatus === 'Missing') {
-        // Calculate the actual date for this day
-        var dayDate = new Date(complianceData.weekStart);
-        dayDate.setDate(dayDate.getDate() + d);
-        missingJHAs.push(Utilities.formatDate(dayDate, Session.getScriptTimeZone(), 'MM/dd/yyyy'));
-      }
-    }
-
-    // Check Weekly Meeting
-    if (crew.weeklyMeeting === '❌' || crew.weeklyMeeting === 'Missing') {
-      missingWeekly = true;
-    }
-
-    // NOTE: Monthly Checklist is tracked but does NOT create tasks
-    // Only JHAs and Weekly Meeting create tasks for the Task List
-
-    // Skip if nothing is missing (only check JHAs and Weekly Meeting)
-    if (missingJHAs.length === 0 && !missingWeekly) continue;
-
-    // Build itemType (exclude Monthly Checklist)
-    var itemTypeParts = [];
-    if (missingJHAs.length > 0) itemTypeParts.push('JHA');
-    if (missingWeekly) itemTypeParts.push('Weekly Meeting');
-    var itemType = itemTypeParts.join(' + ');
-
-    // Build notes with specific missing dates (exclude Monthly Checklist)
-    var notesParts = [];
-    if (missingJHAs.length > 0) {
-      notesParts.push('Missing JHA: ' + missingJHAs.join(', '));
-    }
-    if (missingWeekly) {
-      var weekStartStr = Utilities.formatDate(complianceData.weekStart, Session.getScriptTimeZone(), 'MM/dd/yyyy');
-      notesParts.push('Missing Weekly Safety Meeting for week of ' + weekStartStr);
-    }
-    var notes = notesParts.join('; ');
-
-    // Check if task already exists for this crew/week
-    var taskId = 'SafetyCompliance_' + jobNumber + '_' + Utilities.formatDate(complianceData.weekStart, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-    var existingData = taskMetaSheet.getDataRange().getValues();
-    var taskExists = false;
-    for (var r = 1; r < existingData.length; r++) {
-      if (existingData[r][0] === taskId) {
-        taskExists = true;
-        break;
-      }
-    }
-
-    if (taskExists) {
-      Logger.log('Task already exists: ' + taskId);
-      continue;
-    }
-
-    // Create task record - using the last day of the week (Saturday) as due date
-    var dueDate = new Date(weekEnd);
-
-    var taskRow = [
-      taskId,                           // A: TaskID
-      'Safety Compliance',              // B: SourceSheet
-      '',                               // C: SourceRow (not applicable)
-      foreman,                          // D: Employee (foreman name)
-      'Missing Safety Report',          // E: TaskType
-      itemType,                         // F: ItemType
-      '',                               // G: CurrentItem
-      location,                         // H: Location
-      foreman,                          // I: Foreman
-      phone,                            // J: PhoneNumber
-      dueDate,                          // K: DueDate (Saturday of the week)
-      '',                               // L: ScheduledDate
-      '',                               // M: StartTime
-      '',                               // N: EndTime
-      'Pending',                        // O: Status
-      '',                               // P: NotifiedDate
-      '',                               // Q: ScheduledClassDate
-      '',                               // R: ClassType
-      true,                             // S: IsOffice (phone call)
-      false,                            // T: IsRegistered
-      false,                            // U: IsDeclined
-      '',                               // V: CompletedDate
-      notes,                            // W: Notes
-      now,                              // X: CreatedDate
-      now                               // Y: LastModified
-    ];
-
-    taskMetaSheet.appendRow(taskRow);
-    tasksCreated++;
-    Logger.log('Created missing report task for ' + foreman + ' (' + jobNumber + '): ' + itemType);
+    if (crew.status === 'Complete') compliantCount++;
+    else if (crew.status === 'Missing Reports') missingCount++;
+    else pendingCount++;
   }
 
-  Logger.log('createMissingReportTasks: Created ' + tasksCreated + ' tasks');
-  return tasksCreated;
-}
+  // Build HTML dashboard
+  var html = '<style>' +
+    'body { font-family: Arial, sans-serif; padding: 20px; }' +
+    '.header { background: linear-gradient(135deg, #4285f4, #34a853); color: white; padding: 15px; border-radius: 8px; margin-bottom: 20px; }' +
+    '.header h2 { margin: 0; }' +
+    '.header .subtitle { opacity: 0.9; font-size: 14px; }' +
+    '.summary { display: flex; gap: 15px; margin-bottom: 20px; }' +
+    '.stat-card { flex: 1; padding: 15px; border-radius: 8px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }' +
+    '.stat-card.green { background: #e8f5e9; border: 2px solid #4caf50; }' +
+    '.stat-card.red { background: #ffebee; border: 2px solid #f44336; }' +
+    '.stat-card.yellow { background: #fff8e1; border: 2px solid #ffc107; }' +
+    '.stat-card .num { font-size: 32px; font-weight: bold; }' +
+    '.stat-card .label { font-size: 12px; color: #666; }' +
+    '.crew-table { width: 100%; border-collapse: collapse; font-size: 12px; }' +
+    '.crew-table th { background: #4285f4; color: white; padding: 8px 4px; text-align: center; }' +
+    '.crew-table td { padding: 6px 4px; text-align: center; border-bottom: 1px solid #ddd; }' +
+    '.crew-table tr:hover { background: #f5f5f5; }' +
+    '.ok { color: #28a745; }' +
+    '.missing { color: #dc3545; font-weight: bold; }' +
+    '.pending { color: #ffc107; }' +
+    '.na { color: #999; }' +
+    '.scroll-container { max-height: 300px; overflow-y: auto; }' +
+    '</style>';
 
-/**
- * Builds SMS message for missing safety reports (JHAs and Weekly Meeting only)
- *
- * @param {Object} task - Task object with itemType and notes
- * @returns {string} - SMS message text
- */
-function buildMissingSafetyReportSmsMessage(task) {
-  var itemType = task.itemType || task.ItemType || "";
-  var notes = task.notes || task.Notes || "";
+  html += '<div class="header">' +
+    '<h2>📊 Safety Compliance Dashboard</h2>' +
+    '<div class="subtitle">Week of ' + weekStartStr + ' - ' + weekEndStr + '</div>' +
+    '</div>';
 
-  // Extract dates from notes (only JHAs and Weekly Meeting)
-  var jhaDateMatch = notes.match(/Missing JHA:\s*([^;]+)/);
-  var weekOfMatch = notes.match(/week of\s+(\d{2}\/\d{2}\/\d{4})/i);
+  html += '<div class="summary">' +
+    '<div class="stat-card green"><div class="num">' + compliantCount + '</div><div class="label">Compliant</div></div>';
 
-  var jhaDates = jhaDateMatch ? jhaDateMatch[1].trim() : "";
-  var weekOf = weekOfMatch ? weekOfMatch[1] : "";
-
-  // Parse JHA dates
-  var jhaDateArray = jhaDates ? jhaDates.split(',').map(function(d) { return d.trim(); }) : [];
-  var allWorkDays = jhaDateArray.length === 5; // Mon-Fri = 5 days
-
-  var message = "";
-
-  // Build opening (only JHAs and Weekly Meeting)
-  var missingItems = [];
-  if (jhaDateArray.length > 0) missingItems.push("JHA" + (jhaDateArray.length > 1 ? "s" : ""));
-  if (weekOf) missingItems.push("Weekly Safety Meeting");
-
-  if (missingItems.length === 0) {
-    return "We did not receive a safety report from your crew. This is just a reminder not to miss them this week. Was there an issue turning them in that you need help with?";
-  }
-
-  var itemsList = missingItems.join(" or ");
-
-  // Build message based on whether it's the entire week or specific days
-  if (allWorkDays && weekOf) {
-    // Missing entire week
-    message = "We did not receive " + itemsList + " from your crew for the entire week of " + weekOf + ". This is just a reminder not to miss them this week. Was there an issue turning them in that you need help with?";
+  if (complianceData.isPastDeadline) {
+    html += '<div class="stat-card red"><div class="num">' + missingCount + '</div><div class="label">Missing</div></div>';
   } else {
-    // Missing specific days
-    message = "We did not receive " + itemsList + " from your crew";
-    if (weekOf) {
-      message += " for the week of " + weekOf;
-    }
-    message += ". ";
-
-    // Add specific missing dates (only JHAs and Weekly Meeting)
-    var detailParts = [];
-    if (jhaDateArray.length > 0) {
-      if (jhaDateArray.length <= 3) {
-        // List specific dates if 3 or fewer
-        detailParts.push("JHA - " + jhaDateArray.join(", "));
-      } else {
-        // Just say how many if more than 3
-        detailParts.push("JHA (" + jhaDateArray.length + " days)");
-      }
-    }
-    if (weekOf) {
-      detailParts.push("Safety Meeting - " + weekOf);
-    }
-
-    if (detailParts.length > 0) {
-      message += "Here are the items we are missing: " + detailParts.join(". ") + ". ";
-    }
-
-    message += "This is just a reminder not to miss them this week. Was there an issue turning them in that you need help with?";
+    html += '<div class="stat-card yellow"><div class="num">' + pendingCount + '</div><div class="label">Pending</div></div>';
   }
 
-  return message;
+  html += '<div class="stat-card" style="background:#f5f5f5;"><div class="num">' + complianceData.totalCrews + '</div><div class="label">Total Crews</div></div>' +
+    '</div>';
+
+  html += '<div class="scroll-container">' +
+    '<table class="crew-table">' +
+    '<tr><th>Crew</th><th>Foreman</th><th>Sun</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th><th>Weekly</th></tr>';
+
+  var crewKeys = Object.keys(complianceData.crews).sort();
+  for (var c = 0; c < crewKeys.length; c++) {
+    var crew = complianceData.crews[crewKeys[c]];
+    html += '<tr>';
+    html += '<td><strong>' + crew.jobNumber + '</strong></td>';
+    html += '<td>' + (crew.foreman || '-') + '</td>';
+
+    var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    for (var d = 0; d < dayNames.length; d++) {
+      var st = crew.jha[d] || '';
+      var cls = st === '✅' ? 'ok' : (st === '❌' ? 'missing' : (st === '⏳' ? 'pending' : 'na'));
+      html += '<td class="' + cls + '">' + st + '</td>';
+    }
+
+    var mCls = crew.weeklyMeeting === '✅' ? 'ok' : (crew.weeklyMeeting === '❌' ? 'missing' : (crew.weeklyMeeting === '⏳' ? 'pending' : 'na'));
+    html += '<td class="' + mCls + '">' + crew.weeklyMeeting + '</td>';
+    html += '</tr>';
+  }
+
+  html += '</table></div>';
+
+  html += '<div style="margin-top: 15px; text-align: center;">' +
+    '<button onclick="google.script.host.close()" style="background:#4285f4;color:white;border:none;padding:10px 30px;border-radius:4px;cursor:pointer;">Close</button>' +
+    '</div>';
+
+  var output = HtmlService.createHtmlOutput(html)
+    .setWidth(700)
+    .setHeight(550);
+
+  SpreadsheetApp.getUi().showModalDialog(output, 'Safety Compliance Dashboard');
 }
 
-
-/**
- * Gets missing safety report tasks from PREVIOUS work week only (not current week)
- * Returns tasks from Task Metadata where TaskType = "Missing Safety Report"
- *
- * Previous week = last Sunday to last Saturday
- * Current week = this Sunday to this Saturday (excluded)
- *
- * @returns {Array} - Array of missing safety report task objects from previous week
- */
-function getMissingSafetyReportTasks() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var taskSheet = ss.getSheetByName("Task Metadata");
-
-  if (!taskSheet || taskSheet.getLastRow() < 2) {
-    Logger.log("getMissingSafetyReportTasks: Task Metadata sheet not found or empty");
-    return [];
-  }
-
-  // Calculate previous work week boundaries
-  var today = new Date();
-  var dayOfWeek = today.getDay(); // 0 = Sunday
-
-  // Current week start (this Sunday)
-  var currentWeekStart = new Date(today);
-  currentWeekStart.setDate(today.getDate() - dayOfWeek);
-  currentWeekStart.setHours(0, 0, 0, 0);
-
-  // Previous week start (last Sunday)
-  var previousWeekStart = new Date(currentWeekStart);
-  previousWeekStart.setDate(currentWeekStart.getDate() - 7);
-
-  // Previous week end (last Saturday)
-  var previousWeekEnd = new Date(currentWeekStart);
-  previousWeekEnd.setDate(currentWeekStart.getDate() - 1);
-  previousWeekEnd.setHours(23, 59, 59, 999);
-
-  Logger.log("getMissingSafetyReportTasks - Previous week: " + previousWeekStart.toDateString() + " to " + previousWeekEnd.toDateString());
-
-  var data = taskSheet.getDataRange().getValues();
-  var headers = data[0];
-
-  // Find column indices
-  var colIndices = {};
-  for (var i = 0; i < headers.length; i++) {
-    colIndices[headers[i]] = i;
-  }
-
-  var tasks = [];
-
-  // Scan for Missing Safety Report tasks from previous week
-  for (var row = 1; row < data.length; row++) {
-    var taskType = data[row][colIndices['TaskType']];
-    var status = data[row][colIndices['Status']];
-    var createdDate = data[row][colIndices['CreatedDate']];
-
-    if (taskType === "Missing Safety Report" && createdDate) {
-      // Check if task was created during previous week
-      var taskCreated = new Date(createdDate);
-
-      if (taskCreated >= previousWeekStart && taskCreated <= previousWeekEnd) {
-        var task = {
-          taskId: data[row][colIndices['TaskID']],
-          sourceSheet: data[row][colIndices['SourceSheet']],
-          sourceRow: data[row][colIndices['SourceRow']],
-          employee: data[row][colIndices['Employee']] || '',
-          taskType: taskType,
-          itemType: data[row][colIndices['ItemType']] || '',
-          location: data[row][colIndices['Location']] || '',
-          foreman: data[row][colIndices['Foreman']] || '',
-          phoneNumber: data[row][colIndices['PhoneNumber']] || '',
-          dueDate: data[row][colIndices['DueDate']] || '',
-          scheduledDate: data[row][colIndices['ScheduledDate']] || '',
-          startTime: data[row][colIndices['StartTime']] || '',
-          endTime: data[row][colIndices['EndTime']] || '',
-          status: status,
-          notes: data[row][colIndices['Notes']] || '',
-          createdDate: createdDate,
-          completedDate: data[row][colIndices['CompletedDate']] || '',
-          lastModified: data[row][colIndices['LastModified']] || '',
-          rowNumber: row + 1,
-          completed: status === 'Complete'
-        };
-
-        tasks.push(task);
-      }
-    }
-  }
-
-  Logger.log("getMissingSafetyReportTasks: Found " + tasks.length + " tasks from previous week");
-  return tasks;
-}
-
-/**
- * Marks a missing safety report task as complete with notes explaining why it wasn't received
- *
- * @param {string} taskId - The Task ID from Task Metadata
- * @param {string} resolutionNotes - Notes explaining why the report wasn't received
- * @returns {boolean} - Success status
- */
-function completeMissingSafetyReportTask(taskId, resolutionNotes) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var taskSheet = ss.getSheetByName("Task Metadata");
-
-  if (!taskSheet) {
-    throw new Error("Task Metadata sheet not found");
-  }
-
-  var data = taskSheet.getDataRange().getValues();
-  var headers = data[0];
-
-  // Find column indices
-  var colIndices = {};
-  for (var i = 0; i < headers.length; i++) {
-    colIndices[headers[i]] = i;
-  }
-
-  // Find the task by TaskID
-  for (var row = 1; row < data.length; row++) {
-    if (data[row][colIndices['TaskID']] === taskId) {
-      var rowNum = row + 1;
-      var now = new Date();
-
-      // Update Status, CompletedDate, LastModified
-      taskSheet.getRange(rowNum, colIndices['Status'] + 1).setValue('Complete');
-      taskSheet.getRange(rowNum, colIndices['CompletedDate'] + 1).setValue(now);
-      taskSheet.getRange(rowNum, colIndices['LastModified'] + 1).setValue(now);
-
-      // Append resolution notes to existing notes
-      var existingNotes = data[row][colIndices['Notes']] || '';
-      var separator = existingNotes ? '\n\n' : '';
-      var updatedNotes = existingNotes + separator + '=== RESOLUTION ===\n' + resolutionNotes + '\n(Completed: ' + Utilities.formatDate(now, Session.getScriptTimeZone(), 'MM/dd/yyyy hh:mm a') + ')';
-      taskSheet.getRange(rowNum, colIndices['Notes'] + 1).setValue(updatedNotes);
-
-      Logger.log("Completed missing safety report task: " + taskId);
-      Logger.log("Resolution: " + resolutionNotes);
-      return true;
-    }
-  }
-
-  Logger.log("Task not found: " + taskId);
-  return false;
-}
