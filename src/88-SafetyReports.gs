@@ -488,23 +488,37 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode) {
     try {
       Logger.log("Running compliance tracking...");
       var today = new Date();
-      var weekBounds = getWeekBoundaries(today);
-      var complianceData = calculateSafetyCompliance(weekBounds.weekStart);
+      var currentWeekBounds = getWeekBoundaries(today);
 
-      // Update compliance sheet
-      updateComplianceSheet(complianceData);
+      // ALWAYS process the PREVIOUS week first (this is where tasks should be created)
+      // The previous week's deadline has definitely passed, so we can create tasks for missing reports
+      var previousWeekStart = new Date(currentWeekBounds.weekStart);
+      previousWeekStart.setDate(previousWeekStart.getDate() - 7);
+      var previousWeekBounds = getWeekBoundaries(previousWeekStart);
 
-      // Create missing report tasks if past deadline
+      Logger.log("Processing PREVIOUS week: " + Utilities.formatDate(previousWeekBounds.weekStart, Session.getScriptTimeZone(), "MM/dd/yyyy"));
+      var previousWeekData = calculateSafetyCompliance(previousWeekBounds.weekStart);
+
       var tasksCreated = 0;
-      if (complianceData.isPastDeadline) {
-        tasksCreated = createMissingReportTasks(complianceData);
+      if (previousWeekData) {
+        updateComplianceSheet(previousWeekData);
+        // Previous week is always past deadline, so create tasks for missing reports
+        tasksCreated = createMissingReportTasks(previousWeekData);
+        Logger.log("Previous week tasks created: " + tasksCreated);
       }
 
-      // Also finalize any past weeks that still show "Pending"
+      // Now process current week (for display purposes - won't create tasks since not past deadline)
+      Logger.log("Processing CURRENT week: " + Utilities.formatDate(currentWeekBounds.weekStart, Session.getScriptTimeZone(), "MM/dd/yyyy"));
+      var complianceData = calculateSafetyCompliance(currentWeekBounds.weekStart);
+
+      // Update compliance sheet for current week
+      updateComplianceSheet(complianceData);
+
+      // Also finalize any OTHER past weeks that still show "Pending" (older than previous week)
       var pastWeekResult = finalizePastWeeksCompliance();
       tasksCreated += pastWeekResult.tasksCreated;
 
-      // Add compliance stats to result
+      // Add compliance stats to result (show current week to user)
       result.compliance = {
         weekStart: Utilities.formatDate(complianceData.weekStart, Session.getScriptTimeZone(), "MM/dd"),
         weekEnd: Utilities.formatDate(complianceData.weekEnd, Session.getScriptTimeZone(), "MM/dd/yyyy"),
@@ -515,6 +529,18 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode) {
         tasksCreated: tasksCreated,
         crews: []
       };
+
+      // Also add previous week stats for reference
+      if (previousWeekData) {
+        result.previousWeek = {
+          weekStart: Utilities.formatDate(previousWeekData.weekStart, Session.getScriptTimeZone(), "MM/dd"),
+          weekEnd: Utilities.formatDate(previousWeekData.weekEnd, Session.getScriptTimeZone(), "MM/dd/yyyy"),
+          compliantCount: previousWeekData.compliantCount,
+          missingCount: previousWeekData.missingCount,
+          totalCrews: previousWeekData.totalCrews,
+          tasksCreated: tasksCreated
+        };
+      }
 
       // Add crew details for display
       for (var jobNumber in complianceData.crews) {
@@ -2976,14 +3002,13 @@ function createMissingReportTasks(complianceData) {
 
   var weekStartStr = Utilities.formatDate(complianceData.weekStart, Session.getScriptTimeZone(), "MM/dd/yyyy");
 
-  // Get existing tasks to avoid duplicates
+  // Get existing tasks to avoid duplicates - check by TaskID now (not Notes)
   var existingData = taskSheet.getDataRange().getValues();
-  var existingKeys = {};
+  var existingTaskIds = {};
   for (var i = 1; i < existingData.length; i++) {
-    var taskType = String(existingData[i][3] || '').trim(); // TaskType column
-    var notes = String(existingData[i][24] || '').trim(); // Notes column (Y)
-    if (taskType === 'Missing Safety Report') {
-      existingKeys[notes] = true;
+    var taskId = String(existingData[i][0] || '').trim(); // TaskID column (A)
+    if (taskId.indexOf('SafetyCompliance_') === 0) {
+      existingTaskIds[taskId] = true;
     }
   }
 
@@ -2996,42 +3021,66 @@ function createMissingReportTasks(complianceData) {
 
     if (crew.status !== 'Missing Reports' || crew.missingItems.length === 0) continue;
 
-    // Build description of what's missing
-    var missingJHA = [];
+    // Build description of what's missing - consolidate all items
+    var missingJHADays = [];
+    var missingJHADates = [];
     var missingMeeting = false;
+    var missingMonthlyChecklist = false;
 
     for (var m = 0; m < crew.missingItems.length; m++) {
       var item = crew.missingItems[m];
       if (item.indexOf('JHA') !== -1) {
-        missingJHA.push(item.replace('JHA (', '').replace(')', ''));
+        // Extract day name (Mon, Tue, etc.)
+        var dayMatch = item.match(/JHA \(([A-Za-z]+)\)/);
+        if (dayMatch) {
+          var dayName = dayMatch[1];
+          missingJHADays.push(dayName);
+          // Calculate actual date for this day
+          var dayOffset = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(dayName);
+          if (dayOffset >= 0) {
+            var jhaDate = new Date(complianceData.weekStart);
+            jhaDate.setDate(jhaDate.getDate() + dayOffset);
+            missingJHADates.push(Utilities.formatDate(jhaDate, Session.getScriptTimeZone(), "MM/dd/yyyy"));
+          }
+        }
       } else if (item === 'Weekly Meeting') {
         missingMeeting = true;
+      } else if (item === 'Monthly Checklist') {
+        missingMonthlyChecklist = true;
       }
     }
 
-    // Create task key for duplicate checking
-    var taskKey = jobNumber + "|" + weekStartStr;
-    if (existingKeys[taskKey]) continue;
+    // Create unique task ID for duplicate checking
+    var taskId = 'SafetyCompliance_' + jobNumber + '_' + weekStartStr.replace(/\//g, '-');
+    if (existingTaskIds[taskId]) {
+      Logger.log("createMissingReportTasks: Task already exists: " + taskId);
+      continue;
+    }
 
-    // Determine item type (JHA, Weekly Meeting, or both)
+    // Determine item type (JHA, Weekly Meeting, or combinations)
+    // Note: Monthly Checklist is excluded from task creation per user request
     var itemType = '';
-    if (missingJHA.length > 0 && missingMeeting) {
+    if (missingJHADays.length > 0 && missingMeeting) {
       itemType = 'JHA + Weekly Meeting';
-    } else if (missingJHA.length > 0) {
+    } else if (missingJHADays.length > 0) {
       itemType = 'JHA';
     } else if (missingMeeting) {
       itemType = 'Weekly Meeting';
+    } else {
+      // Only monthly checklist missing - don't create task
+      continue;
     }
 
-    // Build description
-    var description = 'Week of ' + weekStartStr + ': ';
-    if (missingJHA.length > 0) {
-      description += 'Missing JHA for ' + missingJHA.join(', ');
-      if (missingMeeting) description += '; ';
+    // Build Notes field in the format expected by ToDoSchedule.html and SMS builder
+    // Format: "Missing JHA: 02/03/2026, 02/04/2026; Missing Weekly Safety Meeting for week of 02/01/2026"
+    var notesParts = [];
+    if (missingJHADates.length > 0) {
+      notesParts.push('Missing JHA: ' + missingJHADates.join(', '));
     }
     if (missingMeeting) {
-      description += 'Missing Weekly Safety Meeting';
+      notesParts.push('Missing Weekly Safety Meeting for week of ' + weekStartStr);
     }
+    var notesText = notesParts.join('; ');
 
     // Get foreman phone for SMS
     var foremanPhone = lookupForemanPhoneByJobNumber(jobNumber);
@@ -3042,9 +3091,9 @@ function createMissingReportTasks(complianceData) {
     //          CompletedDate, CompletedBy, NotifiedDate, NotifiedMethod, ReminderDates,
     //          CreatedDate, ModifiedDate, ChangeOutDate, ClaimedBy, Notes
     var taskRow = [
-      'SafetyCompliance_' + jobNumber + '_' + weekStartStr.replace(/\//g, '-'), // TaskID
+      taskId,                 // TaskID (unique, used for duplicate detection)
       'Safety Compliance',    // SourceSheet
-      '',                     // SourceRow (N/A for generated tasks)
+      jobNumber,              // SourceRow (store job number for reference)
       'Missing Safety Report',// TaskType
       itemType,               // ItemType
       crew.foreman || jobNumber, // Employee (foreman name or job number)
@@ -3066,12 +3115,12 @@ function createMissingReportTasks(complianceData) {
       now,                    // ModifiedDate
       '',                     // ChangeOutDate
       '',                     // ClaimedBy
-      taskKey                 // Notes (used for duplicate detection)
+      notesText               // Notes (human-readable, used for display and SMS)
     ];
 
     taskSheet.appendRow(taskRow);
     tasksCreated++;
-    Logger.log("Created missing report task for " + jobNumber + ": " + description);
+    Logger.log("Created missing report task for " + jobNumber + ": " + notesText);
   }
 
   return tasksCreated;
@@ -3159,6 +3208,68 @@ function menuFinalizePastWeeks() {
   } else {
     Browser.msgBox("✅ Finalized " + result.weeksFinalized + " past week(s).\n\nCreated " + result.tasksCreated + " missing report tasks.");
   }
+}
+
+/**
+ * Manually regenerate missing report tasks for the previous week
+ * Useful when you want to recreate tasks that may have been deleted or if something went wrong
+ *
+ * @returns {Object} - {tasksCreated: number, weekStart: string, weekEnd: string}
+ */
+function regeneratePreviousWeekTasks() {
+  var today = new Date();
+  var currentWeekBounds = getWeekBoundaries(today);
+
+  // Calculate previous week
+  var previousWeekStart = new Date(currentWeekBounds.weekStart);
+  previousWeekStart.setDate(previousWeekStart.getDate() - 7);
+  var previousWeekBounds = getWeekBoundaries(previousWeekStart);
+
+  Logger.log("Regenerating tasks for week: " + Utilities.formatDate(previousWeekBounds.weekStart, Session.getScriptTimeZone(), "MM/dd/yyyy"));
+
+  // Calculate compliance for that week
+  var complianceData = calculateSafetyCompliance(previousWeekBounds.weekStart);
+
+  if (!complianceData) {
+    return { tasksCreated: 0, error: "Could not calculate compliance data" };
+  }
+
+  // Update the compliance sheet
+  updateComplianceSheet(complianceData);
+
+  // Create tasks for missing reports
+  var tasksCreated = createMissingReportTasks(complianceData);
+
+  return {
+    tasksCreated: tasksCreated,
+    weekStart: Utilities.formatDate(previousWeekBounds.weekStart, Session.getScriptTimeZone(), "MM/dd/yyyy"),
+    weekEnd: Utilities.formatDate(previousWeekBounds.weekEnd, Session.getScriptTimeZone(), "MM/dd/yyyy"),
+    compliantCount: complianceData.compliantCount,
+    missingCount: complianceData.missingCount
+  };
+}
+
+/**
+ * Menu function to regenerate tasks for previous week
+ */
+function menuRegeneratePreviousWeekTasks() {
+  var result = regeneratePreviousWeekTasks();
+
+  if (result.error) {
+    Browser.msgBox("❌ Error: " + result.error);
+    return;
+  }
+
+  var message = "📋 Previous Week: " + result.weekStart + " - " + result.weekEnd + "\n\n";
+  message += "✅ Compliant crews: " + result.compliantCount + "\n";
+  message += "❌ Crews with missing reports: " + result.missingCount + "\n\n";
+  message += "📝 Tasks created: " + result.tasksCreated;
+
+  if (result.tasksCreated === 0 && result.missingCount > 0) {
+    message += "\n\n(Tasks may already exist - check Task Metadata sheet)";
+  }
+
+  Browser.msgBox("Previous Week Task Generation", message, Browser.Buttons.OK);
 }
 
 /**

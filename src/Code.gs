@@ -4553,6 +4553,7 @@ function onOpen() {
       // === TASKS ===
       .addItem('📋 Create Tasks from Issues', 'createTasksFromSafetyIssues')
       .addItem('🔄 Refresh Safety Sheets', 'refreshSafetySheets')
+      .addItem('📅 Regenerate Previous Week Tasks', 'menuRegeneratePreviousWeekTasks')
       .addItem('📅 Backfill Past Weeks', 'menuBackfillPastWeeks')
       .addItem('🎨 Reformat by Week', 'menuReformatComplianceSheet')
       .addSeparator()

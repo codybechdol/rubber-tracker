@@ -34,7 +34,7 @@
 ## To Revert To This Point
 
 ```bash
-git checkout <commit-hash>
+git checkout c56aff3
 ```
 
 Or restore these files from this commit:
