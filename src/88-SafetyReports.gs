@@ -519,23 +519,25 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode) {
       // Add crew details for display
       for (var jobNumber in complianceData.crews) {
         var crew = complianceData.crews[jobNumber];
-        // Convert individual jhaSun, jhaMon, etc. properties to jha array for UI
+        // Convert crew.days object to jha array for UI (days are stored as crew.days['Sun'], etc.)
+        // Use defensive access in case days object is missing
+        var days = crew.days || {};
         var jhaArray = [
-          crew.jhaSun || 'N/A',
-          crew.jhaMon || '⏳',
-          crew.jhaTue || '⏳',
-          crew.jhaWed || '⏳',
-          crew.jhaThu || '⏳',
-          crew.jhaFri || '⏳',
-          crew.jhaSat || 'N/A'
+          days['Sun'] || 'N/A',
+          days['Mon'] || '⏳',
+          days['Tue'] || '⏳',
+          days['Wed'] || '⏳',
+          days['Thu'] || '⏳',
+          days['Fri'] || '⏳',
+          days['Sat'] || 'N/A'
         ];
         result.compliance.crews.push({
           jobNumber: jobNumber,
-          foreman: crew.foreman,
+          foreman: crew.foreman || '',
           jha: jhaArray,
-          weeklyMeeting: crew.weeklyMeeting,
-          monthlyChecklist: crew.monthlyChecklist,
-          status: crew.status
+          weeklyMeeting: crew.weeklyMeeting || '⏳',
+          monthlyChecklist: crew.monthlyChecklist || '⏳',
+          status: crew.status || 'Pending'
         });
       }
 
@@ -796,14 +798,16 @@ function showProcessSafetyEmailsDialog() {
     '    var crew = compliance.crews[i];' +
     '    html += "<tr><td><strong>" + crew.jobNumber + "</strong></td>";' +
     '    for (var d = 0; d < 7; d++) {' +
-    '      var st = crew.jha[d];' +
+    '      var st = crew.jha && crew.jha[d] ? crew.jha[d] : (d === 0 || d === 6 ? "N/A" : "⏳");' +
     '      var cls = st === "✅" ? "ok" : (st === "❌" ? "missing" : (st === "⏳" ? "pending" : "na"));' +
     '      html += "<td class=\\"" + cls + "\\">" + st + "</td>";' +
     '    }' +
-    '    var mCls = crew.weeklyMeeting === "✅" ? "ok" : (crew.weeklyMeeting === "❌" ? "missing" : (crew.weeklyMeeting === "⏳" ? "pending" : "na"));' +
-    '    html += "<td class=\\"" + mCls + "\\">" + crew.weeklyMeeting + "</td>";' +
-    '    var mcCls = crew.monthlyChecklist === "✅" ? "ok" : (crew.monthlyChecklist === "❌" ? "missing" : (crew.monthlyChecklist === "⏳" ? "pending" : "na"));' +
-    '    html += "<td class=\\"" + mcCls + "\\">" + (crew.monthlyChecklist || "⏳") + "</td></tr>";' +
+    '    var wm = crew.weeklyMeeting || "⏳";' +
+    '    var mCls = wm === "✅" ? "ok" : (wm === "❌" ? "missing" : (wm === "⏳" ? "pending" : "na"));' +
+    '    html += "<td class=\\"" + mCls + "\\">" + wm + "</td>";' +
+    '    var mc = crew.monthlyChecklist || "⏳";' +
+    '    var mcCls = mc === "✅" ? "ok" : (mc === "❌" ? "missing" : (mc === "⏳" ? "pending" : "na"));' +
+    '    html += "<td class=\\"" + mcCls + "\\">" + mc + "</td></tr>";' +
     '  }' +
     '  html += "</table></div>";' +
     '  html += "<div style=\\"margin-top: 10px;\\">";' +
@@ -2228,11 +2232,11 @@ function setupSafetyComplianceConfig() {
 
   sheet = ss.insertSheet("Safety Compliance Config");
 
-  // Headers
+  // Headers - includes Monthly Checklist column
   var headers = [
     "Job Number", "Foreman",
     "Skip Sun", "Skip Mon", "Skip Tue", "Skip Wed", "Skip Thu", "Skip Fri", "Skip Sat",
-    "Skip Weekly Meeting", "Notes"
+    "Skip Weekly Meeting", "Skip Monthly Checklist", "Notes"
   ];
 
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
@@ -2253,26 +2257,207 @@ function setupSafetyComplianceConfig() {
       rows.push([
         crews[i], foremanName,
         true, false, false, false, false, false, true, // Sun=skip, Sat=skip
-        false, "" // Don't skip weekly meeting, no notes
+        false, false, "" // Don't skip weekly meeting, don't skip monthly checklist, no notes
       ]);
     }
     sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
 
-    // Add checkboxes for skip columns (C-J = columns 3-10)
-    var checkboxRange = sheet.getRange(2, 3, rows.length, 8);
+    // Add checkboxes for skip columns (C-K = columns 3-11)
+    var checkboxRange = sheet.getRange(2, 3, rows.length, 9);
     checkboxRange.insertCheckboxes();
   }
 
   // Column widths
   sheet.setColumnWidth(1, 80);   // Job Number
   sheet.setColumnWidth(2, 120);  // Foreman
-  for (var j = 3; j <= 10; j++) {
+  for (var j = 3; j <= 11; j++) {
     sheet.setColumnWidth(j, 70); // Skip columns
   }
-  sheet.setColumnWidth(11, 200); // Notes
+  sheet.setColumnWidth(12, 200); // Notes
 
   Logger.log("setupSafetyComplianceConfig: Created config with " + crews.length + " crews");
   return sheet;
+}
+
+/**
+ * Populates the Safety Compliance Config sheet with all active crews
+ * Adds missing crews without deleting existing settings
+ * Called from menu: "Populate Crew Config"
+ */
+function populateComplianceConfig() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Safety Compliance Config");
+
+  // If sheet doesn't exist, create it
+  if (!sheet) {
+    sheet = setupSafetyComplianceConfig();
+    SpreadsheetApp.getUi().alert("Created Safety Compliance Config with " + (sheet.getLastRow() - 1) + " crews.");
+    return;
+  }
+
+  // Get existing crews in config
+  var existingData = sheet.getDataRange().getValues();
+  var existingCrews = {};
+  for (var i = 1; i < existingData.length; i++) {
+    var jobNum = String(existingData[i][0] || '').trim();
+    if (jobNum) {
+      existingCrews[jobNum] = true;
+    }
+  }
+
+  // Get all active crews
+  var allCrews = getActiveCrews();
+
+  // Find missing crews
+  var missingCrews = [];
+  for (var c = 0; c < allCrews.length; c++) {
+    if (!existingCrews[allCrews[c]]) {
+      missingCrews.push(allCrews[c]);
+    }
+  }
+
+  if (missingCrews.length === 0) {
+    SpreadsheetApp.getUi().alert("All " + allCrews.length + " active crews are already in the config.");
+    return;
+  }
+
+  // Add missing crews
+  var newRows = [];
+  for (var m = 0; m < missingCrews.length; m++) {
+    var foreman = lookupForemanByJobNumber(missingCrews[m]);
+    var foremanName = (foreman && foreman.name) ? foreman.name : "";
+    // Default: Skip Sun and Sat (weekends)
+    newRows.push([
+      missingCrews[m], foremanName,
+      true, false, false, false, false, false, true, // Sun=skip, Sat=skip
+      false, false, "" // Don't skip weekly meeting, don't skip monthly checklist, no notes
+    ]);
+  }
+
+  // Append to sheet
+  var lastRow = sheet.getLastRow();
+  sheet.getRange(lastRow + 1, 1, newRows.length, 12).setValues(newRows);
+
+  // Add checkboxes for the new rows (columns C-K = 3-11)
+  var checkboxRange = sheet.getRange(lastRow + 1, 3, newRows.length, 9);
+  checkboxRange.insertCheckboxes();
+
+  // Sort by job number
+  if (sheet.getLastRow() > 1) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, 12).sort(1);
+  }
+
+  SpreadsheetApp.getUi().alert("Added " + missingCrews.length + " new crew(s) to config:\n" + missingCrews.join(", "));
+  Logger.log("populateComplianceConfig: Added " + missingCrews.length + " crews");
+}
+
+/**
+ * Migrates existing Safety Compliance Config sheet to add missing "Skip Monthly Checklist" column
+ * Call this if your config sheet has the old 11-column structure
+ */
+function migrateComplianceConfigAddMonthlyChecklist() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Safety Compliance Config");
+
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert("Safety Compliance Config sheet not found. Use 'Populate Crew Config' to create it.");
+    return;
+  }
+
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+  // Check if Monthly Checklist column already exists
+  var hasMonthlyChecklist = false;
+  var monthlyChecklistCol = -1;
+  var notesCol = -1;
+
+  for (var i = 0; i < headers.length; i++) {
+    var header = String(headers[i]).toLowerCase().trim();
+    if (header.indexOf('monthly') !== -1) {
+      hasMonthlyChecklist = true;
+      monthlyChecklistCol = i + 1;
+    }
+    if (header === 'notes') {
+      notesCol = i + 1;
+    }
+  }
+
+  if (hasMonthlyChecklist) {
+    SpreadsheetApp.getUi().alert("Skip Monthly Checklist column already exists (column " + monthlyChecklistCol + ").");
+    return;
+  }
+
+  if (notesCol === -1) {
+    SpreadsheetApp.getUi().alert("Cannot find Notes column. Sheet structure may be corrupted.");
+    return;
+  }
+
+  // Insert new column before Notes
+  sheet.insertColumnBefore(notesCol);
+
+  // Set header for new column
+  sheet.getRange(1, notesCol).setValue("Skip Monthly Checklist");
+  sheet.getRange(1, notesCol).setFontWeight("bold").setBackground("#93C47D").setFontColor("white");
+
+  // Set column width
+  sheet.setColumnWidth(notesCol, 120);
+
+  // Add checkboxes for all data rows
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    var checkboxRange = sheet.getRange(2, notesCol, lastRow - 1, 1);
+    checkboxRange.insertCheckboxes();
+    // Default to FALSE (require monthly checklist)
+    checkboxRange.setValue(false);
+  }
+
+  SpreadsheetApp.getUi().alert("Added 'Skip Monthly Checklist' column (column " + notesCol + "). Default: unchecked (require checklist).");
+  Logger.log("migrateComplianceConfigAddMonthlyChecklist: Added column at position " + notesCol);
+}
+
+/**
+ * Fixes the Notes column by removing checkboxes (they were added incorrectly)
+ * Call this if column L has checkboxes instead of plain text
+ */
+function fixNotesColumnCheckboxes() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Safety Compliance Config");
+
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert("Safety Compliance Config sheet not found.");
+    return;
+  }
+
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var notesCol = -1;
+
+  for (var i = 0; i < headers.length; i++) {
+    var header = String(headers[i]).toLowerCase().trim();
+    if (header === 'notes') {
+      notesCol = i + 1;
+      break;
+    }
+  }
+
+  if (notesCol === -1) {
+    SpreadsheetApp.getUi().alert("Cannot find Notes column.");
+    return;
+  }
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    // Remove checkboxes from Notes column by clearing and setting as plain text
+    var notesRange = sheet.getRange(2, notesCol, lastRow - 1, 1);
+    notesRange.removeCheckboxes();
+    notesRange.clearContent();
+    notesRange.setNumberFormat("@"); // Plain text format
+  }
+
+  // Widen the Notes column for text
+  sheet.setColumnWidth(notesCol, 200);
+
+  SpreadsheetApp.getUi().alert("Fixed Notes column (column " + notesCol + "). Checkboxes removed, ready for text notes.");
+  Logger.log("fixNotesColumnCheckboxes: Fixed column " + notesCol);
 }
 
 /**
@@ -2337,7 +2522,8 @@ function loadComplianceConfig() {
         !!data[i][8]   // Sat
       ],
       skipWeeklyMeeting: !!data[i][9],
-      notes: data[i][10] || ''
+      skipMonthlyChecklist: !!data[i][10],
+      notes: data[i][11] || ''
     };
   }
 
@@ -2374,12 +2560,13 @@ function calculateSafetyCompliance(weekStartDate) {
   // Read all Safety Reports data
   var reportData = safetySheet.getDataRange().getValues();
 
-  // Build lookup: jobNumber -> { jhaByDay: [0..6], weeklyMeeting: boolean }
+  // Build lookup: jobNumber -> { jhaByDay: [0..6], weeklyMeeting: boolean, monthlyChecklist: boolean }
   var crewReports = {};
   for (var c = 0; c < crews.length; c++) {
     crewReports[crews[c]] = {
       jhaByDay: [false, false, false, false, false, false, false], // Sun-Sat
-      weeklyMeeting: false
+      weeklyMeeting: false,
+      monthlyChecklist: false
     };
   }
 
@@ -2405,6 +2592,8 @@ function calculateSafetyCompliance(weekStartDate) {
       crewReports[baseJob].jhaByDay[dayOfWeek] = true;
     } else if (reportType === 'Safety Meeting' || reportType.indexOf('Safety Meeting') !== -1) {
       crewReports[baseJob].weeklyMeeting = true;
+    } else if (reportType === 'Fleet Checklist' || reportType.indexOf('Fleet') !== -1 || reportType.indexOf('Monthly') !== -1) {
+      crewReports[baseJob].monthlyChecklist = true;
     }
   }
 
@@ -2421,7 +2610,7 @@ function calculateSafetyCompliance(weekStartDate) {
 
   for (var c = 0; c < crews.length; c++) {
     var crew = crews[c];
-    var crewConfig = config[crew] || { skipDays: [true, false, false, false, false, false, true], skipWeeklyMeeting: false };
+    var crewConfig = config[crew] || { skipDays: [true, false, false, false, false, false, true], skipWeeklyMeeting: false, skipMonthlyChecklist: false };
     var reports = crewReports[crew];
     var foremanResult = lookupForemanByJobNumber(crew);
     var foremanName = (foremanResult && foremanResult.name) ? foremanResult.name : "";
@@ -2431,6 +2620,7 @@ function calculateSafetyCompliance(weekStartDate) {
       foreman: foremanName,
       days: {},
       weeklyMeeting: '',
+      monthlyChecklist: '',
       status: 'Complete',
       missingItems: []
     };
@@ -2467,8 +2657,37 @@ function calculateSafetyCompliance(weekStartDate) {
       if (crewData.status === 'Complete') crewData.status = 'Pending';
     }
 
+    // Check monthly checklist
+    if (crewConfig.skipMonthlyChecklist) {
+      crewData.monthlyChecklist = 'N/A';
+    } else if (reports.monthlyChecklist) {
+      crewData.monthlyChecklist = '✅';
+    } else if (isPastDeadline) {
+      crewData.monthlyChecklist = '❌';
+      crewData.status = 'Missing Reports';
+      crewData.missingItems.push('Monthly Checklist');
+    } else {
+      crewData.monthlyChecklist = '⏳';
+      if (crewData.status === 'Complete') crewData.status = 'Pending';
+    }
+
     complianceData.crews[crew] = crewData;
   }
+
+  // Calculate counts
+  var compliantCount = 0;
+  var missingCount = 0;
+  var crewKeys = Object.keys(complianceData.crews);
+  for (var k = 0; k < crewKeys.length; k++) {
+    var crewStatus = complianceData.crews[crewKeys[k]].status;
+    if (crewStatus === 'Complete') {
+      compliantCount++;
+    } else if (crewStatus === 'Missing Reports') {
+      missingCount++;
+    }
+  }
+  complianceData.compliantCount = compliantCount;
+  complianceData.missingCount = missingCount;
 
   return complianceData;
 }
@@ -2525,7 +2744,7 @@ function updateComplianceSheet(complianceData) {
       crew.days['Fri'] || '',
       crew.days['Sat'] || '',
       crew.weeklyMeeting || '',
-      '', // Monthly Checklist (not implemented yet)
+      crew.monthlyChecklist || '', // Monthly Checklist from config
       crew.status,
       nowStr
     ];

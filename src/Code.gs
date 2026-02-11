@@ -4546,6 +4546,9 @@ function onOpen() {
       .addItem('📊 View Safety Reports', 'openSafetyReports')
       .addItem('📈 View Compliance History', 'openComplianceSheet')
       .addItem('⚙️ Configure Crew Exclusions', 'openComplianceConfig')
+      .addItem('👥 Populate Crew Config', 'populateComplianceConfig')
+      .addItem('🔧 Add Monthly Checklist Column', 'migrateComplianceConfigAddMonthlyChecklist')
+      .addItem('🔧 Fix Notes Column', 'fixNotesColumnCheckboxes')
       .addSeparator()
       // === TASKS ===
       .addItem('📋 Create Tasks from Issues', 'createTasksFromSafetyIssues')
