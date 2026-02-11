@@ -3086,36 +3086,37 @@ function createMissingReportTasks(complianceData) {
     var foremanPhone = lookupForemanPhoneByJobNumber(jobNumber);
 
     // Create task row
-    // Columns: TaskID, SourceSheet, SourceRow, TaskType, ItemType, Employee, Location, PhoneNumber,
-    //          DueDate, Priority, EstimatedTime, ScheduledDate, StartTime, EndTime, Status,
-    //          CompletedDate, CompletedBy, NotifiedDate, NotifiedMethod, ReminderDates,
-    //          CreatedDate, ModifiedDate, ChangeOutDate, ClaimedBy, Notes
+    // Actual Task Metadata columns (26 total):
+    // TaskID, SourceSheet, SourceRow, Employee, TaskType, ItemType, CurrentItem, Location, Foreman, PhoneNumber,
+    // DueDate, ScheduledDate, StartTime, EndTime, Status, NotifiedDate, ScheduledClassDate, ClassType,
+    // IsOffice, IsRegistered, IsDeclined, CompletedDate, Notes, CreatedDate, LastModified, InTaskList
     var taskRow = [
-      taskId,                 // TaskID (unique, used for duplicate detection)
-      'Safety Compliance',    // SourceSheet
-      jobNumber,              // SourceRow (store job number for reference)
-      'Missing Safety Report',// TaskType
-      itemType,               // ItemType
-      crew.foreman || jobNumber, // Employee (foreman name or job number)
-      lookupLocationByJobNumber(jobNumber), // Location
-      foremanPhone,           // PhoneNumber
-      complianceData.weekEnd, // DueDate (Saturday of that week)
-      'High',                 // Priority
-      15,                     // EstimatedTime (phone call)
-      '',                     // ScheduledDate
-      '',                     // StartTime
-      '',                     // EndTime
-      'Pending',              // Status
-      '',                     // CompletedDate
-      '',                     // CompletedBy
-      '',                     // NotifiedDate
-      '',                     // NotifiedMethod
-      '',                     // ReminderDates
-      now,                    // CreatedDate
-      now,                    // ModifiedDate
-      '',                     // ChangeOutDate
-      '',                     // ClaimedBy
-      notesText               // Notes (human-readable, used for display and SMS)
+      taskId,                           // 1. TaskID
+      'Safety Compliance',              // 2. SourceSheet
+      jobNumber,                        // 3. SourceRow (job number for reference)
+      crew.foreman || jobNumber,        // 4. Employee (foreman name)
+      'Missing Safety Report',          // 5. TaskType
+      itemType,                         // 6. ItemType (JHA, Weekly Meeting, etc.)
+      '',                               // 7. CurrentItem
+      lookupLocationByJobNumber(jobNumber), // 8. Location
+      crew.foreman || '',               // 9. Foreman
+      foremanPhone,                     // 10. PhoneNumber
+      complianceData.weekEnd,           // 11. DueDate (Saturday of that week)
+      '',                               // 12. ScheduledDate
+      '',                               // 13. StartTime
+      '',                               // 14. EndTime
+      'Pending',                        // 15. Status
+      '',                               // 16. NotifiedDate
+      '',                               // 17. ScheduledClassDate
+      '',                               // 18. ClassType
+      '',                               // 19. IsOffice
+      '',                               // 20. IsRegistered
+      '',                               // 21. IsDeclined
+      '',                               // 22. CompletedDate
+      notesText,                        // 23. Notes
+      now,                              // 24. CreatedDate
+      now,                              // 25. LastModified
+      ''                                // 26. InTaskList
     ];
 
     taskSheet.appendRow(taskRow);

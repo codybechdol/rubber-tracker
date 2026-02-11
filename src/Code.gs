@@ -14868,4 +14868,89 @@ function cleanupIncorrectSafetyReportTasks() {
   Logger.log('cleanupIncorrectSafetyReportTasks: Deleted ' + totalDeleted + ' rows total');
 }
 
+/**
+ * Fixes Safety Compliance tasks that have columns shifted incorrectly.
+ * These tasks have TaskType containing "JHA" or "Weekly Meeting" instead of "Missing Safety Report".
+ * The fix is to delete them and regenerate.
+ * Menu item: Glove Manager → Utilities → Fix Shifted Safety Tasks
+ */
+function fixShiftedSafetyComplianceTasks() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+
+  var taskMetaSheet = ss.getSheetByName('Task Metadata');
+  if (!taskMetaSheet || taskMetaSheet.getLastRow() < 2) {
+    ui.alert('No Task Metadata Found', 'Task Metadata sheet is empty or missing.', ui.ButtonSet.OK);
+    return;
+  }
+
+  var data = taskMetaSheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Find column indices
+  var colIdx = {};
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'taskid') colIdx.taskID = h;
+    if (header === 'sourcesheet') colIdx.sourceSheet = h;
+    if (header === 'tasktype') colIdx.taskType = h;
+    if (header === 'itemtype') colIdx.itemType = h;
+  }
+
+  // Patterns that indicate shifted columns (these should be in ItemType, not TaskType)
+  var shiftedPatterns = ['JHA', 'Weekly Meeting', 'JHA + Weekly Meeting', 'Monthly Checklist'];
+
+  var rowsToDelete = [];
+
+  for (var i = 1; i < data.length; i++) {
+    var taskType = String(data[i][colIdx.taskType] || '').trim();
+    var sourceSheet = String(data[i][colIdx.sourceSheet] || '').trim();
+
+    // Check if TaskType contains values that should be in ItemType
+    if (sourceSheet === 'Safety Compliance' ||
+        shiftedPatterns.indexOf(taskType) !== -1) {
+      // This is a shifted Safety Compliance task
+      if (taskType !== 'Missing Safety Report') {
+        rowsToDelete.push(i + 1); // 1-based
+        Logger.log('Will delete row ' + (i + 1) + ': TaskType="' + taskType + '" (should be "Missing Safety Report")');
+      }
+    }
+  }
+
+  if (rowsToDelete.length === 0) {
+    ui.alert('✅ No Shifted Tasks Found',
+      'All Safety Compliance tasks have correct column structure.\n\n' +
+      'If you still see JHA/Weekly Meeting in the debug, they might be from a different source.',
+      ui.ButtonSet.OK);
+    return;
+  }
+
+  // Confirm deletion
+  var response = ui.alert('Fix Shifted Safety Tasks',
+    'Found ' + rowsToDelete.length + ' task(s) with incorrect column structure.\n\n' +
+    'These tasks will be deleted. You can regenerate them by:\n' +
+    '1. Process Safety Emails\n' +
+    '2. Or: Regenerate Previous Week Tasks\n\n' +
+    'Continue?',
+    ui.ButtonSet.YES_NO);
+
+  if (response !== ui.Button.YES) {
+    return;
+  }
+
+  // Delete rows from bottom to top
+  rowsToDelete.sort(function(a, b) { return b - a; });
+  for (var r = 0; r < rowsToDelete.length; r++) {
+    taskMetaSheet.deleteRow(rowsToDelete[r]);
+  }
+
+  ui.alert('✅ Cleanup Complete',
+    'Deleted ' + rowsToDelete.length + ' shifted task(s).\n\n' +
+    'To regenerate these tasks correctly:\n' +
+    '• Menu → Safety Reports → Regenerate Previous Week Tasks',
+    ui.ButtonSet.OK);
+
+  Logger.log('fixShiftedSafetyComplianceTasks: Deleted ' + rowsToDelete.length + ' rows');
+}
+
 

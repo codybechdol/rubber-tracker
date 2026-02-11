@@ -2462,3 +2462,176 @@ function clearTrainingCrewsFilter() {
     SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
+/**
+ * Deep debug of training task flow from collection to Task Metadata to Task List
+ * Shows exactly where training tasks might be lost
+ */
+function debugTrainingTaskFlow() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var message = '=== TRAINING TASK FLOW DEBUG ===\n\n';
+
+  try {
+    // Step 1: Check Training Tracking sheet
+    var trainingSheet = ss.getSheetByName('Training Tracking');
+    if (!trainingSheet) {
+      message += '❌ Training Tracking sheet NOT FOUND\n';
+      ui.alert('Debug', message, ui.ButtonSet.OK);
+      return;
+    }
+    var trainingRows = trainingSheet.getLastRow();
+    message += '✅ Training Tracking sheet: ' + trainingRows + ' rows\n\n';
+
+    // Step 2: Collect training tasks
+    message += '📊 STEP 1: collectAndGroupTasks()\n';
+    var tasksByLocation = collectAndGroupTasks(ss);
+
+    var trainingInCollection = 0;
+    var trainingLocations = [];
+    var trainingSample = null;
+
+    for (var loc in tasksByLocation) {
+      var tasks = tasksByLocation[loc];
+      for (var t = 0; t < tasks.length; t++) {
+        var task = tasks[t];
+        var taskType = task.type || task.taskType || '';
+        if (taskType.toLowerCase().indexOf('training') !== -1) {
+          trainingInCollection++;
+          if (trainingLocations.indexOf(loc) === -1) {
+            trainingLocations.push(loc);
+          }
+          if (!trainingSample) {
+            trainingSample = {
+              type: task.type,
+              taskType: task.taskType,
+              employee: task.employee,
+              sheetName: task.sheetName,
+              source: task.source,
+              rowIndex: task.rowIndex,
+              location: task.location
+            };
+          }
+        }
+      }
+    }
+
+    message += '  Training tasks collected: ' + trainingInCollection + '\n';
+    message += '  Locations: ' + trainingLocations.slice(0, 5).join(', ') + (trainingLocations.length > 5 ? '...' : '') + '\n';
+    if (trainingSample) {
+      message += '  Sample task:\n';
+      message += '    type: "' + trainingSample.type + '"\n';
+      message += '    taskType: "' + trainingSample.taskType + '"\n';
+      message += '    sheetName: "' + trainingSample.sheetName + '"\n';
+      message += '    source: "' + trainingSample.source + '"\n';
+      message += '    rowIndex: ' + trainingSample.rowIndex + '\n';
+    }
+    message += '\n';
+
+    // Step 3: Check Task Metadata sheet
+    message += '📊 STEP 2: Task Metadata Sheet\n';
+    var metadataSheet = ss.getSheetByName('Task Metadata');
+
+    if (!metadataSheet) {
+      message += '  ❌ Task Metadata sheet NOT FOUND!\n';
+      message += '  → Run "Generate Task Metadata" to create it\n\n';
+    } else {
+      var metaData = metadataSheet.getDataRange().getValues();
+      var metaHeaders = metaData[0];
+      var sourceSheetCol = -1;
+      var taskTypeCol = -1;
+      var statusCol = -1;
+
+      for (var h = 0; h < metaHeaders.length; h++) {
+        if (metaHeaders[h] === 'SourceSheet') sourceSheetCol = h;
+        if (metaHeaders[h] === 'TaskType') taskTypeCol = h;
+        if (metaHeaders[h] === 'Status') statusCol = h;
+      }
+
+      var trainingInMeta = 0;
+      var trainingCompleteInMeta = 0;
+      var trainingTrackingSource = 0;
+
+      for (var i = 1; i < metaData.length; i++) {
+        var sourceSheet = metaData[i][sourceSheetCol] || '';
+        var taskType = metaData[i][taskTypeCol] || '';
+        var status = metaData[i][statusCol] || '';
+
+        if (sourceSheet.indexOf('Training Tracking') !== -1) {
+          trainingTrackingSource++;
+          if (taskType.toLowerCase().indexOf('training') !== -1) {
+            trainingInMeta++;
+            if (status === 'Complete') {
+              trainingCompleteInMeta++;
+            }
+          }
+        }
+      }
+
+      message += '  Total Task Metadata rows: ' + (metaData.length - 1) + '\n';
+      message += '  Training Tracking source: ' + trainingTrackingSource + '\n';
+      message += '  TaskType=Training: ' + trainingInMeta + ' (complete: ' + trainingCompleteInMeta + ')\n\n';
+
+      if (trainingInCollection > 0 && trainingInMeta === 0) {
+        message += '  ⚠️ ISSUE: Training tasks collected but NOT in Task Metadata!\n';
+        message += '  → Run "Generate Task Metadata" to add them\n\n';
+      }
+    }
+
+    // Step 4: Check getTasksWithMetadata enrichment
+    message += '📊 STEP 3: getTasksWithMetadata() enrichment\n';
+
+    try {
+      // We can't easily call getTasksWithMetadata here because it stores to properties
+      // Instead, simulate the key building
+      if (trainingSample) {
+        var sampleKey = (trainingSample.source || trainingSample.sheetName || 'Unknown') + '_' + trainingSample.rowIndex;
+        message += '  Sample key format: "' + sampleKey + '"\n';
+
+        // Check if this key exists in Task Metadata
+        if (metadataSheet) {
+          var sourceRowCol = -1;
+          for (var h2 = 0; h2 < metaHeaders.length; h2++) {
+            if (metaHeaders[h2] === 'SourceRow') sourceRowCol = h2;
+          }
+
+          var keyFound = false;
+          for (var j = 1; j < metaData.length; j++) {
+            var metaSourceSheet = metaData[j][sourceSheetCol] || '';
+            var metaSourceRow = metaData[j][sourceRowCol] || '';
+            var metaKey = metaSourceSheet + '_' + metaSourceRow;
+            if (metaKey === sampleKey) {
+              keyFound = true;
+              break;
+            }
+          }
+
+          message += '  Sample key in metadata: ' + (keyFound ? '✅ YES' : '❌ NO') + '\n';
+        }
+      }
+    } catch (e3) {
+      message += '  Error checking enrichment: ' + e3 + '\n';
+    }
+
+    message += '\n=== SUMMARY ===\n';
+    if (trainingInCollection > 0) {
+      message += '✅ Training tasks ARE being collected (' + trainingInCollection + ')\n';
+    } else {
+      message += '❌ No training tasks collected - check Training Tracking sheet\n';
+    }
+
+    if (metadataSheet && trainingInMeta > 0) {
+      message += '✅ Training tasks ARE in Task Metadata (' + trainingInMeta + ')\n';
+    } else {
+      message += '⚠️ Training tasks NOT in Task Metadata\n';
+      message += '   → Run "Generate Task Metadata" from Quick Actions\n';
+    }
+
+    Logger.log(message);
+    ui.alert('Training Task Flow Debug', message, ui.ButtonSet.OK);
+
+  } catch (e) {
+    ui.alert('Error', 'Debug error: ' + e.toString(), ui.ButtonSet.OK);
+    Logger.log('debugTrainingTaskFlow error: ' + e.toString());
+  }
+}
+
