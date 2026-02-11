@@ -152,7 +152,7 @@ function generateToDoListLegacy() {
     var crewCol = 2;       // C: Crew #
     var leadCol = 3;       // D: Crew Lead
     var dateCol = 5;       // F: Completion Date
-    var statusCol = 9;     // J: Status
+    var statusCol = 8;     // I: Status (0-indexed)
 
     // Get current month for priority determination
     var today = new Date();

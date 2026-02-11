@@ -4570,7 +4570,12 @@ function onOpen() {
       .addItem('📊 Show All Glove Swaps', 'runGloveSwapDiagnostic')
       .addSeparator()
       .addItem('🔄 Migrate Manual Tasks Sheet', 'migrateManualTasksSheet')
-      .addItem('🧪 Test Trip Planner Data', 'debugTripPlannerData'))
+      .addItem('🧪 Test Trip Planner Data', 'debugTripPlannerData')
+      .addSeparator()
+      .addItem('🔍 Debug Task List', 'debugTaskListData')
+      .addItem('🔍 Debug Training Tasks', 'debugTrainingTasks')
+      .addItem('🔍 Metadata vs Collection', 'debugMetadataVsCollection')
+      .addItem('🧹 Clear Training Filter', 'clearTrainingCrewsFilter'))
     .addSeparator()
     .addItem('Close & Save History', 'closeAndSaveHistory')
     .addToUi();
@@ -13273,7 +13278,7 @@ function generateToDoListLegacyCode() {
       var crewCol = 2;       // C: Crew #
       var leadCol = 3;       // D: Crew Lead
       var dateCol = 5;       // F: Completion Date
-      var statusCol = 9;     // J: Status
+      var statusCol = 8;     // I: Status (0-indexed)
 
       // Get current month for priority determination
       var currentMonth = today.getMonth() + 1; // 1-12

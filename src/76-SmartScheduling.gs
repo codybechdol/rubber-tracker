@@ -761,7 +761,7 @@ function collectTrainingTasks(ss, tasksByLocation, today) {
   var crewCol = 2;       // C: Crew #
   var leadCol = 3;       // D: Crew Lead
   var dateCol = 5;       // F: Completion Date
-  var statusCol = 9;     // J: Status
+  var statusCol = 8;     // I: Status (was incorrectly 9 for column J)
 
   // Month name to number mapping
   var monthNumbers = {
@@ -2171,609 +2171,294 @@ function getCrewLocationMap(ss) {
   return crewMap;
 }
 
-// ============================================================================
-// TO-DO LIST CREATION FUNCTIONS
-// ============================================================================
-
 /**
- * Creates or updates the To-Do List with smart scheduled tasks.
- * - Preserves user-edited scheduled dates
- * - Schedules ONE location per day (no stacking)
- *
- * @param {Spreadsheet} ss - Active spreadsheet
- * @param {Object} tasksByLocation - Tasks grouped by location
+ * Debug what tasks are being collected for Task List
+ * Shows counts by task type to identify collection issues
  */
-function createSmartScheduleToDoList(ss, tasksByLocation) {
-  var todoSheet = ss.getSheetByName('To Do List');
+function debugTaskListData() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
 
-  // Read existing scheduled dates BEFORE clearing the sheet
-  var existingScheduledDates = {};
-  if (todoSheet && todoSheet.getLastRow() > 13) {
-    var existingData = todoSheet.getRange(14, 1, todoSheet.getLastRow() - 13, 19).getValues();
-    for (var e = 0; e < existingData.length; e++) {
-      var row = existingData[e];
-      var location = String(row[4]).trim(); // Location column (E)
-      var employee = String(row[3]).trim(); // Employee column (D)
-      var taskType = String(row[2]).trim(); // Task Type column (C)
-      var scheduledDate = row[12]; // Scheduled Date column (M)
+  try {
+    Logger.log('=== debugTaskListData START ===');
+    var tasksByLocation = collectAndGroupTasks(ss);
 
-      // Create a unique key for this task
-      var taskKey = location + '|' + employee + '|' + taskType;
-      if (scheduledDate && scheduledDate !== '') {
-        existingScheduledDates[taskKey] = scheduledDate;
-      }
-    }
-    Logger.log('Preserved ' + Object.keys(existingScheduledDates).length + ' existing scheduled dates');
-  }
+    var countsByType = {};
+    var totalTasks = 0;
+    var sampleByType = {};
 
-  if (!todoSheet) {
-    todoSheet = ss.insertSheet('To Do List');
-  }
+    for (var loc in tasksByLocation) {
+      var tasks = tasksByLocation[loc];
+      for (var i = 0; i < tasks.length; i++) {
+        var task = tasks[i];
+        var taskType = task.type || task.taskType || 'Unknown';
+        countsByType[taskType] = (countsByType[taskType] || 0) + 1;
+        totalTasks++;
 
-  todoSheet.clear();
-
-  var tasks = [];
-  var tasksByDate = {}; // For calendar display
-  var today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  // Get drive times
-  var driveTimesByLocation = getDriveTimeMap();
-
-  // Track which dates are already scheduled (ONE location per day)
-  var scheduledDates = {};
-
-  // FIRST: Pre-populate scheduledDates with manual tasks that have specific dates
-  // This ensures manual task dates are respected and not overwritten
-  for (var loc in tasksByLocation) {
-    var locTasks = tasksByLocation[loc];
-    for (var t = 0; t < locTasks.length; t++) {
-      var task = locTasks[t];
-      if (task.isManualTask && task.scheduledDate) {
-        var dateKey = formatDateKey(task.scheduledDate);
-        if (dateKey) {
-          scheduledDates[dateKey] = loc + ' (Manual)';
-          Logger.log('Pre-blocked ' + dateKey + ' for manual task at ' + loc);
+        if (!sampleByType[taskType]) {
+          sampleByType[taskType] = {
+            employee: task.employee,
+            location: loc,
+            status: task.status
+          };
         }
       }
     }
+
+    var message = '=== Task Collection Debug ===\n\n';
+    message += 'Total: ' + totalTasks + ' tasks\n';
+    message += 'Locations: ' + Object.keys(tasksByLocation).length + '\n\n';
+    message += 'By Type:\n';
+
+    var types = Object.keys(countsByType).sort();
+    for (var t = 0; t < types.length; t++) {
+      var typ = types[t];
+      var sample = sampleByType[typ];
+      message += '  ' + typ + ': ' + countsByType[typ];
+      if (sample) {
+        message += ' (e.g. ' + sample.employee + ')';
+      }
+      message += '\n';
+    }
+
+    Logger.log(message);
+    ui.alert('Task List Debug', message, ui.ButtonSet.OK);
+
+  } catch (e) {
+    ui.alert('Error', 'Debug error: ' + e.toString(), ui.ButtonSet.OK);
+    Logger.log('debugTaskListData error: ' + e.toString());
   }
-  Logger.log('Pre-populated scheduledDates with ' + Object.keys(scheduledDates).length + ' manual task dates');
+}
 
-  // Process each location
-  var locationNames = Object.keys(tasksByLocation).sort(function(a, b) {
-    // Sort by priority: locations with overdue tasks first
-    var aHasOverdue = tasksByLocation[a].some(function(t) { return t.isOverdue; });
-    var bHasOverdue = tasksByLocation[b].some(function(t) { return t.isOverdue; });
+/**
+ * Debug: Compare Task Metadata vs collectAndGroupTasks
+ * Shows discrepancy between stored metadata and live collection
+ */
+function debugMetadataVsCollection() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
 
-    if (aHasOverdue && !bHasOverdue) return -1;
-    if (!aHasOverdue && bHasOverdue) return 1;
+  try {
+    // Count from Task Metadata
+    var metadataSheet = ss.getSheetByName('Task Metadata');
+    var metadataCount = 0;
+    var metadataByType = {};
 
-    // Then by location name
-    return a.localeCompare(b);
-  });
+    if (metadataSheet && metadataSheet.getLastRow() > 1) {
+      var metaData = metadataSheet.getDataRange().getValues();
+      var headers = metaData[0];
+      var taskTypeCol = -1;
+      var statusCol = -1;
 
-  for (var i = 0; i < locationNames.length; i++) {
-    var location = locationNames[i];
-    var locationTasks = tasksByLocation[location];
+      for (var h = 0; h < headers.length; h++) {
+        if (headers[h] === 'TaskType') taskTypeCol = h;
+        if (headers[h] === 'Status') statusCol = h;
+      }
 
-    if (locationTasks.length === 0) continue;
+      for (var i = 1; i < metaData.length; i++) {
+        var taskType = metaData[i][taskTypeCol] || 'Unknown';
+        var status = metaData[i][statusCol] || '';
 
-    // Calculate total time for this location visit
-    var totalTime = 0;
-    var hasOverdue = false;
-    var earliestDueDate = null;
-
-    for (var j = 0; j < locationTasks.length; j++) {
-      var task = locationTasks[j];
-      totalTime += task.estimatedTime || 0;
-      if (task.isOverdue) hasOverdue = true;
-      if (task.dueDate && (!earliestDueDate || task.dueDate < earliestDueDate)) {
-        earliestDueDate = task.dueDate;
+        if (status !== 'Complete') {
+          metadataCount++;
+          metadataByType[taskType] = (metadataByType[taskType] || 0) + 1;
+        }
       }
     }
 
-    // Get drive time for this location
-    var driveTime = driveTimesByLocation[location.toLowerCase()] || 0;
+    // Count from collectAndGroupTasks
+    var tasksByLocation = collectAndGroupTasks(ss);
+    var collectedCount = 0;
+    var collectedByType = {};
 
-    // Calculate suggested scheduled date - ONE location per day
-    var suggestedDate = calculateSuggestedScheduleDateOnePerDay(locationTasks, today, scheduledDates, location);
-
-    // Mark this date as used for this location
-    var dateKey = formatDateKey(suggestedDate);
-    scheduledDates[dateKey] = location;
-    Logger.log('Scheduled ' + location + ' on ' + dateKey + ' (scheduledDates now has ' + Object.keys(scheduledDates).length + ' entries)');
-
-    // Detect overnight requirement (10-hour workday)
-    var overnightInfo = detectOvernightRequirement({
-      location: location,
-      driveTime: driveTime,
-      visitTime: totalTime
-    });
-    var overnightRequired = overnightInfo.overnightRequired;
-
-    // Group tasks by foreman within this location
-    var foremanGroups = {};
-    for (var j = 0; j < locationTasks.length; j++) {
-      var task = locationTasks[j];
-      var foreman = task.foreman || 'Unknown';
-      if (!foremanGroups[foreman]) {
-        foremanGroups[foreman] = [];
+    for (var loc in tasksByLocation) {
+      var tasks = tasksByLocation[loc];
+      for (var t = 0; t < tasks.length; t++) {
+        var task = tasks[t];
+        var type = task.type || task.taskType || 'Unknown';
+        collectedCount++;
+        collectedByType[type] = (collectedByType[type] || 0) + 1;
       }
-      foremanGroups[foreman].push(task);
     }
 
-    // Sort foremen alphabetically
-    var sortedForemen = Object.keys(foremanGroups).sort();
+    var message = '=== Metadata vs Collection Comparison ===\n\n';
+    message += 'TASK METADATA (stored): ' + metadataCount + ' non-completed tasks\n';
+    for (var mt in metadataByType) {
+      message += '  ' + mt + ': ' + metadataByType[mt] + '\n';
+    }
 
-    // Add tasks grouped by foreman
-    for (var fi = 0; fi < sortedForemen.length; fi++) {
-      var foreman = sortedForemen[fi];
-      var foremanTasks = foremanGroups[foreman];
+    message += '\ncollectAndGroupTasks (live): ' + collectedCount + ' tasks\n';
+    for (var ct in collectedByType) {
+      message += '  ' + ct + ': ' + collectedByType[ct] + '\n';
+    }
 
-      // Add each task for this foreman
-      for (var j = 0; j < foremanTasks.length; j++) {
-        var task = foremanTasks[j];
+    message += '\n=== DISCREPANCIES ===\n';
+    var allTypes = {};
+    for (var k1 in metadataByType) allTypes[k1] = true;
+    for (var k2 in collectedByType) allTypes[k2] = true;
 
-        // Check if user had previously set a scheduled date for this task
-        var taskKey = location + '|' + (task.employee || task.crewLead || task.crew) + '|' + task.type;
-
-        // For manual tasks with their own scheduled date, ALWAYS use that date
-        var finalScheduledDate;
-        if (task.isManualTask && task.scheduledDate) {
-          finalScheduledDate = task.scheduledDate;
-          Logger.log('Using manual task scheduled date for ' + task.type + ' at ' + location + ': ' + formatDateKey(finalScheduledDate));
-        } else if (task.type === 'Cert Expiring') {
-          // For cert tasks, ONLY use a scheduled date if the user has explicitly set one
-          // Do NOT assign a suggested date - cert tasks should not appear on calendar until user schedules them
-          finalScheduledDate = existingScheduledDates[taskKey] || ''; // Empty string if not scheduled by user
-          if (finalScheduledDate) {
-            Logger.log('Using user-set scheduled date for cert task: ' + task.employee + ' - ' + task.itemType + ' on ' + formatDateKey(finalScheduledDate));
-          } else {
-            Logger.log('Cert task not scheduled by user: ' + task.employee + ' - ' + task.itemType + ' (will not appear on calendar)');
-          }
+    var hasDiscrepancy = false;
+    for (var typ in allTypes) {
+      var inMeta = metadataByType[typ] || 0;
+      var inColl = collectedByType[typ] || 0;
+      if (inMeta !== inColl) {
+        hasDiscrepancy = true;
+        message += typ + ': Metadata=' + inMeta + ', Collected=' + inColl;
+        if (inMeta > inColl) {
+          message += ' ⚠️ Missing ' + (inMeta - inColl) + ' from collection!\n';
         } else {
-          // For other tasks (swaps, training, etc.), check if user previously edited the date, otherwise use suggested
-          finalScheduledDate = existingScheduledDates[taskKey] || suggestedDate;
+          message += ' ⚠️ Extra ' + (inColl - inMeta) + ' in collection!\n';
         }
-
-        var daysTillDueDisplay = '';
-        if (task.isOverdue) {
-          daysTillDueDisplay = 'OVERDUE';
-        } else if (task.daysTillDue !== null) {
-          daysTillDueDisplay = task.daysTillDue;
-        }
-
-        // Include foreman info in the location label for ALL tasks (so frontend can group properly)
-        var locationVisitLabel = '📍 ' + location;
-        if (foreman && foreman !== 'Unknown') {
-          locationVisitLabel = '📍 ' + location + ' (👷 ' + foreman + ')';
-        }
-
-        tasks.push([
-          locationVisitLabel, // Location Visit with foreman info
-        task.priority, // Priority
-        task.type, // Task Type (Swap or Training)
-        task.employee || task.crewLead || task.crew, // Employee/Crew
-        location, // Location
-        task.currentItem || '', // Current Item
-        task.pickListItem || '', // Pick List Item
-        task.itemType || (task.type === 'Training' ? task.topic : ''), // Item Type or Training Topic
-        task.size || '', // Size
-        task.dueDate || '', // Due Date
-        daysTillDueDisplay, // Days Till Due
-        task.status, // Status
-        finalScheduledDate, // Scheduled Date (preserved if user edited)
-        task.estimatedTime, // Estimated Time
-        'Helena', // Start Location
-        location, // End Location
-        driveTime, // Drive Time
-        overnightRequired, // Overnight Required
-        false // Completed
-      ]);
-
-      // Group by scheduled date for calendar display
-      if (finalScheduledDate) {
-        var dateObj = finalScheduledDate instanceof Date ? finalScheduledDate : new Date(finalScheduledDate);
-        if (!isNaN(dateObj.getTime())) {
-          var calDateKey = dateObj.getFullYear() + '-' +
-                        String(dateObj.getMonth() + 1).padStart(2, '0') + '-' +
-                        String(dateObj.getDate()).padStart(2, '0');
-          if (!tasksByDate[calDateKey]) {
-            tasksByDate[calDateKey] = [];
-          }
-          tasksByDate[calDateKey].push({
-            type: task.type,
-            location: location,
-            employee: task.employee || task.crewLead || task.crew,
-            itemType: task.itemType || task.topic,
-            estimatedTime: task.estimatedTime || 15,
-            driveTime: driveTime,
-            overnightRequired: overnightRequired
-          });
-        }
-      }
-      } // End foremanTasks for loop
-    } // End sortedForemen for loop
-  }
-
-  // Now build calendar with task data
-  Logger.log('=== tasksByDate summary ===');
-  var dateKeys = Object.keys(tasksByDate).sort();
-  for (var dk = 0; dk < dateKeys.length; dk++) {
-    var key = dateKeys[dk];
-    var locations = [];
-    for (var t = 0; t < tasksByDate[key].length; t++) {
-      var loc = tasksByDate[key][t].location;
-      if (locations.indexOf(loc) === -1) {
-        locations.push(loc);
       }
     }
-    Logger.log('  ' + key + ': ' + locations.join(', ') + ' (' + tasksByDate[key].length + ' tasks)');
+
+    if (!hasDiscrepancy) {
+      message += 'None - counts match!\n';
+    }
+
+    Logger.log(message);
+    ui.alert('Metadata vs Collection Debug', message, ui.ButtonSet.OK);
+
+  } catch (e) {
+    ui.alert('Error', 'Debug error: ' + e.toString(), ui.ButtonSet.OK);
+    Logger.log('debugMetadataVsCollection error: ' + e.toString());
   }
-  Logger.log('=== END tasksByDate ===');
+}
 
-  buildToDoListCalendar(todoSheet, tasksByDate);
+/**
+ * Debug Training Tasks specifically - shows why training tasks may not be collected
+ */
+function debugTrainingTasks() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
 
-  // Set up headers (starting at row 13 after calendar)
-  var headerRow = 13;
-  var headers = [
-    'Location Visit',
-    'Priority',
-    'Task Type',
-    'Employee/Crew',
-    'Location',
-    'Current Item',
-    'Pick List Item',
-    'Item Type',
-    'Size',
-    'Due Date',
-    'Days Till Due',
-    'Status',
-    'Scheduled Date',
-    'Estimated Time (min)',
-    'Start Location',
-    'End Location',
-    'Drive Time (min)',
-    'Overnight Required',
-    'Completed'
-  ];
+  try {
+    var trainingSheet = ss.getSheetByName('Training Tracking');
+    if (!trainingSheet || trainingSheet.getLastRow() < 3) {
+      ui.alert('Training Tracking sheet not found or empty');
+      return;
+    }
 
-  todoSheet.getRange(headerRow, 1, 1, headers.length).setValues([headers]);
-  todoSheet.getRange(headerRow, 1, 1, headers.length)
-    .setFontWeight('bold')
-    .setBackground('#4285f4')
-    .setFontColor('white')
-    .setHorizontalAlignment('center')
-    .setWrap(true);
+    var data = trainingSheet.getDataRange().getValues();
+    var today = new Date();
+    var currentMonth = today.getMonth();
+    var monthNames = ['January','February','March','April','May','June',
+                      'July','August','September','October','November','December'];
 
-  // Write tasks to sheet
-  if (tasks.length > 0) {
-    var dataStartRow = 14;
-    todoSheet.getRange(dataStartRow, 1, tasks.length, headers.length).setValues(tasks);
+    // Check trainingCrews filter
+    var props = PropertiesService.getScriptProperties();
+    var crewsJson = props.getProperty('trainingCrews');
+    var selectedCrews = null;
+    if (crewsJson) {
+      try { selectedCrews = JSON.parse(crewsJson); } catch(e) {}
+    }
 
-    // Enable text wrapping for all data cells
-    todoSheet.getRange(dataStartRow, 1, tasks.length, headers.length).setWrap(true);
+    var monthNumbers = {
+      'january': 0, 'february': 1, 'march': 2, 'april': 3,
+      'may': 4, 'june': 5, 'july': 6, 'august': 7,
+      'september': 8, 'october': 9, 'november': 10, 'december': 11
+    };
 
-    // Format columns - ONLY columns 8+ (don't override calendar columns 1-7)
-    // Columns 1-7 are set by buildToDoListCalendar to 200px each
-    todoSheet.setColumnWidth(8, 100); // Item Type
-    todoSheet.setColumnWidth(9, 60);  // Size
-    todoSheet.setColumnWidth(10, 100); // Due Date
-    todoSheet.setColumnWidth(11, 100); // Days Till Due
-    todoSheet.setColumnWidth(12, 120); // Status
-    todoSheet.setColumnWidth(13, 110); // Scheduled Date
-    todoSheet.setColumnWidth(14, 100); // Estimated Time
-    todoSheet.setColumnWidth(15, 100); // Start Location
-    todoSheet.setColumnWidth(16, 100); // End Location
-    todoSheet.setColumnWidth(17, 80);  // Drive Time
-    todoSheet.setColumnWidth(18, 100); // Overnight Required
-    todoSheet.setColumnWidth(19, 80);  // Completed
+    var pending = 0, complete = 0, na = 0, filteredByCrew = 0, noLead = 0, futureMonth = 0;
+    var pendingList = [];
+    var filteredCrewsList = [];
 
-    // Format dates
-    todoSheet.getRange(dataStartRow, 10, tasks.length, 1).setNumberFormat('mm/dd/yyyy'); // Due Date
-    todoSheet.getRange(dataStartRow, 13, tasks.length, 1).setNumberFormat('mm/dd/yyyy'); // Scheduled Date
+    // Column indices based on Training Tracking structure
+    var monthCol = 0;      // A: Month
+    var crewCol = 2;       // C: Crew #
+    var leadCol = 3;       // D: Crew Lead
+    var dateCol = 5;       // F: Completion Date
+    var statusCol = 8;     // I: Status (0-indexed)
 
-    // Add checkboxes for Completed and Overnight Required
-    var completedRule = SpreadsheetApp.newDataValidation().requireCheckbox().build();
-    todoSheet.getRange(dataStartRow, 19, tasks.length, 1).setDataValidation(completedRule);
+    for (var i = 2; i < data.length; i++) {
+      var month = String(data[i][monthCol]).trim().toLowerCase();
+      var crew = String(data[i][crewCol]).trim();
+      var lead = String(data[i][leadCol]).trim();
+      var status = String(data[i][statusCol]).trim();
+      var completionDate = data[i][dateCol];
 
-    var overnightRule = SpreadsheetApp.newDataValidation().requireCheckbox().build();
-    todoSheet.getRange(dataStartRow, 18, tasks.length, 1).setDataValidation(overnightRule);
+      if (!crew) continue;
 
-    // Color code by location groups with PROMINENT separators
-    var currentLocation = '';
-    var locationColorIndex = 0;
-    // Alternating colors: light blue and light green for easy distinction
-    var locationColors = ['#e3f2fd', '#e8f5e9'];
+      var monthNum = monthNumbers[month];
 
-    for (var i = 0; i < tasks.length; i++) {
-      var rowNum = dataStartRow + i;
-      var taskLocation = tasks[i][4]; // Location column (E)
-      var priority = tasks[i][1]; // Priority column
-      var daysTillDue = tasks[i][10]; // Days Till Due column
-
-      // Check if this is a new location group
-      if (taskLocation !== currentLocation) {
-        // Add THICK top border to clearly separate locations
-        if (currentLocation !== '') {
-          // Add thick dark border ABOVE the new location
-          todoSheet.getRange(rowNum, 1, 1, headers.length)
-            .setBorder(true, null, null, null, null, null, '#263238', SpreadsheetApp.BorderStyle.SOLID_THICK);
-        }
-
-        // Make the FIRST row of each location group stand out
-        todoSheet.getRange(rowNum, 1, 1, headers.length)
-          .setFontWeight('bold');
-
-        currentLocation = taskLocation;
-        locationColorIndex = (locationColorIndex + 1) % 2;
+      // Skip future months beyond next month
+      if (monthNum !== undefined && monthNum > currentMonth + 1) {
+        futureMonth++;
+        continue;
       }
 
-      // Set base background color based on location group
-      var baseColor = locationColors[locationColorIndex];
+      // Skip past months (before current month)
+      if (monthNum !== undefined && monthNum < currentMonth) {
+        continue; // Don't count as future, just skip silently
+      }
 
-      // Apply background - priority colors override location colors
-      if (daysTillDue === 'OVERDUE') {
-        // Red background for overdue - but keep location distinction with border
-        todoSheet.getRange(rowNum, 1, 1, headers.length).setBackground('#ffcdd2');
-      } else if (priority === 'High') {
-        // Light orange/yellow for high priority
-        todoSheet.getRange(rowNum, 1, 1, headers.length).setBackground('#fff3e0');
+      if (status === 'Complete' || (completionDate && completionDate instanceof Date)) {
+        complete++;
+      } else if (status === 'N/A') {
+        na++;
+      } else if (selectedCrews && selectedCrews.length > 0 && selectedCrews.indexOf(crew) === -1) {
+        filteredByCrew++;
+        if (filteredCrewsList.indexOf(crew) === -1) {
+          filteredCrewsList.push(crew);
+        }
+      } else if (!lead) {
+        noLead++;
       } else {
-        // Use alternating location group color (blue/green)
-        todoSheet.getRange(rowNum, 1, 1, headers.length).setBackground(baseColor);
+        pending++;
+        if (pendingList.length < 5) {
+          pendingList.push('Row ' + (i+1) + ': ' + crew + ' - ' + lead);
+        }
       }
     }
 
-    // Add thick bottom border to last row
-    if (tasks.length > 0) {
-      todoSheet.getRange(dataStartRow + tasks.length - 1, 1, 1, headers.length)
-        .setBorder(null, null, true, null, null, null, '#263238', SpreadsheetApp.BorderStyle.SOLID_THICK);
+    var message = '=== Training Debug ===\n\n';
+    message += 'Current Month: ' + monthNames[currentMonth] + '\n';
+    message += 'Crew Filter: ' + (selectedCrews ? (selectedCrews.length + ' crews: ' + selectedCrews.slice(0,3).join(', ') + (selectedCrews.length > 3 ? '...' : '')) : 'ALL crews (no filter)') + '\n\n';
+    message += 'Current + Next Month Results:\n';
+    message += '  ✅ PENDING (should show): ' + pending + '\n';
+    message += '  ✓ Complete: ' + complete + '\n';
+    message += '  - N/A: ' + na + '\n';
+    message += '  ⚠️ Filtered by crew: ' + filteredByCrew + '\n';
+    message += '  ❌ No crew lead: ' + noLead + '\n';
+    message += '  ⏭️ Future month: ' + futureMonth + '\n';
+
+    if (pendingList.length > 0) {
+      message += '\nPending examples:\n';
+      for (var p = 0; p < pendingList.length; p++) {
+        message += '  • ' + pendingList[p] + '\n';
+      }
     }
 
-    // Don't freeze rows - allows scrolling with calendar above
-    // todoSheet.setFrozenRows(headerRow);
+    if (filteredByCrew > 0) {
+      message += '\n⚠️ WARNING: ' + filteredByCrew + ' tasks filtered out!\n';
+      message += 'Crews excluded: ' + filteredCrewsList.slice(0,5).join(', ');
+      if (filteredCrewsList.length > 5) message += '...';
+      message += '\n\nRun "Clear Training Filter" to include all crews.';
+    }
 
-    logEvent('Smart Schedule generated with ' + tasks.length + ' tasks across ' + locationNames.length + ' locations', 'INFO');
-  } else {
-    todoSheet.getRange(14, 1).setValue('No tasks found. Great job!');
+    if (pending === 0 && filteredByCrew === 0) {
+      message += '\n\n❓ No pending tasks found. Check:\n';
+      message += '1. Status column (J) values\n';
+      message += '2. Completion Date column (F)\n';
+      message += '3. Crew Lead column (D)';
+    }
+
+    Logger.log(message);
+    ui.alert('Training Debug', message, ui.ButtonSet.OK);
+
+  } catch (e) {
+    ui.alert('Error', e.toString(), ui.ButtonSet.OK);
+    Logger.log('debugTrainingTasks error: ' + e);
   }
 }
 
 /**
- * Calculates suggested schedule date based on task due dates.
- *
- * @param {Array} locationTasks - Tasks for this location
- * @param {Date} today - Today's date
- * @return {Date} Suggested schedule date
+ * Clear the training crews filter to show all crews
  */
-function calculateSuggestedScheduleDate(locationTasks, today) {
-  var hasOverdue = false;
-  var earliestDueDate = null;
-
-  for (var i = 0; i < locationTasks.length; i++) {
-    var task = locationTasks[i];
-    if (task.isOverdue) {
-      hasOverdue = true;
-    }
-    if (task.dueDate && (!earliestDueDate || task.dueDate < earliestDueDate)) {
-      earliestDueDate = task.dueDate;
-    }
-  }
-
-  // If any task is overdue, schedule ASAP (today or tomorrow)
-  if (hasOverdue) {
-    var tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    return tomorrow;
-  }
-
-  // If there's a due date coming up, schedule a few days before
-  if (earliestDueDate) {
-    var daysAhead = Math.max(1, Math.ceil((earliestDueDate - today) / (1000 * 60 * 60 * 24)) - 2);
-    var scheduleDate = new Date(today);
-    scheduleDate.setDate(scheduleDate.getDate() + daysAhead);
-    return scheduleDate;
-  }
-
-  // Default: schedule within next week
-  var nextWeek = new Date(today);
-  nextWeek.setDate(nextWeek.getDate() + 7);
-  return nextWeek;
-}
-
-/**
- * Calculates suggested schedule date ensuring ONE location per day.
- * Skips weekends and already-scheduled dates.
- *
- * @param {Array} locationTasks - Tasks for this location
- * @param {Date} today - Today's date
- * @param {Object} scheduledDates - Map of dateKey -> location already scheduled
- * @param {string} location - Current location being scheduled
- * @return {Date} Suggested schedule date
- */
-function calculateSuggestedScheduleDateOnePerDay(locationTasks, today, scheduledDates, location) {
-  var hasOverdue = false;
-  var earliestDueDate = null;
-
-  for (var i = 0; i < locationTasks.length; i++) {
-    var task = locationTasks[i];
-    if (task.isOverdue) {
-      hasOverdue = true;
-    }
-    if (task.dueDate && (!earliestDueDate || task.dueDate < earliestDueDate)) {
-      earliestDueDate = task.dueDate;
-    }
-  }
-
-  // ALWAYS start searching from tomorrow - this ensures we find sequential dates
-  var searchStart = new Date(today);
-  searchStart.setDate(searchStart.getDate() + 1); // Start from tomorrow
-
-  // Find the next available weekday (Mon-Fri) that's not already scheduled
-  var maxDaysToCheck = 90; // Look up to 90 days ahead
-  for (var d = 0; d < maxDaysToCheck; d++) {
-    var checkDate = new Date(searchStart);
-    checkDate.setDate(checkDate.getDate() + d);
-
-    var dayOfWeek = checkDate.getDay();
-
-    // Skip weekends (0 = Sunday, 6 = Saturday)
-    if (dayOfWeek === 0 || dayOfWeek === 6) {
-      continue;
-    }
-
-    var dateKey = formatDateKey(checkDate);
-
-    // Check if this date is already scheduled for another location
-    if (!scheduledDates[dateKey]) {
-      Logger.log('calculateSuggestedScheduleDateOnePerDay: ' + location + ' -> ' + dateKey);
-      return checkDate;
-    }
-  }
-
-  // Fallback: return tomorrow if no open slots found (shouldn't happen)
-  Logger.log('calculateSuggestedScheduleDateOnePerDay: ' + location + ' -> FALLBACK to tomorrow');
-  return searchStart;
-}
-
-/**
- * Formats a date as YYYY-MM-DD string for use as a key.
- * @param {Date} date - Date to format
- * @return {string} Date key in YYYY-MM-DD format
- */
-function formatDateKey(date) {
-  if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
-    return '';
-  }
-  return date.getFullYear() + '-' +
-         String(date.getMonth() + 1).padStart(2, '0') + '-' +
-         String(date.getDate()).padStart(2, '0');
-}
-
-/**
- * Gets location coordinates (latitude, longitude) for drive time calculations.
- * Coordinates are approximate centers for each work area.
- *
- * @return {Object} Location (lowercase) to {lat, lng, driveTimeFromHelena}
- */
-function getLocationCoordinates() {
-  return {
-    // Home base
-    'helena': { lat: 46.5958, lng: -112.0270, driveTimeFromHelena: 0 },
-
-    // East/Southeast Montana (Bozeman area)
-    'bozeman': { lat: 45.6770, lng: -111.0429, driveTimeFromHelena: 90 },
-    'livingston': { lat: 45.6616, lng: -110.5609, driveTimeFromHelena: 120 },
-    'big sky': { lat: 45.2618, lng: -111.4018, driveTimeFromHelena: 90 },
-    'ennis': { lat: 45.3491, lng: -111.7310, driveTimeFromHelena: 60 },
-
-    // Far East Montana (Billings area)
-    'billings': { lat: 45.7833, lng: -108.5007, driveTimeFromHelena: 240 },
-    'rapelje': { lat: 45.9583, lng: -109.4167, driveTimeFromHelena: 180 }, // Between Billings and Livingston
-    'miles city': { lat: 46.4083, lng: -105.8406, driveTimeFromHelena: 300 },
-    'sidney': { lat: 47.7167, lng: -104.1561, driveTimeFromHelena: 360 },
-    'glendive': { lat: 47.1053, lng: -104.7124, driveTimeFromHelena: 330 },
-
-    // North Montana
-    'great falls': { lat: 47.5002, lng: -111.3008, driveTimeFromHelena: 90 },
-    'stanford': { lat: 47.1533, lng: -110.2181, driveTimeFromHelena: 120 },
-
-    // West Montana
-    'missoula': { lat: 46.8721, lng: -114.0063, driveTimeFromHelena: 120 },
-    'lolo': { lat: 46.7585, lng: -114.0881, driveTimeFromHelena: 130 },
-    'kalispell': { lat: 48.1920, lng: -114.3167, driveTimeFromHelena: 180 },
-
-    // Southwest Montana
-    'butte': { lat: 46.0038, lng: -112.5348, driveTimeFromHelena: 65 },
-    'anaconda': { lat: 46.1282, lng: -112.9439, driveTimeFromHelena: 75 },
-    'dillon': { lat: 45.2166, lng: -112.6377, driveTimeFromHelena: 120 },
-    'deer lodge': { lat: 46.3988, lng: -112.7330, driveTimeFromHelena: 60 },
-
-    // Helena area
-    'elliston': { lat: 46.5747, lng: -112.4461, driveTimeFromHelena: 30 },
-    'townsend': { lat: 46.3191, lng: -111.5206, driveTimeFromHelena: 30 },
-    'boulder': { lat: 46.2366, lng: -112.1213, driveTimeFromHelena: 45 },
-    'gold creek': { lat: 46.5411, lng: -113.0858, driveTimeFromHelena: 60 },
-    'weeds': { lat: 46.5958, lng: -112.0270, driveTimeFromHelena: 0 }, // Same as Helena (phone work)
-
-    // Far locations
-    'northern lights': { lat: 48.6910, lng: -116.3163, driveTimeFromHelena: 420 }, // Bonner's Ferry, ID
-    'bonner\'s ferry': { lat: 48.6910, lng: -116.3163, driveTimeFromHelena: 420 },
-    'california': { lat: 37.7749, lng: -122.4194, driveTimeFromHelena: 960 }, // San Francisco area
-    'ca sub': { lat: 37.7749, lng: -122.4194, driveTimeFromHelena: 960 },
-    'south dakota': { lat: 44.3668, lng: -100.3538, driveTimeFromHelena: 600 }, // Central SD
-    'south dakota dock': { lat: 44.3668, lng: -100.3538, driveTimeFromHelena: 600 },
-
-    // Additional Montana locations
-    'whitehall': { lat: 45.8708, lng: -112.0974, driveTimeFromHelena: 60 },
-    'three forks': { lat: 45.8922, lng: -111.5519, driveTimeFromHelena: 75 },
-    'manhattan': { lat: 45.8566, lng: -111.3324, driveTimeFromHelena: 80 },
-    'belgrade': { lat: 45.7758, lng: -111.1761, driveTimeFromHelena: 85 }
-  };
-}
-
-/**
- * Calculates estimated drive time between two locations using coordinates.
- * Uses Haversine formula for distance, then estimates time based on average speed.
- *
- * @param {string} fromLocation - From location name
- * @param {string} toLocation - To location name
- * @return {number} Estimated drive time in minutes
- */
-function calculateDriveTimeBetween(fromLocation, toLocation) {
-  var coords = getLocationCoordinates();
-  var fromLoc = coords[fromLocation.toLowerCase()];
-  var toLoc = coords[toLocation.toLowerCase()];
-
-  // If either location not found, use fallback from driveTimeFromHelena
-  if (!fromLoc || !toLoc) {
-    var driveMap = getDriveTimeMap();
-    var fromTime = driveMap[fromLocation.toLowerCase()] || 120;
-    var toTime = driveMap[toLocation.toLowerCase()] || 120;
-
-    // Rough estimate: if going same direction, use difference; otherwise sum
-    return Math.abs(toTime - fromTime) + 15;
-  }
-
-  // Same location
-  if (fromLocation.toLowerCase() === toLocation.toLowerCase()) {
-    return 0;
-  }
-
-  // Calculate distance using Haversine formula
-  var R = 3959; // Earth's radius in miles
-  var dLat = (toLoc.lat - fromLoc.lat) * Math.PI / 180;
-  var dLng = (toLoc.lng - fromLoc.lng) * Math.PI / 180;
-  var a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-          Math.cos(fromLoc.lat * Math.PI / 180) * Math.cos(toLoc.lat * Math.PI / 180) *
-          Math.sin(dLng/2) * Math.sin(dLng/2);
-  var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  var distanceMiles = R * c;
-
-  // Estimate drive time: Montana roads average ~50-60 mph, use 55 mph
-  // Add 10% for road curves, stops, etc.
-  var driveTimeMinutes = Math.round((distanceMiles / 55) * 60 * 1.1);
-
-  // Minimum 15 minutes between any two different locations
-  return Math.max(15, driveTimeMinutes);
-}
-
-/**
- * Gets drive time map for common locations (legacy function for backward compatibility).
- * Now returns drive times FROM HELENA for each location.
- *
- * @return {Object} Location (lowercase) to drive time from Helena (minutes)
- */
-function getDriveTimeMap() {
-  var coords = getLocationCoordinates();
-  var map = {};
-
-  for (var loc in coords) {
-    map[loc] = coords[loc].driveTimeFromHelena;
-  }
-
-  return map;
+function clearTrainingCrewsFilter() {
+  PropertiesService.getScriptProperties().deleteProperty('trainingCrews');
+  SpreadsheetApp.getUi().alert('✅ Training Filter Cleared',
+    'The training crews filter has been removed.\n\nAll crews will now be included in training task collection.\n\nPlease run "Generate Task Metadata" to update tasks.',
+    SpreadsheetApp.getUi().ButtonSet.OK);
 }
 

@@ -1914,18 +1914,17 @@ function updateDecemberCatchUps() {
   var data = sheet.getDataRange().getValues();
   var headers = data[1]; // Row 2 is headers
 
-  // Find columns
-  var monthCol = 0;      // A
-  var topicCol = 1;      // B
-  var crewCol = 2;       // C
-  var leadCol = 3;       // D
-  var sizeCol = 4;       // E
-  var dateCol = 5;       // F
-  var attendeesCol = 6;  // G
-  var hoursCol = 7;      // H
-  var trainerCol = 8;    // I
-  var statusCol = 9;     // J
-  var notesCol = 10;     // K
+  // Find columns (based on actual Training Tracking sheet structure)
+  var monthCol = 0;      // A: Month
+  var topicCol = 1;      // B: Training Topic
+  var crewCol = 2;       // C: Crew #
+  var leadCol = 3;       // D: Crew Lead
+  var sizeCol = 4;       // E: Crew Size
+  var dateCol = 5;       // F: Completion Date
+  var attendeesCol = 6;  // G: Attendees
+  var hoursCol = 7;      // H: Hours Trainer
+  var statusCol = 8;     // I: Status
+  var notesCol = 9;      // J: Notes
 
   // Get current month to determine which months are "complete" (past)
   var today = new Date();
