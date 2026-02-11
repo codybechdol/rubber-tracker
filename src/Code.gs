@@ -4560,7 +4560,8 @@ function onOpen() {
       // === CLEANUP & DEBUG ===
       .addItem('🔍 Diagnose Compliance', 'diagnoseSafetyCompliance')
       .addItem('🧹 Remove Duplicate Rows', 'menuCleanupDuplicateComplianceRows')
-      .addItem('🧹 Clear Saved Job Corrections', 'clearJobNumberCorrections'))
+      .addItem('🧹 Clear Saved Job Corrections', 'clearJobNumberCorrections')
+      .addItem('🛠️ Fix Shifted Safety Tasks', 'fixShiftedSafetyComplianceTasks'))
     .addSubMenu(ui.createMenu('🔍 Debug')
       .addItem('Test Edit Trigger', 'testEditTrigger')
       .addItem('Recalc Current Row', 'recalcCurrentRow')
