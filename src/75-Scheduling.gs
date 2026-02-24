@@ -199,12 +199,65 @@ function calculateNextTrainingDate(lastDate, frequency) {
 }
 
 // ============================================================================
+// JOB PREFIX EXCLUSION (for Crew Visits & Training)
+// ============================================================================
+
+/**
+ * Default job number prefixes to exclude from Crew Visits and Training tasks.
+ * Employees with job numbers starting with these prefixes are excluded.
+ * - 002: Lost/Destroyed/In Testing equipment records (not real employees)
+ * - 005: Light Duty employees (office-based, no field visits needed)
+ */
+var DEFAULT_EXCLUDED_JOB_PREFIXES = ['002', '005'];
+
+/**
+ * Gets the list of excluded job number prefixes from ScriptProperties.
+ * Falls back to default if not configured.
+ *
+ * @return {Array} Array of excluded job prefixes (e.g., ['002', '005'])
+ */
+function getExcludedJobPrefixesInternal() {
+  var props = PropertiesService.getScriptProperties();
+  var json = props.getProperty('excludedJobPrefixes');
+  if (json) {
+    try {
+      return JSON.parse(json);
+    } catch (e) {
+      Logger.log('getExcludedJobPrefixesInternal: Error parsing JSON: ' + e);
+    }
+  }
+  return DEFAULT_EXCLUDED_JOB_PREFIXES;
+}
+
+/**
+ * Checks if a job number should be excluded based on its prefix.
+ * Used to filter out Light Duty, Lost, etc. from Crew Visits and Training.
+ *
+ * @param {string} jobNumber - Full job number (e.g., "005-26.27" or "013-26.1")
+ * @return {boolean} True if job should be excluded
+ */
+function isExcludedJobPrefix(jobNumber) {
+  if (!jobNumber) return true;
+  var jobStr = String(jobNumber).trim();
+  if (!jobStr || jobStr.toUpperCase() === 'N/A') return true;
+
+  var excludedPrefixes = getExcludedJobPrefixesInternal();
+  for (var i = 0; i < excludedPrefixes.length; i++) {
+    if (jobStr.indexOf(excludedPrefixes[i] + '-') === 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// ============================================================================
 // CREW EXTRACTION FUNCTIONS
 // ============================================================================
 
 /**
  * Extracts unique crew numbers from Employees sheet.
  * Converts job numbers like "009-26.1" → "009-26" (removes employee suffix).
+ * Excludes employees with job prefixes in the exclusion list (002, 005, etc.).
  *
  * @return {Array} Array of unique crew numbers sorted
  */
@@ -219,12 +272,15 @@ function getActiveCrews() {
   var data = employeesSheet.getDataRange().getValues();
   var headers = data[0];
   var jobNumCol = -1;
+  var secondaryJobCol = -1;
+  var secondaryJobCol = -1;
   var lastDayCol = -1;
 
-  // Find Job Number column (D) and Last Day column (L)
+  // Find Job Number column (D), Secondary Job Number column, and Last Day column (L)
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
     if (header === 'job number') jobNumCol = h;
+    if (header === 'secondary job number') secondaryJobCol = h;
     if (header === 'last day') lastDayCol = h;
   }
 
@@ -239,15 +295,26 @@ function getActiveCrews() {
   for (var i = 1; i < data.length; i++) {
     var row = data[i];
     var jobNumber = String(row[jobNumCol]).trim();
+    var secondaryJob = secondaryJobCol !== -1 ? String(row[secondaryJobCol]).trim() : '';
     var lastDay = lastDayCol !== -1 ? row[lastDayCol] : '';
 
-    // Skip if no job number or employee has left
-    if (!jobNumber || lastDay) continue;
+    // Skip if employee has left
+    if (lastDay) continue;
 
-    // Extract crew prefix (e.g., "009-26.1" → "009-26")
-    var crewNumber = extractCrewNumber(jobNumber);
-    if (crewNumber) {
-      crewSet[crewNumber] = true;
+    // Process primary job number
+    if (jobNumber && !isExcludedJobPrefix(jobNumber)) {
+      var crewNumber = extractCrewNumber(jobNumber);
+      if (crewNumber) {
+        crewSet[crewNumber] = true;
+      }
+    }
+
+    // Also process secondary job number if present
+    if (secondaryJob && !isExcludedJobPrefix(secondaryJob)) {
+      var secondaryCrewNumber = extractCrewNumber(secondaryJob);
+      if (secondaryCrewNumber) {
+        crewSet[secondaryCrewNumber] = true;
+      }
     }
   }
 
@@ -278,7 +345,17 @@ function extractCrewNumber(jobNumber) {
 
 /**
  * Gets crew lead/foreman information for a crew.
- * Looks for employee with matching crew and Job Classification containing "Foreman" or "Lead".
+ * Uses a classification hierarchy to determine crew lead:
+ * 1. F (Foreman) - Primary crew lead
+ * 2. GTO F (Gas Tech Operator - Foreman) - Alternate foreman
+ * 3. GF (General Foreman) - Supervisor role
+ * 4. SUP (Superintendent) - Management role
+ * 5. JRY (Journeyman Lineman) - Senior worker
+ * 6. JRY OP (Journeyman Operator)
+ * 7. WT (Working Technician)
+ * 8. AP 7-1 (Apprentices by seniority, 7 is most senior)
+ * 9. First employee in crew - Fallback
+ * Excludes employees with excluded job prefixes (Light Duty, etc.).
  *
  * @param {string} crewNumber - Crew number (e.g., "009-26")
  * @return {Object} {name: string, jobNumber: string, classification: string} or null
@@ -311,7 +388,32 @@ function getCrewLead(crewNumber) {
     return null;
   }
 
-  // Look for crew lead
+  // Classification hierarchy (lower number = higher priority)
+  var classificationPriority = {
+    'F': 1,        // Foreman - Primary crew lead
+    'GTO F': 2,    // Gas Tech Operator - Foreman
+    'GF': 3,       // General Foreman
+    'SUP': 4,      // Superintendent
+    'JRY': 5,      // Journeyman Lineman
+    'JRY OP': 6,   // Journeyman Operator
+    'WT': 7,       // Working Technician
+    'GTO': 8,      // Gas Tech Operator
+    'EO 1': 9,     // Equipment Operator 1
+    'EO 2': 10,    // Equipment Operator 2
+    'AP 7': 11,    // 7th Year Apprentice (most senior apprentice)
+    'AP 6': 12,
+    'AP 5': 13,
+    'AP 4': 14,
+    'AP 3': 15,
+    'AP 2': 16,
+    'AP 1': 17     // 1st Year Apprentice (least senior)
+  };
+
+  var bestCandidate = null;
+  var bestPriority = 999;
+  var firstEmployee = null;
+
+  // Scan all employees in this crew
   for (var i = 1; i < data.length; i++) {
     var row = data[i];
     var employeeJobNum = String(row[jobNumCol]).trim();
@@ -321,45 +423,43 @@ function getCrewLead(crewNumber) {
     // Skip if not in this crew or has left
     if (employeeCrew !== crewNumber || lastDay) continue;
 
-    // Check if this is a crew lead
-    if (classificationCol !== -1) {
-      var classification = String(row[classificationCol]).trim();
+    // Skip employees with excluded job prefixes (Light Duty, etc.)
+    if (isExcludedJobPrefix(employeeJobNum)) continue;
 
-      // Only F and GTO F are crew leads for training tracking
-      if (classification === 'F' || classification === 'GTO F') {
-        return {
-          name: row[nameCol],
-          jobNumber: employeeJobNum,
-          classification: row[classificationCol]
-        };
-      }
+    var employeeName = row[nameCol];
+    var classification = classificationCol !== -1 ? String(row[classificationCol]).trim() : '';
+
+    // Track first valid employee as fallback
+    if (!firstEmployee) {
+      firstEmployee = {
+        name: employeeName,
+        jobNumber: employeeJobNum,
+        classification: classification
+      };
     }
-  }
 
-  // If no lead found, return first employee in crew
-  for (var j = 1; j < data.length; j++) {
-    var row2 = data[j];
-    var employeeJobNum2 = String(row2[jobNumCol]).trim();
-    var employeeCrew2 = extractCrewNumber(employeeJobNum2);
-    var lastDay2 = lastDayCol !== -1 ? row2[lastDayCol] : '';
-
-    if (employeeCrew2 === crewNumber && !lastDay2) {
-      return {
-        name: row2[nameCol],
-        jobNumber: employeeJobNum2,
-        classification: classificationCol !== -1 ? row2[classificationCol] : ''
+    // Check classification priority
+    var priority = classificationPriority[classification];
+    if (priority && priority < bestPriority) {
+      bestPriority = priority;
+      bestCandidate = {
+        name: employeeName,
+        jobNumber: employeeJobNum,
+        classification: classification
       };
     }
   }
 
-  return null;
+  // Return best candidate by classification, or first employee if no classified lead found
+  return bestCandidate || firstEmployee;
 }
 
 /**
  * Gets crew size (count of active employees in crew).
+ * Excludes employees with excluded job prefixes (Light Duty, etc.).
  *
  * @param {string} crewNumber - Crew number (e.g., "009-26")
- * @return {number} Number of active employees
+ * @return {number} Number of active field employees
  */
 function getCrewSize(crewNumber) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -389,9 +489,11 @@ function getCrewSize(crewNumber) {
     var employeeCrew = extractCrewNumber(employeeJobNum);
     var lastDay = lastDayCol !== -1 ? row[lastDayCol] : '';
 
-    if (employeeCrew === crewNumber && !lastDay) {
-      count++;
-    }
+    // Skip if not in this crew, has left, or has excluded job prefix
+    if (employeeCrew !== crewNumber || lastDay) continue;
+    if (isExcludedJobPrefix(employeeJobNum)) continue;
+
+    count++;
   }
 
   return count;
@@ -993,6 +1095,192 @@ function setupCrewVisitConfig() {
 }
 
 /**
+ * Refreshes Crew Visit Config without losing user-customized data.
+ * Preserves: Notes, Visit Frequency, Last Visit Date
+ * Updates: Crew Lead, Crew Size, Location, Drive Time
+ * Removes: Crews with no field employees (all on Light Duty, etc.)
+ * Adds: New crews that appeared in Employees sheet
+ *
+ * Menu item: Glove Manager → Schedule & To-Do → Refresh Crew Visit Config
+ */
+function refreshCrewVisitConfig() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_CREW_VISIT_CONFIG);
+
+  if (!sheet || sheet.getLastRow() < 2) {
+    // No existing config, just run full setup
+    setupCrewVisitConfig();
+    return;
+  }
+
+  var ui = SpreadsheetApp.getUi();
+
+  // Get current active crews from Employees sheet (with exclusions applied)
+  var activeCrews = getActiveCrews();
+
+  if (activeCrews.length === 0) {
+    ui.alert('⚠️ No Active Crews Found\n\nNo field crews found in Employees sheet.\nAll employees may be on Light Duty or have excluded job prefixes.');
+    return;
+  }
+
+  // Read existing config data
+  var existingData = sheet.getDataRange().getValues();
+  var headers = existingData[0];
+
+  // Find column indices
+  var colIndices = {};
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'job number') colIndices.jobNumber = h;
+    if (header === 'location') colIndices.location = h;
+    if (header === 'crew lead') colIndices.crewLead = h;
+    if (header === 'crew size') colIndices.crewSize = h;
+    if (header === 'visit frequency') colIndices.frequency = h;
+    if (header === 'est. visit time') colIndices.visitTime = h;
+    if (header === 'last visit date') colIndices.lastVisit = h;
+    if (header === 'next visit date') colIndices.nextVisit = h;
+    if (header === 'drive time from helena') colIndices.driveTime = h;
+    if (header === 'priority') colIndices.priority = h;
+    if (header === 'notes') colIndices.notes = h;
+  }
+
+  // Build map of existing crew data (preserve user customizations)
+  var existingCrewMap = {};
+  for (var i = 1; i < existingData.length; i++) {
+    var row = existingData[i];
+    var crewNum = String(row[colIndices.jobNumber] || '').trim();
+    if (crewNum) {
+      existingCrewMap[crewNum] = {
+        frequency: row[colIndices.frequency] || 'Monthly',
+        lastVisit: row[colIndices.lastVisit] || '',
+        notes: row[colIndices.notes] || '',
+        priority: row[colIndices.priority] || 'Medium'
+      };
+    }
+  }
+
+  // Drive times by location
+  var driveTimesByLocation = {
+    'helena': 0,
+    'ennis': 60,
+    'butte': 90,
+    'big sky': 90,
+    'bozeman': 90,
+    'missoula': 120,
+    'great falls': 90,
+    'kalispell': 180,
+    'billings': 180,
+    'miles city': 240,
+    'sidney': 300,
+    'glendive': 270,
+    'livingston': 90,
+    'elliston': 45,
+    'gold creek': 75,
+    'rapelje': 120,
+    'south dakota': 420,
+    'california': 960,
+    'stanford': 120,
+    'northern lights': 420
+  };
+
+  // Build new crew data
+  var newCrewData = [];
+  var today = new Date();
+  var lastWeek = new Date(today);
+  lastWeek.setDate(lastWeek.getDate() - 7);
+
+  var crewsAdded = 0;
+  var crewsUpdated = 0;
+  var crewsRemoved = Object.keys(existingCrewMap).length;
+
+  for (var c = 0; c < activeCrews.length; c++) {
+    var crewNumber = activeCrews[c];
+    var lead = getCrewLead(crewNumber);
+    var size = getCrewSize(crewNumber);
+    var location = getCrewLocation(crewNumber);
+    var estimatedTime = calculateCrewVisitTime(size);
+
+    // Get drive time based on location
+    var driveTime = 0;
+    if (location) {
+      var locationLower = location.toLowerCase();
+      for (var loc in driveTimesByLocation) {
+        if (locationLower.indexOf(loc) !== -1) {
+          driveTime = driveTimesByLocation[loc];
+          break;
+        }
+      }
+    }
+
+    // Check if this crew exists in current config
+    var existing = existingCrewMap[crewNumber];
+    var frequency, lastVisit, notes, priority;
+
+    if (existing) {
+      // Preserve user customizations
+      frequency = existing.frequency;
+      lastVisit = existing.lastVisit || lastWeek;
+      notes = existing.notes;
+      priority = existing.priority;
+      crewsUpdated++;
+      crewsRemoved--; // Don't count as removed
+    } else {
+      // New crew - use defaults
+      frequency = 'Monthly';
+      lastVisit = lastWeek;
+      notes = '';
+      priority = (location && location.toLowerCase().indexOf('helena') !== -1) ? 'High' : 'Medium';
+      crewsAdded++;
+    }
+
+    newCrewData.push([
+      crewNumber,
+      location || '',
+      lead ? lead.name : '',
+      size,
+      frequency,
+      estimatedTime,
+      lastVisit,
+      calculateNextVisitDate(lastVisit instanceof Date ? lastVisit : new Date(lastVisit), frequency),
+      driveTime,
+      priority,
+      notes
+    ]);
+  }
+
+  // Clear existing data (except headers) and write new data
+  if (sheet.getLastRow() > 1) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).clearContent();
+  }
+
+  if (newCrewData.length > 0) {
+    sheet.getRange(2, 1, newCrewData.length, headers.length).setValues(newCrewData);
+
+    // Format dates
+    sheet.getRange(2, colIndices.lastVisit + 1, newCrewData.length, 2).setNumberFormat('mm/dd/yyyy');
+  }
+
+  // Build summary message
+  var message = '✅ Crew Visit Config refreshed!\n\n';
+  message += '📊 Summary:\n';
+  message += '• ' + crewsUpdated + ' existing crew(s) updated\n';
+  message += '• ' + crewsAdded + ' new crew(s) added\n';
+  message += '• ' + crewsRemoved + ' crew(s) removed (no field employees)\n\n';
+  message += '📋 Preserved your customizations:\n';
+  message += '• Visit Frequency\n';
+  message += '• Last Visit Date\n';
+  message += '• Priority\n';
+  message += '• Notes\n\n';
+  message += '🔄 Updated from Employees sheet:\n';
+  message += '• Crew Leads\n';
+  message += '• Crew Sizes\n';
+  message += '• Locations\n';
+  message += '• Drive Times';
+
+  ui.alert(message);
+}
+
+/**
  * Gets the location for a crew by finding the first crew member's location.
  *
  * @param {string} crewNumber - Crew number (e.g., "009-26")
@@ -1455,6 +1743,75 @@ function setupTrainingTracking() {
   message += '• 12 months of 2026 training topics\n\n';
   message += 'Update completion dates and status as training is completed.\n\n';
   message += '💡 TIP: Crews with foreman (F/GTO F) having job# N/A or location "weeds" are auto-excluded.';
+
+  SpreadsheetApp.getUi().alert(message);
+}
+
+/**
+ * Refreshes Crew Lead and Crew Size columns in Training Tracking sheet.
+ * Preserves all user data (completion dates, status, attendees, etc.).
+ * Use this after crew changes (e.g., after importing new crew makeup).
+ *
+ * Menu: Glove Manager → Schedule & To-Do → 🔄 Refresh Training Tracking Crew Leads
+ */
+function refreshTrainingTrackingCrewLeads() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_TRAINING_TRACKING);
+
+  if (!sheet || sheet.getLastRow() < 3) {
+    SpreadsheetApp.getUi().alert('⚠️ Training Tracking sheet not found or empty.\n\nRun "Setup Training Tracking" first.');
+    return;
+  }
+
+  var data = sheet.getDataRange().getValues();
+  var updatedCount = 0;
+  var changes = [];
+
+  // Column indices (0-based)
+  var crewCol = 2;     // C: Crew #
+  var leadCol = 3;     // D: Crew Lead
+  var sizeCol = 4;     // E: Crew Size
+
+  // Start from row 3 (index 2) - skip title and headers
+  for (var i = 2; i < data.length; i++) {
+    var row = data[i];
+    var crewNumber = String(row[crewCol]).trim();
+    var currentLead = String(row[leadCol]).trim();
+
+    if (!crewNumber) continue;
+
+    // Get current crew lead and size
+    var leadInfo = getCrewLead(crewNumber);
+    var newLead = leadInfo ? leadInfo.name : '';
+    var newSize = getCrewSize(crewNumber);
+
+    var rowNum = i + 1; // 1-based row number
+
+    // Update if different
+    if (currentLead !== newLead) {
+      sheet.getRange(rowNum, leadCol + 1).setValue(newLead);
+      if (currentLead && newLead && currentLead !== newLead) {
+        changes.push(crewNumber + ': ' + currentLead + ' → ' + newLead);
+      }
+      updatedCount++;
+    }
+
+    // Update crew size
+    sheet.getRange(rowNum, sizeCol + 1).setValue(newSize);
+  }
+
+  var message = '✅ Training Tracking Crew Leads Refreshed\n\n';
+  message += '• ' + updatedCount + ' row(s) updated\n';
+
+  if (changes.length > 0) {
+    message += '\n📝 Crew Lead Changes:\n';
+    for (var j = 0; j < Math.min(changes.length, 10); j++) {
+      message += '  • ' + changes[j] + '\n';
+    }
+    if (changes.length > 10) {
+      message += '  ... and ' + (changes.length - 10) + ' more\n';
+    }
+  }
 
   SpreadsheetApp.getUi().alert(message);
 }

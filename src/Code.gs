@@ -2010,12 +2010,23 @@ function getEmployeeNamesForMatching() {
           employeeEntries[empKey] = [];
         }
 
+        // Also capture Event Type column for "Terminated" detection
+        var eventType = '';
+        for (var etc = 0; etc < histHeaders.length; etc++) {
+          var etHeader = String(histHeaders[etc]).toLowerCase().trim();
+          if (etHeader === 'event type') {
+            eventType = String(histRow[etc] || '').trim();
+            break;
+          }
+        }
+
         employeeEntries[empKey].push({
           name: empName,
           date: entryDate,
           lastDay: histLastDayCol !== -1 ? String(histRow[histLastDayCol] || '').trim() : '',
           lastDayReason: histLastDayReasonCol !== -1 ? String(histRow[histLastDayReasonCol] || '').trim() : '',
-          location: histLocationCol !== -1 ? String(histRow[histLocationCol] || '').trim() : ''
+          location: histLocationCol !== -1 ? String(histRow[histLocationCol] || '').trim() : '',
+          eventType: eventType
         });
       }
 
@@ -2049,8 +2060,28 @@ function getEmployeeNamesForMatching() {
           }
         }
 
-        // Check if most recent entry is a termination (has Last Day + Last Day Reason)
-        if (mostRecentEntry && mostRecentEntry.lastDay && mostRecentEntry.lastDayReason) {
+        // Check if most recent entry is a termination:
+        // 1. Has Last Day + Last Day Reason columns filled in, OR
+        // 2. Location = "Previous Employee", OR
+        // 3. Event Type = "Terminated", "LAYOFF", "Fired", etc.
+        var isTerminated = false;
+        if (mostRecentEntry) {
+          if (mostRecentEntry.lastDay && mostRecentEntry.lastDayReason) {
+            isTerminated = true;
+          } else if (mostRecentEntry.location && mostRecentEntry.location.toLowerCase() === 'previous employee') {
+            isTerminated = true;
+          } else if (mostRecentEntry.eventType) {
+            var eventTypeLower = mostRecentEntry.eventType.toLowerCase();
+            if (eventTypeLower === 'terminated' || eventTypeLower === 'layoff' ||
+                eventTypeLower === 'fired' || eventTypeLower === 'quit' ||
+                eventTypeLower.indexOf('terminated') !== -1 ||
+                eventTypeLower.indexOf('layoff') !== -1) {
+              isTerminated = true;
+            }
+          }
+        }
+
+        if (isTerminated && mostRecentEntry) {
           terminatedEmployees[empKey] = {
             name: mostRecentEntry.name,
             location: 'Previous Employee',
@@ -2061,8 +2092,8 @@ function getEmployeeNamesForMatching() {
             jobClassification: '',
             rowIndex: -1, // No row index (not on Employees sheet)
             source: 'Employee History',
-            lastDay: mostRecentEntry.lastDay,
-            lastDayReason: mostRecentEntry.lastDayReason
+            lastDay: mostRecentEntry.lastDay || mostRecentEntry.date,
+            lastDayReason: mostRecentEntry.lastDayReason || mostRecentEntry.eventType || 'Terminated'
           };
         }
       }
@@ -2070,6 +2101,7 @@ function getEmployeeNamesForMatching() {
       // Add terminated employees to the list
       for (var termKey in terminatedEmployees) {
         employees.push(terminatedEmployees[termKey]);
+        Logger.log('  Added terminated employee: ' + termKey + ' (lastDay: ' + terminatedEmployees[termKey].lastDay + ', reason: ' + terminatedEmployees[termKey].lastDayReason + ')');
       }
 
       Logger.log('getEmployeeNamesForMatching: Found ' + Object.keys(terminatedEmployees).length + ' terminated employees in Employee History');
@@ -4520,6 +4552,9 @@ function onOpen() {
       .addItem('🧽 Cleanup Orphaned Metadata', 'cleanupOrphanedTaskMetadata')
       .addItem('🧹 Cleanup Incorrect Safety Tasks', 'cleanupIncorrectSafetyReportTasks')
       .addSeparator()
+      .addItem('📍 Setup Locations Sheet', 'setupLocationsSheet')
+      .addItem('📍 View Locations', 'openLocationsSheet')
+      .addSeparator()
       .addItem('🔄 Migrate Manual Tasks Sheet', 'migrateManualTasksSheet')
       .addItem('🧹 Clean Up Manual Tasks', 'cleanupDuplicateManualTasks')
       .addItem('🗑️ Purge Stuck Task by Location', 'promptPurgeTaskByLocation')
@@ -6741,6 +6776,295 @@ function migrateTaskMetadataAddChecklistColumn() {
 
   Logger.log('migrateTaskMetadataAddChecklistColumn: Added InTaskList column at column ' + newColIndex);
   return { success: true, message: 'Added InTaskList column at column ' + newColIndex };
+}
+
+// ============================================================================
+// LOCATIONS SHEET MANAGEMENT
+// ============================================================================
+
+/**
+ * Sets up the Locations sheet with drive times for all known locations.
+ * This sheet is the single source of truth for location data used by:
+ * - Trip Planner (drive time calculations)
+ * - Time Tracking (travel time estimates)
+ * - Crew Import (new location validation)
+ *
+ * Menu item: Glove Manager → Setup & Admin → 📍 Setup Locations Sheet
+ */
+function setupLocationsSheet() {
+  Logger.log('=== setupLocationsSheet START ===');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Locations');
+
+  // Check if sheet already exists
+  if (sheet) {
+    var ui = SpreadsheetApp.getUi();
+    var response = ui.alert(
+      'Locations Sheet Exists',
+      'The Locations sheet already exists with ' + (sheet.getLastRow() - 1) + ' locations.\n\n' +
+      'Do you want to RESET it? This will delete all existing data and recreate from defaults.',
+      ui.ButtonSet.YES_NO
+    );
+    if (response === ui.Button.NO) {
+      Logger.log('setupLocationsSheet: User cancelled - sheet exists');
+      return { success: false, message: 'Cancelled - sheet already exists' };
+    }
+    sheet.clear();
+  } else {
+    sheet = ss.insertSheet('Locations');
+  }
+
+  // Set up headers
+  var headers = ['Location', 'Drive Time (min)', 'Direction', 'Overnight City'];
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+
+  // Format header row
+  var headerRange = sheet.getRange(1, 1, 1, headers.length);
+  headerRange.setFontWeight('bold');
+  headerRange.setBackground('#1a73e8');
+  headerRange.setFontColor('white');
+  headerRange.setHorizontalAlignment('center');
+
+  // Freeze header row
+  sheet.setFrozenRows(1);
+
+  // Set column widths
+  sheet.setColumnWidth(1, 150); // Location
+  sheet.setColumnWidth(2, 120); // Drive Time (min)
+  sheet.setColumnWidth(3, 100); // Direction
+  sheet.setColumnWidth(4, 120); // Overnight City
+
+  // Default locations data - migrated from hardcoded getDriveTimeMap()
+  var defaultLocations = [
+    ['Helena', 0, 'Home', 'Helena'],
+    ['Bozeman', 90, 'East', 'Bozeman'],
+    ['Livingston', 90, 'East', 'Bozeman'],
+    ['Big Sky', 90, 'East', 'Bozeman'],
+    ['Ennis', 60, 'East', 'Ennis'],
+    ['Great Falls', 90, 'North', 'Great Falls'],
+    ['Stanford', 120, 'North', 'Great Falls'],
+    ['Butte', 90, 'Southwest', 'Butte'],
+    ['Anaconda', 90, 'Southwest', 'Butte'],
+    ['Missoula', 120, 'West', 'Missoula'],
+    ['Lolo', 130, 'West', 'Missoula'],
+    ['Elliston', 45, 'West', 'Helena'],
+    ['Gold Creek', 75, 'West', 'Butte'],
+    ['Kalispell', 180, 'Northwest', 'Kalispell'],
+    ['Billings', 180, 'East', 'Billings'],
+    ['Miles City', 240, 'East', 'Billings'],
+    ['Sidney', 300, 'East', 'Sidney'],
+    ['Glendive', 270, 'East', 'Glendive'],
+    ['Rapelje', 120, 'East', 'Billings'],
+    ['Greycliff', 120, 'East', 'Bozeman'],
+    ['Manhattan', 90, 'East', 'Bozeman'],
+    ['South Dakota', 420, 'Far', 'South Dakota'],
+    ['Northern Lights', 420, 'Far', 'Northern Lights'],
+    ['California', 960, 'Far', 'California'],
+    ['Weeds', 0, 'Office', 'Helena'],
+    ['Light Duty', 0, 'Office', 'Helena'],
+    ['Vacation', 0, 'Office', 'Helena'],
+    ['Leave', 0, 'Office', 'Helena'],
+    ['Previous Employee', 0, 'Office', 'Helena'],
+    ['Unknown', 0, 'Office', 'Helena']
+  ];
+
+  // Write data
+  if (defaultLocations.length > 0) {
+    sheet.getRange(2, 1, defaultLocations.length, 4).setValues(defaultLocations);
+  }
+
+  // Add data validation for Direction column
+  var directionValues = ['Home', 'East', 'North', 'West', 'Southwest', 'Northwest', 'Far', 'Office'];
+  var directionRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(directionValues)
+    .setAllowInvalid(true)
+    .build();
+  sheet.getRange(2, 3, sheet.getMaxRows() - 1, 1).setDataValidation(directionRule);
+
+  // Add number validation for Drive Time column
+  var driveTimeRule = SpreadsheetApp.newDataValidation()
+    .requireNumberGreaterThanOrEqualTo(0)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, 2, sheet.getMaxRows() - 1, 1).setDataValidation(driveTimeRule);
+
+  // Sort by Location name
+  sheet.getRange(2, 1, defaultLocations.length, 4).sort(1);
+
+  Logger.log('setupLocationsSheet: Created with ' + defaultLocations.length + ' locations');
+
+  SpreadsheetApp.getUi().alert(
+    '✅ Locations Sheet Created!\n\n' +
+    'Added ' + defaultLocations.length + ' locations with drive times.\n\n' +
+    'This sheet is now the source of truth for:\n' +
+    '• Trip Planner route calculations\n' +
+    '• Time Tracking travel estimates\n' +
+    '• Crew Import location validation\n\n' +
+    'To add a new location, simply add a row with the location name and drive time from Helena.'
+  );
+
+  return { success: true, message: 'Created Locations sheet with ' + defaultLocations.length + ' locations' };
+}
+
+/**
+ * Gets the drive time for a specific location from the Locations sheet.
+ * Returns 0 if location not found (with warning logged).
+ *
+ * @param {string} locationName - The location to look up
+ * @return {number} Drive time in minutes from Helena
+ */
+function getLocationDriveTime(locationName) {
+  if (!locationName) return 0;
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Locations');
+
+  if (!sheet || sheet.getLastRow() < 2) {
+    Logger.log('getLocationDriveTime: Locations sheet not found or empty - returning 0 for ' + locationName);
+    return 0;
+  }
+
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
+  var searchName = String(locationName).toLowerCase().trim();
+
+  for (var i = 0; i < data.length; i++) {
+    var locName = String(data[i][0]).toLowerCase().trim();
+    if (locName === searchName) {
+      return Number(data[i][1]) || 0;
+    }
+  }
+
+  Logger.log('getLocationDriveTime: Location "' + locationName + '" not found in Locations sheet - returning 0');
+  return 0;
+}
+
+/**
+ * Gets all location data from the Locations sheet.
+ * Used by dialogs to populate location dropdowns.
+ *
+ * @return {Array} Array of location objects with name, driveTime, direction, overnightCity
+ */
+function getLocationsSheetData() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Locations');
+
+  if (!sheet || sheet.getLastRow() < 2) {
+    Logger.log('getLocationsSheetData: Locations sheet not found or empty');
+    return [];
+  }
+
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 4).getValues();
+  var locations = [];
+
+  for (var i = 0; i < data.length; i++) {
+    if (data[i][0]) {
+      locations.push({
+        name: String(data[i][0]).trim(),
+        driveTime: Number(data[i][1]) || 0,
+        direction: String(data[i][2] || '').trim(),
+        overnightCity: String(data[i][3] || '').trim()
+      });
+    }
+  }
+
+  return locations;
+}
+
+/**
+ * Adds a new location to the Locations sheet with drive time.
+ * Called from Crew Import when a new location is detected.
+ *
+ * @param {string} locationName - The new location name
+ * @param {number} driveTime - Drive time in minutes from Helena
+ * @param {string} direction - Optional: Direction from Helena (East, North, etc.)
+ * @param {string} overnightCity - Optional: Nearest city for overnight stays
+ * @return {Object} Result with success status
+ */
+function addLocationWithDriveTime(locationName, driveTime, direction, overnightCity) {
+  Logger.log('addLocationWithDriveTime: Adding "' + locationName + '" with drive time ' + driveTime);
+
+  if (!locationName || locationName.trim() === '') {
+    return { success: false, message: 'Location name is required' };
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Locations');
+
+  // Create sheet if it doesn't exist
+  if (!sheet) {
+    Logger.log('addLocationWithDriveTime: Locations sheet not found - creating it first');
+    setupLocationsSheet();
+    sheet = ss.getSheetByName('Locations');
+  }
+
+  // Check if location already exists
+  var existingData = sheet.getRange(2, 1, Math.max(1, sheet.getLastRow() - 1), 1).getValues();
+  var searchName = locationName.toLowerCase().trim();
+
+  for (var i = 0; i < existingData.length; i++) {
+    if (String(existingData[i][0]).toLowerCase().trim() === searchName) {
+      Logger.log('addLocationWithDriveTime: Location "' + locationName + '" already exists');
+      return { success: false, message: 'Location "' + locationName + '" already exists' };
+    }
+  }
+
+  // Add the new location
+  var newRow = [
+    locationName.trim(),
+    Number(driveTime) || 0,
+    direction || '',
+    overnightCity || locationName.trim()
+  ];
+
+  sheet.appendRow(newRow);
+
+  // Sort by location name
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 2) {
+    sheet.getRange(2, 1, lastRow - 1, 4).sort(1);
+  }
+
+  Logger.log('addLocationWithDriveTime: Added "' + locationName + '" with drive time ' + driveTime + ' min');
+
+  return {
+    success: true,
+    message: 'Added location "' + locationName + '" with ' + driveTime + ' min drive time',
+    location: {
+      name: locationName.trim(),
+      driveTime: Number(driveTime) || 0,
+      direction: direction || '',
+      overnightCity: overnightCity || locationName.trim()
+    }
+  };
+}
+
+/**
+ * Opens the Locations sheet for viewing/editing.
+ * Menu item: Glove Manager → Setup & Admin → 📍 View Locations
+ */
+function openLocationsSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Locations');
+
+  if (!sheet) {
+    var ui = SpreadsheetApp.getUi();
+    var response = ui.alert(
+      'Locations Sheet Not Found',
+      'The Locations sheet does not exist.\n\nWould you like to create it now?',
+      ui.ButtonSet.YES_NO
+    );
+    if (response === ui.Button.YES) {
+      setupLocationsSheet();
+      sheet = ss.getSheetByName('Locations');
+    } else {
+      return;
+    }
+  }
+
+  if (sheet) {
+    ss.setActiveSheet(sheet);
+    sheet.activate();
+  }
 }
 
 /**

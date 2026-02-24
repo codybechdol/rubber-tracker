@@ -1,0 +1,9 @@
+Line 500: depth=3
+Line 1000: depth=5
+Line 1500: depth=4
+Line 2000: depth=1
+Line 2500: depth=3
+Line 3000: depth=1
+Line 3500: depth=3
+Line 4000: depth=0
+Final depth: 1

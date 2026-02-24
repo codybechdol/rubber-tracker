@@ -45,15 +45,17 @@ If the dialog receives `null` from server but logs show function completed:
 - `Code.gs` - Main code file with core functions, including Task Metadata functions
 - `76-SmartScheduling.gs` - Smart scheduling and task collection
 - `87-RoutePlanner.gs` - Trip planning and route optimization (reads directly from source sheets)
-- `ToDoSchedule.html` - Tasks & Calendar dialog (main scheduling interface)
+- `98-LegacyArchive.gs` - Archived legacy functions (DO NOT USE - for reference only)
+- `ToDoSchedule.html` - Task List dialog (Calendar tab removed Feb 18, 2026)
 - `ToDoConfig.html` - Schedule Configuration dialog
-- `TripPlanner.html` - Trip Planner dialog (route planning)
+- `TripPlanner.html` - **Trip Planner / Scheduler** (primary scheduling interface - replaces Calendar)
 - `Schedule.html` - Legacy unified dialog (no longer used in menus)
 
 ## Conventions
 - Use `Logger.log()` for debugging in Google Apps Script
 - Task types include: Swap, Reclaim, Training, Cert Expiring, Missing Safety Report
 - Item types are: Glove, Sleeve
+- **Standardized Statuses:** Unassigned, Assigned, Complete, Overdue, Deferred (as of Feb 18, 2026)
 
 ## Architecture (February 2026)
 **Option A Implementation - Phase 6 COMPLETE**
@@ -714,6 +716,408 @@ Notes: [Any notes]
 ---
 
 ## Completed Features Log
+
+### February 19, 2026
+- ✅ **Fixed Repeated Unknown Jobs Popup in Process Safety Emails**
+  - **Problem:** When processing safety emails, the "Unknown Job Numbers Found" popup kept appearing repeatedly for the same job numbers (e.g., 037-26, 001-26), even after the user assigned them to a foreman or clicked "Skip"
+  - **Root Cause:** When a job was explicitly skipped by the user:
+    1. `lookupForemanWithCustomMapping()` correctly returned `{ jobExists: false, source: 'skipped' }`
+    2. But `parseSafetyEmail()` only returned `skippedReason: "Job not on Employee sheet"` for ALL failed lookups
+    3. The main processing loop then added the job to `unknownJobsEncountered` again - even though user already decided to skip it
+  - **Solution:**
+    1. `parseSafetyEmail()` now returns different skip reasons:
+       - `"User skipped"` - Job was explicitly skipped in a previous batch
+       - `"Job not on Employee sheet"` - Job is genuinely unknown
+    2. Main processing loop only adds jobs to `unknownJobsEncountered` when `skippedReason === "Job not on Employee sheet"`
+    3. User-skipped jobs are silently ignored and counted as `skippedCount`
+  - **Files Modified:**
+    - `src/88-SafetyReports.gs` - Updated `parseSafetyEmail()` (~line 1621-1628), added handling for user-skipped jobs in main loop (~line 647-670)
+  - **Impact:** Users no longer get stuck in a loop of assigning/skipping the same job numbers
+
+### February 18, 2026
+- ✅ **Option C Implementation - Unassigned Tasks & Status Standardization**
+  - **Major Changes:**
+    1. **Renamed Trip Planner → "Trip Planner / Scheduler"** - Now the primary scheduling interface
+    2. **Renamed "Unassigned Locations" → "📋 Unassigned Tasks"** - Shows individual tasks under location headers
+    3. **Removed Calendar tab from Task List** - Use Trip Planner / Scheduler for scheduling
+    4. **Standardized status values** across entire system
+  - **New Standardized Statuses:**
+    - `Unassigned` - No scheduled date (replaces "Pending")
+    - `Assigned` - Has scheduled date (replaces "Scheduled")
+    - `Complete` - Task finished
+    - `Overdue` - Past due date, not complete
+    - `Deferred` - Intentionally postponed (new)
+  - **Unassigned Tasks Sidebar:**
+    - Collapsible location headers (📍 Bozeman, 📍 Livingston, etc.)
+    - Individual task cards under each location (draggable)
+    - Each task shows: icon, employee name, task type, due date, urgency dot
+    - Right-click context menu for quick actions
+  - **Right-Click Context Menu:**
+    - 📅 Schedule Next Week - Assigns to Monday of next week
+    - 📅 Schedule in 2 Weeks - Assigns to Monday 2 weeks out
+    - ⏸️ Defer Task - Sets status to Deferred (shows badge)
+    - ↩️ Remove Deferred Status - Removes deferred status
+    - 👁️ View Details - Shows full task info popup
+  - **Individual Task Dragging:**
+    - Drag single task to calendar day (not entire location)
+    - If location exists on day, merges task into it
+    - If not, creates new location entry
+    - Task removed from unassigned sidebar
+  - **Migration Function:**
+    - `menuMigrateTaskStatuses()` - Converts old statuses to new format
+    - Mapping: Pending→Unassigned, Scheduled→Assigned, Declined→Deferred
+    - Menu: Glove Manager → Maintenance → 🔄 Migrate Task Statuses
+  - **Files Modified:**
+    - `src/TripPlanner.html` - Complete sidebar rewrite, individual task cards, context menu, drag handling
+    - `src/ToDoSchedule.html` - Removed Calendar tab, added status CSS, stub renderCalendar()
+    - `src/Code.gs` - Status migration function, updated status validation
+    - `src/87-RoutePlanner.gs` - Updated default status to 'Unassigned'
+  - **Impact:** Trip Planner is now the central scheduling interface, task assignment is more granular
+- ✅ **Trip Planner UI Redesign - Separate Field Locations from Office Tasks**
+  - **Problem:** Grey dot (office/phone) tasks were mixed with field trip locations in the Trip Planner sidebar
+  - **Solution:** Split the sidebar into two sections:
+    1. **📋 Unassigned Tasks** - Field trip tasks (draggable to calendar days)
+    2. **📞 Office/Phone Tasks** - Cert expiring, Weeds, Light Duty tasks (no travel needed)
+  - **Office Tasks Section Features:**
+    - Grouped by task type (Cert Renewals, Other)
+    - Collapsible groups with count badges
+    - Click task to see detail popup with:
+      - Employee name & location
+      - Task type & due date
+      - Phone number (if available)
+      - Quick "Send SMS" button
+    - Summary count at bottom
+  - **Files Modified:**
+    - `src/TripPlanner.html` - New sidebar layout, `renderUnassigned()` and `renderOfficeTasks()` functions
+  - **Impact:** Cleaner separation between field work and phone work
+- ✅ **Fixed Trip Planner "getDriveTimeMap is not defined" Error (Redeployed)**
+  - **Problem:** Trip Planner was returning null due to `getDriveTimeMap` not being found
+  - **Root Cause:** The function was added Feb 17 but may not have been deployed
+  - **Solution:** Redeployed with `.\push.bat` to ensure `getDriveTimeMap()` from `76-SmartScheduling.gs` is available
+- ✅ **Office Tasks Now Schedulable via Drag-and-Drop**
+  - **Problem:** Office/phone tasks (cert renewals, etc.) couldn't be scheduled to specific days in Trip Planner
+  - **Solution:** Made office task cards draggable to calendar days
+  - **How it works:**
+    1. Office tasks in the "📞 Office/Phone Tasks" sidebar show "⬆️ Drag to schedule" hint
+    2. Drag any office task to a calendar day
+    3. Creates "Helena Office" location on that day with the task
+    4. Multiple office tasks dragged to same day merge into single "Helena Office" entry
+    5. Drag "Helena Office" card back to sidebar to unschedule (returns tasks to Office/Phone section)
+    6. When "Apply to Schedule" is clicked, office tasks update Task Metadata with scheduled date
+  - **Helena Office Location Features:**
+    - Shows green styling with 🏢 icon
+    - Badge shows "Office" to distinguish from field locations
+    - Tasks within show employee name and cert type
+    - Time estimate: 15 minutes per office task
+  - **Backend Changes:**
+    - `applyTripToSchedule()` now handles "Helena Office" locations
+    - Matches tasks by source sheet + row index (not by location)
+    - Updates Task Metadata with scheduled date, start time, and "Scheduled" status
+  - **Files Modified:**
+    - `src/TripPlanner.html` - Draggable office tasks, `handleOfficeTaskDragStart()`, updated `handleDrop()`, `createLocationCard()` with helena-office class
+    - `src/87-RoutePlanner.gs` - Special handling in `applyTripToSchedule()` for Helena Office
+  - **Impact:** All tasks (field and office) can now be scheduled via Trip Planner
+- ✅ **Unassigned Locations Split: Urgent vs Backlog**
+  - **Problem:** All unassigned field locations were shown together regardless of urgency
+  - **Solution:** Split into two sections:
+    1. **📍 Unassigned Locations** - Urgent tasks only (overdue, due soon, this week)
+    2. **📋 Unscheduled (Backlog)** - Non-urgent tasks that can be scheduled when convenient
+  - **Features:**
+    - Backlog section only appears when there are non-urgent tasks
+    - Grey styling to indicate lower priority
+    - Both sections support drag-and-drop
+    - Urgency threshold: maxUrgency >= 50 = urgent, < 50 = backlog
+  - **Files Modified:**
+    - `src/TripPlanner.html` - New `renderUnscheduledBacklog()` function, updated `renderUnassigned()`, new sidebar section HTML
+  - **Impact:** Better visual prioritization of what needs to be scheduled first
+
+### February 17, 2026
+- ✅ **Fixed Trip Planner "getDriveTimeMap is not defined" Error**
+  - **Problem:** Trip Planner returned null/failed with error `ReferenceError: getDriveTimeMap is not defined`
+  - **Root Cause:** The `getDriveTimeMap()` function was referenced in `87-RoutePlanner.gs` and `86-TimeTracking.gs` but never defined anywhere in the codebase
+  - **Solution:** Added `getDriveTimeMap()` function to `76-SmartScheduling.gs`
+  - **What the function does:**
+    - Returns a map of drive times (in minutes) from Helena to various locations
+    - Used by Trip Planner for route optimization and Time Tracking for daily accomplishments
+  - **Drive times included:**
+    - Helena: 0, Ennis: 60, Butte: 90, Big Sky: 90, Bozeman: 90, Livingston: 90
+    - Great Falls: 90, Missoula: 120, Lolo: 130, Stanford: 120, Rapelje: 120
+    - Elliston: 45, Gold Creek: 75, Kalispell: 180, Billings: 180
+    - Miles City: 240, Sidney: 300, Glendive: 270, South Dakota: 420
+    - Northern Lights: 420, California: 960, Weeds/Light Duty/Unknown: 0 (office-based)
+  - **Files Modified:**
+    - `src/76-SmartScheduling.gs` - Added `getDriveTimeMap()` function (~40 lines)
+  - **Impact:** Trip Planner now loads correctly and can calculate route times
+- ✅ **Fixed Duplicate Safety Compliance Tasks in UI (Client-Side Deduplication)**
+  - **Problem:** Safety Compliance tasks appeared multiple times in the Task List, even after server-side fixes. Same job+week showed up twice with slightly different TaskID date formats.
+  - **Root Cause 1:** Tasks were loaded from TWO sources simultaneously:
+    1. `allTasks` from `getTasksWithMetadata()` → `collectMissingSafetyReportTasks()`
+    2. `safetyComplianceTasks` from `getMissingSafetyReportTasks()` (separate call)
+  - **Root Cause 2:** Different date formats in TaskID weren't being normalized:
+    - `SafetyCompliance_013-26_02-08-2026` (MM-DD-YYYY)
+    - `SafetyCompliance_013-26_20260208` (YYYYMMDD)
+    - `SafetyCompliance_013-26_02/08/2026` (MM/DD/YYYY)
+  - **Solution 1:** Added deduplication in `processTaskData()` after date normalization
+    - Normalizes all date formats to MM-DD-YYYY before comparing
+    - Keeps only first occurrence of each job+week combination
+    - Logs: `processTaskData: Removed X duplicate Safety Compliance tasks`
+  - **Solution 2:** Added deduplication in `renderPersonalChecklist()` to skip safetyComplianceTasks already in allTasks
+    - Builds set of existing taskIds from allTasks
+    - Skips any safetyComplianceTasks that match (including normalized date formats)
+    - Logs: `renderPersonalChecklist: Skipping duplicate safety task X`
+  - **Files Modified:**
+    - `src/ToDoSchedule.html` - Added ~70 lines of deduplication logic in two functions
+  - **How to Test:** Open Tasks & Calendar → Safety Compliance tasks should appear only once per job+week
+  - **Documentation:** See `FIX_DUPLICATE_SAFETY_TASKS_FEB17.md`
+- ✅ **Fixed "Last Processed: Loading..." in Process Safety Emails Dialog**
+  - **Problem:** The "Last processed" timestamp always showed "Loading..." instead of actual date
+  - **Root Cause:** No failure handler on `getLastSafetyEmailProcessedTime()` call - if call failed, UI stayed at "Loading..."
+  - **Solution:** Added `.withFailureHandler()` to show "Unknown" if call fails
+  - **Files Modified:** `src/ProcessSafetyEmailsDialog.html` - Added 4 lines
+- ✅ **Fixed Duplicate Safety Compliance Tasks in Task List (Improved)**
+  - **Problem:** After recording a resolution for a Missing Safety Report task, the task would return when "Process Safety Emails" ran again. Also, duplicate tasks with different date formats in TaskID were not being detected.
+  - **Root Cause 1:** `collectMissingSafetyReportTasks()` used simple string comparison for job+week deduplication but didn't normalize date formats (YYYYMMDD, MM-DD-YYYY, MM/DD/YYYY)
+  - **Root Cause 2:** When duplicates were found, it was keeping the first one found instead of the newest (with Complete/Resolved status)
+  - **Solution:**
+    1. Added `normalizeDateString()` helper in `cleanupDuplicateSafetyComplianceTasks()` to normalize YYYYMMDD, MM-DD-YYYY, MM/DD/YYYY, and YYYY-MM-DD to consistent MM-DD-YYYY format
+    2. Updated `collectMissingSafetyReportTasks()` to track tasks by job+week and keep the NEWEST when duplicates found (compares CreatedDate)
+    3. Improved cleanup function to properly identify and remove duplicates using normalized date keys
+  - **Date Format Normalization:**
+    - `20260208` → `02-08-2026`
+    - `02/08/2026` → `02-08-2026`
+    - `2026-02-08` → `02-08-2026`
+  - **Deduplication Priority:**
+    - Status: Complete > Resolved > Pending > others
+    - If same status, newer row (higher rowIndex) is kept
+  - **Files Modified:**
+    - `src/76-SmartScheduling.gs` - Enhanced deduplication logic in `collectMissingSafetyReportTasks()` (~40 lines added)
+    - `src/88-SafetyReports.gs` - Added `normalizeDateString()` helper, improved `cleanupDuplicateSafetyComplianceTasks()` (~50 lines added)
+  - **Menu Item:** Glove Manager → 🛡️ Safety Reports → 🧹 Cleanup Duplicate Safety Tasks (existing, improved)
+  - **Impact:** Resolved Safety Compliance tasks now stay resolved, duplicates with different date formats properly detected and removed
+
+### February 16, 2026
+- ✅ **Late Submission Tracking for JHA/Safety Meeting**
+  - **Problem:** JHA for 02/13/2026 (week of 02/08) received on 02/16/2026 (week of 02/15) was counting as on-time but should be marked as LATE
+  - **Solution:** Added late submission detection and tracking throughout the system
+  - **How it works:**
+    - `isReportLate(reportDate, receivedDate)` - Compares report date week vs received date week
+    - If email received in a LATER week than the report date → marked as LATE
+    - Late submissions now show **✅L** in Safety Compliance sheet (yellow background, amber text)
+    - On-time submissions show **✅** (green background)
+  - **Safety Reports Sheet:**
+    - Notes column now includes "LATE SUBMISSION - Received MM/DD/YYYY" for late reports
+    - Issue Description shows "Report received LATE - submitted after week deadline"
+  - **SMS Messages:**
+    - Updated `buildMissingSafetyReportMessage()` to handle late submissions
+    - Late submission message: "The JHA for [date] was received late. Be sure to submit them in the same week that they are due."
+  - **New Menu Item:**
+    - Glove Manager → 🛡️ Safety → 🎨 Add Late Submission Formatting
+    - Adds ✅L formatting rule to existing Safety Compliance sheets
+  - **New Functions in `88-SafetyReports.gs`:**
+    - `isReportLate(reportDate, receivedDate)` - Determines if report was submitted late
+    - `addLateSubmissionFormatting()` - Adds ✅L formatting to existing sheet
+    - `menuAddLateSubmissionFormatting()` - Menu function
+  - **Changes to `calculateSafetyCompliance()`:**
+    - Now tracks `jhaLateByDay[]` and `weeklyMeetingLate` per crew
+    - Shows ✅L instead of ✅ for late submissions
+    - Tracks `lateCount` in compliance data for reporting
+  - **Files Modified:**
+    - `src/88-SafetyReports.gs` - Late detection, tracking, formatting (~200 lines added)
+    - `src/ToDoSchedule.html` - Updated SMS message builder for late submissions
+    - `src/Code.gs` - Added menu item
+- ✅ **Menu Cleanup & Legacy Code Archival**
+  - **Streamlined Glove Manager menu** - Reduced from 10+ submenus to 8 organized categories
+  - **Quick Actions is now first item** - Primary entry point for daily workflow
+  - **New menu structure:**
+    - 📱 Quick Actions (primary)
+    - 📊 Reports (generate reports)
+    - 📅 Scheduling (tasks, trip planner, config)
+    - 🛡️ Safety (safety emails, compliance)
+    - 🛒 Purchase Orders
+    - 📧 Email Reports
+    - 📋 History
+    - ⚙️ Setup & Admin
+    - 🧹 Maintenance
+    - 🔧 Advanced (cleanup/debug)
+  - **Removed legacy items:**
+    - "Generate To-Do List" → redirects to generateTaskMetadata
+    - "Clear Completed Tasks" → redirects to archiveOldCompletedTasks
+    - "Archive Old To Do List" → one-time migration, done
+    - Debug menu → moved to Advanced submenu
+  - **Archived legacy files:**
+    - `70-ToDoList.gs` - Now contains only stub redirects
+    - `10-Menu.gs` - Archived, all code moved to Code.gs
+  - **Documentation:** See `docs/MENU_CLEANUP_PLAN.md` for full details
+- ✅ **Fixed Safety Compliance Sheet Not Showing Current Week**
+  - **Problem:** After running "Process Safety Emails", the Safety Compliance sheet wasn't showing the current week (02/15/2026) - only the previous week was visible
+  - **Root Cause:** `processSafetyEmails()` was updating compliance data correctly (logs showed "Updated 15 crew records for week of 02/15/2026"), but new week rows were appended at the **bottom** of the sheet. The `formatComplianceSheetByWeek()` function that sorts and formats the sheet was **not being called** after processing.
+  - **Solution:** Added `formatComplianceSheetByWeek()` call after `finalizePastWeeksCompliance()` in the compliance tracking section of `processSafetyEmails()`
+  - **What it does:**
+    - Sorts Safety Compliance sheet by week (newest at top)
+    - Applies alternating row colors for different weeks
+    - Adds blue border separators between weeks
+  - **Files Modified:**
+    - `src/88-SafetyReports.gs` - Added `formatComplianceSheetByWeek()` call (~line 520)
+  - **Impact:** Current week now appears at the top of Safety Compliance sheet after processing safety emails
+
+### February 15, 2026
+- ✅ **Fixed Duplicate Safety Compliance Tasks**
+  - **Problem:** Matt Miller (and others) showed 2 duplicate tasks for the same week - one with "Missing: JHA" and one with "Missing: JHA & Weekly Meeting"
+  - **Root Cause:** The `generateTaskMetadata()` function was creating duplicate Safety Compliance tasks with a different TaskID format (`SafetyCompliance_[rowIndex]_[date]`) than the original format (`SafetyCompliance_[jobNumber]_[week]`), bypassing duplicate detection
+  - **Solution 1:** Skip Safety Compliance tasks in `generateTaskMetadata()` - they're already managed by `createMissingReportTasks()` with proper TaskIDs
+  - **Solution 2:** Preserve "Resolved" status in `updateComplianceSheet()` - prevents overwriting resolved status when reprocessing emails
+  - **Solution 3:** Add deduplication tracking in `collectMissingSafetyReportTasks()` - tracks seen job+week combinations to prevent showing duplicates in Task List
+  - **Solution 4:** Add cleanup function `cleanupDuplicateSafetyComplianceTasks()` to remove existing duplicates
+  - **New Menu Item:** Glove Manager → 🛡️ Safety Reports → 🧹 Cleanup Duplicate Safety Tasks
+  - **Files Modified:**
+    - `src/Code.gs` - Skip Safety Compliance tasks in generateTaskMetadata(), added menu item
+    - `src/88-SafetyReports.gs` - Preserve "Resolved" status, added cleanup function (~150 lines)
+    - `src/76-SmartScheduling.gs` - Added seenJobWeeks tracking in collectMissingSafetyReportTasks()
+  - **Task Completion After Resolution:** When you record a resolution via the Resolution dialog, the task is now properly:
+    1. Marked as "Complete" in Task Metadata (Status + CompletedDate)
+    2. Safety Compliance sheet status set to "Resolved"
+    3. Excluded from future Task List displays (collectMissingSafetyReportTasks skips completed tasks)
+    4. NOT recreated when processSafetyEmails runs again (duplicate detection + Resolved status preserved)
+
+### February 12, 2026
+- ✅ **Crew Lead Classification Hierarchy**
+  - **Problem:** When no Foreman (F) or GTO F is assigned to a crew, the system was returning the "first employee" instead of the highest-ranked employee by classification
+  - **Example:** Crew 039-26 had Kamron Jones (JRY OP) and Dawson Marcil (AP 4), but Dawson was showing as crew lead because he was listed first
+  - **Solution:** Updated `getCrewLead()` to use a classification hierarchy when selecting crew lead
+  - **Classification Priority (lower = higher rank):**
+    1. F (Foreman) - Primary crew lead
+    2. GTO F (Gas Tech Operator - Foreman)
+    3. GF (General Foreman)
+    4. SUP (Superintendent)
+    5. JRY (Journeyman Lineman)
+    6. JRY OP (Journeyman Operator) ← Now correctly selected over apprentices
+    7. WT (Working Technician)
+    8. GTO (Gas Tech Operator)
+    9. EO 1, EO 2 (Equipment Operators)
+    10. AP 7 → AP 1 (Apprentices by year, 7 is most senior)
+    11. First employee (fallback if no classification matches)
+  - **Files Modified:**
+    - `src/75-Scheduling.gs` - Rewrote `getCrewLead()` function (~70 lines)
+  - **To Update Existing Data:**
+    - Run: Glove Manager → Schedule & To-Do → 🔄 Refresh Training Tracking Crew Leads
+    - Run: Glove Manager → Schedule & To-Do → 🔄 Refresh Crew Visit Config
+- ✅ **Monthly Checklist Progressive Deadline Status**
+  - **Problem:** Monthly Checklist was treated like weekly reports - showing ❌ (red) as soon as the week passed, but it's actually due once per MONTH with deadline on the last work day
+  - **Solution:** Implemented progressive deadline status with graduated urgency colors
+  - **How it works:**
+    - **Weeks 1-2:** ⏳ (yellow/pending) - Plenty of time, no urgency
+    - **Week 3:** ⚠️ (orange/warning) - Getting close, should submit soon
+    - **Week 4/Final week:** ❌⏳ (red hourglass) - Urgent but still has time before month ends
+    - **After month ends:** ❌ (red missing) - Deadline passed, task created
+  - **Status Column Logic (UPDATED):**
+    - If ONLY Monthly Checklist is ⏳ (weeks 1-2) but ALL other reports are ✅ → Status = **Complete**
+    - If Monthly Checklist is ⚠️ or ❌⏳ (week 3+) → Status = **Pending** (unless worse)
+    - If ANY required JHA or Weekly Meeting is missing → Status = **Missing Reports** or **Pending**
+    - Example: Dusty Hendrickson has all JHAs and Weekly Meeting ✅, only Monthly ⏳ → **Complete**
+  - **Task Creation:** Tasks are ONLY created when the month has ended and checklist wasn't received (prevents premature task creation during the month)
+  - **New Functions in `88-SafetyReports.gs`:**
+    - `getWeekOfMonth(date)` - Calculates which week of the month (1-4+) a date falls into
+    - `getMonthlyChecklistStatus(weekStartDate, hasSubmitted, isSkipped)` - Returns `{status, cssClass, shouldCreateTask, affectsStatus}`
+    - `menuAddMonthlyChecklistFormatting()` - Adds new formatting rules to existing sheet
+  - **Key Property: `affectsStatus`**
+    - `affectsStatus: false` (weeks 1-2) → Monthly Checklist doesn't change crew's Status column
+    - `affectsStatus: true` (week 3+) → Monthly Checklist can set Status to Pending
+  - **Conditional Formatting Added:** ⚠️ (orange) and ❌⏳ (red/pink) rules
+  - **New Menu Item:** Glove Manager → Safety Reports → 🎨 Add Monthly Checklist Formatting
+  - **Files Modified:**
+    - `src/88-SafetyReports.gs` - Added ~100 lines: `getWeekOfMonth()`, `getMonthlyChecklistStatus()`, updated `calculateSafetyCompliance()`
+    - `src/Code.gs` - Updated menu item name
+- ✅ **ToDoConfig Dialog Loading Fixes**
+  - **Problem 1:** Close button was opening Schedule Hub instead of closing to spreadsheet
+  - **Problem 2:** Settings tab sections stuck on "Loading..." spinners (Crew Visit Config, Training: Select Crews, Certifications: Select Types)
+  - **Root Cause:** JavaScript error `Cannot read properties of null (reading 'addEventListener')` caused by orphaned event listener for non-existent `schedule-tab` element. This error stopped all subsequent JavaScript from executing.
+  - **Solution:**
+    1. Fixed `closeDialog()` to call `google.script.host.close()` directly
+    2. Removed orphaned event listener for non-existent `schedule-tab`
+    3. Added console logging to all loading functions for debugging
+    4. Added 10-second timeout handling with Retry buttons
+    5. Added error handling with Retry buttons
+  - **Loading Functions Updated:**
+    - `loadCrewVisitConfig()` - 10 sec timeout, retry button
+    - `loadTrainingConfig()` - 10 sec timeout, retry button
+    - `loadExpiringCertsConfig()` - 10 sec timeout, retry button
+    - `loadExcludedPrefixes()` - console logging
+    - `loadEmployeeCertsData()` - 15 sec timeout, retry button
+    - `loadTrainingConfigData()` - 10 sec timeout, retry button
+    - `loadTrainingTrackingData()` - 10 sec timeout, retry button
+  - **Files Modified:**
+    - `src/ToDoConfig.html` - All loading functions updated, removed orphan event listener
+- ✅ **Crew Visit Config & Training - Job Prefix Exclusion**
+  - **Problem:** JT Kale (Light Duty, job 005-26.27) was appearing in Crew Visit Config and Training tasks even though Light Duty employees shouldn't need field visits or training
+  - **Solution:** Implemented job prefix-based exclusion for Crew Visits and Training
+  - **How it works:**
+    - Employees with job numbers starting with excluded prefixes are automatically excluded
+    - Default excluded prefixes: `002` (Lost/Destroyed), `005` (Light Duty)
+    - When employee moves to Light Duty (job 005-xx), they're excluded automatically
+    - When employee returns to field crew (job 013-xx), they're included automatically
+  - **What's excluded:**
+    - Crew Visit Config - Light Duty crews won't appear
+    - Training Tasks - Light Duty employees won't get training tasks
+  - **What's NOT excluded:**
+    - Glove/Sleeve Swaps - Still managed normally
+    - Expiring Certs - Certs still tracked
+  - **New Functions:**
+    - `isExcludedJobPrefix(jobNumber)` - Checks if job should be excluded
+    - `getExcludedJobPrefixesInternal()` - Gets exclusion list from config
+    - `refreshCrewVisitConfig()` - Updates crews while preserving user data
+    - `getExcludedJobPrefixes()` / `saveExcludedJobPrefixes()` - API functions
+  - **Modified Functions:**
+    - `getActiveCrews()` - Now skips excluded job prefixes
+    - `getCrewLead()` - Now skips excluded job prefixes
+    - `getCrewSize()` - Now skips excluded job prefixes
+    - `collectTrainingTasks()` - Now checks assignee's current job number
+  - **New UI:** Schedule Config → "🚫 Exclude Job Prefixes" section
+    - View current excluded prefixes as red badges
+    - Add/remove prefixes
+  - **New Menu Item:** Glove Manager → Schedule & To-Do → 🔄 Refresh Crew Visit Config
+  - **Files Modified:**
+    - `src/75-Scheduling.gs` - Added exclusion functions, modified crew functions
+    - `src/76-SmartScheduling.gs` - Modified collectTrainingTasks()
+    - `src/Code.gs` - Added API functions and menu item
+    - `src/ToDoConfig.html` - Added excluded prefixes UI
+- ✅ **Missing Report Resolution Dialog (Stage 2 for Safety Compliance)**
+  - **Problem:** After sending SMS notification (Stage 1), the "Send Class Schedule" button (Stage 2) was showing for Missing Safety Report tasks - but class scheduling doesn't apply to safety compliance, it's for cert renewals
+  - **Solution:** Created new "Record Resolution" dialog for Safety Compliance tasks that allows recording why each missing day's report was not received
+  - **What Was Added:**
+    - **New Modal:** `missingReportResolutionModal` in ToDoSchedule.html
+      - Shows foreman name, week date, and list of missing days
+      - For each missing day, dropdown with reasons: "Did Not Do", "Complete But Forgot to Send", "App Didn't Send", "Did Not Work"
+      - Weekly Meeting section if that's also missing
+      - Legend showing status code meanings
+    - **New Backend Function:** `recordMissingReportResolutions()` in 88-SafetyReports.gs
+      - Updates Safety Compliance sheet cells with resolution codes (❌D, ❌F, ❌A, ❌W)
+      - Auto-completes the Task Metadata entry when all resolutions are recorded
+      - Updates row status to "Resolved"
+    - **SMS Notification Updates Sheet:** `markSafetyReportNotified()` function
+      - When Stage 1 SMS is sent, all ❌ cells turn to ❌🔔 (orange/notified)
+      - Called automatically from `sendNotifySMS()` for safety compliance tasks
+    - **New Conditional Formatting:** `addResolutionFormattingRules()` function
+      - ❌D = Did Not Do → Red background, bold red text
+      - ❌F = Forgot to Send → Yellow background
+      - ❌A = App Issue → Light orange background
+      - ❌W = Did Not Work → Gray background (similar to N/A)
+      - ❌🔔 = Notified → Orange background
+  - **UI Changes:**
+    - Stage 2 button for Safety Compliance tasks now shows clipboard icon and "Record resolution" title
+    - Button changes to "Edit resolutions" after recording
+    - `openScheduledModal()` now redirects to new modal for Missing Safety Report tasks
+  - **New Menu Item:**
+    - Glove Manager → 🛡️ Safety Reports → 🎨 Add Resolution Formatting
+  - **Files Modified:**
+    - `src/ToDoSchedule.html` - New modal HTML, new JS functions, modified button rendering
+    - `src/88-SafetyReports.gs` - Added ~350 lines of resolution functions
+    - `src/Code.gs` - Added menu item
+  - **Workflow:**
+    1. Missing Safety Report task appears in Task List
+    2. Click SMS button (Stage 1) → sends notification, sheet updates to ❌🔔 (orange)
+    3. Click clipboard button (Stage 2) → opens Resolution dialog
+    4. Select reason for each missing day → Save
+    5. Sheet updates with codes (❌D, ❌F, etc.), task auto-completes
 
 ### February 10, 2026
 - ✅ **Fixed Process Safety Emails - Job Number Normalization**
@@ -1499,3 +1903,310 @@ Notes: [Any notes]
   - Overnight checkbox now shows location name: "🏨 Overnight in [Location]"
   - Better flow between End location and Overnight selection
 
+### February 16, 2026
+- ✅ **Menu Cleanup & Legacy Code Archival**
+  - **Streamlined Glove Manager menu** - Reduced from 10+ submenus to 8 organized categories
+  - **Quick Actions is now first item** - Primary entry point for daily workflow
+  - **New menu structure:**
+    - 📱 Quick Actions (primary)
+    - 📊 Reports (generate reports)
+    - 📅 Scheduling (tasks, trip planner, config)
+    - 🛡️ Safety (safety emails, compliance)
+    - 🛒 Purchase Orders
+    - 📧 Email Reports
+    - 📋 History
+    - ⚙️ Setup & Admin
+    - 🧹 Maintenance
+    - 🔧 Advanced (cleanup/debug)
+  - **Removed legacy items:**
+    - "Generate To-Do List" → redirects to generateTaskMetadata
+    - "Clear Completed Tasks" → redirects to archiveOldCompletedTasks
+    - "Archive Old To Do List" → one-time migration, done
+    - Debug menu → moved to Advanced submenu
+  - **Archived legacy files:**
+    - `70-ToDoList.gs` - Now contains only stub redirects
+    - `10-Menu.gs` - Archived, all code moved to Code.gs
+  - **Documentation:** See `docs/MENU_CLEANUP_PLAN.md` for full details
+
+### February 18, 2026
+- ✅ **Option C Implementation - Unassigned Tasks & Status Standardization**
+  - **Major Changes:**
+    1. **Renamed Trip Planner → "Trip Planner / Scheduler"** - Now the primary scheduling interface
+    2. **Renamed "Unassigned Locations" → "📋 Unassigned Tasks"** - Shows individual tasks under location headers
+    3. **Removed Calendar tab from Task List** - Use Trip Planner / Scheduler for scheduling
+    4. **Standardized status values** across entire system
+  - **New Standardized Statuses:**
+    - `Unassigned` - No scheduled date (replaces "Pending")
+    - `Assigned` - Has scheduled date (replaces "Scheduled")
+    - `Complete` - Task finished
+    - `Overdue` - Past due date, not complete
+    - `Deferred` - Intentionally postponed (new)
+  - **Unassigned Tasks Sidebar:**
+    - Collapsible location headers (📍 Bozeman, 📍 Livingston, etc.)
+    - Individual task cards under each location (draggable)
+    - Each task shows: icon, employee name, task type, due date, urgency dot
+    - Right-click context menu for quick actions
+  - **Right-Click Context Menu:**
+    - 📅 Schedule Next Week - Assigns to Monday of next week
+    - 📅 Schedule in 2 Weeks - Assigns to Monday 2 weeks out
+    - ⏸️ Defer Task - Sets status to Deferred (shows badge)
+    - ↩️ Remove Deferred Status - Removes deferred status
+    - 👁️ View Details - Shows full task info popup
+  - **Individual Task Dragging:**
+    - Drag single task to calendar day (not entire location)
+    - If location exists on day, merges task into it
+    - If not, creates new location entry
+    - Task removed from unassigned sidebar
+  - **Migration Function:**
+    - `menuMigrateTaskStatuses()` - Converts old statuses to new format
+    - Mapping: Pending→Unassigned, Scheduled→Assigned, Declined→Deferred
+    - Menu: Glove Manager → Maintenance → 🔄 Migrate Task Statuses
+  - **Files Modified:**
+    - `src/TripPlanner.html` - Complete sidebar rewrite, individual task cards, context menu, drag handling
+    - `src/ToDoSchedule.html` - Removed Calendar tab, added status CSS, stub renderCalendar()
+    - `src/Code.gs` - Status migration function, updated status validation
+    - `src/87-RoutePlanner.gs` - Updated default status to 'Unassigned'
+  - **Impact:** Trip Planner is now the central scheduling interface, task assignment is more granular
+  - **Documentation:** See `docs/OPTION_C_IMPLEMENTATION.md` for full details
+- ✅ **Fixed Task Metadata Data Validation Error**
+  - **Problem:** Error when saving tasks: "The data you entered in cell O2 violates the data validation rules"
+  - **Cause:** Old validation rules (Pending, Scheduled, etc.) still in place on existing Task Metadata sheet
+  - **Solution:** Migration function now:
+    1. Clears old data validation FIRST (prevents write errors)
+    2. Updates all status values using mapping
+    3. Re-applies new validation rules
+  - **Files Modified:** `src/Code.gs` - Updated `migrateTaskMetadataStatuses()`
+- ✅ **Fixed `resolvedCrews is not defined` Error**
+  - **Problem:** Safety compliance tracking failed with "ReferenceError: resolvedCrews is not defined"
+  - **Location:** `88-SafetyReports.gs` in `calculateSafetyCompliance()` function
+  - **Cause:** Variable used but never initialized
+  - **Solution:** Added initialization code to load resolved crews from Safety Compliance sheet
+  - **Files Modified:** `src/88-SafetyReports.gs` - Added ~30 lines to load resolved crews
+
+### February 17, 2026
+- ✅ **Duplicate Function Cleanup - Code.gs Refactoring**
+  - **Problem:** Multiple duplicate function definitions across .gs files causing potential conflicts
+  - **Solution:** Consolidated duplicates, kept canonical versions in appropriate domain modules
+  - **Changes Made:**
+    1. **`getActiveCrews()`** - REMOVED from `88-SafetyReports.gs` (lines 2009-2048)
+       - Canonical version in `75-Scheduling.gs:264` now used everywhere
+       - Uses `isExcludedJobPrefix()` for consistent crew filtering
+    2. **`getEmployeePhoneMap()`** - Renamed in `76-SmartScheduling.gs`
+       - Renamed to `getEmployeePhoneMapInternal(ss)` to avoid conflict
+       - `Code.gs` wrapper calls the canonical version
+       - Removed `getEmployeePhoneMapForTasks()` from Code.gs (75 lines)
+    3. **`formatDateForDisplay()`** - REMOVED duplicate from `Code.gs:13059`
+       - Canonical version at `Code.gs:6514` (Item Lookup section) remains
+       - Was duplicate in legacy TO-DO LIST section
+    4. **`formatDateForHistory()`** - REMOVED from `Code.gs:12440`
+       - Canonical version in `50-History.gs:176` now used
+       - Includes `parseDateFlexible()` for robust date parsing
+  - **Files Modified:**
+    - `src/Code.gs` - Removed ~95 lines of duplicate code
+    - `src/76-SmartScheduling.gs` - Renamed function to avoid conflict
+    - `src/88-SafetyReports.gs` - Removed duplicate, uses 75-Scheduling version
+  - **Impact:** Reduced Code.gs from 15,091 to 14,994 lines (~97 lines removed)
+  - **Testing:** Deployed successfully via `.\push.bat`, all 51 files pushed
+- ✅ **Fixed Missing Safety Report Tasks Not Auto-Completing on Resolution**
+  - **Problem:** When recording resolutions via the Resolution dialog, tasks were marked Complete but would return when "Process Safety Emails" ran again
+  - **Root Cause:** Multiple issues in the compliance tracking flow:
+    1. `updateComplianceSheet()` was preserving "Resolved" status but overwriting the resolution codes (❌D, ❌F, etc.) with newly calculated ❌ values
+    2. `calculateSafetyCompliance()` was recalculating all crews from scratch, not checking for already-resolved crews
+  - **Solution:** Three-part fix:
+    1. **`calculateSafetyCompliance()`** - Now loads resolved statuses from Safety Compliance sheet at start, skips crews with "Resolved" status entirely (adds them with `status: 'Resolved'` to prevent task creation)
+    2. **`updateComplianceSheet()`** - Now fully skips rows with "Resolved" status instead of just preserving the status column (preserves all data including resolution codes)
+    3. **`createMissingReportTasks()`** - Already correctly skips crews with status !== 'Missing Reports', now works properly since resolved crews have `status: 'Resolved'`
+  - **Files Modified:**
+    - `src/88-SafetyReports.gs` - Added ~30 lines to `calculateSafetyCompliance()`, modified `updateComplianceSheet()`
+  - **Resolution Workflow Now:**
+    1. User clicks "Record Resolution" for Missing Safety Report task
+    2. `recordMissingReportResolutions()` updates Safety Compliance cells with codes (❌D, ❌F, etc.) and sets row Status = "Resolved"
+    3. Task Metadata entry marked Complete
+    4. On next "Process Safety Emails" run:
+       - `calculateSafetyCompliance()` sees crew is "Resolved" → skips recalculation
+       - `updateComplianceSheet()` sees "Resolved" status → skips row entirely (preserves resolution codes)
+       - `createMissingReportTasks()` sees `status: 'Resolved'` → doesn't create new task
+    5. Task stays completed, doesn't return
+- ✅ **Fixed "Last Processed: Loading..." in Process Safety Emails Dialog**
+  - **Problem:** Dialog always showed "Loading..." instead of actual last processed timestamp
+  - **Root Cause:** Function `getLastSafetyEmailProcessedTime()` called by dialog didn't exist
+  - **Solution:** Added the missing function to `88-SafetyReports.gs`
+  - **Files Modified:** `src/88-SafetyReports.gs` - Added ~15 lines
+
+### February 18, 2026 (Session 2)
+- ✅ **Process Safety Emails - Job Number Configuration**
+  - **Goal:** Allow users to pre-configure job→foreman mappings and handle unknown job numbers during processing
+  - **New Features:**
+    1. **Job Configuration Section** in Process Safety Emails dialog
+       - Collapsible table showing all foremen with their job numbers (up to 3 per row)
+       - Pre-populated from Employees sheet (primary + secondary job columns)
+       - "+ Add Row" button to add temporary/unexpected job numbers
+       - "Custom" badge for user-added rows
+       - Custom mappings persist between sessions (ScriptProperties)
+    2. **Unknown Jobs Popup** during processing
+       - When job number not in configuration or Employees sheet, shows modal
+       - Options: Assign to foreman (dropdown) OR skip this report
+       - "Apply & Continue" or "Skip All" buttons
+       - Temporary assignments only apply to current batch
+  - **Secondary Job Number Column Migration:**
+    - New `addSecondaryJobNumberColumn()` function in `22-EmployeeValidation.gs`
+    - Adds column at END of Employees sheet (safe - no column shifting)
+    - Menu: Glove Manager → 🔧 Utilities → 📋 Add Secondary Job Column
+    - New Employees sheets now include "Secondary Job Number" in headers
+  - **New Functions in `88-SafetyReports.gs`:**
+    - `getJobForemanMappingsForDialog()` - Returns foremen with all their job numbers
+    - `saveCustomJobForemanMappings()` / `getCustomJobForemanMappings()` - Persist custom mappings
+    - `lookupForemanWithCustomMapping()` - Check custom mappings first, then Employees
+    - `applyUnknownJobDecisions()` - Handle user's assign/skip decisions
+    - `storeUnknownJobsForPrompt()` / `getPendingUnknownJobs()` - Track unknown jobs
+  - **Dialog Changes in `ProcessSafetyEmailsDialog.html`:**
+    - Added collapsible "📋 Job Number Configuration" section
+    - Added "Unknown Jobs Modal" for runtime prompts
+    - Dialog size increased from 500x550 to 550x700
+    - Custom mappings saved before processing starts
+  - **Files Modified:**
+    - `src/22-EmployeeValidation.gs` - Added ~100 lines (migration function)
+    - `src/Code.gs` - Updated empHeaders array, added menu item
+    - `src/88-SafetyReports.gs` - Added ~350 lines (job mapping functions)
+    - `src/ProcessSafetyEmailsDialog.html` - Complete redesign with job config
+    - `src/85-DataImport.gs` - Added secondary job number support in applyCrewChanges()
+    - `src/CrewImport.html` - Captures secondary jobs from duplicate employee selections
+  - **Documentation:** `docs/SAFETY_EMAIL_JOB_CONFIG_FEB18.md`
+- ✅ **Crew Import - Secondary Job Number Support**
+  - When an employee appears in multiple crews during import:
+    - Primary job (selected) → saved to "Job Number" column
+    - Secondary job (non-selected) → saved to "Secondary Job Number" column
+  - Example: Employee works M-Th on 013-26, Fri-Sat on 015-26
+    - Job Number: `013-26.1` (primary)
+    - Secondary Job Number: `015-26` (secondary)
+  - Changes logged to Employee History with "Secondary Job" notation
+  - Prerequisite: Run "Add Secondary Job Column" from Utilities menu first
+  - **Files Modified:**
+    - `src/85-DataImport.gs` - Added secondaryJobNumCol lookup and update logic
+    - `src/CrewImport.html` - Builds secondaryJobMap from duplicate employee selections
+
+### February 19, 2026
+- ✅ **Fixed Received Date Column Truncation in Safety Reports**
+  - **Problem:** Compliance records were written with only 12 columns, but the array has 13 elements (including Received Date at index 12)
+  - **Root Cause:** Code used `.setValues(complianceRecords)` with column count of 12, truncating the Received Date column
+  - **Impact:** 
+    - Received Date column (M) in Safety Reports sheet was always empty
+    - Late submission detection failed because received dates weren't stored
+    - Uncredited jobs display showed incorrect dates
+  - **Solution:** Changed column count from 12 to 13 in both locations:
+    - `processSafetyEmails()` line 871
+    - `applyJobNumberCorrections()` line 1327
+  - **Files Modified:** `src/88-SafetyReports.gs` - 2 lines changed
+  - **Documentation:** `docs/PDF_PROCESSING_IMPROVEMENTS_FEB19.md`
+- ✅ **Uncredited Jobs Display After Safety Email Processing - ENHANCED**
+  - **Goal:** After processing emails, show which job numbers in Gmail were NOT credited to any tracked crew, and allow assigning individual reports to specific crews and missing days
+  - **New Features:**
+    - After compliance tracking completes, dialog shows "⚠️ Uncredited Job Numbers Found"
+    - Each uncredited job shows individual report cards with:
+      - Report type (JHA, Safety Meeting) and day name (Mon, Tue, etc.)
+      - Report Date (when the work was done)
+      - Received Date (when the email was received)
+      - Crew dropdown to select target crew
+      - Day dropdown showing ONLY missing days for selected crew
+      - "Credit" button to assign the report
+      - "Remember" checkbox to save as permanent mapping
+  - **How Jobs Become Uncredited:**
+    - Not a direct tracked crew (e.g., 054-26 not in Employees sheet)
+    - No foreman mapping found (neither primary/secondary job, nor custom mapping)
+    - Foreman found but has no primary crew tracked
+  - **Individual Report Assignment Flow:**
+    1. Select target crew from dropdown
+    2. System loads that crew's missing days for the report's week
+    3. Day dropdown shows options like "JHA - Mon (02/17/2026)" or "Weekly Meeting (week of 02/15/2026)"
+    4. Select the appropriate missing day
+    5. Click "Credit" to:
+       - Update Safety Reports sheet (change job number to target crew)
+       - Mark the day as ✅ in Safety Compliance sheet
+       - Optionally save a permanent mapping (if "Remember" is checked)
+  - **New Backend Functions:**
+    - `creditUncreditedReport(assignmentDataJson)` - Credits a report to a specific crew/day
+    - `getMissingDaysForCrew(crewJob, weekStart)` - Returns missing days for a crew in a week
+    - `getTrackedCrewsForAssignment()` - Returns list of tracked crews for dropdown
+    - `resolveToPrimaryCrew()` - Enhanced to track individual reports with full details
+  - **Technical Changes:**
+    - `calculateSafetyCompliance()` - Tracks uncredited jobs with `reports` array containing full details
+    - Each report tracks: reportType, reportDate, receivedDate, dayOfWeek, dayName, emailSubject
+    - Dialog shows new individual report cards with crew/day assignment UI
+  - **Files Modified:**
+    - `src/88-SafetyReports.gs` - ~250 lines for enhanced uncredited tracking and creditUncreditedReport function
+    - `src/ProcessSafetyEmailsDialog.html` - ~200 lines for individual report cards UI
+  - **Documentation:** `docs/UNCREDITED_JOBS_FEATURE_FEB19.md`
+- ✅ **Fixed Task Metadata Data Validation Error**
+  - **Problem:** `generateTaskMetadata()` failed with "The data you entered in cell O59 violates the data validation rules"
+  - **Cause:** Existing rows had old status values (e.g., "Pending") that failed new validation (Unassigned, Assigned, Complete, Overdue, Deferred)
+  - **Solution:** `generateTaskMetadata()` now:
+    1. Clears data validation on Status column (O) before writing
+    2. Writes all records
+    3. Reapplies validation with standardized values
+  - **Files Modified:** `src/Code.gs` - ~15 lines added
+- ✅ **Late Submission Detection - Now Uses PDF Date Completed**
+  - **Problem:** Late submission detection was using the email subject date, but the actual "Date Completed" in the JHA PDF is more accurate (and can differ from subject date)
+  - **Example:** Email subject shows "02-17-2026" but PDF contains JHAs for 02/09, 02/10, 02/11 - these should be marked LATE
+  - **New Late Detection Rule:** If Date Received week ≠ Date Completed week → LATE
+  - **New Features:**
+    1. **PDF Date Extraction** - Extracts "Date Completed" from JHA PDF text
+    2. **Multiple JHAs Per Email** - Handles PDFs with multiple JHAs (one per page, different dates)
+    3. **Independent Late Detection** - Each JHA is independently checked for late submission
+  - **PDF Date Extraction Patterns:**
+    - `Date Completed: 02/09/2026`
+    - `Date Completed 02-09-2026`
+    - `Completed: 02/09/26`
+    - Various date formats (MM/DD/YYYY, MM-DD-YYYY, MM/DD/YY)
+  - **Compliance Record Notes:**
+    - Single JHA: "Date from PDF Date Completed field"
+    - Multiple JHAs: "Date from PDF (1 of 3 JHAs in email)"
+    - Late submission: "LATE SUBMISSION - Received MM/DD/YYYY"
+  - **New Functions in `88-SafetyReports.gs`:**
+    - `extractDatesCompletedFromJHAPDF(pdfText)` - Extracts all Date Completed values from PDF
+    - `parseFlexibleDate(dateStr)` - Parses dates in various formats
+  - **Modified:**
+    - `parseSafetyEmail()` - Now extracts PDF for JHAs and reads Date Completed
+    - Compliance record creation - Now handles multiple JHAs per email
+    - `isReportLate()` - Now compares PDF Date Completed vs Received Date
+  - **Impact:** More accurate late submission tracking, correct handling of batched JHAs
+- ✅ **Auto-Correction of Past Week Compliance Data (Option B)**
+  - **Problem:** When a JHA email is received in the **current week** but the PDF contains JHAs with "Date Completed" from a **past week**, the compliance tracking was not correctly crediting the past week
+  - **Example:**
+    - Email received: 02/17/2026 (week of 02/15)
+    - PDF contains JHAs with Date Completed: 02/09, 02/10, 02/11 (week of 02/08) ← PAST WEEK
+    - Safety Compliance for week 02/08 still showed ❌ for Mon/Tue/Wed
+  - **Solution:** `autoCorrectPastWeekCompliance()` function now runs after compliance records are written
+    - Scans newly written compliance records for JHAs
+    - For each JHA, checks if report date falls in a **past week** (before current processing week)
+    - If past week row exists in Safety Compliance sheet:
+      - Finds correct day column (Mon, Tue, etc.) based on report date
+      - Updates ❌ or ⏳ cells to ✅ (or ✅L if late submission)
+      - Updates crew status to "Complete" if all required reports now received
+  - **Where it runs:**
+    - After `complianceRecords` are written in `processSafetyEmails()`
+    - After `finalCompliance` records are written in `applyJobNumberCorrections()`
+  - **Example Flow:**
+    - **Before:** Week 02/08: Mon ❌, Tue ❌, Wed ❌, Status: "Missing Reports"
+    - **After auto-correction:** Week 02/08: Mon ✅L, Tue ✅L, Wed ✅L, Status: "Complete"
+  - **Files Modified:**
+    - `src/88-SafetyReports.gs` - Added `autoCorrectPastWeekCompliance()` function (~110 lines)
+    - `src/88-SafetyReports.gs` - Added call after compliance record writing in two locations
+  - **Documentation:** `docs/UNCREDITED_JOBS_FEATURE_FEB19.md` (updated with Option B section)
+- ✅ **Simplified JHA Tracking - Only Date Completed & Date Received**
+  - **Problem:** Safety Reports sheet was cluttered with hundreds of "No Issues" compliance tracking rows
+  - **Solution:** JHA/Safety Meeting compliance tracking now ONLY goes to Safety Compliance sheet - NOT Safety Reports
+  - **New Architecture:**
+    - **Safety Compliance sheet** - ✅/❌ grid per crew per day (JHA tracking)
+    - **Safety Reports sheet** - ONLY actual equipment issues (fire extinguishers, hot sticks, etc.)
+  - **Changes Made:**
+    1. **Stopped writing JHA "No Issues" records to Safety Reports**
+       - Modified `processSafetyEmails()` to NOT write compliance records to Safety Reports
+       - Modified `applyJobNumberCorrections()` same fix
+       - Compliance records still processed for auto-correction, just not stored in Safety Reports
+    2. **Added cleanup function** `cleanupSafetyReportsSheet()` to remove existing "No Issues" rows
+       - Menu: Glove Manager → 🛡️ Safety Reports → 🧹 Cleanup Safety Reports
+       - Removes all rows where Equipment Type = "No Issues"
+  - **Files Modified:**
+    - `src/88-SafetyReports.gs` - Added cleanupSafetyReportsSheet(), modified compliance record writing
+    - `src/Code.gs` - Added menu item
+  - **Documentation:** `docs/PDF_PROCESSING_IMPROVEMENTS_FEB19.md` (updated with cleanup section)

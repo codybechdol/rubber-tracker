@@ -600,6 +600,84 @@
       background: #c8e6c9;
     }
 
+    /* Later tasks (grey dot - non-urgent) */
+    .unassigned-card.later-task {
+      background: #f5f5f5;
+      border: 1px solid #bdbdbd;
+      opacity: 0.85;
+    }
+
+    .unassigned-card.later-task:hover {
+      background: #eeeeee;
+      opacity: 1;
+    }
+
+    /* Section headers in sidebar */
+    .sidebar-section-header {
+      font-size: 11px;
+      font-weight: 600;
+      color: #666;
+      text-transform: uppercase;
+      margin: 10px 0 5px 0;
+      padding: 3px 5px;
+      background: #f0f0f0;
+      border-radius: 3px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .sidebar-section-header .count {
+      background: #1565c0;
+      color: white;
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 8px;
+    }
+
+    .sidebar-section-header.urgent {
+      background: #fff3e0;
+      color: #e65100;
+    }
+
+    .sidebar-section-header.urgent .count {
+      background: #ff9800;
+    }
+
+    .sidebar-section-header.later {
+      background: #f5f5f5;
+      color: #757575;
+    }
+
+    .sidebar-section-header.later .count {
+      background: #9e9e9e;
+    }
+
+    /* Collapsible section */
+    .collapsible-section {
+      margin-bottom: 10px;
+    }
+
+    .collapsible-header {
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .collapsible-header:hover {
+      opacity: 0.8;
+    }
+
+    .collapsible-content {
+      max-height: 200px;
+      overflow-y: auto;
+      transition: max-height 0.3s ease-out;
+    }
+
+    .collapsible-content.collapsed {
+      max-height: 0;
+      overflow: hidden;
+    }
+
     /* Office task dialog inputs */
     .office-task-entry {
       padding: 10px;
@@ -723,6 +801,227 @@
     .empty-state .icon {
       font-size: 32px;
       margin-bottom: 10px;
+    }
+
+    /* Draggable office task card */
+    .office-task-card.draggable {
+      cursor: grab;
+      border: 1px solid #81c784 !important;
+      background: #f1f8e9 !important;
+      transition: all 0.2s;
+      border-radius: 4px;
+    }
+
+    .office-task-card.draggable:hover {
+      background: #e8f5e9 !important;
+      border-color: #4caf50 !important;
+      box-shadow: 0 2px 4px rgba(76,175,80,0.2);
+    }
+
+    .office-task-card.draggable:active,
+    .office-task-card.draggable.dragging {
+      cursor: grabbing;
+      opacity: 0.5;
+    }
+
+    .office-task-card .drag-hint {
+      font-size: 9px;
+      color: #4caf50;
+      margin-top: 3px;
+    }
+
+    /* Helena Office location card on calendar */
+    .location-card.helena-office {
+      background: #e8f5e9;
+      border: 1px solid #4caf50;
+      border-left: 3px solid #2e7d32;
+    }
+
+    .location-card.helena-office:hover {
+      background: #c8e6c9;
+      border-color: #2e7d32;
+    }
+
+    .location-card.helena-office .location-name {
+      color: #2e7d32;
+    }
+
+    /* Unscheduled tasks section (backlog) */
+    .sidebar-section.unscheduled-section {
+      background: #fafafa;
+      border: 1px dashed #bdbdbd;
+    }
+
+    .sidebar-section.unscheduled-section h3 {
+      color: #757575;
+    }
+
+    .unscheduled-card {
+      background: #f5f5f5;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      padding: 6px 8px;
+      margin-bottom: 5px;
+      cursor: grab;
+      opacity: 0.85;
+    }
+
+    .unscheduled-card:hover {
+      background: #eeeeee;
+      opacity: 1;
+      border-color: #9e9e9e;
+    }
+
+    /* Drop zone styling for unassigned list */
+    #unassignedList.drag-over-unassigned {
+      background: #fff3e0;
+      border: 2px dashed #ff9800;
+      border-radius: 4px;
+    }
+
+    /* Drop zone styling for office tasks list */
+    #officeTasksList.drag-over-office {
+      background: #e8f5e9;
+      border: 2px dashed #4caf50;
+      border-radius: 4px;
+    }
+
+    /* Location group in unassigned tasks sidebar */
+    .location-group {
+      margin-bottom: 8px;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .location-group-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 8px;
+      background: #f5f5f5;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      color: #333;
+      user-select: none;
+    }
+
+    .location-group-header:hover {
+      background: #eeeeee;
+    }
+
+    .location-group-header .location-name {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .location-group-header .task-count-badge {
+      background: #1565c0;
+      color: white;
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 8px;
+      font-weight: normal;
+    }
+
+    .location-group-header .collapse-icon {
+      transition: transform 0.2s;
+    }
+
+    .location-group-header.collapsed .collapse-icon {
+      transform: rotate(-90deg);
+    }
+
+    .location-group-tasks {
+      border-top: 1px solid #e0e0e0;
+    }
+
+    .location-group-tasks.collapsed {
+      display: none;
+    }
+
+    /* Individual unassigned task card */
+    .unassigned-task-card {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 6px 8px;
+      background: #fff;
+      border-bottom: 1px solid #f0f0f0;
+      cursor: grab;
+      font-size: 11px;
+      transition: background 0.2s;
+    }
+
+    .unassigned-task-card:last-child {
+      border-bottom: none;
+    }
+
+    .unassigned-task-card:hover {
+      background: #fff3e0;
+    }
+
+    .unassigned-task-card:active {
+      cursor: grabbing;
+    }
+
+    .unassigned-task-card.dragging {
+      opacity: 0.5;
+    }
+
+    .unassigned-task-card .task-icon {
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+
+    .unassigned-task-card .task-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .unassigned-task-card .task-title {
+      font-weight: 500;
+      color: #333;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .unassigned-task-card .task-subtitle {
+      font-size: 10px;
+      color: #666;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .unassigned-task-card .urgency-indicator {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      margin-top: 3px;
+    }
+
+    /* Deferred badge */
+    .deferred-badge {
+      background: #9e9e9e;
+      color: white;
+      font-size: 9px;
+      padding: 1px 4px;
+      border-radius: 3px;
+      margin-left: 4px;
+    }
+
+    .unassigned-task-card.deferred {
+      opacity: 0.7;
+      background: #fafafa;
+    }
+
+    .unassigned-task-card.deferred:hover {
+      opacity: 1;
     }
 
     /* Drop zone indicator */
@@ -1036,7 +1335,7 @@
 </head>
 <body>
   <div class="header">
-    <h2>🗺️ Trip Planner</h2>
+    <h2>🗺️ Trip Planner / Scheduler</h2>
     <div class="header-buttons">
       <button class="btn btn-secondary" onclick="refreshTasks()">🔄 Refresh Tasks</button>
       <button class="btn btn-secondary" onclick="resetPlan()">↩️ Reset</button>
@@ -1057,10 +1356,25 @@
     </div>
 
     <div class="sidebar">
+      <!-- Unassigned Tasks Section (individual tasks grouped by location) -->
       <div class="sidebar-section">
-        <h3>📋 Unassigned Locations</h3>
-        <div id="unassignedList" class="unassigned-list">
-          <!-- Unassigned locations will be listed here -->
+        <h3>📋 Unassigned Tasks</h3>
+        <div class="unassigned-hint" style="font-size: 11px; color: #666; margin-bottom: 8px; padding: 5px; background: #f5f5f5; border-radius: 4px;">
+          Drag individual tasks to a day to schedule
+        </div>
+        <div id="unassignedList" class="unassigned-list" style="max-height: 350px;">
+          <!-- Unassigned tasks grouped by location will be listed here -->
+        </div>
+      </div>
+
+      <!-- Office/Phone Tasks Section -->
+      <div class="sidebar-section">
+        <h3>📞 Office/Phone Tasks</h3>
+        <div class="unassigned-hint" style="font-size: 11px; color: #666; margin-bottom: 8px; padding: 5px; background: #e8f5e9; border-radius: 4px;">
+          <span style="color: #2e7d32;">🖐️ Drag to a day</span> to schedule, or handle via phone
+        </div>
+        <div id="officeTasksList" class="unassigned-list" style="max-height: 250px;">
+          <!-- Office tasks will be listed here -->
         </div>
       </div>
 
@@ -1661,9 +1975,15 @@
       card.dataset.locIndex = locIndex;
       card.dataset.location = loc.location;
 
+      // Add special class for Helena Office
+      if (loc.location === 'Helena Office' || loc.isOfficeLocation) {
+        card.classList.add('helena-office');
+      }
+
       // Handle locked tasks - not draggable
       var isLocked = loc.isLocked || false;
       var isManualTask = loc.isManualTask || false;
+      var isOfficeLocation = loc.isOfficeLocation || loc.location === 'Helena Office';
 
       // Handle locked tasks
       // Locked tasks can still be reordered within the same day if allowTimeChange is true
@@ -1719,13 +2039,18 @@
         lockedIcon = '<span class="locked-icon" title="Locked to day, time flexible">🔒⏱️</span>';
       }
 
+      // Office location special handling
+      var locationIcon = isOfficeLocation ? '🏢 ' : '';
+      var officeBadge = isOfficeLocation ? '<span class="manual-task-badge" style="background: #e8f5e9; color: #2e7d32;">Office</span>' : '';
+
       var cardHtml = '<div class="location-name">' +
           '<span class="urgency-dot ' + urgencyClass + '"></span>' +
-          loc.location +
+          locationIcon + loc.location +
           '<span class="task-count">' + loc.taskCount + '</span>' +
           (loc.isNew ? '🆕' : '') +
           lockedIcon +
           (isManualTask ? '<span class="manual-task-badge">Manual</span>' : '') +
+          officeBadge +
         '</div>' +
         '<div class="location-direction">' + loc.direction + '</div>';
 
@@ -2231,129 +2556,664 @@
       return 'urgency-later';
     }
 
-    // Render unassigned locations
+    // Get urgency color for indicator dot
+    function getUrgencyColor(urgency) {
+      if (urgency >= 100) return '#f44336'; // red - overdue
+      if (urgency >= 80) return '#ff9800';  // orange - due soon
+      if (urgency >= 50) return '#ffc107';  // yellow - this week
+      if (urgency >= 20) return '#4caf50';  // green - next week
+      return '#9e9e9e';                      // grey - later
+    }
+
+    // Render unassigned tasks (individual tasks grouped by location)
     function renderUnassigned() {
       const container = document.getElementById('unassignedList');
       container.innerHTML = '';
 
-      // Add Office card first if there are office tasks
-      var officeTasks = tripPlan.officeTasks || [];
-      if (officeTasks.length > 0) {
-        var officeCard = document.createElement('div');
-        officeCard.className = 'unassigned-card office-card';
-        officeCard.dataset.isOfficeCard = 'true';
-        officeCard.dataset.location = 'Office';
-        officeCard.draggable = true; // Make Office card draggable
+      // Add drag/drop handlers to allow dropping tasks back to unassigned
+      container.addEventListener('dragover', handleUnassignedDragOver);
+      container.addEventListener('dragleave', handleUnassignedDragLeave);
+      container.addEventListener('drop', handleDropToUnassigned);
 
-        // Track mousedown time to differentiate click vs drag
-        var officeMouseDownTime = 0;
-        officeCard.addEventListener('mousedown', function() {
-          officeMouseDownTime = Date.now();
-        });
-
-        // Make it clickable to show office tasks (only if not dragging)
-        officeCard.addEventListener('click', function() {
-          var clickDuration = Date.now() - officeMouseDownTime;
-          if (clickDuration < 200) { // Quick click = show popup
-            showOfficeTasksPopup(officeTasks);
-          }
-        });
-
-        // Add drag handlers for Office card
-        officeCard.addEventListener('dragstart', function(e) {
-          console.log('Office card dragstart triggered');
-          draggedElement = e.target;
-          draggedElement.classList.add('dragging');
-
-          // Create a virtual "Office" location object
-          draggedLocationData = {
-            type: 'office',
-            index: -1, // Special index for office
-            location: {
-              location: 'Helena',
-              name: 'Office Work',
-              direction: 'Home Base',
-              taskCount: officeTasks.length,
-              maxUrgency: maxOfficeUrgency,
-              estimatedTime: officeTasks.length * 15, // 15 min per office task
-              tasks: officeTasks.map(function(t) {
-                return {
-                  rowIndex: t.rowIndex,
-                  source: t.source || 'Task Metadata',
-                  taskType: t.taskType || 'Office',
-                  employee: t.employee || '',
-                  itemType: t.itemType || '',
-                  location: 'Helena',
-                  urgencyLabel: t.urgencyLabel || ''
-                };
-              }),
-              isOfficeCard: true
-            }
-          };
-          console.log('Office draggedLocationData set:', draggedLocationData);
-
-          e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData('text/plain', 'Office');
-        });
-
-        officeCard.addEventListener('dragend', handleDragEnd);
-
-        // Calculate max urgency for office tasks
-        var maxOfficeUrgency = 0;
-        officeTasks.forEach(function(t) {
-          if (t.urgency > maxOfficeUrgency) maxOfficeUrgency = t.urgency;
-        });
-
-        var urgencyClass = getUrgencyClass(maxOfficeUrgency);
-
-        officeCard.innerHTML = '<div class="location-name">' +
-          '<span class="urgency-dot ' + urgencyClass + '"></span>' +
-          '🏢 Office Work' +
-          '<span class="task-count">' + officeTasks.length + '</span>' +
-          '</div>' +
-          '<div class="location-direction">Phone/Helena tasks</div>';
-
-        container.appendChild(officeCard);
-      }
-
+      // Check if there are any unassigned locations
       if (!tripPlan.unassignedLocations || tripPlan.unassignedLocations.length === 0) {
-        if (officeTasks.length === 0) {
-          container.innerHTML = '<div class="empty-state">All locations assigned! ✅</div>';
-        }
+        container.innerHTML = '<div class="empty-state" style="padding: 15px; font-size: 12px;">All tasks scheduled! ✅<br><span style="color: #888; font-size: 11px;">Drag tasks here to unschedule</span></div>';
+        renderOfficeTasks();
         return;
       }
 
-      tripPlan.unassignedLocations.forEach(function(loc, idx) {
-        var card = document.createElement('div');
-        card.className = 'unassigned-card';
-        card.draggable = true;
-        card.dataset.unassignedIndex = idx;
-        var locationName = loc.location || loc.name; // Use standardized 'location' property
-        card.dataset.location = locationName;
+      // Sort locations by max urgency (most urgent first)
+      var sortedLocations = tripPlan.unassignedLocations.slice().sort(function(a, b) {
+        return (b.maxUrgency || 0) - (a.maxUrgency || 0);
+      });
 
-        // Debug: Log card creation
-        console.log('Creating unassigned card:', idx, locationName, 'draggable:', card.draggable);
+      // Render each location as a collapsible group with individual tasks
+      sortedLocations.forEach(function(loc, idx) {
+        var locationName = loc.location || loc.name || 'Unknown';
+        var tasks = loc.tasks || [];
+        var taskCount = tasks.length || loc.taskCount || 0;
 
-        card.addEventListener('dragstart', handleUnassignedDragStart);
-        card.addEventListener('dragend', handleDragEnd);
+        if (taskCount === 0) return; // Skip empty locations
 
-        // Also add mousedown listener to debug if clicks are registering
-        card.addEventListener('mousedown', function(e) {
-          console.log('Mousedown on unassigned card:', idx, locationName);
+        // Store original index for reference
+        loc._unassignedIndex = tripPlan.unassignedLocations.indexOf(loc);
+
+        // Create location group container
+        var groupDiv = document.createElement('div');
+        groupDiv.className = 'location-group';
+        groupDiv.dataset.locationName = locationName;
+
+        // Create collapsible header
+        var header = document.createElement('div');
+        header.className = 'location-group-header';
+
+        var urgencyClass = getUrgencyClass(loc.maxUrgency || 0);
+
+        header.innerHTML =
+          '<div class="location-name">' +
+            '<span class="collapse-icon">▼</span>' +
+            '<span class="urgency-dot ' + urgencyClass + '" style="margin: 0 4px;"></span>' +
+            '<span>📍 ' + locationName + '</span>' +
+          '</div>' +
+          '<span class="task-count-badge">' + taskCount + '</span>';
+
+        header.onclick = function() {
+          this.classList.toggle('collapsed');
+          var tasksContainer = this.nextElementSibling;
+          tasksContainer.classList.toggle('collapsed');
+        };
+
+        groupDiv.appendChild(header);
+
+        // Create tasks container
+        var tasksContainer = document.createElement('div');
+        tasksContainer.className = 'location-group-tasks';
+
+        // Render each individual task
+        tasks.forEach(function(task, taskIdx) {
+          var taskCard = createUnassignedTaskCard(task, loc, taskIdx);
+          tasksContainer.appendChild(taskCard);
         });
 
-        var urgencyClass = getUrgencyClass(loc.maxUrgency);
-        var taskCount = loc.tasks ? loc.tasks.length : (loc.taskCount || 0);
-
-        card.innerHTML = '<div class="location-name">' +
-          '<span class="urgency-dot ' + urgencyClass + '"></span>' +
-          locationName +
-          '<span class="task-count">' + taskCount + '</span>' +
-          '</div>' +
-          '<div class="location-direction">' + loc.direction + '</div>';
-
-        container.appendChild(card);
+        groupDiv.appendChild(tasksContainer);
+        container.appendChild(groupDiv);
       });
+
+      // Render office/phone tasks in separate container
+      renderOfficeTasks();
+    }
+
+    // Create an individual unassigned task card
+    function createUnassignedTaskCard(task, parentLocation, taskIndex) {
+      var card = document.createElement('div');
+      card.className = 'unassigned-task-card';
+      card.draggable = true;
+
+      // Store data for drag handling
+      card.dataset.locationName = parentLocation.location || parentLocation.name;
+      card.dataset.taskIndex = taskIndex;
+      card.dataset.rowIndex = task.rowIndex || '';
+      card.dataset.source = task.source || '';
+
+      // Check if task is deferred
+      var isDeferred = (task.status || '').toLowerCase() === 'deferred';
+      if (isDeferred) {
+        card.classList.add('deferred');
+      }
+
+      // Add drag event handlers
+      card.addEventListener('dragstart', handleUnassignedTaskDragStart);
+      card.addEventListener('dragend', handleDragEnd);
+
+      // Get task icon and info
+      var taskType = task.taskType || task.type || task.itemType || '';
+      var icon = getTaskIcon(taskType);
+      var urgency = task.urgency || 0;
+      var urgencyColor = getUrgencyColor(urgency);
+
+      // Build task title
+      var title = task.employee || taskType || 'Task';
+      var subtitle = '';
+
+      if (task.itemType && task.itemType !== taskType) {
+        subtitle = task.itemType;
+      } else if (task.employee && taskType) {
+        subtitle = taskType;
+      }
+
+      if (task.dueDate) {
+        subtitle += (subtitle ? ' • ' : '') + '📅 ' + task.dueDate;
+      }
+
+      // Deferred badge
+      var deferredBadge = isDeferred ? '<span class="deferred-badge">Deferred</span>' : '';
+
+      card.innerHTML =
+        '<span class="urgency-indicator" style="background: ' + urgencyColor + ';"></span>' +
+        '<span class="task-icon">' + icon + '</span>' +
+        '<div class="task-info">' +
+          '<div class="task-title">' + title + deferredBadge + '</div>' +
+          (subtitle ? '<div class="task-subtitle">' + subtitle + '</div>' : '') +
+        '</div>';
+
+      // Right-click context menu for defer
+      card.addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+        showTaskContextMenu(e, task, parentLocation);
+      });
+
+      return card;
+    }
+
+    // Handle drag start for individual unassigned task
+    function handleUnassignedTaskDragStart(e) {
+      console.log('handleUnassignedTaskDragStart triggered');
+      e.stopPropagation();
+
+      draggedElement = e.target;
+      draggedElement.classList.add('dragging');
+
+      var locationName = e.target.dataset.locationName;
+      var taskIndex = parseInt(e.target.dataset.taskIndex);
+      var rowIndex = e.target.dataset.rowIndex;
+      var source = e.target.dataset.source;
+
+      console.log('Dragging individual task from:', locationName, 'taskIndex:', taskIndex);
+
+      // Find the parent location and task
+      var parentLoc = tripPlan.unassignedLocations.find(function(loc) {
+        return (loc.location || loc.name) === locationName;
+      });
+
+      if (!parentLoc || !parentLoc.tasks || !parentLoc.tasks[taskIndex]) {
+        console.error('Could not find task at index', taskIndex, 'in location', locationName);
+        return;
+      }
+
+      var task = parentLoc.tasks[taskIndex];
+      console.log('Task data:', task);
+
+      // Set up drag data for single task
+      draggedLocationData = {
+        type: 'unassignedTask',
+        locationName: locationName,
+        taskIndex: taskIndex,
+        task: task,
+        parentLocation: parentLoc,
+        location: {
+          location: locationName,
+          name: locationName,
+          direction: parentLoc.direction || 'Unknown',
+          taskCount: 1,
+          estimatedTime: 15, // Default for single task
+          maxUrgency: task.urgency || parentLoc.maxUrgency || 10,
+          tasks: [task]
+        }
+      };
+
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', (task.employee || task.taskType || 'Task') + ' - ' + locationName);
+    }
+
+    // Show context menu for task (right-click)
+    function showTaskContextMenu(e, task, parentLocation) {
+      // Remove any existing context menu
+      var existing = document.getElementById('taskContextMenu');
+      if (existing) existing.remove();
+
+      var menu = document.createElement('div');
+      menu.id = 'taskContextMenu';
+      menu.style.cssText = 'position: fixed; left: ' + e.clientX + 'px; top: ' + e.clientY + 'px; ' +
+        'background: white; border: 1px solid #ddd; border-radius: 4px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); ' +
+        'z-index: 1000; min-width: 150px;';
+
+      var isDeferred = (task.status || '').toLowerCase() === 'deferred';
+
+      menu.innerHTML =
+        '<div class="context-menu-item" data-action="schedule-next-week" style="padding: 8px 12px; cursor: pointer; font-size: 12px;">📅 Schedule Next Week</div>' +
+        '<div class="context-menu-item" data-action="schedule-2-weeks" style="padding: 8px 12px; cursor: pointer; font-size: 12px;">📅 Schedule in 2 Weeks</div>' +
+        '<div style="border-top: 1px solid #eee;"></div>' +
+        (isDeferred
+          ? '<div class="context-menu-item" data-action="undefer" style="padding: 8px 12px; cursor: pointer; font-size: 12px;">↩️ Remove Deferred Status</div>'
+          : '<div class="context-menu-item" data-action="defer" style="padding: 8px 12px; cursor: pointer; font-size: 12px;">⏸️ Defer Task</div>') +
+        '<div style="border-top: 1px solid #eee;"></div>' +
+        '<div class="context-menu-item" data-action="view-details" style="padding: 8px 12px; cursor: pointer; font-size: 12px;">👁️ View Details</div>';
+
+      // Add hover effects
+      menu.querySelectorAll('.context-menu-item').forEach(function(item) {
+        item.addEventListener('mouseenter', function() { this.style.background = '#f5f5f5'; });
+        item.addEventListener('mouseleave', function() { this.style.background = 'white'; });
+      });
+
+      // Handle menu item clicks
+      menu.addEventListener('click', function(ev) {
+        var action = ev.target.dataset.action;
+        if (!action) return;
+
+        menu.remove();
+
+        switch(action) {
+          case 'schedule-next-week':
+            scheduleTaskForWeek(task, parentLocation, 1);
+            break;
+          case 'schedule-2-weeks':
+            scheduleTaskForWeek(task, parentLocation, 2);
+            break;
+          case 'defer':
+            deferTask(task, parentLocation);
+            break;
+          case 'undefer':
+            undeferTask(task, parentLocation);
+            break;
+          case 'view-details':
+            showTaskDetailsPopup(task, parentLocation);
+            break;
+        }
+      });
+
+      document.body.appendChild(menu);
+
+      // Close menu when clicking outside
+      setTimeout(function() {
+        document.addEventListener('click', function closeMenu(ev) {
+          if (!menu.contains(ev.target)) {
+            menu.remove();
+            document.removeEventListener('click', closeMenu);
+          }
+        });
+      }, 100);
+    }
+
+    // Schedule task for a future week
+    function scheduleTaskForWeek(task, parentLocation, weeksAhead) {
+      var today = new Date();
+      var targetMonday = new Date(today);
+
+      // Get to next Monday
+      var daysUntilMonday = (8 - today.getDay()) % 7;
+      if (daysUntilMonday === 0) daysUntilMonday = 7;
+      targetMonday.setDate(today.getDate() + daysUntilMonday + (7 * (weeksAhead - 1)));
+
+      var dateStr = targetMonday.toISOString().split('T')[0];
+
+      showStatus('Scheduling for ' + formatDateForDisplay(targetMonday) + '...', 'info');
+
+      // Build task key
+      var taskKey = (task.source || task.sheetName || '') + '_' + task.rowIndex;
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            showStatus('Scheduled for week of ' + formatDateForDisplay(targetMonday), 'success');
+            // Remove task from unassigned and refresh
+            removeTaskFromUnassigned(task, parentLocation);
+            renderUnassigned();
+          } else {
+            showStatus('Error: ' + (result.error || 'Unknown error'), 'error');
+          }
+        })
+        .withFailureHandler(function(err) {
+          showStatus('Error: ' + err.message, 'error');
+        })
+        .updateTaskMetadata(taskKey, { ScheduledDate: dateStr, Status: 'Assigned' });
+    }
+
+    // Defer a task
+    function deferTask(task, parentLocation) {
+      var taskKey = (task.source || task.sheetName || '') + '_' + task.rowIndex;
+
+      showStatus('Deferring task...', 'info');
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            task.status = 'Deferred';
+            showStatus('Task deferred', 'success');
+            renderUnassigned();
+          } else {
+            showStatus('Error: ' + (result.error || 'Unknown error'), 'error');
+          }
+        })
+        .withFailureHandler(function(err) {
+          showStatus('Error: ' + err.message, 'error');
+        })
+        .updateTaskMetadata(taskKey, { Status: 'Deferred' });
+    }
+
+    // Remove deferred status
+    function undeferTask(task, parentLocation) {
+      var taskKey = (task.source || task.sheetName || '') + '_' + task.rowIndex;
+
+      showStatus('Removing deferred status...', 'info');
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            task.status = 'Unassigned';
+            showStatus('Deferred status removed', 'success');
+            renderUnassigned();
+          } else {
+            showStatus('Error: ' + (result.error || 'Unknown error'), 'error');
+          }
+        })
+        .withFailureHandler(function(err) {
+          showStatus('Error: ' + err.message, 'error');
+        })
+        .updateTaskMetadata(taskKey, { Status: 'Unassigned' });
+    }
+
+    // Show task details popup
+    function showTaskDetailsPopup(task, parentLocation) {
+      var locationName = parentLocation.location || parentLocation.name || 'Unknown';
+
+      var overlay = document.createElement('div');
+      overlay.className = 'task-popup-overlay';
+      overlay.id = 'taskDetailOverlay';
+      overlay.onclick = function(e) {
+        if (e.target === overlay) overlay.remove();
+      };
+
+      var taskType = task.taskType || task.type || task.itemType || 'Task';
+      var icon = getTaskIcon(taskType);
+      var urgencyLabel = task.urgencyLabel || getUrgencyLabel(task.urgency || 0);
+
+      var popup = document.createElement('div');
+      popup.className = 'task-popup';
+      popup.style.maxWidth = '400px';
+      popup.innerHTML =
+        '<div class="task-popup-header" style="background: #1565c0;">' +
+          '<h3>' + icon + ' Task Details</h3>' +
+          '<button class="task-popup-close" onclick="document.getElementById(\'taskDetailOverlay\').remove()">&times;</button>' +
+        '</div>' +
+        '<div class="task-popup-content">' +
+          '<div style="margin-bottom: 12px;">' +
+            '<div style="font-size: 16px; font-weight: 600;">' + (task.employee || 'Unknown') + '</div>' +
+            '<div style="color: #666; font-size: 12px;">📍 ' + locationName + '</div>' +
+          '</div>' +
+          '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">' +
+            '<div style="padding: 8px; background: #f9f9f9; border-radius: 4px;">' +
+              '<div style="font-size: 10px; color: #666; text-transform: uppercase;">Task Type</div>' +
+              '<div style="font-size: 12px; font-weight: 500;">' + taskType + '</div>' +
+            '</div>' +
+            '<div style="padding: 8px; background: #f9f9f9; border-radius: 4px;">' +
+              '<div style="font-size: 10px; color: #666; text-transform: uppercase;">Item</div>' +
+              '<div style="font-size: 12px; font-weight: 500;">' + (task.itemType || '-') + '</div>' +
+            '</div>' +
+            '<div style="padding: 8px; background: #f9f9f9; border-radius: 4px;">' +
+              '<div style="font-size: 10px; color: #666; text-transform: uppercase;">Due Date</div>' +
+              '<div style="font-size: 12px; font-weight: 500;">' + (task.dueDate || 'Not set') + '</div>' +
+            '</div>' +
+            '<div style="padding: 8px; background: #f9f9f9; border-radius: 4px;">' +
+              '<div style="font-size: 10px; color: #666; text-transform: uppercase;">Urgency</div>' +
+              '<div style="font-size: 12px; font-weight: 500;">' + urgencyLabel + '</div>' +
+            '</div>' +
+          '</div>' +
+          '<div style="margin-top: 12px; padding: 8px; background: #f9f9f9; border-radius: 4px;">' +
+            '<div style="font-size: 10px; color: #666; text-transform: uppercase;">Source</div>' +
+            '<div style="font-size: 12px;">' + (task.source || task.sheetName || 'Unknown') + ' (Row ' + (task.rowIndex || '?') + ')</div>' +
+          '</div>' +
+        '</div>';
+
+      overlay.appendChild(popup);
+      document.body.appendChild(overlay);
+    }
+
+    // Get urgency label text
+    function getUrgencyLabel(urgency) {
+      if (urgency >= 100) return '🔴 Overdue';
+      if (urgency >= 80) return '🟠 Due Soon';
+      if (urgency >= 50) return '🟡 This Week';
+      if (urgency >= 20) return '🟢 Next Week';
+      return '⚪ Later';
+    }
+
+    // Format date for display
+    function formatDateForDisplay(date) {
+      if (!date) return '';
+      var d = date instanceof Date ? date : new Date(date);
+      var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return months[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
+    }
+
+    // Remove task from unassigned locations
+    function removeTaskFromUnassigned(task, parentLocation) {
+      var locationName = parentLocation.location || parentLocation.name;
+
+      // Find the location in unassigned
+      for (var i = 0; i < tripPlan.unassignedLocations.length; i++) {
+        var loc = tripPlan.unassignedLocations[i];
+        if ((loc.location || loc.name) === locationName) {
+          // Remove the specific task
+          if (loc.tasks) {
+            loc.tasks = loc.tasks.filter(function(t) {
+              return t.rowIndex !== task.rowIndex;
+            });
+            loc.taskCount = loc.tasks.length;
+          }
+
+          // If no tasks left, remove the location
+          if (!loc.tasks || loc.tasks.length === 0) {
+            tripPlan.unassignedLocations.splice(i, 1);
+          }
+          break;
+        }
+      }
+    }
+
+
+    // Render office/phone tasks (grey dot tasks - no travel needed, but can be scheduled)
+    function renderOfficeTasks() {
+      const container = document.getElementById('officeTasksList');
+      if (!container) return;
+
+      container.innerHTML = '';
+
+      // Add drag/drop handlers to allow dropping tasks into office tasks (convert to phone tasks)
+      container.addEventListener('dragover', handleOfficeDragOver);
+      container.addEventListener('dragleave', handleOfficeDragLeave);
+      container.addEventListener('drop', handleDropToOfficeTasks);
+
+      var officeTasks = tripPlan.officeTasks || [];
+
+      if (officeTasks.length === 0) {
+        container.innerHTML = '<div class="empty-state" style="padding: 10px; font-size: 11px; color: #666;">No phone tasks pending<br><span style="font-size: 10px; color: #888;">Drag tasks here to mark as phone tasks</span></div>';
+        return;
+      }
+
+      // Group office tasks by type for better organization
+      var tasksByType = {};
+      officeTasks.forEach(function(task, idx) {
+        // Store original index for drag/drop
+        task._officeTaskIndex = idx;
+        var typeKey = task.isCertTask ? 'Cert Renewals' : (task.taskType || 'Other');
+        if (!tasksByType[typeKey]) {
+          tasksByType[typeKey] = [];
+        }
+        tasksByType[typeKey].push(task);
+      });
+
+      // Render each type group
+      Object.keys(tasksByType).sort().forEach(function(typeKey) {
+        var tasks = tasksByType[typeKey];
+
+        // Create collapsible group header
+        var groupDiv = document.createElement('div');
+        groupDiv.className = 'office-task-group';
+
+        var header = document.createElement('div');
+        header.className = 'office-task-header';
+        header.style.cssText = 'font-size: 11px; font-weight: 600; color: #666; padding: 5px 8px; background: #f0f0f0; border-radius: 4px; margin-bottom: 4px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;';
+
+        // Calculate max urgency for badge color
+        var maxUrgency = 0;
+        tasks.forEach(function(t) { if (t.urgency > maxUrgency) maxUrgency = t.urgency; });
+        var urgencyClass = getUrgencyClass(maxUrgency);
+
+        header.innerHTML = '<span><span class="urgency-dot ' + urgencyClass + '" style="margin-right: 4px;"></span>' +
+          (typeKey === 'Cert Renewals' ? '📜 ' : '📋 ') + typeKey + '</span>' +
+          '<span class="task-count" style="background: #9e9e9e; color: white; font-size: 10px; padding: 1px 6px; border-radius: 8px;">' + tasks.length + '</span>';
+
+        header.onclick = function() {
+          var content = this.nextElementSibling;
+          content.style.display = content.style.display === 'none' ? 'block' : 'none';
+        };
+
+        groupDiv.appendChild(header);
+
+        // Create task list (initially visible)
+        var taskList = document.createElement('div');
+        taskList.className = 'office-task-list';
+        taskList.style.cssText = 'margin-bottom: 8px;';
+
+        tasks.forEach(function(task) {
+          var taskCard = document.createElement('div');
+          taskCard.className = 'office-task-card draggable';
+          taskCard.draggable = true;
+          taskCard.dataset.officeTaskIndex = task._officeTaskIndex;
+          taskCard.style.cssText = 'padding: 6px 8px; margin: 2px 0; border-left: 3px solid ' +
+            (task.urgency >= 100 ? '#f44336' : task.urgency >= 80 ? '#ff9800' : '#4caf50') +
+            '; font-size: 11px; cursor: grab;';
+
+          // Add drag event handlers
+          taskCard.addEventListener('dragstart', handleOfficeTaskDragStart);
+          taskCard.addEventListener('dragend', handleDragEnd);
+
+          // Build task display
+          var employeeText = task.employee || 'Unknown';
+          var certType = task.isCertTask ? (task.certType || task.itemType || 'Cert') : '';
+          var locationText = task.location && task.location.toLowerCase() !== 'helena' ? task.location : '';
+          var dueDateText = task.dueDate ? task.dueDate : '';
+
+          var detailParts = [];
+          if (certType) detailParts.push(certType);
+          if (locationText) detailParts.push('📍 ' + locationText);
+          if (dueDateText) detailParts.push((task.urgency >= 100 ? '⚠️ ' : '📅 ') + dueDateText);
+
+          taskCard.innerHTML = '<div style="font-weight: 500;">' + employeeText + '</div>' +
+            (detailParts.length > 0 ? '<div style="color: #666; font-size: 10px;">' + detailParts.join(' • ') + '</div>' : '') +
+            '<div class="drag-hint">⬆️ Drag to schedule</div>';
+
+          // Click to show detail popup
+          taskCard.onclick = function(e) {
+            // Don't trigger on drag
+            if (e.defaultPrevented) return;
+            showOfficeTaskDetail(task);
+          };
+
+          taskList.appendChild(taskCard);
+        });
+
+        groupDiv.appendChild(taskList);
+        container.appendChild(groupDiv);
+      });
+
+      // Add summary count
+      var summaryDiv = document.createElement('div');
+      summaryDiv.style.cssText = 'padding: 8px; text-align: center; font-size: 11px; color: #666; border-top: 1px solid #eee; margin-top: 8px;';
+      summaryDiv.innerHTML = '<strong>' + officeTasks.length + '</strong> tasks • drag to day or handle by phone';
+      container.appendChild(summaryDiv);
+    }
+
+    // Handle drag start for office tasks
+    function handleOfficeTaskDragStart(e) {
+      console.log('handleOfficeTaskDragStart triggered');
+      e.stopPropagation(); // Prevent click event
+
+      draggedElement = e.target;
+      draggedElement.classList.add('dragging');
+
+      var taskIndex = parseInt(e.target.dataset.officeTaskIndex);
+      console.log('Dragging office task index:', taskIndex);
+
+      var task = tripPlan.officeTasks[taskIndex];
+      if (!task) {
+        console.error('Office task not found at index:', taskIndex);
+        return;
+      }
+
+      console.log('Office task data:', task);
+
+      // Build location data for drop handler
+      draggedLocationData = {
+        type: 'officeTask',
+        index: taskIndex,
+        location: {
+          location: 'Helena Office',
+          name: 'Helena Office',
+          direction: 'Office',
+          taskCount: 1,
+          estimatedTime: 15, // Default 15 min for office tasks
+          maxUrgency: task.urgency || 10,
+          tasks: [task],
+          isOfficeLocation: true
+        },
+        task: task
+      };
+
+      console.log('draggedLocationData set for office task:', draggedLocationData);
+
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', 'Helena Office - ' + (task.employee || 'Office Task'));
+    }
+
+    // Show detail popup for an office task
+    function showOfficeTaskDetail(task) {
+      var overlay = document.createElement('div');
+      overlay.className = 'task-popup-overlay';
+      overlay.id = 'officeTaskDetailOverlay';
+      overlay.onclick = function(e) {
+        if (e.target === overlay) overlay.remove();
+      };
+
+      var employeeName = task.employee || 'Unknown';
+      var certType = task.isCertTask ? (task.certType || task.itemType || 'Certification') : task.taskType;
+      var locationText = task.location || 'Unknown';
+      var dueDateText = task.dueDate || 'Not set';
+      var urgencyText = task.urgencyLabel || 'Later';
+      var phoneText = task.phoneNumber || 'No phone on file';
+
+      var popup = document.createElement('div');
+      popup.className = 'task-popup';
+      popup.style.cssText = 'max-width: 400px;';
+      popup.innerHTML = `
+        <div class="task-popup-header" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: #f5f5f5; border-radius: 8px 8px 0 0;">
+          <h3 style="margin: 0; font-size: 14px;">📞 Phone Task</h3>
+          <button onclick="document.getElementById('officeTaskDetailOverlay').remove()" style="background: none; border: none; font-size: 18px; cursor: pointer; padding: 0;">&times;</button>
+        </div>
+        <div class="task-popup-body" style="padding: 15px;">
+          <div style="margin-bottom: 12px;">
+            <div style="font-size: 16px; font-weight: 600;">${employeeName}</div>
+            <div style="color: #666; font-size: 12px;">📍 ${locationText}</div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;">
+            <div style="padding: 8px; background: #f9f9f9; border-radius: 4px;">
+              <div style="font-size: 10px; color: #666; text-transform: uppercase;">Task</div>
+              <div style="font-size: 12px; font-weight: 500;">${certType}</div>
+            </div>
+            <div style="padding: 8px; background: #f9f9f9; border-radius: 4px;">
+              <div style="font-size: 10px; color: #666; text-transform: uppercase;">Due Date</div>
+              <div style="font-size: 12px; font-weight: 500; ${task.urgency >= 100 ? 'color: #f44336;' : ''}">${dueDateText}</div>
+            </div>
+          </div>
+          <div style="padding: 10px; background: #e3f2fd; border-radius: 4px; margin-bottom: 15px;">
+            <div style="font-size: 10px; color: #666; text-transform: uppercase; margin-bottom: 4px;">Phone Number</div>
+            <div style="font-size: 14px; font-weight: 600;">📱 ${phoneText}</div>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button onclick="window.open('sms:${task.phoneNumber}', '_blank'); document.getElementById('officeTaskDetailOverlay').remove();"
+                    class="btn btn-primary" style="flex: 1; padding: 10px;">
+              💬 Send SMS
+            </button>
+            <button onclick="document.getElementById('officeTaskDetailOverlay').remove();"
+                    class="btn btn-secondary" style="flex: 1; padding: 10px;">
+              Close
+            </button>
+          </div>
+        </div>
+      `;
+
+      overlay.appendChild(popup);
+      document.body.appendChild(overlay);
     }
 
     // Show office tasks popup (tasks you can handle via phone/in office)
@@ -2639,6 +3499,269 @@
       document.querySelectorAll('.drag-over').forEach(function(el) {
         el.classList.remove('drag-over');
       });
+
+      // Also remove unassigned drop zone styling
+      var unassignedList = document.getElementById('unassignedList');
+      if (unassignedList) {
+        unassignedList.classList.remove('drag-over-unassigned');
+      }
+
+      // Also remove office tasks drop zone styling
+      var officeList = document.getElementById('officeTasksList');
+      if (officeList) {
+        officeList.classList.remove('drag-over-office');
+        officeList.style.backgroundColor = '';
+        officeList.style.borderColor = '';
+      }
+    }
+
+    // Handler for dragging over unassigned list
+    function handleUnassignedDragOver(e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      e.currentTarget.classList.add('drag-over-unassigned');
+    }
+
+    // Handler for leaving unassigned list
+    function handleUnassignedDragLeave(e) {
+      e.currentTarget.classList.remove('drag-over-unassigned');
+    }
+
+    // Handler for dragging over office tasks list
+    function handleOfficeDragOver(e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      e.currentTarget.classList.add('drag-over-office');
+      e.currentTarget.style.backgroundColor = '#e8f5e9';
+      e.currentTarget.style.borderColor = '#4caf50';
+    }
+
+    // Handler for leaving office tasks list
+    function handleOfficeDragLeave(e) {
+      e.currentTarget.classList.remove('drag-over-office');
+      e.currentTarget.style.backgroundColor = '';
+      e.currentTarget.style.borderColor = '';
+    }
+
+    // Handler for dropping into office tasks list (convert to phone tasks)
+    function handleDropToOfficeTasks(e) {
+      e.preventDefault();
+      e.currentTarget.classList.remove('drag-over-office');
+      e.currentTarget.style.backgroundColor = '';
+      e.currentTarget.style.borderColor = '';
+
+      console.log('handleDropToOfficeTasks triggered');
+      console.log('draggedLocationData:', draggedLocationData);
+
+      if (!draggedLocationData) {
+        console.log('No dragged location data - aborting drop');
+        return;
+      }
+
+      // Initialize officeTasks array if not present
+      if (!tripPlan.officeTasks) {
+        tripPlan.officeTasks = [];
+      }
+
+      // Handle drop from assigned day
+      if (draggedLocationData.type === 'assigned') {
+        var loc = draggedLocationData.location;
+        var locationName = loc.location || loc.name || 'Unknown';
+        var sourceDayIdx = draggedLocationData.dayIndex;
+
+        // Check if locked - can't move locked tasks
+        if (loc.isLocked) {
+          showStatus('🔒 Cannot move locked tasks to Office/Phone. Edit Manual Tasks sheet to unlock.', 'error');
+          return;
+        }
+
+        // Remove from source day
+        if (sourceDayIdx >= 0 && sourceDayIdx < tripPlan.workDays.length) {
+          tripPlan.workDays[sourceDayIdx].assignedLocations.splice(draggedLocationData.locIndex, 1);
+        }
+
+        // Convert tasks to office tasks
+        var tasks = loc.tasks || [];
+        tasks.forEach(function(task) {
+          // Mark as office/phone task
+          task.isOfficeTask = true;
+          task.scheduledDate = null; // Unschedule
+          tripPlan.officeTasks.push(task);
+        });
+
+        showStatus('Moved ' + tasks.length + ' task(s) from ' + locationName + ' to Office/Phone Tasks', 'success');
+
+        // Re-render
+        renderOfficeTasks();
+        recalculateDays([sourceDayIdx]);
+        return;
+      }
+
+      // Handle drop from unassigned
+      if (draggedLocationData.type === 'unassigned') {
+        var loc = draggedLocationData.location;
+        var locationName = loc.location || loc.name || 'Unknown';
+
+        // Find and remove from unassigned locations
+        var idx = tripPlan.unassignedLocations.findIndex(function(u) {
+          return (u.location || u.name) === locationName;
+        });
+
+        if (idx >= 0) {
+          tripPlan.unassignedLocations.splice(idx, 1);
+        }
+
+        // Convert tasks to office tasks
+        var tasks = loc.tasks || [];
+        tasks.forEach(function(task) {
+          task.isOfficeTask = true;
+          task.scheduledDate = null;
+          tripPlan.officeTasks.push(task);
+        });
+
+        showStatus('Moved ' + tasks.length + ' task(s) from ' + locationName + ' to Office/Phone Tasks', 'success');
+
+        // Re-render
+        renderUnassigned();
+        return;
+      }
+
+      // Handle drop of individual unassigned task
+      if (draggedLocationData.type === 'unassignedTask') {
+        var task = draggedLocationData.task;
+        var parentLocation = draggedLocationData.parentLocation;
+
+        if (!task) {
+          console.log('No task data in unassignedTask drop');
+          return;
+        }
+
+        // Remove task from parent location
+        if (parentLocation && parentLocation.tasks) {
+          var taskIdx = draggedLocationData.taskIndex;
+          if (taskIdx >= 0 && taskIdx < parentLocation.tasks.length) {
+            parentLocation.tasks.splice(taskIdx, 1);
+            parentLocation.taskCount = parentLocation.tasks.length;
+
+            // If location is now empty, remove it from unassigned
+            if (parentLocation.tasks.length === 0) {
+              var locIdx = tripPlan.unassignedLocations.findIndex(function(u) {
+                return (u.location || u.name) === (parentLocation.location || parentLocation.name);
+              });
+              if (locIdx >= 0) {
+                tripPlan.unassignedLocations.splice(locIdx, 1);
+              }
+            }
+          }
+        }
+
+        // Add to office tasks
+        task.isOfficeTask = true;
+        task.scheduledDate = null;
+        tripPlan.officeTasks.push(task);
+
+        var employeeName = task.employee || 'Unknown';
+        showStatus('Moved ' + employeeName + ' task to Office/Phone Tasks', 'success');
+
+        // Re-render
+        renderUnassigned();
+        return;
+      }
+
+      console.log('Unhandled drag type:', draggedLocationData.type);
+    }
+
+    // Handler for dropping into unassigned list (unscheduling a task)
+    function handleDropToUnassigned(e) {
+      e.preventDefault();
+      e.currentTarget.classList.remove('drag-over-unassigned');
+
+      console.log('handleDropToUnassigned triggered');
+      console.log('draggedLocationData:', draggedLocationData);
+
+      if (!draggedLocationData || !draggedLocationData.location) {
+        console.log('No dragged location data - aborting drop');
+        return;
+      }
+
+      // Only handle drops from assigned days (not from unassigned list to itself)
+      if (draggedLocationData.type !== 'assigned') {
+        console.log('Not dropping from assigned location - ignoring');
+        return;
+      }
+
+      var loc = draggedLocationData.location;
+      var locationName = loc.location || loc.name || 'Unknown';
+      var sourceDayIdx = draggedLocationData.dayIndex;
+
+      // Check if locked - can't unschedule locked tasks
+      if (loc.isLocked) {
+        showStatus('🔒 Cannot unschedule locked tasks. Edit Manual Tasks sheet to unlock.', 'error');
+        return;
+      }
+
+      // Remove from source day
+      if (sourceDayIdx >= 0 && sourceDayIdx < tripPlan.workDays.length) {
+        tripPlan.workDays[sourceDayIdx].assignedLocations.splice(draggedLocationData.locIndex, 1);
+      }
+
+      // SPECIAL HANDLING: Helena Office locations - return tasks to office tasks list
+      if (locationName === 'Helena Office' || loc.isOfficeLocation) {
+        var officeTasks = loc.tasks || [];
+        if (!tripPlan.officeTasks) {
+          tripPlan.officeTasks = [];
+        }
+
+        // Add each task back to office tasks list
+        for (var i = 0; i < officeTasks.length; i++) {
+          tripPlan.officeTasks.push(officeTasks[i]);
+        }
+
+        showStatus('Returned ' + officeTasks.length + ' task(s) to Office/Phone Tasks', 'info');
+
+        // Re-render office tasks and recalculate day
+        renderOfficeTasks();
+        recalculateDays([sourceDayIdx]);
+        return;
+      }
+
+      // Add tasks back to unassigned locations
+      if (!tripPlan.unassignedLocations) {
+        tripPlan.unassignedLocations = [];
+      }
+
+      // Check if this location already exists in unassigned
+      var existingLoc = tripPlan.unassignedLocations.find(function(u) {
+        return (u.location || u.name) === locationName;
+      });
+
+      if (existingLoc) {
+        // Merge tasks into existing unassigned location
+        existingLoc.tasks = existingLoc.tasks || [];
+        var tasksToAdd = loc.tasks || [];
+        for (var i = 0; i < tasksToAdd.length; i++) {
+          existingLoc.tasks.push(tasksToAdd[i]);
+        }
+        existingLoc.taskCount = existingLoc.tasks.length;
+        existingLoc.maxUrgency = Math.max(existingLoc.maxUrgency || 0, loc.maxUrgency || 10);
+      } else {
+        // Create new unassigned location
+        tripPlan.unassignedLocations.push({
+          location: locationName,
+          name: locationName,
+          direction: loc.direction || 'Unknown',
+          taskCount: loc.taskCount || (loc.tasks ? loc.tasks.length : 0),
+          maxUrgency: loc.maxUrgency || 10,
+          estimatedTime: loc.estimatedTime || 25,
+          tasks: loc.tasks || []
+        });
+      }
+
+      showStatus('Unscheduled ' + locationName + ' - moved to Unassigned Tasks', 'info');
+
+      // Re-render unassigned and recalculate the affected day
+      renderUnassigned();
+      recalculateDays([sourceDayIdx]);
     }
 
     function handleDragOver(e) {
@@ -2736,6 +3859,142 @@
       var locationName = draggedLocationData.location.location || draggedLocationData.location.name || 'Unknown';
       var sourceDayIdx = draggedLocationData.dayIndex;
 
+      // Handle OFFICE TASK drop - special handling for Helena Office
+      if (draggedLocationData.type === 'officeTask') {
+        console.log('Handling office task drop');
+        var officeTask = draggedLocationData.task;
+        var taskIndex = draggedLocationData.index;
+
+        // Remove from office tasks array
+        if (taskIndex >= 0 && taskIndex < tripPlan.officeTasks.length) {
+          tripPlan.officeTasks.splice(taskIndex, 1);
+          console.log('Removed office task at index:', taskIndex);
+        }
+
+        // Check if Helena Office already exists on this day
+        var helenaOfficeIndex = -1;
+        for (var i = 0; i < targetDay.assignedLocations.length; i++) {
+          var existingLoc = targetDay.assignedLocations[i];
+          if (existingLoc.location === 'Helena Office' || existingLoc.isOfficeLocation) {
+            helenaOfficeIndex = i;
+            break;
+          }
+        }
+
+        if (helenaOfficeIndex >= 0) {
+          // Merge into existing Helena Office
+          var existingHelenaOffice = targetDay.assignedLocations[helenaOfficeIndex];
+          existingHelenaOffice.tasks = existingHelenaOffice.tasks || [];
+          existingHelenaOffice.tasks.push(officeTask);
+          existingHelenaOffice.taskCount = existingHelenaOffice.tasks.length;
+          existingHelenaOffice.estimatedTime = existingHelenaOffice.tasks.length * 15; // 15 min per task
+          existingHelenaOffice.maxUrgency = Math.max(existingHelenaOffice.maxUrgency || 0, officeTask.urgency || 10);
+
+          showStatus('Added ' + (officeTask.employee || 'task') + ' to Helena Office on ' + targetDay.dayName, 'success');
+        } else {
+          // Create new Helena Office location
+          var helenaOfficeLocation = {
+            location: 'Helena Office',
+            name: 'Helena Office',
+            direction: 'Office',
+            taskCount: 1,
+            estimatedTime: 15, // 15 min default
+            maxUrgency: officeTask.urgency || 10,
+            tasks: [officeTask],
+            isOfficeLocation: true,
+            isManualTask: false,
+            isLocked: false
+          };
+
+          // Insert at drop position (or end if not specified)
+          if (dropIndex >= 0 && dropIndex <= targetDay.assignedLocations.length) {
+            targetDay.assignedLocations.splice(dropIndex, 0, helenaOfficeLocation);
+          } else {
+            targetDay.assignedLocations.push(helenaOfficeLocation);
+          }
+
+          showStatus('Scheduled ' + (officeTask.employee || 'office task') + ' at Helena Office on ' + targetDay.dayName, 'success');
+        }
+
+        // Re-render and recalculate
+        renderOfficeTasks();
+        recalculateDays([targetDayIndex]);
+        return;
+      }
+
+      // Handle INDIVIDUAL UNASSIGNED TASK drop
+      if (draggedLocationData.type === 'unassignedTask') {
+        console.log('Handling individual unassigned task drop');
+        var task = draggedLocationData.task;
+        var parentLoc = draggedLocationData.parentLocation;
+        var taskLocationName = draggedLocationData.locationName;
+
+        // Remove task from parent location's tasks array
+        if (parentLoc && parentLoc.tasks) {
+          var taskIdx = parentLoc.tasks.indexOf(task);
+          if (taskIdx >= 0) {
+            parentLoc.tasks.splice(taskIdx, 1);
+            parentLoc.taskCount = parentLoc.tasks.length;
+          }
+
+          // If no tasks left, remove the location from unassigned
+          if (parentLoc.tasks.length === 0) {
+            var locIdx = tripPlan.unassignedLocations.indexOf(parentLoc);
+            if (locIdx >= 0) {
+              tripPlan.unassignedLocations.splice(locIdx, 1);
+            }
+          }
+        }
+
+        // Check if this location already exists on the target day
+        var existingLocIndex = -1;
+        for (var i = 0; i < targetDay.assignedLocations.length; i++) {
+          var existingLoc = targetDay.assignedLocations[i];
+          if (existingLoc.location === taskLocationName) {
+            existingLocIndex = i;
+            break;
+          }
+        }
+
+        if (existingLocIndex >= 0) {
+          // Merge into existing location on this day
+          var existingLocation = targetDay.assignedLocations[existingLocIndex];
+          existingLocation.tasks = existingLocation.tasks || [];
+          existingLocation.tasks.push(task);
+          existingLocation.taskCount = existingLocation.tasks.length;
+          existingLocation.estimatedTime = 15 + (existingLocation.tasks.length * 10);
+          existingLocation.maxUrgency = Math.max(existingLocation.maxUrgency || 0, task.urgency || 10);
+
+          showStatus('Added ' + (task.employee || 'task') + ' to ' + taskLocationName + ' on ' + targetDay.dayName, 'success');
+        } else {
+          // Create new location entry for this day
+          var newLocation = {
+            location: taskLocationName,
+            name: taskLocationName,
+            direction: parentLoc ? parentLoc.direction : 'Unknown',
+            taskCount: 1,
+            estimatedTime: 25, // Default for single task at new location
+            maxUrgency: task.urgency || 10,
+            tasks: [task],
+            isManualTask: false,
+            isLocked: false
+          };
+
+          // Insert at drop position (or end if not specified)
+          if (dropIndex >= 0 && dropIndex <= targetDay.assignedLocations.length) {
+            targetDay.assignedLocations.splice(dropIndex, 0, newLocation);
+          } else {
+            targetDay.assignedLocations.push(newLocation);
+          }
+
+          showStatus('Scheduled ' + (task.employee || 'task') + ' at ' + taskLocationName + ' on ' + targetDay.dayName, 'success');
+        }
+
+        // Re-render unassigned and recalculate
+        renderUnassigned();
+        recalculateDays([targetDayIndex]);
+        return;
+      }
 
       // Check if same day reorder
       if (draggedLocationData.type === 'assigned' && sourceDayIdx === targetDayIndex) {

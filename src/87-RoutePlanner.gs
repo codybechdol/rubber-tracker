@@ -1,6 +1,8 @@
 /**
  * Glove Manager – Smart Route Optimizer (Phase 2B)
  *
+ * Updated: Feb 18, 2026 - Fixed task-specific matching in applyTripToSchedule
+ *
  * Analyzes pending tasks, groups by location/direction from Helena,
  * and suggests optimal multi-day trip plans with scheduling constraints.
  *
@@ -77,6 +79,51 @@ function formatDateForDisplayRoute(date) {
   return String(date.getMonth() + 1).padStart(2, '0') + '/' +
          String(date.getDate()).padStart(2, '0') + '/' +
          date.getFullYear();
+}
+
+/**
+ * Parses a date string (YYYY-MM-DD or MM/DD/YYYY) as LOCAL time, not UTC.
+ * This prevents timezone issues where "2026-02-23" becomes Feb 22 in local time.
+ *
+ * @param {string|Date} dateValue - Date string or Date object
+ * @return {Date|null} Date object in local time, or null if invalid
+ */
+function parseDateAsLocal(dateValue) {
+  if (!dateValue) return null;
+
+  // If already a Date object, return as-is
+  if (dateValue instanceof Date) {
+    return isNaN(dateValue.getTime()) ? null : dateValue;
+  }
+
+  var dateStr = String(dateValue).trim();
+  if (!dateStr) return null;
+
+  var year, month, day;
+
+  // Try YYYY-MM-DD format first
+  var isoMatch = dateStr.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (isoMatch) {
+    year = parseInt(isoMatch[1], 10);
+    month = parseInt(isoMatch[2], 10) - 1; // JS months are 0-indexed
+    day = parseInt(isoMatch[3], 10);
+  } else {
+    // Try MM/DD/YYYY format
+    var usMatch = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (usMatch) {
+      month = parseInt(usMatch[1], 10) - 1;
+      day = parseInt(usMatch[2], 10);
+      year = parseInt(usMatch[3], 10);
+    } else {
+      // Fallback to Date parsing (may have timezone issues)
+      var fallbackDate = new Date(dateStr);
+      return isNaN(fallbackDate.getTime()) ? null : fallbackDate;
+    }
+  }
+
+  // Create date in local timezone
+  var localDate = new Date(year, month, day, 0, 0, 0, 0);
+  return isNaN(localDate.getTime()) ? null : localDate;
 }
 
 // ============================================================================
@@ -534,38 +581,47 @@ function collectTasksForTripPlanner() {
       Logger.log('Data stored in ScriptProperties, fetching via getStoredTasks...');
       metadataResult = getStoredTasks();
       Logger.log('getStoredTasks returned ' + (metadataResult.tasks ? metadataResult.tasks.length : 0) + ' tasks');
+    }
 
-      // Deserialize compressed tasks
-      if (metadataResult.tasks && metadataResult.tasks.length > 0) {
-        var firstTask = metadataResult.tasks[0];
-        // Check if tasks are in compressed format (abbreviated field names)
-        if (firstTask.emp !== undefined || firstTask.loc !== undefined) {
-          Logger.log('Deserializing compressed task format...');
-          metadataResult.tasks = metadataResult.tasks.map(function(t) {
-            return {
-              taskKey: t.taskKey,
-              employee: t.emp || '',
-              taskType: t.type || '',
-              type: t.type || '', // Alias
-              itemType: t.item || '',
-              location: t.loc || '',
-              phoneNumber: t.phone || '',
-              dueDate: t.due || '',
-              scheduledDate: t.sched || '',
-              startTime: t.start || '',
-              endTime: t.end || '',
-              status: t.stat || 'Pending',
-              isOverdue: t.over === 1,
-              daysTillDue: t.days || 0,
-              sheetName: t.src || '',
-              source: t.src || '',
-              rowIndex: t.row || 0,
-              isManualTask: t.manual === 1,
-              inTaskList: t.inList === 1,
-              isRegistered: t.reg === 1
-            };
+    // Always check if tasks need deserialization (compressed format uses abbreviated field names)
+    if (metadataResult.tasks && metadataResult.tasks.length > 0) {
+      var firstTask = metadataResult.tasks[0];
+      // Check if tasks are in compressed format (abbreviated field names)
+      if (firstTask.emp !== undefined || firstTask.loc !== undefined || firstTask.sched !== undefined) {
+        Logger.log('Deserializing compressed task format...');
+        metadataResult.tasks = metadataResult.tasks.map(function(t) {
+          return {
+            taskKey: t.taskKey,
+            employee: t.emp || '',
+            taskType: t.type || '',
+            type: t.type || '', // Alias
+            itemType: t.item || '',
+            location: t.loc || '',
+            phoneNumber: t.phone || '',
+            dueDate: t.due || '',
+            scheduledDate: t.sched || '',
+            startTime: t.start || '',
+            endTime: t.end || '',
+            status: t.stat || 'Unassigned',
+            isOverdue: t.over === 1,
+            daysTillDue: t.days || 0,
+            sheetName: t.src || '',
+            source: t.src || '',
+            rowIndex: t.row || 0,
+            isManualTask: t.manual === 1,
+            inTaskList: t.inList === 1,
+            isRegistered: t.reg === 1
+          };
+        });
+        Logger.log('Deserialized ' + metadataResult.tasks.length + ' tasks');
+
+        // Log sample scheduled tasks for debugging
+        var scheduledSample = metadataResult.tasks.filter(function(t) { return t.scheduledDate; }).slice(0, 5);
+        if (scheduledSample.length > 0) {
+          Logger.log('Sample scheduled tasks after deserialization:');
+          scheduledSample.forEach(function(t) {
+            Logger.log('  - ' + t.location + ' (' + t.employee + '): scheduledDate=' + t.scheduledDate);
           });
-          Logger.log('Deserialized ' + metadataResult.tasks.length + ' tasks');
         }
       }
     }
@@ -728,13 +784,16 @@ function collectTasksForTripPlanner() {
       // Handle tasks already scheduled for a future date - collect them by date
       // so Trip Planner can show them on their scheduled days
       if (sourceTask.scheduledDate) {
-        var scheduledDateObj = sourceTask.scheduledDate instanceof Date ?
-            sourceTask.scheduledDate : new Date(sourceTask.scheduledDate);
-        if (!isNaN(scheduledDateObj.getTime())) {
+        // Use parseDateAsLocal to correctly parse YYYY-MM-DD strings as local time
+        var scheduledDateObj = parseDateAsLocal(sourceTask.scheduledDate);
+        if (scheduledDateObj && !isNaN(scheduledDateObj.getTime())) {
           scheduledDateObj.setHours(0, 0, 0, 0);
           if (scheduledDateObj >= today) {
             // Collect this task for its scheduled day instead of skipping
             var scheduledDateKey = formatDateKeyForRoute(scheduledDateObj);
+
+            // DEBUG: Log scheduled task details
+            Logger.log('Scheduled task found: ' + locationName + ' (' + (sourceTask.employee || 'unknown') + ') -> dateKey=' + scheduledDateKey + ' (original: ' + sourceTask.scheduledDate + ')');
 
             // Calculate urgency based on due date (not scheduled date)
             var taskDueDate = sourceTask.dueDate || sourceTask.changeOutDate || null;
@@ -1485,6 +1544,19 @@ function suggestOptimalTrips(daysAhead) {
     var scheduledTasks = pendingData.scheduledTasks || {};
     var scheduledTaskCount = 0;
 
+    // Debug: Log all scheduled task date keys and work day date keys
+    var scheduledDateKeys = Object.keys(scheduledTasks);
+    var workDayDateKeys = workDays.map(function(d) { return d.dateKey; });
+    Logger.log('Scheduled task date keys: ' + scheduledDateKeys.join(', '));
+    Logger.log('Work day date keys: ' + workDayDateKeys.join(', '));
+
+    // Log details of scheduled tasks by location
+    for (var sKey in scheduledTasks) {
+      var sTasks = scheduledTasks[sKey];
+      var sLocations = sTasks.map(function(t) { return t.location; }).join(', ');
+      Logger.log('  scheduledTasks["' + sKey + '"]: ' + sTasks.length + ' tasks at ' + sLocations);
+    }
+
     for (var d = 0; d < workDays.length; d++) {
       var day = workDays[d];
       var tasksOnDate = scheduledTasks[day.dateKey] || [];
@@ -1658,13 +1730,22 @@ function suggestOptimalTrips(daysAhead) {
     }
 
     // Assign locations to days (assignedLocations already has manual tasks from Step 5)
-    Logger.log('Step 7: Assigning locations to days...');
+    // NOTE: Only auto-assign URGENT tasks (overdue, due soon, this week)
+    // Non-urgent tasks (grey dots / URGENCY_LATER) stay in unassigned pool for user to manually drag
+    Logger.log('Step 7: Assigning URGENT locations to days (non-urgent stay unassigned)...');
 
     for (var l = 0; l < locationList.length; l++) {
       var locData = locationList[l];
       var locName = locData.name.toLowerCase();
 
       if (assignedLocations[locName]) continue;
+
+      // ONLY auto-assign if task is urgent (overdue, due soon, or this week)
+      // Leave non-urgent tasks (URGENCY_NEXT_WEEK = 20, URGENCY_LATER = 10) in unassigned pool
+      if (locData.maxUrgency < URGENCY_THIS_WEEK) {
+        Logger.log('Skipping auto-assign for ' + locData.name + ' (urgency=' + locData.maxUrgency + ' < ' + URGENCY_THIS_WEEK + ')');
+        continue; // Will appear in unassigned locations
+      }
 
       // Find best day for this location, considering manual tasks already scheduled
       var bestDayIdx = findBestDayForLocation(locData, workDays, byLocation, driveTimeMap);
@@ -1681,11 +1762,12 @@ function suggestOptimalTrips(daysAhead) {
         });
         assignedLocations[locName] = true;
 
-        // Try to add same-direction locations to this day (limit iterations)
+        // Try to add same-direction URGENT locations to this day (limit iterations)
         var sameDirection = locationList.filter(function(other) {
           return other.direction === locData.direction &&
                  other.name.toLowerCase() !== locName &&
-                 !assignedLocations[other.name.toLowerCase()];
+                 !assignedLocations[other.name.toLowerCase()] &&
+                 other.maxUrgency >= URGENCY_THIS_WEEK; // Only add urgent same-direction
         });
 
         // Limit to first 5 same-direction locations to avoid performance issues
@@ -2090,65 +2172,206 @@ function applyTripToSchedule(daysToApply) {
       // Get arrival time for this location
       var arrivalTime = arrivalTimes[locationName.toLowerCase()] || locData.arrivalTime || '';
 
-      // Find matching tasks in Task Metadata by location
-      var locLower = locationName.toLowerCase();
-      var matchedForThisLocation = 0;
+      // SPECIAL HANDLING: Helena Office locations (office tasks scheduled to a day)
+      if (locationName === 'Helena Office' || locData.isOfficeLocation) {
+        Logger.log('  Processing Helena Office with ' + (locData.tasks ? locData.tasks.length : 0) + ' office tasks');
 
-      Logger.log('  Looking for location: "' + locLower + '" (taskCount: ' + (locData.taskCount || locData.tasks?.length || 'unknown') + ')');
+        // For Helena Office, we need to match tasks by their source/rowIndex, not by location
+        var officeTasks = locData.tasks || [];
+        for (var ot = 0; ot < officeTasks.length; ot++) {
+          var officeTask = officeTasks[ot];
+          var taskSource = officeTask.source || '';
+          var taskRowIndex = officeTask.rowIndex;
 
-      for (var row = 1; row < metadataData.length; row++) {
-        var rowData = metadataData[row];
-        var rowLocation = locationCol !== undefined ? String(rowData[locationCol] || '').toLowerCase().trim() : '';
+          Logger.log('    Looking for office task: source=' + taskSource + ' rowIndex=' + taskRowIndex + ' employee=' + (officeTask.employee || 'unknown'));
 
-        // Match location
-        if (rowLocation !== locLower) continue;
+          // Search Task Metadata for matching task by source sheet and row index
+          for (var row = 1; row < metadataData.length; row++) {
+            var rowData = metadataData[row];
+            var rowSource = sourceSheetCol !== undefined ? String(rowData[sourceSheetCol] || '') : '';
+            var rowRowIndex = sourceRowCol !== undefined ? rowData[sourceRowCol] : '';
 
-        // Skip completed tasks
-        var status = statusCol !== undefined ? String(rowData[statusCol] || '').toLowerCase() : '';
-        if (status === 'complete' || status === 'completed') {
-          skippedComplete++;
-          continue;
-        }
+            // Match by source sheet and row index
+            if (rowSource === taskSource && String(rowRowIndex) === String(taskRowIndex)) {
+              // Skip completed tasks
+              var status = statusCol !== undefined ? String(rowData[statusCol] || '').toLowerCase() : '';
+              if (status === 'complete' || status === 'completed') {
+                skippedComplete++;
+                Logger.log('      Skipping row ' + (row + 1) + ' - already completed');
+                continue;
+              }
 
-        // Check if already scheduled for a future date (don't override)
-        var existingScheduledDate = rowData[scheduledDateCol];
-        if (existingScheduledDate) {
-          var existingDate = existingScheduledDate instanceof Date ?
-            existingScheduledDate : new Date(existingScheduledDate);
-          if (!isNaN(existingDate.getTime())) {
-            existingDate.setHours(0, 0, 0, 0);
-            if (existingDate > today) {
-              Logger.log('    Skipping row ' + (row + 1) + ' - already scheduled for ' + existingDate.toDateString());
-              skippedCount++;
-              continue;
+              // Update the task
+              try {
+                // Set scheduled date
+                metadataSheet.getRange(row + 1, scheduledDateCol + 1).setValue(targetDate);
+
+                // Set start time (use arrival time or default to 8am for office tasks)
+                if (startTimeCol !== undefined) {
+                  var officeStartTime = arrivalTime || '08:00';
+                  metadataSheet.getRange(row + 1, startTimeCol + 1).setValue(officeStartTime);
+                }
+
+                // Update status to Assigned
+                if (statusCol !== undefined) {
+                  metadataSheet.getRange(row + 1, statusCol + 1).setValue('Assigned');
+                }
+
+                // Update last modified
+                if (lastModifiedCol !== undefined) {
+                  metadataSheet.getRange(row + 1, lastModifiedCol + 1).setValue(new Date());
+                }
+
+                updatedCount++;
+                matchedForThisLocation++;
+                Logger.log('      Updated row ' + (row + 1) + ' (Helena Office task) to ' + dateKey);
+              } catch (e) {
+                Logger.log('      Error updating row ' + (row + 1) + ': ' + e);
+                errorCount++;
+              }
+              break; // Found the matching row, move to next office task
             }
           }
         }
 
-        // Update the task
-        try {
-          // Set scheduled date
-          metadataSheet.getRange(row + 1, scheduledDateCol + 1).setValue(targetDate);
-
-          // Set start time if available
-          if (startTimeCol !== undefined && arrivalTime) {
-            metadataSheet.getRange(row + 1, startTimeCol + 1).setValue(arrivalTime);
-          }
-
-          // Update last modified
-          if (lastModifiedCol !== undefined) {
-            metadataSheet.getRange(row + 1, lastModifiedCol + 1).setValue(new Date());
-          }
-
-          updatedCount++;
-          matchedForThisLocation++;
-          Logger.log('    Updated row ' + (row + 1) + ' (' + rowLocation + ') to ' + dateKey + (arrivalTime ? ' @ ' + arrivalTime : ''));
-
-        } catch (e) {
-          Logger.log('    Error updating row ' + (row + 1) + ': ' + e);
-          errorCount++;
+        if (matchedForThisLocation === 0 && officeTasks.length > 0) {
+          Logger.log('  WARNING: No matching tasks found for Helena Office tasks');
+          noMatchCount++;
+        } else {
+          Logger.log('  Matched ' + matchedForThisLocation + ' office tasks');
         }
+        continue; // Move to next location
       }
+
+      // Find matching tasks in Task Metadata by location (regular field locations)
+      var locLower = locationName.toLowerCase();
+      var matchedForThisLocation = 0;
+
+      // Get specific tasks from location data if available
+      var specificTasks = locData.tasks || [];
+      var hasSpecificTasks = specificTasks.length > 0;
+
+      Logger.log('  Looking for location: "' + locLower + '" (specificTasks: ' + specificTasks.length + ', taskCount: ' + (locData.taskCount || 'unknown') + ')');
+
+      // If we have specific tasks, match by source+rowIndex (precise matching)
+      if (hasSpecificTasks) {
+        for (var ti = 0; ti < specificTasks.length; ti++) {
+          var task = specificTasks[ti];
+          var taskSource = task.source || task.sheetName || '';
+          var taskRowIndex = task.rowIndex;
+
+          Logger.log('    Looking for specific task: source=' + taskSource + ' rowIndex=' + taskRowIndex + ' employee=' + (task.employee || 'unknown'));
+
+          // Find this specific task in Task Metadata
+          for (var row = 1; row < metadataData.length; row++) {
+            var rowData = metadataData[row];
+            var rowSource = sourceSheetCol !== undefined ? String(rowData[sourceSheetCol] || '') : '';
+            var rowRowIndex = sourceRowCol !== undefined ? rowData[sourceRowCol] : '';
+
+            // Match by source sheet and row index
+            if (rowSource === taskSource && String(rowRowIndex) === String(taskRowIndex)) {
+              // Skip completed tasks
+              var status = statusCol !== undefined ? String(rowData[statusCol] || '').toLowerCase() : '';
+              if (status === 'complete' || status === 'completed') {
+                skippedComplete++;
+                Logger.log('      Skipping row ' + (row + 1) + ' - already completed');
+                break;
+              }
+
+              // Update the task
+              try {
+                // Set scheduled date
+                metadataSheet.getRange(row + 1, scheduledDateCol + 1).setValue(targetDate);
+
+                // Set start time if available
+                if (startTimeCol !== undefined && arrivalTime) {
+                  metadataSheet.getRange(row + 1, startTimeCol + 1).setValue(arrivalTime);
+                }
+
+                // Update status to Assigned
+                if (statusCol !== undefined) {
+                  metadataSheet.getRange(row + 1, statusCol + 1).setValue('Assigned');
+                }
+
+                // Update last modified
+                if (lastModifiedCol !== undefined) {
+                  metadataSheet.getRange(row + 1, lastModifiedCol + 1).setValue(new Date());
+                }
+
+                updatedCount++;
+                matchedForThisLocation++;
+                Logger.log('      Updated row ' + (row + 1) + ' (' + taskSource + '_' + taskRowIndex + ') to ' + dateKey + (arrivalTime ? ' @ ' + arrivalTime : ''));
+              } catch (e) {
+                Logger.log('      Error updating row ' + (row + 1) + ': ' + e);
+                errorCount++;
+              }
+              break; // Found the matching row, move to next task
+            }
+          }
+        }
+      } else {
+        // Fallback: match by location only (legacy behavior for backwards compatibility)
+        Logger.log('    Using location-only matching (no specific tasks provided)');
+
+        for (var row = 1; row < metadataData.length; row++) {
+          var rowData = metadataData[row];
+          var rowLocation = locationCol !== undefined ? String(rowData[locationCol] || '').toLowerCase().trim() : '';
+
+          // Match location
+          if (rowLocation !== locLower) continue;
+
+          // Skip completed tasks
+          var status = statusCol !== undefined ? String(rowData[statusCol] || '').toLowerCase() : '';
+          if (status === 'complete' || status === 'completed') {
+            skippedComplete++;
+            continue;
+          }
+
+          // Check if already scheduled for a future date (don't override)
+          var existingScheduledDate = rowData[scheduledDateCol];
+          if (existingScheduledDate) {
+            var existingDate = existingScheduledDate instanceof Date ?
+              existingScheduledDate : new Date(existingScheduledDate);
+            if (!isNaN(existingDate.getTime())) {
+              existingDate.setHours(0, 0, 0, 0);
+              if (existingDate > today) {
+                Logger.log('    Skipping row ' + (row + 1) + ' - already scheduled for ' + existingDate.toDateString());
+                skippedCount++;
+                continue;
+              }
+            }
+          }
+
+          // Update the task
+          try {
+            // Set scheduled date
+            metadataSheet.getRange(row + 1, scheduledDateCol + 1).setValue(targetDate);
+
+            // Set start time if available
+            if (startTimeCol !== undefined && arrivalTime) {
+              metadataSheet.getRange(row + 1, startTimeCol + 1).setValue(arrivalTime);
+            }
+
+            // Update status to Assigned
+            if (statusCol !== undefined) {
+              metadataSheet.getRange(row + 1, statusCol + 1).setValue('Assigned');
+            }
+
+            // Update last modified
+            if (lastModifiedCol !== undefined) {
+              metadataSheet.getRange(row + 1, lastModifiedCol + 1).setValue(new Date());
+            }
+
+            updatedCount++;
+            matchedForThisLocation++;
+            Logger.log('    Updated row ' + (row + 1) + ' (' + rowLocation + ') to ' + dateKey + (arrivalTime ? ' @ ' + arrivalTime : ''));
+
+          } catch (e) {
+            Logger.log('    Error updating row ' + (row + 1) + ': ' + e);
+            errorCount++;
+          }
+        }
+      } // End of hasSpecificTasks else block
 
       if (matchedForThisLocation === 0) {
         Logger.log('  WARNING: No matching tasks found for location "' + locLower + '"');

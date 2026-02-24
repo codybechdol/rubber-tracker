@@ -36,34 +36,13 @@
     .status-complete { background: #e6f4ea; color: #137333; }
     .status-overdue { background: #fce8e6; color: #c5221f; }
     .status-scheduled { background: #e8f0fe; color: #1967d2; }
+    .status-unassigned { background: #f5f5f5; color: #5f6368; }
+    .status-assigned { background: #e8f0fe; color: #1967d2; }
+    .status-deferred { background: #f3e5f5; color: #7b1fa2; }
     .filter-bar { background: white; padding: 12px; border-radius: 8px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
 
-    /* Calendar Styles */
-    .calendar-container { background: white; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
-    .calendar-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-    .calendar-title { font-size: 18px; font-weight: 500; color: #202124; }
-    .calendar-nav { display: flex; gap: 8px; }
-    .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
-    .calendar-day-header { text-align: center; font-weight: 500; color: #5f6368; padding: 8px; font-size: 12px; }
-    .calendar-day { min-height: 80px; border: 1px solid #e0e0e0; border-radius: 4px; padding: 4px; background: #fff; cursor: pointer; }
-    .calendar-day:hover { background: #f1f3f4; }
-    .calendar-day.today { background: #fff59d; border-color: #f57c00; }
-    .calendar-day.other-month { background: #f5f5f5; color: #9e9e9e; }
-    .calendar-day.has-tasks { background: #e3f2fd; }
-    .calendar-day-number { font-weight: 500; font-size: 14px; margin-bottom: 4px; }
-    .calendar-task-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 2px; }
-    .calendar-task-dot.high { background: #ea4335; }
-    .calendar-task-dot.medium { background: #fbbc04; }
-    .calendar-task-dot.low { background: #34a853; }
-    .calendar-task-preview { font-size: 10px; color: #5f6368; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .calendar-task-location { font-size: 9px; color: #667eea; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .calendar-task-location.my-task { background: #e3f2fd; color: #1565c0; padding: 1px 4px; border-radius: 3px; }
-    .day-detail-popup { position: fixed; background: white; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); padding: 16px; z-index: 1000; max-width: 450px; max-height: 500px; overflow-y: auto; }
-    .day-detail-task { border: 1px solid #e0e0e0; border-radius: 6px; padding: 10px; margin-bottom: 8px; }
-    .day-detail-task.priority-high { border-left: 4px solid #ea4335; }
-    .day-detail-task.priority-medium { border-left: 4px solid #fbbc04; }
-    .day-detail-task.priority-low { border-left: 4px solid #34a853; }
-    .day-detail-task.my-task { background: #e8f4fd; border-color: #90caf9; }
+    /* Calendar styles removed - use Trip Planner/Scheduler instead */
+
     .unsaved-indicator { display: none; color: #dc3545; font-size: 12px; margin-left: 8px; }
     .unsaved-indicator.show { display: inline; }
     .date-input.changed { background: #fff3cd; border-color: #ffc107; }
@@ -149,16 +128,10 @@
 
   <ul class="nav nav-tabs mb-3" id="scheduleTabs" role="tablist">
     <li class="nav-item" role="presentation">
-      <button class="nav-link active" id="calendar-tab" data-bs-toggle="tab" data-bs-target="#calendar" type="button">
-        <i class="bi bi-calendar3"></i> Calendar
-      </button>
-    </li>
-    <li class="nav-item" role="presentation">
-      <button class="nav-link" id="tasklist-tab" data-bs-toggle="tab" data-bs-target="#tasklist" type="button">
+      <button class="nav-link active" id="tasklist-tab" data-bs-toggle="tab" data-bs-target="#tasklist" type="button">
         <i class="bi bi-list-check"></i> Task List
       </button>
     </li>
-    <!-- My Checklist tab removed - content merged into Task List (Phase 5) -->
     <li class="nav-item" role="presentation">
       <button class="nav-link" id="expiringcerts-tab" data-bs-toggle="tab" data-bs-target="#expiringcerts" type="button">
         <i class="bi bi-file-earmark-medical"></i> Expiring Certs <span class="badge bg-danger" id="certsBadge" style="display: none;">0</span>
@@ -167,31 +140,8 @@
   </ul>
 
   <div class="tab-content" id="scheduleTabContent">
-    <!-- Calendar Tab -->
-    <div class="tab-pane fade show active" id="calendar" role="tabpanel">
-      <div class="calendar-container">
-        <div class="calendar-header">
-          <button class="btn btn-outline-secondary btn-sm" onclick="changeMonth(-1)">
-            <i class="bi bi-chevron-left"></i>
-          </button>
-          <span class="calendar-title" id="calendarTitle">January 2026</span>
-          <button class="btn btn-outline-secondary btn-sm" onclick="changeMonth(1)">
-            <i class="bi bi-chevron-right"></i>
-          </button>
-        </div>
-        <div class="calendar-grid" id="calendarGrid">
-          <!-- Calendar will be rendered here -->
-        </div>
-        <div class="mt-3 text-muted small">
-          <span class="calendar-task-dot high"></span> High Priority
-          <span class="calendar-task-dot medium ms-2"></span> Medium Priority
-          <span class="calendar-task-dot low ms-2"></span> Low Priority
-        </div>
-      </div>
-    </div>
-
-    <!-- Task List Tab -->
-    <div class="tab-pane fade" id="tasklist" role="tabpanel">
+    <!-- Task List Tab (now default) -->
+    <div class="tab-pane fade show active" id="tasklist" role="tabpanel">
       <div class="filter-bar">
         <div class="row align-items-center">
           <div class="col-auto">
@@ -712,6 +662,78 @@
     </div>
   </div>
 
+  <!-- Missing Report Resolution Modal (Stage 2 - Record why reports were missing) -->
+  <div class="modal fade" id="missingReportResolutionModal" tabindex="-1" aria-labelledby="missingReportResolutionModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header" style="background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%); color: white;">
+          <h5 class="modal-title" id="missingReportResolutionModalLabel"><i class="bi bi-clipboard-check"></i> Record Resolution</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div class="alert alert-info small mb-3">
+            <strong><i class="bi bi-person-badge"></i> <span id="resolutionForemanName">Foreman</span></strong><br>
+            <span id="resolutionWeekInfo"></span><br>
+            <span id="resolutionJobNumber" class="text-muted"></span>
+          </div>
+
+          <!-- Legend -->
+          <div class="alert alert-secondary small mb-3">
+            <strong>Status Legend:</strong>
+            <span class="badge bg-success ms-2">✅</span> Completed
+            <span class="badge bg-danger ms-2">❌D</span> Did Not Do
+            <span class="badge bg-warning text-dark ms-2">❌F</span> Forgot to Send
+            <span class="badge bg-info ms-2">❌A</span> App Issue
+            <span class="badge bg-secondary ms-2">❌W</span> Did Not Work
+            <span class="badge ms-2" style="background-color: #7e57c2; color: white;">❌L</span> Late Submission
+          </div>
+
+          <h6 class="mb-2"><i class="bi bi-calendar-week"></i> Missing Report Days</h6>
+          <div class="card mb-3">
+            <div class="card-body" id="resolutionDaysContainer">
+              <!-- Days will be dynamically populated here -->
+            </div>
+          </div>
+
+          <!-- Weekly Meeting Section (if missing) -->
+          <div id="resolutionWeeklyMeetingSection" style="display: none;">
+            <h6 class="mb-2"><i class="bi bi-people"></i> Weekly Safety Meeting</h6>
+            <div class="card mb-3">
+              <div class="card-body">
+                <div class="row align-items-center">
+                  <div class="col-md-4">
+                    <span class="badge bg-danger">❌</span> Weekly Meeting
+                  </div>
+                  <div class="col-md-8">
+                    <select class="form-select form-select-sm" id="resolutionWeeklyMeetingReason">
+                      <option value="">-- Select Reason --</option>
+                      <option value="C">Completed ✅</option>
+                      <option value="D">Did Not Do</option>
+                      <option value="F">Complete But Forgot to Send</option>
+                      <option value="A">App Didn't Send</option>
+                      <option value="W">Did Not Work This Week</option>
+                      <option value="L">Late Submission</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="alert alert-warning small mb-0">
+            <i class="bi bi-info-circle"></i> Select a reason for each missing day. This will update the Safety Compliance sheet and mark the task as resolved.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-warning" id="saveResolutionsBtn" onclick="saveResolutions()">
+            <i class="bi bi-check-lg"></i> Save Resolutions
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   <script>
     var allTasks = [];
@@ -908,6 +930,15 @@
         }
         if (vehicleNum) {
           equipLabel += ' <span style="color:#666;font-weight:bold;">(#' + vehicleNum + ')</span>';
+        }
+        // Add "From Report Received" date - use reportDate if available, otherwise dueDate
+        // (For Safety Equipment tasks, dueDate = report date when the safety email was received)
+        var reportDateVal = task.reportDate || task.dueDate;
+        if (reportDateVal) {
+          var reportDateDisplay = formatDisplayDate(reportDateVal);
+          if (reportDateDisplay) {
+            equipLabel += '<br><span style="font-size:11px;color:#1a73e8;"><i class="bi bi-envelope-fill"></i> From Report Received: ' + reportDateDisplay + '</span>';
+          }
         }
         // Add description excerpt if available
         if (currentItem && currentItem.length > 0) {
@@ -1317,6 +1348,8 @@
     // Process task data (used by both cache and direct paths)
     function processTaskData(data) {
       console.log('processTaskData: Processing', data.totalTasks, 'tasks');
+      console.log('processTaskData: data.tasks array length:', (data.tasks || []).length);
+      console.log('processTaskData: First task sample:', JSON.stringify((data.tasks || [])[0]));
 
       // Expand shortened property names from server (for smaller transfer size)
       var rawTasks = data.tasks || [];
@@ -1325,6 +1358,7 @@
         if (t.emp !== undefined || t.taskKey !== undefined) {
           return {
             taskKey: t.taskKey,
+            tid: t.tid || '',            // TaskID for Safety Compliance job number extraction
             _originalIndex: t.idx,
             employee: t.emp,
             taskType: t.type,
@@ -1343,7 +1377,9 @@
             rowIndex: t.row,
             isManualTask: t.manual === 1,
             inTaskList: t.inList === 1,  // Phase 5: Task List flag
-            isRegistered: t.reg === 1    // Phase 5: Registration flag for green highlight
+            isRegistered: t.reg === 1,   // Phase 5: Registration flag for green highlight
+            notes: t.n || '',            // Notes (for SMS messages - Missing Safety Reports, etc.)
+            jobNumber: t.job || ''       // Job number for Safety Compliance tasks
           };
         }
         // Otherwise use as-is (legacy format)
@@ -1382,6 +1418,57 @@
           });
           console.log('processTaskData: Normalized dates for ' + allTasks.length + ' tasks');
 
+          // DEDUPLICATION: Remove duplicate Safety Compliance tasks (same job+week but different date formats)
+          // e.g., SafetyCompliance_013-26_02-08-2026 vs SafetyCompliance_013-26_20260208
+          var seenSafetyJobWeeks = {};
+          var beforeDedup = allTasks.length;
+          allTasks = allTasks.filter(function(task) {
+            // Only dedupe Safety Compliance tasks
+            var taskId = task.taskId || task.tid || '';
+            var isSafetyTask = (task.taskType === 'Missing Safety Report' ||
+                                task.source === 'Safety Compliance' ||
+                                taskId.indexOf('SafetyCompliance_') === 0);
+
+            if (!isSafetyTask) return true; // Keep non-safety tasks
+
+            // Extract job number and date from TaskID
+            var match = taskId.match(/SafetyCompliance_(\d{3}-\d{2})_(.+)/);
+            if (!match) return true; // Can't parse, keep it
+
+            var jobNum = match[1];
+            var dateStr = match[2];
+
+            // Normalize date to MM-DD-YYYY format for consistent comparison
+            var normalizedDate = dateStr;
+            // Handle YYYYMMDD format (8 digits)
+            if (dateStr.match(/^\d{8}$/)) {
+              normalizedDate = dateStr.substring(4, 6) + '-' + dateStr.substring(6, 8) + '-' + dateStr.substring(0, 4);
+            }
+            // Handle MM/DD/YYYY format
+            if (dateStr.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
+              normalizedDate = dateStr.replace(/\//g, '-');
+            }
+            // Handle YYYY-MM-DD format
+            if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+              var parts = dateStr.split('-');
+              normalizedDate = parts[1] + '-' + parts[2] + '-' + parts[0];
+            }
+
+            var normalizedKey = jobNum + '_' + normalizedDate;
+
+            if (seenSafetyJobWeeks[normalizedKey]) {
+              console.log('processTaskData: Removing duplicate Safety task: ' + taskId + ' (normalized: ' + normalizedKey + ')');
+              return false; // Duplicate, filter out
+            }
+
+            seenSafetyJobWeeks[normalizedKey] = true;
+            return true; // First occurrence, keep it
+          });
+
+          if (beforeDedup !== allTasks.length) {
+            console.log('processTaskData: Removed ' + (beforeDedup - allTasks.length) + ' duplicate Safety Compliance tasks');
+          }
+
           // Build employee phone map for checklist items
           buildEmployeePhoneMap();
           console.log('processTaskData: Built phone map with ' + Object.keys(employeePhoneMap).length + ' entries');
@@ -1407,20 +1494,17 @@
             })
             .getMissingSafetyReportTasks();
 
+          console.log('processTaskData: About to call renderTasks with ' + allTasks.length + ' tasks');
           try {
             renderTasks(allTasks);
-            console.log('processTaskData: renderTasks completed');
+            console.log('processTaskData: renderTasks completed successfully');
           } catch (e) {
             console.error('processTaskData: renderTasks error:', e);
+            console.error('processTaskData: Error stack:', e.stack);
             document.getElementById('taskContainer').innerHTML =
-              '<div class="alert alert-danger">Error rendering tasks: ' + e.message + '</div>';
+              '<div class="alert alert-danger">Error rendering tasks: ' + e.message + '<br><pre>' + e.stack + '</pre></div>';
           }
-          try {
-            renderCalendar();
-            console.log('processTaskData: renderCalendar completed');
-          } catch (e) {
-            console.error('processTaskData: renderCalendar error:', e);
-          }
+          // Calendar tab removed - use Trip Planner/Scheduler instead
           try {
             renderPersonalChecklist();
             console.log('processTaskData: renderPersonalChecklist completed');
@@ -1429,243 +1513,44 @@
           }
     }
 
-    // ================== CALENDAR FUNCTIONS ==================
+    // ================== CALENDAR FUNCTIONS REMOVED ==================
+    // Calendar tab has been removed. Use Trip Planner / Scheduler for scheduling tasks.
+    // Access via: Glove Manager → Scheduling → Trip Planner/Scheduler
+
+    // Stub function to prevent errors - calendar functionality moved to Trip Planner
     function renderCalendar() {
-      var grid = document.getElementById('calendarGrid');
-      var title = document.getElementById('calendarTitle');
-
-      var today = new Date();
-      today.setHours(0, 0, 0, 0);
-      var todayStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
-
-      // Calculate the start of the current week (Sunday)
-      var currentWeekStart = new Date(today);
-      currentWeekStart.setDate(today.getDate() - today.getDay());
-      currentWeekStart.setHours(0, 0, 0, 0);
-
-      // For rolling calendar: start from current week's Sunday and show 5 weeks
-      var calendarStart = new Date(currentWeekStart);
-      var weeksToShow = 5;
-      var totalDays = weeksToShow * 7;
-
-      // Calculate the end date for title purposes
-      var calendarEnd = new Date(calendarStart);
-      calendarEnd.setDate(calendarStart.getDate() + totalDays - 1);
-
-      // Update title to show date range
-      var startMonthYear = monthNames[calendarStart.getMonth()] + ' ' + calendarStart.getFullYear();
-      var endMonthYear = monthNames[calendarEnd.getMonth()] + ' ' + calendarEnd.getFullYear();
-      if (startMonthYear === endMonthYear) {
-        title.textContent = startMonthYear;
-      } else {
-        title.textContent = monthNames[calendarStart.getMonth()] + ' - ' + monthNames[calendarEnd.getMonth()] + ' ' + calendarEnd.getFullYear();
-      }
-
-      // Group tasks by date
-      var tasksByDate = {};
-      allTasks.forEach(function(task) {
-        if (task.scheduledDate) {
-          if (!tasksByDate[task.scheduledDate]) tasksByDate[task.scheduledDate] = [];
-          tasksByDate[task.scheduledDate].push(task);
-        }
-      });
-
-      var html = '';
-
-      // Day headers
-      var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-      dayNames.forEach(function(day) {
-        html += '<div class="calendar-day-header">' + day + '</div>';
-      });
-
-      // Render each day in the 5-week rolling window
-      for (var d = 0; d < totalDays; d++) {
-        var currentDate = new Date(calendarStart);
-        currentDate.setDate(calendarStart.getDate() + d);
-
-        var day = currentDate.getDate();
-        var month = currentDate.getMonth();
-        var year = currentDate.getFullYear();
-        var dateStr = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
-
-        var dayTasks = tasksByDate[dateStr] || [];
-        var isToday = dateStr === todayStr;
-        var hasTasks = dayTasks.length > 0;
-
-        // Check if this is the first day of a month (show month indicator)
-        var isFirstOfMonth = (day === 1);
-
-        var classes = 'calendar-day';
-        if (isToday) classes += ' today';
-        if (hasTasks) classes += ' has-tasks';
-
-        html += '<div class="' + classes + '" onclick="showDayDetail(\'' + dateStr + '\', event)">';
-
-        // Show month name on the 1st of each month
-        if (isFirstOfMonth) {
-          html += '<div class="calendar-day-number" style="font-weight: bold;">' + monthNames[month].substring(0, 3) + ' ' + day + '</div>';
-        } else {
-          html += '<div class="calendar-day-number">' + day + '</div>';
-        }
-
-        if (hasTasks) {
-          // Show priority dots
-          var highCount = dayTasks.filter(function(t) { return t.priority === 'High'; }).length;
-          var medCount = dayTasks.filter(function(t) { return t.priority === 'Medium'; }).length;
-          var lowCount = dayTasks.filter(function(t) { return t.priority === 'Low'; }).length;
-
-          html += '<div>';
-          for (var h = 0; h < Math.min(highCount, 3); h++) html += '<span class="calendar-task-dot high"></span>';
-          for (var m = 0; m < Math.min(medCount, 3); m++) html += '<span class="calendar-task-dot medium"></span>';
-          for (var l = 0; l < Math.min(lowCount, 3); l++) html += '<span class="calendar-task-dot low"></span>';
-          html += '</div>';
-
-          // Group tasks by location and count, tracking My Tasks status
-          var locationCounts = {};
-          var locationIsMyTask = {};
-          dayTasks.forEach(function(t) {
-            var loc = t.location || 'No Location';
-            if (!locationCounts[loc]) {
-              locationCounts[loc] = 0;
-              locationIsMyTask[loc] = false;
-            }
-            locationCounts[loc]++;
-            // Check if this task is from My Checklist (Manual Tasks or in personalChecklist)
-            if (t.source === 'Manual Tasks' || isTaskInChecklist(t)) {
-              locationIsMyTask[loc] = true;
-            }
-          });
-
-          // Sort locations by task count (most tasks first)
-          var sortedLocations = Object.keys(locationCounts).sort(function(a, b) {
-            return locationCounts[b] - locationCounts[a];
-          });
-
-          // Show first 2 locations with counts and My Task indicator
-          for (var loc = 0; loc < Math.min(sortedLocations.length, 2); loc++) {
-            var locName = sortedLocations[loc];
-            var count = locationCounts[locName];
-            var myTaskClass = locationIsMyTask[locName] ? ' my-task' : '';
-            html += '<div class="calendar-task-location' + myTaskClass + '">📍 ' + locName;
-            if (count > 1) html += ' (' + count + ')';
-            html += '</div>';
-          }
-          if (sortedLocations.length > 2) {
-            html += '<div class="calendar-task-preview">+' + (sortedLocations.length - 2) + ' more</div>';
-          }
-        }
-        html += '</div>';
-      }
-
-      grid.innerHTML = html;
-    }
-
-    function changeMonth(delta) {
-      // For rolling calendar, this now shifts weeks instead of months
-      // Each click moves 2 weeks forward or back
-      var today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      // Calculate current week start
-      var currentWeekStart = new Date(today);
-      currentWeekStart.setDate(today.getDate() - today.getDay());
-
-      // Don't allow going before current week
-      if (delta < 0) {
-        showToast('Cannot view past weeks - calendar starts from current week', 'info');
-        return;
-      }
-
-      // For forward navigation, we could extend the view, but for now just show a message
-      showToast('Showing 5 weeks from current week. Tasks beyond this range are still tracked.', 'info');
-    }
-
-    function showDayDetail(dateStr, event) {
-      event.stopPropagation();
-
-      var dayTasks = allTasks.filter(function(t) { return t.scheduledDate === dateStr; });
-
-      var date = new Date(dateStr + 'T12:00:00');
-      var dateDisplay = monthNames[date.getMonth()] + ' ' + date.getDate() + ', ' + date.getFullYear();
-
-      // Update modal title
-      document.getElementById('dayDetailModalLabel').innerHTML = '📅 ' + dateDisplay + ' <span class="badge bg-light text-dark ms-2">' + dayTasks.length + ' task(s)</span>';
-
-      var modalBody = document.getElementById('dayDetailModalBody');
-
-      if (dayTasks.length === 0) {
-        modalBody.innerHTML = '<div class="text-center text-muted py-4"><i class="bi bi-calendar-x" style="font-size: 48px;"></i><p class="mt-3">No tasks scheduled for this day.</p></div>';
-      } else {
-        // Group tasks by location
-        var tasksByLoc = {};
-        dayTasks.forEach(function(task) {
-          var loc = task.location || 'No Location';
-          if (!tasksByLoc[loc]) tasksByLoc[loc] = [];
-          tasksByLoc[loc].push(task);
-        });
-
-        var html = '';
-
-        // Render by location
-        var locations = Object.keys(tasksByLoc).sort();
-        locations.forEach(function(location) {
-          var locTasks = tasksByLoc[location];
-          html += '<div class="mb-4">';
-          html += '<h6 style="color: #667eea; border-bottom: 1px solid #e0e0e0; padding-bottom: 8px;"><i class="bi bi-geo-alt-fill"></i> ' + location + ' <span class="badge bg-secondary">' + locTasks.length + '</span></h6>';
-
-          locTasks.forEach(function(task) {
-            var priorityClass = 'priority-' + (task.priority || 'medium').toLowerCase();
-            var statusClass = getStatusClass(task.status);
-            var displayTaskType = formatTaskType(task);
-            var taskIsOffice = isTaskOffice(task);
-
-            html += '<div class="day-detail-task ' + priorityClass + ' mb-2">';
-            html += '<div class="d-flex justify-content-between align-items-start">';
-            html += '<div><strong>' + displayTaskType + '</strong>';
-            if (taskIsOffice) {
-              html += '<span class="office-badge"><i class="bi bi-building"></i> Office</span>';
-            }
-            if (task.employee) html += '<div class="text-muted small">👤 ' + task.employee + '</div>';
-            html += '</div>';
-            html += '<span class="status-badge ' + statusClass + '">' + (task.status || 'Pending') + '</span>';
-            html += '</div>';
-
-            html += '<div class="small text-muted mt-1">';
-            html += '<i class="bi bi-box-arrow-in-right"></i> ' + (task.source || 'Unknown');
-            if (task.startTime) {
-              html += ' &nbsp;|&nbsp; <i class="bi bi-clock"></i> ' + convertTo12Hour(task.startTime);
-              if (task.endTime) html += ' - ' + convertTo12Hour(task.endTime);
-            }
-            html += '</div>';
-
-            if (task.notes) {
-              html += '<div class="text-muted small mt-1 fst-italic"><i class="bi bi-info-circle"></i> ' + task.notes + '</div>';
-            }
-            html += '</div>';
-          });
-
-          html += '</div>';
-        });
-
-        modalBody.innerHTML = html;
-      }
-
-      // Show the modal
-      var modal = new bootstrap.Modal(document.getElementById('dayDetailModal'));
-      modal.show();
-    }
-
-    function closeDayDetail() {
-      var modal = bootstrap.Modal.getInstance(document.getElementById('dayDetailModal'));
-      if (modal) modal.hide();
+      // Calendar tab removed - no-op
     }
 
     // ================== TASK LIST FUNCTIONS ==================
+    var renderTasksCallCount = 0;
     function renderTasks(tasks) {
+      renderTasksCallCount++;
       var container = document.getElementById('taskContainer');
 
+      // VISIBLE DEBUG - temporary
+      var debugInfo = 'RENDER #' + renderTasksCallCount + ': tasks=' + (tasks ? tasks.length : 'null') +
+                      ', allTasks=' + allTasks.length;
+      console.log('renderTasks: ' + debugInfo);
+
+      // Extra debug: Log task types distribution
+      if (tasks && tasks.length > 0) {
+        var typeCounts = {};
+        var sourceCounts = {};
+        tasks.forEach(function(t) {
+          var tt = (t.taskType || 'NO_TYPE').toLowerCase();
+          var ss = (t.source || 'NO_SOURCE').toLowerCase();
+          typeCounts[tt] = (typeCounts[tt] || 0) + 1;
+          sourceCounts[ss] = (sourceCounts[ss] || 0) + 1;
+        });
+        console.log('renderTasks: Task types:', JSON.stringify(typeCounts));
+        console.log('renderTasks: Sources:', JSON.stringify(sourceCounts));
+      }
+
       if (!tasks || tasks.length === 0) {
-        container.innerHTML = '<div class="empty-state"><i class="bi bi-calendar-x" style="font-size: 48px;"></i><p class="mt-3">No tasks found</p><p class="text-muted">Tasks will appear from Training, Crew Visits, Expiring Certs, and Swaps</p></div>';
+        console.log('renderTasks: Empty tasks array, showing empty state');
+        container.innerHTML = '<div class="alert alert-warning">' + debugInfo + '</div>' +
+          '<div class="empty-state"><i class="bi bi-calendar-x" style="font-size: 48px;"></i><p class="mt-3">No tasks found</p><p class="text-muted">Tasks will appear from Training, Crew Visits, Expiring Certs, and Swaps</p></div>';
         return;
       }
 
@@ -1673,7 +1558,9 @@
       // - Include Manual Tasks (grouped by location/foreman like other tasks)
       // - Include Cert tasks that have inTaskList=true (added from Expiring Certs tab)
       // - Exclude cert tasks that have NOT been added to checklist (they stay in Expiring Certs tab)
+      var filterStats = { total: 0, manual: 0, certInList: 0, certNotInList: 0, other: 0, completed: 0 };
       var filteredTasks = tasks.filter(function(task, index) {
+        filterStats.total++;
         task._originalIndex = index; // Preserve original index for actions
 
         // Get task type/source info
@@ -1685,7 +1572,8 @@
         if (source === 'manual tasks' || itemType === 'manual' ||
             taskType === 'manual' || taskType === 'manual task') {
           // Skip completed manual tasks
-          if (task.status === 'Complete' || task.completed) return false;
+          if (task.status === 'Complete' || task.completed) { filterStats.completed++; return false; }
+          filterStats.manual++;
           return true;
         }
 
@@ -1695,10 +1583,12 @@
           // Only show if user added it to their Task List
           if (task.inTaskList === true) {
             // Skip completed cert tasks
-            if (task.status === 'Complete' || task.completed) return false;
+            if (task.status === 'Complete' || task.completed) { filterStats.completed++; return false; }
+            filterStats.certInList++;
             return true;
           }
           // Cert tasks NOT in checklist stay in Expiring Certs tab only
+          filterStats.certNotInList++;
           return false;
         }
 
@@ -1708,12 +1598,30 @@
 
         // Include other task types (Training, Swaps, etc.)
         // Skip if completed
-        if (task.status === 'Complete' || task.completed) return false;
+        if (task.status === 'Complete' || task.completed) { filterStats.completed++; return false; }
+        filterStats.other++;
         return true;
       });
 
+      console.log('renderTasks: Filter stats:', JSON.stringify(filterStats));
+
+      console.log('renderTasks: After filtering - filteredTasks=' + filteredTasks.length + ' (from ' + tasks.length + ' input)');
+
+      // VISIBLE DEBUG: Show filter stats as banner if low task count
+      var filterDebugHtml = '<div class="alert alert-secondary mb-2 small" style="font-family: monospace;">' +
+        '<strong>DEBUG Filter:</strong> total=' + filterStats.total +
+        ', manual=' + filterStats.manual +
+        ', certInList=' + filterStats.certInList +
+        ', certNotInList=' + filterStats.certNotInList +
+        ', other=' + filterStats.other +
+        ', completed=' + filterStats.completed +
+        ' → <strong>' + filteredTasks.length + ' passed</strong>' +
+        '</div>';
+
       if (filteredTasks.length === 0) {
-        container.innerHTML = '<div class="empty-state"><i class="bi bi-calendar-check" style="font-size: 48px;"></i><p class="mt-3">All tasks handled</p><p class="text-muted">Some tasks may have been moved to your personal checklist</p></div>';
+        container.innerHTML = filterDebugHtml +
+          '<div class="alert alert-info">DEBUG: ' + tasks.length + ' tasks received, 0 after filtering</div>' +
+          '<div class="empty-state"><i class="bi bi-calendar-check" style="font-size: 48px;"></i><p class="mt-3">All tasks handled</p><p class="text-muted">Some tasks may have been moved to your personal checklist</p></div>';
         return;
       }
 
@@ -1904,15 +1812,49 @@
           var weekOfMatch = notes.match(/week of\s+(\d{2}\/\d{2}\/\d{4})/i);
           var weekOfDate = weekOfMatch ? weekOfMatch[1] : '';
 
-          // Show WEEK prominently first
+          // Extract JHA dates first (we need this for fallback week calculation)
+          var jhaMatch = notes.match(/Missing JHA:\s*([^;]+)/);
+          var jhaDates = jhaMatch ? jhaMatch[1].trim().split(',') : [];
+
+          // If weekOfDate not found in notes, calculate it from JHA date or dueDate
+          if (!weekOfDate && jhaDates.length > 0) {
+            var firstDateStr = jhaDates[0].trim();
+            var dateParts = firstDateStr.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+            if (dateParts) {
+              var missingDate = new Date(parseInt(dateParts[3]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
+              var dayOfWeek = missingDate.getDay();
+              var weekStart = new Date(missingDate);
+              weekStart.setDate(missingDate.getDate() - dayOfWeek);
+              weekOfDate = String(weekStart.getMonth() + 1).padStart(2, '0') + '/' +
+                           String(weekStart.getDate()).padStart(2, '0') + '/' +
+                           weekStart.getFullYear();
+            }
+          }
+
+          // Last fallback: calculate from dueDate (Saturday = end of week)
+          if (!weekOfDate && task.dueDate) {
+            var dueParts = task.dueDate.match(/(\d{4})-(\d{2})-(\d{2})/);
+            if (!dueParts) dueParts = task.dueDate.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+            if (dueParts) {
+              var yr, mo, dy;
+              if (dueParts[1].length === 4) { yr = dueParts[1]; mo = dueParts[2]; dy = dueParts[3]; }
+              else { mo = dueParts[1]; dy = dueParts[2]; yr = dueParts[3]; }
+              var dueDate = new Date(parseInt(yr), parseInt(mo) - 1, parseInt(dy));
+              var weekSunday = new Date(dueDate);
+              weekSunday.setDate(dueDate.getDate() - 6); // Saturday - 6 = Sunday
+              weekOfDate = String(weekSunday.getMonth() + 1).padStart(2, '0') + '/' +
+                           String(weekSunday.getDate()).padStart(2, '0') + '/' +
+                           weekSunday.getFullYear();
+            }
+          }
+
+          // Show WEEK prominently first (now always calculated)
           if (weekOfDate) {
             html += '<div class="text-primary small" style="margin-left: 20px; font-weight: 600;"><i class="bi bi-calendar-week"></i> Week of ' + weekOfDate + '</div>';
           }
 
-          // Extract JHA dates
-          var jhaMatch = notes.match(/Missing JHA:\s*([^;]+)/);
-          if (jhaMatch) {
-            var jhaDates = jhaMatch[1].trim().split(',');
+          // Build JHA display
+          if (jhaDates.length > 0) {
             if (jhaDates.length === 5) {
               displayParts.push('JHA: Full week');
             } else if (jhaDates.length <= 2) {
@@ -2008,9 +1950,12 @@
 
         // SMS Scheduled button (Stage 2) - only show if notified
         if (isTaskNotified(task)) {
+          var isSafetyCompliance = (task.taskType || '').toLowerCase() === 'missing safety report';
           var scheduledBtnClass = isTaskScheduled(task) ? 'btn-scheduled' : 'btn-sms';
-          var scheduledIcon = isTaskScheduled(task) ? 'bi-calendar-check-fill' : 'bi-calendar-plus';
-          var scheduledTitle = isTaskScheduled(task) ? 'Resend class schedule' : 'Send class schedule text';
+          var scheduledIcon = isTaskScheduled(task) ? 'bi-clipboard-check-fill' : (isSafetyCompliance ? 'bi-clipboard-check' : 'bi-calendar-plus');
+          var scheduledTitle = isSafetyCompliance
+            ? (isTaskScheduled(task) ? 'Edit resolutions' : 'Record resolution')
+            : (isTaskScheduled(task) ? 'Resend class schedule' : 'Send class schedule text');
           html += '<button class="btn ' + scheduledBtnClass + ' btn-sm me-1" onclick="event.stopPropagation(); openScheduledModal(' + task._originalIndex + ')" title="' + scheduledTitle + '"><i class="bi ' + scheduledIcon + '"></i></button>';
         }
 
@@ -2045,11 +1990,14 @@
     }
 
     function getStatusClass(status) {
-      var statusLower = (status || 'pending').toLowerCase();
+      var statusLower = (status || 'unassigned').toLowerCase();
       if (statusLower.indexOf('complete') !== -1) return 'status-complete';
       if (statusLower.indexOf('overdue') !== -1) return 'status-overdue';
-      if (statusLower.indexOf('scheduled') !== -1) return 'status-scheduled';
-      return 'status-pending';
+      if (statusLower.indexOf('assigned') !== -1) return 'status-assigned';
+      if (statusLower.indexOf('scheduled') !== -1) return 'status-scheduled'; // Legacy support
+      if (statusLower.indexOf('deferred') !== -1) return 'status-deferred';
+      if (statusLower.indexOf('pending') !== -1) return 'status-pending'; // Legacy support
+      return 'status-unassigned';
     }
 
     function toggleLocationGroup(locIndex) {
@@ -2327,7 +2275,24 @@
     function markComplete(index) {
       var task = allTasks[index];
 
-      // Check if this is a cert renewal task
+      // Check if this is a Missing Safety Report task - show note dialog
+      if (task.taskType === 'Missing Safety Report' || task.type === 'Missing Safety Report') {
+        showMissingSafetyReportCompletionModal(task, index);
+        return;
+      }
+
+      // Check if this is a cert task (from Expiring Certs or Cert Expiring type)
+      if (task.taskType === 'Cert Expiring' || task.source === 'Expiring Certs' || task.sheetName === 'Expiring Certs') {
+        var certType = task.itemType || task.certType || '';
+        var employee = task.employee || '';
+
+        if (employee && certType) {
+          showCertExpirationModal(employee, certType, index);
+          return;
+        }
+      }
+
+      // Check if this is a cert renewal task (legacy check for 'Renew' in taskType)
       if (task.taskType && task.taskType.toLowerCase().indexOf('renew') !== -1) {
         // Extract cert type and employee from task
         var certType = task.taskType.replace(/renew\s*/i, '').trim();
@@ -2353,6 +2318,95 @@
         .markScheduleTaskComplete(allTasks[index]);
     }
 
+    // Show modal for completing Missing Safety Report tasks with a note
+    function showMissingSafetyReportCompletionModal(task, taskIndex) {
+      var employee = task.employee || task.foreman || 'Unknown';
+      var itemType = task.itemType || 'Safety Report';
+      var notes = task.notes || '';
+
+      // Common reasons for missing reports
+      var commonReasons = [
+        'Foreman will submit going forward',
+        'Report was submitted but not received - verified receipt',
+        'Crew was on leave/vacation during this period',
+        'Equipment/connectivity issues - resolved',
+        'Training provided on submission process',
+        'Report found in spam/junk folder',
+        'Other (see notes)'
+      ];
+
+      var reasonOptions = commonReasons.map(function(r) {
+        return '<option value="' + r + '">' + r + '</option>';
+      }).join('');
+
+      var modalHtml = '<div class="modal fade" id="safetyReportCompletionModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">';
+      modalHtml += '<div class="modal-header bg-warning text-dark"><h5 class="modal-title">🛡️ Complete Missing Safety Report Task</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>';
+      modalHtml += '<div class="modal-body">';
+      modalHtml += '<p><strong>Foreman:</strong> ' + employee + '</p>';
+      modalHtml += '<p><strong>Missing:</strong> ' + itemType + '</p>';
+      if (notes) {
+        modalHtml += '<p class="text-muted small"><strong>Details:</strong> ' + notes + '</p>';
+      }
+      modalHtml += '<hr>';
+      modalHtml += '<div class="mb-3"><label class="form-label">Resolution Reason *</label>';
+      modalHtml += '<select class="form-select" id="safetyReportResolution" onchange="toggleOtherNotes()" required>' + reasonOptions + '</select></div>';
+      modalHtml += '<div class="mb-3" id="otherNotesDiv" style="display:none;"><label class="form-label">Additional Notes</label>';
+      modalHtml += '<textarea class="form-control" id="safetyReportNotes" rows="3" placeholder="Enter additional details..."></textarea></div>';
+      modalHtml += '<div class="alert alert-info small">This will mark the task as complete and log the resolution reason.</div>';
+      modalHtml += '</div><div class="modal-footer">';
+      modalHtml += '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>';
+      modalHtml += '<button type="button" class="btn btn-success" onclick="completeSafetyReportTask(' + taskIndex + ')">✓ Mark Complete</button>';
+      modalHtml += '</div></div></div></div>';
+
+      var existingModal = document.getElementById('safetyReportCompletionModal');
+      if (existingModal) existingModal.remove();
+
+      document.body.insertAdjacentHTML('beforeend', modalHtml);
+      var modal = new bootstrap.Modal(document.getElementById('safetyReportCompletionModal'));
+      modal.show();
+    }
+
+    function toggleOtherNotes() {
+      var select = document.getElementById('safetyReportResolution');
+      var notesDiv = document.getElementById('otherNotesDiv');
+      if (select.value === 'Other (see notes)') {
+        notesDiv.style.display = 'block';
+      } else {
+        notesDiv.style.display = 'none';
+      }
+    }
+
+    function completeSafetyReportTask(taskIndex) {
+      var task = allTasks[taskIndex];
+      var resolution = document.getElementById('safetyReportResolution').value;
+      var additionalNotes = document.getElementById('safetyReportNotes').value || '';
+
+      var fullNote = resolution;
+      if (additionalNotes) {
+        fullNote += ' - ' + additionalNotes;
+      }
+
+      // Add resolution to task notes
+      task.completionNotes = fullNote;
+
+      // Close modal
+      var modal = bootstrap.Modal.getInstance(document.getElementById('safetyReportCompletionModal'));
+      if (modal) modal.hide();
+
+      // Call server to complete the task
+      google.script.run
+        .withSuccessHandler(function() {
+          allTasks[taskIndex].status = 'Complete';
+          renderTasks(allTasks);
+          renderCalendar();
+          showToast('Safety report task completed: ' + resolution);
+        })
+        .withFailureHandler(function(error) {
+          showToast('Error: ' + error, 'error');
+        })
+        .completeMissingSafetyReportTask(task.taskKey || task.taskId, fullNote);
+    }
+
     function extractEmployeeFromNotes(notes) {
       // Extract employee name from notes like "Employee: John Smith | ..."
       var match = notes.match(/Employee:\s*([^|]+)/i);
@@ -2360,30 +2414,17 @@
     }
 
     function showCertExpirationModal(employee, certType, taskIndex) {
-      // Calculate default expiration based on cert type
-      var today = new Date();
-      var defaultYears = 1;
-
-      if (certType.toLowerCase().indexOf('dl') !== -1 || certType.toLowerCase().indexOf('driver') !== -1) {
-        defaultYears = 2;
-      } else if (certType.toLowerCase().indexOf('mec') !== -1 || certType.toLowerCase().indexOf('medical') !== -1) {
-        defaultYears = 3;
-      }
-
-      var defaultDate = new Date(today.getFullYear() + defaultYears, today.getMonth(), today.getDate());
-      var defaultDateStr = defaultDate.toISOString().split('T')[0];
-
       var modalHtml = '<div class="modal fade" id="certExpirationModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">';
-      modalHtml += '<div class="modal-header"><h5 class="modal-title">📅 Update Certification Expiration</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>';
+      modalHtml += '<div class="modal-header bg-success text-white"><h5 class="modal-title">📜 Enter New Expiration Date</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>';
       modalHtml += '<div class="modal-body">';
       modalHtml += '<p><strong>Employee:</strong> ' + employee + '</p>';
       modalHtml += '<p><strong>Certification:</strong> ' + certType + '</p>';
-      modalHtml += '<div class="mb-3"><label class="form-label">New Expiration Date *</label>';
-      modalHtml += '<input type="date" class="form-control" id="newCertExpiration" value="' + defaultDateStr + '" required></div>';
-      modalHtml += '<p class="text-muted small">This will update the expiration date in the Expiring Certs sheet.</p>';
+      modalHtml += '<div class="mb-3"><label class="form-label">New Expiration Date <span class="text-danger">*</span></label>';
+      modalHtml += '<input type="date" class="form-control" id="newCertExpiration" required>';
+      modalHtml += '<div class="form-text">Enter the expiration date from the new certification.</div></div>';
       modalHtml += '</div><div class="modal-footer">';
       modalHtml += '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>';
-      modalHtml += '<button type="button" class="btn btn-success" onclick="saveCertExpiration(\'' + employee + '\', \'' + certType + '\', ' + taskIndex + ')">Save & Complete Task</button>';
+      modalHtml += '<button type="button" class="btn btn-success" onclick="saveCertExpiration(\'' + employee.replace(/'/g, "\\'") + '\', \'' + certType.replace(/'/g, "\\'") + '\', ' + taskIndex + ')"><i class="bi bi-check-lg"></i> Save & Complete</button>';
       modalHtml += '</div></div></div></div>';
 
       var existingModal = document.getElementById('certExpirationModal');
@@ -2398,7 +2439,7 @@
       var newExpiration = document.getElementById('newCertExpiration').value;
 
       if (!newExpiration) {
-        alert('Please enter an expiration date');
+        showToast('Please enter the new expiration date', 'error');
         return;
       }
 
@@ -2406,18 +2447,42 @@
       var modal = bootstrap.Modal.getInstance(document.getElementById('certExpirationModal'));
       modal.hide();
 
+      showToast('Updating certification...');
+      console.log('saveCertExpiration: Calling server with employee="' + employee + '", certType="' + certType + '", date="' + newExpiration + '"');
+
+      // Get the task for passing to server (may be undefined if taskIndex is -1)
+      var taskToPass = (taskIndex >= 0 && taskIndex < allTasks.length) ? allTasks[taskIndex] : null;
+
       // Update cert and mark task complete
       google.script.run
         .withSuccessHandler(function(result) {
-          allTasks[taskIndex].status = 'Complete';
+          console.log('saveCertExpiration: Success!', result);
+          showToast('✓ Certification updated with new expiration: ' + newExpiration);
+
+          // Remove from allTasks (completed tasks shouldn't remain)
+          if (taskIndex !== undefined && taskIndex >= 0 && taskIndex < allTasks.length) {
+            allTasks.splice(taskIndex, 1);
+          }
+
+          // Remove from personalChecklist
+          personalChecklist = personalChecklist.filter(function(item) {
+            return !(item.employee === employee &&
+                    (item.itemType === certType || item.certType === certType));
+          });
+          saveChecklistToStorage();
+
+          // Refresh UI
+          loadExpiringCerts();
           renderTasks(allTasks);
           renderCalendar();
-          showToast('✓ Certification updated and task completed!');
+          renderPersonalChecklist();
+          updateChecklistBadge();
         })
         .withFailureHandler(function(error) {
-          showToast('Error: ' + error, 'error');
+          console.error('saveCertExpiration: Error!', error);
+          showToast('Error: ' + error.message, 'error');
         })
-        .updateCertExpirationFromTask(employee, certType, newExpiration, allTasks[taskIndex]);
+        .updateCertExpirationFromTask(employee, certType, newExpiration, taskToPass);
     }
 
     function deleteTask(index, taskKey) {
@@ -3641,31 +3706,124 @@
 
     // Build SMS message for missing JHA/Weekly Safety Meeting reports
     function buildMissingSafetyReportMessage(task) {
+      console.log('buildMissingSafetyReportMessage: task =', task);
+      console.log('buildMissingSafetyReportMessage: task.notes =', task ? task.notes : 'TASK IS NULL');
+      console.log('buildMissingSafetyReportMessage: task.Notes =', task ? task.Notes : 'TASK IS NULL');
+
       var itemType = task.itemType || task.ItemType || '';
       var notes = task.notes || task.Notes || '';
 
+      // Extract foreman name for personalization
+      var foremanName = task.employee || task.Employee || task.foreman || task.Foreman || '';
+      var firstName = foremanName.split(' ')[0] || '';
+
+      console.log('buildMissingSafetyReportMessage: itemType=' + itemType + ', notes="' + notes + '"');
+      console.log('buildMissingSafetyReportMessage: foremanName="' + foremanName + '", firstName="' + firstName + '"');
+
       // Extract dates from notes
       // Notes format: "Missing JHA: 02/03/2026, 02/04/2026; Missing Weekly Safety Meeting for week of 02/02/2026"
+      // Also check for late submissions: "Late JHA: 02/13/2026" or notes containing "LATE"
       var jhaDateMatch = notes.match(/Missing JHA:\s*([^;]+)/);
+      var lateJhaMatch = notes.match(/Late JHA:\s*([^;]+)/i);
       var weekOfMatch = notes.match(/week of\s+(\d{2}\/\d{2}\/\d{4})/i);
 
       var jhaDates = jhaDateMatch ? jhaDateMatch[1].trim() : '';
+      var lateJhaDates = lateJhaMatch ? lateJhaMatch[1].trim() : '';
       var weekOf = weekOfMatch ? weekOfMatch[1] : '';
+
+      console.log('buildMissingSafetyReportMessage: jhaDates="' + jhaDates + '", lateJhaDates="' + lateJhaDates + '", weekOf="' + weekOf + '"');
 
       // Count JHA dates for grammar
       var jhaDateCount = jhaDates ? jhaDates.split(',').length : 0;
+      var lateJhaCount = lateJhaDates ? lateJhaDates.split(',').length : 0;
       var itThem = jhaDateCount > 1 ? 'them' : 'it';
+      var lateItThem = lateJhaCount > 1 ? 'them' : 'it';
+
+      // Build greeting with foreman's first name
+      var greeting = firstName ? 'Hi ' + firstName + ', ' : '';
 
       var message = '';
 
-      if (itemType === 'JHA + Weekly Meeting') {
-        message = 'We did not receive a JHA for ' + jhaDates + ' or a Weekly Safety Meeting for the week of ' + weekOf + ' from your crew. This is just a reminder not to miss them this week. Was there an issue turning them in that you need help with?';
-      } else if (itemType === 'JHA') {
-        message = 'We did not receive a JHA for ' + jhaDates + ' from your crew. This is just a reminder not to miss ' + itThem + ' this week. Was there an issue turning ' + itThem + ' in that you need help with?';
-      } else if (itemType === 'Weekly Meeting') {
-        message = 'We did not receive a Weekly Safety Meeting for the week of ' + weekOf + ' from your crew. This is just a reminder not to miss it this week. Was there an issue turning it in that you need help with?';
+      // Build combined message for missing AND late items
+      var messageParts = [];
+
+      // Part 1: Missing items (not received at all)
+      if (jhaDates && itemType.indexOf('JHA') !== -1) {
+        messageParts.push('we did not receive a JHA for ' + jhaDates + ' from your crew');
+      }
+      if (itemType.indexOf('Weekly Meeting') !== -1 && weekOf && notes.indexOf('Missing Weekly') !== -1) {
+        messageParts.push('we did not receive a Weekly Safety Meeting for the week of ' + weekOf);
+      }
+
+      // Part 2: Late items (received but after deadline)
+      if (lateJhaDates) {
+        messageParts.push('the JHA for ' + lateJhaDates + ' was received late. Be sure to submit ' + lateItThem + ' in the same week they are due');
+      }
+      if (notes.indexOf('Late Weekly') !== -1 || notes.indexOf('late.*Weekly') !== -1) {
+        var lateWeekMatch = notes.match(/Late Weekly.*?week of\s+(\d{2}\/\d{2}\/\d{4})/i);
+        var lateWeekOf = lateWeekMatch ? lateWeekMatch[1] : weekOf;
+        if (lateWeekOf) {
+          messageParts.push('the Weekly Safety Meeting for the week of ' + lateWeekOf + ' was received late. Be sure to submit it in the same week it is due');
+        }
+      }
+
+      // Combine message parts
+      if (messageParts.length > 0) {
+        message = greeting;
+        if (messageParts.length === 1) {
+          message += messageParts[0].charAt(0).toUpperCase() + messageParts[0].slice(1) + '.';
+        } else {
+          // Capitalize first part
+          message += messageParts[0].charAt(0).toUpperCase() + messageParts[0].slice(1);
+          // Join rest with proper grammar
+          for (var i = 1; i < messageParts.length; i++) {
+            if (i === messageParts.length - 1) {
+              message += '. Also, ' + messageParts[i] + '.';
+            } else {
+              message += ', and ' + messageParts[i];
+            }
+          }
+        }
+        message += ' Was there an issue that you need help with?';
       } else {
-        message = 'We did not receive a safety report from your crew. This is just a reminder not to miss it this week. Was there an issue turning it in that you need help with?';
+        // Fallback to original logic if no patterns matched
+        if (itemType === 'JHA + Weekly Meeting') {
+          message = greeting + 'we did not receive a JHA for ' + jhaDates + ' or a Weekly Safety Meeting for the week of ' + weekOf + ' from your crew. This is just a reminder not to miss them this week. Was there an issue turning them in that you need help with?';
+        } else if (itemType === 'JHA') {
+          message = greeting + 'we did not receive a JHA for ' + jhaDates + ' from your crew. This is just a reminder not to miss ' + itThem + ' this week. Was there an issue turning ' + itThem + ' in that you need help with?';
+        } else if (itemType === 'Weekly Meeting') {
+          message = greeting + 'we did not receive a Weekly Safety Meeting for the week of ' + weekOf + ' from your crew. This is just a reminder not to miss it this week. Was there an issue turning it in that you need help with?';
+        } else {
+          // Generic fallback
+          message = greeting + 'we did not receive a safety report from your crew. This is just a reminder not to miss it this week. Was there an issue turning it in that you need help with?';
+        }
+      }
+
+      console.log('buildMissingSafetyReportMessage: RETURNING message="' + message + '"');
+      return message;
+    }
+
+    // Build SMS message specifically for late submissions
+    function buildLateSubmissionMessage(task) {
+      var foremanName = task.employee || task.Employee || task.foreman || task.Foreman || '';
+      var firstName = foremanName.split(' ')[0] || '';
+      var notes = task.notes || task.Notes || '';
+      var itemType = task.itemType || task.ItemType || '';
+
+      var greeting = firstName ? 'Hi ' + firstName + ', ' : '';
+
+      // Extract date info
+      var dateMatch = notes.match(/(\d{2}\/\d{2}\/\d{4})/);
+      var reportDate = dateMatch ? dateMatch[1] : '';
+
+      var message = '';
+
+      if (itemType.indexOf('JHA') !== -1) {
+        message = greeting + 'the JHA for ' + reportDate + ' was received late. Be sure to submit them in the same week that they are due.';
+      } else if (itemType.indexOf('Weekly Meeting') !== -1 || itemType.indexOf('Safety Meeting') !== -1) {
+        message = greeting + 'the Weekly Safety Meeting was received late. Be sure to submit it in the same week that it is due.';
+      } else {
+        message = greeting + 'the safety report was received late. Be sure to submit them in the same week that they are due.';
       }
 
       return message;
@@ -3748,6 +3906,13 @@
       currentSmsTask.firstName = employeeName.split(' ')[0];
       currentSmsTask.certType = task.itemType || task.certType || 'Certification';
 
+      // Check if this is a Missing Safety Report task - use Resolution modal instead
+      var taskType = (task.taskType || task.type || '').toLowerCase();
+      if (taskType === 'missing safety report' || taskType.indexOf('missing safety') !== -1) {
+        openMissingReportResolutionModal(task, index);
+        return;
+      }
+
       // Check if this is a Crane Cert - use different modal (no SMS, just tracking)
       var itemType = (task.itemType || task.certType || '').toLowerCase();
       if (itemType === 'crane cert' || itemType === 'crane certification') {
@@ -3778,6 +3943,355 @@
 
       var modal = new bootstrap.Modal(document.getElementById('smsScheduledModal'));
       modal.show();
+    }
+
+    // ================== MISSING REPORT RESOLUTION FUNCTIONS ==================
+
+    var currentResolutionTask = null;
+    var currentResolutionDays = [];
+
+    function openMissingReportResolutionModal(task, index) {
+      currentResolutionTask = { task: task, index: index };
+      currentResolutionDays = [];
+
+      var employeeName = task.employee || task.emp || task.foreman || 'Foreman';
+      var notes = task.notes || task.n || '';
+      var itemType = task.itemType || task.item || 'JHA';
+
+      console.log('openMissingReportResolutionModal: DEBUG notes="' + notes + '"');
+      console.log('openMissingReportResolutionModal: DEBUG task.notes="' + task.notes + '", task.n="' + task.n + '"');
+
+      // Parse the task notes to extract missing days
+      // Format: "Missing JHA: 02/05/2026, 02/06/2026; Missing Weekly Safety Meeting for week of 02/01/2026"
+      var jhaMatch = notes.match(/Missing JHA:\s*([^;]+)/i);
+      var weekOfMatch = notes.match(/week of\s+(\d{2}\/\d{2}\/\d{4})/i);
+      var weekOf = weekOfMatch ? weekOfMatch[1] : '';
+
+      console.log('openMissingReportResolutionModal: DEBUG jhaMatch=', jhaMatch, ', weekOfMatch=', weekOfMatch);
+
+      // If weekOf not found in notes, calculate it from the missing date
+      if (!weekOf && jhaMatch) {
+        var firstDateStr = jhaMatch[1].trim().split(',')[0].trim();
+        console.log('openMissingReportResolutionModal: DEBUG firstDateStr="' + firstDateStr + '"');
+        var dateParts = firstDateStr.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+        console.log('openMissingReportResolutionModal: DEBUG dateParts=', dateParts);
+        if (dateParts) {
+          var missingDate = new Date(parseInt(dateParts[3]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
+          var dayOfWeek = missingDate.getDay();
+          var weekStart = new Date(missingDate);
+          weekStart.setDate(missingDate.getDate() - dayOfWeek);
+          weekOf = String(weekStart.getMonth() + 1).padStart(2, '0') + '/' +
+                   String(weekStart.getDate()).padStart(2, '0') + '/' +
+                   weekStart.getFullYear();
+          console.log('openMissingReportResolutionModal: Calculated weekOf=' + weekOf + ' from date ' + firstDateStr);
+        }
+      }
+
+      // Also try to extract weekOf from tid if still not found
+      // tid format: SafetyCompliance_XXX-XX_MM-DD-YYYY or SafetyCompliance_NN_YYYYMMDD
+      if (!weekOf && task.tid) {
+        var tidWeekMatch = task.tid.match(/_(\d{2})-(\d{2})-(\d{4})$/);
+        if (tidWeekMatch) {
+          weekOf = tidWeekMatch[1] + '/' + tidWeekMatch[2] + '/' + tidWeekMatch[3];
+        } else {
+          // Try YYYYMMDD format at end
+          var tidDateMatch = task.tid.match(/_(\d{4})(\d{2})(\d{2})$/);
+          if (tidDateMatch) {
+            // This is a date (likely creation date), calculate Sunday of that week
+            var tidDate = new Date(parseInt(tidDateMatch[1]), parseInt(tidDateMatch[2]) - 1, parseInt(tidDateMatch[3]));
+            // Go back to Sunday of that week
+            var dow = tidDate.getDay();
+            var ws = new Date(tidDate);
+            ws.setDate(tidDate.getDate() - dow);
+            weekOf = String(ws.getMonth() + 1).padStart(2, '0') + '/' +
+                     String(ws.getDate()).padStart(2, '0') + '/' +
+                     ws.getFullYear();
+            console.log('openMissingReportResolutionModal: Calculated weekOf=' + weekOf + ' from tid date');
+          }
+        }
+      }
+
+      // Last resort: use task due date to calculate week
+      if (!weekOf && task.dueDate) {
+        var dueStr = task.dueDate;
+        var dueParts = dueStr.match(/(\d{4})-(\d{2})-(\d{2})/);
+        if (!dueParts) dueParts = dueStr.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+        if (dueParts) {
+          var yr, mo, dy;
+          if (dueParts[1].length === 4) { yr = dueParts[1]; mo = dueParts[2]; dy = dueParts[3]; }
+          else { mo = dueParts[1]; dy = dueParts[2]; yr = dueParts[3]; }
+          var dueDate = new Date(parseInt(yr), parseInt(mo) - 1, parseInt(dy));
+          // Due date is Saturday, so Sunday = due - 6 days
+          var weekSunday = new Date(dueDate);
+          weekSunday.setDate(dueDate.getDate() - 6);
+          weekOf = String(weekSunday.getMonth() + 1).padStart(2, '0') + '/' +
+                   String(weekSunday.getDate()).padStart(2, '0') + '/' +
+                   weekSunday.getFullYear();
+          console.log('openMissingReportResolutionModal: Calculated weekOf=' + weekOf + ' from dueDate');
+        }
+      }
+
+      // Extract job number from multiple sources
+      var jobNumber = '';
+      // Try task.jobNumber first
+      if (task.jobNumber && task.jobNumber.match(/^\d{3}-\d{2}$/)) {
+        jobNumber = task.jobNumber;
+      }
+      // Try task.tid (TaskID from server) - format: SafetyCompliance_XXX-XX_MM-DD-YYYY
+      if (!jobNumber && task.tid) {
+        var tidMatch = task.tid.match(/(\d{3}-\d{2})/);
+        if (tidMatch) jobNumber = tidMatch[1];
+      }
+      // Try taskKey format: "Safety Compliance_XXX-XX"
+      if (!jobNumber && task.taskKey) {
+        var keyMatch = task.taskKey.match(/(\d{3}-\d{2})/);
+        if (keyMatch) jobNumber = keyMatch[1];
+      }
+      // Try task.row (rowIndex from server - for Safety Compliance tasks, this IS the job number)
+      if (!jobNumber && task.row) {
+        var rowMatch = String(task.row).match(/(\d{3}-\d{2})/);
+        if (rowMatch) jobNumber = rowMatch[1];
+      }
+      // Try from taskId
+      var taskId = task.taskId || task.TaskID || '';
+      if (!jobNumber && taskId) {
+        var taskIdMatch = taskId.match(/(\d{3}-\d{2})/);
+        if (taskIdMatch) jobNumber = taskIdMatch[1];
+      }
+
+      console.log('openMissingReportResolutionModal: task=', task, 'tid=' + task.tid, 'jobNumber=' + jobNumber, 'weekOf=' + weekOf);
+
+      // Populate modal header info
+      document.getElementById('resolutionForemanName').textContent = employeeName;
+      document.getElementById('resolutionWeekInfo').innerHTML = '<strong>Week of:</strong> ' + (weekOf || 'Unknown');
+      document.getElementById('resolutionJobNumber').textContent = jobNumber ? 'Crew: ' + jobNumber : '';
+
+      // Build the missing days list
+      var daysContainer = document.getElementById('resolutionDaysContainer');
+      daysContainer.innerHTML = '';
+
+      if (jhaMatch) {
+        var jhaDates = jhaMatch[1].trim().split(',');
+        for (var i = 0; i < jhaDates.length; i++) {
+          var dateStr = jhaDates[i].trim();
+          var dayName = getDayNameFromDate(dateStr);
+
+          currentResolutionDays.push({
+            type: 'JHA',
+            date: dateStr,
+            dayName: dayName
+          });
+
+          var rowHtml = '<div class="row align-items-center mb-2" data-day-index="' + i + '">' +
+            '<div class="col-md-4">' +
+            '<span class="badge bg-danger">❌</span> ' + dayName + ' (' + dateStr + ')' +
+            '</div>' +
+            '<div class="col-md-8">' +
+            '<select class="form-select form-select-sm resolution-day-select" data-index="' + i + '">' +
+            '<option value="">-- Select Reason --</option>' +
+            '<option value="C">Completed ✅</option>' +
+            '<option value="D">Did Not Do</option>' +
+            '<option value="F">Complete But Forgot to Send</option>' +
+            '<option value="A">App Didn\'t Send</option>' +
+            '<option value="W">Did Not Work</option>' +
+            '<option value="L">Late Submission</option>' +
+            '</select>' +
+            '</div>' +
+            '</div>';
+          daysContainer.innerHTML += rowHtml;
+        }
+      }
+
+      // Check if Weekly Meeting is also missing
+      var weeklyMeetingSection = document.getElementById('resolutionWeeklyMeetingSection');
+      if (itemType.indexOf('Weekly') !== -1 || notes.indexOf('Weekly Safety Meeting') !== -1) {
+        weeklyMeetingSection.style.display = 'block';
+        document.getElementById('resolutionWeeklyMeetingReason').value = '';
+        currentResolutionDays.push({
+          type: 'WeeklyMeeting',
+          date: weekOf,
+          dayName: 'Weekly Meeting'
+        });
+      } else {
+        weeklyMeetingSection.style.display = 'none';
+      }
+
+      // Show the modal
+      var modal = new bootstrap.Modal(document.getElementById('missingReportResolutionModal'));
+      modal.show();
+    }
+
+    function getDayNameFromDate(dateStr) {
+      // Parse MM/DD/YYYY format
+      if (!dateStr) return 'Unknown';
+      var parts = dateStr.split('/');
+      if (parts.length !== 3) return dateStr;
+
+      var date = new Date(parts[2], parts[0] - 1, parts[1]);
+      var days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      return days[date.getDay()] || dateStr;
+    }
+
+    function saveResolutions() {
+      if (!currentResolutionTask) {
+        showToast('No task selected', 'error');
+        return;
+      }
+
+      var task = currentResolutionTask.task;
+      var resolutions = [];
+
+      // Collect JHA day resolutions
+      var daySelects = document.querySelectorAll('.resolution-day-select');
+      var allFilled = true;
+
+      daySelects.forEach(function(select, idx) {
+        var reason = select.value;
+        if (!reason) {
+          allFilled = false;
+        } else {
+          resolutions.push({
+            type: 'JHA',
+            date: currentResolutionDays[idx].date,
+            dayName: currentResolutionDays[idx].dayName,
+            reason: reason
+          });
+        }
+      });
+
+      // Collect Weekly Meeting resolution if present
+      var weeklySection = document.getElementById('resolutionWeeklyMeetingSection');
+      if (weeklySection.style.display !== 'none') {
+        var weeklyReason = document.getElementById('resolutionWeeklyMeetingReason').value;
+        if (!weeklyReason) {
+          allFilled = false;
+        } else {
+          resolutions.push({
+            type: 'WeeklyMeeting',
+            date: '',
+            dayName: 'Weekly Meeting',
+            reason: weeklyReason
+          });
+        }
+      }
+
+      if (!allFilled) {
+        showToast('Please select a reason for each missing day', 'error');
+        return;
+      }
+
+      // Disable save button
+      var saveBtn = document.getElementById('saveResolutionsBtn');
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Saving...';
+
+      // Extract info needed for server call
+      var taskId = task.taskId || task.TaskID || task.tid || task.taskKey || '';
+      var notes = task.notes || task.n || '';
+
+      // Get weekOf from the modal display (which was already calculated correctly)
+      var weekOfDisplay = document.getElementById('resolutionWeekInfo').textContent || '';
+      var weekOfMatch = weekOfDisplay.match(/(\d{2}\/\d{2}\/\d{4})/);
+      var weekOf = weekOfMatch ? weekOfMatch[1] : '';
+
+      // Fallback: try notes if modal didn't have it
+      if (!weekOf) {
+        weekOfMatch = notes.match(/week of\s+(\d{2}\/\d{2}\/\d{4})/i);
+        weekOf = weekOfMatch ? weekOfMatch[1] : '';
+      }
+
+      // Last fallback: calculate from missing date
+      if (!weekOf && currentResolutionDays.length > 0 && currentResolutionDays[0].date) {
+        var firstDate = currentResolutionDays[0].date;
+        var parts = firstDate.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+        if (parts) {
+          var d = new Date(parseInt(parts[3]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+          var dow = d.getDay();
+          var ws = new Date(d);
+          ws.setDate(d.getDate() - dow);
+          weekOf = String(ws.getMonth() + 1).padStart(2, '0') + '/' +
+                   String(ws.getDate()).padStart(2, '0') + '/' +
+                   ws.getFullYear();
+        }
+      }
+
+      // Extract job number from multiple sources
+      var jobNumber = '';
+      // Try task.jobNumber first
+      if (task.jobNumber && task.jobNumber.match(/^\d{3}-\d{2}$/)) {
+        jobNumber = task.jobNumber;
+      }
+      // Try task.tid (TaskID from server) - format: SafetyCompliance_XXX-XX_MM-DD-YYYY
+      if (!jobNumber && task.tid) {
+        var tidMatch = task.tid.match(/(\d{3}-\d{2})/);
+        if (tidMatch) jobNumber = tidMatch[1];
+      }
+      // Try taskKey format: "Safety Compliance_XXX-XX"
+      if (!jobNumber && task.taskKey) {
+        var keyMatch = task.taskKey.match(/(\d{3}-\d{2})/);
+        if (keyMatch) jobNumber = keyMatch[1];
+      }
+      // Try task.row (rowIndex from server - for Safety Compliance tasks, this IS the job number)
+      if (!jobNumber && task.row) {
+        var rowMatch = String(task.row).match(/(\d{3}-\d{2})/);
+        if (rowMatch) jobNumber = rowMatch[1];
+      }
+      // Try from taskId
+      if (!jobNumber && taskId) {
+        var taskIdMatch = taskId.match(/(\d{3}-\d{2})/);
+        if (taskIdMatch) jobNumber = taskIdMatch[1];
+      }
+
+      // Get employee name for server-side lookup
+      var employeeName = task.employee || task.emp || task.foreman || '';
+
+      console.log('saveResolutions: taskId=' + taskId + ', tid=' + task.tid + ', jobNumber=' + jobNumber + ', weekOf=' + weekOf + ', employeeName=' + employeeName);
+
+      // Call server to save resolutions
+      google.script.run
+        .withSuccessHandler(function(result) {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = '<i class="bi bi-check-lg"></i> Save Resolutions';
+
+          if (result && result.success) {
+            // Mark task as scheduled/resolved locally
+            var key = getTaskKey(task);
+            scheduledTasks[key] = true;
+            saveScheduledToStorage();
+
+            // Close modal
+            var modal = bootstrap.Modal.getInstance(document.getElementById('missingReportResolutionModal'));
+            modal.hide();
+
+            // Find and remove the completed task from allTasks
+            var taskIndex = -1;
+            for (var i = 0; i < allTasks.length; i++) {
+              if (allTasks[i] === task ||
+                  (allTasks[i].taskId === task.taskId && allTasks[i].employee === task.employee)) {
+                taskIndex = i;
+                break;
+              }
+            }
+            if (taskIndex !== -1) {
+              allTasks.splice(taskIndex, 1);
+              console.log('Removed completed Safety Compliance task from allTasks at index ' + taskIndex);
+            }
+
+            // Re-render without the completed task
+            renderTasks(allTasks);
+            renderCalendar();
+
+            showToast('✓ Resolutions saved and task marked complete');
+          } else {
+            showToast('Error: ' + (result ? result.error : 'Unknown error'), 'error');
+          }
+        })
+        .withFailureHandler(function(error) {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = '<i class="bi bi-check-lg"></i> Save Resolutions';
+          showToast('Error: ' + error, 'error');
+        })
+        .recordMissingReportResolutions(taskId, weekOf, resolutions, jobNumber, employeeName);
     }
 
     function getSelectedClassType() {
@@ -4082,9 +4596,69 @@
       markRelatedCertsNotified(task);
       saveNotifiedToStorage();
 
-      // Open SMS link
+      // If this is a Safety Compliance task, also update the Safety Compliance sheet
+      if (certCategory === 'missing_safety_report') {
+        var taskId = task.taskId || task.TaskID || task.tid || task.taskKey || '';
+        console.log('sendNotifySMS: Safety Compliance task, taskId=' + taskId);
+
+        // Extract jobNumber and weekOf from task data for more reliable matching
+        var jobNumber = task.jobNumber || '';
+        var weekOf = '';
+
+        // Try to extract weekOf from notes
+        var notesText = task.notes || task.n || '';
+        var weekMatch = notesText.match(/week of\s+(\d{2}\/\d{2}\/\d{4})/i);
+        if (weekMatch) {
+          weekOf = weekMatch[1];
+        }
+
+        // If not in notes, try from dueDate (Saturday - go back 6 days to get Sunday)
+        if (!weekOf && task.dueDate) {
+          var dueStr = task.dueDate;
+          var dueParts = dueStr.match(/(\d{4})-(\d{2})-(\d{2})/);
+          if (!dueParts) dueParts = dueStr.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+          if (dueParts) {
+            var yr, mo, dy;
+            if (dueParts[1].length === 4) { yr = dueParts[1]; mo = dueParts[2]; dy = dueParts[3]; }
+            else { mo = dueParts[1]; dy = dueParts[2]; yr = dueParts[3]; }
+            var dueDate = new Date(parseInt(yr), parseInt(mo) - 1, parseInt(dy));
+            var weekSunday = new Date(dueDate);
+            weekSunday.setDate(dueDate.getDate() - 6);
+            weekOf = String(weekSunday.getMonth() + 1).padStart(2, '0') + '/' +
+                     String(weekSunday.getDate()).padStart(2, '0') + '/' +
+                     weekSunday.getFullYear();
+          }
+        }
+
+        console.log('sendNotifySMS: Extracted jobNumber=' + jobNumber + ', weekOf=' + weekOf);
+
+        if (taskId || jobNumber) {
+          google.script.run
+            .withSuccessHandler(function(result) {
+              if (result && result.success) {
+                console.log('Safety Compliance sheet updated to notified status:', result);
+              } else {
+                console.log('Failed to update Safety Compliance sheet:', result);
+              }
+            })
+            .withFailureHandler(function(err) {
+              console.log('Error updating Safety Compliance sheet:', err);
+            })
+            .markSafetyReportNotified(taskId, jobNumber, weekOf);
+        }
+      }
+
+      // Open SMS link - use link click method for better compatibility
       var smsUrl = 'sms:' + phoneNumber + '?body=' + encodeURIComponent(message);
-      window.open(smsUrl, '_blank');
+      console.log('Opening SMS URL:', smsUrl);
+
+      // Create a temporary link and click it (most reliable method)
+      var link = document.createElement('a');
+      link.href = smsUrl;
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(function() { document.body.removeChild(link); }, 100);
 
       // Close modal and refresh
       var modal = bootstrap.Modal.getInstance(document.getElementById('smsNotifyModal'));
@@ -4308,15 +4882,19 @@
       var task = safetyComplianceTasks.find(function(t) { return t.taskId === taskId; });
       if (!task) return;
 
-      var phoneNumber = task.phoneNumber;
+      var phoneNumber = task.phone || task.phoneNumber;
       if (!phoneNumber || phoneNumber.length < 10) {
         showToast('No phone number available', 'error');
         return;
       }
 
+      console.log('sendSafetyComplianceSms: task=', task);
+      console.log('sendSafetyComplianceSms: notes=' + task.notes + ', itemType=' + task.itemType);
+
       // Build SMS message using server function
       google.script.run
         .withSuccessHandler(function(message) {
+          console.log('SMS message from server: ' + message);
           if (message) {
             var smsUrl = 'sms:' + phoneNumber + '?body=' + encodeURIComponent(message);
             window.open(smsUrl, '_blank');
@@ -4326,6 +4904,7 @@
           }
         })
         .withFailureHandler(function(err) {
+          console.error('SMS error:', err);
           showToast('❌ Error: ' + err.message, 'error');
         })
         .buildMissingSafetyReportSmsMessage(task);
@@ -4438,7 +5017,57 @@
       });
 
       // Add safety compliance tasks (always show, not in filteredChecklist)
+      // DEDUPLICATION: Build a set of taskIds already in allTasks to avoid duplicates
+      var existingSafetyTaskIds = {};
+      allTasks.forEach(function(t) {
+        if (t.taskType === 'Missing Safety Report' || t.source === 'Safety Compliance' ||
+            (t.taskId && t.taskId.indexOf('SafetyCompliance_') === 0)) {
+          existingSafetyTaskIds[t.taskId] = true;
+          // Also track normalized versions to catch different date formats
+          // e.g., SafetyCompliance_013-26_02-08-2026 vs SafetyCompliance_013-26_20260208
+          var jobWeekMatch = (t.taskId || '').match(/SafetyCompliance_(\d{3}-\d{2})_(.+)/);
+          if (jobWeekMatch) {
+            var jobNum = jobWeekMatch[1];
+            var dateStr = jobWeekMatch[2];
+            // Normalize date to MM-DD-YYYY format
+            var normalizedDate = dateStr;
+            // Handle YYYYMMDD format
+            if (dateStr.match(/^\d{8}$/)) {
+              normalizedDate = dateStr.substring(4, 6) + '-' + dateStr.substring(6, 8) + '-' + dateStr.substring(0, 4);
+            }
+            // Handle MM/DD/YYYY format
+            if (dateStr.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
+              normalizedDate = dateStr.replace(/\//g, '-');
+            }
+            existingSafetyTaskIds['SafetyCompliance_' + jobNum + '_' + normalizedDate] = true;
+          }
+        }
+      });
+
       safetyComplianceTasks.forEach(function(task) {
+        // Skip if this task already exists in allTasks (from collectMissingSafetyReportTasks)
+        if (existingSafetyTaskIds[task.taskId]) {
+          console.log('renderPersonalChecklist: Skipping duplicate safety task ' + task.taskId);
+          return;
+        }
+        // Also check normalized version
+        var jobWeekMatch = (task.taskId || '').match(/SafetyCompliance_(\d{3}-\d{2})_(.+)/);
+        if (jobWeekMatch) {
+          var jobNum = jobWeekMatch[1];
+          var dateStr = jobWeekMatch[2];
+          var normalizedDate = dateStr;
+          if (dateStr.match(/^\d{8}$/)) {
+            normalizedDate = dateStr.substring(4, 6) + '-' + dateStr.substring(6, 8) + '-' + dateStr.substring(0, 4);
+          }
+          if (dateStr.match(/^\d{2}\/\d{2}\/\d{4}$/)) {
+            normalizedDate = dateStr.replace(/\//g, '-');
+          }
+          if (existingSafetyTaskIds['SafetyCompliance_' + jobNum + '_' + normalizedDate]) {
+            console.log('renderPersonalChecklist: Skipping duplicate safety task (normalized) ' + task.taskId);
+            return;
+          }
+        }
+
         var checklistItem = {
           id: 'safety_' + task.taskId,
           taskId: task.taskId,
@@ -4451,7 +5080,7 @@
           priority: 'High', // All safety compliance is high priority
           completed: task.completed,
           completedDate: task.completedDate || '',
-          phoneNumber: task.phoneNumber || '',
+          phoneNumber: task.phone || task.phoneNumber || '',
           dueDate: task.dueDate || '',
           itemType: task.itemType,
           isFromServer: true,
@@ -4772,42 +5401,62 @@
 
     function loadExpiringCerts() {
       console.log('loadExpiringCerts: Starting...');
+      var container = document.getElementById('expiringCertsContainer');
+
+      // Set a timeout to show error if loading takes too long
+      var loadingTimeout = setTimeout(function() {
+        console.error('loadExpiringCerts: Timeout after 30 seconds');
+        if (container.innerHTML.indexOf('Loading') !== -1) {
+          container.innerHTML = '<div class="alert alert-warning m-3"><i class="bi bi-exclamation-triangle"></i> Loading is taking longer than expected. Please try refreshing.</div>';
+        }
+      }, 30000);
+
       google.script.run
         .withSuccessHandler(function(result) {
+          clearTimeout(loadingTimeout);
           console.log('loadExpiringCerts: Received ' + (result && result.certs ? result.certs.length : 0) + ' certs');
-          allExpiringCerts = (result && result.certs) || [];
 
-          // Enrich certs with Task Metadata status (for certs declined before sheet update)
-          enrichCertsWithMetadataStatus();
+          try {
+            allExpiringCerts = (result && result.certs) || [];
 
-          // Add phone numbers from expiring certs to employeePhoneMap
-          allExpiringCerts.forEach(function(cert) {
-            if (cert.employee && cert.phoneNumber && cert.phoneNumber.length >= 10) {
-              var empName = cert.employee.toLowerCase().trim();
-              if (!employeePhoneMap[empName]) {
-                employeePhoneMap[empName] = cert.phoneNumber;
-                console.log('Added phone for ' + cert.employee + ' from certs: ' + cert.phoneNumber);
+            // Enrich certs with Task Metadata status (for certs declined before sheet update)
+            enrichCertsWithMetadataStatus();
+
+            // Add phone numbers from expiring certs to employeePhoneMap
+            allExpiringCerts.forEach(function(cert) {
+              if (cert.employee && cert.phoneNumber && cert.phoneNumber.length >= 10) {
+                var empName = cert.employee.toLowerCase().trim();
+                if (!employeePhoneMap[empName]) {
+                  employeePhoneMap[empName] = cert.phoneNumber;
+                  console.log('Added phone for ' + cert.employee + ' from certs: ' + cert.phoneNumber);
+                }
               }
-            }
-          });
+            });
 
-          // Also update localStorage checklist items with these phone numbers
-          updateChecklistPhoneNumbers();
+            // Also update localStorage checklist items with these phone numbers
+            updateChecklistPhoneNumbers();
 
-          // Phase 5: Add certs that are in personalChecklist to allTasks for Task List display
-          addChecklistCertsToAllTasks();
+            // Phase 5: Add certs that are in personalChecklist to allTasks for Task List display
+            addChecklistCertsToAllTasks();
 
-          populateCertFilters();
-          renderExpiringCerts();
+            populateCertFilters();
+            console.log('loadExpiringCerts: Calling renderExpiringCerts...');
+            renderExpiringCerts();
+            console.log('loadExpiringCerts: renderExpiringCerts complete');
 
-          // Re-render Task List with any added certs
-          renderTasks(allTasks);
-          renderCalendar();
+            // Re-render Task List with any added certs
+            renderTasks(allTasks);
+            renderCalendar();
 
-          // Re-render checklist in case phone numbers were added
-          renderPersonalChecklist();
+            // Re-render checklist in case phone numbers were added
+            renderPersonalChecklist();
+          } catch (err) {
+            console.error('loadExpiringCerts: Error in success handler:', err);
+            container.innerHTML = '<div class="alert alert-danger m-3"><i class="bi bi-exclamation-triangle"></i> Error rendering certs: ' + err.message + '</div>';
+          }
         })
         .withFailureHandler(function(error) {
+          clearTimeout(loadingTimeout);
           console.error('loadExpiringCerts: Error:', error);
           document.getElementById('expiringCertsContainer').innerHTML =
             '<div class="alert alert-danger m-3"><i class="bi bi-exclamation-triangle"></i> Error loading expiring certs: ' + error + '</div>';
@@ -4951,162 +5600,149 @@
     function renderExpiringCerts() {
       var container = document.getElementById('expiringCertsContainer');
 
-      // Apply filters
-      var filteredCerts = allExpiringCerts.filter(function(cert) {
-        var status = getCertStatus(cert);
-        if (certFilterState.status && status !== certFilterState.status) return false;
-        if (certFilterState.type && cert.certType !== certFilterState.type) return false;
-        if (certFilterState.location && cert.location !== certFilterState.location) return false;
-        return true;
-      });
+      try {
+        // Apply filters
+        var filteredCerts = allExpiringCerts.filter(function(cert) {
+          var status = getCertStatus(cert);
+          if (certFilterState.status && status !== certFilterState.status) return false;
+          if (certFilterState.type && cert.certType !== certFilterState.type) return false;
+          if (certFilterState.location && cert.location !== certFilterState.location) return false;
+          return true;
+        });
 
-      // Update badge
-      var badge = document.getElementById('certsBadge');
-      var expiredCount = allExpiringCerts.filter(function(c) {
-        var s = getCertStatus(c);
-        return s === 'Expired' || s === 'Critical';
-      }).length;
-      if (expiredCount > 0) {
-        badge.textContent = expiredCount;
-        badge.style.display = 'inline';
-      } else {
-        badge.style.display = 'none';
-      }
+        console.log('renderExpiringCerts: Filtered to ' + filteredCerts.length + ' certs');
 
-      if (filteredCerts.length === 0) {
-        container.innerHTML = '<div class="empty-state"><i class="bi bi-shield-check" style="font-size: 48px; color: #34a853;"></i><p class="mt-3">No expiring certifications found</p></div>';
-        return;
-      }
+        // Update badge
+        var badge = document.getElementById('certsBadge');
+        var expiredCount = allExpiringCerts.filter(function(c) {
+          var s = getCertStatus(c);
+          return s === 'Expired' || s === 'Critical';
+        }).length;
+        if (expiredCount > 0) {
+          badge.textContent = expiredCount;
+          badge.style.display = 'inline';
+        } else {
+          badge.style.display = 'none';
+        }
 
-      // Helper function to get work week key and label for a date
-      function getWorkWeekInfo(dateStr) {
-        if (!dateStr) return { key: '9999-99', label: 'No Expiration Date', weekStart: null };
+        if (filteredCerts.length === 0) {
+          container.innerHTML = '<div class="empty-state"><i class="bi bi-shield-check" style="font-size: 48px; color: #34a853;"></i><p class="mt-3">No expiring certifications found</p></div>';
+          return;
+        }
+
+      // Helper function to get month key and label for a date
+      function getMonthInfo(dateStr) {
+        if (!dateStr) return { key: '9999-99', label: 'No Expiration Date', monthStart: null };
 
         var date = new Date(dateStr);
-        if (isNaN(date.getTime())) return { key: '9999-99', label: 'No Expiration Date', weekStart: null };
+        if (isNaN(date.getTime())) return { key: '9999-99', label: 'No Expiration Date', monthStart: null };
 
         var today = new Date();
         today.setHours(0, 0, 0, 0);
 
         // Check if expired
         if (date < today) {
-          return { key: '0000-00', label: '🔴 EXPIRED / OVERDUE', weekStart: null, isExpired: true };
+          return { key: '0000-00', label: '🔴 EXPIRED / OVERDUE', monthStart: null, isExpired: true };
         }
 
-        // Get Monday of the week containing this date
-        var dayOfWeek = date.getDay();
-        var mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek; // Sunday = go back 6 days, else go back to Monday
-        var monday = new Date(date);
-        monday.setDate(date.getDate() + mondayOffset);
-        monday.setHours(0, 0, 0, 0);
+        // Get first day of the month
+        var monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
+        var monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0);
 
-        var friday = new Date(monday);
-        friday.setDate(monday.getDate() + 4);
+        // Format as YYYY-MM for sorting
+        var key = date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0');
 
-        // Format as YYYY-WW for sorting
-        var weekNum = getWeekNumber(monday);
-        var key = monday.getFullYear() + '-' + String(weekNum).padStart(2, '0');
+        // Format label: "March 2026" or "Mar 1 - Mar 31, 2026"
+        var monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                          'July', 'August', 'September', 'October', 'November', 'December'];
+        var label = monthNames[date.getMonth()] + ' ' + date.getFullYear();
 
-        // Format label: "Week of Feb 10 - Feb 14, 2026"
-        var options = { month: 'short', day: 'numeric' };
-        var yearOptions = { month: 'short', day: 'numeric', year: 'numeric' };
-        var label = 'Week of ' + monday.toLocaleDateString('en-US', options) + ' - ' + friday.toLocaleDateString('en-US', yearOptions);
-
-        return { key: key, label: label, weekStart: monday };
+        return { key: key, label: label, monthStart: monthStart };
       }
 
-      // Helper to get ISO week number
-      function getWeekNumber(date) {
-        var d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-        var dayNum = d.getUTCDay() || 7;
-        d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-        var yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-        return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
-      }
-
-      // Group certs by work week, then by cert type within each week
-      var certsByWeek = {};
+      // Group certs by month, then by cert type within each month
+      var certsByMonth = {};
       filteredCerts.forEach(function(cert) {
-        var weekInfo = getWorkWeekInfo(cert.expirationDate);
-        var weekKey = weekInfo.key;
+        var monthInfo = getMonthInfo(cert.expirationDate);
+        var monthKey = monthInfo.key;
 
-        if (!certsByWeek[weekKey]) {
-          certsByWeek[weekKey] = {
-            label: weekInfo.label,
-            weekStart: weekInfo.weekStart,
-            isExpired: weekInfo.isExpired || false,
+        if (!certsByMonth[monthKey]) {
+          certsByMonth[monthKey] = {
+            label: monthInfo.label,
+            monthStart: monthInfo.monthStart,
+            isExpired: monthInfo.isExpired || false,
             certTypes: {}
           };
         }
 
         var certType = cert.certType || 'Unknown';
-        if (!certsByWeek[weekKey].certTypes[certType]) {
-          certsByWeek[weekKey].certTypes[certType] = [];
+        if (!certsByMonth[monthKey].certTypes[certType]) {
+          certsByMonth[monthKey].certTypes[certType] = [];
         }
-        certsByWeek[weekKey].certTypes[certType].push(cert);
+        certsByMonth[monthKey].certTypes[certType].push(cert);
       });
 
-      // Sort weeks chronologically
-      var sortedWeekKeys = Object.keys(certsByWeek).sort();
+      // Sort months chronologically
+      var sortedMonthKeys = Object.keys(certsByMonth).sort();
 
       var html = '';
-      var weekIndex = 0;
+      var monthIndex = 0;
 
-      sortedWeekKeys.forEach(function(weekKey) {
-        var weekData = certsByWeek[weekKey];
-        var sortedCertTypes = Object.keys(weekData.certTypes).sort();
+      sortedMonthKeys.forEach(function(monthKey) {
+        var monthData = certsByMonth[monthKey];
+        var sortedCertTypes = Object.keys(monthData.certTypes).sort();
 
-        // Count totals for this week
-        var totalCertsInWeek = 0;
-        var expiredInWeek = 0;
-        var criticalInWeek = 0;
+        // Count totals for this month
+        var totalCertsInMonth = 0;
+        var expiredInMonth = 0;
+        var criticalInMonth = 0;
 
         sortedCertTypes.forEach(function(certType) {
-          var certs = weekData.certTypes[certType];
-          totalCertsInWeek += certs.length;
+          var certs = monthData.certTypes[certType];
+          totalCertsInMonth += certs.length;
           certs.forEach(function(c) {
             var s = getCertStatus(c);
-            if (s === 'Expired') expiredInWeek++;
-            if (s === 'Critical') criticalInWeek++;
+            if (s === 'Expired') expiredInMonth++;
+            if (s === 'Critical') criticalInMonth++;
           });
         });
 
-        // Determine week header color
-        var weekHeaderGradient;
-        if (weekData.isExpired || expiredInWeek > 0) {
-          weekHeaderGradient = 'linear-gradient(135deg, #b71c1c 0%, #880e0e 100%)'; // Dark red for expired
-        } else if (criticalInWeek > 0) {
-          weekHeaderGradient = 'linear-gradient(135deg, #e65100 0%, #bf360c 100%)'; // Orange for critical
+        // Determine month header color
+        var monthHeaderGradient;
+        if (monthData.isExpired || expiredInMonth > 0) {
+          monthHeaderGradient = 'linear-gradient(135deg, #b71c1c 0%, #880e0e 100%)'; // Dark red for expired
+        } else if (criticalInMonth > 0) {
+          monthHeaderGradient = 'linear-gradient(135deg, #e65100 0%, #bf360c 100%)'; // Orange for critical
         } else {
-          weekHeaderGradient = 'linear-gradient(135deg, #1565c0 0%, #0d47a1 100%)'; // Blue for future weeks
+          monthHeaderGradient = 'linear-gradient(135deg, #1565c0 0%, #0d47a1 100%)'; // Blue for future months
         }
 
-        // Week header (outer dropdown)
+        // Month header (outer dropdown)
         html += '<div class="card mb-3" style="border: 2px solid #1565c0;">';
-        html += '<div class="card-header" style="cursor: pointer; background: ' + weekHeaderGradient + '; color: white; padding: 12px 16px;" onclick="toggleWeekGroup(' + weekIndex + ')">';
+        html += '<div class="card-header" style="cursor: pointer; background: ' + monthHeaderGradient + '; color: white; padding: 12px 16px;" onclick="toggleWeekGroup(' + monthIndex + ')">';
         html += '<div style="display: flex; justify-content: space-between; align-items: center;">';
         html += '<div>';
-        html += '<i class="bi bi-chevron-right me-2" id="week-chevron-' + weekIndex + '"></i>';
-        html += '<i class="bi bi-calendar-week me-2"></i><strong>' + weekData.label + '</strong>';
+        html += '<i class="bi bi-chevron-right me-2" id="week-chevron-' + monthIndex + '"></i>';
+        html += '<i class="bi bi-calendar-month me-2"></i><strong>' + monthData.label + '</strong>';
         html += '</div>';
         html += '<div>';
-        html += '<span class="badge bg-white text-dark">' + totalCertsInWeek + ' cert' + (totalCertsInWeek !== 1 ? 's' : '') + '</span>';
-        if (expiredInWeek > 0) {
-          html += '<span class="badge bg-danger ms-1">' + expiredInWeek + ' expired</span>';
+        html += '<span class="badge bg-white text-dark">' + totalCertsInMonth + ' cert' + (totalCertsInMonth !== 1 ? 's' : '') + '</span>';
+        if (expiredInMonth > 0) {
+          html += '<span class="badge bg-danger ms-1">' + expiredInMonth + ' expired</span>';
         }
-        if (criticalInWeek > 0) {
-          html += '<span class="badge bg-warning text-dark ms-1">' + criticalInWeek + ' critical</span>';
+        if (criticalInMonth > 0) {
+          html += '<span class="badge bg-warning text-dark ms-1">' + criticalInMonth + ' critical</span>';
         }
         html += '</div>';
         html += '</div>';
         html += '</div>';
 
-        // Week body (contains cert type dropdowns)
-        html += '<div id="week-body-' + weekIndex + '" style="display: none; padding: 10px;">';
+        // Month body (contains cert type dropdowns)
+        html += '<div id="week-body-' + monthIndex + '" style="display: none; padding: 10px;">';
 
         var certTypeIndex = 0;
         sortedCertTypes.forEach(function(certType) {
-          var certs = weekData.certTypes[certType];
+          var certs = monthData.certTypes[certType];
 
           // Sort employees by expiration date within cert type
           certs.sort(function(a, b) {
@@ -5132,7 +5768,7 @@
             certHeaderGradient = 'linear-gradient(135deg, #4caf50 0%, #2e7d32 100%)';
           }
 
-          var uniqueId = weekIndex + '-' + certTypeIndex;
+          var uniqueId = monthIndex + '-' + certTypeIndex;
 
           html += '<div class="card mb-2">';
           html += '<div class="card-header cert-type-header" style="cursor: pointer; background: ' + certHeaderGradient + '; color: white; padding: 8px 12px;" onclick="toggleCertTypeGroup(\'' + uniqueId + '\')">';
@@ -5157,16 +5793,22 @@
         });
 
         html += '</div></div>';
-        weekIndex++;
+        monthIndex++;
       });
 
       container.innerHTML = html;
+      console.log('renderExpiringCerts: Complete');
+
+      } catch (err) {
+        console.error('renderExpiringCerts: Error:', err);
+        container.innerHTML = '<div class="alert alert-danger m-3"><i class="bi bi-exclamation-triangle"></i> Error rendering certs: ' + err.message + '</div>';
+      }
     }
 
-    // Toggle week group (outer dropdown)
-    function toggleWeekGroup(weekIndex) {
-      var body = document.getElementById('week-body-' + weekIndex);
-      var chevron = document.getElementById('week-chevron-' + weekIndex);
+    // Toggle month group (outer dropdown) - kept as toggleWeekGroup for backward compatibility
+    function toggleWeekGroup(monthIndex) {
+      var body = document.getElementById('week-body-' + monthIndex);
+      var chevron = document.getElementById('week-chevron-' + monthIndex);
       if (body.style.display === 'none') {
         body.style.display = 'block';
         chevron.className = 'bi bi-chevron-down me-2';
@@ -5620,27 +6262,18 @@
     }
 
     function markCertComplete(employee, certType) {
-      if (!confirm('Mark ' + certType + ' for ' + employee + ' as renewed/complete?\n\nThis will update the expiration date in the Expiring Certs sheet.')) {
-        return;
+      // Find this cert in allTasks to get a task index, or use -1 for direct completion
+      var taskIndex = -1;
+      for (var i = 0; i < allTasks.length; i++) {
+        if (allTasks[i].employee === employee &&
+            (allTasks[i].itemType === certType || allTasks[i].certType === certType)) {
+          taskIndex = i;
+          break;
+        }
       }
 
-      showToast('Updating certification...');
-      google.script.run
-        .withSuccessHandler(function() {
-          showToast('✓ Certification marked as complete');
-          // Remove from checklist if present
-          personalChecklist = personalChecklist.filter(function(item) {
-            return !(item.employee === employee && (item.itemType === certType || item.certType === certType));
-          });
-          saveChecklistToStorage();
-          // Reload certs
-          loadExpiringCerts();
-          renderPersonalChecklist();
-        })
-        .withFailureHandler(function(error) {
-          showToast('Error: ' + error, 'error');
-        })
-        .markCertAsRenewed(employee, certType);
+      // Show the expiration date modal
+      showCertExpirationModal(employee, certType, taskIndex);
     }
 
     // Track which categories are expanded/collapsed (default to closed)
@@ -5679,4 +6312,5 @@
   </script>
 </body>
 </html>
+
 

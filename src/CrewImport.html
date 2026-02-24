@@ -40,6 +40,127 @@
     .form-check { padding: 8px 8px 8px 32px; margin: 4px 0; border-radius: 4px; }
     .form-check:hover { background: #f8f9fa; }
     .form-check-input:checked + .form-check-label { font-weight: 500; color: #1a73e8; }
+
+    /* Special Location Cards (Weeds, Light Duty, Vacation) */
+    .special-location-card { border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; margin-bottom: 12px; background: white; }
+    .special-location-card.weeds { border-left: 4px solid #9c27b0; background: linear-gradient(135deg, #f3e5f5, white); }
+    .special-location-card.light-duty { border-left: 4px solid #ff9800; background: linear-gradient(135deg, #fff3e0, white); }
+    .special-location-card.vacation { border-left: 4px solid #2196f3; background: linear-gradient(135deg, #e3f2fd, white); }
+    .special-location-card.leave { border-left: 4px solid #607d8b; background: linear-gradient(135deg, #eceff1, white); }
+    .special-location-card-header { font-weight: bold; margin-bottom: 8px; border-bottom: 1px solid rgba(0,0,0,0.1); padding-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+    .special-location-card.weeds .special-location-card-header { color: #7b1fa2; }
+    .special-location-card.light-duty .special-location-card-header { color: #e65100; }
+    .special-location-card.vacation .special-location-card-header { color: #1565c0; }
+    .special-location-card.leave .special-location-card-header { color: #455a64; }
+
+    /* Custom Notification Modal Styles */
+    .notification-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.2s ease, visibility 0.2s ease;
+    }
+    .notification-overlay.show {
+      opacity: 1;
+      visibility: visible;
+    }
+    .notification-modal {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+      max-width: 450px;
+      width: 90%;
+      transform: scale(0.9);
+      transition: transform 0.2s ease;
+      overflow: hidden;
+    }
+    .notification-overlay.show .notification-modal {
+      transform: scale(1);
+    }
+    .notification-header {
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border-bottom: 1px solid #e0e0e0;
+    }
+    .notification-header.success { background: linear-gradient(135deg, #e8f5e9, #c8e6c9); }
+    .notification-header.error { background: linear-gradient(135deg, #ffebee, #ffcdd2); }
+    .notification-header.warning { background: linear-gradient(135deg, #fff3e0, #ffe0b2); }
+    .notification-header.info { background: linear-gradient(135deg, #e3f2fd, #bbdefb); }
+    .notification-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+    }
+    .notification-header.success .notification-icon { background: #4caf50; color: white; }
+    .notification-header.error .notification-icon { background: #f44336; color: white; }
+    .notification-header.warning .notification-icon { background: #ff9800; color: white; }
+    .notification-header.info .notification-icon { background: #2196f3; color: white; }
+    .notification-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #202124;
+      margin: 0;
+    }
+    .notification-body {
+      padding: 20px;
+      color: #5f6368;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .notification-body ul {
+      margin: 8px 0 0 0;
+      padding-left: 20px;
+    }
+    .notification-body li {
+      margin: 4px 0;
+    }
+    .notification-footer {
+      padding: 12px 20px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      border-top: 1px solid #e0e0e0;
+      background: #f8f9fa;
+    }
+    .notification-btn {
+      padding: 8px 24px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s ease;
+    }
+    .notification-btn-primary {
+      background: #1a73e8;
+      color: white;
+    }
+    .notification-btn-primary:hover {
+      background: #1557b0;
+    }
+    .notification-btn-secondary {
+      background: white;
+      color: #5f6368;
+      border: 1px solid #dadce0;
+    }
+    .notification-btn-secondary:hover {
+      background: #f1f3f4;
+    }
   </style>
 </head>
 <body>
@@ -116,6 +237,13 @@
     <h3><i class="bi bi-diagram-3"></i> Detected Crews <span class="badge bg-primary" id="crewCount">0</span></h3>
     <p class="text-muted small mb-3">Verify that crews and employees are correctly identified.</p>
     <div id="crewCardsContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px;"></div>
+
+    <!-- Special Locations (Weeds, Light Duty, Vacation) -->
+    <div id="specialLocationsSection" style="display: none; margin-top: 24px;">
+      <h4 class="text-secondary mb-3"><i class="bi bi-geo-alt-fill"></i> Non-Field Locations</h4>
+      <p class="text-muted small mb-3">Employees assigned to non-field locations based on Special Circumstances selections.</p>
+      <div id="specialLocationsContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px;"></div>
+    </div>
   </div>
 
   <!-- Duplicate Employee Selection -->
@@ -156,12 +284,13 @@
 
     <!-- Changes Preview -->
     <div class="config-section">
-      <h3><i class="bi bi-pencil-square"></i> Proposed Changes <button class="btn btn-outline-primary btn-sm float-end" onclick="toggleSelectAll()"><i class="bi bi-check-all"></i> Toggle All</button></h3>
+      <h3><i class="bi bi-pencil-square"></i> Proposed Changes <button class="btn btn-outline-primary btn-sm float-end" onclick="toggleSelectAll()"><i class="bi bi-check-all"></i> Select All</button></h3>
+      <p class="text-muted small mb-2"><i class="bi bi-info-circle"></i> <strong>Check the boxes</strong> next to the changes you want to apply. Unchecked changes will be skipped.</p>
       <div class="table-responsive">
         <table class="table table-sm preview-table" id="changesTable">
           <thead>
             <tr>
-              <th style="width: 30px;"><input type="checkbox" id="selectAll" checked onchange="toggleAllChanges(this)"></th>
+              <th style="width: 30px;"><input type="checkbox" id="selectAll" onchange="toggleAllChanges(this)"></th>
               <th>Employee</th>
               <th>Role/Classification</th>
               <th>Location</th>
@@ -307,7 +436,7 @@
               </div>
             </div>
 
-            <input type="hidden" id="newEmpUnmatchedIndex">
+            <input type="hidden" id="newEmpUnmatchedKey">
           </form>
         </div>
         <div class="modal-footer">
@@ -320,8 +449,148 @@
     </div>
   </div>
 
+  <!-- Custom Notification Modal -->
+  <div id="notificationOverlay" class="notification-overlay" onclick="closeNotificationOnOverlay(event)">
+    <div class="notification-modal" onclick="event.stopPropagation()">
+      <div id="notificationHeader" class="notification-header info">
+        <div class="notification-icon">
+          <i id="notificationIcon" class="bi bi-info-circle"></i>
+        </div>
+        <h4 id="notificationTitle" class="notification-title">Notification</h4>
+      </div>
+      <div id="notificationBody" class="notification-body">
+        Message content here
+      </div>
+      <div class="notification-footer">
+        <button id="notificationCancelBtn" class="notification-btn notification-btn-secondary" style="display: none;" onclick="handleNotificationCancel()">Cancel</button>
+        <button id="notificationOkBtn" class="notification-btn notification-btn-primary" onclick="closeNotification()">OK</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   <script>
+    // ========================================
+    // CUSTOM NOTIFICATION SYSTEM
+    // Replaces browser alert() with styled modals
+    // ========================================
+    var notificationCallback = null;
+    var notificationCancelCallback = null;
+
+    /**
+     * Show a custom notification modal
+     * @param {string} message - The message to display (supports HTML)
+     * @param {string} type - 'success', 'error', 'warning', 'info'
+     * @param {string} title - Optional title (defaults based on type)
+     * @param {Function} onOk - Optional callback when OK is clicked
+     */
+    function showNotification(message, type, title, onOk) {
+      type = type || 'info';
+      var icons = {
+        success: 'bi-check-circle-fill',
+        error: 'bi-x-circle-fill',
+        warning: 'bi-exclamation-triangle-fill',
+        info: 'bi-info-circle-fill'
+      };
+      var titles = {
+        success: 'Success',
+        error: 'Error',
+        warning: 'Warning',
+        info: 'Information'
+      };
+
+      document.getElementById('notificationHeader').className = 'notification-header ' + type;
+      document.getElementById('notificationIcon').className = 'bi ' + icons[type];
+      document.getElementById('notificationTitle').textContent = title || titles[type];
+      document.getElementById('notificationBody').innerHTML = message;
+      document.getElementById('notificationCancelBtn').style.display = 'none';
+      document.getElementById('notificationOkBtn').textContent = 'OK';
+
+      notificationCallback = onOk || null;
+      notificationCancelCallback = null;
+
+      document.getElementById('notificationOverlay').classList.add('show');
+    }
+
+    /**
+     * Show a confirmation dialog with OK/Cancel buttons
+     * @param {string} message - The message to display
+     * @param {Function} onConfirm - Callback when confirmed
+     * @param {Function} onCancel - Optional callback when cancelled
+     * @param {string} title - Optional title
+     */
+    function showConfirm(message, onConfirm, onCancel, title) {
+      document.getElementById('notificationHeader').className = 'notification-header warning';
+      document.getElementById('notificationIcon').className = 'bi bi-question-circle-fill';
+      document.getElementById('notificationTitle').textContent = title || 'Confirm';
+      document.getElementById('notificationBody').innerHTML = message;
+      document.getElementById('notificationCancelBtn').style.display = 'inline-block';
+      document.getElementById('notificationOkBtn').textContent = 'OK';
+
+      notificationCallback = onConfirm || null;
+      notificationCancelCallback = onCancel || null;
+
+      document.getElementById('notificationOverlay').classList.add('show');
+    }
+
+    /**
+     * Show a skip confirmation with "Remember" option
+     * @param {string} name - Employee name
+     * @param {Function} onOk - Callback with (shouldRemember) when OK clicked
+     */
+    function showSkipConfirm(name, onOk) {
+      var msg = '<p>Skip <strong>"' + name + '"</strong>?</p>';
+      msg += '<div class="form-check mt-3">';
+      msg += '<input class="form-check-input" type="checkbox" id="skipRememberCheckbox">';
+      msg += '<label class="form-check-label text-muted" for="skipRememberCheckbox">Also remember this for future imports</label>';
+      msg += '</div>';
+
+      document.getElementById('notificationHeader').className = 'notification-header info';
+      document.getElementById('notificationIcon').className = 'bi bi-skip-forward-fill';
+      document.getElementById('notificationTitle').textContent = 'Skip Employee';
+      document.getElementById('notificationBody').innerHTML = msg;
+      document.getElementById('notificationCancelBtn').style.display = 'inline-block';
+      document.getElementById('notificationOkBtn').textContent = 'Skip';
+
+      notificationCallback = function() {
+        var remember = document.getElementById('skipRememberCheckbox') && document.getElementById('skipRememberCheckbox').checked;
+        if (onOk) onOk(remember);
+      };
+      notificationCancelCallback = null;
+
+      document.getElementById('notificationOverlay').classList.add('show');
+    }
+
+    function closeNotification() {
+      document.getElementById('notificationOverlay').classList.remove('show');
+      if (notificationCallback) {
+        var cb = notificationCallback;
+        notificationCallback = null;
+        notificationCancelCallback = null;
+        cb();
+      }
+    }
+
+    function handleNotificationCancel() {
+      document.getElementById('notificationOverlay').classList.remove('show');
+      if (notificationCancelCallback) {
+        var cb = notificationCancelCallback;
+        notificationCallback = null;
+        notificationCancelCallback = null;
+        cb();
+      }
+    }
+
+    function closeNotificationOnOverlay(event) {
+      if (event.target.id === 'notificationOverlay') {
+        handleNotificationCancel();
+      }
+    }
+
+    // ========================================
+    // LOCATION MAPPINGS
+    // ========================================
+
     // Default location mappings (spreadsheet name -> Google Sheet location)
     var locationMappings = {
       'Belgrade Dock': 'Bozeman',
@@ -381,6 +650,7 @@
     var proposedChanges = [];
     var unknownLocations = [];
     var specialCircumstances = []; // Employees with Layoff, Resigned, Light Duty, etc.
+    var specialLocationEmployees = {}; // Track employees by special location (Weeds, Light Duty, Vacation)
     var workbook = null;
     var selectedSheet = null;
     var savedDuplicateSelections = {}; // Loaded from server
@@ -430,6 +700,14 @@
         .withSuccessHandler(function(employees) {
           currentEmployees = employees || [];
           console.log('Loaded ' + currentEmployees.length + ' employees');
+
+          // If we already have parsed crews, re-filter special circumstances
+          // This handles the case where parseSheet() ran before employees were loaded
+          if (parsedCrews && parsedCrews.length > 0 && specialCircumstances && specialCircumstances.length > 0) {
+            console.log('Re-filtering special circumstances now that employees are loaded...');
+            filterSpecialCircumstancesAlreadyMatched();
+            showSpecialSection();  // Re-render the special section
+          }
         })
         .withFailureHandler(function(error) {
           console.error('Failed to load employees:', error);
@@ -447,17 +725,17 @@
           console.log('Is disabled:', btn.classList.contains('disabled'));
 
           if (!btn.classList.contains('disabled')) {
-            var unmatchedIndex = parseInt(btn.getAttribute('data-unmatched-index'));
+            var unmatchedKey = btn.getAttribute('data-unmatched-key');
             var employeeRow = parseInt(btn.getAttribute('data-employee-row'));
             var employeeName = btn.getAttribute('data-employee-name');
 
-            console.log('Data attributes:', { unmatchedIndex: unmatchedIndex, employeeRow: employeeRow, employeeName: employeeName });
+            console.log('Data attributes:', { unmatchedKey: unmatchedKey, employeeRow: employeeRow, employeeName: employeeName });
 
-            if (!isNaN(unmatchedIndex) && !isNaN(employeeRow) && employeeName) {
+            if (unmatchedKey && !isNaN(employeeRow) && employeeName) {
               console.log('Calling manuallyMatchEmployee...');
-              manuallyMatchEmployee(unmatchedIndex, employeeRow, employeeName);
+              manuallyMatchEmployee(unmatchedKey, employeeRow, employeeName);
             } else {
-              console.error('Invalid data attributes on button');
+              console.error('Invalid data attributes on button. unmatchedKey:', unmatchedKey, 'employeeRow:', employeeRow, 'employeeName:', employeeName);
             }
           }
         }
@@ -515,7 +793,7 @@
 
         } catch (err) {
           console.error('Error parsing Excel file:', err);
-          alert('Error reading Excel file: ' + err.message);
+          showNotification('Error reading Excel file: ' + err.message, 'error', 'File Error');
         }
       };
       reader.readAsArrayBuffer(file);
@@ -571,7 +849,7 @@
     function parseSheet(sheetName) {
       var sheet = workbook.Sheets[sheetName];
       if (!sheet) {
-        alert('Sheet not found: ' + sheetName);
+        showNotification('Sheet not found: ' + sheetName, 'error', 'Sheet Error');
         return;
       }
 
@@ -733,6 +1011,18 @@
       parsedCrews = [];
       unknownLocations = [];
       specialCircumstances = []; // Track employees with special status
+      clearSpecialLocations(); // Clear the special location tracking
+
+      // DEBUG: Log current employees status
+      console.log('parseCrewCards starting. currentEmployees loaded: ' + (currentEmployees ? currentEmployees.length : 'NOT LOADED'));
+      if (currentEmployees && currentEmployees.length > 0) {
+        // Find Chad Cliff specifically for debugging
+        for (var ce = 0; ce < currentEmployees.length; ce++) {
+          if (currentEmployees[ce].name && currentEmployees[ce].name.toLowerCase().indexOf('chad cliff') !== -1) {
+            console.log('  Found Chad Cliff in currentEmployees:', currentEmployees[ce]);
+          }
+        }
+      }
 
       // Find all crew headers (cells with job number pattern XXX-XX)
       // A crew header is a cell containing something like "Belgrade Dock 013-26 5 8's M-F"
@@ -746,8 +1036,8 @@
           var cell = data[r][c];
           if (!cell) continue;
 
-          // Check for special section headers (Light Duty, Time off, Quit, Layoff, etc.)
-          if (cell.match(/Light\s*Duty|Time\s*off|Quit|Other|Layoff|Resign|Leave|Vacation|MT\s*Misc/i) && !cell.match(/\d{3}-\d{2}/)) {
+          // Check for special section headers (Light Duty, Time off, Quit, Layoff, Weeds, etc.)
+          if (cell.match(/Light\s*Duty|Time\s*off|Quit|Other|Layoff|Resign|Leave|Vacation|MT\s*Misc|Weeds/i) && !cell.match(/\d{3}-\d{2}/)) {
             console.log('Found special section header at [' + r + ',' + c + ']: ' + cell);
             specialSectionHeaders.push({
               row: r,
@@ -861,8 +1151,11 @@
         }
 
         // Sort employees by classification hierarchy before assigning positions
+        // Use getEffectiveRole to get role from Google Sheet if not in Excel
         employees.sort(function(a, b) {
-          return getRolePriority(a.role) - getRolePriority(b.role);
+          var roleA = getEffectiveRole(a);
+          var roleB = getEffectiveRole(b);
+          return getRolePriority(roleA) - getRolePriority(roleB);
         });
 
         // Assign position numbers to employees (now in correct order)
@@ -876,6 +1169,7 @@
 
         parsedCrews.push({
           originalLocation: header.locationName,
+          location: mappedLocation,  // Add both for compatibility
           mappedLocation: mappedLocation,
           jobNumber: header.jobNumber,
           employees: employees,
@@ -889,7 +1183,12 @@
         });
       }
 
-      console.log('Parsed ' + parsedCrews.length + ' crews with employees');
+      console.log('Parsed ' + parsedCrews.length + ' crews before merging');
+
+      // MERGE crews with the same job number (e.g., two Rapelje blocks with 039-26)
+      mergeCrewsByJobNumber();
+
+      console.log('After merge: ' + parsedCrews.length + ' crews');
 
       // Check for unknown locations first
       if (unknownLocations.length > 0) {
@@ -897,18 +1196,146 @@
         return;
       }
 
+      // Filter out special circumstances that are already terminated as Previous Employees
+      // This MUST run BEFORE showCrewPreview so Dawson, etc. are not displayed
+      filterSpecialCircumstancesAlreadyMatched();
+
       // Show crew preview and match employees
       showCrewPreview();
       matchEmployeesToSheet();
-
-      // Filter out special circumstances that are already matched as Previous Employees
-      filterSpecialCircumstancesAlreadyMatched();
 
       // Note: if there are duplicates, matchEmployeesToSheet will show the duplicate UI
       // and displayPreview will be called after user resolves duplicates
       if (duplicateEmployees.length === 0) {
         displayPreview();
       }
+    }
+
+    /**
+     * Gets the effective role for an employee, checking Google Sheet if Excel role is empty
+     * @param {Object} emp - Employee object from Excel parsing
+     * @returns {string} Role string to use for sorting
+     */
+    function getEffectiveRole(emp) {
+      // If employee has a role from Excel parsing, use it
+      if (emp.role && emp.role.trim()) {
+        return emp.role;
+      }
+
+      // Otherwise, try to look up from Google Sheet by name
+      if (currentEmployees && currentEmployees.length > 0) {
+        var empNameLower = emp.name.toLowerCase().trim();
+
+        for (var i = 0; i < currentEmployees.length; i++) {
+          var sheetEmp = currentEmployees[i];
+          var sheetNameLower = (sheetEmp.name || '').toLowerCase().trim();
+
+          if (sheetNameLower === empNameLower) {
+            var classification = sheetEmp.jobClassification || '';
+            if (classification) {
+              emp.classificationFromSheet = classification;  // Store for reference
+              console.log('  Got role "' + classification + '" from sheet for: ' + emp.name);
+              return classification;
+            }
+            break;
+          }
+        }
+      }
+
+      return ''; // No role found
+    }
+
+    /**
+     * Merges crews that have the same job number (e.g., two Rapelje 039-26 blocks)
+     * This handles the case where the same crew appears in multiple Excel blocks
+     */
+    function mergeCrewsByJobNumber() {
+      if (parsedCrews.length <= 1) return;
+
+      // Group crews by job number
+      var crewsByJob = {};
+      for (var i = 0; i < parsedCrews.length; i++) {
+        var crew = parsedCrews[i];
+        var jobNum = crew.jobNumber;
+
+        if (!crewsByJob[jobNum]) {
+          crewsByJob[jobNum] = [];
+        }
+        crewsByJob[jobNum].push(crew);
+      }
+
+      // Check if any job numbers have multiple crews
+      var mergedCrews = [];
+      var mergeCount = 0;
+
+      for (var jobNum in crewsByJob) {
+        var crews = crewsByJob[jobNum];
+
+        if (crews.length === 1) {
+          // Only one crew with this job number - no merge needed
+          mergedCrews.push(crews[0]);
+        } else {
+          // Multiple crews with same job number - merge them
+          console.log('Merging ' + crews.length + ' crews with job number ' + jobNum);
+          mergeCount++;
+
+          // Use the first crew as the base
+          var mergedCrew = {
+            originalLocation: crews[0].originalLocation,
+            location: crews[0].location || crews[0].mappedLocation,
+            mappedLocation: crews[0].mappedLocation,
+            jobNumber: jobNum,
+            employees: [],
+            headerRow: crews[0].headerRow,
+            headerCol: crews[0].headerCol,
+            isUnknownLocation: crews[0].isUnknownLocation,
+            fullHeaderText: crews[0].fullHeaderText,
+            scheduleType: crews[0].scheduleType,
+            scheduleLabel: crews[0].scheduleLabel,
+            scheduleBadgeColor: crews[0].scheduleBadgeColor
+          };
+
+          // Collect all employees, avoiding duplicates by name
+          var seenNames = {};
+
+          for (var c = 0; c < crews.length; c++) {
+            var crewEmps = crews[c].employees || [];
+            for (var e = 0; e < crewEmps.length; e++) {
+              var emp = crewEmps[e];
+              var empNameKey = emp.name.toLowerCase().trim();
+
+              if (!seenNames[empNameKey]) {
+                seenNames[empNameKey] = true;
+                mergedCrew.employees.push(emp);
+              } else {
+                console.log('  Skipping duplicate employee in merge: ' + emp.name);
+              }
+            }
+          }
+
+          // Re-sort merged employees by classification hierarchy
+          mergedCrew.employees.sort(function(a, b) {
+            var roleA = getEffectiveRole(a);
+            var roleB = getEffectiveRole(b);
+            return getRolePriority(roleA) - getRolePriority(roleB);
+          });
+
+          // Re-assign position numbers
+          for (var pe = 0; pe < mergedCrew.employees.length; pe++) {
+            mergedCrew.employees[pe].position = pe + 1;
+            mergedCrew.employees[pe].fullJobNumber = jobNum + '.' + (pe + 1);
+          }
+
+          console.log('  Merged crew has ' + mergedCrew.employees.length + ' employees');
+          mergedCrews.push(mergedCrew);
+        }
+      }
+
+      if (mergeCount > 0) {
+        console.log('Merged ' + mergeCount + ' duplicate job number groups');
+      }
+
+      parsedCrews = mergedCrews;
     }
 
     // Parse employees in special sections (Time off/Quit/Other)
@@ -1046,6 +1473,7 @@
       var text = headerText.toLowerCase();
 
       if (text.match(/light\s*duty/i)) return 'Light Duty';
+      if (text.match(/weeds/i)) return 'Weeds';  // Waiting for work/job assignment
       if (text.match(/layoff|laid\s*off/i)) return 'Layoff';
       if (text.match(/resign/i)) return 'Resigned';
       if (text.match(/quit/i)) return 'Quit';
@@ -1141,6 +1569,12 @@
       if (!result.status && cleanText.match(/\bQuit\b/i)) {
         result.status = 'Quit';
         cleanText = cleanText.replace(/\bQuit\b/i, ' ').trim();
+      }
+
+      // Check for Fired / Terminated
+      if (!result.status && cleanText.match(/\b(Fired|Terminated)\b/i)) {
+        result.status = 'Fired';
+        cleanText = cleanText.replace(/\b(Fired|Terminated)\b/i, ' ').trim();
       }
 
       // Check for Vacation or Time Off
@@ -1531,7 +1965,9 @@
 
       for (var i = 0; i < parsedCrews.length; i++) {
         var crew = parsedCrews[i];
-        html += '<div class="crew-card" id="crew-card-' + i + '">';
+        // Use job number as unique ID (sanitized for DOM ID)
+        var crewId = crew.jobNumber.replace(/[^a-zA-Z0-9-]/g, '_');
+        html += '<div class="crew-card" id="crew-card-' + crewId + '" data-job-number="' + crew.jobNumber + '">';
         html += '<div class="crew-card-header d-flex justify-content-between align-items-start">';
         html += '<div>';
         html += '<i class="bi bi-geo-alt"></i> ' + crew.mappedLocation + ' <span class="text-muted">(' + crew.jobNumber + ')</span>';
@@ -1542,22 +1978,24 @@
         var badgeColor = crew.scheduleBadgeColor || 'bg-secondary';
         var badgeLabel = crew.scheduleLabel || 'Unknown';
         var scheduleType = crew.scheduleType || '';
-        html += '<button class="btn btn-sm ' + badgeColor + ' dropdown-toggle" type="button" id="scheduleDropdown-' + i + '" data-bs-toggle="dropdown" aria-expanded="false" style="font-size: 10px; padding: 2px 6px;">';
+        html += '<button class="btn btn-sm ' + badgeColor + ' dropdown-toggle" type="button" id="scheduleDropdown-' + crewId + '" data-bs-toggle="dropdown" aria-expanded="false" style="font-size: 10px; padding: 2px 6px;">';
         if (scheduleType) {
           html += scheduleType + ' (' + badgeLabel + ')';
         } else {
           html += '<i class="bi bi-question-circle"></i> Set Schedule';
         }
         html += '</button>';
-        html += '<ul class="dropdown-menu dropdown-menu-end" aria-labelledby="scheduleDropdown-' + i + '">';
-        html += '<li><a class="dropdown-item" href="#" onclick="setCrewSchedule(' + i + ', \'Primary\', \'M-Th\'); return false;"><span class="badge bg-success me-1">Primary</span> M-Th</a></li>';
-        html += '<li><a class="dropdown-item" href="#" onclick="setCrewSchedule(' + i + ', \'Primary\', \'M-F\'); return false;"><span class="badge bg-success me-1">Primary</span> M-F</a></li>';
+        html += '<ul class="dropdown-menu dropdown-menu-end" aria-labelledby="scheduleDropdown-' + crewId + '">';
+        html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Primary\', \'M-Th\'); return false;"><span class="badge bg-success me-1">Primary</span> M-Th</a></li>';
+        html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Primary\', \'M-F\'); return false;"><span class="badge bg-success me-1">Primary</span> M-F</a></li>';
         html += '<li><hr class="dropdown-divider"></li>';
-        html += '<li><a class="dropdown-item" href="#" onclick="setCrewSchedule(' + i + ', \'Secondary\', \'Fri-Sat\'); return false;"><span class="badge bg-warning text-dark me-1">Secondary</span> Fri-Sat</a></li>';
-        html += '<li><a class="dropdown-item" href="#" onclick="setCrewSchedule(' + i + ', \'Secondary\', \'Weekend\'); return false;"><span class="badge bg-warning text-dark me-1">Secondary</span> Weekend</a></li>';
+        html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Secondary\', \'Fri-Sat\'); return false;"><span class="badge bg-warning text-dark me-1">Secondary</span> Fri-Sat</a></li>';
+        html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Secondary\', \'Weekend\'); return false;"><span class="badge bg-warning text-dark me-1">Secondary</span> Weekend</a></li>';
         html += '<li><hr class="dropdown-divider"></li>';
-        html += '<li><a class="dropdown-item" href="#" onclick="setCrewSchedule(' + i + ', \'Split\', \'Mon-Wed\'); return false;"><span class="badge bg-info me-1">Split</span> Mon-Wed</a></li>';
-        html += '<li><a class="dropdown-item" href="#" onclick="setCrewSchedule(' + i + ', \'Split\', \'Thu-Fri\'); return false;"><span class="badge bg-info me-1">Split</span> Thu-Fri</a></li>';
+        html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Split\', \'Mon-Wed\'); return false;"><span class="badge bg-info me-1">Split</span> Mon-Wed</a></li>';
+        html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Split\', \'Thu-Fri\'); return false;"><span class="badge bg-info me-1">Split</span> Thu-Fri</a></li>';
+        html += '<li><hr class="dropdown-divider"></li>';
+        html += '<li><a class="dropdown-item text-danger" href="#" onclick="excludeCrewByJob(\'' + crew.jobNumber + '\', event); return false;"><i class="bi bi-x-circle me-1"></i> Exclude Crew</a></li>';
         html += '</ul>';
         html += '</div>';
 
@@ -1572,15 +2010,66 @@
             var empNameLower = emp.name.toLowerCase().trim();
             var isDuplicate = nameOccurrences[empNameLower] && nameOccurrences[empNameLower].length > 1;
 
+            // Check if this employee is in Special Circumstances with a non-temporary status
+            // If so, skip them from crew cards (they'll show in the Special Locations section)
+            var isInSpecialCircumstances = false;
+            var specialStatus = '';
+            for (var sc = 0; sc < specialCircumstances.length; sc++) {
+              var spec = specialCircumstances[sc];
+              if (spec && (spec.name || '').toLowerCase().trim() === empNameLower) {
+                isInSpecialCircumstances = true;
+                specialStatus = spec.status || '';
+                break;
+              }
+            }
+
+            // Skip employees who are in non-temporary special circumstances
+            // Temporary: Time Off (one-off), Vacation (this week only)
+            // Non-temporary: Light Duty, Weeds, Layoff, Fired, Quit, Resigned, Leave
+            var nonTempStatuses = ['Light Duty', 'Weeds', 'Layoff', 'Fired', 'Quit', 'Resigned', 'Leave', 'FMLA', 'Previous Employee'];
+            if (isInSpecialCircumstances && nonTempStatuses.indexOf(specialStatus) !== -1) {
+              console.log('Skipping ' + emp.name + ' from crew card - in Special Circumstances as ' + specialStatus);
+              continue;
+            }
+
             var rowStyle = isDuplicate ? ' style="color: #dc3545; font-weight: 500;"' : '';
             var dupIcon = isDuplicate ? '<i class="bi bi-exclamation-triangle text-warning" title="Appears in multiple crews"></i> ' : '';
 
+            // Check if employee has pending changes (will be shown in green)
+            var hasPendingChange = false;
+            for (var pc = 0; pc < proposedChanges.length; pc++) {
+              if (proposedChanges[pc].employee === emp ||
+                  (proposedChanges[pc].match && proposedChanges[pc].match.employeeName.toLowerCase() === empNameLower)) {
+                hasPendingChange = true;
+                break;
+              }
+            }
+
+            // Override style for pending changes (green) - takes priority over duplicate (red)
+            if (hasPendingChange && !isDuplicate) {
+              rowStyle = ' style="color: #198754; font-weight: 500;"';  // Green color
+            }
+
+            // Show a badge for special circumstances (temporary ones that still show in crew)
+            var specialBadge = '';
+            if (isInSpecialCircumstances) {
+              specialBadge = ' <span class="badge bg-info" style="font-size: 9px;" title="Also in Special Circumstances">' + specialStatus + '</span>';
+            }
+
             html += '<div class="crew-card-employee"' + rowStyle + '>';
-            html += dupIcon + emp.fullJobNumber + '. ' + emp.name;
+            html += dupIcon + emp.fullJobNumber + '. ' + emp.name + specialBadge;
+
+            // Show role badge - use role from Excel, or classificationFromSheet if looked up from Google Sheet
+            var displayRole = emp.role || emp.classificationFromSheet || '';
             if (emp.isForeman) {
               html += ' <span class="badge bg-primary badge-role">F</span>';
-            } else if (emp.role) {
-              html += ' <span class="badge bg-secondary badge-role">' + emp.role + '</span>';
+            } else if (displayRole) {
+              // If classification came from sheet (not Excel), show with different color
+              var badgeClass = emp.classificationFromSheet && !emp.role ? 'bg-info' : 'bg-secondary';
+              html += ' <span class="badge ' + badgeClass + ' badge-role">' + displayRole + '</span>';
+              if (emp.classificationFromSheet && !emp.role) {
+                html += ' <small class="text-info" style="font-size: 9px;">(from sheet)</small>';
+              }
             }
 
             // Debug: show source row/col and original text
@@ -1602,16 +2091,166 @@
       if (specialCircumstances.length > 0) {
         showSpecialSection();
       }
+
+      // Show special location cards (Weeds, Light Duty, Vacation)
+      renderSpecialLocationCards();
+    }
+
+    /**
+     * Renders the special location cards showing employees assigned to non-field locations
+     * These are: Weeds, Light Duty, Vacation, Leave, Previous Employee
+     * ALSO includes employees from Google Sheet already in these locations
+     */
+    function renderSpecialLocationCards() {
+      var container = document.getElementById('specialLocationsContainer');
+      var section = document.getElementById('specialLocationsSection');
+      if (!container || !section) return;
+
+      // FIRST: Populate special locations from Google Sheet (existing employees in these locations)
+      if (currentEmployees && currentEmployees.length > 0) {
+        var specialLocationNames = ['Weeds', 'Light Duty', 'Vacation', 'Leave'];
+        for (var i = 0; i < currentEmployees.length; i++) {
+          var emp = currentEmployees[i];
+          var empLocation = (emp.location || '').trim();
+
+          // Check if this employee is in a special location
+          for (var sl = 0; sl < specialLocationNames.length; sl++) {
+            if (empLocation.toLowerCase() === specialLocationNames[sl].toLowerCase()) {
+              // Add to special location tracking (avoiding duplicates)
+              if (!specialLocationEmployees[specialLocationNames[sl]]) {
+                specialLocationEmployees[specialLocationNames[sl]] = [];
+              }
+
+              var exists = specialLocationEmployees[specialLocationNames[sl]].some(function(e) {
+                return e.name.toLowerCase() === (emp.name || '').toLowerCase();
+              });
+
+              if (!exists) {
+                specialLocationEmployees[specialLocationNames[sl]].push({
+                  name: emp.name,
+                  classification: emp.jobClassification || '',
+                  notes: 'From Employees sheet',
+                  fromSheet: true
+                });
+              }
+              break;
+            }
+          }
+        }
+      }
+
+      // Check if there are any employees in special locations
+      var hasSpecialEmployees = false;
+      for (var loc in specialLocationEmployees) {
+        if (specialLocationEmployees[loc] && specialLocationEmployees[loc].length > 0) {
+          hasSpecialEmployees = true;
+          break;
+        }
+      }
+
+      if (!hasSpecialEmployees) {
+        section.style.display = 'none';
+        return;
+      }
+
+      var html = '';
+
+      // Define the special locations to show and their styling
+      var specialLocations = [
+        { key: 'Light Duty', icon: 'bi-bandaid', label: 'Light Duty', cssClass: 'light-duty' },
+        { key: 'Weeds', icon: 'bi-clock-history', label: 'Weeds (Waiting for Work)', cssClass: 'weeds' },
+        { key: 'Vacation', icon: 'bi-sun', label: 'Vacation', cssClass: 'vacation' },
+        { key: 'Leave', icon: 'bi-briefcase', label: 'Leave', cssClass: 'leave' },
+        { key: 'Time Off', icon: 'bi-calendar-x', label: 'Time Off', cssClass: 'vacation' }
+      ];
+
+      for (var i = 0; i < specialLocations.length; i++) {
+        var locInfo = specialLocations[i];
+        var employees = specialLocationEmployees[locInfo.key];
+        if (!employees || employees.length === 0) continue;
+
+        html += '<div class="special-location-card ' + locInfo.cssClass + '">';
+        html += '<div class="special-location-card-header">';
+        html += '<div><i class="bi ' + locInfo.icon + '"></i> ' + locInfo.label + '</div>';
+        html += '<span class="badge bg-secondary">' + employees.length + '</span>';
+        html += '</div>';
+        html += '<div class="crew-card-employees">';
+
+        for (var j = 0; j < employees.length; j++) {
+          var emp = employees[j];
+          html += '<div class="crew-card-employee">';
+          html += '<i class="bi bi-person"></i> ' + escapeHtml(emp.name);
+          if (emp.classification) {
+            html += ' <span class="badge bg-secondary badge-role" style="font-size: 9px;">' + emp.classification + '</span>';
+          }
+          if (emp.notes) {
+            html += ' <small class="text-muted">(' + escapeHtml(emp.notes) + ')</small>';
+          }
+          html += '</div>';
+        }
+
+        html += '</div></div>';
+      }
+
+      container.innerHTML = html;
+      section.style.display = html ? 'block' : 'none';
+    }
+
+    /**
+     * Adds an employee to the special location tracking
+     * @param {string} location - Special location (Weeds, Light Duty, Vacation, etc.)
+     * @param {Object} employeeInfo - Employee information
+     */
+    function addToSpecialLocation(location, employeeInfo) {
+      if (!specialLocationEmployees[location]) {
+        specialLocationEmployees[location] = [];
+      }
+
+      // Avoid duplicates by name
+      var exists = specialLocationEmployees[location].some(function(e) {
+        return e.name.toLowerCase() === employeeInfo.name.toLowerCase();
+      });
+
+      if (!exists) {
+        specialLocationEmployees[location].push(employeeInfo);
+      }
+
+      // Re-render the special location cards
+      renderSpecialLocationCards();
+    }
+
+    /**
+     * Clears all special location tracking (called when re-parsing)
+     */
+    function clearSpecialLocations() {
+      specialLocationEmployees = {};
+      var container = document.getElementById('specialLocationsContainer');
+      var section = document.getElementById('specialLocationsSection');
+      if (container) container.innerHTML = '';
+      if (section) section.style.display = 'none';
     }
 
     /**
      * Sets the schedule type for a crew (called from dropdown in crew card)
-     * @param {number} crewIndex - Index in parsedCrews array
+     * Uses job number to find the crew, which is stable even after array modifications
+     * @param {string} jobNumber - The job number (e.g., "013-26")
      * @param {string} scheduleType - 'Primary', 'Secondary', or 'Split'
      * @param {string} scheduleLabel - 'M-Th', 'M-F', 'Fri-Sat', etc.
      */
-    function setCrewSchedule(crewIndex, scheduleType, scheduleLabel) {
-      if (!parsedCrews[crewIndex]) return;
+    function setCrewScheduleByJob(jobNumber, scheduleType, scheduleLabel) {
+      // Find the crew by job number
+      var crewIndex = -1;
+      for (var i = 0; i < parsedCrews.length; i++) {
+        if (parsedCrews[i].jobNumber === jobNumber) {
+          crewIndex = i;
+          break;
+        }
+      }
+
+      if (crewIndex === -1) {
+        console.warn('Could not find crew with job number: ' + jobNumber);
+        return;
+      }
 
       var crew = parsedCrews[crewIndex];
       crew.scheduleType = scheduleType;
@@ -1628,14 +2267,154 @@
         crew.scheduleBadgeColor = 'bg-secondary';
       }
 
-      // Update the dropdown button text
-      var btn = document.getElementById('scheduleDropdown-' + crewIndex);
+      // Update the dropdown button text - use sanitized job number for DOM ID
+      var crewId = jobNumber.replace(/[^a-zA-Z0-9-]/g, '_');
+      var btn = document.getElementById('scheduleDropdown-' + crewId);
       if (btn) {
         btn.className = 'btn btn-sm ' + crew.scheduleBadgeColor + ' dropdown-toggle';
         btn.innerHTML = scheduleType + ' (' + scheduleLabel + ')';
+
+        // Close the dropdown using Bootstrap API
+        var dropdown = bootstrap.Dropdown.getOrCreateInstance(btn);
+        if (dropdown) {
+          dropdown.hide();
+        }
       }
 
       console.log('Set crew ' + crew.jobNumber + ' schedule to ' + scheduleType + ' (' + scheduleLabel + ')');
+    }
+
+    // Legacy function for backwards compatibility
+    function setCrewSchedule(crewIndex, scheduleType, scheduleLabel) {
+      if (!parsedCrews[crewIndex]) return;
+      setCrewScheduleByJob(parsedCrews[crewIndex].jobNumber, scheduleType, scheduleLabel);
+    }
+
+    /**
+     * Excludes a crew from the import by job number (removes from display and changes list)
+     * Uses job number to find the crew, which is stable even after array modifications
+     * @param {string} jobNumber - The job number (e.g., "013-26")
+     * @param {Event} event - The click event
+     */
+    function excludeCrewByJob(jobNumber, event) {
+      // Prevent default and stop propagation to avoid scrolling
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+
+      // Find the crew by job number
+      var crewIndex = -1;
+      for (var i = 0; i < parsedCrews.length; i++) {
+        if (parsedCrews[i].jobNumber === jobNumber) {
+          crewIndex = i;
+          break;
+        }
+      }
+
+      if (crewIndex === -1) {
+        console.warn('Could not find crew with job number: ' + jobNumber);
+        return;
+      }
+
+      var crew = parsedCrews[crewIndex];
+      var crewName = (crew.mappedLocation || crew.location || crew.originalLocation) + ' (' + crew.jobNumber + ')';
+
+      showConfirm('<p>Are you sure you want to exclude <strong>' + crewName + '</strong> from this import?</p><p class="text-muted small">Employees in this crew will not be updated.</p>', function() {
+        // Close the dropdown first - use sanitized job number for DOM ID
+        var crewId = jobNumber.replace(/[^a-zA-Z0-9-]/g, '_');
+        var btn = document.getElementById('scheduleDropdown-' + crewId);
+        if (btn) {
+          var dropdown = bootstrap.Dropdown.getOrCreateInstance(btn);
+          if (dropdown) {
+            dropdown.hide();
+          }
+        }
+
+        // Save scroll position BEFORE any changes
+        var scrollPos = window.scrollY || document.documentElement.scrollTop;
+        console.log('Scroll position before exclude: ' + scrollPos);
+
+        // Remove the crew from parsedCrews array
+        var removedCrew = parsedCrews.splice(crewIndex, 1)[0];
+        console.log('Excluded crew: ' + crewName, removedCrew);
+
+        // Remove the crew card from DOM using the job number ID
+        var crewCard = document.getElementById('crew-card-' + crewId);
+        if (crewCard) {
+          crewCard.remove();
+          console.log('Removed crew card DOM element');
+        } else {
+          // Fallback: re-render with scroll preservation
+          console.log('Could not find crew card element, re-rendering');
+          showCrewPreview();
+        }
+
+        // Re-run matching to update duplicate detection (but don't change scroll)
+        matchEmployeesToSheet();
+
+        // Restore scroll position after DOM updates
+        setTimeout(function() {
+          window.scrollTo(0, scrollPos);
+          console.log('Restored scroll to: ' + scrollPos);
+        }, 50);
+      }, null, 'Exclude Crew');
+    }
+
+    // Legacy function - keep for backwards compatibility
+    /**
+     * Excludes a crew from the import (removes from display and changes list)
+     * @param {number} crewIndex - Index in parsedCrews array
+     */
+    function excludeCrew(crewIndex, event) {
+      // Prevent default and stop propagation to avoid scrolling
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+
+      if (!parsedCrews[crewIndex]) return;
+
+      var crew = parsedCrews[crewIndex];
+      var crewName = (crew.mappedLocation || crew.location || crew.originalLocation) + ' (' + crew.jobNumber + ')';
+
+      showConfirm('<p>Are you sure you want to exclude <strong>' + crewName + '</strong> from this import?</p><p class="text-muted small">Employees in this crew will not be updated.</p>', function() {
+        // Close the dropdown first
+        var btn = document.getElementById('scheduleDropdown-' + crewIndex);
+        if (btn) {
+          var dropdown = bootstrap.Dropdown.getOrCreateInstance(btn);
+          if (dropdown) {
+            dropdown.hide();
+          }
+        }
+
+        // Save scroll position BEFORE any changes
+        var scrollPos = window.scrollY || document.documentElement.scrollTop;
+        console.log('Scroll position before exclude: ' + scrollPos);
+
+        // Remove the crew from parsedCrews array
+        var removedCrew = parsedCrews.splice(crewIndex, 1)[0];
+        console.log('Excluded crew: ' + crewName, removedCrew);
+
+        // Just remove the crew card from DOM instead of full re-render
+        var crewCard = document.getElementById('crew-card-' + crewIndex);
+        if (crewCard) {
+          crewCard.remove();
+          console.log('Removed crew card DOM element');
+        } else {
+          // Fallback: re-render with scroll preservation
+          showCrewPreview();
+        }
+
+        // Re-run matching to update duplicate detection (but don't change scroll)
+        matchEmployeesToSheet();
+
+        // Restore scroll position after DOM updates
+        setTimeout(function() {
+          window.scrollTo(0, scrollPos);
+          console.log('Restored scroll to: ' + scrollPos);
+        }, 50);
+      }, null, 'Exclude Crew');
     }
 
     /**
@@ -1774,6 +2553,11 @@
           suggestedAction = 'update';
           statusBadgeClass = 'bg-info';
           statusIcon = 'bi-bandaid';
+        } else if (spec.status === 'Weeds') {
+          suggestedLocation = 'Weeds'; // Set location to Weeds (waiting for work)
+          suggestedAction = 'update';
+          statusBadgeClass = 'bg-secondary';
+          statusIcon = 'bi-clock-history';
         } else if (spec.status === 'Leave' || spec.status === 'Time Off' || spec.status === 'Vacation') {
           suggestedLocation = 'Vacation';
           suggestedAction = 'vacation';
@@ -1838,7 +2622,7 @@
         html += '<div class="col-md-3">';
         html += '<label class="form-label small mb-1">Status/Reason</label>';
         html += '<select class="form-select form-select-sm" id="spec-status-' + i + '">';
-        var statuses = ['Layoff', 'Fired', 'Resigned', 'Quit', 'Time Off', 'Vacation', 'Light Duty', 'Leave', 'FMLA', 'MT Misc', 'Unknown'];
+        var statuses = ['Layoff', 'Fired', 'Resigned', 'Quit', 'Time Off', 'Vacation', 'Light Duty', 'Weeds', 'Leave', 'FMLA', 'MT Misc', 'Unknown'];
         for (var s = 0; s < statuses.length; s++) {
           var isSelected = spec.status === statuses[s] ? ' selected' : '';
           html += '<option value="' + statuses[s] + '"' + isSelected + '>' + statuses[s] + '</option>';
@@ -1858,7 +2642,8 @@
         html += '<option value="">-- Keep Current --</option>';
         html += '<option value="Previous Employee"' + ( suggestedLocation === 'Previous Employee' ? ' selected' : '') + '>Previous Employee</option>';
         html += '<option value="Vacation"' + (suggestedLocation === 'Vacation' ? ' selected' : '') + '>Vacation</option>';
-        html += '<option value="Light Duty">Light Duty</option>';
+        html += '<option value="Light Duty"' + (suggestedLocation === 'Light Duty' ? ' selected' : '') + '>Light Duty</option>';
+        html += '<option value="Weeds"' + (suggestedLocation === 'Weeds' ? ' selected' : '') + '>Weeds</option>';
         html += '<option value="Leave">Leave</option>';
         html += '<option disabled>──────────</option>';
         for (var l = 0; l < allLocations.length; l++) {
@@ -1946,7 +2731,7 @@
       var notes = document.getElementById('spec-notes-' + specIndex).value.trim();
 
       if (!name) {
-        alert('Please enter an employee name');
+        showNotification('Please enter an employee name', 'warning', 'Required Field');
         return;
       }
 
@@ -1959,55 +2744,64 @@
         }
       }
 
-      // Confirm the action
-      var msg = 'Apply changes for "' + name + '"?\n\n';
-      if (newLocation) msg += '• Location: ' + newLocation + '\n';
-      if (classification) msg += '• Classification: ' + classification + '\n';
-      if (jobNumber) msg += '• Job Number: ' + jobNumber + '\n';
-      if (clearJobNumber) msg += '• Clear Job Number\n';
-      msg += '• Status: ' + status + '\n';
-      if (displayDate) msg += '• Date: ' + displayDate + '\n';
-      if (notes) msg += '• Notes: ' + notes + '\n';
-      msg += '\nThis will be logged to Employee History.';
+      // Build confirmation message (HTML formatted)
+      var msg = '<p>Apply changes for <strong>"' + name + '"</strong>?</p><ul>';
+      if (newLocation) msg += '<li>Location: ' + newLocation + '</li>';
+      if (classification) msg += '<li>Classification: ' + classification + '</li>';
+      if (jobNumber) msg += '<li>Job Number: ' + jobNumber + '</li>';
+      if (clearJobNumber) msg += '<li>Clear Job Number</li>';
+      msg += '<li>Status: ' + status + '</li>';
+      if (displayDate) msg += '<li>Date: ' + displayDate + '</li>';
+      if (notes) msg += '<li>Notes: ' + notes + '</li>';
+      msg += '</ul><p class="text-muted small">This will be logged to Employee History.</p>';
 
       // Add warning if marking as Previous Employee
       if (newLocation === 'Previous Employee') {
-        msg += '\n\n⚠️ WARNING: This will REMOVE the employee from the Employees sheet.';
-        msg += '\nThey will only exist in Employee History.';
+        msg += '<div class="alert alert-danger small mt-2 mb-0"><i class="bi bi-exclamation-triangle"></i> <strong>WARNING:</strong> This will REMOVE the employee from the Employees sheet. They will only exist in Employee History.</div>';
       }
 
-      if (!confirm(msg)) return;
+      showConfirm(msg, function() {
+        // User confirmed - proceed with update
+        var card = document.getElementById('special-card-' + specIndex);
+        if (card) {
+          card.style.opacity = '0.5';
+          card.querySelectorAll('button, input, select').forEach(function(el) { el.disabled = true; });
+        }
 
-      // Disable the card
-      var card = document.getElementById('special-card-' + specIndex);
-      if (card) {
-        card.style.opacity = '0.5';
-        card.querySelectorAll('button, input, select').forEach(function(el) { el.disabled = true; });
-      }
+        var updateData = {
+          name: name,
+          newLocation: newLocation,
+          classification: classification,
+          status: status,
+          date: displayDate || date,
+          jobNumber: jobNumber,
+          clearJobNumber: clearJobNumber,
+          notes: notes,
+          company: spec.company || ''
+        };
 
-      var updateData = {
-        name: name,
-        newLocation: newLocation,
-        classification: classification,
-        status: status,
-        date: displayDate || date, // Use formatted date if available
-        jobNumber: jobNumber,
-        clearJobNumber: clearJobNumber,
-        notes: notes,
-        company: spec.company || ''
-      };
-
-      google.script.run
+        google.script.run
         .withSuccessHandler(function(result) {
           if (result.success) {
-            alert('✓ Updated ' + name);
+            showNotification('✓ Updated <strong>' + name + '</strong>', 'success', 'Employee Updated');
 
             // Save this selection for future imports
             saveSpecialSelection(name, status, newLocation, false);
 
+            // Track this employee in special locations for display
+            var specialLocs = ['Light Duty', 'Weeds', 'Vacation', 'Leave', 'Time Off'];
+            if (specialLocs.indexOf(newLocation) !== -1 || specialLocs.indexOf(status) !== -1) {
+              var displayLoc = newLocation || status;
+              addToSpecialLocation(displayLoc, {
+                name: name,
+                classification: classification || '',
+                notes: notes || ''
+              });
+            }
+
             removeSpecialCard(specIndex);
           } else {
-            alert('Error: ' + result.message);
+            showNotification(result.message, 'error', 'Update Failed');
             if (card) {
               card.style.opacity = '1';
               card.querySelectorAll('button, input, select').forEach(function(el) { el.disabled = false; });
@@ -2015,13 +2809,14 @@
           }
         })
         .withFailureHandler(function(error) {
-          alert('Error: ' + error);
+          showNotification(error.toString(), 'error', 'Update Failed');
           if (card) {
             card.style.opacity = '1';
             card.querySelectorAll('button, input, select').forEach(function(el) { el.disabled = false; });
           }
         })
         .applySpecialCircumstanceUpdate(updateData);
+      }, null, 'Confirm Changes');
     }
 
     /**
@@ -2069,6 +2864,17 @@
         if (spec.autoApply && spec.savedStatus && spec.savedLocation) {
           console.log('Auto-applying: ' + spec.name + ' → ' + spec.savedLocation);
 
+          // Track this employee in special locations for display
+          var specialLocs = ['Light Duty', 'Weeds', 'Vacation', 'Leave', 'Time Off'];
+          if (specialLocs.indexOf(spec.savedLocation) !== -1 || specialLocs.indexOf(spec.savedStatus) !== -1) {
+            var displayLoc = spec.savedLocation || spec.savedStatus;
+            addToSpecialLocation(displayLoc, {
+              name: spec.name,
+              classification: spec.classification || '',
+              notes: spec.notes || ''
+            });
+          }
+
           var updateData = {
             name: spec.name,
             newLocation: spec.savedLocation,
@@ -2090,6 +2896,9 @@
               console.error('Auto-apply failed: ' + error);
             })
             .applySpecialCircumstanceUpdate(updateData);
+        } else if (spec.autoSkip) {
+          // For skipped employees, don't add to special locations
+          // They stay where they are (usually "Time Off" is temporary)
         }
       }
     }
@@ -2098,27 +2907,27 @@
       var spec = specialCircumstances[specIndex];
       if (!spec) return;
 
-      var msg = 'Mark "' + spec.name + '" as Previous Employee?\n\n';
-      msg += 'Status: ' + spec.status + '\n';
-      if (spec.date) msg += 'Date: ' + spec.date + '\n';
-      if (spec.notes) msg += 'Notes: ' + spec.notes + '\n';
-      msg += '\nThis will:\n';
-      msg += '• Set their Location to "Previous Employee"\n';
-      msg += '• Clear their Job Number\n';
-      msg += '• Log to Employee History\n';
-      msg += '• REMOVE them from the Employees sheet\n';
-      msg += '\n⚠️ The employee will only exist in Employee History after this action.';
+      var msg = '<p>Mark <strong>"' + spec.name + '"</strong> as Previous Employee?</p>';
+      msg += '<ul><li>Status: ' + spec.status + '</li>';
+      if (spec.date) msg += '<li>Date: ' + spec.date + '</li>';
+      if (spec.notes) msg += '<li>Notes: ' + spec.notes + '</li>';
+      msg += '</ul><p>This will:</p><ul>';
+      msg += '<li>Set their Location to "Previous Employee"</li>';
+      msg += '<li>Clear their Job Number</li>';
+      msg += '<li>Log to Employee History</li>';
+      msg += '<li>REMOVE them from the Employees sheet</li>';
+      msg += '</ul>';
+      msg += '<div class="alert alert-danger small mt-2 mb-0"><i class="bi bi-exclamation-triangle"></i> The employee will only exist in Employee History after this action.</div>';
 
-      if (!confirm(msg)) return;
+      showConfirm(msg, function() {
+        // User confirmed
+        var card = document.getElementById('special-card-' + specIndex);
+        if (card) {
+          card.style.opacity = '0.5';
+          card.querySelectorAll('button').forEach(function(btn) { btn.disabled = true; });
+        }
 
-      // Disable the card
-      var card = document.getElementById('special-card-' + specIndex);
-      if (card) {
-        card.style.opacity = '0.5';
-        card.querySelectorAll('button').forEach(function(btn) { btn.disabled = true; });
-      }
-
-      var updateData = {
+        var updateData = {
         name: spec.name,
         status: spec.status,
         date: spec.date,
@@ -2129,10 +2938,10 @@
       google.script.run
         .withSuccessHandler(function(result) {
           if (result.success) {
-            alert('✓ ' + spec.name + ' marked as Previous Employee');
+            showNotification('✓ <strong>' + spec.name + '</strong> marked as Previous Employee', 'success', 'Employee Updated');
             removeSpecialCard(specIndex);
           } else {
-            alert('Error: ' + result.message);
+            showNotification(result.message, 'error', 'Update Failed');
             if (card) {
               card.style.opacity = '1';
               card.querySelectorAll('button').forEach(function(btn) { btn.disabled = false; });
@@ -2140,13 +2949,14 @@
           }
         })
         .withFailureHandler(function(error) {
-          alert('Error: ' + error);
+          showNotification(error.toString(), 'error', 'Update Failed');
           if (card) {
             card.style.opacity = '1';
             card.querySelectorAll('button').forEach(function(btn) { btn.disabled = false; });
           }
         })
         .markEmployeeAsPrevious(updateData);
+      }, null, 'Mark as Previous Employee');
     }
 
     function updateEmployeeNotes(specIndex) {
@@ -2170,10 +2980,10 @@
       google.script.run
         .withSuccessHandler(function(result) {
           if (result.success) {
-            alert('✓ Notes updated for ' + spec.name);
+            showNotification('✓ Notes updated for <strong>' + spec.name + '</strong>', 'success', 'Notes Updated');
             removeSpecialCard(specIndex);
           } else {
-            alert('Error: ' + result.message);
+            showNotification(result.message, 'error', 'Update Failed');
             if (card) {
               card.style.opacity = '1';
               card.querySelectorAll('button').forEach(function(btn) { btn.disabled = false; });
@@ -2181,7 +2991,7 @@
           }
         })
         .withFailureHandler(function(error) {
-          alert('Error: ' + error);
+          showNotification(error.toString(), 'error', 'Update Failed');
           if (card) {
             card.style.opacity = '1';
             card.querySelectorAll('button').forEach(function(btn) { btn.disabled = false; });
@@ -2192,13 +3002,27 @@
 
     function skipSpecialEmployee(specIndex) {
       var spec = specialCircumstances[specIndex];
-      if (spec && spec.name) {
-        // Ask if they want to remember this skip
-        if (confirm('Skip "' + spec.name + '"?\n\nCheck OK to also remember this for future imports.')) {
-          saveSpecialSelection(spec.name, spec.status, '', true);
-        }
+      if (!spec) {
+        removeSpecialCard(specIndex);
+        return;
       }
-      removeSpecialCard(specIndex);
+
+      // Determine if this is a long-term status that should offer "remember" option
+      var status = (spec.status || '').toLowerCase();
+      var isLongTermStatus = ['light duty', 'layoff', 'fired', 'quit', 'resigned', 'terminated'].indexOf(status) !== -1;
+
+      if (isLongTermStatus && spec.name) {
+        // For long-term statuses (Light Duty, Layoff, etc.), offer to remember
+        showSkipConfirm(spec.name, function(shouldRemember) {
+          if (shouldRemember) {
+            saveSpecialSelection(spec.name, spec.status, '', true);
+          }
+          removeSpecialCard(specIndex);
+        });
+      } else {
+        // For temporary statuses like "Time Off", just skip silently - no popup
+        removeSpecialCard(specIndex);
+      }
     }
 
     function removeSpecialCard(specIndex) {
@@ -2286,14 +3110,14 @@
       if (select.value === '__NEW__') {
         mappedTo = newInput.value.trim();
         if (!mappedTo) {
-          alert('Please enter a new location name');
+          showNotification('Please enter a new location name', 'warning', 'Required Field');
           newInput.focus();
           return;
         }
       } else if (select.value) {
         mappedTo = select.value;
       } else {
-        alert('Please select an existing location or add a new one');
+        showNotification('Please select an existing location or add a new one', 'warning', 'Required Field');
         return;
       }
 
@@ -2464,6 +3288,8 @@
       // If all duplicates were remembered, skip the UI entirely
       if (needsSelection.length === 0) {
         console.log('All duplicate selections were remembered - skipping selection UI');
+        // IMPORTANT: Hide the duplicate section in case it was visible from a previous run
+        document.getElementById('duplicateSection').style.display = 'none';
         finishMatching();
         displayPreview();
         return;
@@ -2770,45 +3596,117 @@
         return; // Wait for user to resolve duplicates
       }
 
-      // No duplicates - proceed with normal matching
+      // No duplicates - hide section if it was visible from a previous run, then proceed
+      document.getElementById('duplicateSection').style.display = 'none';
       finishMatching();
     }
 
     function filterSpecialCircumstancesAlreadyMatched() {
-      // Remove special circumstances for employees that are already matched as Previous Employees
-      // from Employee History (they'll be handled as rehires, not special circumstances)
+      // Remove special circumstances for employees that are already terminated/Previous Employees
+      // They should not appear in the Special Circumstances UI
+
+      console.log('=== filterSpecialCircumstancesAlreadyMatched ===');
+      console.log('Special circumstances to filter: ' + specialCircumstances.length);
+      console.log('Current employees to check against: ' + (currentEmployees ? currentEmployees.length : 'NONE'));
 
       if (specialCircumstances.length === 0) return;
 
+      // DEBUG: Look for Dawson in currentEmployees
+      if (currentEmployees) {
+        var dawsonFound = false;
+        for (var d = 0; d < currentEmployees.length; d++) {
+          var de = currentEmployees[d];
+          if (de.name && de.name.toLowerCase().indexOf('dawson') !== -1) {
+            console.log('Found Dawson in currentEmployees:', de);
+            dawsonFound = true;
+          }
+        }
+        if (!dawsonFound) {
+          console.log('Dawson NOT found in currentEmployees!');
+        }
+      }
+
       var filtered = [];
       var removedCount = 0;
+      var removedNames = [];
 
       for (var i = 0; i < specialCircumstances.length; i++) {
         var spec = specialCircumstances[i];
         var specNameLower = spec.name.toLowerCase().trim();
+        console.log('Checking special circumstance: "' + spec.name + '" (status: ' + spec.status + ', location: ' + (spec.location || 'none') + ')');
 
-        // Check if this special circumstance matches any Previous Employee from Employee History
-        var matchedAsPreviousEmployee = false;
+        // EARLY EXIT: If status indicates termination (Fired/Terminated/Quit/Layoff/Resigned),
+        // this person is already terminated - skip them regardless of currentEmployees
+        // Note: status field comes from parseSpecialEmployee() which detects these keywords
+        var statusLower = (spec.status || '').toLowerCase();
+        var terminationStatuses = ['fired', 'terminated', 'quit', 'resigned', 'layoff'];
+        var isTerminationStatus = terminationStatuses.indexOf(statusLower) !== -1;
+
+        if (isTerminationStatus) {
+          console.log('  ==> REMOVING: "' + spec.name + '" (termination status: ' + spec.status + ')');
+          removedCount++;
+          removedNames.push(spec.name + ' (' + spec.status + ')');
+          continue;  // Skip this special circumstance
+        }
+
+        // Clean the special circumstance name - remove status words
+        var cleanedSpecName = specNameLower
+          .replace(/\s*(fired|quit|resigned|layoff|laid off|terminated|light duty)\s*/gi, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        console.log('  Cleaned name: "' + cleanedSpecName + '"');
+
+        // Check if this special circumstance matches any Previous Employee
+        var shouldRemove = false;
+        var removeReason = '';
 
         for (var e = 0; e < currentEmployees.length; e++) {
           var emp = currentEmployees[e];
+          var empNameLower = (emp.name || '').toLowerCase().trim();
 
-          // Check if this is a Previous Employee from Employee History
+          // Method 1: Check Employee History terminated employees
           if (emp.source === 'Employee History' && emp.location === 'Previous Employee') {
-            var empNameLower = emp.name.toLowerCase().trim();
+            // Check various matching methods
+            var exactMatch = specNameLower === empNameLower;
+            var cleanMatch = cleanedSpecName === empNameLower;
+            var containsMatch = specNameLower.indexOf(empNameLower) !== -1;
+            var reverseContains = empNameLower.indexOf(cleanedSpecName) !== -1;
+            var similarity = calculateSimilarity(cleanedSpecName, empNameLower);
 
-            // Check for name match (exact or very close)
-            if (specNameLower === empNameLower || calculateSimilarity(specNameLower, empNameLower) >= 85) {
-              matchedAsPreviousEmployee = true;
-              console.log('Special circumstance "' + spec.name + '" matches Previous Employee "' + emp.name + '" from Employee History - will be handled as REHIRE');
-              removedCount++;
+            console.log('  Comparing to Employee History "' + emp.name + '" (loc: ' + emp.location + '): exact=' + exactMatch + ', clean=' + cleanMatch + ', contains=' + containsMatch + ', reverseContains=' + reverseContains + ', similarity=' + similarity);
+
+            if (exactMatch || cleanMatch || containsMatch || reverseContains || similarity >= 85) {
+              shouldRemove = true;
+              removeReason = 'Employee History - Previous Employee';
+              break;
+            }
+          }
+
+          // Method 2: Check Employees sheet for location = "Previous Employee"
+          if (emp.source === 'Employees' && emp.location === 'Previous Employee') {
+            var exactMatch2 = specNameLower === empNameLower;
+            var cleanMatch2 = cleanedSpecName === empNameLower;
+            var containsMatch2 = specNameLower.indexOf(empNameLower) !== -1;
+            var reverseContains2 = empNameLower.indexOf(cleanedSpecName) !== -1;
+            var similarity2 = calculateSimilarity(cleanedSpecName, empNameLower);
+
+            console.log('  Comparing to Employees sheet "' + emp.name + '" (loc: ' + emp.location + '): exact=' + exactMatch2 + ', clean=' + cleanMatch2 + ', contains=' + containsMatch2 + ', reverseContains=' + reverseContains2 + ', similarity=' + similarity2);
+
+            if (exactMatch2 || cleanMatch2 || containsMatch2 || reverseContains2 || similarity2 >= 85) {
+              shouldRemove = true;
+              removeReason = 'Employees sheet - Previous Employee';
               break;
             }
           }
         }
 
-        // Only keep special circumstances that DON'T match Previous Employees
-        if (!matchedAsPreviousEmployee) {
+        if (shouldRemove) {
+          console.log('  ==> REMOVING: "' + spec.name + '" (' + removeReason + ')');
+          removedCount++;
+          removedNames.push(spec.name);
+        } else {
+          console.log('  ==> KEEPING: "' + spec.name + '"');
           filtered.push(spec);
         }
       }
@@ -2816,7 +3714,7 @@
       specialCircumstances = filtered;
 
       if (removedCount > 0) {
-        console.log('Filtered out ' + removedCount + ' special circumstances that are already matched as Previous Employees');
+        console.log('Filtered out ' + removedCount + ' terminated employees from Special Circumstances: ' + removedNames.join(', '));
       }
     }
 
@@ -2883,7 +3781,7 @@
                 locationChanged: locationChanged,
                 jobChanged: jobChanged,
                 classificationChanged: classificationChanged,
-                apply: true
+                apply: false  // Default to unchecked - user must approve each change
               });
             } else {
               emp.noChanges = true;
@@ -3166,8 +4064,9 @@
       } else {
         for (var i = 0; i < proposedChanges.length; i++) {
           var ch = proposedChanges[i];
+          var isChecked = ch.apply ? ' checked' : '';
           html += '<tr class="change-row">';
-          html += '<td><input type="checkbox" checked data-index="' + i + '" onchange="toggleChange(' + i + ', this)"></td>';
+          html += '<td><input type="checkbox"' + isChecked + ' data-index="' + i + '" onchange="toggleChange(' + i + ', this)"></td>';
           html += '<td><strong>' + ch.match.employeeName + '</strong>';
 
           // Show badge if employee is being rehired from Employee History
@@ -3263,21 +4162,37 @@
       document.getElementById('btnApplyChanges').disabled = proposedChanges.length === 0;
     }
 
-    // Store unmatched employees globally for manual matching
+    // Store unmatched employees globally for manual matching - keyed by unique ID
     var unmatchedList = [];
+    var unmatchedByKey = {}; // Map from unique key to unmatched data
+
+    function getUnmatchedKey(crewIndex, empName) {
+      // Create a unique key for each unmatched employee
+      return crewIndex + '_' + (empName || '').toLowerCase().replace(/\s+/g, '_');
+    }
 
     function renderUnmatchedEmployees(unmatchedEmps) {
       unmatchedList = unmatchedEmps;
+      unmatchedByKey = {}; // Reset the map
+
+      // Build the key map
+      for (var i = 0; i < unmatchedEmps.length; i++) {
+        var u = unmatchedEmps[i];
+        var key = getUnmatchedKey(u.crewIndex, u.emp.name);
+        unmatchedByKey[key] = { data: u, index: i };
+      }
+
       var container = document.getElementById('unmatchedContainer');
       var html = '';
 
       for (var i = 0; i < unmatchedEmps.length; i++) {
         var u = unmatchedEmps[i];
+        var uniqueKey = getUnmatchedKey(u.crewIndex, u.emp.name);
 
         // Find potential matches (employees not yet matched, using loose criteria)
         var potentialMatches = findPotentialMatches(u.emp.name, 5);
 
-        html += '<div class="card mb-3" id="unmatched-card-' + i + '">';
+        html += '<div class="card mb-3" id="unmatched-card-' + i + '" data-unmatched-key="' + escapeAttr(uniqueKey) + '">';
         html += '<div class="card-header d-flex justify-content-between align-items-center">';
         html += '<div>';
         html += '<strong>' + escapeHtml(u.emp.originalText) + '</strong>';
@@ -3298,7 +4213,7 @@
 
             html += '<button type="button" class="list-group-item list-group-item-action potential-match-btn ' + disabledClass + '" ';
             if (!isAlreadyMatched) {
-              html += 'data-unmatched-index="' + i + '" ';
+              html += 'data-unmatched-key="' + escapeAttr(uniqueKey) + '" ';
               html += 'data-employee-row="' + match.rowIndex + '" ';
               html += 'data-employee-name="' + escapeAttr(match.name) + '"';
             }
@@ -3319,17 +4234,17 @@
         }
 
         html += '<div class="mt-3">';
-        html += '<button class="btn btn-success btn-sm me-2" onclick="addAsNewEmployee(' + i + ')">';
+        html += '<button class="btn btn-success btn-sm me-2" onclick="addAsNewEmployee(\'' + escapeAttr(uniqueKey) + '\')">';
         html += '<i class="bi bi-person-plus"></i> Add as New Employee';
         html += '</button>';
-        html += '<button class="btn btn-outline-secondary btn-sm me-2" onclick="showAllEmployeesDropdown(' + i + ')">';
+        html += '<button class="btn btn-outline-secondary btn-sm me-2" onclick="showAllEmployeesDropdown(\'' + escapeAttr(uniqueKey) + '\')">';
         html += '<i class="bi bi-search"></i> Search Existing';
         html += '</button>';
-        html += '<button class="btn btn-outline-danger btn-sm" onclick="skipUnmatchedEmployee(' + i + ')">';
+        html += '<button class="btn btn-outline-danger btn-sm" onclick="skipUnmatchedEmployee(\'' + escapeAttr(uniqueKey) + '\')">';
         html += '<i class="bi bi-x"></i> Skip';
         html += '</button>';
         html += '</div>';
-        html += '<div id="all-employees-dropdown-' + i + '" style="display: none;" class="mt-2"></div>';
+        html += '<div id="all-employees-dropdown-' + escapeAttr(uniqueKey) + '" style="display: none;" class="mt-2"></div>';
         html += '</div>';
         html += '</div>';
       }
@@ -3406,8 +4321,13 @@
       return matches.slice(0, maxResults);
     }
 
-    function showAllEmployeesDropdown(unmatchedIndex) {
-      var container = document.getElementById('all-employees-dropdown-' + unmatchedIndex);
+    function showAllEmployeesDropdown(unmatchedKey) {
+      var container = document.getElementById('all-employees-dropdown-' + unmatchedKey);
+
+      if (!container) {
+        console.error('Dropdown container not found for key:', unmatchedKey);
+        return;
+      }
 
       if (container.style.display === 'block') {
         container.style.display = 'none';
@@ -3416,9 +4336,9 @@
 
       // Build searchable dropdown
       var html = '<div class="input-group mb-2">';
-      html += '<input type="text" class="form-control form-control-sm" id="employee-search-' + unmatchedIndex + '" placeholder="Type to search..." onkeyup="filterEmployeeList(' + unmatchedIndex + ')">';
+      html += '<input type="text" class="form-control form-control-sm" id="employee-search-' + escapeAttr(unmatchedKey) + '" placeholder="Type to search..." onkeyup="filterEmployeeList(\'' + escapeAttr(unmatchedKey) + '\')">';
       html += '</div>';
-      html += '<div class="list-group" id="employee-list-' + unmatchedIndex + '" style="max-height: 200px; overflow-y: auto;">';
+      html += '<div class="list-group" id="employee-list-' + escapeAttr(unmatchedKey) + '" style="max-height: 200px; overflow-y: auto;">';
 
       // Show all non-matched employees, sorted alphabetically
       var availableEmps = currentEmployees.filter(function(emp) {
@@ -3433,7 +4353,7 @@
         var emp = availableEmps[i];
         html += '<button type="button" class="list-group-item list-group-item-action py-1 employee-option" ';
         html += 'data-name="' + escapeHtml(emp.name.toLowerCase()) + '" ';
-        html += 'onclick="manuallyMatchEmployee(' + unmatchedIndex + ', ' + emp.rowIndex + ', \'' + escapeQuotes(emp.name) + '\')">';
+        html += 'onclick="manuallyMatchEmployee(\'' + escapeAttr(unmatchedKey) + '\', ' + emp.rowIndex + ', \'' + escapeQuotes(emp.name) + '\')">';
         html += '<small>' + escapeHtml(emp.name) + '</small>';
         html += '</button>';
       }
@@ -3441,12 +4361,16 @@
       html += '</div>';
       container.innerHTML = html;
       container.style.display = 'block';
-      document.getElementById('employee-search-' + unmatchedIndex).focus();
+      var searchInput = document.getElementById('employee-search-' + unmatchedKey);
+      if (searchInput) searchInput.focus();
     }
 
-    function filterEmployeeList(unmatchedIndex) {
-      var searchText = document.getElementById('employee-search-' + unmatchedIndex).value.toLowerCase();
-      var items = document.querySelectorAll('#employee-list-' + unmatchedIndex + ' .employee-option');
+    function filterEmployeeList(unmatchedKey) {
+      var searchInput = document.getElementById('employee-search-' + unmatchedKey);
+      if (!searchInput) return;
+
+      var searchText = searchInput.value.toLowerCase();
+      var items = document.querySelectorAll('#employee-list-' + unmatchedKey + ' .employee-option');
 
       for (var i = 0; i < items.length; i++) {
         var name = items[i].getAttribute('data-name');
@@ -3458,19 +4382,19 @@
       }
     }
 
-    function manuallyMatchEmployee(unmatchedIndex, employeeRowIndex, employeeName) {
+    function manuallyMatchEmployee(unmatchedKey, employeeRowIndex, employeeName) {
       console.log('=== manuallyMatchEmployee START ===');
-      console.log('Parameters:', { unmatchedIndex: unmatchedIndex, employeeRowIndex: employeeRowIndex, employeeName: employeeName });
-      console.log('unmatchedList length:', unmatchedList.length);
-      console.log('unmatchedList names:', unmatchedList.map(function(u) { return u.emp.name; }));
+      console.log('Parameters:', { unmatchedKey: unmatchedKey, employeeRowIndex: employeeRowIndex, employeeName: employeeName });
+      console.log('unmatchedByKey keys:', Object.keys(unmatchedByKey));
 
-      var unmatched = unmatchedList[unmatchedIndex];
-      if (!unmatched) {
-        console.error('ERROR: No unmatched employee at index ' + unmatchedIndex + '. List only has ' + unmatchedList.length + ' items.');
-        alert('Error: Could not find unmatched employee at index ' + unmatchedIndex + '. Please close and reopen the dialog to refresh.');
+      var unmatchedInfo = unmatchedByKey[unmatchedKey];
+      if (!unmatchedInfo) {
+        console.error('ERROR: No unmatched employee with key "' + unmatchedKey + '". Available keys:', Object.keys(unmatchedByKey));
+        showNotification('Could not find unmatched employee. The list may have changed. Please try selecting again.', 'error', 'Employee Not Found');
         return;
       }
 
+      var unmatched = unmatchedInfo.data;
       console.log('Found unmatched employee:', unmatched.emp.name);
 
       // Find the employee data
@@ -3484,7 +4408,7 @@
 
       if (!empData) {
         console.error('ERROR: Employee not found with rowIndex:', employeeRowIndex);
-        alert('Employee not found in the sheet. They may have been removed.');
+        showNotification('Employee not found in the sheet. They may have been removed.', 'error', 'Employee Not Found');
         return;
       }
 
@@ -3537,10 +4461,9 @@
         console.log('No changes detected for this employee');
       }
 
-      // Remove from unmatched list and refresh display
-      console.log('Splicing unmatchedList at index', unmatchedIndex);
-      unmatchedList.splice(unmatchedIndex, 1);
-      console.log('unmatchedList now has', unmatchedList.length, 'items');
+      // Remove from maps
+      delete unmatchedByKey[unmatchedKey];
+      console.log('Removed from unmatchedByKey. Remaining keys:', Object.keys(unmatchedByKey).length);
 
       // Re-render displays
       console.log('Calling displayPreview()...');
@@ -3548,37 +4471,50 @@
       console.log('=== manuallyMatchEmployee END ===');
     }
 
-    function skipUnmatchedEmployee(unmatchedIndex) {
-      var card = document.getElementById('unmatched-card-' + unmatchedIndex);
-      if (card) {
-        card.remove();
-      }
+    function skipUnmatchedEmployee(unmatchedKey) {
+      // Find the card by key
+      var cards = document.querySelectorAll('[data-unmatched-key="' + unmatchedKey + '"]');
+      cards.forEach(function(card) {
+        if (card.classList.contains('card')) {
+          card.remove();
+        }
+      });
 
-      unmatchedList.splice(unmatchedIndex, 1);
+      // Remove from the map
+      delete unmatchedByKey[unmatchedKey];
 
-      if (unmatchedList.length === 0) {
+      // Update unmatchedList (re-filter from parsedCrews to rebuild)
+      var remainingCount = Object.keys(unmatchedByKey).length;
+
+      if (remainingCount === 0) {
         document.getElementById('unmatchedSection').style.display = 'none';
       } else {
-        document.getElementById('unmatchedCount').textContent = unmatchedList.length;
+        document.getElementById('unmatchedCount').textContent = remainingCount;
       }
     }
 
     function skipAllUnmatched() {
       unmatchedList = [];
+      unmatchedByKey = {};
       document.getElementById('unmatchedSection').style.display = 'none';
     }
 
-    function addAsNewEmployee(unmatchedIndex) {
-      var unmatched = unmatchedList[unmatchedIndex];
-      if (!unmatched) return;
+    function addAsNewEmployee(unmatchedKey) {
+      var unmatchedInfo = unmatchedByKey[unmatchedKey];
+      if (!unmatchedInfo) {
+        console.error('Could not find unmatched employee with key:', unmatchedKey);
+        showNotification('Could not find the employee to add. Please try again.', 'error', 'Employee Not Found');
+        return;
+      }
 
+      var unmatched = unmatchedInfo.data;
       var emp = unmatched.emp;
       var crew = unmatched.crew;
 
       // Populate the modal with pre-filled data
       document.getElementById('newEmpNameDisplay').textContent = emp.name;
       document.getElementById('newEmpOriginalText').textContent = emp.originalName || emp.name;
-      document.getElementById('newEmpUnmatchedIndex').value = unmatchedIndex;
+      document.getElementById('newEmpUnmatchedKey').value = unmatchedKey;
 
       // Pre-fill location dropdown
       var locationSelect = document.getElementById('newEmpLocation');
@@ -3633,22 +4569,24 @@
       var location = document.getElementById('newEmpLocation').value;
       var jobNumber = document.getElementById('newEmpJobNumber').value.trim();
       var classification = document.getElementById('newEmpClassification').value;
-      var unmatchedIndex = parseInt(document.getElementById('newEmpUnmatchedIndex').value);
+      var unmatchedKey = document.getElementById('newEmpUnmatchedKey').value;
 
       if (!location) {
-        alert('Please select a location');
+        showNotification('Please select a location', 'warning', 'Required Field');
         return;
       }
       if (!jobNumber) {
-        alert('Please enter a job number');
+        showNotification('Please enter a job number', 'warning', 'Required Field');
         return;
       }
       if (!classification) {
-        alert('Please select a job classification');
+        showNotification('Please select a job classification', 'warning', 'Required Field');
         return;
       }
 
-      var unmatched = unmatchedList[unmatchedIndex];
+      // Use key-based lookup instead of index
+      var unmatchedInfo = unmatchedByKey[unmatchedKey];
+      var unmatched = unmatchedInfo ? unmatchedInfo.data : null;
       var emp = unmatched ? unmatched.emp : null;
       var crew = unmatched ? unmatched.crew : null;
 
@@ -3708,22 +4646,24 @@
               matchedSheetEmployees[result.employeeName.toLowerCase()] = emp.name;
             }
 
-            // Remove from unmatched list
-            unmatchedList.splice(unmatchedIndex, 1);
+            // Remove from unmatched tracking using key
+            if (unmatchedKey && unmatchedByKey[unmatchedKey]) {
+              delete unmatchedByKey[unmatchedKey];
+            }
 
             // Show success message
-            alert('✓ Added "' + result.employeeName + '" to Employees sheet!');
+            showNotification('✓ Added <strong>"' + result.employeeName + '"</strong> to Employees sheet!', 'success', 'Employee Added');
 
             // Refresh display
             displayPreview();
           } else {
-            alert('Error: ' + result.message);
+            showNotification(result.message, 'error', 'Failed to Add Employee');
           }
         })
         .withFailureHandler(function(error) {
           submitBtn.disabled = false;
           submitBtn.innerHTML = '<i class="bi bi-person-plus"></i> Add Employee';
-          alert('Error adding employee: ' + error);
+          showNotification('Error adding employee: ' + error, 'error', 'Failed to Add Employee');
         })
         .addNewEmployeeFromImport(newEmployeeData);
     }
@@ -3751,28 +4691,27 @@
       var changesToApply = proposedChanges.filter(function(c) { return c.apply; });
 
       if (changesToApply.length === 0) {
-        alert('No changes selected to apply.');
+        showNotification('No changes selected to apply.', 'warning', 'No Changes');
         return;
       }
 
-      var msg = 'Apply ' + changesToApply.length + ' change(s) to the Employees sheet?\n\n';
-      msg += 'This will update:\n';
-      msg += '• Location\n• Job Number (with position)\n• Job Classification (F, JRY, AP 1-7, etc.)\n\n';
-      msg += 'All changes will be logged to Employee History.';
+      var msg = '<p>Apply <strong>' + changesToApply.length + '</strong> change(s) to the Employees sheet?</p>';
+      msg += '<p>This will update:</p><ul>';
+      msg += '<li>Location</li><li>Job Number (with position)</li><li>Job Classification (F, JRY, AP 1-7, etc.)</li>';
+      msg += '</ul><p class="text-muted small">All changes will be logged to Employee History.</p>';
 
-      if (!confirm(msg)) return;
+      showConfirm(msg, function() {
+        document.getElementById('btnApplyChanges').disabled = true;
+        document.getElementById('btnApplyChanges').innerHTML = '<span class="spinner-border spinner-border-sm"></span> Applying...';
 
-      document.getElementById('btnApplyChanges').disabled = true;
-      document.getElementById('btnApplyChanges').innerHTML = '<span class="spinner-border spinner-border-sm"></span> Applying...';
-
-      var changes = changesToApply.map(function(c) {
-        return {
-          employeeName: c.match.employeeName,
-          rowIndex: c.match.employeeData.rowIndex,
-          newLocation: c.newLocation,
-          newJobNumber: c.newJobNumber,
-          newClassification: c.newClassification || '',
-          oldLocation: c.oldLocation,
+        var changes = changesToApply.map(function(c) {
+          return {
+            employeeName: c.match.employeeName,
+            rowIndex: c.match.employeeData.rowIndex,
+            newLocation: c.newLocation,
+            newJobNumber: c.newJobNumber,
+            newClassification: c.newClassification || '',
+            oldLocation: c.oldLocation,
           oldJobNumber: c.oldJobNumber,
           oldClassification: c.oldClassification || '',
           isForeman: c.employee.isForeman
@@ -3781,15 +4720,17 @@
 
       google.script.run
         .withSuccessHandler(function(result) {
-          alert(result.message);
-          google.script.host.close();
+          showNotification(result.message, 'success', 'Crew Makeup Import Complete!', function() {
+            google.script.host.close();
+          });
         })
         .withFailureHandler(function(error) {
-          alert('Error: ' + error);
+          showNotification('Error: ' + error, 'error', 'Import Failed');
           document.getElementById('btnApplyChanges').disabled = false;
           document.getElementById('btnApplyChanges').innerHTML = '<i class="bi bi-check-lg"></i> Apply Changes';
         })
         .applyCrewChanges(changes);
+      }, null, 'Apply Changes');
     }
 
     // Initialize on load

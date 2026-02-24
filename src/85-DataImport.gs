@@ -13,11 +13,12 @@
 /**
  * Shows the Crew Makeup Import dialog.
  * Menu item: Glove Manager → Data Import → Import Crew Makeup
+ * Dialog size: 1920x1080 (maximum for full screen on most monitors)
  */
 function showCrewImportDialog() {
   var html = HtmlService.createHtmlOutputFromFile('CrewImport')
-    .setWidth(900)
-    .setHeight(700);
+    .setWidth(1900)
+    .setHeight(1000);
   SpreadsheetApp.getUi().showModalDialog(html, 'Import Crew Makeup');
 }
 
@@ -47,12 +48,14 @@ function applyCrewChanges(changes) {
   var nameCol = 0;
   var locationCol = -1;
   var jobNumCol = -1;
+  var secondaryJobNumCol = -1;
   var jobClassificationCol = -1;
 
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
     if (header === 'location') locationCol = h;
     if (header === 'job number') jobNumCol = h;
+    if (header === 'secondary job number' || header === 'secondary job') secondaryJobNumCol = h;
     if (header === 'job classification') jobClassificationCol = h;
   }
 
@@ -64,6 +67,13 @@ function applyCrewChanges(changes) {
   if (jobClassificationCol === -1) {
     jobClassificationCol = 13; // Column N = index 13 (0-based)
     Logger.log('Job Classification column not found by header, using column N (index 13)');
+  }
+
+  // Log secondary job column status
+  if (secondaryJobNumCol !== -1) {
+    Logger.log('Secondary Job Number column found at index: ' + secondaryJobNumCol);
+  } else {
+    Logger.log('Secondary Job Number column not found - run "Add Secondary Job Column" from Utilities menu');
   }
 
   var updatedCount = 0;
@@ -144,6 +154,7 @@ function applyCrewChanges(changes) {
 
       var locationChanged = false;
       var jobChanged = false;
+      var secondaryJobChanged = false;
       var classificationChanged = false;
 
       // Update Location
@@ -158,13 +169,23 @@ function applyCrewChanges(changes) {
         jobChanged = true;
       }
 
+      // Update Secondary Job Number (if column exists and value provided)
+      if (secondaryJobNumCol !== -1 && change.newSecondaryJobNumber) {
+        var currentSecondaryJob = String(data[rowIndex - 1][secondaryJobNumCol] || '').trim();
+        if (change.newSecondaryJobNumber !== currentSecondaryJob) {
+          employeesSheet.getRange(rowIndex, secondaryJobNumCol + 1).setValue(change.newSecondaryJobNumber);
+          secondaryJobChanged = true;
+          Logger.log('Updated secondary job for ' + change.employeeName + ': ' + change.newSecondaryJobNumber);
+        }
+      }
+
       // Update Job Classification (e.g., F, JRY, AP 1, AP 2, etc.)
       if (change.newClassification && change.newClassification !== change.oldClassification) {
         employeesSheet.getRange(rowIndex, jobClassificationCol + 1).setValue(change.newClassification);
         classificationChanged = true;
       }
 
-      if (locationChanged || jobChanged || classificationChanged) {
+      if (locationChanged || jobChanged || secondaryJobChanged || classificationChanged) {
         updatedCount++;
 
         // Log to Employee History
@@ -172,6 +193,7 @@ function applyCrewChanges(changes) {
           var changesArr = [];
           if (locationChanged) changesArr.push('Location');
           if (jobChanged) changesArr.push('Job Number');
+          if (secondaryJobChanged) changesArr.push('Secondary Job');
           if (classificationChanged) changesArr.push('Classification');
 
           var eventType = changesArr.length > 1 ? 'Multiple Changes' : changesArr[0] + ' Change';
@@ -179,6 +201,7 @@ function applyCrewChanges(changes) {
           var notes = 'Crew Makeup Import: ';
           if (locationChanged) notes += 'Location: ' + (change.oldLocation || 'None') + ' → ' + change.newLocation + '. ';
           if (jobChanged) notes += 'Job #: ' + (change.oldJobNumber || 'None') + ' → ' + change.newJobNumber + '. ';
+          if (secondaryJobChanged) notes += 'Secondary Job: ' + change.newSecondaryJobNumber + '. ';
           if (classificationChanged) notes += 'Role: ' + (change.oldClassification || 'None') + ' → ' + change.newClassification + '.';
 
           var historyRow = [
@@ -205,6 +228,7 @@ function applyCrewChanges(changes) {
         Logger.log('Updated employee: ' + change.employeeName +
                    ' | Location: ' + (locationChanged ? change.oldLocation + ' → ' + change.newLocation : 'unchanged') +
                    ' | Job #: ' + (jobChanged ? change.oldJobNumber + ' → ' + change.newJobNumber : 'unchanged') +
+                   ' | Secondary Job #: ' + (secondaryJobChanged ? change.newSecondaryJobNumber : 'unchanged') +
                    ' | Classification: ' + (classificationChanged ? change.oldClassification + ' → ' + change.newClassification : 'unchanged'));
       }
 
@@ -380,6 +404,181 @@ function addNewEmployeeFromImport(employeeData) {
 
   } catch (error) {
     Logger.log('Error adding new employee: ' + error.toString());
+    return { success: false, message: 'Error: ' + error.toString() };
+  }
+}
+
+/**
+ * Rehires a previous employee from the Crew Import dialog.
+ * Creates a new row on the Employees sheet and logs "Rehired" to Employee History.
+ *
+ * @param {Object} employeeData - Object with all employee fields
+ * @param {string} employeeData.name - Employee name
+ * @param {string} employeeData.location - Work location
+ * @param {string} employeeData.jobNumber - Job number (e.g., 013-26.1)
+ * @param {string} employeeData.classification - Job classification (F, JRY, AP 1, etc.)
+ * @param {string} employeeData.hireDate - Rehire date (becomes Hire Date on Employees sheet)
+ * @param {string} employeeData.phoneNumber - Optional phone
+ * @param {string} employeeData.emailAddress - Optional email
+ * @param {string} employeeData.mpEmail - Optional MP email
+ * @param {string} employeeData.notificationEmails - Optional notification emails
+ * @param {string} employeeData.gloveSize - Optional glove size
+ * @param {string} employeeData.sleeveSize - Optional sleeve size
+ * @return {Object} Result with success status, message, and row info
+ */
+function rehireEmployeeFromImport(employeeData) {
+  Logger.log('=== rehireEmployeeFromImport START ===');
+  Logger.log('Rehiring employee: ' + JSON.stringify(employeeData));
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+
+    if (!employeesSheet) {
+      return { success: false, message: 'Employees sheet not found' };
+    }
+
+    var data = employeesSheet.getDataRange().getValues();
+    var headers = data[0];
+
+    // Find all column indices
+    var colIndices = {
+      name: 0,
+      location: -1,
+      jobNumber: -1,
+      jobClassification: -1,
+      hireDate: -1,
+      phoneNumber: -1,
+      emailAddress: -1,
+      mpEmail: -1,
+      notificationEmails: -1,
+      gloveSize: -1,
+      sleeveSize: -1
+    };
+
+    for (var h = 0; h < headers.length; h++) {
+      var header = String(headers[h]).toLowerCase().trim();
+      if (header === 'location') colIndices.location = h;
+      if (header === 'job number') colIndices.jobNumber = h;
+      if (header === 'job classification') colIndices.jobClassification = h;
+      if (header === 'hire date') colIndices.hireDate = h;
+      if (header === 'phone number' || header === 'phone') colIndices.phoneNumber = h;
+      if (header === 'email address' || header === 'email') colIndices.emailAddress = h;
+      if (header === 'mp email') colIndices.mpEmail = h;
+      if (header === 'notification emails' || header === 'notification email') colIndices.notificationEmails = h;
+      if (header === 'glove size') colIndices.gloveSize = h;
+      if (header === 'sleeve size') colIndices.sleeveSize = h;
+    }
+
+    if (colIndices.location === -1 || colIndices.jobNumber === -1) {
+      return { success: false, message: 'Could not find required columns in Employees sheet' };
+    }
+
+    // Check if employee already exists on Employees sheet (should NOT for a rehire)
+    var nameLower = employeeData.name.toLowerCase().trim();
+    for (var i = 1; i < data.length; i++) {
+      var existingName = String(data[i][colIndices.name]).toLowerCase().trim();
+      var existingLocation = String(data[i][colIndices.location] || '').toLowerCase().trim();
+
+      if (existingName === nameLower && existingLocation !== 'previous employee') {
+        return { success: false, message: 'An active employee with this name already exists' };
+      }
+    }
+
+    // Create new row with employee data
+    var newRow = new Array(headers.length).fill('');
+    newRow[colIndices.name] = employeeData.name;
+    newRow[colIndices.location] = employeeData.location;
+    newRow[colIndices.jobNumber] = employeeData.jobNumber;
+
+    // Set optional fields
+    if (colIndices.jobClassification !== -1 && employeeData.classification) {
+      newRow[colIndices.jobClassification] = employeeData.classification;
+    }
+    if (colIndices.hireDate !== -1 && employeeData.hireDate) {
+      // Convert YYYY-MM-DD to MM/DD/YYYY format
+      var hireDateParts = employeeData.hireDate.split('-');
+      if (hireDateParts.length === 3) {
+        newRow[colIndices.hireDate] = hireDateParts[1] + '/' + hireDateParts[2] + '/' + hireDateParts[0];
+      }
+    }
+    if (colIndices.phoneNumber !== -1 && employeeData.phoneNumber) {
+      newRow[colIndices.phoneNumber] = employeeData.phoneNumber;
+    }
+    if (colIndices.emailAddress !== -1 && employeeData.emailAddress) {
+      newRow[colIndices.emailAddress] = employeeData.emailAddress;
+    }
+    if (colIndices.mpEmail !== -1 && employeeData.mpEmail) {
+      newRow[colIndices.mpEmail] = employeeData.mpEmail;
+    }
+    if (colIndices.notificationEmails !== -1 && employeeData.notificationEmails) {
+      newRow[colIndices.notificationEmails] = employeeData.notificationEmails;
+    }
+    if (colIndices.gloveSize !== -1 && employeeData.gloveSize) {
+      newRow[colIndices.gloveSize] = employeeData.gloveSize;
+    }
+    if (colIndices.sleeveSize !== -1 && employeeData.sleeveSize) {
+      newRow[colIndices.sleeveSize] = employeeData.sleeveSize;
+    }
+
+    // Add to Employees sheet
+    employeesSheet.appendRow(newRow);
+    var newRowIndex = employeesSheet.getLastRow();
+
+    // Log to Employee History with "Rehired" event type and Rehire Date
+    var historySheet = ss.getSheetByName('Employee History');
+    if (historySheet) {
+      var timezone = ss.getSpreadsheetTimeZone();
+      var todayStr = Utilities.formatDate(new Date(), timezone, 'MM/dd/yyyy');
+
+      // Format rehire date for display
+      var rehireDateStr = todayStr;
+      if (employeeData.hireDate) {
+        var parts = employeeData.hireDate.split('-');
+        if (parts.length === 3) {
+          rehireDateStr = parts[1] + '/' + parts[2] + '/' + parts[0];
+        }
+      }
+
+      var notes = 'Rehired from Crew Makeup Import. ';
+      notes += 'Location: ' + employeeData.location + '. ';
+      notes += 'Job #: ' + employeeData.jobNumber + '.';
+      if (employeeData.classification) {
+        notes += ' Classification: ' + employeeData.classification + '.';
+      }
+
+      var historyRow = [
+        todayStr,                         // Date (event date)
+        employeeData.name,                // Employee Name
+        'Rehired',                        // Event Type
+        employeeData.location,            // Location
+        employeeData.jobNumber,           // Job Number
+        '',                               // Hire Date (original hire date - preserved from history)
+        '',                               // Last Day
+        '',                               // Last Day Reason
+        rehireDateStr,                    // Rehire Date (NEW!)
+        notes,                            // Notes
+        employeeData.phoneNumber || '',   // Phone Number
+        employeeData.emailAddress || '',  // Email Address
+        employeeData.gloveSize || '',     // Glove Size
+        employeeData.sleeveSize || ''     // Sleeve Size
+      ];
+
+      historySheet.appendRow(historyRow);
+    }
+
+    Logger.log('Rehired employee: ' + employeeData.name + ' at row ' + newRowIndex);
+    logEvent('Employee Rehired: ' + employeeData.name + ' from Crew Makeup Import');
+
+    return {
+      success: true,
+      message: 'Employee rehired successfully',
+      employeeName: employeeData.name,
+      rowIndex: newRowIndex
+    };
+
+  } catch (error) {
+    Logger.log('Error rehiring employee: ' + error.toString());
     return { success: false, message: 'Error: ' + error.toString() };
   }
 }

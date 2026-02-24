@@ -281,7 +281,7 @@
       <!-- Task Sources Section (merged from Task Sources tab) -->
       <div class="config-section">
         <h3><i class="bi bi-mortarboard"></i> 🎯 Training: Select Crews</h3>
-        <p class="text-muted mb-3">Select which crews should have training tasks in the To Do List.</p>
+        <p class="text-muted mb-3">Select which crews should have training tasks in the Task List.</p>
 
         <div class="mb-3">
           <button class="btn btn-outline-primary btn-sm me-2" onclick="selectAllCrews()">
@@ -302,7 +302,7 @@
 
       <div class="config-section">
         <h3><i class="bi bi-file-earmark-medical"></i> 🎯 Certifications: Select Types</h3>
-        <p class="text-muted mb-3">Select which certification types should generate tasks in the To Do List.</p>
+        <p class="text-muted mb-3">Select which certification types should generate tasks in the Task List.</p>
         <div id="certTypeCheckboxes" class="row">
           <div class="col-12 text-center">
             <div class="spinner-border spinner-border-sm text-primary"></div>
@@ -311,14 +311,44 @@
         </div>
       </div>
 
+      <!-- Excluded Job Prefixes Section -->
+      <div class="config-section">
+        <h3><i class="bi bi-person-x"></i> 🚫 Exclude Job Prefixes</h3>
+        <p class="text-muted mb-3">Employees with job numbers starting with these prefixes are excluded from <strong>Crew Visit Config</strong> and <strong>Training tasks</strong>. They will still appear in Glove/Sleeve Swaps and Expiring Certs.</p>
+
+        <div class="row mb-3">
+          <div class="col-md-4">
+            <div class="input-group">
+              <input type="text" id="newJobPrefix" class="form-control form-control-sm" placeholder="e.g., 005" maxlength="3">
+              <button class="btn btn-outline-danger btn-sm" onclick="addExcludedPrefix()">
+                <i class="bi bi-plus-lg"></i> Add
+              </button>
+            </div>
+          </div>
+          <div class="col-md-8">
+            <div id="excludedPrefixesList" class="d-flex flex-wrap gap-2">
+              <span class="text-muted small">Loading...</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="alert alert-secondary small">
+          <i class="bi bi-info-circle"></i> <strong>Common prefixes:</strong>
+          <ul class="mb-0 mt-1">
+            <li><strong>002</strong> - Lost/Destroyed/In Testing equipment (not real employees)</li>
+            <li><strong>005</strong> - Light Duty employees (office-based, no field visits)</li>
+          </ul>
+        </div>
+      </div>
+
       <div class="config-section">
         <h3><i class="bi bi-info-circle"></i> How Task Sources Work</h3>
         <div class="alert alert-info">
-          <i class="bi bi-lightbulb"></i> <strong>Your To Do List pulls from these sources:</strong>
+          <i class="bi bi-lightbulb"></i> <strong>Your Task List pulls from these sources:</strong>
           <ul class="mb-0 mt-2">
             <li><strong>Glove/Sleeve Swaps</strong> - Auto-detected from swap sheets (always included)</li>
-            <li><strong>Training Tasks</strong> - Only crews checked above appear in To Do</li>
-            <li><strong>Expiring Certs</strong> - Only cert types checked above appear in To Do</li>
+            <li><strong>Training Tasks</strong> - Only crews checked above appear in Task List</li>
+            <li><strong>Expiring Certs</strong> - Only cert types checked above appear in Task List</li>
             <li><strong>Manual Tasks</strong> - Tasks you add manually (always included)</li>
           </ul>
         </div>
@@ -533,18 +563,10 @@
     function closeDialog() {
       if (hasUnsavedChanges) {
         if (confirm('You have unsaved changes. Are you sure you want to close without saving?')) {
-          // Return to Schedule Hub
-          google.script.run
-            .withSuccessHandler(function() {})
-            .withFailureHandler(function() { google.script.host.close(); })
-            .showScheduleDialog();
+          google.script.host.close();
         }
       } else {
-        // Return to Schedule Hub
-        google.script.run
-          .withSuccessHandler(function() {})
-          .withFailureHandler(function() { google.script.host.close(); })
-          .showScheduleDialog();
+        google.script.host.close();
       }
     }
 
@@ -560,6 +582,7 @@
         .getToDoConfig();
 
       loadLocations();
+      loadExcludedPrefixes();
     }
 
     function loadLocations() {
@@ -789,12 +812,25 @@
 
     // Load expiring certs config (just the cert type checkboxes for Task Sources tab)
     function loadExpiringCertsConfig() {
+      console.log('loadExpiringCertsConfig: Starting...');
+
+      var timeoutId = setTimeout(function() {
+        var container = document.getElementById('certTypeCheckboxes');
+        if (container && container.innerHTML.indexOf('Loading') !== -1) {
+          container.innerHTML = '<div class="col-12"><div class="alert alert-warning">Loading is taking longer than expected. <button class="btn btn-sm btn-primary" onclick="loadExpiringCertsConfig()">Retry</button></div></div>';
+        }
+      }, 10000);
+
       google.script.run
         .withSuccessHandler(function(config) {
+          clearTimeout(timeoutId);
+          console.log('loadExpiringCertsConfig: SUCCESS');
           renderCertTypeCheckboxes(config.certTypes, config.selectedCertTypes);
         })
         .withFailureHandler(function(error) {
-          document.getElementById('certTypeCheckboxes').innerHTML = '<div class="col-12"><div class="alert alert-danger">Error loading cert types: ' + error + '</div></div>';
+          clearTimeout(timeoutId);
+          console.error('loadExpiringCertsConfig: ERROR', error);
+          document.getElementById('certTypeCheckboxes').innerHTML = '<div class="col-12"><div class="alert alert-danger">Error loading cert types: ' + error + ' <button class="btn btn-sm btn-primary" onclick="loadExpiringCertsConfig()">Retry</button></div></div>';
         })
         .getExpiringCertsConfig();
     }
@@ -833,34 +869,38 @@
     }
 
     function loadEmployeeCertsData() {
-      console.log('loadEmployeeCertsData called');
+      console.log('loadEmployeeCertsData: Starting...');
 
       // Set a timeout to show a message if it takes too long
       var timeoutId = setTimeout(function() {
         var container = document.getElementById('employeeCertsContainer');
         if (container.innerHTML.indexOf('Loading') !== -1) {
-          container.innerHTML = '<div class="alert alert-warning">Loading is taking longer than expected. Please wait or try refreshing the page.</div>';
+          container.innerHTML = '<div class="alert alert-warning">Loading is taking longer than expected. <button class="btn btn-sm btn-primary ms-2" onclick="loadEmployeeCertsData()">Retry</button></div>';
+        }
+        var overviewContainer = document.getElementById('certStatusOverview');
+        if (overviewContainer.innerHTML.indexOf('Loading') !== -1) {
+          overviewContainer.innerHTML = '<div class="alert alert-warning">Loading is taking longer than expected.</div>';
         }
       }, 15000);
 
       google.script.run
         .withSuccessHandler(function(data) {
           clearTimeout(timeoutId);
-          console.log('getExpiringCertsForConfig SUCCESS:', data);
+          console.log('loadEmployeeCertsData: SUCCESS, got', (data && data.employees ? data.employees.length : 0), 'employees');
           if (data && data.employees) {
             renderCertStatusOverview(data.employees);
             renderEmployeeCerts(data.employees);
             updateCertsSummary(data.summary);
           } else {
-            document.getElementById('certStatusOverview').innerHTML = '<div class="alert alert-warning">No data available.</div>';
-            document.getElementById('employeeCertsContainer').innerHTML = '<div class="alert alert-warning">No data returned. Please check if the Expiring Certs sheet has data.</div>';
+            document.getElementById('certStatusOverview').innerHTML = '<div class="alert alert-warning">No data available. <button class="btn btn-sm btn-primary ms-2" onclick="loadEmployeeCertsData()">Retry</button></div>';
+            document.getElementById('employeeCertsContainer').innerHTML = '<div class="alert alert-warning">No data returned. Please check if the Expiring Certs sheet has data. <button class="btn btn-sm btn-primary ms-2" onclick="loadEmployeeCertsData()">Retry</button></div>';
           }
         })
         .withFailureHandler(function(error) {
           clearTimeout(timeoutId);
-          console.error('getExpiringCertsForConfig ERROR:', error);
-          document.getElementById('certStatusOverview').innerHTML = '<div class="alert alert-danger">Error loading data: ' + error + '</div>';
-          document.getElementById('employeeCertsContainer').innerHTML = '<div class="alert alert-danger">Error loading data: ' + error + '</div>';
+          console.error('loadEmployeeCertsData: ERROR', error);
+          document.getElementById('certStatusOverview').innerHTML = '<div class="alert alert-danger">Error loading data: ' + error + ' <button class="btn btn-sm btn-primary ms-2" onclick="loadEmployeeCertsData()">Retry</button></div>';
+          document.getElementById('employeeCertsContainer').innerHTML = '<div class="alert alert-danger">Error loading data: ' + error + ' <button class="btn btn-sm btn-primary ms-2" onclick="loadEmployeeCertsData()">Retry</button></div>';
         })
         .getExpiringCertsForConfig();
     }
@@ -1251,16 +1291,111 @@
 
     // Note: Tab event listeners are defined at the bottom of the script to ensure all functions exist
 
+    // ================== EXCLUDED JOB PREFIXES FUNCTIONS ==================
+    var excludedPrefixes = [];
+
+    function loadExcludedPrefixes() {
+      console.log('loadExcludedPrefixes: Starting...');
+      google.script.run
+        .withSuccessHandler(function(prefixes) {
+          console.log('loadExcludedPrefixes: SUCCESS, got', prefixes);
+          excludedPrefixes = prefixes || ['002', '005'];
+          renderExcludedPrefixes();
+        })
+        .withFailureHandler(function(error) {
+          console.error('loadExcludedPrefixes: ERROR', error);
+          excludedPrefixes = ['002', '005'];
+          renderExcludedPrefixes();
+        })
+        .getExcludedJobPrefixes();
+    }
+
+    function renderExcludedPrefixes() {
+      var container = document.getElementById('excludedPrefixesList');
+      if (excludedPrefixes.length === 0) {
+        container.innerHTML = '<span class="text-muted small">No prefixes excluded</span>';
+        return;
+      }
+
+      var html = '';
+      excludedPrefixes.forEach(function(prefix) {
+        html += '<span class="badge bg-danger d-flex align-items-center gap-1" style="font-size: 13px;">';
+        html += prefix + '-XX';
+        html += '<button type="button" class="btn-close btn-close-white" style="font-size: 8px;" onclick="removeExcludedPrefix(\'' + prefix + '\')" title="Remove"></button>';
+        html += '</span>';
+      });
+      container.innerHTML = html;
+    }
+
+    function addExcludedPrefix() {
+      var input = document.getElementById('newJobPrefix');
+      var prefix = input.value.trim();
+
+      if (!prefix) {
+        alert('Please enter a job prefix (e.g., 005)');
+        return;
+      }
+
+      // Validate format (should be 3 digits)
+      if (!/^\d{3}$/.test(prefix)) {
+        alert('Job prefix should be 3 digits (e.g., 002, 005)');
+        return;
+      }
+
+      if (excludedPrefixes.indexOf(prefix) !== -1) {
+        alert('Prefix ' + prefix + ' is already excluded');
+        return;
+      }
+
+      excludedPrefixes.push(prefix);
+      excludedPrefixes.sort();
+      saveExcludedPrefixes();
+      input.value = '';
+    }
+
+    function removeExcludedPrefix(prefix) {
+      var index = excludedPrefixes.indexOf(prefix);
+      if (index !== -1) {
+        excludedPrefixes.splice(index, 1);
+        saveExcludedPrefixes();
+      }
+    }
+
+    function saveExcludedPrefixes() {
+      google.script.run
+        .withSuccessHandler(function(result) {
+          renderExcludedPrefixes();
+          console.log('Excluded prefixes saved:', excludedPrefixes);
+        })
+        .withFailureHandler(function(error) {
+          alert('Error saving excluded prefixes: ' + error);
+        })
+        .saveExcludedJobPrefixes(excludedPrefixes);
+    }
+
     // ================== TRAINING CONFIG FUNCTIONS ==================
     function loadTrainingConfig() {
+      console.log('loadTrainingConfig: Starting...');
+
+      var timeoutId = setTimeout(function() {
+        var container = document.getElementById('crewCheckboxes');
+        if (container && container.innerHTML.indexOf('Loading') !== -1) {
+          container.innerHTML = '<div class="col-12"><div class="alert alert-warning">Loading is taking longer than expected. <button class="btn btn-sm btn-primary" onclick="loadTrainingConfig()">Retry</button></div></div>';
+        }
+      }, 10000);
+
       google.script.run
         .withSuccessHandler(function(config) {
+          clearTimeout(timeoutId);
+          console.log('loadTrainingConfig: SUCCESS, got', (config.crews ? config.crews.length : 0), 'crews');
           renderCrewCheckboxes(config.crews, config.selectedCrews);
           renderCrewSummary(config.crewDetails);
         })
         .withFailureHandler(function(error) {
+          clearTimeout(timeoutId);
+          console.error('loadTrainingConfig: ERROR', error);
           document.getElementById('crewCheckboxes').innerHTML =
-            '<div class="col-12"><div class="alert alert-danger">Error loading training config: ' + error + '</div></div>';
+            '<div class="col-12"><div class="alert alert-danger">Error loading training config: ' + error + ' <button class="btn btn-sm btn-primary" onclick="loadTrainingConfig()">Retry</button></div></div>';
         })
         .getTrainingConfig();
     }
@@ -1361,14 +1496,27 @@
     var crewVisitData = [];
 
     function loadCrewVisitConfig() {
+      console.log('loadCrewVisitConfig: Starting...');
+
+      var timeoutId = setTimeout(function() {
+        var container = document.getElementById('crewVisitContainer');
+        if (container && container.innerHTML.indexOf('Loading') !== -1) {
+          container.innerHTML = '<div class="alert alert-warning">Loading is taking longer than expected. <button class="btn btn-sm btn-primary ms-2" onclick="loadCrewVisitConfig()">Retry</button></div>';
+        }
+      }, 10000);
+
       google.script.run
         .withSuccessHandler(function(data) {
+          clearTimeout(timeoutId);
+          console.log('loadCrewVisitConfig: SUCCESS, got', (data ? data.length : 0), 'crews');
           crewVisitData = data || [];
           renderCrewVisitTable(crewVisitData);
         })
         .withFailureHandler(function(error) {
+          clearTimeout(timeoutId);
+          console.error('loadCrewVisitConfig: ERROR', error);
           document.getElementById('crewVisitContainer').innerHTML =
-            '<div class="alert alert-danger">Error loading crew visit config: ' + error + '</div>';
+            '<div class="alert alert-danger">Error loading crew visit config: ' + error + ' <button class="btn btn-sm btn-primary ms-2" onclick="loadCrewVisitConfig()">Retry</button></div>';
         })
         .getCrewVisitConfig();
     }
@@ -1476,24 +1624,33 @@
       }
     }
 
-    // Load crew visit config when schedule tab is shown
-    document.getElementById('schedule-tab').addEventListener('shown.bs.tab', function() {
-      loadCrewVisitConfig();
-    });
 
     // ================== TRAINING CONFIG FUNCTIONS ==================
     var trainingConfigData = [];
 
     function loadTrainingConfigData() {
+      console.log('loadTrainingConfigData: Starting...');
+
+      var timeoutId = setTimeout(function() {
+        var container = document.getElementById('trainingConfigContainer');
+        if (container && container.innerHTML.indexOf('Loading') !== -1) {
+          container.innerHTML = '<div class="alert alert-warning">Loading is taking longer than expected. <button class="btn btn-sm btn-primary ms-2" onclick="loadTrainingConfigData()">Retry</button></div>';
+        }
+      }, 10000);
+
       google.script.run
         .withSuccessHandler(function(data) {
+          clearTimeout(timeoutId);
+          console.log('loadTrainingConfigData: SUCCESS, got', (data ? data.length : 0), 'trainings');
           trainingConfigData = data || [];
           renderTrainingConfigTable(trainingConfigData);
           updateTrainingCompletionSummary(trainingConfigData);
         })
         .withFailureHandler(function(error) {
+          clearTimeout(timeoutId);
+          console.error('loadTrainingConfigData: ERROR', error);
           document.getElementById('trainingConfigContainer').innerHTML =
-            '<div class="alert alert-danger">Error loading training config: ' + error + '</div>';
+            '<div class="alert alert-danger">Error loading training config: ' + error + ' <button class="btn btn-sm btn-primary ms-2" onclick="loadTrainingConfigData()">Retry</button></div>';
         })
         .getTrainingConfigData();
     }
@@ -1634,16 +1791,29 @@
     var filteredTrainingData = [];
 
     function loadTrainingTrackingData() {
+      console.log('loadTrainingTrackingData: Starting...');
+
+      var timeoutId = setTimeout(function() {
+        var container = document.getElementById('trainingTrackingContainer');
+        if (container && container.innerHTML.indexOf('Loading') !== -1) {
+          container.innerHTML = '<div class="alert alert-warning">Loading is taking longer than expected. <button class="btn btn-sm btn-primary ms-2" onclick="loadTrainingTrackingData()">Retry</button></div>';
+        }
+      }, 10000);
+
       google.script.run
         .withSuccessHandler(function(data) {
+          clearTimeout(timeoutId);
+          console.log('loadTrainingTrackingData: SUCCESS, got', (data ? data.length : 0), 'records');
           trainingTrackingData = data || [];
           filteredTrainingData = trainingTrackingData;
           renderTrainingTrackingTable(filteredTrainingData);
           updateTrainingTrackingSummary(trainingTrackingData);
         })
         .withFailureHandler(function(error) {
+          clearTimeout(timeoutId);
+          console.error('loadTrainingTrackingData: ERROR', error);
           document.getElementById('trainingTrackingContainer').innerHTML =
-            '<div class="alert alert-danger">Error loading training tracking: ' + error + '</div>';
+            '<div class="alert alert-danger">Error loading training tracking: ' + error + ' <button class="btn btn-sm btn-primary ms-2" onclick="loadTrainingTrackingData()">Retry</button></div>';
         })
         .getTrainingTrackingData();
     }
