@@ -2210,3 +2210,115 @@ Notes: [Any notes]
     - `src/88-SafetyReports.gs` - Added cleanupSafetyReportsSheet(), modified compliance record writing
     - `src/Code.gs` - Added menu item
   - **Documentation:** `docs/PDF_PROCESSING_IMPROVEMENTS_FEB19.md` (updated with cleanup section)
+
+### February 24, 2026
+- ✅ **MAJOR REFACTOR: Option B - Raw Data Logging Sheets for Safety Compliance**
+  - **Problem:** Crews were not getting credited for JHAs and Safety Meetings despite emails being present in Gmail. Complex inline processing with multiple failure points and no audit trail.
+  - **Solution:** Implemented Option B - Raw Data Logging approach with three audit trail sheets
+  - **New Sheets Created:**
+    1. **JHA Log** - Logs every JHA email with Date Received, Date Created, Job Number, Foreman, Status, Credited To
+    2. **Weekly Safety Log** - Logs every Safety Meeting email
+    3. **Monthly Checklist Log** - Logs every Fleet Checklist email
+  - **Key Benefits:**
+    - Complete audit trail - every email is logged even if job is unknown
+    - Reliable compliance calculation from logged data
+    - Easy debugging - can see exactly why a report wasn't credited
+    - Manual fixes possible by editing Credited To column
+  - **New Functions:**
+    - `setupJHALogSheet()`, `setupWeeklySafetyLogSheet()`, `setupMonthlyChecklistLogSheet()` - Create log sheets
+    - `setupAllSafetyLogSheets()` - Menu function to create all 3 sheets
+    - `logJHAEmail()`, `logWeeklySafetyEmail()`, `logMonthlyChecklistEmail()` - Log to appropriate sheet
+    - `logParsedSafetyEmail()` - Central function that routes parsed emails to correct log sheet
+    - `calculateComplianceFromLogs()` - Calculates compliance by reading log sheets (replaces old method)
+    - `updateComplianceSheetFromLogs()` - Updates Safety Compliance from calculated data
+    - `recalculateComplianceFromLogs()` - Menu function to recalculate compliance from logs
+    - `cleanupOldLogEntries()` - Auto-cleans entries older than 90 days
+    - `emailExistsInLog()` - Deduplication check
+  - **New Menu Items (Glove Manager → 🛡️ Safety):**
+    - 📋 Setup Log Sheets - Creates all 3 log sheets
+    - 📄 View JHA Log - Opens JHA Log sheet
+    - 📄 View Weekly Safety Log - Opens Weekly Safety Log sheet  
+    - 📄 View Monthly Checklist Log - Opens Monthly Checklist Log sheet
+    - 🔄 Recalculate Compliance - Recalculates compliance from log data
+  - **Modified `processSafetyEmails()`:**
+    - Now builds job resolution context at start (tracked crews, custom mappings, employee data)
+    - Auto-cleans old log entries (>90 days) on first batch
+    - Calls `logParsedSafetyEmail()` for each email processed
+    - At completion, calls `calculateComplianceFromLogs()` instead of old `calculateSafetyCompliance()`
+    - Returns `logsCreated: { jha, weekly, monthly }` in result
+  - **Files Modified:**
+    - `src/88-SafetyReports.gs` - Added ~900 lines (Option B functions)
+    - `src/Code.gs` - Added 5 new menu items
+  - **Documentation:** `docs/OPTION_B_IMPLEMENTATION_PLAN.md`
+  - **Impact:** Safety compliance tracking now has complete audit trail and reliable calculation
+- ✅ **MAJOR REFACTOR: Safety Compliance Direct Tracking from Gmail**
+  - **Problem:** JHA/Safety Meeting records were no longer being written to "Safety Reports" sheet, so `calculateSafetyCompliance()` couldn't find them - crews weren't getting credited for submitted reports
+  - **Solution:** Direct compliance tracking from parsed email data to Safety Compliance sheet
+  - **Key Changes:**
+    1. **Renamed "Safety Reports" → "Safety Equipment Needs"**
+       - Sheet now only contains actual equipment issues (fire extinguishers, hot sticks, etc.)
+       - JHA/Meeting compliance lives in Safety Compliance sheet
+       - New `migrateSafetyReportsToEquipmentNeeds()` function for one-click migration
+       - `getSafetyEquipmentSheet()` helper checks both old and new names for compatibility
+    2. **New Direct Compliance Update Function**
+       - `updateComplianceFromParsedRecords(complianceRecords)` - Updates Safety Compliance sheet directly during email processing
+       - Called BEFORE `calculateSafetyCompliance()` so data is available
+       - Updates specific ✅/✅L cells as emails are parsed
+       - Creates new rows for new crews/weeks as needed
+    3. **Unified Job Resolution**
+       - `resolveJobToCrew(jobNumber, context)` - Single function for all job→crew resolution
+       - Checks: direct match → custom mappings → Employees sheet (primary + secondary)
+       - Returns detailed result with source and reason for debugging
+    4. **calculateSafetyCompliance() Refactored**
+       - Now loads existing JHA/Meeting data from Safety Compliance sheet itself
+       - No longer depends on Safety Reports/Equipment Needs for JHA/Meeting data
+       - Only scans Safety Equipment Needs for Monthly Checklist (Fleet Checklists)
+    5. **Real-time State Building**
+       - `buildComplianceStateFromEmails()` - Builds compliance state from parsed emails
+       - `mergeAndUpdateComplianceSheet()` - Merges new state with existing data
+  - **New Functions:**
+    - `getSafetyEquipmentSheet()` - Gets sheet (checks both old/new names)
+    - `migrateSafetyReportsToEquipmentNeeds()` - Migration function
+    - `resolveJobToCrew()` - Unified job resolution
+    - `updateComplianceFromParsedRecords()` - Direct compliance update
+    - `buildComplianceStateFromEmails()` - Build state from parsed data
+    - `mergeAndUpdateComplianceSheet()` - Merge and update compliance
+  - **Menu Changes:**
+    - Renamed "🛡️ Safety Reports" → "🛡️ Safety"
+    - Changed "📊 View Safety Reports" → "📊 View Equipment Needs"
+    - Added "🔄 Migrate Safety Reports Sheet" menu item
+    - Added "🧹 Cleanup Equipment Sheet" menu item
+  - **Files Modified:**
+    - `src/88-SafetyReports.gs` - Major refactor (~500 lines added/changed)
+    - `src/Code.gs` - Updated menu items
+  - **Documentation:** `docs/SAFETY_COMPLIANCE_REFACTOR_PLAN.md`
+  - **Impact:** JHAs from Gmail now immediately appear as ✅ in Safety Compliance sheet
+- ✅ **Crew Import Duplicate Fixes (from earlier today)**
+  - Fixed duplicate API calls when same employee appears in multiple special sections
+  - Added name parsing improvements for "wk X-XX" and "??" patterns
+  - See `docs/CREW_IMPORT_FIX_FEB24.md` for details
+- ✅ **Fixed Invalid Crew Numbers in Tracked Crews List**
+  - **Problem:** Invalid job numbers like "N/A", "000", "000-26" were appearing in tracked crews list, causing issues with compliance tracking and diagnostics
+  - **Root Cause:** `extractCrewNumber()` function didn't validate job number format - it just split on `.` and returned whatever was before it
+  - **Solution:** Added format validation to `extractCrewNumber()`:
+    - Must match pattern `NNN-YY` (3 digits, dash, 2 digits)
+    - Excludes placeholder jobs like `000-XX`
+    - Returns empty string for invalid formats (skips them)
+  - **Files Modified:**
+    - `src/75-Scheduling.gs` - Updated `extractCrewNumber()` function with regex validation
+  - **Impact:** Tracked crews list now only shows valid crew numbers
+- ✅ **Fixed Diagnostic Function to Show Foreman Names**
+  - **Problem:** `diagnoseSafetyCompliance()` showed "Foreman=NOT FOUND" for all crews
+  - **Root Cause:** The diagnostic function had its own inline code to read crews from Employees sheet, which didn't use the `getCrewLead()` function that properly looks up foremen by classification
+  - **Solution:** Refactored diagnostic section 4 to use shared functions:
+    - Now calls `getActiveCrews()` (which validates job number format)
+    - Now calls `getCrewLead()` (which uses classification hierarchy to find foreman)
+    - Now calls `getCrewSize()` (which correctly counts active employees)
+  - **Files Modified:**
+    - `src/88-SafetyReports.gs` - Updated `diagnoseSafetyCompliance()` section 4
+  - **Impact:** Diagnostic now correctly shows foreman names and crew sizes
+- ✅ **Fixed Duplicate Variable Declaration**
+  - Fixed duplicate `var secondaryJobCol = -1;` line in `getActiveCrews()` function
+  - **Files Modified:** `src/75-Scheduling.gs`
+
+

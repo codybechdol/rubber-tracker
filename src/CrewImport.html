@@ -1400,6 +1400,7 @@
     /**
      * Find best employee match within a cell's text.
      * Scans the cell text for any employee name from the sheet.
+     * Supports nickname mapping (Nick/Nicholas, Matt/Matthew, etc.)
      * @param {string} cellText - The full cell text
      * @param {Array} employees - Array of employee objects from sheet
      * @returns {Object|null} Best match with employeeName and confidence
@@ -1410,6 +1411,44 @@
       var cellLower = cellText.toLowerCase();
       var bestMatch = null;
       var bestConfidence = 0;
+
+      // Nickname mappings - format: { nickname: [full name, ...], ... }
+      var nicknameMappings = {
+        'nick': ['nicholas', 'nicolas'],
+        'nicholas': ['nick'],
+        'nicolas': ['nick'],
+        'matt': ['matthew'],
+        'matthew': ['matt'],
+        'jim': ['james', 'jimmy'],
+        'jimmy': ['james', 'jim'],
+        'james': ['jim', 'jimmy'],
+        'bob': ['robert'],
+        'robert': ['bob'],
+        'mike': ['michael'],
+        'michael': ['mike'],
+        'chris': ['christopher'],
+        'christopher': ['chris'],
+        'bill': ['william'],
+        'william': ['bill'],
+        'dan': ['daniel'],
+        'daniel': ['dan'],
+        'tom': ['thomas'],
+        'thomas': ['tom'],
+        'joe': ['joseph'],
+        'joseph': ['joe'],
+        'tony': ['anthony'],
+        'anthony': ['tony']
+      };
+
+      // Function to get all variations of a first name
+      function getNameVariations(name) {
+        var lower = name.toLowerCase();
+        var variations = [lower];
+        if (nicknameMappings[lower]) {
+          variations = variations.concat(nicknameMappings[lower]);
+        }
+        return variations;
+      }
 
       for (var i = 0; i < employees.length; i++) {
         var emp = employees[i];
@@ -1432,8 +1471,6 @@
           }
         } else {
           // Try fuzzy matching on the cell text
-          // Split cell into words and check for partial matches
-          var cellWords = cellText.split(/[\s,]+/);
           var empParts = empName.split(/\s+/);
 
           // Check if first and last name appear (possibly not adjacent)
@@ -1441,7 +1478,18 @@
             var firstName = empParts[0].toLowerCase();
             var lastName = empParts[empParts.length - 1].toLowerCase();
 
-            var hasFirst = cellLower.indexOf(firstName) !== -1;
+            // Get all variations of the first name (including nicknames)
+            var firstNameVariations = getNameVariations(firstName);
+
+            // Check if any first name variation appears in cell
+            var hasFirst = false;
+            for (var v = 0; v < firstNameVariations.length; v++) {
+              if (cellLower.indexOf(firstNameVariations[v]) !== -1) {
+                hasFirst = true;
+                break;
+              }
+            }
+
             var hasLast = cellLower.indexOf(lastName) !== -1;
 
             if (hasFirst && hasLast) {
@@ -1686,6 +1734,12 @@
 
       // Remove "with" if it's standalone (leftover from "with injury")
       cleanText = cleanText.replace(/\bwith\b/gi, ' ').trim();
+
+      // Remove "wk" followed by date pattern (schedule info like "wk 3-23")
+      cleanText = cleanText.replace(/\bwk\s+\d{1,2}[-\/]\d{1,2}\s*/gi, ' ').trim();
+
+      // Remove question marks (like "??" for uncertain schedules)
+      cleanText = cleanText.replace(/\?+/g, ' ').trim();
 
       // Clean up multiple spaces
       cleanText = cleanText.replace(/\s+/g, ' ').trim();
@@ -2097,6 +2151,63 @@
     }
 
     /**
+     * Updates crew card styling after proposedChanges is populated.
+     * Highlights employees with UNCHECKED pending changes in green.
+     * Employees with CHECKED (approved) changes are shown in normal color.
+     */
+    function updateCrewCardStyling() {
+      if (proposedChanges.length === 0) return;
+
+      // Build a map of employee names with pending changes and their checkbox state
+      // Only mark as pending (green) if the checkbox is NOT checked
+      var pendingChangeNames = {};
+      var approvedChangeNames = {};
+      for (var i = 0; i < proposedChanges.length; i++) {
+        var ch = proposedChanges[i];
+        var empNameKey = '';
+        if (ch.match && ch.match.employeeName) {
+          empNameKey = ch.match.employeeName.toLowerCase();
+        } else if (ch.employee && ch.employee.name) {
+          empNameKey = ch.employee.name.toLowerCase();
+        }
+        if (empNameKey) {
+          if (ch.apply) {
+            approvedChangeNames[empNameKey] = true;
+          } else {
+            pendingChangeNames[empNameKey] = true;
+          }
+        }
+      }
+
+      // Find all crew card employee elements and update styling
+      var empElements = document.querySelectorAll('.crew-card-employee');
+      for (var i = 0; i < empElements.length; i++) {
+        var el = empElements[i];
+        var text = el.textContent || '';
+
+        // Extract employee name from the text (format: "013-26.1. Employee Name [badge] [metadata]")
+        var nameMatch = text.match(/\d+-\d+\.\d+\.\s*([^[\[]+)/);
+        if (nameMatch) {
+          var empName = nameMatch[1].trim().toLowerCase();
+
+          // Check if it's currently styled as duplicate (red) - don't change those
+          var isDuplicate = el.innerHTML.indexOf('bi-exclamation-triangle') !== -1;
+          if (isDuplicate) continue;
+
+          // Check if this employee has UNCHECKED pending changes (show in green)
+          if (pendingChangeNames[empName]) {
+            el.style.color = '#198754';  // Bootstrap success green
+            el.style.fontWeight = '500';
+          } else if (approvedChangeNames[empName]) {
+            // Approved change - show in normal color
+            el.style.color = '';
+            el.style.fontWeight = '';
+          }
+        }
+      }
+    }
+
+    /**
      * Renders the special location cards showing employees assigned to non-field locations
      * These are: Weeds, Light Duty, Vacation, Leave, Previous Employee
      * ALSO includes employees from Google Sheet already in these locations
@@ -2474,17 +2585,134 @@
 
         if (savedSelection && !savedSelection.skip) {
           // We have a saved selection for this employee - auto-apply it
-          spec.autoApply = true;
-          spec.savedStatus = savedSelection.status;
-          spec.savedLocation = savedSelection.location;
-          autoApplied.push(spec.name + ' (' + savedSelection.status + ')');
-          console.log('Will auto-apply saved selection for ' + spec.name + ': ' + savedSelection.status + ' → ' + savedSelection.location);
+          // But ONLY if the current detected status matches the saved status
+          // (e.g., saved as "Light Duty" and detected as "Light Duty")
+          var currentStatus = (spec.status || '').toLowerCase();
+          var savedStatus = (savedSelection.status || '').toLowerCase();
+
+          // Check if statuses are compatible (same or similar meaning)
+          var statusesMatch = currentStatus === savedStatus ||
+            (currentStatus === 'time off' && savedStatus === 'vacation') ||
+            (currentStatus === 'vacation' && savedStatus === 'time off') ||
+            (currentStatus === 'leave' && savedStatus === 'vacation');
+
+          if (statusesMatch) {
+            spec.autoApply = true;
+            spec.savedStatus = savedSelection.status;
+            spec.savedLocation = savedSelection.location;
+            autoApplied.push(spec.name + ' (' + savedSelection.status + ')');
+            console.log('Will auto-apply saved selection for ' + spec.name + ': ' + savedSelection.status + ' → ' + savedSelection.location);
+          } else {
+            // Status is different - show for user review
+            console.log('Status changed for ' + spec.name + ': saved=' + savedStatus + ', current=' + currentStatus + ' - showing for review');
+            needsSelection.push(spec);
+          }
         } else if (savedSelection && savedSelection.skip) {
-          // Saved as "skip" - mark it to be skipped
-          spec.autoSkip = true;
-          autoApplied.push(spec.name + ' (skipped)');
-          console.log('Will auto-skip ' + spec.name);
+          // Saved as "skip" - but only auto-skip if:
+          // 1. Current status is "Time Off" (temporary)
+          // 2. AND the employee's current location on the sheet is ALREADY a special location (Vacation, Leave, etc.)
+          // If the employee is currently on a crew and this is a NEW vacation, don't auto-skip - show for review
+          var currentStatus = (spec.status || '').toLowerCase();
+          var tempStatuses = ['time off', 'vacation'];
+
+          // Look up the employee's CURRENT location from the Employees sheet
+          var currentLocationOnSheet = '';
+          if (spec.matchedFromSheet && spec.employeeData) {
+            currentLocationOnSheet = (spec.employeeData.location || '').toLowerCase();
+          } else {
+            // Try to find in currentEmployees
+            var empNameLower = (spec.name || '').toLowerCase().trim();
+            for (var e = 0; e < currentEmployees.length; e++) {
+              var emp = currentEmployees[e];
+              if ((emp.name || '').toLowerCase().trim() === empNameLower) {
+                currentLocationOnSheet = (emp.location || '').toLowerCase();
+                break;
+              }
+            }
+          }
+
+          // Special locations that mean employee is already "off"
+          var specialLocations = ['vacation', 'leave', 'light duty', 'weeds', 'previous employee', 'fmla', 'layoff'];
+          var isAlreadyInSpecialLocation = specialLocations.some(function(loc) {
+            return currentLocationOnSheet.indexOf(loc) !== -1;
+          });
+
+          // Only auto-skip if:
+          // - Current status is temporary (Time Off, Vacation)
+          // - AND employee is ALREADY in a special location (not coming FROM a regular crew)
+          if (tempStatuses.indexOf(currentStatus) !== -1 && isAlreadyInSpecialLocation) {
+            spec.autoSkip = true;
+            autoApplied.push(spec.name + ' (skipped)');
+            console.log('Will auto-skip ' + spec.name + ' (already in special location: ' + currentLocationOnSheet + ')');
+          } else if (tempStatuses.indexOf(currentStatus) !== -1 && !isAlreadyInSpecialLocation) {
+            // Employee is on a regular crew, this is a NEW vacation - show for review
+            console.log('Showing ' + spec.name + ' for review - employee on crew (' + currentLocationOnSheet + ') going to ' + spec.status);
+            needsSelection.push(spec);
+          } else {
+            // Non-temporary status - show for user review
+            console.log('Saved skip for ' + spec.name + ' but current status is ' + spec.status + ' - showing for review');
+            needsSelection.push(spec);
+          }
         } else {
+          // No saved selection - but check if employee is ALREADY in the target location
+          // If detected as "Weeds" and already on "Weeds" sheet location - no change needed
+          var currentStatus = (spec.status || '').toLowerCase();
+
+          // Map status to expected location
+          var statusToLocationMap = {
+            'weeds': 'weeds',
+            'light duty': 'light duty',
+            'vacation': 'vacation',
+            'time off': 'vacation',
+            'leave': 'leave',
+            'fmla': 'leave'
+          };
+
+          var targetLocation = statusToLocationMap[currentStatus];
+
+          if (targetLocation) {
+            // Look up the employee's CURRENT location from the Employees sheet
+            var currentLocationOnSheet = '';
+            if (spec.matchedFromSheet && spec.employeeData) {
+              currentLocationOnSheet = (spec.employeeData.location || '').toLowerCase();
+            } else {
+              // Try to find in currentEmployees using fuzzy matching
+              var specNameLower = (spec.name || '').toLowerCase().trim();
+              // Clean name - remove status/classification suffixes like F, JL, /EO2, etc.
+              var cleanSpecName = specNameLower
+                .replace(/\s*[\/\-]\s*(eo\s*\d|gto|jry|jl|f)\s*$/i, '')  // Remove /EO2, /GTO, etc.
+                .replace(/\s+(f|jl|jry|gto|wt|sup|gf)\s*$/i, '')  // Remove single-letter roles
+                .replace(/\s+(ap\s*\d|eo\s*\d)\s*$/i, '')  // Remove AP #, EO #
+                .replace(/\s+(jry\s*op)\s*$/i, '')  // Remove "Jry Op"
+                .replace(/\s+no\s+cdl\s*$/i, '')  // Remove "No CDL"
+                .trim();
+
+              for (var e = 0; e < currentEmployees.length; e++) {
+                var emp = currentEmployees[e];
+                var empNameLower = (emp.name || '').toLowerCase().trim();
+
+                // Check for match - exact, contains, or similarity
+                if (empNameLower === cleanSpecName ||
+                    empNameLower.indexOf(cleanSpecName) !== -1 ||
+                    cleanSpecName.indexOf(empNameLower) !== -1 ||
+                    calculateSimilarity(empNameLower, cleanSpecName) >= 80) {
+                  currentLocationOnSheet = (emp.location || '').toLowerCase();
+                  spec.matchedFromSheet = true;
+                  spec.employeeData = emp;
+                  break;
+                }
+              }
+            }
+
+            // Check if employee is already in the target location (no change needed)
+            if (currentLocationOnSheet && currentLocationOnSheet.indexOf(targetLocation) !== -1) {
+              spec.autoSkip = true;
+              autoApplied.push(spec.name + ' (no change - already ' + spec.status + ')');
+              console.log('Skipping ' + spec.name + ' - already at target location: ' + currentLocationOnSheet);
+              continue;  // Skip to next special circumstance
+            }
+          }
+
           needsSelection.push(spec);
         }
       }
@@ -2526,6 +2754,43 @@
 
         // Skip if already auto-applied or auto-skipped
         if (spec.autoApply || spec.autoSkip) continue;
+
+        // SECOND-PASS MATCHING: If not matched yet, try harder to find a match
+        // This handles cases like "Brian Dixon F off wk 2-23" → "Brian Dixon"
+        if (!spec.matchedFromSheet) {
+          var specNameLower = (spec.name || '').toLowerCase().trim();
+          // Strip common suffixes: F, JL, JRY, GTO, AP #, EO #, and "off wk..." phrases
+          var cleanSpecName = specNameLower
+            .replace(/\s+off\s+wk.*$/i, '')      // Remove "off wk ..." at end
+            .replace(/\s+wk\s*\d.*$/i, '')        // Remove "wk 2-23" at end
+            .replace(/\s+no\s+cdl\s*$/i, '')     // Remove "No CDL" at end
+            .replace(/\s+(f|jl|jry|gto|wt|sup|gf)\s*$/i, '')  // Remove single-letter roles at end
+            .replace(/\s+(ap\s*\d|eo\s*\d)\s*$/i, '')         // Remove AP #, EO # at end
+            .replace(/\s+(jry\s*op)\s*$/i, '')               // Remove "Jry Op" at end
+            .replace(/,.*$/, '')                            // Remove anything after comma
+            .trim();
+
+          console.log('Second-pass matching for "' + spec.name + '" → cleaned: "' + cleanSpecName + '"');
+
+          // Try to find a match in currentEmployees
+          for (var e = 0; e < currentEmployees.length; e++) {
+            var emp = currentEmployees[e];
+            var empNameLower = (emp.name || '').toLowerCase().trim();
+
+            // Check for match
+            var exactMatch = empNameLower === cleanSpecName;
+            var containsMatch = empNameLower.indexOf(cleanSpecName) !== -1 || cleanSpecName.indexOf(empNameLower) !== -1;
+            var similarity = calculateSimilarity(empNameLower, cleanSpecName);
+
+            if (exactMatch || containsMatch || similarity >= 75) {
+              console.log('  Found match: "' + emp.name + '" (similarity: ' + similarity + ')');
+              spec.matchedFromSheet = true;
+              spec.employeeData = emp;
+              spec.name = emp.name;  // Use the exact name from sheet
+              break;
+            }
+          }
+        }
 
         // Determine suggested action based on status
         var suggestedLocation = '';
@@ -2583,6 +2848,9 @@
           }
         }
 
+        // Check if this is a NEW employee (not found on Employees sheet)
+        var isNewEmployee = !spec.matchedFromSheet;
+
         html += '<div class="card mb-3" id="special-card-' + i + '">';
         html += '<div class="card-header d-flex justify-content-between align-items-center">';
         html += '<div>';
@@ -2590,12 +2858,61 @@
         if (spec.classification) {
           html += ' <span class="badge bg-secondary badge-role">' + spec.classification + '</span>';
         }
+        if (isNewEmployee) {
+          html += ' <span class="badge bg-warning text-dark" title="Employee not found on Employees sheet"><i class="bi bi-person-plus"></i> NEW</span>';
+        }
         html += '<br><small class="text-muted">' + escapeHtml(spec.originalText) + '</small>';
         html += '</div>';
         html += '<span class="badge ' + statusBadgeClass + '"><i class="bi ' + statusIcon + '"></i> ' + spec.status + '</span>';
         html += '</div>';
         html += '<div class="card-body">';
 
+        // If this is a NEW employee, show Add New Employee UI instead of update UI
+        if (isNewEmployee) {
+          html += '<div class="alert alert-info mb-3">';
+          html += '<i class="bi bi-info-circle"></i> This employee was not found on the Employees sheet. ';
+          html += 'Click <strong>Add New Employee</strong> to add them.';
+          html += '</div>';
+
+          html += '<div class="row g-2 mb-3">';
+          html += '<div class="col-md-6">';
+          html += '<label class="form-label small mb-1">Employee Name</label>';
+          html += '<input type="text" class="form-control form-control-sm" id="spec-name-' + i + '" value="' + escapeHtml(spec.name) + '">';
+          html += '</div>';
+          html += '<div class="col-md-3">';
+          html += '<label class="form-label small mb-1">Job Classification</label>';
+          html += '<select class="form-select form-select-sm" id="spec-classification-' + i + '">';
+          html += '<option value="">Select...</option>';
+          var classifications = ['F', 'JRY', 'AP 1', 'AP 2', 'AP 3', 'AP 4', 'AP 5', 'AP 6', 'AP 7', 'GTO', 'GTO F', 'JRY OP', 'EO 2', 'WT'];
+          for (var c = 0; c < classifications.length; c++) {
+            var isSelected = spec.classification === classifications[c] ? ' selected' : '';
+            html += '<option value="' + classifications[c] + '"' + isSelected + '>' + classifications[c] + '</option>';
+          }
+          html += '</select>';
+          html += '</div>';
+          html += '<div class="col-md-3">';
+          html += '<label class="form-label small mb-1">Status</label>';
+          html += '<select class="form-select form-select-sm" id="spec-status-' + i + '" disabled>';
+          html += '<option value="' + spec.status + '" selected>' + spec.status + '</option>';
+          html += '</select>';
+          html += '</div>';
+          html += '</div>';
+
+          html += '<div class="mt-2">';
+          html += '<button class="btn btn-success btn-sm me-2" onclick="addNewEmployeeFromSpecial(' + i + ')">';
+          html += '<i class="bi bi-person-plus"></i> Add New Employee';
+          html += '</button>';
+          html += '<button class="btn btn-outline-secondary btn-sm" onclick="skipSpecialEmployee(' + i + ')">';
+          html += '<i class="bi bi-x"></i> Skip';
+          html += '</button>';
+          html += '</div>';
+
+          html += '</div>';
+          html += '</div>';
+          continue;  // Skip the rest of the card building for new employees
+        }
+
+        // EXISTING EMPLOYEE - Show update form
         // Editable form fields - Row 1
         html += '<div class="row g-2 mb-2">';
 
@@ -2856,12 +3173,24 @@
 
     /**
      * Auto-applies saved special selections without user interaction.
+     * DEDUPLICATES by employee name to prevent multiple updates for the same person.
      */
     function applyAutoSavedSpecialSelections() {
+      // Track which employees have already been processed to prevent duplicates
+      var processedEmployees = {};
+
       for (var i = 0; i < specialCircumstances.length; i++) {
         var spec = specialCircumstances[i];
 
         if (spec.autoApply && spec.savedStatus && spec.savedLocation) {
+          // DEDUPLICATION: Check if we've already processed this employee
+          var empKey = (spec.name || '').toLowerCase().trim();
+          if (processedEmployees[empKey]) {
+            console.log('Skipping duplicate auto-apply for: ' + spec.name + ' (already processed)');
+            continue;
+          }
+          processedEmployees[empKey] = true;
+
           console.log('Auto-applying: ' + spec.name + ' → ' + spec.savedLocation);
 
           // Track this employee in special locations for display
@@ -2998,6 +3327,101 @@
           }
         })
         .updateEmployeeStatusNotes(updateData);
+    }
+
+    /**
+     * Adds a new employee from the Special Circumstances section.
+     * Opens the Add New Employee modal with pre-filled data.
+     * @param {number} specIndex - Index in specialCircumstances array
+     */
+    function addNewEmployeeFromSpecial(specIndex) {
+      var spec = specialCircumstances[specIndex];
+      if (!spec) {
+        showNotification('Could not find the employee data. Please try again.', 'error', 'Error');
+        return;
+      }
+
+      // Get the current values from the form
+      var nameInput = document.getElementById('spec-name-' + specIndex);
+      var classInput = document.getElementById('spec-classification-' + specIndex);
+      var name = nameInput ? nameInput.value.trim() : spec.name;
+      var classification = classInput ? classInput.value : spec.classification || '';
+
+      // Determine location based on status
+      var location = 'Weeds';  // Default for unassigned/waiting employees
+      var statusLower = (spec.status || '').toLowerCase();
+      if (statusLower === 'light duty') {
+        location = 'Light Duty';
+      } else if (statusLower === 'vacation' || statusLower === 'time off') {
+        location = 'Vacation';
+      } else if (statusLower === 'leave' || statusLower === 'fmla') {
+        location = 'Leave';
+      }
+
+      // Populate the modal
+      document.getElementById('newEmpNameDisplay').textContent = name;
+      document.getElementById('newEmpOriginalText').textContent = spec.originalText || name;
+      document.getElementById('newEmpUnmatchedKey').value = 'special_' + specIndex;  // Special marker
+
+      // Pre-fill location dropdown
+      var locationSelect = document.getElementById('newEmpLocation');
+      locationSelect.innerHTML = '<option value="">Select location...</option>';
+      locationSelect.innerHTML += '<option value="Weeds"' + (location === 'Weeds' ? ' selected' : '') + '>Weeds (Waiting for Work)</option>';
+      locationSelect.innerHTML += '<option value="Light Duty"' + (location === 'Light Duty' ? ' selected' : '') + '>Light Duty</option>';
+      locationSelect.innerHTML += '<option value="Vacation"' + (location === 'Vacation' ? ' selected' : '') + '>Vacation</option>';
+      locationSelect.innerHTML += '<option value="Leave"' + (location === 'Leave' ? ' selected' : '') + '>Leave</option>';
+      locationSelect.innerHTML += '<option disabled>──────────</option>';
+
+      var allLocations = Object.values(locationMappings).filter(function(v, i, self) {
+        return self.indexOf(v) === i && ['Weeds', 'Light Duty', 'Vacation', 'Leave'].indexOf(v) === -1;
+      }).sort();
+      allLocations.forEach(function(loc) {
+        var opt = document.createElement('option');
+        opt.value = loc;
+        opt.textContent = loc;
+        locationSelect.appendChild(opt);
+      });
+
+      // For Weeds employees, leave job number blank (they don't get job numbers)
+      document.getElementById('newEmpJobNumber').value = '';
+
+      // If Weeds, add a note about no job number
+      if (location === 'Weeds') {
+        document.getElementById('newEmpJobNumber').placeholder = 'Optional - Weeds employees typically have no job#';
+      } else {
+        document.getElementById('newEmpJobNumber').placeholder = 'e.g., 013-26.1';
+      }
+
+      // Pre-fill classification
+      var classSelect = document.getElementById('newEmpClassification');
+      classSelect.selectedIndex = 0;  // Reset
+      if (classification) {
+        for (var i = 0; i < classSelect.options.length; i++) {
+          if (classSelect.options[i].value === classification) {
+            classSelect.selectedIndex = i;
+            break;
+          }
+        }
+      }
+
+      // Set today as default hire date
+      var today = new Date().toISOString().split('T')[0];
+      document.getElementById('newEmpHireDate').value = today;
+
+      // Clear other fields
+      document.getElementById('newEmpPhone').value = '';
+      document.getElementById('newEmpEmail').value = '';
+      document.getElementById('newEmpMPEmail').value = '';
+      document.getElementById('newEmpNotificationEmails').value = '';
+      document.getElementById('newEmpGloveSize').selectedIndex = 0;
+      document.getElementById('newEmpSleeveSize').selectedIndex = 0;
+
+      // Show the modal
+      var modal = new bootstrap.Modal(document.getElementById('newEmployeeModal'));
+      modal.show();
+
+      // Store the specIndex so we can remove the card after adding
+      document.getElementById('newEmpUnmatchedKey').dataset.specIndex = specIndex;
     }
 
     function skipSpecialEmployee(specIndex) {
@@ -4056,6 +4480,9 @@
       document.getElementById('statUnmatched').textContent = unmatchedCount;
       document.getElementById('statSkipped').textContent = noChangeCount;
 
+      // Update crew card styling to show employees with pending changes in green
+      updateCrewCardStyling();
+
       var tbody = document.getElementById('changesTableBody');
       var html = '';
 
@@ -4571,11 +4998,20 @@
       var classification = document.getElementById('newEmpClassification').value;
       var unmatchedKey = document.getElementById('newEmpUnmatchedKey').value;
 
+      // Check if this is from a special circumstance (added via addNewEmployeeFromSpecial)
+      var specIndex = document.getElementById('newEmpUnmatchedKey').dataset.specIndex;
+      var isFromSpecial = unmatchedKey && unmatchedKey.indexOf('special_') === 0;
+
       if (!location) {
         showNotification('Please select a location', 'warning', 'Required Field');
         return;
       }
-      if (!jobNumber) {
+
+      // Job number is NOT required for special locations (Weeds, Light Duty, Vacation, Leave)
+      var specialLocations = ['Weeds', 'Light Duty', 'Vacation', 'Leave'];
+      var isSpecialLocation = specialLocations.indexOf(location) !== -1;
+
+      if (!jobNumber && !isSpecialLocation) {
         showNotification('Please enter a job number', 'warning', 'Required Field');
         return;
       }
@@ -4651,6 +5087,11 @@
               delete unmatchedByKey[unmatchedKey];
             }
 
+            // If this was from a special circumstance, remove that card too
+            if (isFromSpecial && specIndex !== undefined) {
+              removeSpecialCard(parseInt(specIndex));
+            }
+
             // Show success message
             showNotification('✓ Added <strong>"' + result.employeeName + '"</strong> to Employees sheet!', 'success', 'Employee Added');
 
@@ -4685,6 +5126,94 @@
 
     function toggleChange(index, checkbox) {
       proposedChanges[index].apply = checkbox.checked;
+
+      // Update UI to reflect the change
+      var ch = proposedChanges[index];
+      if (ch && ch.match && ch.match.employeeName) {
+        var empName = ch.match.employeeName.toLowerCase();
+
+        // If checked (approved), remove from non-field location cards and reset color to normal
+        // If unchecked, the employee should stay in their current special location
+        if (checkbox.checked) {
+          removeEmployeeFromSpecialLocationCards(empName);
+        }
+
+        // Update crew card styling - green if unchecked (pending), normal if checked (approved)
+        updateCrewCardEmployeeColor(empName, checkbox.checked ? 'normal' : 'green');
+      }
+    }
+
+    /**
+     * Removes an employee from special location cards (Vacation, Light Duty, etc.)
+     * Called when a proposed change is approved (checkbox checked)
+     */
+    function removeEmployeeFromSpecialLocationCards(empNameLower) {
+      // Remove from specialLocationEmployees tracking - use fuzzy matching
+      var removed = false;
+      for (var loc in specialLocationEmployees) {
+        var employees = specialLocationEmployees[loc];
+        if (employees) {
+          var originalLength = employees.length;
+          specialLocationEmployees[loc] = employees.filter(function(e) {
+            var eName = (e.name || '').toLowerCase().trim();
+            // Exact match
+            if (eName === empNameLower) return false;
+            // Contains match (one name contains the other)
+            if (eName.indexOf(empNameLower) !== -1 || empNameLower.indexOf(eName) !== -1) return false;
+            // Similarity match
+            if (calculateSimilarity(eName, empNameLower) >= 80) return false;
+            return true;
+          });
+          if (specialLocationEmployees[loc].length < originalLength) {
+            removed = true;
+            console.log('Removed ' + empNameLower + ' from ' + loc + ' card');
+          }
+        }
+      }
+
+      // Re-render the special location cards
+      if (removed) {
+        renderSpecialLocationCards();
+      }
+    }
+
+    /**
+     * Updates the color of an employee name on crew cards
+     * @param {string} empNameLower - Employee name in lowercase
+     * @param {string} colorType - 'normal' (black) or 'green'
+     */
+    function updateCrewCardEmployeeColor(empNameLower, colorType) {
+      var empElements = document.querySelectorAll('.crew-card-employee');
+      for (var i = 0; i < empElements.length; i++) {
+        var el = empElements[i];
+        var text = el.textContent || '';
+
+        // Extract employee name from the text (format: "013-26.1. Employee Name [badge] [metadata]")
+        var nameMatch = text.match(/\d+-\d+\.\d+\.\s*([^[\[]+)/);
+        if (nameMatch) {
+          var foundName = nameMatch[1].trim().toLowerCase();
+
+          // Check for match using multiple methods
+          var isMatch = foundName === empNameLower ||
+                       foundName.indexOf(empNameLower) !== -1 ||
+                       empNameLower.indexOf(foundName) !== -1 ||
+                       calculateSimilarity(foundName, empNameLower) >= 80;
+
+          if (isMatch) {
+            // Check if it's a duplicate (red) - don't change those
+            var isDuplicate = el.innerHTML.indexOf('bi-exclamation-triangle') !== -1;
+            if (!isDuplicate) {
+              if (colorType === 'normal') {
+                el.style.color = '';
+                el.style.fontWeight = '';
+              } else if (colorType === 'green') {
+                el.style.color = '#198754';
+                el.style.fontWeight = '500';
+              }
+            }
+          }
+        }
+      }
     }
 
     function applyChanges() {

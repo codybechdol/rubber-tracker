@@ -130,6 +130,10 @@
     <input type="checkbox" id="newOnlyMode" checked onchange="updateDaysBackState()">
     <label for="newOnlyMode">Only process new emails since last run (faster)</label>
   </div>
+  <div class="checkbox-row">
+    <input type="checkbox" id="fastMode">
+    <label for="fastMode" style="color:#e67c00;">⚡ Fast Mode: Skip PDF extraction (uses email date, may miss batched JHAs)</label>
+  </div>
   <label style="font-size:12px;">Or search last:</label>
   <select id="daysBack" style="width:100%; margin-bottom:12px;">
     <option value="7">7 days</option>
@@ -139,6 +143,7 @@
     <option value="90">90 days</option>
   </select>
   <button id="processBtn" onclick="processEmails()">Start Processing</button>
+  <button id="continueBtn" onclick="continueProcessing()" class="success" style="display:none;">▶ Continue Processing</button>
   <button id="reprocessAllBtn" onclick="reprocessAll()" class="secondary" style="background:#dc3545; margin-top:5px;">🔄 Reprocess All (Clear & Restart)</button>
   <div id="progressContainer" class="progress-bar-container" style="display:none;">
     <div id="progressBar" class="progress-bar" style="width:0%;">0%</div>
@@ -146,7 +151,7 @@
   <div id="status" class="status" style="display:none;"></div>
   <div id="uncreditedSection" class="uncredited-section" style="display:none;"></div>
   <div id="complianceSection" class="compliance-section" style="display:none;"></div>
-  <div class="warning">⚠️ Safety Checklist PDFs take ~5-10 seconds each to extract. Processing in batches of 50.</div>
+  <div class="warning">⚠️ Processing uses batch size of 5 (timeout prevention). PDF extraction is slow (~5-10 sec each). Use Fast Mode to skip PDFs.</div>
 
   <!-- Unknown Jobs Modal -->
   <div class="modal-overlay" id="unknownJobsModal">
@@ -343,18 +348,21 @@
 
       try {
         var btn = document.getElementById("processBtn");
+        var continueBtn = document.getElementById("continueBtn");
         var reprocessBtn = document.getElementById("reprocessAllBtn");
         var status = document.getElementById("status");
         var progressContainer = document.getElementById("progressContainer");
         var progressBar = document.getElementById("progressBar");
         var days = parseInt(document.getElementById("daysBack").value);
+        var fastMode = document.getElementById("fastMode").checked;
         newOnlyMode = document.getElementById("newOnlyMode").checked;
         currentDays = days;
 
-        console.log("Days: " + days + ", newOnlyMode: " + newOnlyMode);
+        console.log("Days: " + days + ", newOnlyMode: " + newOnlyMode + ", fastMode: " + fastMode);
 
         btn.disabled = true;
         btn.textContent = "Processing Batch...";
+        if (continueBtn) continueBtn.style.display = "none";
         if (reprocessBtn) reprocessBtn.disabled = true;
         status.style.display = "block";
         progressContainer.style.display = "block";
@@ -366,10 +374,11 @@
         }
 
         var modeText = newOnlyMode ? "new emails only" : "last " + days + " days";
-        status.innerHTML = "🔍 Searching Gmail for safety emails (" + modeText + ")...";
+        var fastModeText = fastMode ? " (Fast Mode)" : "";
+        status.innerHTML = "🔍 Searching Gmail for safety emails (" + modeText + ")" + fastModeText + "...";
         document.getElementById("complianceSection").style.display = "none";
 
-        console.log("Calling google.script.run.processSafetyEmails");
+        console.log("Calling google.script.run.processSafetyEmails with batch size 5 and fastMode=" + fastMode);
         google.script.run
           .withSuccessHandler(handleBatchComplete)
           .withFailureHandler(function(err) {
@@ -379,7 +388,7 @@
             btn.textContent = "Retry";
             if (reprocessBtn) reprocessBtn.disabled = false;
           })
-          .processSafetyEmails(days, 50, newOnlyMode);
+          .processSafetyEmails(days, 5, newOnlyMode, fastMode);  // BATCH SIZE 5 + fastMode
         console.log("google.script.run initiated");
       } catch(e) {
         console.error("Error in processEmails:", e);
@@ -433,6 +442,7 @@
             updateDaysBackState();
 
             // Start the processing
+            var fastMode = document.getElementById("fastMode").checked;
             google.script.run
               .withSuccessHandler(handleBatchComplete)
               .withFailureHandler(function(err) {
@@ -442,7 +452,7 @@
                 reprocessBtn.disabled = false;
                 reprocessBtn.textContent = "🔄 Reprocess All (Clear & Restart)";
               })
-              .processSafetyEmails(90, 50, false);
+              .processSafetyEmails(90, 5, false, fastMode);  // BATCH SIZE 5 + fastMode
           } else {
             status.innerHTML = "<span style='color: red;'>❌ Failed to clear data</span>";
             btn.disabled = false;
@@ -463,6 +473,7 @@
     function handleBatchComplete(result) {
       console.log("handleBatchComplete called", result);
       var btn = document.getElementById("processBtn");
+      var continueBtn = document.getElementById("continueBtn");
       var reprocessBtn = document.getElementById("reprocessAllBtn");
       var status = document.getElementById("status");
       var progressContainer = document.getElementById("progressContainer");
@@ -477,24 +488,78 @@
 
         if (result && result.needsApproval) {
           showApprovalDialog(result.corrections, result);
+        } else if (result && result.timedOut) {
+          // Handle graceful timeout - show continue button
+          var pct = Math.round((result.threadsProcessed / result.totalThreads) * 100);
+          progressBar.style.width = pct + "%";
+          progressBar.textContent = result.threadsProcessed + " of " + result.totalThreads + " (" + pct + "%)";
+          progressBar.style.background = "linear-gradient(90deg, #ffc107, #e67c00)";
+
+          status.innerHTML =
+            "⏱️ <span class='progress' style='color:#e67c00;'>Stopped to prevent timeout</span><br>" +
+            "<div class='info'>⏱️ Elapsed time: " + result.elapsedSeconds + " seconds</div>" +
+            "<div class='info'>Progress: " + result.threadsProcessed + " / " + result.totalThreads + " emails (" + pct + "%)</div>" +
+            "<div class='info'>This batch: " + result.processedThisBatch + " processed, " + result.skippedThisBatch + " skipped</div>" +
+            "<div class='info' style='color:#28a745;font-weight:bold;'>✅ Progress saved! Click 'Continue Processing' to resume.</div>";
+
+          btn.disabled = false;
+          btn.innerHTML = "🔄 Start Over";
+          btn.onclick = function() { isFirstCall = true; processEmails(); };
+
+          // Show the Continue button prominently
+          if (continueBtn) {
+            continueBtn.style.display = "block";
+            continueBtn.disabled = false;
+          }
+
+          if (reprocessBtn) {
+            reprocessBtn.disabled = false;
+            reprocessBtn.textContent = "🔄 Reprocess All (Clear & Restart)";
+          }
         } else if (result && result.complete) {
           progressBar.style.width = "100%";
           progressBar.textContent = result.totalThreads + " of " + result.totalThreads + " (100%)";
           progressBar.style.background = "linear-gradient(90deg, #34A853, #137333)";
 
           var modeInfo = result.newOnlyMode ? " (new only since " + result.lastProcessedDate + ")" : " (last " + currentDays + " days)";
-          var complianceInfo = result.complianceRecordsAdded ? "<div class='info'>📋 JHA/Safety Meeting records logged: " + result.complianceRecordsAdded + "</div>" : "";
+
+          // Build logs info from the new Option B logging
+          var logsInfo = "";
+          if (result.logsCreated) {
+            var jhaCount = result.logsCreated.jha || 0;
+            var weeklyCount = result.logsCreated.weekly || 0;
+            var monthlyCount = result.logsCreated.monthly || 0;
+            var totalLogs = jhaCount + weeklyCount + monthlyCount;
+
+            console.log("Logs Created: JHA=" + jhaCount + ", Weekly=" + weeklyCount + ", Monthly=" + monthlyCount);
+
+            if (totalLogs > 0) {
+              logsInfo = "<div class='info'>📋 Logged to sheets: " + totalLogs + " total (JHA: " + jhaCount + ", Weekly: " + weeklyCount + ", Monthly: " + monthlyCount + ")</div>";
+            } else {
+              logsInfo = "<div class='info' style='color:#e65100;'>⚠️ No new records logged (all may be duplicates)</div>";
+            }
+          }
+
+          // Legacy compliance records info (backward compat)
+          var complianceInfo = "";
+          if (!result.logsCreated && result.complianceRecordsAdded) {
+            complianceInfo = "<div class='info'>📋 JHA/Safety Meeting records logged: " + result.complianceRecordsAdded + "</div>";
+          }
 
           status.innerHTML =
             "✅ <span class='progress'>All Complete!</span>" + modeInfo + "<br>" +
             "<div class='info'>📧 Total emails processed: " + result.totalThreads + "</div>" +
-            "<div class='info'>Logged: " + result.processedThisBatch + " | Skipped (duplicates): " + result.skippedThisBatch + "</div>" +
-            "<div class='info'>Equipment issues found: " + result.issuesThisBatch + "</div>" + complianceInfo;
+            "<div class='info'>This batch: " + result.processedThisBatch + " processed, " + result.skippedThisBatch + " skipped</div>" +
+            "<div class='info'>Equipment issues found: " + result.issuesThisBatch + "</div>" +
+            logsInfo + complianceInfo;
 
           btn.style.background = "#34A853";
           btn.innerHTML = "✅ Close";
           btn.disabled = false;
           btn.onclick = function() { google.script.host.close(); };
+
+          // Hide continue button
+          if (continueBtn) continueBtn.style.display = "none";
 
           // Re-enable reprocess button
           if (reprocessBtn) {
@@ -523,6 +588,7 @@
 
           btn.innerHTML = "Processing... (" + result.threadsRemaining + " remaining)";
           btn.disabled = true;
+          if (continueBtn) continueBtn.style.display = "none";
           setTimeout(function() { continueBatch(); }, 1000);
         }
       } catch(e) {
@@ -610,6 +676,7 @@
     }
 
     function continueBatch() {
+      var fastMode = document.getElementById("fastMode").checked;
       google.script.run
         .withSuccessHandler(handleBatchComplete)
         .withFailureHandler(function(err) {
@@ -620,7 +687,27 @@
           btn.textContent = "Retry";
           btn.onclick = function() { isFirstCall = true; processEmails(); };
         })
-        .processSafetyEmails(currentDays, 50, newOnlyMode);
+        .processSafetyEmails(currentDays, 5, newOnlyMode, fastMode);  // BATCH SIZE 5
+    }
+
+    // Called when user clicks "Continue Processing" after a timeout
+    function continueProcessing() {
+      console.log("continueProcessing called - resuming from saved progress");
+
+      var btn = document.getElementById("processBtn");
+      var continueBtn = document.getElementById("continueBtn");
+      var status = document.getElementById("status");
+      var progressBar = document.getElementById("progressBar");
+
+      btn.disabled = true;
+      if (continueBtn) {
+        continueBtn.disabled = true;
+        continueBtn.textContent = "Resuming...";
+      }
+      progressBar.style.background = "linear-gradient(90deg, #4285f4, #34a853)";
+      status.innerHTML = "⏳ <span class='progress'>Resuming processing...</span>";
+
+      continueBatch();
     }
 
     function showComplianceGrid(compliance) {

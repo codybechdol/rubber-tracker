@@ -820,20 +820,83 @@ function applySpecialCircumstanceUpdate(data) {
       jobClassificationCol = 13; // Column N
     }
 
-    // Find the employee by name
+    // Find the employee by name (with fuzzy matching support)
     var nameLower = data.name.toLowerCase().trim();
     var rowIndex = -1;
     var oldLocation = '';
     var oldJobNum = '';
     var oldClassification = '';
+    var actualEmployeeName = data.name; // Will be updated if fuzzy match is used
 
+    // First pass: exact match
     for (var i = 1; i < sheetData.length; i++) {
-      if (String(sheetData[i][nameCol]).toLowerCase().trim() === nameLower) {
+      var sheetNameLower = String(sheetData[i][nameCol]).toLowerCase().trim();
+      if (sheetNameLower === nameLower) {
         rowIndex = i + 1;
         oldLocation = String(sheetData[i][locationCol] || '');
         oldJobNum = String(sheetData[i][jobNumCol] || '');
         oldClassification = String(sheetData[i][jobClassificationCol] || '');
+        actualEmployeeName = String(sheetData[i][nameCol]);
         break;
+      }
+    }
+
+    // Second pass: fuzzy match if exact match failed
+    if (rowIndex === -1) {
+      var nameParts = nameLower.split(/\s+/);
+      var searchFirst = nameParts[0] || '';
+      var searchLast = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
+      var bestMatch = { rowIndex: -1, score: 0, name: '' };
+
+      for (var i = 1; i < sheetData.length; i++) {
+        var sheetName = String(sheetData[i][nameCol] || '');
+        var sheetNameLower = sheetName.toLowerCase().trim();
+        var sheetParts = sheetNameLower.split(/\s+/);
+        var sheetFirst = sheetParts[0] || '';
+        var sheetLast = sheetParts.length > 1 ? sheetParts[sheetParts.length - 1] : '';
+
+        // Check for nickname/abbreviation matches (Nick/Nicholas, Matt/Matthew, etc.)
+        var firstNameMatches = sheetFirst === searchFirst ||
+          (searchFirst === 'nick' && sheetFirst === 'nicholas') ||
+          (searchFirst === 'nicholas' && sheetFirst === 'nick') ||
+          (searchFirst === 'matt' && sheetFirst === 'matthew') ||
+          (searchFirst === 'matthew' && sheetFirst === 'matt') ||
+          (searchFirst === 'jim' && sheetFirst === 'james') ||
+          (searchFirst === 'james' && sheetFirst === 'jim') ||
+          (searchFirst === 'jimmy' && sheetFirst === 'james') ||
+          (searchFirst === 'james' && sheetFirst === 'jimmy') ||
+          (searchFirst === 'bob' && sheetFirst === 'robert') ||
+          (searchFirst === 'robert' && sheetFirst === 'bob') ||
+          (searchFirst === 'mike' && sheetFirst === 'michael') ||
+          (searchFirst === 'michael' && sheetFirst === 'mike') ||
+          (searchFirst === 'chris' && sheetFirst === 'christopher') ||
+          (searchFirst === 'christopher' && sheetFirst === 'chris') ||
+          sheetFirst.indexOf(searchFirst) === 0 ||  // Sheet name starts with search name
+          searchFirst.indexOf(sheetFirst) === 0;    // Search name starts with sheet name
+
+        var lastNameMatches = sheetLast === searchLast;
+
+        // Calculate match score
+        var score = 0;
+        if (firstNameMatches) score += 40;
+        if (lastNameMatches) score += 60;
+
+        // If first and last name both match (with nickname support), this is a strong match
+        if (score > bestMatch.score && score >= 80) {
+          bestMatch.rowIndex = i + 1;
+          bestMatch.score = score;
+          bestMatch.name = sheetName;
+          bestMatch.data = sheetData[i];
+        }
+      }
+
+      if (bestMatch.rowIndex !== -1) {
+        rowIndex = bestMatch.rowIndex;
+        oldLocation = String(bestMatch.data[locationCol] || '');
+        oldJobNum = String(bestMatch.data[jobNumCol] || '');
+        oldClassification = String(bestMatch.data[jobClassificationCol] || '');
+        actualEmployeeName = bestMatch.name;
+        Logger.log('Fuzzy matched "' + data.name + '" to "' + actualEmployeeName + '" (score: ' + bestMatch.score + ')');
       }
     }
 

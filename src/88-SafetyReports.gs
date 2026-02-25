@@ -3,30 +3,2755 @@
  *
  * Gmail integration for processing JHAs, Safety Meetings, and Fleet Checklists
  * Extracts equipment issues (fire extinguishers, hot sticks, rubber goods, etc.)
- * Logs to Safety Reports sheet for tracking and task creation
+ * Logs to Safety Equipment Needs sheet for tracking and task creation
  *
  * Created: February 4, 2026
  * Updated: February 18, 2026 - Added secondary job number support for lookupForemanByJobNumber
+ * Updated: February 24, 2026 - MAJOR REFACTOR: Direct compliance tracking from Gmail
+ *   - Renamed "Safety Reports" → "Safety Equipment Needs"
+ *   - JHA/Safety Meeting compliance tracked directly from parsed emails
+ *   - Removed writing of "No Issues" records to Safety Equipment Needs
+ *   - Added unified resolveJobToCrew() function
+ *   - Added real-time compliance updates during email processing
  */
 
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+
 /**
- * Creates the Safety Reports tracking sheet
+ * Sheet name constants - allows for easy migration and backward compatibility
+ */
+var SAFETY_EQUIPMENT_SHEET_NAME = "Safety Equipment Needs";
+var SAFETY_EQUIPMENT_SHEET_OLD_NAME = "Safety Reports"; // For backward compat
+var SAFETY_COMPLIANCE_SHEET_NAME = "Safety Compliance";
+
+/**
+ * NEW: Raw data logging sheet names (Option B implementation - Feb 24, 2026)
+ * These sheets provide an audit trail for ALL safety emails processed
+ */
+var JHA_LOG_SHEET_NAME = "JHA Log";
+var WEEKLY_SAFETY_LOG_SHEET_NAME = "Weekly Safety Log";
+var MONTHLY_CHECKLIST_LOG_SHEET_NAME = "Monthly Checklist Log";
+
+// ============================================================================
+// LOG SHEET SETUP FUNCTIONS (Option B - Feb 24, 2026)
+// ============================================================================
+
+/**
+ * Creates the JHA Log sheet for tracking all JHA emails
+ * This provides an audit trail - every JHA email gets logged here
+ * Columns: Date Received, Date Created, Job Number, Foreman, Email Subject,
+ *          Email ID, Source, Status, Credited To, Notes
+ */
+function setupJHALogSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(JHA_LOG_SHEET_NAME);
+
+  if (sheet) {
+    // Sheet exists - don't recreate (preserves data)
+    Logger.log("setupJHALogSheet: Sheet already exists");
+    return sheet;
+  }
+
+  sheet = ss.insertSheet(JHA_LOG_SHEET_NAME);
+
+  var headers = [
+    "Date Received",   // A - When email arrived
+    "Date Created",    // B - JHA work date (from PDF or subject)
+    "Job Number",      // C - Raw job number from email
+    "Foreman",         // D - Resolved foreman name (or "UNKNOWN")
+    "Email Subject",   // E - Full subject for debugging
+    "Email ID",        // F - Gmail message ID (deduplication)
+    "Source",          // G - "Subject" or "PDF" - where date came from
+    "Status",          // H - "Credited", "Unknown Job", "Duplicate", "Error"
+    "Credited To",     // I - Which tracked crew got credit
+    "Notes"            // J - Additional info or error messages
+  ];
+
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.getRange(1, 1, 1, headers.length)
+    .setFontWeight("bold")
+    .setBackground("#4285F4")  // Blue
+    .setFontColor("white");
+  sheet.setFrozenRows(1);
+
+  // Set column widths
+  sheet.setColumnWidth(1, 120);  // Date Received
+  sheet.setColumnWidth(2, 120);  // Date Created
+  sheet.setColumnWidth(3, 90);   // Job Number
+  sheet.setColumnWidth(4, 140);  // Foreman
+  sheet.setColumnWidth(5, 400);  // Email Subject
+  sheet.setColumnWidth(6, 180);  // Email ID
+  sheet.setColumnWidth(7, 80);   // Source
+  sheet.setColumnWidth(8, 100);  // Status
+  sheet.setColumnWidth(9, 90);   // Credited To
+  sheet.setColumnWidth(10, 250); // Notes
+
+  // Format date columns
+  sheet.getRange(2, 1, 1000, 1).setNumberFormat("MM/dd/yyyy HH:mm");
+  sheet.getRange(2, 2, 1000, 1).setNumberFormat("MM/dd/yyyy");
+
+  // Add conditional formatting for Status column
+  var statusRange = sheet.getRange("H2:H1001");
+  var rules = sheet.getConditionalFormatRules();
+
+  // Credited = Green
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo("Credited")
+    .setBackground("#C8E6C9")
+    .setFontColor("#1B5E20")
+    .setRanges([statusRange])
+    .build());
+
+  // Unknown Job = Orange
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo("Unknown Job")
+    .setBackground("#FFE0B2")
+    .setFontColor("#E65100")
+    .setRanges([statusRange])
+    .build());
+
+  // Duplicate = Gray
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo("Duplicate")
+    .setBackground("#E0E0E0")
+    .setFontColor("#616161")
+    .setRanges([statusRange])
+    .build());
+
+  // Error = Red
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo("Error")
+    .setBackground("#FFCDD2")
+    .setFontColor("#B71C1C")
+    .setRanges([statusRange])
+    .build());
+
+  sheet.setConditionalFormatRules(rules);
+
+  Logger.log("setupJHALogSheet: Created JHA Log sheet");
+  return sheet;
+}
+
+/**
+ * Creates the Weekly Safety Log sheet for tracking Safety Meeting emails
+ */
+function setupWeeklySafetyLogSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(WEEKLY_SAFETY_LOG_SHEET_NAME);
+
+  if (sheet) {
+    Logger.log("setupWeeklySafetyLogSheet: Sheet already exists");
+    return sheet;
+  }
+
+  sheet = ss.insertSheet(WEEKLY_SAFETY_LOG_SHEET_NAME);
+
+  var headers = [
+    "Date Received",   // A - When email arrived
+    "Week Of",         // B - Week date from subject
+    "Job Number",      // C - Raw job number from email
+    "Foreman",         // D - Resolved foreman name
+    "Email Subject",   // E - Full subject
+    "Email ID",        // F - Gmail message ID
+    "Status",          // G - "Credited", "Unknown Job", "Duplicate"
+    "Credited To",     // H - Which tracked crew got credit
+    "Notes"            // I - Additional info
+  ];
+
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.getRange(1, 1, 1, headers.length)
+    .setFontWeight("bold")
+    .setBackground("#0F9D58")  // Green
+    .setFontColor("white");
+  sheet.setFrozenRows(1);
+
+  // Set column widths
+  sheet.setColumnWidth(1, 120);  // Date Received
+  sheet.setColumnWidth(2, 120);  // Week Of
+  sheet.setColumnWidth(3, 90);   // Job Number
+  sheet.setColumnWidth(4, 140);  // Foreman
+  sheet.setColumnWidth(5, 400);  // Email Subject
+  sheet.setColumnWidth(6, 180);  // Email ID
+  sheet.setColumnWidth(7, 100);  // Status
+  sheet.setColumnWidth(8, 90);   // Credited To
+  sheet.setColumnWidth(9, 250);  // Notes
+
+  // Format date columns
+  sheet.getRange(2, 1, 1000, 1).setNumberFormat("MM/dd/yyyy HH:mm");
+  sheet.getRange(2, 2, 1000, 1).setNumberFormat("MM/dd/yyyy");
+
+  // Add conditional formatting for Status column
+  var statusRange = sheet.getRange("G2:G1001");
+  var rules = sheet.getConditionalFormatRules();
+
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo("Credited")
+    .setBackground("#C8E6C9")
+    .setFontColor("#1B5E20")
+    .setRanges([statusRange])
+    .build());
+
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo("Unknown Job")
+    .setBackground("#FFE0B2")
+    .setFontColor("#E65100")
+    .setRanges([statusRange])
+    .build());
+
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo("Duplicate")
+    .setBackground("#E0E0E0")
+    .setFontColor("#616161")
+    .setRanges([statusRange])
+    .build());
+
+  sheet.setConditionalFormatRules(rules);
+
+  Logger.log("setupWeeklySafetyLogSheet: Created Weekly Safety Log sheet");
+  return sheet;
+}
+
+/**
+ * Creates the Monthly Checklist Log sheet for tracking Fleet Safety Checklists
+ */
+function setupMonthlyChecklistLogSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(MONTHLY_CHECKLIST_LOG_SHEET_NAME);
+
+  if (sheet) {
+    Logger.log("setupMonthlyChecklistLogSheet: Sheet already exists");
+    return sheet;
+  }
+
+  sheet = ss.insertSheet(MONTHLY_CHECKLIST_LOG_SHEET_NAME);
+
+  var headers = [
+    "Date Received",      // A - When email arrived
+    "Report Date",        // B - Date of checklist
+    "Job Number",         // C - Raw job number
+    "Foreman",            // D - Resolved foreman name
+    "Vehicle Number",     // E - Extracted vehicle #
+    "Email Subject",      // F - Full subject
+    "Email ID",           // G - Gmail message ID
+    "Status",             // H - "Credited", "Unknown Job", "Duplicate"
+    "Credited To",        // I - Which crew got credit
+    "Has Equipment Issues", // J - "Yes" or "No"
+    "Notes"               // K - Additional info
+  ];
+
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.getRange(1, 1, 1, headers.length)
+    .setFontWeight("bold")
+    .setBackground("#F4B400")  // Yellow
+    .setFontColor("#333333");
+  sheet.setFrozenRows(1);
+
+  // Set column widths
+  sheet.setColumnWidth(1, 120);  // Date Received
+  sheet.setColumnWidth(2, 100);  // Report Date
+  sheet.setColumnWidth(3, 90);   // Job Number
+  sheet.setColumnWidth(4, 140);  // Foreman
+  sheet.setColumnWidth(5, 100);  // Vehicle Number
+  sheet.setColumnWidth(6, 400);  // Email Subject
+  sheet.setColumnWidth(7, 180);  // Email ID
+  sheet.setColumnWidth(8, 100);  // Status
+  sheet.setColumnWidth(9, 90);   // Credited To
+  sheet.setColumnWidth(10, 60);  // Has Equipment Issues
+  sheet.setColumnWidth(11, 250); // Notes
+
+  // Format date columns
+  sheet.getRange(2, 1, 1000, 1).setNumberFormat("MM/dd/yyyy HH:mm");
+  sheet.getRange(2, 2, 1000, 1).setNumberFormat("MM/dd/yyyy");
+
+  // Add conditional formatting for Status column
+  var statusRange = sheet.getRange("H2:H1001");
+  var rules = sheet.getConditionalFormatRules();
+
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo("Credited")
+    .setBackground("#C8E6C9")
+    .setFontColor("#1B5E20")
+    .setRanges([statusRange])
+    .build());
+
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo("Unknown Job")
+    .setBackground("#FFE0B2")
+    .setFontColor("#E65100")
+    .setRanges([statusRange])
+    .build());
+
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo("Duplicate")
+    .setBackground("#E0E0E0")
+    .setFontColor("#616161")
+    .setRanges([statusRange])
+    .build());
+
+  sheet.setConditionalFormatRules(rules);
+
+  Logger.log("setupMonthlyChecklistLogSheet: Created Monthly Checklist Log sheet");
+  return sheet;
+}
+
+/**
+ * Creates all three log sheets at once
+ * Menu function: Glove Manager → Safety → Setup Log Sheets
+ */
+function setupAllSafetyLogSheets() {
+  var jhaSheet = setupJHALogSheet();
+  var weeklySheet = setupWeeklySafetyLogSheet();
+  var monthlySheet = setupMonthlyChecklistLogSheet();
+
+  SpreadsheetApp.getUi().alert('✅ Log Sheets Created',
+    'Created 3 safety log sheets:\n\n' +
+    '• JHA Log - tracks all Job Hazard Reports\n' +
+    '• Weekly Safety Log - tracks Safety Meeting Reports\n' +
+    '• Monthly Checklist Log - tracks Fleet Safety Checklists\n\n' +
+    'These sheets provide an audit trail for compliance tracking.',
+    SpreadsheetApp.getUi().ButtonSet.OK);
+
+  Logger.log("setupAllSafetyLogSheets: Created all 3 log sheets");
+}
+
+// ============================================================================
+// LOG SHEET DATA FUNCTIONS (Option B - Feb 24, 2026)
+// ============================================================================
+
+/**
+ * Gets or creates the JHA Log sheet
+ */
+function getJHALogSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(JHA_LOG_SHEET_NAME);
+  if (!sheet) {
+    sheet = setupJHALogSheet();
+  }
+  return sheet;
+}
+
+/**
+ * Gets or creates the Weekly Safety Log sheet
+ */
+function getWeeklySafetyLogSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(WEEKLY_SAFETY_LOG_SHEET_NAME);
+  if (!sheet) {
+    sheet = setupWeeklySafetyLogSheet();
+  }
+  return sheet;
+}
+
+/**
+ * Gets or creates the Monthly Checklist Log sheet
+ */
+function getMonthlyChecklistLogSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(MONTHLY_CHECKLIST_LOG_SHEET_NAME);
+  if (!sheet) {
+    sheet = setupMonthlyChecklistLogSheet();
+  }
+  return sheet;
+}
+
+/**
+ * Checks if an email ID already exists in a log sheet (deduplication)
+ * @param {Sheet} sheet - The log sheet to check
+ * @param {string} emailId - Gmail message ID
+ * @param {number} emailIdCol - Column index (0-based) of Email ID
+ * @returns {boolean} - true if already exists
+ */
+function emailExistsInLog(sheet, emailId, emailIdCol) {
+  if (!sheet || sheet.getLastRow() < 2) return false;
+
+  var data = sheet.getRange(2, emailIdCol + 1, sheet.getLastRow() - 1, 1).getValues();
+  for (var i = 0; i < data.length; i++) {
+    if (data[i][0] === emailId) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Logs a JHA email to the JHA Log sheet
+ * This is THE key function for Option B - every JHA gets logged here
+ *
+ * @param {Object} params - Log parameters
+ * @param {Date} params.dateReceived - When email arrived
+ * @param {Date} params.dateCreated - JHA work date
+ * @param {string} params.jobNumber - Raw job number from email
+ * @param {string} params.foreman - Resolved foreman name
+ * @param {string} params.emailSubject - Full subject line
+ * @param {string} params.emailId - Gmail message ID
+ * @param {string} params.source - "Subject" or "PDF"
+ * @param {string} params.status - "Credited", "Unknown Job", "Duplicate", "Error"
+ * @param {string} params.creditedTo - Tracked crew that got credit (or blank)
+ * @param {string} params.notes - Additional info
+ * @returns {Object} - { success: boolean, row: number }
+ */
+function logJHAEmail(params) {
+  var sheet = getJHALogSheet();
+  var tz = Session.getScriptTimeZone();
+
+  // Check for duplicate
+  if (emailExistsInLog(sheet, params.emailId, 5)) { // Column F = Email ID (0-indexed = 5)
+    Logger.log("logJHAEmail: Duplicate - " + params.emailId);
+    return { success: false, duplicate: true };
+  }
+
+  var row = [
+    params.dateReceived ? Utilities.formatDate(params.dateReceived, tz, "MM/dd/yyyy HH:mm") : '',
+    params.dateCreated ? Utilities.formatDate(params.dateCreated, tz, "MM/dd/yyyy") : '',
+    params.jobNumber || '',
+    params.foreman || 'UNKNOWN',
+    params.emailSubject || '',
+    params.emailId || '',
+    params.source || 'Subject',
+    params.status || 'Credited',
+    params.creditedTo || '',
+    params.notes || ''
+  ];
+
+  sheet.appendRow(row);
+  var lastRow = sheet.getLastRow();
+
+  Logger.log("logJHAEmail: Logged JHA for job " + params.jobNumber + " - Status: " + params.status + " - Credited To: " + params.creditedTo);
+  return { success: true, row: lastRow };
+}
+
+/**
+ * Logs a Safety Meeting email to the Weekly Safety Log sheet
+ *
+ * @param {Object} params - Log parameters
+ * @param {Date} params.dateReceived - When email arrived
+ * @param {Date} params.weekOf - Week date from subject
+ * @param {string} params.jobNumber - Raw job number
+ * @param {string} params.foreman - Resolved foreman name
+ * @param {string} params.emailSubject - Full subject
+ * @param {string} params.emailId - Gmail message ID
+ * @param {string} params.status - Status
+ * @param {string} params.creditedTo - Tracked crew
+ * @param {string} params.notes - Additional info
+ * @returns {Object} - { success: boolean, row: number }
+ */
+function logWeeklySafetyEmail(params) {
+  var sheet = getWeeklySafetyLogSheet();
+  var tz = Session.getScriptTimeZone();
+
+  // Check for duplicate
+  if (emailExistsInLog(sheet, params.emailId, 5)) { // Column F = Email ID
+    Logger.log("logWeeklySafetyEmail: Duplicate - " + params.emailId);
+    return { success: false, duplicate: true };
+  }
+
+  var row = [
+    params.dateReceived ? Utilities.formatDate(params.dateReceived, tz, "MM/dd/yyyy HH:mm") : '',
+    params.weekOf ? Utilities.formatDate(params.weekOf, tz, "MM/dd/yyyy") : '',
+    params.jobNumber || '',
+    params.foreman || 'UNKNOWN',
+    params.emailSubject || '',
+    params.emailId || '',
+    params.status || 'Credited',
+    params.creditedTo || '',
+    params.notes || ''
+  ];
+
+  sheet.appendRow(row);
+  var lastRow = sheet.getLastRow();
+
+  Logger.log("logWeeklySafetyEmail: Logged meeting for job " + params.jobNumber + " - Status: " + params.status);
+  return { success: true, row: lastRow };
+}
+
+/**
+ * Logs a Monthly Checklist (Fleet Safety) email to the Monthly Checklist Log sheet
+ *
+ * @param {Object} params - Log parameters
+ * @param {Date} params.dateReceived - When email arrived
+ * @param {Date} params.reportDate - Report date
+ * @param {string} params.jobNumber - Raw job number
+ * @param {string} params.foreman - Resolved foreman name
+ * @param {string} params.vehicleNumber - Vehicle number
+ * @param {string} params.emailSubject - Full subject
+ * @param {string} params.emailId - Gmail message ID
+ * @param {string} params.status - Status
+ * @param {string} params.creditedTo - Tracked crew
+ * @param {boolean} params.hasEquipmentIssues - Whether equipment issues were found
+ * @param {string} params.notes - Additional info
+ * @returns {Object} - { success: boolean, row: number }
+ */
+function logMonthlyChecklistEmail(params) {
+  var sheet = getMonthlyChecklistLogSheet();
+  var tz = Session.getScriptTimeZone();
+
+  // Check for duplicate
+  if (emailExistsInLog(sheet, params.emailId, 6)) { // Column G = Email ID
+    Logger.log("logMonthlyChecklistEmail: Duplicate - " + params.emailId);
+    return { success: false, duplicate: true };
+  }
+
+  var row = [
+    params.dateReceived ? Utilities.formatDate(params.dateReceived, tz, "MM/dd/yyyy HH:mm") : '',
+    params.reportDate ? Utilities.formatDate(params.reportDate, tz, "MM/dd/yyyy") : '',
+    params.jobNumber || '',
+    params.foreman || 'UNKNOWN',
+    params.vehicleNumber || '',
+    params.emailSubject || '',
+    params.emailId || '',
+    params.status || 'Credited',
+    params.creditedTo || '',
+    params.hasEquipmentIssues ? 'Yes' : 'No',
+    params.notes || ''
+  ];
+
+  sheet.appendRow(row);
+  var lastRow = sheet.getLastRow();
+
+  Logger.log("logMonthlyChecklistEmail: Logged checklist for job " + params.jobNumber + " - Status: " + params.status);
+  return { success: true, row: lastRow };
+}
+
+/**
+ * Cleans up old log entries (older than specified days)
+ * This keeps the log sheets manageable in size
+ * Run automatically at start of processSafetyEmails or via menu
+ *
+ * @param {number} daysToKeep - Number of days to keep (default: 90)
+ * @returns {Object} - { jhaDeleted, weeklyDeleted, monthlyDeleted }
+ */
+function cleanupOldLogEntries(daysToKeep) {
+  if (!daysToKeep) daysToKeep = 90;
+
+  var cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+
+  var result = {
+    jhaDeleted: 0,
+    weeklyDeleted: 0,
+    monthlyDeleted: 0
+  };
+
+  // Cleanup JHA Log
+  var jhaSheet = getJHALogSheet();
+  if (jhaSheet && jhaSheet.getLastRow() > 1) {
+    result.jhaDeleted = deleteOldRowsFromSheet(jhaSheet, cutoffDate, 0); // Column A = Date Received
+  }
+
+  // Cleanup Weekly Safety Log
+  var weeklySheet = getWeeklySafetyLogSheet();
+  if (weeklySheet && weeklySheet.getLastRow() > 1) {
+    result.weeklyDeleted = deleteOldRowsFromSheet(weeklySheet, cutoffDate, 0);
+  }
+
+  // Cleanup Monthly Checklist Log
+  var monthlySheet = getMonthlyChecklistLogSheet();
+  if (monthlySheet && monthlySheet.getLastRow() > 1) {
+    result.monthlyDeleted = deleteOldRowsFromSheet(monthlySheet, cutoffDate, 0);
+  }
+
+  var total = result.jhaDeleted + result.weeklyDeleted + result.monthlyDeleted;
+  Logger.log("cleanupOldLogEntries: Deleted " + total + " old entries (JHA: " + result.jhaDeleted +
+    ", Weekly: " + result.weeklyDeleted + ", Monthly: " + result.monthlyDeleted + ")");
+
+  return result;
+}
+
+/**
+ * Helper to delete rows older than cutoff date from a sheet
+ * @param {Sheet} sheet - The sheet to clean
+ * @param {Date} cutoffDate - Delete rows with date before this
+ * @param {number} dateCol - Column index (0-based) containing the date
+ * @returns {number} - Number of rows deleted
+ */
+function deleteOldRowsFromSheet(sheet, cutoffDate, dateCol) {
+  var data = sheet.getDataRange().getValues();
+  var rowsToDelete = [];
+
+  for (var i = data.length - 1; i >= 1; i--) {
+    var cellValue = data[i][dateCol];
+    if (cellValue) {
+      var rowDate = new Date(cellValue);
+      if (rowDate < cutoffDate) {
+        rowsToDelete.push(i + 1); // 1-based row number
+      }
+    }
+  }
+
+  // Delete from bottom to top
+  for (var r = 0; r < rowsToDelete.length; r++) {
+    sheet.deleteRow(rowsToDelete[r]);
+  }
+
+  return rowsToDelete.length;
+}
+
+// ============================================================================
+// DIAGNOSTIC FUNCTIONS (Debugging - Feb 24, 2026)
+// ============================================================================
+
+/**
+ * Debug function to check what's in the JHA Log sheet
+ * Run this from Script Editor to see the log contents
+ */
+function debugJHALogContents() {
+  var sheet = getJHALogSheet();
+  if (!sheet) {
+    Logger.log("DEBUG: JHA Log sheet not found!");
+    return;
+  }
+
+  var lastRow = sheet.getLastRow();
+  Logger.log("DEBUG: JHA Log has " + (lastRow - 1) + " records (excluding header)");
+
+  if (lastRow <= 1) {
+    Logger.log("DEBUG: JHA Log is EMPTY - no records logged");
+    return;
+  }
+
+  // Show first 10 records
+  var data = sheet.getRange(2, 1, Math.min(10, lastRow - 1), 10).getValues();
+  Logger.log("DEBUG: First " + data.length + " JHA records:");
+
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    Logger.log("  " + (i+1) + ": Date=" + row[1] + ", Job=" + row[2] + ", Status=" + row[7] + ", CreditedTo=" + row[8]);
+  }
+
+  // Count by status
+  var allData = sheet.getRange(2, 8, lastRow - 1, 1).getValues();
+  var statusCounts = {};
+  for (var j = 0; j < allData.length; j++) {
+    var status = String(allData[j][0] || 'Unknown').trim();
+    statusCounts[status] = (statusCounts[status] || 0) + 1;
+  }
+  Logger.log("DEBUG: JHA Status counts: " + JSON.stringify(statusCounts));
+}
+
+/**
+ * Debug function to check what's in the Weekly Safety Log sheet
+ */
+function debugWeeklySafetyLogContents() {
+  var sheet = getWeeklySafetyLogSheet();
+  if (!sheet) {
+    Logger.log("DEBUG: Weekly Safety Log sheet not found!");
+    return;
+  }
+
+  var lastRow = sheet.getLastRow();
+  Logger.log("DEBUG: Weekly Safety Log has " + (lastRow - 1) + " records (excluding header)");
+
+  if (lastRow <= 1) {
+    Logger.log("DEBUG: Weekly Safety Log is EMPTY - no records logged");
+    return;
+  }
+
+  // Show first 10 records
+  var data = sheet.getRange(2, 1, Math.min(10, lastRow - 1), 9).getValues();
+  Logger.log("DEBUG: First " + data.length + " Weekly Safety records:");
+
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    Logger.log("  " + (i+1) + ": WeekOf=" + row[1] + ", Job=" + row[2] + ", Status=" + row[6] + ", CreditedTo=" + row[7]);
+  }
+}
+
+/**
+ * Debug function to check compliance calculation
+ */
+function debugComplianceCalculation() {
+  var today = new Date();
+  var weekBounds = getWeekBoundaries(today);
+  var tz = Session.getScriptTimeZone();
+
+  Logger.log("DEBUG: Current week: " + Utilities.formatDate(weekBounds.weekStart, tz, "MM/dd/yyyy") +
+             " to " + Utilities.formatDate(weekBounds.weekEnd, tz, "MM/dd/yyyy"));
+
+  var result = calculateComplianceFromLogs(weekBounds.weekStart);
+
+  if (!result) {
+    Logger.log("DEBUG: calculateComplianceFromLogs returned null!");
+    return;
+  }
+
+  Logger.log("DEBUG: Compliance data for " + Object.keys(result.crewCompliance).length + " crews");
+
+  // Show crew summary
+  var creditedCount = 0;
+  var missingCount = 0;
+  for (var crewJob in result.crewCompliance) {
+    var crew = result.crewCompliance[crewJob];
+    var hasJHA = crew.jhaByDay.some(function(d) { return d === true; });
+    var hasWeekly = crew.weeklyMeeting;
+
+    if (hasJHA || hasWeekly) {
+      creditedCount++;
+      Logger.log("  " + crewJob + " (" + crew.foreman + "): JHAs=" +
+                 crew.jhaByDay.filter(function(d){return d;}).length +
+                 " days, Weekly=" + (hasWeekly ? "YES" : "no"));
+    } else {
+      missingCount++;
+    }
+  }
+
+  Logger.log("DEBUG: " + creditedCount + " crews have some reports, " + missingCount + " crews have none");
+
+  if (result.unknownJobs) {
+    Logger.log("DEBUG: Unknown jobs: " + Object.keys(result.unknownJobs).join(", "));
+  }
+}
+
+/**
+ * Menu function to diagnose the state of safety log sheets
+ * Run this from Glove Manager → Safety → 🔍 Diagnose Log Sheets
+ */
+function menuDiagnoseLogSheets() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+  var report = [];
+
+  // Check JHA Log
+  var jhaSheet = ss.getSheetByName(JHA_LOG_SHEET_NAME);
+  if (jhaSheet) {
+    var jhaCount = jhaSheet.getLastRow() - 1;
+    report.push('📄 JHA Log: ' + jhaCount + ' records');
+
+    if (jhaCount > 0) {
+      // Count by status
+      var jhaData = jhaSheet.getRange(2, 8, jhaCount, 2).getValues(); // Status, Credited To
+      var credited = 0, unknown = 0, other = 0;
+      var creditedCrews = {};
+      for (var i = 0; i < jhaData.length; i++) {
+        var status = String(jhaData[i][0] || '').trim();
+        var crew = String(jhaData[i][1] || '').trim();
+        if (status === 'Credited') {
+          credited++;
+          creditedCrews[crew] = (creditedCrews[crew] || 0) + 1;
+        } else if (status === 'Unknown Job') {
+          unknown++;
+        } else {
+          other++;
+        }
+      }
+      report.push('   - Credited: ' + credited + ', Unknown Job: ' + unknown + ', Other: ' + other);
+      if (credited > 0) {
+        var crewList = Object.keys(creditedCrews).slice(0, 5).map(function(c) { return c + ' (' + creditedCrews[c] + ')'; });
+        report.push('   - Top crews: ' + crewList.join(', '));
+      }
+    }
+  } else {
+    report.push('📄 JHA Log: NOT FOUND');
+  }
+
+  // Check Weekly Safety Log
+  var weeklySheet = ss.getSheetByName(WEEKLY_SAFETY_LOG_SHEET_NAME);
+  if (weeklySheet) {
+    var weeklyCount = weeklySheet.getLastRow() - 1;
+    report.push('📄 Weekly Safety Log: ' + weeklyCount + ' records');
+
+    if (weeklyCount > 0) {
+      var weeklyData = weeklySheet.getRange(2, 7, weeklyCount, 2).getValues(); // Status, Credited To
+      var credited = 0, unknown = 0;
+      for (var i = 0; i < weeklyData.length; i++) {
+        if (String(weeklyData[i][0]).trim() === 'Credited') credited++;
+        else if (String(weeklyData[i][0]).trim() === 'Unknown Job') unknown++;
+      }
+      report.push('   - Credited: ' + credited + ', Unknown Job: ' + unknown);
+    }
+  } else {
+    report.push('📄 Weekly Safety Log: NOT FOUND');
+  }
+
+  // Check Monthly Checklist Log
+  var monthlySheet = ss.getSheetByName(MONTHLY_CHECKLIST_LOG_SHEET_NAME);
+  if (monthlySheet) {
+    var monthlyCount = monthlySheet.getLastRow() - 1;
+    report.push('📄 Monthly Checklist Log: ' + monthlyCount + ' records');
+  } else {
+    report.push('📄 Monthly Checklist Log: NOT FOUND');
+  }
+
+  // Check Safety Compliance
+  var complianceSheet = ss.getSheetByName(SAFETY_COMPLIANCE_SHEET_NAME);
+  if (complianceSheet) {
+    var compCount = complianceSheet.getLastRow() - 1;
+    report.push('\\n📊 Safety Compliance: ' + compCount + ' records');
+  } else {
+    report.push('\\n📊 Safety Compliance: NOT FOUND');
+  }
+
+  // Recommendation
+  report.push('\\n--- RECOMMENDATION ---');
+  if (jhaSheet && jhaSheet.getLastRow() <= 1 && weeklySheet && weeklySheet.getLastRow() <= 1) {
+    report.push('⚠️ Log sheets are EMPTY. Run "Process Safety Emails" to populate them.');
+  } else if (jhaSheet && jhaSheet.getLastRow() > 1) {
+    report.push('✅ Log sheets have data. Run "🔄 Recalculate Compliance" to update Safety Compliance from logs.');
+  }
+
+  ui.alert('🔍 Safety Log Sheets Diagnostic', report.join('\\n'), ui.ButtonSet.OK);
+}
+
+// ============================================================================
+// COMPLIANCE CALCULATION FROM LOGS (Option B - Feb 24, 2026)
+// ============================================================================
+
+/**
+ * DETAILED diagnostic that traces the exact compliance calculation
+ * Shows: what dates are being compared, what matches, what doesn't
+ * Menu function: Glove Manager → Safety → 📊 Trace Compliance Calculation
+ */
+function traceComplianceCalculation() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var tz = Session.getScriptTimeZone();
+  var report = [];
+
+  report.push('========================================');
+  report.push('DETAILED COMPLIANCE TRACE');
+  report.push('Generated: ' + new Date().toLocaleString());
+  report.push('========================================');
+  report.push('');
+
+  // Get current week boundaries
+  var today = new Date();
+  var weekBounds = getWeekBoundaries(today);
+  var weekStartStr = Utilities.formatDate(weekBounds.weekStart, tz, 'MM/dd/yyyy');
+  var weekEndStr = Utilities.formatDate(weekBounds.weekEnd, tz, 'MM/dd/yyyy');
+
+  report.push('=== WEEK BOUNDARIES ===');
+  report.push('Today: ' + Utilities.formatDate(today, tz, 'MM/dd/yyyy HH:mm'));
+  report.push('Week Start (Sunday): ' + weekStartStr + ' @ ' + weekBounds.weekStart.toTimeString());
+  report.push('Week End (Saturday): ' + weekEndStr + ' @ ' + weekBounds.weekEnd.toTimeString());
+
+  // Get tracked crews
+  var crews = getActiveCrews();
+  report.push('');
+  report.push('=== TRACKED CREWS (' + crews.length + ' total) ===');
+  report.push(crews.join(', '));
+
+  // Build a set for fast lookup
+  var crewSet = {};
+  for (var c = 0; c < crews.length; c++) {
+    crewSet[crews[c]] = true;
+  }
+
+  // Read JHA Log
+  var jhaSheet = ss.getSheetByName('JHA Log');
+  if (!jhaSheet) {
+    report.push('');
+    report.push('❌ JHA Log sheet not found!');
+  } else {
+    var jhaData = jhaSheet.getDataRange().getValues();
+    report.push('');
+    report.push('=== JHA LOG ANALYSIS ===');
+    report.push('Total rows in JHA Log: ' + (jhaData.length - 1));
+
+    var matchedCount = 0;
+    var skippedOutsideWeek = 0;
+    var skippedNoDate = 0;
+    var skippedNotCredited = 0;
+    var skippedCrewNotTracked = 0;
+    var creditedByCrew = {};
+
+    // Initialize crew tracking
+    for (var ci = 0; ci < crews.length; ci++) {
+      creditedByCrew[crews[ci]] = { mon: false, tue: false, wed: false, thu: false, fri: false, days: [] };
+    }
+
+    report.push('');
+    report.push('--- Processing each JHA Log entry ---');
+
+    for (var j = 1; j < Math.min(jhaData.length, 30); j++) { // Limit to first 30 for readability
+      var jhaRow = jhaData[j];
+      var dateCreated = jhaRow[1]; // Column B
+      var jobNumber = String(jhaRow[2] || '').trim();
+      var status = String(jhaRow[7] || '').trim(); // Column H
+      var creditedTo = String(jhaRow[8] || '').trim(); // Column I
+
+      if (!dateCreated) {
+        skippedNoDate++;
+        continue;
+      }
+
+      var jhaDate = new Date(dateCreated);
+      jhaDate.setHours(12, 0, 0, 0); // Normalize to noon to avoid timezone issues
+      var jhaDateStr = Utilities.formatDate(jhaDate, tz, 'MM/dd/yyyy');
+      var dayOfWeek = jhaDate.getDay();
+      var dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dayOfWeek];
+
+      // Check if in week - use date comparison (ignoring time)
+      var jhaDateOnly = new Date(jhaDate.getFullYear(), jhaDate.getMonth(), jhaDate.getDate());
+      var weekStartOnly = new Date(weekBounds.weekStart.getFullYear(), weekBounds.weekStart.getMonth(), weekBounds.weekStart.getDate());
+      var weekEndOnly = new Date(weekBounds.weekEnd.getFullYear(), weekBounds.weekEnd.getMonth(), weekBounds.weekEnd.getDate());
+
+      var inWeek = (jhaDateOnly >= weekStartOnly && jhaDateOnly <= weekEndOnly);
+
+      var rowInfo = 'Row ' + (j+1) + ': ' + jhaDateStr + ' (' + dayName + ') | Job=' + jobNumber +
+                    ' | Status=' + status + ' | CreditedTo=' + creditedTo;
+
+      if (!inWeek) {
+        skippedOutsideWeek++;
+        if (j <= 10) { // Only show first few skipped
+          report.push(rowInfo + ' | ❌ OUTSIDE WEEK');
+        }
+        continue;
+      }
+
+      if (status !== 'Credited') {
+        skippedNotCredited++;
+        report.push(rowInfo + ' | ⚠️ Not Credited (status=' + status + ')');
+        continue;
+      }
+
+      if (!creditedTo) {
+        skippedNotCredited++;
+        report.push(rowInfo + ' | ⚠️ No CreditedTo value');
+        continue;
+      }
+
+      // Check if creditedTo is a tracked crew
+      if (!crewSet[creditedTo]) {
+        skippedCrewNotTracked++;
+        report.push(rowInfo + ' | ⚠️ Crew "' + creditedTo + '" NOT in tracked crews list!');
+        continue;
+      }
+
+      // Success - this entry should be credited
+      matchedCount++;
+      report.push(rowInfo + ' | ✅ IN WEEK, CREDITED');
+
+      if (creditedByCrew[creditedTo]) {
+        creditedByCrew[creditedTo].days.push(dayName);
+        var dayKey = dayName.toLowerCase();
+        if (creditedByCrew[creditedTo][dayKey] !== undefined) {
+          creditedByCrew[creditedTo][dayKey] = true;
+        }
+      }
+    }
+
+    if (jhaData.length > 30) {
+      report.push('... (showing first 30 rows only, ' + (jhaData.length - 30) + ' more)');
+    }
+
+    report.push('');
+    report.push('=== SUMMARY ===');
+    report.push('JHAs in current week (credited): ' + matchedCount);
+    report.push('Skipped - outside week: ' + skippedOutsideWeek);
+    report.push('Skipped - no date: ' + skippedNoDate);
+    report.push('Skipped - not credited status: ' + skippedNotCredited);
+    report.push('Skipped - crew not tracked: ' + skippedCrewNotTracked);
+
+    report.push('');
+    report.push('=== CREDITED STATUS BY CREW (Current Week) ===');
+    var crewsWithCredits = 0;
+    for (var crewJob in creditedByCrew) {
+      var crewStatus = creditedByCrew[crewJob];
+      var daysWithCredit = crewStatus.days.length;
+      if (daysWithCredit > 0) {
+        crewsWithCredits++;
+        var statusStr = 'Days credited: ' + crewStatus.days.join(', ');
+        report.push(crewJob + ': ' + statusStr);
+      }
+    }
+    if (crewsWithCredits === 0) {
+      report.push('(No crews have credited JHAs for this week)');
+    }
+  }
+
+  // Show report
+  var htmlReport = '<pre style="font-family: monospace; font-size: 11px; white-space: pre-wrap; max-height: 600px; overflow: auto;">' +
+    report.join('\n').replace(/✅/g, '<span style="color:green">✅</span>')
+                     .replace(/❌/g, '<span style="color:red">❌</span>')
+                     .replace(/⚠️/g, '<span style="color:orange">⚠️</span>') +
+    '</pre>';
+
+  var html = HtmlService.createHtmlOutput(htmlReport)
+    .setWidth(900)
+    .setHeight(700)
+    .setTitle('Compliance Calculation Trace');
+  SpreadsheetApp.getUi().showModalDialog(html, 'Compliance Calculation Trace');
+}
+
+/**
+ * Calculates Safety Compliance by reading from the log sheets
+ * This is the NEW reliable method - reads from audit trail, not inline processing
+ *
+ * @param {Date} weekStartDate - Sunday of the week to calculate
+ * @returns {Object} - Compliance data for updating Safety Compliance sheet
+ */
+function calculateComplianceFromLogs(weekStartDate) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var tz = Session.getScriptTimeZone();
+  var weekBounds = getWeekBoundaries(weekStartDate);
+  var weekStartStr = Utilities.formatDate(weekBounds.weekStart, tz, 'MM/dd/yyyy');
+  var weekEndStr = Utilities.formatDate(weekBounds.weekEnd, tz, 'MM/dd/yyyy');
+  var today = new Date();
+  var isPastDeadline = today > weekBounds.weekEnd;
+
+  Logger.log("calculateComplianceFromLogs: Calculating for week " + weekStartStr + " to " + weekEndStr);
+
+  // Get all tracked crews
+  var crews = getActiveCrews();
+  if (crews.length === 0) {
+    Logger.log("calculateComplianceFromLogs: No active crews found");
+    return null;
+  }
+
+  // Load compliance config for skip days
+  var config = loadComplianceConfig();
+
+  // Initialize compliance state for each crew
+  var crewCompliance = {};
+  for (var c = 0; c < crews.length; c++) {
+    var crewJob = crews[c];
+    var crewConfig = config[crewJob] || {
+      skipDays: [true, false, false, false, false, false, true], // Skip Sun/Sat by default
+      skipWeeklyMeeting: false,
+      skipMonthlyChecklist: false
+    };
+
+    crewCompliance[crewJob] = {
+      foreman: '',
+      jhaByDay: [false, false, false, false, false, false, false], // Sun-Sat
+      jhaLateByDay: [false, false, false, false, false, false, false],
+      weeklyMeeting: false,
+      weeklyMeetingLate: false,
+      monthlyChecklist: false,
+      skipDays: crewConfig.skipDays,
+      skipWeeklyMeeting: crewConfig.skipWeeklyMeeting,
+      skipMonthlyChecklist: crewConfig.skipMonthlyChecklist,
+      status: 'Complete'
+    };
+
+    // Get foreman name
+    var foremanResult = lookupForemanByJobNumber(crewJob);
+    if (foremanResult && foremanResult.name) {
+      crewCompliance[crewJob].foreman = foremanResult.name;
+    }
+  }
+
+  // Track unknown jobs
+  var unknownJobs = {};
+
+  // === READ JHA LOG ===
+  var jhaSheet = getJHALogSheet();
+  var jhaCreditsApplied = 0;
+  var jhaRowsProcessed = 0;
+  var jhaRowsSkippedOutsideWeek = 0;
+  var jhaRowsSkippedNotCredited = 0;
+  var jhaRowsSkippedCrewNotFound = 0;
+
+  Logger.log("calculateComplianceFromLogs: Week bounds - Start: " + weekBounds.weekStart + ", End: " + weekBounds.weekEnd);
+  Logger.log("calculateComplianceFromLogs: Tracked crews: " + crews.join(', '));
+
+  if (jhaSheet && jhaSheet.getLastRow() > 1) {
+    var jhaData = jhaSheet.getDataRange().getValues();
+    Logger.log("calculateComplianceFromLogs: JHA Log has " + (jhaData.length - 1) + " rows");
+
+    for (var j = 1; j < jhaData.length; j++) {
+      var jhaRow = jhaData[j];
+      var dateCreated = jhaRow[1]; // Column B - Date Created (JHA work date)
+      var jobNumber = String(jhaRow[2] || '').trim();
+      var status = String(jhaRow[7] || '').trim(); // Column H - Status
+      var creditedTo = String(jhaRow[8] || '').trim(); // Column I - Credited To
+      var notes = String(jhaRow[9] || '').trim(); // Column J - Notes
+
+      if (!dateCreated) continue;
+      jhaRowsProcessed++;
+
+      var jhaDate = new Date(dateCreated);
+
+      // Check if this JHA is within our week
+      if (jhaDate < weekBounds.weekStart || jhaDate > weekBounds.weekEnd) {
+        jhaRowsSkippedOutsideWeek++;
+        continue;
+      }
+
+      // Check if this is a credited entry
+      if (status !== 'Credited') {
+        jhaRowsSkippedNotCredited++;
+        continue;
+      }
+
+      if (!creditedTo) {
+        jhaRowsSkippedNotCredited++;
+        continue;
+      }
+
+      if (!crewCompliance[creditedTo]) {
+        jhaRowsSkippedCrewNotFound++;
+        Logger.log("calculateComplianceFromLogs: CREW NOT IN crewCompliance: " + creditedTo);
+        continue;
+      }
+
+      // SUCCESS - this row should be credited
+      var dayOfWeek = jhaDate.getDay(); // 0=Sun, 6=Sat
+      crewCompliance[creditedTo].jhaByDay[dayOfWeek] = true;
+      jhaCreditsApplied++;
+
+      // Check if late
+      if (notes && notes.indexOf('LATE') !== -1) {
+        crewCompliance[creditedTo].jhaLateByDay[dayOfWeek] = true;
+      }
+
+      Logger.log("calculateComplianceFromLogs: ✓ Credited JHA to " + creditedTo + " for day " + dayOfWeek + " (row " + (j+1) + ")");
+    }
+  }
+
+  Logger.log("calculateComplianceFromLogs: JHA Summary - " +
+    "Processed: " + jhaRowsProcessed +
+    ", Credits applied: " + jhaCreditsApplied +
+    ", Skipped (outside week): " + jhaRowsSkippedOutsideWeek +
+    ", Skipped (not credited): " + jhaRowsSkippedNotCredited +
+    ", Skipped (crew not found): " + jhaRowsSkippedCrewNotFound);
+
+  // === READ WEEKLY SAFETY LOG ===
+  var weeklySheet = getWeeklySafetyLogSheet();
+  if (weeklySheet && weeklySheet.getLastRow() > 1) {
+    var weeklyData = weeklySheet.getDataRange().getValues();
+
+    for (var w = 1; w < weeklyData.length; w++) {
+      var weeklyRow = weeklyData[w];
+      var weekOf = weeklyRow[1]; // Column B - Week Of
+      var jobNumber = String(weeklyRow[2] || '').trim();
+      var status = String(weeklyRow[6] || '').trim(); // Column G - Status
+      var creditedTo = String(weeklyRow[7] || '').trim(); // Column H - Credited To
+      var notes = String(weeklyRow[8] || '').trim(); // Column I - Notes
+
+      if (!weekOf) continue;
+
+      var meetingWeekDate = new Date(weekOf);
+
+      // Check if this meeting is for our week
+      // Meeting week should match (within 6 days of week start)
+      var daysDiff = Math.abs((meetingWeekDate.getTime() - weekBounds.weekStart.getTime()) / (1000 * 60 * 60 * 24));
+      if (daysDiff > 6) {
+        continue;
+      }
+
+      if (status === 'Credited' && creditedTo && crewCompliance[creditedTo]) {
+        crewCompliance[creditedTo].weeklyMeeting = true;
+
+        if (notes && notes.indexOf('LATE') !== -1) {
+          crewCompliance[creditedTo].weeklyMeetingLate = true;
+        }
+
+        Logger.log("calculateComplianceFromLogs: Credited Weekly Meeting to " + creditedTo);
+      } else if (status === 'Unknown Job') {
+        if (!unknownJobs[jobNumber]) {
+          unknownJobs[jobNumber] = { reportTypes: [], dates: [], reason: 'Unknown Job' };
+        }
+        if (unknownJobs[jobNumber].reportTypes.indexOf('Safety Meeting') === -1) {
+          unknownJobs[jobNumber].reportTypes.push('Safety Meeting');
+        }
+      }
+    }
+  }
+
+  // === READ MONTHLY CHECKLIST LOG ===
+  var monthlySheet = getMonthlyChecklistLogSheet();
+  var monthStart = new Date(weekBounds.weekStart.getFullYear(), weekBounds.weekStart.getMonth(), 1);
+  var monthEnd = new Date(weekBounds.weekStart.getFullYear(), weekBounds.weekStart.getMonth() + 1, 0, 23, 59, 59);
+
+  if (monthlySheet && monthlySheet.getLastRow() > 1) {
+    var monthlyData = monthlySheet.getDataRange().getValues();
+
+    for (var m = 1; m < monthlyData.length; m++) {
+      var monthlyRow = monthlyData[m];
+      var reportDate = monthlyRow[1]; // Column B - Report Date
+      var status = String(monthlyRow[7] || '').trim(); // Column H - Status
+      var creditedTo = String(monthlyRow[8] || '').trim(); // Column I - Credited To
+
+      if (!reportDate) continue;
+
+      var checklistDate = new Date(reportDate);
+
+      // Check if this checklist is within our month
+      if (checklistDate < monthStart || checklistDate > monthEnd) {
+        continue;
+      }
+
+      if (status === 'Credited' && creditedTo && crewCompliance[creditedTo]) {
+        crewCompliance[creditedTo].monthlyChecklist = true;
+        Logger.log("calculateComplianceFromLogs: Credited Monthly Checklist to " + creditedTo);
+      }
+    }
+  }
+
+  // === CALCULATE STATUS FOR EACH CREW ===
+  var compliantCount = 0;
+  var missingCount = 0;
+  var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  for (var crewJob in crewCompliance) {
+    var crew = crewCompliance[crewJob];
+    var missingItems = [];
+    var lateCount = 0;
+
+    // Build day status
+    crew.days = {};
+    for (var d = 0; d < 7; d++) {
+      if (crew.skipDays[d]) {
+        crew.days[dayNames[d]] = 'N/A';
+      } else if (crew.jhaByDay[d]) {
+        if (crew.jhaLateByDay[d]) {
+          crew.days[dayNames[d]] = '✅L';
+          lateCount++;
+        } else {
+          crew.days[dayNames[d]] = '✅';
+        }
+      } else {
+        if (isPastDeadline) {
+          crew.days[dayNames[d]] = '❌';
+          missingItems.push('JHA (' + dayNames[d] + ')');
+        } else {
+          crew.days[dayNames[d]] = '⏳';
+        }
+      }
+    }
+
+    // Weekly meeting status
+    if (crew.skipWeeklyMeeting) {
+      crew.weeklyMeetingStatus = 'N/A';
+    } else if (crew.weeklyMeeting) {
+      crew.weeklyMeetingStatus = crew.weeklyMeetingLate ? '✅L' : '✅';
+      if (crew.weeklyMeetingLate) lateCount++;
+    } else {
+      if (isPastDeadline) {
+        crew.weeklyMeetingStatus = '❌';
+        missingItems.push('Weekly Meeting');
+      } else {
+        crew.weeklyMeetingStatus = '⏳';
+      }
+    }
+
+    // Monthly checklist status (progressive deadline)
+    var monthlyStatus = getMonthlyChecklistStatus(
+      weekBounds.weekStart,
+      crew.monthlyChecklist,
+      crew.skipMonthlyChecklist,
+      null
+    );
+    crew.monthlyChecklistStatus = monthlyStatus.status;
+
+    if (monthlyStatus.affectsStatus && monthlyStatus.shouldCreateTask) {
+      missingItems.push('Monthly Checklist');
+    }
+
+    // Determine overall status
+    if (missingItems.length > 0) {
+      crew.status = 'Missing Reports';
+      missingCount++;
+    } else if (!isPastDeadline && (
+      crew.days['Mon'] === '⏳' || crew.days['Tue'] === '⏳' ||
+      crew.days['Wed'] === '⏳' || crew.days['Thu'] === '⏳' ||
+      crew.days['Fri'] === '⏳' || crew.weeklyMeetingStatus === '⏳')) {
+      crew.status = 'Pending';
+    } else {
+      crew.status = 'Complete';
+      compliantCount++;
+    }
+
+    crew.missingItems = missingItems;
+    crew.lateCount = lateCount;
+  }
+
+  // Build result object
+  var result = {
+    weekStart: weekBounds.weekStart,
+    weekEnd: weekBounds.weekEnd,
+    isPastDeadline: isPastDeadline,
+    totalCrews: crews.length,
+    compliantCount: compliantCount,
+    missingCount: missingCount,
+    crews: crewCompliance,
+    uncreditedJobs: []
+  };
+
+  // Convert unknown jobs to array
+  for (var uj in unknownJobs) {
+    result.uncreditedJobs.push({
+      jobNumber: uj,
+      reportTypes: unknownJobs[uj].reportTypes,
+      dates: unknownJobs[uj].dates,
+      reason: unknownJobs[uj].reason
+    });
+  }
+
+  Logger.log("calculateComplianceFromLogs: Complete - " + compliantCount + " compliant, " +
+    missingCount + " missing, " + result.uncreditedJobs.length + " unknown jobs");
+
+  return result;
+}
+
+/**
+ * Updates the Safety Compliance sheet from calculated compliance data
+ * This is the same updateComplianceSheet but called with data from calculateComplianceFromLogs
+ *
+ * @param {Object} complianceData - From calculateComplianceFromLogs()
+ */
+function updateComplianceSheetFromLogs(complianceData) {
+  if (!complianceData || !complianceData.crews) {
+    Logger.log("updateComplianceSheetFromLogs: No compliance data");
+    return;
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SAFETY_COMPLIANCE_SHEET_NAME);
+
+  if (!sheet) {
+    sheet = setupSafetyComplianceSheet();
+  }
+
+  var tz = Session.getScriptTimeZone();
+  var weekStartStr = Utilities.formatDate(complianceData.weekStart, tz, 'MM/dd/yyyy');
+  var nowStr = Utilities.formatDate(new Date(), tz, 'MM/dd/yyyy HH:mm');
+
+  // Read existing data to find rows to update
+  var data = sheet.getDataRange().getValues();
+  var existingRows = {};
+
+  for (var i = 1; i < data.length; i++) {
+    var rowWeek = data[i][0];
+    var rowJob = String(data[i][1] || '').trim();
+    var rowStatus = String(data[i][12] || '').trim();
+
+    if (rowWeek && rowJob) {
+      var rowWeekStr = Utilities.formatDate(new Date(rowWeek), tz, 'MM/dd/yyyy');
+      if (rowWeekStr === weekStartStr) {
+        existingRows[rowJob] = {
+          rowNum: i + 1,
+          status: rowStatus
+        };
+      }
+    }
+  }
+
+  var updated = 0;
+  var added = 0;
+
+  for (var crewJob in complianceData.crews) {
+    var crew = complianceData.crews[crewJob];
+
+    // Skip if already resolved
+    if (existingRows[crewJob] && existingRows[crewJob].status === 'Resolved') {
+      Logger.log("updateComplianceSheetFromLogs: Skipping resolved crew " + crewJob);
+      continue;
+    }
+
+    var rowData = [
+      weekStartStr,
+      crewJob,
+      crew.foreman,
+      crew.days['Sun'] || 'N/A',
+      crew.days['Mon'] || '⏳',
+      crew.days['Tue'] || '⏳',
+      crew.days['Wed'] || '⏳',
+      crew.days['Thu'] || '⏳',
+      crew.days['Fri'] || '⏳',
+      crew.days['Sat'] || 'N/A',
+      crew.weeklyMeetingStatus || '⏳',
+      crew.monthlyChecklistStatus || '⏳',
+      crew.status,
+      nowStr
+    ];
+
+    if (existingRows[crewJob]) {
+      sheet.getRange(existingRows[crewJob].rowNum, 1, 1, rowData.length).setValues([rowData]);
+      updated++;
+    } else {
+      sheet.appendRow(rowData);
+      added++;
+    }
+  }
+
+  Logger.log("updateComplianceSheetFromLogs: Updated " + updated + ", Added " + added + " rows");
+}
+
+/**
+ * Logs a parsed safety email to the appropriate log sheet based on report type
+ * This is the central function for Option B - every email gets logged here
+ *
+ * @param {Object} parsed - Result from parseSafetyEmail()
+ * @param {GmailMessage} message - The Gmail message object
+ * @param {Object} context - Resolution context with trackedCrews, customMappings
+ * @returns {Object} - { logged: boolean, status: string, creditedTo: string|null, logSheet: string }
+ */
+function logParsedSafetyEmail(parsed, message, context) {
+  if (!parsed || !parsed.reportMeta) {
+    return { logged: false, status: 'Error', error: 'No parsed data' };
+  }
+
+  var meta = parsed.reportMeta;
+  var reportType = meta.reportType || 'Unknown';
+  var jobNumber = meta.jobNumber || '';
+  var messageId = message.getId();
+  var receivedDate = message.getDate();
+  var subject = message.getSubject();
+
+  // Resolve job to tracked crew
+  var resolution = resolveJobToCrew(jobNumber, context);
+
+  var status = resolution.found ? 'Credited' : 'Unknown Job';
+  var creditedTo = resolution.found ? resolution.crew : '';
+  var foreman = resolution.foreman || meta.foreman || 'UNKNOWN';
+  var notes = resolution.found ? resolution.reason : (resolution.reason || 'Could not resolve to tracked crew');
+
+  // Check for late submission
+  if (meta.date && meta.receivedDate) {
+    var isLate = isReportLate(meta.date, meta.receivedDate);
+    if (isLate) {
+      notes = (notes ? notes + '. ' : '') + 'LATE SUBMISSION';
+    }
+  }
+
+  // Add date source info
+  if (meta.dateSource) {
+    notes = (notes ? notes + '. ' : '') + 'Date from: ' + meta.dateSource;
+  }
+
+  // If user skipped this job, mark it appropriately
+  if (parsed.skippedReason) {
+    status = 'Skipped';
+    notes = parsed.skippedReason;
+  }
+
+  var result = { logged: false, status: status, creditedTo: creditedTo };
+
+  // Log to appropriate sheet based on report type
+  if (reportType === 'JHA' || reportType.indexOf('Job Hazard') !== -1) {
+    // Handle multiple JHAs per email
+    var datesToProcess = [];
+    if (meta.multipleJHADates && meta.multipleJHADates.length > 0) {
+      datesToProcess = meta.multipleJHADates;
+    } else if (meta.date) {
+      datesToProcess = [meta.date];
+    }
+
+    // Log each JHA date separately
+    for (var i = 0; i < datesToProcess.length; i++) {
+      var jhaDate = datesToProcess[i];
+      var logNotes = notes;
+      if (datesToProcess.length > 1) {
+        logNotes = (logNotes ? logNotes + '. ' : '') + 'JHA ' + (i + 1) + ' of ' + datesToProcess.length + ' in email';
+      }
+
+      // Check late for this specific date
+      var jhaIsLate = isReportLate(jhaDate, receivedDate);
+      if (jhaIsLate && logNotes.indexOf('LATE') === -1) {
+        logNotes = (logNotes ? logNotes + '. ' : '') + 'LATE SUBMISSION';
+      }
+
+      var logResult = logJHAEmail({
+        dateReceived: receivedDate,
+        dateCreated: jhaDate,
+        jobNumber: jobNumber,
+        foreman: foreman,
+        emailSubject: subject,
+        emailId: messageId + (datesToProcess.length > 1 ? '_' + i : ''), // Unique ID for multiple JHAs
+        source: meta.dateSource || 'Subject',
+        status: status,
+        creditedTo: creditedTo,
+        notes: logNotes
+      });
+
+      if (logResult.success) {
+        result.logged = true;
+        result.logSheet = JHA_LOG_SHEET_NAME;
+      }
+    }
+
+  } else if (reportType === 'Safety Meeting' || reportType.indexOf('Safety Meeting') !== -1) {
+    var logResult = logWeeklySafetyEmail({
+      dateReceived: receivedDate,
+      weekOf: meta.date,
+      jobNumber: jobNumber,
+      foreman: foreman,
+      emailSubject: subject,
+      emailId: messageId,
+      status: status,
+      creditedTo: creditedTo,
+      notes: notes
+    });
+
+    if (logResult.success) {
+      result.logged = true;
+      result.logSheet = WEEKLY_SAFETY_LOG_SHEET_NAME;
+    } else if (logResult.duplicate) {
+      result.status = 'Duplicate';
+    }
+
+  } else if (reportType === 'Fleet Checklist' || reportType === 'Safety Checklist') {
+    var hasEquipmentIssues = parsed.issues && parsed.issues.length > 0;
+
+    var logResult = logMonthlyChecklistEmail({
+      dateReceived: receivedDate,
+      reportDate: meta.date,
+      jobNumber: jobNumber,
+      foreman: foreman,
+      vehicleNumber: meta.vehicleNumber || '',
+      emailSubject: subject,
+      emailId: messageId,
+      status: status,
+      creditedTo: creditedTo,
+      hasEquipmentIssues: hasEquipmentIssues,
+      notes: notes
+    });
+
+    if (logResult.success) {
+      result.logged = true;
+      result.logSheet = MONTHLY_CHECKLIST_LOG_SHEET_NAME;
+    } else if (logResult.duplicate) {
+      result.status = 'Duplicate';
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Recalculates compliance from log sheets and updates Safety Compliance sheet
+ * Menu function: Glove Manager → Safety → Recalculate Compliance
+ */
+function recalculateComplianceFromLogs() {
+  var ui = SpreadsheetApp.getUi();
+
+  try {
+    var today = new Date();
+    var currentWeek = getWeekBoundaries(today);
+    var previousWeek = getWeekBoundaries(new Date(currentWeek.weekStart.getTime() - 7 * 24 * 60 * 60 * 1000));
+
+    // Calculate for previous week (past deadline - can create tasks)
+    Logger.log("recalculateComplianceFromLogs: Processing previous week");
+    var prevData = calculateComplianceFromLogs(previousWeek.weekStart);
+    if (prevData) {
+      updateComplianceSheetFromLogs(prevData);
+      createMissingReportTasks(prevData);
+    }
+
+    // Calculate for current week
+    Logger.log("recalculateComplianceFromLogs: Processing current week");
+    var currData = calculateComplianceFromLogs(currentWeek.weekStart);
+    if (currData) {
+      updateComplianceSheetFromLogs(currData);
+    }
+
+    // Format the sheet
+    formatComplianceSheetByWeek();
+
+    var msg = '✅ Compliance recalculated from log sheets!\n\n';
+    if (prevData) {
+      msg += 'Previous week: ' + prevData.compliantCount + ' compliant, ' + prevData.missingCount + ' missing\n';
+    }
+    if (currData) {
+      msg += 'Current week: ' + currData.compliantCount + ' compliant, ' + currData.missingCount + ' missing';
+    }
+
+    ui.alert('Compliance Recalculated', msg, ui.ButtonSet.OK);
+
+  } catch (e) {
+    Logger.log("recalculateComplianceFromLogs error: " + e.toString());
+    ui.alert('Error', 'Failed to recalculate compliance: ' + e.toString(), ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * Opens the JHA Log sheet
+ * Menu function
+ */
+function openJHALogSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = getJHALogSheet();
+  ss.setActiveSheet(sheet);
+}
+
+/**
+ * Opens the Weekly Safety Log sheet
+ * Menu function
+ */
+function openWeeklySafetyLogSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = getWeeklySafetyLogSheet();
+  ss.setActiveSheet(sheet);
+}
+
+/**
+ * Opens the Monthly Checklist Log sheet
+ * Menu function
+ */
+function openMonthlyChecklistLogSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = getMonthlyChecklistLogSheet();
+  ss.setActiveSheet(sheet);
+}
+
+// ============================================================================
+// ============================================================================
+// DIAGNOSTIC TOOLS
+// ============================================================================
+
+/**
+ * Comprehensive diagnostic tool for safety compliance issues
+ * Checks: Email parsing, job resolution, log writing, compliance calculation
+ * Menu function: Glove Manager → Safety → 🔍 Diagnose Compliance
+ */
+function diagnoseSafetyCompliance() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  var report = [];
+  report.push('========================================');
+  report.push('SAFETY COMPLIANCE DIAGNOSTIC REPORT');
+  report.push('Generated: ' + new Date().toLocaleString());
+  report.push('========================================\n');
+
+  // 1. Check Log Sheets Exist
+  report.push('=== 1. LOG SHEETS STATUS ===');
+  var jhaLog = ss.getSheetByName('JHA Log');
+  var weeklyLog = ss.getSheetByName('Weekly Safety Log');
+  var monthlyLog = ss.getSheetByName('Monthly Checklist Log');
+
+  report.push('JHA Log: ' + (jhaLog ? '✅ Exists (' + (jhaLog.getLastRow() - 1) + ' records)' : '❌ MISSING'));
+  report.push('Weekly Safety Log: ' + (weeklyLog ? '✅ Exists (' + (weeklyLog.getLastRow() - 1) + ' records)' : '❌ MISSING'));
+  report.push('Monthly Checklist Log: ' + (monthlyLog ? '✅ Exists (' + (monthlyLog.getLastRow() - 1) + ' records)' : '❌ MISSING'));
+
+  if (!jhaLog || !weeklyLog || !monthlyLog) {
+    report.push('\n⚠️ Missing log sheets! Run "Setup Log Sheets" from Safety menu.');
+  }
+
+  // 2. Check Recent JHA Log Entries
+  report.push('\n=== 2. RECENT JHA LOG ENTRIES (Last 10) ===');
+  if (jhaLog && jhaLog.getLastRow() > 1) {
+    // Read all 10 columns: A=DateRecv, B=DateCreated, C=Job, D=Foreman, E=Subject, F=EmailID, G=Source, H=Status, I=CreditedTo, J=Notes
+    var jhaData = jhaLog.getRange(2, 1, Math.min(10, jhaLog.getLastRow() - 1), 10).getValues();
+    for (var i = 0; i < jhaData.length; i++) {
+      var row = jhaData[i];
+      // row[7]=Status (H), row[8]=CreditedTo (I)
+      report.push('  ' + (i + 1) + '. Job: ' + row[2] + ' | Foreman: ' + row[3] + ' | Status: ' + row[7] + ' | CreditedTo: ' + row[8]);
+    }
+
+    // Add raw column data analysis for first 3 rows
+    report.push('\n  --- RAW COLUMN DATA (First 3 rows for debugging) ---');
+    for (var r = 0; r < Math.min(3, jhaData.length); r++) {
+      var row = jhaData[r];
+      report.push('  Row ' + (r + 1) + ':');
+      report.push('    A (DateRecv): ' + row[0]);
+      report.push('    B (DateCreated): ' + row[1]);
+      report.push('    C (Job): ' + row[2]);
+      report.push('    D (Foreman): ' + row[3]);
+      report.push('    E (Subject): ' + String(row[4]).substring(0, 50) + '...');
+      report.push('    F (EmailID): ' + row[5]);
+      report.push('    G (Source): ' + row[6]);
+      report.push('    H (Status): ' + row[7]);
+      report.push('    I (CreditedTo): ' + row[8]);
+      report.push('    J (Notes): ' + String(row[9]).substring(0, 50) + '...');
+    }
+  } else {
+    report.push('  No JHA log entries found.');
+  }
+
+  // 3. Check Safety Compliance Sheet
+  report.push('\n=== 3. SAFETY COMPLIANCE SHEET ===');
+  var compSheet = ss.getSheetByName('Safety Compliance');
+  if (compSheet) {
+    var compRows = compSheet.getLastRow() - 1;
+    report.push('Total rows: ' + compRows);
+
+    // Check current week
+    var today = new Date();
+    var weekBounds = getWeekBoundaries(today);
+    var weekKey = Utilities.formatDate(weekBounds.weekStart, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+
+    report.push('Current week start: ' + weekKey);
+
+    var compData = compSheet.getDataRange().getValues();
+    var currentWeekRows = 0;
+    var crewsThisWeek = [];
+    for (var j = 1; j < compData.length; j++) {
+      var rowWeek = compData[j][0];
+      if (rowWeek instanceof Date) {
+        rowWeek = Utilities.formatDate(rowWeek, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+      }
+      if (String(rowWeek) === weekKey) {
+        currentWeekRows++;
+        crewsThisWeek.push(compData[j][1]); // Job Number column
+      }
+    }
+    report.push('Rows for current week: ' + currentWeekRows);
+    if (crewsThisWeek.length > 0) {
+      report.push('Crews tracked this week: ' + crewsThisWeek.join(', '));
+    }
+  } else {
+    report.push('❌ Safety Compliance sheet not found!');
+  }
+
+  // 4. Check Tracked Crews Configuration
+  report.push('\n=== 4. TRACKED CREWS (from Employee sheet) ===');
+  try {
+    // Use getActiveCrews() which validates job number format
+    var activeCrews = getActiveCrews();
+    report.push('Total tracked crews: ' + activeCrews.length);
+
+    // Show each crew with foreman and size
+    for (var ac = 0; ac < Math.min(15, activeCrews.length); ac++) {
+      var crewNum = activeCrews[ac];
+      var crewLead = getCrewLead(crewNum);
+      var crewSize = getCrewSize(crewNum);
+      var foremanName = crewLead ? crewLead.name : 'NOT FOUND';
+      report.push('  ' + crewNum + ': Foreman=' + foremanName + ', Size=' + crewSize);
+    }
+    if (activeCrews.length > 15) {
+      report.push('  ... and ' + (activeCrews.length - 15) + ' more');
+    }
+  } catch (e) {
+    report.push('Error getting tracked crews: ' + e.toString());
+  }
+
+  // 5. Test Email Parsing (last 3 JHA emails)
+  report.push('\n=== 5. RECENT JHA EMAIL PARSING TEST ===');
+  try {
+    var threads = GmailApp.search('subject:"Job Hazard Report"', 0, 3);
+    report.push('Found ' + threads.length + ' recent JHA email threads');
+
+    for (var t = 0; t < threads.length; t++) {
+      var messages = threads[t].getMessages();
+      var msg = messages[0];
+      var subject = msg.getSubject();
+      report.push('\n  Email ' + (t + 1) + ':');
+      report.push('    Subject: ' + subject.substring(0, 80) + '...');
+
+      // Try to extract job number
+      var jobMatch = subject.match(/_(\d{3}-\d{2})_/);
+      if (jobMatch) {
+        report.push('    Extracted Job: ' + jobMatch[1]);
+      } else {
+        report.push('    ⚠️ Could not extract job number from subject');
+      }
+
+      // Try to extract date
+      var dateMatch = subject.match(/(\d{2})-(\d{2})-(\d{4})/);
+      if (dateMatch) {
+        report.push('    Extracted Date: ' + dateMatch[0]);
+      } else {
+        report.push('    ⚠️ Could not extract date from subject');
+      }
+    }
+  } catch (e) {
+    report.push('Error accessing Gmail: ' + e.toString());
+  }
+
+  // 6. Check Custom Job Mappings
+  report.push('\n=== 6. CUSTOM JOB MAPPINGS ===');
+  try {
+    var customMappings = JSON.parse(PropertiesService.getScriptProperties().getProperty('CUSTOM_JOB_FOREMAN_MAPPINGS') || '{}');
+    var mapKeys = Object.keys(customMappings);
+    report.push('Custom mappings saved: ' + mapKeys.length);
+    for (var m = 0; m < mapKeys.length; m++) {
+      report.push('  ' + mapKeys[m] + ' → ' + customMappings[mapKeys[m]]);
+    }
+  } catch (e) {
+    report.push('Error reading custom mappings: ' + e.toString());
+  }
+
+  // 7. Test Job Resolution for Known Jobs
+  report.push('\n=== 7. JOB RESOLUTION TEST ===');
+  try {
+    var crews = getActiveCrews();
+    var trackedCrews = {};
+    for (var ci = 0; ci < crews.length; ci++) {
+      trackedCrews[crews[ci]] = true;
+    }
+    var customMappingsForTest = getCustomJobForemanMappings() || {};
+    var empSheet = ss.getSheetByName('Employees');
+    var employeeData = empSheet ? empSheet.getDataRange().getValues() : [];
+
+    var testContext = {
+      trackedCrews: trackedCrews,
+      customMappings: customMappingsForTest,
+      employeeData: employeeData
+    };
+
+    // Test a few job numbers from the JHA log
+    var testJobs = ['013-26', '029-26', '016-26', '022-26', '041-26'];
+    for (var tj = 0; tj < testJobs.length; tj++) {
+      var testJob = testJobs[tj];
+      var resolution = resolveJobToCrew(testJob, testContext);
+      report.push('  ' + testJob + ' → found: ' + resolution.found + ', crew: ' + resolution.crew + ', source: ' + resolution.source);
+      if (!resolution.found) {
+        report.push('    ⚠️ Reason: ' + resolution.reason);
+      }
+    }
+  } catch (e) {
+    report.push('Error testing job resolution: ' + e.toString());
+  }
+
+  // Show report
+  var htmlReport = '<pre style="font-family: monospace; font-size: 12px; white-space: pre-wrap;">' +
+    report.join('\n').replace(/✅/g, '<span style="color:green">✅</span>')
+                     .replace(/❌/g, '<span style="color:red">❌</span>')
+                     .replace(/⚠️/g, '<span style="color:orange">⚠️</span>') +
+    '</pre>';
+
+  var htmlOutput = HtmlService.createHtmlOutput(htmlReport)
+    .setWidth(800)
+    .setHeight(600);
+  ui.showModalDialog(htmlOutput, '🔍 Safety Compliance Diagnostic Report');
+
+  Logger.log(report.join('\n'));
+}
+
+/**
+ * Test parsing a single email by subject line pattern
+ * Opens a dialog to test email parsing without processing
+ */
+function testEmailParsing() {
+  var ui = SpreadsheetApp.getUi();
+
+  var response = ui.prompt(
+    'Test Email Parsing',
+    'Enter search query (e.g., "Job Hazard Report 009-26" or "Safety Meeting 015-26"):',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+
+  var query = response.getResponseText().trim();
+  if (!query) return;
+
+  var report = [];
+  report.push('=== EMAIL PARSING TEST ===');
+  report.push('Query: ' + query);
+  report.push('');
+
+  try {
+    var threads = GmailApp.search('subject:"' + query + '"', 0, 5);
+    report.push('Found ' + threads.length + ' threads\n');
+
+    for (var t = 0; t < threads.length; t++) {
+      var messages = threads[t].getMessages();
+      for (var m = 0; m < messages.length; m++) {
+        var msg = messages[m];
+        var subject = msg.getSubject();
+        var receivedDate = msg.getDate();
+
+        report.push('--- Message ' + (t + 1) + '.' + (m + 1) + ' ---');
+        report.push('Subject: ' + subject);
+        report.push('Received: ' + receivedDate.toLocaleString());
+
+        // Test parsing
+        var parsedData = parseSafetyEmail(msg, {});
+        if (parsedData) {
+          report.push('Parsed Report Type: ' + parsedData.reportType);
+          report.push('Parsed Job Number: ' + parsedData.jobNumber);
+          report.push('Parsed Report Date: ' + parsedData.reportDate);
+          report.push('Parsed Foreman: ' + parsedData.foreman);
+          if (parsedData.skippedReason) {
+            report.push('⚠️ Skipped: ' + parsedData.skippedReason);
+          }
+        } else {
+          report.push('❌ parseSafetyEmail returned null');
+        }
+        report.push('');
+      }
+    }
+  } catch (e) {
+    report.push('Error: ' + e.toString());
+  }
+
+  var htmlReport = '<pre style="font-family: monospace; font-size: 12px; white-space: pre-wrap;">' +
+    report.join('\n') + '</pre>';
+
+  var htmlOutput = HtmlService.createHtmlOutput(htmlReport)
+    .setWidth(700)
+    .setHeight(500);
+  ui.showModalDialog(htmlOutput, '🔬 Email Parsing Test Results');
+}
+
+/**
+ * Check why a specific crew is not getting credited
+ */
+function diagnoseCrewCompliance() {
+  var ui = SpreadsheetApp.getUi();
+
+  var response = ui.prompt(
+    'Diagnose Crew Compliance',
+    'Enter job number (e.g., "009-26"):',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+
+  var jobNum = response.getResponseText().trim();
+  if (!jobNum) return;
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var report = [];
+  report.push('=== CREW COMPLIANCE DIAGNOSIS: ' + jobNum + ' ===\n');
+
+  // 1. Check if crew exists in Employees
+  var empSheet = ss.getSheetByName('Employees');
+  var empData = empSheet.getDataRange().getValues();
+  var crewMembers = [];
+  var foreman = null;
+
+  for (var i = 1; i < empData.length; i++) {
+    var empJob = String(empData[i][3] || '').trim();
+    if (empJob.startsWith(jobNum)) {
+      crewMembers.push({
+        name: empData[i][0],
+        job: empJob,
+        classification: empData[i][4]
+      });
+      if (empData[i][4] === 'F' || empData[i][4] === 'GTO F') {
+        foreman = empData[i][0];
+      }
+    }
+  }
+
+  report.push('1. EMPLOYEE SHEET:');
+  report.push('   Crew members found: ' + crewMembers.length);
+  report.push('   Foreman: ' + (foreman || '❌ NOT FOUND'));
+  if (crewMembers.length > 0) {
+    for (var j = 0; j < crewMembers.length; j++) {
+      report.push('   - ' + crewMembers[j].name + ' (' + crewMembers[j].classification + ') - ' + crewMembers[j].job);
+    }
+  }
+
+  // 2. Check JHA Log for this crew
+  report.push('\n2. JHA LOG ENTRIES:');
+  var jhaLog = ss.getSheetByName('JHA Log');
+  if (jhaLog && jhaLog.getLastRow() > 1) {
+    var jhaData = jhaLog.getDataRange().getValues();
+    var jhaEntries = [];
+    for (var k = 1; k < jhaData.length; k++) {
+      if (String(jhaData[k][2]).indexOf(jobNum) !== -1 || String(jhaData[k][5]).indexOf(jobNum) !== -1) {
+        jhaEntries.push({
+          received: jhaData[k][0],
+          created: jhaData[k][1],
+          job: jhaData[k][2],
+          foreman: jhaData[k][3],
+          status: jhaData[k][4],
+          creditedTo: jhaData[k][5]
+        });
+      }
+    }
+    report.push('   Found ' + jhaEntries.length + ' JHA entries');
+    for (var e = 0; e < jhaEntries.length; e++) {
+      var entry = jhaEntries[e];
+      report.push('   - Date: ' + entry.created + ' | Status: ' + entry.status + ' | CreditedTo: ' + entry.creditedTo);
+    }
+  } else {
+    report.push('   ❌ JHA Log not found or empty');
+  }
+
+  // 3. Check Safety Compliance sheet
+  report.push('\n3. SAFETY COMPLIANCE SHEET:');
+  var compSheet = ss.getSheetByName('Safety Compliance');
+  if (compSheet && compSheet.getLastRow() > 1) {
+    var compData = compSheet.getDataRange().getValues();
+    var compEntries = [];
+    for (var c = 1; c < compData.length; c++) {
+      if (String(compData[c][1]).indexOf(jobNum) !== -1) {
+        compEntries.push({
+          week: compData[c][0],
+          job: compData[c][1],
+          foreman: compData[c][2],
+          status: compData[c][11],
+          mon: compData[c][3],
+          tue: compData[c][4],
+          wed: compData[c][5],
+          thu: compData[c][6],
+          fri: compData[c][7]
+        });
+      }
+    }
+    report.push('   Found ' + compEntries.length + ' compliance rows');
+    for (var r = 0; r < compEntries.length; r++) {
+      var row = compEntries[r];
+      report.push('   - Week: ' + row.week + ' | Status: ' + row.status);
+      report.push('     M:' + row.mon + ' T:' + row.tue + ' W:' + row.wed + ' Th:' + row.thu + ' F:' + row.fri);
+    }
+  } else {
+    report.push('   ❌ Safety Compliance sheet not found or empty');
+  }
+
+  // 4. Check for recent Gmail
+  report.push('\n4. GMAIL SEARCH (last 7 days):');
+  try {
+    var threads = GmailApp.search('subject:"Job Hazard Report" subject:"' + jobNum + '" newer_than:7d', 0, 10);
+    report.push('   Found ' + threads.length + ' JHA email threads');
+    for (var g = 0; g < threads.length; g++) {
+      var gmsg = threads[g].getMessages()[0];
+      report.push('   - ' + gmsg.getDate().toLocaleDateString() + ': ' + gmsg.getSubject().substring(0, 60) + '...');
+    }
+  } catch (e) {
+    report.push('   Error searching Gmail: ' + e.toString());
+  }
+
+  var htmlReport = '<pre style="font-family: monospace; font-size: 12px; white-space: pre-wrap;">' +
+    report.join('\n') + '</pre>';
+
+  var htmlOutput = HtmlService.createHtmlOutput(htmlReport)
+    .setWidth(800)
+    .setHeight(600);
+  ui.showModalDialog(htmlOutput, '🔍 Crew Compliance Diagnosis: ' + jobNum);
+}
+
+// ============================================================================
+// MIGRATION FUNCTIONS
+// ============================================================================
+
+/**
+ * Gets the Safety Equipment sheet, checking both new and old names
+ * @returns {Sheet|null} The sheet or null if not found
+ */
+function getSafetyEquipmentSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SAFETY_EQUIPMENT_SHEET_NAME);
+  if (!sheet) {
+    // Try old name for backward compatibility
+    sheet = ss.getSheetByName(SAFETY_EQUIPMENT_SHEET_OLD_NAME);
+  }
+  return sheet;
+}
+
+/**
+ * Migrates the Safety Reports sheet to Safety Equipment Needs
+ * Safe to run multiple times - only renames if old name exists
+ * Menu function: Glove Manager → Safety → Migrate Safety Reports Sheet
+ */
+function migrateSafetyReportsToEquipmentNeeds() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var oldSheet = ss.getSheetByName(SAFETY_EQUIPMENT_SHEET_OLD_NAME);
+  var newSheet = ss.getSheetByName(SAFETY_EQUIPMENT_SHEET_NAME);
+
+  if (newSheet) {
+    SpreadsheetApp.getUi().alert('✅ Already Migrated',
+      '"Safety Equipment Needs" sheet already exists.\n\nNo migration needed.',
+      SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+
+  if (!oldSheet) {
+    SpreadsheetApp.getUi().alert('ℹ️ No Sheet Found',
+      'Neither "Safety Reports" nor "Safety Equipment Needs" sheet exists.\n\nRun "Setup Safety Equipment Sheet" to create one.',
+      SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+
+  // Rename the sheet
+  oldSheet.setName(SAFETY_EQUIPMENT_SHEET_NAME);
+
+  // Clean up any "No Issues" compliance records (they belong in Safety Compliance, not here)
+  var data = oldSheet.getDataRange().getValues();
+  var rowsToDelete = [];
+  for (var i = data.length - 1; i >= 1; i--) {
+    var equipType = String(data[i][5] || '').trim(); // Column F = Equipment Type
+    if (equipType === 'No Issues') {
+      rowsToDelete.push(i + 1);
+    }
+  }
+
+  // Delete from bottom to top
+  for (var r = 0; r < rowsToDelete.length; r++) {
+    oldSheet.deleteRow(rowsToDelete[r]);
+  }
+
+  SpreadsheetApp.getUi().alert('✅ Migration Complete',
+    '"Safety Reports" has been renamed to "Safety Equipment Needs".\n\n' +
+    'Removed ' + rowsToDelete.length + ' "No Issues" compliance records.\n\n' +
+    'The sheet now only contains actual equipment issues that need attention.',
+    SpreadsheetApp.getUi().ButtonSet.OK);
+
+  Logger.log("migrateSafetyReportsToEquipmentNeeds: Renamed sheet, removed " + rowsToDelete.length + " No Issues rows");
+}
+
+// ============================================================================
+// UNIFIED JOB RESOLUTION
+// ============================================================================
+
+/**
+ * Unified function to resolve a job number to its tracked crew
+ * Consolidates all the job→foreman→primary crew logic in one place
+ *
+ * @param {string} jobNumber - Job number to resolve (e.g., "013-26", "054-26.1")
+ * @param {Object} context - Context object with cached lookups (optional)
+ *   - customMappings: Custom job→foreman mappings from dialog
+ *   - employeeData: Cached Employees sheet data
+ *   - trackedCrews: Set of tracked crew job numbers
+ * @returns {Object} Resolution result:
+ *   - found: boolean - Whether the job resolved to a tracked crew
+ *   - crew: string - The tracked crew job number (or null)
+ *   - foreman: string - Foreman name (or null)
+ *   - source: string - How it was resolved ('direct', 'custom', 'primary', 'secondary', 'notfound')
+ *   - reason: string - Human-readable explanation
+ */
+function resolveJobToCrew(jobNumber, context) {
+  context = context || {};
+  var customMappings = context.customMappings || {};
+  var trackedCrews = context.trackedCrews || {};
+
+  if (!jobNumber) {
+    return { found: false, crew: null, foreman: null, source: 'invalid', reason: 'No job number provided' };
+  }
+
+  // Extract base job (remove position suffix like .1, .2)
+  var baseJob = String(jobNumber).split('.')[0].trim();
+
+  // 1. Check if job is directly a tracked crew
+  if (trackedCrews[baseJob]) {
+    var directForeman = lookupForemanByJobNumber(baseJob);
+    return {
+      found: true,
+      crew: baseJob,
+      foreman: directForeman.name || '',
+      source: 'direct',
+      reason: 'Job is a tracked crew'
+    };
+  }
+
+  // 2. Check custom mappings (user-configured from dialog)
+  if (customMappings[baseJob]) {
+    var customForeman = customMappings[baseJob];
+    // Find this foreman's primary crew
+    var primaryCrew = findForemanPrimaryCrew(customForeman, context.employeeData);
+    if (primaryCrew && trackedCrews[primaryCrew]) {
+      return {
+        found: true,
+        crew: primaryCrew,
+        foreman: customForeman,
+        source: 'custom',
+        reason: 'Custom mapping: ' + baseJob + ' → ' + customForeman + ' (primary: ' + primaryCrew + ')'
+      };
+    } else {
+      return {
+        found: false,
+        crew: null,
+        foreman: customForeman,
+        source: 'custom_no_primary',
+        reason: 'Custom mapping found foreman ' + customForeman + ' but no tracked primary crew'
+      };
+    }
+  }
+
+  // 3. Search Employees sheet for this job (primary or secondary)
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var empSheet = ss.getSheetByName('Employees');
+  if (!empSheet) {
+    return { found: false, crew: null, foreman: null, source: 'no_employees', reason: 'Employees sheet not found' };
+  }
+
+  var empData = context.employeeData || empSheet.getDataRange().getValues();
+  var headers = empData[0].map(function(h) { return String(h).toLowerCase().trim(); });
+
+  var nameCol = headers.indexOf('name');
+  if (nameCol === -1) nameCol = headers.indexOf('employee');
+  if (nameCol === -1) nameCol = headers.indexOf('employee name');
+  if (nameCol === -1) nameCol = 0;
+
+  var jobCol = headers.indexOf('job number');
+  var secondaryJobCol = headers.indexOf('secondary job number');
+  var classCol = headers.indexOf('job classification');
+
+  if (jobCol === -1) {
+    return { found: false, crew: null, foreman: null, source: 'no_job_col', reason: 'Job Number column not found in Employees' };
+  }
+
+  // Search for this job in Employees
+  for (var i = 1; i < empData.length; i++) {
+    var empJob = String(empData[i][jobCol] || '').split('.')[0].trim();
+    var empSecondaryJob = secondaryJobCol !== -1 ? String(empData[i][secondaryJobCol] || '').split('.')[0].trim() : '';
+    var empName = String(empData[i][nameCol] || '').trim();
+
+    // Check if this employee's primary or secondary job matches
+    if (empJob === baseJob || empSecondaryJob === baseJob) {
+      // Found! Now find their primary crew
+      var primaryCrew = empJob; // Primary job is the tracked crew
+
+      // Check if their primary job is tracked
+      if (trackedCrews[primaryCrew]) {
+        var isSecondary = (empSecondaryJob === baseJob);
+        return {
+          found: true,
+          crew: primaryCrew,
+          foreman: empName,
+          source: isSecondary ? 'secondary' : 'primary',
+          reason: isSecondary
+            ? 'Secondary job ' + baseJob + ' → primary crew ' + primaryCrew + ' (via ' + empName + ')'
+            : 'Primary job match for ' + empName
+        };
+      }
+    }
+  }
+
+  // 4. Not found
+  return {
+    found: false,
+    crew: null,
+    foreman: null,
+    source: 'notfound',
+    reason: 'Job ' + baseJob + ' not found in Employees sheet (primary or secondary)'
+  };
+}
+
+/**
+ * Helper to find a foreman's primary crew from Employees data
+ */
+function findForemanPrimaryCrew(foremanName, employeeData) {
+  if (!foremanName || !employeeData) return null;
+
+  var headers = employeeData[0].map(function(h) { return String(h).toLowerCase().trim(); });
+  var nameCol = headers.indexOf('name');
+  if (nameCol === -1) nameCol = headers.indexOf('employee');
+  if (nameCol === -1) nameCol = 0;
+  var jobCol = headers.indexOf('job number');
+  if (jobCol === -1) return null;
+
+  var foremanLower = foremanName.toLowerCase().trim();
+
+  for (var i = 1; i < employeeData.length; i++) {
+    var empName = String(employeeData[i][nameCol] || '').trim();
+    if (empName.toLowerCase() === foremanLower) {
+      var empJob = String(employeeData[i][jobCol] || '').split('.')[0].trim();
+      return empJob || null;
+    }
+  }
+
+  return null;
+}
+
+// ============================================================================
+// REAL-TIME COMPLIANCE TRACKING
+// ============================================================================
+
+/**
+ * Builds compliance state directly from parsed email data
+ * This replaces reading from Safety Reports sheet for JHA/Meeting compliance
+ *
+ * @param {Array} parsedEmails - Array of parsed email results from parseSafetyEmail()
+ * @param {Date} weekStartDate - Sunday of the week to track
+ * @param {Object} context - Resolution context with trackedCrews, customMappings, employeeData
+ * @returns {Object} Compliance state keyed by crew
+ */
+function buildComplianceStateFromEmails(parsedEmails, weekStartDate, context) {
+  var weekBounds = getWeekBoundaries(weekStartDate);
+  var state = {};
+  var uncredited = {};
+
+  var trackedCrews = context.trackedCrews || {};
+
+  // Initialize state for all tracked crews
+  for (var crew in trackedCrews) {
+    state[crew] = {
+      jhaByDay: [false, false, false, false, false, false, false], // Sun-Sat
+      jhaLateByDay: [false, false, false, false, false, false, false],
+      weeklyMeeting: false,
+      weeklyMeetingLate: false,
+      monthlyChecklist: false
+    };
+  }
+
+  // Process each parsed email
+  for (var i = 0; i < parsedEmails.length; i++) {
+    var parsed = parsedEmails[i];
+    if (!parsed || !parsed.reportMeta) continue;
+
+    var meta = parsed.reportMeta;
+    if (!meta.jobNumber) continue;
+
+    // Resolve job to tracked crew
+    var resolution = resolveJobToCrew(meta.jobNumber, context);
+
+    if (!resolution.found) {
+      // Track uncredited
+      var baseJob = meta.jobNumber.split('.')[0];
+      if (!uncredited[baseJob]) {
+        uncredited[baseJob] = {
+          reportTypes: [],
+          dates: [],
+          reason: resolution.reason
+        };
+      }
+      if (uncredited[baseJob].reportTypes.indexOf(meta.reportType) === -1) {
+        uncredited[baseJob].reportTypes.push(meta.reportType);
+      }
+      if (meta.date) {
+        var dateStr = Utilities.formatDate(meta.date, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+        if (uncredited[baseJob].dates.indexOf(dateStr) === -1) {
+          uncredited[baseJob].dates.push(dateStr);
+        }
+      }
+      continue;
+    }
+
+    var crew = resolution.crew;
+
+    // Handle multiple JHA dates (from PDF extraction)
+    var datesToProcess = [];
+    if (meta.reportType === 'JHA') {
+      if (meta.multipleJHADates && meta.multipleJHADates.length > 0) {
+        datesToProcess = meta.multipleJHADates;
+      } else if (meta.date) {
+        datesToProcess = [meta.date];
+      }
+    } else if (meta.date) {
+      datesToProcess = [meta.date];
+    }
+
+    // Process each date
+    for (var d = 0; d < datesToProcess.length; d++) {
+      var reportDate = new Date(datesToProcess[d]);
+
+      // Check if within this week
+      if (reportDate < weekBounds.weekStart || reportDate > weekBounds.weekEnd) {
+        continue;
+      }
+
+      var dayOfWeek = reportDate.getDay(); // 0=Sun, 6=Sat
+      var isLate = isReportLate(reportDate, meta.receivedDate);
+
+      if (meta.reportType === 'JHA' || meta.reportType.indexOf('Job Hazard') !== -1) {
+        if (state[crew]) {
+          state[crew].jhaByDay[dayOfWeek] = true;
+          if (isLate) {
+            state[crew].jhaLateByDay[dayOfWeek] = true;
+          }
+          Logger.log("buildComplianceStateFromEmails: Credited JHA to " + crew + " for day " + dayOfWeek + " (from job " + meta.jobNumber + ")");
+        }
+      } else if (meta.reportType === 'Safety Meeting' || meta.reportType.indexOf('Safety Meeting') !== -1) {
+        if (state[crew]) {
+          state[crew].weeklyMeeting = true;
+          if (isLate) {
+            state[crew].weeklyMeetingLate = true;
+          }
+          Logger.log("buildComplianceStateFromEmails: Credited Meeting to " + crew + " (from job " + meta.jobNumber + ")");
+        }
+      } else if (meta.reportType === 'Fleet Checklist' || meta.reportType === 'Safety Checklist') {
+        if (state[crew]) {
+          state[crew].monthlyChecklist = true;
+        }
+      }
+    }
+  }
+
+  return {
+    crewState: state,
+    uncredited: uncredited
+  };
+}
+
+/**
+ * Merges newly parsed compliance state with existing Safety Compliance sheet data
+ * Updates the sheet with combined state
+ *
+ * @param {Object} newState - From buildComplianceStateFromEmails()
+ * @param {Date} weekStartDate - Week being processed
+ */
+function mergeAndUpdateComplianceSheet(newState, weekStartDate) {
+  if (!newState || !newState.crewState) {
+    Logger.log("mergeAndUpdateComplianceSheet: No new state to merge");
+    return;
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SAFETY_COMPLIANCE_SHEET_NAME);
+
+  if (!sheet) {
+    sheet = setupSafetyComplianceSheet();
+  }
+
+  var weekBounds = getWeekBoundaries(weekStartDate);
+  var weekStartStr = Utilities.formatDate(weekBounds.weekStart, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+  var config = loadComplianceConfig();
+  var today = new Date();
+  var isPastDeadline = today > weekBounds.weekEnd;
+  var nowStr = Utilities.formatDate(today, Session.getScriptTimeZone(), 'MM/dd/yyyy HH:mm');
+
+  // Read existing data
+  var data = sheet.getDataRange().getValues();
+  var existingRows = {};
+  for (var i = 1; i < data.length; i++) {
+    var rowWeek = data[i][0];
+    var rowJob = String(data[i][1] || '').trim();
+    var rowStatus = String(data[i][12] || '').trim();
+
+    if (rowWeek && rowJob) {
+      var rowWeekStr = Utilities.formatDate(new Date(rowWeek), Session.getScriptTimeZone(), 'MM/dd/yyyy');
+      if (rowWeekStr === weekStartStr) {
+        existingRows[rowJob] = {
+          rowNum: i + 1,
+          status: rowStatus,
+          data: data[i]
+        };
+      }
+    }
+  }
+
+  var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  var crewsUpdated = 0;
+
+  // Process each crew
+  for (var crew in newState.crewState) {
+    var crewData = newState.crewState[crew];
+    var crewConfig = config[crew] || { skipDays: [true, false, false, false, false, false, true], skipWeeklyMeeting: false, skipMonthlyChecklist: false };
+
+    // Skip if already resolved
+    if (existingRows[crew] && existingRows[crew].status === 'Resolved') {
+      Logger.log("mergeAndUpdateComplianceSheet: Skipping resolved crew " + crew);
+      continue;
+    }
+
+    var foremanResult = lookupForemanByJobNumber(crew);
+    var foremanName = (foremanResult && foremanResult.name) ? foremanResult.name : "";
+
+    // Build day columns
+    var dayValues = [];
+    var missingItems = [];
+    var lateCount = 0;
+    var status = 'Complete';
+
+    for (var d = 0; d < 7; d++) {
+      if (crewConfig.skipDays[d]) {
+        dayValues.push('N/A');
+      } else if (crewData.jhaByDay[d]) {
+        if (crewData.jhaLateByDay[d]) {
+          dayValues.push('✅L');
+          lateCount++;
+        } else {
+          dayValues.push('✅');
+        }
+      } else {
+        // Check existing data first (might have been credited before)
+        if (existingRows[crew]) {
+          var existingDayVal = String(existingRows[crew].data[3 + d] || '').trim();
+          if (existingDayVal === '✅' || existingDayVal === '✅L') {
+            dayValues.push(existingDayVal);
+            continue;
+          }
+        }
+        // Not credited
+        if (isPastDeadline) {
+          dayValues.push('❌');
+          status = 'Missing Reports';
+          missingItems.push('JHA (' + dayNames[d] + ')');
+        } else {
+          dayValues.push('⏳');
+          if (status === 'Complete') status = 'Pending';
+        }
+      }
+    }
+
+    // Weekly meeting
+    var weeklyVal = '';
+    if (crewConfig.skipWeeklyMeeting) {
+      weeklyVal = 'N/A';
+    } else if (crewData.weeklyMeeting) {
+      weeklyVal = crewData.weeklyMeetingLate ? '✅L' : '✅';
+      if (crewData.weeklyMeetingLate) lateCount++;
+    } else {
+      // Check existing
+      if (existingRows[crew]) {
+        var existingMeeting = String(existingRows[crew].data[10] || '').trim();
+        if (existingMeeting === '✅' || existingMeeting === '✅L') {
+          weeklyVal = existingMeeting;
+        }
+      }
+      if (!weeklyVal) {
+        if (isPastDeadline) {
+          weeklyVal = '❌';
+          status = 'Missing Reports';
+          missingItems.push('Weekly Meeting');
+        } else {
+          weeklyVal = '⏳';
+          if (status === 'Complete') status = 'Pending';
+        }
+      }
+    }
+
+    // Monthly checklist (progressive deadline)
+    var monthlyStatus = getMonthlyChecklistStatus(
+      weekBounds.weekStart,
+      crewData.monthlyChecklist,
+      crewConfig.skipMonthlyChecklist,
+      null
+    );
+
+    var monthlyVal = monthlyStatus.status;
+    if (monthlyStatus.affectsStatus) {
+      if (monthlyStatus.shouldCreateTask && status !== 'Missing Reports') {
+        status = 'Missing Reports';
+        missingItems.push('Monthly Checklist');
+      } else if (status === 'Complete' && monthlyVal !== '✅' && monthlyVal !== 'N/A') {
+        status = 'Pending';
+      }
+    }
+
+    // Build row
+    var rowData = [
+      weekStartStr,
+      crew,
+      foremanName,
+      dayValues[0], dayValues[1], dayValues[2], dayValues[3], dayValues[4], dayValues[5], dayValues[6],
+      weeklyVal,
+      monthlyVal,
+      status,
+      nowStr
+    ];
+
+    // Update or insert
+    if (existingRows[crew]) {
+      sheet.getRange(existingRows[crew].rowNum, 1, 1, rowData.length).setValues([rowData]);
+    } else {
+      sheet.appendRow(rowData);
+    }
+    crewsUpdated++;
+  }
+
+  Logger.log("mergeAndUpdateComplianceSheet: Updated " + crewsUpdated + " crews for week " + weekStartStr);
+}
+
+/**
+ * Updates Safety Compliance sheet directly from parsed compliance records
+ * This is the key function that writes JHA/Meeting data to the ✅/❌ grid
+ * Called during email processing BEFORE calculateSafetyCompliance()
+ *
+ * @param {Array} complianceRecords - Array of compliance record arrays from processSafetyEmails
+ *   Each record: [reportDate, reportType, jobNumber, foreman, vehicle, equipType, desc, status, feDate, emailId, notes, subject, receivedDate]
+ * @returns {Object} - { updated: number, skipped: number }
+ */
+function updateComplianceFromParsedRecords(complianceRecords) {
+  if (!complianceRecords || complianceRecords.length === 0) {
+    return { updated: 0, skipped: 0 };
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SAFETY_COMPLIANCE_SHEET_NAME);
+
+  if (!sheet) {
+    Logger.log("updateComplianceFromParsedRecords: Safety Compliance sheet not found - creating it");
+    sheet = setupSafetyComplianceSheet();
+    if (!sheet) {
+      return { updated: 0, skipped: 0, error: "Could not create Safety Compliance sheet" };
+    }
+  }
+
+  var tz = Session.getScriptTimeZone();
+  var today = new Date();
+  var nowStr = Utilities.formatDate(today, tz, 'MM/dd/yyyy HH:mm');
+  var crews = getActiveCrews();
+  var config = loadComplianceConfig();
+  var customMappings = getCustomJobForemanMappings() || {};
+
+  // Build tracked crews lookup
+  var trackedCrews = {};
+  for (var c = 0; c < crews.length; c++) {
+    trackedCrews[crews[c]] = true;
+  }
+
+  // Build job resolution context
+  var empSheet = ss.getSheetByName('Employees');
+  var employeeData = empSheet ? empSheet.getDataRange().getValues() : [];
+  var context = {
+    trackedCrews: trackedCrews,
+    customMappings: customMappings,
+    employeeData: employeeData
+  };
+
+  // Read existing Safety Compliance data
+  var data = sheet.getDataRange().getValues();
+  var existingRows = {}; // Key: "weekStart|jobNumber" → { rowNum, data }
+
+  for (var i = 1; i < data.length; i++) {
+    var rowWeek = data[i][0];
+    var rowJob = String(data[i][1] || '').trim();
+    var rowStatus = String(data[i][12] || '').trim();
+
+    if (rowWeek && rowJob) {
+      var rowWeekStr = Utilities.formatDate(new Date(rowWeek), tz, 'MM/dd/yyyy');
+      var key = rowWeekStr + '|' + rowJob;
+      existingRows[key] = {
+        rowNum: i + 1,
+        data: data[i],
+        status: rowStatus
+      };
+    }
+  }
+
+  var updatedCount = 0;
+  var skippedCount = 0;
+  var newRowsByWeekJob = {}; // Track new rows to add
+
+  // Process each compliance record
+  for (var r = 0; r < complianceRecords.length; r++) {
+    var record = complianceRecords[r];
+    var reportDate = record[0];
+    var reportType = String(record[1] || '').trim();
+    var jobNumber = String(record[2] || '').trim();
+    var foreman = String(record[3] || '').trim();
+    var notes = String(record[10] || '').trim();
+
+    if (!reportDate || !jobNumber) {
+      skippedCount++;
+      continue;
+    }
+
+    // Only process JHA and Safety Meeting records
+    if (reportType !== 'JHA' && reportType.indexOf('Job Hazard') === -1 &&
+        reportType !== 'Safety Meeting' && reportType.indexOf('Safety Meeting') === -1) {
+      skippedCount++;
+      continue;
+    }
+
+    // Resolve job to tracked crew
+    var baseJob = jobNumber.split('.')[0];
+    var resolution = resolveJobToCrew(baseJob, context);
+
+    if (!resolution.found) {
+      Logger.log("updateComplianceFromParsedRecords: Could not resolve job " + jobNumber + " - " + resolution.reason);
+      skippedCount++;
+      continue;
+    }
+
+    var targetCrew = resolution.crew;
+    var targetForeman = resolution.foreman || foreman;
+
+    // Get week boundaries for this report date
+    var reportDateObj = new Date(reportDate);
+    var weekBounds = getWeekBoundaries(reportDateObj);
+    var weekStartStr = Utilities.formatDate(weekBounds.weekStart, tz, 'MM/dd/yyyy');
+    var key = weekStartStr + '|' + targetCrew;
+
+    // Check if late submission
+    var isLate = notes.indexOf('LATE SUBMISSION') !== -1;
+    var checkVal = isLate ? '✅L' : '✅';
+
+    // Determine which column to update
+    var dayOfWeek = reportDateObj.getDay(); // 0=Sun, 6=Sat
+    var isJHA = (reportType === 'JHA' || reportType.indexOf('Job Hazard') !== -1);
+    var isMeeting = (reportType === 'Safety Meeting' || reportType.indexOf('Safety Meeting') !== -1);
+
+    // Column indices: 0=Week, 1=Job, 2=Foreman, 3=Sun, 4=Mon, 5=Tue, 6=Wed, 7=Thu, 8=Fri, 9=Sat, 10=Meeting, 11=Monthly, 12=Status, 13=Updated
+    var targetColIndex = -1;
+    if (isJHA) {
+      targetColIndex = 3 + dayOfWeek; // Sun=3, Mon=4, etc.
+    } else if (isMeeting) {
+      targetColIndex = 10; // Weekly Meeting column (K)
+    }
+
+    if (targetColIndex < 0) {
+      skippedCount++;
+      continue;
+    }
+
+    // Update existing row or create new row
+    if (existingRows[key]) {
+      var existingRow = existingRows[key];
+
+      // Skip if already resolved
+      if (existingRow.status === 'Resolved') {
+        Logger.log("updateComplianceFromParsedRecords: Skipping resolved crew " + targetCrew + " for week " + weekStartStr);
+        skippedCount++;
+        continue;
+      }
+
+      // Check current value - only update if not already credited
+      var currentVal = String(existingRow.data[targetColIndex] || '').trim();
+      if (currentVal === '✅' || currentVal === '✅L') {
+        // Already credited, skip
+        skippedCount++;
+        continue;
+      }
+
+      // Update the specific cell
+      sheet.getRange(existingRow.rowNum, targetColIndex + 1).setValue(checkVal);
+      sheet.getRange(existingRow.rowNum, 14).setValue(nowStr); // Update timestamp
+
+      // Also update in-memory cache
+      existingRow.data[targetColIndex] = checkVal;
+
+      updatedCount++;
+      Logger.log("updateComplianceFromParsedRecords: Credited " + reportType + " to " + targetCrew +
+        " for " + weekStartStr + (isJHA ? " day " + dayOfWeek : " (meeting)"));
+
+    } else {
+      // Need to create new row - track it and add at end
+      if (!newRowsByWeekJob[key]) {
+        // Initialize new row with pending values
+        var crewConfig = config[targetCrew] || { skipDays: [true, false, false, false, false, false, true], skipWeeklyMeeting: false };
+        var newRow = [
+          weekStartStr,     // Week
+          targetCrew,       // Job
+          targetForeman,    // Foreman
+          crewConfig.skipDays[0] ? 'N/A' : '⏳', // Sun
+          crewConfig.skipDays[1] ? 'N/A' : '⏳', // Mon
+          crewConfig.skipDays[2] ? 'N/A' : '⏳', // Tue
+          crewConfig.skipDays[3] ? 'N/A' : '⏳', // Wed
+          crewConfig.skipDays[4] ? 'N/A' : '⏳', // Thu
+          crewConfig.skipDays[5] ? 'N/A' : '⏳', // Fri
+          crewConfig.skipDays[6] ? 'N/A' : '⏳', // Sat
+          crewConfig.skipWeeklyMeeting ? 'N/A' : '⏳', // Meeting
+          '⏳',             // Monthly
+          'Pending',        // Status
+          nowStr            // Updated
+        ];
+        newRowsByWeekJob[key] = newRow;
+      }
+
+      // Update the specific column in the new row
+      newRowsByWeekJob[key][targetColIndex] = checkVal;
+      updatedCount++;
+      Logger.log("updateComplianceFromParsedRecords: Created new row for " + targetCrew + " week " + weekStartStr +
+        ", credited " + reportType + (isJHA ? " day " + dayOfWeek : " (meeting)"));
+    }
+  }
+
+  // Append all new rows
+  var newRowKeys = Object.keys(newRowsByWeekJob);
+  for (var nk = 0; nk < newRowKeys.length; nk++) {
+    sheet.appendRow(newRowsByWeekJob[newRowKeys[nk]]);
+  }
+
+  Logger.log("updateComplianceFromParsedRecords: Complete - Updated " + updatedCount + ", Skipped " + skippedCount + ", New rows " + newRowKeys.length);
+
+  return { updated: updatedCount, skipped: skippedCount, newRows: newRowKeys.length };
+}
+
+/**
+ * Creates the Safety Equipment Needs tracking sheet (formerly "Safety Reports")
+ * This sheet tracks ACTUAL EQUIPMENT ISSUES only - not JHA/Meeting compliance
+ * JHA/Meeting compliance is tracked in the Safety Compliance sheet
  */
 function setupSafetyReportsSheet() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Safety Reports");
+
+  // Check for both old and new names
+  var sheet = ss.getSheetByName(SAFETY_EQUIPMENT_SHEET_NAME);
+  var oldSheet = ss.getSheetByName(SAFETY_EQUIPMENT_SHEET_OLD_NAME);
 
   if (sheet) {
     var response = Browser.msgBox(
-      "Safety Reports sheet already exists",
+      "Safety Equipment Needs sheet already exists",
       "Do you want to recreate it? This will DELETE all existing data.",
       Browser.Buttons.YES_NO
     );
     if (response === "no") return;
     ss.deleteSheet(sheet);
+  } else if (oldSheet) {
+    // Offer to migrate instead of recreate
+    var response = Browser.msgBox(
+      "Found 'Safety Reports' sheet",
+      "Would you like to:\n• YES = Migrate existing data to 'Safety Equipment Needs'\n• NO = Delete and create fresh",
+      Browser.Buttons.YES_NO
+    );
+    if (response === "yes") {
+      migrateSafetyReportsToEquipmentNeeds();
+      return;
+    }
+    ss.deleteSheet(oldSheet);
   }
 
-  sheet = ss.insertSheet("Safety Reports");
+  sheet = ss.insertSheet(SAFETY_EQUIPMENT_SHEET_NAME);
 
   // Set up headers
   var headers = [
@@ -131,22 +2856,22 @@ function setupSafetyReportsSheet() {
 }
 
 /**
- * Opens the Safety Reports sheet
- * Menu function: Glove Manager → Safety → View Safety Reports
+ * Opens the Safety Equipment Needs sheet (formerly Safety Reports)
+ * Menu function: Glove Manager → Safety → View Safety Equipment Needs
  */
 function openSafetyReports() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Safety Reports");
+  var sheet = getSafetyEquipmentSheet();
 
   if (!sheet) {
     var ui = SpreadsheetApp.getUi();
-    var response = ui.alert('Safety Reports Not Found',
-      'The Safety Reports sheet does not exist. Would you like to create it?',
+    var response = ui.alert('Safety Equipment Needs Not Found',
+      'The Safety Equipment Needs sheet does not exist. Would you like to create it?',
       ui.ButtonSet.YES_NO);
 
     if (response === ui.Button.YES) {
       setupSafetyReportsSheet();
-      sheet = ss.getSheetByName("Safety Reports");
+      sheet = getSafetyEquipmentSheet();
     } else {
       return;
     }
@@ -157,17 +2882,16 @@ function openSafetyReports() {
 }
 
 /**
- * Cleans up Safety Reports sheet by removing "No Issues" compliance records.
+ * Cleans up Safety Equipment Needs sheet by removing "No Issues" compliance records.
  * These records are now tracked only in the Safety Compliance sheet.
- * Menu function: Glove Manager → Safety → Cleanup Safety Reports
+ * Menu function: Glove Manager → Safety → Cleanup Safety Equipment Needs
  */
 function cleanupSafetyReportsSheet() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Safety Reports");
+  var sheet = getSafetyEquipmentSheet();
 
   if (!sheet || sheet.getLastRow() < 2) {
     Browser.msgBox('ℹ️ No Data',
-      'The Safety Reports sheet is empty or does not exist.',
+      'The Safety Equipment Needs sheet is empty or does not exist.',
       Browser.Buttons.OK);
     return;
   }
@@ -681,27 +3405,42 @@ function applyStatusFormatting(sheet, startRow, numRows) {
 
 /**
  * Searches Gmail for JHAs, Safety Meetings, and Fleet Checklists
- * Parses them and logs equipment issues to Safety Reports sheet
+ * Parses them and logs equipment issues to Safety Equipment Needs sheet
+ * JHA/Meeting compliance is tracked directly in Safety Compliance sheet (not via Safety Equipment Needs)
  *
  * @param {number} daysBack - Number of days to search back (default 7)
  * @param {number} batchSize - Number of emails to process at once (default 10 for PDF processing)
  * @param {boolean} newOnlyMode - If true, only process emails newer than last processed date (default true)
  * @returns {Object} - Status object with progress info
  */
-function processSafetyEmails(daysBack, batchSize, newOnlyMode) {
+/**
+ * Process safety emails from Gmail
+ * @param {number} daysBack - Number of days to look back (default 7)
+ * @param {number} batchSize - Number of threads per batch (default 5 for speed)
+ * @param {boolean} newOnlyMode - Only process emails since last run (default true)
+ * @param {boolean} skipPdfExtraction - Skip slow PDF extraction, use subject date only (default false)
+ */
+function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction) {
   if (!daysBack) daysBack = 7;
-  if (!batchSize) batchSize = 10; // Small batch size due to slow PDF extraction (~5-10 sec each)
+  if (!batchSize) batchSize = 5; // REDUCED from 10 to 5 for better timeout handling
   if (newOnlyMode === undefined) newOnlyMode = true; // Default to new-only mode
+  if (skipPdfExtraction === undefined) skipPdfExtraction = false; // Default to extracting PDFs
+
+  // Store skipPdfExtraction in script properties so parseSafetyEmail can access it
+  var props = PropertiesService.getScriptProperties();
+  props.setProperty('SKIP_PDF_EXTRACTION', skipPdfExtraction ? 'true' : 'false');
+
+  var startTime = new Date().getTime(); // Track execution time
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Safety Reports");
+  var sheet = getSafetyEquipmentSheet();
   if (!sheet) {
     // Auto-create the sheet
-    Logger.log("Safety Reports sheet not found - creating it now");
+    Logger.log("Safety Equipment Needs sheet not found - creating it now");
     setupSafetyReportsSheet();
-    sheet = ss.getSheetByName("Safety Reports");
+    sheet = getSafetyEquipmentSheet();
     if (!sheet) {
-      Browser.msgBox("❌ Failed to create Safety Reports sheet.");
+      Browser.msgBox("❌ Failed to create Safety Equipment Needs sheet.");
       return { complete: true, error: "Failed to create sheet" };
     }
   }
@@ -778,26 +3517,79 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode) {
   var batchEnd = Math.min(batchStart + batchSize, allThreads.length);
   var batchThreads = allThreads.slice(batchStart, batchEnd);
 
+  // Time tracking - stop 30 seconds before the 6-minute limit
+  var MAX_EXECUTION_MS = 5.5 * 60 * 1000; // 5.5 minutes = 330 seconds
+  var timedOut = false;
+
+  // === OPTION B: Build job resolution context for logging ===
+  // This allows us to resolve jobs to tracked crews as we process emails
+  var crews = getActiveCrews();
+  var trackedCrews = {};
+  for (var ci = 0; ci < crews.length; ci++) {
+    trackedCrews[crews[ci]] = true;
+  }
+
+  var customMappings = getCustomJobForemanMappings() || {};
+  var empSheet = ss.getSheetByName('Employees');
+  var employeeData = empSheet ? empSheet.getDataRange().getValues() : [];
+
+  var jobResolutionContext = {
+    trackedCrews: trackedCrews,
+    customMappings: customMappings,
+    employeeData: employeeData
+  };
+
+  // Auto-cleanup old log entries (>90 days) on first batch only
+  if (batchStart === 0) {
+    var cleanupResult = cleanupOldLogEntries(90);
+    Logger.log("Auto-cleanup: Removed " + (cleanupResult.jhaDeleted + cleanupResult.weeklyDeleted + cleanupResult.monthlyDeleted) + " old log entries");
+  }
+  // === END OPTION B SETUP ===
+
       var issues = [];
       var complianceRecords = []; // Track all compliance reports (even with no issues)
       var pendingCorrections = []; // Track job number corrections that need approval
       var unknownJobsEncountered = []; // Track unknown jobs for user assignment
       var processedCount = 0;
       var skippedCount = 0;
+      var lastProcessedIndex = 0;
+      var logsCreated = { jha: 0, weekly: 0, monthly: 0 }; // Track Option B logs
 
-      batchThreads.forEach(function(thread) {
+      for (var tidx = 0; tidx < batchThreads.length && !timedOut; tidx++) {
+        var thread = batchThreads[tidx];
         var messages = thread.getMessages();
-        messages.forEach(function(message) {
+
+        for (var midx = 0; midx < messages.length && !timedOut; midx++) {
+          var message = messages[midx];
           var messageId = message.getId();
+
+          // Check time remaining - if under 30 seconds, stop processing
+          var elapsedMs = new Date().getTime() - startTime;
+          if (elapsedMs > MAX_EXECUTION_MS) {
+            Logger.log("⏱️ Timeout prevention: Stopping after " + Math.round(elapsedMs/1000) + " seconds to avoid 6-minute limit");
+            timedOut = true;
+            break;
+          }
 
           // Skip if already processed
           if (existingEmailIds[messageId]) {
             skippedCount++;
-            return;
+            continue;
           }
 
-          var parsed = parseSafetyEmail(message);
+          var parsed = parseSafetyEmail(message, skipPdfExtraction);
+          lastProcessedIndex = tidx;
           if (parsed) {
+            // === OPTION B: Log to audit trail sheets ===
+            // This creates a complete audit trail in JHA Log, Weekly Safety Log, Monthly Checklist Log
+            var logResult = logParsedSafetyEmail(parsed, message, jobResolutionContext);
+            if (logResult.logged) {
+              if (logResult.logSheet === JHA_LOG_SHEET_NAME) logsCreated.jha++;
+              else if (logResult.logSheet === WEEKLY_SAFETY_LOG_SHEET_NAME) logsCreated.weekly++;
+              else if (logResult.logSheet === MONTHLY_CHECKLIST_LOG_SHEET_NAME) logsCreated.monthly++;
+            }
+            // === END OPTION B LOGGING ===
+
             // Track unknown jobs that need user assignment
             // NOTE: "User skipped" jobs are silently ignored (user already decided to skip them)
             if (parsed.skippedReason === "Job not on Employee sheet" && parsed.reportMeta && parsed.reportMeta.jobNumber) {
@@ -913,8 +3705,30 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode) {
 
             processedCount++;
           }
-        });
-      });
+        } // end messages loop
+      } // end threads loop
+
+      // If we timed out, save progress and return early
+      if (timedOut) {
+        var actualProcessed = batchStart + lastProcessedIndex;
+        props.setProperty('SAFETY_BATCH_START', actualProcessed.toString());
+        Logger.log("Timed out - saved progress at thread " + actualProcessed + " of " + allThreads.length);
+
+        return {
+          complete: false,
+          timedOut: true,
+          batchNumber: Math.floor(batchStart / batchSize) + 1,
+          totalBatches: Math.ceil(allThreads.length / batchSize),
+          processedThisBatch: processedCount,
+          skippedThisBatch: skippedCount,
+          issuesThisBatch: issues.length,
+          totalThreads: allThreads.length,
+          threadsProcessed: actualProcessed,
+          threadsRemaining: allThreads.length - actualProcessed,
+          elapsedSeconds: Math.round((new Date().getTime() - startTime) / 1000),
+          message: "Stopping to prevent timeout. Click 'Continue Processing' to resume."
+        };
+      }
 
       // Check if we have unknown jobs that need user assignment FIRST
       // This takes priority over corrections - user must assign foremen before processing can continue
@@ -1018,6 +3832,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode) {
     skippedThisBatch: skippedCount,
     issuesThisBatch: issues.length,
     complianceRecordsAdded: complianceRecords.length,
+    logsCreated: logsCreated, // Option B: show log counts
     totalThreads: allThreads.length,
     threadsProcessed: batchEnd,
     threadsRemaining: allThreads.length - batchEnd,
@@ -1028,7 +3843,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode) {
   // When all batches are complete, run compliance tracking
   if (isComplete) {
     try {
-      Logger.log("Running compliance tracking...");
+      Logger.log("Running compliance tracking from log sheets (Option B)...");
       var today = new Date();
       var currentWeekBounds = getWeekBoundaries(today);
 
@@ -1038,23 +3853,25 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode) {
       previousWeekStart.setDate(previousWeekStart.getDate() - 7);
       var previousWeekBounds = getWeekBoundaries(previousWeekStart);
 
-      Logger.log("Processing PREVIOUS week: " + Utilities.formatDate(previousWeekBounds.weekStart, Session.getScriptTimeZone(), "MM/dd/yyyy"));
-      var previousWeekData = calculateSafetyCompliance(previousWeekBounds.weekStart);
+      Logger.log("Processing PREVIOUS week from logs: " + Utilities.formatDate(previousWeekBounds.weekStart, Session.getScriptTimeZone(), "MM/dd/yyyy"));
+      var previousWeekData = calculateComplianceFromLogs(previousWeekBounds.weekStart);
 
       var tasksCreated = 0;
       if (previousWeekData) {
-        updateComplianceSheet(previousWeekData);
+        updateComplianceSheetFromLogs(previousWeekData);
         // Previous week is always past deadline, so create tasks for missing reports
         tasksCreated = createMissingReportTasks(previousWeekData);
         Logger.log("Previous week tasks created: " + tasksCreated);
       }
 
       // Now process current week (for display purposes - won't create tasks since not past deadline)
-      Logger.log("Processing CURRENT week: " + Utilities.formatDate(currentWeekBounds.weekStart, Session.getScriptTimeZone(), "MM/dd/yyyy"));
-      var complianceData = calculateSafetyCompliance(currentWeekBounds.weekStart);
+      Logger.log("Processing CURRENT week from logs: " + Utilities.formatDate(currentWeekBounds.weekStart, Session.getScriptTimeZone(), "MM/dd/yyyy"));
+      var complianceData = calculateComplianceFromLogs(currentWeekBounds.weekStart);
 
       // Update compliance sheet for current week
-      updateComplianceSheet(complianceData);
+      if (complianceData) {
+        updateComplianceSheetFromLogs(complianceData);
+      }
 
       // Also finalize any OTHER past weeks that still show "Pending" (older than previous week)
       var pastWeekResult = finalizePastWeeksCompliance();
@@ -1065,64 +3882,65 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode) {
       Logger.log("Compliance sheet formatted - newest week now at top");
 
       // Add compliance stats to result (show current week to user)
-      result.compliance = {
-        weekStart: Utilities.formatDate(complianceData.weekStart, Session.getScriptTimeZone(), "MM/dd"),
-        weekEnd: Utilities.formatDate(complianceData.weekEnd, Session.getScriptTimeZone(), "MM/dd/yyyy"),
-        compliantCount: complianceData.compliantCount,
-        missingCount: complianceData.missingCount,
-        totalCrews: complianceData.totalCrews,
-        isPastDeadline: complianceData.isPastDeadline,
-        tasksCreated: tasksCreated,
-        crews: []
-      };
-
-      // Also add previous week stats for reference
-      if (previousWeekData) {
-        result.previousWeek = {
-          weekStart: Utilities.formatDate(previousWeekData.weekStart, Session.getScriptTimeZone(), "MM/dd"),
-          weekEnd: Utilities.formatDate(previousWeekData.weekEnd, Session.getScriptTimeZone(), "MM/dd/yyyy"),
-          compliantCount: previousWeekData.compliantCount,
-          missingCount: previousWeekData.missingCount,
-          totalCrews: previousWeekData.totalCrews,
-          tasksCreated: tasksCreated
+      if (complianceData) {
+        result.compliance = {
+          weekStart: Utilities.formatDate(complianceData.weekStart, Session.getScriptTimeZone(), "MM/dd"),
+          weekEnd: Utilities.formatDate(complianceData.weekEnd, Session.getScriptTimeZone(), "MM/dd/yyyy"),
+          compliantCount: complianceData.compliantCount,
+          missingCount: complianceData.missingCount,
+          totalCrews: complianceData.totalCrews,
+          isPastDeadline: complianceData.isPastDeadline,
+          tasksCreated: tasksCreated,
+          crews: []
         };
-      }
 
-      // Add crew details for display
-      for (var jobNumber in complianceData.crews) {
-        var crew = complianceData.crews[jobNumber];
-        // Convert crew.days object to jha array for UI (days are stored as crew.days['Sun'], etc.)
-        // Use defensive access in case days object is missing
-        var days = crew.days || {};
-        var jhaArray = [
-          days['Sun'] || 'N/A',
-          days['Mon'] || '⏳',
-          days['Tue'] || '⏳',
-          days['Wed'] || '⏳',
-          days['Thu'] || '⏳',
-          days['Fri'] || '⏳',
-          days['Sat'] || 'N/A'
-        ];
-        result.compliance.crews.push({
-          jobNumber: jobNumber,
-          foreman: crew.foreman || '',
-          jha: jhaArray,
-          weeklyMeeting: crew.weeklyMeeting || '⏳',
-          monthlyChecklist: crew.monthlyChecklist || '⏳',
-          status: crew.status || 'Unassigned'
-        });
-      }
+        // Also add previous week stats for reference
+        if (previousWeekData) {
+          result.previousWeek = {
+            weekStart: Utilities.formatDate(previousWeekData.weekStart, Session.getScriptTimeZone(), "MM/dd"),
+            weekEnd: Utilities.formatDate(previousWeekData.weekEnd, Session.getScriptTimeZone(), "MM/dd/yyyy"),
+            compliantCount: previousWeekData.compliantCount,
+            missingCount: previousWeekData.missingCount,
+            totalCrews: previousWeekData.totalCrews,
+            tasksCreated: tasksCreated
+          };
+        }
 
-      // Combine uncredited jobs from both weeks (deduplicated)
-      var allUncreditedJobs = {};
+        // Add crew details for display
+        for (var jobNumber in complianceData.crews) {
+          var crew = complianceData.crews[jobNumber];
+          // Convert crew.days object to jha array for UI (days are stored as crew.days['Sun'], etc.)
+          // Use defensive access in case days object is missing
+          var days = crew.days || {};
+          var jhaArray = [
+            days['Sun'] || 'N/A',
+            days['Mon'] || '⏳',
+            days['Tue'] || '⏳',
+            days['Wed'] || '⏳',
+            days['Thu'] || '⏳',
+            days['Fri'] || '⏳',
+            days['Sat'] || 'N/A'
+          ];
+          result.compliance.crews.push({
+            jobNumber: jobNumber,
+            foreman: crew.foreman || '',
+            jha: jhaArray,
+            weeklyMeeting: crew.weeklyMeetingStatus || '⏳',
+            monthlyChecklist: crew.monthlyChecklistStatus || '⏳',
+            status: crew.status || 'Unassigned'
+          });
+        }
 
-      // Add from current week
-      if (complianceData.uncreditedJobs) {
-        for (var ui = 0; ui < complianceData.uncreditedJobs.length; ui++) {
-          var uj = complianceData.uncreditedJobs[ui];
-          if (!allUncreditedJobs[uj.jobNumber]) {
-            allUncreditedJobs[uj.jobNumber] = uj;
-          } else {
+        // Combine uncredited jobs from both weeks (deduplicated)
+        var allUncreditedJobs = {};
+
+        // Add from current week
+        if (complianceData.uncreditedJobs) {
+          for (var ui = 0; ui < complianceData.uncreditedJobs.length; ui++) {
+            var uj = complianceData.uncreditedJobs[ui];
+            if (!allUncreditedJobs[uj.jobNumber]) {
+              allUncreditedJobs[uj.jobNumber] = uj;
+            } else {
             // Merge dates and report types
             for (var rt = 0; rt < uj.reportTypes.length; rt++) {
               if (allUncreditedJobs[uj.jobNumber].reportTypes.indexOf(uj.reportTypes[rt]) === -1) {
@@ -1170,6 +3988,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode) {
         result.uncreditedJobs = uncreditedJobsList;
         Logger.log("Found " + uncreditedJobsList.length + " uncredited job(s) in Safety Reports not matched to any tracked crew");
       }
+      } // Close if (complianceData)
 
       Logger.log("Compliance tracking complete. Tasks created: " + tasksCreated);
     } catch (compError) {
@@ -1542,9 +4361,16 @@ function cancelPendingCorrections() {
  * Parses safety email and extracts equipment issues
  *
  * @param {GmailMessage} message - Gmail message object
+ * @param {boolean} skipPdfExtraction - If true, skip slow PDF extraction and use subject date only
  * @returns {Object} - {issues: [[row data]], reportMeta: {...}, jobNormalization: {...}}
  */
-function parseSafetyEmail(message) {
+function parseSafetyEmail(message, skipPdfExtraction) {
+  // Get skipPdfExtraction from script properties if not passed directly
+  if (skipPdfExtraction === undefined) {
+    var props = PropertiesService.getScriptProperties();
+    skipPdfExtraction = props.getProperty('SKIP_PDF_EXTRACTION') === 'true';
+  }
+
   try {
     var subject = message.getSubject();
     var body = message.getPlainBody();
@@ -1673,8 +4499,9 @@ function parseSafetyEmail(message) {
     var jhaDateOverrides = []; // Holds dates extracted from PDF for JHAs (may have multiple per email)
 
     // Extract PDF content for Safety Checklist reports (required - all data is in PDF)
-    // This is slow (~5-10 seconds per PDF) but necessary
-    if (reportType === "Safety Checklist") {
+    // This is slow (~5-10 seconds per PDF) but necessary for equipment issues
+    // NOTE: Can be skipped with skipPdfExtraction=true for compliance-only mode
+    if (reportType === "Safety Checklist" && !skipPdfExtraction) {
       Logger.log("Processing Safety Checklist PDF for job " + jobNumber + "...");
       var attachments = message.getAttachments();
 
@@ -1699,12 +4526,15 @@ function parseSafetyEmail(message) {
           break;
         }
       }
+    } else if (reportType === "Safety Checklist" && skipPdfExtraction) {
+      Logger.log("⚡ FAST MODE: Skipping Safety Checklist PDF extraction for job " + jobNumber + " - equipment issues won't be extracted");
     }
 
     // Extract PDF content for JHA reports to get actual "Date Completed" from the PDF
     // This is important because the email subject date may differ from actual work dates
     // PROCESSES ALL PDFs in the email (some emails have multiple JHA PDFs)
-    if (reportType === "JHA") {
+    // NOTE: This is SLOW (~5-10 sec per PDF). Can be skipped with skipPdfExtraction=true
+    if (reportType === "JHA" && !skipPdfExtraction) {
       Logger.log("Processing ALL JHA PDFs for job " + jobNumber + " to extract Date Completed...");
       var attachments = message.getAttachments();
       var pdfCount = 0;
@@ -1777,6 +4607,8 @@ function parseSafetyEmail(message) {
       } else {
         Logger.log("No Date Completed found in any PDF, using subject date: " + (reportDate ? reportDate.toDateString() : "unknown"));
       }
+    } else if (reportType === "JHA" && skipPdfExtraction) {
+      Logger.log("⚡ FAST MODE: Skipping JHA PDF extraction for job " + jobNumber + " - using subject date instead");
     }
 
     // Extract vehicle number from fleet checklist if not already set
@@ -3369,17 +6201,22 @@ function loadComplianceConfig() {
 
 /**
  * Calculates safety compliance for all crews for a given week
+ * NOTE: This function now primarily reads from the Safety Compliance sheet itself
+ * for existing compliance data, rather than from Safety Equipment Needs.
+ * JHA/Meeting data is tracked directly in Safety Compliance during email processing.
  *
  * @param {Date} weekStartDate - The Sunday of the week to calculate
  * @returns {Object} - Compliance data for all crews
  */
 function calculateSafetyCompliance(weekStartDate) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var safetySheet = ss.getSheetByName("Safety Reports");
 
+  // Safety Equipment Needs sheet is optional - only used for Monthly Checklist (Fleet Checklists)
+  var safetySheet = getSafetyEquipmentSheet();
+
+  // Log but don't fail if sheet doesn't exist - compliance can still work from Safety Compliance sheet
   if (!safetySheet) {
-    Logger.log("calculateSafetyCompliance: Safety Reports sheet not found");
-    return null;
+    Logger.log("calculateSafetyCompliance: Safety Equipment Needs sheet not found - compliance tracking will use Safety Compliance sheet only");
   }
 
   var config = loadComplianceConfig();
@@ -3393,30 +6230,40 @@ function calculateSafetyCompliance(weekStartDate) {
   var weekBounds = getWeekBoundaries(weekStartDate);
   var today = new Date();
   var isPastDeadline = today > weekBounds.weekEnd;
+  var weekStartStr = Utilities.formatDate(weekBounds.weekStart, Session.getScriptTimeZone(), 'MM/dd/yyyy');
 
-  // Load already-resolved crews from Safety Compliance sheet
-  // These crews should retain their resolution codes and not be recalculated
+  // Load existing compliance data from Safety Compliance sheet
+  // This is now the PRIMARY source of JHA/Meeting compliance data
   var resolvedCrews = {};
-  var complianceSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Safety Compliance');
+  var existingComplianceByJob = {};  // Job → existing row data
+  var complianceSheet = ss.getSheetByName(SAFETY_COMPLIANCE_SHEET_NAME);
   if (complianceSheet) {
     var complianceData = complianceSheet.getDataRange().getValues();
-    var weekStartStr = Utilities.formatDate(weekBounds.weekStart, Session.getScriptTimeZone(), 'MM/dd/yyyy');
     for (var rc = 1; rc < complianceData.length; rc++) {
       var rowWeek = complianceData[rc][0]; // Week Start column
       var rowJob = String(complianceData[rc][1] || '').trim(); // Job Number column
       var rowStatus = String(complianceData[rc][12] || '').trim(); // Status column (M = 12)
 
-      // Check if this row matches our week and has Resolved status
+      // Check if this row matches our week
       if (rowWeek && rowJob) {
         var rowWeekStr = Utilities.formatDate(new Date(rowWeek), Session.getScriptTimeZone(), 'MM/dd/yyyy');
-        if (rowWeekStr === weekStartStr && rowStatus === 'Resolved') {
-          resolvedCrews[rowJob] = true;
-          Logger.log('calculateSafetyCompliance: Found resolved crew ' + rowJob + ' for week ' + weekStartStr);
+        if (rowWeekStr === weekStartStr) {
+          // Store the existing data for this job
+          existingComplianceByJob[rowJob] = {
+            rowData: complianceData[rc],
+            rowNum: rc + 1,  // 1-based row number
+            status: rowStatus
+          };
+
+          if (rowStatus === 'Resolved') {
+            resolvedCrews[rowJob] = true;
+            Logger.log('calculateSafetyCompliance: Found resolved crew ' + rowJob + ' for week ' + weekStartStr);
+          }
         }
       }
     }
   }
-  Logger.log('calculateSafetyCompliance: Loaded ' + Object.keys(resolvedCrews).length + ' resolved crews');
+  Logger.log('calculateSafetyCompliance: Loaded existing data for ' + Object.keys(existingComplianceByJob).length + ' crews, ' + Object.keys(resolvedCrews).length + ' resolved');
 
   // Build mappings for secondary/custom jobs → primary crew
   // This allows reports submitted on secondary jobs (e.g., 006-26) to credit the foreman's primary crew (e.g., 052-25)
@@ -3505,20 +6352,6 @@ function calculateSafetyCompliance(weekStartDate) {
     Logger.log('calculateSafetyCompliance: Custom job ' + debugJob + ' -> foreman ' + debugForeman + ' -> primary crew ' + (debugPrimary || 'NOT FOUND'));
   }
 
-  // Read all Safety Reports data
-  var reportData = safetySheet.getDataRange().getValues();
-
-  // Find Notes column index (column K = index 10, but verify)
-  var headers = reportData[0];
-  var notesColIdx = 10; // Default to column K (0-indexed)
-  for (var h = 0; h < headers.length; h++) {
-    var hdr = String(headers[h]).toLowerCase().trim();
-    if (hdr === 'notes') {
-      notesColIdx = h;
-      break;
-    }
-  }
-
   // Get month boundaries for Monthly Checklist tracking
   // Monthly Checklist is valid for the entire month once received
   var monthStart = new Date(weekBounds.weekStart.getFullYear(), weekBounds.weekStart.getMonth(), 1);
@@ -3526,9 +6359,11 @@ function calculateSafetyCompliance(weekStartDate) {
   var tz = Session.getScriptTimeZone();
 
   // Build lookup: jobNumber -> { jhaByDay, weeklyMeeting, monthlyChecklist, monthlyChecklistDate }
+  // IMPORTANT: Initialize from existing Safety Compliance sheet data to preserve JHA/Meeting status
   var crewReports = {};
   for (var c = 0; c < crews.length; c++) {
-    crewReports[crews[c]] = {
+    var crewJob = crews[c];
+    crewReports[crewJob] = {
       jhaByDay: [false, false, false, false, false, false, false], // Sun-Sat
       jhaLateByDay: [false, false, false, false, false, false, false], // Track which were late
       weeklyMeeting: false,
@@ -3536,6 +6371,64 @@ function calculateSafetyCompliance(weekStartDate) {
       monthlyChecklist: false,
       monthlyChecklistDate: null  // Track when checklist was received this month
     };
+
+    // POPULATE from existing Safety Compliance sheet data (THIS IS THE KEY FIX)
+    // The JHA/Meeting compliance data is now stored directly in Safety Compliance, not Safety Reports
+    if (existingComplianceByJob[crewJob]) {
+      var existingRow = existingComplianceByJob[crewJob].rowData;
+      // Safety Compliance columns: 0=Week, 1=Job, 2=Foreman, 3=Sun, 4=Mon, 5=Tue, 6=Wed, 7=Thu, 8=Fri, 9=Sat, 10=Meeting, 11=Monthly, 12=Status
+
+      // Parse JHA days (columns 3-9, indices 3-9)
+      var dayColOffset = 3; // Sun is column D (index 3)
+      for (var dayIdx = 0; dayIdx < 7; dayIdx++) {
+        var dayVal = String(existingRow[dayColOffset + dayIdx] || '').trim();
+        if (dayVal === '✅') {
+          crewReports[crewJob].jhaByDay[dayIdx] = true;
+        } else if (dayVal === '✅L') {
+          crewReports[crewJob].jhaByDay[dayIdx] = true;
+          crewReports[crewJob].jhaLateByDay[dayIdx] = true;
+        }
+      }
+
+      // Parse Weekly Meeting (column K, index 10)
+      var meetingVal = String(existingRow[10] || '').trim();
+      if (meetingVal === '✅') {
+        crewReports[crewJob].weeklyMeeting = true;
+      } else if (meetingVal === '✅L') {
+        crewReports[crewJob].weeklyMeeting = true;
+        crewReports[crewJob].weeklyMeetingLate = true;
+      }
+
+      // Parse Monthly Checklist (column L, index 11)
+      var monthlyVal = String(existingRow[11] || '').trim();
+      if (monthlyVal === '✅') {
+        crewReports[crewJob].monthlyChecklist = true;
+      }
+
+      Logger.log('calculateSafetyCompliance: Loaded existing compliance for ' + crewJob +
+        ' - JHA days credited: ' + crewReports[crewJob].jhaByDay.filter(function(v) { return v; }).length +
+        ', Meeting: ' + crewReports[crewJob].weeklyMeeting);
+    }
+  }
+
+  // Read Safety Equipment Needs data ONLY for Monthly Checklist (Fleet Checklists)
+  // JHA and Safety Meeting are NOT stored here anymore
+  var reportData = [];
+  var headers = [];
+  var notesColIdx = 10;
+
+  if (safetySheet) {
+    reportData = safetySheet.getDataRange().getValues();
+    headers = reportData[0];
+
+    // Find Notes column index
+    for (var h = 0; h < headers.length; h++) {
+      var hdr = String(headers[h]).toLowerCase().trim();
+      if (hdr === 'notes') {
+        notesColIdx = h;
+        break;
+      }
+    }
   }
 
   // Track jobs that couldn't be resolved to a tracked crew
@@ -4231,12 +7124,6 @@ function menuAddLateSubmissionFormatting() {
   addLateSubmissionFormatting();
 }
 
-/**
- * Menu function to add late submission formatting
- */
-function menuAddLateSubmissionFormatting() {
-  addLateSubmissionFormatting();
-}
 
 /**
  * Auto-corrects past week compliance data when new JHA reports are found with PDF dates
@@ -6550,22 +9437,6 @@ function lookupForemanWithCustomMapping(jobNumber, dialogMappings) {
   return result;
 }
 
-/**
- * Gets the last processed timestamp for display in dialog
- * @returns {string} Formatted timestamp or "Never"
- */
-function getLastSafetyEmailProcessedTime() {
-  var props = PropertiesService.getScriptProperties();
-  var timestamp = props.getProperty('LAST_SAFETY_EMAIL_TIMESTAMP');
-  if (timestamp) {
-    return timestamp;
-  }
-  var dateStr = props.getProperty('LAST_SAFETY_EMAIL_DATE');
-  if (dateStr) {
-    return dateStr;
-  }
-  return 'Never';
-}
 
 /**
  * Stores unknown job numbers encountered during processing for user prompt

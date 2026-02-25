@@ -3,6 +3,8 @@
  *
  * Functions for managing crew visit schedules and training calendar.
  * Provides monthly calendar view with time estimates and route optimization.
+ *
+ * Last updated: 2026-02-24 19:30
  */
 
 // ============================================================================
@@ -273,7 +275,6 @@ function getActiveCrews() {
   var headers = data[0];
   var jobNumCol = -1;
   var secondaryJobCol = -1;
-  var secondaryJobCol = -1;
   var lastDayCol = -1;
 
   // Find Job Number column (D), Secondary Job Number column, and Last Day column (L)
@@ -326,9 +327,10 @@ function getActiveCrews() {
 /**
  * Extracts crew number from full job number.
  * Example: "009-26.1" → "009-26"
+ * Returns empty string for invalid formats like "N/A", "Unknown", "000-XX", etc.
  *
  * @param {string} jobNumber - Full job number
- * @return {string} Crew number prefix
+ * @return {string} Crew number prefix (NNN-YY format) or empty string
  */
 function extractCrewNumber(jobNumber) {
   var jobStr = String(jobNumber).trim();
@@ -336,11 +338,21 @@ function extractCrewNumber(jobNumber) {
 
   // Find last dot and remove everything after it
   var lastDotIndex = jobStr.lastIndexOf('.');
-  if (lastDotIndex !== -1) {
-    return jobStr.substring(0, lastDotIndex);
+  var crewNumber = lastDotIndex !== -1 ? jobStr.substring(0, lastDotIndex) : jobStr;
+
+  // Validate format: NNN-YY (e.g., 009-26, 013-26)
+  // Must be 3 digits, dash, 2 digits
+  var validFormat = new RegExp('^\\d{3}-\\d{2}$');
+  if (!validFormat.test(crewNumber)) {
+    return ''; // Invalid format - skip
   }
 
-  return jobStr; // Return as-is if no dot found
+  // Exclude placeholder job numbers like 000-XX
+  if (crewNumber.startsWith('000-')) {
+    return ''; // Placeholder - skip
+  }
+
+  return crewNumber;
 }
 
 /**

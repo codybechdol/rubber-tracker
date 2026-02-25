@@ -4575,15 +4575,22 @@ function onOpen() {
       .addItem('📝 Create Purchase Order', 'showPurchaseOrderDialog')
       .addItem('📋 Order History', 'openPurchaseOrdersSheet')
       .addItem('⚙️ Manage Vendors', 'showVendorConfigDialog'))
-    .addSubMenu(ui.createMenu('🛡️ Safety Reports')
+    .addSubMenu(ui.createMenu('🛡️ Safety')
       // === MAIN ACTIONS ===
       .addItem('📥 Process Safety Emails', 'showProcessSafetyEmailsDialog')
-      .addItem('📊 View Safety Reports', 'openSafetyReports')
+      .addItem('📊 View Equipment Needs', 'openSafetyReports')
       .addItem('📈 View Compliance History', 'openComplianceSheet')
       .addItem('⚙️ Configure Crew Exclusions', 'openComplianceConfig')
       .addItem('👥 Populate Crew Config', 'populateComplianceConfig')
       .addItem('🔧 Add Monthly Checklist Column', 'migrateComplianceConfigAddMonthlyChecklist')
       .addItem('🔧 Fix Notes Column', 'fixNotesColumnCheckboxes')
+      .addSeparator()
+      // === LOG SHEETS (Option B - Feb 24, 2026) ===
+      .addItem('📋 Setup Log Sheets', 'setupAllSafetyLogSheets')
+      .addItem('📄 View JHA Log', 'openJHALogSheet')
+      .addItem('📄 View Weekly Safety Log', 'openWeeklySafetyLogSheet')
+      .addItem('📄 View Monthly Checklist Log', 'openMonthlyChecklistLogSheet')
+      .addItem('🔄 Recalculate Compliance', 'recalculateComplianceFromLogs')
       .addSeparator()
       // === TASKS ===
       .addItem('📋 Create Tasks from Issues', 'createTasksFromSafetyIssues')
@@ -4592,8 +4599,16 @@ function onOpen() {
       .addItem('📅 Backfill Past Weeks', 'menuBackfillPastWeeks')
       .addItem('🎨 Reformat by Week', 'menuReformatComplianceSheet')
       .addSeparator()
-      // === CLEANUP & DEBUG ===
+      // === DIAGNOSTICS ===
       .addItem('🔍 Diagnose Compliance', 'diagnoseSafetyCompliance')
+      .addItem('📊 Trace Compliance Calculation', 'traceComplianceCalculation')
+      .addItem('🧪 Test Compliance Update', 'testComplianceUpdate')
+      .addItem('🔬 Test Email Parsing', 'testEmailParsing')
+      .addItem('🔎 Diagnose Specific Crew', 'diagnoseCrewCompliance')
+      .addSeparator()
+      // === MIGRATION & CLEANUP ===
+      .addItem('🔄 Migrate Safety Reports Sheet', 'migrateSafetyReportsToEquipmentNeeds')
+      .addItem('🧹 Cleanup Equipment Sheet', 'cleanupSafetyReportsSheet')
       .addItem('🧹 Remove Duplicate Rows', 'menuCleanupDuplicateComplianceRows')
       .addItem('🧹 Clear Saved Job Corrections', 'clearJobNumberCorrections')
       .addItem('🛠️ Fix Shifted Safety Tasks', 'fixShiftedSafetyComplianceTasks'))
