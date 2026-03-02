@@ -12227,4 +12227,154 @@ function diagnoseHistoricalCrews() {
   SpreadsheetApp.getUi().showModalDialog(htmlOutput, 'Historical Crews Diagnostic');
 }
 
+/**
+ * Clear the last safety email processed date to force a full re-scan
+ * Menu function with confirmation dialog
+ */
+function clearLastSafetyProcessedDate() {
+  var ui = SpreadsheetApp.getUi();
+  var props = PropertiesService.getScriptProperties();
+
+  var lastDate = props.getProperty('LAST_SAFETY_EMAIL_DATE');
+  var lastTimestamp = props.getProperty('LAST_SAFETY_EMAIL_TIMESTAMP');
+
+  var message = 'This will clear the last processed date, forcing Process Safety Emails to re-scan all emails within the selected date range.\n\n';
+  if (lastDate) {
+    message += 'Current last processed date: ' + lastDate + '\n';
+  }
+  if (lastTimestamp) {
+    message += 'Last timestamp: ' + lastTimestamp + '\n';
+  }
+  message += '\nContinue?';
+
+  var response = ui.alert('🔄 Reset Last Processed Date', message, ui.ButtonSet.YES_NO);
+
+  if (response === ui.Button.YES) {
+    props.deleteProperty('LAST_SAFETY_EMAIL_DATE');
+    props.deleteProperty('LAST_SAFETY_EMAIL_TIMESTAMP');
+
+    ui.alert('✅ Last Processed Date Cleared',
+      'The last processed date has been cleared.\n\n' +
+      'When you run Process Safety Emails, it will search using the day range you select (7, 14, 30, etc. days).\n\n' +
+      'Note: Already-logged emails will still be skipped to prevent duplicates.',
+      ui.ButtonSet.OK);
+
+    Logger.log('clearLastSafetyProcessedDate: Cleared last processed date');
+  }
+}
+
+/**
+ * Show current safety email processing status
+ * Menu function to display diagnostic information
+ */
+function showSafetyProcessingStatus() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var props = PropertiesService.getScriptProperties();
+
+  // Get last processed info
+  var lastDate = props.getProperty('LAST_SAFETY_EMAIL_DATE') || 'Not set';
+  var lastTimestamp = props.getProperty('LAST_SAFETY_EMAIL_TIMESTAMP') || 'Not set';
+
+  // Count log entries
+  var jhaLogCount = 0;
+  var weeklyLogCount = 0;
+  var monthlyLogCount = 0;
+
+  try {
+    var jhaLog = ss.getSheetByName('JHA Log');
+    if (jhaLog && jhaLog.getLastRow() > 1) {
+      jhaLogCount = jhaLog.getLastRow() - 1;
+    }
+  } catch(e) {}
+
+  try {
+    var weeklyLog = ss.getSheetByName('Weekly Safety Log');
+    if (weeklyLog && weeklyLog.getLastRow() > 1) {
+      weeklyLogCount = weeklyLog.getLastRow() - 1;
+    }
+  } catch(e) {}
+
+  try {
+    var monthlyLog = ss.getSheetByName('Monthly Checklist Log');
+    if (monthlyLog && monthlyLog.getLastRow() > 1) {
+      monthlyLogCount = monthlyLog.getLastRow() - 1;
+    }
+  } catch(e) {}
+
+  // Count compliance rows
+  var complianceCount = 0;
+  try {
+    var compliance = ss.getSheetByName('Safety Compliance');
+    if (compliance && compliance.getLastRow() > 1) {
+      complianceCount = compliance.getLastRow() - 1;
+    }
+  } catch(e) {}
+
+  // Get tracked crews count
+  var trackedCrewsCount = 0;
+  try {
+    var crews = getActiveCrews();
+    trackedCrewsCount = crews ? crews.length : 0;
+  } catch(e) {}
+
+  // Get custom mappings count
+  var customMappingsCount = 0;
+  try {
+    var mappings = getCustomJobForemanMappings();
+    customMappingsCount = Object.keys(mappings).length;
+  } catch(e) {}
+
+  // Build status message
+  var html = '<html><head><style>';
+  html += 'body { font-family: Arial, sans-serif; padding: 20px; }';
+  html += 'h2 { color: #1a73e8; margin-top: 0; }';
+  html += '.section { margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px; }';
+  html += '.section h3 { margin-top: 0; color: #5f6368; font-size: 14px; }';
+  html += '.stat { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #e0e0e0; }';
+  html += '.stat:last-child { border-bottom: none; }';
+  html += '.label { color: #5f6368; }';
+  html += '.value { font-weight: bold; color: #202124; }';
+  html += '.warning { color: #ea8600; }';
+  html += '.ok { color: #1e8e3e; }';
+  html += '</style></head><body>';
+
+  html += '<h2>📋 Safety Email Processing Status</h2>';
+
+  html += '<div class="section">';
+  html += '<h3>📅 Last Processing</h3>';
+  html += '<div class="stat"><span class="label">Last Processed Date:</span><span class="value">' + lastDate + '</span></div>';
+  html += '<div class="stat"><span class="label">Last Timestamp:</span><span class="value">' + lastTimestamp + '</span></div>';
+  html += '</div>';
+
+  html += '<div class="section">';
+  html += '<h3>📊 Log Sheet Counts</h3>';
+  html += '<div class="stat"><span class="label">JHA Log entries:</span><span class="value">' + jhaLogCount + '</span></div>';
+  html += '<div class="stat"><span class="label">Weekly Safety Log entries:</span><span class="value">' + weeklyLogCount + '</span></div>';
+  html += '<div class="stat"><span class="label">Monthly Checklist Log entries:</span><span class="value">' + monthlyLogCount + '</span></div>';
+  html += '</div>';
+
+  html += '<div class="section">';
+  html += '<h3>📈 Compliance Data</h3>';
+  html += '<div class="stat"><span class="label">Safety Compliance rows:</span><span class="value">' + complianceCount + '</span></div>';
+  html += '<div class="stat"><span class="label">Tracked crews:</span><span class="value">' + trackedCrewsCount + '</span></div>';
+  html += '<div class="stat"><span class="label">Custom job mappings:</span><span class="value">' + customMappingsCount + '</span></div>';
+  html += '</div>';
+
+  html += '<div class="section">';
+  html += '<h3>💡 Tips</h3>';
+  html += '<p style="margin: 5px 0; font-size: 13px;">• Use "Reset Last Processed Date" to force a full re-scan</p>';
+  html += '<p style="margin: 5px 0; font-size: 13px;">• Already-logged emails are skipped (no duplicates)</p>';
+  html += '<p style="margin: 5px 0; font-size: 13px;">• Use "Recalculate ALL Weeks" to rebuild compliance from logs</p>';
+  html += '</div>';
+
+  html += '</body></html>';
+
+  var htmlOutput = HtmlService.createHtmlOutput(html)
+    .setWidth(450)
+    .setHeight(500)
+    .setTitle('Safety Processing Status');
+
+  SpreadsheetApp.getUi().showModalDialog(htmlOutput, 'Safety Processing Status');
+}
+
 
