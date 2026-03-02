@@ -390,14 +390,20 @@ function emailExistsInLog(sheet, emailId, emailIdCol) {
  * @param {string} params.status - "Credited", "Unknown Job", "Duplicate", "Error"
  * @param {string} params.creditedTo - Tracked crew that got credit (or blank)
  * @param {string} params.notes - Additional info
+ * @param {Object} existingEmailIds - Optional pre-loaded set for fast duplicate check
  * @returns {Object} - { success: boolean, row: number }
  */
-function logJHAEmail(params) {
+function logJHAEmail(params, existingEmailIds) {
   var sheet = getJHALogSheet();
   var tz = Session.getScriptTimeZone();
 
-  // Check for duplicate
-  if (emailExistsInLog(sheet, params.emailId, 5)) { // Column F = Email ID (0-indexed = 5)
+  // Fast duplicate check using pre-loaded set if available
+  if (existingEmailIds && existingEmailIds[params.emailId]) {
+    return { success: false, duplicate: true };
+  }
+
+  // Fallback to sheet read if no pre-loaded set (slower but safe)
+  if (!existingEmailIds && emailExistsInLog(sheet, params.emailId, 5)) {
     Logger.log("logJHAEmail: Duplicate - " + params.emailId);
     return { success: false, duplicate: true };
   }
@@ -435,14 +441,20 @@ function logJHAEmail(params) {
  * @param {string} params.status - Status
  * @param {string} params.creditedTo - Tracked crew
  * @param {string} params.notes - Additional info
+ * @param {Object} existingEmailIds - Optional pre-loaded set for fast duplicate check
  * @returns {Object} - { success: boolean, row: number }
  */
-function logWeeklySafetyEmail(params) {
+function logWeeklySafetyEmail(params, existingEmailIds) {
   var sheet = getWeeklySafetyLogSheet();
   var tz = Session.getScriptTimeZone();
 
-  // Check for duplicate
-  if (emailExistsInLog(sheet, params.emailId, 5)) { // Column F = Email ID
+  // Fast duplicate check using pre-loaded set if available
+  if (existingEmailIds && existingEmailIds[params.emailId]) {
+    return { success: false, duplicate: true };
+  }
+
+  // Fallback to sheet read if no pre-loaded set (slower but safe)
+  if (!existingEmailIds && emailExistsInLog(sheet, params.emailId, 5)) {
     Logger.log("logWeeklySafetyEmail: Duplicate - " + params.emailId);
     return { success: false, duplicate: true };
   }
@@ -481,14 +493,20 @@ function logWeeklySafetyEmail(params) {
  * @param {string} params.creditedTo - Tracked crew
  * @param {boolean} params.hasEquipmentIssues - Whether equipment issues were found
  * @param {string} params.notes - Additional info
+ * @param {Object} existingEmailIds - Optional pre-loaded set for fast duplicate check
  * @returns {Object} - { success: boolean, row: number }
  */
-function logMonthlyChecklistEmail(params) {
+function logMonthlyChecklistEmail(params, existingEmailIds) {
   var sheet = getMonthlyChecklistLogSheet();
   var tz = Session.getScriptTimeZone();
 
-  // Check for duplicate
-  if (emailExistsInLog(sheet, params.emailId, 6)) { // Column G = Email ID
+  // Fast duplicate check using pre-loaded set if available
+  if (existingEmailIds && existingEmailIds[params.emailId]) {
+    return { success: false, duplicate: true };
+  }
+
+  // Fallback to sheet read if no pre-loaded set (slower but safe)
+  if (!existingEmailIds && emailExistsInLog(sheet, params.emailId, 6)) {
     Logger.log("logMonthlyChecklistEmail: Duplicate - " + params.emailId);
     return { success: false, duplicate: true };
   }
@@ -980,6 +998,91 @@ function traceComplianceCalculation() {
  * @param {Date} weekStartDate - Sunday of the week to calculate
  * @returns {Object} - Compliance data for updating Safety Compliance sheet
  */
+/**
+ * Builds a tooltip/note for a Safety Compliance cell
+ * @param {string} cellType - 'jha', 'weekly', or 'monthly'
+ * @param {Date} dayDate - The actual date for this cell (for JHA day cells)
+ * @param {string} statusIcon - The status icon (✅, ❌, ⏳, N/A, ✅L)
+ * @param {Object} details - Object with dateReceived, dateCreated (optional)
+ * @returns {string} Formatted tooltip text
+ */
+function buildComplianceCellNote(cellType, dayDate, statusIcon, details) {
+  var tz = Session.getScriptTimeZone();
+  var lines = [];
+  var dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+  // Header based on cell type
+  if (cellType === 'jha' && dayDate) {
+    var dayName = dayNames[dayDate.getDay()];
+    var dateStr = Utilities.formatDate(dayDate, tz, 'MMM dd, yyyy');
+    lines.push('📅 ' + dayName + ', ' + dateStr);
+  } else if (cellType === 'weekly') {
+    lines.push('📋 Weekly Safety Meeting');
+    if (details && details.weekOf) {
+      var weekOfStr = Utilities.formatDate(new Date(details.weekOf), tz, 'MMM dd, yyyy');
+      lines.push('Week of: ' + weekOfStr);
+    }
+  } else if (cellType === 'monthly') {
+    lines.push('📋 Monthly Fleet Checklist');
+    if (details && details.reportDate) {
+      var reportDateStr = Utilities.formatDate(new Date(details.reportDate), tz, 'MMM dd, yyyy');
+      lines.push('Report Date: ' + reportDateStr);
+    }
+  }
+
+  // Add date details if available
+  if (details) {
+    if (details.dateCreated && cellType === 'jha') {
+      var createdStr = Utilities.formatDate(new Date(details.dateCreated), tz, 'MM/dd/yyyy');
+      lines.push('Created: ' + createdStr);
+    }
+    if (details.dateReceived) {
+      var receivedStr = Utilities.formatDate(new Date(details.dateReceived), tz, 'MM/dd/yyyy h:mm a');
+      lines.push('Received: ' + receivedStr);
+    }
+  }
+
+  // Add explanation for ONLY the current status icon
+  lines.push('');
+  var iconExplanation = getIconExplanation(statusIcon, cellType);
+  if (iconExplanation) {
+    lines.push(iconExplanation);
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Returns the explanation for a specific status icon
+ * @param {string} icon - The status icon
+ * @param {string} cellType - 'jha', 'weekly', or 'monthly'
+ * @returns {string} Explanation for the icon
+ */
+function getIconExplanation(icon, cellType) {
+  var iconStr = String(icon || '').trim();
+
+  if (iconStr === '✅') {
+    return '✅ Received on time';
+  } else if (iconStr === '✅L') {
+    return '✅L Received late (after deadline)';
+  } else if (iconStr === '❌') {
+    return '❌ Missing - not received';
+  } else if (iconStr === '⏳') {
+    if (cellType === 'monthly') {
+      return '⏳ Pending (month not over)';
+    }
+    return '⏳ Pending (week not over)';
+  } else if (iconStr === 'N/A') {
+    return 'N/A Skipped per config';
+  } else if (iconStr === '⚠️') {
+    return '⚠️ Warning - Week 3, due soon';
+  } else if (iconStr === '❌⏳') {
+    return '❌⏳ Urgent - Week 4, deadline approaching';
+  }
+
+  return '';
+}
+
 function calculateComplianceFromLogs(weekStartDate) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var tz = Session.getScriptTimeZone();
@@ -989,45 +1092,102 @@ function calculateComplianceFromLogs(weekStartDate) {
   var today = new Date();
   var isPastDeadline = today > weekBounds.weekEnd;
 
-  Logger.log("calculateComplianceFromLogs: Calculating for week " + weekStartStr + " to " + weekEndStr);
+  // Determine if this is the CURRENT week (for applying config changes)
+  var currentWeekBounds = getWeekBoundaries(today);
+  var isCurrentWeek = weekStartStr === Utilities.formatDate(currentWeekBounds.weekStart, tz, 'MM/dd/yyyy');
 
-  // Get all tracked crews
-  var crews = getActiveCrews();
+  Logger.log("calculateComplianceFromLogs: Calculating for week " + weekStartStr + " to " + weekEndStr);
+  Logger.log("calculateComplianceFromLogs: isCurrentWeek = " + isCurrentWeek);
+
+  // === LOAD RESOLVED CREWS FROM SAFETY COMPLIANCE SHEET ===
+  // Crews with "Resolved" status should NOT be recalculated or have tasks created
+  var resolvedCrews = loadResolvedCrewsForWeek(ss, weekBounds.weekStart, tz);
+  Logger.log("calculateComplianceFromLogs: Found " + Object.keys(resolvedCrews).length + " resolved crews for this week");
+
+  // Get all tracked crews (current active crews)
+  var activeCrews = getActiveCrews();
+
+  // For PAST weeks, also include historical crews found in the JHA Log
+  // This handles foremen who are no longer active but were active during that week
+  var historicalCrews = [];
+  if (!isCurrentWeek) {
+    historicalCrews = getHistoricalCrewsForWeek(weekBounds);
+    Logger.log("calculateComplianceFromLogs: Found " + historicalCrews.length + " historical crews for this week");
+  }
+
+  // Combine active and historical crews (avoiding duplicates)
+  var crewSet = {};
+  for (var a = 0; a < activeCrews.length; a++) {
+    crewSet[activeCrews[a]] = true;
+  }
+  for (var h = 0; h < historicalCrews.length; h++) {
+    crewSet[historicalCrews[h].crew] = true;
+  }
+  var crews = Object.keys(crewSet).sort();
+
   if (crews.length === 0) {
-    Logger.log("calculateComplianceFromLogs: No active crews found");
+    Logger.log("calculateComplianceFromLogs: No crews found (active or historical)");
     return null;
   }
 
-  // Load compliance config for skip days
+  Logger.log("calculateComplianceFromLogs: Total crews to track: " + crews.length + " (" + activeCrews.length + " active, " + historicalCrews.length + " historical)");
+
+  // Load compliance config for skip days - ONLY applies to current week
   var config = loadComplianceConfig();
+
+  // Build a map of historical crew foremen for lookup
+  var historicalForemanMap = {};
+  for (var hf = 0; hf < historicalCrews.length; hf++) {
+    historicalForemanMap[historicalCrews[hf].crew] = historicalCrews[hf].foreman;
+  }
 
   // Initialize compliance state for each crew
   var crewCompliance = {};
   for (var c = 0; c < crews.length; c++) {
     var crewJob = crews[c];
-    var crewConfig = config[crewJob] || {
-      skipDays: [true, false, false, false, false, false, true], // Skip Sun/Sat by default
-      skipWeeklyMeeting: false,
-      skipMonthlyChecklist: false
-    };
+
+    // For current week, use live config. For past weeks, use default (will be overwritten by existing data)
+    var crewConfig;
+    if (isCurrentWeek) {
+      crewConfig = config[crewJob] || {
+        skipDays: [true, false, false, false, false, false, true], // Skip Sun/Sat by default
+        skipWeeklyMeeting: false,
+        skipMonthlyChecklist: false
+      };
+    } else {
+      // For past weeks, default to standard config - existing sheet data will override
+      crewConfig = {
+        skipDays: [true, false, false, false, false, false, true],
+        skipWeeklyMeeting: false,
+        skipMonthlyChecklist: false
+      };
+    }
 
     crewCompliance[crewJob] = {
       foreman: '',
       jhaByDay: [false, false, false, false, false, false, false], // Sun-Sat
       jhaLateByDay: [false, false, false, false, false, false, false],
+      jhaDetails: [{}, {}, {}, {}, {}, {}, {}], // Details for each day (dateReceived, dateCreated)
       weeklyMeeting: false,
       weeklyMeetingLate: false,
+      weeklyMeetingDetails: null, // {dateReceived, weekOf}
       monthlyChecklist: false,
+      monthlyChecklistDetails: null, // {dateReceived, reportDate}
       skipDays: crewConfig.skipDays,
       skipWeeklyMeeting: crewConfig.skipWeeklyMeeting,
       skipMonthlyChecklist: crewConfig.skipMonthlyChecklist,
-      status: 'Complete'
+      status: 'Complete',
+      isCurrentWeek: isCurrentWeek,
+      isHistorical: activeCrews.indexOf(crewJob) === -1 // Flag if this is a historical-only crew
     };
 
-    // Get foreman name
+    // Get foreman name - first try current Employees sheet, then historical
     var foremanResult = lookupForemanByJobNumber(crewJob);
     if (foremanResult && foremanResult.name) {
       crewCompliance[crewJob].foreman = foremanResult.name;
+    } else if (historicalForemanMap[crewJob]) {
+      // Use foreman name from JHA Log for historical crews
+      crewCompliance[crewJob].foreman = historicalForemanMap[crewJob];
     }
   }
 
@@ -1051,10 +1211,11 @@ function calculateComplianceFromLogs(weekStartDate) {
 
     for (var j = 1; j < jhaData.length; j++) {
       var jhaRow = jhaData[j];
+      var dateReceived = jhaRow[0]; // Column A - Date Received
       var dateCreated = jhaRow[1]; // Column B - Date Created (JHA work date)
-      var jobNumber = String(jhaRow[2] || '').trim();
+      var originalJobNumber = String(jhaRow[2] || '').trim(); // Column C - Original job from email
       var status = String(jhaRow[7] || '').trim(); // Column H - Status
-      var creditedTo = String(jhaRow[8] || '').trim(); // Column I - Credited To
+      var creditedTo = String(jhaRow[8] || '').trim(); // Column I - Credited To (used for typo corrections)
       var notes = String(jhaRow[9] || '').trim(); // Column J - Notes
 
       if (!dateCreated) continue;
@@ -1074,28 +1235,38 @@ function calculateComplianceFromLogs(weekStartDate) {
         continue;
       }
 
-      if (!creditedTo) {
-        jhaRowsSkippedNotCredited++;
-        continue;
+      // Determine which crew to credit
+      // Priority 1: ORIGINAL job number if it's a tracked crew (historical foremen like Matt Miller on 015-26)
+      // Priority 2: CreditedTo job number if original is NOT tracked (for typo corrections like 054-26 -> 052-25)
+      var crewToCredit = null;
+
+      if (originalJobNumber && crewCompliance[originalJobNumber]) {
+        // Original job is tracked - credit it directly
+        crewToCredit = originalJobNumber;
+      } else if (creditedTo && crewCompliance[creditedTo]) {
+        // Original job not tracked, but creditedTo is - use that (for typo/reassignment cases)
+        crewToCredit = creditedTo;
       }
 
-      if (!crewCompliance[creditedTo]) {
+      if (!crewToCredit) {
         jhaRowsSkippedCrewNotFound++;
-        Logger.log("calculateComplianceFromLogs: CREW NOT IN crewCompliance: " + creditedTo);
+        Logger.log("calculateComplianceFromLogs: CREW NOT FOUND - Original: " + originalJobNumber + ", CreditedTo: " + creditedTo);
         continue;
       }
 
-      // SUCCESS - this row should be credited
       var dayOfWeek = jhaDate.getDay(); // 0=Sun, 6=Sat
-      crewCompliance[creditedTo].jhaByDay[dayOfWeek] = true;
+
+      crewCompliance[crewToCredit].jhaByDay[dayOfWeek] = true;
+      crewCompliance[crewToCredit].jhaDetails[dayOfWeek] = {
+        dateReceived: dateReceived,
+        dateCreated: dateCreated
+      };
+      if (notes && notes.indexOf('LATE') !== -1) {
+        crewCompliance[crewToCredit].jhaLateByDay[dayOfWeek] = true;
+      }
       jhaCreditsApplied++;
 
-      // Check if late
-      if (notes && notes.indexOf('LATE') !== -1) {
-        crewCompliance[creditedTo].jhaLateByDay[dayOfWeek] = true;
-      }
-
-      Logger.log("calculateComplianceFromLogs: ✓ Credited JHA to " + creditedTo + " for day " + dayOfWeek + " (row " + (j+1) + ")");
+      Logger.log("calculateComplianceFromLogs: ✓ Credited JHA to " + crewToCredit + " for day " + dayOfWeek + " (row " + (j+1) + ", original=" + originalJobNumber + ", creditedTo=" + creditedTo + ")");
     }
   }
 
@@ -1106,6 +1277,10 @@ function calculateComplianceFromLogs(weekStartDate) {
     ", Skipped (not credited): " + jhaRowsSkippedNotCredited +
     ", Skipped (crew not found): " + jhaRowsSkippedCrewNotFound);
 
+  // Load custom mappings for re-checking unknown jobs
+  var customMappings = getCustomJobForemanMappings();
+  Logger.log("calculateComplianceFromLogs: Custom mappings loaded: " + JSON.stringify(customMappings));
+
   // === READ WEEKLY SAFETY LOG ===
   var weeklySheet = getWeeklySafetyLogSheet();
   if (weeklySheet && weeklySheet.getLastRow() > 1) {
@@ -1113,8 +1288,9 @@ function calculateComplianceFromLogs(weekStartDate) {
 
     for (var w = 1; w < weeklyData.length; w++) {
       var weeklyRow = weeklyData[w];
+      var weeklyDateReceived = weeklyRow[0]; // Column A - Date Received
       var weekOf = weeklyRow[1]; // Column B - Week Of
-      var jobNumber = String(weeklyRow[2] || '').trim();
+      var originalJobNumber = String(weeklyRow[2] || '').trim(); // Column C - Original job from email
       var status = String(weeklyRow[6] || '').trim(); // Column G - Status
       var creditedTo = String(weeklyRow[7] || '').trim(); // Column H - Credited To
       var notes = String(weeklyRow[8] || '').trim(); // Column I - Notes
@@ -1123,27 +1299,57 @@ function calculateComplianceFromLogs(weekStartDate) {
 
       var meetingWeekDate = new Date(weekOf);
 
-      // Check if this meeting is for our week
-      // Meeting week should match (within 6 days of week start)
-      var daysDiff = Math.abs((meetingWeekDate.getTime() - weekBounds.weekStart.getTime()) / (1000 * 60 * 60 * 24));
-      if (daysDiff > 6) {
+      // Check if this meeting's "Week of" date falls within our compliance week (Sun-Sat)
+      // The email subject shows "Week of 02-09-2026" (Monday), which should be credited
+      // to the compliance week that CONTAINS that date (02/08/2026 - 02/14/2026)
+      // NOT the week that starts after it (02/15/2026)
+      // FIX: Changed from daysDiff <= 6 to proper boundary check
+      if (meetingWeekDate < weekBounds.weekStart || meetingWeekDate > weekBounds.weekEnd) {
         continue;
       }
 
-      if (status === 'Credited' && creditedTo && crewCompliance[creditedTo]) {
-        crewCompliance[creditedTo].weeklyMeeting = true;
+      if (status === 'Credited') {
+        // Determine which crew to credit (same priority logic as JHA)
+        // Priority 1: ORIGINAL job number if it's a tracked crew
+        // Priority 2: CreditedTo job number if original is NOT tracked
+        var crewToCredit = null;
 
-        if (notes && notes.indexOf('LATE') !== -1) {
-          crewCompliance[creditedTo].weeklyMeetingLate = true;
+        if (originalJobNumber && crewCompliance[originalJobNumber]) {
+          crewToCredit = originalJobNumber;
+        } else if (creditedTo && crewCompliance[creditedTo]) {
+          crewToCredit = creditedTo;
         }
 
-        Logger.log("calculateComplianceFromLogs: Credited Weekly Meeting to " + creditedTo);
+        if (crewToCredit) {
+          crewCompliance[crewToCredit].weeklyMeeting = true;
+          crewCompliance[crewToCredit].weeklyMeetingDetails = {
+            dateReceived: weeklyDateReceived,
+            weekOf: weekOf
+          };
+          if (notes && notes.indexOf('LATE') !== -1) {
+            crewCompliance[crewToCredit].weeklyMeetingLate = true;
+          }
+          Logger.log("calculateComplianceFromLogs: Credited Weekly Meeting to " + crewToCredit + " (original=" + originalJobNumber + ", creditedTo=" + creditedTo + ")");
+        }
       } else if (status === 'Unknown Job') {
-        if (!unknownJobs[jobNumber]) {
-          unknownJobs[jobNumber] = { reportTypes: [], dates: [], reason: 'Unknown Job' };
+        // Re-check if this job now has a custom mapping
+        var baseJob = originalJobNumber.split('.')[0].trim();
+        if (customMappings[baseJob]) {
+          // User has mapped this job - don't treat as unknown anymore
+          Logger.log("calculateComplianceFromLogs: Job " + baseJob + " was 'Unknown' but now has custom mapping to " + customMappings[baseJob] + " - skipping from unknowns");
+          continue;
         }
-        if (unknownJobs[jobNumber].reportTypes.indexOf('Safety Meeting') === -1) {
-          unknownJobs[jobNumber].reportTypes.push('Safety Meeting');
+
+        if (!unknownJobs[originalJobNumber]) {
+          unknownJobs[originalJobNumber] = { reportTypes: [], dates: [], reason: 'Unknown Job' };
+        }
+        if (unknownJobs[originalJobNumber].reportTypes.indexOf('Safety Meeting') === -1) {
+          unknownJobs[originalJobNumber].reportTypes.push('Safety Meeting');
+        }
+        // Add the meeting date to the dates array
+        var meetingDateStr = weekOf ? Utilities.formatDate(new Date(weekOf), Session.getScriptTimeZone(), 'MM/dd/yyyy') : '';
+        if (meetingDateStr && unknownJobs[originalJobNumber].dates.indexOf(meetingDateStr) === -1) {
+          unknownJobs[originalJobNumber].dates.push(meetingDateStr);
         }
       }
     }
@@ -1159,6 +1365,7 @@ function calculateComplianceFromLogs(weekStartDate) {
 
     for (var m = 1; m < monthlyData.length; m++) {
       var monthlyRow = monthlyData[m];
+      var monthlyDateReceived = monthlyRow[0]; // Column A - Date Received
       var reportDate = monthlyRow[1]; // Column B - Report Date
       var status = String(monthlyRow[7] || '').trim(); // Column H - Status
       var creditedTo = String(monthlyRow[8] || '').trim(); // Column I - Credited To
@@ -1167,14 +1374,27 @@ function calculateComplianceFromLogs(weekStartDate) {
 
       var checklistDate = new Date(reportDate);
 
-      // Check if this checklist is within our month
+      // Check if this checklist is within our month (any week in the month counts)
       if (checklistDate < monthStart || checklistDate > monthEnd) {
         continue;
       }
 
       if (status === 'Credited' && creditedTo && crewCompliance[creditedTo]) {
-        crewCompliance[creditedTo].monthlyChecklist = true;
-        Logger.log("calculateComplianceFromLogs: Credited Monthly Checklist to " + creditedTo);
+        // Keep track of the newest checklist received in the month
+        var existingDetails = crewCompliance[creditedTo].monthlyChecklistDetails;
+        var receivedTime = monthlyDateReceived ? new Date(monthlyDateReceived).getTime() : 0;
+
+        if (!existingDetails || !existingDetails.dateReceived ||
+            receivedTime > new Date(existingDetails.dateReceived).getTime()) {
+          // This is the newest checklist - store it
+          crewCompliance[creditedTo].monthlyChecklist = true;
+          crewCompliance[creditedTo].monthlyChecklistDetails = {
+            dateReceived: monthlyDateReceived,
+            reportDate: reportDate
+          };
+          Logger.log("calculateComplianceFromLogs: Credited Monthly Checklist to " + creditedTo +
+            " (received: " + monthlyDateReceived + ")");
+        }
       }
     }
   }
@@ -1186,12 +1406,33 @@ function calculateComplianceFromLogs(weekStartDate) {
 
   for (var crewJob in crewCompliance) {
     var crew = crewCompliance[crewJob];
+
+    // Check if this crew was already resolved (user deleted task or recorded resolutions)
+    // If so, preserve the Resolved status and skip recalculation
+    if (resolvedCrews[crewJob]) {
+      crew.status = 'Resolved';
+      crew.days = resolvedCrews[crewJob].days || {};
+      crew.weeklyMeetingStatus = resolvedCrews[crewJob].weeklyMeetingStatus || 'N/A';
+      crew.monthlyChecklistStatus = resolvedCrews[crewJob].monthlyChecklistStatus || 'N/A';
+      crew.missingItems = [];
+      crew.lateCount = 0;
+      compliantCount++;
+      Logger.log("calculateComplianceFromLogs: Skipping crew " + crewJob + " - already Resolved");
+      continue;
+    }
+
     var missingItems = [];
     var lateCount = 0;
 
-    // Build day status
+    // Build day status and store dayDates for tooltips
     crew.days = {};
+    crew.dayDates = {}; // Store the actual date for each day
     for (var d = 0; d < 7; d++) {
+      // Calculate the actual date for this day of the week
+      var dayDate = new Date(weekBounds.weekStart.getTime());
+      dayDate.setDate(dayDate.getDate() + d);
+      crew.dayDates[dayNames[d]] = dayDate;
+
       if (crew.skipDays[d]) {
         crew.days[dayNames[d]] = 'N/A';
       } else if (crew.jhaByDay[d]) {
@@ -1227,11 +1468,13 @@ function calculateComplianceFromLogs(weekStartDate) {
     }
 
     // Monthly checklist status (progressive deadline)
+    // Pass the received date from details so it shows ✅ for all weeks after receipt
+    var monthlyChecklistDate = crew.monthlyChecklistDetails ? crew.monthlyChecklistDetails.dateReceived : null;
     var monthlyStatus = getMonthlyChecklistStatus(
       weekBounds.weekStart,
       crew.monthlyChecklist,
       crew.skipMonthlyChecklist,
-      null
+      monthlyChecklistDate
     );
     crew.monthlyChecklistStatus = monthlyStatus.status;
 
@@ -1288,6 +1531,7 @@ function calculateComplianceFromLogs(weekStartDate) {
 /**
  * Updates the Safety Compliance sheet from calculated compliance data
  * This is the same updateComplianceSheet but called with data from calculateComplianceFromLogs
+ * Now includes cell notes (tooltips) with date details and icon legends
  *
  * @param {Object} complianceData - From calculateComplianceFromLogs()
  */
@@ -1307,6 +1551,7 @@ function updateComplianceSheetFromLogs(complianceData) {
   var tz = Session.getScriptTimeZone();
   var weekStartStr = Utilities.formatDate(complianceData.weekStart, tz, 'MM/dd/yyyy');
   var nowStr = Utilities.formatDate(new Date(), tz, 'MM/dd/yyyy HH:mm');
+  var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   // Read existing data to find rows to update
   var data = sheet.getDataRange().getValues();
@@ -1357,16 +1602,251 @@ function updateComplianceSheetFromLogs(complianceData) {
       nowStr
     ];
 
+    var rowNum;
     if (existingRows[crewJob]) {
-      sheet.getRange(existingRows[crewJob].rowNum, 1, 1, rowData.length).setValues([rowData]);
+      rowNum = existingRows[crewJob].rowNum;
+      sheet.getRange(rowNum, 1, 1, rowData.length).setValues([rowData]);
       updated++;
     } else {
       sheet.appendRow(rowData);
+      rowNum = sheet.getLastRow();
       added++;
+    }
+
+    // Add cell notes/tooltips for day columns (D-J = columns 4-10), Weekly Meeting (K=11), Monthly (L=12)
+    // Day columns: D=Sun(4), E=Mon(5), F=Tue(6), G=Wed(7), H=Thu(8), I=Fri(9), J=Sat(10)
+    for (var dayIdx = 0; dayIdx < 7; dayIdx++) {
+      var dayName = dayNames[dayIdx];
+      var dayDate = crew.dayDates ? crew.dayDates[dayName] : null;
+      var statusIcon = crew.days[dayName] || 'N/A';
+      var details = (crew.jhaDetails && crew.jhaDetails[dayIdx]) ? crew.jhaDetails[dayIdx] : null;
+
+      var note = buildComplianceCellNote('jha', dayDate, statusIcon, details);
+      sheet.getRange(rowNum, 4 + dayIdx).setNote(note); // Column D=4 + dayIdx
+    }
+
+    // Weekly Meeting tooltip (column K = 11)
+    var weeklyNote = buildComplianceCellNote('weekly', null, crew.weeklyMeetingStatus || '⏳', crew.weeklyMeetingDetails);
+    sheet.getRange(rowNum, 11).setNote(weeklyNote);
+
+    // Monthly Checklist tooltip (column L = 12)
+    var monthlyNote = buildComplianceCellNote('monthly', null, crew.monthlyChecklistStatus || '⏳', crew.monthlyChecklistDetails);
+    sheet.getRange(rowNum, 12).setNote(monthlyNote);
+  }
+
+  Logger.log("updateComplianceSheetFromLogs: Updated " + updated + ", Added " + added + " rows (with tooltips)");
+}
+
+/**
+ * Adds tooltips to all rows in the Safety Compliance sheet
+ * Reads data from log sheets to get date details for each cell
+ * Can be called manually or from menu
+ */
+function refreshSafetyComplianceTooltips() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SAFETY_COMPLIANCE_SHEET_NAME);
+
+  if (!sheet || sheet.getLastRow() < 2) {
+    Logger.log("refreshSafetyComplianceTooltips: No Safety Compliance data found");
+    return;
+  }
+
+  var tz = Session.getScriptTimeZone();
+  var data = sheet.getDataRange().getValues();
+  var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  // Load all log data for lookups
+  var jhaLog = loadJHALogData();
+  var weeklyLog = loadWeeklySafetyLogData();
+  var monthlyLog = loadMonthlyChecklistLogData();
+
+  var updatedRows = 0;
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var weekStart = row[0];
+    var jobNumber = String(row[1] || '').trim();
+
+    if (!weekStart || !jobNumber) continue;
+
+    var weekBounds = getWeekBoundaries(new Date(weekStart));
+    var rowNum = i + 1;
+
+    // Add tooltips for each day column (D-J)
+    for (var dayIdx = 0; dayIdx < 7; dayIdx++) {
+      var colIdx = 3 + dayIdx; // Column D=3 (0-based), but getRange uses 1-based so 4+dayIdx
+      var statusIcon = String(row[colIdx] || '').trim();
+
+      // Calculate actual date for this day
+      var dayDate = new Date(weekBounds.weekStart.getTime());
+      dayDate.setDate(dayDate.getDate() + dayIdx);
+
+      // Look up details from JHA Log
+      var details = lookupJHADetails(jhaLog, jobNumber, dayDate, tz);
+
+      var note = buildComplianceCellNote('jha', dayDate, statusIcon, details);
+      sheet.getRange(rowNum, 4 + dayIdx).setNote(note);
+    }
+
+    // Add tooltip for Weekly Meeting (column K = 11)
+    var weeklyStatus = String(row[10] || '').trim();
+    var weeklyDetails = lookupWeeklyMeetingDetails(weeklyLog, jobNumber, weekBounds.weekStart, tz);
+    var weeklyNote = buildComplianceCellNote('weekly', null, weeklyStatus, weeklyDetails);
+    sheet.getRange(rowNum, 11).setNote(weeklyNote);
+
+    // Add tooltip for Monthly Checklist (column L = 12)
+    var monthlyStatus = String(row[11] || '').trim();
+    var monthlyDetails = lookupMonthlyChecklistDetails(monthlyLog, jobNumber, weekBounds.weekStart, tz);
+    var monthlyNote = buildComplianceCellNote('monthly', null, monthlyStatus, monthlyDetails);
+    sheet.getRange(rowNum, 12).setNote(monthlyNote);
+
+    updatedRows++;
+  }
+
+  Logger.log("refreshSafetyComplianceTooltips: Added tooltips to " + updatedRows + " rows");
+  return updatedRows;
+}
+
+/**
+ * Loads all JHA Log data into memory for fast lookups
+ */
+function loadJHALogData() {
+  var sheet = getJHALogSheet();
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  return sheet.getDataRange().getValues();
+}
+
+/**
+ * Loads all Weekly Safety Log data into memory for fast lookups
+ */
+function loadWeeklySafetyLogData() {
+  var sheet = getWeeklySafetyLogSheet();
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  return sheet.getDataRange().getValues();
+}
+
+/**
+ * Loads all Monthly Checklist Log data into memory for fast lookups
+ */
+function loadMonthlyChecklistLogData() {
+  var sheet = getMonthlyChecklistLogSheet();
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  return sheet.getDataRange().getValues();
+}
+
+/**
+ * Looks up JHA details from log data for a specific crew and date
+ */
+function lookupJHADetails(jhaLog, jobNumber, dayDate, tz) {
+  if (!jhaLog || jhaLog.length < 2) return null;
+
+  var dayStr = Utilities.formatDate(dayDate, tz, 'MM/dd/yyyy');
+
+  for (var i = 1; i < jhaLog.length; i++) {
+    var row = jhaLog[i];
+    var creditedTo = String(row[8] || '').trim(); // Column I - Credited To
+    var dateCreated = row[1]; // Column B
+
+    if (!creditedTo || !dateCreated) continue;
+
+    // Check if this row matches our crew
+    if (creditedTo !== jobNumber) continue;
+
+    // Check if the date matches
+    var createdStr = Utilities.formatDate(new Date(dateCreated), tz, 'MM/dd/yyyy');
+    if (createdStr === dayStr) {
+      return {
+        dateReceived: row[0], // Column A
+        dateCreated: dateCreated
+      };
     }
   }
 
-  Logger.log("updateComplianceSheetFromLogs: Updated " + updated + ", Added " + added + " rows");
+  return null;
+}
+
+/**
+ * Looks up Weekly Meeting details from log data for a specific crew and week
+ */
+function lookupWeeklyMeetingDetails(weeklyLog, jobNumber, weekStart, tz) {
+  if (!weeklyLog || weeklyLog.length < 2) return null;
+
+  var weekStartStr = Utilities.formatDate(weekStart, tz, 'MM/dd/yyyy');
+
+  for (var i = 1; i < weeklyLog.length; i++) {
+    var row = weeklyLog[i];
+    var creditedTo = String(row[7] || '').trim(); // Column H - Credited To
+    var weekOf = row[1]; // Column B
+
+    if (!creditedTo || !weekOf) continue;
+
+    // Check if this row matches our crew
+    if (creditedTo !== jobNumber) continue;
+
+    // Check if the week matches (within 6 days)
+    var weekOfDate = new Date(weekOf);
+    var daysDiff = Math.abs((weekOfDate.getTime() - weekStart.getTime()) / (1000 * 60 * 60 * 24));
+    if (daysDiff <= 6) {
+      return {
+        dateReceived: row[0], // Column A
+        weekOf: weekOf
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Looks up Monthly Checklist details from log data for a specific crew and month
+ */
+function lookupMonthlyChecklistDetails(monthlyLog, jobNumber, weekStart, tz) {
+  if (!monthlyLog || monthlyLog.length < 2) return null;
+
+  var targetMonth = weekStart.getMonth();
+  var targetYear = weekStart.getFullYear();
+  var newestDetails = null;
+  var newestDate = null;
+
+  for (var i = 1; i < monthlyLog.length; i++) {
+    var row = monthlyLog[i];
+    var creditedTo = String(row[8] || '').trim(); // Column I - Credited To
+    var reportDate = row[1]; // Column B
+
+    if (!creditedTo || !reportDate) continue;
+
+    // Check if this row matches our crew
+    if (creditedTo !== jobNumber) continue;
+
+    // Check if the report is in the same month
+    var checkDate = new Date(reportDate);
+    if (checkDate.getMonth() === targetMonth && checkDate.getFullYear() === targetYear) {
+      // Keep the newest one
+      if (!newestDate || checkDate > newestDate) {
+        newestDate = checkDate;
+        newestDetails = {
+          dateReceived: row[0], // Column A
+          reportDate: reportDate
+        };
+      }
+    }
+  }
+
+  return newestDetails;
+}
+
+/**
+ * Menu function to refresh all tooltips on the Safety Compliance sheet
+ */
+function menuRefreshComplianceTooltips() {
+  var ui = SpreadsheetApp.getUi();
+
+  try {
+    var count = refreshSafetyComplianceTooltips();
+    ui.alert('Tooltips Refreshed', '✅ Added tooltips to ' + count + ' rows.\n\nHover over any cell in columns D-L to see the tooltip.', ui.ButtonSet.OK);
+  } catch (e) {
+    ui.alert('Error', 'Failed to refresh tooltips: ' + e.toString(), ui.ButtonSet.OK);
+  }
 }
 
 /**
@@ -1376,9 +1856,10 @@ function updateComplianceSheetFromLogs(complianceData) {
  * @param {Object} parsed - Result from parseSafetyEmail()
  * @param {GmailMessage} message - The Gmail message object
  * @param {Object} context - Resolution context with trackedCrews, customMappings
+ * @param {Object} existingEmailIds - Optional pre-loaded set of existing email IDs (for fast lookup)
  * @returns {Object} - { logged: boolean, status: string, creditedTo: string|null, logSheet: string }
  */
-function logParsedSafetyEmail(parsed, message, context) {
+function logParsedSafetyEmail(parsed, message, context, existingEmailIds) {
   if (!parsed || !parsed.reportMeta) {
     return { logged: false, status: 'Error', error: 'No parsed data' };
   }
@@ -1454,11 +1935,15 @@ function logParsedSafetyEmail(parsed, message, context) {
         status: status,
         creditedTo: creditedTo,
         notes: logNotes
-      });
+      }, existingEmailIds);
 
       if (logResult.success) {
         result.logged = true;
         result.logSheet = JHA_LOG_SHEET_NAME;
+        // Add to pre-loaded set to prevent duplicate logging in same batch
+        if (existingEmailIds) {
+          existingEmailIds[messageId + (datesToProcess.length > 1 ? '_' + i : '')] = true;
+        }
       }
     }
 
@@ -1473,11 +1958,15 @@ function logParsedSafetyEmail(parsed, message, context) {
       status: status,
       creditedTo: creditedTo,
       notes: notes
-    });
+    }, existingEmailIds);
 
     if (logResult.success) {
       result.logged = true;
       result.logSheet = WEEKLY_SAFETY_LOG_SHEET_NAME;
+      // Add to pre-loaded set to prevent duplicate logging in same batch
+      if (existingEmailIds) {
+        existingEmailIds[messageId] = true;
+      }
     } else if (logResult.duplicate) {
       result.status = 'Duplicate';
     }
@@ -1497,17 +1986,102 @@ function logParsedSafetyEmail(parsed, message, context) {
       creditedTo: creditedTo,
       hasEquipmentIssues: hasEquipmentIssues,
       notes: notes
-    });
+    }, existingEmailIds);
 
     if (logResult.success) {
       result.logged = true;
       result.logSheet = MONTHLY_CHECKLIST_LOG_SHEET_NAME;
+      // Add to pre-loaded set to prevent duplicate logging in same batch
+      if (existingEmailIds) {
+        existingEmailIds[messageId] = true;
+      }
     } else if (logResult.duplicate) {
       result.status = 'Duplicate';
     }
   }
 
   return result;
+}
+
+/**
+ * Recalculates ALL weeks in the Safety Compliance sheet from log data
+ * Use this to fix incorrectly credited weeks after bug fixes
+ * Menu function: Glove Manager → Safety → Recalculate ALL Compliance
+ */
+function recalculateAllComplianceFromLogs() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var tz = Session.getScriptTimeZone();
+
+  // Confirm with user
+  var response = ui.alert(
+    '⚠️ Recalculate ALL Compliance',
+    'This will recalculate compliance for ALL weeks in the Safety Compliance sheet from the log sheets.\n\n' +
+    'This fixes any incorrectly credited reports (e.g., wrong week assignments).\n\n' +
+    'Continue?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (response !== ui.Button.YES) {
+    return;
+  }
+
+  try {
+    var complianceSheet = ss.getSheetByName('Safety Compliance');
+    if (!complianceSheet || complianceSheet.getLastRow() < 2) {
+      ui.alert('No Data', 'Safety Compliance sheet is empty or not found.', ui.ButtonSet.OK);
+      return;
+    }
+
+    // Get all unique week starts from the sheet
+    var data = complianceSheet.getDataRange().getValues();
+    var uniqueWeeks = {};
+
+    for (var i = 1; i < data.length; i++) {
+      var weekStart = data[i][0]; // Column A - Week Start
+      if (weekStart) {
+        var weekKey = Utilities.formatDate(new Date(weekStart), tz, 'yyyy-MM-dd');
+        uniqueWeeks[weekKey] = new Date(weekStart);
+      }
+    }
+
+    var weekKeys = Object.keys(uniqueWeeks).sort().reverse(); // Most recent first
+    Logger.log("recalculateAllComplianceFromLogs: Found " + weekKeys.length + " unique weeks to process");
+
+    var processedCount = 0;
+    var totalCompliant = 0;
+    var totalMissing = 0;
+
+    for (var w = 0; w < weekKeys.length; w++) {
+      var weekStart = uniqueWeeks[weekKeys[w]];
+      Logger.log("Processing week: " + weekKeys[w]);
+
+      var complianceData = calculateComplianceFromLogs(weekStart);
+      if (complianceData) {
+        updateComplianceSheetFromLogs(complianceData);
+        totalCompliant += complianceData.compliantCount || 0;
+        totalMissing += complianceData.missingCount || 0;
+        processedCount++;
+      }
+    }
+
+    // Format the sheet
+    formatComplianceSheetByWeek();
+
+    // Refresh tooltips
+    refreshSafetyComplianceTooltips();
+
+    var msg = '✅ Recalculated ' + processedCount + ' weeks from log sheets!\n\n' +
+              'Total compliant: ' + totalCompliant + '\n' +
+              'Total missing: ' + totalMissing + '\n\n' +
+              'Tooltips have been refreshed.';
+
+    ui.alert('All Compliance Recalculated', msg, ui.ButtonSet.OK);
+
+  } catch (e) {
+    Logger.log("recalculateAllComplianceFromLogs error: " + e.toString());
+    ui.alert('Error', 'Failed to recalculate: ' + e.toString(), ui.ButtonSet.OK);
+  }
 }
 
 /**
@@ -1886,10 +2460,11 @@ function diagnoseCrewCompliance() {
   if (!jobNum) return;
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var tz = Session.getScriptTimeZone();
   var report = [];
   report.push('=== CREW COMPLIANCE DIAGNOSIS: ' + jobNum + ' ===\n');
 
-  // 1. Check if crew exists in Employees
+  // 1. Check if crew exists in Employees and is in tracked crews
   var empSheet = ss.getSheetByName('Employees');
   var empData = empSheet.getDataRange().getValues();
   var crewMembers = [];
@@ -1918,29 +2493,69 @@ function diagnoseCrewCompliance() {
     }
   }
 
-  // 2. Check JHA Log for this crew
+  // Check if in tracked crews
+  var trackedCrews = getActiveCrews();
+  var isTracked = trackedCrews.indexOf(jobNum) !== -1;
+  report.push('   Is tracked crew: ' + (isTracked ? '✅ YES' : '❌ NO'));
+  if (!isTracked) {
+    report.push('   ⚠️ This crew is NOT in the tracked crews list - compliance won\'t be calculated!');
+  }
+
+  // 2. Check JHA Log for this crew (both job number AND creditedTo)
   report.push('\n2. JHA LOG ENTRIES:');
   var jhaLog = ss.getSheetByName('JHA Log');
   if (jhaLog && jhaLog.getLastRow() > 1) {
     var jhaData = jhaLog.getDataRange().getValues();
     var jhaEntries = [];
+
+    // JHA Log columns: A=DateReceived, B=DateCreated, C=JobNumber, D=Foreman, E=Subject, F=EmailID, G=Source, H=Status, I=CreditedTo, J=Notes
     for (var k = 1; k < jhaData.length; k++) {
-      if (String(jhaData[k][2]).indexOf(jobNum) !== -1 || String(jhaData[k][5]).indexOf(jobNum) !== -1) {
+      var rowJobNumber = String(jhaData[k][2] || '').trim();
+      var creditedTo = String(jhaData[k][8] || '').trim();
+
+      // Check if this row matches our crew (either original job or credited to)
+      if (rowJobNumber.indexOf(jobNum) !== -1 || creditedTo === jobNum) {
+        var dateCreated = jhaData[k][1];
+        var dateStr = dateCreated ? Utilities.formatDate(new Date(dateCreated), tz, 'MM/dd/yyyy') : 'N/A';
+
         jhaEntries.push({
+          row: k + 1,
           received: jhaData[k][0],
-          created: jhaData[k][1],
-          job: jhaData[k][2],
+          created: dateStr,
+          createdRaw: dateCreated,
+          job: rowJobNumber,
           foreman: jhaData[k][3],
-          status: jhaData[k][4],
-          creditedTo: jhaData[k][5]
+          status: jhaData[k][7],      // Column H - Status
+          creditedTo: creditedTo,     // Column I - Credited To
+          notes: jhaData[k][9]
         });
       }
     }
+
     report.push('   Found ' + jhaEntries.length + ' JHA entries');
     for (var e = 0; e < jhaEntries.length; e++) {
       var entry = jhaEntries[e];
-      report.push('   - Date: ' + entry.created + ' | Status: ' + entry.status + ' | CreditedTo: ' + entry.creditedTo);
+      var statusIcon = entry.status === 'Credited' ? '✅' : '❌';
+      var creditIcon = entry.creditedTo === jobNum ? '✅' : (entry.creditedTo ? '⚠️' : '❌');
+      report.push('   Row ' + entry.row + ': ' + entry.created + ' | Status: ' + statusIcon + entry.status + ' | CreditedTo: ' + creditIcon + (entry.creditedTo || 'EMPTY'));
+      if (entry.creditedTo && entry.creditedTo !== jobNum) {
+        report.push('      ⚠️ Credited to different crew: ' + entry.creditedTo);
+      }
     }
+
+    // Check for entries that SHOULD be credited to this crew
+    var shouldBeCredited = jhaEntries.filter(function(e) {
+      return e.status === 'Credited' && e.creditedTo === jobNum;
+    });
+    report.push('\n   ✅ Entries properly credited to ' + jobNum + ': ' + shouldBeCredited.length);
+
+    var wrongCrew = jhaEntries.filter(function(e) {
+      return e.status === 'Credited' && e.creditedTo !== jobNum;
+    });
+    if (wrongCrew.length > 0) {
+      report.push('   ⚠️ Entries credited to WRONG crew: ' + wrongCrew.length);
+    }
+
   } else {
     report.push('   ❌ JHA Log not found or empty');
   }
@@ -1951,26 +2566,39 @@ function diagnoseCrewCompliance() {
   if (compSheet && compSheet.getLastRow() > 1) {
     var compData = compSheet.getDataRange().getValues();
     var compEntries = [];
+
+    // Columns: A=WeekStart, B=JobNumber, C=Foreman, D=Sun, E=Mon, F=Tue, G=Wed, H=Thu, I=Fri, J=Sat, K=Weekly, L=Monthly, M=Status
     for (var c = 1; c < compData.length; c++) {
       if (String(compData[c][1]).indexOf(jobNum) !== -1) {
+        var weekDate = compData[c][0];
+        var weekStr = weekDate ? Utilities.formatDate(new Date(weekDate), tz, 'MM/dd/yyyy') : 'N/A';
+
         compEntries.push({
-          week: compData[c][0],
+          row: c + 1,
+          week: weekStr,
           job: compData[c][1],
           foreman: compData[c][2],
-          status: compData[c][11],
-          mon: compData[c][3],
-          tue: compData[c][4],
-          wed: compData[c][5],
-          thu: compData[c][6],
-          fri: compData[c][7]
+          sun: compData[c][3],
+          mon: compData[c][4],
+          tue: compData[c][5],
+          wed: compData[c][6],
+          thu: compData[c][7],
+          fri: compData[c][8],
+          sat: compData[c][9],
+          weekly: compData[c][10],
+          monthly: compData[c][11],
+          status: compData[c][12]
         });
       }
     }
+
     report.push('   Found ' + compEntries.length + ' compliance rows');
     for (var r = 0; r < compEntries.length; r++) {
       var row = compEntries[r];
-      report.push('   - Week: ' + row.week + ' | Status: ' + row.status);
-      report.push('     M:' + row.mon + ' T:' + row.tue + ' W:' + row.wed + ' Th:' + row.thu + ' F:' + row.fri);
+      var statusIcon = row.status === 'Complete' ? '✅' : (row.status === 'Missing Reports' ? '❌' : '⏳');
+      report.push('   Row ' + row.row + ' | Week: ' + row.week + ' | Status: ' + statusIcon + row.status);
+      report.push('     Sun:' + row.sun + ' Mon:' + row.mon + ' Tue:' + row.tue + ' Wed:' + row.wed + ' Thu:' + row.thu + ' Fri:' + row.fri + ' Sat:' + row.sat);
+      report.push('     Weekly: ' + row.weekly + ' | Monthly: ' + row.monthly);
     }
   } else {
     report.push('   ❌ Safety Compliance sheet not found or empty');
@@ -1996,6 +2624,132 @@ function diagnoseCrewCompliance() {
     .setWidth(800)
     .setHeight(600);
   ui.showModalDialog(htmlOutput, '🔍 Crew Compliance Diagnosis: ' + jobNum);
+}
+
+/**
+/**
+ * Test function to trace EXACTLY why compliance isn't being credited
+ * Run this manually and check the Logs
+ */
+function testComplianceCalculationForWeek() {
+  var ui = SpreadsheetApp.getUi();
+
+  var response = ui.prompt(
+    'Test Compliance Calculation',
+    'Enter week start date (e.g., "02/22/2026"):',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+
+  var weekStartStr = response.getResponseText().trim();
+  var weekStart = new Date(weekStartStr);
+
+  if (isNaN(weekStart.getTime())) {
+    ui.alert('Error', 'Invalid date format. Use MM/DD/YYYY', ui.ButtonSet.OK);
+    return;
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var tz = Session.getScriptTimeZone();
+  var report = [];
+
+  report.push('=== TEST COMPLIANCE CALCULATION ===');
+  report.push('Input week start: ' + weekStartStr);
+  report.push('Parsed date: ' + weekStart.toString());
+
+  // Get week bounds
+  var weekBounds = getWeekBoundaries(weekStart);
+  report.push('Week bounds: ' + weekBounds.weekStart + ' to ' + weekBounds.weekEnd);
+  report.push('Week start formatted: ' + Utilities.formatDate(weekBounds.weekStart, tz, 'MM/dd/yyyy'));
+
+  // Get tracked crews
+  var trackedCrews = getActiveCrews();
+  report.push('\nTracked crews (' + trackedCrews.length + '): ' + trackedCrews.join(', '));
+
+  // Read JHA Log
+  var jhaSheet = ss.getSheetByName('JHA Log');
+  if (!jhaSheet) {
+    report.push('\n❌ JHA Log sheet not found!');
+  } else {
+    var jhaData = jhaSheet.getDataRange().getValues();
+    report.push('\nJHA Log has ' + (jhaData.length - 1) + ' rows');
+
+    var matchingRows = [];
+    var skippedReasons = { outsideWeek: 0, notCredited: 0, crewNotFound: 0, noDate: 0 };
+
+    for (var i = 1; i < jhaData.length; i++) {
+      var dateCreated = jhaData[i][1]; // Column B
+      var status = String(jhaData[i][7] || '').trim(); // Column H
+      var creditedTo = String(jhaData[i][8] || '').trim(); // Column I
+
+      if (!dateCreated) {
+        skippedReasons.noDate++;
+        continue;
+      }
+
+      var jhaDate = new Date(dateCreated);
+
+      // Check if within week
+      if (jhaDate < weekBounds.weekStart || jhaDate > weekBounds.weekEnd) {
+        skippedReasons.outsideWeek++;
+        continue;
+      }
+
+      // This row is within the week
+      var rowInfo = {
+        row: i + 1,
+        dateCreated: Utilities.formatDate(jhaDate, tz, 'MM/dd/yyyy'),
+        dayOfWeek: jhaDate.getDay(),
+        dayName: ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][jhaDate.getDay()],
+        status: status,
+        creditedTo: creditedTo
+      };
+
+      if (status !== 'Credited') {
+        rowInfo.skipReason = 'Status is "' + status + '", not "Credited"';
+        skippedReasons.notCredited++;
+      } else if (!creditedTo) {
+        rowInfo.skipReason = 'CreditedTo is empty';
+        skippedReasons.notCredited++;
+      } else if (trackedCrews.indexOf(creditedTo) === -1) {
+        rowInfo.skipReason = 'CreditedTo "' + creditedTo + '" is not a tracked crew';
+        skippedReasons.crewNotFound++;
+      } else {
+        rowInfo.willCredit = true;
+      }
+
+      matchingRows.push(rowInfo);
+    }
+
+    report.push('\nJHA entries within week (' + matchingRows.length + '):');
+    report.push('Skipped reasons - Outside week: ' + skippedReasons.outsideWeek +
+      ', Not credited/empty: ' + skippedReasons.notCredited +
+      ', Crew not found: ' + skippedReasons.crewNotFound +
+      ', No date: ' + skippedReasons.noDate);
+
+    var willCreditCount = 0;
+    for (var j = 0; j < matchingRows.length; j++) {
+      var row = matchingRows[j];
+      var icon = row.willCredit ? '✅' : '❌';
+      report.push('  ' + icon + ' Row ' + row.row + ': ' + row.dateCreated + ' (' + row.dayName + ') | Status: ' + row.status + ' | CreditedTo: ' + row.creditedTo);
+      if (row.skipReason) {
+        report.push('      ⚠️ ' + row.skipReason);
+      }
+      if (row.willCredit) willCreditCount++;
+    }
+
+    report.push('\n✅ Total that WILL be credited: ' + willCreditCount);
+  }
+
+  // Now show results
+  var htmlReport = '<pre style="font-family: monospace; font-size: 11px; white-space: pre-wrap;">' +
+    report.join('\n') + '</pre>';
+
+  var htmlOutput = HtmlService.createHtmlOutput(htmlReport)
+    .setWidth(800)
+    .setHeight(600);
+  ui.showModalDialog(htmlOutput, 'Compliance Calculation Test: ' + weekStartStr);
 }
 
 // ============================================================================
@@ -2116,7 +2870,10 @@ function resolveJobToCrew(jobNumber, context) {
     var customForeman = customMappings[baseJob];
     // Find this foreman's primary crew
     var primaryCrew = findForemanPrimaryCrew(customForeman, context.employeeData);
+    Logger.log("resolveJobToCrew: Custom mapping " + baseJob + " → " + customForeman + ", primaryCrew=" + primaryCrew + ", tracked=" + (primaryCrew ? !!trackedCrews[primaryCrew] : false));
+
     if (primaryCrew && trackedCrews[primaryCrew]) {
+      // Best case: foreman's primary crew is tracked
       return {
         found: true,
         crew: primaryCrew,
@@ -2124,13 +2881,27 @@ function resolveJobToCrew(jobNumber, context) {
         source: 'custom',
         reason: 'Custom mapping: ' + baseJob + ' → ' + customForeman + ' (primary: ' + primaryCrew + ')'
       };
-    } else {
+    } else if (primaryCrew) {
+      // Foreman found, has a primary crew, but it's not in tracked list
+      // Still mark as "found" since user explicitly mapped it - credit to their primary crew anyway
+      Logger.log("resolveJobToCrew: primaryCrew " + primaryCrew + " NOT in trackedCrews, but user mapped it - crediting anyway");
       return {
-        found: false,
-        crew: null,
+        found: true,
+        crew: primaryCrew,
         foreman: customForeman,
-        source: 'custom_no_primary',
-        reason: 'Custom mapping found foreman ' + customForeman + ' but no tracked primary crew'
+        source: 'custom_untracked',
+        reason: 'Custom mapping: ' + baseJob + ' → ' + customForeman + ' (crew ' + primaryCrew + ' not actively tracked)'
+      };
+    } else {
+      // Foreman name doesn't match anyone in Employees sheet
+      // Still mark as handled since user explicitly created mapping
+      Logger.log("resolveJobToCrew: Foreman " + customForeman + " not found in Employees sheet, but user mapped it");
+      return {
+        found: true,
+        crew: baseJob, // Use the original job number as the "crew"
+        foreman: customForeman,
+        source: 'custom_manual',
+        reason: 'Custom mapping: ' + baseJob + ' → ' + customForeman + ' (foreman not in Employees sheet)'
       };
     }
   }
@@ -3455,8 +4226,14 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   if (newOnlyMode && lastProcessedDate && batchStart === 0) {
     // Use after: filter to only get emails newer than last processed
     // Format: YYYY/MM/DD
-    dateFilter = ' after:' + lastProcessedDate;
-    Logger.log('New-only mode: filtering emails after ' + lastProcessedDate);
+    // IMPORTANT: Gmail's after: is EXCLUSIVE, so we need to use the day BEFORE
+    // to catch emails received on the same day as last processed
+    // This is safe because we check existingEmailIds to avoid duplicates
+    var lastDate = new Date(lastProcessedDate.replace(/\//g, '-'));
+    lastDate.setDate(lastDate.getDate() - 1); // Go back one day
+    var filterDate = Utilities.formatDate(lastDate, Session.getScriptTimeZone(), 'yyyy/MM/dd');
+    dateFilter = ' after:' + filterDate;
+    Logger.log('New-only mode: filtering emails after ' + filterDate + ' (last processed: ' + lastProcessedDate + ')');
   } else {
     // Use the explicit day range specified by user (14 days, 30 days, etc.)
     dateFilter = ' newer_than:' + daysBack + 'd';
@@ -3500,18 +4277,86 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
 
   if (allThreads.length === 0) {
     props.deleteProperty('SAFETY_BATCH_START');
-    Browser.msgBox("No safety emails found in the last " + daysBack + " days.");
-    return { complete: true, totalThreads: 0 };
+
+    // Still run compliance calculation to ensure current/previous weeks are created
+    // This is important when no new emails exist but we need to show the week
+    Logger.log("No threads found, but still ensuring weeks exist in compliance sheet...");
+    try {
+      var today = new Date();
+      var currentWeekBounds = getWeekBoundaries(today);
+
+      // Process previous week
+      var previousWeekStart = new Date(currentWeekBounds.weekStart);
+      previousWeekStart.setDate(previousWeekStart.getDate() - 7);
+      var previousWeekBounds = getWeekBoundaries(previousWeekStart);
+      var previousWeekData = calculateComplianceFromLogs(previousWeekBounds.weekStart);
+      if (previousWeekData) {
+        updateComplianceSheetFromLogs(previousWeekData);
+        createMissingReportTasks(previousWeekData);
+      }
+
+      // Process current week
+      var complianceData = calculateComplianceFromLogs(currentWeekBounds.weekStart);
+      if (complianceData) {
+        updateComplianceSheetFromLogs(complianceData);
+      }
+
+      formatComplianceSheetByWeek();
+      Logger.log("Compliance weeks ensured even with no new emails");
+    } catch (e) {
+      Logger.log("Error ensuring weeks exist: " + e.toString());
+    }
+
+    Browser.msgBox("No NEW safety emails found in the last " + daysBack + " days.\n\nAll emails in this period have already been processed. Safety Compliance sheet has been updated.");
+    return { complete: true, totalThreads: 0, message: "No new emails found - all already processed" };
   }
 
-  // Get existing email IDs to avoid duplicates
-  var existingData = sheet.getDataRange().getValues();
+  // Get existing email IDs to avoid duplicates - load from ALL log sheets
+  // This is critical for performance: pre-load once, check in memory, avoid repeated sheet reads
   var existingEmailIds = {};
+
+  // Load from Safety Equipment Needs sheet (column J = index 9)
+  var existingData = sheet.getDataRange().getValues();
   for (var i = 1; i < existingData.length; i++) {
-    if (existingData[i][9]) { // Column J = Source Email ID
+    if (existingData[i][9]) {
       existingEmailIds[existingData[i][9]] = true;
     }
   }
+
+  // Load from JHA Log sheet (column F = index 5)
+  var jhaLogSheet = getJHALogSheet();
+  if (jhaLogSheet && jhaLogSheet.getLastRow() > 1) {
+    var jhaEmailIds = jhaLogSheet.getRange(2, 6, jhaLogSheet.getLastRow() - 1, 1).getValues();
+    for (var j = 0; j < jhaEmailIds.length; j++) {
+      if (jhaEmailIds[j][0]) {
+        existingEmailIds[jhaEmailIds[j][0]] = true;
+      }
+    }
+  }
+
+  // Load from Weekly Safety Log sheet (column F = index 5)
+  var weeklyLogSheet = getWeeklySafetyLogSheet();
+  if (weeklyLogSheet && weeklyLogSheet.getLastRow() > 1) {
+    var weeklyEmailIds = weeklyLogSheet.getRange(2, 6, weeklyLogSheet.getLastRow() - 1, 1).getValues();
+    for (var k = 0; k < weeklyEmailIds.length; k++) {
+      if (weeklyEmailIds[k][0]) {
+        existingEmailIds[weeklyEmailIds[k][0]] = true;
+      }
+    }
+  }
+
+  // Load from Monthly Checklist Log sheet (column G = index 6)
+  var monthlyLogSheet = getMonthlyChecklistLogSheet();
+  if (monthlyLogSheet && monthlyLogSheet.getLastRow() > 1) {
+    var monthlyEmailIds = monthlyLogSheet.getRange(2, 7, monthlyLogSheet.getLastRow() - 1, 1).getValues();
+    for (var m = 0; m < monthlyEmailIds.length; m++) {
+      if (monthlyEmailIds[m][0]) {
+        existingEmailIds[monthlyEmailIds[m][0]] = true;
+      }
+    }
+  }
+
+  Logger.log("Pre-loaded " + Object.keys(existingEmailIds).length + " existing email IDs from all sheets");
 
   // Process only this batch
   var batchEnd = Math.min(batchStart + batchSize, allThreads.length);
@@ -3582,11 +4427,14 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
           if (parsed) {
             // === OPTION B: Log to audit trail sheets ===
             // This creates a complete audit trail in JHA Log, Weekly Safety Log, Monthly Checklist Log
-            var logResult = logParsedSafetyEmail(parsed, message, jobResolutionContext);
+            // Pass existingEmailIds for fast duplicate check and to track newly logged items
+            var logResult = logParsedSafetyEmail(parsed, message, jobResolutionContext, existingEmailIds);
             if (logResult.logged) {
               if (logResult.logSheet === JHA_LOG_SHEET_NAME) logsCreated.jha++;
               else if (logResult.logSheet === WEEKLY_SAFETY_LOG_SHEET_NAME) logsCreated.weekly++;
               else if (logResult.logSheet === MONTHLY_CHECKLIST_LOG_SHEET_NAME) logsCreated.monthly++;
+              // Mark this email as processed to avoid re-processing in subsequent batches
+              existingEmailIds[messageId] = true;
             }
             // === END OPTION B LOGGING ===
 
@@ -5630,6 +6478,88 @@ function getWeekBoundaries(date) {
 }
 
 /**
+ * Loads crews with "Resolved" status for a specific week from Safety Compliance sheet.
+ * These crews should not have tasks recreated or statuses recalculated.
+ *
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @param {Date} weekStart - Start date of the week (Sunday)
+ * @param {string} tz - Timezone
+ * @returns {Object} Map of jobNumber -> {status, days, weeklyMeetingStatus, monthlyChecklistStatus}
+ */
+function loadResolvedCrewsForWeek(ss, weekStart, tz) {
+  var resolvedCrews = {};
+  var complianceSheet = ss.getSheetByName('Safety Compliance');
+
+  if (!complianceSheet || complianceSheet.getLastRow() < 2) {
+    return resolvedCrews;
+  }
+
+  var data = complianceSheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Find column indices
+  var colIdx = {};
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim().replace(/\s+/g, '');
+    if (header === 'weekstart') colIdx.weekStart = h;
+    else if (header === 'jobnumber') colIdx.jobNumber = h;
+    else if (header === 'status') colIdx.status = h;
+    else if (header === 'sun') colIdx.sun = h;
+    else if (header === 'mon') colIdx.mon = h;
+    else if (header === 'tue') colIdx.tue = h;
+    else if (header === 'wed') colIdx.wed = h;
+    else if (header === 'thu') colIdx.thu = h;
+    else if (header === 'fri') colIdx.fri = h;
+    else if (header === 'sat') colIdx.sat = h;
+    else if (header === 'weeklymeeting') colIdx.weeklyMeeting = h;
+    else if (header === 'monthly' || header === 'monthlychecklist') colIdx.monthly = h;
+  }
+
+  if (colIdx.weekStart === undefined || colIdx.jobNumber === undefined || colIdx.status === undefined) {
+    Logger.log("loadResolvedCrewsForWeek: Required columns not found");
+    return resolvedCrews;
+  }
+
+  var targetWeekStr = Utilities.formatDate(weekStart, tz, 'yyyy-MM-dd');
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var rowWeekStart = row[colIdx.weekStart];
+    var rowJob = String(row[colIdx.jobNumber] || '').trim();
+    var rowStatus = String(row[colIdx.status] || '').trim();
+
+    if (!rowWeekStart || !rowJob) continue;
+
+    // Match week
+    var rowWeekDate = (rowWeekStart instanceof Date) ? rowWeekStart : new Date(rowWeekStart);
+    var rowWeekStr = Utilities.formatDate(rowWeekDate, tz, 'yyyy-MM-dd');
+
+    if (rowWeekStr !== targetWeekStr) continue;
+
+    // Check if status is "Resolved" (set by delete or resolution recording)
+    if (rowStatus === 'Resolved') {
+      resolvedCrews[rowJob] = {
+        status: 'Resolved',
+        days: {
+          'Sun': colIdx.sun !== undefined ? String(row[colIdx.sun] || '') : 'N/A',
+          'Mon': colIdx.mon !== undefined ? String(row[colIdx.mon] || '') : 'N/A',
+          'Tue': colIdx.tue !== undefined ? String(row[colIdx.tue] || '') : 'N/A',
+          'Wed': colIdx.wed !== undefined ? String(row[colIdx.wed] || '') : 'N/A',
+          'Thu': colIdx.thu !== undefined ? String(row[colIdx.thu] || '') : 'N/A',
+          'Fri': colIdx.fri !== undefined ? String(row[colIdx.fri] || '') : 'N/A',
+          'Sat': colIdx.sat !== undefined ? String(row[colIdx.sat] || '') : 'N/A'
+        },
+        weeklyMeetingStatus: colIdx.weeklyMeeting !== undefined ? String(row[colIdx.weeklyMeeting] || '') : 'N/A',
+        monthlyChecklistStatus: colIdx.monthly !== undefined ? String(row[colIdx.monthly] || '') : 'N/A'
+      };
+      Logger.log("loadResolvedCrewsForWeek: Found Resolved crew " + rowJob + " for week " + targetWeekStr);
+    }
+  }
+
+  return resolvedCrews;
+}
+
+/**
  * Determines which week of the month a date falls into and month boundary info
  *
  * @param {Date} date - Any date within the month
@@ -5688,20 +6618,23 @@ function getMonthlyChecklistStatus(weekStartDate, hasSubmitted, isSkipped, check
     return { status: 'N/A', cssClass: 'na', shouldCreateTask: false, affectsStatus: false };
   }
 
-  // If checklist was submitted THIS WEEK, show checkmark
+  // If checklist was submitted, show ✅ for all weeks in the same month
+  // The received date will be shown in the tooltip instead of the cell
   if (hasSubmitted && checklistDate) {
-    var checklistWeek = getWeekBoundaries(checklistDate);
-    var targetWeek = getWeekBoundaries(weekStartDate);
+    var checklistMonth = new Date(checklistDate).getMonth();
+    var checklistYear = new Date(checklistDate).getFullYear();
+    var targetMonth = weekStartDate.getMonth();
+    var targetYear = weekStartDate.getFullYear();
 
-    // If checklist was received in THIS week being evaluated, show ✅
-    if (checklistDate >= targetWeek.weekStart && checklistDate <= targetWeek.weekEnd) {
+    // If checklist was received in the same month as the target week, show ✅
+    if (checklistYear === targetYear && checklistMonth === targetMonth) {
       return { status: '✅', cssClass: 'ok', shouldCreateTask: false, affectsStatus: false };
     }
 
-    // Checklist was received EARLIER in the month - show the date (e.g., "✓02/10")
-    var tz = Session.getScriptTimeZone();
-    var dateStr = Utilities.formatDate(checklistDate, tz, "MM/dd");
-    return { status: '✓' + dateStr, cssClass: 'ok-date', shouldCreateTask: false, affectsStatus: false };
+    // If checklist was received in a LATER month (shouldn't happen), still show ✅
+    if (checklistYear > targetYear || (checklistYear === targetYear && checklistMonth > targetMonth)) {
+      return { status: '✅', cssClass: 'ok', shouldCreateTask: false, affectsStatus: false };
+    }
   }
 
   // Legacy support: if hasSubmitted is true but no date provided, show checkmark
@@ -6909,6 +7842,7 @@ function updateComplianceSheet(complianceData) {
 function formatComplianceSheetByWeek() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Safety Compliance");
+  var tz = Session.getScriptTimeZone();
 
   if (!sheet) {
     Logger.log("formatComplianceSheetByWeek: Sheet not found");
@@ -6922,25 +7856,36 @@ function formatComplianceSheetByWeek() {
     return;
   }
 
+  // Helper to normalize date to YYYY-MM-DD string for consistent comparison
+  function normalizeWeekDate(dateValue) {
+    if (!dateValue) return '';
+    var d = new Date(dateValue);
+    if (isNaN(d.getTime())) return '';
+    return Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+  }
+
   // Sort by: 1) Week Start (descending - most recent first), 2) Job Number
   var dataRows = [];
   for (var i = 1; i < data.length; i++) {
-    dataRows.push({ row: i + 1, data: data[i] });
+    dataRows.push({
+      row: i + 1,
+      data: data[i],
+      weekKey: normalizeWeekDate(data[i][0])
+    });
   }
 
   // Log unique weeks before sorting
   var uniqueWeeks = {};
   for (var i = 0; i < dataRows.length; i++) {
-    var weekStr = String(dataRows[i].data[0]);
-    uniqueWeeks[weekStr] = (uniqueWeeks[weekStr] || 0) + 1;
+    var weekKey = dataRows[i].weekKey;
+    uniqueWeeks[weekKey] = (uniqueWeeks[weekKey] || 0) + 1;
   }
   Logger.log("formatComplianceSheetByWeek: Unique weeks found: " + JSON.stringify(uniqueWeeks));
 
   dataRows.sort(function(a, b) {
-    var dateA = new Date(a.data[0]);
-    var dateB = new Date(b.data[0]);
-    if (dateB.getTime() !== dateA.getTime()) {
-      return dateB.getTime() - dateA.getTime(); // Most recent first
+    // Compare normalized week keys (YYYY-MM-DD format sorts correctly as strings)
+    if (b.weekKey !== a.weekKey) {
+      return b.weekKey.localeCompare(a.weekKey); // Most recent first (descending)
     }
     // Same week - sort by job number
     return String(a.data[1]).localeCompare(String(b.data[1]));
@@ -6948,30 +7893,36 @@ function formatComplianceSheetByWeek() {
 
   // Log first few rows after sorting to verify order
   if (dataRows.length > 0) {
-    Logger.log("formatComplianceSheetByWeek: After sort, first week is: " + String(dataRows[0].data[0]));
+    Logger.log("formatComplianceSheetByWeek: After sort, first week is: " + dataRows[0].weekKey);
   }
 
   // Rewrite sorted data
   var sortedData = dataRows.map(function(r) { return r.data; });
+  var sortedWeekKeys = dataRows.map(function(r) { return r.weekKey; });
   sheet.getRange(2, 1, sortedData.length, sortedData[0].length).setValues(sortedData);
+
+  // Clear existing borders and backgrounds first
+  var dataRange = sheet.getRange(2, 1, sortedData.length, 14);
+  dataRange.setBorder(false, false, false, false, false, false);
+  dataRange.setBackground(null);
 
   // Now apply week coloring
   var lastWeek = "";
-  var weekIndex = 0;
+  var weekIndex = -1;
   var weekColors = ['#ffffff', '#e3f2fd']; // White, Light Blue alternating
 
   for (var i = 0; i < sortedData.length; i++) {
-    var weekStr = String(sortedData[i][0]);
+    var weekKey = sortedWeekKeys[i];
     var rowNum = i + 2; // 1-based, skip header
 
-    if (weekStr !== lastWeek) {
-      // New week - add thick border above this row (if not first row)
+    if (weekKey !== lastWeek) {
+      // New week - add thick border above this row (if not first data row)
       if (i > 0) {
         var borderRange = sheet.getRange(rowNum, 1, 1, 14);
         borderRange.setBorder(true, null, null, null, null, null, '#1565c0', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
       }
       weekIndex++;
-      lastWeek = weekStr;
+      lastWeek = weekKey;
     }
 
     // Apply alternating background color for this week
@@ -6979,7 +7930,7 @@ function formatComplianceSheetByWeek() {
     sheet.getRange(rowNum, 1, 1, 14).setBackground(color);
   }
 
-  Logger.log("formatComplianceSheetByWeek: Applied week formatting to " + sortedData.length + " rows");
+  Logger.log("formatComplianceSheetByWeek: Applied week formatting to " + sortedData.length + " rows across " + (weekIndex + 1) + " weeks");
 }
 
 /**
@@ -7948,10 +8899,12 @@ function menuRegeneratePreviousWeekTasks() {
 
 /**
  * Shows the Safety Compliance Dashboard with current week stats and trends
+ * Now includes HTML tooltips on each day cell with date details
  */
 function showComplianceDashboard() {
   var today = new Date();
   var weekBounds = getWeekBoundaries(today);
+  var tz = Session.getScriptTimeZone();
 
   // Defensive check for weekBounds
   if (!weekBounds || !weekBounds.weekStart) {
@@ -7959,7 +8912,8 @@ function showComplianceDashboard() {
     return;
   }
 
-  var complianceData = calculateSafetyCompliance(weekBounds.weekStart);
+  // Use calculateComplianceFromLogs instead of calculateSafetyCompliance to get detail data for tooltips
+  var complianceData = calculateComplianceFromLogs(weekBounds.weekStart);
 
   if (!complianceData || !complianceData.crews) {
     Browser.msgBox("❌ Could not calculate compliance data. Make sure Safety Reports and Safety Compliance Config sheets exist.");
@@ -7972,8 +8926,10 @@ function showComplianceDashboard() {
     return;
   }
 
-  var weekStartStr = Utilities.formatDate(complianceData.weekStart, Session.getScriptTimeZone(), "MM/dd");
-  var weekEndStr = Utilities.formatDate(complianceData.weekEnd, Session.getScriptTimeZone(), "MM/dd/yyyy");
+  var weekStartStr = Utilities.formatDate(complianceData.weekStart, tz, "MM/dd");
+  var weekEndStr = Utilities.formatDate(complianceData.weekEnd, tz, "MM/dd/yyyy");
+  var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  var fullDayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
   // Count compliant and missing
   var compliantCount = 0;
@@ -8002,7 +8958,7 @@ function showComplianceDashboard() {
     '.stat-card .label { font-size: 12px; color: #666; }' +
     '.crew-table { width: 100%; border-collapse: collapse; font-size: 12px; }' +
     '.crew-table th { background: #4285f4; color: white; padding: 8px 4px; text-align: center; }' +
-    '.crew-table td { padding: 6px 4px; text-align: center; border-bottom: 1px solid #ddd; }' +
+    '.crew-table td { padding: 6px 4px; text-align: center; border-bottom: 1px solid #ddd; cursor: help; }' +
     '.crew-table tr:hover { background: #f5f5f5; }' +
     '.ok { color: #28a745; }' +
     '.late { color: #b8860b; background: #fff8dc; }' +
@@ -8010,6 +8966,7 @@ function showComplianceDashboard() {
     '.pending { color: #ffc107; }' +
     '.na { color: #999; }' +
     '.scroll-container { max-height: 300px; overflow-y: auto; }' +
+    '.legend { margin-top: 15px; font-size: 11px; color: #666; text-align: center; }' +
     '</style>';
 
   html += '<div class="header">' +
@@ -8031,7 +8988,7 @@ function showComplianceDashboard() {
 
   html += '<div class="scroll-container">' +
     '<table class="crew-table">' +
-    '<tr><th>Crew</th><th>Foreman</th><th>Sun</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th><th>Weekly</th></tr>';
+    '<tr><th>Crew</th><th>Foreman</th><th>Sun</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th><th>Weekly</th><th>Monthly</th></tr>';
 
   var crewKeys = Object.keys(complianceData.crews).sort();
   for (var c = 0; c < crewKeys.length; c++) {
@@ -8045,29 +9002,114 @@ function showComplianceDashboard() {
     html += '<td><strong>' + (crew.jobNumber || crewKeys[c]) + '</strong></td>';
     html += '<td>' + (crew.foreman || '-') + '</td>';
 
-    var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    // Day columns with tooltips
     for (var d = 0; d < dayNames.length; d++) {
       var st = (crew.days && crew.days[dayNames[d]]) ? crew.days[dayNames[d]] : '';
       var cls = st === '✅' ? 'ok' : (st === '✅L' ? 'late' : (st === '❌' ? 'missing' : (st === '⏳' ? 'pending' : 'na')));
-      html += '<td class="' + cls + '">' + st + '</td>';
+
+      // Build tooltip for this day
+      var dayDate = new Date(complianceData.weekStart.getTime());
+      dayDate.setDate(dayDate.getDate() + d);
+      var dayDateStr = Utilities.formatDate(dayDate, tz, 'MMM dd, yyyy');
+      var details = (crew.jhaDetails && crew.jhaDetails[d]) ? crew.jhaDetails[d] : null;
+
+      // Build tooltip with &#10; for line breaks in HTML title attribute
+      var tooltipParts = [];
+      tooltipParts.push('📅 ' + fullDayNames[d] + ', ' + dayDateStr);
+      if (details && details.dateCreated) {
+        tooltipParts.push('Created: ' + Utilities.formatDate(new Date(details.dateCreated), tz, 'MM/dd/yyyy'));
+      }
+      if (details && details.dateReceived) {
+        tooltipParts.push('Received: ' + Utilities.formatDate(new Date(details.dateReceived), tz, 'MM/dd/yyyy h:mm a'));
+      }
+      tooltipParts.push('');
+      tooltipParts.push(getIconExplanationForHtml(st));
+      var tooltip = tooltipParts.join('&#10;');
+
+      html += '<td class="' + cls + '" title="' + tooltip + '">' + st + '</td>';
     }
 
-    var mCls = crew.weeklyMeeting === '✅' ? 'ok' : (crew.weeklyMeeting === '❌' ? 'missing' : (crew.weeklyMeeting === '⏳' ? 'pending' : 'na'));
-    html += '<td class="' + mCls + '">' + (crew.weeklyMeeting || '') + '</td>';
+    // Weekly Meeting with tooltip
+    var wst = (crew.weeklyMeetingStatus) ? crew.weeklyMeetingStatus : '';
+    var mCls = wst === '✅' ? 'ok' : (wst === '✅L' ? 'late' : (wst === '❌' ? 'missing' : (wst === '⏳' ? 'pending' : 'na')));
+    var wkDetails = crew.weeklyMeetingDetails || null;
+    var wkTooltipParts = [];
+    wkTooltipParts.push('📋 Weekly Safety Meeting');
+    if (wkDetails && wkDetails.weekOf) {
+      wkTooltipParts.push('Week of: ' + Utilities.formatDate(new Date(wkDetails.weekOf), tz, 'MMM dd, yyyy'));
+    }
+    if (wkDetails && wkDetails.dateReceived) {
+      wkTooltipParts.push('Received: ' + Utilities.formatDate(new Date(wkDetails.dateReceived), tz, 'MM/dd/yyyy h:mm a'));
+    }
+    wkTooltipParts.push('');
+    wkTooltipParts.push(getIconExplanationForHtml(wst));
+    var wkTooltip = wkTooltipParts.join('&#10;');
+    html += '<td class="' + mCls + '" title="' + wkTooltip + '">' + wst + '</td>';
+
+    // Monthly Checklist with tooltip
+    var mst = (crew.monthlyChecklistStatus) ? crew.monthlyChecklistStatus : '';
+    var moCls = mst === '✅' ? 'ok' : (mst === '❌' ? 'missing' : (mst === '⏳' ? 'pending' : (mst === '⚠️' ? 'pending' : 'na')));
+    var moDetails = crew.monthlyChecklistDetails || null;
+    var moTooltipParts = [];
+    moTooltipParts.push('📋 Monthly Fleet Checklist');
+    if (moDetails && moDetails.reportDate) {
+      moTooltipParts.push('Report Date: ' + Utilities.formatDate(new Date(moDetails.reportDate), tz, 'MMM dd, yyyy'));
+    }
+    if (moDetails && moDetails.dateReceived) {
+      moTooltipParts.push('Received: ' + Utilities.formatDate(new Date(moDetails.dateReceived), tz, 'MM/dd/yyyy h:mm a'));
+    }
+    moTooltipParts.push('');
+    moTooltipParts.push(getIconExplanationForHtml(mst, 'monthly'));
+    var moTooltip = moTooltipParts.join('&#10;');
+    html += '<td class="' + moCls + '" title="' + moTooltip + '">' + mst + '</td>';
+
     html += '</tr>';
   }
 
   html += '</table></div>';
+
+  // Add legend at bottom
+  html += '<div class="legend">' +
+    '✅ On time | ✅L Late | ❌ Missing | ⏳ Pending | N/A Skipped | ⚠️ Warning (Monthly) | ❌⏳ Urgent (Monthly)' +
+    '</div>';
 
   html += '<div style="margin-top: 15px; text-align: center;">' +
     '<button onclick="google.script.host.close()" style="background:#4285f4;color:white;border:none;padding:10px 30px;border-radius:4px;cursor:pointer;">Close</button>' +
     '</div>';
 
   var output = HtmlService.createHtmlOutput(html)
-    .setWidth(700)
-    .setHeight(550);
+    .setWidth(800)
+    .setHeight(600);
 
   SpreadsheetApp.getUi().showModalDialog(output, 'Safety Compliance Dashboard');
+}
+
+/**
+ * Returns icon explanation for HTML tooltips
+ * @param {string} icon - The status icon
+ * @param {string} cellType - Optional cell type for context
+ * @returns {string} Explanation
+ */
+function getIconExplanationForHtml(icon, cellType) {
+  var iconStr = String(icon || '').trim();
+
+  if (iconStr === '✅') {
+    return '✅ = Received on time';
+  } else if (iconStr === '✅L') {
+    return '✅L = Received late';
+  } else if (iconStr === '❌') {
+    return '❌ = Missing/not received';
+  } else if (iconStr === '⏳') {
+    return '⏳ = Pending';
+  } else if (iconStr === 'N/A') {
+    return 'N/A = Skipped per config';
+  } else if (iconStr === '⚠️') {
+    return '⚠️ = Warning (Week 3)';
+  } else if (iconStr === '❌⏳') {
+    return '❌⏳ = Urgent (Week 4)';
+  }
+
+  return '';
 }
 
 
@@ -9352,29 +10394,89 @@ function getCustomJobForemanMappings() {
 /**
  * Saves custom job→foreman mappings to ScriptProperties
  * Called from dialog when user adds custom job numbers
+ * MERGES with existing mappings (doesn't replace)
  * @param {string} mappingsJson - JSON string of {jobNumber: foremanName, ...}
  */
 function saveCustomJobForemanMappings(mappingsJson) {
   var props = PropertiesService.getScriptProperties();
-  var mappings = {};
+
+  // Load existing mappings first
+  var existingMappings = {};
+  var existingJson = props.getProperty('CUSTOM_JOB_FOREMAN_MAPPINGS');
+  if (existingJson) {
+    try {
+      existingMappings = JSON.parse(existingJson);
+    } catch (e) {
+      Logger.log('Error parsing existing mappings: ' + e);
+    }
+  }
+
+  // Parse new mappings
+  var newMappings = {};
   try {
-    mappings = JSON.parse(mappingsJson);
+    newMappings = JSON.parse(mappingsJson);
   } catch (e) {
     Logger.log('Error parsing mappings JSON: ' + e);
     return { success: false, error: e.toString() };
   }
-  props.setProperty('CUSTOM_JOB_FOREMAN_MAPPINGS', JSON.stringify(mappings));
-  Logger.log('Saved ' + Object.keys(mappings).length + ' custom job→foreman mappings');
-  return { success: true, count: Object.keys(mappings).length };
+
+  // Merge: new mappings overwrite existing ones with same key
+  for (var job in newMappings) {
+    existingMappings[job] = newMappings[job];
+  }
+
+  props.setProperty('CUSTOM_JOB_FOREMAN_MAPPINGS', JSON.stringify(existingMappings));
+  Logger.log('Saved custom job→foreman mappings. Total: ' + Object.keys(existingMappings).length + ' mappings');
+  return { success: true, count: Object.keys(existingMappings).length };
 }
 
 /**
  * Clears all custom job→foreman mappings
+ * Can be called from dialog (no alert) or from menu (shows alert)
+ * @param {boolean} showAlert - Whether to show confirmation alert (default: false for dialog use)
  */
-function clearCustomJobForemanMappings() {
+function clearCustomJobForemanMappings(showAlert) {
   var props = PropertiesService.getScriptProperties();
   props.deleteProperty('CUSTOM_JOB_FOREMAN_MAPPINGS');
-  SpreadsheetApp.getUi().alert('✅ Custom job→foreman mappings cleared.');
+  Logger.log('Cleared all custom job→foreman mappings');
+  if (showAlert) {
+    SpreadsheetApp.getUi().alert('✅ Custom job→foreman mappings cleared.');
+  }
+}
+
+/**
+ * Removes a single custom job→foreman mapping
+ * @param {string} jobNumber - The job number to remove from mappings
+ * @returns {Object} - {success: boolean, error?: string}
+ */
+function removeCustomJobForemanMapping(jobNumber) {
+  if (!jobNumber) {
+    return { success: false, error: 'No job number provided' };
+  }
+
+  var props = PropertiesService.getScriptProperties();
+  var existingJson = props.getProperty('CUSTOM_JOB_FOREMAN_MAPPINGS');
+
+  if (!existingJson) {
+    return { success: false, error: 'No mappings found' };
+  }
+
+  try {
+    var mappings = JSON.parse(existingJson);
+
+    if (!mappings[jobNumber]) {
+      return { success: false, error: 'Mapping for ' + jobNumber + ' not found' };
+    }
+
+    delete mappings[jobNumber];
+    props.setProperty('CUSTOM_JOB_FOREMAN_MAPPINGS', JSON.stringify(mappings));
+
+    Logger.log('Removed custom mapping for job ' + jobNumber + '. Remaining: ' + Object.keys(mappings).length);
+    return { success: true, remaining: Object.keys(mappings).length };
+  } catch (e) {
+    Logger.log('Error removing mapping: ' + e);
+    return { success: false, error: e.toString() };
+  }
 }
 
 /**
@@ -9473,6 +10575,212 @@ function clearPendingUnknownJobs() {
 }
 
 /**
+ * Menu function: Add missing job→foreman mappings manually
+ * Prompts for job numbers and foremen to add to the permanent custom mappings
+ */
+function addMissingJobMappings() {
+  var ui = SpreadsheetApp.getUi();
+
+  // Show current mappings first
+  var currentMappings = getCustomJobForemanMappings();
+  var currentList = Object.keys(currentMappings).map(function(j) {
+    return j + ' → ' + currentMappings[j];
+  }).join('\n') || 'None';
+
+  var response = ui.prompt(
+    'Add Job→Foreman Mappings',
+    'Current mappings:\n' + currentList + '\n\n' +
+    'Enter mappings in format: jobNumber=foremanName (one per line)\n' +
+    'Example:\n054-26=Benjamin Lapka\n006-26=Benjamin Lapka\n038-26=Erik Davis',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (response.getSelectedButton() !== ui.Button.OK) {
+    return;
+  }
+
+  var input = response.getResponseText().trim();
+  if (!input) {
+    ui.alert('No Input', 'No mappings entered.', ui.ButtonSet.OK);
+    return;
+  }
+
+  // Parse input
+  var lines = input.split('\n');
+  var newMappings = {};
+  var errors = [];
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].trim();
+    if (!line) continue;
+
+    var parts = line.split('=');
+    if (parts.length !== 2) {
+      errors.push('Invalid format: ' + line);
+      continue;
+    }
+
+    var jobNumber = parts[0].trim();
+    var foreman = parts[1].trim();
+
+    if (!jobNumber || !foreman) {
+      errors.push('Missing job or foreman: ' + line);
+      continue;
+    }
+
+    newMappings[jobNumber] = foreman;
+  }
+
+  if (errors.length > 0) {
+    ui.alert('Errors Found', errors.join('\n'), ui.ButtonSet.OK);
+    return;
+  }
+
+  if (Object.keys(newMappings).length === 0) {
+    ui.alert('No Valid Mappings', 'No valid mappings were found in input.', ui.ButtonSet.OK);
+    return;
+  }
+
+  // Merge with existing mappings
+  var props = PropertiesService.getScriptProperties();
+  var existingMappings = getCustomJobForemanMappings();
+
+  for (var job in newMappings) {
+    existingMappings[job] = newMappings[job];
+  }
+
+  props.setProperty('CUSTOM_JOB_FOREMAN_MAPPINGS', JSON.stringify(existingMappings));
+
+  var addedList = Object.keys(newMappings).map(function(j) {
+    return '• ' + j + ' → ' + newMappings[j];
+  }).join('\n');
+
+  ui.alert('Mappings Added', '✅ Added ' + Object.keys(newMappings).length + ' mapping(s):\n\n' + addedList +
+    '\n\nNow run "Fix Skipped Log Entries" to update existing log entries.', ui.ButtonSet.OK);
+}
+
+/**
+ * Menu function: Clear all safety log sheets and reprocess from scratch
+ * WARNING: This deletes all data in JHA Log, Weekly Safety Log, Monthly Checklist Log
+ */
+function clearAndReprocessSafetyEmails() {
+  var ui = SpreadsheetApp.getUi();
+
+  var response = ui.alert(
+    '⚠️ Clear and Reprocess ALL Safety Emails',
+    'This will:\n' +
+    '1. DELETE all data in JHA Log, Weekly Safety Log, Monthly Checklist Log\n' +
+    '2. Clear the Safety Compliance sheet\n' +
+    '3. Reset the "last processed" date so ALL emails are reprocessed\n\n' +
+    'Your custom job→foreman mappings will be PRESERVED.\n\n' +
+    'Are you sure you want to continue?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (response !== ui.Button.YES) {
+    return;
+  }
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    // Clear JHA Log (keep header)
+    var jhaSheet = getJHALogSheet();
+    if (jhaSheet && jhaSheet.getLastRow() > 1) {
+      jhaSheet.deleteRows(2, jhaSheet.getLastRow() - 1);
+      Logger.log('Cleared JHA Log');
+    }
+
+    // Clear Weekly Safety Log (keep header)
+    var weeklySheet = getWeeklySafetyLogSheet();
+    if (weeklySheet && weeklySheet.getLastRow() > 1) {
+      weeklySheet.deleteRows(2, weeklySheet.getLastRow() - 1);
+      Logger.log('Cleared Weekly Safety Log');
+    }
+
+    // Clear Monthly Checklist Log (keep header)
+    var monthlySheet = getMonthlyChecklistLogSheet();
+    if (monthlySheet && monthlySheet.getLastRow() > 1) {
+      monthlySheet.deleteRows(2, monthlySheet.getLastRow() - 1);
+      Logger.log('Cleared Monthly Checklist Log');
+    }
+
+    // Clear Safety Compliance (keep header)
+    var complianceSheet = ss.getSheetByName('Safety Compliance');
+    if (complianceSheet && complianceSheet.getLastRow() > 1) {
+      complianceSheet.deleteRows(2, complianceSheet.getLastRow() - 1);
+      Logger.log('Cleared Safety Compliance');
+    }
+
+    // Clear the last processed date
+    var props = PropertiesService.getScriptProperties();
+    props.deleteProperty('LAST_SAFETY_EMAIL_DATE');
+    props.deleteProperty('SAFETY_BATCH_START');
+    props.deleteProperty('TEMP_JOB_FOREMAN_MAPPINGS');
+    props.deleteProperty('SKIPPED_UNKNOWN_JOBS');
+    props.deleteProperty('PENDING_UNKNOWN_JOBS');
+    Logger.log('Cleared processing state');
+
+    ui.alert('Data Cleared', '✅ All safety log data has been cleared.\n\n' +
+      'Now run "Process Safety Emails" and select a date range (e.g., 90 days or "All time").\n\n' +
+      'When unknown jobs appear, assign them to foremen. The mappings will be saved permanently.',
+      ui.ButtonSet.OK);
+
+  } catch (e) {
+    Logger.log('Error clearing safety data: ' + e.toString());
+    ui.alert('Error', 'Failed to clear data: ' + e.toString(), ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * Menu function: Fix existing "Skipped" log entries using saved custom job mappings
+ * Use this to retroactively credit JHAs/Meetings that were previously skipped
+ * because the job number wasn't recognized, but you've since assigned a foreman.
+ */
+function fixSkippedLogEntriesFromMappings() {
+  var ui = SpreadsheetApp.getUi();
+
+  try {
+    // Get all saved custom mappings
+    var customMappings = getCustomJobForemanMappings();
+    var jobNumbers = Object.keys(customMappings);
+
+    if (jobNumbers.length === 0) {
+      ui.alert('No Mappings Found', 'There are no saved job→foreman mappings.\n\nMappings are created when you assign a foreman to an unknown job during safety email processing.', ui.ButtonSet.OK);
+      return;
+    }
+
+    // Build assignments array
+    var assignments = [];
+    for (var i = 0; i < jobNumbers.length; i++) {
+      assignments.push({
+        jobNumber: jobNumbers[i],
+        foreman: customMappings[jobNumbers[i]]
+      });
+    }
+
+    Logger.log('fixSkippedLogEntriesFromMappings: Found ' + assignments.length + ' custom mappings');
+
+    // Update log entries
+    var updatedCount = updateLogEntriesForAssignedJobs(assignments);
+
+    // Recalculate compliance to reflect the changes
+    if (updatedCount > 0) {
+      Logger.log('Recalculating compliance after updating ' + updatedCount + ' log entries...');
+      recalculateComplianceFromLogs();
+    }
+
+    ui.alert('Log Entries Fixed', '✅ Updated ' + updatedCount + ' log entries from "Skipped" to "Credited".\n\n' +
+      'Job mappings used:\n' + jobNumbers.map(function(j) { return '• ' + j + ' → ' + customMappings[j]; }).join('\n') +
+      '\n\nCompliance has been recalculated.', ui.ButtonSet.OK);
+
+  } catch (e) {
+    Logger.log('Error fixing skipped log entries: ' + e.toString());
+    ui.alert('Error', 'Failed to fix log entries: ' + e.toString(), ui.ButtonSet.OK);
+  }
+}
+
+/**
  * Applies user's decisions for unknown job numbers and continues processing
  * @param {string} decisionsJson - JSON string of [{jobNumber, foreman, action: 'assign'|'skip'}]
  * @returns {Object} Result with temporary mappings applied
@@ -9491,11 +10799,21 @@ function applyUnknownJobDecisions(decisionsJson) {
     Logger.log('Existing temp mappings: ' + JSON.stringify(tempMappings));
     Logger.log('Existing skipped jobs: ' + JSON.stringify(skippedJobs));
 
+    // Track assignments to update existing log entries
+    var jobsToCredit = [];
+
     for (var i = 0; i < decisions.length; i++) {
       var decision = decisions[i];
       if (decision.action === 'assign' && decision.foreman) {
         tempMappings[decision.jobNumber] = decision.foreman;
         Logger.log('Assigned: ' + decision.jobNumber + ' → ' + decision.foreman);
+
+        // Track this assignment for updating existing log entries
+        jobsToCredit.push({
+          jobNumber: decision.jobNumber,
+          foreman: decision.foreman
+        });
+
         // Remove from skipped if it was there
         var skipIdx = skippedJobs.indexOf(decision.jobNumber);
         if (skipIdx !== -1) {
@@ -9517,6 +10835,14 @@ function applyUnknownJobDecisions(decisionsJson) {
     props.setProperty('TEMP_JOB_FOREMAN_MAPPINGS', JSON.stringify(tempMappings));
     props.setProperty('SKIPPED_UNKNOWN_JOBS', JSON.stringify(skippedJobs));
 
+    // === NEW: Update existing log entries for assigned jobs ===
+    var updatedCount = 0;
+    if (jobsToCredit.length > 0) {
+      Logger.log('Updating existing log entries for ' + jobsToCredit.length + ' assigned jobs...');
+      updatedCount = updateLogEntriesForAssignedJobs(jobsToCredit);
+      Logger.log('Updated ' + updatedCount + ' log entries');
+    }
+
     // Reset batch position to re-process the same batch with new mappings
     // The PENDING_BATCH_START tells us where this batch began
     var pendingBatchStart = props.getProperty('PENDING_BATCH_START');
@@ -9533,12 +10859,357 @@ function applyUnknownJobDecisions(decisionsJson) {
     return {
       success: true,
       assigned: Object.keys(tempMappings).length,
-      skipped: skippedJobs.length
+      skipped: skippedJobs.length,
+      logEntriesUpdated: updatedCount
     };
 
   } catch (e) {
     Logger.log('Error applying unknown job decisions: ' + e.toString());
     return { success: false, error: e.toString() };
+  }
+}
+
+/**
+ * Updates existing log entries (JHA Log, Weekly Safety Log) when a foreman is assigned
+ * to an unknown job number. Changes status from "Skipped" or "Unknown Job" to "Credited".
+ *
+ * @param {Array} assignments - Array of {jobNumber, foreman} objects
+ * @returns {number} Number of log entries updated
+ */
+function updateLogEntriesForAssignedJobs(assignments) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var totalUpdated = 0;
+
+  // Load employee data to find foreman's primary crew
+  var empSheet = ss.getSheetByName('Employees');
+  var employeeData = empSheet ? empSheet.getDataRange().getValues() : null;
+
+  // Build a map for quick lookup: jobNumber → {foreman, primaryCrew}
+  var jobMap = {};
+  for (var a = 0; a < assignments.length; a++) {
+    var assignment = assignments[a];
+    var baseJob = String(assignment.jobNumber).split('.')[0].trim();
+
+    // Find the foreman's primary crew from Employees sheet
+    var primaryCrew = null;
+    if (employeeData) {
+      primaryCrew = findForemanPrimaryCrew(assignment.foreman, employeeData);
+    }
+
+    // If we couldn't find the primary crew, the foreman assignment won't help much
+    // But we'll still update with the base job as fallback
+    jobMap[baseJob] = {
+      foreman: assignment.foreman,
+      primaryCrew: primaryCrew || baseJob // Use original job number if no primary crew found
+    };
+
+    if (primaryCrew) {
+      Logger.log('updateLogEntriesForAssignedJobs: ' + baseJob + ' → ' + assignment.foreman + ' (primaryCrew: ' + primaryCrew + ')');
+    } else {
+      Logger.log('updateLogEntriesForAssignedJobs: WARNING - Could not find primary crew for ' + assignment.foreman + ', using ' + baseJob);
+    }
+  }
+
+  // === Update JHA Log ===
+  var jhaSheet = getJHALogSheet();
+  if (jhaSheet && jhaSheet.getLastRow() > 1) {
+    var jhaData = jhaSheet.getDataRange().getValues();
+    // Columns: A=DateReceived, B=DateCreated, C=JobNumber, D=Foreman, E=Subject, F=EmailID, G=Source, H=Status, I=CreditedTo, J=Notes
+
+    for (var i = 1; i < jhaData.length; i++) {
+      var rowJobNumber = String(jhaData[i][2] || '').split('.')[0].trim(); // Column C
+      var currentStatus = String(jhaData[i][7] || '').trim(); // Column H
+
+      // Check if this job is in our assignment list and status is not already Credited
+      if (jobMap[rowJobNumber] && (currentStatus === 'Skipped' || currentStatus === 'Unknown Job')) {
+        var mapping = jobMap[rowJobNumber];
+        var rowNum = i + 1; // 1-indexed row number
+
+        // Update: Status = Credited, CreditedTo = primaryCrew, Foreman = foreman name
+        jhaSheet.getRange(rowNum, 4).setValue(mapping.foreman); // Column D - Foreman
+        jhaSheet.getRange(rowNum, 8).setValue('Credited'); // Column H - Status
+        jhaSheet.getRange(rowNum, 9).setValue(mapping.primaryCrew); // Column I - Credited To
+
+        // Append note about the assignment
+        var existingNotes = String(jhaData[i][9] || '').trim(); // Column J
+        var newNote = 'Assigned via dialog: ' + rowJobNumber + ' → ' + mapping.foreman;
+        if (existingNotes && existingNotes.indexOf('Assigned via dialog') === -1) {
+          newNote = existingNotes + '. ' + newNote;
+        }
+        jhaSheet.getRange(rowNum, 10).setValue(newNote); // Column J - Notes
+
+        totalUpdated++;
+        Logger.log('Updated JHA Log row ' + rowNum + ': ' + rowJobNumber + ' → Credited to ' + mapping.primaryCrew);
+      }
+    }
+  }
+
+  // === Update Weekly Safety Log ===
+  var weeklySheet = getWeeklySafetyLogSheet();
+  if (weeklySheet && weeklySheet.getLastRow() > 1) {
+    var weeklyData = weeklySheet.getDataRange().getValues();
+    // Columns: A=DateReceived, B=WeekOf, C=JobNumber, D=Foreman, E=Subject, F=EmailID, G=Status, H=CreditedTo, I=Notes
+
+    for (var j = 1; j < weeklyData.length; j++) {
+      var rowJobNumber = String(weeklyData[j][2] || '').split('.')[0].trim(); // Column C
+      var currentStatus = String(weeklyData[j][6] || '').trim(); // Column G
+
+      // Check if this job is in our assignment list and status is not already Credited
+      if (jobMap[rowJobNumber] && (currentStatus === 'Skipped' || currentStatus === 'Unknown Job')) {
+        var mapping = jobMap[rowJobNumber];
+        var rowNum = j + 1;
+
+        // Update: Status = Credited, CreditedTo = primaryCrew, Foreman = foreman name
+        weeklySheet.getRange(rowNum, 4).setValue(mapping.foreman); // Column D - Foreman
+        weeklySheet.getRange(rowNum, 7).setValue('Credited'); // Column G - Status
+        weeklySheet.getRange(rowNum, 8).setValue(mapping.primaryCrew); // Column H - Credited To
+
+        // Append note about the assignment
+        var existingNotes = String(weeklyData[j][8] || '').trim(); // Column I
+        var newNote = 'Assigned via dialog: ' + rowJobNumber + ' → ' + mapping.foreman;
+        if (existingNotes && existingNotes.indexOf('Assigned via dialog') === -1) {
+          newNote = existingNotes + '. ' + newNote;
+        }
+        weeklySheet.getRange(rowNum, 9).setValue(newNote); // Column I - Notes
+
+        totalUpdated++;
+        Logger.log('Updated Weekly Safety Log row ' + rowNum + ': ' + rowJobNumber + ' → Credited to ' + mapping.primaryCrew);
+      }
+    }
+  }
+
+  // === Update Monthly Checklist Log ===
+  var monthlySheet = getMonthlyChecklistLogSheet();
+  if (monthlySheet && monthlySheet.getLastRow() > 1) {
+    var monthlyData = monthlySheet.getDataRange().getValues();
+    // Columns: A=DateReceived, B=ReportDate, C=JobNumber, D=Foreman, E=Vehicle, F=Subject, G=EmailID, H=Status, I=CreditedTo, J=HasIssues, K=Notes
+
+    for (var k = 1; k < monthlyData.length; k++) {
+      var rowJobNumber = String(monthlyData[k][2] || '').split('.')[0].trim(); // Column C
+      var currentStatus = String(monthlyData[k][7] || '').trim(); // Column H
+
+      // Check if this job is in our assignment list and status is not already Credited
+      if (jobMap[rowJobNumber] && (currentStatus === 'Skipped' || currentStatus === 'Unknown Job')) {
+        var mapping = jobMap[rowJobNumber];
+        var rowNum = k + 1;
+
+        // Update: Status = Credited, CreditedTo = primaryCrew, Foreman = foreman name
+        monthlySheet.getRange(rowNum, 4).setValue(mapping.foreman); // Column D - Foreman
+        monthlySheet.getRange(rowNum, 8).setValue('Credited'); // Column H - Status
+        monthlySheet.getRange(rowNum, 9).setValue(mapping.primaryCrew); // Column I - Credited To
+
+        // Append note about the assignment
+        var existingNotes = String(monthlyData[k][10] || '').trim(); // Column K
+        var newNote = 'Assigned via dialog: ' + rowJobNumber + ' → ' + mapping.foreman;
+        if (existingNotes && existingNotes.indexOf('Assigned via dialog') === -1) {
+          newNote = existingNotes + '. ' + newNote;
+        }
+        monthlySheet.getRange(rowNum, 11).setValue(newNote); // Column K - Notes
+
+        totalUpdated++;
+        Logger.log('Updated Monthly Checklist Log row ' + rowNum + ': ' + rowJobNumber + ' → Credited to ' + mapping.primaryCrew);
+      }
+    }
+  }
+
+  return totalUpdated;
+}
+
+/**
+ * Fixes ALL log entries that have incorrect "Credited To" values.
+ * Looks up each foreman's primary crew from Employees sheet and updates the log.
+ * This fixes entries where foreman was assigned but the primary crew lookup failed.
+ *
+ * @returns {Object} Result with counts of fixed entries
+ */
+function fixAllLogEntryCreditedTo() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+
+  // Load employee data
+  var empSheet = ss.getSheetByName('Employees');
+  if (!empSheet) {
+    ui.alert('Error', 'Employees sheet not found', ui.ButtonSet.OK);
+    return { success: false, error: 'Employees sheet not found' };
+  }
+  var employeeData = empSheet.getDataRange().getValues();
+
+  // Get tracked crews
+  var trackedCrews = getActiveCrews();
+  var trackedCrewSet = {};
+  for (var i = 0; i < trackedCrews.length; i++) {
+    trackedCrewSet[trackedCrews[i]] = true;
+  }
+
+  var jhaFixed = 0;
+  var weeklyFixed = 0;
+  var monthlyFixed = 0;
+
+  // === Fix JHA Log ===
+  var jhaSheet = getJHALogSheet();
+  if (jhaSheet && jhaSheet.getLastRow() > 1) {
+    var jhaData = jhaSheet.getDataRange().getValues();
+    // Columns: A=DateReceived, B=DateCreated, C=JobNumber, D=Foreman, E=Subject, F=EmailID, G=Source, H=Status, I=CreditedTo, J=Notes
+
+    for (var i = 1; i < jhaData.length; i++) {
+      var foreman = String(jhaData[i][3] || '').trim(); // Column D - Foreman
+      var currentCreditedTo = String(jhaData[i][8] || '').trim(); // Column I - Credited To
+      var status = String(jhaData[i][7] || '').trim(); // Column H - Status
+
+      if (!foreman || foreman === 'UNKNOWN') continue;
+
+      // Find this foreman's primary crew
+      var primaryCrew = findForemanPrimaryCrew(foreman, employeeData);
+
+      if (primaryCrew && primaryCrew !== currentCreditedTo) {
+        // Only update if the primary crew is a tracked crew
+        if (trackedCrewSet[primaryCrew]) {
+          var rowNum = i + 1;
+          jhaSheet.getRange(rowNum, 9).setValue(primaryCrew); // Column I - Credited To
+
+          // Update status to Credited if it was Unknown Job or Skipped
+          if (status === 'Unknown Job' || status === 'Skipped') {
+            jhaSheet.getRange(rowNum, 8).setValue('Credited'); // Column H - Status
+          }
+
+          // Add note
+          var existingNotes = String(jhaData[i][9] || '').trim(); // Column J
+          if (existingNotes.indexOf('Fixed by fixAllLogEntryCreditedTo') === -1) {
+            var newNote = 'Fixed by fixAllLogEntryCreditedTo: ' + (currentCreditedTo || 'empty') + ' → ' + primaryCrew;
+            jhaSheet.getRange(rowNum, 10).setValue(existingNotes ? existingNotes + '. ' + newNote : newNote);
+          }
+
+          jhaFixed++;
+          Logger.log('Fixed JHA Log row ' + rowNum + ': ' + foreman + ' → ' + primaryCrew + ' (was: ' + currentCreditedTo + ')');
+        }
+      }
+    }
+  }
+
+  // === Fix Weekly Safety Log ===
+  var weeklySheet = getWeeklySafetyLogSheet();
+  if (weeklySheet && weeklySheet.getLastRow() > 1) {
+    var weeklyData = weeklySheet.getDataRange().getValues();
+    // Columns: A=DateReceived, B=WeekOf, C=JobNumber, D=Foreman, E=Subject, F=EmailID, G=Status, H=CreditedTo, I=Notes
+
+    for (var j = 1; j < weeklyData.length; j++) {
+      var foreman = String(weeklyData[j][3] || '').trim(); // Column D - Foreman
+      var currentCreditedTo = String(weeklyData[j][7] || '').trim(); // Column H - Credited To
+      var status = String(weeklyData[j][6] || '').trim(); // Column G - Status
+
+      if (!foreman || foreman === 'UNKNOWN') continue;
+
+      var primaryCrew = findForemanPrimaryCrew(foreman, employeeData);
+
+      if (primaryCrew && primaryCrew !== currentCreditedTo) {
+        if (trackedCrewSet[primaryCrew]) {
+          var rowNum = j + 1;
+          weeklySheet.getRange(rowNum, 8).setValue(primaryCrew); // Column H - Credited To
+
+          if (status === 'Unknown Job' || status === 'Skipped') {
+            weeklySheet.getRange(rowNum, 7).setValue('Credited'); // Column G - Status
+          }
+
+          var existingNotes = String(weeklyData[j][8] || '').trim(); // Column I
+          if (existingNotes.indexOf('Fixed by fixAllLogEntryCreditedTo') === -1) {
+            var newNote = 'Fixed by fixAllLogEntryCreditedTo: ' + (currentCreditedTo || 'empty') + ' → ' + primaryCrew;
+            weeklySheet.getRange(rowNum, 9).setValue(existingNotes ? existingNotes + '. ' + newNote : newNote);
+          }
+
+          weeklyFixed++;
+          Logger.log('Fixed Weekly Safety Log row ' + rowNum + ': ' + foreman + ' → ' + primaryCrew);
+        }
+      }
+    }
+  }
+
+  // === Fix Monthly Checklist Log ===
+  var monthlySheet = getMonthlyChecklistLogSheet();
+  if (monthlySheet && monthlySheet.getLastRow() > 1) {
+    var monthlyData = monthlySheet.getDataRange().getValues();
+    // Columns: A=DateReceived, B=ReportDate, C=JobNumber, D=Foreman, E=Vehicle, F=Subject, G=EmailID, H=Status, I=CreditedTo, J=HasIssues, K=Notes
+
+    for (var k = 1; k < monthlyData.length; k++) {
+      var foreman = String(monthlyData[k][3] || '').trim(); // Column D - Foreman
+      var currentCreditedTo = String(monthlyData[k][8] || '').trim(); // Column I - Credited To
+      var status = String(monthlyData[k][7] || '').trim(); // Column H - Status
+
+      if (!foreman || foreman === 'UNKNOWN') continue;
+
+      var primaryCrew = findForemanPrimaryCrew(foreman, employeeData);
+
+      if (primaryCrew && primaryCrew !== currentCreditedTo) {
+        if (trackedCrewSet[primaryCrew]) {
+          var rowNum = k + 1;
+          monthlySheet.getRange(rowNum, 9).setValue(primaryCrew); // Column I - Credited To
+
+          if (status === 'Unknown Job' || status === 'Skipped') {
+            monthlySheet.getRange(rowNum, 8).setValue('Credited'); // Column H - Status
+          }
+
+          var existingNotes = String(monthlyData[k][10] || '').trim(); // Column K
+          if (existingNotes.indexOf('Fixed by fixAllLogEntryCreditedTo') === -1) {
+            var newNote = 'Fixed by fixAllLogEntryCreditedTo: ' + (currentCreditedTo || 'empty') + ' → ' + primaryCrew;
+            monthlySheet.getRange(rowNum, 11).setValue(existingNotes ? existingNotes + '. ' + newNote : newNote);
+          }
+
+          monthlyFixed++;
+          Logger.log('Fixed Monthly Checklist Log row ' + rowNum + ': ' + foreman + ' → ' + primaryCrew);
+        }
+      }
+    }
+  }
+
+  var totalFixed = jhaFixed + weeklyFixed + monthlyFixed;
+  Logger.log('fixAllLogEntryCreditedTo: Fixed ' + totalFixed + ' entries (JHA: ' + jhaFixed + ', Weekly: ' + weeklyFixed + ', Monthly: ' + monthlyFixed + ')');
+
+  return {
+    success: true,
+    jhaFixed: jhaFixed,
+    weeklyFixed: weeklyFixed,
+    monthlyFixed: monthlyFixed,
+    totalFixed: totalFixed
+  };
+}
+
+/**
+ * Menu function to fix log entries and recalculate compliance
+ */
+function menuFixAndRecalculateCompliance() {
+  var ui = SpreadsheetApp.getUi();
+
+  var response = ui.alert(
+    '🔧 Fix Log Entries & Recalculate',
+    'This will:\n\n' +
+    '1. Fix all log entries with incorrect "Credited To" values\n' +
+    '2. Recalculate compliance for all weeks\n' +
+    '3. Refresh tooltips\n\n' +
+    'This may take a minute. Continue?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (response !== ui.Button.YES) return;
+
+  try {
+    // Step 1: Fix log entries
+    ui.alert('Step 1', 'Fixing log entries...', ui.ButtonSet.OK);
+    var fixResult = fixAllLogEntryCreditedTo();
+
+    // Step 2: Recalculate compliance
+    recalculateAllComplianceFromLogs();
+
+    var msg = '✅ Complete!\n\n' +
+              'Log entries fixed:\n' +
+              '• JHA Log: ' + fixResult.jhaFixed + '\n' +
+              '• Weekly Safety Log: ' + fixResult.weeklyFixed + '\n' +
+              '• Monthly Checklist Log: ' + fixResult.monthlyFixed + '\n\n' +
+              'Compliance has been recalculated and tooltips refreshed.';
+
+    ui.alert('Fix Complete', msg, ui.ButtonSet.OK);
+
+  } catch (e) {
+    Logger.log('menuFixAndRecalculateCompliance error: ' + e.toString());
+    ui.alert('Error', 'Failed: ' + e.toString(), ui.ButtonSet.OK);
   }
 }
 
@@ -10079,6 +11750,481 @@ function getTrackedCrewsForAssignment() {
     Logger.log('getTrackedCrewsForAssignment error: ' + e.toString());
     return { success: false, error: e.toString(), crews: [] };
   }
+}
+
+/**
+ * Quick diagnostic - run from Script Editor and check Logs
+ * Shows exactly what's in the JHA Log and why entries aren't being credited
+ */
+function quickDiagnoseJHALog() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var tz = Session.getScriptTimeZone();
+
+  // Get tracked crews
+  var trackedCrews = getActiveCrews();
+  Logger.log('=== TRACKED CREWS ===');
+  Logger.log('Count: ' + trackedCrews.length);
+  Logger.log('Crews: ' + trackedCrews.join(', '));
+
+  // Get JHA Log
+  var jhaSheet = ss.getSheetByName('JHA Log');
+  if (!jhaSheet) {
+    Logger.log('ERROR: JHA Log sheet not found!');
+    return;
+  }
+
+  var jhaData = jhaSheet.getDataRange().getValues();
+  Logger.log('\n=== JHA LOG ===');
+  Logger.log('Total rows: ' + (jhaData.length - 1));
+
+  // Show first 20 data rows
+  Logger.log('\nFirst 20 rows:');
+  for (var i = 1; i < Math.min(21, jhaData.length); i++) {
+    var dateCreated = jhaData[i][1];
+    var status = String(jhaData[i][7] || '').trim();
+    var creditedTo = String(jhaData[i][8] || '').trim();
+
+    var dateStr = dateCreated ? Utilities.formatDate(new Date(dateCreated), tz, 'MM/dd/yyyy') : 'NO DATE';
+    var isTracked = trackedCrews.indexOf(creditedTo) !== -1;
+    var icon = (status === 'Credited' && isTracked) ? '✅' : '❌';
+
+    Logger.log('Row ' + (i + 1) + ': ' + icon + ' | Date: ' + dateStr + ' | Status: ' + status + ' | CreditedTo: "' + creditedTo + '" | IsTracked: ' + isTracked);
+  }
+
+  // Count by status
+  var statusCounts = {};
+  var creditedToCounts = {};
+  var notTrackedCrews = {};
+
+  for (var j = 1; j < jhaData.length; j++) {
+    var status = String(jhaData[j][7] || '').trim() || 'EMPTY';
+    var creditedTo = String(jhaData[j][8] || '').trim() || 'EMPTY';
+
+    statusCounts[status] = (statusCounts[status] || 0) + 1;
+    creditedToCounts[creditedTo] = (creditedToCounts[creditedTo] || 0) + 1;
+
+    if (status === 'Credited' && creditedTo !== 'EMPTY' && trackedCrews.indexOf(creditedTo) === -1) {
+      notTrackedCrews[creditedTo] = (notTrackedCrews[creditedTo] || 0) + 1;
+    }
+  }
+
+  Logger.log('\n=== STATUS COUNTS ===');
+  for (var s in statusCounts) {
+    Logger.log(s + ': ' + statusCounts[s]);
+  }
+
+  Logger.log('\n=== CREDITED TO COUNTS (top 20) ===');
+  var ctArray = [];
+  for (var ct in creditedToCounts) {
+    ctArray.push({ crew: ct, count: creditedToCounts[ct] });
+  }
+  ctArray.sort(function(a, b) { return b.count - a.count; });
+  for (var k = 0; k < Math.min(20, ctArray.length); k++) {
+    var isTracked = trackedCrews.indexOf(ctArray[k].crew) !== -1;
+    Logger.log(ctArray[k].crew + ': ' + ctArray[k].count + (isTracked ? ' ✅' : ' ❌ NOT TRACKED'));
+  }
+
+  Logger.log('\n=== CREDITED BUT NOT TRACKED CREWS ===');
+  for (var nt in notTrackedCrews) {
+    Logger.log(nt + ': ' + notTrackedCrews[nt] + ' entries');
+  }
+
+  Logger.log('\n=== DIAGNOSIS COMPLETE ===');
+}
+
+/**
+ * Trace compliance calculation for a specific week - shows EXACTLY what's happening
+ */
+function traceComplianceForWeek() {
+  var ui = SpreadsheetApp.getUi();
+  var response = ui.prompt('Enter week start (MM/DD/YYYY):', ui.ButtonSet.OK_CANCEL);
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+
+  var weekStartStr = response.getResponseText().trim();
+  var weekStartDate = new Date(weekStartStr);
+
+  if (isNaN(weekStartDate.getTime())) {
+    ui.alert('Invalid date');
+    return;
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var tz = Session.getScriptTimeZone();
+  var weekBounds = getWeekBoundaries(weekStartDate);
+
+  Logger.log('=== TRACE COMPLIANCE FOR WEEK ===');
+  Logger.log('Input: ' + weekStartStr);
+  Logger.log('Week Start: ' + Utilities.formatDate(weekBounds.weekStart, tz, 'MM/dd/yyyy EEE'));
+  Logger.log('Week End: ' + Utilities.formatDate(weekBounds.weekEnd, tz, 'MM/dd/yyyy EEE'));
+
+  var today = new Date();
+  var isPastDeadline = today > weekBounds.weekEnd;
+  Logger.log('Today: ' + Utilities.formatDate(today, tz, 'MM/dd/yyyy EEE'));
+  Logger.log('isPastDeadline: ' + isPastDeadline);
+
+  // Get tracked crews
+  var trackedCrews = getActiveCrews();
+  Logger.log('\nTracked crews: ' + trackedCrews.join(', '));
+
+  // Read JHA Log and count credits per crew per day
+  var jhaSheet = ss.getSheetByName('JHA Log');
+  var jhaData = jhaSheet.getDataRange().getValues();
+
+  var crewCredits = {}; // crewJob -> [false, false, false, false, false, false, false] (Sun-Sat)
+  for (var c = 0; c < trackedCrews.length; c++) {
+    crewCredits[trackedCrews[c]] = [false, false, false, false, false, false, false];
+  }
+
+  var matchedCount = 0;
+  var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  Logger.log('\n=== JHA ENTRIES WITHIN WEEK ===');
+  for (var i = 1; i < jhaData.length; i++) {
+    var dateCreated = jhaData[i][1];
+    var status = String(jhaData[i][7] || '').trim();
+    var creditedTo = String(jhaData[i][8] || '').trim();
+
+    if (!dateCreated) continue;
+
+    var jhaDate = new Date(dateCreated);
+
+    // Check if within week bounds
+    if (jhaDate < weekBounds.weekStart || jhaDate > weekBounds.weekEnd) continue;
+
+    matchedCount++;
+    var dayOfWeek = jhaDate.getDay();
+    var dayName = dayNames[dayOfWeek];
+    var dateStr = Utilities.formatDate(jhaDate, tz, 'MM/dd/yyyy');
+
+    Logger.log('Row ' + (i + 1) + ': ' + dateStr + ' (' + dayName + ') | Status: ' + status + ' | CreditedTo: ' + creditedTo);
+
+    if (status === 'Credited' && crewCredits[creditedTo]) {
+      crewCredits[creditedTo][dayOfWeek] = true;
+      Logger.log('  → Credited to ' + creditedTo + ' for ' + dayName);
+    }
+  }
+
+  Logger.log('\nTotal JHA entries in week: ' + matchedCount);
+
+  // Show final credit status per crew
+  Logger.log('\n=== FINAL CREDIT STATUS PER CREW ===');
+  for (var crew in crewCredits) {
+    var credits = crewCredits[crew];
+    var line = crew + ': ';
+    for (var d = 0; d < 7; d++) {
+      var status = credits[d] ? '✅' : (isPastDeadline ? '❌' : '⏳');
+      line += dayNames[d] + ':' + status + ' ';
+    }
+    Logger.log(line);
+  }
+
+  ui.alert('Trace complete! Check Apps Script logs (Ctrl+Enter or View > Logs)');
+}
+
+/**
+ * Force update a single week's compliance from logs
+ * This bypasses any caching and directly recalculates and writes to sheet
+ */
+function forceUpdateSingleWeek() {
+  var ui = SpreadsheetApp.getUi();
+  var response = ui.prompt('Force Update Week', 'Enter week start (MM/DD/YYYY):', ui.ButtonSet.OK_CANCEL);
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+
+  var weekStartStr = response.getResponseText().trim();
+  var weekStartDate = new Date(weekStartStr);
+
+  if (isNaN(weekStartDate.getTime())) {
+    ui.alert('Invalid date');
+    return;
+  }
+
+  var tz = Session.getScriptTimeZone();
+
+  Logger.log('=== FORCE UPDATE SINGLE WEEK ===');
+  Logger.log('Input: ' + weekStartStr);
+  Logger.log('Parsed: ' + weekStartDate);
+
+  // Step 1: Calculate compliance
+  Logger.log('\n--- Step 1: calculateComplianceFromLogs ---');
+  var complianceData = calculateComplianceFromLogs(weekStartDate);
+
+  if (!complianceData) {
+    Logger.log('ERROR: calculateComplianceFromLogs returned null!');
+    ui.alert('Error', 'Calculation returned no data', ui.ButtonSet.OK);
+    return;
+  }
+
+  Logger.log('Compliance data received:');
+  Logger.log('  weekStart: ' + complianceData.weekStart);
+  Logger.log('  totalCrews: ' + complianceData.totalCrews);
+  Logger.log('  compliantCount: ' + complianceData.compliantCount);
+  Logger.log('  missingCount: ' + complianceData.missingCount);
+
+  // Log each crew's calculated data
+  Logger.log('\nCrew day statuses:');
+  for (var crewJob in complianceData.crews) {
+    var crew = complianceData.crews[crewJob];
+    var dayStr = 'Sun:' + (crew.days['Sun'] || '?') +
+                 ' Mon:' + (crew.days['Mon'] || '?') +
+                 ' Tue:' + (crew.days['Tue'] || '?') +
+                 ' Wed:' + (crew.days['Wed'] || '?') +
+                 ' Thu:' + (crew.days['Thu'] || '?') +
+                 ' Fri:' + (crew.days['Fri'] || '?') +
+                 ' Sat:' + (crew.days['Sat'] || '?');
+    Logger.log('  ' + crewJob + ': ' + dayStr + ' | Status: ' + crew.status);
+  }
+
+  // Step 2: Write to sheet
+  Logger.log('\n--- Step 2: updateComplianceSheetFromLogs ---');
+  updateComplianceSheetFromLogs(complianceData);
+
+  Logger.log('\n=== FORCE UPDATE COMPLETE ===');
+
+  ui.alert('Force Update Complete',
+    'Week ' + weekStartStr + ' has been recalculated and written to the Safety Compliance sheet.\n\n' +
+    'Check the sheet to verify the data.\n\n' +
+    'See Apps Script logs for detailed information.',
+    ui.ButtonSet.OK);
+}
+
+/**
+ * Gets historical crews that had JHAs during a specific week.
+ * This handles foremen who are no longer active but were active during that week.
+ *
+ * @param {Object} weekBounds - Object with weekStart and weekEnd Date objects
+ * @returns {Array} Array of {crew: string, foreman: string} objects
+ */
+function getHistoricalCrewsForWeek(weekBounds) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var jhaSheet = ss.getSheetByName('JHA Log');
+
+  if (!jhaSheet || jhaSheet.getLastRow() < 2) {
+    return [];
+  }
+
+  var jhaData = jhaSheet.getDataRange().getValues();
+  var crewMap = {}; // crew -> foreman name
+
+  // JHA Log columns: A=DateReceived, B=DateCreated, C=JobNumber, D=Foreman, E=Subject, F=EmailID, G=Source, H=Status, I=CreditedTo, J=Notes
+  for (var i = 1; i < jhaData.length; i++) {
+    var dateCreated = jhaData[i][1]; // Column B
+    var originalJobNumber = String(jhaData[i][2] || '').trim(); // Column C (ORIGINAL job number from email)
+    var foreman = String(jhaData[i][3] || '').trim(); // Column D
+    var status = String(jhaData[i][7] || '').trim(); // Column H
+    var creditedTo = String(jhaData[i][8] || '').trim(); // Column I
+
+    if (!dateCreated) continue;
+
+    var jhaDate = new Date(dateCreated);
+
+    // Check if within week bounds
+    if (jhaDate < weekBounds.weekStart || jhaDate > weekBounds.weekEnd) continue;
+
+    // Track BOTH the original job number AND the credited to job (if different)
+    // This ensures historical foremen appear even if their credits went elsewhere
+
+    // Track original job number (the one the foreman actually submitted under)
+    if (originalJobNumber && /^\d{3}-\d{2}$/.test(originalJobNumber) && !originalJobNumber.startsWith('000-')) {
+      if (!crewMap[originalJobNumber]) {
+        crewMap[originalJobNumber] = foreman || 'UNKNOWN';
+      }
+    }
+
+    // Also track credited to job (if different and credited)
+    if (status === 'Credited' && creditedTo && /^\d{3}-\d{2}$/.test(creditedTo) && !creditedTo.startsWith('000-')) {
+      if (!crewMap[creditedTo]) {
+        crewMap[creditedTo] = foreman || 'UNKNOWN';
+      }
+    }
+  }
+
+  // Also check Weekly Safety Log
+  var weeklySheet = ss.getSheetByName('Weekly Safety Log');
+  if (weeklySheet && weeklySheet.getLastRow() > 1) {
+    var weeklyData = weeklySheet.getDataRange().getValues();
+
+    // Weekly Safety Log columns: A=DateReceived, B=WeekOf, C=JobNumber, D=Foreman, E=Subject, F=EmailID, G=Status, H=CreditedTo, I=Notes
+    for (var w = 1; w < weeklyData.length; w++) {
+      var weekOf = weeklyData[w][1]; // Column B
+      var originalJob = String(weeklyData[w][2] || '').trim(); // Column C
+      var foreman = String(weeklyData[w][3] || '').trim(); // Column D
+      var status = String(weeklyData[w][6] || '').trim(); // Column G
+      var creditedTo = String(weeklyData[w][7] || '').trim(); // Column H
+
+      if (!weekOf) continue;
+
+      var meetingDate = new Date(weekOf);
+
+      // Check if within week bounds (allowing some tolerance)
+      var daysDiff = Math.abs((meetingDate.getTime() - weekBounds.weekStart.getTime()) / (1000 * 60 * 60 * 24));
+      if (daysDiff > 6) continue;
+
+      // Track original job number
+      if (originalJob && /^\d{3}-\d{2}$/.test(originalJob) && !originalJob.startsWith('000-')) {
+        if (!crewMap[originalJob]) {
+          crewMap[originalJob] = foreman || 'UNKNOWN';
+        }
+      }
+
+      // Also track credited to job
+      if (status === 'Credited' && creditedTo && /^\d{3}-\d{2}$/.test(creditedTo) && !creditedTo.startsWith('000-')) {
+        if (!crewMap[creditedTo]) {
+          crewMap[creditedTo] = foreman || 'UNKNOWN';
+        }
+      }
+    }
+  }
+
+  // Convert to array
+  var result = [];
+  for (var crew in crewMap) {
+    result.push({
+      crew: crew,
+      foreman: crewMap[crew]
+    });
+  }
+
+  Logger.log("getHistoricalCrewsForWeek: Found " + result.length + " crews: " + result.map(function(c) { return c.crew; }).join(', '));
+
+  return result;
+}
+
+/**
+ * Diagnose why historical foremen might not be appearing on the compliance sheet.
+ * Menu: Glove Manager → 🛡️ Safety → 🔍 Diagnose Historical Crews
+ */
+function diagnoseHistoricalCrews() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var jhaSheet = ss.getSheetByName('JHA Log');
+
+  if (!jhaSheet || jhaSheet.getLastRow() < 2) {
+    SpreadsheetApp.getUi().alert('No JHA Log found.');
+    return;
+  }
+
+  var jhaData = jhaSheet.getDataRange().getValues();
+
+  // Get current active crews for comparison
+  var activeCrews = getActiveCrews();
+  var activeCrewSet = {};
+  for (var a = 0; a < activeCrews.length; a++) {
+    activeCrewSet[activeCrews[a]] = true;
+  }
+
+  // Track all unique job numbers and their statuses
+  var jobStats = {}; // jobNumber -> {credited: count, skipped: count, unknown: count, foremen: []}
+
+  for (var i = 1; i < jhaData.length; i++) {
+    var jobNumber = String(jhaData[i][2] || '').trim(); // Column C (original job number)
+    var foreman = String(jhaData[i][3] || '').trim(); // Column D
+    var status = String(jhaData[i][7] || '').trim(); // Column H
+    var creditedTo = String(jhaData[i][8] || '').trim(); // Column I
+
+    // Validate format
+    if (!jobNumber.match(/^\d{3}-\d{2}$/)) continue;
+    if (jobNumber.startsWith('000-')) continue;
+
+    if (!jobStats[jobNumber]) {
+      jobStats[jobNumber] = { credited: 0, skipped: 0, unknown: 0, foremen: [], creditedTo: {} };
+    }
+
+    if (status === 'Credited') {
+      jobStats[jobNumber].credited++;
+      if (creditedTo && !jobStats[jobNumber].creditedTo[creditedTo]) {
+        jobStats[jobNumber].creditedTo[creditedTo] = true;
+      }
+    } else if (status === 'Skipped') {
+      jobStats[jobNumber].skipped++;
+    } else {
+      jobStats[jobNumber].unknown++;
+    }
+
+    if (foreman && jobStats[jobNumber].foremen.indexOf(foreman) === -1) {
+      jobStats[jobNumber].foremen.push(foreman);
+    }
+  }
+
+  // Find historical jobs (not in active crews but have JHA entries)
+  var historicalJobs = [];
+  for (var job in jobStats) {
+    var stats = jobStats[job];
+    var isActive = activeCrewSet[job] || false;
+
+    historicalJobs.push({
+      job: job,
+      isActive: isActive,
+      credited: stats.credited,
+      skipped: stats.skipped,
+      unknown: stats.unknown,
+      foremen: stats.foremen.join(', '),
+      creditedTo: Object.keys(stats.creditedTo).join(', ')
+    });
+  }
+
+  // Sort by job number
+  historicalJobs.sort(function(a, b) { return a.job.localeCompare(b.job); });
+
+  // Build report
+  var html = '<html><head><style>';
+  html += 'body { font-family: Arial, sans-serif; padding: 15px; }';
+  html += 'table { border-collapse: collapse; width: 100%; font-size: 12px; }';
+  html += 'th, td { border: 1px solid #ddd; padding: 6px; text-align: left; }';
+  html += 'th { background: #4285f4; color: white; }';
+  html += 'tr:nth-child(even) { background: #f9f9f9; }';
+  html += '.active { background: #e6ffe6 !important; }';
+  html += '.historical { background: #fff3e6 !important; }';
+  html += '.problem { color: red; font-weight: bold; }';
+  html += 'h2 { color: #333; }';
+  html += '.legend { margin: 10px 0; padding: 10px; background: #f0f0f0; border-radius: 5px; }';
+  html += '</style></head><body>';
+
+  html += '<h2>Historical Crews Diagnostic Report</h2>';
+  html += '<div class="legend">';
+  html += '<strong>Legend:</strong> ';
+  html += '<span style="background:#e6ffe6;padding:2px 6px;">Active Crew</span> ';
+  html += '<span style="background:#fff3e6;padding:2px 6px;">Historical Crew</span> ';
+  html += '<span class="problem">Problem (has entries but not showing)</span>';
+  html += '</div>';
+
+  html += '<p><strong>Total unique job numbers in JHA Log:</strong> ' + historicalJobs.length + '</p>';
+  html += '<p><strong>Active crews:</strong> ' + activeCrews.length + '</p>';
+
+  html += '<table>';
+  html += '<tr><th>Job #</th><th>Active?</th><th>Credited</th><th>Skipped</th><th>Unknown</th><th>Foremen</th><th>Credited To</th><th>Issue?</th></tr>';
+
+  for (var h = 0; h < historicalJobs.length; h++) {
+    var row = historicalJobs[h];
+    var rowClass = row.isActive ? 'active' : 'historical';
+    var issue = '';
+
+    // Identify issues
+    if (!row.isActive && row.credited === 0 && (row.skipped > 0 || row.unknown > 0)) {
+      issue = '<span class="problem">Historical crew with no credits - needs re-assignment</span>';
+    } else if (row.creditedTo && row.creditedTo !== row.job && !row.isActive) {
+      issue = '<span class="problem">Credits assigned to different crew (' + row.creditedTo + ')</span>';
+    }
+
+    html += '<tr class="' + rowClass + '">';
+    html += '<td>' + row.job + '</td>';
+    html += '<td>' + (row.isActive ? '✅ Yes' : '❌ No') + '</td>';
+    html += '<td>' + row.credited + '</td>';
+    html += '<td>' + row.skipped + '</td>';
+    html += '<td>' + row.unknown + '</td>';
+    html += '<td>' + row.foremen + '</td>';
+    html += '<td>' + (row.creditedTo || '-') + '</td>';
+    html += '<td>' + issue + '</td>';
+    html += '</tr>';
+  }
+
+  html += '</table>';
+  html += '</body></html>';
+
+  var htmlOutput = HtmlService.createHtmlOutput(html)
+    .setWidth(900)
+    .setHeight(600)
+    .setTitle('Historical Crews Diagnostic');
+
+  SpreadsheetApp.getUi().showModalDialog(htmlOutput, 'Historical Crews Diagnostic');
 }
 
 

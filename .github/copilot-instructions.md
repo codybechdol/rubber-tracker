@@ -2321,4 +2321,63 @@ Notes: [Any notes]
   - Fixed duplicate `var secondaryJobCol = -1;` line in `getActiveCrews()` function
   - **Files Modified:** `src/75-Scheduling.gs`
 
+### February 26, 2026
+- ✅ **Safety Compliance Tooltips/Cell Notes**
+  - **Goal:** Add hover tooltips to Safety Compliance sheet showing detailed date info for each JHA day, Weekly Meeting, and Monthly Checklist
+  - **What Was Added:**
+    - `buildComplianceCellNote()` - Creates formatted tooltip text with day name, date, created date, received date, and icon legend
+    - Enhanced `calculateComplianceFromLogs()` to track `jhaDetails`, `weeklyMeetingDetails`, `monthlyChecklistDetails` from log sheets
+    - `updateComplianceSheetFromLogs()` now sets cell notes via `setNote()` for columns D-L
+    - `showComplianceDashboard()` now includes `title` attributes (HTML tooltips) on table cells
+  - **Tooltip Format:**
+    ```
+    📅 Monday, Feb 17, 2026
+    ✏️ Created: 02/17/2026
+    📥 Received: 02/17/2026 3:45 PM
+    
+    Icon Legend:
+    ✅ = Received on time
+    ✅L = Received late (after deadline)
+    ❌ = Missing/not received
+    ⏳ = Pending (week not over)
+    N/A = Skipped (per config)
+    ```
+  - **Files Modified:** `src/88-SafetyReports.gs` - ~300 lines added
+  - **Documentation:** `docs/SAFETY_COMPLIANCE_TOOLTIPS_FEB26.md`
+- ✅ **Fixed Monthly Checklist Icon (✓02/06 → ✅)**
+  - **Problem:** Monthly Checklist was showing `✓02/06` format instead of standard `✅` icon
+  - **Solution:** Updated `getMonthlyChecklistStatus()` to return `✅` for all weeks after receipt in the same month
+  - The received date is now shown in the tooltip instead of the cell text
+  - **Files Modified:** `src/88-SafetyReports.gs`
+- ✅ **Monthly Checklist Carry-Over Across Weeks**
+  - **Problem:** Monthly Checklist received on 02/06 only showed for week of 02/01, not subsequent weeks in February
+  - **Solution:** `calculateComplianceFromLogs()` now finds the newest checklist received in the same month and shows ✅ for all weeks
+  - **Files Modified:** `src/88-SafetyReports.gs`
+- ✅ **Safety Compliance Config - Current Week Only**
+  - **Problem:** Changing skip day checkboxes in Safety Compliance Config would affect past weeks, potentially corrupting historical data
+  - **Solution:** Config changes now only affect the current week
+    - Added `isCurrentWeek` flag in `calculateComplianceFromLogs()`
+    - Past weeks retain their original N/A vs ⏳/❌ values
+  - **Files Modified:** `src/88-SafetyReports.gs`
+- ✅ **Added Monthly Column to Compliance Dashboard**
+  - **Problem:** Compliance Dashboard was missing Monthly Checklist column
+  - **Solution:** Added Monthly Checklist column (L) to the dashboard table with appropriate tooltips and coloring
+  - Added legend row at bottom of dashboard
+  - Increased dialog size to 800x600
+  - **Files Modified:** `src/88-SafetyReports.gs`
+- ✅ **Fixed Safety Compliance Week Matching Bug**
+  - **Problem:** Weekly Safety Meeting reports were being credited to the wrong week. Example: Chandler Reel's meeting for "Week of 02-09-2026" was being credited to week of 02/15/2026 instead of 02/08/2026
+  - **Root Cause:** The week matching logic used `daysDiff <= 6` which allowed a report from week of 02/09 to match compliance week of 02/15 (exactly 6 days apart)
+  - **Solution:** Changed to proper boundary check: `if (meetingWeekDate < weekBounds.weekStart || meetingWeekDate > weekBounds.weekEnd) continue;`
+  - **Week Logic:**
+    - Compliance week: Sunday to Saturday (e.g., 02/08/2026 - 02/14/2026)
+    - Email subject: "Week of 02-09-2026" (Monday, since crews get report Monday morning)
+    - Credit rule: If "Week of" date falls within compliance week boundaries, credit it
+  - **New Function:** `recalculateAllComplianceFromLogs()` - Recalculates ALL weeks in compliance sheet from log data
+  - **New Menu Item:** Glove Manager → 🛡️ Safety → 🔄 Recalculate ALL Weeks
+  - **Files Modified:**
+    - `src/88-SafetyReports.gs` - Fixed week matching logic, added recalculate all function
+    - `src/Code.gs` - Added menu item
+  - **Documentation:** `docs/FIX_SAFETY_COMPLIANCE_WEEK_MATCHING_FEB26.md`
+
 

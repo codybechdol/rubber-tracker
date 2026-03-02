@@ -355,6 +355,18 @@ function onEditHandler(e) {
       return;  // Handled - don't continue to processEdit
     }
 
+    // SKIP Employees sheet Last Day Reason changes - already handled by onEdit → processEdit
+    // This prevents the double popup issue when both simple and installable triggers fire
+    if (sheetName === 'Employees') {
+      var empHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+      for (var h = 0; h < empHeaders.length; h++) {
+        if (String(empHeaders[h]).toLowerCase().trim() === 'last day reason' && editedCol === (h + 1)) {
+          Logger.log('onEditHandler: Skipping Employees Last Day Reason change (handled by onEdit)');
+          return;  // Already handled by onEdit's processEdit call
+        }
+      }
+    }
+
     // For all other edits, use standard processing
     processEdit(e);
   } catch (err) {

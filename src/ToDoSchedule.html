@@ -1970,8 +1970,16 @@
         html += '<button class="btn ' + notifiedBtnClass + ' btn-sm me-1" onclick="event.stopPropagation(); toggleNotified(' + task._originalIndex + ')" title="' + notifiedTitle + '"><i class="bi ' + notifiedIcon + '"></i></button>';
       }
 
-      // Mark Complete button
-      html += '<button class="btn btn-outline-success btn-sm me-1" onclick="event.stopPropagation(); markComplete(' + task._originalIndex + ')" title="Mark Complete"><i class="bi bi-check-lg"></i></button>';
+      // Mark Complete button - skip for Safety Compliance (uses Resolutions dialog instead)
+      var isSafetyComplianceTask = (task.taskType || '').toLowerCase() === 'missing safety report' ||
+                                    (task.source || '').toLowerCase() === 'safety compliance' ||
+                                    (task.sheetName || '').toLowerCase() === 'safety compliance' ||
+                                    ((task.itemType || '').toLowerCase().indexOf('jha') !== -1 && (task.notes || '').toLowerCase().indexOf('missing') !== -1) ||
+                                    ((task.notes || '').toLowerCase().indexOf('missing jha') !== -1) ||
+                                    ((task.notes || '').toLowerCase().indexOf('missing weekly safety') !== -1);
+      if (!isSafetyComplianceTask) {
+        html += '<button class="btn btn-outline-success btn-sm me-1" onclick="event.stopPropagation(); markComplete(' + task._originalIndex + ')" title="Mark Complete"><i class="bi bi-check-lg"></i></button>';
+      }
 
       // Delete button - available for all tasks now
       var taskKeyAttr = task.taskKey ? ' data-taskkey="' + task.taskKey + '"' : '';
@@ -2488,17 +2496,37 @@
     function deleteTask(index, taskKey) {
       if (!confirm('Are you sure you want to delete this task?')) return;
 
+      var task = allTasks[index];
+
+      // Build taskData object for server-side cleanup
+      var taskData = null;
+      if (task) {
+        taskData = {
+          taskType: task.taskType || task.type || '',
+          source: task.source || task.sheetName || '',
+          taskId: task.taskId || task.taskID || '',
+          jobNumber: task.jobNumber || '',
+          dueDate: task.dueDate || '',
+          employee: task.employee || task.foreman || '',
+          rowIndex: task.rowIndex || 0  // Added Feb 27, 2026: Include rowIndex for Safety Equipment cleanup
+        };
+      }
+
       google.script.run
-        .withSuccessHandler(function() {
+        .withSuccessHandler(function(result) {
           allTasks.splice(index, 1);
           renderTasks(allTasks);
           renderCalendar();
-          showToast('Task deleted');
+          var msg = 'Task deleted';
+          if (result && result.deleted) {
+            msg += ' from ' + result.deleted;
+          }
+          showToast(msg);
         })
         .withFailureHandler(function(error) {
-          showToast('Error: ' + error, 'error');
+          showToast('Error: ' + error.message, 'error');
         })
-        .deleteScheduleTask(index, taskKey);
+        .deleteScheduleTask(index, taskKey, taskData);
     }
 
     function applyFilters() {
@@ -2745,19 +2773,41 @@
       // Check if it's a server-side item
       if (typeof id === 'string' && id.startsWith('server_')) {
         var serverIndex = parseInt(id.replace('server_', ''));
+        var task = allTasks[serverIndex];
+        var task = allTasks[serverIndex];
+
+        // Build taskKey and taskData for proper server-side cleanup
+        var taskKey = '';
+        var taskData = null;
+        if (task) {
+          taskKey = task.taskKey || task.sheetName + '_' + task.rowIndex || '';
+          taskData = {
+            taskType: task.taskType || task.type || '',
+            source: task.source || task.sheetName || '',
+            taskId: task.taskId || task.taskID || '',
+            jobNumber: task.jobNumber || '',
+            dueDate: task.dueDate || '',
+            employee: task.employee || task.foreman || ''
+          };
+        }
+
         // Delete from server
         google.script.run
-          .withSuccessHandler(function() {
+          .withSuccessHandler(function(result) {
             allTasks.splice(serverIndex, 1);
             renderPersonalChecklist();
             renderTasks(allTasks);
             renderCalendar();
-            showToast('Task deleted');
+            var msg = 'Task deleted';
+            if (result && result.deleted) {
+              msg += ' from ' + result.deleted;
+            }
+            showToast(msg);
           })
           .withFailureHandler(function(error) {
-            showToast('Error deleting: ' + error, 'error');
+            showToast('Error deleting: ' + error.message, 'error');
           })
-          .deleteScheduleTask(serverIndex);
+          .deleteScheduleTask(serverIndex, taskKey, taskData);
         return;
       }
 

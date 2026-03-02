@@ -272,7 +272,20 @@ function logNewEmployeeFromImport(empData) {
 function handleLastDayReasonChange(ss, sheet, editedRow, newValue) {
   if (!newValue || newValue === '') return;
 
+  // Get script lock to prevent duplicate execution from multiple triggers
+  var lock = LockService.getScriptLock();
+  var lockAcquired = false;
+
   try {
+    // Try to acquire lock - if already locked, another process is handling this
+    try {
+      lock.waitLock(1000); // Wait up to 1 second
+      lockAcquired = true;
+    } catch (lockErr) {
+      Logger.log('handleLastDayReasonChange: Could not acquire lock for row ' + editedRow + ' - likely duplicate trigger. Skipping.');
+      return;
+    }
+
     var ui = SpreadsheetApp.getUi();
     var empData = sheet.getRange(editedRow, 1, 1, sheet.getLastColumn()).getValues()[0];
     var empHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
@@ -316,7 +329,7 @@ function handleLastDayReasonChange(ss, sheet, editedRow, newValue) {
     var validReasons = ['Quit', 'Fired', 'Layoff', 'Resigned'];
     if (validReasons.indexOf(lastDayReason) === -1) {
       // Not a termination reason - ignore (might be clearing the field or invalid value)
-      return;
+      return; // Lock released in finally block
     }
 
     // Validate that Last Day date is filled in
@@ -331,7 +344,7 @@ function handleLastDayReasonChange(ss, sheet, editedRow, newValue) {
       if (lastDayReasonColIdx !== -1) {
         sheet.getRange(editedRow, lastDayReasonColIdx + 1).setValue('');
       }
-      return;
+      return; // Lock released in finally block
     }
 
     // Show confirmation dialog before proceeding
@@ -353,7 +366,7 @@ function handleLastDayReasonChange(ss, sheet, editedRow, newValue) {
         sheet.getRange(editedRow, lastDayReasonColIdx + 1).setValue('');
       }
       ss.toast('Termination cancelled. Last Day Reason cleared.', '❌ Cancelled', 3);
-      return;
+      return; // Lock released in finally block
     }
 
     // Format Last Day date
@@ -406,19 +419,34 @@ function handleLastDayReasonChange(ss, sheet, editedRow, newValue) {
         sleeveSize                         // Sleeve Size
       ];
       historySheet.appendRow(historyRow);
+      Logger.log('Added terminated employee "' + empName + '" to Employee History');
     } else {
       Logger.log('Skipped duplicate Terminated entry for ' + empName);
     }
 
     // Delete the employee row from Employees sheet
-    Utilities.sleep(500);
-    sheet.deleteRow(editedRow);
-
-    Logger.log('Employee "' + empName + '" terminated and moved to history');
-    ss.toast('Employee "' + empName + '" removed from Employees sheet and added to Employee History.', '✅ Terminated', 5);
+    // First verify the row still contains this employee (in case of race condition)
+    var currentName = sheet.getRange(editedRow, 1).getValue();
+    if (String(currentName).trim() === String(empName).trim()) {
+      sheet.deleteRow(editedRow);
+      Logger.log('Employee "' + empName + '" row deleted from Employees sheet');
+      ss.toast('Employee "' + empName + '" removed from Employees sheet and added to Employee History.', '✅ Terminated', 5);
+    } else {
+      Logger.log('Row ' + editedRow + ' no longer contains "' + empName + '" - row may have already been deleted. Current: "' + currentName + '"');
+      ss.toast('Employee "' + empName + '" added to history. Row may have already been removed.', '⚠️ Check', 5);
+    }
 
   } catch (e) {
     Logger.log('[ERROR] handleLastDayReasonChange: ' + e);
+  } finally {
+    // Always release the lock
+    if (lockAcquired) {
+      try {
+        lock.releaseLock();
+      } catch (releaseErr) {
+        Logger.log('handleLastDayReasonChange: Error releasing lock: ' + releaseErr);
+      }
+    }
   }
 }
 

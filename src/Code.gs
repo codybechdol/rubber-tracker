@@ -1385,124 +1385,476 @@ function updateTrainingTrackingFromToDo(task) {
 /**
  * Deletes a task from the To Do Schedule.
  * Works for Manual Tasks (deletes from sheet) and Task Metadata tasks (marks as deleted or removes).
+ * For Safety Compliance tasks, also updates the Safety Compliance sheet and removes from log sheets.
  *
  * @param {number} taskIndex - Index of task in array
  * @param {string} taskKey - Optional: Task key in format "SourceSheet_RowIndex" for direct deletion
+ * @param {Object} taskData - Optional: Full task data object for Safety Compliance cleanup
  */
-function deleteScheduleTask(taskIndex, taskKey) {
-  Logger.log('deleteScheduleTask: index=' + taskIndex + ', key=' + taskKey);
+function deleteScheduleTask(taskIndex, taskKey, taskData) {
+  Logger.log('deleteScheduleTask: index=' + taskIndex + ', key=' + taskKey + ', taskData=' + JSON.stringify(taskData));
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var deletedFrom = [];
+  var taskMetaSheet = ss.getSheetByName('Task Metadata');
+  var taskInfo = null;
 
-  // If taskKey is provided, use it for direct Task Metadata deletion
-  if (taskKey) {
-    var taskMetaSheet = ss.getSheetByName('Task Metadata');
-    if (taskMetaSheet) {
-      var data = taskMetaSheet.getDataRange().getValues();
-      var headers = data[0];
-      var taskKeyCol = -1;
+  // First, find the task info from Task Metadata if we have a key
+  // taskKey format is usually "SourceSheet_SourceRow" (e.g., "Glove Swaps_15" or "Safety Compliance_013-26")
+  // For Safety Compliance, taskKey can also be "SafetyCompliance_XXX-XX_MM-DD-YYYY"
+  if (taskKey && taskMetaSheet) {
+    var data = taskMetaSheet.getDataRange().getValues();
+    var headers = data[0];
+    var colMap = {};
+    for (var h = 0; h < headers.length; h++) {
+      colMap[String(headers[h]).toLowerCase().replace(/\s+/g, '')] = h;
+    }
 
-      for (var h = 0; h < headers.length; h++) {
-        if (String(headers[h]).toLowerCase() === 'taskkey') {
-          taskKeyCol = h;
-          break;
-        }
+    var taskIdCol = colMap['taskid'] !== undefined ? colMap['taskid'] : 0;  // Column A
+    var sourceSheetCol = colMap['sourcesheet'] !== undefined ? colMap['sourcesheet'] : 1;  // Column B
+    var sourceRowCol = colMap['sourcerow'] !== undefined ? colMap['sourcerow'] : 2;  // Column C
+    var taskTypeCol = colMap['tasktype'] !== undefined ? colMap['tasktype'] : 4;
+    var jobCol = colMap['jobnumber'] !== undefined ? colMap['jobnumber'] : -1;
+    var dueDateCol = colMap['duedate'] !== undefined ? colMap['duedate'] : -1;
+    var employeeCol = colMap['employee'] !== undefined ? colMap['employee'] : 3;
+
+    // Try to find the task by matching SourceSheet_SourceRow key
+    for (var i = data.length - 1; i >= 1; i--) {
+      var rowSourceSheet = String(data[i][sourceSheetCol] || '');
+      var rowSourceRow = String(data[i][sourceRowCol] || '');
+      var rowTaskId = String(data[i][taskIdCol] || '');
+      var rowKey = rowSourceSheet + '_' + rowSourceRow;
+
+      // Match by: SourceSheet_SourceRow key, or TaskID starts with the taskKey
+      if (rowKey === taskKey || rowTaskId === taskKey || rowTaskId.indexOf(taskKey) === 0) {
+        taskInfo = {
+          rowIndex: i + 1,
+          taskKey: taskKey,
+          taskType: taskTypeCol !== -1 ? data[i][taskTypeCol] : '',
+          source: rowSourceSheet,
+          sourceRow: rowSourceRow,
+          taskId: rowTaskId,
+          jobNumber: jobCol !== -1 ? String(data[i][jobCol] || '') : '',
+          dueDate: dueDateCol !== -1 ? data[i][dueDateCol] : '',
+          employee: employeeCol !== -1 ? String(data[i][employeeCol] || '') : ''
+        };
+        Logger.log('Found task in Task Metadata at row ' + (i + 1) + ': ' + JSON.stringify(taskInfo));
+        break;
       }
+    }
+  }
 
-      if (taskKeyCol !== -1) {
+  // Merge with provided taskData
+  if (taskData) {
+    taskInfo = taskInfo || {};
+    taskInfo.taskType = taskInfo.taskType || taskData.taskType || taskData.type || '';
+    taskInfo.source = taskInfo.source || taskData.source || taskData.sheetName || '';
+    taskInfo.taskId = taskInfo.taskId || taskData.taskId || taskData.taskID || '';
+    taskInfo.jobNumber = taskInfo.jobNumber || taskData.jobNumber || '';
+    taskInfo.dueDate = taskInfo.dueDate || taskData.dueDate || '';
+    taskInfo.employee = taskData.employee || taskData.foreman || '';
+  }
+
+  // Check if this is a Safety Compliance task
+  var isSafetyCompliance = (taskInfo && (
+    taskInfo.taskType === 'Missing Safety Report' ||
+    taskInfo.source === 'Safety Compliance' ||
+    (taskInfo.taskId && taskInfo.taskId.indexOf('SafetyCompliance_') === 0)
+  )) || (taskKey && taskKey.indexOf('SafetyCompliance_') === 0) ||
+       (taskData && (taskData.taskType === 'Missing Safety Report' || taskData.source === 'Safety Compliance'));
+
+  Logger.log('isSafetyCompliance: ' + isSafetyCompliance);
+
+  // If Safety Compliance task, handle special cleanup
+  if (isSafetyCompliance) {
+    var cleanupResult = cleanupSafetyComplianceTaskData(taskInfo, taskKey, ss);
+    if (cleanupResult.deletedFrom) {
+      deletedFrom = deletedFrom.concat(cleanupResult.deletedFrom);
+    }
+    Logger.log('Safety Compliance cleanup result: ' + JSON.stringify(cleanupResult));
+  }
+
+  // Check if this is a Safety Equipment task - Updated Feb 27, 2026 to work even when taskInfo is null
+  // Safety Equipment tasks come from the "Safety Reports" sheet with equipment issues
+  var isSafetyEquipment = (taskInfo && (
+    taskInfo.taskType === 'Safety Equipment' ||
+    taskInfo.source === 'Safety Reports'
+  )) || (taskKey && taskKey.indexOf('Safety Reports_') === 0) ||
+       (taskData && (taskData.taskType === 'Safety Equipment' || taskData.source === 'Safety Reports'));
+
+  Logger.log('isSafetyEquipment: ' + isSafetyEquipment);
+  Logger.log('isSafetyEquipment check: taskInfo=' + (taskInfo ? 'exists' : 'null') +
+             ', taskKey=' + taskKey +
+             ', taskData.source=' + (taskData ? taskData.source : 'null'));
+
+  // If Safety Equipment task, handle special cleanup (update source sheet status to "Resolved")
+  if (isSafetyEquipment) {
+    // Build taskInfo from taskData/taskKey if not already available
+    var cleanupTaskInfo = taskInfo || {};
+    if (taskData) {
+      cleanupTaskInfo.taskType = cleanupTaskInfo.taskType || taskData.taskType || 'Safety Equipment';
+      cleanupTaskInfo.source = cleanupTaskInfo.source || taskData.source || 'Safety Reports';
+      cleanupTaskInfo.sourceRow = cleanupTaskInfo.sourceRow || taskData.rowIndex || null;
+    }
+    // Parse sourceRow from taskKey if not in taskInfo (format: "Safety Reports_2")
+    if (!cleanupTaskInfo.sourceRow && taskKey && taskKey.indexOf('Safety Reports_') === 0) {
+      var parts = taskKey.split('_');
+      if (parts.length >= 2) {
+        cleanupTaskInfo.sourceRow = parseInt(parts[parts.length - 1], 10);
+      }
+    }
+
+    var equipCleanupResult = cleanupSafetyEquipmentTaskData(cleanupTaskInfo, taskKey, ss);
+    if (equipCleanupResult.deletedFrom) {
+      deletedFrom = deletedFrom.concat(equipCleanupResult.deletedFrom);
+    }
+    Logger.log('Safety Equipment cleanup result: ' + JSON.stringify(equipCleanupResult));
+  }
+
+  // Delete from Task Metadata - use the taskInfo we already found
+  if (taskInfo && taskInfo.rowIndex && taskMetaSheet) {
+    taskMetaSheet.deleteRow(taskInfo.rowIndex);
+    Logger.log('Deleted task from Task Metadata at row ' + taskInfo.rowIndex + ': ' + taskKey);
+    deletedFrom.push('Task Metadata');
+  } else if (taskKey && taskMetaSheet) {
+    // Fallback: try to find by key again
+    var data = taskMetaSheet.getDataRange().getValues();
+    var headers = data[0];
+    var colMap = {};
+    for (var h = 0; h < headers.length; h++) {
+      colMap[String(headers[h]).toLowerCase().replace(/\s+/g, '')] = h;
+    }
+    var sourceSheetCol = colMap['sourcesheet'] !== undefined ? colMap['sourcesheet'] : 1;
+    var sourceRowCol = colMap['sourcerow'] !== undefined ? colMap['sourcerow'] : 2;
+    var taskIdCol = colMap['taskid'] !== undefined ? colMap['taskid'] : 0;
+
+    for (var i = data.length - 1; i >= 1; i--) {
+      var rowSourceSheet = String(data[i][sourceSheetCol] || '');
+      var rowSourceRow = String(data[i][sourceRowCol] || '');
+      var rowTaskId = String(data[i][taskIdCol] || '');
+      var rowKey = rowSourceSheet + '_' + rowSourceRow;
+
+      if (rowKey === taskKey || rowTaskId === taskKey || rowTaskId.indexOf(taskKey) === 0) {
+        taskMetaSheet.deleteRow(i + 1);
+        Logger.log('Deleted task from Task Metadata (fallback) at row ' + (i + 1) + ': ' + taskKey);
+        deletedFrom.push('Task Metadata');
+        break;
+      }
+    }
+  }
+
+  // If we have a task index, try to delete using that
+  if (taskIndex !== undefined && taskIndex >= 0 && !taskKey) {
+    var tasks = getScheduleTasks();
+    if (taskIndex < tasks.length) {
+      var task = tasks[taskIndex];
+      Logger.log('Task to delete by index: source=' + task.source + ', rowIndex=' + task.rowIndex);
+
+      // Handle deletion based on source
+      if (task.source === 'Manual Tasks') {
+        var manualSheet = ss.getSheetByName('Manual Tasks');
+        if (manualSheet && task.rowIndex) {
+          manualSheet.deleteRow(task.rowIndex);
+          Logger.log('Deleted from Manual Tasks sheet');
+          deletedFrom.push('Manual Tasks');
+        }
+      } else if (task.taskKey && taskMetaSheet) {
+        // Delete from Task Metadata by taskKey (SourceSheet_SourceRow format)
+        var data = taskMetaSheet.getDataRange().getValues();
+        var headers = data[0];
+        var colMap = {};
+        for (var h = 0; h < headers.length; h++) {
+          colMap[String(headers[h]).toLowerCase().replace(/\s+/g, '')] = h;
+        }
+        var sourceSheetCol = colMap['sourcesheet'] !== undefined ? colMap['sourcesheet'] : 1;
+        var sourceRowCol = colMap['sourcerow'] !== undefined ? colMap['sourcerow'] : 2;
+        var taskIdCol = colMap['taskid'] !== undefined ? colMap['taskid'] : 0;
+
         for (var i = data.length - 1; i >= 1; i--) {
-          if (data[i][taskKeyCol] === taskKey) {
+          var rowSourceSheet = String(data[i][sourceSheetCol] || '');
+          var rowSourceRow = String(data[i][sourceRowCol] || '');
+          var rowTaskId = String(data[i][taskIdCol] || '');
+          var rowKey = rowSourceSheet + '_' + rowSourceRow;
+
+          if (rowKey === task.taskKey || rowTaskId === task.taskKey || rowTaskId.indexOf(task.taskKey) === 0) {
             taskMetaSheet.deleteRow(i + 1);
-            Logger.log('Deleted task from Task Metadata: ' + taskKey);
-            return { success: true, deleted: 'Task Metadata', key: taskKey };
+            Logger.log('Deleted from Task Metadata by taskKey: ' + task.taskKey);
+            deletedFrom.push('Task Metadata');
+            break;
           }
         }
       }
     }
   }
 
-  var tasks = getScheduleTasks();
-  if (taskIndex < 0 || taskIndex >= tasks.length) {
-    throw new Error('Invalid task index');
+  if (deletedFrom.length === 0) {
+    throw new Error('Could not find task to delete. Please try refreshing the page.');
   }
 
-  var task = tasks[taskIndex];
-  Logger.log('Task to delete: source=' + task.source + ', rowIndex=' + task.rowIndex);
+  return { success: true, deleted: deletedFrom.join(', '), key: taskKey };
+}
 
-  // Handle deletion based on source
-  if (task.source === 'Manual Tasks') {
-    var manualSheet = ss.getSheetByName('Manual Tasks');
-    if (manualSheet && task.rowIndex) {
-      manualSheet.deleteRow(task.rowIndex);
-      Logger.log('Deleted from Manual Tasks sheet');
-      return { success: true, deleted: 'Manual Tasks' };
+/**
+ * Cleans up Safety Compliance related data when deleting a task.
+ * - Updates Safety Compliance sheet row to "Resolved" status (or removes the row if user is deleting task)
+ * - Removes related entries from log sheets (JHA Log, Weekly Safety Log, Monthly Checklist Log)
+ *
+ * @param {Object} taskInfo - Task information
+ * @param {string} taskKey - Task key
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @return {Object} Result with deletedFrom array
+ */
+function cleanupSafetyComplianceTaskData(taskInfo, taskKey, ss) {
+  var deletedFrom = [];
+  Logger.log('cleanupSafetyComplianceTaskData: taskInfo=' + JSON.stringify(taskInfo) + ', taskKey=' + taskKey);
+
+  // Extract job number and week date from taskKey or taskInfo
+  // TaskKey format: SafetyCompliance_XXX-XX_MM-DD-YYYY
+  var jobNumber = '';
+  var weekDate = '';
+
+  if (taskKey && taskKey.indexOf('SafetyCompliance_') === 0) {
+    var parts = taskKey.split('_');
+    if (parts.length >= 3) {
+      jobNumber = parts[1]; // e.g., "013-26"
+      weekDate = parts[2];  // e.g., "02-15-2026"
     }
-  } else if (task.source === 'Task Metadata' || task.taskKey) {
-    // Delete from Task Metadata sheet
-    var taskMetaSheet = ss.getSheetByName('Task Metadata');
-    if (taskMetaSheet) {
-      var data = taskMetaSheet.getDataRange().getValues();
-      var headers = data[0];
-      var taskKeyCol = -1;
+  }
 
-      for (var h = 0; h < headers.length; h++) {
-        if (String(headers[h]).toLowerCase() === 'taskkey') {
-          taskKeyCol = h;
-          break;
+  if (!jobNumber && taskInfo) {
+    jobNumber = taskInfo.jobNumber || taskInfo.sourceRow || '';
+  }
+
+  // Also try to extract from sourceRow for Safety Compliance tasks (sourceRow is the job number)
+  if (!jobNumber && taskInfo && taskInfo.source === 'Safety Compliance') {
+    jobNumber = taskInfo.sourceRow || '';
+  }
+
+  Logger.log('cleanupSafetyComplianceTaskData: jobNumber=' + jobNumber + ', weekDate=' + weekDate);
+
+  // Update Safety Compliance sheet - mark row as "Resolved"
+  var complianceSheet = ss.getSheetByName('Safety Compliance');
+  if (complianceSheet && jobNumber) {
+    var compData = complianceSheet.getDataRange().getValues();
+    var compHeaders = compData[0];
+
+    // Find column indices
+    var weekCol = -1, jobCol = -1, statusCol = -1;
+    for (var c = 0; c < compHeaders.length; c++) {
+      var header = String(compHeaders[c]).toLowerCase().replace(/\s+/g, '');
+      if (header === 'weekstart') weekCol = c;
+      else if (header === 'jobnumber') jobCol = c;
+      else if (header === 'status') statusCol = c;
+    }
+
+    if (weekCol !== -1 && jobCol !== -1 && statusCol !== -1) {
+      // Parse weekDate to compare (if provided)
+      var targetWeekStr = '';
+      if (weekDate) {
+        var weekParts = weekDate.split('-');
+        if (weekParts.length === 3) {
+          // Convert MM-DD-YYYY to comparable format
+          var targetWeek = new Date(parseInt(weekParts[2]), parseInt(weekParts[0]) - 1, parseInt(weekParts[1]));
+          targetWeekStr = targetWeek.toDateString();
         }
       }
 
-      // Try to find by taskKey first
-      var keyToFind = task.taskKey || (task.source + '_' + task.rowIndex);
-      if (taskKeyCol !== -1) {
-        for (var i = data.length - 1; i >= 1; i--) {
-          if (data[i][taskKeyCol] === keyToFind) {
-            taskMetaSheet.deleteRow(i + 1);
-            Logger.log('Deleted from Task Metadata by key: ' + keyToFind);
-            return { success: true, deleted: 'Task Metadata', key: keyToFind };
-          }
+      for (var row = compData.length - 1; row >= 1; row--) {
+        var rowJob = String(compData[row][jobCol] || '');
+        var rowWeek = compData[row][weekCol];
+        var rowWeekStr = rowWeek instanceof Date ? rowWeek.toDateString() : String(rowWeek);
+
+        // Match by job number (and week date if provided)
+        var matches = (rowJob === jobNumber);
+        if (matches && weekDate) {
+          matches = (rowWeekStr === targetWeekStr || String(rowWeek) === weekDate);
+        }
+
+        if (matches) {
+          // Mark as Resolved
+          complianceSheet.getRange(row + 1, statusCol + 1).setValue('Resolved');
+          Logger.log('Updated Safety Compliance row ' + (row + 1) + ' to Resolved');
+          deletedFrom.push('Safety Compliance (marked Resolved)');
+          if (weekDate) break; // Only update specific week if weekDate was provided
         }
       }
+    }
+  }
 
-      // Fallback: delete by row index if we have it
-      if (task.rowIndex && task.rowIndex > 1) {
-        taskMetaSheet.deleteRow(task.rowIndex);
-        Logger.log('Deleted from Task Metadata by rowIndex: ' + task.rowIndex);
-        return { success: true, deleted: 'Task Metadata', rowIndex: task.rowIndex };
+  // Also remove from log sheets if we have enough info to identify the entries
+  if (jobNumber && weekDate) {
+    // Convert weekDate to Date object for comparison
+    var weekParts = weekDate.split('-');
+    var weekStart = null;
+    var weekEnd = null;
+    if (weekParts.length === 3) {
+      weekStart = new Date(parseInt(weekParts[2]), parseInt(weekParts[0]) - 1, parseInt(weekParts[1]));
+      weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+    }
+
+    // Remove from JHA Log
+    var jhaLogSheet = ss.getSheetByName('JHA Log');
+    if (jhaLogSheet && weekStart) {
+      var deleted = deleteFromLogSheet(jhaLogSheet, jobNumber, weekStart, weekEnd);
+      if (deleted > 0) {
+        deletedFrom.push('JHA Log (' + deleted + ' entries)');
       }
     }
-    throw new Error('Could not find task in Task Metadata to delete');
+
+    // Remove from Weekly Safety Log
+    var weeklyLogSheet = ss.getSheetByName('Weekly Safety Log');
+    if (weeklyLogSheet && weekStart) {
+      var deleted = deleteFromLogSheet(weeklyLogSheet, jobNumber, weekStart, weekEnd);
+      if (deleted > 0) {
+        deletedFrom.push('Weekly Safety Log (' + deleted + ' entries)');
+      }
+    }
+  }
+
+  return { deletedFrom: deletedFrom };
+}
+
+/**
+ * Cleans up Safety Equipment related data when deleting a task.
+ * Updates the Safety Reports / Safety Equipment Needs sheet to change status from "Needs Attention" to "Resolved".
+ *
+ * @param {Object} taskInfo - Task information
+ * @param {string} taskKey - Task key (format: "Safety Reports_RowNumber")
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @return {Object} Result with deletedFrom array
+ */
+function cleanupSafetyEquipmentTaskData(taskInfo, taskKey, ss) {
+  var deletedFrom = [];
+  Logger.log('cleanupSafetyEquipmentTaskData: taskInfo=' + JSON.stringify(taskInfo) + ', taskKey=' + taskKey);
+
+  // Get the row number from taskKey or taskInfo
+  var sourceRow = null;
+
+  // Try to get row from taskInfo first
+  if (taskInfo && taskInfo.sourceRow) {
+    sourceRow = parseInt(taskInfo.sourceRow, 10);
+  }
+
+  // If not found, try to parse from taskKey (format: "Safety Reports_RowNumber")
+  if (!sourceRow && taskKey) {
+    var parts = taskKey.split('_');
+    if (parts.length >= 2) {
+      var possibleRow = parseInt(parts[parts.length - 1], 10);
+      if (!isNaN(possibleRow) && possibleRow > 0) {
+        sourceRow = possibleRow;
+      }
+    }
+  }
+
+  Logger.log('cleanupSafetyEquipmentTaskData: sourceRow=' + sourceRow);
+
+  if (!sourceRow || isNaN(sourceRow)) {
+    Logger.log('cleanupSafetyEquipmentTaskData: Could not determine source row');
+    return { deletedFrom: deletedFrom };
+  }
+
+  // Try to find the Safety Reports / Safety Equipment Needs sheet
+  var safetySheet = ss.getSheetByName('Safety Equipment Needs') || ss.getSheetByName('Safety Reports');
+
+  if (!safetySheet) {
+    Logger.log('cleanupSafetyEquipmentTaskData: Safety Reports/Equipment Needs sheet not found');
+    return { deletedFrom: deletedFrom };
+  }
+
+  // Find the status column
+  var headers = safetySheet.getRange(1, 1, 1, safetySheet.getLastColumn()).getValues()[0];
+  var statusCol = -1;
+
+  for (var c = 0; c < headers.length; c++) {
+    var header = String(headers[c]).toLowerCase().trim();
+    if (header === 'status') {
+      statusCol = c + 1; // 1-based for getRange
+      break;
+    }
+  }
+
+  if (statusCol === -1) {
+    Logger.log('cleanupSafetyEquipmentTaskData: Status column not found');
+    return { deletedFrom: deletedFrom };
+  }
+
+  // Check if the row exists and update status
+  if (sourceRow <= safetySheet.getLastRow()) {
+    var currentStatus = safetySheet.getRange(sourceRow, statusCol).getValue();
+    Logger.log('cleanupSafetyEquipmentTaskData: Current status at row ' + sourceRow + ': ' + currentStatus);
+
+    // Only update if it's currently "Needs Attention"
+    if (String(currentStatus).trim() === 'Needs Attention') {
+      safetySheet.getRange(sourceRow, statusCol).setValue('Resolved');
+      Logger.log('cleanupSafetyEquipmentTaskData: Updated status to "Resolved" at row ' + sourceRow);
+      deletedFrom.push('Safety Reports (status updated)');
+    } else {
+      Logger.log('cleanupSafetyEquipmentTaskData: Status is not "Needs Attention", no update needed');
+    }
   } else {
-    // For other sources (Glove Swaps, Sleeve Swaps, etc.), just remove from Task Metadata if present
-    var taskMetaSheet = ss.getSheetByName('Task Metadata');
-    if (taskMetaSheet && task.taskKey) {
-      var data = taskMetaSheet.getDataRange().getValues();
-      var headers = data[0];
-      var taskKeyCol = -1;
-
-      for (var h = 0; h < headers.length; h++) {
-        if (String(headers[h]).toLowerCase() === 'taskkey') {
-          taskKeyCol = h;
-          break;
-        }
-      }
-
-      if (taskKeyCol !== -1) {
-        for (var i = data.length - 1; i >= 1; i--) {
-          if (data[i][taskKeyCol] === task.taskKey) {
-            taskMetaSheet.deleteRow(i + 1);
-            Logger.log('Deleted from Task Metadata: ' + task.taskKey);
-            return { success: true, deleted: 'Task Metadata', key: task.taskKey };
-          }
-        }
-      }
-    }
-
-    // If we can't delete from Task Metadata, inform the user
-    throw new Error('Cannot delete this task type (' + task.source + '). Please delete it from the source sheet or Task Metadata directly.');
+    Logger.log('cleanupSafetyEquipmentTaskData: Row ' + sourceRow + ' exceeds sheet last row ' + safetySheet.getLastRow());
   }
 
-  return { success: true };
+  return { deletedFrom: deletedFrom };
+}
+
+/**
+ * Helper function to delete entries from a log sheet by job number and date range.
+ *
+ * @param {Sheet} sheet - The log sheet
+ * @param {string} jobNumber - Job number to match
+ * @param {Date} weekStart - Start of the week
+ * @param {Date} weekEnd - End of the week
+ * @return {number} Number of rows deleted
+ */
+function deleteFromLogSheet(sheet, jobNumber, weekStart, weekEnd) {
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return 0;
+
+  var headers = data[0];
+  var jobCol = -1, dateCol = -1;
+
+  // Find job and date columns
+  for (var c = 0; c < headers.length; c++) {
+    var header = String(headers[c]).toLowerCase().replace(/\s+/g, '');
+    if (header === 'jobnumber' || header === 'job') jobCol = c;
+    else if (header === 'datecreated' || header === 'reportdate' || header === 'date') dateCol = c;
+  }
+
+  if (jobCol === -1) {
+    Logger.log('deleteFromLogSheet: Could not find job column in ' + sheet.getName());
+    return 0;
+  }
+
+  var deletedCount = 0;
+  // Iterate backwards to safely delete rows
+  for (var row = data.length - 1; row >= 1; row--) {
+    var rowJob = String(data[row][jobCol] || '');
+
+    // Check if job matches (allow partial match for job number with .X suffix)
+    var jobMatches = (rowJob === jobNumber || rowJob.indexOf(jobNumber + '.') === 0 || rowJob.indexOf(jobNumber) === 0);
+
+    if (jobMatches) {
+      var shouldDelete = true;
+
+      // If we have a date column, also check that the date falls within the week
+      if (dateCol !== -1 && weekStart && weekEnd) {
+        var rowDate = data[row][dateCol];
+        if (rowDate instanceof Date) {
+          shouldDelete = (rowDate >= weekStart && rowDate <= weekEnd);
+        }
+      }
+
+      if (shouldDelete) {
+        sheet.deleteRow(row + 1);
+        deletedCount++;
+        Logger.log('Deleted row ' + (row + 1) + ' from ' + sheet.getName() + ' for job ' + rowJob);
+      }
+    }
+  }
+
+  return deletedCount;
 }
 
 /**
@@ -4551,6 +4903,7 @@ function onOpen() {
       .addItem('🧹 Remove Duplicate Task Metadata', 'removeDuplicateTaskMetadata')
       .addItem('🧽 Cleanup Orphaned Metadata', 'cleanupOrphanedTaskMetadata')
       .addItem('🧹 Cleanup Incorrect Safety Tasks', 'cleanupIncorrectSafetyReportTasks')
+      .addItem('🗺️ Fix Training Task Locations', 'fixTrainingTaskLocations')
       .addSeparator()
       .addItem('📍 Setup Locations Sheet', 'setupLocationsSheet')
       .addItem('📍 View Locations', 'openLocationsSheet')
@@ -4580,6 +4933,7 @@ function onOpen() {
       .addItem('📥 Process Safety Emails', 'showProcessSafetyEmailsDialog')
       .addItem('📊 View Equipment Needs', 'openSafetyReports')
       .addItem('📈 View Compliance History', 'openComplianceSheet')
+      .addItem('💬 Refresh Compliance Tooltips', 'menuRefreshComplianceTooltips')
       .addItem('⚙️ Configure Crew Exclusions', 'openComplianceConfig')
       .addItem('👥 Populate Crew Config', 'populateComplianceConfig')
       .addItem('🔧 Add Monthly Checklist Column', 'migrateComplianceConfigAddMonthlyChecklist')
@@ -4591,6 +4945,8 @@ function onOpen() {
       .addItem('📄 View Weekly Safety Log', 'openWeeklySafetyLogSheet')
       .addItem('📄 View Monthly Checklist Log', 'openMonthlyChecklistLogSheet')
       .addItem('🔄 Recalculate Compliance', 'recalculateComplianceFromLogs')
+      .addItem('🔄 Recalculate ALL Weeks', 'recalculateAllComplianceFromLogs')
+      .addItem('🔧 Fix Log Entries & Recalculate', 'menuFixAndRecalculateCompliance')
       .addSeparator()
       // === TASKS ===
       .addItem('📋 Create Tasks from Issues', 'createTasksFromSafetyIssues')
@@ -4603,15 +4959,27 @@ function onOpen() {
       .addItem('🔍 Diagnose Compliance', 'diagnoseSafetyCompliance')
       .addItem('📊 Trace Compliance Calculation', 'traceComplianceCalculation')
       .addItem('🧪 Test Compliance Update', 'testComplianceUpdate')
+      .addItem('🧪 Test Week Calculation', 'testComplianceCalculationForWeek')
+      .addItem('📋 Quick JHA Log Diagnostic', 'quickDiagnoseJHALog')
+      .addItem('🔬 Trace Week Compliance', 'traceComplianceForWeek')
+      .addItem('⚡ Force Update Single Week', 'forceUpdateSingleWeek')
       .addItem('🔬 Test Email Parsing', 'testEmailParsing')
       .addItem('🔎 Diagnose Specific Crew', 'diagnoseCrewCompliance')
+      .addItem('🔎 Diagnose Historical Crews', 'diagnoseHistoricalCrews')
       .addSeparator()
       // === MIGRATION & CLEANUP ===
       .addItem('🔄 Migrate Safety Reports Sheet', 'migrateSafetyReportsToEquipmentNeeds')
       .addItem('🧹 Cleanup Equipment Sheet', 'cleanupSafetyReportsSheet')
       .addItem('🧹 Remove Duplicate Rows', 'menuCleanupDuplicateComplianceRows')
       .addItem('🧹 Clear Saved Job Corrections', 'clearJobNumberCorrections')
-      .addItem('🛠️ Fix Shifted Safety Tasks', 'fixShiftedSafetyComplianceTasks'))
+      .addItem('🛠️ Fix Shifted Safety Tasks', 'fixShiftedSafetyComplianceTasks')
+      .addItem('🔧 Fix Skipped Log Entries', 'fixSkippedLogEntriesFromMappings')
+      .addItem('➕ Add Job Mappings Manually', 'addMissingJobMappings')
+      .addItem('🗑️ Clear & Reprocess All Emails', 'clearAndReprocessSafetyEmails')
+      .addSeparator()
+      // === RESET & STATUS ===
+      .addItem('📋 Processing Status', 'showSafetyProcessingStatus')
+      .addItem('🔄 Reset Last Processed Date', 'clearLastSafetyProcessedDate'))
     .addSubMenu(ui.createMenu('🔍 Debug')
       .addItem('Test Edit Trigger', 'testEditTrigger')
       .addItem('Recalc Current Row', 'recalcCurrentRow')
@@ -7296,6 +7664,15 @@ function generateTaskMetadata() {
 
   Logger.log('generateTaskMetadata: ' + newRecords.length + ' new records, ' + updatedCount + ' existing records to update');
 
+  // Clear data validation on Status column (O = column 15) to prevent validation errors during write
+  // This is needed because old rows may have legacy status values that fail new validation rules
+  var lastRow = metadataSheet.getLastRow();
+  if (lastRow > 1) {
+    var statusColumnRange = metadataSheet.getRange(2, 15, lastRow - 1, 1);
+    statusColumnRange.clearDataValidations();
+    Logger.log('generateTaskMetadata: Cleared validation on Status column (rows 2-' + lastRow + ')');
+  }
+
   // Write updates to existing rows
   if (updateRecords.length > 0) {
     for (var u = 0; u < updateRecords.length; u++) {
@@ -7308,8 +7685,65 @@ function generateTaskMetadata() {
   // Write new records to sheet
   if (newRecords.length > 0) {
     var startRow = metadataSheet.getLastRow() + 1;
+    var endRow = startRow + newRecords.length - 1;
+
+    // Ensure sheet has enough rows
+    var currentMaxRows = metadataSheet.getMaxRows();
+    if (endRow > currentMaxRows) {
+      var rowsToAdd = endRow - currentMaxRows;
+      metadataSheet.insertRowsAfter(currentMaxRows, rowsToAdd);
+      Logger.log('generateTaskMetadata: Added ' + rowsToAdd + ' rows to sheet');
+    }
+
+    // Ensure sheet has enough columns (need 25 columns)
+    var currentMaxCols = metadataSheet.getMaxColumns();
+    if (currentMaxCols < 25) {
+      metadataSheet.insertColumnsAfter(currentMaxCols, 25 - currentMaxCols);
+      Logger.log('generateTaskMetadata: Added ' + (25 - currentMaxCols) + ' columns to sheet');
+    }
+
+    // Write the data
     metadataSheet.getRange(startRow, 1, newRecords.length, 25).setValues(newRecords);
     Logger.log('generateTaskMetadata: Wrote ' + newRecords.length + ' records starting at row ' + startRow);
+
+    // THEN clear any inherited validation on the Status column for new rows
+    var newRowsStatusRange = metadataSheet.getRange(startRow, 15, newRecords.length, 1);
+    newRowsStatusRange.clearDataValidations();
+    Logger.log('generateTaskMetadata: Cleared validation on new record rows ' + startRow + '-' + (startRow + newRecords.length - 1));
+  }
+
+  // Flush changes to ensure sheet dimensions are updated before getting final row count
+  SpreadsheetApp.flush();
+
+  // Reapply data validation on Status column with standardized values
+  try {
+    var finalLastRow = metadataSheet.getLastRow();
+    Logger.log('generateTaskMetadata: Final last row after flush: ' + finalLastRow);
+
+    if (finalLastRow > 1) {
+      var validStatuses = ['Unassigned', 'Assigned', 'Complete', 'Overdue', 'Deferred'];
+      var statusValidation = SpreadsheetApp.newDataValidation()
+        .requireValueInList(validStatuses, true)
+        .setAllowInvalid(false)
+        .build();
+
+      // Make sure we don't exceed the actual sheet dimensions
+      var sheetMaxRow = metadataSheet.getMaxRows();
+      var sheetMaxCol = metadataSheet.getMaxColumns();
+      Logger.log('generateTaskMetadata: Sheet max rows=' + sheetMaxRow + ', max cols=' + sheetMaxCol);
+
+      var rowCount = Math.min(finalLastRow - 1, sheetMaxRow - 1);
+      if (rowCount > 0 && sheetMaxCol >= 15) {
+        var finalStatusRange = metadataSheet.getRange(2, 15, rowCount, 1);
+        finalStatusRange.setDataValidation(statusValidation);
+        Logger.log('generateTaskMetadata: Reapplied validation on Status column (rows 2-' + (rowCount + 1) + ')');
+      } else {
+        Logger.log('generateTaskMetadata: Skipped validation - rowCount=' + rowCount + ', maxCol=' + sheetMaxCol);
+      }
+    }
+  } catch (validationError) {
+    Logger.log('generateTaskMetadata: Warning - Could not apply validation: ' + validationError.message);
+    // Continue with the rest of the function - validation is not critical
   }
 
   // Show success message
@@ -7435,6 +7869,19 @@ function formatTime(timeValue) {
   var result = Utilities.formatDate(date, spreadsheetTz, 'h:mm a');
   Logger.log('formatTime: Date object with spreadsheet timezone ' + spreadsheetTz + ', returning: ' + result);
   return result;
+}
+
+/**
+ * Extracts job number from TaskID for Safety Compliance tasks.
+ * Example: SafetyCompliance_013-26_02-01-2026 -> 013-26
+ * @param {string} taskID - The TaskID string
+ * @return {string} The job number or empty string if not found
+ */
+function extractJobNumberFromTaskID(taskID) {
+  if (!taskID) return '';
+  // Match pattern: SafetyCompliance_XXX-XX_date
+  var match = taskID.match(/SafetyCompliance_(\d{3}-\d{2})_/);
+  return match ? match[1] : '';
 }
 
 function getTasksWithMetadata() {
@@ -7587,7 +8034,10 @@ function getTasksWithMetadata() {
 
           // Computed fields
           isOverdue: task.isOverdue,
-          daysTillDue: task.daysTillDue
+          daysTillDue: task.daysTillDue,
+
+          // Safety Compliance fields
+          jobNumber: task.jobNumber || ''
         };
 
         enrichedTasks.push(enrichedTask);
@@ -7613,7 +8063,10 @@ function getTasksWithMetadata() {
           emailSubject: task.emailSubject || '',        // Pass email subject for Safety Equipment tasks
           isOverdue: task.isOverdue,
           daysTillDue: task.daysTillDue,
-          needsMetadata: true // Flag for regeneration
+          needsMetadata: true, // Flag for regeneration
+          // Safety Compliance fields
+          jobNumber: task.jobNumber || '',
+          notes: task.notes || ''
         });
       }
     }
@@ -7707,6 +8160,9 @@ function getTasksWithMetadata() {
       metadataRow: metadata.metadataRow,
       inTaskList: true,
 
+      // Safety Compliance fields
+      jobNumber: extractJobNumberFromTaskID(metadata.taskID),
+
       // Computed fields
       isOverdue: false,
       daysTillDue: 0
@@ -7753,6 +8209,7 @@ function getTasksWithMetadata() {
       return {
         // Identity (for saves/updates)
         taskKey: task.sheetName + '_' + task.rowIndex,
+        tid: task.taskID || '',  // TaskID for Safety Compliance identification
         idx: index,
         // Display fields
         emp: task.employee || '',
@@ -7776,7 +8233,11 @@ function getTasksWithMetadata() {
         // Task List flag (Phase 5)
         inList: task.inTaskList ? 1 : 0,
         // Registration flag (Phase 5)
-        reg: task.isRegistered ? 1 : 0
+        reg: task.isRegistered ? 1 : 0,
+        // Notes (for SMS messages - Missing Safety Reports, etc.)
+        n: task.notes || '',
+        // Job number (for Safety Compliance tasks)
+        job: task.jobNumber || extractJobNumberFromTaskID(task.taskID || '')
       };
     });
 

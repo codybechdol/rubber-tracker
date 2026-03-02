@@ -2098,14 +2098,21 @@
       if (tasks.length > 0) {
         tasks.forEach(function(task) {
           preparedTasks.push({
-            source: task.source || 'To Do List',
+            source: task.source || task.sheetName || 'To Do List',
             rowIndex: task.rowIndex,
-            taskType: task.taskType,
+            taskType: task.taskType || task.type,
             employee: task.employee,
             itemType: task.itemType,
             location: task.location,
             urgencyLabel: task.urgencyLabel,
-            dueDate: task.dueDate
+            dueDate: task.dueDate,
+            // Additional detail fields
+            topic: task.topic,                   // Training topic
+            month: task.month,                   // Training month
+            vehicleNumber: task.vehicleNumber,   // Safety Equipment vehicle
+            currentItem: task.currentItem,       // Safety Equipment issue description
+            notes: task.notes,                   // General notes
+            crew: task.crew                      // Crew number for Training
           });
         });
       } else if (loc.isManualTask) {
@@ -2153,10 +2160,34 @@
           var icon = getTaskIcon(task.taskType || task.itemType);
           var urgencyLabel = task.urgencyLabel || '';
 
-          // Format task title - for cert tasks, show "Renew [CertType]" instead of "Cert Expiring"
+          // Format task title based on task type with more detail
           var taskTitle = task.taskType || task.itemType || 'Task';
+          var taskSubtitle = '';
+
           if ((task.taskType === 'Cert Expiring' || (task.taskType && task.taskType.indexOf('Cert') !== -1)) && task.itemType) {
+            // Cert task - show "Renew [CertType]"
             taskTitle = 'Renew ' + task.itemType;
+          } else if (task.taskType === 'Training' || task.type === 'Training') {
+            // Training task - show the topic (e.g., "Training: Job Briefings/ JHA's/ Emergency Action Plans")
+            if (task.topic) {
+              taskTitle = 'Training: ' + task.topic;
+            } else if (task.itemType && task.itemType.indexOf('Monthly Training:') === 0) {
+              taskTitle = task.itemType; // Already formatted as "Monthly Training: [topic]"
+            }
+            // Add month as subtitle if available
+            if (task.month) {
+              taskSubtitle = '📅 ' + task.month + ' training';
+            }
+          } else if (task.taskType === 'Safety Equipment') {
+            // Safety Equipment - show equipment type with vehicle number
+            taskTitle = task.itemType || 'Safety Equipment';
+            if (task.vehicleNumber) {
+              taskTitle += ' - Vehicle #' + task.vehicleNumber;
+            }
+            // Show issue description as subtitle
+            if (task.currentItem) {
+              taskSubtitle = '⚠️ ' + (task.currentItem.length > 60 ? task.currentItem.substring(0, 60) + '...' : task.currentItem);
+            }
           }
 
           // Show due date for cert tasks
@@ -2172,6 +2203,7 @@
             '<div class="task-details">' +
               '<div class="task-title">' + taskTitle + '</div>' +
               (task.employee ? '<div class="task-employee">👤 ' + task.employee + '</div>' : '') +
+              (taskSubtitle ? '<div class="task-employee" style="color:#666;font-size:0.85em;">' + taskSubtitle + '</div>' : '') +
               dueDateHtml +
               (urgencyLabel ? '<div class="task-urgency">' + urgencyLabel + '</div>' : '') +
             '</div>' +
@@ -2671,16 +2703,37 @@
       var urgency = task.urgency || 0;
       var urgencyColor = getUrgencyColor(urgency);
 
-      // Build task title
+      // Build task title and subtitle based on task type
       var title = task.employee || taskType || 'Task';
       var subtitle = '';
+      var taskTypeLower = taskType.toLowerCase();
 
-      if (task.itemType && task.itemType !== taskType) {
+      // Enhanced subtitle based on task type
+      if (taskTypeLower === 'swap') {
+        // Swap task: show "Glove Swap" or "Sleeve Swap"
+        subtitle = (task.itemType || 'Glove') + ' Swap';
+      } else if (taskTypeLower === 'training') {
+        // Training task: show topic or "Monthly Training: [topic]"
+        if (task.topic) {
+          subtitle = 'Training: ' + task.topic;
+        } else if (task.itemType && task.itemType.indexOf('Monthly Training:') === 0) {
+          subtitle = task.itemType;
+        } else {
+          subtitle = 'Training';
+        }
+      } else if (taskTypeLower === 'safety equipment') {
+        // Safety Equipment: show equipment type with vehicle number
+        subtitle = task.itemType || 'Safety Equipment';
+        if (task.vehicleNumber) {
+          subtitle += ' - #' + task.vehicleNumber;
+        }
+      } else if (task.itemType && task.itemType !== taskType) {
         subtitle = task.itemType;
       } else if (task.employee && taskType) {
         subtitle = taskType;
       }
 
+      // Add due date
       if (task.dueDate) {
         subtitle += (subtitle ? ' • ' : '') + '📅 ' + task.dueDate;
       }

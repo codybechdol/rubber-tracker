@@ -9,6 +9,116 @@
 /* eslint-disable no-redeclare, no-unused-vars */
 
 // ============================================================================
+// CREW LOCATION MAPPING
+// ============================================================================
+
+/**
+ * Builds a map of crew number → location by finding each crew's foreman (or first employee)
+ * and returning their location from the Employees sheet.
+ *
+ * @param {Spreadsheet} ss - The spreadsheet object
+ * @return {Object} Map of crew number to location (e.g., {'041-26': 'Gold Creek', '039-26': 'Rapelje'})
+ */
+function getCrewLocationMap(ss) {
+  if (!ss) {
+    ss = SpreadsheetApp.getActiveSpreadsheet();
+  }
+
+  var employeesSheet = ss.getSheetByName('Employees');
+  if (!employeesSheet || employeesSheet.getLastRow() < 2) {
+    Logger.log('getCrewLocationMap: No Employees sheet found');
+    return {};
+  }
+
+  var data = employeesSheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Find columns
+  var nameCol = -1, jobNumCol = -1, locationCol = -1, lastDayCol = -1, classificationCol = -1;
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'name') nameCol = h;
+    if (header === 'job number') jobNumCol = h;
+    if (header === 'location') locationCol = h;
+    if (header === 'last day') lastDayCol = h;
+    if (header === 'job classification') classificationCol = h;
+  }
+
+  if (jobNumCol === -1 || locationCol === -1) {
+    Logger.log('getCrewLocationMap: Missing required columns (Job Number or Location)');
+    return {};
+  }
+
+  // Classification hierarchy for finding crew lead
+  var classificationPriority = {
+    'F': 1, 'GTO F': 2, 'GF': 3, 'SUP': 4, 'JRY': 5, 'JRY OP': 6,
+    'WT': 7, 'GTO': 8, 'EO 1': 9, 'EO 2': 10,
+    'AP 7': 11, 'AP 6': 12, 'AP 5': 13, 'AP 4': 14, 'AP 3': 15, 'AP 2': 16, 'AP 1': 17
+  };
+
+  // First pass: collect all employees grouped by crew
+  var crewEmployees = {}; // crew number → [{name, location, classification, position}]
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var jobNum = String(row[jobNumCol] || '').trim();
+    var location = String(row[locationCol] || '').trim();
+    var lastDay = lastDayCol !== -1 ? row[lastDayCol] : '';
+    var classification = classificationCol !== -1 ? String(row[classificationCol] || '').trim() : '';
+    var name = nameCol !== -1 ? String(row[nameCol] || '').trim() : '';
+
+    // Skip if no job number, inactive employee, or excluded prefix
+    if (!jobNum || lastDay) continue;
+
+    // Extract crew number and position (e.g., "041-26.1" → "041-26", 1)
+    var parts = jobNum.split('.');
+    var crewNum = parts[0];
+    var position = parts.length > 1 ? parseFloat(parts[1]) : 999;
+
+    // Validate crew number format (NNN-YY)
+    if (!/^\d{3}-\d{2}$/.test(crewNum)) continue;
+
+    // Skip placeholder crews
+    if (crewNum.indexOf('000-') === 0) continue;
+
+    if (!crewEmployees[crewNum]) {
+      crewEmployees[crewNum] = [];
+    }
+
+    crewEmployees[crewNum].push({
+      name: name,
+      location: location,
+      classification: classification,
+      position: position,
+      priority: classificationPriority[classification] || 999
+    });
+  }
+
+  // Second pass: for each crew, find the best employee (foreman or first by position)
+  var crewLocations = {};
+
+  for (var crew in crewEmployees) {
+    var employees = crewEmployees[crew];
+
+    // Sort by classification priority first, then by position number
+    employees.sort(function(a, b) {
+      if (a.priority !== b.priority) {
+        return a.priority - b.priority; // Lower priority number = higher rank
+      }
+      return a.position - b.position; // Lower position = earlier
+    });
+
+    // Use the first (best) employee's location
+    if (employees.length > 0 && employees[0].location) {
+      crewLocations[crew] = employees[0].location;
+    }
+  }
+
+  Logger.log('getCrewLocationMap: Built map with ' + Object.keys(crewLocations).length + ' crews');
+  return crewLocations;
+}
+
+// ============================================================================
 // PHONE NUMBER FORMATTING
 // ============================================================================
 
@@ -907,8 +1017,18 @@ function collectTrainingTasks(ss, tasksByLocation, today) {
     var status = String(row[statusCol]).trim();
     var completionDate = row[dateCol];
 
+    // DEBUG: Log Keenan's training to understand location assignment
+    var isKeenan = crewLead.toLowerCase().indexOf('keenan') !== -1;
+    if (isKeenan) {
+      Logger.log('collectTrainingTasks: KEENAN DEBUG row=' + (i+1) +
+                 ' crew=' + crew +
+                 ' crewLead=' + crewLead +
+                 ' crewLocations[' + crew + ']=' + (crewLocations[crew] || 'NOT FOUND') +
+                 ' month=' + month + ' topic=' + topic);
+    }
+
     // Skip if complete, N/A, or already has completion date
-    if (!crew || status === 'Complete' || status === 'N/A') {
+    if (status === 'Complete' || status === 'N/A') {
       if (month.toLowerCase() === 'february') {
         Logger.log('collectTrainingTasks: DEBUG - Skipping Feb row ' + (i+1) + ' crew=' + crew + ' status=' + status + ' (complete/N/A)');
         skippedComplete++;
@@ -1061,2064 +1181,281 @@ function collectTrainingTasks(ss, tasksByLocation, today) {
 }
 
 /**
- * Builds a map of crew numbers to whether they have employees with selected job classifications.
- *
- * @param {Spreadsheet} ss - Active spreadsheet
- * @param {Array} selectedClassifications - Array of job classification codes to include
- * @return {Object} Map of crew number to true (if has selected employees)
+ * Debug function to trace Keenan's training task location assignment
+ * Run from Script Editor to see detailed logging
  */
-function getCrewClassificationMap(ss, selectedClassifications) {
+function debugKeenanTrainingLocation() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+  var message = '=== KEENAN TRAINING LOCATION DEBUG ===\n\n';
+
+  // Step 1: Check Employees sheet for crew 041-26
+  message += '1️⃣ EMPLOYEES SHEET - Crew 041-26:\n';
   var employeesSheet = ss.getSheetByName('Employees');
-  if (!employeesSheet || employeesSheet.getLastRow() < 2) {
-    return {};
-  }
-
-  var data = employeesSheet.getDataRange().getValues();
-  var headers = data[0];
-  var jobNumCol = -1;
-  var classificationCol = -1;
-
-  // Find columns
-  for (var h = 0; h < headers.length; h++) {
-    var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'job number') jobNumCol = h;
-    if (header === 'job classification') classificationCol = h;
-  }
-
-  if (jobNumCol === -1 || classificationCol === -1) {
-    Logger.log('getCrewClassificationMap: Could not find required columns');
-    return {};
-  }
-
-  var crewMap = {};
-
-  for (var i = 1; i < data.length; i++) {
-    var jobNumber = String(data[i][jobNumCol]).trim();
-    var classification = String(data[i][classificationCol]).trim();
-
-    if (!jobNumber) continue;
-
-    // Extract crew number (e.g., "009-26.1" → "009-26")
-    var crew = extractCrewNumber(jobNumber);
-    if (!crew) continue;
-
-    // If this employee has a selected classification, mark the crew
-    if (selectedClassifications.indexOf(classification) !== -1) {
-      crewMap[crew] = true;
-    }
-  }
-
-  return crewMap;
-}
-
-/**
- * Collects reclaim tasks from Reclaims sheet.
- * Includes Class 3 Reclaims (downgrade to CL2) and Class 2 Reclaims (upgrade to CL3).
- *
- * Reclaims sheet structure:
- * - "Class 3 Reclaims" section header
- * - Headers: Employee, Item Type, Item #, Size, Class, Location, Pick List Item #, Pick List Status
- * - "Class 2 Reclaims" section header
- * - Same headers
- *
- * @param {Spreadsheet} ss - Active spreadsheet
- * @param {Object} tasksByLocation - Object to add tasks to
- * @param {Object} employeeLocations - Employee to location map
- * @param {Object} employeeForemen - Employee to foreman map
- * @param {Date} today - Today's date
- */
-function collectReclaimTasks(ss, tasksByLocation, employeeLocations, employeeForemen, today) {
-  var reclaimsSheet = ss.getSheetByName('Reclaims');
-  if (!reclaimsSheet || reclaimsSheet.getLastRow() < 3) {
-    Logger.log('collectReclaimTasks: Reclaims sheet not found or empty');
-    return;
-  }
-
-  var data = reclaimsSheet.getDataRange().getValues();
-  Logger.log('collectReclaimTasks: Processing Reclaims sheet with ' + data.length + ' rows');
-
-  var taskCount = 0;
-  var currentReclaimType = ''; // 'CL3→CL2' or 'CL2→CL3'
-  var inReclaimSection = false;
-  var headerRowIndex = -1;
-
-  // Column indices (will be set when we find header row)
-  var employeeCol = -1;
-  var itemTypeCol = -1;
-  var itemNumCol = -1;
-  var sizeCol = -1;
-  var classCol = -1;
-  var locationCol = -1;
-  var pickListCol = -1;
-  var statusCol = -1;
-
-  for (var i = 0; i < data.length; i++) {
-    var row = data[i];
-    var firstCell = String(row[0]).trim();
-    var firstCellLower = firstCell.toLowerCase();
-
-    // Detect section headers
-    if (firstCellLower.indexOf('class 3 reclaims') !== -1) {
-      currentReclaimType = 'Reclaim CL3→CL2';
-      inReclaimSection = true;
-      headerRowIndex = -1; // Reset to find new header
-      Logger.log('collectReclaimTasks: Found Class 3 Reclaims section at row ' + (i + 1));
-      continue;
-    }
-
-    if (firstCellLower.indexOf('class 2 reclaims') !== -1) {
-      currentReclaimType = 'Reclaim CL2→CL3';
-      inReclaimSection = true;
-      headerRowIndex = -1; // Reset to find new header
-      Logger.log('collectReclaimTasks: Found Class 2 Reclaims section at row ' + (i + 1));
-      continue;
-    }
-
-    // Skip other section headers (Previous Employee, Approved Locations, Lost Items)
-    if (firstCellLower.indexOf('previous employee') !== -1 ||
-        firstCellLower.indexOf('approved') !== -1 ||
-        firstCellLower.indexOf('lost items') !== -1) {
-      inReclaimSection = false;
-      continue;
-    }
-
-    // Skip if not in a reclaim section
-    if (!inReclaimSection) continue;
-
-    // Find header row within reclaim section
-    if (firstCellLower === 'employee') {
-      headerRowIndex = i;
-      // Find column indices
-      for (var h = 0; h < row.length; h++) {
-        var header = String(row[h]).toLowerCase().trim();
-        if (header === 'employee') employeeCol = h;
-        if (header === 'item type') itemTypeCol = h;
-        if (header === 'item #') itemNumCol = h;
-        if (header === 'size') sizeCol = h;
-        if (header === 'class') classCol = h;
-        if (header === 'location') locationCol = h;
-        if (header.indexOf('pick list') !== -1 && header.indexOf('#') !== -1) pickListCol = h;
-        if (header.indexOf('pick list') !== -1 && header.indexOf('status') !== -1) statusCol = h;
-      }
-      Logger.log('collectReclaimTasks: Found header row at ' + (i + 1) + ', employeeCol=' + employeeCol);
-      continue;
-    }
-
-    // Skip if we haven't found header row yet
-    if (headerRowIndex === -1 || employeeCol === -1) continue;
-
-    // Process data rows
-    var employee = String(row[employeeCol]).trim();
-
-    // Skip empty rows or location headers
-    if (!employee) continue;
-    if (employee.indexOf('📍') !== -1) continue;
-
-    var itemType = itemTypeCol !== -1 ? String(row[itemTypeCol]).trim() : '';
-    var itemNum = itemNumCol !== -1 ? String(row[itemNumCol]).trim() : '';
-    var size = sizeCol !== -1 ? String(row[sizeCol]).trim() : '';
-    var itemClass = classCol !== -1 ? String(row[classCol]).trim() : '';
-    var location = locationCol !== -1 ? String(row[locationCol]).trim() : '';
-    var pickListItem = pickListCol !== -1 ? String(row[pickListCol]).trim() : '';
-    var status = statusCol !== -1 ? String(row[statusCol]).trim() : '';
-
-    // Skip if already resolved (has "Already Has" in status)
-    if (status.indexOf('Already Has') !== -1) {
-      continue;
-    }
-
-    // Use location from row, or fall back to employee lookup
-    if (!location) {
-      location = employeeLocations[employee.toLowerCase()] || 'Unknown';
-    }
-
-    // Get foreman for this employee
-    var foreman = employeeForemen[employee.toLowerCase()] || 'Unknown';
-
-    // Reclaims are always high priority (ASAP)
-    var task = {
-      type: currentReclaimType, // 'Reclaim CL3→CL2' or 'Reclaim CL2→CL3'
-      itemType: itemType,
-      employee: employee,
-      location: location,
-      foreman: foreman,
-      currentItem: itemNum,
-      pickListItem: pickListItem,
-      size: size,
-      itemClass: itemClass,
-      dueDate: null, // Reclaims don't have due dates
-      isOverdue: false,
-      daysTillDue: null,
-      status: status || 'Unassigned',
-      estimatedTime: 10, // 10 minutes per reclaim
-      priority: 'High', // Reclaims are always high priority
-      sheetName: 'Reclaims',
-      rowIndex: i + 1
-    };
-
-    // Add to location group
-    if (!tasksByLocation[location]) {
-      tasksByLocation[location] = [];
-    }
-    tasksByLocation[location].push(task);
-    taskCount++;
-
-    Logger.log('collectReclaimTasks: Added ' + currentReclaimType + ' task for ' + employee + ' at ' + location);
-  }
-
-  Logger.log('collectReclaimTasks: Added ' + taskCount + ' reclaim tasks total');
-}
-
-/**
- * Collects expiring certification tasks based on selected cert types in ToDoConfig.
- * Only creates tasks for cert types that are checked in the "Create To Do Tasks For" section.
- *
- * @param {Spreadsheet} ss - Active spreadsheet
- * @param {Object} tasksByLocation - Object to add tasks to
- * @param {Object} employeeLocations - Employee to location map
- * @param {Object} employeeForemen - Employee to foreman map
- * @param {Object} employeePhones - Employee to phone number map
- * @param {Date} today - Today's date
- */
-function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employeeForemen, employeePhones, today) {
-  var expiringSheet = ss.getSheetByName('Expiring Certs');
-  if (!expiringSheet || expiringSheet.getLastRow() < 2) {
-    Logger.log('collectExpiringCertTasks: Expiring Certs sheet not found or empty');
-    return;
-  }
-
-  // Build set of previous/terminated employee names to exclude
-  var previousEmployeeNames = new Set();
-
-  // Check Employee History for terminated employees
-  var employeeHistorySheet = ss.getSheetByName('Employee History');
-  if (employeeHistorySheet && employeeHistorySheet.getLastRow() > 2) {
-    var historyData = employeeHistorySheet.getRange(3, 1, employeeHistorySheet.getLastRow() - 2, 10).getValues();
-    // Employee History columns: A=Date, B=Employee Name, C=Event Type, D=Location
-    for (var hi = 0; hi < historyData.length; hi++) {
-      var histEventType = (historyData[hi][2] || '').toString().trim().toLowerCase();
-      var histName = (historyData[hi][1] || '').toString().trim().toLowerCase();
-
-      // If employee was terminated or marked as previous employee
-      if (histEventType === 'terminated' || histEventType === 'previous employee') {
-        if (histName) {
-          previousEmployeeNames.add(histName);
-        }
-      }
-    }
-  }
-
-  // Also check Employees sheet for "Previous Employee" location
-  var employeesSheet = ss.getSheetByName('Employees');
-  if (employeesSheet && employeesSheet.getLastRow() > 1) {
+  if (employeesSheet) {
     var empData = employeesSheet.getDataRange().getValues();
     var empHeaders = empData[0];
-    var empNameCol = -1;
-    var empLocCol = -1;
+    var nameCol = -1, locCol = -1, jobCol = -1;
 
-    for (var eh = 0; eh < empHeaders.length; eh++) {
-      var hdr = String(empHeaders[eh]).toLowerCase().trim();
-      if (hdr === 'name') empNameCol = eh;
-      if (hdr === 'location') empLocCol = eh;
+    for (var h = 0; h < empHeaders.length; h++) {
+      var hdr = String(empHeaders[h]).toLowerCase().trim();
+      if (hdr === 'name') nameCol = h;
+      if (hdr === 'location') locCol = h;
+      if (hdr === 'job number') jobCol = h;
     }
 
-    if (empNameCol !== -1 && empLocCol !== -1) {
-      for (var ei = 1; ei < empData.length; ei++) {
-        var empName = (empData[ei][empNameCol] || '').toString().trim().toLowerCase();
-        var empLoc = (empData[ei][empLocCol] || '').toString().trim().toLowerCase();
-        if (empName && empLoc === 'previous employee') {
-          previousEmployeeNames.add(empName);
-        }
-      }
-    }
-  }
-
-  Logger.log('collectExpiringCertTasks: Found ' + previousEmployeeNames.size + ' previous/terminated employees to exclude');
-
-  // Get selected cert types from config
-  var properties = PropertiesService.getScriptProperties();
-  var selectedJson = properties.getProperty('selectedCertTypes');
-  var selectedCertTypes = [];
-
-  if (selectedJson) {
-    try {
-      selectedCertTypes = JSON.parse(selectedJson);
-    } catch (e) {
-      Logger.log('collectExpiringCertTasks: Error parsing selectedCertTypes: ' + e);
-      // Use defaults if parse fails - must match defaults in Code.gs getExpiringCertsMapping()
-      selectedCertTypes = ['DL', 'MEC Expiration', '1st Aid', 'CPR', 'Crane Cert', 'Harassment Training'];
-    }
-  } else {
-    // Default cert types if none configured - must match defaults in Code.gs getExpiringCertsMapping()
-    selectedCertTypes = ['DL', 'MEC Expiration', '1st Aid', 'CPR', 'Crane Cert', 'Harassment Training'];
-  }
-
-  Logger.log('collectExpiringCertTasks: Selected cert types: ' + selectedCertTypes.join(', '));
-
-  var data = expiringSheet.getDataRange().getValues();
-  var headers = data[0];
-
-  // Find column indices
-  var empCol = -1;
-  var certTypeCol = -1;
-  var expirationCol = -1;
-  var locationCol = -1;
-
-  for (var h = 0; h < headers.length; h++) {
-    var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'employee name' || header === 'employee') empCol = h;
-    if (header === 'item type' || header === 'cert type' || header === 'certification') certTypeCol = h;
-    if (header === 'expiration date' || header === 'expiration') expirationCol = h;
-    if (header === 'location') locationCol = h;
-  }
-
-  // Fallback to positional columns (A=Employee, B=Cert Type, C=Expiration)
-  if (empCol === -1) empCol = 0;
-  if (certTypeCol === -1) certTypeCol = 1;
-  if (expirationCol === -1) expirationCol = 2;
-
-  Logger.log('collectExpiringCertTasks: empCol=' + empCol + ', certTypeCol=' + certTypeCol + ', expirationCol=' + expirationCol);
-
-  var taskCount = 0;
-  var thirtyDaysFromNow = new Date(today);
-  thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
-
-  // Track added certs to prevent duplicates (employee + cert type combination)
-  var addedCerts = new Set();
-  var duplicateCount = 0;
-
-  for (var i = 1; i < data.length; i++) {
-    var row = data[i];
-    var employee = String(row[empCol] || '').trim();
-    var certType = String(row[certTypeCol] || '').trim();
-    var expirationDate = row[expirationCol];
-
-    // Skip if no employee or cert type
-    if (!employee || !certType) continue;
-
-    // Skip if employee is a previous/terminated employee
-    if (previousEmployeeNames.has(employee.toLowerCase())) {
-      Logger.log('collectExpiringCertTasks: Skipping ' + certType + ' for previous employee: ' + employee);
-      continue;
-    }
-
-    // Skip if this cert type is NOT selected in config
-    if (selectedCertTypes.indexOf(certType) === -1) {
-      continue;
-    }
-
-    // Enhanced logging for Crane Cert specifically
-    if (certType === 'Crane Cert') {
-      Logger.log('collectExpiringCertTasks: Processing Crane Cert for ' + employee + ', expiration: ' + expirationDate);
-    }
-
-    // Special handling for Crane Evaluation:
-    // Crane Evaluation is a non-expiring cert - the date is when evaluation was performed
-    // If row exists, employee is in compliance - skip it
-    // Missing Crane Evaluations are detected via special check later (employees with Crane Cert but no Crane Evaluation row)
-    if (certType === 'Crane Evaluation') {
-      Logger.log('collectExpiringCertTasks: Skipping Crane Evaluation for ' + employee + ' - evaluation completed (non-expiring)');
-      continue;
-    }
-
-    // Parse expiration date
-    var expDate = null;
-    if (expirationDate instanceof Date) {
-      expDate = new Date(expirationDate);
-    } else if (expirationDate && typeof expirationDate === 'string') {
-      expDate = new Date(expirationDate);
-      if (isNaN(expDate.getTime())) {
-        expDate = null;
-      }
-    }
-
-    // Handle other non-expiring certs (OSHA 1910, BNSF, MSHA, etc.)
-    // If row exists but no expiration date, treat as completed/compliant
-    var isNonExpiringCert = !expDate;
-
-    if (isNonExpiringCert) {
-      // Non-expiring cert with a row in sheet = employee has it, skip
-      Logger.log('collectExpiringCertTasks: Skipping non-expiring cert ' + certType + ' for ' + employee + ' - has cert (non-expiring)');
-      continue;
-    }
-
-    // Regular expiring cert - check if expired or expiring soon
-    expDate.setHours(0, 0, 0, 0);
-
-    // Calculate days until expiration
-    var daysTillDue = Math.ceil((expDate - today) / (1000 * 60 * 60 * 24));
-
-    // Only include certs that are expired or expiring within 30 days
-    if (daysTillDue > 30) continue;
-
-    var isOverdue = daysTillDue < 0;
-
-    // Determine priority
-    var priority = 'Low';
-    if (isOverdue) {
-      priority = 'High';
-    } else if (daysTillDue <= 7) {
-      priority = 'High';
-    } else if (daysTillDue <= 14) {
-      priority = 'Medium';
-    }
-
-    // ALWAYS use employee's current location from Employees sheet (not stale data in Expiring Certs)
-    // This ensures employees who moved (e.g., to "Weeds") show up under their current location
-    var location = employeeLocations[employee.toLowerCase()] || '';
-    if (!location) {
-      // Fallback to location in Expiring Certs row if employee not found in Employees sheet
-      location = locationCol !== -1 ? String(row[locationCol] || '').trim() : 'Unknown';
-    }
-
-    // Enhanced logging for Crane Cert
-    if (certType === 'Crane Cert') {
-      Logger.log('collectExpiringCertTasks: Crane Cert for ' + employee + ' - Location: ' + location + ', Days till due: ' + daysTillDue + ', Overdue: ' + isOverdue);
-    }
-
-    // Get foreman for this employee
-    var foreman = employeeForemen[employee.toLowerCase()] || 'Unassigned';
-
-    // Get phone number for this employee - try multiple matching strategies
-    var whitespaceRegex = new RegExp('\\s+', 'g');
-    var empNameLower = employee.toLowerCase().trim().replace(whitespaceRegex, ' '); // Normalize whitespace
-    var phoneNumber = employeePhones[empNameLower] || '';
-
-    // If no direct match, try partial matching on first and last name
-    if (!phoneNumber) {
-      var nameParts = empNameLower.split(' ');
-      if (nameParts.length >= 2) {
-        var firstName = nameParts[0];
-        var lastName = nameParts[nameParts.length - 1];
-        for (var empKey in employeePhones) {
-          if (empKey.indexOf(firstName) !== -1 && empKey.indexOf(lastName) !== -1) {
-            phoneNumber = employeePhones[empKey];
-            break;
-          }
-        }
-      }
-    }
-
-    // Log if phone not found for debugging
-    if (!phoneNumber && taskCount < 10) {
-      Logger.log('collectExpiringCertTasks: No phone found for "' + employee + '" (normalized: "' + empNameLower + '")');
-    }
-
-    // Determine status using standardized values (as of Feb 18, 2026)
-    var status = isOverdue ? 'Overdue' : 'Unassigned';
-
-    // Check for duplicate (same employee + cert type already added)
-    var certKey = employee.toLowerCase() + '|' + certType;
-    if (addedCerts.has(certKey)) {
-      Logger.log('collectExpiringCertTasks: Skipping duplicate ' + certType + ' for ' + employee);
-      duplicateCount++;
-      continue;
-    }
-    addedCerts.add(certKey);
-
-    var task = {
-      type: 'Cert Expiring',
-      itemType: certType,
-      employee: employee,
-      location: location,
-      foreman: foreman, // Use actual foreman from employee lookup
-      phoneNumber: phoneNumber, // For SMS notifications
-      currentItem: '', // No item number for certs
-      pickListItem: '',
-      size: '',
-      dueDate: expDate,
-      isOverdue: isOverdue,
-      daysTillDue: daysTillDue,
-      status: isOverdue ? 'Overdue' : 'Unassigned',  // Standardized status (Feb 18, 2026)
-      estimatedTime: 0,
-      priority: priority,
-      sheetName: 'Expiring Certs',
-      rowIndex: i + 1
-    };
-
-    // Add to location group
-    if (!tasksByLocation[location]) {
-      tasksByLocation[location] = [];
-    }
-    tasksByLocation[location].push(task);
-    taskCount++;
-
-    Logger.log('collectExpiringCertTasks: Added ' + certType + ' task for ' + employee + ' at ' + location + ' (days=' + daysTillDue + ')');
-  }
-
-  // Count Crane Cert tasks specifically
-  var craneCertCount = 0;
-  for (var loc in tasksByLocation) {
-    for (var t = 0; t < tasksByLocation[loc].length; t++) {
-      if (tasksByLocation[loc][t].itemType === 'Crane Cert' && tasksByLocation[loc][t].type === 'Cert Expiring') {
-        craneCertCount++;
-      }
-    }
-  }
-
-  Logger.log('collectExpiringCertTasks: Added ' + taskCount + ' expiring cert tasks from Expiring Certs sheet (including ' + craneCertCount + ' Crane Cert tasks)');
-
-  if (duplicateCount > 0) {
-    Logger.log('collectExpiringCertTasks: Skipped ' + duplicateCount + ' duplicate cert tasks');
-  }
-
-  // === CRANE EVALUATION CHECK ===
-  // Special logic: Check if employees have Crane Cert but are missing Crane Evaluation
-  if (selectedCertTypes.indexOf('Crane Evaluation') !== -1) {
-    Logger.log('collectExpiringCertTasks: Checking for missing Crane Evaluations...');
-
-    // Build map of employees who have each cert type
-    var employeeCerts = {}; // { employeeName: { 'Crane Cert': true, 'Crane Evaluation': true, ... } }
-
-    for (var i = 1; i < data.length; i++) {
-      var row = data[i];
-      var employee = String(row[empCol] || '').trim();
-      var certType = String(row[certTypeCol] || '').trim();
-
-      if (!employee || !certType) continue;
-
-      // Skip previous employees
-      if (previousEmployeeNames.has(employee.toLowerCase())) continue;
-
-      if (!employeeCerts[employee.toLowerCase()]) {
-        employeeCerts[employee.toLowerCase()] = {};
-      }
-      employeeCerts[employee.toLowerCase()][certType] = true;
-    }
-
-    // Check for employees with Crane Cert but no Crane Evaluation
-    var missingEvalCount = 0;
-    for (var empName in employeeCerts) {
-      var certs = employeeCerts[empName];
-
-      if (certs['Crane Cert'] && !certs['Crane Evaluation']) {
-        // Employee has Crane Cert but is missing Crane Evaluation
-        var properName = empName.charAt(0).toUpperCase() + empName.slice(1);
-
-        // Find proper capitalization from Employees sheet
-        for (var empKey in employeeLocations) {
-          if (empKey.toLowerCase() === empName) {
-            var employeesSheet = ss.getSheetByName('Employees');
-            if (employeesSheet) {
-              var empData = employeesSheet.getDataRange().getValues();
-              var empHeaders = empData[0];
-              var empNameCol = -1;
-              for (var eh = 0; eh < empHeaders.length; eh++) {
-                if (String(empHeaders[eh]).toLowerCase().trim() === 'name') {
-                  empNameCol = eh;
-                  break;
-                }
-              }
-              if (empNameCol !== -1) {
-                for (var ei = 1; ei < empData.length; ei++) {
-                  if (String(empData[ei][empNameCol]).trim().toLowerCase() === empName) {
-                    properName = String(empData[ei][empNameCol]).trim();
-                    break;
-                  }
-                }
-              }
-            }
-            break;
-          }
-        }
-
-        var location = employeeLocations[empName] || 'Unknown';
-        var foreman = employeeForemen[empName] || 'Unassigned';
-
-        // Get phone number - try direct match first, then partial match
-        var phoneNumber = employeePhones[empName] || '';
-        if (!phoneNumber) {
-          var nameParts = empName.split(' ');
-          if (nameParts.length >= 2) {
-            var firstName = nameParts[0];
-            var lastName = nameParts[nameParts.length - 1];
-            for (var pk in employeePhones) {
-              if (pk.indexOf(firstName) !== -1 && pk.indexOf(lastName) !== -1) {
-                phoneNumber = employeePhones[pk];
-                break;
-              }
-            }
-          }
-        }
-
-        var task = {
-          type: 'Cert Expiring',
-          itemType: 'Crane Evaluation',
-          employee: properName,
-          location: location,
-          foreman: foreman,
-          phoneNumber: phoneNumber,
-          currentItem: '',
-          pickListItem: '',
-          size: '',
-          dueDate: null,
-          isOverdue: true,
-          daysTillDue: -1,
-          status: 'Missing',
-          estimatedTime: 0,
-          priority: 'High',
-          sheetName: 'Expiring Certs',
-          rowIndex: 0,
-          isMissingCert: true
-        };
-
-        if (!tasksByLocation[location]) {
-          tasksByLocation[location] = [];
-        }
-        tasksByLocation[location].push(task);
-        missingEvalCount++;
-
-        Logger.log('collectExpiringCertTasks: Added missing Crane Evaluation for ' + properName + ' at ' + location);
-      }
-    }
-
-    Logger.log('collectExpiringCertTasks: Added ' + missingEvalCount + ' missing Crane Evaluation tasks');
-    taskCount += missingEvalCount;
-  }
-
-  Logger.log('collectExpiringCertTasks: TOTAL cert tasks = ' + taskCount);
-
-  // Post-process: Group 1st Aid and CPR certs for same employee
-  // This allows sending a single notification for both certs
-  for (var loc in tasksByLocation) {
-    var tasks = tasksByLocation[loc];
-    var certTasksByEmployee = {};
-
-    // Group cert tasks by employee
-    for (var t = 0; t < tasks.length; t++) {
-      var task = tasks[t];
-      if (task.type === 'Cert Expiring') {
-        var empKey = task.employee.toLowerCase();
-        if (!certTasksByEmployee[empKey]) {
-          certTasksByEmployee[empKey] = [];
-        }
-        certTasksByEmployee[empKey].push(task);
-      }
-    }
-
-    // For each employee with multiple cert tasks, link them via relatedCerts
-    for (var empKey in certTasksByEmployee) {
-      var empCertTasks = certTasksByEmployee[empKey];
-      if (empCertTasks.length > 1) {
-        // Check if employee has both 1st Aid and CPR type certs
-        var certTypes = empCertTasks.map(function(t) { return t.itemType; });
-        var has1stAid = certTypes.some(function(ct) {
-          return ct.toLowerCase().indexOf('1st aid') !== -1 || ct.toLowerCase().indexOf('first aid') !== -1;
+    var crew041Members = [];
+    for (var i = 1; i < empData.length; i++) {
+      var jobNum = String(empData[i][jobCol] || '').trim();
+      if (jobNum.indexOf('041-26') === 0) {
+        crew041Members.push({
+          name: empData[i][nameCol],
+          location: empData[i][locCol],
+          jobNumber: jobNum,
+          row: i + 1
         });
-        var hasCPR = certTypes.some(function(ct) {
-          return ct.toLowerCase().indexOf('cpr') !== -1;
+      }
+    }
+
+    if (crew041Members.length === 0) {
+      message += '  ❌ NO employees found with job number starting with 041-26!\n';
+    } else {
+      message += '  Found ' + crew041Members.length + ' employee(s):\n';
+      crew041Members.forEach(function(emp) {
+        message += '  Row ' + emp.row + ': ' + emp.name + ' @ ' + emp.location + ' (job: ' + emp.jobNumber + ')\n';
+      });
+    }
+  }
+  message += '\n';
+
+  // Step 2: Check what getCrewLocationMap returns for 041-26
+  message += '2️⃣ CREW LOCATION MAP:\n';
+  var crewLocations = getCrewLocationMap(ss);
+  message += '  041-26 → ' + (crewLocations['041-26'] || '❌ NOT FOUND') + '\n';
+  message += '  039-26 → ' + (crewLocations['039-26'] || '❌ NOT FOUND') + '\n';
+  message += '\n';
+
+  // Step 3: Check Training Tracking for Keenan's rows
+  message += '3️⃣ TRAINING TRACKING - Keenan\'s rows:\n';
+  var trainingSheet = ss.getSheetByName('Training Tracking');
+  if (trainingSheet) {
+    var trainData = trainingSheet.getDataRange().getValues();
+    var keenanRows = [];
+
+    for (var t = 2; t < trainData.length; t++) {
+      var crewLead = String(trainData[t][3] || '').trim();  // Column D = Crew Lead
+      var crewNum = String(trainData[t][2] || '').trim();   // Column C = Crew #
+      var topic = String(trainData[t][1] || '').trim();     // Column B = Topic
+      var month = String(trainData[t][0] || '').trim();     // Column A = Month
+      var status = String(trainData[t][8] || '').trim();    // Column I = Status
+
+      if (crewLead.toLowerCase().indexOf('keenan') !== -1) {
+        keenanRows.push({
+          row: t + 1,
+          month: month,
+          crew: crewNum,
+          topic: topic,
+          status: status,
+          mappedLocation: crewLocations[crewNum] || 'NOT FOUND'
         });
-
-        // If employee has related certs (1st Aid + CPR), add relatedCerts array to each task
-        if (has1stAid && hasCPR) {
-          var relatedCertInfo = empCertTasks.map(function(t) {
-            return {
-              certType: t.itemType,
-              expirationDate: t.dueDate ? t.dueDate.toISOString() : null,
-              daysTillDue: t.daysTillDue
-            };
-          });
-
-          for (var rt = 0; rt < empCertTasks.length; rt++) {
-            empCertTasks[rt].relatedCerts = relatedCertInfo;
-            empCertTasks[rt].hasRelatedCerts = true;
-          }
-          Logger.log('collectExpiringCertTasks: Grouped ' + empCertTasks.length + ' related certs for ' + empCertTasks[0].employee);
-        }
       }
+    }
+
+    if (keenanRows.length === 0) {
+      message += '  ❌ No rows found with Keenan as Crew Lead!\n';
+    } else {
+      message += '  Found ' + keenanRows.length + ' training(s) for Keenan:\n';
+      keenanRows.forEach(function(row) {
+        message += '  Row ' + row.row + ': ' + row.month + ' - ' + row.topic + '\n';
+        message += '    Crew: ' + row.crew + ' → Location: ' + row.mappedLocation + '\n';
+        message += '    Status: ' + row.status + '\n';
+      });
+    }
+  }
+  message += '\n';
+
+  // Step 4: Check Task Metadata for Keenan's tasks
+  message += '4️⃣ TASK METADATA - Keenan\'s training tasks:\n';
+  var metadataSheet = ss.getSheetByName('Task Metadata');
+  if (metadataSheet && metadataSheet.getLastRow() > 1) {
+    var metaData = metadataSheet.getDataRange().getValues();
+    var metaHeaders = metaData[0];
+    var empCol = -1, locCol = -1, typeCol = -1, itemCol = -1, srcCol = -1, srcRowCol = -1;
+
+    for (var mh = 0; mh < metaHeaders.length; mh++) {
+      var header = String(metaHeaders[mh]).toLowerCase().trim();
+      if (header === 'employee') empCol = mh;
+      if (header === 'location') locCol = mh;
+      if (header === 'tasktype') typeCol = mh;
+      if (header === 'itemtype') itemCol = mh;
+      if (header === 'sourcesheet') srcCol = mh;
+      if (header === 'sourcerow') srcRowCol = mh;
+    }
+
+    var keenanMeta = [];
+    for (var m = 1; m < metaData.length; m++) {
+      var emp = String(metaData[m][empCol] || '').trim();
+      if (emp.toLowerCase().indexOf('keenan') !== -1) {
+        keenanMeta.push({
+          row: m + 1,
+          employee: emp,
+          location: metaData[m][locCol],
+          taskType: metaData[m][typeCol],
+          itemType: metaData[m][itemCol],
+          sourceSheet: metaData[m][srcCol],
+          sourceRow: metaData[m][srcRowCol] || '?'
+        });
+      }
+    }
+
+    if (keenanMeta.length === 0) {
+      message += '  No Keenan tasks in Task Metadata\n';
+    } else {
+      message += '  Found ' + keenanMeta.length + ' task(s):\n';
+      keenanMeta.forEach(function(task) {
+        message += '  Row ' + task.row + ': ' + task.taskType + ' - ' + task.itemType + '\n';
+        message += '    Location: ' + task.location + ' (source: ' + task.sourceSheet + ' row ' + task.sourceRow + ')\n';
+      });
+    }
+  }
+  message += '\n';
+
+  // Step 5: Cross-reference Training Tracking source rows
+  message += '5️⃣ CROSS-REFERENCE - What\'s at Training Tracking row 31?\n';
+  if (trainingSheet) {
+    var trainData = trainingSheet.getDataRange().getValues();
+    // Check row 31 specifically (Feb Job Briefings)
+    if (trainData.length >= 31) {
+      var row31 = trainData[30]; // 0-indexed
+      message += '  Row 31: Month=' + row31[0] + ', Topic=' + row31[1] + '\n';
+      message += '          Crew=' + row31[2] + ', Lead=' + row31[3] + '\n';
+      var row31Location = crewLocations[String(row31[2]).trim()] || 'NOT FOUND';
+      message += '          Mapped Location: ' + row31Location + '\n';
     }
   }
 
-  Logger.log('collectExpiringCertTasks: Added ' + taskCount + ' expiring cert tasks total');
+  Logger.log(message);
+  ui.alert('Keenan Training Debug', message, ui.ButtonSet.OK);
 }
 
+
 /**
- * Collects manually added tasks from the Manual Tasks sheet.
+ * Fixes training task locations in Task Metadata by looking up the crew from
+ * the source Training Tracking row and mapping to current crew location.
+ * This corrects stale location data when employees move between crews.
  *
- * @param {Spreadsheet} ss - Active spreadsheet
- * @param {Object} tasksByLocation - Object to add tasks to
- * @param {Date} today - Today's date
+ * Run from Script Editor or menu to fix location mismatches.
  */
-function collectManualTasks(ss, tasksByLocation, today) {
-  var manualSheet = ss.getSheetByName('Manual Tasks');
-  if (!manualSheet || manualSheet.getLastRow() < 2) {
-    Logger.log('collectManualTasks: Manual Tasks sheet not found or empty');
+function fixTrainingTaskLocations() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+
+  // Get current crew location map
+  var crewLocations = getCrewLocationMap(ss);
+  Logger.log('fixTrainingTaskLocations: Loaded ' + Object.keys(crewLocations).length + ' crew locations');
+
+  // Get Training Tracking data
+  var trainingSheet = ss.getSheetByName('Training Tracking');
+  if (!trainingSheet) {
+    ui.alert('Error', 'Training Tracking sheet not found.', ui.ButtonSet.OK);
     return;
   }
+  var trainData = trainingSheet.getDataRange().getValues();
+  Logger.log('fixTrainingTaskLocations: Training Tracking has ' + trainData.length + ' rows');
 
-  var data = manualSheet.getDataRange().getValues();
-  var headers = data[0];
+  // Get Task Metadata
+  var metadataSheet = ss.getSheetByName('Task Metadata');
+  if (!metadataSheet || metadataSheet.getLastRow() < 2) {
+    ui.alert('Error', 'Task Metadata sheet not found or empty.', ui.ButtonSet.OK);
+    return;
+  }
+  var metaData = metadataSheet.getDataRange().getValues();
+  var metaHeaders = metaData[0];
 
-  // Find column indices from headers
-  // Expected: Location, Priority, Task Type, Scheduled Date, Start Time, End Time,
-  //           Estimated Time (hrs), Start Location, End Location, Notes, Date Added, Status
-  var locationCol = -1;
-  var priorityCol = -1;
-  var taskTypeCol = -1;
-  var scheduledDateCol = -1;
-  var startTimeCol = -1;
-  var endTimeCol = -1;
-  var estimatedTimeCol = -1;
-  var startLocationCol = -1;
-  var endLocationCol = -1;
-  var notesCol = -1;
-  var statusCol = -1;
-
-  for (var h = 0; h < headers.length; h++) {
-    var header = String(headers[h]).toLowerCase().trim();
+  // Find column indices
+  var srcSheetCol = -1, srcRowCol = -1, locationCol = -1, taskTypeCol = -1;
+  for (var h = 0; h < metaHeaders.length; h++) {
+    var header = String(metaHeaders[h]).toLowerCase().trim();
+    if (header === 'sourcesheet') srcSheetCol = h;
+    if (header === 'sourcerow') srcRowCol = h;
     if (header === 'location') locationCol = h;
-    if (header === 'priority') priorityCol = h;
-    if (header === 'task type') taskTypeCol = h;
-    if (header === 'scheduled date') scheduledDateCol = h;
-    if (header === 'start time') startTimeCol = h;
-    if (header === 'end time') endTimeCol = h;
-    if (header.indexOf('estimated time') !== -1) estimatedTimeCol = h;
-    if (header === 'start location') startLocationCol = h;
-    if (header === 'end location') endLocationCol = h;
-    if (header === 'notes') notesCol = h;
-    if (header === 'status') statusCol = h;
+    if (header === 'tasktype') taskTypeCol = h;
   }
 
-  // Fallbacks for column positions
-  if (locationCol === -1) locationCol = 0;
-  if (priorityCol === -1) priorityCol = 1;
-  if (taskTypeCol === -1) taskTypeCol = 2;
-  if (scheduledDateCol === -1) scheduledDateCol = 3;
-  if (startTimeCol === -1) startTimeCol = 4;
-  if (endTimeCol === -1) endTimeCol = 5;
-  if (estimatedTimeCol === -1) estimatedTimeCol = 6;
-  if (statusCol === -1) statusCol = 11;
-
-  var taskCount = 0;
-
-  for (var i = 1; i < data.length; i++) {
-    var row = data[i];
-    var location = String(row[locationCol] || '').trim();
-    var priority = String(row[priorityCol] || 'Medium').trim();
-    var taskType = String(row[taskTypeCol] || 'Task').trim();
-    var scheduledDate = row[scheduledDateCol];
-    var startTime = row[startTimeCol] || '';
-    var estimatedTime = parseFloat(row[estimatedTimeCol]) || 1;
-    var notes = notesCol !== -1 ? String(row[notesCol] || '').trim() : '';
-    var status = statusCol !== -1 ? String(row[statusCol] || 'Unassigned').trim() : 'Unassigned';
-
-    // Skip if no location
-    if (!location) {
-      Logger.log('collectManualTasks: Skipping row ' + (i+1) + ' - no location');
-      continue;
-    }
-
-    // Skip trip summary entries (combined locations created by Trip Planner)
-    // These have "+" in location (e.g., "Billings + Livingston") OR
-    // taskType starts with "🗺️ Trip:" prefix
-    if (location.indexOf(' + ') !== -1 || taskType.indexOf('🗺️ Trip:') !== -1) {
-      Logger.log('collectManualTasks: Skipping row ' + (i+1) + ' - trip summary entry: ' + location);
-      continue;
-    }
-
-    // Skip Safety Equipment tasks - these are now collected directly from Safety Reports sheet
-    // to avoid duplicate entries (old workflow created them here via createTasksFromSafetyIssues)
-    if (taskType === 'Safety Equipment' || taskType.indexOf('🔧') !== -1) {
-      Logger.log('collectManualTasks: Skipping row ' + (i+1) + ' - Safety Equipment task (handled by Safety Reports)');
-      continue;
-    }
-
-    // Skip if already complete
-    if (status.toLowerCase() === 'complete' || status.toLowerCase() === 'completed') {
-      Logger.log('collectManualTasks: Skipping row ' + (i+1) + ' - already complete');
-      continue;
-    }
-
-    // Parse scheduled date
-    var dueDate = null;
-    if (scheduledDate instanceof Date) {
-      dueDate = new Date(scheduledDate);
-      dueDate.setHours(0, 0, 0, 0);
-    } else if (scheduledDate && typeof scheduledDate === 'string') {
-      dueDate = new Date(scheduledDate);
-      if (isNaN(dueDate.getTime())) {
-        dueDate = null;
-      } else {
-        dueDate.setHours(0, 0, 0, 0);
-      }
-    }
-
-    // Calculate days until due
-    var daysTillDue = null;
-    var isOverdue = false;
-    if (dueDate) {
-      daysTillDue = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
-      isOverdue = daysTillDue < 0;
-    }
-
-    // Build task object
-    var task = {
-      type: taskType,
-      itemType: taskType, // Use task type as item type for manual tasks
-      employee: '', // Manual tasks may not have an employee
-      location: location,
-      foreman: 'Manual', // Indicate this is a manual task
-      currentItem: '',
-      pickListItem: '',
-      size: '',
-      dueDate: dueDate,
-      scheduledDate: dueDate, // Manual tasks use their scheduled date directly
-      isOverdue: isOverdue,
-      daysTillDue: daysTillDue,
-      status: status,
-      estimatedTime: estimatedTime,
-      priority: priority,
-      startTime: startTime,
-      notes: notes,
-      sheetName: 'Manual Tasks',
-      rowIndex: i + 1,
-      isManualTask: true // Flag to identify manual tasks
-    };
-
-    // Add to location group
-    if (!tasksByLocation[location]) {
-      tasksByLocation[location] = [];
-    }
-    tasksByLocation[location].push(task);
-    taskCount++;
-
-    Logger.log('collectManualTasks: Added ' + taskType + ' task at ' + location +
-               (dueDate ? ' (scheduled: ' + dueDate.toDateString() + ')' : ' (no date)') +
-               ' - isManualTask: ' + task.isManualTask + ', type: ' + task.type);
-  }
-
-  Logger.log('collectManualTasks: Added ' + taskCount + ' manual tasks total');
-}
-
-/**
- * Collects safety equipment issues from the Safety Reports sheet.
- * Only includes "Needs Attention" items with valid job numbers.
- * Excludes vehicle mechanical items (brakes, wipers, etc.)
- *
- * @param {Spreadsheet} ss - Active spreadsheet
- * @param {Object} tasksByLocation - Object to add tasks to
- * @param {Object} employeeLocations - Map of employee names to locations
- * @param {Date} today - Today's date
- */
-function collectSafetyReportsTasks(ss, tasksByLocation, employeeLocations, today) {
-  var safetySheet = ss.getSheetByName('Safety Reports');
-  if (!safetySheet || safetySheet.getLastRow() < 2) {
-    Logger.log('collectSafetyReportsTasks: Safety Reports sheet not found or empty');
+  if (srcSheetCol === -1 || srcRowCol === -1 || locationCol === -1) {
+    ui.alert('Error', 'Required columns not found in Task Metadata.', ui.ButtonSet.OK);
     return;
   }
 
-  var data = safetySheet.getDataRange().getValues();
-  var headers = data[0];
+  var updatedCount = 0;
+  var updates = [];
 
-  // Get crew-to-location map for job number lookups
-  var crewLocationMap = getCrewLocationMap(ss);
+  // Loop through Task Metadata and fix training task locations
+  for (var m = 1; m < metaData.length; m++) {
+    var sourceSheet = String(metaData[m][srcSheetCol] || '').trim();
+    var sourceRow = metaData[m][srcRowCol];
+    var currentLocation = String(metaData[m][locationCol] || '').trim();
+    var taskType = String(metaData[m][taskTypeCol] || '').trim().toLowerCase();
 
-  // Find column indices
-  var colIdx = {};
-  for (var h = 0; h < headers.length; h++) {
-    var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'report date') colIdx.reportDate = h;
-    if (header === 'report type') colIdx.reportType = h;
-    if (header === 'job number') colIdx.jobNumber = h;
-    if (header === 'foreman') colIdx.foreman = h;
-    if (header === 'vehicle number') colIdx.vehicleNumber = h;
-    if (header === 'equipment type') colIdx.equipmentType = h;
-    if (header === 'issue description') colIdx.issueDescription = h;
-    if (header === 'status') colIdx.status = h;
-    if (header === 'fe test date') colIdx.feTestDate = h;
-    if (header === 'email subject') colIdx.emailSubject = h;
-  }
-
-  // Equipment types to EXCLUDE (vehicle mechanical items)
-  var excludedEquipmentTypes = [
-    'wipers', 'horn', 'reflectors', 'warning lights', 'brakes',
-    'lights', 'mirrors', 'windshield', 'defrost', 'windows',
-    'heater', 'seat belts', 'misc comment', 'tires', 'battery',
-    'engine', 'oil', 'transmission', 'clutch', 'alternator',
-    'starter', 'radiator', 'suspension', 'exhaust', 'fuel', 'coolant', 'filter'
-  ];
-
-  // DEDUPLICATION: Track best (newest) task for each unique equipment issue
-  // Key: crewNumber_vehicleNumber_equipmentType (normalized)
-  var bestTasks = {};  // key -> {task, reportDate, rowIndex}
-  var duplicateCount = 0;
-
-  for (var i = 1; i < data.length; i++) {
-    var row = data[i];
-    var status = String(row[colIdx.status] || '').trim();
-    var jobNumber = String(row[colIdx.jobNumber] || '').trim();
-    var equipmentType = String(row[colIdx.equipmentType] || '').trim();
-    var foreman = String(row[colIdx.foreman] || '').trim();
-    var vehicleNumber = String(row[colIdx.vehicleNumber] || '').trim();
-    var issueDescription = String(row[colIdx.issueDescription] || '').trim();
-    var reportDate = row[colIdx.reportDate];
-    var emailSubject = colIdx.emailSubject !== undefined ? String(row[colIdx.emailSubject] || '').trim() : '';
-
-    // Skip if not "Needs Attention"
-    if (status !== 'Needs Attention') {
+    // Only process Training tasks from Training Tracking
+    if (taskType !== 'training' || sourceSheet !== 'Training Tracking') {
       continue;
     }
 
-    // Skip if no job number (can't determine location for trip planning)
-    if (!jobNumber) {
-      Logger.log('collectSafetyReportsTasks: Skipping row ' + (i + 1) + ' - no job number');
+    // Look up the crew from Training Tracking source row
+    var trainRowIndex = parseInt(sourceRow, 10);
+    if (isNaN(trainRowIndex) || trainRowIndex < 3 || trainRowIndex > trainData.length) {
+      Logger.log('fixTrainingTaskLocations: Skipping row ' + (m+1) + ' - invalid source row: ' + sourceRow);
       continue;
     }
 
-    // Skip excluded equipment types (vehicle mechanical items)
-    var equipLower = equipmentType.toLowerCase();
-    var isExcluded = false;
-    for (var e = 0; e < excludedEquipmentTypes.length; e++) {
-      if (equipLower.indexOf(excludedEquipmentTypes[e]) !== -1) {
-        isExcluded = true;
-        break;
-      }
-    }
-    if (isExcluded) {
-      Logger.log('collectSafetyReportsTasks: Skipping row ' + (i + 1) + ' - excluded equipment type: ' + equipmentType);
-      continue;
-    }
+    var trainRow = trainData[trainRowIndex - 1]; // Convert to 0-indexed
+    var crew = String(trainRow[2] || '').trim(); // Column C = Crew #
 
-    // Lookup location from job number using crew map
-    // Extract base crew number (e.g., "013-26" from "013-26.1")
-    var crewNumber = jobNumber.split('.')[0];
-    var location = crewLocationMap[crewNumber] || jobNumber;
+    // Get correct location from crew location map
+    var correctLocation = crewLocations[crew] || 'Unknown';
 
-    // Parse report date as due date
-    var dueDate = null;
-    var reportDateObj = null;
-    if (reportDate instanceof Date) {
-      dueDate = new Date(reportDate);
-      reportDateObj = new Date(reportDate);
-      dueDate.setHours(0, 0, 0, 0);
-    } else if (reportDate && typeof reportDate === 'string') {
-      dueDate = new Date(reportDate);
-      reportDateObj = new Date(reportDate);
-      if (isNaN(dueDate.getTime())) {
-        dueDate = new Date();
-        reportDateObj = new Date();
-      }
-      dueDate.setHours(0, 0, 0, 0);
-    } else {
-      dueDate = new Date();
-      reportDateObj = new Date();
-      dueDate.setHours(0, 0, 0, 0);
-    }
-
-    // Calculate days until due (safety issues are immediate priority)
-    var daysTillDue = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
-    var isOverdue = daysTillDue < 0;
-
-    // Build notes with vehicle number for persistence to Task Metadata
-    var notes = '';
-    if (vehicleNumber) {
-      notes = 'Vehicle #' + vehicleNumber;
-    }
-
-    // Build task object
-    var task = {
-      type: 'Safety Equipment',
-      taskType: 'Safety Equipment',
-      itemType: equipmentType,
-      employee: foreman,
-      location: location,
-      foreman: foreman,
-      currentItem: issueDescription,
-      vehicleNumber: vehicleNumber,
-      emailSubject: emailSubject,
-      notes: notes,
-      dueDate: dueDate,
-      reportDate: reportDateObj, // Date the safety report email was received
-      scheduledDate: null,
-      isOverdue: isOverdue,
-      daysTillDue: daysTillDue,
-      status: status,
-      sheetName: 'Safety Reports',
-      source: 'Safety Reports',
-      rowIndex: i + 1
-    };
-
-    // DEDUPLICATION: Create unique key for this equipment issue
-    // Key format: crewNumber_vehicleNumber_equipmentType (all normalized lowercase)
-    var dedupeKey = (crewNumber + '_' + vehicleNumber + '_' + equipmentType).toLowerCase().replace(/\s+/g, '');
-
-    if (bestTasks[dedupeKey]) {
-      // Duplicate found - keep the NEWEST (most recent report date)
-      var existingReportDate = bestTasks[dedupeKey].reportDate;
-      if (reportDateObj && existingReportDate && reportDateObj > existingReportDate) {
-        // Current task is newer - replace
-        Logger.log('collectSafetyReportsTasks: Replacing older duplicate for ' + dedupeKey +
-                   ' (old row ' + bestTasks[dedupeKey].rowIndex + ' -> new row ' + (i + 1) + ')');
-        bestTasks[dedupeKey] = { task: task, reportDate: reportDateObj, rowIndex: i + 1 };
-      } else {
-        // Existing task is newer or same - skip current
-        Logger.log('collectSafetyReportsTasks: Skipping duplicate row ' + (i + 1) + ' for ' + dedupeKey +
-                   ' (keeping row ' + bestTasks[dedupeKey].rowIndex + ')');
-      }
-      duplicateCount++;
-    } else {
-      // First occurrence of this equipment issue
-      bestTasks[dedupeKey] = { task: task, reportDate: reportDateObj, rowIndex: i + 1 };
+    // Check if location needs updating
+    if (correctLocation !== currentLocation && correctLocation !== 'Unknown') {
+      Logger.log('fixTrainingTaskLocations: Row ' + (m+1) + ' crew ' + crew + ': ' + currentLocation + ' → ' + correctLocation);
+      updates.push({
+        row: m + 1, // 1-indexed for sheet
+        col: locationCol + 1, // 1-indexed for sheet
+        oldValue: currentLocation,
+        newValue: correctLocation,
+        crew: crew
+      });
     }
   }
 
-  // Add deduplicated tasks to location groups
-  var taskCount = 0;
-  for (var key in bestTasks) {
-    var taskEntry = bestTasks[key];
-    var task = taskEntry.task;
-    var location = task.location;
-
-    if (!tasksByLocation[location]) {
-      tasksByLocation[location] = [];
-    }
-    tasksByLocation[location].push(task);
-    taskCount++;
-
-    Logger.log('collectSafetyReportsTasks: Added ' + task.itemType + ' task at ' + location +
-               ' (vehicle: ' + task.vehicleNumber + ', row: ' + task.rowIndex + ')');
-  }
-
-  Logger.log('collectSafetyReportsTasks: Added ' + taskCount + ' unique safety report tasks (skipped ' + duplicateCount + ' duplicates)');
-}
-
-/**
- * Collects cert tasks that user explicitly added to the Task List (InTaskList=TRUE in Task Metadata).
- *
- * This captures certs like Crane Certs that were manually added from the Expiring Certs tab,
- * regardless of their expiration date. These certs may not be within 30 days but the user
- * has explicitly said they want to track them.
- *
- * @param {Spreadsheet} ss - Active spreadsheet
- * @param {Object} tasksByLocation - Object to add tasks to
- * @param {Object} employeeLocations - Map of employee names to locations
- * @param {Object} employeeForemen - Map of employee names to foremen
- * @param {Object} employeePhones - Map of employee names to phone numbers
- */
-function collectInTaskListCerts(ss, tasksByLocation, employeeLocations, employeeForemen, employeePhones) {
-  var taskMetadataSheet = ss.getSheetByName('Task Metadata');
-  if (!taskMetadataSheet || taskMetadataSheet.getLastRow() < 2) {
-    Logger.log('collectInTaskListCerts: Task Metadata sheet not found or empty');
+  // Apply updates
+  if (updates.length === 0) {
+    ui.alert('No Updates Needed', 'All training task locations are already correct.', ui.ButtonSet.OK);
     return;
   }
 
-  var data = taskMetadataSheet.getDataRange().getValues();
-  var headers = data[0];
-
-  // Find column indices
-  var colIdx = {};
-  for (var h = 0; h < headers.length; h++) {
-    var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'taskid') colIdx.taskID = h;
-    if (header === 'sourcesheet') colIdx.sourceSheet = h;
-    if (header === 'sourcerow') colIdx.sourceRow = h;
-    if (header === 'employee') colIdx.employee = h;
-    if (header === 'tasktype') colIdx.taskType = h;
-    if (header === 'itemtype') colIdx.itemType = h;
-    if (header === 'location') colIdx.location = h;
-    if (header === 'foreman') colIdx.foreman = h;
-    if (header === 'phonenumber') colIdx.phoneNumber = h;
-    if (header === 'duedate') colIdx.dueDate = h;
-    if (header === 'scheduleddate') colIdx.scheduledDate = h;
-    if (header === 'starttime') colIdx.startTime = h;
-    if (header === 'endtime') colIdx.endTime = h;
-    if (header === 'status') colIdx.status = h;
-    if (header === 'notes') colIdx.notes = h;
-    if (header === 'intasklist') colIdx.inTaskList = h;
+  var confirmMsg = 'Found ' + updates.length + ' training task(s) with incorrect locations.\n\n';
+  for (var i = 0; i < Math.min(updates.length, 10); i++) {
+    confirmMsg += '• Crew ' + updates[i].crew + ': ' + updates[i].oldValue + ' → ' + updates[i].newValue + '\n';
   }
+  if (updates.length > 10) {
+    confirmMsg += '... and ' + (updates.length - 10) + ' more\n';
+  }
+  confirmMsg += '\nUpdate these locations?';
 
-  if (colIdx.inTaskList === undefined) {
-    Logger.log('collectInTaskListCerts: InTaskList column not found in Task Metadata');
+  var response = ui.alert('Confirm Location Updates', confirmMsg, ui.ButtonSet.YES_NO);
+  if (response !== ui.Button.YES) {
     return;
   }
 
-  var today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  // Track already-added certs to avoid duplicates (if collectExpiringCertTasks already added them)
-  var addedCerts = {};
-  for (var loc in tasksByLocation) {
-    var tasks = tasksByLocation[loc];
-    for (var t = 0; t < tasks.length; t++) {
-      if (tasks[t].type === 'Cert Expiring') {
-        var key = (tasks[t].employee || '').toLowerCase() + '|' + (tasks[t].itemType || '');
-        addedCerts[key] = true;
-      }
-    }
+  // Apply updates to sheet
+  for (var u = 0; u < updates.length; u++) {
+    metadataSheet.getRange(updates[u].row, updates[u].col).setValue(updates[u].newValue);
+    updatedCount++;
   }
 
-  var taskCount = 0;
-
-  for (var i = 1; i < data.length; i++) {
-    var row = data[i];
-    var taskType = String(row[colIdx.taskType] || '').trim();
-    var inTaskList = row[colIdx.inTaskList];
-    var status = String(row[colIdx.status] || '').trim();
-
-    // Only collect "Cert Expiring" tasks that have InTaskList=TRUE
-    if (taskType !== 'Cert Expiring') {
-      continue;
-    }
-
-    // Check InTaskList flag
-    if (inTaskList !== true && String(inTaskList).toUpperCase() !== 'TRUE') {
-      continue;
-    }
-
-    // Skip completed tasks
-    if (status === 'Complete' || status === 'Completed') {
-      continue;
-    }
-
-    var employee = String(row[colIdx.employee] || '').trim();
-    var itemType = String(row[colIdx.itemType] || '').trim(); // e.g., "Crane Cert", "CPR"
-    var location = String(row[colIdx.location] || '').trim();
-    var foreman = String(row[colIdx.foreman] || '').trim();
-    var phoneNumber = String(row[colIdx.phoneNumber] || '').trim();
-    var sourceSheet = String(row[colIdx.sourceSheet] || '').trim();
-    var sourceRow = row[colIdx.sourceRow];
-
-    // Skip if already added by collectExpiringCertTasks
-    var certKey = addedCerts[employee.toLowerCase() + '|' + itemType] || false;
-    if (certKey) {
-      Logger.log('collectInTaskListCerts: Skipping duplicate ' + itemType + ' for ' + employee);
-      continue;
-    }
-    addedCerts[certKey] = true;
-
-    // Parse due date
-    var dueDate = null;
-    var dueDateValue = row[colIdx.dueDate];
-    if (dueDateValue instanceof Date) {
-      dueDate = new Date(dueDateValue);
-      dueDate.setHours(0, 0, 0, 0);
-    } else if (dueDateValue && typeof dueDateValue === 'string') {
-      dueDate = new Date(dueDateValue);
-      if (isNaN(dueDate.getTime())) {
-        dueDate = null;
-      } else {
-        dueDate.setHours(0, 0, 0, 0);
-      }
-    }
-
-    // Calculate days until due
-    var daysTillDue = null;
-    var isOverdue = false;
-    if (dueDate) {
-      daysTillDue = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
-      isOverdue = daysTillDue < 0;
-    }
-
-    // Parse scheduled date
-    var scheduledDate = null;
-    var scheduledDateValue = row[colIdx.scheduledDate];
-    if (scheduledDateValue instanceof Date) {
-      scheduledDate = new Date(scheduledDateValue);
-    } else if (scheduledDateValue && typeof scheduledDateValue === 'string') {
-      scheduledDate = new Date(scheduledDateValue);
-      if (isNaN(scheduledDate.getTime())) {
-        scheduledDate = null;
-      }
-    }
-
-    // Use location from metadata, fallback to employee lookup
-    if (!location && employee) {
-      var empKey = employee.toLowerCase();
-      location = employeeLocations[empKey] || 'Unknown';
-    }
-    if (!location) {
-      location = 'Unknown';
-    }
-
-    // Get foreman if not set
-    if (!foreman && employee) {
-      foreman = employeeForemen[employee.toLowerCase()] || 'Unassigned';
-    }
-
-    // Determine priority
-    var priority = 'Low';
-    if (isOverdue) {
-      priority = 'High';
-    } else if (daysTillDue !== null && daysTillDue <= 7) {
-      priority = 'High';
-    } else if (daysTillDue !== null && daysTillDue <= 30) {
-      priority = 'Medium';
-    }
-
-    // Build task object
-    var task = {
-      type: 'Cert Expiring',
-      taskType: 'Cert Expiring',
-      itemType: itemType,
-      employee: employee,
-      location: location,
-      foreman: foreman,
-      phoneNumber: phoneNumber,
-      currentItem: '',
-      pickListItem: '',
-      size: '',
-      dueDate: dueDate,
-      scheduledDate: scheduledDate,
-      isOverdue: isOverdue,
-      daysTillDue: daysTillDue,
-      status: isOverdue ? 'Overdue' : 'Unassigned',  // Standardized status (Feb 18, 2026)
-      estimatedTime: 0,
-      priority: priority,
-      source: sourceSheet || 'Expiring Certs',
-      sheetName: sourceSheet || 'Expiring Certs',
-      rowIndex: sourceRow || (i + 1)
-    };
-
-    // Add to location group
-    if (!tasksByLocation[location]) {
-      tasksByLocation[location] = [];
-    }
-    tasksByLocation[location].push(task);
-    taskCount++;
-
-    Logger.log('collectInTaskListCerts: Added ' + itemType + ' for ' + employee +
-               ' at ' + location + ' (InTaskList=TRUE, days=' + daysTillDue + ')');
-  }
-
-  Logger.log('collectInTaskListCerts: Added ' + taskCount + ' InTaskList cert tasks from Task Metadata');
+  ui.alert('Locations Updated', 'Updated ' + updatedCount + ' training task location(s).', ui.ButtonSet.OK);
+  Logger.log('fixTrainingTaskLocations: Updated ' + updatedCount + ' locations');
 }
 
-/**
- * Collects Missing Safety Report tasks directly from Task Metadata.
- * These tasks are created by the compliance tracking system when crews
- * miss JHAs or Weekly Safety Meetings.
- *
- * Only includes tasks from the PREVIOUS work week (not current week, not older weeks).
- * Parses TaskID (SafetyCompliance_JOB-NUM_MM-DD-YYYY) to determine week.
- *
- * @param {Spreadsheet} ss - Active spreadsheet
- * @param {Object} tasksByLocation - Object to add tasks to
- * @param {Object} employeeLocations - Map of employee names to locations
- * @param {Object} employeeForemen - Map of employee names to foremen
- * @param {Object} employeePhones - Map of employee names to phone numbers
- * @param {Date} today - Today's date
- */
-function collectMissingSafetyReportTasks(ss, tasksByLocation, employeeLocations, employeeForemen, employeePhones, today) {
-  var taskMetadataSheet = ss.getSheetByName('Task Metadata');
-  if (!taskMetadataSheet || taskMetadataSheet.getLastRow() < 2) {
-    Logger.log('collectMissingSafetyReportTasks: Task Metadata sheet not found or empty');
-    return;
-  }
-
-  var data = taskMetadataSheet.getDataRange().getValues();
-  var headers = data[0];
-
-  // Find column indices
-  var colIdx = {};
-  for (var h = 0; h < headers.length; h++) {
-    var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'taskid') colIdx.taskID = h;
-    if (header === 'sourcesheet') colIdx.sourceSheet = h;
-    if (header === 'sourcerow') colIdx.sourceRow = h;
-    if (header === 'employee') colIdx.employee = h;
-    if (header === 'tasktype') colIdx.taskType = h;
-    if (header === 'itemtype') colIdx.itemType = h;
-    if (header === 'currentitem') colIdx.currentItem = h;
-    if (header === 'location') colIdx.location = h;
-    if (header === 'foreman') colIdx.foreman = h;
-    if (header === 'phonenumber') colIdx.phoneNumber = h;
-    if (header === 'duedate') colIdx.dueDate = h;
-    if (header === 'status') colIdx.status = h;
-    if (header === 'notes') colIdx.notes = h;
-    if (header === 'createddate') colIdx.createdDate = h;
-    if (header === 'completeddate') colIdx.completedDate = h;
-  }
-
-  // Calculate CURRENT week start (for filtering - we don't show current week tasks)
-  var dayOfWeek = today.getDay(); // 0 = Sunday
-  var currentWeekStart = new Date(today);
-  currentWeekStart.setDate(today.getDate() - dayOfWeek);
-  currentWeekStart.setHours(0, 0, 0, 0);
-
-  var currentWeekStartStr = Utilities.formatDate(currentWeekStart, Session.getScriptTimeZone(), 'MM/dd/yyyy');
-
-  Logger.log('collectMissingSafetyReportTasks: Collecting all PAST week tasks (current week start = ' + currentWeekStartStr + ')');
-
-  var taskCount = 0;
-  var debugCount = 0;
-
-  // Track seen job+week combinations to prevent duplicates in UI
-  // Also track which row was seen first (and its CreatedDate) for keeping newest
-  var seenJobWeeks = {};
-  var tasksByJobWeek = {}; // jobWeekKey -> {row, taskId, createdDate}
-
-  // First pass: identify all Safety Compliance tasks and group by job+week
-  var allSafetyTasks = [];
-
-  for (var i = 1; i < data.length; i++) {
-    var row = data[i];
-    var taskId = String(row[colIdx.taskID] || '').trim();
-    var sourceSheet = String(row[colIdx.sourceSheet] || '').trim();
-    var taskType = String(row[colIdx.taskType] || '').trim();
-
-    // Check multiple ways to identify Safety Compliance tasks:
-    // 1. TaskID starts with SafetyCompliance_
-    // 2. SourceSheet is 'Safety Compliance'
-    // 3. TaskType is 'Missing Safety Report'
-    var isSafetyComplianceTask = (
-      taskId.indexOf('SafetyCompliance_') === 0 ||
-      sourceSheet === 'Safety Compliance' ||
-      taskType === 'Missing Safety Report'
-    );
-
-    if (!isSafetyComplianceTask) {
-      continue;
-    }
-
-    // Parse TaskID to extract job number and week start date
-    // Example: SafetyCompliance_013-26_02-01-2026
-    var taskIdParts = taskId.split('_');
-    var jobNumber = '';
-    var weekDateStr = '';
-
-    // Try to extract from TaskID format: SafetyCompliance_XXX-XX_MM-DD-YYYY
-    if (taskIdParts.length >= 3 && taskIdParts[0] === 'SafetyCompliance') {
-      jobNumber = taskIdParts[1];
-      weekDateStr = taskIdParts[2];
-    }
-
-    // If job number not in TaskID, try to extract from other sources
-    if (!jobNumber || !jobNumber.match(/^\d{3}-\d{2}$/)) {
-      // Try SourceRow (sometimes contains job number)
-      var sourceRow = String(row[colIdx.sourceRow] || '').trim();
-      var jobMatch = sourceRow.match(/(\d{3}-\d{2})/);
-      if (jobMatch) {
-        jobNumber = jobMatch[1];
-      }
-    }
-
-    // If still no job number, try to extract from Notes field
-    if (!jobNumber || !jobNumber.match(/^\d{3}-\d{2}$/)) {
-      var notesText = String(row[colIdx.notes] || '').trim();
-      var jobFromNotes = notesText.match(/(\d{3}-\d{2})/);
-      if (jobFromNotes) {
-        jobNumber = jobFromNotes[1];
-      }
-    }
-
-    // If still no job number, try Employee name lookup
-    if (!jobNumber || !jobNumber.match(/^\d{3}-\d{2}$/)) {
-      var empName = String(row[colIdx.employee] || '').trim();
-      if (empName && employeeForemen) {
-        // Look up job number from employees
-        for (var empKey in employeeForemen) {
-          if (empKey === empName.toLowerCase()) {
-            var foremanJob = employeeForemen[empKey];
-            var fjm = String(foremanJob).match(/(\d{3}-\d{2})/);
-            if (fjm) {
-              jobNumber = fjm[1];
-              break;
-            }
-          }
-        }
-      }
-    }
-
-    // Try to get week date from DueDate if not in TaskID
-    if (!weekDateStr || weekDateStr.split('-').length !== 3) {
-      var dueDate = row[colIdx.dueDate];
-      if (dueDate) {
-        var dueDateObj = (dueDate instanceof Date) ? dueDate : new Date(dueDate);
-        if (!isNaN(dueDateObj.getTime())) {
-          // Due date is Saturday - week start is Sunday (6 days before)
-          var weekStart = new Date(dueDateObj);
-          weekStart.setDate(dueDateObj.getDate() - 6);
-          weekDateStr = Utilities.formatDate(weekStart, Session.getScriptTimeZone(), 'MM-dd-yyyy');
-        }
-      }
-    }
-
-    // If we still don't have week date, try notes
-    if (!weekDateStr || weekDateStr.split('-').length !== 3) {
-      var notesText = String(row[colIdx.notes] || '').trim();
-      var weekMatch = notesText.match(/week of\s+(\d{2})\/(\d{2})\/(\d{4})/i);
-      if (weekMatch) {
-        weekDateStr = weekMatch[1] + '-' + weekMatch[2] + '-' + weekMatch[3];
-      }
-    }
-
-    // Parse week start date
-    var weekDateParts = weekDateStr ? weekDateStr.split('-') : [];
-    if (weekDateParts.length !== 3) {
-      // Can't determine week, log and skip
-      Logger.log('collectMissingSafetyReportTasks: Skipping row ' + (i+1) + ' - cannot determine week date. TaskID=' + taskId + ', weekDateStr=' + weekDateStr);
-      continue;
-    }
-
-    var taskWeekStart = new Date(
-      parseInt(weekDateParts[2]), // year
-      parseInt(weekDateParts[0]) - 1, // month (0-indexed)
-      parseInt(weekDateParts[1]) // day
-    );
-    taskWeekStart.setHours(0, 0, 0, 0);
-
-    // Filter: Include all PAST week tasks (exclude current week - deadline hasn't passed)
-    // A task is from a past week if its week start is BEFORE the current week start
-    if (taskWeekStart.getTime() >= currentWeekStart.getTime()) {
-      Logger.log('collectMissingSafetyReportTasks: Skipping ' + taskId + ' - week ' + weekDateStr + ' is current or future week');
-      continue;
-    }
-
-    debugCount++;
-
-    // Check status - skip completed tasks
-    var status = String(row[colIdx.status] || '').trim();
-    var completedDate = row[colIdx.completedDate];
-    if (status === 'Complete' || status === 'Completed' || completedDate) {
-      Logger.log('collectMissingSafetyReportTasks: Skipping #' + debugCount + ' (' + taskId + ') - already completed');
-      continue;
-    }
-
-    // Detect malformed data (columns shifted by 1)
-    // In malformed data: Employee column contains "Missing Safety Report" instead of name
-    var employeeVal = String(row[colIdx.employee] || '').trim();
-    var isMalformed = (employeeVal === 'Missing Safety Report');
-
-    var employee, location, foreman, phoneNumber, itemType, notes;
-
-    if (isMalformed) {
-      // Malformed column mapping:
-      // D (Employee): "Missing Safety Report" (should be foreman)
-      // E (TaskType): "JHA" (should be "Missing Safety Report")
-      // F (ItemType): foreman name (should be itemType)
-      // G (CurrentItem): location (should be empty)
-      // H (Location): phone number (should be location)
-      // I (Foreman): due date (should be foreman)
-      // Notes column is still correct
-
-      itemType = String(row[colIdx.taskType] || '').trim(); // E has actual itemType (JHA, etc)
-      employee = String(row[colIdx.itemType] || '').trim(); // F has foreman name
-      foreman = employee;
-      location = String(row[colIdx.currentItem] || '').trim(); // G has location
-      phoneNumber = String(row[colIdx.location] || '').trim(); // H has phone
-      notes = String(row[colIdx.notes] || '').trim();
-
-      Logger.log('collectMissingSafetyReportTasks: DEBUG - Malformed data corrected - employee=' + employee +
-                 ', itemType=' + itemType + ', location=' + location);
-    } else {
-      // Normal column mapping
-      employee = employeeVal;
-      itemType = String(row[colIdx.itemType] || '').trim();
-      location = String(row[colIdx.location] || '').trim();
-      foreman = String(row[colIdx.foreman] || '').trim();
-      phoneNumber = String(row[colIdx.phoneNumber] || '').trim();
-      notes = String(row[colIdx.notes] || '').trim();
-    }
-
-    // If location is empty or looks like a phone number, try lookup
-    if (!location || location.match(/^\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}$/)) {
-      location = lookupLocationByJobNumber(jobNumber) || 'Unknown';
-    }
-
-    // If phone is missing or invalid, try lookup
-    if (!phoneNumber || !phoneNumber.match(/\d{10,}/)) {
-      var empKey = (employee || '').toLowerCase().trim();
-      phoneNumber = employeePhones[empKey] || '';
-    }
-
-    // Calculate due date (Saturday of the week)
-    var dueDate = new Date(taskWeekStart);
-    dueDate.setDate(dueDate.getDate() + 6); // Saturday
-    dueDate.setHours(23, 59, 59, 999);
-
-    // Calculate days until due
-    var daysTillDue = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
-    var isOverdue = daysTillDue < 0;
-
-    // Build task object
-    var task = {
-      employee: employee || foreman || jobNumber,
-      foreman: foreman || employee || jobNumber,
-      location: location,
-      type: 'Missing Safety Report',
-      taskType: 'Missing Safety Report',
-      itemType: itemType, // "JHA", "Weekly Meeting", or "JHA + Weekly Meeting"
-      phoneNumber: phoneNumber,
-      dueDate: dueDate,
-      daysTillDue: daysTillDue,
-      isOverdue: isOverdue,
-      priority: 'High', // Always high for compliance
-      estimatedTime: 0.25, // 15 minutes for a phone call
-      notes: notes,
-      weekStart: taskWeekStart,
-      // Use actual SourceSheet and SourceRow from the Task Metadata row
-      // This ensures the key matches the metadata lookup in getTasksWithMetadata
-      source: String(row[colIdx.sourceSheet] || 'Safety Compliance').trim(),
-      sheetName: String(row[colIdx.sourceSheet] || 'Safety Compliance').trim(),
-      rowIndex: String(row[colIdx.sourceRow] || '').trim() || (i + 1),
-      metadataRow: i + 1, // Actual row in Task Metadata for updates
-      taskId: taskId,
-      jobNumber: jobNumber,
-      createdDate: row[colIdx.createdDate] || null
-    };
-
-    // Debug logging
-    Logger.log('collectMissingSafetyReportTasks: Task ' + taskId + ' - notes="' + notes + '", source=' + task.source + ', rowIndex=' + task.rowIndex);
-
-    // Deduplicate: Only show ONE task per job+week combination (KEEP NEWEST)
-    // This handles cases where Task Metadata has duplicates from generateTaskMetadata bug
-    // Use NORMALIZED week date (from parsed taskWeekStart) for consistent grouping
-    var normalizedWeek = Utilities.formatDate(taskWeekStart, Session.getScriptTimeZone(), 'MM-dd-yyyy');
-    var jobWeekKey = jobNumber + '_' + normalizedWeek;
-
-    if (tasksByJobWeek[jobWeekKey]) {
-      // Found duplicate - compare CreatedDate to keep newest
-      var existingTask = tasksByJobWeek[jobWeekKey];
-      var existingCreated = existingTask.createdDate ? new Date(existingTask.createdDate) : new Date(0);
-      var currentCreated = task.createdDate ? new Date(task.createdDate) : new Date(0);
-
-      if (currentCreated > existingCreated) {
-        // Current task is newer - replace existing
-        Logger.log('collectMissingSafetyReportTasks: Replacing older duplicate for ' + jobWeekKey + ' (old: ' + existingTask.taskId + ', new: ' + taskId + ')');
-
-        // Remove the old task from its location array
-        var oldLoc = existingTask.location;
-        if (tasksByLocation[oldLoc]) {
-          for (var r = tasksByLocation[oldLoc].length - 1; r >= 0; r--) {
-            if (tasksByLocation[oldLoc][r].taskId === existingTask.taskId) {
-              tasksByLocation[oldLoc].splice(r, 1);
-              taskCount--;
-              break;
-            }
-          }
-        }
-
-        // Update tracking with newer task
-        tasksByJobWeek[jobWeekKey] = task;
-      } else {
-        // Existing task is newer or same age - skip this one
-        Logger.log('collectMissingSafetyReportTasks: Skipping older duplicate for ' + jobWeekKey + ' (keeping: ' + existingTask.taskId + ', skipping: ' + taskId + ')');
-        continue;
-      }
-    } else {
-      // First time seeing this job+week
-      tasksByJobWeek[jobWeekKey] = task;
-    }
-
-    seenJobWeeks[jobWeekKey] = true;
-
-    // Add to location
-    if (!tasksByLocation[location]) {
-      tasksByLocation[location] = [];
-    }
-    tasksByLocation[location].push(task);
-    taskCount++;
-
-  }
-
-  Logger.log('collectMissingSafetyReportTasks: Added ' + taskCount + ' missing safety report tasks total');
-}
-
-/**
- * Creates crew number to location map.
- *
- * @param {Spreadsheet} ss - Active spreadsheet
- * @return {Object} Map of crew number to location
- */
-function getCrewLocationMap(ss) {
-  var employeesSheet = ss.getSheetByName('Employees');
-  if (!employeesSheet || employeesSheet.getLastRow() < 2) {
-    return {};
-  }
-
-  var data = employeesSheet.getDataRange().getValues();
-  var headers = data[0];
-  var jobNumCol = -1;
-  var locationCol = -1;
-
-  // Find columns
-  for (var h = 0; h < headers.length; h++) {
-    var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'job number') jobNumCol = h;
-    if (header === 'location') locationCol = h;
-  }
-
-  if (jobNumCol === -1 || locationCol === -1) {
-    return {};
-  }
-
-  var crewMap = {};
-  for (var i = 1; i < data.length; i++) {
-    var jobNumber = String(data[i][jobNumCol]).trim();
-    var location = String(data[i][locationCol]).trim();
-
-    if (jobNumber && location) {
-      // Extract crew number (e.g., "009-26.1" → "009-26")
-      var crew = extractCrewNumber(jobNumber);
-      if (crew) {
-        crewMap[crew] = location;
-      }
-    }
-  }
-
-  return crewMap;
-}
-
-/**
- * Debug what tasks are being collected for Task List
- * Shows counts by task type to identify collection issues
- */
-function debugTaskListData() {
-  var ui = SpreadsheetApp.getUi();
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-
-  try {
-    Logger.log('=== debugTaskListData START ===');
-    var tasksByLocation = collectAndGroupTasks(ss);
-
-    var countsByType = {};
-    var totalTasks = 0;
-    var sampleByType = {};
-
-    for (var loc in tasksByLocation) {
-      var tasks = tasksByLocation[loc];
-      for (var i = 0; i < tasks.length; i++) {
-        var task = tasks[i];
-        var taskType = task.type || task.taskType || 'Unknown';
-        countsByType[taskType] = (countsByType[taskType] || 0) + 1;
-        totalTasks++;
-
-        if (!sampleByType[taskType]) {
-          sampleByType[taskType] = {
-            employee: task.employee,
-            location: loc,
-            status: task.status
-          };
-        }
-      }
-    }
-
-    var message = '=== Task Collection Debug ===\n\n';
-    message += 'Total: ' + totalTasks + ' tasks\n';
-    message += 'Locations: ' + Object.keys(tasksByLocation).length + '\n\n';
-    message += 'By Type:\n';
-
-    var types = Object.keys(countsByType).sort();
-    for (var t = 0; t < types.length; t++) {
-      var typ = types[t];
-      var sample = sampleByType[typ];
-      message += '  ' + typ + ': ' + countsByType[typ];
-      if (sample) {
-        message += ' (e.g. ' + sample.employee + ')';
-      }
-      message += '\n';
-    }
-
-    Logger.log(message);
-    ui.alert('Task List Debug', message, ui.ButtonSet.OK);
-
-  } catch (e) {
-    ui.alert('Error', 'Debug error: ' + e.toString(), ui.ButtonSet.OK);
-    Logger.log('debugTaskListData error: ' + e.toString());
-  }
-}
-
-/**
- * Debug: Compare Task Metadata vs collectAndGroupTasks
- * Shows discrepancy between stored metadata and live collection
- */
-function debugMetadataVsCollection() {
-  var ui = SpreadsheetApp.getUi();
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-
-  try {
-    // Count from Task Metadata
-    var metadataSheet = ss.getSheetByName('Task Metadata');
-    var metadataCount = 0;
-    var metadataByType = {};
-
-    if (metadataSheet && metadataSheet.getLastRow() > 1) {
-      var metaData = metadataSheet.getDataRange().getValues();
-      var metaHeaders = metaData[0];
-      var taskTypeCol = -1;
-      var statusCol = -1;
-
-      for (var h = 0; h < metaHeaders.length; h++) {
-        if (metaHeaders[h] === 'TaskType') taskTypeCol = h;
-        if (metaHeaders[h] === 'Status') statusCol = h;
-      }
-
-      for (var i = 1; i < metaData.length; i++) {
-        var taskType = metaData[i][taskTypeCol] || 'Unknown';
-        var status = metaData[i][statusCol] || '';
-
-        if (status !== 'Complete') {
-          metadataCount++;
-          metadataByType[taskType] = (metadataByType[taskType] || 0) + 1;
-        }
-      }
-    }
-
-    // Count from collectAndGroupTasks
-    var tasksByLocation = collectAndGroupTasks(ss);
-    var collectedCount = 0;
-    var collectedByType = {};
-
-    for (var loc in tasksByLocation) {
-      var tasks = tasksByLocation[loc];
-      for (var t = 0; t < tasks.length; t++) {
-        var task = tasks[t];
-        var type = task.type || task.taskType || 'Unknown';
-        collectedCount++;
-        collectedByType[type] = (collectedByType[type] || 0) + 1;
-      }
-    }
-
-    var message = '=== Metadata vs Collection Comparison ===\n\n';
-    message += 'TASK METADATA (stored): ' + metadataCount + ' non-completed tasks\n';
-    for (var mt in metadataByType) {
-      message += '  ' + mt + ': ' + metadataByType[mt] + '\n';
-    }
-
-    message += '\ncollectAndGroupTasks (live): ' + collectedCount + ' tasks\n';
-    for (var ct in collectedByType) {
-      message += '  ' + ct + ': ' + collectedByType[ct] + '\n';
-    }
-
-    message += '\n=== DISCREPANCIES ===\n';
-    var allTypes = {};
-    for (var k1 in metadataByType) allTypes[k1] = true;
-    for (var k2 in collectedByType) allTypes[k2] = true;
-
-    var hasDiscrepancy = false;
-    for (var typ in allTypes) {
-      var inMeta = metadataByType[typ] || 0;
-      var inColl = collectedByType[typ] || 0;
-      if (inMeta !== inColl) {
-        hasDiscrepancy = true;
-        message += typ + ': Metadata=' + inMeta + ', Collected=' + inColl;
-        if (inMeta > inColl) {
-          message += ' ⚠️ Missing ' + (inMeta - inColl) + ' from collection!\n';
-        } else {
-          message += ' ⚠️ Extra ' + (inColl - inMeta) + ' in collection!\n';
-        }
-      }
-    }
-
-    if (!hasDiscrepancy) {
-      message += 'None - counts match!\n';
-    }
-
-    Logger.log(message);
-    ui.alert('Metadata vs Collection Debug', message, ui.ButtonSet.OK);
-
-  } catch (e) {
-    ui.alert('Error', 'Debug error: ' + e.toString(), ui.ButtonSet.OK);
-    Logger.log('debugMetadataVsCollection error: ' + e.toString());
-  }
-}
-
-/**
- * Debug Training Tasks specifically - shows why training tasks may not be collected
- */
-function debugTrainingTasks() {
-  var ui = SpreadsheetApp.getUi();
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-
-  try {
-    var trainingSheet = ss.getSheetByName('Training Tracking');
-    if (!trainingSheet || trainingSheet.getLastRow() < 3) {
-      ui.alert('Training Tracking sheet not found or empty');
-      return;
-    }
-    var data = trainingSheet.getDataRange().getValues();
-    var today = new Date();
-    var currentMonth = today.getMonth();
-    var monthNames = ['January','February','March','April','May','June',
-                      'July','August','September','October','November','December'];
-
-    // Check trainingCrews filter
-    var props = PropertiesService.getScriptProperties();
-    var crewsJson = props.getProperty('trainingCrews');
-    var selectedCrews = null;
-    if (crewsJson) {
-      try { selectedCrews = JSON.parse(crewsJson); } catch(e) {}
-    }
-
-    var monthNumbers = {
-      'january': 0, 'february': 1, 'march': 2, 'april': 3,
-      'may': 4, 'june': 5, 'july': 6, 'august': 7,
-      'september': 8, 'october': 9, 'november': 10, 'december': 11
-    };
-
-    var pending = 0, complete = 0, na = 0, filteredByCrew = 0, noLead = 0, futureMonth = 0;
-    var pendingList = [];
-    var filteredCrewsList = [];
-
-    // Column indices based on Training Tracking structure
-    var monthCol = 0;      // A: Month
-    var crewCol = 2;       // C: Crew #
-    var leadCol = 3;       // D: Crew Lead
-    var dateCol = 5;       // F: Completion Date
-    var statusCol = 8;     // I: Status (0-indexed)
-
-    for (var i = 2; i < data.length; i++) {
-      var month = String(data[i][monthCol]).trim().toLowerCase();
-      var crew = String(data[i][crewCol]).trim();
-      var lead = String(data[i][leadCol]).trim();
-      var status = String(data[i][statusCol]).trim();
-      var completionDate = data[i][dateCol];
-
-      if (!crew) continue;
-
-      var monthNum = monthNumbers[month];
-
-      // Skip future months beyond next month
-      if (monthNum !== undefined && monthNum > currentMonth + 1) {
-        futureMonth++;
-        continue;
-      }
-
-      // Skip past months (before current month)
-      if (monthNum !== undefined && monthNum < currentMonth) {
-        continue; // Don't count as future, just skip silently
-      }
-
-      if (status === 'Complete' || (completionDate && completionDate instanceof Date)) {
-        complete++;
-      } else if (status === 'N/A') {
-        na++;
-      } else if (selectedCrews && selectedCrews.length > 0 && selectedCrews.indexOf(crew) === -1) {
-        filteredByCrew++;
-        if (filteredCrewsList.indexOf(crew) === -1) {
-          filteredCrewsList.push(crew);
-        }
-      } else if (!lead) {
-        noLead++;
-      } else {
-        pending++;
-        if (pendingList.length < 5) {
-          pendingList.push('Row ' + (i+1) + ': ' + crew + ' - ' + lead);
-        }
-      }
-    }
-
-    var message = '=== Training Debug ===\n\n';
-    message += 'Current Month: ' + monthNames[currentMonth] + '\n';
-    message += 'Crew Filter: ' + (selectedCrews ? (selectedCrews.length + ' crews: ' + selectedCrews.slice(0,3).join(', ') + (selectedCrews.length > 3 ? '...' : '')) : 'ALL crews (no filter)') + '\n\n';
-    message += 'Current + Next Month Results:\n';
-    message += '  ✅ PENDING (should show): ' + pending + '\n';
-    message += '  ✓ Complete: ' + complete + '\n';
-    message += '  - N/A: ' + na + '\n';
-    message += '  ⚠️ Filtered by crew: ' + filteredByCrew + '\n';
-    message += '  ❌ No crew lead: ' + noLead + '\n';
-    message += '  ⏭️ Future month: ' + futureMonth + '\n';
-
-    if (pendingList.length > 0) {
-      message += '\nPending examples:\n';
-      for (var p = 0; p < pendingList.length; p++) {
-        message += '  • ' + pendingList[p] + '\n';
-      }
-    }
-
-    if (filteredByCrew > 0) {
-      message += '\n⚠️ WARNING: ' + filteredByCrew + ' tasks filtered out!\n';
-      message += 'Crews excluded: ' + filteredCrewsList.slice(0,5).join(', ');
-      if (filteredCrewsList.length > 5) message += '...';
-      message += '\n\nRun "Clear Training Filter" to include all crews.';
-    }
-
-    if (pending === 0 && filteredByCrew === 0) {
-      message += '\n\n❓ No pending tasks found. Check:\n';
-      message += '1. Status column (J) values\n';
-      message += '2. Completion Date column (F)\n';
-      message += '3. Crew Lead column (D)';
-    }
-
-    Logger.log(message);
-    ui.alert('Training Debug', message, ui.ButtonSet.OK);
-
-  } catch (e) {
-    ui.alert('Error', e.toString(), ui.ButtonSet.OK);
-    Logger.log('debugTrainingTasks error: ' + e);
-  }
-}
-
-/**
- * Clear the training crews filter to show all crews
- */
-function clearTrainingCrewsFilter() {
-  PropertiesService.getScriptProperties().deleteProperty('trainingCrews');
-  SpreadsheetApp.getUi().alert('✅ Training Filter Cleared',
-    'The training crews filter has been removed.\n\nAll crews will now be included in training task collection.\n\nPlease run "Generate Task Metadata" to update tasks.',
-    SpreadsheetApp.getUi().ButtonSet.OK);
-}
-
-/**
- * Deep debug of training task flow from collection to Task Metadata to Task List
- * Shows exactly where training tasks might be lost
- */
-function debugTrainingTaskFlow() {
-  var ui = SpreadsheetApp.getUi();
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var message = '=== TRAINING TASK FLOW DEBUG ===\n\n';
-
-  try {
-    // Step 1: Check Training Tracking sheet
-    var trainingSheet = ss.getSheetByName('Training Tracking');
-    if (!trainingSheet) {
-      message += '❌ Training Tracking sheet NOT FOUND\n';
-      ui.alert('Debug', message, ui.ButtonSet.OK);
-      return;
-    }
-    var trainingRows = trainingSheet.getLastRow();
-    message += '✅ Training Tracking sheet: ' + trainingRows + ' rows\n\n';
-
-    // Step 2: Collect training tasks
-    message += '📊 STEP 1: collectAndGroupTasks()\n';
-    var tasksByLocation = collectAndGroupTasks(ss);
-
-    var trainingInCollection = 0;
-    var trainingLocations = [];
-    var trainingSample = null;
-
-    for (var loc in tasksByLocation) {
-      var tasks = tasksByLocation[loc];
-      for (var t = 0; t < tasks.length; t++) {
-        var task = tasks[t];
-        var taskType = task.type || task.taskType || '';
-        if (taskType.toLowerCase().indexOf('training') !== -1) {
-          trainingInCollection++;
-          if (trainingLocations.indexOf(loc) === -1) {
-            trainingLocations.push(loc);
-          }
-          if (!trainingSample) {
-            trainingSample = {
-              type: task.type,
-              taskType: task.taskType,
-              employee: task.employee,
-              sheetName: task.sheetName,
-              source: task.source,
-              rowIndex: task.rowIndex,
-              location: task.location
-            };
-          }
-        }
-      }
-    }
-
-    message += '  Training tasks collected: ' + trainingInCollection + '\n';
-    message += '  Locations: ' + trainingLocations.slice(0, 5).join(', ') + (trainingLocations.length > 5 ? '...' : '') + '\n';
-    if (trainingSample) {
-      message += '  Sample task:\n';
-      message += '    type: "' + trainingSample.type + '"\n';
-      message += '    taskType: "' + trainingSample.taskType + '"\n';
-      message += '    sheetName: "' + trainingSample.sheetName + '"\n';
-      message += '    source: "' + trainingSample.source + '"\n';
-      message += '    rowIndex: ' + trainingSample.rowIndex + '\n';
-    }
-    message += '\n';
-
-    // Step 3: Check Task Metadata sheet
-    message += '📊 STEP 2: Task Metadata Sheet\n';
-    var metadataSheet = ss.getSheetByName('Task Metadata');
-
-    if (!metadataSheet) {
-      message += '  ❌ Task Metadata sheet NOT FOUND!\n';
-      message += '  → Run "Generate Task Metadata" to create it\n\n';
-    } else {
-      var metaData = metadataSheet.getDataRange().getValues();
-      var metaHeaders = metaData[0];
-      var sourceSheetCol = -1;
-      var taskTypeCol = -1;
-      var statusCol = -1;
-
-      for (var h = 0; h < metaHeaders.length; h++) {
-        if (metaHeaders[h] === 'SourceSheet') sourceSheetCol = h;
-        if (metaHeaders[h] === 'TaskType') taskTypeCol = h;
-        if (metaHeaders[h] === 'Status') statusCol = h;
-      }
-
-      var trainingInMeta = 0;
-      var trainingCompleteInMeta = 0;
-      var trainingTrackingSource = 0;
-
-      for (var i = 1; i < metaData.length; i++) {
-        var sourceSheet = metaData[i][sourceSheetCol] || '';
-        var taskType = metaData[i][taskTypeCol] || '';
-        var status = metaData[i][statusCol] || '';
-
-        if (sourceSheet.indexOf('Training Tracking') !== -1) {
-          trainingTrackingSource++;
-          if (taskType.toLowerCase().indexOf('training') !== -1) {
-            trainingInMeta++;
-            if (status === 'Complete') {
-              trainingCompleteInMeta++;
-            }
-          }
-        }
-      }
-
-      message += '  Total Task Metadata rows: ' + (metaData.length - 1) + '\n';
-      message += '  Training Tracking source: ' + trainingTrackingSource + '\n';
-      message += '  TaskType=Training: ' + trainingInMeta + ' (complete: ' + trainingCompleteInMeta + ')\n\n';
-
-      if (trainingInCollection > 0 && trainingInMeta === 0) {
-        message += '  ⚠️ ISSUE: Training tasks collected but NOT in Task Metadata!\n';
-        message += '  → Run "Generate Task Metadata" to add them\n\n';
-      }
-    }
-
-    // Step 4: Check getTasksWithMetadata enrichment
-    message += '📊 STEP 3: getTasksWithMetadata() enrichment\n';
-
-    try {
-      // We can't easily call getTasksWithMetadata here because it stores to properties
-      // Instead, simulate the key building
-      if (trainingSample) {
-        var sampleKey = (trainingSample.source || trainingSample.sheetName || 'Unknown') + '_' + trainingSample.rowIndex;
-        message += '  Sample key format: "' + sampleKey + '"\n';
-
-        // Check if this key exists in Task Metadata
-        if (metadataSheet) {
-          var sourceRowCol = -1;
-          for (var h2 = 0; h2 < metaHeaders.length; h2++) {
-            if (metaHeaders[h2] === 'SourceRow') sourceRowCol = h2;
-          }
-
-          var keyFound = false;
-          for (var j = 1; j < metaData.length; j++) {
-            var metaSourceSheet = metaData[j][sourceSheetCol] || '';
-            var metaSourceRow = metaData[j][sourceRowCol] || '';
-            var metaKey = metaSourceSheet + '_' + metaSourceRow;
-            if (metaKey === sampleKey) {
-              keyFound = true;
-              break;
-            }
-          }
-
-          message += '  Sample key in metadata: ' + (keyFound ? '✅ YES' : '❌ NO') + '\n';
-        }
-      }
-    } catch (e3) {
-      message += '  Error checking enrichment: ' + e3 + '\n';
-    }
-
-    message += '\n=== SUMMARY ===\n';
-    if (trainingInCollection > 0) {
-      message += '✅ Training tasks ARE being collected (' + trainingInCollection + ')\n';
-    } else {
-      message += '❌ No training tasks collected - check Training Tracking sheet\n';
-    }
-
-    if (metadataSheet && trainingInMeta > 0) {
-      message += '✅ Training tasks ARE in Task Metadata (' + trainingInMeta + ')\n';
-    } else {
-      message += '⚠️ Training tasks NOT in Task Metadata\n';
-      message += '   → Run "Generate Task Metadata" from Quick Actions\n';
-    }
-
-    Logger.log(message);
-    ui.alert('Training Task Flow Debug', message, ui.ButtonSet.OK);
-
-  } catch (e) {
-    ui.alert('Error', 'Debug error: ' + e.toString(), ui.ButtonSet.OK);
-    Logger.log('debugTrainingTaskFlow error: ' + e.toString());
-  }
-}
 

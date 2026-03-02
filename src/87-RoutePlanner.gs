@@ -1944,16 +1944,25 @@ function suggestOptimalTrips(daysAhead) {
         taskCount: loc.tasks ? loc.tasks.length : 0,
         maxUrgency: loc.maxUrgency || 0,
         estimatedTime: loc.estimatedTime || 0,
-        // Include minimal task data for drag-drop and completion
+        // Include task data for drag-drop, completion, and display
         tasks: (loc.tasks || []).map(function(t) {
           return {
             rowIndex: t.rowIndex,
             source: t.source || 'To Do List',
-            taskType: t.taskType || '',
+            taskType: t.taskType || t.type || '',
             employee: t.employee || '',
             itemType: t.itemType || '',
             location: t.location || loc.name,
-            urgencyLabel: t.urgencyLabel || ''
+            urgencyLabel: t.urgencyLabel || '',
+            urgency: t.urgency || 0,
+            dueDate: t.dueDate || '',
+            // Additional detail fields for enhanced display
+            topic: t.topic || '',
+            month: t.month || '',
+            currentItem: t.currentItem || '',
+            vehicleNumber: t.vehicleNumber || '',
+            crew: t.crew || '',
+            notes: t.notes || ''
           };
         })
       };
