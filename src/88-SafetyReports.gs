@@ -12377,4 +12377,146 @@ function showSafetyProcessingStatus() {
   SpreadsheetApp.getUi().showModalDialog(htmlOutput, 'Safety Processing Status');
 }
 
+/**
+ * Diagnostic function to test Gmail search and see what's found vs what's already logged
+ * Menu function to help troubleshoot email processing issues
+ */
+function diagnoseGmailSearch() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  var html = '<html><head><style>';
+  html += 'body { font-family: Arial, sans-serif; padding: 15px; font-size: 13px; }';
+  html += 'h2 { color: #1a73e8; margin-top: 0; }';
+  html += 'h3 { color: #5f6368; margin-top: 15px; }';
+  html += '.section { margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 6px; }';
+  html += '.success { color: #1e8e3e; }';
+  html += '.warning { color: #ea8600; }';
+  html += '.error { color: #d93025; }';
+  html += 'table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }';
+  html += 'th, td { padding: 6px; border: 1px solid #ddd; text-align: left; }';
+  html += 'th { background: #e8eaed; }';
+  html += '.new { background: #e6f4ea; }';
+  html += '.logged { background: #fce8e6; }';
+  html += '</style></head><body>';
+
+  html += '<h2>🔍 Gmail Search Diagnostic</h2>';
+
+  // Test each query
+  var queries = [
+    { name: 'Job Hazard Report', query: 'subject:"Job Hazard Report" newer_than:14d' },
+    { name: 'Safety Meeting Report', query: 'subject:"Safety Meeting Report" newer_than:14d' },
+    { name: 'Weekly Safety Repairs', query: 'subject:"Weekly Safety Repairs" newer_than:14d' },
+    { name: 'Safety Checklist Report', query: 'subject:"Safety Checklist Report" newer_than:14d' }
+  ];
+
+  // Load existing email IDs from log sheets
+  var existingEmailIds = {};
+
+  // JHA Log
+  var jhaLogSheet = ss.getSheetByName('JHA Log');
+  if (jhaLogSheet && jhaLogSheet.getLastRow() > 1) {
+    var jhaData = jhaLogSheet.getRange(2, 6, jhaLogSheet.getLastRow() - 1, 1).getValues();
+    for (var i = 0; i < jhaData.length; i++) {
+      if (jhaData[i][0]) existingEmailIds[jhaData[i][0]] = 'JHA Log';
+    }
+  }
+
+  // Weekly Safety Log
+  var weeklyLogSheet = ss.getSheetByName('Weekly Safety Log');
+  if (weeklyLogSheet && weeklyLogSheet.getLastRow() > 1) {
+    var weeklyData = weeklyLogSheet.getRange(2, 6, weeklyLogSheet.getLastRow() - 1, 1).getValues();
+    for (var j = 0; j < weeklyData.length; j++) {
+      if (weeklyData[j][0]) existingEmailIds[weeklyData[j][0]] = 'Weekly Log';
+    }
+  }
+
+  // Monthly Checklist Log
+  var monthlyLogSheet = ss.getSheetByName('Monthly Checklist Log');
+  if (monthlyLogSheet && monthlyLogSheet.getLastRow() > 1) {
+    var monthlyData = monthlyLogSheet.getRange(2, 7, monthlyLogSheet.getLastRow() - 1, 1).getValues();
+    for (var k = 0; k < monthlyData.length; k++) {
+      if (monthlyData[k][0]) existingEmailIds[monthlyData[k][0]] = 'Monthly Log';
+    }
+  }
+
+  html += '<div class="section">';
+  html += '<strong>Existing logged email IDs:</strong> ' + Object.keys(existingEmailIds).length;
+  html += '</div>';
+
+  var totalNew = 0;
+  var totalLogged = 0;
+
+  for (var q = 0; q < queries.length; q++) {
+    var queryInfo = queries[q];
+    html += '<h3>' + queryInfo.name + '</h3>';
+    html += '<div class="section">';
+    html += '<strong>Query:</strong> <code>' + queryInfo.query + '</code><br><br>';
+
+    try {
+      var threads = GmailApp.search(queryInfo.query);
+      html += '<strong>Threads found:</strong> ' + threads.length + '<br>';
+
+      if (threads.length > 0) {
+        html += '<table><tr><th>Date</th><th>Subject</th><th>Status</th></tr>';
+
+        var maxShow = Math.min(threads.length, 10);
+        for (var t = 0; t < maxShow; t++) {
+          var thread = threads[t];
+          var messages = thread.getMessages();
+          var firstMsg = messages[0];
+          var msgId = firstMsg.getId();
+          var msgDate = Utilities.formatDate(firstMsg.getDate(), Session.getScriptTimeZone(), 'MM/dd/yyyy HH:mm');
+          var subject = firstMsg.getSubject();
+          if (subject.length > 60) subject = subject.substring(0, 60) + '...';
+
+          var isLogged = existingEmailIds[msgId];
+          var statusClass = isLogged ? 'logged' : 'new';
+          var statusText = isLogged ? '⚠️ Already in ' + isLogged : '✅ NEW';
+
+          if (isLogged) {
+            totalLogged++;
+          } else {
+            totalNew++;
+          }
+
+          html += '<tr class="' + statusClass + '">';
+          html += '<td>' + msgDate + '</td>';
+          html += '<td>' + subject + '</td>';
+          html += '<td>' + statusText + '</td>';
+          html += '</tr>';
+        }
+
+        if (threads.length > 10) {
+          html += '<tr><td colspan="3">... and ' + (threads.length - 10) + ' more</td></tr>';
+        }
+
+        html += '</table>';
+      }
+    } catch (e) {
+      html += '<span class="error">Error: ' + e.toString() + '</span>';
+    }
+
+    html += '</div>';
+  }
+
+  html += '<div class="section">';
+  html += '<h3>Summary</h3>';
+  html += '<strong class="success">NEW emails (not logged):</strong> ' + totalNew + '<br>';
+  html += '<strong class="warning">Already logged:</strong> ' + totalLogged + '<br>';
+  if (totalNew === 0 && totalLogged > 0) {
+    html += '<br><span class="warning">⚠️ All found emails are already in the log sheets. This is why "No NEW emails found" appears.</span>';
+  }
+  html += '</div>';
+
+  html += '</body></html>';
+
+  var htmlOutput = HtmlService.createHtmlOutput(html)
+    .setWidth(700)
+    .setHeight(600)
+    .setTitle('Gmail Search Diagnostic');
+
+  ui.showModalDialog(htmlOutput, 'Gmail Search Diagnostic');
+}
+
 

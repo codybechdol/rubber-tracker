@@ -4979,6 +4979,7 @@ function onOpen() {
       .addSeparator()
       // === RESET & STATUS ===
       .addItem('📋 Processing Status', 'showSafetyProcessingStatus')
+      .addItem('🔍 Diagnose Gmail Search', 'diagnoseGmailSearch')
       .addItem('🔄 Reset Last Processed Date', 'clearLastSafetyProcessedDate'))
     .addSubMenu(ui.createMenu('🔍 Debug')
       .addItem('Test Edit Trigger', 'testEditTrigger')
