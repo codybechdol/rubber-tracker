@@ -889,6 +889,356 @@ function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLoca
 
 
 /**
+ * Collects reclaim tasks from Reclaims sheet.
+ * Reclaims are gloves/sleeves that need to be reclaimed from employees (Class upgrades/downgrades).
+ *
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @param {Object} tasksByLocation - Object to add tasks to
+ * @param {Object} employeeLocations - Map of employee names to locations
+ * @param {Object} employeeForemen - Map of employee names to foremen
+ * @param {Date} today - Today's date
+ */
+function collectReclaimTasks(ss, tasksByLocation, employeeLocations, employeeForemen, today) {
+  var reclaimsSheet = ss.getSheetByName('Reclaims');
+  if (!reclaimsSheet) {
+    Logger.log('collectReclaimTasks: Reclaims sheet not found');
+    return;
+  }
+
+  var lastRow = reclaimsSheet.getLastRow();
+  if (lastRow < 2) {
+    Logger.log('collectReclaimTasks: Reclaims sheet has too few rows');
+    return;
+  }
+
+  var data = reclaimsSheet.getDataRange().getValues();
+  Logger.log('collectReclaimTasks: Processing ' + data.length + ' rows');
+
+  var inClass3Table = false;
+  var inClass2Table = false;
+  var inLostItemsTable = false;
+  var tasksAdded = 0;
+
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    var firstCell = String(row[0] || '').trim();
+
+    // Detect table headers
+    if (firstCell.indexOf('Class 3 Reclaims') !== -1) {
+      inClass3Table = true;
+      inClass2Table = false;
+      inLostItemsTable = false;
+      continue;
+    }
+    if (firstCell.indexOf('Class 2 Reclaims') !== -1) {
+      inClass3Table = false;
+      inClass2Table = true;
+      inLostItemsTable = false;
+      continue;
+    }
+    if (firstCell.indexOf('Lost Items') !== -1) {
+      inClass3Table = false;
+      inClass2Table = false;
+      inLostItemsTable = true;
+      continue;
+    }
+
+    // End of Lost Items table
+    if (inLostItemsTable && (firstCell.indexOf('Previous') !== -1 ||
+        firstCell.indexOf('Approved') !== -1 || firstCell.indexOf('Class') !== -1)) {
+      inLostItemsTable = false;
+      continue;
+    }
+
+    // Skip header rows and non-data rows
+    if (firstCell === 'Employee' || firstCell === 'Item Type' || firstCell === '' ||
+        firstCell.indexOf('Previous') !== -1 ||
+        firstCell.indexOf('Approved') !== -1 || firstCell.indexOf('Location') !== -1 ||
+        firstCell.indexOf('✅') !== -1 || firstCell.indexOf('📍') !== -1 ||
+        firstCell.toLowerCase() === 'no reclaims') {
+      continue;
+    }
+
+    if (inClass3Table || inClass2Table) {
+      // Reclaims table structure: Employee, Item Type, Item #, Size, Class, Location, Pick List Item #, Pick List Status
+      var employee = String(row[0] || '').trim();
+      var itemType = String(row[1] || '').trim();
+      var itemNum = String(row[2] || '').trim();
+      var size = String(row[3] || '').trim();
+      var itemClass = String(row[4] || '').trim();
+      var location = String(row[5] || '').trim();
+
+      // Skip if no employee name
+      if (!employee) continue;
+
+      // Get location from employee map if not in sheet
+      if (!location || location === '') {
+        location = employeeLocations[employee.toLowerCase()] || 'Unknown';
+      }
+
+      // Get foreman for this employee
+      var foreman = employeeForemen[employee.toLowerCase()] || 'Unknown';
+
+      var reclaimType = inClass3Table ? 'Reclaim CL3→CL2' : 'Reclaim CL2→CL3';
+
+      var task = {
+        type: 'Reclaim',
+        taskType: reclaimType,
+        itemType: itemType || 'Glove',
+        employee: employee,
+        location: location,
+        foreman: foreman,
+        currentItem: itemNum,
+        pickListItem: '',
+        size: size,
+        itemClass: itemClass,
+        dueDate: null,
+        isOverdue: false,
+        daysTillDue: null,
+        status: 'Reclaim Pending',
+        estimatedTime: 15, // 15 minutes per reclaim
+        priority: 'Medium',
+        sheetName: 'Reclaims',
+        rowIndex: i + 1
+      };
+
+      // Add to location group
+      if (!tasksByLocation[location]) {
+        tasksByLocation[location] = [];
+      }
+      tasksByLocation[location].push(task);
+      tasksAdded++;
+    }
+  }
+
+  Logger.log('collectReclaimTasks: Added ' + tasksAdded + ' reclaim tasks');
+}
+
+
+/**
+ * Collects expiring cert tasks from Expiring Certs sheet.
+ * Only includes certs that are expired or expiring soon based on config.
+ *
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @param {Object} tasksByLocation - Object to add tasks to
+ * @param {Object} employeeLocations - Map of employee names to locations
+ * @param {Object} employeeForemen - Map of employee names to foremen
+ * @param {Object} employeePhones - Map of employee names to phone numbers
+ * @param {Date} today - Today's date
+ */
+function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employeeForemen, employeePhones, today) {
+  var expiringSheet = ss.getSheetByName('Expiring Certs');
+  if (!expiringSheet || expiringSheet.getLastRow() < 2) {
+    Logger.log('collectExpiringCertTasks: Expiring Certs sheet not found or empty');
+    return;
+  }
+
+  // Get config for which cert types to track
+  var properties = PropertiesService.getScriptProperties();
+  var selectedCertTypesJson = properties.getProperty('selectedCertTypes');
+  var selectedCertTypes = null;
+  if (selectedCertTypesJson) {
+    try {
+      selectedCertTypes = JSON.parse(selectedCertTypesJson);
+    } catch (e) {
+      Logger.log('collectExpiringCertTasks: Error parsing selectedCertTypes: ' + e);
+    }
+  }
+
+  var data = expiringSheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Find column indices
+  var nameCol = -1, certTypeCol = -1, expDateCol = -1, daysUntilCol = -1;
+  for (var h = 0; h < headers.length; h++) {
+    var hdr = String(headers[h]).toLowerCase().trim();
+    if (hdr === 'employee name' || hdr === 'name') nameCol = h;
+    if (hdr === 'cert type' || hdr === 'certification type') certTypeCol = h;
+    if (hdr === 'expiration date' || hdr === 'exp date') expDateCol = h;
+    if (hdr === 'days until' || hdr === 'days until expiration') daysUntilCol = h;
+  }
+
+  if (nameCol === -1 || certTypeCol === -1) {
+    Logger.log('collectExpiringCertTasks: Required columns not found');
+    return;
+  }
+
+  var tasksAdded = 0;
+  var daysThreshold = 365; // Include certs expiring within this many days
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var employee = String(row[nameCol] || '').trim();
+    var certType = String(row[certTypeCol] || '').trim();
+    var expDate = expDateCol !== -1 ? row[expDateCol] : null;
+    var daysUntil = daysUntilCol !== -1 ? row[daysUntilCol] : null;
+
+    if (!employee || !certType) continue;
+
+    // Check if cert type is in selected types (if configured)
+    if (selectedCertTypes && selectedCertTypes.length > 0) {
+      if (selectedCertTypes.indexOf(certType) === -1) continue;
+    }
+
+    // Skip Crane Evaluation - it's non-expiring
+    if (certType === 'Crane Evaluation') continue;
+
+    // Only include expired or expiring soon
+    var isExpired = false;
+    var daysLeft = null;
+
+    if (typeof daysUntil === 'number') {
+      daysLeft = daysUntil;
+      isExpired = daysUntil < 0;
+    } else if (expDate instanceof Date && !isNaN(expDate.getTime())) {
+      var todayStart = new Date(today);
+      todayStart.setHours(0, 0, 0, 0);
+      var expDateStart = new Date(expDate);
+      expDateStart.setHours(0, 0, 0, 0);
+      daysLeft = Math.ceil((expDateStart - todayStart) / (1000 * 60 * 60 * 24));
+      isExpired = daysLeft < 0;
+    }
+
+    // Only include if expired or expiring within threshold
+    if (daysLeft === null || daysLeft > daysThreshold) continue;
+
+    var location = employeeLocations[employee.toLowerCase()] || 'Unknown';
+    var foreman = employeeForemen[employee.toLowerCase()] || 'Unknown';
+    var phone = employeePhones[employee.toLowerCase()] || '';
+
+    var task = {
+      type: 'Cert Expiring',
+      taskType: 'Cert Expiring',
+      itemType: certType,
+      certType: certType,
+      employee: employee,
+      location: location,
+      foreman: foreman,
+      phoneNumber: phone,
+      dueDate: expDate instanceof Date ? expDate : null,
+      isOverdue: isExpired,
+      daysTillDue: daysLeft,
+      status: isExpired ? 'Expired' : 'Expiring',
+      estimatedTime: 15, // 15 minutes for phone call
+      priority: isExpired ? 'High' : (daysLeft <= 30 ? 'Medium' : 'Low'),
+      sheetName: 'Expiring Certs',
+      rowIndex: i + 1
+    };
+
+    // Add to location group
+    if (!tasksByLocation[location]) {
+      tasksByLocation[location] = [];
+    }
+    tasksByLocation[location].push(task);
+    tasksAdded++;
+  }
+
+  Logger.log('collectExpiringCertTasks: Added ' + tasksAdded + ' cert tasks');
+}
+
+
+/**
+ * Collects certs that were manually added to task list (InTaskList=TRUE in Task Metadata).
+ * This captures Crane Certs and other certs that were manually added from the Expiring Certs tab.
+ *
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @param {Object} tasksByLocation - Object to add tasks to
+ * @param {Object} employeeLocations - Map of employee names to locations
+ * @param {Object} employeeForemen - Map of employee names to foremen
+ * @param {Object} employeePhones - Map of employee names to phone numbers
+ */
+function collectInTaskListCerts(ss, tasksByLocation, employeeLocations, employeeForemen, employeePhones) {
+  var metadataSheet = ss.getSheetByName('Task Metadata');
+  if (!metadataSheet || metadataSheet.getLastRow() < 2) {
+    Logger.log('collectInTaskListCerts: Task Metadata sheet not found or empty');
+    return;
+  }
+
+  var data = metadataSheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Find column indices
+  var cols = {};
+  for (var h = 0; h < headers.length; h++) {
+    var hdr = String(headers[h]).toLowerCase().trim();
+    if (hdr === 'tasktype') cols.taskType = h;
+    if (hdr === 'itemtype') cols.itemType = h;
+    if (hdr === 'employee') cols.employee = h;
+    if (hdr === 'location') cols.location = h;
+    if (hdr === 'status') cols.status = h;
+    if (hdr === 'intasklist' || hdr === 'in task list') cols.inTaskList = h;
+    if (hdr === 'sourcesheet') cols.sourceSheet = h;
+    if (hdr === 'sourcerowindex') cols.sourceRowIndex = h;
+    if (hdr === 'duedate') cols.dueDate = h;
+  }
+
+  if (cols.inTaskList === undefined) {
+    Logger.log('collectInTaskListCerts: InTaskList column not found');
+    return;
+  }
+
+  var tasksAdded = 0;
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+
+    // Only include if InTaskList is TRUE and it's a cert task
+    var inTaskList = row[cols.inTaskList];
+    if (inTaskList !== true && String(inTaskList).toLowerCase() !== 'true') continue;
+
+    var taskType = cols.taskType !== undefined ? String(row[cols.taskType] || '').trim() : '';
+    if (taskType !== 'Cert Expiring') continue;
+
+    var status = cols.status !== undefined ? String(row[cols.status] || '').trim() : '';
+    if (status === 'Complete' || status === 'Completed') continue;
+
+    var employee = cols.employee !== undefined ? String(row[cols.employee] || '').trim() : '';
+    var itemType = cols.itemType !== undefined ? String(row[cols.itemType] || '').trim() : '';
+    var location = cols.location !== undefined ? String(row[cols.location] || '').trim() : '';
+    var dueDate = cols.dueDate !== undefined ? row[cols.dueDate] : null;
+
+    if (!employee) continue;
+
+    // Use provided maps if location not in metadata
+    if (!location || location === 'Unknown') {
+      location = employeeLocations[employee.toLowerCase()] || 'Unknown';
+    }
+    var foreman = employeeForemen[employee.toLowerCase()] || 'Unknown';
+    var phone = employeePhones[employee.toLowerCase()] || '';
+
+    var task = {
+      type: 'Cert Expiring',
+      taskType: 'Cert Expiring',
+      itemType: itemType,
+      certType: itemType,
+      employee: employee,
+      location: location,
+      foreman: foreman,
+      phoneNumber: phone,
+      dueDate: dueDate instanceof Date ? dueDate : null,
+      isOverdue: false,
+      daysTillDue: null,
+      status: status || 'Pending',
+      estimatedTime: 15,
+      priority: 'Medium',
+      sheetName: 'Task Metadata',
+      rowIndex: i + 1,
+      fromInTaskList: true
+    };
+
+    // Add to location group
+    if (!tasksByLocation[location]) {
+      tasksByLocation[location] = [];
+    }
+    tasksByLocation[location].push(task);
+    tasksAdded++;
+  }
+
+  Logger.log('collectInTaskListCerts: Added ' + tasksAdded + ' manually-added cert tasks');
+}
+
+
+/**
  * Collects training tasks from Training Tracking sheet.
  * Filters crews based on job classifications selected in Training Config.
  *
@@ -1459,3 +1809,367 @@ function fixTrainingTaskLocations() {
 }
 
 
+/**
+ * Collects tasks from the Manual Tasks sheet.
+ * Manual Tasks are user-created tasks or system-generated tasks from Trip Planner.
+ *
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @param {Object} tasksByLocation - Object to add tasks to
+ * @param {Date} today - Current date
+ */
+function collectManualTasks(ss, tasksByLocation, today) {
+  var manualSheet = ss.getSheetByName('Manual Tasks');
+  if (!manualSheet || manualSheet.getLastRow() < 2) {
+    Logger.log('collectManualTasks: Manual Tasks sheet not found or empty');
+    return;
+  }
+
+  var data = manualSheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Find column indices
+  var colMap = {};
+  for (var h = 0; h < headers.length; h++) {
+    var hdr = String(headers[h]).toLowerCase().trim();
+    if (hdr === 'location') colMap.location = h;
+    if (hdr === 'priority') colMap.priority = h;
+    if (hdr === 'task' || hdr === 'task type') colMap.taskType = h;
+    if (hdr === 'employee') colMap.employee = h;
+    if (hdr === 'scheduled date') colMap.scheduledDate = h;
+    if (hdr === 'start time') colMap.startTime = h;
+    if (hdr === 'end time') colMap.endTime = h;
+    if (hdr === 'status') colMap.status = h;
+    if (hdr === 'notes') colMap.notes = h;
+    if (hdr === 'date added') colMap.dateAdded = h;
+    if (hdr === 'locked') colMap.locked = h;
+    if (hdr === 'manually created') colMap.manuallyCreated = h;
+    if (hdr === 'completed') colMap.completed = h;
+  }
+
+  if (colMap.location === undefined) {
+    Logger.log('collectManualTasks: Required "Location" column not found');
+    return;
+  }
+
+  var tasksAdded = 0;
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+
+    var location = String(row[colMap.location] || '').trim();
+    if (!location) continue;
+
+    var status = colMap.status !== undefined ? String(row[colMap.status] || '').trim().toLowerCase() : '';
+    var completed = colMap.completed !== undefined ? row[colMap.completed] : false;
+
+    // Skip completed tasks
+    if (status === 'complete' || status === 'completed' || completed === true || completed === 'TRUE') {
+      continue;
+    }
+
+    var taskType = colMap.taskType !== undefined ? String(row[colMap.taskType] || 'Manual Task').trim() : 'Manual Task';
+    var employee = colMap.employee !== undefined ? String(row[colMap.employee] || '').trim() : '';
+    var priority = colMap.priority !== undefined ? String(row[colMap.priority] || 'Medium').trim() : 'Medium';
+    var notes = colMap.notes !== undefined ? String(row[colMap.notes] || '').trim() : '';
+    var scheduledDate = colMap.scheduledDate !== undefined ? row[colMap.scheduledDate] : null;
+    var startTime = colMap.startTime !== undefined ? row[colMap.startTime] : null;
+    var endTime = colMap.endTime !== undefined ? row[colMap.endTime] : null;
+    var isLocked = colMap.locked !== undefined ? (row[colMap.locked] === true || row[colMap.locked] === 'TRUE') : false;
+    var manuallyCreated = colMap.manuallyCreated !== undefined ? (row[colMap.manuallyCreated] === true || row[colMap.manuallyCreated] === 'TRUE') : true;
+
+    // Parse scheduled date
+    var dueDate = null;
+    if (scheduledDate instanceof Date && !isNaN(scheduledDate.getTime())) {
+      dueDate = scheduledDate;
+    }
+
+    // Check if overdue
+    var isOverdue = false;
+    if (dueDate) {
+      var todayStart = new Date(today);
+      todayStart.setHours(0, 0, 0, 0);
+      var dueDateStart = new Date(dueDate);
+      dueDateStart.setHours(0, 0, 0, 0);
+      isOverdue = dueDateStart < todayStart;
+    }
+
+    var task = {
+      type: 'Manual Task',
+      taskType: taskType,
+      itemType: taskType,
+      employee: employee || 'N/A',
+      location: location,
+      foreman: '',
+      phoneNumber: '',
+      dueDate: dueDate,
+      scheduledDate: dueDate,
+      startTime: startTime,
+      endTime: endTime,
+      isOverdue: isOverdue,
+      status: status || (dueDate ? 'Assigned' : 'Unassigned'),
+      estimatedTime: 30,
+      priority: priority,
+      notes: notes,
+      isLocked: isLocked,
+      manuallyCreated: manuallyCreated,
+      sheetName: 'Manual Tasks',
+      rowIndex: i + 1
+    };
+
+    // Add to location group
+    if (!tasksByLocation[location]) {
+      tasksByLocation[location] = [];
+    }
+    tasksByLocation[location].push(task);
+    tasksAdded++;
+  }
+
+  Logger.log('collectManualTasks: Added ' + tasksAdded + ' manual tasks');
+}
+
+
+/**
+ * Collects tasks from the Safety Equipment Needs sheet (formerly Safety Reports).
+ * Only includes items with "Needs Attention" status.
+ *
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @param {Object} tasksByLocation - Object to add tasks to
+ * @param {Object} employeeLocations - Map of employee names to locations
+ * @param {Date} today - Current date
+ */
+function collectSafetyReportsTasks(ss, tasksByLocation, employeeLocations, today) {
+  // Check for both old and new sheet names
+  var safetySheet = ss.getSheetByName('Safety Equipment Needs') || ss.getSheetByName('Safety Reports');
+  if (!safetySheet || safetySheet.getLastRow() < 2) {
+    Logger.log('collectSafetyReportsTasks: Safety Equipment Needs sheet not found or empty');
+    return;
+  }
+
+  var data = safetySheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Find column indices
+  var colMap = {};
+  for (var h = 0; h < headers.length; h++) {
+    var hdr = String(headers[h]).toLowerCase().trim();
+    if (hdr === 'report date') colMap.reportDate = h;
+    if (hdr === 'report type') colMap.reportType = h;
+    if (hdr === 'job number') colMap.jobNumber = h;
+    if (hdr === 'foreman') colMap.foreman = h;
+    if (hdr === 'vehicle number') colMap.vehicleNumber = h;
+    if (hdr === 'equipment type') colMap.equipmentType = h;
+    if (hdr === 'issue description') colMap.issueDescription = h;
+    if (hdr === 'status') colMap.status = h;
+    if (hdr === 'fe test date') colMap.feTestDate = h;
+    if (hdr === 'notes') colMap.notes = h;
+  }
+
+  if (colMap.status === undefined || colMap.equipmentType === undefined) {
+    Logger.log('collectSafetyReportsTasks: Required columns not found');
+    return;
+  }
+
+  var tasksAdded = 0;
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+
+    var status = String(row[colMap.status] || '').trim();
+    // Only include "Needs Attention" items
+    if (status !== 'Needs Attention') continue;
+
+    var equipmentType = colMap.equipmentType !== undefined ? String(row[colMap.equipmentType] || '').trim() : '';
+    if (!equipmentType || equipmentType === 'No Issues') continue;
+
+    var foreman = colMap.foreman !== undefined ? String(row[colMap.foreman] || '').trim() : '';
+    var jobNumber = colMap.jobNumber !== undefined ? String(row[colMap.jobNumber] || '').trim() : '';
+    var vehicleNumber = colMap.vehicleNumber !== undefined ? String(row[colMap.vehicleNumber] || '').trim() : '';
+    var issueDescription = colMap.issueDescription !== undefined ? String(row[colMap.issueDescription] || '').trim() : '';
+    var reportDate = colMap.reportDate !== undefined ? row[colMap.reportDate] : null;
+    var notes = colMap.notes !== undefined ? String(row[colMap.notes] || '').trim() : '';
+
+    // Determine location from foreman's employee location
+    var location = 'Unknown';
+    if (foreman && employeeLocations[foreman.toLowerCase()]) {
+      location = employeeLocations[foreman.toLowerCase()];
+    }
+
+    // Check if overdue (more than 7 days old)
+    var isOverdue = false;
+    if (reportDate instanceof Date && !isNaN(reportDate.getTime())) {
+      var daysSince = Math.floor((today - reportDate) / (1000 * 60 * 60 * 24));
+      isOverdue = daysSince > 7;
+    }
+
+    var task = {
+      type: 'Safety Equipment',
+      taskType: 'Safety Equipment',
+      itemType: equipmentType,
+      employee: foreman || 'N/A',
+      location: location,
+      foreman: foreman,
+      jobNumber: jobNumber,
+      vehicleNumber: vehicleNumber,
+      phoneNumber: '',
+      dueDate: reportDate,
+      description: issueDescription,
+      isOverdue: isOverdue,
+      status: 'Needs Attention',
+      estimatedTime: 30,
+      priority: isOverdue ? 'High' : 'Medium',
+      notes: notes,
+      sheetName: 'Safety Equipment Needs',
+      rowIndex: i + 1
+    };
+
+    // Add to location group
+    if (!tasksByLocation[location]) {
+      tasksByLocation[location] = [];
+    }
+    tasksByLocation[location].push(task);
+    tasksAdded++;
+  }
+
+  Logger.log('collectSafetyReportsTasks: Added ' + tasksAdded + ' safety equipment tasks');
+}
+
+
+/**
+ * Collects Missing Safety Report tasks from Task Metadata.
+ * These are JHA/Weekly Meeting compliance tasks created by the safety compliance tracking.
+ *
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @param {Object} tasksByLocation - Object to add tasks to
+ * @param {Object} employeeLocations - Map of employee names to locations
+ * @param {Object} employeeForemen - Map of employee names to foremen
+ * @param {Object} employeePhones - Map of employee names to phone numbers
+ * @param {Date} today - Current date
+ */
+function collectMissingSafetyReportTasks(ss, tasksByLocation, employeeLocations, employeeForemen, employeePhones, today) {
+  var metadataSheet = ss.getSheetByName('Task Metadata');
+  if (!metadataSheet || metadataSheet.getLastRow() < 2) {
+    Logger.log('collectMissingSafetyReportTasks: Task Metadata sheet not found or empty');
+    return;
+  }
+
+  var data = metadataSheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Find column indices
+  var colMap = {};
+  for (var h = 0; h < headers.length; h++) {
+    var hdr = String(headers[h]).toLowerCase().trim();
+    if (hdr === 'taskid') colMap.taskId = h;
+    if (hdr === 'tasktype') colMap.taskType = h;
+    if (hdr === 'itemtype') colMap.itemType = h;
+    if (hdr === 'employee') colMap.employee = h;
+    if (hdr === 'location') colMap.location = h;
+    if (hdr === 'jobnumber') colMap.jobNumber = h;
+    if (hdr === 'phonenumber') colMap.phoneNumber = h;
+    if (hdr === 'duedate') colMap.dueDate = h;
+    if (hdr === 'status') colMap.status = h;
+    if (hdr === 'completeddate') colMap.completedDate = h;
+    if (hdr === 'notes') colMap.notes = h;
+    if (hdr === 'sourcesheet') colMap.sourceSheet = h;
+    if (hdr === 'sourcerow') colMap.sourceRow = h;
+  }
+
+  if (colMap.taskType === undefined || colMap.status === undefined) {
+    Logger.log('collectMissingSafetyReportTasks: Required columns not found');
+    return;
+  }
+
+  var tasksAdded = 0;
+  var seenJobWeeks = {};
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+
+    var taskType = String(row[colMap.taskType] || '').trim();
+    // Only process Missing Safety Report tasks
+    if (taskType !== 'Missing Safety Report') continue;
+
+    var status = String(row[colMap.status] || '').trim().toLowerCase();
+    // Skip completed/resolved tasks
+    if (status === 'complete' || status === 'completed' || status === 'resolved') continue;
+
+    var taskId = colMap.taskId !== undefined ? String(row[colMap.taskId] || '').trim() : '';
+    var itemType = colMap.itemType !== undefined ? String(row[colMap.itemType] || '').trim() : 'JHA';
+    var employee = colMap.employee !== undefined ? String(row[colMap.employee] || '').trim() : '';
+    var location = colMap.location !== undefined ? String(row[colMap.location] || '').trim() : 'Unknown';
+    var jobNumber = colMap.jobNumber !== undefined ? String(row[colMap.jobNumber] || '').trim() : '';
+    var phone = colMap.phoneNumber !== undefined ? String(row[colMap.phoneNumber] || '').trim() : '';
+    var dueDate = colMap.dueDate !== undefined ? row[colMap.dueDate] : null;
+    var notes = colMap.notes !== undefined ? String(row[colMap.notes] || '').trim() : '';
+
+    // Extract week date from taskId for deduplication
+    var weekKey = '';
+    if (taskId) {
+      var parts = taskId.split('_');
+      if (parts.length >= 3) {
+        var job = parts[1];
+        var weekPart = parts.slice(2).join('_');
+        weekKey = job + '_' + weekPart;
+      }
+    }
+
+    // Skip duplicate job+week combinations
+    if (weekKey && seenJobWeeks[weekKey]) {
+      continue;
+    }
+    if (weekKey) {
+      seenJobWeeks[weekKey] = true;
+    }
+
+    // Parse due date
+    var parsedDueDate = null;
+    if (dueDate instanceof Date && !isNaN(dueDate.getTime())) {
+      parsedDueDate = dueDate;
+    }
+
+    // Check if overdue
+    var isOverdue = false;
+    if (parsedDueDate) {
+      var todayStart = new Date(today);
+      todayStart.setHours(0, 0, 0, 0);
+      var dueDateStart = new Date(parsedDueDate);
+      dueDateStart.setHours(0, 0, 0, 0);
+      isOverdue = dueDateStart < todayStart;
+    }
+
+    // Get phone from employee phones if not in task metadata
+    if (!phone && employee && employeePhones[employee.toLowerCase()]) {
+      phone = employeePhones[employee.toLowerCase()];
+    }
+
+    var task = {
+      type: 'Missing Safety Report',
+      taskType: 'Missing Safety Report',
+      itemType: itemType,
+      employee: employee || 'Unknown Foreman',
+      location: location,
+      foreman: employee,
+      jobNumber: jobNumber,
+      phoneNumber: phone,
+      dueDate: parsedDueDate,
+      isOverdue: isOverdue,
+      status: isOverdue ? 'Overdue' : 'Pending',
+      estimatedTime: 15,
+      priority: isOverdue ? 'High' : 'Medium',
+      notes: notes,
+      taskId: taskId,
+      sheetName: 'Task Metadata',
+      rowIndex: i + 1,
+      source: 'Safety Compliance'
+    };
+
+    // Add to location group
+    if (!tasksByLocation[location]) {
+      tasksByLocation[location] = [];
+    }
+    tasksByLocation[location].push(task);
+    tasksAdded++;
+  }
+
+  Logger.log('collectMissingSafetyReportTasks: Added ' + tasksAdded + ' missing safety report tasks');
+}

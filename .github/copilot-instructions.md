@@ -717,6 +717,146 @@ Notes: [Any notes]
 
 ## Completed Features Log
 
+### March 3, 2026
+- ✅ **Auto-Cleanup at End of Process Safety Emails**
+  - **New Feature:** Automatic compliance cleanup runs silently at end of `processSafetyEmails()`
+  - **What it does:**
+    1. Auto-populates Safety Compliance Config with current crews from Employees sheet
+    2. Fixes log entries (Credited To values) for current + previous week only
+    3. Removes non-config crews from current week only (preserves historical data)
+  - **Benefits:**
+    - No more manual "Recalculate" needed after processing emails
+    - Config stays in sync with employee changes
+    - Non-config crews (typos, temporary jobs) automatically cleaned up
+  - **New Functions in `88-SafetyReports.gs`:**
+    - `autoComplianceCleanup()` - Lightweight cleanup, runs silently without UI
+    - `fixLogEntriesForWeeks(weeks)` - Fixes logs for specific weeks only
+    - `resolveJobToTrackedCrew(jobNumber)` - Resolves job to tracked crew
+  - **Impact:** Process Safety Emails now auto-cleans compliance data - no manual intervention needed
+- ✅ **Restore Deleted Employee Utility**
+  - **New Feature:** Dialog to restore accidentally deleted employees from Employee History data
+  - **How to Access:** Glove Manager → 🔧 Utilities → 🔄 Restore Deleted Employee
+  - **What it does:**
+    1. Search for employee by name in Employee History
+    2. Shows matching employees NOT currently in Employees sheet
+    3. Reconstructs employee data from all their history entries (most recent values)
+    4. Preview and edit data before restoring (can update location, job number, etc.)
+    5. Adds employee back to Employees sheet
+    6. Logs "Restored" event to Employee History
+  - **Data Restored:**
+    - Name, Location, Job Number, Job Classification
+    - Phone Number, Email Address
+    - Glove Size, Sleeve Size
+    - Hire Date
+  - **New Functions in `51-EmployeeHistory.gs`:**
+    - `showRestoreEmployeeDialog()` - Opens the restore dialog
+    - `buildRestoreEmployeeHtml()` - Builds the dialog HTML
+    - `searchEmployeeHistory(query)` - Searches history for matching employees
+    - `restoreEmployeeToSheet(dataJson)` - Restores employee to Employees sheet
+  - **Use Case:** Cody Schoonover was accidentally deleted from Employees sheet - use this utility to restore him
+  - **Files Modified:**
+    - `src/51-EmployeeHistory.gs` - Added ~350 lines of restore functions
+    - `src/Code.gs` - Added menu item
+- ✅ **Gmail Authorization Fix - Process Safety Emails Permission Error**
+  - **Problem:** Process Safety Emails showing "The script does not have permission to perform that action" error for all Gmail searches. No new JHAs being logged since 02/27/2026.
+  - **Root Cause:** Gmail permissions were revoked or expired - the OAuth token needed to be refreshed
+  - **Solution:** Added Gmail authorization functions to test and fix permissions
+  - **New Functions in `88-SafetyReports.gs`:**
+    - `authorizeGmailAccess()` - Forces Gmail authorization, shows prompt to grant access
+    - `testGmailAccess()` - Returns true/false for Gmail access status
+    - `showGmailStatus()` - Shows current Gmail status with email counts found
+  - **New Menu Items (Glove Manager → 🛡️ Safety):**
+    - 🔑 Authorize Gmail Access - Run this to fix permission issues
+    - 📊 Gmail Status - Check if Gmail is working and see email counts
+  - **How to Fix Permission Issues:**
+    1. Go to Glove Manager → 🛡️ Safety → 🔑 Authorize Gmail Access
+    2. If prompted, click "Allow" to grant Gmail access
+    3. You should see "✅ Gmail Access Authorized" message
+    4. Now run "Process Safety Emails" as normal
+  - **If Authorization Prompt Doesn't Appear:**
+    1. Go to Extensions → Apps Script
+    2. Find and run `authorizeGmailAccess` function directly
+    3. Accept permissions when prompted
+    4. Return to spreadsheet and try again
+  - **Files Modified:**
+    - `src/88-SafetyReports.gs` - Added ~100 lines of authorization functions
+    - `src/Code.gs` - Added 2 new menu items at top of Safety submenu
+  - **Impact:** Users can now easily diagnose and fix Gmail permission issues
+- ✅ **Safety Compliance Config as Authoritative Crew Source**
+  - **Problem:** Non-config job numbers (like 006-26, 053-25) were creating separate rows in Safety Compliance instead of crediting to the foreman's primary crew (052-25)
+  - **Root Cause:** `calculateComplianceFromLogs()` was using `getActiveCrews()` from Employees sheet, which includes ALL job numbers
+  - **Solution:** Config is authoritative for CURRENT week only; past weeks preserve existing crews
+  - **Changes Made:**
+    1. **Auto-populate Config** - `processSafetyEmails()` now calls `populateComplianceConfigSilent()` at the start to add any new crews from Employees sheet
+    2. **Config-based tracking for current week** - Current week compliance ONLY shows crews in Config
+    3. **Past weeks preserved** - Past weeks use `getExistingCrewsForWeek()` to keep whatever crews already exist in the sheet
+  - **New Functions:**
+    - `populateComplianceConfigSilent()` - Silently adds new crews to Config (no UI alerts)
+    - `getExistingCrewsForWeek()` - Gets crews that already exist in Safety Compliance for a given week
+    - `removeNonConfigCrewsFromCompliance()` - Removes non-config crews from CURRENT WEEK ONLY
+  - **Behavior:**
+    - **Current week:** Only Config crews appear in Safety Compliance
+    - **Past weeks:** Existing crews are preserved (historical data NOT changed)
+    - **When JHA for non-config job (006-26) is assigned to foreman:** Credits the foreman's primary crew (052-25) via "Credited To" column
+    - **Recalculate ALL weeks:** Preserves past week crews (uses existing data from sheet)
+  - **Files Modified:**
+    - `src/88-SafetyReports.gs` - Updated `calculateComplianceFromLogs()`, added helper functions
+  - **New Menu Items:**
+    - 🧹 Remove Non-Config Crews - Removes non-config crews from CURRENT WEEK ONLY
+- ✅ **One-Time Fix: Ben Lapka Weeks (02/15 and 02/22)**
+  - **Problem:** Ben Lapka had multiple rows (006-26, 053-25, 052-25) instead of just his primary crew
+  - **Solution:** Created one-time fix function to clean up those specific weeks
+  - **New Menu Item:** Glove Manager → 🛡️ Safety → 🔧 Fix Ben Lapka Weeks
+  - **What it does:**
+    1. Removes rows for 006-26 and 053-25 from weeks 02/15/2026 and 02/22/2026
+    2. Updates JHA Log and Weekly Safety Log entries to credit 052-25
+    3. Recalculates compliance for those weeks
+  - **Files Modified:**
+    - `src/88-SafetyReports.gs` - Added `fixBenLapkaWeeks()` function
+    - `src/Code.gs` - Added menu item
+- ✅ **Consolidated Master Recalculate Compliance Function**
+  - **Problem:** There were 3 separate compliance recalculate functions with overlapping functionality:
+    - `recalculateComplianceFromLogs()` - Recalculates ONLY current + previous week
+    - `recalculateAllComplianceFromLogs()` - Recalculates ALL weeks in Safety Compliance sheet
+    - `menuFixAndRecalculateCompliance()` - Fixes log entries THEN recalculates all weeks
+  - **Solution:** Created `masterRecalculateCompliance()` that combines ALL functionality:
+    1. Fixes all log entries (Credited To values)
+    2. Removes non-config crews from CURRENT WEEK ONLY (preserves historical data)
+    3. Recalculates ALL weeks from log data
+    4. Refreshes all tooltips
+  - **New Menu Item:** Glove Manager → 🛡️ Safety → 🔄 Master Recalculate
+  - **Replaced Menu Items:** The three separate items were consolidated into one
+  - **Helper Functions Added:**
+    - `findNonConfigCrewsInCurrentWeek()` - Identifies crews not in Config for current week
+    - `removeNonConfigCrewsFromCurrentWeekSilent()` - Removes non-config crews (no UI prompts)
+  - **Files Modified:**
+    - `src/88-SafetyReports.gs` - Added `masterRecalculateCompliance()` and helper functions (~200 lines)
+    - `src/Code.gs` - Replaced 3 menu items with single "🔄 Master Recalculate"
+  - **Impact:** Users now have ONE button that does everything needed to fix compliance issues
+
+### March 2, 2026
+- ✅ **Safety Compliance - Ensure Current Week Exists**
+  - **Problem:** When Process Safety Emails times out or there are no new emails, the current week doesn't get added to the Safety Compliance sheet, leaving gaps
+  - **Solution:** Added utility functions to manually ensure weeks exist in compliance sheet
+  - **New Functions:**
+    - `ensureCurrentWeekInCompliance()` - Calculates compliance for current AND previous week from log data
+    - `quickGmailCheck()` - Quick diagnostic showing what emails are in Gmail vs already logged (no processing)
+    - `addJobMappingManually(jobNumber, foremanName)` - Programmatic way to add job→foreman mappings
+  - **New Menu Items (Glove Manager → 🛡️ Safety):**
+    - 🗓️ Ensure Current Week Exists - Adds current and previous week to compliance sheet from logs
+    - 🔎 Quick Gmail Check - Shows Gmail search results vs what's already logged
+  - **How `ensureCurrentWeekInCompliance()` works:**
+    1. Calculates week boundaries for current and previous week
+    2. Runs `calculateComplianceFromLogs()` for previous week (can create tasks if past deadline)
+    3. Runs `calculateComplianceFromLogs()` for current week
+    4. Updates Safety Compliance sheet with both weeks
+    5. Formats and sorts the sheet
+  - **Use Case:** If processing times out, run "Ensure Current Week Exists" to manually add the missing weeks
+  - **Files Modified:**
+    - `src/88-SafetyReports.gs` - Added ~200 lines of new utility functions
+    - `src/Code.gs` - Added 2 new menu items
+  - **Impact:** Users can now manually add weeks to compliance sheet without reprocessing all emails
+
 ### February 19, 2026
 - ✅ **Fixed Repeated Unknown Jobs Popup in Process Safety Emails**
   - **Problem:** When processing safety emails, the "Unknown Job Numbers Found" popup kept appearing repeatedly for the same job numbers (e.g., 037-26, 001-26), even after the user assigned them to a foreman or clicked "Skip"

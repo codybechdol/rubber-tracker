@@ -988,3 +988,348 @@ function saveEmployeeHistory() {
   return newEntries;
 }
 
+/**
+ * Restores an accidentally deleted employee from Employee History data.
+ * Shows a dialog to search for the employee and preview data before restoring.
+ *
+ * Menu: Glove Manager → Utilities → 🔄 Restore Deleted Employee
+ */
+function showRestoreEmployeeDialog() {
+  var html = HtmlService.createHtmlOutput(buildRestoreEmployeeHtml())
+    .setWidth(600)
+    .setHeight(550);
+  SpreadsheetApp.getUi().showModalDialog(html, '🔄 Restore Deleted Employee');
+}
+
+/**
+ * Build the HTML for restore employee dialog
+ */
+function buildRestoreEmployeeHtml() {
+  var html = '<style>';
+  html += 'body { font-family: Arial, sans-serif; padding: 15px; }';
+  html += '.search-box { display: flex; gap: 10px; margin-bottom: 20px; }';
+  html += '.search-box input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }';
+  html += '.search-box button { padding: 10px 20px; background: #1a73e8; color: white; border: none; border-radius: 4px; cursor: pointer; }';
+  html += '.results { margin-top: 10px; }';
+  html += '.result-item { padding: 12px; border: 1px solid #ddd; border-radius: 4px; margin: 8px 0; cursor: pointer; }';
+  html += '.result-item:hover { background: #f5f5f5; border-color: #1a73e8; }';
+  html += '.result-item.selected { background: #e8f0fe; border-color: #1a73e8; border-width: 2px; }';
+  html += '.preview { margin-top: 20px; padding: 15px; background: #f9f9f9; border-radius: 4px; display: none; }';
+  html += '.preview h3 { margin-top: 0; color: #1a73e8; }';
+  html += '.preview-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }';
+  html += '.preview-item { padding: 8px; background: white; border-radius: 4px; }';
+  html += '.preview-item label { display: block; font-size: 11px; color: #666; margin-bottom: 2px; }';
+  html += '.preview-item input { width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 3px; box-sizing: border-box; }';
+  html += '.buttons { margin-top: 20px; text-align: right; }';
+  html += '.buttons button { padding: 10px 20px; margin-left: 10px; border: none; border-radius: 4px; cursor: pointer; }';
+  html += '.btn-restore { background: #34a853; color: white; }';
+  html += '.btn-cancel { background: #6c757d; color: white; }';
+  html += '.no-results { color: #666; font-style: italic; padding: 20px; text-align: center; }';
+  html += '.loading { color: #666; padding: 20px; text-align: center; }';
+  html += '.error { color: #dc3545; padding: 10px; background: #f8d7da; border-radius: 4px; margin-top: 10px; }';
+  html += '</style>';
+
+  html += '<div class="search-box">';
+  html += '<input type="text" id="searchInput" placeholder="Enter employee name to search..." onkeypress="if(event.key===\'Enter\')searchEmployee()">';
+  html += '<button onclick="searchEmployee()">🔍 Search</button>';
+  html += '</div>';
+
+  html += '<div id="results" class="results"></div>';
+
+  html += '<div id="preview" class="preview">';
+  html += '<h3>📋 Employee Data Preview</h3>';
+  html += '<p style="font-size:12px;color:#666;margin-bottom:15px;">Review and edit if needed before restoring:</p>';
+  html += '<div class="preview-grid">';
+  html += '<div class="preview-item"><label>Name</label><input type="text" id="prev_name" readonly style="background:#eee;"></div>';
+  html += '<div class="preview-item"><label>Job Classification</label><input type="text" id="prev_class"></div>';
+  html += '<div class="preview-item"><label>Location</label><input type="text" id="prev_location"></div>';
+  html += '<div class="preview-item"><label>Job Number</label><input type="text" id="prev_jobNumber"></div>';
+  html += '<div class="preview-item"><label>Phone Number</label><input type="text" id="prev_phone"></div>';
+  html += '<div class="preview-item"><label>Email Address</label><input type="text" id="prev_email"></div>';
+  html += '<div class="preview-item"><label>Glove Size</label><input type="text" id="prev_gloveSize"></div>';
+  html += '<div class="preview-item"><label>Sleeve Size</label><input type="text" id="prev_sleeveSize"></div>';
+  html += '<div class="preview-item"><label>Hire Date</label><input type="text" id="prev_hireDate"></div>';
+  html += '<div class="preview-item"><label>Notes (history source)</label><input type="text" id="prev_notes" readonly style="background:#eee;font-size:11px;"></div>';
+  html += '</div>';
+  html += '<div class="buttons">';
+  html += '<button class="btn-cancel" onclick="google.script.host.close()">Cancel</button>';
+  html += '<button class="btn-restore" onclick="restoreEmployee()">✅ Restore Employee</button>';
+  html += '</div>';
+  html += '</div>';
+
+  html += '<script>';
+  html += 'var selectedEmployee = null;';
+
+  html += 'function searchEmployee() {';
+  html += '  var query = document.getElementById("searchInput").value.trim();';
+  html += '  if (!query || query.length < 2) { alert("Please enter at least 2 characters"); return; }';
+  html += '  document.getElementById("results").innerHTML = "<div class=\\"loading\\">🔍 Searching...</div>";';
+  html += '  document.getElementById("preview").style.display = "none";';
+  html += '  google.script.run.withSuccessHandler(showResults).withFailureHandler(showError).searchEmployeeHistory(query);';
+  html += '}';
+
+  html += 'function showResults(results) {';
+  html += '  var container = document.getElementById("results");';
+  html += '  if (!results || results.length === 0) {';
+  html += '    container.innerHTML = "<div class=\\"no-results\\">No employees found in history matching that name.</div>";';
+  html += '    return;';
+  html += '  }';
+  html += '  var html = "";';
+  html += '  for (var i = 0; i < results.length; i++) {';
+  html += '    var r = results[i];';
+  html += '    html += "<div class=\\"result-item\\" onclick=\\"selectResult(" + i + ")\\" id=\\"result_" + i + "\\">";';
+  html += '    html += "<strong>" + r.name + "</strong>";';
+  html += '    if (r.jobNumber) html += " <span style=\\"color:#666\\">(" + r.jobNumber + ")</span>";';
+  html += '    html += "<br><span style=\\"font-size:12px;color:#666\\">";';
+  html += '    if (r.location) html += "📍 " + r.location + " ";';
+  html += '    html += "Last seen: " + r.lastSeen + "</span>";';
+  html += '    html += "</div>";';
+  html += '  }';
+  html += '  container.innerHTML = html;';
+  html += '  window.searchResults = results;';
+  html += '}';
+
+  html += 'function showError(error) {';
+  html += '  document.getElementById("results").innerHTML = "<div class=\\"error\\">Error: " + error.message + "</div>";';
+  html += '}';
+
+  html += 'function selectResult(index) {';
+  html += '  var items = document.querySelectorAll(".result-item");';
+  html += '  for (var i = 0; i < items.length; i++) { items[i].classList.remove("selected"); }';
+  html += '  document.getElementById("result_" + index).classList.add("selected");';
+  html += '  selectedEmployee = window.searchResults[index];';
+  html += '  document.getElementById("prev_name").value = selectedEmployee.name || "";';
+  html += '  document.getElementById("prev_class").value = selectedEmployee.class || "";';
+  html += '  document.getElementById("prev_location").value = selectedEmployee.location || "";';
+  html += '  document.getElementById("prev_jobNumber").value = selectedEmployee.jobNumber || "";';
+  html += '  document.getElementById("prev_phone").value = selectedEmployee.phone || "";';
+  html += '  document.getElementById("prev_email").value = selectedEmployee.email || "";';
+  html += '  document.getElementById("prev_gloveSize").value = selectedEmployee.gloveSize || "";';
+  html += '  document.getElementById("prev_sleeveSize").value = selectedEmployee.sleeveSize || "";';
+  html += '  document.getElementById("prev_hireDate").value = selectedEmployee.hireDate || "";';
+  html += '  document.getElementById("prev_notes").value = "From " + selectedEmployee.historyEntries + " history entries";';
+  html += '  document.getElementById("preview").style.display = "block";';
+  html += '}';
+
+  html += 'function restoreEmployee() {';
+  html += '  if (!selectedEmployee) { alert("Please select an employee first"); return; }';
+  html += '  var data = {';
+  html += '    name: document.getElementById("prev_name").value,';
+  html += '    class: document.getElementById("prev_class").value,';
+  html += '    location: document.getElementById("prev_location").value,';
+  html += '    jobNumber: document.getElementById("prev_jobNumber").value,';
+  html += '    phone: document.getElementById("prev_phone").value,';
+  html += '    email: document.getElementById("prev_email").value,';
+  html += '    gloveSize: document.getElementById("prev_gloveSize").value,';
+  html += '    sleeveSize: document.getElementById("prev_sleeveSize").value,';
+  html += '    hireDate: document.getElementById("prev_hireDate").value';
+  html += '  };';
+  html += '  if (!confirm("Restore " + data.name + " to the Employees sheet?")) return;';
+  html += '  google.script.run.withSuccessHandler(function(result) {';
+  html += '    alert(result);';
+  html += '    google.script.host.close();';
+  html += '  }).withFailureHandler(function(error) {';
+  html += '    alert("Error: " + error.message);';
+  html += '  }).restoreEmployeeToSheet(JSON.stringify(data));';
+  html += '}';
+
+  html += '</script>';
+
+  return html;
+}
+
+/**
+ * Search Employee History for employees matching the query.
+ * Returns reconstructed employee data from history entries.
+ *
+ * @param {string} query - Name to search for
+ * @return {Array} Array of employee data objects
+ */
+function searchEmployeeHistory(query) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var historySheet = ss.getSheetByName('Employee History');
+  var employeesSheet = ss.getSheetByName('Employees');
+
+  if (!historySheet || historySheet.getLastRow() <= 2) {
+    return [];
+  }
+
+  var queryLower = query.toLowerCase().trim();
+  var historyData = historySheet.getRange(3, 1, historySheet.getLastRow() - 2, 14).getValues();
+
+  // Get current employees to exclude them from results
+  var currentEmployees = {};
+  if (employeesSheet && employeesSheet.getLastRow() > 1) {
+    var empData = employeesSheet.getDataRange().getValues();
+    for (var e = 1; e < empData.length; e++) {
+      var empName = String(empData[e][0] || '').toLowerCase().trim();
+      if (empName) currentEmployees[empName] = true;
+    }
+  }
+
+  // Build employee data from history entries
+  // History columns: Date, Employee, EventType, Location, JobNumber, HireDate, LastDay, LastDayReason, RehireDate, Notes, Phone, Email, GloveSize, SleeveSize
+  var employeeMap = {};
+
+  for (var i = 0; i < historyData.length; i++) {
+    var row = historyData[i];
+    var name = String(row[1] || '').trim();
+    var nameLower = name.toLowerCase();
+
+    if (!name || nameLower.indexOf(queryLower) === -1) continue;
+
+    // Skip if currently in Employees sheet
+    if (currentEmployees[nameLower]) continue;
+
+    if (!employeeMap[nameLower]) {
+      employeeMap[nameLower] = {
+        name: name,
+        location: '',
+        jobNumber: '',
+        class: '',
+        phone: '',
+        email: '',
+        gloveSize: '',
+        sleeveSize: '',
+        hireDate: '',
+        lastSeen: '',
+        historyEntries: 0
+      };
+    }
+
+    var emp = employeeMap[nameLower];
+    emp.historyEntries++;
+
+    // Update with latest non-empty values
+    var date = row[0];
+    var location = String(row[3] || '').trim();
+    var jobNumber = String(row[4] || '').trim();
+    var hireDate = row[5];
+    var phone = String(row[10] || '').trim();
+    var email = String(row[11] || '').trim();
+    var gloveSize = String(row[12] || '').trim();
+    var sleeveSize = String(row[13] || '').trim();
+
+    // Keep most recent non-empty values
+    if (location) emp.location = location;
+    if (jobNumber) emp.jobNumber = jobNumber;
+    if (phone) emp.phone = phone;
+    if (email) emp.email = email;
+    if (gloveSize) emp.gloveSize = gloveSize;
+    if (sleeveSize) emp.sleeveSize = sleeveSize;
+    if (hireDate) {
+      emp.hireDate = (hireDate instanceof Date)
+        ? Utilities.formatDate(hireDate, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy')
+        : String(hireDate);
+    }
+
+    // Track last seen date
+    if (date) {
+      var dateStr = (date instanceof Date)
+        ? Utilities.formatDate(date, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy')
+        : String(date);
+      emp.lastSeen = dateStr;
+    }
+  }
+
+  // Convert to array and sort by last seen date
+  var results = [];
+  for (var key in employeeMap) {
+    results.push(employeeMap[key]);
+  }
+
+  return results;
+}
+
+/**
+ * Restore an employee to the Employees sheet.
+ * Called from the restore dialog.
+ *
+ * @param {string} dataJson - JSON string of employee data
+ * @return {string} Result message
+ */
+function restoreEmployeeToSheet(dataJson) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var employeesSheet = ss.getSheetByName('Employees');
+  var historySheet = ss.getSheetByName('Employee History');
+
+  if (!employeesSheet) {
+    throw new Error('Employees sheet not found');
+  }
+
+  var data = JSON.parse(dataJson);
+
+  if (!data.name) {
+    throw new Error('Employee name is required');
+  }
+
+  // Check if employee already exists
+  var empData = employeesSheet.getDataRange().getValues();
+  var nameLower = data.name.toLowerCase().trim();
+
+  for (var i = 1; i < empData.length; i++) {
+    if (String(empData[i][0] || '').toLowerCase().trim() === nameLower) {
+      throw new Error('Employee "' + data.name + '" already exists in Employees sheet (row ' + (i + 1) + ')');
+    }
+  }
+
+  // Get headers to find column indices
+  var headers = empData[0];
+  var colMap = {};
+  for (var h = 0; h < headers.length; h++) {
+    var hdr = String(headers[h]).toLowerCase().trim();
+    if (hdr === 'name') colMap.name = h;
+    else if (hdr === 'class') colMap.class = h;
+    else if (hdr === 'location') colMap.location = h;
+    else if (hdr === 'job number') colMap.jobNumber = h;
+    else if (hdr === 'phone number') colMap.phone = h;
+    else if (hdr === 'email address') colMap.email = h;
+    else if (hdr === 'glove size') colMap.gloveSize = h;
+    else if (hdr === 'sleeve size') colMap.sleeveSize = h;
+    else if (hdr === 'hire date') colMap.hireDate = h;
+    else if (hdr === 'job classification') colMap.classification = h;
+  }
+
+  // Build the new row (match header order)
+  var newRow = new Array(headers.length).fill('');
+  if (colMap.name !== undefined) newRow[colMap.name] = data.name;
+  if (colMap.class !== undefined) newRow[colMap.class] = data.class || '';
+  if (colMap.location !== undefined) newRow[colMap.location] = data.location || '';
+  if (colMap.jobNumber !== undefined) newRow[colMap.jobNumber] = data.jobNumber || '';
+  if (colMap.phone !== undefined) newRow[colMap.phone] = data.phone || '';
+  if (colMap.email !== undefined) newRow[colMap.email] = data.email || '';
+  if (colMap.gloveSize !== undefined) newRow[colMap.gloveSize] = data.gloveSize || '';
+  if (colMap.sleeveSize !== undefined) newRow[colMap.sleeveSize] = data.sleeveSize || '';
+  if (colMap.hireDate !== undefined) newRow[colMap.hireDate] = data.hireDate || '';
+  if (colMap.classification !== undefined) newRow[colMap.classification] = data.class || '';
+
+  // Append the row
+  employeesSheet.appendRow(newRow);
+
+  // Log to Employee History
+  if (historySheet) {
+    var today = new Date();
+    var todayStr = Utilities.formatDate(today, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+
+    historySheet.appendRow([
+      todayStr,                    // Date
+      data.name,                   // Employee Name
+      'Restored',                  // Event Type
+      data.location || '',         // Location
+      data.jobNumber || '',        // Job Number
+      data.hireDate || '',         // Hire Date
+      '',                          // Last Day
+      '',                          // Last Day Reason
+      '',                          // Rehire Date
+      'Restored from Employee History - accidentally deleted', // Notes
+      data.phone || '',            // Phone
+      data.email || '',            // Email
+      data.gloveSize || '',        // Glove Size
+      data.sleeveSize || ''        // Sleeve Size
+    ]);
+  }
+
+  Logger.log('restoreEmployeeToSheet: Restored ' + data.name + ' to Employees sheet');
+
+  return '✅ Employee Restored!\n\n' + data.name + ' has been added back to the Employees sheet.\n\nJob Number: ' + (data.jobNumber || 'Not set') + '\nLocation: ' + (data.location || 'Not set');
+}
