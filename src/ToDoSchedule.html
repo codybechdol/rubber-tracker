@@ -1952,11 +1952,19 @@
         // SMS Scheduled button (Stage 2) - only show if notified
         if (isTaskNotified(task)) {
           var isSafetyCompliance = (task.taskType || '').toLowerCase() === 'missing safety report';
+          var itemTypeLower = (task.itemType || task.certType || '').toLowerCase();
+          // Check for non-class certs that don't need class scheduling
+          var isNonClassCert = ['dl', 'driver license', 'driver\'s license', 'drivers license',
+                                'mec', 'medical examiner', 'forklift', 'cdl'].some(function(c) {
+            return itemTypeLower.indexOf(c) !== -1;
+          });
           var scheduledBtnClass = isTaskScheduled(task) ? 'btn-scheduled' : 'btn-sms';
-          var scheduledIcon = isTaskScheduled(task) ? 'bi-clipboard-check-fill' : (isSafetyCompliance ? 'bi-clipboard-check' : 'bi-calendar-plus');
+          var scheduledIcon = isTaskScheduled(task) ? 'bi-clipboard-check-fill' : (isSafetyCompliance ? 'bi-clipboard-check' : (isNonClassCert ? 'bi-calendar-date' : 'bi-calendar-plus'));
           var scheduledTitle = isSafetyCompliance
             ? (isTaskScheduled(task) ? 'Edit resolutions' : 'Record resolution')
-            : (isTaskScheduled(task) ? 'Resend class schedule' : 'Send class schedule text');
+            : isNonClassCert
+              ? (isTaskScheduled(task) ? 'Update expiration date' : 'Enter new expiration date')
+              : (isTaskScheduled(task) ? 'Resend class schedule' : 'Send class schedule text');
           html += '<button class="btn ' + scheduledBtnClass + ' btn-sm me-1" onclick="event.stopPropagation(); openScheduledModal(' + task._originalIndex + ')" title="' + scheduledTitle + '"><i class="bi ' + scheduledIcon + '"></i></button>';
         }
 
@@ -5408,9 +5416,17 @@
           // SMS Scheduled button (Stage 2) - only show if notified
           if (itemNotified) {
             var itemScheduled = isChecklistItemScheduled(item);
+            var itemTypeLower = (item.itemType || item.certType || '').toLowerCase();
+            // Check for non-class certs that don't need class scheduling
+            var isNonClassCert = ['dl', 'driver license', 'driver\'s license', 'drivers license',
+                                  'mec', 'medical examiner', 'forklift', 'cdl'].some(function(c) {
+              return itemTypeLower.indexOf(c) !== -1;
+            });
             var scheduledBtnClass = itemScheduled ? 'btn-scheduled' : 'btn-sms';
-            var scheduledIcon = itemScheduled ? 'bi-calendar-check-fill' : 'bi-calendar-plus';
-            var scheduledTitle = itemScheduled ? 'Resend class schedule' : 'Send class schedule text';
+            var scheduledIcon = itemScheduled ? 'bi-calendar-check-fill' : (isNonClassCert ? 'bi-calendar-date' : 'bi-calendar-plus');
+            var scheduledTitle = isNonClassCert
+              ? (itemScheduled ? 'Update expiration date' : 'Enter new expiration date')
+              : (itemScheduled ? 'Resend class schedule' : 'Send class schedule text');
             html += '<button class="btn ' + scheduledBtnClass + ' btn-sm me-1" onclick="event.stopPropagation(); openScheduledModal(' + taskIndex + ')" title="' + scheduledTitle + '"><i class="bi ' + scheduledIcon + '"></i></button>';
           }
         } else {
