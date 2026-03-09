@@ -717,6 +717,83 @@ Notes: [Any notes]
 
 ## Completed Features Log
 
+### March 9, 2026
+- ✅ **Job/Crew Tracking Sheet - Lifecycle Management**
+  - **New Feature:** Track job/crew start dates, end dates, and status to manage crew lifecycle
+  - **Problem Solved:** 
+    - Secondary job numbers were being used for future jobs (not actual concurrent work)
+    - No way to track when jobs start or end
+    - No way to exclude future/pending jobs from Safety Compliance tracking
+  - **New Sheet: "Job Tracking"** with columns:
+    - Job Number (e.g., 013-26)
+    - Location
+    - Foreman
+    - Crew Size
+    - Start Date (when job becomes active)
+    - Est. End Date (projected completion)
+    - Actual End Date (when completed)
+    - Status (Active, Pending Start, Completed, On Hold)
+    - Notes
+    - Last Updated
+  - **How it works:**
+    - Jobs with "Pending Start" status are excluded from Safety Compliance tracking
+    - Jobs with future Start Date are also excluded
+    - Jobs with "Completed" status are excluded
+    - Only "Active" jobs with past/current Start Date are tracked
+  - **New Functions in `22-EmployeeValidation.gs`:**
+    - `setupJobTrackingSheet()` - Creates and sets up the Job Tracking sheet
+    - `populateJobTrackingFromEmployees()` - Populates from Employees sheet
+    - `refreshJobTrackingFromEmployees()` - Refreshes while preserving dates/status
+    - `markJobComplete()` - Sets status to Completed and Actual End Date to today
+    - `addFutureJob()` - Adds a new job with future start date
+    - `getActiveJobNumbers()` - Returns only active job numbers (for Safety Compliance)
+    - `isJobActive(jobNumber)` - Checks if a specific job is active
+    - `openJobTrackingSheet()` - Opens the sheet
+  - **New Menu Items (Glove Manager → 🔧 Utilities):**
+    - 📋 Setup Job Tracking Sheet - Creates the sheet
+    - 🔄 Refresh Job Tracking - Updates from Employees sheet
+    - ✅ Mark Job Complete - Closes out a finished job
+    - ➕ Add Future Job - Adds job with future start date
+    - 📂 View Job Tracking - Opens the sheet
+  - **Use Cases:**
+    - Track when a job/crew started and when it's expected to end
+    - Mark jobs as "Pending Start" for future assignments (employees assigned but job hasn't started)
+    - Mark jobs as "Completed" when crew finishes and moves to new job
+    - Future jobs don't appear in Safety Compliance until their start date
+  - **Secondary Job Number Clarification:**
+    - If employee's secondary job is actually a FUTURE job, add it to Job Tracking as "Pending Start"
+    - The secondary job won't appear in Safety Compliance until it becomes Active
+    - When old job completes, mark it "Completed" and change employee's primary job
+  - **Crew Import Integration:**
+    - After uploading crew makeup Excel file, Job Tracking is automatically synced
+    - **Completed jobs are filtered out** from the crew preview - they won't show in the import
+    - **Pending Start jobs** with employees assigned trigger an **activation dialog**
+    - Dialog shows each pending job with checkbox - checked = activate, unchecked = keep pending
+    - Shows job number, location, foreman, crew size, and planned start date
+    - **Pending Start jobs show location from Job Tracking sheet** (not from Excel)
+    - User can selectively activate jobs that are actually starting now
+    - Jobs kept as "Pending Start" stay in future planning mode (not tracked for compliance)
+    - New jobs that appear in the import are automatically added to Job Tracking
+    - Jobs with no employees after import are flagged for review
+    - Import completion message shows Job Tracking sync results
+  - **Pending Start jobs excluded from "Employees in Multiple Crews":**
+    - If an employee appears in both an Active job AND a Pending Start job, they are NOT flagged as duplicates
+    - Only active job assignments count as duplicates
+    - This allows future planning (assigning employees to jobs that haven't started yet) without triggering duplicate warnings
+  - **Set as Pending Start from Crew Card:**
+    - Each crew card dropdown has "📅 Set as Pending Start..." option
+    - Opens dialog to set estimated start date
+    - Adds job to Job Tracking sheet with Pending Start status
+    - Immediately refreshes the preview and duplicate detection
+  - **Mark Job Active:**
+    - For jobs already marked as Pending Start, dropdown shows "✅ Mark as Active Now"
+    - Changes status from Pending Start to Active in Job Tracking
+  - **Files Modified:**
+    - `src/22-EmployeeValidation.gs` - Added ~750 lines of job tracking functions
+    - `src/85-DataImport.gs` - Added `syncJobTrackingAfterImport()`, `getJobTrackingForCrewImport()`, and `addOrUpdateJobTracking()` functions
+    - `src/CrewImport.html` - Added jobTrackingData loading, filtering, Pending Start display, duplicate filtering, and Set Pending Start dialog
+    - `src/Code.gs` - Added 5 new menu items
+
 ### March 3, 2026
 - ✅ **Auto-Cleanup at End of Process Safety Emails**
   - **New Feature:** Automatic compliance cleanup runs silently at end of `processSafetyEmails()`

@@ -1586,7 +1586,7 @@ function setupTrainingTracking() {
         preserved ? preserved.attendees : '', // Attendees - preserved if exists
         training.hours,
         preserved ? preserved.trainer : '', // Trainer - preserved if exists
-        preserved ? preserved.status : 'Pending', // Status - preserved if exists, otherwise Pending
+        preserved ? preserved.status : 'Unassigned', // Status - preserved if exists, otherwise Unassigned
         '' // Notes
       ];
 
@@ -1634,7 +1634,7 @@ function setupTrainingTracking() {
         decemberPreserved ? decemberPreserved.attendees : crewMembers, // Attendees - preserved if exists, otherwise auto-populate
         2,  // Default hours
         decemberPreserved ? decemberPreserved.trainer : '', // Trainer - preserved
-        decemberPreserved ? decemberPreserved.status : 'Pending', // Status - preserved
+        decemberPreserved ? decemberPreserved.status : 'Unassigned', // Status - preserved
         catchupNote
       ];
 
@@ -2478,7 +2478,7 @@ function getTrainingComplianceStatus(jobNumber, month) {
     if (rowMonth === month && rowJobNum === jobNumber) {
       return {
         found: true,
-        status: row[colIndices.status] || 'Pending',
+        status: row[colIndices.status] || 'Unassigned',
         completionDate: row[colIndices.completionDate],
         topic: row[colIndices.topic]
       };

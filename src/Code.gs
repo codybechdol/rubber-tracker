@@ -8,6 +8,7 @@
  * Expand each placeholder as features are implemented. Logging and error handling included for maintainability.
  *
  * NOTE: Constants (COLS, sheet names, etc.) are defined in 00-Constants.gs
+ * LAST UPDATE: March 6, 2026 - Fixed status validation errors in generateTaskMetadata
  *
  * UPDATE Feb 1, 2026: Phase 4 - Migrated localStorage to Task Metadata sheet
  * NOTE: Utility functions (logEvent, normalizeApprovalValue, etc.) are defined in 01-Utilities.gs
@@ -297,7 +298,7 @@ function getScheduleTasks() {
       var scheduledDate = colIndices.scheduledDate !== undefined ? mRow[colIndices.scheduledDate] : '';
       var startTime = colIndices.startTime !== undefined ? formatTimeForInput(mRow[colIndices.startTime]) : '';
       var endTime = colIndices.endTime !== undefined ? formatTimeForInput(mRow[colIndices.endTime]) : '';
-      var status = colIndices.status !== undefined ? (mRow[colIndices.status] || 'Pending') : 'Pending';
+      var status = colIndices.status !== undefined ? (mRow[colIndices.status] || 'Unassigned') : 'Unassigned';
       var notes = colIndices.notes !== undefined ? (mRow[colIndices.notes] || '') : '';
       // Check for manuallyCreated - handle all forms: boolean true, string 'TRUE', string 'true'
       // If column doesn't exist (old sheet), default to TRUE since all pre-migration tasks were user-created
@@ -745,7 +746,7 @@ function addManualScheduleTask(task) {
   if (colMap.scheduledDate !== undefined) newRow[colMap.scheduledDate] = task.scheduledDate || '';
   if (colMap.startTime !== undefined) newRow[colMap.startTime] = task.startTime || '';
   if (colMap.endTime !== undefined) newRow[colMap.endTime] = task.endTime || '';
-  if (colMap.status !== undefined) newRow[colMap.status] = 'Pending';
+  if (colMap.status !== undefined) newRow[colMap.status] = 'Unassigned';
   if (colMap.notes !== undefined) newRow[colMap.notes] = task.notes || '';
   if (colMap.dateAdded !== undefined) {
     newRow[colMap.dateAdded] = Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy HH:mm');
@@ -850,7 +851,7 @@ function migrateManualTasksSheet() {
       oldColMap.scheduledDate !== undefined ? oldRow[oldColMap.scheduledDate] : '',
       oldColMap.startTime !== undefined ? oldRow[oldColMap.startTime] : '',
       oldColMap.endTime !== undefined ? oldRow[oldColMap.endTime] : '',
-      oldColMap.status !== undefined ? oldRow[oldColMap.status] : 'Pending',
+      oldColMap.status !== undefined ? oldRow[oldColMap.status] : 'Unassigned',
       oldColMap.notes !== undefined ? oldRow[oldColMap.notes] : '',
       oldColMap.dateAdded !== undefined ? oldRow[oldColMap.dateAdded] : '',
       // Flexibility options - preserve if they exist, default to locked for existing tasks
@@ -4899,7 +4900,15 @@ function onOpen() {
       .addItem('📥 Import Data', 'showImportDialog')
       .addItem('📥 Quick Import (1084)', 'importProvidedData')
       .addSeparator()
+      // === JOB TRACKING ===
+      .addItem('📋 Setup Job Tracking Sheet', 'setupJobTrackingSheet')
+      .addItem('🔄 Refresh Job Tracking', 'refreshJobTrackingFromEmployees')
+      .addItem('✅ Mark Job Complete', 'markJobComplete')
+      .addItem('➕ Add Future Job', 'addFutureJob')
+      .addItem('📂 View Job Tracking', 'openJobTrackingSheet')
+      .addSeparator()
       .addItem('📋 Setup Task Metadata Sheet', 'setupTaskMetadataSheet')
+      .addItem('🔧 Fix Task Metadata Status Validation', 'fixTaskMetadataStatusValidation')
       .addItem('🏥 Task Metadata Health Check', 'showTaskMetadataHealthCheck')
       .addItem('🧹 Remove Duplicate Task Metadata', 'removeDuplicateTaskMetadata')
       .addItem('🧽 Cleanup Orphaned Metadata', 'cleanupOrphanedTaskMetadata')
@@ -7067,7 +7076,8 @@ function setupTaskMetadataSheet() {
   sheet.setColumnWidth(26, 100); // InTaskList
 
   // Add data validation for Status column (column O = 15)
-  var statusValues = ['Pending', 'Scheduled', 'Complete', 'Overdue', 'Declined'];
+  // Standardized status values (Feb 18, 2026)
+  var statusValues = ['Unassigned', 'Assigned', 'Complete', 'Overdue', 'Deferred'];
   var statusRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(statusValues)
     .setAllowInvalid(false)
@@ -7460,11 +7470,143 @@ function openLocationsSheet() {
 }
 
 /**
+ * Normalizes task status to standardized values.
+ * Converts legacy values (Pending, Scheduled, Declined) to new format (Unassigned, Assigned, Deferred).
+ * @param {string} status - The status value to normalize
+ * @returns {string} Normalized status value
+ */
+function normalizeStatus(status) {
+  if (!status) return '';
+
+  var statusStr = String(status).trim();
+
+  // Map old statuses to new standardized values
+  var statusMap = {
+    'pending': 'Unassigned',
+    'scheduled': 'Assigned',
+    'declined': 'Deferred',
+    'unassigned': 'Unassigned',
+    'assigned': 'Assigned',
+    'complete': 'Complete',
+    'completed': 'Complete',
+    'overdue': 'Overdue',
+    'deferred': 'Deferred'
+  };
+
+  var normalized = statusMap[statusStr.toLowerCase()];
+
+  // If no mapping found, return original if it's a valid status, otherwise Unassigned
+  if (!normalized) {
+    var validStatuses = ['Unassigned', 'Assigned', 'Complete', 'Overdue', 'Deferred'];
+    for (var i = 0; i < validStatuses.length; i++) {
+      if (statusStr.toLowerCase() === validStatuses[i].toLowerCase()) {
+        return validStatuses[i];
+      }
+    }
+    // Unknown status - default to Unassigned
+    return 'Unassigned';
+  }
+
+  return normalized;
+}
+
+/**
  * Generates task metadata from all source sheets and populates Task Metadata sheet.
  * Reads from: Glove Swaps, Sleeve Swaps, Training Tracking, Reclaims, Expiring Certs, Manual Tasks
  * Creates metadata records with unique TaskIDs for scheduling and state tracking.
  * Menu item: Glove Manager → Schedule & To-Do → Generate Task Metadata
  */
+/**
+ * Normalizes status values to the standardized set
+ * Valid values: Unassigned, Assigned, Complete, Overdue, Deferred
+ * @param {string} status - The status value to normalize
+ * @return {string} The normalized status value
+ */
+function normalizeTaskStatus(status) {
+  if (!status) return 'Unassigned';
+
+  var statusLower = String(status).toLowerCase().trim();
+
+  // Map legacy values to new standardized values
+  var statusMap = {
+    'pending': 'Unassigned',
+    'unassigned': 'Unassigned',
+    'scheduled': 'Assigned',
+    'assigned': 'Assigned',
+    'complete': 'Complete',
+    'completed': 'Complete',
+    'overdue': 'Overdue',
+    'deferred': 'Deferred',
+    'declined': 'Deferred',
+    'resolved': 'Complete',
+    'reclaim pending': 'Unassigned',
+    'in progress': 'Assigned'
+  };
+
+  return statusMap[statusLower] || 'Unassigned';
+}
+
+/**
+ * Fixes Task Metadata sheet validation and migrates legacy status values
+ * Run this to fix validation errors when running Generate Task Metadata
+ */
+function fixTaskMetadataStatusValidation() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Task Metadata');
+
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert('Task Metadata sheet not found.');
+    return;
+  }
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    SpreadsheetApp.getUi().alert('Task Metadata sheet has no data rows.');
+    return;
+  }
+
+  // Step 1: Clear all validation on status column
+  var maxRows = sheet.getMaxRows();
+  var statusColumnRange = sheet.getRange(2, 15, maxRows - 1, 1);
+  statusColumnRange.clearDataValidations();
+  Logger.log('fixTaskMetadataStatusValidation: Cleared validation');
+
+  // Step 2: Read and normalize all status values
+  var statusRange = sheet.getRange(2, 15, lastRow - 1, 1);
+  var statusValues = statusRange.getValues();
+  var updatedCount = 0;
+
+  for (var i = 0; i < statusValues.length; i++) {
+    var oldStatus = statusValues[i][0];
+    var newStatus = normalizeTaskStatus(oldStatus);
+    if (oldStatus !== newStatus) {
+      statusValues[i][0] = newStatus;
+      updatedCount++;
+    }
+  }
+
+  // Step 3: Write normalized values back
+  statusRange.setValues(statusValues);
+  Logger.log('fixTaskMetadataStatusValidation: Normalized ' + updatedCount + ' status values');
+
+  // Step 4: Reapply validation with correct values
+  var validStatuses = ['Unassigned', 'Assigned', 'Complete', 'Overdue', 'Deferred'];
+  var statusValidation = SpreadsheetApp.newDataValidation()
+    .requireValueInList(validStatuses, true)
+    .setAllowInvalid(false)
+    .build();
+
+  // Only apply to rows with data
+  sheet.getRange(2, 15, lastRow - 1, 1).setDataValidation(statusValidation);
+  Logger.log('fixTaskMetadataStatusValidation: Applied new validation');
+
+  SpreadsheetApp.getUi().alert(
+    '✅ Task Metadata Status Fixed!\n\n' +
+    'Updated ' + updatedCount + ' status values.\n' +
+    'Valid statuses: Unassigned, Assigned, Complete, Overdue, Deferred'
+  );
+}
+
 function generateTaskMetadata() {
   Logger.log('=== generateTaskMetadata START ===');
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -7523,6 +7665,18 @@ function generateTaskMetadata() {
       // Create unique TaskID - check both source and sheetName properties
       var sourceSheet = task.source || task.sheetName || 'Unknown';
       var sourceRow = task.rowIndex || 0;
+
+      // SKIP: Safety Compliance / Missing Safety Report tasks
+      // These are already created directly in Task Metadata by createMissingReportTasks()
+      // and should NOT be regenerated here (they have their own TaskID format)
+      // Fixed: March 4, 2026 - prevents duplicate Missing Safety Report tasks in Task List
+      if (sourceSheet === 'Safety Compliance' ||
+          sourceSheet === 'Task Metadata' ||
+          task.taskType === 'Missing Safety Report' ||
+          task.type === 'Missing Safety Report') {
+        continue; // Skip - already managed
+      }
+
       var taskID = sourceSheet.replace(/\s+/g, '') + '_' + sourceRow + '_' + dateCreated;
 
       // Get phone number for employee
@@ -7646,7 +7800,7 @@ function generateTaskMetadata() {
         existing.scheduledDate || '',      // L: PRESERVE ScheduledDate
         existing.startTime || '',          // M: PRESERVE StartTime
         existing.endTime || '',            // N: PRESERVE EndTime
-        existing.status || rec[14],        // O: PRESERVE Status (or use new if empty)
+        normalizeTaskStatus(existing.status || rec[14]), // O: PRESERVE Status (normalized to valid value)
         existing.notifiedDate || '',       // P: PRESERVE NotifiedDate
         existing.scheduledClassDate || '', // Q: PRESERVE ScheduledClassDate
         existing.classType || '',          // R: PRESERVE ClassType
@@ -7673,13 +7827,14 @@ function generateTaskMetadata() {
 
   Logger.log('generateTaskMetadata: ' + newRecords.length + ' new records, ' + updatedCount + ' existing records to update');
 
-  // Clear data validation on Status column (O = column 15) to prevent validation errors during write
+  // Clear data validation on ENTIRE Status column (O = column 15) to prevent validation errors during write
   // This is needed because old rows may have legacy status values that fail new validation rules
-  var lastRow = metadataSheet.getLastRow();
-  if (lastRow > 1) {
-    var statusColumnRange = metadataSheet.getRange(2, 15, lastRow - 1, 1);
+  // Clear ALL rows (use max rows to cover any new rows that will be added)
+  var maxRows = metadataSheet.getMaxRows();
+  if (maxRows > 1) {
+    var statusColumnRange = metadataSheet.getRange(2, 15, maxRows - 1, 1);
     statusColumnRange.clearDataValidations();
-    Logger.log('generateTaskMetadata: Cleared validation on Status column (rows 2-' + lastRow + ')');
+    Logger.log('generateTaskMetadata: Cleared validation on Status column (rows 2-' + maxRows + ')');
   }
 
   // Write updates to existing rows
@@ -8215,10 +8370,12 @@ function getTasksWithMetadata() {
     // Convert Date objects to ISO strings for safe serialization
     // MINIMAL task objects to stay under 50KB transfer limit (45 tasks × ~500 bytes each = ~22KB)
     var serializedTasks = enrichedTasks.map(function(task, index) {
+      // Handle both taskId and taskID (case variations)
+      var taskIdValue = task.taskID || task.taskId || task.tid || '';
       return {
         // Identity (for saves/updates)
         taskKey: task.sheetName + '_' + task.rowIndex,
-        tid: task.taskID || '',  // TaskID for Safety Compliance identification
+        tid: taskIdValue,  // TaskID for Safety Compliance identification
         idx: index,
         // Display fields
         emp: task.employee || '',
@@ -8246,7 +8403,7 @@ function getTasksWithMetadata() {
         // Notes (for SMS messages - Missing Safety Reports, etc.)
         n: task.notes || '',
         // Job number (for Safety Compliance tasks)
-        job: task.jobNumber || extractJobNumberFromTaskID(task.taskID || '')
+        job: task.jobNumber || extractJobNumberFromTaskID(taskIdValue)
       };
     });
 

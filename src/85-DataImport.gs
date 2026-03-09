@@ -246,7 +246,432 @@ function applyCrewChanges(changes) {
 
   logEvent('Crew Makeup Import: Updated ' + updatedCount + ' employees, logged ' + historyLogged + ' history entries');
 
-  return { success: true, message: message };
+  // Sync with Job Tracking sheet if it exists
+  var jobTrackingResult = syncJobTrackingAfterImport(ss);
+  var pendingJobs = [];
+
+  if (jobTrackingResult) {
+    message += '\n\n📊 Job Tracking: ' + jobTrackingResult.message;
+    pendingJobs = jobTrackingResult.pendingJobs || [];
+
+    if (pendingJobs.length > 0) {
+      message += '\n\n⚠️ ' + pendingJobs.length + ' "Pending Start" job(s) now have employees assigned.';
+    }
+  }
+
+  return {
+    success: true,
+    message: message,
+    pendingJobs: pendingJobs
+  };
+}
+
+/**
+ * Syncs Job Tracking sheet after crew import.
+ * - Updates existing jobs with new foreman/crew size/location
+ * - Detects "Pending Start" jobs that now have employees (returns for UI decision)
+ * - Adds new jobs that appeared in the import
+ * - Marks jobs with no employees as needing review
+ *
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @return {Object} Result with message and pendingJobs array
+ */
+function syncJobTrackingAfterImport(ss) {
+  var jobSheet = ss.getSheetByName('Job Tracking');
+  if (!jobSheet) {
+    Logger.log('syncJobTrackingAfterImport: Job Tracking sheet not found, skipping');
+    return null;
+  }
+
+  var employeesSheet = ss.getSheetByName('Employees');
+  if (!employeesSheet) {
+    return null;
+  }
+
+  // Get current Job Tracking data
+  var jobData = jobSheet.getDataRange().getValues();
+  var existingJobs = {};
+
+  for (var j = 1; j < jobData.length; j++) {
+    var jobNum = String(jobData[j][0] || '').trim();
+    if (jobNum) {
+      existingJobs[jobNum] = {
+        rowIndex: j + 1,
+        location: jobData[j][1],
+        foreman: jobData[j][2],
+        crewSize: jobData[j][3],
+        startDate: jobData[j][4],
+        estEndDate: jobData[j][5],
+        actualEndDate: jobData[j][6],
+        status: String(jobData[j][7] || '').trim(),
+        notes: jobData[j][8] || ''
+      };
+    }
+  }
+
+  // Get current crews from Employees sheet
+  var empData = employeesSheet.getDataRange().getValues();
+  var empHeaders = empData[0];
+
+  var nameCol = -1, jobNumCol = -1, locationCol = -1, classificationCol = -1, lastDayCol = -1;
+  for (var h = 0; h < empHeaders.length; h++) {
+    var header = String(empHeaders[h]).toLowerCase().trim();
+    if (header === 'name') nameCol = h;
+    if (header === 'job number') jobNumCol = h;
+    if (header === 'location') locationCol = h;
+    if (header === 'job classification') classificationCol = h;
+    if (header === 'last day') lastDayCol = h;
+  }
+
+  if (jobNumCol === -1) return null;
+
+  // Build current crew data from Employees
+  var crewMap = {};
+
+  for (var i = 1; i < empData.length; i++) {
+    var row = empData[i];
+    var jobNumber = String(row[jobNumCol] || '').trim();
+    var lastDay = lastDayCol !== -1 ? row[lastDayCol] : '';
+
+    if (!jobNumber || lastDay) continue;
+
+    var crewNumber = jobNumber;
+    var dotIndex = jobNumber.lastIndexOf('.');
+    if (dotIndex !== -1) {
+      crewNumber = jobNumber.substring(0, dotIndex);
+    }
+
+    if (!/^\d{3}-\d{2}$/.test(crewNumber)) continue;
+    if (crewNumber.startsWith('000-') || crewNumber.startsWith('002-')) continue;
+
+    var name = nameCol !== -1 ? String(row[nameCol] || '').trim() : '';
+    var location = locationCol !== -1 ? String(row[locationCol] || '').trim() : '';
+    var classification = classificationCol !== -1 ? String(row[classificationCol] || '').trim() : '';
+
+    if (!crewMap[crewNumber]) {
+      crewMap[crewNumber] = {
+        location: location,
+        foreman: '',
+        crewSize: 0,
+        employees: []
+      };
+    }
+
+    crewMap[crewNumber].crewSize++;
+    crewMap[crewNumber].employees.push(name);
+
+    if (!crewMap[crewNumber].location && location) {
+      crewMap[crewNumber].location = location;
+    }
+
+    // Check for foreman classification
+    if (classification === 'F' || classification === 'GTO F' || classification === 'GF') {
+      crewMap[crewNumber].foreman = name;
+    }
+  }
+
+  var timestamp = new Date();
+  var updatedCount = 0;
+  var addedCount = 0;
+  var pendingJobsWithEmployees = []; // Jobs that are Pending Start but now have employees
+  var newRows = [];
+
+  // Process each crew from Employees
+  for (var crewNum in crewMap) {
+    var crew = crewMap[crewNum];
+
+    if (existingJobs[crewNum]) {
+      // Update existing job
+      var existing = existingJobs[crewNum];
+      var rowIdx = existing.rowIndex;
+
+      // Update location, foreman, crew size
+      jobSheet.getRange(rowIdx, 2).setValue(crew.location || existing.location || 'Unknown');
+      jobSheet.getRange(rowIdx, 3).setValue(crew.foreman || existing.foreman || '');
+      jobSheet.getRange(rowIdx, 4).setValue(crew.crewSize);
+      jobSheet.getRange(rowIdx, 10).setValue(timestamp);
+
+      // If status is "Pending Start" and now has employees, DON'T auto-activate
+      // Instead, track for user decision
+      if (existing.status === 'Pending Start' && crew.crewSize > 0) {
+        pendingJobsWithEmployees.push({
+          jobNumber: crewNum,
+          location: crew.location || existing.location || 'Unknown',
+          foreman: crew.foreman || '',
+          crewSize: crew.crewSize,
+          startDate: existing.startDate,
+          employees: crew.employees,
+          rowIndex: rowIdx
+        });
+        Logger.log('syncJobTrackingAfterImport: Pending Start job ' + crewNum + ' has ' + crew.crewSize + ' employees - needs user decision');
+      }
+
+      updatedCount++;
+      delete existingJobs[crewNum];
+    } else {
+      // New crew - add to Job Tracking
+      newRows.push([
+        crewNum,
+        crew.location || 'Unknown',
+        crew.foreman || '',
+        crew.crewSize,
+        timestamp,        // Start Date = today (just appeared)
+        '',               // Est. End Date
+        '',               // Actual End Date
+        'Active',         // Status
+        'Added via Crew Import on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy'),
+        timestamp
+      ]);
+      addedCount++;
+    }
+  }
+
+  // Add new rows
+  if (newRows.length > 0) {
+    var lastRow = jobSheet.getLastRow();
+    jobSheet.getRange(lastRow + 1, 1, newRows.length, 10).setValues(newRows);
+  }
+
+  // Check for jobs that now have no employees (not in crewMap)
+  var emptyJobCount = 0;
+  for (var oldCrew in existingJobs) {
+    var oldData = existingJobs[oldCrew];
+    if (oldData.status === 'Active' || oldData.status === 'Pending Start') {
+      // This job had no employees in the import
+      if (oldData.crewSize > 0) {
+        // Update crew size to 0 and add note
+        jobSheet.getRange(oldData.rowIndex, 4).setValue(0);
+        var oldNotes = oldData.notes || '';
+        var emptyNote = 'No employees in Crew Import on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+        if (oldNotes.indexOf('No employees') === -1) {
+          jobSheet.getRange(oldData.rowIndex, 9).setValue(oldNotes ? oldNotes + '; ' + emptyNote : emptyNote);
+        }
+        emptyJobCount++;
+      }
+    }
+  }
+
+  // Build result message
+  var results = [];
+  if (updatedCount > 0) results.push(updatedCount + ' updated');
+  if (addedCount > 0) results.push(addedCount + ' new jobs added');
+  if (emptyJobCount > 0) results.push(emptyJobCount + ' jobs have no employees');
+
+  Logger.log('syncJobTrackingAfterImport: ' + results.join(', '));
+  if (pendingJobsWithEmployees.length > 0) {
+    Logger.log('syncJobTrackingAfterImport: ' + pendingJobsWithEmployees.length + ' Pending Start jobs need activation decision');
+  }
+
+  return {
+    message: results.length > 0 ? results.join(', ') : 'No changes',
+    pendingJobs: pendingJobsWithEmployees
+  };
+}
+
+/**
+ * Activates specified jobs from Pending Start to Active status.
+ * Called from CrewImport.html after user confirms which jobs to activate.
+ *
+ * @param {Array} jobNumbers - Array of job numbers to activate
+ * @return {Object} Result with count of activated jobs
+ */
+function activatePendingJobs(jobNumbers) {
+  if (!jobNumbers || jobNumbers.length === 0) {
+    return { success: true, activated: 0, message: 'No jobs to activate' };
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var jobSheet = ss.getSheetByName('Job Tracking');
+
+  if (!jobSheet) {
+    return { success: false, message: 'Job Tracking sheet not found' };
+  }
+
+  var jobData = jobSheet.getDataRange().getValues();
+  var timestamp = new Date();
+  var activatedCount = 0;
+
+  for (var i = 1; i < jobData.length; i++) {
+    var jobNum = String(jobData[i][0] || '').trim();
+
+    if (jobNumbers.indexOf(jobNum) !== -1) {
+      var currentStatus = String(jobData[i][7] || '').trim();
+
+      if (currentStatus === 'Pending Start') {
+        var rowIdx = i + 1;
+        jobSheet.getRange(rowIdx, 8).setValue('Active');
+
+        var currentNotes = jobData[i][8] || '';
+        var activateNote = 'Activated on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy') + ' via Crew Import';
+        jobSheet.getRange(rowIdx, 9).setValue(currentNotes ? currentNotes + '; ' + activateNote : activateNote);
+        jobSheet.getRange(rowIdx, 10).setValue(timestamp);
+
+        activatedCount++;
+        Logger.log('activatePendingJobs: Activated ' + jobNum);
+      }
+    }
+  }
+
+  return {
+    success: true,
+    activated: activatedCount,
+    message: activatedCount + ' job(s) activated'
+  };
+}
+
+/**
+ * Gets Job Tracking data for the Crew Import dialog.
+ * Returns status and dates for each job so the dialog can:
+ * - Hide completed jobs from preview
+ * - Show Pending Start jobs with their location and start date
+ *
+ * @return {Object} Map of job numbers to their tracking data
+ */
+function getJobTrackingForCrewImport() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var jobSheet = ss.getSheetByName('Job Tracking');
+
+  if (!jobSheet) {
+    Logger.log('getJobTrackingForCrewImport: Job Tracking sheet not found');
+    return {};
+  }
+
+  var data = jobSheet.getDataRange().getValues();
+  var result = {};
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var jobNumber = String(row[0] || '').trim();
+
+    if (!jobNumber) continue;
+
+    var status = String(row[7] || '').trim();
+    var startDate = row[4];
+    var estEndDate = row[5];
+    var location = String(row[1] || '').trim();
+    var foreman = String(row[2] || '').trim();
+
+    // Format dates for JSON
+    var startDateStr = '';
+    var estEndDateStr = '';
+
+    if (startDate instanceof Date && !isNaN(startDate.getTime())) {
+      startDateStr = Utilities.formatDate(startDate, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+    } else if (startDate) {
+      startDateStr = String(startDate);
+    }
+
+    if (estEndDate instanceof Date && !isNaN(estEndDate.getTime())) {
+      estEndDateStr = Utilities.formatDate(estEndDate, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+    } else if (estEndDate) {
+      estEndDateStr = String(estEndDate);
+    }
+
+    result[jobNumber] = {
+      status: status,
+      location: location,
+      foreman: foreman,
+      startDate: startDateStr,
+      estEndDate: estEndDateStr,
+      isCompleted: status === 'Completed',
+      isPendingStart: status === 'Pending Start',
+      isActive: status === 'Active',
+      isOnHold: status === 'On Hold'
+    };
+  }
+
+  Logger.log('getJobTrackingForCrewImport: Found ' + Object.keys(result).length + ' jobs');
+  return result;
+}
+
+/**
+ * Adds or updates a job in the Job Tracking sheet.
+ * Used from Crew Import to set a job as Pending Start with a start date.
+ *
+ * @param {string} jobNumber - Job number (e.g., "018-26")
+ * @param {string} location - Location name
+ * @param {string} foreman - Foreman name (optional)
+ * @param {number} crewSize - Number of employees
+ * @param {string} startDate - Start date as string (YYYY-MM-DD)
+ * @param {string} status - Status (Active, Pending Start, Completed, On Hold)
+ * @return {Object} Result with success status and message
+ */
+function addOrUpdateJobTracking(jobNumber, location, foreman, crewSize, startDate, status) {
+  Logger.log('=== addOrUpdateJobTracking ===');
+  Logger.log('Job: ' + jobNumber + ', Location: ' + location + ', Status: ' + status + ', Start: ' + startDate);
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var jobSheet = ss.getSheetByName('Job Tracking');
+
+    if (!jobSheet) {
+      // Create the sheet if it doesn't exist
+      jobSheet = ss.insertSheet('Job Tracking');
+      var headers = ['Job Number', 'Location', 'Foreman', 'Crew Size', 'Start Date', 'Est. End Date', 'Actual End Date', 'Status', 'Notes', 'Last Updated'];
+      jobSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      jobSheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#1565c0').setFontColor('white');
+      Logger.log('Created Job Tracking sheet');
+    }
+
+    var data = jobSheet.getDataRange().getValues();
+    var existingRow = -1;
+
+    // Find existing row for this job
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim() === jobNumber) {
+        existingRow = i + 1; // 1-based row number
+        break;
+      }
+    }
+
+    var timestamp = new Date();
+    var formattedTimestamp = Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy HH:mm');
+
+    // Parse start date
+    var startDateObj = null;
+    if (startDate) {
+      startDateObj = new Date(startDate + 'T00:00:00');
+      if (isNaN(startDateObj.getTime())) {
+        startDateObj = null;
+      }
+    }
+
+    if (existingRow > 0) {
+      // Update existing row - preserve some values, update others
+      jobSheet.getRange(existingRow, 2).setValue(location);  // Location
+      if (foreman) jobSheet.getRange(existingRow, 3).setValue(foreman);  // Foreman
+      if (crewSize > 0) jobSheet.getRange(existingRow, 4).setValue(crewSize);  // Crew Size
+      if (startDateObj) jobSheet.getRange(existingRow, 5).setValue(startDateObj);  // Start Date
+      jobSheet.getRange(existingRow, 8).setValue(status);  // Status
+      jobSheet.getRange(existingRow, 10).setValue(formattedTimestamp);  // Last Updated
+
+      Logger.log('Updated existing job ' + jobNumber + ' at row ' + existingRow);
+      return { success: true, message: 'Updated job ' + jobNumber, row: existingRow, action: 'updated' };
+    } else {
+      // Add new row
+      var newRow = [
+        jobNumber,
+        location,
+        foreman || '',
+        crewSize || 0,
+        startDateObj || '',
+        '',  // Est. End Date
+        '',  // Actual End Date
+        status,
+        'Added via Crew Import',
+        formattedTimestamp
+      ];
+
+      jobSheet.appendRow(newRow);
+      var newRowNum = jobSheet.getLastRow();
+
+      Logger.log('Added new job ' + jobNumber + ' at row ' + newRowNum);
+      return { success: true, message: 'Added job ' + jobNumber, row: newRowNum, action: 'added' };
+    }
+  } catch (e) {
+    Logger.log('Error in addOrUpdateJobTracking: ' + e.toString());
+    return { success: false, message: 'Error: ' + e.toString() };
+  }
 }
 
 /**

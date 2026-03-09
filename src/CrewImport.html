@@ -634,7 +634,12 @@
       'Manhattan': 'Manhattan',
       'Mill Crk Sub': 'Mill Creek',
       'Mill Crk Sub Anaconda Dock': 'Anaconda',
+      'Anaconda City Sub': 'Anaconda City Sub',
       'Anaconda': 'Anaconda',
+      'Three Rivers Sub': 'Three Rivers Sub',
+      'Three Forks': 'Three Forks',
+      'Rattlesnake Sub': 'Rattlesnake Sub',
+      'Bonner': 'Bonner',
       'Northern Lights Dock': 'Northern Lights',
       'Northern Lights': 'Northern Lights',
       'CA Sub Foundation': 'California',
@@ -655,10 +660,23 @@
     var selectedSheet = null;
     var savedDuplicateSelections = {}; // Loaded from server
     var savedSpecialSelections = {}; // Loaded from server - for JT = Light Duty, etc.
+    var jobTrackingData = {}; // Job Tracking status and dates for filtering
 
     function init() {
       setupDragDrop();
       setupPotentialMatchClickHandler();
+
+      // Load Job Tracking data first (for filtering completed jobs)
+      google.script.run
+        .withSuccessHandler(function(data) {
+          jobTrackingData = data || {};
+          console.log('Loaded Job Tracking data for ' + Object.keys(jobTrackingData).length + ' jobs');
+        })
+        .withFailureHandler(function(error) {
+          console.error('Failed to load Job Tracking data:', error);
+          jobTrackingData = {};
+        })
+        .getJobTrackingForCrewImport();
 
       // Load saved settings from server first, then render
       google.script.run
@@ -1993,12 +2011,23 @@
 
     function showCrewPreview() {
       document.getElementById('crewsPreview').style.display = 'block';
-      document.getElementById('crewCount').textContent = parsedCrews.length;
 
-      // First, detect duplicate names across crews
+      // Filter out completed jobs from Job Tracking
+      var visibleCrews = parsedCrews.filter(function(crew) {
+        var jobInfo = jobTrackingData[crew.jobNumber];
+        if (jobInfo && jobInfo.isCompleted) {
+          console.log('Filtering out completed job: ' + crew.jobNumber);
+          return false;
+        }
+        return true;
+      });
+
+      document.getElementById('crewCount').textContent = visibleCrews.length;
+
+      // First, detect duplicate names across crews (only visible crews)
       var nameOccurrences = {};
-      for (var i = 0; i < parsedCrews.length; i++) {
-        var crew = parsedCrews[i];
+      for (var i = 0; i < visibleCrews.length; i++) {
+        var crew = visibleCrews[i];
         for (var e = 0; e < crew.employees.length; e++) {
           var empName = crew.employees[e].name.toLowerCase().trim();
           if (!nameOccurrences[empName]) {
@@ -2017,14 +2046,39 @@
       var container = document.getElementById('crewCardsContainer');
       var html = '';
 
-      for (var i = 0; i < parsedCrews.length; i++) {
-        var crew = parsedCrews[i];
+      for (var i = 0; i < visibleCrews.length; i++) {
+        var crew = visibleCrews[i];
         // Use job number as unique ID (sanitized for DOM ID)
         var crewId = crew.jobNumber.replace(/[^a-zA-Z0-9-]/g, '_');
-        html += '<div class="crew-card" id="crew-card-' + crewId + '" data-job-number="' + crew.jobNumber + '">';
+
+        // Check Job Tracking for this job's status and info
+        var jobInfo = jobTrackingData[crew.jobNumber];
+        var isPendingStart = jobInfo && jobInfo.isPendingStart;
+        var jobTrackingLocation = jobInfo ? jobInfo.location : '';
+        var jobStartDate = jobInfo ? jobInfo.startDate : '';
+
+        // Use Job Tracking location if available (especially for Pending Start jobs)
+        var displayLocation = crew.mappedLocation;
+        if (jobTrackingLocation && isPendingStart) {
+          displayLocation = jobTrackingLocation;
+        }
+
+        // Card styling for Pending Start jobs
+        var cardStyle = isPendingStart ? ' style="border-left: 4px solid #ffc107; background: #fffbf0;"' : '';
+
+        html += '<div class="crew-card" id="crew-card-' + crewId + '" data-job-number="' + crew.jobNumber + '"' + cardStyle + '>';
         html += '<div class="crew-card-header d-flex justify-content-between align-items-start">';
         html += '<div>';
-        html += '<i class="bi bi-geo-alt"></i> ' + crew.mappedLocation + ' <span class="text-muted">(' + crew.jobNumber + ')</span>';
+        html += '<i class="bi bi-geo-alt"></i> ' + displayLocation + ' <span class="text-muted">(' + crew.jobNumber + ')</span>';
+
+        // Show Pending Start badge and start date
+        if (isPendingStart) {
+          html += ' <span class="badge bg-warning text-dark ms-1" title="Job not yet active">⏳ Pending Start</span>';
+          if (jobStartDate) {
+            html += '<br><small class="text-muted"><i class="bi bi-calendar-event"></i> Est. Start: ' + jobStartDate + '</small>';
+          }
+        }
+
         html += '</div>';
 
         // Schedule type badge with dropdown to change
@@ -2049,6 +2103,12 @@
         html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Split\', \'Mon-Wed\'); return false;"><span class="badge bg-info me-1">Split</span> Mon-Wed</a></li>';
         html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Split\', \'Thu-Fri\'); return false;"><span class="badge bg-info me-1">Split</span> Thu-Fri</a></li>';
         html += '<li><hr class="dropdown-divider"></li>';
+        // Add option to mark as Pending Start (for new jobs not yet active)
+        if (!isPendingStart) {
+          html += '<li><a class="dropdown-item text-warning" href="#" onclick="showSetPendingStartDialog(\'' + crew.jobNumber + '\', \'' + escapeHtml(displayLocation) + '\'); return false;"><i class="bi bi-calendar-plus me-1"></i> Set as Pending Start...</a></li>';
+        } else {
+          html += '<li><a class="dropdown-item text-success" href="#" onclick="markJobActive(\'' + crew.jobNumber + '\'); return false;"><i class="bi bi-check-circle me-1"></i> Mark as Active Now</a></li>';
+        }
         html += '<li><a class="dropdown-item text-danger" href="#" onclick="excludeCrewByJob(\'' + crew.jobNumber + '\', event); return false;"><i class="bi bi-x-circle me-1"></i> Exclude Crew</a></li>';
         html += '</ul>';
         html += '</div>';
@@ -2526,6 +2586,134 @@
           console.log('Restored scroll to: ' + scrollPos);
         }, 50);
       }, null, 'Exclude Crew');
+    }
+
+    /**
+     * Shows a dialog to set a job as Pending Start with a start date.
+     * This will add/update the job in Job Tracking sheet.
+     * @param {string} jobNumber - The job number (e.g., "018-26")
+     * @param {string} location - The location name for display
+     */
+    function showSetPendingStartDialog(jobNumber, location) {
+      // Get today's date for default
+      var today = new Date();
+      var defaultDate = today.toISOString().split('T')[0];
+
+      var msg = '<p>Set <strong>' + jobNumber + '</strong> (' + location + ') as a <span class="badge bg-warning text-dark">Pending Start</span> job.</p>';
+      msg += '<p class="text-muted small">This job will be added to Job Tracking as "Pending Start" and employees assigned to it will NOT be counted as duplicates.</p>';
+      msg += '<div class="mb-3">';
+      msg += '<label class="form-label"><i class="bi bi-calendar-event"></i> Estimated Start Date:</label>';
+      msg += '<input type="date" class="form-control" id="pendingStartDate" value="' + defaultDate + '">';
+      msg += '</div>';
+
+      document.getElementById('notificationHeader').className = 'notification-header warning';
+      document.getElementById('notificationIcon').className = 'bi bi-calendar-plus';
+      document.getElementById('notificationTitle').textContent = 'Set as Pending Start';
+      document.getElementById('notificationBody').innerHTML = msg;
+      document.getElementById('notificationCancelBtn').style.display = 'inline-block';
+      document.getElementById('notificationCancelBtn').textContent = 'Cancel';
+      document.getElementById('notificationOkBtn').textContent = 'Set Pending Start';
+
+      notificationCallback = function() {
+        var startDate = document.getElementById('pendingStartDate').value;
+        if (!startDate) {
+          showNotification('Please enter a start date.', 'warning');
+          return;
+        }
+
+        // Find the crew to get foreman and crew size
+        var crew = null;
+        for (var i = 0; i < parsedCrews.length; i++) {
+          if (parsedCrews[i].jobNumber === jobNumber) {
+            crew = parsedCrews[i];
+            break;
+          }
+        }
+
+        var foreman = '';
+        var crewSize = 0;
+        if (crew) {
+          crewSize = crew.employees.length;
+          for (var e = 0; e < crew.employees.length; e++) {
+            if (crew.employees[e].isForeman) {
+              foreman = crew.employees[e].name;
+              break;
+            }
+          }
+        }
+
+        // Call server to add/update Job Tracking
+        google.script.run
+          .withSuccessHandler(function(result) {
+            if (result.success) {
+              // Update local jobTrackingData
+              jobTrackingData[jobNumber] = {
+                status: 'Pending Start',
+                location: location,
+                foreman: foreman,
+                startDate: startDate,
+                isPendingStart: true,
+                isActive: false,
+                isCompleted: false
+              };
+
+              showNotification('✅ ' + jobNumber + ' set as Pending Start (starting ' + startDate + ')', 'success');
+
+              // Re-render to show the Pending Start badge
+              showCrewPreview();
+              // Re-run matching (will now filter out this job from duplicates)
+              matchEmployeesToSheet();
+            } else {
+              showNotification('Error: ' + result.message, 'error');
+            }
+          })
+          .withFailureHandler(function(error) {
+            showNotification('Error setting Pending Start: ' + error, 'error');
+          })
+          .addOrUpdateJobTracking(jobNumber, location, foreman, crewSize, startDate, 'Pending Start');
+      };
+
+      notificationCancelCallback = null;
+      document.getElementById('notificationOverlay').classList.add('show');
+    }
+
+    /**
+     * Marks a Pending Start job as Active (starting now).
+     * @param {string} jobNumber - The job number to activate
+     */
+    function markJobActive(jobNumber) {
+      showConfirm(
+        '<p>Mark <strong>' + jobNumber + '</strong> as <span class="badge bg-success">Active</span>?</p>' +
+        '<p class="text-muted small">This will change the job status from "Pending Start" to "Active" in Job Tracking.</p>',
+        function() {
+          google.script.run
+            .withSuccessHandler(function(result) {
+              if (result.success) {
+                // Update local jobTrackingData
+                if (jobTrackingData[jobNumber]) {
+                  jobTrackingData[jobNumber].status = 'Active';
+                  jobTrackingData[jobNumber].isPendingStart = false;
+                  jobTrackingData[jobNumber].isActive = true;
+                }
+
+                showNotification('✅ ' + jobNumber + ' is now Active', 'success');
+
+                // Re-render to remove the Pending Start badge
+                showCrewPreview();
+                // Re-run matching
+                matchEmployeesToSheet();
+              } else {
+                showNotification('Error: ' + result.message, 'error');
+              }
+            })
+            .withFailureHandler(function(error) {
+              showNotification('Error activating job: ' + error, 'error');
+            })
+            .activatePendingJobs([jobNumber]);
+        },
+        null,
+        'Activate Job'
+      );
     }
 
     /**
@@ -3973,9 +4161,27 @@
       }
 
       // Identify duplicates and auto-select primary job
+      // BUT filter out occurrences where the job is "Pending Start" or "Completed" - those are future planning or closed
       for (var key in employeeOccurrences) {
-        if (employeeOccurrences[key].length > 1) {
-          var employeeName = employeeOccurrences[key][0].match.employeeName;
+        var allOccurrences = employeeOccurrences[key];
+
+        // Filter out Pending Start and Completed job occurrences
+        var activeOccurrences = allOccurrences.filter(function(occ) {
+          var jobInfo = jobTrackingData[occ.crew.jobNumber];
+          if (jobInfo && jobInfo.isPendingStart) {
+            console.log('Filtering out Pending Start job ' + occ.crew.jobNumber + ' from duplicate detection for ' + key);
+            return false;
+          }
+          if (jobInfo && jobInfo.isCompleted) {
+            console.log('Filtering out Completed job ' + occ.crew.jobNumber + ' from duplicate detection for ' + key);
+            return false;
+          }
+          return true;
+        });
+
+        // Only consider it a duplicate if there are 2+ ACTIVE job occurrences
+        if (activeOccurrences.length > 1) {
+          var employeeName = activeOccurrences[0].match.employeeName;
           var primaryIndex = 0;
           var usedSavedSelection = false;
           var savedScheduleType = '';
@@ -3984,8 +4190,8 @@
           if (savedDuplicateSelections && savedDuplicateSelections[employeeName]) {
             var savedSelection = savedDuplicateSelections[employeeName];
             // Find the occurrence that matches the saved job number
-            for (var si = 0; si < employeeOccurrences[key].length; si++) {
-              var occ = employeeOccurrences[key][si];
+            for (var si = 0; si < activeOccurrences.length; si++) {
+              var occ = activeOccurrences[si];
               if (occ.crew.jobNumber === savedSelection.selectedJobNumber ||
                   occ.employee.fullJobNumber === savedSelection.selectedJobNumber) {
                 primaryIndex = si;
@@ -4001,12 +4207,12 @@
 
           // If no saved selection, auto-select the primary job based on schedule
           if (!usedSavedSelection) {
-            primaryIndex = selectPrimaryJob(employeeOccurrences[key]);
+            primaryIndex = selectPrimaryJob(activeOccurrences);
           }
 
           duplicateEmployees.push({
             employeeName: employeeName,
-            occurrences: employeeOccurrences[key],
+            occurrences: activeOccurrences,
             selectedIndex: primaryIndex,
             autoSelected: !usedSavedSelection,
             usedSavedSelection: usedSavedSelection
@@ -4148,6 +4354,13 @@
 
       for (var i = 0; i < parsedCrews.length; i++) {
         var crew = parsedCrews[i];
+
+        // Skip crews that are Pending Start or Completed - employees here shouldn't generate changes yet
+        var jobInfo = jobTrackingData[crew.jobNumber];
+        if (jobInfo && (jobInfo.isPendingStart || jobInfo.isCompleted)) {
+          console.log('Skipping proposed changes for crew ' + crew.jobNumber + ' (status: ' + jobInfo.status + ')');
+          continue;
+        }
 
         for (var j = 0; j < crew.employees.length; j++) {
           var emp = crew.employees[j];
@@ -5249,9 +5462,14 @@
 
       google.script.run
         .withSuccessHandler(function(result) {
-          showNotification(result.message, 'success', 'Crew Makeup Import Complete!', function() {
-            google.script.host.close();
-          });
+          // Check if there are pending jobs that need activation decision
+          if (result.pendingJobs && result.pendingJobs.length > 0) {
+            showPendingJobsDialog(result.pendingJobs, result.message);
+          } else {
+            showNotification(result.message, 'success', 'Crew Makeup Import Complete!', function() {
+              google.script.host.close();
+            });
+          }
         })
         .withFailureHandler(function(error) {
           showNotification('Error: ' + error, 'error', 'Import Failed');
@@ -5260,6 +5478,97 @@
         })
         .applyCrewChanges(changes);
       }, null, 'Apply Changes');
+    }
+
+    /**
+     * Show dialog for pending jobs that need activation decision
+     * @param {Array} pendingJobs - Jobs that are Pending Start but have employees
+     * @param {string} baseMessage - The base success message from import
+     */
+    function showPendingJobsDialog(pendingJobs, baseMessage) {
+      var msg = '<p><strong>Import completed!</strong></p>';
+      msg += '<p>' + baseMessage.replace(/\n/g, '<br>') + '</p>';
+      msg += '<hr>';
+      msg += '<p><i class="bi bi-exclamation-triangle text-warning"></i> <strong>' + pendingJobs.length + ' "Pending Start" job(s)</strong> now have employees assigned:</p>';
+      msg += '<div style="max-height: 300px; overflow-y: auto;">';
+
+      for (var i = 0; i < pendingJobs.length; i++) {
+        var job = pendingJobs[i];
+        var startDateStr = job.startDate ? formatDateForDisplay(job.startDate) : 'Not set';
+
+        msg += '<div class="card mb-2" style="border-left: 4px solid #ffc107;">';
+        msg += '<div class="card-body p-2">';
+        msg += '<div class="d-flex align-items-center">';
+        msg += '<input type="checkbox" class="form-check-input me-2 pending-job-checkbox" id="pendingJob_' + i + '" data-job="' + job.jobNumber + '" checked>';
+        msg += '<div class="flex-grow-1">';
+        msg += '<strong>' + job.jobNumber + '</strong> - ' + job.location;
+        msg += '<br><small class="text-muted">Foreman: ' + (job.foreman || 'Not assigned') + ' | Crew: ' + job.crewSize + ' | Start: ' + startDateStr + '</small>';
+        msg += '</div>';
+        msg += '</div>';
+        msg += '</div></div>';
+      }
+
+      msg += '</div>';
+      msg += '<p class="text-muted small mt-3"><i class="bi bi-info-circle"></i> <strong>Checked = Activate Now</strong> (job is active and will be tracked)<br>';
+      msg += '<strong>Unchecked = Keep Pending</strong> (job stays "Pending Start" - future planning only)</p>';
+
+      document.getElementById('notificationHeader').className = 'notification-header warning';
+      document.getElementById('notificationIcon').className = 'bi bi-calendar-check';
+      document.getElementById('notificationTitle').textContent = 'Activate Jobs?';
+      document.getElementById('notificationBody').innerHTML = msg;
+      document.getElementById('notificationCancelBtn').style.display = 'inline-block';
+      document.getElementById('notificationCancelBtn').textContent = 'Keep All Pending';
+      document.getElementById('notificationOkBtn').textContent = 'Activate Selected';
+
+      notificationCallback = function() {
+        // Get selected jobs to activate
+        var jobsToActivate = [];
+        var checkboxes = document.querySelectorAll('.pending-job-checkbox:checked');
+        checkboxes.forEach(function(cb) {
+          jobsToActivate.push(cb.getAttribute('data-job'));
+        });
+
+        if (jobsToActivate.length > 0) {
+          // Call server to activate selected jobs
+          google.script.run
+            .withSuccessHandler(function(activateResult) {
+              showNotification(baseMessage + '\n\n✅ ' + activateResult.message, 'success', 'Import Complete!', function() {
+                google.script.host.close();
+              });
+            })
+            .withFailureHandler(function(error) {
+              showNotification('Import completed but failed to activate jobs: ' + error, 'warning', 'Partial Success', function() {
+                google.script.host.close();
+              });
+            })
+            .activatePendingJobs(jobsToActivate);
+        } else {
+          showNotification(baseMessage + '\n\n📋 All pending jobs kept as "Pending Start"', 'success', 'Import Complete!', function() {
+            google.script.host.close();
+          });
+        }
+      };
+
+      notificationCancelCallback = function() {
+        // Keep all as pending
+        showNotification(baseMessage + '\n\n📋 All pending jobs kept as "Pending Start"', 'success', 'Import Complete!', function() {
+          google.script.host.close();
+        });
+      };
+
+      document.getElementById('notificationOverlay').classList.add('show');
+    }
+
+    /**
+     * Format date for display
+     * @param {Date|string} date - Date to format
+     * @return {string} Formatted date string
+     */
+    function formatDateForDisplay(date) {
+      if (!date) return 'N/A';
+      var d = date instanceof Date ? date : new Date(date);
+      if (isNaN(d.getTime())) return 'N/A';
+      return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
     }
 
     // Initialize on load

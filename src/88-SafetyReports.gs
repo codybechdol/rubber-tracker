@@ -10114,7 +10114,7 @@ function fixSafetyComplianceNotes() {
  */
 function recordMissingReportResolutions(taskId, weekOf, resolutions, jobNumber, employeeName) {
   Logger.log('=== recordMissingReportResolutions START ===');
-  Logger.log('taskId=' + taskId + ', weekOf=' + weekOf + ', jobNumber=' + jobNumber);
+  Logger.log('taskId=' + taskId + ', weekOf=' + weekOf + ', jobNumber=' + jobNumber + ', employeeName=' + employeeName);
 
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -10138,8 +10138,77 @@ function recordMissingReportResolutions(taskId, weekOf, resolutions, jobNumber, 
       if (match) jobNumber = match[1];
     }
 
+    // FALLBACK: If job number still not found, look up by employee name (foreman)
+    if ((!jobNumber || !jobNumber.match(/^\d{3}-\d{2}$/)) && employeeName) {
+      Logger.log('recordMissingReportResolutions: Looking up job number by foreman name: ' + employeeName);
+
+      // First try Safety Compliance sheet itself (Foreman column)
+      var compData = complianceSheet.getDataRange().getValues();
+      var compHeaders = compData[0];
+      var foremanCol = -1, jobCol = -1, weekStartCol = -1;
+      for (var h = 0; h < compHeaders.length; h++) {
+        var hdr = String(compHeaders[h]).toLowerCase().trim();
+        if (hdr === 'foreman') foremanCol = h;
+        if (hdr === 'job number') jobCol = h;
+        if (hdr === 'week start') weekStartCol = h;
+      }
+
+      if (foremanCol >= 0 && jobCol >= 0 && weekStartCol >= 0) {
+        var employeeNameLower = employeeName.toLowerCase().trim();
+        for (var i = 1; i < compData.length; i++) {
+          var rowForeman = String(compData[i][foremanCol] || '').toLowerCase().trim();
+          var rowWeekStart = compData[i][weekStartCol];
+
+          // Check if foreman matches and week matches
+          if (rowForeman === employeeNameLower) {
+            var rowWeekDate = (rowWeekStart instanceof Date) ? rowWeekStart : new Date(rowWeekStart);
+            if (!isNaN(rowWeekDate.getTime()) &&
+                rowWeekDate.getDate() === targetWeekStart.getDate() &&
+                rowWeekDate.getMonth() === targetWeekStart.getMonth() &&
+                rowWeekDate.getFullYear() === targetWeekStart.getFullYear()) {
+              jobNumber = String(compData[i][jobCol] || '').trim();
+              Logger.log('recordMissingReportResolutions: Found job number ' + jobNumber + ' for foreman ' + employeeName + ' in Safety Compliance');
+              break;
+            }
+          }
+        }
+      }
+
+      // If still not found, try Employees sheet
+      if (!jobNumber || !jobNumber.match(/^\d{3}-\d{2}$/)) {
+        var empSheet = ss.getSheetByName('Employees');
+        if (empSheet) {
+          var empData = empSheet.getDataRange().getValues();
+          var empHeaders = empData[0];
+          var empNameCol = -1, empJobCol = -1;
+          for (var e = 0; e < empHeaders.length; e++) {
+            var empHdr = String(empHeaders[e]).toLowerCase().trim();
+            if (empHdr === 'name' || empHdr === 'employee name') empNameCol = e;
+            if (empHdr === 'job number' || empHdr === 'job') empJobCol = e;
+          }
+
+          if (empNameCol >= 0 && empJobCol >= 0) {
+            var employeeNameLower = employeeName.toLowerCase().trim();
+            for (var j = 1; j < empData.length; j++) {
+              var empName = String(empData[j][empNameCol] || '').toLowerCase().trim();
+              if (empName === employeeNameLower) {
+                var empJob = String(empData[j][empJobCol] || '').trim();
+                // Extract base job number (remove .X suffix)
+                var jobMatch = empJob.match(/^(\d{3}-\d{2})/);
+                if (jobMatch) {
+                  jobNumber = jobMatch[1];
+                  Logger.log('recordMissingReportResolutions: Found job number ' + jobNumber + ' for employee ' + employeeName + ' in Employees sheet');
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
     if (!jobNumber) {
-      return { success: false, error: 'Could not identify crew' };
+      return { success: false, error: 'Could not identify crew for ' + employeeName + '. Please ensure the employee is in the system.' };
     }
 
     // Find row in Safety Compliance

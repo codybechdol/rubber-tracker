@@ -1359,6 +1359,7 @@
           return {
             taskKey: t.taskKey,
             tid: t.tid || '',            // TaskID for Safety Compliance job number extraction
+            taskId: t.tid || '',         // Also set taskId for resolution modal (uses tid as source)
             _originalIndex: t.idx,
             employee: t.emp,
             taskType: t.type,
@@ -3973,6 +3974,23 @@
 
         var modal = new bootstrap.Modal(document.getElementById('craneCertModal'));
         modal.show();
+        return;
+      }
+
+      // Check if this is a non-class cert (DL, MEC, Forklift, etc.) - show expiration date modal instead
+      // These certs are renewed through external processes (DMV, DOT physical, etc.), not through classes
+      var nonClassCerts = ['dl', 'driver license', 'driver\'s license', 'drivers license',
+                           'mec', 'medical examiner', 'medical examiner\'s certificate',
+                           'forklift', 'forklift certification', 'forklift cert',
+                           'cdl', 'commercial driver', 'cdl-a', 'cdl-b'];
+      var isNonClassCert = nonClassCerts.some(function(certName) {
+        return itemType.indexOf(certName) !== -1;
+      });
+
+      if (isNonClassCert) {
+        // Show the cert expiration date modal instead of class registration
+        var certType = task.itemType || task.certType || 'Certification';
+        showCertExpirationModal(employeeName, certType, index);
         return;
       }
 
