@@ -1,16 +1,16 @@
 /**
  * Glove Manager – Smart Route Optimizer (Phase 2B)
  *
- * Updated: Feb 18, 2026 - Fixed task-specific matching in applyTripToSchedule
+ * Updated: Mar 16, 2026 - Added work schedule configuration (Mon-Thu vs Tue-Fri)
  *
  * Analyzes pending tasks, groups by location/direction from Helena,
  * and suggests optimal multi-day trip plans with scheduling constraints.
  *
  * Constraints:
  * - 10-hour workdays (7am - 5pm)
- * - Monday-Thursday preferred, Friday only if necessary
- * - Tuesday nights: MUST return to Helena
- * - Overnight stays OK on Mon/Wed/Thu if saves significant time
+ * - Work schedule configurable: Mon-Thu (default) or Tue-Fri
+ * - "Must return to Helena" day: Tuesday (Mon-Thu) or Friday (Tue-Fri)
+ * - Overnight stays OK on other days if saves significant time
  *
  * Phase 6 Update: Now uses Task Metadata as single source of truth.
  */
@@ -25,6 +25,10 @@
 var WORK_START_HOUR = 7;  // 7am
 var WORK_END_HOUR = 17;   // 5pm
 var MAX_WORK_MINUTES = 600; // 10 hours
+
+// Work schedule options
+var SCHEDULE_MON_THU = 'Mon-Thu';  // Monday-Thursday, Tuesday must return
+var SCHEDULE_TUE_FRI = 'Tue-Fri';  // Tuesday-Friday, Friday must return
 
 // Urgency scoring
 var URGENCY_OVERDUE = 100;
@@ -628,7 +632,7 @@ function collectTasksForTripPlanner() {
   } catch (e) {
     Logger.log('ERROR calling getTasksWithMetadata: ' + e.message);
     // Fall back to old method if Task Metadata not available
-    Logger.log('Falling back to collectAndGroupTasks...');
+    Logger.log('Falling back to collectTasksForTripPlannerLegacy...');
     return collectTasksForTripPlannerLegacy();
   }
 
@@ -716,6 +720,11 @@ function collectTasksForTripPlanner() {
           location: locationName,
           taskType: taskType,
           employee: officeTask.employee || '',
+          itemType: officeTask.itemType || '',
+          certType: officeTask.certType || officeTask.itemType || '',
+          phoneNumber: officeTask.phoneNumber || '',  // Phone number for contact
+          topic: officeTask.topic || '',              // Training topic
+          month: officeTask.month || '',              // Training month
           dueDate: dueDate ? formatDateForDisplay(dueDate instanceof Date ? dueDate : new Date(dueDate)) : null,
           daysTillDue: daysTillDue,
           urgency: calculateUrgencyScore(daysTillDue),
@@ -768,6 +777,7 @@ function collectTasksForTripPlanner() {
           employee: sourceTask.employee || '',
           certType: certTypeName,
           itemType: certTypeName,
+          phoneNumber: sourceTask.phoneNumber || '',  // Phone number for contact
           dueDate: certDueDate ? formatDateForDisplay(certDueDate instanceof Date ? certDueDate : new Date(certDueDate)) : null,
           daysTillDue: certDaysTillDue,
           urgency: calculateUrgencyScore(certDaysTillDue),
@@ -814,8 +824,14 @@ function collectTasksForTripPlanner() {
               taskType: sourceTask.type || sourceTask.taskType || '',
               employee: sourceTask.employee || '',
               itemType: sourceTask.itemType || '',
+              certType: sourceTask.certType || sourceTask.itemType || '', // For cert tasks
               crew: sourceTask.crew || '',
               foreman: sourceTask.foreman || '',
+              phoneNumber: sourceTask.phoneNumber || '',  // Phone number for contact
+              topic: sourceTask.topic || '',              // Training topic
+              month: sourceTask.month || '',              // Training month
+              vehicleNumber: sourceTask.vehicleNumber || '',  // Vehicle number for Safety Equipment tasks
+              currentItem: sourceTask.currentItem || '',      // Issue description for Safety Equipment tasks
               dueDate: taskDueDate ? formatDateForDisplay(taskDueDate instanceof Date ? taskDueDate : new Date(taskDueDate)) : null,
               scheduledDate: scheduledDateKey,
               daysTillDue: taskDaysTillDue,
@@ -864,8 +880,14 @@ function collectTasksForTripPlanner() {
         taskType: taskType, // Use the properly extracted taskType
         employee: sourceTask.employee || '',
         itemType: sourceTask.itemType || '',
+        certType: sourceTask.certType || sourceTask.itemType || '', // For cert tasks
         crew: sourceTask.crew || '',
         foreman: sourceTask.foreman || '',
+        phoneNumber: sourceTask.phoneNumber || '',  // Phone number for contact
+        topic: sourceTask.topic || '',              // Training topic
+        month: sourceTask.month || '',              // Training month
+        vehicleNumber: sourceTask.vehicleNumber || '',  // Vehicle number for Safety Equipment tasks
+        currentItem: sourceTask.currentItem || '',      // Issue description for Safety Equipment tasks
         dueDate: dueDate ? formatDateForDisplay(dueDate instanceof Date ? dueDate : new Date(dueDate)) : null,
         daysTillDue: daysTillDue,
         urgency: urgency,
@@ -1460,24 +1482,35 @@ function suggestOptimalTrips(daysAhead) {
 
     Logger.log('Step 3: Got ' + Object.keys(byLocation).length + ' locations with tasks');
 
-    // Get date range (skip weekends initially, mark Fridays as "avoid")
+    // Get work schedule configuration (Mon-Thu or Tue-Fri)
+    var workSchedule = getWorkSchedule();
+    var scheduleConfig = getScheduleConfig(workSchedule);
+    Logger.log('Step 3.5: Using work schedule: ' + workSchedule + ' (must return day: ' + scheduleConfig.mustReturnDayName + ')');
+
+    // Get date range based on configured schedule
     var today = new Date();
     today.setHours(0, 0, 0, 0);
 
     var workDays = [];
     var currentDate = new Date(today);
 
-    Logger.log('Step 4: Building work days...');
+    Logger.log('Step 4: Building work days for ' + workSchedule + ' schedule...');
     while (workDays.length < daysAhead) {
       var dayOfWeek = currentDate.getDay();
 
-      // Skip Saturday (6) and Sunday (0)
-      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+      // Check if this day is part of the work schedule
+      var isWorkDay = scheduleConfig.workDays.indexOf(dayOfWeek) !== -1;
+
+      if (isWorkDay) {
         var dateKey = formatDateKeyForRoute(currentDate);
 
         // Check for locked manual tasks on this date
         var manualTasksOnDay = manualData.byDate[dateKey] || [];
         var lockedTasksOnDay = manualTasksOnDay.filter(function(t) { return t.isLocked || (!t.allowDayChange && !t.allowWeekChange); });
+
+        // Determine special day flags based on schedule
+        var isMustReturnDay = dayOfWeek === scheduleConfig.mustReturnDay;
+        var isAvoidDay = scheduleConfig.avoidDay !== null && dayOfWeek === scheduleConfig.avoidDay;
 
         workDays.push({
           date: currentDate.toISOString(), // Convert to string for serialization
@@ -1486,8 +1519,9 @@ function suggestOptimalTrips(daysAhead) {
           dayOfWeek: dayOfWeek,
           isTuesday: dayOfWeek === 2,
           isFriday: dayOfWeek === 5,
-          avoidIfPossible: dayOfWeek === 5, // Friday
-          mustReturnToHelena: dayOfWeek === 2, // Tuesday
+          avoidIfPossible: isAvoidDay,
+          mustReturnToHelena: isMustReturnDay,
+          mustReturnDayName: isMustReturnDay ? scheduleConfig.mustReturnDayName : null,
           assignedLocations: [],
           plan: null,
           startLocation: 'Helena',
@@ -1495,13 +1529,15 @@ function suggestOptimalTrips(daysAhead) {
           // Manual task tracking
           manualTasks: manualTasksOnDay,
           lockedManualTasks: lockedTasksOnDay,
-          hasLockedTasks: lockedTasksOnDay.length > 0
+          hasLockedTasks: lockedTasksOnDay.length > 0,
+          // Schedule info
+          workSchedule: workSchedule
         });
       }
 
       currentDate.setDate(currentDate.getDate() + 1);
     }
-    Logger.log('Step 4 done: Created ' + workDays.length + ' work days');
+    Logger.log('Step 4 done: Created ' + workDays.length + ' work days for ' + workSchedule + ' schedule');
 
     // Track assigned locations (including manual tasks) to prevent duplicates
     var assignedLocations = {};
@@ -1766,11 +1802,10 @@ function suggestOptimalTrips(daysAhead) {
         var sameDirection = locationList.filter(function(other) {
           return other.direction === locData.direction &&
                  other.name.toLowerCase() !== locName &&
-                 !assignedLocations[other.name.toLowerCase()] &&
                  other.maxUrgency >= URGENCY_THIS_WEEK; // Only add urgent same-direction
         });
 
-        // Limit to first 5 same-direction locations to avoid performance issues
+        // Limit to first 5 same-dir to avoid performance issues
         var maxSameDir = Math.min(5, sameDirection.length);
         for (var s = 0; s < maxSameDir; s++) {
           var otherLoc = sameDirection[s];
@@ -1983,7 +2018,10 @@ function suggestOptimalTrips(daysAhead) {
         total: manualData.tasks.length,
         locked: manualData.lockedTasks.length,
         flexible: manualData.flexibleTasks.length
-      }
+      },
+      // Work schedule configuration
+      workSchedule: workSchedule,
+      scheduleConfig: scheduleConfig
     };
 
   } catch (e) {

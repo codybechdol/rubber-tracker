@@ -561,12 +561,31 @@
             complianceInfo = "<div class='info'>📋 JHA/Safety Meeting records logged: " + result.complianceRecordsAdded + "</div>";
           }
 
+          // Build skip reasons breakdown
+          var skipInfo = "";
+          if (result.skipReasons) {
+            var sr = result.skipReasons;
+            var totalSkipped = sr.alreadyLogged + sr.parseFailed + sr.userSkipped + sr.unknownJob + sr.logDuplicate + sr.noJobNumber;
+            if (totalSkipped > 0) {
+              skipInfo = "<div class='info' style='margin-top:8px;padding:8px;background:#fff3cd;border-radius:4px;border:1px solid #ffc107;'>" +
+                "<strong style='color:#856404;'>📊 Skip Breakdown (" + totalSkipped + " total):</strong><br>" +
+                "<span style='font-size:11px;'>";
+              if (sr.alreadyLogged > 0) skipInfo += "• Already in logs: <strong>" + sr.alreadyLogged + "</strong><br>";
+              if (sr.logDuplicate > 0) skipInfo += "• Duplicate detected: <strong>" + sr.logDuplicate + "</strong><br>";
+              if (sr.parseFailed > 0) skipInfo += "• Parse failed: <strong>" + sr.parseFailed + "</strong><br>";
+              if (sr.userSkipped > 0) skipInfo += "• User skipped: <strong>" + sr.userSkipped + "</strong><br>";
+              if (sr.unknownJob > 0) skipInfo += "• Unknown job: <strong>" + sr.unknownJob + "</strong><br>";
+              if (sr.noJobNumber > 0) skipInfo += "• No job number: <strong>" + sr.noJobNumber + "</strong><br>";
+              skipInfo += "</span></div>";
+            }
+          }
+
           status.innerHTML =
             "✅ <span class='progress'>All Complete!</span>" + modeInfo + "<br>" +
             "<div class='info'>📧 Total emails processed: " + result.totalThreads + "</div>" +
             "<div class='info'>This batch: " + result.processedThisBatch + " processed, " + result.skippedThisBatch + " skipped</div>" +
             "<div class='info'>Equipment issues found: " + result.issuesThisBatch + "</div>" +
-            logsInfo + complianceInfo;
+            logsInfo + complianceInfo + skipInfo;
 
           btn.style.background = "#34A853";
           btn.innerHTML = "✅ Close";
@@ -595,10 +614,26 @@
           progressBar.style.width = pct + "%";
           progressBar.textContent = result.threadsProcessed + " of " + result.totalThreads + " (" + pct + "%)";
 
+          // Build in-progress skip summary for display during processing
+          // Build in-progress skip summary for display during processing
+          var inProgressSkipInfo = "";
+          if (result.skipReasons) {
+            var sr = result.skipReasons;
+            var skippedSummary = [];
+            if (sr.alreadyLogged > 0) skippedSummary.push("logged:" + sr.alreadyLogged);
+            if (sr.logDuplicate > 0) skippedSummary.push("dup:" + sr.logDuplicate);
+            if (sr.parseFailed > 0) skippedSummary.push("parse:" + sr.parseFailed);
+            if (sr.userSkipped > 0) skippedSummary.push("user:" + sr.userSkipped);
+            if (sr.unknownJob > 0) skippedSummary.push("unknown:" + sr.unknownJob);
+            if (skippedSummary.length > 0) {
+              inProgressSkipInfo = " [" + skippedSummary.join(", ") + "]";
+            }
+          }
+
           status.innerHTML =
             "📊 <span class='progress'>Processing emails...</span><br>" +
             "<div class='info'>Progress: " + result.threadsProcessed + " / " + result.totalThreads + " emails (" + pct + "%)</div>" +
-            "<div class='info'>This batch: " + result.processedThisBatch + " processed, " + result.skippedThisBatch + " skipped, " + result.issuesThisBatch + " issues</div>" +
+            "<div class='info'>This batch: " + result.processedThisBatch + " processed, " + result.skippedThisBatch + " skipped" + inProgressSkipInfo + ", " + result.issuesThisBatch + " issues</div>" +
             "<div class='info'>⏳ Auto-continuing in 1 second...</div>";
 
           btn.innerHTML = "Processing... (" + result.threadsRemaining + " remaining)";

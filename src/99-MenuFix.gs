@@ -114,6 +114,9 @@ function forceCreateMenu() {
 
       // ===== ADVANCED (Hidden unless needed) =====
       .addSubMenu(ui.createMenu('🔧 Advanced')
+        .addItem('🔍 Diagnose Auth Issues', 'diagnoseAuthIssues')
+        .addItem('🗑️ Clear Background Triggers', 'clearAllBackgroundTriggers')
+        .addSeparator()
         .addItem('🧹 Remove Duplicate Task Metadata', 'removeDuplicateTaskMetadata')
         .addItem('🧹 Cleanup Duplicate Safety Tasks', 'menuCleanupDuplicateSafetyTasks')
         .addItem('🧹 Cleanup Duplicate Compliance Rows', 'menuCleanupDuplicateComplianceRows')

@@ -1388,6 +1388,8 @@
         .withSuccessHandler(function(config) {
           clearTimeout(timeoutId);
           console.log('loadTrainingConfig: SUCCESS, got', (config.crews ? config.crews.length : 0), 'crews');
+          // Store original selection for comparison
+          window.originalSelectedCrews = config.selectedCrews ? config.selectedCrews.slice() : [];
           renderCrewCheckboxes(config.crews, config.selectedCrews);
           renderCrewSummary(config.crewDetails);
         })
@@ -1414,7 +1416,7 @@
         var safeId = 'crew-' + crew.number.replace(/[^a-zA-Z0-9]/g, '');
 
         html += '<div class="col-md-4 col-sm-6 mb-2"><div class="form-check p-2 border rounded" style="background: ' + (checked ? '#e8f5e9' : '#fff') + ';">';
-        html += '<input class="form-check-input" type="checkbox" id="' + safeId + '" value="' + crew.number + '" ' + checked + ' onchange="saveCrewSelection()">';
+        html += '<input class="form-check-input" type="checkbox" id="' + safeId + '" value="' + crew.number + '" ' + checked + ' onchange="handleCrewCheckboxChange(this)">';
         html += '<label class="form-check-label" for="' + safeId + '">';
         html += '<strong>' + crew.number + '</strong>';
         if (crew.foreman) {
@@ -1426,6 +1428,93 @@
       });
 
       container.innerHTML = html;
+    }
+
+    /**
+     * Handles checkbox change - shows confirmation if unchecking a crew
+     */
+    function handleCrewCheckboxChange(checkbox) {
+      var crewNumber = checkbox.value;
+      var wasSelected = window.originalSelectedCrews && window.originalSelectedCrews.indexOf(crewNumber) !== -1;
+
+      // If unchecking a previously selected crew, show confirmation
+      if (!checkbox.checked && wasSelected) {
+        showUncheckConfirmation(checkbox, crewNumber);
+      } else {
+        // Checking a new crew or re-checking - proceed directly
+        saveCrewSelection();
+      }
+    }
+
+    /**
+     * Shows confirmation dialog before unchecking a crew
+     */
+    function showUncheckConfirmation(checkbox, crewNumber) {
+      var modalHtml = '<div class="modal fade" id="uncheckConfirmModal" tabindex="-1">' +
+        '<div class="modal-dialog modal-dialog-centered">' +
+        '<div class="modal-content">' +
+        '<div class="modal-header bg-warning">' +
+        '<h5 class="modal-title">⚠️ Confirm Uncheck Crew</h5>' +
+        '<button type="button" class="btn-close" data-bs-dismiss="modal"></button>' +
+        '</div>' +
+        '<div class="modal-body">' +
+        '<p><strong>You are unchecking crew ' + crewNumber + '</strong></p>' +
+        '<p>This will:</p>' +
+        '<ul>' +
+        '<li>🗑️ <strong>Remove</strong> pending training rows for <strong>current month</strong> (if still pending) and <strong>future months</strong></li>' +
+        '<li>✅ <strong>Preserve</strong> all past months (historical data)</li>' +
+        '<li>✅ <strong>Preserve</strong> any completed training (any month)</li>' +
+        '</ul>' +
+        '<p class="text-muted small">If you re-check this crew later, only current and future month rows will be added back.</p>' +
+        '</div>' +
+        '<div class="modal-footer">' +
+        '<button type="button" class="btn btn-secondary" id="cancelUncheckBtn">Cancel</button>' +
+        '<button type="button" class="btn btn-warning" id="confirmUncheckBtn">Yes, Uncheck Crew</button>' +
+        '</div>' +
+        '</div>' +
+        '</div>' +
+        '</div>';
+
+      // Remove any existing modal
+      var existingModal = document.getElementById('uncheckConfirmModal');
+      if (existingModal) {
+        existingModal.remove();
+      }
+
+      // Add modal to page
+      document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+      var modal = new bootstrap.Modal(document.getElementById('uncheckConfirmModal'));
+
+      // Handle cancel - re-check the checkbox
+      document.getElementById('cancelUncheckBtn').onclick = function() {
+        checkbox.checked = true;
+        var container = checkbox.closest('.form-check');
+        if (container) container.style.background = '#e8f5e9';
+        modal.hide();
+      };
+
+      // Handle confirm - proceed with uncheck
+      document.getElementById('confirmUncheckBtn').onclick = function() {
+        modal.hide();
+        saveCrewSelection();
+      };
+
+      // Also re-check if modal is dismissed via X or clicking outside
+      document.getElementById('uncheckConfirmModal').addEventListener('hidden.bs.modal', function() {
+        // Only re-check if the save hasn't happened yet
+        var currentlyChecked = document.querySelector('input[value="' + crewNumber + '"]');
+        if (currentlyChecked && !currentlyChecked.checked && !window.uncheckConfirmed) {
+          currentlyChecked.checked = true;
+          var container = currentlyChecked.closest('.form-check');
+          if (container) container.style.background = '#e8f5e9';
+        }
+        window.uncheckConfirmed = false;
+        // Clean up modal
+        document.getElementById('uncheckConfirmModal').remove();
+      });
+
+      modal.show();
     }
 
     function renderCrewSummary(crewDetails) {
@@ -1460,12 +1549,84 @@
     }
 
     function deselectAllCrews() {
+      // Check how many crews will be unchecked
+      // Check how many crews will be unchecked
+      var crewsToUncheck = [];
       var checkboxes = document.querySelectorAll('#crewCheckboxes input[type="checkbox"]');
-      checkboxes.forEach(function(cb) { cb.checked = false; });
-      saveCrewSelection();
+      checkboxes.forEach(function(cb) {
+        if (cb.checked && window.originalSelectedCrews && window.originalSelectedCrews.indexOf(cb.value) !== -1) {
+          crewsToUncheck.push(cb.value);
+        }
+      });
+
+      if (crewsToUncheck.length > 0) {
+        // Show confirmation for bulk uncheck
+        showBulkUncheckConfirmation(crewsToUncheck);
+      } else {
+        // No previously selected crews to uncheck
+        checkboxes.forEach(function(cb) { cb.checked = false; });
+        saveCrewSelection();
+      }
+    }
+
+    /**
+     * Shows confirmation dialog for bulk unchecking (Deselect All)
+     */
+    function showBulkUncheckConfirmation(crewNumbers) {
+      var modalHtml = '<div class="modal fade" id="bulkUncheckConfirmModal" tabindex="-1">' +
+        '<div class="modal-dialog modal-dialog-centered">' +
+        '<div class="modal-content">' +
+        '<div class="modal-header bg-warning">' +
+        '<h5 class="modal-title">⚠️ Confirm Deselect All</h5>' +
+        '<button type="button" class="btn-close" data-bs-dismiss="modal"></button>' +
+        '</div>' +
+        '<div class="modal-body">' +
+        '<p><strong>You are unchecking ' + crewNumbers.length + ' crews:</strong></p>' +
+        '<p class="small text-muted" style="max-height: 100px; overflow-y: auto;">' + crewNumbers.join(', ') + '</p>' +
+        '<p>This will:</p>' +
+        '<ul>' +
+        '<li>🗑️ <strong>Remove</strong> pending training rows for <strong>current month</strong> and <strong>future months</strong></li>' +
+        '<li>✅ <strong>Preserve</strong> all past months (historical data)</li>' +
+        '<li>✅ <strong>Preserve</strong> any completed training (any month)</li>' +
+        '</ul>' +
+        '</div>' +
+        '<div class="modal-footer">' +
+        '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>' +
+        '<button type="button" class="btn btn-warning" id="confirmBulkUncheckBtn">Yes, Deselect All</button>' +
+        '</div>' +
+        '</div>' +
+        '</div>' +
+        '</div>';
+
+      // Remove any existing modal
+      var existingModal = document.getElementById('bulkUncheckConfirmModal');
+      if (existingModal) {
+        existingModal.remove();
+      }
+
+      // Add modal to page
+      document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+      var modal = new bootstrap.Modal(document.getElementById('bulkUncheckConfirmModal'));
+
+      // Handle confirm
+      document.getElementById('confirmBulkUncheckBtn').onclick = function() {
+        modal.hide();
+        var checkboxes = document.querySelectorAll('#crewCheckboxes input[type="checkbox"]');
+        checkboxes.forEach(function(cb) { cb.checked = false; });
+        saveCrewSelection();
+      };
+
+      // Clean up modal on close
+      document.getElementById('bulkUncheckConfirmModal').addEventListener('hidden.bs.modal', function() {
+        document.getElementById('bulkUncheckConfirmModal').remove();
+      });
+
+      modal.show();
     }
 
     function saveCrewSelection() {
+      window.uncheckConfirmed = true; // Flag to prevent re-checking on modal close
       var selected = [];
       var checkboxes = document.querySelectorAll('#crewCheckboxes input[type="checkbox"]');
       checkboxes.forEach(function(cb) {
@@ -1483,8 +1644,32 @@
       });
 
       google.script.run
-        .withSuccessHandler(function() {
-          showToast('Crew selection saved (' + selected.length + ' crews selected)', 'success');
+        .withSuccessHandler(function(result) {
+          var msg = 'Crew selection saved (' + selected.length + ' crews selected)';
+
+          // Show info about removed rows (unchecked crews)
+          if (result && result.uncheckedCrews && result.uncheckedCrews.length > 0) {
+            msg += '\n\n📋 Unchecked crews: ' + result.uncheckedCrews.join(', ');
+            if (result.removedRows > 0) {
+              msg += '\n🗑️ Removed ' + result.removedRows + ' pending training rows (current + future months)';
+            }
+            if (result.preservedRows > 0) {
+              msg += '\n✅ Preserved ' + result.preservedRows + ' rows (past months & completed training)';
+            }
+          }
+
+          // Show info about added rows (newly checked crews)
+          if (result && result.newlyCheckedCrews && result.newlyCheckedCrews.length > 0) {
+            msg += '\n\n➕ Newly checked crews: ' + result.newlyCheckedCrews.join(', ');
+            if (result.addedRows > 0) {
+              msg += '\n📝 Added ' + result.addedRows + ' training rows (current + future months)';
+            }
+          }
+
+          // Update the original selection to reflect saved state
+          window.originalSelectedCrews = selected.slice();
+
+          showToast(msg, 'success');
         })
         .withFailureHandler(function(error) {
           showToast('Error saving: ' + error, 'error');

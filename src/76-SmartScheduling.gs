@@ -143,15 +143,18 @@ function formatEmployeePhoneNumbers() {
   // Find Phone Number column
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'phone number' || header === 'phone') {
+    // Match various phone column header formats
+    if (header === 'phone number' || header === 'phone' || header === 'phone #' || header === 'cell' || header === 'cell phone') {
       phoneCol = h;
       break;
     }
   }
 
+  // Use COLS constants as fallback if headers don't match
+  // COLS.EMPLOYEES.PHONE = 5 (column E, 0-based index 4)
   if (phoneCol === -1) {
-    SpreadsheetApp.getUi().alert('Could not find Phone Number column in Employees sheet.');
-    return;
+    phoneCol = 4; // Column E (0-based)
+    Logger.log('formatEmployeePhoneNumbers: Using fallback phoneCol=4 (Column E)');
   }
 
   var updatedCount = 0;
@@ -336,19 +339,19 @@ function collectAndGroupTasks(ss) {
 
   // Collect from Glove Swaps
   var beforeGlove = countTasks(tasksByLocation);
-  collectSwapTasks(ss, 'Glove Swaps', 'Glove', tasksByLocation, employeeLocations, employeeForemen, today);
+  collectSwapTasks(ss, 'Glove Swaps', 'Glove', tasksByLocation, employeeLocations, employeeForemen, employeePhones, today);
   var afterGlove = countTasks(tasksByLocation);
   Logger.log('collectAndGroupTasks: Glove Swaps added ' + (afterGlove - beforeGlove) + ' tasks');
 
   // Collect from Sleeve Swaps
   var beforeSleeve = countTasks(tasksByLocation);
-  collectSwapTasks(ss, 'Sleeve Swaps', 'Sleeve', tasksByLocation, employeeLocations, employeeForemen, today);
+  collectSwapTasks(ss, 'Sleeve Swaps', 'Sleeve', tasksByLocation, employeeLocations, employeeForemen, employeePhones, today);
   var afterSleeve = countTasks(tasksByLocation);
   Logger.log('collectAndGroupTasks: Sleeve Swaps added ' + (afterSleeve - beforeSleeve) + ' tasks');
 
   // Collect from Training Tracking
   var beforeTraining = countTasks(tasksByLocation);
-  collectTrainingTasks(ss, tasksByLocation, today);
+  collectTrainingTasks(ss, tasksByLocation, employeePhones, today);
   var afterTraining = countTasks(tasksByLocation);
   Logger.log('collectAndGroupTasks: Training added ' + (afterTraining - beforeTraining) + ' tasks');
 
@@ -478,16 +481,24 @@ function getEmployeePhoneMapInternal(ss) {
   var nameCol = -1;
   var phoneCol = -1;
 
-  // Find columns
+  // Find columns - check various header name formats
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
     if (header === 'name') nameCol = h;
-    if (header === 'phone number' || header === 'phone') phoneCol = h;
+    // Match various phone column header formats
+    if (header === 'phone number' || header === 'phone' || header === 'phone #' || header === 'cell' || header === 'cell phone') phoneCol = h;
   }
 
-  if (nameCol === -1 || phoneCol === -1) {
-    Logger.log('getEmployeePhoneMap: Could not find name or phone column');
-    return {};
+  // Use COLS constants as fallback if headers don't match
+  // COLS.EMPLOYEES.NAME = 1 (column A, 0-based index 0)
+  // COLS.EMPLOYEES.PHONE = 5 (column E, 0-based index 4)
+  if (nameCol === -1) {
+    nameCol = 0; // Column A (0-based)
+    Logger.log('getEmployeePhoneMapInternal: Using fallback nameCol=0 (Column A)');
+  }
+  if (phoneCol === -1) {
+    phoneCol = 4; // Column E (0-based) - COLS.EMPLOYEES.PHONE - 1
+    Logger.log('getEmployeePhoneMapInternal: Using fallback phoneCol=4 (Column E)');
   }
 
   var phoneMap = {};
@@ -515,7 +526,7 @@ function getEmployeePhoneMapInternal(ss) {
     }
   }
 
-  Logger.log('getEmployeePhoneMap: Found ' + Object.keys(phoneMap).length + ' employee phone numbers');
+  Logger.log('getEmployeePhoneMapInternal: Found ' + Object.keys(phoneMap).length + ' employee phone numbers');
   return phoneMap;
 }
 
@@ -634,9 +645,10 @@ function getEmployeeForemanMap(ss) {
  * @param {Object} tasksByLocation - Object to add tasks to
  * @param {Object} employeeLocations - Employee to location map
  * @param {Object} employeeForemen - Employee to foreman map
+ * @param {Object} employeePhones - Employee to phone number map
  * @param {Date} today - Today's date
  */
-function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLocations, employeeForemen, today) {
+function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLocations, employeeForemen, employeePhones, today) {
   Logger.log('*** collectSwapTasks CALLED for ' + sheetName + ' ***');
 
   var sheet = ss.getSheetByName(sheetName);
@@ -843,6 +855,9 @@ function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLoca
       // Get foreman for this employee
       var foreman = employeeForemen[employee.toLowerCase()] || 'Unknown';
 
+      // Get phone number for this employee
+      var phoneNumber = employeePhones[employee.toLowerCase()] || '';
+
       // Create task object
       var task = {
         type: 'Swap',
@@ -850,6 +865,7 @@ function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLoca
         employee: employee,
         location: location,
         foreman: foreman,
+        phoneNumber: phoneNumber,
         currentItem: currentItem,
         pickListItem: pickListItem,
         size: size,
@@ -1033,6 +1049,52 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
     return;
   }
 
+  // Build set of completed cert tasks from Task Metadata to skip
+  // This prevents certs from reappearing after user updates the expiration date
+  var completedCerts = {};
+  var metadataSheet = ss.getSheetByName('Task Metadata');
+  if (metadataSheet && metadataSheet.getLastRow() > 1) {
+    var metaData = metadataSheet.getDataRange().getValues();
+    var metaHeaders = metaData[0];
+    var metaSourceSheetCol = -1, metaSourceRowCol = -1, metaStatusCol = -1;
+    var metaEmployeeCol = -1, metaItemTypeCol = -1, metaTaskTypeCol = -1;
+
+    for (var mh = 0; mh < metaHeaders.length; mh++) {
+      var metaHdr = String(metaHeaders[mh]).trim();
+      if (metaHdr === 'SourceSheet') metaSourceSheetCol = mh;
+      if (metaHdr === 'SourceRow') metaSourceRowCol = mh;
+      if (metaHdr === 'Status') metaStatusCol = mh;
+      if (metaHdr === 'Employee') metaEmployeeCol = mh;
+      if (metaHdr === 'ItemType') metaItemTypeCol = mh;
+      if (metaHdr === 'TaskType') metaTaskTypeCol = mh;
+    }
+
+    if (metaStatusCol !== -1) {
+      for (var mi = 1; mi < metaData.length; mi++) {
+        var metaStatus = String(metaData[mi][metaStatusCol] || '').trim();
+        var metaSourceSheet = String(metaData[mi][metaSourceSheetCol] || '').trim();
+        var metaTaskType = String(metaData[mi][metaTaskTypeCol] || '').trim();
+
+        // Only track completed Cert Expiring tasks from Expiring Certs sheet
+        if (metaStatus === 'Complete' &&
+            (metaSourceSheet === 'Expiring Certs' || metaTaskType === 'Cert Expiring')) {
+          var metaSourceRow = metaData[mi][metaSourceRowCol];
+          var metaEmployee = String(metaData[mi][metaEmployeeCol] || '').trim().toLowerCase();
+          var metaItemType = String(metaData[mi][metaItemTypeCol] || '').trim().toLowerCase();
+
+          // Track by row number AND by employee+certType combo
+          if (metaSourceRow) {
+            completedCerts['row_' + metaSourceRow] = true;
+          }
+          if (metaEmployee && metaItemType) {
+            completedCerts['emp_' + metaEmployee + '_' + metaItemType] = true;
+          }
+        }
+      }
+    }
+    Logger.log('collectExpiringCertTasks: Found ' + Object.keys(completedCerts).length + ' completed cert tasks to skip');
+  }
+
   // Get config for which cert types to track
   var properties = PropertiesService.getScriptProperties();
   var selectedCertTypesJson = properties.getProperty('selectedCertTypes');
@@ -1053,17 +1115,18 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
   for (var h = 0; h < headers.length; h++) {
     var hdr = String(headers[h]).toLowerCase().trim();
     if (hdr === 'employee name' || hdr === 'name') nameCol = h;
-    if (hdr === 'cert type' || hdr === 'certification type') certTypeCol = h;
+    if (hdr === 'cert type' || hdr === 'certification type' || hdr === 'item type') certTypeCol = h;
     if (hdr === 'expiration date' || hdr === 'exp date') expDateCol = h;
     if (hdr === 'days until' || hdr === 'days until expiration') daysUntilCol = h;
   }
 
   if (nameCol === -1 || certTypeCol === -1) {
-    Logger.log('collectExpiringCertTasks: Required columns not found');
+    Logger.log('collectExpiringCertTasks: Required columns not found. nameCol=' + nameCol + ', certTypeCol=' + certTypeCol + '. Headers: ' + JSON.stringify(headers));
     return;
   }
 
   var tasksAdded = 0;
+  var skippedCompleted = 0;
   var daysThreshold = 365; // Include certs expiring within this many days
 
   for (var i = 1; i < data.length; i++) {
@@ -1074,6 +1137,15 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
     var daysUntil = daysUntilCol !== -1 ? row[daysUntilCol] : null;
 
     if (!employee || !certType) continue;
+
+    // Skip certs that have been marked Complete in Task Metadata
+    // Check both by row number and by employee+certType combo
+    var rowKey = 'row_' + (i + 1);
+    var empCertKey = 'emp_' + employee.toLowerCase() + '_' + certType.toLowerCase();
+    if (completedCerts[rowKey] || completedCerts[empCertKey]) {
+      skippedCompleted++;
+      continue;
+    }
 
     // Check if cert type is in selected types (if configured)
     if (selectedCertTypes && selectedCertTypes.length > 0) {
@@ -1133,7 +1205,7 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
     tasksAdded++;
   }
 
-  Logger.log('collectExpiringCertTasks: Added ' + tasksAdded + ' cert tasks');
+  Logger.log('collectExpiringCertTasks: Added ' + tasksAdded + ' cert tasks (skipped ' + skippedCompleted + ' completed)');
 }
 
 
@@ -1246,7 +1318,7 @@ function collectInTaskListCerts(ss, tasksByLocation, employeeLocations, employee
  * @param {Object} tasksByLocation - Object to add tasks to
  * @param {Date} today - Today's date
  */
-function collectTrainingTasks(ss, tasksByLocation, today) {
+function collectTrainingTasks(ss, tasksByLocation, employeePhones, today) {
   var trainingSheet = ss.getSheetByName('Training Tracking');
   if (!trainingSheet || trainingSheet.getLastRow() < 3) {
     Logger.log('collectTrainingTasks: Training Tracking sheet not found or empty');
@@ -1479,6 +1551,9 @@ function collectTrainingTasks(ss, tasksByLocation, today) {
       }
     }
 
+    // Get phone number for the assignee
+    var phoneNumber = employeePhones[assignee.toLowerCase()] || '';
+
     var task = {
       type: 'Training',
       itemType: 'Monthly Training: ' + topic, // Add "Monthly Training:" prefix for clarity
@@ -1489,6 +1564,7 @@ function collectTrainingTasks(ss, tasksByLocation, today) {
       foreman: assignee, // Use assignee as foreman for grouping
       location: location,
       month: month,
+      phoneNumber: phoneNumber,
       currentItem: '', // No current item for training
       pickListItem: '', // No pick list for training
       size: '', // No size for training

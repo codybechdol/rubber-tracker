@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+<!-- Crew Lead Selection Feature Added: March 17, 2026 -->
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -160,6 +161,43 @@
     }
     .notification-btn-secondary:hover {
       background: #f1f3f4;
+    }
+
+    /* Lead Selection Styles */
+    .lead-selection-card {
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .lead-selection-card:hover {
+      border-color: #1a73e8;
+      background: #f8fbff;
+    }
+    .lead-selection-card.selected {
+      border-color: #1a73e8;
+      background: #e8f0fe;
+    }
+    .lead-selection-card input[type="radio"] {
+      margin-right: 10px;
+    }
+    .lead-badge {
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-left: 8px;
+    }
+    .crew-lead-indicator {
+      display: inline-block;
+      background: #ffc107;
+      color: #000;
+      font-size: 9px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      margin-left: 4px;
+      font-weight: bold;
     }
   </style>
 </head>
@@ -661,6 +699,8 @@
     var savedDuplicateSelections = {}; // Loaded from server
     var savedSpecialSelections = {}; // Loaded from server - for JT = Light Duty, etc.
     var jobTrackingData = {}; // Job Tracking status and dates for filtering
+    var crewLeadSelections = {}; // Stores selected crew lead by job number: { "005-26": "John Smith" }
+    var crewsWithMultipleLeads = []; // Crews that need lead selection
 
     function init() {
       setupDragDrop();
@@ -987,7 +1027,8 @@
     /**
      * Extracts schedule type from crew header text.
      * @param {string} headerText - The full crew header text (e.g., "Belgrade Dock 013-26 5 8's M-F")
-     * @returns {Object} { type: 'Primary'|'Secondary'|'Split'|'', label: 'M-Th'|'M-F'|'Fri-Sat'|etc, badgeColor: 'bg-success'|etc }
+     * @returns {Object} { type: 'Primary'|'Secondary'|'Split'|'', label: 'M-Th'|'M-F'|'Tue-Fri'|'Fri-Sat'|etc, badgeColor: 'bg-success'|etc }
+     * @returns {Object} { type: 'Primary'|'Secondary'|'Split'|'', label: 'M-Th'|'M-F'|'Tue-Fri'|'Fri-Sat'|etc, badgeColor: 'bg-success'|etc }
      */
     function getScheduleTypeFromHeader(headerText) {
       if (!headerText) return { type: '', label: '', badgeColor: 'bg-secondary' };
@@ -1001,6 +1042,10 @@
       // M-F schedule is also primary
       if (text.match(/M-F|Mon-Fri|Monday.*Friday/i)) {
         return { type: 'Primary', label: 'M-F', badgeColor: 'bg-success' };
+      }
+      // Tue-Fri or T-F schedule is primary
+      if (text.match(/T-F|Tue-Fri|Tu-F|Tuesday.*Friday/i)) {
+        return { type: 'Primary', label: 'Tue-Fri', badgeColor: 'bg-success' };
       }
       // Fri & Sat is secondary
       if (text.match(/Fri\s*&\s*Sat|Fri.*Sat|Friday.*Saturday/i)) {
@@ -1225,8 +1270,29 @@
       // Note: if there are duplicates, matchEmployeesToSheet will show the duplicate UI
       // and displayPreview will be called after user resolves duplicates
       if (duplicateEmployees.length === 0) {
-        displayPreview();
+        // Check for crews with multiple lead-type employees (SUP, GF, F, GTO F)
+        // If found, show selection dialogs before proceeding
+        checkAndHandleMultipleLeads(function() {
+          displayPreview();
+        });
       }
+    }
+
+    /**
+     * Checks for crews with multiple leads and shows selection dialogs if needed
+     * @param {Function} callback - Called when lead selection is complete
+     */
+    function checkAndHandleMultipleLeads(callback) {
+      var crewsWithLeads = detectCrewsWithMultipleLeads();
+
+      if (crewsWithLeads.length === 0) {
+        // No crews with multiple leads - proceed immediately
+        if (callback) callback();
+        return;
+      }
+
+      console.log('Found ' + crewsWithLeads.length + ' crew(s) with multiple lead-type employees');
+      processMultipleLeadSelections(callback);
     }
 
     /**
@@ -1995,6 +2061,331 @@
       return 999; // Unknown
     }
 
+    /**
+     * Lead classification types that can be crew leads
+     * These are the classifications that should prompt for lead selection if multiple exist
+     */
+    var LEAD_CLASSIFICATIONS = ['SUP', 'GF', 'F', 'GTO F'];
+
+    /**
+     * Checks if a classification is a lead type
+     * @param {string} classification - The classification to check
+     * @returns {boolean} True if this is a lead classification
+     */
+    function isLeadClassification(classification) {
+      if (!classification) return false;
+      var upper = classification.toUpperCase().trim();
+      return LEAD_CLASSIFICATIONS.indexOf(upper) !== -1;
+    }
+
+    /**
+     * Gets the display name for a lead classification
+     * @param {string} classification - The classification
+     * @returns {string} Human-readable name
+     */
+    function getLeadClassificationName(classification) {
+      if (!classification) return '';
+      var upper = classification.toUpperCase().trim();
+      var names = {
+        'SUP': 'Supervisor',
+        'GF': 'General Foreman',
+        'F': 'Foreman',
+        'GTO F': 'GTO Foreman'
+      };
+      return names[upper] || classification;
+    }
+
+    /**
+     * Detects crews with multiple lead-type employees
+     * @returns {Array} Array of crew objects that have multiple leads
+     */
+    function detectCrewsWithMultipleLeads() {
+      crewsWithMultipleLeads = [];
+
+      for (var i = 0; i < parsedCrews.length; i++) {
+        var crew = parsedCrews[i];
+        var leads = [];
+
+        for (var e = 0; e < crew.employees.length; e++) {
+          var emp = crew.employees[e];
+          var effectiveClassification = emp.classification || emp.classificationFromSheet || '';
+
+          if (isLeadClassification(effectiveClassification)) {
+            leads.push({
+              employee: emp,
+              classification: effectiveClassification,
+              index: e
+            });
+          }
+        }
+
+        if (leads.length > 1) {
+          crewsWithMultipleLeads.push({
+            crew: crew,
+            leads: leads
+          });
+        }
+      }
+
+      return crewsWithMultipleLeads;
+    }
+
+    /**
+     * Shows a dialog to select the crew lead when multiple leads exist
+     * @param {Object} crewData - Object with crew and leads arrays
+     * @param {Function} callback - Called when selection is made
+     */
+    function showLeadSelectionDialog(crewData, callback) {
+      var crew = crewData.crew;
+      var leads = crewData.leads;
+
+      var msg = '<p>Crew <strong>' + crew.jobNumber + '</strong> at <strong>' + crew.mappedLocation + '</strong> has multiple employees with lead classifications:</p>';
+      msg += '<div style="max-height: 300px; overflow-y: auto;">';
+
+      for (var i = 0; i < leads.length; i++) {
+        var lead = leads[i];
+        var emp = lead.employee;
+        var classificationName = getLeadClassificationName(lead.classification);
+        var isFirst = i === 0;
+
+        msg += '<label class="lead-selection-card d-flex align-items-center' + (isFirst ? ' selected' : '') + '" onclick="selectLeadCard(this)">';
+        msg += '<input type="radio" name="leadSelection" value="' + i + '"' + (isFirst ? ' checked' : '') + '>';
+        msg += '<div class="flex-grow-1">';
+        msg += '<strong>' + emp.name + '</strong>';
+        msg += '<span class="badge bg-primary lead-badge">' + lead.classification + '</span>';
+        msg += '<br><small class="text-muted">' + classificationName + '</small>';
+        msg += '</div>';
+        msg += '</label>';
+      }
+
+      msg += '</div>';
+      msg += '<p class="text-muted small mt-3"><i class="bi bi-info-circle"></i> The selected person will be assigned job number <strong>' + crew.jobNumber + '.1</strong> and will be listed as the crew lead for this job.</p>';
+
+      document.getElementById('notificationHeader').className = 'notification-header info';
+      document.getElementById('notificationIcon').className = 'bi bi-person-badge';
+      document.getElementById('notificationTitle').textContent = 'Select Crew Lead for ' + crew.jobNumber;
+      document.getElementById('notificationBody').innerHTML = msg;
+      document.getElementById('notificationCancelBtn').style.display = 'inline-block';
+      document.getElementById('notificationCancelBtn').textContent = 'Skip';
+      document.getElementById('notificationOkBtn').textContent = 'Confirm Selection';
+
+      notificationCallback = function() {
+        var selected = document.querySelector('input[name="leadSelection"]:checked');
+        if (selected) {
+          var selectedIndex = parseInt(selected.value);
+          var selectedLead = leads[selectedIndex];
+          crewLeadSelections[crew.jobNumber] = selectedLead.employee.name;
+
+          // Reorder employees so selected lead is first
+          reorderCrewWithSelectedLead(crew, selectedLead.index);
+
+          console.log('Selected ' + selectedLead.employee.name + ' as lead for ' + crew.jobNumber);
+        }
+        if (callback) callback();
+      };
+
+      notificationCancelCallback = function() {
+        // Skip - use default ordering (first lead in hierarchy order)
+        if (callback) callback();
+      };
+
+      document.getElementById('notificationOverlay').classList.add('show');
+    }
+
+    /**
+     * Helper function to update lead selection card styling
+     */
+    function selectLeadCard(card) {
+      // Remove selected class from all cards
+      var cards = document.querySelectorAll('.lead-selection-card');
+      cards.forEach(function(c) { c.classList.remove('selected'); });
+      // Add selected class to clicked card
+      card.classList.add('selected');
+      // Check the radio button
+      var radio = card.querySelector('input[type="radio"]');
+      if (radio) radio.checked = true;
+    }
+
+    /**
+     * Reorders a crew's employees so the selected lead is first (gets .1)
+     * @param {Object} crew - The crew object
+     * @param {number} leadIndex - Index of the selected lead in employees array
+     */
+    function reorderCrewWithSelectedLead(crew, leadIndex) {
+      if (leadIndex === 0) return; // Already first
+
+      var employees = crew.employees;
+      var selectedLead = employees[leadIndex];
+
+      // Remove from current position and insert at start
+      employees.splice(leadIndex, 1);
+      employees.unshift(selectedLead);
+
+      // Re-assign position numbers
+      for (var e = 0; e < employees.length; e++) {
+        employees[e].position = e + 1;
+        employees[e].fullJobNumber = crew.jobNumber + '.' + (e + 1);
+      }
+    }
+
+    /**
+     * Processes all crews with multiple leads, showing dialogs sequentially
+     * @param {Function} finalCallback - Called when all selections are complete
+     */
+    function processMultipleLeadSelections(finalCallback) {
+      var crewsNeedingSelection = detectCrewsWithMultipleLeads();
+
+      if (crewsNeedingSelection.length === 0) {
+        if (finalCallback) finalCallback();
+        return;
+      }
+
+      var currentIndex = 0;
+
+      function processNext() {
+        if (currentIndex >= crewsNeedingSelection.length) {
+          // All done - refresh the preview
+          showCrewPreview();
+          matchEmployeesToSheet();
+          if (finalCallback) finalCallback();
+          return;
+        }
+
+        var crewData = crewsNeedingSelection[currentIndex];
+        currentIndex++;
+
+        showLeadSelectionDialog(crewData, processNext);
+      }
+
+      processNext();
+    }
+
+    /**
+     * Gets the selected crew lead for a job number
+     * @param {string} jobNumber - The job number
+     * @returns {string|null} The selected lead's name, or null if not set
+     */
+    function getSelectedCrewLead(jobNumber) {
+      return crewLeadSelections[jobNumber] || null;
+    }
+
+    /**
+     * Checks if an employee is the selected crew lead for their job
+     * @param {Object} emp - Employee object
+     * @param {string} jobNumber - The job number
+     * @returns {boolean} True if this employee is the selected lead
+     */
+    function isSelectedCrewLead(emp, jobNumber) {
+      var selectedLead = crewLeadSelections[jobNumber];
+      if (!selectedLead) return false;
+      return emp.name.toLowerCase().trim() === selectedLead.toLowerCase().trim();
+    }
+
+    /**
+     * Gets all employees with lead-type classifications for a crew
+     * @param {Object} crew - The crew object
+     * @returns {Array} Array of employee objects with lead classifications
+     */
+    function getLeadEmployeesForCrew(crew) {
+      var leads = [];
+      for (var e = 0; e < crew.employees.length; e++) {
+        var emp = crew.employees[e];
+        var classification = emp.classification || emp.classificationFromSheet || '';
+        if (isLeadClassification(classification)) {
+          leads.push({
+            employee: emp,
+            classification: classification,
+            index: e
+          });
+        }
+      }
+      return leads;
+    }
+
+    /**
+     * Shows dialog to change the crew lead for a specific job
+     * @param {string} jobNumber - The job number to change lead for
+     */
+    function showChangeCrewLeadDialog(jobNumber) {
+      // Find the crew
+      var crew = null;
+      for (var i = 0; i < parsedCrews.length; i++) {
+        if (parsedCrews[i].jobNumber === jobNumber) {
+          crew = parsedCrews[i];
+          break;
+        }
+      }
+
+      if (!crew) {
+        showNotification('Crew not found: ' + jobNumber, 'error');
+        return;
+      }
+
+      var leads = getLeadEmployeesForCrew(crew);
+      if (leads.length < 2) {
+        showNotification('This crew only has one lead-type employee.', 'info');
+        return;
+      }
+
+      // Find currently selected lead (default to first)
+      var currentLeadName = crewLeadSelections[jobNumber] || (crew.employees[0] ? crew.employees[0].name : '');
+
+      var msg = '<p>Select who should be the crew lead for <strong>' + jobNumber + '</strong>:</p>';
+      msg += '<div style="max-height: 300px; overflow-y: auto;">';
+
+      for (var i = 0; i < leads.length; i++) {
+        var lead = leads[i];
+        var emp = lead.employee;
+        var isCurrentLead = emp.name.toLowerCase().trim() === currentLeadName.toLowerCase().trim();
+        var classificationName = getLeadClassificationName(lead.classification);
+
+        msg += '<label class="lead-selection-card d-flex align-items-center' + (isCurrentLead ? ' selected' : '') + '" onclick="selectLeadCard(this)">';
+        msg += '<input type="radio" name="leadSelection" value="' + i + '"' + (isCurrentLead ? ' checked' : '') + '>';
+        msg += '<div class="flex-grow-1">';
+        msg += '<strong>' + emp.name + '</strong>';
+        msg += '<span class="badge bg-primary lead-badge">' + lead.classification + '</span>';
+        if (isCurrentLead) {
+          msg += ' <span class="badge bg-success ms-1" style="font-size: 10px;">Current Lead</span>';
+        }
+        msg += '<br><small class="text-muted">' + classificationName + '</small>';
+        msg += '</div>';
+        msg += '</label>';
+      }
+
+      msg += '</div>';
+      msg += '<p class="text-muted small mt-3"><i class="bi bi-info-circle"></i> The selected person will be assigned job number <strong>' + jobNumber + '.1</strong>.</p>';
+
+      document.getElementById('notificationHeader').className = 'notification-header info';
+      document.getElementById('notificationIcon').className = 'bi bi-person-badge';
+      document.getElementById('notificationTitle').textContent = 'Change Crew Lead for ' + jobNumber;
+      document.getElementById('notificationBody').innerHTML = msg;
+      document.getElementById('notificationCancelBtn').style.display = 'inline-block';
+      document.getElementById('notificationCancelBtn').textContent = 'Cancel';
+      document.getElementById('notificationOkBtn').textContent = 'Update Lead';
+
+      notificationCallback = function() {
+        var selected = document.querySelector('input[name="leadSelection"]:checked');
+        if (selected) {
+          var selectedIndex = parseInt(selected.value);
+          var selectedLead = leads[selectedIndex];
+          crewLeadSelections[jobNumber] = selectedLead.employee.name;
+
+          // Reorder employees so selected lead is first
+          reorderCrewWithSelectedLead(crew, selectedLead.index);
+
+          console.log('Changed lead for ' + jobNumber + ' to ' + selectedLead.employee.name);
+
+          // Refresh displays
+          showCrewPreview();
+          matchEmployeesToSheet();
+          displayPreview();
+        }
+      };
+
+      notificationCancelCallback = null;
+      document.getElementById('notificationOverlay').classList.add('show');
+    }
+
     function mapLocation(locationName) {
       if (locationMappings[locationName]) {
         return locationMappings[locationName];
@@ -2096,6 +2487,7 @@
         html += '<ul class="dropdown-menu dropdown-menu-end" aria-labelledby="scheduleDropdown-' + crewId + '">';
         html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Primary\', \'M-Th\'); return false;"><span class="badge bg-success me-1">Primary</span> M-Th</a></li>';
         html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Primary\', \'M-F\'); return false;"><span class="badge bg-success me-1">Primary</span> M-F</a></li>';
+        html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Primary\', \'Tue-Fri\'); return false;"><span class="badge bg-success me-1">Primary</span> Tue-Fri</a></li>';
         html += '<li><hr class="dropdown-divider"></li>';
         html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Secondary\', \'Fri-Sat\'); return false;"><span class="badge bg-warning text-dark me-1">Secondary</span> Fri-Sat</a></li>';
         html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Secondary\', \'Weekend\'); return false;"><span class="badge bg-warning text-dark me-1">Secondary</span> Weekend</a></li>';
@@ -2109,6 +2501,15 @@
         } else {
           html += '<li><a class="dropdown-item text-success" href="#" onclick="markJobActive(\'' + crew.jobNumber + '\'); return false;"><i class="bi bi-check-circle me-1"></i> Mark as Active Now</a></li>';
         }
+        // Add option to mark job as Completed (job is finished)
+        html += '<li><a class="dropdown-item text-secondary" href="#" onclick="showMarkJobCompletedDialog(\'' + crew.jobNumber + '\', \'' + escapeHtml(displayLocation) + '\'); return false;"><i class="bi bi-check-square me-1"></i> Mark Job Completed...</a></li>';
+
+        // Add option to change crew lead if crew has multiple lead-type employees
+        var crewLeads = getLeadEmployeesForCrew(crew);
+        if (crewLeads.length > 1) {
+          html += '<li><a class="dropdown-item text-primary" href="#" onclick="showChangeCrewLeadDialog(\'' + crew.jobNumber + '\'); return false;"><i class="bi bi-person-badge me-1"></i> Change Crew Lead...</a></li>';
+        }
+
         html += '<li><a class="dropdown-item text-danger" href="#" onclick="excludeCrewByJob(\'' + crew.jobNumber + '\', event); return false;"><i class="bi bi-x-circle me-1"></i> Exclude Crew</a></li>';
         html += '</ul>';
         html += '</div>';
@@ -2184,6 +2585,11 @@
               if (emp.classificationFromSheet && !emp.role) {
                 html += ' <small class="text-info" style="font-size: 9px;">(from sheet)</small>';
               }
+            }
+
+            // Show "CREW LEAD" indicator if this employee was selected as the lead for this job
+            if (isSelectedCrewLead(emp, crew.jobNumber) || (emp.position === 1 && isLeadClassification(emp.classification || emp.classificationFromSheet))) {
+              html += ' <span class="crew-lead-indicator" title="Assigned as crew lead">LEAD</span>';
             }
 
             // Debug: show source row/col and original text
@@ -2634,10 +3040,20 @@
         var crewSize = 0;
         if (crew) {
           crewSize = crew.employees.length;
-          for (var e = 0; e < crew.employees.length; e++) {
-            if (crew.employees[e].isForeman) {
-              foreman = crew.employees[e].name;
-              break;
+
+          // First, check if a crew lead was explicitly selected
+          if (crewLeadSelections[jobNumber]) {
+            foreman = crewLeadSelections[jobNumber];
+          } else {
+            // Otherwise, find the first employee with a lead classification (SUP, GF, F, GTO F)
+            // or fall back to isForeman flag
+            for (var e = 0; e < crew.employees.length; e++) {
+              var emp = crew.employees[e];
+              var empClass = emp.classification || emp.classificationFromSheet || '';
+              if (isLeadClassification(empClass) || emp.isForeman) {
+                foreman = emp.name;
+                break;
+              }
             }
           }
         }
@@ -2714,6 +3130,73 @@
         null,
         'Activate Job'
       );
+    }
+
+    /**
+     * Shows a dialog to mark a job as Completed (job is finished).
+     * This will update the job in Job Tracking sheet with Status=Completed and Actual End Date.
+     * @param {string} jobNumber - The job number (e.g., "052-25")
+     * @param {string} location - The location name for display
+     */
+    function showMarkJobCompletedDialog(jobNumber, location) {
+      // Get today's date for default
+      var today = new Date();
+      var defaultDate = today.toISOString().split('T')[0];
+
+      var msg = '<p>Mark <strong>' + jobNumber + '</strong> (' + location + ') as <span class="badge bg-secondary">Completed</span>?</p>';
+      msg += '<p class="text-muted small">This job will be marked as finished in Job Tracking. Employees will be shown as "crew no longer appears" and won\'t be updated.</p>';
+      msg += '<div class="mb-3">';
+      msg += '<label class="form-label"><i class="bi bi-calendar-check"></i> Completion Date:</label>';
+      msg += '<input type="date" class="form-control" id="completionDate" value="' + defaultDate + '">';
+      msg += '</div>';
+
+      document.getElementById('notificationHeader').className = 'notification-header secondary';
+      document.getElementById('notificationIcon').className = 'bi bi-check-square';
+      document.getElementById('notificationTitle').textContent = 'Mark Job Completed';
+      document.getElementById('notificationBody').innerHTML = msg;
+      document.getElementById('notificationCancelBtn').style.display = 'inline-block';
+      document.getElementById('notificationCancelBtn').textContent = 'Cancel';
+      document.getElementById('notificationOkBtn').textContent = 'Mark Completed';
+
+      notificationCallback = function() {
+        var completionDate = document.getElementById('completionDate').value;
+        if (!completionDate) {
+          showNotification('Please enter a completion date.', 'warning');
+          return;
+        }
+
+        // Call server to update Job Tracking
+        google.script.run
+          .withSuccessHandler(function(result) {
+            if (result.success) {
+              // Update local jobTrackingData
+              jobTrackingData[jobNumber] = {
+                status: 'Completed',
+                location: location,
+                isPendingStart: false,
+                isActive: false,
+                isCompleted: true,
+                actualEndDate: completionDate
+              };
+
+              showNotification('✅ ' + jobNumber + ' marked as Completed', 'success');
+
+              // Re-render to show the crew as completed
+              showCrewPreview();
+              // Re-run matching (will now filter out this job from duplicates)
+              matchEmployeesToSheet();
+            } else {
+              showNotification('Error: ' + result.message, 'error');
+            }
+          })
+          .withFailureHandler(function(error) {
+            showNotification('Error marking job completed: ' + error, 'error');
+          })
+          .markJobCompletedFromImport(jobNumber, completionDate);
+      };
+
+      notificationCancelCallback = null;
+      document.getElementById('notificationOverlay').classList.add('show');
     }
 
     /**
@@ -4015,7 +4498,7 @@
 
     /**
      * Selects the primary job for an employee who appears in multiple crews.
-     * Primary job = M-Th or M-F (standard workweek)
+     * Primary job = M-Th, M-F, or Tue-Fri (standard workweek)
      * Secondary job = Fri & Sat, weekends, or partial weeks with fewer days
      * @param {Array} occurrences - Array of crew occurrences for this employee
      * @returns {number} Index of the primary job
@@ -4038,6 +4521,11 @@
         else if (fullText.match(/M-F|Mon-Fri|Monday.*Friday/i)) {
           score += 100;
           occ.scheduleType = 'Primary (M-F)';
+        }
+        // Tue-Fri or T-F schedule is primary (+100 points)
+        else if (fullText.match(/T-F|Tue-Fri|Tu-F|Tuesday.*Friday/i)) {
+          score += 100;
+          occ.scheduleType = 'Primary (Tue-Fri)';
         }
         // Standard workweek patterns (4 10's, 5 8's) without weekend mention (+50)
         else if (fullText.match(/[45]\s*(10|8)'?s/i) && !fullText.match(/Fri\s*&\s*Sat|Sat\s*&\s*Sun|weekend/i)) {
@@ -4088,7 +4576,12 @@
 
       document.getElementById('duplicateSection').style.display = 'none';
       finishMatching();
-      displayPreview();
+
+      // Check for crews with multiple lead-type employees (SUP, GF, F, GTO F)
+      // If found, show selection dialogs before proceeding
+      checkAndHandleMultipleLeads(function() {
+        displayPreview();
+      });
     }
 
     /**
@@ -4354,6 +4847,7 @@
 
       for (var i = 0; i < parsedCrews.length; i++) {
         var crew = parsedCrews[i];
+
 
         // Skip crews that are Pending Start or Completed - employees here shouldn't generate changes yet
         var jobInfo = jobTrackingData[crew.jobNumber];

@@ -1470,11 +1470,32 @@
             console.log('processTaskData: Removed ' + (beforeDedup - allTasks.length) + ' duplicate Safety Compliance tasks');
           }
 
-          // Build employee phone map for checklist items
+          // Build employee phone map from tasks that already have phone numbers
           buildEmployeePhoneMap();
-          console.log('processTaskData: Built phone map with ' + Object.keys(employeePhoneMap).length + ' entries');
+          console.log('processTaskData: Built initial phone map with ' + Object.keys(employeePhoneMap).length + ' entries from tasks');
 
-          // Update localStorage checklist items with phone numbers if missing
+          // Also fetch phone numbers directly from Employees sheet to fill gaps
+          google.script.run
+            .withSuccessHandler(function(serverPhoneMap) {
+              if (serverPhoneMap) {
+                var addedCount = 0;
+                for (var empName in serverPhoneMap) {
+                  if (!employeePhoneMap[empName]) {
+                    employeePhoneMap[empName] = serverPhoneMap[empName];
+                    addedCount++;
+                  }
+                }
+                console.log('processTaskData: Added ' + addedCount + ' phone numbers from server. Total: ' + Object.keys(employeePhoneMap).length);
+              }
+              // Update localStorage checklist items with phone numbers
+              updateChecklistPhoneNumbers();
+            })
+            .withFailureHandler(function(e) {
+              console.log('Failed to fetch employee phone map:', e);
+            })
+            .getEmployeePhoneMap();
+
+          // Update localStorage checklist items with phone numbers if missing (initial pass)
           updateChecklistPhoneNumbers();
 
           // Load safety compliance tasks (missing reports from previous week)
@@ -2891,7 +2912,7 @@
                 phoneNumber: item.phoneNumber || '',
                 subject: 'Renew ' + item.itemType,
                 addedDate: new Date().toISOString().split('T')[0],
-                completed: item.status === 'Completed',
+                completed: item.status === 'Complete' || item.status === 'Completed',
                 notified: !!item.notifiedDate,
                 notes: item.dueDate ? 'Expires: ' + item.dueDate : '',
                 taskKey: item.taskKey,
@@ -3527,7 +3548,24 @@
 
       var certInfo = getCertInfoText(task);
       var employeeName = task.employee || 'Employee';
+
+      // Get phone number - check task directly first, then look up from employeePhoneMap
       var phoneNumber = task.phoneNumber || '';
+      if ((!phoneNumber || String(phoneNumber).length < 10) && task.employee) {
+        var empLower = task.employee.toLowerCase().trim();
+        phoneNumber = employeePhoneMap[empLower] || '';
+        console.log('openNotifyModal: Looked up phone for "' + empLower + '" = "' + phoneNumber + '"');
+      }
+      // Also try getPhoneForChecklistItem as final fallback
+      if (!phoneNumber || String(phoneNumber).length < 10) {
+        phoneNumber = getPhoneForChecklistItem(task);
+        console.log('openNotifyModal: getPhoneForChecklistItem returned "' + phoneNumber + '"');
+      }
+      // Store phone on task for later use by sendNotifySMS
+      if (phoneNumber && String(phoneNumber).length >= 10) {
+        task.phoneNumber = phoneNumber;
+      }
+
       var certCategory = getCertCategory(task);
 
       // Store cert info for message building
@@ -4467,7 +4505,10 @@
       saveClassTypeToStorage();
 
       // Open SMS link
-      var smsUrl = 'sms:' + phoneNumber + '?body=' + encodeURIComponent(message);
+      // Clean phone number - remove all non-digit characters for SMS URL
+      var cleanPhone = phoneNumber.replace(/\D/g, '');
+      if (cleanPhone.length === 10) cleanPhone = '1' + cleanPhone;
+      var smsUrl = 'sms:' + cleanPhone + '?body=' + encodeURIComponent(message);
       window.open(smsUrl, '_blank');
 
       // Close modal and refresh
@@ -4725,7 +4766,13 @@
       }
 
       // Open SMS link - use link click method for better compatibility
-      var smsUrl = 'sms:' + phoneNumber + '?body=' + encodeURIComponent(message);
+      // Clean phone number - remove all non-digit characters for SMS URL
+      var cleanPhone = phoneNumber.replace(/\D/g, '');
+      // Ensure it has country code (add 1 for US if 10 digits)
+      if (cleanPhone.length === 10) {
+        cleanPhone = '1' + cleanPhone;
+      }
+      var smsUrl = 'sms:' + cleanPhone + '?body=' + encodeURIComponent(message);
       console.log('Opening SMS URL:', smsUrl);
 
       // Create a temporary link and click it (most reliable method)
@@ -4972,7 +5019,10 @@
         .withSuccessHandler(function(message) {
           console.log('SMS message from server: ' + message);
           if (message) {
-            var smsUrl = 'sms:' + phoneNumber + '?body=' + encodeURIComponent(message);
+            // Clean phone number - remove all non-digit characters for SMS URL
+            var cleanPhone = phoneNumber.replace(/\D/g, '');
+            if (cleanPhone.length === 10) cleanPhone = '1' + cleanPhone;
+            var smsUrl = 'sms:' + cleanPhone + '?body=' + encodeURIComponent(message);
             window.open(smsUrl, '_blank');
             showToast('✓ Opening messaging app...');
           } else {
@@ -5558,7 +5608,10 @@
       personalChecklist.forEach(function(item) {
         // Only process cert items
         if (item.source !== 'Expiring Certs' && item.taskType !== 'Cert Expiring') return;
+
+        // Skip completed items - check both completed flag and status
         if (item.completed) return;
+        if (item.status === 'Complete' || item.status === 'Completed') return;
 
         // Check if already in allTasks
         var alreadyExists = allTasks.some(function(task) {

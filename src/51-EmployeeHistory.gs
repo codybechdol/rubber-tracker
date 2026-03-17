@@ -23,6 +23,52 @@ var EMPLOYEE_EVENT_TYPES = {
 };
 
 /**
+ * Validates that a date has a reasonable year (between minYear and maxYear).
+ * Returns null if the date is invalid or has an unrealistic year.
+ *
+ * This catches issues like:
+ * - Year 46050 (caused by serial number being interpreted as year)
+ * - Year 25 (2-digit year interpreted as 25 AD)
+ * - Year 1899/1900 (Excel epoch dates)
+ *
+ * @param {Date|string|number} dateValue - The date value to validate
+ * @param {number} minYear - Minimum valid year (default: 1950)
+ * @param {number} maxYear - Maximum valid year (default: 2100)
+ * @return {Date|null} Valid Date object or null if invalid/unrealistic
+ */
+function validateDateYear(dateValue, minYear, maxYear) {
+  minYear = minYear || 1950;
+  maxYear = maxYear || 2100;
+
+  if (!dateValue) return null;
+
+  var dateObj = null;
+
+  if (dateValue instanceof Date) {
+    dateObj = dateValue;
+  } else {
+    // Try to parse the date
+    dateObj = new Date(dateValue);
+  }
+
+  // Check if valid date
+  if (!dateObj || isNaN(dateObj.getTime())) {
+    return null;
+  }
+
+  // Check year is reasonable
+  var year = dateObj.getFullYear();
+  if (year < minYear || year > maxYear) {
+    Logger.log('[WARNING] validateDateYear: Unrealistic year ' + year +
+               ' detected (valid range: ' + minYear + '-' + maxYear + '). ' +
+               'Original value: ' + dateValue);
+    return null;
+  }
+
+  return dateObj;
+}
+
+/**
  * Checks if a duplicate Employee History entry already exists.
  * Matches on employee name (case-insensitive), event type, and date.
  *
@@ -308,11 +354,20 @@ function handleLastDayReasonChange(ss, sheet, editedRow, newValue) {
       if (header === 'hire date') hireDateColIdx = h;
       if (header === 'last day') lastDayColIdx = h;
       if (header === 'last day reason') lastDayReasonColIdx = h;
-      if (header === 'phone number') phoneNumberColIdx = h;
+      // Match various phone column header formats
+      if (header === 'phone number' || header === 'phone' || header === 'phone #' || header === 'cell' || header === 'cell phone') phoneNumberColIdx = h;
       if (header === 'email address') emailAddressColIdx = h;
       if (header === 'glove size') gloveSizeColIdx = h;
       if (header === 'sleeve size') sleeveSizeColIdx = h;
     }
+
+    // Use COLS constants as fallback if headers don't match
+    // COLS.EMPLOYEES.LOCATION = 3 (column C, 0-based index 2)
+    // COLS.EMPLOYEES.JOB_NUMBER = 4 (column D, 0-based index 3)
+    // COLS.EMPLOYEES.PHONE = 5 (column E, 0-based index 4)
+    if (locationColIdx === -1) locationColIdx = 2;
+    if (jobNumberColIdx === -1) jobNumberColIdx = 3;
+    if (phoneNumberColIdx === -1) phoneNumberColIdx = 4;
 
     var empName = empData[nameColIdx] || '';
     var location = locationColIdx !== -1 ? empData[locationColIdx] : '';
@@ -369,27 +424,56 @@ function handleLastDayReasonChange(ss, sheet, editedRow, newValue) {
       return; // Lock released in finally block
     }
 
-    // Format Last Day date
+    // Format Last Day date with validation
     var lastDayStr = '';
+    var lastDayDateObj = null;
+
     if (lastDay instanceof Date) {
-      lastDayStr = Utilities.formatDate(lastDay, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
-    } else {
+      lastDayDateObj = lastDay;
+    } else if (lastDay) {
+      // Try to parse the date
       var lastDayDate = new Date(lastDay);
       if (!isNaN(lastDayDate.getTime())) {
-        lastDayStr = Utilities.formatDate(lastDayDate, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
-      } else {
-        lastDayStr = String(lastDay);
+        lastDayDateObj = lastDayDate;
       }
+    }
+
+    // Validate year is reasonable (between 2000 and 2100)
+    if (lastDayDateObj) {
+      var year = lastDayDateObj.getFullYear();
+      if (year < 2000 || year > 2100) {
+        // Log the error and use current date as fallback
+        Logger.log('[WARNING] handleLastDayReasonChange: Invalid year ' + year + ' detected for Last Day date. Original value: ' + lastDay + '. Using current date instead.');
+        lastDayDateObj = new Date();
+        ss.toast('⚠️ Invalid Last Day date detected (year: ' + year + '). Using today\'s date.', 'Date Warning', 5);
+      }
+      lastDayStr = Utilities.formatDate(lastDayDateObj, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+    } else {
+      // Fallback to string if date parsing failed completely
+      lastDayStr = String(lastDay || '');
+      Logger.log('[WARNING] handleLastDayReasonChange: Could not parse Last Day date: ' + lastDay);
     }
 
     var hireDateStr = '';
     if (hireDate) {
+      var hireDateObj = null;
       if (hireDate instanceof Date) {
-        hireDateStr = Utilities.formatDate(hireDate, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+        hireDateObj = hireDate;
       } else {
         var hDate = new Date(hireDate);
         if (!isNaN(hDate.getTime())) {
-          hireDateStr = Utilities.formatDate(hDate, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+          hireDateObj = hDate;
+        }
+      }
+
+      // Validate year is reasonable (between 1950 and 2100)
+      if (hireDateObj) {
+        var hireYear = hireDateObj.getFullYear();
+        if (hireYear < 1950 || hireYear > 2100) {
+          Logger.log('[WARNING] handleLastDayReasonChange: Invalid hire year ' + hireYear + ' detected. Original value: ' + hireDate);
+          hireDateStr = '';  // Don't use invalid dates
+        } else {
+          hireDateStr = Utilities.formatDate(hireDateObj, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
         }
       }
     }
@@ -688,12 +772,23 @@ function trackEmployeeChange(ss, sheet, editedRow, editedCol, newValue, oldValue
 
     var hireDateStr = '';
     if (hireDate) {
+      var hireDateObj = null;
       if (hireDate instanceof Date) {
-        hireDateStr = Utilities.formatDate(hireDate, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+        hireDateObj = hireDate;
       } else {
         var hd = new Date(hireDate);
         if (!isNaN(hd.getTime())) {
-          hireDateStr = Utilities.formatDate(hd, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+          hireDateObj = hd;
+        }
+      }
+
+      // Validate year is reasonable (between 1950 and 2100)
+      if (hireDateObj) {
+        var hireYear = hireDateObj.getFullYear();
+        if (hireYear >= 1950 && hireYear <= 2100) {
+          hireDateStr = Utilities.formatDate(hireDateObj, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+        } else {
+          Logger.log('[WARNING] trackEmployeeChange: Invalid hire year ' + hireYear + ' for ' + empName);
         }
       }
     }
@@ -789,12 +884,21 @@ function saveEmployeeHistory() {
     if (header === 'location') locationColIdx = h;
     if (header === 'job number') jobNumberColIdx = h;
     if (header === 'hire date') hireDateColIdx = h;
-    if (header === 'phone number') phoneNumberColIdx = h;
+    // Match various phone column header formats
+    if (header === 'phone number' || header === 'phone' || header === 'phone #' || header === 'cell' || header === 'cell phone') phoneNumberColIdx = h;
     if (header === 'email address') emailAddressColIdx = h;
     if (header === 'glove size') gloveSizeColIdx = h;
     if (header === 'sleeve size') sleeveSizeColIdx = h;
     if (header === 'job classification') jobClassificationColIdx = h;
   }
+
+  // Use COLS constants as fallback if headers don't match
+  // COLS.EMPLOYEES.LOCATION = 3 (column C, 0-based index 2)
+  // COLS.EMPLOYEES.JOB_NUMBER = 4 (column D, 0-based index 3)
+  // COLS.EMPLOYEES.PHONE = 5 (column E, 0-based index 4)
+  if (locationColIdx === -1) locationColIdx = 2;
+  if (jobNumberColIdx === -1) jobNumberColIdx = 3;
+  if (phoneNumberColIdx === -1) phoneNumberColIdx = 4;
 
   // Get existing history to find last known state for each employee
   var historyData = [];
@@ -851,15 +955,26 @@ function saveEmployeeHistory() {
 
     var last = lastKnownState[nameLower];
 
-    // Format hire date
+    // Format hire date with validation
     var hireDateStr = '';
     if (hireDate) {
+      var hireDateObj = null;
       if (hireDate instanceof Date) {
-        hireDateStr = Utilities.formatDate(hireDate, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+        hireDateObj = hireDate;
       } else {
         var hd = new Date(hireDate);
         if (!isNaN(hd.getTime())) {
-          hireDateStr = Utilities.formatDate(hd, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+          hireDateObj = hd;
+        }
+      }
+
+      // Validate year is reasonable (between 1950 and 2100)
+      if (hireDateObj) {
+        var hireYear = hireDateObj.getFullYear();
+        if (hireYear >= 1950 && hireYear <= 2100) {
+          hireDateStr = Utilities.formatDate(hireDateObj, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+        } else {
+          Logger.log('[WARNING] saveEmployeeHistory: Invalid hire year ' + hireYear + ' for ' + name);
         }
       }
     }
@@ -1282,13 +1397,24 @@ function restoreEmployeeToSheet(dataJson) {
     else if (hdr === 'class') colMap.class = h;
     else if (hdr === 'location') colMap.location = h;
     else if (hdr === 'job number') colMap.jobNumber = h;
-    else if (hdr === 'phone number') colMap.phone = h;
+    // Match various phone column header formats
+    else if (hdr === 'phone number' || hdr === 'phone' || hdr === 'phone #' || hdr === 'cell' || hdr === 'cell phone') colMap.phone = h;
     else if (hdr === 'email address') colMap.email = h;
     else if (hdr === 'glove size') colMap.gloveSize = h;
     else if (hdr === 'sleeve size') colMap.sleeveSize = h;
     else if (hdr === 'hire date') colMap.hireDate = h;
     else if (hdr === 'job classification') colMap.classification = h;
   }
+
+  // Use COLS constants as fallback if headers don't match
+  // COLS.EMPLOYEES.NAME = 1 (column A, 0-based index 0)
+  // COLS.EMPLOYEES.LOCATION = 3 (column C, 0-based index 2)
+  // COLS.EMPLOYEES.JOB_NUMBER = 4 (column D, 0-based index 3)
+  // COLS.EMPLOYEES.PHONE = 5 (column E, 0-based index 4)
+  if (colMap.name === undefined) colMap.name = 0;
+  if (colMap.location === undefined) colMap.location = 2;
+  if (colMap.jobNumber === undefined) colMap.jobNumber = 3;
+  if (colMap.phone === undefined) colMap.phone = 4;
 
   // Build the new row (match header order)
   var newRow = new Array(headers.length).fill('');

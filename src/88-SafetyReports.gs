@@ -1169,20 +1169,24 @@ function getIconExplanation(icon, cellType) {
     return '✅L Received late (after deadline)';
   } else if (iconStr === '❌') {
     return '❌ Missing - not received';
+  } else if (iconStr === '❌W' || iconStr.toUpperCase() === 'DNW') {
+    return '❌W Did Not Work - crew did not work this day';
   } else if (iconStr === '⏳') {
     if (cellType === 'monthly') {
       return '⏳ Pending (month not over)';
     }
     return '⏳ Pending (week not over)';
   } else if (iconStr === 'N/A') {
-    return 'N/A Skipped per config';
+    return '(Skipped - crew scheduled off this day)';
   } else if (iconStr === '⚠️') {
     return '⚠️ Warning - Week 3, due soon';
   } else if (iconStr === '❌⏳') {
     return '❌⏳ Urgent - Week 4, deadline approaching';
+  } else if (iconStr === '') {
+    return '(Skipped - crew scheduled off this day)';
   }
 
-  return '';
+  return iconStr + ' (unknown status)';
 }
 
 function calculateComplianceFromLogs(weekStartDate) {
@@ -1246,6 +1250,16 @@ function calculateComplianceFromLogs(weekStartDate) {
     }
   }
 
+  // === FILTER CREWS BY JOB TRACKING START DATE ===
+  // Remove crews whose start date in Job Tracking is AFTER the week being calculated
+  // This prevents adding compliance rows for jobs that hadn't started yet
+  var filterResult = filterCrewsByJobTrackingStartDate(crews, weekBounds.weekEnd);
+  if (filterResult.excludedCrews.length > 0) {
+    Logger.log("calculateComplianceFromLogs: Excluded " + filterResult.excludedCrews.length +
+               " crews due to Job Tracking start date: " + filterResult.excludedCrews.join(', '));
+    crews = filterResult.filteredCrews;
+  }
+
   if (crews.length === 0) {
     Logger.log("calculateComplianceFromLogs: No crews found");
     return null;
@@ -1253,30 +1267,65 @@ function calculateComplianceFromLogs(weekStartDate) {
 
   Logger.log("calculateComplianceFromLogs: Total crews to track: " + crews.length);
 
+  // === LOAD EXISTING COMPLIANCE DATA FOR PAST WEEKS ===
+  // For past weeks, we need to PRESERVE the existing N/A values from the sheet
+  // because work schedules can change week to week (e.g., Mon-Fri to Mon-Thu)
+  var existingComplianceData = {};
+  if (!isCurrentWeek) {
+    existingComplianceData = loadExistingComplianceForWeek(ss, weekBounds.weekStart, tz);
+    Logger.log("calculateComplianceFromLogs: Loaded existing data for " + Object.keys(existingComplianceData).length + " crews (past week - preserving N/A values)");
+  }
+
   // Initialize compliance state for each crew
   var crewCompliance = {};
   for (var c = 0; c < crews.length; c++) {
     var crewJob = crews[c];
+    var existingCrewData = existingComplianceData[crewJob] || null;
 
-    // For current week, use live config. For past weeks, use default (will be overwritten by existing data)
-    var crewConfig;
+    // For CURRENT week: Use Config skipDays settings
+    // For PAST weeks: Preserve existing N/A values from the sheet (work schedules can change)
+    var skipDays, skipWeeklyMeeting, skipMonthlyChecklist;
+    var foreman = '';
+
     if (isCurrentWeek) {
-      crewConfig = config[crewJob] || {
+      // CURRENT WEEK: Use current Config settings
+      var crewConfig = config[crewJob] || {
         skipDays: [true, false, false, false, false, false, true], // Skip Sun/Sat by default
         skipWeeklyMeeting: false,
         skipMonthlyChecklist: false
       };
+      skipDays = crewConfig.skipDays;
+      skipWeeklyMeeting = crewConfig.skipWeeklyMeeting;
+      skipMonthlyChecklist = crewConfig.skipMonthlyChecklist;
+    } else if (existingCrewData) {
+      // PAST WEEK with existing data: PRESERVE the N/A/blank values from the sheet
+      // Convert existing day values to skipDays array
+      var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      skipDays = [];
+      for (var di = 0; di < dayNames.length; di++) {
+        var existingVal = existingCrewData.days[dayNames[di]] || '';
+        // If it was N/A or blank in the sheet, keep it as a skip day
+        skipDays.push(existingVal === 'N/A' || existingVal === '');
+      }
+      // Treat blank same as N/A for weekly/monthly
+      skipWeeklyMeeting = (existingCrewData.weeklyMeeting === 'N/A' || existingCrewData.weeklyMeeting === '');
+      skipMonthlyChecklist = (existingCrewData.monthlyChecklist === 'N/A' || existingCrewData.monthlyChecklist === '');
+      foreman = existingCrewData.foreman || '';
+      Logger.log("calculateComplianceFromLogs: Preserved skipDays for " + crewJob + ": " + JSON.stringify(skipDays) + " (from existing sheet data)");
     } else {
-      // For past weeks, default to standard config - existing sheet data will override
-      crewConfig = {
-        skipDays: [true, false, false, false, false, false, true],
+      // PAST WEEK without existing data (new crew for this week): Use current Config or defaults
+      var crewConfig = config[crewJob] || {
+        skipDays: [true, false, false, false, false, false, true], // Skip Sun/Sat by default
         skipWeeklyMeeting: false,
         skipMonthlyChecklist: false
       };
+      skipDays = crewConfig.skipDays;
+      skipWeeklyMeeting = crewConfig.skipWeeklyMeeting;
+      skipMonthlyChecklist = crewConfig.skipMonthlyChecklist;
     }
 
     crewCompliance[crewJob] = {
-      foreman: '',
+      foreman: foreman,
       jhaByDay: [false, false, false, false, false, false, false], // Sun-Sat
       jhaLateByDay: [false, false, false, false, false, false, false],
       jhaDetails: [{}, {}, {}, {}, {}, {}, {}], // Details for each day (dateReceived, dateCreated)
@@ -1285,21 +1334,23 @@ function calculateComplianceFromLogs(weekStartDate) {
       weeklyMeetingDetails: null, // {dateReceived, weekOf}
       monthlyChecklist: false,
       monthlyChecklistDetails: null, // {dateReceived, reportDate}
-      skipDays: crewConfig.skipDays,
-      skipWeeklyMeeting: crewConfig.skipWeeklyMeeting,
-      skipMonthlyChecklist: crewConfig.skipMonthlyChecklist,
+      skipDays: skipDays,
+      skipWeeklyMeeting: skipWeeklyMeeting,
+      skipMonthlyChecklist: skipMonthlyChecklist,
       status: 'Complete',
       isCurrentWeek: isCurrentWeek,
       isHistorical: configCrews.indexOf(crewJob) === -1 // Flag if this is a historical-only crew (not in current Config)
     };
 
-    // Get foreman name - first try current Employees sheet, then historical
-    var foremanResult = lookupForemanByJobNumber(crewJob);
-    if (foremanResult && foremanResult.name) {
-      crewCompliance[crewJob].foreman = foremanResult.name;
-    } else if (historicalForemanMap[crewJob]) {
-      // Use foreman name from JHA Log for historical crews
-      crewCompliance[crewJob].foreman = historicalForemanMap[crewJob];
+    // Get foreman name - first try existing data, then current Employees sheet, then historical
+    if (!crewCompliance[crewJob].foreman) {
+      var foremanResult = lookupForemanByJobNumber(crewJob);
+      if (foremanResult && foremanResult.name) {
+        crewCompliance[crewJob].foreman = foremanResult.name;
+      } else if (historicalForemanMap[crewJob]) {
+        // Use foreman name from JHA Log for historical crews
+        crewCompliance[crewJob].foreman = historicalForemanMap[crewJob];
+      }
     }
   }
 
@@ -2109,6 +2160,7 @@ function logParsedSafetyEmail(parsed, message, context, existingEmailIds) {
       }
     } else if (logResult.duplicate) {
       result.status = 'Duplicate';
+      result.reason = 'duplicate';
     }
   }
 
@@ -3875,11 +3927,11 @@ function cleanupSafetyReportsSheet() {
  */
 function createTasksFromSafetyIssues() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var safetySheet = ss.getSheetByName("Safety Reports");
+  var safetySheet = getSafetyEquipmentSheet();
 
   if (!safetySheet || safetySheet.getLastRow() < 2) {
     Browser.msgBox('⚠️ No Safety Reports',
-      'The Safety Reports sheet is empty or does not exist.\\n\\nRun "Process Safety Emails" first to populate the sheet.',
+      'The Safety Equipment Needs sheet is empty or does not exist.\\n\\nRun "Process Safety Emails" first to populate the sheet.',
       Browser.Buttons.OK);
     return;
   }
@@ -4520,6 +4572,16 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
       var lastProcessedIndex = 0;
       var logsCreated = { jha: 0, weekly: 0, monthly: 0 }; // Track Option B logs
 
+      // Track skip reasons for UI display
+      var skipReasons = {
+        alreadyLogged: 0,    // Email ID already in log sheets
+        logDuplicate: 0,     // logParsedSafetyEmail returned duplicate
+        parseFailed: 0,      // parseSafetyEmail returned null
+        userSkipped: 0,      // Job was previously skipped by user
+        unknownJob: 0,       // Job not found in Employees sheet
+        noJobNumber: 0       // No job number could be extracted
+      };
+
       for (var tidx = 0; tidx < batchThreads.length && !timedOut; tidx++) {
         var thread = batchThreads[tidx];
         var messages = thread.getMessages();
@@ -4539,6 +4601,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
           // Skip if already processed
           if (existingEmailIds[messageId]) {
             skippedCount++;
+            skipReasons.alreadyLogged++;
             continue;
           }
 
@@ -4555,6 +4618,9 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
               else if (logResult.logSheet === MONTHLY_CHECKLIST_LOG_SHEET_NAME) logsCreated.monthly++;
               // Mark this email as processed to avoid re-processing in subsequent batches
               existingEmailIds[messageId] = true;
+            } else if (logResult.reason === 'duplicate') {
+              skippedCount++;
+              skipReasons.logDuplicate++;
             }
             // === END OPTION B LOGGING ===
 
@@ -4579,11 +4645,14 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
                   messageId: messageId
                 });
                 Logger.log("Unknown job tracked for user assignment: " + parsed.reportMeta.jobNumber);
+                skipReasons.unknownJob++;
               }
+              skippedCount++;
             } else if (parsed.skippedReason === "User skipped") {
               // User already decided to skip this job - log it but don't prompt again
               Logger.log("Silently skipping user-skipped job: " + (parsed.reportMeta ? parsed.reportMeta.jobNumber : 'unknown'));
               skippedCount++;
+              skipReasons.userSkipped++;
             }
 
             // Track job number corrections that need approval (not remembered)
@@ -4672,6 +4741,10 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
             }
 
             processedCount++;
+          } else {
+            // parseSafetyEmail returned null - not a valid safety email format
+            skippedCount++;
+            skipReasons.parseFailed++;
           }
         } // end messages loop
       } // end threads loop
@@ -4689,6 +4762,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
           totalBatches: Math.ceil(allThreads.length / batchSize),
           processedThisBatch: processedCount,
           skippedThisBatch: skippedCount,
+          skipReasons: skipReasons,
           issuesThisBatch: issues.length,
           totalThreads: allThreads.length,
           threadsProcessed: actualProcessed,
@@ -4718,6 +4792,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
           totalBatches: Math.ceil(allThreads.length / batchSize),
           processedThisBatch: processedCount,
           skippedThisBatch: skippedCount,
+          skipReasons: skipReasons,
           issuesThisBatch: issues.length,
           complianceRecordsCount: complianceRecords.length,
           totalThreads: allThreads.length
@@ -4741,6 +4816,8 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
           batchNumber: Math.floor(batchStart / batchSize) + 1,
           totalBatches: Math.ceil(allThreads.length / batchSize),
           processedThisBatch: processedCount,
+          skippedThisBatch: skippedCount,
+          skipReasons: skipReasons,
           issuesThisBatch: issues.length,
           complianceRecordsCount: complianceRecords.length
         };
@@ -4798,6 +4875,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     totalBatches: Math.ceil(allThreads.length / batchSize),
     processedThisBatch: processedCount,
     skippedThisBatch: skippedCount,
+    skipReasons: skipReasons, // Breakdown of why emails were skipped
     issuesThisBatch: issues.length,
     complianceRecordsAdded: complianceRecords.length,
     logsCreated: logsCreated, // Option B: show log counts
@@ -5771,6 +5849,30 @@ function extractDatesCompletedFromJHAPDF(pdfText) {
     }
   }
 
+  // ========== PATTERN 1B: "Date Completed" with MONTH NAME format ==========
+  // Handles: "Date Completed: Mar 16, 2026", "Date Completed: March 16, 2026"
+  // This is the format used in the actual JHA PDFs from the field tablets
+  if (dates.length === 0) {
+    var monthNamePattern = /Date\s*Completed[\s:]*([A-Za-z]{3,9})\s+(\d{1,2}),?\s*(\d{4})/gi;
+    while ((match = monthNamePattern.exec(normalizedText)) !== null) {
+      var monthStr = match[1];
+      var dayStr = match[2];
+      var yearStr = match[3];
+      var dateStr = monthStr + ' ' + dayStr + ', ' + yearStr;
+      Logger.log("extractDatesCompletedFromJHAPDF: Pattern1B (month name) matched: '" + match[0] + "' -> date: " + dateStr);
+      var parsedDate = new Date(dateStr);
+      if (parsedDate && !isNaN(parsedDate.getTime())) {
+        var year = parsedDate.getFullYear();
+        if (year >= 2024 && year <= 2030) {
+          if (!dates.some(function(d) { return d.getTime() === parsedDate.getTime(); })) {
+            dates.push(parsedDate);
+            Logger.log("extractDatesCompletedFromJHAPDF: ✓ Added from Pattern1B: " + parsedDate.toDateString());
+          }
+        }
+      }
+    }
+  }
+
   // ========== PATTERN 2: "Completed" alone with date ==========
   // Handles: "Completed: 02/09/2026", "Completed 02-09-2026"
   if (dates.length === 0) {
@@ -5857,6 +5959,29 @@ function extractDatesCompletedFromJHAPDF(pdfText) {
         if (!dates.some(function(d) { return d.getTime() === parsedDate.getTime(); })) {
           dates.push(parsedDate);
           Logger.log("extractDatesCompletedFromJHAPDF: ✓ Added from Pattern6: " + parsedDate.toDateString());
+        }
+      }
+    }
+  }
+
+  // ========== PATTERN 6B: Standalone month name date formats ==========
+  // Handles: "Mar 16, 2026", "March 16, 2026", "16 Mar 2026" - as last resort
+  if (dates.length === 0) {
+    // Pattern: "Mar 16, 2026" or "March 16, 2026"
+    var pattern6b = /\b([A-Za-z]{3,9})\s+(\d{1,2}),?\s*(202[4-7])\b/g;
+    while ((match = pattern6b.exec(normalizedText)) !== null) {
+      var monthStr = match[1].toLowerCase();
+      var validMonths = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
+                         'january', 'february', 'march', 'april', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+      if (validMonths.indexOf(monthStr) !== -1 || validMonths.indexOf(monthStr.substring(0, 3)) !== -1) {
+        var dateStr = match[1] + ' ' + match[2] + ', ' + match[3];
+        Logger.log("extractDatesCompletedFromJHAPDF: Pattern6B (standalone month name) matched: " + dateStr);
+        var parsedDate = new Date(dateStr);
+        if (parsedDate && !isNaN(parsedDate.getTime())) {
+          if (!dates.some(function(d) { return d.getTime() === parsedDate.getTime(); })) {
+            dates.push(parsedDate);
+            Logger.log("extractDatesCompletedFromJHAPDF: ✓ Added from Pattern6B: " + parsedDate.toDateString());
+          }
         }
       }
     }
@@ -6441,11 +6566,18 @@ function lookupForemanPhoneByJobNumber(jobNumber) {
     if (header === "job number") jobCol = h;
     if (header === "secondary job number") secondaryJobCol = h;
     if (header === "job classification" || header === "classification") classCol = h;
-    if (header === "phone" || header === "phone number") phoneCol = h;
+    // Match various phone column header formats
+    if (header === "phone" || header === "phone number" || header === "phone #" || header === "cell" || header === "cell phone") phoneCol = h;
   }
 
+  // Use COLS constants as fallback if headers don't match
+  // COLS.EMPLOYEES.NAME = 1 (column A, 0-based index 0)
+  // COLS.EMPLOYEES.JOB_NUMBER = 4 (column D, 0-based index 3)
+  // COLS.EMPLOYEES.PHONE = 5 (column E, 0-based index 4)
   if (nameCol === -1) nameCol = 0;
-  if (jobCol === -1 || phoneCol === -1) return "";
+  if (jobCol === -1) jobCol = 3;
+  if (phoneCol === -1) phoneCol = 4;
+  if (jobCol === -1) return "";
 
   // Collect all employees for this crew (check both primary and secondary job)
   var crewMembers = [];
@@ -6608,6 +6740,88 @@ function getWeekBoundaries(date) {
 }
 
 /**
+ * Loads ALL existing compliance data for a specific week from Safety Compliance sheet.
+ * Used to preserve historical data including N/A values when recalculating past weeks.
+ * This is critical because work schedules can change week to week (e.g., Mon-Fri to Mon-Thu).
+ *
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @param {Date} weekStart - Start date of the week (Sunday)
+ * @param {string} tz - Timezone
+ * @returns {Object} Map of jobNumber -> {foreman, days: {Sun, Mon, ...}, weeklyMeeting, monthlyChecklist, status}
+ */
+function loadExistingComplianceForWeek(ss, weekStart, tz) {
+  var existingData = {};
+  var complianceSheet = ss.getSheetByName('Safety Compliance');
+
+  if (!complianceSheet || complianceSheet.getLastRow() < 2) {
+    return existingData;
+  }
+
+  var data = complianceSheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Find column indices
+  var colIdx = {};
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim().replace(/\s+/g, '');
+    if (header === 'weekstart') colIdx.weekStart = h;
+    else if (header === 'jobnumber') colIdx.jobNumber = h;
+    else if (header === 'foreman') colIdx.foreman = h;
+    else if (header === 'status') colIdx.status = h;
+    else if (header === 'sun') colIdx.sun = h;
+    else if (header === 'mon') colIdx.mon = h;
+    else if (header === 'tue') colIdx.tue = h;
+    else if (header === 'wed') colIdx.wed = h;
+    else if (header === 'thu') colIdx.thu = h;
+    else if (header === 'fri') colIdx.fri = h;
+    else if (header === 'sat') colIdx.sat = h;
+    else if (header === 'weeklymeeting') colIdx.weeklyMeeting = h;
+    else if (header === 'monthly' || header === 'monthlychecklist') colIdx.monthly = h;
+  }
+
+  if (colIdx.weekStart === undefined || colIdx.jobNumber === undefined) {
+    Logger.log("loadExistingComplianceForWeek: Required columns not found");
+    return existingData;
+  }
+
+  var targetWeekStr = Utilities.formatDate(weekStart, tz, 'yyyy-MM-dd');
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var rowWeekStart = row[colIdx.weekStart];
+    var rowJob = String(row[colIdx.jobNumber] || '').trim();
+
+    if (!rowWeekStart || !rowJob) continue;
+
+    // Match week
+    var rowWeekDate = (rowWeekStart instanceof Date) ? rowWeekStart : new Date(rowWeekStart);
+    var rowWeekStr = Utilities.formatDate(rowWeekDate, tz, 'yyyy-MM-dd');
+
+    if (rowWeekStr !== targetWeekStr) continue;
+
+    // Store all the existing data for this crew/week
+    existingData[rowJob] = {
+      foreman: colIdx.foreman !== undefined ? String(row[colIdx.foreman] || '') : '',
+      status: colIdx.status !== undefined ? String(row[colIdx.status] || '') : '',
+      days: {
+        'Sun': colIdx.sun !== undefined ? String(row[colIdx.sun] || '') : '',
+        'Mon': colIdx.mon !== undefined ? String(row[colIdx.mon] || '') : '',
+        'Tue': colIdx.tue !== undefined ? String(row[colIdx.tue] || '') : '',
+        'Wed': colIdx.wed !== undefined ? String(row[colIdx.wed] || '') : '',
+        'Thu': colIdx.thu !== undefined ? String(row[colIdx.thu] || '') : '',
+        'Fri': colIdx.fri !== undefined ? String(row[colIdx.fri] || '') : '',
+        'Sat': colIdx.sat !== undefined ? String(row[colIdx.sat] || '') : ''
+      },
+      weeklyMeeting: colIdx.weeklyMeeting !== undefined ? String(row[colIdx.weeklyMeeting] || '') : '',
+      monthlyChecklist: colIdx.monthly !== undefined ? String(row[colIdx.monthly] || '') : ''
+    };
+  }
+
+  Logger.log("loadExistingComplianceForWeek: Found existing data for " + Object.keys(existingData).length + " crews for week " + targetWeekStr);
+  return existingData;
+}
+
+/**
  * Loads crews with "Resolved" status for a specific week from Safety Compliance sheet.
  * These crews should not have tasks recreated or statuses recalculated.
  *
@@ -6687,6 +6901,79 @@ function loadResolvedCrewsForWeek(ss, weekStart, tz) {
   }
 
   return resolvedCrews;
+}
+
+/**
+ * Load ALL existing crew data for a specific week from the Safety Compliance sheet
+ * This preserves N/A values, foreman names, and day-by-day data for past weeks
+ *
+ * @param {Spreadsheet} ss - Spreadsheet object
+ * @param {Date} weekStart - The start of the week to look for (Sunday)
+ * @param {string} tz - Timezone
+ * @return {Object} Map of jobNumber -> {foreman, dayStatuses: {sun, mon, tue, wed, thu, fri, sat}, status}
+ */
+function loadExistingWeekData(ss, weekStart, tz) {
+  var complianceSheet = ss.getSheetByName('Safety Compliance');
+  if (!complianceSheet || complianceSheet.getLastRow() < 2) return {};
+
+  var data = complianceSheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Find column indices
+  var cols = {};
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim().replace(/\s+/g, '');
+    if (header === 'weekstart') cols.weekStart = h;
+    else if (header === 'jobnumber') cols.jobNumber = h;
+    else if (header === 'foreman') cols.foreman = h;
+    else if (header === 'sun') cols.sun = h;
+    else if (header === 'mon') cols.mon = h;
+    else if (header === 'tue') cols.tue = h;
+    else if (header === 'wed') cols.wed = h;
+    else if (header === 'thu') cols.thu = h;
+    else if (header === 'fri') cols.fri = h;
+    else if (header === 'sat') cols.sat = h;
+    else if (header === 'status') cols.status = h;
+  }
+
+  if (cols.weekStart === undefined || cols.jobNumber === undefined) {
+    return {};
+  }
+
+  var targetWeekStr = Utilities.formatDate(weekStart, tz, 'yyyy-MM-dd');
+  var existingData = {};
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var rowWeekStart = row[cols.weekStart];
+
+    if (!rowWeekStart) continue;
+
+    var rowWeekDate = (rowWeekStart instanceof Date) ? rowWeekStart : new Date(rowWeekStart);
+    var rowWeekStr = Utilities.formatDate(rowWeekDate, tz, 'yyyy-MM-dd');
+
+    if (rowWeekStr === targetWeekStr) {
+      var jobNumber = String(row[cols.jobNumber] || '').trim();
+      if (jobNumber) {
+        existingData[jobNumber] = {
+          foreman: cols.foreman !== undefined ? String(row[cols.foreman] || '').trim() : '',
+          dayStatuses: {
+            sun: cols.sun !== undefined ? row[cols.sun] : '',
+            mon: cols.mon !== undefined ? row[cols.mon] : '',
+            tue: cols.tue !== undefined ? row[cols.tue] : '',
+            wed: cols.wed !== undefined ? row[cols.wed] : '',
+            thu: cols.thu !== undefined ? row[cols.thu] : '',
+            fri: cols.fri !== undefined ? row[cols.fri] : '',
+            sat: cols.sat !== undefined ? row[cols.sat] : ''
+          },
+          status: cols.status !== undefined ? String(row[cols.status] || '').trim() : ''
+        };
+      }
+    }
+  }
+
+  Logger.log('loadExistingWeekData: Found ' + Object.keys(existingData).length + ' existing crews for week ' + targetWeekStr);
+  return existingData;
 }
 
 /**
@@ -7002,7 +7289,7 @@ function setupSafetyComplianceSheet() {
   sheet.setColumnWidth(2, 80);   // Job Number
   sheet.setColumnWidth(3, 120);  // Foreman
   for (var i = 4; i <= 10; i++) {
-    sheet.setColumnWidth(i, 50); // Day columns
+    sheet.setColumnWidth(i, 55); // Day columns
   }
   sheet.setColumnWidth(11, 100); // Weekly Meeting
   sheet.setColumnWidth(12, 110); // Monthly Checklist
@@ -7011,6 +7298,22 @@ function setupSafetyComplianceSheet() {
 
   // Date format for Week Start
   sheet.getRange(2, 1, 1000, 1).setNumberFormat("MM/dd/yyyy");
+
+  // Add data validation dropdowns for day columns (D-J) and Weekly Meeting (K)
+  var dayValues = ['✅', '✅L', '❌', 'N/A', '⏳', ''];
+  var dayRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(dayValues, true)
+    .setAllowInvalid(true)  // Allow other values to be typed
+    .build();
+  sheet.getRange(2, 4, 1000, 8).setDataValidation(dayRule);  // Columns D-K (days + weekly meeting)
+
+  // Add data validation for Status column (M)
+  var statusValues = ['Complete', 'Missing Reports', 'Pending', 'Resolved'];
+  var statusRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(statusValues, true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, 13, 1000, 1).setDataValidation(statusRule);
 
   // Add conditional formatting for status icons
   var dayRange = sheet.getRange("D2:L1001");
@@ -7090,6 +7393,189 @@ function setupSafetyComplianceSheet() {
 
   Logger.log("setupSafetyComplianceSheet: Created Safety Compliance sheet");
   return sheet;
+}
+
+/**
+ * Adds dropdown data validation to existing Safety Compliance sheet.
+ * This makes it easy to change values by clicking and selecting from a dropdown.
+ *
+ * Called from: Glove Manager → Safety → Add Dropdowns to Safety Compliance
+ */
+function addDropdownsToSafetyCompliance() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName("Safety Compliance");
+
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert('Safety Compliance sheet not found.');
+    return;
+  }
+
+  var lastRow = Math.max(sheet.getLastRow(), 100);
+
+  // Add data validation dropdowns for day columns (D-J) and Weekly Meeting (K)
+  // Include common variants that exist in the data
+  var dayValues = ['✅', '✅L', '❌', '❌W', 'N/A', '⏳', ''];
+  var dayRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(dayValues, true)
+    .setAllowInvalid(true)  // MUST allow other values - existing data has variants
+    .build();
+  sheet.getRange(2, 4, lastRow, 8).setDataValidation(dayRule);  // Columns D-K
+
+  // Add data validation for Status column (M)
+  var statusValues = ['Complete', 'Missing Reports', 'Pending', 'Resolved'];
+  var statusRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(statusValues, true)
+    .setAllowInvalid(true)  // Allow flexibility
+    .build();
+  sheet.getRange(2, 13, lastRow, 1).setDataValidation(statusRule);
+
+  // Also fix column widths for day columns (D-J)
+  for (var i = 4; i <= 10; i++) {
+    sheet.setColumnWidth(i, 55);
+  }
+
+  SpreadsheetApp.getUi().alert(
+    '✅ Dropdowns Added!',
+    'You can now click any day/meeting cell and select from a dropdown:\n\n' +
+    '• ✅ - Received on time\n' +
+    '• ✅L - Received late\n' +
+    '• ❌ - Missing\n' +
+    '• N/A - Skipped\n' +
+    '• ⏳ - Pending\n\n' +
+    'Status column also has a dropdown.\nColumn widths adjusted to 55px.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+
+  Logger.log("addDropdownsToSafetyCompliance: Added dropdowns to " + lastRow + " rows");
+}
+
+/**
+ * Cleans up the Safety Compliance sheet by replacing N/A with blank cells.
+ * Blank cells will still have gray background from conditional formatting.
+ * Tooltips are preserved/updated to explain the blank means "skipped".
+ *
+ * Called from: Glove Manager → Safety → 🧹 Cleanup N/A Cells
+ */
+function cleanupNACellsInCompliance() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Safety Compliance');
+
+  if (!sheet || sheet.getLastRow() < 2) {
+    SpreadsheetApp.getUi().alert('Safety Compliance sheet not found or empty.');
+    return;
+  }
+
+  var tz = Session.getScriptTimeZone();
+  var data = sheet.getDataRange().getValues();
+  var replacedCount = 0;
+
+  // Process each row
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var weekStart = row[0];
+    var rowNum = i + 1;
+
+    if (!weekStart) continue;
+
+    // Check day columns D-J (indices 3-9 in 0-based, columns 4-10 in 1-based)
+    for (var col = 4; col <= 10; col++) {
+      var value = String(row[col - 1] || '').trim();
+
+      if (value === 'N/A') {
+        // Clear the cell but keep gray formatting via conditional formatting
+        var cell = sheet.getRange(rowNum, col);
+        cell.setValue('');
+
+        // Calculate the date for this day
+        var dayIdx = col - 4; // 0=Sun, 6=Sat
+        var dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        var dayDate = new Date(weekStart);
+        dayDate.setDate(dayDate.getDate() + dayIdx);
+        var dateStr = Utilities.formatDate(dayDate, tz, 'MMM dd, yyyy');
+
+        // Set tooltip to explain
+        cell.setNote('📅 ' + dayNames[dayIdx] + ', ' + dateStr + '\n\n(Skipped - crew scheduled off this day)');
+        replacedCount++;
+      }
+    }
+
+    // Check Weekly Meeting column K (column 11, index 10)
+    var weeklyValue = String(row[10] || '').trim();
+    if (weeklyValue === 'N/A') {
+      var weeklyCell = sheet.getRange(rowNum, 11);
+      weeklyCell.setValue('');
+      weeklyCell.setNote('📋 Weekly Safety Meeting\n\n(Skipped per config)');
+      replacedCount++;
+    }
+
+    // Check Monthly Checklist column L (column 12, index 11)
+    var monthlyValue = String(row[11] || '').trim();
+    if (monthlyValue === 'N/A') {
+      var monthlyCell = sheet.getRange(rowNum, 12);
+      monthlyCell.setValue('');
+      monthlyCell.setNote('📋 Monthly Fleet Checklist\n\n(Skipped per config)');
+      replacedCount++;
+    }
+  }
+
+  // Update conditional formatting to also apply gray to empty cells
+  addBlankCellFormatting(sheet);
+
+  SpreadsheetApp.getUi().alert(
+    '🧹 Cleanup Complete',
+    'Replaced ' + replacedCount + ' N/A cells with blank cells.\n\n' +
+    'Blank cells now show gray background and have tooltips explaining they are skipped days.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+
+  Logger.log('cleanupNACellsInCompliance: Replaced ' + replacedCount + ' N/A cells');
+}
+
+/**
+ * Adds conditional formatting for blank cells in Safety Compliance.
+ * Blank cells in day columns (D-L) will show light gray background.
+ */
+function addBlankCellFormatting(sheet) {
+  if (!sheet) {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    sheet = ss.getSheetByName('Safety Compliance');
+  }
+
+  if (!sheet) return;
+
+  var rules = sheet.getConditionalFormatRules();
+  var dayRange = sheet.getRange('D2:L1001');
+
+  // Check if blank rule already exists
+  var hasBlankRule = false;
+  for (var r = 0; r < rules.length; r++) {
+    var rule = rules[r];
+    // Check if this is our blank cell rule (isBlank condition)
+    try {
+      if (rule.getBooleanCondition() &&
+          rule.getBooleanCondition().getCriteriaType() === SpreadsheetApp.BooleanCriteria.CELL_EMPTY) {
+        hasBlankRule = true;
+        break;
+      }
+    } catch (e) {
+      // Ignore errors checking rule type
+    }
+  }
+
+  if (!hasBlankRule) {
+    // Add rule for blank cells - light gray background
+    var blankRule = SpreadsheetApp.newConditionalFormatRule()
+      .whenCellEmpty()
+      .setBackground('#EFEFEF')  // Light gray - same as N/A
+      .setRanges([dayRange])
+      .build();
+
+    // Add at the END of the rules (lowest priority)
+    rules.push(blankRule);
+    sheet.setConditionalFormatRules(rules);
+
+    Logger.log('addBlankCellFormatting: Added blank cell formatting rule');
+  }
 }
 
 /**
@@ -12527,6 +13013,124 @@ function removeNonConfigCrewsFromCompliance() {
 
   } catch (e) {
     Logger.log('removeNonConfigCrewsFromCompliance error: ' + e.toString());
+    ui.alert('Error', 'Failed: ' + e.toString(), ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * Removes compliance rows for jobs that hadn't started yet during those weeks.
+ * Checks Job Tracking "Start Date" column and removes rows where the week is
+ * BEFORE the job's start date.
+ *
+ * Run from: Glove Manager → Safety → 🧹 Remove Pre-Start Job Rows
+ */
+function removePreStartJobRowsFromCompliance() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var tz = Session.getScriptTimeZone();
+
+  // Get Job Tracking start dates
+  var startDates = getJobTrackingStartDates();
+  var jobsWithStartDates = Object.keys(startDates);
+
+  if (jobsWithStartDates.length === 0) {
+    ui.alert('No Start Dates Found', 'No jobs found in Job Tracking with start dates.\n\nThis cleanup requires jobs to have Start Date values in the Job Tracking sheet.', ui.ButtonSet.OK);
+    return;
+  }
+
+  // Build summary for confirmation dialog
+  var jobSummary = [];
+  for (var j = 0; j < Math.min(jobsWithStartDates.length, 10); j++) {
+    var job = jobsWithStartDates[j];
+    jobSummary.push(job + ': ' + Utilities.formatDate(startDates[job], tz, 'MM/dd/yyyy'));
+  }
+  if (jobsWithStartDates.length > 10) {
+    jobSummary.push('... and ' + (jobsWithStartDates.length - 10) + ' more');
+  }
+
+  var response = ui.alert(
+    '🧹 Remove Pre-Start Job Rows',
+    'This will remove rows from the Safety Compliance sheet where the week is BEFORE the job\'s start date in Job Tracking.\n\n' +
+    'Jobs with start dates:\n' + jobSummary.join('\n') + '\n\n' +
+    'Example: Job 018-26 with start date 03/16/2026 will be removed from weeks before 03/16/2026.\n\n' +
+    'Continue?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (response !== ui.Button.YES) return;
+
+  try {
+    var sheet = ss.getSheetByName('Safety Compliance');
+    if (!sheet || sheet.getLastRow() < 2) {
+      ui.alert('Error', 'Safety Compliance sheet not found or empty', ui.ButtonSet.OK);
+      return;
+    }
+
+    var data = sheet.getDataRange().getValues();
+    var rowsToDelete = [];
+    var removedDetails = {}; // { jobNumber: { weekStr: true, ... } }
+
+    // Scan from bottom to top for safe deletion
+    for (var i = data.length - 1; i >= 1; i--) {
+      var rowWeek = data[i][0]; // Column A - Week Start
+      var rowJob = String(data[i][1] || '').trim(); // Column B - Job Number
+
+      if (!rowWeek || !rowJob) continue;
+
+      // Check if this job has a start date in Job Tracking
+      var jobStartDate = startDates[rowJob];
+      if (!jobStartDate) continue; // No start date - keep the row
+
+      var rowWeekDate = (rowWeek instanceof Date) ? rowWeek : new Date(rowWeek);
+      if (isNaN(rowWeekDate.getTime())) continue;
+
+      // Get the week END date (Saturday)
+      var weekEndDate = new Date(rowWeekDate);
+      weekEndDate.setDate(weekEndDate.getDate() + 6);
+      weekEndDate.setHours(23, 59, 59, 999);
+
+      // If the job's start date is AFTER this week's end date, remove the row
+      if (jobStartDate > weekEndDate) {
+        rowsToDelete.push(i + 1); // 1-indexed row number
+
+        // Track for summary
+        if (!removedDetails[rowJob]) removedDetails[rowJob] = [];
+        removedDetails[rowJob].push(Utilities.formatDate(rowWeekDate, tz, 'MM/dd/yyyy'));
+      }
+    }
+
+    if (rowsToDelete.length === 0) {
+      ui.alert('No Changes Needed', 'No compliance rows found for jobs that hadn\'t started yet.', ui.ButtonSet.OK);
+      return;
+    }
+
+    // Delete rows (already sorted from bottom to top)
+    for (var r = 0; r < rowsToDelete.length; r++) {
+      sheet.deleteRow(rowsToDelete[r]);
+    }
+
+    // Format the sheet
+    formatComplianceSheetByWeek();
+
+    // Build summary
+    var summaryLines = [];
+    for (var job in removedDetails) {
+      var weeks = removedDetails[job];
+      summaryLines.push('• ' + job + ' (start: ' + Utilities.formatDate(startDates[job], tz, 'MM/dd/yyyy') + '): removed ' + weeks.length + ' week(s)');
+      if (weeks.length <= 3) {
+        summaryLines.push('  Weeks: ' + weeks.join(', '));
+      }
+    }
+
+    var msg = '✅ Cleanup Complete!\n\n' +
+              'Rows removed: ' + rowsToDelete.length + '\n\n' +
+              summaryLines.join('\n');
+
+    ui.alert('Cleanup Complete', msg, ui.ButtonSet.OK);
+    Logger.log('removePreStartJobRowsFromCompliance: Removed ' + rowsToDelete.length + ' rows. Details: ' + JSON.stringify(removedDetails));
+
+  } catch (e) {
+    Logger.log('removePreStartJobRowsFromCompliance error: ' + e.toString());
     ui.alert('Error', 'Failed: ' + e.toString(), ui.ButtonSet.OK);
   }
 }

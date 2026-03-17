@@ -520,6 +520,75 @@ function activatePendingJobs(jobNumbers) {
 }
 
 /**
+ * Marks a job as Completed from the Crew Import dialog.
+ * Sets Status to "Completed" and Actual End Date to the specified date.
+ * Also syncs related sheets (Training Tracking, Safety Compliance Config, etc.)
+ *
+ * @param {string} jobNumber - The job number to mark as completed (e.g., "052-25")
+ * @param {string} completionDateStr - The completion date as string (YYYY-MM-DD format)
+ * @return {Object} Result with success status and message
+ */
+function markJobCompletedFromImport(jobNumber, completionDateStr) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var jobSheet = ss.getSheetByName('Job Tracking');
+
+  if (!jobSheet) {
+    return { success: false, message: 'Job Tracking sheet not found' };
+  }
+
+  var jobData = jobSheet.getDataRange().getValues();
+  var foundRow = -1;
+
+  for (var i = 1; i < jobData.length; i++) {
+    if (String(jobData[i][0] || '').trim() === jobNumber) {
+      foundRow = i + 1;
+      break;
+    }
+  }
+
+  if (foundRow === -1) {
+    return { success: false, message: 'Job number "' + jobNumber + '" not found in Job Tracking' };
+  }
+
+  // Parse the completion date
+  var completionDate;
+  if (completionDateStr) {
+    var parts = completionDateStr.split('-');
+    completionDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+  } else {
+    completionDate = new Date();
+  }
+
+  var timestamp = new Date();
+
+  // Update the row - BOTH Status AND Actual End Date
+  jobSheet.getRange(foundRow, 7).setValue(completionDate);  // Actual End Date (column G)
+  jobSheet.getRange(foundRow, 8).setValue('Completed');     // Status (column H)
+  jobSheet.getRange(foundRow, 10).setValue(timestamp);      // Last Updated (column J)
+
+  // Add note about completion
+  var currentNotes = jobData[foundRow - 1][8] || '';
+  var completedNote = 'Marked Completed via Crew Import on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+  jobSheet.getRange(foundRow, 9).setValue(currentNotes ? currentNotes + '; ' + completedNote : completedNote);
+
+  Logger.log('markJobCompletedFromImport: Job ' + jobNumber + ' marked as Completed with date ' + completionDateStr);
+
+  // Sync related sheets
+  try {
+    // Remove future training rows for this completed job
+    var trainingDeleted = autoSyncCompletedJobToTraining(jobNumber, completionDate);
+    Logger.log('markJobCompletedFromImport: Deleted ' + trainingDeleted + ' future training rows');
+  } catch (err) {
+    Logger.log('markJobCompletedFromImport: Error syncing training: ' + err);
+  }
+
+  return {
+    success: true,
+    message: 'Job ' + jobNumber + ' marked as Completed'
+  };
+}
+
+/**
  * Gets Job Tracking data for the Crew Import dialog.
  * Returns status and dates for each job so the dialog can:
  * - Hide completed jobs from preview
@@ -717,7 +786,8 @@ function addNewEmployeeFromImport(employeeData) {
       if (header === 'job number') colIndices.jobNumber = h;
       if (header === 'job classification') colIndices.jobClassification = h;
       if (header === 'hire date') colIndices.hireDate = h;
-      if (header === 'phone number' || header === 'phone') colIndices.phoneNumber = h;
+      // Match various phone column header formats
+      if (header === 'phone number' || header === 'phone' || header === 'phone #' || header === 'cell' || header === 'cell phone') colIndices.phoneNumber = h;
       if (header === 'email address' || header === 'email') colIndices.emailAddress = h;
       if (header === 'mp email') colIndices.mpEmail = h;
       if (header === 'notification emails' || header === 'notification email') colIndices.notificationEmails = h;
@@ -725,9 +795,13 @@ function addNewEmployeeFromImport(employeeData) {
       if (header === 'sleeve size') colIndices.sleeveSize = h;
     }
 
-    if (colIndices.location === -1 || colIndices.jobNumber === -1) {
-      return { success: false, message: 'Could not find required columns in Employees sheet' };
-    }
+    // Use COLS constants as fallback if headers don't match
+    // COLS.EMPLOYEES.LOCATION = 3 (column C, 0-based index 2)
+    // COLS.EMPLOYEES.JOB_NUMBER = 4 (column D, 0-based index 3)
+    // COLS.EMPLOYEES.PHONE = 5 (column E, 0-based index 4)
+    if (colIndices.location === -1) colIndices.location = 2;
+    if (colIndices.jobNumber === -1) colIndices.jobNumber = 3;
+    if (colIndices.phoneNumber === -1) colIndices.phoneNumber = 4;
 
     // Check for duplicate name
     var nameLower = employeeData.name.toLowerCase().trim();
@@ -887,7 +961,8 @@ function rehireEmployeeFromImport(employeeData) {
       if (header === 'job number') colIndices.jobNumber = h;
       if (header === 'job classification') colIndices.jobClassification = h;
       if (header === 'hire date') colIndices.hireDate = h;
-      if (header === 'phone number' || header === 'phone') colIndices.phoneNumber = h;
+      // Match various phone column header formats
+      if (header === 'phone number' || header === 'phone' || header === 'phone #' || header === 'cell' || header === 'cell phone') colIndices.phoneNumber = h;
       if (header === 'email address' || header === 'email') colIndices.emailAddress = h;
       if (header === 'mp email') colIndices.mpEmail = h;
       if (header === 'notification emails' || header === 'notification email') colIndices.notificationEmails = h;
@@ -895,9 +970,13 @@ function rehireEmployeeFromImport(employeeData) {
       if (header === 'sleeve size') colIndices.sleeveSize = h;
     }
 
-    if (colIndices.location === -1 || colIndices.jobNumber === -1) {
-      return { success: false, message: 'Could not find required columns in Employees sheet' };
-    }
+    // Use COLS constants as fallback if headers don't match
+    // COLS.EMPLOYEES.LOCATION = 3 (column C, 0-based index 2)
+    // COLS.EMPLOYEES.JOB_NUMBER = 4 (column D, 0-based index 3)
+    // COLS.EMPLOYEES.PHONE = 5 (column E, 0-based index 4)
+    if (colIndices.location === -1) colIndices.location = 2;
+    if (colIndices.jobNumber === -1) colIndices.jobNumber = 3;
+    if (colIndices.phoneNumber === -1) colIndices.phoneNumber = 4;
 
     // Check if employee already exists on Employees sheet (should NOT for a rehire)
     var nameLower = employeeData.name.toLowerCase().trim();

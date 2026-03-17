@@ -6,6 +6,110 @@
  */
 
 /**
+/**
+/**
+/**
+ * Clears ALL background/time-based triggers that might be causing permission issues.
+ * Run this from the menu if you see PERMISSION_DENIED errors.
+ * Menu: Glove Manager → 🔧 Utilities → 🗑️ Clear Background Triggers
+ */
+function clearAllBackgroundTriggers() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var deleted = 0;
+  var kept = 0;
+
+  for (var i = 0; i < triggers.length; i++) {
+    var trigger = triggers[i];
+    var handlerName = trigger.getHandlerFunction();
+    var triggerType = trigger.getEventType();
+
+    // Delete time-based triggers (background sync triggers)
+    if (triggerType === ScriptApp.EventType.CLOCK) {
+      ScriptApp.deleteTrigger(trigger);
+      deleted++;
+      Logger.log('Deleted time-based trigger: ' + handlerName);
+    } else {
+      kept++;
+      Logger.log('Kept trigger: ' + handlerName + ' (type: ' + triggerType + ')');
+    }
+  }
+
+  // Clear any pending sync requests from ScriptProperties
+  try {
+    var props = PropertiesService.getScriptProperties();
+    props.deleteProperty('JOB_TRACKING_SYNC_PENDING');
+    Logger.log('Cleared pending sync request from ScriptProperties');
+  } catch (propErr) {
+    Logger.log('Could not clear ScriptProperties (may not have access): ' + propErr);
+  }
+
+  SpreadsheetApp.getUi().alert('✅ Background Triggers Cleared!\n\n' +
+    'Deleted: ' + deleted + ' time-based trigger(s)\n' +
+    'Kept: ' + kept + ' edit/change trigger(s)\n\n' +
+    'This should fix PERMISSION_DENIED errors from background syncs.');
+}
+
+/**
+ * Diagnoses current authorization state and shows account info.
+ * Menu: Glove Manager → 🔧 Utilities → 🔍 Diagnose Auth Issues
+ */
+function diagnoseAuthIssues() {
+  var report = [];
+
+  // Check current user
+  try {
+    var email = Session.getActiveUser().getEmail();
+    report.push('✅ Current User: ' + (email || '(Could not determine - may need re-auth)'));
+  } catch (e) {
+    report.push('❌ Could not get current user: ' + e.message);
+  }
+
+  // Check effective user (the account that owns the script)
+  try {
+    var effectiveEmail = Session.getEffectiveUser().getEmail();
+    report.push('✅ Effective User (script owner): ' + (effectiveEmail || '(unknown)'));
+  } catch (e) {
+    report.push('❌ Could not get effective user: ' + e.message);
+  }
+
+  // Check ScriptProperties access
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var testKey = 'AUTH_TEST_' + new Date().getTime();
+    props.setProperty(testKey, 'test');
+    props.deleteProperty(testKey);
+    report.push('✅ ScriptProperties: Read/Write OK');
+  } catch (e) {
+    report.push('❌ ScriptProperties ERROR: ' + e.message);
+    report.push('   → This causes PERMISSION_DENIED errors');
+  }
+
+  // List all triggers
+  try {
+    var triggers = ScriptApp.getProjectTriggers();
+    report.push('\n📋 Current Triggers (' + triggers.length + '):');
+    for (var i = 0; i < triggers.length; i++) {
+      var t = triggers[i];
+      report.push('   • ' + t.getHandlerFunction() + ' (' + t.getEventType() + ')');
+    }
+  } catch (e) {
+    report.push('❌ Could not list triggers: ' + e.message);
+  }
+
+  // Check spreadsheet access
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    report.push('\n✅ Spreadsheet: ' + ss.getName());
+    report.push('   ID: ' + ss.getId());
+  } catch (e) {
+    report.push('❌ Could not access spreadsheet: ' + e.message);
+  }
+
+  SpreadsheetApp.getUi().alert('🔍 Authorization Diagnosis\n\n' + report.join('\n'));
+  Logger.log('Auth Diagnosis:\n' + report.join('\n'));
+}
+
+/**
  * Creates installable triggers for edit detection. Run this once from the Apps Script editor.
  * Go to Run > createEditTrigger
  *
@@ -242,9 +346,37 @@ function onEditHandler(e) {
 
     Logger.log('onEditHandler fired: sheet=' + sheetName + ', row=' + editedRow + ', col=' + editedCol);
 
+    // Handle Safety Compliance sheet edits (day columns, status, weekly meeting, monthly checklist)
+    if (sheetName === 'Safety Compliance' && editedRow >= 2) {
+      // Columns: A=Week Start, B=Job Number, C=Foreman, D-J=Days (Sun-Sat), K=Weekly Meeting, L=Monthly Checklist, M=Status
+      // Editable columns: D-J (4-10) for days, K (11) for weekly meeting, L (12) for monthly checklist, M (13) for status
+      if (editedCol >= 4 && editedCol <= 13) {
+        handleSafetyComplianceEdit(e);
+      }
+      return;  // Handled - don't continue to processEdit
+    }
+
+    // Handle Safety Compliance Config sheet edits (sync schedule changes to Job Tracking)
+    if (sheetName === 'Safety Compliance Config' && editedRow >= 2) {
+      // Skip Day columns are D-J (4-10), corresponding to Skip Sun through Skip Sat
+      if (editedCol >= 4 && editedCol <= 10) {
+        handleSafetyComplianceConfigEdit(e);
+      }
+      return;  // Handled
+    }
+
     // Handle Training Tracking sheet edits (Status and Completion Date columns)
     if (sheetName === 'Training Tracking') {
       handleTrainingTrackingEdit(e);
+      return;  // Handled - don't continue to processEdit
+    }
+
+    // Handle Job Tracking sheet edits (Status or Actual End Date columns)
+    if (sheetName === 'Job Tracking' && editedRow >= 2) {
+      // Column H (8) = Status, Column G (7) = Actual End Date
+      if (editedCol === 8 || editedCol === 7) {
+        handleJobTrackingEdit(e);
+      }
       return;  // Handled - don't continue to processEdit
     }
 
@@ -575,4 +707,977 @@ function processEdit(e) {
       handleDateChangedEdit(ss, sheet, inventorySheet, editedRow, cellValue, isGloveSwaps);
     }
   }
+}
+
+// ============================================================================
+// JOB TRACKING AUTO-SYNC
+// ============================================================================
+
+/**
+ * Handles edits to the Job Tracking sheet.
+ * When Status or Actual End Date is changed, automatically syncs related sheets:
+ * - Training Tracking (removes future months for completed jobs)
+ * - Crew Visit Config (refreshes to remove non-active crews)
+ * - Safety Compliance Config (refreshes to remove non-active crews)
+ *
+ * @param {Object} e - Edit event object
+ */
+function handleJobTrackingEdit(e) {
+  try {
+    var sheet = e.range.getSheet();
+    var editedRow = e.range.getRow();
+    var editedCol = e.range.getColumn();
+    var newValue = e.range.getValue();
+    var oldValue = e.oldValue;
+
+    // Get job details from the row
+    var jobNumber = String(sheet.getRange(editedRow, 1).getValue() || '').trim();
+    var status = String(sheet.getRange(editedRow, 8).getValue() || '').trim();
+    var actualEndDate = sheet.getRange(editedRow, 7).getValue();
+
+    if (!jobNumber) {
+      Logger.log('handleJobTrackingEdit: No job number in row ' + editedRow);
+      return;
+    }
+
+    Logger.log('handleJobTrackingEdit: Job ' + jobNumber + ', col=' + editedCol + ', newValue=' + newValue + ', oldValue=' + oldValue);
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var syncActions = [];
+
+    // Check if Actual End Date was set (column 7) and Status is NOT already "Completed"
+    // This handles the case where someone sets the end date but forgets to change status
+    if (editedCol === 7 && newValue && status !== 'Completed') {
+      Logger.log('handleJobTrackingEdit: Job ' + jobNumber + ' Actual End Date set, auto-setting Status to Completed');
+      sheet.getRange(editedRow, 8).setValue('Completed');
+      status = 'Completed';
+      syncActions.push('Status auto-set to Completed');
+
+      // Sync Training Tracking - remove future training rows
+      var trainingDeletedAuto = autoSyncCompletedJobToTraining(jobNumber, newValue);
+      if (trainingDeletedAuto > 0) {
+        syncActions.push('Training: ' + trainingDeletedAuto + ' future row(s) removed');
+      }
+
+      // Sync Safety Compliance - mark remaining days as N/A
+      var safetyResult = autoSyncCompletedJobToSafetyCompliance(jobNumber, newValue);
+      if (safetyResult.weeksUpdated > 0) {
+        syncActions.push('Safety Compliance: current week updated');
+      }
+      if (safetyResult.configRemoved) {
+        syncActions.push('Safety Config: crew removed');
+      }
+
+      // Queue config sync
+      queueJobTrackingSync(jobNumber, 'Completed', oldValue);
+    }
+
+    // Check if status changed TO "Completed"
+    if (editedCol === 8 && status === 'Completed') {
+      Logger.log('handleJobTrackingEdit: Job ' + jobNumber + ' marked as Completed');
+
+      // If no Actual End Date set, set it to today
+      if (!actualEndDate || !(actualEndDate instanceof Date)) {
+        actualEndDate = new Date();
+        sheet.getRange(editedRow, 7).setValue(actualEndDate);
+        Logger.log('handleJobTrackingEdit: Auto-set Actual End Date to today');
+      }
+
+      // Sync Training Tracking - remove future training rows
+      var trainingDeleted = autoSyncCompletedJobToTraining(jobNumber, actualEndDate);
+      if (trainingDeleted > 0) {
+        syncActions.push('Training: ' + trainingDeleted + ' future row(s) removed');
+      }
+
+      // Sync Safety Compliance - mark remaining days as N/A
+      var safetyResultStatus = autoSyncCompletedJobToSafetyCompliance(jobNumber, actualEndDate);
+      if (safetyResultStatus.weeksUpdated > 0) {
+        syncActions.push('Safety Compliance: current week updated');
+      }
+      if (safetyResultStatus.configRemoved) {
+        syncActions.push('Safety Config: crew removed');
+      }
+    }
+
+    // Check if status changed FROM "Active" to something else (or TO "Active")
+    var statusChanged = (editedCol === 8 && oldValue !== newValue);
+
+    if (statusChanged) {
+      // Queue background sync for config sheets
+      // Use a delayed sync to avoid slowing down the edit
+      queueJobTrackingSync(jobNumber, status, oldValue);
+
+      if (status !== 'Active' && oldValue === 'Active') {
+        syncActions.push('Configs will be synced (job no longer active)');
+      } else if (status === 'Active' && oldValue !== 'Active') {
+        syncActions.push('Configs will be synced (job now active)');
+      }
+    }
+
+    // Show toast notification
+    if (syncActions.length > 0) {
+      ss.toast(syncActions.join('\n'), '🔄 Job Tracking Sync', 5);
+    }
+
+  } catch (err) {
+    Logger.log('Error in handleJobTrackingEdit: ' + err);
+  }
+}
+
+// ============================================================================
+// SAFETY COMPLIANCE EDIT HANDLER
+// ============================================================================
+
+/**
+ * Handles edits to the Safety Compliance sheet.
+ * When day status, weekly meeting, monthly checklist, or overall status changes,
+ * syncs to Task Metadata and updates related tasks.
+ *
+ * Columns:
+ * A (1): Week Start
+ * B (2): Job Number
+ * C (3): Foreman
+ * D-J (4-10): Sun-Sat (day columns)
+ * K (11): Weekly Meeting
+ * L (12): Monthly Checklist
+ * M (13): Status
+ * N (14): Updated
+ *
+ * Valid day values: ✅, ✅L, ❌, N/A, ⏳, (empty)
+ *
+ * @param {Object} e - Edit event object
+ */
+function handleSafetyComplianceEdit(e) {
+  try {
+    var sheet = e.range.getSheet();
+    var editedRow = e.range.getRow();
+    var editedCol = e.range.getColumn();
+    var newValue = String(e.range.getValue() || '').trim();
+    var oldValue = String(e.oldValue || '').trim();
+
+    // Get row data
+    var rowData = sheet.getRange(editedRow, 1, 1, 14).getValues()[0];
+    var weekStart = rowData[0];  // Column A
+    var jobNumber = String(rowData[1] || '').trim();  // Column B
+    var foreman = String(rowData[2] || '').trim();  // Column C
+
+    if (!weekStart || !jobNumber) {
+      Logger.log('handleSafetyComplianceEdit: Missing week start or job number, skipping');
+      return;
+    }
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var tz = Session.getScriptTimeZone();
+    var weekStartStr = '';
+
+    if (weekStart instanceof Date) {
+      weekStartStr = Utilities.formatDate(weekStart, tz, 'MM/dd/yyyy');
+    } else {
+      weekStartStr = String(weekStart);
+    }
+
+    Logger.log('handleSafetyComplianceEdit: Job=' + jobNumber + ', Week=' + weekStartStr + ', Col=' + editedCol + ', Old=' + oldValue + ', New=' + newValue);
+
+    // Determine what type of edit this is
+    var columnNames = ['', 'Week Start', 'Job Number', 'Foreman', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Weekly Meeting', 'Monthly Checklist', 'Status'];
+    var columnName = columnNames[editedCol] || 'Unknown';
+    var dayIndex = -1;  // 0=Sun, 6=Sat
+
+    if (editedCol >= 4 && editedCol <= 10) {
+      // Day column edit (Sun=4, Mon=5, Tue=6, Wed=7, Thu=8, Fri=9, Sat=10)
+      dayIndex = editedCol - 4;  // Convert to 0-6 index
+    }
+
+    // Validate the new value for day/meeting columns
+    // Allow common variants like ❌W (didn't work)
+    var validDayValues = ['✅', '✅L', '❌', '❌W', 'N/A', '⏳', ''];
+    if (editedCol >= 4 && editedCol <= 12 && validDayValues.indexOf(newValue) === -1) {
+      // Check if it might be a partial entry like "✓" for Monthly Checklist
+      if (editedCol !== 12 || !newValue.startsWith('✓')) {
+        Logger.log('handleSafetyComplianceEdit: Non-standard value "' + newValue + '" for column ' + columnName + ' - allowing it');
+        // Don't reject - just log and continue (allow flexibility)
+      }
+    }
+
+    // Update the "Updated" column (N) with timestamp
+    sheet.getRange(editedRow, 14).setValue(new Date());
+
+    // === UPDATE TOOLTIP/NOTE based on new value ===
+    var noteText = '';
+    var timestamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MM/dd/yyyy h:mm a');
+    if (newValue === '✅') {
+      noteText = 'Received on time\nUpdated: ' + timestamp;
+    } else if (newValue === '✅L') {
+      noteText = 'Received LATE (after deadline)\nUpdated: ' + timestamp;
+    } else if (newValue === '❌') {
+      noteText = 'Missing - not received\nUpdated: ' + timestamp;
+    } else if (newValue === '❌W' || newValue.toUpperCase() === 'DNW') {
+      noteText = 'Did Not Work this day\nUpdated: ' + timestamp;
+    } else if (newValue === 'N/A') {
+      noteText = 'N/A - Skipped (crew does not work this day)\nUpdated: ' + timestamp;
+    } else if (newValue === '⏳') {
+      noteText = 'Pending - not yet due\nUpdated: ' + timestamp;
+    } else if (newValue === '') {
+      noteText = '';  // Clear note for empty cells
+    }
+    // Set or clear the note on the cell
+    if (noteText) {
+      e.range.setNote(noteText);
+    } else {
+      e.range.clearNote();
+    }
+
+    // === SYNC TO TASK METADATA ===
+    var syncResult = syncSafetyComplianceToTaskMetadata(jobNumber, weekStart, editedCol, newValue, oldValue, foreman);
+
+    // === UPDATE STATUS COLUMN IF NEEDED ===
+    // Recalculate overall status based on all day values
+    if (editedCol >= 4 && editedCol <= 12) {
+      updateSafetyComplianceRowStatus(sheet, editedRow);
+    }
+
+    // Show feedback
+    var feedbackMsg = '🛡️ ' + jobNumber + ' ' + columnName;
+    if (newValue === '✅' || newValue === '✅L') {
+      feedbackMsg += ' marked received';
+    } else if (newValue === '❌') {
+      feedbackMsg += ' marked missing';
+    } else if (newValue === '❌W') {
+      feedbackMsg += ' marked Did Not Work';
+    } else if (newValue === 'N/A') {
+      feedbackMsg += ' marked N/A (skipped)';
+    } else if (newValue === '⏳') {
+      feedbackMsg += ' marked pending';
+    }
+
+    if (syncResult && syncResult.taskUpdated) {
+      feedbackMsg += '\n✅ Task Metadata synced';
+    }
+
+    ss.toast(feedbackMsg, 'Safety Compliance Updated', 3);
+
+  } catch (err) {
+    Logger.log('Error in handleSafetyComplianceEdit: ' + err);
+    SpreadsheetApp.getActiveSpreadsheet().toast('Error: ' + err, '❌ Error', 5);
+  }
+}
+
+/**
+ * Syncs a Safety Compliance edit to Task Metadata.
+ * - If changed to ✅ or ✅L: Mark the Missing Safety Report task as Complete
+ * - If changed to ❌: Create or update Missing Safety Report task
+ * - If changed to N/A or ⏳: Remove or update the task status
+ *
+ * @param {string} jobNumber - The job number
+ * @param {Date} weekStart - The week start date
+ * @param {number} editedCol - The column that was edited (4-13)
+ * @param {string} newValue - The new cell value
+ * @param {string} oldValue - The old cell value
+ * @param {string} foreman - The foreman name
+ * @return {Object} Result with taskUpdated flag
+ */
+function syncSafetyComplianceToTaskMetadata(jobNumber, weekStart, editedCol, newValue, oldValue, foreman) {
+  var result = { taskUpdated: false };
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var metadataSheet = ss.getSheetByName('Task Metadata');
+
+    if (!metadataSheet) {
+      Logger.log('syncSafetyComplianceToTaskMetadata: Task Metadata sheet not found');
+      return result;
+    }
+
+    var tz = Session.getScriptTimeZone();
+    var weekStartDate = (weekStart instanceof Date) ? weekStart : new Date(weekStart);
+    var weekStartStr = Utilities.formatDate(weekStartDate, tz, 'MM-dd-yyyy');
+
+    // Determine what type of edit (day, weekly meeting, monthly checklist, or status)
+    var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    var itemType = '';
+    var dayName = '';
+
+    if (editedCol >= 4 && editedCol <= 10) {
+      // Day column (JHA)
+      itemType = 'JHA';
+      dayName = dayNames[editedCol - 4];
+    } else if (editedCol === 11) {
+      // Weekly Meeting
+      itemType = 'Weekly Meeting';
+    } else if (editedCol === 12) {
+      // Monthly Checklist
+      itemType = 'Monthly Checklist';
+    } else if (editedCol === 13) {
+      // Status column - handled separately
+      return result;
+    }
+
+    // Build the task key pattern to search for
+    // TaskID format: SafetyCompliance_{jobNumber}_{weekStart}
+    var taskIdPattern = 'SafetyCompliance_' + jobNumber + '_' + weekStartStr;
+
+    // Search for existing task in Task Metadata
+    var metadataData = metadataSheet.getDataRange().getValues();
+    var headers = metadataData[0];
+
+    // Find column indices
+    var cols = {};
+    for (var h = 0; h < headers.length; h++) {
+      var header = String(headers[h]).toLowerCase().trim();
+      if (header === 'taskid') cols.taskId = h;
+      else if (header === 'tasktype') cols.taskType = h;
+      else if (header === 'itemtype') cols.itemType = h;
+      else if (header === 'status') cols.status = h;
+      else if (header === 'notes') cols.notes = h;
+      else if (header === 'lastupdated') cols.lastUpdated = h;
+    }
+
+    if (cols.taskId === undefined) {
+      Logger.log('syncSafetyComplianceToTaskMetadata: TaskId column not found');
+      return result;
+    }
+
+    // Find matching task row(s)
+    var foundRow = -1;
+    for (var i = 1; i < metadataData.length; i++) {
+      var rowTaskId = String(metadataData[i][cols.taskId] || '');
+      var rowItemType = String(metadataData[i][cols.itemType] || '');
+
+      // Match by TaskID pattern and ItemType
+      if (rowTaskId.indexOf(taskIdPattern) !== -1) {
+        // Check if this is the right item type
+        if (itemType === 'JHA' && (rowItemType.indexOf('JHA') !== -1 || rowItemType === 'JHA + Weekly Meeting')) {
+          foundRow = i + 1;
+          break;
+        } else if (itemType === 'Weekly Meeting' && (rowItemType.indexOf('Weekly Meeting') !== -1 || rowItemType === 'JHA + Weekly Meeting')) {
+          foundRow = i + 1;
+          break;
+        } else if (itemType === 'Monthly Checklist' && rowItemType.indexOf('Monthly') !== -1) {
+          foundRow = i + 1;
+          break;
+        }
+      }
+    }
+
+    var timestamp = new Date();
+
+    if (newValue === '✅' || newValue === '✅L') {
+      // Marked as received - mark task as Complete
+      if (foundRow !== -1) {
+        var currentStatus = String(metadataData[foundRow - 1][cols.status] || '');
+        if (currentStatus !== 'Complete') {
+          metadataSheet.getRange(foundRow, cols.status + 1).setValue('Complete');
+          var note = 'Marked complete via Safety Compliance sheet edit';
+          if (dayName) note += ' (' + dayName + ' JHA received)';
+          if (cols.notes !== undefined) {
+            metadataSheet.getRange(foundRow, cols.notes + 1).setValue(note);
+          }
+          if (cols.lastUpdated !== undefined) {
+            metadataSheet.getRange(foundRow, cols.lastUpdated + 1).setValue(timestamp);
+          }
+          result.taskUpdated = true;
+          Logger.log('syncSafetyComplianceToTaskMetadata: Marked task Complete for ' + jobNumber + ' ' + itemType);
+        }
+      }
+    } else if (newValue === '❌') {
+      // Marked as missing - create task if doesn't exist, or update to Pending
+      if (foundRow !== -1) {
+        // Update existing task to Pending
+        var currentStatus = String(metadataData[foundRow - 1][cols.status] || '');
+        if (currentStatus === 'Complete') {
+          metadataSheet.getRange(foundRow, cols.status + 1).setValue('Pending');
+          var note = 'Reverted to Pending via Safety Compliance sheet edit';
+          if (dayName) note += ' (' + dayName + ' marked missing)';
+          if (cols.notes !== undefined) {
+            metadataSheet.getRange(foundRow, cols.notes + 1).setValue(note);
+          }
+          if (cols.lastUpdated !== undefined) {
+            metadataSheet.getRange(foundRow, cols.lastUpdated + 1).setValue(timestamp);
+          }
+          result.taskUpdated = true;
+          Logger.log('syncSafetyComplianceToTaskMetadata: Reverted task to Pending for ' + jobNumber + ' ' + itemType);
+        }
+      } else {
+        // No task exists - create one
+        var createResult = createMissingSafetyReportTask(jobNumber, weekStartDate, itemType, dayName, foreman);
+        if (createResult && createResult.created) {
+          result.taskUpdated = true;
+          Logger.log('syncSafetyComplianceToTaskMetadata: Created new task for ' + jobNumber + ' ' + itemType);
+        }
+      }
+    } else if (newValue === 'N/A' || newValue === '⏳') {
+      // Marked as N/A (skipped) or pending - remove task or set to special status
+      if (foundRow !== -1) {
+        if (newValue === 'N/A') {
+          // Mark task as Complete with special note (day was skipped)
+          metadataSheet.getRange(foundRow, cols.status + 1).setValue('Complete');
+          var note = 'Marked N/A (day skipped) via Safety Compliance sheet edit';
+          if (cols.notes !== undefined) {
+            metadataSheet.getRange(foundRow, cols.notes + 1).setValue(note);
+          }
+        } else {
+          // ⏳ - Just update note, keep as Pending
+          var note = 'Pending - not yet due';
+          if (cols.notes !== undefined) {
+            metadataSheet.getRange(foundRow, cols.notes + 1).setValue(note);
+          }
+        }
+        if (cols.lastUpdated !== undefined) {
+          metadataSheet.getRange(foundRow, cols.lastUpdated + 1).setValue(timestamp);
+        }
+        result.taskUpdated = true;
+      }
+    }
+
+    return result;
+
+  } catch (err) {
+    Logger.log('Error in syncSafetyComplianceToTaskMetadata: ' + err);
+    return result;
+  }
+}
+
+/**
+ * Creates a Missing Safety Report task in Task Metadata.
+ *
+ * @param {string} jobNumber - The job number
+ * @param {Date} weekStart - The week start date
+ * @param {string} itemType - The type (JHA, Weekly Meeting, Monthly Checklist)
+ * @param {string} dayName - The day name for JHAs (Mon, Tue, etc.)
+ * @param {string} foreman - The foreman name
+ * @return {Object} Result with created flag
+ */
+function createMissingSafetyReportTask(jobNumber, weekStart, itemType, dayName, foreman) {
+  var result = { created: false };
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var metadataSheet = ss.getSheetByName('Task Metadata');
+
+    if (!metadataSheet) return result;
+
+    var tz = Session.getScriptTimeZone();
+    var weekStartStr = Utilities.formatDate(weekStart, tz, 'MM-dd-yyyy');
+    var taskId = 'SafetyCompliance_' + jobNumber + '_' + weekStartStr;
+
+    // Get headers to determine column positions
+    var headers = metadataSheet.getRange(1, 1, 1, metadataSheet.getLastColumn()).getValues()[0];
+    var colMap = {};
+    for (var h = 0; h < headers.length; h++) {
+      colMap[String(headers[h]).toLowerCase().trim()] = h;
+    }
+
+    var timestamp = new Date();
+    var itemTypeStr = itemType;
+    if (itemType === 'JHA' && dayName) {
+      itemTypeStr = 'JHA (' + dayName + ')';
+    }
+
+    // Build new row data
+    var newRow = [];
+    for (var c = 0; c < headers.length; c++) {
+      var colName = String(headers[c]).toLowerCase().trim();
+      switch (colName) {
+        case 'taskid': newRow.push(taskId); break;
+        case 'tasktype': newRow.push('Missing Safety Report'); break;
+        case 'itemtype': newRow.push(itemTypeStr); break;
+        case 'employee': newRow.push(foreman || ''); break;
+        case 'location': newRow.push(jobNumber); break;  // Use job number as location
+        case 'sourcesheet': newRow.push('Safety Compliance'); break;
+        case 'sourcerowindex': newRow.push(0); break;
+        case 'status': newRow.push('Pending'); break;
+        case 'duedate': newRow.push(weekStart); break;
+        case 'scheduleddate': newRow.push(''); break;
+        case 'notes': newRow.push('Created via Safety Compliance sheet edit'); break;
+        case 'createdat':
+        case 'lastupdated': newRow.push(timestamp); break;
+        default: newRow.push(''); break;
+      }
+    }
+
+    // Add the row
+    metadataSheet.appendRow(newRow);
+    result.created = true;
+
+    Logger.log('createMissingSafetyReportTask: Created task for ' + jobNumber + ' ' + itemTypeStr);
+    return result;
+
+  } catch (err) {
+    Logger.log('Error in createMissingSafetyReportTask: ' + err);
+    return result;
+  }
+}
+
+/**
+ * Updates the Status column (M) of a Safety Compliance row based on all day/meeting values.
+ *
+ * Status determination:
+ * - "Complete" if all non-N/A days have ✅ or ✅L AND weekly meeting has ✅ or ✅L
+ * - "Missing Reports" if any required day has ❌
+ * - "Pending" if any required day has ⏳
+ *
+ * @param {Sheet} sheet - The Safety Compliance sheet
+ * @param {number} row - The row number to update
+ */
+function updateSafetyComplianceRowStatus(sheet, row) {
+  try {
+    var rowData = sheet.getRange(row, 1, 1, 13).getValues()[0];
+
+    // Day columns D-J (indices 3-9), Weekly Meeting K (index 10)
+    var dayValues = [];
+    for (var d = 3; d <= 9; d++) {
+      dayValues.push(String(rowData[d] || '').trim());
+    }
+    var weeklyMeeting = String(rowData[10] || '').trim();
+    var monthlyChecklist = String(rowData[11] || '').trim();
+
+    var hasMissing = false;
+    var hasPending = false;
+    var allComplete = true;
+
+    // Check day values
+    for (var i = 0; i < dayValues.length; i++) {
+      var val = dayValues[i];
+      if (val === 'N/A' || val === '') continue;  // Skip N/A and empty
+
+      if (val === '❌') {
+        hasMissing = true;
+        allComplete = false;
+      } else if (val === '⏳') {
+        hasPending = true;
+        allComplete = false;
+      } else if (val !== '✅' && val !== '✅L') {
+        allComplete = false;
+      }
+    }
+
+    // Check weekly meeting
+    if (weeklyMeeting !== 'N/A' && weeklyMeeting !== '') {
+      if (weeklyMeeting === '❌') {
+        hasMissing = true;
+        allComplete = false;
+      } else if (weeklyMeeting === '⏳') {
+        hasPending = true;
+        allComplete = false;
+      } else if (weeklyMeeting !== '✅' && weeklyMeeting !== '✅L') {
+        allComplete = false;
+      }
+    }
+
+    // Check monthly checklist (different logic - may have date suffix)
+    if (monthlyChecklist !== 'N/A' && monthlyChecklist !== '') {
+      // ⏳ or ⚠️ or ❌⏳ means still pending
+      if (monthlyChecklist === '❌') {
+        hasMissing = true;
+        allComplete = false;
+      } else if (monthlyChecklist === '⏳' || monthlyChecklist === '⚠️' || monthlyChecklist === '❌⏳') {
+        hasPending = true;
+        allComplete = false;
+      } else if (!monthlyChecklist.startsWith('✅') && !monthlyChecklist.startsWith('✓')) {
+        allComplete = false;
+      }
+    }
+
+    // Determine new status
+    var newStatus = 'Complete';
+    if (hasMissing) {
+      newStatus = 'Missing Reports';
+    } else if (hasPending) {
+      newStatus = 'Pending';
+    } else if (!allComplete) {
+      newStatus = 'Pending';
+    }
+
+    // Only update if different from current
+    var currentStatus = String(rowData[12] || '').trim();
+    if (currentStatus !== newStatus && currentStatus !== 'Resolved') {
+      // Don't change Resolved status
+      sheet.getRange(row, 13).setValue(newStatus);
+      Logger.log('updateSafetyComplianceRowStatus: Updated row ' + row + ' status from "' + currentStatus + '" to "' + newStatus + '"');
+    }
+
+  } catch (err) {
+    Logger.log('Error in updateSafetyComplianceRowStatus: ' + err);
+  }
+}
+
+/**
+ * Handles edits to the Safety Compliance Config sheet.
+ * When skip day settings are changed, syncs to Job Tracking schedule history.
+ *
+ * Config columns:
+ * A (1): Job Number
+ * B (2): Foreman
+ * C (3): Notes
+ * D-J (4-10): Skip Sun, Skip Mon, ... Skip Sat (checkboxes)
+ * K (11): Skip Weekly Meeting
+ * L (12): Skip Monthly Checklist
+ *
+ * @param {Object} e - Edit event object
+ */
+function handleSafetyComplianceConfigEdit(e) {
+  try {
+    var sheet = e.range.getSheet();
+    var editedRow = e.range.getRow();
+
+    // Get the job number from column A
+    var jobNumber = String(sheet.getRange(editedRow, 1).getValue() || '').trim();
+
+    if (!jobNumber || !/^\d{3}-\d{2}$/.test(jobNumber)) {
+      Logger.log('handleSafetyComplianceConfigEdit: Invalid job number, skipping');
+      return;
+    }
+
+    // Get all skip day values for this row
+    var skipValues = sheet.getRange(editedRow, 4, 1, 7).getValues()[0];  // D-J = Skip Sun through Skip Sat
+
+    var skipDays = [];
+    var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+    for (var d = 0; d < 7; d++) {
+      if (skipValues[d] === true) {
+        skipDays.push(dayNames[d]);
+      }
+    }
+
+    var skipDaysStr = skipDays.join(',');
+    var schedule = determineScheduleType(skipDaysStr);
+
+    Logger.log('handleSafetyComplianceConfigEdit: Job ' + jobNumber + ' schedule changed to ' + schedule + ' (skip: ' + skipDaysStr + ')');
+
+    // Sync to Job Tracking (if schedule columns exist)
+    var result = updateCrewScheduleInJobTracking(jobNumber, schedule, skipDaysStr);
+
+    if (result) {
+      SpreadsheetApp.getActiveSpreadsheet().toast(
+        'Schedule updated for ' + jobNumber + ': ' + schedule,
+        '📅 Schedule Synced',
+        3
+      );
+    }
+
+  } catch (err) {
+    Logger.log('Error in handleSafetyComplianceConfigEdit: ' + err);
+  }
+}
+
+/**
+ * Queues a background sync for config sheets when Job Tracking status changes.
+ * Stores the sync request in ScriptProperties and creates a time-based trigger
+ * to run the sync in a few seconds (avoids slowing down the edit).
+ *
+ * @param {string} jobNumber - The job number that changed
+ * @param {string} newStatus - The new status value
+ * @param {string} oldStatus - The previous status value
+ */
+function queueJobTrackingSync(jobNumber, newStatus, oldStatus) {
+  try {
+    // Store sync request (optional - sync will run anyway)
+    var syncRequest = {
+      jobNumber: jobNumber,
+      newStatus: newStatus,
+      oldStatus: oldStatus,
+      timestamp: new Date().toISOString()
+    };
+
+    try {
+      PropertiesService.getScriptProperties().setProperty('JOB_TRACKING_SYNC_PENDING', JSON.stringify(syncRequest));
+    } catch (propErr) {
+      // ScriptProperties access can fail - continue anyway since the trigger will run
+      Logger.log('queueJobTrackingSync: ScriptProperties not accessible: ' + propErr);
+    }
+
+    // Check if a sync trigger already exists
+    var triggers = ScriptApp.getProjectTriggers();
+    var syncTriggerExists = false;
+
+    for (var i = 0; i < triggers.length; i++) {
+      if (triggers[i].getHandlerFunction() === 'runJobTrackingSyncBackground') {
+        syncTriggerExists = true;
+        break;
+      }
+    }
+
+    // Create a one-time trigger to run the sync in 5 seconds
+    if (!syncTriggerExists) {
+      ScriptApp.newTrigger('runJobTrackingSyncBackground')
+        .timeBased()
+        .after(5000) // 5 seconds
+        .create();
+      Logger.log('queueJobTrackingSync: Created background sync trigger');
+    }
+
+  } catch (err) {
+    Logger.log('Error in queueJobTrackingSync: ' + err);
+    // Fall back to immediate sync if queueing fails
+    runJobTrackingConfigSync();
+  }
+}
+
+/**
+ * Background trigger function that runs the config sync.
+ * Called by the time-based trigger created in queueJobTrackingSync().
+ */
+function runJobTrackingSyncBackground() {
+  try {
+    // Delete this trigger (one-time use)
+    var triggers = ScriptApp.getProjectTriggers();
+    for (var i = 0; i < triggers.length; i++) {
+      if (triggers[i].getHandlerFunction() === 'runJobTrackingSyncBackground') {
+        ScriptApp.deleteTrigger(triggers[i]);
+      }
+    }
+
+    // Try to check for pending sync request - but handle permission errors gracefully
+    var pendingJson = null;
+    try {
+      var props = PropertiesService.getScriptProperties();
+      pendingJson = props.getProperty('JOB_TRACKING_SYNC_PENDING');
+
+      if (pendingJson) {
+        // Clear the pending request
+        props.deleteProperty('JOB_TRACKING_SYNC_PENDING');
+        var syncRequest = JSON.parse(pendingJson);
+        Logger.log('runJobTrackingSyncBackground: Processing sync for job ' + syncRequest.jobNumber);
+      }
+    } catch (propErr) {
+      // ScriptProperties access can fail with PERMISSION_DENIED in background triggers
+      // This is expected - just run the sync anyway since we know it was queued
+      Logger.log('runJobTrackingSyncBackground: ScriptProperties not accessible (expected in background): ' + propErr);
+    }
+
+    // Run the actual sync regardless - if the trigger exists, we queued it for a reason
+    runJobTrackingConfigSync();
+
+  } catch (err) {
+    Logger.log('Error in runJobTrackingSyncBackground: ' + err);
+  }
+}
+
+/**
+ * Silently syncs all config sheets based on current Job Tracking data.
+ * Called after Job Tracking status changes to keep configs in sync.
+ *
+ * This function:
+ * 1. Refreshes Crew Visit Config (removes non-active crews)
+ * 2. Refreshes Safety Compliance Config (removes non-active crews)
+ * 3. Does NOT rebuild Training Tracking (that's handled separately by autoSyncCompletedJobToTraining)
+ */
+function runJobTrackingConfigSync() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var results = [];
+
+  Logger.log('runJobTrackingConfigSync: Starting config sync');
+
+  // 1. Sync Crew Visit Config (if it exists)
+  var crewVisitResult = syncCrewVisitConfigSilent();
+  if (crewVisitResult.changed) {
+    results.push('Crew Visit: ' + crewVisitResult.removed + ' removed, ' + crewVisitResult.added + ' added');
+  }
+
+  // 2. Sync Safety Compliance Config (if it exists)
+  var safetyConfigResult = syncSafetyComplianceConfigSilent();
+  if (safetyConfigResult.changed) {
+    results.push('Safety Config: ' + safetyConfigResult.removed + ' removed, ' + safetyConfigResult.added + ' added');
+  }
+
+  if (results.length > 0) {
+    Logger.log('runJobTrackingConfigSync: ' + results.join('; '));
+    ss.toast(results.join('\n'), '🔄 Config Sync Complete', 5);
+  } else {
+    Logger.log('runJobTrackingConfigSync: No changes needed');
+  }
+}
+
+/**
+ * Silently syncs Crew Visit Config - removes non-active crews, adds new active crews.
+ * Does not show UI alerts.
+ *
+ * @returns {Object} {changed: boolean, removed: number, added: number}
+ */
+function syncCrewVisitConfigSilent() {
+  var result = { changed: false, removed: 0, added: 0 };
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('Crew Visit Config');
+
+    if (!sheet || sheet.getLastRow() < 2) {
+      Logger.log('syncCrewVisitConfigSilent: Sheet not found or empty');
+      return result;
+    }
+
+    // Get active crews (filtered by Job Tracking)
+    var activeCrews = getActiveCrews();
+    var activeCrewSet = {};
+    for (var i = 0; i < activeCrews.length; i++) {
+      activeCrewSet[activeCrews[i]] = true;
+    }
+
+    // Get existing data
+    var data = sheet.getDataRange().getValues();
+    var headers = data[0];
+
+    // Find rows to remove (work backwards)
+    var rowsToRemove = [];
+    var existingCrews = {};
+
+    for (var r = 1; r < data.length; r++) {
+      var jobNum = String(data[r][0] || '').trim();
+      if (!jobNum) continue;
+
+      existingCrews[jobNum] = true;
+
+      if (!activeCrewSet[jobNum]) {
+        rowsToRemove.push(r + 1); // 1-indexed
+        result.removed++;
+      }
+    }
+
+    // Delete rows from bottom to top
+    rowsToRemove.sort(function(a, b) { return b - a; });
+    for (var d = 0; d < rowsToRemove.length; d++) {
+      sheet.deleteRow(rowsToRemove[d]);
+    }
+
+    // Check for new crews to add
+    var crewsToAdd = [];
+    for (var c = 0; c < activeCrews.length; c++) {
+      if (!existingCrews[activeCrews[c]]) {
+        crewsToAdd.push(activeCrews[c]);
+        result.added++;
+      }
+    }
+
+    // Add new crews (simplified - just job number and defaults)
+    if (crewsToAdd.length > 0) {
+      var lastRow = sheet.getLastRow();
+      for (var a = 0; a < crewsToAdd.length; a++) {
+        var crewNum = crewsToAdd[a];
+        var lead = getCrewLead(crewNum);
+        var location = getCrewLocation(crewNum);
+        var size = getCrewSize(crewNum);
+
+        sheet.appendRow([
+          crewNum,
+          location || '',
+          lead ? lead.name : '',
+          size,
+          'Monthly',
+          15 + (size * 5),  // Estimated time
+          new Date(),       // Last visit (today as placeholder)
+          '',               // Next visit
+          0,                // Drive time
+          'Medium',         // Priority
+          'Auto-added ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MM/dd/yyyy')
+        ]);
+      }
+    }
+
+    result.changed = (result.removed > 0 || result.added > 0);
+    Logger.log('syncCrewVisitConfigSilent: removed=' + result.removed + ', added=' + result.added);
+
+  } catch (err) {
+    Logger.log('Error in syncCrewVisitConfigSilent: ' + err);
+  }
+
+  return result;
+}
+
+/**
+ * Silently syncs Safety Compliance Config - removes non-active crews, adds new active crews.
+ * Does not show UI alerts.
+ *
+ * @returns {Object} {changed: boolean, removed: number, added: number}
+ */
+function syncSafetyComplianceConfigSilent() {
+  var result = { changed: false, removed: 0, added: 0 };
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('Safety Compliance Config');
+
+    if (!sheet || sheet.getLastRow() < 2) {
+      Logger.log('syncSafetyComplianceConfigSilent: Sheet not found or empty');
+      return result;
+    }
+
+    // Get active crews (filtered by Job Tracking)
+    var activeCrews = getActiveCrews();
+    var activeCrewSet = {};
+    for (var i = 0; i < activeCrews.length; i++) {
+      activeCrewSet[activeCrews[i]] = true;
+    }
+
+    // Get existing data
+    var data = sheet.getDataRange().getValues();
+
+    // Find rows to remove (work backwards)
+    var rowsToRemove = [];
+    var existingCrews = {};
+
+    for (var r = 1; r < data.length; r++) {
+      var jobNum = String(data[r][0] || '').trim();
+      if (!jobNum) continue;
+
+      existingCrews[jobNum] = true;
+
+      if (!activeCrewSet[jobNum]) {
+        rowsToRemove.push(r + 1); // 1-indexed
+        result.removed++;
+      }
+    }
+
+    // Delete rows from bottom to top
+    rowsToRemove.sort(function(a, b) { return b - a; });
+    for (var d = 0; d < rowsToRemove.length; d++) {
+      sheet.deleteRow(rowsToRemove[d]);
+    }
+
+    // Check for new crews to add
+    var crewsToAdd = [];
+    for (var c = 0; c < activeCrews.length; c++) {
+      if (!existingCrews[activeCrews[c]]) {
+        crewsToAdd.push(activeCrews[c]);
+        result.added++;
+      }
+    }
+
+    // Add new crews with default settings
+    if (crewsToAdd.length > 0) {
+      var newRows = [];
+      for (var a = 0; a < crewsToAdd.length; a++) {
+        var crewNum = crewsToAdd[a];
+        var foreman = lookupForemanByJobNumber(crewNum);
+        var foremanName = (foreman && foreman.name) ? foreman.name : '';
+
+        // Default: Skip Sun and Sat (weekends)
+        newRows.push([
+          crewNum, foremanName,
+          true, false, false, false, false, false, true, // Sun=skip, Sat=skip
+          false, false, 'Auto-added ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MM/dd/yyyy')
+        ]);
+      }
+
+      var lastRow = sheet.getLastRow();
+      sheet.getRange(lastRow + 1, 1, newRows.length, 12).setValues(newRows);
+
+      // Add checkboxes for the new rows (columns C-K = 3-11)
+      var checkboxRange = sheet.getRange(lastRow + 1, 3, newRows.length, 9);
+      checkboxRange.insertCheckboxes();
+    }
+
+    // Sort by job number
+    if (sheet.getLastRow() > 1 && (result.removed > 0 || result.added > 0)) {
+      sheet.getRange(2, 1, sheet.getLastRow() - 1, 12).sort(1);
+    }
+
+    result.changed = (result.removed > 0 || result.added > 0);
+    Logger.log('syncSafetyComplianceConfigSilent: removed=' + result.removed + ', added=' + result.added);
+
+  } catch (err) {
+    Logger.log('Error in syncSafetyComplianceConfigSilent: ' + err);
+  }
+
+  return result;
 }

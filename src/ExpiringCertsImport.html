@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -54,13 +55,37 @@
       </button>
     </div>
   </div>
+  <!-- Import Options -->
+  <!-- Import Options -->
+  <div class="config-section">
+    <h3><i class="bi bi-sliders"></i> 📋 Import Options</h3>
+    <div class="form-check mb-3">
+      <input class="form-check-input" type="checkbox" id="preserveNewerDates" checked>
+      <label class="form-check-label" for="preserveNewerDates">
+        <strong>🔒 Preserve newer expiration dates</strong>
+        <span class="text-muted d-block small">If Google Sheets has a newer expiration date than Excel, keep the Google Sheets date.</span>
+      </label>
+    </div>
+  </div>
+
 
   <!-- Cert Type Checkboxes -->
   <div class="config-section">
     <h3><i class="bi bi-list-check"></i> 🎯 Create To Do Tasks For:</h3>
     <p class="text-muted small mb-3">Select which certification types should generate tasks in your To Do list when expiring soon or marked as priority.</p>
-    <div class="cert-checkboxes" id="certCheckboxes">
-      <!-- Will be populated by JavaScript -->
+
+    <div class="form-check mb-3" style="background: #fff3cd; padding: 10px; border-radius: 6px;">
+      <input class="form-check-input" type="checkbox" id="skipTaskGeneration">
+      <label class="form-check-label" for="skipTaskGeneration">
+        <strong>⏭️ Skip task generation</strong>
+        <span class="text-muted d-block small">Don't create any Manual Tasks - only update the Expiring Certs sheet.</span>
+      </label>
+    </div>
+
+    <div id="certCheckboxWrapper">
+      <div class="cert-checkboxes" id="certCheckboxes">
+        <!-- Will be populated by JavaScript -->
+      </div>
     </div>
   </div>
 
@@ -210,6 +235,18 @@
 
       // Setup drag and drop
       setupDragAndDrop();
+
+      // Setup skip task generation toggle
+      var skipCheckbox = document.getElementById('skipTaskGeneration');
+      if (skipCheckbox) {
+        skipCheckbox.addEventListener('change', function() {
+          var wrapper = document.getElementById('certCheckboxWrapper');
+          if (wrapper) {
+            wrapper.style.opacity = this.checked ? '0.5' : '1';
+            wrapper.style.pointerEvents = this.checked ? 'none' : 'auto';
+          }
+        });
+      }
     }
 
     // ================== IMPORT METHOD SWITCHING ==================
@@ -948,10 +985,20 @@
       }
 
       var selectedCerts = getSelectedCertTypes();
+      var preserveNewerDates = document.getElementById('preserveNewerDates').checked;
+      var skipTaskGeneration = document.getElementById('skipTaskGeneration').checked;
 
-      if (confirm('This will replace all existing certification data. Continue?')) {
+      var confirmMsg = preserveNewerDates
+        ? 'This will import certification data.\n\n🔒 Newer dates in Google Sheets will be preserved.\n\nContinue?'
+        : 'This will replace ALL existing certification data.\n\n⚠️ Warning: Any newer dates in Google Sheets will be OVERWRITTEN!\n\nContinue?';
+
+      if (confirm(confirmMsg)) {
         document.getElementById('btnConfirmImport').disabled = true;
         document.getElementById('btnConfirmImport').innerHTML = '<span class="spinner-border spinner-border-sm"></span> Importing...';
+
+        // Add the flags to parsedData
+        parsedData.preserveNewerDates = preserveNewerDates;
+        parsedData.skipTaskGeneration = skipTaskGeneration;
 
         google.script.run
           .withSuccessHandler(function(result) {

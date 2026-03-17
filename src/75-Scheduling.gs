@@ -252,6 +252,35 @@ function isExcludedJobPrefix(jobNumber) {
   return false;
 }
 
+/**
+ * API function for ToDoConfig.html - Gets excluded job prefixes.
+ * Called by google.script.run.getExcludedJobPrefixes()
+ *
+ * @return {Array} Array of excluded job prefixes (e.g., ['002', '005'])
+ */
+function getExcludedJobPrefixes() {
+  return getExcludedJobPrefixesInternal();
+}
+
+/**
+ * API function for ToDoConfig.html - Saves excluded job prefixes.
+ * Called by google.script.run.saveExcludedJobPrefixes(prefixes)
+ *
+ * @param {Array} prefixes - Array of job prefixes to exclude (e.g., ['002', '005'])
+ * @return {boolean} True if saved successfully
+ */
+function saveExcludedJobPrefixes(prefixes) {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    props.setProperty('excludedJobPrefixes', JSON.stringify(prefixes || []));
+    Logger.log('saveExcludedJobPrefixes: Saved prefixes: ' + JSON.stringify(prefixes));
+    return true;
+  } catch (e) {
+    Logger.log('saveExcludedJobPrefixes: Error: ' + e);
+    throw new Error('Failed to save excluded job prefixes: ' + e.message);
+  }
+}
+
 // ============================================================================
 // CREW EXTRACTION FUNCTIONS
 // ============================================================================
@@ -260,6 +289,9 @@ function isExcludedJobPrefix(jobNumber) {
  * Extracts unique crew numbers from Employees sheet.
  * Converts job numbers like "009-26.1" → "009-26" (removes employee suffix).
  * Excludes employees with job prefixes in the exclusion list (002, 005, etc.).
+ *
+ * If Job Tracking sheet exists, ONLY returns crews with "Active" status.
+ * Jobs with Completed, Pending Start, or On Hold status are excluded.
  *
  * @return {Array} Array of unique crew numbers sorted
  */
@@ -321,7 +353,149 @@ function getActiveCrews() {
 
   // Convert to sorted array
   var crews = Object.keys(crewSet).sort();
+
+  // If Job Tracking sheet exists, filter to only include "Active" status jobs
+  var jobTrackingSheet = ss.getSheetByName('Job Tracking');
+  if (jobTrackingSheet && jobTrackingSheet.getLastRow() > 1) {
+    var activeJobsFromTracking = getActiveJobsFromTrackingSheet(jobTrackingSheet);
+
+    // Filter crews to only include those that are Active in Job Tracking
+    // If a crew exists in Employees but NOT in Job Tracking, include it (backwards compatibility)
+    // If a crew exists in Job Tracking with non-Active status, exclude it
+    var filteredCrews = [];
+    for (var c = 0; c < crews.length; c++) {
+      var crew = crews[c];
+      if (activeJobsFromTracking.activeJobs[crew] === true) {
+        // Explicitly marked as Active in Job Tracking
+        filteredCrews.push(crew);
+      } else if (activeJobsFromTracking.allJobs[crew] === undefined) {
+        // Not in Job Tracking at all - include for backwards compatibility
+        filteredCrews.push(crew);
+      }
+      // If in Job Tracking but NOT active, exclude it
+    }
+
+    Logger.log('getActiveCrews: Filtered from ' + crews.length + ' to ' + filteredCrews.length + ' crews based on Job Tracking status');
+    return filteredCrews;
+  }
+
   return crews;
+}
+
+/**
+ * Helper function to get active jobs from Job Tracking sheet.
+ * Returns both the set of active jobs and the set of all jobs for filtering.
+ *
+ * @param {Sheet} jobTrackingSheet - The Job Tracking sheet
+ * @return {Object} { activeJobs: {job: true}, allJobs: {job: true} }
+ */
+function getActiveJobsFromTrackingSheet(jobTrackingSheet) {
+  var result = {
+    activeJobs: {},
+    allJobs: {}
+  };
+
+  var data = jobTrackingSheet.getDataRange().getValues();
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  for (var i = 1; i < data.length; i++) {
+    var jobNum = String(data[i][0] || '').trim();
+    var startDate = data[i][4];
+    var status = String(data[i][7] || '').trim();
+
+    if (!jobNum) continue;
+
+    // Track all jobs in the sheet
+    result.allJobs[jobNum] = true;
+
+    // Only add to activeJobs if status is Active AND start date has passed
+    if (status === 'Active') {
+      // If start date exists and is in the future, don't count as active yet
+      if (startDate instanceof Date && startDate > today) {
+        continue;
+      }
+      result.activeJobs[jobNum] = true;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Gets start dates from Job Tracking sheet for all jobs.
+ * Used to filter crews from compliance tracking if the job hadn't started yet during a specific week.
+ *
+ * @return {Object} { jobNumber: startDate, ... } - Maps job numbers to their start dates
+ */
+function getJobTrackingStartDates() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var jobTrackingSheet = ss.getSheetByName('Job Tracking');
+
+  if (!jobTrackingSheet || jobTrackingSheet.getLastRow() < 2) {
+    return {};
+  }
+
+  var data = jobTrackingSheet.getDataRange().getValues();
+  var result = {};
+
+  // Columns: A=Job Number (0), E=Start Date (4), H=Status (7)
+  for (var i = 1; i < data.length; i++) {
+    var jobNum = String(data[i][0] || '').trim();
+    var startDate = data[i][4];
+
+    if (!jobNum) continue;
+
+    // Only store if there's a valid start date
+    if (startDate instanceof Date && !isNaN(startDate.getTime())) {
+      result[jobNum] = startDate;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Filters a list of crews to only include those that were active during a specific week.
+ * A crew is considered active during a week if:
+ *   1. The job is NOT in Job Tracking (backwards compatibility) OR
+ *   2. The job's start date is ON or BEFORE the week's END date
+ *
+ * @param {Array} crews - Array of crew numbers to filter
+ * @param {Date} weekEndDate - The end date of the week being calculated
+ * @return {Object} { filteredCrews: Array, excludedCrews: Array }
+ */
+function filterCrewsByJobTrackingStartDate(crews, weekEndDate) {
+  var startDates = getJobTrackingStartDates();
+  var weekEnd = new Date(weekEndDate);
+  weekEnd.setHours(23, 59, 59, 999);
+
+  var filteredCrews = [];
+  var excludedCrews = [];
+
+  for (var i = 0; i < crews.length; i++) {
+    var crew = crews[i];
+    var startDate = startDates[crew];
+
+    if (!startDate) {
+      // Not in Job Tracking - include for backwards compatibility
+      filteredCrews.push(crew);
+    } else if (startDate <= weekEnd) {
+      // Job had started by the end of this week
+      filteredCrews.push(crew);
+    } else {
+      // Job hadn't started yet during this week - exclude
+      excludedCrews.push(crew);
+      Logger.log("filterCrewsByJobTrackingStartDate: Excluding " + crew + " - start date " +
+                 Utilities.formatDate(startDate, Session.getScriptTimeZone(), 'MM/dd/yyyy') +
+                 " is after week end " + Utilities.formatDate(weekEnd, Session.getScriptTimeZone(), 'MM/dd/yyyy'));
+    }
+  }
+
+  return {
+    filteredCrews: filteredCrews,
+    excludedCrews: excludedCrews
+  };
 }
 
 /**

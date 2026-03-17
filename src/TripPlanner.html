@@ -1730,8 +1730,9 @@
       card.dataset.dayIndex = dayIndex;
       card.dataset.dateKey = day.dateKey;
 
-      if (day.isTuesday) card.classList.add('is-tuesday');
-      if (day.isFriday) card.classList.add('is-friday');
+      // Add class for "must return" day (was hardcoded to Tuesday, now uses flag)
+      if (day.mustReturnToHelena) card.classList.add('is-tuesday');
+      if (day.avoidIfPossible) card.classList.add('is-friday');
       if (day.overtimeApproved) card.classList.add('overtime-approved');
 
       // Header
@@ -1749,10 +1750,10 @@
       const badges = document.createElement('div');
       badges.className = 'day-badges';
 
-      if (day.isTuesday) {
+      if (day.mustReturnToHelena) {
         badges.innerHTML += '<span class="badge badge-tuesday">Must Return</span>';
       }
-      if (day.isFriday) {
+      if (day.avoidIfPossible) {
         badges.innerHTML += '<span class="badge badge-friday">Avoid</span>';
       }
       if (day.overnightCity) {
@@ -1889,12 +1890,13 @@
       var endHtml = '';
 
       if (mustReturn) {
-        // Tuesday - forced to end in Helena
+        // This is the designated "must return" day for the current schedule
+        var mustReturnDayName = day.mustReturnDayName || day.dayName;
         endHtml = '<span class="end-icon">🏁</span> End at: ' +
           '<select class="end-location-select" disabled>' +
           '<option value="Helena" selected>Helena</option>' +
           '</select>' +
-          '<span class="tuesday-note">Tuesday - must return to Helena</span>';
+          '<span class="tuesday-note">' + mustReturnDayName + ' - must return to Helena</span>';
       } else {
         // Check if staying overnight (end location is not Helena)
         var overnightChecked = stayOvernight && endLocation !== 'Helena';
@@ -2103,9 +2105,11 @@
             taskType: task.taskType || task.type,
             employee: task.employee,
             itemType: task.itemType,
+            certType: task.certType,             // Cert type for Cert Expiring tasks
             location: task.location,
             urgencyLabel: task.urgencyLabel,
             dueDate: task.dueDate,
+            phoneNumber: task.phoneNumber,       // Phone number for contact
             // Additional detail fields
             topic: task.topic,                   // Training topic
             month: task.month,                   // Training month
@@ -2164,23 +2168,31 @@
           var taskTitle = task.taskType || task.itemType || 'Task';
           var taskSubtitle = '';
 
-          if ((task.taskType === 'Cert Expiring' || (task.taskType && task.taskType.indexOf('Cert') !== -1)) && task.itemType) {
+          if ((task.taskType === 'Cert Expiring' || (task.taskType && task.taskType.indexOf('Cert') !== -1)) && (task.certType || task.itemType)) {
             // Cert task - show "Renew [CertType]"
-            taskTitle = 'Renew ' + task.itemType;
+            taskTitle = '🎓 Renew ' + (task.certType || task.itemType);
           } else if (task.taskType === 'Training' || task.type === 'Training') {
             // Training task - show the topic (e.g., "Training: Job Briefings/ JHA's/ Emergency Action Plans")
             if (task.topic) {
-              taskTitle = 'Training: ' + task.topic;
+              taskTitle = '📚 ' + task.topic;
             } else if (task.itemType && task.itemType.indexOf('Monthly Training:') === 0) {
-              taskTitle = task.itemType; // Already formatted as "Monthly Training: [topic]"
+              taskTitle = '📚 ' + task.itemType.replace('Monthly Training:', '').trim();
+            } else {
+              taskTitle = '📚 Training';
             }
             // Add month as subtitle if available
             if (task.month) {
               taskSubtitle = '📅 ' + task.month + ' training';
             }
+          } else if (task.taskType === 'Swap') {
+            // Swap task - show what kind of swap
+            taskTitle = '🔄 ' + (task.itemType || 'Glove') + ' Swap';
+          } else if (task.taskType === 'Reclaim') {
+            // Reclaim task
+            taskTitle = '♻️ Reclaim ' + (task.itemType || 'Item');
           } else if (task.taskType === 'Safety Equipment') {
             // Safety Equipment - show equipment type with vehicle number
-            taskTitle = task.itemType || 'Safety Equipment';
+            taskTitle = '🔧 ' + (task.itemType || 'Safety Equipment');
             if (task.vehicleNumber) {
               taskTitle += ' - Vehicle #' + task.vehicleNumber;
             }
@@ -2188,13 +2200,23 @@
             if (task.currentItem) {
               taskSubtitle = '⚠️ ' + (task.currentItem.length > 60 ? task.currentItem.substring(0, 60) + '...' : task.currentItem);
             }
+          } else if (task.taskType === 'Missing Safety Report') {
+            // Missing Safety Report
+            taskTitle = '🛡️ Missing: ' + (task.itemType || 'Report');
           }
 
-          // Show due date for cert tasks
+          // Show due date for all tasks
           var dueDateHtml = '';
           if (task.dueDate) {
-            var dateLabel = task.taskType === 'Cert Expiring' ? 'Expires' : 'Due';
+            var dateLabel = (task.taskType === 'Cert Expiring' || (task.taskType && task.taskType.indexOf('Cert') !== -1)) ? 'Expires' : 'Due';
             dueDateHtml = '<div class="task-employee">📅 ' + dateLabel + ': ' + task.dueDate + '</div>';
+          }
+
+          // Show phone number if available
+          var phoneHtml = '';
+          if (task.phoneNumber) {
+            var formattedPhone = formatPhoneNumber(task.phoneNumber);
+            phoneHtml = '<div class="task-employee">📞 ' + formattedPhone + '</div>';
           }
 
           tasksHtml += '<div class="task-popup-item" data-task-index="' + i + '">' +
@@ -2203,6 +2225,7 @@
             '<div class="task-details">' +
               '<div class="task-title">' + taskTitle + '</div>' +
               (task.employee ? '<div class="task-employee">👤 ' + task.employee + '</div>' : '') +
+              phoneHtml +
               (taskSubtitle ? '<div class="task-employee" style="color:#666;font-size:0.85em;">' + taskSubtitle + '</div>' : '') +
               dueDateHtml +
               (urgencyLabel ? '<div class="task-urgency">' + urgencyLabel + '</div>' : '') +
@@ -2713,20 +2736,38 @@
         // Swap task: show "Glove Swap" or "Sleeve Swap"
         subtitle = (task.itemType || 'Glove') + ' Swap';
       } else if (taskTypeLower === 'training') {
-        // Training task: show topic or "Monthly Training: [topic]"
+        // Training task: show the actual training topic
         if (task.topic) {
-          subtitle = 'Training: ' + task.topic;
+          // Truncate long topics for card display
+          var topicText = task.topic.length > 40 ? task.topic.substring(0, 37) + '...' : task.topic;
+          subtitle = '📚 ' + topicText;
         } else if (task.itemType && task.itemType.indexOf('Monthly Training:') === 0) {
-          subtitle = task.itemType;
+          var topicFromItem = task.itemType.replace('Monthly Training:', '').trim();
+          var topicDisplay = topicFromItem.length > 40 ? topicFromItem.substring(0, 37) + '...' : topicFromItem;
+          subtitle = '📚 ' + topicDisplay;
         } else {
-          subtitle = 'Training';
+          subtitle = '📚 Training';
         }
+        // Add month if available
+        if (task.month) {
+          subtitle += ' (' + task.month + ')';
+        }
+      } else if (taskTypeLower === 'cert expiring' || taskTypeLower.indexOf('cert') !== -1) {
+        // Cert task: show the cert type clearly
+        var certType = task.certType || task.itemType || 'Certification';
+        subtitle = '🎓 Renew: ' + certType;
       } else if (taskTypeLower === 'safety equipment') {
         // Safety Equipment: show equipment type with vehicle number
         subtitle = task.itemType || 'Safety Equipment';
         if (task.vehicleNumber) {
           subtitle += ' - #' + task.vehicleNumber;
         }
+      } else if (taskTypeLower === 'reclaim') {
+        // Reclaim task
+        subtitle = '♻️ Reclaim ' + (task.itemType || 'Item');
+      } else if (taskTypeLower === 'missing safety report') {
+        // Missing Safety Report
+        subtitle = '🛡️ Missing: ' + (task.itemType || 'Report');
       } else if (task.itemType && task.itemType !== taskType) {
         subtitle = task.itemType;
       } else if (task.employee && taskType) {
@@ -3219,11 +3260,40 @@
       };
 
       var employeeName = task.employee || 'Unknown';
-      var certType = task.isCertTask ? (task.certType || task.itemType || 'Certification') : task.taskType;
+
+      // Determine task description based on task type
+      var taskDescription = task.taskType || 'Task';
+      var taskTypeLower = (task.taskType || '').toLowerCase();
+
+      if (task.isCertTask || taskTypeLower === 'cert expiring' || taskTypeLower.indexOf('cert') !== -1) {
+        // Cert task - show cert type
+        taskDescription = '🎓 Renew: ' + (task.certType || task.itemType || 'Certification');
+      } else if (taskTypeLower === 'training') {
+        // Training task - show topic
+        if (task.topic) {
+          taskDescription = '📚 ' + task.topic;
+        } else if (task.itemType && task.itemType.indexOf('Monthly Training:') === 0) {
+          taskDescription = '📚 ' + task.itemType.replace('Monthly Training:', '').trim();
+        } else {
+          taskDescription = '📚 Training';
+        }
+        // Add month if available
+        if (task.month) {
+          taskDescription += ' (' + task.month + ')';
+        }
+      } else if (taskTypeLower === 'swap') {
+        taskDescription = '🔄 ' + (task.itemType || 'Glove') + ' Swap';
+      }
+
       var locationText = task.location || 'Unknown';
       var dueDateText = task.dueDate || 'Not set';
       var urgencyText = task.urgencyLabel || 'Later';
-      var phoneText = task.phoneNumber || 'No phone on file';
+
+      // Format phone number
+      var phoneText = 'No phone on file';
+      if (task.phoneNumber) {
+        phoneText = formatPhoneNumber(task.phoneNumber);
+      }
 
       var popup = document.createElement('div');
       popup.className = 'task-popup';
@@ -3241,7 +3311,7 @@
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;">
             <div style="padding: 8px; background: #f9f9f9; border-radius: 4px;">
               <div style="font-size: 10px; color: #666; text-transform: uppercase;">Task</div>
-              <div style="font-size: 12px; font-weight: 500;">${certType}</div>
+              <div style="font-size: 12px; font-weight: 500;">${taskDescription}</div>
             </div>
             <div style="padding: 8px; background: #f9f9f9; border-radius: 4px;">
               <div style="font-size: 10px; color: #666; text-transform: uppercase;">Due Date</div>
@@ -3253,8 +3323,8 @@
             <div style="font-size: 14px; font-weight: 600;">📱 ${phoneText}</div>
           </div>
           <div style="display: flex; gap: 8px;">
-            <button onclick="window.open('sms:${task.phoneNumber}', '_blank'); document.getElementById('officeTaskDetailOverlay').remove();"
-                    class="btn btn-primary" style="flex: 1; padding: 10px;">
+            <button onclick="var phone = '${task.phoneNumber || ''}'.replace(/\\D/g, ''); if (phone.length === 10) phone = '1' + phone; window.open('sms:' + phone, '_blank'); document.getElementById('officeTaskDetailOverlay').remove();"
+                    class="btn btn-primary" style="flex: 1; padding: 10px;" ${!task.phoneNumber ? 'disabled' : ''}>
               💬 Send SMS
             </button>
             <button onclick="document.getElementById('officeTaskDetailOverlay').remove();"
@@ -4256,9 +4326,10 @@
 
       var day = tripPlan.workDays[dayIdx];
 
-      // Don't allow non-Helena end on Tuesday
+      // Don't allow non-Helena end on "must return" day
       if (day.mustReturnToHelena && endCity !== 'Helena') {
-        showStatus('Tuesday must return to Helena - cannot change end location', 'error');
+        var dayName = day.mustReturnDayName || day.dayName;
+        showStatus(dayName + ' must return to Helena - cannot change end location', 'error');
         renderPlan();
         return;
       }
@@ -4478,6 +4549,20 @@
       var mins = Math.round(minutes % 60);
       if (mins === 0) return hrs + ' hr' + (hrs > 1 ? 's' : '');
       return hrs + ' hr' + (hrs > 1 ? 's' : '') + ' ' + mins + ' min';
+    }
+
+    // Format phone number for display (e.g., 14065551234 -> (406) 555-1234)
+    function formatPhoneNumber(phone) {
+      if (!phone) return '';
+      var digits = String(phone).replace(/\D/g, '');
+      // Remove leading 1 if 11 digits
+      if (digits.length === 11 && digits.charAt(0) === '1') {
+        digits = digits.substring(1);
+      }
+      if (digits.length === 10) {
+        return '(' + digits.substring(0, 3) + ') ' + digits.substring(3, 6) + '-' + digits.substring(6);
+      }
+      return phone; // Return original if can't format
     }
 
     function getWeekStart(date) {
