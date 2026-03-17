@@ -124,7 +124,7 @@ Expanding the Rubber Tracker system to track additional electrical safety equipm
 
 ### History Tracking
 - [x] Create `saveBlanketAssignmentToHistory()` function
-- [ ] Update history on assignment changes (needs onEdit trigger integration)
+- [x] Update history on assignment changes (onEdit trigger integration added)
 - [x] Alternating row colors for visual grouping
 
 ### Task Integration
@@ -270,6 +270,12 @@ Expanding the Rubber Tracker system to track additional electrical safety equipm
   - Updated `generateAllReports()` to include blanket swaps
   - Added menu items for blanket operations
   - **Deployed to Google Apps Script** ✅
+- **Double-check fixes:**
+  - Added SHEET_BLANKETS and SHEET_BLANKET_SWAPS to sheetDefs array (was missing!)
+  - Added "🏗️ Build Sheets" menu item to Utilities submenu
+  - Added Blankets handling to onEdit trigger for auto-calculating Change Out Date
+  - Added Blankets to onEditHandler for item number detection and Type auto-detection
+  - **Re-deployed to Google Apps Script** ✅
 
 ---
 

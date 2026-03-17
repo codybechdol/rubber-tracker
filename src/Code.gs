@@ -11437,7 +11437,7 @@ function buildSheets() {
       if (def.headers) {
         sheet.getRange(1, 1, 1, def.headers.length).setValues([def.headers]);
       }
-    } else if ([SHEET_EMPLOYEES, SHEET_GLOVES, SHEET_SLEEVES].includes(def.name)) {
+    } else if ([SHEET_EMPLOYEES, SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS].includes(def.name)) {
       // For Employees, ensure all headers exist (add missing ones without clearing data)
       if (def.name === SHEET_EMPLOYEES && sheet.getLastRow() > 0 && def.headers) {
         var existingHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
@@ -11468,8 +11468,8 @@ function buildSheets() {
         sheet.getRange(1, 1, 1, def.headers.length).setValues([def.headers]);
       }
     }
-    // Formatting for Employees, Gloves, Sleeves
-    if ([SHEET_EMPLOYEES, SHEET_GLOVES, SHEET_SLEEVES].includes(def.name)) {
+    // Formatting for Employees, Gloves, Sleeves, Blankets
+    if ([SHEET_EMPLOYEES, SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS].includes(def.name)) {
       sheet.setFrozenRows(1);
       sheet.setFrozenColumns(1);
       var headerRange = sheet.getRange(1, 1, 1, def.headers.length);
