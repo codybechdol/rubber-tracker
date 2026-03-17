@@ -5685,6 +5685,8 @@ function onOpen() {
       .addItem('📊 Recalculate Training Completion %', 'recalculateAllTrainingCompletionStatus')
       .addItem('📊 Generate Compliance Report', 'generateTrainingComplianceReport'))
     .addSubMenu(ui.createMenu('🔧 Utilities')
+      .addItem('🏗️ Build Sheets', 'buildSheets')
+      .addSeparator()
       .addItem('Fix All Change Out Dates', 'fixAllChangeOutDates')
       .addItem('🧱 Fix Blanket Change Out Dates', 'fixBlanketChangeOutDates')
       .addItem('⚡ Setup Auto Change Out Dates', 'createEditTrigger')
@@ -11419,8 +11421,10 @@ function buildSheets() {
     { name: 'Employee History', headers: null, customSetup: true },
     { name: SHEET_GLOVES, headers: ['Glove', 'Size', 'Class', 'Test Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'] },
     { name: SHEET_SLEEVES, headers: ['Sleeve', 'Size', 'Class', 'Test Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'] },
+    { name: SHEET_BLANKETS, headers: ['Blanket', 'Type', 'Class', 'Test Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'] },
     { name: SHEET_GLOVE_SWAPS, headers: ['Employee', 'Item Number', 'Size', 'Date Assigned', 'Change Out Date', 'Days Left', 'Pick List', 'Status', 'Picked', 'Date Changed'] },
     { name: SHEET_SLEEVE_SWAPS, headers: ['Employee', 'Item Number', 'Size', 'Date Assigned', 'Change Out Date', 'Days Left', 'Pick List', 'Status', 'Picked', 'Date Changed'] },
+    { name: SHEET_BLANKET_SWAPS, headers: ['Employee', 'Item Number', 'Type', 'Date Assigned', 'Change Out Date', 'Days Left', 'Pick List', 'Status', 'Picked', 'Date Changed'] },
     { name: SHEET_PURCHASE_NEEDS, headers: ['Item Type', 'Size', 'Class', 'Quantity Needed', 'Reason', 'Status/Notes'] },
     { name: SHEET_INVENTORY_REPORTS, headers: null, customSetup: true },
     { name: SHEET_RECLAIMS, headers: null, customSetup: true }

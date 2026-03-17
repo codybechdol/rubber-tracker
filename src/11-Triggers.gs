@@ -321,6 +321,41 @@ function onEdit(e) {
       return;  // Don't call processEdit again, we handled it
     }
 
+    // Handle Blankets sheet - Test Date (column D) changes update Change Out Date
+    if (sheetName === SHEET_BLANKETS && (editedCol === 4 || editedCol === 5)) {
+      // Column D (4) = Test Date, Column E (5) = Date Assigned
+      // Change Out Date is based on Test Date + 12 months for blankets
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      var testDate = sheet.getRange(editedRow, 4).getValue();      // Column D - Test Date
+      var location = sheet.getRange(editedRow, 6).getValue();      // Column F
+      var assignedTo = sheet.getRange(editedRow, 8).getValue();    // Column H
+
+      if (testDate) {
+        var changeOutDate = calculateBlanketChangeOut(testDate, assignedTo, location);
+        if (changeOutDate) {
+          var changeOutCell = sheet.getRange(editedRow, 9);  // Column I
+          if (changeOutDate === 'N/A') {
+            changeOutCell.setNumberFormat('@');
+          } else {
+            changeOutCell.setNumberFormat('MM/dd/yyyy');
+          }
+          changeOutCell.setValue(changeOutDate);
+
+          // Auto-detect and set Type from item number if not set
+          var itemNumber = sheet.getRange(editedRow, 1).getValue();  // Column A
+          var currentType = sheet.getRange(editedRow, 2).getValue(); // Column B
+          if (itemNumber && !currentType) {
+            var detectedType = detectBlanketType(itemNumber);
+            sheet.getRange(editedRow, 2).setValue(detectedType);
+          }
+
+          // Show confirmation toast
+          ss.toast('Change Out Date updated to ' + changeOutDate, 'Auto-Calc', 3);
+        }
+      }
+      return;  // Don't call processEdit again, we handled it
+    }
+
     // For all other edits, use the standard processEdit
     processEdit(e);
   } catch (err) {
@@ -402,11 +437,20 @@ function onEditHandler(e) {
       return;  // Handled - don't continue to processEdit
     }
 
-    // Handle new item number detection in Gloves/Sleeves (Column A = item number)
-    if ((sheetName === 'Gloves' || sheetName === 'Sleeves') && editedCol === 1 && editedRow >= 2) {
+    // Handle new item number detection in Gloves/Sleeves/Blankets (Column A = item number)
+    if ((sheetName === 'Gloves' || sheetName === 'Sleeves' || sheetName === 'Blankets') && editedCol === 1 && editedRow >= 2) {
       var newItemNum = e.range.getValue();
       var oldItemNum = e.oldValue;
       var itemNumStr = String(newItemNum).trim();
+
+      // For Blankets, auto-detect and set Type from item number
+      if (sheetName === 'Blankets' && newItemNum && itemNumStr !== '') {
+        var detectedType = detectBlanketType(itemNumStr);
+        var currentType = sheet.getRange(editedRow, 2).getValue(); // Column B = Type
+        if (!currentType) {
+          sheet.getRange(editedRow, 2).setValue(detectedType);
+        }
+      }
 
       // Check if an item number was REMOVED (cleared or changed)
       if (oldItemNum && String(oldItemNum).trim() !== '' &&
