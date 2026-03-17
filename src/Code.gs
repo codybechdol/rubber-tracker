@@ -5645,6 +5645,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Generate Glove Swaps', 'generateGloveSwaps')
     .addItem('Generate Sleeve Swaps', 'generateSleeveSwaps')
+    .addItem('🧱 Generate Blanket Swaps', 'menuGenerateBlanketSwaps')
     .addItem('Update Purchase Needs', 'updatePurchaseNeeds')
     .addItem('Update Inventory Reports', 'updateInventoryReports')
     .addItem('Run Reclaims Check', 'runReclaimsCheck')
@@ -5685,6 +5686,7 @@ function onOpen() {
       .addItem('📊 Generate Compliance Report', 'generateTrainingComplianceReport'))
     .addSubMenu(ui.createMenu('🔧 Utilities')
       .addItem('Fix All Change Out Dates', 'fixAllChangeOutDates')
+      .addItem('🧱 Fix Blanket Change Out Dates', 'fixBlanketChangeOutDates')
       .addItem('⚡ Setup Auto Change Out Dates', 'createEditTrigger')
       .addItem('📤 Archive Previous Employees', 'archivePreviousEmployees')
       .addItem('🔄 Restore Deleted Employee', 'showRestoreEmployeeDialog')
@@ -11411,8 +11413,8 @@ function removeDuplicateTaskMetadata() {
 
 function buildSheets() {
   ensureSeparateHistorySheets(); // Remove old History tab and ensure separate history sheets
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheetDefs = [
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetDefs = [
     { name: SHEET_EMPLOYEES, headers: ['Name', 'Location', 'Job Number', 'Phone Number', 'Notification Emails', 'MP Email', 'Email Address', 'Glove Size', 'Sleeve Size', 'Hire Date', 'Last Day', 'Last Day Reason', 'Job Classification'] },
     { name: 'Employee History', headers: null, customSetup: true },
     { name: SHEET_GLOVES, headers: ['Glove', 'Size', 'Class', 'Test Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'] },
@@ -11495,7 +11497,7 @@ function buildSheets() {
         sheet.getRange(2, 11, empLastRow - 1, 2).setNumberFormat('mm/dd/yyyy');
       }
 
-      if (def.name === SHEET_GLOVES || def.name === SHEET_SLEEVES) {
+      if (def.name === SHEET_GLOVES || def.name === SHEET_SLEEVES || def.name === SHEET_BLANKETS) {
         var totalRows = Math.max(lastRow, 1);
         sheet.getRange(1, 10, totalRows, 1).setWrap(true);
         sheet.setColumnWidth(10, 180);
@@ -11503,8 +11505,8 @@ function buildSheets() {
         sheet.setColumnWidth(11, 200);
       }
     }
-    // Formatting for Glove Swaps, Sleeve Swaps
-    if ([SHEET_GLOVE_SWAPS, SHEET_SLEEVE_SWAPS].includes(def.name)) {
+    // Formatting for Glove Swaps, Sleeve Swaps, Blanket Swaps
+    if ([SHEET_GLOVE_SWAPS, SHEET_SLEEVE_SWAPS, SHEET_BLANKET_SWAPS].includes(def.name)) {
       var swapSheet = sheet;
       var swapHeaders = def.headers.length;
       swapSheet.getRange(1, 1, 1, swapHeaders).setHorizontalAlignment('center');
@@ -11532,6 +11534,36 @@ function buildSheets() {
     empHistorySheet = ss.insertSheet('Employee History');
   }
   setupEmployeeHistorySheet(empHistorySheet);
+
+  // Custom setup for Blankets History sheet
+  ensureBlanketHistorySheet();
+
+  // Add dropdown validations for Blankets sheet
+  var blanketsSheet = ss.getSheetByName(SHEET_BLANKETS);
+  if (blanketsSheet) {
+    var blanketLastRow = Math.max(blanketsSheet.getLastRow(), 100);
+
+    // Type dropdown (Column B) - Regular or Split
+    var typeRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(['Regular', 'Split'], true)
+      .setAllowInvalid(false)
+      .build();
+    blanketsSheet.getRange(2, 2, blanketLastRow - 1, 1).setDataValidation(typeRule);
+
+    // Class dropdown (Column C) - 2 or 4
+    var classRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(['2', '4'], true)
+      .setAllowInvalid(false)
+      .build();
+    blanketsSheet.getRange(2, 3, blanketLastRow - 1, 1).setDataValidation(classRule);
+
+    // Status dropdown (Column G) - Same as gloves
+    var statusRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(['In Service', 'Available', 'In Testing', 'Failed', 'Lost', 'Retired'], true)
+      .setAllowInvalid(false)
+      .build();
+    blanketsSheet.getRange(2, 7, blanketLastRow - 1, 1).setDataValidation(statusRule);
+  }
 
   // Add dropdown validation for Last Day Reason column on Employees sheet
   var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
@@ -11637,12 +11669,14 @@ function generateAllReports() {
 
     // First, ensure all Change Out Dates are correct (in case triggers didn't fire)
     fixChangeOutDatesSilent();
+    fixBlanketChangeOutDatesSilent();
 
     // Sync inventory locations with current employee data
     syncInventoryLocations();
 
     generateGloveSwaps();
     generateSleeveSwaps();
+    generateBlanketSwaps();
 
     // Update Reclaims BEFORE Purchase Needs so reclaim data is available
     updateReclaimsSheet();
@@ -17491,6 +17525,396 @@ function updateJobTrackingForemen(assignments) {
       }
     }
   }
+}
+
+
+// =============================================================================
+// PHASE 1: BLANKET EQUIPMENT TRACKING (March 2026)
+// =============================================================================
+
+/**
+ * Detects the blanket type (Regular or Split) from the item number.
+ * B### = Regular, S### = Split
+ *
+ * @param {string} itemNumber - The blanket item number (e.g., "B001" or "S042")
+ * @return {string} "Regular" or "Split" (defaults to "Regular" if unknown)
+ */
+function detectBlanketType(itemNumber) {
+  if (!itemNumber) return 'Regular';
+  var prefix = String(itemNumber).trim().toUpperCase().charAt(0);
+  if (prefix === 'S') return 'Split';
+  return 'Regular';
+}
+
+/**
+ * Calculates the Blanket Change Out Date based on Test Date.
+ * Blankets have a 12-month (1 year) test interval from the test date.
+ *
+ * @param {Date|string} testDate - The last electrical test date
+ * @param {string} assignedTo - Who the blanket is assigned to (for N/A logic)
+ * @param {string} location - The location (for N/A logic)
+ * @return {Date|string|null} The calculated change out date, 'N/A', or null if invalid
+ */
+function calculateBlanketChangeOut(testDate, assignedTo, location) {
+  if (!testDate) return null;
+
+  var assignedToLower = (assignedTo || '').toString().trim().toLowerCase();
+  var locationLower = (location || '').toString().trim().toLowerCase();
+
+  // Lost, Failed, Retired items get N/A
+  if (assignedToLower === 'lost' || assignedToLower === 'failed' ||
+      assignedToLower === 'retired' || locationLower === 'previous employee' ||
+      locationLower === 'destroyed' || locationLower === 'lost') {
+    return 'N/A';
+  }
+
+  var d = new Date(testDate);
+  if (isNaN(d.getTime())) return null;
+
+  // Blankets: Test Date + 12 months
+  d.setMonth(d.getMonth() + INTERVAL_BLANKET_TEST);
+  return d;
+}
+
+/**
+ * Recalculates all Change Out Dates in the Blankets sheet.
+ * Called from Glove Manager menu → 🔧 Utilities → Fix Blanket Change Out Dates
+ */
+function fixBlanketChangeOutDates() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+
+  var result = ui.alert(
+    'Recalculate Blanket Change Out Dates',
+    'This will recalculate ALL Change Out Dates in the Blankets sheet.\n\n' +
+    'Blankets: Test Date + 12 months\n\n' +
+    'Continue?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (result !== ui.Button.YES) return;
+
+  var fixed = fixBlanketChangeOutDatesSilent();
+
+  ui.alert('✅ Blanket Change Out Dates Updated!\n\n' +
+    'Fixed ' + fixed + ' blanket change out date(s).');
+}
+
+/**
+ * Silently fixes all Blanket Change Out Dates without showing any UI prompts.
+ * @return {number} Number of dates fixed
+ */
+function fixBlanketChangeOutDatesSilent() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_BLANKETS);
+
+  if (!sheet || sheet.getLastRow() < 2) return 0;
+
+  var data = sheet.getDataRange().getValues();
+  var fixed = 0;
+
+  // Column indices (0-based): D=3 (Test Date), F=5 (Location), H=7 (Assigned To), I=8 (Change Out Date)
+  for (var i = 1; i < data.length; i++) {
+    var testDate = data[i][3];      // Column D - Test Date
+    var location = data[i][5];       // Column F - Location
+    var assignedTo = data[i][7];     // Column H - Assigned To
+    var currentChangeOut = data[i][8]; // Column I - Change Out Date
+
+    if (!testDate) continue;
+
+    var correctChangeOut = calculateBlanketChangeOut(testDate, assignedTo, location);
+    if (!correctChangeOut) continue;
+
+    // Update if different
+    var cell = sheet.getRange(i + 1, 9);  // Column I (1-based row)
+    if (correctChangeOut === 'N/A') {
+      if (currentChangeOut !== 'N/A') {
+        cell.setNumberFormat('@');
+        cell.setValue('N/A');
+        fixed++;
+      }
+    } else {
+      // Compare dates
+      var currentDate = currentChangeOut instanceof Date ? currentChangeOut : new Date(currentChangeOut);
+      if (isNaN(currentDate.getTime()) || currentDate.getTime() !== correctChangeOut.getTime()) {
+        cell.setNumberFormat('mm/dd/yyyy');
+        cell.setValue(correctChangeOut);
+        fixed++;
+      }
+    }
+  }
+
+  return fixed;
+}
+
+/**
+ * Ensures the Blankets History sheet exists with proper structure.
+ * Creates the sheet if it doesn't exist.
+ */
+function ensureBlanketHistorySheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var historySheet = ss.getSheetByName(SHEET_BLANKETS_HISTORY);
+
+  if (!historySheet) {
+    historySheet = ss.insertSheet(SHEET_BLANKETS_HISTORY);
+    var headers = ['Date Assigned', 'Item #', 'Type', 'Class', 'Location', 'Assigned To'];
+    historySheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    historySheet.getRange(1, 1, 1, headers.length)
+      .setFontWeight('bold')
+      .setBackground('#e65100')  // Orange for blankets
+      .setFontColor('#ffffff')
+      .setHorizontalAlignment('center');
+    historySheet.setFrozenRows(1);
+    historySheet.setColumnWidth(1, 100);
+    historySheet.setColumnWidth(2, 70);
+    historySheet.setColumnWidth(3, 70);
+    historySheet.setColumnWidth(4, 50);
+    historySheet.setColumnWidth(5, 120);
+    historySheet.setColumnWidth(6, 150);
+    Logger.log('Created Blankets History sheet');
+  }
+
+  return historySheet;
+}
+
+/**
+ * Saves a blanket assignment to the Blankets History sheet.
+ *
+ * @param {string} itemNumber - The blanket item number
+ * @param {string} type - Regular or Split
+ * @param {string} blanketClass - The blanket class (2 or 4)
+ * @param {string} location - The location
+ * @param {string} assignedTo - Who the blanket is assigned to
+ * @param {Date} dateAssigned - When it was assigned
+ */
+function saveBlanketAssignmentToHistory(itemNumber, type, blanketClass, location, assignedTo, dateAssigned) {
+  var historySheet = ensureBlanketHistorySheet();
+
+  var newRow = [
+    dateAssigned || new Date(),
+    itemNumber || '',
+    type || '',
+    blanketClass || '',
+    location || '',
+    assignedTo || ''
+  ];
+
+  historySheet.appendRow(newRow);
+
+  // Apply alternating colors for visual grouping
+  var lastRow = historySheet.getLastRow();
+  var itemCol = 2; // Column B - Item #
+  var data = historySheet.getRange(2, itemCol, lastRow - 1, 1).getValues();
+
+  // Group by item number and apply alternating colors
+  var colorToggle = false;
+  var prevItem = '';
+
+  for (var i = 0; i < data.length; i++) {
+    var currentItem = String(data[i][0]).trim();
+    if (currentItem !== prevItem) {
+      colorToggle = !colorToggle;
+      prevItem = currentItem;
+    }
+    var bgColor = colorToggle ? HISTORY_COLOR_BLANKET_1 : HISTORY_COLOR_BLANKET_2;
+    historySheet.getRange(i + 2, 1, 1, 6).setBackground(bgColor);
+  }
+}
+
+/**
+ * Generates the Blanket Swaps report.
+ * Identifies blankets with upcoming change out dates and creates swap entries.
+ * Groups by crew lead / job number similar to glove swaps.
+ */
+function generateBlanketSwaps() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+  var tz = ss.getSpreadsheetTimeZone();
+  var now = new Date();
+
+  // Get Blankets sheet
+  var blanketsSheet = ss.getSheetByName(SHEET_BLANKETS);
+  if (!blanketsSheet || blanketsSheet.getLastRow() < 2) {
+    ui.alert('No blankets found in the Blankets sheet.');
+    return;
+  }
+
+  // Get or create Blanket Swaps sheet
+  var swapsSheet = ss.getSheetByName(SHEET_BLANKET_SWAPS);
+  if (!swapsSheet) {
+    swapsSheet = ss.insertSheet(SHEET_BLANKET_SWAPS);
+  }
+  swapsSheet.clear();
+
+  // Set headers
+  var headers = ['Employee', 'Item Number', 'Type', 'Date Assigned', 'Change Out Date', 'Days Left', 'Pick List', 'Status', 'Picked', 'Date Changed'];
+  swapsSheet.getRange(1, 1, 1, headers.length).setValues([headers])
+    .setFontWeight('bold')
+    .setBackground(HEADER_BG_COLOR)
+    .setFontColor('#ffffff')
+    .setHorizontalAlignment('center');
+  swapsSheet.setFrozenRows(1);
+
+  // Read blankets data
+  var data = blanketsSheet.getDataRange().getValues();
+  var blanketsNeedingSwap = [];
+
+  // Column indices (0-based): A=0 (Item#), B=1 (Type), C=2 (Class), D=3 (Test Date),
+  // E=4 (Date Assigned), F=5 (Location), G=6 (Status), H=7 (Assigned To), I=8 (Change Out Date)
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var itemNum = row[0];
+    var type = row[1] || detectBlanketType(itemNum);
+    var blanketClass = row[2];
+    var testDate = row[3];
+    var dateAssigned = row[4];
+    var location = row[5];
+    var status = String(row[6] || '').trim();
+    var assignedTo = row[7];
+    var changeOutDate = row[8];
+
+    // Skip if not in service or no change out date
+    if (status !== 'In Service' || !changeOutDate || changeOutDate === 'N/A') continue;
+
+    // Calculate days left
+    var changeOut = changeOutDate instanceof Date ? changeOutDate : new Date(changeOutDate);
+    if (isNaN(changeOut.getTime())) continue;
+
+    var daysLeft = Math.ceil((changeOut - now) / (1000 * 60 * 60 * 24));
+
+    // Include if due within 60 days or overdue
+    if (daysLeft <= 60) {
+      blanketsNeedingSwap.push({
+        itemNum: itemNum,
+        type: type,
+        blanketClass: blanketClass,
+        dateAssigned: dateAssigned,
+        changeOutDate: changeOut,
+        daysLeft: daysLeft,
+        location: location,
+        assignedTo: assignedTo,
+        rowIndex: i + 1
+      });
+    }
+  }
+
+  if (blanketsNeedingSwap.length === 0) {
+    ui.alert('✅ No Blanket Swaps Needed\n\nNo blankets are due for swap in the next 60 days.');
+    return;
+  }
+
+  // Sort by assigned to (crew lead), then by days left
+  blanketsNeedingSwap.sort(function(a, b) {
+    var assignedCompare = (a.assignedTo || 'ZZZ').toString().localeCompare((b.assignedTo || 'ZZZ').toString());
+    if (assignedCompare !== 0) return assignedCompare;
+    return a.daysLeft - b.daysLeft;
+  });
+
+  // Get available blankets for pick list (Status = Available)
+  var availableBlankets = [];
+  for (var i = 1; i < data.length; i++) {
+    var status = String(data[i][6] || '').trim();
+    if (status === 'Available') {
+      availableBlankets.push({
+        itemNum: data[i][0],
+        type: data[i][1] || detectBlanketType(data[i][0]),
+        blanketClass: data[i][2]
+      });
+    }
+  }
+
+  // Build pick list string
+  var pickListItems = availableBlankets.map(function(b) {
+    return b.itemNum + ' (Class ' + b.blanketClass + ', ' + b.type + ')';
+  });
+
+  // Write swap rows grouped by crew lead
+  var currentRow = 2;
+  var currentCrewLead = null;
+
+  for (var s = 0; s < blanketsNeedingSwap.length; s++) {
+    var swap = blanketsNeedingSwap[s];
+
+    // Add section header when crew lead changes
+    if (swap.assignedTo !== currentCrewLead) {
+      if (currentCrewLead !== null) {
+        currentRow++; // Add empty row between sections
+      }
+      // Write crew lead header
+      var headerText = '👷 ' + (swap.assignedTo || 'Unassigned') + ' - ' + (swap.location || 'Unknown Location');
+      swapsSheet.getRange(currentRow, 1, 1, headers.length).merge();
+      swapsSheet.getRange(currentRow, 1).setValue(headerText)
+        .setFontWeight('bold')
+        .setBackground('#fff3e0')  // Light orange
+        .setFontColor('#e65100');
+      currentRow++;
+      currentCrewLead = swap.assignedTo;
+    }
+
+    // Format date assigned
+    var dateAssignedFormatted = '';
+    if (swap.dateAssigned instanceof Date) {
+      dateAssignedFormatted = Utilities.formatDate(swap.dateAssigned, tz, 'MM/dd/yyyy');
+    }
+
+    // Write swap row
+    var swapRow = [
+      swap.assignedTo || '',
+      swap.itemNum || '',
+      swap.type || '',
+      dateAssignedFormatted,
+      swap.changeOutDate,
+      swap.daysLeft,
+      '',  // Pick List - will add dropdown
+      swap.daysLeft < 0 ? 'OVERDUE' : 'Pending',
+      false,  // Picked checkbox
+      ''   // Date Changed
+    ];
+
+    swapsSheet.getRange(currentRow, 1, 1, swapRow.length).setValues([swapRow]);
+
+    // Add pick list dropdown if available blankets exist
+    if (pickListItems.length > 0) {
+      var pickListRule = SpreadsheetApp.newDataValidation()
+        .requireValueInList(pickListItems, true)
+        .setAllowInvalid(true)
+        .build();
+      swapsSheet.getRange(currentRow, 7).setDataValidation(pickListRule);
+    }
+
+    // Add checkbox for Picked column
+    swapsSheet.getRange(currentRow, 9).insertCheckboxes();
+
+    // Highlight overdue rows
+    if (swap.daysLeft < 0) {
+      swapsSheet.getRange(currentRow, 1, 1, headers.length).setBackground('#ffcdd2');  // Light red
+    } else if (swap.daysLeft <= 14) {
+      swapsSheet.getRange(currentRow, 1, 1, headers.length).setBackground('#fff9c4');  // Light yellow
+    }
+
+    currentRow++;
+  }
+
+  // Format columns
+  swapsSheet.getRange(2, 5, currentRow - 1, 1).setNumberFormat('mm/dd/yyyy');  // Change Out Date
+  swapsSheet.getRange(2, 10, currentRow - 1, 1).setNumberFormat('mm/dd/yyyy'); // Date Changed
+
+  // Auto-resize columns
+  for (var c = 1; c <= headers.length; c++) {
+    swapsSheet.autoResizeColumn(c);
+  }
+
+  ui.alert('✅ Blanket Swaps Generated!\n\n' +
+    'Found ' + blanketsNeedingSwap.length + ' blanket(s) due for swap.\n' +
+    'Available for assignment: ' + availableBlankets.length + ' blanket(s).\n\n' +
+    'Use the Pick List dropdown to select replacement blankets.');
+}
+
+/**
+ * Menu function to generate blanket swaps report.
+ */
+function menuGenerateBlanketSwaps() {
+  generateBlanketSwaps();
 }
 
 

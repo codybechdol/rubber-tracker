@@ -349,6 +349,13 @@ function collectAndGroupTasks(ss) {
   var afterSleeve = countTasks(tasksByLocation);
   Logger.log('collectAndGroupTasks: Sleeve Swaps added ' + (afterSleeve - beforeSleeve) + ' tasks');
 
+  // Collect from Blanket Swaps (Phase 1 - March 2026)
+  // Collect from Blanket Swaps (Phase 1 - March 2026)
+  var beforeBlanket = countTasks(tasksByLocation);
+  collectSwapTasks(ss, 'Blanket Swaps', 'Blanket', tasksByLocation, employeeLocations, employeeForemen, employeePhones, today);
+  var afterBlanket = countTasks(tasksByLocation);
+  Logger.log('collectAndGroupTasks: Blanket Swaps added ' + (afterBlanket - beforeBlanket) + ' tasks');
+
   // Collect from Training Tracking
   var beforeTraining = countTasks(tasksByLocation);
   collectTrainingTasks(ss, tasksByLocation, employeePhones, today);
