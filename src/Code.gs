@@ -11431,93 +11431,109 @@ function buildSheets() {
     // Note: Item History Lookup sheet removed - lookup now displays in popup dialog
   ];
   sheetDefs.forEach(function(def) {
-    var sheet = ss.getSheetByName(def.name);
-    if (!sheet) {
-      sheet = ss.insertSheet(def.name);
-      if (def.headers) {
-        sheet.getRange(1, 1, 1, def.headers.length).setValues([def.headers]);
-      }
-    } else if ([SHEET_EMPLOYEES, SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS].includes(def.name)) {
-      // For Employees, ensure all headers exist (add missing ones without clearing data)
-      if (def.name === SHEET_EMPLOYEES && sheet.getLastRow() > 0 && def.headers) {
-        var existingHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-        var existingHeadersLower = existingHeaders.map(function(h) { return String(h).toLowerCase().trim(); });
-
-        // Check each required header and add if missing
-        for (var hi = 0; hi < def.headers.length; hi++) {
-          var reqHeader = def.headers[hi];
-          var reqHeaderLower = reqHeader.toLowerCase().trim();
-          if (existingHeadersLower.indexOf(reqHeaderLower) === -1) {
-            // Add missing header at the end
-            var newCol = sheet.getLastColumn() + 1;
-            sheet.getRange(1, newCol).setValue(reqHeader)
-              .setFontWeight('bold').setBackground('#1565c0').setFontColor('#ffffff').setHorizontalAlignment('center');
-            Logger.log('Added missing header "' + reqHeader + '" to ' + def.name + ' at column ' + newCol);
-          }
+    try {
+      Logger.log('buildSheets: Processing sheet "' + def.name + '"');
+      var sheet = ss.getSheetByName(def.name);
+      if (!sheet) {
+        Logger.log('buildSheets: Creating new sheet "' + def.name + '"');
+        sheet = ss.insertSheet(def.name);
+        if (def.headers) {
+          sheet.getRange(1, 1, 1, def.headers.length).setValues([def.headers]);
         }
-      } else if (sheet.getLastRow() === 0 && def.headers) {
-        // Only set headers if sheet is empty (no data)
-        sheet.getRange(1, 1, 1, def.headers.length).setValues([def.headers]);
-      }
-      // Do not clear or overwrite any data
-    } else if (def.customSetup) {
-      // Custom setup sheets - don't clear, handled separately
-    } else {
-      sheet.clear();
-      if (def.headers) {
-        sheet.getRange(1, 1, 1, def.headers.length).setValues([def.headers]);
-      }
-    }
-    // Formatting for Employees, Gloves, Sleeves, Blankets
-    if ([SHEET_EMPLOYEES, SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS].includes(def.name)) {
-      sheet.setFrozenRows(1);
-      sheet.setFrozenColumns(1);
-      var headerRange = sheet.getRange(1, 1, 1, def.headers.length);
-      headerRange.setBackground('#1565c0');
-      headerRange.setFontColor('#ffffff');
-      headerRange.setFontWeight('bold');
-      var lastRow = sheet.getLastRow();
-      var lastCol = def.headers.length;
-      if (lastRow > 1) {
-        sheet.getRange(2, 1, lastRow - 1, lastCol).setHorizontalAlignment('center');
-      }
-      headerRange.setHorizontalAlignment('center');
+      } else if ([SHEET_EMPLOYEES, SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS].includes(def.name)) {
+        // For Employees, ensure all headers exist (add missing ones without clearing data)
+        if (def.name === SHEET_EMPLOYEES && sheet.getLastRow() > 0 && sheet.getLastColumn() > 0 && def.headers) {
+          var existingHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+          var existingHeadersLower = existingHeaders.map(function(h) { return String(h).toLowerCase().trim(); });
 
-      SpreadsheetApp.flush();
-
-      for (var c = 1; c <= lastCol; c++) {
-        sheet.autoResizeColumn(c);
+          // Check each required header and add if missing
+          for (var hi = 0; hi < def.headers.length; hi++) {
+            var reqHeader = def.headers[hi];
+            var reqHeaderLower = reqHeader.toLowerCase().trim();
+            if (existingHeadersLower.indexOf(reqHeaderLower) === -1) {
+              // Add missing header at the end
+              var newCol = sheet.getLastColumn() + 1;
+              sheet.getRange(1, newCol).setValue(reqHeader)
+                .setFontWeight('bold').setBackground('#1565c0').setFontColor('#ffffff').setHorizontalAlignment('center');
+              Logger.log('Added missing header "' + reqHeader + '" to ' + def.name + ' at column ' + newCol);
+            }
+          }
+        } else if (sheet.getLastRow() === 0 && def.headers) {
+          // Only set headers if sheet is empty (no data)
+          sheet.getRange(1, 1, 1, def.headers.length).setValues([def.headers]);
+        }
+        // Do not clear or overwrite any data
+      } else if (def.customSetup) {
+        // Custom setup sheets - don't clear, handled separately
+      } else {
+        sheet.clear();
+        if (def.headers) {
+          sheet.getRange(1, 1, 1, def.headers.length).setValues([def.headers]);
+        }
       }
+      // Formatting for Employees, Gloves, Sleeves, Blankets
+      if ([SHEET_EMPLOYEES, SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS].includes(def.name)) {
+        Logger.log('buildSheets: Formatting sheet "' + def.name + '"');
+        sheet.setFrozenRows(1);
+        sheet.setFrozenColumns(1);
+        var headerRange = sheet.getRange(1, 1, 1, def.headers.length);
+        headerRange.setBackground('#1565c0');
+        headerRange.setFontColor('#ffffff');
+        headerRange.setFontWeight('bold');
+        var lastRow = sheet.getLastRow();
+        var lastCol = def.headers.length;
+        if (lastRow > 1) {
+          sheet.getRange(2, 1, lastRow - 1, lastCol).setHorizontalAlignment('center');
+        }
+        headerRange.setHorizontalAlignment('center');
 
-      if (def.name === SHEET_EMPLOYEES) {
-        sheet.setColumnWidth(1, Math.max(sheet.getColumnWidth(1), 150));
-        sheet.setColumnWidth(3, Math.max(sheet.getColumnWidth(3), 150));
-        sheet.setColumnWidth(4, Math.max(sheet.getColumnWidth(4), 100));
-        sheet.setColumnWidth(6, Math.max(sheet.getColumnWidth(6), 150));
-        sheet.setColumnWidth(8, Math.max(sheet.getColumnWidth(8), 180));
+        SpreadsheetApp.flush();
 
-        // Format Hire Date (column K=11) and Last Day (column L=12) as date only (no time)
-        var empLastRow = Math.max(sheet.getLastRow(), 2);
-        sheet.getRange(2, 11, empLastRow - 1, 2).setNumberFormat('mm/dd/yyyy');
-      }
+        for (var c = 1; c <= lastCol; c++) {
+          sheet.autoResizeColumn(c);
+        }
 
-      if (def.name === SHEET_GLOVES || def.name === SHEET_SLEEVES || def.name === SHEET_BLANKETS) {
-        var totalRows = Math.max(lastRow, 1);
-        sheet.getRange(1, 10, totalRows, 1).setWrap(true);
-        sheet.setColumnWidth(10, 180);
-        sheet.getRange(1, 11, totalRows, 1).setWrap(true);
-        sheet.setColumnWidth(11, 200);
+        if (def.name === SHEET_EMPLOYEES) {
+          sheet.setColumnWidth(1, Math.max(sheet.getColumnWidth(1), 150));
+          sheet.setColumnWidth(3, Math.max(sheet.getColumnWidth(3), 150));
+          sheet.setColumnWidth(4, Math.max(sheet.getColumnWidth(4), 100));
+          sheet.setColumnWidth(6, Math.max(sheet.getColumnWidth(6), 150));
+          sheet.setColumnWidth(8, Math.max(sheet.getColumnWidth(8), 180));
+
+          // Format Hire Date (column K=11) and Last Day (column L=12) as date only (no time)
+          var empLastRow = Math.max(sheet.getLastRow(), 2);
+          var empRowCount = Math.max(1, empLastRow - 1);
+          sheet.getRange(2, 11, empRowCount, 2).setNumberFormat('mm/dd/yyyy');
+        }
+
+        if (def.name === SHEET_GLOVES || def.name === SHEET_SLEEVES || def.name === SHEET_BLANKETS) {
+          var totalRows = Math.max(lastRow, 1);
+          // Ensure sheet has at least 11 columns before formatting columns 10-11
+          var currentMaxCol = sheet.getMaxColumns();
+          if (currentMaxCol < 11) {
+            sheet.insertColumnsAfter(currentMaxCol, 11 - currentMaxCol);
+            Logger.log('buildSheets: Inserted columns to reach 11 columns for "' + def.name + '"');
+          }
+          sheet.getRange(1, 10, totalRows, 1).setWrap(true);
+          sheet.setColumnWidth(10, 180);
+          sheet.getRange(1, 11, totalRows, 1).setWrap(true);
+          sheet.setColumnWidth(11, 200);
+        }
       }
-    }
-    // Formatting for Glove Swaps, Sleeve Swaps, Blanket Swaps
-    if ([SHEET_GLOVE_SWAPS, SHEET_SLEEVE_SWAPS, SHEET_BLANKET_SWAPS].includes(def.name)) {
-      var swapSheet = sheet;
-      var swapHeaders = def.headers.length;
-      swapSheet.getRange(1, 1, 1, swapHeaders).setHorizontalAlignment('center');
-      var swapLastRow = swapSheet.getLastRow();
-      if (swapLastRow > 1) {
-        swapSheet.getRange(2, 1, swapLastRow - 1, swapHeaders).setHorizontalAlignment('center');
+      // Formatting for Glove Swaps, Sleeve Swaps, Blanket Swaps
+      if ([SHEET_GLOVE_SWAPS, SHEET_SLEEVE_SWAPS, SHEET_BLANKET_SWAPS].includes(def.name)) {
+        var swapSheet = sheet;
+        var swapHeaders = def.headers.length;
+        swapSheet.getRange(1, 1, 1, swapHeaders).setHorizontalAlignment('center');
+        var swapLastRow = swapSheet.getLastRow();
+        if (swapLastRow > 1) {
+          swapSheet.getRange(2, 1, swapLastRow - 1, swapHeaders).setHorizontalAlignment('center');
+        }
       }
+      Logger.log('buildSheets: Completed processing "' + def.name + '"');
+    } catch (sheetError) {
+      Logger.log('buildSheets: ERROR processing sheet "' + def.name + '": ' + sheetError.message);
+      // Continue processing other sheets
     }
   });
 
@@ -11543,58 +11559,68 @@ function buildSheets() {
   ensureBlanketHistorySheet();
 
   // Add dropdown validations for Blankets sheet
-  var blanketsSheet = ss.getSheetByName(SHEET_BLANKETS);
-  if (blanketsSheet) {
-    // Ensure sheet has enough rows for validation (at least 101 rows total)
-    var blanketSheetRows = blanketsSheet.getMaxRows();
-    if (blanketSheetRows < 101) {
-      blanketsSheet.insertRowsAfter(Math.max(1, blanketSheetRows), 101 - blanketSheetRows);
+  try {
+    var blanketsSheet = ss.getSheetByName(SHEET_BLANKETS);
+    if (blanketsSheet) {
+      // Ensure sheet has enough rows for validation (at least 101 rows total)
+      var blanketSheetRows = blanketsSheet.getMaxRows();
+      if (blanketSheetRows < 101) {
+        blanketsSheet.insertRowsAfter(Math.max(1, blanketSheetRows), 101 - blanketSheetRows);
+      }
+      var blanketRowCount = 100;  // Apply validation to 100 rows starting at row 2
+
+      // Type dropdown (Column B) - Regular or Split
+      var typeRule = SpreadsheetApp.newDataValidation()
+        .requireValueInList(['Regular', 'Split'], true)
+        .setAllowInvalid(false)
+        .build();
+      blanketsSheet.getRange(2, 2, blanketRowCount, 1).setDataValidation(typeRule);
+
+      // Class dropdown (Column C) - 2 or 4
+      var classRule = SpreadsheetApp.newDataValidation()
+        .requireValueInList(['2', '4'], true)
+        .setAllowInvalid(false)
+        .build();
+      blanketsSheet.getRange(2, 3, blanketRowCount, 1).setDataValidation(classRule);
+
+      // Status dropdown (Column G) - Same as gloves
+      var statusRule = SpreadsheetApp.newDataValidation()
+        .requireValueInList(['In Service', 'Available', 'In Testing', 'Failed', 'Lost', 'Retired'], true)
+        .setAllowInvalid(false)
+        .build();
+      blanketsSheet.getRange(2, 7, blanketRowCount, 1).setDataValidation(statusRule);
     }
-    var blanketRowCount = 100;  // Apply validation to 100 rows starting at row 2
-
-    // Type dropdown (Column B) - Regular or Split
-    var typeRule = SpreadsheetApp.newDataValidation()
-      .requireValueInList(['Regular', 'Split'], true)
-      .setAllowInvalid(false)
-      .build();
-    blanketsSheet.getRange(2, 2, blanketRowCount, 1).setDataValidation(typeRule);
-
-    // Class dropdown (Column C) - 2 or 4
-    var classRule = SpreadsheetApp.newDataValidation()
-      .requireValueInList(['2', '4'], true)
-      .setAllowInvalid(false)
-      .build();
-    blanketsSheet.getRange(2, 3, blanketRowCount, 1).setDataValidation(classRule);
-
-    // Status dropdown (Column G) - Same as gloves
-    var statusRule = SpreadsheetApp.newDataValidation()
-      .requireValueInList(['In Service', 'Available', 'In Testing', 'Failed', 'Lost', 'Retired'], true)
-      .setAllowInvalid(false)
-      .build();
-    blanketsSheet.getRange(2, 7, blanketRowCount, 1).setDataValidation(statusRule);
+  } catch (blanketValidationError) {
+    Logger.log('buildSheets: Warning - Blankets validation failed: ' + blanketValidationError.message);
+    // Continue with the rest of the function
   }
 
   // Add dropdown validation for Last Day Reason column on Employees sheet
-  var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
-  if (employeesSheet && employeesSheet.getLastColumn() > 0) {
-    var empHeaders = employeesSheet.getRange(1, 1, 1, employeesSheet.getLastColumn()).getValues()[0];
-    var lastDayReasonColIdx = -1;
-    for (var h = 0; h < empHeaders.length; h++) {
-      if (String(empHeaders[h]).toLowerCase().trim() === 'last day reason') {
-        lastDayReasonColIdx = h + 1;  // 1-based
-        break;
+  try {
+    var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+    if (employeesSheet && employeesSheet.getLastColumn() > 0) {
+      var empHeaders = employeesSheet.getRange(1, 1, 1, employeesSheet.getLastColumn()).getValues()[0];
+      var lastDayReasonColIdx = -1;
+      for (var h = 0; h < empHeaders.length; h++) {
+        if (String(empHeaders[h]).toLowerCase().trim() === 'last day reason') {
+          lastDayReasonColIdx = h + 1;  // 1-based
+          break;
+        }
+      }
+      if (lastDayReasonColIdx !== -1) {
+        // Set dropdown for all data rows in Last Day Reason column
+        var lastRow = Math.max(employeesSheet.getLastRow(), 100);  // At least 100 rows
+        var reasonRange = employeesSheet.getRange(2, lastDayReasonColIdx, Math.max(1, lastRow - 1), 1);
+        var reasonRule = SpreadsheetApp.newDataValidation()
+          .requireValueInList(['Quit', 'Fired', 'Layoff', 'Resigned'], true)
+          .setAllowInvalid(false)
+          .build();
+        reasonRange.setDataValidation(reasonRule);
       }
     }
-    if (lastDayReasonColIdx !== -1) {
-      // Set dropdown for all data rows in Last Day Reason column
-      var lastRow = Math.max(employeesSheet.getLastRow(), 100);  // At least 100 rows
-      var reasonRange = employeesSheet.getRange(2, lastDayReasonColIdx, Math.max(1, lastRow - 1), 1);
-      var reasonRule = SpreadsheetApp.newDataValidation()
-        .requireValueInList(['Quit', 'Fired', 'Layoff', 'Resigned'], true)
-        .setAllowInvalid(false)
-        .build();
-      reasonRange.setDataValidation(reasonRule);
-    }
+  } catch (empValidationError) {
+    Logger.log('buildSheets: Warning - Employees validation failed: ' + empValidationError.message);
+    // Continue with the rest of the function
   }
 
   logEvent('Sheets built or reset.');
