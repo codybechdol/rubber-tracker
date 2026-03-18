@@ -11545,33 +11545,38 @@ function buildSheets() {
   // Add dropdown validations for Blankets sheet
   var blanketsSheet = ss.getSheetByName(SHEET_BLANKETS);
   if (blanketsSheet) {
-    var blanketLastRow = Math.max(blanketsSheet.getLastRow(), 100);
+    // Ensure sheet has enough rows for validation (at least 101 rows total)
+    var blanketSheetRows = blanketsSheet.getMaxRows();
+    if (blanketSheetRows < 101) {
+      blanketsSheet.insertRowsAfter(Math.max(1, blanketSheetRows), 101 - blanketSheetRows);
+    }
+    var blanketRowCount = 100;  // Apply validation to 100 rows starting at row 2
 
     // Type dropdown (Column B) - Regular or Split
     var typeRule = SpreadsheetApp.newDataValidation()
       .requireValueInList(['Regular', 'Split'], true)
       .setAllowInvalid(false)
       .build();
-    blanketsSheet.getRange(2, 2, blanketLastRow - 1, 1).setDataValidation(typeRule);
+    blanketsSheet.getRange(2, 2, blanketRowCount, 1).setDataValidation(typeRule);
 
     // Class dropdown (Column C) - 2 or 4
     var classRule = SpreadsheetApp.newDataValidation()
       .requireValueInList(['2', '4'], true)
       .setAllowInvalid(false)
       .build();
-    blanketsSheet.getRange(2, 3, blanketLastRow - 1, 1).setDataValidation(classRule);
+    blanketsSheet.getRange(2, 3, blanketRowCount, 1).setDataValidation(classRule);
 
     // Status dropdown (Column G) - Same as gloves
     var statusRule = SpreadsheetApp.newDataValidation()
       .requireValueInList(['In Service', 'Available', 'In Testing', 'Failed', 'Lost', 'Retired'], true)
       .setAllowInvalid(false)
       .build();
-    blanketsSheet.getRange(2, 7, blanketLastRow - 1, 1).setDataValidation(statusRule);
+    blanketsSheet.getRange(2, 7, blanketRowCount, 1).setDataValidation(statusRule);
   }
 
   // Add dropdown validation for Last Day Reason column on Employees sheet
   var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
-  if (employeesSheet) {
+  if (employeesSheet && employeesSheet.getLastColumn() > 0) {
     var empHeaders = employeesSheet.getRange(1, 1, 1, employeesSheet.getLastColumn()).getValues()[0];
     var lastDayReasonColIdx = -1;
     for (var h = 0; h < empHeaders.length; h++) {
@@ -11583,7 +11588,7 @@ function buildSheets() {
     if (lastDayReasonColIdx !== -1) {
       // Set dropdown for all data rows in Last Day Reason column
       var lastRow = Math.max(employeesSheet.getLastRow(), 100);  // At least 100 rows
-      var reasonRange = employeesSheet.getRange(2, lastDayReasonColIdx, lastRow - 1, 1);
+      var reasonRange = employeesSheet.getRange(2, lastDayReasonColIdx, Math.max(1, lastRow - 1), 1);
       var reasonRule = SpreadsheetApp.newDataValidation()
         .requireValueInList(['Quit', 'Fired', 'Layoff', 'Resigned'], true)
         .setAllowInvalid(false)

@@ -245,6 +245,28 @@ Expanding the Rubber Tracker system to track additional electrical safety equipm
 
 ## Running Change Log
 
+### March 18, 2026
+- **Fixed "Please make a selection within a single column" error (second fix)**
+  - Issue: After the initial fix, the error could still occur in certain edge cases
+  - Root cause: Multiple potential issues:
+    1. `insertRowsAfter(0, ...)` fails if blanketSheetRows is 0
+    2. `getRange(1, 1, 1, getLastColumn())` fails if getLastColumn() returns 0
+    3. `getRange(2, col, lastRow - 1, 1)` fails if lastRow - 1 is 0
+  - Solution: Added multiple guards:
+    1. Changed `insertRowsAfter(blanketSheetRows, ...)` to `insertRowsAfter(Math.max(1, blanketSheetRows), ...)`
+    2. Added `employeesSheet.getLastColumn() > 0` check before reading headers
+    3. Changed `lastRow - 1` to `Math.max(1, lastRow - 1)` for validation range
+  - Deployed to Google Apps Script ✅
+
+- **Fixed "Please make a selection within a single column" error**
+  - Issue: When running `buildSheets()`, the Blankets dropdown validation code failed because it tried to apply validation to rows that didn't exist in a newly created sheet
+  - Root cause: `blanketLastRow - 1` calculated row count but the sheet didn't have enough rows for the validation range
+  - Solution: 
+    1. Added check for sheet's max rows using `getMaxRows()`
+    2. If sheet has fewer than 101 rows, insert additional rows using `insertRowsAfter()`
+    3. Use a fixed `blanketRowCount = 100` for validation instead of calculating from last row
+  - Deployed to Google Apps Script ✅
+
 ### March 17, 2026
 - Created EQUIPMENT_EXPANSION_PLAN.md
 - Defined Phase 1-3 implementation approach
