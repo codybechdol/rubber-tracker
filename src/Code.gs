@@ -11445,7 +11445,16 @@ function buildSheets() {
           sheet.getRange(1, 1, 1, def.headers.length).setValues([def.headers]);
         }
       } else {
-        // Remove any filters that might be causing selection issues
+        // Reset any active selection FIRST to avoid "column level actions" errors
+        try {
+          SpreadsheetApp.setActiveSheet(sheet);
+          sheet.getRange('A1').activate();
+          Logger.log('buildSheets: Reset selection for "' + def.name + '"');
+        } catch (selectionErr) {
+          Logger.log('buildSheets: Could not reset selection for "' + def.name + '": ' + selectionErr.message);
+        }
+
+        // Remove any filters that might be maintaining column selections
         try {
           var filter = sheet.getFilter();
           if (filter) {
@@ -11456,14 +11465,6 @@ function buildSheets() {
           Logger.log('buildSheets: Could not check/remove filter for "' + def.name + '": ' + filterErr.message);
         }
 
-        // Reset any active selection to avoid "column level actions" errors
-        try {
-          SpreadsheetApp.setActiveSheet(sheet);
-          sheet.getRange('A1').activate();
-          Logger.log('buildSheets: Reset selection for "' + def.name + '"');
-        } catch (selectionErr) {
-          Logger.log('buildSheets: Could not reset selection for "' + def.name + '": ' + selectionErr.message);
-        }
 
         // Header handling - wrapped in try-catch so errors don't prevent formatting
         try {
