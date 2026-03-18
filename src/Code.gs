@@ -11443,9 +11443,11 @@ function buildSheets() {
       } else {
         // Reset any active selection to avoid "column level actions" errors
         try {
-          sheet.setActiveSelection('A1');
+          SpreadsheetApp.setActiveSheet(sheet);
+          sheet.getRange('A1').activate();
+          Logger.log('buildSheets: Reset selection for "' + def.name + '"');
         } catch (selectionErr) {
-          // Ignore selection reset errors
+          Logger.log('buildSheets: Could not reset selection for "' + def.name + '": ' + selectionErr.message);
         }
 
         if ([SHEET_EMPLOYEES, SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS].includes(def.name)) {
