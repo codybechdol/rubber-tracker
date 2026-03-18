@@ -246,6 +246,17 @@ Expanding the Rubber Tracker system to track additional electrical safety equipm
 ## Running Change Log
 
 ### March 18, 2026
+- **Gloves sheet error persists but is now isolated**
+  - Issue: Gloves sheet keeps showing "Please make a selection within a single column" error
+  - Root cause: Unknown - the error occurs even with minimal code execution
+  - Solution: Added separate try-catch around header handling so if it fails, formatting still runs
+  - This allows Build Sheets to complete for all other sheets while still processing Gloves as much as possible
+  - Deployed to Google Apps Script ✅
+
+- **Added Update Reclaims to Reports submenu**
+  - The Reports submenu now includes: Daily Accomplishments, Update Inventory Reports, Update Reclaims, Run Reclaims Check
+  - Deployed to Google Apps Script ✅
+
 - **Fixed Gloves sheet "column level actions" error**
   - Issue: Gloves sheet consistently failed with "Please make a selection within a single column" error while other sheets processed successfully
   - Root cause: The Gloves sheet had an active multi-column selection from a previous user action, which interfered with column-level operations
