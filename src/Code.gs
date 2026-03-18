@@ -5759,7 +5759,11 @@ function onOpen() {
       .addItem('🕐 Set Up Weekly Email (Mon 12 PM)', 'createWeeklyEmailTrigger')
       .addItem('🚫 Remove Scheduled Email', 'removeEmailTrigger'))
     .addSubMenu(ui.createMenu('📊 Reports')
-      .addItem('📝 Daily Accomplishments', 'showTimeBreakdownDialog'))
+      .addItem('📝 Daily Accomplishments', 'showTimeBreakdownDialog')
+      .addSeparator()
+      .addItem('📦 Update Inventory Reports', 'updateInventoryReports')
+      .addItem('🔄 Update Reclaims', 'updateReclaimsSheet')
+      .addItem('📋 Run Reclaims Check', 'runReclaimsCheck'))
     .addSubMenu(ui.createMenu('🛒 Purchase Orders')
       .addItem('📝 Create Purchase Order', 'showPurchaseOrderDialog')
       .addItem('📋 Order History', 'openPurchaseOrdersSheet')
@@ -11451,8 +11455,10 @@ function buildSheets() {
         }
 
         if ([SHEET_EMPLOYEES, SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS].includes(def.name)) {
+          Logger.log('buildSheets: Handling headers for "' + def.name + '"');
           // For Employees, ensure all headers exist (add missing ones without clearing data)
           if (def.name === SHEET_EMPLOYEES && sheet.getLastRow() > 0 && sheet.getLastColumn() > 0 && def.headers) {
+            Logger.log('buildSheets: EMPLOYEES header handling');
             var existingHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
             var existingHeadersLower = existingHeaders.map(function(h) { return String(h).toLowerCase().trim(); });
 
@@ -11469,8 +11475,11 @@ function buildSheets() {
               }
             }
           } else if (sheet.getLastRow() === 0 && def.headers) {
+            Logger.log('buildSheets: Setting headers for empty sheet "' + def.name + '"');
             // Only set headers if sheet is empty (no data)
             sheet.getRange(1, 1, 1, def.headers.length).setValues([def.headers]);
+          } else {
+            Logger.log('buildSheets: No header changes needed for "' + def.name + '" (has data, not EMPLOYEES)');
           }
           // Do not clear or overwrite any data
         } else if (def.customSetup) {
