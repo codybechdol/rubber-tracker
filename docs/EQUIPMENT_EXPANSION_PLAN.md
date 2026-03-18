@@ -246,6 +246,13 @@ Expanding the Rubber Tracker system to track additional electrical safety equipm
 ## Running Change Log
 
 ### March 18, 2026
+- **Fixed Gloves sheet "column level actions" error**
+  - Issue: Gloves sheet consistently failed with "Please make a selection within a single column" error while other sheets processed successfully
+  - Root cause: The Gloves sheet had an active multi-column selection from a previous user action, which interfered with column-level operations
+  - Solution: Added `sheet.setActiveSelection('A1')` at the start of processing for existing sheets to reset any active selection
+  - Also added column count check: If sheet has fewer than 11 columns, insert columns to reach 11 before formatting columns 10-11
+  - Deployed to Google Apps Script ✅
+
 - **Fixed "Please make a selection within a single column" error (second fix)**
   - Issue: After the initial fix, the error could still occur in certain edge cases
   - Root cause: Multiple potential issues:

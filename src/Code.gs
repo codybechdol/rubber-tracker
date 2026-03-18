@@ -11440,7 +11440,15 @@ function buildSheets() {
         if (def.headers) {
           sheet.getRange(1, 1, 1, def.headers.length).setValues([def.headers]);
         }
-      } else if ([SHEET_EMPLOYEES, SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS].includes(def.name)) {
+      } else {
+        // Reset any active selection to avoid "column level actions" errors
+        try {
+          sheet.setActiveSelection('A1');
+        } catch (selectionErr) {
+          // Ignore selection reset errors
+        }
+
+        if ([SHEET_EMPLOYEES, SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS].includes(def.name)) {
         // For Employees, ensure all headers exist (add missing ones without clearing data)
         if (def.name === SHEET_EMPLOYEES && sheet.getLastRow() > 0 && sheet.getLastColumn() > 0 && def.headers) {
           var existingHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
@@ -11463,12 +11471,13 @@ function buildSheets() {
           sheet.getRange(1, 1, 1, def.headers.length).setValues([def.headers]);
         }
         // Do not clear or overwrite any data
-      } else if (def.customSetup) {
-        // Custom setup sheets - don't clear, handled separately
-      } else {
-        sheet.clear();
-        if (def.headers) {
-          sheet.getRange(1, 1, 1, def.headers.length).setValues([def.headers]);
+        } else if (def.customSetup) {
+          // Custom setup sheets - don't clear, handled separately
+        } else {
+          sheet.clear();
+          if (def.headers) {
+            sheet.getRange(1, 1, 1, def.headers.length).setValues([def.headers]);
+          }
         }
       }
       // Formatting for Employees, Gloves, Sleeves, Blankets
