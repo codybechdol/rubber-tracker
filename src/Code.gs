@@ -11445,6 +11445,17 @@ function buildSheets() {
           sheet.getRange(1, 1, 1, def.headers.length).setValues([def.headers]);
         }
       } else {
+        // Remove any filters that might be causing selection issues
+        try {
+          var filter = sheet.getFilter();
+          if (filter) {
+            filter.remove();
+            Logger.log('buildSheets: Removed filter from "' + def.name + '"');
+          }
+        } catch (filterErr) {
+          Logger.log('buildSheets: Could not check/remove filter for "' + def.name + '": ' + filterErr.message);
+        }
+
         // Reset any active selection to avoid "column level actions" errors
         try {
           SpreadsheetApp.setActiveSheet(sheet);
