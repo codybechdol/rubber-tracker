@@ -11455,31 +11455,38 @@ function buildSheets() {
         }
 
         if ([SHEET_EMPLOYEES, SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS].includes(def.name)) {
-          Logger.log('buildSheets: Handling headers for "' + def.name + '"');
-          // For Employees, ensure all headers exist (add missing ones without clearing data)
-          if (def.name === SHEET_EMPLOYEES && sheet.getLastRow() > 0 && sheet.getLastColumn() > 0 && def.headers) {
-            Logger.log('buildSheets: EMPLOYEES header handling');
-            var existingHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-            var existingHeadersLower = existingHeaders.map(function(h) { return String(h).toLowerCase().trim(); });
+          // Only EMPLOYEES needs header management - skip for Gloves/Sleeves/Blankets
+          if (def.name === SHEET_EMPLOYEES) {
+            Logger.log('buildSheets: Handling headers for "' + def.name + '"');
+            // For Employees, ensure all headers exist (add missing ones without clearing data)
+            if (sheet.getLastRow() > 0 && sheet.getLastColumn() > 0 && def.headers) {
+              Logger.log('buildSheets: EMPLOYEES header handling');
+              var existingHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+              var existingHeadersLower = existingHeaders.map(function(h) { return String(h).toLowerCase().trim(); });
 
-            // Check each required header and add if missing
-            for (var hi = 0; hi < def.headers.length; hi++) {
-              var reqHeader = def.headers[hi];
-              var reqHeaderLower = reqHeader.toLowerCase().trim();
-              if (existingHeadersLower.indexOf(reqHeaderLower) === -1) {
-                // Add missing header at the end
-                var newCol = sheet.getLastColumn() + 1;
-                sheet.getRange(1, newCol).setValue(reqHeader)
-                  .setFontWeight('bold').setBackground('#1565c0').setFontColor('#ffffff').setHorizontalAlignment('center');
-                Logger.log('Added missing header "' + reqHeader + '" to ' + def.name + ' at column ' + newCol);
+              // Check each required header and add if missing
+              for (var hi = 0; hi < def.headers.length; hi++) {
+                var reqHeader = def.headers[hi];
+                var reqHeaderLower = reqHeader.toLowerCase().trim();
+                if (existingHeadersLower.indexOf(reqHeaderLower) === -1) {
+                  // Add missing header at the end
+                  var newCol = sheet.getLastColumn() + 1;
+                  sheet.getRange(1, newCol).setValue(reqHeader)
+                    .setFontWeight('bold').setBackground('#1565c0').setFontColor('#ffffff').setHorizontalAlignment('center');
+                  Logger.log('Added missing header "' + reqHeader + '" to ' + def.name + ' at column ' + newCol);
+                }
               }
+            } else if (sheet.getLastRow() === 0 && def.headers) {
+              Logger.log('buildSheets: Setting headers for empty sheet "' + def.name + '"');
+              // Only set headers if sheet is empty (no data)
+              sheet.getRange(1, 1, 1, def.headers.length).setValues([def.headers]);
             }
-          } else if (sheet.getLastRow() === 0 && def.headers) {
-            Logger.log('buildSheets: Setting headers for empty sheet "' + def.name + '"');
-            // Only set headers if sheet is empty (no data)
-            sheet.getRange(1, 1, 1, def.headers.length).setValues([def.headers]);
           } else {
-            Logger.log('buildSheets: No header changes needed for "' + def.name + '" (has data, not EMPLOYEES)');
+            // Gloves, Sleeves, Blankets - just check if headers needed for empty sheet
+            if (sheet.getLastRow() === 0 && def.headers) {
+              Logger.log('buildSheets: Setting headers for empty sheet "' + def.name + '"');
+              sheet.getRange(1, 1, 1, def.headers.length).setValues([def.headers]);
+            }
           }
           // Do not clear or overwrite any data
         } else if (def.customSetup) {
