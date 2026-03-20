@@ -396,15 +396,15 @@ function onEdit(e) {
       return;  // Don't call processEdit again, we handled it
     }
 
-    // Handle Phasing Sets sheet - Assigned To (column H) changes auto-populate Status and Location
-    if (sheetName === SHEET_PHASING_SETS && editedCol === 8 && editedRow >= 2) {
+    // Handle Phasing Sets sheet - Assigned To (column I = 9) changes auto-populate Status and Location
+    if (sheetName === SHEET_PHASING_SETS && editedCol === 9 && editedRow >= 2) {
       var ss = SpreadsheetApp.getActiveSpreadsheet();
       handlePhasingSetAssignedToChange(ss, sheet, editedRow, e.value);
       return;  // Don't call processEdit again, we handled it
     }
 
-    // Handle Phasing Sets sheet - Calibration Date (column D) changes auto-calculate Change Out Date
-    if (sheetName === SHEET_PHASING_SETS && editedCol === 4 && editedRow >= 2) {
+    // Handle Phasing Sets sheet - Calibration Date (column E = 5) changes auto-calculate Change Out Date
+    if (sheetName === SHEET_PHASING_SETS && editedCol === 5 && editedRow >= 2) {
       var ss = SpreadsheetApp.getActiveSpreadsheet();
       handlePhasingSetCalibrationDateChange(ss, sheet, editedRow, e.value);
       return;  // Don't call processEdit again, we handled it

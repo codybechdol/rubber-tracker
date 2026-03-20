@@ -6691,7 +6691,7 @@ function handlePhasingSetAssignedToChange(ss, sheet, editedRow, newValue) {
       lock = null;
     }
 
-    var assignedToCol = 8;  // Column H
+    var assignedToCol = COLS.PHASING_SETS.ASSIGNED_TO;  // Column I (9)
     var actualValue = sheet.getRange(editedRow, assignedToCol).getValue();
 
     logEvent('handlePhasingSetAssignedToChange ENTRY: Row=' + editedRow + ', newValue=' + newValue + ', actualValue=' + actualValue, 'DEBUG');
@@ -6737,8 +6737,8 @@ function handlePhasingSetAssignedToChange(ss, sheet, editedRow, newValue) {
     var newStatus = '';
     var newLocation = '';
 
-    var colStatus = 7;    // Column G = Status
-    var colLocation = 6;  // Column F = Location
+    var colStatus = COLS.PHASING_SETS.STATUS;      // Column H (8)
+    var colLocation = COLS.PHASING_SETS.LOCATION;  // Column G (7)
 
     if (assignedToLower === 'on shelf' || assignedToLower === '') {
       newStatus = 'On Shelf';
@@ -6843,8 +6843,8 @@ function handlePhasingSetCalibrationDateChange(ss, sheet, editedRow, newValue) {
   if (editedRow < 2) return; // Skip header row
 
   try {
-    var colCalibrationDate = 4;  // Column D
-    var colChangeOutDate = 9;    // Column I
+    var colCalibrationDate = COLS.PHASING_SETS.CALIBRATION_DATE;  // Column E (5)
+    var colChangeOutDate = COLS.PHASING_SETS.CHANGE_OUT_DATE;     // Column J (10)
 
     var calibrationDate = sheet.getRange(editedRow, colCalibrationDate).getValue();
 
@@ -6919,14 +6919,17 @@ function fixPhasingSetChangeOutDates() {
   var data = dataRange.getValues();
   var updated = 0;
 
+  var colCalibrationDate = COLS.PHASING_SETS.CALIBRATION_DATE;  // Column E (5)
+  var colChangeOutDate = COLS.PHASING_SETS.CHANGE_OUT_DATE;     // Column J (10)
+
   for (var i = 1; i < data.length; i++) {
-    var calibrationDate = data[i][3]; // Column D (index 3)
+    var calibrationDate = data[i][colCalibrationDate - 1]; // Array is 0-indexed
     if (calibrationDate && calibrationDate instanceof Date && !isNaN(calibrationDate.getTime())) {
       var changeOutDate = calculateHVChangeOutDate(calibrationDate);
       if (changeOutDate) {
-        sheet.getRange(i + 1, 9).setValue(changeOutDate); // Column I
+        sheet.getRange(i + 1, colChangeOutDate).setValue(changeOutDate);
         try {
-          sheet.getRange(i + 1, 9).setNumberFormat('mm/dd/yyyy');
+          sheet.getRange(i + 1, colChangeOutDate).setNumberFormat('mm/dd/yyyy');
         } catch (fmtErr) { /* Ignore format errors on typed columns */ }
         updated++;
       }
@@ -8821,22 +8824,23 @@ function saveHistoryFast(silent) {
     }
 
     // Process Phasing Sets
-    // Phasing Sets columns: A=Item#, B=Model, C=Serial#, D=Calibration Date, E=Date Assigned, F=Location, G=Status, H=Assigned To
+    // Phasing Sets columns: A=Item#, B=Model, C=KV, D=Serial#, E=Calibration Date, F=Date Assigned, G=Location, H=Status, I=Assigned To
     if (phasingSetsSheet && phasingSetsSheet.getLastRow() > 1 && phasingSetsHistorySheet) {
       var numPhasingSetRows = phasingSetsSheet.getLastRow() - 1;
-      var phasingSetsDisplay = phasingSetsSheet.getRange(2, 1, numPhasingSetRows, 8).getDisplayValues();
-      var phasingSetsRawValues = phasingSetsSheet.getRange(2, 1, numPhasingSetRows, 8).getValues();
+      var phasingSetsDisplay = phasingSetsSheet.getRange(2, 1, numPhasingSetRows, 9).getDisplayValues();
+      var phasingSetsRawValues = phasingSetsSheet.getRange(2, 1, numPhasingSetRows, 9).getValues();
 
       for (var p = 0; p < phasingSetsDisplay.length; p++) {
         var psRow = phasingSetsDisplay[p];
         var psRawRow = phasingSetsRawValues[p];
         var psItemNum = formatItemNum(psRawRow[0]);
         var psModel = psRow[1];           // Column B - Model
-        var psSerialNum = psRow[2];       // Column C - Serial #
-        var psDateAssignedRaw = psRawRow[4];   // Raw date from Column E
-        var psDateAssignedDisplay = psRow[4];  // Display string for duplicate checking
-        var psLocation = psRow[5];        // Column F
-        var psAssignedTo = psRow[7];      // Column H
+        var psKV = psRow[2];              // Column C - KV
+        var psSerialNum = psRow[3];       // Column D - Serial #
+        var psDateAssignedRaw = psRawRow[5];   // Raw date from Column F
+        var psDateAssignedDisplay = psRow[5];  // Display string for duplicate checking
+        var psLocation = psRow[6];        // Column G
+        var psAssignedTo = psRow[8];      // Column I
 
         // Skip rows without item number or date assigned
         if (!psItemNum || !psDateAssignedDisplay) continue;
@@ -8844,10 +8848,10 @@ function saveHistoryFast(silent) {
         // Use fast in-memory lookup with change type detection
         var psChangeResult = getChangeTypeFast(phasingSetsLookup, psItemNum, psAssignedTo, psDateAssignedDisplay, psLocation, 'Phasing Set');
         if (!psChangeResult.isDuplicate) {
-          // Phasing Sets History columns: Date Assigned, Item#, Model, Serial#, Location, Assigned To, Notes
+          // Phasing Sets History columns: Date Assigned, Item#, Model, KV, Serial#, Location, Assigned To, Notes (8 columns)
           newPhasingSetRows.push([
             silent ? formatDateForHistory(psDateAssignedRaw) : psDateAssignedDisplay,
-            psItemNum, psModel, psSerialNum, psLocation, psAssignedTo, psChangeResult.note || ''
+            psItemNum, psModel, psKV, psSerialNum, psLocation, psAssignedTo, psChangeResult.note || ''
           ]);
           newPhasingSetEntries++;
         }
@@ -8878,7 +8882,7 @@ function saveHistoryFast(silent) {
 
     if (newPhasingSetRows.length > 0) {
       var phasingSetsLastRow = phasingSetsHistorySheet.getLastRow();
-      phasingSetsHistorySheet.getRange(phasingSetsLastRow + 1, 1, newPhasingSetRows.length, 7).setValues(newPhasingSetRows);
+      phasingSetsHistorySheet.getRange(phasingSetsLastRow + 1, 1, newPhasingSetRows.length, 8).setValues(newPhasingSetRows);
     }
 
     Logger.log('saveHistoryFast: All inventory types processed in ' + (new Date().getTime() - startTime) + 'ms');
@@ -19873,7 +19877,7 @@ function ensurePhasingSetsHistorySheet() {
 
   if (!historySheet) {
     historySheet = ss.insertSheet(SHEET_PHASING_SETS_HISTORY);
-    var headers = ['Date Assigned', 'Item #', 'Model', 'Serial #', 'Location', 'Assigned To', 'Notes'];
+    var headers = ['Date Assigned', 'Item #', 'Model', 'KV', 'Serial #', 'Location', 'Assigned To', 'Notes'];
     historySheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     historySheet.getRange(1, 1, 1, headers.length)
       .setFontWeight('bold')
@@ -19884,21 +19888,40 @@ function ensurePhasingSetsHistorySheet() {
     historySheet.setColumnWidth(1, 100);
     historySheet.setColumnWidth(2, 80);
     historySheet.setColumnWidth(3, 100);
-    historySheet.setColumnWidth(4, 100);
-    historySheet.setColumnWidth(5, 120);
-    historySheet.setColumnWidth(6, 150);
-    historySheet.setColumnWidth(7, 200);
-    Logger.log('Created Phasing Sets History sheet');
+    historySheet.setColumnWidth(4, 60);
+    historySheet.setColumnWidth(5, 100);
+    historySheet.setColumnWidth(6, 120);
+    historySheet.setColumnWidth(7, 150);
+    historySheet.setColumnWidth(8, 200);
+    Logger.log('Created Phasing Sets History sheet with KV column');
   } else {
-    // Check if Notes column exists, add if missing
-    var existingHeaders = historySheet.getRange(1, 1, 1, 7).getValues()[0];
-    if (String(existingHeaders[6]).toLowerCase().trim() !== 'notes') {
-      historySheet.getRange(1, 7).setValue('Notes')
+    // Check if KV column exists (column 4), add if missing
+    var existingHeaders = historySheet.getRange(1, 1, 1, 8).getValues()[0];
+    if (String(existingHeaders[3]).toLowerCase().trim() !== 'kv') {
+      // Need to insert KV column - shift data right and add header
+      var lastRow = historySheet.getLastRow();
+      if (lastRow > 1) {
+        // Shift columns D onwards (Serial #, Location, Assigned To, Notes) right by 1
+        var dataToShift = historySheet.getRange(1, 4, lastRow, 4).getValues();
+        historySheet.getRange(1, 5, lastRow, 4).setValues(dataToShift);
+      }
+      // Add KV header
+      historySheet.getRange(1, 4).setValue('KV')
         .setFontWeight('bold')
         .setBackground('#00838f')
         .setFontColor('#ffffff')
         .setHorizontalAlignment('center');
-      historySheet.setColumnWidth(7, 200);
+      historySheet.setColumnWidth(4, 60);
+      Logger.log('Added KV column to Phasing Sets History');
+    }
+    // Check if Notes column exists at position 8
+    if (String(existingHeaders[7]).toLowerCase().trim() !== 'notes') {
+      historySheet.getRange(1, 8).setValue('Notes')
+        .setFontWeight('bold')
+        .setBackground('#00838f')
+        .setFontColor('#ffffff')
+        .setHorizontalAlignment('center');
+      historySheet.setColumnWidth(8, 200);
       Logger.log('Added Notes column to Phasing Sets History');
     }
   }
@@ -21087,7 +21110,8 @@ function generatePhasingSetSwaps(silent) {
     var row = phasingSetsData[i];
     var itemNum = (row[COLS.PHASING_SETS.ITEM_NUM - 1] || '').toString().trim();
     var model = (row[COLS.PHASING_SETS.MODEL - 1] || '').toString().trim();
-    var serialNum = (row[2] || '').toString().trim(); // Column C - Serial #
+    var kv = (row[COLS.PHASING_SETS.KV - 1] || '').toString().trim();
+    var serialNum = (row[COLS.PHASING_SETS.SERIAL_NUM - 1] || '').toString().trim();
     var calibrationDate = row[COLS.PHASING_SETS.CALIBRATION_DATE - 1];
     var dateAssigned = row[COLS.PHASING_SETS.DATE_ASSIGNED - 1];
     var location = (row[COLS.PHASING_SETS.LOCATION - 1] || '').toString().trim();
@@ -21114,6 +21138,7 @@ function generatePhasingSetSwaps(silent) {
       availableSets.push({
         itemNum: itemNum,
         model: model,
+        kv: kv,
         serialNum: serialNum,
         rowIndex: i + 1
       });
@@ -21128,6 +21153,7 @@ function generatePhasingSetSwaps(silent) {
         setsNeedingReplacement.push({
           itemNum: itemNum,
           model: model,
+          kv: kv,
           serialNum: serialNum,
           calibrationDate: calibrationDate,
           dateAssigned: dateAssigned,
@@ -21172,12 +21198,12 @@ function generatePhasingSetSwaps(silent) {
   var currentRow = 1;
 
   // Title row
-  swapsSheet.getRange(currentRow, 1, 1, 10).merge().setValue('⚡ Phasing Set Replacements - ' + Utilities.formatDate(now, tz, 'MMMM yyyy'));
-  swapsSheet.getRange(currentRow, 1, 1, 10).setFontWeight('bold').setFontSize(14).setBackground('#e0f7fa').setFontColor('#00838f').setHorizontalAlignment('center');
+  swapsSheet.getRange(currentRow, 1, 1, 11).merge().setValue('⚡ Phasing Set Replacements - ' + Utilities.formatDate(now, tz, 'MMMM yyyy'));
+  swapsSheet.getRange(currentRow, 1, 1, 11).setFontWeight('bold').setFontSize(14).setBackground('#e0f7fa').setFontColor('#00838f').setHorizontalAlignment('center');
   currentRow += 2;
 
   // Headers
-  var headers = ['Item #', 'Model', 'Serial #', 'Calibration Date', 'Replacement Date', 'Days Left', 'Location', 'Assigned To', 'Status', 'Notes'];
+  var headers = ['Item #', 'Model', 'KV', 'Serial #', 'Calibration Date', 'Replacement Date', 'Days Left', 'Location', 'Assigned To', 'Status', 'Notes'];
   swapsSheet.getRange(currentRow, 1, 1, headers.length).setValues([headers]);
   swapsSheet.getRange(currentRow, 1, 1, headers.length).setFontWeight('bold').setBackground('#00838f').setFontColor('#ffffff').setHorizontalAlignment('center');
   swapsSheet.setFrozenRows(currentRow);
@@ -21188,6 +21214,7 @@ function generatePhasingSetSwaps(silent) {
     var rowData = [
       pset.itemNum,
       pset.model,
+      pset.kv,
       pset.serialNum,
       pset.calibrationDate instanceof Date ? Utilities.formatDate(pset.calibrationDate, tz, 'MM/dd/yyyy') : '',
       pset.replacementDate instanceof Date ? Utilities.formatDate(pset.replacementDate, tz, 'MM/dd/yyyy') : '',
