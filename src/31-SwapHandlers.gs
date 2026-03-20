@@ -117,7 +117,9 @@ function handlePickedCheckboxChange(ss, swapSheet, inventorySheet, editedRow, ne
       if (changeOutDate && changeOutDate !== 'N/A') {
         var invColChangeOutDate = 9;
         var changeOutCell = inventorySheet.getRange(pickListRow, invColChangeOutDate);
-        changeOutCell.setNumberFormat('MM/dd/yyyy');
+        try {
+          changeOutCell.setNumberFormat('MM/dd/yyyy');
+        } catch (fmtErr) { /* Ignore format errors on typed columns */ }
         changeOutCell.setValue(changeOutDate);
         logEvent('Stage 2: Set Change Out Date to ' + changeOutDate + ' for item ' + pickListNum);
       }
@@ -162,11 +164,13 @@ function handlePickedCheckboxChange(ss, swapSheet, inventorySheet, editedRow, ne
           var revertChangeOutDate = calculateChangeOutDate(stage1Date, revertLocation, revertAssignedTo, isSleeve);
           if (revertChangeOutDate) {
             var revertChangeOutCell = inventorySheet.getRange(pickListRow, invColChangeOutDate);
-            if (revertChangeOutDate === 'N/A') {
-              revertChangeOutCell.setNumberFormat('@');
-            } else {
-              revertChangeOutCell.setNumberFormat('MM/dd/yyyy');
-            }
+            try {
+              if (revertChangeOutDate === 'N/A') {
+                revertChangeOutCell.setNumberFormat('@');
+              } else {
+                revertChangeOutCell.setNumberFormat('MM/dd/yyyy');
+              }
+            } catch (fmtErr) { /* Ignore format errors on typed columns */ }
             revertChangeOutCell.setValue(revertChangeOutDate);
             logEvent('Stage 5: Reverted Change Out Date to ' + revertChangeOutDate + ' for item ' + pickListNum);
           }

@@ -70,10 +70,15 @@
       width: auto;
       margin-right: 5px;
     }
+    .hint {
+      font-size: 11px;
+      color: #666;
+      margin-top: 3px;
+    }
   </style>
 </head>
 <body>
-  <h2>📦 New <?= itemType ?> Detected</h2>
+  <h2><? if (sheetName === 'Blankets') { ?>🧱 New Blanket Detected<? } else { ?>📦 New <?= itemType ?> Detected<? } ?></h2>
 
   <div class="item-info">
     <strong>Item #:</strong> <?= itemNum ?><br>
@@ -81,9 +86,29 @@
   </div>
 
   <form id="newItemForm">
+    <? if (sheetName === 'Blankets') { ?>
+    <!-- Blankets: Type field instead of Size -->
+    <div class="form-group">
+      <label>Type:</label>
+      <select id="size" name="size">
+        <option value="">Select type...</option>
+        <option value="Regular" <?= itemNum.toString().toUpperCase().charAt(0) === 'B' ? 'selected' : '' ?>>Regular</option>
+        <option value="Split" <?= itemNum.toString().toUpperCase().charAt(0) === 'S' ? 'selected' : '' ?>>Split</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>Class:</label>
+      <select id="itemClass" name="itemClass">
+        <option value="">Select class...</option>
+        <option value="4" selected>Class 4</option>
+        <option value="2">Class 2</option>
+      </select>
+    </div>
+    <? } else if (sheetName === 'Gloves') { ?>
+    <!-- Gloves: Size field -->
     <div class="form-group">
       <label>Size:</label>
-      <? if (sheetName === 'Gloves') { ?>
       <select id="size" name="size">
         <option value="">Select size...</option>
         <option value="8">8</option>
@@ -96,14 +121,6 @@
         <option value="11.5">11.5</option>
         <option value="12">12</option>
       </select>
-      <? } else { ?>
-      <select id="size" name="size">
-        <option value="">Select size...</option>
-        <option value="Regular">Regular</option>
-        <option value="Large">Large</option>
-        <option value="X-Large">X-Large</option>
-      </select>
-      <? } ?>
     </div>
 
     <div class="form-group">
@@ -111,10 +128,32 @@
       <select id="itemClass" name="itemClass">
         <option value="">Select class...</option>
         <option value="0">Class 0</option>
-        <option value="2">Class 2</option>
+        <option value="2" selected>Class 2</option>
         <option value="3">Class 3</option>
       </select>
     </div>
+    <? } else { ?>
+    <!-- Sleeves: Size field -->
+    <div class="form-group">
+      <label>Size:</label>
+      <select id="size" name="size">
+        <option value="">Select size...</option>
+        <option value="Regular">Regular</option>
+        <option value="Large">Large</option>
+        <option value="X-Large">X-Large</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>Class:</label>
+      <select id="itemClass" name="itemClass">
+        <option value="">Select class...</option>
+        <option value="0">Class 0</option>
+        <option value="2" selected>Class 2</option>
+        <option value="3">Class 3</option>
+      </select>
+    </div>
+    <? } ?>
 
     <div class="form-group">
       <label>Test Date:</label>
@@ -123,21 +162,34 @@
 
     <div class="form-group">
       <label>Location:</label>
-      <input type="text" id="location" name="location" placeholder="Enter location (e.g., Helena)">
+      <input type="text" id="location" name="location" placeholder="Enter location (e.g., Helena)" value="Helena">
     </div>
 
     <div class="form-group">
       <label>Status:</label>
+      <? if (sheetName === 'Blankets') { ?>
       <select id="status" name="status">
-        <option value="On Shelf">On Shelf</option>
+        <option value="On Shelf" selected>On Shelf</option>
+        <option value="In Service">In Service</option>
+        <option value="In Testing">In Testing</option>
+        <option value="Failed Rubber">Failed Rubber</option>
+        <option value="Lost">Lost</option>
+      </select>
+      <? } else { ?>
+      <select id="status" name="status">
+        <option value="On Shelf" selected>On Shelf</option>
         <option value="In Testing">In Testing</option>
         <option value="Assigned">Assigned</option>
+        <option value="Failed Rubber">Failed Rubber</option>
+        <option value="Lost">Lost</option>
       </select>
+      <? } ?>
     </div>
 
     <div class="form-group">
-      <label>Assigned To (optional):</label>
-      <input type="text" id="assignedTo" name="assignedTo" placeholder="Employee name if assigned">
+      <label>Assigned To:</label>
+      <input type="text" id="assignedTo" name="assignedTo" placeholder="Employee name or leave blank for On Shelf" value="">
+      <div class="hint">Enter employee name to auto-set Status to Assigned and lookup their location</div>
     </div>
 
     <hr style="margin: 20px 0;">
@@ -158,14 +210,106 @@
   </form>
 
   <script>
+    var sheetName = '<?= sheetName ?>';
+    var employeeLocations = {}; // Cache for employee locations
+
+    // Load employee locations when dialog opens
+    google.script.run
+      .withSuccessHandler(function(data) {
+        if (data) {
+          employeeLocations = data;
+          console.log('Loaded ' + Object.keys(data).length + ' employee locations');
+        } else {
+          console.log('No employee locations returned');
+        }
+      })
+      .withFailureHandler(function(err) {
+        console.error('Failed to load employee locations: ' + err);
+      })
+      .getEmployeeLocationsMap();
+
+    // Function to auto-update Status and Location based on Assigned To value
+    function autoUpdateFromAssignedTo() {
+      var assignedTo = document.getElementById('assignedTo').value.trim();
+      var statusSelect = document.getElementById('status');
+      var locationInput = document.getElementById('location');
+
+      if (assignedTo === '') return; // Don't do anything if empty
+
+      // Define status values that are not employee names
+      var statusValueMap = {
+        'on shelf': 'On Shelf',
+        'in testing': 'In Testing',
+        'in service': 'In Service',
+        'failed': 'Failed Rubber',
+        'failed rubber': 'Failed Rubber',
+        'lost': 'Lost',
+        'ready for delivery': 'Ready For Delivery',
+        'ready for test': 'Ready For Test'
+      };
+
+      var assignedToLower = assignedTo.toLowerCase();
+      var isStatusValue = statusValueMap.hasOwnProperty(assignedToLower);
+
+      console.log('Assigned To: "' + assignedTo + '", isStatusValue: ' + isStatusValue);
+
+      if (isStatusValue) {
+        // This is a status value - set the Status dropdown to match
+        var targetStatus = statusValueMap[assignedToLower];
+        console.log('Status value detected, setting Status to: ' + targetStatus);
+        statusSelect.value = targetStatus;
+
+        // Clear the Assigned To field and put the status value there for the form submission
+        // Actually, keep it as is - the backend will handle it
+      } else {
+        // This looks like an employee name
+        // Set Status to Assigned (or In Service for Blankets)
+        if (sheetName === 'Blankets') {
+          statusSelect.value = 'In Service';
+        } else {
+          statusSelect.value = 'Assigned';
+        }
+        console.log('Employee name detected, set Status to: ' + statusSelect.value);
+
+        // Look up employee location
+        var empNameLower = assignedTo.toLowerCase();
+        console.log('Looking up location for: ' + empNameLower);
+        console.log('Available employees: ' + Object.keys(employeeLocations).length);
+
+        if (employeeLocations[empNameLower]) {
+          locationInput.value = employeeLocations[empNameLower];
+          console.log('Set Location to: ' + employeeLocations[empNameLower]);
+        } else {
+          console.log('Employee not found in locations map');
+        }
+      }
+    }
+
+    // Auto-update Status and Location when Assigned To changes (on blur and input)
+    document.getElementById('assignedTo').addEventListener('blur', autoUpdateFromAssignedTo);
+    document.getElementById('assignedTo').addEventListener('input', function() {
+      // Debounce - only run after user stops typing for 500ms
+      clearTimeout(this.autoUpdateTimer);
+      this.autoUpdateTimer = setTimeout(autoUpdateFromAssignedTo, 500);
+    });
+
     function submitForm() {
+      var assignedTo = document.getElementById('assignedTo').value.trim();
+      var status = document.getElementById('status').value;
+
+      // If Assigned To is empty, default to "On Shelf" status value
+      if (assignedTo === '') {
+        assignedTo = 'On Shelf';
+        status = 'On Shelf';
+      }
+
       var formData = {
         size: document.getElementById('size').value,
         itemClass: document.getElementById('itemClass').value,
         testDate: document.getElementById('testDate').value,
         location: document.getElementById('location').value,
-        status: document.getElementById('status').value,
-        assignedTo: document.getElementById('assignedTo').value,
+        status: status,
+        assignedTo: assignedTo,
         itemSource: document.querySelector('input[name="itemSource"]:checked').value
       };
 
@@ -176,9 +320,8 @@
         .withFailureHandler(function(err) {
           alert('Error: ' + err);
         })
-        .processNewItemDialogSubmit(formData, '<?= itemNum ?>', '<?= sheetName ?>', <?= rowNum ?>)
+        .processNewItemDialogSubmit(formData, '<?= itemNum ?>', '<?= sheetName ?>', <?= rowNum ?>);
     }
   </script>
 </body>
 </html>
-

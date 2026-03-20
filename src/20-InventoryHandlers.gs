@@ -149,11 +149,13 @@ function handleInventoryAssignedToChange(ss, sheet, sheetName, editedRow, newVal
         var changeOutDate = calculateChangeOutDate(dateAssigned, newLocation, assignedTo, isSleeve);
         if (changeOutDate) {
           var changeOutCell = sheet.getRange(editedRow, colChangeOutDate);
-          if (changeOutDate === 'N/A') {
-            changeOutCell.setNumberFormat('@');
-          } else {
-            changeOutCell.setNumberFormat('MM/dd/yyyy');
-          }
+          try {
+            if (changeOutDate === 'N/A') {
+              changeOutCell.setNumberFormat('@');
+            } else {
+              changeOutCell.setNumberFormat('MM/dd/yyyy');
+            }
+          } catch (fmtErr) { /* Ignore format errors on typed columns */ }
           changeOutCell.setValue(changeOutDate);
         }
       }

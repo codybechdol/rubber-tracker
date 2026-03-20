@@ -548,6 +548,11 @@
 
             console.log("Logs Created: JHA=" + jhaCount + ", Weekly=" + weeklyCount + ", Monthly=" + monthlyCount);
 
+            // Log skip reasons for debugging
+            if (result.skipReasons) {
+              console.log("Skip Reasons:", JSON.stringify(result.skipReasons));
+            }
+
             if (totalLogs > 0) {
               logsInfo = "<div class='info'>📋 Logged to sheets: " + totalLogs + " total (JHA: " + jhaCount + ", Weekly: " + weeklyCount + ", Monthly: " + monthlyCount + ")</div>";
             } else {

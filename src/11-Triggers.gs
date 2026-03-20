@@ -307,11 +307,13 @@ function onEdit(e) {
         var changeOutDate = calculateChangeOutDate(dateAssigned, location, assignedTo, isSleeve);
         if (changeOutDate) {
           var changeOutCell = sheet.getRange(editedRow, 9);  // Column I
-          if (changeOutDate === 'N/A') {
-            changeOutCell.setNumberFormat('@');
-          } else {
-            changeOutCell.setNumberFormat('MM/dd/yyyy');
-          }
+          try {
+            if (changeOutDate === 'N/A') {
+              changeOutCell.setNumberFormat('@');
+            } else {
+              changeOutCell.setNumberFormat('MM/dd/yyyy');
+            }
+          } catch (fmtErr) { /* Ignore format errors on typed columns */ }
           changeOutCell.setValue(changeOutDate);
 
           // Show confirmation toast
@@ -321,7 +323,7 @@ function onEdit(e) {
       return;  // Don't call processEdit again, we handled it
     }
 
-    // Handle Blankets sheet - Test Date (column D) changes update Change Out Date
+    // Handle Blankets sheet - Test Date (column D) or Date Assigned (column E) changes update Change Out Date
     if (sheetName === SHEET_BLANKETS && (editedCol === 4 || editedCol === 5)) {
       // Column D (4) = Test Date, Column E (5) = Date Assigned
       // Change Out Date is based on Test Date + 12 months for blankets
@@ -334,11 +336,13 @@ function onEdit(e) {
         var changeOutDate = calculateBlanketChangeOut(testDate, assignedTo, location);
         if (changeOutDate) {
           var changeOutCell = sheet.getRange(editedRow, 9);  // Column I
-          if (changeOutDate === 'N/A') {
-            changeOutCell.setNumberFormat('@');
-          } else {
-            changeOutCell.setNumberFormat('MM/dd/yyyy');
-          }
+          try {
+            if (changeOutDate === 'N/A') {
+              changeOutCell.setNumberFormat('@');
+            } else {
+              changeOutCell.setNumberFormat('MM/dd/yyyy');
+            }
+          } catch (fmtErr) { /* Ignore format errors on typed columns */ }
           changeOutCell.setValue(changeOutDate);
 
           // Auto-detect and set Type from item number if not set
@@ -353,6 +357,41 @@ function onEdit(e) {
           ss.toast('Change Out Date updated to ' + changeOutDate, 'Auto-Calc', 3);
         }
       }
+      return;  // Don't call processEdit again, we handled it
+    }
+
+    // Handle Blankets sheet - Assigned To (column H) changes auto-populate Location
+    if (sheetName === SHEET_BLANKETS && editedCol === 8 && editedRow >= 2) {
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      handleBlanketAssignedToChange(ss, sheet, editedRow, e.value);
+      return;  // Don't call processEdit again, we handled it
+    }
+
+    // Handle HV Testers sheet - Assigned To (column H) changes auto-populate Status and Location
+    if (sheetName === SHEET_HV_TESTERS && editedCol === 8 && editedRow >= 2) {
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      handleHVTesterAssignedToChange(ss, sheet, editedRow, e.value);
+      return;  // Don't call processEdit again, we handled it
+    }
+
+    // Handle HV Testers sheet - Calibration Date (column D) changes auto-calculate Change Out Date
+    if (sheetName === SHEET_HV_TESTERS && editedCol === 4 && editedRow >= 2) {
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      handleHVTesterCalibrationDateChange(ss, sheet, editedRow, e.value);
+      return;  // Don't call processEdit again, we handled it
+    }
+
+    // Handle Phasing Sets sheet - Assigned To (column H) changes auto-populate Status and Location
+    if (sheetName === SHEET_PHASING_SETS && editedCol === 8 && editedRow >= 2) {
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      handlePhasingSetAssignedToChange(ss, sheet, editedRow, e.value);
+      return;  // Don't call processEdit again, we handled it
+    }
+
+    // Handle Phasing Sets sheet - Calibration Date (column D) changes auto-calculate Change Out Date
+    if (sheetName === SHEET_PHASING_SETS && editedCol === 4 && editedRow >= 2) {
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      handlePhasingSetCalibrationDateChange(ss, sheet, editedRow, e.value);
       return;  // Don't call processEdit again, we handled it
     }
 
@@ -443,12 +482,51 @@ function onEditHandler(e) {
       var oldItemNum = e.oldValue;
       var itemNumStr = String(newItemNum).trim();
 
-      // For Blankets, auto-detect and set Type from item number
+      // For Blankets, auto-detect and set Type, Class, Status, Location, Assigned To
+      // Wrapped in try-catch so validation errors don't prevent the dialog from showing
       if (sheetName === 'Blankets' && newItemNum && itemNumStr !== '') {
-        var detectedType = detectBlanketType(itemNumStr);
-        var currentType = sheet.getRange(editedRow, 2).getValue(); // Column B = Type
-        if (!currentType) {
-          sheet.getRange(editedRow, 2).setValue(detectedType);
+        try {
+          // Auto-detect and set Type from item number
+          var detectedType = detectBlanketType(itemNumStr);
+          var currentType = sheet.getRange(editedRow, 2).getValue(); // Column B = Type
+          if (!currentType) {
+            sheet.getRange(editedRow, 2).setValue(detectedType);
+          }
+
+          // Auto-set Class to '4' if empty
+          var currentClass = sheet.getRange(editedRow, 3).getValue(); // Column C = Class
+          if (!currentClass) {
+            sheet.getRange(editedRow, 3).setValue('4');
+          }
+
+          // Auto-set Location to 'Helena' if empty
+          var currentLocation = sheet.getRange(editedRow, 6).getValue(); // Column F = Location
+          if (!currentLocation) {
+            sheet.getRange(editedRow, 6).setValue('Helena');
+          }
+
+          // Auto-set Status - try 'On Shelf' first, fall back to 'Available' for old validation
+          var currentStatus = sheet.getRange(editedRow, 7).getValue(); // Column G = Status
+          if (!currentStatus) {
+            try {
+              sheet.getRange(editedRow, 7).setValue('On Shelf');
+            } catch (statusErr) {
+              // Old validation might not have 'On Shelf', try 'Available'
+              try {
+                sheet.getRange(editedRow, 7).setValue('Available');
+              } catch (statusErr2) {
+                Logger.log('Could not set Status - validation mismatch');
+              }
+            }
+          }
+
+          // Auto-set Assigned To to 'On Shelf' if empty
+          var currentAssignedTo = sheet.getRange(editedRow, 8).getValue(); // Column H = Assigned To
+          if (!currentAssignedTo) {
+            sheet.getRange(editedRow, 8).setValue('On Shelf');
+          }
+        } catch (autoPopErr) {
+          Logger.log('Blankets auto-population error (will show dialog): ' + autoPopErr);
         }
       }
 
@@ -459,9 +537,15 @@ function onEditHandler(e) {
         Logger.log('Item number cleared: ' + oldItemNum + ' from ' + sheetName);
         handleItemRemoval(String(oldItemNum).trim(), sheetName);
       }
-      // Check if this is a new item number
+      // Check for DUPLICATE item numbers first (before checking if new)
       else if (newItemNum && itemNumStr !== '') {
-        if (isNewItemNumber(itemNumStr, sheetName)) {
+        // Check if this item number already exists in the sheet
+        if (handleDuplicateItemNumber(itemNumStr, sheetName, editedRow)) {
+          Logger.log('Duplicate item number blocked: ' + itemNumStr + ' in ' + sheetName);
+          // Duplicate was found and cleared - don't continue with new item processing
+        }
+        // Check if this is a new item number (not a duplicate)
+        else if (isNewItemNumber(itemNumStr, sheetName)) {
           Logger.log('New item number detected: ' + itemNumStr + ' in ' + sheetName);
           promptNewItemSource(itemNumStr, sheetName, editedRow);
         }
@@ -514,11 +598,13 @@ function onEditHandler(e) {
 
         if (changeOutDate) {
           var changeOutCell = sheet.getRange(editedRow, 9);  // Column I = Change Out Date
-          if (changeOutDate === 'N/A') {
-            changeOutCell.setNumberFormat('@');
-          } else {
-            changeOutCell.setNumberFormat('MM/dd/yyyy');
-          }
+          try {
+            if (changeOutDate === 'N/A') {
+              changeOutCell.setNumberFormat('@');
+            } else {
+              changeOutCell.setNumberFormat('MM/dd/yyyy');
+            }
+          } catch (fmtErr) { /* Ignore format errors on typed columns */ }
           changeOutCell.setValue(changeOutDate);
           Logger.log('Set Change Out Date to ' + changeOutDate);
 
@@ -572,9 +658,9 @@ function processEdit(e) {
   // Ignore header rows
   if (editedRow < 2) return;
 
-  // Only process edits in Glove Swaps, Sleeve Swaps, Gloves, Sleeves, Employees, Employee History, or Reclaims tabs
-  if (sheetName !== SHEET_GLOVE_SWAPS && sheetName !== SHEET_SLEEVE_SWAPS &&
-      sheetName !== SHEET_GLOVES && sheetName !== SHEET_SLEEVES &&
+  // Only process edits in Glove Swaps, Sleeve Swaps, Blanket Swaps, Gloves, Sleeves, Blankets, Employees, Employee History, or Reclaims tabs
+  if (sheetName !== SHEET_GLOVE_SWAPS && sheetName !== SHEET_SLEEVE_SWAPS && sheetName !== SHEET_BLANKET_SWAPS &&
+      sheetName !== SHEET_GLOVES && sheetName !== SHEET_SLEEVES && sheetName !== SHEET_BLANKETS &&
       sheetName !== SHEET_EMPLOYEES && sheetName !== 'Employee History' &&
       sheetName !== SHEET_RECLAIMS) {
     return;
@@ -665,11 +751,13 @@ function processEdit(e) {
           var changeOutDate = calculateChangeOutDate(dateAssigned, location, assignedTo, isSleeve);
           if (changeOutDate) {
             var changeOutCell = sheet.getRange(editedRow, COLS.INVENTORY.CHANGE_OUT_DATE);
-            if (changeOutDate === 'N/A') {
-              changeOutCell.setNumberFormat('@');
-            } else {
-              changeOutCell.setNumberFormat('MM/dd/yyyy');
-            }
+            try {
+              if (changeOutDate === 'N/A') {
+                changeOutCell.setNumberFormat('@');
+              } else {
+                changeOutCell.setNumberFormat('MM/dd/yyyy');
+              }
+            } catch (fmtErr) { /* Ignore format errors on typed columns */ }
             changeOutCell.setValue(changeOutDate);
             logEvent('Set Change Out Date to ' + changeOutDate + ' for row ' + editedRow, 'DEBUG');
           }
@@ -683,6 +771,122 @@ function processEdit(e) {
     // Handle Notes column edits (LOST-LOCATE highlighting)
     if (editedCol === notesCol) {
       handleNotesChange(ss, sheet, sheetName, editedRow, newValue);
+      return;
+    }
+  }
+
+  // Handle Blankets tab edits (Assigned To, Status, Test Date columns)
+  if (sheetName === SHEET_BLANKETS) {
+    var blanketAssignedToCol = 8;   // Column H = Assigned To
+    var blanketTestDateCol = 4;     // Column D = Test Date
+    var blanketStatusCol = 7;       // Column G = Status
+    var blanketLocationCol = 6;     // Column F = Location
+    var blanketClassCol = 3;        // Column C = Class
+    var blanketNotesCol = 11;       // Column K = Notes
+
+    logEvent('processEdit: Blankets sheet, editedCol=' + editedCol, 'DEBUG');
+
+    // Handle Status changes - when 'On Shelf', auto-populate Location and Assigned To
+    if (editedCol === blanketStatusCol) {
+      var statusValue = String(newValue || '').trim();
+      if (statusValue === 'On Shelf') {
+        sheet.getRange(editedRow, blanketLocationCol).setValue('Helena');
+        sheet.getRange(editedRow, blanketAssignedToCol).setValue('On Shelf');
+        ss.toast('Location and Assigned To set to "On Shelf" / "Helena"', '📍 Auto-Updated', 3);
+      }
+      return;
+    }
+
+    // Handle Assigned To changes - auto-populate Location from Employees sheet
+    if (editedCol === blanketAssignedToCol) {
+      handleBlanketAssignedToChange(ss, sheet, editedRow, newValue);
+      return;
+    }
+
+    // Handle Test Date changes - update Change Out Date
+    if (editedCol === blanketTestDateCol) {
+      var testDate = sheet.getRange(editedRow, 4).getValue();      // Column D
+      var location = sheet.getRange(editedRow, 6).getValue();      // Column F
+      var assignedTo = sheet.getRange(editedRow, 8).getValue();    // Column H
+
+      if (testDate) {
+        var changeOutDate = calculateBlanketChangeOut(testDate, assignedTo, location);
+        if (changeOutDate) {
+          var changeOutCell = sheet.getRange(editedRow, 9);  // Column I
+          try {
+            if (changeOutDate === 'N/A') {
+              changeOutCell.setNumberFormat('@');
+            } else {
+              changeOutCell.setNumberFormat('MM/dd/yyyy');
+            }
+          } catch (fmtErr) { /* Ignore format errors on typed columns */ }
+          changeOutCell.setValue(changeOutDate);
+        }
+      }
+      return;
+    }
+  }
+
+  // Handle HV Testers sheet edits - Assigned To (column H) changes
+  if (sheetName === SHEET_HV_TESTERS) {
+    var hvAssignedToCol = 8;  // Column H = Assigned To
+    var hvStatusCol = 7;      // Column G = Status
+    var hvLocationCol = 6;    // Column F = Location
+
+    logEvent('processEdit: HV Testers sheet, editedCol=' + editedCol, 'DEBUG');
+
+    // Handle Status changes - when 'On Shelf', auto-populate Location and Assigned To
+    if (editedCol === hvStatusCol) {
+      var statusValue = String(newValue || '').trim();
+      if (statusValue === 'On Shelf') {
+        sheet.getRange(editedRow, hvLocationCol).setValue('Helena');
+        sheet.getRange(editedRow, hvAssignedToCol).setValue('On Shelf');
+        ss.toast('Location and Assigned To set to "On Shelf" / "Helena"', '📍 Auto-Updated', 3);
+      }
+      return;
+    }
+
+    // Handle Assigned To changes - auto-populate Location and Status from Employees sheet
+    if (editedCol === hvAssignedToCol) {
+      handleHVTesterAssignedToChange(ss, sheet, editedRow, newValue);
+      return;
+    }
+
+    // Handle Calibration Date changes - auto-calculate Change Out Date (Calibration + 10 years)
+    if (editedCol === 4) {  // Column D = Calibration Date
+      handleHVTesterCalibrationDateChange(ss, sheet, editedRow, newValue);
+      return;
+    }
+  }
+
+  // Handle Phasing Sets sheet edits - Assigned To (column H) changes
+  if (sheetName === SHEET_PHASING_SETS) {
+    var psAssignedToCol = 8;  // Column H = Assigned To
+    var psStatusCol = 7;      // Column G = Status
+    var psLocationCol = 6;    // Column F = Location
+
+    logEvent('processEdit: Phasing Sets sheet, editedCol=' + editedCol, 'DEBUG');
+
+    // Handle Status changes - when 'On Shelf', auto-populate Location and Assigned To
+    if (editedCol === psStatusCol) {
+      var statusValue = String(newValue || '').trim();
+      if (statusValue === 'On Shelf') {
+        sheet.getRange(editedRow, psLocationCol).setValue('Helena');
+        sheet.getRange(editedRow, psAssignedToCol).setValue('On Shelf');
+        ss.toast('Location and Assigned To set to "On Shelf" / "Helena"', '📍 Auto-Updated', 3);
+      }
+      return;
+    }
+
+    // Handle Assigned To changes - auto-populate Location and Status from Employees sheet
+    if (editedCol === psAssignedToCol) {
+      handlePhasingSetAssignedToChange(ss, sheet, editedRow, newValue);
+      return;
+    }
+
+    // Handle Calibration Date changes - auto-calculate Change Out Date (Calibration + 10 years)
+    if (editedCol === 4) {  // Column D = Calibration Date
+      handlePhasingSetCalibrationDateChange(ss, sheet, editedRow, newValue);
       return;
     }
   }
@@ -749,6 +953,30 @@ function processEdit(e) {
       // Date Changed column edited - read actual cell value to get Date object
       var cellValue = sheet.getRange(editedRow, 10).getValue();
       handleDateChangedEdit(ss, sheet, inventorySheet, editedRow, cellValue, isGloveSwaps);
+    }
+  }
+
+
+  // Handle Blanket Swaps tab edits
+  if (sheetName === SHEET_BLANKET_SWAPS) {
+    var blanketsSheet = ss.getSheetByName(SHEET_BLANKETS);
+
+    if (!blanketsSheet) {
+      logEvent('processEdit: Blankets sheet not found', 'ERROR');
+      return;
+    }
+
+    // Column G (7) = Pick List Item # (manual edit), Column I (9) = Picked checkbox, Column J (10) = Date Changed
+    if (editedCol === 7) {
+      // Pick List Item # manually edited
+      handleBlanketPickListManualEdit(ss, sheet, blanketsSheet, editedRow, newValue);
+    } else if (editedCol === 9) {
+      // Picked checkbox changed
+      handleBlanketPickedCheckboxChange(ss, sheet, blanketsSheet, editedRow, newValue);
+    } else if (editedCol === 10) {
+      // Date Changed column edited - read actual cell value to get Date object
+      var cellValue = sheet.getRange(editedRow, 10).getValue();
+      handleBlanketDateChangedEdit(ss, sheet, blanketsSheet, editedRow, cellValue);
     }
   }
 }

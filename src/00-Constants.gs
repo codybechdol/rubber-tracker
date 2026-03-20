@@ -115,13 +115,13 @@ var COLS = {
   HV_TESTERS: {
     ITEM_NUM: 1,        // A - Equipment identifier
     MODEL: 2,           // B - Equipment model
-    UNUSED_C: 3,        // C - (unused)
+    SERIAL_NUM: 3,      // C - Serial number
     CALIBRATION_DATE: 4,// D - Last calibration date
     DATE_ASSIGNED: 5,   // E
     LOCATION: 6,        // F
     STATUS: 7,          // G
     ASSIGNED_TO: 8,     // H - Crew Lead
-    REPLACEMENT_DATE: 9,// I - Calibration + 10 years
+    CHANGE_OUT_DATE: 9, // I - Calibration + 10 years
     PICKED_FOR: 10,     // J
     NOTES: 11           // K
   },
@@ -131,13 +131,13 @@ var COLS = {
   PHASING_SETS: {
     ITEM_NUM: 1,        // A - Equipment identifier
     MODEL: 2,           // B - Equipment model
-    UNUSED_C: 3,        // C - (unused)
+    SERIAL_NUM: 3,      // C - Serial number
     CALIBRATION_DATE: 4,// D - Last calibration date
     DATE_ASSIGNED: 5,   // E
     LOCATION: 6,        // F
     STATUS: 7,          // G
     ASSIGNED_TO: 8,     // H - Crew Lead
-    REPLACEMENT_DATE: 9,// I - Calibration + 10 years
+    CHANGE_OUT_DATE: 9, // I - Calibration + 10 years
     PICKED_FOR: 10,     // J
     NOTES: 11           // K
   },

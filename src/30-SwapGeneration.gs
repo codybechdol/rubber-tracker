@@ -103,11 +103,29 @@ function generateAllReports() {
     ss.toast('Updating Inventory Reports...', '📊 Generate All Reports', 3);
     updateInventoryReports();
 
+    // Update Training Tracking crew leads to reflect current assignments
+    ss.toast('Updating Training Tracking Crew Leads...', '📊 Generate All Reports', 3);
+    var crewLeadResults = null;
+    try {
+      if (typeof updateTrainingTrackingCrewLeadsSilent === 'function') {
+        crewLeadResults = updateTrainingTrackingCrewLeadsSilent();
+        Logger.log('generateAllReports: Crew lead update returned: ' + JSON.stringify(crewLeadResults));
+      } else {
+        Logger.log('generateAllReports: updateTrainingTrackingCrewLeadsSilent is not defined as a function');
+      }
+    } catch (crewLeadError) {
+      Logger.log('generateAllReports: Error updating crew leads: ' + crewLeadError);
+    }
 
     logEvent('All reports generated.');
-    SpreadsheetApp.getUi().alert('✅ All reports generated successfully!' +
-      (upgradeResults && upgradeResults.totalUpgrades > 0 ?
-        '\n\n🔄 ' + upgradeResults.totalUpgrades + ' pick list item(s) upgraded to better options.' : ''));
+    var successMsg = '✅ All reports generated successfully!';
+    if (upgradeResults && upgradeResults.totalUpgrades > 0) {
+      successMsg += '\n\n🔄 ' + upgradeResults.totalUpgrades + ' pick list item(s) upgraded to better options.';
+    }
+    if (crewLeadResults && crewLeadResults.updatedRows > 0) {
+      successMsg += '\n\n👥 ' + crewLeadResults.updatedRows + ' Training Tracking crew lead(s) updated.';
+    }
+    SpreadsheetApp.getUi().alert(successMsg);
   } catch (e) {
     logEvent('Error in generateAllReports: ' + e, 'ERROR');
     SpreadsheetApp.getUi().alert('❌ Error generating reports: ' + e);

@@ -732,6 +732,97 @@ Notes: [Any notes]
 
 ## Completed Features Log
 
+### March 19, 2026
+- ✅ **Phase 2: HV Testers & Phasing Sets Equipment Tracking**
+  - **Goal:** Track HV Testers and Phasing Sets with 10-year replacement cycles
+  - **What was built:**
+    1. **HV Tester Swaps Generation**
+       - `generateHVTesterSwaps(silent)` - Scans HV Testers sheet for items approaching 10-year replacement date
+       - Shows items due within 365 days (1 year)
+       - Color-coded urgency: 🔴 OVERDUE (red), 🟠 Due Soon ≤90 days (orange), 🟡 Upcoming ≤180 days (yellow)
+       - Creates "HV Tester Swaps" sheet with replacement recommendations
+       - Tracks available testers "On Shelf" for replacements
+    2. **Phasing Set Swaps Generation**
+       - `generatePhasingSetSwaps(silent)` - Same logic as HV Testers
+       - Creates "Phasing Set Swaps" sheet
+       - Tracks available sets "On Shelf"
+    3. **Replacement Date Calculation**
+       - `calculateReplacementDate(calibrationDate)` - Adds 10 years to calibration date
+       - Uses `INTERVAL_CALIBRATION_YEARS = 10` constant from 00-Constants.gs
+       - Auto-updates Replacement Date column when generating swaps
+    4. **Sheet Navigation Functions**
+       - `openHVTestersSheet()` - Opens HV Testers sheet
+       - `openPhasingSetsSheet()` - Opens Phasing Sets sheet
+  - **Menu Items Added:**
+    - Glove Manager → 📊 Generate All Reports → ⚡ Generate HV Tester Swaps
+    - Glove Manager → 📊 Generate All Reports → ⚡ Generate Phasing Set Swaps
+    - Glove Manager → 🔧 Maintenance → 📦 Inventory → ⚡ View HV Testers
+    - Glove Manager → 🔧 Maintenance → 📦 Inventory → ⚡ View Phasing Sets
+  - **Sheet Structure (both HV Testers and Phasing Sets):**
+    | Item # | Model | Serial # | Calibration Date | Date Assigned | Location | Status | Assigned To | Replacement Date | Picked For | Notes |
+    - **Status values:** On Shelf, In Service
+    - **Replacement Date:** Auto-calculated as Calibration Date + 10 years
+  - **Constants Used (from 00-Constants.gs):**
+    - `SHEET_HV_TESTERS = 'HV Testers'`
+    - `SHEET_HV_TESTER_SWAPS = 'HV Tester Swaps'`
+    - `SHEET_HV_TESTERS_HISTORY = 'HV Testers History'`
+    - `SHEET_PHASING_SETS = 'Phasing Sets'`
+    - `SHEET_PHASING_SET_SWAPS = 'Phasing Set Swaps'`
+    - `SHEET_PHASING_SETS_HISTORY = 'Phasing Sets History'`
+    - `INTERVAL_CALIBRATION_YEARS = 10`
+    - `COLS.HV_TESTERS.*` and `COLS.PHASING_SETS.*` - Column indices
+  - **Files Modified:**
+    - `src/Code.gs` - Added ~400 lines of HV Tester and Phasing Set functions
+    - `src/Code.gs` - Added menu items to onOpen()
+  - **Impact:** 10-year replacement cycles for calibrated test equipment are now tracked automatically
+
+- ✅ **Menu Restructure - Monday Workflow Organization**
+  - **Goal:** Reorganize Glove Manager menu to match the Monday workflow steps from Quick Actions
+  - **New Menu Structure:**
+    1. 📱 Quick Actions (sidebar)
+    2. 📥 Import Crew Makeup (submenu with utilities)
+    3. 📊 Generate All Reports (submenu with utilities)
+    4. 🛡️ Process Safety Emails (submenu with utilities, logs, debug, cleanup)
+    5. 🎯 Generate Task Metadata (submenu with utilities)
+    6. 📅 Review & Schedule (submenu with training, crew visit, utilities)
+    7. 💾 Save & Backup (submenu with history, email reports)
+    8. 🔧 Maintenance (inventory, purchase orders, employees, sheets setup)
+    9. 🔍 Debug (diagnostic tools)
+  - **Key Changes:**
+    - Each workflow step now has its own top-level submenu
+    - Related functions grouped under 🔧 Utilities submenus
+    - Debug/diagnostic functions grouped under 🔍 Debug submenus
+    - Safety cleanup functions grouped under 🧹 Cleanup submenu
+    - Rarely-used functions moved to 🔧 Maintenance
+  - **Files Modified:**
+    - `src/Code.gs` - Complete rewrite of `onOpen()` menu structure (~200 lines)
+  - **Impact:** Menu now mirrors the 6-step Monday workflow, making it easier to find functions
+
+- ✅ **Training Tracking Crew Leads - Auto-Update in Generate All Reports**
+  - **Goal:** Automatically update Training Tracking crew leads when running Generate All Reports
+  - **Problem:** When a crew's foreman changed, Training Tracking still showed the old name until manually updated
+  - **Solution:** Added crew lead update step to `generateAllReports()` function
+  - **Key Features:**
+    - Only updates CURRENT and FUTURE months (March forward for March 2026)
+    - Preserves historical data - January/February crew leads are NOT changed
+    - Uses `getCrewLead()` function to determine current crew lead by job classification hierarchy
+    - Shows count of updated rows in success message
+  - **New Functions:**
+    - `updateTrainingTrackingCrewLeadsSilent()` - Silent version for batch operations
+    - `updateTrainingTrackingCrewLeads()` - Menu version with UI feedback
+  - **Menu Item:** Glove Manager → 📊 Generate All Reports → 🔧 Utilities → 🔄 Update Training Tracking Crew Leads
+  - **Files Modified:**
+    - `src/Code.gs` - Added both crew lead update functions (~150 lines)
+    - `src/Code.gs` - Modified `generateAllReports()` to call `updateTrainingTrackingCrewLeadsSilent()`
+  - **Impact:** Training Tracking crew leads now stay in sync with Employees sheet automatically
+
+- ✅ **Fixed Duplicate generateAllReports Function**
+  - **Problem:** Crew lead update wasn't running during Generate All Reports
+  - **Root Cause:** Two `generateAllReports()` functions existed - one in `30-SwapGeneration.gs` and one in `Code.gs`. Since Code.gs loads last alphabetically, its version (without crew lead update) was being used.
+  - **Solution:** Added crew lead update to the `Code.gs` version of `generateAllReports()`
+  - **Files Modified:**
+    - `src/Code.gs` - Updated `generateAllReports()` to include crew lead update step
+
 ### March 13, 2026
 - ✅ **Stale Cert Tasks Cleanup - Auto-Complete When Expiration Updated to Far Future**
   - **Problem:** When Nick Camp's DL expiration date was updated from near-term to far in the future (> 365 days), the old Task Metadata record persisted with the OLD date. Running "Generate All Task Metadata" didn't remove or update it because:

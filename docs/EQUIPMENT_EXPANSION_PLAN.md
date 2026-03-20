@@ -17,8 +17,8 @@ Expanding the Rubber Tracker system to track additional electrical safety equipm
 | Equipment | Test/Calibration Interval | Naming Convention | Key Date Field |
 |-----------|---------------------------|-------------------|----------------|
 | **Blankets** | 1 year (test date) | B### (Regular), S### (Split) | Test Date → Change Out Date |
-| **HV Testers** | 10 years (calibration) | TBD | Calibration Date → Replacement Date |
-| **Phasing Sets** | 10 years (calibration) | TBD | Calibration Date → Replacement Date |
+| **HV Testers** | 10 years (calibration) | TBD | Calibration Date → Change Out Date |
+| **Phasing Sets** | 10 years (calibration) | TBD | Calibration Date → Change Out Date |
 | **AED** | Pad expiration varies | TBD | Pad Expiration Date |
 
 ---
@@ -67,19 +67,32 @@ Expanding the Rubber Tracker system to track additional electrical safety equipm
 | J | Picked For | Pending assignment | |
 | K | Notes | Free text | |
 
-#### Blanket Swaps Sheet (10 visible columns + hidden)
-| Col | Header | Description |
-|-----|--------|-------------|
-| A | Employee | Crew Lead name |
-| B | Item Number | Current blanket # |
-| C | Type | Regular or Split |
-| D | Date Assigned | Current assignment date |
-| E | Change Out Date | When swap is due |
-| F | Days Left | Calculated |
-| G | Pick List | New blanket to assign |
-| H | Status | Pending, Ready, etc. |
-| I | Picked | Checkbox |
-| J | Date Changed | When swap completed |
+#### Blanket Swaps Sheet (10 visible columns + 13 hidden)
+| Col | Header | Description | Visible |
+|-----|--------|-------------|---------|
+| A | Employee | Crew Lead name | ✅ |
+| B | Current Blanket # | Current blanket # | ✅ |
+| C | Type | Regular or Split | ✅ |
+| D | Date Assigned | Current assignment date | ✅ |
+| E | Change Out Date | When swap is due | ✅ |
+| F | Days Left | Calculated | ✅ |
+| G | Pick List Item # | New blanket to assign | ✅ |
+| H | Status | Pending, Ready, etc. | ✅ |
+| I | Picked | Checkbox | ✅ |
+| J | Date Changed | When swap completed | ✅ |
+| K | Status | Stage 1 - Pick List before check | ❌ Hidden |
+| L | Assigned To | Stage 1 - Pick List before check | ❌ Hidden |
+| M | Date Assigned | Stage 1 - Pick List before check | ❌ Hidden |
+| N | Status | Stage 1 - Old blanket assignment | ❌ Hidden |
+| O | Assigned To | Stage 1 - Old blanket assignment | ❌ Hidden |
+| P | Date Assigned | Stage 1 - Old blanket assignment | ❌ Hidden |
+| Q | Status | Stage 2 - Pick List after check | ❌ Hidden |
+| R | Assigned To | Stage 2 - Pick List after check | ❌ Hidden |
+| S | Date Assigned | Stage 2 - Pick List after check | ❌ Hidden |
+| T | Picked For | Stage 2 - Pick List after check | ❌ Hidden |
+| U | Assigned To | Stage 3 - New assignment | ❌ Hidden |
+| V | Date Assigned | Stage 3 - New assignment | ❌ Hidden |
+| W | Change Out Date | Stage 3 - New assignment | ❌ Hidden |
 
 #### Blankets History Sheet (6 columns)
 | Col | Header |
@@ -119,8 +132,8 @@ Expanding the Rubber Tracker system to track additional electrical safety equipm
 ### Swap Generation
 - [x] Create `generateBlanketSwaps()` function (mirror `generateGloveSwaps()`)
 - [x] Group swaps by job number/crew lead
-- [x] Support section headers for different crews
-- [ ] Handle hidden columns for stage tracking (future - matches glove pattern)
+- [x] Handle hidden columns for stage tracking (K-W, same as Gloves/Sleeves)
+- [x] Update "Picked For" column on Blankets sheet when blanket is assigned to swap
 
 ### History Tracking
 - [x] Create `saveBlanketAssignmentToHistory()` function
@@ -162,38 +175,45 @@ Expanding the Rubber Tracker system to track additional electrical safety equipm
 ## Phase 2 Checklist (HV Testers & Phasing Sets)
 
 ### Constants & Configuration
-- [ ] Activate `SHEET_HV_TESTERS`, `SHEET_HV_TESTER_SWAPS`, `SHEET_HV_TESTERS_HISTORY`
-- [ ] Activate `SHEET_PHASING_SETS`, `SHEET_PHASING_SET_SWAPS`, `SHEET_PHASING_SETS_HISTORY`
-- [ ] Add `INTERVAL_CALIBRATION_YEARS = 10` constant
-- [ ] Add `COLS.HV_TESTER` and `COLS.PHASING_SET` column mappings
+- [x] Activate `SHEET_HV_TESTERS`, `SHEET_HV_TESTER_SWAPS`, `SHEET_HV_TESTERS_HISTORY`
+- [x] Activate `SHEET_PHASING_SETS`, `SHEET_PHASING_SET_SWAPS`, `SHEET_PHASING_SETS_HISTORY`
+- [x] Add `INTERVAL_CALIBRATION_YEARS = 10` constant
+- [x] Add `COLS.HV_TESTERS` and `COLS.PHASING_SETS` column mappings
+- [x] Rename `REPLACEMENT_DATE` to `CHANGE_OUT_DATE` in constants
 
 ### Sheet Structure (both equipment types)
 | Col | Header | Description |
 |-----|--------|-------------|
 | A | Item # | Equipment identifier |
 | B | Model | Equipment model |
-| C | (unused) | — |
+| C | Serial # | Serial number |
 | D | Calibration Date | Last calibration |
 | E | Date Assigned | When assigned |
 | F | Location | Crew location |
 | G | Status | In Service, etc. |
 | H | Assigned To | Crew Lead |
-| I | Replacement Date | Calibration + 10 years |
+| I | Change Out Date | Calibration + 10 years (auto-calculated) |
 | J | Picked For | Pending assignment |
 | K | Notes | Free text |
 
 ### Sheet Creation
-- [ ] Update `buildSheets()` for HV Testers sheet
+- [x] Update `buildSheets()` for HV Testers sheet
 - [ ] Update `buildSheets()` for HV Tester Swaps sheet
-- [ ] Update `buildSheets()` for Phasing Sets sheet
+- [x] Update `buildSheets()` for Phasing Sets sheet
 - [ ] Update `buildSheets()` for Phasing Set Swaps sheet
-- [ ] Create history sheets for both
+- [x] Create history sheets for both
 
 ### Core Functions
-- [ ] Create `calculateReplacementDate(calibrationDate)` - returns date + 10 years
-- [ ] Create `generateHVTesterSwaps()` function
-- [ ] Create `generatePhasingSetSwaps()` function
-- [ ] Create history tracking functions
+- [x] Create `calculateReplacementDate(calibrationDate)` - returns date + 10 years
+- [x] Create `calculateHVChangeOutDate(calibrationDate)` - alias for 10 year calculation
+- [x] Create `generateHVTesterSwaps()` function
+- [x] Create `generatePhasingSetSwaps()` function
+- [x] Create history tracking functions
+
+### Auto-Population Features
+- [x] Calibration Date change → auto-calculates Change Out Date (10 years)
+- [x] Assigned To change → auto-populates Location and Status ("In Service")
+- [x] onEdit triggers in place for both HV Testers and Phasing Sets
 
 ### Task Integration
 - [ ] Add to `collectAndGroupTasks()`
@@ -245,7 +265,80 @@ Expanding the Rubber Tracker system to track additional electrical safety equipm
 
 ## Running Change Log
 
+### March 20, 2026
+- **Renamed Replacement Date to Change Out Date for HV Testers and Phasing Sets**
+  - Updated constants in `00-Constants.gs`: `REPLACEMENT_DATE` → `CHANGE_OUT_DATE`
+  - Updated column C description: `UNUSED_C` → `SERIAL_NUM` (matches actual sheet header)
+  - Updated `Code.gs` references in `generateHVTesterSwaps()` and `generatePhasingSetSwaps()`
+  - Consistent naming across all equipment types (Gloves, Sleeves, Blankets, HV Testers, Phasing Sets)
+  - Deployed to Google Apps Script ✅
+
+- **Auto-Calculation for HV Testers and Phasing Sets already in place**
+  - `handleHVTesterCalibrationDateChange()` - Triggered when Calibration Date (column D) is edited
+  - `handlePhasingSetCalibrationDateChange()` - Same for Phasing Sets
+  - Both use `calculateHVChangeOutDate()` which adds 10 years to the calibration date
+  - Toast notification confirms: "Change Out Date set to [date] (10 years from calibration)"
+  - onEdit triggers already configured in `11-Triggers.gs`
+
 ### March 18, 2026
+- **Added hidden columns K-W for stage tracking to Blanket Swaps (matching Gloves/Sleeves)**
+  - Blanket Swaps sheet now has 23 columns (A-W) with columns K-W hidden
+  - Stage headers: STAGE 1, STAGE 2, STAGE 3
+  - K-M: Pick List Blanket Before Check (original state before picking)
+  - N-P: Old Blanket Assignment (crew's current blanket)
+  - Q-T: Pick List Blanket After Check (Ready For Delivery state)
+  - U-W: Pick List Blanket New Assignment (final assignment)
+  - Also improved sorting: by Location → Foreman → Days Left
+  - Added location and foreman sub-headers (📍 and 👷) to match Glove/Sleeve Swaps
+  - Deployed to Google Apps Script ✅
+
+- **Added Location auto-population when Assigned To is set on Blankets sheet**
+  - When you enter a name in the "Assigned To" column on the Blankets sheet, the Location column now automatically populates based on the employee's location from the Employees sheet
+  - Same behavior as Gloves and Sleeves sheets
+  - Also sets Status to "In Service" when assigned to an employee
+  - Special handling for: "On Shelf", "Packed for Delivery", "Packed for Testing", "In Testing", "Failed Rubber", "Lost"
+  - Created new function `handleBlanketAssignedToChange()` in `Code.gs`
+  - Added handling in both `onEdit()` and `processEdit()` triggers in `11-Triggers.gs`
+  - Shows toast notification "📍 Location updated to [location]" when auto-populated
+  - Deployed to Google Apps Script ✅
+
+- **Set consistent column widths for Blankets sheet (matching Gloves/Sleeves)**
+  - Added minimum column widths in `buildSheets()` for Gloves, Sleeves, and Blankets:
+    - Column A (Item#): 80px
+    - Column B (Size/Type): 70px
+    - Column C (Class): 50px
+    - Column D (Test Date): 90px
+    - Column E (Date Assigned): 100px
+    - Column F (Location): 100px
+    - Column G (Status): 110px
+    - Column H (Assigned To): 130px
+    - Column I (Change Out Date): 110px
+    - Column J (Picked For): 180px with text wrap
+    - Column K (Notes): 200px with text wrap
+  - Run `buildSheets()` from Utilities menu to apply new widths to existing sheets
+  - Deployed to Google Apps Script ✅
+
+- **Silenced spurious "Employee History" filter warning in buildSheets()**
+  - Issue: Log showed "Could not check/remove filter for Employee History: Please make a selection within a single column"
+  - Root cause: `sheet.getFilter()` was being called on customSetup sheets like "Employee History" which don't need filter removal
+  - Solution: Added `if (!def.customSetup)` check to skip filter removal for sheets with `customSetup: true`
+  - Impact: None - the warning was harmless, but now the logs are cleaner
+  - Deployed to Google Apps Script ✅
+
+- **Fixed alert showing in silent mode when no blankets due for swap**
+  - Issue: "No Blanket Swaps Needed" alert was appearing during `generateAllReports()` even in silent mode
+  - Solution: Added `if (!silent)` check around the alert at line 17886
+  - Now the function logs the message but doesn't show UI alert when called in batch/silent mode
+  - Deployed to Google Apps Script ✅
+
+- **Added logging and silent mode to generateBlanketSwaps()**
+  - Issue: When running `generateAllReports()`, Blanket Swaps wasn't logging anything
+  - Solution: Added `logEvent()` calls at start and end of function
+  - Added `silent` parameter - when true, suppresses UI alerts (for batch mode)
+  - `generateAllReports()` now passes `silent=true` to avoid popups
+  - Menu function `menuGenerateBlanketSwaps()` passes `silent=false` for standalone use
+  - Deployed to Google Apps Script ✅
+
 - **FIXED: Gloves sheet "column level actions" error - FINAL SOLUTION**
   - Issue: Gloves sheet showed "Please make a selection within a single column" error
   - Root cause: **The Gloves sheet had a filter/table (Table3) with an active multi-row selection (M2:M159)** that persisted even after trying to reset the selection

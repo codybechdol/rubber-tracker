@@ -919,7 +919,7 @@ var NEW_ITEMS_PROPERTY_KEY = 'knownItemNumbers';
 /**
  * Checks if an item number is new (not previously tracked).
  * @param {string} itemNum - Item number to check
- * @param {string} sheetName - 'Gloves' or 'Sleeves'
+ * @param {string} sheetName - 'Gloves', 'Sleeves', or 'Blankets'
  * @return {boolean} True if this is a new item number
  */
 function isNewItemNumber(itemNum, sheetName) {
@@ -929,9 +929,12 @@ function isNewItemNumber(itemNum, sheetName) {
   var key = NEW_ITEMS_PROPERTY_KEY + '_' + sheetName;
   var knownItems = props.getProperty(key);
 
+  // If no tracking exists for this sheet yet, initialize it EXCLUDING the current item
+  // (since the item is already in the sheet by the time this check runs)
+  // and return true (this IS a new item)
   if (!knownItems) {
-    initializeKnownItemNumbers(sheetName);
-    knownItems = props.getProperty(key);
+    initializeKnownItemNumbers(sheetName, itemNum);  // Exclude current item
+    return true;  // This is a new item since we never tracked this sheet before
   }
 
   var knownSet = knownItems ? knownItems.split(',') : [];
@@ -941,7 +944,7 @@ function isNewItemNumber(itemNum, sheetName) {
 /**
  * Adds an item number to the known items list.
  * @param {string} itemNum - Item number to add
- * @param {string} sheetName - 'Gloves' or 'Sleeves'
+ * @param {string} sheetName - 'Gloves', 'Sleeves', or 'Blankets'
  */
 function addToKnownItemNumbers(itemNum, sheetName) {
   if (!itemNum || String(itemNum).trim() === '') return;
@@ -961,9 +964,10 @@ function addToKnownItemNumbers(itemNum, sheetName) {
 
 /**
  * Initializes the known item numbers from the current sheet data.
- * @param {string} sheetName - 'Gloves' or 'Sleeves'
+ * @param {string} sheetName - 'Gloves', 'Sleeves', or 'Blankets'
+ * @param {string} excludeItem - Optional item number to exclude (for new items being added)
  */
-function initializeKnownItemNumbers(sheetName) {
+function initializeKnownItemNumbers(sheetName, excludeItem) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(sheetName);
 
@@ -974,41 +978,72 @@ function initializeKnownItemNumbers(sheetName) {
 
   var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
   var itemNums = [];
+  var excludeItemStr = excludeItem ? String(excludeItem).trim() : '';
 
   data.forEach(function(row) {
     var itemNum = String(row[0]).trim();
-    if (itemNum && itemNums.indexOf(itemNum) === -1) {
+    // Skip the excluded item (the one being added that triggered this initialization)
+    if (itemNum && itemNums.indexOf(itemNum) === -1 && itemNum !== excludeItemStr) {
       itemNums.push(itemNum);
     }
   });
 
   PropertiesService.getScriptProperties().setProperty(NEW_ITEMS_PROPERTY_KEY + '_' + sheetName, itemNums.join(','));
-  logEvent('Initialized known item numbers for ' + sheetName + ': ' + itemNums.length + ' items');
+  logEvent('Initialized known item numbers for ' + sheetName + ': ' + itemNums.length + ' items' + (excludeItemStr ? ' (excluding ' + excludeItemStr + ')' : ''));
 }
 
 /**
- * Resets the known item numbers tracking.
+ * Resets the known item numbers tracking for all inventory sheets.
  */
 function resetKnownItemNumbers() {
   var props = PropertiesService.getScriptProperties();
   props.deleteProperty(NEW_ITEMS_PROPERTY_KEY + '_Gloves');
   props.deleteProperty(NEW_ITEMS_PROPERTY_KEY + '_Sleeves');
+  props.deleteProperty(NEW_ITEMS_PROPERTY_KEY + '_Blankets');
 
   initializeKnownItemNumbers('Gloves');
   initializeKnownItemNumbers('Sleeves');
+  initializeKnownItemNumbers('Blankets');
 
   SpreadsheetApp.getUi().alert('✅ Known item numbers have been reset and re-initialized from current inventory.');
 }
 
 /**
- * Prompts user when a new item number is detected in Gloves or Sleeves sheet.
+ * Resets the known item numbers tracking for Blankets only.
+ * Run this if the New Blanket dialog isn't showing.
+ */
+function resetBlanketTracking() {
+  var props = PropertiesService.getScriptProperties();
+  props.deleteProperty(NEW_ITEMS_PROPERTY_KEY + '_Blankets');
+
+  // Don't initialize - let it be empty so the next blanket is detected as "new"
+  SpreadsheetApp.getUi().alert('✅ Blanket tracking has been reset.\n\nThe next blanket number you enter will trigger the New Blanket Entry dialog.');
+}
+
+/**
+ * Prompts user when a new item number is detected in Gloves, Sleeves, or Blankets sheet.
  * Shows an HTML dialog with individual fields for all item details.
  * @param {string} itemNum - The new item number
- * @param {string} sheetName - 'Gloves' or 'Sleeves'
+ * @param {string} sheetName - 'Gloves', 'Sleeves', or 'Blankets'
  * @param {number} rowNum - The row number where the item was added
  */
 function promptNewItemSource(itemNum, sheetName, rowNum) {
-  var itemType = sheetName === 'Gloves' ? 'Glove' : 'Sleeve';
+  var itemType;
+  var dialogTitle;
+
+  if (sheetName === 'Gloves') {
+    itemType = 'Glove';
+    dialogTitle = '📦 New Glove Entry';
+  } else if (sheetName === 'Sleeves') {
+    itemType = 'Sleeve';
+    dialogTitle = '📦 New Sleeve Entry';
+  } else if (sheetName === 'Blankets') {
+    itemType = 'Blanket';
+    dialogTitle = '🧱 New Blanket Entry';
+  } else {
+    itemType = 'Item';
+    dialogTitle = '📦 New Item Entry';
+  }
 
   var template = HtmlService.createTemplateFromFile('NewItemDialog');
   template.itemNum = itemNum;
@@ -1017,10 +1052,10 @@ function promptNewItemSource(itemNum, sheetName, rowNum) {
   template.itemType = itemType;
 
   var html = template.evaluate()
-    .setWidth(420)
-    .setHeight(580);
+    .setWidth(500)
+    .setHeight(750);
 
-  SpreadsheetApp.getUi().showModalDialog(html, '📦 New ' + itemType + ' Entry');
+  SpreadsheetApp.getUi().showModalDialog(html, dialogTitle);
 }
 
 /**
@@ -1034,15 +1069,16 @@ function promptNewItemSource(itemNum, sheetName, rowNum) {
 function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(sheetName);
-  var itemType = sheetName === 'Gloves' ? 'Glove' : 'Sleeve';
+  var isBlanket = (sheetName === 'Blankets');
+  var itemType = sheetName === 'Gloves' ? 'Glove' : (sheetName === 'Sleeves' ? 'Sleeve' : 'Blanket');
 
-  // Column mapping for Gloves/Sleeves:
-  // A=Item#(1), B=Size(2), C=Class(3), D=Test Date(4), E=Date Assigned(5),
+  // Column mapping for Gloves/Sleeves/Blankets:
+  // A=Item#(1), B=Size/Type(2), C=Class(3), D=Test Date(4), E=Date Assigned(5),
   // F=Location(6), G=Status(7), H=Assigned To(8), I=Change Out Date(9), J=Picked For(10), K=Notes(11)
 
   // Fill in the basic data
   if (formData.size) {
-    sheet.getRange(rowNum, 2).setValue(formData.size);  // Column B = Size
+    sheet.getRange(rowNum, 2).setValue(formData.size);  // Column B = Size/Type
   }
 
   if (formData.itemClass) {
@@ -1051,10 +1087,15 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
 
   if (formData.testDate) {
     var testDateCell = sheet.getRange(rowNum, 4);  // Column D = Test Date
-    var parsedTestDate = new Date(formData.testDate);
-    if (!isNaN(parsedTestDate.getTime())) {
-      testDateCell.setValue(parsedTestDate);
-      testDateCell.setNumberFormat('MM/dd/yyyy');
+    // Parse date string (YYYY-MM-DD from HTML input) to avoid timezone issues
+    var dateParts = formData.testDate.split('-');
+    if (dateParts.length === 3) {
+      // Create date using local timezone (year, month-1, day)
+      var parsedTestDate = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
+      if (!isNaN(parsedTestDate.getTime())) {
+        testDateCell.setValue(parsedTestDate);
+        testDateCell.setNumberFormat('MM/dd/yyyy');
+      }
     }
   }
 
@@ -1063,30 +1104,20 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
     var assignedTo = formData.assignedTo.trim();
     var assignedToLower = assignedTo.toLowerCase();
 
-    // Check if "Assigned To" is a status value (On Shelf, In Testing, etc.) rather than an employee name
-    var statusValues = ['on shelf', 'in testing', 'ready for delivery', 'ready for test', 'lost', 'failed rubber'];
+    // Check if "Assigned To" is a status value rather than an employee name
+    // Different status values for Blankets vs Gloves/Sleeves
+    var statusValuesGloves = ['on shelf', 'in testing', 'ready for delivery', 'ready for test', 'lost', 'failed rubber', 'failed'];
+    var statusValuesBlankets = ['on shelf', 'in service', 'in testing', 'lost', 'failed'];
+    var statusValues = isBlanket ? statusValuesBlankets : statusValuesGloves;
     var isStatusValue = statusValues.indexOf(assignedToLower) !== -1;
 
     if (isStatusValue) {
       // This is a status value, not an employee assignment
-      // Set Assigned To and Status to match
+      // Set Assigned To column to the status value
       sheet.getRange(rowNum, 8).setValue(assignedTo);  // Column H = Assigned To
 
-      // Set Status based on the Assigned To value
-      var statusToSet = assignedTo;
-      if (assignedToLower === 'on shelf') {
-        statusToSet = 'On Shelf';
-      } else if (assignedToLower === 'in testing') {
-        statusToSet = 'In Testing';
-      } else if (assignedToLower === 'ready for delivery') {
-        statusToSet = 'Ready For Delivery';
-      } else if (assignedToLower === 'ready for test') {
-        statusToSet = 'Ready For Test';
-      } else if (assignedToLower === 'lost') {
-        statusToSet = 'Lost';
-      } else if (assignedToLower === 'failed rubber') {
-        statusToSet = 'Failed Rubber';
-      }
+      // Set Status based on the form's status field (which should match)
+      var statusToSet = formData.status || assignedTo;
       sheet.getRange(rowNum, 7).setValue(statusToSet);  // Column G = Status
 
       // Set Location from form or default to Helena for On Shelf items
@@ -1102,8 +1133,8 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
       dateAssignedCell.setValue(today);
       dateAssignedCell.setNumberFormat('MM/dd/yyyy');
 
-      // Calculate Change Out Date based on test date
-      if (formData.testDate) {
+      // Calculate Change Out Date based on test date (only for non-failed/lost items)
+      if (formData.testDate && assignedToLower !== 'lost' && assignedToLower !== 'failed' && assignedToLower !== 'failed rubber') {
         var isSleeve = (sheetName === 'Sleeves');
         var location = sheet.getRange(rowNum, 6).getValue();
         var changeOutDate = calculateChangeOutDate(today, location, assignedTo, isSleeve);
@@ -1129,8 +1160,9 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
       dateAssignedCell.setValue(today);
       dateAssignedCell.setNumberFormat('MM/dd/yyyy');
 
-      // Set Status to Assigned
-      sheet.getRange(rowNum, 7).setValue('Assigned');  // Column G = Status
+      // Set Status - "In Service" for Blankets, "Assigned" for Gloves/Sleeves
+      var assignedStatus = isBlanket ? 'In Service' : 'Assigned';
+      sheet.getRange(rowNum, 7).setValue(assignedStatus);  // Column G = Status
 
       // Look up employee's location from Employees sheet
       var employeesSheet = ss.getSheetByName('Employees');
@@ -1160,19 +1192,21 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
         }
       }
 
-      // Calculate and set Change Out Date
-      var isSleeve = (sheetName === 'Sleeves');
-      var location = sheet.getRange(rowNum, 6).getValue();  // Get location (may have been auto-filled)
-      var changeOutDate = calculateChangeOutDate(today, location, assignedTo, isSleeve);
+      // Calculate and set Change Out Date (for Gloves/Sleeves, not Blankets)
+      if (!isBlanket) {
+        var isSleeve = (sheetName === 'Sleeves');
+        var location = sheet.getRange(rowNum, 6).getValue();
+        var changeOutDate = calculateChangeOutDate(today, location, assignedTo, isSleeve);
 
-      if (changeOutDate) {
-        var changeOutCell = sheet.getRange(rowNum, 9);  // Column I = Change Out Date
-        if (changeOutDate === 'N/A') {
-          changeOutCell.setNumberFormat('@');
-        } else {
-          changeOutCell.setNumberFormat('MM/dd/yyyy');
+        if (changeOutDate) {
+          var changeOutCell = sheet.getRange(rowNum, 9);  // Column I = Change Out Date
+          if (changeOutDate === 'N/A') {
+            changeOutCell.setNumberFormat('@');
+          } else {
+            changeOutCell.setNumberFormat('MM/dd/yyyy');
+          }
+          changeOutCell.setValue(changeOutDate);
         }
-        changeOutCell.setValue(changeOutDate);
       }
     }
 
@@ -1521,3 +1555,461 @@ function syncNewItemsLogWithInventory() {
   SpreadsheetApp.getUi().alert('📊 New Items Log Sync', message, SpreadsheetApp.getUi().ButtonSet.OK);
   logEvent('Synced New Items Log: removed ' + rowsToDelete.length + ' orphaned entries');
 }
+
+// =============================================================================
+// DUPLICATE ITEM NUMBER PROTECTION
+// =============================================================================
+
+/**
+ * Checks if an item number already exists in a sheet (excluding the current row).
+ * @param {string} itemNum - Item number to check
+ * @param {string} sheetName - 'Gloves', 'Sleeves', or 'Blankets'
+ * @param {number} excludeRow - Row to exclude from check (the current row being edited)
+ * @return {Object} {isDuplicate: boolean, existingRow: number or null}
+ */
+function checkDuplicateItemNumber(itemNum, sheetName, excludeRow) {
+  if (!itemNum || String(itemNum).trim() === '') {
+    return { isDuplicate: false, existingRow: null };
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet || sheet.getLastRow() < 2) {
+    return { isDuplicate: false, existingRow: null };
+  }
+
+  var itemNumStr = String(itemNum).trim().toUpperCase();
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
+
+  for (var i = 0; i < data.length; i++) {
+    var rowNum = i + 2;  // Data starts at row 2
+    if (rowNum === excludeRow) continue;  // Skip the current row
+
+    var existingItemNum = String(data[i][0] || '').trim().toUpperCase();
+    if (existingItemNum === itemNumStr) {
+      return { isDuplicate: true, existingRow: rowNum };
+    }
+  }
+
+  return { isDuplicate: false, existingRow: null };
+}
+
+/**
+ * Handles duplicate item number detection and warns the user.
+ * Called from the onEdit trigger when an item number is entered.
+ * @param {string} itemNum - Item number entered
+ * @param {string} sheetName - 'Gloves', 'Sleeves', or 'Blankets'
+ * @param {number} currentRow - Current row being edited
+ * @return {boolean} True if duplicate was found and handled
+ */
+function handleDuplicateItemNumber(itemNum, sheetName, currentRow) {
+  var result = checkDuplicateItemNumber(itemNum, sheetName, currentRow);
+
+  if (result.isDuplicate) {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(sheetName);
+
+    // Clear the duplicate item number
+    sheet.getRange(currentRow, 1).setValue('');
+
+    // Show warning to user
+    var ui = SpreadsheetApp.getUi();
+    ui.alert(
+      '⚠️ Duplicate Item Number',
+      'Item number "' + itemNum + '" already exists in row ' + result.existingRow + ' of the ' + sheetName + ' sheet.\n\n' +
+      'Please use a unique item number.',
+      ui.ButtonSet.OK
+    );
+
+    return true;  // Duplicate was found
+  }
+
+  return false;  // No duplicate
+}
+
+// =============================================================================
+// ARCHIVE LOST/FAILED ITEMS
+// =============================================================================
+
+/**
+ * Archives Lost and Failed items from Gloves, Sleeves, and Blankets to archive sheets.
+ * This removes them from the main inventory so counts are accurate.
+ * @param {string} itemType - 'Gloves', 'Sleeves', 'Blankets', or 'All'
+ * @return {Object} Summary of archived items
+ */
+function archiveLostAndFailedItems(itemType) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var results = {
+    gloves: { lost: 0, failed: 0, skipped: 0 },
+    sleeves: { lost: 0, failed: 0, skipped: 0 },
+    blankets: { lost: 0, failed: 0, skipped: 0 }
+  };
+
+  var sheetsToProcess = [];
+  if (itemType === 'All' || itemType === 'Gloves') sheetsToProcess.push('Gloves');
+  if (itemType === 'All' || itemType === 'Sleeves') sheetsToProcess.push('Sleeves');
+  if (itemType === 'All' || itemType === 'Blankets') sheetsToProcess.push('Blankets');
+
+  sheetsToProcess.forEach(function(sheetName) {
+    var sheet = ss.getSheetByName(sheetName);
+    if (!sheet || sheet.getLastRow() < 2) return;
+
+    var archiveSheetName = sheetName + ' Archive';
+    var archiveSheet = ss.getSheetByName(archiveSheetName);
+
+    // Create archive sheet if it doesn't exist
+    if (!archiveSheet) {
+      archiveSheet = ss.insertSheet(archiveSheetName);
+      // Copy headers from main sheet
+      var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues();
+      archiveSheet.getRange(1, 1, 1, headers[0].length).setValues(headers);
+      archiveSheet.getRange(1, 1, 1, headers[0].length)
+        .setBackground('#9e9e9e')
+        .setFontColor('#ffffff')
+        .setFontWeight('bold');
+      archiveSheet.setFrozenRows(1);
+
+      // Add "Archived Date" and "Archive Reason" columns
+      var lastCol = headers[0].length;
+      archiveSheet.getRange(1, lastCol + 1).setValue('Archived Date').setBackground('#9e9e9e').setFontColor('#ffffff').setFontWeight('bold');
+      archiveSheet.getRange(1, lastCol + 2).setValue('Archive Reason').setBackground('#9e9e9e').setFontColor('#ffffff').setFontWeight('bold');
+
+      Logger.log('Created archive sheet: ' + archiveSheetName);
+    }
+
+    var data = sheet.getDataRange().getValues();
+    var headers = data[0];
+    var statusColIdx = -1;
+    var assignedToColIdx = -1;
+    var dateAssignedColIdx = -1;
+
+    // Find Status, Assigned To, and Date Assigned columns
+    for (var h = 0; h < headers.length; h++) {
+      var headerLower = String(headers[h]).toLowerCase().trim();
+      if (headerLower === 'status') statusColIdx = h;
+      if (headerLower === 'assigned to') assignedToColIdx = h;
+      if (headerLower === 'date assigned') dateAssignedColIdx = h;
+    }
+
+    if (statusColIdx === -1) {
+      Logger.log('Could not find Status column in ' + sheetName);
+      return;
+    }
+
+    var rowsToArchive = [];
+    var skippedCurrentYear = 0;
+    var today = new Date();
+    var currentYear = today.getFullYear();
+    var archiveDate = Utilities.formatDate(today, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+
+    // Find rows to archive (Lost or Failed status FROM PREVIOUS YEAR ONLY)
+    for (var i = 1; i < data.length; i++) {
+      var status = String(data[i][statusColIdx] || '').trim().toLowerCase();
+      var assignedTo = assignedToColIdx !== -1 ? String(data[i][assignedToColIdx] || '').trim().toLowerCase() : '';
+
+      var isLost = status === 'lost' || assignedTo === 'lost';
+      var isFailed = status === 'failed' || status === 'failed rubber' ||
+                     assignedTo === 'failed rubber' || assignedTo === 'failed';
+
+      if (isLost || isFailed) {
+        // Check if the status was assigned in a PREVIOUS year (not current year)
+        var shouldArchive = false;
+        var dateAssigned = dateAssignedColIdx !== -1 ? data[i][dateAssignedColIdx] : null;
+
+        if (dateAssigned) {
+          var assignedDate = dateAssigned instanceof Date ? dateAssigned : new Date(dateAssigned);
+          if (!isNaN(assignedDate.getTime())) {
+            var assignedYear = assignedDate.getFullYear();
+            // Only archive if assigned in a previous year
+            if (assignedYear < currentYear) {
+              shouldArchive = true;
+            } else {
+              skippedCurrentYear++;
+              results[sheetName.toLowerCase()].skipped++;
+              Logger.log('Skipping ' + data[i][0] + ' - Lost/Failed status assigned in ' + assignedYear + ' (current year)');
+            }
+          } else {
+            // If date is invalid/empty, archive it (legacy data)
+            shouldArchive = true;
+            Logger.log('Archiving ' + data[i][0] + ' - no valid date assigned (legacy data)');
+          }
+        } else {
+          // If no date assigned column or empty, archive it (legacy data)
+          shouldArchive = true;
+          Logger.log('Archiving ' + data[i][0] + ' - no date assigned (legacy data)');
+        }
+
+        if (shouldArchive) {
+          var reason = isLost ? 'Lost' : 'Failed';
+          rowsToArchive.push({
+            rowIndex: i + 1,  // 1-based row number
+            data: data[i],
+            reason: reason
+          });
+
+          if (isLost) {
+            results[sheetName.toLowerCase()].lost++;
+          } else {
+            results[sheetName.toLowerCase()].failed++;
+          }
+        }
+      }
+    }
+
+    if (skippedCurrentYear > 0) {
+      Logger.log('Skipped ' + skippedCurrentYear + ' items in ' + sheetName + ' with Lost/Failed status assigned in ' + currentYear);
+    }
+
+    // Archive rows (add to archive sheet)
+    if (rowsToArchive.length > 0) {
+      var archiveLastRow = archiveSheet.getLastRow();
+      var numCols = data[0].length;
+
+      rowsToArchive.forEach(function(item) {
+        archiveLastRow++;
+        // Copy row data
+        archiveSheet.getRange(archiveLastRow, 1, 1, numCols).setValues([item.data]);
+        // Add archived date and reason
+        archiveSheet.getRange(archiveLastRow, numCols + 1).setValue(archiveDate);
+        archiveSheet.getRange(archiveLastRow, numCols + 2).setValue(item.reason);
+      });
+
+      // Delete rows from main sheet (from bottom to top to preserve indices)
+      rowsToArchive.sort(function(a, b) { return b.rowIndex - a.rowIndex; });
+      rowsToArchive.forEach(function(item) {
+        sheet.deleteRow(item.rowIndex);
+      });
+
+      // Also remove from known items tracking
+      rowsToArchive.forEach(function(item) {
+        var itemNum = String(item.data[0] || '').trim();
+        if (itemNum) {
+          removeFromKnownItemNumbers(itemNum, sheetName);
+        }
+      });
+
+      Logger.log('Archived ' + rowsToArchive.length + ' items from ' + sheetName);
+    }
+  });
+
+  return results;
+}
+
+/**
+ * Shows a dialog to archive Lost and Failed items.
+ * Menu item handler.
+ */
+function showArchiveLostFailedDialog() {
+  var ui = SpreadsheetApp.getUi();
+  var currentYear = new Date().getFullYear();
+
+  var response = ui.alert(
+    '🗄️ Archive Lost & Failed Items',
+    'This will move Lost and Failed items from PREVIOUS YEARS to archive sheets.\n\n' +
+    '📅 Year-Based Archiving:\n' +
+    '• Items marked Lost/Failed in ' + (currentYear - 1) + ' or earlier → ARCHIVED\n' +
+    '• Items marked Lost/Failed in ' + currentYear + ' → REMAIN on main sheet\n\n' +
+    'Archived items:\n' +
+    '• Will be removed from the main inventory sheets\n' +
+    '• Will be stored in "[Sheet] Archive" sheets\n' +
+    '• Will no longer count in Inventory Reports\n' +
+    '• Can be viewed in the archive sheets at any time\n\n' +
+    'Do you want to proceed?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (response !== ui.Button.YES) {
+    return;
+  }
+
+  var results = archiveLostAndFailedItems('All');
+
+  var totalGloves = results.gloves.lost + results.gloves.failed;
+  var totalSleeves = results.sleeves.lost + results.sleeves.failed;
+  var totalBlankets = results.blankets.lost + results.blankets.failed;
+  var grandTotal = totalGloves + totalSleeves + totalBlankets;
+
+  var totalSkipped = (results.gloves.skipped || 0) + (results.sleeves.skipped || 0) + (results.blankets.skipped || 0);
+  var currentYear = new Date().getFullYear();
+
+  var message = '✅ Archive Complete!\n\n';
+
+  if (grandTotal === 0 && totalSkipped === 0) {
+    message += 'No Lost or Failed items found.';
+  } else if (grandTotal === 0 && totalSkipped > 0) {
+    message += 'No items archived.\n\n';
+    message += '📅 Remaining on sheets (' + currentYear + ' items):\n';
+    if (results.gloves.skipped > 0) message += '🧤 Gloves: ' + results.gloves.skipped + '\n';
+    if (results.sleeves.skipped > 0) message += '💪 Sleeves: ' + results.sleeves.skipped + '\n';
+    if (results.blankets.skipped > 0) message += '🧱 Blankets: ' + results.blankets.skipped + '\n';
+    message += '\nThese items have Lost/Failed status from ' + currentYear + ' and will remain on the main sheets.';
+  } else {
+    message += 'Archived Items (from previous years):\n\n';
+
+    if (totalGloves > 0) {
+      message += '🧤 Gloves: ' + totalGloves + ' (' + results.gloves.lost + ' lost, ' + results.gloves.failed + ' failed)\n';
+    }
+    if (totalSleeves > 0) {
+      message += '💪 Sleeves: ' + totalSleeves + ' (' + results.sleeves.lost + ' lost, ' + results.sleeves.failed + ' failed)\n';
+    }
+    if (totalBlankets > 0) {
+      message += '🧱 Blankets: ' + totalBlankets + ' (' + results.blankets.lost + ' lost, ' + results.blankets.failed + ' failed)\n';
+    }
+
+    message += '\nTotal: ' + grandTotal + ' items archived.\n';
+    message += '\nItems have been moved to their respective Archive sheets.';
+
+    // Also show skipped items if any
+    if (totalSkipped > 0) {
+      message += '\n\n📅 Remaining on sheets (' + currentYear + ' items):\n';
+      if (results.gloves.skipped > 0) message += '🧤 Gloves: ' + results.gloves.skipped + '\n';
+      if (results.sleeves.skipped > 0) message += '💪 Sleeves: ' + results.sleeves.skipped + '\n';
+      if (results.blankets.skipped > 0) message += '🧱 Blankets: ' + results.blankets.skipped + '\n';
+    }
+  }
+
+  ui.alert('🗄️ Archive Results', message, ui.ButtonSet.OK);
+
+  // Update inventory reports to reflect the changes
+  if (grandTotal > 0) {
+    try {
+      updateInventoryReports();
+      SpreadsheetApp.getActiveSpreadsheet().toast('Inventory Reports updated', '📊 Updated', 3);
+    } catch (e) {
+      Logger.log('Error updating inventory reports after archive: ' + e);
+    }
+  }
+}
+
+/**
+ * Views the archive sheet for a specific item type.
+ * @param {string} itemType - 'Gloves', 'Sleeves', or 'Blankets'
+ */
+function viewArchiveSheet(itemType) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var archiveSheetName = itemType + ' Archive';
+  var archiveSheet = ss.getSheetByName(archiveSheetName);
+
+  if (!archiveSheet) {
+    SpreadsheetApp.getUi().alert(
+      '📋 No Archive Found',
+      'The "' + archiveSheetName + '" sheet does not exist yet.\n\n' +
+      'Run "Archive Lost & Failed Items" to create it.',
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    return;
+  }
+
+  ss.setActiveSheet(archiveSheet);
+}
+
+/**
+ * Restores an item from an archive sheet back to the main inventory.
+ * @param {string} itemType - 'Gloves', 'Sleeves', or 'Blankets'
+ * @param {number} archiveRow - Row number in the archive sheet to restore
+ * @return {boolean} True if successful
+ */
+function restoreFromArchive(itemType, archiveRow) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var archiveSheet = ss.getSheetByName(itemType + ' Archive');
+  var mainSheet = ss.getSheetByName(itemType);
+
+  if (!archiveSheet || !mainSheet) {
+    return false;
+  }
+
+  if (archiveRow < 2 || archiveRow > archiveSheet.getLastRow()) {
+    return false;
+  }
+
+  // Get the main sheet's column count (exclude Archived Date and Archive Reason)
+  var mainColCount = mainSheet.getLastColumn();
+
+  // Get the row data (only the original columns, not the archive metadata)
+  var rowData = archiveSheet.getRange(archiveRow, 1, 1, mainColCount).getValues()[0];
+
+  // Set status to "On Shelf" for restored items
+  var statusColIdx = -1;
+  var assignedToColIdx = -1;
+  var headers = mainSheet.getRange(1, 1, 1, mainColCount).getValues()[0];
+
+  for (var h = 0; h < headers.length; h++) {
+    var headerLower = String(headers[h]).toLowerCase().trim();
+    if (headerLower === 'status') statusColIdx = h;
+    if (headerLower === 'assigned to') assignedToColIdx = h;
+  }
+
+  if (statusColIdx !== -1) {
+    rowData[statusColIdx] = 'On Shelf';
+  }
+  if (assignedToColIdx !== -1) {
+    rowData[assignedToColIdx] = 'On Shelf';
+  }
+
+  // Add to main sheet
+  mainSheet.appendRow(rowData);
+
+  // Add to known items tracking
+  var itemNum = String(rowData[0] || '').trim();
+  if (itemNum) {
+    addToKnownItemNumbers(itemNum, itemType);
+  }
+
+  // Delete from archive
+  archiveSheet.deleteRow(archiveRow);
+
+  Logger.log('Restored item ' + itemNum + ' from ' + itemType + ' Archive');
+  return true;
+}
+
+/**
+ * Shows dialog to restore selected item from archive.
+ */
+function showRestoreFromArchiveDialog() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var activeSheet = ss.getActiveSheet();
+  var sheetName = activeSheet.getName();
+
+  // Check if we're on an archive sheet
+  if (!sheetName.endsWith(' Archive')) {
+    SpreadsheetApp.getUi().alert(
+      '⚠️ Wrong Sheet',
+      'Please select a row in an Archive sheet (Gloves Archive, Sleeves Archive, or Blankets Archive) and try again.',
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    return;
+  }
+
+  var activeRange = activeSheet.getActiveRange();
+  if (!activeRange || activeRange.getRow() < 2) {
+    SpreadsheetApp.getUi().alert(
+      '⚠️ No Row Selected',
+      'Please select a row to restore and try again.',
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    return;
+  }
+
+  var rowNum = activeRange.getRow();
+  var itemType = sheetName.replace(' Archive', '');
+  var itemNum = activeSheet.getRange(rowNum, 1).getValue();
+
+  var ui = SpreadsheetApp.getUi();
+  var response = ui.alert(
+    '↩️ Restore Item',
+    'Restore item "' + itemNum + '" from ' + sheetName + ' back to ' + itemType + '?\n\n' +
+    'The item will be set to "On Shelf" status.',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (response === ui.Button.YES) {
+    var success = restoreFromArchive(itemType, rowNum);
+    if (success) {
+      ui.alert('✅ Item Restored', 'Item "' + itemNum + '" has been restored to ' + itemType + '.', ui.ButtonSet.OK);
+    } else {
+      ui.alert('❌ Restore Failed', 'Could not restore the item. Please try again.', ui.ButtonSet.OK);
+    }
+  }
+}
+

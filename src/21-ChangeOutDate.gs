@@ -192,11 +192,13 @@ function fixAllChangeOutDates() {
 
         if (needsUpdate) {
           var cell = sheet.getRange(i + 1, colChangeOutDateIdx + 1);  // +1 for 1-based column
-          if (correctChangeOut === 'N/A') {
-            cell.setNumberFormat('@');  // Plain text for N/A
-          } else {
-            cell.setNumberFormat('MM/dd/yyyy');
-          }
+          try {
+            if (correctChangeOut === 'N/A') {
+              cell.setNumberFormat('@');  // Plain text for N/A
+            } else {
+              cell.setNumberFormat('MM/dd/yyyy');
+            }
+          } catch (fmtErr) { /* Ignore format errors on typed columns */ }
           cell.setValue(correctChangeOut);
           fixedCount++;
 
