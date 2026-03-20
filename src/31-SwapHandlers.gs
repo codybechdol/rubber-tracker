@@ -182,11 +182,13 @@ function handlePickedCheckboxChange(ss, swapSheet, inventorySheet, editedRow, ne
         var fallbackChangeOutDate = calculateChangeOutDate(currentDateAssigned || today, revertLocation, revertAssignedTo, isSleeve);
         if (fallbackChangeOutDate) {
           var fallbackCell = inventorySheet.getRange(pickListRow, invColChangeOutDate);
-          if (fallbackChangeOutDate === 'N/A') {
-            fallbackCell.setNumberFormat('@');
-          } else {
-            fallbackCell.setNumberFormat('MM/dd/yyyy');
-          }
+          try {
+            if (fallbackChangeOutDate === 'N/A') {
+              fallbackCell.setNumberFormat('@');
+            } else {
+              fallbackCell.setNumberFormat('MM/dd/yyyy');
+            }
+          } catch (fmtErr) { /* Ignore format errors on typed columns */ }
           fallbackCell.setValue(fallbackChangeOutDate);
           logEvent('Stage 5: Set fallback Change Out Date to ' + fallbackChangeOutDate + ' for item ' + pickListNum);
         }
@@ -315,29 +317,37 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
 
     inventorySheet.getRange(pickListRow, 7).setValue('Assigned');
     inventorySheet.getRange(pickListRow, 8).setValue(employeeName);
-    inventorySheet.getRange(pickListRow, 5).setNumberFormat('MM/dd/yyyy').setValue(dateChanged);
+    var dateAssignedCell = inventorySheet.getRange(pickListRow, 5);
+    try { dateAssignedCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) { /* Ignore */ }
+    dateAssignedCell.setValue(dateChanged);
     inventorySheet.getRange(pickListRow, 6).setValue(employeeLocation);
 
     var changeOutCell = inventorySheet.getRange(pickListRow, 9);
     if (changeOutDate === 'N/A') {
-      changeOutCell.setNumberFormat('@').setValue('N/A');
+      try { changeOutCell.setNumberFormat('@'); } catch (fmtErr) { /* Ignore */ }
+      changeOutCell.setValue('N/A');
     } else if (changeOutDate) {
-      changeOutCell.setNumberFormat('MM/dd/yyyy').setValue(changeOutDate);
+      try { changeOutCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) { /* Ignore */ }
+      changeOutCell.setValue(changeOutDate);
     }
     inventorySheet.getRange(pickListRow, 10).setValue('');
 
     if (oldItemRow > 0) {
       inventorySheet.getRange(oldItemRow, 7).setValue('Ready For Test');
       inventorySheet.getRange(oldItemRow, 8).setValue('Packed For Testing');
-      inventorySheet.getRange(oldItemRow, 5).setNumberFormat('MM/dd/yyyy').setValue(dateChanged);
+      var oldDateAssignedCell = inventorySheet.getRange(oldItemRow, 5);
+      try { oldDateAssignedCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) { /* Ignore */ }
+      oldDateAssignedCell.setValue(dateChanged);
       inventorySheet.getRange(oldItemRow, 6).setValue("Cody's Truck");
 
       var oldItemChangeOutDate = calculateChangeOutDate(dateChanged, "Cody's Truck", 'Packed For Testing', isSleeve);
       var oldItemChangeOutCell = inventorySheet.getRange(oldItemRow, 9);
       if (oldItemChangeOutDate === 'N/A') {
-        oldItemChangeOutCell.setNumberFormat('@').setValue('N/A');
+        try { oldItemChangeOutCell.setNumberFormat('@'); } catch (fmtErr) { /* Ignore */ }
+        oldItemChangeOutCell.setValue('N/A');
       } else if (oldItemChangeOutDate) {
-        oldItemChangeOutCell.setNumberFormat('MM/dd/yyyy').setValue(oldItemChangeOutDate);
+        try { oldItemChangeOutCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) { /* Ignore */ }
+        oldItemChangeOutCell.setValue(oldItemChangeOutDate);
       }
     }
 
@@ -370,9 +380,11 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
         var pickListChangeOut = calculateChangeOutDate(stage2Date, "Cody's Truck", 'Packed For Delivery', isSleeve);
         var pickListChangeOutCell = inventorySheet.getRange(pickListRow, 9);
         if (pickListChangeOut === 'N/A') {
-          pickListChangeOutCell.setNumberFormat('@').setValue('N/A');
+          try { pickListChangeOutCell.setNumberFormat('@'); } catch (fmtErr) { /* Ignore */ }
+          pickListChangeOutCell.setValue('N/A');
         } else if (pickListChangeOut) {
-          pickListChangeOutCell.setNumberFormat('MM/dd/yyyy').setValue(pickListChangeOut);
+          try { pickListChangeOutCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) { /* Ignore */ }
+          pickListChangeOutCell.setValue(pickListChangeOut);
         }
       } else {
         inventorySheet.getRange(pickListRow, 5).setValue(stage2DateAssigned);
@@ -396,9 +408,11 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
           var oldItemChangeOut = calculateChangeOutDate(oldGloveDate, employeeLocation, oldGloveAssignedTo, isSleeve);
           var oldItemChangeOutCell = inventorySheet.getRange(oldItemRow, 9);
           if (oldItemChangeOut === 'N/A') {
-            oldItemChangeOutCell.setNumberFormat('@').setValue('N/A');
+            try { oldItemChangeOutCell.setNumberFormat('@'); } catch (fmtErr) { /* Ignore */ }
+            oldItemChangeOutCell.setValue('N/A');
           } else if (oldItemChangeOut) {
-            oldItemChangeOutCell.setNumberFormat('MM/dd/yyyy').setValue(oldItemChangeOut);
+            try { oldItemChangeOutCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) { /* Ignore */ }
+            oldItemChangeOutCell.setValue(oldItemChangeOut);
           }
         } else {
           inventorySheet.getRange(oldItemRow, 5).setValue(oldGloveDateAssigned);

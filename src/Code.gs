@@ -6043,11 +6043,13 @@ function recalcCurrentRow() {
 
   if (changeOutDate) {
     var changeOutCell = sheet.getRange(activeRow, COLS.INVENTORY.CHANGE_OUT_DATE);
-    if (changeOutDate === 'N/A') {
-      changeOutCell.setNumberFormat('@');
-    } else {
-      changeOutCell.setNumberFormat('MM/dd/yyyy');
-    }
+    try {
+      if (changeOutDate === 'N/A') {
+        changeOutCell.setNumberFormat('@');
+      } else {
+        changeOutCell.setNumberFormat('MM/dd/yyyy');
+      }
+    } catch (fmtErr) { /* Ignore format errors on typed columns */ }
     changeOutCell.setValue(changeOutDate);
 
     SpreadsheetApp.getUi().alert(
@@ -6249,11 +6251,13 @@ function handleInventoryAssignedToChange(ss, sheet, sheetName, editedRow, newVal
         var changeOutDate = calculateChangeOutDate(dateAssigned, newLocation, assignedTo, isSleeve);
         if (changeOutDate) {
           var changeOutCell = sheet.getRange(editedRow, colChangeOutDate);
-          if (changeOutDate === 'N/A') {
-            changeOutCell.setNumberFormat('@');  // Plain text for N/A
-          } else {
-            changeOutCell.setNumberFormat('MM/dd/yyyy');
-          }
+          try {
+            if (changeOutDate === 'N/A') {
+              changeOutCell.setNumberFormat('@');  // Plain text for N/A
+            } else {
+              changeOutCell.setNumberFormat('MM/dd/yyyy');
+            }
+          } catch (fmtErr) { /* Ignore format errors on typed columns */ }
           changeOutCell.setValue(changeOutDate);
           logEvent('Set Change Out Date to ' + changeOutDate + ' for row ' + editedRow, 'DEBUG');
         }
@@ -6748,7 +6752,9 @@ function fixHVTesterChangeOutDates() {
       var changeOutDate = calculateHVChangeOutDate(calibrationDate);
       if (changeOutDate) {
         sheet.getRange(i + 1, 9).setValue(changeOutDate); // Column I
-        sheet.getRange(i + 1, 9).setNumberFormat('mm/dd/yyyy');
+        try {
+          sheet.getRange(i + 1, 9).setNumberFormat('mm/dd/yyyy');
+        } catch (fmtErr) { /* Ignore format errors on typed columns */ }
         updated++;
       }
     }
@@ -6781,7 +6787,9 @@ function fixPhasingSetChangeOutDates() {
       var changeOutDate = calculateHVChangeOutDate(calibrationDate);
       if (changeOutDate) {
         sheet.getRange(i + 1, 9).setValue(changeOutDate); // Column I
-        sheet.getRange(i + 1, 9).setNumberFormat('mm/dd/yyyy');
+        try {
+          sheet.getRange(i + 1, 9).setNumberFormat('mm/dd/yyyy');
+        } catch (fmtErr) { /* Ignore format errors on typed columns */ }
         updated++;
       }
     }
@@ -6839,7 +6847,9 @@ function migrateHVAndPhasingSetsToChangeOutDate() {
         var changeOutDate = calculateHVChangeOutDate(calibrationDate);
         if (changeOutDate) {
           sheet.getRange(i + 2, 9).setValue(changeOutDate); // Column I
-          sheet.getRange(i + 2, 9).setNumberFormat('mm/dd/yyyy');
+          try {
+            sheet.getRange(i + 2, 9).setNumberFormat('mm/dd/yyyy');
+          } catch (fmtErr) { /* Ignore format errors on typed columns */ }
           updated++;
         }
       }
@@ -6900,11 +6910,13 @@ function handleDateAssignedChange(ss, sheet, sheetName, editedRow, newValue) {
 
     if (changeOutDate) {
       var changeOutDateCell = sheet.getRange(editedRow, colChangeOutDate);
-      if (changeOutDate === 'N/A') {
-        changeOutDateCell.setNumberFormat('@');  // Plain text for N/A
-      } else {
-        changeOutDateCell.setNumberFormat('MM/dd/yyyy');
-      }
+      try {
+        if (changeOutDate === 'N/A') {
+          changeOutDateCell.setNumberFormat('@');  // Plain text for N/A
+        } else {
+          changeOutDateCell.setNumberFormat('MM/dd/yyyy');
+        }
+      } catch (fmtErr) { /* Ignore format errors on typed columns */ }
       changeOutDateCell.setValue(changeOutDate);
       SpreadsheetApp.flush(); // Ensure the value is written
       logEvent('handleDateAssignedChange: Set Change Out Date to ' + changeOutDate + ' for row ' + editedRow, 'DEBUG');
@@ -7185,7 +7197,9 @@ function handlePickedCheckboxChange(ss, swapSheet, inventorySheet, editedRow, ne
       if (changeOutDate && changeOutDate !== 'N/A') {
         var invColChangeOutDate = 9;  // Column I
         var changeOutCell = inventorySheet.getRange(pickListRow, invColChangeOutDate);
-        changeOutCell.setNumberFormat('MM/dd/yyyy');
+        try {
+          changeOutCell.setNumberFormat('MM/dd/yyyy');
+        } catch (fmtErr) { /* Ignore format errors on typed columns */ }
         changeOutCell.setValue(changeOutDate);
         logEvent('Stage 2: Set Change Out Date to ' + changeOutDate + ' for item ' + pickListNum);
       }
@@ -7238,11 +7252,13 @@ function handlePickedCheckboxChange(ss, swapSheet, inventorySheet, editedRow, ne
           var revertChangeOutDate = calculateChangeOutDate(stage1Date, revertLocation, revertAssignedTo, isSleeve);
           if (revertChangeOutDate) {
             var revertChangeOutCell = inventorySheet.getRange(pickListRow, invColChangeOutDate);
-            if (revertChangeOutDate === 'N/A') {
-              revertChangeOutCell.setNumberFormat('@');
-            } else {
-              revertChangeOutCell.setNumberFormat('MM/dd/yyyy');
-            }
+            try {
+              if (revertChangeOutDate === 'N/A') {
+                revertChangeOutCell.setNumberFormat('@');
+              } else {
+                revertChangeOutCell.setNumberFormat('MM/dd/yyyy');
+              }
+            } catch (fmtErr) { /* Ignore format errors on typed columns */ }
             revertChangeOutCell.setValue(revertChangeOutDate);
             logEvent('Stage 5: Reverted Change Out Date to ' + revertChangeOutDate + ' for item ' + pickListNum);
           }
@@ -7255,11 +7271,13 @@ function handlePickedCheckboxChange(ss, swapSheet, inventorySheet, editedRow, ne
         var fallbackChangeOutDate = calculateChangeOutDate(currentDateAssigned || today, revertLocation, revertAssignedTo, isSleeve);
         if (fallbackChangeOutDate) {
           var fallbackCell = inventorySheet.getRange(pickListRow, invColChangeOutDate);
-          if (fallbackChangeOutDate === 'N/A') {
-            fallbackCell.setNumberFormat('@');
-          } else {
-            fallbackCell.setNumberFormat('MM/dd/yyyy');
-          }
+          try {
+            if (fallbackChangeOutDate === 'N/A') {
+              fallbackCell.setNumberFormat('@');
+            } else {
+              fallbackCell.setNumberFormat('MM/dd/yyyy');
+            }
+          } catch (fmtErr) { /* Ignore format errors on typed columns */ }
           fallbackCell.setValue(fallbackChangeOutDate);
           logEvent('Stage 5: Set fallback Change Out Date to ' + fallbackChangeOutDate + ' for item ' + pickListNum);
         }

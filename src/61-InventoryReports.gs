@@ -1094,7 +1094,9 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
       var parsedTestDate = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
       if (!isNaN(parsedTestDate.getTime())) {
         testDateCell.setValue(parsedTestDate);
-        testDateCell.setNumberFormat('MM/dd/yyyy');
+        try {
+          testDateCell.setNumberFormat('MM/dd/yyyy');
+        } catch (fmtErr) { /* Ignore format errors on typed columns */ }
       }
     }
   }
@@ -1131,7 +1133,9 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
       var today = new Date();
       var dateAssignedCell = sheet.getRange(rowNum, 5);  // Column E = Date Assigned
       dateAssignedCell.setValue(today);
-      dateAssignedCell.setNumberFormat('MM/dd/yyyy');
+      try {
+        dateAssignedCell.setNumberFormat('MM/dd/yyyy');
+      } catch (fmtErr) { /* Ignore format errors on typed columns */ }
 
       // Calculate Change Out Date based on test date (only for non-failed/lost items)
       if (formData.testDate && assignedToLower !== 'lost' && assignedToLower !== 'failed' && assignedToLower !== 'failed rubber') {
@@ -1140,11 +1144,13 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
         var changeOutDate = calculateChangeOutDate(today, location, assignedTo, isSleeve);
         if (changeOutDate) {
           var changeOutCell = sheet.getRange(rowNum, 9);  // Column I = Change Out Date
-          if (changeOutDate === 'N/A') {
-            changeOutCell.setNumberFormat('@');
-          } else {
-            changeOutCell.setNumberFormat('MM/dd/yyyy');
-          }
+          try {
+            if (changeOutDate === 'N/A') {
+              changeOutCell.setNumberFormat('@');
+            } else {
+              changeOutCell.setNumberFormat('MM/dd/yyyy');
+            }
+          } catch (fmtErr) { /* Ignore format errors on typed columns */ }
           changeOutCell.setValue(changeOutDate);
         }
       }
@@ -1158,7 +1164,9 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
       var today = new Date();
       var dateAssignedCell = sheet.getRange(rowNum, 5);  // Column E = Date Assigned
       dateAssignedCell.setValue(today);
-      dateAssignedCell.setNumberFormat('MM/dd/yyyy');
+      try {
+        dateAssignedCell.setNumberFormat('MM/dd/yyyy');
+      } catch (fmtErr) { /* Ignore format errors on typed columns */ }
 
       // Set Status - "In Service" for Blankets, "Assigned" for Gloves/Sleeves
       var assignedStatus = isBlanket ? 'In Service' : 'Assigned';
@@ -1200,11 +1208,13 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
 
         if (changeOutDate) {
           var changeOutCell = sheet.getRange(rowNum, 9);  // Column I = Change Out Date
-          if (changeOutDate === 'N/A') {
-            changeOutCell.setNumberFormat('@');
-          } else {
-            changeOutCell.setNumberFormat('MM/dd/yyyy');
-          }
+          try {
+            if (changeOutDate === 'N/A') {
+              changeOutCell.setNumberFormat('@');
+            } else {
+              changeOutCell.setNumberFormat('MM/dd/yyyy');
+            }
+          } catch (fmtErr) { /* Ignore format errors on typed columns */ }
           changeOutCell.setValue(changeOutDate);
         }
       }
