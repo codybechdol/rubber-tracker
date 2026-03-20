@@ -48,6 +48,144 @@ function getCol(sheetName, headerName) {
 }
 
 /**
+ * Validates that an item number is unique within the given sheet.
+ * Called from onEdit triggers when column A is edited on inventory sheets.
+ *
+ * @param {Object} e - The edit event object
+ * @param {string} sheetName - The name of the sheet being edited
+ * @return {boolean} - True if item number is unique (or empty), false if duplicate found
+ */
+function validateUniqueItemNumber(e, sheetName) {
+  if (!e || !e.range) return true;
+
+  var newValue = e.value;
+  var editedRow = e.range.getRow();
+
+  Logger.log('validateUniqueItemNumber: Checking "' + newValue + '" in ' + sheetName + ' (row ' + editedRow + ')');
+
+  // If the cell was cleared, allow it
+  if (!newValue || newValue.toString().trim() === '') {
+    Logger.log('validateUniqueItemNumber: Empty value, allowing');
+    return true;
+  }
+
+  var sheet = e.range.getSheet();
+  var lastRow = sheet.getLastRow();
+
+  // If only header row exists, no duplicates possible
+  if (lastRow < 2) {
+    Logger.log('validateUniqueItemNumber: Only header row, no duplicates possible');
+    return true;
+  }
+
+  // Get all item numbers from column A
+  var itemNumbers = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+
+  // Normalize: trim, uppercase, and remove ALL internal spaces
+  var normalizedNewValue = newValue.toString().trim().toUpperCase().replace(/\s+/g, '');
+  Logger.log('validateUniqueItemNumber: Normalized new value = "' + normalizedNewValue + '"');
+
+  // Check for duplicates (excluding the current row)
+  for (var i = 0; i < itemNumbers.length; i++) {
+    var existingItem = itemNumbers[i][0];
+    var currentRow = i + 2; // +2 because data starts at row 2
+
+    if (currentRow === editedRow) continue; // Skip the row being edited
+
+    // Normalize existing value the same way: trim, uppercase, remove ALL spaces
+    var normalizedExisting = existingItem ? existingItem.toString().trim().toUpperCase().replace(/\s+/g, '') : '';
+
+    if (normalizedExisting === normalizedNewValue) {
+      // Found duplicate! Show error and clear the cell
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+      Logger.log('validateUniqueItemNumber: DUPLICATE FOUND! "' + newValue + '" matches row ' + currentRow + ' value "' + existingItem + '"');
+
+      // Clear the invalid entry
+      e.range.clearContent();
+
+      // Show error message to user
+      ss.toast(
+        '❌ Duplicate Item Number!\n\nItem "' + newValue + '" already exists in row ' + currentRow + '.\n\nPlease use a unique item number.',
+        '⚠️ Duplicate Found',
+        8
+      );
+
+      // Also show an alert for more visibility
+      try {
+        SpreadsheetApp.getUi().alert(
+          '⚠️ Duplicate Item Number',
+          'Item number "' + newValue + '" already exists in row ' + currentRow + ' of the ' + sheetName + ' sheet.\n\n' +
+          'Each item must have a unique identifier.\n\n' +
+          'The duplicate entry has been cleared.',
+          SpreadsheetApp.getUi().ButtonSet.OK
+        );
+      } catch (uiErr) {
+        // UI alert might fail in some contexts, toast is the fallback
+        Logger.log('Could not show UI alert: ' + uiErr);
+      }
+
+      Logger.log('validateUniqueItemNumber: Blocked duplicate "' + newValue + '" in ' + sheetName + ' (exists in row ' + currentRow + ')');
+      return false;
+    }
+  }
+
+  // No duplicate found
+  Logger.log('validateUniqueItemNumber: No duplicate found, allowing');
+  return true;
+}
+
+/**
+ * Check if an item number already exists in the specified sheet.
+ * This is a standalone check function that can be called from any context.
+ * Used by dialogs and server-side validation before adding new items.
+ *
+ * @param {string} sheetName - The name of the sheet to check
+ * @param {string} itemNumber - The item number to check for
+ * @param {number} excludeRow - Optional row number to exclude (for edits, not new items)
+ * @returns {boolean} - True if duplicate exists, false otherwise
+ */
+function isDuplicateItemNumber(sheetName, itemNumber, excludeRow) {
+  // Sheets that should have unique item numbers
+  var uniqueItemSheets = [SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS, SHEET_HV_TESTERS, SHEET_PHASING_SETS, SHEET_AED];
+
+  if (uniqueItemSheets.indexOf(sheetName) === -1) {
+    return false; // Sheet doesn't require unique item numbers
+  }
+
+  if (!itemNumber || itemNumber.toString().trim() === '') {
+    return false; // Empty item number, nothing to check
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return false;
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return false; // No data rows
+
+  // Get all item numbers from column A (item number is always in column A)
+  var itemNumbers = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+
+  // Normalize: trim, uppercase, and remove ALL internal spaces
+  var normalizedNewItem = itemNumber.toString().trim().toUpperCase().replace(/\s+/g, '');
+
+  for (var i = 0; i < itemNumbers.length; i++) {
+    // Normalize existing value the same way
+    var existingItem = itemNumbers[i][0] ? itemNumbers[i][0].toString().trim().toUpperCase().replace(/\s+/g, '') : '';
+    var currentRow = i + 2; // +2 because data starts at row 2
+
+    if (currentRow === excludeRow) continue; // Skip excluded row
+
+    if (existingItem === normalizedNewItem) {
+      return true; // Found duplicate
+    }
+  }
+
+  return false; // No duplicate found
+}
+
+/**
  * Opens the Quick Actions sidebar for step-by-step workflow.
  * Menu item: Glove Manager → Quick Actions
  */

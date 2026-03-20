@@ -294,6 +294,21 @@ function onEdit(e) {
     var editedCol = e.range.getColumn();
     var editedRow = e.range.getRow();
 
+    // =========================================================================
+    // DUPLICATE ITEM NUMBER VALIDATION (Column A edits on inventory sheets)
+    // =========================================================================
+    // Check if this is an item number edit on one of the unique-item sheets
+    if (editedCol === 1 && editedRow >= 2) {
+      // UNIQUE_ITEM_SHEETS is defined in Code.gs - these sheets require unique item numbers
+      var uniqueSheets = [SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS, SHEET_HV_TESTERS, SHEET_PHASING_SETS, SHEET_AED];
+      if (uniqueSheets.indexOf(sheetName) !== -1) {
+        // Validate uniqueness - this will clear the cell and show error if duplicate
+        if (!validateUniqueItemNumber(e, sheetName)) {
+          return;  // Stop processing if duplicate was found
+        }
+      }
+    }
+
     // Only process Gloves/Sleeves sheets for Date Assigned changes
     if ((sheetName === SHEET_GLOVES || sheetName === SHEET_SLEEVES) && editedCol === 5) {
       // Column E (5) = Date Assigned - directly update Change Out Date
@@ -419,6 +434,21 @@ function onEditHandler(e) {
     var editedRow = e.range.getRow();
 
     Logger.log('onEditHandler fired: sheet=' + sheetName + ', row=' + editedRow + ', col=' + editedCol);
+
+    // =========================================================================
+    // DUPLICATE ITEM NUMBER VALIDATION (Column A edits on inventory sheets)
+    // =========================================================================
+    // Check if this is an item number edit on one of the unique-item sheets
+    if (editedCol === 1 && editedRow >= 2) {
+      var uniqueSheets = [SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS, SHEET_HV_TESTERS, SHEET_PHASING_SETS, SHEET_AED];
+      if (uniqueSheets.indexOf(sheetName) !== -1) {
+        // Validate uniqueness - this will clear the cell and show error if duplicate
+        if (!validateUniqueItemNumber(e, sheetName)) {
+          Logger.log('onEditHandler: Blocked duplicate item number in ' + sheetName);
+          return;  // Stop processing if duplicate was found
+        }
+      }
+    }
 
     // Handle Safety Compliance sheet edits (day columns, status, weekly meeting, monthly checklist)
     if (sheetName === 'Safety Compliance' && editedRow >= 2) {

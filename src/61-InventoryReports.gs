@@ -1072,6 +1072,17 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
   var isBlanket = (sheetName === 'Blankets');
   var itemType = sheetName === 'Gloves' ? 'Glove' : (sheetName === 'Sleeves' ? 'Sleeve' : 'Blanket');
 
+  // ===========================================================================
+  // DUPLICATE ITEM NUMBER VALIDATION
+  // ===========================================================================
+  // Check if this item number already exists (excluding the current row being edited)
+  var duplicateCheck = checkDuplicateItemNumber(sheetName, itemNum);
+  if (duplicateCheck.isDuplicate) {
+    // Clear the item number from the cell
+    sheet.getRange(rowNum, 1).clearContent();
+    throw new Error(duplicateCheck.message);
+  }
+
   // Column mapping for Gloves/Sleeves/Blankets:
   // A=Item#(1), B=Size/Type(2), C=Class(3), D=Test Date(4), E=Date Assigned(5),
   // F=Location(6), G=Status(7), H=Assigned To(8), I=Change Out Date(9), J=Picked For(10), K=Notes(11)
