@@ -8508,6 +8508,8 @@ function saveHistoryFast(silent) {
     var glovesSheet = ss.getSheetByName(SHEET_GLOVES);
     var sleevesSheet = ss.getSheetByName(SHEET_SLEEVES);
     var blanketsSheet = ss.getSheetByName(SHEET_BLANKETS);
+    var hvTestersSheet = ss.getSheetByName(SHEET_HV_TESTERS);
+    var phasingSetsSheet = ss.getSheetByName(SHEET_PHASING_SETS);
     var glovesHistorySheet = silent ?
       ss.getSheetByName(SHEET_GLOVES_HISTORY) :
       (ss.getSheetByName('Gloves History') || ss.insertSheet('Gloves History'));
@@ -8515,10 +8517,22 @@ function saveHistoryFast(silent) {
       ss.getSheetByName(SHEET_SLEEVES_HISTORY) :
       (ss.getSheetByName('Sleeves History') || ss.insertSheet('Sleeves History'));
     var blanketsHistorySheet = ss.getSheetByName(SHEET_BLANKETS_HISTORY);
+    var hvTestersHistorySheet = ss.getSheetByName(SHEET_HV_TESTERS_HISTORY);
+    var phasingSetsHistorySheet = ss.getSheetByName(SHEET_PHASING_SETS_HISTORY);
 
     // Ensure Blankets History sheet exists
     if (!blanketsHistorySheet) {
       blanketsHistorySheet = ensureBlanketHistorySheet();
+    }
+
+    // Ensure HV Testers History sheet exists
+    if (!hvTestersHistorySheet) {
+      hvTestersHistorySheet = ensureHVTestersHistorySheet();
+    }
+
+    // Ensure Phasing Sets History sheet exists
+    if (!phasingSetsHistorySheet) {
+      phasingSetsHistorySheet = ensurePhasingSetsHistorySheet();
     }
 
     /**
@@ -8571,7 +8585,8 @@ function saveHistoryFast(silent) {
           var year = d.getFullYear();
           return month + '/' + day + '/' + year;  // No leading zeros
         }
-        return str;
+        // If can't parse as date, try to strip leading zeros from existing format
+        return str.replace(/\b0+(\d)/g, '$1');
       }
 
       var normalizedNew = normalizeDate(dateAssigned);
@@ -8592,18 +8607,22 @@ function saveHistoryFast(silent) {
       var newAssignedTo = String(assignedTo || '').toLowerCase().trim();
       var newLocation = String(location || '').toLowerCase().trim();
 
-      // Normalize date strings for comparison
+      // Normalize date strings for comparison - strips leading zeros for consistency
+      // This handles both "3/20/2026" and "03/20/2026" as the same date
       function normalizeDate(dateStr) {
         if (!dateStr) return '';
         var str = String(dateStr).trim();
         var d = new Date(str);
         if (!isNaN(d.getTime())) {
+          // Use getMonth()+1, getDate(), getFullYear() - no leading zeros
           var month = d.getMonth() + 1;
           var day = d.getDate();
           var year = d.getFullYear();
           return month + '/' + day + '/' + year;
         }
-        return str;
+        // If can't parse as date, try to strip leading zeros from existing format
+        // e.g., "03/20/2026" -> "3/20/2026"
+        return str.replace(/\b0+(\d)/g, '$1');
       }
 
       // No previous entry - this is a new assignment
@@ -8654,17 +8673,23 @@ function saveHistoryFast(silent) {
     var newGloveEntries = 0;
     var newSleeveEntries = 0;
     var newBlanketEntries = 0;
+    var newHVTesterEntries = 0;
+    var newPhasingSetEntries = 0;
 
     // Build lookup maps ONCE for all history sheets (this is the key optimization)
     var glovesLookup = buildHistoryLookup(glovesHistorySheet);
     var sleevesLookup = buildHistoryLookup(sleevesHistorySheet);
     var blanketsLookup = buildHistoryLookup(blanketsHistorySheet);
+    var hvTestersLookup = buildHistoryLookup(hvTestersHistorySheet);
+    var phasingSetsLookup = buildHistoryLookup(phasingSetsHistorySheet);
     Logger.log('saveHistoryFast: Built lookups in ' + (new Date().getTime() - startTime) + 'ms');
 
     // Collect new entries in arrays for batch write
     var newGloveRows = [];
     var newSleeveRows = [];
     var newBlanketRows = [];
+    var newHVTesterRows = [];
+    var newPhasingSetRows = [];
 
     // Process Gloves
     if (glovesSheet && glovesSheet.getLastRow() > 1 && glovesHistorySheet) {
@@ -8761,6 +8786,74 @@ function saveHistoryFast(silent) {
       }
     }
 
+    // Process HV Testers
+    // HV Testers columns: A=Item#, B=Model, C=Serial#, D=Calibration Date, E=Date Assigned, F=Location, G=Status, H=Assigned To
+    if (hvTestersSheet && hvTestersSheet.getLastRow() > 1 && hvTestersHistorySheet) {
+      var numHVTesterRows = hvTestersSheet.getLastRow() - 1;
+      var hvTestersDisplay = hvTestersSheet.getRange(2, 1, numHVTesterRows, 8).getDisplayValues();
+      var hvTestersRawValues = hvTestersSheet.getRange(2, 1, numHVTesterRows, 8).getValues();
+
+      for (var h = 0; h < hvTestersDisplay.length; h++) {
+        var hvRow = hvTestersDisplay[h];
+        var hvRawRow = hvTestersRawValues[h];
+        var hvItemNum = formatItemNum(hvRawRow[0]);
+        var hvModel = hvRow[1];           // Column B - Model
+        var hvSerialNum = hvRow[2];       // Column C - Serial #
+        var hvDateAssignedRaw = hvRawRow[4];   // Raw date from Column E
+        var hvDateAssignedDisplay = hvRow[4];  // Display string for duplicate checking
+        var hvLocation = hvRow[5];        // Column F
+        var hvAssignedTo = hvRow[7];      // Column H
+
+        // Skip rows without item number or date assigned
+        if (!hvItemNum || !hvDateAssignedDisplay) continue;
+
+        // Use fast in-memory lookup with change type detection
+        var hvChangeResult = getChangeTypeFast(hvTestersLookup, hvItemNum, hvAssignedTo, hvDateAssignedDisplay, hvLocation, 'HV Tester');
+        if (!hvChangeResult.isDuplicate) {
+          // HV Testers History columns: Date Assigned, Item#, Model, Serial#, Location, Assigned To, Notes
+          newHVTesterRows.push([
+            silent ? formatDateForHistory(hvDateAssignedRaw) : hvDateAssignedDisplay,
+            hvItemNum, hvModel, hvSerialNum, hvLocation, hvAssignedTo, hvChangeResult.note || ''
+          ]);
+          newHVTesterEntries++;
+        }
+      }
+    }
+
+    // Process Phasing Sets
+    // Phasing Sets columns: A=Item#, B=Model, C=Serial#, D=Calibration Date, E=Date Assigned, F=Location, G=Status, H=Assigned To
+    if (phasingSetsSheet && phasingSetsSheet.getLastRow() > 1 && phasingSetsHistorySheet) {
+      var numPhasingSetRows = phasingSetsSheet.getLastRow() - 1;
+      var phasingSetsDisplay = phasingSetsSheet.getRange(2, 1, numPhasingSetRows, 8).getDisplayValues();
+      var phasingSetsRawValues = phasingSetsSheet.getRange(2, 1, numPhasingSetRows, 8).getValues();
+
+      for (var p = 0; p < phasingSetsDisplay.length; p++) {
+        var psRow = phasingSetsDisplay[p];
+        var psRawRow = phasingSetsRawValues[p];
+        var psItemNum = formatItemNum(psRawRow[0]);
+        var psModel = psRow[1];           // Column B - Model
+        var psSerialNum = psRow[2];       // Column C - Serial #
+        var psDateAssignedRaw = psRawRow[4];   // Raw date from Column E
+        var psDateAssignedDisplay = psRow[4];  // Display string for duplicate checking
+        var psLocation = psRow[5];        // Column F
+        var psAssignedTo = psRow[7];      // Column H
+
+        // Skip rows without item number or date assigned
+        if (!psItemNum || !psDateAssignedDisplay) continue;
+
+        // Use fast in-memory lookup with change type detection
+        var psChangeResult = getChangeTypeFast(phasingSetsLookup, psItemNum, psAssignedTo, psDateAssignedDisplay, psLocation, 'Phasing Set');
+        if (!psChangeResult.isDuplicate) {
+          // Phasing Sets History columns: Date Assigned, Item#, Model, Serial#, Location, Assigned To, Notes
+          newPhasingSetRows.push([
+            silent ? formatDateForHistory(psDateAssignedRaw) : psDateAssignedDisplay,
+            psItemNum, psModel, psSerialNum, psLocation, psAssignedTo, psChangeResult.note || ''
+          ]);
+          newPhasingSetEntries++;
+        }
+      }
+    }
+
     // BATCH WRITE: Write all new entries at once (MUCH faster than appendRow)
     // Now includes 7 columns (added Notes column)
     if (newGloveRows.length > 0) {
@@ -8778,7 +8871,17 @@ function saveHistoryFast(silent) {
       blanketsHistorySheet.getRange(blanketsLastRow + 1, 1, newBlanketRows.length, 7).setValues(newBlanketRows);
     }
 
-    Logger.log('saveHistoryFast: Gloves/Sleeves/Blankets processed in ' + (new Date().getTime() - startTime) + 'ms');
+    if (newHVTesterRows.length > 0) {
+      var hvTestersLastRow = hvTestersHistorySheet.getLastRow();
+      hvTestersHistorySheet.getRange(hvTestersLastRow + 1, 1, newHVTesterRows.length, 7).setValues(newHVTesterRows);
+    }
+
+    if (newPhasingSetRows.length > 0) {
+      var phasingSetsLastRow = phasingSetsHistorySheet.getLastRow();
+      phasingSetsHistorySheet.getRange(phasingSetsLastRow + 1, 1, newPhasingSetRows.length, 7).setValues(newPhasingSetRows);
+    }
+
+    Logger.log('saveHistoryFast: All inventory types processed in ' + (new Date().getTime() - startTime) + 'ms');
 
     // Save Employee History (uses its own optimized function)
     var newEmployeeEntries = 0;
@@ -8792,17 +8895,19 @@ function saveHistoryFast(silent) {
 
     if (silent) {
       PropertiesService.getUserProperties().setProperty('historySavedThisSession', 'true');
-      logEvent('Fast history backup completed in ' + totalTime + 'ms. Gloves: ' + newGloveEntries + ', Sleeves: ' + newSleeveEntries + ', Blankets: ' + newBlanketEntries + ', Employees: ' + newEmployeeEntries);
+      logEvent('Fast history backup completed in ' + totalTime + 'ms. Gloves: ' + newGloveEntries + ', Sleeves: ' + newSleeveEntries + ', Blankets: ' + newBlanketEntries + ', HV Testers: ' + newHVTesterEntries + ', Phasing Sets: ' + newPhasingSetEntries + ', Employees: ' + newEmployeeEntries);
     } else {
-      Logger.log('History saved in ' + totalTime + 'ms - Gloves: ' + newGloveEntries + ', Sleeves: ' + newSleeveEntries + ', Blankets: ' + newBlanketEntries + ', Employees: ' + newEmployeeEntries);
+      Logger.log('History saved in ' + totalTime + 'ms - Gloves: ' + newGloveEntries + ', Sleeves: ' + newSleeveEntries + ', Blankets: ' + newBlanketEntries + ', HV Testers: ' + newHVTesterEntries + ', Phasing Sets: ' + newPhasingSetEntries + ', Employees: ' + newEmployeeEntries);
 
       var message = '✅ History Saved Successfully!\n\n';
       message += '🧤 Gloves: ' + newGloveEntries + ' new entries\n';
       message += '🦺 Sleeves: ' + newSleeveEntries + ' new entries\n';
       message += '🧱 Blankets: ' + newBlanketEntries + ' new entries\n';
+      message += '⚡ HV Testers: ' + newHVTesterEntries + ' new entries\n';
+      message += '⚡ Phasing Sets: ' + newPhasingSetEntries + ' new entries\n';
       message += '👤 Employees: ' + newEmployeeEntries + ' new entries\n\n';
       message += '⏱️ Completed in ' + (totalTime / 1000).toFixed(1) + ' seconds';
-      if (newGloveEntries === 0 && newSleeveEntries === 0 && newBlanketEntries === 0 && newEmployeeEntries === 0) {
+      if (newGloveEntries === 0 && newSleeveEntries === 0 && newBlanketEntries === 0 && newHVTesterEntries === 0 && newPhasingSetEntries === 0 && newEmployeeEntries === 0) {
         message += '\n\nNo changes detected since last save.';
       }
       SpreadsheetApp.getUi().alert(message);
@@ -13623,6 +13728,10 @@ function generateAllReports() {
     generateGloveSwaps();
     generateSleeveSwaps();
     generateBlanketSwaps(true);  // Silent mode for batch operations
+
+    // Generate HV Tester and Phasing Set swaps (10-year calibration cycles)
+    generateHVTesterSwaps(true);  // Silent mode for batch operations
+    generatePhasingSetSwaps(true);  // Silent mode for batch operations
 
     // Update Reclaims BEFORE Purchase Needs so reclaim data is available
     updateReclaimsSheet();
@@ -19711,6 +19820,92 @@ function saveBlanketAssignmentToHistory(itemNumber, type, blanketClass, location
   }
 }
 
+/**
+ * Ensures the HV Testers History sheet exists with proper structure.
+ * Creates the sheet if it doesn't exist.
+ */
+function ensureHVTestersHistorySheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var historySheet = ss.getSheetByName(SHEET_HV_TESTERS_HISTORY);
+
+  if (!historySheet) {
+    historySheet = ss.insertSheet(SHEET_HV_TESTERS_HISTORY);
+    var headers = ['Date Assigned', 'Item #', 'Model', 'Serial #', 'Location', 'Assigned To', 'Notes'];
+    historySheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    historySheet.getRange(1, 1, 1, headers.length)
+      .setFontWeight('bold')
+      .setBackground('#7b1fa2')  // Purple for HV Testers
+      .setFontColor('#ffffff')
+      .setHorizontalAlignment('center');
+    historySheet.setFrozenRows(1);
+    historySheet.setColumnWidth(1, 100);
+    historySheet.setColumnWidth(2, 80);
+    historySheet.setColumnWidth(3, 100);
+    historySheet.setColumnWidth(4, 100);
+    historySheet.setColumnWidth(5, 120);
+    historySheet.setColumnWidth(6, 150);
+    historySheet.setColumnWidth(7, 200);
+    Logger.log('Created HV Testers History sheet');
+  } else {
+    // Check if Notes column exists, add if missing
+    var existingHeaders = historySheet.getRange(1, 1, 1, 7).getValues()[0];
+    if (String(existingHeaders[6]).toLowerCase().trim() !== 'notes') {
+      historySheet.getRange(1, 7).setValue('Notes')
+        .setFontWeight('bold')
+        .setBackground('#7b1fa2')
+        .setFontColor('#ffffff')
+        .setHorizontalAlignment('center');
+      historySheet.setColumnWidth(7, 200);
+      Logger.log('Added Notes column to HV Testers History');
+    }
+  }
+
+  return historySheet;
+}
+
+/**
+ * Ensures the Phasing Sets History sheet exists with proper structure.
+ * Creates the sheet if it doesn't exist.
+ */
+function ensurePhasingSetsHistorySheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var historySheet = ss.getSheetByName(SHEET_PHASING_SETS_HISTORY);
+
+  if (!historySheet) {
+    historySheet = ss.insertSheet(SHEET_PHASING_SETS_HISTORY);
+    var headers = ['Date Assigned', 'Item #', 'Model', 'Serial #', 'Location', 'Assigned To', 'Notes'];
+    historySheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    historySheet.getRange(1, 1, 1, headers.length)
+      .setFontWeight('bold')
+      .setBackground('#00838f')  // Cyan for Phasing Sets
+      .setFontColor('#ffffff')
+      .setHorizontalAlignment('center');
+    historySheet.setFrozenRows(1);
+    historySheet.setColumnWidth(1, 100);
+    historySheet.setColumnWidth(2, 80);
+    historySheet.setColumnWidth(3, 100);
+    historySheet.setColumnWidth(4, 100);
+    historySheet.setColumnWidth(5, 120);
+    historySheet.setColumnWidth(6, 150);
+    historySheet.setColumnWidth(7, 200);
+    Logger.log('Created Phasing Sets History sheet');
+  } else {
+    // Check if Notes column exists, add if missing
+    var existingHeaders = historySheet.getRange(1, 1, 1, 7).getValues()[0];
+    if (String(existingHeaders[6]).toLowerCase().trim() !== 'notes') {
+      historySheet.getRange(1, 7).setValue('Notes')
+        .setFontWeight('bold')
+        .setBackground('#00838f')
+        .setFontColor('#ffffff')
+        .setHorizontalAlignment('center');
+      historySheet.setColumnWidth(7, 200);
+      Logger.log('Added Notes column to Phasing Sets History');
+    }
+  }
+
+  return historySheet;
+}
+
 // ============================================================================
 // BLANKET SWAPS HANDLER FUNCTIONS
 // ============================================================================
@@ -20737,8 +20932,8 @@ function generateHVTesterSwaps(silent) {
     }
 
     // Check if in service and approaching replacement
-    if (status.toLowerCase() === 'in service' && replacementDate instanceof Date) {
-      var daysUntilReplacement = Math.floor((replacementDate - now) / (1000 * 60 * 60 * 24));
+    if (status.toLowerCase() === 'in service' && changeOutDate instanceof Date) {
+      var daysUntilReplacement = Math.floor((changeOutDate - now) / (1000 * 60 * 60 * 24));
 
       if (daysUntilReplacement <= lookAheadDays) {
         testersNeedingReplacement.push({
@@ -20747,7 +20942,7 @@ function generateHVTesterSwaps(silent) {
           serialNum: serialNum,
           calibrationDate: calibrationDate,
           dateAssigned: dateAssigned,
-          replacementDate: replacementDate,
+          replacementDate: changeOutDate,
           daysLeft: daysUntilReplacement,
           location: location || 'Unknown',
           assignedTo: assignedTo,
@@ -20773,7 +20968,15 @@ function generateHVTesterSwaps(silent) {
   if (!swapsSheet) {
     swapsSheet = ss.insertSheet(SHEET_HV_TESTER_SWAPS);
   }
-  swapsSheet.clear();
+  // Clear everything including data validation rules on the entire sheet
+  var maxRows = swapsSheet.getMaxRows();
+  var maxCols = swapsSheet.getMaxColumns();
+  if (maxRows > 0 && maxCols > 0) {
+    var fullRange = swapsSheet.getRange(1, 1, maxRows, maxCols);
+    fullRange.clearDataValidations();
+    fullRange.clearContent();
+    fullRange.clearFormat();
+  }
 
   // Build the swap report
   var currentRow = 1;
@@ -20928,7 +21131,7 @@ function generatePhasingSetSwaps(silent) {
           serialNum: serialNum,
           calibrationDate: calibrationDate,
           dateAssigned: dateAssigned,
-          replacementDate: replacementDate,
+          replacementDate: changeOutDate,
           daysLeft: daysUntilReplacement,
           location: location || 'Unknown',
           assignedTo: assignedTo,
@@ -20954,7 +21157,16 @@ function generatePhasingSetSwaps(silent) {
   if (!swapsSheet) {
     swapsSheet = ss.insertSheet(SHEET_PHASING_SET_SWAPS);
   }
-  swapsSheet.clear();
+  // Clear everything including data validation rules on the entire sheet
+  var maxRows = swapsSheet.getMaxRows();
+  var maxCols = swapsSheet.getMaxColumns();
+  if (maxRows > 0 && maxCols > 0) {
+    var fullRange = swapsSheet.getRange(1, 1, maxRows, maxCols);
+    fullRange.clearDataValidations();
+    fullRange.clearContent();
+    fullRange.clearFormat();
+  }
+
 
   // Build the swap report
   var currentRow = 1;
