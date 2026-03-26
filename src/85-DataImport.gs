@@ -237,6 +237,7 @@ function applyCrewChanges(changes) {
 
   var updatedCount = 0;
   var historyLogged = 0;
+  var changeDetails = []; // Specific changes for UI display
   var timezone = ss.getSpreadsheetTimeZone();
   var today = new Date();
   var todayStr = Utilities.formatDate(today, timezone, 'MM/dd/yyyy');
@@ -292,6 +293,10 @@ function applyCrewChanges(changes) {
         }
 
         Logger.log('Rehired employee: ' + change.employeeName + ' | Location: ' + change.newLocation + ' | Job #: ' + change.newJobNumber);
+        changeDetails.push({
+          name: change.employeeName,
+          changes: ['Rehired — Location: ' + change.newLocation + ', Job #: ' + change.newJobNumber]
+        });
         continue; // Skip to next employee
       }
 
@@ -389,6 +394,14 @@ function applyCrewChanges(changes) {
                    ' | Job #: ' + (jobChanged ? change.oldJobNumber + ' → ' + change.newJobNumber : 'unchanged') +
                    ' | Secondary Job #: ' + (secondaryJobChanged ? change.newSecondaryJobNumber : 'unchanged') +
                    ' | Classification: ' + (classificationChanged ? change.oldClassification + ' → ' + change.newClassification : 'unchanged'));
+
+        // Track change details for UI display
+        var empChanges = [];
+        if (locationChanged) empChanges.push('Location: ' + (change.oldLocation || 'None') + ' → ' + change.newLocation);
+        if (jobChanged) empChanges.push('Job #: ' + (change.oldJobNumber || 'None') + ' → ' + change.newJobNumber);
+        if (secondaryJobChanged) empChanges.push('Secondary Job: → ' + change.newSecondaryJobNumber);
+        if (classificationChanged) empChanges.push('Role: ' + (change.oldClassification || 'None') + ' → ' + change.newClassification);
+        changeDetails.push({ name: change.employeeName, changes: empChanges });
       }
 
     } catch (e) {
@@ -421,7 +434,8 @@ function applyCrewChanges(changes) {
   return {
     success: true,
     message: message,
-    pendingJobs: pendingJobs
+    pendingJobs: pendingJobs,
+    changeDetails: changeDetails
   };
 }
 
@@ -836,12 +850,60 @@ function getJobTrackingForCrewImport() {
       isCompleted: status === 'Completed',
       isPendingStart: status === 'Pending Start',
       isActive: status === 'Active',
-      isOnHold: status === 'On Hold'
+      isOnHold: status === 'On Hold',
+      schedule: deriveScheduleLabel(row)
     };
   }
 
   Logger.log('getJobTrackingForCrewImport: Found ' + Object.keys(result).length + ' jobs');
   return result;
+}
+
+/**
+ * Derives a human-readable schedule label from Job Tracking skip-day columns.
+ * Columns L-R (indices 11-17) are: Skip Sun, Skip Mon, Skip Tue, Skip Wed, Skip Thu, Skip Fri, Skip Sat
+ * @param {Array} row - Full row from Job Tracking sheet
+ * @returns {string} Schedule label (e.g., "Mon-Thu", "Tue-Fri", "Mon-Fri", or "" if no data)
+ */
+function deriveScheduleLabel(row) {
+  // Indices 11-17 = Skip Sun, Skip Mon, Skip Tue, Skip Wed, Skip Thu, Skip Fri, Skip Sat
+  var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  var workDays = [];
+  var hasAnySkipData = false;
+
+  for (var d = 0; d < 7; d++) {
+    var skipVal = row[11 + d];
+    if (skipVal === true || skipVal === 'TRUE' || skipVal === 'true') {
+      hasAnySkipData = true;
+      // This day is skipped (not a work day)
+    } else if (skipVal === false || skipVal === 'FALSE' || skipVal === 'false') {
+      hasAnySkipData = true;
+      workDays.push(dayNames[d]);
+    } else {
+      // No value / empty - assume it's a work day (weekday) or skip day (weekend)
+      if (d === 0 || d === 6) {
+        // Sun/Sat default to skip
+      } else {
+        workDays.push(dayNames[d]);
+      }
+    }
+  }
+
+  if (!hasAnySkipData) return ''; // No schedule data configured
+
+  // Common patterns
+  var workDayStr = workDays.join(',');
+  if (workDayStr === 'Mon,Tue,Wed,Thu') return 'Mon-Thu';
+  if (workDayStr === 'Tue,Wed,Thu,Fri') return 'Tue-Fri';
+  if (workDayStr === 'Mon,Tue,Wed,Thu,Fri') return 'Mon-Fri';
+  if (workDayStr === 'Mon,Tue,Wed,Thu,Fri,Sat') return 'Mon-Sat';
+
+  // If consecutive, show range
+  if (workDays.length >= 2) {
+    return workDays[0] + '-' + workDays[workDays.length - 1];
+  }
+
+  return workDays.join(', ') || '';
 }
 
 /**

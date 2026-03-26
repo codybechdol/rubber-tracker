@@ -705,6 +705,7 @@
     var jobTrackingData = {}; // Job Tracking status and dates for filtering
     var crewLeadSelections = {}; // Stores selected crew lead by job number: { "005-26": "John Smith" }
     var crewsWithMultipleLeads = []; // Crews that need lead selection
+    var _autoSelectionsAlreadyApplied = false; // Guard against duplicate auto-apply calls
 
     function init() {
       setupDragDrop();
@@ -1263,6 +1264,20 @@
 
       console.log('After merge: ' + parsedCrews.length + ' crews');
 
+      // Fill in missing schedule data from Job Tracking
+      for (var si = 0; si < parsedCrews.length; si++) {
+        var crew = parsedCrews[si];
+        if (!crew.scheduleType && jobTrackingData[crew.jobNumber]) {
+          var jtSchedule = jobTrackingData[crew.jobNumber].schedule;
+          if (jtSchedule) {
+            crew.scheduleLabel = jtSchedule;
+            crew.scheduleType = 'Primary';
+            crew.scheduleBadgeColor = 'bg-success';
+            crew.scheduleFromJobTracking = true;
+            console.log('Filled schedule from Job Tracking for ' + crew.jobNumber + ': ' + jtSchedule);
+          }
+        }
+      }
       // Check for unknown locations first
       if (unknownLocations.length > 0) {
         showUnknownLocations();
@@ -2490,9 +2505,12 @@
         var badgeColor = crew.scheduleBadgeColor || 'bg-secondary';
         var badgeLabel = crew.scheduleLabel || 'Unknown';
         var scheduleType = crew.scheduleType || '';
-        html += '<button class="btn btn-sm ' + badgeColor + ' dropdown-toggle" type="button" id="scheduleDropdown-' + crewId + '" data-bs-toggle="dropdown" aria-expanded="false" style="font-size: 10px; padding: 2px 6px;">';
+        html += '<button class="btn btn-sm ' + badgeColor + ' dropdown-toggle" type="button" id="scheduleDropdown-' + crewId + '" data-bs-toggle="dropdown" aria-expanded="false" style="font-size: 10px; padding: 2px 6px;"' + (crew.scheduleFromJobTracking ? ' title="Schedule from Job Tracking"' : '') + '>';
         if (scheduleType) {
           html += scheduleType + ' (' + badgeLabel + ')';
+          if (crew.scheduleFromJobTracking) {
+            html += ' <i class="bi bi-database" style="font-size: 8px;" title="From Job Tracking"></i>';
+          }
         } else {
           html += '<i class="bi bi-question-circle"></i> Set Schedule';
         }
@@ -3861,6 +3879,13 @@
      * DEDUPLICATES by employee name to prevent multiple updates for the same person.
      */
     function applyAutoSavedSpecialSelections() {
+      // Guard: Only run once per session (showSpecialSection can be called multiple times)
+      if (_autoSelectionsAlreadyApplied) {
+        console.log('applyAutoSavedSpecialSelections: Already applied, skipping duplicate call');
+        return;
+      }
+      _autoSelectionsAlreadyApplied = true;
+
       // Track which employees have already been processed to prevent duplicates
       var processedEmployees = {};
 
@@ -5983,11 +6008,33 @@
 
       google.script.run
         .withSuccessHandler(function(result) {
+          // Build detailed message with specific changes
+          var detailMsg = result.message;
+          if (result.changeDetails && result.changeDetails.length > 0) {
+            detailMsg += '\n\n📋 Changes Applied:';
+            for (var di = 0; di < result.changeDetails.length; di++) {
+              var d = result.changeDetails[di];
+              detailMsg += '\n• ' + d.name + ': ' + d.changes.join(', ');
+            }
+          }
+
           // Check if there are pending jobs that need activation decision
           if (result.pendingJobs && result.pendingJobs.length > 0) {
-            showPendingJobsDialog(result.pendingJobs, result.message);
+            showPendingJobsDialog(result.pendingJobs, detailMsg);
           } else {
-            showNotification(result.message, 'success', 'Crew Makeup Import Complete!', function() {
+            // Build HTML notification with change details
+            var htmlMsg = '<p>' + escapeHtml(result.message).replace(/\n/g, '<br>') + '</p>';
+            if (result.changeDetails && result.changeDetails.length > 0) {
+              htmlMsg += '<hr><p><strong>📋 Changes Applied:</strong></p>';
+              htmlMsg += '<div style="max-height: 250px; overflow-y: auto; font-size: 12px;">';
+              htmlMsg += '<table class="table table-sm table-bordered mb-0"><thead><tr><th>Employee</th><th>Changes</th></tr></thead><tbody>';
+              for (var di = 0; di < result.changeDetails.length; di++) {
+                var d = result.changeDetails[di];
+                htmlMsg += '<tr><td><strong>' + escapeHtml(d.name) + '</strong></td><td>' + d.changes.map(function(c) { return escapeHtml(c); }).join('<br>') + '</td></tr>';
+              }
+              htmlMsg += '</tbody></table></div>';
+            }
+            showNotification(htmlMsg, 'success', 'Crew Makeup Import Complete!', function() {
               google.script.host.close();
             });
           }
