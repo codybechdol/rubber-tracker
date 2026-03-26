@@ -6264,6 +6264,8 @@ function onOpen() {
         .addItem('🧹 Cleanup Config Crews (Legacy)', 'cleanupComplianceConfig')
         .addItem('🔧 Fix Config Checkboxes (Legacy)', 'fixComplianceConfigCheckboxes')
         .addItem('🧹 Remove Duplicate Rows', 'menuCleanupDuplicateComplianceRows')
+        .addItem('🧹 Remove Duplicate Log Entries', 'menuCleanupDuplicateLogEntries')
+        .addItem('🧹 Remove Duplicate Equipment Needs', 'cleanupDuplicateEquipmentNeeds')
         .addItem('🧹 Clear Saved Job Corrections', 'clearJobNumberCorrections')
         .addItem('🛠️ Fix Shifted Safety Tasks', 'fixShiftedSafetyComplianceTasks')
         .addItem('🔧 Fix Skipped Log Entries', 'fixSkippedLogEntriesFromMappings')
@@ -12848,16 +12850,21 @@ function cleanupOrphanedTaskMetadata() {
   Logger.log('=== cleanupOrphanedTaskMetadata START ===');
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
   var metadataSheet = ss.getSheetByName('Task Metadata');
 
   if (!metadataSheet) {
+    ui.alert('❌ Error', 'Task Metadata sheet not found.', ui.ButtonSet.OK);
     return { success: false, error: 'Task Metadata sheet not found' };
   }
 
   var data = metadataSheet.getDataRange().getValues();
   if (data.length <= 1) {
+    ui.alert('ℹ️ Empty', 'Task Metadata sheet has no records to check.', ui.ButtonSet.OK);
     return { success: true, cleanedCount: 0, message: 'No records to check' };
   }
+
+  Logger.log('Task Metadata: ' + (data.length - 1) + ' records to check');
 
   var headers = data[0];
   var colMap = {};
@@ -12871,16 +12878,20 @@ function cleanupOrphanedTaskMetadata() {
 
   // Build cache of source sheet row counts
   var sourceSheets = {};
-  var sheetNames = ['Glove Swaps', 'Sleeve Swaps', 'Training Tracking', 'Reclaims', 'Expiring Certs', 'Manual Tasks'];
+  var sheetNames = ['Glove Swaps', 'Sleeve Swaps', 'Training Tracking', 'Reclaims', 'Expiring Certs', 'Manual Tasks', 'Safety Equipment Needs'];
 
   sheetNames.forEach(function(name) {
     var sheet = ss.getSheetByName(name);
     if (sheet) {
       sourceSheets[name] = sheet.getLastRow();
+      Logger.log('Source sheet "' + name + '": ' + sheet.getLastRow() + ' rows');
     }
   });
 
   var rowsToDelete = [];
+  var skippedComplete = 0;
+  var skippedUntracked = 0;
+  var checkedCount = 0;
 
   // Check each metadata record
   for (var i = data.length - 1; i >= 1; i--) {
@@ -12890,10 +12901,18 @@ function cleanupOrphanedTaskMetadata() {
     var status = row[statusCol];
 
     // Skip completed/archived tasks - they may reference old rows
-    if (status === 'Complete' || status === 'Archived') continue;
+    if (status === 'Complete' || status === 'Archived') {
+      skippedComplete++;
+      continue;
+    }
 
     // Skip if source sheet not tracked
-    if (!sourceSheets.hasOwnProperty(sourceSheet)) continue;
+    if (!sourceSheets.hasOwnProperty(sourceSheet)) {
+      skippedUntracked++;
+      continue;
+    }
+
+    checkedCount++;
 
     // Check if source row exists
     var maxRow = sourceSheets[sourceSheet];
@@ -12903,9 +12922,15 @@ function cleanupOrphanedTaskMetadata() {
     }
   }
 
+  Logger.log('cleanupOrphanedTaskMetadata: Checked ' + checkedCount + ' records, skipped ' + skippedComplete + ' Complete/Archived, skipped ' + skippedUntracked + ' untracked source sheets');
   Logger.log('cleanupOrphanedTaskMetadata: Found ' + rowsToDelete.length + ' orphaned records');
 
   if (rowsToDelete.length === 0) {
+    Logger.log('=== cleanupOrphanedTaskMetadata END (none found) ===');
+    ui.alert('✅ No Orphaned Records',
+      'Checked ' + checkedCount + ' active Task Metadata records - none are orphaned.\n\n' +
+      'Skipped: ' + skippedComplete + ' Complete/Archived, ' + skippedUntracked + ' untracked sources.',
+      ui.ButtonSet.OK);
     return { success: true, cleanedCount: 0, message: 'No orphaned records found' };
   }
 
@@ -12916,6 +12941,11 @@ function cleanupOrphanedTaskMetadata() {
 
   Logger.log('cleanupOrphanedTaskMetadata: Deleted ' + rowsToDelete.length + ' orphaned records');
   Logger.log('=== cleanupOrphanedTaskMetadata END ===');
+
+  ui.alert('✅ Cleanup Complete',
+    'Removed ' + rowsToDelete.length + ' orphaned metadata records.\n\n' +
+    'These were tasks pointing to source rows that no longer exist.',
+    ui.ButtonSet.OK);
 
   return {
     success: true,
@@ -19442,6 +19472,8 @@ function cleanupIncorrectSafetyReportTasks() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var ui = SpreadsheetApp.getUi();
 
+  Logger.log('=== cleanupIncorrectSafetyReportTasks START ===');
+
   // Patterns to match for incorrect safety report tasks
   var incorrectPatterns = [
     /wipers/i,
@@ -19552,6 +19584,8 @@ function cleanupIncorrectSafetyReportTasks() {
   totalDeleted = taskMetaDeleted + manualTasksDeleted;
 
   if (totalDeleted === 0) {
+    Logger.log('No incorrect safety report tasks found. Task Metadata rows checked: ' + (data ? data.length - 1 : 0) + ', Manual Tasks rows: ' + (manualData ? manualData.length - 1 : 0));
+    Logger.log('=== cleanupIncorrectSafetyReportTasks END (nothing found) ===');
     ui.alert('✅ No Cleanup Needed', 'No incorrect safety report tasks found to clean up.', ui.ButtonSet.OK);
   } else {
     ui.alert('✅ Cleanup Complete',

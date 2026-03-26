@@ -2066,15 +2066,19 @@ function cleanupPendingTrainingForCompletedJobs() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var ui = SpreadsheetApp.getUi();
 
+  Logger.log('=== cleanupPendingTrainingForCompletedJobs START ===');
+
   var jobSheet = ss.getSheetByName('Job Tracking');
   var trainingSheet = ss.getSheetByName('Training Tracking');
 
   if (!jobSheet) {
+    Logger.log('ERROR: Job Tracking sheet not found');
     ui.alert('❌ Error', 'Job Tracking sheet not found.\n\nRun "Setup Job Tracking Sheet" first.', ui.ButtonSet.OK);
     return;
   }
 
   if (!trainingSheet) {
+    Logger.log('ERROR: Training Tracking sheet not found');
     ui.alert('❌ Error', 'Training Tracking sheet not found.\n\nRun "Setup Training Tracking" first.', ui.ButtonSet.OK);
     return;
   }
@@ -2083,20 +2087,45 @@ function cleanupPendingTrainingForCompletedJobs() {
   var jobData = jobSheet.getDataRange().getValues();
   var completedJobs = {}; // jobNumber → true
 
-  // Job Tracking columns: A=Job Number, B=Location, C=Foreman, D=Crew Size, E=Start Date,
-  //   F=Put On Hold Date, G=Estimated Return, H=Est. End Date, I=Actual End Date, J=Status
+  Logger.log('Job Tracking: ' + (jobData.length - 1) + ' data rows (headers: ' + String(jobData[0]).substring(0, 100) + ')');
+
+  // Dynamically find Status column by header name
+  var statusColIdx = -1;
+  var jobNumColIdx = 0; // Default column A
+  for (var h = 0; h < jobData[0].length; h++) {
+    var hdr = String(jobData[0][h]).toLowerCase().trim();
+    if (hdr === 'status') statusColIdx = h;
+    if (hdr === 'job number') jobNumColIdx = h;
+  }
+
+  if (statusColIdx === -1) {
+    Logger.log('ERROR: Could not find "Status" column in Job Tracking headers: ' + JSON.stringify(jobData[0]));
+    ui.alert('❌ Error', 'Could not find "Status" column in Job Tracking sheet.\n\nHeaders found: ' + jobData[0].join(', '), ui.ButtonSet.OK);
+    return;
+  }
+
+  Logger.log('Job Tracking column indices - Job Number: ' + jobNumColIdx + ', Status: ' + statusColIdx);
+
+  // Log all unique status values found
+  var statusCounts = {};
   for (var j = 1; j < jobData.length; j++) {
-    var jobNum = String(jobData[j][0] || '').trim();
-    var status = String(jobData[j][9] || '').trim();  // Status is now column J (index 9)
+    var jobNum = String(jobData[j][jobNumColIdx] || '').trim();
+    var status = String(jobData[j][statusColIdx] || '').trim();
+
+    if (!statusCounts[status]) statusCounts[status] = [];
+    statusCounts[status].push(jobNum);
 
     if (status === 'Completed' && jobNum) {
       completedJobs[jobNum] = true;
     }
   }
 
+  Logger.log('Job Tracking status breakdown: ' + JSON.stringify(Object.keys(statusCounts).map(function(s) { return s + ': ' + statusCounts[s].length + ' (' + statusCounts[s].slice(0, 3).join(', ') + (statusCounts[s].length > 3 ? '...' : '') + ')'; })));
+
   var completedJobCount = Object.keys(completedJobs).length;
   if (completedJobCount === 0) {
-    ui.alert('ℹ️ No Completed Jobs', 'No jobs are marked as "Completed" in Job Tracking.\n\nNo changes needed.', ui.ButtonSet.OK);
+    Logger.log('No completed jobs found. All statuses: ' + JSON.stringify(statusCounts));
+    ui.alert('ℹ️ No Completed Jobs', 'No jobs are marked as "Completed" in Job Tracking.\n\nNo changes needed.\n\nStatuses found: ' + Object.keys(statusCounts).join(', '), ui.ButtonSet.OK);
     return;
   }
 
@@ -2105,26 +2134,43 @@ function cleanupPendingTrainingForCompletedJobs() {
   // Get Training Tracking data
   var trainingData = trainingSheet.getDataRange().getValues();
 
-  // Training Tracking structure:
-  // Row 0: Title (row 1 in sheet)
-  // Row 1: Headers (row 2 in sheet)
-  // Row 2+: Data (row 3+ in sheet)
-  // Columns: A=Month, B=Topic, C=Crew#, D=Lead, E=Size, F=CompletionDate, G=Attendees, H=Hours, I=Trainer, J=Status, K=Notes
+  Logger.log('Training Tracking: ' + (trainingData.length - 2) + ' data rows (skipping title + header)');
+  Logger.log('Training Tracking headers: ' + String(trainingData[1]).substring(0, 150));
+
+  // Dynamically find column indices by header name (row 1 = headers)
+  var ttCrewCol = 2;   // Default column C
+  var ttStatusCol = 9;  // Default column J
+  for (var th = 0; th < trainingData[1].length; th++) {
+    var ttHdr = String(trainingData[1][th]).toLowerCase().trim();
+    if (ttHdr === 'crew #' || ttHdr === 'crew#' || ttHdr === 'job number' || ttHdr === 'crew') ttCrewCol = th;
+    if (ttHdr === 'status') ttStatusCol = th;
+  }
+  Logger.log('Training Tracking column indices - Crew: ' + ttCrewCol + ', Status: ' + ttStatusCol);
 
   // Collect rows to delete (work backwards to avoid index shifting)
   var rowsToDelete = [];
+  var crewsSeenInTraining = {};
+  var completedJobMatchCount = 0;
+  var completeStatusCount = 0;
+  var otherStatusCount = 0;
 
   for (var t = 2; t < trainingData.length; t++) {
     var month = String(trainingData[t][0] || '').trim();
     var topic = String(trainingData[t][1] || '').trim();
-    var crew = String(trainingData[t][2] || '').trim();
-    var status = String(trainingData[t][9] || '').trim();
+    var crew = String(trainingData[t][ttCrewCol] || '').trim();
+    var status = String(trainingData[t][ttStatusCol] || '').trim();
+
+    if (crew) crewsSeenInTraining[crew] = true;
 
     // Only process rows for completed jobs
     if (!completedJobs[crew]) continue;
+    completedJobMatchCount++;
 
     // Skip if status is "Complete" - keep for historical purposes
-    if (status === 'Complete') continue;
+    if (status === 'Complete') {
+      completeStatusCount++;
+      continue;
+    }
 
     // If status is "Pending", "N/A", or empty - mark for deletion
     if (status === 'Pending' || status === 'N/A' || status === '') {
@@ -2135,10 +2181,27 @@ function cleanupPendingTrainingForCompletedJobs() {
         crew: crew,
         status: status || '(empty)'
       });
+    } else {
+      otherStatusCount++;
+      Logger.log('Training row skipped (status="' + status + '"): crew=' + crew + ', month=' + month);
+    }
+  }
+
+  Logger.log('Training scan: ' + completedJobMatchCount + ' rows match completed jobs, ' + completeStatusCount + ' already Complete, ' + rowsToDelete.length + ' to delete, ' + otherStatusCount + ' other status');
+  Logger.log('Unique crews in Training Tracking: ' + Object.keys(crewsSeenInTraining).join(', '));
+  Logger.log('Completed jobs looking for: ' + Object.keys(completedJobs).join(', '));
+
+  // Check for near-misses (similar but not exact match)
+  var completedJobKeys = Object.keys(completedJobs);
+  var trainingCrewKeys = Object.keys(crewsSeenInTraining);
+  for (var ck = 0; ck < completedJobKeys.length; ck++) {
+    if (!crewsSeenInTraining[completedJobKeys[ck]]) {
+      Logger.log('WARNING: Completed job "' + completedJobKeys[ck] + '" NOT found in Training Tracking crews');
     }
   }
 
   if (rowsToDelete.length === 0) {
+    Logger.log('cleanupPendingTrainingForCompletedJobs: No rows to delete. ' + completedJobMatchCount + ' matched rows were all Complete or other status.');
     ui.alert(
       'ℹ️ No Rows to Remove',
       'No "Pending" training records found for completed jobs.\n\n' +

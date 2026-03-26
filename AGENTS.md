@@ -194,20 +194,73 @@ Key functions in `88-SafetyReports.gs`:
    - Duplicate `*/` in JSDoc comments
    - Return data > 50KB (use ScriptProperties pattern)
    - Function not found (check if in Code.gs, not module file)
-   - Gmail permissions revoked → Run `authorizeGmailAccess()` from menu: 🛡️ Safety → 🔑 Authorize Gmail Access
+   - Gmail permissions revoked → Run `authorizeGmailAccess()` from menu: 🛡️ Process Safety Emails → 🔧 Utilities → 🔑 Authorize Gmail Access
 
 ## Menu System
-Menu defined in `Code.gs` `onOpen()` function. Organized as a 6-step Monday workflow:
-1. **📥 Import Crew Makeup** - Upload weekly crew assignments, sync crews
-2. **📊 Generate All Reports** - Swaps (glove, sleeve, blanket, HV tester, phasing set), purchase needs, reclaims
-3. **🛡️ Process Safety Emails** - Gmail processing, compliance tracking, log sheets
-4. **🎯 Generate Task Metadata** - Build/refresh task database, dashboard, archiving
-5. **📅 Review & Schedule** - Task List, Trip Planner, training, crew visits, daily accomplishments
-6. **💾 Save & Backup** - History snapshots, Drive backups, email reports
+Menu defined in `Code.gs` `onOpen()` function. Organized as a 6-step Monday workflow under **Glove Manager**:
 
-Additional top-level submenus:
-- **🔧 Maintenance** - Inventory, purchase orders, employees, job tracking, sheets setup
-- **🔍 Debug** - Diagnostic tools, test functions
+```
+Glove Manager
+├── 📱 Quick Actions                    ← Opens sidebar
+├── ─────────────────────────
+├── 📥 Import Crew Makeup              ← STEP 1
+│   ├── 👥 Import Crew Makeup
+│   ├── 👷 Assign Crew Leads
+│   ├── 🔄 Sync Crews
+│   └── 🔧 Utilities →                 (Job Tracking setup, migration, refresh, etc.)
+├── 📊 Generate All Reports            ← STEP 2
+│   ├── ⚡ Generate All Reports
+│   ├── Generate Glove/Sleeve/Blanket/HV Tester/Phasing Set Swaps
+│   ├── Update Purchase Needs / Inventory Reports
+│   ├── Run Reclaims Check / Update Reclaims Sheet
+│   └── 🔧 Utilities →                 (Fix change-out dates, training crew leads)
+├── 🛡️ Process Safety Emails           ← STEP 3
+│   ├── 📥 Process Safety Emails
+│   ├── 📊 View Equipment Needs
+│   ├── 📈 View Compliance History
+│   ├── ⚙️ Manage Schedules (Job Tracking)
+│   ├── 🔧 Utilities →                 (Gmail auth, sync crews, master recalculate, tooltips, etc.)
+│   ├── 📄 Logs →                       (Setup/view JHA Log, Weekly Safety Log, Monthly Checklist Log)
+│   ├── 🔍 Debug →                      (Diagnose compliance, trace calculations, test parsing, etc.)
+│   └── 🧹 Cleanup →                   (Create tasks from issues, refresh sheets, remove duplicates, etc.)
+├── 🎯 Generate Task Metadata          ← STEP 4
+│   ├── 🎯 Generate Task Metadata
+│   ├── 📊 Task Dashboard
+│   ├── 🗄️ Archive Completed Tasks
+│   └── 🔧 Utilities →                 (Setup sheet, health check, remove duplicates, cleanup orphans)
+├── 📅 Review & Schedule               ← STEP 5
+│   ├── 📋 Tasks & Calendar
+│   ├── 🗺️ Trip Planner
+│   ├── ⚙️ Schedule Config
+│   ├── 📝 Daily Accomplishments
+│   ├── 📚 Training →                  (Setup config/tracking, sync crews, compliance report)
+│   ├── 👷 Crew Visit →                (Setup/refresh crew visit config)
+│   └── 🔧 Utilities →                 (Monthly schedule, refresh calendar, migrate manual tasks)
+├── 💾 Save & Backup                   ← STEP 6
+│   ├── 💾 Save Current State to History
+│   ├── 💾 Create Backup Snapshot
+│   ├── 📂 View Backup Folder
+│   ├── 📋 History →                   (Import legacy, item lookup, view full)
+│   └── 📧 Email Reports →             (Send, preview, configure, schedule)
+├── ─────────────────────────
+├── 🔧 Maintenance                     ← RARELY USED
+│   ├── 📦 Inventory →                 (Archive, restore, sync, HV testers, phasing sets)
+│   ├── 🛒 Purchase Orders →           (Create PO, order history, manage vendors)
+│   ├── 👥 Employees →                 (Location validation, archive, restore, phone format, etc.)
+│   ├── 📋 Job Tracking →              (View, refresh, schedule history, mark complete, add future)
+│   ├── 🏗️ Sheets Setup →             (Build sheets, setup locations, fiscal year, import data)
+│   ├── 🔍 Diagnose Auth Issues
+│   └── 🗑️ Clear Background Triggers
+├── 🔍 Debug                           ← DIAGNOSTIC TOOLS
+│   ├── Test Edit Trigger / Recalc Current Row
+│   ├── Diagnose Pick Lists / Show Swaps
+│   ├── Test Trip Planner / Debug Task List / Debug Training
+│   └── Diagnose specific crews
+├── ─────────────────────────
+└── Close & Save History
+```
+
+**Important:** There is NO "🛡️ Safety" top-level menu. The safety section is called **"🛡️ Process Safety Emails"**.
 
 After changes:
 1. Run `.\push.bat`

@@ -27,6 +27,14 @@ var SAFETY_EQUIPMENT_SHEET_NAME = "Safety Equipment Needs";
 var SAFETY_EQUIPMENT_SHEET_OLD_NAME = "Safety Reports"; // For backward compat
 var SAFETY_COMPLIANCE_SHEET_NAME = "Safety Compliance";
 
+// Execution-level caches (reset per execution, cleared explicitly at entry points)
+var _complianceConfigCache = null;
+var _customMappingsCache = null;
+var _employeesDataCache = null;       // Cached Employees sheet data (full array)
+var _jobTrackingDataCache = null;     // Cached Job Tracking sheet data (full array)
+var _resolveJobCache = {};            // Cached resolveJobToTrackedCrew results by job number
+var _foremanByJobCache = {};          // Cached lookupForemanByJobNumber results by job number
+
 /**
  * NEW: Raw data logging sheet names (Option B implementation - Feb 24, 2026)
  * These sheets provide an audit trail for ALL safety emails processed
@@ -708,6 +716,111 @@ function deleteOldRowsFromSheet(sheet, cutoffDate, dateCol) {
   return rowsToDelete.length;
 }
 
+/**
+ * Removes duplicate entries from JHA Log and Weekly Safety Log.
+ * Duplicates are identified by matching: Job Number + Date Created/Week Of + Email Subject.
+ * Keeps the FIRST occurrence (lowest row) and removes later duplicates.
+ *
+ * @returns {Object} - { jhaDuplicates: number, weeklyDuplicates: number }
+ */
+function cleanupDuplicateLogEntries() {
+  var result = { jhaDuplicates: 0, weeklyDuplicates: 0 };
+
+  Logger.log('=== cleanupDuplicateLogEntries START ===');
+
+  // Cleanup JHA Log duplicates
+  var jhaSheet = getJHALogSheet();
+  if (jhaSheet && jhaSheet.getLastRow() > 1) {
+    var jhaData = jhaSheet.getDataRange().getValues();
+    var seen = {};
+    var rowsToDelete = [];
+
+    Logger.log('JHA Log: ' + (jhaData.length - 1) + ' data rows');
+
+    for (var i = 1; i < jhaData.length; i++) {
+      // Build key from: Date Created (col B=1) + Job Number (col C=2) + Email Subject (col E=4)
+      var dateCreated = jhaData[i][1] ? String(jhaData[i][1]) : '';
+      var jobNum = String(jhaData[i][2] || '').trim();
+      var subject = String(jhaData[i][4] || '').trim();
+      var emailId = String(jhaData[i][5] || '').trim();
+
+      // Primary key: email ID + date created (most reliable, allows multi-day JHAs)
+      // Secondary key: date+job+subject (for entries without email ID)
+      var key = emailId ? ('eid_' + emailId + '_' + dateCreated) : ('djn_' + dateCreated + '_' + jobNum + '_' + subject);
+
+      if (seen[key]) {
+        rowsToDelete.push(i + 1); // 1-based row
+      } else {
+        seen[key] = true;
+      }
+    }
+
+    // Delete from bottom to top
+    for (var r = rowsToDelete.length - 1; r >= 0; r--) {
+      jhaSheet.deleteRow(rowsToDelete[r]);
+    }
+    result.jhaDuplicates = rowsToDelete.length;
+    Logger.log('JHA Log: ' + Object.keys(seen).length + ' unique keys, ' + rowsToDelete.length + ' duplicates removed');
+  } else {
+    Logger.log('JHA Log: sheet not found or empty');
+  }
+
+  // Cleanup Weekly Safety Log duplicates
+  var weeklySheet = getWeeklySafetyLogSheet();
+  if (weeklySheet && weeklySheet.getLastRow() > 1) {
+    var weeklyData = weeklySheet.getDataRange().getValues();
+    var weeklySeen = {};
+    var weeklyRowsToDelete = [];
+
+    Logger.log('Weekly Safety Log: ' + (weeklyData.length - 1) + ' data rows');
+
+    for (var w = 1; w < weeklyData.length; w++) {
+      var weekOf = weeklyData[w][1] ? String(weeklyData[w][1]) : '';
+      var wJobNum = String(weeklyData[w][2] || '').trim();
+      var wEmailId = String(weeklyData[w][5] || '').trim();
+
+      var wKey = wEmailId ? ('eid_' + wEmailId) : ('wjn_' + weekOf + '_' + wJobNum);
+
+      if (weeklySeen[wKey]) {
+        weeklyRowsToDelete.push(w + 1);
+      } else {
+        weeklySeen[wKey] = true;
+      }
+    }
+
+    for (var wr = weeklyRowsToDelete.length - 1; wr >= 0; wr--) {
+      weeklySheet.deleteRow(weeklyRowsToDelete[wr]);
+    }
+    result.weeklyDuplicates = weeklyRowsToDelete.length;
+    Logger.log('Weekly Safety Log: ' + Object.keys(weeklySeen).length + ' unique keys, ' + weeklyRowsToDelete.length + ' duplicates removed');
+  } else {
+    Logger.log('Weekly Safety Log: sheet not found or empty');
+  }
+
+  Logger.log('=== cleanupDuplicateLogEntries END ===');
+  return result;
+}
+
+/**
+ * Menu function to clean up duplicate log entries with UI feedback
+ */
+function menuCleanupDuplicateLogEntries() {
+  var result = cleanupDuplicateLogEntries();
+  var total = result.jhaDuplicates + result.weeklyDuplicates;
+
+  if (total === 0) {
+    SpreadsheetApp.getUi().alert('✅ No Duplicates Found',
+      'JHA Log and Weekly Safety Log have no duplicate entries.\n\nCheck the Execution Log for details on rows examined.', SpreadsheetApp.getUi().ButtonSet.OK);
+  } else {
+    SpreadsheetApp.getUi().alert('🧹 Duplicates Removed',
+      'Removed ' + total + ' duplicate log entries:\n\n' +
+      '• JHA Log: ' + result.jhaDuplicates + ' duplicates removed\n' +
+      '• Weekly Safety Log: ' + result.weeklyDuplicates + ' duplicates removed\n\n' +
+      'Run "Master Recalculate" to refresh compliance data.',
+      SpreadsheetApp.getUi().ButtonSet.OK);
+  }
+}
+
 // ============================================================================
 // DIAGNOSTIC FUNCTIONS (Debugging - Feb 24, 2026)
 // ============================================================================
@@ -1372,6 +1485,10 @@ function calculateComplianceFromLogs(weekStartDate) {
   // Track unknown jobs
   var unknownJobs = {};
 
+  // === LOAD JOB TRACKING STATUS MAP ===
+  // Used to filter out On Hold/Completed/Pending Start crews from unknownJobs
+  var jobTrackingStatuses = getJobTrackingStatusMap();
+
   // === READ JHA LOG ===
   var jhaSheet = getJHALogSheet();
   var jhaCreditsApplied = 0;
@@ -1407,53 +1524,75 @@ function calculateComplianceFromLogs(weekStartDate) {
         continue;
       }
 
+      // Compute dayOfWeek BEFORE the status check so it's available for Unknown Job tracking too
+      var dayOfWeek = jhaDate.getDay(); // 0=Sun, 6=Sat
+
       // Check if this is a credited entry
       if (status !== 'Credited') {
-        jhaRowsSkippedNotCredited++;
         // Track unknown JHA jobs for user assignment
         // But ONLY if it's truly unknown - not if it's now a tracked crew
         if (status === 'Unknown Job') {
           var jhaBaseJob = originalJobNumber.split('.')[0].trim();
-          // Skip if this job is now a tracked crew
-          if (crewCompliance[jhaBaseJob]) {
-            Logger.log("calculateComplianceFromLogs: Skipping Unknown Job log entry for " + jhaBaseJob + " - it's now a tracked crew");
+          // Skip empty job numbers
+          if (!jhaBaseJob) {
+            jhaRowsSkippedNotCredited++;
             continue;
           }
-          // Check if now has custom mapping
-          var jhaCustomMappings = getCustomJobForemanMappings();
-          if (!jhaCustomMappings[jhaBaseJob]) {
-            if (!unknownJobs[originalJobNumber]) {
-              unknownJobs[originalJobNumber] = { reportTypes: [], dates: [], reports: [], reason: 'Unknown Job' };
+          // RE-CREDIT if this job is now a tracked crew (crew was added to tracking after initial processing)
+          if (crewCompliance[jhaBaseJob]) {
+            Logger.log("calculateComplianceFromLogs: Re-crediting Unknown Job JHA for " + jhaBaseJob + " - now a tracked crew");
+            // Fall through to normal crediting logic below by overriding creditedTo
+            creditedTo = jhaBaseJob;
+            // Don't increment skipped count or continue - let it fall through
+          } else {
+            // Skip if this job exists in Job Tracking with On Hold/Completed/Pending Start status
+            var jhaJobStatus = jobTrackingStatuses[jhaBaseJob];
+            if (jhaJobStatus && jhaJobStatus !== 'active') {
+              Logger.log("calculateComplianceFromLogs: Skipping Unknown Job log entry for " + jhaBaseJob + " - Job Tracking status: " + jhaJobStatus);
+              jhaRowsSkippedNotCredited++;
+              continue;
             }
-            if (unknownJobs[originalJobNumber].reportTypes.indexOf('JHA') === -1) {
-              unknownJobs[originalJobNumber].reportTypes.push('JHA');
-            }
-            var jhaDateStr = Utilities.formatDate(jhaDate, Session.getScriptTimeZone(), 'MM/dd/yyyy');
-            if (unknownJobs[originalJobNumber].dates.indexOf(jhaDateStr) === -1) {
-              unknownJobs[originalJobNumber].dates.push(jhaDateStr);
-            }
-            // Add individual report with email ID for PDF preview
-            var jhaEmailId = String(jhaRow[5] || '').trim(); // Column F - Email ID
-            var jhaEmailSubject = String(jhaRow[4] || '').trim(); // Column E - Email Subject
-            var jhaReceivedDateStr = dateReceived ? Utilities.formatDate(new Date(dateReceived), Session.getScriptTimeZone(), 'MM/dd/yyyy') : '';
-            // Check for duplicate report
-            var jhaIsDup = unknownJobs[originalJobNumber].reports.some(function(r) {
-              return r.reportType === 'JHA' && r.reportDate === jhaDateStr;
-            });
-            if (!jhaIsDup) {
-              unknownJobs[originalJobNumber].reports.push({
-                reportType: 'JHA',
-                reportDate: jhaDateStr,
-                receivedDate: jhaReceivedDateStr,
-                dayOfWeek: dayOfWeek,
-                dayName: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dayOfWeek],
-                emailSubject: jhaEmailSubject,
-                emailId: jhaEmailId
+            // Check if now has custom mapping
+            var jhaCustomMappings = getCustomJobForemanMappings();
+            if (!jhaCustomMappings[jhaBaseJob]) {
+              if (!unknownJobs[originalJobNumber]) {
+                unknownJobs[originalJobNumber] = { reportTypes: [], dates: [], reports: [], reason: 'Unknown Job' };
+              }
+              if (unknownJobs[originalJobNumber].reportTypes.indexOf('JHA') === -1) {
+                unknownJobs[originalJobNumber].reportTypes.push('JHA');
+              }
+              var jhaDateStr = Utilities.formatDate(jhaDate, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+              if (unknownJobs[originalJobNumber].dates.indexOf(jhaDateStr) === -1) {
+                unknownJobs[originalJobNumber].dates.push(jhaDateStr);
+              }
+              // Add individual report with email ID for PDF preview
+              var jhaEmailId = String(jhaRow[5] || '').trim(); // Column F - Email ID
+              var jhaEmailSubject = String(jhaRow[4] || '').trim(); // Column E - Email Subject
+              var jhaReceivedDateStr = dateReceived ? Utilities.formatDate(new Date(dateReceived), Session.getScriptTimeZone(), 'MM/dd/yyyy') : '';
+              // Check for duplicate report
+              var jhaIsDup = unknownJobs[originalJobNumber].reports.some(function(r) {
+                return r.reportType === 'JHA' && r.reportDate === jhaDateStr;
               });
+              if (!jhaIsDup) {
+                unknownJobs[originalJobNumber].reports.push({
+                  reportType: 'JHA',
+                  reportDate: jhaDateStr,
+                  receivedDate: jhaReceivedDateStr,
+                  dayOfWeek: dayOfWeek,
+                  dayName: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dayOfWeek],
+                  emailSubject: jhaEmailSubject,
+                  emailId: jhaEmailId
+                });
+              }
             }
+            jhaRowsSkippedNotCredited++;
+            continue;
           }
+        } else {
+          // Status is something else (not Credited and not Unknown Job) - skip
+          jhaRowsSkippedNotCredited++;
+          continue;
         }
-        continue;
       }
 
       // Determine which crew to credit
@@ -1469,13 +1608,29 @@ function calculateComplianceFromLogs(weekStartDate) {
         crewToCredit = creditedTo;
       }
 
+      // Priority 3: If creditedTo crew exists but was excluded (e.g., start date filter),
+      // look up the foreman and find any other tracked crew they're associated with
+      if (!crewToCredit && creditedTo) {
+        var foremanLookup = lookupForemanByJobNumber(creditedTo);
+        if (foremanLookup && foremanLookup.name) {
+          var foremanName = foremanLookup.name.toLowerCase().trim();
+          for (var crewKey in crewCompliance) {
+            if (crewCompliance[crewKey].foreman && crewCompliance[crewKey].foreman.toLowerCase().trim() === foremanName) {
+              crewToCredit = crewKey;
+              Logger.log("calculateComplianceFromLogs: Foreman fallback - " + creditedTo + " not tracked, but foreman " + foremanLookup.name + " found on " + crewKey);
+              break;
+            }
+          }
+        }
+      }
+
       if (!crewToCredit) {
         jhaRowsSkippedCrewNotFound++;
         Logger.log("calculateComplianceFromLogs: CREW NOT FOUND - Original: " + originalJobNumber + ", CreditedTo: " + creditedTo);
         continue;
       }
 
-      var dayOfWeek = jhaDate.getDay(); // 0=Sun, 6=Sat
+
 
       crewCompliance[crewToCredit].jhaByDay[dayOfWeek] = true;
       crewCompliance[crewToCredit].jhaDetails[dayOfWeek] = {
@@ -1541,6 +1696,21 @@ function calculateComplianceFromLogs(weekStartDate) {
           crewToCredit = creditedTo;
         }
 
+        // Priority 3: Foreman fallback - look up the foreman of creditedTo crew
+        if (!crewToCredit && creditedTo) {
+          var wmForemanLookup = lookupForemanByJobNumber(creditedTo);
+          if (wmForemanLookup && wmForemanLookup.name) {
+            var wmForemanName = wmForemanLookup.name.toLowerCase().trim();
+            for (var wmKey in crewCompliance) {
+              if (crewCompliance[wmKey].foreman && crewCompliance[wmKey].foreman.toLowerCase().trim() === wmForemanName) {
+                crewToCredit = wmKey;
+                Logger.log("calculateComplianceFromLogs: Weekly Meeting foreman fallback - " + creditedTo + " not tracked, but foreman " + wmForemanLookup.name + " found on " + wmKey);
+                break;
+              }
+            }
+          }
+        }
+
         if (crewToCredit) {
           crewCompliance[crewToCredit].weeklyMeeting = true;
           crewCompliance[crewToCredit].weeklyMeetingDetails = {
@@ -1551,13 +1721,33 @@ function calculateComplianceFromLogs(weekStartDate) {
             crewCompliance[crewToCredit].weeklyMeetingLate = true;
           }
           Logger.log("calculateComplianceFromLogs: Credited Weekly Meeting to " + crewToCredit + " (original=" + originalJobNumber + ", creditedTo=" + creditedTo + ")");
+        } else {
+          Logger.log("calculateComplianceFromLogs: Weekly Meeting CREW NOT FOUND - Original: " + originalJobNumber + ", CreditedTo: " + creditedTo);
         }
       } else if (status === 'Unknown Job') {
         // Re-check if this job now has a custom mapping OR is a tracked crew
         var baseJob = originalJobNumber.split('.')[0].trim();
-        // Skip if this job is now a tracked crew
+        // Skip empty job numbers
+        if (!baseJob) {
+          continue;
+        }
+        // RE-CREDIT if this job is now a tracked crew (crew was added to tracking after initial processing)
         if (crewCompliance[baseJob]) {
-          Logger.log("calculateComplianceFromLogs: Skipping Unknown Job Weekly Meeting for " + baseJob + " - it's now a tracked crew");
+          Logger.log("calculateComplianceFromLogs: Re-crediting Unknown Job Weekly Meeting for " + baseJob + " - now a tracked crew");
+          crewCompliance[baseJob].weeklyMeeting = true;
+          crewCompliance[baseJob].weeklyMeetingDetails = {
+            dateReceived: weeklyDateReceived,
+            weekOf: weekOf
+          };
+          if (notes && notes.indexOf('LATE') !== -1) {
+            crewCompliance[baseJob].weeklyMeetingLate = true;
+          }
+          continue;
+        }
+        // Skip if this job exists in Job Tracking with On Hold/Completed/Pending Start status
+        var wmJobStatus = jobTrackingStatuses[baseJob];
+        if (wmJobStatus && wmJobStatus !== 'active') {
+          Logger.log("calculateComplianceFromLogs: Skipping Unknown Job Weekly Meeting for " + baseJob + " - Job Tracking status: " + wmJobStatus);
           continue;
         }
         if (customMappings[baseJob]) {
@@ -1758,13 +1948,24 @@ function calculateComplianceFromLogs(weekStartDate) {
     uncreditedJobs: []
   };
 
-  // Convert unknown jobs to array, but FILTER OUT any jobs that are actually tracked crews
-  // This handles the case where old log entries have status='Unknown Job' but the crew was later added to config
+  // Convert unknown jobs to array, but FILTER OUT any jobs that are actually tracked crews,
+  // empty job numbers, or jobs with known non-Active statuses in Job Tracking
   for (var uj in unknownJobs) {
     var baseJob = uj.split('.')[0].trim();
+    // Skip empty job numbers
+    if (!baseJob) {
+      Logger.log("calculateComplianceFromLogs: Filtering out empty job number from uncredited list");
+      continue;
+    }
     // Skip if this job is actually a tracked crew
     if (crewCompliance[baseJob]) {
       Logger.log("calculateComplianceFromLogs: Filtering out " + uj + " from uncredited list - it's a tracked crew");
+      continue;
+    }
+    // Skip if this job exists in Job Tracking with On Hold/Completed/Pending Start status
+    var ujJobStatus = jobTrackingStatuses[baseJob];
+    if (ujJobStatus && ujJobStatus !== 'active') {
+      Logger.log("calculateComplianceFromLogs: Filtering out " + uj + " from uncredited list - Job Tracking status: " + ujJobStatus);
       continue;
     }
     result.uncreditedJobs.push({
@@ -1829,6 +2030,7 @@ function updateComplianceSheetFromLogs(complianceData) {
 
   var updated = 0;
   var added = 0;
+  var affectedRows = []; // Track rows that need data validation re-applied
 
   for (var crewJob in complianceData.crews) {
     var crew = complianceData.crews[crewJob];
@@ -1866,6 +2068,7 @@ function updateComplianceSheetFromLogs(complianceData) {
       rowNum = sheet.getLastRow();
       added++;
     }
+    affectedRows.push(rowNum);
 
     // Add cell notes/tooltips for day columns (D-J = columns 4-10), Weekly Meeting (K=11), Monthly (L=12)
     // Day columns: D=Sun(4), E=Mon(5), F=Tue(6), G=Wed(7), H=Thu(8), I=Fri(9), J=Sat(10)
@@ -1886,6 +2089,31 @@ function updateComplianceSheetFromLogs(complianceData) {
     // Monthly Checklist tooltip (column L = 12)
     var monthlyNote = buildComplianceCellNote('monthly', null, crew.monthlyChecklistStatus || '⏳', crew.monthlyChecklistDetails);
     sheet.getRange(rowNum, 12).setNote(monthlyNote);
+  }
+
+  // Re-apply data validation dropdowns to all affected rows
+  // setValues() and appendRow() strip data validation, so we must restore it
+  if (affectedRows.length > 0) {
+    var dayValues = ['✅', '✅L', '❌', '❌W', 'N/A', '⏳', ''];
+    var dayRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(dayValues, true)
+      .setAllowInvalid(true)
+      .build();
+
+    var statusValues = ['Complete', 'Missing Reports', 'Pending', 'Resolved'];
+    var statusRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(statusValues, true)
+      .setAllowInvalid(true)
+      .build();
+
+    for (var ri = 0; ri < affectedRows.length; ri++) {
+      var r = affectedRows[ri];
+      // Day columns D-K (cols 4-11): 8 columns
+      sheet.getRange(r, 4, 1, 8).setDataValidation(dayRule);
+      // Status column M (col 13)
+      sheet.getRange(r, 13, 1, 1).setDataValidation(statusRule);
+    }
+    Logger.log("updateComplianceSheetFromLogs: Re-applied dropdowns to " + affectedRows.length + " rows");
   }
 
   Logger.log("updateComplianceSheetFromLogs: Updated " + updated + ", Added " + added + " rows (with tooltips)");
@@ -3913,6 +4141,7 @@ function openSafetyReports() {
  * Menu function: Glove Manager → Safety → Cleanup Safety Equipment Needs
  */
 function cleanupSafetyReportsSheet() {
+  Logger.log('=== cleanupSafetyReportsSheet START ===');
   var sheet = getSafetyEquipmentSheet();
 
   if (!sheet || sheet.getLastRow() < 2) {
@@ -3971,6 +4200,8 @@ function cleanupSafetyReportsSheet() {
   }
 
   if (rowsToDelete.length === 0) {
+    Logger.log('No rows to clean: ' + (data.length - 1) + ' rows checked, all are valid equipment issues');
+    Logger.log('=== cleanupSafetyReportsSheet END (already clean) ===');
     Browser.msgBox('✅ Already Clean',
       'No JHA or Safety Meeting compliance records found in Safety Reports.\\n\\n' +
       'The sheet already contains only actual equipment issues from Fleet Checklists.',
@@ -4010,6 +4241,75 @@ function cleanupSafetyReportsSheet() {
     Browser.Buttons.OK);
 
   Logger.log("cleanupSafetyReportsSheet: Removed " + deleted + " records (" + jhaCount + " JHA, " + meetingCount + " Safety Meeting, " + noIssuesCount + " No Issues)");
+}
+
+/**
+ * Removes duplicate rows from the Safety Equipment Needs sheet.
+ * Duplicates are identified by matching Email ID + Equipment Type + first 50 chars of Description.
+ * Keeps the FIRST occurrence and removes subsequent duplicates.
+ * Menu: Glove Manager → Process Safety Emails → Cleanup → Remove Duplicate Equipment Needs
+ */
+function cleanupDuplicateEquipmentNeeds() {
+  var sheet = getSafetyEquipmentSheet();
+  if (!sheet || sheet.getLastRow() < 2) {
+    SpreadsheetApp.getUi().alert('ℹ️ No Data', 'Safety Equipment Needs sheet is empty or does not exist.', SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+
+  var data = sheet.getDataRange().getValues();
+  var seen = {};
+  var rowsToDelete = [];
+
+  // Scan from row 1 (skip header at 0) - keep first occurrence, mark later ones for deletion
+  // Use CONTENT-BASED dedup key: reportDate + vehicleNumber + jobNumber + equipType + description
+  // This catches duplicates from different email messages that contain the same report
+  for (var i = 1; i < data.length; i++) {
+    var reportDate = '';
+    try {
+      var rd = data[i][0];
+      if (rd instanceof Date && !isNaN(rd.getTime())) {
+        reportDate = Utilities.formatDate(rd, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      } else {
+        reportDate = String(rd || '').substring(0, 10);
+      }
+    } catch (e) {
+      reportDate = String(data[i][0] || '').substring(0, 10);
+    }
+    var vehicleNum = String(data[i][4] || '').trim();
+    var jobNumber = String(data[i][2] || '').trim();
+    var equipType = String(data[i][5] || '').trim();
+    var desc = String(data[i][6] || '').substring(0, 50).trim();
+
+    // Content-based key: same date + vehicle + job + equipment type + description = duplicate
+    var contentKey = reportDate + '|' + vehicleNum + '|' + jobNumber + '|' + equipType + '|' + desc;
+
+    if (seen[contentKey]) {
+      rowsToDelete.push(i + 1); // 1-based row number
+    } else {
+      seen[contentKey] = true;
+    }
+  }
+
+  if (rowsToDelete.length === 0) {
+    SpreadsheetApp.getUi().alert('✅ No Duplicates', 'No duplicate equipment issue rows found.', SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+
+  var response = SpreadsheetApp.getUi().alert(
+    '🧹 Remove Duplicate Equipment Needs',
+    'Found ' + rowsToDelete.length + ' duplicate rows out of ' + (data.length - 1) + ' total rows.\n\nRemove them?',
+    SpreadsheetApp.getUi().ButtonSet.YES_NO
+  );
+
+  if (response !== SpreadsheetApp.getUi().Button.YES) return;
+
+  // Delete from bottom to top to preserve row numbers
+  for (var r = rowsToDelete.length - 1; r >= 0; r--) {
+    sheet.deleteRow(rowsToDelete[r]);
+  }
+
+  SpreadsheetApp.getUi().alert('✅ Cleanup Complete', 'Removed ' + rowsToDelete.length + ' duplicate equipment issue rows.', SpreadsheetApp.getUi().ButtonSet.OK);
+  Logger.log('cleanupDuplicateEquipmentNeeds: Removed ' + rowsToDelete.length + ' duplicates');
 }
 
 /**
@@ -4452,17 +4752,31 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   if (newOnlyMode === undefined) newOnlyMode = true; // Default to new-only mode
   if (skipPdfExtraction === undefined) skipPdfExtraction = false; // Default to extracting PDFs
 
-  // === SYNC CREWS (replaces old auto-populate Config) ===
-  // Ensures any new crews from Employees sheet are added to Job Tracking before processing
-  // This runs silently without alerts
-  var configResult = populateComplianceConfigSilent();
-  if (configResult.added > 0) {
-    Logger.log("processSafetyEmails: syncCrews added " + configResult.added + " new crews to Job Tracking");
-  }
+  // Read batch state FIRST so we can skip expensive init on continuation batches
+  var props = PropertiesService.getScriptProperties();
+  var batchStart = parseInt(props.getProperty('SAFETY_BATCH_START') || '0');
+  var isFirstBatch = (batchStart === 0);
+  var batchCache = CacheService.getScriptCache();
 
   // Store skipPdfExtraction in script properties so parseSafetyEmail can access it
-  var props = PropertiesService.getScriptProperties();
   props.setProperty('SKIP_PDF_EXTRACTION', skipPdfExtraction ? 'true' : 'false');
+
+  if (isFirstBatch) {
+    // Clear all execution-level caches at the start of this top-level entry point
+    clearComplianceConfigCache();
+    // Clear batch caches from any previous run
+    batchCache.removeAll(['SAFETY_BATCH_CREWS', 'SAFETY_BATCH_EMP_DATA', 'SAFETY_BATCH_EMAIL_IDS']);
+
+    // === SYNC CREWS (replaces old auto-populate Config) ===
+    // Ensures any new crews from Employees sheet are added to Job Tracking before processing
+    // This runs silently without alerts
+    var configResult = populateComplianceConfigSilent();
+    if (configResult.added > 0) {
+      Logger.log("processSafetyEmails: syncCrews added " + configResult.added + " new crews to Job Tracking");
+    }
+  } else {
+    Logger.log('Continuation batch ' + (Math.floor(batchStart / batchSize) + 1) + ' - skipping syncCrews and sheet init');
+  }
 
   var startTime = new Date().getTime(); // Track execution time
 
@@ -4479,14 +4793,24 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     }
   }
 
-  var props = PropertiesService.getScriptProperties();
-  var batchStart = parseInt(props.getProperty('SAFETY_BATCH_START') || '0');
 
   // Get last processed date for smart filtering
   var lastProcessedDate = props.getProperty('LAST_SAFETY_EMAIL_DATE');
   var dateFilter = '';
 
-  if (newOnlyMode && lastProcessedDate && batchStart === 0) {
+  // On continuation batches, restore the SAME dateFilter used by batch 1
+  // This prevents the thread list from changing between batches (41 vs 72 threads)
+  if (!isFirstBatch) {
+    var cachedDateFilter = props.getProperty('SAFETY_BATCH_DATE_FILTER');
+    if (cachedDateFilter) {
+      dateFilter = cachedDateFilter;
+      Logger.log('Continuation batch: restored dateFilter from batch 1: ' + dateFilter);
+    } else {
+      // Fallback if cache was lost - use day range
+      dateFilter = ' newer_than:' + daysBack + 'd';
+      Logger.log('Continuation batch: no cached dateFilter, using fallback: ' + dateFilter);
+    }
+  } else if (newOnlyMode && lastProcessedDate) {
     // Use after: filter to only get emails newer than last processed
     // Format: YYYY/MM/DD
     // IMPORTANT: Gmail's after: is EXCLUSIVE, so we need to use the day BEFORE
@@ -4497,10 +4821,14 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     var filterDate = Utilities.formatDate(lastDate, Session.getScriptTimeZone(), 'yyyy/MM/dd');
     dateFilter = ' after:' + filterDate;
     Logger.log('New-only mode: filtering emails after ' + filterDate + ' (last processed: ' + lastProcessedDate + ')');
+    // Save dateFilter for continuation batches so thread list stays consistent
+    props.setProperty('SAFETY_BATCH_DATE_FILTER', dateFilter);
   } else {
     // Use the explicit day range specified by user (14 days, 30 days, etc.)
     dateFilter = ' newer_than:' + daysBack + 'd';
     Logger.log('Date range mode: filtering emails from last ' + daysBack + ' days');
+    // Save dateFilter for continuation batches so thread list stays consistent
+    props.setProperty('SAFETY_BATCH_DATE_FILTER', dateFilter);
   }
 
   // Search queries for different report types
@@ -4540,6 +4868,8 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
 
   if (allThreads.length === 0) {
     props.deleteProperty('SAFETY_BATCH_START');
+    props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
+    batchCache.removeAll(['SAFETY_BATCH_CREWS', 'SAFETY_BATCH_EMP_DATA', 'SAFETY_BATCH_EMAIL_IDS']);
 
     // Still run compliance calculation to ensure current/previous weeks are created
     // This is important when no new emails exist but we need to show the week
@@ -4577,49 +4907,66 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   // Get existing email IDs to avoid duplicates - load from ALL log sheets
   // This is critical for performance: pre-load once, check in memory, avoid repeated sheet reads
   var existingEmailIds = {};
+  var emailIdsLoadedFromCache = false;
 
-  // Load from Safety Equipment Needs sheet (column J = index 9)
-  var existingData = sheet.getDataRange().getValues();
-  for (var i = 1; i < existingData.length; i++) {
-    if (existingData[i][9]) {
-      existingEmailIds[existingData[i][9]] = true;
-    }
-  }
-
-  // Load from JHA Log sheet (column F = index 5)
-  var jhaLogSheet = getJHALogSheet();
-  if (jhaLogSheet && jhaLogSheet.getLastRow() > 1) {
-    var jhaEmailIds = jhaLogSheet.getRange(2, 6, jhaLogSheet.getLastRow() - 1, 1).getValues();
-    for (var j = 0; j < jhaEmailIds.length; j++) {
-      if (jhaEmailIds[j][0]) {
-        existingEmailIds[jhaEmailIds[j][0]] = true;
+  // On continuation batches, try loading from CacheService first (avoids 4 sheet reads)
+  if (!isFirstBatch) {
+    var cachedEmailIds = batchCache.get('SAFETY_BATCH_EMAIL_IDS');
+    if (cachedEmailIds) {
+      try {
+        existingEmailIds = JSON.parse(cachedEmailIds);
+        emailIdsLoadedFromCache = true;
+        Logger.log("Loaded " + Object.keys(existingEmailIds).length + " email IDs from batch cache");
+      } catch(e) {
+        Logger.log("Email ID cache parse error, falling back to sheet reads");
       }
     }
   }
 
-  // Load from Weekly Safety Log sheet (column F = index 5)
-  var weeklyLogSheet = getWeeklySafetyLogSheet();
-  if (weeklyLogSheet && weeklyLogSheet.getLastRow() > 1) {
-    var weeklyEmailIds = weeklyLogSheet.getRange(2, 6, weeklyLogSheet.getLastRow() - 1, 1).getValues();
-    for (var k = 0; k < weeklyEmailIds.length; k++) {
-      if (weeklyEmailIds[k][0]) {
-        existingEmailIds[weeklyEmailIds[k][0]] = true;
+  if (!emailIdsLoadedFromCache) {
+    // Load from Safety Equipment Needs sheet (column J = index 9)
+    var existingData = sheet.getDataRange().getValues();
+    for (var i = 1; i < existingData.length; i++) {
+      if (existingData[i][9]) {
+        existingEmailIds[existingData[i][9]] = true;
       }
     }
-  }
 
-  // Load from Monthly Checklist Log sheet (column G = index 6)
-  var monthlyLogSheet = getMonthlyChecklistLogSheet();
-  if (monthlyLogSheet && monthlyLogSheet.getLastRow() > 1) {
-    var monthlyEmailIds = monthlyLogSheet.getRange(2, 7, monthlyLogSheet.getLastRow() - 1, 1).getValues();
-    for (var m = 0; m < monthlyEmailIds.length; m++) {
-      if (monthlyEmailIds[m][0]) {
-        existingEmailIds[monthlyEmailIds[m][0]] = true;
+    // Load from JHA Log sheet (column F = index 5)
+    var jhaLogSheet = getJHALogSheet();
+    if (jhaLogSheet && jhaLogSheet.getLastRow() > 1) {
+      var jhaEmailIds = jhaLogSheet.getRange(2, 6, jhaLogSheet.getLastRow() - 1, 1).getValues();
+      for (var j = 0; j < jhaEmailIds.length; j++) {
+        if (jhaEmailIds[j][0]) {
+          existingEmailIds[jhaEmailIds[j][0]] = true;
+        }
       }
     }
-  }
 
-  Logger.log("Pre-loaded " + Object.keys(existingEmailIds).length + " existing email IDs from all sheets");
+    // Load from Weekly Safety Log sheet (column F = index 5)
+    var weeklyLogSheet = getWeeklySafetyLogSheet();
+    if (weeklyLogSheet && weeklyLogSheet.getLastRow() > 1) {
+      var weeklyEmailIds = weeklyLogSheet.getRange(2, 6, weeklyLogSheet.getLastRow() - 1, 1).getValues();
+      for (var k = 0; k < weeklyEmailIds.length; k++) {
+        if (weeklyEmailIds[k][0]) {
+          existingEmailIds[weeklyEmailIds[k][0]] = true;
+        }
+      }
+    }
+
+    // Load from Monthly Checklist Log sheet (column G = index 6)
+    var monthlyLogSheet = getMonthlyChecklistLogSheet();
+    if (monthlyLogSheet && monthlyLogSheet.getLastRow() > 1) {
+      var monthlyEmailIds = monthlyLogSheet.getRange(2, 7, monthlyLogSheet.getLastRow() - 1, 1).getValues();
+      for (var m = 0; m < monthlyEmailIds.length; m++) {
+        if (monthlyEmailIds[m][0]) {
+          existingEmailIds[monthlyEmailIds[m][0]] = true;
+        }
+      }
+    }
+
+    Logger.log("Pre-loaded " + Object.keys(existingEmailIds).length + " existing email IDs from all sheets");
+  }
 
   // Process only this batch
   var batchEnd = Math.min(batchStart + batchSize, allThreads.length);
@@ -4631,15 +4978,44 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
 
   // === OPTION B: Build job resolution context for logging ===
   // This allows us to resolve jobs to tracked crews as we process emails
-  var crews = getActiveCrews();
+  // On continuation batches, use cached data to avoid redundant Employees + Job Tracking sheet reads
+  var crews, employeeData;
+
+  if (!isFirstBatch) {
+    var cachedCrews = batchCache.get('SAFETY_BATCH_CREWS');
+    var cachedEmpData = batchCache.get('SAFETY_BATCH_EMP_DATA');
+    if (cachedCrews && cachedEmpData) {
+      try {
+        crews = JSON.parse(cachedCrews);
+        employeeData = JSON.parse(cachedEmpData);
+        Logger.log("Loaded " + crews.length + " active crews and " + employeeData.length + " employee rows from batch cache");
+      } catch(e) {
+        Logger.log("Batch cache parse error, falling back to sheet reads");
+        crews = null;
+      }
+    }
+  }
+
+  if (!crews) {
+    crews = getActiveCrews();
+    var empSheet = ss.getSheetByName('Employees');
+    employeeData = empSheet ? empSheet.getDataRange().getValues() : [];
+    // Cache for continuation batches (10 min TTL)
+    try {
+      batchCache.put('SAFETY_BATCH_CREWS', JSON.stringify(crews), 600);
+      batchCache.put('SAFETY_BATCH_EMP_DATA', JSON.stringify(employeeData), 600);
+    } catch(e) {
+      Logger.log("Could not cache batch data: " + e.toString());
+    }
+  }
+
   var trackedCrews = {};
   for (var ci = 0; ci < crews.length; ci++) {
     trackedCrews[crews[ci]] = true;
   }
 
+  // Always reload custom mappings (they can change between batches if user assigns unknown jobs)
   var customMappings = getCustomJobForemanMappings() || {};
-  var empSheet = ss.getSheetByName('Employees');
-  var employeeData = empSheet ? empSheet.getDataRange().getValues() : [];
 
   var jobResolutionContext = {
     trackedCrews: trackedCrews,
@@ -4915,10 +5291,66 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
       }
 
       // Write equipment issues to sheet (NOT compliance records - those go only to Safety Compliance sheet)
+      // De-duplicate using BOTH email-ID-based AND content-based keys
+      // Content key (date + vehicle + job + equipType + desc) catches duplicates from different email messages
       if (issues.length > 0) {
-        var lastRow = sheet.getLastRow();
-        sheet.getRange(lastRow + 1, 1, issues.length, 12).setValues(issues);
-        applyStatusFormatting(sheet, lastRow + 1, issues.length);
+        var sheetData = sheet.getDataRange().getValues();
+        var existingEmailKeys = {};
+        var existingContentKeys = {};
+        for (var eiIdx = 1; eiIdx < sheetData.length; eiIdx++) {
+          var eiEmailId = String(sheetData[eiIdx][9] || '');
+          var eiEquipType = String(sheetData[eiIdx][5] || '');
+          var eiDesc = String(sheetData[eiIdx][6] || '').substring(0, 50);
+          if (eiEmailId) {
+            existingEmailKeys[eiEmailId + '|' + eiEquipType + '|' + eiDesc] = true;
+          }
+          // Content-based key: date + vehicle + job + equipType + desc
+          var eiDateStr = '';
+          try {
+            var eiDate = sheetData[eiIdx][0];
+            if (eiDate instanceof Date && !isNaN(eiDate.getTime())) {
+              eiDateStr = Utilities.formatDate(eiDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+            }
+          } catch (e) { eiDateStr = ''; }
+          var eiVehicle = String(sheetData[eiIdx][4] || '').trim();
+          var eiJob = String(sheetData[eiIdx][2] || '').trim();
+          existingContentKeys[eiDateStr + '|' + eiVehicle + '|' + eiJob + '|' + eiEquipType + '|' + eiDesc] = true;
+        }
+        var dedupedIssues = [];
+        for (var diIdx = 0; diIdx < issues.length; diIdx++) {
+          var diEmailId = String(issues[diIdx][9] || '');
+          var diEquipType = String(issues[diIdx][5] || '');
+          var diDesc = String(issues[diIdx][6] || '').substring(0, 50);
+          var emailKey = diEmailId + '|' + diEquipType + '|' + diDesc;
+
+          // Build content key for this issue
+          var diDateStr = '';
+          try {
+            var diDate = issues[diIdx][0];
+            if (diDate instanceof Date && !isNaN(diDate.getTime())) {
+              diDateStr = Utilities.formatDate(diDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+            }
+          } catch (e) { diDateStr = ''; }
+          var diVehicle = String(issues[diIdx][4] || '').trim();
+          var diJob = String(issues[diIdx][2] || '').trim();
+          var contentKey = diDateStr + '|' + diVehicle + '|' + diJob + '|' + diEquipType + '|' + diDesc;
+
+          if (!existingEmailKeys[emailKey] && !existingContentKeys[contentKey]) {
+            dedupedIssues.push(issues[diIdx]);
+            existingEmailKeys[emailKey] = true;
+            existingContentKeys[contentKey] = true;
+          } else {
+            Logger.log('Skipping duplicate equipment issue: ' + (existingEmailKeys[emailKey] ? 'email match' : 'content match') + ' - ' + contentKey);
+          }
+        }
+        if (dedupedIssues.length > 0) {
+          var lastRow = sheet.getLastRow();
+          sheet.getRange(lastRow + 1, 1, dedupedIssues.length, 12).setValues(dedupedIssues);
+          applyStatusFormatting(sheet, lastRow + 1, dedupedIssues.length);
+        }
+        if (dedupedIssues.length < issues.length) {
+          Logger.log('Dedup: Wrote ' + dedupedIssues.length + ' issues, skipped ' + (issues.length - dedupedIssues.length) + ' duplicates');
+        }
       }
 
       // NOTE: Compliance records (JHA/Safety Meeting tracking) are NO LONGER written to Safety Reports
@@ -4940,8 +5372,20 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
 
       // Update batch progress
       var isComplete = batchEnd >= allThreads.length;
+
+      // Cache email IDs for next continuation batch (includes newly logged IDs)
+      try {
+        batchCache.put('SAFETY_BATCH_EMAIL_IDS', JSON.stringify(existingEmailIds), 600);
+      } catch(e) {
+        Logger.log("Could not cache email IDs: " + e.toString());
+      }
+
       if (isComplete) {
         props.deleteProperty('SAFETY_BATCH_START');
+        props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
+        props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
+        // Clear batch caches - no longer needed
+        batchCache.removeAll(['SAFETY_BATCH_CREWS', 'SAFETY_BATCH_EMP_DATA', 'SAFETY_BATCH_EMAIL_IDS']);
 
     // Store timestamp with date AND time for accurate tracking
     // Note: Gmail after: filter only supports dates, but we track time for user display
@@ -5019,8 +5463,9 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
       Logger.log("Compliance sheet formatted - newest week now at top");
 
       // Auto-cleanup: Fix log entries and remove non-config crews (runs silently)
+      // Pass true to skip syncCrews since we already ran it at the start of processSafetyEmails
       try {
-        var cleanupResult = autoComplianceCleanup();
+        var cleanupResult = autoComplianceCleanup(true);
         Logger.log("Auto-cleanup complete - LogFixes: JHA=" + cleanupResult.logsFixes.jha +
                    ", Weekly=" + cleanupResult.logsFixes.weekly +
                    ", NonConfigRemoved=" + cleanupResult.nonConfigRemoved);
@@ -5305,11 +5750,10 @@ function applyJobNumberNormalization(jobNumber) {
  */
 function applyJobNumberCorrections(approvalsJson) {
   var props = PropertiesService.getScriptProperties();
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Safety Reports");
+  var sheet = getSafetyEquipmentSheet();
 
   if (!sheet) {
-    return { complete: true, error: "Safety Reports sheet not found" };
+    return { complete: true, error: "Safety Equipment Needs sheet not found" };
   }
 
   try {
@@ -5393,12 +5837,61 @@ function applyJobNumberCorrections(approvalsJson) {
       finalCompliance.push(record);
     }
 
-    // Write equipment issues to sheet (NOT compliance records)
+    // Write equipment issues to sheet (NOT compliance records) - with dedup
+    // Uses BOTH email-ID-based AND content-based keys to catch all duplicates
     if (finalIssues.length > 0) {
-      var lastRow = sheet.getLastRow();
-      sheet.getRange(lastRow + 1, 1, finalIssues.length, 12).setValues(finalIssues);
-      applyStatusFormatting(sheet, lastRow + 1, finalIssues.length);
-      Logger.log("Wrote " + finalIssues.length + " issues to sheet");
+      var sheetData = sheet.getDataRange().getValues();
+      var existingEmailKeys = {};
+      var existingContentKeys = {};
+      for (var eiIdx = 1; eiIdx < sheetData.length; eiIdx++) {
+        var eiEmailId = String(sheetData[eiIdx][9] || '');
+        var eiEquipType = String(sheetData[eiIdx][5] || '');
+        var eiDesc = String(sheetData[eiIdx][6] || '').substring(0, 50);
+        if (eiEmailId) {
+          existingEmailKeys[eiEmailId + '|' + eiEquipType + '|' + eiDesc] = true;
+        }
+        // Content-based key: date + vehicle + job + equipType + desc
+        var eiDateStr = '';
+        try {
+          var eiDate = sheetData[eiIdx][0];
+          if (eiDate instanceof Date && !isNaN(eiDate.getTime())) {
+            eiDateStr = Utilities.formatDate(eiDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+          }
+        } catch (e) { eiDateStr = ''; }
+        var eiVehicle = String(sheetData[eiIdx][4] || '').trim();
+        var eiJob = String(sheetData[eiIdx][2] || '').trim();
+        existingContentKeys[eiDateStr + '|' + eiVehicle + '|' + eiJob + '|' + eiEquipType + '|' + eiDesc] = true;
+      }
+      var dedupedFinalIssues = [];
+      for (var diIdx = 0; diIdx < finalIssues.length; diIdx++) {
+        var diEmailId = String(finalIssues[diIdx][9] || '');
+        var diEquipType = String(finalIssues[diIdx][5] || '');
+        var diDesc = String(finalIssues[diIdx][6] || '').substring(0, 50);
+        var emailKey = diEmailId + '|' + diEquipType + '|' + diDesc;
+
+        var diDateStr = '';
+        try {
+          var diDate = finalIssues[diIdx][0];
+          if (diDate instanceof Date && !isNaN(diDate.getTime())) {
+            diDateStr = Utilities.formatDate(diDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+          }
+        } catch (e) { diDateStr = ''; }
+        var diVehicle = String(finalIssues[diIdx][4] || '').trim();
+        var diJob = String(finalIssues[diIdx][2] || '').trim();
+        var contentKey = diDateStr + '|' + diVehicle + '|' + diJob + '|' + diEquipType + '|' + diDesc;
+
+        if (!existingEmailKeys[emailKey] && !existingContentKeys[contentKey]) {
+          dedupedFinalIssues.push(finalIssues[diIdx]);
+          existingEmailKeys[emailKey] = true;
+          existingContentKeys[contentKey] = true;
+        }
+      }
+      if (dedupedFinalIssues.length > 0) {
+        var lastRow = sheet.getLastRow();
+        sheet.getRange(lastRow + 1, 1, dedupedFinalIssues.length, 12).setValues(dedupedFinalIssues);
+        applyStatusFormatting(sheet, lastRow + 1, dedupedFinalIssues.length);
+        Logger.log("Wrote " + dedupedFinalIssues.length + " issues to sheet (skipped " + (finalIssues.length - dedupedFinalIssues.length) + " duplicates)");
+      }
     }
 
     // NOTE: Compliance records are NO LONGER written to Safety Reports
@@ -5507,6 +6000,8 @@ function cancelPendingCorrections() {
   props.deleteProperty('PENDING_BATCH_END');
   props.deleteProperty('PENDING_TOTAL_THREADS');
   props.deleteProperty('SAFETY_BATCH_START');
+  props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
+  props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
 
   Logger.log("Pending corrections cancelled and batch data cleared");
 }
@@ -6674,11 +7169,14 @@ function getJobPositionSuffix(jobNumber) {
 function lookupForemanByJobNumber(jobNumber) {
   if (!jobNumber) return { name: "", jobExists: false };
 
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var employeeSheet = ss.getSheetByName("Employees");
-  if (!employeeSheet) return { name: "", jobExists: false };
+  // Return cached result if available
+  if (_foremanByJobCache[jobNumber]) {
+    return _foremanByJobCache[jobNumber];
+  }
 
-  var data = employeeSheet.getDataRange().getValues();
+  // Use cached Employees data (reads sheet only once per execution)
+  var data = getCachedEmployeesData();
+  if (!data) return { name: "", jobExists: false };
   var headers = data[0];
 
   // Find column indices dynamically
@@ -6693,10 +7191,6 @@ function lookupForemanByJobNumber(jobNumber) {
 
   if (nameCol === -1) nameCol = 0;
   if (jobCol === -1) return { name: "", jobExists: false };
-
-  // Debug logging for troubleshooting
-  Logger.log("lookupForemanByJobNumber: Searching for job " + jobNumber);
-  Logger.log("lookupForemanByJobNumber: Column indices - nameCol=" + nameCol + ", jobCol=" + jobCol + ", secondaryJobCol=" + secondaryJobCol);
 
   // Collect all employees for this crew (check both primary and secondary job columns)
   var crewMembers = [];
@@ -6713,9 +7207,7 @@ function lookupForemanByJobNumber(jobNumber) {
     // Also check secondary job number
     var matchesSecondary = empSecondaryJob && empSecondaryJob.indexOf(jobNumber) === 0;
 
-    // Debug: Log matches for the specific job we're looking for
     if (matchesPrimary || matchesSecondary) {
-      Logger.log("lookupForemanByJobNumber: MATCH - " + empName + " (primary=" + empJobNumber + ", secondary=" + empSecondaryJob + ")");
       jobExists = true;
       crewMembers.push({
         name: empName,
@@ -6728,7 +7220,9 @@ function lookupForemanByJobNumber(jobNumber) {
   }
 
   if (crewMembers.length === 0) {
-    return { name: "", jobExists: jobExists };
+    var result = { name: "", jobExists: jobExists };
+    _foremanByJobCache[jobNumber] = result;
+    return result;
   }
 
   // Sort by: 1) Primary job holders first, 2) Position suffix (lower = foreman), 3) Classification priority
@@ -6745,7 +7239,9 @@ function lookupForemanByJobNumber(jobNumber) {
     return a.classificationPriority - b.classificationPriority;
   });
 
-  return { name: crewMembers[0].name, jobExists: true };
+  var result = { name: crewMembers[0].name, jobExists: true };
+  _foremanByJobCache[jobNumber] = result;
+  return result;
 }
 
 /**
@@ -8066,6 +8562,47 @@ function migrateConfigToJobTracking() {
 }
 
 /**
+ * Returns a map of job number → status (lowercase) from Job Tracking sheet.
+ * Used to identify On Hold/Completed/Pending Start crews that should not be
+ * treated as "unknown" in compliance tracking.
+ *
+ * @returns {Object} Map of job number → status string (e.g., { '041-26': 'on hold' })
+ */
+function getJobTrackingStatusMap() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var jobTrackingSheet = ss.getSheetByName('Job Tracking');
+  var statusMap = {};
+
+  if (!jobTrackingSheet || jobTrackingSheet.getLastRow() <= 1) {
+    return statusMap;
+  }
+
+  var jobData = jobTrackingSheet.getDataRange().getValues();
+  var headers = jobData[0];
+
+  var jobNumCol = headers.indexOf('Job Number');
+  var statusCol = headers.indexOf('Status');
+
+  if (jobNumCol === -1) jobNumCol = 0;
+  if (statusCol === -1) statusCol = 9;
+
+  for (var i = 1; i < jobData.length; i++) {
+    var jobNum = jobData[i][jobNumCol];
+    var status = jobData[i][statusCol];
+
+    if (jobNum) {
+      var jobNumStr = String(jobNum).split('.')[0].trim();
+      var statusStr = status ? status.toString().toLowerCase().trim() : '';
+      if (jobNumStr && statusStr) {
+        statusMap[jobNumStr] = statusStr;
+      }
+    }
+  }
+
+  return statusMap;
+}
+
+/**
  * Gets all active crews directly from Job Tracking sheet
  * This is more reliable than getActiveCrews() which starts from Employees
  *
@@ -8770,6 +9307,11 @@ function refreshComplianceForemenNames() {
  * @returns {Object} - Map of job number to config settings
  */
 function loadComplianceConfig() {
+  // Return cached result if available (cleared at start of each top-level operation)
+  if (_complianceConfigCache) {
+    return _complianceConfigCache;
+  }
+
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var jobSheet = ss.getSheetByName("Job Tracking");
 
@@ -8866,7 +9408,48 @@ function loadComplianceConfig() {
   }
 
   Logger.log('loadComplianceConfig: Loaded config for ' + Object.keys(config).length + ' active crews from Job Tracking');
+  _complianceConfigCache = config;
   return config;
+}
+
+/**
+ * Clears ALL execution-level caches.
+ * Call at the start of top-level entry points (processSafetyEmails, masterRecalculateCompliance)
+ * to ensure fresh data is loaded.
+ */
+function clearComplianceConfigCache() {
+  _complianceConfigCache = null;
+  _customMappingsCache = null;
+  _employeesDataCache = null;
+  _jobTrackingDataCache = null;
+  _resolveJobCache = {};
+  _foremanByJobCache = {};
+}
+
+/**
+ * Returns cached Employees sheet data (full 2D array including header row).
+ * Reads the sheet only once per execution.
+ */
+function getCachedEmployeesData() {
+  if (_employeesDataCache) return _employeesDataCache;
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Employees');
+  if (!sheet) return null;
+  _employeesDataCache = sheet.getDataRange().getValues();
+  return _employeesDataCache;
+}
+
+/**
+ * Returns cached Job Tracking sheet data (full 2D array including header row).
+ * Reads the sheet only once per execution.
+ */
+function getCachedJobTrackingData() {
+  if (_jobTrackingDataCache) return _jobTrackingDataCache;
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Job Tracking');
+  if (!sheet) return null;
+  _jobTrackingDataCache = sheet.getDataRange().getValues();
+  return _jobTrackingDataCache;
 }
 
 /**
@@ -9921,6 +10504,13 @@ function autoCorrectPastWeekCompliance(complianceRecords, currentWeekStart) {
     // Apply the correction
     complianceSheet.getRange(rowNum, colIdx + 1).setValue(newValue); // +1 for 1-indexed columns
 
+    // Re-apply data validation dropdown (setValue strips it)
+    var dayRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(['✅', '✅L', '❌', '❌W', 'N/A', '⏳', ''], true)
+      .setAllowInvalid(true)
+      .build();
+    complianceSheet.getRange(rowNum, colIdx + 1).setDataValidation(dayRule);
+
     correctionsApplied++;
     var detail = {
       jobNumber: baseJob,
@@ -9958,6 +10548,12 @@ function autoCorrectPastWeekCompliance(complianceRecords, currentWeekStart) {
     var currentStatus = String(rowData[12] || '').trim(); // Status column (M)
     if (!hasMissing && currentStatus !== 'Resolved' && currentStatus !== 'Complete') {
       complianceSheet.getRange(rowNum, 13).setValue('Complete'); // Update status
+      // Re-apply status dropdown (setValue strips it)
+      var statusRule = SpreadsheetApp.newDataValidation()
+        .requireValueInList(['Complete', 'Missing Reports', 'Pending', 'Resolved'], true)
+        .setAllowInvalid(true)
+        .build();
+      complianceSheet.getRange(rowNum, 13).setDataValidation(statusRule);
       Logger.log("autoCorrectPastWeekCompliance: Updated status to 'Complete' for " + baseJob + " week " + reportWeekStr);
     }
   }
@@ -10301,13 +10897,19 @@ function menuCleanupDuplicateComplianceRows() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName("Safety Compliance");
 
+  Logger.log('=== menuCleanupDuplicateComplianceRows START ===');
+
   if (!sheet) {
+    Logger.log('ERROR: Safety Compliance sheet not found');
     Browser.msgBox("❌ Safety Compliance sheet not found.");
     return;
   }
 
   var data = sheet.getDataRange().getValues();
+  Logger.log('Safety Compliance: ' + (data.length - 1) + ' data rows');
+
   if (data.length < 2) {
+    Logger.log('No data rows to check');
     Browser.msgBox("ℹ️ No data rows to clean up.");
     return;
   }
@@ -10315,15 +10917,28 @@ function menuCleanupDuplicateComplianceRows() {
   // Find duplicates (keep last occurrence = most recent)
   var seen = {};
   var rowsToDelete = [];
+  var skippedCount = 0;
+  var processedCount = 0;
 
   for (var i = data.length - 1; i >= 1; i--) {
     var weekDate = data[i][0];
     var jobNumber = String(data[i][1] || '').trim();
 
-    if (!weekDate || !jobNumber) continue;
+    if (!weekDate || !jobNumber) {
+      skippedCount++;
+      continue;
+    }
 
-    var dateStr = Utilities.formatDate(new Date(weekDate), Session.getScriptTimeZone(), "yyyy-MM-dd");
+    var dateStr;
+    try {
+      dateStr = Utilities.formatDate(new Date(weekDate), Session.getScriptTimeZone(), "yyyy-MM-dd");
+    } catch (e) {
+      Logger.log('WARNING: Row ' + (i+1) + ' has invalid date: "' + weekDate + '" (type: ' + typeof weekDate + ')');
+      skippedCount++;
+      continue;
+    }
     var key = dateStr + '|' + jobNumber;
+    processedCount++;
 
     if (seen[key]) {
       rowsToDelete.push(i + 1); // Row number (1-based)
@@ -10332,8 +10947,12 @@ function menuCleanupDuplicateComplianceRows() {
     }
   }
 
+  Logger.log('Processed ' + processedCount + ' rows, skipped ' + skippedCount + ' (empty/invalid), found ' + rowsToDelete.length + ' duplicates, ' + Object.keys(seen).length + ' unique keys');
+
   if (rowsToDelete.length === 0) {
-    Browser.msgBox("✅ No duplicate rows found.");
+    Logger.log('No duplicates found. Sample keys: ' + Object.keys(seen).slice(0, 5).join(', '));
+    Logger.log('=== menuCleanupDuplicateComplianceRows END (no duplicates) ===');
+    Browser.msgBox("✅ No duplicate rows found.\n\n" + processedCount + " rows checked, " + Object.keys(seen).length + " unique week+crew combos.");
     return;
   }
 
@@ -10543,14 +11162,14 @@ function finalizePastWeeksCompliance() {
     return { weeksFinalized: 0, tasksCreated: 0 };
   }
 
-  // Re-calculate compliance for each past week (will mark pending as ❌)
+  // Re-calculate compliance for each past week using log-based calculation (will mark pending as ❌)
   var totalTasksCreated = 0;
   for (var weekStr in weeksToUpdate) {
     var weekStart = weeksToUpdate[weekStr];
-    var complianceData = calculateSafetyCompliance(weekStart);
+    var complianceData = calculateComplianceFromLogs(weekStart);
 
     if (complianceData) {
-      updateComplianceSheet(complianceData);
+      updateComplianceSheetFromLogs(complianceData);
       var tasksCreated = createMissingReportTasks(complianceData);
       totalTasksCreated += tasksCreated;
     }
@@ -11435,6 +12054,15 @@ function recordMissingReportResolutions(taskId, weekOf, resolutions, jobNumber, 
 
     // Apply resolutions
     var now = new Date();
+    var dayValidationRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(['✅', '✅L', '❌', '❌W', 'N/A', '⏳', ''], true)
+      .setAllowInvalid(true)
+      .build();
+    var statusValidationRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(['Complete', 'Missing Reports', 'Pending', 'Resolved'], true)
+      .setAllowInvalid(true)
+      .build();
+
     for (var r = 0; r < resolutions.length; r++) {
       var res = resolutions[r];
       var code = reasonCodes[res.reason] || res.reason;
@@ -11443,15 +12071,18 @@ function recordMissingReportResolutions(taskId, weekOf, resolutions, jobNumber, 
         var col = dayColumns[res.dayName];
         if (col !== undefined) {
           complianceSheet.getRange(foundRow, col + 1).setValue(code);
+          complianceSheet.getRange(foundRow, col + 1).setDataValidation(dayValidationRule);
         }
       } else if (res.type === 'WeeklyMeeting') {
         complianceSheet.getRange(foundRow, colIdx.weeklyMeeting + 1).setValue(code);
+        complianceSheet.getRange(foundRow, colIdx.weeklyMeeting + 1).setDataValidation(dayValidationRule);
       }
     }
 
     // Update status
     if (colIdx.status !== undefined) {
       complianceSheet.getRange(foundRow, colIdx.status + 1).setValue('Resolved');
+      complianceSheet.getRange(foundRow, colIdx.status + 1).setDataValidation(statusValidationRule);
     }
     if (colIdx.updated !== undefined) {
       complianceSheet.getRange(foundRow, colIdx.updated + 1).setValue(now);
@@ -11729,10 +12360,15 @@ function markSafetyReportNotified(taskId, jobNumberParam, weekOfParam) {
       var row = matchedRow + 1;
       var dayCols = [colIdx.sun, colIdx.mon, colIdx.tue, colIdx.wed, colIdx.thu, colIdx.fri, colIdx.sat, colIdx.weeklyMeeting];
       var updatedCount = 0;
+      var dayValRule = SpreadsheetApp.newDataValidation()
+        .requireValueInList(['✅', '✅L', '❌', '❌W', 'N/A', '⏳', ''], true)
+        .setAllowInvalid(true)
+        .build();
       for (var d = 0; d < dayCols.length; d++) {
         var col = dayCols[d];
         if (col !== undefined && String(data[matchedRow][col]).trim() === '❌') {
           complianceSheet.getRange(row, col + 1).setValue('❌🔔');
+          complianceSheet.getRange(row, col + 1).setDataValidation(dayValRule);
           updatedCount++;
         }
       }
@@ -12215,11 +12851,16 @@ function getJobForemanMappingsForDialog() {
  * @returns {Object} Map of jobNumber → foremanName
  */
 function getCustomJobForemanMappings() {
+  // Return cached result if available
+  if (_customMappingsCache) {
+    return _customMappingsCache;
+  }
   var props = PropertiesService.getScriptProperties();
   var saved = props.getProperty('CUSTOM_JOB_FOREMAN_MAPPINGS');
   if (saved) {
     try {
-      return JSON.parse(saved);
+      _customMappingsCache = JSON.parse(saved);
+      return _customMappingsCache;
     } catch (e) {
       Logger.log('Error parsing custom job mappings: ' + e);
       return {};
@@ -12581,6 +13222,10 @@ function clearAndReprocessSafetyEmails() {
     var props = PropertiesService.getScriptProperties();
     props.deleteProperty('LAST_SAFETY_EMAIL_DATE');
     props.deleteProperty('SAFETY_BATCH_START');
+    props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
+    props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
+    props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
+    props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
     props.deleteProperty('TEMP_JOB_FOREMAN_MAPPINGS');
     props.deleteProperty('SKIPPED_UNKNOWN_JOBS');
     props.deleteProperty('PENDING_UNKNOWN_JOBS');
@@ -13080,6 +13725,9 @@ function masterRecalculateCompliance() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var tz = Session.getScriptTimeZone();
 
+  // Clear all execution-level caches at the start of this top-level entry point
+  clearComplianceConfigCache();
+
   // Build info about current state
   var today = new Date();
   var currentWeekBounds = getWeekBoundaries(today);
@@ -13255,10 +13903,14 @@ function removeNonConfigCrewsFromCurrentWeekSilent(ss, currentWeekStart, config,
  * Lightweight auto-cleanup that runs at end of processSafetyEmails
  * Does NOT show UI dialogs - runs silently
  * Only fixes current + previous week (not all weeks)
- *
+/**
+/**
+ * Auto-cleanup: Fix log entries and remove non-config crews from current week.
+ * Runs silently at the end of processSafetyEmails.
+ * @param {boolean} skipSyncCrews - If true, skip the syncCrews step (already done by caller)
  * @returns {Object} - Results of cleanup operations
  */
-function autoComplianceCleanup() {
+function autoComplianceCleanup(skipSyncCrews) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var tz = Session.getScriptTimeZone();
   var results = {
@@ -13273,13 +13925,18 @@ function autoComplianceCleanup() {
     var previousWeekStart = new Date(currentWeekBounds.weekStart);
     previousWeekStart.setDate(previousWeekStart.getDate() - 7);
 
-    // Step 1: Sync crews to Job Tracking (ensure current crews are tracked)
-    try {
-      populateComplianceConfigSilent();
+    // Step 1: Sync crews to Job Tracking (skip if already done by caller)
+    if (!skipSyncCrews) {
+      try {
+        populateComplianceConfigSilent();
+        results.configPopulated = true;
+        Logger.log('autoComplianceCleanup: Crews synced to Job Tracking');
+      } catch (e) {
+        Logger.log('autoComplianceCleanup: Crew sync error (non-fatal): ' + e.toString());
+      }
+    } else {
       results.configPopulated = true;
-      Logger.log('autoComplianceCleanup: Crews synced to Job Tracking');
-    } catch (e) {
-      Logger.log('autoComplianceCleanup: Crew sync error (non-fatal): ' + e.toString());
+      Logger.log('autoComplianceCleanup: Skipping crew sync (already done by caller)');
     }
 
     // Step 2: Fix log entries for current + previous week only
@@ -13416,11 +14073,19 @@ function resolveJobToTrackedCrew(jobNumber) {
   if (!jobNumber) return { creditedTo: '', resolved: false };
 
   var baseJob = String(jobNumber).split('.')[0];
+
+  // Return cached result if available
+  if (_resolveJobCache[baseJob]) {
+    return _resolveJobCache[baseJob];
+  }
+
   var config = loadComplianceConfig();
 
   // If it's directly in config, use it
   if (config[baseJob]) {
-    return { creditedTo: baseJob, resolved: true, source: 'config' };
+    var result = { creditedTo: baseJob, resolved: true, source: 'config' };
+    _resolveJobCache[baseJob] = result;
+    return result;
   }
 
   // Check custom mappings
@@ -13430,17 +14095,16 @@ function resolveJobToTrackedCrew(jobNumber) {
     var foremanName = customMappings[baseJob];
     for (var configJob in config) {
       if (config[configJob].foreman === foremanName) {
-        return { creditedTo: configJob, resolved: true, source: 'custom_mapping' };
+        var result = { creditedTo: configJob, resolved: true, source: 'custom_mapping' };
+        _resolveJobCache[baseJob] = result;
+        return result;
       }
     }
   }
 
-  // Check Job Tracking sheet directly (includes all statuses: Active, Pending Start, Complete)
-  // This allows us to credit JHAs to jobs even if they're not in Config yet
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var jobTrackingSheet = ss.getSheetByName('Job Tracking');
-  if (jobTrackingSheet && jobTrackingSheet.getLastRow() > 1) {
-    var jtData = jobTrackingSheet.getDataRange().getValues();
+  // Check Job Tracking sheet directly (uses cached data)
+  var jtData = getCachedJobTrackingData();
+  if (jtData && jtData.length > 1) {
     var jtHeaders = jtData[0].map(function(h) { return String(h).toLowerCase().trim(); });
     var jtJobCol = jtHeaders.indexOf('job number');
     var jtForemanCol = jtHeaders.indexOf('foreman');
@@ -13453,21 +14117,21 @@ function resolveJobToTrackedCrew(jobNumber) {
           var jtForeman = jtForemanCol >= 0 ? String(jtData[j][jtForemanCol] || '').trim() : '';
           var jtStatus = jtStatusCol >= 0 ? String(jtData[j][jtStatusCol] || '').trim() : '';
           Logger.log('resolveJobToTrackedCrew: Found ' + baseJob + ' in Job Tracking (status: ' + jtStatus + ', foreman: ' + jtForeman + ')');
-          return { creditedTo: baseJob, resolved: true, source: 'job_tracking', foreman: jtForeman, status: jtStatus };
+          var result = { creditedTo: baseJob, resolved: true, source: 'job_tracking', foreman: jtForeman, status: jtStatus };
+          _resolveJobCache[baseJob] = result;
+          return result;
         }
       }
     }
   }
 
-  // Try to find via Employees sheet - check BOTH primary and secondary jobs
-  var empSheet = ss.getSheetByName('Employees');
-  if (empSheet) {
-    var empData = empSheet.getDataRange().getValues();
+  // Try to find via Employees sheet (uses cached data)
+  var empData = getCachedEmployeesData();
+  if (empData && empData.length > 1) {
     var headers = empData[0].map(function(h) { return String(h).toLowerCase().trim(); });
     var nameCol = headers.indexOf('name');
     var jobCol = headers.indexOf('job number');
     var secondaryJobCol = headers.indexOf('secondary job number');
-    var classCol = headers.indexOf('job classification');
 
     // Find employee with this job (primary or secondary)
     for (var i = 1; i < empData.length; i++) {
@@ -13481,12 +14145,14 @@ function resolveJobToTrackedCrew(jobNumber) {
 
       if (matchesPrimary || matchesSecondary) {
         // Found employee! Use their PRIMARY job for crediting (if it's in config)
-        var primaryJob = empJob; // Primary job is always the first job number
+        var primaryJob = empJob;
 
         if (config[primaryJob]) {
           var source = matchesSecondary ? 'secondary_to_primary' : 'primary';
           Logger.log('resolveJobToTrackedCrew: ' + baseJob + ' → ' + primaryJob + ' via ' + empName + ' (' + source + ')');
-          return { creditedTo: primaryJob, resolved: true, source: source, employee: empName };
+          var result = { creditedTo: primaryJob, resolved: true, source: source, employee: empName };
+          _resolveJobCache[baseJob] = result;
+          return result;
         }
       }
     }
@@ -13494,7 +14160,9 @@ function resolveJobToTrackedCrew(jobNumber) {
 
   // Couldn't resolve - return the base job
   Logger.log('resolveJobToTrackedCrew: Could not resolve ' + baseJob + ' to a tracked crew');
-  return { creditedTo: baseJob, resolved: false };
+  var result = { creditedTo: baseJob, resolved: false };
+  _resolveJobCache[baseJob] = result;
+  return result;
 }
 
 /**
@@ -14012,7 +14680,13 @@ function reprocessAllSafetyEmails(daysBack) {
   // Step 2: Also clear batch position data
   var props = PropertiesService.getScriptProperties();
   props.deleteProperty('SAFETY_BATCH_START');
+  props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
   props.deleteProperty('PENDING_BATCH_START');
+
+  // Clear batch caches for clean start
+  try {
+    CacheService.getScriptCache().removeAll(['SAFETY_BATCH_CREWS', 'SAFETY_BATCH_EMP_DATA', 'SAFETY_BATCH_EMAIL_IDS']);
+  } catch(e) { /* ignore */ }
 
   Logger.log('Step 2: Starting processing for last ' + daysBack + ' days...');
 
@@ -14187,6 +14861,12 @@ function creditUncreditedReport(assignmentDataJson) {
             }
 
             complianceSheet.getRange(ci + 1, colToUpdate + 1).setValue(checkMark);
+            // Re-apply dropdown (setValue strips data validation)
+            var creditDayRule = SpreadsheetApp.newDataValidation()
+              .requireValueInList(['✅', '✅L', '❌', '❌W', 'N/A', '⏳', ''], true)
+              .setAllowInvalid(true)
+              .build();
+            complianceSheet.getRange(ci + 1, colToUpdate + 1).setDataValidation(creditDayRule);
             Logger.log('creditUncreditedReport: Updated Safety Compliance row ' + (ci + 1) + ' column ' + (colToUpdate + 1) + ' to ' + checkMark);
           }
           break;
