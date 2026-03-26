@@ -4452,12 +4452,12 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   if (newOnlyMode === undefined) newOnlyMode = true; // Default to new-only mode
   if (skipPdfExtraction === undefined) skipPdfExtraction = false; // Default to extracting PDFs
 
-  // === AUTO-POPULATE COMPLIANCE CONFIG ===
-  // Ensures any new crews from Employees sheet are added to Config before processing
+  // === SYNC CREWS (replaces old auto-populate Config) ===
+  // Ensures any new crews from Employees sheet are added to Job Tracking before processing
   // This runs silently without alerts
   var configResult = populateComplianceConfigSilent();
   if (configResult.added > 0) {
-    Logger.log("processSafetyEmails: Auto-added " + configResult.added + " new crews to Config: " + configResult.newCrews.join(", "));
+    Logger.log("processSafetyEmails: syncCrews added " + configResult.added + " new crews to Job Tracking");
   }
 
   // Store skipPdfExtraction in script properties so parseSafetyEmail can access it
@@ -8220,83 +8220,17 @@ function populateComplianceConfig() {
  * @returns {Object} Result with crewsAdded count and list
  */
 function populateComplianceConfigSilent() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Safety Compliance Config");
-
-  // If sheet doesn't exist, create it
-  if (!sheet) {
-    sheet = setupSafetyComplianceConfig();
-    var crewCount = sheet.getLastRow() - 1;
-    Logger.log("populateComplianceConfigSilent: Created Config sheet with " + crewCount + " crews");
-    return { crewsAdded: crewCount, created: true };
+  // As of March 2026, Safety Compliance Config is consolidated into Job Tracking.
+  // This function now delegates to syncCrews() which handles foremen, schedules, and new crews.
+  try {
+    var result = syncCrews(true);
+    var crewsAdded = (result && result.newCrews) || 0;
+    Logger.log("populateComplianceConfigSilent: Delegated to syncCrews - " + crewsAdded + " new crews added");
+    return { crewsAdded: crewsAdded, created: false, added: crewsAdded, newCrews: [] };
+  } catch (e) {
+    Logger.log("populateComplianceConfigSilent: syncCrews error (non-fatal): " + e.toString());
+    return { crewsAdded: 0, created: false, added: 0, newCrews: [] };
   }
-
-  // Get existing crews in config
-  var existingData = sheet.getDataRange().getValues();
-  var existingCrews = {};
-  for (var i = 1; i < existingData.length; i++) {
-    var jobNum = String(existingData[i][0] || '').trim();
-    if (jobNum) {
-      existingCrews[jobNum] = true;
-    }
-  }
-
-  // Get all active crews directly from Job Tracking
-  var allCrewsData = getActiveCrewsFromJobTracking();
-
-  // Find missing crews
-  var missingCrews = [];
-  for (var c = 0; c < allCrewsData.length; c++) {
-    if (!existingCrews[allCrewsData[c].jobNumber]) {
-      missingCrews.push(allCrewsData[c]);
-    }
-  }
-
-  if (missingCrews.length === 0) {
-    Logger.log("populateComplianceConfigSilent: All " + allCrewsData.length + " crews already in config");
-    return { crewsAdded: 0, created: false };
-  }
-
-  // Add missing crews
-  var newRows = [];
-  var crewNames = [];
-  for (var m = 0; m < missingCrews.length; m++) {
-    var crew = missingCrews[m];
-    // Use foreman from Job Tracking, or lookup if not available
-    var foremanName = crew.foreman;
-    if (!foremanName) {
-      var foreman = lookupForemanByJobNumber(crew.jobNumber);
-      foremanName = (foreman && foreman.name) ? foreman.name : "";
-    }
-    // Default: Skip Sun and Sat (weekends)
-    newRows.push([
-      crew.jobNumber, foremanName,
-      true, false, false, false, false, false, true, // Sun=skip, Sat=skip
-      false, false, "" // Don't skip weekly meeting, don't skip monthly checklist, no notes
-    ]);
-    crewNames.push(crew.jobNumber);
-  }
-
-  // Append to sheet
-  var lastRow = sheet.getLastRow();
-  sheet.getRange(lastRow + 1, 1, newRows.length, 12).setValues(newRows);
-
-  // Sort by job number FIRST
-  // Sort by job number FIRST
-  if (sheet.getLastRow() > 1) {
-    sheet.getRange(2, 1, sheet.getLastRow() - 1, 12).sort(1);
-  }
-
-  // Add checkboxes for ALL data rows AFTER sorting (columns C-K = 3-11)
-  // This ensures checkboxes are preserved even after sorting moves rows around
-  var totalRows = sheet.getLastRow() - 1;
-  if (totalRows > 0) {
-    var checkboxRange = sheet.getRange(2, 3, totalRows, 9);
-    checkboxRange.insertCheckboxes();
-  }
-
-  Logger.log("populateComplianceConfigSilent: Added " + missingCrews.length + " crews: " + crewNames.join(", "));
-  return { crewsAdded: missingCrews.length, crews: crewNames, created: false };
 }
 
 /**
@@ -13339,13 +13273,13 @@ function autoComplianceCleanup() {
     var previousWeekStart = new Date(currentWeekBounds.weekStart);
     previousWeekStart.setDate(previousWeekStart.getDate() - 7);
 
-    // Step 1: Auto-populate Config from Employees sheet (ensure current crews are tracked)
+    // Step 1: Sync crews to Job Tracking (ensure current crews are tracked)
     try {
       populateComplianceConfigSilent();
       results.configPopulated = true;
-      Logger.log('autoComplianceCleanup: Config auto-populated');
+      Logger.log('autoComplianceCleanup: Crews synced to Job Tracking');
     } catch (e) {
-      Logger.log('autoComplianceCleanup: Config populate error (non-fatal): ' + e.toString());
+      Logger.log('autoComplianceCleanup: Crew sync error (non-fatal): ' + e.toString());
     }
 
     // Step 2: Fix log entries for current + previous week only
@@ -13769,7 +13703,7 @@ function removeNonConfigCrewsFromCompliance() {
 
   var response = ui.alert(
     '🧹 Remove Non-Config Crews (Current Week Only)',
-    'This will remove rows from the CURRENT WEEK (' + currentWeekStr + ') that have job numbers NOT in the Safety Compliance Config.\n\n' +
+    'This will remove rows from the CURRENT WEEK (' + currentWeekStr + ') that have job numbers NOT in Job Tracking (active crews).\n\n' +
     'Config has ' + configCount + ' tracked crews.\n\n' +
     'IMPORTANT: Past weeks will NOT be affected - historical data is preserved.\n\n' +
     'Continue?',

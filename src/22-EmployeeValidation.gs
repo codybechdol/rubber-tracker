@@ -918,8 +918,9 @@ function refreshJobTrackingForemenSilent() {
   }
 
   // Classification hierarchy (lower number = higher priority)
+  // Must match syncCrews() and getCrewLead() hierarchy: SUP > GF > F > GTO F
   var classificationPriority = {
-    'F': 1, 'GTO F': 2, 'GF': 3, 'SUP': 4, 'JRY': 5, 'JRY OP': 6,
+    'SUP': 1, 'GF': 2, 'F': 3, 'GTO F': 4, 'JRY': 5, 'JRY OP': 6,
     'WT': 7, 'GTO': 8, 'EO 1': 9, 'EO 2': 10,
     'AP 7': 11, 'AP 6': 12, 'AP 5': 13, 'AP 4': 14, 'AP 3': 15, 'AP 2': 16, 'AP 1': 17
   };

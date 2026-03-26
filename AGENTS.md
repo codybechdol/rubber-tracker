@@ -145,7 +145,7 @@ Gmail is processed to track JHA/Safety Meeting compliance per crew:
 - `autoComplianceCleanup()` - Runs automatically at end of `processSafetyEmails()` to keep data clean
 
 **Key Behavior:**
-- Current week: Only Safety Compliance Config crews appear
+- Current week: Only Job Tracking active crews appear
 - Past weeks: Existing data is preserved (historical crews not removed)
 - `loadExistingComplianceForWeek()` preserves past week N/A values when recalculating
 
@@ -155,12 +155,20 @@ Job Tracking sheet manages crew lifecycle, schedules, and Safety Compliance sett
 - **Pending Start jobs** excluded from Safety Compliance tracking until start date
 - **Completed jobs** auto-sync to Training (removes future pending training rows)
 
-**NEW (March 2026): Consolidated Safety Compliance Config**
+**Consolidated Safety Compliance Config (March 2026)**
 Job Tracking now includes 9 visible schedule columns (L-T) that replace the separate "Safety Compliance Config" sheet:
 - **L-R:** Skip Sun, Skip Mon, Skip Tue, Skip Wed, Skip Thu, Skip Fri, Skip Sat (checkboxes)
 - **S-T:** Skip Weekly Meeting, Skip Monthly Checklist (checkboxes)
 - **Default schedule:** Mon-Thu (Sun, Fri, Sat checked to skip)
 - **Hidden columns V-Y:** Work Schedule, Skip Days, Schedule Effective, Schedule History
+
+**⚠️ Classification Hierarchy (foreman detection):**
+All functions that determine crew foreman MUST use this priority (lower = higher rank):
+```
+SUP(1) > GF(2) > F(3) > GTO F(4) > JRY(5) > JRY OP(6) > WT(7) > GTO(8) > EO 1(9) > EO 2(10) > AP 7-1(11-17)
+```
+Canonical source: `getCrewLead()` in `75-Scheduling.gs`. Also used by `syncCrews()` and `refreshJobTrackingForemenSilent()`.
+`generateAllReports()` calls `syncCrews(true)` for foreman updates (not `refreshJobTrackingForemenSilent`).
 
 Key functions in `22-EmployeeValidation.gs`:
 - `setupJobTrackingSheet()` - Creates sheet with all 25 columns

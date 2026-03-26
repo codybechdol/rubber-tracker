@@ -6261,8 +6261,8 @@ function onOpen() {
         .addSeparator()
         .addItem('🔄 Migrate Safety Reports Sheet', 'migrateSafetyReportsToEquipmentNeeds')
         .addItem('🧹 Cleanup Equipment Sheet', 'cleanupSafetyReportsSheet')
-        .addItem('🧹 Cleanup Config Crews', 'cleanupComplianceConfig')
-        .addItem('🔧 Fix Config Checkboxes', 'fixComplianceConfigCheckboxes')
+        .addItem('🧹 Cleanup Config Crews (Legacy)', 'cleanupComplianceConfig')
+        .addItem('🔧 Fix Config Checkboxes (Legacy)', 'fixComplianceConfigCheckboxes')
         .addItem('🧹 Remove Duplicate Rows', 'menuCleanupDuplicateComplianceRows')
         .addItem('🧹 Clear Saved Job Corrections', 'clearJobNumberCorrections')
         .addItem('🛠️ Fix Shifted Safety Tasks', 'fixShiftedSafetyComplianceTasks')
@@ -14056,13 +14056,14 @@ function generateAllReports() {
       Logger.log('generateAllReports: Error adding missing crews: ' + addCrewsError);
     }
 
-    // Refresh Job Tracking foremen from Employees sheet classification hierarchy
+    // Sync crews in Job Tracking (foremen, schedules, new crews) using syncCrews
     var foremanResults = null;
     try {
-      foremanResults = refreshJobTrackingForemenSilent();
-      Logger.log('generateAllReports: Job Tracking foremen update returned: ' + JSON.stringify(foremanResults));
+      var syncResult = syncCrews(true);
+      foremanResults = { updatedCount: (syncResult && syncResult.foremanUpdates) || 0, changedJobs: [] };
+      Logger.log('generateAllReports: syncCrews returned: ' + JSON.stringify(syncResult));
     } catch (foremanError) {
-      Logger.log('generateAllReports: Error refreshing foremen: ' + foremanError);
+      Logger.log('generateAllReports: Error syncing crews: ' + foremanError);
     }
 
     logEvent('All reports generated.');
