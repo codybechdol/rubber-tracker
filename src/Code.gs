@@ -4793,6 +4793,278 @@ function updateTrainingTrackingCrewLeadsSilent() {
   return { updatedRows: updatedRows, skippedPastMonths: skippedPastMonths };
 }
 
+/**
+ * Adds missing crews to Training Tracking for current and future months.
+ * Only adds rows for months that haven't happened yet (current month forward).
+ * Called by generateAllReports to ensure new crews get added to training schedule.
+ *
+ * @return {Object} Result with addedRows count and crews added
+ */
+function addMissingCrewsToTrainingTracking() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Training Tracking');
+
+  if (!sheet || sheet.getLastRow() < 3) {
+    Logger.log('addMissingCrewsToTrainingTracking: Training Tracking sheet is empty or not set up');
+    return { addedRows: 0, crews: [] };
+  }
+
+  var data = sheet.getDataRange().getValues();
+  var headers = data[1]; // Row 2 is headers
+
+  // Find column indices
+  var monthCol = -1;
+  var topicCol = -1;
+  var crewCol = -1;
+  var leadCol = -1;
+  var sizeCol = -1;
+  var statusCol = -1;
+  var hoursCol = -1;
+
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'month') monthCol = h;
+    if (header === 'training topic') topicCol = h;
+    if (header === 'job number' || header === 'crew' || header === 'crew #') crewCol = h;
+    if (header === 'crew lead' || header === 'foreman') leadCol = h;
+    if (header === 'crew size') sizeCol = h;
+    if (header === 'status') statusCol = h;
+    if (header === 'hours') hoursCol = h;
+  }
+
+  if (monthCol === -1 || crewCol === -1) {
+    Logger.log('addMissingCrewsToTrainingTracking: Could not find Month or Crew columns');
+    return { addedRows: 0, crews: [] };
+  }
+
+  // Get current month info
+  var now = new Date();
+  var currentMonthIndex = now.getMonth(); // 0-11
+  var monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                    'July', 'August', 'September', 'October', 'November', 'December'];
+  var currentMonthName = monthNames[currentMonthIndex];
+
+  // Get all active crews from Employees sheet + Job Tracking
+  var activeCrewsFromEmployees = getActiveCrews ? getActiveCrews() : [];
+  var activeCrewsFromJobTracking = getActiveCrewsFromJobTracking ? getActiveCrewsFromJobTracking() : [];
+
+  // Merge both sources
+  var allActiveCrews = {};
+  for (var e = 0; e < activeCrewsFromEmployees.length; e++) {
+    allActiveCrews[activeCrewsFromEmployees[e]] = true;
+  }
+  for (var j = 0; j < activeCrewsFromJobTracking.length; j++) {
+    var jtCrew = activeCrewsFromJobTracking[j].jobNumber;
+    if (jtCrew) allActiveCrews[jtCrew] = true;
+  }
+
+  var activeCrews = Object.keys(allActiveCrews).sort();
+  Logger.log('addMissingCrewsToTrainingTracking: Found ' + activeCrews.length + ' active crews');
+
+  if (activeCrews.length === 0) {
+    return { addedRows: 0, crews: [] };
+  }
+
+  // Build set of existing crew+month combinations
+  var existingCombos = {};
+  for (var i = 2; i < data.length; i++) {
+    var rowMonth = String(data[i][monthCol] || '').trim();
+    var rowCrew = String(data[i][crewCol] || '').trim();
+    if (rowMonth && rowCrew) {
+      existingCombos[rowMonth + '|' + rowCrew] = true;
+    }
+  }
+
+  // Get training topics - collect from existing rows (month -> topic, hours)
+  var monthTopics = {};
+  for (var m = 2; m < data.length; m++) {
+    var month = String(data[m][monthCol] || '').trim();
+    var topic = topicCol >= 0 ? String(data[m][topicCol] || '').trim() : '';
+    var hours = hoursCol >= 0 ? data[m][hoursCol] : 2;
+
+    if (month && topic && !monthTopics[month]) {
+      monthTopics[month] = { topic: topic, hours: hours };
+    }
+  }
+
+  // Create rows for missing crew+month combinations (current month and forward only)
+  var newRows = [];
+  var addedCrewSet = {};
+
+  for (var a = 0; a < activeCrews.length; a++) {
+    var crew = activeCrews[a];
+
+    // Check if crew should be excluded (management crew etc)
+    var shouldExclude = shouldExcludeCrew ? shouldExcludeCrew(crew) : false;
+    if (shouldExclude) continue;
+
+    // Get crew info
+    var crewLead = getCrewLead ? getCrewLead(crew) : null;
+    var leadName = crewLead ? crewLead.name : '';
+    var crewSize = getCrewSize ? getCrewSize(crew) : '';
+
+    // Check each month from current month onward
+    for (var mi = currentMonthIndex; mi < 12; mi++) {
+      var monthName = monthNames[mi];
+      var comboKey = monthName + '|' + crew;
+
+      // Skip if this crew+month combination already exists
+      if (existingCombos[comboKey]) continue;
+
+      // Get the training topic and hours for this month
+      var monthInfo = monthTopics[monthName];
+      var trainingTopic = monthInfo ? monthInfo.topic : (monthName === 'December' ? 'Catch Up - All Incomplete Training' : 'TBD');
+      var trainingHours = monthInfo ? monthInfo.hours : 2;
+
+      // Create new row: Month, Topic, Crew #, Crew Lead, Crew Size, Completion Date, Attendees, Hours, Trainer, Status, Notes
+      var newRow = [
+        monthName,
+        trainingTopic,
+        crew,
+        leadName,
+        crewSize,
+        '', // Completion Date
+        '', // Attendees
+        trainingHours,
+        '', // Trainer
+        'Pending', // Status
+        '' // Notes
+      ];
+
+      newRows.push(newRow);
+      addedCrewSet[crew] = true;
+    }
+  }
+
+  if (newRows.length === 0) {
+    Logger.log('addMissingCrewsToTrainingTracking: No missing crews for current/future months');
+    return { addedRows: 0, crews: [] };
+  }
+
+  // Sort new rows by month index, then by crew
+  newRows.sort(function(a, b) {
+    var monthA = monthNames.indexOf(a[0]);
+    var monthB = monthNames.indexOf(b[0]);
+    if (monthA !== monthB) return monthA - monthB;
+    return a[2].localeCompare(b[2]); // Sort by crew
+  });
+
+  // Append new rows to sheet
+  var lastRow = sheet.getLastRow();
+  sheet.getRange(lastRow + 1, 1, newRows.length, 11).setValues(newRows);
+
+  // Add status validation to new rows
+  var statusRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['Pending', 'In Progress', 'Complete', 'Overdue', 'N/A'], true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(lastRow + 1, statusCol + 1, newRows.length, 1).setDataValidation(statusRule);
+
+  // Sort entire sheet by Month then Crew
+  if (sheet.getLastRow() > 2) {
+    // Convert month names to numbers for proper sorting
+    // We'll re-sort after adding by using a helper approach
+    var allData = sheet.getRange(3, 1, sheet.getLastRow() - 2, 11).getValues();
+    allData.sort(function(a, b) {
+      var monthA = monthNames.indexOf(String(a[0]).trim());
+      var monthB = monthNames.indexOf(String(b[0]).trim());
+      if (monthA !== monthB) return monthA - monthB;
+      return String(a[2]).localeCompare(String(b[2])); // Then by crew
+    });
+    sheet.getRange(3, 1, allData.length, 11).setValues(allData);
+
+    // Re-apply formatting after sorting
+    applyTrainingTrackingFormatting(sheet);
+  }
+
+  var addedCrewsList = Object.keys(addedCrewSet).sort();
+  Logger.log('addMissingCrewsToTrainingTracking: Added ' + newRows.length + ' rows for crews: ' + addedCrewsList.join(', '));
+
+  return { addedRows: newRows.length, crews: addedCrewsList };
+}
+
+
+/**
+ * Applies alternating month colors and divider borders to Training Tracking sheet.
+ * Restores the visual formatting that separates months with colors and borders.
+ * Can be called after adding rows or as a standalone menu function.
+ *
+ * @param {Sheet} sheet - Optional sheet object, if not provided will get Training Tracking
+ */
+function applyTrainingTrackingFormatting(sheet) {
+  if (!sheet) {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    sheet = ss.getSheetByName('Training Tracking');
+  }
+
+  if (!sheet || sheet.getLastRow() < 3) {
+    Logger.log('applyTrainingTrackingFormatting: No data to format');
+    return;
+  }
+
+  var data = sheet.getDataRange().getValues();
+  var numCols = Math.min(data[1].length, 11); // Use header row column count, max 11
+
+  // Month order for coloring
+  var monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                    'July', 'August', 'September', 'October', 'November', 'December'];
+  var monthColors = ['#e8f4f8', '#ffffff']; // Alternating light blue and white
+
+  // First, clear any existing backgrounds (except headers)
+  if (sheet.getLastRow() > 2) {
+    sheet.getRange(3, 1, sheet.getLastRow() - 2, numCols).setBackground(null);
+    // Clear all existing borders in data area
+    sheet.getRange(3, 1, sheet.getLastRow() - 2, numCols).setBorder(false, false, false, false, false, false);
+  }
+
+  // Group rows by month
+  var currentMonth = '';
+  var monthStartRow = 3;
+  var colorIndex = -1;
+
+  for (var i = 2; i < data.length; i++) {
+    var rowMonth = String(data[i][0]).trim();
+    var rowNum = i + 1; // 1-based
+
+    // If month changed, apply formatting to previous month group
+    if (rowMonth !== currentMonth) {
+      // Apply color to previous month group (if not first month)
+      if (currentMonth && monthStartRow < rowNum) {
+        var prevMonthRange = sheet.getRange(monthStartRow, 1, rowNum - monthStartRow, numCols);
+        prevMonthRange.setBackground(monthColors[colorIndex % 2]);
+
+        // Add thick border at bottom of month group
+        prevMonthRange.setBorder(null, null, true, null, null, null, '#666666', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+      }
+
+      // Start new month group
+      currentMonth = rowMonth;
+      monthStartRow = rowNum;
+      colorIndex = monthNames.indexOf(rowMonth);
+      if (colorIndex === -1) colorIndex = 0; // Default if month not found
+    }
+  }
+
+  // Apply formatting to last month group
+  if (currentMonth && monthStartRow <= sheet.getLastRow()) {
+    var lastMonthRange = sheet.getRange(monthStartRow, 1, sheet.getLastRow() - monthStartRow + 1, numCols);
+    lastMonthRange.setBackground(monthColors[colorIndex % 2]);
+    lastMonthRange.setBorder(null, null, true, null, null, null, '#666666', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+  }
+
+  Logger.log('applyTrainingTrackingFormatting: Formatting applied successfully');
+}
+
+
+/**
+ * Menu function to re-apply Training Tracking formatting.
+ * Use this after manual edits disrupt the alternating colors or month dividers.
+ */
+function menuApplyTrainingTrackingFormatting() {
+  applyTrainingTrackingFormatting();
+  SpreadsheetApp.getUi().alert('✅ Training Tracking Formatting Applied\n\nAlternating month colors and divider borders have been restored.');
+}
+
 
 /**
  * Gets Crew Visit Config data for the To Do Config dialog.
@@ -5899,15 +6171,20 @@ function onOpen() {
     .addSubMenu(ui.createMenu('📥 Import Crew Makeup')
       .addItem('👥 Import Crew Makeup', 'showCrewImportDialog')
       .addItem('👷 Assign Crew Leads', 'showAssignCrewLeadsDialog')
+      .addItem('🔄 Sync Crews', 'menuSyncCrews')
       .addSeparator()
       .addSubMenu(ui.createMenu('🔧 Utilities')
         .addItem('📋 Setup Job Tracking Sheet', 'setupJobTrackingSheet')
+        .addItem('📋 Migrate Job Tracking for Compliance', 'migrateJobTrackingForComplianceConfig')
+        .addItem('📋 Migrate Config to Job Tracking', 'migrateConfigToJobTracking')
+        .addSeparator()
+        .addItem('🔄 Migrate Job Tracking (Add On Hold Columns)', 'migrateJobTrackingSheet')
         .addItem('🔄 Refresh Job Tracking', 'refreshJobTrackingFromEmployees')
+        .addItem('👤 Refresh Job Tracking Foremen', 'refreshJobTrackingForemen')
         .addItem('✅ Mark Job Complete', 'markJobComplete')
         .addItem('➕ Add Future Job', 'addFutureJob')
         .addItem('🎨 Apply Job Tracking Formatting', 'menuApplyJobTrackingFormatting')
         .addItem('📅 Add Schedule History Columns', 'migrateJobTrackingScheduleColumns')
-        .addItem('🔄 Sync Config to Job Tracking Schedules', 'syncConfigToJobTrackingSchedule')
         .addItem('📂 View Job Tracking', 'openJobTrackingSheet')
         .addSeparator()
         .addItem('🔄 Sync Completed Jobs to Training', 'syncCompletedJobsToTraining')
@@ -5939,17 +6216,17 @@ function onOpen() {
       .addItem('📥 Process Safety Emails', 'showProcessSafetyEmailsDialog')
       .addItem('📊 View Equipment Needs', 'openSafetyReports')
       .addItem('📈 View Compliance History', 'openComplianceSheet')
-      .addItem('⚙️ Configure Crew Exclusions', 'openComplianceConfig')
+      .addItem('⚙️ Manage Schedules (Job Tracking)', 'openJobTrackingSheet')
       .addSeparator()
       .addSubMenu(ui.createMenu('🔧 Utilities')
         .addItem('🔑 Authorize Gmail Access', 'authorizeGmailAccess')
         .addItem('📊 Gmail Status', 'showGmailStatus')
-        .addItem('👥 Populate Crew Config', 'populateComplianceConfig')
+        .addItem('🔄 Sync Crews', 'menuSyncCrews')
+        .addItem('👤 Refresh Foreman Names', 'refreshComplianceForemenNames')
         .addItem('🔽 Add Dropdowns to Compliance Sheet', 'addDropdownsToSafetyCompliance')
         .addItem('🧹 Cleanup N/A Cells (make blank)', 'cleanupNACellsInCompliance')
         .addItem('💬 Refresh Compliance Tooltips', 'menuRefreshComplianceTooltips')
         .addItem('🔄 Master Recalculate', 'masterRecalculateCompliance')
-        .addItem('🔧 Add Monthly Checklist Column', 'migrateComplianceConfigAddMonthlyChecklist')
         .addItem('🔧 Fix Notes Column', 'fixNotesColumnCheckboxes'))
       .addSubMenu(ui.createMenu('📄 Logs')
         .addItem('📋 Setup Log Sheets', 'setupAllSafetyLogSheets')
@@ -5971,7 +6248,10 @@ function onOpen() {
         .addItem('🔍 Diagnose Gmail Search', 'diagnoseGmailSearch')
         .addItem('🔄 Reset Last Processed Date', 'clearLastSafetyProcessedDate')
         .addItem('🗓️ Ensure Current Week Exists', 'ensureCurrentWeekInCompliance')
-        .addItem('🔎 Quick Gmail Check', 'quickGmailCheck'))
+        .addItem('🔎 Quick Gmail Check', 'quickGmailCheck')
+        .addSeparator()
+        .addItem('🔍 Diagnose Missing Crews', 'diagnoseMissingCrews')
+        .addItem('➕ Force Add Active Crews', 'forceAddMissingCrewsToCompliance'))
       .addSubMenu(ui.createMenu('🧹 Cleanup')
         .addItem('📋 Create Tasks from Issues', 'createTasksFromSafetyIssues')
         .addItem('🔄 Refresh Safety Sheets', 'refreshSafetySheets')
@@ -5982,6 +6262,7 @@ function onOpen() {
         .addItem('🔄 Migrate Safety Reports Sheet', 'migrateSafetyReportsToEquipmentNeeds')
         .addItem('🧹 Cleanup Equipment Sheet', 'cleanupSafetyReportsSheet')
         .addItem('🧹 Cleanup Config Crews', 'cleanupComplianceConfig')
+        .addItem('🔧 Fix Config Checkboxes', 'fixComplianceConfigCheckboxes')
         .addItem('🧹 Remove Duplicate Rows', 'menuCleanupDuplicateComplianceRows')
         .addItem('🧹 Clear Saved Job Corrections', 'clearJobNumberCorrections')
         .addItem('🛠️ Fix Shifted Safety Tasks', 'fixShiftedSafetyComplianceTasks')
@@ -6018,6 +6299,8 @@ function onOpen() {
       .addSubMenu(ui.createMenu('📚 Training')
         .addItem('Setup Training Config', 'setupTrainingConfig')
         .addItem('Setup Training Tracking', 'setupTrainingTracking')
+        .addItem('🆕 Sync New Crews to Training Tracking', 'menuSyncNewCrewsToTrainingTracking')
+        .addItem('🎨 Apply Training Tracking Formatting', 'menuApplyTrainingTrackingFormatting')
         .addItem('Refresh Training Attendees', 'refreshTrainingAttendees')
         .addItem('🔄 Update December Catch-Ups', 'updateDecemberCatchUps')
         .addItem('⏰ Setup Auto December Updates', 'setupAutoDecemberUpdates')
@@ -6078,6 +6361,7 @@ function onOpen() {
         .addItem('📋 Order History', 'openPurchaseOrdersSheet')
         .addItem('⚙️ Manage Vendors', 'showVendorConfigDialog'))
       .addSubMenu(ui.createMenu('👥 Employees')
+        .addItem('📍 Update Location Validation', 'updateEmployeesLocationValidation')
         .addItem('📤 Archive Previous Employees', 'archivePreviousEmployees')
         .addItem('🔄 Restore Deleted Employee', 'showRestoreEmployeeDialog')
         .addItem('🔄 Update Employee History Headers', 'updateEmployeeHistoryHeaders')
@@ -6088,6 +6372,13 @@ function onOpen() {
         .addItem('✅ Fix Last Day Reason Dropdown', 'fixLastDayReasonValidation')
         .addItem('👷 Setup Job Classification Dropdown', 'setupJobClassificationDropdown')
         .addItem('📖 View Classification Guide', 'showClassificationGuide'))
+      .addSubMenu(ui.createMenu('📋 Job Tracking')
+        .addItem('📂 View Job Tracking', 'openJobTrackingSheet')
+        .addItem('🔄 Refresh Job Tracking', 'refreshJobTrackingFromEmployees')
+        .addItem('📅 Add Schedule History Columns', 'migrateJobTrackingScheduleColumns')
+        .addItem('🔄 Sync Config to Job Tracking Schedules', 'syncConfigToJobTrackingSchedule')
+        .addItem('✅ Mark Job Complete', 'markJobComplete')
+        .addItem('➕ Add Future Job', 'addFutureJob'))
       .addSubMenu(ui.createMenu('🏗️ Sheets Setup')
         .addItem('🏗️ Build Sheets', 'buildSheets')
         .addItem('⚡ Setup HV Tester & Phasing Set Sheets', 'setupHVTesterAndPhasingSetSheets')
@@ -6116,7 +6407,10 @@ function onOpen() {
       .addItem('🔍 Debug Task List', 'debugTaskListData')
       .addItem('🔍 Debug Training Tasks', 'debugTrainingTasks')
       .addItem('🔍 Metadata vs Collection', 'debugMetadataVsCollection')
-      .addItem('🧹 Clear Training Filter', 'clearTrainingCrewsFilter'))
+      .addItem('🧹 Clear Training Filter', 'clearTrainingCrewsFilter')
+      .addSeparator()
+      .addItem('🔍 Diagnose Crew 005-26', 'diagnoseCrew005')
+      .addItem('🔍 Diagnose Crew 045-26', 'diagnose045Crew'))
 
     .addSeparator()
     .addItem('Close & Save History', 'closeAndSaveHistory')
@@ -13752,13 +14046,38 @@ function generateAllReports() {
       Logger.log('generateAllReports: Error updating crew leads: ' + crewLeadError);
     }
 
+    // Add missing crews to Training Tracking for current and future months
+    // This adds rows for new crews that don't yet have training rows
+    var addedCrewsResults = null;
+    try {
+      addedCrewsResults = addMissingCrewsToTrainingTracking();
+      Logger.log('generateAllReports: Added missing crews to Training Tracking: ' + JSON.stringify(addedCrewsResults));
+    } catch (addCrewsError) {
+      Logger.log('generateAllReports: Error adding missing crews: ' + addCrewsError);
+    }
+
+    // Refresh Job Tracking foremen from Employees sheet classification hierarchy
+    var foremanResults = null;
+    try {
+      foremanResults = refreshJobTrackingForemenSilent();
+      Logger.log('generateAllReports: Job Tracking foremen update returned: ' + JSON.stringify(foremanResults));
+    } catch (foremanError) {
+      Logger.log('generateAllReports: Error refreshing foremen: ' + foremanError);
+    }
+
     logEvent('All reports generated.');
     var successMsg = '✅ All reports generated successfully!';
+    if (addedCrewsResults && addedCrewsResults.addedRows > 0) {
+      successMsg += '\n\n📚 ' + addedCrewsResults.addedRows + ' Training Tracking row(s) added for new crews: ' + addedCrewsResults.crews.join(', ');
+    }
     if (crewLeadResults && crewLeadResults.updatedRows > 0) {
       successMsg += '\n\n👥 ' + crewLeadResults.updatedRows + ' Training Tracking crew lead(s) updated.';
       if (crewLeadResults.skippedPastMonths > 0) {
         successMsg += '\n(Past months preserved: ' + crewLeadResults.skippedPastMonths + ' rows)';
       }
+    }
+    if (foremanResults && foremanResults.updatedCount > 0) {
+      successMsg += '\n\n👤 ' + foremanResults.updatedCount + ' Job Tracking foreman(s) updated.';
     }
     SpreadsheetApp.getUi().alert(successMsg);
   } catch (e) {
@@ -21568,3 +21887,322 @@ function fixEquipmentSheetHeaders() {
     SpreadsheetApp.getUi().alert('No updates needed - column headers are already correct.');
   }
 }
+
+/**
+ * Diagnostic function to troubleshoot crew 005-26 showing 0 employees in Training Tracking.
+ * Checks: Employees sheet for 005-26 job numbers, Job Tracking status, and exclusion rules.
+ */
+function diagnoseCrew005() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+  var results = [];
+
+  var targetCrew = '005-26';
+  results.push('=== DIAGNOSTIC: Crew ' + targetCrew + ' ===\n');
+
+  // 1. Check Employees sheet for employees with 005-26 job numbers
+  var employeesSheet = ss.getSheetByName('Employees');
+  if (!employeesSheet || employeesSheet.getLastRow() < 2) {
+    results.push('ERROR: Employees sheet not found or empty');
+    ui.alert('Diagnostic Results', results.join('\n'), ui.ButtonSet.OK);
+    return;
+  }
+
+  var empData = employeesSheet.getDataRange().getValues();
+  var headers = empData[0];
+
+  // Find column indices
+  var nameCol = -1, jobNumCol = -1, locationCol = -1, lastDayCol = -1, classCol = -1;
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'name') nameCol = h;
+    if (header === 'job number') jobNumCol = h;
+    if (header === 'location') locationCol = h;
+    if (header === 'last day') lastDayCol = h;
+    if (header === 'job classification') classCol = h;
+  }
+
+  results.push('Column indices: name=' + nameCol + ', jobNum=' + jobNumCol + ', location=' + locationCol + ', lastDay=' + lastDayCol);
+
+  if (jobNumCol === -1) {
+    results.push('ERROR: Job Number column not found!');
+    ui.alert('Diagnostic Results', results.join('\n'), ui.ButtonSet.OK);
+    return;
+  }
+
+  // Find all employees with 005-26 job numbers
+  var matchingEmployees = [];
+  var allJobNums = [];
+
+  for (var i = 1; i < empData.length; i++) {
+    var row = empData[i];
+    var name = String(row[nameCol] || '').trim();
+    var jobNum = String(row[jobNumCol] || '').trim();
+    var location = locationCol !== -1 ? String(row[locationCol] || '').trim() : '';
+    var lastDay = lastDayCol !== -1 ? row[lastDayCol] : '';
+    var classification = classCol !== -1 ? String(row[classCol] || '').trim() : '';
+
+    if (!name) continue;
+
+    // Track all job numbers for debugging
+    if (jobNum && allJobNums.indexOf(jobNum) === -1) {
+      allJobNums.push(jobNum);
+    }
+
+    // Check if job number starts with 005-26
+    if (jobNum.indexOf(targetCrew) === 0) {
+      matchingEmployees.push({
+        row: i + 1,
+        name: name,
+        jobNum: jobNum,
+        location: location,
+        lastDay: lastDay ? 'Has Last Day: ' + lastDay : 'Active',
+        classification: classification
+      });
+    }
+  }
+
+  results.push('\n--- Employees with job number starting with ' + targetCrew + ' ---');
+  if (matchingEmployees.length === 0) {
+    results.push('⚠️ NO EMPLOYEES FOUND with job number ' + targetCrew + '.*');
+    results.push('\nSample of job numbers found in Employees sheet (first 20):');
+    allJobNums.sort().slice(0, 20).forEach(function(jn) {
+      results.push('  • ' + jn);
+    });
+  } else {
+    results.push('Found ' + matchingEmployees.length + ' employee(s):');
+    matchingEmployees.forEach(function(emp) {
+      results.push('  Row ' + emp.row + ': ' + emp.name);
+      results.push('    Job #: ' + emp.jobNum + ', Location: ' + emp.location);
+      results.push('    Status: ' + emp.lastDay + ', Class: ' + emp.classification);
+    });
+  }
+
+  // 2. Check Job Tracking sheet for 005-26 status
+  results.push('\n--- Job Tracking Status ---');
+  var jobTrackingSheet = ss.getSheetByName('Job Tracking');
+  if (jobTrackingSheet && jobTrackingSheet.getLastRow() > 1) {
+    var jtData = jobTrackingSheet.getDataRange().getValues();
+    var jtHeaders = jtData[0];
+
+    var jtJobNumCol = -1, jtStatusCol = -1, jtForemanCol = -1;
+    for (var jh = 0; jh < jtHeaders.length; jh++) {
+      var jtHeader = String(jtHeaders[jh]).toLowerCase().trim();
+      if (jtHeader === 'job number') jtJobNumCol = jh;
+      if (jtHeader === 'status') jtStatusCol = jh;
+      if (jtHeader === 'foreman') jtForemanCol = jh;
+    }
+
+    for (var j = 1; j < jtData.length; j++) {
+      var jtJobNum = String(jtData[j][jtJobNumCol] || '').trim();
+      if (jtJobNum === targetCrew) {
+        var jtStatus = jtStatusCol !== -1 ? String(jtData[j][jtStatusCol] || '').trim() : 'N/A';
+        var jtForeman = jtForemanCol !== -1 ? String(jtData[j][jtForemanCol] || '').trim() : 'N/A';
+        results.push('Found in Job Tracking:');
+        results.push('  Job #: ' + jtJobNum);
+        results.push('  Status: ' + jtStatus);
+        results.push('  Foreman: ' + jtForeman);
+
+        if (jtStatus === 'Completed' || jtStatus === 'Pending Start') {
+          results.push('  ⚠️ Job status may exclude from Training Tracking!');
+        }
+        break;
+      }
+    }
+  } else {
+    results.push('Job Tracking sheet not found');
+  }
+
+  // 3. Check Training Tracking for 005-26
+  results.push('\n--- Training Tracking Data ---');
+  var trainingSheet = ss.getSheetByName('Training Tracking');
+  if (trainingSheet && trainingSheet.getLastRow() > 2) {
+    var ttData = trainingSheet.getDataRange().getValues();
+    var marchRows = [];
+
+    for (var t = 2; t < ttData.length; t++) {
+      var month = String(ttData[t][0] || '').trim();
+      var crew = String(ttData[t][2] || '').trim();
+      var crewLead = String(ttData[t][3] || '').trim();
+      var crewSize = ttData[t][4];
+      var attendees = String(ttData[t][6] || '').trim();
+
+      if (crew === targetCrew && month === 'March') {
+        marchRows.push({
+          row: t + 1,
+          month: month,
+          crew: crew,
+          crewLead: crewLead,
+          crewSize: crewSize,
+          attendees: attendees.substring(0, 50) + (attendees.length > 50 ? '...' : '')
+        });
+      }
+    }
+
+    if (marchRows.length > 0) {
+      results.push('Training Tracking rows for ' + targetCrew + ' in March:');
+      marchRows.forEach(function(row) {
+        results.push('  Row ' + row.row + ':');
+        results.push('    Crew Lead: ' + row.crewLead);
+        results.push('    Crew Size: ' + row.crewSize);
+        results.push('    Attendees: ' + (row.attendees || '(empty)'));
+      });
+    } else {
+      results.push('No March rows found for ' + targetCrew);
+    }
+  }
+
+  // 4. Test getCrewSize and getCrewLead functions
+  results.push('\n--- Function Tests ---');
+  try {
+    var size = getCrewSize(targetCrew);
+    results.push('getCrewSize("' + targetCrew + '"): ' + size);
+  } catch (e) {
+    results.push('getCrewSize error: ' + e.message);
+  }
+
+  try {
+    var lead = getCrewLead(targetCrew);
+    results.push('getCrewLead("' + targetCrew + '"): ' + (lead ? lead.name + ' (' + lead.classification + ')' : 'null'));
+  } catch (e) {
+    results.push('getCrewLead error: ' + e.message);
+  }
+
+  // Show results in alert (limited length) and log full results
+  Logger.log(results.join('\n'));
+
+  var shortResults = results.slice(0, 30).join('\n');
+  if (results.length > 30) {
+    shortResults += '\n\n... (see full results in Apps Script Logs)';
+  }
+
+  ui.alert('Diagnostic: Crew ' + targetCrew, shortResults, ui.ButtonSet.OK);
+}
+
+/**
+ * Diagnostic: Show all employees in crew 045-26 and their classifications.
+ * Helps debug why wrong crew lead is showing.
+ */
+function diagnose045Crew() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+  var results = [];
+
+  results.push('=== Diagnosing Crew 045-26 ===');
+  results.push('Looking for Tony Harmon vs Erik Davis issue');
+  results.push('');
+
+  if (!employeesSheet) {
+    ui.alert('Error', 'Employees sheet not found', ui.ButtonSet.OK);
+    return;
+  }
+
+  var data = employeesSheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Find columns
+  var nameCol = -1, jobNumCol = -1, classificationCol = -1, locationCol = -1, lastDayCol = -1;
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'name') nameCol = h;
+    if (header === 'job number') jobNumCol = h;
+    if (header === 'job classification') classificationCol = h;
+    if (header === 'location') locationCol = h;
+    if (header === 'last day') lastDayCol = h;
+  }
+
+  results.push('Column indices: Name=' + nameCol + ', JobNum=' + jobNumCol + ', Classification=' + classificationCol);
+  results.push('');
+
+  // Find all employees with "045" in job number
+  results.push('--- Employees with "045" in job number ---');
+  var crew045 = [];
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var name = row[nameCol] || '';
+    var jobNum = String(row[jobNumCol] || '').trim();
+    var classification = classificationCol !== -1 ? String(row[classificationCol] || '').trim() : '';
+    var location = locationCol !== -1 ? String(row[locationCol] || '').trim() : '';
+    var lastDay = lastDayCol !== -1 ? row[lastDayCol] : '';
+
+    if (jobNum.indexOf('045') !== -1) {
+      var hasLeft = lastDay ? ' [LEFT: ' + lastDay + ']' : '';
+      results.push('Row ' + (i+1) + ': ' + name);
+      results.push('  Job Number: ' + jobNum);
+      results.push('  Classification: "' + classification + '"' + hasLeft);
+      results.push('  Location: ' + location);
+
+      if (!lastDay) {
+        crew045.push({
+          name: name,
+          jobNum: jobNum,
+          classification: classification,
+          location: location,
+          row: i + 1
+        });
+      }
+    }
+  }
+
+  // Also search for Tony Harmon and Erik Davis specifically
+  results.push('');
+  results.push('--- Searching for Tony Harmon ---');
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var name = String(row[nameCol] || '').toLowerCase();
+    if (name.indexOf('tony') !== -1 || name.indexOf('harmon') !== -1) {
+      results.push('Row ' + (i+1) + ': ' + row[nameCol]);
+      results.push('  Job Number: ' + row[jobNumCol]);
+      results.push('  Classification: ' + (classificationCol !== -1 ? row[classificationCol] : 'N/A'));
+    }
+  }
+
+  results.push('');
+  results.push('--- Searching for Erik Davis ---');
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var name = String(row[nameCol] || '').toLowerCase();
+    if (name.indexOf('erik') !== -1 || name.indexOf('davis') !== -1) {
+      results.push('Row ' + (i+1) + ': ' + row[nameCol]);
+      results.push('  Job Number: ' + row[jobNumCol]);
+      results.push('  Classification: ' + (classificationCol !== -1 ? row[classificationCol] : 'N/A'));
+    }
+  }
+
+  // Test getCrewLead function
+  results.push('');
+  results.push('--- getCrewLead("045-26") result ---');
+  try {
+    var lead = getCrewLead('045-26');
+    if (lead) {
+      results.push('Returns: ' + lead.name);
+      results.push('Classification: ' + lead.classification);
+      results.push('Job Number: ' + lead.jobNumber);
+    } else {
+      results.push('Returns: null (no lead found)');
+    }
+  } catch (e) {
+    results.push('Error: ' + e.message);
+  }
+
+  // Classification priority reference
+  results.push('');
+  results.push('--- Classification Priority (lower = higher priority) ---');
+  results.push('SUP=1, GF=2, F=3, GTO F=4, JRY=5, JRY OP=6, WT=7, GTO=8');
+  results.push('EO 1=9, EO 2=10, AP 7=11, AP 6=12, ... AP 1=17');
+  results.push('');
+  results.push('⚠️ Manual "Crew Lead" column assignment ALWAYS takes priority over classification!');
+
+  Logger.log(results.join('\n'));
+
+  // Show in dialog
+  var html = HtmlService.createHtmlOutput(
+    '<pre style="font-size:12px;max-height:500px;overflow:auto;">' +
+    results.join('\n') +
+    '</pre>'
+  ).setWidth(600).setHeight(500);
+
+  ui.showModalDialog(html, 'Diagnose Crew 045-26');
+}
+

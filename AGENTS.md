@@ -15,15 +15,22 @@ Google Apps Script loads files **alphabetically**. Numbered prefixes control loa
 00-Constants.gs  → loads FIRST (defines COLS, SHEET_* constants)
 01-Utilities.gs  → utility functions (logEvent, normalizeApprovalValue)
 10-Menu.gs       → archived (menu now in Code.gs)
-22-EmployeeValidation.gs → Job Tracking functions, Employee validation (~1.7k lines)
-...
-51-EmployeeHistory.gs → Employee lifecycle, restore deleted employees (~1.3k lines)
-76-SmartScheduling.gs → Task collection, getDriveTimeMap() (~1.9k lines)
-85-DataImport.gs → Crew Import, Job Tracking sync (~1.9k lines)
-86-TimeTracking.gs → Daily Accomplishments
-87-RoutePlanner.gs → Trip Planner (~2.1k lines)
-88-SafetyReports.gs → Gmail processing, Safety Compliance (~12.5k lines)
-Code.gs          → loads LAST, contains ALL working implementations (~15.7k lines)
+11-Triggers.gs   → edit/change triggers, auto change-out dates (~2k lines)
+22-EmployeeValidation.gs → Job Tracking functions, Employee validation (~3k lines)
+22-LocationSync.gs → Inventory location sync with Employees (~175 lines)
+30-SwapGeneration.gs → Swap report generation (~1.4k lines)
+51-EmployeeHistory.gs → Employee lifecycle, restore deleted employees (~1.5k lines)
+62-PurchaseOrders.gs → PO generation and vendor management (~700 lines)
+75-Scheduling.gs → Crew visit scheduling, training calendar (~3.5k lines)
+76-SmartScheduling.gs → Task collection, getDriveTimeMap() (~2.3k lines)
+76-EmployeeClassifications.gs → Job classification dropdowns (~150 lines)
+80-EmailReports.gs → Weekly HTML email reports (~1.5k lines)
+85-DataImport.gs → Crew Import, Job Tracking sync (~2.4k lines)
+86-TimeTracking.gs → Daily Accomplishments (~1k lines)
+87-RoutePlanner.gs → Trip Planner (~2.5k lines)
+88-SafetyReports.gs → Gmail processing, Safety Compliance (~15.9k lines)
+95-DiagnosticTools.gs → Pick list diagnostics (~630 lines)
+Code.gs          → loads LAST, contains ALL working implementations (~22.2k lines)
 ```
 
 **Key Rule:** When functions appear in multiple files, **Code.gs always wins** (loads last).
@@ -77,42 +84,46 @@ function showMyDialog() {
 ## Key Files
 | File | Purpose |
 |------|---------|
-| `Code.gs` | Main file - ALL working functions go here (~15.7k lines) |
-| `00-Constants.gs` | Sheet names, column indices, business constants |
-| `22-EmployeeValidation.gs` | Job Tracking sheet functions, employee validation, training sync (~1.7k lines) |
-| `51-EmployeeHistory.gs` | Employee lifecycle tracking, restore deleted employees (~1.3k lines) |
-| `76-SmartScheduling.gs` | Task collection, `getDriveTimeMap()` (~1.9k lines) |
-| `85-DataImport.gs` | Crew Import from Excel, Job Tracking sync (~1.9k lines) |
-| `87-RoutePlanner.gs` | Trip planning and route optimization (~2.1k lines) |
-| `88-SafetyReports.gs` | Gmail processing, Safety Compliance tracking (~12.5k lines) |
-| `ToDoSchedule.html` | Task List dialog |
-| `TripPlanner.html` | Trip Planner / Scheduler (primary scheduling interface) |
-| `CrewImport.html` | Excel crew import with SheetJS |
+| `Code.gs` | Main file - ALL working functions go here (~22.2k lines) |
+| `00-Constants.gs` | Sheet names, column indices (`COLS`), business constants |
+| `11-Triggers.gs` | Edit triggers, auto change-out date recalculation (~2k lines) |
+| `22-EmployeeValidation.gs` | Job Tracking sheet functions, employee validation, training sync (~3k lines) |
+| `51-EmployeeHistory.gs` | Employee lifecycle tracking, restore deleted employees (~1.5k lines) |
+| `75-Scheduling.gs` | Crew visit scheduling, training calendar (~3.5k lines) |
+| `76-SmartScheduling.gs` | Task collection, `getDriveTimeMap()` (~2.3k lines) |
+| `85-DataImport.gs` | Crew Import from Excel, Job Tracking sync (~2.4k lines) |
+| `87-RoutePlanner.gs` | Trip planning and route optimization (~2.5k lines) |
+| `88-SafetyReports.gs` | Gmail processing, Safety Compliance tracking (~15.9k lines) |
+| `ToDoSchedule.html` | Task List dialog (~6.5k lines) |
+| `TripPlanner.html` | Trip Planner / Scheduler (primary scheduling interface, ~5k lines) |
+| `CrewImport.html` | Excel crew import with SheetJS (~6.1k lines) |
 | `QuickActions.html` | Monday workflow sidebar |
+| `ProcessSafetyEmailsDialog.html` | Safety email processing dialog (~1.5k lines) |
 
 ## Key Sheets (Data Architecture)
 | Sheet | Purpose |
 |-------|---------|
 | Task Metadata | Single source of truth for task state |
 | Task Metadata Archive | Archived completed tasks (via garbage collection) |
-| Job Tracking | Crew lifecycle (Active, Pending Start, Completed) with schedule history |
+| Job Tracking | Crew lifecycle (Active, Pending Start, Completed) with schedule history and compliance config (columns L-T) |
 | Employees | Employee info, location, job numbers, sizes |
 | Training Tracking | Monthly training compliance per crew |
 | Training Config | Crews to track, monthly training topics |
 | Expiring Certs | Employee certification expiration tracking |
 | Safety Compliance | Weekly JHA/Meeting tracking per crew |
-| Safety Compliance Config | Crew exclusion settings, work schedules |
 | JHA Log | Audit trail for Job Hazard Analyses |
 | Weekly Safety Log | Audit trail for Safety Meetings |
 | Monthly Checklist Log | Audit trail for Fleet Checklists |
 | Safety Equipment Needs | Equipment issues (fire extinguishers, etc.) |
 | Locations | Drive times from Helena for route planning |
+| Blankets | Rubber blankets - 1-year test cycle |
+| Blanket Swaps | Blankets approaching test date |
 | HV Testers | High Voltage Testers - 10-year calibration/replacement cycle |
 | HV Tester Swaps | HV Testers approaching replacement date |
 | Phasing Sets | Phasing Sets - 10-year calibration/replacement cycle |
 | Phasing Set Swaps | Phasing Sets approaching replacement date |
-| Blankets | Rubber blankets - 1-year test cycle |
-| Blanket Swaps | Blankets approaching test date |
+
+> **Note:** Safety Compliance Config was migrated into Job Tracking columns L-T (see Job Tracking Integration section). The separate sheet no longer exists.
 
 ## Trip Planner Work Schedule
 The Trip Planner supports configurable work schedules:
@@ -139,16 +150,34 @@ Gmail is processed to track JHA/Safety Meeting compliance per crew:
 - `loadExistingComplianceForWeek()` preserves past week N/A values when recalculating
 
 ## Job Tracking Integration
-Job Tracking sheet manages crew lifecycle and integrates with Training and Safety Compliance:
+Job Tracking sheet manages crew lifecycle, schedules, and Safety Compliance settings:
 - **Statuses:** Active, Pending Start, Completed, On Hold
 - **Pending Start jobs** excluded from Safety Compliance tracking until start date
 - **Completed jobs** auto-sync to Training (removes future pending training rows)
 
+**NEW (March 2026): Consolidated Safety Compliance Config**
+Job Tracking now includes 9 visible schedule columns (L-T) that replace the separate "Safety Compliance Config" sheet:
+- **L-R:** Skip Sun, Skip Mon, Skip Tue, Skip Wed, Skip Thu, Skip Fri, Skip Sat (checkboxes)
+- **S-T:** Skip Weekly Meeting, Skip Monthly Checklist (checkboxes)
+- **Default schedule:** Mon-Thu (Sun, Fri, Sat checked to skip)
+- **Hidden columns V-Y:** Work Schedule, Skip Days, Schedule Effective, Schedule History
+
 Key functions in `22-EmployeeValidation.gs`:
+- `setupJobTrackingSheet()` - Creates sheet with all 25 columns
+- `migrateJobTrackingForComplianceConfig()` - Adds columns L-T to existing sheets
+- `syncCrews(silent)` - Syncs foremen from Employees, applies default schedules
 - `syncCompletedJobsToTraining()` - Removes FUTURE training months after job end date
 - `cleanupPendingTrainingForCompletedJobs()` - Removes ANY pending training for completed jobs
-- `autoSyncCompletedJobToSafetyCompliance()` - Removes compliance rows after job ends
 - `getCrewScheduleForWeek()` - Gets historical schedule for a week (supports schedule changes)
+
+Key functions in `88-SafetyReports.gs`:
+- `loadComplianceConfig()` - NOW reads from Job Tracking columns L-T (not Safety Compliance Config)
+- `migrateConfigToJobTracking()` - One-time migration from old Config sheet to Job Tracking
+
+**Migration workflow:**
+1. Run "Migrate Job Tracking for Compliance" to add columns L-T
+2. Run "Migrate Config to Job Tracking" to copy settings and delete old sheet
+3. Use "Sync Crews" to update foremen and apply default schedules
 
 ## Debugging
 1. Check Apps Script execution log: Extensions → Apps Script → Executions
@@ -160,10 +189,17 @@ Key functions in `22-EmployeeValidation.gs`:
    - Gmail permissions revoked → Run `authorizeGmailAccess()` from menu: 🛡️ Safety → 🔑 Authorize Gmail Access
 
 ## Menu System
-Menu defined in `Code.gs` `onOpen()` function. Key submenus:
-- **📅 Schedule & To-Do** - Task management, Trip Planner
-- **🛡️ Safety** - Gmail processing, compliance tracking
-- **🔧 Utilities** - Job Tracking, imports, maintenance
+Menu defined in `Code.gs` `onOpen()` function. Organized as a 6-step Monday workflow:
+1. **📥 Import Crew Makeup** - Upload weekly crew assignments, sync crews
+2. **📊 Generate All Reports** - Swaps (glove, sleeve, blanket, HV tester, phasing set), purchase needs, reclaims
+3. **🛡️ Process Safety Emails** - Gmail processing, compliance tracking, log sheets
+4. **🎯 Generate Task Metadata** - Build/refresh task database, dashboard, archiving
+5. **📅 Review & Schedule** - Task List, Trip Planner, training, crew visits, daily accomplishments
+6. **💾 Save & Backup** - History snapshots, Drive backups, email reports
+
+Additional top-level submenus:
+- **🔧 Maintenance** - Inventory, purchase orders, employees, job tracking, sheets setup
+- **🔍 Debug** - Diagnostic tools, test functions
 
 After changes:
 1. Run `.\push.bat`

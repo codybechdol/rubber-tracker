@@ -166,21 +166,26 @@ function fixLastDayReasonValidation() {
  * Creates and sets up the "Job Tracking" sheet for managing crew/job lifecycle.
  * Tracks start dates, end dates, and status of each job/crew.
  *
- * Columns:
+ * Columns (25 total, 21 visible + 4 hidden):
  * A: Job Number (e.g., 013-26)
  * B: Location
  * C: Foreman
  * D: Crew Size
  * E: Start Date (when job becomes active)
- * F: Est. End Date (projected completion)
- * G: Actual End Date (when completed)
- * H: Status (Active, Pending Start, Completed, On Hold)
- * I: Notes
- * J: Last Updated
- * K: Work Schedule (hidden) - Current schedule type (Mon-Thu, Tue-Fri, Mon-Fri, Custom)
- * L: Skip Days (hidden) - Comma-separated list (e.g., "Sat,Sun,Fri")
- * M: Schedule Effective Date (hidden) - When current schedule started
- * N: Schedule History (hidden) - JSON array of past schedules
+ * F: Put On Hold Date (when job was put on hold - for On Hold jobs)
+ * G: Estimated Return (expected return date - for On Hold jobs)
+ * H: Est. End Date (projected completion)
+ * I: Actual End Date (when completed)
+ * J: Status (Active, Pending Start, Completed, On Hold)
+ * K: Notes
+ * L-R: Skip Sun, Skip Mon, Skip Tue, Skip Wed, Skip Thu, Skip Fri, Skip Sat (checkboxes)
+ * S: Skip Weekly Meeting (checkbox)
+ * T: Skip Monthly Checklist (checkbox)
+ * U: Last Updated
+ * V: Work Schedule (hidden) - Current schedule type (Mon-Thu, Tue-Fri, Mon-Fri, Custom)
+ * W: Skip Days (hidden) - Comma-separated list (e.g., "Sat,Sun,Fri")
+ * X: Schedule Effective Date (hidden) - When current schedule started
+ * Y: Schedule History (hidden) - JSON array of past schedules
  *
  * Called from: Glove Manager → 🔧 Utilities → Setup Job Tracking Sheet
  */
@@ -211,22 +216,34 @@ function setupJobTrackingSheet() {
   // Create new sheet
   var sheet = ss.insertSheet('Job Tracking');
 
-  // Define headers - including hidden schedule columns
+  // Define headers - visible columns A-U, hidden columns V-Y
+  // NEW STRUCTURE: Added 9 visible schedule columns (L-T) for Safety Compliance
   var headers = [
-    'Job Number',
-    'Location',
-    'Foreman',
-    'Crew Size',
-    'Start Date',
-    'Est. End Date',
-    'Actual End Date',
-    'Status',
-    'Notes',
-    'Last Updated',
-    'Work Schedule',      // Column K (hidden)
-    'Skip Days',          // Column L (hidden)
-    'Schedule Effective', // Column M (hidden)
-    'Schedule History'    // Column N (hidden)
+    'Job Number',           // A
+    'Location',             // B
+    'Foreman',              // C
+    'Crew Size',            // D
+    'Start Date',           // E
+    'Put On Hold Date',     // F (for On Hold jobs)
+    'Estimated Return',     // G (for On Hold jobs)
+    'Est. End Date',        // H
+    'Actual End Date',      // I
+    'Status',               // J
+    'Notes',                // K
+    'Skip Sun',             // L (NEW - checkbox, default checked)
+    'Skip Mon',             // M (NEW - checkbox)
+    'Skip Tue',             // N (NEW - checkbox)
+    'Skip Wed',             // O (NEW - checkbox)
+    'Skip Thu',             // P (NEW - checkbox)
+    'Skip Fri',             // Q (NEW - checkbox, default checked)
+    'Skip Sat',             // R (NEW - checkbox, default checked)
+    'Skip Weekly Meeting',  // S (NEW - checkbox)
+    'Skip Monthly Checklist', // T (NEW - checkbox)
+    'Last Updated',         // U
+    'Work Schedule',        // V (hidden)
+    'Skip Days',            // W (hidden)
+    'Schedule Effective',   // X (hidden)
+    'Schedule History'      // Y (hidden)
   ];
 
   // Write headers
@@ -245,39 +262,53 @@ function setupJobTrackingSheet() {
   sheet.setColumnWidth(3, 140);  // Foreman
   sheet.setColumnWidth(4, 80);   // Crew Size
   sheet.setColumnWidth(5, 110);  // Start Date
-  sheet.setColumnWidth(6, 110);  // Est. End Date
-  sheet.setColumnWidth(7, 110);  // Actual End Date
-  sheet.setColumnWidth(8, 100);  // Status
-  sheet.setColumnWidth(9, 200);  // Notes
-  sheet.setColumnWidth(10, 140); // Last Updated
-  sheet.setColumnWidth(11, 100); // Work Schedule (hidden)
-  sheet.setColumnWidth(12, 120); // Skip Days (hidden)
-  sheet.setColumnWidth(13, 130); // Schedule Effective (hidden)
-  sheet.setColumnWidth(14, 200); // Schedule History (hidden)
+  sheet.setColumnWidth(6, 120);  // Put On Hold Date
+  sheet.setColumnWidth(7, 120);  // Estimated Return
+  sheet.setColumnWidth(8, 110);  // Est. End Date
+  sheet.setColumnWidth(9, 110);  // Actual End Date
+  sheet.setColumnWidth(10, 100); // Status
+  sheet.setColumnWidth(11, 200); // Notes
+  sheet.setColumnWidth(12, 70);  // Skip Sun (NEW)
+  sheet.setColumnWidth(13, 70);  // Skip Mon (NEW)
+  sheet.setColumnWidth(14, 70);  // Skip Tue (NEW)
+  sheet.setColumnWidth(15, 70);  // Skip Wed (NEW)
+  sheet.setColumnWidth(16, 70);  // Skip Thu (NEW)
+  sheet.setColumnWidth(17, 70);  // Skip Fri (NEW)
+  sheet.setColumnWidth(18, 70);  // Skip Sat (NEW)
+  sheet.setColumnWidth(19, 100); // Skip Weekly Meeting (NEW)
+  sheet.setColumnWidth(20, 120); // Skip Monthly Checklist (NEW)
+  sheet.setColumnWidth(21, 140); // Last Updated
+  sheet.setColumnWidth(22, 100); // Work Schedule (hidden)
+  sheet.setColumnWidth(23, 120); // Skip Days (hidden)
+  sheet.setColumnWidth(24, 130); // Schedule Effective (hidden)
+  sheet.setColumnWidth(25, 200); // Schedule History (hidden)
 
-  // Hide schedule columns (K-N)
-  sheet.hideColumns(11, 4);
+  // Hide schedule history columns (V-Y = columns 22-25)
+  sheet.hideColumns(22, 4);
 
-  // Add data validation for Status column
+  // Add checkboxes for skip day columns (L-T = columns 12-20)
+  sheet.getRange(2, 12, 500, 9).insertCheckboxes();
+
+  // Add data validation for Status column (J = column 10)
   var statusValues = ['Active', 'Pending Start', 'Completed', 'On Hold'];
   var statusRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(statusValues, true)
     .setAllowInvalid(false)
     .build();
-  sheet.getRange(2, 8, 500, 1).setDataValidation(statusRule);
+  sheet.getRange(2, 10, 500, 1).setDataValidation(statusRule);
 
-  // Add data validation for Work Schedule column (K)
+  // Add data validation for Work Schedule column (V = column 22)
   var scheduleValues = ['Mon-Thu', 'Tue-Fri', 'Mon-Fri', 'Custom'];
   var scheduleRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(scheduleValues, true)
     .setAllowInvalid(true)
     .build();
-  sheet.getRange(2, 11, 500, 1).setDataValidation(scheduleRule);
+  sheet.getRange(2, 22, 500, 1).setDataValidation(scheduleRule);
 
-  // Format date columns
-  sheet.getRange(2, 5, 500, 3).setNumberFormat('mm/dd/yyyy');
-  sheet.getRange(2, 10, 500, 1).setNumberFormat('mm/dd/yyyy hh:mm');
-  sheet.getRange(2, 13, 500, 1).setNumberFormat('mm/dd/yyyy');  // Schedule Effective
+  // Format date columns (E, F, G, H, I = 5, 6, 7, 8, 9)
+  sheet.getRange(2, 5, 500, 5).setNumberFormat('mm/dd/yyyy');
+  sheet.getRange(2, 21, 500, 1).setNumberFormat('mm/dd/yyyy hh:mm');  // Last Updated (U)
+  sheet.getRange(2, 24, 500, 1).setNumberFormat('mm/dd/yyyy');  // Schedule Effective (X)
 
   // Add conditional formatting for Status column
   addJobTrackingConditionalFormatting(sheet);
@@ -285,8 +316,8 @@ function setupJobTrackingSheet() {
   // Freeze header row
   sheet.setFrozenRows(1);
 
-  // Add filter
-  sheet.getRange(1, 1, 1, 10).createFilter();  // Only filter visible columns
+  // Add filter for visible columns A-U (21 columns)
+  sheet.getRange(1, 1, 1, 21).createFilter();
 
   // Populate with current crews from Employees sheet
   populateJobTrackingFromEmployees(sheet);
@@ -296,13 +327,320 @@ function setupJobTrackingSheet() {
     'The Job Tracking sheet has been set up.\n\n' +
     'Key Features:\n' +
     '• Start Date - When a job becomes active\n' +
+    '• Put On Hold Date & Estimated Return - For On Hold jobs\n' +
     '• Est. End Date - Projected completion date\n' +
     '• Status - Active, Pending Start, Completed, On Hold\n' +
-    '• Schedule History - Tracked in hidden columns for compliance\n\n' +
+    '• Skip Day Checkboxes (L-R) - For Safety Compliance tracking\n' +
+    '• Skip Weekly Meeting/Monthly Checklist (S-T)\n' +
+    '• Default: Mon-Thu schedule (Sun/Fri/Sat skipped)\n\n' +
     'Jobs with "Pending Start" status will not have employees assigned yet.\n' +
     'Use "Mark Job Complete" to close out finished jobs.',
     ui.ButtonSet.OK
   );
+}
+
+/**
+ * Migrates existing Job Tracking sheet to add "Put On Hold Date" and "Estimated Return" columns.
+ * Inserts two new columns after Start Date (E), shifting existing columns F-N to the right.
+ *
+ * Old structure: A=Job#, B=Location, C=Foreman, D=Size, E=Start, F=Est.End, G=Actual End, H=Status, I=Notes, J=Updated, K-N=Hidden
+ * New structure: A=Job#, B=Location, C=Foreman, D=Size, E=Start, F=OnHold, G=Return, H=Est.End, I=Actual End, J=Status, K=Notes, L=Updated, M-P=Hidden
+ *
+ * Called from: Glove Manager → 🔧 Utilities → Migrate Job Tracking Sheet
+ */
+function migrateJobTrackingSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+
+  var sheet = ss.getSheetByName('Job Tracking');
+  if (!sheet) {
+    ui.alert('❌ Not Found', 'Job Tracking sheet not found.\n\nRun "Setup Job Tracking Sheet" first.', ui.ButtonSet.OK);
+    return;
+  }
+
+  // Check if migration is needed by looking at headers
+  var headers = sheet.getRange(1, 1, 1, 16).getValues()[0];
+  var header6 = String(headers[5] || '').trim().toLowerCase();
+
+  // If column F is already "Put On Hold Date", migration is done
+  if (header6 === 'put on hold date') {
+    ui.alert('ℹ️ Already Migrated', 'The Job Tracking sheet already has the "Put On Hold Date" and "Estimated Return" columns.', ui.ButtonSet.OK);
+    return;
+  }
+
+  // Confirm migration
+  var confirmResponse = ui.alert(
+    '⚠️ Migrate Job Tracking Sheet',
+    'This will add two new columns to the Job Tracking sheet:\n\n' +
+    '• "Put On Hold Date" (column F)\n' +
+    '• "Estimated Return" (column G)\n\n' +
+    'These columns will be used when jobs have Status = "On Hold".\n\n' +
+    'Existing data will be preserved and shifted to the right.\n\n' +
+    'Continue with migration?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (confirmResponse !== ui.Button.YES) {
+    return;
+  }
+
+  try {
+    // Insert 2 new columns after column E (Start Date)
+    // This will shift columns F and beyond to the right
+    sheet.insertColumnsAfter(5, 2);
+
+    // Set the new headers
+    sheet.getRange(1, 6).setValue('Put On Hold Date');
+    sheet.getRange(1, 7).setValue('Estimated Return');
+
+    // Format header style for new columns
+    var newHeaderRange = sheet.getRange(1, 6, 1, 2);
+    newHeaderRange.setBackground('#1565c0');
+    newHeaderRange.setFontColor('#ffffff');
+    newHeaderRange.setFontWeight('bold');
+    newHeaderRange.setHorizontalAlignment('center');
+
+    // Set column widths
+    sheet.setColumnWidth(6, 120);  // Put On Hold Date
+    sheet.setColumnWidth(7, 120);  // Estimated Return
+
+    // Format as dates
+    var lastRow = Math.max(sheet.getLastRow(), 500);
+    sheet.getRange(2, 6, lastRow - 1, 2).setNumberFormat('mm/dd/yyyy');
+
+    // Update conditional formatting to use new column J for Status
+    addJobTrackingConditionalFormatting(sheet);
+
+    // Update data validation for Status column (now column J = 10)
+    var statusValues = ['Active', 'Pending Start', 'Completed', 'On Hold'];
+    var statusRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(statusValues, true)
+      .setAllowInvalid(false)
+      .build();
+    sheet.getRange(2, 10, 500, 1).setDataValidation(statusRule);
+
+    // Update data validation for Work Schedule column (now column M = 13)
+    var scheduleValues = ['Mon-Thu', 'Tue-Fri', 'Mon-Fri', 'Custom'];
+    var scheduleRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(scheduleValues, true)
+      .setAllowInvalid(true)
+      .build();
+    sheet.getRange(2, 13, 500, 1).setDataValidation(scheduleRule);
+
+    // Hide schedule columns (M-P = columns 13-16)
+    sheet.hideColumns(13, 4);
+
+    // Update the filter to include new columns
+    var existingFilter = sheet.getFilter();
+    if (existingFilter) {
+      existingFilter.remove();
+    }
+    sheet.getRange(1, 1, 1, 12).createFilter();  // Filter visible columns A-L
+
+    ui.alert(
+      '✅ Migration Complete',
+      'The Job Tracking sheet has been updated with:\n\n' +
+      '• "Put On Hold Date" column (F)\n' +
+      '• "Estimated Return" column (G)\n\n' +
+      'When a job status is set to "On Hold", you can now track:\n' +
+      '• When it was put on hold\n' +
+      '• When it\'s expected to return\n\n' +
+      'All existing data has been preserved.',
+      ui.ButtonSet.OK
+    );
+
+  } catch (e) {
+    ui.alert('❌ Migration Error', 'Error during migration:\n\n' + e.toString(), ui.ButtonSet.OK);
+    Logger.log('migrateJobTrackingSheet error: ' + e.toString());
+  }
+}
+
+/**
+ * Migrates existing Job Tracking sheet to add 9 visible schedule columns (L-T) for Safety Compliance.
+ * Also shifts hidden columns from M-P to V-Y.
+ *
+ * OLD STRUCTURE (12 visible + 4 hidden = 16 cols):
+ *   A-K: Job Number through Notes
+ *   L: Last Updated
+ *   M-P: Hidden (Work Schedule, Skip Days, Schedule Effective, Schedule History)
+ *
+ * NEW STRUCTURE (21 visible + 4 hidden = 25 cols):
+ *   A-K: Job Number through Notes (unchanged)
+ *   L-R: Skip Sun, Skip Mon, Skip Tue, Skip Wed, Skip Thu, Skip Fri, Skip Sat (NEW checkboxes)
+ *   S-T: Skip Weekly Meeting, Skip Monthly Checklist (NEW checkboxes)
+ *   U: Last Updated (moved from L)
+ *   V-Y: Hidden (Work Schedule, Skip Days, Schedule Effective, Schedule History) (moved from M-P)
+ *
+ * Called from: Glove Manager → 🔧 Maintenance → Migrate Job Tracking for Compliance
+ */
+function migrateJobTrackingForComplianceConfig() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+
+  var sheet = ss.getSheetByName('Job Tracking');
+  if (!sheet) {
+    ui.alert('❌ Not Found', 'Job Tracking sheet not found.\n\nRun "Setup Job Tracking Sheet" first.', ui.ButtonSet.OK);
+    return;
+  }
+
+  // Check if migration is needed by looking at headers
+  var headers = sheet.getRange(1, 1, 1, 25).getValues()[0];
+  var header12 = String(headers[11] || '').trim().toLowerCase();
+
+  // If column L is already "Skip Sun", migration is done
+  if (header12 === 'skip sun') {
+    ui.alert('ℹ️ Already Migrated', 'The Job Tracking sheet already has the Schedule Compliance columns (L-T).', ui.ButtonSet.OK);
+    return;
+  }
+
+  // Confirm migration
+  var confirmResponse = ui.alert(
+    '⚠️ Migrate Job Tracking for Compliance Config',
+    'This will add 9 new columns to the Job Tracking sheet for Safety Compliance tracking:\n\n' +
+    '• Skip Sun, Skip Mon, Skip Tue, Skip Wed, Skip Thu, Skip Fri, Skip Sat (L-R)\n' +
+    '• Skip Weekly Meeting, Skip Monthly Checklist (S-T)\n\n' +
+    'Default schedule: Mon-Thu (Sun, Fri, Sat will be checked)\n\n' +
+    'This replaces the need for the separate "Safety Compliance Config" sheet.\n\n' +
+    'Continue with migration?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (confirmResponse !== ui.Button.YES) {
+    return;
+  }
+
+  try {
+    // First, save any data from the old hidden columns (M-P = 13-16)
+    var lastRow = sheet.getLastRow();
+    var oldHiddenData = [];
+    if (lastRow > 1) {
+      // Check if old hidden columns exist (column M = 13)
+      var maxCol = sheet.getLastColumn();
+      if (maxCol >= 16) {
+        oldHiddenData = sheet.getRange(2, 13, lastRow - 1, 4).getValues();
+      }
+    }
+
+    // Insert 9 new columns after K (Notes = column 11)
+    // This shifts everything from L onwards to the right
+    sheet.insertColumnsAfter(11, 9);
+
+    // Set new headers for columns L-T (12-20)
+    var newHeaders = [
+      'Skip Sun',             // L (12)
+      'Skip Mon',             // M (13)
+      'Skip Tue',             // N (14)
+      'Skip Wed',             // O (15)
+      'Skip Thu',             // P (16)
+      'Skip Fri',             // Q (17)
+      'Skip Sat',             // R (18)
+      'Skip Weekly Meeting',  // S (19)
+      'Skip Monthly Checklist' // T (20)
+    ];
+    sheet.getRange(1, 12, 1, 9).setValues([newHeaders]);
+
+    // Format new header cells
+    var newHeaderRange = sheet.getRange(1, 12, 1, 9);
+    newHeaderRange.setBackground('#1565c0');
+    newHeaderRange.setFontColor('#ffffff');
+    newHeaderRange.setFontWeight('bold');
+    newHeaderRange.setHorizontalAlignment('center');
+
+    // Set column widths for new columns
+    for (var col = 12; col <= 18; col++) {
+      sheet.setColumnWidth(col, 70);  // Skip day columns
+    }
+    sheet.setColumnWidth(19, 100);  // Skip Weekly Meeting
+    sheet.setColumnWidth(20, 120);  // Skip Monthly Checklist
+
+    // Add checkboxes for the new columns
+    if (lastRow > 1) {
+      sheet.getRange(2, 12, lastRow - 1, 9).insertCheckboxes();
+
+      // Set default values: Sun (L), Fri (Q), Sat (R) = checked (Mon-Thu schedule)
+      var defaultSkipDays = [];
+      for (var r = 0; r < lastRow - 1; r++) {
+        defaultSkipDays.push([
+          true,   // Skip Sun (L)
+          false,  // Skip Mon (M)
+          false,  // Skip Tue (N)
+          false,  // Skip Wed (O)
+          false,  // Skip Thu (P)
+          true,   // Skip Fri (Q)
+          true,   // Skip Sat (R)
+          false,  // Skip Weekly Meeting (S)
+          false   // Skip Monthly Checklist (T)
+        ]);
+      }
+      sheet.getRange(2, 12, lastRow - 1, 9).setValues(defaultSkipDays);
+    }
+
+    // Columns have now shifted:
+    // Old L (Last Updated, was col 12) is now U (col 21)
+    // Old M-P (hidden, were cols 13-16) are now V-Y (cols 22-25)
+
+    // Update Last Updated header (now column U = 21)
+    sheet.getRange(1, 21).setValue('Last Updated');
+
+    // Update hidden column headers (now V-Y = 22-25)
+    sheet.getRange(1, 22, 1, 4).setValues([['Work Schedule', 'Skip Days', 'Schedule Effective', 'Schedule History']]);
+
+    // Format hidden column headers
+    var hiddenHeaderRange = sheet.getRange(1, 22, 1, 4);
+    hiddenHeaderRange.setBackground('#1565c0');
+    hiddenHeaderRange.setFontColor('#ffffff');
+    hiddenHeaderRange.setFontWeight('bold');
+    hiddenHeaderRange.setHorizontalAlignment('center');
+
+    // Set column widths for shifted columns
+    sheet.setColumnWidth(21, 140); // Last Updated
+    sheet.setColumnWidth(22, 100); // Work Schedule
+    sheet.setColumnWidth(23, 120); // Skip Days
+    sheet.setColumnWidth(24, 130); // Schedule Effective
+    sheet.setColumnWidth(25, 200); // Schedule History
+
+    // Hide the schedule history columns (V-Y = 22-25)
+    sheet.hideColumns(22, 4);
+
+    // Add data validation for Work Schedule column (V = 22)
+    var scheduleValues = ['Mon-Thu', 'Tue-Fri', 'Mon-Fri', 'Custom'];
+    var scheduleRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(scheduleValues, true)
+      .setAllowInvalid(true)
+      .build();
+    sheet.getRange(2, 22, 500, 1).setDataValidation(scheduleRule);
+
+    // Format date columns
+    sheet.getRange(2, 21, 500, 1).setNumberFormat('mm/dd/yyyy hh:mm');  // Last Updated (U)
+    sheet.getRange(2, 24, 500, 1).setNumberFormat('mm/dd/yyyy');  // Schedule Effective (X)
+
+    // Update conditional formatting to span all 21 visible columns
+    addJobTrackingConditionalFormatting(sheet);
+
+    // Update filter
+    var existingFilter = sheet.getFilter();
+    if (existingFilter) {
+      existingFilter.remove();
+    }
+    sheet.getRange(1, 1, 1, 21).createFilter();  // Filter visible columns A-U
+
+    ui.alert(
+      '✅ Migration Complete',
+      'The Job Tracking sheet has been updated with Safety Compliance columns:\n\n' +
+      '• Skip Sun through Skip Sat (columns L-R) - checkboxes\n' +
+      '• Skip Weekly Meeting, Skip Monthly Checklist (S-T) - checkboxes\n\n' +
+      'Default schedule set to Mon-Thu (Sun, Fri, Sat are checked to skip).\n\n' +
+      'You can now manage crew schedules directly in Job Tracking.\n' +
+      'The separate "Safety Compliance Config" sheet is no longer needed.',
+      ui.ButtonSet.OK
+    );
+
+    Logger.log('migrateJobTrackingForComplianceConfig: Migration complete for ' + (lastRow - 1) + ' crews');
+
+  } catch (e) {
+    ui.alert('❌ Migration Error', 'Error during migration:\n\n' + e.toString(), ui.ButtonSet.OK);
+    Logger.log('migrateJobTrackingForComplianceConfig error: ' + e.toString());
+  }
 }
 
 /**
@@ -344,15 +682,15 @@ function addJobTrackingConditionalFormatting(sheet) {
 
   // Define the range for conditional formatting (entire data rows)
   var lastRow = Math.max(sheet.getLastRow(), 500);
-  var numCols = 10; // All columns A-J
+  var numCols = 21; // All visible columns A-U
   var range = sheet.getRange(2, 1, lastRow - 1, numCols);
 
-  // Status column is H (column 8)
-  // Formula references $H2 to check status for each row
+  // Status column is J (column 10)
+  // Formula references $J2 to check status for each row
 
   // Rule 1: Completed = Grey (#e0e0e0)
   var completedRule = SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=$H2="Completed"')
+    .whenFormulaSatisfied('=$J2="Completed"')
     .setBackground('#e0e0e0')
     .setFontColor('#757575')
     .setRanges([range])
@@ -361,7 +699,7 @@ function addJobTrackingConditionalFormatting(sheet) {
 
   // Rule 2: Active = Light Green (#c8e6c9)
   var activeRule = SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=$H2="Active"')
+    .whenFormulaSatisfied('=$J2="Active"')
     .setBackground('#c8e6c9')
     .setRanges([range])
     .build();
@@ -369,7 +707,7 @@ function addJobTrackingConditionalFormatting(sheet) {
 
   // Rule 3: Pending Start = Light Yellow (#fff9c4)
   var pendingRule = SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=$H2="Pending Start"')
+    .whenFormulaSatisfied('=$J2="Pending Start"')
     .setBackground('#fff9c4')
     .setRanges([range])
     .build();
@@ -377,7 +715,7 @@ function addJobTrackingConditionalFormatting(sheet) {
 
   // Rule 4: On Hold = Light Orange (#ffe0b2)
   var onHoldRule = SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=$H2="On Hold"')
+    .whenFormulaSatisfied('=$J2="On Hold"')
     .setBackground('#ffe0b2')
     .setRanges([range])
     .build();
@@ -411,6 +749,315 @@ function menuApplyJobTrackingFormatting() {
     '🟠 On Hold = Orange\n' +
     '⚫ Completed = Grey',
     ui.ButtonSet.OK);
+}
+
+/**
+ * Refreshes the Foreman column in Job Tracking sheet by determining the crew lead
+ * for each job from the Employees sheet using the classification hierarchy.
+ *
+ * Called from: Glove Manager → 📥 Import Crew Makeup → 🔧 Utilities → 🔄 Refresh Job Tracking Foremen
+ */
+function refreshJobTrackingForemen() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+
+  var jobSheet = ss.getSheetByName('Job Tracking');
+  if (!jobSheet) {
+    ui.alert('❌ Error', 'Job Tracking sheet not found.\n\nRun "Setup Job Tracking Sheet" first.', ui.ButtonSet.OK);
+    return;
+  }
+
+  var employeesSheet = ss.getSheetByName('Employees');
+  if (!employeesSheet) {
+    ui.alert('❌ Error', 'Employees sheet not found!', ui.ButtonSet.OK);
+    return;
+  }
+
+  // Get Job Tracking data
+  var jobData = jobSheet.getDataRange().getValues();
+
+  // Get Employees data
+  var empData = employeesSheet.getDataRange().getValues();
+  var empHeaders = empData[0];
+
+  // Find employee columns
+  var nameCol = -1, jobNumCol = -1, classificationCol = -1, lastDayCol = -1;
+  for (var h = 0; h < empHeaders.length; h++) {
+    var header = String(empHeaders[h]).toLowerCase().trim();
+    if (header === 'name') nameCol = h;
+    if (header === 'job number') jobNumCol = h;
+    if (header === 'job classification') classificationCol = h;
+    if (header === 'last day') lastDayCol = h;
+  }
+
+  if (nameCol === -1 || jobNumCol === -1) {
+    ui.alert('❌ Error', 'Could not find Name or Job Number columns in Employees sheet!', ui.ButtonSet.OK);
+    return;
+  }
+
+  // Classification hierarchy (lower number = higher priority)
+  var classificationPriority = {
+    'F': 1,        // Foreman - Primary crew lead
+    'GTO F': 2,    // Gas Tech Operator - Foreman
+    'GF': 3,       // General Foreman
+    'SUP': 4,      // Superintendent
+    'JRY': 5,      // Journeyman Lineman
+    'JRY OP': 6,   // Journeyman Operator
+    'WT': 7,       // Working Technician
+    'GTO': 8,      // Gas Tech Operator
+    'EO 1': 9,     // Equipment Operator 1
+    'EO 2': 10,    // Equipment Operator 2
+    'AP 7': 11,    // 7th Year Apprentice (most senior apprentice)
+    'AP 6': 12,
+    'AP 5': 13,
+    'AP 4': 14,
+    'AP 3': 15,
+    'AP 2': 16,
+    'AP 1': 17     // 1st Year Apprentice (least senior)
+  };
+
+  // Build crew lead map from Employees
+  var crewLeadMap = {}; // { crewNumber: { name, priority } }
+
+  for (var i = 1; i < empData.length; i++) {
+    var row = empData[i];
+    var name = String(row[nameCol] || '').trim();
+    var jobNumber = String(row[jobNumCol] || '').trim();
+    var classification = classificationCol !== -1 ? String(row[classificationCol] || '').trim() : '';
+    var lastDay = lastDayCol !== -1 ? row[lastDayCol] : '';
+
+    if (!name || !jobNumber || lastDay) continue;
+
+    // Extract crew number (e.g., "013-26.1" → "013-26")
+    var crewNumber = jobNumber;
+    var dotIndex = jobNumber.lastIndexOf('.');
+    if (dotIndex !== -1) {
+      crewNumber = jobNumber.substring(0, dotIndex);
+    }
+
+    if (!/^\d{3}-\d{2}$/.test(crewNumber)) continue;
+
+    var priority = classificationPriority[classification] || 999;
+
+    if (!crewLeadMap[crewNumber] || priority < crewLeadMap[crewNumber].priority) {
+      crewLeadMap[crewNumber] = { name: name, priority: priority, classification: classification };
+    }
+  }
+
+  // Update Job Tracking foreman column
+  var updatedCount = 0;
+  var changedJobs = [];
+
+  for (var j = 1; j < jobData.length; j++) {
+    var jobNum = String(jobData[j][0] || '').trim();
+    var currentForeman = String(jobData[j][2] || '').trim();  // Foreman is column C (index 2)
+
+    if (!jobNum) continue;
+
+    var crewLead = crewLeadMap[jobNum];
+    if (crewLead && crewLead.name !== currentForeman) {
+      jobSheet.getRange(j + 1, 3).setValue(crewLead.name);  // Column C = Foreman
+      changedJobs.push(jobNum + ': ' + (currentForeman || '(none)') + ' → ' + crewLead.name + ' (' + crewLead.classification + ')');
+      updatedCount++;
+    }
+  }
+
+  if (updatedCount === 0) {
+    ui.alert('ℹ️ No Changes', 'All Job Tracking foremen are already correct.', ui.ButtonSet.OK);
+  } else {
+    var message = '✅ Updated ' + updatedCount + ' foreman(s):\n\n';
+    message += changedJobs.slice(0, 10).join('\n');
+    if (changedJobs.length > 10) {
+      message += '\n... and ' + (changedJobs.length - 10) + ' more';
+    }
+    ui.alert('✅ Foremen Updated', message, ui.ButtonSet.OK);
+  }
+
+  Logger.log('refreshJobTrackingForemen: Updated ' + updatedCount + ' foremen: ' + changedJobs.join(', '));
+}
+
+/**
+ * Silent version of refreshJobTrackingForemen for batch operations.
+ * Returns result object instead of showing alerts.
+ *
+ * Called from: generateAllReports()
+ * @return {Object} { updatedCount, changedJobs }
+ */
+function refreshJobTrackingForemenSilent() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  var jobSheet = ss.getSheetByName('Job Tracking');
+  if (!jobSheet) {
+    return { updatedCount: 0, changedJobs: [], error: 'Job Tracking sheet not found' };
+  }
+
+  var employeesSheet = ss.getSheetByName('Employees');
+  if (!employeesSheet) {
+    return { updatedCount: 0, changedJobs: [], error: 'Employees sheet not found' };
+  }
+
+  // Get Job Tracking data
+  var jobData = jobSheet.getDataRange().getValues();
+
+  // Get Employees data
+  var empData = employeesSheet.getDataRange().getValues();
+  var empHeaders = empData[0];
+
+  // Find employee columns
+  var nameCol = -1, jobNumCol = -1, classificationCol = -1, lastDayCol = -1;
+  for (var h = 0; h < empHeaders.length; h++) {
+    var header = String(empHeaders[h]).toLowerCase().trim();
+    if (header === 'name') nameCol = h;
+    if (header === 'job number') jobNumCol = h;
+    if (header === 'job classification') classificationCol = h;
+    if (header === 'last day') lastDayCol = h;
+  }
+
+  if (nameCol === -1 || jobNumCol === -1) {
+    return { updatedCount: 0, changedJobs: [], error: 'Could not find Name or Job Number columns' };
+  }
+
+  // Classification hierarchy (lower number = higher priority)
+  var classificationPriority = {
+    'F': 1, 'GTO F': 2, 'GF': 3, 'SUP': 4, 'JRY': 5, 'JRY OP': 6,
+    'WT': 7, 'GTO': 8, 'EO 1': 9, 'EO 2': 10,
+    'AP 7': 11, 'AP 6': 12, 'AP 5': 13, 'AP 4': 14, 'AP 3': 15, 'AP 2': 16, 'AP 1': 17
+  };
+
+  // Build crew lead map from Employees
+  var crewLeadMap = {};
+
+  for (var i = 1; i < empData.length; i++) {
+    var row = empData[i];
+    var name = String(row[nameCol] || '').trim();
+    var jobNumber = String(row[jobNumCol] || '').trim();
+    var classification = classificationCol !== -1 ? String(row[classificationCol] || '').trim() : '';
+    var lastDay = lastDayCol !== -1 ? row[lastDayCol] : '';
+
+    if (!name || !jobNumber || lastDay) continue;
+
+    var crewNumber = jobNumber;
+    var dotIndex = jobNumber.lastIndexOf('.');
+    if (dotIndex !== -1) {
+      crewNumber = jobNumber.substring(0, dotIndex);
+    }
+
+    if (!/^\d{3}-\d{2}$/.test(crewNumber)) continue;
+
+    var priority = classificationPriority[classification] || 999;
+
+    if (!crewLeadMap[crewNumber] || priority < crewLeadMap[crewNumber].priority) {
+      crewLeadMap[crewNumber] = { name: name, priority: priority, classification: classification };
+    }
+  }
+
+  // Update Job Tracking foreman column
+  var updatedCount = 0;
+  var changedJobs = [];
+
+  for (var j = 1; j < jobData.length; j++) {
+    var jobNum = String(jobData[j][0] || '').trim();
+    var currentForeman = String(jobData[j][2] || '').trim();
+
+    if (!jobNum) continue;
+
+    var crewLead = crewLeadMap[jobNum];
+    if (crewLead && crewLead.name !== currentForeman) {
+      jobSheet.getRange(j + 1, 3).setValue(crewLead.name);
+      changedJobs.push(jobNum + ': ' + crewLead.name);
+      updatedCount++;
+    }
+  }
+
+  Logger.log('refreshJobTrackingForemenSilent: Updated ' + updatedCount + ' foremen');
+  return { updatedCount: updatedCount, changedJobs: changedJobs };
+}
+
+/**
+ * Updates the Location column data validation on the Employees sheet to include new locations.
+ * This ensures that when Crew Import tries to assign employees to new locations, it won't fail.
+ *
+ * Called from: Glove Manager → 🔧 Maintenance → 🔧 Employees → 📍 Update Location Validation
+ */
+function updateEmployeesLocationValidation() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+
+  var employeesSheet = ss.getSheetByName('Employees');
+  if (!employeesSheet) {
+    ui.alert('❌ Error', 'Employees sheet not found!', ui.ButtonSet.OK);
+    return;
+  }
+
+  // Complete list of valid locations (including new ones)
+  var validLocations = [
+    'Anaconda',
+    'Anaconda City Sub',
+    'Big Sky',
+    'Billings',
+    'Bozeman',
+    'Butte',
+    'CA Sub',
+    'California',
+    'Elliston',
+    'Ennis',
+    'Glendive',
+    'Gold Creek',
+    'Great Falls',
+    'Helena',
+    'Kalispell',
+    'Leave',
+    'Light Duty',
+    'Livingston',
+    'Lolo',
+    'Miles City',
+    'Missoula',
+    'Northern Lights',
+    'Rapelje',
+    'Rattlesnake Sub',
+    'Sidney',
+    'South Dakota',
+    'South Dakota Dock',
+    'Stanford',
+    'Texas',
+    'Three Rivers Sub',
+    'Vacation',
+    'Weeds',
+    'Previous Employee'
+  ].sort();
+
+  // Find the Location column
+  var headers = employeesSheet.getRange(1, 1, 1, employeesSheet.getLastColumn()).getValues()[0];
+  var locationCol = -1;
+  for (var h = 0; h < headers.length; h++) {
+    if (String(headers[h]).toLowerCase().trim() === 'location') {
+      locationCol = h + 1;  // 1-based column number
+      break;
+    }
+  }
+
+  if (locationCol === -1) {
+    ui.alert('❌ Error', 'Location column not found in Employees sheet!', ui.ButtonSet.OK);
+    return;
+  }
+
+  // Create the new validation rule
+  var rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(validLocations, true)
+    .setAllowInvalid(false)
+    .build();
+
+  // Apply to the Location column (from row 2 to 500)
+  var lastRow = Math.max(employeesSheet.getLastRow(), 500);
+  employeesSheet.getRange(2, locationCol, lastRow - 1, 1).setDataValidation(rule);
+
+  ui.alert('✅ Location Validation Updated',
+    'The Location column now accepts the following ' + validLocations.length + ' locations:\n\n' +
+    validLocations.slice(0, 15).join(', ') + '...\n\n' +
+    'New locations added:\n• Anaconda City Sub\n• Rattlesnake Sub\n• Texas\n• Three Rivers Sub',
+    ui.ButtonSet.OK);
+
+  Logger.log('updateEmployeesLocationValidation: Applied validation with ' + validLocations.length + ' locations');
 }
 
 /**
@@ -490,7 +1137,7 @@ function populateJobTrackingFromEmployees(sheet) {
     }
 
     // Check if this employee is a foreman (using classification hierarchy)
-    if (classification === 'F' || classification === 'GTO F' || classification === 'GF') {
+    if (classification === 'F' || classification === 'GTO F' || classification === 'GF' || classification === 'SUP') {
       crewMap[crewNumber].foreman = name;
     }
   }
@@ -527,21 +1174,32 @@ function populateJobTrackingFromEmployees(sheet) {
     var crew = crewMap[crewNum];
 
     dataRows.push([
-      crewNum,                    // Job Number
-      crew.location || 'Unknown', // Location
-      crew.foreman || '',         // Foreman
-      crew.crewSize,              // Crew Size
-      '',                         // Start Date (to be filled in)
-      '',                         // Est. End Date (to be filled in)
-      '',                         // Actual End Date
-      'Active',                   // Status (default to Active for existing crews)
-      '',                         // Notes
-      timestamp                   // Last Updated
+      crewNum,                    // Job Number (A)
+      crew.location || 'Unknown', // Location (B)
+      crew.foreman || '',         // Foreman (C)
+      crew.crewSize,              // Crew Size (D)
+      '',                         // Start Date (E) - to be filled in
+      '',                         // Put On Hold Date (F)
+      '',                         // Estimated Return (G)
+      '',                         // Est. End Date (H) - to be filled in
+      '',                         // Actual End Date (I)
+      'Active',                   // Status (J) - default to Active for existing crews
+      '',                         // Notes (K)
+      true,                       // Skip Sun (L) - DEFAULT CHECKED (Mon-Thu schedule)
+      false,                      // Skip Mon (M)
+      false,                      // Skip Tue (N)
+      false,                      // Skip Wed (O)
+      false,                      // Skip Thu (P)
+      true,                       // Skip Fri (Q) - DEFAULT CHECKED (Mon-Thu schedule)
+      true,                       // Skip Sat (R) - DEFAULT CHECKED (Mon-Thu schedule)
+      false,                      // Skip Weekly Meeting (S)
+      false,                      // Skip Monthly Checklist (T)
+      timestamp                   // Last Updated (U)
     ]);
   }
 
   if (dataRows.length > 0) {
-    sheet.getRange(2, 1, dataRows.length, 10).setValues(dataRows);
+    sheet.getRange(2, 1, dataRows.length, 21).setValues(dataRows);
     Logger.log('populateJobTrackingFromEmployees: Added ' + dataRows.length + ' crews');
   }
 }
@@ -574,6 +1232,9 @@ function refreshJobTrackingFromEmployees() {
   var jobHeaders = jobData[0];
 
   // Build existing jobs map
+  // Columns: A=Job Number(0), B=Location(1), C=Foreman(2), D=Crew Size(3), E=Start Date(4),
+  //          F=Put On Hold Date(5), G=Estimated Return(6), H=Est. End Date(7), I=Actual End Date(8),
+  //          J=Status(9), K=Notes(10), L-R=Skip Days(11-17), S-T=Skip Flags(18-19), U=Last Updated(20)
   var existingJobs = {};
   for (var j = 1; j < jobData.length; j++) {
     var jobNum = String(jobData[j][0] || '').trim();
@@ -581,10 +1242,12 @@ function refreshJobTrackingFromEmployees() {
       existingJobs[jobNum] = {
         rowIndex: j + 1,
         startDate: jobData[j][4],
-        estEndDate: jobData[j][5],
-        actualEndDate: jobData[j][6],
-        status: jobData[j][7] || 'Active',
-        notes: jobData[j][8] || ''
+        putOnHoldDate: jobData[j][5],
+        estimatedReturn: jobData[j][6],
+        estEndDate: jobData[j][7],
+        actualEndDate: jobData[j][8],
+        status: jobData[j][9] || 'Active',
+        notes: jobData[j][10] || ''
       };
     }
   }
@@ -645,7 +1308,7 @@ function refreshJobTrackingFromEmployees() {
       crewMap[crewNumber].location = location;
     }
 
-    if (classification === 'F' || classification === 'GTO F' || classification === 'GF') {
+    if (classification === 'F' || classification === 'GTO F' || classification === 'GF' || classification === 'SUP') {
       crewMap[crewNumber].foreman = name;
     }
   }
@@ -668,26 +1331,37 @@ function refreshJobTrackingFromEmployees() {
       var existing = existingJobs[crewNum];
       var rowIdx = existing.rowIndex;
 
-      jobSheet.getRange(rowIdx, 2).setValue(crew.location || 'Unknown');  // Location
-      jobSheet.getRange(rowIdx, 3).setValue(crew.foreman || '');          // Foreman
-      jobSheet.getRange(rowIdx, 4).setValue(crew.crewSize);               // Crew Size
-      jobSheet.getRange(rowIdx, 10).setValue(timestamp);                  // Last Updated
+      jobSheet.getRange(rowIdx, 2).setValue(crew.location || 'Unknown');  // Location (B)
+      jobSheet.getRange(rowIdx, 3).setValue(crew.foreman || '');          // Foreman (C)
+      jobSheet.getRange(rowIdx, 4).setValue(crew.crewSize);               // Crew Size (D)
+      jobSheet.getRange(rowIdx, 21).setValue(timestamp);                  // Last Updated (U)
 
       updatedCount++;
       delete existingJobs[crewNum]; // Mark as processed
     } else {
-      // New crew
+      // New crew - 21 columns (A-U)
       newRows.push([
-        crewNum,
-        crew.location || 'Unknown',
-        crew.foreman || '',
-        crew.crewSize,
-        '',           // Start Date
-        '',           // Est. End Date
-        '',           // Actual End Date
-        'Active',     // Status
-        'New crew added ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy'),
-        timestamp
+        crewNum,                    // Job Number (A)
+        crew.location || 'Unknown', // Location (B)
+        crew.foreman || '',         // Foreman (C)
+        crew.crewSize,              // Crew Size (D)
+        '',                         // Start Date (E)
+        '',                         // Put On Hold Date (F)
+        '',                         // Estimated Return (G)
+        '',                         // Est. End Date (H)
+        '',                         // Actual End Date (I)
+        'Active',                   // Status (J)
+        'New crew added ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy'), // Notes (K)
+        true,                       // Skip Sun (L) - DEFAULT Mon-Thu
+        false,                      // Skip Mon (M)
+        false,                      // Skip Tue (N)
+        false,                      // Skip Wed (O)
+        false,                      // Skip Thu (P)
+        true,                       // Skip Fri (Q) - DEFAULT Mon-Thu
+        true,                       // Skip Sat (R) - DEFAULT Mon-Thu
+        false,                      // Skip Weekly Meeting (S)
+        false,                      // Skip Monthly Checklist (T)
+        timestamp                   // Last Updated (U)
       ]);
       addedCount++;
     }
@@ -701,7 +1375,7 @@ function refreshJobTrackingFromEmployees() {
       var currentNotes = oldData.notes || '';
       var noEmpNote = 'No active employees as of ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy');
       if (currentNotes.indexOf('No active employees') === -1) {
-        jobSheet.getRange(oldData.rowIndex, 9).setValue(currentNotes ? currentNotes + '; ' + noEmpNote : noEmpNote);
+        jobSheet.getRange(oldData.rowIndex, 11).setValue(currentNotes ? currentNotes + '; ' + noEmpNote : noEmpNote);  // Notes (K)
       }
       noEmployeesCount++;
     }
@@ -710,7 +1384,9 @@ function refreshJobTrackingFromEmployees() {
   // Add new rows
   if (newRows.length > 0) {
     var lastRow = jobSheet.getLastRow();
-    jobSheet.getRange(lastRow + 1, 1, newRows.length, 10).setValues(newRows);
+    jobSheet.getRange(lastRow + 1, 1, newRows.length, 21).setValues(newRows);
+    // Add checkboxes for skip day columns (L-T = cols 12-20) on new rows
+    jobSheet.getRange(lastRow + 1, 12, newRows.length, 9).insertCheckboxes();
   }
 
   ui.alert(
@@ -721,6 +1397,314 @@ function refreshJobTrackingFromEmployees() {
     (noEmployeesCount > 0 ? '• ⚠️ ' + noEmployeesCount + ' jobs have no active employees\n  (Review and mark as Completed if appropriate)' : ''),
     ui.ButtonSet.OK
   );
+}
+
+/**
+ * Syncs crews between Employees sheet and Job Tracking.
+ * - Auto-creates Job Tracking if missing
+ * - Updates foreman names using getCrewLead() logic (classification hierarchy + Crew Lead column)
+ * - Sets default schedule (Mon-Thu) for crews missing schedule settings
+ * - Can be called after Import Crew Makeup
+ *
+ * Called from: Quick Actions Step 2, Menu, or after Crew Import
+ *
+ * @param {boolean} silent - If true, suppresses UI alerts (for batch mode)
+ * @returns {Object} Summary of changes made
+ */
+function syncCrews(silent) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = silent ? null : SpreadsheetApp.getUi();
+
+  Logger.log('syncCrews: Starting crew sync...');
+
+  // Check if Job Tracking sheet exists
+  var jobSheet = ss.getSheetByName('Job Tracking');
+  if (!jobSheet) {
+    Logger.log('syncCrews: Job Tracking sheet not found, creating it...');
+    // Auto-create Job Tracking sheet
+    setupJobTrackingSheet();
+    jobSheet = ss.getSheetByName('Job Tracking');
+    if (!jobSheet) {
+      if (!silent) {
+        ui.alert('❌ Error', 'Could not create Job Tracking sheet.', ui.ButtonSet.OK);
+      }
+      return { success: false, error: 'Could not create Job Tracking sheet' };
+    }
+  }
+
+  // Check if the new schedule columns exist (column L should be "Skip Sun")
+  var headers = jobSheet.getRange(1, 1, 1, 25).getValues()[0];
+  var skipSunCol = headers.indexOf('Skip Sun');
+
+  if (skipSunCol === -1) {
+    // Need to run migration first
+    if (!silent) {
+      var response = ui.alert(
+        '⚠️ Migration Required',
+        'The Job Tracking sheet needs to be migrated to add Schedule Compliance columns.\n\n' +
+        'Would you like to run the migration now?',
+        ui.ButtonSet.YES_NO
+      );
+      if (response === ui.Button.YES) {
+        migrateJobTrackingForComplianceConfig();
+        // Refresh headers after migration
+        headers = jobSheet.getRange(1, 1, 1, 25).getValues()[0];
+        skipSunCol = headers.indexOf('Skip Sun');
+      } else {
+        return { success: false, error: 'Migration required but declined' };
+      }
+    } else {
+      Logger.log('syncCrews: Migration required - skipping in silent mode');
+      return { success: false, error: 'Migration required' };
+    }
+  }
+
+  // Get Employees sheet
+  var employeesSheet = ss.getSheetByName('Employees');
+  if (!employeesSheet) {
+    if (!silent) {
+      ui.alert('❌ Error', 'Employees sheet not found!', ui.ButtonSet.OK);
+    }
+    return { success: false, error: 'Employees sheet not found' };
+  }
+
+  // Read Job Tracking data
+  var jobData = jobSheet.getDataRange().getValues();
+  var jobHeaders = jobData[0];
+
+  // Find column indices - NEW STRUCTURE
+  var colIndices = {
+    jobNumber: 0,     // A
+    location: 1,      // B
+    foreman: 2,       // C
+    crewSize: 3,      // D
+    status: 9,        // J
+    skipSun: 11,      // L
+    skipMon: 12,      // M
+    skipTue: 13,      // N
+    skipWed: 14,      // O
+    skipThu: 15,      // P
+    skipFri: 16,      // Q
+    skipSat: 17,      // R
+    skipWeeklyMeeting: 18,  // S
+    skipMonthlyChecklist: 19, // T
+    lastUpdated: 20   // U
+  };
+
+  // Build existing jobs map
+  var existingJobs = {};
+  for (var j = 1; j < jobData.length; j++) {
+    var jobNum = String(jobData[j][0] || '').trim();
+    if (jobNum) {
+      existingJobs[jobNum] = {
+        rowIndex: j + 1,
+        foreman: jobData[j][colIndices.foreman] || '',
+        status: jobData[j][colIndices.status] || 'Active',
+        hasSkipDays: jobData[j][colIndices.skipSun] !== '' && jobData[j][colIndices.skipSun] !== undefined
+      };
+    }
+  }
+
+  // Read Employees sheet to build current crew data
+  var empData = employeesSheet.getDataRange().getValues();
+  var empHeaders = empData[0];
+
+  // Find employee columns
+  var nameCol = -1, jobNumCol = -1, locationCol = -1, classificationCol = -1, lastDayCol = -1, crewLeadCol = -1;
+  for (var h = 0; h < empHeaders.length; h++) {
+    var header = String(empHeaders[h]).toLowerCase().trim();
+    if (header === 'name') nameCol = h;
+    if (header === 'job number') jobNumCol = h;
+    if (header === 'location') locationCol = h;
+    if (header === 'job classification') classificationCol = h;
+    if (header === 'last day') lastDayCol = h;
+    if (header === 'crew lead') crewLeadCol = h;
+  }
+
+  if (jobNumCol === -1) {
+    if (!silent) {
+      ui.alert('❌ Error', 'Job Number column not found in Employees sheet!', ui.ButtonSet.OK);
+    }
+    return { success: false, error: 'Job Number column not found' };
+  }
+
+  // Classification hierarchy (lower number = higher priority)
+  var classificationPriority = {
+    'SUP': 1, 'GF': 2, 'F': 3, 'GTO F': 4, 'JRY': 5, 'JRY OP': 6,
+    'WT': 7, 'GTO': 8, 'EO 1': 9, 'EO 2': 10,
+    'AP 7': 11, 'AP 6': 12, 'AP 5': 13, 'AP 4': 14, 'AP 3': 15, 'AP 2': 16, 'AP 1': 17
+  };
+
+  // Build crew map from Employees
+  var crewMap = {};
+  for (var i = 1; i < empData.length; i++) {
+    var row = empData[i];
+    var jobNumber = String(row[jobNumCol] || '').trim();
+    var lastDay = lastDayCol !== -1 ? row[lastDayCol] : '';
+
+    if (!jobNumber || lastDay) continue;
+
+    // Extract crew number
+    var crewNumber = jobNumber;
+    var dotIndex = jobNumber.lastIndexOf('.');
+    if (dotIndex !== -1) {
+      crewNumber = jobNumber.substring(0, dotIndex);
+    }
+
+    // Validate format
+    if (!/^\d{3}-\d{2}$/.test(crewNumber)) continue;
+    if (crewNumber.startsWith('000-') || crewNumber.startsWith('002-')) continue;
+
+    var name = nameCol !== -1 ? String(row[nameCol] || '').trim() : '';
+    var location = locationCol !== -1 ? String(row[locationCol] || '').trim() : '';
+    var classification = classificationCol !== -1 ? String(row[classificationCol] || '').trim() : '';
+    var isManualLead = crewLeadCol !== -1 &&
+      (String(row[crewLeadCol] || '').toLowerCase() === 'yes' ||
+       String(row[crewLeadCol] || '').toLowerCase() === 'true' ||
+       row[crewLeadCol] === true);
+
+    if (!crewMap[crewNumber]) {
+      crewMap[crewNumber] = {
+        location: location,
+        foreman: '',
+        foremanPriority: 999,
+        manualLead: null,
+        crewSize: 0
+      };
+    }
+
+    crewMap[crewNumber].crewSize++;
+
+    if (!crewMap[crewNumber].location && location) {
+      crewMap[crewNumber].location = location;
+    }
+
+    // Track manual lead (highest priority)
+    if (isManualLead) {
+      crewMap[crewNumber].manualLead = name;
+    }
+
+    // Track best classification-based lead
+    var priority = classificationPriority[classification] || 999;
+    if (priority < crewMap[crewNumber].foremanPriority) {
+      crewMap[crewNumber].foremanPriority = priority;
+      crewMap[crewNumber].foreman = name;
+    }
+  }
+
+  // Finalize foreman for each crew (manual lead takes priority)
+  for (var crew in crewMap) {
+    if (crewMap[crew].manualLead) {
+      crewMap[crew].foreman = crewMap[crew].manualLead;
+    }
+  }
+
+  // Now sync to Job Tracking - track which crews we've seen
+  var timestamp = new Date();
+  var foremanUpdates = 0;
+  var scheduleDefaults = 0;
+  var processedCrews = {};
+
+  for (var crewNum in crewMap) {
+    var crew = crewMap[crewNum];
+    processedCrews[crewNum] = true;
+
+    if (existingJobs[crewNum]) {
+      // Update existing row
+      var existing = existingJobs[crewNum];
+      var rowIdx = existing.rowIndex;
+
+      // Update foreman if different
+      if (existing.foreman !== crew.foreman && crew.foreman) {
+        jobSheet.getRange(rowIdx, colIndices.foreman + 1).setValue(crew.foreman);
+        foremanUpdates++;
+        Logger.log('syncCrews: Updated foreman for ' + crewNum + ': ' + existing.foreman + ' → ' + crew.foreman);
+      }
+
+      // Set default schedule if not set (empty or undefined)
+      if (!existing.hasSkipDays) {
+        // Set Mon-Thu default: Sun=true, Mon=false, Tue=false, Wed=false, Thu=false, Fri=true, Sat=true
+        jobSheet.getRange(rowIdx, colIndices.skipSun + 1, 1, 9).setValues([[
+          true, false, false, false, false, true, true, false, false
+        ]]);
+        scheduleDefaults++;
+        Logger.log('syncCrews: Set default schedule (Mon-Thu) for ' + crewNum);
+      }
+
+      // Update Last Updated
+      jobSheet.getRange(rowIdx, colIndices.lastUpdated + 1).setValue(timestamp);
+    }
+  }
+
+  // Add new crews that weren't in Job Tracking
+  var newCrewRows = [];
+  for (var cn in crewMap) {
+    if (!existingJobs[cn]) {
+      var crewData = crewMap[cn];
+      newCrewRows.push([
+        cn,                         // Job Number (A)
+        crewData.location || 'Unknown', // Location (B)
+        crewData.foreman || '',     // Foreman (C)
+        crewData.crewSize,          // Crew Size (D)
+        '',                         // Start Date (E)
+        '',                         // Put On Hold Date (F)
+        '',                         // Estimated Return (G)
+        '',                         // Est. End Date (H)
+        '',                         // Actual End Date (I)
+        'Active',                   // Status (J)
+        'Added by syncCrews ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy'), // Notes (K)
+        true,                       // Skip Sun (L)
+        false,                      // Skip Mon (M)
+        false,                      // Skip Tue (N)
+        false,                      // Skip Wed (O)
+        false,                      // Skip Thu (P)
+        true,                       // Skip Fri (Q)
+        true,                       // Skip Sat (R)
+        false,                      // Skip Weekly Meeting (S)
+        false,                      // Skip Monthly Checklist (T)
+        timestamp                   // Last Updated (U)
+      ]);
+    }
+  }
+
+  if (newCrewRows.length > 0) {
+    var lastRow = jobSheet.getLastRow();
+    jobSheet.getRange(lastRow + 1, 1, newCrewRows.length, 21).setValues(newCrewRows);
+    // Add checkboxes for new rows
+    jobSheet.getRange(lastRow + 1, 12, newCrewRows.length, 9).insertCheckboxes();
+    Logger.log('syncCrews: Added ' + newCrewRows.length + ' new crews');
+  }
+
+  var summary = {
+    success: true,
+    foremanUpdates: foremanUpdates,
+    scheduleDefaults: scheduleDefaults,
+    newCrews: newCrewRows.length
+  };
+
+  Logger.log('syncCrews: Complete - ' + foremanUpdates + ' foreman updates, ' +
+             scheduleDefaults + ' schedule defaults, ' + newCrewRows.length + ' new crews');
+
+  if (!silent) {
+    ui.alert(
+      '✅ Crew Sync Complete',
+      'Results:\n\n' +
+      '• Foreman updates: ' + foremanUpdates + '\n' +
+      '• Schedule defaults applied: ' + scheduleDefaults + '\n' +
+      '• New crews added: ' + newCrewRows.length + '\n\n' +
+      'Job Tracking is now in sync with Employees sheet.',
+      ui.ButtonSet.OK
+    );
+  }
+
+  return summary;
+}
+
+/**
+ * Menu function for syncCrews
+ */
+function menuSyncCrews() {
+  syncCrews(false);
 }
 
 /**
@@ -774,8 +1758,8 @@ function markJobComplete() {
     return;
   }
 
-  // Check current status
-  var currentStatus = jobData[foundRow - 1][7];
+  // Check current status (Status is now column J = index 9)
+  var currentStatus = jobData[foundRow - 1][9];
   if (currentStatus === 'Completed') {
     ui.alert('ℹ️ Already Completed', 'Job "' + jobNumber + '" is already marked as Completed.', ui.ButtonSet.OK);
     return;
@@ -797,11 +1781,11 @@ function markJobComplete() {
     return;
   }
 
-  // Update the row
+  // Update the row (new column positions)
   var today = new Date();
-  jobSheet.getRange(foundRow, 7).setValue(today);       // Actual End Date
-  jobSheet.getRange(foundRow, 8).setValue('Completed'); // Status
-  jobSheet.getRange(foundRow, 10).setValue(today);      // Last Updated
+  jobSheet.getRange(foundRow, 9).setValue(today);        // Actual End Date (I)
+  jobSheet.getRange(foundRow, 10).setValue('Completed'); // Status (J)
+  jobSheet.getRange(foundRow, 21).setValue(today);       // Last Updated (U)
 
   // Auto-remove future training rows for this completed job
   var trainingRowsDeleted = autoSyncCompletedJobToTraining(jobNumber, today);
@@ -902,23 +1886,36 @@ function addFutureJob() {
   today.setHours(0, 0, 0, 0);
   var status = startDate > today ? 'Pending Start' : 'Active';
 
-  // Add to sheet
+  // Add to sheet (21 columns: A-U)
   var timestamp = new Date();
   var newRow = [
-    jobNumber,
-    location,
-    '',           // Foreman (not assigned yet)
-    0,            // Crew Size
-    startDate,    // Start Date
-    '',           // Est. End Date
-    '',           // Actual End Date
-    status,
-    'Added as future job on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy'),
-    timestamp
+    jobNumber,              // Job Number (A)
+    location,               // Location (B)
+    '',                     // Foreman (C) - not assigned yet
+    0,                      // Crew Size (D)
+    startDate,              // Start Date (E)
+    '',                     // Put On Hold Date (F)
+    '',                     // Estimated Return (G)
+    '',                     // Est. End Date (H)
+    '',                     // Actual End Date (I)
+    status,                 // Status (J)
+    'Added as future job on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy'), // Notes (K)
+    true,                   // Skip Sun (L) - DEFAULT Mon-Thu
+    false,                  // Skip Mon (M)
+    false,                  // Skip Tue (N)
+    false,                  // Skip Wed (O)
+    false,                  // Skip Thu (P)
+    true,                   // Skip Fri (Q) - DEFAULT Mon-Thu
+    true,                   // Skip Sat (R) - DEFAULT Mon-Thu
+    false,                  // Skip Weekly Meeting (S)
+    false,                  // Skip Monthly Checklist (T)
+    timestamp               // Last Updated (U)
   ];
 
   var lastRow = jobSheet.getLastRow();
-  jobSheet.getRange(lastRow + 1, 1, 1, 10).setValues([newRow]);
+  jobSheet.getRange(lastRow + 1, 1, 1, 21).setValues([newRow]);
+  // Add checkboxes for skip day columns (L-T = cols 12-20)
+  jobSheet.getRange(lastRow + 1, 12, 1, 9).insertCheckboxes();
 
   ui.alert(
     '✅ Future Job Added',
@@ -953,10 +1950,11 @@ function getActiveJobNumbers() {
   var today = new Date();
   today.setHours(0, 0, 0, 0);
 
+  // Columns: A=Job Number(0), E=Start Date(4), J=Status(9)
   for (var i = 1; i < data.length; i++) {
     var jobNum = String(data[i][0] || '').trim();
     var startDate = data[i][4];
-    var status = String(data[i][7] || '').trim();
+    var status = String(data[i][9] || '').trim();  // Status (J, index 9)
 
     if (!jobNum) continue;
 
@@ -1084,10 +2082,11 @@ function cleanupPendingTrainingForCompletedJobs() {
   var jobData = jobSheet.getDataRange().getValues();
   var completedJobs = {}; // jobNumber → true
 
-  // Job Tracking columns: A=Job Number, B=Location, C=Foreman, D=Crew Size, E=Start Date, F=Est. End Date, G=Actual End Date, H=Status
+  // Job Tracking columns: A=Job Number, B=Location, C=Foreman, D=Crew Size, E=Start Date,
+  //   F=Put On Hold Date, G=Estimated Return, H=Est. End Date, I=Actual End Date, J=Status
   for (var j = 1; j < jobData.length; j++) {
     var jobNum = String(jobData[j][0] || '').trim();
-    var status = String(jobData[j][7] || '').trim();
+    var status = String(jobData[j][9] || '').trim();  // Status is now column J (index 9)
 
     if (status === 'Completed' && jobNum) {
       completedJobs[jobNum] = true;
@@ -1225,10 +2224,12 @@ function syncCompletedJobsToTraining() {
   var jobData = jobSheet.getDataRange().getValues();
   var completedJobs = {}; // jobNumber → actualEndDate
 
+  // Columns: A=Job Number(0), B=Location(1), C=Foreman(2), D=Crew Size(3), E=Start Date(4),
+  //          F=Put On Hold Date(5), G=Estimated Return(6), H=Est. End Date(7), I=Actual End Date(8), J=Status(9)
   for (var j = 1; j < jobData.length; j++) {
     var jobNum = String(jobData[j][0] || '').trim();
-    var status = String(jobData[j][7] || '').trim();
-    var actualEndDate = jobData[j][6]; // Column G: Actual End Date
+    var status = String(jobData[j][9] || '').trim();    // Status (J, index 9)
+    var actualEndDate = jobData[j][8];                  // Actual End Date (I, index 8)
 
     if (status === 'Completed' && actualEndDate instanceof Date) {
       completedJobs[jobNum] = actualEndDate;
@@ -1600,7 +2601,7 @@ function menuSyncCompletedJob() {
   for (var i = 1; i < jobData.length; i++) {
     if (String(jobData[i][0]).trim() === jobNumber) {
       jobRow = jobData[i];
-      actualEndDate = jobData[i][6];  // Column G = Actual End Date
+      actualEndDate = jobData[i][8];  // Column I = Actual End Date (index 8)
       break;
     }
   }
@@ -1610,7 +2611,7 @@ function menuSyncCompletedJob() {
     return;
   }
 
-  var status = String(jobRow[7] || '').trim();  // Column H = Status
+  var status = String(jobRow[9] || '').trim();  // Column J = Status (index 9)
   if (status !== 'Completed') {
     var confirm = ui.alert(
       'Job Not Completed',
@@ -1624,10 +2625,10 @@ function menuSyncCompletedJob() {
     // Mark as completed
     for (var j = 1; j < jobData.length; j++) {
       if (String(jobData[j][0]).trim() === jobNumber) {
-        jobSheet.getRange(j + 1, 8).setValue('Completed');
+        jobSheet.getRange(j + 1, 10).setValue('Completed');  // Status (J, column 10)
         if (!actualEndDate) {
           actualEndDate = new Date();
-          jobSheet.getRange(j + 1, 7).setValue(actualEndDate);
+          jobSheet.getRange(j + 1, 9).setValue(actualEndDate);  // Actual End Date (I, column 9)
         }
         break;
       }
@@ -1672,7 +2673,7 @@ function migrateJobTrackingScheduleColumns() {
     return;
   }
 
-  var headers = jobSheet.getRange(1, 1, 1, 20).getValues()[0];
+  var headers = jobSheet.getRange(1, 1, 1, 25).getValues()[0];
   var hasScheduleColumns = headers.indexOf('Work Schedule') !== -1;
 
   if (hasScheduleColumns) {
@@ -1776,10 +2777,10 @@ function initializeSchedulesFromConfig() {
     var schedule = determineScheduleType(skipDays);
 
     var rowNum = j + 1;
-    jobSheet.getRange(rowNum, 11).setValue(schedule);        // Work Schedule
-    jobSheet.getRange(rowNum, 12).setValue(skipDays);        // Skip Days
-    jobSheet.getRange(rowNum, 13).setValue(today);           // Schedule Effective
-    jobSheet.getRange(rowNum, 14).setValue('[]');            // Schedule History (empty)
+    jobSheet.getRange(rowNum, 22).setValue(schedule);        // Work Schedule (V)
+    jobSheet.getRange(rowNum, 23).setValue(skipDays);        // Skip Days (W)
+    jobSheet.getRange(rowNum, 24).setValue(today);           // Schedule Effective (X)
+    jobSheet.getRange(rowNum, 25).setValue('[]');            // Schedule History (Y) (empty)
   }
 
   Logger.log('initializeSchedulesFromConfig: Initialized schedule data for ' + Object.keys(configMap).length + ' crews');
@@ -1832,7 +2833,7 @@ function updateCrewScheduleInJobTracking(jobNumber, newSchedule, newSkipDays) {
   }
 
   // Check if schedule columns exist
-  var headers = jobSheet.getRange(1, 1, 1, 20).getValues()[0];
+  var headers = jobSheet.getRange(1, 1, 1, 25).getValues()[0];
   var scheduleCol = headers.indexOf('Work Schedule') + 1;
 
   if (scheduleCol === 0) {
@@ -1858,11 +2859,11 @@ function updateCrewScheduleInJobTracking(jobNumber, newSchedule, newSkipDays) {
   var today = new Date();
   var todayStr = Utilities.formatDate(today, Session.getScriptTimeZone(), 'MM/dd/yyyy');
 
-  // Get current schedule info
-  var currentSchedule = jobData[foundRow - 1][10] || '';  // Column K (index 10)
-  var currentSkipDays = jobData[foundRow - 1][11] || '';  // Column L (index 11)
-  var currentEffective = jobData[foundRow - 1][12] || ''; // Column M (index 12)
-  var historyJson = jobData[foundRow - 1][13] || '[]';    // Column N (index 13)
+  // Get current schedule info from hidden columns V-Y (indices 21-24)
+  var currentSchedule = jobData[foundRow - 1][21] || '';  // Column V (index 21) - Work Schedule
+  var currentSkipDays = jobData[foundRow - 1][22] || '';  // Column W (index 22) - Skip Days
+  var currentEffective = jobData[foundRow - 1][23] || ''; // Column X (index 23) - Schedule Effective
+  var historyJson = jobData[foundRow - 1][24] || '[]';    // Column Y (index 24) - Schedule History
 
   // Only update if schedule actually changed
   if (currentSchedule === newSchedule && currentSkipDays === newSkipDays) {
@@ -1895,10 +2896,10 @@ function updateCrewScheduleInJobTracking(jobNumber, newSchedule, newSkipDays) {
   }
 
   // Update with new schedule
-  jobSheet.getRange(foundRow, 11).setValue(newSchedule);     // Work Schedule
-  jobSheet.getRange(foundRow, 12).setValue(newSkipDays);     // Skip Days
-  jobSheet.getRange(foundRow, 13).setValue(today);           // Schedule Effective
-  jobSheet.getRange(foundRow, 14).setValue(JSON.stringify(history)); // Schedule History
+  jobSheet.getRange(foundRow, 22).setValue(newSchedule);     // Work Schedule (V)
+  jobSheet.getRange(foundRow, 23).setValue(newSkipDays);     // Skip Days (W)
+  jobSheet.getRange(foundRow, 24).setValue(today);           // Schedule Effective (X)
+  jobSheet.getRange(foundRow, 25).setValue(JSON.stringify(history)); // Schedule History (Y)
 
   Logger.log('updateCrewScheduleInJobTracking: Updated ' + jobNumber + ' to ' + newSchedule + ' (skip: ' + newSkipDays + ')');
   return true;
@@ -1919,7 +2920,7 @@ function getCrewScheduleForWeek(jobNumber, weekStartDate) {
   if (!jobSheet) return null;
 
   // Check if schedule columns exist
-  var headers = jobSheet.getRange(1, 1, 1, 20).getValues()[0];
+  var headers = jobSheet.getRange(1, 1, 1, 25).getValues()[0];
   var scheduleCol = headers.indexOf('Work Schedule');
 
   if (scheduleCol === -1) {
@@ -1939,10 +2940,12 @@ function getCrewScheduleForWeek(jobNumber, weekStartDate) {
 
   if (!foundRow) return null;
 
-  var currentSchedule = foundRow[10] || '';   // Column K (index 10)
-  var currentSkipDays = foundRow[11] || '';   // Column L (index 11)
-  var currentEffective = foundRow[12];        // Column M (index 12)
-  var historyJson = foundRow[13] || '[]';     // Column N (index 13)
+  // NEW COLUMN STRUCTURE (after adding visible skip day columns L-T):
+  // Hidden schedule columns are now V-Y (indices 21-24)
+  var currentSchedule = foundRow[21] || '';   // Column V (index 21) - Work Schedule
+  var currentSkipDays = foundRow[22] || '';   // Column W (index 22) - Skip Days
+  var currentEffective = foundRow[23];        // Column X (index 23) - Schedule Effective
+  var historyJson = foundRow[24] || '[]';     // Column Y (index 24) - Schedule History
 
   // Parse effective date
   var effectiveDate = null;
@@ -2006,7 +3009,7 @@ function syncConfigToJobTrackingSchedule() {
   }
 
   // Check if schedule columns exist
-  var headers = jobSheet.getRange(1, 1, 1, 20).getValues()[0];
+  var headers = jobSheet.getRange(1, 1, 1, 25).getValues()[0];
   if (headers.indexOf('Work Schedule') === -1) {
     Logger.log('syncConfigToJobTrackingSchedule: Schedule columns not found - run migration first');
     return;

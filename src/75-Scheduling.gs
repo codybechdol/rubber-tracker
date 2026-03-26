@@ -399,10 +399,12 @@ function getActiveJobsFromTrackingSheet(jobTrackingSheet) {
   var today = new Date();
   today.setHours(0, 0, 0, 0);
 
+  // Columns: A=Job Number(0), B=Location(1), C=Foreman(2), D=Crew Size(3), E=Start Date(4),
+  //          F=Put On Hold Date(5), G=Estimated Return(6), H=Est. End Date(7), I=Actual End Date(8), J=Status(9)
   for (var i = 1; i < data.length; i++) {
     var jobNum = String(data[i][0] || '').trim();
     var startDate = data[i][4];
-    var status = String(data[i][7] || '').trim();
+    var status = String(data[i][9] || '').trim();  // Status (J, index 9)
 
     if (!jobNum) continue;
 
@@ -439,7 +441,7 @@ function getJobTrackingStartDates() {
   var data = jobTrackingSheet.getDataRange().getValues();
   var result = {};
 
-  // Columns: A=Job Number (0), E=Start Date (4), H=Status (7)
+  // Columns: A=Job Number(0), E=Start Date(4), J=Status(9) (after adding Put On Hold Date and Estimated Return)
   for (var i = 1; i < data.length; i++) {
     var jobNum = String(data[i][0] || '').trim();
     var startDate = data[i][4];
@@ -560,12 +562,14 @@ function getCrewLead(crewNumber) {
   var jobNumCol = -1;
   var classificationCol = -1;
   var lastDayCol = -1;
+  var crewLeadCol = -1;
 
   // Find columns
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
     if (header === 'name') nameCol = h;
     if (header === 'job number') jobNumCol = h;
+    if (header === 'crew lead') crewLeadCol = h;
     if (header === 'job classification') classificationCol = h;
     if (header === 'last day') lastDayCol = h;
   }
@@ -575,11 +579,12 @@ function getCrewLead(crewNumber) {
   }
 
   // Classification hierarchy (lower number = higher priority)
+  // SUP > GF > F > GTO F > JRY > JRY OP > WT > GTO > EO > AP
   var classificationPriority = {
-    'F': 1,        // Foreman - Primary crew lead
-    'GTO F': 2,    // Gas Tech Operator - Foreman
-    'GF': 3,       // General Foreman
-    'SUP': 4,      // Superintendent
+    'SUP': 1,      // Superintendent - Highest rank
+    'GF': 2,       // General Foreman
+    'F': 3,        // Foreman
+    'GTO F': 4,    // Gas Tech Operator - Foreman
     'JRY': 5,      // Journeyman Lineman
     'JRY OP': 6,   // Journeyman Operator
     'WT': 7,       // Working Technician
@@ -598,6 +603,7 @@ function getCrewLead(crewNumber) {
   var bestCandidate = null;
   var bestPriority = 999;
   var firstEmployee = null;
+  var manualLead = null;  // Manual assignment from "Crew Lead" column takes priority
 
   // Scan all employees in this crew
   for (var i = 1; i < data.length; i++) {
@@ -615,6 +621,19 @@ function getCrewLead(crewNumber) {
     var employeeName = row[nameCol];
     var classification = classificationCol !== -1 ? String(row[classificationCol]).trim() : '';
 
+    // Check for manual crew lead assignment - this takes PRIORITY over classification
+    if (crewLeadCol !== -1) {
+      var crewLeadValue = String(row[crewLeadCol] || '').toLowerCase().trim();
+      if (crewLeadValue === 'yes' || crewLeadValue === 'true' || crewLeadValue === '1') {
+        manualLead = {
+          name: employeeName,
+          jobNumber: employeeJobNum,
+          classification: classification
+        };
+        // Don't break - continue to find all valid employees as fallback
+      }
+    }
+
     // Track first valid employee as fallback
     if (!firstEmployee) {
       firstEmployee = {
@@ -624,7 +643,7 @@ function getCrewLead(crewNumber) {
       };
     }
 
-    // Check classification priority
+    // Check classification priority (used only if no manual lead)
     var priority = classificationPriority[classification];
     if (priority && priority < bestPriority) {
       bestPriority = priority;
@@ -636,8 +655,10 @@ function getCrewLead(crewNumber) {
     }
   }
 
-  // Return best candidate by classification, or first employee if no classified lead found
-  return bestCandidate || firstEmployee;
+  // Priority: 1) Manual assignment from "Crew Lead" column
+  //           2) Best classification priority
+  //           3) First employee as fallback
+  return manualLead || bestCandidate || firstEmployee;
 }
 
 /**

@@ -23,6 +23,143 @@ function showCrewImportDialog() {
 }
 
 /**
+ * Ensures that the given locations are included in the Location column's data validation.
+ * If any location is not in the current validation list, updates the validation to include it.
+ *
+ * @param {Sheet} sheet - The Employees sheet
+ * @param {number} locationColNum - 1-based column number for Location
+ * @param {Array} locationsToAdd - Array of location strings to ensure are valid
+ * @return {boolean} True if validation was updated, false if no changes needed
+ */
+function ensureLocationsInValidation(sheet, locationColNum, locationsToAdd) {
+  try {
+    // Get current validation from first data cell
+    var validationCell = sheet.getRange(2, locationColNum);
+    var currentRule = validationCell.getDataValidation();
+
+    var existingLocations = [];
+
+    if (currentRule) {
+      var criteria = currentRule.getCriteriaType();
+      if (criteria === SpreadsheetApp.DataValidationCriteria.VALUE_IN_LIST) {
+        var args = currentRule.getCriteriaValues();
+        if (args && args[0]) {
+          existingLocations = args[0];
+        }
+      }
+    }
+
+    // If no existing validation, start with base locations
+    if (existingLocations.length === 0) {
+      existingLocations = [
+        'Anaconda', 'Anaconda City Sub', 'Big Sky', 'Billings', 'Bozeman', 'Butte',
+        'CA Sub', 'California', 'Elliston', 'Ennis', 'Glendive', 'Gold Creek',
+        'Great Falls', 'Helena', 'Kalispell', 'Leave', 'Light Duty', 'Livingston',
+        'Lolo', 'Miles City', 'Missoula', 'Northern Lights', 'Rapelje', 'Rattlesnake Sub',
+        'Sidney', 'South Dakota', 'South Dakota Dock', 'Stanford', 'Texas',
+        'Three Rivers Sub', 'Vacation', 'Weeds', 'Previous Employee'
+      ];
+    }
+
+    // Check which locations need to be added
+    var needsUpdate = false;
+    for (var i = 0; i < locationsToAdd.length; i++) {
+      var loc = locationsToAdd[i];
+      if (loc && existingLocations.indexOf(loc) === -1) {
+        existingLocations.push(loc);
+        needsUpdate = true;
+        Logger.log('ensureLocationsInValidation: Adding new location: ' + loc);
+      }
+    }
+
+    if (!needsUpdate) {
+      return false;
+    }
+
+    // Sort and create new validation rule
+    existingLocations.sort();
+    var newRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(existingLocations, true)
+      .setAllowInvalid(false)
+      .build();
+
+    // Apply to entire Location column (rows 2-500)
+    var lastRow = Math.max(sheet.getLastRow(), 500);
+    sheet.getRange(2, locationColNum, lastRow - 1, 1).setDataValidation(newRule);
+
+    Logger.log('ensureLocationsInValidation: Updated validation with ' + existingLocations.length + ' locations');
+    return true;
+
+  } catch (e) {
+    Logger.log('ensureLocationsInValidation ERROR: ' + e.toString());
+    return false;
+  }
+}
+
+/**
+ * Ensures that the given locations exist in the Locations sheet.
+ * If a location is not in the sheet, adds it with default values.
+ * This keeps the Locations sheet (used for drive times) in sync with employee locations.
+ *
+ * @param {Spreadsheet} ss - The spreadsheet
+ * @param {Array} locations - Array of location strings to ensure exist
+ * @return {number} Number of locations added
+ */
+function ensureLocationsInLocationsSheet(ss, locations) {
+  var locationsSheet = ss.getSheetByName('Locations');
+  if (!locationsSheet) {
+    Logger.log('ensureLocationsInLocationsSheet: Locations sheet not found');
+    return 0;
+  }
+
+  var data = locationsSheet.getDataRange().getValues();
+  var existingLocations = {};
+
+  // Build map of existing locations (column A)
+  for (var i = 1; i < data.length; i++) {
+    var loc = String(data[i][0] || '').trim();
+    if (loc) {
+      existingLocations[loc.toLowerCase()] = true;
+    }
+  }
+
+  var addedCount = 0;
+  var newRows = [];
+
+  for (var j = 0; j < locations.length; j++) {
+    var location = locations[j];
+    if (!location) continue;
+
+    // Skip special status locations (not physical locations)
+    var skipLocations = ['Light Duty', 'Weeds', 'Vacation', 'Leave', 'Previous Employee', 'Unknown'];
+    if (skipLocations.indexOf(location) !== -1) continue;
+
+    // Check if location already exists
+    if (existingLocations[location.toLowerCase()]) continue;
+
+    // Add new location with default values
+    // Columns: Location, Drive Time (min), Direction, Overnight City
+    newRows.push([
+      location,
+      120,        // Default 2 hours drive time
+      'Far',      // Default direction
+      location    // Overnight city defaults to location name
+    ]);
+
+    Logger.log('ensureLocationsInLocationsSheet: Adding new location: ' + location);
+    addedCount++;
+  }
+
+  if (newRows.length > 0) {
+    var lastRow = locationsSheet.getLastRow();
+    locationsSheet.getRange(lastRow + 1, 1, newRows.length, 4).setValues(newRows);
+    Logger.log('ensureLocationsInLocationsSheet: Added ' + addedCount + ' new location(s)');
+  }
+
+  return addedCount;
+}
+
+/**
  * Applies crew changes to the Employees sheet.
  * Called from CrewImport.html when user confirms changes.
  * Updates: Location, Job Number, and Job Classification
@@ -61,6 +198,28 @@ function applyCrewChanges(changes) {
 
   if (locationCol === -1 || jobNumCol === -1) {
     return { success: false, message: 'Could not find Location or Job Number columns in Employees sheet' };
+  }
+
+  // AUTO-UPDATE LOCATION VALIDATION: Collect all new locations and ensure they're allowed
+  var newLocationsToAdd = [];
+  for (var c = 0; c < changes.length; c++) {
+    var loc = changes[c].newLocation;
+    if (loc && newLocationsToAdd.indexOf(loc) === -1) {
+      newLocationsToAdd.push(loc);
+    }
+  }
+  if (newLocationsToAdd.length > 0) {
+    // Update Employees sheet Location dropdown validation
+    var validationUpdated = ensureLocationsInValidation(employeesSheet, locationCol + 1, newLocationsToAdd);
+    if (validationUpdated) {
+      Logger.log('applyCrewChanges: Updated Location validation to include: ' + newLocationsToAdd.join(', '));
+    }
+
+    // Also add new locations to the Locations sheet (for drive times)
+    var locationsAdded = ensureLocationsInLocationsSheet(ss, newLocationsToAdd);
+    if (locationsAdded > 0) {
+      Logger.log('applyCrewChanges: Added ' + locationsAdded + ' new location(s) to Locations sheet');
+    }
   }
 
   // If Job Classification column doesn't exist, it's column N (index 13)
@@ -289,6 +448,9 @@ function syncJobTrackingAfterImport(ss) {
   }
 
   // Get current Job Tracking data
+  // Columns: A=Job Number(0), B=Location(1), C=Foreman(2), D=Crew Size(3), E=Start Date(4),
+  //          F=Put On Hold Date(5), G=Estimated Return(6), H=Est. End Date(7), I=Actual End Date(8),
+  //          J=Status(9), K=Notes(10), L-R=Skip Days(11-17), S-T=Skip Flags(18-19), U=Last Updated(20)
   var jobData = jobSheet.getDataRange().getValues();
   var existingJobs = {};
 
@@ -301,10 +463,12 @@ function syncJobTrackingAfterImport(ss) {
         foreman: jobData[j][2],
         crewSize: jobData[j][3],
         startDate: jobData[j][4],
-        estEndDate: jobData[j][5],
-        actualEndDate: jobData[j][6],
-        status: String(jobData[j][7] || '').trim(),
-        notes: jobData[j][8] || ''
+        putOnHoldDate: jobData[j][5],
+        estimatedReturn: jobData[j][6],
+        estEndDate: jobData[j][7],
+        actualEndDate: jobData[j][8],
+        status: String(jobData[j][9] || '').trim(),
+        notes: jobData[j][10] || ''
       };
     }
   }
@@ -364,8 +528,8 @@ function syncJobTrackingAfterImport(ss) {
       crewMap[crewNumber].location = location;
     }
 
-    // Check for foreman classification
-    if (classification === 'F' || classification === 'GTO F' || classification === 'GF') {
+    // Check for foreman classification (includes F, GTO F, GF, SUP)
+    if (classification === 'F' || classification === 'GTO F' || classification === 'GF' || classification === 'SUP') {
       crewMap[crewNumber].foreman = name;
     }
   }
@@ -386,10 +550,10 @@ function syncJobTrackingAfterImport(ss) {
       var rowIdx = existing.rowIndex;
 
       // Update location, foreman, crew size
-      jobSheet.getRange(rowIdx, 2).setValue(crew.location || existing.location || 'Unknown');
-      jobSheet.getRange(rowIdx, 3).setValue(crew.foreman || existing.foreman || '');
-      jobSheet.getRange(rowIdx, 4).setValue(crew.crewSize);
-      jobSheet.getRange(rowIdx, 10).setValue(timestamp);
+      jobSheet.getRange(rowIdx, 2).setValue(crew.location || existing.location || 'Unknown');  // Location (B)
+      jobSheet.getRange(rowIdx, 3).setValue(crew.foreman || existing.foreman || '');          // Foreman (C)
+      jobSheet.getRange(rowIdx, 4).setValue(crew.crewSize);                                   // Crew Size (D)
+      jobSheet.getRange(rowIdx, 21).setValue(timestamp);                                      // Last Updated (U)
 
       // If status is "Pending Start" and now has employees, DON'T auto-activate
       // Instead, track for user decision
@@ -409,18 +573,29 @@ function syncJobTrackingAfterImport(ss) {
       updatedCount++;
       delete existingJobs[crewNum];
     } else {
-      // New crew - add to Job Tracking
+      // New crew - add to Job Tracking (21 columns: A-U)
       newRows.push([
-        crewNum,
-        crew.location || 'Unknown',
-        crew.foreman || '',
-        crew.crewSize,
-        timestamp,        // Start Date = today (just appeared)
-        '',               // Est. End Date
-        '',               // Actual End Date
-        'Active',         // Status
-        'Added via Crew Import on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy'),
-        timestamp
+        crewNum,                    // Job Number (A)
+        crew.location || 'Unknown', // Location (B)
+        crew.foreman || '',         // Foreman (C)
+        crew.crewSize,              // Crew Size (D)
+        timestamp,                  // Start Date (E) = today (just appeared)
+        '',                         // Put On Hold Date (F)
+        '',                         // Estimated Return (G)
+        '',                         // Est. End Date (H)
+        '',                         // Actual End Date (I)
+        'Active',                   // Status (J)
+        'Added via Crew Import on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy'), // Notes (K)
+        true,                       // Skip Sun (L) - DEFAULT Mon-Thu
+        false,                      // Skip Mon (M)
+        false,                      // Skip Tue (N)
+        false,                      // Skip Wed (O)
+        false,                      // Skip Thu (P)
+        true,                       // Skip Fri (Q) - DEFAULT Mon-Thu
+        true,                       // Skip Sat (R) - DEFAULT Mon-Thu
+        false,                      // Skip Weekly Meeting (S)
+        false,                      // Skip Monthly Checklist (T)
+        timestamp                   // Last Updated (U)
       ]);
       addedCount++;
     }
@@ -429,7 +604,9 @@ function syncJobTrackingAfterImport(ss) {
   // Add new rows
   if (newRows.length > 0) {
     var lastRow = jobSheet.getLastRow();
-    jobSheet.getRange(lastRow + 1, 1, newRows.length, 10).setValues(newRows);
+    jobSheet.getRange(lastRow + 1, 1, newRows.length, 21).setValues(newRows);
+    // Add checkboxes for skip day columns (L-T = cols 12-20) on new rows
+    jobSheet.getRange(lastRow + 1, 12, newRows.length, 9).insertCheckboxes();
   }
 
   // Check for jobs that now have no employees (not in crewMap)
@@ -440,11 +617,11 @@ function syncJobTrackingAfterImport(ss) {
       // This job had no employees in the import
       if (oldData.crewSize > 0) {
         // Update crew size to 0 and add note
-        jobSheet.getRange(oldData.rowIndex, 4).setValue(0);
+        jobSheet.getRange(oldData.rowIndex, 4).setValue(0);  // Crew Size (D)
         var oldNotes = oldData.notes || '';
         var emptyNote = 'No employees in Crew Import on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy');
         if (oldNotes.indexOf('No employees') === -1) {
-          jobSheet.getRange(oldData.rowIndex, 9).setValue(oldNotes ? oldNotes + '; ' + emptyNote : emptyNote);
+          jobSheet.getRange(oldData.rowIndex, 11).setValue(oldNotes ? oldNotes + '; ' + emptyNote : emptyNote);  // Notes (K)
         }
         emptyJobCount++;
       }
@@ -460,6 +637,19 @@ function syncJobTrackingAfterImport(ss) {
   Logger.log('syncJobTrackingAfterImport: ' + results.join(', '));
   if (pendingJobsWithEmployees.length > 0) {
     Logger.log('syncJobTrackingAfterImport: ' + pendingJobsWithEmployees.length + ' Pending Start jobs need activation decision');
+  }
+
+  // Also run syncCrews to ensure foremen and default schedules are applied
+  // This updates the new schedule columns (L-T) if they exist
+  try {
+    var syncResult = syncCrews(true);  // Silent mode
+    if (syncResult && syncResult.success) {
+      Logger.log('syncJobTrackingAfterImport: syncCrews complete - ' +
+                 syncResult.foremanUpdates + ' foreman updates, ' +
+                 syncResult.scheduleDefaults + ' schedule defaults');
+    }
+  } catch (e) {
+    Logger.log('syncJobTrackingAfterImport: syncCrews failed (non-critical): ' + e.toString());
   }
 
   return {
@@ -495,16 +685,16 @@ function activatePendingJobs(jobNumbers) {
     var jobNum = String(jobData[i][0] || '').trim();
 
     if (jobNumbers.indexOf(jobNum) !== -1) {
-      var currentStatus = String(jobData[i][7] || '').trim();
+      var currentStatus = String(jobData[i][9] || '').trim();  // Status (J, index 9)
 
       if (currentStatus === 'Pending Start') {
         var rowIdx = i + 1;
-        jobSheet.getRange(rowIdx, 8).setValue('Active');
+        jobSheet.getRange(rowIdx, 10).setValue('Active');  // Status (J, column 10)
 
-        var currentNotes = jobData[i][8] || '';
+        var currentNotes = jobData[i][10] || '';  // Notes (K, index 10)
         var activateNote = 'Activated on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy') + ' via Crew Import';
-        jobSheet.getRange(rowIdx, 9).setValue(currentNotes ? currentNotes + '; ' + activateNote : activateNote);
-        jobSheet.getRange(rowIdx, 10).setValue(timestamp);
+        jobSheet.getRange(rowIdx, 11).setValue(currentNotes ? currentNotes + '; ' + activateNote : activateNote);  // Notes (K)
+        jobSheet.getRange(rowIdx, 21).setValue(timestamp);  // Last Updated (U)
 
         activatedCount++;
         Logger.log('activatePendingJobs: Activated ' + jobNum);
@@ -561,15 +751,15 @@ function markJobCompletedFromImport(jobNumber, completionDateStr) {
 
   var timestamp = new Date();
 
-  // Update the row - BOTH Status AND Actual End Date
-  jobSheet.getRange(foundRow, 7).setValue(completionDate);  // Actual End Date (column G)
-  jobSheet.getRange(foundRow, 8).setValue('Completed');     // Status (column H)
-  jobSheet.getRange(foundRow, 10).setValue(timestamp);      // Last Updated (column J)
+  // Update the row - BOTH Status AND Actual End Date (new column positions)
+  jobSheet.getRange(foundRow, 9).setValue(completionDate);   // Actual End Date (I, column 9)
+  jobSheet.getRange(foundRow, 10).setValue('Completed');     // Status (J, column 10)
+  jobSheet.getRange(foundRow, 21).setValue(timestamp);       // Last Updated (U, column 21)
 
-  // Add note about completion
-  var currentNotes = jobData[foundRow - 1][8] || '';
+  // Add note about completion (Notes is now column K, index 10)
+  var currentNotes = jobData[foundRow - 1][10] || '';
   var completedNote = 'Marked Completed via Crew Import on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy');
-  jobSheet.getRange(foundRow, 9).setValue(currentNotes ? currentNotes + '; ' + completedNote : completedNote);
+  jobSheet.getRange(foundRow, 11).setValue(currentNotes ? currentNotes + '; ' + completedNote : completedNote);  // Notes (K)
 
   Logger.log('markJobCompletedFromImport: Job ' + jobNumber + ' marked as Completed with date ' + completionDateStr);
 
@@ -614,9 +804,10 @@ function getJobTrackingForCrewImport() {
 
     if (!jobNumber) continue;
 
-    var status = String(row[7] || '').trim();
-    var startDate = row[4];
-    var estEndDate = row[5];
+    // Updated column indexes: Status(9), Start Date(4), Est. End Date(7), Location(1), Foreman(2)
+    var status = String(row[9] || '').trim();     // Status (J, index 9)
+    var startDate = row[4];                       // Start Date (E, index 4)
+    var estEndDate = row[7];                      // Est. End Date (H, index 7)
     var location = String(row[1] || '').trim();
     var foreman = String(row[2] || '').trim();
 
@@ -674,12 +865,13 @@ function addOrUpdateJobTracking(jobNumber, location, foreman, crewSize, startDat
     var jobSheet = ss.getSheetByName('Job Tracking');
 
     if (!jobSheet) {
-      // Create the sheet if it doesn't exist
+      // Create the sheet if it doesn't exist (21 visible columns + 4 hidden = 25 total)
       jobSheet = ss.insertSheet('Job Tracking');
-      var headers = ['Job Number', 'Location', 'Foreman', 'Crew Size', 'Start Date', 'Est. End Date', 'Actual End Date', 'Status', 'Notes', 'Last Updated'];
+      var headers = ['Job Number', 'Location', 'Foreman', 'Crew Size', 'Start Date', 'Put On Hold Date', 'Estimated Return', 'Est. End Date', 'Actual End Date', 'Status', 'Notes', 'Skip Sun', 'Skip Mon', 'Skip Tue', 'Skip Wed', 'Skip Thu', 'Skip Fri', 'Skip Sat', 'Skip Weekly Meeting', 'Skip Monthly Checklist', 'Last Updated', 'Work Schedule', 'Skip Days', 'Schedule Effective', 'Schedule History'];
       jobSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
       jobSheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#1565c0').setFontColor('white');
-      Logger.log('Created Job Tracking sheet');
+      jobSheet.hideColumns(22, 4);  // Hide V-Y
+      Logger.log('Created Job Tracking sheet with 25 columns');
     }
 
     var data = jobSheet.getDataRange().getValues();
@@ -706,33 +898,46 @@ function addOrUpdateJobTracking(jobNumber, location, foreman, crewSize, startDat
     }
 
     if (existingRow > 0) {
-      // Update existing row - preserve some values, update others
-      jobSheet.getRange(existingRow, 2).setValue(location);  // Location
-      if (foreman) jobSheet.getRange(existingRow, 3).setValue(foreman);  // Foreman
-      if (crewSize > 0) jobSheet.getRange(existingRow, 4).setValue(crewSize);  // Crew Size
-      if (startDateObj) jobSheet.getRange(existingRow, 5).setValue(startDateObj);  // Start Date
-      jobSheet.getRange(existingRow, 8).setValue(status);  // Status
-      jobSheet.getRange(existingRow, 10).setValue(formattedTimestamp);  // Last Updated
+      // Update existing row - preserve some values, update others (new column positions)
+      jobSheet.getRange(existingRow, 2).setValue(location);                      // Location (B)
+      if (foreman) jobSheet.getRange(existingRow, 3).setValue(foreman);          // Foreman (C)
+      if (crewSize > 0) jobSheet.getRange(existingRow, 4).setValue(crewSize);    // Crew Size (D)
+      if (startDateObj) jobSheet.getRange(existingRow, 5).setValue(startDateObj);// Start Date (E)
+      jobSheet.getRange(existingRow, 10).setValue(status);                       // Status (J)
+      jobSheet.getRange(existingRow, 21).setValue(formattedTimestamp);           // Last Updated (U)
 
       Logger.log('Updated existing job ' + jobNumber + ' at row ' + existingRow);
       return { success: true, message: 'Updated job ' + jobNumber, row: existingRow, action: 'updated' };
     } else {
-      // Add new row
+      // Add new row (21 columns: A-U with skip day defaults)
       var newRow = [
-        jobNumber,
-        location,
-        foreman || '',
-        crewSize || 0,
-        startDateObj || '',
-        '',  // Est. End Date
-        '',  // Actual End Date
-        status,
-        'Added via Crew Import',
-        formattedTimestamp
+        jobNumber,                  // Job Number (A)
+        location,                   // Location (B)
+        foreman || '',              // Foreman (C)
+        crewSize || 0,              // Crew Size (D)
+        startDateObj || '',         // Start Date (E)
+        '',                         // Put On Hold Date (F)
+        '',                         // Estimated Return (G)
+        '',                         // Est. End Date (H)
+        '',                         // Actual End Date (I)
+        status,                     // Status (J)
+        'Added via Crew Import',    // Notes (K)
+        true,                       // Skip Sun (L) - DEFAULT Mon-Thu
+        false,                      // Skip Mon (M)
+        false,                      // Skip Tue (N)
+        false,                      // Skip Wed (O)
+        false,                      // Skip Thu (P)
+        true,                       // Skip Fri (Q) - DEFAULT Mon-Thu
+        true,                       // Skip Sat (R) - DEFAULT Mon-Thu
+        false,                      // Skip Weekly Meeting (S)
+        false,                      // Skip Monthly Checklist (T)
+        formattedTimestamp          // Last Updated (U)
       ];
 
       jobSheet.appendRow(newRow);
       var newRowNum = jobSheet.getLastRow();
+      // Add checkboxes for skip day columns (L-T = cols 12-20)
+      jobSheet.getRange(newRowNum, 12, 1, 9).insertCheckboxes();
 
       Logger.log('Added new job ' + jobNumber + ' at row ' + newRowNum);
       return { success: true, message: 'Added job ' + jobNumber, row: newRowNum, action: 'added' };

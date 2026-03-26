@@ -75,10 +75,18 @@
     </div>
   </div>
 
-  <!-- STEP 2: Generate All Reports -->
+  <!-- STEP 2: Sync Crews -->
   <div class="step-container">
-    <button class="step-btn" id="step2" onclick="runStep(2, 'generateAllReports')">
+    <button class="step-btn" id="step2" onclick="runStep(2, 'menuSyncCrews')">
       <span class="step-num"><span>2</span></span>
+      <div class="step-text">🔄 Sync Crews<div class="step-subtitle">Update foremen & schedules in Job Tracking</div></div>
+    </button>
+  </div>
+
+  <!-- STEP 3: Generate All Reports -->
+  <div class="step-container">
+    <button class="step-btn" id="step3" onclick="runStep(3, 'generateAllReports')">
+      <span class="step-num"><span>3</span></span>
       <div class="step-text">📊 Generate All Reports<div class="step-subtitle">Swaps, Purchase Needs, Reclaims</div></div>
     </button>
     <div class="sub-actions">
@@ -89,10 +97,10 @@
     </div>
   </div>
 
-  <!-- STEP 3: Process Safety Emails -->
+  <!-- STEP 4: Process Safety Emails -->
   <div class="step-container">
-    <button class="step-btn" id="step3" onclick="openSafetyEmails()">
-      <span class="step-num"><span>3</span></span>
+    <button class="step-btn" id="step4" onclick="openSafetyEmails()">
+      <span class="step-num"><span>4</span></span>
       <div class="step-text">🛡️ Process Safety Emails<div class="step-subtitle">JHAs, Meetings, Fleet Checklists</div></div>
     </button>
     <div class="sub-actions">
@@ -100,10 +108,10 @@
     </div>
   </div>
 
-  <!-- STEP 4: Generate Task Metadata -->
+  <!-- STEP 5: Generate Task Metadata -->
   <div class="step-container">
-    <button class="step-btn" id="step4" onclick="runStep(4, 'generateTaskMetadata')">
-      <span class="step-num"><span>4</span></span>
+    <button class="step-btn" id="step5" onclick="runStep(5, 'generateTaskMetadata')">
+      <span class="step-num"><span>5</span></span>
       <div class="step-text">🎯 Generate Task Metadata<div class="step-subtitle">Build task database</div></div>
     </button>
     <div class="sub-actions">
@@ -111,10 +119,10 @@
     </div>
   </div>
 
-  <!-- STEP 5: Review & Schedule -->
+  <!-- STEP 6: Review & Schedule -->
   <div class="step-container">
-    <button class="step-btn" id="step5" onclick="openToDoSchedule()">
-      <span class="step-num"><span>5</span></span>
+    <button class="step-btn" id="step6" onclick="openToDoSchedule()">
+      <span class="step-num"><span>6</span></span>
       <div class="step-text">📅 Review & Schedule<div class="step-subtitle">Tasks & Trip Planner</div></div>
     </button>
     <div class="sub-actions">
@@ -123,10 +131,10 @@
     </div>
   </div>
 
-  <!-- STEP 6: Save & Backup -->
+  <!-- STEP 7: Save & Backup -->
   <div class="step-container">
-    <button class="step-btn" id="step6" onclick="runStep(6, 'saveAndBackup')">
-      <span class="step-num"><span>6</span></span>
+    <button class="step-btn" id="step7" onclick="runStep(7, 'saveAndBackup')">
+      <span class="step-num"><span>7</span></span>
       <div class="step-text">💾 Save & Backup<div class="step-subtitle">History + Drive backup</div></div>
     </button>
     <div class="sub-actions">
@@ -142,7 +150,7 @@
     <button class="quick-btn" onclick="runQuick('setupCrewVisitConfig', 'Crew Visit Config', 'Setting up...')">👷 Crew Visit Config</button>
     <button class="quick-btn" onclick="runQuick('setupTrainingConfig', 'Training Config', 'Setting up...')">📚 Training Config</button>
     <button class="quick-btn" onclick="runQuick('setupTrainingTracking', 'Training Tracking', 'Setting up...')">📋 Training Tracking</button>
-    <button class="quick-btn" onclick="runQuick('openComplianceConfig', 'Safety Compliance Config', 'Opening config...')">🛡️ Compliance Config</button>
+    <button class="quick-btn" onclick="runQuick('openJobTrackingSheet', 'Job Tracking (Schedules)', 'Opening Job Tracking...')">🛡️ Manage Schedules</button>
   </div>
 
   <div class="divider"></div>

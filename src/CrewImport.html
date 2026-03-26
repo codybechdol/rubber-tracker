@@ -365,8 +365,10 @@
         </div>
         <div class="modal-body">
           <div class="mb-3 p-3" style="background: #f8f9fa; border-radius: 8px;">
-            <strong id="newEmpNameDisplay" style="font-size: 18px;"></strong>
-            <br><small class="text-muted">From Excel: <span id="newEmpOriginalText"></span></small>
+            <label class="form-label small"><strong>Employee Name</strong> <span class="text-danger">*</span></label>
+            <input type="text" class="form-control form-control-sm" id="newEmpNameInput" style="font-size: 16px; font-weight: 600;" required>
+            <small class="text-muted">From Excel: <span id="newEmpOriginalText"></span></small>
+            <input type="hidden" id="newEmpNameDisplay">
           </div>
 
           <form id="newEmployeeForm">
@@ -685,7 +687,9 @@
       'CA Sub': 'California',
       'Gold Creek Trans Dock': 'Gold Creek',
       'Gold Creek Dock': 'Gold Creek',
-      'Gold Creek': 'Gold Creek'
+      'Gold Creek': 'Gold Creek',
+      'Texas Dock': 'Texas',
+      'Texas': 'Texas'
     };
 
     var currentEmployees = [];
@@ -1044,8 +1048,14 @@
         return { type: 'Primary', label: 'M-F', badgeColor: 'bg-success' };
       }
       // Tue-Fri or T-F schedule is primary
-      if (text.match(/T-F|Tue-Fri|Tu-F|Tuesday.*Friday/i)) {
+      // Note: Order matters - check more specific patterns before broader ones
+      if (text.match(/T-F\b|Tu-F\b|Tue-F\b|Tue-Fri|T-Fri|Tu-Fri|Tuesday.*Friday|\d+\s*10'?s?\s*T-?F/i)) {
         return { type: 'Primary', label: 'Tue-Fri', badgeColor: 'bg-success' };
+      }
+      // M-Sat or Mon-Sat schedule is primary (6-day work week)
+      // Also detect "6 10's" pattern which typically means M-Sat (6 days of 10-hour shifts)
+      if (text.match(/M-Sat|Mon-Sat|Monday.*Saturday|6\s*10'?s/i)) {
+        return { type: 'Primary', label: 'M-Sat', badgeColor: 'bg-success' };
       }
       // Fri & Sat is secondary
       if (text.match(/Fri\s*&\s*Sat|Fri.*Sat|Friday.*Saturday/i)) {
@@ -1929,6 +1939,9 @@
       // First, strip any CDL notes from the end (they're not roles)
       cleanText = cleanText.replace(/\s+(CDL-[AB]|No CDL)\s*$/i, '').trim();
 
+      // Strip common annotations like "NEW HIRE", "TEMP", "CONTRACTOR" etc.
+      cleanText = cleanText.replace(/\s+(NEW\s*HIRE|NEWHIRE|NEW|TEMP|TEMPORARY|CONTRACTOR|TRAINEE)\s*$/i, '').trim();
+
       // Check for Foreman (F suffix)
       if (cleanText.match(/\sF$/i) && !cleanText.match(/GTO\s*F$/i)) {
         result.isForeman = true;
@@ -2488,6 +2501,7 @@
         html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Primary\', \'M-Th\'); return false;"><span class="badge bg-success me-1">Primary</span> M-Th</a></li>';
         html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Primary\', \'M-F\'); return false;"><span class="badge bg-success me-1">Primary</span> M-F</a></li>';
         html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Primary\', \'Tue-Fri\'); return false;"><span class="badge bg-success me-1">Primary</span> Tue-Fri</a></li>';
+        html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Primary\', \'M-Sat\'); return false;"><span class="badge bg-success me-1">Primary</span> M-Sat</a></li>';
         html += '<li><hr class="dropdown-divider"></li>';
         html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Secondary\', \'Fri-Sat\'); return false;"><span class="badge bg-warning text-dark me-1">Secondary</span> Fri-Sat</a></li>';
         html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Secondary\', \'Weekend\'); return false;"><span class="badge bg-warning text-dark me-1">Secondary</span> Weekend</a></li>';
@@ -4030,7 +4044,8 @@
       }
 
       // Populate the modal
-      document.getElementById('newEmpNameDisplay').textContent = name;
+      document.getElementById('newEmpNameInput').value = name;
+      document.getElementById('newEmpNameDisplay').value = name;
       document.getElementById('newEmpOriginalText').textContent = spec.originalText || name;
       document.getElementById('newEmpUnmatchedKey').value = 'special_' + specIndex;  // Special marker
 
@@ -4523,9 +4538,14 @@
           occ.scheduleType = 'Primary (M-F)';
         }
         // Tue-Fri or T-F schedule is primary (+100 points)
-        else if (fullText.match(/T-F|Tue-Fri|Tu-F|Tuesday.*Friday/i)) {
+        else if (fullText.match(/T-F\b|Tu-F\b|Tue-F\b|Tue-Fri|T-Fri|Tu-Fri|Tuesday.*Friday|\d+\s*10'?s?\s*T-?F/i)) {
           score += 100;
           occ.scheduleType = 'Primary (Tue-Fri)';
+        }
+        // M-Sat or 6 10's schedule is primary (+100 points) - 6 days
+        else if (fullText.match(/M-Sat|Mon-Sat|Monday.*Saturday|6\s*10'?s/i)) {
+          score += 100;
+          occ.scheduleType = 'Primary (M-Sat)';
         }
         // Standard workweek patterns (4 10's, 5 8's) without weekend mention (+50)
         else if (fullText.match(/[45]\s*(10|8)'?s/i) && !fullText.match(/Fri\s*&\s*Sat|Sat\s*&\s*Sun|weekend/i)) {
@@ -5646,7 +5666,8 @@
       var crew = unmatched.crew;
 
       // Populate the modal with pre-filled data
-      document.getElementById('newEmpNameDisplay').textContent = emp.name;
+      document.getElementById('newEmpNameInput').value = emp.name;
+      document.getElementById('newEmpNameDisplay').value = emp.name;
       document.getElementById('newEmpOriginalText').textContent = emp.originalName || emp.name;
       document.getElementById('newEmpUnmatchedKey').value = unmatchedKey;
 
@@ -5699,11 +5720,17 @@
 
     function submitNewEmployee() {
       // Validate required fields
-      var name = document.getElementById('newEmpNameDisplay').textContent;
+      var name = document.getElementById('newEmpNameInput').value.trim();
       var location = document.getElementById('newEmpLocation').value;
       var jobNumber = document.getElementById('newEmpJobNumber').value.trim();
       var classification = document.getElementById('newEmpClassification').value;
       var unmatchedKey = document.getElementById('newEmpUnmatchedKey').value;
+
+      // Validate name
+      if (!name) {
+        showNotification('Please enter an employee name', 'warning', 'Required Field');
+        return;
+      }
 
       // Check if this is from a special circumstance (added via addNewEmployeeFromSpecial)
       var specIndex = document.getElementById('newEmpUnmatchedKey').dataset.specIndex;

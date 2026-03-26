@@ -108,6 +108,7 @@ function forceCreateMenu() {
         .addItem('📤 Archive Previous Employees', 'archivePreviousEmployees')
         .addItem('🔄 Refresh Crew Visit Config', 'refreshCrewVisitConfig')
         .addItem('🔄 Refresh Training Crew Leads', 'refreshTrainingTrackingCrewLeads')
+        .addItem('🎨 Apply Training Tracking Formatting', 'menuApplyTrainingTrackingFormatting')
         .addSeparator()
         .addItem('⚡ Setup Auto Change Out Dates', 'createEditTrigger')
         .addItem('🔧 Fix All Change Out Dates', 'fixAllChangeOutDates'))
