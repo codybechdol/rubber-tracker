@@ -52,12 +52,12 @@ function ensureLocationsInValidation(sheet, locationColNum, locationsToAdd) {
     // If no existing validation, start with base locations
     if (existingLocations.length === 0) {
       existingLocations = [
-        'Anaconda', 'Anaconda City Sub', 'Big Sky', 'Billings', 'Bozeman', 'Butte',
+        'Anaconda', 'Big Sky', 'Billings', 'Bonner', 'Bozeman', 'Butte',
         'CA Sub', 'California', 'Elliston', 'Ennis', 'Glendive', 'Gold Creek',
         'Great Falls', 'Helena', 'Kalispell', 'Leave', 'Light Duty', 'Livingston',
-        'Lolo', 'Miles City', 'Missoula', 'Northern Lights', 'Rapelje', 'Rattlesnake Sub',
+        'Lolo', 'Manhattan', 'Miles City', 'Missoula', 'Northern Lights', 'Rapelje',
         'Sidney', 'South Dakota', 'South Dakota Dock', 'Stanford', 'Texas',
-        'Three Rivers Sub', 'Vacation', 'Weeds', 'Previous Employee'
+        'Three Forks', 'Vacation', 'Weeds', 'Previous Employee'
       ];
     }
 
@@ -131,6 +131,7 @@ function ensureLocationsInLocationsSheet(ss, locations) {
     if (!location) continue;
 
     // Skip special status locations (not physical locations)
+    // "Light Duty" kept for backwards compatibility - new ones get Location = "Helena"
     var skipLocations = ['Light Duty', 'Weeds', 'Vacation', 'Leave', 'Previous Employee', 'Unknown'];
     if (skipLocations.indexOf(location) !== -1) continue;
 
@@ -418,8 +419,15 @@ function applyCrewChanges(changes) {
 
   logEvent('Crew Makeup Import: Updated ' + updatedCount + ' employees, logged ' + historyLogged + ' history entries');
 
+  // Extract jobNameMap from first change (if provided by client)
+  var jobNameMap = null;
+  if (changes.length > 0 && changes[0].jobNameMap) {
+    jobNameMap = changes[0].jobNameMap;
+    Logger.log('applyCrewChanges: Received jobNameMap with ' + Object.keys(jobNameMap).length + ' entries');
+  }
+
   // Sync with Job Tracking sheet if it exists
-  var jobTrackingResult = syncJobTrackingAfterImport(ss);
+  var jobTrackingResult = syncJobTrackingAfterImport(ss, jobNameMap);
   var pendingJobs = [];
 
   if (jobTrackingResult) {
@@ -449,7 +457,7 @@ function applyCrewChanges(changes) {
  * @param {Spreadsheet} ss - Active spreadsheet
  * @return {Object} Result with message and pendingJobs array
  */
-function syncJobTrackingAfterImport(ss) {
+function syncJobTrackingAfterImport(ss, jobNameMap) {
   var jobSheet = ss.getSheetByName('Job Tracking');
   if (!jobSheet) {
     Logger.log('syncJobTrackingAfterImport: Job Tracking sheet not found, skipping');
@@ -648,6 +656,15 @@ function syncJobTrackingAfterImport(ss) {
   if (addedCount > 0) results.push(addedCount + ' new jobs added');
   if (emptyJobCount > 0) results.push(emptyJobCount + ' jobs have no employees');
 
+  // Backfill empty Job Names from Excel header data (if available)
+  var jobNamesFilled = 0;
+  if (jobNameMap && Object.keys(jobNameMap).length > 0) {
+    jobNamesFilled = backfillJobNamesFromImport(jobSheet, jobNameMap);
+    if (jobNamesFilled > 0) {
+      results.push(jobNamesFilled + ' Job Name(s) backfilled');
+    }
+  }
+
   Logger.log('syncJobTrackingAfterImport: ' + results.join(', '));
   if (pendingJobsWithEmployees.length > 0) {
     Logger.log('syncJobTrackingAfterImport: ' + pendingJobsWithEmployees.length + ' Pending Start jobs need activation decision');
@@ -810,7 +827,14 @@ function getJobTrackingForCrewImport() {
   }
 
   var data = jobSheet.getDataRange().getValues();
+  var headers = data[0];
   var result = {};
+
+  // Find Job Name column dynamically (may not exist on older sheets)
+  var jobNameCol = -1;
+  for (var h = 0; h < headers.length; h++) {
+    if (String(headers[h]).trim() === 'Job Name') { jobNameCol = h; break; }
+  }
 
   for (var i = 1; i < data.length; i++) {
     var row = data[i];
@@ -824,6 +848,7 @@ function getJobTrackingForCrewImport() {
     var estEndDate = row[7];                      // Est. End Date (H, index 7)
     var location = String(row[1] || '').trim();
     var foreman = String(row[2] || '').trim();
+    var jobName = jobNameCol !== -1 ? String(row[jobNameCol] || '').trim() : '';
 
     // Format dates for JSON
     var startDateStr = '';
@@ -845,6 +870,7 @@ function getJobTrackingForCrewImport() {
       status: status,
       location: location,
       foreman: foreman,
+      jobName: jobName,
       startDate: startDateStr,
       estEndDate: estEndDateStr,
       isCompleted: status === 'Completed',
@@ -855,8 +881,26 @@ function getJobTrackingForCrewImport() {
     };
   }
 
-  Logger.log('getJobTrackingForCrewImport: Found ' + Object.keys(result).length + ' jobs');
+  Logger.log('getJobTrackingForCrewImport: Found ' + Object.keys(result).length + ' jobs' + (jobNameCol !== -1 ? ' (with Job Name column)' : ' (no Job Name column)'));
   return result;
+}
+
+/**
+ * Returns location names from the Locations sheet for dropdown use.
+ * @return {Array} Array of location name strings, sorted alphabetically
+ */
+function getLocationsForDropdown() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Locations');
+  if (!sheet || sheet.getLastRow() < 2) return [];
+
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
+  var locations = [];
+  for (var i = 0; i < data.length; i++) {
+    var loc = String(data[i][0] || '').trim();
+    if (loc) locations.push(loc);
+  }
+  return locations.sort();
 }
 
 /**
@@ -918,22 +962,29 @@ function deriveScheduleLabel(row) {
  * @param {string} status - Status (Active, Pending Start, Completed, On Hold)
  * @return {Object} Result with success status and message
  */
-function addOrUpdateJobTracking(jobNumber, location, foreman, crewSize, startDate, status) {
+function addOrUpdateJobTracking(jobNumber, location, foreman, crewSize, startDate, status, jobName) {
   Logger.log('=== addOrUpdateJobTracking ===');
-  Logger.log('Job: ' + jobNumber + ', Location: ' + location + ', Status: ' + status + ', Start: ' + startDate);
+  Logger.log('Job: ' + jobNumber + ', Location: ' + location + ', JobName: ' + (jobName || '(none)') + ', Status: ' + status + ', Start: ' + startDate);
 
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var jobSheet = ss.getSheetByName('Job Tracking');
 
     if (!jobSheet) {
-      // Create the sheet if it doesn't exist (21 visible columns + 4 hidden = 25 total)
+      // Create the sheet if it doesn't exist (21 visible columns + 4 hidden + 1 Job Name = 26 total)
       jobSheet = ss.insertSheet('Job Tracking');
-      var headers = ['Job Number', 'Location', 'Foreman', 'Crew Size', 'Start Date', 'Put On Hold Date', 'Estimated Return', 'Est. End Date', 'Actual End Date', 'Status', 'Notes', 'Skip Sun', 'Skip Mon', 'Skip Tue', 'Skip Wed', 'Skip Thu', 'Skip Fri', 'Skip Sat', 'Skip Weekly Meeting', 'Skip Monthly Checklist', 'Last Updated', 'Work Schedule', 'Skip Days', 'Schedule Effective', 'Schedule History'];
+      var headers = ['Job Number', 'Location', 'Foreman', 'Crew Size', 'Start Date', 'Put On Hold Date', 'Estimated Return', 'Est. End Date', 'Actual End Date', 'Status', 'Notes', 'Skip Sun', 'Skip Mon', 'Skip Tue', 'Skip Wed', 'Skip Thu', 'Skip Fri', 'Skip Sat', 'Skip Weekly Meeting', 'Skip Monthly Checklist', 'Last Updated', 'Work Schedule', 'Skip Days', 'Schedule Effective', 'Schedule History', 'Job Name'];
       jobSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
       jobSheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#1565c0').setFontColor('white');
-      jobSheet.hideColumns(22, 4);  // Hide V-Y
-      Logger.log('Created Job Tracking sheet with 25 columns');
+      jobSheet.hideColumns(22, 4);  // Hide V-Y (Work Schedule through Schedule History)
+      Logger.log('Created Job Tracking sheet with 26 columns (includes Job Name)');
+    }
+
+    // Find Job Name column dynamically
+    var allHeaders = jobSheet.getRange(1, 1, 1, jobSheet.getLastColumn()).getValues()[0];
+    var jobNameCol = -1;
+    for (var h = 0; h < allHeaders.length; h++) {
+      if (String(allHeaders[h]).trim() === 'Job Name') { jobNameCol = h + 1; break; } // 1-based
     }
 
     var data = jobSheet.getDataRange().getValues();
@@ -967,6 +1018,10 @@ function addOrUpdateJobTracking(jobNumber, location, foreman, crewSize, startDat
       if (startDateObj) jobSheet.getRange(existingRow, 5).setValue(startDateObj);// Start Date (E)
       jobSheet.getRange(existingRow, 10).setValue(status);                       // Status (J)
       jobSheet.getRange(existingRow, 21).setValue(formattedTimestamp);           // Last Updated (U)
+      // Write Job Name if column exists and value provided
+      if (jobNameCol > 0 && jobName) {
+        jobSheet.getRange(existingRow, jobNameCol).setValue(jobName);
+      }
 
       Logger.log('Updated existing job ' + jobNumber + ' at row ' + existingRow);
       return { success: true, message: 'Updated job ' + jobNumber, row: existingRow, action: 'updated' };
@@ -996,6 +1051,14 @@ function addOrUpdateJobTracking(jobNumber, location, foreman, crewSize, startDat
         formattedTimestamp          // Last Updated (U)
       ];
 
+      // Pad to Job Name column if it exists
+      if (jobNameCol > 0) {
+        while (newRow.length < jobNameCol - 1) {
+          newRow.push(''); // Pad hidden columns
+        }
+        newRow.push(jobName || ''); // Job Name (Z or wherever it is)
+      }
+
       jobSheet.appendRow(newRow);
       var newRowNum = jobSheet.getLastRow();
       // Add checkboxes for skip day columns (L-T = cols 12-20)
@@ -1008,6 +1071,265 @@ function addOrUpdateJobTracking(jobNumber, location, foreman, crewSize, startDat
     Logger.log('Error in addOrUpdateJobTracking: ' + e.toString());
     return { success: false, message: 'Error: ' + e.toString() };
   }
+}
+
+/**
+ * Adds multiple new jobs to Job Tracking from crew import.
+ * Called when new job numbers are detected in the Excel file.
+ *
+ * @param {string} jobsJson - JSON array of {jobNumber, jobName, location}
+ * @return {Object} Result with success count and details
+ */
+function addNewJobsToTracking(jobsJson) {
+  Logger.log('=== addNewJobsToTracking ===');
+  var jobs = JSON.parse(jobsJson);
+  var results = [];
+  var successCount = 0;
+
+  for (var i = 0; i < jobs.length; i++) {
+    var job = jobs[i];
+    var result = addOrUpdateJobTracking(
+      job.jobNumber,
+      job.location,
+      '',          // foreman (unknown yet)
+      0,           // crew size (unknown yet)
+      '',          // start date
+      'Active',    // default to Active
+      job.jobName  // new Job Name field
+    );
+    results.push(result);
+    if (result.success) successCount++;
+  }
+
+  Logger.log('addNewJobsToTracking: Added ' + successCount + '/' + jobs.length + ' jobs');
+  return { success: true, added: successCount, total: jobs.length, results: results };
+}
+
+/**
+ * Migration function: Adds "Job Name" column to existing Job Tracking sheet.
+ * Safe to run multiple times (idempotent).
+ * Appends the column at the end so NO existing indices shift.
+ */
+function migrateJobTrackingAddJobName() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Job Tracking');
+
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert('Job Tracking sheet not found. Run Setup Job Tracking Sheet first.');
+    return;
+  }
+
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+  // Check if already exists
+  for (var i = 0; i < headers.length; i++) {
+    if (String(headers[i]).trim() === 'Job Name') {
+      SpreadsheetApp.getUi().alert('✅ Job Name column already exists at column ' + String.fromCharCode(65 + i) + '.');
+      return;
+    }
+  }
+
+  // Add at the end
+  var newCol = sheet.getLastColumn() + 1;
+  sheet.getRange(1, newCol).setValue('Job Name');
+  sheet.getRange(1, newCol).setFontWeight('bold').setBackground('#1565c0').setFontColor('white');
+  sheet.setColumnWidth(newCol, 200);
+
+  SpreadsheetApp.getUi().alert('✅ Added "Job Name" column at column ' + String.fromCharCode(64 + newCol) + '.\n\n' +
+    'Job Names will be filled automatically during the next Crew Import.');
+  Logger.log('migrateJobTrackingAddJobName: Added Job Name column at column ' + newCol);
+}
+
+/**
+ * Backfills empty "Job Name" values in Job Tracking using reverse location mapping.
+ * Uses the primary dock/site name for each city (e.g., Bozeman → "Belgrade Dock").
+ * Shows results and lets user know which were filled.
+ *
+ * Menu: Glove Manager → 📥 Import Crew Makeup → 🔧 Utilities → 📝 Backfill Job Names
+ */
+function backfillJobNames() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+  var sheet = ss.getSheetByName('Job Tracking');
+
+  if (!sheet) {
+    ui.alert('❌ Job Tracking sheet not found.\n\nRun "Setup Job Tracking Sheet" first.');
+    return;
+  }
+
+  // Find Job Name column
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var jobNameCol = -1;
+  var locationCol = -1;
+  var statusCol = -1;
+
+  for (var h = 0; h < headers.length; h++) {
+    var hdr = String(headers[h]).trim();
+    if (hdr === 'Job Name') jobNameCol = h;
+    if (hdr === 'Location') locationCol = h;
+    if (hdr === 'Status') statusCol = h;
+  }
+
+  if (jobNameCol === -1) {
+    ui.alert('❌ Job Name column not found.\n\nRun "Add Job Name Column" first.');
+    return;
+  }
+
+  if (locationCol === -1) {
+    ui.alert('❌ Location column not found in Job Tracking.');
+    return;
+  }
+
+  // Reverse location mapping: City → primary Excel header/dock name
+  // This is the inverse of the mapping in CrewImport.html
+  var reverseLocationMap = {
+    'Bozeman': 'Belgrade Dock',
+    'Big Sky': 'Big Sky Dock',
+    'Helena': 'Helena Trans Dock',
+    'Great Falls': 'Great Falls Dock',
+    'Butte': 'Butte Dock',
+    'Livingston': 'Livingston Dock',
+    'Ennis': 'Ennis Dock',
+    'Stanford': 'Stanford Trans Dock',
+    'South Dakota': 'South Dakota Dock',
+    'Lolo': 'Lolo Sub Dock',
+    'Missoula': 'Missoula',
+    'Elliston': 'Elliston Distro Poles',
+    'Rapelje': 'Alkali/Rapelje Trans',
+    'Manhattan': 'Manhattan Sub',
+    'Anaconda': 'Anaconda City Sub Dock',
+    'Three Forks': 'Three Rivers Sub Dock',
+    'Bonner': 'Rattlesnake Sub Dock',
+    'Northern Lights': 'Northern Lights Dock',
+    'California': 'CA Sub Foundation',
+    'Gold Creek': 'Gold Creek Trans Dock',
+    'Texas': 'Texas Dock',
+    'Kalispell': 'Kalispell',
+    'Billings': 'Billings',
+    'Miles City': 'Miles City',
+    'Sidney': 'Sidney',
+    'Glendive': 'Glendive'
+  };
+
+  // Also check for user-saved custom mappings (reverse them)
+  try {
+    var customMappings = getCrewImportLocationMappings();
+    for (var excelName in customMappings) {
+      var city = customMappings[excelName];
+      // Only add if we don't already have a reverse mapping for this city
+      if (!reverseLocationMap[city]) {
+        reverseLocationMap[city] = excelName;
+      }
+    }
+  } catch (e) {
+    Logger.log('backfillJobNames: Could not load custom mappings: ' + e.message);
+  }
+
+  var data = sheet.getDataRange().getValues();
+  var filledCount = 0;
+  var skippedCount = 0;
+  var alreadyHasCount = 0;
+  var noMappingJobs = [];
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var jobNumber = String(row[0] || '').trim();
+    var location = String(row[locationCol] || '').trim();
+    var currentJobName = String(row[jobNameCol] || '').trim();
+    var status = statusCol !== -1 ? String(row[statusCol] || '').trim() : '';
+
+    if (!jobNumber) continue;
+
+    // Skip completed jobs
+    if (status === 'Completed') {
+      skippedCount++;
+      continue;
+    }
+
+    // Already has a Job Name
+    if (currentJobName) {
+      alreadyHasCount++;
+      continue;
+    }
+
+    // Try reverse mapping
+    var suggestedName = reverseLocationMap[location] || '';
+
+    if (suggestedName) {
+      // Write the job name
+      sheet.getRange(i + 1, jobNameCol + 1).setValue(suggestedName);
+      filledCount++;
+      Logger.log('backfillJobNames: ' + jobNumber + ' (' + location + ') → "' + suggestedName + '"');
+    } else if (location && location !== 'Unknown') {
+      // No mapping found - use location as fallback
+      sheet.getRange(i + 1, jobNameCol + 1).setValue(location);
+      filledCount++;
+      noMappingJobs.push(jobNumber + ' (' + location + ')');
+      Logger.log('backfillJobNames: ' + jobNumber + ' - no mapping, using location "' + location + '"');
+    } else {
+      noMappingJobs.push(jobNumber + ' (Unknown location)');
+    }
+  }
+
+  // Build result message
+  var msg = '📝 Job Name Backfill Complete!\n\n';
+  msg += '✅ Filled: ' + filledCount + ' job(s)\n';
+  msg += '⏭️ Already had names: ' + alreadyHasCount + '\n';
+  msg += '⏭️ Completed (skipped): ' + skippedCount;
+
+  if (noMappingJobs.length > 0) {
+    msg += '\n\n⚠️ Used location as fallback for:\n';
+    for (var n = 0; n < noMappingJobs.length; n++) {
+      msg += '  • ' + noMappingJobs[n] + '\n';
+    }
+    msg += '\nYou can edit these directly in the Job Name column.';
+  }
+
+  msg += '\n\nTip: Future Crew Imports will automatically fill Job Names from the Excel header.';
+
+  ui.alert('Job Name Backfill', msg, ui.ButtonSet.OK);
+  Logger.log('backfillJobNames: Done - filled ' + filledCount + ', already had ' + alreadyHasCount + ', skipped ' + skippedCount);
+}
+
+/**
+ * Backfills Job Names for existing jobs during Crew Import.
+ * Called from syncJobTrackingAfterImport after employee data is synced.
+ * Uses the parsedCrews data (originalLocation) from the Excel file.
+ *
+ * @param {Sheet} jobSheet - Job Tracking sheet
+ * @param {Object} crewJobNameMap - Map of job number → Excel header name (originalLocation)
+ */
+function backfillJobNamesFromImport(jobSheet, crewJobNameMap) {
+  if (!jobSheet || !crewJobNameMap) return 0;
+
+  var headers = jobSheet.getRange(1, 1, 1, jobSheet.getLastColumn()).getValues()[0];
+  var jobNameCol = -1;
+  for (var h = 0; h < headers.length; h++) {
+    if (String(headers[h]).trim() === 'Job Name') { jobNameCol = h + 1; break; }
+  }
+
+  if (jobNameCol === -1) {
+    Logger.log('backfillJobNamesFromImport: Job Name column not found, skipping');
+    return 0;
+  }
+
+  var data = jobSheet.getDataRange().getValues();
+  var filledCount = 0;
+
+  for (var i = 1; i < data.length; i++) {
+    var jobNumber = String(data[i][0] || '').trim();
+    var currentJobName = String(data[i][jobNameCol - 1] || '').trim();
+
+    // Only backfill if currently empty and we have a name from the import
+    if (jobNumber && !currentJobName && crewJobNameMap[jobNumber]) {
+      jobSheet.getRange(i + 1, jobNameCol).setValue(crewJobNameMap[jobNumber]);
+      filledCount++;
+      Logger.log('backfillJobNamesFromImport: ' + jobNumber + ' → "' + crewJobNameMap[jobNumber] + '"');
+    }
+  }
+
+  Logger.log('backfillJobNamesFromImport: Filled ' + filledCount + ' Job Name(s)');
+  return filledCount;
 }
 
 /**
@@ -1686,9 +2008,18 @@ function applySpecialCircumstanceUpdate(data) {
     var newJobNumber = data.jobNumber || '';
 
     // Special handling for Light Duty - auto-assign job number 005-26.#
-    if (data.newLocation === 'Light Duty' && !data.clearJobNumber && !data.jobNumber) {
-      newJobNumber = getNextLightDutyJobNumber(sheetData, jobNumCol);
+    // Uses LockService internally to prevent duplicate numbers from parallel calls
+    // Light Duty is a STATUS, not a location — actual location is Helena
+    var isLightDutyAssignment = (data.newLocation === 'Light Duty' || data.status === 'Light Duty');
+    if (isLightDutyAssignment && !data.clearJobNumber && !data.jobNumber) {
+      newJobNumber = getNextLightDutyJobNumber(sheetData, jobNumCol, employeesSheet, rowIndex);
       Logger.log('Auto-assigned Light Duty job number: ' + newJobNumber);
+    }
+
+    // Light Duty employees are physically in Helena — change location to real city
+    if (data.newLocation === 'Light Duty') {
+      data.newLocation = 'Helena';
+      Logger.log('Light Duty → Helena (Light Duty is a status, not a location)');
     }
 
     // Update Location if specified
@@ -1823,29 +2154,59 @@ function applySpecialCircumstanceUpdate(data) {
  * @param {number} jobNumCol - Index of the job number column
  * @return {string} Next available Light Duty job number (e.g., "005-26.3")
  */
-function getNextLightDutyJobNumber(sheetData, jobNumCol) {
-  var lightDutyPrefix = '005-26';
-  var maxPosition = 0;
+function getNextLightDutyJobNumber(sheetData, jobNumCol, employeesSheet, rowIndex) {
+  // Use LockService to prevent race condition when multiple parallel calls
+  // each try to assign the next Light Duty job number simultaneously
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000); // Wait up to 30 seconds - throws on failure (intentional)
 
-  // Scan all rows for existing 005-26.# job numbers
-  for (var i = 1; i < sheetData.length; i++) {
-    var jobNum = String(sheetData[i][jobNumCol] || '').trim();
+  try {
+    var lightDutyPrefix = '005-26';
+    var maxFromSheet = 0;
 
-    // Check if this is a Light Duty job number (005-26.#)
-    if (jobNum.indexOf(lightDutyPrefix) === 0) {
-      var match = jobNum.match(/005-26\.(\d+)/);
-      if (match) {
-        var position = parseInt(match[1], 10);
-        if (position > maxPosition) {
-          maxPosition = position;
+    // Scan sheet data for existing 005-26.# job numbers
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var freshSheet = employeesSheet || ss.getSheetByName('Employees');
+    var freshData = freshSheet ? freshSheet.getDataRange().getValues() : sheetData;
+
+    for (var i = 1; i < freshData.length; i++) {
+      var jobNum = String(freshData[i][jobNumCol] || '').trim();
+      if (jobNum.indexOf(lightDutyPrefix) === 0) {
+        var match = jobNum.match(/005-26\.(\d+)/);
+        if (match) {
+          var position = parseInt(match[1], 10);
+          if (position > maxFromSheet) {
+            maxFromSheet = position;
+          }
         }
       }
     }
-  }
 
-  // Return the next available number
-  var nextPosition = maxPosition + 1;
-  return lightDutyPrefix + '.' + nextPosition;
+    // ALSO check ScriptProperties for recently assigned numbers.
+    // This handles the case where Google Sheets read cache returns stale data
+    // even after a prior call did flush(). Properties are always fresh.
+    var props = PropertiesService.getScriptProperties();
+    var recentMax = parseInt(props.getProperty('LIGHT_DUTY_RECENT_MAX') || '0', 10);
+
+    // Use the higher of sheet scan vs properties counter
+    var maxPosition = Math.max(maxFromSheet, recentMax);
+    var nextPosition = maxPosition + 1;
+    var newJobNumber = lightDutyPrefix + '.' + nextPosition;
+
+    // Save to ScriptProperties FIRST (so next caller sees it even with stale sheet cache)
+    props.setProperty('LIGHT_DUTY_RECENT_MAX', String(nextPosition));
+
+    // Also write to the sheet
+    if (freshSheet && rowIndex) {
+      freshSheet.getRange(rowIndex, jobNumCol + 1).setValue(newJobNumber);
+      SpreadsheetApp.flush();
+    }
+
+    Logger.log('getNextLightDutyJobNumber: sheet max=' + maxFromSheet + ', props max=' + recentMax + ', assigned=' + newJobNumber);
+    return newJobNumber;
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // ============================================================================

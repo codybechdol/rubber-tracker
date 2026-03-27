@@ -1380,7 +1380,10 @@
             inTaskList: t.inList === 1,  // Phase 5: Task List flag
             isRegistered: t.reg === 1,   // Phase 5: Registration flag for green highlight
             notes: t.n || '',            // Notes (for SMS messages - Missing Safety Reports, etc.)
-            jobNumber: t.job || ''       // Job number for Safety Compliance tasks
+            jobNumber: t.job || '',       // Job number for Safety Compliance tasks
+            vehicleNumber: t.veh || '',   // Vehicle number for Safety Equipment tasks
+            currentItem: t.cur || '',     // Issue description for Safety Equipment tasks
+            emailSubject: t.esubj || ''   // Email subject for Safety Equipment tasks
           };
         }
         // Otherwise use as-is (legacy format)

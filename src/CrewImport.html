@@ -631,7 +631,9 @@
     // LOCATION MAPPINGS
     // ========================================
 
-    // Default location mappings (spreadsheet name -> Google Sheet location)
+    // Default location mappings (Excel job name -> Employees sheet Location/city)
+    // These are FALLBACK mappings for jobs not yet in Job Tracking.
+    // Job Tracking is the primary source of location data (looked up by job number).
     var locationMappings = {
       'Belgrade Dock': 'Bozeman',
       'Belgrade': 'Bozeman',
@@ -665,20 +667,23 @@
       'Missoula': 'Missoula',
       'Elliston Distro Poles': 'Elliston',
       'Elliston': 'Elliston',
-      'Alkali/Rapelje Trans': 'Alkali',
-      'Alkali': 'Alkali',
+      'Alkali/Rapelje Trans': 'Rapelje',
+      'Alkali': 'Rapelje',
       'Rapelje/Greycliff Trans': 'Rapelje',
       'Rapelje': 'Rapelje',
-      'Greycliff': 'Greycliff',
+      'Greycliff': 'Rapelje',
       'Manhattan Sub': 'Manhattan',
       'Manhattan': 'Manhattan',
-      'Mill Crk Sub': 'Mill Creek',
+      'Mill Crk Sub': 'Anaconda',
       'Mill Crk Sub Anaconda Dock': 'Anaconda',
-      'Anaconda City Sub': 'Anaconda City Sub',
+      'Anaconda City Sub Dock': 'Anaconda',
+      'Anaconda City Sub': 'Anaconda',
       'Anaconda': 'Anaconda',
-      'Three Rivers Sub': 'Three Rivers Sub',
+      'Three Rivers Sub Dock': 'Three Forks',
+      'Three Rivers Sub': 'Three Forks',
       'Three Forks': 'Three Forks',
-      'Rattlesnake Sub': 'Rattlesnake Sub',
+      'Rattlesnake Sub Dock': 'Bonner',
+      'Rattlesnake Sub': 'Bonner',
       'Bonner': 'Bonner',
       'Northern Lights Dock': 'Northern Lights',
       'Northern Lights': 'Northern Lights',
@@ -689,6 +694,7 @@
       'Gold Creek Dock': 'Gold Creek',
       'Gold Creek': 'Gold Creek',
       'Texas Dock': 'Texas',
+      'Texas UG': 'Texas',
       'Texas': 'Texas'
     };
 
@@ -706,6 +712,8 @@
     var crewLeadSelections = {}; // Stores selected crew lead by job number: { "005-26": "John Smith" }
     var crewsWithMultipleLeads = []; // Crews that need lead selection
     var _autoSelectionsAlreadyApplied = false; // Guard against duplicate auto-apply calls
+    var detectedNewJobs = []; // Jobs found in Excel but not in Job Tracking
+    var locationsDropdownList = []; // Location names from Locations sheet (for dropdowns)
 
     function init() {
       setupDragDrop();
@@ -723,19 +731,37 @@
         })
         .getJobTrackingForCrewImport();
 
+      // Load locations for dropdown (used in New Jobs section)
+      google.script.run
+        .withSuccessHandler(function(locations) {
+          locationsDropdownList = locations || [];
+          console.log('Loaded ' + locationsDropdownList.length + ' locations for dropdown');
+        })
+        .withFailureHandler(function(error) {
+          console.error('Failed to load locations for dropdown:', error);
+          locationsDropdownList = [];
+        })
+        .getLocationsForDropdown();
+
       // Load saved settings from server first, then render
       google.script.run
         .withSuccessHandler(function(settings) {
           console.log('Loaded saved crew import settings:', settings);
 
-          // Merge saved location mappings with defaults
+          // Merge saved location mappings - saved mappings override defaults
+          // (saved mappings are user corrections like "Rattlesnake Sub Dock" → "Bonner")
           if (settings && settings.locationMappings) {
+            var overrideCount = 0;
             for (var key in settings.locationMappings) {
               if (settings.locationMappings.hasOwnProperty(key)) {
+                if (locationMappings[key] && locationMappings[key] !== settings.locationMappings[key]) {
+                  console.log('Saved mapping overrides default: "' + key + '" → "' + settings.locationMappings[key] + '" (was "' + locationMappings[key] + '")');
+                  overrideCount++;
+                }
                 locationMappings[key] = settings.locationMappings[key];
               }
             }
-            console.log('Merged ' + Object.keys(settings.locationMappings).length + ' saved location mappings');
+            console.log('Merged ' + Object.keys(settings.locationMappings).length + ' saved location mappings (' + overrideCount + ' overrides)');
           }
 
           // Store saved duplicate selections for later use
@@ -1041,7 +1067,7 @@
       var text = headerText.toString();
 
       // M-Th or M-T schedule is primary
-      if (text.match(/M-Th|M-T\b|Mon-Thu|Monday.*Thursday/i)) {
+      if (text.match(/M-Th|M-T\b|Mon-Thu|Mon-Thurs|Monday.*Thursday/i)) {
         return { type: 'Primary', label: 'M-Th', badgeColor: 'bg-success' };
       }
       // M-F schedule is also primary
@@ -1050,7 +1076,7 @@
       }
       // Tue-Fri or T-F schedule is primary
       // Note: Order matters - check more specific patterns before broader ones
-      if (text.match(/T-F\b|Tu-F\b|Tue-F\b|Tue-Fri|T-Fri|Tu-Fri|Tuesday.*Friday|\d+\s*10'?s?\s*T-?F/i)) {
+      if (text.match(/T-F\b|Tu-F\b|Tue-F\b|Tue-Fri|Tues-Fri|T-Fri|Tu-Fri|Tuesday.*Friday|\d+\s*10'?s?\s*T-?F/i)) {
         return { type: 'Primary', label: 'Tue-Fri', badgeColor: 'bg-success' };
       }
       // M-Sat or Mon-Sat schedule is primary (6-day work week)
@@ -1059,7 +1085,7 @@
         return { type: 'Primary', label: 'M-Sat', badgeColor: 'bg-success' };
       }
       // Fri & Sat is secondary
-      if (text.match(/Fri\s*&\s*Sat|Fri.*Sat|Friday.*Saturday/i)) {
+      if (text.match(/Fri\s*&\s*Sat|Fri.*Sat|Friday.*Saturday|Fri\s*-\s*Sat/i)) {
         return { type: 'Secondary', label: 'Fri-Sat', badgeColor: 'bg-warning text-dark' };
       }
       // Weekend work is secondary
@@ -1128,7 +1154,7 @@
             var jobNumber = match[2];
 
             // Skip BID items that are greyed out/future planning
-            if (cell.match(/BID\s*$/i)) {
+            if (cell.match(/\bBID\b/i) || locationName.match(/\bBID\b/i)) {
               console.log('Skipping BID item: ' + cell);
               continue;
             }
@@ -1194,6 +1220,10 @@
           if (cell.match(/^(NWE|Aprox|Tentative|Completed|On Hold)/i)) continue;
           if (cell.match(/schedule|Released|layoff|weeks? work/i)) continue;
           if (cell.match(/^\d+\s*10\/\d+\s*10\s+schedule/i)) continue; // "4 10/5 10 schedule..."
+          if (cell.match(/^Starts?\s+(March|April|May|June|July|Aug|Sept?|Oct|Nov|Dec|Jan|Feb)/i)) continue; // "Start March 31st"
+          if (cell.match(/^Approved\s+w?\/?/i)) continue; // "Approved w/ 4th man Monday"
+          if (cell.match(/^Completed,?\s/i)) continue; // "Completed, waiting for more."
+          if (cell.match(/^On Hold/i)) continue; // "On Hold, Back 4-1..."
 
           // Break on section markers (these indicate a new section/job, not an employee)
           if (cell.match(/\b(Dock|Sub|Trans)\b/i) && cell.match(/\b(City|Three|Rattlesnake|Ennis|Lone|Alkali)\b/i)) {
@@ -1265,16 +1295,34 @@
       console.log('After merge: ' + parsedCrews.length + ' crews');
 
       // Fill in missing schedule data from Job Tracking
+      // AND use Job Tracking as PRIMARY location source (job number → city)
       for (var si = 0; si < parsedCrews.length; si++) {
         var crew = parsedCrews[si];
-        if (!crew.scheduleType && jobTrackingData[crew.jobNumber]) {
-          var jtSchedule = jobTrackingData[crew.jobNumber].schedule;
-          if (jtSchedule) {
-            crew.scheduleLabel = jtSchedule;
+        var jtData = jobTrackingData[crew.jobNumber];
+
+        if (jtData) {
+          // PRIMARY: Use Job Tracking location (most authoritative - set by user)
+          if (jtData.location) {
+            var jtLocation = jtData.location;
+            if (crew.mappedLocation !== jtLocation) {
+              console.log('Job Tracking location for ' + crew.jobNumber + ': "' + jtLocation + '" (was "' + crew.mappedLocation + '" from name mapping)');
+              crew.mappedLocation = jtLocation;
+              crew.location = jtLocation;
+              crew.locationFromJobTracking = true;
+              crew.isUnknownLocation = false;
+              // Remove from unknownLocations if it was there
+              var unknIdx = unknownLocations.indexOf(crew.originalLocation);
+              if (unknIdx !== -1) unknownLocations.splice(unknIdx, 1);
+            }
+          }
+
+          // Fill schedule from Job Tracking if not detected from Excel header
+          if (!crew.scheduleType && jtData.schedule) {
+            crew.scheduleLabel = jtData.schedule;
             crew.scheduleType = 'Primary';
             crew.scheduleBadgeColor = 'bg-success';
             crew.scheduleFromJobTracking = true;
-            console.log('Filled schedule from Job Tracking for ' + crew.jobNumber + ': ' + jtSchedule);
+            console.log('Filled schedule from Job Tracking for ' + crew.jobNumber + ': ' + jtData.schedule);
           }
         }
       }
@@ -1284,8 +1332,36 @@
         return;
       }
 
+      // Detect new job numbers not in Job Tracking
+      detectedNewJobs = [];
+      for (var nj = 0; nj < parsedCrews.length; nj++) {
+        var crewForNewJob = parsedCrews[nj];
+        if (!jobTrackingData[crewForNewJob.jobNumber]) {
+          detectedNewJobs.push({
+            jobNumber: crewForNewJob.jobNumber,
+            excelJobName: crewForNewJob.originalLocation,  // e.g., "Rattlesnake Sub Dock"
+            mappedLocation: crewForNewJob.mappedLocation,   // e.g., "Bonner" (from name mapping)
+            jobName: crewForNewJob.originalLocation,        // default Job Name = Excel header
+            location: crewForNewJob.mappedLocation          // default Location = mapped location
+          });
+          console.log('New job detected: ' + crewForNewJob.jobNumber + ' (' + crewForNewJob.originalLocation + ')');
+        }
+      }
+
+      if (detectedNewJobs.length > 0) {
+        showNewJobsSection();
+        return;
+      }
+
+      continueAfterNewJobs();
+    }
+
+    /**
+     * Continue the import flow after new jobs have been resolved.
+     * Called directly if no new jobs, or after user confirms new jobs.
+     */
+    function continueAfterNewJobs() {
       // Filter out special circumstances that are already terminated as Previous Employees
-      // This MUST run BEFORE showCrewPreview so Dawson, etc. are not displayed
       filterSpecialCircumstancesAlreadyMatched();
 
       // Show crew preview and match employees
@@ -1293,14 +1369,190 @@
       matchEmployeesToSheet();
 
       // Note: if there are duplicates, matchEmployeesToSheet will show the duplicate UI
-      // and displayPreview will be called after user resolves duplicates
       if (duplicateEmployees.length === 0) {
-        // Check for crews with multiple lead-type employees (SUP, GF, F, GTO F)
-        // If found, show selection dialogs before proceeding
         checkAndHandleMultipleLeads(function() {
           displayPreview();
         });
       }
+    }
+
+    /**
+     * Show the New Jobs section for user to provide Job Name and Location for jobs not in Job Tracking.
+     */
+    function showNewJobsSection() {
+      var section = document.getElementById('newJobsSection');
+      if (!section) {
+        // Create the section dynamically (insert before crewsPreview)
+        var previewSection = document.getElementById('crewsPreview');
+        section = document.createElement('div');
+        section.id = 'newJobsSection';
+        section.className = 'mb-4';
+        previewSection.parentNode.insertBefore(section, previewSection);
+      }
+
+      section.style.display = 'block';
+
+      var html = '<div class="alert alert-info">';
+      html += '<h5><i class="bi bi-plus-circle"></i> New Jobs Detected <span class="badge bg-primary">' + detectedNewJobs.length + '</span></h5>';
+      html += '<p>These job numbers were found in the Excel file but are not in Job Tracking. Provide a <strong>Job Name</strong> (project/site name) and <strong>Location</strong> (city for drive time) for each.</p>';
+      html += '</div>';
+
+      for (var i = 0; i < detectedNewJobs.length; i++) {
+        var job = detectedNewJobs[i];
+        html += '<div class="card mb-2" id="new-job-card-' + i + '">';
+        html += '<div class="card-body">';
+        html += '<div class="row g-2 align-items-end">';
+
+        // Job Number (read-only)
+        html += '<div class="col-md-2">';
+        html += '<label class="form-label small mb-1 fw-bold">Job Number</label>';
+        html += '<input type="text" class="form-control form-control-sm" value="' + escapeHtml(job.jobNumber) + '" readonly style="background: #e9ecef;">';
+        html += '</div>';
+
+        // Job Name (editable, pre-filled from Excel header)
+        html += '<div class="col-md-4">';
+        html += '<label class="form-label small mb-1 fw-bold">Job Name <small class="text-muted">(project/site)</small></label>';
+        html += '<input type="text" class="form-control form-control-sm" id="newjob-name-' + i + '" value="' + escapeHtml(job.excelJobName) + '" placeholder="e.g., Rattlesnake Sub Dock">';
+        html += '</div>';
+
+        // Location (dropdown from Locations sheet)
+        html += '<div class="col-md-4">';
+        html += '<label class="form-label small mb-1 fw-bold">Location <small class="text-muted">(city)</small></label>';
+        html += '<select class="form-select form-select-sm" id="newjob-location-' + i + '">';
+        html += '<option value="">Select location...</option>';
+        for (var l = 0; l < locationsDropdownList.length; l++) {
+          var isSelected = locationsDropdownList[l] === job.mappedLocation ? ' selected' : '';
+          html += '<option value="' + escapeHtml(locationsDropdownList[l]) + '"' + isSelected + '>' + escapeHtml(locationsDropdownList[l]) + '</option>';
+        }
+        html += '<option value="__CUSTOM__">➕ Custom location...</option>';
+        html += '</select>';
+        html += '<input type="text" class="form-control form-control-sm mt-1" id="newjob-custom-loc-' + i + '" style="display:none;" placeholder="Enter new location name">';
+        html += '</div>';
+
+        // Status indicator
+        html += '<div class="col-md-2 text-center">';
+        html += '<span class="badge bg-success" id="newjob-status-' + i + '" style="display:none;"><i class="bi bi-check"></i> Ready</span>';
+        html += '</div>';
+
+        html += '</div>';
+        html += '</div>';
+        html += '</div>';
+      }
+
+      html += '<div class="mt-3 d-flex gap-2">';
+      html += '<button class="btn btn-primary" onclick="confirmNewJobs()"><i class="bi bi-plus-circle"></i> Add to Job Tracking & Continue</button>';
+      html += '<button class="btn btn-outline-secondary" onclick="skipNewJobs()"><i class="bi bi-skip-forward"></i> Skip (don\'t add)</button>';
+      html += '</div>';
+
+      section.innerHTML = html;
+
+      // Add change handlers for custom location toggle
+      for (var j = 0; j < detectedNewJobs.length; j++) {
+        (function(idx) {
+          var select = document.getElementById('newjob-location-' + idx);
+          if (select) {
+            select.addEventListener('change', function() {
+              var customInput = document.getElementById('newjob-custom-loc-' + idx);
+              if (this.value === '__CUSTOM__') {
+                customInput.style.display = 'block';
+                customInput.focus();
+              } else {
+                customInput.style.display = 'none';
+              }
+            });
+          }
+        })(j);
+      }
+    }
+
+    /**
+     * User confirms new jobs — save to Job Tracking and continue import.
+     */
+    function confirmNewJobs() {
+      var jobsToAdd = [];
+      var hasErrors = false;
+
+      for (var i = 0; i < detectedNewJobs.length; i++) {
+        var jobName = document.getElementById('newjob-name-' + i).value.trim();
+        var locationSelect = document.getElementById('newjob-location-' + i);
+        var location = locationSelect.value;
+
+        if (location === '__CUSTOM__') {
+          location = document.getElementById('newjob-custom-loc-' + i).value.trim();
+        }
+
+        if (!location) {
+          locationSelect.style.borderColor = 'red';
+          hasErrors = true;
+          continue;
+        }
+
+        jobsToAdd.push({
+          jobNumber: detectedNewJobs[i].jobNumber,
+          jobName: jobName || detectedNewJobs[i].excelJobName,
+          location: location
+        });
+      }
+
+      if (hasErrors) {
+        showNotification('Please select a location for all new jobs.', 'warning');
+        return;
+      }
+
+      // Save to Job Tracking via backend
+      var btn = document.querySelector('#newJobsSection .btn-primary');
+      if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Adding...'; }
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          console.log('Added new jobs to Job Tracking:', result);
+
+          // Merge new jobs into local jobTrackingData
+          for (var j = 0; j < jobsToAdd.length; j++) {
+            var newJob = jobsToAdd[j];
+            jobTrackingData[newJob.jobNumber] = {
+              status: 'Active',
+              location: newJob.location,
+              jobName: newJob.jobName,
+              foreman: '',
+              startDate: '',
+              estEndDate: '',
+              isCompleted: false,
+              isPendingStart: false,
+              isActive: true,
+              isOnHold: false,
+              schedule: ''
+            };
+
+            // Also update the parsed crew's location from Job Tracking
+            for (var pc = 0; pc < parsedCrews.length; pc++) {
+              if (parsedCrews[pc].jobNumber === newJob.jobNumber) {
+                parsedCrews[pc].mappedLocation = newJob.location;
+                parsedCrews[pc].location = newJob.location;
+                parsedCrews[pc].locationFromJobTracking = true;
+                parsedCrews[pc].isUnknownLocation = false;
+              }
+            }
+          }
+
+          // Hide the new jobs section and continue
+          document.getElementById('newJobsSection').style.display = 'none';
+          showNotification('✅ Added ' + result.added + ' job(s) to Job Tracking', 'success');
+          continueAfterNewJobs();
+        })
+        .withFailureHandler(function(error) {
+          if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-plus-circle"></i> Add to Job Tracking & Continue'; }
+          showNotification('Error adding jobs: ' + error, 'error');
+        })
+        .addNewJobsToTracking(JSON.stringify(jobsToAdd));
+    }
+
+    /**
+     * User skips new job addition — continue import without adding to Job Tracking.
+     */
+    function skipNewJobs() {
+      document.getElementById('newJobsSection').style.display = 'none';
+      continueAfterNewJobs();
     }
 
     /**
@@ -2473,22 +2725,42 @@
         // Check Job Tracking for this job's status and info
         var jobInfo = jobTrackingData[crew.jobNumber];
         var isPendingStart = jobInfo && jobInfo.isPendingStart;
+        var isOnHold = jobInfo && jobInfo.isOnHold;
         var jobTrackingLocation = jobInfo ? jobInfo.location : '';
         var jobStartDate = jobInfo ? jobInfo.startDate : '';
 
-        // Use Job Tracking location if available (especially for Pending Start jobs)
+        // Use Job Tracking location if available (especially for Pending Start/On Hold jobs)
         var displayLocation = crew.mappedLocation;
-        if (jobTrackingLocation && isPendingStart) {
+        if (jobTrackingLocation && (isPendingStart || isOnHold)) {
           displayLocation = jobTrackingLocation;
         }
 
-        // Card styling for Pending Start jobs
-        var cardStyle = isPendingStart ? ' style="border-left: 4px solid #ffc107; background: #fffbf0;"' : '';
+        // Card styling for Pending Start and On Hold jobs
+        var cardStyle = '';
+        if (isPendingStart) {
+          cardStyle = ' style="border-left: 4px solid #ffc107; background: #fffbf0;"';
+        } else if (isOnHold) {
+          cardStyle = ' style="border-left: 4px solid #6c757d; background: #f8f9fa;"';
+        }
 
         html += '<div class="crew-card" id="crew-card-' + crewId + '" data-job-number="' + crew.jobNumber + '"' + cardStyle + '>';
         html += '<div class="crew-card-header d-flex justify-content-between align-items-start">';
         html += '<div>';
-        html += '<i class="bi bi-geo-alt"></i> ' + displayLocation + ' <span class="text-muted">(' + crew.jobNumber + ')</span>';
+
+        // Determine Job Name and Location for display
+        var jobInfo = jobTrackingData[crew.jobNumber];
+        var cardJobName = (jobInfo && jobInfo.jobName) ? jobInfo.jobName : crew.originalLocation;
+        var cardLocation = displayLocation; // City name from Job Tracking or mapping
+
+        // Show: Job Name (job#) — Location
+        // When Job Name = Location (e.g., both "Helena"), just show once
+        var jobNameMatchesLocation = cardJobName.toLowerCase() === cardLocation.toLowerCase();
+
+        html += '<i class="bi bi-geo-alt"></i> <strong>' + escapeHtml(cardJobName) + '</strong>';
+        html += ' <span class="text-muted">(' + crew.jobNumber + ')</span>';
+        if (!jobNameMatchesLocation && cardLocation) {
+          html += ' <span class="text-muted">—</span> <span class="text-muted" style="font-size: 12px;"><i class="bi bi-pin-map"></i> ' + escapeHtml(cardLocation) + '</span>';
+        }
 
         // Show Pending Start badge and start date
         if (isPendingStart) {
@@ -2496,6 +2768,11 @@
           if (jobStartDate) {
             html += '<br><small class="text-muted"><i class="bi bi-calendar-event"></i> Est. Start: ' + jobStartDate + '</small>';
           }
+        }
+
+        // Show On Hold badge
+        if (isOnHold) {
+          html += ' <span class="badge bg-secondary ms-1" title="Job is on hold">⏸️ On Hold</span>';
         }
 
         html += '</div>';
@@ -2721,29 +2998,40 @@
         for (var i = 0; i < currentEmployees.length; i++) {
           var emp = currentEmployees[i];
           var empLocation = (emp.location || '').trim();
+          var empJobNum = (emp.jobNumber || '').trim();
 
-          // Check if this employee is in a special location
+          // Check if this employee is in a special location by location name
+          // OR by 005-26 job prefix (Light Duty employees now have Location = "Helena")
+          var matchedSpecialLoc = null;
           for (var sl = 0; sl < specialLocationNames.length; sl++) {
             if (empLocation.toLowerCase() === specialLocationNames[sl].toLowerCase()) {
+              matchedSpecialLoc = specialLocationNames[sl];
+              break;
+            }
+          }
+          // Also detect 005-26 prefix as Light Duty (these employees have Location = Helena)
+          if (!matchedSpecialLoc && empJobNum.indexOf('005-') === 0) {
+            matchedSpecialLoc = 'Light Duty';
+          }
+
+          if (matchedSpecialLoc) {
               // Add to special location tracking (avoiding duplicates)
-              if (!specialLocationEmployees[specialLocationNames[sl]]) {
-                specialLocationEmployees[specialLocationNames[sl]] = [];
+              if (!specialLocationEmployees[matchedSpecialLoc]) {
+                specialLocationEmployees[matchedSpecialLoc] = [];
               }
 
-              var exists = specialLocationEmployees[specialLocationNames[sl]].some(function(e) {
+              var exists = specialLocationEmployees[matchedSpecialLoc].some(function(e) {
                 return e.name.toLowerCase() === (emp.name || '').toLowerCase();
               });
 
               if (!exists) {
-                specialLocationEmployees[specialLocationNames[sl]].push({
+                specialLocationEmployees[matchedSpecialLoc].push({
                   name: emp.name,
                   classification: emp.jobClassification || '',
                   notes: 'From Employees sheet',
                   fromSheet: true
                 });
               }
-              break;
-            }
           }
         }
       }
@@ -3361,10 +3649,12 @@
           // If detected as "Weeds" and already on "Weeds" sheet location - no change needed
           var currentStatus = (spec.status || '').toLowerCase();
 
-          // Map status to expected location
+          // Map status to expected location on Employees sheet
+          // Note: Light Duty maps to Helena because Light Duty is a STATUS, not a location
+          // The 005-26 job number prefix handles exclusion from field visits
           var statusToLocationMap = {
             'weeds': 'weeds',
-            'light duty': 'light duty',
+            'light duty': 'helena',
             'vacation': 'vacation',
             'time off': 'vacation',
             'leave': 'leave',
@@ -3662,7 +3952,7 @@
         html += '<option value="">-- Keep Current --</option>';
         html += '<option value="Previous Employee"' + ( suggestedLocation === 'Previous Employee' ? ' selected' : '') + '>Previous Employee</option>';
         html += '<option value="Vacation"' + (suggestedLocation === 'Vacation' ? ' selected' : '') + '>Vacation</option>';
-        html += '<option value="Light Duty"' + (suggestedLocation === 'Light Duty' ? ' selected' : '') + '>Light Duty</option>';
+        html += '<option value="Light Duty"' + (suggestedLocation === 'Light Duty' ? ' selected' : '') + '>Light Duty (→ Helena, 005-26)</option>';
         html += '<option value="Weeds"' + (suggestedLocation === 'Weeds' ? ' selected' : '') + '>Weeds</option>';
         html += '<option value="Leave">Leave</option>';
         html += '<option disabled>──────────</option>';
@@ -3809,9 +4099,12 @@
             saveSpecialSelection(name, status, newLocation, false);
 
             // Track this employee in special locations for display
-            var specialLocs = ['Light Duty', 'Weeds', 'Vacation', 'Leave', 'Time Off'];
-            if (specialLocs.indexOf(newLocation) !== -1 || specialLocs.indexOf(status) !== -1) {
-              var displayLoc = newLocation || status;
+            // Note: Light Duty employees now get Location = Helena, so we check STATUS too
+            var specialStatuses = ['Light Duty', 'Weeds', 'Vacation', 'Leave', 'Time Off'];
+            var specialLocs = ['Weeds', 'Vacation', 'Leave', 'Time Off'];
+            var isSpecial = (specialLocs.indexOf(newLocation) !== -1 || specialStatuses.indexOf(status) !== -1);
+            if (isSpecial) {
+              var displayLoc = (status === 'Light Duty') ? 'Light Duty' : (newLocation || status);
               addToSpecialLocation(displayLoc, {
                 name: name,
                 classification: classification || '',
@@ -4058,10 +4351,11 @@
       var classification = classInput ? classInput.value : spec.classification || '';
 
       // Determine location based on status
+      // Light Duty is a STATUS, not a location — actual location is Helena
       var location = 'Weeds';  // Default for unassigned/waiting employees
       var statusLower = (spec.status || '').toLowerCase();
       if (statusLower === 'light duty') {
-        location = 'Light Duty';
+        location = 'Helena';
       } else if (statusLower === 'vacation' || statusLower === 'time off') {
         location = 'Vacation';
       } else if (statusLower === 'leave' || statusLower === 'fmla') {
@@ -4195,7 +4489,7 @@
         var loc = unknownLocations[i];
         html += '<div class="unknown-location" id="unknown-' + i + '">';
         html += '<div class="d-flex justify-content-between align-items-center flex-wrap gap-2">';
-        html += '<div><strong>' + escapeHtml(loc) + '</strong><br><small class="text-muted">Not in location mappings</small></div>';
+        html += '<div><strong>' + escapeHtml(loc) + '</strong><br><small class="text-muted">Not in Job Tracking or location mappings. Map to a city/location:</small></div>';
         html += '<div class="d-flex align-items-center gap-2">';
 
         // Dropdown for existing locations
@@ -4894,9 +5188,9 @@
         var crew = parsedCrews[i];
 
 
-        // Skip crews that are Pending Start or Completed - employees here shouldn't generate changes yet
+        // Skip crews that are Pending Start, On Hold, or Completed - employees here shouldn't generate changes yet
         var jobInfo = jobTrackingData[crew.jobNumber];
-        if (jobInfo && (jobInfo.isPendingStart || jobInfo.isCompleted)) {
+        if (jobInfo && (jobInfo.isPendingStart || jobInfo.isCompleted || jobInfo.isOnHold)) {
           console.log('Skipping proposed changes for crew ' + crew.jobNumber + ' (status: ' + jobInfo.status + ')');
           continue;
         }
@@ -5992,6 +6286,15 @@
         document.getElementById('btnApplyChanges').disabled = true;
         document.getElementById('btnApplyChanges').innerHTML = '<span class="spinner-border spinner-border-sm"></span> Applying...';
 
+        // Build jobNameMap from ALL parsedCrews (not just changes) for Job Tracking backfill
+        var jobNameMap = {};
+        for (var jm = 0; jm < parsedCrews.length; jm++) {
+          var pc = parsedCrews[jm];
+          if (pc.jobNumber && pc.originalLocation) {
+            jobNameMap[pc.jobNumber] = pc.originalLocation;
+          }
+        }
+
         var changes = changesToApply.map(function(c) {
           return {
             employeeName: c.match.employeeName,
@@ -6005,6 +6308,11 @@
           isForeman: c.employee.isForeman
         };
       });
+
+      // Attach jobNameMap to the first change so it's available server-side
+      if (changes.length > 0) {
+        changes[0].jobNameMap = jobNameMap;
+      }
 
       google.script.run
         .withSuccessHandler(function(result) {

@@ -732,6 +732,49 @@ Notes: [Any notes]
 
 ## Completed Features Log
 
+### March 26, 2026
+- ✅ **Job Name Column - Backfill Utility & Auto-Fill During Crew Import**
+  - **Goal:** Populate empty Job Name values in Job Tracking sheet (col Z) for existing jobs
+  - **What was built:**
+    1. **`backfillJobNames()` utility** - One-click backfill using reverse location mapping
+       - Bozeman → "Belgrade Dock", Lolo → "Lolo Sub Dock", etc.
+       - Skips completed jobs, shows results summary
+       - Also reads custom location mappings from ScriptProperties
+       - Menu: Glove Manager → 📥 Import Crew Makeup → 🔧 Utilities → 📝 Backfill Job Names
+    2. **`backfillJobNamesFromImport()` auto-fill** - During Crew Import
+       - Client sends `jobNameMap` (job# → Excel header text) with change data
+       - `syncJobTrackingAfterImport()` calls backfill for existing jobs with empty Job Name
+       - Result message shows "X Job Name(s) backfilled"
+  - **Files Modified:**
+    - `src/85-DataImport.gs` - Added `backfillJobNames()` (~120 lines), `backfillJobNamesFromImport()` (~40 lines), updated `applyCrewChanges()` and `syncJobTrackingAfterImport()`
+    - `src/CrewImport.html` - Builds `jobNameMap` from `parsedCrews` and sends with changes
+    - `src/Code.gs` - Added menu item
+
+- ✅ **Light Duty Location Normalization (Forward-Only, Backwards Compatible)**
+  - **Goal:** Light Duty is a STATUS, not a location. New Light Duty employees should get Location = "Helena" (actual city) with 005-26 job prefix handling exclusion.
+  - **Problem:** The `Location` column on Employees sheet serves double duty: physical city (for drive times, change-out dates) AND employee status (Light Duty, Weeds, Vacation). This breaks when multiple crew types exist in the same city (e.g., Helena has office, dock, and bid job crews).
+  - **Solution (forward-only):**
+    1. **Crew Import** - When setting someone as "Light Duty", system now writes `Location = "Helena"` + `Job Number = 005-26.#`
+    2. **All filter/skip lists** - Still include "Light Duty" for backwards compatibility with existing data
+    3. **Dropdown** - Shows "Light Duty (→ Helena, 005-26)" to indicate the mapping
+    4. **Special location cards** - Also detect 005- job prefix as Light Duty (since new ones have Location = Helena)
+    5. **Job Tracking differentiation** - Use Job Name (col Z) to distinguish crews in same city:
+       - 005-26: Job Name = "Office/Management", Location = "Helena"
+       - Dock crews: Job Name = "Helena Dock A", Location = "Helena"
+       - Bid jobs: Job Name = "Montana Ave Rebuild", Location = "Helena"
+  - **What did NOT change (backwards compatible):**
+    - Existing employees with `Location = "Light Duty"` still filtered correctly everywhere
+    - "Weeds", "Vacation", "Leave" completely untouched
+    - Change-out dates unaffected (Helena = 3 months, same as before)
+    - Trip Planner, Training, Safety Compliance exclusions all work via both old Location value AND 005- prefix
+  - **Future plan:** Add proper "Employee Status" column to fully separate location from condition (Light Duty, Weeds, Vacation, Leave). Needs planning session.
+  - **Files Modified:**
+    - `src/85-DataImport.gs` - `applySpecialCircumstanceUpdate()` converts Light Duty → Helena
+    - `src/87-RoutePlanner.gs` - Updated OFFICE_ONLY_LOCATIONS comments (kept Light Duty for compat)
+    - `src/Code.gs` - Updated comments on skip lists (kept Light Duty for compat)
+    - `src/CrewImport.html` - Updated dropdown label, statusToLocationMap, special card detection for 005- prefix, add-as-new-employee flow
+    - `AGENTS.md` - Added Location vs Employee Status documentation
+
 ### March 19, 2026
 - ✅ **Phase 2: HV Testers & Phasing Sets Equipment Tracking**
   - **Goal:** Track HV Testers and Phasing Sets with 10-year replacement cycles

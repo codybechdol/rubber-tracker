@@ -12,6 +12,7 @@
  * - "Must return to Helena" day: Tuesday (Mon-Thu) or Friday (Tue-Fri)
  * - Overnight stays OK on other days if saves significant time
  *
+ *w
  * Phase 6 Update: Now uses Task Metadata as single source of truth.
  */
 
@@ -43,10 +44,12 @@ var CREW_PER_TASK = 10;   // 10 min per task
 
 // Non-field locations (office/phone work only - excluded from trip planning)
 // Note: Helena is NOT included here - Helena crews need field visits for training/swaps
+// Note: "Light Duty" kept for backwards compatibility with existing data.
+//       New Light Duty employees get Location = "Helena" + 005- prefix (which is excluded via isExcludedJobPrefix).
 var OFFICE_ONLY_LOCATIONS = [
   'weeds',            // Employees waiting for job to start (phone work only)
   'previous employee',// No longer with company
-  'light duty',       // Office-based employees
+  'light duty',       // Legacy: office-based employees (new ones get Helena + 005-)
   'vacation',         // On vacation
   'leave',            // On leave
   'unknown'           // Unknown location

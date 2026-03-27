@@ -2091,8 +2091,47 @@ function updateComplianceSheetFromLogs(complianceData) {
     sheet.getRange(rowNum, 12).setNote(monthlyNote);
   }
 
+  // === REMOVE STALE ROWS ===
+  // Delete rows that exist in the sheet for this week but are NOT in complianceData
+  // This handles crews that were filtered out (e.g., by filterCrewsByJobTrackingStartDate)
+  // Skip "Resolved" rows - those were manually resolved by the user and should be preserved
+  var rowsToDelete = [];
+  for (var existingJob in existingRows) {
+    if (!complianceData.crews[existingJob] && existingRows[existingJob].status !== 'Resolved') {
+      rowsToDelete.push(existingRows[existingJob].rowNum);
+      Logger.log("updateComplianceSheetFromLogs: Marking stale row for deletion - crew " + existingJob +
+                 " (row " + existingRows[existingJob].rowNum + ", status: " + existingRows[existingJob].status + ")");
+    }
+  }
+
+  // Delete stale rows in reverse order (bottom-up) to avoid shifting row numbers
+  if (rowsToDelete.length > 0) {
+    rowsToDelete.sort(function(a, b) { return b - a; }); // Sort descending
+    for (var d = 0; d < rowsToDelete.length; d++) {
+      sheet.deleteRow(rowsToDelete[d]);
+    }
+    Logger.log("updateComplianceSheetFromLogs: Deleted " + rowsToDelete.length + " stale rows for week " + weekStartStr);
+  }
+
   // Re-apply data validation dropdowns to all affected rows
   // setValues() and appendRow() strip data validation, so we must restore it
+  // NOTE: After deleting rows above, row numbers may have shifted. Re-read to get correct row numbers.
+  if (affectedRows.length > 0 && rowsToDelete.length > 0) {
+    // Row numbers shifted due to deletions - re-read the sheet to find correct rows
+    var freshData = sheet.getDataRange().getValues();
+    affectedRows = [];
+    for (var fi = 1; fi < freshData.length; fi++) {
+      var fWeek = freshData[fi][0];
+      var fJob = String(freshData[fi][1] || '').trim();
+      if (fWeek && fJob) {
+        var fWeekStr = Utilities.formatDate(new Date(fWeek), tz, 'MM/dd/yyyy');
+        if (fWeekStr === weekStartStr && complianceData.crews[fJob]) {
+          affectedRows.push(fi + 1); // 1-based row number
+        }
+      }
+    }
+  }
+
   if (affectedRows.length > 0) {
     var dayValues = ['✅', '✅L', '❌', '❌W', 'N/A', '⏳', ''];
     var dayRule = SpreadsheetApp.newDataValidation()
@@ -2116,7 +2155,7 @@ function updateComplianceSheetFromLogs(complianceData) {
     Logger.log("updateComplianceSheetFromLogs: Re-applied dropdowns to " + affectedRows.length + " rows");
   }
 
-  Logger.log("updateComplianceSheetFromLogs: Updated " + updated + ", Added " + added + " rows (with tooltips)");
+  Logger.log("updateComplianceSheetFromLogs: Updated " + updated + ", Added " + added + ", Deleted " + rowsToDelete.length + " rows (with tooltips)");
 }
 
 /**
@@ -16486,3 +16525,4 @@ function forceAddMissingCrewsToCompliance() {
   ui.alert('Success', 'Added ' + addedCount + ' missing crew(s) to Safety Compliance for week ' + weekStartStr + '\n\nThe sheet has been formatted with alternating week colors and borders.', ui.ButtonSet.OK);
 }
 
+ 

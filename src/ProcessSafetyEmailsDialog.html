@@ -604,12 +604,29 @@
             }
           }
 
+          // Build PDF too-large warnings
+          var pdfWarningInfo = "";
+          if (result.pdfWarnings && result.pdfWarnings.length > 0) {
+            pdfWarningInfo = "<div style='margin-top:8px;padding:10px;background:#fff3e0;border-radius:6px;border:1px solid #ff9800;'>" +
+              "<strong style='color:#e65100;'>⚠️ PDF Too Large to OCR (" + result.pdfWarnings.length + "):</strong><br>" +
+              "<span style='font-size:11px;color:#bf360c;'>These JHAs used the <em>email subject date</em> instead of the PDF's actual Date Completed. Please verify manually.</span><br><br>";
+            for (var pw = 0; pw < result.pdfWarnings.length; pw++) {
+              var w = result.pdfWarnings[pw];
+              pdfWarningInfo += "<div style='padding:6px 8px;margin:4px 0;background:#fff;border-radius:4px;border-left:3px solid #ff9800;font-size:12px;'>" +
+                "<strong>" + w.jobNumber + "</strong> (" + (w.foreman || 'Unknown') + ")<br>" +
+                "📄 " + w.pdfName + " — <strong>" + w.sizeMB + " MB</strong> (max 2 MB)<br>" +
+                "📅 Date used: " + w.dateUsed + " <em>(from " + w.dateSource + ")</em>" +
+                "</div>";
+            }
+            pdfWarningInfo += "</div>";
+          }
+
           status.innerHTML =
             "✅ <span class='progress'>All Complete!</span>" + modeInfo + "<br>" +
             "<div class='info'>📧 Total emails processed: " + result.totalThreads + "</div>" +
             "<div class='info'>This batch: " + result.processedThisBatch + " processed, " + result.skippedThisBatch + " skipped</div>" +
             "<div class='info'>Equipment issues found: " + result.issuesThisBatch + "</div>" +
-            logsInfo + complianceInfo + skipInfo;
+            logsInfo + complianceInfo + skipInfo + pdfWarningInfo;
 
           btn.style.background = "#34A853";
           btn.innerHTML = "✅ Close";

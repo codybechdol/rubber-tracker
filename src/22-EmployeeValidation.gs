@@ -243,7 +243,8 @@ function setupJobTrackingSheet() {
     'Work Schedule',        // V (hidden)
     'Skip Days',            // W (hidden)
     'Schedule Effective',   // X (hidden)
-    'Schedule History'      // Y (hidden)
+    'Schedule History',     // Y (hidden)
+    'Job Name'              // Z (project/site name, distinct from Location city)
   ];
 
   // Write headers
@@ -282,6 +283,7 @@ function setupJobTrackingSheet() {
   sheet.setColumnWidth(23, 120); // Skip Days (hidden)
   sheet.setColumnWidth(24, 130); // Schedule Effective (hidden)
   sheet.setColumnWidth(25, 200); // Schedule History (hidden)
+  sheet.setColumnWidth(26, 200); // Job Name
 
   // Hide schedule history columns (V-Y = columns 22-25)
   sheet.hideColumns(22, 4);

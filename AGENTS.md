@@ -154,6 +154,28 @@ Job Tracking sheet manages crew lifecycle, schedules, and Safety Compliance sett
 - **Statuses:** Active, Pending Start, Completed, On Hold
 - **Pending Start jobs** excluded from Safety Compliance tracking until start date
 - **Completed jobs** auto-sync to Training (removes future pending training rows)
+- **Job Name** (col Z): Descriptive site/project name from Excel crew import (e.g., "Belgrade Dock", "Office/Management")
+
+**Location vs Employee Status (Important!)**
+The `Location` column on the Employees sheet currently serves double duty:
+- **Physical city** (Bozeman, Helena, Great Falls) — used for drive times, change-out dates, Trip Planner
+- **Employee status** (Light Duty, Weeds, Vacation, Leave) — used as exclusion signals
+
+**Current state (March 2026):**
+- "Light Duty", "Weeds", "Vacation", "Leave" are still valid Location values for backwards compatibility
+- New Light Duty employees via Crew Import get **Location = "Helena"** + **Job Number = 005-26.#** (the 005- prefix handles exclusion)
+- All filter/skip lists still include "Light Duty" for existing data
+- **Future plan:** Add proper "Employee Status" column to separate location from condition. Needs planning.
+
+**Differentiating crews in same city (e.g., multiple Helena crews):**
+- Use `Location` = city name (Helena) for ALL crews in that city
+- Use `Job Name` (col Z in Job Tracking) for descriptive labels (e.g., "Office/Management", "Helena Dock A", "Montana Ave Rebuild")
+- Use `Job Number` prefix for exclusion logic (005- = office/light duty, 002- = lost/destroyed)
+
+**Job prefix exclusions:**
+- `DEFAULT_EXCLUDED_JOB_PREFIXES = ['002', '005']` in `75-Scheduling.gs`
+- 002-: Lost/Destroyed/In Testing equipment records
+- 005-: Office/Management/Light Duty employees
 
 **Consolidated Safety Compliance Config (March 2026)**
 Job Tracking now includes 9 visible schedule columns (L-T) that replace the separate "Safety Compliance Config" sheet:

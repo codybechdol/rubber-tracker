@@ -2092,6 +2092,7 @@ function collectSafetyReportsTasks(ss, tasksByLocation, employeeLocations, today
       foreman: foreman,
       jobNumber: jobNumber,
       vehicleNumber: vehicleNumber,
+      currentItem: issueDescription,
       phoneNumber: '',
       dueDate: reportDate,
       description: issueDescription,

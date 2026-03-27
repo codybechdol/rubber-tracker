@@ -2470,145 +2470,17 @@ function getEmployeeNamesForMatching() {
     }
   }
 
-  // ===== PART 2: Read from Employee History (terminated employees) =====
-  var historySheet = ss.getSheetByName('Employee History');
-  if (historySheet && historySheet.getLastRow() >= 3) {
-    var histData = historySheet.getDataRange().getValues();
-    var histHeaders = histData[0];
-
-    // Find column indices in Employee History
-    var histNameCol = -1;
-    var histDateCol = -1;
-    var histLocationCol = -1;
-    var histJobNumCol = -1;
-    var histLastDayCol = -1;
-    var histLastDayReasonCol = -1;
-
-    for (var hh = 0; hh < histHeaders.length; hh++) {
-      var histHeader = String(histHeaders[hh]).toLowerCase().trim();
-      if (histHeader === 'employee name') histNameCol = hh;
-      if (histHeader === 'date') histDateCol = hh;
-      if (histHeader === 'location') histLocationCol = hh;
-      if (histHeader === 'job number') histJobNumCol = hh;
-      if (histHeader === 'last day') histLastDayCol = hh;
-      if (histHeader === 'last day reason') histLastDayReasonCol = hh;
-    }
-
-    if (histNameCol === -1 || histDateCol === -1) {
-      Logger.log('getEmployeeNamesForMatching: Could not find required columns in Employee History');
-    } else {
-      // Group all entries by employee name
-      var employeeEntries = {};
-
-      for (var hi = 2; hi < histData.length; hi++) {
-        var histRow = histData[hi];
-        var empName = String(histRow[histNameCol] || '').trim();
-        var entryDate = histRow[histDateCol];
-
-        if (!empName) continue;
-
-        var empKey = empName.toLowerCase();
-        if (!employeeEntries[empKey]) {
-          employeeEntries[empKey] = [];
-        }
-
-        // Also capture Event Type column for "Terminated" detection
-        var eventType = '';
-        for (var etc = 0; etc < histHeaders.length; etc++) {
-          var etHeader = String(histHeaders[etc]).toLowerCase().trim();
-          if (etHeader === 'event type') {
-            eventType = String(histRow[etc] || '').trim();
-            break;
-          }
-        }
-
-        employeeEntries[empKey].push({
-          name: empName,
-          date: entryDate,
-          lastDay: histLastDayCol !== -1 ? String(histRow[histLastDayCol] || '').trim() : '',
-          lastDayReason: histLastDayReasonCol !== -1 ? String(histRow[histLastDayReasonCol] || '').trim() : '',
-          location: histLocationCol !== -1 ? String(histRow[histLocationCol] || '').trim() : '',
-          eventType: eventType
-        });
-      }
-
-      // For each employee, find the most recent entry and check if it's a termination
-      var terminatedEmployees = {};
-
-      for (var empKey in employeeEntries) {
-        var entries = employeeEntries[empKey];
-
-        // Find most recent entry by Date
-        var mostRecentEntry = null;
-        var mostRecentDate = null;
-
-        for (var ei = 0; ei < entries.length; ei++) {
-          var entry = entries[ei];
-          var entryDate = entry.date;
-
-          // Parse date for comparison
-          var parsedDate = null;
-          if (entryDate instanceof Date) {
-            parsedDate = entryDate;
-          } else if (entryDate) {
-            parsedDate = new Date(entryDate);
-          }
-
-          if (parsedDate && !isNaN(parsedDate.getTime())) {
-            if (!mostRecentDate || parsedDate > mostRecentDate) {
-              mostRecentDate = parsedDate;
-              mostRecentEntry = entry;
-            }
-          }
-        }
-
-        // Check if most recent entry is a termination:
-        // 1. Has Last Day + Last Day Reason columns filled in, OR
-        // 2. Location = "Previous Employee", OR
-        // 3. Event Type = "Terminated", "LAYOFF", "Fired", etc.
-        var isTerminated = false;
-        if (mostRecentEntry) {
-          if (mostRecentEntry.lastDay && mostRecentEntry.lastDayReason) {
-            isTerminated = true;
-          } else if (mostRecentEntry.location && mostRecentEntry.location.toLowerCase() === 'previous employee') {
-            isTerminated = true;
-          } else if (mostRecentEntry.eventType) {
-            var eventTypeLower = mostRecentEntry.eventType.toLowerCase();
-            if (eventTypeLower === 'terminated' || eventTypeLower === 'layoff' ||
-                eventTypeLower === 'fired' || eventTypeLower === 'quit' ||
-                eventTypeLower.indexOf('terminated') !== -1 ||
-                eventTypeLower.indexOf('layoff') !== -1) {
-              isTerminated = true;
-            }
-          }
-        }
-
-        if (isTerminated && mostRecentEntry) {
-          terminatedEmployees[empKey] = {
-            name: mostRecentEntry.name,
-            location: 'Previous Employee',
-            jobNum: '',
-            class: '',
-            gloveSize: '',
-            sleeveSize: '',
-            jobClassification: '',
-            rowIndex: -1, // No row index (not on Employees sheet)
-            source: 'Employee History',
-            lastDay: mostRecentEntry.lastDay || mostRecentEntry.date,
-            lastDayReason: mostRecentEntry.lastDayReason || mostRecentEntry.eventType || 'Terminated'
-          };
-        }
-      }
-
-      // Add terminated employees to the list
-      for (var termKey in terminatedEmployees) {
-        employees.push(terminatedEmployees[termKey]);
-        Logger.log('  Added terminated employee: ' + termKey + ' (lastDay: ' + terminatedEmployees[termKey].lastDay + ', reason: ' + terminatedEmployees[termKey].lastDayReason + ')');
-      }
-
-      Logger.log('getEmployeeNamesForMatching: Found ' + Object.keys(terminatedEmployees).length + ' terminated employees in Employee History');
-    }
+  // Build lookup of active employee names for reference
+  var activeEmployeeNames = {};
+  for (var ae = 0; ae < employees.length; ae++) {
+    activeEmployeeNames[employees[ae].name.toLowerCase().trim()] = true;
   }
+
+  // NOTE: Employee History (Part 2) intentionally disabled.
+  // Adding terminated employees from history caused false positives where active employees
+  // were matched to their old "Terminated" history entries, making them show as "NEW" in
+  // Special Circumstances. The filterSpecialCircumstancesAlreadyMatched() function in
+  // CrewImport.html handles terminated employee filtering on the client side instead.
 
   Logger.log('getEmployeeNamesForMatching: Returning ' + employees.length + ' total employees');
   return employees;
@@ -6185,6 +6057,8 @@ function onOpen() {
         .addItem('➕ Add Future Job', 'addFutureJob')
         .addItem('🎨 Apply Job Tracking Formatting', 'menuApplyJobTrackingFormatting')
         .addItem('📅 Add Schedule History Columns', 'migrateJobTrackingScheduleColumns')
+        .addItem('📝 Add Job Name Column', 'migrateJobTrackingAddJobName')
+        .addItem('📝 Backfill Job Names', 'backfillJobNames')
         .addItem('📂 View Job Tracking', 'openJobTrackingSheet')
         .addSeparator()
         .addItem('🔄 Sync Completed Jobs to Training', 'syncCompletedJobsToTraining')
@@ -11688,7 +11562,11 @@ function getTasksWithMetadata() {
         // Notes (for SMS messages - Missing Safety Reports, etc.)
         n: task.notes || '',
         // Job number (for Safety Compliance tasks)
-        job: task.jobNumber || extractJobNumberFromTaskID(taskIdValue)
+        job: task.jobNumber || extractJobNumberFromTaskID(taskIdValue),
+        // Safety Equipment fields
+        veh: task.vehicleNumber || '',
+        cur: task.currentItem || '',
+        esubj: task.emailSubject || ''
       };
     });
 
@@ -13947,11 +13825,11 @@ function buildSheets() {
       // Set dropdown for Location column - valid locations only (no Unknown)
       if (locationColIdx !== -1) {
         var validLocations = [
-          'Big Sky', 'Billings', 'Bozeman', 'Butte', 'CA Sub', 'California',
+          'Anaconda', 'Big Sky', 'Billings', 'Bonner', 'Bozeman', 'Butte', 'CA Sub', 'California',
           'Elliston', 'Ennis', 'Glendive', 'Gold Creek', 'Great Falls', 'Helena',
-          'Kalispell', 'Leave', 'Light Duty', 'Livingston', 'Lolo', 'Miles City',
+          'Kalispell', 'Leave', 'Livingston', 'Lolo', 'Manhattan', 'Miles City',
           'Missoula', 'Northern Lights', 'Rapelje', 'Sidney', 'South Dakota',
-          'South Dakota Dock', 'Stanford', 'Vacation', 'Weeds', 'Previous Employee'
+          'South Dakota Dock', 'Stanford', 'Texas', 'Three Forks', 'Vacation', 'Weeds', 'Previous Employee'
         ];
         var locationRange = employeesSheet.getRange(2, locationColIdx, Math.max(1, lastRow - 1), 1);
         var locationRule = SpreadsheetApp.newDataValidation()
@@ -15629,7 +15507,6 @@ function setupReclaimsSheet(sheet, savedApprovals, prevEmpCount) {
       'Helena': 'CL2',
       'Kalispell': 'CL2',
       'Leave': 'CL2 & CL3',
-      'Light Duty': 'CL2 & CL3',
       'Livingston': 'CL2 & CL3',
       'Lolo': 'CL2',
       'Miles City': 'CL2',
@@ -19746,7 +19623,8 @@ function getCrewsForLeadAssignment() {
 
       if (!fullJobNum || !name) continue;
 
-      // Skip office-only locations
+      // Skip office-only locations (not physical crew locations)
+      // "Light Duty" kept for backwards compatibility - new Light Duty employees get Location = "Helena" + 005- prefix
       var skipLocations = ['Weeds', 'Previous Employee', 'Light Duty', 'Vacation', 'Leave', 'Unknown'];
       if (skipLocations.indexOf(location) !== -1) continue;
 
