@@ -413,9 +413,30 @@ function applyCrewChanges(changes) {
   // Instead of ~200 individual setValue calls, write each modified column in one call
   var batchWriteCount = 0;
   if (columnsModified.location) {
+    // Temporarily clear location validation to avoid errors from existing values
+    // that might not be in the validation list (e.g., old locations like "Bonner", "Unknown")
+    var locationRange = employeesSheet.getRange(2, locationCol + 1, data.length - 1, 1);
+    locationRange.clearDataValidations();
+
     var locationValues = data.map(function(row) { return [row[locationCol]]; });
     employeesSheet.getRange(1, locationCol + 1, data.length, 1).setValues(locationValues);
     batchWriteCount++;
+
+    // Re-apply validation with ALL location values that now exist in the sheet
+    var allLocationValues = {};
+    for (var lv = 1; lv < data.length; lv++) {
+      var locVal = String(data[lv][locationCol] || '').trim();
+      if (locVal) allLocationValues[locVal] = true;
+    }
+    var allLocs = Object.keys(allLocationValues).sort();
+    if (allLocs.length > 0) {
+      var revalidationRule = SpreadsheetApp.newDataValidation()
+        .requireValueInList(allLocs, true)
+        .setAllowInvalid(false)
+        .build();
+      locationRange.setDataValidation(revalidationRule);
+      Logger.log('applyCrewChanges: Re-applied location validation with ' + allLocs.length + ' values');
+    }
   }
   if (columnsModified.jobNum) {
     var jobNumValues = data.map(function(row) { return [row[jobNumCol]]; });

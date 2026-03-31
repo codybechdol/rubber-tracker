@@ -1412,6 +1412,11 @@
       // Filter out special circumstances that are already terminated as Previous Employees
       filterSpecialCircumstancesAlreadyMatched();
 
+      // Pre-resolve obvious cross-crew duplicates BEFORE rendering crew cards
+      // If the same employee appears in multiple crews but is already assigned to one on the
+      // Employees sheet, remove them from the wrong crew(s) immediately
+      preResolveObviousDuplicates();
+
       // Show crew preview and match employees
       showCrewPreview();
       matchEmployeesToSheet();
@@ -1422,6 +1427,84 @@
           displayPreview();
         });
       }
+    }
+
+    /**
+     * Pre-resolves obvious cross-crew duplicates by checking the Employees sheet.
+     * If the same employee name appears in multiple parsed crews AND they're already
+     * assigned to one of those crews on the Employees sheet, physically remove them
+     * from the other crew(s). This prevents ghost entries from stale Excel data.
+     */
+    function preResolveObviousDuplicates() {
+      if (!parsedCrews || parsedCrews.length === 0 || !currentEmployees || currentEmployees.length === 0) return;
+
+      // Build a map of employee name → list of {crewIndex, empIndex, crewJobNumber}
+      var nameToCrews = {};
+      for (var i = 0; i < parsedCrews.length; i++) {
+        var crew = parsedCrews[i];
+        for (var j = 0; j < crew.employees.length; j++) {
+          var emp = crew.employees[j];
+          var key = emp.name.toLowerCase().trim();
+          if (!nameToCrews[key]) nameToCrews[key] = [];
+          nameToCrews[key].push({ crewIndex: i, empIndex: j, jobNumber: crew.jobNumber });
+        }
+      }
+
+      var removals = []; // {crewIndex, empIndex, name, fromJob, reason}
+
+      for (var name in nameToCrews) {
+        var entries = nameToCrews[name];
+        if (entries.length <= 1) continue; // Not a cross-crew duplicate
+
+        // Find this employee on the Employees sheet
+        var match = findBestMatchWithoutSkip(name, currentEmployees);
+        if (!match || match.confidence < 60 || !match.employeeData || !match.employeeData.jobNum) continue;
+
+        var currentJobBase = String(match.employeeData.jobNum).split('.')[0]; // Strip .N suffix
+
+        // Check if their current job matches any of the crews they appear in
+        var matchingCrewEntry = null;
+        var nonMatchingEntries = [];
+        for (var k = 0; k < entries.length; k++) {
+          if (entries[k].jobNumber === currentJobBase) {
+            matchingCrewEntry = entries[k];
+          } else {
+            nonMatchingEntries.push(entries[k]);
+          }
+        }
+
+        // If we found a clear match (employee IS assigned to one of the crews), remove from others
+        if (matchingCrewEntry && nonMatchingEntries.length > 0) {
+          for (var r = 0; r < nonMatchingEntries.length; r++) {
+            removals.push({
+              crewIndex: nonMatchingEntries[r].crewIndex,
+              empIndex: nonMatchingEntries[r].empIndex,
+              name: match.employeeName,
+              fromJob: nonMatchingEntries[r].jobNumber,
+              correctJob: currentJobBase
+            });
+          }
+        }
+      }
+
+      if (removals.length === 0) return;
+
+      // Sort removals by empIndex descending (so removal doesn't shift indices)
+      removals.sort(function(a, b) {
+        if (a.crewIndex !== b.crewIndex) return b.crewIndex - a.crewIndex;
+        return b.empIndex - a.empIndex;
+      });
+
+      // Actually remove the employees from the wrong crews
+      for (var m = 0; m < removals.length; m++) {
+        var rem = removals[m];
+        var crew = parsedCrews[rem.crewIndex];
+        console.log('PRE-RESOLVE: Removing "' + rem.name + '" from crew ' + crew.jobNumber +
+                    ' (stale data — employee is assigned to ' + rem.correctJob + ' on Employees sheet)');
+        crew.employees.splice(rem.empIndex, 1);
+      }
+
+      console.log('PRE-RESOLVE: Removed ' + removals.length + ' stale cross-crew duplicate(s)');
     }
 
     // ========== NEW HIRES FLOW ==========
@@ -3392,6 +3475,14 @@
           for (var e = 0; e < crew.employees.length; e++) {
             var emp = crew.employees[e];
             var empNameLower = emp.name.toLowerCase().trim();
+
+            // NUKE: Skip employees that were resolved as non-primary duplicates
+            // They belong to a different crew - don't show them here at all
+            if (emp.skippedDuplicate) {
+              console.log('Hiding ' + emp.name + ' from crew card ' + crew.jobNumber + ' (resolved as non-primary duplicate)');
+              continue;
+            }
+
             var isDuplicate = nameOccurrences[empNameLower] && nameOccurrences[empNameLower].length > 1;
 
             // Check if this employee is in Special Circumstances with a non-temporary status
@@ -4364,6 +4455,25 @@
                   spec.matchedFromSheet = true;
                   spec.employeeData = emp;
                   break;
+                }
+
+                // Nickname matching: split into first/last and check nicknames (e.g., Nick → Nicholas)
+                var specParts = cleanSpecName.split(/\s+/);
+                var empParts = empNameLower.split(/\s+/);
+                if (specParts.length >= 2 && empParts.length >= 2) {
+                  var specFirst = specParts[0];
+                  var specLast = specParts[specParts.length - 1];
+                  var empFirst = empParts[0];
+                  var empLast = empParts[empParts.length - 1];
+                  var lastSim = calculateSimilarity(specLast, empLast);
+                  if (lastSim >= 80 && firstNamesMatch(specFirst, empFirst)) {
+                    currentLocationOnSheet = (emp.location || '').toLowerCase();
+                    spec.matchedFromSheet = true;
+                    spec.employeeData = emp;
+                    spec.name = emp.name; // Use canonical name from sheet
+                    console.log('  Nickname match: "' + cleanSpecName + '" → "' + empNameLower + '"');
+                    break;
+                  }
                 }
               }
             }
@@ -5446,6 +5556,8 @@
       if (needsSelection.length === 0) {
         document.getElementById('duplicateSection').style.display = 'none';
         finishMatching();
+        // Re-render crew cards so skipped duplicates are removed from non-primary crew cards
+        showCrewPreview();
         displayPreview();
         return;
       }
@@ -5661,6 +5773,23 @@
           occ.scheduleType = ''; // No schedule detected
         }
 
+        // MAJOR BOOST: If employee is CURRENTLY assigned to this crew on the Employees sheet,
+        // this is almost certainly the correct primary job (stale Excel data in another column is common)
+        if (occ.match && occ.match.employeeData && occ.match.employeeData.jobNum) {
+          var currentJobBase = String(occ.match.employeeData.jobNum).split('.')[0]; // Strip .N suffix
+          if (currentJobBase === occ.crew.jobNumber) {
+            score += 500;
+            console.log('  +500: Employee currently assigned to ' + occ.crew.jobNumber + ' on Employees sheet');
+          }
+        }
+
+        // Small boost for NEW HIRE entries - these are intentional new assignments,
+        // non-NEW-HIRE entries in other crews are likely stale Excel data
+        if (occ.employee.isNewHire) {
+          score += 25;
+          console.log('  +25: NEW HIRE flag set for this occurrence');
+        }
+
         // Tie-breaker: more employees = likely main crew (+1 per employee, max 10)
         score += Math.min(occ.crew.employees.length, 10);
 
@@ -5682,6 +5811,9 @@
 
       document.getElementById('duplicateSection').style.display = 'none';
       finishMatching();
+
+      // Re-render crew cards so skipped duplicates are removed from non-primary crew cards
+      showCrewPreview();
 
       // Check for crews with multiple lead-type employees (SUP, GF, F, GTO F)
       // If found, show selection dialogs before proceeding
@@ -6309,8 +6441,9 @@
       for (var i = 0; i < parsedCrews.length; i++) {
         var crew = parsedCrews[i];
         for (var j = 0; j < crew.employees.length; j++) {
-          totalEmployees++;
           var emp = crew.employees[j];
+          if (emp.skippedDuplicate) continue; // Don't count non-primary duplicates
+          totalEmployees++;
           if (emp.matchedEmployee) matchedCount++;
           if (emp.unmatched) unmatchedCount++;
           if (emp.noChanges) noChangeCount++;
@@ -6391,6 +6524,7 @@
       for (var i = 0; i < parsedCrews.length; i++) {
         for (var j = 0; j < parsedCrews[i].employees.length; j++) {
           var emp = parsedCrews[i].employees[j];
+          if (emp.skippedDuplicate) continue; // Skip non-primary duplicates
           if (emp.unmatched) {
             // Filter out entries that don't look like real names
             // Real names should have at least 2 words and not start with common non-name patterns
