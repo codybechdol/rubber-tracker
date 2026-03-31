@@ -78,7 +78,7 @@
   </style>
 </head>
 <body>
-  <h2><? if (sheetName === 'Blankets') { ?>🧱 New Blanket Detected<? } else if (sheetName === 'HV Testers') { ?>⚡ New HV Tester Detected<? } else if (sheetName === 'Phasing Sets') { ?>⚡ New Phasing Set Detected<? } else { ?>📦 New <?= itemType ?> Detected<? } ?></h2>
+  <h2><? if (sheetName === 'Blankets') { ?>🧱 New Blanket Detected<? } else if (sheetName === 'HV Testers') { ?>⚡ New HV Tester Detected<? } else if (sheetName === 'Phasing Sets') { ?>⚡ New Phasing Set Detected<? } else if (sheetName === 'AED') { ?>🏥 New AED Detected<? } else { ?>📦 New <?= itemType ?> Detected<? } ?></h2>
 
   <div class="item-info">
     <strong>Item #:</strong> <?= itemNum ?><br>
@@ -137,6 +137,27 @@
       <label>Calibration Date:</label>
       <input type="date" id="calibrationDate" name="calibrationDate">
       <div class="hint">Replacement Date will auto-calculate (Calibration + 10 years)</div>
+    </div>
+
+    <? } else if (sheetName === 'AED') { ?>
+    <!-- AED: Model, Pad Expiration -->
+    <div class="form-group">
+      <label>Model:</label>
+      <select id="model" name="model">
+        <option value="">Select model...</option>
+        <option value="ZOLL AED Plus">ZOLL AED Plus</option>
+        <option value="ZOLL AED 3">ZOLL AED 3</option>
+        <option value="Philips HeartStart">Philips HeartStart</option>
+        <option value="Physio-Control LIFEPAK">Physio-Control LIFEPAK</option>
+        <option value="Cardiac Science Powerheart">Cardiac Science Powerheart</option>
+        <option value="Other">Other</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>Pad Expiration Date:</label>
+      <input type="date" id="padExpiration" name="padExpiration">
+      <div class="hint">When the defibrillator pads expire and need replacement</div>
     </div>
 
     <? } else if (sheetName === 'Blankets') { ?>
@@ -208,7 +229,7 @@
     </div>
     <? } ?>
 
-    <? if (sheetName !== 'HV Testers' && sheetName !== 'Phasing Sets') { ?>
+    <? if (sheetName !== 'HV Testers' && sheetName !== 'Phasing Sets' && sheetName !== 'AED') { ?>
     <div class="form-group">
       <label>Test Date:</label>
       <input type="date" id="testDate" name="testDate">
@@ -222,7 +243,7 @@
 
     <div class="form-group">
       <label>Status:</label>
-      <? if (sheetName === 'HV Testers' || sheetName === 'Phasing Sets') { ?>
+      <? if (sheetName === 'HV Testers' || sheetName === 'Phasing Sets' || sheetName === 'AED') { ?>
       <select id="status" name="status">
         <option value="On Shelf" selected>On Shelf</option>
         <option value="In Service">In Service</option>
@@ -250,7 +271,7 @@
     <div class="form-group">
       <label>Assigned To:</label>
       <input type="text" id="assignedTo" name="assignedTo" placeholder="Employee name or leave blank for On Shelf" value="">
-      <div class="hint">Enter employee name to auto-set Status to <? if (sheetName === 'HV Testers' || sheetName === 'Phasing Sets' || sheetName === 'Blankets') { ?>In Service<? } else { ?>Assigned<? } ?> and lookup their location</div>
+      <div class="hint">Enter employee name to auto-set Status to <? if (sheetName === 'HV Testers' || sheetName === 'Phasing Sets' || sheetName === 'Blankets' || sheetName === 'AED') { ?>In Service<? } else { ?>Assigned<? } ?> and lookup their location</div>
     </div>
 
     <hr style="margin: 20px 0;">
@@ -325,7 +346,7 @@
       } else {
         // This looks like an employee name
         // Set Status to In Service for Blankets/HV Testers/Phasing Sets, Assigned for Gloves/Sleeves
-        if (sheetName === 'Blankets' || sheetName === 'HV Testers' || sheetName === 'Phasing Sets') {
+        if (sheetName === 'Blankets' || sheetName === 'HV Testers' || sheetName === 'Phasing Sets' || sheetName === 'AED') {
           statusSelect.value = 'In Service';
         } else {
           statusSelect.value = 'Assigned';
@@ -381,6 +402,9 @@
         formData.kv = document.getElementById('kv').value;
         formData.serialNum = document.getElementById('serialNum').value;
         formData.calibrationDate = document.getElementById('calibrationDate').value;
+      } else if (sheetName === 'AED') {
+        formData.model = document.getElementById('model').value;
+        formData.padExpiration = document.getElementById('padExpiration').value;
       } else {
         // Gloves/Sleeves/Blankets fields
         formData.size = document.getElementById('size').value;

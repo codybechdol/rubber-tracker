@@ -6074,6 +6074,7 @@ function onOpen() {
       .addItem('🧱 Generate Blanket Swaps', 'menuGenerateBlanketSwaps')
       .addItem('⚡ Generate HV Tester Swaps', 'menuGenerateHVTesterSwaps')
       .addItem('⚡ Generate Phasing Set Swaps', 'menuGeneratePhasingSetSwaps')
+      .addItem('🏥 Generate AED Swaps', 'menuGenerateAEDSwaps')
       .addItem('Update Purchase Needs', 'updatePurchaseNeeds')
       .addItem('Update Inventory Reports', 'updateInventoryReports')
       .addItem('Run Reclaims Check', 'runReclaimsCheck')
@@ -6231,6 +6232,7 @@ function onOpen() {
         .addSeparator()
         .addItem('⚡ View HV Testers', 'openHVTestersSheet')
         .addItem('⚡ View Phasing Sets', 'openPhasingSetsSheet')
+        .addItem('🏥 View AED', 'openAEDSheet')
         .addItem('🔧 Fix Equipment Headers', 'fixEquipmentSheetHeaders'))
       .addSubMenu(ui.createMenu('🛒 Purchase Orders')
         .addItem('📝 Create Purchase Order', 'showPurchaseOrderDialog')
@@ -9143,6 +9145,39 @@ function saveHistoryFast(silent) {
       }
     }
 
+    // Process AED
+    // AED columns: A=Item#, B=Model, C=(unused), D=Pad Expiration, E=Date Assigned, F=Location, G=Status, H=Assigned To
+    if (aedSheet && aedSheet.getLastRow() > 1 && aedHistorySheet) {
+      var numAEDRows = aedSheet.getLastRow() - 1;
+      var aedDisplay = aedSheet.getRange(2, 1, numAEDRows, 8).getDisplayValues();
+      var aedRawValues = aedSheet.getRange(2, 1, numAEDRows, 8).getValues();
+
+      for (var a = 0; a < aedDisplay.length; a++) {
+        var aedRow = aedDisplay[a];
+        var aedRawRow = aedRawValues[a];
+        var aedItemNum = formatItemNum(aedRawRow[0]);
+        var aedModel = aedRow[1];              // Column B - Model
+        var aedDateAssignedRaw = aedRawRow[4]; // Raw date from Column E
+        var aedDateAssignedDisplay = aedRow[4]; // Display string for duplicate checking
+        var aedLocation = aedRow[5];           // Column F
+        var aedAssignedTo = aedRow[7];         // Column H
+
+        // Skip rows without item number or date assigned
+        if (!aedItemNum || !aedDateAssignedDisplay) continue;
+
+        // Use fast in-memory lookup with change type detection
+        var aedChangeResult = getChangeTypeFast(aedLookup, aedItemNum, aedAssignedTo, aedDateAssignedDisplay, aedLocation, 'AED');
+        if (!aedChangeResult.isDuplicate) {
+          // AED History columns: Date Assigned, Item#, Model, Location, Assigned To, Notes (6 columns)
+          newAEDRows.push([
+            silent ? formatDateForHistory(aedDateAssignedRaw) : aedDateAssignedDisplay,
+            aedItemNum, aedModel, aedLocation, aedAssignedTo, aedChangeResult.note || ''
+          ]);
+          newAEDEntries++;
+        }
+      }
+    }
+
     // BATCH WRITE: Write all new entries at once (MUCH faster than appendRow)
     // Now includes 7 columns (added Notes column)
     if (newGloveRows.length > 0) {
@@ -9184,9 +9219,9 @@ function saveHistoryFast(silent) {
 
     if (silent) {
       PropertiesService.getUserProperties().setProperty('historySavedThisSession', 'true');
-      logEvent('Fast history backup completed in ' + totalTime + 'ms. Gloves: ' + newGloveEntries + ', Sleeves: ' + newSleeveEntries + ', Blankets: ' + newBlanketEntries + ', HV Testers: ' + newHVTesterEntries + ', Phasing Sets: ' + newPhasingSetEntries + ', Employees: ' + newEmployeeEntries);
+      logEvent('Fast history backup completed in ' + totalTime + 'ms. Gloves: ' + newGloveEntries + ', Sleeves: ' + newSleeveEntries + ', Blankets: ' + newBlanketEntries + ', HV Testers: ' + newHVTesterEntries + ', Phasing Sets: ' + newPhasingSetEntries + ', AED: ' + newAEDEntries + ', Employees: ' + newEmployeeEntries);
     } else {
-      Logger.log('History saved in ' + totalTime + 'ms - Gloves: ' + newGloveEntries + ', Sleeves: ' + newSleeveEntries + ', Blankets: ' + newBlanketEntries + ', HV Testers: ' + newHVTesterEntries + ', Phasing Sets: ' + newPhasingSetEntries + ', Employees: ' + newEmployeeEntries);
+      Logger.log('History saved in ' + totalTime + 'ms - Gloves: ' + newGloveEntries + ', Sleeves: ' + newSleeveEntries + ', Blankets: ' + newBlanketEntries + ', HV Testers: ' + newHVTesterEntries + ', Phasing Sets: ' + newPhasingSetEntries + ', AED: ' + newAEDEntries + ', Employees: ' + newEmployeeEntries);
 
       var message = '✅ History Saved Successfully!\n\n';
       message += '🧤 Gloves: ' + newGloveEntries + ' new entries\n';
@@ -9194,9 +9229,10 @@ function saveHistoryFast(silent) {
       message += '🧱 Blankets: ' + newBlanketEntries + ' new entries\n';
       message += '⚡ HV Testers: ' + newHVTesterEntries + ' new entries\n';
       message += '⚡ Phasing Sets: ' + newPhasingSetEntries + ' new entries\n';
+      message += '🏥 AED: ' + newAEDEntries + ' new entries\n';
       message += '👤 Employees: ' + newEmployeeEntries + ' new entries\n\n';
       message += '⏱️ Completed in ' + (totalTime / 1000).toFixed(1) + ' seconds';
-      if (newGloveEntries === 0 && newSleeveEntries === 0 && newBlanketEntries === 0 && newHVTesterEntries === 0 && newPhasingSetEntries === 0 && newEmployeeEntries === 0) {
+      if (newGloveEntries === 0 && newSleeveEntries === 0 && newBlanketEntries === 0 && newHVTesterEntries === 0 && newPhasingSetEntries === 0 && newAEDEntries === 0 && newEmployeeEntries === 0) {
         message += '\n\nNo changes detected since last save.';
       }
       SpreadsheetApp.getUi().alert(message);
@@ -22290,5 +22326,392 @@ function diagnose045Crew() {
   ).setWidth(600).setHeight(500);
 
   ui.showModalDialog(html, 'Diagnose Crew 045-26');
+}
+
+// =============================================================================
+// PHASE 3: AED (Automated External Defibrillator) TRACKING
+// =============================================================================
+
+/**
+ * Generates the AED Swaps report.
+ * Shows AEDs with pads approaching or past their expiration date.
+ * Uses AED_SWAP_LOOKAHEAD_DAYS constant (default 90 days) for lookahead window.
+ * @param {boolean} silent - If true, suppress UI alerts
+ */
+function generateAEDSwaps(silent) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+  var tz = ss.getSpreadsheetTimeZone();
+  var now = new Date();
+
+  logEvent('Generating AED Swaps report...');
+
+  // Get AED sheet
+  var aedSheet = ss.getSheetByName(SHEET_AED);
+  if (!aedSheet || aedSheet.getLastRow() < 2) {
+    logEvent('No AEDs found in the AED sheet.', 'INFO');
+    if (!silent) {
+      ui.alert('ℹ️ No AEDs found in the AED sheet.\n\nAdd AEDs to the sheet first.');
+    }
+    return;
+  }
+
+  // Get Employees sheet for location lookups
+  var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+  var empLocationMap = {};
+  if (employeesSheet && employeesSheet.getLastRow() > 1) {
+    var empData = employeesSheet.getDataRange().getValues();
+    for (var e = 1; e < empData.length; e++) {
+      var name = (empData[e][0] || '').toString().trim().toLowerCase();
+      if (name) {
+        empLocationMap[name] = (empData[e][1] || 'Unknown').toString().trim();
+      }
+    }
+  }
+
+  var aedData = aedSheet.getDataRange().getValues();
+  var aedsNeedingPads = [];
+  var availableAEDs = [];
+
+  // Look ahead period (days) - configurable via constant
+  var lookAheadDays = (typeof AED_SWAP_LOOKAHEAD_DAYS !== 'undefined') ? AED_SWAP_LOOKAHEAD_DAYS : 90;
+
+  for (var i = 1; i < aedData.length; i++) {
+    var row = aedData[i];
+    var itemNum = (row[COLS.AED.ITEM_NUM - 1] || '').toString().trim();
+    var model = (row[COLS.AED.MODEL - 1] || '').toString().trim();
+    var padExpiration = row[COLS.AED.PAD_EXPIRATION - 1];
+    var dateAssigned = row[COLS.AED.DATE_ASSIGNED - 1];
+    var location = (row[COLS.AED.LOCATION - 1] || '').toString().trim();
+    var status = (row[COLS.AED.STATUS - 1] || '').toString().trim();
+    var assignedTo = (row[COLS.AED.ASSIGNED_TO - 1] || '').toString().trim();
+
+    if (!itemNum) continue;
+
+    // Check if "On Shelf" or available
+    if (status.toLowerCase() === 'on shelf') {
+      availableAEDs.push({
+        itemNum: itemNum,
+        model: model,
+        rowIndex: i + 1
+      });
+      continue;
+    }
+
+    // Check if in service and approaching pad expiration
+    if (status.toLowerCase() === 'in service' && padExpiration instanceof Date) {
+      var daysUntilExpiration = Math.floor((padExpiration - now) / (1000 * 60 * 60 * 24));
+
+      if (daysUntilExpiration <= lookAheadDays) {
+        aedsNeedingPads.push({
+          itemNum: itemNum,
+          model: model,
+          padExpiration: padExpiration,
+          dateAssigned: dateAssigned,
+          daysLeft: daysUntilExpiration,
+          location: location || 'Unknown',
+          assignedTo: assignedTo,
+          rowIndex: i + 1
+        });
+      }
+    }
+  }
+
+  if (aedsNeedingPads.length === 0) {
+    logEvent('No AEDs with pads expiring in the next ' + lookAheadDays + ' days.', 'INFO');
+    if (!silent) {
+      ui.alert('✅ No AED Pad Replacements Needed\n\nNo AED pads are expiring in the next ' + lookAheadDays + ' days.');
+    }
+    return;
+  }
+
+  // Sort by days left (most urgent first)
+  aedsNeedingPads.sort(function(a, b) { return a.daysLeft - b.daysLeft; });
+
+  // Get or create AED Swaps sheet
+  var swapsSheet = ss.getSheetByName(SHEET_AED_SWAPS);
+  if (!swapsSheet) {
+    swapsSheet = ss.insertSheet(SHEET_AED_SWAPS);
+  }
+  // Clear everything including data validation rules on the entire sheet
+  var maxRows = swapsSheet.getMaxRows();
+  var maxCols = swapsSheet.getMaxColumns();
+  if (maxRows > 0 && maxCols > 0) {
+    var fullRange = swapsSheet.getRange(1, 1, maxRows, maxCols);
+    fullRange.clearDataValidations();
+    fullRange.clearContent();
+    fullRange.clearFormat();
+  }
+
+  // Build the swap report
+  var currentRow = 1;
+
+  // Title row
+  swapsSheet.getRange(currentRow, 1, 1, 10).merge().setValue('🏥 AED Pad Replacements - ' + Utilities.formatDate(now, tz, 'MMMM yyyy'));
+  swapsSheet.getRange(currentRow, 1, 1, 10).setFontWeight('bold').setFontSize(14).setBackground('#ffebee').setFontColor('#c62828').setHorizontalAlignment('center');
+  currentRow += 2;
+
+  // Headers
+  var headers = ['Item #', 'Model', 'Date Assigned', 'Pad Expiration', 'Days Left', 'Location', 'Assigned To', 'Status', 'Replacement Pads', 'Notes'];
+  swapsSheet.getRange(currentRow, 1, 1, headers.length).setValues([headers]);
+  swapsSheet.getRange(currentRow, 1, 1, headers.length).setFontWeight('bold').setBackground('#c62828').setFontColor('#ffffff').setHorizontalAlignment('center');
+  swapsSheet.setFrozenRows(currentRow);
+  currentRow++;
+
+  // Data rows
+  aedsNeedingPads.forEach(function(aed) {
+    var rowData = [
+      aed.itemNum,
+      aed.model,
+      aed.dateAssigned instanceof Date ? Utilities.formatDate(aed.dateAssigned, tz, 'MM/dd/yyyy') : '',
+      aed.padExpiration instanceof Date ? Utilities.formatDate(aed.padExpiration, tz, 'MM/dd/yyyy') : '',
+      aed.daysLeft,
+      aed.location,
+      aed.assignedTo,
+      aed.daysLeft < 0 ? '🔴 EXPIRED' : aed.daysLeft <= 30 ? '🟠 Expiring Soon' : '🟡 Upcoming',
+      '', // Replacement Pads - for manual tracking
+      ''
+    ];
+    swapsSheet.getRange(currentRow, 1, 1, rowData.length).setValues([rowData]);
+
+    // Color coding for urgency
+    if (aed.daysLeft < 0) {
+      swapsSheet.getRange(currentRow, 1, 1, rowData.length).setBackground('#ffcdd2');  // Light red
+    } else if (aed.daysLeft <= 30) {
+      swapsSheet.getRange(currentRow, 1, 1, rowData.length).setBackground('#ffe0b2');  // Light orange
+    } else if (aed.daysLeft <= 60) {
+      swapsSheet.getRange(currentRow, 1, 1, rowData.length).setBackground('#fff9c4');  // Light yellow
+    }
+
+    currentRow++;
+  });
+
+  // Auto-resize columns
+  for (var c = 1; c <= headers.length; c++) {
+    swapsSheet.autoResizeColumn(c);
+  }
+
+  // Summary row
+  currentRow++;
+  swapsSheet.getRange(currentRow, 1, 1, 3).merge().setValue('Summary: ' + aedsNeedingPads.length + ' AED(s) need pad replacement, ' + availableAEDs.length + ' available on shelf');
+  swapsSheet.getRange(currentRow, 1).setFontStyle('italic');
+
+  logEvent('AED Swaps report generated. Found ' + aedsNeedingPads.length + ' with pads expiring.');
+
+  if (!silent) {
+    ui.alert('✅ AED Swaps Generated!\n\n' +
+      'Found ' + aedsNeedingPads.length + ' AED(s) with pads expiring within ' + lookAheadDays + ' days.\n' +
+      'Available on shelf: ' + availableAEDs.length + ' unit(s).');
+  }
+}
+
+/**
+ * Menu function to generate AED swaps report.
+ */
+function menuGenerateAEDSwaps() {
+  generateAEDSwaps(false);
+}
+
+/**
+ * Handles changes to the Assigned To column (H) in AED sheet.
+ * Auto-populates Status (G) and Location (F) based on the assigned value.
+ *
+ * Status values: In Service, On Shelf, Out of Service, Retired, Lost
+ */
+function handleAEDAssignedToChange(ss, sheet, editedRow, newValue) {
+  if (editedRow < 2) return; // Skip header row
+
+  var lock = null;
+  try {
+    try {
+      lock = LockService.getScriptLock();
+      lock.waitLock(30000);
+    } catch (lockErr) {
+      lock = null;
+    }
+
+    var assignedToCol = COLS.AED.ASSIGNED_TO;  // Column H = 8
+    var actualValue = sheet.getRange(editedRow, assignedToCol).getValue();
+
+    logEvent('handleAEDAssignedToChange ENTRY: Row=' + editedRow + ', newValue=' + newValue + ', actualValue=' + actualValue, 'DEBUG');
+
+    var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+    if (!employeesSheet) {
+      logEvent('handleAEDAssignedToChange: Employees sheet not found!', 'ERROR');
+      return;
+    }
+
+    // Build name to location map from Employees sheet
+    var empData = employeesSheet.getDataRange().getValues();
+    var empHeaders = empData[0];
+    var nameColIdx = 0;
+    var locationColIdx = -1;
+
+    for (var h = 0; h < empHeaders.length; h++) {
+      if (String(empHeaders[h]).trim().toLowerCase() === 'location') {
+        locationColIdx = h;
+        break;
+      }
+    }
+
+    if (locationColIdx === -1) {
+      logEvent('handleAEDAssignedToChange: Location column not found in Employees sheet!', 'ERROR');
+      locationColIdx = 1;
+    }
+
+    var nameToLocation = {};
+    for (var i = 1; i < empData.length; i++) {
+      var name = (empData[i][nameColIdx] || '').toString().trim().toLowerCase();
+      var loc = empData[i][locationColIdx] || '';
+      if (name) nameToLocation[name] = loc;
+    }
+
+    var assignedTo = (actualValue !== undefined && actualValue !== null && actualValue !== '')
+                     ? actualValue.toString().trim()
+                     : (newValue || '').toString().trim();
+    var assignedToLower = assignedTo.toLowerCase();
+
+    logEvent('handleAEDAssignedToChange: Processing assignedTo="' + assignedTo + '"', 'DEBUG');
+
+    var newStatus = '';
+    var newLocation = '';
+
+    var colStatus = COLS.AED.STATUS;      // Column G = 7
+    var colLocation = COLS.AED.LOCATION;  // Column F = 6
+
+    if (assignedToLower === 'on shelf' || assignedToLower === '') {
+      newStatus = 'On Shelf';
+      newLocation = 'Helena';
+    } else if (assignedToLower === 'out of service') {
+      newStatus = 'Out of Service';
+      newLocation = 'Helena';
+    } else if (assignedToLower === 'retired') {
+      newStatus = 'Retired';
+      newLocation = 'Retired';
+    } else if (assignedToLower === 'lost') {
+      newStatus = 'Lost';
+      newLocation = 'Lost';
+    } else if (nameToLocation[assignedToLower]) {
+      newStatus = 'In Service';
+      newLocation = nameToLocation[assignedToLower];
+    } else if (assignedTo !== '') {
+      logEvent('handleAEDAssignedToChange: Employee "' + assignedTo + '" not found in ' + SHEET_EMPLOYEES, 'WARNING');
+      newStatus = 'In Service';
+      newLocation = 'Unknown';
+    }
+
+    logEvent('handleAEDAssignedToChange: Row=' + editedRow + ', AssignedTo=' + assignedTo +
+             ', newStatus=' + newStatus + ', newLocation=' + newLocation, 'DEBUG');
+
+    if (newLocation) {
+      sheet.getRange(editedRow, colLocation).setValue(newLocation);
+      logEvent('Set Location to "' + newLocation + '" at row ' + editedRow, 'DEBUG');
+    }
+
+    if (newStatus) {
+      sheet.getRange(editedRow, colStatus).setValue(newStatus);
+      logEvent('Set Status to "' + newStatus + '" at row ' + editedRow, 'DEBUG');
+    }
+
+    ss.toast('Location: ' + newLocation + ', Status: ' + newStatus, '📍 Auto-Updated', 3);
+
+  } catch (e) {
+    logEvent('handleAEDAssignedToChange error: ' + e, 'ERROR');
+  } finally {
+    if (lock) lock.releaseLock();
+  }
+}
+
+/**
+ * Ensures the AED History sheet exists with proper structure.
+ * Creates the sheet if it doesn't exist.
+ * @return {Sheet} The AED History sheet
+ */
+function ensureAEDHistorySheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var historySheet = ss.getSheetByName(SHEET_AED_HISTORY);
+
+  if (!historySheet) {
+    historySheet = ss.insertSheet(SHEET_AED_HISTORY);
+    var headers = ['Date Assigned', 'Item #', 'Model', 'Location', 'Assigned To', 'Notes'];
+    historySheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    historySheet.getRange(1, 1, 1, headers.length)
+      .setFontWeight('bold')
+      .setBackground('#c62828')  // Red for AED
+      .setFontColor('#ffffff')
+      .setHorizontalAlignment('center');
+    historySheet.setFrozenRows(1);
+    historySheet.setColumnWidth(1, 100);
+    historySheet.setColumnWidth(2, 80);
+    historySheet.setColumnWidth(3, 100);
+    historySheet.setColumnWidth(4, 120);
+    historySheet.setColumnWidth(5, 150);
+    historySheet.setColumnWidth(6, 200);
+    Logger.log('Created AED History sheet');
+  } else {
+    // Check if Notes column exists, add if missing
+    var lastCol = historySheet.getLastColumn();
+    if (lastCol < 6) {
+      historySheet.getRange(1, 6).setValue('Notes')
+        .setFontWeight('bold')
+        .setBackground('#c62828')
+        .setFontColor('#ffffff')
+        .setHorizontalAlignment('center');
+      historySheet.setColumnWidth(6, 200);
+      Logger.log('Added Notes column to AED History');
+    }
+  }
+
+  return historySheet;
+}
+
+/**
+ * Saves an AED assignment to the AED History sheet.
+ * @param {string} itemNumber - AED unit number
+ * @param {string} model - Equipment model
+ * @param {string} location - Location assigned to
+ * @param {string} assignedTo - Person/status assigned to
+ * @param {Date} dateAssigned - When assigned
+ */
+function saveAEDAssignmentToHistory(itemNumber, model, location, assignedTo, dateAssigned) {
+  try {
+    var historySheet = ensureAEDHistorySheet();
+    var lastRow = historySheet.getLastRow();
+    var colorIndex = lastRow % 2;
+    var bgColor = colorIndex === 0 ? HISTORY_COLOR_AED_1 : HISTORY_COLOR_AED_2;
+
+    var newRow = [dateAssigned || new Date(), itemNumber, model, location, assignedTo, ''];
+    historySheet.appendRow(newRow);
+    var addedRow = historySheet.getLastRow();
+    historySheet.getRange(addedRow, 1, 1, 6).setBackground(bgColor);
+  } catch (e) {
+    Logger.log('Error saving AED assignment to history: ' + e);
+  }
+}
+
+/**
+ * Opens the AED sheet.
+ */
+function openAEDSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_AED);
+  if (sheet) {
+    ss.setActiveSheet(sheet);
+  } else {
+    SpreadsheetApp.getUi().alert('AED sheet not found. Run Build Sheets first.');
+  }
+}
+
+/**
+ * Opens the AED Swaps sheet.
+ */
+function openAEDSwapsSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_AED_SWAPS);
+  if (sheet) {
+    ss.setActiveSheet(sheet);
+  } else {
+    SpreadsheetApp.getUi().alert('AED Swaps sheet not found. Run Generate AED Swaps first.');
+  }
 }
 

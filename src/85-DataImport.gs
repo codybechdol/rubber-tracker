@@ -251,6 +251,12 @@ function applyCrewChanges(changes) {
   for (var i = 0; i < changes.length; i++) {
     var change = changes[i];
 
+    // Skip sync-only entries (no actual employee change, just jobNameMap carrier)
+    if (change._syncOnly) {
+      Logger.log('applyCrewChanges: Skipping _syncOnly entry (no employee changes, just Job Tracking sync)');
+      continue;
+    }
+
     try {
       var rowIndex = change.rowIndex;
 
@@ -2423,6 +2429,11 @@ function applySpecialCircumstanceUpdate(data) {
 
     // Update Location if specified
     if (data.newLocation) {
+      // Ensure the location value is in the data validation list before writing
+      // (applyCrewChanges handles this for crew changes, but special circumstances
+      // may set status-type locations like Vacation, Leave, Previous Employee)
+      ensureLocationsInValidation(employeesSheet, locationCol + 1, [data.newLocation]);
+
       employeesSheet.getRange(rowIndex, locationCol + 1).setValue(data.newLocation);
       locationChanged = (oldLocation !== data.newLocation);
     }

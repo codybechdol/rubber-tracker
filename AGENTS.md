@@ -12,25 +12,38 @@ Google Apps Script-based inventory management system for tracking rubber gloves/
 ## Architecture: File Load Order & Function Ownership
 Google Apps Script loads files **alphabetically**. Numbered prefixes control load order:
 ```
-00-Constants.gs  → loads FIRST (defines COLS, SHEET_* constants)
-01-Utilities.gs  → utility functions (logEvent, normalizeApprovalValue)
-10-Menu.gs       → archived (menu now in Code.gs)
-11-Triggers.gs   → edit/change triggers, auto change-out dates (~2k lines)
-22-EmployeeValidation.gs → Job Tracking functions, Employee validation (~3k lines)
-22-LocationSync.gs → Inventory location sync with Employees (~175 lines)
-30-SwapGeneration.gs → Swap report generation (~1.4k lines)
-51-EmployeeHistory.gs → Employee lifecycle, restore deleted employees (~1.5k lines)
-62-PurchaseOrders.gs → PO generation and vendor management (~960 lines)
-75-Scheduling.gs → Crew visit scheduling, training calendar (~3.5k lines)
-76-SmartScheduling.gs → Task collection, getDriveTimeMap() (~2.3k lines)
-76-EmployeeClassifications.gs → Job classification dropdowns (~150 lines)
-80-EmailReports.gs → Weekly HTML email reports (~1.5k lines)
-85-DataImport.gs → Crew Import, Job Tracking sync, new hire/rehire flow (~3.1k lines)
-86-TimeTracking.gs → Daily Accomplishments (~1k lines)
-87-RoutePlanner.gs → Trip Planner (~2.5k lines)
-88-SafetyReports.gs → Gmail processing, Safety Compliance (~15.9k lines)
-95-DiagnosticTools.gs → Pick list diagnostics (~630 lines)
-Code.gs          → loads LAST, contains ALL working implementations (~22.2k lines)
+00-Constants.gs  → loads FIRST (defines COLS, SHEET_* constants, incl. Blankets/HV Testers/Phasing Sets/AED) (~240 lines)
+01-Utilities.gs  → utility functions (logEvent, normalizeApprovalValue) (~80 lines)
+10-Menu.gs       → archived (menu now in Code.gs) (~18 lines)
+11-Triggers.gs   → edit/change triggers, auto change-out dates (~1.8k lines)
+20-InventoryHandlers.gs → inventory status/assignment handlers (~190 lines)
+21-ChangeOutDate.gs → change-out date calculation logic (~190 lines)
+22-EmployeeValidation.gs → Job Tracking functions, Employee validation (~2.7k lines)
+22-LocationSync.gs → Inventory location sync with Employees (~145 lines)
+30-SwapGeneration.gs → Swap report generation (~1.2k lines)
+31-SwapHandlers.gs → Swap stage handling (Stage 1/2/3 workflows) (~440 lines)
+32-SwapPreservation.gs → Swap checkbox/data preservation between regenerations (~125 lines)
+40-Reclaims.gs   → Reclaims logic and pick list generation (~930 lines)
+50-History.gs    → Item history (Gloves/Sleeves History) (~240 lines)
+51-EmployeeHistory.gs → Employee lifecycle, restore deleted employees (~1.3k lines)
+60-PurchaseNeeds.gs → Purchase Needs report generation (~375 lines)
+61-InventoryReports.gs → Inventory Reports with charts (~1.9k lines)
+62-PurchaseOrders.gs → PO generation and vendor management (~825 lines)
+70-ToDoList.gs   → archived (To Do List functionality now in Code.gs) (~50 lines)
+75-Scheduling.gs → Crew visit scheduling, training calendar (~3k lines)
+76-SmartScheduling.gs → Task collection, getDriveTimeMap() (~1.9k lines)
+76-EmployeeClassifications.gs → Job classification dropdowns (~130 lines)
+80-EmailReports.gs → Weekly HTML email reports (~1.2k lines)
+85-DataImport.gs → Crew Import, Job Tracking sync, new hire/rehire flow (~2.8k lines)
+86-TimeTracking.gs → Daily Accomplishments (~890 lines)
+87-RoutePlanner.gs → Trip Planner (~2.1k lines)
+88-SafetyReports.gs → Gmail processing, Safety Compliance (~14.1k lines)
+90-Backup.gs     → Google Drive backup snapshot (~90 lines)
+95-BuildSheets.gs → Sheet creation/setup utilities (~80 lines)
+95-DiagnosticTools.gs → Pick list diagnostics (~540 lines)
+98-LegacyArchive.gs → Archived legacy functions (DO NOT USE) (~525 lines)
+99-MenuFix.gs    → Menu fix/reset utilities (~150 lines)
+Code.gs          → loads LAST, contains ALL working implementations (~22.3k lines)
 ```
 
 **Key Rule:** When functions appear in multiple files, **Code.gs always wins** (loads last).
@@ -59,6 +72,8 @@ var itemNum = row[COLS.INVENTORY.ITEM_NUM - 1];  // -1 for array index
 var status = row[COLS.INVENTORY.STATUS - 1];
 ```
 
+Available `COLS` namespaces: `INVENTORY` (Gloves/Sleeves), `BLANKETS`, `HV_TESTERS`, `PHASING_SETS`, `AED`, `SWAPS`, `BLANKET_SWAPS`, `SWAPS_HIDDEN`, `EMPLOYEES`, `EMPLOYEE_HISTORY`.
+
 ### Logging
 ```javascript
 logEvent('Task completed successfully', 'INFO');  // Levels: INFO, ERROR, WARNING, DEBUG
@@ -76,7 +91,7 @@ function showMyDialog() {
 
 ## Data Flow Architecture
 - **Task Metadata Sheet** - Single source of truth for task scheduling state
-- **Source Sheets** (Glove Swaps, Sleeve Swaps, Reclaims, etc.) → `generateTaskMetadata()` → Task Metadata
+- **Source Sheets** (Glove Swaps, Sleeve Swaps, Blanket Swaps, HV Tester Swaps, Phasing Set Swaps, AED Swaps, Reclaims, etc.) → `generateTaskMetadata()` → Task Metadata
 - Client dialogs call `getTasksWithMetadata()` which joins source data with metadata
 - **~50KB return limit** - Large data stored in ScriptProperties, client fetches separately
 - **Standardized Statuses:** Unassigned, Assigned, Complete, Overdue, Deferred
@@ -84,28 +99,34 @@ function showMyDialog() {
 ## Key Files
 | File | Purpose |
 |------|---------|
-| `Code.gs` | Main file - ALL working functions go here (~22.2k lines) |
-| `00-Constants.gs` | Sheet names, column indices (`COLS`), business constants |
-| `11-Triggers.gs` | Edit triggers, auto change-out date recalculation (~2k lines) |
-| `22-EmployeeValidation.gs` | Job Tracking sheet functions, employee validation, training sync (~3k lines) |
-| `51-EmployeeHistory.gs` | Employee lifecycle tracking, restore deleted employees (~1.5k lines) |
-| `75-Scheduling.gs` | Crew visit scheduling, training calendar (~3.5k lines) |
-| `76-SmartScheduling.gs` | Task collection, `getDriveTimeMap()` (~2.3k lines) |
-| `85-DataImport.gs` | Crew Import from Excel, Job Tracking sync, new hire/rehire flow (~3.1k lines) |
-| `87-RoutePlanner.gs` | Trip planning and route optimization (~2.5k lines) |
-| `88-SafetyReports.gs` | Gmail processing, Safety Compliance tracking (~15.9k lines) |
-| `ToDoSchedule.html` | Task List dialog (~6.5k lines) |
-| `TripPlanner.html` | Trip Planner / Scheduler (primary scheduling interface, ~5k lines) |
-| `CrewImport.html` | Excel crew import with SheetJS (~7k lines) |
-| `QuickActions.html` | Monday workflow sidebar |
-| `ProcessSafetyEmailsDialog.html` | Safety email processing dialog (~1.5k lines) |
+| `Code.gs` | Main file - ALL working functions go here (~22.3k lines) |
+| `00-Constants.gs` | Sheet names, column indices (`COLS`), business constants (~240 lines) |
+| `11-Triggers.gs` | Edit triggers, auto change-out date recalculation (~1.8k lines) |
+| `22-EmployeeValidation.gs` | Job Tracking sheet functions, employee validation, training sync (~2.7k lines) |
+| `51-EmployeeHistory.gs` | Employee lifecycle tracking, restore deleted employees (~1.3k lines) |
+| `75-Scheduling.gs` | Crew visit scheduling, training calendar (~3k lines) |
+| `76-SmartScheduling.gs` | Task collection, `getDriveTimeMap()` (~1.9k lines) |
+| `85-DataImport.gs` | Crew Import from Excel, Job Tracking sync, new hire/rehire flow (~2.8k lines) |
+| `87-RoutePlanner.gs` | Trip planning and route optimization (~2.1k lines) |
+| `88-SafetyReports.gs` | Gmail processing, Safety Compliance tracking (~14.1k lines) |
+| `ToDoSchedule.html` | Task List dialog (~5.7k lines) |
+| `TripPlanner.html` | Trip Planner / Scheduler (primary scheduling interface, ~4.2k lines) |
+| `CrewImport.html` | Excel crew import with SheetJS (~6.4k lines) |
+| `QuickActions.html` | Monday workflow sidebar (~350 lines) |
+| `ProcessSafetyEmailsDialog.html` | Safety email processing dialog (~1.3k lines) |
+| `ToDoConfig.html` | Schedule configuration dialog (~2k lines) |
+| `PurchaseOrderDialog.html` | Purchase order creation dialog (~750 lines) |
+| `ComplianceConfig.html` | Safety Compliance configuration (~175 lines) |
+| `AssignCrewLeads.html` | Crew lead assignment dialog (~485 lines) |
+| `NewItemDialog.html` | New inventory item dialog (Gloves, Sleeves, HV Testers, Phasing Sets) (~365 lines) |
+| `NewEmployeeDialog.html` | New employee creation dialog (~205 lines) |
 
 ## Key Sheets (Data Architecture)
 | Sheet | Purpose |
 |-------|---------|
 | Task Metadata | Single source of truth for task state |
 | Task Metadata Archive | Archived completed tasks (via garbage collection) |
-| Job Tracking | Crew lifecycle (Active, Pending Start, Completed) with schedule history and compliance config (columns L-T) |
+| Job Tracking | Crew lifecycle (Active, Pending Start, Completed, On Hold) with schedule history and compliance config (columns L-T) |
 | Employees | Employee info, location, job numbers, sizes |
 | Training Tracking | Monthly training compliance per crew |
 | Training Config | Crews to track, monthly training topics |
@@ -122,6 +143,11 @@ function showMyDialog() {
 | HV Tester Swaps | HV Testers approaching replacement date |
 | Phasing Sets | Phasing Sets - 10-year calibration/replacement cycle |
 | Phasing Set Swaps | Phasing Sets approaching replacement date |
+| AED | Automated External Defibrillators - pad expiration tracking |
+| AED Swaps | AEDs with pads approaching expiration |
+| Purchase Orders | PO history with vendor, items, status |
+| Vendors | Vendor catalog with item numbers and pricing (8-column combined format) |
+| Email Report Config | Per-recipient email report section preferences |
 
 > **Note:** Safety Compliance Config was migrated into Job Tracking columns L-T (see Job Tracking Integration section). The separate sheet no longer exists.
 
@@ -232,7 +258,7 @@ Glove Manager
 │   └── 🔧 Utilities →                 (Job Tracking setup, migration, refresh, etc.)
 ├── 📊 Generate All Reports            ← STEP 2
 │   ├── ⚡ Generate All Reports
-│   ├── Generate Glove/Sleeve/Blanket/HV Tester/Phasing Set Swaps
+│   ├── Generate Glove/Sleeve/Blanket/HV Tester/Phasing Set/AED Swaps
 │   ├── Update Purchase Needs / Inventory Reports
 │   ├── Run Reclaims Check / Update Reclaims Sheet
 │   └── 🔧 Utilities →                 (Fix change-out dates, training crew leads)
@@ -295,4 +321,3 @@ After changes:
 3. Refresh spreadsheet, check menu loads
 4. Test affected feature
 5. Check Extensions → Apps Script → Executions for errors
-

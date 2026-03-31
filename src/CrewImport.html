@@ -2285,6 +2285,29 @@
             console.log('  Using section header status for ' + specialInfo.name + ': ' + defaultStatus);
           }
 
+          // If header was ambiguous (no defaultStatus) and employee has no detected status,
+          // default to 'Time Off' (safest assumption - most people under mixed headers are temporarily out)
+          if (specialInfo.status === 'Unknown' && !defaultStatus) {
+            specialInfo.status = 'Time Off';
+            console.log('  Ambiguous header, defaulting to Time Off for ' + specialInfo.name);
+          }
+
+          // FUTURE DATE FILTER: Skip employees with dates far in the future (>14 days from import week)
+          // Columns C & D typically contain future time off entries that shouldn't be processed this week
+          if (specialInfo.date && selectedSheet) {
+            var importWeekDate = parseSheetTabDate(selectedSheet);
+            if (importWeekDate) {
+              var specDate = parseSpecialDate(specialInfo.date);
+              if (specDate) {
+                var daysDiff = Math.floor((specDate - importWeekDate) / (1000 * 60 * 60 * 24));
+                if (daysDiff > 14) {
+                  console.log('  Skipping FUTURE entry: ' + specialInfo.name + ' (date: ' + specialInfo.date + ', ' + daysDiff + ' days from import week)');
+                  continue;
+                }
+              }
+            }
+          }
+
           // Deduplicate: check if this employee is already in specialCircumstances
           var specNameLower = (specialInfo.name || '').toLowerCase().trim();
           var isDuplicate = false;
@@ -2430,16 +2453,40 @@
 
       var text = headerText.toLowerCase();
 
-      if (text.match(/light\s*duty/i)) return 'Light Duty';
-      if (text.match(/weeds/i)) return 'Weeds';  // Waiting for work/job assignment
-      if (text.match(/layoff|laid\s*off/i)) return 'Layoff';
-      if (text.match(/resign/i)) return 'Resigned';
-      if (text.match(/quit/i)) return 'Quit';
-      if (text.match(/fired|terminated/i)) return 'Fired';
-      if (text.match(/vacation/i)) return 'Vacation';
-      if (text.match(/time\s*off/i)) return 'Time Off';
-      if (text.match(/leave|fmla/i)) return 'Leave';
-      if (text.match(/mt\s*misc/i)) return 'MT Misc';
+      // Count how many CONFLICTING status keywords appear in the header
+      // If multiple are found (e.g., "Time off/Quit/Other"), the header is ambiguous
+      // and we should NOT assign a default - let per-employee parsing decide
+      var statusKeywords = [
+        { pattern: /light\s*duty/i, status: 'Light Duty' },
+        { pattern: /weeds/i, status: 'Weeds' },
+        { pattern: /layoff|laid\s*off/i, status: 'Layoff' },
+        { pattern: /resign/i, status: 'Resigned' },
+        { pattern: /quit/i, status: 'Quit' },
+        { pattern: /fired|terminated/i, status: 'Fired' },
+        { pattern: /vacation/i, status: 'Vacation' },
+        { pattern: /time\s*off/i, status: 'Time Off' },
+        { pattern: /leave|fmla/i, status: 'Leave' },
+        { pattern: /mt\s*misc/i, status: 'MT Misc' }
+      ];
+
+      var matchedStatuses = [];
+      for (var k = 0; k < statusKeywords.length; k++) {
+        if (text.match(statusKeywords[k].pattern)) {
+          matchedStatuses.push(statusKeywords[k].status);
+        }
+      }
+
+      // If exactly one keyword matched, use it as the default
+      if (matchedStatuses.length === 1) {
+        return matchedStatuses[0];
+      }
+
+      // If multiple keywords matched (e.g., "Time off/Quit/Other"),
+      // the header is ambiguous - return empty to force per-employee detection
+      if (matchedStatuses.length > 1) {
+        console.log('  Ambiguous header "' + headerText + '" matched: ' + matchedStatuses.join(', ') + ' - defaulting to per-employee detection');
+        return '';
+      }
 
       return '';
     }
@@ -2468,7 +2515,7 @@
       // Look for date patterns and extract them
       // Format: M-D, M-D-YY, M-D-YYYY, or with Mon/Tue prefix
       var datePatterns = [
-        /\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)?\s*(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/gi
+        /\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun)?\s*(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?\b/i
       ];
 
       for (var dp = 0; dp < datePatterns.length; dp++) {
@@ -2682,6 +2729,40 @@
       return null;
     }
 
+    /**
+     * Parse a sheet tab name like "3.30.26" or "3.30" into a Date object.
+     * @param {string} tabName - The sheet tab name
+     * @returns {Date|null} Parsed date or null
+     */
+    function parseSheetTabDate(tabName) {
+      if (!tabName) return null;
+      var parts = tabName.split('.');
+      if (parts.length < 2) return null;
+      var month = parseInt(parts[0], 10);
+      var day = parseInt(parts[1], 10);
+      var year = parts[2] ? parseInt(parts[2], 10) : 26;
+      if (year < 100) year += 2000;
+      if (isNaN(month) || isNaN(day) || isNaN(year)) return null;
+      return new Date(year, month - 1, day);
+    }
+
+    /**
+     * Parse a special date string like "3-30-26" or "4-28" into a Date object.
+     * @param {string} dateStr - Date string from parseSpecialEmployee
+     * @returns {Date|null} Parsed date or null
+     */
+    function parseSpecialDate(dateStr) {
+      if (!dateStr) return null;
+      var parts = dateStr.split(/[-\/]/);
+      if (parts.length < 2) return null;
+      var month = parseInt(parts[0], 10);
+      var day = parseInt(parts[1], 10);
+      var year = parts[2] ? parseInt(parts[2], 10) : 26;
+      if (year < 100) year += 2000;
+      if (isNaN(month) || isNaN(day) || isNaN(year)) return null;
+      return new Date(year, month - 1, day);
+    }
+
     function findNextHeaderRow(crewHeaders, col, currentRow, specialHeaders) {
       var nextRow = 9999;
       // Look for the next row that has ANY crew header (not just same column)
@@ -2707,6 +2788,8 @@
     function isEmployeeName(text) {
       if (!text || text.length < 4) return false;
       if (text.match(/^\d/)) return false; // Starts with number
+      // Skip continuation text starting with lowercase prepositions (e.g., "of April, going south to work")
+      if (text.match(/^(of|and|or|for|to|in|at|on|by|per|going|south|north|east|west)\s/i) && text[0] === text[0].toLowerCase()) return false;
       if (text.match(/^(NWE|Aprox|Tentative|Completed|On Hold|BID)/i)) return false;
       if (text.match(/schedule|Released|Crane Cert|Summer|Fall|Start|weeks? work|Project|Install|Arrival/i)) return false;
       // Skip location-like text (Dock, Sub, Trans, Poles, etc.)
@@ -2717,8 +2800,8 @@
       if (text.match(/\bthru\b/i)) return false;
       // Skip "Another Operator??" and similar notes
       if (text.match(/^Another\s/i) || text.match(/\?\?/)) return false;
-      // Skip appointment/meeting text
-      if (text.match(/\b(Appointment|Meeting|Call|Interview)\b/i)) return false;
+      // Skip appointment/meeting/PT/doctor text
+      if (text.match(/\b(Appointment|Meeting|Call|Interview|PT\b|Physical\s*Therapy|Appt)\b/i)) return false;
       // Skip time patterns (9am, 10:30, etc.)
       if (text.match(/\b\d{1,2}(:\d{2})?\s*(am|pm)\b/i)) return false;
       // Skip "Next" followed by anything
@@ -5996,18 +6079,42 @@
         var specNameLower = spec.name.toLowerCase().trim();
         console.log('Checking special circumstance: "' + spec.name + '" (status: ' + spec.status + ', location: ' + (spec.location || 'none') + ')');
 
-        // EARLY EXIT: If status indicates termination (Fired/Terminated/Quit/Layoff/Resigned),
-        // this person is already terminated - skip them regardless of currentEmployees
-        // Note: status field comes from parseSpecialEmployee() which detects these keywords
+        // CHECK TERMINATION STATUS: If status indicates termination (Fired/Terminated/Quit/Layoff/Resigned),
+        // only auto-remove if employee is ALREADY a Previous Employee on the sheet.
+        // If they're still active, they need to show in the UI for the user to confirm/process the departure.
         var statusLower = (spec.status || '').toLowerCase();
         var terminationStatuses = ['fired', 'terminated', 'quit', 'resigned', 'layoff'];
         var isTerminationStatus = terminationStatuses.indexOf(statusLower) !== -1;
 
         if (isTerminationStatus) {
-          console.log('  ==> REMOVING: "' + spec.name + '" (termination status: ' + spec.status + ')');
-          removedCount++;
-          removedNames.push(spec.name + ' (' + spec.status + ')');
-          continue;  // Skip this special circumstance
+          // Check if this employee is ALREADY a Previous Employee
+          var alreadyPreviousEmployee = false;
+          for (var t = 0; t < currentEmployees.length; t++) {
+            var tEmp = currentEmployees[t];
+            var tEmpName = (tEmp.name || '').toLowerCase().trim();
+            var tEmpLoc = (tEmp.location || '').toLowerCase().trim();
+
+            // Check both Employees sheet and Employee History
+            if (tEmpLoc === 'previous employee') {
+              if (specNameLower === tEmpName ||
+                  specNameLower.indexOf(tEmpName) !== -1 ||
+                  tEmpName.indexOf(specNameLower) !== -1 ||
+                  calculateSimilarity(specNameLower, tEmpName) >= 85) {
+                alreadyPreviousEmployee = true;
+                break;
+              }
+            }
+          }
+
+          if (alreadyPreviousEmployee) {
+            console.log('  ==> REMOVING: "' + spec.name + '" (termination status: ' + spec.status + ', already Previous Employee)');
+            removedCount++;
+            removedNames.push(spec.name + ' (' + spec.status + ' - already processed)');
+            continue;  // Skip this special circumstance
+          } else {
+            console.log('  ==> KEEPING: "' + spec.name + '" (termination status: ' + spec.status + ', NOT yet Previous Employee - needs user action)');
+            // Fall through to the rest of the filtering logic
+          }
         }
 
         // Clean the special circumstance name - remove status words
@@ -6564,7 +6671,17 @@
         document.getElementById('unmatchedSection').style.display = 'none';
       }
 
-      document.getElementById('btnApplyChanges').disabled = proposedChanges.length === 0;
+      var btn = document.getElementById('btnApplyChanges');
+      if (proposedChanges.length === 0) {
+        // No crew changes, but still allow finishing to trigger Job Tracking sync
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-check-circle"></i> Finish & Sync';
+        btn.title = 'No crew changes detected — click to sync Job Tracking and finish';
+      } else {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-check-lg"></i> Apply Changes';
+        btn.title = '';
+      }
     }
 
     // Store unmatched employees globally for manual matching - keyed by unique ID
@@ -7204,28 +7321,32 @@
     function applyChanges() {
       var changesToApply = proposedChanges.filter(function(c) { return c.apply; });
 
-      if (changesToApply.length === 0) {
-        showNotification('No changes selected to apply.', 'warning', 'No Changes');
-        return;
+      // Build jobNameMap from ALL parsedCrews (not just changes) for Job Tracking backfill
+      var jobNameMap = {};
+      for (var jm = 0; jm < parsedCrews.length; jm++) {
+        var pc = parsedCrews[jm];
+        if (pc.jobNumber && pc.originalLocation) {
+          jobNameMap[pc.jobNumber] = pc.originalLocation;
+        }
       }
 
-      var msg = '<p>Apply <strong>' + changesToApply.length + '</strong> change(s) to the Employees sheet?</p>';
-      msg += '<p>This will update:</p><ul>';
-      msg += '<li>Location</li><li>Job Number (with position)</li><li>Job Classification (F, JRY, AP 1-7, etc.)</li>';
-      msg += '</ul><p class="text-muted small">All changes will be logged to Employee History.</p>';
+      var msg;
+      if (changesToApply.length === 0) {
+        msg = '<p>No crew assignment changes detected — all employees are already at the correct location and job.</p>';
+        msg += '<p>This will still:</p><ul>';
+        msg += '<li>Sync Job Tracking (foremen, job names, activation dates)</li>';
+        msg += '<li>Update crew schedules</li>';
+        msg += '</ul>';
+      } else {
+        msg = '<p>Apply <strong>' + changesToApply.length + '</strong> change(s) to the Employees sheet?</p>';
+        msg += '<p>This will update:</p><ul>';
+        msg += '<li>Location</li><li>Job Number (with position)</li><li>Job Classification (F, JRY, AP 1-7, etc.)</li>';
+        msg += '</ul><p class="text-muted small">All changes will be logged to Employee History.</p>';
+      }
 
       showConfirm(msg, function() {
         document.getElementById('btnApplyChanges').disabled = true;
         document.getElementById('btnApplyChanges').innerHTML = '<span class="spinner-border spinner-border-sm"></span> Applying...';
-
-        // Build jobNameMap from ALL parsedCrews (not just changes) for Job Tracking backfill
-        var jobNameMap = {};
-        for (var jm = 0; jm < parsedCrews.length; jm++) {
-          var pc = parsedCrews[jm];
-          if (pc.jobNumber && pc.originalLocation) {
-            jobNameMap[pc.jobNumber] = pc.originalLocation;
-          }
-        }
 
         var changes = changesToApply.map(function(c) {
           return {
@@ -7241,9 +7362,13 @@
         };
       });
 
-      // Attach jobNameMap to the first change so it's available server-side
+      // Attach jobNameMap so it's available server-side for Job Tracking sync
       if (changes.length > 0) {
         changes[0].jobNameMap = jobNameMap;
+      } else {
+        // No crew changes but still need to sync Job Tracking
+        // Pass a synthetic entry with just the jobNameMap
+        changes.push({ _syncOnly: true, jobNameMap: jobNameMap });
       }
 
       google.script.run
@@ -7285,7 +7410,7 @@
           document.getElementById('btnApplyChanges').innerHTML = '<i class="bi bi-check-lg"></i> Apply Changes';
         })
         .applyCrewChanges(changes);
-      }, null, 'Apply Changes');
+      }, null, changesToApply.length > 0 ? 'Apply Changes' : 'Finish & Sync');
     }
 
     /**

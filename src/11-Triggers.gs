@@ -410,6 +410,13 @@ function onEdit(e) {
       return;  // Don't call processEdit again, we handled it
     }
 
+    // Handle AED sheet - Assigned To (column H = 8) changes auto-populate Status and Location
+    if (sheetName === SHEET_AED && editedCol === COLS.AED.ASSIGNED_TO && editedRow >= 2) {
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      handleAEDAssignedToChange(ss, sheet, editedRow, e.value);
+      return;  // Don't call processEdit again, we handled it
+    }
+
     // For all other edits, use the standard processEdit
     processEdit(e);
   } catch (err) {
@@ -506,8 +513,8 @@ function onEditHandler(e) {
       return;  // Handled - don't continue to processEdit
     }
 
-    // Handle new item number detection in Gloves/Sleeves/Blankets/HV Testers/Phasing Sets (Column A = item number)
-    if ((sheetName === 'Gloves' || sheetName === 'Sleeves' || sheetName === 'Blankets' || sheetName === 'HV Testers' || sheetName === 'Phasing Sets') && editedCol === 1 && editedRow >= 2) {
+    // Handle new item number detection in Gloves/Sleeves/Blankets/HV Testers/Phasing Sets/AED (Column A = item number)
+    if ((sheetName === 'Gloves' || sheetName === 'Sleeves' || sheetName === 'Blankets' || sheetName === 'HV Testers' || sheetName === 'Phasing Sets' || sheetName === 'AED') && editedCol === 1 && editedRow >= 2) {
       var newItemNum = e.range.getValue();
       var oldItemNum = e.oldValue;
       var itemNumStr = String(newItemNum).trim();
@@ -603,6 +610,29 @@ function onEditHandler(e) {
           }
         } catch (autoPopErr) {
           Logger.log('Phasing Sets auto-population error (will show dialog): ' + autoPopErr);
+        }
+      }
+
+      // For AED, auto-set defaults
+      if (sheetName === 'AED' && newItemNum && itemNumStr !== '') {
+        try {
+          // Auto-set Location to 'Helena' if empty (col F)
+          var currentLocation = sheet.getRange(editedRow, COLS.AED.LOCATION).getValue();
+          if (!currentLocation) {
+            sheet.getRange(editedRow, COLS.AED.LOCATION).setValue('Helena');
+          }
+          // Auto-set Status to 'On Shelf' if empty (col G)
+          var currentStatus = sheet.getRange(editedRow, COLS.AED.STATUS).getValue();
+          if (!currentStatus) {
+            sheet.getRange(editedRow, COLS.AED.STATUS).setValue('On Shelf');
+          }
+          // Auto-set Assigned To to 'On Shelf' if empty (col H)
+          var currentAssignedTo = sheet.getRange(editedRow, COLS.AED.ASSIGNED_TO).getValue();
+          if (!currentAssignedTo) {
+            sheet.getRange(editedRow, COLS.AED.ASSIGNED_TO).setValue('On Shelf');
+          }
+        } catch (autoPopErr) {
+          Logger.log('AED auto-population error (will show dialog): ' + autoPopErr);
         }
       }
 
@@ -963,6 +993,32 @@ function processEdit(e) {
     // Handle Calibration Date changes - auto-calculate Change Out Date (Calibration + 10 years)
     if (editedCol === 4) {  // Column D = Calibration Date
       handlePhasingSetCalibrationDateChange(ss, sheet, editedRow, newValue);
+      return;
+    }
+  }
+
+  // Handle AED sheet edits - Assigned To and Status changes
+  if (sheetName === SHEET_AED) {
+    var aedAssignedToCol = COLS.AED.ASSIGNED_TO;  // Column H = 8
+    var aedStatusCol = COLS.AED.STATUS;            // Column G = 7
+    var aedLocationCol = COLS.AED.LOCATION;        // Column F = 6
+
+    logEvent('processEdit: AED sheet, editedCol=' + editedCol, 'DEBUG');
+
+    // Handle Status changes - when 'On Shelf', auto-populate Location and Assigned To
+    if (editedCol === aedStatusCol) {
+      var statusValue = String(newValue || '').trim();
+      if (statusValue === 'On Shelf') {
+        sheet.getRange(editedRow, aedLocationCol).setValue('Helena');
+        sheet.getRange(editedRow, aedAssignedToCol).setValue('On Shelf');
+        ss.toast('Location and Assigned To set to "On Shelf" / "Helena"', '📍 Auto-Updated', 3);
+      }
+      return;
+    }
+
+    // Handle Assigned To changes - auto-populate Location and Status from Employees sheet
+    if (editedCol === aedAssignedToCol) {
+      handleAEDAssignedToChange(ss, sheet, editedRow, newValue);
       return;
     }
   }

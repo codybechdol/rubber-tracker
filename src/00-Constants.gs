@@ -58,6 +58,10 @@ var INTERVAL_BLANKET_TEST = 12;
 // HV Tester/Phasing Set calibration interval (years) - Phase 2
 var INTERVAL_CALIBRATION_YEARS = 10;
 
+// AED pad replacement lookahead (days) - Phase 3
+// Show AEDs with pads expiring within 90 days on the AED Swaps report
+var AED_SWAP_LOOKAHEAD_DAYS = 90;
+
 // Alternating colors for history grouping
 var HISTORY_COLOR_GLOVE_1 = '#e3f2fd';  // Light blue
 var HISTORY_COLOR_GLOVE_2 = '#ffffff';  // White
