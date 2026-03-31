@@ -1173,7 +1173,7 @@ Notes: [Any notes]
   - **New Menu Items (Glove Manager → 🛡️ Safety):**
     - 🗓️ Ensure Current Week Exists - Adds current and previous week to compliance sheet from logs
     - 🔎 Quick Gmail Check - Shows Gmail search results vs what's already logged
-  - **How `ensureCurrentWeekInCompliance()` works:**
+  - ****How `ensureCurrentWeekInCompliance()` works:**
     1. Calculates week boundaries for current and previous week
     2. Runs `calculateComplianceFromLogs()` for previous week (can create tasks if past deadline)
     3. Runs `calculateComplianceFromLogs()` for current week
@@ -1588,12 +1588,6 @@ Notes: [Any notes]
       - Finds correct day column (Mon, Tue, etc.) based on report date
       - Updates ❌ or ⏳ cells to ✅ (or ✅L if late submission)
       - Updates crew status to "Complete" if all required reports now received
-  - **Where it runs:**
-    - After `complianceRecords` are written in `processSafetyEmails()`
-    - After `finalCompliance` records are written in `applyJobNumberCorrections()`
-  - **Example Flow:**
-    - **Before:** Week 02/08: Mon ❌, Tue ❌, Wed ❌, Status: "Missing Reports"
-    - **After auto-correction:** Week 02/08: Mon ✅L, Tue ✅L, Wed ✅L, Status: "Complete"
   - **Files Modified:**
     - `src/88-SafetyReports.gs` - Added `autoCorrectPastWeekCompliance()` function (~110 lines)
     - `src/Code.gs` - Added call after compliance record writing in two locations
@@ -1673,3 +1667,96 @@ Notes: [Any notes]
   - **Documentation:** `docs/SAFETY_COMPLIANCE_REFACTOR_PLAN.md`
   - **Impact:** JHAs from Gmail now immediately appear as ✅ in Safety Compliance sheet
 
+### March 27, 2026
+- ✅ **New Hires Flow in Crew Import**
+  - **Goal:** Detect NEW HIRE employees in Excel file and add them to Employees sheet before crew matching
+  - **What was built:**
+    1. **`checkForNewHires()`** - Scans parsed crews for employees flagged as NEW HIRE
+    2. **`searchEmployeeHistoryBatch(namesJson)`** - Batch searches Employee History to detect rehires
+    3. **`addNewEmployeeFromImport(employeeData)`** - Adds brand new employee to Employees sheet
+    4. **`rehireEmployeeFromImport(employeeData)`** - Updates existing "Previous Employee" record for rehires
+    5. **New Hires UI Section** - Cards for each new hire with rehire detection, history data, individual/bulk add
+    6. **Sequential processing** - `addAllNewHires()` adds one at a time to avoid race conditions
+    7. **`refreshEmployeesAndContinue()`** - Reloads employee data after adding, then continues flow
+  - **Flow:** Parse Excel → Detect new jobs → **Detect new hires** → Match employees → Preview → Apply
+  - **Rehire detection:** If employee has Employee History AND current location is "Previous Employee", uses rehire flow (preserves sizes, phone, etc.)
+  - **Files Modified:**
+    - `src/85-DataImport.gs` - Added ~350 lines (searchEmployeeHistoryBatch, addNewEmployeeFromImport, rehireEmployeeFromImport)
+    - `src/CrewImport.html` - Added ~400 lines (new hires section, cards, sequential add, refresh flow)
+
+- ✅ **Job Activation Scheduling (On Hold / Pending Start Auto-Activation)**
+  - **Goal:** Schedule future activation dates for On Hold and Pending Start jobs; auto-activate when date arrives
+  - **What was built:**
+    1. **`setJobActivationDate(jobNumber, activationDateStr)`** - Saves activation date to Job Tracking
+       - On Hold jobs: saves to "Estimated Return" (column G)
+       - Pending Start jobs: saves to "Start Date" (column E)
+    2. **`checkAndActivateScheduledJobs()`** - Scans all On Hold/Pending Start jobs, auto-activates when date arrives
+       - Called automatically during `syncJobTrackingAfterImport()` and `generateAllReports()`
+       - Clears On Hold fields (Put On Hold Date, Estimated Return) when activating from On Hold
+       - Adds note with activation details
+    3. **`activatePendingJobs()`** - Updated to handle both On Hold and Pending Start statuses
+  - **Files Modified:**
+    - `src/85-DataImport.gs` - Added ~160 lines (setJobActivationDate, checkAndActivateScheduledJobs)
+    - `src/Code.gs` - Added auto-activation call in generateAllReports()
+
+- ✅ **Purchase Order System - Vendor Catalog & Custom Items**
+  - **Goal:** Redesign vendor management to support arbitrary items (not just glove/sleeve classes) and streamline PO creation
+  - **What was built:**
+    1. **Combined Vendor Sheet Format** - 8 columns: Vendor Name, Contact, Email, Phone, Notes, Item, Item Number, Price
+       - Each row = one item for a vendor (vendor info repeated per row)
+       - Replaces old 17-column fixed format + separate Vendor Items sheet
+       - Auto-migrates from old format via `migrateVendorSheets()`
+    2. **Vendor Catalog in PO Dialog** - Selecting a vendor auto-loads their catalog items
+       - Items shown as unchecked rows, user selects what to order
+       - "Add from Vendor Catalog" button for additional items
+       - "Add Custom Line" for freeform items with editable name and price
+    3. **VendorConfig.html Redesign** - Item Number fields alongside prices for all glove/sleeve classes
+       - Custom Items section with add/remove rows
+       - 2-column grid layout: Glove Prices | Sleeve Prices
+    4. **PurchaseOrderDialog.html Enhancements** - Category-based item display
+       - Vendor catalog items shown with item numbers
+       - Inline editing for custom line items
+       - Remove button for vendor catalog and custom items
+    5. **Email sending** - `sendPurchaseOrderEmail()` sends PO directly from dialog
+  - **Files Modified:**
+    - `src/62-PurchaseOrders.gs` - Added ~400 lines (migrateVendorSheets, combined format CRUD, email sending)
+    - `src/PurchaseOrderDialog.html` - Added ~270 lines (catalog items, custom lines, inline editing)
+    - `src/VendorConfig.html` - Added ~230 lines (item numbers, custom items section)
+
+- ✅ **Reclaim Pick List Bug Fixes**
+  - **Problems Fixed:**
+    1. **Date objects in Class column** - Google Sheets sometimes stores small numbers (0, 2, 3) as serial dates (Dec 31 1899, Jan 1 1900, etc.). `parseInt()` returned NaN.
+    2. **Sleeve size matching** - "XL" vs "X-Large" not matching; now uses `normalizeSleeveSize()` from 30-SwapGeneration.gs
+    3. **Logic bug** - `!notAssigned` should have been `notAssigned` (double negation was inverted)
+    4. **N/A preferred size** - Employee's preferred size of "N/A" fell through instead of using actual item size
+  - **What was built:**
+    - `safeParseClass(val)` helper - Handles Date objects, converts serial dates back to class numbers
+    - `sleeveSizeMatch(itemSizeRaw)` helper - Normalizes both sides before comparing
+    - N/A preferred size detection - Falls back to item's actual size when employee's preferred size is "N/A" or empty
+  - **Files Modified:**
+    - `src/Code.gs` - Updated `findReclaimPickListItem()` (~100 lines changed)
+
+- ✅ **HV Tester & Phasing Set Trigger Enhancements**
+  - Auto-set defaults when new item number entered (Location=Helena, Status=On Shelf, Assigned To=On Shelf)
+  - NewItemDialog.html updated with HV Tester and Phasing Set field layouts (Model, Serial #, Calibration Date, KV)
+  - **Files Modified:**
+    - `src/11-Triggers.gs` - Added ~50 lines (auto-defaults for HV Testers and Phasing Sets)
+    - `src/NewItemDialog.html` - Added ~90 lines (HV Tester and Phasing Set form fields)
+
+- ✅ **Purchase Needs - "Size Up" Category & Better Matching**
+  - Added "SIZE UP ASSIGNMENTS" category to purchase needs tables
+  - Improved item matching with sleeve size normalization
+  - **Files Modified:**
+    - `src/60-PurchaseNeeds.gs` - Updated ~40 lines
+
+- ✅ **Crew Import Parser Improvements**
+  - Break on special section headers (Time Off, Quit, Layoff, Resign, etc.) during employee parsing
+  - Break on "Crew Here" placeholders (e.g., "Crew Here Wed 4-1 thru Thurs 4-9")
+  - Prevents these entries from being treated as employee names
+  - **Files Modified:**
+    - `src/CrewImport.html` - Updated `parseCrewCards()` employee scanning logic
+
+- ✅ **ES6 Syntax Fix - const to var**
+  - Fixed `const` usage in `writeSwapTableHeadersDynamic()` function to use `var` per project convention
+  - **Files Modified:**
+    - `src/Code.gs` - 2 lines changed (const → var)

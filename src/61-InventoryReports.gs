@@ -1000,10 +1000,14 @@ function resetKnownItemNumbers() {
   props.deleteProperty(NEW_ITEMS_PROPERTY_KEY + '_Gloves');
   props.deleteProperty(NEW_ITEMS_PROPERTY_KEY + '_Sleeves');
   props.deleteProperty(NEW_ITEMS_PROPERTY_KEY + '_Blankets');
+  props.deleteProperty(NEW_ITEMS_PROPERTY_KEY + '_HV Testers');
+  props.deleteProperty(NEW_ITEMS_PROPERTY_KEY + '_Phasing Sets');
 
   initializeKnownItemNumbers('Gloves');
   initializeKnownItemNumbers('Sleeves');
   initializeKnownItemNumbers('Blankets');
+  initializeKnownItemNumbers('HV Testers');
+  initializeKnownItemNumbers('Phasing Sets');
 
   SpreadsheetApp.getUi().alert('✅ Known item numbers have been reset and re-initialized from current inventory.');
 }
@@ -1040,6 +1044,12 @@ function promptNewItemSource(itemNum, sheetName, rowNum) {
   } else if (sheetName === 'Blankets') {
     itemType = 'Blanket';
     dialogTitle = '🧱 New Blanket Entry';
+  } else if (sheetName === 'HV Testers') {
+    itemType = 'HV Tester';
+    dialogTitle = '⚡ New HV Tester Entry';
+  } else if (sheetName === 'Phasing Sets') {
+    itemType = 'Phasing Set';
+    dialogTitle = '⚡ New Phasing Set Entry';
   } else {
     itemType = 'Item';
     dialogTitle = '📦 New Item Entry';
@@ -1070,7 +1080,10 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(sheetName);
   var isBlanket = (sheetName === 'Blankets');
-  var itemType = sheetName === 'Gloves' ? 'Glove' : (sheetName === 'Sleeves' ? 'Sleeve' : 'Blanket');
+  var isHVTester = (sheetName === 'HV Testers');
+  var isPhasingSet = (sheetName === 'Phasing Sets');
+  var isEquipment = isHVTester || isPhasingSet;
+  var itemType = sheetName === 'Gloves' ? 'Glove' : (sheetName === 'Sleeves' ? 'Sleeve' : (isBlanket ? 'Blanket' : (isHVTester ? 'HV Tester' : (isPhasingSet ? 'Phasing Set' : 'Item'))));
 
   // ===========================================================================
   // DUPLICATE ITEM NUMBER VALIDATION
@@ -1083,9 +1096,137 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
     throw new Error(duplicateCheck.message);
   }
 
-  // Column mapping for Gloves/Sleeves/Blankets:
-  // A=Item#(1), B=Size/Type(2), C=Class(3), D=Test Date(4), E=Date Assigned(5),
-  // F=Location(6), G=Status(7), H=Assigned To(8), I=Change Out Date(9), J=Picked For(10), K=Notes(11)
+  // ===========================================================================
+  // HV TESTERS: A=Item#(1), B=Model(2), C=Serial#(3), D=Calibration Date(4),
+  //             E=Date Assigned(5), F=Location(6), G=Status(7), H=Assigned To(8),
+  //             I=Replacement Date(9), J=Picked For(10), K=Notes(11)
+  // ===========================================================================
+  if (isHVTester) {
+    if (formData.model) {
+      sheet.getRange(rowNum, COLS.HV_TESTERS.MODEL).setValue(formData.model);
+    }
+    if (formData.serialNum) {
+      sheet.getRange(rowNum, COLS.HV_TESTERS.SERIAL_NUM).setValue(formData.serialNum);
+    }
+    if (formData.calibrationDate) {
+      var calCell = sheet.getRange(rowNum, COLS.HV_TESTERS.CALIBRATION_DATE);
+      var dateParts = formData.calibrationDate.split('-');
+      if (dateParts.length === 3) {
+        var parsedDate = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
+        if (!isNaN(parsedDate.getTime())) {
+          calCell.setValue(parsedDate);
+          try { calCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+          // Calculate Replacement Date = Calibration Date + 10 years
+          var replacementDate = new Date(parsedDate);
+          replacementDate.setFullYear(replacementDate.getFullYear() + (typeof INTERVAL_CALIBRATION_YEARS !== 'undefined' ? INTERVAL_CALIBRATION_YEARS : 10));
+          var replCell = sheet.getRange(rowNum, COLS.HV_TESTERS.CHANGE_OUT_DATE);
+          replCell.setValue(replacementDate);
+          try { replCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+        }
+      }
+    }
+    if (formData.location) {
+      sheet.getRange(rowNum, COLS.HV_TESTERS.LOCATION).setValue(formData.location);
+    }
+    if (formData.status) {
+      sheet.getRange(rowNum, COLS.HV_TESTERS.STATUS).setValue(formData.status);
+    }
+    if (formData.assignedTo && formData.assignedTo.trim() !== '') {
+      var assignedTo = formData.assignedTo.trim();
+      sheet.getRange(rowNum, COLS.HV_TESTERS.ASSIGNED_TO).setValue(assignedTo);
+      // If assigned to employee, set Date Assigned & look up location
+      if (assignedTo.toLowerCase() !== 'on shelf') {
+        var today = new Date();
+        var dateCell = sheet.getRange(rowNum, COLS.HV_TESTERS.DATE_ASSIGNED);
+        dateCell.setValue(today);
+        try { dateCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+        sheet.getRange(rowNum, COLS.HV_TESTERS.STATUS).setValue('In Service');
+        // Look up employee location
+        var empLoc = lookupEmployeeLocation(ss, assignedTo);
+        if (empLoc) {
+          sheet.getRange(rowNum, COLS.HV_TESTERS.LOCATION).setValue(empLoc);
+        }
+      }
+    } else {
+      sheet.getRange(rowNum, COLS.HV_TESTERS.ASSIGNED_TO).setValue('On Shelf');
+      sheet.getRange(rowNum, COLS.HV_TESTERS.STATUS).setValue('On Shelf');
+    }
+    // Add to known items
+    addToKnownItemNumbers(itemNum, sheetName);
+    // Handle item source logging
+    processItemSourceLogging(formData, itemNum, itemType, sheetName, ss);
+    return;
+  }
+
+  // ===========================================================================
+  // PHASING SETS: A=Item#(1), B=Model(2), C=KV(3), D=Serial#(4),
+  //               E=Calibration Date(5), F=Date Assigned(6), G=Location(7),
+  //               H=Status(8), I=Assigned To(9), J=Replacement Date(10),
+  //               K=Picked For(11), L=Notes(12)
+  // ===========================================================================
+  if (isPhasingSet) {
+    if (formData.model) {
+      sheet.getRange(rowNum, COLS.PHASING_SETS.MODEL).setValue(formData.model);
+    }
+    if (formData.kv) {
+      sheet.getRange(rowNum, COLS.PHASING_SETS.KV).setValue(formData.kv);
+    }
+    if (formData.serialNum) {
+      sheet.getRange(rowNum, COLS.PHASING_SETS.SERIAL_NUM).setValue(formData.serialNum);
+    }
+    if (formData.calibrationDate) {
+      var calCell = sheet.getRange(rowNum, COLS.PHASING_SETS.CALIBRATION_DATE);
+      var dateParts = formData.calibrationDate.split('-');
+      if (dateParts.length === 3) {
+        var parsedDate = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
+        if (!isNaN(parsedDate.getTime())) {
+          calCell.setValue(parsedDate);
+          try { calCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+          // Calculate Replacement Date = Calibration Date + 10 years
+          var replacementDate = new Date(parsedDate);
+          replacementDate.setFullYear(replacementDate.getFullYear() + (typeof INTERVAL_CALIBRATION_YEARS !== 'undefined' ? INTERVAL_CALIBRATION_YEARS : 10));
+          var replCell = sheet.getRange(rowNum, COLS.PHASING_SETS.CHANGE_OUT_DATE);
+          replCell.setValue(replacementDate);
+          try { replCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+        }
+      }
+    }
+    if (formData.location) {
+      sheet.getRange(rowNum, COLS.PHASING_SETS.LOCATION).setValue(formData.location);
+    }
+    if (formData.status) {
+      sheet.getRange(rowNum, COLS.PHASING_SETS.STATUS).setValue(formData.status);
+    }
+    if (formData.assignedTo && formData.assignedTo.trim() !== '') {
+      var assignedTo = formData.assignedTo.trim();
+      sheet.getRange(rowNum, COLS.PHASING_SETS.ASSIGNED_TO).setValue(assignedTo);
+      // If assigned to employee, set Date Assigned & look up location
+      if (assignedTo.toLowerCase() !== 'on shelf') {
+        var today = new Date();
+        var dateCell = sheet.getRange(rowNum, COLS.PHASING_SETS.DATE_ASSIGNED);
+        dateCell.setValue(today);
+        try { dateCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+        sheet.getRange(rowNum, COLS.PHASING_SETS.STATUS).setValue('In Service');
+        // Look up employee location
+        var empLoc = lookupEmployeeLocation(ss, assignedTo);
+        if (empLoc) {
+          sheet.getRange(rowNum, COLS.PHASING_SETS.LOCATION).setValue(empLoc);
+        }
+      }
+    } else {
+      sheet.getRange(rowNum, COLS.PHASING_SETS.ASSIGNED_TO).setValue('On Shelf');
+      sheet.getRange(rowNum, COLS.PHASING_SETS.STATUS).setValue('On Shelf');
+    }
+    // Add to known items
+    addToKnownItemNumbers(itemNum, sheetName);
+    // Handle item source logging
+    processItemSourceLogging(formData, itemNum, itemType, sheetName, ss);
+    return;
+  }
+
+  // ===========================================================================
+  // GLOVES / SLEEVES / BLANKETS (original logic)
+  // ===========================================================================
 
   // Fill in the basic data
   if (formData.size) {
@@ -1283,6 +1424,72 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
   } catch (reportErr) {
     logEvent('Error auto-updating Inventory Reports: ' + reportErr, 'WARN');
   }
+}
+
+/**
+ * Looks up an employee's location from the Employees sheet.
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @param {string} employeeName - Employee name to look up
+ * @return {string|null} Location or null if not found
+ */
+function lookupEmployeeLocation(ss, employeeName) {
+  var employeesSheet = ss.getSheetByName('Employees');
+  if (!employeesSheet || employeesSheet.getLastRow() < 2) return null;
+
+  var empData = employeesSheet.getDataRange().getValues();
+  var empHeaders = empData[0];
+  var nameCol = -1;
+  var locCol = -1;
+
+  for (var h = 0; h < empHeaders.length; h++) {
+    var hdr = String(empHeaders[h]).toLowerCase().trim();
+    if (hdr === 'name') nameCol = h;
+    if (hdr === 'location') locCol = h;
+  }
+
+  if (nameCol === -1 || locCol === -1) return null;
+
+  var targetName = employeeName.toLowerCase().trim();
+  for (var i = 1; i < empData.length; i++) {
+    var empName = String(empData[i][nameCol]).trim().toLowerCase();
+    if (empName === targetName) {
+      var empLocation = String(empData[i][locCol]).trim();
+      return empLocation || null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Handles item source logging (New Purchase, Reclaimed, Not New) for any equipment type.
+ * @param {Object} formData - Form data from dialog
+ * @param {string} itemNum - Item number
+ * @param {string} itemType - 'HV Tester', 'Phasing Set', etc.
+ * @param {string} sheetName - Sheet name
+ * @param {Spreadsheet} ss - Active spreadsheet
+ */
+function processItemSourceLogging(formData, itemNum, itemType, sheetName, ss) {
+  var source = 'Purchased';
+  if (formData.itemSource === '2') {
+    source = 'Reclaimed';
+  } else if (formData.itemSource === '3') {
+    ss.toast('Item #' + itemNum + ' added (not logged as new)', '✅ Item Added', 5);
+    return;
+  }
+
+  // Log as new item
+  logNewItem({
+    itemNum: itemNum,
+    itemType: itemType,
+    itemClass: '',
+    size: formData.model || '',
+    source: source,
+    originalItems: '',
+    cost: '',
+    notes: 'Auto-detected from ' + sheetName + ' sheet'
+  });
+
+  ss.toast('Item #' + itemNum + ' logged as ' + source, '✅ New Item Logged', 3);
 }
 
 /**

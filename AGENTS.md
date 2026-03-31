@@ -20,12 +20,12 @@ Google Apps Script loads files **alphabetically**. Numbered prefixes control loa
 22-LocationSync.gs → Inventory location sync with Employees (~175 lines)
 30-SwapGeneration.gs → Swap report generation (~1.4k lines)
 51-EmployeeHistory.gs → Employee lifecycle, restore deleted employees (~1.5k lines)
-62-PurchaseOrders.gs → PO generation and vendor management (~700 lines)
+62-PurchaseOrders.gs → PO generation and vendor management (~960 lines)
 75-Scheduling.gs → Crew visit scheduling, training calendar (~3.5k lines)
 76-SmartScheduling.gs → Task collection, getDriveTimeMap() (~2.3k lines)
 76-EmployeeClassifications.gs → Job classification dropdowns (~150 lines)
 80-EmailReports.gs → Weekly HTML email reports (~1.5k lines)
-85-DataImport.gs → Crew Import, Job Tracking sync (~2.4k lines)
+85-DataImport.gs → Crew Import, Job Tracking sync, new hire/rehire flow (~3.1k lines)
 86-TimeTracking.gs → Daily Accomplishments (~1k lines)
 87-RoutePlanner.gs → Trip Planner (~2.5k lines)
 88-SafetyReports.gs → Gmail processing, Safety Compliance (~15.9k lines)
@@ -91,12 +91,12 @@ function showMyDialog() {
 | `51-EmployeeHistory.gs` | Employee lifecycle tracking, restore deleted employees (~1.5k lines) |
 | `75-Scheduling.gs` | Crew visit scheduling, training calendar (~3.5k lines) |
 | `76-SmartScheduling.gs` | Task collection, `getDriveTimeMap()` (~2.3k lines) |
-| `85-DataImport.gs` | Crew Import from Excel, Job Tracking sync (~2.4k lines) |
+| `85-DataImport.gs` | Crew Import from Excel, Job Tracking sync, new hire/rehire flow (~3.1k lines) |
 | `87-RoutePlanner.gs` | Trip planning and route optimization (~2.5k lines) |
 | `88-SafetyReports.gs` | Gmail processing, Safety Compliance tracking (~15.9k lines) |
 | `ToDoSchedule.html` | Task List dialog (~6.5k lines) |
 | `TripPlanner.html` | Trip Planner / Scheduler (primary scheduling interface, ~5k lines) |
-| `CrewImport.html` | Excel crew import with SheetJS (~6.1k lines) |
+| `CrewImport.html` | Excel crew import with SheetJS (~7k lines) |
 | `QuickActions.html` | Monday workflow sidebar |
 | `ProcessSafetyEmailsDialog.html` | Safety email processing dialog (~1.5k lines) |
 

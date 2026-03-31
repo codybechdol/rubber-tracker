@@ -35,14 +35,20 @@
 
     .pricing-section { margin-top: 20px; }
     .pricing-section h3 { font-size: 14px; color: #1a73e8; margin: 0 0 10px 0; }
-    .pricing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; background: white; padding: 15px; border-radius: 8px; border: 1px solid #dadce0; }
+    .pricing-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; background: white; padding: 15px; border-radius: 8px; border: 1px solid #dadce0; }
     .pricing-card { background: #f8f9fa; border-radius: 6px; padding: 12px; }
     .pricing-card h4 { margin: 0 0 10px 0; font-size: 13px; color: #333; }
-    .pricing-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .pricing-row { display: flex; align-items: center; margin-bottom: 8px; gap: 6px; }
     .pricing-row:last-child { margin-bottom: 0; }
-    .pricing-row label { font-size: 12px; color: #5f6368; }
-    .pricing-row input { width: 90px; padding: 6px 8px; border: 1px solid #dadce0; border-radius: 4px; font-size: 12px; text-align: right; }
+    .pricing-row label { font-size: 12px; color: #5f6368; white-space: nowrap; min-width: 52px; }
+    .pricing-row input.item-num { width: 110px; padding: 6px 8px; border: 1px solid #dadce0; border-radius: 4px; font-size: 12px; }
+    .pricing-row input.price { width: 80px; padding: 6px 8px; border: 1px solid #dadce0; border-radius: 4px; font-size: 12px; text-align: right; }
     .pricing-row input:focus { border-color: #1a73e8; outline: none; }
+    .pricing-header-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid #e0e0e0; }
+    .pricing-header-row span { font-size: 10px; color: #999; font-weight: 600; text-transform: uppercase; }
+    .pricing-header-row .lbl-spacer { min-width: 52px; }
+    .pricing-header-row .lbl-itemnum { width: 110px; text-align: center; }
+    .pricing-header-row .lbl-price { width: 80px; text-align: center; }
 
     .vendor-select { margin-bottom: 15px; }
     .vendor-select label { font-weight: 600; margin-right: 10px; }
@@ -122,43 +128,75 @@
       <div class="pricing-grid">
         <div class="pricing-card">
           <h4>🧤 Glove Prices</h4>
-        <div class="pricing-row">
-          <label>Class 0:</label>
-          <input type="text" id="class0GlovePrice" placeholder="$0.00" oninput="formatPrice(this); autoSavePricing()">
-        </div>
-        <div class="pricing-row">
-          <label>Class 2:</label>
-          <input type="text" id="class2GlovePrice" placeholder="$0.00" oninput="formatPrice(this); autoSavePricing()">
-        </div>
-        <div class="pricing-row">
-          <label>Class 3:</label>
-          <input type="text" id="class3GlovePrice" placeholder="$0.00" oninput="formatPrice(this); autoSavePricing()">
-        </div>
-      </div>
-
-      <div class="pricing-card">
-        <h4>💪 Sleeve Prices</h4>
-        <div class="pricing-row">
-          <label>Class 0:</label>
-          <input type="text" id="class0SleevePrice" placeholder="$0.00" oninput="formatPrice(this); autoSavePricing()">
-        </div>
-        <div class="pricing-row">
-          <label>Class 2:</label>
-          <input type="text" id="class2SleevePrice" placeholder="$0.00" oninput="formatPrice(this); autoSavePricing()">
-        </div>
-        <div class="pricing-row">
-          <label>Class 3:</label>
-          <input type="text" id="class3SleevePrice" placeholder="$0.00" oninput="formatPrice(this); autoSavePricing()">
+          <div class="pricing-header-row">
+            <span class="lbl-spacer"></span>
+            <span class="lbl-itemnum">Item #</span>
+            <span class="lbl-price">Price</span>
+          </div>
+          <div class="pricing-row">
+            <label>Class 0:</label>
+            <input type="text" class="item-num" id="class0GloveItemNum" placeholder="Item #" oninput="autoSavePricing()">
+            <input type="text" class="price" id="class0GlovePrice" placeholder="$0.00" oninput="formatPrice(this); autoSavePricing()">
+          </div>
+          <div class="pricing-row">
+            <label>Class 2:</label>
+            <input type="text" class="item-num" id="class2GloveItemNum" placeholder="Item #" oninput="autoSavePricing()">
+            <input type="text" class="price" id="class2GlovePrice" placeholder="$0.00" oninput="formatPrice(this); autoSavePricing()">
+          </div>
+          <div class="pricing-row">
+            <label>Class 3:</label>
+            <input type="text" class="item-num" id="class3GloveItemNum" placeholder="Item #" oninput="autoSavePricing()">
+            <input type="text" class="price" id="class3GlovePrice" placeholder="$0.00" oninput="formatPrice(this); autoSavePricing()">
           </div>
         </div>
 
-        <div class="pricing-card" style="background: #e8f5e9;">
-          <h4>💡 Tips</h4>
-          <p style="font-size: 11px; color: #5f6368; margin: 0;">
-            • Enter prices without $ sign<br>
-            • Prices auto-format on save<br>
-            • Leave blank if not applicable
-          </p>
+        <div class="pricing-card">
+          <h4>💪 Sleeve Prices</h4>
+          <div class="pricing-header-row">
+            <span class="lbl-spacer"></span>
+            <span class="lbl-itemnum">Item #</span>
+            <span class="lbl-price">Price</span>
+          </div>
+          <div class="pricing-row">
+            <label>Class 0:</label>
+            <input type="text" class="item-num" id="class0SleeveItemNum" placeholder="Item #" oninput="autoSavePricing()">
+            <input type="text" class="price" id="class0SleevePrice" placeholder="$0.00" oninput="formatPrice(this); autoSavePricing()">
+          </div>
+          <div class="pricing-row">
+            <label>Class 2:</label>
+            <input type="text" class="item-num" id="class2SleeveItemNum" placeholder="Item #" oninput="autoSavePricing()">
+            <input type="text" class="price" id="class2SleevePrice" placeholder="$0.00" oninput="formatPrice(this); autoSavePricing()">
+          </div>
+          <div class="pricing-row">
+            <label>Class 3:</label>
+            <input type="text" class="item-num" id="class3SleeveItemNum" placeholder="Item #" oninput="autoSavePricing()">
+            <input type="text" class="price" id="class3SleevePrice" placeholder="$0.00" oninput="formatPrice(this); autoSavePricing()">
+          </div>
+        </div>
+      </div>
+
+      <!-- Custom Items Section -->
+      <div id="customItemsSection" style="margin-top: 15px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <h4 style="margin: 0; color: #1a73e8; font-size: 13px;">📦 Additional Items</h4>
+          <button class="success" style="padding: 5px 12px; font-size: 11px;" onclick="addCustomItem()">➕ Add Item</button>
+        </div>
+        <div class="custom-items-table-wrap" style="max-height: 200px; overflow-y: auto; border: 1px solid #dadce0; border-radius: 6px; background: white;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+            <thead>
+              <tr>
+                <th style="background: #1a73e8; color: white; padding: 6px 8px; text-align: left; position: sticky; top: 0; z-index: 5;">Item</th>
+                <th style="background: #1a73e8; color: white; padding: 6px 8px; text-align: left; position: sticky; top: 0; z-index: 5;">Item Number</th>
+                <th style="background: #1a73e8; color: white; padding: 6px 8px; text-align: right; position: sticky; top: 0; z-index: 5; width: 90px;">Price</th>
+                <th style="background: #1a73e8; color: white; padding: 6px 8px; position: sticky; top: 0; z-index: 5; width: 40px;"></th>
+              </tr>
+            </thead>
+            <tbody id="customItemsBody">
+            </tbody>
+          </table>
+        </div>
+        <div id="noCustomItems" style="display: none; text-align: center; padding: 15px; color: #999; font-size: 11px; background: white; border: 1px solid #dadce0; border-radius: 6px;">
+          No custom items yet. Click "➕ Add Item" to add items.
         </div>
       </div>
     </div>
@@ -243,7 +281,14 @@
         class3GlovePrice: '',
         class0SleevePrice: '',
         class2SleevePrice: '',
-        class3SleevePrice: ''
+        class3SleevePrice: '',
+        class0GloveItemNum: '',
+        class2GloveItemNum: '',
+        class3GloveItemNum: '',
+        class0SleeveItemNum: '',
+        class2SleeveItemNum: '',
+        class3SleeveItemNum: '',
+        customItems: []
       });
       renderTable();
       updatePricingDropdown();
@@ -286,6 +331,7 @@
       // Save current vendor pricing first if one was selected
       if (currentPricingVendorIndex >= 0) {
         savePricingToVendor(currentPricingVendorIndex);
+        saveCustomItemsToVendor(currentPricingVendorIndex);
       }
 
       var select = document.getElementById('pricingVendorSelect');
@@ -296,6 +342,7 @@
       if (isNaN(index) || index < 0) {
         currentPricingVendorIndex = -1;
         clearPricingFields();
+        renderCustomItems([]);
         hint.style.display = 'inline';
         priceInputs.forEach(function(input) { input.disabled = true; input.style.background = '#f5f5f5'; });
         return;
@@ -314,6 +361,16 @@
       document.getElementById('class0SleevePrice').value = formatPriceValue(v.class0SleevePrice);
       document.getElementById('class2SleevePrice').value = formatPriceValue(v.class2SleevePrice);
       document.getElementById('class3SleevePrice').value = formatPriceValue(v.class3SleevePrice);
+
+      document.getElementById('class0GloveItemNum').value = v.class0GloveItemNum || '';
+      document.getElementById('class2GloveItemNum').value = v.class2GloveItemNum || '';
+      document.getElementById('class3GloveItemNum').value = v.class3GloveItemNum || '';
+      document.getElementById('class0SleeveItemNum').value = v.class0SleeveItemNum || '';
+      document.getElementById('class2SleeveItemNum').value = v.class2SleeveItemNum || '';
+      document.getElementById('class3SleeveItemNum').value = v.class3SleeveItemNum || '';
+
+      // Render custom items
+      renderCustomItems(v.customItems || []);
     }
 
     function formatPriceValue(val) {
@@ -348,6 +405,13 @@
       document.getElementById('class0SleevePrice').value = '';
       document.getElementById('class2SleevePrice').value = '';
       document.getElementById('class3SleevePrice').value = '';
+      document.getElementById('class0GloveItemNum').value = '';
+      document.getElementById('class2GloveItemNum').value = '';
+      document.getElementById('class3GloveItemNum').value = '';
+      document.getElementById('class0SleeveItemNum').value = '';
+      document.getElementById('class2SleeveItemNum').value = '';
+      document.getElementById('class3SleeveItemNum').value = '';
+      renderCustomItems([]);
     }
 
     function savePricingToVendor(index) {
@@ -359,6 +423,101 @@
       vendors[index].class0SleevePrice = parseFloat(document.getElementById('class0SleevePrice').value) || '';
       vendors[index].class2SleevePrice = parseFloat(document.getElementById('class2SleevePrice').value) || '';
       vendors[index].class3SleevePrice = parseFloat(document.getElementById('class3SleevePrice').value) || '';
+
+      vendors[index].class0GloveItemNum = document.getElementById('class0GloveItemNum').value.trim();
+      vendors[index].class2GloveItemNum = document.getElementById('class2GloveItemNum').value.trim();
+      vendors[index].class3GloveItemNum = document.getElementById('class3GloveItemNum').value.trim();
+      vendors[index].class0SleeveItemNum = document.getElementById('class0SleeveItemNum').value.trim();
+      vendors[index].class2SleeveItemNum = document.getElementById('class2SleeveItemNum').value.trim();
+      vendors[index].class3SleeveItemNum = document.getElementById('class3SleeveItemNum').value.trim();
+    }
+
+    function renderCustomItems(items) {
+      var tbody = document.getElementById('customItemsBody');
+      var noItems = document.getElementById('noCustomItems');
+      var tableWrap = document.querySelector('.custom-items-table-wrap');
+
+      if (!items || items.length === 0) {
+        tbody.innerHTML = '';
+        tableWrap.style.display = 'none';
+        noItems.style.display = 'block';
+        return;
+      }
+
+      tableWrap.style.display = 'block';
+      noItems.style.display = 'none';
+      tbody.innerHTML = '';
+
+      for (var i = 0; i < items.length; i++) {
+        var ci = items[i];
+        var tr = document.createElement('tr');
+        tr.setAttribute('data-ci-index', i);
+        tr.innerHTML =
+          '<td style="padding: 4px 6px;"><input type="text" data-ci-field="item" value="' + escapeHtml(ci.item || '') + '" placeholder="e.g., Rubber Blanket" style="width: 100%; padding: 5px 7px; border: 1px solid #dadce0; border-radius: 4px; font-size: 12px;"></td>' +
+          '<td style="padding: 4px 6px;"><input type="text" data-ci-field="itemNumber" value="' + escapeHtml(ci.itemNumber || '') + '" placeholder="e.g., RB-100" style="width: 100%; padding: 5px 7px; border: 1px solid #dadce0; border-radius: 4px; font-size: 12px;"></td>' +
+          '<td style="padding: 4px 6px;"><input type="text" data-ci-field="price" value="' + formatPriceValue(ci.price) + '" placeholder="0.00" oninput="formatPrice(this)" style="width: 100%; padding: 5px 7px; border: 1px solid #dadce0; border-radius: 4px; font-size: 12px; text-align: right;"></td>' +
+          '<td style="padding: 4px 6px; text-align: center;"><button class="delete-btn" onclick="deleteCustomItem(' + i + ')" title="Remove item">🗑️</button></td>';
+        tbody.appendChild(tr);
+      }
+    }
+
+    function addCustomItem() {
+      if (currentPricingVendorIndex < 0) {
+        showStatus('Select a vendor first to add custom items.', 'error');
+        return;
+      }
+
+      // Save current custom items from DOM first
+      saveCustomItemsToVendor(currentPricingVendorIndex);
+
+      var v = vendors[currentPricingVendorIndex];
+      if (!v.customItems) v.customItems = [];
+      v.customItems.push({ item: '', itemNumber: '', price: '' });
+      renderCustomItems(v.customItems);
+
+      // Focus the new item's name field
+      var rows = document.querySelectorAll('#customItemsBody tr');
+      if (rows.length > 0) {
+        var lastRow = rows[rows.length - 1];
+        var firstInput = lastRow.querySelector('[data-ci-field="item"]');
+        if (firstInput) firstInput.focus();
+      }
+    }
+
+    function deleteCustomItem(index) {
+      if (currentPricingVendorIndex < 0) return;
+
+      // Save current state from DOM first
+      saveCustomItemsToVendor(currentPricingVendorIndex);
+
+      var v = vendors[currentPricingVendorIndex];
+      if (v.customItems && index >= 0 && index < v.customItems.length) {
+        v.customItems.splice(index, 1);
+        renderCustomItems(v.customItems);
+      }
+    }
+
+    function saveCustomItemsToVendor(index) {
+      if (index < 0 || index >= vendors.length) return;
+
+      var rows = document.querySelectorAll('#customItemsBody tr');
+      var items = [];
+
+      rows.forEach(function(row) {
+        var itemInput = row.querySelector('[data-ci-field="item"]');
+        var itemNumInput = row.querySelector('[data-ci-field="itemNumber"]');
+        var priceInput = row.querySelector('[data-ci-field="price"]');
+
+        if (itemInput) {
+          items.push({
+            item: itemInput.value.trim(),
+            itemNumber: itemNumInput ? itemNumInput.value.trim() : '',
+            price: priceInput ? (parseFloat(priceInput.value) || '') : ''
+          });
+        }
+      });
+
+      vendors[index].customItems = items;
     }
 
     function collectTableData() {
@@ -380,6 +539,7 @@
       // Save current pricing if a vendor is selected
       if (currentPricingVendorIndex >= 0) {
         savePricingToVendor(currentPricingVendorIndex);
+        saveCustomItemsToVendor(currentPricingVendorIndex);
       }
 
       // Filter out completely empty vendors

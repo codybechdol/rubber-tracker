@@ -506,8 +506,8 @@ function onEditHandler(e) {
       return;  // Handled - don't continue to processEdit
     }
 
-    // Handle new item number detection in Gloves/Sleeves/Blankets (Column A = item number)
-    if ((sheetName === 'Gloves' || sheetName === 'Sleeves' || sheetName === 'Blankets') && editedCol === 1 && editedRow >= 2) {
+    // Handle new item number detection in Gloves/Sleeves/Blankets/HV Testers/Phasing Sets (Column A = item number)
+    if ((sheetName === 'Gloves' || sheetName === 'Sleeves' || sheetName === 'Blankets' || sheetName === 'HV Testers' || sheetName === 'Phasing Sets') && editedCol === 1 && editedRow >= 2) {
       var newItemNum = e.range.getValue();
       var oldItemNum = e.oldValue;
       var itemNumStr = String(newItemNum).trim();
@@ -557,6 +557,52 @@ function onEditHandler(e) {
           }
         } catch (autoPopErr) {
           Logger.log('Blankets auto-population error (will show dialog): ' + autoPopErr);
+        }
+      }
+
+      // For HV Testers, auto-set defaults
+      if (sheetName === 'HV Testers' && newItemNum && itemNumStr !== '') {
+        try {
+          // Auto-set Location to 'Helena' if empty (col F)
+          var currentLocation = sheet.getRange(editedRow, COLS.HV_TESTERS.LOCATION).getValue();
+          if (!currentLocation) {
+            sheet.getRange(editedRow, COLS.HV_TESTERS.LOCATION).setValue('Helena');
+          }
+          // Auto-set Status to 'On Shelf' if empty (col G)
+          var currentStatus = sheet.getRange(editedRow, COLS.HV_TESTERS.STATUS).getValue();
+          if (!currentStatus) {
+            sheet.getRange(editedRow, COLS.HV_TESTERS.STATUS).setValue('On Shelf');
+          }
+          // Auto-set Assigned To to 'On Shelf' if empty (col H)
+          var currentAssignedTo = sheet.getRange(editedRow, COLS.HV_TESTERS.ASSIGNED_TO).getValue();
+          if (!currentAssignedTo) {
+            sheet.getRange(editedRow, COLS.HV_TESTERS.ASSIGNED_TO).setValue('On Shelf');
+          }
+        } catch (autoPopErr) {
+          Logger.log('HV Testers auto-population error (will show dialog): ' + autoPopErr);
+        }
+      }
+
+      // For Phasing Sets, auto-set defaults
+      if (sheetName === 'Phasing Sets' && newItemNum && itemNumStr !== '') {
+        try {
+          // Auto-set Location to 'Helena' if empty (col G)
+          var currentLocation = sheet.getRange(editedRow, COLS.PHASING_SETS.LOCATION).getValue();
+          if (!currentLocation) {
+            sheet.getRange(editedRow, COLS.PHASING_SETS.LOCATION).setValue('Helena');
+          }
+          // Auto-set Status to 'On Shelf' if empty (col H)
+          var currentStatus = sheet.getRange(editedRow, COLS.PHASING_SETS.STATUS).getValue();
+          if (!currentStatus) {
+            sheet.getRange(editedRow, COLS.PHASING_SETS.STATUS).setValue('On Shelf');
+          }
+          // Auto-set Assigned To to 'On Shelf' if empty (col I)
+          var currentAssignedTo = sheet.getRange(editedRow, COLS.PHASING_SETS.ASSIGNED_TO).getValue();
+          if (!currentAssignedTo) {
+            sheet.getRange(editedRow, COLS.PHASING_SETS.ASSIGNED_TO).setValue('On Shelf');
+          }
+        } catch (autoPopErr) {
+          Logger.log('Phasing Sets auto-population error (will show dialog): ' + autoPopErr);
         }
       }
 

@@ -96,6 +96,14 @@
     .no-vendors-warning { background: #fff3cd; border: 1px solid #ffc107; color: #856404; padding: 12px; border-radius: 6px; margin-bottom: 15px; }
     .no-vendors-warning a { color: #0d6efd; cursor: pointer; text-decoration: underline; }
 
+sh    .add-item-bar { display: flex; gap: 8px; margin-bottom: 10px; align-items: center; }
+    .add-item-bar button { font-size: 12px; padding: 6px 12px; }
+    .add-item-bar .add-item-hint { font-size: 11px; color: #5f6368; }
+    td input.inline-text { width: 100%; padding: 4px 6px; border: 1px solid #dadce0; border-radius: 4px; font-size: 12px; }
+    td input.inline-price { width: 70px; padding: 4px 6px; border: 1px solid #dadce0; border-radius: 4px; font-size: 12px; text-align: right; }
+    .remove-btn { background: none; border: none; color: #ea4335; cursor: pointer; font-size: 14px; padding: 2px 6px; }
+    .remove-btn:hover { background: #fce8e6; border-radius: 4px; }
+
     .copy-success { position: fixed; top: 20px; right: 20px; background: #34A853; color: white; padding: 12px 20px; border-radius: 6px; display: none; z-index: 1000; animation: fadeIn 0.3s; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
   </style>
@@ -157,9 +165,16 @@
       </div>
 
       <div id="emptyItems" class="empty-state" style="display: none;">
-        <p>✅ No items currently need ordering!</p>
-        <p>Run "Update Purchase Needs" to refresh the list.</p>
+        <p>✅ No items currently need ordering from Purchase Needs.</p>
+        <p>Select a vendor and use "➕ Add from Vendor Catalog" below to add items.</p>
       </div>
+    </div>
+
+    <!-- Add Item Buttons -->
+    <div class="add-item-bar">
+      <button class="success" onclick="addVendorCatalogItem()" id="addCatalogBtn" style="display:none;">➕ Add from Vendor Catalog</button>
+      <button class="secondary" onclick="addCustomLine()">➕ Add Custom Line</button>
+      <span class="add-item-hint" id="addCatalogHint">Select a vendor to add catalog items</span>
     </div>
 
     <!-- Totals -->
@@ -245,10 +260,16 @@
       var select = document.getElementById('vendorSelect');
       var index = parseInt(select.value);
 
+      // Remove previously added vendor catalog items
+      items = items.filter(function(item) { return !item.isVendorCatalog; });
+
       if (isNaN(index) || index < 0) {
         selectedVendor = null;
         document.getElementById('vendorInfo').textContent = '';
-        updateItemPrices();
+        document.getElementById('addCatalogBtn').style.display = 'none';
+        document.getElementById('addCatalogHint').style.display = 'inline';
+        renderItemsTable();
+        updateTotals();
         return;
       }
 
@@ -261,6 +282,32 @@
       if (selectedVendor.phone) info.push(selectedVendor.phone);
       document.getElementById('vendorInfo').textContent = info.join(' • ');
 
+      // Show/hide catalog button
+      var hasCustomItems = selectedVendor.customItems && selectedVendor.customItems.length > 0;
+      document.getElementById('addCatalogBtn').style.display = 'inline-block';
+      document.getElementById('addCatalogHint').style.display = 'none';
+
+      // Auto-add vendor catalog items (custom items) as unchecked
+      if (hasCustomItems) {
+        for (var c = 0; c < selectedVendor.customItems.length; c++) {
+          var ci = selectedVendor.customItems[c];
+          items.push({
+            itemType: ci.item,
+            itemNumber: ci.itemNumber || '',
+            size: '',
+            classNum: '',
+            quantity: 1,
+            price: parseFloat(ci.price) || 0,
+            selected: false,
+            category: 'VENDOR CATALOG',
+            isVendorCatalog: true,
+            isCustomItem: true,
+            timeframe: ''
+          });
+        }
+      }
+
+      renderItemsTable();
       updateItemPrices();
     }
 
@@ -294,9 +341,12 @@
         document.querySelector('.table-container').style.display = 'none';
         document.getElementById('emptyItems').style.display = 'block';
         document.getElementById('totalsRow').style.display = 'none';
-        document.getElementById('orderBtn').style.display = 'none';
         return;
       }
+
+      document.querySelector('.table-container').style.display = 'block';
+      document.getElementById('emptyItems').style.display = 'none';
+      document.getElementById('totalsRow').style.display = 'flex';
 
       // Group items by category
       var categories = {};
@@ -312,7 +362,9 @@
         'READY FOR DELIVERY (SIZE UP)': { bg: '#b2dfdb', color: '#00695c', badge: '📦⚠️', selected: false },
         'IN TESTING': { bg: '#fff9c4', color: '#f57f17', badge: '⏳', selected: false },
         'IN TESTING (SIZE UP)': { bg: '#e1bee7', color: '#6a1b9a', badge: '⏳⚠️', selected: false },
-        'SIZE UP ASSIGNMENTS': { bg: '#ffe0b2', color: '#e65100', badge: '⚠️', selected: false }
+        'SIZE UP ASSIGNMENTS': { bg: '#ffe0b2', color: '#e65100', badge: '⚠️', selected: false },
+        'VENDOR CATALOG': { bg: '#e3f2fd', color: '#1565c0', badge: '📦', selected: false },
+        'CUSTOM ITEMS': { bg: '#f3e5f5', color: '#7b1fa2', badge: '✏️', selected: true }
       };
 
       for (var cat in categories) {
@@ -335,40 +387,63 @@
             item.selected = style.selected;
           }
 
-          var price = getItemPrice(item);
+          var price = item.isCustomItem ? (item.price || 0) : getItemPrice(item);
           item.price = price;
 
           var row = document.createElement('tr');
           row.setAttribute('data-index', idx);
           row.className = item.selected ? 'selected' : '';
 
-          var itemDesc = 'Class ' + item.classNum + ' ' + item.itemType + ', Size ' + item.size;
-          if (item.isSizeUp) {
-            itemDesc += ' <span style="color: #ff9800; font-size: 10px;">(SIZE UP)</span>';
-          }
-          var totalVal = price * item.quantity;
+          // Build item description based on type
+          var itemDesc = '';
+          var timeframeTd = '';
+          var priceTd = '';
 
-          // Timeframe badge styling
-          var timeframeBadge = '';
-          if (item.timeframe === 'Immediate') {
-            timeframeBadge = '<span style="background: #ef5350; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">Immediate</span>';
-          } else if (item.timeframe === 'In 2 Weeks') {
-            timeframeBadge = '<span style="background: #66bb6a; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">In 2 Weeks</span>';
-          } else if (item.timeframe === 'In 3 Weeks') {
-            timeframeBadge = '<span style="background: #ffa726; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">In 3 Weeks</span>';
-          } else if (item.timeframe === 'Consider') {
-            timeframeBadge = '<span style="background: #bdbdbd; color: #333; padding: 2px 6px; border-radius: 3px; font-size: 10px;">Consider</span>';
+          if (item.isCustomItem && item.isEditable) {
+            // Freeform custom line - editable name and price
+            itemDesc = '<input type="text" class="inline-text" value="' + escapeHtml(item.itemType || '') + '" onchange="updateItemName(' + idx + ', this.value)" placeholder="Item description...">';
+            timeframeTd = '<td style="text-align: center;"><button class="remove-btn" onclick="removeItem(' + idx + ')" title="Remove">✕</button></td>';
+            priceTd = '<td><input type="text" class="inline-price" value="' + (price > 0 ? price.toFixed(2) : '') + '" oninput="updateItemPrice(' + idx + ', this.value)" placeholder="0.00"></td>';
+          } else if (item.isCustomItem) {
+            // Vendor catalog item - show name + item number
+            var nameWithNum = escapeHtml(item.itemType || '');
+            if (item.itemNumber) nameWithNum += ' <span style="color:#999;font-size:10px;">#' + escapeHtml(item.itemNumber) + '</span>';
+            itemDesc = nameWithNum;
+            timeframeTd = '<td style="text-align: center;"><button class="remove-btn" onclick="removeItem(' + idx + ')" title="Remove">✕</button></td>';
+            priceTd = '<td class="price-cell">' + (price > 0 ? '$' + price.toFixed(2) : '-') + '</td>';
           } else {
-            timeframeBadge = '<span style="color: #999; font-size: 10px;">' + (item.timeframe || '-') + '</span>';
+            // Standard Purchase Needs item
+            itemDesc = 'Class ' + item.classNum + ' ' + item.itemType + ', Size ' + item.size;
+            if (item.isSizeUp) {
+              itemDesc += ' <span style="color: #ff9800; font-size: 10px;">(SIZE UP)</span>';
+            }
+
+            // Timeframe badge styling
+            var timeframeBadge = '';
+            if (item.timeframe === 'Immediate') {
+              timeframeBadge = '<span style="background: #ef5350; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">Immediate</span>';
+            } else if (item.timeframe === 'In 2 Weeks') {
+              timeframeBadge = '<span style="background: #66bb6a; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">In 2 Weeks</span>';
+            } else if (item.timeframe === 'In 3 Weeks') {
+              timeframeBadge = '<span style="background: #ffa726; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">In 3 Weeks</span>';
+            } else if (item.timeframe === 'Consider') {
+              timeframeBadge = '<span style="background: #bdbdbd; color: #333; padding: 2px 6px; border-radius: 3px; font-size: 10px;">Consider</span>';
+            } else {
+              timeframeBadge = '<span style="color: #999; font-size: 10px;">' + (item.timeframe || '-') + '</span>';
+            }
+            timeframeTd = '<td style="text-align: center;">' + timeframeBadge + '</td>';
+            priceTd = '<td class="price-cell">' + (price > 0 ? '$' + price.toFixed(2) : '-') + '</td>';
           }
 
+          var totalVal = price * item.quantity;
           var checkedAttr = item.selected ? 'checked' : '';
+
           row.innerHTML =
             '<td><input type="checkbox" ' + checkedAttr + ' onchange="toggleItem(' + idx + ')"></td>' +
             '<td><input type="number" min="1" value="' + item.quantity + '" onchange="updateQty(' + idx + ', this.value)"></td>' +
             '<td class="item">' + itemDesc + '</td>' +
-            '<td style="text-align: center;">' + timeframeBadge + '</td>' +
-            '<td class="price-cell">' + (price > 0 ? '$' + price.toFixed(2) : '-') + '</td>' +
+            timeframeTd +
+            priceTd +
             '<td class="total-cell">' + (totalVal > 0 ? '$' + totalVal.toFixed(2) : '-') + '</td>';
 
           tbody.appendChild(row);
@@ -428,6 +503,125 @@
       return items.filter(function(item) { return item.selected; });
     }
 
+    function addVendorCatalogItem() {
+      if (!selectedVendor) {
+        showStatus('Select a vendor first.', 'error');
+        return;
+      }
+
+      // Build list of all vendor items (standard glove/sleeve + custom)
+      var catalogItems = [];
+      var standardNames = [
+        { name: 'Class 0 Glove', priceKey: 'class0GlovePrice', numKey: 'class0GloveItemNum' },
+        { name: 'Class 2 Glove', priceKey: 'class2GlovePrice', numKey: 'class2GloveItemNum' },
+        { name: 'Class 3 Glove', priceKey: 'class3GlovePrice', numKey: 'class3GloveItemNum' },
+        { name: 'Class 0 Sleeve', priceKey: 'class0SleevePrice', numKey: 'class0SleeveItemNum' },
+        { name: 'Class 2 Sleeve', priceKey: 'class2SleevePrice', numKey: 'class2SleeveItemNum' },
+        { name: 'Class 3 Sleeve', priceKey: 'class3SleevePrice', numKey: 'class3SleeveItemNum' }
+      ];
+
+      for (var s = 0; s < standardNames.length; s++) {
+        var si = standardNames[s];
+        var p = parseFloat(selectedVendor[si.priceKey]) || 0;
+        var n = selectedVendor[si.numKey] || '';
+        if (p || n) {
+          catalogItems.push({ name: si.name, itemNumber: n, price: p });
+        }
+      }
+
+      if (selectedVendor.customItems) {
+        for (var c = 0; c < selectedVendor.customItems.length; c++) {
+          var ci = selectedVendor.customItems[c];
+          catalogItems.push({ name: ci.item, itemNumber: ci.itemNumber || '', price: parseFloat(ci.price) || 0 });
+        }
+      }
+
+      if (catalogItems.length === 0) {
+        showStatus('This vendor has no items configured. Use "Manage Vendors" to add items.', 'error');
+        return;
+      }
+
+      // Build a picker list
+      var msg = 'Select an item to add:\n\n';
+      for (var i = 0; i < catalogItems.length; i++) {
+        var ci = catalogItems[i];
+        msg += (i + 1) + '. ' + ci.name;
+        if (ci.itemNumber) msg += ' (#' + ci.itemNumber + ')';
+        if (ci.price > 0) msg += ' - $' + ci.price.toFixed(2);
+        msg += '\n';
+      }
+      msg += '\nEnter the number (1-' + catalogItems.length + '):';
+
+      var choice = prompt(msg);
+      if (!choice) return;
+
+      var choiceNum = parseInt(choice);
+      if (isNaN(choiceNum) || choiceNum < 1 || choiceNum > catalogItems.length) {
+        showStatus('Invalid selection.', 'error');
+        return;
+      }
+
+      var selected = catalogItems[choiceNum - 1];
+      items.push({
+        itemType: selected.name,
+        itemNumber: selected.itemNumber || '',
+        size: '',
+        classNum: '',
+        quantity: 1,
+        price: selected.price,
+        selected: true,
+        category: 'VENDOR CATALOG',
+        isVendorCatalog: true,
+        isCustomItem: true,
+        timeframe: ''
+      });
+
+      renderItemsTable();
+      updateTotals();
+      showStatus('Added "' + selected.name + '" to order.', 'info');
+    }
+
+    function addCustomLine() {
+      items.push({
+        itemType: '',
+        itemNumber: '',
+        size: '',
+        classNum: '',
+        quantity: 1,
+        price: 0,
+        selected: true,
+        category: 'CUSTOM ITEMS',
+        isCustomItem: true,
+        isEditable: true,
+        timeframe: ''
+      });
+
+      renderItemsTable();
+      updateTotals();
+
+      // Focus the new item's name input
+      var lastIdx = items.length - 1;
+      var newInput = document.querySelector('[data-index="' + lastIdx + '"] .inline-text');
+      if (newInput) newInput.focus();
+    }
+
+    function removeItem(index) {
+      items.splice(index, 1);
+      renderItemsTable();
+      updateTotals();
+    }
+
+    function updateItemName(index, value) {
+      items[index].itemType = value;
+    }
+
+    function updateItemPrice(index, value) {
+      var price = parseFloat(value) || 0;
+      items[index].price = price;
+      updateRowTotal(index);
+      updateTotals();
+    }
+
     function generatePOText() {
       var selectedItems = getSelectedItems();
 
@@ -452,7 +646,15 @@
 
       for (var i = 0; i < selectedItems.length; i++) {
         var item = selectedItems[i];
-        var line = '- (' + item.quantity + ') Class ' + item.classNum + ' ' + item.itemType + ', Size ' + item.size;
+        var line = '';
+        if (item.isCustomItem) {
+          // Vendor catalog or custom line item
+          line = '- (' + item.quantity + ') ' + (item.itemType || 'Item');
+          if (item.itemNumber) line += ' #' + item.itemNumber;
+        } else {
+          // Standard Purchase Needs item
+          line = '- (' + item.quantity + ') Class ' + item.classNum + ' ' + item.itemType + ', Size ' + item.size;
+        }
         if (item.price && item.price > 0) {
           line += ' @ $' + parseFloat(item.price).toFixed(2);
         }
@@ -528,10 +730,12 @@
         items: selectedItems.map(function(item) {
           return {
             itemType: item.itemType,
-            size: item.size,
-            classNum: item.classNum,
+            size: item.size || '',
+            classNum: item.classNum || '',
             quantity: item.quantity,
-            price: item.price || 0
+            price: item.price || 0,
+            itemNumber: item.itemNumber || '',
+            isCustomItem: item.isCustomItem || false
           };
         }),
         vendor: vendorName,
@@ -600,10 +804,12 @@
         items: selectedItems.map(function(item) {
           return {
             itemType: item.itemType,
-            size: item.size,
-            classNum: item.classNum,
+            size: item.size || '',
+            classNum: item.classNum || '',
             quantity: item.quantity,
-            price: item.price || 0
+            price: item.price || 0,
+            itemNumber: item.itemNumber || '',
+            isCustomItem: item.isCustomItem || false
           };
         }),
         vendor: selectedVendor.vendorName,

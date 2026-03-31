@@ -78,7 +78,7 @@
   </style>
 </head>
 <body>
-  <h2><? if (sheetName === 'Blankets') { ?>🧱 New Blanket Detected<? } else { ?>📦 New <?= itemType ?> Detected<? } ?></h2>
+  <h2><? if (sheetName === 'Blankets') { ?>🧱 New Blanket Detected<? } else if (sheetName === 'HV Testers') { ?>⚡ New HV Tester Detected<? } else if (sheetName === 'Phasing Sets') { ?>⚡ New Phasing Set Detected<? } else { ?>📦 New <?= itemType ?> Detected<? } ?></h2>
 
   <div class="item-info">
     <strong>Item #:</strong> <?= itemNum ?><br>
@@ -86,7 +86,60 @@
   </div>
 
   <form id="newItemForm">
-    <? if (sheetName === 'Blankets') { ?>
+    <? if (sheetName === 'HV Testers') { ?>
+    <!-- HV Testers: Model, Serial #, Calibration Date -->
+    <div class="form-group">
+      <label>Model:</label>
+      <select id="model" name="model">
+        <option value="">Select model...</option>
+        <option value="Chance">Chance</option>
+        <option value="HD Electric">HD Electric</option>
+        <option value="Megger">Megger</option>
+        <option value="Other">Other</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>Serial #:</label>
+      <input type="text" id="serialNum" name="serialNum" placeholder="Enter serial number">
+    </div>
+
+    <div class="form-group">
+      <label>Calibration Date:</label>
+      <input type="date" id="calibrationDate" name="calibrationDate">
+      <div class="hint">Replacement Date will auto-calculate (Calibration + 10 years)</div>
+    </div>
+
+    <? } else if (sheetName === 'Phasing Sets') { ?>
+    <!-- Phasing Sets: Model, KV, Serial #, Calibration Date -->
+    <div class="form-group">
+      <label>Model:</label>
+      <select id="model" name="model">
+        <option value="">Select model...</option>
+        <option value="Chance">Chance</option>
+        <option value="HD Electric">HD Electric</option>
+        <option value="Megger">Megger</option>
+        <option value="Other">Other</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>KV Rating:</label>
+      <input type="text" id="kv" name="kv" placeholder="e.g., 69, 138, 230">
+    </div>
+
+    <div class="form-group">
+      <label>Serial #:</label>
+      <input type="text" id="serialNum" name="serialNum" placeholder="Enter serial number">
+    </div>
+
+    <div class="form-group">
+      <label>Calibration Date:</label>
+      <input type="date" id="calibrationDate" name="calibrationDate">
+      <div class="hint">Replacement Date will auto-calculate (Calibration + 10 years)</div>
+    </div>
+
+    <? } else if (sheetName === 'Blankets') { ?>
     <!-- Blankets: Type field instead of Size -->
     <div class="form-group">
       <label>Type:</label>
@@ -155,10 +208,12 @@
     </div>
     <? } ?>
 
+    <? if (sheetName !== 'HV Testers' && sheetName !== 'Phasing Sets') { ?>
     <div class="form-group">
       <label>Test Date:</label>
       <input type="date" id="testDate" name="testDate">
     </div>
+    <? } ?>
 
     <div class="form-group">
       <label>Location:</label>
@@ -167,7 +222,13 @@
 
     <div class="form-group">
       <label>Status:</label>
-      <? if (sheetName === 'Blankets') { ?>
+      <? if (sheetName === 'HV Testers' || sheetName === 'Phasing Sets') { ?>
+      <select id="status" name="status">
+        <option value="On Shelf" selected>On Shelf</option>
+        <option value="In Service">In Service</option>
+        <option value="Lost">Lost</option>
+      </select>
+      <? } else if (sheetName === 'Blankets') { ?>
       <select id="status" name="status">
         <option value="On Shelf" selected>On Shelf</option>
         <option value="In Service">In Service</option>
@@ -189,7 +250,7 @@
     <div class="form-group">
       <label>Assigned To:</label>
       <input type="text" id="assignedTo" name="assignedTo" placeholder="Employee name or leave blank for On Shelf" value="">
-      <div class="hint">Enter employee name to auto-set Status to Assigned and lookup their location</div>
+      <div class="hint">Enter employee name to auto-set Status to <? if (sheetName === 'HV Testers' || sheetName === 'Phasing Sets' || sheetName === 'Blankets') { ?>In Service<? } else { ?>Assigned<? } ?> and lookup their location</div>
     </div>
 
     <hr style="margin: 20px 0;">
@@ -263,8 +324,8 @@
         // Actually, keep it as is - the backend will handle it
       } else {
         // This looks like an employee name
-        // Set Status to Assigned (or In Service for Blankets)
-        if (sheetName === 'Blankets') {
+        // Set Status to In Service for Blankets/HV Testers/Phasing Sets, Assigned for Gloves/Sleeves
+        if (sheetName === 'Blankets' || sheetName === 'HV Testers' || sheetName === 'Phasing Sets') {
           statusSelect.value = 'In Service';
         } else {
           statusSelect.value = 'Assigned';
@@ -304,14 +365,28 @@
       }
 
       var formData = {
-        size: document.getElementById('size').value,
-        itemClass: document.getElementById('itemClass').value,
-        testDate: document.getElementById('testDate').value,
         location: document.getElementById('location').value,
         status: status,
         assignedTo: assignedTo,
         itemSource: document.querySelector('input[name="itemSource"]:checked').value
       };
+
+      // Equipment-specific fields
+      if (sheetName === 'HV Testers') {
+        formData.model = document.getElementById('model').value;
+        formData.serialNum = document.getElementById('serialNum').value;
+        formData.calibrationDate = document.getElementById('calibrationDate').value;
+      } else if (sheetName === 'Phasing Sets') {
+        formData.model = document.getElementById('model').value;
+        formData.kv = document.getElementById('kv').value;
+        formData.serialNum = document.getElementById('serialNum').value;
+        formData.calibrationDate = document.getElementById('calibrationDate').value;
+      } else {
+        // Gloves/Sleeves/Blankets fields
+        formData.size = document.getElementById('size').value;
+        formData.itemClass = document.getElementById('itemClass').value;
+        formData.testDate = document.getElementById('testDate').value;
+      }
 
       google.script.run
         .withSuccessHandler(function() {

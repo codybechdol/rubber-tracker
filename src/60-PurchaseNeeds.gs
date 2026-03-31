@@ -145,6 +145,7 @@ function updatePurchaseNeeds() {
     if (reclaimsSheet && reclaimsSheet.getLastRow() > 1) {
       var reclaimsData = reclaimsSheet.getDataRange().getValues();
       var inReclaimSection = false;
+      var reclaimDirection = ''; // 'downgrade' (CL3→CL2) or 'upgrade' (CL2→CL3)
       var headerRowFound = false;
 
       // Column indices (will be set when we find header row)
@@ -162,12 +163,20 @@ function updatePurchaseNeeds() {
         var firstCellLower = rFirstCell.toLowerCase();
 
         // Detect section headers using lowercase comparison (handles emoji prefixes)
-        // Class 3 Reclaims contains "downgrade", Class 2 Reclaims contains "upgrade"
-        if ((firstCellLower.indexOf('reclaims') !== -1 && firstCellLower.indexOf('downgrade') !== -1) ||
-            (firstCellLower.indexOf('reclaims') !== -1 && firstCellLower.indexOf('upgrade') !== -1)) {
+        // Class 3 Reclaims contains "downgrade" (CL3 items → need CL2 replacements)
+        // Class 2 Reclaims contains "upgrade" (CL2 items → need CL3 replacements)
+        if (firstCellLower.indexOf('reclaims') !== -1 && firstCellLower.indexOf('downgrade') !== -1) {
           inReclaimSection = true;
+          reclaimDirection = 'downgrade';
           headerRowFound = false; // Reset to find new header
-          console.log('DEBUG Row ' + (ri+1) + ': Found Class Reclaims section: "' + rFirstCell.substring(0,50) + '"');
+          console.log('DEBUG Row ' + (ri+1) + ': Found Class 3 Reclaims (downgrade→CL2): "' + rFirstCell.substring(0,50) + '"');
+          continue;
+        }
+        if (firstCellLower.indexOf('reclaims') !== -1 && firstCellLower.indexOf('upgrade') !== -1) {
+          inReclaimSection = true;
+          reclaimDirection = 'upgrade';
+          headerRowFound = false;
+          console.log('DEBUG Row ' + (ri+1) + ': Found Class 2 Reclaims (upgrade→CL3): "' + rFirstCell.substring(0,50) + '"');
           continue;
         }
 
@@ -223,17 +232,29 @@ function updatePurchaseNeeds() {
 
         // Process valid reclaim rows with relevant statuses
         if ((rItemType === 'Glove' || rItemType === 'Sleeve') && rSize && rClass) {
-          var classNum = parseInt(rClass, 10);
-          if (isNaN(classNum)) continue;
-          var key = rItemType + '|' + rSize + '|' + classNum;
+          var originalClassNum = parseInt(rClass, 10);
+          if (isNaN(originalClassNum)) continue;
+
+          // For reclaims, the purchase need is for the REPLACEMENT class, not the original:
+          // - "downgrade" section (CL3 items): need to buy CL2 replacements
+          // - "upgrade" section (CL2 items): need to buy CL3 replacements
+          var purchaseClassNum;
+          if (reclaimDirection === 'downgrade') {
+            purchaseClassNum = 2;
+          } else if (reclaimDirection === 'upgrade') {
+            purchaseClassNum = 3;
+          } else {
+            purchaseClassNum = originalClassNum; // fallback
+          }
+          var key = rItemType + '|' + rSize + '|' + purchaseClassNum;
 
           // Match against each table type
           for (var t = 0; t < tables.length; t++) {
             var matchResult = tables[t].match(rPickListStatus);
             if (matchResult) {
-              console.log('DEBUG: MATCHED! ' + rEmployee + ' status "' + rPickListStatus + '" -> ' + tables[t].title);
+              console.log('DEBUG: MATCHED! ' + rEmployee + ' status "' + rPickListStatus + '" -> ' + tables[t].title + ' (original CL' + originalClassNum + ' → purchase CL' + purchaseClassNum + ')');
               if (!allRows[t][key]) {
-                allRows[t][key] = { itemType: rItemType, size: rSize, class: classNum, qty: 0, employees: [] };
+                allRows[t][key] = { itemType: rItemType, size: rSize, class: purchaseClassNum, qty: 0, employees: [] };
               }
               allRows[t][key].qty++;
               var employeeLabel = rEmployee + ' (Reclaim)';

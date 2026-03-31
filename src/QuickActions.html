@@ -93,7 +93,6 @@
       <button class="quick-btn sub-btn" onclick="runQuick('generateGloveSwaps', 'Glove Swaps', 'Generating...')">🧤 Gloves</button>
       <button class="quick-btn sub-btn" onclick="runQuick('generateSleeveSwaps', 'Sleeve Swaps', 'Generating...')">💪 Sleeves</button>
       <button class="quick-btn sub-btn" onclick="runQuick('updatePurchaseNeeds', 'Purchase Needs', 'Calculating...')">🛒 Purchase</button>
-      <button class="quick-btn sub-btn" onclick="runQuick('showPurchaseOrderDialog', 'Purchase Order', 'Opening...')">📝 Create PO</button>
     </div>
   </div>
 
@@ -132,10 +131,22 @@
     </div>
   </div>
 
-  <!-- STEP 7: Save & Backup -->
+  <!-- STEP 7: Create Purchase Order -->
   <div class="step-container">
-    <button class="step-btn" id="step7" onclick="runStep(7, 'saveAndBackup')">
+    <button class="step-btn" id="step7" onclick="runQuick('showPurchaseOrderDialog', 'Purchase Order', 'Opening Purchase Order...')">
       <span class="step-num"><span>7</span></span>
+      <div class="step-text">🛒 Create Purchase Order<div class="step-subtitle">Order gloves, sleeves & supplies</div></div>
+    </button>
+    <div class="sub-actions">
+      <button class="quick-btn sub-btn" onclick="runQuick('showVendorConfigDialog', 'Manage Vendors', 'Opening Vendor Config...')">⚙️ Manage Vendors</button>
+      <button class="quick-btn sub-btn" onclick="runQuick('openPurchaseOrdersSheet', 'Order History', 'Opening Order History...')">📋 Order History</button>
+    </div>
+  </div>
+
+  <!-- STEP 8: Save & Backup -->
+  <div class="step-container">
+    <button class="step-btn" id="step8" onclick="runStep(8, 'saveAndBackup')">
+      <span class="step-num"><span>8</span></span>
       <div class="step-text">💾 Save & Backup<div class="step-subtitle">History + Drive backup</div></div>
     </button>
     <div class="sub-actions">
@@ -257,7 +268,7 @@
     }
 
     function openSafetyEmails() {
-      var btn = document.getElementById('step3');
+      var btn = document.getElementById('step4');
       btn.classList.add('running');
       showStatus('⏳ Opening Safety Emails...');
       google.script.run.withSuccessHandler(function() {
@@ -270,7 +281,7 @@
     }
 
     function openToDoSchedule() {
-      var btn = document.getElementById('step5');
+      var btn = document.getElementById('step6');
       if (btn) btn.classList.add('running');
       showStatus('⏳ Opening Tasks & Calendar...');
       google.script.run.withSuccessHandler(function() {
@@ -283,7 +294,7 @@
     }
 
     function resetSteps() {
-      for(var i=1;i<=6;i++){var b=document.getElementById('step'+i);if(b){b.classList.remove('done','running');b.disabled=false;}}
+      for(var i=1;i<=8;i++){var b=document.getElementById('step'+i);if(b){b.classList.remove('done','running');b.disabled=false;}}
       showStatus('Reset', 'success'); setTimeout(hideStatus, 1500);
     }
 

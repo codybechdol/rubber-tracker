@@ -6242,6 +6242,7 @@ function onOpen() {
         .addItem('🔄 Restore Deleted Employee', 'showRestoreEmployeeDialog')
         .addItem('🔄 Update Employee History Headers', 'updateEmployeeHistoryHeaders')
         .addItem('🧹 Clean Up Duplicate Employee History', 'cleanupDuplicateEmployeeHistoryEntries')
+        .addItem('🧹 Fix Bad Employee Names', 'cleanupBadEmployeeNames')
         .addItem('🧹 Clean Up Duplicate Item History', 'cleanupDuplicateItemHistory')
         .addItem('🔍 Scan for Bad Dates in History', 'scanEmployeeHistoryForBadDates')
         .addItem('📱 Format Phone Numbers', 'formatEmployeePhoneNumbers')
@@ -7842,9 +7843,9 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
  * @return {number} The next available row after headers.
  */
 function writeSwapTableHeadersDynamic(swapSheet, currentRow, itemType, headerFont, numStages) {
-  const itemNumHeader = itemType === 'Gloves' ? 'Current Glove #' : 'Current Sleeve #';
+  var itemNumHeader = itemType === 'Gloves' ? 'Current Glove #' : 'Current Sleeve #';
   // Only visible headers (A–J)
-  const visibleHeaders = [
+  var visibleHeaders = [
     'Employee',           // A
     itemNumHeader,        // B
     'Size',               // C
@@ -8122,6 +8123,120 @@ function updateEmployeeHistoryHeaders() {
     logEvent('Error in updateEmployeeHistoryHeaders: ' + e, 'ERROR');
     SpreadsheetApp.getUi().alert('❌ Error', 'Error updating headers: ' + e.message, SpreadsheetApp.getUi().ButtonSet.OK);
   }
+}
+
+/**
+ * Scans the Employees sheet for names with formatting issues and offers to fix them.
+ * Detects: extra whitespace, role suffixes (F, JL, GTO, etc.), annotations (NEW HIRE, ST #),
+ * leading/trailing punctuation, non-printable characters.
+ * Menu item: Glove Manager → Maintenance → Employees → 🧹 Fix Bad Employee Names
+ */
+function cleanupBadEmployeeNames() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+  var sheet = ss.getSheetByName(SHEET_EMPLOYEES);
+
+  if (!sheet || sheet.getLastRow() < 2) {
+    ui.alert('ℹ️ Info', 'Employees sheet is empty or not found.', ui.ButtonSet.OK);
+    return;
+  }
+
+  var lastRow = sheet.getLastRow();
+  var names = sheet.getRange(2, 1, lastRow - 1, 1).getValues(); // Column A, rows 2+
+  var issues = [];
+
+  for (var i = 0; i < names.length; i++) {
+    var original = String(names[i][0] || '');
+    if (!original.trim()) continue; // skip empty rows
+
+    var cleaned = original;
+
+    // 1. Remove non-printable / zero-width characters
+    cleaned = cleaned.replace(/[\x00-\x1F\x7F\u200B\uFEFF]/g, '');
+
+    // 2. Normalize all whitespace (tabs, non-breaking spaces, multiple spaces) to single space
+    cleaned = cleaned.replace(/[\s\u00A0]+/g, ' ');
+
+    // 3. Trim leading/trailing whitespace
+    cleaned = cleaned.trim();
+
+    // 4. Remove trailing role suffixes that got left on from import
+    //    (F, JL, JRY, GTO, GTO F, WT, SUP, GF, AP #, EO #, JRY OP)
+    cleaned = cleaned
+      .replace(/\s+GTO\s*F\s*$/i, '')
+      .replace(/\s+JRY\s*OP\s*$/i, '')
+      .replace(/\s+(AP|EO)\s*\d\s*$/i, '')
+      .replace(/\s+(F|JL|JRY|GTO|WT|SUP|GF)\s*$/i, '');
+
+    // 5. Remove annotations (NEW HIRE, NEWHIRE, TEMP, CONTRACTOR, TRAINEE)
+    cleaned = cleaned.replace(/\s+(NEW\s*HIRE|NEWHIRE|TEMP|TEMPORARY|CONTRACTOR|TRAINEE)\s*/gi, ' ');
+
+    // 6. Remove "ST #" start date indicators (e.g., "Ivan Gomez ST 1")
+    cleaned = cleaned.replace(/\s+ST\s*\d+\s*/gi, ' ');
+
+    // 7. Remove CDL annotations
+    cleaned = cleaned.replace(/\s+(CDL-[AB]|No CDL)\s*$/i, '');
+
+    // 8. Remove leading/trailing punctuation (commas, periods, dashes)
+    cleaned = cleaned.replace(/^[,.\-\s]+|[,.\-\s]+$/g, '').trim();
+
+    // 9. Final whitespace normalization
+    cleaned = cleaned.replace(/\s+/g, ' ').trim();
+
+    // 10. Title case fix - capitalize first letter of each word if all lowercase or all uppercase
+    if (cleaned === cleaned.toLowerCase() || cleaned === cleaned.toUpperCase()) {
+      cleaned = cleaned.replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+    }
+
+    if (cleaned !== original) {
+      issues.push({
+        row: i + 2, // 1-based, data starts at row 2
+        original: original,
+        cleaned: cleaned
+      });
+    }
+  }
+
+  if (issues.length === 0) {
+    ui.alert('✅ All Good', 'No employee name issues found! All ' + names.length + ' names look clean.', ui.ButtonSet.OK);
+    return;
+  }
+
+  // Build summary message
+  var msg = 'Found ' + issues.length + ' name(s) with issues:\n\n';
+  var maxShow = Math.min(issues.length, 20);
+  for (var j = 0; j < maxShow; j++) {
+    msg += 'Row ' + issues[j].row + ': "' + issues[j].original + '" → "' + issues[j].cleaned + '"\n';
+  }
+  if (issues.length > maxShow) {
+    msg += '\n... and ' + (issues.length - maxShow) + ' more.\n';
+  }
+  msg += '\nFix all ' + issues.length + ' name(s)?';
+
+  var response = ui.alert('🧹 Fix Bad Employee Names', msg, ui.ButtonSet.YES_NO);
+
+  if (response !== ui.Button.YES) {
+    ui.alert('ℹ️ Cancelled', 'No changes were made.', ui.ButtonSet.OK);
+    return;
+  }
+
+  // Apply fixes
+  var fixedCount = 0;
+  for (var k = 0; k < issues.length; k++) {
+    var issue = issues[k];
+    sheet.getRange(issue.row, 1).setValue(issue.cleaned);
+    fixedCount++;
+
+    // Log the name correction to Employee History
+    try {
+      logNameCorrection(issue.original, issue.cleaned, '', '');
+    } catch (e) {
+      Logger.log('Could not log name correction for row ' + issue.row + ': ' + e);
+    }
+  }
+
+  ui.alert('✅ Done', 'Fixed ' + fixedCount + ' employee name(s).\n\nChanges logged to Employee History.', ui.ButtonSet.OK);
+  Logger.log('cleanupBadEmployeeNames: Fixed ' + fixedCount + ' names');
 }
 
 /**
@@ -13924,6 +14039,16 @@ function generateAllReports() {
   try {
     logEvent('Generating all reports...');
 
+    // Auto-activate any On Hold / Pending Start jobs whose activation date has arrived
+    try {
+      var autoActivateResult = checkAndActivateScheduledJobs();
+      if (autoActivateResult.activated > 0) {
+        Logger.log('generateAllReports: Auto-activated ' + autoActivateResult.activated + ' job(s): ' + autoActivateResult.jobs.join(', '));
+      }
+    } catch (autoErr) {
+      Logger.log('generateAllReports: Auto-activation check failed (non-critical): ' + autoErr);
+    }
+
     // First, ensure all Change Out Dates are correct (in case triggers didn't fire)
     fixChangeOutDatesSilent();
     fixBlanketChangeOutDatesSilent();
@@ -16060,7 +16185,9 @@ function updateReclaimsSheet() {
 
       // Get employee's preferred glove size
       var empKey = assignedToLower;
-      var preferredSize = employeeMap[empKey] ? employeeMap[empKey].gloveSize : size;
+      var empGloveSize = employeeMap[empKey] ? employeeMap[empKey].gloveSize : null;
+      // Fall back to actual item size if employee's glove size is missing or "N/A"
+      var preferredSize = (empGloveSize && String(empGloveSize).trim().toLowerCase() !== 'n/a') ? empGloveSize : size;
 
       if (approvalStatus === 'None') {
         if (itemClassNum === 3) {
@@ -16132,7 +16259,9 @@ function updateReclaimsSheet() {
       var itemClassNum = parseInt(itemClass, 10) || 0;
 
       var empKey = assignedToLower;
-      var preferredSize = employeeMap[empKey] ? employeeMap[empKey].sleeveSize : size;
+      var empSleeveSize = employeeMap[empKey] ? employeeMap[empKey].sleeveSize : null;
+      // Fall back to actual item size if employee's sleeve size is missing or "N/A"
+      var preferredSize = (empSleeveSize && String(empSleeveSize).trim().toLowerCase() !== 'n/a') ? empSleeveSize : size;
 
       if (approvalStatus === 'None') {
         if (itemClassNum === 3) {
@@ -17485,7 +17614,7 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
 
     // Check if employee already has a Class 2 item assigned
     var hasClass2 = allInventoryData.some(function(item) {
-      var itemClass = parseInt(item[2], 10);
+      var itemClass = safeParseClass(item[2]);
       var assignedTo = (item[7] || '').toString().trim().toLowerCase();
       return itemClass === 2 && assignedTo === employeeName;
     });
@@ -17501,7 +17630,7 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
 
     // Check if employee already has a Class 3 item assigned
     var hasClass3 = allInventoryData.some(function(item) {
-      var itemClass = parseInt(item[2], 10);
+      var itemClass = safeParseClass(item[2]);
       var assignedTo = (item[7] || '').toString().trim().toLowerCase();
       return itemClass === 3 && assignedTo === employeeName;
     });
@@ -17514,8 +17643,37 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
     return result;
   }
 
-  var useSize = reclaim.preferredSize || reclaim.size;
+  // Use preferred size from Employees sheet, but fall back to item's actual size
+  // if preferred size is missing, empty, or "N/A" (not a real size)
+  var prefSize = (reclaim.preferredSize || '').toString().trim();
+  var isInvalidPrefSize = !prefSize || prefSize.toLowerCase() === 'n/a' || prefSize === '—' || prefSize === '-';
+  var useSize = isInvalidPrefSize ? reclaim.size : prefSize;
   var useSizeNum = isGlove ? parseFloat(useSize) : null;
+  // Normalize sleeve size for matching (handles "XL" → "X-Large", "L" → "Large", etc.)
+  var useSizeNormalized = isGlove ? null : normalizeSleeveSize(useSize);
+
+  Logger.log('findReclaimPickListItem: Looking for ' + (isGlove ? 'Glove' : 'Sleeve') +
+    ' class=' + targetClass + ' size="' + useSize + '"' +
+    (isGlove ? '' : ' normalized="' + useSizeNormalized + '"') +
+    ' for ' + employeeName + ' (reclaimType=' + reclaimType + ')');
+
+  // Helper function to safely parse class value (handles Date objects from Google Sheets)
+  function safeParseClass(val) {
+    if (val === null || val === undefined || val === '') return NaN;
+    if (val instanceof Date) {
+      // Google Sheets sometimes stores small numbers as serial dates
+      var str = String(val);
+      if (str.indexOf('1900') !== -1 || str.indexOf('1899') !== -1) {
+        // Serial date 2 = Jan 1 1900, serial date 3 = Jan 2 1900
+        if (str.indexOf('Jan 01') !== -1 || str.indexOf('1/1/1900') !== -1) return 2;
+        if (str.indexOf('Jan 02') !== -1 || str.indexOf('1/2/1900') !== -1) return 3;
+        if (str.indexOf('Dec 31') !== -1 || str.indexOf('12/31/1899') !== -1) return 0;
+        if (str.indexOf('Dec 30') !== -1 || str.indexOf('12/30/1899') !== -1) return 0;
+      }
+      return NaN;
+    }
+    return parseInt(val, 10);
+  }
 
   // Helper function to check if item has LOST-LOCATE marker
   // Items with this marker should NOT be assigned in pick lists
@@ -17524,24 +17682,28 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
     return notes.indexOf('LOST-LOCATE') !== -1;
   }
 
+  // Helper for sleeve size matching using normalizeSleeveSize()
+  function sleeveSizeMatch(itemSizeRaw) {
+    if (!itemSizeRaw || !useSize) return false;
+    return normalizeSleeveSize(itemSizeRaw) === useSizeNormalized;
+  }
+
   // Search priority: 1) Exact size On Shelf, 2) Size up On Shelf, 3) Ready For Delivery, 4) In Testing
 
   // 1) Try exact size On Shelf
   var match = inventoryData.find(function(item) {
-    var itemClass = parseInt(item[2], 10);
+    var itemClass = safeParseClass(item[2]);
     var itemStatus = (item[6] || '').toString().trim().toLowerCase();
     var itemNum = item[0].toString().trim();
-    var itemSize = isGlove ? parseFloat(item[1]) : item[1];
 
     var classMatch = (itemClass === targetClass);
     var statusMatch = (itemStatus === 'on shelf');
     var notAssigned = !assignedItems.has(itemNum);
     var notLost = !isLostLocate(item);
-    var sizeMatch = isGlove ? (itemSize === useSizeNum) :
-                    (item[1] && item[1].toString().trim().toLowerCase() === useSize.toString().trim().toLowerCase());
+    var sizeMatch = isGlove ? (parseFloat(item[1]) === useSizeNum) : sleeveSizeMatch(item[1]);
 
     // Debug logging when filtering due to LOST-LOCATE
-    if (classMatch && statusMatch && !notAssigned && sizeMatch && !notLost) {
+    if (classMatch && statusMatch && notAssigned && sizeMatch && !notLost) {
       Logger.log('findReclaimPickListItem: Filtered item #' + itemNum + ' for ' + employeeName + ' - LOST-LOCATE marker found');
     }
 
@@ -17558,7 +17720,7 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
   // 2) Try size up On Shelf (gloves only)
   if (isGlove && !isNaN(useSizeNum)) {
     match = inventoryData.find(function(item) {
-      var itemClass = parseInt(item[2], 10);
+      var itemClass = safeParseClass(item[2]);
       var itemStatus = (item[6] || '').toString().trim().toLowerCase();
       var itemNum = item[0].toString().trim();
       var itemSize = parseFloat(item[1]);
@@ -17586,20 +17748,18 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
 
   // 3) Try Ready For Delivery
   match = inventoryData.find(function(item) {
-    var itemClass = parseInt(item[2], 10);
+    var itemClass = safeParseClass(item[2]);
     var itemStatus = (item[6] || '').toString().trim().toLowerCase();
     var itemNum = item[0].toString().trim();
-    var itemSize = isGlove ? parseFloat(item[1]) : item[1];
 
     var classMatch = (itemClass === targetClass);
     var statusMatch = (itemStatus === 'ready for delivery');
     var notAssigned = !assignedItems.has(itemNum);
     var notLost = !isLostLocate(item);
-    var sizeMatch = isGlove ? (itemSize === useSizeNum) :
-                    (item[1] && item[1].toString().trim().toLowerCase() === useSize.toString().trim().toLowerCase());
+    var sizeMatch = isGlove ? (parseFloat(item[1]) === useSizeNum) : sleeveSizeMatch(item[1]);
 
     // Debug logging when filtering due to LOST-LOCATE
-    if (classMatch && statusMatch && !notAssigned && sizeMatch && !notLost) {
+    if (classMatch && statusMatch && notAssigned && sizeMatch && !notLost) {
       Logger.log('findReclaimPickListItem: Filtered item #' + itemNum + ' (ready for delivery) for ' + employeeName + ' - LOST-LOCATE marker found');
     }
 
@@ -17616,7 +17776,7 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
   // 3b) Try size up Ready For Delivery (gloves only)
   if (isGlove && !isNaN(useSizeNum)) {
     match = inventoryData.find(function(item) {
-      var itemClass = parseInt(item[2], 10);
+      var itemClass = safeParseClass(item[2]);
       var itemStatus = (item[6] || '').toString().trim().toLowerCase();
       var itemNum = item[0].toString().trim();
       var itemSize = parseFloat(item[1]);
@@ -17644,20 +17804,18 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
 
   // 4) Try In Testing
   match = inventoryData.find(function(item) {
-    var itemClass = parseInt(item[2], 10);
+    var itemClass = safeParseClass(item[2]);
     var itemStatus = (item[6] || '').toString().trim().toLowerCase();
     var itemNum = item[0].toString().trim();
-    var itemSize = isGlove ? parseFloat(item[1]) : item[1];
 
     var classMatch = (itemClass === targetClass);
     var statusMatch = (itemStatus === 'in testing');
     var notAssigned = !assignedItems.has(itemNum);
     var notLost = !isLostLocate(item);
-    var sizeMatch = isGlove ? (itemSize === useSizeNum) :
-                    (item[1] && item[1].toString().trim().toLowerCase() === useSize.toString().trim().toLowerCase());
+    var sizeMatch = isGlove ? (parseFloat(item[1]) === useSizeNum) : sleeveSizeMatch(item[1]);
 
     // Debug logging when filtering due to LOST-LOCATE
-    if (classMatch && statusMatch && !notAssigned && sizeMatch && !notLost) {
+    if (classMatch && statusMatch && notAssigned && sizeMatch && !notLost) {
       Logger.log('findReclaimPickListItem: Filtered item #' + itemNum + ' (in testing) for ' + employeeName + ' - LOST-LOCATE marker found');
     }
 
@@ -17674,7 +17832,7 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
   // 4b) Try size up In Testing (gloves only)
   if (isGlove && !isNaN(useSizeNum)) {
     match = inventoryData.find(function(item) {
-      var itemClass = parseInt(item[2], 10);
+      var itemClass = safeParseClass(item[2]);
       var itemStatus = (item[6] || '').toString().trim().toLowerCase();
       var itemNum = item[0].toString().trim();
       var itemSize = parseFloat(item[1]);
@@ -17699,6 +17857,21 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
       return result;
     }
   }
+
+  // Log when no match found - helps diagnose pick list issues
+  var candidateCount = 0;
+  inventoryData.forEach(function(item) {
+    var itemClass = safeParseClass(item[2]);
+    var itemStatus = (item[6] || '').toString().trim().toLowerCase();
+    if (itemClass === targetClass && (itemStatus === 'on shelf' || itemStatus === 'ready for delivery' || itemStatus === 'in testing')) {
+      candidateCount++;
+    }
+  });
+  Logger.log('findReclaimPickListItem: NO MATCH for ' + employeeName + ' (' + (isGlove ? 'Glove' : 'Sleeve') +
+    ' class=' + targetClass + ' size="' + useSize + '"' +
+    (isGlove ? '' : ' normalized="' + useSizeNormalized + '"') +
+    '). Found ' + candidateCount + ' items of target class in inventory. ' +
+    assignedItems.size + ' items excluded as already assigned.');
 
   return result;
 }

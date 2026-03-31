@@ -1607,36 +1607,69 @@ function syncCrews(silent) {
   var foremanUpdates = 0;
   var scheduleDefaults = 0;
   var processedCrews = {};
+  var jobDataModified = false; // BATCH: Track if jobData was modified
 
   for (var crewNum in crewMap) {
     var crew = crewMap[crewNum];
     processedCrews[crewNum] = true;
 
     if (existingJobs[crewNum]) {
-      // Update existing row
+      // Update existing row - BATCH: modify in memory instead of individual setValue
       var existing = existingJobs[crewNum];
-      var rowIdx = existing.rowIndex;
+      var dataIdx = existing.rowIndex - 1; // Array index into jobData[]
 
       // Update foreman if different
       if (existing.foreman !== crew.foreman && crew.foreman) {
-        jobSheet.getRange(rowIdx, colIndices.foreman + 1).setValue(crew.foreman);
+        jobData[dataIdx][colIndices.foreman] = crew.foreman;
         foremanUpdates++;
+        jobDataModified = true;
         Logger.log('syncCrews: Updated foreman for ' + crewNum + ': ' + existing.foreman + ' → ' + crew.foreman);
       }
 
       // Set default schedule if not set (empty or undefined)
       if (!existing.hasSkipDays) {
         // Set Mon-Thu default: Sun=true, Mon=false, Tue=false, Wed=false, Thu=false, Fri=true, Sat=true
-        jobSheet.getRange(rowIdx, colIndices.skipSun + 1, 1, 9).setValues([[
-          true, false, false, false, false, true, true, false, false
-        ]]);
+        jobData[dataIdx][colIndices.skipSun] = true;
+        jobData[dataIdx][colIndices.skipMon] = false;
+        jobData[dataIdx][colIndices.skipTue] = false;
+        jobData[dataIdx][colIndices.skipWed] = false;
+        jobData[dataIdx][colIndices.skipThu] = false;
+        jobData[dataIdx][colIndices.skipFri] = true;
+        jobData[dataIdx][colIndices.skipSat] = true;
+        jobData[dataIdx][colIndices.skipWeeklyMeeting] = false;
+        jobData[dataIdx][colIndices.skipMonthlyChecklist] = false;
         scheduleDefaults++;
+        jobDataModified = true;
         Logger.log('syncCrews: Set default schedule (Mon-Thu) for ' + crewNum);
       }
 
       // Update Last Updated
-      jobSheet.getRange(rowIdx, colIndices.lastUpdated + 1).setValue(timestamp);
+      jobData[dataIdx][colIndices.lastUpdated] = timestamp;
+      jobDataModified = true;
     }
+  }
+
+  // ========== BATCH WRITE: Write modified columns back to Job Tracking sheet ==========
+  if (jobDataModified) {
+    // Write Foreman (C) column
+    var foremanValues = jobData.map(function(row) { return [row[colIndices.foreman]]; });
+    jobSheet.getRange(1, colIndices.foreman + 1, jobData.length, 1).setValues(foremanValues);
+
+    // Write Schedule columns (L-T, 9 columns)
+    var scheduleValues = jobData.map(function(row) {
+      return [
+        row[colIndices.skipSun], row[colIndices.skipMon], row[colIndices.skipTue],
+        row[colIndices.skipWed], row[colIndices.skipThu], row[colIndices.skipFri],
+        row[colIndices.skipSat], row[colIndices.skipWeeklyMeeting], row[colIndices.skipMonthlyChecklist]
+      ];
+    });
+    jobSheet.getRange(1, colIndices.skipSun + 1, jobData.length, 9).setValues(scheduleValues);
+
+    // Write Last Updated (U) column
+    var lastUpdatedValues = jobData.map(function(row) { return [row[colIndices.lastUpdated]]; });
+    jobSheet.getRange(1, colIndices.lastUpdated + 1, jobData.length, 1).setValues(lastUpdatedValues);
+
+    Logger.log('syncCrews: Batch wrote Foreman, Schedule, and Last Updated columns (' + jobData.length + ' rows)');
   }
 
   // Add new crews that weren't in Job Tracking

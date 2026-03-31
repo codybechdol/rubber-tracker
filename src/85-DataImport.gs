@@ -169,7 +169,7 @@ function ensureLocationsInLocationsSheet(ss, locations) {
  * @return {Object} Result with success message
  */
 function applyCrewChanges(changes) {
-  Logger.log('=== applyCrewChanges START ===');
+  Logger.log('=== applyCrewChanges START (BATCH OPTIMIZED) ===');
   Logger.log('Applying ' + changes.length + ' changes');
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -239,6 +239,8 @@ function applyCrewChanges(changes) {
   var updatedCount = 0;
   var historyLogged = 0;
   var changeDetails = []; // Specific changes for UI display
+  var historyRows = []; // BATCH: Collect all history entries for single write
+  var columnsModified = { location: false, jobNum: false, secondaryJob: false, classification: false };
   var timezone = ss.getSpreadsheetTimeZone();
   var today = new Date();
   var todayStr = Utilities.formatDate(today, timezone, 'MM/dd/yyyy');
@@ -257,7 +259,7 @@ function applyCrewChanges(changes) {
         // This employee exists only in Employee History - REHIRE them
         Logger.log('Rehiring Previous Employee: ' + change.employeeName);
 
-        // Add new row to Employees sheet
+        // Add new row to Employees sheet (appendRow since it's a new row)
         var newRow = [];
         for (var col = 0; col < headers.length; col++) {
           var header = String(headers[col]).toLowerCase().trim();
@@ -271,27 +273,24 @@ function applyCrewChanges(changes) {
         employeesSheet.appendRow(newRow);
         updatedCount++;
 
-        // Log rehire to Employee History
-        if (historySheet) {
-          var historyRow = [
-            todayStr,                    // Date
-            change.employeeName,         // Employee Name
-            'Rehired',                   // Event Type
-            change.newLocation || '',    // Location
-            change.newJobNumber || '',   // Job Number
-            '',                          // Hire Date
-            '',                          // Last Day
-            '',                          // Last Day Reason
-            todayStr,                    // Rehire Date
-            'Crew Makeup Import: Rehired from Previous Employee. Location: ' + change.newLocation + ', Job #: ' + change.newJobNumber,
-            '',                          // Phone Number
-            '',                          // Email Address
-            '',                          // Glove Size
-            ''                           // Sleeve Size
-          ];
-          historySheet.appendRow(historyRow);
-          historyLogged++;
-        }
+        // Collect rehire history for batch write
+        historyRows.push([
+          todayStr,                    // Date
+          change.employeeName,         // Employee Name
+          'Rehired',                   // Event Type
+          change.newLocation || '',    // Location
+          change.newJobNumber || '',   // Job Number
+          '',                          // Hire Date
+          '',                          // Last Day
+          '',                          // Last Day Reason
+          todayStr,                    // Rehire Date
+          'Crew Makeup Import: Rehired from Previous Employee. Location: ' + change.newLocation + ', Job #: ' + change.newJobNumber,
+          '',                          // Phone Number
+          '',                          // Email Address
+          '',                          // Glove Size
+          ''                           // Sleeve Size
+        ]);
+        historyLogged++;
 
         Logger.log('Rehired employee: ' + change.employeeName + ' | Location: ' + change.newLocation + ' | Job #: ' + change.newJobNumber);
         changeDetails.push({
@@ -317,43 +316,45 @@ function applyCrewChanges(changes) {
         continue;
       }
 
+      var dataIdx = rowIndex - 1; // Array index into data[]
       var locationChanged = false;
       var jobChanged = false;
       var secondaryJobChanged = false;
       var classificationChanged = false;
 
-      // Update Location
+      // BATCH: Modify in memory instead of individual setValue calls
       if (change.newLocation && change.newLocation !== change.oldLocation) {
-        employeesSheet.getRange(rowIndex, locationCol + 1).setValue(change.newLocation);
+        data[dataIdx][locationCol] = change.newLocation;
         locationChanged = true;
+        columnsModified.location = true;
       }
 
-      // Update Job Number (with position, e.g., 013-26.1)
       if (change.newJobNumber && change.newJobNumber !== change.oldJobNumber) {
-        employeesSheet.getRange(rowIndex, jobNumCol + 1).setValue(change.newJobNumber);
+        data[dataIdx][jobNumCol] = change.newJobNumber;
         jobChanged = true;
+        columnsModified.jobNum = true;
       }
 
-      // Update Secondary Job Number (if column exists and value provided)
       if (secondaryJobNumCol !== -1 && change.newSecondaryJobNumber) {
-        var currentSecondaryJob = String(data[rowIndex - 1][secondaryJobNumCol] || '').trim();
+        var currentSecondaryJob = String(data[dataIdx][secondaryJobNumCol] || '').trim();
         if (change.newSecondaryJobNumber !== currentSecondaryJob) {
-          employeesSheet.getRange(rowIndex, secondaryJobNumCol + 1).setValue(change.newSecondaryJobNumber);
+          data[dataIdx][secondaryJobNumCol] = change.newSecondaryJobNumber;
           secondaryJobChanged = true;
+          columnsModified.secondaryJob = true;
           Logger.log('Updated secondary job for ' + change.employeeName + ': ' + change.newSecondaryJobNumber);
         }
       }
 
-      // Update Job Classification (e.g., F, JRY, AP 1, AP 2, etc.)
       if (change.newClassification && change.newClassification !== change.oldClassification) {
-        employeesSheet.getRange(rowIndex, jobClassificationCol + 1).setValue(change.newClassification);
+        data[dataIdx][jobClassificationCol] = change.newClassification;
         classificationChanged = true;
+        columnsModified.classification = true;
       }
 
       if (locationChanged || jobChanged || secondaryJobChanged || classificationChanged) {
         updatedCount++;
 
-        // Log to Employee History
+        // BATCH: Collect history rows for single write (instead of individual appendRow)
         if (historySheet) {
           var changesArr = [];
           if (locationChanged) changesArr.push('Location');
@@ -369,7 +370,7 @@ function applyCrewChanges(changes) {
           if (secondaryJobChanged) notes += 'Secondary Job: ' + change.newSecondaryJobNumber + '. ';
           if (classificationChanged) notes += 'Role: ' + (change.oldClassification || 'None') + ' → ' + change.newClassification + '.';
 
-          var historyRow = [
+          historyRows.push([
             todayStr,                    // Date
             change.employeeName,         // Employee Name
             eventType,                   // Event Type
@@ -384,13 +385,11 @@ function applyCrewChanges(changes) {
             '',                          // Email Address
             '',                          // Glove Size
             ''                           // Sleeve Size
-          ];
-
-          historySheet.appendRow(historyRow);
+          ]);
           historyLogged++;
         }
 
-        Logger.log('Updated employee: ' + change.employeeName +
+        Logger.log('Updated (in memory): ' + change.employeeName +
                    ' | Location: ' + (locationChanged ? change.oldLocation + ' → ' + change.newLocation : 'unchanged') +
                    ' | Job #: ' + (jobChanged ? change.oldJobNumber + ' → ' + change.newJobNumber : 'unchanged') +
                    ' | Secondary Job #: ' + (secondaryJobChanged ? change.newSecondaryJobNumber : 'unchanged') +
@@ -408,6 +407,38 @@ function applyCrewChanges(changes) {
     } catch (e) {
       Logger.log('Error updating employee ' + change.employeeName + ': ' + e.toString());
     }
+  }
+
+  // ========== BATCH WRITE: Write modified columns back to Employees sheet ==========
+  // Instead of ~200 individual setValue calls, write each modified column in one call
+  var batchWriteCount = 0;
+  if (columnsModified.location) {
+    var locationValues = data.map(function(row) { return [row[locationCol]]; });
+    employeesSheet.getRange(1, locationCol + 1, data.length, 1).setValues(locationValues);
+    batchWriteCount++;
+  }
+  if (columnsModified.jobNum) {
+    var jobNumValues = data.map(function(row) { return [row[jobNumCol]]; });
+    employeesSheet.getRange(1, jobNumCol + 1, data.length, 1).setValues(jobNumValues);
+    batchWriteCount++;
+  }
+  if (columnsModified.secondaryJob && secondaryJobNumCol !== -1) {
+    var secJobValues = data.map(function(row) { return [row[secondaryJobNumCol]]; });
+    employeesSheet.getRange(1, secondaryJobNumCol + 1, data.length, 1).setValues(secJobValues);
+    batchWriteCount++;
+  }
+  if (columnsModified.classification) {
+    var classValues = data.map(function(row) { return [row[jobClassificationCol]]; });
+    employeesSheet.getRange(1, jobClassificationCol + 1, data.length, 1).setValues(classValues);
+    batchWriteCount++;
+  }
+  Logger.log('applyCrewChanges: Batch wrote ' + batchWriteCount + ' column(s) to Employees sheet');
+
+  // ========== BATCH WRITE: Write all history rows at once ==========
+  if (historyRows.length > 0 && historySheet) {
+    var lastHistRow = historySheet.getLastRow();
+    historySheet.getRange(lastHistRow + 1, 1, historyRows.length, historyRows[0].length).setValues(historyRows);
+    Logger.log('applyCrewChanges: Batch wrote ' + historyRows.length + ' history row(s)');
   }
 
   Logger.log('=== applyCrewChanges END ===');
@@ -462,6 +493,16 @@ function syncJobTrackingAfterImport(ss, jobNameMap) {
   if (!jobSheet) {
     Logger.log('syncJobTrackingAfterImport: Job Tracking sheet not found, skipping');
     return null;
+  }
+
+  // Auto-activate any On Hold / Pending Start jobs whose activation date has arrived
+  try {
+    var autoResult = checkAndActivateScheduledJobs();
+    if (autoResult.activated > 0) {
+      Logger.log('syncJobTrackingAfterImport: Auto-activated ' + autoResult.activated + ' job(s): ' + autoResult.jobs.join(', '));
+    }
+  } catch (e) {
+    Logger.log('syncJobTrackingAfterImport: Auto-activation check failed (non-critical): ' + e.toString());
   }
 
   var employeesSheet = ss.getSheetByName('Employees');
@@ -561,21 +602,22 @@ function syncJobTrackingAfterImport(ss, jobNameMap) {
   var addedCount = 0;
   var pendingJobsWithEmployees = []; // Jobs that are Pending Start but now have employees
   var newRows = [];
+  var jobDataModified = false; // BATCH: Track if jobData array was modified
 
   // Process each crew from Employees
   for (var crewNum in crewMap) {
     var crew = crewMap[crewNum];
 
     if (existingJobs[crewNum]) {
-      // Update existing job
+      // Update existing job - BATCH: modify in memory instead of individual setValue
       var existing = existingJobs[crewNum];
-      var rowIdx = existing.rowIndex;
+      var dataIdx = existing.rowIndex - 1; // Array index into jobData[]
 
-      // Update location, foreman, crew size
-      jobSheet.getRange(rowIdx, 2).setValue(crew.location || existing.location || 'Unknown');  // Location (B)
-      jobSheet.getRange(rowIdx, 3).setValue(crew.foreman || existing.foreman || '');          // Foreman (C)
-      jobSheet.getRange(rowIdx, 4).setValue(crew.crewSize);                                   // Crew Size (D)
-      jobSheet.getRange(rowIdx, 21).setValue(timestamp);                                      // Last Updated (U)
+      jobData[dataIdx][1] = crew.location || existing.location || 'Unknown';  // Location (B)
+      jobData[dataIdx][2] = crew.foreman || existing.foreman || '';           // Foreman (C)
+      jobData[dataIdx][3] = crew.crewSize;                                    // Crew Size (D)
+      jobData[dataIdx][20] = timestamp;                                       // Last Updated (U)
+      jobDataModified = true;
 
       // If status is "Pending Start" and now has employees, DON'T auto-activate
       // Instead, track for user decision
@@ -587,7 +629,7 @@ function syncJobTrackingAfterImport(ss, jobNameMap) {
           crewSize: crew.crewSize,
           startDate: existing.startDate,
           employees: crew.employees,
-          rowIndex: rowIdx
+          rowIndex: existing.rowIndex
         });
         Logger.log('syncJobTrackingAfterImport: Pending Start job ' + crewNum + ' has ' + crew.crewSize + ' employees - needs user decision');
       }
@@ -623,31 +665,50 @@ function syncJobTrackingAfterImport(ss, jobNameMap) {
     }
   }
 
-  // Add new rows
-  if (newRows.length > 0) {
-    var lastRow = jobSheet.getLastRow();
-    jobSheet.getRange(lastRow + 1, 1, newRows.length, 21).setValues(newRows);
-    // Add checkboxes for skip day columns (L-T = cols 12-20) on new rows
-    jobSheet.getRange(lastRow + 1, 12, newRows.length, 9).insertCheckboxes();
-  }
-
-  // Check for jobs that now have no employees (not in crewMap)
+  // Check for jobs that now have no employees (not in crewMap) - modify in memory
   var emptyJobCount = 0;
   for (var oldCrew in existingJobs) {
     var oldData = existingJobs[oldCrew];
     if (oldData.status === 'Active' || oldData.status === 'Pending Start') {
       // This job had no employees in the import
       if (oldData.crewSize > 0) {
-        // Update crew size to 0 and add note
-        jobSheet.getRange(oldData.rowIndex, 4).setValue(0);  // Crew Size (D)
-        var oldNotes = oldData.notes || '';
+        var emptyIdx = oldData.rowIndex - 1; // Array index
+        // Update crew size to 0 and add note - BATCH: modify in memory
+        jobData[emptyIdx][3] = 0;  // Crew Size (D)
+        var oldNotes = String(jobData[emptyIdx][10] || '');
         var emptyNote = 'No employees in Crew Import on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy');
         if (oldNotes.indexOf('No employees') === -1) {
-          jobSheet.getRange(oldData.rowIndex, 11).setValue(oldNotes ? oldNotes + '; ' + emptyNote : emptyNote);  // Notes (K)
+          jobData[emptyIdx][10] = oldNotes ? oldNotes + '; ' + emptyNote : emptyNote;  // Notes (K)
         }
+        jobDataModified = true;
         emptyJobCount++;
       }
     }
+  }
+
+  // ========== BATCH WRITE: Write modified columns back to Job Tracking sheet ==========
+  if (jobDataModified) {
+    // Write Location (B), Foreman (C), Crew Size (D) columns
+    var colBCD = jobData.map(function(row) { return [row[1], row[2], row[3]]; });
+    jobSheet.getRange(1, 2, jobData.length, 3).setValues(colBCD);
+
+    // Write Notes (K) column
+    var colK = jobData.map(function(row) { return [row[10]]; });
+    jobSheet.getRange(1, 11, jobData.length, 1).setValues(colK);
+
+    // Write Last Updated (U) column
+    var colU = jobData.map(function(row) { return [row[20]]; });
+    jobSheet.getRange(1, 21, jobData.length, 1).setValues(colU);
+
+    Logger.log('syncJobTrackingAfterImport: Batch wrote Job Tracking columns (B,C,D,K,U) for ' + jobData.length + ' rows');
+  }
+
+  // Add new rows (already batched)
+  if (newRows.length > 0) {
+    var lastRow = jobSheet.getLastRow();
+    jobSheet.getRange(lastRow + 1, 1, newRows.length, 21).setValues(newRows);
+    // Add checkboxes for skip day columns (L-T = cols 12-20) on new rows
+    jobSheet.getRange(lastRow + 1, 12, newRows.length, 9).insertCheckboxes();
   }
 
   // Build result message
@@ -718,12 +779,18 @@ function activatePendingJobs(jobNumbers) {
     if (jobNumbers.indexOf(jobNum) !== -1) {
       var currentStatus = String(jobData[i][9] || '').trim();  // Status (J, index 9)
 
-      if (currentStatus === 'Pending Start') {
+      if (currentStatus === 'Pending Start' || currentStatus === 'On Hold') {
         var rowIdx = i + 1;
         jobSheet.getRange(rowIdx, 10).setValue('Active');  // Status (J, column 10)
 
+        // Clear Put On Hold Date (F) if coming from On Hold
+        if (currentStatus === 'On Hold') {
+          jobSheet.getRange(rowIdx, 6).setValue('');  // Put On Hold Date (F)
+          jobSheet.getRange(rowIdx, 7).setValue('');  // Estimated Return (G)
+        }
+
         var currentNotes = jobData[i][10] || '';  // Notes (K, index 10)
-        var activateNote = 'Activated on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy') + ' via Crew Import';
+        var activateNote = 'Activated from ' + currentStatus + ' on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy') + ' via Crew Import';
         jobSheet.getRange(rowIdx, 11).setValue(currentNotes ? currentNotes + '; ' + activateNote : activateNote);  // Notes (K)
         jobSheet.getRange(rowIdx, 21).setValue(timestamp);  // Last Updated (U)
 
@@ -738,6 +805,170 @@ function activatePendingJobs(jobNumbers) {
     activated: activatedCount,
     message: activatedCount + ' job(s) activated'
   };
+}
+
+/**
+ * Sets a scheduled activation date for an On Hold or Pending Start job.
+ * For On Hold jobs: saves to "Estimated Return" (column G).
+ * For Pending Start jobs: saves to "Start Date" (column E).
+ * checkAndActivateScheduledJobs() will auto-activate when the date arrives.
+ *
+ * @param {string} jobNumber - The job number (e.g., "041-26")
+ * @param {string} activationDateStr - The activation date as YYYY-MM-DD string
+ * @return {Object} Result with success status
+ */
+function setJobActivationDate(jobNumber, activationDateStr) {
+  Logger.log('setJobActivationDate: ' + jobNumber + ' -> ' + activationDateStr);
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var jobSheet = ss.getSheetByName('Job Tracking');
+    if (!jobSheet) {
+      return { success: false, message: 'Job Tracking sheet not found' };
+    }
+
+    // Parse YYYY-MM-DD explicitly to avoid timezone ambiguity
+    // (new Date('YYYY-MM-DDT00:00:00') can be treated as UTC in GAS V8, causing off-by-one day)
+    var dateParts = activationDateStr.split('-');
+    var dateObj = new Date(parseInt(dateParts[0], 10), parseInt(dateParts[1], 10) - 1, parseInt(dateParts[2], 10));
+    if (isNaN(dateObj.getTime())) {
+      return { success: false, message: 'Invalid date: ' + activationDateStr };
+    }
+
+    var data = jobSheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim() === jobNumber) {
+        var rowIdx = i + 1;
+        var status = String(data[i][9] || '').trim();
+        var timestamp = new Date();
+
+        if (status === 'On Hold') {
+          // Save to Estimated Return (G, column 7)
+          jobSheet.getRange(rowIdx, 7).setValue(dateObj);
+          jobSheet.getRange(rowIdx, 7).setNumberFormat('MM/dd/yyyy');
+        } else if (status === 'Pending Start') {
+          // Save to Start Date (E, column 5)
+          jobSheet.getRange(rowIdx, 5).setValue(dateObj);
+          jobSheet.getRange(rowIdx, 5).setNumberFormat('MM/dd/yyyy');
+        } else {
+          return { success: false, message: 'Job ' + jobNumber + ' is "' + status + '", not On Hold or Pending Start' };
+        }
+
+        // Update notes and timestamp
+        var currentNotes = String(data[i][10] || '');
+        var dateNote = 'Activation scheduled for ' + Utilities.formatDate(dateObj, Session.getScriptTimeZone(), 'MM/dd/yyyy') +
+                       ' (set on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy') + ')';
+        jobSheet.getRange(rowIdx, 11).setValue(currentNotes ? currentNotes + '; ' + dateNote : dateNote);
+        jobSheet.getRange(rowIdx, 21).setValue(timestamp);  // Last Updated (U)
+
+        Logger.log('setJobActivationDate: Set activation date for ' + jobNumber + ' (' + status + ') to ' + activationDateStr);
+        return { success: true, message: 'Activation date set to ' + Utilities.formatDate(dateObj, Session.getScriptTimeZone(), 'MM/dd/yyyy'), status: status };
+      }
+    }
+
+    return { success: false, message: 'Job ' + jobNumber + ' not found in Job Tracking' };
+  } catch (e) {
+    Logger.log('setJobActivationDate error: ' + e.toString());
+    return { success: false, message: 'Error: ' + e.toString() };
+  }
+}
+
+/**
+ * Checks all On Hold and Pending Start jobs and auto-activates any whose
+ * scheduled activation date has arrived (today or earlier).
+ * - On Hold jobs: checks "Estimated Return" (column G)
+ * - Pending Start jobs: checks "Start Date" (column E)
+ *
+ * Called automatically during syncJobTrackingAfterImport() and generateAllReports().
+ *
+ * @return {Object} Result with activated job numbers and count
+ */
+function checkAndActivateScheduledJobs() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var jobSheet = ss.getSheetByName('Job Tracking');
+  if (!jobSheet) return { activated: 0, jobs: [] };
+
+  var data = jobSheet.getDataRange().getValues();
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  var activatedJobs = [];
+  var timestamp = new Date();
+  var dataModified = false;
+
+  for (var i = 1; i < data.length; i++) {
+    var jobNum = String(data[i][0] || '').trim();
+    var status = String(data[i][9] || '').trim();
+    if (!jobNum) continue;
+
+    var activationDate = null;
+    var dateSource = '';
+
+    if (status === 'On Hold') {
+      // Check Estimated Return (G, index 6)
+      var estReturn = data[i][6];
+      if (estReturn instanceof Date && !isNaN(estReturn.getTime())) {
+        activationDate = new Date(estReturn);
+        dateSource = 'Estimated Return';
+      }
+    } else if (status === 'Pending Start') {
+      // Check Start Date (E, index 4)
+      var startDate = data[i][4];
+      if (startDate instanceof Date && !isNaN(startDate.getTime())) {
+        activationDate = new Date(startDate);
+        dateSource = 'Start Date';
+      }
+    }
+
+    if (!activationDate) continue;
+    activationDate.setHours(0, 0, 0, 0);
+
+    // If activation date is today or in the past, activate the job
+    if (activationDate <= today) {
+      // BATCH: Modify in memory instead of individual setValue
+      data[i][9] = 'Active';  // Status (J)
+
+      // Clear On Hold fields if coming from On Hold
+      if (status === 'On Hold') {
+        data[i][5] = '';  // Put On Hold Date (F)
+        data[i][6] = '';  // Estimated Return (G)
+      }
+
+      var currentNotes = String(data[i][10] || '');
+      var activateNote = 'Auto-activated on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy') +
+                         ' (' + dateSource + ' reached)';
+      data[i][10] = currentNotes ? currentNotes + '; ' + activateNote : activateNote;
+      data[i][20] = timestamp;  // Last Updated (U)
+      dataModified = true;
+
+      activatedJobs.push(jobNum);
+      Logger.log('checkAndActivateScheduledJobs: Auto-activated ' + jobNum + ' (was ' + status + ', ' + dateSource + ' = ' +
+                 Utilities.formatDate(activationDate, Session.getScriptTimeZone(), 'MM/dd/yyyy') + ')');
+    }
+  }
+
+  // BATCH WRITE: Write all modified columns at once
+  if (dataModified) {
+    // Write columns F, G (Put On Hold, Estimated Return)
+    var colFG = data.map(function(row) { return [row[5], row[6]]; });
+    jobSheet.getRange(1, 6, data.length, 2).setValues(colFG);
+
+    // Write Status (J), Notes (K) columns
+    var colJK = data.map(function(row) { return [row[9], row[10]]; });
+    jobSheet.getRange(1, 10, data.length, 2).setValues(colJK);
+
+    // Write Last Updated (U)
+    var colU = data.map(function(row) { return [row[20]]; });
+    jobSheet.getRange(1, 21, data.length, 1).setValues(colU);
+
+    Logger.log('checkAndActivateScheduledJobs: Batch wrote activated job changes');
+  }
+
+  if (activatedJobs.length > 0) {
+    Logger.log('checkAndActivateScheduledJobs: Activated ' + activatedJobs.length + ' job(s): ' + activatedJobs.join(', '));
+  }
+
+  return { activated: activatedJobs.length, jobs: activatedJobs };
 }
 
 /**
@@ -845,6 +1076,7 @@ function getJobTrackingForCrewImport() {
     // Updated column indexes: Status(9), Start Date(4), Est. End Date(7), Location(1), Foreman(2)
     var status = String(row[9] || '').trim();     // Status (J, index 9)
     var startDate = row[4];                       // Start Date (E, index 4)
+    var estimatedReturn = row[6];                 // Estimated Return (G, index 6)
     var estEndDate = row[7];                      // Est. End Date (H, index 7)
     var location = String(row[1] || '').trim();
     var foreman = String(row[2] || '').trim();
@@ -853,6 +1085,7 @@ function getJobTrackingForCrewImport() {
     // Format dates for JSON
     var startDateStr = '';
     var estEndDateStr = '';
+    var estimatedReturnStr = '';
 
     if (startDate instanceof Date && !isNaN(startDate.getTime())) {
       startDateStr = Utilities.formatDate(startDate, Session.getScriptTimeZone(), 'MM/dd/yyyy');
@@ -866,6 +1099,12 @@ function getJobTrackingForCrewImport() {
       estEndDateStr = String(estEndDate);
     }
 
+    if (estimatedReturn instanceof Date && !isNaN(estimatedReturn.getTime())) {
+      estimatedReturnStr = Utilities.formatDate(estimatedReturn, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+    } else if (estimatedReturn) {
+      estimatedReturnStr = String(estimatedReturn);
+    }
+
     result[jobNumber] = {
       status: status,
       location: location,
@@ -873,6 +1112,7 @@ function getJobTrackingForCrewImport() {
       jobName: jobName,
       startDate: startDateStr,
       estEndDate: estEndDateStr,
+      estimatedReturn: estimatedReturnStr,
       isCompleted: status === 'Completed',
       isPendingStart: status === 'Pending Start',
       isActive: status === 'Active',
@@ -1001,10 +1241,16 @@ function addOrUpdateJobTracking(jobNumber, location, foreman, crewSize, startDat
     var timestamp = new Date();
     var formattedTimestamp = Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy HH:mm');
 
-    // Parse start date
+    // Parse start date - use explicit constructor to avoid timezone issues
+    // (new Date('YYYY-MM-DDT00:00:00') can be treated as UTC in GAS V8, causing off-by-one day)
     var startDateObj = null;
     if (startDate) {
-      startDateObj = new Date(startDate + 'T00:00:00');
+      var sdParts = startDate.split('-');
+      if (sdParts.length === 3) {
+        startDateObj = new Date(parseInt(sdParts[0], 10), parseInt(sdParts[1], 10) - 1, parseInt(sdParts[2], 10));
+      } else {
+        startDateObj = new Date(startDate);
+      }
       if (isNaN(startDateObj.getTime())) {
         startDateObj = null;
       }
@@ -1315,6 +1561,7 @@ function backfillJobNamesFromImport(jobSheet, crewJobNameMap) {
 
   var data = jobSheet.getDataRange().getValues();
   var filledCount = 0;
+  var dataModified = false;
 
   for (var i = 1; i < data.length; i++) {
     var jobNumber = String(data[i][0] || '').trim();
@@ -1322,14 +1569,131 @@ function backfillJobNamesFromImport(jobSheet, crewJobNameMap) {
 
     // Only backfill if currently empty and we have a name from the import
     if (jobNumber && !currentJobName && crewJobNameMap[jobNumber]) {
-      jobSheet.getRange(i + 1, jobNameCol).setValue(crewJobNameMap[jobNumber]);
+      data[i][jobNameCol - 1] = crewJobNameMap[jobNumber];
+      dataModified = true;
       filledCount++;
       Logger.log('backfillJobNamesFromImport: ' + jobNumber + ' → "' + crewJobNameMap[jobNumber] + '"');
     }
   }
 
+  // BATCH WRITE: Write entire Job Name column at once
+  if (dataModified) {
+    var jobNameValues = data.map(function(row) { return [row[jobNameCol - 1]]; });
+    jobSheet.getRange(1, jobNameCol, data.length, 1).setValues(jobNameValues);
+    Logger.log('backfillJobNamesFromImport: Batch wrote Job Name column');
+  }
+
   Logger.log('backfillJobNamesFromImport: Filled ' + filledCount + ' Job Name(s)');
   return filledCount;
+}
+
+/**
+ * Batch searches Employee History for multiple names at once.
+ * Used by Crew Import to check if NEW HIRE employees are rehires.
+ * Single sheet read for efficiency.
+ *
+ * @param {string} namesJson - JSON array of employee names to search for
+ * @return {Object} Map of name -> history data (or null if not found)
+ */
+function searchEmployeeHistoryBatch(namesJson) {
+  var names = JSON.parse(namesJson);
+  Logger.log('searchEmployeeHistoryBatch: Searching for ' + names.length + ' names');
+
+  var result = {};
+  for (var n = 0; n < names.length; n++) {
+    result[names[n]] = null;
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var historySheet = ss.getSheetByName('Employee History');
+  var employeesSheet = ss.getSheetByName('Employees');
+
+  if (!historySheet || historySheet.getLastRow() <= 2) {
+    Logger.log('searchEmployeeHistoryBatch: No Employee History data');
+    return result;
+  }
+
+  // Build set of current employees to check for Previous Employee status
+  var currentEmployeeLocations = {};
+  if (employeesSheet && employeesSheet.getLastRow() > 1) {
+    var empData = employeesSheet.getDataRange().getValues();
+    for (var e = 1; e < empData.length; e++) {
+      var empName = String(empData[e][0] || '').toLowerCase().trim();
+      var empLocation = String(empData[e][2] || '').toLowerCase().trim();
+      if (empName) currentEmployeeLocations[empName] = empLocation;
+    }
+  }
+
+  // Build search lookup (lowercase)
+  var searchNames = {};
+  for (var i = 0; i < names.length; i++) {
+    searchNames[names[i].toLowerCase().trim()] = names[i];
+  }
+
+  // Read all history data in one call
+  var historyData = historySheet.getRange(3, 1, historySheet.getLastRow() - 2, 14).getValues();
+
+  // History columns: Date, Employee, EventType, Location, JobNumber, HireDate, LastDay, LastDayReason, RehireDate, Notes, Phone, Email, GloveSize, SleeveSize
+  var employeeMap = {};
+
+  for (var h = 0; h < historyData.length; h++) {
+    var row = historyData[h];
+    var histName = String(row[1] || '').trim();
+    var histNameLower = histName.toLowerCase();
+
+    // Only process names we're looking for
+    if (!searchNames[histNameLower]) continue;
+
+    if (!employeeMap[histNameLower]) {
+      employeeMap[histNameLower] = {
+        name: histName,
+        location: '',
+        jobNumber: '',
+        phone: '',
+        email: '',
+        gloveSize: '',
+        sleeveSize: '',
+        hireDate: '',
+        historyEntries: 0,
+        isPreviousEmployee: currentEmployeeLocations[histNameLower] === 'previous employee'
+      };
+    }
+
+    var emp = employeeMap[histNameLower];
+    emp.historyEntries++;
+
+    // Keep most recent non-empty values
+    var location = String(row[3] || '').trim();
+    var jobNumber = String(row[4] || '').trim();
+    var hireDate = row[5];
+    var phone = String(row[10] || '').trim();
+    var email = String(row[11] || '').trim();
+    var gloveSize = String(row[12] || '').trim();
+    var sleeveSize = String(row[13] || '').trim();
+
+    if (location) emp.location = location;
+    if (jobNumber) emp.jobNumber = jobNumber;
+    if (phone) emp.phone = phone;
+    if (email) emp.email = email;
+    if (gloveSize) emp.gloveSize = gloveSize;
+    if (sleeveSize) emp.sleeveSize = sleeveSize;
+    if (hireDate) {
+      emp.hireDate = (hireDate instanceof Date)
+        ? Utilities.formatDate(hireDate, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy')
+        : String(hireDate);
+    }
+  }
+
+  // Map results back to original names
+  for (var key in employeeMap) {
+    var originalName = searchNames[key];
+    if (originalName) {
+      result[originalName] = employeeMap[key];
+    }
+  }
+
+  Logger.log('searchEmployeeHistoryBatch: Found ' + Object.keys(employeeMap).length + ' matches out of ' + names.length + ' names');
+  return result;
 }
 
 /**
@@ -1342,6 +1706,20 @@ function backfillJobNamesFromImport(jobSheet, crewJobNameMap) {
 function addNewEmployeeFromImport(employeeData) {
   Logger.log('=== addNewEmployeeFromImport START ===');
   Logger.log('Adding new employee: ' + JSON.stringify(employeeData));
+
+  // Safety: Clean the name in case client-side parsing missed something
+  // Strip "NEW HIRE", "ST #" (start date), "TEMP", etc. from the name
+  if (employeeData.name) {
+    var cleanedName = employeeData.name
+      .replace(/\s+(NEW\s*HIRE|NEWHIRE|TEMP|TEMPORARY|CONTRACTOR|TRAINEE)\s*/gi, ' ')
+      .replace(/\s+ST\s*\d+\s*/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (cleanedName !== employeeData.name) {
+      Logger.log('Cleaned employee name: "' + employeeData.name + '" → "' + cleanedName + '"');
+      employeeData.name = cleanedName;
+    }
+  }
 
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -2712,6 +3090,32 @@ function getCrewImportDuplicateSelections() {
     Logger.log('Error loading duplicate selections: ' + e.message);
   }
   return {};
+}
+
+/**
+ * Clears a specific employee's saved duplicate selection.
+ * Called from CrewImport UI when user clicks "Reset" on a remembered selection.
+ *
+ * @param {string} employeeName - The employee name to clear
+ * @return {Object} Result with success flag
+ */
+function clearCrewImportDuplicateSelection(employeeName) {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var saved = props.getProperty('CREW_IMPORT_DUPLICATE_SELECTIONS');
+    if (saved) {
+      var selections = JSON.parse(saved);
+      if (selections[employeeName]) {
+        delete selections[employeeName];
+        props.setProperty('CREW_IMPORT_DUPLICATE_SELECTIONS', JSON.stringify(selections));
+        Logger.log('Cleared saved duplicate selection for: ' + employeeName);
+      }
+    }
+    return { success: true };
+  } catch (e) {
+    Logger.log('Error clearing duplicate selection: ' + e.message);
+    return { success: false, error: e.message };
+  }
 }
 
 /**
