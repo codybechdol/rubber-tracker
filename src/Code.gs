@@ -11460,7 +11460,7 @@ function getTasksWithMetadata() {
           foreman: task.foreman,
           currentItem: task.currentItem,
           dueDate: task.dueDate,
-          status: 'Pending',
+          status: 'Unassigned',
           phoneNumber: task.phoneNumber || '',
           sheetName: sourceSheet,
           rowIndex: sourceRow,
@@ -11621,7 +11621,7 @@ function getTasksWithMetadata() {
       scheduledDate: metadata.scheduledDate,
       startTime: metadata.startTime,
       endTime: metadata.endTime,
-      status: metadata.status || 'Pending',
+      status: metadata.status || 'Unassigned',
       phoneNumber: metadata.phoneNumber,
       notifiedDate: metadata.notifiedDate,
       scheduledClassDate: metadata.scheduledClassDate,
@@ -11702,7 +11702,7 @@ function getTasksWithMetadata() {
         start: task.startTime || '',
         end: task.endTime || '',
         // Status
-        stat: task.status || 'Pending',
+        stat: task.status || 'Unassigned',
         over: task.isOverdue ? 1 : 0,
         days: task.daysTillDue || 0,
         // Source info
@@ -12140,7 +12140,7 @@ function reAddDeclinedCertToTaskList(taskKey, employee, certType) {
   // 1. Update Task Metadata - reset declined status, add back to Task List, clear notifications
   var metadataResult = updateTaskMetadata(taskKey, {
     IsDeclined: 'FALSE',
-    Status: 'Pending',
+    Status: 'Unassigned',
     InTaskList: 'TRUE',
     NotifiedDate: '',           // Clear notification date for fresh start
     ScheduledClassDate: '',     // Clear scheduled class date
@@ -12371,7 +12371,7 @@ function createTaskMetadataRecord(sourceSheet, sourceRow, taskInfo) {
     '',                               // ScheduledDate
     '',                               // StartTime
     '',                               // EndTime
-    'Pending',                        // Status
+    'Unassigned',                     // Status
     '',                               // NotifiedDate
     '',                               // ScheduledClassDate
     '',                               // ClassType
@@ -13285,8 +13285,8 @@ function getTaskStatistics() {
     }
   }
 
-  // Calculate pending (not completed, not declined)
-  stats.pendingTasks = (stats.byStatus['Pending'] || 0) + (stats.byStatus['Scheduled'] || 0) + (stats.byStatus['Overdue'] || 0);
+  // Calculate pending (not completed, not declined) - includes both old and new status names
+  stats.pendingTasks = (stats.byStatus['Unassigned'] || 0) + (stats.byStatus['Assigned'] || 0) + (stats.byStatus['Overdue'] || 0) + (stats.byStatus['Pending'] || 0) + (stats.byStatus['Scheduled'] || 0);
 
   Logger.log('getTaskStatistics: Total=' + stats.totalTasks + ', Pending=' + stats.pendingTasks + ', Overdue=' + stats.overdueTasks);
   Logger.log('=== getTaskStatistics END ===');
