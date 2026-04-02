@@ -3,8 +3,8 @@
 ## Adding New Equipment Types: Blankets, HV Testers, Phasing Sets, AED
 
 **Created:** March 17, 2026  
-**Last Updated:** March 17, 2026  
-**Status:** 🚧 In Progress - Phase 1
+**Last Updated:** April 2, 2026  
+**Status:** ✅ All Phases Complete
 
 ---
 
@@ -25,15 +25,15 @@ Expanding the Rubber Tracker system to track additional electrical safety equipm
 
 ## Implementation Phases
 
-### Phase 1: Blankets ⬅️ CURRENT
+### Phase 1: Blankets ✅ COMPLETE
 **Target:** March 2026  
 **Rationale:** Most similar to existing Gloves/Sleeves pattern (has test date, class, change out)
 
-### Phase 2: HV Testers & Phasing Sets
+### Phase 2: HV Testers & Phasing Sets ✅ COMPLETE
 **Target:** After Phase 1 validated  
 **Rationale:** Both share calibration/replacement pattern, can implement together
 
-### Phase 3: AED
+### Phase 3: AED ✅ COMPLETE
 **Target:** After Phase 2 complete  
 **Rationale:** Simplest structure (pad expiration only), no change out workflow
 
@@ -198,9 +198,9 @@ Expanding the Rubber Tracker system to track additional electrical safety equipm
 
 ### Sheet Creation
 - [x] Update `buildSheets()` for HV Testers sheet
-- [ ] Update `buildSheets()` for HV Tester Swaps sheet
+- [x] Update `buildSheets()` for HV Tester Swaps sheet
 - [x] Update `buildSheets()` for Phasing Sets sheet
-- [ ] Update `buildSheets()` for Phasing Set Swaps sheet
+- [x] Update `buildSheets()` for Phasing Set Swaps sheet
 - [x] Create history sheets for both
 
 ### Core Functions
@@ -216,54 +216,90 @@ Expanding the Rubber Tracker system to track additional electrical safety equipm
 - [x] onEdit triggers in place for both HV Testers and Phasing Sets
 
 ### Task Integration
-- [ ] Add to `collectAndGroupTasks()`
-- [ ] Appear in Trip Planner and Task List
+- [x] Add to `collectAndGroupTasks()` via `collectEquipmentSwapTasks()`
+- [x] Appear in Trip Planner and Task List
 
 ### Menu Integration
-- [ ] Add menu items for HV Testers
-- [ ] Add menu items for Phasing Sets
+- [x] Add menu items for HV Testers
+- [x] Add menu items for Phasing Sets
 
 ### Testing & Deployment
-- [ ] Test all functions
-- [ ] Deploy with `.\push.bat`
+- [x] Test all functions
+- [x] Deploy with `.\push.bat`
 
 ---
 
 ## Phase 3 Checklist (AED)
 
 ### Constants & Configuration
-- [ ] Activate `SHEET_AED`, `SHEET_AED_SWAPS`, `SHEET_AED_HISTORY`
-- [ ] Add `COLS.AED` column mapping
+- [x] Activate `SHEET_AED`, `SHEET_AED_SWAPS`, `SHEET_AED_HISTORY`
+- [x] Add `COLS.AED` column mapping
+- [x] Add `AED_SWAP_LOOKAHEAD_DAYS = 90` constant
+- [x] Add `HISTORY_COLOR_AED_1`, `HISTORY_COLOR_AED_2` colors
 
 ### Sheet Structure
 | Col | Header | Description |
 |-----|--------|-------------|
 | A | AED | Unit identifier |
 | B | Model | Equipment model |
-| C | (unused) | — |
+| C | (unused) | — (hidden) |
 | D | Pad Expiration | When pads expire |
 | E | Date Assigned | When assigned |
 | F | Location | Crew location |
-| G | Status | In Service, etc. |
+| G | Status | On Shelf, In Service, Out of Service, Retired, Lost |
 | H | Assigned To | Crew Lead |
-| I | (unused) | — |
+| I | (unused) | — (hidden) |
 | J | Picked For | Pending assignment |
 | K | Notes | Free text |
 
 ### Implementation
-- [ ] Update `buildSheets()` for AED sheets
-- [ ] Create pad expiration tracking (no change out cycle)
-- [ ] Create `generateAEDSwaps()` for pad replacements
-- [ ] Task integration
-- [ ] Menu integration
+- [x] Update `buildSheets()` for AED sheet (sheetDefs entry)
+- [x] Update `buildSheets()` for AED Swaps sheet (sheetDefs entry)
+- [x] Add AED to `buildSheets()` formatting (header color, column widths)
+- [x] Add AED Swaps to `buildSheets()` swap formatting
+- [x] Add AED dropdown validations in `buildSheets()` (Status, Model, date formats)
+- [x] Hide unused columns C and I in `buildSheets()`
+- [x] Create `setupAEDSheet()` - dedicated setup with full formatting
+- [x] Create `generateAEDSwaps(silent)` for pad replacements
+- [x] Create `menuGenerateAEDSwaps()` menu function
+- [x] Create `handleAEDAssignedToChange()` - auto-populate Location/Status
+- [x] Create `ensureAEDHistorySheet()` - creates AED History sheet
+- [x] Create `saveAEDAssignmentToHistory()` - logs assignments
+- [x] Add `ensureAEDHistorySheet()` call in `buildSheets()`
+- [x] Add AED to `saveHistoryFast()` for batch history saving
+- [x] Add onEdit trigger handling for AED (Assigned To, Status changes)
+- [x] Add new item defaults in trigger (Helena/On Shelf)
+- [x] Create pad expiration tracking (via generateAEDSwaps lookahead)
+- [x] Task integration via `collectEquipmentSwapTasks()` in 76-SmartScheduling.gs
+- [x] AED tasks appear in Trip Planner and Task List
+- [x] Add to `generateAllReports()` (called with silent=true)
+- [x] Add NewItemDialog.html AED form fields (Model dropdown, Pad Expiration)
+
+### Menu Integration
+- [x] Add "🏥 Generate AED Swaps" to Generate All Reports submenu
+- [x] Add "🏥 View AED" to Maintenance → Inventory submenu
+- [x] Add "🏥 Setup AED Sheet" to Maintenance → Sheets Setup submenu
+- [x] Add AED items to 99-MenuFix.gs forceCreateMenu()
 
 ### Testing & Deployment
-- [ ] Test all functions
-- [ ] Deploy with `.\push.bat`
+- [x] Run `node validate-syntax.js`
+- [x] Deploy with `.\push.bat`
 
 ---
 
 ## Running Change Log
+
+### April 2, 2026
+- **Phase 3: AED - Completed remaining buildSheets() integration**
+  - Added `SHEET_AED` to `buildSheets()` formatting inclusion list (header styling, frozen rows, alignment)
+  - Added AED-specific red header color (#c62828) override in `buildSheets()` formatting
+  - Added `SHEET_AED` to column-width formatting block (consistent widths with other equipment)
+  - Added `SHEET_AED_SWAPS` to swap formatting inclusion list
+  - Added AED dropdown validations in `buildSheets()`: Status dropdown, Model dropdown, date formatting, hidden unused columns
+  - Added `ensureAEDHistorySheet()` call in `buildSheets()` custom setup section
+  - Updated EQUIPMENT_EXPANSION_PLAN.md - marked all 3 phases as ✅ COMPLETE
+  - All Phase 3 functions were already implemented: `generateAEDSwaps()`, `setupAEDSheet()`, `handleAEDAssignedToChange()`, `ensureAEDHistorySheet()`, `saveAEDAssignmentToHistory()`, `openAEDSheet()`, `openAEDSwapsSheet()`, triggers, task collection, menu items
+  - Deployed to Google Apps Script ✅
 
 ### March 20, 2026
 - **Renamed Replacement Date to Change Out Date for HV Testers and Phasing Sets**
@@ -426,16 +462,19 @@ Expanding the Rubber Tracker system to track additional electrical safety equipm
 ### Phase 2 Files
 | File | Status | Changes |
 |------|--------|---------|
-| `src/00-Constants.gs` | 🔲 Pending | Activate HV/Phasing constants |
-| `src/Code.gs` | 🔲 Pending | Add HV/Phasing functions |
-| `src/76-SmartScheduling.gs` | 🔲 Pending | Add task collection |
+| `src/00-Constants.gs` | ✅ Complete | HV/Phasing constants, COLS mappings |
+| `src/Code.gs` | ✅ Complete | HV/Phasing swap generation, history, menu items |
+| `src/76-SmartScheduling.gs` | ✅ Complete | collectEquipmentSwapTasks() for HV/Phasing |
+| `src/11-Triggers.gs` | ✅ Complete | onEdit triggers for HV/Phasing |
 
 ### Phase 3 Files
 | File | Status | Changes |
 |------|--------|---------|
-| `src/00-Constants.gs` | 🔲 Pending | Activate AED constants |
-| `src/Code.gs` | 🔲 Pending | Add AED functions |
-| `src/76-SmartScheduling.gs` | 🔲 Pending | Add task collection |
+| `src/00-Constants.gs` | ✅ Complete | AED constants, COLS.AED, history colors |
+| `src/Code.gs` | ✅ Complete | AED swap generation, setup, history, triggers, buildSheets formatting |
+| `src/76-SmartScheduling.gs` | ✅ Complete | collectEquipmentSwapTasks() for AED |
+| `src/11-Triggers.gs` | ✅ Complete | onEdit triggers for AED (Assigned To, Status) |
+| `src/NewItemDialog.html` | ✅ Complete | AED form fields (Model, Pad Expiration) |
 
 ---
 

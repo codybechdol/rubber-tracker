@@ -6,166 +6,271 @@
  * 2. Select this function: forceCreateMenu
  * 3. Click Run
  * 4. Go back to spreadsheet and refresh
+ *
+ * LAST SYNCED: April 2, 2026 - Matches onOpen() in Code.gs
  */
 function forceCreateMenu() {
   try {
     var ui = SpreadsheetApp.getUi();
 
-    // Create the streamlined menu structure (matches onOpen in Code.gs)
     ui.createMenu('Glove Manager')
-      // ===== PRIMARY ENTRY POINT =====
+      // === QUICK ACTIONS SIDEBAR ===
       .addItem('📱 Quick Actions', 'openQuickActionsSidebar')
       .addSeparator()
 
-      // ===== REPORTS =====
-      .addSubMenu(ui.createMenu('📊 Reports')
-        .addItem('📋 Generate All Reports', 'generateAllReports')
+      // === STEP 1: IMPORT CREW MAKEUP ===
+      .addSubMenu(ui.createMenu('📥 Import Crew Makeup')
+        .addItem('👥 Import Crew Makeup', 'showCrewImportDialog')
+        .addItem('👷 Assign Crew Leads', 'showAssignCrewLeadsDialog')
+        .addItem('🔄 Sync Crews', 'menuSyncCrews')
         .addSeparator()
-        .addItem('🧤 Generate Glove Swaps', 'generateGloveSwaps')
-        .addItem('💪 Generate Sleeve Swaps', 'generateSleeveSwaps')
-        .addItem('🛒 Update Purchase Needs', 'updatePurchaseNeeds')
-        .addItem('♻️ Update Reclaims Sheet', 'updateReclaimsSheet')
-        .addSeparator()
-        .addItem('📝 Daily Accomplishments', 'showTimeBreakdownDialog'))
+        .addSubMenu(ui.createMenu('🔧 Utilities')
+          .addItem('📋 Setup Job Tracking Sheet', 'setupJobTrackingSheet')
+          .addItem('📋 Migrate Job Tracking for Compliance', 'migrateJobTrackingForComplianceConfig')
+          .addItem('📋 Migrate Config to Job Tracking', 'migrateConfigToJobTracking')
+          .addSeparator()
+          .addItem('🔄 Migrate Job Tracking (Add On Hold Columns)', 'migrateJobTrackingSheet')
+          .addItem('🔄 Refresh Job Tracking', 'refreshJobTrackingFromEmployees')
+          .addItem('👤 Refresh Job Tracking Foremen', 'refreshJobTrackingForemen')
+          .addItem('✅ Mark Job Complete', 'markJobComplete')
+          .addItem('➕ Add Future Job', 'addFutureJob')
+          .addItem('🎨 Apply Job Tracking Formatting', 'menuApplyJobTrackingFormatting')
+          .addItem('📅 Add Schedule History Columns', 'migrateJobTrackingScheduleColumns')
+          .addItem('📝 Add Job Name Column', 'migrateJobTrackingAddJobName')
+          .addItem('📝 Backfill Job Names', 'backfillJobNames')
+          .addItem('📂 View Job Tracking', 'openJobTrackingSheet')
+          .addSeparator()
+          .addItem('🔄 Sync Completed Jobs to Training', 'syncCompletedJobsToTraining')
+          .addItem('🧹 Cleanup Pending Training for Completed Jobs', 'cleanupPendingTrainingForCompletedJobs')
+          .addItem('🔄 Sync Completed Job (Manual)', 'menuSyncCompletedJob')))
 
-      // ===== SCHEDULING =====
-      .addSubMenu(ui.createMenu('📅 Scheduling')
+      // === STEP 2: GENERATE ALL REPORTS ===
+      .addSubMenu(ui.createMenu('📊 Generate All Reports')
+        .addItem('⚡ Generate All Reports', 'generateAllReports')
+        .addSeparator()
+        .addItem('Generate Glove Swaps', 'generateGloveSwaps')
+        .addItem('Generate Sleeve Swaps', 'generateSleeveSwaps')
+        .addItem('🧱 Generate Blanket Swaps', 'menuGenerateBlanketSwaps')
+        .addItem('⚡ Generate HV Tester Swaps', 'menuGenerateHVTesterSwaps')
+        .addItem('⚡ Generate Phasing Set Swaps', 'menuGeneratePhasingSetSwaps')
+        .addItem('🏥 Generate AED Swaps', 'menuGenerateAEDSwaps')
+        .addItem('Update Purchase Needs', 'updatePurchaseNeeds')
+        .addItem('Update Inventory Reports', 'updateInventoryReports')
+        .addItem('Run Reclaims Check', 'runReclaimsCheck')
+        .addItem('Update Reclaims Sheet', 'updateReclaimsSheet')
+        .addSeparator()
+        .addSubMenu(ui.createMenu('🔧 Utilities')
+          .addItem('Fix All Change Out Dates', 'fixAllChangeOutDates')
+          .addItem('🧱 Fix Blanket Change Out Dates', 'fixBlanketChangeOutDates')
+          .addItem('⚡ Setup Auto Change Out Dates', 'createEditTrigger')
+          .addItem('🔄 Update Training Tracking Crew Leads', 'updateTrainingTrackingCrewLeads')))
+
+      // === STEP 3: PROCESS SAFETY EMAILS ===
+      .addSubMenu(ui.createMenu('🛡️ Process Safety Emails')
+        .addItem('📥 Process Safety Emails', 'showProcessSafetyEmailsDialog')
+        .addItem('📊 View Equipment Needs', 'openSafetyReports')
+        .addItem('📈 View Compliance History', 'openComplianceSheet')
+        .addItem('⚙️ Manage Schedules (Job Tracking)', 'openJobTrackingSheet')
+        .addSeparator()
+        .addSubMenu(ui.createMenu('🔧 Utilities')
+          .addItem('🔑 Authorize Gmail Access', 'authorizeGmailAccess')
+          .addItem('📊 Gmail Status', 'showGmailStatus')
+          .addItem('🔄 Sync Crews', 'menuSyncCrews')
+          .addItem('👤 Refresh Foreman Names', 'refreshComplianceForemenNames')
+          .addItem('🔽 Add Dropdowns to Compliance Sheet', 'addDropdownsToSafetyCompliance')
+          .addItem('🧹 Cleanup N/A Cells (make blank)', 'cleanupNACellsInCompliance')
+          .addItem('💬 Refresh Compliance Tooltips', 'menuRefreshComplianceTooltips')
+          .addItem('🔄 Master Recalculate', 'masterRecalculateCompliance')
+          .addItem('🔧 Fix Notes Column', 'fixNotesColumnCheckboxes'))
+        .addSubMenu(ui.createMenu('📄 Logs')
+          .addItem('📋 Setup Log Sheets', 'setupAllSafetyLogSheets')
+          .addItem('📄 View JHA Log', 'openJHALogSheet')
+          .addItem('📄 View Weekly Safety Log', 'openWeeklySafetyLogSheet')
+          .addItem('📄 View Monthly Checklist Log', 'openMonthlyChecklistLogSheet'))
+        .addSubMenu(ui.createMenu('🔍 Debug')
+          .addItem('🔍 Diagnose Compliance', 'diagnoseSafetyCompliance')
+          .addItem('📊 Trace Compliance Calculation', 'traceComplianceCalculation')
+          .addItem('🧪 Test Week Calculation', 'testComplianceCalculationForWeek')
+          .addItem('📋 Quick JHA Log Diagnostic', 'quickDiagnoseJHALog')
+          .addItem('🔬 Trace Week Compliance', 'traceComplianceForWeek')
+          .addItem('⚡ Force Update Single Week', 'forceUpdateSingleWeek')
+          .addItem('🔬 Test Email Parsing', 'testEmailParsing')
+          .addItem('🔎 Diagnose Specific Crew', 'diagnoseCrewCompliance')
+          .addItem('🔎 Diagnose Historical Crews', 'diagnoseHistoricalCrews')
+          .addItem('📋 Processing Status', 'showSafetyProcessingStatus')
+          .addItem('🔍 Diagnose Gmail Search', 'diagnoseGmailSearch')
+          .addItem('🔄 Reset Last Processed Date', 'clearLastSafetyProcessedDate')
+          .addItem('🗓️ Ensure Current Week Exists', 'ensureCurrentWeekInCompliance')
+          .addItem('🔎 Quick Gmail Check', 'quickGmailCheck')
+          .addSeparator()
+          .addItem('🔍 Diagnose Missing Crews', 'diagnoseMissingCrews')
+          .addItem('➕ Force Add Active Crews', 'forceAddMissingCrewsToCompliance'))
+        .addSubMenu(ui.createMenu('🧹 Cleanup')
+          .addItem('📋 Create Tasks from Issues', 'createTasksFromSafetyIssues')
+          .addItem('🔄 Refresh Safety Sheets', 'refreshSafetySheets')
+          .addItem('📅 Regenerate Previous Week Tasks', 'menuRegeneratePreviousWeekTasks')
+          .addItem('📅 Backfill Past Weeks', 'menuBackfillPastWeeks')
+          .addItem('🎨 Reformat by Week', 'menuReformatComplianceSheet')
+          .addSeparator()
+          .addItem('🔄 Migrate Safety Reports Sheet', 'migrateSafetyReportsToEquipmentNeeds')
+          .addItem('🧹 Cleanup Equipment Sheet', 'cleanupSafetyReportsSheet')
+          .addItem('🧹 Cleanup Config Crews (Legacy)', 'cleanupComplianceConfig')
+          .addItem('🔧 Fix Config Checkboxes (Legacy)', 'fixComplianceConfigCheckboxes')
+          .addItem('🧹 Remove Duplicate Rows', 'menuCleanupDuplicateComplianceRows')
+          .addItem('🧹 Remove Duplicate Log Entries', 'menuCleanupDuplicateLogEntries')
+          .addItem('🧹 Remove Duplicate Equipment Needs', 'cleanupDuplicateEquipmentNeeds')
+          .addItem('🧹 Clear Saved Job Corrections', 'clearJobNumberCorrections')
+          .addItem('🛠️ Fix Shifted Safety Tasks', 'fixShiftedSafetyComplianceTasks')
+          .addItem('🔧 Fix Skipped Log Entries', 'fixSkippedLogEntriesFromMappings')
+          .addItem('🔧 Fix Ben Lapka Weeks', 'fixBenLapkaWeeks')
+          .addItem('🧹 Remove Non-Config Crews', 'removeNonConfigCrewsFromCompliance')
+          .addItem('🧹 Remove Pre-Start Job Rows', 'removePreStartJobRowsFromCompliance')
+          .addItem('➕ Add Job Mappings Manually', 'addMissingJobMappings')
+          .addItem('🗑️ Clear & Reprocess All Emails', 'clearAndReprocessSafetyEmails')))
+
+      // === STEP 4: GENERATE TASK METADATA ===
+      .addSubMenu(ui.createMenu('🎯 Generate Task Metadata')
+        .addItem('🎯 Generate Task Metadata', 'generateTaskMetadata')
+        .addItem('📊 Task Dashboard', 'showTaskDashboard')
+        .addItem('🗄️ Archive Completed Tasks', 'showArchiveCompletedTasksDialog')
+        .addSeparator()
+        .addSubMenu(ui.createMenu('🔧 Utilities')
+          .addItem('📋 Setup Task Metadata Sheet', 'setupTaskMetadataSheet')
+          .addItem('🎨 Standardize Task Metadata Formatting', 'standardizeTaskMetadataFormatting')
+          .addItem('🔧 Fix Task Metadata Status Validation', 'fixTaskMetadataStatusValidation')
+          .addItem('🏥 Task Metadata Health Check', 'showTaskMetadataHealthCheck')
+          .addItem('🧹 Remove Duplicate Task Metadata', 'removeDuplicateTaskMetadata')
+          .addItem('🧽 Cleanup Orphaned Metadata', 'cleanupOrphanedTaskMetadata')
+          .addItem('🧹 Cleanup Incorrect Safety Tasks', 'cleanupIncorrectSafetyReportTasks')
+          .addItem('🗺️ Fix Training Task Locations', 'fixTrainingTaskLocations')))
+
+      // === STEP 5: REVIEW & SCHEDULE ===
+      .addSubMenu(ui.createMenu('📅 Review & Schedule')
         .addItem('📋 Tasks & Calendar', 'showToDoSchedule')
         .addItem('🗺️ Trip Planner', 'showTripPlannerDialog')
         .addItem('⚙️ Schedule Config', 'showToDoConfig')
-        .addItem('📊 Task Dashboard', 'showTaskDashboard')
+        .addItem('📝 Daily Accomplishments', 'showTimeBreakdownDialog')
         .addSeparator()
-        .addItem('🎯 Generate Task Metadata', 'generateTaskMetadata'))
+        .addSubMenu(ui.createMenu('📚 Training')
+          .addItem('Setup Training Config', 'setupTrainingConfig')
+          .addItem('Setup Training Tracking', 'setupTrainingTracking')
+          .addItem('🎨 Apply Training Tracking Formatting', 'menuApplyTrainingTrackingFormatting')
+          .addItem('Refresh Training Attendees', 'refreshTrainingAttendees')
+          .addItem('🔄 Update December Catch-Ups', 'updateDecemberCatchUps')
+          .addItem('🕐 Setup Auto December Updates', 'setupAutoDecemberUpdates')
+          .addItem('📊 Recalculate Training Completion %', 'recalculateAllTrainingCompletionStatus')
+          .addItem('📊 Generate Compliance Report', 'generateTrainingComplianceReport')
+          .addItem('🔄 Sync Training Tracking with Config', 'syncTrainingTrackingWithConfig')
+          .addItem('🔍 Debug Training Config', 'debugTrainingConfig'))
+        .addSubMenu(ui.createMenu('👷 Crew Visit')
+          .addItem('Setup Crew Visit Config', 'setupCrewVisitConfig')
+          .addItem('🔄 Refresh Crew Visit Config', 'refreshCrewVisitConfig'))
+        .addSubMenu(ui.createMenu('🔧 Utilities')
+          .addItem('📅 Generate Monthly Schedule', 'generateMonthlySchedule')
+          .addItem('🔄 Refresh Calendar', 'refreshCalendar')
+          .addItem('✅ Mark Visit Complete', 'markVisitComplete')
+          .addItem('🧹 Clear Completed Tasks', 'clearCompletedTasks')
+          .addItem('Setup All Schedule Sheets', 'setupAllScheduleSheets')
+          .addItem('🗑️ Archive Old To Do List (Legacy)', 'archiveToDoListSheet')
+          .addSeparator()
+          .addItem('🔄 Migrate Manual Tasks Sheet', 'migrateManualTasksSheet')
+          .addItem('🧹 Clean Up Manual Tasks', 'cleanupDuplicateManualTasks')
+          .addItem('🗑️ Purge Stuck Task by Location', 'promptPurgeTaskByLocation')))
 
-      // ===== SAFETY =====
-      .addSubMenu(ui.createMenu('🛡️ Safety')
-        .addItem('🔑 Authorize Gmail Access', 'authorizeGmailAccess')
-        .addItem('📊 Gmail Status', 'showGmailStatus')
-        .addSeparator()
-        .addItem('📥 Process Safety Emails', 'showProcessSafetyEmailsDialog')
-        .addItem('📊 Compliance Dashboard', 'showComplianceDashboard')
-        .addItem('📈 View Compliance History', 'openComplianceSheet')
-        .addItem('⚙️ Manage Schedules (Job Tracking)', 'openJobTrackingSheet')
-        .addItem('🔄 Sync Crews', 'menuSyncCrews')
-        .addSeparator()
-        .addItem('📋 Setup Log Sheets', 'setupAllSafetyLogSheets')
-        .addItem('📄 View JHA Log', 'openJHALogSheet')
-        .addItem('📄 View Weekly Safety Log', 'openWeeklySafetyLogSheet')
-        .addItem('📄 View Monthly Checklist Log', 'openMonthlyChecklistLogSheet')
-        .addSeparator()
-        .addItem('🔄 Master Recalculate', 'masterRecalculateCompliance')
-        .addItem('🔄 Recalculate Compliance', 'recalculateComplianceFromLogs')
-        .addItem('🔄 Recalculate ALL Weeks', 'recalculateAllComplianceFromLogs')
-        .addItem('🔧 Fix Log Entries & Recalculate', 'menuFixAndRecalculateCompliance')
-        .addSeparator()
-        .addItem('📋 Create Tasks from Issues', 'createTasksFromSafetyIssues')
-        .addItem('🔄 Refresh Safety Sheets', 'refreshSafetySheets')
-        .addItem('🗓️ Ensure Current Week Exists', 'ensureCurrentWeekInCompliance')
-        .addItem('🔎 Quick Gmail Check', 'quickGmailCheck'))
-
-      // ===== PURCHASE ORDERS =====
-      .addSubMenu(ui.createMenu('🛒 Purchase Orders')
-        .addItem('📝 Create Purchase Order', 'showPurchaseOrderDialog')
-        .addItem('📋 Order History', 'openPurchaseOrdersSheet')
-        .addItem('⚙️ Manage Vendors', 'showVendorConfigDialog'))
-
-      // ===== EMAIL =====
-      .addSubMenu(ui.createMenu('📧 Email Reports')
-        .addItem('📤 Send Report Now', 'sendEmailReport')
-        .addItem('👁️ Preview My Report', 'previewEmailReport')
-        .addSeparator()
-        .addItem('⚙️ Configure Email Reports', 'openEmailReportConfig')
-        .addItem('🕐 Set Up Weekly Email', 'createWeeklyEmailTrigger'))
-
-      // ===== HISTORY =====
-      .addSubMenu(ui.createMenu('📋 History')
-        .addItem('💾 Save Current State', 'saveHistory')
-        .addItem('🔍 Item History Lookup', 'showItemHistoryLookup')
-        .addItem('📂 View Full History', 'viewFullHistory'))
-
-      .addSeparator()
-
-      // ===== SETUP & ADMIN =====
-      .addSubMenu(ui.createMenu('⚙️ Setup & Admin')
-        .addItem('📋 Setup All Schedule Sheets', 'setupAllScheduleSheets')
-        .addItem('📋 Setup Task Metadata Sheet', 'setupTaskMetadataSheet')
-        .addItem('👥 Setup Crew Visit Config', 'setupCrewVisitConfig')
-        .addItem('📚 Setup Training Config', 'setupTrainingConfig')
-        .addItem('📊 Setup Training Tracking', 'setupTrainingTracking')
-        .addSeparator()
-        .addItem('👥 Import Crew Makeup', 'showCrewImportDialog')
-        .addItem('📥 Import Data', 'showImportDialog')
-        .addSeparator()
+      // === STEP 6: SAVE & BACKUP ===
+      .addSubMenu(ui.createMenu('💾 Save & Backup')
+        .addItem('💾 Save Current State to History', 'saveHistory')
         .addItem('💾 Create Backup Snapshot', 'createBackupSnapshot')
-        .addItem('📂 View Backup Folder', 'openBackupFolder'))
-
-      // ===== MAINTENANCE =====
-      .addSubMenu(ui.createMenu('🧹 Maintenance')
-        .addItem('🗄️ Archive Completed Tasks', 'showArchiveCompletedTasksDialog')
-        .addItem('🏥 Task Metadata Health Check', 'showTaskMetadataHealthCheck')
-        .addItem('🧽 Cleanup Orphaned Metadata', 'cleanupOrphanedTaskMetadata')
+        .addItem('📂 View Backup Folder', 'openBackupFolder')
         .addSeparator()
-        .addItem('📤 Archive Previous Employees', 'archivePreviousEmployees')
-        .addItem('🔄 Refresh Crew Visit Config', 'refreshCrewVisitConfig')
-        .addItem('🔄 Refresh Training Crew Leads', 'refreshTrainingTrackingCrewLeads')
-        .addItem('🎨 Apply Training Tracking Formatting', 'menuApplyTrainingTrackingFormatting')
-        .addSeparator()
-        .addItem('⚡ Setup Auto Change Out Dates', 'createEditTrigger')
-        .addItem('🔧 Fix All Change Out Dates', 'fixAllChangeOutDates'))
-
-      // ===== ADVANCED (Hidden unless needed) =====
-      .addSubMenu(ui.createMenu('🔧 Advanced')
-        .addItem('🔍 Diagnose Auth Issues', 'diagnoseAuthIssues')
-        .addItem('🗑️ Clear Background Triggers', 'clearAllBackgroundTriggers')
-        .addSeparator()
-        .addItem('🧹 Remove Duplicate Task Metadata', 'removeDuplicateTaskMetadata')
-        .addItem('🧹 Cleanup Duplicate Safety Tasks', 'menuCleanupDuplicateSafetyTasks')
-        .addItem('🧹 Cleanup Duplicate Compliance Rows', 'menuCleanupDuplicateComplianceRows')
-        .addItem('🧹 Clean Up Manual Tasks', 'cleanupDuplicateManualTasks'))
+        .addSubMenu(ui.createMenu('📋 History')
+          .addItem('Import Legacy History', 'showImportLegacyHistoryDialog')
+          .addItem('Item History Lookup', 'showItemHistoryLookup')
+          .addItem('View Full History', 'viewFullHistory'))
+        .addSubMenu(ui.createMenu('📧 Email Reports')
+          .addItem('📤 Send Report Now', 'sendEmailReport')
+          .addItem('👁️ Preview My Report', 'previewEmailReport')
+          .addItem('⚙️ Configure Email Reports', 'openEmailReportConfig')
+          .addItem('🕐 Set Up Weekly Email (Mon 12 PM)', 'createWeeklyEmailTrigger')
+          .addItem('🚫 Remove Scheduled Email', 'removeEmailTrigger')))
 
       .addSeparator()
-      .addItem('💾 Close & Save History', 'closeAndSaveHistory')
+
+      // === MAINTENANCE (Rarely Used) ===
+      .addSubMenu(ui.createMenu('🔧 Maintenance')
+        .addSubMenu(ui.createMenu('📦 Inventory')
+          .addItem('🗄️ Archive Lost & Failed Items', 'showArchiveLostFailedDialog')
+          .addItem('↩️ Restore Item from Archive', 'showRestoreFromArchiveDialog')
+          .addItem('📊 Update Inventory Reports', 'updateInventoryReports')
+          .addItem('🔄 Sync New Items Log', 'syncNewItemsLogWithInventory')
+          .addItem('📦 Reset Known Item Numbers', 'resetKnownItemNumbers')
+          .addItem('🧱 Reset Blanket Tracking', 'resetBlanketTracking')
+          .addSeparator()
+          .addItem('⚡ View HV Testers', 'openHVTestersSheet')
+          .addItem('⚡ View Phasing Sets', 'openPhasingSetsSheet')
+          .addItem('🏥 View AED', 'openAEDSheet')
+          .addItem('🔧 Fix Equipment Headers', 'fixEquipmentSheetHeaders'))
+        .addSubMenu(ui.createMenu('🛒 Purchase Orders')
+          .addItem('📝 Create Purchase Order', 'showPurchaseOrderDialog')
+          .addItem('📋 Order History', 'openPurchaseOrdersSheet')
+          .addItem('⚙️ Manage Vendors', 'showVendorConfigDialog'))
+        .addSubMenu(ui.createMenu('👥 Employees')
+          .addItem('📝 Update Location Validation', 'updateEmployeesLocationValidation')
+          .addItem('📤 Archive Previous Employees', 'archivePreviousEmployees')
+          .addItem('🔄 Restore Deleted Employee', 'showRestoreEmployeeDialog')
+          .addItem('🔄 Update Employee History Headers', 'updateEmployeeHistoryHeaders')
+          .addItem('🧹 Clean Up Duplicate Employee History', 'cleanupDuplicateEmployeeHistoryEntries')
+          .addItem('🧹 Fix Bad Employee Names', 'cleanupBadEmployeeNames')
+          .addItem('🧹 Clean Up Duplicate Item History', 'cleanupDuplicateItemHistory')
+          .addItem('🔍 Scan for Bad Dates in History', 'scanEmployeeHistoryForBadDates')
+          .addItem('📱 Format Phone Numbers', 'formatEmployeePhoneNumbers')
+          .addItem('✅ Fix Last Day Reason Dropdown', 'fixLastDayReasonValidation')
+          .addItem('👷 Setup Job Classification Dropdown', 'setupJobClassificationDropdown')
+          .addItem('📖 View Classification Guide', 'showClassificationGuide'))
+        .addSubMenu(ui.createMenu('📋 Job Tracking')
+          .addItem('📂 View Job Tracking', 'openJobTrackingSheet')
+          .addItem('🔄 Refresh Job Tracking', 'refreshJobTrackingFromEmployees')
+          .addItem('📅 Add Schedule History Columns', 'migrateJobTrackingScheduleColumns')
+          .addItem('🔄 Sync Config to Job Tracking Schedules', 'syncConfigToJobTrackingSchedule')
+          .addItem('✅ Mark Job Complete', 'markJobComplete')
+          .addItem('➕ Add Future Job', 'addFutureJob'))
+        .addSubMenu(ui.createMenu('🏗️ Sheets Setup')
+          .addItem('🏗️ Build Sheets', 'buildSheets')
+          .addItem('⚡ Setup HV Tester & Phasing Set Sheets', 'setupHVTesterAndPhasingSetSheets')
+          .addItem('🏥 Setup AED Sheet', 'setupAEDSheet')
+          .addItem('⚡ Migrate HV/Phasing to Change Out Date', 'migrateHVAndPhasingSetsToChangeOutDate')
+          .addItem('⚡ Fix HV Tester Change Out Dates', 'fixHVTesterChangeOutDates')
+          .addItem('⚡ Fix Phasing Set Change Out Dates', 'fixPhasingSetChangeOutDates')
+          .addItem('📍 Setup Locations Sheet', 'setupLocationsSheet')
+          .addItem('📍 View Locations', 'openLocationsSheet')
+          .addItem('📅 Fiscal Year Config', 'showFiscalYearConfig')
+          .addItem('📥 Import Data', 'showImportDialog')
+          .addItem('📥 Quick Import (1084)', 'importProvidedData'))
+        .addSeparator()
+        .addItem('🔍 Diagnose Auth Issues', 'diagnoseAuthIssues')
+        .addItem('🗑️ Clear Background Triggers', 'clearAllBackgroundTriggers'))
+
+      // === DEBUG ===
+      .addSubMenu(ui.createMenu('🔍 Debug')
+        .addItem('Test Edit Trigger', 'testEditTrigger')
+        .addItem('Recalc Current Row', 'recalcCurrentRow')
+        .addSeparator()
+        .addItem('🔍 Diagnose Employee Pick List', 'runDiagnostic')
+        .addItem('📊 Show All Sleeve Swaps', 'runSleeveSwapDiagnostic')
+        .addItem('📊 Show All Glove Swaps', 'runGloveSwapDiagnostic')
+        .addSeparator()
+        .addItem('🧪 Test Trip Planner Data', 'debugTripPlannerData')
+        .addSeparator()
+        .addItem('🔍 Diagnose Crew 005-26', 'diagnoseCrew005')
+        .addItem('🔍 Diagnose Crew 045-26', 'diagnose045Crew'))
+
+      .addSeparator()
+      .addItem('Close & Save History', 'closeAndSaveHistory')
       .addToUi();
 
-    SpreadsheetApp.getUi().alert('✅ Menu Created!\n\nThe Glove Manager menu has been added.\n\nRefresh your spreadsheet (Ctrl+R) to see it.');
+    SpreadsheetApp.getUi().alert('✅ Menu Created!\n\nThe Glove Manager menu has been added.\nIt now matches the 6-step Monday workflow.\n\nRefresh your spreadsheet (Ctrl+R) to see it.');
 
   } catch (e) {
     SpreadsheetApp.getUi().alert('❌ Error creating menu: ' + e.toString());
   }
 }
-
-/**
- * DIRECT SETUP - Run this to create sheets without using menu
- *
- * If you can't see the menu at all, run this to create the sheets directly:
- * 1. Open Apps Script Editor
- * 2. Select this function: directSetupScheduling
- * 3. Click Run
- * 4. Sheets will be created automatically
- */
-function directSetupScheduling() {
-  try {
-    setupCrewVisitConfig();
-    setupTrainingConfig();
-    setupTrainingTracking();
-    SpreadsheetApp.getUi().alert('✅ Scheduling Sheets Created!\n\nThree new sheets have been added:\n- Crew Visit Config\n- Training Config\n- Training Tracking\n\nCheck your spreadsheet tabs!');
-  } catch (e) {
-    SpreadsheetApp.getUi().alert('❌ Error: ' + e.toString());
-  }
-}
-
-/**
- * TEST FUNCTION - Verify scheduling functions exist
- */
-function testSchedulingFunctions() {
-  var results = 'Function Test Results:\n\n';
-
-  results += 'setupCrewVisitConfig: ' + (typeof setupCrewVisitConfig === 'function' ? '✅ Found' : '❌ Missing') + '\n';
-  results += 'setupTrainingConfig: ' + (typeof setupTrainingConfig === 'function' ? '✅ Found' : '❌ Missing') + '\n';
-  results += 'setupTrainingTracking: ' + (typeof setupTrainingTracking === 'function' ? '✅ Found' : '❌ Missing') + '\n';
-  results += 'setupAllScheduleSheets: ' + (typeof setupAllScheduleSheets === 'function' ? '✅ Found' : '❌ Missing') + '\n';
-  results += 'generateTrainingComplianceReport: ' + (typeof generateTrainingComplianceReport === 'function' ? '✅ Found' : '❌ Missing') + '\n';
-
-  SpreadsheetApp.getUi().alert('🧪 Function Test', results, SpreadsheetApp.getUi().ButtonSet.OK);
-}
-
