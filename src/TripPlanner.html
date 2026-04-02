@@ -1549,14 +1549,14 @@
 
       const defaultMessage = `
         <p style="color: #666; max-width: 400px; margin: 0 auto;">
-          The Trip Planner looks for incomplete tasks in your <strong>To Do List</strong> sheet that have locations outside of Helena.
+          The Trip Planner looks for incomplete tasks in your <strong>Task Metadata</strong> sheet that have locations outside of Helena.
         </p>
         <p style="color: #666; margin-top: 15px;">
           <strong>To get started:</strong>
         </p>
         <ol style="text-align: left; max-width: 400px; margin: 10px auto; color: #666;">
-          <li>Go to <strong>Glove Manager → Schedule & To-Do → Generate Smart Schedule</strong></li>
-          <li>This creates a "To Do List" sheet with all your pending tasks</li>
+          <li>Go to <strong>Glove Manager → 🎯 Generate Task Metadata</strong></li>
+          <li>This creates metadata records for all your pending tasks</li>
           <li>Come back here to plan your trips!</li>
         </ol>
       `;
@@ -2100,7 +2100,7 @@
       if (tasks.length > 0) {
         tasks.forEach(function(task) {
           preparedTasks.push({
-            source: task.source || task.sheetName || 'To Do List',
+            source: task.source || task.sheetName || 'Task Metadata',
             rowIndex: task.rowIndex,
             taskType: task.taskType || task.type,
             employee: task.employee,

@@ -355,6 +355,24 @@ function collectAndGroupTasks(ss) {
   var afterBlanket = countTasks(tasksByLocation);
   Logger.log('collectAndGroupTasks: Blanket Swaps added ' + (afterBlanket - beforeBlanket) + ' tasks');
 
+  // Collect from HV Tester Swaps (Phase 2 - equipment-based format)
+  var beforeHVTester = countTasks(tasksByLocation);
+  collectEquipmentSwapTasks(ss, SHEET_HV_TESTER_SWAPS, 'HV Tester', tasksByLocation, employeeLocations, employeeForemen, employeePhones, today);
+  var afterHVTester = countTasks(tasksByLocation);
+  Logger.log('collectAndGroupTasks: HV Tester Swaps added ' + (afterHVTester - beforeHVTester) + ' tasks');
+
+  // Collect from Phasing Set Swaps (Phase 2 - equipment-based format)
+  var beforePhasingSet = countTasks(tasksByLocation);
+  collectEquipmentSwapTasks(ss, SHEET_PHASING_SET_SWAPS, 'Phasing Set', tasksByLocation, employeeLocations, employeeForemen, employeePhones, today);
+  var afterPhasingSet = countTasks(tasksByLocation);
+  Logger.log('collectAndGroupTasks: Phasing Set Swaps added ' + (afterPhasingSet - beforePhasingSet) + ' tasks');
+
+  // Collect from AED Swaps (Phase 3 - equipment-based format)
+  var beforeAED = countTasks(tasksByLocation);
+  collectEquipmentSwapTasks(ss, SHEET_AED_SWAPS, 'AED', tasksByLocation, employeeLocations, employeeForemen, employeePhones, today);
+  var afterAED = countTasks(tasksByLocation);
+  Logger.log('collectAndGroupTasks: AED Swaps added ' + (afterAED - beforeAED) + ' tasks');
+
   // Collect from Training Tracking
   var beforeTraining = countTasks(tasksByLocation);
   collectTrainingTasks(ss, tasksByLocation, employeePhones, today);
@@ -907,6 +925,178 @@ function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLoca
 
     Logger.log('collectSwapTasks: Section ' + section + ' summary - rowsWithEmployee=' + rowsWithEmployee + ', rowsPicked=' + rowsPicked + ', rowsNotDelivered=' + rowsNotDelivered);
   }
+}
+
+
+/**
+ * Collects equipment swap tasks from report-style swap sheets (HV Testers, Phasing Sets, AED).
+ * These sheets have a different format from Glove/Sleeve/Blanket swaps:
+ * - Equipment-based (Item #, Model, etc.) rather than employee-based
+ * - No Picked/Date Changed workflow - items are listed if approaching replacement
+ * - "Assigned To" column indicates who has the equipment
+ *
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @param {string} sheetName - Name of the swap sheet (e.g., 'HV Tester Swaps')
+ * @param {string} itemType - Type label (e.g., 'HV Tester', 'Phasing Set', 'AED')
+ * @param {Object} tasksByLocation - Object to add tasks to
+ * @param {Object} employeeLocations - Map of employee names to locations
+ * @param {Object} employeeForemen - Map of employee names to foremen
+ * @param {Object} employeePhones - Map of employee names to phone numbers
+ * @param {Date} today - Today's date
+ */
+function collectEquipmentSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLocations, employeeForemen, employeePhones, today) {
+  Logger.log('*** collectEquipmentSwapTasks CALLED for ' + sheetName + ' ***');
+
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    Logger.log('collectEquipmentSwapTasks: Sheet "' + sheetName + '" NOT FOUND');
+    return;
+  }
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    Logger.log('collectEquipmentSwapTasks: Sheet "' + sheetName + '" has no data rows');
+    return;
+  }
+
+  var data = sheet.getDataRange().getValues();
+
+  // Find header row (skip title/merge rows)
+  var headerRowIndex = -1;
+  for (var i = 0; i < Math.min(data.length, 5); i++) {
+    var firstCell = String(data[i][0]).toLowerCase().trim();
+    if (firstCell === 'item #' || firstCell === 'item') {
+      headerRowIndex = i;
+      break;
+    }
+  }
+
+  if (headerRowIndex === -1) {
+    Logger.log('collectEquipmentSwapTasks: Could not find header row in ' + sheetName);
+    return;
+  }
+
+  var headers = data[headerRowIndex];
+
+  // Find column indices dynamically
+  var itemNumCol = -1;
+  var modelCol = -1;
+  var locationCol = -1;
+  var assignedToCol = -1;
+  var daysLeftCol = -1;
+  var statusCol = -1;
+  // Date column varies: "Replacement Date" for HV/Phasing, "Pad Expiration" for AED
+  var dueDateCol = -1;
+
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'item #' || header === 'item') itemNumCol = h;
+    if (header === 'model') modelCol = h;
+    if (header === 'location') locationCol = h;
+    if (header === 'assigned to') assignedToCol = h;
+    if (header === 'days left') daysLeftCol = h;
+    if (header === 'status') statusCol = h;
+    if (header === 'replacement date' || header === 'pad expiration' || header === 'change out date') dueDateCol = h;
+  }
+
+  Logger.log('collectEquipmentSwapTasks: ' + sheetName + ' columns - itemNum=' + itemNumCol + ', assignedTo=' + assignedToCol + ', dueDate=' + dueDateCol + ', location=' + locationCol);
+
+  if (itemNumCol === -1) {
+    Logger.log('collectEquipmentSwapTasks: Could not find Item # column in ' + sheetName);
+    return;
+  }
+
+  var tasksAdded = 0;
+
+  // Process data rows after header
+  for (var r = headerRowIndex + 1; r < data.length; r++) {
+    var row = data[r];
+    var itemNum = String(row[itemNumCol] || '').trim();
+    if (!itemNum) continue;
+
+    // Skip summary rows
+    if (itemNum.toLowerCase().indexOf('summary') !== -1) continue;
+
+    var model = modelCol !== -1 ? String(row[modelCol] || '').trim() : '';
+    var assignedTo = assignedToCol !== -1 ? String(row[assignedToCol] || '').trim() : '';
+    var location = locationCol !== -1 ? String(row[locationCol] || '').trim() : '';
+    var daysLeftValue = daysLeftCol !== -1 ? row[daysLeftCol] : '';
+    var status = statusCol !== -1 ? String(row[statusCol] || '').trim() : '';
+
+    // Skip "On Shelf" items or items without an assignment
+    if (!assignedTo || assignedTo.toLowerCase() === 'on shelf') continue;
+
+    // Parse due date
+    var dueDate = null;
+    var isOverdue = false;
+    var daysTillDue = null;
+
+    if (dueDateCol !== -1) {
+      var rawDueDate = row[dueDateCol];
+      if (rawDueDate instanceof Date) {
+        dueDate = new Date(rawDueDate);
+        dueDate.setHours(0, 0, 0, 0);
+        daysTillDue = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
+        isOverdue = daysTillDue < 0;
+      }
+    }
+
+    // Fallback: use Days Left column
+    if (daysTillDue === null && daysLeftValue !== '') {
+      var parsedDays = parseInt(daysLeftValue, 10);
+      if (!isNaN(parsedDays)) {
+        daysTillDue = parsedDays;
+        isOverdue = daysTillDue < 0;
+      }
+    }
+
+    // Check status for overdue indicators
+    if (status.indexOf('OVERDUE') !== -1 || status.indexOf('EXPIRED') !== -1) {
+      isOverdue = true;
+    }
+
+    // Determine location - use sheet's location or look up from employee
+    if (!location || location === 'Unknown') {
+      location = employeeLocations[assignedTo.toLowerCase()] || 'Unknown';
+    }
+
+    // Get foreman and phone for this employee
+    var foreman = employeeForemen[assignedTo.toLowerCase()] || 'Unknown';
+    var phoneNumber = employeePhones[assignedTo.toLowerCase()] || '';
+
+    // Build task description
+    var taskDescription = itemType + ' ' + itemNum;
+    if (model) taskDescription += ' (' + model + ')';
+
+    var task = {
+      type: 'Swap',
+      itemType: itemType,
+      employee: assignedTo,
+      location: location,
+      foreman: foreman,
+      phoneNumber: phoneNumber,
+      currentItem: itemNum,
+      pickListItem: '',
+      size: model,
+      dueDate: dueDate,
+      isOverdue: isOverdue,
+      daysTillDue: daysTillDue,
+      status: status,
+      estimatedTime: 15,  // 15 minutes per equipment swap
+      priority: isOverdue ? 'High' : (daysTillDue !== null && daysTillDue <= 30 ? 'Medium' : 'Low'),
+      sheetName: sheetName,
+      rowIndex: r + 1  // 1-based row number
+    };
+
+    // Add to location group
+    if (!tasksByLocation[location]) {
+      tasksByLocation[location] = [];
+    }
+    tasksByLocation[location].push(task);
+    tasksAdded++;
+  }
+
+  Logger.log('collectEquipmentSwapTasks: Added ' + tasksAdded + ' ' + itemType + ' tasks from ' + sheetName);
 }
 
 

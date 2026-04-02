@@ -31,7 +31,7 @@ Google Apps Script loads files **alphabetically**. Numbered prefixes control loa
 62-PurchaseOrders.gs → PO generation and vendor management (~825 lines)
 70-ToDoList.gs   → archived (To Do List functionality now in Code.gs) (~50 lines)
 75-Scheduling.gs → Crew visit scheduling, training calendar (~3k lines)
-76-SmartScheduling.gs → Task collection, getDriveTimeMap() (~1.9k lines)
+76-SmartScheduling.gs → Task collection (incl. equipment swaps), getDriveTimeMap() (~2.1k lines)
 76-EmployeeClassifications.gs → Job classification dropdowns (~130 lines)
 80-EmailReports.gs → Weekly HTML email reports (~1.2k lines)
 85-DataImport.gs → Crew Import, Job Tracking sync, new hire/rehire flow (~2.8k lines)

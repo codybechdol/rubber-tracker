@@ -4478,10 +4478,10 @@ function refreshSafetySheets() {
 
   var syncCount = 0;
 
-  // Sync completed Safety Equipment tasks to Safety Reports sheet
+  // Sync completed Safety Equipment tasks to Safety Equipment Needs sheet
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var taskSheet = ss.getSheetByName("Task Metadata");
-  var safetySheet = ss.getSheetByName("Safety Reports");
+  var safetySheet = getSafetyEquipmentSheet();
 
   if (taskSheet && safetySheet) {
     var taskData = taskSheet.getDataRange().getValues();
@@ -4561,12 +4561,11 @@ function syncSafetyReportCompletion(taskKey) {
     return { synced: false, message: 'Invalid row index' };
   }
 
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var safetySheet = ss.getSheetByName('Safety Reports');
+  var safetySheet = getSafetyEquipmentSheet();
 
   if (!safetySheet) {
-    Logger.log('syncSafetyReportCompletion: Safety Reports sheet not found');
-    return { synced: false, message: 'Safety Reports sheet not found' };
+    Logger.log('syncSafetyReportCompletion: Safety Equipment Needs sheet not found');
+    return { synced: false, message: 'Safety Equipment Needs sheet not found' };
   }
 
   var lastRow = safetySheet.getLastRow();
@@ -4598,10 +4597,9 @@ function syncSafetyReportCompletion(taskKey) {
  */
 function addResolvedRowFormatting(sheet) {
   if (!sheet) {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    sheet = ss.getSheetByName("Safety Reports");
+    sheet = getSafetyEquipmentSheet();
     if (!sheet) {
-      Logger.log("Safety Reports sheet not found");
+      Logger.log("Safety Equipment Needs sheet not found");
       return;
     }
   }
@@ -4677,10 +4675,10 @@ function addResolvedFormattingToSafetyReports() {
  */
 function addReceivedDateColumnToSafetyReports() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Safety Reports");
+  var sheet = getSafetyEquipmentSheet();
 
   if (!sheet) {
-    SpreadsheetApp.getUi().alert("❌ Safety Reports sheet not found.\n\nPlease run 'Setup Safety Reports Sheet' first.");
+    SpreadsheetApp.getUi().alert("❌ Safety Equipment Needs sheet not found.\n\nPlease run 'Setup Safety Reports Sheet' first.");
     return;
   }
 
@@ -9184,15 +9182,17 @@ function openComplianceSheet() {
  */
 function openComplianceConfig() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Safety Compliance Config");
+  // Safety Compliance Config was migrated into Job Tracking columns L-T (March 2026)
+  var sheet = ss.getSheetByName("Job Tracking");
 
   if (!sheet) {
-    sheet = setupSafetyComplianceConfig();
+    SpreadsheetApp.getUi().alert('Job Tracking sheet not found.\n\nRun "Setup Job Tracking Sheet" first.');
+    return;
   }
 
-  if (sheet) {
-    sheet.activate();
-  }
+  sheet.activate();
+  // Scroll to show compliance config columns (L-T)
+  ss.setActiveRange(sheet.getRange('L1'));
 }
 
 /**
@@ -10659,10 +10659,10 @@ function addMonthlyChecklistDateFormatting() {
  */
 function fixLateSubmissionsRetroactively() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var safetySheet = ss.getSheetByName("Safety Reports");
+  var safetySheet = getSafetyEquipmentSheet();
 
   if (!safetySheet) {
-    Browser.msgBox("❌ Safety Reports sheet not found.");
+    Browser.msgBox("❌ Safety Equipment Needs sheet not found.");
     return;
   }
 
@@ -10869,10 +10869,10 @@ function menuFixLateSubmissions() {
  */
 function menuBackfillPastWeeks() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var safetySheet = ss.getSheetByName("Safety Reports");
+  var safetySheet = getSafetyEquipmentSheet();
 
   if (!safetySheet) {
-    Browser.msgBox("❌ Safety Reports sheet not found. Run 'Process Safety Emails' first.");
+    Browser.msgBox("❌ Safety Equipment Needs sheet not found. Run 'Process Safety Emails' first.");
     return;
   }
 
@@ -14760,74 +14760,103 @@ function creditUncreditedReport(assignmentDataJson) {
     Logger.log('creditUncreditedReport: Processing assignment: ' + JSON.stringify(data));
 
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var safetySheet = ss.getSheetByName('Safety Reports');
     var complianceSheet = ss.getSheetByName('Safety Compliance');
+    var tz = Session.getScriptTimeZone();
 
-    if (!safetySheet) {
-      return { success: false, error: 'Safety Reports sheet not found' };
+    // Determine which log sheet to search based on report type
+    var logSheet = null;
+    var logSheetName = '';
+    var logJobCol = 3; // Column C in both log sheets (1-based)
+    var logCreditedToCol = -1;
+    var logNotesCol = -1;
+    var logDateCol = -1;
+
+    if (data.reportType === 'JHA' || (data.reportType && data.reportType.indexOf('Job Hazard') !== -1)) {
+      logSheet = ss.getSheetByName(JHA_LOG_SHEET_NAME);
+      logSheetName = JHA_LOG_SHEET_NAME;
+      logDateCol = 2;       // Column B = Date Created
+      logCreditedToCol = 9; // Column I = Credited To
+      logNotesCol = 10;     // Column J = Notes
+    } else if (data.reportType === 'Safety Meeting' || (data.reportType && data.reportType.indexOf('Safety Meeting') !== -1)) {
+      logSheet = ss.getSheetByName(WEEKLY_SAFETY_LOG_SHEET_NAME);
+      logSheetName = WEEKLY_SAFETY_LOG_SHEET_NAME;
+      logDateCol = 2;       // Column B = Week Of
+      logCreditedToCol = 8; // Column H = Credited To
+      logNotesCol = 9;      // Column I = Notes
     }
 
-    // Find the report in Safety Reports sheet
-    var reportData = safetySheet.getDataRange().getValues();
     var foundRows = [];
 
-    for (var i = 1; i < reportData.length; i++) {
-      var reportDate = reportData[i][0]; // Column A
-      var reportType = String(reportData[i][1] || '').trim(); // Column B
-      var jobNumber = String(reportData[i][2] || '').trim(); // Column C
+    // Search the log sheet for matching entries
+    if (logSheet && logSheet.getLastRow() > 1) {
+      var logData = logSheet.getDataRange().getValues();
 
-      if (!reportDate || !jobNumber) continue;
+      for (var i = 1; i < logData.length; i++) {
+        var rowJobNumber = String(logData[i][logJobCol - 1] || '').trim();
+        var baseJob = rowJobNumber.split('.')[0];
+        if (baseJob !== data.originalJobNumber) continue;
 
-      // Match job number
-      var baseJob = jobNumber.split('.')[0];
-      if (baseJob !== data.originalJobNumber) continue;
-
-      // Match report type (if specified)
-      if (data.reportType) {
-        var matchesType = false;
-        if (data.reportType === 'JHA' && (reportType === 'JHA' || reportType.indexOf('Job Hazard') !== -1)) {
-          matchesType = true;
-        } else if (data.reportType === 'Safety Meeting' && (reportType === 'Safety Meeting' || reportType.indexOf('Safety Meeting') !== -1)) {
-          matchesType = true;
-        } else if (reportType === data.reportType) {
-          matchesType = true;
+        // Match report date (if specified)
+        if (data.reportDate) {
+          var rowDate = logData[i][logDateCol - 1];
+          if (rowDate) {
+            var rowDateStr = Utilities.formatDate(new Date(rowDate), tz, 'MM/dd/yyyy');
+            if (rowDateStr !== data.reportDate) continue;
+          }
         }
-        if (!matchesType) continue;
+
+        foundRows.push({
+          rowIndex: i + 1,
+          reportDate: logData[i][logDateCol - 1]
+        });
       }
 
-      // Match report date (if specified)
-      if (data.reportDate) {
-        var rowDateStr = Utilities.formatDate(new Date(reportDate), Session.getScriptTimeZone(), 'MM/dd/yyyy');
-        if (rowDateStr !== data.reportDate) continue;
+      // Update matching rows in log sheet
+      for (var r = 0; r < foundRows.length; r++) {
+        var row = foundRows[r];
+        logSheet.getRange(row.rowIndex, logCreditedToCol).setValue(data.targetCrew);
+        // Update status to Credited
+        var statusCol = (logSheetName === JHA_LOG_SHEET_NAME) ? 8 : 7;
+        logSheet.getRange(row.rowIndex, statusCol).setValue('Credited');
+        // Add transfer note
+        var currentNotes = String(logSheet.getRange(row.rowIndex, logNotesCol).getValue() || '');
+        var transferNote = 'Credited from ' + data.originalJobNumber + ' on ' + Utilities.formatDate(new Date(), tz, 'MM/dd/yyyy');
+        var newNotes = currentNotes ? currentNotes + '; ' + transferNote : transferNote;
+        logSheet.getRange(row.rowIndex, logNotesCol).setValue(newNotes);
+        Logger.log('creditUncreditedReport: Updated ' + logSheetName + ' row ' + row.rowIndex + ' → ' + data.targetCrew);
       }
+    }
 
-      foundRows.push({
-        rowIndex: i + 1, // 1-based for sheet operations
-        reportDate: reportDate,
-        reportType: reportType
-      });
+    // Also check Safety Equipment Needs sheet for equipment-related reports
+    if (foundRows.length === 0) {
+      var equipSheet = getSafetyEquipmentSheet();
+      if (equipSheet && equipSheet.getLastRow() > 1) {
+        var equipData = equipSheet.getDataRange().getValues();
+        for (var ei = 1; ei < equipData.length; ei++) {
+          var eDate = equipData[ei][0];
+          var eJob = String(equipData[ei][2] || '').trim();
+          if (!eDate || !eJob) continue;
+          var eBase = eJob.split('.')[0];
+          if (eBase !== data.originalJobNumber) continue;
+          if (data.reportDate) {
+            var eDateStr = Utilities.formatDate(new Date(eDate), tz, 'MM/dd/yyyy');
+            if (eDateStr !== data.reportDate) continue;
+          }
+          foundRows.push({ rowIndex: ei + 1, reportDate: eDate });
+        }
+        for (var er = 0; er < foundRows.length; er++) {
+          var eRow = foundRows[er];
+          equipSheet.getRange(eRow.rowIndex, 3).setValue(data.targetCrew);
+          if (data.targetForeman) equipSheet.getRange(eRow.rowIndex, 4).setValue(data.targetForeman);
+          var eNotes = String(equipSheet.getRange(eRow.rowIndex, 11).getValue() || '');
+          var eTransfer = 'Credited from ' + data.originalJobNumber + ' on ' + Utilities.formatDate(new Date(), tz, 'MM/dd/yyyy');
+          equipSheet.getRange(eRow.rowIndex, 11).setValue(eNotes ? eNotes + '; ' + eTransfer : eTransfer);
+        }
+      }
     }
 
     if (foundRows.length === 0) {
-      return { success: false, error: 'No matching report found for ' + data.originalJobNumber + ' ' + data.reportType + ' on ' + data.reportDate };
-    }
-
-    // Update all matching rows in Safety Reports
-    for (var r = 0; r < foundRows.length; r++) {
-      var row = foundRows[r];
-      // Update job number (column C = 3)
-      safetySheet.getRange(row.rowIndex, 3).setValue(data.targetCrew);
-      // Update foreman (column D = 4)
-      if (data.targetForeman) {
-        safetySheet.getRange(row.rowIndex, 4).setValue(data.targetForeman);
-      }
-      // Add note about credit transfer
-      var currentNotes = String(safetySheet.getRange(row.rowIndex, 11).getValue() || '');
-      var transferNote = 'Credited from ' + data.originalJobNumber + ' on ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MM/dd/yyyy');
-      var newNotes = currentNotes ? currentNotes + '; ' + transferNote : transferNote;
-      safetySheet.getRange(row.rowIndex, 11).setValue(newNotes);
-
-      Logger.log('creditUncreditedReport: Updated row ' + row.rowIndex + ' from ' + data.originalJobNumber + ' to ' + data.targetCrew);
+      Logger.log('creditUncreditedReport: No matching log entry found - proceeding with compliance update only');
     }
 
     // Update Safety Compliance sheet if specified
@@ -14923,7 +14952,7 @@ function creditUncreditedReport(assignmentDataJson) {
 
     return {
       success: true,
-      message: 'Credited ' + foundRows.length + ' report(s) from ' + data.originalJobNumber + ' to ' + data.targetCrew,
+      message: 'Credited ' + data.originalJobNumber + ' to ' + data.targetCrew + (foundRows.length > 0 ? ' (' + foundRows.length + ' log entries updated)' : ' (compliance updated)'),
       rowsUpdated: foundRows.length
     };
 
