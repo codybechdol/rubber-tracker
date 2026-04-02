@@ -4423,7 +4423,7 @@ function createTasksFromSafetyIssues() {
     // Create task row
     var taskRow = [
       taskId,                           // TaskID
-      'Safety Reports',                 // SourceSheet
+      'Safety Equipment Needs',         // SourceSheet (renamed from "Safety Reports" Feb 2026)
       i + 1,                           // SourceRow
       equipment + ' - ' + vehicle,     // Employee (using equipment + vehicle as identifier)
       'Safety Equipment',               // TaskType

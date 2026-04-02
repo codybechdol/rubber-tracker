@@ -1842,6 +1842,11 @@ function addNewEmployeeFromImport(employeeData) {
       newRow[colIndices.sleeveSize] = employeeData.sleeveSize;
     }
 
+    // Ensure the location is in the data validation dropdown before writing
+    if (employeeData.location) {
+      ensureLocationsInValidation(employeesSheet, colIndices.location + 1, [employeeData.location]);
+    }
+
     // Add to sheet
     employeesSheet.appendRow(newRow);
     var newRowIndex = employeesSheet.getLastRow();
@@ -2017,6 +2022,11 @@ function rehireEmployeeFromImport(employeeData) {
     }
     if (colIndices.sleeveSize !== -1 && employeeData.sleeveSize) {
       newRow[colIndices.sleeveSize] = employeeData.sleeveSize;
+    }
+
+    // Ensure the location is in the data validation dropdown before writing
+    if (employeeData.location) {
+      ensureLocationsInValidation(employeesSheet, colIndices.location + 1, [employeeData.location]);
     }
 
     // Add to Employees sheet
