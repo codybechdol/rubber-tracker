@@ -1425,6 +1425,7 @@ function calculateComplianceFromLogs(weekStartDate) {
       skipDays = crewConfig.skipDays;
       skipWeeklyMeeting = crewConfig.skipWeeklyMeeting;
       skipMonthlyChecklist = crewConfig.skipMonthlyChecklist;
+      foreman = crewConfig.foreman || '';
     } else if (existingCrewData) {
       // PAST WEEK with existing data: PRESERVE the N/A/blank values from the sheet
       // Convert existing day values to skipDays array
@@ -1450,6 +1451,7 @@ function calculateComplianceFromLogs(weekStartDate) {
       skipDays = crewConfig.skipDays;
       skipWeeklyMeeting = crewConfig.skipWeeklyMeeting;
       skipMonthlyChecklist = crewConfig.skipMonthlyChecklist;
+      foreman = crewConfig.foreman || '';
     }
 
     crewCompliance[crewJob] = {
