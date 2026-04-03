@@ -1134,10 +1134,17 @@ function handleJobTrackingEdit(e) {
     var newValue = e.range.getValue();
     var oldValue = e.oldValue;
 
+    // Job Tracking column layout (after On Hold columns were added):
+    // A(1)=Job#, B(2)=Location, C(3)=Foreman, D(4)=Crew Size, E(5)=Start Date,
+    // F(6)=Put On Hold Date, G(7)=Estimated Return, H(8)=Est. End Date,
+    // I(9)=Actual End Date, J(10)=Status, K(11)=Notes
+    var COL_ACTUAL_END_DATE = 9;  // Column I
+    var COL_STATUS = 10;          // Column J
+
     // Get job details from the row
     var jobNumber = String(sheet.getRange(editedRow, 1).getValue() || '').trim();
-    var status = String(sheet.getRange(editedRow, 8).getValue() || '').trim();
-    var actualEndDate = sheet.getRange(editedRow, 7).getValue();
+    var status = String(sheet.getRange(editedRow, COL_STATUS).getValue() || '').trim();
+    var actualEndDate = sheet.getRange(editedRow, COL_ACTUAL_END_DATE).getValue();
 
     if (!jobNumber) {
       Logger.log('handleJobTrackingEdit: No job number in row ' + editedRow);
@@ -1149,11 +1156,11 @@ function handleJobTrackingEdit(e) {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var syncActions = [];
 
-    // Check if Actual End Date was set (column 7) and Status is NOT already "Completed"
+    // Check if Actual End Date was set (column I=9) and Status is NOT already "Completed"
     // This handles the case where someone sets the end date but forgets to change status
-    if (editedCol === 7 && newValue && status !== 'Completed') {
+    if (editedCol === COL_ACTUAL_END_DATE && newValue && status !== 'Completed') {
       Logger.log('handleJobTrackingEdit: Job ' + jobNumber + ' Actual End Date set, auto-setting Status to Completed');
-      sheet.getRange(editedRow, 8).setValue('Completed');
+      sheet.getRange(editedRow, COL_STATUS).setValue('Completed');
       status = 'Completed';
       syncActions.push('Status auto-set to Completed');
 
@@ -1177,13 +1184,13 @@ function handleJobTrackingEdit(e) {
     }
 
     // Check if status changed TO "Completed"
-    if (editedCol === 8 && status === 'Completed') {
+    if (editedCol === COL_STATUS && status === 'Completed') {
       Logger.log('handleJobTrackingEdit: Job ' + jobNumber + ' marked as Completed');
 
       // If no Actual End Date set, set it to today
       if (!actualEndDate || !(actualEndDate instanceof Date)) {
         actualEndDate = new Date();
-        sheet.getRange(editedRow, 7).setValue(actualEndDate);
+        sheet.getRange(editedRow, COL_ACTUAL_END_DATE).setValue(actualEndDate);
         Logger.log('handleJobTrackingEdit: Auto-set Actual End Date to today');
       }
 
@@ -1204,7 +1211,7 @@ function handleJobTrackingEdit(e) {
     }
 
     // Check if status changed FROM "Active" to something else (or TO "Active")
-    var statusChanged = (editedCol === 8 && oldValue !== newValue);
+    var statusChanged = (editedCol === COL_STATUS && oldValue !== newValue);
 
     if (statusChanged) {
       // Queue background sync for config sheets
