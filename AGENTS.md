@@ -19,7 +19,7 @@ Google Apps Script loads files **alphabetically**. Numbered prefixes control loa
 20-InventoryHandlers.gs → inventory status/assignment handlers (~215 lines)
 21-ChangeOutDate.gs → change-out date calculation logic (~220 lines)
 22-EmployeeValidation.gs → Job Tracking functions, Employee validation (~3.2k lines)
-22-LocationSync.gs → Inventory location sync with Employees (Gloves, Sleeves, Blankets, HV Testers, Phasing Sets, AED) (~175 lines)
+22-LocationSync.gs → Inventory location sync with Employees (Gloves, Sleeves, Blankets, HV Testers, Phasing Sets, AED) (~186 lines)
 30-SwapGeneration.gs → Swap report generation (~1.4k lines)
 31-SwapHandlers.gs → Swap stage handling (Stage 1/2/3 workflows) (~515 lines)
 32-SwapPreservation.gs → Swap checkbox/data preservation between regenerations (~150 lines)
@@ -43,7 +43,7 @@ Google Apps Script loads files **alphabetically**. Numbered prefixes control loa
 95-DiagnosticTools.gs → Pick list diagnostics (~630 lines)
 98-LegacyArchive.gs → Archived legacy functions (DO NOT USE) (~615 lines)
 99-MenuFix.gs    → Full menu backup (mirrors Code.gs onOpen()), menu fix/reset (~280 lines)
-Code.gs          → loads LAST, contains ALL working implementations (~21.9k lines)
+Code.gs          → loads LAST, contains ALL working implementations (~22.6k lines)
 TestRunner.gs    → Basic integration tests, run via Apps Script editor (~190 lines)
 ```
 
@@ -100,7 +100,7 @@ function showMyDialog() {
 ## Key Files
 | File | Purpose |
 |------|---------|
-| `Code.gs` | Main file - ALL working functions go here (~21.9k lines) |
+| `Code.gs` | Main file - ALL working functions go here (~22.6k lines) |
 | `00-Constants.gs` | Sheet names, column indices (`COLS`), business constants (~240 lines) |
 | `11-Triggers.gs` | Edit triggers, auto change-out date recalculation (~2.1k lines) |
 | `22-EmployeeValidation.gs` | Job Tracking sheet functions, employee validation, training sync (~3.2k lines) |
@@ -112,18 +112,21 @@ function showMyDialog() {
 | `88-SafetyReports.gs` | Gmail processing, Safety Compliance tracking (~16.6k lines) |
 | `99-MenuFix.gs` | Full menu backup (run `forceCreateMenu` if menu missing) (~280 lines) |
 | `TestRunner.gs` | Integration tests - run `runAllTests()` in Apps Script editor (~190 lines) |
-| `ToDoSchedule.html` | Task List dialog (~5.7k lines) |
-| `TripPlanner.html` | Trip Planner / Scheduler (primary scheduling interface, ~4.2k lines) |
-| `CrewImport.html` | Excel crew import with SheetJS (~6.6k lines) |
-| `QuickActions.html` | Monday workflow sidebar (~350 lines) |
-| `ProcessSafetyEmailsDialog.html` | Safety email processing dialog (~1.3k lines) |
+| `ToDoSchedule.html` | Task List dialog (~6.5k lines) |
+| `TripPlanner.html` | Trip Planner / Scheduler (primary scheduling interface, ~5k lines) |
+| `CrewImport.html` | Excel crew import with SheetJS (~7.5k lines) |
+| `QuickActions.html` | Monday workflow sidebar (~375 lines) |
+| `ProcessSafetyEmailsDialog.html` | Safety email processing dialog (~1.5k lines) |
 | `ToDoConfig.html` | Schedule configuration dialog (~2k lines) |
-| `PurchaseOrderDialog.html` | Purchase order creation dialog (~750 lines) |
-| `ComplianceConfig.html` | Safety Compliance configuration (~175 lines) |
-| `AssignCrewLeads.html` | Crew lead assignment dialog (~485 lines) |
-| `LookupDialog.html` | Employee & item lookup dialog, all assignments view (~450 lines) |
-| `NewItemDialog.html` | New inventory item dialog (Gloves, Sleeves, HV Testers, Phasing Sets) (~390 lines) |
-| `NewEmployeeDialog.html` | New employee creation dialog (~205 lines) |
+| `PurchaseOrderDialog.html` | Purchase order creation dialog (~870 lines) |
+| `ComplianceConfig.html` | Safety Compliance configuration (~200 lines) |
+| `AssignCrewLeads.html` | Crew lead assignment dialog (~535 lines) |
+| `LookupDialog.html` | Employee & item lookup dialog, all assignments view (~520 lines) |
+| `NewItemDialog.html` | New inventory item dialog (Gloves, Sleeves, HV Testers, Phasing Sets) (~425 lines) |
+| `NewEmployeeDialog.html` | New employee creation dialog (~220 lines) |
+| `Dashboard.html` | Task dashboard display (~710 lines) |
+| `ExpiringCertsImport.html` | Expiring certs import dialog (~1.1k lines) |
+| `FiscalYearConfig.html` | Fiscal year configuration dialog (~340 lines) |
 
 ## Key Sheets (Data Architecture)
 | Sheet | Purpose |
@@ -264,13 +267,14 @@ Key functions in `88-SafetyReports.gs`:
 
 Key backend functions:
 - `lookupEmployee(name)` - Smart name matching with scoring (exact > contains > partial)
+- `lookupEmployeeHistory(name)` - Loads past assignment history from all History sheets (called separately to avoid timeout)
 - `lookupItem(itemType, itemNum)` - Multi-type item search with COLS constants
 - `getEquipmentHistoryForEmployee(ss, sheetName, name)` - Scans History sheets for past assignments
-- `getAllEmployeeAssignments()` - Builds all-employee equipment map with swap detection, stores in ScriptProperties
+- `getAllEmployeeAssignments()` - Builds all-employee equipment map with swap detection, stores in ScriptProperties. Falls back to `directData` in response if ScriptProperties storage fails.
 - `getStoredAllAssignments()` - Retrieves stored data for client
 
 ## Menu System
-Menu defined in `Code.gs` `onOpen()` function. Organized as a 6-step Monday workflow under **Glove Manager**:
+Menu defined in `Code.gs` `onOpen()` function. Organized as an 8-step Monday workflow under **Glove Manager**:
 
 ```
 Glove Manager
@@ -309,7 +313,11 @@ Glove Manager
 │   ├── 📚 Training →                  (Setup config/tracking, sync crews, compliance report)
 │   ├── 👷 Crew Visit →                (Setup/refresh crew visit config)
 │   └── 🔧 Utilities →                 (Monthly schedule, refresh calendar, migrate manual tasks)
-├── 💾 Save & Backup                   ← STEP 6
+├── 🛒 Create Purchase Order           ← STEP 7 (Quick Actions sidebar)
+│   ├── 📝 Create Purchase Order       (in Maintenance → 🛒 Purchase Orders menu)
+│   ├── 📋 Order History
+│   └── ⚙️ Manage Vendors
+├── 💾 Save & Backup                   ← STEP 8
 │   ├── 💾 Save Current State to History
 │   ├── 💾 Create Backup Snapshot
 │   ├── 📂 View Backup Folder

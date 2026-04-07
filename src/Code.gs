@@ -10853,7 +10853,9 @@ function setupTaskMetadataSheet() {
 /**
  * Standardizes formatting on the Task Metadata sheet.
  * Fixes inconsistent formats in date, time, and phone columns.
- * Call this if columns J, K, X, Y, etc. have mixed format styles.
+ * Ensures header row formatting is consistent across ALL columns (A-Z).
+ * Applies alternating row banding for a table look.
+ * Call this if columns have mixed format styles or col Z looks different.
  */
 function standardizeTaskMetadataFormatting() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -10865,80 +10867,142 @@ function standardizeTaskMetadataFormatting() {
   }
 
   var lastRow = sheet.getLastRow();
-  if (lastRow < 2) {
-    SpreadsheetApp.getUi().alert('No data to format - sheet is empty');
+  var lastCol = sheet.getLastColumn();
+  if (lastCol < 1) {
+    SpreadsheetApp.getUi().alert('Sheet has no columns');
     return;
   }
 
-  Logger.log('standardizeTaskMetadataFormatting: Formatting ' + (lastRow - 1) + ' rows');
+  Logger.log('standardizeTaskMetadataFormatting: Formatting ' + (lastRow - 1) + ' data rows, ' + lastCol + ' columns');
 
-  // Get headers to find column positions
-  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  // ── 1. Fix header row formatting across ALL columns ──
+  var headerRange = sheet.getRange(1, 1, 1, lastCol);
+  headerRange.setFontWeight('bold');
+  headerRange.setBackground('#4285f4');
+  headerRange.setFontColor('white');
+  headerRange.setHorizontalAlignment('center');
+  headerRange.setVerticalAlignment('middle');
+  headerRange.setFontSize(10);
+  headerRange.setWrap(false);
+  sheet.setRowHeight(1, 28);
+  sheet.setFrozenRows(1);
+  Logger.log('  Header row formatted consistently across ' + lastCol + ' columns');
 
-  // Find column indices (0-based in array, 1-based in sheet)
-  var colMap = {};
-  for (var h = 0; h < headers.length; h++) {
-    colMap[headers[h]] = h + 1; // Convert to 1-based column number
+  if (lastRow < 2) {
+    SpreadsheetApp.getUi().alert('✅ Header formatting fixed! No data rows to format.');
+    return;
   }
 
-  // Date columns - format as yyyy-mm-dd
+  // Get headers to find column positions
+  var headers = headerRange.getValues()[0];
+  var colMap = {};
+  for (var h = 0; h < headers.length; h++) {
+    colMap[headers[h]] = h + 1;
+  }
+
+  // ── 2. Data range: consistent base formatting ──
+  var dataRange = sheet.getRange(2, 1, lastRow - 1, lastCol);
+  dataRange.setFontSize(10);
+  dataRange.setVerticalAlignment('middle');
+  dataRange.setFontColor('#202124');
+  dataRange.setFontWeight('normal');
+
+  // ── 3. Remove any existing banding, then apply fresh ──
+  var bandings = sheet.getBandings();
+  for (var b = 0; b < bandings.length; b++) {
+    bandings[b].remove();
+  }
+  var tableRange = sheet.getRange(1, 1, lastRow, lastCol);
+  tableRange.applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY, true, false);
+  Logger.log('  Applied alternating row banding');
+
+  // ── 4. Date columns ──
   var dateColumns = ['DueDate', 'ScheduledDate', 'NotifiedDate', 'ScheduledClassDate',
                      'CompletedDate', 'CreatedDate', 'LastModified'];
   dateColumns.forEach(function(colName) {
     var col = colMap[colName];
     if (col) {
       sheet.getRange(2, col, lastRow - 1, 1).setNumberFormat('yyyy-mm-dd');
-      Logger.log('  Formatted ' + colName + ' (column ' + col + ') as date');
     }
   });
 
-  // Time columns - format as hh:mm AM/PM
+  // ── 5. Time columns ──
   var timeColumns = ['StartTime', 'EndTime'];
   timeColumns.forEach(function(colName) {
     var col = colMap[colName];
     if (col) {
       sheet.getRange(2, col, lastRow - 1, 1).setNumberFormat('h:mm AM/PM');
-      Logger.log('  Formatted ' + colName + ' (column ' + col + ') as time');
     }
   });
 
-  // Phone column - format as plain text (prevents scientific notation)
+  // ── 6. Phone column - plain text ──
   var phoneCol = colMap['PhoneNumber'];
   if (phoneCol) {
-    sheet.getRange(2, phoneCol, lastRow - 1, 1).setNumberFormat('@'); // Plain text
-    Logger.log('  Formatted PhoneNumber (column ' + phoneCol + ') as text');
+    sheet.getRange(2, phoneCol, lastRow - 1, 1).setNumberFormat('@');
   }
 
-  // Status column - center align
-  var statusCol = colMap['Status'];
-  if (statusCol) {
-    sheet.getRange(2, statusCol, lastRow - 1, 1).setHorizontalAlignment('center');
-    Logger.log('  Centered Status column');
-  }
-
-  // Employee and Location columns - left align
-  ['Employee', 'Location', 'Foreman'].forEach(function(colName) {
-    var col = colMap[colName];
-    if (col) {
-      sheet.getRange(2, col, lastRow - 1, 1).setHorizontalAlignment('left');
-    }
-  });
-
-  // Boolean columns - center align
-  ['IsOffice', 'IsRegistered', 'IsDeclined', 'InTaskList'].forEach(function(colName) {
+  // ── 7. Alignment ──
+  // Center: Status, boolean columns, narrow columns
+  ['Status', 'IsOffice', 'IsRegistered', 'IsDeclined', 'InTaskList', 'SourceRow'].forEach(function(colName) {
     var col = colMap[colName];
     if (col) {
       sheet.getRange(2, col, lastRow - 1, 1).setHorizontalAlignment('center');
     }
   });
 
+  // Left: text columns
+  ['TaskID', 'SourceSheet', 'Employee', 'Location', 'Foreman', 'TaskType', 'ItemType',
+   'CurrentItem', 'Notes', 'ClassType'].forEach(function(colName) {
+    var col = colMap[colName];
+    if (col) {
+      sheet.getRange(2, col, lastRow - 1, 1).setHorizontalAlignment('left');
+    }
+  });
+
+  // Center: date/time columns
+  dateColumns.concat(timeColumns).forEach(function(colName) {
+    var col = colMap[colName];
+    if (col) {
+      sheet.getRange(2, col, lastRow - 1, 1).setHorizontalAlignment('center');
+    }
+  });
+
+  // ── 8. Ensure filter covers all columns ──
+  var existingFilter = sheet.getFilter();
+  if (existingFilter) {
+    existingFilter.remove();
+  }
+  sheet.getRange(1, 1, lastRow, lastCol).createFilter();
+  Logger.log('  Filter applied across all ' + lastCol + ' columns');
+
+  // ── 9. Column widths (re-apply to ensure consistency) ──
+  var widths = {
+    'TaskID': 200, 'SourceSheet': 120, 'SourceRow': 70, 'Employee': 150,
+    'TaskType': 120, 'ItemType': 100, 'CurrentItem': 100, 'Location': 120,
+    'Foreman': 150, 'PhoneNumber': 130, 'DueDate': 100, 'ScheduledDate': 110,
+    'StartTime': 85, 'EndTime': 85, 'Status': 100, 'NotifiedDate': 110,
+    'ScheduledClassDate': 135, 'ClassType': 110, 'IsOffice': 70, 'IsRegistered': 90,
+    'IsDeclined': 85, 'CompletedDate': 115, 'Notes': 200, 'CreatedDate': 110,
+    'LastModified': 145, 'InTaskList': 85
+  };
+  var widthKeys = Object.keys(widths);
+  for (var w = 0; w < widthKeys.length; w++) {
+    var col = colMap[widthKeys[w]];
+    if (col) {
+      sheet.setColumnWidth(col, widths[widthKeys[w]]);
+    }
+  }
+
   Logger.log('standardizeTaskMetadataFormatting: Complete');
   SpreadsheetApp.getUi().alert(
-    '✅ Formatting Standardized!\n\n' +
-    '• Date columns: yyyy-mm-dd format\n' +
-    '• Time columns: h:mm AM/PM format\n' +
-    '• Phone numbers: Plain text (no scientific notation)\n' +
-    '• Alignment: Standardized across columns'
+    '✅ Task Metadata Table Formatted!\n\n' +
+    '• Header: Consistent blue across all ' + lastCol + ' columns\n' +
+    '• Banding: Alternating row colors applied\n' +
+    '• Dates: yyyy-mm-dd format\n' +
+    '• Times: h:mm AM/PM format\n' +
+    '• Phone: Plain text\n' +
+    '• Filter: Covers all columns\n' +
+    '• Column widths: Standardized'
   );
 }
 
