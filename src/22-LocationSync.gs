@@ -86,6 +86,18 @@ function syncInventoryLocations() {
     // Process Sleeves sheet
     updateCount += syncSheetLocations(ss, 'Sleeves', nameToLocation);
 
+    // Process Blankets sheet
+    updateCount += syncSheetLocations(ss, 'Blankets', nameToLocation);
+
+    // Process HV Testers sheet
+    updateCount += syncSheetLocations(ss, 'HV Testers', nameToLocation);
+
+    // Process Phasing Sets sheet
+    updateCount += syncSheetLocations(ss, 'Phasing Sets', nameToLocation);
+
+    // Process AED sheet
+    updateCount += syncSheetLocations(ss, 'AED', nameToLocation);
+
     logEvent('syncInventoryLocations: Updated ' + updateCount + ' item locations');
 
   } catch (e) {

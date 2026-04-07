@@ -6,9 +6,6 @@
  */
 
 /**
-/**
-/**
-/**
  * Clears ALL background/time-based triggers that might be causing permission issues.
  * Run this from the menu if you see PERMISSION_DENIED errors.
  * Menu: Glove Manager → 🔧 Utilities → 🗑️ Clear Background Triggers
@@ -482,10 +479,10 @@ function onEditHandler(e) {
       return;  // Handled - don't continue to processEdit
     }
 
-    // Handle Job Tracking sheet edits (Status or Actual End Date columns)
+    // Handle Job Tracking sheet edits (Status, Actual End Date, Estimated Return, Start Date columns)
     if (sheetName === 'Job Tracking' && editedRow >= 2) {
-      // Column H (8) = Status, Column G (7) = Actual End Date
-      if (editedCol === 8 || editedCol === 7) {
+      // Column E(5)=Start Date, G(7)=Estimated Return, I(9)=Actual End Date, J(10)=Status
+      if (editedCol === 5 || editedCol === 7 || editedCol === 9 || editedCol === 10) {
         handleJobTrackingEdit(e);
       }
       return;  // Handled - don't continue to processEdit
@@ -1138,8 +1135,12 @@ function handleJobTrackingEdit(e) {
     // A(1)=Job#, B(2)=Location, C(3)=Foreman, D(4)=Crew Size, E(5)=Start Date,
     // F(6)=Put On Hold Date, G(7)=Estimated Return, H(8)=Est. End Date,
     // I(9)=Actual End Date, J(10)=Status, K(11)=Notes
+    var COL_START_DATE = 5;       // Column E
+    var COL_PUT_ON_HOLD = 6;      // Column F
+    var COL_ESTIMATED_RETURN = 7; // Column G
     var COL_ACTUAL_END_DATE = 9;  // Column I
     var COL_STATUS = 10;          // Column J
+    var COL_NOTES = 11;           // Column K
 
     // Get job details from the row
     var jobNumber = String(sheet.getRange(editedRow, 1).getValue() || '').trim();
@@ -1155,6 +1156,48 @@ function handleJobTrackingEdit(e) {
 
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var syncActions = [];
+
+    // === AUTO-ACTIVATE: On Hold job when Estimated Return date is today or past ===
+    if (editedCol === COL_ESTIMATED_RETURN && newValue && status === 'On Hold') {
+      var returnDate = new Date(newValue);
+      var today = new Date();
+      today.setHours(0, 0, 0, 0);
+      returnDate.setHours(0, 0, 0, 0);
+
+      if (!isNaN(returnDate.getTime()) && returnDate <= today) {
+        Logger.log('handleJobTrackingEdit: Job ' + jobNumber + ' Estimated Return is today or past, auto-activating');
+        sheet.getRange(editedRow, COL_STATUS).setValue('Active');
+        sheet.getRange(editedRow, COL_PUT_ON_HOLD).setValue('');  // Clear Put On Hold Date
+        sheet.getRange(editedRow, COL_ESTIMATED_RETURN).setValue('');  // Clear Estimated Return
+        var currentNotes = String(sheet.getRange(editedRow, COL_NOTES).getValue() || '');
+        var activateNote = 'Auto-activated on ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MM/dd/yyyy') +
+                           ' (Estimated Return date reached)';
+        sheet.getRange(editedRow, COL_NOTES).setValue(currentNotes ? currentNotes + '; ' + activateNote : activateNote);
+        status = 'Active';
+        syncActions.push('✅ Status auto-set to Active (returned from On Hold)');
+        queueJobTrackingSync(jobNumber, 'Active', 'On Hold');
+      }
+    }
+
+    // === AUTO-ACTIVATE: Pending Start job when Start Date is today or past ===
+    if (editedCol === COL_START_DATE && newValue && status === 'Pending Start') {
+      var startDate = new Date(newValue);
+      var todayPS = new Date();
+      todayPS.setHours(0, 0, 0, 0);
+      startDate.setHours(0, 0, 0, 0);
+
+      if (!isNaN(startDate.getTime()) && startDate <= todayPS) {
+        Logger.log('handleJobTrackingEdit: Job ' + jobNumber + ' Start Date is today or past, auto-activating');
+        sheet.getRange(editedRow, COL_STATUS).setValue('Active');
+        var currentNotesPS = String(sheet.getRange(editedRow, COL_NOTES).getValue() || '');
+        var activateNotePS = 'Auto-activated on ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MM/dd/yyyy') +
+                             ' (Start Date reached)';
+        sheet.getRange(editedRow, COL_NOTES).setValue(currentNotesPS ? currentNotesPS + '; ' + activateNotePS : activateNotePS);
+        status = 'Active';
+        syncActions.push('✅ Status auto-set to Active (Pending Start → Active)');
+        queueJobTrackingSync(jobNumber, 'Active', 'Pending Start');
+      }
+    }
 
     // Check if Actual End Date was set (column I=9) and Status is NOT already "Completed"
     // This handles the case where someone sets the end date but forgets to change status

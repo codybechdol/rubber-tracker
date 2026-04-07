@@ -1294,9 +1294,23 @@
           }
         }
 
-        // Map location
+        // Map location from header text (fallback)
         var mappedLocation = mapLocation(header.locationName);
         var isUnknown = mappedLocation === header.locationName && !locationMappings[header.locationName];
+
+        // Override with Job Tracking location if available (authoritative source)
+        // This prevents wrong mappings when Excel header text is ambiguous
+        // e.g., 041-26 is "Gold Creek" in Job Tracking but header might fuzzy-match to "Rapelje"
+        if (jobTrackingData && jobTrackingData[header.jobNumber]) {
+          var jtInfo = jobTrackingData[header.jobNumber];
+          if (jtInfo.location && !jtInfo.isCompleted) {
+            if (jtInfo.location !== mappedLocation) {
+              console.log('  Job Tracking override: ' + header.jobNumber + ' location "' + mappedLocation + '" → "' + jtInfo.location + '"');
+            }
+            mappedLocation = jtInfo.location;
+            isUnknown = false;
+          }
+        }
 
         if (isUnknown && unknownLocations.indexOf(header.locationName) === -1) {
           unknownLocations.push(header.locationName);
@@ -3367,14 +3381,21 @@
       if (locationMappings[locationName]) {
         return locationMappings[locationName];
       }
+      // Fuzzy match - find the LONGEST matching key (most specific match wins)
+      // This prevents short keys like "Greycliff" from matching before "Gold Creek Trans Dock"
       var lowerName = locationName.toLowerCase();
+      var bestMatch = null;
+      var bestMatchLength = 0;
       for (var key in locationMappings) {
         var lowerKey = key.toLowerCase();
         if (lowerName.indexOf(lowerKey) !== -1 || lowerKey.indexOf(lowerName) !== -1) {
-          return locationMappings[key];
+          if (lowerKey.length > bestMatchLength) {
+            bestMatch = locationMappings[key];
+            bestMatchLength = lowerKey.length;
+          }
         }
       }
-      return locationName;
+      return bestMatch || locationName;
     }
 
     function showCrewPreview() {

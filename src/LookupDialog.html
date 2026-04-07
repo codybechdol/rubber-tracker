@@ -4,154 +4,126 @@
   <base target="_top">
   <style>
     * { box-sizing: border-box; font-family: 'Google Sans', Arial, sans-serif; }
-    body { margin: 0; padding: 20px; background: #f8f9fa; }
-    h2 { color: #1a73e8; margin: 0 0 16px 0; font-size: 18px; }
+    body { margin: 0; padding: 16px; background: #f8f9fa; }
+    h2 { color: #1a73e8; margin: 0 0 12px 0; font-size: 18px; }
+    h2 { color: #1a73e8; margin: 0 0 12px 0; font-size: 18px; }
 
-    .tabs {
-      display: flex;
-      border-bottom: 2px solid #dadce0;
-      margin-bottom: 16px;
-    }
-
+    .tabs { display: flex; border-bottom: 2px solid #dadce0; margin-bottom: 12px; }
     .tab {
-      padding: 10px 20px;
-      cursor: pointer;
-      border: none;
-      background: none;
-      font-size: 14px;
-      font-weight: 500;
-      color: #5f6368;
-      border-bottom: 2px solid transparent;
-      margin-bottom: -2px;
+      padding: 8px 16px; cursor: pointer; border: none; background: none;
+      font-size: 13px; font-weight: 500; color: #5f6368;
+      border-bottom: 2px solid transparent; margin-bottom: -2px;
     }
+    .tab.active { color: #1a73e8; border-bottom-color: #1a73e8; }
+    .tab:hover:not(.active) { background: #f1f3f4; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
 
-    .tab.active {
-      color: #1a73e8;
-      border-bottom-color: #1a73e8;
-    }
-
-    .tab:hover:not(.active) {
-      background: #f1f3f4;
-    }
-
-    .tab-content {
-      display: none;
-    }
-
-    .tab-content.active {
-      display: block;
-    }
-
-    label {
-      display: block;
-      margin-top: 12px;
-      font-weight: 500;
-      color: #202124;
-      font-size: 13px;
-    }
-
+    label { display: block; margin-top: 8px; font-weight: 500; color: #202124; font-size: 13px; }
     select, input[type="text"] {
-      width: 100%;
-      padding: 10px 12px;
-      margin-top: 6px;
-      border: 1px solid #dadce0;
-      border-radius: 4px;
-      font-size: 14px;
+      width: 100%; padding: 8px 10px; margin-top: 4px;
+      border: 1px solid #dadce0; border-radius: 4px; font-size: 13px;
     }
-
-    select:focus, input:focus {
-      outline: none;
-      border-color: #1a73e8;
-    }
-
+    select:focus, input:focus { outline: none; border-color: #1a73e8; }
     .btn {
-      margin-top: 16px;
-      padding: 10px 24px;
-      background: #1a73e8;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 14px;
-      font-weight: 500;
+      margin-top: 10px; padding: 8px 20px; background: #1a73e8; color: white;
+      border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 500;
     }
-
     .btn:hover { background: #1557b0; }
     .btn:disabled { background: #dadce0; cursor: not-allowed; }
+    .btn-sm { padding: 4px 12px; font-size: 12px; margin-top: 4px; }
 
-    .results {
-      margin-top: 20px;
-      max-height: 350px;
-      overflow-y: auto;
-    }
+    .results { margin-top: 12px; max-height: calc(100vh - 200px); overflow-y: auto; }
 
     .result-card {
-      background: white;
-      border: 1px solid #dadce0;
-      border-radius: 8px;
-      padding: 12px;
-      margin-bottom: 10px;
+      background: white; border: 1px solid #dadce0; border-radius: 6px;
+      padding: 10px; margin-bottom: 8px;
     }
-
-    .result-card h3 {
-      margin: 0 0 8px 0;
-      font-size: 14px;
-      color: #1a73e8;
-    }
-
+    .result-card h3 { margin: 0 0 6px 0; font-size: 13px; color: #1a73e8; }
     .result-row {
-      display: flex;
-      justify-content: space-between;
-      padding: 4px 0;
-      font-size: 13px;
-      border-bottom: 1px solid #f1f3f4;
+      display: flex; justify-content: space-between; padding: 3px 0;
+      font-size: 12px; border-bottom: 1px solid #f1f3f4;
     }
-
     .result-row:last-child { border-bottom: none; }
     .result-label { color: #5f6368; }
     .result-value { font-weight: 500; color: #202124; }
 
-    .no-results {
-      text-align: center;
-      padding: 20px;
-      color: #5f6368;
-      font-style: italic;
-    }
-
-    .loading {
-      text-align: center;
-      padding: 20px;
-      color: #1a73e8;
-    }
+    .no-results { text-align: center; padding: 16px; color: #5f6368; font-style: italic; }
+    .loading { text-align: center; padding: 16px; color: #1a73e8; }
 
     .section-header {
-      background: #e8f0fe;
-      padding: 8px 12px;
-      margin: 16px -12px 12px -12px;
-      font-weight: 500;
-      color: #1a73e8;
-      font-size: 13px;
+      background: #e8f0fe; padding: 6px 10px; margin: 12px -10px 8px -10px;
+      font-weight: 500; color: #1a73e8; font-size: 12px;
     }
 
     .item-badge {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 12px;
-      font-size: 11px;
-      font-weight: 500;
-      margin-left: 8px;
+      display: inline-block; padding: 1px 6px; border-radius: 10px;
+      font-size: 10px; font-weight: 500; margin-left: 6px;
     }
+    .badge-glove, .badge-Glove { background: #e3f2fd; color: #1565c0; }
+    .badge-sleeve, .badge-Sleeve { background: #e8f5e9; color: #2e7d32; }
+    .badge-blanket, .badge-Blanket { background: #fff3e0; color: #e65100; }
+    .badge-hv_tester, .badge-HV-Tester { background: #f3e5f5; color: #7b1fa2; }
+    .badge-phasing_set, .badge-Phasing-Set { background: #e0f7fa; color: #00695c; }
+    .badge-aed, .badge-AED { background: #ffebee; color: #c62828; }
 
-    .badge-glove { background: #e3f2fd; color: #1565c0; }
-    .badge-sleeve { background: #e8f5e9; color: #2e7d32; }
+    /* History toggle */
+    .history-toggle {
+      cursor: pointer; color: #5f6368; font-size: 11px; margin-top: 6px;
+      display: inline-block; user-select: none;
+    }
+    .history-toggle:hover { color: #1a73e8; }
+    .history-list { display: none; margin-top: 4px; }
+    .history-list.open { display: block; }
+    .history-entry {
+      font-size: 11px; padding: 3px 8px; border-left: 2px solid #dadce0;
+      margin-bottom: 3px; color: #5f6368;
+    }
+    .history-entry span { margin-right: 10px; }
+
+    /* All Assignments tab */
+    .filter-bar { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+    .filter-bar input { flex: 1; }
+    .emp-accordion {
+      border: 1px solid #dadce0; border-radius: 6px; margin-bottom: 4px;
+      overflow: hidden;
+    }
+    .emp-header {
+      padding: 8px 12px; cursor: pointer; display: flex; align-items: center;
+      justify-content: space-between; font-size: 13px; font-weight: 500;
+      transition: background 0.15s;
+    }
+    .emp-header:hover { filter: brightness(0.97); }
+    .emp-header .arrow { transition: transform 0.2s; font-size: 10px; color: #5f6368; }
+    .emp-header.open .arrow { transform: rotate(90deg); }
+
+    .emp-foreman { background: #e8f5e9; border-left: 3px solid #2e7d32; }
+    .emp-normal { background: #f8f9fa; border-left: 3px solid #dadce0; }
+    .emp-swap .emp-name { color: #c62828 !important; }
+    .emp-foreman:not(.emp-swap) .emp-name { color: #2e7d32; }
+    .emp-normal:not(.emp-swap) .emp-name { color: #202124; }
+
+    .emp-details { display: none; padding: 6px 12px 8px 12px; background: white; border-top: 1px solid #e0e0e0; }
+    .emp-details.open { display: block; }
+    .emp-item-row {
+      display: flex; align-items: center; padding: 4px 0; font-size: 12px;
+      border-bottom: 1px solid #f5f5f5; gap: 8px; flex-wrap: wrap;
+    }
+    .emp-item-row:last-child { border-bottom: none; }
+    .swap-icon { color: #c62828; font-size: 11px; }
+    .emp-meta { font-size: 11px; color: #5f6368; }
+    .item-count { font-size: 11px; color: #5f6368; margin-left: 4px; }
+    .legend { font-size: 11px; color: #5f6368; margin-bottom: 8px; }
+    .legend span { margin-right: 12px; }
   </style>
 </head>
 <body>
   <h2>🔍 Lookup</h2>
 
   <div class="tabs">
-    <button class="tab active" onclick="switchTab('employee')">👤 Employee</button>
-    <button class="tab" onclick="switchTab('item')">📦 Item</button>
+    <button class="tab active" data-tab="employee" onclick="switchTab('employee')">👤 Employee</button>
+    <button class="tab" data-tab="item" onclick="switchTab('item')">📦 Item</button>
+    <button class="tab" data-tab="all" onclick="switchTab('all')">📋 All Assignments</button>
   </div>
 
   <!-- Employee Search Tab -->
@@ -168,6 +140,10 @@
     <select id="itemType">
       <option value="glove">🧤 Glove</option>
       <option value="sleeve">💪 Sleeve</option>
+      <option value="blanket">🟫 Blanket</option>
+      <option value="hv_tester">⚡ HV Tester</option>
+      <option value="phasing_set">🔌 Phasing Set</option>
+      <option value="aed">❤️ AED</option>
     </select>
     <label>Item Number:</label>
     <input type="text" id="itemNum" placeholder="e.g., 667" onkeypress="if(event.key==='Enter')searchItem()">
@@ -175,151 +151,365 @@
     <div id="itemResults" class="results"></div>
   </div>
 
+  <!-- All Assignments Tab -->
+  <div id="allTab" class="tab-content">
+    <div class="filter-bar">
+      <input type="text" id="allFilter" placeholder="Filter by name..." oninput="filterAllAssignments()">
+      <button class="btn btn-sm" onclick="loadAllAssignments()">🔄 Refresh</button>
+    </div>
+    <div class="legend">
+      <span>🟢 Foreman/Lead</span>
+      <span>⚪ Standard</span>
+      <span>🔴 Has Swap Due</span>
+      <span>🔄 Item on Swaps</span>
+    </div>
+    <div id="allResults" class="results"></div>
+  </div>
+
   <script>
+    var allAssignmentsData = null;
+    var allTabLoaded = false;
+
     function switchTab(tab) {
       document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
       document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
-
-      if (tab === 'employee') {
-        document.querySelector('.tab:first-child').classList.add('active');
-        document.getElementById('employeeTab').classList.add('active');
-      } else {
-        document.querySelector('.tab:last-child').classList.add('active');
-        document.getElementById('itemTab').classList.add('active');
+      document.querySelector('.tab[data-tab="' + tab + '"]').classList.add('active');
+      document.getElementById(tab + 'Tab').classList.add('active');
+      if (tab === 'all' && !allTabLoaded) {
+        loadAllAssignments();
       }
     }
 
+    function row(label, value) {
+      return '<div class="result-row"><span class="result-label">' + label + ':</span><span class="result-value">' + (value || 'N/A') + '</span></div>';
+    }
+
+    // ============================================================
+    // EMPLOYEE SEARCH
+    // ============================================================
     function searchEmployee() {
       var name = document.getElementById('employeeName').value.trim();
-      if (!name) {
-        alert('Please enter an employee name');
-        return;
-      }
-
+      if (!name) { alert('Please enter an employee name'); return; }
       var resultsDiv = document.getElementById('employeeResults');
       resultsDiv.innerHTML = '<div class="loading">⏳ Searching...</div>';
-
       google.script.run
-        .withSuccessHandler(function(result) {
-          displayEmployeeResults(result);
-        })
-        .withFailureHandler(function(error) {
-          resultsDiv.innerHTML = '<div class="no-results">Error: ' + error + '</div>';
-        })
+        .withSuccessHandler(displayEmployeeResults)
+        .withFailureHandler(function(err) { resultsDiv.innerHTML = '<div class="no-results">Error: ' + err + '</div>'; })
         .lookupEmployee(name);
     }
 
+    var lastSearchedName = '';
+
     function displayEmployeeResults(data) {
       var resultsDiv = document.getElementById('employeeResults');
-
       if (!data || !data.found) {
         resultsDiv.innerHTML = '<div class="no-results">No employee found matching that name</div>';
         return;
       }
 
+      lastSearchedName = data.name;
+
       var html = '<div class="result-card">';
       html += '<h3>👤 ' + data.name + '</h3>';
-      html += '<div class="result-row"><span class="result-label">Location:</span><span class="result-value">' + (data.location || 'N/A') + '</span></div>';
-      html += '<div class="result-row"><span class="result-label">Job Number:</span><span class="result-value">' + (data.jobNumber || 'N/A') + '</span></div>';
-      html += '<div class="result-row"><span class="result-label">Job Classification:</span><span class="result-value">' + (data.jobClassification || 'N/A') + '</span></div>';
-      html += '<div class="result-row"><span class="result-label">Glove Size:</span><span class="result-value">' + (data.gloveSize || 'N/A') + '</span></div>';
-      html += '<div class="result-row"><span class="result-label">Sleeve Size:</span><span class="result-value">' + (data.sleeveSize || 'N/A') + '</span></div>';
+      html += row('Location', data.location);
+      html += row('Job Number', data.jobNumber);
+      html += row('Classification', data.jobClassification);
+      if (data.phone) html += row('Phone', data.phone);
+      if (data.email) html += row('Email', data.email);
+      html += row('Glove Size', data.gloveSize);
+      html += row('Sleeve Size', data.sleeveSize);
       html += '</div>';
 
-      // Current Assignments
-      if (data.gloves && data.gloves.length > 0) {
-        html += '<div class="section-header">🧤 Current Gloves (' + data.gloves.length + ')</div>';
-        data.gloves.forEach(function(g) {
-          html += '<div class="result-card">';
-          html += '<h3>Glove #' + g.itemNum + '<span class="item-badge badge-glove">Class ' + g.itemClass + '</span></h3>';
-          html += '<div class="result-row"><span class="result-label">Size:</span><span class="result-value">' + g.size + '</span></div>';
-          html += '<div class="result-row"><span class="result-label">Date Assigned:</span><span class="result-value">' + g.dateAssigned + '</span></div>';
-          html += '<div class="result-row"><span class="result-label">Change Out Date:</span><span class="result-value">' + g.changeOutDate + '</span></div>';
-          html += '<div class="result-row"><span class="result-label">Status:</span><span class="result-value">' + g.status + '</span></div>';
-          html += '</div>';
-        });
+      html += equipSection('🧤 Gloves', 'glove', data.gloves, null);
+      html += equipSection('💪 Sleeves', 'sleeve', data.sleeves, null);
+      html += equipSection('🟫 Blankets', 'blanket', data.blankets, null);
+      html += equipSection('⚡ HV Testers', 'hv_tester', data.hvTesters, null);
+      html += equipSection('🔌 Phasing Sets', 'phasing_set', data.phasingSets, null);
+      html += equipSection('❤️ AEDs', 'aed', data.aeds, null);
+
+      var hasCurrent = (data.gloves && data.gloves.length) || (data.sleeves && data.sleeves.length) ||
+        (data.blankets && data.blankets.length) || (data.hvTesters && data.hvTesters.length) ||
+        (data.phasingSets && data.phasingSets.length) || (data.aeds && data.aeds.length);
+      if (!hasCurrent) {
+        html += '<div class="no-results">No equipment currently assigned</div>';
       }
 
-      if (data.sleeves && data.sleeves.length > 0) {
-        html += '<div class="section-header">💪 Current Sleeves (' + data.sleeves.length + ')</div>';
-        data.sleeves.forEach(function(s) {
-          html += '<div class="result-card">';
-          html += '<h3>Sleeve #' + s.itemNum + '<span class="item-badge badge-sleeve">Class ' + s.itemClass + '</span></h3>';
-          html += '<div class="result-row"><span class="result-label">Size:</span><span class="result-value">' + s.size + '</span></div>';
-          html += '<div class="result-row"><span class="result-label">Date Assigned:</span><span class="result-value">' + s.dateAssigned + '</span></div>';
-          html += '<div class="result-row"><span class="result-label">Change Out Date:</span><span class="result-value">' + s.changeOutDate + '</span></div>';
-          html += '<div class="result-row"><span class="result-label">Status:</span><span class="result-value">' + s.status + '</span></div>';
-          html += '</div>';
-        });
-      }
-
-      if ((!data.gloves || data.gloves.length === 0) && (!data.sleeves || data.sleeves.length === 0)) {
-        html += '<div class="no-results">No items currently assigned</div>';
-      }
-
+      html += '<div id="historySection"><div class="loading">⏳ Loading history...</div></div>';
       resultsDiv.innerHTML = html;
+
+      // Load history separately to avoid timeout
+      google.script.run
+        .withSuccessHandler(function(hist) { displayEmployeeHistory(hist, data); })
+        .withFailureHandler(function() {
+          var hs = document.getElementById('historySection');
+          if (hs) hs.innerHTML = '<div class="no-results" style="font-size:11px">History unavailable</div>';
+        })
+        .lookupEmployeeHistory(data.name);
     }
 
+    function displayEmployeeHistory(hist, data) {
+      var hs = document.getElementById('historySection');
+      if (!hs) return;
+      if (!hist) { hs.innerHTML = ''; return; }
+
+      var html = '';
+      var types = [
+        { key: 'gloveHistory', title: '🧤 Gloves', typeKey: 'glove' },
+        { key: 'sleeveHistory', title: '💪 Sleeves', typeKey: 'sleeve' },
+        { key: 'blanketHistory', title: '🟫 Blankets', typeKey: 'blanket' },
+        { key: 'hvTesterHistory', title: '⚡ HV Testers', typeKey: 'hv_tester' },
+        { key: 'phasingSetHistory', title: '🔌 Phasing Sets', typeKey: 'phasing_set' },
+        { key: 'aedHistory', title: '❤️ AEDs', typeKey: 'aed' }
+      ];
+
+      types.forEach(function(t) {
+        var items = hist[t.key];
+        if (items && items.length > 0) {
+          var histId = 'hist_' + t.typeKey + '_' + Math.random().toString(36).substr(2, 5);
+          html += '<div class="history-toggle" onclick="toggleHistory(\'' + histId + '\', this)">📜 ' + t.title + ' Past Assignments (' + items.length + ') ▸</div>';
+          html += '<div id="' + histId + '" class="history-list">';
+          items.forEach(function(h) {
+            html += '<div class="history-entry">';
+            html += '<span><b>#' + h.itemNum + '</b></span>';
+            if (h.sizeOrType) html += '<span>' + h.sizeOrType + '</span>';
+            if (h.itemClass) html += '<span>Class ' + h.itemClass + '</span>';
+            html += '<span>' + h.location + '</span>';
+            html += '<span>' + h.date + '</span>';
+            html += '</div>';
+          });
+          html += '</div>';
+        }
+      });
+
+      hs.innerHTML = html;
+    }
+
+    function equipSection(title, typeKey, currentItems, historyItems) {
+      var hasCurrent = currentItems && currentItems.length > 0;
+      var hasHistory = historyItems && historyItems.length > 0;
+      if (!hasCurrent && !hasHistory) return '';
+
+      var html = '<div class="section-header">' + title;
+      if (hasCurrent) html += ' (' + currentItems.length + ' current)';
+      html += '</div>';
+
+      if (hasCurrent) {
+        currentItems.forEach(function(item) {
+          html += '<div class="result-card">';
+          html += '<h3>#' + item.itemNum;
+          if (item.itemClass) html += '<span class="item-badge badge-' + typeKey + '">Class ' + item.itemClass + '</span>';
+          if (item.model) html += '<span class="item-badge badge-' + typeKey + '">' + item.model + '</span>';
+          if (item.type) html += '<span class="item-badge badge-' + typeKey + '">' + item.type + '</span>';
+          html += '</h3>';
+          if (item.size) html += row('Size', item.size);
+          if (item.kv) html += row('KV', item.kv);
+          if (item.serialNum) html += row('Serial #', item.serialNum);
+          html += row('Status', item.status);
+          if (item.dateAssigned) html += row('Date Assigned', item.dateAssigned);
+          if (item.changeOutDate) html += row('Change Out Date', item.changeOutDate);
+          if (item.calibrationDate) html += row('Calibration Date', item.calibrationDate);
+          if (item.padExpiration) html += row('Pad Expiration', item.padExpiration);
+          if (item.testDate) html += row('Test Date', item.testDate);
+          html += '</div>';
+        });
+      }
+
+      if (hasHistory) {
+        var histId = 'hist_' + typeKey + '_' + Math.random().toString(36).substr(2, 5);
+        html += '<div class="history-toggle" onclick="toggleHistory(\'' + histId + '\', this)">📜 Past Assignments (' + historyItems.length + ') ▸</div>';
+        html += '<div id="' + histId + '" class="history-list">';
+        historyItems.forEach(function(h) {
+          html += '<div class="history-entry">';
+          html += '<span><b>#' + h.itemNum + '</b></span>';
+          if (h.sizeOrType) html += '<span>' + h.sizeOrType + '</span>';
+          if (h.itemClass) html += '<span>Class ' + h.itemClass + '</span>';
+          html += '<span>' + h.location + '</span>';
+          html += '<span>' + h.date + '</span>';
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+      return html;
+    }
+
+    function toggleHistory(id, el) {
+      var div = document.getElementById(id);
+      var isOpen = div.classList.contains('open');
+      div.classList.toggle('open');
+      el.textContent = el.textContent.replace(isOpen ? '▾' : '▸', isOpen ? '▸' : '▾');
+    }
+
+    // ============================================================
+    // ITEM SEARCH
+    // ============================================================
     function searchItem() {
       var itemType = document.getElementById('itemType').value;
       var itemNum = document.getElementById('itemNum').value.trim();
-
-      if (!itemNum) {
-        alert('Please enter an item number');
-        return;
-      }
-
+      if (!itemNum) { alert('Please enter an item number'); return; }
       var resultsDiv = document.getElementById('itemResults');
       resultsDiv.innerHTML = '<div class="loading">⏳ Searching...</div>';
-
       google.script.run
-        .withSuccessHandler(function(result) {
-          displayItemResults(result, itemType);
-        })
-        .withFailureHandler(function(error) {
-          resultsDiv.innerHTML = '<div class="no-results">Error: ' + error + '</div>';
-        })
+        .withSuccessHandler(function(r) { displayItemResults(r, itemType); })
+        .withFailureHandler(function(err) { resultsDiv.innerHTML = '<div class="no-results">Error: ' + err + '</div>'; })
         .lookupItem(itemType, itemNum);
     }
 
     function displayItemResults(data, itemType) {
       var resultsDiv = document.getElementById('itemResults');
-
       if (!data || !data.found) {
         resultsDiv.innerHTML = '<div class="no-results">Item not found</div>';
         return;
       }
-
-      var typeLabel = itemType === 'sleeve' ? '💪 Sleeve' : '🧤 Glove';
-      var badgeClass = itemType === 'sleeve' ? 'badge-sleeve' : 'badge-glove';
+      var typeLabels = { glove:'🧤 Glove', sleeve:'💪 Sleeve', blanket:'🟫 Blanket',
+        hv_tester:'⚡ HV Tester', phasing_set:'🔌 Phasing Set', aed:'❤️ AED' };
+      var typeLabel = typeLabels[itemType] || itemType;
+      var badgeClass = 'badge-' + itemType;
 
       var html = '<div class="result-card">';
-      html += '<h3>' + typeLabel + ' #' + data.itemNum + '<span class="item-badge ' + badgeClass + '">Class ' + data.itemClass + '</span></h3>';
-      html += '<div class="result-row"><span class="result-label">Size:</span><span class="result-value">' + data.size + '</span></div>';
-      html += '<div class="result-row"><span class="result-label">Status:</span><span class="result-value">' + data.status + '</span></div>';
-      html += '<div class="result-row"><span class="result-label">Location:</span><span class="result-value">' + data.location + '</span></div>';
-      html += '<div class="result-row"><span class="result-label">Assigned To:</span><span class="result-value">' + data.assignedTo + '</span></div>';
-      html += '<div class="result-row"><span class="result-label">Test Date:</span><span class="result-value">' + data.testDate + '</span></div>';
-      html += '<div class="result-row"><span class="result-label">Date Assigned:</span><span class="result-value">' + data.dateAssigned + '</span></div>';
-      html += '<div class="result-row"><span class="result-label">Change Out Date:</span><span class="result-value">' + data.changeOutDate + '</span></div>';
-      if (data.notes) {
-        html += '<div class="result-row"><span class="result-label">Notes:</span><span class="result-value">' + data.notes + '</span></div>';
-      }
+      html += '<h3>' + typeLabel + ' #' + data.itemNum;
+      if (data.itemClass) html += '<span class="item-badge ' + badgeClass + '">Class ' + data.itemClass + '</span>';
+      if (data.model) html += '<span class="item-badge ' + badgeClass + '">' + data.model + '</span>';
+      html += '</h3>';
+      if (data.size) html += row('Size', data.size);
+      if (data.type) html += row('Type', data.type);
+      if (data.serialNum) html += row('Serial #', data.serialNum);
+      if (data.kv) html += row('KV', data.kv);
+      html += row('Status', data.status);
+      html += row('Location', data.location);
+      html += row('Assigned To', data.assignedTo);
+      if (data.testDate) html += row('Test Date', data.testDate);
+      if (data.calibrationDate) html += row('Calibration Date', data.calibrationDate);
+      if (data.padExpiration) html += row('Pad Expiration', data.padExpiration);
+      if (data.dateAssigned) html += row('Date Assigned', data.dateAssigned);
+      if (data.changeOutDate) html += row('Change Out Date', data.changeOutDate);
+      if (data.notes) html += row('Notes', data.notes);
       html += '</div>';
 
-      // History section
       if (data.history && data.history.length > 0) {
         html += '<div class="section-header">📜 Assignment History (' + data.history.length + ' entries)</div>';
         data.history.forEach(function(h) {
           html += '<div class="result-card">';
-          html += '<div class="result-row"><span class="result-label">Date:</span><span class="result-value">' + h.date + '</span></div>';
-          html += '<div class="result-row"><span class="result-label">Assigned To:</span><span class="result-value">' + h.assignedTo + '</span></div>';
-          html += '<div class="result-row"><span class="result-label">Location:</span><span class="result-value">' + h.location + '</span></div>';
+          html += row('Date', h.date);
+          html += row('Assigned To', h.assignedTo);
+          html += row('Location', h.location);
           html += '</div>';
         });
       }
-
       resultsDiv.innerHTML = html;
+    }
+
+    // ============================================================
+    // ALL ASSIGNMENTS TAB
+    // ============================================================
+    function loadAllAssignments() {
+      var resultsDiv = document.getElementById('allResults');
+      resultsDiv.innerHTML = '<div class="loading">⏳ Loading all assignments... (this may take a moment)</div>';
+      google.script.run
+        .withSuccessHandler(function(conf) {
+          if (!conf || !conf.stored) {
+            resultsDiv.innerHTML = '<div class="no-results">Error loading data: ' + (conf && conf.error ? conf.error : 'Unknown error') + '<br><br>Try clicking 🔄 Refresh again.</div>';
+            return;
+          }
+          // If directData is included (ScriptProperties storage failed), use it directly
+          if (conf.directData) {
+            allAssignmentsData = conf.directData;
+            allTabLoaded = true;
+            renderAllAssignments(conf.directData);
+            return;
+          }
+          resultsDiv.innerHTML = '<div class="loading">⏳ Retrieving ' + (conf.count || 0) + ' employee(s)...</div>';
+          google.script.run
+            .withSuccessHandler(function(data) {
+              if (!data) {
+                resultsDiv.innerHTML = '<div class="no-results">Data retrieval returned empty. Try clicking 🔄 Refresh again.</div>';
+                return;
+              }
+              allAssignmentsData = data;
+              allTabLoaded = true;
+              renderAllAssignments(data);
+            })
+            .withFailureHandler(function(err) { resultsDiv.innerHTML = '<div class="no-results">Error retrieving data: ' + err + '</div>'; })
+            .getStoredAllAssignments();
+        })
+        .withFailureHandler(function(err) { resultsDiv.innerHTML = '<div class="no-results">Error: ' + err + '<br><br>Try clicking 🔄 Refresh to retry.</div>'; })
+        .getAllEmployeeAssignments();
+    }
+
+    var FOREMAN_CLASSES = ['SUP','GF','F','GTO F'];
+    function isForeman(classification) {
+      return FOREMAN_CLASSES.indexOf((classification || '').trim()) !== -1;
+    }
+
+    function renderAllAssignments(data) {
+      var resultsDiv = document.getElementById('allResults');
+      if (!data || !data.employees || data.employees.length === 0) {
+        resultsDiv.innerHTML = '<div class="no-results">No equipment assignments found</div>';
+        return;
+      }
+      var filter = (document.getElementById('allFilter').value || '').toLowerCase().trim();
+      var html = '';
+      var shown = 0;
+
+      data.employees.forEach(function(emp) {
+        if (filter && emp.name.toLowerCase().indexOf(filter) === -1) return;
+        shown++;
+        var isFore = isForeman(emp.classification);
+        var headerClass = isFore ? 'emp-foreman' : 'emp-normal';
+        if (emp.hasSwapItem) headerClass += ' emp-swap';
+
+        var typeCounts = {};
+        emp.items.forEach(function(it) {
+          typeCounts[it.type] = (typeCounts[it.type] || 0) + 1;
+        });
+        var summary = [];
+        var typeKeys = Object.keys(typeCounts);
+        for (var t = 0; t < typeKeys.length; t++) {
+          summary.push(typeCounts[typeKeys[t]] + ' ' + typeKeys[t] + (typeCounts[typeKeys[t]] > 1 ? 's' : ''));
+        }
+
+        html += '<div class="emp-accordion">';
+        html += '<div class="emp-header ' + headerClass + '" onclick="toggleEmp(this)">';
+        html += '<span>';
+        if (isFore) html += '👷 ';
+        if (emp.hasSwapItem) html += '🔴 ';
+        html += '<span class="emp-name">' + emp.name + '</span>';
+        html += '<span class="item-count"> — ' + summary.join(', ') + '</span>';
+        html += '</span>';
+        html += '<span>';
+        html += '<span class="emp-meta">' + (emp.classification || '') + ' • ' + (emp.location || '') + '</span> ';
+        html += '<span class="arrow">▶</span>';
+        html += '</span></div>';
+
+        html += '<div class="emp-details">';
+        emp.items.forEach(function(it) {
+          var badgeCls = 'badge-' + it.type.replace(/ /g, '-');
+          html += '<div class="emp-item-row">';
+          if (it.onSwap) html += '<span class="swap-icon">🔄</span>';
+          html += '<span class="item-badge ' + badgeCls + '">' + it.type + '</span>';
+          html += '<span><b>#' + it.itemNum + '</b></span>';
+          if (it.size) html += '<span>' + it.size + '</span>';
+          if (it.sizeOrType) html += '<span>' + it.sizeOrType + '</span>';
+          if (it.itemClass) html += '<span>Class ' + it.itemClass + '</span>';
+          if (it.model) html += '<span>' + it.model + '</span>';
+          html += '<span style="color:#5f6368">' + (it.status || '') + '</span>';
+          if (it.changeOutDate && it.changeOutDate !== 'N/A') html += '<span style="color:#5f6368;font-size:11px">Due: ' + it.changeOutDate + '</span>';
+          html += '</div>';
+        });
+        html += '</div></div>';
+      });
+
+      if (!shown) html = '<div class="no-results">No matches for "' + filter + '"</div>';
+      resultsDiv.innerHTML = html;
+    }
+
+    function toggleEmp(headerEl) {
+      headerEl.classList.toggle('open');
+      headerEl.nextElementSibling.classList.toggle('open');
+    }
+
+    function filterAllAssignments() {
+      if (!allAssignmentsData) return;
+      renderAllAssignments(allAssignmentsData);
     }
   </script>
 </body>

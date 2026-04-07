@@ -1302,7 +1302,8 @@ function getIconExplanation(icon, cellType) {
   return iconStr + ' (unknown status)';
 }
 
-function calculateComplianceFromLogs(weekStartDate) {
+function calculateComplianceFromLogs(weekStartDate, options) {
+  var ignoreResolved = (options && options.ignoreResolved) || false;
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var tz = Session.getScriptTimeZone();
   var weekBounds = getWeekBoundaries(weekStartDate);
@@ -1320,8 +1321,14 @@ function calculateComplianceFromLogs(weekStartDate) {
 
   // === LOAD RESOLVED CREWS FROM SAFETY COMPLIANCE SHEET ===
   // Crews with "Resolved" status should NOT be recalculated or have tasks created
-  var resolvedCrews = loadResolvedCrewsForWeek(ss, weekBounds.weekStart, tz);
-  Logger.log("calculateComplianceFromLogs: Found " + Object.keys(resolvedCrews).length + " resolved crews for this week");
+  // UNLESS ignoreResolved=true (used by masterRecalculateCompliance for full refresh)
+  var resolvedCrews = {};
+  if (!ignoreResolved) {
+    resolvedCrews = loadResolvedCrewsForWeek(ss, weekBounds.weekStart, tz);
+    Logger.log("calculateComplianceFromLogs: Found " + Object.keys(resolvedCrews).length + " resolved crews for this week");
+  } else {
+    Logger.log("calculateComplianceFromLogs: ignoreResolved=true, recalculating ALL crews including Resolved");
+  }
 
   // Load compliance config - this is the authoritative source for CURRENT week crews
   var config = loadComplianceConfig();
@@ -1992,7 +1999,8 @@ function calculateComplianceFromLogs(weekStartDate) {
  *
  * @param {Object} complianceData - From calculateComplianceFromLogs()
  */
-function updateComplianceSheetFromLogs(complianceData) {
+function updateComplianceSheetFromLogs(complianceData, options) {
+  var ignoreResolved = (options && options.ignoreResolved) || false;
   if (!complianceData || !complianceData.crews) {
     Logger.log("updateComplianceSheetFromLogs: No compliance data");
     return;
@@ -2037,8 +2045,8 @@ function updateComplianceSheetFromLogs(complianceData) {
   for (var crewJob in complianceData.crews) {
     var crew = complianceData.crews[crewJob];
 
-    // Skip if already resolved
-    if (existingRows[crewJob] && existingRows[crewJob].status === 'Resolved') {
+    // Skip if already resolved (unless ignoreResolved=true for master recalculate)
+    if (!ignoreResolved && existingRows[crewJob] && existingRows[crewJob].status === 'Resolved') {
       Logger.log("updateComplianceSheetFromLogs: Skipping resolved crew " + crewJob);
       continue;
     }
@@ -4075,6 +4083,7 @@ function setupSafetyReportsSheet() {
   sheet.setColumnWidth(11, 200); // Notes
   sheet.setColumnWidth(12, 400); // Email Subject
   sheet.setColumnWidth(13, 100); // Received Date
+  sheet.setColumnWidth(14, 120); // Resolved On
 
   // Add status dropdown (column H = 8)
   var statusRange = sheet.getRange(2, 8, 1000, 1);
@@ -4489,26 +4498,45 @@ function refreshSafetySheets() {
     var taskData = taskSheet.getDataRange().getValues();
     var safetyData = safetySheet.getDataRange().getValues();
 
+    // Find Resolved On column
+    var safetyHeaders = safetyData[0];
+    var resolvedOnColIdx = -1;
+    for (var rh = 0; rh < safetyHeaders.length; rh++) {
+      if (String(safetyHeaders[rh]).toLowerCase().trim() === 'resolved on') {
+        resolvedOnColIdx = rh;
+        break;
+      }
+    }
+
     for (var t = 1; t < taskData.length; t++) {
       var taskId = String(taskData[t][0] || '').trim();
+      var sourceSheet = String(taskData[t][1] || '').trim();
       var status = String(taskData[t][14] || '').trim(); // Status column (O = 15, 0-indexed = 14)
       var completedDate = taskData[t][21]; // CompletedDate column (V = 22, 0-indexed = 21)
 
-      // Check for both formats: "SafetyReports_" and "Safety Reports_"
-      var isSafetyReportsTask = (taskId.indexOf('SafetyReports_') === 0 || taskId.indexOf('Safety Reports_') === 0);
+      // Check for all formats: "SafetyReports_", "Safety Reports_", and "Safety Equipment Needs_"
+      var isSafetyReportsTask = (taskId.indexOf('SafetyReports_') === 0 || taskId.indexOf('Safety Reports_') === 0 || taskId.indexOf('Safety Equipment Needs_') === 0) ||
+        (sourceSheet === 'Safety Equipment Needs' || sourceSheet === 'Safety Reports');
       if (!isSafetyReportsTask) continue;
       if (status !== 'Complete' && status !== 'Completed' && !completedDate) continue;
 
-      // Extract source row from taskId - handle both formats
-      var normalizedTaskId = taskId.replace('Safety Reports_', 'SafetyReports_');
-      var parts = normalizedTaskId.split('_');
-      if (parts.length < 2) continue;
-      var sourceRow = parseInt(parts[1]);
+      // Extract source row from taskId or source row column
+      var sourceRow = parseInt(taskData[t][2]); // Column C = SourceRow (0-indexed = 2)
+      if (isNaN(sourceRow) || sourceRow < 1) {
+        // Fallback: parse from taskId
+        var normalizedTaskId = taskId.replace('Safety Reports_', 'SafetyReports_').replace('Safety Equipment Needs_', 'SafetyEquipmentNeeds_');
+        var parts = normalizedTaskId.split('_');
+        sourceRow = parseInt(parts[parts.length - 1]);
+      }
 
-      if (sourceRow > 0 && sourceRow < safetyData.length) {
-        var currentStatus = String(safetyData[sourceRow][7] || '').trim(); // Status column (H = 8, 0-indexed = 7)
+      if (sourceRow > 0 && sourceRow <= safetyData.length) {
+        var rowIdx = sourceRow - 1; // Convert to 0-based for safetyData array
+        var currentStatus = String(safetyData[rowIdx][7] || '').trim(); // Status column (H = 8, 0-indexed = 7)
         if (currentStatus !== 'Resolved') {
-          safetySheet.getRange(sourceRow + 1, 8).setValue('Resolved'); // +1 for 1-based row
+          safetySheet.getRange(sourceRow, 8).setValue('Resolved');
+          if (resolvedOnColIdx >= 0) {
+            safetySheet.getRange(sourceRow, resolvedOnColIdx + 1).setValue(completedDate || new Date());
+          }
           syncCount++;
         }
       }
@@ -4547,6 +4575,7 @@ function syncSafetyReportCompletion(taskKey) {
     return { synced: false, message: 'No taskKey provided' };
   }
 
+  // Normalize the taskKey - handle both "Safety Reports_X" and "SafetyReports_X" formats
   // Normalize the taskKey - handle both "Safety Reports_X" and "SafetyReports_X" formats
   var normalizedKey = taskKey.replace('Safety Reports_', 'SafetyReports_');
 
@@ -4590,6 +4619,43 @@ function syncSafetyReportCompletion(taskKey) {
   Logger.log('syncSafetyReportCompletion: Updated row ' + sourceRow + ' to Resolved');
 
   return { synced: true, message: 'Updated to Resolved' };
+}
+
+/**
+ddd/**
+ddd/**
+ * Adds "Resolved On" column to existing Safety Equipment Needs sheet if missing.
+ * Run once to migrate existing sheets.
+ */
+function addResolvedOnColumn() {
+  var sheet = getSafetyEquipmentSheet();
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert('Safety Equipment Needs sheet not found');
+    return;
+  }
+
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  for (var h = 0; h < headers.length; h++) {
+    if (String(headers[h]).toLowerCase().trim() === 'resolved on') {
+      SpreadsheetApp.getUi().alert('Resolved On column already exists (column ' + (h + 1) + ')');
+      return;
+    }
+  }
+
+  // Add header in next available column
+  var newCol = headers.length + 1;
+  sheet.getRange(1, newCol).setValue('Resolved On')
+    .setFontWeight('bold')
+    .setBackground('#4A86E8')
+    .setFontColor('white');
+  sheet.setColumnWidth(newCol, 120);
+
+  // Format as date for existing rows
+  if (sheet.getLastRow() > 1) {
+    sheet.getRange(2, newCol, sheet.getLastRow() - 1, 1).setNumberFormat('MM/dd/yyyy');
+  }
+
+  SpreadsheetApp.getUi().alert('✅ Added "Resolved On" column (column ' + newCol + ') to Safety Equipment Needs sheet');
 }
 
 /**
@@ -13843,9 +13909,9 @@ function masterRecalculateCompliance() {
 
       for (var w = 0; w < weekKeys.length; w++) {
         var weekStart = uniqueWeeks[weekKeys[w]];
-        var complianceData = calculateComplianceFromLogs(weekStart);
+        var complianceData = calculateComplianceFromLogs(weekStart, { ignoreResolved: true });
         if (complianceData) {
-          updateComplianceSheetFromLogs(complianceData);
+          updateComplianceSheetFromLogs(complianceData, { ignoreResolved: true });
           results.compliant += complianceData.compliantCount || 0;
           results.missing += complianceData.missingCount || 0;
           results.weeksProcessed++;

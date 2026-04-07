@@ -1430,6 +1430,31 @@ function markScheduleTaskComplete(taskIndexOrTask) {
     } else {
       Logger.log('ERROR: Training Tracking sheet not found');
     }
+  } else if (source === 'Safety Equipment Needs' || source === 'Safety Reports') {
+    // Safety Equipment task - update source sheet status to "Resolved" and set "Resolved On" date
+    var safetySheet = ss.getSheetByName('Safety Equipment Needs') || ss.getSheetByName('Safety Reports');
+    if (safetySheet && task.rowIndex <= safetySheet.getLastRow()) {
+      var safetyHeaders = safetySheet.getRange(1, 1, 1, safetySheet.getLastColumn()).getValues()[0];
+      var safetyStatusCol = -1;
+      var resolvedOnCol = -1;
+      for (var sh = 0; sh < safetyHeaders.length; sh++) {
+        var shdr = String(safetyHeaders[sh]).toLowerCase().trim();
+        if (shdr === 'status') safetyStatusCol = sh + 1;
+        if (shdr === 'resolved on') resolvedOnCol = sh + 1;
+      }
+      if (safetyStatusCol > 0) {
+        safetySheet.getRange(task.rowIndex, safetyStatusCol).setValue('Resolved');
+        Logger.log('Updated Safety Equipment Needs row ' + task.rowIndex + ' status to Resolved');
+        updated = true;
+      }
+      if (resolvedOnCol > 0) {
+        safetySheet.getRange(task.rowIndex, resolvedOnCol).setValue(new Date());
+        Logger.log('Set Resolved On date for Safety Equipment Needs row ' + task.rowIndex);
+      }
+    } else {
+      Logger.log('WARNING: Safety Equipment Needs sheet not found or row out of range');
+      updated = true; // Task Metadata was already updated above
+    }
   } else if (source === 'To Do List' || !source) {
     // Legacy To Do List handling - To Do List sheet has been archived since Phase 6
     // Tasks should now go through Task Metadata only
@@ -1586,7 +1611,7 @@ function deleteScheduleTask(taskIndex, taskKey, taskData) {
     taskInfo.taskType === 'Safety Equipment' ||
     taskInfo.source === 'Safety Reports' ||
     taskInfo.source === 'Safety Equipment Needs'
-  )) || (taskKey && (taskKey.indexOf('Safety Reports_') === 0 || taskKey.indexOf('SafetyReports_') === 0)) ||
+  )) || (taskKey && (taskKey.indexOf('Safety Reports_') === 0 || taskKey.indexOf('SafetyReports_') === 0 || taskKey.indexOf('Safety Equipment Needs_') === 0)) ||
        (taskData && (taskData.taskType === 'Safety Equipment' || taskData.source === 'Safety Reports' || taskData.source === 'Safety Equipment Needs'));
 
   Logger.log('isSafetyEquipment: ' + isSafetyEquipment);
@@ -1872,12 +1897,15 @@ function cleanupSafetyEquipmentTaskData(taskInfo, taskKey, ss) {
   // Find the status column
   var headers = safetySheet.getRange(1, 1, 1, safetySheet.getLastColumn()).getValues()[0];
   var statusCol = -1;
+  var resolvedOnCol = -1;
 
   for (var c = 0; c < headers.length; c++) {
     var header = String(headers[c]).toLowerCase().trim();
     if (header === 'status') {
       statusCol = c + 1; // 1-based for getRange
-      break;
+    }
+    if (header === 'resolved on') {
+      resolvedOnCol = c + 1;
     }
   }
 
@@ -1894,6 +1922,9 @@ function cleanupSafetyEquipmentTaskData(taskInfo, taskKey, ss) {
     // Only update if it's currently "Needs Attention"
     if (String(currentStatus).trim() === 'Needs Attention') {
       safetySheet.getRange(sourceRow, statusCol).setValue('Resolved');
+      if (resolvedOnCol > 0) {
+        safetySheet.getRange(sourceRow, resolvedOnCol).setValue(new Date());
+      }
       Logger.log('cleanupSafetyEquipmentTaskData: Updated status to "Resolved" at row ' + sourceRow);
       deletedFrom.push('Safety Reports (status updated)');
     } else {
@@ -5985,6 +6016,186 @@ function markCertAsRenewed(employee, certType) {
 }
 
 /**
+ * Syncs employee locations on the Employees sheet with authoritative locations from Job Tracking.
+ * Finds employees whose Location doesn't match what Job Tracking says for their job number.
+ * Groups by job number and prompts for each group individually (approve/deny per job).
+ * Skips non-field locations on both source and destination sides.
+ * Use case: 041-26 employees have "Rapelje" but Job Tracking says "Gold Creek".
+ */
+function syncEmployeeLocationsFromJobTracking() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+
+  var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+  var jobSheet = ss.getSheetByName('Job Tracking');
+
+  if (!employeesSheet) { ui.alert('❌ Error', 'Employees sheet not found!', ui.ButtonSet.OK); return; }
+  if (!jobSheet) { ui.alert('❌ Error', 'Job Tracking sheet not found!', ui.ButtonSet.OK); return; }
+
+  // Build job number → location map from Job Tracking
+  var jtData = jobSheet.getDataRange().getValues();
+  var jtHeaders = jtData[0];
+  var statusColIdx = -1;
+  for (var jh = 0; jh < jtHeaders.length; jh++) {
+    if (String(jtHeaders[jh]).toLowerCase().trim() === 'status') { statusColIdx = jh; break; }
+  }
+
+  var jobLocationMap = {};
+  for (var j = 1; j < jtData.length; j++) {
+    var jobNum = String(jtData[j][0] || '').trim();
+    var jtLocation = String(jtData[j][1] || '').trim();
+    var jtStatus = statusColIdx !== -1 ? String(jtData[j][statusColIdx] || '').trim() : '';
+    if (jobNum && jtLocation && jtStatus !== 'Completed') {
+      jobLocationMap[jobNum] = jtLocation;
+    }
+  }
+
+  // Read employees and find mismatches
+  var empData = employeesSheet.getDataRange().getValues();
+  var empHeaders = empData[0];
+  var nameCol = -1, locationCol = -1, jobNumCol = -1, lastDayCol = -1;
+  for (var h = 0; h < empHeaders.length; h++) {
+    var hdr = String(empHeaders[h]).toLowerCase().trim();
+    if (hdr === 'name' || hdr === 'employee name') nameCol = h;
+    if (hdr === 'location') locationCol = h;
+    if (hdr === 'job number') jobNumCol = h;
+    if (hdr === 'last day') lastDayCol = h;
+  }
+
+  if (nameCol === -1 || locationCol === -1 || jobNumCol === -1) {
+    ui.alert('❌ Error', 'Missing required columns (Name, Location, Job Number) in Employees sheet.', ui.ButtonSet.OK);
+    return;
+  }
+
+  // Non-field locations to skip (both as current location AND as destination)
+  var nonFieldLocations = ['previous employee', 'weeds', 'vacation', 'leave', 'light duty', 'unknown'];
+
+  var mismatches = [];
+  for (var i = 1; i < empData.length; i++) {
+    var empName = String(empData[i][nameCol] || '').trim();
+    var empLocation = String(empData[i][locationCol] || '').trim();
+    var empJobNum = String(empData[i][jobNumCol] || '').trim();
+    var empLastDay = empData[i][lastDayCol];
+
+    if (!empName || !empJobNum) continue;
+    // Skip terminated employees
+    if (empLastDay && empLastDay instanceof Date && !isNaN(empLastDay.getTime())) continue;
+    // Skip employees already in non-field locations
+    if (nonFieldLocations.indexOf(empLocation.toLowerCase()) !== -1) continue;
+
+    // Strip position suffix (041-26.3 → 041-26)
+    var baseJobNum = empJobNum.replace(/\.\d+$/, '');
+    var jtLocation = jobLocationMap[baseJobNum];
+
+    if (!jtLocation || jtLocation === empLocation) continue;
+    // Skip if Job Tracking location is a non-field location (Vacation, Weeds, etc.)
+    if (nonFieldLocations.indexOf(jtLocation.toLowerCase()) !== -1) continue;
+
+    mismatches.push({
+      row: i,
+      name: empName,
+      currentLocation: empLocation,
+      correctLocation: jtLocation,
+      jobNumber: empJobNum,
+      baseJobNumber: baseJobNum
+    });
+  }
+
+  if (mismatches.length === 0) {
+    ui.alert('✅ All Synced', 'All employee locations match Job Tracking. No changes needed.', ui.ButtonSet.OK);
+    return;
+  }
+
+  // Group mismatches by base job number
+  var groups = {};
+  for (var m = 0; m < mismatches.length; m++) {
+    var mm = mismatches[m];
+    if (!groups[mm.baseJobNumber]) {
+      groups[mm.baseJobNumber] = {
+        from: mm.currentLocation,
+        to: mm.correctLocation,
+        employees: []
+      };
+    }
+    groups[mm.baseJobNumber].employees.push(mm);
+  }
+
+  // Prompt per job group
+  var approved = [];
+  var skipped = 0;
+  var jobNumbers = Object.keys(groups);
+
+  for (var g = 0; g < jobNumbers.length; g++) {
+    var jobKey = jobNumbers[g];
+    var group = groups[jobKey];
+    var names = group.employees.map(function(e) { return e.name; });
+
+    var prompt = 'Job ' + jobKey + ': ' + group.from + ' → ' + group.to + '\n\n';
+    prompt += names.length + ' employee(s):\n';
+    for (var n = 0; n < names.length; n++) {
+      prompt += '  • ' + names[n] + '\n';
+    }
+    prompt += '\nUpdate these employees\' location to "' + group.to + '"?';
+
+    var resp = ui.alert('🔄 Sync ' + jobKey + ' (' + (g + 1) + '/' + jobNumbers.length + ')', prompt, ui.ButtonSet.YES_NO);
+    if (resp === ui.Button.YES) {
+      for (var a = 0; a < group.employees.length; a++) {
+        approved.push(group.employees[a]);
+      }
+    } else {
+      skipped += group.employees.length;
+    }
+  }
+
+  if (approved.length === 0) {
+    ui.alert('ℹ️ No Changes', 'All groups were skipped. No employees updated.', ui.ButtonSet.OK);
+    return;
+  }
+
+  // Ensure all new locations are in the validation dropdown
+  var newLocs = [];
+  for (var nl = 0; nl < approved.length; nl++) {
+    if (newLocs.indexOf(approved[nl].correctLocation) === -1) {
+      newLocs.push(approved[nl].correctLocation);
+    }
+  }
+  ensureLocationsInValidation(employeesSheet, locationCol + 1, newLocs);
+
+  // Apply approved changes
+  var historySheet = ss.getSheetByName('Employee History');
+  var timezone = ss.getSpreadsheetTimeZone();
+  var todayStr = Utilities.formatDate(new Date(), timezone, 'MM/dd/yyyy');
+  var historyRows = [];
+
+  for (var u = 0; u < approved.length; u++) {
+    var fix = approved[u];
+    employeesSheet.getRange(fix.row + 1, locationCol + 1).setValue(fix.correctLocation);
+
+    if (historySheet) {
+      historyRows.push([
+        todayStr,
+        fix.name,
+        'Location Change',
+        fix.correctLocation,
+        fix.jobNumber,
+        '', '', '',
+        '',
+        'Synced from Job Tracking (was ' + fix.currentLocation + ')'
+      ]);
+    }
+  }
+
+  // Batch write history
+  if (historyRows.length > 0 && historySheet) {
+    var histLastRow = historySheet.getLastRow();
+    historySheet.getRange(histLastRow + 1, 1, historyRows.length, historyRows[0].length).setValues(historyRows);
+  }
+
+  ui.alert('✅ Locations Updated', 'Updated ' + approved.length + ' employee(s) to match Job Tracking.' + (skipped > 0 ? '\nSkipped ' + skipped + ' employee(s).' : '') + '\n\nChanges logged to Employee History.', ui.ButtonSet.OK);
+  Logger.log('syncEmployeeLocationsFromJobTracking: Updated ' + approved.length + ' employees, skipped ' + skipped);
+}
+
+/**
  * Adds a custom menu to the Google Sheet for Glove Manager actions.
  * Also automatically opens the Quick Actions sidebar.
  */
@@ -6018,6 +6229,7 @@ function onOpen() {
         .addItem('📝 Backfill Job Names', 'backfillJobNames')
         .addItem('📂 View Job Tracking', 'openJobTrackingSheet')
         .addSeparator()
+        .addItem('🔄 Sync Employee Locations from Job Tracking', 'syncEmployeeLocationsFromJobTracking')
         .addItem('🔄 Sync Completed Jobs to Training', 'syncCompletedJobsToTraining')
         .addItem('🧹 Cleanup Pending Training for Completed Jobs', 'cleanupPendingTrainingForCompletedJobs')
         .addItem('🔄 Sync Completed Job (Manual)', 'menuSyncCompletedJob')))
@@ -6092,6 +6304,7 @@ function onOpen() {
         .addSeparator()
         .addItem('🔄 Migrate Safety Reports Sheet', 'migrateSafetyReportsToEquipmentNeeds')
         .addItem('🧹 Cleanup Equipment Sheet', 'cleanupSafetyReportsSheet')
+        .addItem('📅 Add Resolved On Column', 'addResolvedOnColumn')
         .addItem('🧹 Cleanup Config Crews (Legacy)', 'cleanupComplianceConfig')
         .addItem('🔧 Fix Config Checkboxes (Legacy)', 'fixComplianceConfigCheckboxes')
         .addItem('🧹 Remove Duplicate Rows', 'menuCleanupDuplicateComplianceRows')
@@ -9742,8 +9955,8 @@ function importLegacyHistoryData(itemType, itemNum, itemSize, itemClass, legacyD
  */
 function showItemHistoryLookup() {
   var html = HtmlService.createHtmlOutputFromFile('LookupDialog')
-    .setWidth(900)
-    .setHeight(700);
+    .setWidth(1000)
+    .setHeight(750);
   SpreadsheetApp.getUi().showModalDialog(html, '🔍 Lookup');
 }
 
@@ -9753,40 +9966,69 @@ function showItemHistoryLookup() {
  * @return {Object} Employee data with assignments
  */
 function lookupEmployee(name) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
-  var glovesSheet = ss.getSheetByName(SHEET_GLOVES);
-  var sleevesSheet = ss.getSheetByName(SHEET_SLEEVES);
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
 
-  if (!employeesSheet) {
-    return { found: false };
-  }
+    if (!employeesSheet) {
+      return { found: false };
+    }
 
-  var empData = employeesSheet.getDataRange().getValues();
-  var empHeaders = empData[0];
+    var empData = employeesSheet.getDataRange().getValues();
+    var empHeaders = empData[0];
 
-  // Find column indices
-  var cols = {};
-  empHeaders.forEach(function(h, i) {
-    var header = String(h).toLowerCase().trim();
-    if (header === 'name') cols.name = i;
-    if (header === 'location') cols.location = i;
-    if (header === 'job number') cols.jobNumber = i;
-    if (header === 'job classification') cols.jobClassification = i;
-    if (header === 'glove size') cols.gloveSize = i;
-    if (header === 'sleeve size') cols.sleeveSize = i;
-  });
+    // Find column indices by header name
+    var cols = {};
+    empHeaders.forEach(function(h, i) {
+      var header = String(h).toLowerCase().trim();
+      if (header === 'name') cols.name = i;
+      if (header === 'location') cols.location = i;
+      if (header === 'job number') cols.jobNumber = i;
+      if (header === 'job classification') cols.jobClassification = i;
+      if (header === 'glove size') cols.gloveSize = i;
+      if (header === 'sleeve size') cols.sleeveSize = i;
+      if (header === 'phone' || header === 'phone number') cols.phone = i;
+      if (header === 'mp email' || header === 'email') cols.email = i;
+    });
 
-  // Search for employee (case-insensitive partial match)
+    // Safety: if name column not found, use COLS constant
+    if (cols.name === undefined) cols.name = COLS.EMPLOYEES.NAME - 1;
+
+    Logger.log('lookupEmployee: searching for "' + name + '", name col=' + cols.name + ', rows=' + empData.length);
+
+  // Search for employee (case-insensitive, prioritize exact/best match)
   var searchName = name.toLowerCase().trim();
   var employee = null;
+  var bestMatch = null;
+  var bestScore = 0; // Higher = better match
 
   for (var i = 1; i < empData.length; i++) {
     var empName = String(empData[i][cols.name] || '').toLowerCase().trim();
-    if (empName.indexOf(searchName) !== -1 || searchName.indexOf(empName) !== -1) {
+    if (!empName) continue;
+
+    var score = 0;
+
+    if (empName === searchName) {
+      // Exact match - use immediately
       employee = empData[i];
       break;
+    } else if (empName.indexOf(searchName) !== -1) {
+      // Employee name contains search term (e.g., search "corey" matches "corey allen")
+      score = searchName.length * 2; // Reward longer search terms
+    } else if (searchName.indexOf(empName) !== -1) {
+      // Search term contains employee name (e.g., search "corey allen" matches "allen")
+      // Lower priority - only use if no better match found
+      score = empName.length;
     }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = empData[i];
+    }
+  }
+
+  if (!employee) {
+    employee = bestMatch;
   }
 
   if (!employee) {
@@ -9801,23 +10043,35 @@ function lookupEmployee(name) {
     jobClassification: employee[cols.jobClassification] || '',
     gloveSize: employee[cols.gloveSize] || '',
     sleeveSize: employee[cols.sleeveSize] || '',
+    phone: cols.phone !== undefined ? (employee[cols.phone] || '') : '',
+    email: cols.email !== undefined ? (employee[cols.email] || '') : '',
     gloves: [],
-    sleeves: []
+    sleeves: [],
+    blankets: [],
+    hvTesters: [],
+    phasingSets: [],
+    aeds: []
   };
+
+  // Get equipment sheets
+  var glovesSheet = ss.getSheetByName(SHEET_GLOVES);
+  var sleevesSheet = ss.getSheetByName(SHEET_SLEEVES);
+  var blanketsSheet = ss.getSheetByName(SHEET_BLANKETS);
+  var aedSheet = ss.getSheetByName(SHEET_AED);
 
   // Find assigned gloves
   if (glovesSheet && glovesSheet.getLastRow() > 1) {
     var gloveData = glovesSheet.getDataRange().getValues();
     for (var g = 1; g < gloveData.length; g++) {
-      var assignedTo = String(gloveData[g][7] || '').toLowerCase().trim(); // Column H = Assigned To
+      var assignedTo = String(gloveData[g][COLS.INVENTORY.ASSIGNED_TO - 1] || '').toLowerCase().trim();
       if (assignedTo.indexOf(searchName) !== -1) {
         result.gloves.push({
-          itemNum: gloveData[g][0] || '',
-          size: gloveData[g][1] || '',
-          itemClass: gloveData[g][2] || '',
-          dateAssigned: formatDateForDisplay(gloveData[g][4]),
-          changeOutDate: formatDateForDisplay(gloveData[g][8]),
-          status: gloveData[g][6] || ''
+          itemNum: gloveData[g][COLS.INVENTORY.ITEM_NUM - 1] || '',
+          size: gloveData[g][COLS.INVENTORY.SIZE - 1] || '',
+          itemClass: gloveData[g][COLS.INVENTORY.CLASS - 1] || '',
+          dateAssigned: formatDateForDisplay(gloveData[g][COLS.INVENTORY.DATE_ASSIGNED - 1]),
+          changeOutDate: formatDateForDisplay(gloveData[g][COLS.INVENTORY.CHANGE_OUT_DATE - 1]),
+          status: gloveData[g][COLS.INVENTORY.STATUS - 1] || ''
         });
       }
     }
@@ -9827,36 +10081,143 @@ function lookupEmployee(name) {
   if (sleevesSheet && sleevesSheet.getLastRow() > 1) {
     var sleeveData = sleevesSheet.getDataRange().getValues();
     for (var s = 1; s < sleeveData.length; s++) {
-      var sleeveAssignedTo = String(sleeveData[s][7] || '').toLowerCase().trim();
+      var sleeveAssignedTo = String(sleeveData[s][COLS.INVENTORY.ASSIGNED_TO - 1] || '').toLowerCase().trim();
       if (sleeveAssignedTo.indexOf(searchName) !== -1) {
         result.sleeves.push({
-          itemNum: sleeveData[s][0] || '',
-          size: sleeveData[s][1] || '',
-          itemClass: sleeveData[s][2] || '',
-          dateAssigned: formatDateForDisplay(sleeveData[s][4]),
-          changeOutDate: formatDateForDisplay(sleeveData[s][8]),
-          status: sleeveData[s][6] || ''
+          itemNum: sleeveData[s][COLS.INVENTORY.ITEM_NUM - 1] || '',
+          size: sleeveData[s][COLS.INVENTORY.SIZE - 1] || '',
+          itemClass: sleeveData[s][COLS.INVENTORY.CLASS - 1] || '',
+          dateAssigned: formatDateForDisplay(sleeveData[s][COLS.INVENTORY.DATE_ASSIGNED - 1]),
+          changeOutDate: formatDateForDisplay(sleeveData[s][COLS.INVENTORY.CHANGE_OUT_DATE - 1]),
+          status: sleeveData[s][COLS.INVENTORY.STATUS - 1] || ''
         });
       }
     }
   }
 
+  // Find assigned blankets
+  if (blanketsSheet && blanketsSheet.getLastRow() > 1) {
+    var blanketData = blanketsSheet.getDataRange().getValues();
+    for (var b = 1; b < blanketData.length; b++) {
+      var blanketAssignedTo = String(blanketData[b][COLS.BLANKETS.ASSIGNED_TO - 1] || '').toLowerCase().trim();
+      if (blanketAssignedTo.indexOf(searchName) !== -1) {
+        result.blankets.push({
+          itemNum: blanketData[b][COLS.BLANKETS.ITEM_NUM - 1] || '',
+          type: blanketData[b][COLS.BLANKETS.TYPE - 1] || '',
+          itemClass: blanketData[b][COLS.BLANKETS.CLASS - 1] || '',
+          testDate: formatDateForDisplay(blanketData[b][COLS.BLANKETS.TEST_DATE - 1]),
+          dateAssigned: formatDateForDisplay(blanketData[b][COLS.BLANKETS.DATE_ASSIGNED - 1]),
+          changeOutDate: formatDateForDisplay(blanketData[b][COLS.BLANKETS.CHANGE_OUT_DATE - 1]),
+          status: blanketData[b][COLS.BLANKETS.STATUS - 1] || ''
+        });
+      }
+    }
+  }
+
+  // Find assigned HV Testers
+  var hvTestersSheet = ss.getSheetByName(SHEET_HV_TESTERS);
+  if (hvTestersSheet && hvTestersSheet.getLastRow() > 1) {
+    var hvData = hvTestersSheet.getDataRange().getValues();
+    for (var hv = 1; hv < hvData.length; hv++) {
+      var hvAssignedTo = String(hvData[hv][COLS.HV_TESTERS.ASSIGNED_TO - 1] || '').toLowerCase().trim();
+      if (hvAssignedTo.indexOf(searchName) !== -1) {
+        result.hvTesters.push({
+          itemNum: hvData[hv][COLS.HV_TESTERS.ITEM_NUM - 1] || '',
+          model: hvData[hv][COLS.HV_TESTERS.MODEL - 1] || '',
+          serialNum: hvData[hv][COLS.HV_TESTERS.SERIAL_NUM - 1] || '',
+          calibrationDate: formatDateForDisplay(hvData[hv][COLS.HV_TESTERS.CALIBRATION_DATE - 1]),
+          changeOutDate: formatDateForDisplay(hvData[hv][COLS.HV_TESTERS.CHANGE_OUT_DATE - 1]),
+          status: hvData[hv][COLS.HV_TESTERS.STATUS - 1] || ''
+        });
+      }
+    }
+  }
+
+  // Find assigned Phasing Sets
+  var phasingSetsSheet = ss.getSheetByName(SHEET_PHASING_SETS);
+  if (phasingSetsSheet && phasingSetsSheet.getLastRow() > 1) {
+    var psData = phasingSetsSheet.getDataRange().getValues();
+    for (var ps = 1; ps < psData.length; ps++) {
+      var psAssignedTo = String(psData[ps][COLS.PHASING_SETS.ASSIGNED_TO - 1] || '').toLowerCase().trim();
+      if (psAssignedTo.indexOf(searchName) !== -1) {
+        result.phasingSets.push({
+          itemNum: psData[ps][COLS.PHASING_SETS.ITEM_NUM - 1] || '',
+          model: psData[ps][COLS.PHASING_SETS.MODEL - 1] || '',
+          kv: psData[ps][COLS.PHASING_SETS.KV - 1] || '',
+          serialNum: psData[ps][COLS.PHASING_SETS.SERIAL_NUM - 1] || '',
+          calibrationDate: formatDateForDisplay(psData[ps][COLS.PHASING_SETS.CALIBRATION_DATE - 1]),
+          changeOutDate: formatDateForDisplay(psData[ps][COLS.PHASING_SETS.CHANGE_OUT_DATE - 1]),
+          status: psData[ps][COLS.PHASING_SETS.STATUS - 1] || ''
+        });
+      }
+    }
+  }
+
+  // Find assigned AEDs
+  if (aedSheet && aedSheet.getLastRow() > 1) {
+    var aedData = aedSheet.getDataRange().getValues();
+    for (var a = 1; a < aedData.length; a++) {
+      var aedAssignedTo = String(aedData[a][COLS.AED.ASSIGNED_TO - 1] || '').toLowerCase().trim();
+      if (aedAssignedTo.indexOf(searchName) !== -1) {
+        result.aeds.push({
+          itemNum: aedData[a][COLS.AED.ITEM_NUM - 1] || '',
+          model: aedData[a][COLS.AED.MODEL - 1] || '',
+          padExpiration: formatDateForDisplay(aedData[a][COLS.AED.PAD_EXPIRATION - 1]),
+          dateAssigned: formatDateForDisplay(aedData[a][COLS.AED.DATE_ASSIGNED - 1]),
+          status: aedData[a][COLS.AED.STATUS - 1] || ''
+        });
+      }
+    }
+  }
+
+  // Collect past assignment history from History sheets (wrapped in try/catch to prevent timeout/errors)
+  try {
+    var employeeFullName = String(employee[cols.name] || '').trim();
+    result.gloveHistory = getEquipmentHistoryForEmployee(ss, SHEET_GLOVES_HISTORY, employeeFullName);
+    result.sleeveHistory = getEquipmentHistoryForEmployee(ss, SHEET_SLEEVES_HISTORY, employeeFullName);
+    result.blanketHistory = getEquipmentHistoryForEmployee(ss, SHEET_BLANKETS_HISTORY, employeeFullName);
+    result.hvTesterHistory = getEquipmentHistoryForEmployee(ss, SHEET_HV_TESTERS_HISTORY, employeeFullName);
+    result.phasingSetHistory = getEquipmentHistoryForEmployee(ss, SHEET_PHASING_SETS_HISTORY, employeeFullName);
+    result.aedHistory = getEquipmentHistoryForEmployee(ss, SHEET_AED_HISTORY, employeeFullName);
+  } catch (histErr) {
+    Logger.log('History lookup error (non-fatal): ' + histErr.message);
+    // Return result without history rather than failing entirely
+  }
+
   return result;
+  } catch (outerErr) {
+    Logger.log('lookupEmployee FATAL error: ' + outerErr.message + '\n' + outerErr.stack);
+    throw outerErr; // Re-throw so the failure handler catches it with a real error message
+  }
 }
 
 /**
  * Looks up an item by number and returns current info plus history.
- * @param {string} itemType - 'glove' or 'sleeve'
+ * Supports: glove, sleeve, blanket, hv_tester, phasing_set, aed
+ * @param {string} itemType - Item type to search
  * @param {string} itemNum - Item number to search for
  * @return {Object} Item data with history
  */
 function lookupItem(itemType, itemNum) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetName = (itemType === 'sleeve') ? SHEET_SLEEVES : SHEET_GLOVES;
-  var historySheetName = (itemType === 'sleeve') ? SHEET_SLEEVES_HISTORY : SHEET_GLOVES_HISTORY;
 
-  var sheet = ss.getSheetByName(sheetName);
-  var historySheet = ss.getSheetByName(historySheetName);
+  // Map item types to sheet names and history sheet names
+  var sheetMap = {
+    glove: { sheet: SHEET_GLOVES, history: SHEET_GLOVES_HISTORY },
+    sleeve: { sheet: SHEET_SLEEVES, history: SHEET_SLEEVES_HISTORY },
+    blanket: { sheet: SHEET_BLANKETS, history: SHEET_BLANKETS_HISTORY },
+    hv_tester: { sheet: SHEET_HV_TESTERS, history: SHEET_HV_TESTERS_HISTORY },
+    phasing_set: { sheet: SHEET_PHASING_SETS, history: SHEET_PHASING_SETS_HISTORY },
+    aed: { sheet: SHEET_AED, history: SHEET_AED_HISTORY }
+  };
+
+  var config = sheetMap[itemType];
+  if (!config) {
+    return { found: false };
+  }
+
+  var sheet = ss.getSheetByName(config.sheet);
+  var historySheet = ss.getSheetByName(config.history);
 
   if (!sheet) {
     return { found: false };
@@ -9864,11 +10225,13 @@ function lookupItem(itemType, itemNum) {
 
   var data = sheet.getDataRange().getValues();
   var item = null;
+  var itemRow = -1;
 
-  // Find the item
+  // Find the item by Item # (always column A / index 0)
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][0]).trim() === String(itemNum).trim()) {
       item = data[i];
+      itemRow = i;
       break;
     }
   }
@@ -9877,22 +10240,62 @@ function lookupItem(itemType, itemNum) {
     return { found: false };
   }
 
-  var result = {
-    found: true,
-    itemNum: item[0] || '',
-    size: item[1] || '',
-    itemClass: item[2] || '',
-    testDate: formatDateForDisplay(item[3]),
-    dateAssigned: formatDateForDisplay(item[4]),
-    location: item[5] || '',
-    status: item[6] || '',
-    assignedTo: item[7] || '',
-    changeOutDate: formatDateForDisplay(item[8]),
-    notes: item[10] || '',
-    history: []
-  };
+  // Build result based on item type using COLS constants
+  var result = { found: true, itemNum: item[0] || '' };
+
+  if (itemType === 'glove' || itemType === 'sleeve') {
+    result.size = item[COLS.INVENTORY.SIZE - 1] || '';
+    result.itemClass = item[COLS.INVENTORY.CLASS - 1] || '';
+    result.testDate = formatDateForDisplay(item[COLS.INVENTORY.TEST_DATE - 1]);
+    result.dateAssigned = formatDateForDisplay(item[COLS.INVENTORY.DATE_ASSIGNED - 1]);
+    result.location = item[COLS.INVENTORY.LOCATION - 1] || '';
+    result.status = item[COLS.INVENTORY.STATUS - 1] || '';
+    result.assignedTo = item[COLS.INVENTORY.ASSIGNED_TO - 1] || '';
+    result.changeOutDate = formatDateForDisplay(item[COLS.INVENTORY.CHANGE_OUT_DATE - 1]);
+    result.notes = item[COLS.INVENTORY.NOTES - 1] || '';
+  } else if (itemType === 'blanket') {
+    result.type = item[COLS.BLANKETS.TYPE - 1] || '';
+    result.itemClass = item[COLS.BLANKETS.CLASS - 1] || '';
+    result.testDate = formatDateForDisplay(item[COLS.BLANKETS.TEST_DATE - 1]);
+    result.dateAssigned = formatDateForDisplay(item[COLS.BLANKETS.DATE_ASSIGNED - 1]);
+    result.location = item[COLS.BLANKETS.LOCATION - 1] || '';
+    result.status = item[COLS.BLANKETS.STATUS - 1] || '';
+    result.assignedTo = item[COLS.BLANKETS.ASSIGNED_TO - 1] || '';
+    result.changeOutDate = formatDateForDisplay(item[COLS.BLANKETS.CHANGE_OUT_DATE - 1]);
+    result.notes = item[COLS.BLANKETS.NOTES - 1] || '';
+  } else if (itemType === 'hv_tester') {
+    result.model = item[COLS.HV_TESTERS.MODEL - 1] || '';
+    result.serialNum = item[COLS.HV_TESTERS.SERIAL_NUM - 1] || '';
+    result.calibrationDate = formatDateForDisplay(item[COLS.HV_TESTERS.CALIBRATION_DATE - 1]);
+    result.dateAssigned = formatDateForDisplay(item[COLS.HV_TESTERS.DATE_ASSIGNED - 1]);
+    result.location = item[COLS.HV_TESTERS.LOCATION - 1] || '';
+    result.status = item[COLS.HV_TESTERS.STATUS - 1] || '';
+    result.assignedTo = item[COLS.HV_TESTERS.ASSIGNED_TO - 1] || '';
+    result.changeOutDate = formatDateForDisplay(item[COLS.HV_TESTERS.CHANGE_OUT_DATE - 1]);
+    result.notes = item[COLS.HV_TESTERS.NOTES - 1] || '';
+  } else if (itemType === 'phasing_set') {
+    result.model = item[COLS.PHASING_SETS.MODEL - 1] || '';
+    result.kv = item[COLS.PHASING_SETS.KV - 1] || '';
+    result.serialNum = item[COLS.PHASING_SETS.SERIAL_NUM - 1] || '';
+    result.calibrationDate = formatDateForDisplay(item[COLS.PHASING_SETS.CALIBRATION_DATE - 1]);
+    result.dateAssigned = formatDateForDisplay(item[COLS.PHASING_SETS.DATE_ASSIGNED - 1]);
+    result.location = item[COLS.PHASING_SETS.LOCATION - 1] || '';
+    result.status = item[COLS.PHASING_SETS.STATUS - 1] || '';
+    result.assignedTo = item[COLS.PHASING_SETS.ASSIGNED_TO - 1] || '';
+    result.changeOutDate = formatDateForDisplay(item[COLS.PHASING_SETS.CHANGE_OUT_DATE - 1]);
+    result.notes = item[COLS.PHASING_SETS.NOTES - 1] || '';
+  } else if (itemType === 'aed') {
+    result.model = item[COLS.AED.MODEL - 1] || '';
+    result.padExpiration = formatDateForDisplay(item[COLS.AED.PAD_EXPIRATION - 1]);
+    result.dateAssigned = formatDateForDisplay(item[COLS.AED.DATE_ASSIGNED - 1]);
+    result.location = item[COLS.AED.LOCATION - 1] || '';
+    result.status = item[COLS.AED.STATUS - 1] || '';
+    result.assignedTo = item[COLS.AED.ASSIGNED_TO - 1] || '';
+    result.notes = item[COLS.AED.NOTES - 1] || '';
+  }
 
   // Get history if available
+  result.history = [];
   if (historySheet && historySheet.getLastRow() > 1) {
     var historyData = historySheet.getDataRange().getValues();
     for (var h = 1; h < historyData.length; h++) {
@@ -9911,6 +10314,228 @@ function lookupItem(itemType, itemNum) {
   }
 
   return result;
+}
+
+/**
+ * Searches a History sheet for all records assigned to a given employee.
+ * History sheets have columns: Date(0), Item#(1), Size/Type(2), Class(3), Location(4), Assigned To(5)
+ * @param {Spreadsheet} ss
+ * @param {string} historySheetName
+ * @param {string} employeeName - Full name (case-insensitive match)
+ * @return {Array} Array of history objects, sorted by date descending, max 25
+ */
+function getEquipmentHistoryForEmployee(ss, historySheetName, employeeName) {
+  var results = [];
+  var sheet = ss.getSheetByName(historySheetName);
+  if (!sheet || sheet.getLastRow() < 2) return results;
+
+  var data = sheet.getDataRange().getValues();
+  var searchName = employeeName.toLowerCase().trim();
+
+  for (var i = 1; i < data.length; i++) {
+    var assignedTo = String(data[i][5] || '').toLowerCase().trim();
+    if (assignedTo === searchName) {
+      results.push({
+        date: formatDateForDisplay(data[i][0]),
+        itemNum: String(data[i][1] || ''),
+        sizeOrType: String(data[i][2] || ''),
+        itemClass: String(data[i][3] || ''),
+        location: String(data[i][4] || '')
+      });
+    }
+  }
+
+  // Sort by date descending
+  results.sort(function(a, b) {
+    return new Date(b.date) - new Date(a.date);
+  });
+
+  return results.slice(0, 25);
+}
+
+/**
+ * Looks up equipment history for an employee across all equipment types.
+ * Called separately from lookupEmployee() to avoid timeout on large history sheets.
+ * @param {string} name - Employee name
+ * @return {Object} History arrays by equipment type
+ */
+function lookupEmployeeHistory(name) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var result = {};
+    result.gloveHistory = getEquipmentHistoryForEmployee(ss, SHEET_GLOVES_HISTORY, name);
+    result.sleeveHistory = getEquipmentHistoryForEmployee(ss, SHEET_SLEEVES_HISTORY, name);
+    result.blanketHistory = getEquipmentHistoryForEmployee(ss, SHEET_BLANKETS_HISTORY, name);
+    result.hvTesterHistory = getEquipmentHistoryForEmployee(ss, SHEET_HV_TESTERS_HISTORY, name);
+    result.phasingSetHistory = getEquipmentHistoryForEmployee(ss, SHEET_PHASING_SETS_HISTORY, name);
+    result.aedHistory = getEquipmentHistoryForEmployee(ss, SHEET_AED_HISTORY, name);
+    return result;
+  } catch (e) {
+    Logger.log('lookupEmployeeHistory error: ' + e.message);
+    return null;
+  }
+}
+
+/**
+ * Returns all employees who have equipment assigned, with swap status.
+ * Stores result in ScriptProperties and returns confirmation.
+ * Client calls getStoredAllAssignments() to retrieve.
+ */
+function getAllEmployeeAssignments() {
+  try {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+  if (!employeesSheet) return { stored: false, error: 'Employees sheet not found' };
+
+  var empData = employeesSheet.getDataRange().getValues();
+  var empHeaders = empData[0];
+
+  // Find employee column indices - use COLS constants as fallback
+  var nameCol = COLS.EMPLOYEES.NAME - 1;
+  var classCol = COLS.EMPLOYEES.JOB_CLASSIFICATION - 1;
+  var jobNumCol = COLS.EMPLOYEES.JOB_NUMBER - 1;
+  var locationCol = COLS.EMPLOYEES.LOCATION - 1;
+
+  // Try header-based detection (override if found)
+  for (var h = 0; h < empHeaders.length; h++) {
+    var hdr = String(empHeaders[h]).toLowerCase().trim();
+    if (hdr === 'name') nameCol = h;
+    if (hdr === 'job classification') classCol = h;
+    if (hdr === 'job number') jobNumCol = h;
+    if (hdr === 'location') locationCol = h;
+  }
+
+  Logger.log('getAllEmployeeAssignments: nameCol=' + nameCol + ', classCol=' + classCol +
+    ', jobNumCol=' + jobNumCol + ', locationCol=' + locationCol + ', empRows=' + (empData.length - 1));
+
+  // Build employee info map
+  var employeeMap = {}; // name (lowercase) -> { name, classification, jobNumber, location, items: [] }
+  for (var e = 1; e < empData.length; e++) {
+    var empName = String(empData[e][nameCol] || '').trim();
+    if (!empName) continue;
+    employeeMap[empName.toLowerCase()] = {
+      name: empName,
+      classification: classCol >= 0 ? String(empData[e][classCol] || '') : '',
+      jobNumber: jobNumCol >= 0 ? String(empData[e][jobNumCol] || '') : '',
+      location: locationCol >= 0 ? String(empData[e][locationCol] || '') : '',
+      items: [],
+      hasSwapItem: false
+    };
+  }
+
+  var empCount = Object.keys(employeeMap).length;
+  Logger.log('getAllEmployeeAssignments: built employeeMap with ' + empCount + ' employees');
+
+  // Build set of item numbers on swap sheets
+  var swapItemNums = {};
+  var swapSheets = [
+    { name: SHEET_GLOVE_SWAPS, col: COLS.SWAPS.CURRENT_ITEM - 1 },
+    { name: SHEET_SLEEVE_SWAPS, col: COLS.SWAPS.CURRENT_ITEM - 1 },
+    { name: SHEET_BLANKET_SWAPS, col: COLS.BLANKET_SWAPS.CURRENT_ITEM - 1 },
+    { name: SHEET_HV_TESTER_SWAPS, col: 1 },
+    { name: SHEET_PHASING_SET_SWAPS, col: 1 },
+    { name: SHEET_AED_SWAPS, col: 1 }
+  ];
+
+  for (var sw = 0; sw < swapSheets.length; sw++) {
+    var swSheet = ss.getSheetByName(swapSheets[sw].name);
+    if (swSheet && swSheet.getLastRow() > 1) {
+      var swData = swSheet.getDataRange().getValues();
+      for (var sr = 1; sr < swData.length; sr++) {
+        var swItem = String(swData[sr][swapSheets[sw].col] || '').trim();
+        if (swItem) swapItemNums[swItem] = true;
+      }
+    }
+  }
+
+  // Helper to collect items from an equipment sheet
+  function collectItems(sheetName, typeName, colsDef) {
+    var sheet = ss.getSheetByName(sheetName);
+    if (!sheet || sheet.getLastRow() < 2) {
+      Logger.log('collectItems: ' + sheetName + ' - sheet not found or empty');
+      return;
+    }
+    var data = sheet.getDataRange().getValues();
+    var matched = 0;
+    var unmatched = 0;
+    for (var r = 1; r < data.length; r++) {
+      var assignedTo = String(data[r][colsDef.ASSIGNED_TO - 1] || '').trim();
+      if (!assignedTo || assignedTo === 'On Shelf' || assignedTo === 'on shelf') continue;
+      var key = assignedTo.toLowerCase();
+      if (!employeeMap[key]) {
+        unmatched++;
+        if (unmatched <= 3) Logger.log('collectItems: ' + sheetName + ' unmatched name: "' + assignedTo + '"');
+        continue;
+      }
+      matched++;
+      var itemNum = String(data[r][colsDef.ITEM_NUM - 1] || '');
+      var onSwap = !!swapItemNums[itemNum];
+      var item = {
+        type: typeName,
+        itemNum: itemNum,
+        status: String(data[r][colsDef.STATUS - 1] || ''),
+        onSwap: onSwap
+      };
+      // Add type-specific fields
+      if (colsDef.SIZE) item.size = String(data[r][colsDef.SIZE - 1] || '');
+      if (colsDef.TYPE) item.sizeOrType = String(data[r][colsDef.TYPE - 1] || '');
+      if (colsDef.CLASS) item.itemClass = String(data[r][colsDef.CLASS - 1] || '');
+      if (colsDef.MODEL) item.model = String(data[r][colsDef.MODEL - 1] || '');
+      if (colsDef.DATE_ASSIGNED) item.dateAssigned = formatDateForDisplay(data[r][colsDef.DATE_ASSIGNED - 1]);
+      if (colsDef.CHANGE_OUT_DATE) item.changeOutDate = formatDateForDisplay(data[r][colsDef.CHANGE_OUT_DATE - 1]);
+
+      employeeMap[key].items.push(item);
+      if (onSwap) employeeMap[key].hasSwapItem = true;
+    }
+    Logger.log('collectItems: ' + sheetName + ' - ' + (data.length - 1) + ' rows, ' + matched + ' matched, ' + unmatched + ' unmatched');
+  }
+
+  collectItems(SHEET_GLOVES, 'Glove', COLS.INVENTORY);
+  collectItems(SHEET_SLEEVES, 'Sleeve', COLS.INVENTORY);
+  collectItems(SHEET_BLANKETS, 'Blanket', COLS.BLANKETS);
+  collectItems(SHEET_HV_TESTERS, 'HV Tester', COLS.HV_TESTERS);
+  collectItems(SHEET_PHASING_SETS, 'Phasing Set', COLS.PHASING_SETS);
+  collectItems(SHEET_AED, 'AED', COLS.AED);
+
+  // Filter to only employees with items, sort alphabetically
+  var result = [];
+  var keys = Object.keys(employeeMap);
+  for (var k = 0; k < keys.length; k++) {
+    var emp = employeeMap[keys[k]];
+    if (emp.items.length > 0) {
+      result.push(emp);
+    }
+  }
+  result.sort(function(a, b) { return a.name.localeCompare(b.name); });
+
+  Logger.log('getAllEmployeeAssignments: ' + result.length + ' employees with items (out of ' + empCount + ' total)');
+
+  // Store in ScriptProperties
+  var json = JSON.stringify({ employees: result, generated: new Date().toISOString() });
+  Logger.log('getAllEmployeeAssignments: JSON size = ' + json.length + ' chars');
+
+  try {
+    PropertiesService.getScriptProperties().setProperty('ALL_ASSIGNMENTS_DATA', json);
+  } catch (storeErr) {
+    Logger.log('getAllEmployeeAssignments: ScriptProperties storage failed (' + storeErr.message + '), returning data directly');
+    // If storage fails (too large), return the data directly
+    return { stored: true, count: result.length, directData: { employees: result, generated: new Date().toISOString() } };
+  }
+
+  return { stored: true, count: result.length };
+  } catch (outerErr) {
+    Logger.log('getAllEmployeeAssignments FATAL error: ' + outerErr.message + '\n' + outerErr.stack);
+    return { stored: false, error: outerErr.message };
+  }
+}
+
+/**
+ * Retrieves stored All Assignments data from ScriptProperties.
+ */
+function getStoredAllAssignments() {
+  var json = PropertiesService.getScriptProperties().getProperty('ALL_ASSIGNMENTS_DATA');
+  if (!json) return null;
+  return JSON.parse(json);
 }
 
 /**
@@ -10433,8 +11058,11 @@ function setupLocationsSheet() {
     ['Stanford', 120, 'North', 'Great Falls'],
     ['Butte', 90, 'Southwest', 'Butte'],
     ['Anaconda', 90, 'Southwest', 'Butte'],
+    ['Anaconda City Sub', 90, 'Southwest', 'Butte'],
     ['Missoula', 120, 'West', 'Missoula'],
     ['Lolo', 130, 'West', 'Missoula'],
+    ['Rattlesnake Sub', 120, 'West', 'Missoula'],
+    ['Three Rivers Sub', 120, 'West', 'Missoula'],
     ['Elliston', 45, 'West', 'Helena'],
     ['Gold Creek', 75, 'West', 'Butte'],
     ['Kalispell', 180, 'Northwest', 'Kalispell'],
@@ -10448,6 +11076,9 @@ function setupLocationsSheet() {
     ['South Dakota', 420, 'Far', 'South Dakota'],
     ['Northern Lights', 420, 'Far', 'Northern Lights'],
     ['California', 960, 'Far', 'California'],
+    ['CA Sub', 960, 'Far', 'California'],
+    ['Texas', 960, 'Far', 'Texas'],
+    ['South Dakota Dock', 420, 'Far', 'South Dakota'],
     ['Weeds', 0, 'Office', 'Helena'],
     ['Light Duty', 0, 'Office', 'Helena'],
     ['Vacation', 0, 'Office', 'Helena'],
@@ -11928,7 +12559,7 @@ function markTaskComplete(taskKey, options) {
   if (result.success) {
     // For Safety Equipment tasks, sync completion to Safety Reports sheet
     // This updates the source row status from "Needs Attention" to "Resolved"
-    if (taskKey && (taskKey.indexOf('SafetyReports') === 0 || taskKey.indexOf('Safety Reports') === 0)) {
+    if (taskKey && (taskKey.indexOf('SafetyReports') === 0 || taskKey.indexOf('Safety Reports') === 0 || taskKey.indexOf('Safety Equipment Needs') === 0)) {
       try {
         var syncResult = syncSafetyReportCompletion(taskKey);
         if (syncResult && syncResult.synced) {
