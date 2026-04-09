@@ -62,6 +62,10 @@ var INTERVAL_CALIBRATION_YEARS = 10;
 // Show AEDs with pads expiring within 90 days on the AED Swaps report
 var AED_SWAP_LOOKAHEAD_DAYS = 90;
 
+// Location values that represent employee STATUS, not physical cities.
+// These should NOT be used as crew locations in Job Tracking.
+var STATUS_LOCATIONS = ['vacation', 'light duty', 'weeds', 'leave', 'previous employee', 'unknown'];
+
 // Alternating colors for history grouping
 var HISTORY_COLOR_GLOVE_1 = '#e3f2fd';  // Light blue
 var HISTORY_COLOR_GLOVE_2 = '#ffffff';  // White
@@ -115,19 +119,20 @@ var COLS = {
     NOTES: 11           // K
   },
 
-  // HV Testers Sheet - Phase 2 (Future)
+  // HV Testers Sheet - Phase 2 (matches Phasing Sets layout)
   HV_TESTERS: {
     ITEM_NUM: 1,        // A - Equipment identifier
     MODEL: 2,           // B - Equipment model
-    SERIAL_NUM: 3,      // C - Serial number
-    CALIBRATION_DATE: 4,// D - Last calibration date
-    DATE_ASSIGNED: 5,   // E
-    LOCATION: 6,        // F
-    STATUS: 7,          // G
-    ASSIGNED_TO: 8,     // H - Crew Lead
-    CHANGE_OUT_DATE: 9, // I - Calibration + 10 years
-    PICKED_FOR: 10,     // J
-    NOTES: 11           // K
+    KV: 3,              // C - Voltage rating (KV)
+    SERIAL_NUM: 4,      // D - Serial number
+    CALIBRATION_DATE: 5,// E - Last calibration date
+    DATE_ASSIGNED: 6,   // F
+    LOCATION: 7,        // G
+    STATUS: 8,          // H
+    ASSIGNED_TO: 9,     // I - Crew Lead
+    CHANGE_OUT_DATE: 10,// J - Calibration + 10 years
+    PICKED_FOR: 11,     // K
+    NOTES: 12           // L
   },
 
   // Phasing Sets Sheet - Phase 2 (Future)

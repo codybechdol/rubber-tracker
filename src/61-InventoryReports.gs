@@ -1098,13 +1098,18 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
   }
 
   // ===========================================================================
-  // HV TESTERS: A=Item#(1), B=Model(2), C=Serial#(3), D=Calibration Date(4),
-  //             E=Date Assigned(5), F=Location(6), G=Status(7), H=Assigned To(8),
-  //             I=Replacement Date(9), J=Picked For(10), K=Notes(11)
+  // HV TESTERS: A=Item#(1), B=Model(2), C=KV(3), D=Serial#(4),
+  // HV TESTERS: A=Item#(1), B=Model(2), C=KV(3), D=Serial#(4),
+  //             E=Calibration Date(5), F=Date Assigned(6), G=Location(7),
+  //             H=Status(8), I=Assigned To(9), J=Change Out Date(10),
+  //             K=Picked For(11), L=Notes(12)
   // ===========================================================================
   if (isHVTester) {
     if (formData.model) {
       sheet.getRange(rowNum, COLS.HV_TESTERS.MODEL).setValue(formData.model);
+    }
+    if (formData.kv) {
+      sheet.getRange(rowNum, COLS.HV_TESTERS.KV).setValue(formData.kv);
     }
     if (formData.serialNum) {
       sheet.getRange(rowNum, COLS.HV_TESTERS.SERIAL_NUM).setValue(formData.serialNum);

@@ -181,20 +181,22 @@ Expanding the Rubber Tracker system to track additional electrical safety equipm
 - [x] Add `COLS.HV_TESTERS` and `COLS.PHASING_SETS` column mappings
 - [x] Rename `REPLACEMENT_DATE` to `CHANGE_OUT_DATE` in constants
 
-### Sheet Structure (both equipment types)
+### Sheet Structure (both equipment types - 12 columns A-L)
+### Sheet Structure (both equipment types - 12 columns A-L)
 | Col | Header | Description |
 |-----|--------|-------------|
 | A | Item # | Equipment identifier |
 | B | Model | Equipment model |
-| C | Serial # | Serial number |
-| D | Calibration Date | Last calibration |
-| E | Date Assigned | When assigned |
-| F | Location | Crew location |
-| G | Status | In Service, etc. |
-| H | Assigned To | Crew Lead |
-| I | Change Out Date | Calibration + 10 years (auto-calculated) |
-| J | Picked For | Pending assignment |
-| K | Notes | Free text |
+| C | KV | Voltage rating |
+| D | Serial # | Serial number |
+| E | Calibration Date | Last calibration |
+| F | Date Assigned | When assigned |
+| G | Location | Crew location |
+| H | Status | In Service, etc. |
+| I | Assigned To | Crew Lead |
+| J | Change Out Date | Calibration + 10 years (auto-calculated) |
+| K | Picked For | Pending assignment |
+| L | Notes | Free text |
 
 ### Sheet Creation
 - [x] Update `buildSheets()` for HV Testers sheet

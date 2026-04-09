@@ -12,39 +12,39 @@ Google Apps Script-based inventory management system for tracking rubber gloves/
 ## Architecture: File Load Order & Function Ownership
 Google Apps Script loads files **alphabetically**. Numbered prefixes control load order:
 ```
-00-Constants.gs  → loads FIRST (defines COLS, SHEET_* constants, incl. Blankets/HV Testers/Phasing Sets/AED) (~240 lines)
-01-Utilities.gs  → utility functions (logEvent, normalizeApprovalValue) (~90 lines)
+00-Constants.gs  → loads FIRST (defines COLS, SHEET_* constants, STATUS_LOCATIONS, incl. Blankets/HV Testers/Phasing Sets/AED) (~250 lines)
+01-Utilities.gs  → utility functions (logEvent, normalizeApprovalValue, isStatusLocation) (~105 lines)
 10-Menu.gs       → archived (menu now in Code.gs) (~18 lines)
-11-Triggers.gs   → edit/change triggers, auto change-out dates (~2.1k lines)
-20-InventoryHandlers.gs → inventory status/assignment handlers (~215 lines)
-21-ChangeOutDate.gs → change-out date calculation logic (~220 lines)
-22-EmployeeValidation.gs → Job Tracking functions, Employee validation (~3.2k lines)
-22-LocationSync.gs → Inventory location sync with Employees (Gloves, Sleeves, Blankets, HV Testers, Phasing Sets, AED) (~186 lines)
-30-SwapGeneration.gs → Swap report generation (~1.4k lines)
-31-SwapHandlers.gs → Swap stage handling (Stage 1/2/3 workflows) (~515 lines)
-32-SwapPreservation.gs → Swap checkbox/data preservation between regenerations (~150 lines)
-40-Reclaims.gs   → Reclaims logic and pick list generation (~1.1k lines)
-50-History.gs    → Item history (Gloves/Sleeves History) (~275 lines)
-51-EmployeeHistory.gs → Employee lifecycle, restore deleted employees (~1.5k lines)
-60-PurchaseNeeds.gs → Purchase Needs report generation (~425 lines)
-61-InventoryReports.gs → Inventory Reports with charts (~2.3k lines)
-62-PurchaseOrders.gs → PO generation and vendor management (~960 lines)
+11-Triggers.gs   → edit/change triggers, auto change-out dates (~1.9k lines)
+20-InventoryHandlers.gs → inventory status/assignment handlers (~190 lines)
+21-ChangeOutDate.gs → change-out date calculation logic (~190 lines)
+22-EmployeeValidation.gs → Job Tracking functions, Employee validation (~2.7k lines)
+22-LocationSync.gs → Inventory location sync with Employees (Gloves, Sleeves, Blankets, HV Testers, Phasing Sets, AED) (~150 lines)
+30-SwapGeneration.gs → Swap report generation (~1.2k lines)
+31-SwapHandlers.gs → Swap stage handling (Stage 1/2/3 workflows) (~440 lines)
+32-SwapPreservation.gs → Swap checkbox/data preservation between regenerations (~125 lines)
+40-Reclaims.gs   → Reclaims logic and pick list generation (~930 lines)
+50-History.gs    → Item history (Gloves/Sleeves History) (~240 lines)
+51-EmployeeHistory.gs → Employee lifecycle, restore deleted employees (~1.3k lines)
+60-PurchaseNeeds.gs → Purchase Needs report generation (~375 lines)
+61-InventoryReports.gs → Inventory Reports with charts (~2k lines)
+62-PurchaseOrders.gs → PO generation and vendor management (~820 lines)
 70-ToDoList.gs   → archived (To Do List functionality now in Code.gs) (~50 lines)
-75-Scheduling.gs → Crew visit scheduling, training calendar (~3.5k lines)
-76-SmartScheduling.gs → Task collection (incl. equipment swaps), getDriveTimeMap() (~2.4k lines)
-76-EmployeeClassifications.gs → Job classification dropdowns (~150 lines)
-80-EmailReports.gs → Weekly HTML email reports (~1.5k lines)
-85-DataImport.gs → Crew Import, Job Tracking sync, new hire/rehire, fiscal year transition (~3.3k lines)
-86-TimeTracking.gs → Daily Accomplishments (~1.1k lines)
-87-RoutePlanner.gs → Trip Planner (~2.5k lines)
-88-SafetyReports.gs → Gmail processing, Safety Compliance (~16.6k lines)
-90-Backup.gs     → Google Drive backup snapshot (~110 lines)
-95-BuildSheets.gs → Sheet creation/setup utilities (~90 lines)
-95-DiagnosticTools.gs → Pick list diagnostics (~630 lines)
-98-LegacyArchive.gs → Archived legacy functions (DO NOT USE) (~615 lines)
-99-MenuFix.gs    → Full menu backup (mirrors Code.gs onOpen()), menu fix/reset (~280 lines)
-Code.gs          → loads LAST, contains ALL working implementations (~22.6k lines)
-TestRunner.gs    → Basic integration tests, run via Apps Script editor (~190 lines)
+75-Scheduling.gs → Crew visit scheduling, training calendar (~3k lines)
+76-SmartScheduling.gs → Task collection (incl. equipment swaps), getDriveTimeMap() (~2.1k lines)
+76-EmployeeClassifications.gs → Job classification dropdowns (~130 lines)
+80-EmailReports.gs → Weekly HTML email reports (~1.2k lines)
+85-DataImport.gs → Crew Import, Job Tracking sync, new hire/rehire, fiscal year transition (~2.8k lines)
+86-TimeTracking.gs → Daily Accomplishments (~890 lines)
+87-RoutePlanner.gs → Trip Planner (~2.1k lines)
+88-SafetyReports.gs → Gmail processing, Safety Compliance (~14.2k lines)
+90-Backup.gs     → Google Drive backup snapshot (~88 lines)
+95-BuildSheets.gs → Sheet creation/setup utilities (~80 lines)
+95-DiagnosticTools.gs → Pick list diagnostics (~540 lines)
+98-LegacyArchive.gs → Archived legacy functions (DO NOT USE) (~525 lines)
+99-MenuFix.gs    → Full menu backup (mirrors Code.gs onOpen()), menu fix/reset (~265 lines)
+Code.gs          → loads LAST, contains ALL working implementations (~22.9k lines)
+TestRunner.gs    → Basic integration tests, run via Apps Script editor (~176 lines)
 ```
 
 **Key Rule:** When functions appear in multiple files, **Code.gs always wins** (loads last).
@@ -75,6 +75,8 @@ var status = row[COLS.INVENTORY.STATUS - 1];
 
 Available `COLS` namespaces: `INVENTORY` (Gloves/Sleeves), `BLANKETS`, `HV_TESTERS`, `PHASING_SETS`, `AED`, `SWAPS`, `BLANKET_SWAPS`, `SWAPS_HIDDEN`, `EMPLOYEES`, `EMPLOYEE_HISTORY`.
 
+**Note:** `HV_TESTERS` and `PHASING_SETS` share the same 12-column layout (A-L): Item#, Model, KV, Serial#, Calibration Date, Date Assigned, Location, Status, Assigned To, Change Out Date, Picked For, Notes.
+
 ### Logging
 ```javascript
 logEvent('Task completed successfully', 'INFO');  // Levels: INFO, ERROR, WARNING, DEBUG
@@ -100,33 +102,36 @@ function showMyDialog() {
 ## Key Files
 | File | Purpose |
 |------|---------|
-| `Code.gs` | Main file - ALL working functions go here (~22.6k lines) |
-| `00-Constants.gs` | Sheet names, column indices (`COLS`), business constants (~240 lines) |
-| `11-Triggers.gs` | Edit triggers, auto change-out date recalculation (~2.1k lines) |
-| `22-EmployeeValidation.gs` | Job Tracking sheet functions, employee validation, training sync (~3.2k lines) |
-| `51-EmployeeHistory.gs` | Employee lifecycle tracking, restore deleted employees (~1.5k lines) |
-| `75-Scheduling.gs` | Crew visit scheduling, training calendar (~3.5k lines) |
-| `76-SmartScheduling.gs` | Task collection, `getDriveTimeMap()` (~2.4k lines) |
-| `85-DataImport.gs` | Crew Import from Excel, Job Tracking sync, new hire/rehire, fiscal year transition (~3.3k lines) |
-| `87-RoutePlanner.gs` | Trip planning and route optimization (~2.5k lines) |
-| `88-SafetyReports.gs` | Gmail processing, Safety Compliance tracking (~16.6k lines) |
-| `99-MenuFix.gs` | Full menu backup (run `forceCreateMenu` if menu missing) (~280 lines) |
-| `TestRunner.gs` | Integration tests - run `runAllTests()` in Apps Script editor (~190 lines) |
-| `ToDoSchedule.html` | Task List dialog (~6.5k lines) |
-| `TripPlanner.html` | Trip Planner / Scheduler (primary scheduling interface, ~5k lines) |
-| `CrewImport.html` | Excel crew import with SheetJS (~7.5k lines) |
-| `QuickActions.html` | Monday workflow sidebar (~375 lines) |
-| `ProcessSafetyEmailsDialog.html` | Safety email processing dialog (~1.5k lines) |
+| `Code.gs` | Main file - ALL working functions go here (~22.9k lines) |
+| `00-Constants.gs` | Sheet names, column indices (`COLS`), `STATUS_LOCATIONS`, business constants (~250 lines) |
+| `11-Triggers.gs` | Edit triggers, auto change-out date recalculation (~1.9k lines) |
+| `22-EmployeeValidation.gs` | Job Tracking sheet functions, employee validation, training sync (~2.7k lines) |
+| `51-EmployeeHistory.gs` | Employee lifecycle tracking, restore deleted employees (~1.3k lines) |
+| `75-Scheduling.gs` | Crew visit scheduling, training calendar (~3k lines) |
+| `76-SmartScheduling.gs` | Task collection, `getDriveTimeMap()` (~2.1k lines) |
+| `85-DataImport.gs` | Crew Import from Excel, Job Tracking sync, new hire/rehire, fiscal year transition (~2.8k lines) |
+| `87-RoutePlanner.gs` | Trip planning and route optimization (~2.1k lines) |
+| `88-SafetyReports.gs` | Gmail processing, Safety Compliance tracking (~14.2k lines) |
+| `99-MenuFix.gs` | Full menu backup (run `forceCreateMenu` if menu missing) (~265 lines) |
+| `TestRunner.gs` | Integration tests - run `runAllTests()` in Apps Script editor (~176 lines) |
+| `ToDoSchedule.html` | Task List dialog (~5.7k lines) |
+| `TripPlanner.html` | Trip Planner / Scheduler (primary scheduling interface, ~4.2k lines) |
+| `CrewImport.html` | Excel crew import with SheetJS (~6.6k lines) |
+| `QuickActions.html` | Monday workflow sidebar (~350 lines) |
+| `ProcessSafetyEmailsDialog.html` | Safety email processing dialog (~1.3k lines) |
 | `ToDoConfig.html` | Schedule configuration dialog (~2k lines) |
-| `PurchaseOrderDialog.html` | Purchase order creation dialog (~870 lines) |
-| `ComplianceConfig.html` | Safety Compliance configuration (~200 lines) |
-| `AssignCrewLeads.html` | Crew lead assignment dialog (~535 lines) |
-| `LookupDialog.html` | Employee & item lookup dialog, all assignments view (~520 lines) |
-| `NewItemDialog.html` | New inventory item dialog (Gloves, Sleeves, HV Testers, Phasing Sets) (~425 lines) |
-| `NewEmployeeDialog.html` | New employee creation dialog (~220 lines) |
-| `Dashboard.html` | Task dashboard display (~710 lines) |
-| `ExpiringCertsImport.html` | Expiring certs import dialog (~1.1k lines) |
-| `FiscalYearConfig.html` | Fiscal year configuration dialog (~340 lines) |
+| `PurchaseOrderDialog.html` | Purchase order creation dialog (~750 lines) |
+| `VendorConfig.html` | Vendor management with pricing and catalog (~510 lines) |
+| `ComplianceConfig.html` | Safety Compliance configuration (~175 lines) |
+| `AssignCrewLeads.html` | Crew lead assignment dialog (~485 lines) |
+| `LookupDialog.html` | Employee & item lookup dialog, all assignments view (~465 lines) |
+| `NewItemDialog.html` | New inventory item dialog (Gloves, Sleeves, HV Testers, Phasing Sets) (~390 lines) |
+| `NewEmployeeDialog.html` | New employee creation dialog (~205 lines) |
+| `Dashboard.html` | Task dashboard display (~660 lines) |
+| `ExpiringCertsImport.html` | Expiring certs import dialog (~940 lines) |
+| `ExpiringCertsChoice.html` | Cert management choice dialog (Import / Refresh / Scan) (~90 lines) |
+| `TimeBreakdown.html` | Daily Accomplishments / time tracking dialog (~430 lines) |
+| `FiscalYearConfig.html` | Fiscal year configuration dialog (~300 lines) |
 
 ## Key Sheets (Data Architecture)
 | Sheet | Purpose |
@@ -194,7 +199,19 @@ The `Location` column on the Employees sheet currently serves double duty:
 - **Physical city** (Bozeman, Helena, Great Falls) — used for drive times, change-out dates, Trip Planner
 - **Employee status** (Light Duty, Weeds, Vacation, Leave) — used as exclusion signals
 
-**Current state (March 2026):**
+**⚠️ Status Location Filtering (April 2026 fix):**
+`STATUS_LOCATIONS` constant in `00-Constants.gs` lists values that are statuses, NOT physical cities:
+```javascript
+var STATUS_LOCATIONS = ['vacation', 'light duty', 'weeds', 'leave', 'previous employee', 'unknown'];
+```
+Use `isStatusLocation(location)` from `01-Utilities.gs` to check if a location is a status value.
+**All functions that determine crew location for Job Tracking MUST filter out status locations.** Otherwise, if the first employee processed for a crew has Location="Vacation", the entire crew gets "Vacation" as its location in Job Tracking. Functions already fixed:
+- `syncJobTrackingAfterImport()` in `85-DataImport.gs`
+- `refreshJobTrackingFromEmployees()` in `22-EmployeeValidation.gs`
+- `populateJobTrackingFromEmployees()` in `22-EmployeeValidation.gs`
+- `syncCrews()` in `22-EmployeeValidation.gs`
+
+**Current state (April 2026):**
 - "Light Duty", "Weeds", "Vacation", "Leave" are still valid Location values for backwards compatibility
 - New Light Duty employees via Crew Import get **Location = "Helena"** + **Job Number = 005-26.#** (the 005- prefix handles exclusion)
 - All filter/skip lists still include "Light Duty" for existing data

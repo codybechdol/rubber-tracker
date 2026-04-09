@@ -4060,7 +4060,7 @@ function setupSafetyReportsSheet() {
   var headers = [
     "Report Date", "Report Type", "Job Number", "Foreman",
     "Vehicle Number", "Equipment Type", "Issue Description",
-    "Status", "FE Test Date", "Source Email ID", "Notes", "Email Subject", "Received Date"
+    "Status", "FE Test Date", "Source Email ID", "Notes", "Email Subject", "Received Date", "Resolved On"
   ];
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   sheet.getRange(1, 1, 1, headers.length)
@@ -4111,6 +4111,8 @@ function setupSafetyReportsSheet() {
   // Format dates
   sheet.getRange(2, 1, 1000, 1).setNumberFormat("MM/dd/yyyy");
   sheet.getRange(2, 9, 1000, 1).setNumberFormat("MM/dd/yyyy");
+  sheet.getRange(2, 13, 1000, 1).setNumberFormat("MM/dd/yyyy"); // Received Date
+  sheet.getRange(2, 14, 1000, 1).setNumberFormat("MM/dd/yyyy"); // Resolved On
 
   // Add conditional formatting for Fire Extinguisher expiration (Column I = FE Test Date)
   // Fire extinguishers expire 1 year after test date
@@ -5450,7 +5452,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
         }
         if (dedupedIssues.length > 0) {
           var lastRow = sheet.getLastRow();
-          sheet.getRange(lastRow + 1, 1, dedupedIssues.length, 12).setValues(dedupedIssues);
+          sheet.getRange(lastRow + 1, 1, dedupedIssues.length, 13).setValues(dedupedIssues);
           applyStatusFormatting(sheet, lastRow + 1, dedupedIssues.length);
         }
         if (dedupedIssues.length < issues.length) {
@@ -5993,7 +5995,7 @@ function applyJobNumberCorrections(approvalsJson) {
       }
       if (dedupedFinalIssues.length > 0) {
         var lastRow = sheet.getLastRow();
-        sheet.getRange(lastRow + 1, 1, dedupedFinalIssues.length, 12).setValues(dedupedFinalIssues);
+        sheet.getRange(lastRow + 1, 1, dedupedFinalIssues.length, 13).setValues(dedupedFinalIssues);
         applyStatusFormatting(sheet, lastRow + 1, dedupedFinalIssues.length);
         Logger.log("Wrote " + dedupedFinalIssues.length + " issues to sheet (skipped " + (finalIssues.length - dedupedFinalIssues.length) + " duplicates)");
       }
@@ -6911,7 +6913,8 @@ function extractEquipmentIssues(body, context) {
           testDate || "",                  // Test/Expiration Date
           context.messageId,               // Source Email ID
           "",                              // Notes
-          context.subject || ""            // Email Subject
+          context.subject || "",           // Email Subject
+          context.receivedDate || ""       // Received Date
         ]);
 
         // Only match once per line
@@ -7043,7 +7046,8 @@ function extractSafetyChecklistIssues(pdfText, context) {
               testDate || "",                  // Test/Expiration Date
               context.messageId,               // Source Email ID
               "",                              // Notes
-              context.subject || ""            // Email Subject
+              context.subject || "",           // Email Subject
+              context.receivedDate || ""       // Received Date
             ]);
 
             // Only match once per equipment type
@@ -7136,7 +7140,8 @@ function extractSafetyChecklistIssues(pdfText, context) {
           feTestDate || "",                // I: FE Test Date (always include if available)
           context.messageId,               // J: Source Email ID
           "",                              // K: Notes
-          context.subject || ""            // L: Email Subject
+          context.subject || "",           // L: Email Subject
+          context.receivedDate || ""       // M: Received Date
         ]);
       }
     }
@@ -7163,7 +7168,8 @@ function extractSafetyChecklistIssues(pdfText, context) {
       feTestDate,  // Column I: FE Test Date
       context.messageId,
       "",
-      context.subject || ""  // L: Email Subject
+      context.subject || "",  // L: Email Subject
+      context.receivedDate || ""  // M: Received Date
     ]);
     Logger.log("  ** ISSUE: Fire Extinguisher Expired");
   }

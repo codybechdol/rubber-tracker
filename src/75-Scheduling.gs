@@ -1755,6 +1755,12 @@ function setupTrainingTracking() {
     {month: 'November', topic: 'OSHA ET&D 10 HR Refresher 4th Quarter', hours: 10}
   ];
 
+  // Pre-build crew members cache to avoid redundant Employees sheet reads
+  var crewMembersCache = {};
+  for (var cm = 0; cm < filteredCrews.length; cm++) {
+    crewMembersCache[filteredCrews[cm]] = getCrewMembers(filteredCrews[cm]);
+  }
+
   // Generate all rows: each crew × each month's training (Jan-Nov)
   var dataRows = [];
   var crewTrainingMap = {}; // Track training records by crew for catch-up logic
@@ -1771,6 +1777,9 @@ function setupTrainingTracking() {
       var key = training.month + '|' + crew;
       var preserved = existingData[key];
 
+      // Auto-populate attendees from Employees if not preserved
+      var attendees = preserved ? preserved.attendees : (crewMembersCache[crew] || '');
+
       var row = [
         training.month,
         training.topic,
@@ -1778,7 +1787,7 @@ function setupTrainingTracking() {
         lead ? lead.name : '',
         size,
         preserved ? preserved.completionDate : '', // Completion Date - preserved if exists
-        preserved ? preserved.attendees : '', // Attendees - preserved if exists
+        attendees, // Attendees - preserved if exists, otherwise auto-populated
         training.hours,
         preserved ? preserved.trainer : '', // Trainer - preserved if exists
         preserved ? preserved.status : 'Unassigned', // Status - preserved if exists, otherwise Unassigned
@@ -2391,6 +2400,15 @@ function refreshTrainingAttendees() {
   var updatedCount = 0;
   var skippedCount = 0;
 
+  // Pre-cache crew members to avoid redundant Employees sheet reads
+  var crewMembersCache = {};
+  function getCachedCrewMembers(crewNum) {
+    if (!crewMembersCache.hasOwnProperty(crewNum)) {
+      crewMembersCache[crewNum] = getCrewMembers(crewNum);
+    }
+    return crewMembersCache[crewNum];
+  }
+
   // Process each training record (start from row 3, skip title and headers)
   for (var i = 2; i < data.length; i++) {
     var row = data[i];
@@ -2406,8 +2424,8 @@ function refreshTrainingAttendees() {
       continue;
     }
 
-    // Get current crew members
-    var crewMembers = getCrewMembers(crew);
+    // Get current crew members (from cache)
+    var crewMembers = getCachedCrewMembers(crew);
 
     // Only update if:
     // 1. Attendees is empty, OR

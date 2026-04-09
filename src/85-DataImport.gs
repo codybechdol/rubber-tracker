@@ -602,9 +602,13 @@ function syncJobTrackingAfterImport(ss, jobNameMap) {
     var location = locationCol !== -1 ? String(row[locationCol] || '').trim() : '';
     var classification = classificationCol !== -1 ? String(row[classificationCol] || '').trim() : '';
 
+    // Filter out status locations (Vacation, Light Duty, Weeds, Leave, etc.)
+    // These are employee statuses, not physical cities - should not appear in Job Tracking
+    var isRealLocation = location && !isStatusLocation(location);
+
     if (!crewMap[crewNumber]) {
       crewMap[crewNumber] = {
-        location: location,
+        location: isRealLocation ? location : '',
         foreman: '',
         crewSize: 0,
         employees: []
@@ -614,7 +618,7 @@ function syncJobTrackingAfterImport(ss, jobNameMap) {
     crewMap[crewNumber].crewSize++;
     crewMap[crewNumber].employees.push(name);
 
-    if (!crewMap[crewNumber].location && location) {
+    if (!crewMap[crewNumber].location && isRealLocation) {
       crewMap[crewNumber].location = location;
     }
 

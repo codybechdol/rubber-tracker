@@ -79,6 +79,7 @@
 </head>
 <body>
   <h2><? if (sheetName === 'Blankets') { ?>🧱 New Blanket Detected<? } else if (sheetName === 'HV Testers') { ?>⚡ New HV Tester Detected<? } else if (sheetName === 'Phasing Sets') { ?>⚡ New Phasing Set Detected<? } else if (sheetName === 'AED') { ?>🏥 New AED Detected<? } else { ?>📦 New <?= itemType ?> Detected<? } ?></h2>
+  <h2><? if (sheetName === 'Blankets') { ?>🧱 New Blanket Detected<? } else if (sheetName === 'HV Testers') { ?>⚡ New HV Tester Detected<? } else if (sheetName === 'Phasing Sets') { ?>⚡ New Phasing Set Detected<? } else if (sheetName === 'AED') { ?>🏥 New AED Detected<? } else { ?>📦 New <?= itemType ?> Detected<? } ?></h2>
 
   <div class="item-info">
     <strong>Item #:</strong> <?= itemNum ?><br>
@@ -87,7 +88,7 @@
 
   <form id="newItemForm">
     <? if (sheetName === 'HV Testers') { ?>
-    <!-- HV Testers: Model, Serial #, Calibration Date -->
+    <!-- HV Testers: Model, KV, Serial #, Calibration Date -->
     <div class="form-group">
       <label>Model:</label>
       <select id="model" name="model">
@@ -100,6 +101,11 @@
     </div>
 
     <div class="form-group">
+      <label>KV Rating:</label>
+      <input type="text" id="kv" name="kv" placeholder="e.g., 69, 138, 230">
+    </div>
+
+    <div class="form-group">
       <label>Serial #:</label>
       <input type="text" id="serialNum" name="serialNum" placeholder="Enter serial number">
     </div>
@@ -107,7 +113,7 @@
     <div class="form-group">
       <label>Calibration Date:</label>
       <input type="date" id="calibrationDate" name="calibrationDate">
-      <div class="hint">Replacement Date will auto-calculate (Calibration + 10 years)</div>
+      <div class="hint">Change Out Date will auto-calculate (Calibration + 10 years)</div>
     </div>
 
     <? } else if (sheetName === 'Phasing Sets') { ?>
@@ -395,6 +401,7 @@
       // Equipment-specific fields
       if (sheetName === 'HV Testers') {
         formData.model = document.getElementById('model').value;
+        formData.kv = document.getElementById('kv').value;
         formData.serialNum = document.getElementById('serialNum').value;
         formData.calibrationDate = document.getElementById('calibrationDate').value;
       } else if (sheetName === 'Phasing Sets') {

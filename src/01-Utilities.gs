@@ -88,3 +88,14 @@ function getSignificantJobNumber(jobNumber) {
   return match ? match[1] : jobStr;
 }
 
+/**
+ * Checks if a location value is actually an employee status, not a physical city.
+ * Uses the STATUS_LOCATIONS constant from 00-Constants.gs.
+ * @param {string} location - The location string to check
+ * @returns {boolean} - True if the location is a status value (Vacation, Light Duty, etc.)
+ */
+function isStatusLocation(location) {
+  if (!location) return false;
+  var loc = String(location).trim().toLowerCase();
+  return STATUS_LOCATIONS.indexOf(loc) !== -1;
+}

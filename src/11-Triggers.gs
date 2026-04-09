@@ -379,32 +379,34 @@ function onEdit(e) {
       return;  // Don't call processEdit again, we handled it
     }
 
-    // Handle HV Testers sheet - Assigned To (column H) changes auto-populate Status and Location
-    if (sheetName === SHEET_HV_TESTERS && editedCol === 8 && editedRow >= 2) {
-      var ss = SpreadsheetApp.getActiveSpreadsheet();
-      handleHVTesterAssignedToChange(ss, sheet, editedRow, e.value);
-      return;  // Don't call processEdit again, we handled it
+    // Handle HV Testers sheet - use header-based detection for both 11-col and 12-col layouts
+    if (sheetName === SHEET_HV_TESTERS && editedRow >= 2 && editedCol >= 4 && editedCol <= 9) {
+      var editedHeader = String(sheet.getRange(1, editedCol).getValue()).toLowerCase().trim();
+      if (editedHeader === 'assigned to') {
+        var ss = SpreadsheetApp.getActiveSpreadsheet();
+        handleHVTesterAssignedToChange(ss, sheet, editedRow, e.value);
+        return;
+      }
+      if (editedHeader === 'calibration date') {
+        var ss = SpreadsheetApp.getActiveSpreadsheet();
+        handleHVTesterCalibrationDateChange(ss, sheet, editedRow, e.value);
+        return;
+      }
     }
 
-    // Handle HV Testers sheet - Calibration Date (column D) changes auto-calculate Change Out Date
-    if (sheetName === SHEET_HV_TESTERS && editedCol === 4 && editedRow >= 2) {
-      var ss = SpreadsheetApp.getActiveSpreadsheet();
-      handleHVTesterCalibrationDateChange(ss, sheet, editedRow, e.value);
-      return;  // Don't call processEdit again, we handled it
-    }
-
-    // Handle Phasing Sets sheet - Assigned To (column I = 9) changes auto-populate Status and Location
-    if (sheetName === SHEET_PHASING_SETS && editedCol === 9 && editedRow >= 2) {
-      var ss = SpreadsheetApp.getActiveSpreadsheet();
-      handlePhasingSetAssignedToChange(ss, sheet, editedRow, e.value);
-      return;  // Don't call processEdit again, we handled it
-    }
-
-    // Handle Phasing Sets sheet - Calibration Date (column E = 5) changes auto-calculate Change Out Date
-    if (sheetName === SHEET_PHASING_SETS && editedCol === 5 && editedRow >= 2) {
-      var ss = SpreadsheetApp.getActiveSpreadsheet();
-      handlePhasingSetCalibrationDateChange(ss, sheet, editedRow, e.value);
-      return;  // Don't call processEdit again, we handled it
+    // Handle Phasing Sets sheet - use header-based detection for both 11-col and 12-col layouts
+    if (sheetName === SHEET_PHASING_SETS && editedRow >= 2 && editedCol >= 4 && editedCol <= 9) {
+      var editedHeader = String(sheet.getRange(1, editedCol).getValue()).toLowerCase().trim();
+      if (editedHeader === 'assigned to') {
+        var ss = SpreadsheetApp.getActiveSpreadsheet();
+        handlePhasingSetAssignedToChange(ss, sheet, editedRow, e.value);
+        return;
+      }
+      if (editedHeader === 'calibration date') {
+        var ss = SpreadsheetApp.getActiveSpreadsheet();
+        handlePhasingSetCalibrationDateChange(ss, sheet, editedRow, e.value);
+        return;
+      }
     }
 
     // Handle AED sheet - Assigned To (column H = 8) changes auto-populate Status and Location
@@ -564,46 +566,48 @@ function onEditHandler(e) {
         }
       }
 
-      // For HV Testers, auto-set defaults
+      // For HV Testers, auto-set defaults (uses dynamic offset for 11 or 12 col layout)
       if (sheetName === 'HV Testers' && newItemNum && itemNumStr !== '') {
         try {
-          // Auto-set Location to 'Helena' if empty (col F)
-          var currentLocation = sheet.getRange(editedRow, COLS.HV_TESTERS.LOCATION).getValue();
+          var hvOff = getEquipmentColOffset(sheet);
+          // Auto-set Location to 'Helena' if empty
+          var currentLocation = sheet.getRange(editedRow, COLS.HV_TESTERS.LOCATION + hvOff).getValue();
           if (!currentLocation) {
-            sheet.getRange(editedRow, COLS.HV_TESTERS.LOCATION).setValue('Helena');
+            sheet.getRange(editedRow, COLS.HV_TESTERS.LOCATION + hvOff).setValue('Helena');
           }
-          // Auto-set Status to 'On Shelf' if empty (col G)
-          var currentStatus = sheet.getRange(editedRow, COLS.HV_TESTERS.STATUS).getValue();
+          // Auto-set Status to 'On Shelf' if empty
+          var currentStatus = sheet.getRange(editedRow, COLS.HV_TESTERS.STATUS + hvOff).getValue();
           if (!currentStatus) {
-            sheet.getRange(editedRow, COLS.HV_TESTERS.STATUS).setValue('On Shelf');
+            sheet.getRange(editedRow, COLS.HV_TESTERS.STATUS + hvOff).setValue('On Shelf');
           }
-          // Auto-set Assigned To to 'On Shelf' if empty (col H)
-          var currentAssignedTo = sheet.getRange(editedRow, COLS.HV_TESTERS.ASSIGNED_TO).getValue();
+          // Auto-set Assigned To to 'On Shelf' if empty
+          var currentAssignedTo = sheet.getRange(editedRow, COLS.HV_TESTERS.ASSIGNED_TO + hvOff).getValue();
           if (!currentAssignedTo) {
-            sheet.getRange(editedRow, COLS.HV_TESTERS.ASSIGNED_TO).setValue('On Shelf');
+            sheet.getRange(editedRow, COLS.HV_TESTERS.ASSIGNED_TO + hvOff).setValue('On Shelf');
           }
         } catch (autoPopErr) {
           Logger.log('HV Testers auto-population error (will show dialog): ' + autoPopErr);
         }
       }
 
-      // For Phasing Sets, auto-set defaults
+      // For Phasing Sets, auto-set defaults (uses dynamic offset for 11 or 12 col layout)
       if (sheetName === 'Phasing Sets' && newItemNum && itemNumStr !== '') {
         try {
-          // Auto-set Location to 'Helena' if empty (col G)
-          var currentLocation = sheet.getRange(editedRow, COLS.PHASING_SETS.LOCATION).getValue();
+          var psOff = getEquipmentColOffset(sheet);
+          // Auto-set Location to 'Helena' if empty
+          var currentLocation = sheet.getRange(editedRow, COLS.PHASING_SETS.LOCATION + psOff).getValue();
           if (!currentLocation) {
-            sheet.getRange(editedRow, COLS.PHASING_SETS.LOCATION).setValue('Helena');
+            sheet.getRange(editedRow, COLS.PHASING_SETS.LOCATION + psOff).setValue('Helena');
           }
-          // Auto-set Status to 'On Shelf' if empty (col H)
-          var currentStatus = sheet.getRange(editedRow, COLS.PHASING_SETS.STATUS).getValue();
+          // Auto-set Status to 'On Shelf' if empty
+          var currentStatus = sheet.getRange(editedRow, COLS.PHASING_SETS.STATUS + psOff).getValue();
           if (!currentStatus) {
-            sheet.getRange(editedRow, COLS.PHASING_SETS.STATUS).setValue('On Shelf');
+            sheet.getRange(editedRow, COLS.PHASING_SETS.STATUS + psOff).setValue('On Shelf');
           }
-          // Auto-set Assigned To to 'On Shelf' if empty (col I)
-          var currentAssignedTo = sheet.getRange(editedRow, COLS.PHASING_SETS.ASSIGNED_TO).getValue();
+          // Auto-set Assigned To to 'On Shelf' if empty
+          var currentAssignedTo = sheet.getRange(editedRow, COLS.PHASING_SETS.ASSIGNED_TO + psOff).getValue();
           if (!currentAssignedTo) {
-            sheet.getRange(editedRow, COLS.PHASING_SETS.ASSIGNED_TO).setValue('On Shelf');
+            sheet.getRange(editedRow, COLS.PHASING_SETS.ASSIGNED_TO + psOff).setValue('On Shelf');
           }
         } catch (autoPopErr) {
           Logger.log('Phasing Sets auto-population error (will show dialog): ' + autoPopErr);
@@ -930,65 +934,61 @@ function processEdit(e) {
     }
   }
 
-  // Handle HV Testers sheet edits - Assigned To (column H) changes
+  // Handle HV Testers sheet edits - use header-based detection for both 11-col and 12-col layouts
   if (sheetName === SHEET_HV_TESTERS) {
-    var hvAssignedToCol = 8;  // Column H = Assigned To
-    var hvStatusCol = 7;      // Column G = Status
-    var hvLocationCol = 6;    // Column F = Location
-
     logEvent('processEdit: HV Testers sheet, editedCol=' + editedCol, 'DEBUG');
+    var hvEditedHeader = String(sheet.getRange(1, editedCol).getValue()).toLowerCase().trim();
 
     // Handle Status changes - when 'On Shelf', auto-populate Location and Assigned To
-    if (editedCol === hvStatusCol) {
+    if (hvEditedHeader === 'status') {
       var statusValue = String(newValue || '').trim();
       if (statusValue === 'On Shelf') {
-        sheet.getRange(editedRow, hvLocationCol).setValue('Helena');
-        sheet.getRange(editedRow, hvAssignedToCol).setValue('On Shelf');
+        var hvOff = getEquipmentColOffset(sheet);
+        sheet.getRange(editedRow, COLS.HV_TESTERS.LOCATION + hvOff).setValue('Helena');
+        sheet.getRange(editedRow, COLS.HV_TESTERS.ASSIGNED_TO + hvOff).setValue('On Shelf');
         ss.toast('Location and Assigned To set to "On Shelf" / "Helena"', '📍 Auto-Updated', 3);
       }
       return;
     }
 
     // Handle Assigned To changes - auto-populate Location and Status from Employees sheet
-    if (editedCol === hvAssignedToCol) {
+    if (hvEditedHeader === 'assigned to') {
       handleHVTesterAssignedToChange(ss, sheet, editedRow, newValue);
       return;
     }
 
     // Handle Calibration Date changes - auto-calculate Change Out Date (Calibration + 10 years)
-    if (editedCol === 4) {  // Column D = Calibration Date
+    if (hvEditedHeader === 'calibration date') {
       handleHVTesterCalibrationDateChange(ss, sheet, editedRow, newValue);
       return;
     }
   }
 
-  // Handle Phasing Sets sheet edits - Assigned To (column H) changes
+  // Handle Phasing Sets sheet edits - use header-based detection for both 11-col and 12-col layouts
   if (sheetName === SHEET_PHASING_SETS) {
-    var psAssignedToCol = 8;  // Column H = Assigned To
-    var psStatusCol = 7;      // Column G = Status
-    var psLocationCol = 6;    // Column F = Location
-
     logEvent('processEdit: Phasing Sets sheet, editedCol=' + editedCol, 'DEBUG');
+    var psEditedHeader = String(sheet.getRange(1, editedCol).getValue()).toLowerCase().trim();
 
     // Handle Status changes - when 'On Shelf', auto-populate Location and Assigned To
-    if (editedCol === psStatusCol) {
+    if (psEditedHeader === 'status') {
       var statusValue = String(newValue || '').trim();
       if (statusValue === 'On Shelf') {
-        sheet.getRange(editedRow, psLocationCol).setValue('Helena');
-        sheet.getRange(editedRow, psAssignedToCol).setValue('On Shelf');
+        var psOff = getEquipmentColOffset(sheet);
+        sheet.getRange(editedRow, COLS.PHASING_SETS.LOCATION + psOff).setValue('Helena');
+        sheet.getRange(editedRow, COLS.PHASING_SETS.ASSIGNED_TO + psOff).setValue('On Shelf');
         ss.toast('Location and Assigned To set to "On Shelf" / "Helena"', '📍 Auto-Updated', 3);
       }
       return;
     }
 
     // Handle Assigned To changes - auto-populate Location and Status from Employees sheet
-    if (editedCol === psAssignedToCol) {
+    if (psEditedHeader === 'assigned to') {
       handlePhasingSetAssignedToChange(ss, sheet, editedRow, newValue);
       return;
     }
 
     // Handle Calibration Date changes - auto-calculate Change Out Date (Calibration + 10 years)
-    if (editedCol === 4) {  // Column D = Calibration Date
+    if (psEditedHeader === 'calibration date') {
       handlePhasingSetCalibrationDateChange(ss, sheet, editedRow, newValue);
       return;
     }

@@ -4777,6 +4777,7 @@ function addMissingCrewsToTrainingTracking() {
       var trainingHours = monthInfo ? monthInfo.hours : 2;
 
       // Create new row: Month, Topic, Crew #, Crew Lead, Crew Size, Completion Date, Attendees, Hours, Trainer, Status, Notes
+      var crewAttendees = getCrewMembers ? getCrewMembers(crew) : '';
       var newRow = [
         monthName,
         trainingTopic,
@@ -4784,7 +4785,7 @@ function addMissingCrewsToTrainingTracking() {
         leadName,
         crewSize,
         '', // Completion Date
-        '', // Attendees
+        crewAttendees, // Attendees - auto-populated from Employees
         trainingHours,
         '', // Trainer
         'Pending', // Status
@@ -6304,6 +6305,7 @@ function onOpen() {
         .addSeparator()
         .addItem('🔄 Migrate Safety Reports Sheet', 'migrateSafetyReportsToEquipmentNeeds')
         .addItem('🧹 Cleanup Equipment Sheet', 'cleanupSafetyReportsSheet')
+        .addItem('🗄️ Archive Resolved Equipment', 'showArchiveResolvedEquipmentDialog')
         .addItem('📅 Add Resolved On Column', 'addResolvedOnColumn')
         .addItem('🧹 Cleanup Config Crews (Legacy)', 'cleanupComplianceConfig')
         .addItem('🔧 Fix Config Checkboxes (Legacy)', 'fixComplianceConfigCheckboxes')
@@ -6400,7 +6402,10 @@ function onOpen() {
         .addItem('⚡ View HV Testers', 'openHVTestersSheet')
         .addItem('⚡ View Phasing Sets', 'openPhasingSetsSheet')
         .addItem('🏥 View AED', 'openAEDSheet')
-        .addItem('🔧 Fix Equipment Headers', 'fixEquipmentSheetHeaders'))
+        .addItem('🔧 Fix Equipment Headers', 'fixEquipmentSheetHeaders')
+        .addItem('🔧 Repair History Sheet Columns', 'repairHistorySheetColumns')
+        .addItem('🔧 Fix History Overflow Data', 'fixHistorySheetOrphanedData')
+        .addItem('🔧 Regenerate History Notes', 'regenerateHistoryNotes'))
       .addSubMenu(ui.createMenu('🛒 Purchase Orders')
         .addItem('📝 Create Purchase Order', 'showPurchaseOrderDialog')
         .addItem('📋 Order History', 'openPurchaseOrdersSheet')
@@ -6429,6 +6434,7 @@ function onOpen() {
         .addItem('🏗️ Build Sheets', 'buildSheets')
         .addItem('⚡ Setup HV Tester & Phasing Set Sheets', 'setupHVTesterAndPhasingSetSheets')
         .addItem('🏥 Setup AED Sheet', 'setupAEDSheet')
+        .addItem('⚡ Migrate HV Testers - Add KV Column', 'migrateHVTestersAddKVColumn')
         .addItem('⚡ Migrate HV/Phasing to Change Out Date', 'migrateHVAndPhasingSetsToChangeOutDate')
         .addItem('⚡ Fix HV Tester Change Out Dates', 'fixHVTesterChangeOutDates')
         .addItem('⚡ Fix Phasing Set Change Out Dates', 'fixPhasingSetChangeOutDates')
@@ -7074,8 +7080,8 @@ function handlePhasingSetAssignedToChange(ss, sheet, editedRow, newValue) {
     var newStatus = '';
     var newLocation = '';
 
-    var colStatus = COLS.PHASING_SETS.STATUS;      // Column H (8)
-    var colLocation = COLS.PHASING_SETS.LOCATION;  // Column G (7)
+    var colStatus = COLS.PHASING_SETS.STATUS + psOffset;      // 8 (12-col) or 7 (11-col)
+    var colLocation = COLS.PHASING_SETS.LOCATION + psOffset;  // 7 (12-col) or 6 (11-col)
 
     if (assignedToLower === 'on shelf' || assignedToLower === '') {
       newStatus = 'On Shelf';
@@ -7124,6 +7130,25 @@ function handlePhasingSetAssignedToChange(ss, sheet, editedRow, newValue) {
 }
 
 /**
+ * Detects whether an HV Testers or Phasing Sets sheet has the KV column (12-column layout)
+ * or the old layout without KV (11-column layout).
+ *
+ * Returns a column offset: 0 if KV exists (12-col), -1 if no KV (11-col).
+ * Use: var col = COLS.HV_TESTERS.LOCATION + offset;
+ *
+ * @param {Sheet} sheet - The HV Testers or Phasing Sets sheet
+ * @returns {number} 0 for 12-column layout (has KV), -1 for 11-column layout (no KV)
+ */
+function getEquipmentColOffset(sheet) {
+  try {
+    var headerC = String(sheet.getRange(1, 3).getValue()).toLowerCase().trim();
+    return (headerC === 'kv') ? 0 : -1;
+  } catch (e) {
+    return 0; // Default to 12-col layout
+  }
+}
+
+/**
  * Calculates the Change Out Date for HV Testers and Phasing Sets.
  * Change Out Date = Calibration Date + 10 years
  *
@@ -7148,8 +7173,9 @@ function handleHVTesterCalibrationDateChange(ss, sheet, editedRow, newValue) {
   if (editedRow < 2) return; // Skip header row
 
   try {
-    var colCalibrationDate = 4;  // Column D
-    var colChangeOutDate = 9;    // Column I
+    var hvCalOffset = getEquipmentColOffset(sheet);
+    var colCalibrationDate = COLS.HV_TESTERS.CALIBRATION_DATE + hvCalOffset;  // 5 (12-col) or 4 (11-col)
+    var colChangeOutDate = COLS.HV_TESTERS.CHANGE_OUT_DATE + hvCalOffset;    // 10 (12-col) or 9 (11-col)
 
     var calibrationDate = sheet.getRange(editedRow, colCalibrationDate).getValue();
 
@@ -7180,8 +7206,9 @@ function handlePhasingSetCalibrationDateChange(ss, sheet, editedRow, newValue) {
   if (editedRow < 2) return; // Skip header row
 
   try {
-    var colCalibrationDate = COLS.PHASING_SETS.CALIBRATION_DATE;  // Column E (5)
-    var colChangeOutDate = COLS.PHASING_SETS.CHANGE_OUT_DATE;     // Column J (10)
+    var psCalOffset = getEquipmentColOffset(sheet);
+    var colCalibrationDate = COLS.PHASING_SETS.CALIBRATION_DATE + psCalOffset;  // 5 (12-col) or 4 (11-col)
+    var colChangeOutDate = COLS.PHASING_SETS.CHANGE_OUT_DATE + psCalOffset;     // 10 (12-col) or 9 (11-col)
 
     var calibrationDate = sheet.getRange(editedRow, colCalibrationDate).getValue();
 
@@ -7221,14 +7248,17 @@ function fixHVTesterChangeOutDates() {
   var data = dataRange.getValues();
   var updated = 0;
 
+  var colCalibrationDate = COLS.HV_TESTERS.CALIBRATION_DATE;  // Column E (5)
+  var colChangeOutDate = COLS.HV_TESTERS.CHANGE_OUT_DATE;     // Column J (10)
+
   for (var i = 1; i < data.length; i++) {
-    var calibrationDate = data[i][3]; // Column D (index 3)
+    var calibrationDate = data[i][colCalibrationDate - 1]; // Array is 0-indexed
     if (calibrationDate && calibrationDate instanceof Date && !isNaN(calibrationDate.getTime())) {
       var changeOutDate = calculateHVChangeOutDate(calibrationDate);
       if (changeOutDate) {
-        sheet.getRange(i + 1, 9).setValue(changeOutDate); // Column I
+        sheet.getRange(i + 1, colChangeOutDate).setValue(changeOutDate);
         try {
-          sheet.getRange(i + 1, 9).setNumberFormat('mm/dd/yyyy');
+          sheet.getRange(i + 1, colChangeOutDate).setNumberFormat('mm/dd/yyyy');
         } catch (fmtErr) { /* Ignore format errors on typed columns */ }
         updated++;
       }
@@ -7299,8 +7329,10 @@ function migrateHVAndPhasingSetsToChangeOutDate() {
       return;
     }
 
-    // 1. Rename header in column I from "Replacement Date" to "Change Out Date"
-    var headerCell = sheet.getRange(1, 9);
+    // 1. Rename header from "Replacement Date" to "Change Out Date"
+    //    Both HV Testers and Phasing Sets now have same layout: Change Out Date at column J (10)
+    var changeOutCol = 10;
+    var headerCell = sheet.getRange(1, changeOutCol);
     var currentHeader = headerCell.getValue();
     if (currentHeader === 'Replacement Date') {
       headerCell.setValue('Change Out Date');
@@ -7316,17 +7348,17 @@ function migrateHVAndPhasingSetsToChangeOutDate() {
       return;
     }
 
-    var data = sheet.getRange(2, 1, lastRow - 1, 9).getValues(); // Columns A-I
+    var data = sheet.getRange(2, 1, lastRow - 1, changeOutCol).getValues();
     var updated = 0;
 
     for (var i = 0; i < data.length; i++) {
-      var calibrationDate = data[i][3]; // Column D (index 3)
+      var calibrationDate = data[i][4]; // Column E (index 4) - Calibration Date for both sheets
       if (calibrationDate && calibrationDate instanceof Date && !isNaN(calibrationDate.getTime())) {
         var changeOutDate = calculateHVChangeOutDate(calibrationDate);
         if (changeOutDate) {
-          sheet.getRange(i + 2, 9).setValue(changeOutDate); // Column I
+          sheet.getRange(i + 2, changeOutCol).setValue(changeOutDate);
           try {
-            sheet.getRange(i + 2, 9).setNumberFormat('mm/dd/yyyy');
+            sheet.getRange(i + 2, changeOutCol).setNumberFormat('mm/dd/yyyy');
           } catch (fmtErr) { /* Ignore format errors on typed columns */ }
           updated++;
         }
@@ -9000,25 +9032,41 @@ function saveHistoryFast(silent) {
 
     /**
      * Build a lookup map of existing history entries from the sheet.
-     * Key: itemNum, Value: last entry {assignedTo, dateAssigned, location}
+     * Key: itemNum, Value: last entry {assignedTo, location}
+     *
+     * Column layout varies by equipment type:
+     * - Gloves/Sleeves/Blankets/HV Testers: Item# at [1], Location at [4], AssignedTo at [5]
+     * - Phasing Sets: Item# at [1], Location at [5], AssignedTo at [6]
+     * - AED: Item# at [1], Location at [3], AssignedTo at [4]
+     *
+     * @param {Sheet} historySheet - The history sheet to read
+     * @param {number} itemNumCol - Column index for Item # (default 1)
+     * @param {number} locationCol - Column index for Location (default 4)
+     * @param {number} assignedToCol - Column index for Assigned To (default 5)
      */
-    function buildHistoryLookup(historySheet) {
+    function buildHistoryLookup(historySheet, itemNumCol, locationCol, assignedToCol) {
       var lookup = {};
       if (!historySheet || historySheet.getLastRow() < 2) return lookup;
+
+      // Defaults for Gloves/Sleeves/Blankets/HV Testers layout
+      if (itemNumCol === undefined) itemNumCol = 1;
+      if (locationCol === undefined) locationCol = 4;
+      if (assignedToCol === undefined) assignedToCol = 5;
 
       var numRows = historySheet.getLastRow() - 1;
       if (numRows <= 0) return lookup;
 
-      var data = historySheet.getRange(2, 1, numRows, 6).getDisplayValues();
+      // Read enough columns to cover the widest layout (Phasing Sets = 8)
+      var maxCol = Math.max(itemNumCol, locationCol, assignedToCol) + 1;
+      var data = historySheet.getRange(2, 1, numRows, maxCol).getDisplayValues();
       for (var i = 0; i < data.length; i++) {
-        var itemNum = String(data[i][1] || '').trim();
+        var itemNum = String(data[i][itemNumCol] || '').trim();
         if (!itemNum) continue;
 
         // Keep updating to get the LAST entry for each item
         lookup[itemNum] = {
-          assignedTo: String(data[i][5] || '').toLowerCase().trim(),
-          dateAssigned: String(data[i][0] || '').trim(),
-          location: String(data[i][4] || '').toLowerCase().trim()
+          assignedTo: String(data[i][assignedToCol] || '').toLowerCase().trim(),
+          location: String(data[i][locationCol] || '').toLowerCase().trim()
         };
       }
       return lookup;
@@ -9026,89 +9074,74 @@ function saveHistoryFast(silent) {
 
     /**
      * Check if entry is duplicate using in-memory lookup (O(1) instead of O(n))
-     * Normalizes dates to handle format differences (e.g., "3/18/2026" vs "03/18/2026")
-     * NOTE: Location is NOT included in duplicate check - we only track item + date + assignedTo
-     * This prevents logging every location change when an employee's crew moves locations
+     * Only tracks Location + AssignedTo changes - if neither changed, it's a duplicate.
+     * DateAssigned changes alone do NOT trigger a new history entry.
      */
     function isDuplicateFast(lookup, itemNum, assignedTo, dateAssigned, location) {
       var lastEntry = lookup[itemNum];
       if (!lastEntry) return false;
 
       var newAssignedTo = String(assignedTo || '').toLowerCase().trim();
+      var newLocation = String(location || '').toLowerCase().trim();
 
-      // Normalize date strings for comparison (handles "3/18/2026" vs "03/18/2026")
-      function normalizeDate(dateStr) {
-        if (!dateStr) return '';
-        var str = String(dateStr).trim();
-        // Try to parse as date and reformat consistently
-        var d = new Date(str);
-        if (!isNaN(d.getTime())) {
-          var month = d.getMonth() + 1;
-          var day = d.getDate();
-          var year = d.getFullYear();
-          return month + '/' + day + '/' + year;  // No leading zeros
-        }
-        // If can't parse as date, try to strip leading zeros from existing format
-        return str.replace(/\b0+(\d)/g, '$1');
-      }
-
-      var normalizedNew = normalizeDate(dateAssigned);
-      var normalizedLast = normalizeDate(lastEntry.dateAssigned);
-
-      // Only check item + date + assignedTo (NOT location)
+      // Duplicate if BOTH assignedTo AND location are unchanged
       return lastEntry.assignedTo === newAssignedTo &&
-             normalizedLast === normalizedNew;
+             lastEntry.location === newLocation;
     }
 
     /**
      * Enhanced duplicate check that also returns change type/note
      * Returns: {isDuplicate: boolean, note: string}
-     * Used for history logging to track what type of change occurred
+     * Only logs when Location or AssignedTo changes - DateAssigned changes alone are ignored.
      */
     function getChangeTypeFast(lookup, itemNum, assignedTo, dateAssigned, location, itemType) {
       var lastEntry = lookup[itemNum];
       var newAssignedTo = String(assignedTo || '').toLowerCase().trim();
       var newLocation = String(location || '').toLowerCase().trim();
 
-      // Normalize date strings for comparison - strips leading zeros for consistency
-      // This handles both "3/20/2026" and "03/20/2026" as the same date
-      function normalizeDate(dateStr) {
-        if (!dateStr) return '';
-        var str = String(dateStr).trim();
-        var d = new Date(str);
-        if (!isNaN(d.getTime())) {
-          // Use getMonth()+1, getDate(), getFullYear() - no leading zeros
-          var month = d.getMonth() + 1;
-          var day = d.getDate();
-          var year = d.getFullYear();
-          return month + '/' + day + '/' + year;
-        }
-        // If can't parse as date, try to strip leading zeros from existing format
-        // e.g., "03/20/2026" -> "3/20/2026"
-        return str.replace(/\b0+(\d)/g, '$1');
-      }
-
       // No previous entry - this is a new assignment
       if (!lastEntry) {
         return { isDuplicate: false, note: 'New Assignment' };
       }
 
-      var normalizedNew = normalizeDate(dateAssigned);
-      var normalizedLast = normalizeDate(lastEntry.dateAssigned);
-
-      // Check if it's an exact duplicate (same item, date, assignedTo)
-      if (lastEntry.assignedTo === newAssignedTo && normalizedLast === normalizedNew) {
+      // Check if BOTH location AND assignedTo are unchanged = duplicate (no log needed)
+      if (lastEntry.assignedTo === newAssignedTo && lastEntry.location === newLocation) {
         return { isDuplicate: true, note: '' };
       }
 
       // Not a duplicate - determine the type of change
       var note = '';
-      if (lastEntry.assignedTo !== newAssignedTo && lastEntry.assignedTo) {
-        // Item was reassigned to a different person
+
+      // Check for Previous Employee
+      if (newAssignedTo === 'previous employee') {
+        return {
+          isDuplicate: false,
+          note: 'Last working location: ' + (location || 'Unknown')
+        };
+      }
+
+      // Check for returned/unassigned items
+      var returnedKeywords = ['on shelf', 'storage', 'unassigned', 'available', 'lab'];
+      for (var r = 0; r < returnedKeywords.length; r++) {
+        if (newAssignedTo.indexOf(returnedKeywords[r]) !== -1 && lastEntry.assignedTo.indexOf(returnedKeywords[r]) === -1) {
+          return {
+            isDuplicate: false,
+            note: 'Returned from ' + lastEntry.assignedTo
+          };
+        }
+      }
+
+      // Both changed
+      if (lastEntry.assignedTo !== newAssignedTo && lastEntry.location !== newLocation) {
+        note = 'Reassigned: ' + lastEntry.assignedTo + ' (' + lastEntry.location + ')';
+      }
+      // Only assignedTo changed
+      else if (lastEntry.assignedTo !== newAssignedTo) {
         note = 'Reassigned from ' + lastEntry.assignedTo;
-      } else if (normalizedLast !== normalizedNew) {
-        // Same person but new date (renewal/swap)
-        note = 'Renewed';
+      }
+      // Only location changed
+      else if (lastEntry.location !== newLocation) {
+        note = 'Location change: ' + lastEntry.location + ' → ' + location;
       }
 
       return { isDuplicate: false, note: note };
@@ -9140,12 +9173,16 @@ function saveHistoryFast(silent) {
     var newPhasingSetEntries = 0;
 
     // Build lookup maps ONCE for all history sheets (this is the key optimization)
-    var glovesLookup = buildHistoryLookup(glovesHistorySheet);
-    var sleevesLookup = buildHistoryLookup(sleevesHistorySheet);
-    var blanketsLookup = buildHistoryLookup(blanketsHistorySheet);
-    var hvTestersLookup = buildHistoryLookup(hvTestersHistorySheet);
-    var phasingSetsLookup = buildHistoryLookup(phasingSetsHistorySheet);
-    var aedLookup = buildHistoryLookup(aedHistorySheet);
+    // Column indices: buildHistoryLookup(sheet, itemNumCol, locationCol, assignedToCol)
+    // Gloves/Sleeves/Blankets/HV Testers: Date[0], Item#[1], ..., Location[4], AssignedTo[5]
+    // Phasing Sets: Date[0], Item#[1], Model[2], KV[3], Serial#[4], Location[5], AssignedTo[6]
+    // AED: Date[0], Item#[1], Model[2], Location[3], AssignedTo[4]
+    var glovesLookup = buildHistoryLookup(glovesHistorySheet);         // defaults: 1, 4, 5
+    var sleevesLookup = buildHistoryLookup(sleevesHistorySheet);       // defaults: 1, 4, 5
+    var blanketsLookup = buildHistoryLookup(blanketsHistorySheet);     // defaults: 1, 4, 5
+    var hvTestersLookup = buildHistoryLookup(hvTestersHistorySheet);   // defaults: 1, 4, 5
+    var phasingSetsLookup = buildHistoryLookup(phasingSetsHistorySheet, 1, 5, 6);  // Phasing Sets layout
+    var aedLookup = buildHistoryLookup(aedHistorySheet, 1, 3, 4);     // AED layout
     Logger.log('saveHistoryFast: Built lookups in ' + (new Date().getTime() - startTime) + 'ms');
 
     // Collect new entries in arrays for batch write
@@ -9184,6 +9221,8 @@ function saveHistoryFast(silent) {
             itemNum, size, classVal, location, assignedTo, changeResult.note || ''
           ]);
           newGloveEntries++;
+          // Update lookup to prevent duplicates within this run
+          glovesLookup[itemNum] = { assignedTo: String(assignedTo || '').toLowerCase().trim(), location: String(location || '').toLowerCase().trim() };
         }
       }
     }
@@ -9215,6 +9254,7 @@ function saveHistoryFast(silent) {
             sItemNum, sSize, sClassVal, sLocation, sAssignedTo, sChangeResult.note || ''
           ]);
           newSleeveEntries++;
+          sleevesLookup[sItemNum] = { assignedTo: String(sAssignedTo || '').toLowerCase().trim(), location: String(sLocation || '').toLowerCase().trim() };
         }
       }
     }
@@ -9248,27 +9288,36 @@ function saveHistoryFast(silent) {
             bItemNum, bType, bClassVal, bLocation, bAssignedTo, bChangeResult.note || ''
           ]);
           newBlanketEntries++;
+          blanketsLookup[bItemNum] = { assignedTo: String(bAssignedTo || '').toLowerCase().trim(), location: String(bLocation || '').toLowerCase().trim() };
         }
       }
     }
 
     // Process HV Testers
-    // HV Testers columns: A=Item#, B=Model, C=Serial#, D=Calibration Date, E=Date Assigned, F=Location, G=Status, H=Assigned To
+    // Dynamically detect layout: 12-col (with KV) or 11-col (without KV)
     if (hvTestersSheet && hvTestersSheet.getLastRow() > 1 && hvTestersHistorySheet) {
+      var hvOffset = getEquipmentColOffset(hvTestersSheet);
+      var hvNumCols = (hvOffset === 0) ? 9 : 8; // 12-col reads 9 (A-I), 11-col reads 8 (A-H)
       var numHVTesterRows = hvTestersSheet.getLastRow() - 1;
-      var hvTestersDisplay = hvTestersSheet.getRange(2, 1, numHVTesterRows, 8).getDisplayValues();
-      var hvTestersRawValues = hvTestersSheet.getRange(2, 1, numHVTesterRows, 8).getValues();
+      var hvTestersDisplay = hvTestersSheet.getRange(2, 1, numHVTesterRows, hvNumCols).getDisplayValues();
+      var hvTestersRawValues = hvTestersSheet.getRange(2, 1, numHVTesterRows, hvNumCols).getValues();
+
+      // Column indices adjusted by offset (0 for 12-col, -1 for 11-col)
+      var hvSerialIdx = COLS.HV_TESTERS.SERIAL_NUM - 1 + hvOffset;       // 3 or 2
+      var hvDateAssignedIdx = COLS.HV_TESTERS.DATE_ASSIGNED - 1 + hvOffset; // 5 or 4
+      var hvLocationIdx = COLS.HV_TESTERS.LOCATION - 1 + hvOffset;       // 6 or 5
+      var hvAssignedToIdx = COLS.HV_TESTERS.ASSIGNED_TO - 1 + hvOffset;  // 8 or 7
 
       for (var h = 0; h < hvTestersDisplay.length; h++) {
         var hvRow = hvTestersDisplay[h];
         var hvRawRow = hvTestersRawValues[h];
         var hvItemNum = formatItemNum(hvRawRow[0]);
-        var hvModel = hvRow[1];           // Column B - Model
-        var hvSerialNum = hvRow[2];       // Column C - Serial #
-        var hvDateAssignedRaw = hvRawRow[4];   // Raw date from Column E
-        var hvDateAssignedDisplay = hvRow[4];  // Display string for duplicate checking
-        var hvLocation = hvRow[5];        // Column F
-        var hvAssignedTo = hvRow[7];      // Column H
+        var hvModel = hvRow[1];                          // Column B - Model (same in both layouts)
+        var hvSerialNum = hvRow[hvSerialIdx];             // Serial # (D or C)
+        var hvDateAssignedRaw = hvRawRow[hvDateAssignedIdx];   // Raw date
+        var hvDateAssignedDisplay = hvRow[hvDateAssignedIdx];  // Display string
+        var hvLocation = hvRow[hvLocationIdx];            // Location (G or F)
+        var hvAssignedTo = hvRow[hvAssignedToIdx];        // Assigned To (I or H)
 
         // Skip rows without item number or date assigned
         if (!hvItemNum || !hvDateAssignedDisplay) continue;
@@ -9282,28 +9331,38 @@ function saveHistoryFast(silent) {
             hvItemNum, hvModel, hvSerialNum, hvLocation, hvAssignedTo, hvChangeResult.note || ''
           ]);
           newHVTesterEntries++;
+          hvTestersLookup[hvItemNum] = { assignedTo: String(hvAssignedTo || '').toLowerCase().trim(), location: String(hvLocation || '').toLowerCase().trim() };
         }
       }
     }
 
     // Process Phasing Sets
-    // Phasing Sets columns: A=Item#, B=Model, C=KV, D=Serial#, E=Calibration Date, F=Date Assigned, G=Location, H=Status, I=Assigned To
+    // Dynamically detect layout: 12-col (with KV) or 11-col (without KV)
     if (phasingSetsSheet && phasingSetsSheet.getLastRow() > 1 && phasingSetsHistorySheet) {
+      var psOffset = getEquipmentColOffset(phasingSetsSheet);
+      var psNumCols = (psOffset === 0) ? 9 : 8; // 12-col reads 9 (A-I), 11-col reads 8 (A-H)
       var numPhasingSetRows = phasingSetsSheet.getLastRow() - 1;
-      var phasingSetsDisplay = phasingSetsSheet.getRange(2, 1, numPhasingSetRows, 9).getDisplayValues();
-      var phasingSetsRawValues = phasingSetsSheet.getRange(2, 1, numPhasingSetRows, 9).getValues();
+      var phasingSetsDisplay = phasingSetsSheet.getRange(2, 1, numPhasingSetRows, psNumCols).getDisplayValues();
+      var phasingSetsRawValues = phasingSetsSheet.getRange(2, 1, numPhasingSetRows, psNumCols).getValues();
+
+      // Column indices adjusted by offset
+      var psKVIdx = (psOffset === 0) ? 2 : -1;  // KV only exists in 12-col layout
+      var psSerialIdx = COLS.PHASING_SETS.SERIAL_NUM - 1 + psOffset;
+      var psDateAssignedIdx = COLS.PHASING_SETS.DATE_ASSIGNED - 1 + psOffset;
+      var psLocationIdx = COLS.PHASING_SETS.LOCATION - 1 + psOffset;
+      var psAssignedToIdx = COLS.PHASING_SETS.ASSIGNED_TO - 1 + psOffset;
 
       for (var p = 0; p < phasingSetsDisplay.length; p++) {
         var psRow = phasingSetsDisplay[p];
         var psRawRow = phasingSetsRawValues[p];
         var psItemNum = formatItemNum(psRawRow[0]);
-        var psModel = psRow[1];           // Column B - Model
-        var psKV = psRow[2];              // Column C - KV
-        var psSerialNum = psRow[3];       // Column D - Serial #
-        var psDateAssignedRaw = psRawRow[5];   // Raw date from Column F
-        var psDateAssignedDisplay = psRow[5];  // Display string for duplicate checking
-        var psLocation = psRow[6];        // Column G
-        var psAssignedTo = psRow[8];      // Column I
+        var psModel = psRow[1];                          // Column B - Model
+        var psKV = (psKVIdx >= 0) ? psRow[psKVIdx] : ''; // KV (C or empty)
+        var psSerialNum = psRow[psSerialIdx];             // Serial #
+        var psDateAssignedRaw = psRawRow[psDateAssignedIdx];
+        var psDateAssignedDisplay = psRow[psDateAssignedIdx];
+        var psLocation = psRow[psLocationIdx];
+        var psAssignedTo = psRow[psAssignedToIdx];
 
         // Skip rows without item number or date assigned
         if (!psItemNum || !psDateAssignedDisplay) continue;
@@ -9317,6 +9376,7 @@ function saveHistoryFast(silent) {
             psItemNum, psModel, psKV, psSerialNum, psLocation, psAssignedTo, psChangeResult.note || ''
           ]);
           newPhasingSetEntries++;
+          phasingSetsLookup[psItemNum] = { assignedTo: String(psAssignedTo || '').toLowerCase().trim(), location: String(psLocation || '').toLowerCase().trim() };
         }
       }
     }
@@ -9350,6 +9410,7 @@ function saveHistoryFast(silent) {
             aedItemNum, aedModel, aedLocation, aedAssignedTo, aedChangeResult.note || ''
           ]);
           newAEDEntries++;
+          aedLookup[aedItemNum] = { assignedTo: String(aedAssignedTo || '').toLowerCase().trim(), location: String(aedLocation || '').toLowerCase().trim() };
         }
       }
     }
@@ -9680,10 +9741,17 @@ function cleanupDuplicateItemHistory() {
 
   ss.toast('Cleaning up duplicate history entries...', '💾 Please wait', -1);
 
+  // Each sheet definition includes:
+  //   name: sheet constant, label: display name,
+  //   numCols: total columns to read/write,
+  //   assignedToCol: 0-based index of AssignedTo column for dedup key
   var sheets = [
-    { name: SHEET_GLOVES_HISTORY, label: 'Gloves History' },
-    { name: SHEET_SLEEVES_HISTORY, label: 'Sleeves History' },
-    { name: SHEET_BLANKETS_HISTORY, label: 'Blankets History' }
+    { name: SHEET_GLOVES_HISTORY, label: 'Gloves History', numCols: 7, assignedToCol: 5 },
+    { name: SHEET_SLEEVES_HISTORY, label: 'Sleeves History', numCols: 7, assignedToCol: 5 },
+    { name: SHEET_BLANKETS_HISTORY, label: 'Blankets History', numCols: 7, assignedToCol: 5 },
+    { name: SHEET_HV_TESTERS_HISTORY, label: 'HV Testers History', numCols: 7, assignedToCol: 5 },
+    { name: SHEET_PHASING_SETS_HISTORY, label: 'Phasing Sets History', numCols: 8, assignedToCol: 6 },
+    { name: SHEET_AED_HISTORY, label: 'AED History', numCols: 6, assignedToCol: 4 }
   ];
 
   var totalRemoved = 0;
@@ -9712,11 +9780,11 @@ function cleanupDuplicateItemHistory() {
       continue;
     }
 
-    // Get header row
-    var headerRow = sheet.getRange(1, 1, 1, 6).getValues()[0];
+    var numCols = sheetInfo.numCols;
+    var assignedToIdx = sheetInfo.assignedToCol;
 
     var numRows = sheet.getLastRow() - 1;
-    var data = sheet.getRange(2, 1, numRows, 6).getValues();  // Use getValues() to preserve dates
+    var data = sheet.getRange(2, 1, numRows, numCols).getValues();
 
     // First pass: find the LAST entry for each unique key (item + date + assignedTo)
     // This ensures we keep the most current location
@@ -9724,10 +9792,10 @@ function cleanupDuplicateItemHistory() {
 
     for (var i = 0; i < data.length; i++) {
       var row = data[i];
-      // Columns: 0=Date Assigned, 1=Item#, 2=Size/Type, 3=Class, 4=Location, 5=Assigned To
+      // Column 0 = Date Assigned, Column 1 = Item#, assignedToIdx varies by sheet type
       var dateAssigned = normalizeDate(row[0]);
       var itemNum = String(row[1] || '').trim();
-      var assignedTo = String(row[5] || '').toLowerCase().trim();
+      var assignedTo = String(row[assignedToIdx] || '').toLowerCase().trim();
 
       if (!itemNum) continue;  // Skip empty rows
 
@@ -9746,7 +9814,7 @@ function cleanupDuplicateItemHistory() {
       var row = data[j];
       var dateAssigned = normalizeDate(row[0]);
       var itemNum = String(row[1] || '').trim();
-      var assignedTo = String(row[5] || '').toLowerCase().trim();
+      var assignedTo = String(row[assignedToIdx] || '').toLowerCase().trim();
 
       if (!itemNum) {
         // Keep rows without item numbers (probably empty or malformed)
@@ -9766,14 +9834,26 @@ function cleanupDuplicateItemHistory() {
 
     // Only rewrite if we found duplicates
     if (duplicateCount > 0) {
-      // Clear data rows (keep header)
+      // Clear ALL data rows including any overflow columns (prevents orphaned data in extra columns)
       if (numRows > 0) {
-        sheet.getRange(2, 1, numRows, 6).clearContent();
+        var lastCol = sheet.getLastColumn();
+        var clearCols = Math.max(numCols, lastCol);
+        sheet.getRange(2, 1, numRows, clearCols).clearContent();
       }
 
       // Write back unique rows
       if (uniqueRows.length > 0) {
-        sheet.getRange(2, 1, uniqueRows.length, 6).setValues(uniqueRows);
+        sheet.getRange(2, 1, uniqueRows.length, numCols).setValues(uniqueRows);
+      }
+
+      // Delete overflow columns entirely if they exist (avoids Table header issues)
+      var sheetLastCol = sheet.getLastColumn();
+      if (sheetLastCol > numCols) {
+        try {
+          sheet.deleteColumns(numCols + 1, sheetLastCol - numCols);
+        } catch (delErr) {
+          Logger.log('cleanupDuplicateItemHistory: Could not delete overflow cols for ' + sheetInfo.label + ': ' + delErr);
+        }
       }
     }
 
@@ -10118,16 +10198,17 @@ function lookupEmployee(name) {
   var hvTestersSheet = ss.getSheetByName(SHEET_HV_TESTERS);
   if (hvTestersSheet && hvTestersSheet.getLastRow() > 1) {
     var hvData = hvTestersSheet.getDataRange().getValues();
+    var hvEmpOff = getEquipmentColOffset(hvTestersSheet);
     for (var hv = 1; hv < hvData.length; hv++) {
-      var hvAssignedTo = String(hvData[hv][COLS.HV_TESTERS.ASSIGNED_TO - 1] || '').toLowerCase().trim();
+      var hvAssignedTo = String(hvData[hv][COLS.HV_TESTERS.ASSIGNED_TO - 1 + hvEmpOff] || '').toLowerCase().trim();
       if (hvAssignedTo.indexOf(searchName) !== -1) {
         result.hvTesters.push({
           itemNum: hvData[hv][COLS.HV_TESTERS.ITEM_NUM - 1] || '',
           model: hvData[hv][COLS.HV_TESTERS.MODEL - 1] || '',
-          serialNum: hvData[hv][COLS.HV_TESTERS.SERIAL_NUM - 1] || '',
-          calibrationDate: formatDateForDisplay(hvData[hv][COLS.HV_TESTERS.CALIBRATION_DATE - 1]),
-          changeOutDate: formatDateForDisplay(hvData[hv][COLS.HV_TESTERS.CHANGE_OUT_DATE - 1]),
-          status: hvData[hv][COLS.HV_TESTERS.STATUS - 1] || ''
+          serialNum: hvData[hv][COLS.HV_TESTERS.SERIAL_NUM - 1 + hvEmpOff] || '',
+          calibrationDate: formatDateForDisplay(hvData[hv][COLS.HV_TESTERS.CALIBRATION_DATE - 1 + hvEmpOff]),
+          changeOutDate: formatDateForDisplay(hvData[hv][COLS.HV_TESTERS.CHANGE_OUT_DATE - 1 + hvEmpOff]),
+          status: hvData[hv][COLS.HV_TESTERS.STATUS - 1 + hvEmpOff] || ''
         });
       }
     }
@@ -10137,17 +10218,18 @@ function lookupEmployee(name) {
   var phasingSetsSheet = ss.getSheetByName(SHEET_PHASING_SETS);
   if (phasingSetsSheet && phasingSetsSheet.getLastRow() > 1) {
     var psData = phasingSetsSheet.getDataRange().getValues();
+    var psEmpOff = getEquipmentColOffset(phasingSetsSheet);
     for (var ps = 1; ps < psData.length; ps++) {
-      var psAssignedTo = String(psData[ps][COLS.PHASING_SETS.ASSIGNED_TO - 1] || '').toLowerCase().trim();
+      var psAssignedTo = String(psData[ps][COLS.PHASING_SETS.ASSIGNED_TO - 1 + psEmpOff] || '').toLowerCase().trim();
       if (psAssignedTo.indexOf(searchName) !== -1) {
         result.phasingSets.push({
           itemNum: psData[ps][COLS.PHASING_SETS.ITEM_NUM - 1] || '',
           model: psData[ps][COLS.PHASING_SETS.MODEL - 1] || '',
-          kv: psData[ps][COLS.PHASING_SETS.KV - 1] || '',
-          serialNum: psData[ps][COLS.PHASING_SETS.SERIAL_NUM - 1] || '',
-          calibrationDate: formatDateForDisplay(psData[ps][COLS.PHASING_SETS.CALIBRATION_DATE - 1]),
-          changeOutDate: formatDateForDisplay(psData[ps][COLS.PHASING_SETS.CHANGE_OUT_DATE - 1]),
-          status: psData[ps][COLS.PHASING_SETS.STATUS - 1] || ''
+          kv: (psEmpOff === 0) ? (psData[ps][COLS.PHASING_SETS.KV - 1] || '') : '',
+          serialNum: psData[ps][COLS.PHASING_SETS.SERIAL_NUM - 1 + psEmpOff] || '',
+          calibrationDate: formatDateForDisplay(psData[ps][COLS.PHASING_SETS.CALIBRATION_DATE - 1 + psEmpOff]),
+          changeOutDate: formatDateForDisplay(psData[ps][COLS.PHASING_SETS.CHANGE_OUT_DATE - 1 + psEmpOff]),
+          status: psData[ps][COLS.PHASING_SETS.STATUS - 1 + psEmpOff] || ''
         });
       }
     }
@@ -10264,26 +10346,29 @@ function lookupItem(itemType, itemNum) {
     result.changeOutDate = formatDateForDisplay(item[COLS.BLANKETS.CHANGE_OUT_DATE - 1]);
     result.notes = item[COLS.BLANKETS.NOTES - 1] || '';
   } else if (itemType === 'hv_tester') {
+    var hvLookupOff = getEquipmentColOffset(sheet);
     result.model = item[COLS.HV_TESTERS.MODEL - 1] || '';
-    result.serialNum = item[COLS.HV_TESTERS.SERIAL_NUM - 1] || '';
-    result.calibrationDate = formatDateForDisplay(item[COLS.HV_TESTERS.CALIBRATION_DATE - 1]);
-    result.dateAssigned = formatDateForDisplay(item[COLS.HV_TESTERS.DATE_ASSIGNED - 1]);
-    result.location = item[COLS.HV_TESTERS.LOCATION - 1] || '';
-    result.status = item[COLS.HV_TESTERS.STATUS - 1] || '';
-    result.assignedTo = item[COLS.HV_TESTERS.ASSIGNED_TO - 1] || '';
-    result.changeOutDate = formatDateForDisplay(item[COLS.HV_TESTERS.CHANGE_OUT_DATE - 1]);
-    result.notes = item[COLS.HV_TESTERS.NOTES - 1] || '';
+    result.kv = (hvLookupOff === 0) ? (item[COLS.HV_TESTERS.KV - 1] || '') : '';
+    result.serialNum = item[COLS.HV_TESTERS.SERIAL_NUM - 1 + hvLookupOff] || '';
+    result.calibrationDate = formatDateForDisplay(item[COLS.HV_TESTERS.CALIBRATION_DATE - 1 + hvLookupOff]);
+    result.dateAssigned = formatDateForDisplay(item[COLS.HV_TESTERS.DATE_ASSIGNED - 1 + hvLookupOff]);
+    result.location = item[COLS.HV_TESTERS.LOCATION - 1 + hvLookupOff] || '';
+    result.status = item[COLS.HV_TESTERS.STATUS - 1 + hvLookupOff] || '';
+    result.assignedTo = item[COLS.HV_TESTERS.ASSIGNED_TO - 1 + hvLookupOff] || '';
+    result.changeOutDate = formatDateForDisplay(item[COLS.HV_TESTERS.CHANGE_OUT_DATE - 1 + hvLookupOff]);
+    result.notes = item[COLS.HV_TESTERS.NOTES - 1 + hvLookupOff] || '';
   } else if (itemType === 'phasing_set') {
+    var psLookupOff = getEquipmentColOffset(sheet);
     result.model = item[COLS.PHASING_SETS.MODEL - 1] || '';
-    result.kv = item[COLS.PHASING_SETS.KV - 1] || '';
-    result.serialNum = item[COLS.PHASING_SETS.SERIAL_NUM - 1] || '';
-    result.calibrationDate = formatDateForDisplay(item[COLS.PHASING_SETS.CALIBRATION_DATE - 1]);
-    result.dateAssigned = formatDateForDisplay(item[COLS.PHASING_SETS.DATE_ASSIGNED - 1]);
-    result.location = item[COLS.PHASING_SETS.LOCATION - 1] || '';
-    result.status = item[COLS.PHASING_SETS.STATUS - 1] || '';
-    result.assignedTo = item[COLS.PHASING_SETS.ASSIGNED_TO - 1] || '';
-    result.changeOutDate = formatDateForDisplay(item[COLS.PHASING_SETS.CHANGE_OUT_DATE - 1]);
-    result.notes = item[COLS.PHASING_SETS.NOTES - 1] || '';
+    result.kv = (psLookupOff === 0) ? (item[COLS.PHASING_SETS.KV - 1] || '') : '';
+    result.serialNum = item[COLS.PHASING_SETS.SERIAL_NUM - 1 + psLookupOff] || '';
+    result.calibrationDate = formatDateForDisplay(item[COLS.PHASING_SETS.CALIBRATION_DATE - 1 + psLookupOff]);
+    result.dateAssigned = formatDateForDisplay(item[COLS.PHASING_SETS.DATE_ASSIGNED - 1 + psLookupOff]);
+    result.location = item[COLS.PHASING_SETS.LOCATION - 1 + psLookupOff] || '';
+    result.status = item[COLS.PHASING_SETS.STATUS - 1 + psLookupOff] || '';
+    result.assignedTo = item[COLS.PHASING_SETS.ASSIGNED_TO - 1 + psLookupOff] || '';
+    result.changeOutDate = formatDateForDisplay(item[COLS.PHASING_SETS.CHANGE_OUT_DATE - 1 + psLookupOff]);
+    result.notes = item[COLS.PHASING_SETS.NOTES - 1 + psLookupOff] || '';
   } else if (itemType === 'aed') {
     result.model = item[COLS.AED.MODEL - 1] || '';
     result.padExpiration = formatDateForDisplay(item[COLS.AED.PAD_EXPIRATION - 1]);
@@ -10455,11 +10540,20 @@ function getAllEmployeeAssignments() {
       Logger.log('collectItems: ' + sheetName + ' - sheet not found or empty');
       return;
     }
+    // Dynamic column offset for HV Testers / Phasing Sets (11 vs 12 col layout)
+    var eqOffset = 0;
+    if (sheetName === SHEET_HV_TESTERS || sheetName === SHEET_PHASING_SETS) {
+      eqOffset = getEquipmentColOffset(sheet);
+    }
+    // Helper: adjust column index (cols after B need offset for HV/Phasing)
+    function adjCol(colNum) {
+      return (colNum <= 2) ? colNum - 1 : colNum - 1 + eqOffset;
+    }
     var data = sheet.getDataRange().getValues();
     var matched = 0;
     var unmatched = 0;
     for (var r = 1; r < data.length; r++) {
-      var assignedTo = String(data[r][colsDef.ASSIGNED_TO - 1] || '').trim();
+      var assignedTo = String(data[r][adjCol(colsDef.ASSIGNED_TO)] || '').trim();
       if (!assignedTo || assignedTo === 'On Shelf' || assignedTo === 'on shelf') continue;
       var key = assignedTo.toLowerCase();
       if (!employeeMap[key]) {
@@ -10468,21 +10562,21 @@ function getAllEmployeeAssignments() {
         continue;
       }
       matched++;
-      var itemNum = String(data[r][colsDef.ITEM_NUM - 1] || '');
+      var itemNum = String(data[r][adjCol(colsDef.ITEM_NUM)] || '');
       var onSwap = !!swapItemNums[itemNum];
       var item = {
         type: typeName,
         itemNum: itemNum,
-        status: String(data[r][colsDef.STATUS - 1] || ''),
+        status: String(data[r][adjCol(colsDef.STATUS)] || ''),
         onSwap: onSwap
       };
       // Add type-specific fields
-      if (colsDef.SIZE) item.size = String(data[r][colsDef.SIZE - 1] || '');
-      if (colsDef.TYPE) item.sizeOrType = String(data[r][colsDef.TYPE - 1] || '');
-      if (colsDef.CLASS) item.itemClass = String(data[r][colsDef.CLASS - 1] || '');
-      if (colsDef.MODEL) item.model = String(data[r][colsDef.MODEL - 1] || '');
-      if (colsDef.DATE_ASSIGNED) item.dateAssigned = formatDateForDisplay(data[r][colsDef.DATE_ASSIGNED - 1]);
-      if (colsDef.CHANGE_OUT_DATE) item.changeOutDate = formatDateForDisplay(data[r][colsDef.CHANGE_OUT_DATE - 1]);
+      if (colsDef.SIZE) item.size = String(data[r][adjCol(colsDef.SIZE)] || '');
+      if (colsDef.TYPE) item.sizeOrType = String(data[r][adjCol(colsDef.TYPE)] || '');
+      if (colsDef.CLASS) item.itemClass = String(data[r][adjCol(colsDef.CLASS)] || '');
+      if (colsDef.MODEL) item.model = String(data[r][adjCol(colsDef.MODEL)] || '');
+      if (colsDef.DATE_ASSIGNED) item.dateAssigned = formatDateForDisplay(data[r][adjCol(colsDef.DATE_ASSIGNED)]);
+      if (colsDef.CHANGE_OUT_DATE) item.changeOutDate = formatDateForDisplay(data[r][adjCol(colsDef.CHANGE_OUT_DATE)]);
 
       employeeMap[key].items.push(item);
       if (onSwap) employeeMap[key].hasSwapItem = true;
@@ -11713,23 +11807,57 @@ function generateTaskMetadata() {
 
   Logger.log('generateTaskMetadata: ' + newRecords.length + ' new records, ' + updatedCount + ' existing records to update');
 
+  // Remove any bandings/table formatting that may cause "typed columns" errors
+  // Google Sheets Tables with typed columns block setValues/clearDataValidations
+  try {
+    var bandings = metadataSheet.getBandings();
+    if (bandings.length > 0) {
+      for (var bn = 0; bn < bandings.length; bn++) {
+        bandings[bn].remove();
+      }
+      Logger.log('generateTaskMetadata: Removed ' + bandings.length + ' banding(s) to prevent typed column errors');
+    }
+  } catch (bandErr) {
+    Logger.log('generateTaskMetadata: Warning removing bandings: ' + bandErr.message);
+  }
+
   // Clear data validation on ENTIRE Status column (O = column 15) to prevent validation errors during write
   // This is needed because old rows may have legacy status values that fail new validation rules
   // Clear ALL rows (use max rows to cover any new rows that will be added)
   var maxRows = metadataSheet.getMaxRows();
   if (maxRows > 1) {
-    var statusColumnRange = metadataSheet.getRange(2, 15, maxRows - 1, 1);
-    statusColumnRange.clearDataValidations();
-    Logger.log('generateTaskMetadata: Cleared validation on Status column (rows 2-' + maxRows + ')');
+    try {
+      var statusColumnRange = metadataSheet.getRange(2, 15, maxRows - 1, 1);
+      statusColumnRange.clearDataValidations();
+      Logger.log('generateTaskMetadata: Cleared validation on Status column (rows 2-' + maxRows + ')');
+    } catch (clearValErr) {
+      Logger.log('generateTaskMetadata: Warning - Could not clear validation (typed columns?): ' + clearValErr.message);
+      // Try clearing ALL data validations on data range as fallback
+      try {
+        metadataSheet.getDataRange().clearDataValidations();
+        Logger.log('generateTaskMetadata: Cleared ALL data validations as fallback');
+      } catch (clearAllErr) {
+        Logger.log('generateTaskMetadata: Warning - Could not clear any validations: ' + clearAllErr.message);
+      }
+    }
   }
 
   // Write updates to existing rows
   if (updateRecords.length > 0) {
-    for (var u = 0; u < updateRecords.length; u++) {
-      var update = updateRecords[u];
-      metadataSheet.getRange(update.rowIndex, 1, 1, 25).setValues([update.data]);
+    try {
+      for (var u = 0; u < updateRecords.length; u++) {
+        var update = updateRecords[u];
+        metadataSheet.getRange(update.rowIndex, 1, 1, 25).setValues([update.data]);
+      }
+      Logger.log('generateTaskMetadata: Updated ' + updateRecords.length + ' existing records');
+    } catch (writeErr) {
+      if (writeErr.message && writeErr.message.indexOf('typed columns') !== -1) {
+        throw new Error('Cannot write to Task Metadata sheet - it has been converted to a Google Sheets Table with typed columns.\n\n' +
+          'Fix: In Google Sheets, click on the table → right-click → "Convert back to range" (or Format → Table → Convert to range).\n' +
+          'Then run Generate Task Metadata again.');
+      }
+      throw writeErr;
     }
-    Logger.log('generateTaskMetadata: Updated ' + updateRecords.length + ' existing records');
   }
 
   // Write new records to sheet
@@ -11753,13 +11881,26 @@ function generateTaskMetadata() {
     }
 
     // Write the data
-    metadataSheet.getRange(startRow, 1, newRecords.length, 25).setValues(newRecords);
-    Logger.log('generateTaskMetadata: Wrote ' + newRecords.length + ' records starting at row ' + startRow);
+    try {
+      metadataSheet.getRange(startRow, 1, newRecords.length, 25).setValues(newRecords);
+      Logger.log('generateTaskMetadata: Wrote ' + newRecords.length + ' records starting at row ' + startRow);
+    } catch (newWriteErr) {
+      if (newWriteErr.message && newWriteErr.message.indexOf('typed columns') !== -1) {
+        throw new Error('Cannot write to Task Metadata sheet - it has been converted to a Google Sheets Table with typed columns.\n\n' +
+          'Fix: In Google Sheets, click on the table → right-click → "Convert back to range" (or Format → Table → Convert to range).\n' +
+          'Then run Generate Task Metadata again.');
+      }
+      throw newWriteErr;
+    }
 
     // THEN clear any inherited validation on the Status column for new rows
-    var newRowsStatusRange = metadataSheet.getRange(startRow, 15, newRecords.length, 1);
-    newRowsStatusRange.clearDataValidations();
-    Logger.log('generateTaskMetadata: Cleared validation on new record rows ' + startRow + '-' + (startRow + newRecords.length - 1));
+    try {
+      var newRowsStatusRange = metadataSheet.getRange(startRow, 15, newRecords.length, 1);
+      newRowsStatusRange.clearDataValidations();
+      Logger.log('generateTaskMetadata: Cleared validation on new record rows ' + startRow + '-' + (startRow + newRecords.length - 1));
+    } catch (clearNewValErr) {
+      Logger.log('generateTaskMetadata: Warning - Could not clear new row validation: ' + clearNewValErr.message);
+    }
   }
 
   // Flush changes to ensure sheet dimensions are updated before getting final row count
@@ -13533,6 +13674,182 @@ function showArchiveCompletedTasksDialog() {
 }
 
 /**
+ * Archives resolved items from the Safety Equipment Needs sheet to a
+ * "Safety Equipment Archive" sheet.
+ * Moves rows where Status = "Resolved" or "Replaced" that are older than X days.
+ *
+ * @param {number} daysOld - Archive items resolved more than this many days ago (default 30, 0 = all)
+ * @return {Object} Result with counts
+ */
+function archiveResolvedSafetyEquipment(daysOld) {
+  if (daysOld === undefined || daysOld === null || daysOld === '') {
+    daysOld = 30;
+  }
+  Logger.log('=== archiveResolvedSafetyEquipment START (daysOld=' + daysOld + ') ===');
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sourceSheet = ss.getSheetByName('Safety Equipment Needs') || ss.getSheetByName('Safety Reports');
+
+  if (!sourceSheet) {
+    return { success: false, error: 'Safety Equipment Needs sheet not found' };
+  }
+
+  // Get or create archive sheet
+  var archiveSheet = ss.getSheetByName('Safety Equipment Archive');
+  if (!archiveSheet) {
+    archiveSheet = ss.insertSheet('Safety Equipment Archive');
+    var headers = sourceSheet.getRange(1, 1, 1, sourceSheet.getLastColumn()).getValues();
+    archiveSheet.getRange(1, 1, 1, headers[0].length).setValues(headers);
+    archiveSheet.getRange(1, 1, 1, headers[0].length)
+      .setFontWeight('bold')
+      .setBackground('#4A86E8')
+      .setFontColor('white');
+    archiveSheet.setFrozenRows(1);
+    Logger.log('archiveResolvedSafetyEquipment: Created Safety Equipment Archive sheet');
+  }
+
+  var data = sourceSheet.getDataRange().getValues();
+  if (data.length <= 1) {
+    return { success: true, archivedCount: 0, message: 'No items to archive' };
+  }
+
+  var headers = data[0];
+
+  // Build column map from headers
+  var colMap = {};
+  for (var h = 0; h < headers.length; h++) {
+    var hName = String(headers[h]).trim().toLowerCase();
+    colMap[hName] = h;
+  }
+
+  var statusCol = colMap['status'];
+  var resolvedOnCol = colMap['resolved on'];
+  var reportDateCol = colMap['report date'];
+
+  if (statusCol === undefined) {
+    return { success: false, error: 'Status column not found in Safety Equipment Needs sheet' };
+  }
+
+  var cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - daysOld);
+  if (daysOld === 0) {
+    cutoffDate.setHours(23, 59, 59, 999);
+  } else {
+    cutoffDate.setHours(0, 0, 0, 0);
+  }
+
+  var rowsToArchive = [];
+  var rowIndicesToDelete = [];
+  var resolvedCount = 0;
+  var replacedCount = 0;
+
+  // Scan from bottom to top for safe deletion
+  for (var i = data.length - 1; i >= 1; i--) {
+    var row = data[i];
+    var status = String(row[statusCol] || '').trim();
+
+    // Only archive Resolved or Replaced items
+    if (status !== 'Resolved' && status !== 'Replaced') {
+      continue;
+    }
+
+    // Determine age from Resolved On date, fall back to Report Date
+    var dateToCheck = null;
+    if (resolvedOnCol !== undefined && row[resolvedOnCol]) {
+      dateToCheck = row[resolvedOnCol] instanceof Date ? row[resolvedOnCol] : new Date(row[resolvedOnCol]);
+    } else if (reportDateCol !== undefined && row[reportDateCol]) {
+      dateToCheck = row[reportDateCol] instanceof Date ? row[reportDateCol] : new Date(row[reportDateCol]);
+    }
+
+    var shouldArchive = false;
+    if (daysOld === 0) {
+      // Archive ALL resolved/replaced
+      shouldArchive = true;
+    } else if (dateToCheck && !isNaN(dateToCheck.getTime()) && dateToCheck < cutoffDate) {
+      shouldArchive = true;
+    } else if (!dateToCheck) {
+      // No date available - archive anyway if daysOld is 0, skip otherwise
+      Logger.log('archiveResolvedSafetyEquipment: Row ' + (i + 1) + ' has no date, skipping');
+      continue;
+    }
+
+    if (shouldArchive) {
+      rowsToArchive.unshift(row);
+      rowIndicesToDelete.unshift(i + 1); // 1-based row number
+      if (status === 'Resolved') resolvedCount++;
+      if (status === 'Replaced') replacedCount++;
+    }
+  }
+
+  Logger.log('archiveResolvedSafetyEquipment: Found ' + rowsToArchive.length + ' items to archive');
+  Logger.log('  - Resolved: ' + resolvedCount);
+  Logger.log('  - Replaced: ' + replacedCount);
+
+  if (rowsToArchive.length === 0) {
+    return { success: true, archivedCount: 0, message: 'No resolved/replaced items older than ' + daysOld + ' days to archive' };
+  }
+
+  // Append rows to archive sheet
+  var archiveLastRow = archiveSheet.getLastRow();
+  archiveSheet.getRange(archiveLastRow + 1, 1, rowsToArchive.length, rowsToArchive[0].length)
+    .setValues(rowsToArchive);
+
+  // Delete rows from source sheet (bottom to top)
+  for (var d = rowIndicesToDelete.length - 1; d >= 0; d--) {
+    sourceSheet.deleteRow(rowIndicesToDelete[d]);
+  }
+
+  Logger.log('archiveResolvedSafetyEquipment: Archived ' + rowsToArchive.length + ' items');
+  Logger.log('=== archiveResolvedSafetyEquipment END ===');
+
+  return {
+    success: true,
+    archivedCount: rowsToArchive.length,
+    resolvedCount: resolvedCount,
+    replacedCount: replacedCount,
+    cutoffDate: Utilities.formatDate(cutoffDate, Session.getScriptTimeZone(), 'yyyy-MM-dd'),
+    message: 'Archived ' + rowsToArchive.length + ' items:\n' +
+             '• ' + resolvedCount + ' Resolved\n' +
+             '• ' + replacedCount + ' Replaced\n' +
+             '(older than ' + daysOld + ' days)'
+  };
+}
+
+/**
+ * Shows dialog to archive resolved Safety Equipment Needs items.
+ * Menu item: Glove Manager → 🛡️ Process Safety Emails → 🧹 Cleanup → 🗄️ Archive Resolved Equipment
+ */
+function showArchiveResolvedEquipmentDialog() {
+  var ui = SpreadsheetApp.getUi();
+  var response = ui.prompt(
+    '🗄️ Archive Resolved Equipment',
+    'Archive resolved/replaced Safety Equipment items older than X days.\n\n' +
+    'Enter number of days:\n' +
+    'Default: 30 days\nRecommended: 30-90 days\nEnter 0 to archive ALL resolved items',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (response.getSelectedButton() !== ui.Button.OK) {
+    return;
+  }
+
+  var daysStr = response.getResponseText().trim();
+  var days = parseInt(daysStr, 10);
+
+  if (isNaN(days) || days < 0) {
+    days = 30;
+  }
+
+  var result = archiveResolvedSafetyEquipment(days);
+
+  if (result.success) {
+    ui.alert('✅ Archive Complete', result.message, ui.ButtonSet.OK);
+  } else {
+    ui.alert('❌ Archive Failed', result.error || 'Unknown error', ui.ButtonSet.OK);
+  }
+}
+
+/**
  * Cleans up orphaned Task Metadata records where the source task no longer exists.
  * Phase 7: Cleanup & Optimization - Task 7.1
  *
@@ -14320,8 +14637,8 @@ function buildSheets() {
     { name: SHEET_GLOVES, headers: ['Glove', 'Size', 'Class', 'Test Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'] },
     { name: SHEET_SLEEVES, headers: ['Sleeve', 'Size', 'Class', 'Test Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'] },
     { name: SHEET_BLANKETS, headers: ['Blanket', 'Type', 'Class', 'Test Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'] },
-    { name: SHEET_HV_TESTERS, headers: ['HV Tester', 'Model', 'Serial #', 'Calibration Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'] },
-    { name: SHEET_PHASING_SETS, headers: ['Phasing Set', 'Model', 'Serial #', 'Calibration Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'] },
+    { name: SHEET_HV_TESTERS, headers: ['HV Tester', 'Model', 'KV', 'Serial #', 'Calibration Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'] },
+    { name: SHEET_PHASING_SETS, headers: ['Phasing Set', 'Model', 'KV', 'Serial #', 'Calibration Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'] },
     { name: SHEET_GLOVE_SWAPS, headers: ['Employee', 'Item Number', 'Size', 'Date Assigned', 'Change Out Date', 'Days Left', 'Pick List', 'Status', 'Picked', 'Date Changed'] },
     { name: SHEET_SLEEVE_SWAPS, headers: ['Employee', 'Item Number', 'Size', 'Date Assigned', 'Change Out Date', 'Days Left', 'Pick List', 'Status', 'Picked', 'Date Changed'] },
     { name: SHEET_BLANKET_SWAPS, headers: ['Employee', 'Item Number', 'Type', 'Date Assigned', 'Change Out Date', 'Days Left', 'Pick List', 'Status', 'Picked', 'Date Changed'] },
@@ -14453,7 +14770,7 @@ function buildSheets() {
           sheet.getRange(2, 11, empRowCount, 2).setNumberFormat('mm/dd/yyyy');
         }
 
-        if (def.name === SHEET_GLOVES || def.name === SHEET_SLEEVES || def.name === SHEET_BLANKETS || def.name === SHEET_HV_TESTERS || def.name === SHEET_PHASING_SETS) {
+        if (def.name === SHEET_GLOVES || def.name === SHEET_SLEEVES || def.name === SHEET_BLANKETS) {
           var totalRows = Math.max(lastRow, 1);
           // Ensure sheet has at least 11 columns before formatting columns 10-11
           var currentMaxCol = sheet.getMaxColumns();
@@ -14487,6 +14804,35 @@ function buildSheets() {
           // Column K: Notes (text wrap)
           sheet.getRange(1, 11, totalRows, 1).setWrap(true);
           sheet.setColumnWidth(11, 200);
+        }
+
+        if (def.name === SHEET_HV_TESTERS || def.name === SHEET_PHASING_SETS) {
+          var totalRows = Math.max(lastRow, 1);
+          // Ensure sheet has at least 12 columns for HV Testers/Phasing Sets (A-L)
+          var currentMaxCol = sheet.getMaxColumns();
+          if (currentMaxCol < 12) {
+            sheet.insertColumnsAfter(currentMaxCol, 12 - currentMaxCol);
+            Logger.log('buildSheets: Inserted columns to reach 12 columns for "' + def.name + '"');
+          }
+
+          // Set minimum column widths for 12-column layout
+          // A: Item#, B: Model, C: KV, D: Serial#, E: Cal Date, F: Date Assigned, G: Location, H: Status, I: Assigned To, J: Change Out Date, K: Picked For, L: Notes
+          sheet.setColumnWidth(1, Math.max(sheet.getColumnWidth(1), 100));  // A: Item#
+          sheet.setColumnWidth(2, Math.max(sheet.getColumnWidth(2), 120));  // B: Model
+          sheet.setColumnWidth(3, Math.max(sheet.getColumnWidth(3), 60));   // C: KV
+          sheet.setColumnWidth(4, Math.max(sheet.getColumnWidth(4), 120));  // D: Serial#
+          sheet.setColumnWidth(5, Math.max(sheet.getColumnWidth(5), 110));  // E: Calibration Date
+          sheet.setColumnWidth(6, Math.max(sheet.getColumnWidth(6), 100));  // F: Date Assigned
+          sheet.setColumnWidth(7, Math.max(sheet.getColumnWidth(7), 100));  // G: Location
+          sheet.setColumnWidth(8, Math.max(sheet.getColumnWidth(8), 110));  // H: Status
+          sheet.setColumnWidth(9, Math.max(sheet.getColumnWidth(9), 130));  // I: Assigned To
+          sheet.setColumnWidth(10, Math.max(sheet.getColumnWidth(10), 120)); // J: Change Out Date
+          // Column K: Picked For (text wrap)
+          sheet.getRange(1, 11, totalRows, 1).setWrap(true);
+          sheet.setColumnWidth(11, 150);
+          // Column L: Notes (text wrap)
+          sheet.getRange(1, 12, totalRows, 1).setWrap(true);
+          sheet.setColumnWidth(12, 200);
         }
       }
       // Formatting for Glove Swaps, Sleeve Swaps, Blanket Swaps, HV Tester Swaps, Phasing Set Swaps, AED Swaps
@@ -14837,6 +15183,16 @@ function generateAllReports() {
       Logger.log('generateAllReports: Error adding missing crews: ' + addCrewsError);
     }
 
+    // Refresh Training Tracking attendee lists for current and future months
+    // Only updates rows where attendees are empty or match full roster (not manually edited)
+    var attendeeResults = null;
+    try {
+      attendeeResults = refreshTrainingAttendeesSilent();
+      Logger.log('generateAllReports: Attendee refresh returned: ' + JSON.stringify(attendeeResults));
+    } catch (attendeeError) {
+      Logger.log('generateAllReports: Error refreshing attendees: ' + attendeeError);
+    }
+
     // Sync crews in Job Tracking (foremen, schedules, new crews) using syncCrews
     var foremanResults = null;
     try {
@@ -14857,6 +15213,9 @@ function generateAllReports() {
       if (crewLeadResults.skippedPastMonths > 0) {
         successMsg += '\n(Past months preserved: ' + crewLeadResults.skippedPastMonths + ' rows)';
       }
+    }
+    if (attendeeResults && attendeeResults.updatedRows > 0) {
+      successMsg += '\n\n📋 ' + attendeeResults.updatedRows + ' Training Tracking attendee list(s) refreshed.';
     }
     if (foremanResults && foremanResults.updatedCount > 0) {
       successMsg += '\n\n👤 ' + foremanResults.updatedCount + ' Job Tracking foreman(s) updated.';
@@ -21157,17 +21516,21 @@ function generateHVTesterSwaps(silent) {
   // Look ahead period (days) - show items due within 365 days (1 year)
   var lookAheadDays = 365;
 
+  // Dynamic column offset for 11-col (no KV) vs 12-col (with KV) layout
+  var hvSwapOffset = getEquipmentColOffset(hvTestersSheet);
+
   for (var i = 1; i < hvTestersData.length; i++) {
     var row = hvTestersData[i];
     var itemNum = (row[COLS.HV_TESTERS.ITEM_NUM - 1] || '').toString().trim();
     var model = (row[COLS.HV_TESTERS.MODEL - 1] || '').toString().trim();
-    var serialNum = (row[2] || '').toString().trim(); // Column C - Serial #
-    var calibrationDate = row[COLS.HV_TESTERS.CALIBRATION_DATE - 1];
-    var dateAssigned = row[COLS.HV_TESTERS.DATE_ASSIGNED - 1];
-    var location = (row[COLS.HV_TESTERS.LOCATION - 1] || '').toString().trim();
-    var status = (row[COLS.HV_TESTERS.STATUS - 1] || '').toString().trim();
-    var assignedTo = (row[COLS.HV_TESTERS.ASSIGNED_TO - 1] || '').toString().trim();
-    var changeOutDate = row[COLS.HV_TESTERS.CHANGE_OUT_DATE - 1];
+    var kv = (hvSwapOffset === 0) ? (row[COLS.HV_TESTERS.KV - 1] || '').toString().trim() : '';
+    var serialNum = (row[COLS.HV_TESTERS.SERIAL_NUM - 1 + hvSwapOffset] || '').toString().trim();
+    var calibrationDate = row[COLS.HV_TESTERS.CALIBRATION_DATE - 1 + hvSwapOffset];
+    var dateAssigned = row[COLS.HV_TESTERS.DATE_ASSIGNED - 1 + hvSwapOffset];
+    var location = (row[COLS.HV_TESTERS.LOCATION - 1 + hvSwapOffset] || '').toString().trim();
+    var status = (row[COLS.HV_TESTERS.STATUS - 1 + hvSwapOffset] || '').toString().trim();
+    var assignedTo = (row[COLS.HV_TESTERS.ASSIGNED_TO - 1 + hvSwapOffset] || '').toString().trim();
+    var changeOutDate = row[COLS.HV_TESTERS.CHANGE_OUT_DATE - 1 + hvSwapOffset];
 
     if (!itemNum) continue;
 
@@ -21177,7 +21540,7 @@ function generateHVTesterSwaps(silent) {
       if (calculatedChangeOut) {
         // Update change out date in sheet if needed
         if (!(changeOutDate instanceof Date) || Math.abs(changeOutDate.getTime() - calculatedChangeOut.getTime()) > 86400000) {
-          hvTestersSheet.getRange(i + 1, COLS.HV_TESTERS.CHANGE_OUT_DATE).setValue(calculatedChangeOut);
+          hvTestersSheet.getRange(i + 1, COLS.HV_TESTERS.CHANGE_OUT_DATE + hvSwapOffset).setValue(calculatedChangeOut);
           changeOutDate = calculatedChangeOut;
         }
       }
@@ -21188,6 +21551,7 @@ function generateHVTesterSwaps(silent) {
       availableTesters.push({
         itemNum: itemNum,
         model: model,
+        kv: kv,
         serialNum: serialNum,
         rowIndex: i + 1
       });
@@ -21202,6 +21566,7 @@ function generateHVTesterSwaps(silent) {
         testersNeedingReplacement.push({
           itemNum: itemNum,
           model: model,
+          kv: kv,
           serialNum: serialNum,
           calibrationDate: calibrationDate,
           dateAssigned: dateAssigned,
@@ -21245,12 +21610,12 @@ function generateHVTesterSwaps(silent) {
   var currentRow = 1;
 
   // Title row
-  swapsSheet.getRange(currentRow, 1, 1, 10).merge().setValue('⚡ HV Tester Replacements - ' + Utilities.formatDate(now, tz, 'MMMM yyyy'));
-  swapsSheet.getRange(currentRow, 1, 1, 10).setFontWeight('bold').setFontSize(14).setBackground('#f3e5f5').setFontColor('#7b1fa2').setHorizontalAlignment('center');
+  swapsSheet.getRange(currentRow, 1, 1, 11).merge().setValue('⚡ HV Tester Replacements - ' + Utilities.formatDate(now, tz, 'MMMM yyyy'));
+  swapsSheet.getRange(currentRow, 1, 1, 11).setFontWeight('bold').setFontSize(14).setBackground('#f3e5f5').setFontColor('#7b1fa2').setHorizontalAlignment('center');
   currentRow += 2;
 
   // Headers
-  var headers = ['Item #', 'Model', 'Serial #', 'Calibration Date', 'Replacement Date', 'Days Left', 'Location', 'Assigned To', 'Status', 'Notes'];
+  var headers = ['Item #', 'Model', 'KV', 'Serial #', 'Calibration Date', 'Replacement Date', 'Days Left', 'Location', 'Assigned To', 'Status', 'Notes'];
   swapsSheet.getRange(currentRow, 1, 1, headers.length).setValues([headers]);
   swapsSheet.getRange(currentRow, 1, 1, headers.length).setFontWeight('bold').setBackground('#7b1fa2').setFontColor('#ffffff').setHorizontalAlignment('center');
   swapsSheet.setFrozenRows(currentRow);
@@ -21261,6 +21626,7 @@ function generateHVTesterSwaps(silent) {
     var rowData = [
       tester.itemNum,
       tester.model,
+      tester.kv,
       tester.serialNum,
       tester.calibrationDate instanceof Date ? Utilities.formatDate(tester.calibrationDate, tz, 'MM/dd/yyyy') : '',
       tester.replacementDate instanceof Date ? Utilities.formatDate(tester.replacementDate, tz, 'MM/dd/yyyy') : '',
@@ -21346,18 +21712,21 @@ function generatePhasingSetSwaps(silent) {
   // Look ahead period (days) - show items due within 365 days (1 year)
   var lookAheadDays = 365;
 
+  // Dynamic column offset for 11-col (no KV) vs 12-col (with KV) layout
+  var psSwapOffset = getEquipmentColOffset(phasingSetsSheet);
+
   for (var i = 1; i < phasingSetsData.length; i++) {
     var row = phasingSetsData[i];
     var itemNum = (row[COLS.PHASING_SETS.ITEM_NUM - 1] || '').toString().trim();
     var model = (row[COLS.PHASING_SETS.MODEL - 1] || '').toString().trim();
-    var kv = (row[COLS.PHASING_SETS.KV - 1] || '').toString().trim();
-    var serialNum = (row[COLS.PHASING_SETS.SERIAL_NUM - 1] || '').toString().trim();
-    var calibrationDate = row[COLS.PHASING_SETS.CALIBRATION_DATE - 1];
-    var dateAssigned = row[COLS.PHASING_SETS.DATE_ASSIGNED - 1];
-    var location = (row[COLS.PHASING_SETS.LOCATION - 1] || '').toString().trim();
-    var status = (row[COLS.PHASING_SETS.STATUS - 1] || '').toString().trim();
-    var assignedTo = (row[COLS.PHASING_SETS.ASSIGNED_TO - 1] || '').toString().trim();
-    var changeOutDate = row[COLS.PHASING_SETS.CHANGE_OUT_DATE - 1];
+    var kv = (psSwapOffset === 0) ? (row[COLS.PHASING_SETS.KV - 1] || '').toString().trim() : '';
+    var serialNum = (row[COLS.PHASING_SETS.SERIAL_NUM - 1 + psSwapOffset] || '').toString().trim();
+    var calibrationDate = row[COLS.PHASING_SETS.CALIBRATION_DATE - 1 + psSwapOffset];
+    var dateAssigned = row[COLS.PHASING_SETS.DATE_ASSIGNED - 1 + psSwapOffset];
+    var location = (row[COLS.PHASING_SETS.LOCATION - 1 + psSwapOffset] || '').toString().trim();
+    var status = (row[COLS.PHASING_SETS.STATUS - 1 + psSwapOffset] || '').toString().trim();
+    var assignedTo = (row[COLS.PHASING_SETS.ASSIGNED_TO - 1 + psSwapOffset] || '').toString().trim();
+    var changeOutDate = row[COLS.PHASING_SETS.CHANGE_OUT_DATE - 1 + psSwapOffset];
 
     if (!itemNum) continue;
 
@@ -21367,7 +21736,7 @@ function generatePhasingSetSwaps(silent) {
       if (calculatedChangeOut) {
         // Update change out date in sheet if needed
         if (!(changeOutDate instanceof Date) || Math.abs(changeOutDate.getTime() - calculatedChangeOut.getTime()) > 86400000) {
-          phasingSetsSheet.getRange(i + 1, COLS.PHASING_SETS.CHANGE_OUT_DATE).setValue(calculatedChangeOut);
+          phasingSetsSheet.getRange(i + 1, COLS.PHASING_SETS.CHANGE_OUT_DATE + psSwapOffset).setValue(calculatedChangeOut);
           changeOutDate = calculatedChangeOut;
         }
       }
@@ -21512,6 +21881,137 @@ function menuGeneratePhasingSetSwaps() {
 }
 
 /**
+ * Migrates the HV Testers sheet from old 11-column layout (no KV) to new 12-column layout (with KV at column C).
+ * Old layout: Item# | Model | Serial# | CalDate | DateAssigned | Location | Status | AssignedTo | ChangeOut | PickedFor | Notes
+ * New layout: Item# | Model | KV | Serial# | CalDate | DateAssigned | Location | Status | AssignedTo | ChangeOut | PickedFor | Notes
+ *
+ * Inserts a blank KV column at position C and shifts everything right.
+ * Safe to run multiple times - checks if migration already done.
+ */
+function migrateHVTestersAddKVColumn() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+
+  var sheet = ss.getSheetByName(SHEET_HV_TESTERS);
+  if (!sheet) {
+    ui.alert('❌ HV Testers sheet not found.\n\nRun "Setup HV Testers & Phasing Sets" first.');
+    return;
+  }
+
+  // Check if already migrated by looking at header row
+  var headers = sheet.getRange(1, 1, 1, Math.min(12, sheet.getMaxColumns())).getValues()[0];
+  var headerC = (headers[2] || '').toString().trim();
+
+  // If column C header is already "KV", migration was already done
+  if (headerC.toLowerCase() === 'kv') {
+    ui.alert('✅ HV Testers sheet already has KV column at position C.\n\nNo migration needed.');
+    return;
+  }
+
+  // Verify this looks like the old layout (column C should be "Serial #" or similar)
+  var headerA = (headers[0] || '').toString().trim().toLowerCase();
+  var headerB = (headers[1] || '').toString().trim().toLowerCase();
+
+  // Basic sanity check - column A should have item identifier, column B should be Model
+  if (headerA === '' && headerB === '') {
+    ui.alert('⚠️ HV Testers sheet appears empty. Please set up headers first.');
+    return;
+  }
+
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  var dataRowCount = lastRow > 1 ? lastRow - 1 : 0;
+
+  // Confirm with user
+  var response = ui.alert(
+    '⚡ Migrate HV Testers Sheet',
+    'This will insert a "KV" column at position C (between Model and Serial #) and shift all data to the right.\n\n' +
+    'Current data rows: ' + dataRowCount + '\n' +
+    'Current columns: ' + lastCol + ' → will become ' + (lastCol + 1) + '\n\n' +
+    'Before:\n' +
+    'A: Item# | B: Model | C: Serial# | D: CalDate | ...\n\n' +
+    'After:\n' +
+    'A: Item# | B: Model | C: KV | D: Serial# | E: CalDate | ...\n\n' +
+    'Continue?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (response !== ui.Button.YES) {
+    ui.alert('Migration cancelled.');
+    return;
+  }
+
+  try {
+    // Insert a new column at position C (column 3)
+    sheet.insertColumnBefore(3);
+
+    // Set the header for the new KV column
+    var kvHeader = sheet.getRange(1, 3);
+    kvHeader.setValue('KV');
+
+    // Copy header formatting from column B (Model) to column C (KV)
+    var modelHeader = sheet.getRange(1, 2);
+    modelHeader.copyFormatToRange(sheet, 3, 3, 1, 1);
+
+    // Set column width for KV (narrow)
+    sheet.setColumnWidth(3, 60);
+
+    // Update the header row text to match expected 12-column layout
+    var expectedHeaders = ['HV Tester', 'Model', 'KV', 'Serial #', 'Calibration Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'];
+    var currentHeaders = sheet.getRange(1, 1, 1, 12).getValues()[0];
+
+    // Only update header text if it doesn't match (preserve existing if close enough)
+    for (var h = 0; h < expectedHeaders.length; h++) {
+      var current = (currentHeaders[h] || '').toString().trim();
+      var expected = expectedHeaders[h];
+      // Update if empty or significantly different
+      if (!current || (h > 0 && current.toLowerCase() !== expected.toLowerCase())) {
+        // Don't overwrite column A if it has a reasonable value (e.g., "Item #" instead of "HV Tester")
+        if (h === 0 && current) continue;
+        sheet.getRange(1, h + 1).setValue(expected);
+      }
+    }
+
+    // Add date formatting for shifted date columns
+    if (lastRow > 1) {
+      // Calibration Date: was D(4), now E(5)
+      sheet.getRange(2, 5, dataRowCount, 1).setNumberFormat('mm/dd/yyyy');
+      // Date Assigned: was E(5), now F(6)
+      sheet.getRange(2, 6, dataRowCount, 1).setNumberFormat('mm/dd/yyyy');
+      // Change Out Date: was I(9), now J(10)
+      sheet.getRange(2, 10, dataRowCount, 1).setNumberFormat('mm/dd/yyyy');
+    }
+
+    // Re-apply Status dropdown validation on new column H (was G)
+    if (lastRow > 1 || sheet.getMaxRows() > 1) {
+      var validationRows = Math.max(dataRowCount, 100);
+      var statusValidation = SpreadsheetApp.newDataValidation()
+        .requireValueInList(['In Service', 'On Shelf', 'In Calibration', 'Out of Service', 'Retired', 'Lost'], true)
+        .setAllowInvalid(false)
+        .build();
+      sheet.getRange(2, COLS.HV_TESTERS.STATUS, validationRows, 1).setDataValidation(statusValidation);
+    }
+
+    // Set text wrap for Picked For (K=11) and Notes (L=12)
+    var wrapRows = Math.max(dataRowCount, 100);
+    sheet.getRange(2, 11, wrapRows, 1).setWrap(true);
+    sheet.getRange(2, 12, wrapRows, 1).setWrap(true);
+
+    logEvent('Migrated HV Testers sheet: Inserted KV column at position C. ' + dataRowCount + ' data rows shifted.', 'INFO');
+
+    ui.alert('✅ Migration Complete!\n\n' +
+      'KV column inserted at position C.\n' +
+      dataRowCount + ' data row(s) shifted successfully.\n\n' +
+      'New layout: Item# | Model | KV | Serial# | CalDate | DateAssigned | Location | Status | AssignedTo | ChangeOut | PickedFor | Notes\n\n' +
+      'You can now enter KV values in column C.');
+
+  } catch (e) {
+    logEvent('migrateHVTestersAddKVColumn error: ' + e, 'ERROR');
+    ui.alert('❌ Migration Failed!\n\n' + e.toString() + '\n\nCheck the execution log for details.');
+  }
+}
+
+/**
  * Sets up the HV Testers and Phasing Sets sheets with proper structure and formatting.
  * Creates both sheets if they don't exist, sets up headers, formatting, and data validation.
  */
@@ -21525,12 +22025,12 @@ function setupHVTesterAndPhasingSetSheets() {
   var inventoryConfigs = [
     {
       name: SHEET_HV_TESTERS,
-      headers: ['HV Tester', 'Model', 'Serial #', 'Calibration Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Replacement Date', 'Picked For', 'Notes'],
+      headers: ['HV Tester', 'Model', 'KV', 'Serial #', 'Calibration Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'],
       type: 'inventory'
     },
     {
       name: SHEET_PHASING_SETS,
-      headers: ['Phasing Set', 'Model', 'Serial #', 'Calibration Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Replacement Date', 'Picked For', 'Notes'],
+      headers: ['Phasing Set', 'Model', 'KV', 'Serial #', 'Calibration Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'],
       type: 'inventory'
     }
   ];
@@ -21578,8 +22078,8 @@ function setupHVTesterAndPhasingSetSheets() {
     headerRange.setFontWeight('bold');
     sheet.setFrozenRows(1);
 
-    // Set column widths for inventory sheets
-    var columnWidths = [100, 120, 120, 110, 100, 100, 110, 130, 120, 150, 200];
+    // Set column widths for inventory sheets (12 columns: A-L)
+    var columnWidths = [100, 120, 60, 120, 110, 100, 100, 110, 130, 120, 150, 200];
     for (var i = 0; i < columnWidths.length && i < config.headers.length; i++) {
       sheet.setColumnWidth(i + 1, columnWidths[i]);
     }
@@ -21589,23 +22089,24 @@ function setupHVTesterAndPhasingSetSheets() {
       sheet.insertRowsAfter(Math.max(1, sheet.getMaxRows()), 101 - sheet.getMaxRows());
     }
 
-    // Add Status dropdown validation (column 7)
+    // Add Status dropdown validation (column H = 8)
     var statusValidation = SpreadsheetApp.newDataValidation()
       .requireValueInList(['In Service', 'On Shelf', 'In Calibration', 'Out of Service', 'Retired', 'Lost'], true)
       .setAllowInvalid(false)
       .build();
-    sheet.getRange(2, 7, 100, 1).setDataValidation(statusValidation);
+    sheet.getRange(2, 8, 100, 1).setDataValidation(statusValidation);
 
-    // Add date formatting for Calibration Date (column 4), Date Assigned (column 5), Replacement Date (column 9)
-    sheet.getRange(2, 4, 100, 1).setNumberFormat('mm/dd/yyyy');
+    // Add date formatting for Calibration Date (E=5), Date Assigned (F=6), Change Out Date (J=10)
     sheet.getRange(2, 5, 100, 1).setNumberFormat('mm/dd/yyyy');
-    sheet.getRange(2, 9, 100, 1).setNumberFormat('mm/dd/yyyy');
+    sheet.getRange(2, 6, 100, 1).setNumberFormat('mm/dd/yyyy');
+    sheet.getRange(2, 10, 100, 1).setNumberFormat('mm/dd/yyyy');
 
-    // Set text wrap for Notes column (column 11)
+    // Set text wrap for Notes column (L=12)
+    sheet.getRange(2, 12, 100, 1).setWrap(true);
+
+    // Set text wrap for Picked For column (K=11)
     sheet.getRange(2, 11, 100, 1).setWrap(true);
 
-    // Set text wrap for Picked For column (column 10)
-    sheet.getRange(2, 10, 100, 1).setWrap(true);
 
     Logger.log('setupHVTesterAndPhasingSetSheets: Finished setting up inventory sheet "' + config.name + '"');
   });
@@ -21672,15 +22173,19 @@ function setupHVTesterAndPhasingSetSheets() {
   });
 
   // Process HISTORY sheets
+  // IMPORTANT: Headers must match what saveHistoryFast writes and buildHistoryLookup reads:
+  // - HV Testers History: [Date Assigned, Item#, Model, Serial#, Location, AssignedTo, Notes] (7 cols)
+  // - Phasing Sets History: [Date Assigned, Item#, Model, KV, Serial#, Location, AssignedTo, Notes] (8 cols)
+  // Do NOT include Calibration Date - it's not tracked in history (only in source sheets)
   var historyConfigs = [
     {
       name: SHEET_HV_TESTERS_HISTORY,
-      headers: ['Date Assigned', 'Item #', 'Model', 'Serial #', 'Calibration Date', 'Location', 'Assigned To', 'Notes'],
+      headers: ['Date Assigned', 'Item #', 'Model', 'Serial #', 'Location', 'Assigned To', 'Notes'],
       color: '#6a1b9a' // Purple for HV Testers
     },
     {
       name: SHEET_PHASING_SETS_HISTORY,
-      headers: ['Date Assigned', 'Item #', 'Model', 'Serial #', 'Calibration Date', 'Location', 'Assigned To', 'Notes'],
+      headers: ['Date Assigned', 'Item #', 'Model', 'KV', 'Serial #', 'Location', 'Assigned To', 'Notes'],
       color: '#00695c' // Teal for Phasing Sets
     }
   ];
@@ -21782,22 +22287,22 @@ function fixEquipmentSheetHeaders() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var updated = [];
 
-  // Fix HV Testers sheet
+  // Fix HV Testers sheet - Change Out Date at column J (10)
   var hvSheet = ss.getSheetByName(SHEET_HV_TESTERS);
-  if (hvSheet && hvSheet.getLastColumn() >= 9) {
-    var header = hvSheet.getRange(1, 9).getValue();
+  if (hvSheet && hvSheet.getLastColumn() >= 10) {
+    var header = hvSheet.getRange(1, 10).getValue();
     if (header && header.toString().toLowerCase().indexOf('replacement') >= 0) {
-      hvSheet.getRange(1, 9).setValue('Change Out Date');
+      hvSheet.getRange(1, 10).setValue('Change Out Date');
       updated.push('HV Testers');
     }
   }
 
-  // Fix Phasing Sets sheet
+  // Fix Phasing Sets sheet - Change Out Date at column J (10)
   var psSheet = ss.getSheetByName(SHEET_PHASING_SETS);
-  if (psSheet && psSheet.getLastColumn() >= 9) {
-    var header = psSheet.getRange(1, 9).getValue();
+  if (psSheet && psSheet.getLastColumn() >= 10) {
+    var header = psSheet.getRange(1, 10).getValue();
     if (header && header.toString().toLowerCase().indexOf('replacement') >= 0) {
-      psSheet.getRange(1, 9).setValue('Change Out Date');
+      psSheet.getRange(1, 10).setValue('Change Out Date');
       updated.push('Phasing Sets');
     }
   }
@@ -21807,6 +22312,502 @@ function fixEquipmentSheetHeaders() {
   } else {
     SpreadsheetApp.getUi().alert('No updates needed - column headers are already correct.');
   }
+}
+
+/**
+ * Repairs HV Testers History and Phasing Sets History sheets that were created with
+ * incorrect column layouts by setupHVTesterAndPhasingSetSheets.
+ *
+ * The bug: setupHVTesterAndPhasingSetSheets created history sheets with a "Calibration Date"
+ * column that doesn't belong in history sheets. Then ensurePhasingSetsHistorySheet's KV
+ * migration shifted data, causing Location to be read as AssignedTo → generating duplicates.
+ *
+ * Expected layouts (what saveHistoryFast writes):
+ * - HV Testers History: [Date Assigned, Item#, Model, Serial#, Location, AssignedTo, Notes] (7 cols)
+ * - Phasing Sets History: [Date Assigned, Item#, Model, KV, Serial#, Location, AssignedTo, Notes] (8 cols)
+ *
+ * This function detects and fixes mismatched layouts, then runs duplicate cleanup.
+ *
+ * Menu: Glove Manager → 🔧 Maintenance → 📦 Inventory → 🔧 Repair History Sheet Columns
+ */
+function repairHistorySheetColumns() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+  var results = [];
+
+  ss.toast('Repairing history sheet columns...', '🔧 Please wait', -1);
+
+  // ---- FIX HV TESTERS HISTORY ----
+  var hvHistSheet = ss.getSheetByName(SHEET_HV_TESTERS_HISTORY);
+  if (hvHistSheet && hvHistSheet.getLastRow() >= 1) {
+    var hvHeaders = hvHistSheet.getRange(1, 1, 1, hvHistSheet.getLastColumn()).getValues()[0];
+    var hvHeaderStrs = hvHeaders.map(function(h) { return String(h).toLowerCase().trim(); });
+    var hvCalIdx = hvHeaderStrs.indexOf('calibration date');
+
+    if (hvCalIdx !== -1) {
+      // Wrong layout detected: has Calibration Date column that shouldn't be there
+      // Expected: [Date Assigned, Item#, Model, Serial#, Location, AssignedTo, Notes]
+      // Wrong:    [Date Assigned, Item#, Model, Serial#, CalibrationDate, Location, AssignedTo, Notes]
+      var hvLastRow = hvHistSheet.getLastRow();
+
+      if (hvLastRow > 1) {
+        // Read all data
+        var hvData = hvHistSheet.getRange(2, 1, hvLastRow - 1, hvHistSheet.getLastColumn()).getValues();
+
+        // Remove the CalibrationDate column (index hvCalIdx) from each row
+        var hvFixedRows = [];
+        for (var i = 0; i < hvData.length; i++) {
+          var row = [];
+          for (var c = 0; c < hvData[i].length; c++) {
+            if (c !== hvCalIdx) row.push(hvData[i][c]);
+          }
+          // Ensure exactly 7 columns [Date, Item#, Model, Serial#, Location, AssignedTo, Notes]
+          while (row.length < 7) row.push('');
+          hvFixedRows.push(row.slice(0, 7));
+        }
+
+        // Clear sheet and rewrite
+        hvHistSheet.clear();
+        var hvCorrectHeaders = ['Date Assigned', 'Item #', 'Model', 'Serial #', 'Location', 'Assigned To', 'Notes'];
+        hvHistSheet.getRange(1, 1, 1, 7).setValues([hvCorrectHeaders]);
+        hvHistSheet.getRange(1, 1, 1, 7)
+          .setFontWeight('bold')
+          .setBackground('#7b1fa2')
+          .setFontColor('#ffffff')
+          .setHorizontalAlignment('center');
+        hvHistSheet.setFrozenRows(1);
+
+        if (hvFixedRows.length > 0) {
+          hvHistSheet.getRange(2, 1, hvFixedRows.length, 7).setValues(hvFixedRows);
+        }
+        results.push('⚡ HV Testers History: Removed "Calibration Date" column, fixed ' + hvFixedRows.length + ' rows');
+      } else {
+        // No data, just fix headers
+        hvHistSheet.clear();
+        var hvCorrectHeaders = ['Date Assigned', 'Item #', 'Model', 'Serial #', 'Location', 'Assigned To', 'Notes'];
+        hvHistSheet.getRange(1, 1, 1, 7).setValues([hvCorrectHeaders]);
+        hvHistSheet.getRange(1, 1, 1, 7)
+          .setFontWeight('bold').setBackground('#7b1fa2').setFontColor('#ffffff').setHorizontalAlignment('center');
+        hvHistSheet.setFrozenRows(1);
+        results.push('⚡ HV Testers History: Fixed headers (no data rows)');
+      }
+    } else {
+      results.push('⚡ HV Testers History: Headers OK');
+    }
+  } else {
+    results.push('⚡ HV Testers History: Not found or empty');
+  }
+
+  // ---- FIX PHASING SETS HISTORY ----
+  var psHistSheet = ss.getSheetByName(SHEET_PHASING_SETS_HISTORY);
+  if (psHistSheet && psHistSheet.getLastRow() >= 1) {
+    var psHeaders = psHistSheet.getRange(1, 1, 1, psHistSheet.getLastColumn()).getValues()[0];
+    var psHeaderStrs = psHeaders.map(function(h) { return String(h).toLowerCase().trim(); });
+    var psCalIdx = psHeaderStrs.indexOf('calibration date');
+    var psKvIdx = psHeaderStrs.indexOf('kv');
+
+    if (psCalIdx !== -1) {
+      // Wrong layout detected: has Calibration Date column that shouldn't be there
+      // Expected: [Date Assigned, Item#, Model, KV, Serial#, Location, AssignedTo, Notes]
+      // Possible wrong layouts:
+      //   [Date Assigned, Item#, Model, Serial#, CalibrationDate, Location, AssignedTo, Notes] (no KV)
+      //   [Date Assigned, Item#, Model, KV, Serial#, CalibrationDate, Location, AssignedTo] (after KV migration, Notes lost)
+      var psLastRow = psHistSheet.getLastRow();
+
+      if (psLastRow > 1) {
+        var psData = psHistSheet.getRange(2, 1, psLastRow - 1, psHistSheet.getLastColumn()).getValues();
+
+        // Remove the CalibrationDate column from each row
+        var psFixedRows = [];
+        for (var pi = 0; pi < psData.length; pi++) {
+          var pRow = [];
+          for (var pc = 0; pc < psData[pi].length; pc++) {
+            if (pc !== psCalIdx) pRow.push(psData[pi][pc]);
+          }
+          // If KV column doesn't exist yet, insert empty KV at position 3
+          if (psKvIdx === -1) {
+            pRow.splice(3, 0, '');
+          }
+          // Ensure exactly 8 columns [Date, Item#, Model, KV, Serial#, Location, AssignedTo, Notes]
+          while (pRow.length < 8) pRow.push('');
+          psFixedRows.push(pRow.slice(0, 8));
+        }
+
+        // Clear and rewrite
+        psHistSheet.clear();
+        var psCorrectHeaders = ['Date Assigned', 'Item #', 'Model', 'KV', 'Serial #', 'Location', 'Assigned To', 'Notes'];
+        psHistSheet.getRange(1, 1, 1, 8).setValues([psCorrectHeaders]);
+        psHistSheet.getRange(1, 1, 1, 8)
+          .setFontWeight('bold')
+          .setBackground('#00838f')
+          .setFontColor('#ffffff')
+          .setHorizontalAlignment('center');
+        psHistSheet.setFrozenRows(1);
+
+        if (psFixedRows.length > 0) {
+          psHistSheet.getRange(2, 1, psFixedRows.length, 8).setValues(psFixedRows);
+        }
+        results.push('🔌 Phasing Sets History: Removed "Calibration Date" column' +
+          (psKvIdx === -1 ? ', added KV column' : '') + ', fixed ' + psFixedRows.length + ' rows');
+      } else {
+        psHistSheet.clear();
+        var psCorrectHeaders = ['Date Assigned', 'Item #', 'Model', 'KV', 'Serial #', 'Location', 'Assigned To', 'Notes'];
+        psHistSheet.getRange(1, 1, 1, 8).setValues([psCorrectHeaders]);
+        psHistSheet.getRange(1, 1, 1, 8)
+          .setFontWeight('bold').setBackground('#00838f').setFontColor('#ffffff').setHorizontalAlignment('center');
+        psHistSheet.setFrozenRows(1);
+        results.push('🔌 Phasing Sets History: Fixed headers (no data rows)');
+      }
+    } else if (psKvIdx === -1) {
+      // No CalibrationDate but also no KV - run the existing ensure function
+      ensurePhasingSetsHistorySheet();
+      results.push('🔌 Phasing Sets History: Added KV column via migration');
+    } else {
+      results.push('🔌 Phasing Sets History: Headers OK');
+    }
+  } else {
+    results.push('🔌 Phasing Sets History: Not found or empty');
+  }
+
+  ss.toast('Repair complete! Now running duplicate cleanup...', '🔧 Step 2', -1);
+
+  // After repairing columns, run duplicate cleanup to remove all the duplicate entries
+  var dupsRemoved = cleanupDuplicateItemHistory();
+
+  ss.toast('All done!', '✅ Complete', 3);
+
+  var message = '🔧 History Sheet Column Repair\n\n';
+  message += results.join('\n');
+  message += '\n\n📊 Then ran duplicate cleanup (removed ' + dupsRemoved + ' total duplicates)';
+  ui.alert(message);
+}
+
+/**
+ * Fixes orphaned data in history sheets beyond the expected column count.
+ *
+ * Problem: cleanupDuplicateItemHistory used to only clear numCols columns when rewriting,
+ * leaving old data in overflow columns (e.g., "Column 8"). When rows were removed during
+ * dedup, column H data stayed at original positions, becoming orphaned.
+ *
+ * Also detects and fixes rows where notes shifted to the wrong column:
+ * - If Notes col is empty but the overflow column has data → move overflow→Notes
+ * - If AssignedTo col has note text (patterns like "New Assignment", "Reassigned from...")
+ *   and Notes col is empty → data was written as 6 cols, shift right to add blank Location
+ *
+ * Menu: Glove Manager → 🔧 Maintenance → 📦 Inventory → 🔧 Fix History Overflow Data
+ */
+function fixHistorySheetOrphanedData() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+  var results = [];
+
+  ss.toast('Fixing history sheet overflow data...', '🔧 Please wait', -1);
+
+  // Note patterns used by getChangeTypeFast
+  var notePatterns = ['new assignment', 'reassigned from ', 'reassigned:', 'returned from ',
+                      'location change:', 'last working location:'];
+
+  function isNoteText(val) {
+    if (!val) return false;
+    var lower = String(val).toLowerCase().trim();
+    for (var i = 0; i < notePatterns.length; i++) {
+      if (lower.indexOf(notePatterns[i]) === 0 || lower === notePatterns[i].trim()) return true;
+    }
+    return false;
+  }
+
+  // Sheet configs: name, expectedCols, notesColIdx (0-based), assignedToColIdx (0-based)
+  var sheets = [
+    { name: SHEET_GLOVES_HISTORY, expectedCols: 7, notesIdx: 6, assignedToIdx: 5, label: 'Gloves History' },
+    { name: SHEET_SLEEVES_HISTORY, expectedCols: 7, notesIdx: 6, assignedToIdx: 5, label: 'Sleeves History' },
+    { name: SHEET_BLANKETS_HISTORY, expectedCols: 7, notesIdx: 6, assignedToIdx: 5, label: 'Blankets History' },
+    { name: SHEET_HV_TESTERS_HISTORY, expectedCols: 7, notesIdx: 6, assignedToIdx: 5, label: 'HV Testers History' },
+    { name: SHEET_PHASING_SETS_HISTORY, expectedCols: 8, notesIdx: 7, assignedToIdx: 6, label: 'Phasing Sets History' },
+    { name: SHEET_AED_HISTORY, expectedCols: 6, notesIdx: 5, assignedToIdx: 4, label: 'AED History' }
+  ];
+
+  var totalFixed = 0;
+
+  for (var s = 0; s < sheets.length; s++) {
+    var config = sheets[s];
+    var sheet = ss.getSheetByName(config.name);
+    if (!sheet || sheet.getLastRow() < 2) {
+      results.push(config.label + ': No data or not found');
+      continue;
+    }
+
+    var lastCol = sheet.getLastColumn();
+    var numRows = sheet.getLastRow() - 1;
+    var readCols = Math.max(config.expectedCols, lastCol);
+
+    // Read all data including overflow columns
+    var data = sheet.getRange(2, 1, numRows, readCols).getValues();
+    var fixedCount = 0;
+    var overflowCleared = 0;
+
+    for (var i = 0; i < data.length; i++) {
+      var row = data[i];
+
+      // Fix 1: If Notes column is empty but overflow column has data → move it to Notes
+      if (readCols > config.expectedCols) {
+        var notesVal = String(row[config.notesIdx] || '').trim();
+        var overflowVal = String(row[config.expectedCols] || '').trim();
+
+        if (!notesVal && overflowVal) {
+          row[config.notesIdx] = overflowVal;
+          row[config.expectedCols] = '';
+          fixedCount++;
+        }
+      }
+
+      // Fix 2: If AssignedTo column contains note-like text AND Notes column is empty
+      // This means the row was written without Location column (6 cols instead of 7)
+      // Shift: insert empty Location before AssignedTo
+      var assignedToVal = String(row[config.assignedToIdx] || '').trim();
+      var notesVal2 = String(row[config.notesIdx] || '').trim();
+
+      if (isNoteText(assignedToVal) && !notesVal2) {
+        // The note text is in the AssignedTo column - shift everything right by 1
+        // Current (wrong): [..., location=realAssignedTo, assignedTo=noteText, notes=empty]
+        // Correct:         [..., location=empty, assignedTo=realAssignedTo, notes=noteText]
+        // We need to look at the column BEFORE assignedTo (which would be Location)
+        var locationIdx = config.assignedToIdx - 1;
+        var locationVal = String(row[locationIdx] || '').trim();
+
+        // The value in Location is actually the AssignedTo value
+        row[config.notesIdx] = assignedToVal;      // Move note to Notes column
+        row[config.assignedToIdx] = locationVal;    // Move location value to AssignedTo
+        row[locationIdx] = '';                      // Clear old Location (it was actually AssignedTo)
+        fixedCount++;
+      }
+
+      // Track overflow columns that had data
+      for (var c = config.expectedCols; c < readCols; c++) {
+        if (String(row[c] || '').trim()) {
+          overflowCleared++;
+        }
+      }
+    }
+
+    // Rewrite if changes were made
+    if (fixedCount > 0 || overflowCleared > 0) {
+      // Step 1: Delete overflow columns FIRST (removes them from Table, avoids header errors)
+      if (lastCol > config.expectedCols) {
+        try {
+          var colsToDelete = lastCol - config.expectedCols;
+          sheet.deleteColumns(config.expectedCols + 1, colsToDelete);
+          Logger.log(config.label + ': Deleted ' + colsToDelete + ' overflow column(s)');
+        } catch (delErr) {
+          Logger.log(config.label + ': Could not delete overflow columns: ' + delErr);
+          // If delete fails, try clearing the data in overflow columns instead
+          try {
+            var totalRows = sheet.getLastRow();
+            if (totalRows > 1) {
+              sheet.getRange(2, config.expectedCols + 1, totalRows - 1, lastCol - config.expectedCols).clearContent();
+            }
+          } catch (clrErr) {
+            Logger.log(config.label + ': Could not clear overflow data either: ' + clrErr);
+          }
+        }
+      }
+
+      // Step 2: Clear data rows and rewrite with correct column count
+      var currentRows = sheet.getLastRow() - 1;
+      if (currentRows > 0) {
+        var currentCols = Math.min(sheet.getLastColumn(), config.expectedCols);
+        sheet.getRange(2, 1, currentRows, currentCols).clearContent();
+      }
+
+      // Write back with correct column count only
+      if (data.length > 0) {
+        var writeData = data.map(function(row) { return row.slice(0, config.expectedCols); });
+        sheet.getRange(2, 1, writeData.length, config.expectedCols).setValues(writeData);
+      }
+
+      totalFixed += fixedCount;
+      results.push(config.label + ': Fixed ' + fixedCount + ' rows, cleared ' + overflowCleared + ' overflow cells');
+    } else {
+      // Even if no data fixes needed, still delete overflow columns if they exist
+      if (lastCol > config.expectedCols) {
+        try {
+          sheet.deleteColumns(config.expectedCols + 1, lastCol - config.expectedCols);
+          results.push(config.label + ': Deleted ' + (lastCol - config.expectedCols) + ' empty overflow column(s)');
+        } catch (delErr) {
+          results.push(config.label + ': OK (could not delete empty overflow cols: ' + delErr + ')');
+        }
+      } else {
+        results.push(config.label + ': OK (no issues found)');
+      }
+    }
+  }
+
+  ss.toast('Fix complete!', '✅ Done', 3);
+
+  var message = '🔧 History Sheet Overflow Fix\n\n';
+  message += results.join('\n');
+  message += '\n\nTotal rows fixed: ' + totalFixed;
+
+  ui.alert(message);
+  Logger.log('fixHistorySheetOrphanedData: ' + message.replace(/\n/g, ' | '));
+}
+
+/**
+ * Regenerates the Notes column for all history sheets by comparing consecutive entries.
+ *
+ * Problem: When history columns were misaligned, buildHistoryLookup read note text from
+ * the AssignedTo column. getChangeTypeFast then embedded those wrong values into new notes,
+ * creating nested strings like "Returned from reassigned from darrell swann".
+ *
+ * Fix: For each item group, sort by date (oldest first), then regenerate each entry's note
+ * by comparing it to the actual previous entry's Location and AssignedTo values.
+ *
+ * Menu: Glove Manager → 🔧 Maintenance → 📦 Inventory → 🔧 Regenerate History Notes
+ */
+function regenerateHistoryNotes() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+  var results = [];
+
+  ss.toast('Regenerating history notes...', '🔧 Please wait', -1);
+
+  // returnedKeywords from getChangeTypeFast
+  var returnedKeywords = ['on shelf', 'storage', 'unassigned', 'available', 'lab'];
+
+  function generateNote(prevEntry, currentEntry) {
+    var newAssignedTo = String(currentEntry.assignedTo || '').toLowerCase().trim();
+    var newLocation = String(currentEntry.location || '').toLowerCase().trim();
+
+    if (!prevEntry) {
+      return 'New Assignment';
+    }
+
+    var prevAssignedTo = String(prevEntry.assignedTo || '').toLowerCase().trim();
+    var prevLocation = String(prevEntry.location || '').toLowerCase().trim();
+
+    // Previous Employee
+    if (newAssignedTo === 'previous employee') {
+      return 'Last working location: ' + (currentEntry.location || 'Unknown');
+    }
+
+    // Returned to shelf/storage
+    for (var r = 0; r < returnedKeywords.length; r++) {
+      if (newAssignedTo.indexOf(returnedKeywords[r]) !== -1 && prevAssignedTo.indexOf(returnedKeywords[r]) === -1) {
+        return 'Returned from ' + prevEntry.assignedTo;
+      }
+    }
+
+    // Both changed
+    if (prevAssignedTo !== newAssignedTo && prevLocation !== newLocation) {
+      if (prevLocation) {
+        return 'Reassigned: ' + prevEntry.assignedTo + ' (' + prevEntry.location + ')';
+      }
+      return 'Reassigned from ' + prevEntry.assignedTo;
+    }
+
+    // Only assignedTo changed
+    if (prevAssignedTo !== newAssignedTo) {
+      return 'Reassigned from ' + prevEntry.assignedTo;
+    }
+
+    // Only location changed
+    if (prevLocation !== newLocation) {
+      return 'Location change: ' + prevEntry.location + ' → ' + currentEntry.location;
+    }
+
+    return '';
+  }
+
+  // Sheet configs matching history layouts
+  // locationIdx and assignedToIdx are 0-based indices in the data array
+  var sheets = [
+    { name: SHEET_GLOVES_HISTORY, numCols: 7, locationIdx: 4, assignedToIdx: 5, notesIdx: 6, label: 'Gloves History' },
+    { name: SHEET_SLEEVES_HISTORY, numCols: 7, locationIdx: 4, assignedToIdx: 5, notesIdx: 6, label: 'Sleeves History' },
+    { name: SHEET_BLANKETS_HISTORY, numCols: 7, locationIdx: 4, assignedToIdx: 5, notesIdx: 6, label: 'Blankets History' },
+    { name: SHEET_HV_TESTERS_HISTORY, numCols: 7, locationIdx: 4, assignedToIdx: 5, notesIdx: 6, label: 'HV Testers History' },
+    { name: SHEET_PHASING_SETS_HISTORY, numCols: 8, locationIdx: 5, assignedToIdx: 6, notesIdx: 7, label: 'Phasing Sets History' },
+    { name: SHEET_AED_HISTORY, numCols: 6, locationIdx: 3, assignedToIdx: 4, notesIdx: 5, label: 'AED History' }
+  ];
+
+  var totalFixed = 0;
+
+  for (var s = 0; s < sheets.length; s++) {
+    var config = sheets[s];
+    var sheet = ss.getSheetByName(config.name);
+    if (!sheet || sheet.getLastRow() < 2) {
+      results.push(config.label + ': No data or not found');
+      continue;
+    }
+
+    var numRows = sheet.getLastRow() - 1;
+    var data = sheet.getRange(2, 1, numRows, config.numCols).getValues();
+
+    // Group entries by item number (col index 1)
+    var itemGroups = {};
+    for (var i = 0; i < data.length; i++) {
+      var itemNum = String(data[i][1] || '').trim();
+      if (!itemNum) continue;
+      if (!itemGroups[itemNum]) itemGroups[itemNum] = [];
+      itemGroups[itemNum].push({ rowIdx: i, row: data[i] });
+    }
+
+    var fixedCount = 0;
+
+    // For each item group, sort by date and regenerate notes
+    var itemNums = Object.keys(itemGroups);
+    for (var g = 0; g < itemNums.length; g++) {
+      var group = itemGroups[itemNums[g]];
+
+      // Sort by date ascending (oldest first)
+      group.sort(function(a, b) {
+        var dateA = new Date(a.row[0]);
+        var dateB = new Date(b.row[0]);
+        if (isNaN(dateA.getTime())) return -1;
+        if (isNaN(dateB.getTime())) return 1;
+        return dateA - dateB;
+      });
+
+      for (var e = 0; e < group.length; e++) {
+        var entry = group[e];
+        var currentEntry = {
+          location: String(entry.row[config.locationIdx] || '').trim(),
+          assignedTo: String(entry.row[config.assignedToIdx] || '').trim()
+        };
+
+        var prevEntry = null;
+        if (e > 0) {
+          prevEntry = {
+            location: String(group[e - 1].row[config.locationIdx] || '').trim(),
+            assignedTo: String(group[e - 1].row[config.assignedToIdx] || '').trim()
+          };
+        }
+
+        var newNote = generateNote(prevEntry, currentEntry);
+        var existingNote = String(entry.row[config.notesIdx] || '').trim();
+
+        if (newNote !== existingNote) {
+          data[entry.rowIdx][config.notesIdx] = newNote;
+          fixedCount++;
+        }
+      }
+    }
+
+    if (fixedCount > 0) {
+      sheet.getRange(2, 1, data.length, config.numCols).setValues(data);
+      totalFixed += fixedCount;
+      results.push(config.label + ': Regenerated ' + fixedCount + ' notes');
+    } else {
+      results.push(config.label + ': All notes OK');
+    }
+  }
+
+  ss.toast('Done!', '✅ Complete', 3);
+
+  var message = '🔧 History Notes Regeneration\n\n';
+  message += results.join('\n');
+  message += '\n\nTotal notes fixed: ' + totalFixed;
+
+  ui.alert(message);
+  Logger.log('regenerateHistoryNotes: ' + message.replace(/\n/g, ' | '));
 }
 
 /**
