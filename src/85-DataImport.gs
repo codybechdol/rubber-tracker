@@ -109,7 +109,7 @@ function ensureLocationsInLocationsSheet(ss, locations) {
   var locationsSheet = ss.getSheetByName('Locations');
   if (!locationsSheet) {
     Logger.log('ensureLocationsInLocationsSheet: Locations sheet not found');
-    return 0;
+    return { count: 0, names: [] };
   }
 
   var data = locationsSheet.getDataRange().getValues();
@@ -125,6 +125,7 @@ function ensureLocationsInLocationsSheet(ss, locations) {
 
   var addedCount = 0;
   var newRows = [];
+  var addedNames = [];
 
   for (var j = 0; j < locations.length; j++) {
     var location = locations[j];
@@ -138,26 +139,33 @@ function ensureLocationsInLocationsSheet(ss, locations) {
     // Check if location already exists
     if (existingLocations[location.toLowerCase()]) continue;
 
-    // Add new location with default values
+    // Add new location flagged for review
     // Columns: Location, Drive Time (min), Direction, Overnight City
     newRows.push([
       location,
-      120,        // Default 2 hours drive time
-      'Far',      // Default direction
-      location    // Overnight city defaults to location name
+      0,                      // Default 0 — needs user input
+      'NEEDS REVIEW',         // Flag for review instead of guessing
+      location                // Overnight city defaults to location name
     ]);
 
-    Logger.log('ensureLocationsInLocationsSheet: Adding new location: ' + location);
+    addedNames.push(location);
+    Logger.log('ensureLocationsInLocationsSheet: Adding new location (needs review): ' + location);
     addedCount++;
   }
 
   if (newRows.length > 0) {
     var lastRow = locationsSheet.getLastRow();
     locationsSheet.getRange(lastRow + 1, 1, newRows.length, 4).setValues(newRows);
-    Logger.log('ensureLocationsInLocationsSheet: Added ' + addedCount + ' new location(s)');
+
+    // Highlight the "NEEDS REVIEW" cells in orange
+    for (var k = 0; k < newRows.length; k++) {
+      locationsSheet.getRange(lastRow + 1 + k, 3).setBackground('#ffa726').setFontWeight('bold');
+    }
+
+    Logger.log('ensureLocationsInLocationsSheet: Added ' + addedCount + ' new location(s) flagged for review');
   }
 
-  return addedCount;
+  return { count: addedCount, names: addedNames };
 }
 
 /**
@@ -209,6 +217,7 @@ function applyCrewChanges(changes) {
       newLocationsToAdd.push(loc);
     }
   }
+  var locationsResult = { count: 0, names: [] };
   if (newLocationsToAdd.length > 0) {
     // Update Employees sheet Location dropdown validation
     var validationUpdated = ensureLocationsInValidation(employeesSheet, locationCol + 1, newLocationsToAdd);
@@ -217,9 +226,9 @@ function applyCrewChanges(changes) {
     }
 
     // Also add new locations to the Locations sheet (for drive times)
-    var locationsAdded = ensureLocationsInLocationsSheet(ss, newLocationsToAdd);
-    if (locationsAdded > 0) {
-      Logger.log('applyCrewChanges: Added ' + locationsAdded + ' new location(s) to Locations sheet');
+    locationsResult = ensureLocationsInLocationsSheet(ss, newLocationsToAdd);
+    if (locationsResult.count > 0) {
+      Logger.log('applyCrewChanges: Added ' + locationsResult.count + ' new location(s) to Locations sheet (NEEDS REVIEW): ' + locationsResult.names.join(', '));
     }
   }
 
@@ -477,6 +486,13 @@ function applyCrewChanges(changes) {
 
   logEvent('Crew Makeup Import: Updated ' + updatedCount + ' employees, logged ' + historyLogged + ' history entries');
 
+  // Add new locations warning if any were added
+  if (locationsResult.names.length > 0) {
+    message += '\n\n📍 New location(s) added to Locations sheet (NEED REVIEW):\n';
+    message += locationsResult.names.join(', ');
+    message += '\n⚠️ Please set drive times via Glove Manager → 🔧 Maintenance → 📍 Review New Locations';
+  }
+
   // Extract jobNameMap from first change (if provided by client)
   var jobNameMap = null;
   if (changes.length > 0 && changes[0].jobNameMap) {
@@ -501,7 +517,8 @@ function applyCrewChanges(changes) {
     success: true,
     message: message,
     pendingJobs: pendingJobs,
-    changeDetails: changeDetails
+    changeDetails: changeDetails,
+    newLocations: locationsResult.names
   };
 }
 
@@ -999,7 +1016,137 @@ function checkAndActivateScheduledJobs() {
     Logger.log('checkAndActivateScheduledJobs: Activated ' + activatedJobs.length + ' job(s): ' + activatedJobs.join(', '));
   }
 
+  // Also activate any pending new hire employees
+  // Also activate any pending new hire employees
+  try {
+    var empResult = checkAndActivatePendingEmployees();
+    if (empResult.activated > 0) {
+      Logger.log('checkAndActivateScheduledJobs: Also activated ' + empResult.activated + ' pending employee(s): ' + empResult.employees.join(', '));
+    }
+  } catch (empErr) {
+    Logger.log('checkAndActivateScheduledJobs: Pending employee activation failed (non-critical): ' + empErr.toString());
+  }
+
   return { activated: activatedJobs.length, jobs: activatedJobs };
+}
+
+/**
+ * Checks for employees with a future Hire Date that has now arrived (today or past).
+ * When Hire Date <= today, the employee is auto-activated (no longer pending).
+ * Logs activation to Employee History.
+ *
+ * Called automatically from checkAndActivateScheduledJobs() which runs during:
+ * - generateAllReports() (Quick Actions Step 2)
+ * - syncJobTrackingAfterImport() (after Crew Import)
+ *
+ * @returns {Object} - { activated: number, employees: string[] }
+ */
+function checkAndActivatePendingEmployees() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var empSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+  if (!empSheet || empSheet.getLastRow() < 2) return { activated: 0, employees: [] };
+
+  var data = empSheet.getDataRange().getValues();
+  var headers = data[0];
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Find Hire Date column dynamically
+  var hireDateCol = -1;
+  var nameCol = 0;
+  for (var h = 0; h < headers.length; h++) {
+    var hdr = String(headers[h]).toLowerCase().trim();
+    if (hdr === 'hire date') hireDateCol = h;
+    if (hdr === 'name') nameCol = h;
+  }
+
+  if (hireDateCol === -1) {
+    Logger.log('checkAndActivatePendingEmployees: Hire Date column not found');
+    return { activated: 0, employees: [] };
+  }
+
+  var activatedEmployees = [];
+  var skippedUnknown = [];
+  var historySheet = ss.getSheetByName('Employee History');
+  var timezone = ss.getSpreadsheetTimeZone();
+  var todayStr = Utilities.formatDate(new Date(), timezone, 'MM/dd/yyyy');
+
+  for (var i = 1; i < data.length; i++) {
+    var name = String(data[i][nameCol] || '').trim();
+    if (!name) continue;
+
+    var hireDate = data[i][hireDateCol];
+    if (!(hireDate instanceof Date) || isNaN(hireDate.getTime())) continue;
+
+    var hd = new Date(hireDate);
+    hd.setHours(0, 0, 0, 0);
+
+    // Only process employees whose hire date WAS in the future but is now today or past
+    // We check if isEmployeePending returns false AND the hire date is recent (within 30 days)
+    // to avoid re-logging old employees
+    if (hd > today) continue; // Still pending, skip
+
+    // Check if this employee was recently activated (within last 30 days) to avoid duplicate logging
+    var daysSinceHire = Math.floor((today - hd) / (1000 * 60 * 60 * 24));
+    if (daysSinceHire > 30) continue; // Hired more than 30 days ago, not a new activation
+
+    // Check if we already logged this activation in Employee History
+    if (historySheet) {
+      var alreadyLogged = false;
+      var histData = historySheet.getDataRange().getValues();
+      for (var hi = 1; hi < histData.length; hi++) {
+        var histName = String(histData[hi][1] || '').trim().toLowerCase();
+        var histEvent = String(histData[hi][2] || '').trim();
+        if (histName === name.toLowerCase() && histEvent === 'PENDING_ACTIVATED') {
+          alreadyLogged = true;
+          break;
+        }
+      }
+      if (alreadyLogged) continue;
+    }
+
+    // Block activation if location is still "Unknown" — user must set a real location first
+    var empLocation = String(data[i][2] || '').trim().toLowerCase();
+    if (empLocation === 'unknown' || empLocation === '') {
+      Logger.log('checkAndActivatePendingEmployees: SKIPPING ' + name +
+        ' — location is "' + data[i][2] + '". Must set a real location before activation.');
+      skippedUnknown.push(name);
+      continue;
+    }
+
+    // Log activation to Employee History
+    if (historySheet) {
+      var hireDateStr = Utilities.formatDate(hireDate, timezone, 'MM/dd/yyyy');
+      var location = String(data[i][2] || '').trim(); // Location col C
+      var jobNumber = String(data[i][3] || '').trim(); // Job Number col D
+      var historyRow = [
+        todayStr,                         // Date
+        name,                             // Employee Name
+        'PENDING_ACTIVATED',              // Event Type
+        location,                         // Location
+        jobNumber,                        // Job Number
+        hireDateStr,                      // Hire Date
+        '',                               // Last Day
+        '',                               // Last Day Reason
+        '',                               // Rehire Date
+        'Auto-activated: Hire Date (' + hireDateStr + ') reached'  // Notes
+      ];
+      historySheet.appendRow(historyRow);
+    }
+
+    activatedEmployees.push(name);
+    Logger.log('checkAndActivatePendingEmployees: Activated ' + name + ' (Hire Date: ' +
+               Utilities.formatDate(hireDate, timezone, 'MM/dd/yyyy') + ')');
+  }
+
+  if (activatedEmployees.length > 0) {
+    Logger.log('checkAndActivatePendingEmployees: Activated ' + activatedEmployees.length + ' employee(s): ' + activatedEmployees.join(', '));
+  }
+  if (skippedUnknown.length > 0) {
+    Logger.log('checkAndActivatePendingEmployees: BLOCKED ' + skippedUnknown.length + ' employee(s) with Unknown location: ' + skippedUnknown.join(', '));
+  }
+
+  return { activated: activatedEmployees.length, employees: activatedEmployees, skippedUnknown: skippedUnknown };
 }
 
 /**
@@ -1669,7 +1816,7 @@ function searchEmployeeHistoryBatch(namesJson) {
 
   for (var h = 0; h < historyData.length; h++) {
     var row = historyData[h];
-    var histName = String(row[1] || '').trim();
+    var histName = String(row[1] || '').replace(/^["']+|["']+$/g, '').trim();
     var histNameLower = histName.toLowerCase();
 
     // Only process names we're looking for
@@ -1861,9 +2008,21 @@ function addNewEmployeeFromImport(employeeData) {
       var timezone = ss.getSpreadsheetTimeZone();
       var todayStr = Utilities.formatDate(new Date(), timezone, 'MM/dd/yyyy');
 
-      var notes = 'New Employee from Crew Makeup Import. ';
+      // Check if this is a pending new hire (future hire date)
+      var isPending = false;
+      if (employeeData.hireDate) {
+        var parsedHD = new Date(employeeData.hireDate);
+        if (!isNaN(parsedHD.getTime())) {
+          isPending = isEmployeePending(parsedHD);
+        }
+      }
+
+      var notes = (isPending ? 'PENDING ' : '') + 'New Employee from Crew Makeup Import. ';
       notes += 'Location: ' + employeeData.location + '. ';
       notes += 'Job #: ' + employeeData.jobNumber + '.';
+      if (isPending) {
+        notes += ' Start Date: ' + employeeData.hireDate + '.';
+      }
       if (employeeData.classification) {
         notes += ' Classification: ' + employeeData.classification + '.';
       }
@@ -1877,7 +2036,7 @@ function addNewEmployeeFromImport(employeeData) {
       var historyRow = [
         todayStr,                         // Date
         employeeData.name,                // Employee Name
-        'NEW_EMPLOYEE_IMPORT',            // Event Type
+        isPending ? 'NEW_EMPLOYEE_PENDING' : 'NEW_EMPLOYEE_IMPORT',  // Event Type
         employeeData.location,            // Location
         employeeData.jobNumber,           // Job Number
         employeeData.hireDate || todayStr, // Hire Date

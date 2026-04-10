@@ -1864,7 +1864,7 @@ function addFutureJob() {
 
   // Prompt for job number
   var jobResponse = ui.prompt(
-    'Add Future Job - Step 1/3',
+    'Add Future Job - Step 1',
     'Enter the new job number (e.g., 055-26):',
     ui.ButtonSet.OK_CANCEL
   );
@@ -1889,7 +1889,7 @@ function addFutureJob() {
 
   // Prompt for location
   var locationResponse = ui.prompt(
-    'Add Future Job - Step 2/3',
+    'Add Future Job - Step 2',
     'Enter the location for job "' + jobNumber + '":',
     ui.ButtonSet.OK_CANCEL
   );
@@ -1898,9 +1898,72 @@ function addFutureJob() {
 
   var location = locationResponse.getResponseText().trim();
 
+  // Check if location exists in Locations sheet — if not, collect details
+  var locCheck = checkLocationExists(location);
+  if (!locCheck.exists) {
+    // Step 2b: Drive time
+    var driveTimeResponse = ui.prompt(
+      '📍 New Location: ' + location + ' (Step 1/3)',
+      '"' + location + '" is not in the Locations sheet.\n\n' +
+      'Enter the drive time from Helena in minutes:\n' +
+      '(e.g., 90 for 1.5 hours, 120 for 2 hours)',
+      ui.ButtonSet.OK_CANCEL
+    );
+    if (driveTimeResponse.getSelectedButton() !== ui.Button.OK) return;
+    var driveTime = parseInt(driveTimeResponse.getResponseText().trim(), 10);
+    if (isNaN(driveTime) || driveTime < 0) {
+      ui.alert('❌ Invalid Drive Time', 'Please enter a number of minutes (e.g., 90).', ui.ButtonSet.OK);
+      return;
+    }
+
+    // Step 2c: Direction
+    var directionResponse = ui.prompt(
+      '📍 New Location: ' + location + ' (Step 2/3)',
+      'Enter the direction from Helena:\n\n' +
+      'Options: East, North, West, Southwest, Northwest, Far\n\n' +
+      '(e.g., "Southwest" for Butte area, "East" for Bozeman area)',
+      ui.ButtonSet.OK_CANCEL
+    );
+    if (directionResponse.getSelectedButton() !== ui.Button.OK) return;
+    var direction = directionResponse.getResponseText().trim();
+    var validDirections = ['East', 'North', 'West', 'Southwest', 'Northwest', 'Far'];
+    // Case-insensitive match
+    var matchedDirection = '';
+    for (var vd = 0; vd < validDirections.length; vd++) {
+      if (validDirections[vd].toLowerCase() === direction.toLowerCase()) {
+        matchedDirection = validDirections[vd];
+        break;
+      }
+    }
+    if (!matchedDirection) {
+      ui.alert('❌ Invalid Direction', 'Please enter one of: East, North, West, Southwest, Northwest, Far', ui.ButtonSet.OK);
+      return;
+    }
+
+    // Step 2d: Overnight city
+    var overnightResponse = ui.prompt(
+      '📍 New Location: ' + location + ' (Step 3/3)',
+      'Enter the nearest overnight city for "' + location + '":\n\n' +
+      '(Leave blank to use "' + location + '" as the overnight city)\n\n' +
+      'Examples: Bozeman, Butte, Missoula, Great Falls',
+      ui.ButtonSet.OK_CANCEL
+    );
+    if (overnightResponse.getSelectedButton() !== ui.Button.OK) return;
+    var overnightCity = overnightResponse.getResponseText().trim() || location;
+
+    // Save the new location
+    var addResult = addLocationWithDriveTime(location, driveTime, matchedDirection, overnightCity);
+    if (addResult && addResult.success) {
+      Logger.log('addFutureJob: Added new location "' + location + '" (' + driveTime + ' min, ' + matchedDirection + ', overnight: ' + overnightCity + ')');
+    } else {
+      Logger.log('addFutureJob: Warning - failed to add location: ' + (addResult ? addResult.message : 'unknown error'));
+    }
+  }
+
   // Prompt for start date
+  var dateStepLabel = locCheck.exists ? 'Step 3/3' : 'Step 4/4';
   var dateResponse = ui.prompt(
-    'Add Future Job - Step 3/3',
+    'Add Future Job - ' + dateStepLabel,
     'Enter the expected start date for job "' + jobNumber + '":\n\n' +
     'Format: MM/DD/YYYY (e.g., 03/15/2026)',
     ui.ButtonSet.OK_CANCEL
@@ -1963,17 +2026,20 @@ function addFutureJob() {
   // Add checkboxes for skip day columns (L-T = cols 12-20)
   jobSheet.getRange(lastRow + 1, 12, 1, 9).insertCheckboxes();
 
-  ui.alert(
-    '✅ Future Job Added',
-    'Job "' + jobNumber + '" has been added.\n\n' +
+  var successMsg = 'Job "' + jobNumber + '" has been added.\n\n' +
     'Location: ' + location + '\n' +
     'Start Date: ' + Utilities.formatDate(startDate, Session.getScriptTimeZone(), 'MM/dd/yyyy') + '\n' +
-    'Status: ' + status + '\n\n' +
-    (status === 'Pending Start' ?
-      '⚠️ This job will not appear in Safety Compliance tracking until the start date.' :
-      'This job is now active and will appear in tracking.'),
-    ui.ButtonSet.OK
-  );
+    'Status: ' + status;
+
+  if (!locCheck.exists) {
+    successMsg += '\n\n📍 New location "' + location + '" added to Locations sheet with drive time info.';
+  }
+
+  successMsg += '\n\n' + (status === 'Pending Start' ?
+    '⚠️ This job will not appear in Safety Compliance tracking until the start date.' :
+    'This job is now active and will appear in tracking.');
+
+  ui.alert('✅ Future Job Added', successMsg, ui.ButtonSet.OK);
 }
 
 /**

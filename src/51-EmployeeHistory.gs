@@ -910,7 +910,7 @@ function saveEmployeeHistory() {
   // Also track Last Day, Last Day Reason, and Rehire Date to preserve them
   var lastKnownState = {};
   for (var hi = 0; hi < historyData.length; hi++) {
-    var histName = (historyData[hi][1] || '').toString().trim().toLowerCase();
+    var histName = (historyData[hi][1] || '').toString().replace(/^["']+|["']+$/g, '').trim().toLowerCase();
     if (histName) {
       // Get current stored values
       var existing = lastKnownState[histName] || {};
@@ -1142,6 +1142,7 @@ function buildRestoreEmployeeHtml() {
   html += '.no-results { color: #666; font-style: italic; padding: 20px; text-align: center; }';
   html += '.loading { color: #666; padding: 20px; text-align: center; }';
   html += '.error { color: #dc3545; padding: 10px; background: #f8d7da; border-radius: 4px; margin-top: 10px; }';
+  html += '.pending-badge { display: none; background: #fff3cd; color: #856404; border: 1px solid #ffc107; border-radius: 6px; padding: 8px 12px; margin-top: 12px; font-size: 13px; }';
   html += '</style>';
 
   html += '<div class="search-box">';
@@ -1163,9 +1164,10 @@ function buildRestoreEmployeeHtml() {
   html += '<div class="preview-item"><label>Email Address</label><input type="text" id="prev_email"></div>';
   html += '<div class="preview-item"><label>Glove Size</label><input type="text" id="prev_gloveSize"></div>';
   html += '<div class="preview-item"><label>Sleeve Size</label><input type="text" id="prev_sleeveSize"></div>';
-  html += '<div class="preview-item"><label>Hire Date</label><input type="text" id="prev_hireDate"></div>';
+  html += '<div class="preview-item"><label>Hire Date (future = Pending New Hire)</label><input type="date" id="prev_hireDate" onchange="checkPending()"></div>';
   html += '<div class="preview-item"><label>Notes (history source)</label><input type="text" id="prev_notes" readonly style="background:#eee;font-size:11px;"></div>';
   html += '</div>';
+  html += '<div class="pending-badge" id="pendingBadge">⏳ <strong>Pending New Hire</strong> — Future Hire Date detected. Employee will be restored but excluded from swap reports and tasks until this date.</div>';
   html += '<div class="buttons">';
   html += '<button class="btn-cancel" onclick="google.script.host.close()">Cancel</button>';
   html += '<button class="btn-restore" onclick="restoreEmployee()">✅ Restore Employee</button>';
@@ -1221,9 +1223,24 @@ function buildRestoreEmployeeHtml() {
   html += '  document.getElementById("prev_email").value = selectedEmployee.email || "";';
   html += '  document.getElementById("prev_gloveSize").value = selectedEmployee.gloveSize || "";';
   html += '  document.getElementById("prev_sleeveSize").value = selectedEmployee.sleeveSize || "";';
-  html += '  document.getElementById("prev_hireDate").value = selectedEmployee.hireDate || "";';
+  html += '  var rawHire = selectedEmployee.hireDate || "";';
+  html += '  if (rawHire) {';
+  html += '    var parts = rawHire.split("/");';
+  html += '    if (parts.length === 3) { rawHire = parts[2] + "-" + parts[0].padStart(2,"0") + "-" + parts[1].padStart(2,"0"); }';
+  html += '  }';
+  html += '  document.getElementById("prev_hireDate").value = rawHire;';
   html += '  document.getElementById("prev_notes").value = "From " + selectedEmployee.historyEntries + " history entries";';
   html += '  document.getElementById("preview").style.display = "block";';
+  html += '  checkPending();';
+  html += '}';
+
+  html += 'function checkPending() {';
+  html += '  var val = document.getElementById("prev_hireDate").value;';
+  html += '  var badge = document.getElementById("pendingBadge");';
+  html += '  if (!val) { badge.style.display = "none"; return; }';
+  html += '  var hd = new Date(val + "T00:00:00");';
+  html += '  var today = new Date(); today.setHours(0,0,0,0);';
+  html += '  badge.style.display = hd > today ? "block" : "none";';
   html += '}';
 
   html += 'function restoreEmployee() {';
@@ -1426,8 +1443,23 @@ function restoreEmployeeToSheet(dataJson) {
   if (colMap.email !== undefined) newRow[colMap.email] = data.email || '';
   if (colMap.gloveSize !== undefined) newRow[colMap.gloveSize] = data.gloveSize || '';
   if (colMap.sleeveSize !== undefined) newRow[colMap.sleeveSize] = data.sleeveSize || '';
-  if (colMap.hireDate !== undefined) newRow[colMap.hireDate] = data.hireDate || '';
   if (colMap.classification !== undefined) newRow[colMap.classification] = data.class || '';
+
+  // Format hire date for the sheet (convert YYYY-MM-DD to MM/DD/YYYY)
+  var hireDateForSheet = data.hireDate || '';
+  if (hireDateForSheet && hireDateForSheet.indexOf('-') !== -1) {
+    var hdParts = hireDateForSheet.split('-');
+    if (hdParts.length === 3) {
+      hireDateForSheet = hdParts[1] + '/' + hdParts[2] + '/' + hdParts[0];
+    }
+  }
+  if (colMap.hireDate !== undefined) newRow[colMap.hireDate] = hireDateForSheet;
+
+  // Detect if this is a pending new hire (future hire date)
+  var isPending = false;
+  if (hireDateForSheet) {
+    isPending = isEmployeePending(new Date(hireDateForSheet));
+  }
 
   // Append the row
   employeesSheet.appendRow(newRow);
@@ -1437,17 +1469,22 @@ function restoreEmployeeToSheet(dataJson) {
     var today = new Date();
     var todayStr = Utilities.formatDate(today, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
 
+    var eventType = isPending ? 'NEW_EMPLOYEE_PENDING' : 'Restored';
+    var notes = isPending
+      ? 'Rehired as Pending New Hire (start date: ' + hireDateForSheet + '). Restored from Employee History.'
+      : 'Restored from Employee History - accidentally deleted';
+
     historySheet.appendRow([
       todayStr,                    // Date
       data.name,                   // Employee Name
-      'Restored',                  // Event Type
+      eventType,                   // Event Type
       data.location || '',         // Location
       data.jobNumber || '',        // Job Number
-      data.hireDate || '',         // Hire Date
+      hireDateForSheet,            // Hire Date
       '',                          // Last Day
       '',                          // Last Day Reason
-      '',                          // Rehire Date
-      'Restored from Employee History - accidentally deleted', // Notes
+      isPending ? '' : todayStr,   // Rehire Date (only for immediate rehires)
+      notes,                       // Notes
       data.phone || '',            // Phone
       data.email || '',            // Email
       data.gloveSize || '',        // Glove Size
@@ -1455,7 +1492,11 @@ function restoreEmployeeToSheet(dataJson) {
     ]);
   }
 
-  Logger.log('restoreEmployeeToSheet: Restored ' + data.name + ' to Employees sheet');
+  Logger.log('restoreEmployeeToSheet: Restored ' + data.name + ' to Employees sheet' + (isPending ? ' (PENDING)' : ''));
+
+  if (isPending) {
+    return '⏳ Pending New Hire Restored!\n\n' + data.name + ' has been added to the Employees sheet as a Pending New Hire.\n\nStart Date: ' + hireDateForSheet + '\nLocation: ' + (data.location || 'Not set') + '\n\nThey will be excluded from swap reports and tasks until their start date. Equipment can be pre-assigned now.';
+  }
 
   return '✅ Employee Restored!\n\n' + data.name + ' has been added back to the Employees sheet.\n\nJob Number: ' + (data.jobNumber || 'Not set') + '\nLocation: ' + (data.location || 'Not set');
 }

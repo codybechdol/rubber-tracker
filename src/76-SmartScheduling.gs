@@ -337,6 +337,13 @@ function collectAndGroupTasks(ss) {
   var employeePhones = getEmployeePhoneMapInternal(ss);
   Logger.log('collectAndGroupTasks: Found ' + Object.keys(employeePhones).length + ' employee phones');
 
+  // Get pending new hire employees (future Hire Date) to exclude from tasks
+  var pendingEmployees = getPendingEmployeeSet(ss);
+  var pendingCount = Object.keys(pendingEmployees).length;
+  if (pendingCount > 0) {
+    Logger.log('collectAndGroupTasks: Found ' + pendingCount + ' pending new hire(s) to exclude');
+  }
+
   // Collect from Glove Swaps
   var beforeGlove = countTasks(tasksByLocation);
   collectSwapTasks(ss, 'Glove Swaps', 'Glove', tasksByLocation, employeeLocations, employeeForemen, employeePhones, today);
@@ -445,6 +452,38 @@ function collectAndGroupTasks(ss) {
   return tasksByLocation;
 }
 
+
+/**
+ * Returns a set of pending new hire employee names (lowercase).
+ * Pending = Hire Date in the future (uses isEmployeePending from 01-Utilities.gs).
+ * Used by task collection functions to exclude pending employees.
+ *
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @return {Object} Map of lowercase employee name to true for pending employees
+ */
+function getPendingEmployeeSet(ss) {
+  var employeesSheet = ss.getSheetByName('Employees');
+  if (!employeesSheet || employeesSheet.getLastRow() < 2) return {};
+
+  var data = employeesSheet.getDataRange().getValues();
+  var headers = data[0];
+  var nameCol = -1, hireDateCol = -1;
+  for (var h = 0; h < headers.length; h++) {
+    var hdr = String(headers[h]).toLowerCase().trim();
+    if (hdr === 'name') nameCol = h;
+    if (hdr === 'hire date') hireDateCol = h;
+  }
+  if (nameCol === -1 || hireDateCol === -1) return {};
+
+  var pending = {};
+  for (var i = 1; i < data.length; i++) {
+    var name = String(data[i][nameCol]).trim();
+    if (name && isEmployeePending(data[i][hireDateCol])) {
+      pending[name.toLowerCase()] = true;
+    }
+  }
+  return pending;
+}
 
 /**
  * Creates employee name to location map from Employees sheet.
@@ -1325,6 +1364,9 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
   var skippedCompleted = 0;
   var daysThreshold = 365; // Include certs expiring within this many days
 
+  // Build pending employee set once (outside loop)
+  var pendingEmps = getPendingEmployeeSet(ss);
+
   for (var i = 1; i < data.length; i++) {
     var row = data[i];
     var employee = String(row[nameCol] || '').trim();
@@ -1333,6 +1375,9 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
     var daysUntil = daysUntilCol !== -1 ? row[daysUntilCol] : null;
 
     if (!employee || !certType) continue;
+
+    // Skip pending new hire employees (future Hire Date)
+    if (pendingEmps[employee.toLowerCase()]) continue;
 
     // Skip certs that have been marked Complete in Task Metadata
     // Check both by row number and by employee+certType combo

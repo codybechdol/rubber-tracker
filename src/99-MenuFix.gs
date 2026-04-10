@@ -248,6 +248,7 @@ function forceCreateMenu() {
           .addItem('⚡ Fix Phasing Set Change Out Dates', 'fixPhasingSetChangeOutDates')
           .addItem('📍 Setup Locations Sheet', 'setupLocationsSheet')
           .addItem('📍 View Locations', 'openLocationsSheet')
+          .addItem('📍 Review New Locations', 'reviewNewLocations')
           .addItem('📅 Fiscal Year Config', 'showFiscalYearConfig')
           .addItem('📥 Import Data', 'showImportDialog')
           .addItem('📥 Quick Import (1084)', 'importProvidedData'))

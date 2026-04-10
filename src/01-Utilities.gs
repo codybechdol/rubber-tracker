@@ -99,3 +99,22 @@ function isStatusLocation(location) {
   var loc = String(location).trim().toLowerCase();
   return STATUS_LOCATIONS.indexOf(loc) !== -1;
 }
+
+/**
+ * Checks if an employee is a pending new hire (Hire Date is in the future).
+ * Used to exclude pending employees from swap reports, task collection,
+ * safety compliance, and training until their start date.
+ * Equipment can still be pre-assigned to pending employees.
+ * @param {*} hireDate - The Hire Date value from the Employees sheet (col K)
+ * @returns {boolean} - True if the employee is pending (hire date in the future)
+ */
+function isEmployeePending(hireDate) {
+  if (!hireDate) return false;
+  var date = (hireDate instanceof Date) ? hireDate : new Date(hireDate);
+  if (isNaN(date.getTime())) return false;
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+  date.setHours(0, 0, 0, 0);
+  return date > today;
+}
+

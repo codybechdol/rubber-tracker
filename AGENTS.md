@@ -13,7 +13,7 @@ Google Apps Script-based inventory management system for tracking rubber gloves/
 Google Apps Script loads files **alphabetically**. Numbered prefixes control load order:
 ```
 00-Constants.gs  → loads FIRST (defines COLS, SHEET_* constants, STATUS_LOCATIONS, incl. Blankets/HV Testers/Phasing Sets/AED) (~250 lines)
-01-Utilities.gs  → utility functions (logEvent, normalizeApprovalValue, isStatusLocation) (~105 lines)
+01-Utilities.gs  → utility functions (logEvent, normalizeApprovalValue, isStatusLocation, isEmployeePending) (~120 lines)
 10-Menu.gs       → archived (menu now in Code.gs) (~18 lines)
 11-Triggers.gs   → edit/change triggers, auto change-out dates (~1.9k lines)
 20-InventoryHandlers.gs → inventory status/assignment handlers (~190 lines)
@@ -258,6 +258,31 @@ Key functions in `88-SafetyReports.gs`:
 1. Run "Migrate Job Tracking for Compliance" to add columns L-T
 2. Run "Migrate Config to Job Tracking" to copy settings and delete old sheet
 3. Use "Sync Crews" to update foremen and apply default schedules
+
+## Pending New Hire Employees (April 2026)
+Employees with a **future Hire Date** (col K on Employees sheet) are "pending new hires". They exist on the Employees sheet so equipment can be pre-assigned, but are excluded from active reporting until their start date.
+
+**How it works:**
+- `isEmployeePending(hireDate)` in `01-Utilities.gs` — single source of truth. Returns `true` if Hire Date > today.
+- `checkAndActivatePendingEmployees()` in `85-DataImport.gs` — auto-activates employees when Hire Date arrives. Called inside `checkAndActivateScheduledJobs()` which runs during `generateAllReports()` and Crew Import sync.
+- `getPendingEmployeeSet(ss)` in `76-SmartScheduling.gs` — returns a map of pending employee names (lowercase) for batch filtering.
+
+**What pending employees are excluded from:**
+- Swap generation (Gloves, Sleeves, Blankets, HV Testers, Phasing Sets, AED) — `generateSwaps()` and equipment-specific generators skip them
+- Task collection — `collectExpiringCertTasks()` skips pending employees
+- Reclaims — pending employees are treated as active (equipment is intentionally pre-staged, not reclaimed)
+
+**What pending employees are NOT excluded from:**
+- Location sync — equipment shows the correct future location
+- Lookup Dialog — you can see what's been pre-assigned
+- Equipment assignment via edit triggers — you can assign equipment normally
+- History logging — events are tracked with `NEW_EMPLOYEE_PENDING` type
+
+**NewEmployeeDialog.html** shows a yellow "Pending New Hire" badge when Hire Date is in the future. Location should be the **real physical city** (Helena, Bozeman, etc.) or "Unknown" if not yet determined.
+
+**Employee History event types:**
+- `NEW_EMPLOYEE_PENDING` — new hire added with future Hire Date
+- `PENDING_ACTIVATED` — auto-logged when Hire Date is reached (within 30-day lookback window)
 
 ## Debugging
 1. Check Apps Script execution log: Extensions → Apps Script → Executions

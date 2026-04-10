@@ -5353,8 +5353,9 @@
         }
       }
 
-      // Set today as default hire date
-      var today = new Date().toISOString().split('T')[0];
+      // Set today as default hire date (use local date, not UTC)
+      var nowD = new Date();
+      var today = nowD.getFullYear() + '-' + ('0' + (nowD.getMonth() + 1)).slice(-2) + '-' + ('0' + nowD.getDate()).slice(-2);
       document.getElementById('newEmpHireDate').value = today;
 
       // Clear other fields
@@ -7090,8 +7091,9 @@
         classSelect.selectedIndex = 0;
       }
 
-      // Set today as default hire date
-      var today = new Date().toISOString().split('T')[0];
+      // Set today as default hire date (use local date, not UTC)
+      var nowD2 = new Date();
+      var today = nowD2.getFullYear() + '-' + ('0' + (nowD2.getMonth() + 1)).slice(-2) + '-' + ('0' + nowD2.getDate()).slice(-2);
       document.getElementById('newEmpHireDate').value = today;
 
       // Clear other fields
