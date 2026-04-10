@@ -746,7 +746,10 @@ Notes: [Any notes]
       - ⚡⚡⚡ **Class 3** — Red/pink sub-header (`#fce4ec`) + light pink row banding (`#fdf2f4`)
     - Items sorted by Class → Item Type → Size within each table
   - **Deduplication:** Low priority items that already appear in Medium priority (same size+class+type) are automatically removed
-  - **Columns:** Priority, Item Type, Size, Class, On Shelf, Qty to Order, Reason, Status, Notes
+  - **Columns:** Priority, Item Type, Size, Class, On Shelf, Qty to Order, Reason, Status, In Testing, Notes
+  - **In Testing column:** Shows count of items currently "In Testing" for that size/class and the soonest expected return date (Date Assigned + 3 weeks). Flags overdue items.
+  - **Summary By Priority table:** Includes description column explaining each tier (e.g., "Less than 2 on shelf", "Swap needed, none or only size-up available", "Currently assigned a size up")
+  - **New functions:** `buildInTestingMap()` scans Gloves/Sleeves for In Testing items, `formatInTestingInfo()` formats count + return date
   - **PO Dialog compatibility:** `getItemsToOrder()` in `62-PurchaseOrders.gs` updated to parse the new section headers (`HIGH PRIORITY`, `MEDIUM PRIORITY`, `LOW PRIORITY`) and skip class sub-header rows
   - **Email Reports compatibility:** `buildPurchaseNeedsSection()` in `80-EmailReports.gs` updated to use new `NEED TO ORDER` / `CONSIDER ORDERING` status values
   - **Files Modified:**
