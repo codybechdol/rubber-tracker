@@ -358,11 +358,9 @@ sh    .add-item-bar { display: flex; gap: 8px; margin-bottom: 10px; align-items:
 
       // Category styling
       var categoryStyles = {
-        'NEED TO ORDER': { bg: '#ffcdd2', color: '#b71c1c', badge: '🛒', selected: true },
-        'READY FOR DELIVERY (SIZE UP)': { bg: '#b2dfdb', color: '#00695c', badge: '📦⚠️', selected: false },
-        'IN TESTING': { bg: '#fff9c4', color: '#f57f17', badge: '⏳', selected: false },
-        'IN TESTING (SIZE UP)': { bg: '#e1bee7', color: '#6a1b9a', badge: '⏳⚠️', selected: false },
-        'SIZE UP ASSIGNMENTS': { bg: '#ffe0b2', color: '#e65100', badge: '⚠️', selected: false },
+        'HIGH PRIORITY': { bg: '#ffcdd2', color: '#b71c1c', badge: '🔴', selected: true },
+        'MEDIUM PRIORITY': { bg: '#ffe0b2', color: '#e65100', badge: '🟠', selected: true },
+        'LOW PRIORITY': { bg: '#c8e6c9', color: '#2e7d32', badge: '🟢', selected: false },
         'VENDOR CATALOG': { bg: '#e3f2fd', color: '#1565c0', badge: '📦', selected: false },
         'CUSTOM ITEMS': { bg: '#f3e5f5', color: '#7b1fa2', badge: '✏️', selected: true }
       };
@@ -418,16 +416,14 @@ sh    .add-item-bar { display: flex; gap: 8px; margin-bottom: 10px; align-items:
               itemDesc += ' <span style="color: #ff9800; font-size: 10px;">(SIZE UP)</span>';
             }
 
-            // Timeframe badge styling
+            // Priority badge styling
             var timeframeBadge = '';
             if (item.timeframe === 'Immediate') {
-              timeframeBadge = '<span style="background: #ef5350; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">Immediate</span>';
-            } else if (item.timeframe === 'In 2 Weeks') {
-              timeframeBadge = '<span style="background: #66bb6a; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">In 2 Weeks</span>';
-            } else if (item.timeframe === 'In 3 Weeks') {
-              timeframeBadge = '<span style="background: #ffa726; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">In 3 Weeks</span>';
+              timeframeBadge = '<span style="background: #ef5350; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">High</span>';
+            } else if (item.timeframe === 'Soon') {
+              timeframeBadge = '<span style="background: #ffa726; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">Medium</span>';
             } else if (item.timeframe === 'Consider') {
-              timeframeBadge = '<span style="background: #bdbdbd; color: #333; padding: 2px 6px; border-radius: 3px; font-size: 10px;">Consider</span>';
+              timeframeBadge = '<span style="background: #66bb6a; color: white; padding: 2px 6px; border-radius: 3px; font-size: 10px;">Low</span>';
             } else {
               timeframeBadge = '<span style="color: #999; font-size: 10px;">' + (item.timeframe || '-') + '</span>';
             }

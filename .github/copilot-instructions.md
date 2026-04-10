@@ -732,6 +732,29 @@ Notes: [Any notes]
 
 ## Completed Features Log
 
+### April 10, 2026
+- ✅ **Purchase Needs Simplification - 3-Tier Priority System with Class Grouping**
+  - **Goal:** Replace the complex 5-table swap-status-based Purchase Needs report with a simpler 3-tier priority system
+  - **New Priority Tiers:**
+    1. **🔴 HIGH PRIORITY - LOW SHELF STOCK** — Less than 2 of any size/class on shelf in Gloves or Sleeves inventory. Also checks Employees sheet for needed sizes that might not exist in inventory.
+    2. **🟠 MEDIUM PRIORITY - SWAP SHORTAGES** — Items on Glove Swaps, Sleeve Swaps, or Reclaims sheets where the pick list status is "Need to Purchase" (no availability) or "Size Up" (only half-size-up available).
+    3. **🟢 LOW PRIORITY - CONSIDER ORDERING** — Currently assigned (In Service) gloves or sleeves where the item size is larger than the employee's preferred size. Flags the preferred size as needed.
+  - **Class Grouping (visual distinction):**
+    - Each priority table has class sub-headers with distinct colors:
+      - ⚡ **Class 0** — Blue sub-header (`#e3f2fd`) + light blue row banding (`#f5f9ff`)
+      - ⚡⚡ **Class 2** — Orange sub-header (`#fff3e0`) + light orange row banding (`#fffaf3`)
+      - ⚡⚡⚡ **Class 3** — Red/pink sub-header (`#fce4ec`) + light pink row banding (`#fdf2f4`)
+    - Items sorted by Class → Item Type → Size within each table
+  - **Deduplication:** Low priority items that already appear in Medium priority (same size+class+type) are automatically removed
+  - **Columns:** Priority, Item Type, Size, Class, On Shelf, Qty to Order, Reason, Status, Notes
+  - **PO Dialog compatibility:** `getItemsToOrder()` in `62-PurchaseOrders.gs` updated to parse the new section headers (`HIGH PRIORITY`, `MEDIUM PRIORITY`, `LOW PRIORITY`) and skip class sub-header rows
+  - **Email Reports compatibility:** `buildPurchaseNeedsSection()` in `80-EmailReports.gs` updated to use new `NEED TO ORDER` / `CONSIDER ORDERING` status values
+  - **Files Modified:**
+    - `src/60-PurchaseNeeds.gs` — Complete rewrite (~710 lines). New functions: `collectHighPriorityItems()`, `collectMediumPriorityItems()`, `processSwapTabForMedium()`, `processReclaimsForMedium()`, `collectLowPriorityItems()`, `capitalizeSleeveSize()`
+    - `src/62-PurchaseOrders.gs` — Updated `getItemsToOrder()` section matching for new header names
+    - `src/80-EmailReports.gs` — Updated status detection in email report builder
+    - `src/PurchaseOrderDialog.html` — Updated category display for new priority tier names
+
 ### March 26, 2026
 - ✅ **Job Name Column - Backfill Utility & Auto-Fill During Crew Import**
   - **Goal:** Populate empty Job Name values in Job Tracking sheet (col Z) for existing jobs

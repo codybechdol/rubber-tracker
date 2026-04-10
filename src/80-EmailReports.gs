@@ -754,8 +754,8 @@ function buildPurchaseNeedsSectionEnhanced(ss, styles) {
 
     var itemTypeCol = colMap['item type'] !== undefined ? colMap['item type'] : 0;
     var sizeCol = colMap['size'] !== undefined ? colMap['size'] : 1;
-    var qtyCol = colMap['quantity needed'] !== undefined ? colMap['quantity needed'] : 3;
-    var statusCol = colMap['status/notes'] !== undefined ? colMap['status/notes'] : 5;
+    var qtyCol = colMap['qty to order'] !== undefined ? colMap['qty to order'] : (colMap['quantity needed'] !== undefined ? colMap['quantity needed'] : 3);
+    var statusCol = colMap['status'] !== undefined ? colMap['status'] : (colMap['status/notes'] !== undefined ? colMap['status/notes'] : 5);
 
     var needsOrder = [];
 
