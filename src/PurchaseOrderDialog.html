@@ -96,7 +96,7 @@
     .no-vendors-warning { background: #fff3cd; border: 1px solid #ffc107; color: #856404; padding: 12px; border-radius: 6px; margin-bottom: 15px; }
     .no-vendors-warning a { color: #0d6efd; cursor: pointer; text-decoration: underline; }
 
-sh    .add-item-bar { display: flex; gap: 8px; margin-bottom: 10px; align-items: center; }
+    .add-item-bar { display: flex; gap: 8px; margin-bottom: 10px; align-items: center; }
     .add-item-bar button { font-size: 12px; padding: 6px 12px; }
     .add-item-bar .add-item-hint { font-size: 11px; color: #5f6368; }
     td input.inline-text { width: 100%; padding: 4px 6px; border: 1px solid #dadce0; border-radius: 4px; font-size: 12px; }
@@ -314,23 +314,106 @@ sh    .add-item-bar { display: flex; gap: 8px; margin-bottom: 10px; align-items:
     function updateItemPrices() {
       for (var i = 0; i < items.length; i++) {
         var item = items[i];
-        var price = getItemPrice(item);
-        item.price = price;
+        if (item.isCustomItem) continue; // Skip catalog/custom items - they already have prices
+
+        var match = findCatalogMatch(item);
+        if (match) {
+          item.price = match.price;
+          item.catalogItemNumber = match.itemNumber;
+          item.catalogName = match.catalogName;
+        } else {
+          item.price = 0;
+          item.catalogItemNumber = '';
+          item.catalogName = '';
+        }
 
         var priceCell = document.querySelector('[data-index="' + i + '"] .price-cell');
         if (priceCell) {
-          priceCell.textContent = price > 0 ? '$' + price.toFixed(2) : '-';
+          priceCell.textContent = item.price > 0 ? '$' + item.price.toFixed(2) : '-';
         }
         updateRowTotal(i);
       }
       updateTotals();
     }
 
+    /**
+     * Search the selected vendor's catalog for an item matching
+     * the given class, type (Glove/Sleeve), and size.
+     * Returns { itemNumber, price, catalogName } or null.
+     */
+    function findCatalogMatch(item) {
+      if (!selectedVendor || !selectedVendor.customItems) return null;
+
+      var targetClass = String(item.classNum || '').trim();
+      var targetType = (item.itemType || '').trim().toLowerCase();
+      var targetSize = String(item.size || '').trim().toLowerCase();
+
+      if (!targetClass || !targetType || !targetSize) return null;
+
+      var catalog = selectedVendor.customItems;
+
+      // Pass 1: exact match - catalog name contains class, type, AND size
+      for (var i = 0; i < catalog.length; i++) {
+        var ci = catalog[i];
+        var name = (ci.item || '').toLowerCase();
+
+        var hasClass = name.indexOf('class ' + targetClass) !== -1 ||
+                       name.indexOf('cl' + targetClass) !== -1 ||
+                       name.indexOf('c' + targetClass + ' ') !== -1;
+        var hasType = name.indexOf(targetType) !== -1;
+
+        if (!hasClass || !hasType) continue;
+
+        // Check size match
+        var hasSize = false;
+        if (name.indexOf('size ' + targetSize) !== -1 ||
+            name.indexOf('sz ' + targetSize) !== -1 ||
+            name.indexOf(', ' + targetSize) !== -1 ||
+            name.indexOf(' ' + targetSize) !== -1) {
+          hasSize = true;
+        }
+
+        if (hasSize) {
+          return {
+            itemNumber: ci.itemNumber || '',
+            price: parseFloat(ci.price) || 0,
+            catalogName: ci.item
+          };
+        }
+      }
+
+      // Pass 2: class + type match only (no size) - for items sold as one-size-fits-all
+      for (var j = 0; j < catalog.length; j++) {
+        var ci2 = catalog[j];
+        var name2 = (ci2.item || '').toLowerCase();
+
+        var hasClass2 = name2.indexOf('class ' + targetClass) !== -1 ||
+                        name2.indexOf('cl' + targetClass) !== -1;
+        var hasType2 = name2.indexOf(targetType) !== -1;
+
+        // Only match if the catalog item doesn't specify a different size
+        var hasAnySize = name2.match(/size\s+\S/i) || name2.match(/sz\s+\S/i);
+
+        if (hasClass2 && hasType2 && !hasAnySize) {
+          return {
+            itemNumber: ci2.itemNumber || '',
+            price: parseFloat(ci2.price) || 0,
+            catalogName: ci2.item
+          };
+        }
+      }
+
+      return null;
+    }
+
     function getItemPrice(item) {
       if (!selectedVendor) return 0;
 
-      var key = 'class' + item.classNum + (item.itemType === 'Glove' ? 'GlovePrice' : 'SleevePrice');
-      return parseFloat(selectedVendor[key]) || 0;
+      // Try catalog match first
+      var match = findCatalogMatch(item);
+      if (match) return match.price;
+
+      return 0;
     }
 
     function renderItemsTable() {
@@ -387,6 +470,13 @@ sh    .add-item-bar { display: flex; gap: 8px; margin-bottom: 10px; align-items:
 
           var price = item.isCustomItem ? (item.price || 0) : getItemPrice(item);
           item.price = price;
+          if (!item.isCustomItem) {
+            var match = findCatalogMatch(item);
+            if (match) {
+              item.catalogItemNumber = match.itemNumber;
+              item.catalogName = match.catalogName;
+            }
+          }
 
           var row = document.createElement('tr');
           row.setAttribute('data-index', idx);
@@ -412,6 +502,9 @@ sh    .add-item-bar { display: flex; gap: 8px; margin-bottom: 10px; align-items:
           } else {
             // Standard Purchase Needs item
             itemDesc = 'Class ' + item.classNum + ' ' + item.itemType + ', Size ' + item.size;
+            if (item.catalogItemNumber) {
+              itemDesc += ' <span style="color:#1a73e8;font-size:10px;">#' + escapeHtml(item.catalogItemNumber) + '</span>';
+            }
             if (item.isSizeUp) {
               itemDesc += ' <span style="color: #ff9800; font-size: 10px;">(SIZE UP)</span>';
             }
@@ -505,25 +598,8 @@ sh    .add-item-bar { display: flex; gap: 8px; margin-bottom: 10px; align-items:
         return;
       }
 
-      // Build list of all vendor items (standard glove/sleeve + custom)
+      // Build list of vendor catalog items
       var catalogItems = [];
-      var standardNames = [
-        { name: 'Class 0 Glove', priceKey: 'class0GlovePrice', numKey: 'class0GloveItemNum' },
-        { name: 'Class 2 Glove', priceKey: 'class2GlovePrice', numKey: 'class2GloveItemNum' },
-        { name: 'Class 3 Glove', priceKey: 'class3GlovePrice', numKey: 'class3GloveItemNum' },
-        { name: 'Class 0 Sleeve', priceKey: 'class0SleevePrice', numKey: 'class0SleeveItemNum' },
-        { name: 'Class 2 Sleeve', priceKey: 'class2SleevePrice', numKey: 'class2SleeveItemNum' },
-        { name: 'Class 3 Sleeve', priceKey: 'class3SleevePrice', numKey: 'class3SleeveItemNum' }
-      ];
-
-      for (var s = 0; s < standardNames.length; s++) {
-        var si = standardNames[s];
-        var p = parseFloat(selectedVendor[si.priceKey]) || 0;
-        var n = selectedVendor[si.numKey] || '';
-        if (p || n) {
-          catalogItems.push({ name: si.name, itemNumber: n, price: p });
-        }
-      }
 
       if (selectedVendor.customItems) {
         for (var c = 0; c < selectedVendor.customItems.length; c++) {
@@ -650,6 +726,7 @@ sh    .add-item-bar { display: flex; gap: 8px; margin-bottom: 10px; align-items:
         } else {
           // Standard Purchase Needs item
           line = '- (' + item.quantity + ') Class ' + item.classNum + ' ' + item.itemType + ', Size ' + item.size;
+          if (item.catalogItemNumber) line += ' #' + item.catalogItemNumber;
         }
         if (item.price && item.price > 0) {
           line += ' @ $' + parseFloat(item.price).toFixed(2);

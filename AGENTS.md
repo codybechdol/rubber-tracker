@@ -28,7 +28,7 @@ Google Apps Script loads files **alphabetically**. Numbered prefixes control loa
 51-EmployeeHistory.gs → Employee lifecycle, restore deleted employees (~1.5k lines)
 60-PurchaseNeeds.gs → Purchase Needs 3-tier priority report (High/Medium/Low with class grouping) (~710 lines)
 61-InventoryReports.gs → Inventory Reports with charts (~2k lines)
-62-PurchaseOrders.gs → PO generation, vendor catalog and management (~960 lines)
+62-PurchaseOrders.gs → PO generation, vendor catalog and management (~780 lines)
 70-ToDoList.gs   → archived (To Do List functionality now in Code.gs) (~50 lines)
 75-Scheduling.gs → Crew visit scheduling, training calendar, attendee management (~3.6k lines)
 76-SmartScheduling.gs → Task collection (incl. equipment swaps), getDriveTimeMap() (~2.5k lines)
@@ -121,7 +121,7 @@ function showMyDialog() {
 | `ProcessSafetyEmailsDialog.html` | Safety email processing dialog (~1.5k lines) |
 | `ToDoConfig.html` | Schedule configuration dialog (~2.3k lines) |
 | `PurchaseOrderDialog.html` | Purchase order creation dialog (~870 lines) |
-| `VendorConfig.html` | Vendor management with pricing and catalog (~580 lines) |
+| `VendorConfig.html` | Vendor management with unified catalog (~385 lines) |
 | `ComplianceConfig.html` | Safety Compliance configuration (~200 lines) |
 | `AssignCrewLeads.html` | Crew lead assignment dialog (~540 lines) |
 | `LookupDialog.html` | Employee & item lookup dialog, all assignments view (~520 lines) |

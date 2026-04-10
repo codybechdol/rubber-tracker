@@ -268,8 +268,8 @@ function getPurchaseOrderNumber() {
 
 /**
  * Gets all vendors from the combined Vendors sheet.
- * Groups rows by vendor name and maps known glove/sleeve items to legacy properties.
- * @returns {Array} Array of vendor objects with pricing and customItems
+ * Groups rows by vendor name. All items (including gloves/sleeves) are in customItems.
+ * @returns {Array} Array of vendor objects with customItems catalog
  */
 function getVendors() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -290,16 +290,6 @@ function getVendors() {
 
   var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 8).getValues();
 
-  // Known item names that map to legacy glove/sleeve fields
-  var KNOWN_MAP = {
-    'Class 0 Glove': { priceField: 'class0GlovePrice', numField: 'class0GloveItemNum' },
-    'Class 2 Glove': { priceField: 'class2GlovePrice', numField: 'class2GloveItemNum' },
-    'Class 3 Glove': { priceField: 'class3GlovePrice', numField: 'class3GloveItemNum' },
-    'Class 0 Sleeve': { priceField: 'class0SleevePrice', numField: 'class0SleeveItemNum' },
-    'Class 2 Sleeve': { priceField: 'class2SleevePrice', numField: 'class2SleeveItemNum' },
-    'Class 3 Sleeve': { priceField: 'class3SleevePrice', numField: 'class3SleeveItemNum' }
-  };
-
   // Group rows by vendor name
   var vendorMap = {};
   var vendorOrder = [];
@@ -316,10 +306,6 @@ function getVendors() {
         email: String(row[2] || ''),
         phone: String(row[3] || ''),
         notes: String(row[4] || ''),
-        class0GlovePrice: 0, class2GlovePrice: 0, class3GlovePrice: 0,
-        class0SleevePrice: 0, class2SleevePrice: 0, class3SleevePrice: 0,
-        class0GloveItemNum: '', class2GloveItemNum: '', class3GloveItemNum: '',
-        class0SleeveItemNum: '', class2SleeveItemNum: '', class3SleeveItemNum: '',
         customItems: []
       };
       vendorOrder.push(name);
@@ -331,18 +317,12 @@ function getVendors() {
 
     if (!itemName) continue; // Empty item row (contact-info-only placeholder)
 
-    // Check if it's a known glove/sleeve item
-    var mapped = KNOWN_MAP[itemName];
-    if (mapped) {
-      vendorMap[name][mapped.priceField] = price;
-      vendorMap[name][mapped.numField] = itemNum;
-    } else {
-      vendorMap[name].customItems.push({
-        item: itemName,
-        itemNumber: itemNum,
-        price: price
-      });
-    }
+    // All items go into customItems (unified catalog)
+    vendorMap[name].customItems.push({
+      item: itemName,
+      itemNumber: itemNum,
+      price: price
+    });
   }
 
   // Return in order
@@ -356,7 +336,7 @@ function getVendors() {
 
 /**
  * Saves vendor data to the combined Vendors sheet (8 columns).
- * Converts legacy glove/sleeve fields + customItems into item rows.
+ * Writes all items from customItems array as individual rows.
  * @param {Array} vendors - Array of vendor objects
  */
 function saveVendors(vendors) {
@@ -383,16 +363,6 @@ function saveVendors(vendors) {
     return { success: true, message: 'Vendors cleared.' };
   }
 
-  // Known glove/sleeve fields to write as standard item rows
-  var KNOWN_ITEMS = [
-    { priceField: 'class0GlovePrice', numField: 'class0GloveItemNum', item: 'Class 0 Glove' },
-    { priceField: 'class2GlovePrice', numField: 'class2GloveItemNum', item: 'Class 2 Glove' },
-    { priceField: 'class3GlovePrice', numField: 'class3GloveItemNum', item: 'Class 3 Glove' },
-    { priceField: 'class0SleevePrice', numField: 'class0SleeveItemNum', item: 'Class 0 Sleeve' },
-    { priceField: 'class2SleevePrice', numField: 'class2SleeveItemNum', item: 'Class 2 Sleeve' },
-    { priceField: 'class3SleevePrice', numField: 'class3SleeveItemNum', item: 'Class 3 Sleeve' }
-  ];
-
   var allRows = [];
   var totalItems = 0;
 
@@ -400,22 +370,7 @@ function saveVendors(vendors) {
     var v = vendors[i];
     var hasItems = false;
 
-    // Write known glove/sleeve items
-    for (var k = 0; k < KNOWN_ITEMS.length; k++) {
-      var ki = KNOWN_ITEMS[k];
-      var price = v[ki.priceField] || 0;
-      var itemNum = v[ki.numField] || '';
-      if (price || itemNum) {
-        allRows.push([
-          v.vendorName || '', v.contactName || '', v.email || '', v.phone || '', v.notes || '',
-          ki.item, itemNum, price
-        ]);
-        hasItems = true;
-        totalItems++;
-      }
-    }
-
-    // Write custom items
+    // Write all catalog items
     if (v.customItems && v.customItems.length > 0) {
       for (var j = 0; j < v.customItems.length; j++) {
         var ci = v.customItems[j];
@@ -854,7 +809,7 @@ function showVendorConfigDialog() {
 
   var html = HtmlService.createHtmlOutputFromFile('VendorConfig')
     .setWidth(900)
-    .setHeight(650);
+    .setHeight(900);
   SpreadsheetApp.getUi().showModalDialog(html, '⚙️ Manage Vendors');
 }
 

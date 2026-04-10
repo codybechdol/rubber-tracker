@@ -671,7 +671,7 @@ Wednesday, Jan 29 (Start: Helena 7am):
 **Key files created:**
 - `62-PurchaseOrders.gs` - Backend PO functions (~600 lines)
 - `PurchaseOrderDialog.html` - Main PO creation dialog
-- `VendorConfig.html` - Vendor management with pricing
+- `VendorConfig.html` - Vendor catalog management (unified item list)
 
 **PO Text Format:**
 ```
@@ -688,8 +688,10 @@ Expected Delivery: ???
 Notes: [Any notes]
 ```
 
-**Vendors Sheet Structure:**
-| Vendor Name | Contact Name | Email | Phone | Notes | Class 0 Glove | Class 2 Glove | Class 3 Glove | Class 0 Sleeve | Class 2 Sleeve | Class 3 Sleeve |
+**Vendors Sheet Structure (8-column combined format):**
+| Vendor Name | Contact Name | Email | Phone | Notes | Item | Item Number | Price |
+- Each row = one catalog item for a vendor (vendor info repeated per row)
+- All items (gloves, sleeves, custom) stored uniformly in `customItems` array
 
 **Purchase Orders Sheet Structure:**
 | Date | PO Number | Vendor | Items | Total Price | Expected Delivery | Status | Notes |
@@ -757,6 +759,20 @@ Notes: [Any notes]
     - `src/62-PurchaseOrders.gs` — Updated `getItemsToOrder()` section matching for new header names
     - `src/80-EmailReports.gs` — Updated status detection in email report builder
     - `src/PurchaseOrderDialog.html` — Updated category display for new priority tier names
+
+- ✅ **Vendor Catalog Simplification - Remove Legacy Glove/Sleeve Pricing Fields**
+  - **Goal:** Remove the old hard-coded glove/sleeve pricing fields (`class0GlovePrice`, `class2GloveItemNum`, etc.) and use the unified `customItems` catalog for everything
+  - **What changed:**
+    1. **`getVendors()`** - Removed `KNOWN_MAP` that mapped glove/sleeve items to legacy fields. All items now flow into `customItems` array uniformly.
+    2. **`saveVendors()`** - Removed `KNOWN_ITEMS` array that wrote legacy glove/sleeve items separately. All items written from `customItems`.
+    3. **`findCatalogMatch()`** (new, PO Dialog) - Smart catalog matching that finds vendor items by class, type, and size. Two-pass search: exact match (class+type+size) then class+type-only for one-size-fits-all items.
+    4. **Catalog item numbers shown on PO** - Purchase Needs items now display matched vendor item numbers (`#RB-100`) inline and in PO text output.
+    5. **VendorConfig.html** - Removed old 2-column glove/sleeve pricing grid, now catalog-only view with taller dialog (900px).
+    6. **CSS fix** - Fixed `sh` typo prefix on `.add-item-bar` CSS rule in PurchaseOrderDialog.html.
+  - **Files Modified:**
+    - `src/62-PurchaseOrders.gs` — Removed ~60 lines of legacy pricing fields, dialog height 650→900
+    - `src/PurchaseOrderDialog.html` — Added `findCatalogMatch()` (~80 lines), catalog item number display, fixed CSS
+    - `src/VendorConfig.html` — Removed legacy pricing grid (~50 lines), updated labels to "catalog"
 
 ### March 26, 2026
 - ✅ **Job Name Column - Backfill Utility & Auto-Fill During Crew Import**
@@ -1736,9 +1752,9 @@ Notes: [Any notes]
        - Items shown as unchecked rows, user selects what to order
        - "Add from Vendor Catalog" button for additional items
        - "Add Custom Line" for freeform items with editable name and price
-    3. **VendorConfig.html Redesign** - Item Number fields alongside prices for all glove/sleeve classes
-       - Custom Items section with add/remove rows
-       - 2-column grid layout: Glove Prices | Sleeve Prices
+    3. **VendorConfig.html Redesign** - Unified catalog-only view (removed legacy glove/sleeve pricing grid)
+       - All items managed through single catalog table
+       - Add/remove items with name, item number, and price
     4. **PurchaseOrderDialog.html Enhancements** - Category-based item display
        - Vendor catalog items shown with item numbers
        - Inline editing for custom line items
