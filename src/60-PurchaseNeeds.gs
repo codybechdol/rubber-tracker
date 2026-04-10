@@ -21,8 +21,15 @@ function updatePurchaseNeeds() {
     var purchaseSheet = ss.getSheetByName('Purchase Needs') || ss.insertSheet('Purchase Needs');
     purchaseSheet.clear();
 
-    // Column headers for all tables
-    var tableHeaders = ['Priority', 'Item Type', 'Size', 'Class', 'On Shelf', 'Qty to Order', 'Reason', 'Status', 'Notes'];
+    // Column headers for all tables (10 columns)
+    var tableHeaders = ['Priority', 'Item Type', 'Size', 'Class', 'On Shelf', 'Qty to Order', 'Reason', 'Status', 'In Testing', 'Notes'];
+    var numCols = tableHeaders.length; // 10
+
+    // =========================================================================
+    // Build In Testing lookup from Gloves and Sleeves inventory
+    // Key: "Glove|10|2" -> [{itemNum, dateSent, expectedReturn}]
+    // =========================================================================
+    var inTestingMap = buildInTestingMap(ss);
 
     // =========================================================================
     // HIGH PRIORITY – Less than 2 of any size On Shelf
@@ -48,6 +55,15 @@ function updatePurchaseNeeds() {
       return !mediumKeys[item.key];
     });
 
+    // Enrich all items with In Testing info
+    var allItems = [highPriorityItems, mediumPriorityItems, lowPriorityItems];
+    for (var ai = 0; ai < allItems.length; ai++) {
+      for (var aj = 0; aj < allItems[ai].length; aj++) {
+        var item = allItems[ai][aj];
+        item.inTesting = formatInTestingInfo(inTestingMap[item.key]);
+      }
+    }
+
     // =========================================================================
     // Write to sheet
     // =========================================================================
@@ -59,7 +75,7 @@ function updatePurchaseNeeds() {
     var rowIdx = 1;
 
     // Title row
-    purchaseSheet.getRange(rowIdx, 1, 1, 9).merge()
+    purchaseSheet.getRange(rowIdx, 1, 1, numCols).merge()
       .setValue('📊 PURCHASE NEEDS SUMMARY - Generated: ' + new Date().toLocaleString())
       .setFontWeight('bold').setFontSize(14).setBackground('#b0bec5').setFontColor('#333333').setHorizontalAlignment('center');
     rowIdx++;
@@ -67,9 +83,9 @@ function updatePurchaseNeeds() {
     // Summary row
     var summaryData = [
       ['🔴 High: ' + highTotal, '🟠 Medium: ' + medTotal, '🟢 Low: ' + lowTotal,
-       'Total: ' + (highTotal + medTotal + lowTotal), '', '', '', '', '']
+       'Total: ' + (highTotal + medTotal + lowTotal), '', '', '', '', '', '']
     ];
-    purchaseSheet.getRange(rowIdx, 1, 1, 9).setValues(summaryData)
+    purchaseSheet.getRange(rowIdx, 1, 1, numCols).setValues(summaryData)
       .setBackground('#eceff1').setFontWeight('bold').setHorizontalAlignment('center');
     rowIdx += 2;
 
@@ -121,7 +137,7 @@ function updatePurchaseNeeds() {
       });
 
       // Table title
-      purchaseSheet.getRange(rowIdx, 1, 1, 9).merge().setValue(tbl.title)
+      purchaseSheet.getRange(rowIdx, 1, 1, numCols).merge().setValue(tbl.title)
         .setFontWeight('bold').setFontSize(12).setBackground(tbl.titleBg).setFontColor('#333333').setHorizontalAlignment('center');
       rowIdx++;
 
@@ -141,7 +157,7 @@ function updatePurchaseNeeds() {
         // Insert class sub-header when class changes
         if (cls !== lastClass) {
           var classInfo = classColors[cls] || { bg: '#eeeeee', text: '#333333', label: 'Class ' + cls };
-          purchaseSheet.getRange(rowIdx, 1, 1, 9).merge()
+          purchaseSheet.getRange(rowIdx, 1, 1, numCols).merge()
             .setValue(classInfo.label)
             .setFontWeight('bold').setFontSize(11)
             .setBackground(classInfo.bg).setFontColor(classInfo.text)
@@ -153,15 +169,16 @@ function updatePurchaseNeeds() {
         tableTotal += r.qtyToOrder;
         var rowData = [
           r.priority, r.itemType, r.size, cls,
-          r.onShelf, r.qtyToOrder, r.reason, r.status, r.notes
+          r.onShelf, r.qtyToOrder, r.reason, r.status, r.inTesting || '', r.notes
         ];
         purchaseSheet.getRange(rowIdx, 1, 1, rowData.length).setValues([rowData]);
         purchaseSheet.getRange(rowIdx, 1, 1, 8).setHorizontalAlignment('center');
         purchaseSheet.getRange(rowIdx, 9).setWrap(true);
+        purchaseSheet.getRange(rowIdx, 10).setWrap(true);
 
         // Apply light class-specific row banding
         var bandColor = classRowBands[cls] || '#ffffff';
-        purchaseSheet.getRange(rowIdx, 1, 1, 9).setBackground(bandColor);
+        purchaseSheet.getRange(rowIdx, 1, 1, numCols).setBackground(bandColor);
 
         rowIdx++;
       }
@@ -177,35 +194,37 @@ function updatePurchaseNeeds() {
         .setFontWeight('bold').setHorizontalAlignment('right').setBackground('#e0e0e0');
       purchaseSheet.getRange(rowIdx, 6).setValue(tableTotal)
         .setFontWeight('bold').setHorizontalAlignment('center').setBackground('#e0e0e0');
-      purchaseSheet.getRange(rowIdx, 7, 1, 3).setBackground('#e0e0e0');
+      purchaseSheet.getRange(rowIdx, 7, 1, 4).setBackground('#e0e0e0');
       rowIdx += 2;
     }
 
     // If no data at all
     if (highPriorityItems.length === 0 && mediumPriorityItems.length === 0 && lowPriorityItems.length === 0) {
-      purchaseSheet.getRange(rowIdx, 1, 1, 9).merge().setValue('✅ No purchase needs at this time!')
+      purchaseSheet.getRange(rowIdx, 1, 1, numCols).merge().setValue('✅ No purchase needs at this time!')
         .setFontWeight('bold').setFontSize(12).setBackground('#4caf50').setFontColor('white').setHorizontalAlignment('center');
     }
 
     // Summary table to the right
     var summaryStartRow = 4;
-    var summaryCol = 11;
+    var summaryCol = 12;
 
-    purchaseSheet.getRange(summaryStartRow, summaryCol, 1, 2).merge().setValue('📊 SUMMARY BY PRIORITY')
+    purchaseSheet.getRange(summaryStartRow, summaryCol, 1, 3).merge().setValue('📊 SUMMARY BY PRIORITY')
       .setFontWeight('bold').setBackground('#b0bec5').setFontColor('#333333').setHorizontalAlignment('center');
 
     var summaryRows = [
-      ['🔴 High Priority', highTotal, '#ef9a9a'],
-      ['🟠 Medium Priority', medTotal, '#ffcc80'],
-      ['🟢 Low Priority', lowTotal, '#a5d6a7']
+      ['🔴 High Priority', highTotal, 'Less than 2 on shelf', '#ef9a9a'],
+      ['🟠 Medium Priority', medTotal, 'Swap needed, none or only size-up available', '#ffcc80'],
+      ['🟢 Low Priority', lowTotal, 'Currently assigned a size up', '#a5d6a7']
     ];
 
     for (var s = 0; s < summaryRows.length; s++) {
       var sRow = summaryStartRow + 1 + s;
       purchaseSheet.getRange(sRow, summaryCol).setValue(summaryRows[s][0])
-        .setBackground(summaryRows[s][2]).setFontColor('#333333').setFontWeight('bold');
+        .setBackground(summaryRows[s][3]).setFontColor('#333333').setFontWeight('bold');
       purchaseSheet.getRange(sRow, summaryCol + 1).setValue(summaryRows[s][1])
-        .setBackground(summaryRows[s][2]).setFontColor('#333333').setFontWeight('bold').setHorizontalAlignment('center');
+        .setBackground(summaryRows[s][3]).setFontColor('#333333').setFontWeight('bold').setHorizontalAlignment('center');
+      purchaseSheet.getRange(sRow, summaryCol + 2).setValue(summaryRows[s][2])
+        .setBackground(summaryRows[s][3]).setFontColor('#555555').setFontStyle('italic');
     }
 
     var totalRow = summaryStartRow + 4;
@@ -213,14 +232,16 @@ function updatePurchaseNeeds() {
       .setBackground('#cfd8dc').setFontColor('#333333').setFontWeight('bold');
     purchaseSheet.getRange(totalRow, summaryCol + 1).setValue(highTotal + medTotal + lowTotal)
       .setBackground('#cfd8dc').setFontColor('#333333').setFontWeight('bold').setHorizontalAlignment('center');
+    purchaseSheet.getRange(totalRow, summaryCol + 2).setBackground('#cfd8dc');
 
     // Column widths
-    var widths = [60, 75, 70, 50, 65, 80, 200, 175, 300];
+    var widths = [60, 75, 70, 50, 65, 80, 200, 175, 220, 300];
     for (var i = 0; i < widths.length; i++) {
       purchaseSheet.setColumnWidth(i + 1, widths[i]);
     }
-    purchaseSheet.setColumnWidth(11, 140);
-    purchaseSheet.setColumnWidth(12, 55);
+    purchaseSheet.setColumnWidth(12, 140);
+    purchaseSheet.setColumnWidth(13, 55);
+    purchaseSheet.setColumnWidth(14, 280);
     purchaseSheet.setFrozenRows(2);
 
     logEvent('Purchase Needs report generated successfully.');
@@ -691,6 +712,108 @@ function collectLowPriorityItems(ss) {
   }
 
   return results;
+}
+
+
+/**
+ * Build a map of items currently In Testing from Gloves and Sleeves sheets.
+ * Key: "Glove|10|2" -> [{itemNum, dateSent, expectedReturn}]
+ * Date Assigned (col E) is used as the date sent to testing.
+ * Expected return = dateSent + 21 days (3 weeks).
+ */
+function buildInTestingMap(ss) {
+  var map = {}; // key -> [{itemNum, dateSent, expectedReturn}]
+  var tz = ss.getSpreadsheetTimeZone();
+
+  var sheetConfigs = [
+    { sheetName: SHEET_GLOVES, itemType: 'Glove', isGloves: true },
+    { sheetName: SHEET_SLEEVES, itemType: 'Sleeve', isGloves: false }
+  ];
+
+  for (var sc = 0; sc < sheetConfigs.length; sc++) {
+    var config = sheetConfigs[sc];
+    var sheet = ss.getSheetByName(config.sheetName);
+    if (!sheet || sheet.getLastRow() < 2) continue;
+
+    var data = sheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      var row = data[i];
+      var itemNum = String(row[COLS.INVENTORY.ITEM_NUM - 1] || '').trim();
+      if (!itemNum) continue;
+
+      var status = String(row[COLS.INVENTORY.STATUS - 1] || '').trim().toLowerCase();
+      if (status !== 'in testing') continue;
+
+      var size = String(row[COLS.INVENTORY.SIZE - 1] || '').trim();
+      var classNum = parseInt(row[COLS.INVENTORY.CLASS - 1], 10);
+      if (isNaN(classNum) || !size) continue;
+
+      // Normalize sleeve sizes
+      if (!config.isGloves) {
+        size = capitalizeSleeveSize(normalizeSleeveSize(size));
+      }
+
+      var dateAssigned = row[COLS.INVENTORY.DATE_ASSIGNED - 1];
+      var dateSent = null;
+      var expectedReturn = null;
+
+      if (dateAssigned instanceof Date && !isNaN(dateAssigned.getTime())) {
+        dateSent = dateAssigned;
+        expectedReturn = new Date(dateSent.getTime() + 21 * 24 * 60 * 60 * 1000); // +3 weeks
+      }
+
+      var key = config.itemType + '|' + size + '|' + classNum;
+      if (!map[key]) {
+        map[key] = [];
+      }
+      map[key].push({
+        itemNum: itemNum,
+        dateSent: dateSent,
+        expectedReturn: expectedReturn
+      });
+    }
+  }
+
+  return map;
+}
+
+
+/**
+ * Format In Testing info: count and soonest return date.
+ * @param {Array} items - Array of {itemNum, dateSent, expectedReturn} or undefined
+ * @returns {string} Formatted string or empty
+ */
+function formatInTestingInfo(items) {
+  if (!items || items.length === 0) return '';
+
+  var tz = Session.getScriptTimeZone();
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Find soonest return date and count overdue
+  var soonestReturn = null;
+  var overdueCount = 0;
+  for (var i = 0; i < items.length; i++) {
+    if (items[i].expectedReturn) {
+      var retClean = new Date(items[i].expectedReturn);
+      retClean.setHours(0, 0, 0, 0);
+      if (retClean <= today) {
+        overdueCount++;
+      } else if (!soonestReturn || items[i].expectedReturn < soonestReturn) {
+        soonestReturn = items[i].expectedReturn;
+      }
+    }
+  }
+
+  var result = items.length + ' in testing';
+  if (overdueCount > 0) {
+    result += ' (' + overdueCount + ' overdue)';
+  }
+  if (soonestReturn) {
+    result += '\nBack ~' + Utilities.formatDate(soonestReturn, tz, 'M/d/yyyy');
+  }
+
+  return result;
 }
 
 
