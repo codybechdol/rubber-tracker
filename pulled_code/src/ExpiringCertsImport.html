@@ -1,0 +1,1067 @@
+<!DOCTYPE html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Import Certifications</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  <!-- SheetJS for Excel parsing -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+  <style>
+    body { font-family: 'Google Sans', Arial, sans-serif; background: #f8f9fa; margin: 0; padding: 20px; }
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .header h1 { color: #1a73e8; font-size: 24px; margin: 0; }
+    .btn-primary { background: #1a73e8; border-color: #1a73e8; }
+    .btn-primary:hover { background: #1557b0; border-color: #1557b0; }
+    .config-section { padding: 20px; background: white; border-radius: 8px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .config-section h3 { color: #202124; font-size: 16px; margin-bottom: 16px; border-bottom: 1px solid #e0e0e0; padding-bottom: 8px; }
+    .cert-checkboxes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .form-check { margin-bottom: 0; }
+    .form-check-label { font-size: 13px; }
+    textarea { font-family: 'Courier New', monospace; font-size: 12px; }
+    .preview-table { font-size: 13px; }
+    .match-exact { background-color: #e6f4ea; }
+    .match-variant { background-color: #fef7e0; }
+    .match-none { background-color: #fce8e6; }
+    .summary-card { background: #e8f0fe; border-left: 4px solid #1a73e8; padding: 16px; margin-bottom: 16px; }
+    .summary-stat { display: inline-block; margin-right: 20px; }
+    .summary-stat strong { color: #1a73e8; }
+    .alert-validation { font-size: 13px; }
+    .loading { text-align: center; padding: 40px; }
+    .upload-area { border: 2px dashed #1a73e8; border-radius: 8px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.2s; }
+    .upload-area:hover { background: #e8f0fe; }
+    .upload-area.dragover { background: #e8f0fe; border-color: #1557b0; }
+    .sheet-tabs { margin-bottom: 16px; }
+    .sheet-tab { display: inline-block; padding: 8px 16px; margin-right: 4px; border: 1px solid #e0e0e0; border-radius: 4px 4px 0 0; cursor: pointer; background: #f8f9fa; }
+    .sheet-tab.active { background: white; border-bottom-color: white; font-weight: bold; color: #1a73e8; }
+    .import-method-tabs { display: flex; margin-bottom: 16px; }
+    .import-method-tab { flex: 1; text-align: center; padding: 12px; border: 1px solid #e0e0e0; cursor: pointer; background: #f8f9fa; }
+    .import-method-tab:first-child { border-radius: 8px 0 0 8px; }
+    .import-method-tab:last-child { border-radius: 0 8px 8px 0; }
+    .import-method-tab.active { background: #1a73e8; color: white; border-color: #1a73e8; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1><i class="bi bi-file-earmark-arrow-up"></i> Import Expiring Certifications</h1>
+    <div>
+      <button class="btn btn-success btn-sm me-2" id="btnConfirmImport" onclick="confirmImport()" disabled>
+        <i class="bi bi-check-lg"></i> Confirm Import
+      </button>
+      <button class="btn btn-primary btn-sm" onclick="google.script.host.close()">
+        <i class="bi bi-x-lg"></i> Close
+      </button>
+    </div>
+  </div>
+  <!-- Import Options -->
+  <!-- Import Options -->
+  <div class="config-section">
+    <h3><i class="bi bi-sliders"></i> 📋 Import Options</h3>
+    <div class="form-check mb-3">
+      <input class="form-check-input" type="checkbox" id="preserveNewerDates" checked>
+      <label class="form-check-label" for="preserveNewerDates">
+        <strong>🔒 Preserve newer expiration dates</strong>
+        <span class="text-muted d-block small">If Google Sheets has a newer expiration date than Excel, keep the Google Sheets date.</span>
+      </label>
+    </div>
+  </div>
+
+
+  <!-- Cert Type Checkboxes -->
+  <div class="config-section">
+    <h3><i class="bi bi-list-check"></i> 🎯 Create To Do Tasks For:</h3>
+    <p class="text-muted small mb-3">Select which certification types should generate tasks in your To Do list when expiring soon or marked as priority.</p>
+
+    <div class="form-check mb-3" style="background: #fff3cd; padding: 10px; border-radius: 6px;">
+      <input class="form-check-input" type="checkbox" id="skipTaskGeneration">
+      <label class="form-check-label" for="skipTaskGeneration">
+        <strong>⏭️ Skip task generation</strong>
+        <span class="text-muted d-block small">Don't create any Manual Tasks - only update the Expiring Certs sheet.</span>
+      </label>
+    </div>
+
+    <div id="certCheckboxWrapper">
+      <div class="cert-checkboxes" id="certCheckboxes">
+        <!-- Will be populated by JavaScript -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Instructions -->
+  <div class="config-section">
+    <h3><i class="bi bi-info-circle"></i> Instructions</h3>
+    <p class="text-muted small mb-2">Upload an Excel file or paste tab-separated data from Excel starting with employee names (no headers).</p>
+    <p class="text-muted small mb-0"><strong>Expected format:</strong> Column A=Name (LastName, FirstName), B=Job#, C=Location, then D=DL, E=Med, F=1st Aid, G=CPR, H=Crane Cert, I=Crane Evaluation, J=OSHA 1910, K=BNSF, L=MSHA, M=OSHA Trench Comp Person, N=Forklift, O=Forklift Operator Safety Training, P=Rigging & Signaling, Q=Harassment Training, R=EICA Basic Helo</p>
+    <p class="text-muted small mt-2"><strong>Non-expiring certs:</strong> Crane Evaluation, OSHA 1910, BNSF, MSHA, EICA Basic Helo (dates will be ignored)</p>
+  </div>
+
+  <!-- Import Method Selection -->
+  <div class="config-section">
+    <h3><i class="bi bi-upload"></i> Import Data</h3>
+    <div class="import-method-tabs">
+      <div class="import-method-tab active" onclick="switchImportMethod('file')" id="methodFileTab">
+        <i class="bi bi-file-earmark-excel"></i> Upload Excel File
+      </div>
+      <div class="import-method-tab" onclick="switchImportMethod('paste')" id="methodPasteTab">
+        <i class="bi bi-clipboard"></i> Paste Data
+      </div>
+    </div>
+
+    <!-- File Upload Area -->
+    <div id="fileUploadArea">
+      <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+        <i class="bi bi-cloud-upload" style="font-size: 48px; color: #1a73e8;"></i>
+        <p class="mt-3 mb-0"><strong>Click to select</strong> or drag & drop the Excel file</p>
+        <p class="text-muted small mb-0">Supports .xlsx and .xls files</p>
+      </div>
+      <input type="file" id="fileInput" accept=".xlsx,.xls" style="display: none;" onchange="handleFileSelect(event)">
+      <div id="fileInfo" class="mt-3" style="display: none;">
+        <div class="alert alert-success mb-0">
+          <i class="bi bi-check-circle"></i> <strong id="fileName">File loaded</strong>
+          <span class="float-end text-muted" id="fileSheets"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sheet Selection (shown after file upload) -->
+    <div id="sheetSelection" class="mt-3" style="display: none;">
+      <label class="form-label"><i class="bi bi-table"></i> Select Sheet:</label>
+      <p class="text-muted small mb-2">Choose the sheet tab that contains the certification data.</p>
+      <div class="sheet-tabs" id="sheetTabs"></div>
+    </div>
+
+    <!-- Paste Area (hidden by default) -->
+    <div id="pasteArea" style="display: none;">
+      <textarea class="form-control" id="excelData" rows="12" placeholder="Paste Excel data here (Ctrl+V)..."></textarea>
+    </div>
+
+    <div class="mt-3">
+      <button class="btn btn-primary" onclick="parseData()">
+        <i class="bi bi-search"></i> Parse & Preview
+      </button>
+    </div>
+  </div>
+
+  <!-- Column Mapping (Advanced) -->
+  <div class="config-section">
+    <div class="accordion" id="advancedAccordion">
+      <div class="accordion-item">
+        <h2 class="accordion-header">
+          <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseMapping">
+            <i class="bi bi-gear"></i> ⚙️ Advanced: Configure Column Mapping
+          </button>
+        </h2>
+        <div id="collapseMapping" class="accordion-collapse collapse" data-bs-parent="#advancedAccordion">
+          <div class="accordion-body">
+            <p class="text-muted small">Customize which Excel column maps to which certification type (only needed if your Excel format differs from standard).</p>
+            <div id="columnMapper" class="row g-2">
+              <!-- Will be populated by JavaScript -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Preview Section -->
+  <div id="previewSection" style="display: none;">
+    <!-- Summary Statistics -->
+    <div class="summary-card">
+      <h4 class="mb-3"><i class="bi bi-graph-up"></i> 📊 Import Summary</h4>
+      <div id="summaryStats">
+        <!-- Will be populated by JavaScript -->
+      </div>
+    </div>
+
+    <!-- Validation Warnings -->
+    <div id="validationWarnings"></div>
+
+    <!-- Preview Table -->
+    <div class="config-section">
+      <h3><i class="bi bi-table"></i> Preview: Employee Matching</h3>
+      <div class="table-responsive">
+        <table class="table table-sm preview-table">
+          <thead>
+            <tr>
+              <th>Excel Name</th>
+              <th>Matched Employee</th>
+              <th>Confidence</th>
+              <th>Cert Count</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="previewTableBody">
+            <!-- Will be populated by JavaScript -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Unmatched Employees -->
+    <div id="unmatchedSection"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    var certTypes = [];
+    var defaultChecked = [];
+    var nonExpiring = [];
+    var columnMapping = {};
+    var parsedData = null;
+    var employees = [];
+    var workbook = null;
+    var currentSheetName = null;
+    var importMethod = 'file'; // 'file' or 'paste'
+
+    function init() {
+      google.script.run
+        .withSuccessHandler(function(config) {
+          certTypes = config.allCertTypes;
+          defaultChecked = config.defaultChecked;
+          nonExpiring = config.nonExpiring;
+          columnMapping = config.defaultMapping;
+          renderCertCheckboxes();
+          renderColumnMapper();
+        })
+        .getCertTypeDefaults();
+
+      google.script.run
+        .withSuccessHandler(function(empList) {
+          employees = empList;
+        })
+        .getEmployeeNamesForMatching();
+
+      // Setup drag and drop
+      setupDragAndDrop();
+
+      // Setup skip task generation toggle
+      var skipCheckbox = document.getElementById('skipTaskGeneration');
+      if (skipCheckbox) {
+        skipCheckbox.addEventListener('change', function() {
+          var wrapper = document.getElementById('certCheckboxWrapper');
+          if (wrapper) {
+            wrapper.style.opacity = this.checked ? '0.5' : '1';
+            wrapper.style.pointerEvents = this.checked ? 'none' : 'auto';
+          }
+        });
+      }
+    }
+
+    // ================== IMPORT METHOD SWITCHING ==================
+    function switchImportMethod(method) {
+      importMethod = method;
+      document.getElementById('methodFileTab').classList.toggle('active', method === 'file');
+      document.getElementById('methodPasteTab').classList.toggle('active', method === 'paste');
+      document.getElementById('fileUploadArea').style.display = method === 'file' ? 'block' : 'none';
+      document.getElementById('pasteArea').style.display = method === 'paste' ? 'block' : 'none';
+      document.getElementById('sheetSelection').style.display = 'none';
+    }
+
+    // ================== FILE UPLOAD FUNCTIONS ==================
+    function setupDragAndDrop() {
+      var uploadArea = document.getElementById('uploadArea');
+
+      uploadArea.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        uploadArea.classList.add('dragover');
+      });
+
+      uploadArea.addEventListener('dragleave', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        uploadArea.classList.remove('dragover');
+      });
+
+      uploadArea.addEventListener('drop', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        uploadArea.classList.remove('dragover');
+        var files = e.dataTransfer.files;
+        if (files.length > 0) {
+          processFile(files[0]);
+        }
+      });
+    }
+
+    function handleFileSelect(event) {
+      var file = event.target.files[0];
+      if (file) {
+        processFile(file);
+      }
+    }
+
+    function processFile(file) {
+      if (!file.name.match(/\.(xlsx|xls)$/i)) {
+        alert('Please select an Excel file (.xlsx or .xls)');
+        return;
+      }
+
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          var data = new Uint8Array(e.target.result);
+          // Enable cellStyles to get hidden row/column metadata (!rows, !cols)
+          workbook = XLSX.read(data, { type: 'array', cellDates: true, cellStyles: true });
+
+          // Show file info
+          document.getElementById('fileName').textContent = file.name;
+          document.getElementById('fileSheets').textContent = workbook.SheetNames.length + ' sheet(s)';
+          document.getElementById('fileInfo').style.display = 'block';
+
+          // Show sheet selection
+          if (workbook.SheetNames.length > 1) {
+            renderSheetTabs();
+            document.getElementById('sheetSelection').style.display = 'block';
+          } else {
+            // Single sheet - auto-select it
+            currentSheetName = workbook.SheetNames[0];
+            document.getElementById('sheetSelection').style.display = 'none';
+          }
+
+          console.log('File loaded: ' + file.name + ', sheets: ' + workbook.SheetNames.join(', '));
+        } catch (err) {
+          alert('Error reading file: ' + err.message);
+          console.error(err);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function renderSheetTabs() {
+      var container = document.getElementById('sheetTabs');
+      var html = '';
+
+      workbook.SheetNames.forEach(function(name, index) {
+        var isActive = index === 0 ? ' active' : '';
+        html += '<div class="sheet-tab' + isActive + '" onclick="selectSheet(\'' + name + '\', this)">' + name + '</div>';
+      });
+
+      container.innerHTML = html;
+      currentSheetName = workbook.SheetNames[0];
+    }
+
+    function selectSheet(sheetName, element) {
+      currentSheetName = sheetName;
+
+      // Update tab styling
+      var tabs = document.querySelectorAll('.sheet-tab');
+      tabs.forEach(function(tab) {
+        tab.classList.remove('active');
+      });
+      element.classList.add('active');
+
+      console.log('Selected sheet: ' + sheetName);
+    }
+
+    // Check if a row is hidden in the Excel sheet
+    function isRowHidden(sheet, rowIndex) {
+      if (!sheet['!rows']) return false;
+      var rowInfo = sheet['!rows'][rowIndex];
+      return rowInfo && rowInfo.hidden === true;
+    }
+
+    // Check if a column is hidden in the Excel sheet
+    function isColHidden(sheet, colIndex) {
+      if (!sheet['!cols']) return false;
+      var colInfo = sheet['!cols'][colIndex];
+      return colInfo && colInfo.hidden === true;
+    }
+
+    function getExcelDataFromFile() {
+      if (!workbook || !currentSheetName) {
+        return null;
+      }
+
+      var sheet = workbook.Sheets[currentSheetName];
+      if (!sheet) {
+        return null;
+      }
+
+      // Get the sheet range
+      var range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
+      var data = [];
+      var hiddenRowCount = 0;
+      var hiddenColCount = 0;
+
+      // Build list of visible column indices
+      var visibleCols = [];
+      for (var c = range.s.c; c <= range.e.c; c++) {
+        if (!isColHidden(sheet, c)) {
+          visibleCols.push(c);
+        } else {
+          hiddenColCount++;
+        }
+      }
+
+      // Iterate through rows, skipping hidden ones
+      for (var r = range.s.r; r <= range.e.r; r++) {
+        // Skip hidden rows
+        if (isRowHidden(sheet, r)) {
+          hiddenRowCount++;
+          continue;
+        }
+
+        var row = [];
+        // Only include visible columns
+        for (var i = 0; i < visibleCols.length; i++) {
+          var c = visibleCols[i];
+          var cellAddr = XLSX.utils.encode_cell({ r: r, c: c });
+          var cell = sheet[cellAddr];
+          var value = '';
+
+          if (cell) {
+            // Handle dates
+            if (cell.t === 'd' || (cell.t === 'n' && cell.w && cell.w.match(/\d+\/\d+\/\d+/))) {
+              // Date cell - use formatted value or parse the number
+              if (cell.w) {
+                value = cell.w;
+              } else if (cell.v instanceof Date) {
+                value = formatExcelDate(cell.v);
+              } else if (typeof cell.v === 'number') {
+                // Excel date serial number - convert to date
+                var date = XLSX.SSF.parse_date_code(cell.v);
+                if (date) {
+                  value = String(date.m).padStart(2, '0') + '/' + String(date.d).padStart(2, '0') + '/' + date.y;
+                }
+              }
+            } else {
+              value = String(cell.v || '');
+            }
+          }
+
+          row.push(value.trim());
+        }
+        data.push(row);
+      }
+
+      console.log('Excel data extracted: ' + data.length + ' visible rows (skipped ' + hiddenRowCount + ' hidden rows, ' + hiddenColCount + ' hidden cols)');
+
+      // Convert to tab-separated text (to reuse existing parsing logic)
+      var text = data.map(function(row) {
+        return row.join('\t');
+      }).join('\n');
+
+      return text;
+    }
+
+    function formatExcelDate(date) {
+      if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
+        return '';
+      }
+      var month = String(date.getMonth() + 1).padStart(2, '0');
+      var day = String(date.getDate()).padStart(2, '0');
+      var year = date.getFullYear();
+      return month + '/' + day + '/' + year;
+    }
+
+    function renderCertCheckboxes() {
+      var container = document.getElementById('certCheckboxes');
+      var html = '';
+      certTypes.forEach(function(cert) {
+        var checked = defaultChecked.includes(cert) ? 'checked' : '';
+        var isNonExp = nonExpiring.includes(cert);
+        var label = cert + (isNonExp ? ' (Non-Expiring)' : '');
+        html += '<div class="form-check">';
+        html += '<input class="form-check-input" type="checkbox" id="cert-' + cert.replace(/[^a-zA-Z0-9]/g, '') + '" value="' + cert + '" ' + checked + '>';
+        html += '<label class="form-check-label" for="cert-' + cert.replace(/[^a-zA-Z0-9]/g, '') + '">' + label + '</label>';
+        html += '</div>';
+      });
+      container.innerHTML = html;
+    }
+
+    function renderColumnMapper() {
+      var container = document.getElementById('columnMapper');
+      var html = '';
+      var columns = ['D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R'];
+      columns.forEach(function(col) {
+        html += '<div class="col-md-4">';
+        html += '<label class="form-label small">Column ' + col + '</label>';
+        html += '<select class="form-select form-select-sm" id="map-' + col + '">';
+        certTypes.forEach(function(cert) {
+          var selected = columnMapping[col] === cert ? 'selected' : '';
+          html += '<option value="' + cert + '" ' + selected + '>' + cert + '</option>';
+        });
+        html += '</select>';
+        html += '</div>';
+      });
+      container.innerHTML = html;
+    }
+
+    function getSelectedCertTypes() {
+      var selected = [];
+      certTypes.forEach(function(cert) {
+        var checkbox = document.getElementById('cert-' + cert.replace(/[^a-zA-Z0-9]/g, ''));
+        if (checkbox && checkbox.checked) {
+          selected.push(cert);
+        }
+      });
+      return selected;
+    }
+
+    function getColumnMapping() {
+      var mapping = {};
+      var columns = ['D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R'];
+      columns.forEach(function(col) {
+        var select = document.getElementById('map-' + col);
+        if (select) {
+          mapping[col] = select.value;
+        }
+      });
+      return mapping;
+    }
+
+    function parseData() {
+      var text = '';
+
+      if (importMethod === 'file') {
+        // Get data from uploaded file
+        if (!workbook) {
+          alert('Please upload an Excel file first');
+          return;
+        }
+        text = getExcelDataFromFile();
+        if (!text) {
+          alert('Could not read data from the selected sheet');
+          return;
+        }
+      } else {
+        // Get data from paste area
+        text = document.getElementById('excelData').value.trim();
+        if (!text) {
+          alert('Please paste Excel data first');
+          return;
+        }
+      }
+
+      var mapping = getColumnMapping();
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          parsedData = result;
+          displayPreview(result);
+        })
+        .withFailureHandler(function(error) {
+          alert('Error parsing data: ' + error);
+        })
+        .parseExcelCertDataMultiRow(text, mapping);
+    }
+
+    function displayPreview(result) {
+      document.getElementById('previewSection').style.display = 'block';
+
+      // Summary stats
+      var summary = result.summary;
+      var statsHtml = '<div class="row">';
+      statsHtml += '<div class="col-md-3"><div class="summary-stat"><strong>' + summary.totalEmployees + '</strong><br><small>Total Employees</small></div></div>';
+      statsHtml += '<div class="col-md-3"><div class="summary-stat"><strong>' + summary.totalCerts + '</strong><br><small>Total Certifications</small></div></div>';
+      statsHtml += '<div class="col-md-3"><div class="summary-stat"><strong>' + summary.priorityCount + '</strong><br><small>Priority Items</small></div></div>';
+      statsHtml += '<div class="col-md-3"><div class="summary-stat"><strong>' + summary.nonExpiringCount + '</strong><br><small>Non-Expiring</small></div></div>';
+      statsHtml += '</div>';
+      document.getElementById('summaryStats').innerHTML = statsHtml;
+
+      // Validation warnings
+      if (summary.validationWarnings && summary.validationWarnings.length > 0) {
+        var warningsHtml = '<div class="alert alert-warning alert-validation"><strong>⚠️ Warnings:</strong><ul class="mb-0 mt-2">';
+        summary.validationWarnings.forEach(function(warning) {
+          warningsHtml += '<li>' + warning + '</li>';
+        });
+        warningsHtml += '</ul></div>';
+        document.getElementById('validationWarnings').innerHTML = warningsHtml;
+      } else {
+        document.getElementById('validationWarnings').innerHTML = '';
+      }
+
+      // Preview table
+      var tableHtml = '';
+      result.employeeMatches.forEach(function(match) {
+        var rowClass = match.confidence === 100 ? 'match-exact' : (match.confidence >= 70 ? 'match-variant' : 'match-none');
+        var statusText = '';
+
+        if (match.confidence === 100) {
+          statusText = '✓ Exact';
+          if (match.isPreviousEmployee) {
+            statusText += ' <span class="badge bg-warning text-dark">Previous Employee</span>';
+          }
+        } else if (match.confidence >= 70) {
+          statusText = '⚠️ Variant';
+          if (match.isPreviousEmployee) {
+            statusText += ' <span class="badge bg-warning text-dark">Previous Employee</span>';
+          }
+        } else {
+          statusText = '❌ Unmatched';
+        }
+
+        // Add match type badge
+        var matchTypeBadge = '';
+        if (match.matchType === 'phonetic') {
+          matchTypeBadge = '<span class="badge bg-info ms-1" title="Matched by sound (phonetic)">🔊 Sounds Like</span>';
+        } else if (match.matchType === 'combined') {
+          matchTypeBadge = '<span class="badge bg-secondary ms-1" title="Matched by spelling + sound">📝🔊</span>';
+        } else if (match.matchType === 'reversed') {
+          matchTypeBadge = '<span class="badge bg-secondary ms-1" title="Name parts reversed">↔️ Reversed</span>';
+        }
+
+        tableHtml += '<tr class="' + rowClass + '">';
+        tableHtml += '<td>' + match.excelName + '</td>';
+        tableHtml += '<td>' + (match.matchedName || 'No match') + matchTypeBadge + '</td>';
+        tableHtml += '<td>' + (match.confidence ? match.confidence + '%' : 'N/A') + '</td>';
+        tableHtml += '<td>' + match.certCount + '</td>';
+        tableHtml += '<td>' + statusText + '</td>';
+        tableHtml += '</tr>';
+      });
+      document.getElementById('previewTableBody').innerHTML = tableHtml;
+
+      // Enable import button if no unmatched
+      var hasUnmatched = result.employeeMatches.some(function(m) { return m.confidence < 70; });
+      if (!hasUnmatched) {
+        // Check for previous employees that need confirmation
+        var hasPreviousEmployees = result.employeeMatches.some(function(m) {
+          return m.isPreviousEmployee && m.confidence >= 70;
+        });
+
+        if (hasPreviousEmployees) {
+          displayPreviousEmployeeConfirmation(result.employeeMatches.filter(function(m) {
+            return m.isPreviousEmployee && m.confidence >= 70;
+          }));
+        } else {
+          document.getElementById('btnConfirmImport').disabled = false;
+        }
+      } else {
+        displayUnmatchedResolution(result.employeeMatches.filter(function(m) { return m.confidence < 70; }));
+      }
+    }
+
+    function displayPreviousEmployeeConfirmation(previousEmps) {
+      var html = '<div class="config-section"><h3><i class="bi bi-person-badge"></i> ⚠️ Confirm Previous Employees</h3>';
+      html += '<p class="text-muted small">The following matches are for employees who are no longer active. Please confirm these are correct.</p>';
+
+      previousEmps.forEach(function(emp, index) {
+        html += '<div class="card mb-3" style="border-left: 4px solid #ffc107;">';
+        html += '<div class="card-header bg-warning bg-opacity-10"><strong>' + emp.excelName + '</strong> → ' + emp.matchedName + ' <span class="badge bg-warning text-dark">Previous Employee</span></div>';
+        html += '<div class="card-body">';
+        html += '<p class="mb-2 small">This employee appears in Employee History as a terminated/previous employee.</p>';
+
+        html += '<div class="btn-group btn-group-sm w-100" role="group">';
+        html += '<button class="btn btn-success" onclick="confirmPreviousEmployee(\'' + emp.excelName + '\', \'' + emp.matchedName + '\', ' + index + ')">✓ Confirm - This is Correct</button>';
+        html += '<button class="btn btn-outline-warning" onclick="chooseDifferentMatch(' + index + ')">Choose Different Match</button>';
+        html += '<button class="btn btn-outline-secondary" onclick="skipEmployee(' + index + ')">⏭️ Skip</button>';
+        html += '</div>';
+        html += '</div></div>';
+      });
+
+      html += '</div>';
+      document.getElementById('unmatchedSection').innerHTML = html;
+    }
+
+    function confirmPreviousEmployee(excelName, matchedName, index) {
+      if (!parsedData.confirmedPreviousEmployees) {
+        parsedData.confirmedPreviousEmployees = {};
+      }
+      parsedData.confirmedPreviousEmployees[excelName] = matchedName;
+
+      // Remove this card
+      var cards = document.querySelectorAll('#unmatchedSection .card');
+      if (cards[index]) {
+        cards[index].remove();
+      }
+
+      // Check if all previous employees are confirmed
+      var remainingCards = document.querySelectorAll('#unmatchedSection .card');
+      if (remainingCards.length === 0) {
+        document.getElementById('unmatchedSection').innerHTML = '';
+        document.getElementById('btnConfirmImport').disabled = false;
+      }
+    }
+
+    function chooseDifferentMatch(index) {
+      alert('Choose different match functionality - showing suggestions');
+      // This will show the same resolution dialog as unmatched employees
+    }
+
+    function displayUnmatchedResolution(unmatched) {
+      var html = '<div class="config-section"><h3><i class="bi bi-person-x"></i> Resolve Unmatched Employees</h3>';
+      html += '<p class="text-muted small">The following employees from Excel could not be automatically matched. They may have spelling variations or be new employees.</p>';
+
+      unmatched.forEach(function(emp, index) {
+        html += '<div class="card mb-3" id="unmatched-card-' + index + '">';
+        html += '<div class="card-header bg-danger bg-opacity-10"><strong>📋 Excel: "' + emp.excelName + '"</strong></div>';
+        html += '<div class="card-body">';
+
+        if (emp.suggestions && emp.suggestions.length > 0) {
+          html += '<label class="form-label small fw-bold">🔍 Possible Matches Found:</label>';
+          html += '<select class="form-select form-select-sm mb-2" id="match-' + index + '" onchange="updateMatchSelection(' + index + ')">';
+          html += '<option value="">-- Select a match --</option>';
+          emp.suggestions.forEach(function(sug) {
+            var previousBadge = sug.isPreviousEmployee ? ' [PREVIOUS]' : '';
+            var matchInfo = '';
+            if (sug.matchType === 'phonetic') {
+              matchInfo = ' 🔊 sounds like';
+            } else if (sug.matchType === 'combined') {
+              matchInfo = ' 📝🔊 similar';
+            } else if (sug.matchType === 'levenshtein') {
+              matchInfo = ' 📝 spelling';
+            }
+            html += '<option value="' + sug.name + '" data-previous="' + (sug.isPreviousEmployee || false) + '" data-match-type="' + (sug.matchType || '') + '">' + sug.name + ' (' + sug.confidence + '%' + matchInfo + ')' + previousBadge + '</option>';
+          });
+          html += '</select>';
+          html += '<div id="match-info-' + index + '" class="small text-muted mb-2"></div>';
+        } else {
+          html += '<p class="text-muted small mb-2">No similar employees found in the system.</p>';
+        }
+
+        html += '<div class="btn-group btn-group-sm w-100" role="group">';
+        if (emp.suggestions && emp.suggestions.length > 0) {
+          html += '<button class="btn btn-outline-primary" id="btn-use-match-' + index + '" onclick="useSelectedMatch(\'' + escapeQuotes(emp.excelName) + '\', ' + index + ')" disabled title="Select a match above first">✓ Use Selected Match</button>';
+        }
+        html += '<button class="btn btn-outline-success" onclick="addNewEmployee(\'' + escapeQuotes(emp.excelName) + '\', ' + index + ')">➕ Add as New Employee</button>';
+        html += '<button class="btn btn-outline-secondary" onclick="skipEmployee(' + index + ')">⏭️ Skip</button>';
+        html += '</div>';
+        html += '</div></div>';
+      });
+
+      html += '</div>';
+      document.getElementById('unmatchedSection').innerHTML = html;
+    }
+
+    function escapeQuotes(str) {
+      return str.replace(/'/g, "\\'").replace(/"/g, '\\"');
+    }
+
+    function updateMatchSelection(index) {
+      var select = document.getElementById('match-' + index);
+      var btn = document.getElementById('btn-use-match-' + index);
+      var infoDiv = document.getElementById('match-info-' + index);
+
+      if (select && select.value) {
+        if (btn) btn.disabled = false;
+        var selectedOption = select.options[select.selectedIndex];
+        var matchType = selectedOption.getAttribute('data-match-type');
+        var isPrevious = selectedOption.getAttribute('data-previous') === 'true';
+
+        var infoText = '';
+        if (matchType === 'phonetic') {
+          infoText = '🔊 <strong>Phonetic match</strong> - Names sound similar (e.g., "Massen" ≈ "Masen")';
+        } else if (matchType === 'combined') {
+          infoText = '📝🔊 <strong>Combined match</strong> - Similar spelling and pronunciation';
+        } else if (matchType === 'levenshtein') {
+          infoText = '📝 <strong>Spelling match</strong> - Names have similar spelling';
+        }
+        if (isPrevious) {
+          infoText += '<br>⚠️ This is a <strong>Previous Employee</strong> (no longer active)';
+        }
+        if (infoDiv) infoDiv.innerHTML = infoText;
+      } else {
+        if (btn) btn.disabled = true;
+        if (infoDiv) infoDiv.innerHTML = '';
+      }
+    }
+
+    var resolvedEmployees = {};
+
+    function useSelectedMatch(excelName, index) {
+      var select = document.getElementById('match-' + index);
+      if (!select || !select.value) {
+        alert('Please select a match first');
+        return;
+      }
+
+      var selectedName = select.value;
+      var selectedOption = select.options[select.selectedIndex];
+      var isPrevious = selectedOption.getAttribute('data-previous') === 'true';
+
+      // Show confirmation dialog
+      var confirmMsg = '📝 Confirm Name Match\n\n';
+      confirmMsg += 'Excel name: "' + excelName + '"\n';
+      confirmMsg += 'Match to: "' + selectedName + '"\n\n';
+      if (isPrevious) {
+        confirmMsg += '⚠️ Note: This is a Previous Employee (no longer active)\n\n';
+      }
+      confirmMsg += 'The certifications from Excel will be associated with "' + selectedName + '".\n\n';
+      confirmMsg += 'Do you want to proceed?';
+
+      if (!confirm(confirmMsg)) {
+        return;
+      }
+
+      // Mark as resolved with the selected match
+      resolvedEmployees[excelName] = {
+        action: 'match',
+        matchedName: selectedName,
+        isPreviousEmployee: isPrevious
+      };
+
+      // Update parsedData to use the matched name
+      if (parsedData && parsedData.employeeMatches) {
+        for (var i = 0; i < parsedData.employeeMatches.length; i++) {
+          if (parsedData.employeeMatches[i].excelName === excelName) {
+            parsedData.employeeMatches[i].matchedName = selectedName;
+            parsedData.employeeMatches[i].confidence = 100; // User confirmed
+            parsedData.employeeMatches[i].userConfirmed = true;
+            break;
+          }
+        }
+      }
+
+      showStatus('✓ Matched "' + excelName + '" → "' + selectedName + '"', 'success');
+      removeCardByIndex(index);
+      checkAllResolved();
+    }
+
+    function updateEmployeeName(excelName, index) {
+      // This function is now replaced by useSelectedMatch
+      // Kept for backward compatibility
+      useSelectedMatch(excelName, index);
+    }
+
+    function addNewEmployee(excelName, index) {
+      // Show confirmation first
+      var confirmMsg = '➕ Add New Employee\n\n';
+      confirmMsg += 'Employee name: "' + excelName + '"\n\n';
+      confirmMsg += 'This will create a new employee in the system.\n';
+      confirmMsg += 'You\'ll be asked for additional details (location, class, etc.)\n\n';
+      confirmMsg += 'Continue?';
+
+      if (!confirm(confirmMsg)) {
+        return;
+      }
+
+      // Show modal to collect new employee data
+      showNewEmployeeModal(excelName, index);
+    }
+
+    function skipEmployee(index) {
+      var card = document.getElementById('unmatched-card-' + index);
+      if (card) {
+        var headerStrong = card.querySelector('.card-header strong');
+        var excelName = headerStrong ? headerStrong.textContent.replace('📋 Excel: "', '').replace('"', '') : '';
+        resolvedEmployees[excelName] = { action: 'skip' };
+        card.remove();
+      }
+      checkAllResolved();
+    }
+
+    function removeCardByIndex(index) {
+      var card = document.getElementById('unmatched-card-' + index);
+      if (card) {
+        card.remove();
+      }
+    }
+
+    function removeCardAndCheckCompletion(index) {
+      removeCardByIndex(index);
+      checkAllResolved();
+    }
+
+    function checkAllResolved() {
+      var remainingCards = document.querySelectorAll('#unmatchedSection .card');
+      if (remainingCards.length === 0) {
+        document.getElementById('unmatchedSection').innerHTML = '<div class="alert alert-success">✓ All employees resolved! You can now confirm the import.</div>';
+        document.getElementById('btnConfirmImport').disabled = false;
+      }
+    }
+
+    function showNewEmployeeModal(excelName, index) {
+      var modalHtml = '<div class="modal fade" id="newEmployeeModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content">';
+      modalHtml += '<div class="modal-header"><h5 class="modal-title">➕ Add New Employee</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>';
+      modalHtml += '<div class="modal-body">';
+      modalHtml += '<p class="text-muted mb-3">Add <strong>' + excelName + '</strong> as a new employee to the system.</p>';
+
+      modalHtml += '<div class="row g-3">';
+      modalHtml += '<div class="col-md-6"><label class="form-label">Name *</label><input type="text" class="form-control" id="newEmpName" value="' + excelName + '"></div>';
+      modalHtml += '<div class="col-md-6"><label class="form-label">Job Classification *</label><select class="form-select" id="newEmpClass">';
+      modalHtml += '<option value="">Select...</option>';
+      modalHtml += '<option value="AP 1">AP 1 - Apprentice 1st Year</option>';
+      modalHtml += '<option value="AP 2">AP 2 - Apprentice 2nd Year</option>';
+      modalHtml += '<option value="AP 3">AP 3 - Apprentice 3rd Year</option>';
+      modalHtml += '<option value="AP 4">AP 4 - Apprentice 4th Year</option>';
+      modalHtml += '<option value="AP 5">AP 5 - Apprentice 5th Year</option>';
+      modalHtml += '<option value="AP 6">AP 6 - Apprentice 6th Year</option>';
+      modalHtml += '<option value="AP 7">AP 7 - Apprentice 7th Year</option>';
+      modalHtml += '<option value="JRY">JRY - Journeyman Lineman</option>';
+      modalHtml += '<option value="WT">WT - White Ticket Lineman</option>';
+      modalHtml += '<option value="F">F - Foreman</option>';
+      modalHtml += '<option value="GF">GF - General Foreman</option>';
+      modalHtml += '<option value="SUP">SUP - Supervisor</option>';
+      modalHtml += '<option value="JRY OP">JRY OP - Journeyman Operator</option>';
+      modalHtml += '<option value="OP">OP - Operator</option>';
+      modalHtml += '<option value="GTO F">GTO F - GTO Foreman</option>';
+      modalHtml += '<option value="GTO">GTO - General Trade Operator</option>';
+      modalHtml += '<option value="EO 1">EO 1 - Equipment Operator 1</option>';
+      modalHtml += '<option value="EO 2">EO 2 - Equipment Operator 2</option>';
+      modalHtml += '</select></div>';
+      modalHtml += '<div class="col-md-6"><label class="form-label">Location *</label><input type="text" class="form-control" id="newEmpLocation" placeholder="e.g., Helena"></div>';
+      modalHtml += '<div class="col-md-6"><label class="form-label">Job Number</label><input type="text" class="form-control" id="newEmpJobNum" placeholder="Optional"></div>';
+      modalHtml += '<div class="col-md-6"><label class="form-label">Phone</label><input type="tel" class="form-control" id="newEmpPhone" placeholder="(123) 456-7890"></div>';
+      modalHtml += '<div class="col-md-6"><label class="form-label">Email</label><input type="email" class="form-control" id="newEmpEmail" placeholder="employee@example.com"></div>';
+      modalHtml += '<div class="col-md-3"><label class="form-label">Glove Size</label><select class="form-select" id="newEmpGloveSize"><option value="">Select...</option><option>8</option><option>8.5</option><option>9</option><option>9.5</option><option>10</option><option>10.5</option><option>11</option><option>11.5</option><option>12</option></select></div>';
+      modalHtml += '<div class="col-md-3"><label class="form-label">Sleeve Size</label><select class="form-select" id="newEmpSleeveSize"><option value="">Select...</option><option>0</option><option>2</option><option>3</option><option>4</option></select></div>';
+      modalHtml += '<div class="col-md-6"><label class="form-label">Hire Date</label><input type="date" class="form-control" id="newEmpHireDate" value="' + new Date().toISOString().split('T')[0] + '"></div>';
+      modalHtml += '</div>';
+
+      modalHtml += '</div><div class="modal-footer">';
+      modalHtml += '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>';
+      modalHtml += '<button type="button" class="btn btn-success" onclick="saveNewEmployee(\'' + excelName + '\', ' + index + ')">Save Employee</button>';
+      modalHtml += '</div></div></div></div>';
+
+      // Remove existing modal if present
+      var existingModal = document.getElementById('newEmployeeModal');
+      if (existingModal) existingModal.remove();
+
+      // Add modal to body
+      document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+      // Show modal
+      var modal = new bootstrap.Modal(document.getElementById('newEmployeeModal'));
+      modal.show();
+    }
+
+    function saveNewEmployee(excelName, index) {
+      // Validate required fields
+      var name = document.getElementById('newEmpName').value.trim();
+      var empClass = document.getElementById('newEmpClass').value;
+      var location = document.getElementById('newEmpLocation').value.trim();
+
+      if (!name || !empClass || !location) {
+        alert('Please fill in all required fields (Name, Class, Location)');
+        return;
+      }
+
+      var newEmpData = {
+        name: name,
+        class: empClass,
+        location: location,
+        jobNum: document.getElementById('newEmpJobNum').value.trim(),
+        phone: document.getElementById('newEmpPhone').value.trim(),
+        email: document.getElementById('newEmpEmail').value.trim(),
+        gloveSize: document.getElementById('newEmpGloveSize').value,
+        sleeveSize: document.getElementById('newEmpSleeveSize').value,
+        hireDate: document.getElementById('newEmpHireDate').value
+      };
+
+      // Final confirmation showing what will be added
+      var confirmMsg = '✅ Confirm New Employee\n\n';
+      confirmMsg += 'The following employee will be added to the Employees sheet:\n\n';
+      confirmMsg += '👤 Name: ' + name + '\n';
+      confirmMsg += '📍 Location: ' + location + '\n';
+      confirmMsg += '🏷️ Class: ' + empClass + '\n';
+      if (newEmpData.jobNum) confirmMsg += '🔢 Job #: ' + newEmpData.jobNum + '\n';
+      if (newEmpData.phone) confirmMsg += '📞 Phone: ' + newEmpData.phone + '\n';
+      if (newEmpData.email) confirmMsg += '📧 Email: ' + newEmpData.email + '\n';
+      if (newEmpData.gloveSize) confirmMsg += '🧤 Glove Size: ' + newEmpData.gloveSize + '\n';
+      if (newEmpData.sleeveSize) confirmMsg += '👕 Sleeve Size: ' + newEmpData.sleeveSize + '\n';
+      confirmMsg += '\nThis will also be logged in Employee History.\n\n';
+      confirmMsg += 'Proceed?';
+
+      if (!confirm(confirmMsg)) {
+        return;
+      }
+
+      // Store new employee data
+      if (!parsedData.newEmployees) {
+        parsedData.newEmployees = [];
+      }
+      parsedData.newEmployees.push(newEmpData);
+
+      resolvedEmployees[excelName] = { action: 'addNew', data: newEmpData };
+
+      // Close modal
+      var modal = bootstrap.Modal.getInstance(document.getElementById('newEmployeeModal'));
+      modal.hide();
+
+      // Remove card and check if done
+      removeCardAndCheckCompletion(index);
+
+      showStatus('✓ New employee ' + name + ' will be added', 'success');
+      setTimeout(hideStatus, 2000);
+    }
+
+    function confirmImport() {
+      if (!parsedData) {
+        alert('Please parse data first');
+        return;
+      }
+
+      var selectedCerts = getSelectedCertTypes();
+      var preserveNewerDates = document.getElementById('preserveNewerDates').checked;
+      var skipTaskGeneration = document.getElementById('skipTaskGeneration').checked;
+
+      var confirmMsg = preserveNewerDates
+        ? 'This will import certification data.\n\n🔒 Newer dates in Google Sheets will be preserved.\n\nContinue?'
+        : 'This will replace ALL existing certification data.\n\n⚠️ Warning: Any newer dates in Google Sheets will be OVERWRITTEN!\n\nContinue?';
+
+      if (confirm(confirmMsg)) {
+        document.getElementById('btnConfirmImport').disabled = true;
+        document.getElementById('btnConfirmImport').innerHTML = '<span class="spinner-border spinner-border-sm"></span> Importing...';
+
+        // Add the flags to parsedData
+        parsedData.preserveNewerDates = preserveNewerDates;
+        parsedData.skipTaskGeneration = skipTaskGeneration;
+
+        google.script.run
+          .withSuccessHandler(function(result) {
+            alert(result.message);
+
+            // Ask if user wants to email report
+            if (confirm('Import complete! Would you like to email a certification report to managers?')) {
+              sendEmailReport();
+            } else {
+              google.script.host.close();
+            }
+          })
+          .withFailureHandler(function(error) {
+            alert('Error during import: ' + error);
+            document.getElementById('btnConfirmImport').disabled = false;
+            document.getElementById('btnConfirmImport').innerHTML = '<i class="bi bi-check-lg"></i> Confirm Import';
+          })
+          .processExpiringCertsImportMultiRow(parsedData, selectedCerts);
+      }
+    }
+
+    function showStatus(message, type) {
+      // Create a toast notification
+      var toast = document.createElement('div');
+      toast.className = 'alert alert-' + (type === 'success' ? 'success' : type === 'error' ? 'danger' : 'info');
+      toast.style.position = 'fixed';
+      toast.style.top = '20px';
+      toast.style.right = '20px';
+      toast.style.zIndex = '9999';
+      toast.style.minWidth = '300px';
+      toast.innerHTML = message;
+      document.body.appendChild(toast);
+
+      setTimeout(function() {
+        toast.remove();
+      }, 3000);
+    }
+
+    function hideStatus() {
+      // Status messages auto-hide
+    }
+
+    function sendEmailReport() {
+      showStatus('📧 Sending email report...', 'info');
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          showStatus(result.message, 'success');
+          setTimeout(function() {
+            google.script.host.close();
+          }, 2000);
+        })
+        .withFailureHandler(function(error) {
+          showStatus('Email error: ' + error, 'error');
+          setTimeout(function() {
+            google.script.host.close();
+          }, 3000);
+        })
+        .emailCertificationReport();
+    }
+
+    // Initialize on load
+    init();
+  </script>
+</body>
+</html>

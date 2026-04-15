@@ -1,0 +1,1483 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body { font-family: Arial, sans-serif; padding: 15px; font-size: 13px; }
+    label { display: block; margin-bottom: 6px; font-weight: bold; }
+    select { padding: 6px; box-sizing: border-box; }
+    button { background: #4A86E8; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; width: 100%; margin-bottom: 8px; }
+    button:hover { background: #3367D6; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    button.success { background: #34A853; }
+    button.success:hover { background: #2D8E47; }
+    button.secondary { background: #6c757d; margin-top: 5px; }
+    .status { margin-top: 10px; padding: 10px; background: #f5f5f5; border-radius: 4px; font-size: 13px; }
+    .progress { color: #1155CC; font-weight: bold; }
+    .warning { color: #E67C00; margin-top: 8px; font-size: 11px; }
+    .info { color: #666; margin-top: 4px; font-size: 12px; }
+    .checkbox-row { display: flex; align-items: center; margin-bottom: 10px; gap: 8px; }
+    .checkbox-row input { width: 16px; height: 16px; margin: 0; }
+    .checkbox-row label { margin: 0; font-weight: normal; font-size: 12px; }
+    .last-run { font-size: 11px; color: #666; margin-bottom: 10px; padding: 5px 8px; background: #e8f4fd; border-radius: 4px; }
+
+    /* Job Config Section */
+    .config-section { border: 1px solid #ddd; border-radius: 6px; margin-bottom: 12px; }
+    .config-header { background: #f8f9fa; padding: 8px 12px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-radius: 6px 6px 0 0; }
+    .config-header:hover { background: #e9ecef; }
+    .config-header h3 { margin: 0; font-size: 13px; color: #333; }
+    .config-header .toggle-icon { font-size: 12px; color: #666; }
+    .config-body { padding: 10px; display: none; max-height: 200px; overflow-y: auto; }
+    .config-body.expanded { display: block; }
+
+    .job-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .job-table th { background: #e9ecef; padding: 5px 4px; text-align: left; font-weight: 600; }
+    .job-table td { padding: 4px; border-bottom: 1px solid #eee; }
+    .job-table input[type="text"] { width: 65px; padding: 3px 5px; border: 1px solid #ccc; border-radius: 3px; font-size: 11px; }
+    .job-table select { width: 100%; padding: 3px; font-size: 11px; }
+    .job-table .remove-btn { background: #dc3545; color: white; border: none; padding: 2px 6px; border-radius: 3px; cursor: pointer; font-size: 10px; }
+    .job-table .remove-btn:hover { background: #c82333; }
+    .add-row-btn { background: #28a745; color: white; border: none; padding: 5px 10px; border-radius: 3px; cursor: pointer; font-size: 11px; margin-top: 8px; }
+    .add-row-btn:hover { background: #218838; }
+    .source-badge { font-size: 9px; padding: 1px 4px; border-radius: 3px; margin-left: 4px; }
+    .source-badge.employees { background: #d4edda; color: #155724; }
+    .source-badge.custom { background: #fff3cd; color: #856404; }
+
+    /* Compliance Grid */
+    .compliance-section { margin-top: 15px; padding: 10px; background: #e8f5e9; border-radius: 4px; }
+    .compliance-section h4 { margin: 0 0 10px 0; color: #2e7d32; font-size: 13px; }
+    .compliance-grid { font-size: 10px; width: 100%; border-collapse: collapse; }
+    .compliance-grid th { background: #1a73e8; color: white; padding: 3px 2px; text-align: center; }
+    .compliance-grid td { padding: 2px; text-align: center; border-bottom: 1px solid #ddd; }
+    .compliance-grid .ok { color: #28a745; }
+    .compliance-grid .missing { color: #dc3545; font-weight: bold; }
+    .compliance-grid .pending { color: #ffc107; }
+    .compliance-grid .na { color: #999; }
+    .summary-row { display: flex; gap: 8px; margin-bottom: 8px; }
+    .summary-item { flex: 1; text-align: center; padding: 6px; border-radius: 4px; }
+    .summary-item.good { background: #d4edda; }
+    .summary-item.bad { background: #f8d7da; }
+    .summary-item.neutral { background: #e2e3e5; }
+    .summary-item .num { font-size: 18px; font-weight: bold; }
+    .summary-item .lbl { font-size: 9px; color: #666; }
+    .progress-bar-container { width: 100%; height: 22px; background: #e0e0e0; border-radius: 11px; overflow: hidden; margin: 8px 0; }
+    .progress-bar { height: 100%; background: linear-gradient(90deg, #4285f4, #34a853); border-radius: 11px; transition: width 0.3s ease; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px; font-weight: bold; min-width: 85px; text-shadow: 0 1px 2px rgba(0,0,0,0.3); }
+
+    /* Unknown Jobs Modal */
+    .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: none; justify-content: center; align-items: center; z-index: 1000; }
+    .modal-overlay.show { display: flex; }
+    .modal-content { background: white; padding: 20px; border-radius: 8px; max-width: 400px; width: 90%; max-height: 80%; overflow-y: auto; }
+    .modal-content h3 { margin: 0 0 15px 0; color: #e67c00; }
+    .unknown-job-item { background: #fff3cd; padding: 10px; border-radius: 4px; margin-bottom: 10px; }
+    .unknown-job-item .job-num { font-weight: bold; color: #856404; }
+    .unknown-job-item select { width: 100%; margin-top: 8px; padding: 6px; }
+    .unknown-job-item .skip-row { margin-top: 8px; }
+
+    /* Uncredited Jobs Section */
+    .uncredited-section { margin-top: 15px; padding: 10px; background: #fff3cd; border-radius: 4px; border: 1px solid #ffc107; }
+    .uncredited-section h4 { margin: 0 0 10px 0; color: #856404; font-size: 13px; }
+    .uncredited-job { background: white; padding: 8px; border-radius: 4px; margin-bottom: 8px; border: 1px solid #e0c587; }
+    .uncredited-job .job-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; }
+    .uncredited-job .job-num { font-weight: bold; color: #dc3545; font-size: 14px; }
+    .uncredited-job .job-details { font-size: 11px; color: #666; margin-top: 4px; }
+    .uncredited-job .assign-row { display: flex; gap: 6px; margin-top: 8px; align-items: center; }
+    .uncredited-job .assign-row select { flex: 1; padding: 4px; font-size: 11px; }
+    .uncredited-job .assign-row button { padding: 4px 10px; font-size: 11px; background: #28a745; color: white; border: none; border-radius: 3px; cursor: pointer; }
+    .uncredited-job .assign-row button:hover { background: #218838; }
+    .uncredited-job.assigned { background: #d4edda; border-color: #28a745; }
+    .uncredited-job.assigned .job-num { color: #155724; }
+
+    /* Individual Report Cards within Uncredited Job */
+    .uncredited-reports { max-height: 250px; overflow-y: auto; }
+    .uncredited-report { transition: background 0.3s, border-color 0.3s; }
+    .uncredited-report select { border: 1px solid #ccc; border-radius: 3px; }
+    .uncredited-report button { white-space: nowrap; }
+    .uncredited-report label { color: #666; white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <div class="last-run" id="lastRunDisplay">📅 Last processed: <strong>Loading...</strong></div>
+
+  <!-- Job Configuration Section -->
+  <div class="config-section">
+    <div class="config-header" onclick="toggleConfig()">
+      <h3>📋 Job Number Configuration</h3>
+      <span class="toggle-icon" id="toggleIcon">▼</span>
+    </div>
+    <div class="config-body" id="configBody">
+      <div style="font-size:11px; color:#666; margin-bottom:8px;">
+        Map job numbers to foremen. Add unexpected job numbers here before processing.
+      </div>
+      <table class="job-table" id="jobTable">
+        <thead>
+          <tr>
+            <th style="width:45%">Foreman/Crew Lead</th>
+            <th>Job 1</th>
+            <th>Job 2</th>
+            <th>Job 3</th>
+            <th style="width:30px"></th>
+          </tr>
+        </thead>
+        <tbody id="jobTableBody">
+          <tr><td colspan="5" style="text-align:center;color:#999;padding:15px;">Loading...</td></tr>
+        </tbody>
+      </table>
+      <button type="button" class="add-row-btn" onclick="addJobRow()">+ Add Row</button>
+    </div>
+  </div>
+
+  <div class="checkbox-row">
+    <input type="checkbox" id="newOnlyMode" checked onchange="updateDaysBackState()">
+    <label for="newOnlyMode">Only process new emails since last run (faster)</label>
+  </div>
+  <div class="checkbox-row">
+    <input type="checkbox" id="fastMode">
+    <label for="fastMode" style="color:#e67c00;">⚡ Fast Mode: Skip PDF extraction (uses email date, may miss batched JHAs)</label>
+  </div>
+  <label style="font-size:12px;">Or search last:</label>
+  <select id="daysBack" style="width:100%; margin-bottom:12px;">
+    <option value="1">1 day (today only)</option>
+    <option value="7" selected>7 days</option>
+    <option value="14">14 days</option>
+    <option value="30">30 days</option>
+    <option value="60">60 days</option>
+    <option value="90">90 days</option>
+  </select>
+  <button id="processBtn" onclick="processEmails()">Start Processing</button>
+  <button id="continueBtn" onclick="continueProcessing()" class="success" style="display:none;">▶ Continue Processing</button>
+  <button id="reprocessAllBtn" onclick="reprocessAll()" class="secondary" style="background:#dc3545; margin-top:5px;">🔄 Reprocess All (Clear & Restart)</button>
+  <button id="viewMappingsBtn" onclick="viewSavedMappings()" class="secondary" style="background:#6c757d; margin-top:5px;">📋 View Saved Mappings</button>
+  <div id="progressContainer" class="progress-bar-container" style="display:none;">
+    <div id="progressBar" class="progress-bar" style="width:0%;">0%</div>
+  </div>
+  <div id="status" class="status" style="display:none;"></div>
+  <div id="uncreditedSection" class="uncredited-section" style="display:none; margin-bottom:15px;"></div>
+  <div id="complianceSection" class="compliance-section" style="display:none;"></div>
+  <div class="warning">⚠️ Processing uses batch size of 5 (timeout prevention). PDF extraction is slow (~5-10 sec each). Use Fast Mode to skip PDFs.</div>
+
+  <!-- Unknown Jobs Modal -->
+  <div class="modal-overlay" id="unknownJobsModal">
+    <div class="modal-content">
+      <h3>⚠️ Unknown Job Numbers Found</h3>
+      <p style="font-size:12px;color:#666;">These job numbers were not found in your configuration. Assign them to a foreman or skip.</p>
+      <div id="unknownJobsList"></div>
+      <div style="display:flex;gap:8px;margin-top:15px;">
+        <button onclick="applyUnknownDecisions()" style="flex:1;background:#28a745;">Apply & Continue</button>
+        <button onclick="skipAllUnknown()" style="flex:1;background:#6c757d;">Skip All</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Saved Mappings Modal -->
+  <div class="modal-overlay" id="savedMappingsModal">
+    <div class="modal-content" style="max-width:500px;">
+      <h3 style="color:#1a73e8;">📋 Saved Job→Foreman Mappings</h3>
+      <p style="font-size:12px;color:#666;">These custom mappings are used to redirect job numbers to the correct foreman's primary crew.</p>
+      <div id="savedMappingsList" style="max-height:300px;overflow-y:auto;margin:10px 0;"></div>
+      <div style="display:flex;gap:8px;margin-top:15px;">
+        <button onclick="closeSavedMappings()" style="flex:1;background:#1a73e8;">Close</button>
+        <button onclick="clearAllMappings()" style="flex:1;background:#dc3545;">🗑️ Clear All Mappings</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- PDF Preview Modal -->
+  <div class="modal-overlay" id="pdfPreviewModal">
+    <div class="modal-content" style="max-width:700px;max-height:80vh;">
+      <h3 style="color:#6c757d;" id="pdfPreviewTitle">📄 PDF Preview</h3>
+      <p style="font-size:12px;color:#666;">Review the PDF content to help determine which foreman should receive credit for this report.</p>
+      <div id="pdfPreviewContent" style="max-height:50vh;overflow-y:auto;margin:10px 0;background:#f8f9fa;border:1px solid #ddd;border-radius:4px;padding:10px;font-family:monospace;font-size:11px;white-space:pre-wrap;word-wrap:break-word;">
+        <div style="text-align:center;padding:20px;color:#666;">
+          <div style="font-size:24px;margin-bottom:10px;">⏳</div>
+          Loading PDF content...
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:15px;">
+        <button onclick="closePdfPreview()" style="flex:1;background:#6c757d;">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    var currentDays = 7;
+    var newOnlyMode = true;
+    var isFirstCall = true;
+    var allForemen = [];
+    var jobMappings = [];
+    var pendingUnknownJobs = [];
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', function() {
+      loadLastProcessedTime();
+      loadJobMappings();
+    });
+
+    function loadLastProcessedTime() {
+      google.script.run
+        .withSuccessHandler(function(lastProcessed) {
+          document.getElementById('lastRunDisplay').innerHTML = '📅 Last processed: <strong>' + (lastProcessed || 'Never') + '</strong>';
+        })
+        .withFailureHandler(function(error) {
+          console.error('Failed to get last processed time:', error);
+          document.getElementById('lastRunDisplay').innerHTML = '📅 Last processed: <strong>Unknown</strong>';
+        })
+        .getLastSafetyEmailProcessedTime();
+    }
+
+    function loadJobMappings() {
+      google.script.run
+        .withSuccessHandler(function(data) {
+          allForemen = data.foremen || [];
+          jobMappings = data.mappings || [];
+          renderJobTable();
+        })
+        .withFailureHandler(function(error) {
+          console.error('Failed to load job mappings:', error);
+          document.getElementById('jobTableBody').innerHTML = '<tr><td colspan="5" style="color:#dc3545;text-align:center;">Error loading mappings</td></tr>';
+        })
+        .getJobForemanMappingsForDialog();
+    }
+
+    function renderJobTable() {
+      var tbody = document.getElementById('jobTableBody');
+      if (jobMappings.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#999;padding:15px;">No job mappings found. Click "+ Add Row" to add one.</td></tr>';
+        return;
+      }
+
+      var html = '';
+      for (var i = 0; i < jobMappings.length; i++) {
+        var m = jobMappings[i];
+        var sourceBadge = m.source === 'custom' ? '<span class="source-badge custom">custom</span>' : '';
+        html += '<tr data-index="' + i + '">';
+        html += '<td>' + buildForemanSelect(i, m.foreman) + sourceBadge + '</td>';
+        html += '<td><input type="text" id="job1_' + i + '" value="' + (m.jobs[0] || '') + '" placeholder="XXX-XX"></td>';
+        html += '<td><input type="text" id="job2_' + i + '" value="' + (m.jobs[1] || '') + '" placeholder="XXX-XX"></td>';
+        html += '<td><input type="text" id="job3_' + i + '" value="' + (m.jobs[2] || '') + '" placeholder="XXX-XX"></td>';
+        html += '<td><button type="button" class="remove-btn" onclick="removeJobRow(' + i + ')">✕</button></td>';
+        html += '</tr>';
+      }
+      tbody.innerHTML = html;
+    }
+
+    function buildForemanSelect(index, selectedValue) {
+      var html = '<select id="foreman_' + index + '">';
+      html += '<option value="">-- Select --</option>';
+      for (var f = 0; f < allForemen.length; f++) {
+        var selected = allForemen[f] === selectedValue ? ' selected' : '';
+        html += '<option value="' + allForemen[f] + '"' + selected + '>' + allForemen[f] + '</option>';
+      }
+      html += '</select>';
+      return html;
+    }
+
+    function addJobRow() {
+      jobMappings.push({ foreman: '', jobs: ['', '', ''], source: 'custom' });
+      renderJobTable();
+    }
+
+    function removeJobRow(index) {
+      jobMappings.splice(index, 1);
+      renderJobTable();
+    }
+
+    function toggleConfig() {
+      var body = document.getElementById('configBody');
+      var icon = document.getElementById('toggleIcon');
+      if (body.classList.contains('expanded')) {
+        body.classList.remove('expanded');
+        icon.textContent = '▼';
+      } else {
+        body.classList.add('expanded');
+        icon.textContent = '▲';
+      }
+    }
+
+    function getJobMappingsFromTable() {
+      // Build mapping object: foreman → [jobs]
+      var mappings = {};
+      for (var i = 0; i < jobMappings.length; i++) {
+        var foremanSelect = document.getElementById('foreman_' + i);
+        var job1 = document.getElementById('job1_' + i);
+        var job2 = document.getElementById('job2_' + i);
+        var job3 = document.getElementById('job3_' + i);
+
+        if (!foremanSelect) continue;
+
+        var foreman = foremanSelect.value;
+        if (!foreman) continue;
+
+        var jobs = [];
+        if (job1 && job1.value.trim()) jobs.push(job1.value.trim());
+        if (job2 && job2.value.trim()) jobs.push(job2.value.trim());
+        if (job3 && job3.value.trim()) jobs.push(job3.value.trim());
+
+        if (jobs.length > 0) {
+          if (!mappings[foreman]) mappings[foreman] = [];
+          mappings[foreman] = mappings[foreman].concat(jobs);
+        }
+      }
+      return mappings;
+    }
+
+    function saveCustomMappings() {
+      // Build job→foreman mapping for all custom/added job numbers
+      // Save any job number that wasn't in the original mapping from Employees sheet
+      var customMappings = {};
+      for (var i = 0; i < jobMappings.length; i++) {
+        var originalJobs = jobMappings[i].jobs || [];
+
+        var foremanSelect = document.getElementById('foreman_' + i);
+        var job1 = document.getElementById('job1_' + i);
+        var job2 = document.getElementById('job2_' + i);
+        var job3 = document.getElementById('job3_' + i);
+
+        if (!foremanSelect || !foremanSelect.value) continue;
+        var foreman = foremanSelect.value;
+
+        // Check each job field - if value is different from original, it's a custom addition
+        if (job1 && job1.value.trim()) {
+          var j1 = job1.value.trim();
+          if (!originalJobs[0] || originalJobs[0] !== j1) {
+            customMappings[j1] = foreman;
+          }
+        }
+        if (job2 && job2.value.trim()) {
+          var j2 = job2.value.trim();
+          if (!originalJobs[1] || originalJobs[1] !== j2) {
+            customMappings[j2] = foreman;
+          }
+        }
+        if (job3 && job3.value.trim()) {
+          var j3 = job3.value.trim();
+          if (!originalJobs[2] || originalJobs[2] !== j3) {
+            customMappings[j3] = foreman;
+          }
+        }
+      }
+
+      console.log("Saving custom mappings:", customMappings);
+      if (Object.keys(customMappings).length > 0) {
+        google.script.run.saveCustomJobForemanMappings(JSON.stringify(customMappings));
+        console.log("Saved " + Object.keys(customMappings).length + " custom job mappings");
+      }
+    }
+
+    function updateDaysBackState() {
+      var isNewOnly = document.getElementById("newOnlyMode").checked;
+      var daysSelect = document.getElementById("daysBack");
+      if (daysSelect) {
+        daysSelect.disabled = isNewOnly;
+      }
+    }
+    updateDaysBackState();
+
+    function processEmails() {
+      console.log("processEmails function called");
+
+      // Save custom mappings before processing
+      saveCustomMappings();
+
+      try {
+        var btn = document.getElementById("processBtn");
+        var continueBtn = document.getElementById("continueBtn");
+        var reprocessBtn = document.getElementById("reprocessAllBtn");
+        var status = document.getElementById("status");
+        var progressContainer = document.getElementById("progressContainer");
+        var progressBar = document.getElementById("progressBar");
+        var days = parseInt(document.getElementById("daysBack").value);
+        var fastMode = document.getElementById("fastMode").checked;
+        newOnlyMode = document.getElementById("newOnlyMode").checked;
+        currentDays = days;
+
+        console.log("Days: " + days + ", newOnlyMode: " + newOnlyMode + ", fastMode: " + fastMode);
+
+        btn.disabled = true;
+        btn.textContent = "Processing Batch...";
+        if (continueBtn) continueBtn.style.display = "none";
+        if (reprocessBtn) reprocessBtn.disabled = true;
+        status.style.display = "block";
+        progressContainer.style.display = "block";
+
+        if (isFirstCall) {
+          progressBar.style.width = "0%";
+          progressBar.textContent = "Starting...";
+          isFirstCall = false;
+        }
+
+        var modeText = newOnlyMode ? "new emails only" : "last " + days + " days";
+        var fastModeText = fastMode ? " (Fast Mode)" : "";
+        status.innerHTML = "🔍 Searching Gmail for safety emails (" + modeText + ")" + fastModeText + "...";
+        document.getElementById("complianceSection").style.display = "none";
+
+        console.log("Calling google.script.run.processSafetyEmails with batch size 5 and fastMode=" + fastMode);
+        google.script.run
+          .withSuccessHandler(handleBatchComplete)
+          .withFailureHandler(function(err) {
+            console.error("Server error: ", err);
+            status.innerHTML = "<span style='color: red;'>❌ Error: " + err.message + "</span>";
+            btn.disabled = false;
+            btn.textContent = "Retry";
+            if (reprocessBtn) reprocessBtn.disabled = false;
+          })
+          .processSafetyEmails(days, 5, newOnlyMode, fastMode);  // BATCH SIZE 5 + fastMode
+        console.log("google.script.run initiated");
+      } catch(e) {
+        console.error("Error in processEmails:", e);
+        alert("JavaScript Error: " + e.message);
+      }
+    }
+
+    function reprocessAll() {
+      // Confirm with user - this is a destructive action
+      if (!confirm('⚠️ REPROCESS ALL\\n\\nThis will:\\n1. Clear ALL saved job mappings\\n2. Clear last processed date\\n3. Process emails from last 90 days\\n\\nThis may take several minutes.\\n\\nContinue?')) {
+        return;
+      }
+
+      console.log("reprocessAll function called");
+
+      var btn = document.getElementById("processBtn");
+      var reprocessBtn = document.getElementById("reprocessAllBtn");
+      var status = document.getElementById("status");
+      var progressContainer = document.getElementById("progressContainer");
+      var progressBar = document.getElementById("progressBar");
+
+      btn.disabled = true;
+      reprocessBtn.disabled = true;
+      reprocessBtn.textContent = "Clearing data...";
+      status.style.display = "block";
+      status.innerHTML = "🗑️ Clearing all saved data for fresh start...";
+      progressContainer.style.display = "block";
+      progressBar.style.width = "0%";
+      progressBar.textContent = "Clearing...";
+
+      // Step 1: Clear all data
+      google.script.run
+        .withSuccessHandler(function(result) {
+          console.log("reprocessAllSafetyEmails result:", result);
+          if (result && result.success) {
+            status.innerHTML = "✅ Data cleared! Starting processing for last 90 days...";
+            progressBar.textContent = "Starting...";
+            reprocessBtn.textContent = "Processing...";
+
+            // Update "Last processed" display
+            document.getElementById('lastRunDisplay').innerHTML = '📅 Last processed: <strong>Never (just cleared)</strong>';
+
+            // Step 2: Start processing with 90 days, newOnlyMode = false
+            currentDays = 90;
+            newOnlyMode = false;
+            isFirstCall = false;
+
+            // Update the dropdown to show 90 days
+            document.getElementById("daysBack").value = "90";
+            document.getElementById("newOnlyMode").checked = false;
+            updateDaysBackState();
+
+            // Start the processing
+            var fastMode = document.getElementById("fastMode").checked;
+            google.script.run
+              .withSuccessHandler(handleBatchComplete)
+              .withFailureHandler(function(err) {
+                console.error("Server error during reprocess: ", err);
+                status.innerHTML = "<span style='color: red;'>❌ Error: " + err.message + "</span>";
+                btn.disabled = false;
+                reprocessBtn.disabled = false;
+                reprocessBtn.textContent = "🔄 Reprocess All (Clear & Restart)";
+              })
+              .processSafetyEmails(90, 5, false, fastMode);  // BATCH SIZE 5 + fastMode
+          } else {
+            status.innerHTML = "<span style='color: red;'>❌ Failed to clear data</span>";
+            btn.disabled = false;
+            reprocessBtn.disabled = false;
+            reprocessBtn.textContent = "🔄 Reprocess All (Clear & Restart)";
+          }
+        })
+        .withFailureHandler(function(err) {
+          console.error("Error clearing data:", err);
+          status.innerHTML = "<span style='color: red;'>❌ Error clearing data: " + err.message + "</span>";
+          btn.disabled = false;
+          reprocessBtn.disabled = false;
+          reprocessBtn.textContent = "🔄 Reprocess All (Clear & Restart)";
+        })
+        .reprocessAllSafetyEmails(90);
+    }
+
+    function handleBatchComplete(result) {
+      console.log("handleBatchComplete called", result);
+      var btn = document.getElementById("processBtn");
+      var continueBtn = document.getElementById("continueBtn");
+      var reprocessBtn = document.getElementById("reprocessAllBtn");
+      var status = document.getElementById("status");
+      var progressContainer = document.getElementById("progressContainer");
+      var progressBar = document.getElementById("progressBar");
+
+      try {
+        // Check for unknown jobs that need user decision
+        if (result && result.needsJobAssignment && result.unknownJobs && result.unknownJobs.length > 0) {
+          showUnknownJobsModal(result.unknownJobs);
+          return;
+        }
+
+        if (result && result.needsApproval) {
+          showApprovalDialog(result.corrections, result);
+        } else if (result && result.timedOut) {
+          // Handle graceful timeout - show continue button
+          var pct = Math.round((result.threadsProcessed / result.totalThreads) * 100);
+          progressBar.style.width = pct + "%";
+          progressBar.textContent = result.threadsProcessed + " of " + result.totalThreads + " (" + pct + "%)";
+          progressBar.style.background = "linear-gradient(90deg, #ffc107, #e67c00)";
+
+          status.innerHTML =
+            "⏱️ <span class='progress' style='color:#e67c00;'>Stopped to prevent timeout</span><br>" +
+            "<div class='info'>⏱️ Elapsed time: " + result.elapsedSeconds + " seconds</div>" +
+            "<div class='info'>Progress: " + result.threadsProcessed + " / " + result.totalThreads + " emails (" + pct + "%)</div>" +
+            "<div class='info'>This batch: " + result.processedThisBatch + " processed, " + result.skippedThisBatch + " skipped</div>" +
+            "<div class='info' style='color:#28a745;font-weight:bold;'>✅ Progress saved! Click 'Continue Processing' to resume.</div>";
+
+          btn.disabled = false;
+          btn.innerHTML = "🔄 Start Over";
+          btn.onclick = function() { isFirstCall = true; processEmails(); };
+
+          // Show the Continue button prominently
+          if (continueBtn) {
+            continueBtn.style.display = "block";
+            continueBtn.disabled = false;
+          }
+
+          if (reprocessBtn) {
+            reprocessBtn.disabled = false;
+            reprocessBtn.textContent = "🔄 Reprocess All (Clear & Restart)";
+          }
+        } else if (result && result.complete) {
+          console.log("Processing complete, full result:", JSON.stringify(result, null, 2));
+          progressBar.style.width = "100%";
+          progressBar.textContent = result.totalThreads + " of " + result.totalThreads + " (100%)";
+          progressBar.style.background = "linear-gradient(90deg, #34A853, #137333)";
+
+          var modeInfo = result.newOnlyMode ? " (new only since " + result.lastProcessedDate + ")" : " (last " + currentDays + " days)";
+
+          // Build logs info from the new Option B logging
+          var logsInfo = "";
+          if (result.logsCreated) {
+            var jhaCount = result.logsCreated.jha || 0;
+            var weeklyCount = result.logsCreated.weekly || 0;
+            var monthlyCount = result.logsCreated.monthly || 0;
+            var totalLogs = jhaCount + weeklyCount + monthlyCount;
+
+            console.log("Logs Created: JHA=" + jhaCount + ", Weekly=" + weeklyCount + ", Monthly=" + monthlyCount);
+
+            // Log skip reasons for debugging
+            if (result.skipReasons) {
+              console.log("Skip Reasons:", JSON.stringify(result.skipReasons));
+            }
+
+            if (totalLogs > 0) {
+              logsInfo = "<div class='info'>📋 Logged to sheets: " + totalLogs + " total (JHA: " + jhaCount + ", Weekly: " + weeklyCount + ", Monthly: " + monthlyCount + ")</div>";
+            } else {
+              logsInfo = "<div class='info' style='color:#e65100;'>⚠️ No new records logged (all may be duplicates)</div>";
+            }
+          }
+
+          // Legacy compliance records info (backward compat)
+          var complianceInfo = "";
+          if (!result.logsCreated && result.complianceRecordsAdded) {
+            complianceInfo = "<div class='info'>📋 JHA/Safety Meeting records logged: " + result.complianceRecordsAdded + "</div>";
+          }
+
+          // Build skip reasons breakdown
+          var skipInfo = "";
+          if (result.skipReasons) {
+            var sr = result.skipReasons;
+            var totalSkipped = sr.alreadyLogged + sr.parseFailed + sr.userSkipped + sr.unknownJob + sr.logDuplicate + sr.noJobNumber;
+            if (totalSkipped > 0) {
+              skipInfo = "<div class='info' style='margin-top:8px;padding:8px;background:#fff3cd;border-radius:4px;border:1px solid #ffc107;'>" +
+                "<strong style='color:#856404;'>📊 Skip Breakdown (" + totalSkipped + " total):</strong><br>" +
+                "<span style='font-size:11px;'>";
+              if (sr.alreadyLogged > 0) skipInfo += "• Already in logs: <strong>" + sr.alreadyLogged + "</strong><br>";
+              if (sr.logDuplicate > 0) skipInfo += "• Duplicate detected: <strong>" + sr.logDuplicate + "</strong><br>";
+              if (sr.parseFailed > 0) skipInfo += "• Parse failed: <strong>" + sr.parseFailed + "</strong><br>";
+              if (sr.userSkipped > 0) skipInfo += "• User skipped: <strong>" + sr.userSkipped + "</strong><br>";
+              if (sr.unknownJob > 0) skipInfo += "• Unknown job: <strong>" + sr.unknownJob + "</strong><br>";
+              if (sr.noJobNumber > 0) skipInfo += "• No job number: <strong>" + sr.noJobNumber + "</strong><br>";
+              skipInfo += "</span></div>";
+            }
+          }
+
+          // Build PDF too-large warnings
+          var pdfWarningInfo = "";
+          if (result.pdfWarnings && result.pdfWarnings.length > 0) {
+            pdfWarningInfo = "<div style='margin-top:8px;padding:10px;background:#fff3e0;border-radius:6px;border:1px solid #ff9800;'>" +
+              "<strong style='color:#e65100;'>⚠️ PDF Too Large to OCR (" + result.pdfWarnings.length + "):</strong><br>" +
+              "<span style='font-size:11px;color:#bf360c;'>These JHAs used the <em>email subject date</em> instead of the PDF's actual Date Completed. Please verify manually.</span><br><br>";
+            for (var pw = 0; pw < result.pdfWarnings.length; pw++) {
+              var w = result.pdfWarnings[pw];
+              pdfWarningInfo += "<div style='padding:6px 8px;margin:4px 0;background:#fff;border-radius:4px;border-left:3px solid #ff9800;font-size:12px;'>" +
+                "<strong>" + w.jobNumber + "</strong> (" + (w.foreman || 'Unknown') + ")<br>" +
+                "📄 " + w.pdfName + " — <strong>" + w.sizeMB + " MB</strong> (max 2 MB)<br>" +
+                "📅 Date used: " + w.dateUsed + " <em>(from " + w.dateSource + ")</em>" +
+                "</div>";
+            }
+            pdfWarningInfo += "</div>";
+          }
+
+          status.innerHTML =
+            "✅ <span class='progress'>All Complete!</span>" + modeInfo + "<br>" +
+            "<div class='info'>📧 Total emails processed: " + result.totalThreads + "</div>" +
+            "<div class='info'>This batch: " + result.processedThisBatch + " processed, " + result.skippedThisBatch + " skipped</div>" +
+            "<div class='info'>Equipment issues found: " + result.issuesThisBatch + "</div>" +
+            logsInfo + complianceInfo + skipInfo + pdfWarningInfo;
+
+          btn.style.background = "#34A853";
+          btn.innerHTML = "✅ Close";
+          btn.disabled = false;
+          btn.onclick = function() { google.script.host.close(); };
+
+          // Hide continue button
+          if (continueBtn) continueBtn.style.display = "none";
+
+          // Re-enable reprocess button
+          if (reprocessBtn) {
+            reprocessBtn.disabled = false;
+            reprocessBtn.textContent = "🔄 Reprocess All (Clear & Restart)";
+          }
+
+          // Show uncredited jobs FIRST if any were found (higher priority)
+          console.log("Checking for uncreditedJobs:", result.uncreditedJobs);
+          if (result.uncreditedJobs && result.uncreditedJobs.length > 0) {
+            console.log("Showing " + result.uncreditedJobs.length + " uncredited jobs");
+            showUncreditedJobs(result.uncreditedJobs);
+            // Scroll to uncredited section so user sees it
+            setTimeout(function() {
+              var uncreditedSection = document.getElementById('uncreditedSection');
+              if (uncreditedSection) {
+                uncreditedSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }
+            }, 100);
+          } else {
+            console.log("No uncredited jobs to show (uncreditedJobs is:", result.uncreditedJobs, ")");
+          }
+
+          // Then show compliance grid
+          if (result.compliance) {
+            showComplianceGrid(result.compliance);
+          }
+        } else if (result) {
+          var pct = Math.round((result.threadsProcessed / result.totalThreads) * 100);
+          progressBar.style.width = pct + "%";
+          progressBar.textContent = result.threadsProcessed + " of " + result.totalThreads + " (" + pct + "%)";
+
+          // Build in-progress skip summary for display during processing
+          // Build in-progress skip summary for display during processing
+          var inProgressSkipInfo = "";
+          if (result.skipReasons) {
+            var sr = result.skipReasons;
+            var skippedSummary = [];
+            if (sr.alreadyLogged > 0) skippedSummary.push("logged:" + sr.alreadyLogged);
+            if (sr.logDuplicate > 0) skippedSummary.push("dup:" + sr.logDuplicate);
+            if (sr.parseFailed > 0) skippedSummary.push("parse:" + sr.parseFailed);
+            if (sr.userSkipped > 0) skippedSummary.push("user:" + sr.userSkipped);
+            if (sr.unknownJob > 0) skippedSummary.push("unknown:" + sr.unknownJob);
+            if (skippedSummary.length > 0) {
+              inProgressSkipInfo = " [" + skippedSummary.join(", ") + "]";
+            }
+          }
+
+          status.innerHTML =
+            "📊 <span class='progress'>Processing emails...</span><br>" +
+            "<div class='info'>Progress: " + result.threadsProcessed + " / " + result.totalThreads + " emails (" + pct + "%)</div>" +
+            "<div class='info'>This batch: " + result.processedThisBatch + " processed, " + result.skippedThisBatch + " skipped" + inProgressSkipInfo + ", " + result.issuesThisBatch + " issues</div>" +
+            "<div class='info'>⏳ Auto-continuing in 1 second...</div>";
+
+          btn.innerHTML = "Processing... (" + result.threadsRemaining + " remaining)";
+          btn.disabled = true;
+          if (continueBtn) continueBtn.style.display = "none";
+          setTimeout(function() { continueBatch(); }, 1000);
+        }
+      } catch(e) {
+        console.error("Error in handleBatchComplete:", e);
+        status.innerHTML = "<span style='color:red'>UI Error: " + e.message + "</span>";
+        btn.disabled = false;
+        btn.innerHTML = "Close (error)";
+        btn.onclick = function() { google.script.host.close(); };
+        // Re-enable reprocess button on error
+        if (reprocessBtn) {
+          reprocessBtn.disabled = false;
+          reprocessBtn.textContent = "🔄 Reprocess All (Clear & Restart)";
+        }
+      }
+    }
+
+    function showApprovalDialog(corrections, batchResult) {
+      var status = document.getElementById("status");
+      var btn = document.getElementById("processBtn");
+
+      var html = "<div style='background:#fff3cd;padding:10px;border-radius:4px;margin-bottom:10px;'>";
+      html += "<strong>⚠️ " + corrections.length + " job number(s) were auto-corrected</strong>";
+      html += "<p style='font-size:12px;margin:5px 0 0 0;'>Review and edit if needed, then click Apply to log records.</p></div>";
+      html += "<table style='width:100%;font-size:11px;border-collapse:collapse;'>";
+      html += "<tr style='background:#f0f0f0;'><th style='padding:5px;text-align:left;'>Type</th><th style='padding:5px;'>Original</th><th style='padding:5px;'>Corrected</th><th style='padding:5px;'>Remember</th><th style='padding:5px;'>Skip</th></tr>";
+
+      for (var i = 0; i < corrections.length; i++) {
+        var c = corrections[i];
+        var shortSubject = c.subject.length > 30 ? c.subject.substring(0, 30) + "..." : c.subject;
+        html += "<tr style='border-bottom:1px solid #ddd;'>";
+        html += "<td style='padding:5px;' title='" + c.subject.replace(/"/g, "&quot;") + "'>" + c.reportType + "</td>";
+        html += "<td style='padding:5px;color:#dc3545;font-weight:bold;'>" + c.original + "</td>";
+        html += "<td style='padding:5px;'><input type='text' id='corrected_" + i + "' value='" + c.normalized + "' style='width:70px;padding:2px;'></td>";
+        html += "<td style='padding:5px;text-align:center;'><input type='checkbox' id='remember_" + i + "' title='Remember this correction'></td>";
+        html += "<td style='padding:5px;text-align:center;'><input type='checkbox' id='skip_" + i + "' title='Skip this record'></td>";
+        html += "</tr>";
+      }
+
+      html += "</table>";
+      html += "<div style='margin-top:10px;display:flex;gap:8px;'>";
+      html += "<button onclick='applyCorrections(" + corrections.length + ")' style='flex:1;background:#28a745;color:white;border:none;padding:10px;border-radius:4px;cursor:pointer;'>✅ Apply & Log</button>";
+      html += "<button onclick='cancelCorrections()' style='flex:1;background:#dc3545;color:white;border:none;padding:10px;border-radius:4px;cursor:pointer;'>❌ Cancel</button>";
+      html += "</div>";
+
+      status.innerHTML = html;
+      btn.style.display = "none";
+      window.pendingBatchResult = batchResult;
+    }
+
+    function applyCorrections(count) {
+      var approvals = [];
+      for (var i = 0; i < count; i++) {
+        var corrected = document.getElementById("corrected_" + i).value;
+        var remember = document.getElementById("remember_" + i).checked;
+        var skip = document.getElementById("skip_" + i).checked;
+        approvals.push({ index: i, corrected: corrected, remember: remember, skip: skip });
+      }
+
+      var status = document.getElementById("status");
+      status.innerHTML = "<div style='text-align:center;padding:20px;'><strong>⏳ Applying corrections and logging records...</strong></div>";
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          handleBatchComplete(result);
+        })
+        .withFailureHandler(function(err) {
+          status.innerHTML = "<span style='color:red;'>❌ Error: " + err.message + "</span>";
+          var btn = document.getElementById("processBtn");
+          btn.style.display = "block";
+          btn.disabled = false;
+          btn.textContent = "Retry";
+        })
+        .applyJobNumberCorrections(JSON.stringify(approvals));
+    }
+
+    function cancelCorrections() {
+      google.script.run.cancelPendingCorrections();
+      var status = document.getElementById("status");
+      status.innerHTML = "<div style='color:#dc3545;padding:10px;'>❌ Batch cancelled. Records were not logged.</div>";
+      var btn = document.getElementById("processBtn");
+      btn.style.display = "block";
+      btn.disabled = false;
+      btn.textContent = "Start Over";
+      btn.onclick = function() { location.reload(); };
+    }
+
+    function continueBatch() {
+      var fastMode = document.getElementById("fastMode").checked;
+      google.script.run
+        .withSuccessHandler(handleBatchComplete)
+        .withFailureHandler(function(err) {
+          var status = document.getElementById("status");
+          var btn = document.getElementById("processBtn");
+          status.innerHTML = "<span style='color: red;'>❌ Error: " + err.message + "</span>";
+          btn.disabled = false;
+          btn.textContent = "Retry";
+          btn.onclick = function() { isFirstCall = true; processEmails(); };
+        })
+        .processSafetyEmails(currentDays, 5, newOnlyMode, fastMode);  // BATCH SIZE 5
+    }
+
+    // Called when user clicks "Continue Processing" after a timeout
+    function continueProcessing() {
+      console.log("continueProcessing called - resuming from saved progress");
+
+      var btn = document.getElementById("processBtn");
+      var continueBtn = document.getElementById("continueBtn");
+      var status = document.getElementById("status");
+      var progressBar = document.getElementById("progressBar");
+
+      btn.disabled = true;
+      if (continueBtn) {
+        continueBtn.disabled = true;
+        continueBtn.textContent = "Resuming...";
+      }
+      progressBar.style.background = "linear-gradient(90deg, #4285f4, #34a853)";
+      status.innerHTML = "⏳ <span class='progress'>Resuming processing...</span>";
+
+      continueBatch();
+    }
+
+    function showComplianceGrid(compliance) {
+      var section = document.getElementById("complianceSection");
+      var html = "<h4>📊 JHA/Weekly/Monthly Compliance - Week of " + compliance.weekStart + " - " + compliance.weekEnd + "</h4>";
+
+      html += "<div class='summary-row'>";
+      html += "<div class='summary-item good'><div class='num'>" + compliance.compliantCount + "</div><div class='lbl'>Compliant</div></div>";
+      if (compliance.isPastDeadline) {
+        html += "<div class='summary-item bad'><div class='num'>" + compliance.missingCount + "</div><div class='lbl'>Missing</div></div>";
+      } else {
+        var pending = compliance.totalCrews - compliance.compliantCount;
+        html += "<div class='summary-item neutral'><div class='num'>" + pending + "</div><div class='lbl'>Pending</div></div>";
+      }
+      html += "<div class='summary-item neutral'><div class='num'>" + compliance.totalCrews + "</div><div class='lbl'>Total</div></div>";
+      html += "</div>";
+
+      if (compliance.tasksCreated > 0) {
+        html += "<div style='color: #1a73e8; margin-bottom: 10px;'>📋 Created " + compliance.tasksCreated + " missing report tasks in Task Metadata</div>";
+      }
+
+      html += "<div style='max-height: 200px; overflow-y: auto;'>";
+      html += "<table class='compliance-grid'><tr><th>Crew</th><th>Sun</th><th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th><th>Weekly</th><th>Monthly</th></tr>";
+
+      for (var i = 0; i < compliance.crews.length; i++) {
+        var crew = compliance.crews[i];
+        html += "<tr><td><strong>" + crew.jobNumber + "</strong></td>";
+        for (var d = 0; d < 7; d++) {
+          var st = crew.jha && crew.jha[d] ? crew.jha[d] : (d === 0 || d === 6 ? "N/A" : "⏳");
+          var cls = st === "✅" ? "ok" : (st === "❌" ? "missing" : (st === "⏳" ? "pending" : "na"));
+          html += "<td class='" + cls + "'>" + st + "</td>";
+        }
+        var wm = crew.weeklyMeeting || "⏳";
+        var mCls = wm === "✅" ? "ok" : (wm === "❌" ? "missing" : (wm === "⏳" ? "pending" : "na"));
+        html += "<td class='" + mCls + "'>" + wm + "</td>";
+        var mc = crew.monthlyChecklist || "⏳";
+        var mcCls = mc === "✅" ? "ok" : (mc === "❌" ? "missing" : (mc === "⏳" ? "pending" : "na"));
+        html += "<td class='" + mcCls + "'>" + mc + "</td></tr>";
+      }
+
+      html += "</table></div>";
+      html += "<div style='margin-top: 10px;'>";
+      html += "<button class='secondary' style='width: auto; padding: 6px 12px;' onclick='google.script.run.openComplianceConfig()'>⚙️ Configure</button> ";
+      html += "<button class='secondary' style='width: auto; padding: 6px 12px;' onclick='google.script.run.showComplianceDashboard()'>📊 Full Dashboard</button>";
+      html += "</div>";
+
+      section.innerHTML = html;
+      section.style.display = "block";
+    }
+
+    // Unknown Jobs Modal Functions
+    function showUnknownJobsModal(unknownJobs) {
+      pendingUnknownJobs = unknownJobs;
+      var list = document.getElementById('unknownJobsList');
+      var html = '';
+
+      for (var i = 0; i < unknownJobs.length; i++) {
+        var job = unknownJobs[i];
+        var emailId = job.messageId || job.emailId || '';
+        html += '<div class="unknown-job-item">';
+        html += '<div class="job-num">Job: ' + job.jobNumber + '</div>';
+        html += '<div style="font-size:11px;color:#666;">Report: ' + job.reportType + ' | Date: ' + job.date + '</div>';
+        html += '<div style="font-size:11px;color:#888;">📩 Received: ' + (job.receivedDate || 'Unknown') + '</div>';
+
+        // Add PDF Preview button if emailId exists
+        if (emailId) {
+          html += '<button onclick="previewPdf(\'' + emailId + '\', \'' + job.reportType + '\', \'' + job.jobNumber + '\')" style="margin:6px 0;padding:4px 10px;font-size:11px;background:#17a2b8;color:white;border:none;border-radius:3px;cursor:pointer;">📄 Preview PDF</button>';
+        }
+
+        html += '<select id="unknownForeman_' + i + '">';
+        html += '<option value="">-- Assign to Foreman --</option>';
+        for (var f = 0; f < allForemen.length; f++) {
+          html += '<option value="' + allForemen[f] + '">' + allForemen[f] + '</option>';
+        }
+        html += '</select>';
+        html += '<div class="skip-row"><label><input type="checkbox" id="skipUnknown_' + i + '"> Skip this report</label></div>';
+        html += '</div>';
+      }
+
+      list.innerHTML = html;
+      document.getElementById('unknownJobsModal').classList.add('show');
+    }
+
+    function applyUnknownDecisions() {
+      var decisions = [];
+      for (var i = 0; i < pendingUnknownJobs.length; i++) {
+        var foreman = document.getElementById('unknownForeman_' + i).value;
+        var skip = document.getElementById('skipUnknown_' + i).checked;
+        decisions.push({
+          jobNumber: pendingUnknownJobs[i].jobNumber,
+          foreman: foreman,
+          action: skip ? 'skip' : 'assign'
+        });
+      }
+
+      document.getElementById('unknownJobsModal').classList.remove('show');
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            // Continue processing
+            continueBatch();
+          }
+        })
+        .withFailureHandler(function(err) {
+          alert('Error applying decisions: ' + err.message);
+        })
+        .applyUnknownJobDecisions(JSON.stringify(decisions));
+    }
+
+    function skipAllUnknown() {
+      var decisions = [];
+      for (var i = 0; i < pendingUnknownJobs.length; i++) {
+        decisions.push({
+          jobNumber: pendingUnknownJobs[i].jobNumber,
+          foreman: '',
+          action: 'skip'
+        });
+      }
+
+      document.getElementById('unknownJobsModal').classList.remove('show');
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          continueBatch();
+        })
+        .applyUnknownJobDecisions(JSON.stringify(decisions));
+    }
+
+    // Uncredited Jobs Display Functions
+    function showUncreditedJobs(uncreditedJobs) {
+      var section = document.getElementById('uncreditedSection');
+      var html = '<h4>⚠️ Uncredited Job Numbers Found in Safety Reports</h4>';
+      html += '<div style="font-size:11px;color:#666;margin-bottom:10px;">These job numbers have JHA/Safety Meeting reports but couldn\'t be credited to any tracked crew. Assign each report to a crew with a missing day.</div>';
+
+      for (var i = 0; i < uncreditedJobs.length; i++) {
+        var job = uncreditedJobs[i];
+        var reasonStr = job.reason || 'No foreman mapping found';
+
+        html += '<div class="uncredited-job" id="uncreditedJob_' + i + '">';
+        html += '<div class="job-header">';
+        html += '<span class="job-num">' + job.jobNumber + '</span>';
+        html += '<span style="font-size:10px;color:#666;margin-left:8px;">❓ ' + reasonStr + '</span>';
+        html += '</div>';
+
+        // Show individual reports if available
+        if (job.reports && job.reports.length > 0) {
+          html += '<div class="uncredited-reports" style="margin-top:8px;">';
+          for (var r = 0; r < job.reports.length; r++) {
+            var report = job.reports[r];
+            var reportKey = i + '_' + r;
+            var emailId = report.emailId || '';
+            html += '<div class="uncredited-report" id="report_' + reportKey + '" style="background:#f8f9fa;padding:6px;margin:4px 0;border-radius:4px;border-left:3px solid #ffc107;">';
+            html += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px;">';
+            html += '<span style="font-weight:bold;font-size:12px;">' + report.reportType + ' - ' + report.dayName + '</span>';
+            html += '<span style="font-size:10px;color:#1a73e8;">📋 Completed: ' + report.reportDate + '</span>';
+            html += '<span style="font-size:10px;color:#666;">📩 Received: ' + (report.receivedDate || report.reportDate) + '</span>';
+            // Add Preview PDF button if emailId is available
+            if (emailId) {
+              html += '<button onclick="previewPdf(\'' + emailId + '\', \'' + report.reportType + '\', \'' + job.jobNumber + '\')" style="padding:2px 6px;font-size:10px;background:#6c757d;color:white;border:none;border-radius:3px;cursor:pointer;" title="View PDF content to help identify foreman">📄 Preview</button>';
+            }
+            html += '</div>';
+            html += '<div class="assign-row" style="display:flex;gap:4px;margin-top:6px;align-items:center;flex-wrap:wrap;">';
+            html += '<select id="crewSelect_' + reportKey + '" style="flex:1;min-width:100px;padding:3px;font-size:10px;" data-reporttype="' + report.reportType + '" data-reportdate="' + report.reportDate + '" onchange="loadMissingDays(\'' + reportKey + '\')">';
+            html += '<option value="">Select Crew...</option>';
+            html += '</select>';
+            html += '<select id="daySelect_' + reportKey + '" style="width:150px;padding:3px;font-size:10px;" disabled>';
+            html += '<option value="">Select Day...</option>';
+            html += '</select>';
+            html += '<button onclick="creditReport(\'' + reportKey + '\', \'' + job.jobNumber + '\', \'' + report.reportType + '\', \'' + report.reportDate + '\', \'' + (report.receivedDate || report.reportDate) + '\')" style="padding:3px 8px;font-size:10px;">Credit</button>';
+            html += '<label style="font-size:10px;display:flex;align-items:center;gap:2px;"><input type="checkbox" id="saveMapping_' + reportKey + '"> Remember</label>';
+            html += '</div>';
+            html += '</div>';
+          }
+          html += '</div>';
+        } else {
+          // Fallback to legacy format
+          var reportTypesStr = job.reportTypes.join(', ');
+          var datesStr = job.dates && job.dates.length > 0 ?
+            (job.dates.length > 3 ? job.dates.slice(0, 3).join(', ') + '...' : job.dates.join(', ')) :
+            'Unknown';
+          html += '<div class="job-details">';
+          html += '<div>📋 Report types: ' + reportTypesStr + '</div>';
+          html += '<div>📅 Dates: ' + datesStr + '</div>';
+          html += '</div>';
+          html += '<div class="assign-row">';
+          html += '<select id="uncreditedForeman_' + i + '">';
+          html += '<option value="">-- Assign to Foreman --</option>';
+          for (var f = 0; f < allForemen.length; f++) {
+            html += '<option value="' + allForemen[f] + '">' + allForemen[f] + '</option>';
+          }
+          html += '</select>';
+          html += '<button onclick="assignUncreditedJob(' + i + ', \'' + job.jobNumber + '\')">Add Mapping</button>';
+          html += '</div>';
+        }
+
+        html += '</div>';
+      }
+
+      html += '<div style="margin-top:10px;font-size:11px;color:#666;">💡 Credit reports to specific missing days, or add a general mapping and re-run processing.</div>';
+
+      section.innerHTML = html;
+      section.style.display = 'block';
+
+      // Load tracked crews for all crew selects
+      loadTrackedCrews();
+    }
+
+    var trackedCrews = [];
+    var allEmployees = [];
+
+    function loadTrackedCrews() {
+      // Load tracked crews AND all employees in parallel
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result && result.success) {
+            trackedCrews = result.crews || [];
+            populateCrewSelects();
+          }
+        })
+        .withFailureHandler(function(err) {
+          console.error('Failed to load tracked crews:', err);
+        })
+        .getTrackedCrewsForAssignment();
+
+      // Also load all employees for the foreman dropdown
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result && result.success) {
+            allEmployees = result.employees || [];
+            populateCrewSelects(); // Re-populate with employees
+          }
+        })
+        .withFailureHandler(function(err) {
+          console.error('Failed to load employees:', err);
+        })
+        .getAllEmployeesForAssignment();
+    }
+
+    function populateCrewSelects() {
+      // Populate all crew selects with tracked crews AND all employees
+      var crewSelects = document.querySelectorAll('select[id^="crewSelect_"]');
+      for (var i = 0; i < crewSelects.length; i++) {
+        var sel = crewSelects[i];
+        var currentVal = sel.value;
+
+        sel.innerHTML = '<option value="">Select Crew...</option>';
+
+        // Add optgroup for tracked crews
+        if (trackedCrews.length > 0) {
+          var crewOptGroup = '<optgroup label="📋 Tracked Crews">';
+          for (var c = 0; c < trackedCrews.length; c++) {
+            var crew = trackedCrews[c];
+            crewOptGroup += '<option value="' + crew.jobNumber + '" data-foreman="' + crew.foreman + '">' +
+              crew.jobNumber + ' (' + crew.foreman + ')</option>';
+          }
+          crewOptGroup += '</optgroup>';
+          sel.innerHTML += crewOptGroup;
+        }
+
+        // Add optgroup for all employees (for past reports)
+        if (allEmployees.length > 0) {
+          var empOptGroup = '<optgroup label="👤 All Employees">';
+          for (var e = 0; e < allEmployees.length; e++) {
+            var emp = allEmployees[e];
+            var badge = emp.isFormer ? ' (former)' : '';
+            var jobDisplay = emp.jobNumber ? ' - ' + emp.jobNumber : '';
+            empOptGroup += '<option value="' + (emp.jobNumber || 'unknown') + '" data-foreman="' + emp.name + '">' +
+              emp.name + jobDisplay + badge + '</option>';
+          }
+          empOptGroup += '</optgroup>';
+          sel.innerHTML += empOptGroup;
+        }
+
+        if (currentVal) sel.value = currentVal;
+      }
+    }
+
+    function loadMissingDays(reportKey) {
+      var crewSelect = document.getElementById('crewSelect_' + reportKey);
+      var daySelect = document.getElementById('daySelect_' + reportKey);
+
+      if (!crewSelect.value) {
+        daySelect.innerHTML = '<option value="">Select Crew First</option>';
+        daySelect.disabled = true;
+        return;
+      }
+
+      var crewJob = crewSelect.value;
+
+      // Get report type from data attribute
+      var reportType = crewSelect.dataset.reporttype || '';
+      // Normalize report type - be flexible about matching
+      var isJHA = reportType === 'JHA' || reportType.indexOf('Job Hazard') !== -1 || reportType.indexOf('JHA') !== -1;
+      var isSafetyMeeting = reportType === 'Safety Meeting' || reportType.indexOf('Safety Meeting') !== -1 || reportType.indexOf('Weekly Safety') !== -1;
+
+      // Get the report date from data attribute or parse from DOM
+      var reportDate = crewSelect.dataset.reportdate || '';
+
+      if (!reportDate) {
+        // Fallback: Get the report date from the reportKey to calculate week start
+        var reportDiv = document.getElementById('report_' + reportKey);
+        var reportDateText = reportDiv ? reportDiv.querySelector('span[style*="color:#666"]').textContent : '';
+        var reportDateMatch = reportDateText.match(/Report:\s*(\d{2}\/\d{2}\/\d{4})/);
+        reportDate = reportDateMatch ? reportDateMatch[1] : '';
+      }
+
+      if (!reportDate) {
+        daySelect.innerHTML = '<option value="">No Report Date</option>';
+        daySelect.disabled = true;
+        return;
+      }
+
+      // Calculate week start (Sunday)
+      var dateParts = reportDate.split('/');
+      var reportDateObj = new Date(parseInt(dateParts[2]), parseInt(dateParts[0]) - 1, parseInt(dateParts[1]));
+      var dayOfWeek = reportDateObj.getDay();
+      var weekStart = new Date(reportDateObj);
+      weekStart.setDate(weekStart.getDate() - dayOfWeek);
+      var weekStartStr = (weekStart.getMonth() + 1) + '/' + weekStart.getDate() + '/' + weekStart.getFullYear();
+
+      // Pad with leading zeros
+      weekStartStr = ('0' + (weekStart.getMonth() + 1)).slice(-2) + '/' +
+                    ('0' + weekStart.getDate()).slice(-2) + '/' +
+                    weekStart.getFullYear();
+
+      daySelect.innerHTML = '<option value="">Loading...</option>';
+      daySelect.disabled = true;
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result && result.success) {
+            daySelect.innerHTML = '<option value="">Select Missing Day...</option>';
+            var hasOptions = false;
+
+            // Only show JHA days if this is a JHA report
+            if (isJHA) {
+              if (result.missingDays.length === 0) {
+                daySelect.innerHTML = '<option value="">No missing JHA days</option>';
+                daySelect.disabled = true;
+                return;
+              }
+
+              for (var d = 0; d < result.missingDays.length; d++) {
+                var day = result.missingDays[d];
+                daySelect.innerHTML += '<option value="JHA|' + day.dayName + '|' + day.date + '">' +
+                  'JHA - ' + day.dayName + ' (' + day.date + ')</option>';
+                hasOptions = true;
+              }
+            }
+
+            // Only show Weekly Meeting if this is a Safety Meeting report
+            if (isSafetyMeeting) {
+              if (!result.weeklyMeetingMissing) {
+                daySelect.innerHTML = '<option value="">Weekly Meeting not missing</option>';
+                daySelect.disabled = true;
+                return;
+              }
+
+              daySelect.innerHTML += '<option value="WeeklyMeeting||' + weekStartStr + '">Weekly Meeting (week of ' + weekStartStr + ')</option>';
+              hasOptions = true;
+            }
+
+            // Fallback: show all if report type is unknown
+            if (!isJHA && !isSafetyMeeting) {
+              // Add JHA days
+              for (var d = 0; d < result.missingDays.length; d++) {
+                var day = result.missingDays[d];
+                daySelect.innerHTML += '<option value="JHA|' + day.dayName + '|' + day.date + '">' +
+                  'JHA - ' + day.dayName + ' (' + day.date + ')</option>';
+                hasOptions = true;
+              }
+
+              // Add Weekly Meeting if missing
+              if (result.weeklyMeetingMissing) {
+                daySelect.innerHTML += '<option value="WeeklyMeeting||' + weekStartStr + '">Weekly Meeting (week of ' + weekStartStr + ')</option>';
+                hasOptions = true;
+              }
+            }
+
+            if (!hasOptions) {
+              daySelect.innerHTML = '<option value="">No missing days for this report type</option>';
+              daySelect.disabled = true;
+              return;
+            }
+
+            daySelect.disabled = false;
+          } else {
+            daySelect.innerHTML = '<option value="">' + (result.error || 'Not found') + '</option>';
+            daySelect.disabled = true;
+          }
+        })
+        .withFailureHandler(function(err) {
+          daySelect.innerHTML = '<option value="">Error loading</option>';
+          daySelect.disabled = true;
+          console.error('Error loading missing days:', err);
+        })
+        .getMissingDaysForCrew(crewJob, weekStartStr);
+    }
+
+    function creditReport(reportKey, originalJob, reportType, reportDate, receivedDate) {
+      var crewSelect = document.getElementById('crewSelect_' + reportKey);
+      var daySelect = document.getElementById('daySelect_' + reportKey);
+      var saveMappingCheckbox = document.getElementById('saveMapping_' + reportKey);
+
+      if (!crewSelect.value) {
+        alert('Please select a crew to credit this report to.');
+        return;
+      }
+
+      var targetCrew = crewSelect.value;
+      var targetForeman = crewSelect.options[crewSelect.selectedIndex].dataset.foreman || '';
+      var dayValue = daySelect.value;
+      var saveMapping = saveMappingCheckbox ? saveMappingCheckbox.checked : false;
+
+      // Parse day selection
+      var targetDay = '';
+      var targetReportType = reportType;
+      if (dayValue) {
+        var parts = dayValue.split('|');
+        if (parts[0] === 'WeeklyMeeting') {
+          targetReportType = 'Safety Meeting';
+        } else if (parts[1]) {
+          targetDay = parts[1];
+        }
+      }
+
+      // Build assignment data
+      var assignmentData = {
+        originalJobNumber: originalJob,
+        reportType: targetReportType,
+        reportDate: reportDate,
+        receivedDate: receivedDate || reportDate,
+        targetCrew: targetCrew,
+        targetForeman: targetForeman,
+        targetDay: targetDay,
+        saveMapping: saveMapping
+      };
+
+      // Show loading state
+      var reportDiv = document.getElementById('report_' + reportKey);
+      var assignRow = reportDiv.querySelector('.assign-row');
+      var originalHTML = assignRow.innerHTML;
+      assignRow.innerHTML = '<span style="color:#666;font-size:10px;">⏳ Crediting...</span>';
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result && result.success) {
+            reportDiv.style.background = '#d4edda';
+            reportDiv.style.borderLeftColor = '#28a745';
+            assignRow.innerHTML = '<span style="color:#155724;font-size:10px;">✅ Credited to ' + targetCrew +
+              (targetDay ? ' (' + targetDay + ')' : '') + '</span>';
+
+            // If mapping was saved, update the job config table
+            if (saveMapping) {
+              addMappingToTable(targetForeman, originalJob);
+            }
+          } else {
+            assignRow.innerHTML = originalHTML;
+            alert('Error: ' + (result.error || 'Unknown error'));
+          }
+        })
+        .withFailureHandler(function(err) {
+          assignRow.innerHTML = originalHTML;
+          alert('Error crediting report: ' + err.message);
+        })
+        .creditUncreditedReport(JSON.stringify(assignmentData));
+    }
+
+    function assignUncreditedJob(index, jobNumber) {
+      var foremanSelect = document.getElementById('uncreditedForeman_' + index);
+      var foreman = foremanSelect.value;
+
+      if (!foreman) {
+        alert('Please select a foreman to assign this job to.');
+        return;
+      }
+
+      // Save this as a custom mapping
+      var mapping = {};
+      mapping[jobNumber] = foreman;
+
+      google.script.run
+        .withSuccessHandler(function() {
+          // Update UI to show success
+          var jobDiv = document.getElementById('uncreditedJob_' + index);
+          jobDiv.classList.add('assigned');
+          jobDiv.querySelector('.assign-row').innerHTML = '<span style="color:#155724;font-size:11px;">✅ Assigned to ' + foreman + ' - Run "Process Safety Emails" again to credit</span>';
+
+          // Also add to the job config table for visibility
+          addMappingToTable(foreman, jobNumber);
+        })
+        .withFailureHandler(function(err) {
+          alert('Error saving mapping: ' + err.message);
+        })
+        .saveCustomJobForemanMappings(JSON.stringify(mapping));
+    }
+
+    function addMappingToTable(foreman, jobNumber) {
+      // Find if foreman already exists in table, add job to their row
+      var found = false;
+      for (var i = 0; i < jobMappings.length; i++) {
+        if (jobMappings[i].foreman === foreman) {
+          // Add job to first empty slot
+          if (!jobMappings[i].jobs[0]) jobMappings[i].jobs[0] = jobNumber;
+          else if (!jobMappings[i].jobs[1]) jobMappings[i].jobs[1] = jobNumber;
+          else if (!jobMappings[i].jobs[2]) jobMappings[i].jobs[2] = jobNumber;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        // Add new row
+        jobMappings.push({ foreman: foreman, jobs: [jobNumber, '', ''], source: 'custom' });
+      }
+      renderJobTable();
+
+      // Expand the config section to show the new mapping
+      var body = document.getElementById('configBody');
+      if (!body.classList.contains('expanded')) {
+        body.classList.add('expanded');
+        document.getElementById('toggleIcon').textContent = '▲';
+      }
+    }
+
+    // ==========================================
+    // Saved Mappings Modal Functions
+    // ==========================================
+
+    function viewSavedMappings() {
+      var listDiv = document.getElementById('savedMappingsList');
+      listDiv.innerHTML = '<div style="text-align:center;color:#666;padding:20px;">Loading...</div>';
+      document.getElementById('savedMappingsModal').classList.add('show');
+
+      google.script.run
+        .withSuccessHandler(function(mappings) {
+          renderSavedMappings(mappings);
+        })
+        .withFailureHandler(function(err) {
+          listDiv.innerHTML = '<div style="color:#dc3545;padding:10px;">Error loading mappings: ' + err.message + '</div>';
+        })
+        .getCustomJobForemanMappings();
+    }
+
+    function renderSavedMappings(mappings) {
+      var listDiv = document.getElementById('savedMappingsList');
+      var keys = Object.keys(mappings || {});
+
+      if (keys.length === 0) {
+        listDiv.innerHTML = '<div style="text-align:center;color:#999;padding:20px;background:#f8f9fa;border-radius:4px;">No custom mappings saved yet.<br><br>Custom mappings are created when you assign uncredited job numbers to a foreman.</div>';
+        return;
+      }
+
+      var html = '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
+      html += '<tr style="background:#e9ecef;"><th style="padding:8px;text-align:left;">Job Number</th><th style="padding:8px;text-align:left;">→ Foreman</th><th style="padding:8px;width:60px;">Action</th></tr>';
+
+      for (var i = 0; i < keys.length; i++) {
+        var job = keys[i];
+        var foreman = mappings[job];
+        html += '<tr style="border-bottom:1px solid #ddd;">';
+        html += '<td style="padding:8px;"><strong style="color:#dc3545;">' + job + '</strong></td>';
+        html += '<td style="padding:8px;">' + foreman + '</td>';
+        html += '<td style="padding:8px;"><button onclick="removeMapping(\'' + job + '\')" style="background:#dc3545;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:10px;">🗑️ Remove</button></td>';
+        html += '</tr>';
+      }
+
+      html += '</table>';
+      html += '<div style="margin-top:10px;font-size:11px;color:#666;background:#e8f4fd;padding:8px;border-radius:4px;">💡 <strong>' + keys.length + '</strong> mapping(s) saved. These will be used to automatically credit reports from these job numbers to the foreman\'s primary crew.</div>';
+
+      listDiv.innerHTML = html;
+    }
+
+    function removeMapping(jobNumber) {
+      if (!confirm('Remove mapping for ' + jobNumber + '?')) return;
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            viewSavedMappings(); // Refresh the list
+          } else {
+            alert('Error: ' + (result.error || 'Unknown error'));
+          }
+        })
+        .withFailureHandler(function(err) {
+          alert('Error removing mapping: ' + err.message);
+        })
+        .removeCustomJobForemanMapping(jobNumber);
+    }
+
+    function clearAllMappings() {
+      if (!confirm('Are you sure you want to clear ALL custom job mappings?\n\nThis cannot be undone.')) return;
+
+      google.script.run
+        .withSuccessHandler(function() {
+          viewSavedMappings(); // Refresh to show empty state
+          alert('All custom mappings cleared.');
+        })
+        .withFailureHandler(function(err) {
+          alert('Error clearing mappings: ' + err.message);
+        })
+        .clearCustomJobForemanMappings();
+    }
+
+    function closeSavedMappings() {
+      document.getElementById('savedMappingsModal').classList.remove('show');
+    }
+
+    // ===== PDF Preview Functions =====
+    function previewPdf(emailId, reportType, jobNumber) {
+      // Show the modal with loading state
+      var modal = document.getElementById('pdfPreviewModal');
+      var title = document.getElementById('pdfPreviewTitle');
+      var content = document.getElementById('pdfPreviewContent');
+
+      title.textContent = '📄 PDF Preview - ' + reportType + ' (Job: ' + jobNumber + ')';
+      content.innerHTML = '<div style="text-align:center;padding:30px;color:#666;">' +
+        '<div style="font-size:32px;margin-bottom:10px;">⏳</div>' +
+        '<div>Loading PDF content...</div>' +
+        '<div style="font-size:11px;margin-top:10px;color:#999;">This may take 5-10 seconds for PDF extraction.</div>' +
+        '</div>';
+
+      modal.classList.add('show');
+
+      // Call the server to get PDF preview
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result && result.success) {
+            // Format the preview text with some highlighting
+            var previewHtml = escapeHtml(result.pdfText);
+
+            // Highlight important fields for JHAs
+            previewHtml = previewHtml.replace(/(Foreman|Crew Lead|Supervisor)[\s:]+([^\n]+)/gi, '<span style="background:#fff3cd;padding:1px 3px;">$1: <strong>$2</strong></span>');
+            previewHtml = previewHtml.replace(/(Job Number|Job #|Job)[\s:]+(\d{3}-\d{2}[^\n]*)/gi, '<span style="background:#cce5ff;padding:1px 3px;">$1: <strong>$2</strong></span>');
+            previewHtml = previewHtml.replace(/(Date Completed|Work Date|Date)[\s:]+(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/gi, '<span style="background:#d4edda;padding:1px 3px;">$1: <strong>$2</strong></span>');
+            previewHtml = previewHtml.replace(/(Location|Site|Address)[\s:]+([^\n]+)/gi, '<span style="background:#e2e3e5;padding:1px 3px;">$1: <strong>$2</strong></span>');
+
+            content.innerHTML = previewHtml;
+          } else {
+            content.innerHTML = '<div style="color:#dc3545;padding:20px;text-align:center;">' +
+              '<div style="font-size:32px;margin-bottom:10px;">❌</div>' +
+              '<div><strong>Error loading PDF</strong></div>' +
+              '<div style="font-size:12px;margin-top:10px;">' + (result && result.error ? escapeHtml(result.error) : 'Unknown error') + '</div>' +
+              '</div>';
+          }
+        })
+        .withFailureHandler(function(err) {
+          content.innerHTML = '<div style="color:#dc3545;padding:20px;text-align:center;">' +
+            '<div style="font-size:32px;margin-bottom:10px;">❌</div>' +
+            '<div><strong>Error loading PDF</strong></div>' +
+            '<div style="font-size:12px;margin-top:10px;">' + escapeHtml(err.message) + '</div>' +
+            '</div>';
+        })
+        .getEmailPdfPreview(emailId);
+    }
+
+    function closePdfPreview() {
+      document.getElementById('pdfPreviewModal').classList.remove('show');
+    }
+
+    // Helper to escape HTML for display
+    function escapeHtml(text) {
+      if (!text) return '';
+      var div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>
+

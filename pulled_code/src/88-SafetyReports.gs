@@ -8751,7 +8751,13 @@ function getActiveCrewsFromJobTracking() {
       var statusLower = status ? status.toString().toLowerCase().trim() : '';
 
       if (statusLower === 'active') {
-        if (jobNum) {
+        var startDateObj = startDate ? new Date(startDate) : null;
+        if (startDateObj) {
+          startDateObj.setHours(0, 0, 0, 0);
+        }
+        var hasStarted = !startDateObj || startDateObj <= today;
+
+        if (hasStarted && jobNum) {
           var jobNumStr = jobNum.toString().trim();
           var foremanStr = foreman ? foreman.toString().trim() : '';
           activeCrews.push({
@@ -8760,6 +8766,8 @@ function getActiveCrewsFromJobTracking() {
           });
           // Log each active crew found
           Logger.log('getActiveCrewsFromJobTracking: Active crew - ' + jobNumStr + ' (' + foremanStr + ')');
+        } else if (jobNum && !hasStarted) {
+          Logger.log('getActiveCrewsFromJobTracking: Job ' + jobNum + ' is Active but hasnt started yet (start: ' + startDate + ')');
         }
       }
     }

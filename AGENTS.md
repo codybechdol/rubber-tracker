@@ -21,30 +21,30 @@ Google Apps Script loads files **alphabetically**. Numbered prefixes control loa
 22-EmployeeValidation.gs → Job Tracking functions, Employee validation, training sync (~3.2k lines)
 22-LocationSync.gs → Inventory location sync with Employees (Gloves, Sleeves, Blankets, HV Testers, Phasing Sets, AED) (~190 lines)
 30-SwapGeneration.gs → Swap report generation (~1.4k lines)
-31-SwapHandlers.gs → Swap stage handling (Stage 1/2/3 workflows) (~440 lines)
-32-SwapPreservation.gs → Swap checkbox/data preservation between regenerations (~125 lines)
-40-Reclaims.gs   → Reclaims logic and pick list generation (~930 lines)
+31-SwapHandlers.gs → Swap stage handling (Stage 1/2/3 workflows) (~515 lines)
+32-SwapPreservation.gs → Swap checkbox/data preservation between regenerations (~150 lines)
+40-Reclaims.gs   → Reclaims logic and pick list generation (~1.1k lines)
 50-History.gs    → Item history (Gloves/Sleeves History) (~240 lines)
 51-EmployeeHistory.gs → Employee lifecycle, restore deleted employees (~1.5k lines)
-60-PurchaseNeeds.gs → Purchase Needs 3-tier priority report (High/Medium/Low with class grouping) (~710 lines)
-61-InventoryReports.gs → Inventory Reports with charts (~2k lines)
-62-PurchaseOrders.gs → PO generation, vendor catalog and management (~780 lines)
+60-PurchaseNeeds.gs → Purchase Needs 3-tier priority report (High/Medium/Low with class grouping) (~830 lines)
+61-InventoryReports.gs → Inventory Reports with charts (~2.3k lines)
+62-PurchaseOrders.gs → PO generation, vendor catalog and management (~920 lines)
 70-ToDoList.gs   → archived (To Do List functionality now in Code.gs) (~50 lines)
 75-Scheduling.gs → Crew visit scheduling, training calendar, attendee management (~3.6k lines)
 76-SmartScheduling.gs → Task collection (incl. equipment swaps), getDriveTimeMap() (~2.5k lines)
 76-EmployeeClassifications.gs → Job classification dropdowns (~130 lines)
-80-EmailReports.gs → Weekly HTML email reports (~1.2k lines)
+80-EmailReports.gs → Weekly HTML email reports (~1.5k lines)
 85-DataImport.gs → Crew Import, Job Tracking sync, new hire/rehire, job activation scheduling, fiscal year transition (~3.5k lines)
 86-TimeTracking.gs → Daily Accomplishments (~1.1k lines)
 87-RoutePlanner.gs → Trip Planner (~2.5k lines)
 88-SafetyReports.gs → Gmail processing, Safety Compliance (~16.6k lines)
-90-Backup.gs     → Google Drive backup snapshot (~88 lines)
+90-Backup.gs     → Google Drive backup snapshot (~110 lines)
 95-BuildSheets.gs → Sheet creation/setup utilities (~80 lines)
-95-DiagnosticTools.gs → Pick list diagnostics (~540 lines)
-98-LegacyArchive.gs → Archived legacy functions (DO NOT USE) (~525 lines)
+95-DiagnosticTools.gs → Pick list diagnostics (~630 lines)
+98-LegacyArchive.gs → Archived legacy functions (DO NOT USE) (~615 lines)
 99-MenuFix.gs    → Full menu backup (mirrors Code.gs onOpen()), menu fix/reset (~283 lines)
 Code.gs          → loads LAST, contains ALL working implementations (~24k lines)
-TestRunner.gs    → Basic integration tests, run via Apps Script editor (~176 lines)
+TestRunner.gs    → Basic integration tests, run via Apps Script editor (~190 lines)
 ```
 
 **Key Rule:** When functions appear in multiple files, **Code.gs always wins** (loads last).
@@ -113,15 +113,15 @@ function showMyDialog() {
 | `87-RoutePlanner.gs` | Trip planning and route optimization (~2.5k lines) |
 | `88-SafetyReports.gs` | Gmail processing, Safety Compliance tracking (~16.6k lines) |
 | `99-MenuFix.gs` | Full menu backup (run `forceCreateMenu` if menu missing) (~283 lines) |
-| `TestRunner.gs` | Integration tests - run `runAllTests()` in Apps Script editor (~176 lines) |
+| `TestRunner.gs` | Integration tests - run `runAllTests()` in Apps Script editor (~190 lines) |
 | `ToDoSchedule.html` | Task List dialog (~6.5k lines) |
 | `TripPlanner.html` | Trip Planner / Scheduler (primary scheduling interface, ~5k lines) |
 | `CrewImport.html` | Excel crew import with SheetJS (~7.5k lines) |
 | `QuickActions.html` | Monday workflow sidebar (~375 lines) |
 | `ProcessSafetyEmailsDialog.html` | Safety email processing dialog (~1.5k lines) |
 | `ToDoConfig.html` | Schedule configuration dialog (~2.3k lines) |
-| `PurchaseOrderDialog.html` | Purchase order creation dialog (~870 lines) |
-| `VendorConfig.html` | Vendor management with unified catalog (~385 lines) |
+| `PurchaseOrderDialog.html` | Purchase order creation dialog (~940 lines) |
+| `VendorConfig.html` | Vendor management with unified catalog (~450 lines) |
 | `ComplianceConfig.html` | Safety Compliance configuration (~200 lines) |
 | `AssignCrewLeads.html` | Crew lead assignment dialog (~540 lines) |
 | `LookupDialog.html` | Employee & item lookup dialog, all assignments view (~520 lines) |
@@ -302,6 +302,17 @@ Employees with a **future Hire Date** (col K on Employees sheet) are "pending ne
    - Function not found (check if in Code.gs, not module file)
    - Gmail permissions revoked → Run `authorizeGmailAccess()` from menu: 🛡️ Process Safety Emails → 🔧 Utilities → 🔑 Authorize Gmail Access
 
+**⚠️ CrewImport.html `specialCircumstances` Array Pattern:**
+`removeSpecialCard()` sets entries to `null` (not splice) to preserve indices for DOM card IDs. **All loops iterating `specialCircumstances` MUST check `if (!spec) continue;`** to skip nulled entries.
+
+**⚠️ CrewImport.html Grid Layout Parsing Rules:**
+The Excel crew structure uses a grid layout with crew "cards" arranged in columns A-D. Key parsing rules:
+- **Crew header boundaries are cross-column** — a new row of crew headers marks a visual band break for ALL columns (correct for grid layout)
+- **Special section boundaries are column-specific** — `findNextHeaderRow()` only uses special section headers from the SAME column as the crew being parsed. A "Weeds Gas" header in column C should NOT truncate employee lists in columns A or B.
+- **`isEmployeeName()` rejects placeholders** — cells like "NEW HIRE JL" (no actual name) and "Need Guy Here With CDL" return `false`
+- **Schedule annotations stripped** — `parseEmployeeName()` strips "Crew to X XX's..." and standalone schedule patterns (e.g., "5 10's this wk") before role detection. Without this, "Waco Worts F Crew to 5 10's this wk" would fail the Foreman check since "F" must be at end of string.
+- **Trailing annotations stripped** — `parseEmployeeName()` strips trailing words like Hot, Cold, Weeds?, etc. before role detection
+
 ## Inventory Location Sync
 `syncInventoryLocations()` in `22-LocationSync.gs` keeps all equipment sheet locations in sync with the Employees sheet:
 - Called automatically during `generateAllReports()`
@@ -325,7 +336,7 @@ Key backend functions:
 - `getStoredAllAssignments()` - Retrieves stored data for client
 
 ## Menu System
-Menu defined in `Code.gs` `onOpen()` function. Organized as an 8-step Monday workflow under **Glove Manager**:
+Menu defined in `Code.gs` `onOpen()` function. Organized as a 6-step Monday workflow under **Glove Manager**:
 
 ```
 Glove Manager
@@ -364,11 +375,7 @@ Glove Manager
 │   ├── 📚 Training →                  (Setup config/tracking, sync crews, compliance report)
 │   ├── 👷 Crew Visit →                (Setup/refresh crew visit config)
 │   └── 🔧 Utilities →                 (Monthly schedule, refresh calendar, migrate manual tasks)
-├── 🛒 Create Purchase Order           ← STEP 7 (Quick Actions sidebar)
-│   ├── 📝 Create Purchase Order       (in Maintenance → 🛒 Purchase Orders menu)
-│   ├── 📋 Order History
-│   └── ⚙️ Manage Vendors
-├── 💾 Save & Backup                   ← STEP 8
+├── 💾 Save & Backup                   ← STEP 6
 │   ├── 💾 Save Current State to History
 │   ├── 💾 Create Backup Snapshot
 │   ├── 📂 View Backup Folder

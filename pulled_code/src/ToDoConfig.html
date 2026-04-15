@@ -1,0 +1,2299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>To Do Config</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  <style>
+    body { font-family: 'Google Sans', Arial, sans-serif; background: #f8f9fa; margin: 0; padding: 20px; }
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .header h1 { color: #1a73e8; font-size: 24px; margin: 0; }
+    .btn-primary { background: #1a73e8; border-color: #1a73e8; }
+    .btn-primary:hover { background: #1557b0; border-color: #1557b0; }
+    .card { border: none; box-shadow: 0 1px 3px rgba(0,0,0,0.12); margin-bottom: 16px; }
+    .card-header { background: #1a73e8; color: white; font-weight: 500; }
+    .config-section { padding: 20px; background: white; border-radius: 8px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .config-section h3 { color: #202124; font-size: 16px; margin-bottom: 16px; border-bottom: 1px solid #e0e0e0; padding-bottom: 8px; }
+    .form-label { font-weight: 500; color: #5f6368; font-size: 13px; }
+    .form-text { font-size: 12px; }
+    .location-list { max-height: 300px; overflow-y: auto; }
+    .location-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border: 1px solid #e0e0e0; border-radius: 4px; margin-bottom: 8px; }
+    .location-item:hover { background: #f1f3f4; }
+    .priority-config { display: flex; gap: 16px; }
+    .priority-card { flex: 1; padding: 16px; border-radius: 8px; text-align: center; }
+    .priority-high { background: #fce8e6; border: 2px solid #ea4335; }
+    .priority-medium { background: #fef7e0; border: 2px solid #fbbc04; }
+    .priority-low { background: #e6f4ea; border: 2px solid #34a853; }
+    .time-slot { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+    .nav-tabs .nav-link { color: #5f6368; }
+    .nav-tabs .nav-link.active { color: #1a73e8; border-color: #1a73e8; border-bottom-color: white; }
+    .loading { text-align: center; padding: 40px; }
+    .cert-table { font-size: 12px; margin-bottom: 0; }
+    .cert-table th { font-size: 11px; padding: 4px 8px !important; }
+    .cert-table td { padding: 4px 8px !important; }
+    .cert-checkboxes-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .cert-overview-card { border: 1px solid #e0e0e0; border-radius: 8px; padding: 10px; margin-bottom: 6px; transition: all 0.2s; }
+    .cert-overview-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+    .cert-overview-card h6 { margin: 0 0 6px 0; font-size: 13px; font-weight: 600; }
+    .cert-overview-stats { display: flex; gap: 6px; flex-wrap: wrap; }
+    .cert-stat { font-size: 11px; padding: 2px 6px; border-radius: 4px; cursor: pointer; transition: all 0.2s; }
+    .cert-stat:hover { transform: scale(1.05); box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+    .cert-stat-expired { background: #fce8e6; color: #c5221f; }
+    .cert-stat-critical { background: #fef7e0; color: #b06000; }
+    .cert-stat-warning { background: #fff3cd; color: #856404; }
+    .cert-stat-ok { background: #e6f4ea; color: #137333; }
+    .cert-stat-total { background: #e8eaed; color: #5f6368; }
+    .cert-employee-list { max-height: 400px; overflow-y: auto; }
+    .cert-employee-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid #e0e0e0; }
+    .cert-employee-item:last-child { border-bottom: none; }
+    .cert-employee-item:hover { background: #f5f5f5; }
+    .cert-employee-name { font-weight: 500; }
+    .cert-employee-location { font-size: 12px; color: #5f6368; }
+    .cert-employee-date { font-size: 12px; }
+    .employee-cert-card { border: 1px solid #e0e0e0; border-radius: 6px; margin-bottom: 8px; overflow: hidden; }
+    .employee-cert-header { padding: 8px 12px; background: #f8f9fa; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+    .employee-cert-header:hover { background: #e8eaed; }
+    .employee-cert-body { padding: 8px 12px; display: none; }
+    .employee-cert-body.show { display: block; }
+    .cert-badge { font-size: 10px; padding: 2px 6px; border-radius: 10px; margin-left: 6px; }
+    .cert-badge-expired { background: #fce8e6; color: #c5221f; }
+    .cert-badge-critical { background: #fef7e0; color: #b06000; }
+    .cert-badge-ok { background: #e6f4ea; color: #137333; }
+    .date-input-small { border: 1px solid #dadce0; border-radius: 4px; padding: 2px 4px; font-size: 11px; width: 110px; }
+    .date-input-small:focus { outline: none; border-color: #1a73e8; }
+    .date-input-small.changed { background: #fff3cd; border-color: #ffc107; }
+    .unsaved-indicator { display: none; color: #dc3545; font-size: 12px; margin-left: 8px; }
+    .unsaved-indicator.show { display: inline; }
+    .crew-visit-table { font-size: 12px; }
+    .crew-visit-table th { font-size: 11px; background: #f8f9fa; position: sticky; top: 0; z-index: 1; }
+    .crew-visit-table td { vertical-align: middle; padding: 6px 8px !important; }
+    .crew-visit-table input, .crew-visit-table select { font-size: 11px; padding: 2px 6px; }
+    .crew-visit-table .form-control-sm { height: 28px; }
+    .crew-visit-table .form-select-sm { height: 28px; }
+    .crew-input { width: 70px; }
+    .crew-input-date { width: 120px; }
+    .training-config-table { font-size: 12px; }
+    .training-config-table th { font-size: 11px; background: #e8f5e9; position: sticky; top: 0; z-index: 1; }
+    .training-config-table td { vertical-align: middle; padding: 6px 8px !important; }
+    .training-config-table input, .training-config-table select { font-size: 11px; padding: 2px 6px; }
+    .training-config-table .form-control-sm { height: 28px; }
+    .training-input-topic { width: 100%; min-width: 200px; }
+    .training-input-hours { width: 60px; }
+    .training-input-status { width: 70px; }
+    .completion-bar { height: 6px; background: #e0e0e0; border-radius: 3px; overflow: hidden; }
+    .completion-bar-fill { height: 100%; background: #34a853; transition: width 0.3s; }
+    .training-tracking-table { font-size: 11px; }
+    .training-tracking-table th { font-size: 10px; background: #fff3e0; position: sticky; top: 0; z-index: 1; white-space: nowrap; }
+    .training-tracking-table td { vertical-align: middle; padding: 4px 6px !important; }
+    .training-tracking-table .form-control-sm, .training-tracking-table .form-select-sm { font-size: 10px; padding: 1px 4px; height: 24px; }
+    .status-pending { background: #fff3e0; }
+    .status-complete { background: #e8f5e9; }
+    .status-overdue { background: #ffebee; }
+    .status-na { background: #f5f5f5; }
+    .training-tracking-table input[type="number"] { width: 50px; }
+    .training-tracking-table input[type="date"] { width: 110px; }
+    .attendees-cell { cursor: help; position: relative; }
+    .attendees-cell:hover { background: #e3f2fd; }
+    .crew-tooltip {
+      position: absolute;
+      background: #333;
+      color: white;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 11px;
+      z-index: 1000;
+      max-width: 250px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      white-space: normal;
+      line-height: 1.4;
+    }
+    .crew-tooltip::before {
+      content: '';
+      position: absolute;
+      top: -6px;
+      left: 20px;
+      border-width: 0 6px 6px 6px;
+      border-style: solid;
+      border-color: transparent transparent #333 transparent;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1><i class="bi bi-gear"></i> To Do Config <span class="unsaved-indicator" id="unsavedIndicator">● Unsaved changes</span></h1>
+    <div>
+      <button class="btn btn-success btn-sm me-2" onclick="saveConfig()">
+        <i class="bi bi-check-lg"></i> Save Changes
+      </button>
+      <button class="btn btn-primary btn-sm" onclick="closeDialog()">
+        <i class="bi bi-x-lg"></i> Close
+      </button>
+    </div>
+  </div>
+
+  <ul class="nav nav-tabs mb-3" id="configTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="locations-tab" data-bs-toggle="tab" data-bs-target="#locations" type="button">
+        <i class="bi bi-geo-alt"></i> Locations
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings" type="button">
+        <i class="bi bi-gear"></i> Settings
+      </button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="certs-tab" data-bs-toggle="tab" data-bs-target="#certs" type="button">
+        <i class="bi bi-file-earmark-medical"></i> Expiring Certs
+      </button>
+    </li>
+  </ul>
+
+  <div class="tab-content" id="configTabContent">
+    <!-- Locations Tab -->
+    <div class="tab-pane fade show active" id="locations" role="tabpanel">
+      <div class="config-section">
+        <h3><i class="bi bi-geo-alt"></i> Location Management</h3>
+        <p class="text-muted mb-3">Configure locations for task scheduling and travel time calculations.</p>
+
+        <div class="row mb-3">
+          <div class="col-md-8">
+            <input type="text" id="newLocation" class="form-control" placeholder="Enter new location name">
+          </div>
+          <div class="col-md-4">
+            <button class="btn btn-primary w-100" onclick="addLocation()">
+              <i class="bi bi-plus-lg"></i> Add Location
+            </button>
+          </div>
+        </div>
+
+        <div class="location-list" id="locationList">
+          <div class="loading">
+            <div class="spinner-border spinner-border-sm text-primary"></div>
+            Loading locations...
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings Tab (merged Schedule Settings + Task Sources) -->
+    <div class="tab-pane fade" id="settings" role="tabpanel">
+      <div class="config-section">
+        <h3><i class="bi bi-clock"></i> Schedule Settings</h3>
+        <p class="text-muted mb-3">Configure working hours and scheduling preferences.</p>
+
+        <div class="row">
+          <div class="col-md-6">
+            <div class="mb-3">
+              <label class="form-label">Work Start Time</label>
+              <input type="time" class="form-control" id="workStartTime" value="08:00">
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Work End Time</label>
+              <input type="time" class="form-control" id="workEndTime" value="17:00">
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="mb-3">
+              <label class="form-label">Default Task Duration (hours)</label>
+              <input type="number" class="form-control" id="defaultDuration" value="1" step="0.5" min="0.5">
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Buffer Time Between Tasks (minutes)</label>
+              <input type="number" class="form-control" id="bufferTime" value="15" step="5" min="0">
+            </div>
+          </div>
+        </div>
+
+        <h5 class="mt-4 mb-3">Working Days</h5>
+        <div class="btn-group" role="group">
+          <input type="checkbox" class="btn-check" id="day-sun" autocomplete="off">
+          <label class="btn btn-outline-primary" for="day-sun">Sun</label>
+          <input type="checkbox" class="btn-check" id="day-mon" autocomplete="off" checked>
+          <label class="btn btn-outline-primary" for="day-mon">Mon</label>
+          <input type="checkbox" class="btn-check" id="day-tue" autocomplete="off" checked>
+          <label class="btn btn-outline-primary" for="day-tue">Tue</label>
+          <input type="checkbox" class="btn-check" id="day-wed" autocomplete="off" checked>
+          <label class="btn btn-outline-primary" for="day-wed">Wed</label>
+          <input type="checkbox" class="btn-check" id="day-thu" autocomplete="off" checked>
+          <label class="btn btn-outline-primary" for="day-thu">Thu</label>
+          <input type="checkbox" class="btn-check" id="day-fri" autocomplete="off" checked>
+          <label class="btn btn-outline-primary" for="day-fri">Fri</label>
+          <input type="checkbox" class="btn-check" id="day-sat" autocomplete="off">
+          <label class="btn btn-outline-primary" for="day-sat">Sat</label>
+        </div>
+      </div>
+
+      <!-- Priority Settings (merged from old Priorities tab) -->
+      <div class="config-section">
+        <h3><i class="bi bi-flag"></i> Priority Thresholds</h3>
+        <p class="text-muted mb-3">Configure how tasks are prioritized based on due date.</p>
+
+        <div class="priority-config">
+          <div class="priority-card priority-high">
+            <h5>🔴 High Priority</h5>
+            <div class="form-group mt-3">
+              <label class="form-label">Max Days Before Due</label>
+              <input type="number" class="form-control form-control-sm" id="highPriorityDays" value="3">
+            </div>
+          </div>
+          <div class="priority-card priority-medium">
+            <h5>🟡 Medium Priority</h5>
+            <div class="form-group mt-3">
+              <label class="form-label">Max Days Before Due</label>
+              <input type="number" class="form-control form-control-sm" id="mediumPriorityDays" value="7">
+            </div>
+          </div>
+          <div class="priority-card priority-low">
+            <h5>🟢 Low Priority</h5>
+            <div class="form-group mt-3">
+              <label class="form-label">Max Days Before Due</label>
+              <input type="number" class="form-control form-control-sm" id="lowPriorityDays" value="14">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Crew Visit Config -->
+      <div class="config-section">
+        <h3><i class="bi bi-truck"></i> Crew Visit Schedule</h3>
+        <p class="text-muted mb-3">Configure visit frequency, drive times, and priorities for each crew.</p>
+
+        <div class="mb-3">
+          <button class="btn btn-outline-primary btn-sm me-2" onclick="refreshCrewVisitConfig()">
+            <i class="bi bi-arrow-clockwise"></i> Refresh from Employees
+          </button>
+          <button class="btn btn-success btn-sm" onclick="saveCrewVisitConfig()">
+            <i class="bi bi-check-lg"></i> Save Changes
+          </button>
+        </div>
+
+        <div id="crewVisitContainer" style="max-height: 400px; overflow-y: auto;">
+          <div class="text-center py-3">
+            <div class="spinner-border spinner-border-sm text-primary"></div>
+            <p class="text-muted small mt-2">Loading crew visit config...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Task Sources Section (merged from Task Sources tab) -->
+      <div class="config-section">
+        <h3><i class="bi bi-mortarboard"></i> 🎯 Training: Select Crews</h3>
+        <p class="text-muted mb-3">Select which crews should have training tasks in the Task List.</p>
+
+        <div class="mb-3">
+          <button class="btn btn-outline-primary btn-sm me-2" onclick="selectAllCrews()">
+            <i class="bi bi-check-all"></i> Select All
+          </button>
+          <button class="btn btn-outline-secondary btn-sm" onclick="deselectAllCrews()">
+            <i class="bi bi-x-lg"></i> Deselect All
+          </button>
+        </div>
+
+        <div id="crewCheckboxes" class="row">
+          <div class="col-12 text-center">
+            <div class="spinner-border spinner-border-sm text-primary"></div>
+            <p class="text-muted small mt-2">Loading crews from Employees sheet...</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="config-section">
+        <h3><i class="bi bi-file-earmark-medical"></i> 🎯 Certifications: Select Types</h3>
+        <p class="text-muted mb-3">Select which certification types should generate tasks in the Task List.</p>
+        <div id="certTypeCheckboxes" class="row">
+          <div class="col-12 text-center">
+            <div class="spinner-border spinner-border-sm text-primary"></div>
+            <p class="text-muted small mt-2">Loading certification types...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Excluded Job Prefixes Section -->
+      <div class="config-section">
+        <h3><i class="bi bi-person-x"></i> 🚫 Exclude Job Prefixes</h3>
+        <p class="text-muted mb-3">Employees with job numbers starting with these prefixes are excluded from <strong>Crew Visit Config</strong> and <strong>Training tasks</strong>. They will still appear in Glove/Sleeve Swaps and Expiring Certs.</p>
+
+        <div class="row mb-3">
+          <div class="col-md-4">
+            <div class="input-group">
+              <input type="text" id="newJobPrefix" class="form-control form-control-sm" placeholder="e.g., 005" maxlength="3">
+              <button class="btn btn-outline-danger btn-sm" onclick="addExcludedPrefix()">
+                <i class="bi bi-plus-lg"></i> Add
+              </button>
+            </div>
+          </div>
+          <div class="col-md-8">
+            <div id="excludedPrefixesList" class="d-flex flex-wrap gap-2">
+              <span class="text-muted small">Loading...</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="alert alert-secondary small">
+          <i class="bi bi-info-circle"></i> <strong>Common prefixes:</strong>
+          <ul class="mb-0 mt-1">
+            <li><strong>002</strong> - Lost/Destroyed/In Testing equipment (not real employees)</li>
+            <li><strong>005</strong> - Light Duty employees (office-based, no field visits)</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="config-section">
+        <h3><i class="bi bi-info-circle"></i> How Task Sources Work</h3>
+        <div class="alert alert-info">
+          <i class="bi bi-lightbulb"></i> <strong>Your Task List pulls from these sources:</strong>
+          <ul class="mb-0 mt-2">
+            <li><strong>Glove/Sleeve Swaps</strong> - Auto-detected from swap sheets (always included)</li>
+            <li><strong>Training Tasks</strong> - Only crews checked above appear in Task List</li>
+            <li><strong>Expiring Certs</strong> - Only cert types checked above appear in Task List</li>
+            <li><strong>Manual Tasks</strong> - Tasks you add manually (always included)</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="config-section">
+        <h3><i class="bi bi-people"></i> Crew Summary</h3>
+        <p class="text-muted mb-3">Overview of crews and their employee counts.</p>
+        <div id="crewSummary">
+          <div class="text-center py-3">
+            <div class="spinner-border spinner-border-sm text-primary"></div>
+            <p class="text-muted small mt-2">Loading crew data...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Training Completion Summary -->
+      <div class="config-section">
+        <h3><i class="bi bi-graph-up-arrow"></i> 📊 Training Completion Status</h3>
+        <p class="text-muted mb-3">Overall training completion progress for 2026.</p>
+
+        <div id="trainingCompletionSummary" class="row g-3 mb-3">
+          <div class="col-md-6">
+            <div class="p-3 rounded" style="background: #e8f5e9; border: 2px solid #4caf50;">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <strong class="text-success" id="currentMonthLabel">January</strong>
+                <span class="badge bg-success" id="currentMonthPercent">0%</span>
+              </div>
+              <div class="progress" style="height: 20px;">
+                <div class="progress-bar bg-success" id="currentMonthProgressBar" role="progressbar" style="width: 0%">0%</div>
+              </div>
+              <small class="text-muted mt-1 d-block"><span id="currentMonthComplete">0</span> of <span id="currentMonthTotal">0</span> crews completed</small>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="p-3 rounded" style="background: #e3f2fd; border: 2px solid #2196f3;">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <strong class="text-primary">Year-to-Date Progress</strong>
+                <span class="badge bg-primary" id="trainingOverallPercent">0%</span>
+              </div>
+              <div class="progress" style="height: 20px;">
+                <div class="progress-bar bg-primary" id="trainingProgressBar" role="progressbar" style="width: 0%">0%</div>
+              </div>
+              <small class="text-muted mt-1 d-block"><span id="yearCompleteCount">0</span> of <span id="yearTotalCount">0</span> total training sessions</small>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Training Config Section -->
+      <div class="config-section">
+        <h3><i class="bi bi-calendar-check"></i> 📅 Training Schedule (2026)</h3>
+        <p class="text-muted mb-3">Edit training topics, duration, and completion status for the year.</p>
+
+        <div class="mb-3">
+          <button class="btn btn-success btn-sm" onclick="saveTrainingConfigData()">
+            <i class="bi bi-check-lg"></i> Save Training Config
+          </button>
+        </div>
+
+        <div id="trainingConfigContainer" style="max-height: 400px; overflow-y: auto;">
+          <div class="text-center py-3">
+            <div class="spinner-border spinner-border-sm text-primary"></div>
+            <p class="text-muted small mt-2">Loading training config...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Training Tracking Section (per-crew completion) -->
+      <div class="config-section">
+        <h3><i class="bi bi-clipboard-check"></i> 📋 Training Tracking (By Crew)</h3>
+        <p class="text-muted mb-3">Track training completion for each crew. Status updates automatically when training is marked complete in To Do Schedule.</p>
+
+        <div class="row mb-3">
+          <div class="col-md-4">
+            <label class="form-label small">Filter by Month</label>
+            <select class="form-select form-select-sm" id="trainingMonthFilter" onchange="filterTrainingTracking()">
+              <option value="">All Months</option>
+              <option value="January">January</option>
+              <option value="February">February</option>
+              <option value="March">March</option>
+              <option value="April">April</option>
+              <option value="May">May</option>
+              <option value="June">June</option>
+              <option value="July">July</option>
+              <option value="August">August</option>
+              <option value="September">September</option>
+              <option value="October">October</option>
+              <option value="November">November</option>
+              <option value="December">December</option>
+            </select>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small">Filter by Status</label>
+            <select class="form-select form-select-sm" id="trainingStatusFilter" onchange="filterTrainingTracking()">
+              <option value="">All Statuses</option>
+              <option value="Pending">Pending</option>
+              <option value="Complete">Complete</option>
+              <option value="Overdue">Overdue</option>
+              <option value="N/A">N/A</option>
+            </select>
+          </div>
+          <div class="col-md-4 d-flex align-items-end">
+            <button class="btn btn-success btn-sm me-2" onclick="saveTrainingTrackingData()">
+              <i class="bi bi-check-lg"></i> Save Changes
+            </button>
+            <button class="btn btn-outline-secondary btn-sm" onclick="loadTrainingTrackingData()">
+              <i class="bi bi-arrow-clockwise"></i> Refresh
+            </button>
+          </div>
+        </div>
+
+        <div id="trainingTrackingContainer" style="max-height: 500px; overflow-y: auto;">
+          <div class="text-center py-3">
+            <div class="spinner-border spinner-border-sm text-primary"></div>
+            <p class="text-muted small mt-2">Loading training tracking data...</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Expiring Certs Tab (view/edit cert dates and status) -->
+    <div class="tab-pane fade" id="certs" role="tabpanel">
+
+      <div class="config-section">
+        <h3><i class="bi bi-bar-chart"></i> 📊 Certification Status Overview</h3>
+        <p class="text-muted mb-3">Status breakdown by certification type.</p>
+        <div id="certStatusOverview">
+          <div class="text-center py-3">
+            <div class="spinner-border spinner-border-sm text-primary"></div>
+            <p class="text-muted small mt-2">Loading status overview...</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="config-section">
+        <h3><i class="bi bi-people"></i> Employee Certification Status</h3>
+        <p class="text-muted mb-3">View and manage certification status by employee. Click to expand/collapse employee details.</p>
+        <div id="employeeCertsContainer">
+          <div class="text-center py-4">
+            <div class="spinner-border text-primary"></div>
+            <p class="text-muted mt-2">Loading employee certifications...</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="config-section">
+        <h3><i class="bi bi-graph-up"></i> Summary Statistics</h3>
+        <div id="certsSummary" class="row g-3">
+          <div class="col-md-4">
+            <div class="text-center p-3 bg-light rounded">
+              <h4 class="mb-1" id="totalCertHolders">-</h4>
+              <small class="text-muted">Total Cert Holders</small>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="text-center p-3 bg-light rounded">
+              <h4 class="mb-1 text-danger" id="priorityCount">-</h4>
+              <small class="text-muted">Priority Items</small>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="text-center p-3 bg-light rounded">
+              <h4 class="mb-1 text-warning" id="expiredCount">-</h4>
+              <small class="text-muted">Expired</small>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cert Employee List Modal -->
+  <div class="modal fade" id="certEmployeeModal" tabindex="-1" aria-labelledby="certEmployeeModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header" id="certEmployeeModalHeader" style="color: white;">
+          <h5 class="modal-title" id="certEmployeeModalLabel">Employees</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div id="certEmployeeList" class="cert-employee-list">
+            <!-- Employee list will be populated here -->
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    var configData = {};
+    var locations = [];
+    var hasUnsavedChanges = false;
+    var certDateChanges = {}; // Track changed cert expiration dates
+    var allEmployeesData = []; // Store employee data for saving
+    var currentCertModalInfo = null; // Store current cert modal info for add to checklist
+
+    function setUnsaved(value) {
+      hasUnsavedChanges = value;
+      var indicator = document.getElementById('unsavedIndicator');
+      if (value) {
+        indicator.classList.add('show');
+      } else {
+        indicator.classList.remove('show');
+      }
+    }
+
+    function closeDialog() {
+      if (hasUnsavedChanges) {
+        if (confirm('You have unsaved changes. Are you sure you want to close without saving?')) {
+          google.script.host.close();
+        }
+      } else {
+        google.script.host.close();
+      }
+    }
+
+    function loadConfig() {
+      google.script.run
+        .withSuccessHandler(function(config) {
+          configData = config || {};
+          applyConfig();
+        })
+        .withFailureHandler(function(error) {
+          showToast('Error loading config: ' + error, 'error');
+        })
+        .getToDoConfig();
+
+      loadLocations();
+      loadExcludedPrefixes();
+    }
+
+    function loadLocations() {
+      google.script.run
+        .withSuccessHandler(function(locs) {
+          locations = locs || ['Home', 'Office', 'Waco', 'Temple', 'Austin'];
+          renderLocations();
+        })
+        .withFailureHandler(function(error) {
+          // Use default locations
+          locations = ['Home', 'Office', 'Waco', 'Temple', 'Austin'];
+          renderLocations();
+        })
+        .getConfiguredLocations();
+    }
+
+    function renderLocations() {
+      var container = document.getElementById('locationList');
+      if (locations.length === 0) {
+        container.innerHTML = '<p class="text-muted">No locations configured. Add your first location above.</p>';
+        return;
+      }
+
+      var html = '';
+      locations.forEach(function(loc, index) {
+        html += '<div class="location-item">';
+        html += '<span><i class="bi bi-geo-alt"></i> ' + loc + '</span>';
+        html += '<button class="btn btn-outline-danger btn-sm" onclick="removeLocation(' + index + ')"><i class="bi bi-trash"></i></button>';
+        html += '</div>';
+      });
+      container.innerHTML = html;
+    }
+
+    function addLocation() {
+      var input = document.getElementById('newLocation');
+      var name = input.value.trim();
+      if (!name) {
+        showToast('Please enter a location name', 'error');
+        return;
+      }
+      if (locations.includes(name)) {
+        showToast('Location already exists', 'error');
+        return;
+      }
+      locations.push(name);
+      input.value = '';
+      renderLocations();
+      showToast('Location added');
+    }
+
+    function removeLocation(index) {
+      if (confirm('Remove this location?')) {
+        locations.splice(index, 1);
+        renderLocations();
+        showToast('Location removed');
+      }
+    }
+
+    function applyConfig() {
+      console.log('Applying config:', configData);
+
+      if (configData.workStartTime) document.getElementById('workStartTime').value = configData.workStartTime;
+      if (configData.workEndTime) document.getElementById('workEndTime').value = configData.workEndTime;
+      if (configData.defaultDuration) document.getElementById('defaultDuration').value = configData.defaultDuration;
+      if (configData.bufferTime) document.getElementById('bufferTime').value = configData.bufferTime;
+      if (configData.highPriorityDays) document.getElementById('highPriorityDays').value = configData.highPriorityDays;
+      if (configData.mediumPriorityDays) document.getElementById('mediumPriorityDays').value = configData.mediumPriorityDays;
+      if (configData.lowPriorityDays) document.getElementById('lowPriorityDays').value = configData.lowPriorityDays;
+
+      // Apply working days - first uncheck all, then check the saved ones
+      var allDays = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+      var savedDays = configData.workingDays || ['mon', 'tue', 'wed', 'thu', 'fri']; // Default to Mon-Fri
+
+      console.log('Applying working days:', savedDays);
+
+      allDays.forEach(function(day) {
+        var checkbox = document.getElementById('day-' + day);
+        if (checkbox) {
+          checkbox.checked = savedDays.indexOf(day) !== -1;
+        }
+      });
+    }
+
+    function saveConfig() {
+      // Get existing config to preserve notification settings (if any)
+      var existingConfig = {};
+
+      // Build config from existing form elements
+      var config = {
+        workStartTime: document.getElementById('workStartTime').value,
+        workEndTime: document.getElementById('workEndTime').value,
+        defaultDuration: parseFloat(document.getElementById('defaultDuration').value) || 1,
+        bufferTime: parseInt(document.getElementById('bufferTime').value) || 15,
+        highPriorityDays: parseInt(document.getElementById('highPriorityDays').value) || 3,
+        mediumPriorityDays: parseInt(document.getElementById('mediumPriorityDays').value) || 7,
+        lowPriorityDays: parseInt(document.getElementById('lowPriorityDays').value) || 14,
+        locations: locations,
+        workingDays: getWorkingDays()
+      };
+
+      console.log('Saving config:', config);
+
+      var errors = [];
+
+      // Save general config
+      google.script.run
+        .withSuccessHandler(function() {
+          console.log('General config saved successfully');
+          // Save Crew Visit Config if there's data
+          if (crewVisitData && crewVisitData.length > 0) {
+            google.script.run
+              .withSuccessHandler(function() {
+                // Continue with training config
+                saveTrainingIfNeeded();
+              })
+              .withFailureHandler(function(error) {
+                errors.push('Crew Visit: ' + error);
+                saveTrainingIfNeeded();
+              })
+              .saveCrewVisitConfig(crewVisitData);
+          } else {
+            saveTrainingIfNeeded();
+          }
+        })
+        .withFailureHandler(function(error) {
+          console.error('Error saving config:', error);
+          showToast('Error saving config: ' + error, 'error');
+        })
+        .saveToDoConfig(config);
+
+      function saveTrainingIfNeeded() {
+        // Save Training Config if there's data
+        if (trainingConfigData && trainingConfigData.length > 0) {
+          google.script.run
+            .withSuccessHandler(function() {
+              // Continue with training tracking
+              saveTrainingTrackingIfNeeded();
+            })
+            .withFailureHandler(function(error) {
+              errors.push('Training Config: ' + error);
+              saveTrainingTrackingIfNeeded();
+            })
+            .saveTrainingConfigData(trainingConfigData);
+        } else {
+          saveTrainingTrackingIfNeeded();
+        }
+      }
+
+      function saveTrainingTrackingIfNeeded() {
+        // Save Training Tracking if there's data
+        if (trainingTrackingData && trainingTrackingData.length > 0) {
+          google.script.run
+            .withSuccessHandler(function() {
+              finalizeSave();
+            })
+            .withFailureHandler(function(error) {
+              errors.push('Training Tracking: ' + error);
+              finalizeSave();
+            })
+            .saveTrainingTrackingData(trainingTrackingData);
+        } else {
+          finalizeSave();
+        }
+      }
+
+      function finalizeSave() {
+        // Handle cert date changes
+        if (Object.keys(certDateChanges).length > 0) {
+          saveCertDateChanges();
+        } else {
+          setUnsaved(false);
+          if (errors.length > 0) {
+            showToast('Saved with warnings: ' + errors.join('; '), 'warning');
+          } else {
+            showToast('All configuration saved successfully!', 'success');
+          }
+        }
+      }
+    }
+
+    function saveCertDateChanges() {
+      var changes = Object.keys(certDateChanges).map(function(key) {
+        return certDateChanges[key];
+      });
+
+      if (changes.length === 0) {
+        setUnsaved(false);
+        showToast('Configuration saved!', 'success');
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          certDateChanges = {};
+          setUnsaved(false);
+          // Remove changed styling from inputs
+          var inputs = document.querySelectorAll('.date-input-small.changed');
+          inputs.forEach(function(input) { input.classList.remove('changed'); });
+          showToast('Saved ' + changes.length + ' cert date change(s) and configuration!', 'success');
+          // Reload to refresh data
+          loadEmployeeCertsData();
+        })
+        .withFailureHandler(function(error) {
+          showToast('Error saving cert dates: ' + error, 'error');
+        })
+        .updateCertExpirationDates(changes);
+    }
+
+    function getWorkingDays() {
+      var days = [];
+      ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].forEach(function(day) {
+        if (document.getElementById('day-' + day).checked) {
+          days.push(day);
+        }
+      });
+      return days;
+    }
+
+    function showToast(message, type) {
+      var toast = document.createElement('div');
+      toast.className = 'alert alert-' + (type === 'error' ? 'danger' : 'success') + ' position-fixed';
+      toast.style.cssText = 'bottom: 20px; right: 20px; z-index: 9999;';
+      toast.textContent = message;
+      document.body.appendChild(toast);
+      setTimeout(function() { toast.remove(); }, 3000);
+    }
+
+    // Load expiring certs config (just the cert type checkboxes for Task Sources tab)
+    function loadExpiringCertsConfig() {
+      console.log('loadExpiringCertsConfig: Starting...');
+
+      var timeoutId = setTimeout(function() {
+        var container = document.getElementById('certTypeCheckboxes');
+        if (container && container.innerHTML.indexOf('Loading') !== -1) {
+          container.innerHTML = '<div class="col-12"><div class="alert alert-warning">Loading is taking longer than expected. <button class="btn btn-sm btn-primary" onclick="loadExpiringCertsConfig()">Retry</button></div></div>';
+        }
+      }, 10000);
+
+      google.script.run
+        .withSuccessHandler(function(config) {
+          clearTimeout(timeoutId);
+          console.log('loadExpiringCertsConfig: SUCCESS');
+          renderCertTypeCheckboxes(config.certTypes, config.selectedCertTypes);
+        })
+        .withFailureHandler(function(error) {
+          clearTimeout(timeoutId);
+          console.error('loadExpiringCertsConfig: ERROR', error);
+          document.getElementById('certTypeCheckboxes').innerHTML = '<div class="col-12"><div class="alert alert-danger">Error loading cert types: ' + error + ' <button class="btn btn-sm btn-primary" onclick="loadExpiringCertsConfig()">Retry</button></div></div>';
+        })
+        .getExpiringCertsConfig();
+    }
+
+    function renderCertTypeCheckboxes(allCertTypes, selectedCertTypes) {
+      var container = document.getElementById('certTypeCheckboxes');
+      var html = '';
+      allCertTypes.forEach(function(cert) {
+        var checked = selectedCertTypes.includes(cert.name) ? 'checked' : '';
+        var label = cert.name + (cert.isNonExpiring ? ' (Non-Expiring)' : '');
+        html += '<div class="col-md-4"><div class="form-check">';
+        html += '<input class="form-check-input" type="checkbox" id="cert-' + cert.name.replace(/[^a-zA-Z0-9]/g, '') + '" value="' + cert.name + '" ' + checked + ' onchange="saveCertTypeSelection()">';
+        html += '<label class="form-check-label" for="cert-' + cert.name.replace(/[^a-zA-Z0-9]/g, '') + '">' + label + '</label>';
+        html += '</div></div>';
+      });
+      container.innerHTML = html;
+    }
+
+    function saveCertTypeSelection() {
+      var selected = [];
+      var checkboxes = document.querySelectorAll('#certTypeCheckboxes input[type="checkbox"]');
+      checkboxes.forEach(function(cb) {
+        if (cb.checked) {
+          selected.push(cb.value);
+        }
+      });
+
+      google.script.run
+        .withSuccessHandler(function() {
+          showToast('Cert type selection saved', 'success');
+        })
+        .withFailureHandler(function(error) {
+          showToast('Error saving: ' + error, 'error');
+        })
+        .saveExpiringCertsConfig(selected);
+    }
+
+    function loadEmployeeCertsData() {
+      console.log('loadEmployeeCertsData: Starting...');
+
+      // Set a timeout to show a message if it takes too long
+      var timeoutId = setTimeout(function() {
+        var container = document.getElementById('employeeCertsContainer');
+        if (container.innerHTML.indexOf('Loading') !== -1) {
+          container.innerHTML = '<div class="alert alert-warning">Loading is taking longer than expected. <button class="btn btn-sm btn-primary ms-2" onclick="loadEmployeeCertsData()">Retry</button></div>';
+        }
+        var overviewContainer = document.getElementById('certStatusOverview');
+        if (overviewContainer.innerHTML.indexOf('Loading') !== -1) {
+          overviewContainer.innerHTML = '<div class="alert alert-warning">Loading is taking longer than expected.</div>';
+        }
+      }, 15000);
+
+      google.script.run
+        .withSuccessHandler(function(data) {
+          clearTimeout(timeoutId);
+          console.log('loadEmployeeCertsData: SUCCESS, got', (data && data.employees ? data.employees.length : 0), 'employees');
+          if (data && data.employees) {
+            renderCertStatusOverview(data.employees);
+            renderEmployeeCerts(data.employees);
+            updateCertsSummary(data.summary);
+          } else {
+            document.getElementById('certStatusOverview').innerHTML = '<div class="alert alert-warning">No data available. <button class="btn btn-sm btn-primary ms-2" onclick="loadEmployeeCertsData()">Retry</button></div>';
+            document.getElementById('employeeCertsContainer').innerHTML = '<div class="alert alert-warning">No data returned. Please check if the Expiring Certs sheet has data. <button class="btn btn-sm btn-primary ms-2" onclick="loadEmployeeCertsData()">Retry</button></div>';
+          }
+        })
+        .withFailureHandler(function(error) {
+          clearTimeout(timeoutId);
+          console.error('loadEmployeeCertsData: ERROR', error);
+          document.getElementById('certStatusOverview').innerHTML = '<div class="alert alert-danger">Error loading data: ' + error + ' <button class="btn btn-sm btn-primary ms-2" onclick="loadEmployeeCertsData()">Retry</button></div>';
+          document.getElementById('employeeCertsContainer').innerHTML = '<div class="alert alert-danger">Error loading data: ' + error + ' <button class="btn btn-sm btn-primary ms-2" onclick="loadEmployeeCertsData()">Retry</button></div>';
+        })
+        .getExpiringCertsForConfig();
+    }
+
+    // Global storage for employees by cert type and status
+    var certEmployeesByTypeStatus = {};
+
+    function renderCertStatusOverview(employees) {
+      var container = document.getElementById('certStatusOverview');
+
+      // Aggregate stats by cert type AND store employee lists
+      var certStats = {};
+      certEmployeesByTypeStatus = {}; // Reset
+
+      employees.forEach(function(emp) {
+        if (emp.certs) {
+          emp.certs.forEach(function(cert) {
+            var type = cert.type || 'Unknown';
+            if (!certStats[type]) {
+              certStats[type] = { total: 0, expired: 0, critical: 0, warning: 0, ok: 0 };
+              certEmployeesByTypeStatus[type] = { expired: [], critical: [], warning: [], ok: [] };
+            }
+            certStats[type].total++;
+            var status = (cert.status || '').toUpperCase();
+
+            var empInfo = {
+              name: emp.name,
+              location: emp.location || '',
+              expiration: cert.expiration,
+              daysUntil: cert.daysUntil,
+              status: cert.status
+            };
+
+            if (status === 'EXPIRED' || status.indexOf('EXPIRED') !== -1) {
+              certStats[type].expired++;
+              certEmployeesByTypeStatus[type].expired.push(empInfo);
+            } else if (status === 'CRITICAL') {
+              certStats[type].critical++;
+              certEmployeesByTypeStatus[type].critical.push(empInfo);
+            } else if (status === 'WARNING') {
+              certStats[type].warning++;
+              certEmployeesByTypeStatus[type].warning.push(empInfo);
+            } else if (status === 'OK' || status === 'NO DATE SET' || status.indexOf('NON-EXPIRING') !== -1) {
+              certStats[type].ok++;
+              certEmployeesByTypeStatus[type].ok.push(empInfo);
+            }
+          });
+        }
+      });
+
+      // Sort cert types by urgency (most expired/critical first)
+      var sortedTypes = Object.keys(certStats).sort(function(a, b) {
+        var urgencyA = certStats[a].expired * 100 + certStats[a].critical * 10;
+        var urgencyB = certStats[b].expired * 100 + certStats[b].critical * 10;
+        return urgencyB - urgencyA;
+      });
+
+      if (sortedTypes.length === 0) {
+        container.innerHTML = '<p class="text-muted text-center">No certification data available.</p>';
+        return;
+      }
+
+      var html = '<div class="row">';
+      sortedTypes.forEach(function(type) {
+        var stats = certStats[type];
+        var escapedType = type.replace(/'/g, "\\'");
+        html += '<div class="col-md-6 col-lg-4 mb-2">';
+        html += '<div class="cert-overview-card">';
+        html += '<h6>' + type + '</h6>';
+        html += '<div class="cert-overview-stats">';
+        if (stats.expired > 0) html += '<span class="cert-stat cert-stat-expired" onclick="showCertEmployees(\'' + escapedType + '\', \'expired\')">🔴 ' + stats.expired + ' Expired</span>';
+        if (stats.critical > 0) html += '<span class="cert-stat cert-stat-critical" onclick="showCertEmployees(\'' + escapedType + '\', \'critical\')">🟠 ' + stats.critical + ' Critical</span>';
+        if (stats.warning > 0) html += '<span class="cert-stat cert-stat-warning" onclick="showCertEmployees(\'' + escapedType + '\', \'warning\')">🟡 ' + stats.warning + ' Warning</span>';
+        if (stats.ok > 0) html += '<span class="cert-stat cert-stat-ok" onclick="showCertEmployees(\'' + escapedType + '\', \'ok\')">🟢 ' + stats.ok + ' OK</span>';
+        html += '<span class="cert-stat cert-stat-total">' + stats.total + ' Total</span>';
+        html += '</div></div></div>';
+      });
+      html += '</div>';
+
+      container.innerHTML = html;
+    }
+
+    function showCertEmployees(certType, status) {
+      var employees = certEmployeesByTypeStatus[certType] && certEmployeesByTypeStatus[certType][status];
+
+      if (!employees || employees.length === 0) {
+        return;
+      }
+
+      // Store current cert info for add to checklist feature
+      currentCertModalInfo = {
+        certType: certType,
+        status: status,
+        employees: employees
+      };
+
+      // Set modal header color and title based on status
+      var headerEl = document.getElementById('certEmployeeModalHeader');
+      var titleEl = document.getElementById('certEmployeeModalLabel');
+      var statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+
+      titleEl.textContent = certType + ' - ' + statusLabel + ' (' + employees.length + ')';
+
+      if (status === 'expired') {
+        headerEl.style.background = 'linear-gradient(135deg, #c5221f 0%, #ea4335 100%)';
+      } else if (status === 'critical') {
+        headerEl.style.background = 'linear-gradient(135deg, #b06000 0%, #f9ab00 100%)';
+      } else if (status === 'warning') {
+        headerEl.style.background = 'linear-gradient(135deg, #856404 0%, #ffc107 100%)';
+      } else {
+        headerEl.style.background = 'linear-gradient(135deg, #137333 0%, #34a853 100%)';
+      }
+
+      // Sort employees by days until expiration (most urgent first)
+      employees.sort(function(a, b) {
+        if (a.daysUntil === null) return 1;
+        if (b.daysUntil === null) return -1;
+        return a.daysUntil - b.daysUntil;
+      });
+
+      // Build employee list HTML
+      var html = '';
+      employees.forEach(function(emp, index) {
+        var dateStr = '';
+        if (emp.expiration) {
+          try {
+            var d = new Date(emp.expiration);
+            if (!isNaN(d.getTime())) {
+              dateStr = (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
+            } else {
+              dateStr = String(emp.expiration);
+            }
+          } catch(e) {
+            dateStr = String(emp.expiration);
+          }
+        }
+
+        var daysText = '';
+        if (emp.daysUntil !== null && emp.daysUntil !== undefined) {
+          if (emp.daysUntil < 0) {
+            daysText = '<span class="text-danger">(' + Math.abs(emp.daysUntil) + ' days ago)</span>';
+          } else if (emp.daysUntil === 0) {
+            daysText = '<span class="text-danger">(Today)</span>';
+          } else {
+            daysText = '<span class="text-muted">(' + emp.daysUntil + ' days)</span>';
+          }
+        }
+
+        html += '<div class="cert-employee-item">';
+        html += '<div style="flex: 1;">';
+        html += '<div class="cert-employee-name">' + emp.name + '</div>';
+        if (emp.location) {
+          html += '<div class="cert-employee-location">' + emp.location + '</div>';
+        }
+        html += '</div>';
+        html += '<div class="text-end me-2">';
+        if (dateStr) {
+          html += '<div class="cert-employee-date">' + dateStr + '</div>';
+        }
+        if (daysText) {
+          html += '<div class="cert-employee-days">' + daysText + '</div>';
+        }
+        html += '</div>';
+        html += '<div>';
+        html += '<button class="btn btn-sm btn-outline-primary" onclick="addCertToChecklist(' + index + ')" title="Add to My Checklist"><i class="bi bi-plus-circle"></i></button>';
+        html += '</div>';
+        html += '</div>';
+      });
+
+      document.getElementById('certEmployeeList').innerHTML = html;
+
+      // Show the modal
+      var modal = new bootstrap.Modal(document.getElementById('certEmployeeModal'));
+      modal.show();
+    }
+
+    function addCertToChecklist(empIndex) {
+      if (!currentCertModalInfo || !currentCertModalInfo.employees[empIndex]) {
+        showToast('Error: Could not find employee data', 'error');
+        return;
+      }
+
+      var emp = currentCertModalInfo.employees[empIndex];
+      var certType = currentCertModalInfo.certType;
+      var status = currentCertModalInfo.status;
+
+      // Create a unique key for this cert task
+      var taskKey = emp.name + '|' + certType;
+
+      // Check if already in checklist (stored in localStorage)
+      var existingChecklist = [];
+      try {
+        var stored = localStorage.getItem('toDoScheduleChecklist');
+        if (stored) {
+          existingChecklist = JSON.parse(stored);
+        }
+      } catch(e) {
+        existingChecklist = [];
+      }
+
+      // Check for duplicate
+      var isDuplicate = existingChecklist.some(function(item) {
+        return item.employee === emp.name && item.itemType === certType;
+      });
+
+      if (isDuplicate) {
+        showToast('⚠️ ' + emp.name + ' - ' + certType + ' is already in your checklist!', 'warning');
+        return;
+      }
+
+      // Create checklist item
+      var checklistItem = {
+        id: Date.now(),
+        employee: emp.name,
+        taskType: 'Cert Expiring',
+        itemType: certType,
+        location: emp.location || '',
+        scheduledDate: '',
+        source: 'Expiring Certs',
+        subject: 'Follow up on ' + certType,
+        addedDate: new Date().toISOString().split('T')[0],
+        completed: false
+      };
+
+      // Add to checklist
+      existingChecklist.push(checklistItem);
+      localStorage.setItem('toDoScheduleChecklist', JSON.stringify(existingChecklist));
+
+      // Also mark as office task
+      var officeTasks = {};
+      try {
+        var storedOffice = localStorage.getItem('toDoScheduleOfficeTasks');
+        if (storedOffice) {
+          officeTasks = JSON.parse(storedOffice);
+        }
+      } catch(e) {
+        officeTasks = {};
+      }
+      officeTasks[taskKey] = true;
+      localStorage.setItem('toDoScheduleOfficeTasks', JSON.stringify(officeTasks));
+
+      showToast('✓ Added ' + emp.name + ' - ' + certType + ' to My Checklist with Office status');
+    }
+
+    function renderEmployeeCerts(employees) {
+      var container = document.getElementById('employeeCertsContainer');
+      allEmployeesData = employees; // Store for later use
+
+      if (!employees || employees.length === 0) {
+        container.innerHTML = '<p class="text-muted text-center">No certification data found. Import certifications to get started.</p>';
+        return;
+      }
+
+      var html = '';
+      employees.forEach(function(emp, index) {
+        var badges = '';
+        if (emp.summary.expired > 0) badges += '<span class="cert-badge cert-badge-expired">' + emp.summary.expired + ' Exp</span>';
+        if (emp.summary.critical > 0) badges += '<span class="cert-badge cert-badge-critical">' + emp.summary.critical + ' Crit</span>';
+        badges += '<span class="cert-badge cert-badge-ok">' + emp.summary.total + '</span>';
+
+        html += '<div class="employee-cert-card">';
+        html += '<div class="employee-cert-header" onclick="toggleEmployeeCerts(' + index + ')">';
+        html += '<div><strong style="font-size: 13px;">' + emp.name + '</strong>' + badges + '</div>';
+        html += '<i class="bi bi-chevron-down" id="chevron-' + index + '" style="font-size: 12px;"></i>';
+        html += '</div>';
+        html += '<div class="employee-cert-body" id="certs-' + index + '">';
+
+        if (emp.certs && emp.certs.length > 0) {
+          html += '<table class="table table-sm cert-table">';
+          html += '<thead><tr><th>Cert</th><th>Expiration</th><th>Days</th><th>Status</th></tr></thead>';
+          html += '<tbody>';
+          emp.certs.forEach(function(cert, certIndex) {
+            var dateValue = formatDateForInput(cert.expiration);
+            var certKey = emp.name + '|' + cert.type;
+
+            html += '<tr>';
+            html += '<td style="font-size: 11px;">' + cert.type + '</td>';
+            html += '<td><input type="date" class="date-input-small" value="' + dateValue + '" onchange="onCertDateChange(\'' + escapeQuotes(emp.name) + '\', \'' + escapeQuotes(cert.type) + '\', this.value, this)">';
+            html += '</td>';
+            html += '<td style="font-size: 11px;">' + (cert.daysUntil !== null ? cert.daysUntil : '-') + '</td>';
+            html += '<td><span class="badge bg-' + getStatusColor(cert.status) + '" style="font-size: 9px;">' + cert.status + '</span></td>';
+            html += '</tr>';
+          });
+          html += '</tbody></table>';
+        } else {
+          html += '<p class="text-muted small">No certifications found</p>';
+        }
+
+        html += '</div>';
+        html += '</div>';
+      });
+
+      container.innerHTML = html;
+    }
+
+    function escapeQuotes(str) {
+      return str.replace(/'/g, "\\'").replace(/"/g, '\\"');
+    }
+
+    function formatDateForInput(dateVal) {
+      if (!dateVal || dateVal === 'N/A' || dateVal === 'Non-Expiring') return '';
+
+      try {
+        // If it's a Date object (from Google Sheets)
+        if (dateVal instanceof Date || (typeof dateVal === 'object' && dateVal.getTime)) {
+          var d = new Date(dateVal);
+          if (!isNaN(d.getTime())) {
+            var year = d.getFullYear();
+            var month = String(d.getMonth() + 1).padStart(2, '0');
+            var day = String(d.getDate()).padStart(2, '0');
+            return year + '-' + month + '-' + day;
+          }
+        }
+
+        // If it's a string
+        var dateStr = String(dateVal);
+
+        // Try to convert MM/DD/YYYY or other formats to YYYY-MM-DD
+        var parts = dateStr.split('/');
+        if (parts.length === 3) {
+          var month = parts[0].padStart(2, '0');
+          var day = parts[1].padStart(2, '0');
+          var year = parts[2];
+          if (year.length === 2) year = '20' + year;
+          return year + '-' + month + '-' + day;
+        }
+        // If already in YYYY-MM-DD format
+        if (dateStr.indexOf('-') !== -1) return dateStr.substring(0, 10);
+
+        // Try parsing as ISO string (from JSON serialization)
+        var parsed = new Date(dateStr);
+        if (!isNaN(parsed.getTime())) {
+          var year = parsed.getFullYear();
+          var month = String(parsed.getMonth() + 1).padStart(2, '0');
+          var day = String(parsed.getDate()).padStart(2, '0');
+          return year + '-' + month + '-' + day;
+        }
+      } catch(e) {
+        console.log('formatDateForInput error:', e, dateVal);
+      }
+      return '';
+    }
+
+    function onCertDateChange(employeeName, certType, newDate, inputElement) {
+      var key = employeeName + '|' + certType;
+      certDateChanges[key] = {
+        employee: employeeName,
+        certType: certType,
+        newDate: newDate
+      };
+      inputElement.classList.add('changed');
+      setUnsaved(true);
+    }
+
+    function toggleEmployeeCerts(index) {
+      var body = document.getElementById('certs-' + index);
+      var chevron = document.getElementById('chevron-' + index);
+      if (body.classList.contains('show')) {
+        body.classList.remove('show');
+        chevron.className = 'bi bi-chevron-down';
+      } else {
+        body.classList.add('show');
+        chevron.className = 'bi bi-chevron-up';
+      }
+    }
+
+    function updateCertsSummary(summary) {
+      document.getElementById('totalCertHolders').textContent = summary.totalEmployees || 0;
+      document.getElementById('priorityCount').textContent = summary.priorityCount || 0;
+      document.getElementById('expiredCount').textContent = summary.expiredCount || 0;
+    }
+
+    function getStatusColor(status) {
+      var colors = {
+        'EXPIRED': 'danger',
+        'CRITICAL': 'warning',
+        'WARNING': 'warning',
+        'UPCOMING': 'info',
+        'OK': 'success',
+        'Non-Expiring': 'secondary',
+        'PRIORITY - Need Copy': 'danger'
+      };
+      return colors[status] || 'secondary';
+    }
+
+    // Load config on page load
+    loadConfig();
+
+    // Note: Tab event listeners are defined at the bottom of the script to ensure all functions exist
+
+    // ================== EXCLUDED JOB PREFIXES FUNCTIONS ==================
+    var excludedPrefixes = [];
+
+    function loadExcludedPrefixes() {
+      console.log('loadExcludedPrefixes: Starting...');
+      google.script.run
+        .withSuccessHandler(function(prefixes) {
+          console.log('loadExcludedPrefixes: SUCCESS, got', prefixes);
+          excludedPrefixes = prefixes || ['002', '005'];
+          renderExcludedPrefixes();
+        })
+        .withFailureHandler(function(error) {
+          console.error('loadExcludedPrefixes: ERROR', error);
+          excludedPrefixes = ['002', '005'];
+          renderExcludedPrefixes();
+        })
+        .getExcludedJobPrefixes();
+    }
+
+    function renderExcludedPrefixes() {
+      var container = document.getElementById('excludedPrefixesList');
+      if (excludedPrefixes.length === 0) {
+        container.innerHTML = '<span class="text-muted small">No prefixes excluded</span>';
+        return;
+      }
+
+      var html = '';
+      excludedPrefixes.forEach(function(prefix) {
+        html += '<span class="badge bg-danger d-flex align-items-center gap-1" style="font-size: 13px;">';
+        html += prefix + '-XX';
+        html += '<button type="button" class="btn-close btn-close-white" style="font-size: 8px;" onclick="removeExcludedPrefix(\'' + prefix + '\')" title="Remove"></button>';
+        html += '</span>';
+      });
+      container.innerHTML = html;
+    }
+
+    function addExcludedPrefix() {
+      var input = document.getElementById('newJobPrefix');
+      var prefix = input.value.trim();
+
+      if (!prefix) {
+        alert('Please enter a job prefix (e.g., 005)');
+        return;
+      }
+
+      // Validate format (should be 3 digits)
+      if (!/^\d{3}$/.test(prefix)) {
+        alert('Job prefix should be 3 digits (e.g., 002, 005)');
+        return;
+      }
+
+      if (excludedPrefixes.indexOf(prefix) !== -1) {
+        alert('Prefix ' + prefix + ' is already excluded');
+        return;
+      }
+
+      excludedPrefixes.push(prefix);
+      excludedPrefixes.sort();
+      saveExcludedPrefixes();
+      input.value = '';
+    }
+
+    function removeExcludedPrefix(prefix) {
+      var index = excludedPrefixes.indexOf(prefix);
+      if (index !== -1) {
+        excludedPrefixes.splice(index, 1);
+        saveExcludedPrefixes();
+      }
+    }
+
+    function saveExcludedPrefixes() {
+      google.script.run
+        .withSuccessHandler(function(result) {
+          renderExcludedPrefixes();
+          console.log('Excluded prefixes saved:', excludedPrefixes);
+        })
+        .withFailureHandler(function(error) {
+          alert('Error saving excluded prefixes: ' + error);
+        })
+        .saveExcludedJobPrefixes(excludedPrefixes);
+    }
+
+    // ================== TRAINING CONFIG FUNCTIONS ==================
+    function loadTrainingConfig() {
+      console.log('loadTrainingConfig: Starting...');
+
+      var timeoutId = setTimeout(function() {
+        var container = document.getElementById('crewCheckboxes');
+        if (container && container.innerHTML.indexOf('Loading') !== -1) {
+          container.innerHTML = '<div class="col-12"><div class="alert alert-warning">Loading is taking longer than expected. <button class="btn btn-sm btn-primary" onclick="loadTrainingConfig()">Retry</button></div></div>';
+        }
+      }, 10000);
+
+      google.script.run
+        .withSuccessHandler(function(config) {
+          clearTimeout(timeoutId);
+          console.log('loadTrainingConfig: SUCCESS, got', (config.crews ? config.crews.length : 0), 'crews');
+          // Store original selection for comparison
+          window.originalSelectedCrews = config.selectedCrews ? config.selectedCrews.slice() : [];
+          renderCrewCheckboxes(config.crews, config.selectedCrews);
+          renderCrewSummary(config.crewDetails);
+        })
+        .withFailureHandler(function(error) {
+          clearTimeout(timeoutId);
+          console.error('loadTrainingConfig: ERROR', error);
+          document.getElementById('crewCheckboxes').innerHTML =
+            '<div class="col-12"><div class="alert alert-danger">Error loading training config: ' + error + ' <button class="btn btn-sm btn-primary" onclick="loadTrainingConfig()">Retry</button></div></div>';
+        })
+        .getTrainingConfig();
+    }
+
+    function renderCrewCheckboxes(allCrews, selectedCrews) {
+      var container = document.getElementById('crewCheckboxes');
+      var html = '';
+
+      if (!allCrews || allCrews.length === 0) {
+        container.innerHTML = '<div class="col-12"><p class="text-muted">No crews found in Employees sheet.</p></div>';
+        return;
+      }
+
+      allCrews.forEach(function(crew) {
+        var checked = selectedCrews.indexOf(crew.number) !== -1 ? 'checked' : '';
+        var safeId = 'crew-' + crew.number.replace(/[^a-zA-Z0-9]/g, '');
+
+        html += '<div class="col-md-4 col-sm-6 mb-2"><div class="form-check p-2 border rounded" style="background: ' + (checked ? '#e8f5e9' : '#fff') + ';">';
+        html += '<input class="form-check-input" type="checkbox" id="' + safeId + '" value="' + crew.number + '" ' + checked + ' onchange="handleCrewCheckboxChange(this)">';
+        html += '<label class="form-check-label" for="' + safeId + '">';
+        html += '<strong>' + crew.number + '</strong>';
+        if (crew.foreman) {
+          html += '<br><small class="text-muted">👷 ' + crew.foreman + '</small>';
+        }
+        html += '<br><small class="text-muted">📍 ' + (crew.location || 'Unknown') + ' • ' + crew.employeeCount + ' employees</small>';
+        html += '</label>';
+        html += '</div></div>';
+      });
+
+      container.innerHTML = html;
+    }
+
+    /**
+     * Handles checkbox change - shows confirmation if unchecking a crew
+     */
+    function handleCrewCheckboxChange(checkbox) {
+      var crewNumber = checkbox.value;
+      var wasSelected = window.originalSelectedCrews && window.originalSelectedCrews.indexOf(crewNumber) !== -1;
+
+      // If unchecking a previously selected crew, show confirmation
+      if (!checkbox.checked && wasSelected) {
+        showUncheckConfirmation(checkbox, crewNumber);
+      } else {
+        // Checking a new crew or re-checking - proceed directly
+        saveCrewSelection();
+      }
+    }
+
+    /**
+     * Shows confirmation dialog before unchecking a crew
+     */
+    function showUncheckConfirmation(checkbox, crewNumber) {
+      var modalHtml = '<div class="modal fade" id="uncheckConfirmModal" tabindex="-1">' +
+        '<div class="modal-dialog modal-dialog-centered">' +
+        '<div class="modal-content">' +
+        '<div class="modal-header bg-warning">' +
+        '<h5 class="modal-title">⚠️ Confirm Uncheck Crew</h5>' +
+        '<button type="button" class="btn-close" data-bs-dismiss="modal"></button>' +
+        '</div>' +
+        '<div class="modal-body">' +
+        '<p><strong>You are unchecking crew ' + crewNumber + '</strong></p>' +
+        '<p>This will:</p>' +
+        '<ul>' +
+        '<li>🗑️ <strong>Remove</strong> pending training rows for <strong>current month</strong> (if still pending) and <strong>future months</strong></li>' +
+        '<li>✅ <strong>Preserve</strong> all past months (historical data)</li>' +
+        '<li>✅ <strong>Preserve</strong> any completed training (any month)</li>' +
+        '</ul>' +
+        '<p class="text-muted small">If you re-check this crew later, only current and future month rows will be added back.</p>' +
+        '</div>' +
+        '<div class="modal-footer">' +
+        '<button type="button" class="btn btn-secondary" id="cancelUncheckBtn">Cancel</button>' +
+        '<button type="button" class="btn btn-warning" id="confirmUncheckBtn">Yes, Uncheck Crew</button>' +
+        '</div>' +
+        '</div>' +
+        '</div>' +
+        '</div>';
+
+      // Remove any existing modal
+      var existingModal = document.getElementById('uncheckConfirmModal');
+      if (existingModal) {
+        existingModal.remove();
+      }
+
+      // Add modal to page
+      document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+      var modal = new bootstrap.Modal(document.getElementById('uncheckConfirmModal'));
+
+      // Handle cancel - re-check the checkbox
+      document.getElementById('cancelUncheckBtn').onclick = function() {
+        checkbox.checked = true;
+        var container = checkbox.closest('.form-check');
+        if (container) container.style.background = '#e8f5e9';
+        modal.hide();
+      };
+
+      // Handle confirm - proceed with uncheck
+      document.getElementById('confirmUncheckBtn').onclick = function() {
+        modal.hide();
+        saveCrewSelection();
+      };
+
+      // Also re-check if modal is dismissed via X or clicking outside
+      document.getElementById('uncheckConfirmModal').addEventListener('hidden.bs.modal', function() {
+        // Only re-check if the save hasn't happened yet
+        var currentlyChecked = document.querySelector('input[value="' + crewNumber + '"]');
+        if (currentlyChecked && !currentlyChecked.checked && !window.uncheckConfirmed) {
+          currentlyChecked.checked = true;
+          var container = currentlyChecked.closest('.form-check');
+          if (container) container.style.background = '#e8f5e9';
+        }
+        window.uncheckConfirmed = false;
+        // Clean up modal
+        document.getElementById('uncheckConfirmModal').remove();
+      });
+
+      modal.show();
+    }
+
+    function renderCrewSummary(crewDetails) {
+      var container = document.getElementById('crewSummary');
+
+      if (!crewDetails || crewDetails.length === 0) {
+        container.innerHTML = '<p class="text-muted text-center">No crew data available.</p>';
+        return;
+      }
+
+      var html = '<table class="table table-sm table-hover">';
+      html += '<thead class="table-light"><tr><th>Crew #</th><th>Foreman</th><th>Location</th><th>Employees</th></tr></thead>';
+      html += '<tbody>';
+
+      crewDetails.forEach(function(crew) {
+        html += '<tr>';
+        html += '<td><strong>' + crew.number + '</strong></td>';
+        html += '<td>' + (crew.foreman || '-') + '</td>';
+        html += '<td>' + (crew.location || '-') + '</td>';
+        html += '<td><span class="badge bg-secondary">' + crew.employeeCount + '</span></td>';
+        html += '</tr>';
+      });
+
+      html += '</tbody></table>';
+      container.innerHTML = html;
+    }
+
+    function selectAllCrews() {
+      var checkboxes = document.querySelectorAll('#crewCheckboxes input[type="checkbox"]');
+      checkboxes.forEach(function(cb) { cb.checked = true; });
+      saveCrewSelection();
+    }
+
+    function deselectAllCrews() {
+      // Check how many crews will be unchecked
+      // Check how many crews will be unchecked
+      var crewsToUncheck = [];
+      var checkboxes = document.querySelectorAll('#crewCheckboxes input[type="checkbox"]');
+      checkboxes.forEach(function(cb) {
+        if (cb.checked && window.originalSelectedCrews && window.originalSelectedCrews.indexOf(cb.value) !== -1) {
+          crewsToUncheck.push(cb.value);
+        }
+      });
+
+      if (crewsToUncheck.length > 0) {
+        // Show confirmation for bulk uncheck
+        showBulkUncheckConfirmation(crewsToUncheck);
+      } else {
+        // No previously selected crews to uncheck
+        checkboxes.forEach(function(cb) { cb.checked = false; });
+        saveCrewSelection();
+      }
+    }
+
+    /**
+     * Shows confirmation dialog for bulk unchecking (Deselect All)
+     */
+    function showBulkUncheckConfirmation(crewNumbers) {
+      var modalHtml = '<div class="modal fade" id="bulkUncheckConfirmModal" tabindex="-1">' +
+        '<div class="modal-dialog modal-dialog-centered">' +
+        '<div class="modal-content">' +
+        '<div class="modal-header bg-warning">' +
+        '<h5 class="modal-title">⚠️ Confirm Deselect All</h5>' +
+        '<button type="button" class="btn-close" data-bs-dismiss="modal"></button>' +
+        '</div>' +
+        '<div class="modal-body">' +
+        '<p><strong>You are unchecking ' + crewNumbers.length + ' crews:</strong></p>' +
+        '<p class="small text-muted" style="max-height: 100px; overflow-y: auto;">' + crewNumbers.join(', ') + '</p>' +
+        '<p>This will:</p>' +
+        '<ul>' +
+        '<li>🗑️ <strong>Remove</strong> pending training rows for <strong>current month</strong> and <strong>future months</strong></li>' +
+        '<li>✅ <strong>Preserve</strong> all past months (historical data)</li>' +
+        '<li>✅ <strong>Preserve</strong> any completed training (any month)</li>' +
+        '</ul>' +
+        '</div>' +
+        '<div class="modal-footer">' +
+        '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>' +
+        '<button type="button" class="btn btn-warning" id="confirmBulkUncheckBtn">Yes, Deselect All</button>' +
+        '</div>' +
+        '</div>' +
+        '</div>' +
+        '</div>';
+
+      // Remove any existing modal
+      var existingModal = document.getElementById('bulkUncheckConfirmModal');
+      if (existingModal) {
+        existingModal.remove();
+      }
+
+      // Add modal to page
+      document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+      var modal = new bootstrap.Modal(document.getElementById('bulkUncheckConfirmModal'));
+
+      // Handle confirm
+      document.getElementById('confirmBulkUncheckBtn').onclick = function() {
+        modal.hide();
+        var checkboxes = document.querySelectorAll('#crewCheckboxes input[type="checkbox"]');
+        checkboxes.forEach(function(cb) { cb.checked = false; });
+        saveCrewSelection();
+      };
+
+      // Clean up modal on close
+      document.getElementById('bulkUncheckConfirmModal').addEventListener('hidden.bs.modal', function() {
+        document.getElementById('bulkUncheckConfirmModal').remove();
+      });
+
+      modal.show();
+    }
+
+    function saveCrewSelection() {
+      window.uncheckConfirmed = true; // Flag to prevent re-checking on modal close
+      var selected = [];
+      var checkboxes = document.querySelectorAll('#crewCheckboxes input[type="checkbox"]');
+      checkboxes.forEach(function(cb) {
+        if (cb.checked) {
+          selected.push(cb.value);
+        }
+      });
+
+      // Update checkbox styling
+      checkboxes.forEach(function(cb) {
+        var container = cb.closest('.form-check');
+        if (container) {
+          container.style.background = cb.checked ? '#e8f5e9' : '#fff';
+        }
+      });
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          var msg = 'Crew selection saved (' + selected.length + ' crews selected)';
+
+          // Show info about removed rows (unchecked crews)
+          if (result && result.uncheckedCrews && result.uncheckedCrews.length > 0) {
+            msg += '\n\n📋 Unchecked crews: ' + result.uncheckedCrews.join(', ');
+            if (result.removedRows > 0) {
+              msg += '\n🗑️ Removed ' + result.removedRows + ' pending training rows (current + future months)';
+            }
+            if (result.preservedRows > 0) {
+              msg += '\n✅ Preserved ' + result.preservedRows + ' rows (past months & completed training)';
+            }
+          }
+
+          // Show info about added rows (newly checked crews)
+          if (result && result.newlyCheckedCrews && result.newlyCheckedCrews.length > 0) {
+            msg += '\n\n➕ Newly checked crews: ' + result.newlyCheckedCrews.join(', ');
+            if (result.addedRows > 0) {
+              msg += '\n📝 Added ' + result.addedRows + ' training rows (current + future months)';
+            }
+          }
+
+          // Update the original selection to reflect saved state
+          window.originalSelectedCrews = selected.slice();
+
+          showToast(msg, 'success');
+        })
+        .withFailureHandler(function(error) {
+          showToast('Error saving: ' + error, 'error');
+        })
+        .saveTrainingConfig(selected);
+    }
+
+    // ================== CREW VISIT CONFIG FUNCTIONS ==================
+    var crewVisitData = [];
+
+    function loadCrewVisitConfig() {
+      console.log('loadCrewVisitConfig: Starting...');
+
+      var timeoutId = setTimeout(function() {
+        var container = document.getElementById('crewVisitContainer');
+        if (container && container.innerHTML.indexOf('Loading') !== -1) {
+          container.innerHTML = '<div class="alert alert-warning">Loading is taking longer than expected. <button class="btn btn-sm btn-primary ms-2" onclick="loadCrewVisitConfig()">Retry</button></div>';
+        }
+      }, 10000);
+
+      google.script.run
+        .withSuccessHandler(function(data) {
+          clearTimeout(timeoutId);
+          console.log('loadCrewVisitConfig: SUCCESS, got', (data ? data.length : 0), 'crews');
+          crewVisitData = data || [];
+          renderCrewVisitTable(crewVisitData);
+        })
+        .withFailureHandler(function(error) {
+          clearTimeout(timeoutId);
+          console.error('loadCrewVisitConfig: ERROR', error);
+          document.getElementById('crewVisitContainer').innerHTML =
+            '<div class="alert alert-danger">Error loading crew visit config: ' + error + ' <button class="btn btn-sm btn-primary ms-2" onclick="loadCrewVisitConfig()">Retry</button></div>';
+        })
+        .getCrewVisitConfig();
+    }
+
+    function renderCrewVisitTable(crews) {
+      var container = document.getElementById('crewVisitContainer');
+
+      if (!crews || crews.length === 0) {
+        container.innerHTML = '<div class="alert alert-warning">No crews found. Click "Refresh from Employees" to populate.</div>';
+        return;
+      }
+
+      var html = '<table class="table table-sm table-hover crew-visit-table">';
+      html += '<thead><tr>';
+      html += '<th>Crew #</th>';
+      html += '<th>Location</th>';
+      html += '<th>Crew Lead</th>';
+      html += '<th>Size</th>';
+      html += '<th>Frequency</th>';
+      html += '<th>Est. Time</th>';
+      html += '<th>Last Visit</th>';
+      html += '<th>Next Visit</th>';
+      html += '<th>Drive Time</th>';
+      html += '<th>Priority</th>';
+      html += '</tr></thead>';
+      html += '<tbody>';
+
+      crews.forEach(function(crew, index) {
+        html += '<tr data-index="' + index + '">';
+        html += '<td><strong>' + (crew.jobNumber || '') + '</strong></td>';
+        html += '<td>' + (crew.location || '') + '</td>';
+        html += '<td>' + (crew.crewLead || '') + '</td>';
+        html += '<td>' + (crew.crewSize || '') + '</td>';
+
+        // Frequency dropdown
+        html += '<td><select class="form-select form-select-sm" onchange="onCrewVisitChange(' + index + ', \'frequency\', this.value)">';
+        ['Weekly', 'Bi-Weekly', 'Monthly', 'Quarterly'].forEach(function(freq) {
+          var selected = (crew.frequency === freq) ? 'selected' : '';
+          html += '<option value="' + freq + '" ' + selected + '>' + freq + '</option>';
+        });
+        html += '</select></td>';
+
+        // Est. Visit Time
+        html += '<td><input type="number" class="form-control form-control-sm crew-input" value="' + (crew.estVisitTime || 60) + '" min="15" step="15" onchange="onCrewVisitChange(' + index + ', \'estVisitTime\', this.value)"></td>';
+
+        // Last Visit Date
+        html += '<td><input type="date" class="form-control form-control-sm crew-input-date" value="' + formatDateForInput(crew.lastVisit) + '" onchange="onCrewVisitChange(' + index + ', \'lastVisit\', this.value)"></td>';
+
+        // Next Visit Date
+        html += '<td><input type="date" class="form-control form-control-sm crew-input-date" value="' + formatDateForInput(crew.nextVisit) + '" onchange="onCrewVisitChange(' + index + ', \'nextVisit\', this.value)"></td>';
+
+        // Drive Time
+        html += '<td><input type="number" class="form-control form-control-sm crew-input" value="' + (crew.driveTime || 0) + '" min="0" step="15" onchange="onCrewVisitChange(' + index + ', \'driveTime\', this.value)"></td>';
+
+        // Priority dropdown
+        html += '<td><select class="form-select form-select-sm" onchange="onCrewVisitChange(' + index + ', \'priority\', this.value)">';
+        ['High', 'Medium', 'Low'].forEach(function(pri) {
+          var selected = (crew.priority === pri) ? 'selected' : '';
+          html += '<option value="' + pri + '" ' + selected + '>' + pri + '</option>';
+        });
+        html += '</select></td>';
+
+        html += '</tr>';
+      });
+
+      html += '</tbody></table>';
+      container.innerHTML = html;
+    }
+
+    function onCrewVisitChange(index, field, value) {
+      if (crewVisitData[index]) {
+        crewVisitData[index][field] = value;
+        setUnsaved(true);
+      }
+    }
+
+    function saveCrewVisitConfig() {
+      google.script.run
+        .withSuccessHandler(function(result) {
+          setUnsaved(false);
+          showToast('Crew visit config saved!', 'success');
+        })
+        .withFailureHandler(function(error) {
+          showToast('Error saving crew visit config: ' + error, 'error');
+        })
+        .saveCrewVisitConfig(crewVisitData);
+    }
+
+    function refreshCrewVisitConfig() {
+      if (confirm('This will refresh crew data from the Employees sheet. Any unsaved changes will be lost. Continue?')) {
+        document.getElementById('crewVisitContainer').innerHTML =
+          '<div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div><p class="text-muted small mt-2">Refreshing...</p></div>';
+
+        google.script.run
+          .withSuccessHandler(function(data) {
+            crewVisitData = data || [];
+            renderCrewVisitTable(crewVisitData);
+            showToast('Crew visit config refreshed!', 'success');
+          })
+          .withFailureHandler(function(error) {
+            showToast('Error refreshing: ' + error, 'error');
+            loadCrewVisitConfig(); // Try to reload existing data
+          })
+          .refreshCrewVisitConfigFromEmployees();
+      }
+    }
+
+
+    // ================== TRAINING CONFIG FUNCTIONS ==================
+    var trainingConfigData = [];
+
+    function loadTrainingConfigData() {
+      console.log('loadTrainingConfigData: Starting...');
+
+      var timeoutId = setTimeout(function() {
+        var container = document.getElementById('trainingConfigContainer');
+        if (container && container.innerHTML.indexOf('Loading') !== -1) {
+          container.innerHTML = '<div class="alert alert-warning">Loading is taking longer than expected. <button class="btn btn-sm btn-primary ms-2" onclick="loadTrainingConfigData()">Retry</button></div>';
+        }
+      }, 10000);
+
+      google.script.run
+        .withSuccessHandler(function(data) {
+          clearTimeout(timeoutId);
+          console.log('loadTrainingConfigData: SUCCESS, got', (data ? data.length : 0), 'trainings');
+          trainingConfigData = data || [];
+          renderTrainingConfigTable(trainingConfigData);
+          updateTrainingCompletionSummary(trainingConfigData);
+        })
+        .withFailureHandler(function(error) {
+          clearTimeout(timeoutId);
+          console.error('loadTrainingConfigData: ERROR', error);
+          document.getElementById('trainingConfigContainer').innerHTML =
+            '<div class="alert alert-danger">Error loading training config: ' + error + ' <button class="btn btn-sm btn-primary ms-2" onclick="loadTrainingConfigData()">Retry</button></div>';
+        })
+        .getTrainingConfigData();
+    }
+
+    function updateTrainingCompletionSummary(trainings) {
+      // NOTE: This function used to update the Completion Status cards, but now
+      // that's handled by updateTrainingTrackingSummary() which has the actual
+      // per-crew completion data. This function is kept for potential future use
+      // or can be used for Training Schedule specific stats.
+
+      // The Completion Status cards are now ONLY updated by updateTrainingTrackingSummary()
+      // which is called when Training Tracking data loads.
+    }
+
+    function renderTrainingConfigTable(trainings) {
+      var container = document.getElementById('trainingConfigContainer');
+
+      if (!trainings || trainings.length === 0) {
+        container.innerHTML = '<div class="alert alert-warning">No training topics found. Run "Setup Training Config" from the menu first.</div>';
+        return;
+      }
+
+      var html = '<table class="table table-sm table-hover training-config-table">';
+      html += '<thead><tr>';
+      html += '<th>Training Topic</th>';
+      html += '<th>Required For</th>';
+      html += '<th>Hours</th>';
+      html += '<th>Frequency</th>';
+      html += '<th>Last Training</th>';
+      html += '<th>Next Training</th>';
+      html += '<th>Attendees</th>';
+      html += '<th>Status</th>';
+      html += '</tr></thead>';
+      html += '<tbody>';
+
+      trainings.forEach(function(training, index) {
+        // Parse completion status - handle both decimal (0.69) and percentage (69%) formats
+        var statusValue = training.completionStatus;
+        var statusPercent = 0;
+        if (typeof statusValue === 'string' && statusValue.includes('%')) {
+          statusPercent = parseInt(statusValue) || 0;
+        } else if (typeof statusValue === 'number' || !isNaN(parseFloat(statusValue))) {
+          var numVal = parseFloat(statusValue);
+          // If it's a decimal like 0.69, convert to percentage
+          if (numVal > 0 && numVal < 1) {
+            statusPercent = Math.round(numVal * 100);
+          } else {
+            statusPercent = Math.round(numVal);
+          }
+        }
+
+        html += '<tr data-index="' + index + '">';
+
+        // Training Topic (editable)
+        html += '<td><input type="text" class="form-control form-control-sm training-input-topic" value="' + escapeHtml(training.topic || '') + '" onchange="onTrainingConfigChange(' + index + ', \'topic\', this.value)"></td>';
+
+        // Required For (editable)
+        html += '<td><select class="form-select form-select-sm" onchange="onTrainingConfigChange(' + index + ', \'requiredFor\', this.value)">';
+        ['All', 'Foremen', 'Linemen', 'Apprentices', 'GTO'].forEach(function(req) {
+          var selected = (training.requiredFor === req) ? 'selected' : '';
+          html += '<option value="' + req + '" ' + selected + '>' + req + '</option>';
+        });
+        html += '</select></td>';
+
+        // Duration Hours
+        html += '<td><input type="number" class="form-control form-control-sm training-input-hours" value="' + (training.duration || 2) + '" min="1" step="1" onchange="onTrainingConfigChange(' + index + ', \'duration\', this.value)"></td>';
+
+        // Frequency
+        html += '<td><select class="form-select form-select-sm" onchange="onTrainingConfigChange(' + index + ', \'frequency\', this.value)">';
+        ['Monthly', 'Quarterly', 'Annual'].forEach(function(freq) {
+          var selected = (training.frequency === freq) ? 'selected' : '';
+          html += '<option value="' + freq + '" ' + selected + '>' + freq + '</option>';
+        });
+        html += '</select></td>';
+
+        // Last Training Date
+        html += '<td><input type="date" class="form-control form-control-sm" value="' + formatDateForInput(training.lastTraining) + '" onchange="onTrainingConfigChange(' + index + ', \'lastTraining\', this.value)"></td>';
+
+        // Next Training Date
+        html += '<td><input type="date" class="form-control form-control-sm" value="' + formatDateForInput(training.nextTraining) + '" onchange="onTrainingConfigChange(' + index + ', \'nextTraining\', this.value)"></td>';
+
+        // Required Attendees
+        html += '<td><input type="number" class="form-control form-control-sm training-input-hours" value="' + (training.requiredAttendees || 0) + '" min="0" onchange="onTrainingConfigChange(' + index + ', \'requiredAttendees\', this.value)"></td>';
+
+        // Completion Status with progress bar - always show as percentage
+        html += '<td>';
+        html += '<input type="text" class="form-control form-control-sm training-input-status mb-1" value="' + statusPercent + '%' + '" onchange="onTrainingConfigChange(' + index + ', \'completionStatus\', this.value)">';
+        html += '<div class="completion-bar"><div class="completion-bar-fill" style="width: ' + statusPercent + '%"></div></div>';
+        html += '</td>';
+
+        html += '</tr>';
+      });
+
+      html += '</tbody></table>';
+      container.innerHTML = html;
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function onTrainingConfigChange(index, field, value) {
+      if (trainingConfigData[index]) {
+        trainingConfigData[index][field] = value;
+        setUnsaved(true);
+
+        // Update progress bar if status changed
+        if (field === 'completionStatus') {
+          var row = document.querySelector('tr[data-index="' + index + '"]');
+          if (row) {
+            var bar = row.querySelector('.completion-bar-fill');
+            if (bar) {
+              var percent = parseInt(value) || 0;
+              bar.style.width = percent + '%';
+            }
+          }
+          // Also update the overall summary
+          updateTrainingCompletionSummary(trainingConfigData);
+        }
+      }
+    }
+
+    function saveTrainingConfigData() {
+      google.script.run
+        .withSuccessHandler(function(result) {
+          setUnsaved(false);
+          showToast('Training config saved!', 'success');
+        })
+        .withFailureHandler(function(error) {
+          showToast('Error saving training config: ' + error, 'error');
+        })
+        .saveTrainingConfigData(trainingConfigData);
+    }
+
+    // ================== TRAINING TRACKING FUNCTIONS ==================
+    var trainingTrackingData = [];
+    var filteredTrainingData = [];
+
+    function loadTrainingTrackingData() {
+      console.log('loadTrainingTrackingData: Starting...');
+
+      var timeoutId = setTimeout(function() {
+        var container = document.getElementById('trainingTrackingContainer');
+        if (container && container.innerHTML.indexOf('Loading') !== -1) {
+          container.innerHTML = '<div class="alert alert-warning">Loading is taking longer than expected. <button class="btn btn-sm btn-primary ms-2" onclick="loadTrainingTrackingData()">Retry</button></div>';
+        }
+      }, 10000);
+
+      google.script.run
+        .withSuccessHandler(function(data) {
+          clearTimeout(timeoutId);
+          console.log('loadTrainingTrackingData: SUCCESS, got', (data ? data.length : 0), 'records');
+          trainingTrackingData = data || [];
+          filteredTrainingData = trainingTrackingData;
+          renderTrainingTrackingTable(filteredTrainingData);
+          updateTrainingTrackingSummary(trainingTrackingData);
+        })
+        .withFailureHandler(function(error) {
+          clearTimeout(timeoutId);
+          console.error('loadTrainingTrackingData: ERROR', error);
+          document.getElementById('trainingTrackingContainer').innerHTML =
+            '<div class="alert alert-danger">Error loading training tracking: ' + error + ' <button class="btn btn-sm btn-primary ms-2" onclick="loadTrainingTrackingData()">Retry</button></div>';
+        })
+        .getTrainingTrackingData();
+    }
+
+    function filterTrainingTracking() {
+      var monthFilter = document.getElementById('trainingMonthFilter').value;
+      var statusFilter = document.getElementById('trainingStatusFilter').value;
+
+      filteredTrainingData = trainingTrackingData.filter(function(item) {
+        var matchMonth = !monthFilter || item.month === monthFilter;
+        var matchStatus = !statusFilter || item.status === statusFilter;
+        return matchMonth && matchStatus;
+      });
+
+      renderTrainingTrackingTable(filteredTrainingData);
+    }
+
+    function renderTrainingTrackingTable(data) {
+      var container = document.getElementById('trainingTrackingContainer');
+
+      if (!data || data.length === 0) {
+        container.innerHTML = '<div class="alert alert-warning">No training records found. Run "Setup Training Tracking" from the menu first.</div>';
+        return;
+      }
+
+      var html = '<table class="table table-sm table-hover training-tracking-table">';
+      html += '<thead><tr>';
+      html += '<th>Month</th>';
+      html += '<th>Training Topic</th>';
+      html += '<th>Crew #</th>';
+      html += '<th>Crew Lead</th>';
+      html += '<th>Size</th>';
+      html += '<th>Completion Date</th>';
+      html += '<th>Attendees</th>';
+      html += '<th>Trainer</th>';
+      html += '<th>Status</th>';
+      html += '</tr></thead>';
+      html += '<tbody>';
+
+      data.forEach(function(record, index) {
+        var statusClass = 'status-' + (record.status || 'pending').toLowerCase().replace(/\s+/g, '');
+        var originalIndex = trainingTrackingData.indexOf(record);
+
+        html += '<tr class="' + statusClass + '" data-index="' + originalIndex + '">';
+        html += '<td><strong>' + (record.month || '') + '</strong></td>';
+        html += '<td style="max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="' + escapeHtml(record.topic || '') + '">' + escapeHtml(record.topic || '') + '</td>';
+        html += '<td>' + (record.crew || '') + '</td>';
+        html += '<td>' + (record.crewLead || '') + '</td>';
+        // Size column - clickable to show crew members
+        html += '<td class="attendees-cell" data-crew="' + escapeHtml(record.crew || '') + '" onmouseenter="showCrewTooltip(this)" onmouseleave="hideCrewTooltip()">' + (record.crewSize || '') + '</td>';
+
+        // Completion Date (editable)
+        html += '<td><input type="date" class="form-control form-control-sm" value="' + formatDateForInput(record.completionDate) + '" onchange="onTrainingTrackingChange(' + originalIndex + ', \'completionDate\', this.value)"></td>';
+
+        // Attendees (editable)
+        html += '<td><input type="number" class="form-control form-control-sm" value="' + (record.attendees || '') + '" min="0" onchange="onTrainingTrackingChange(' + originalIndex + ', \'attendees\', this.value)"></td>';
+
+        // Trainer (editable)
+        html += '<td><input type="text" class="form-control form-control-sm" value="' + escapeHtml(record.trainer || '') + '" style="width: 80px;" onchange="onTrainingTrackingChange(' + originalIndex + ', \'trainer\', this.value)"></td>';
+
+        // Status (editable dropdown)
+        html += '<td><select class="form-select form-select-sm" onchange="onTrainingTrackingChange(' + originalIndex + ', \'status\', this.value)">';
+        ['Pending', 'Complete', 'Overdue', 'N/A'].forEach(function(s) {
+          var selected = (record.status === s) ? 'selected' : '';
+          html += '<option value="' + s + '" ' + selected + '>' + s + '</option>';
+        });
+        html += '</select></td>';
+
+        html += '</tr>';
+      });
+
+      html += '</tbody></table>';
+      html += '<div class="text-muted small mt-2">Showing ' + data.length + ' of ' + trainingTrackingData.length + ' records</div>';
+      container.innerHTML = html;
+    }
+
+    function onTrainingTrackingChange(index, field, value) {
+      if (trainingTrackingData[index]) {
+        trainingTrackingData[index][field] = value;
+        setUnsaved(true);
+
+        // If status changed, update row styling and summary
+        if (field === 'status') {
+          var row = document.querySelector('tr[data-index="' + index + '"]');
+          if (row) {
+            row.className = 'status-' + value.toLowerCase().replace(/\s+/g, '');
+          }
+          updateTrainingTrackingSummary(trainingTrackingData);
+        }
+
+        // If status changed to Complete and no completion date, set today
+        if (field === 'status' && value === 'Complete') {
+          if (!trainingTrackingData[index].completionDate) {
+            var today = new Date().toISOString().split('T')[0];
+            trainingTrackingData[index].completionDate = today;
+            // Update the date input
+            var row = document.querySelector('tr[data-index="' + index + '"]');
+            if (row) {
+              var dateInput = row.querySelector('input[type="date"]');
+              if (dateInput) dateInput.value = today;
+            }
+          }
+        }
+      }
+    }
+
+    function updateTrainingTrackingSummary(data) {
+      if (!data || data.length === 0) return;
+
+      // Get current month name
+      var monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                        'July', 'August', 'September', 'October', 'November', 'December'];
+      var currentMonth = monthNames[new Date().getMonth()];
+
+      // Count current month stats
+      var currentMonthComplete = 0;
+      var currentMonthTotal = 0;
+
+      // Count year stats
+      var yearComplete = 0;
+      var yearTotal = data.length;
+
+      data.forEach(function(record) {
+        var status = (record.status || 'Pending').toLowerCase();
+        var recordMonth = (record.month || '').trim();
+
+        // Check if this is current month
+        if (recordMonth.toLowerCase() === currentMonth.toLowerCase()) {
+          currentMonthTotal++;
+          if (status === 'complete') {
+            currentMonthComplete++;
+          }
+        }
+
+        // Count year totals
+        if (status === 'complete') {
+          yearComplete++;
+        }
+      });
+
+      var currentMonthPercent = currentMonthTotal > 0 ? Math.round((currentMonthComplete / currentMonthTotal) * 100) : 0;
+      var yearPercent = yearTotal > 0 ? Math.round((yearComplete / yearTotal) * 100) : 0;
+
+      // Update current month display
+      document.getElementById('currentMonthLabel').textContent = currentMonth;
+      document.getElementById('currentMonthPercent').textContent = currentMonthPercent + '%';
+      document.getElementById('currentMonthComplete').textContent = currentMonthComplete;
+      document.getElementById('currentMonthTotal').textContent = currentMonthTotal;
+
+      var monthBar = document.getElementById('currentMonthProgressBar');
+      monthBar.style.width = currentMonthPercent + '%';
+      monthBar.textContent = currentMonthPercent + '%';
+
+      // Color the month bar
+      monthBar.className = 'progress-bar';
+      if (currentMonthPercent >= 75) {
+        monthBar.classList.add('bg-success');
+      } else if (currentMonthPercent >= 50) {
+        monthBar.classList.add('bg-info');
+      } else if (currentMonthPercent >= 25) {
+        monthBar.classList.add('bg-warning');
+      } else {
+        monthBar.classList.add('bg-danger');
+      }
+
+      // Update year progress display
+      document.getElementById('trainingOverallPercent').textContent = yearPercent + '%';
+      document.getElementById('yearCompleteCount').textContent = yearComplete;
+      document.getElementById('yearTotalCount').textContent = yearTotal;
+
+      var progressBar = document.getElementById('trainingProgressBar');
+      progressBar.style.width = yearPercent + '%';
+      progressBar.textContent = yearPercent + '%';
+
+      // Change color based on progress
+      progressBar.className = 'progress-bar';
+      if (yearPercent >= 75) {
+        progressBar.classList.add('bg-primary');
+      } else if (yearPercent >= 50) {
+        progressBar.classList.add('bg-info');
+      } else if (yearPercent >= 25) {
+        progressBar.classList.add('bg-warning');
+      } else {
+        progressBar.classList.add('bg-danger');
+      }
+    }
+
+    function saveTrainingTrackingData() {
+      google.script.run
+        .withSuccessHandler(function(result) {
+          setUnsaved(false);
+          showToast('Training tracking saved! (' + result.updatedCount + ' records)', 'success');
+          // Refresh to show updated data
+          loadTrainingTrackingData();
+        })
+        .withFailureHandler(function(error) {
+          showToast('Error saving training tracking: ' + error, 'error');
+        })
+        .saveTrainingTrackingData(trainingTrackingData);
+    }
+
+    // ================== CREW TOOLTIP FUNCTIONS ==================
+    var crewMembersCache = {}; // Cache to avoid repeated server calls
+    var activeTooltip = null;
+
+    function showCrewTooltip(cell) {
+      var crewNumber = cell.getAttribute('data-crew');
+      if (!crewNumber) return;
+
+      // Check cache first
+      if (crewMembersCache[crewNumber] !== undefined) {
+        displayCrewTooltip(cell, crewMembersCache[crewNumber]);
+        return;
+      }
+
+      // Show loading indicator
+      displayCrewTooltip(cell, 'Loading...');
+
+      // Fetch crew members from server
+      google.script.run
+        .withSuccessHandler(function(members) {
+          crewMembersCache[crewNumber] = members || 'No crew members found';
+          // Only update if still hovering over the same cell
+          if (activeTooltip && activeTooltip.cell === cell) {
+            displayCrewTooltip(cell, crewMembersCache[crewNumber]);
+          }
+        })
+        .withFailureHandler(function(error) {
+          crewMembersCache[crewNumber] = 'Error loading crew';
+          if (activeTooltip && activeTooltip.cell === cell) {
+            displayCrewTooltip(cell, 'Error loading crew');
+          }
+        })
+        .getCrewMembersForDisplay(crewNumber);
+    }
+
+    function displayCrewTooltip(cell, content) {
+      hideCrewTooltip(); // Remove any existing tooltip
+
+      var tooltip = document.createElement('div');
+      tooltip.className = 'crew-tooltip';
+
+      // Format content: split by comma and show as list
+      var members = content.split(', ').filter(function(m) { return m.trim(); });
+      if (members.length > 0 && content !== 'Loading...' && content !== 'Error loading crew' && content !== 'No crew members found') {
+        tooltip.innerHTML = '<strong>Crew Members:</strong><br>' + members.map(function(m) { return '• ' + m; }).join('<br>');
+      } else {
+        tooltip.textContent = content;
+      }
+
+      // Position the tooltip below the cell
+      var rect = cell.getBoundingClientRect();
+      tooltip.style.position = 'fixed';
+      tooltip.style.top = (rect.bottom + 5) + 'px';
+      tooltip.style.left = rect.left + 'px';
+
+      document.body.appendChild(tooltip);
+      activeTooltip = { element: tooltip, cell: cell };
+    }
+
+    function hideCrewTooltip() {
+      if (activeTooltip && activeTooltip.element) {
+        activeTooltip.element.remove();
+      }
+      activeTooltip = null;
+    }
+
+    // ================== TAB EVENT LISTENERS ==================
+    // Settings tab - load Crew Visit Config and Training data
+    document.getElementById('settings-tab').addEventListener('shown.bs.tab', function() {
+      loadCrewVisitConfig();
+      loadTrainingConfig();
+      loadExpiringCertsConfig();
+      loadTrainingConfigData();
+      loadTrainingTrackingData();
+    });
+
+    // Expiring Certs tab - load employee cert data
+    document.getElementById('certs-tab').addEventListener('shown.bs.tab', function() {
+      loadEmployeeCertsData();
+    });
+
+    // ================== INITIAL DATA LOAD ==================
+    // Preload data for all tabs when the dialog opens
+    // This ensures data is available even if the user hasn't clicked on a tab yet
+    setTimeout(function() {
+      // Load Settings tab data (Crew Visit Config + Training)
+      loadCrewVisitConfig();
+      loadTrainingConfig();
+      loadExpiringCertsConfig();
+      loadTrainingConfigData();
+      loadTrainingTrackingData();
+
+      // Note: Expiring Certs tab data loads on demand (large dataset)
+    }, 100);
+  </script>
+</body>
+</html>

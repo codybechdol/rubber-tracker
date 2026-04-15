@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Daily Accomplishments</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  <style>
+    body { font-family: 'Google Sans', Arial, sans-serif; background: #f8f9fa; margin: 0; padding: 20px; }
+    .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 12px; margin-bottom: 20px; }
+    .header h1 { font-size: 24px; margin: 0; display: flex; align-items: center; gap: 10px; }
+    .header p { margin: 5px 0 0 0; opacity: 0.9; font-size: 14px; }
+
+    .card { border: none; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 16px; border-radius: 12px; }
+    .card-header { background: #667eea; color: white; font-weight: 500; border-radius: 12px 12px 0 0 !important; }
+
+    .btn-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; }
+    .btn-primary:hover { background: linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%); }
+    .btn-outline-primary { color: #667eea; border-color: #667eea; }
+    .btn-outline-primary:hover { background: #667eea; color: white; }
+
+    .date-btn { margin-right: 8px; margin-bottom: 8px; }
+    .date-btn.active { background: #667eea; color: white; }
+
+    .preview-panel { background: white; border-radius: 8px; padding: 16px; min-height: 300px; max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 13px; white-space: pre-wrap; border: 1px solid #e0e0e0; }
+
+    .edit-textarea { width: 100%; min-height: 300px; font-family: monospace; font-size: 13px; border: 1px solid #dadce0; border-radius: 8px; padding: 12px; resize: vertical; }
+    .edit-textarea:focus { outline: none; border-color: #667eea; box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2); }
+
+    .phrase-chip { display: inline-block; background: #e8f0fe; color: #1967d2; padding: 4px 12px; border-radius: 16px; margin: 4px; cursor: pointer; font-size: 12px; transition: all 0.2s; }
+    .phrase-chip:hover { background: #1967d2; color: white; }
+    .phrase-chip .remove-phrase { margin-left: 6px; opacity: 0.6; }
+    .phrase-chip .remove-phrase:hover { opacity: 1; }
+
+    .alert-warning-custom { background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 12px; margin-bottom: 16px; }
+    .alert-warning-custom i { color: #856404; }
+
+    .loading { text-align: center; padding: 60px; color: #5f6368; }
+    .loading i { font-size: 48px; color: #667eea; margin-bottom: 16px; }
+
+    .summary-stat { text-align: center; padding: 16px; background: #f8f9fa; border-radius: 8px; }
+    .summary-stat .value { font-size: 24px; font-weight: bold; color: #667eea; }
+    .summary-stat .label { font-size: 12px; color: #5f6368; }
+
+    .copy-success { position: fixed; top: 20px; right: 20px; background: #34a853; color: white; padding: 12px 24px; border-radius: 8px; display: none; z-index: 1000; animation: fadeIn 0.3s; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+
+    .tab-content { padding-top: 16px; }
+    .nav-tabs .nav-link { color: #5f6368; }
+    .nav-tabs .nav-link.active { color: #667eea; border-color: #667eea; border-bottom-color: white; }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <div class="header">
+    <h1><i class="bi bi-clipboard-check"></i> Daily Accomplishments</h1>
+    <p>Generate timesheet summaries from completed tasks</p>
+  </div>
+
+  <!-- Date Selection -->
+  <div class="card">
+    <div class="card-header">
+      <i class="bi bi-calendar3"></i> Select Date Range
+    </div>
+    <div class="card-body">
+      <div class="row">
+        <div class="col-md-8">
+          <button class="btn btn-outline-primary date-btn" data-preset="today">Today</button>
+          <button class="btn btn-outline-primary date-btn" data-preset="yesterday">Yesterday</button>
+          <button class="btn btn-outline-primary date-btn active" data-preset="thisWeek">This Week</button>
+          <button class="btn btn-outline-primary date-btn" data-preset="lastWeek">Last Week</button>
+        </div>
+        <div class="col-md-4">
+          <div class="d-flex gap-2 align-items-center">
+            <input type="date" id="startDate" class="form-control form-control-sm">
+            <span>to</span>
+            <input type="date" id="endDate" class="form-control form-control-sm">
+            <button class="btn btn-sm btn-primary" onclick="loadCustomRange()">
+              <i class="bi bi-search"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Missing Times Alert -->
+  <div id="missingTimesAlert" class="alert-warning-custom" style="display: none;">
+    <i class="bi bi-exclamation-triangle-fill"></i>
+    <span id="missingTimesText"></span>
+  </div>
+
+  <!-- Main Content Tabs -->
+  <ul class="nav nav-tabs" id="mainTabs" role="tablist">
+    <li class="nav-item">
+      <button class="nav-link active" id="preview-tab" data-bs-toggle="tab" data-bs-target="#preview-pane" type="button">
+        <i class="bi bi-eye"></i> Preview
+      </button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link" id="edit-tab" data-bs-toggle="tab" data-bs-target="#edit-pane" type="button">
+        <i class="bi bi-pencil"></i> Edit
+      </button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link" id="phrases-tab" data-bs-toggle="tab" data-bs-target="#phrases-pane" type="button">
+        <i class="bi bi-bookmark"></i> Phrases
+      </button>
+    </li>
+  </ul>
+
+  <div class="tab-content">
+    <!-- Preview Tab -->
+    <div class="tab-pane fade show active" id="preview-pane" role="tabpanel">
+      <div id="loadingState" class="loading">
+        <i class="bi bi-arrow-repeat spin"></i>
+        <p>Loading completed tasks...</p>
+      </div>
+
+      <div id="previewContent" style="display: none;">
+        <!-- Summary Stats -->
+        <div class="row mb-3" id="summaryStats">
+          <div class="col-md-3">
+            <div class="summary-stat">
+              <div class="value" id="statFieldTime">0 hrs</div>
+              <div class="label">Field Time</div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="summary-stat">
+              <div class="value" id="statDriveTime">0 hrs</div>
+              <div class="label">Drive Time</div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="summary-stat">
+              <div class="value" id="statOfficeTime">0 hrs</div>
+              <div class="label">Office Time</div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="summary-stat">
+              <div class="value" id="statTasks">0</div>
+              <div class="label">Tasks Completed</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Preview Panel -->
+        <div class="preview-panel" id="previewPanel">
+          No completed tasks found for selected date range.
+        </div>
+      </div>
+
+      <div id="emptyState" style="display: none; text-align: center; padding: 60px; color: #5f6368;">
+        <i class="bi bi-inbox" style="font-size: 48px; color: #dadce0;"></i>
+        <p class="mt-3">No completed tasks found for the selected date range.</p>
+        <p class="small">Try selecting a different date range or mark some tasks as completed.</p>
+      </div>
+    </div>
+
+    <!-- Edit Tab -->
+    <div class="tab-pane fade" id="edit-pane" role="tabpanel">
+      <p class="text-muted small mb-2">Edit the text below before copying to your timesheet:</p>
+      <textarea id="editTextarea" class="edit-textarea" placeholder="Load tasks to see the generated summary here..."></textarea>
+    </div>
+
+    <!-- Phrases Tab -->
+    <div class="tab-pane fade" id="phrases-pane" role="tabpanel">
+      <p class="text-muted small mb-2">Click a phrase to insert it into your summary. Manage your saved phrases below.</p>
+
+      <div class="card mb-3">
+        <div class="card-body">
+          <div id="phrasesList">
+            <!-- Phrases will be loaded here -->
+          </div>
+        </div>
+      </div>
+
+      <div class="d-flex gap-2">
+        <input type="text" id="newPhrase" class="form-control" placeholder="Add a new phrase...">
+        <button class="btn btn-primary" onclick="addPhrase()">
+          <i class="bi bi-plus"></i> Add
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Action Buttons -->
+  <div class="d-flex justify-content-between mt-3">
+    <div>
+      <select id="formatSelect" class="form-select form-select-sm d-inline-block" style="width: auto;">
+        <option value="text">Plain Text</option>
+        <option value="bullets">Bullet List</option>
+      </select>
+    </div>
+    <div>
+      <button class="btn btn-outline-secondary me-2" onclick="google.script.host.close()">
+        Close
+      </button>
+      <button class="btn btn-primary" onclick="copyToClipboard()">
+        <i class="bi bi-clipboard"></i> Copy to Clipboard
+      </button>
+    </div>
+  </div>
+
+  <!-- Copy Success Toast -->
+  <div class="copy-success" id="copySuccess">
+    <i class="bi bi-check-circle"></i> Copied to clipboard!
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    // State
+    var currentBreakdown = null;
+    var currentOutput = '';
+    var favoritePhrases = [];
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', function() {
+      // Set up date button handlers
+      document.querySelectorAll('.date-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          document.querySelectorAll('.date-btn').forEach(function(b) { b.classList.remove('active'); });
+          this.classList.add('active');
+          loadPreset(this.dataset.preset);
+        });
+      });
+
+      // Set up format change handler
+      document.getElementById('formatSelect').addEventListener('change', function() {
+        if (currentBreakdown) {
+          regenerateOutput();
+        }
+      });
+
+      // Load initial data (this week)
+      loadPreset('thisWeek');
+
+      // Load favorite phrases
+      loadPhrases();
+    });
+
+    // Load preset date range
+    function loadPreset(preset) {
+      showLoading();
+
+      google.script.run
+        .withSuccessHandler(function(range) {
+          document.getElementById('startDate').value = range.startDate;
+          document.getElementById('endDate').value = range.endDate;
+          loadTasks(range.startDate, range.endDate);
+        })
+        .withFailureHandler(handleError)
+        .getDateRangePreset(preset);
+    }
+
+    // Load custom date range
+    function loadCustomRange() {
+      var startDate = document.getElementById('startDate').value;
+      var endDate = document.getElementById('endDate').value;
+
+      if (!startDate || !endDate) {
+        alert('Please select both start and end dates.');
+        return;
+      }
+
+      // Remove active from preset buttons
+      document.querySelectorAll('.date-btn').forEach(function(b) { b.classList.remove('active'); });
+
+      showLoading();
+      loadTasks(startDate, endDate);
+    }
+
+    // Load tasks for date range
+    function loadTasks(startDate, endDate) {
+      google.script.run
+        .withSuccessHandler(handleTasksLoaded)
+        .withFailureHandler(handleError)
+        .getCompletedTasksForPeriod(startDate, endDate);
+    }
+
+    // Handle tasks loaded
+    function handleTasksLoaded(breakdown) {
+      currentBreakdown = breakdown;
+
+      hideLoading();
+
+      // Check if we have any tasks
+      var hasTasks = breakdown.dayOrder && breakdown.dayOrder.length > 0;
+
+      if (!hasTasks) {
+        document.getElementById('previewContent').style.display = 'none';
+        document.getElementById('emptyState').style.display = 'block';
+        document.getElementById('editTextarea').value = '';
+        currentOutput = '';
+        return;
+      }
+
+      document.getElementById('previewContent').style.display = 'block';
+      document.getElementById('emptyState').style.display = 'none';
+
+      // Update summary stats
+      if (breakdown.weekSummary) {
+        var ws = breakdown.weekSummary;
+        document.getElementById('statFieldTime').textContent = formatMinutesDisplay(ws.totalFieldMinutes);
+        document.getElementById('statDriveTime').textContent = formatMinutesDisplay(ws.totalDriveMinutes);
+        document.getElementById('statOfficeTime').textContent = formatMinutesDisplay(ws.totalOfficeMinutes);
+
+        var totalTasks = ws.taskCounts.swaps + ws.taskCounts.trainings +
+                        ws.taskCounts.certs + ws.taskCounts.reclaims + ws.taskCounts.other;
+        document.getElementById('statTasks').textContent = totalTasks;
+      }
+
+      // Show missing times alert if needed
+      if (breakdown.missingTimesAlert && breakdown.missingTimesAlert.hasMissing) {
+        var alert = breakdown.missingTimesAlert;
+        document.getElementById('missingTimesText').textContent =
+          '⚠️ ' + alert.count + ' task(s) across ' + alert.daysAffected +
+          ' day(s) have no start/end times - using estimates.';
+        document.getElementById('missingTimesAlert').style.display = 'block';
+      } else {
+        document.getElementById('missingTimesAlert').style.display = 'none';
+      }
+
+      // Generate output
+      regenerateOutput();
+    }
+
+    // Regenerate output with current format
+    function regenerateOutput() {
+      var format = document.getElementById('formatSelect').value;
+
+      google.script.run
+        .withSuccessHandler(function(output) {
+          currentOutput = output;
+          document.getElementById('previewPanel').textContent = output;
+          document.getElementById('editTextarea').value = output;
+        })
+        .withFailureHandler(handleError)
+        .formatBreakdownForTimesheet(currentBreakdown, format);
+    }
+
+    // Copy to clipboard
+    function copyToClipboard() {
+      // Get text from edit textarea (may have been modified)
+      var text = document.getElementById('editTextarea').value;
+
+      if (!text) {
+        alert('No content to copy.');
+        return;
+      }
+
+      // Copy to clipboard
+      navigator.clipboard.writeText(text).then(function() {
+        // Show success toast
+        var toast = document.getElementById('copySuccess');
+        toast.style.display = 'block';
+        setTimeout(function() {
+          toast.style.display = 'none';
+        }, 2000);
+      }).catch(function(err) {
+        // Fallback for older browsers
+        var textarea = document.createElement('textarea');
+        textarea.value = text;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+
+        var toast = document.getElementById('copySuccess');
+        toast.style.display = 'block';
+        setTimeout(function() {
+          toast.style.display = 'none';
+        }, 2000);
+      });
+    }
+
+    // Load favorite phrases
+    function loadPhrases() {
+      google.script.run
+        .withSuccessHandler(function(phrases) {
+          favoritePhrases = phrases;
+          renderPhrases();
+        })
+        .withFailureHandler(handleError)
+        .getFavoritePhrases();
+    }
+
+    // Render phrases
+    function renderPhrases() {
+      var container = document.getElementById('phrasesList');
+      container.innerHTML = '';
+
+      if (favoritePhrases.length === 0) {
+        container.innerHTML = '<p class="text-muted">No saved phrases yet. Add some below!</p>';
+        return;
+      }
+
+      favoritePhrases.forEach(function(phrase, index) {
+        var chip = document.createElement('span');
+        chip.className = 'phrase-chip';
+        chip.innerHTML = phrase +
+          '<span class="remove-phrase" onclick="event.stopPropagation(); removePhrase(' + index + ');">&times;</span>';
+        chip.onclick = function() { insertPhrase(phrase); };
+        container.appendChild(chip);
+      });
+    }
+
+    // Insert phrase into edit textarea
+    function insertPhrase(phrase) {
+      var textarea = document.getElementById('editTextarea');
+      var cursorPos = textarea.selectionStart;
+      var textBefore = textarea.value.substring(0, cursorPos);
+      var textAfter = textarea.value.substring(cursorPos);
+
+      textarea.value = textBefore + phrase + textAfter;
+      textarea.focus();
+      textarea.selectionStart = textarea.selectionEnd = cursorPos + phrase.length;
+
+      // Switch to edit tab
+      var editTab = new bootstrap.Tab(document.getElementById('edit-tab'));
+      editTab.show();
+    }
+
+    // Add new phrase
+    function addPhrase() {
+      var input = document.getElementById('newPhrase');
+      var phrase = input.value.trim();
+
+      if (!phrase) {
+        alert('Please enter a phrase.');
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(phrases) {
+          favoritePhrases = phrases;
+          renderPhrases();
+          input.value = '';
+        })
+        .withFailureHandler(handleError)
+        .addFavoritePhrase(phrase);
+    }
+
+    // Remove phrase
+    function removePhrase(index) {
+      var phrase = favoritePhrases[index];
+
+      google.script.run
+        .withSuccessHandler(function(phrases) {
+          favoritePhrases = phrases;
+          renderPhrases();
+        })
+        .withFailureHandler(handleError)
+        .removeFavoritePhrase(phrase);
+    }
+
+    // UI Helpers
+    function showLoading() {
+      document.getElementById('loadingState').style.display = 'block';
+      document.getElementById('previewContent').style.display = 'none';
+      document.getElementById('emptyState').style.display = 'none';
+    }
+
+    function hideLoading() {
+      document.getElementById('loadingState').style.display = 'none';
+    }
+
+    function handleError(error) {
+      hideLoading();
+      console.error('Error:', error);
+      alert('Error: ' + error.message);
+    }
+
+    function formatMinutesDisplay(minutes) {
+      if (!minutes || minutes <= 0) return '0 hrs';
+
+      var hrs = Math.floor(minutes / 60);
+      var mins = Math.round(minutes % 60);
+
+      if (hrs > 0 && mins > 0) {
+        return hrs + '.' + Math.round(mins / 6) + ' hrs';
+      } else if (hrs > 0) {
+        return hrs + ' hrs';
+      } else {
+        return mins + ' min';
+      }
+    }
+  </script>
+
+  <style>
+    .spin { animation: spin 1s linear infinite; }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  </style>
+</body>
+</html>

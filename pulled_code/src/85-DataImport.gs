@@ -831,17 +831,6 @@ function activatePendingJobs(jobNumbers) {
         var rowIdx = i + 1;
         jobSheet.getRange(rowIdx, 10).setValue('Active');  // Status (J, column 10)
 
-        // Set Start Date to today if not already set or if it's in the future
-        var currentStartDate = jobData[i][4]; // Start Date (E, index 4)
-        var todayDate = new Date();
-        todayDate.setHours(0, 0, 0, 0);
-        var startDateObj = currentStartDate ? new Date(currentStartDate) : null;
-        if (startDateObj) startDateObj.setHours(0, 0, 0, 0);
-        if (!startDateObj || startDateObj > todayDate) {
-          jobSheet.getRange(rowIdx, 5).setValue(todayDate);  // Start Date (E, column 5)
-          Logger.log('activatePendingJobs: Set Start Date to today for ' + jobNum);
-        }
-
         // Clear Put On Hold Date (F) if coming from On Hold
         if (currentStatus === 'On Hold') {
           jobSheet.getRange(rowIdx, 6).setValue('');  // Put On Hold Date (F)
@@ -1827,7 +1816,7 @@ function searchEmployeeHistoryBatch(namesJson) {
 
   for (var h = 0; h < historyData.length; h++) {
     var row = historyData[h];
-    var histName = String(row[1] || '').replace(/^["']+|["']+$/g, '').trim();
+    var histName = String(row[1] || '').trim();
     var histNameLower = histName.toLowerCase();
 
     // Only process names we're looking for

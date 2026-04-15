@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 15px;
+      margin: 0;
+    }
+    h2 {
+      color: #1565c0;
+      margin-top: 0;
+    }
+    .form-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      font-weight: bold;
+      margin-bottom: 5px;
+      color: #333;
+    }
+    input, select {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      box-sizing: border-box;
+      font-size: 14px;
+    }
+    input:focus, select:focus {
+      border-color: #1565c0;
+      outline: none;
+    }
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-right: 10px;
+    }
+    .btn-primary {
+      background-color: #1565c0;
+      color: white;
+    }
+    .btn-secondary {
+      background-color: #757575;
+      color: white;
+    }
+    .btn:hover {
+      opacity: 0.9;
+    }
+    .item-info {
+      background-color: #e3f2fd;
+      padding: 10px;
+      border-radius: 4px;
+      margin-bottom: 15px;
+    }
+    .radio-group {
+      margin-top: 5px;
+    }
+    .radio-group label {
+      display: inline;
+      font-weight: normal;
+      margin-right: 15px;
+    }
+    .radio-group input[type="radio"] {
+      width: auto;
+      margin-right: 5px;
+    }
+    .hint {
+      font-size: 11px;
+      color: #666;
+      margin-top: 3px;
+    }
+  </style>
+</head>
+<body>
+  <h2><? if (sheetName === 'Blankets') { ?>🧱 New Blanket Detected<? } else if (sheetName === 'HV Testers') { ?>⚡ New HV Tester Detected<? } else if (sheetName === 'Phasing Sets') { ?>⚡ New Phasing Set Detected<? } else if (sheetName === 'AED') { ?>🏥 New AED Detected<? } else { ?>📦 New <?= itemType ?> Detected<? } ?></h2>
+  <h2><? if (sheetName === 'Blankets') { ?>🧱 New Blanket Detected<? } else if (sheetName === 'HV Testers') { ?>⚡ New HV Tester Detected<? } else if (sheetName === 'Phasing Sets') { ?>⚡ New Phasing Set Detected<? } else if (sheetName === 'AED') { ?>🏥 New AED Detected<? } else { ?>📦 New <?= itemType ?> Detected<? } ?></h2>
+
+  <div class="item-info">
+    <strong>Item #:</strong> <?= itemNum ?><br>
+    <strong>Sheet:</strong> <?= sheetName ?>
+  </div>
+
+  <form id="newItemForm">
+    <? if (sheetName === 'HV Testers') { ?>
+    <!-- HV Testers: Model, KV, Serial #, Calibration Date -->
+    <div class="form-group">
+      <label>Model:</label>
+      <select id="model" name="model">
+        <option value="">Select model...</option>
+        <option value="Chance">Chance</option>
+        <option value="HD Electric">HD Electric</option>
+        <option value="Megger">Megger</option>
+        <option value="Other">Other</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>KV Rating:</label>
+      <input type="text" id="kv" name="kv" placeholder="e.g., 69, 138, 230">
+    </div>
+
+    <div class="form-group">
+      <label>Serial #:</label>
+      <input type="text" id="serialNum" name="serialNum" placeholder="Enter serial number">
+    </div>
+
+    <div class="form-group">
+      <label>Calibration Date:</label>
+      <input type="date" id="calibrationDate" name="calibrationDate">
+      <div class="hint">Change Out Date will auto-calculate (Calibration + 10 years)</div>
+    </div>
+
+    <? } else if (sheetName === 'Phasing Sets') { ?>
+    <!-- Phasing Sets: Model, KV, Serial #, Calibration Date -->
+    <div class="form-group">
+      <label>Model:</label>
+      <select id="model" name="model">
+        <option value="">Select model...</option>
+        <option value="Chance">Chance</option>
+        <option value="HD Electric">HD Electric</option>
+        <option value="Megger">Megger</option>
+        <option value="Other">Other</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>KV Rating:</label>
+      <input type="text" id="kv" name="kv" placeholder="e.g., 69, 138, 230">
+    </div>
+
+    <div class="form-group">
+      <label>Serial #:</label>
+      <input type="text" id="serialNum" name="serialNum" placeholder="Enter serial number">
+    </div>
+
+    <div class="form-group">
+      <label>Calibration Date:</label>
+      <input type="date" id="calibrationDate" name="calibrationDate">
+      <div class="hint">Replacement Date will auto-calculate (Calibration + 10 years)</div>
+    </div>
+
+    <? } else if (sheetName === 'AED') { ?>
+    <!-- AED: Model, Pad Expiration -->
+    <div class="form-group">
+      <label>Model:</label>
+      <select id="model" name="model">
+        <option value="">Select model...</option>
+        <option value="ZOLL AED Plus">ZOLL AED Plus</option>
+        <option value="ZOLL AED 3">ZOLL AED 3</option>
+        <option value="Philips HeartStart">Philips HeartStart</option>
+        <option value="Physio-Control LIFEPAK">Physio-Control LIFEPAK</option>
+        <option value="Cardiac Science Powerheart">Cardiac Science Powerheart</option>
+        <option value="Other">Other</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>Pad Expiration Date:</label>
+      <input type="date" id="padExpiration" name="padExpiration">
+      <div class="hint">When the defibrillator pads expire and need replacement</div>
+    </div>
+
+    <? } else if (sheetName === 'Blankets') { ?>
+    <!-- Blankets: Type field instead of Size -->
+    <div class="form-group">
+      <label>Type:</label>
+      <select id="size" name="size">
+        <option value="">Select type...</option>
+        <option value="Regular" <?= itemNum.toString().toUpperCase().charAt(0) === 'B' ? 'selected' : '' ?>>Regular</option>
+        <option value="Split" <?= itemNum.toString().toUpperCase().charAt(0) === 'S' ? 'selected' : '' ?>>Split</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>Class:</label>
+      <select id="itemClass" name="itemClass">
+        <option value="">Select class...</option>
+        <option value="4" selected>Class 4</option>
+        <option value="2">Class 2</option>
+      </select>
+    </div>
+    <? } else if (sheetName === 'Gloves') { ?>
+    <!-- Gloves: Size field -->
+    <div class="form-group">
+      <label>Size:</label>
+      <select id="size" name="size">
+        <option value="">Select size...</option>
+        <option value="8">8</option>
+        <option value="8.5">8.5</option>
+        <option value="9">9</option>
+        <option value="9.5">9.5</option>
+        <option value="10">10</option>
+        <option value="10.5">10.5</option>
+        <option value="11">11</option>
+        <option value="11.5">11.5</option>
+        <option value="12">12</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>Class:</label>
+      <select id="itemClass" name="itemClass">
+        <option value="">Select class...</option>
+        <option value="0">Class 0</option>
+        <option value="2" selected>Class 2</option>
+        <option value="3">Class 3</option>
+      </select>
+    </div>
+    <? } else { ?>
+    <!-- Sleeves: Size field -->
+    <div class="form-group">
+      <label>Size:</label>
+      <select id="size" name="size">
+        <option value="">Select size...</option>
+        <option value="Regular">Regular</option>
+        <option value="Large">Large</option>
+        <option value="X-Large">X-Large</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>Class:</label>
+      <select id="itemClass" name="itemClass">
+        <option value="">Select class...</option>
+        <option value="0">Class 0</option>
+        <option value="2" selected>Class 2</option>
+        <option value="3">Class 3</option>
+      </select>
+    </div>
+    <? } ?>
+
+    <? if (sheetName !== 'HV Testers' && sheetName !== 'Phasing Sets' && sheetName !== 'AED') { ?>
+    <div class="form-group">
+      <label>Test Date:</label>
+      <input type="date" id="testDate" name="testDate">
+    </div>
+    <? } ?>
+
+    <div class="form-group">
+      <label>Location:</label>
+      <input type="text" id="location" name="location" placeholder="Enter location (e.g., Helena)" value="Helena">
+    </div>
+
+    <div class="form-group">
+      <label>Status:</label>
+      <? if (sheetName === 'HV Testers' || sheetName === 'Phasing Sets' || sheetName === 'AED') { ?>
+      <select id="status" name="status">
+        <option value="On Shelf" selected>On Shelf</option>
+        <option value="In Service">In Service</option>
+        <option value="Lost">Lost</option>
+      </select>
+      <? } else if (sheetName === 'Blankets') { ?>
+      <select id="status" name="status">
+        <option value="On Shelf" selected>On Shelf</option>
+        <option value="In Service">In Service</option>
+        <option value="In Testing">In Testing</option>
+        <option value="Failed Rubber">Failed Rubber</option>
+        <option value="Lost">Lost</option>
+      </select>
+      <? } else { ?>
+      <select id="status" name="status">
+        <option value="On Shelf" selected>On Shelf</option>
+        <option value="In Testing">In Testing</option>
+        <option value="Assigned">Assigned</option>
+        <option value="Failed Rubber">Failed Rubber</option>
+        <option value="Lost">Lost</option>
+      </select>
+      <? } ?>
+    </div>
+
+    <div class="form-group">
+      <label>Assigned To:</label>
+      <input type="text" id="assignedTo" name="assignedTo" placeholder="Employee name or leave blank for On Shelf" value="">
+      <div class="hint">Enter employee name to auto-set Status to <? if (sheetName === 'HV Testers' || sheetName === 'Phasing Sets' || sheetName === 'Blankets' || sheetName === 'AED') { ?>In Service<? } else { ?>Assigned<? } ?> and lookup their location</div>
+    </div>
+
+    <hr style="margin: 20px 0;">
+
+    <div class="form-group">
+      <label>Item Source:</label>
+      <div class="radio-group">
+        <label><input type="radio" name="itemSource" value="1" checked> New Purchase</label>
+        <label><input type="radio" name="itemSource" value="2"> Reclaimed</label>
+        <label><input type="radio" name="itemSource" value="3"> Not a new item</label>
+      </div>
+    </div>
+
+    <div style="margin-top: 20px;">
+      <button type="button" class="btn btn-primary" onclick="submitForm()">Save</button>
+      <button type="button" class="btn btn-secondary" onclick="google.script.host.close()">Cancel</button>
+    </div>
+  </form>
+
+  <script>
+    var sheetName = '<?= sheetName ?>';
+    var employeeLocations = {}; // Cache for employee locations
+
+    // Load employee locations when dialog opens
+    google.script.run
+      .withSuccessHandler(function(data) {
+        if (data) {
+          employeeLocations = data;
+          console.log('Loaded ' + Object.keys(data).length + ' employee locations');
+        } else {
+          console.log('No employee locations returned');
+        }
+      })
+      .withFailureHandler(function(err) {
+        console.error('Failed to load employee locations: ' + err);
+      })
+      .getEmployeeLocationsMap();
+
+    // Function to auto-update Status and Location based on Assigned To value
+    function autoUpdateFromAssignedTo() {
+      var assignedTo = document.getElementById('assignedTo').value.trim();
+      var statusSelect = document.getElementById('status');
+      var locationInput = document.getElementById('location');
+
+      if (assignedTo === '') return; // Don't do anything if empty
+
+      // Define status values that are not employee names
+      var statusValueMap = {
+        'on shelf': 'On Shelf',
+        'in testing': 'In Testing',
+        'in service': 'In Service',
+        'failed': 'Failed Rubber',
+        'failed rubber': 'Failed Rubber',
+        'lost': 'Lost',
+        'ready for delivery': 'Ready For Delivery',
+        'ready for test': 'Ready For Test'
+      };
+
+      var assignedToLower = assignedTo.toLowerCase();
+      var isStatusValue = statusValueMap.hasOwnProperty(assignedToLower);
+
+      console.log('Assigned To: "' + assignedTo + '", isStatusValue: ' + isStatusValue);
+
+      if (isStatusValue) {
+        // This is a status value - set the Status dropdown to match
+        var targetStatus = statusValueMap[assignedToLower];
+        console.log('Status value detected, setting Status to: ' + targetStatus);
+        statusSelect.value = targetStatus;
+
+        // Clear the Assigned To field and put the status value there for the form submission
+        // Actually, keep it as is - the backend will handle it
+      } else {
+        // This looks like an employee name
+        // Set Status to In Service for Blankets/HV Testers/Phasing Sets, Assigned for Gloves/Sleeves
+        if (sheetName === 'Blankets' || sheetName === 'HV Testers' || sheetName === 'Phasing Sets' || sheetName === 'AED') {
+          statusSelect.value = 'In Service';
+        } else {
+          statusSelect.value = 'Assigned';
+        }
+        console.log('Employee name detected, set Status to: ' + statusSelect.value);
+
+        // Look up employee location
+        var empNameLower = assignedTo.toLowerCase();
+        console.log('Looking up location for: ' + empNameLower);
+        console.log('Available employees: ' + Object.keys(employeeLocations).length);
+
+        if (employeeLocations[empNameLower]) {
+          locationInput.value = employeeLocations[empNameLower];
+          console.log('Set Location to: ' + employeeLocations[empNameLower]);
+        } else {
+          console.log('Employee not found in locations map');
+        }
+      }
+    }
+
+    // Auto-update Status and Location when Assigned To changes (on blur and input)
+    document.getElementById('assignedTo').addEventListener('blur', autoUpdateFromAssignedTo);
+    document.getElementById('assignedTo').addEventListener('input', function() {
+      // Debounce - only run after user stops typing for 500ms
+      clearTimeout(this.autoUpdateTimer);
+      this.autoUpdateTimer = setTimeout(autoUpdateFromAssignedTo, 500);
+    });
+
+    function submitForm() {
+      var assignedTo = document.getElementById('assignedTo').value.trim();
+      var status = document.getElementById('status').value;
+
+      // If Assigned To is empty, default to "On Shelf" status value
+      if (assignedTo === '') {
+        assignedTo = 'On Shelf';
+        status = 'On Shelf';
+      }
+
+      var formData = {
+        location: document.getElementById('location').value,
+        status: status,
+        assignedTo: assignedTo,
+        itemSource: document.querySelector('input[name="itemSource"]:checked').value
+      };
+
+      // Equipment-specific fields
+      if (sheetName === 'HV Testers') {
+        formData.model = document.getElementById('model').value;
+        formData.kv = document.getElementById('kv').value;
+        formData.serialNum = document.getElementById('serialNum').value;
+        formData.calibrationDate = document.getElementById('calibrationDate').value;
+      } else if (sheetName === 'Phasing Sets') {
+        formData.model = document.getElementById('model').value;
+        formData.kv = document.getElementById('kv').value;
+        formData.serialNum = document.getElementById('serialNum').value;
+        formData.calibrationDate = document.getElementById('calibrationDate').value;
+      } else if (sheetName === 'AED') {
+        formData.model = document.getElementById('model').value;
+        formData.padExpiration = document.getElementById('padExpiration').value;
+      } else {
+        // Gloves/Sleeves/Blankets fields
+        formData.size = document.getElementById('size').value;
+        formData.itemClass = document.getElementById('itemClass').value;
+        formData.testDate = document.getElementById('testDate').value;
+      }
+
+      google.script.run
+        .withSuccessHandler(function() {
+          google.script.host.close();
+        })
+        .withFailureHandler(function(err) {
+          alert('Error: ' + err);
+        })
+        .processNewItemDialogSubmit(formData, '<?= itemNum ?>', '<?= sheetName ?>', <?= rowNum ?>);
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Manage Certifications</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  <style>
+    body { font-family: 'Google Sans', Arial, sans-serif; background: #f8f9fa; margin: 0; padding: 40px 20px; }
+    .container { max-width: 800px; margin: 0 auto; }
+    .header { text-align: center; margin-bottom: 40px; }
+    .header h1 { color: #1a73e8; font-size: 28px; margin-bottom: 8px; }
+    .header p { color: #5f6368; font-size: 14px; }
+    .choice-card { background: white; border-radius: 12px; padding: 32px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); cursor: pointer; transition: all 0.3s ease; margin-bottom: 20px; border: 2px solid transparent; }
+    .choice-card:hover { transform: translateY(-4px); box-shadow: 0 4px 16px rgba(0,0,0,0.15); border-color: #1a73e8; }
+    .choice-icon { font-size: 48px; margin-bottom: 16px; }
+    .choice-title { color: #202124; font-size: 20px; font-weight: 500; margin-bottom: 8px; }
+    .choice-description { color: #5f6368; font-size: 14px; line-height: 1.5; }
+    .btn-cancel { margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1><i class="bi bi-file-earmark-medical"></i> Manage Certifications</h1>
+      <p>Choose how you want to update certification information</p>
+    </div>
+
+    <div class="choice-card" onclick="selectOption('import')">
+      <div class="choice-icon">📤</div>
+      <div class="choice-title">Import New Excel Data</div>
+      <div class="choice-description">
+        <strong>Use this when you have certification data from your Excel spreadsheet.</strong> This will replace all existing certification records with new data from your Excel file. After importing, the Expiring Certs sheet will be populated automatically - do NOT run "Scan" afterwards or it will erase your data!
+      </div>
+    </div>
+
+    <div class="choice-card" onclick="selectOption('refresh')">
+      <div class="choice-icon">🔄</div>
+      <div class="choice-title">Refresh from Completed Tasks</div>
+      <div class="choice-description">
+        Update expiration dates based on completed certification renewal tasks in your To Do list. This automatically finds completed tasks and updates the corresponding certification dates in your existing Expiring Certs data.
+      </div>
+    </div>
+
+    <div class="choice-card" onclick="selectOption('scan')">
+      <div class="choice-icon">🔍</div>
+      <div class="choice-title">Scan Gloves/Sleeves for Expiring Certs</div>
+      <div class="choice-description">
+        <strong>Only use this if you DON'T import from Excel.</strong> This scans your Gloves and Sleeves sheets for items with certifications expiring within 60 days. WARNING: This will erase any imported Excel data! Use "Import New Excel Data" instead if you have an Excel spreadsheet.
+      </div>
+    </div>
+
+    <div class="text-center">
+      <button class="btn btn-outline-secondary btn-cancel" onclick="google.script.host.close()">
+        <i class="bi bi-x-lg"></i> Cancel
+      </button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    function selectOption(option) {
+      if (option === 'import') {
+        google.script.run
+          .withSuccessHandler(function() {
+            google.script.host.close();
+          })
+          .withFailureHandler(function(error) {
+            alert('Error: ' + error);
+          })
+          .showExpiringCertsImportDialog();
+      } else if (option === 'refresh') {
+        google.script.run
+          .withSuccessHandler(function(result) {
+            alert(result.message);
+            google.script.host.close();
+          })
+          .withFailureHandler(function(error) {
+            alert('Error: ' + error);
+          })
+          .refreshCertsFromCompletedTasks();
+      } else if (option === 'scan') {
+        // Close dialog first, then run the scan (which shows its own alert)
+        google.script.host.close();
+        google.script.run
+          .withFailureHandler(function(error) {
+            alert('Error scanning for expiring certs: ' + error);
+          })
+          .setupExpiringCertsSheet();
+      }
+    }
+  </script>
+</body>
+</html>

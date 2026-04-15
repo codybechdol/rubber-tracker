@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="description" content="Internal employee management form - Mountain Power">
+  <meta name="robots" content="noindex,nofollow">
+  <!-- Internal business application - not a public form -->
+  <style>
+    /* Bootstrap-equivalent styles (inline to avoid CDN blocking) */
+    *, *::before, *::after { box-sizing: border-box; }
+    body { font-family: 'Google Sans', Arial, sans-serif; padding: 20px; background: #f8f9fa; margin: 0; line-height: 1.5; color: #212529; }
+    .row { display: flex; flex-wrap: wrap; margin-left: -6px; margin-right: -6px; }
+    .col-md-6 { flex: 0 0 50%; max-width: 50%; padding-left: 6px; padding-right: 6px; }
+    .mb-2 { margin-bottom: 8px; }
+    .mb-3 { margin-bottom: 16px; }
+    .mt-2 { margin-top: 8px; }
+    .mt-3 { margin-top: 16px; }
+    .d-flex { display: flex; }
+    .gap-2 { gap: 8px; }
+    .justify-content-end { justify-content: flex-end; }
+    .form-label { display: block; font-weight: 500; color: #3c4043; font-size: 13px; margin-bottom: 4px; }
+    .form-control, .form-select {
+      display: block; width: 100%; padding: 6px 12px; font-size: 14px; line-height: 1.5;
+      color: #212529; background-color: #fff; border: 1px solid #ced4da; border-radius: 6px;
+      appearance: auto; transition: border-color .15s ease-in-out;
+    }
+    .form-control:focus, .form-select:focus { border-color: #86b7fe; outline: 0; box-shadow: 0 0 0 3px rgba(13,110,253,.25); }
+    .form-control-sm, .form-select-sm { padding: 4px 8px; font-size: 13px; }
+    .btn { display: inline-flex; align-items: center; gap: 4px; padding: 8px 16px; font-size: 14px; font-weight: 500; border-radius: 6px; border: 1px solid transparent; cursor: pointer; text-decoration: none; }
+    .btn-sm { padding: 4px 10px; font-size: 13px; }
+    .btn-primary { background: #1a73e8; border-color: #1a73e8; color: white; }
+    .btn-primary:hover { background: #1557b0; border-color: #1557b0; }
+    .btn-primary:disabled { opacity: 0.65; cursor: not-allowed; }
+    .btn-outline-secondary { background: transparent; border-color: #6c757d; color: #6c757d; }
+    .btn-outline-secondary:hover { background: #6c757d; color: white; }
+    .spinner-border { display: inline-block; width: 1em; height: 1em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .75s linear infinite; }
+    .spinner-border-sm { width: 0.8em; height: 0.8em; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    /* Custom styles */
+    .header { text-align: center; margin-bottom: 20px; }
+    .header h2 { color: #1a73e8; margin-bottom: 5px; }
+    .header .employee-name { font-size: 24px; font-weight: bold; color: #202124; }
+    .form-section { background: white; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .form-section h5 { color: #5f6368; margin-bottom: 12px; font-size: 14px; border-bottom: 1px solid #e0e0e0; padding-bottom: 8px; }
+    .required-star { color: #ea4335; }
+    .info-text { font-size: 12px; color: #5f6368; margin-top: 4px; }
+    .pending-badge { display: none; background: #fff3cd; color: #856404; border: 1px solid #ffc107; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; font-size: 13px; }
+    .pending-badge.visible { display: block; }
+    .rehire-badge { display: none; background: #d1ecf1; color: #0c5460; border: 1px solid #17a2b8; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; font-size: 13px; }
+    .rehire-badge.visible { display: block; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h2>👤 New Employee</h2>
+    <div class="employee-name" id="employeeName"></div>
+  </div>
+
+  <div class="rehire-badge" id="rehireBadge">
+    🔄 <strong>Rehire Detected</strong> — Employee History data found. Fields have been pre-filled from previous records.
+  </div>
+
+  <div class="pending-badge" id="pendingBadge">
+    🕐 <strong>Pending New Hire</strong> — This employee has a future start date.
+    Equipment can be pre-assigned now. They will be excluded from swap reports and task collection until their Hire Date.
+  </div>
+
+  <form id="employeeForm">
+    <!-- Location & Job Info -->
+    <div class="form-section">
+      <h5>📍 Location & Job Info</h5>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Location <span class="required-star">*</span></label>
+          <select class="form-select" id="location" required onchange="handleLocationChange()">
+            <option value="">Select location...</option>
+          </select>
+          <div class="info-text" id="locationHint">"Unknown" is only available for Pending New Hires</div>
+
+          <!-- Inline New Location Form -->
+          <div id="newLocationForm" style="display:none; margin-top:10px; padding:12px; background:#e8f0fe; border-radius:8px; border:1px solid #1a73e8;">
+            <h6 style="color:#1a73e8; margin-bottom:10px;">📍 Add New Location</h6>
+            <div class="mb-2">
+              <label class="form-label" style="font-size:12px;">Location Name <span class="required-star">*</span></label>
+              <input type="text" class="form-control form-control-sm" id="newLocationName" placeholder="e.g., Hamilton">
+            </div>
+            <div class="mb-2">
+              <label class="form-label" style="font-size:12px;">Drive Time from Helena (minutes) <span class="required-star">*</span></label>
+              <input type="number" class="form-control form-control-sm" id="newLocationDriveTime" placeholder="e.g., 120" min="0">
+            </div>
+            <div class="mb-2">
+              <label class="form-label" style="font-size:12px;">Direction from Helena <span class="required-star">*</span></label>
+              <select class="form-select form-select-sm" id="newLocationDirection">
+                <option value="">Select direction...</option>
+                <option value="East">East</option>
+                <option value="North">North</option>
+                <option value="West">West</option>
+                <option value="Southwest">Southwest</option>
+                <option value="Northwest">Northwest</option>
+                <option value="Far">Far</option>
+              </select>
+            </div>
+            <div class="mb-2">
+              <label class="form-label" style="font-size:12px;">Overnight City</label>
+              <input type="text" class="form-control form-control-sm" id="newLocationOvernightCity" placeholder="Defaults to location name">
+              <div class="info-text">Nearest city for overnight stays (leave blank to use location name)</div>
+            </div>
+            <div class="d-flex gap-2 mt-2">
+              <button type="button" class="btn btn-sm btn-primary" onclick="saveNewLocation()" id="saveLocationBtn">
+                ✅ Save Location
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="cancelNewLocation()">
+                Cancel
+              </button>
+            </div>
+            <div id="newLocationError" style="display:none; color:#dc3545; font-size:12px; margin-top:6px;"></div>
+            <div id="newLocationSuccess" style="display:none; color:#28a745; font-size:12px; margin-top:6px;"></div>
+          </div>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Job Number <span class="required-star">*</span></label>
+          <input type="text" class="form-control" id="jobNumber" placeholder="e.g., 005-26.1" required>
+          <div class="info-text">Format: XXX-YY.Z (e.g., 005-26.1)</div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Job Classification <span class="required-star">*</span></label>
+          <select class="form-select" id="jobClassification" required>
+            <option value="">Select classification...</option>
+            <option value="AP 1">AP 1 - Apprentice 1st Year</option>
+            <option value="AP 2">AP 2 - Apprentice 2nd Year</option>
+            <option value="AP 3">AP 3 - Apprentice 3rd Year</option>
+            <option value="AP 4">AP 4 - Apprentice 4th Year</option>
+            <option value="AP 5">AP 5 - Apprentice 5th Year</option>
+            <option value="AP 6">AP 6 - Apprentice 6th Year</option>
+            <option value="AP 7">AP 7 - Apprentice 7th Year</option>
+            <option value="JRY">JRY - Journeyman Lineman</option>
+            <option value="WT">WT - White Ticket Lineman</option>
+            <option value="F">F - Foreman</option>
+            <option value="GF">GF - General Foreman</option>
+            <option value="SUP">SUP - Supervisor</option>
+            <option value="JRY OP">JRY OP - Journeyman Operator</option>
+            <option value="OP">OP - Operator</option>
+            <option value="GTO F">GTO F - GTO Foreman</option>
+            <option value="GTO">GTO - General Trade Operator</option>
+            <option value="EO 1">EO 1 - Equipment Operator 1</option>
+            <option value="EO 2">EO 2 - Equipment Operator 2</option>
+          </select>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Hire Date <span class="required-star">*</span></label>
+          <input type="date" class="form-control" id="hireDate" required onchange="checkPendingStatus()">
+          <div class="info-text">Future date = Pending New Hire (excluded from reports until start date)</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Contact Info -->
+    <div class="form-section">
+      <h5>📞 Contact Info</h5>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Phone Number</label>
+          <input type="text" class="form-control" id="phoneNumber" placeholder="(406) 555-1234">
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Personal Contact</label>
+          <input type="text" class="form-control" id="emailAddress" placeholder="Optional">
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label">MP Work Contact</label>
+          <input type="text" class="form-control" id="mpEmail" placeholder="team##">
+          <div class="info-text">MountainPower work address</div>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Notification Contact</label>
+          <input type="text" class="form-control" id="notificationEmails" placeholder="For notifications">
+        </div>
+      </div>
+    </div>
+
+    <!-- Equipment Sizes -->
+    <div class="form-section">
+      <h5>🧤 Equipment Sizes</h5>
+      <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Glove Size</label>
+          <select class="form-select" id="gloveSize">
+            <option value="">Select size...</option>
+            <option value="8">8</option>
+            <option value="8.5">8.5</option>
+            <option value="9">9</option>
+            <option value="9.5">9.5</option>
+            <option value="10">10</option>
+            <option value="10.5">10.5</option>
+            <option value="11">11</option>
+            <option value="11.5">11.5</option>
+            <option value="12">12</option>
+            <option value="N/A">N/A</option>
+          </select>
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Sleeve Size</label>
+          <select class="form-select" id="sleeveSize">
+            <option value="">Select size...</option>
+            <option value="Regular">Regular</option>
+            <option value="Large">Large</option>
+            <option value="X-Large">X-Large</option>
+            <option value="N/A">N/A</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Buttons -->
+    <div class="d-flex justify-content-end gap-2 mt-3">
+      <button type="button" class="btn btn-outline-secondary" onclick="skipForNow()">
+        ❌ Skip for Now
+      </button>
+      <button type="submit" class="btn btn-primary" id="submitBtn">
+        ✅ Save Employee
+      </button>
+    </div>
+  </form>
+
+  <script>
+    // Get data passed from the template
+    var employeeName = <?= JSON.stringify(employeeName || '') ?>;
+    var rowIndex = <?= rowIndex || 0 ?>;
+    var passedLocations = <?= locations || '[]' ?>;
+    var historyData = <?= historyData || 'null' ?>;
+    var isRehire = false;
+
+    // Initialize dialog on load
+    document.addEventListener('DOMContentLoaded', function() {
+      document.getElementById('employeeName').textContent = employeeName;
+
+      // Populate locations dropdown
+      var locationSelect = document.getElementById('location');
+      var locations = typeof passedLocations === 'string' ? JSON.parse(passedLocations) : passedLocations;
+
+      var hasUnknown = false;
+      if (locations && locations.length > 0) {
+        locations.forEach(function(loc) {
+          if (loc.toLowerCase() === 'unknown') hasUnknown = true;
+          var option = document.createElement('option');
+          option.value = loc;
+          option.textContent = loc;
+          locationSelect.appendChild(option);
+        });
+      }
+      if (!hasUnknown) {
+        var unknownOpt = document.createElement('option');
+        unknownOpt.value = 'Unknown';
+        unknownOpt.textContent = 'Unknown (TBD)';
+        unknownOpt.disabled = true; // disabled by default until pending
+        locationSelect.appendChild(unknownOpt);
+      }
+
+      // Add "+ Add New Location" option at the bottom
+      var addNewOpt = document.createElement('option');
+      addNewOpt.value = '__ADD_NEW__';
+      addNewOpt.textContent = '➕ Add New Location...';
+      addNewOpt.style.color = '#1a73e8';
+      addNewOpt.style.fontWeight = 'bold';
+      locationSelect.appendChild(addNewOpt);
+
+      // If history data found, pre-fill fields (rehire)
+      var histData = typeof historyData === 'string' ? JSON.parse(historyData) : historyData;
+      if (histData && histData.name) {
+        isRehire = true;
+        document.getElementById('rehireBadge').classList.add('visible');
+        document.getElementById('submitBtn').innerHTML = '🔄 Save & Rehire';
+
+        // Pre-fill from history (user can override)
+        if (histData.phone) document.getElementById('phoneNumber').value = histData.phone;
+        if (histData.email) document.getElementById('emailAddress').value = histData.email;
+        if (histData.gloveSize) setSelectValue('gloveSize', histData.gloveSize);
+        if (histData.sleeveSize) setSelectValue('sleeveSize', histData.sleeveSize);
+        // Don't pre-fill location/job — those are likely changing for a rehire
+        // Don't pre-fill hire date — user must set new one
+      }
+
+      // Set today as default hire date
+      var today = new Date().toISOString().split('T')[0];
+      if (!document.getElementById('hireDate').value) {
+        document.getElementById('hireDate').value = today;
+      }
+
+      checkPendingStatus();
+      console.log('Dialog initialized: name=' + employeeName + ', rowIndex=' + rowIndex + ', isRehire=' + isRehire);
+    });
+
+    function setSelectValue(id, value) {
+      var sel = document.getElementById(id);
+      for (var i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].value === value) {
+          sel.selectedIndex = i;
+          return;
+        }
+      }
+    }
+
+    /**
+     * Check if hire date is in the future and show/hide pending badge.
+     * Controls "Unknown" location availability.
+     */
+    function checkPendingStatus() {
+      var hireDateStr = document.getElementById('hireDate').value;
+      var badge = document.getElementById('pendingBadge');
+      var locationSelect = document.getElementById('location');
+      var isPending = false;
+
+      if (hireDateStr) {
+        var hireDate = new Date(hireDateStr + 'T00:00:00');
+        var today = new Date();
+        today.setHours(0, 0, 0, 0);
+        isPending = hireDate > today;
+      }
+
+      if (isPending) {
+        badge.classList.add('visible');
+      } else {
+        badge.classList.remove('visible');
+        // If not pending and "Unknown" is selected, clear it
+        if (locationSelect.value.toLowerCase() === 'unknown') {
+          locationSelect.value = '';
+        }
+      }
+
+      // Enable/disable "Unknown" option based on pending status
+      for (var i = 0; i < locationSelect.options.length; i++) {
+        if (locationSelect.options[i].value.toLowerCase() === 'unknown') {
+          locationSelect.options[i].disabled = !isPending;
+          locationSelect.options[i].textContent = isPending ? 'Unknown (TBD)' : 'Unknown (pending only)';
+          break;
+        }
+      }
+    }
+
+    /**
+     * Handles location dropdown change - shows inline form when "+ Add New Location" selected.
+     */
+    function handleLocationChange() {
+      var locationSelect = document.getElementById('location');
+      if (locationSelect.value === '__ADD_NEW__') {
+        document.getElementById('newLocationForm').style.display = 'block';
+        document.getElementById('newLocationName').focus();
+        document.getElementById('newLocationError').style.display = 'none';
+        document.getElementById('newLocationSuccess').style.display = 'none';
+        // Reset the select to blank so form validation doesn't pass with "__ADD_NEW__"
+        locationSelect.value = '';
+      } else {
+        document.getElementById('newLocationForm').style.display = 'none';
+      }
+    }
+
+    /**
+     * Saves a new location to the Locations sheet, then adds it to the dropdown.
+     */
+    function saveNewLocation() {
+      var name = document.getElementById('newLocationName').value.trim();
+      var driveTime = document.getElementById('newLocationDriveTime').value;
+      var direction = document.getElementById('newLocationDirection').value;
+      var overnightCity = document.getElementById('newLocationOvernightCity').value.trim() || name;
+      var errorDiv = document.getElementById('newLocationError');
+      var successDiv = document.getElementById('newLocationSuccess');
+
+      errorDiv.style.display = 'none';
+      successDiv.style.display = 'none';
+
+      // Validate
+      if (!name) { errorDiv.textContent = 'Location name is required.'; errorDiv.style.display = 'block'; return; }
+      if (!driveTime && driveTime !== '0') { errorDiv.textContent = 'Drive time is required.'; errorDiv.style.display = 'block'; return; }
+      if (!direction) { errorDiv.textContent = 'Direction is required.'; errorDiv.style.display = 'block'; return; }
+
+      var btn = document.getElementById('saveLocationBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saving...';
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          btn.disabled = false;
+          btn.innerHTML = '✅ Save Location';
+
+          if (result && result.success) {
+            successDiv.textContent = '✅ Location "' + name + '" added!';
+            successDiv.style.display = 'block';
+
+            // Add to dropdown and select it
+            var locationSelect = document.getElementById('location');
+            var newOption = document.createElement('option');
+            newOption.value = name;
+            newOption.textContent = name;
+
+            // Insert before the __ADD_NEW__ and Unknown options (sorted position)
+            var inserted = false;
+            for (var i = 0; i < locationSelect.options.length; i++) {
+              var opt = locationSelect.options[i];
+              if (opt.value === '__ADD_NEW__' || opt.value === 'Unknown' || opt.value === '') continue;
+              if (opt.textContent.localeCompare(name) > 0) {
+                locationSelect.insertBefore(newOption, opt);
+                inserted = true;
+                break;
+              }
+            }
+            if (!inserted) {
+              // Insert before __ADD_NEW__ option
+              var addNewOpt = locationSelect.querySelector('option[value="__ADD_NEW__"]');
+              if (addNewOpt) {
+                locationSelect.insertBefore(newOption, addNewOpt);
+              } else {
+                locationSelect.appendChild(newOption);
+              }
+            }
+
+            locationSelect.value = name;
+
+            // Hide form after short delay
+            setTimeout(function() {
+              document.getElementById('newLocationForm').style.display = 'none';
+              // Clear form fields
+              document.getElementById('newLocationName').value = '';
+              document.getElementById('newLocationDriveTime').value = '';
+              document.getElementById('newLocationDirection').value = '';
+              document.getElementById('newLocationOvernightCity').value = '';
+              successDiv.style.display = 'none';
+            }, 1000);
+          } else {
+            errorDiv.textContent = (result && result.message) || 'Failed to add location.';
+            errorDiv.style.display = 'block';
+          }
+        })
+        .withFailureHandler(function(error) {
+          btn.disabled = false;
+          btn.innerHTML = '✅ Save Location';
+          errorDiv.textContent = 'Error: ' + error;
+          errorDiv.style.display = 'block';
+        })
+        .addLocationWithDriveTime(name, Number(driveTime), direction, overnightCity);
+    }
+
+    /**
+     * Cancels the inline new location form.
+     */
+    function cancelNewLocation() {
+      document.getElementById('newLocationForm').style.display = 'none';
+      document.getElementById('newLocationName').value = '';
+      document.getElementById('newLocationDriveTime').value = '';
+      document.getElementById('newLocationDirection').value = '';
+      document.getElementById('newLocationOvernightCity').value = '';
+      document.getElementById('location').value = '';
+    }
+
+    // Form submission
+    document.getElementById('employeeForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+
+      // Client-side validation: "Unknown" only for pending
+      var locVal = document.getElementById('location').value;
+
+      // Prevent submission if new location form is still open
+      if (document.getElementById('newLocationForm').style.display !== 'none') {
+        alert('Please save or cancel the new location before submitting.');
+        return;
+      }
+
+      // Prevent submission if __ADD_NEW__ value somehow persisted
+      if (locVal === '__ADD_NEW__' || !locVal) {
+        alert('Please select a valid location.');
+        return;
+      }
+
+      var hireDateStr = document.getElementById('hireDate').value;
+      if (locVal.toLowerCase() === 'unknown') {
+        var hd = new Date(hireDateStr + 'T00:00:00');
+        var now = new Date(); now.setHours(0,0,0,0);
+        if (hd <= now) {
+          alert('"Unknown" location is only allowed for Pending New Hires (future Hire Date).\n\nPlease select a real location or set a future Hire Date.');
+          return;
+        }
+      }
+
+      var employeeData = {
+        name: employeeName,
+        rowIndex: rowIndex,
+        isRehire: isRehire,
+        location: document.getElementById('location').value,
+        jobNumber: document.getElementById('jobNumber').value,
+        jobClassification: document.getElementById('jobClassification').value,
+        hireDate: document.getElementById('hireDate').value,
+        phoneNumber: document.getElementById('phoneNumber').value,
+        emailAddress: document.getElementById('emailAddress').value,
+        mpEmail: document.getElementById('mpEmail').value,
+        notificationEmails: document.getElementById('notificationEmails').value,
+        gloveSize: document.getElementById('gloveSize').value,
+        sleeveSize: document.getElementById('sleeveSize').value
+      };
+
+      var submitBtn = document.getElementById('submitBtn');
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Saving...';
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          google.script.host.close();
+        })
+        .withFailureHandler(function(error) {
+          alert('Error saving employee: ' + error);
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = isRehire
+            ? '🔄 Save & Rehire'
+            : '✅ Save Employee';
+        })
+        .saveNewEmployeeData(employeeData);
+    });
+
+    function skipForNow() {
+      google.script.host.close();
+    }
+  </script>
+</body>
+</html>

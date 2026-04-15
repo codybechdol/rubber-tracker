@@ -2248,20 +2248,15 @@ function cleanupPendingTrainingForCompletedJobs() {
   Logger.log('Training Tracking: ' + (trainingData.length - 2) + ' data rows (skipping title + header)');
   Logger.log('Training Tracking headers: ' + String(trainingData[1]).substring(0, 150));
 
-  // Dynamically find column indices by header name
-  var headerIdx = findTrainingTrackingHeaderRow ? findTrainingTrackingHeaderRow(trainingData) : 1;
+  // Dynamically find column indices by header name (row 1 = headers)
   var ttCrewCol = 2;   // Default column C
   var ttStatusCol = 9;  // Default column J
-  var ttMonthCol = 0;  // Default column A
-  var ttTopicCol = 1;  // Default column B
-  for (var th = 0; th < trainingData[headerIdx].length; th++) {
-    var ttHdr = String(trainingData[headerIdx][th]).toLowerCase().trim();
-    if (ttHdr === 'crew #' || ttHdr === 'crew#' || ttHdr === 'job number' || ttHdr === 'crew' || ttHdr === 'crew number') ttCrewCol = th;
+  for (var th = 0; th < trainingData[1].length; th++) {
+    var ttHdr = String(trainingData[1][th]).toLowerCase().trim();
+    if (ttHdr === 'crew #' || ttHdr === 'crew#' || ttHdr === 'job number' || ttHdr === 'crew') ttCrewCol = th;
     if (ttHdr === 'status') ttStatusCol = th;
-    if (ttHdr === 'month') ttMonthCol = th;
-    if (ttHdr === 'training topic' || ttHdr === 'topic' || ttHdr === 'title') ttTopicCol = th;
   }
-  Logger.log('Training Tracking column indices - Crew: ' + ttCrewCol + ', Status: ' + ttStatusCol + ', headerIdx: ' + headerIdx);
+  Logger.log('Training Tracking column indices - Crew: ' + ttCrewCol + ', Status: ' + ttStatusCol);
 
   // Collect rows to delete (work backwards to avoid index shifting)
   var rowsToDelete = [];
@@ -2270,9 +2265,9 @@ function cleanupPendingTrainingForCompletedJobs() {
   var completeStatusCount = 0;
   var otherStatusCount = 0;
 
-  for (var t = headerIdx + 1; t < trainingData.length; t++) {
-    var month = String(trainingData[t][ttMonthCol] || '').trim();
-    var topic = String(trainingData[t][ttTopicCol] || '').trim();
+  for (var t = 2; t < trainingData.length; t++) {
+    var month = String(trainingData[t][0] || '').trim();
+    var topic = String(trainingData[t][1] || '').trim();
     var crew = String(trainingData[t][ttCrewCol] || '').trim();
     var status = String(trainingData[t][ttStatusCol] || '').trim();
 
@@ -2435,27 +2430,19 @@ function syncCompletedJobsToTraining() {
   var trainingData = trainingSheet.getDataRange().getValues();
   var currentYear = new Date().getFullYear();
 
-  // Dynamic header detection
-  var headerIdx = findTrainingTrackingHeaderRow ? findTrainingTrackingHeaderRow(trainingData) : 1;
-  var ttHeaders = trainingData[headerIdx];
-  var ttMonthCol = 0;   // Default column A
-  var ttCrewCol = 2;     // Default column C
-  var ttStatusCol = 9;   // Default column J
-  for (var th = 0; th < ttHeaders.length; th++) {
-    var ttHdr = String(ttHeaders[th]).toLowerCase().trim();
-    if (ttHdr === 'month') ttMonthCol = th;
-    if (ttHdr === 'crew #' || ttHdr === 'crew#' || ttHdr === 'job number' || ttHdr === 'crew' || ttHdr === 'crew number') ttCrewCol = th;
-    if (ttHdr === 'status') ttStatusCol = th;
-  }
-  Logger.log('syncCompletedJobsToTraining: headerIdx=' + headerIdx + ', monthCol=' + ttMonthCol + ', crewCol=' + ttCrewCol + ', statusCol=' + ttStatusCol);
+  // Training Tracking structure:
+  // Row 0: Title
+  // Row 1: Headers
+  // Row 2+: Data
+  // Columns: A=Month, B=Topic, C=Crew#, D=Lead, E=Size, F=CompletionDate, G=Attendees, H=Hours, I=Trainer, J=Status, K=Notes
 
   // Collect rows to delete (work backwards to avoid index shifting)
   var rowsToDelete = [];
 
-  for (var t = headerIdx + 1; t < trainingData.length; t++) {
-    var month = String(trainingData[t][ttMonthCol] || '').toLowerCase().trim();
-    var crew = String(trainingData[t][ttCrewCol] || '').trim();
-    var status = String(trainingData[t][ttStatusCol] || '').trim();
+  for (var t = 2; t < trainingData.length; t++) {
+    var month = String(trainingData[t][0] || '').toLowerCase().trim();
+    var crew = String(trainingData[t][2] || '').trim();
+    var status = String(trainingData[t][9] || '').trim();
 
     // Skip if already Complete (we want to preserve completed training records)
     if (status === 'Complete') continue;

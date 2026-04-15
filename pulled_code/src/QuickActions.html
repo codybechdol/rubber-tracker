@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    * { box-sizing: border-box; font-family: 'Google Sans', Arial, sans-serif; }
+    body { margin: 0; padding: 12px; background: #f8f9fa; }
+    h2 { color: #1a73e8; margin: 0 0 8px 0; font-size: 16px; font-weight: 500; }
+    .workflow-desc { font-size: 11px; color: #5f6368; margin-bottom: 12px; }
+    .step-container { margin-bottom: 6px; }
+    .step-btn {
+      display: flex; align-items: center; width: 100%; padding: 12px 10px;
+      border: 1px solid #dadce0; border-radius: 8px; font-size: 13px; font-weight: 500;
+      cursor: pointer; text-align: left; background: white; color: #202124;
+    }
+    .step-btn:hover:not(:disabled) { background: #e8f0fe; border-color: #1a73e8; }
+    .step-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .step-btn.running { background: #e8f0fe; border-color: #1a73e8; }
+    .step-btn.done { background: #e6f4ea; border-color: #34a853; }
+    .step-num {
+      width: 22px; height: 22px; background: #1a73e8; color: white; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 600; margin-right: 10px; flex-shrink: 0;
+    }
+    .step-btn.done .step-num { background: #34a853; }
+    .step-btn.done .step-num::after { content: '✓'; }
+    .step-btn.done .step-num span { display: none; }
+    .step-text { flex: 1; }
+    .step-subtitle { font-size: 10px; color: #5f6368; margin-top: 1px; }
+    .divider { height: 1px; background: #dadce0; margin: 14px 0; }
+    .section-title { font-size: 11px; font-weight: 600; color: #5f6368; text-transform: uppercase; margin-bottom: 8px; }
+    .quick-btn {
+      display: inline-block; padding: 6px 10px; margin: 3px 3px 3px 0;
+      border: 1px solid #dadce0; border-radius: 16px; font-size: 11px;
+      cursor: pointer; background: white; color: #5f6368;
+    }
+    .quick-btn:hover:not(:disabled) { background: #f1f3f4; }
+    .quick-btn:disabled { opacity: 0.5; }
+    .status-bar {
+      position: fixed; bottom: 0; left: 0; right: 0; padding: 10px 12px;
+      background: #e8f0fe; color: #1a73e8; font-size: 12px; display: none;
+    }
+    .status-bar.show { display: block; }
+    .status-bar.error { background: #fce8e6; color: #c5221f; }
+    .status-bar.success { background: #e6f4ea; color: #137333; }
+    .reset-link { display: block; text-align: center; margin-top: 10px; font-size: 11px; color: #5f6368; cursor: pointer; }
+    .form-group { margin-bottom: 10px; }
+    .form-label { display: block; font-size: 11px; font-weight: 500; color: #5f6368; margin-bottom: 4px; }
+    .form-input {
+      width: 100%; padding: 8px 10px; border: 1px solid #dadce0; border-radius: 4px;
+      font-size: 13px; background: #f8f9fa;
+    }
+    .form-input:focus { outline: none; border-color: #1a73e8; background: #fff; }
+    .btn { margin-top: 8px; padding: 10px 24px; background: #1a73e8; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; }
+    .btn:hover { background: #1557b0; }
+    .btn:disabled { background: #dadce0; cursor: not-allowed; }
+    .sub-actions { margin: 4px 0 0 32px; padding-left: 0; }
+    .sub-actions .sub-btn { font-size: 10px; padding: 5px 8px; margin: 2px 3px 2px 0; background: #f1f3f4; border-color: #c9cccf; }
+    .sub-actions .sub-btn:hover:not(:disabled) { background: #e8f0fe; border-color: #1a73e8; }
+  </style>
+</head>
+<body>
+  <h2>🧤 Monday Workflow</h2>
+  <div class="workflow-desc">Complete these steps every Monday to start your week</div>
+
+  <!-- STEP 1: Import Crew Makeup -->
+  <div class="step-container">
+    <button class="step-btn" id="step1" onclick="openCrewImport()">
+      <span class="step-num"><span>1</span></span>
+      <div class="step-text">📥 Import Crew Makeup<div class="step-subtitle">Upload weekly crew assignments</div></div>
+    </button>
+    <div class="sub-actions">
+      <button class="quick-btn sub-btn" onclick="runQuick('showAssignCrewLeadsDialog', 'Assign Crew Leads', 'Opening Crew Lead assignments...')">👷 Assign Crew Leads</button>
+      <button class="quick-btn sub-btn" onclick="runQuick('showExpiringCertsImportDialog', 'Import Expiring Certs', 'Opening Certs Import...')">📜 Import Expiring Certs</button>
+    </div>
+  </div>
+
+  <!-- STEP 2: Sync Crews -->
+  <div class="step-container">
+    <button class="step-btn" id="step2" onclick="runStep(2, 'menuSyncCrews')">
+      <span class="step-num"><span>2</span></span>
+      <div class="step-text">🔄 Sync Crews<div class="step-subtitle">Update foremen & schedules in Job Tracking</div></div>
+    </button>
+  </div>
+
+  <!-- STEP 3: Generate All Reports -->
+  <div class="step-container">
+    <button class="step-btn" id="step3" onclick="runStep(3, 'generateAllReports')">
+      <span class="step-num"><span>3</span></span>
+      <div class="step-text">📊 Generate All Reports<div class="step-subtitle">Swaps, Purchase Needs, Reclaims</div></div>
+    </button>
+    <div class="sub-actions">
+      <button class="quick-btn sub-btn" onclick="runQuick('generateGloveSwaps', 'Glove Swaps', 'Generating...')">🧤 Gloves</button>
+      <button class="quick-btn sub-btn" onclick="runQuick('generateSleeveSwaps', 'Sleeve Swaps', 'Generating...')">💪 Sleeves</button>
+      <button class="quick-btn sub-btn" onclick="runQuick('updatePurchaseNeeds', 'Purchase Needs', 'Calculating...')">🛒 Purchase</button>
+    </div>
+  </div>
+
+  <!-- STEP 4: Process Safety Emails -->
+  <div class="step-container">
+    <button class="step-btn" id="step4" onclick="openSafetyEmails()">
+      <span class="step-num"><span>4</span></span>
+      <div class="step-text">🛡️ Process Safety Emails<div class="step-subtitle">JHAs, Meetings, Fleet Checklists</div></div>
+    </button>
+    <div class="sub-actions">
+      <button class="quick-btn sub-btn" onclick="runQuick('showComplianceDashboard', 'Compliance Dashboard', 'Opening dashboard...')">📊 Compliance Dashboard</button>
+      <button class="quick-btn sub-btn" onclick="runQuick('masterRecalculateCompliance', 'Master Recalculate', 'Recalculating compliance...')">🔄 Master Recalculate</button>
+    </div>
+  </div>
+
+  <!-- STEP 5: Generate Task Metadata -->
+  <div class="step-container">
+    <button class="step-btn" id="step5" onclick="runStep(5, 'generateTaskMetadata')">
+      <span class="step-num"><span>5</span></span>
+      <div class="step-text">🎯 Generate Task Metadata<div class="step-subtitle">Build task database</div></div>
+    </button>
+    <div class="sub-actions">
+      <button class="quick-btn sub-btn" onclick="runQuick('showArchiveCompletedTasksDialog', 'Archive Tasks', 'Opening archive dialog...')">🗄️ Archive Metadata</button>
+    </div>
+  </div>
+
+  <!-- STEP 6: Review & Schedule -->
+  <div class="step-container">
+    <button class="step-btn" id="step6" onclick="openToDoSchedule()">
+      <span class="step-num"><span>6</span></span>
+      <div class="step-text">📅 Review & Schedule<div class="step-subtitle">Tasks & Trip Planner</div></div>
+    </button>
+    <div class="sub-actions">
+      <button class="quick-btn sub-btn" onclick="runQuick('showTripPlannerDialog', 'Trip Planner', 'Opening Trip Planner...')">🗺️ Trip Planner</button>
+      <button class="quick-btn sub-btn" onclick="runQuick('showToDoConfig', 'Schedule Config', 'Opening config...')">⚙️ Schedule Config</button>
+    </div>
+  </div>
+
+  <!-- STEP 7: Create Purchase Order -->
+  <div class="step-container">
+    <button class="step-btn" id="step7" onclick="runQuick('showPurchaseOrderDialog', 'Purchase Order', 'Opening Purchase Order...')">
+      <span class="step-num"><span>7</span></span>
+      <div class="step-text">🛒 Create Purchase Order<div class="step-subtitle">Order gloves, sleeves & supplies</div></div>
+    </button>
+    <div class="sub-actions">
+      <button class="quick-btn sub-btn" onclick="runQuick('showVendorConfigDialog', 'Manage Vendors', 'Opening Vendor Config...')">⚙️ Manage Vendors</button>
+      <button class="quick-btn sub-btn" onclick="runQuick('openPurchaseOrdersSheet', 'Order History', 'Opening Order History...')">📋 Order History</button>
+    </div>
+  </div>
+
+  <!-- STEP 8: Save & Backup -->
+  <div class="step-container">
+    <button class="step-btn" id="step8" onclick="runStep(8, 'saveAndBackup')">
+      <span class="step-num"><span>8</span></span>
+      <div class="step-text">💾 Save & Backup<div class="step-subtitle">History + Drive backup</div></div>
+    </button>
+    <div class="sub-actions">
+      <button class="quick-btn sub-btn" onclick="runQuick('sendEmailReport', 'Email Report', 'Sending report...')">📧 Send Email Report</button>
+    </div>
+  </div>
+
+  <div class="reset-link" onclick="resetSteps()">↺ Reset workflow</div>
+
+  <div class="divider"></div>
+  <div class="section-title">As Needed (Monthly/Setup)</div>
+  <div>
+    <button class="quick-btn" onclick="runQuick('setupCrewVisitConfig', 'Crew Visit Config', 'Setting up...')">👷 Crew Visit Config</button>
+    <button class="quick-btn" onclick="runQuick('setupTrainingConfig', 'Training Config', 'Setting up...')">📚 Training Config</button>
+    <button class="quick-btn" onclick="runQuick('setupTrainingTracking', 'Training Tracking', 'Setting up...')">📋 Training Tracking</button>
+    <button class="quick-btn" onclick="runQuick('openJobTrackingSheet', 'Job Tracking (Schedules)', 'Opening Job Tracking...')">🛡️ Manage Schedules</button>
+  </div>
+
+  <div class="divider"></div>
+  <div class="section-title">Quick Actions</div>
+  <div>
+    <button class="quick-btn" onclick="runQuick('showItemHistoryLookup', 'Item History Lookup', 'Opening...')">🔍 Item Lookup</button>
+    <button class="quick-btn" onclick="runQuick('showTaskDashboard', 'Task Dashboard', 'Opening...')">📊 Task Dashboard</button>
+    <button class="quick-btn" onclick="runQuick('showTimeBreakdownDialog', 'Daily Accomplishments', 'Opening...')">📝 Accomplishments</button>
+  </div>
+
+  <div class="divider"></div>
+  <div class="section-title" onclick="toggleManualTask()" style="cursor:pointer;">
+    📅 Add Manual Schedule Item <span id="expandIcon">▼</span>
+  </div>
+  <div id="manualTaskForm" style="display:none; background:#fff; padding:12px; border-radius:8px; border:1px solid #dadce0;">
+    <div class="form-group">
+      <label class="form-label">Location</label>
+      <input type="text" id="mtLocation" class="form-input" placeholder="e.g., Office, Home, Client Site">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Priority</label>
+      <select id="mtPriority" class="form-input">
+        <option value="High">🔴 High</option>
+        <option value="Medium" selected>🟡 Medium</option>
+        <option value="Low">🟢 Low</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Task Type / Title</label>
+      <input type="text" id="mtTaskType" class="form-input" placeholder="e.g., Meeting with John, Doctor Appointment">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Scheduled Date</label>
+      <input type="date" id="mtScheduledDate" class="form-input">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Start Time</label>
+      <input type="time" id="mtStartTime" class="form-input">
+    </div>
+    <div class="form-group">
+      <label class="form-label">End Time (optional)</label>
+      <input type="time" id="mtEndTime" class="form-input">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Estimated Time (hours)</label>
+      <input type="number" id="mtEstimatedTime" class="form-input" placeholder="e.g., 4" step="0.5" min="0.5">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Start Location</label>
+      <input type="text" id="mtStartLocation" class="form-input" placeholder="Where you're coming from">
+    </div>
+    <div class="form-group">
+      <label class="form-label">End Location</label>
+      <input type="text" id="mtEndLocation" class="form-input" placeholder="Where you're going after">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Notes (optional)</label>
+      <input type="text" id="mtNotes" class="form-input" placeholder="Additional details...">
+    </div>
+    <button class="btn" onclick="addManualTask()" style="width:100%;">➕ Add to Schedule</button>
+  </div>
+
+  <div id="statusBar" class="status-bar"></div>
+
+  <script>
+    function runStep(n, func) {
+      var btn = document.getElementById('step' + n);
+      btn.classList.add('running'); btn.disabled = true;
+      showStatus('Running Step ' + n + '...');
+      google.script.run.withSuccessHandler(function() {
+        btn.classList.remove('running'); btn.classList.add('done'); btn.disabled = false;
+        showStatus('✓ Step ' + n + ' complete!', 'success');
+        setTimeout(hideStatus, 2000);
+      }).withFailureHandler(function(e) {
+        btn.classList.remove('running'); btn.disabled = false;
+        showStatus('Error: ' + e, 'error');
+      })[func]();
+    }
+
+    function runQuick(func, title, message) {
+      document.querySelectorAll('.quick-btn').forEach(function(b){b.disabled=true;});
+      showStatus('⏳ ' + message);
+      google.script.run.withSuccessHandler(function() {
+        document.querySelectorAll('.quick-btn').forEach(function(b){b.disabled=false;});
+        showStatus('✓ ' + title + ' complete!', 'success'); setTimeout(hideStatus, 2000);
+      }).withFailureHandler(function(e) {
+        document.querySelectorAll('.quick-btn').forEach(function(b){b.disabled=false;});
+        showStatus('Error: ' + e, 'error');
+      })[func]();
+    }
+
+    function openCrewImport() {
+      var btn = document.getElementById('step1');
+      btn.classList.add('running');
+      showStatus('⏳ Opening Crew Import...');
+      google.script.run.withSuccessHandler(function() {
+        btn.classList.remove('running'); btn.classList.add('done');
+        hideStatus();
+      }).withFailureHandler(function(e) {
+        btn.classList.remove('running');
+        showStatus('Error: ' + e, 'error');
+      }).showCrewImportDialog();
+    }
+
+    function openSafetyEmails() {
+      var btn = document.getElementById('step4');
+      btn.classList.add('running');
+      showStatus('⏳ Opening Safety Emails...');
+      google.script.run.withSuccessHandler(function() {
+        btn.classList.remove('running'); btn.classList.add('done');
+        hideStatus();
+      }).withFailureHandler(function(e) {
+        btn.classList.remove('running');
+        showStatus('Error: ' + e, 'error');
+      }).showProcessSafetyEmailsDialog();
+    }
+
+    function openToDoSchedule() {
+      var btn = document.getElementById('step6');
+      if (btn) btn.classList.add('running');
+      showStatus('⏳ Opening Tasks & Calendar...');
+      google.script.run.withSuccessHandler(function() {
+        if (btn) { btn.classList.remove('running'); btn.classList.add('done'); }
+        hideStatus();
+      }).withFailureHandler(function(e) {
+        if (btn) btn.classList.remove('running');
+        showStatus('Error: ' + e, 'error');
+      }).showToDoSchedule();
+    }
+
+    function resetSteps() {
+      for(var i=1;i<=8;i++){var b=document.getElementById('step'+i);if(b){b.classList.remove('done','running');b.disabled=false;}}
+      showStatus('Reset', 'success'); setTimeout(hideStatus, 1500);
+    }
+
+    function showStatus(m, t) { var s=document.getElementById('statusBar'); s.textContent=m; s.className='status-bar show '+(t||''); }
+    function hideStatus() { document.getElementById('statusBar').className='status-bar'; }
+
+    function toggleManualTask() {
+      var form = document.getElementById('manualTaskForm');
+      var icon = document.getElementById('expandIcon');
+      if (form.style.display === 'none') {
+        form.style.display = 'block';
+        icon.textContent = '▲';
+        // Set default date to today
+        var today = new Date().toISOString().split('T')[0];
+        document.getElementById('mtScheduledDate').value = today;
+      } else {
+        form.style.display = 'none';
+        icon.textContent = '▼';
+      }
+    }
+
+    function addManualTask() {
+      var location = document.getElementById('mtLocation').value.trim();
+      var priority = document.getElementById('mtPriority').value;
+      var taskType = document.getElementById('mtTaskType').value;
+      var scheduledDate = document.getElementById('mtScheduledDate').value;
+      var startTime = document.getElementById('mtStartTime').value;
+      var endTime = document.getElementById('mtEndTime').value;
+      var estimatedTime = document.getElementById('mtEstimatedTime').value;
+      var startLocation = document.getElementById('mtStartLocation').value.trim();
+      var endLocation = document.getElementById('mtEndLocation').value.trim();
+      var notes = document.getElementById('mtNotes').value.trim();
+
+      // Validation
+      if (!location) { alert('Please enter a location'); return; }
+      if (!taskType) { alert('Please enter a task type/title'); return; }
+      if (!scheduledDate) { alert('Please select a scheduled date'); return; }
+      if (!startTime) { alert('Please enter a start time'); return; }
+      if (!estimatedTime || estimatedTime <= 0) { alert('Please enter estimated time (hours)'); return; }
+
+      var taskData = {
+        location: location,
+        priority: priority,
+        taskType: taskType,
+        scheduledDate: scheduledDate,
+        startTime: startTime,
+        endTime: endTime || '',
+        estimatedTime: parseFloat(estimatedTime),
+        startLocation: startLocation,
+        endLocation: endLocation,
+        notes: notes,
+        manuallyCreated: true  // Flag this as user-created manual task
+      };
+
+      showStatus('⏳ Adding to schedule...');
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          showStatus('✓ Added to Smart Schedule!', 'success');
+          setTimeout(hideStatus, 2000);
+          // Clear form
+          document.getElementById('mtLocation').value = '';
+          document.getElementById('mtTaskType').value = '';
+          document.getElementById('mtEstimatedTime').value = '';
+          document.getElementById('mtStartLocation').value = '';
+          document.getElementById('mtEndLocation').value = '';
+          document.getElementById('mtNotes').value = '';
+        })
+        .withFailureHandler(function(error) {
+          showStatus('Error: ' + error, 'error');
+        })
+        .addManualScheduleTask(taskData);
+    }
+  </script>
+</body>
+</html>
+

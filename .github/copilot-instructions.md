@@ -734,6 +734,19 @@ Notes: [Any notes]
 
 ## Completed Features Log
 
+### April 13, 2026
+- ✅ **Fixed Crew Import Crash After Auto-Apply Special Circumstances**
+  - **Problem:** `filterSpecialCircumstancesAlreadyMatched()` crashed with `TypeError: Cannot read properties of null (reading 'name')` on second pass (after new hires check)
+  - **Root Cause:** `removeSpecialCard()` sets `specialCircumstances[specIndex] = null` (not splice) when auto-applying saved selections. On the second call to `filterSpecialCircumstancesAlreadyMatched()`, the loop hit null entries and crashed trying to access `.name`.
+  - **Solution:** Added null guards (`if (!spec) continue;`) in all loops that iterate `specialCircumstances` array:
+    - `filterSpecialCircumstancesAlreadyMatched()` main loop
+    - `showSpecialSection()` auto-apply saved selections loop
+    - `showSpecialSection()` card rendering loop
+    - `applyAutoSelections()` auto-apply loop
+    - Special circumstance deduplication loop in `parseCrewCards()`
+  - **Files Modified:** `src/CrewImport.html` — 5 null guards added
+  - **Impact:** Crew Import no longer crashes when auto-applied special circumstances are followed by new hire detection
+
 ### April 10, 2026
 - ✅ **Purchase Needs Simplification - 3-Tier Priority System with Class Grouping**
   - **Goal:** Replace the complex 5-table swap-status-based Purchase Needs report with a simpler 3-tier priority system
@@ -1802,3 +1815,29 @@ Notes: [Any notes]
   - Fixed `const` usage in `writeSwapTableHeadersDynamic()` function to use `var` per project convention
   - **Files Modified:**
     - `src/Code.gs` - 2 lines changed (const → var)
+
+### April 20, 2026
+- ✅ **Fixed Crew Import Cross-Column Boundary Truncation**
+  - **Problem:** Special section headers (e.g., "Christian Najarro 3 ap Hot Weeds?" at column D) were acting as boundaries for ALL columns, truncating employee lists in columns A, B, C. For example, crew 013-26 (col A) only got 3 employees instead of 4+ because a "Weeds?" note in col D at row 5 stopped scanning at row 5 for all columns.
+  - **Root Cause:** `findNextHeaderRow()` used special section headers from ANY column as boundaries. This is correct for crew headers (grid layout bands) but wrong for special sections (column-specific annotations).
+  - **Solution:** Modified `findNextHeaderRow()` to only use special section headers from the SAME column (`specialHeaders[j].col === col`). Crew header boundary logic unchanged (cross-column is correct for grid layout).
+  - **Files Modified:** `src/CrewImport.html` — `findNextHeaderRow()` function (~5 lines changed)
+
+- ✅ **Fixed Crew Import Placeholder Detection**
+  - **Problem:** "NEW HIRE JL" (no actual name, just role) and "Need Guy Here With CDL" were being parsed as employee names
+  - **Solution:** Added checks to `isEmployeeName()`:
+    - `^NEW\s*HIRE\s*(JL|F|GTO|EO|WT|...)?$` → rejects placeholder cells with no name
+    - `^Need\s` → rejects "Need [something]" notes
+  - Also added "Weeds?" to trailing annotation strip list in `parseEmployeeName()`
+  - **Files Modified:** `src/CrewImport.html` — `isEmployeeName()` and `parseEmployeeName()` functions
+
+- ✅ **Fixed Schedule Annotation Breaking Foreman Detection**
+  - **Problem:** "Waco Worts F Crew to 5 10's this wk" was not detected as Foreman because `\sF$/i` requires "F" at end of string, but "Crew to 5 10's this wk" followed it
+  - **Root Cause:** `parseEmployeeName()` didn't strip schedule change annotations before role detection
+  - **Solution:** Added two new stripping rules in `parseEmployeeName()` BEFORE role detection:
+    1. `Crew to...` pattern: strips "Crew to 5 10's this wk" and similar schedule change notes
+    2. Standalone schedule pattern: strips "5 10's M-Th", "4 8's Mon-Fri" etc. (without "Crew to" prefix)
+    3. Day-range schedule pattern: strips "Tues-Fri 1st week", "Mon-Thu", "M-Th" etc. (day abbreviation + hyphen + day abbreviation)
+  - Also added `isEmployeeName()` rejection for pure day-range schedule cells (e.g., "Tues-Fri 1st wk, then Mon-Thurs afterwards")
+  - **Files Modified:** `src/CrewImport.html` — `parseEmployeeName()` and `isEmployeeName()` functions
+

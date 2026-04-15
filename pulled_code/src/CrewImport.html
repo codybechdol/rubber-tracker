@@ -733,14 +733,8 @@
     var crewLeadSelections = {}; // Stores selected crew lead by job number: { "005-26": "John Smith" }
     var crewsWithMultipleLeads = []; // Crews that need lead selection
     var _autoSelectionsAlreadyApplied = false; // Guard against duplicate auto-apply calls
-    var _crewLeadCheckCompleted = false; // Guard: crew lead selection already done for this tab
-    var _matchingCompleted = false; // Guard: finishMatching() already ran for this tab
-    var _displayPreviewReached = false; // Guard: displayPreview() already rendered for this tab
     var detectedNewJobs = []; // Jobs found in Excel but not in Job Tracking
     var locationsDropdownList = []; // Location names from Locations sheet (for dropdowns)
-    var _jobTrackingLoaded = false; // Whether getJobTrackingForCrewImport has completed
-    var _locationsLoaded = false;   // Whether getLocationsForDropdown has completed
-    var _pendingNewJobsCheck = false; // Whether parseCrewCards finished but async data wasn't ready
 
     function init() {
       setupDragDrop();
@@ -750,15 +744,11 @@
       google.script.run
         .withSuccessHandler(function(data) {
           jobTrackingData = data || {};
-          _jobTrackingLoaded = true;
           console.log('Loaded Job Tracking data for ' + Object.keys(jobTrackingData).length + ' jobs');
-          checkDeferredNewJobsDetection();
         })
         .withFailureHandler(function(error) {
           console.error('Failed to load Job Tracking data:', error);
           jobTrackingData = {};
-          _jobTrackingLoaded = true;
-          checkDeferredNewJobsDetection();
         })
         .getJobTrackingForCrewImport();
 
@@ -766,15 +756,11 @@
       google.script.run
         .withSuccessHandler(function(locations) {
           locationsDropdownList = locations || [];
-          _locationsLoaded = true;
           console.log('Loaded ' + locationsDropdownList.length + ' locations for dropdown');
-          checkDeferredNewJobsDetection();
         })
         .withFailureHandler(function(error) {
           console.error('Failed to load locations for dropdown:', error);
           locationsDropdownList = [];
-          _locationsLoaded = true;
-          checkDeferredNewJobsDetection();
         })
         .getLocationsForDropdown();
 
@@ -1148,14 +1134,6 @@
       specialCircumstances = []; // Track employees with special status
       clearSpecialLocations(); // Clear the special location tracking
 
-      // Reset all flow guards for this new tab parse
-      _autoSelectionsAlreadyApplied = false;
-      _crewLeadCheckCompleted = false;
-      _matchingCompleted = false;
-      _displayPreviewReached = false;
-      crewLeadSelections = {};
-      crewsWithMultipleLeads = [];
-
       // DEBUG: Log current employees status
       console.log('parseCrewCards starting. currentEmployees loaded: ' + (currentEmployees ? currentEmployees.length : 'NOT LOADED'));
       if (currentEmployees && currentEmployees.length > 0) {
@@ -1180,7 +1158,6 @@
           if (!cell) continue;
 
           // Check for special section headers (Light Duty, Time off, Quit, Layoff, Weeds, etc.)
-          // Skip cells that have a job number (those are crew headers, not special sections)
           if (cell.match(/Light\s*Duty|Time\s*off|Quit|Other|Layoff|Resign|Leave|Vacation|MT\s*Misc|Weeds/i) && !cell.match(/\d{3}-\d{2}/)) {
             console.log('Found special section header at [' + r + ',' + c + ']: ' + cell);
             specialSectionHeaders.push({
@@ -1417,62 +1394,6 @@
         return;
       }
 
-      // If Job Tracking or Locations data hasn't loaded yet, defer the new jobs check
-      if (!_jobTrackingLoaded || !_locationsLoaded) {
-        console.log('Async data not ready yet (JT: ' + _jobTrackingLoaded + ', Loc: ' + _locationsLoaded + ') — deferring new jobs check');
-        _pendingNewJobsCheck = true;
-        showNotification('Loading job tracking data... please wait', 'info', 'Loading');
-        return;
-      }
-
-      runNewJobsDetection();
-    }
-
-    /**
-     * Called when async data (jobTrackingData/locationsDropdownList) arrives.
-     * If parsing already finished but was waiting for this data, resume the flow.
-     */
-    function checkDeferredNewJobsDetection() {
-      if (!_pendingNewJobsCheck) return;
-      if (!_jobTrackingLoaded || !_locationsLoaded) return;
-
-      console.log('Async data now ready — running deferred new jobs detection');
-      _pendingNewJobsCheck = false;
-      // Clear loading notification
-      var notif = document.querySelector('.toast.show');
-      if (notif) notif.querySelector('.btn-close').click();
-
-      // Re-apply Job Tracking location overrides now that we have data
-      for (var si = 0; si < parsedCrews.length; si++) {
-        var crew = parsedCrews[si];
-        var jtData = jobTrackingData[crew.jobNumber];
-        if (jtData) {
-          if (jtData.location) {
-            if (crew.mappedLocation !== jtData.location) {
-              console.log('Deferred JT override: ' + crew.jobNumber + ' location "' + crew.mappedLocation + '" → "' + jtData.location + '"');
-              crew.mappedLocation = jtData.location;
-              crew.location = jtData.location;
-              crew.locationFromJobTracking = true;
-              crew.isUnknownLocation = false;
-            }
-          }
-          if (!crew.scheduleType && jtData.schedule) {
-            crew.scheduleLabel = jtData.schedule;
-            crew.scheduleType = 'Primary';
-            crew.scheduleBadgeColor = 'bg-success';
-            crew.scheduleFromJobTracking = true;
-          }
-        }
-      }
-
-      runNewJobsDetection();
-    }
-
-    /**
-     * Detect new job numbers not in Job Tracking and continue the import flow.
-     * Split out so it can be called immediately or deferred until async data loads.
-     */
-    function runNewJobsDetection() {
       // Detect new job numbers not in Job Tracking
       detectedNewJobs = [];
       for (var nj = 0; nj < parsedCrews.length; nj++) {
@@ -1480,10 +1401,10 @@
         if (!jobTrackingData[crewForNewJob.jobNumber]) {
           detectedNewJobs.push({
             jobNumber: crewForNewJob.jobNumber,
-            excelJobName: crewForNewJob.originalLocation,
-            mappedLocation: crewForNewJob.mappedLocation,
-            jobName: crewForNewJob.originalLocation,
-            location: crewForNewJob.mappedLocation
+            excelJobName: crewForNewJob.originalLocation,  // e.g., "Rattlesnake Sub Dock"
+            mappedLocation: crewForNewJob.mappedLocation,   // e.g., "Bonner" (from name mapping)
+            jobName: crewForNewJob.originalLocation,        // default Job Name = Excel header
+            location: crewForNewJob.mappedLocation          // default Location = mapped location
           });
           console.log('New job detected: ' + crewForNewJob.jobNumber + ' (' + crewForNewJob.originalLocation + ')');
         }
@@ -1512,12 +1433,6 @@
 
       // Show crew preview and match employees
       showCrewPreview();
-
-      // Show special circumstances section ONCE here (decoupled from showCrewPreview to prevent re-entry)
-      if (specialCircumstances.length > 0) {
-        showSpecialSection();
-      }
-
       matchEmployeesToSheet();
 
       // Note: if there are duplicates, matchEmployeesToSheet will show the duplicate UI
@@ -1555,8 +1470,8 @@
         var entries = nameToCrews[name];
         if (entries.length <= 1) continue; // Not a cross-crew duplicate
 
-        // Find this employee on the Employees sheet (includeNonField=true so Weeds/Vacation employees are found)
-        var match = findBestMatchWithoutSkip(name, currentEmployees, true);
+        // Find this employee on the Employees sheet
+        var match = findBestMatchWithoutSkip(name, currentEmployees);
         if (!match || match.confidence < 60 || !match.employeeData || !match.employeeData.jobNum) continue;
 
         var currentJobBase = String(match.employeeData.jobNum).split('.')[0]; // Strip .N suffix
@@ -1716,15 +1631,7 @@
 
         // Left side: Employee info
         html += '<div class="flex-grow-1">';
-
-        // If name is empty (role-only entry like "NEW HIRE JL"), show editable name input
-        if (!emp.name || emp.name.trim() === '') {
-          html += '<div class="d-flex align-items-center gap-2 mb-1">';
-          html += '<input type="text" class="form-control form-control-sm" id="nh-name-' + i + '" placeholder="Enter employee name..." style="width: 200px; font-size: 14px; font-weight: 600; border-color: #ffc107;" required>';
-          html += '<span class="badge bg-warning text-dark" style="font-size: 10px;">⚠️ NAME NEEDED</span>';
-        } else {
-          html += '<strong>' + escapeHtml(emp.name) + '</strong>';
-        }
+        html += '<strong>' + escapeHtml(emp.name) + '</strong>';
 
         // Classification badge from Excel
         if (emp.classification) {
@@ -1733,12 +1640,6 @@
 
         // NEW HIRE badge
         html += ' <span class="badge bg-success" style="font-size: 10px;">NEW HIRE</span>';
-
-        // Close the flex div if name was empty
-        if (!emp.name || emp.name.trim() === '') {
-          html += '</div>';
-          html += '<small class="text-muted" style="font-size: 11px;">From cell: "' + escapeHtml(emp.originalText) + '"</small><br>';
-        }
 
         // Rehire badge
         if (isRehire) {
@@ -1839,20 +1740,6 @@
         jobNumber: emp.fullJobNumber || (crew.jobNumber + '.' + emp.position),
         classification: emp.classification || ''
       };
-
-      // If name was empty (role-only entry like "NEW HIRE JL"), read from input field
-      var nameEl = document.getElementById('nh-name-' + index);
-      if (nameEl) {
-        var enteredName = nameEl.value.trim();
-        if (!enteredName) {
-          showNotification('Please enter the employee name before adding.', 'warning');
-          if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-person-plus"></i> Add'; }
-          nameEl.focus();
-          return;
-        }
-        employeeData.name = enteredName;
-        emp.name = enteredName; // Update the emp object so matching works later
-      }
 
       // Pull sizes/phone from history if available
       if (history) {
@@ -1955,20 +1842,6 @@
           jobNumber: emp.fullJobNumber || (crew.jobNumber + '.' + emp.position),
           classification: emp.classification || ''
         };
-
-        // If name was empty (role-only entry like "NEW HIRE JL"), read from input field
-        var nameEl = document.getElementById('nh-name-' + idx);
-        if (nameEl) {
-          var enteredName = nameEl.value.trim();
-          if (!enteredName) {
-            showNotification('⚠️ Please enter a name for the new hire at ' + crew.jobNumber + ' (' + (emp.classification || emp.originalText) + ') before adding all.', 'warning');
-            if (addBtn) { addBtn.disabled = false; addBtn.innerHTML = '<i class="bi bi-people"></i> Add All New Hires'; }
-            nameEl.focus();
-            return;
-          }
-          employeeData.name = enteredName;
-          emp.name = enteredName;
-        }
 
         if (history) {
           if (history.gloveSize) employeeData.gloveSize = history.gloveSize;
@@ -2234,18 +2107,10 @@
      * @param {Function} callback - Called when lead selection is complete
      */
     function checkAndHandleMultipleLeads(callback) {
-      // Guard: if crew lead check already completed for this tab, skip re-prompting
-      if (_crewLeadCheckCompleted) {
-        console.log('checkAndHandleMultipleLeads: Already completed, skipping (guard)');
-        if (callback) callback();
-        return;
-      }
-
       var crewsWithLeads = detectCrewsWithMultipleLeads();
 
       if (crewsWithLeads.length === 0) {
         // No crews with multiple leads - proceed immediately
-        _crewLeadCheckCompleted = true;
         if (callback) callback();
         return;
       }
@@ -2461,7 +2326,6 @@
           var specNameLower = (specialInfo.name || '').toLowerCase().trim();
           var isDuplicate = false;
           for (var sc = 0; sc < specialCircumstances.length; sc++) {
-            if (!specialCircumstances[sc]) continue;
             var existingName = (specialCircumstances[sc].name || '').toLowerCase().trim();
             if (existingName === specNameLower || calculateSimilarity(existingName, specNameLower) >= 90) {
               isDuplicate = true;
@@ -2923,14 +2787,12 @@
           nextRow = crewHeaders[i].row;
         }
       }
-      // Also check special section headers as boundaries - but ONLY for the SAME column
-      // Special sections (like "Weeds Gas" or "Time off") are column-specific annotations,
-      // not grid-wide band breaks like crew headers
+      // Also check special section headers as boundaries (any column)
       if (specialHeaders) {
         for (var j = 0; j < specialHeaders.length; j++) {
-          if (specialHeaders[j].col === col && specialHeaders[j].row > currentRow && specialHeaders[j].row < nextRow) {
+          if (specialHeaders[j].row > currentRow && specialHeaders[j].row < nextRow) {
             nextRow = specialHeaders[j].row;
-            console.log('  Using special section "' + specialHeaders[j].headerText + '" at row ' + specialHeaders[j].row + ' as boundary (same column)');
+            console.log('  Using special section "' + specialHeaders[j].headerText + '" at row ' + specialHeaders[j].row + ' as boundary');
           }
         }
       }
@@ -2940,10 +2802,6 @@
     function isEmployeeName(text) {
       if (!text || text.length < 4) return false;
       if (text.match(/^\d/)) return false; // Starts with number
-      // Skip "NEW HIRE [role]" placeholders with no actual name (e.g., "NEW HIRE JL", "NEW HIRE EO2")
-      if (text.match(/^NEW\s*HIRE\s*(JL|F|GTO\s*F?|EO\s*\d|WT|Jry\s*Op|\d\s*ap)?\s*$/i)) return false;
-      // Skip "Need [something]" placeholders (e.g., "Need Guy Here With CDL")
-      if (text.match(/^Need\s/i)) return false;
       // Skip continuation text starting with lowercase prepositions (e.g., "of April, going south to work")
       if (text.match(/^(of|and|or|for|to|in|at|on|by|per|going|south|north|east|west)\s/i) && text[0] === text[0].toLowerCase()) return false;
       if (text.match(/^(NWE|Aprox|Tentative|Completed|On Hold|BID)/i)) return false;
@@ -2972,8 +2830,6 @@
       if (text.match(/\bfollow\s*(up)?\b/i)) return false;
       // Skip vacation/special section keywords that got past header detection
       if (text.match(/^(Time\s*Off|Quit|Layoff|Resigned?|Fired|Terminated|Vacation|Light\s*Duty|Weeds|Leave|FMLA)\b/i)) return false;
-      // Skip day-range schedule annotations (e.g., "Tues-Fri 1st wk, then Mon-Thurs afterwards")
-      if (text.match(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Tues|Thurs|M|Tu|W|Th|F|Sa|Su)[a-z]*\s*[-–]\s*(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Tues|Thurs|M|Tu|W|Th|F|Sa|Su)/i)) return false;
       // Skip text that's mostly punctuation or numbers
       if (text.replace(/[^a-zA-Z]/g, '').length < 4) return false;
       if (!text.match(/[a-zA-Z]{2,}\s+[a-zA-Z]/)) return false; // Must have first and last name
@@ -3043,26 +2899,10 @@
         cleanText = cleanText.replace(vacDayMatch[0], '').trim();
       }
 
-      // Strip schedule change annotations that appear after role codes
-      // Example: "Waco Worts F Crew to 5 10's this wk" → "Waco Worts F"
-      // "Crew to X XX's..." means a temporary schedule change (can be ignored)
-      cleanText = cleanText.replace(/\s+Crew\s+to\s+.*$/i, '').trim();
-
-      // Strip standalone schedule pattern: "4 10's M-Th", "5 8's Mon-Fri", "5 10's this wk", "4-10's", "5 10s"
-      // These can appear after role without "Crew to" prefix
-      // Handles: optional apostrophe, hyphenated (4-10's), end of string (no trailing text)
-      cleanText = cleanText.replace(/\s+\d+[\s\-]+\d+[''\u2019]?s\b.*$/i, '').trim();
-
-      // Strip day-range schedule annotations: "Tues-Fri 1st week", "Mon-Thu", "M-Th", "Mon-Thurs afterwards"
-      // Example: "Cody Nichols F Tues-Fri 1st week" → "Cody Nichols F"
-      // Note: 'F' excluded from day abbreviations to avoid stripping Foreman role code
-      cleanText = cleanText.replace(/\s+(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Tues|Thurs|M|Tu|W|Th|Sa|Su)[a-z]*\s*[-–]\s*(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Tues|Thurs|M|Tu|W|Th|F|Sa|Su)[a-z]*\b.*$/i, '').trim();
-
       // Strip trailing annotations that appear AFTER the classification and confuse role detection
       // Examples: "Christian Najarro 3 ap Hot" - "Hot" is not a role
-      // "Christian Najarro 3 ap Hot Weeds?" - "Weeds?" is a status annotation
       // Must do this BEFORE role detection so "3 ap Hot" → "3 ap" → match
-      cleanText = cleanText.replace(/\s+(Hot|Cold|Day|Night|Relief|Split|Swing|Temp|Travel|Local|Weeds\??)\s*$/i, '').trim();
+      cleanText = cleanText.replace(/\s+(Hot|Cold|Day|Night|Relief|Split|Swing|Temp|Travel|Local)\s*$/i, '').trim();
 
       // Check for Foreman (F suffix)
       if (cleanText.match(/\sF$/i) && !cleanText.match(/GTO\s*F$/i)) {
@@ -3115,44 +2955,6 @@
         result.role = 'WT';
         result.classification = 'WT';
         result.name = cleanText.replace(/\s+WT\b.*$/i, '').trim();
-      }
-      // No role detected by spaced patterns - check if the ENTIRE string is just a role code
-      // This handles "NEW HIRE JL" → after stripping "NEW HIRE" → "JL" (no preceding name)
-      else if (cleanText.match(/^JL$/i)) {
-        result.role = 'JL';
-        result.classification = 'JRY';
-        result.name = '';
-      } else if (cleanText.match(/^F$/i)) {
-        result.isForeman = true;
-        result.role = 'Foreman';
-        result.classification = 'F';
-        result.name = '';
-      } else if (cleanText.match(/^GTO\s*F$/i)) {
-        result.isForeman = true;
-        result.role = 'GTO Foreman';
-        result.classification = 'GTO F';
-        result.name = '';
-      } else if (cleanText.match(/^(\d)\s*ap$/i)) {
-        var standaloneApMatch = cleanText.match(/^(\d)\s*ap$/i);
-        result.role = standaloneApMatch[1] + ' ap';
-        result.classification = 'AP ' + standaloneApMatch[1];
-        result.name = '';
-      } else if (cleanText.match(/^Jry\s*Op$/i) || cleanText.match(/^Journey\s*Op$/i)) {
-        result.role = 'Jry Op';
-        result.classification = 'JRY OP';
-        result.name = '';
-      } else if (cleanText.match(/^GTO$/i)) {
-        result.role = 'GTO';
-        result.classification = 'GTO';
-        result.name = '';
-      } else if (cleanText.match(/^EO2$/i)) {
-        result.role = 'EO2';
-        result.classification = 'EO 2';
-        result.name = '';
-      } else if (cleanText.match(/^WT$/i)) {
-        result.role = 'WT';
-        result.classification = 'WT';
-        result.name = '';
       }
       // No role detected - classification stays empty (won't update existing)
 
@@ -3288,12 +3090,6 @@
 
       for (var i = 0; i < parsedCrews.length; i++) {
         var crew = parsedCrews[i];
-
-        // Skip crews that already have a crew lead selection — don't re-prompt
-        if (crewLeadSelections[crew.jobNumber]) {
-          continue;
-        }
-
         var leads = [];
 
         for (var e = 0; e < crew.employees.length; e++) {
@@ -3431,7 +3227,6 @@
       var crewsNeedingSelection = detectCrewsWithMultipleLeads();
 
       if (crewsNeedingSelection.length === 0) {
-        _crewLeadCheckCompleted = true;
         if (finalCallback) finalCallback();
         return;
       }
@@ -3440,11 +3235,9 @@
 
       function processNext() {
         if (currentIndex >= crewsNeedingSelection.length) {
-          // All done - mark crew lead check as complete to prevent re-entry
-          _crewLeadCheckCompleted = true;
-          // Refresh the preview (but do NOT re-run matchEmployeesToSheet
-          // to avoid infinite loop with duplicate detection)
+          // All done - refresh the preview
           showCrewPreview();
+          matchEmployeesToSheet();
           if (finalCallback) finalCallback();
           return;
         }
@@ -3878,10 +3671,10 @@
 
       container.innerHTML = html;
 
-      // NOTE: showSpecialSection() is NO LONGER called here.
-      // It is called explicitly once in continueAfterNewJobs() to prevent
-      // re-entry loops when showCrewPreview() is called from multiple places
-      // (resolveDuplicates, processMultipleLeadSelections, etc.)
+      // Show special circumstances section if any found
+      if (specialCircumstances.length > 0) {
+        showSpecialSection();
+      }
 
       // Show special location cards (Weeds, Light Duty, Vacation)
       renderSpecialLocationCards();
@@ -4290,10 +4083,6 @@
       var msg = '<p>Set <strong>' + jobNumber + '</strong> (' + location + ') as a <span class="badge bg-warning text-dark">Pending Start</span> job.</p>';
       msg += '<p class="text-muted small">This job will be added to Job Tracking as "Pending Start" and employees assigned to it will NOT be counted as duplicates.</p>';
       msg += '<div class="mb-3">';
-      msg += '<div class="form-check mb-2">';
-      msg += '<input type="checkbox" class="form-check-input" id="pendingStartTBD" onchange="document.getElementById(\'pendingStartDate\').disabled = this.checked; if(this.checked) document.getElementById(\'pendingStartDate\').value = \'\';">';
-      msg += '<label class="form-check-label" for="pendingStartTBD"><strong>TBD</strong> — Start date not yet determined</label>';
-      msg += '</div>';
       msg += '<label class="form-label"><i class="bi bi-calendar-event"></i> Estimated Start Date:</label>';
       msg += '<input type="date" class="form-control" id="pendingStartDate" value="' + defaultDate + '">';
       msg += '</div>';
@@ -4307,10 +4096,9 @@
       document.getElementById('notificationOkBtn').textContent = 'Set Pending Start';
 
       notificationCallback = function() {
-        var isTBD = document.getElementById('pendingStartTBD').checked;
-        var startDate = isTBD ? '' : document.getElementById('pendingStartDate').value;
-        if (!isTBD && !startDate) {
-          showNotification('Please enter a start date or check TBD.', 'warning');
+        var startDate = document.getElementById('pendingStartDate').value;
+        if (!startDate) {
+          showNotification('Please enter a start date.', 'warning');
           return;
         }
 
@@ -4360,8 +4148,7 @@
                 isCompleted: false
               };
 
-              var dateMsg = startDate ? 'starting ' + startDate : 'start date TBD';
-              showNotification('✅ ' + jobNumber + ' set as Pending Start (' + dateMsg + ')', 'success');
+              showNotification('✅ ' + jobNumber + ' set as Pending Start (starting ' + startDate + ')', 'success');
 
               // Re-render to show the Pending Start badge
               showCrewPreview();
@@ -4649,7 +4436,6 @@
 
       for (var i = 0; i < specialCircumstances.length; i++) {
         var spec = specialCircumstances[i];
-        if (!spec) continue; // Skip null entries (removed by auto-apply)
 
         // Try multiple name variations to find saved selection
         var savedSelection = findSavedSpecialSelection(spec.name);
@@ -4843,7 +4629,6 @@
 
       for (var i = 0; i < specialCircumstances.length; i++) {
         var spec = specialCircumstances[i];
-        if (!spec) continue; // Skip null entries (removed by auto-apply)
 
         // Skip if already auto-applied or auto-skipped
         if (spec.autoApply || spec.autoSkip) continue;
@@ -5343,7 +5128,6 @@
 
       for (var i = 0; i < specialCircumstances.length; i++) {
         var spec = specialCircumstances[i];
-        if (!spec) continue; // Skip null entries
 
         if (spec.autoApply && spec.savedStatus && spec.savedLocation) {
           // DEDUPLICATION: Check if we've already processed this employee
@@ -5569,9 +5353,8 @@
         }
       }
 
-      // Set today as default hire date (use local date, not UTC)
-      var nowD = new Date();
-      var today = nowD.getFullYear() + '-' + ('0' + (nowD.getMonth() + 1)).slice(-2) + '-' + ('0' + nowD.getDate()).slice(-2);
+      // Set today as default hire date
+      var today = new Date().toISOString().split('T')[0];
       document.getElementById('newEmpHireDate').value = today;
 
       // Clear other fields
@@ -6183,24 +5966,18 @@
     var duplicateEmployees = []; // Employees that appear in multiple crews
 
     function matchEmployeesToSheet() {
-      // Reset flow guards — this is a fresh matching cycle
-      _matchingCompleted = false;
-      _crewLeadCheckCompleted = false;
-
       proposedChanges = [];
       matchedSheetEmployees = {}; // Reset for each parse
       duplicateEmployees = []; // Reset duplicates
 
       // First pass: find all matches and detect duplicates
-      // includeNonField=true so employees at Weeds/Vacation/etc. are still matched
-      // (they may be returning to an active crew this week)
       var employeeOccurrences = {}; // Track where each employee appears
 
       for (var i = 0; i < parsedCrews.length; i++) {
         var crew = parsedCrews[i];
         for (var j = 0; j < crew.employees.length; j++) {
           var emp = crew.employees[j];
-          var match = findBestMatchWithoutSkip(emp.name, currentEmployees, true);
+          var match = findBestMatchWithoutSkip(emp.name, currentEmployees);
 
           if (match && match.confidence >= 60) {
             var key = match.employeeName.toLowerCase();
@@ -6223,15 +6000,11 @@
       for (var key in employeeOccurrences) {
         var allOccurrences = employeeOccurrences[key];
 
-        // Filter out Pending Start, On Hold, and Completed job occurrences
+        // Filter out Pending Start and Completed job occurrences
         var activeOccurrences = allOccurrences.filter(function(occ) {
           var jobInfo = jobTrackingData[occ.crew.jobNumber];
           if (jobInfo && jobInfo.isPendingStart) {
             console.log('Filtering out Pending Start job ' + occ.crew.jobNumber + ' from duplicate detection for ' + key);
-            return false;
-          }
-          if (jobInfo && jobInfo.isOnHold) {
-            console.log('Filtering out On Hold job ' + occ.crew.jobNumber + ' from duplicate detection for ' + key);
             return false;
           }
           if (jobInfo && jobInfo.isCompleted) {
@@ -6324,8 +6097,6 @@
 
       for (var i = 0; i < specialCircumstances.length; i++) {
         var spec = specialCircumstances[i];
-        // Skip null entries (removed by auto-apply via removeSpecialCard)
-        if (!spec) continue;
         var specNameLower = spec.name.toLowerCase().trim();
         console.log('Checking special circumstance: "' + spec.name + '" (status: ' + spec.status + ', location: ' + (spec.location || 'none') + ')');
 
@@ -6437,12 +6208,6 @@
     }
 
     function finishMatching() {
-      // Guard: prevent redundant re-runs from re-render cascades
-      if (_matchingCompleted) {
-        console.log('finishMatching: Already completed, skipping (guard)');
-        return;
-      }
-
       proposedChanges = [];
       matchedSheetEmployees = {};
 
@@ -6453,8 +6218,7 @@
         // Skip crews that are Pending Start, On Hold, or Completed - employees here shouldn't generate changes yet
         var jobInfo = jobTrackingData[crew.jobNumber];
         if (jobInfo && (jobInfo.isPendingStart || jobInfo.isCompleted || jobInfo.isOnHold)) {
-          var skippedNames = crew.employees.map(function(e) { return e.name; }).join(', ');
-          console.log('Skipping proposed changes for crew ' + crew.jobNumber + ' (status: ' + jobInfo.status + ') — ' + crew.employees.length + ' employees: ' + skippedNames);
+          console.log('Skipping proposed changes for crew ' + crew.jobNumber + ' (status: ' + jobInfo.status + ')');
           continue;
         }
 
@@ -6514,7 +6278,7 @@
                 locationChanged: locationChanged,
                 jobChanged: jobChanged,
                 classificationChanged: classificationChanged,
-                apply: true  // Default to checked - user can uncheck individual rows
+                apply: false  // Default to unchecked - user must approve each change
               });
             } else {
               emp.noChanges = true;
@@ -6524,9 +6288,6 @@
           }
         }
       }
-
-      _matchingCompleted = true;
-      console.log('finishMatching: Complete. ' + proposedChanges.length + ' proposed changes (all default to apply:true)');
     }
 
     // Non-field locations that should be excluded from crew card matching
@@ -6885,13 +6646,6 @@
       }
 
       tbody.innerHTML = html;
-
-      // Set Select All checkbox to match default apply state (all checked by default)
-      var selectAllCheckbox = document.getElementById('selectAll');
-      if (selectAllCheckbox && proposedChanges.length > 0) {
-        var allChecked = proposedChanges.every(function(c) { return c.apply; });
-        selectAllCheckbox.checked = allChecked;
-      }
 
       // Show unmatched - filter out garbage entries (dates, notes, etc.)
       var unmatchedEmps = [];
@@ -7336,9 +7090,8 @@
         classSelect.selectedIndex = 0;
       }
 
-      // Set today as default hire date (use local date, not UTC)
-      var nowD2 = new Date();
-      var today = nowD2.getFullYear() + '-' + ('0' + (nowD2.getMonth() + 1)).slice(-2) + '-' + ('0' + nowD2.getDate()).slice(-2);
+      // Set today as default hire date
+      var today = new Date().toISOString().split('T')[0];
       document.getElementById('newEmpHireDate').value = today;
 
       // Clear other fields
@@ -7589,25 +7342,6 @@
     function applyChanges() {
       var changesToApply = proposedChanges.filter(function(c) { return c.apply; });
 
-      // Warn if there ARE proposed changes but NONE are checked
-      if (proposedChanges.length > 0 && changesToApply.length === 0) {
-        showConfirm(
-          '<p><strong>⚠️ No changes are selected.</strong></p>' +
-          '<p>There are <strong>' + proposedChanges.length + '</strong> proposed change(s) but none are checked. ' +
-          'Did you mean to select some changes first?</p>' +
-          '<p>Click <strong>OK</strong> to proceed anyway (sync Job Tracking only), or <strong>Cancel</strong> to go back and check some rows.</p>',
-          function() {
-            // User confirmed: proceed with sync-only
-            doApplyChanges(changesToApply);
-          }
-        );
-        return;
-      }
-
-      doApplyChanges(changesToApply);
-    }
-
-    function doApplyChanges(changesToApply) {
       // Build jobNameMap from ALL parsedCrews (not just changes) for Job Tracking backfill
       var jobNameMap = {};
       for (var jm = 0; jm < parsedCrews.length; jm++) {

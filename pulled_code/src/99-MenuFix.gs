@@ -154,8 +154,6 @@ function forceCreateMenu() {
         .addSubMenu(ui.createMenu('📚 Training')
           .addItem('Setup Training Config', 'setupTrainingConfig')
           .addItem('Setup Training Tracking', 'setupTrainingTracking')
-          .addItem('➕ Add Missing Crews to Training', 'menuAddMissingCrewsToTraining')
-          .addItem('🔄 Re-sort Training Tracking', 'resortTrainingTrackingChronologically')
           .addItem('🎨 Apply Training Tracking Formatting', 'menuApplyTrainingTrackingFormatting')
           .addItem('Refresh Training Attendees', 'refreshTrainingAttendees')
           .addItem('🔄 Update December Catch-Ups', 'updateDecemberCatchUps')

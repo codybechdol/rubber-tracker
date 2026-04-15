@@ -4124,9 +4124,8 @@ function removeCrewsFromTrainingTracking(crewNumbers) {
   }
 
   var data = sheet.getDataRange().getValues();
-  // Dynamic header detection
-  var headerIdx = findTrainingTrackingHeaderRow(data);
-  var headers = data[headerIdx];
+  // Row 1 is title, Row 2 is headers
+  var headers = data[1];
   var currentMonth = getCurrentMonthInfo();
 
   // Find column indices
@@ -4138,7 +4137,7 @@ function removeCrewsFromTrainingTracking(crewNumbers) {
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
     if (header === 'month') monthCol = h;
-    if (header === 'job number' || header === 'crew' || header === 'crew #' || header === 'crew number') crewCol = h;
+    if (header === 'job number' || header === 'crew' || header === 'crew #') crewCol = h;
     if (header === 'status') statusCol = h;
     if (header === 'completion date') completionDateCol = h;
   }
@@ -4152,7 +4151,7 @@ function removeCrewsFromTrainingTracking(crewNumbers) {
   var rowsToDelete = [];
   var preservedRows = 0;
 
-  for (var i = data.length - 1; i >= headerIdx + 1; i--) {
+  for (var i = data.length - 1; i >= 2; i--) { // Start from row 3 (index 2)
     var row = data[i];
     var crewValue = String(row[crewCol]).trim();
 
@@ -4239,48 +4238,28 @@ function addCrewsToTrainingTracking(crewNumbers) {
     return { addedRows: 0 };
   }
 
-  var headerIdx = findTrainingTrackingHeaderRow(data);
-  var headers = data[headerIdx];
+  var headers = data[1];
   var monthCol = -1;
   var topicCol = -1;
   var crewCol = -1;
-  var crewLeadCol = -1;
-  var crewSizeCol = -1;
-  var completionDateCol = -1;
-  var attendeesCol = -1;
-  var trainerCol = -1;
-  var materialsCol = -1;
-  var statusCol = -1;
 
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
     if (header === 'month') monthCol = h;
-    if (header === 'training topic' || header === 'topic' || header === 'title') topicCol = h;
-    if (header === 'job number' || header === 'crew' || header === 'crew #' || header === 'crew number') crewCol = h;
-    if (header === 'crew lead' || header === 'foreman') crewLeadCol = h;
-    if (header === 'crew size' || header === 'size') crewSizeCol = h;
-    if (header === 'completion date' || header === 'date completed' || header === 'completed') completionDateCol = h;
-    if (header === 'attendees') attendeesCol = h;
-    if (header === 'trainer name' || header === 'trainer') trainerCol = h;
-    if (header === 'training materials' || header === 'materials') materialsCol = h;
-    if (header === 'status') statusCol = h;
+    if (header === 'training topic' || header === 'topic') topicCol = h;
+    if (header === 'job number' || header === 'crew') crewCol = h;
   }
-
-  var totalCols = headers.length;
 
   if (monthCol === -1 || topicCol === -1 || crewCol === -1) {
-    Logger.log('addCrewsToTrainingTracking: Could not find required columns (month=' + monthCol + ', topic=' + topicCol + ', crew=' + crewCol + ')');
+    Logger.log('addCrewsToTrainingTracking: Could not find required columns');
     return { addedRows: 0 };
   }
-
-  Logger.log('addCrewsToTrainingTracking: Column map - month=' + monthCol + ', topic=' + topicCol + ', crew=' + crewCol +
-    ', crewLead=' + crewLeadCol + ', status=' + statusCol + ', totalCols=' + totalCols);
 
   // Build map of existing month+topic combinations and which crews have them
   var existingMap = {}; // key: "month|topic", value: array of crews
   var monthTopics = {}; // key: "month|topic", value: {month, topic}
 
-  for (var i = headerIdx + 1; i < data.length; i++) {
+  for (var i = 2; i < data.length; i++) {
     var row = data[i];
     var month = String(row[monthCol]).trim();
     var topic = String(row[topicCol]).trim();
@@ -4329,22 +4308,19 @@ function addCrewsToTrainingTracking(crewNumbers) {
         // Only add if crew doesn't already have this month+topic
         if (existingCrews.indexOf(newCrew) === -1) {
           var details = crewDetails[newCrew];
-          // Build row dynamically using actual column positions
-          // null = skip that column (avoids typed column errors)
-          var newRow = [];
-          for (var col = 0; col < totalCols; col++) {
-            if (col === monthCol) newRow.push(mt.month);
-            else if (col === topicCol) newRow.push(mt.topic);
-            else if (col === crewCol) newRow.push(newCrew);
-            else if (col === crewLeadCol) newRow.push(details.lead);
-            else if (col === crewSizeCol) newRow.push(details.size);
-            else if (col === statusCol) newRow.push('Pending');
-            else if (col === attendeesCol) newRow.push('');
-            else if (col === trainerCol) newRow.push('');
-            else if (col === materialsCol) newRow.push('');
-            else if (col === completionDateCol) newRow.push('');
-            else newRow.push(null);
-          }
+          // Create row: Month, Topic, Job Number, Crew Lead, Crew Size, Completion Date, Attendees, Trainer Name, Training Materials, Status
+          var newRow = [
+            mt.month,
+            mt.topic,
+            newCrew,
+            details.lead,
+            details.size,
+            '', // Completion Date
+            '', // Attendees
+            '', // Trainer Name
+            '', // Training Materials
+            'Pending' // Status
+          ];
           rowsToAdd.push(newRow);
           addedRows++;
         }
@@ -4352,26 +4328,14 @@ function addCrewsToTrainingTracking(crewNumbers) {
     }
   }
 
-  // Append new rows cell-by-cell (avoids typed column errors from setValues)
+  // Append new rows
   if (rowsToAdd.length > 0) {
     var lastRow = sheet.getLastRow();
-    for (var r = 0; r < rowsToAdd.length; r++) {
-      var rowData = rowsToAdd[r];
-      var targetRow = lastRow + 1 + r;
-      for (var col = 0; col < rowData.length; col++) {
-        if (rowData[col] !== null) {
-          sheet.getRange(targetRow, col + 1).setValue(rowData[col]);
-        }
-      }
-    }
+    sheet.getRange(lastRow + 1, 1, rowsToAdd.length, rowsToAdd[0].length).setValues(rowsToAdd);
 
-    // Sort by Month then Crew using dynamic column positions
-    var sortStart = headerIdx + 2;
-    var sortRows = sheet.getLastRow() - sortStart + 1;
-    if (sortRows > 1) {
-      var dataRange = sheet.getRange(sortStart, 1, sortRows, sheet.getLastColumn());
-      dataRange.sort([{column: monthCol + 1, ascending: true}, {column: crewCol + 1, ascending: true}]);
-    }
+    // Sort the sheet by Month then Crew
+    var dataRange = sheet.getRange(3, 1, sheet.getLastRow() - 2, sheet.getLastColumn());
+    dataRange.sort([{column: 1, ascending: true}, {column: 3, ascending: true}]);
   }
 
   Logger.log('addCrewsToTrainingTracking: Added ' + addedRows + ' rows for crews: ' + crewNumbers.join(', '));
@@ -4419,15 +4383,13 @@ function syncTrainingTrackingWithConfig() {
   }
 
   var data = sheet.getDataRange().getValues();
-  // Dynamic header detection
-  var headerIdx = findTrainingTrackingHeaderRow(data);
-  var headers = data[headerIdx];
+  var headers = data[1];
 
   // Find crew column
   var crewCol = -1;
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'job number' || header === 'crew' || header === 'crew #' || header === 'crew number') crewCol = h;
+    if (header === 'job number' || header === 'crew' || header === 'crew #') crewCol = h;
   }
 
   if (crewCol === -1) {
@@ -4488,83 +4450,6 @@ function syncTrainingTrackingWithConfig() {
 }
 
 /**
- * Dynamically finds the header row in Training Tracking sheet data.
- * Searches the first 5 rows for one containing known Training Tracking header names.
- * This handles sheets where extra rows (like "Table 18") exist between title and headers.
- *
- * @param {Array[]} data - 2D array from sheet.getDataRange().getValues()
- * @return {number} Index into data array where headers are found (0-based), or 1 as fallback
- */
-function findTrainingTrackingHeaderRow(data) {
-  var knownHeaders = ['month', 'crew #', 'crew lead', 'status', 'training topic', 'title', 'attendees', 'hours', 'crew size', 'foreman', 'job number', 'crew', 'crew number', 'completion date', 'trainer', 'notes', 'topic'];
-  var maxRowsToCheck = Math.min(data.length, 5);
-
-  for (var r = 0; r < maxRowsToCheck; r++) {
-    var row = data[r];
-    var matchCount = 0;
-
-    for (var c = 0; c < row.length; c++) {
-      var cellVal = String(row[c] || '').toLowerCase().trim();
-      if (knownHeaders.indexOf(cellVal) !== -1) {
-        matchCount++;
-      }
-    }
-
-    // If we find at least 2 known headers in this row, it's the header row
-    if (matchCount >= 2) {
-      Logger.log('findTrainingTrackingHeaderRow: Found header row at data index ' + r + ' (sheet row ' + (r + 1) + ') with ' + matchCount + ' matching headers');
-
-      // --- Auto-repair corrupted headers ---
-      // Check each cell: if it CONTAINS a known header but doesn't exactly match, repair it
-      var repairMap = {
-        'training topic': 'Training Topic',
-        'month': 'Month',
-        'crew #': 'Crew #',
-        'crew lead': 'Crew Lead',
-        'status': 'Status',
-        'attendees': 'Attendees',
-        'hours': 'Hours',
-        'crew size': 'Crew Size',
-        'completion date': 'Completion Date',
-        'trainer': 'Trainer',
-        'notes': 'Notes',
-        'job number': 'Job Number',
-        'training materials': 'Training Materials'
-      };
-      var sheet = null;
-      for (var rc = 0; rc < row.length; rc++) {
-        var rawVal = String(row[rc] || '').trim();
-        var lowerVal = rawVal.toLowerCase();
-        if (knownHeaders.indexOf(lowerVal) !== -1) continue; // Already clean
-
-        // Check if cell contains a known header embedded in garbage
-        for (var kn in repairMap) {
-          if (lowerVal.indexOf(kn) !== -1 && lowerVal !== kn) {
-            // Found corrupted header - repair it on the sheet
-            if (!sheet) {
-              sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Training Tracking');
-            }
-            if (sheet) {
-              var correctValue = repairMap[kn];
-              Logger.log('findTrainingTrackingHeaderRow: Auto-repaired corrupted header in col ' + (rc + 1) + ': "' + rawVal + '" → "' + correctValue + '"');
-              sheet.getRange(r + 1, rc + 1).setValue(correctValue);
-              data[r][rc] = correctValue; // Update in-memory too
-            }
-            break;
-          }
-        }
-      }
-
-      return r;
-    }
-  }
-
-  // Fallback to row index 1 (original assumption: row 2)
-  Logger.log('findTrainingTrackingHeaderRow: WARNING - Could not find header row, falling back to data[1]');
-  return 1;
-}
-
-/**
  * Updates the Crew Lead column in Training Tracking based on current Employees data.
  * This fixes incorrect foreman names that may have been set when rows were created.
  * Menu: Glove Manager → Utilities → 🔄 Update Training Tracking Crew Leads
@@ -4583,9 +4468,7 @@ function updateTrainingTrackingCrewLeads() {
   }
 
   var data = sheet.getDataRange().getValues();
-  var headerIdx = findTrainingTrackingHeaderRow(data);
-  var headers = data[headerIdx];
-  var dataStartIdx = headerIdx + 1; // First data row in data array
+  var headers = data[1]; // Row 2 is headers
 
   // Find column indices
   var monthCol = -1;
@@ -4595,7 +4478,7 @@ function updateTrainingTrackingCrewLeads() {
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
     if (header === 'month') monthCol = h;
-    if (header === 'job number' || header === 'crew' || header === 'crew #' || header === 'crew number') crewCol = h;
+    if (header === 'job number' || header === 'crew' || header === 'crew #') crewCol = h;
     if (header === 'crew lead' || header === 'foreman') leadCol = h;
   }
 
@@ -4618,7 +4501,7 @@ function updateTrainingTrackingCrewLeads() {
   var changes = [];
 
   // First pass: collect all unique crew numbers
-  for (var i = dataStartIdx; i < data.length; i++) {
+  for (var i = 2; i < data.length; i++) {
     var crewNum = String(data[i][crewCol]).trim();
     if (crewNum && !crewLeadMap.hasOwnProperty(crewNum)) {
       // Get the current crew lead from Employees sheet
@@ -4628,7 +4511,7 @@ function updateTrainingTrackingCrewLeads() {
   }
 
   // Second pass: update rows where crew lead doesn't match (ONLY current and future months)
-  for (var j = dataStartIdx; j < data.length; j++) {
+  for (var j = 2; j < data.length; j++) {
     var rowMonth = monthCol >= 0 ? String(data[j][monthCol]).trim() : '';
     var crewNum = String(data[j][crewCol]).trim();
     var currentLead = String(data[j][leadCol]).trim();
@@ -4696,9 +4579,7 @@ function updateTrainingTrackingCrewLeadsSilent() {
   }
 
   var data = sheet.getDataRange().getValues();
-  var headerIdx = findTrainingTrackingHeaderRow(data);
-  var headers = data[headerIdx];
-  var dataStartIdx = headerIdx + 1; // First data row in data array
+  var headers = data[1]; // Row 2 is headers
 
   // Find column indices
   var monthCol = -1;
@@ -4708,12 +4589,12 @@ function updateTrainingTrackingCrewLeadsSilent() {
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
     if (header === 'month') monthCol = h;
-    if (header === 'job number' || header === 'crew' || header === 'crew #' || header === 'crew number') crewCol = h;
+    if (header === 'job number' || header === 'crew' || header === 'crew #') crewCol = h;
     if (header === 'crew lead' || header === 'foreman') leadCol = h;
   }
 
   if (crewCol === -1 || leadCol === -1) {
-    Logger.log('updateTrainingTrackingCrewLeadsSilent: Could not find Job Number or Crew Lead columns (headerIdx=' + headerIdx + ')');
+    Logger.log('updateTrainingTrackingCrewLeadsSilent: Could not find Job Number or Crew Lead columns');
     return { updatedRows: 0 };
   }
 
@@ -4724,7 +4605,7 @@ function updateTrainingTrackingCrewLeadsSilent() {
                     'July', 'August', 'September', 'October', 'November', 'December'];
   var currentMonthName = monthNames[currentMonthIndex];
 
-  Logger.log('updateTrainingTrackingCrewLeadsSilent: Current month is ' + currentMonthName + ' (index ' + currentMonthIndex + '), headerIdx=' + headerIdx);
+  Logger.log('updateTrainingTrackingCrewLeadsSilent: Current month is ' + currentMonthName + ' (index ' + currentMonthIndex + ')');
 
   // Build map of crew number to current crew lead using getCrewLead
   var crewLeadMap = {};
@@ -4732,7 +4613,7 @@ function updateTrainingTrackingCrewLeadsSilent() {
   var skippedPastMonths = 0;
 
   // First pass: collect all unique crew numbers
-  for (var i = dataStartIdx; i < data.length; i++) {
+  for (var i = 2; i < data.length; i++) {
     var crewNum = String(data[i][crewCol]).trim();
     if (crewNum && !crewLeadMap.hasOwnProperty(crewNum)) {
       // Get the current crew lead from Employees sheet
@@ -4742,7 +4623,7 @@ function updateTrainingTrackingCrewLeadsSilent() {
   }
 
   // Second pass: update rows where crew lead doesn't match (ONLY current and future months)
-  for (var j = dataStartIdx; j < data.length; j++) {
+  for (var j = 2; j < data.length; j++) {
     var rowMonth = monthCol >= 0 ? String(data[j][monthCol]).trim() : '';
     var crewNum = String(data[j][crewCol]).trim();
     var currentLead = String(data[j][leadCol]).trim();
@@ -4789,10 +4670,7 @@ function addMissingCrewsToTrainingTracking() {
   }
 
   var data = sheet.getDataRange().getValues();
-  var headerIdx = findTrainingTrackingHeaderRow(data);
-  var headers = data[headerIdx];
-  var dataStartIdx = headerIdx + 1; // First data row in data array
-  var dataStartRow = headerIdx + 2; // First data row in sheet (1-based)
+  var headers = data[1]; // Row 2 is headers
 
   // Find column indices
   var monthCol = -1;
@@ -4802,36 +4680,22 @@ function addMissingCrewsToTrainingTracking() {
   var sizeCol = -1;
   var statusCol = -1;
   var hoursCol = -1;
-  var completionDateCol = -1;
-  var attendeesCol = -1;
-  var trainerCol = -1;
-  var notesCol = -1;
-  var materialsCol = -1;
 
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
     if (header === 'month') monthCol = h;
-    if (header === 'training topic' || header === 'title' || header === 'topic' || header.indexOf('training topic') !== -1) topicCol = h;
-    if (header === 'job number' || header === 'crew' || header === 'crew #' || header === 'crew number') crewCol = h;
+    if (header === 'training topic') topicCol = h;
+    if (header === 'job number' || header === 'crew' || header === 'crew #') crewCol = h;
     if (header === 'crew lead' || header === 'foreman') leadCol = h;
-    if (header === 'crew size' || header === 'size') sizeCol = h;
+    if (header === 'crew size') sizeCol = h;
     if (header === 'status') statusCol = h;
-    if (header === 'hours' || header === 'hours trainer') hoursCol = h;
-    if (header === 'completion date' || header === 'date completed' || header === 'completed') completionDateCol = h;
-    if (header === 'attendees') attendeesCol = h;
-    if (header === 'trainer name' || header === 'trainer') trainerCol = h;
-    if (header === 'notes') notesCol = h;
-    if (header === 'training materials' || header === 'materials') materialsCol = h;
+    if (header === 'hours') hoursCol = h;
   }
-
-  var totalCols = headers.length;
 
   if (monthCol === -1 || crewCol === -1) {
-    Logger.log('addMissingCrewsToTrainingTracking: Could not find Month or Crew columns (headerIdx=' + headerIdx + ', headers=' + headers.join(', ') + ')');
+    Logger.log('addMissingCrewsToTrainingTracking: Could not find Month or Crew columns');
     return { addedRows: 0, crews: [] };
   }
-
-  Logger.log('addMissingCrewsToTrainingTracking: Header row at data index ' + headerIdx + ' (sheet row ' + (headerIdx + 1) + '), data starts at index ' + dataStartIdx);
 
   // Get current month info
   var now = new Date();
@@ -4855,9 +4719,7 @@ function addMissingCrewsToTrainingTracking() {
   }
 
   var activeCrews = Object.keys(allActiveCrews).sort();
-  Logger.log('addMissingCrewsToTrainingTracking: Found ' + activeCrews.length + ' active crews: ' + activeCrews.join(', '));
-  Logger.log('addMissingCrewsToTrainingTracking: From Employees sheet: ' + activeCrewsFromEmployees.join(', '));
-  Logger.log('addMissingCrewsToTrainingTracking: From Job Tracking: ' + activeCrewsFromJobTracking.map(function(c) { return c.jobNumber; }).join(', '));
+  Logger.log('addMissingCrewsToTrainingTracking: Found ' + activeCrews.length + ' active crews');
 
   if (activeCrews.length === 0) {
     return { addedRows: 0, crews: [] };
@@ -4865,7 +4727,7 @@ function addMissingCrewsToTrainingTracking() {
 
   // Build set of existing crew+month combinations
   var existingCombos = {};
-  for (var i = dataStartIdx; i < data.length; i++) {
+  for (var i = 2; i < data.length; i++) {
     var rowMonth = String(data[i][monthCol] || '').trim();
     var rowCrew = String(data[i][crewCol] || '').trim();
     if (rowMonth && rowCrew) {
@@ -4873,32 +4735,14 @@ function addMissingCrewsToTrainingTracking() {
     }
   }
 
-  // Get training topics - first try Training Config sheet (authoritative source)
+  // Get training topics - collect from existing rows (month -> topic, hours)
   var monthTopics = {};
-  var configSheet = ss.getSheetByName('Training Config');
-  if (configSheet && configSheet.getLastRow() > 1) {
-    var configData = configSheet.getDataRange().getValues();
-    for (var ci = 1; ci < configData.length; ci++) {
-      var configTopic = String(configData[ci][0] || '').trim(); // e.g. "April: Trenching & Shoring / Haz-Com Awareness"
-      var configHours = configData[ci][2] || 2;
-      var colonIdx = configTopic.indexOf(':');
-      if (colonIdx > 0) {
-        var configMonth = configTopic.substring(0, colonIdx).trim();
-        var topicOnly = configTopic.substring(colonIdx + 1).trim();
-        if (configMonth && topicOnly) {
-          monthTopics[configMonth] = { topic: topicOnly, hours: configHours };
-        }
-      }
-    }
-  }
-
-  // Fallback: collect from existing Training Tracking rows (prefer non-TBD topics)
-  for (var m = dataStartIdx; m < data.length; m++) {
+  for (var m = 2; m < data.length; m++) {
     var month = String(data[m][monthCol] || '').trim();
     var topic = topicCol >= 0 ? String(data[m][topicCol] || '').trim() : '';
     var hours = hoursCol >= 0 ? data[m][hoursCol] : 2;
 
-    if (month && topic && topic !== 'TBD' && !monthTopics[month]) {
+    if (month && topic && !monthTopics[month]) {
       monthTopics[month] = { topic: topic, hours: hours };
     }
   }
@@ -4912,10 +4756,7 @@ function addMissingCrewsToTrainingTracking() {
 
     // Check if crew should be excluded (management crew etc)
     var shouldExclude = shouldExcludeCrew ? shouldExcludeCrew(crew) : false;
-    if (shouldExclude) {
-      Logger.log('addMissingCrewsToTrainingTracking: EXCLUDED crew ' + crew + ' (shouldExcludeCrew=true)');
-      continue;
-    }
+    if (shouldExclude) continue;
 
     // Get crew info
     var crewLead = getCrewLead ? getCrewLead(crew) : null;
@@ -4928,39 +4769,28 @@ function addMissingCrewsToTrainingTracking() {
       var comboKey = monthName + '|' + crew;
 
       // Skip if this crew+month combination already exists
-      if (existingCombos[comboKey]) {
-        if (mi === currentMonthIndex) {
-          Logger.log('addMissingCrewsToTrainingTracking: Crew ' + crew + ' already exists for ' + monthName + ' (skipping)');
-        }
-        continue;
-      }
-
-      Logger.log('addMissingCrewsToTrainingTracking: ADDING crew ' + crew + ' for ' + monthName + ' (lead: ' + leadName + ', size: ' + crewSize + ')');
+      if (existingCombos[comboKey]) continue;
 
       // Get the training topic and hours for this month
       var monthInfo = monthTopics[monthName];
       var trainingTopic = monthInfo ? monthInfo.topic : (monthName === 'December' ? 'Catch Up - All Incomplete Training' : 'TBD');
       var trainingHours = monthInfo ? monthInfo.hours : 2;
 
-      // Build row dynamically using actual column positions
-      // null = skip that column (avoids typed column errors when writing cell-by-cell)
+      // Create new row: Month, Topic, Crew #, Crew Lead, Crew Size, Completion Date, Attendees, Hours, Trainer, Status, Notes
       var crewAttendees = getCrewMembers ? getCrewMembers(crew) : '';
-      var newRow = [];
-      for (var col = 0; col < totalCols; col++) {
-        if (col === monthCol) newRow.push(monthName);
-        else if (col === topicCol) newRow.push(trainingTopic);
-        else if (col === crewCol) newRow.push(crew);
-        else if (col === leadCol) newRow.push(leadName);
-        else if (col === sizeCol) newRow.push(crewSize);
-        else if (col === statusCol) newRow.push('Pending');
-        else if (col === hoursCol) newRow.push(trainingHours);
-        else if (col === attendeesCol) newRow.push(crewAttendees);
-        else if (col === trainerCol) newRow.push('');
-        else if (col === completionDateCol) newRow.push('');
-        else if (col === notesCol) newRow.push('');
-        else if (col === materialsCol) newRow.push('');
-        else newRow.push(null);
-      }
+      var newRow = [
+        monthName,
+        trainingTopic,
+        crew,
+        leadName,
+        crewSize,
+        '', // Completion Date
+        crewAttendees, // Attendees - auto-populated from Employees
+        trainingHours,
+        '', // Trainer
+        'Pending', // Status
+        '' // Notes
+      ];
 
       newRows.push(newRow);
       addedCrewSet[crew] = true;
@@ -4972,51 +4802,37 @@ function addMissingCrewsToTrainingTracking() {
     return { addedRows: 0, crews: [] };
   }
 
-  // Sort new rows by month index, then by crew (using dynamic column positions)
+  // Sort new rows by month index, then by crew
   newRows.sort(function(a, b) {
-    var monthA = monthNames.indexOf(String(a[monthCol]).trim());
-    var monthB = monthNames.indexOf(String(b[monthCol]).trim());
+    var monthA = monthNames.indexOf(a[0]);
+    var monthB = monthNames.indexOf(b[0]);
     if (monthA !== monthB) return monthA - monthB;
-    return String(a[crewCol]).localeCompare(String(b[crewCol]));
+    return a[2].localeCompare(b[2]); // Sort by crew
   });
 
-  // Append new rows cell-by-cell (avoids typed column errors from setValues)
+  // Append new rows to sheet
   var lastRow = sheet.getLastRow();
-  for (var r = 0; r < newRows.length; r++) {
-    var rowData = newRows[r];
-    var targetRow = lastRow + 1 + r;
-    for (var col = 0; col < rowData.length; col++) {
-      if (rowData[col] !== null) {
-        sheet.getRange(targetRow, col + 1).setValue(rowData[col]);
-      }
-    }
-  }
+  sheet.getRange(lastRow + 1, 1, newRows.length, 11).setValues(newRows);
 
   // Add status validation to new rows
-  if (statusCol >= 0) {
-    var statusRule = SpreadsheetApp.newDataValidation()
-      .requireValueInList(['Pending', 'In Progress', 'Complete', 'Overdue', 'N/A'], true)
-      .setAllowInvalid(false)
-      .build();
-    sheet.getRange(lastRow + 1, statusCol + 1, newRows.length, 1).setDataValidation(statusRule);
-  }
+  var statusRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['Pending', 'In Progress', 'Complete', 'Overdue', 'N/A'], true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(lastRow + 1, statusCol + 1, newRows.length, 1).setDataValidation(statusRule);
 
-  // Sort entire sheet by Month (chronological) then Crew (only data rows, skip title/header rows)
-  // NOTE: Cannot use sheet.sort() here because it sorts month NAMES alphabetically
-  // (April, August, December...) instead of chronologically (January, February, March...).
-  // Must read data, sort in-memory by month index, then write back.
-  var totalDataRows = sheet.getLastRow() - dataStartRow + 1;
-  if (totalDataRows > 1 && monthCol >= 0 && crewCol >= 0) {
-    var freshData = sheet.getRange(dataStartRow, 1, totalDataRows, sheet.getLastColumn()).getValues();
-    freshData.sort(function(a, b) {
-      var idxA = monthNames.indexOf(String(a[monthCol]).trim());
-      var idxB = monthNames.indexOf(String(b[monthCol]).trim());
-      if (idxA === -1) idxA = 99;
-      if (idxB === -1) idxB = 99;
-      if (idxA !== idxB) return idxA - idxB;
-      return String(a[crewCol]).localeCompare(String(b[crewCol]));
+  // Sort entire sheet by Month then Crew
+  if (sheet.getLastRow() > 2) {
+    // Convert month names to numbers for proper sorting
+    // We'll re-sort after adding by using a helper approach
+    var allData = sheet.getRange(3, 1, sheet.getLastRow() - 2, 11).getValues();
+    allData.sort(function(a, b) {
+      var monthA = monthNames.indexOf(String(a[0]).trim());
+      var monthB = monthNames.indexOf(String(b[0]).trim());
+      if (monthA !== monthB) return monthA - monthB;
+      return String(a[2]).localeCompare(String(b[2])); // Then by crew
     });
-    sheet.getRange(dataStartRow, 1, totalDataRows, freshData[0].length).setValues(freshData);
+    sheet.getRange(3, 1, allData.length, 11).setValues(allData);
 
     // Re-apply formatting after sorting
     applyTrainingTrackingFormatting(sheet);
@@ -5026,238 +4842,6 @@ function addMissingCrewsToTrainingTracking() {
   Logger.log('addMissingCrewsToTrainingTracking: Added ' + newRows.length + ' rows for crews: ' + addedCrewsList.join(', '));
 
   return { addedRows: newRows.length, crews: addedCrewsList };
-}
-
-
-/**
- * Menu wrapper for addMissingCrewsToTrainingTracking - shows UI feedback.
- * Adds any active crews that are missing from Training Tracking (current month onward).
- * Menu: Glove Manager → Review & Schedule → Training → ➕ Add Missing Crews to Training
- */
-function menuAddMissingCrewsToTraining() {
-  var ui = SpreadsheetApp.getUi();
-  var result = addMissingCrewsToTrainingTracking();
-
-  if (result.addedRows === 0) {
-    ui.alert('✅ No Missing Crews', 'All active crews already have Training Tracking rows for the current month and beyond.', ui.ButtonSet.OK);
-  } else {
-    ui.alert('✅ Crews Added to Training Tracking',
-      'Added ' + result.addedRows + ' training row(s) for ' + result.crews.length + ' crew(s):\n\n' +
-      result.crews.join(', ') + '\n\n' +
-      'Rows added for current month (April) through December.',
-      ui.ButtonSet.OK);
-  }
-}
-
-
-/**
- * Re-sorts the Training Tracking sheet in chronological month order (Jan → Dec),
- * then by crew number within each month. Fixes alphabetical month sorting bug
- * where April appeared before January.
- * Also re-applies alternating month color formatting after sorting.
- * Menu: Glove Manager → Review & Schedule → Training → 🔄 Re-sort Training Tracking
- */
-function resortTrainingTrackingChronologically() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('Training Tracking');
-  var ui = SpreadsheetApp.getUi();
-
-  if (!sheet || sheet.getLastRow() < 3) {
-    ui.alert('⚠️ Training Tracking sheet is empty or not set up.');
-    return;
-  }
-
-  var data = sheet.getDataRange().getValues();
-  var headerIdx = findTrainingTrackingHeaderRow(data);
-  var headers = data[headerIdx];
-  var dataStartRow = headerIdx + 2; // 1-based sheet row
-
-  // Find Month, Crew, and Topic columns
-  var monthCol = -1;
-  var crewCol = -1;
-  var topicCol = -1;
-  for (var h = 0; h < headers.length; h++) {
-    var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'month') monthCol = h;
-    if (header === 'job number' || header === 'crew' || header === 'crew #' || header === 'crew number') crewCol = h;
-    if (header === 'training topic' || header === 'title' || header === 'topic' || header.indexOf('training topic') !== -1) topicCol = h;
-  }
-
-  if (monthCol === -1 || crewCol === -1) {
-    ui.alert('❌ Could not find Month or Crew columns in Training Tracking.');
-    return;
-  }
-
-  var monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
-                    'July', 'August', 'September', 'October', 'November', 'December'];
-
-  var totalDataRows = sheet.getLastRow() - dataStartRow + 1;
-  if (totalDataRows < 2) {
-    ui.alert('ℹ️ Not enough data rows to sort.');
-    return;
-  }
-
-  // Read all data rows
-  var totalCols = sheet.getLastColumn();
-  var dataRows = sheet.getRange(dataStartRow, 1, totalDataRows, totalCols).getValues();
-
-  // Check current order
-  var firstMonth = String(dataRows[0][monthCol]).trim();
-  var lastMonth = String(dataRows[dataRows.length - 1][monthCol]).trim();
-  Logger.log('resortTrainingTrackingChronologically: First month=' + firstMonth + ', Last month=' + lastMonth + ', totalRows=' + dataRows.length);
-  Logger.log('resortTrainingTrackingChronologically: Column indices - monthCol=' + monthCol + ', crewCol=' + crewCol + ', topicCol=' + topicCol);
-  Logger.log('resortTrainingTrackingChronologically: Headers found: ' + headers.join(' | '));
-
-  // Log a sample row to verify column mapping
-  if (dataRows.length > 0) {
-    var sampleRow = dataRows[0];
-    Logger.log('resortTrainingTrackingChronologically: Sample row[0] - month="' + sampleRow[monthCol] + '", crew="' + sampleRow[crewCol] + '", topic="' + (topicCol >= 0 ? sampleRow[topicCol] : 'N/A') + '"');
-  }
-
-  // Count TBD rows before fixing
-  var tbdCount = 0;
-  if (topicCol >= 0) {
-    for (var tb = 0; tb < dataRows.length; tb++) {
-      if (String(dataRows[tb][topicCol] || '').trim().toUpperCase() === 'TBD') tbdCount++;
-    }
-    Logger.log('resortTrainingTrackingChronologically: Found ' + tbdCount + ' rows with TBD topic');
-  } else {
-    Logger.log('resortTrainingTrackingChronologically: WARNING - topicCol is -1, cannot fix TBD topics');
-  }
-
-  // --- Load Training Config topics to fix TBD ---
-  var configTopics = {};
-  var configSheet = ss.getSheetByName('Training Config');
-  if (configSheet && configSheet.getLastRow() > 1) {
-    var configData = configSheet.getDataRange().getValues();
-    Logger.log('resortTrainingTrackingChronologically: Training Config has ' + (configData.length - 1) + ' rows');
-    for (var ci = 1; ci < configData.length; ci++) {
-      var configTopic = String(configData[ci][0] || '').trim();
-      var configHours = configData[ci][2] || 2;
-      var colonIdx = configTopic.indexOf(':');
-      if (colonIdx > 0) {
-        var cfgMonth = configTopic.substring(0, colonIdx).trim();
-        var cfgTopicOnly = configTopic.substring(colonIdx + 1).trim();
-        if (cfgMonth && cfgTopicOnly) {
-          configTopics[cfgMonth] = { topic: cfgTopicOnly, hours: configHours };
-        }
-      }
-    }
-    Logger.log('resortTrainingTrackingChronologically: Parsed ' + Object.keys(configTopics).length + ' month topics from Training Config: ' + Object.keys(configTopics).join(', '));
-  } else {
-    Logger.log('resortTrainingTrackingChronologically: Training Config sheet not found or empty');
-  }
-
-  // Fallback: scan existing Training Tracking rows for non-TBD topics per month
-  if (topicCol >= 0) {
-    for (var ft = 0; ft < dataRows.length; ft++) {
-      var ftMonth = String(dataRows[ft][monthCol] || '').trim();
-      var ftTopic = String(dataRows[ft][topicCol] || '').trim();
-      if (ftMonth && ftTopic && ftTopic.toUpperCase() !== 'TBD' && !configTopics[ftMonth]) {
-        configTopics[ftMonth] = { topic: ftTopic, hours: 2 };
-      }
-    }
-    Logger.log('resortTrainingTrackingChronologically: After fallback scan, have topics for: ' + Object.keys(configTopics).join(', '));
-  }
-
-  // --- Fix TBD topics and remove excluded crews (005-, 002-) ---
-  var fixedTbdCount = 0;
-  var removedExcludedCount = 0;
-  var removedCrews = {};
-  var cleanedRows = [];
-
-  for (var dr = 0; dr < dataRows.length; dr++) {
-    var rowCrew = String(dataRows[dr][crewCol]).trim();
-
-    // Remove rows for excluded crews (005-, 002-)
-    if (typeof isExcludedJobPrefix === 'function' && isExcludedJobPrefix(rowCrew)) {
-      removedExcludedCount++;
-      if (!removedCrews[rowCrew]) removedCrews[rowCrew] = 0;
-      removedCrews[rowCrew]++;
-      continue;
-    }
-
-    // Fix TBD topics from Training Config or fallback scan
-    if (topicCol >= 0) {
-      var rowTopic = String(dataRows[dr][topicCol]).trim();
-      var rowMonth = String(dataRows[dr][monthCol]).trim();
-      if (rowTopic.toUpperCase() === 'TBD' && configTopics[rowMonth]) {
-        dataRows[dr][topicCol] = configTopics[rowMonth].topic;
-        fixedTbdCount++;
-        Logger.log('resortTrainingTrackingChronologically: Fixed TBD for ' + rowCrew + ' ' + rowMonth + ' → ' + configTopics[rowMonth].topic);
-      }
-    }
-    cleanedRows.push(dataRows[dr]);
-  }
-  dataRows = cleanedRows;
-
-  if (removedExcludedCount > 0) {
-    Logger.log('resortTrainingTrackingChronologically: Removed ' + removedExcludedCount + ' rows for excluded crews: ' + JSON.stringify(removedCrews));
-  }
-  if (fixedTbdCount > 0) {
-    Logger.log('resortTrainingTrackingChronologically: Fixed ' + fixedTbdCount + ' TBD topics from Training Config');
-  }
-
-  // Sort chronologically by month index, then by crew number
-  dataRows.sort(function(a, b) {
-    var idxA = monthNames.indexOf(String(a[monthCol]).trim());
-    var idxB = monthNames.indexOf(String(b[monthCol]).trim());
-    if (idxA === -1) idxA = 99;
-    if (idxB === -1) idxB = 99;
-    if (idxA !== idxB) return idxA - idxB;
-    return String(a[crewCol]).localeCompare(String(b[crewCol]));
-  });
-
-  // Clear the entire data area first
-  sheet.getRange(dataStartRow, 1, totalDataRows, totalCols).clearContent();
-
-  // Write sorted/cleaned data back
-  if (dataRows.length > 0) {
-    sheet.getRange(dataStartRow, 1, dataRows.length, dataRows[0].length).setValues(dataRows);
-  }
-
-  // Delete leftover empty rows at the end if we removed excluded crews
-  if (removedExcludedCount > 0) {
-    var emptyRows = totalDataRows - dataRows.length;
-    if (emptyRows > 0) {
-      sheet.deleteRows(dataStartRow + dataRows.length, emptyRows);
-    }
-  }
-
-  // Re-apply formatting
-  applyTrainingTrackingFormatting(sheet);
-
-  // Verify and report
-  var crewCounts = {};
-  for (var i = 0; i < dataRows.length; i++) {
-    var crew = String(dataRows[i][crewCol]).trim();
-    if (!crewCounts[crew]) crewCounts[crew] = 0;
-    crewCounts[crew]++;
-  }
-
-  var sortedMonths = [];
-  var prevMonth = '';
-  for (var j = 0; j < dataRows.length; j++) {
-    var mn = String(dataRows[j][monthCol]).trim();
-    if (mn !== prevMonth) {
-      sortedMonths.push(mn);
-      prevMonth = mn;
-    }
-  }
-
-  Logger.log('resortTrainingTrackingChronologically: Sorted ' + dataRows.length + ' rows. Month order: ' + sortedMonths.join(', '));
-  Logger.log('resortTrainingTrackingChronologically: Crews found: ' + Object.keys(crewCounts).sort().join(', '));
-
-  var extraInfo = '';
-  if (fixedTbdCount > 0) extraInfo += '\n\n🔧 Fixed ' + fixedTbdCount + ' "TBD" topic(s) from Training Config';
-  if (removedExcludedCount > 0) extraInfo += '\n🗑️ Removed ' + removedExcludedCount + ' row(s) for excluded crews (' + Object.keys(removedCrews).sort().join(', ') + ')';
-
-  ui.alert('✅ Training Tracking Re-sorted',
-    'Sorted ' + dataRows.length + ' rows chronologically (Jan → Dec).\n\n' +
-    'Month order: ' + sortedMonths.join(' → ') + '\n\n' +
-    'Total crews: ' + Object.keys(crewCounts).length + '\n' +
-    'Crews: ' + Object.keys(crewCounts).sort().join(', ') + extraInfo,
-    ui.ButtonSet.OK);
 }
 
 
@@ -5280,10 +4864,7 @@ function applyTrainingTrackingFormatting(sheet) {
   }
 
   var data = sheet.getDataRange().getValues();
-  var headerIdx = findTrainingTrackingHeaderRow(data);
-  var numCols = Math.min(data[headerIdx].length, 11); // Use header row column count, max 11
-  var dataStartIdx = headerIdx + 1; // First data row in data array
-  var dataStartRow = headerIdx + 2; // First data row in sheet (1-based)
+  var numCols = Math.min(data[1].length, 11); // Use header row column count, max 11
 
   // Month order for coloring
   var monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
@@ -5291,19 +4872,18 @@ function applyTrainingTrackingFormatting(sheet) {
   var monthColors = ['#e8f4f8', '#ffffff']; // Alternating light blue and white
 
   // First, clear any existing backgrounds (except headers)
-  var totalDataRows = sheet.getLastRow() - dataStartRow + 1;
-  if (totalDataRows > 0) {
-    sheet.getRange(dataStartRow, 1, totalDataRows, numCols).setBackground(null);
+  if (sheet.getLastRow() > 2) {
+    sheet.getRange(3, 1, sheet.getLastRow() - 2, numCols).setBackground(null);
     // Clear all existing borders in data area
-    sheet.getRange(dataStartRow, 1, totalDataRows, numCols).setBorder(false, false, false, false, false, false);
+    sheet.getRange(3, 1, sheet.getLastRow() - 2, numCols).setBorder(false, false, false, false, false, false);
   }
 
   // Group rows by month
   var currentMonth = '';
-  var monthStartRow = dataStartRow;
+  var monthStartRow = 3;
   var colorIndex = -1;
 
-  for (var i = dataStartIdx; i < data.length; i++) {
+  for (var i = 2; i < data.length; i++) {
     var rowMonth = String(data[i][0]).trim();
     var rowNum = i + 1; // 1-based
 
@@ -5346,103 +4926,6 @@ function menuApplyTrainingTrackingFormatting() {
   SpreadsheetApp.getUi().alert('✅ Training Tracking Formatting Applied\n\nAlternating month colors and divider borders have been restored.');
 }
 
-
-/**
- * Silent version of refreshTrainingAttendees for use in Generate All Reports.
- * Refreshes attendee lists for current and future months without showing UI alerts.
- * Uses dynamic header detection to handle sheets with extra rows above headers.
- *
- * @return {Object} { updatedRows: number, skippedRows: number }
- */
-function refreshTrainingAttendeesSilent() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('Training Tracking');
-
-  if (!sheet || sheet.getLastRow() < 3) {
-    Logger.log('refreshTrainingAttendeesSilent: Training Tracking sheet not found or empty');
-    return { updatedRows: 0, skippedRows: 0 };
-  }
-
-  var data = sheet.getDataRange().getValues();
-  var headerIdx = findTrainingTrackingHeaderRow(data);
-  var headers = data[headerIdx];
-  var dataStartIdx = headerIdx + 1;
-
-  // Find column indices
-  var crewCol = -1;
-  var attendeesCol = -1;
-  var statusCol = -1;
-  var monthCol = -1;
-
-  for (var h = 0; h < headers.length; h++) {
-    var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'crew #' || header === 'crew' || header === 'job number' || header === 'crew number') crewCol = h;
-    if (header === 'attendees') attendeesCol = h;
-    if (header === 'status') statusCol = h;
-    if (header === 'month') monthCol = h;
-  }
-
-  if (crewCol === -1 || attendeesCol === -1) {
-    Logger.log('refreshTrainingAttendeesSilent: Required columns not found (crewCol=' + crewCol + ', attendeesCol=' + attendeesCol + ')');
-    return { updatedRows: 0, skippedRows: 0 };
-  }
-
-  // Get current month for filtering (only update current and future months)
-  var now = new Date();
-  var currentMonthIndex = now.getMonth();
-  var monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
-                    'July', 'August', 'September', 'October', 'November', 'December'];
-
-  var updatedCount = 0;
-  var skippedCount = 0;
-
-  // Pre-cache crew members
-  var crewMembersCache = {};
-  function getCachedCrewMembers(crewNum) {
-    if (!crewMembersCache.hasOwnProperty(crewNum)) {
-      crewMembersCache[crewNum] = getCrewMembers ? getCrewMembers(crewNum) : '';
-    }
-    return crewMembersCache[crewNum];
-  }
-
-  for (var i = dataStartIdx; i < data.length; i++) {
-    var row = data[i];
-    var crew = String(row[crewCol]).trim();
-    var currentAttendees = String(row[attendeesCol] || '').trim();
-    var status = statusCol >= 0 ? String(row[statusCol] || '').trim() : '';
-    var rowMonth = monthCol >= 0 ? String(row[monthCol] || '').trim() : '';
-
-    if (!crew) continue;
-
-    // Skip completed records
-    if (status === 'Complete') {
-      skippedCount++;
-      continue;
-    }
-
-    // Skip past months
-    if (monthCol >= 0 && rowMonth) {
-      var rowMonthIndex = monthNames.indexOf(rowMonth);
-      if (rowMonthIndex >= 0 && rowMonthIndex < currentMonthIndex) {
-        skippedCount++;
-        continue;
-      }
-    }
-
-    var crewMembers = getCachedCrewMembers(crew);
-
-    // Only update if empty or matches full roster (not manually edited)
-    if (!currentAttendees || currentAttendees === crewMembers) {
-      sheet.getRange(i + 1, attendeesCol + 1).setValue(crewMembers);
-      updatedCount++;
-    } else {
-      skippedCount++;
-    }
-  }
-
-  Logger.log('refreshTrainingAttendeesSilent: Updated ' + updatedCount + ', skipped ' + skippedCount);
-  return { updatedRows: updatedCount, skippedRows: skippedCount };
-}
 
 /**
  * Gets Crew Visit Config data for the To Do Config dialog.
@@ -6864,8 +6347,6 @@ function onOpen() {
       .addSubMenu(ui.createMenu('📚 Training')
         .addItem('Setup Training Config', 'setupTrainingConfig')
         .addItem('Setup Training Tracking', 'setupTrainingTracking')
-        .addItem('➕ Add Missing Crews to Training', 'menuAddMissingCrewsToTraining')
-        .addItem('🔄 Re-sort Training Tracking', 'resortTrainingTrackingChronologically')
         .addItem('🎨 Apply Training Tracking Formatting', 'menuApplyTrainingTrackingFormatting')
         .addItem('Refresh Training Attendees', 'refreshTrainingAttendees')
         .addItem('🔄 Update December Catch-Ups', 'updateDecemberCatchUps')
@@ -10066,7 +9547,7 @@ function saveEmployeeHistoryFast() {
   var existingEntries = {}; // Key: "name|eventType|date" for O(1) duplicate checking
 
   for (var hi = 0; hi < historyData.length; hi++) {
-    var histName = (historyData[hi][1] || '').toString().replace(/^["']+|["']+$/g, '').trim().toLowerCase();
+    var histName = (historyData[hi][1] || '').toString().trim().toLowerCase();
     if (histName) {
       var existing = lastKnownState[histName] || {};
       lastKnownState[histName] = {
@@ -15840,13 +15321,11 @@ function generateAllReports() {
     // Update Training Tracking crew leads to reflect current assignments
     // Only updates current and future months (preserves historical data)
     var crewLeadResults = null;
-    var trainingWarnings = [];
     try {
       crewLeadResults = updateTrainingTrackingCrewLeadsSilent();
       Logger.log('generateAllReports: Crew lead update returned: ' + JSON.stringify(crewLeadResults));
     } catch (crewLeadError) {
       Logger.log('generateAllReports: Error updating crew leads: ' + crewLeadError);
-      trainingWarnings.push('Crew lead update failed: ' + crewLeadError);
     }
 
     // Add missing crews to Training Tracking for current and future months
@@ -15857,7 +15336,6 @@ function generateAllReports() {
       Logger.log('generateAllReports: Added missing crews to Training Tracking: ' + JSON.stringify(addedCrewsResults));
     } catch (addCrewsError) {
       Logger.log('generateAllReports: Error adding missing crews: ' + addCrewsError);
-      trainingWarnings.push('Add missing crews failed: ' + addCrewsError);
     }
 
     // Refresh Training Tracking attendee lists for current and future months
@@ -15868,7 +15346,6 @@ function generateAllReports() {
       Logger.log('generateAllReports: Attendee refresh returned: ' + JSON.stringify(attendeeResults));
     } catch (attendeeError) {
       Logger.log('generateAllReports: Error refreshing attendees: ' + attendeeError);
-      trainingWarnings.push('Attendee refresh failed: ' + attendeeError);
     }
 
     // Sync crews in Job Tracking (foremen, schedules, new crews) using syncCrews
@@ -15897,9 +15374,6 @@ function generateAllReports() {
     }
     if (foremanResults && foremanResults.updatedCount > 0) {
       successMsg += '\n\n👤 ' + foremanResults.updatedCount + ' Job Tracking foreman(s) updated.';
-    }
-    if (trainingWarnings.length > 0) {
-      successMsg += '\n\n⚠️ Training Tracking warnings:\n' + trainingWarnings.join('\n');
     }
     SpreadsheetApp.getUi().alert(successMsg);
   } catch (e) {
@@ -19132,7 +18606,7 @@ function searchEmployeeHistoryForRehire(query) {
 
   for (var i = 0; i < historyData.length; i++) {
     var row = historyData[i];
-    var name = String(row[1] || '').replace(/^["']+|["']+$/g, '').trim();
+    var name = String(row[1] || '').trim();
     var nameLower = name.toLowerCase();
 
     if (!name || nameLower.indexOf(queryLower) === -1) continue;
@@ -19259,13 +18733,6 @@ function saveNewEmployeeData(data) {
     throw new Error('Invalid row index');
   }
 
-  // Clean name: strip any leading/trailing quotation marks
-  if (data.name) {
-    data.name = String(data.name).replace(/^["']+|["']+$/g, '').trim();
-    // Also update the cell in case the name was written with quotes by the trigger
-    sheet.getRange(rowIndex, 1).setValue(data.name);
-  }
-
   // Get headers to find column indices
   var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   var cols = {};
@@ -19343,12 +18810,10 @@ function saveNewEmployeeData(data) {
   }
   if (cols.hireDate && data.hireDate) {
     var hireDateCell = sheet.getRange(rowIndex, cols.hireDate);
-    // Write as MM/DD/YYYY string to avoid timezone shift between script (America/New_York)
-    // and spreadsheet timezone. Using Date objects can shift the date by a day.
-    var dateParts = String(data.hireDate).split('-');
-    if (dateParts.length === 3) {
-      var hireDateStr = dateParts[1] + '/' + dateParts[2] + '/' + dateParts[0];
-      hireDateCell.setValue(hireDateStr);
+    var hireDate = new Date(data.hireDate);
+    if (!isNaN(hireDate.getTime())) {
+      hireDateCell.setValue(hireDate);
+      hireDateCell.setNumberFormat('mm/dd/yyyy');
     }
   }
   if (cols.jobClassification && data.jobClassification) {
@@ -19358,16 +18823,16 @@ function saveNewEmployeeData(data) {
   // Validate: "Unknown" location only allowed for pending employees
   var isPending = false;
   if (data.hireDate) {
-    var hireParts = String(data.hireDate).split('-');
-    if (hireParts.length === 3) {
-      var parsedHireDate = new Date(Number(hireParts[0]), Number(hireParts[1]) - 1, Number(hireParts[2]));
-      if (!isNaN(parsedHireDate.getTime())) {
-        isPending = isEmployeePending(parsedHireDate);
-      }
+    var parsedHireDate = new Date(data.hireDate);
+    if (!isNaN(parsedHireDate.getTime())) {
+      isPending = isEmployeePending(parsedHireDate);
     }
   }
 
   var locationLower = String(data.location || '').toLowerCase().trim();
+  if (locationLower === 'unknown' && !isPending) {
+    throw new Error('"Unknown" location is only allowed for Pending New Hires (future Hire Date). Please select a real location.');
+  }
 
   // Log the event
   var isRehire = data.isRehire || false;
@@ -19407,29 +18872,6 @@ function trackNewEmployeeInHistory(ss, data, isPending) {
   var lastRow = historySheet.getLastRow();
   var isRehire = data.isRehire || false;
 
-  // Clean name: strip any leading/trailing quotation marks
-  var cleanName = String(data.name || '').replace(/^["']+|["']+$/g, '').trim();
-
-  // Fallback rehire detection: if isRehire is false, check Employee History
-  // for any previous entries with this name (catches cases where dialog rehire
-  // detection silently failed, e.g., searchEmployeeHistoryForRehire threw an error)
-  if (!isRehire && !isPending && lastRow > 2) {
-    try {
-      var histData = historySheet.getRange(3, 1, lastRow - 2, 3).getValues();
-      var nameLower = cleanName.toLowerCase();
-      for (var hi = 0; hi < histData.length; hi++) {
-        var histName = String(histData[hi][1] || '').replace(/^["']+|["']+$/g, '').trim().toLowerCase();
-        if (histName === nameLower) {
-          isRehire = true;
-          Logger.log('trackNewEmployeeInHistory: Fallback rehire detection found history for "' + cleanName + '"');
-          break;
-        }
-      }
-    } catch (rehireCheckErr) {
-      Logger.log('trackNewEmployeeInHistory: Error in fallback rehire check: ' + rehireCheckErr);
-    }
-  }
-
   var eventType;
   var notes;
   var changeReason;
@@ -19447,44 +18889,31 @@ function trackNewEmployeeInHistory(ss, data, isPending) {
     eventType = 'Rehired';
     changeReason = 'Rehired';
     rehireDate = Utilities.formatDate(today, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
-    notes = 'Rehired via New Employee dialog. Previous Employee History data was found.';
+    notes = 'Rehired via New Employee dialog. Previous Employee History data was found and pre-filled.';
   } else {
     eventType = 'New Employee';
     changeReason = 'New Hire';
     notes = 'Added via New Employee dialog';
   }
 
-  // Format hire date as MM/DD/YYYY string to avoid timezone shift
-  var hireDateVal = '';
-  if (data.hireDate) {
-    var hdParts = String(data.hireDate).split('-');
-    if (hdParts.length === 3) {
-      hireDateVal = hdParts[1] + '/' + hdParts[2] + '/' + hdParts[0];
-    }
-  }
-
-  // Employee History columns: A=Date, B=Name, C=Event Type, D=Location, E=Job Number,
-  // F=Hire Date, G=Last Day, H=Last Day Reason, I=Rehire Date, J=Notes,
-  // K=Phone, L=Email, M=Glove Size, N=Sleeve Size
-  historySheet.getRange(lastRow + 1, 1, 1, 14).setValues([[
-    today,                    // A: Date
-    cleanName,                // B: Employee Name (quotes stripped)
-    eventType,                // C: Event Type
-    data.location,            // D: Location
-    data.jobNumber,           // E: Job Number
-    hireDateVal,              // F: Hire Date (as string to avoid timezone shift)
-    '',                       // G: Last Day
-    '',                       // H: Last Day Reason
+  // Add a NEW history entry (does NOT modify past entries)
+  historySheet.getRange(lastRow + 1, 1, 1, 10).setValues([[
+    data.name,                // A: Employee Name
+    today,                    // B: Change Date
+    eventType,                // C: Change Type
+    '',                       // D: Old Value
+    data.location,            // E: New Value (Location)
+    data.location,            // F: Location
+    data.jobNumber,           // G: Job Number
+    changeReason,             // H: Change Reason
     rehireDate,               // I: Rehire Date
-    notes,                    // J: Notes
-    data.phoneNumber || '',   // K: Phone Number
-    data.emailAddress || '',  // L: Email Address
-    data.gloveSize || '',     // M: Glove Size
-    data.sleeveSize || ''     // N: Sleeve Size
+    notes                     // J: Notes
   ]]);
 
+  // Format the date cell
+  historySheet.getRange(lastRow + 1, 2).setNumberFormat('mm/dd/yyyy');
 
-  Logger.log('Tracked ' + eventType + ' in history: ' + cleanName + (isPending ? ' (pending)' : ''));
+  Logger.log('Tracked ' + eventType + ' in history: ' + data.name + (isPending ? ' (pending)' : ''));
 }
 
 /**

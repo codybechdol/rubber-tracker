@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<!DOCTYPE html>
+<!DOCTYPE html>
+<!DOCTYPE html>
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    h2 {
+      color: #1565c0;
+      margin: 0 0 10px 0;
+      font-size: 20px;
+    }
+    .subtitle {
+      color: #666;
+      font-size: 13px;
+      margin-bottom: 20px;
+    }
+    .info-box {
+      background: #e3f2fd;
+      border: 1px solid #90caf9;
+      border-radius: 6px;
+      padding: 12px;
+      margin-bottom: 20px;
+      font-size: 13px;
+      color: #1565c0;
+    }
+    .info-box strong {
+      display: block;
+      margin-bottom: 5px;
+    }
+    .search-box {
+      margin-bottom: 15px;
+    }
+    .search-box input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    .search-box input:focus {
+      outline: none;
+      border-color: #1565c0;
+      box-shadow: 0 0 0 2px rgba(21, 101, 192, 0.2);
+    }
+    .crews-container {
+      max-height: 450px;
+      overflow-y: auto;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: white;
+    }
+    .crew-card {
+      border-bottom: 1px solid #eee;
+      padding: 15px;
+    }
+    .crew-card:last-child {
+      border-bottom: none;
+    }
+    .crew-card:hover {
+      background: #fafafa;
+    }
+    .crew-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .crew-info {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .job-number {
+      font-weight: bold;
+      font-size: 16px;
+      color: #1565c0;
+    }
+    .location-badge {
+      background: #e8eaf6;
+      color: #3949ab;
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 12px;
+    }
+    .current-lead {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+    }
+    .lead-badge {
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+    }
+    .lead-badge.manual {
+      background: #c8e6c9;
+      color: #2e7d32;
+    }
+    .lead-badge.classification {
+      background: #fff3e0;
+      color: #e65100;
+    }
+    .lead-badge.none {
+      background: #ffcdd2;
+      color: #c62828;
+    }
+    .employee-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .employee-chip {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 10px;
+      border-radius: 16px;
+      font-size: 12px;
+      cursor: pointer;
+      border: 2px solid transparent;
+      transition: all 0.2s;
+    }
+    .employee-chip:hover {
+      border-color: #1565c0;
+    }
+    .employee-chip.is-lead {
+      background: #c8e6c9;
+      border-color: #2e7d32;
+    }
+    .employee-chip.has-lead-class {
+      background: #fff3e0;
+    }
+    .employee-chip.regular {
+      background: #e0e0e0;
+    }
+    .employee-chip.selected {
+      background: #1565c0;
+      color: white;
+      border-color: #0d47a1;
+    }
+    .class-indicator {
+      font-size: 10px;
+      opacity: 0.7;
+    }
+    .actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 20px;
+      padding-top: 15px;
+      border-top: 1px solid #ddd;
+    }
+    .btn {
+      padding: 10px 20px;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+    }
+    .btn-primary {
+      background: #1565c0;
+      color: white;
+    }
+    .btn-primary:hover {
+      background: #0d47a1;
+    }
+    .btn-primary:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .btn-secondary {
+      background: #e0e0e0;
+      color: #333;
+    }
+    .btn-secondary:hover {
+      background: #bdbdbd;
+    }
+    .changes-count {
+      font-size: 13px;
+      color: #666;
+    }
+    .changes-count span {
+      font-weight: bold;
+      color: #1565c0;
+    }
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: #666;
+    }
+    .empty-state {
+      text-align: center;
+      padding: 40px;
+      color: #999;
+    }
+    .star-icon {
+      color: #ffc107;
+    }
+    /* Legend */
+    .legend {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 15px;
+      font-size: 12px;
+      color: #666;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .legend-chip {
+      width: 16px;
+      height: 16px;
+      border-radius: 8px;
+    }
+    .legend-chip.lead-class {
+      background: #fff3e0;
+      border: 1px solid #ffcc80;
+    }
+    .legend-chip.assigned {
+      background: #c8e6c9;
+      border: 1px solid #81c784;
+    }
+    .legend-chip.selected {
+      background: #1565c0;
+    }
+  </style>
+</head>
+<body>
+  <h2>👷 Assign Crew Leads</h2>
+  <p class="subtitle">Click an employee to assign them as crew lead for their job. This designation is separate from Job Classification.</p>
+
+  <div class="info-box">
+    <strong>ℹ️ What is a Crew Lead?</strong>
+    A Crew Lead is the person responsible for their crew's tasks in the Task List and Trip Planner.
+    This is independent of their Job Classification (SUP, GF, F, etc.).
+    Employees with lead classifications (SUP, GF, F, GTO F) are automatically considered crew leads unless you manually assign someone else.
+  </div>
+
+  <div class="search-box">
+    <input type="text" id="searchInput" placeholder="🔍 Search by job number, location, or employee name..." oninput="filterCrews()">
+  </div>
+
+  <div class="legend">
+    <div class="legend-item">
+      <div class="legend-chip lead-class"></div>
+      <span>Has Lead Classification</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-chip assigned"></div>
+      <span>Assigned Crew Lead</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-chip selected"></div>
+      <span>Selected (click to assign)</span>
+    </div>
+  </div>
+
+  <div id="loading" class="loading">
+    Loading crews...
+  </div>
+
+  <div id="crewsContainer" class="crews-container" style="display: none;">
+  </div>
+
+  <div class="actions">
+    <div class="changes-count">
+      Changes: <span id="changesCount">0</span>
+    </div>
+    <div>
+      <button class="btn btn-secondary" onclick="google.script.host.close()">Cancel</button>
+      <button class="btn btn-primary" id="saveBtn" onclick="saveChanges()" disabled>Save Changes</button>
+    </div>
+  </div>
+
+  <script>
+    var crewsData = null;
+    var pendingChanges = {};  // jobNumber -> employeeName (or null to remove)
+    var originalAssignments = {};  // Original assignments for tracking changes
+
+    // Load data on init
+    document.addEventListener('DOMContentLoaded', function() {
+      loadCrews();
+    });
+
+    function loadCrews() {
+      document.getElementById('loading').style.display = 'block';
+      document.getElementById('crewsContainer').style.display = 'none';
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          document.getElementById('loading').style.display = 'none';
+
+          if (result.error) {
+            document.getElementById('crewsContainer').innerHTML = '<div class="empty-state">Error: ' + result.error + '</div>';
+            document.getElementById('crewsContainer').style.display = 'block';
+            return;
+          }
+
+          crewsData = result;
+
+          // Store original assignments
+          crewsData.crews.forEach(function(crew) {
+            if (crew.currentLeadSource === 'manual') {
+              originalAssignments[crew.jobNumber] = crew.currentLead;
+            }
+          });
+
+          renderCrews();
+        })
+        .withFailureHandler(function(error) {
+          document.getElementById('loading').style.display = 'none';
+          document.getElementById('crewsContainer').innerHTML = '<div class="empty-state">Error loading crews: ' + error + '</div>';
+          document.getElementById('crewsContainer').style.display = 'block';
+        })
+        .getCrewsForLeadAssignment();
+    }
+
+    function renderCrews() {
+      var container = document.getElementById('crewsContainer');
+      var searchTerm = document.getElementById('searchInput').value.toLowerCase();
+
+      if (!crewsData || !crewsData.crews || crewsData.crews.length === 0) {
+        container.innerHTML = '<div class="empty-state">No crews found</div>';
+        container.style.display = 'block';
+        return;
+      }
+
+      var html = '';
+      var visibleCount = 0;
+
+      crewsData.crews.forEach(function(crew) {
+        // Filter by search term
+        if (searchTerm) {
+          var searchable = (crew.jobNumber + ' ' + crew.location + ' ' +
+                          crew.employees.map(function(e) { return e.name; }).join(' ')).toLowerCase();
+          if (searchable.indexOf(searchTerm) === -1) {
+            return;
+          }
+        }
+
+        visibleCount++;
+
+        // Determine current lead (considering pending changes)
+        var currentLead = pendingChanges.hasOwnProperty(crew.jobNumber)
+          ? pendingChanges[crew.jobNumber]
+          : crew.currentLead;
+        var leadSource = pendingChanges.hasOwnProperty(crew.jobNumber)
+          ? (pendingChanges[crew.jobNumber] ? 'manual' : 'none')
+          : crew.currentLeadSource;
+
+        html += '<div class="crew-card" data-job="' + crew.jobNumber + '">';
+        html += '  <div class="crew-header">';
+        html += '    <div class="crew-info">';
+        html += '      <span class="job-number">' + crew.jobNumber + '</span>';
+        html += '      <span class="location-badge">📍 ' + (crew.location || 'Unknown') + '</span>';
+        html += '    </div>';
+        html += '    <div class="current-lead">';
+
+        if (currentLead) {
+          html += '      <span>Lead: <strong>' + currentLead + '</strong></span>';
+          var badgeClass = leadSource === 'manual' ? 'manual' : 'classification';
+          var badgeText = leadSource === 'manual' ? '✓ Assigned' : '(by classification)';
+          html += '      <span class="lead-badge ' + badgeClass + '">' + badgeText + '</span>';
+        } else {
+          html += '      <span>Lead: <em>Not Assigned</em></span>';
+          html += '      <span class="lead-badge none">⚠️ No Lead</span>';
+        }
+
+        html += '    </div>';
+        html += '  </div>';
+        html += '  <div class="employee-list">';
+
+        crew.employees.forEach(function(emp) {
+          var isLead = currentLead && emp.name.toLowerCase() === currentLead.toLowerCase();
+          var chipClass = 'employee-chip';
+
+          if (isLead) {
+            chipClass += ' is-lead';
+          } else if (emp.isLeadClassification) {
+            chipClass += ' has-lead-class';
+          } else {
+            chipClass += ' regular';
+          }
+
+          html += '    <div class="' + chipClass + '" ';
+          html += '         onclick="selectEmployee(\'' + escapeQuotes(crew.jobNumber) + '\', \'' + escapeQuotes(emp.name) + '\')" ';
+          html += '         title="Click to assign as crew lead">';
+
+          if (isLead) {
+            html += '      <span class="star-icon">★</span>';
+          }
+
+          html += '      <span>' + emp.name + '</span>';
+
+          if (emp.classification) {
+            html += '      <span class="class-indicator">(' + emp.classification + ')</span>';
+          }
+
+          html += '    </div>';
+        });
+
+        // Add "Clear Assignment" option if there's a manual assignment
+        if (leadSource === 'manual' && currentLead) {
+          html += '    <div class="employee-chip regular" onclick="clearAssignment(\'' + escapeQuotes(crew.jobNumber) + '\')" ';
+          html += '         title="Remove manual assignment and use classification-based lead">';
+          html += '      <span>❌ Clear Assignment</span>';
+          html += '    </div>';
+        }
+
+        html += '  </div>';
+        html += '</div>';
+      });
+
+      if (visibleCount === 0) {
+        html = '<div class="empty-state">No crews match your search</div>';
+      }
+
+      container.innerHTML = html;
+      container.style.display = 'block';
+    }
+
+    function escapeQuotes(str) {
+      return str.replace(/'/g, "\\'").replace(/"/g, '\\"');
+    }
+
+    function selectEmployee(jobNumber, employeeName) {
+      // Find the crew
+      var crew = crewsData.crews.find(function(c) { return c.jobNumber === jobNumber; });
+      if (!crew) return;
+
+      // Get current lead
+      var currentLead = pendingChanges.hasOwnProperty(jobNumber)
+        ? pendingChanges[jobNumber]
+        : crew.currentLead;
+
+      // If clicking the same person who is already lead, do nothing (use Clear Assignment instead)
+      if (currentLead && employeeName.toLowerCase() === currentLead.toLowerCase()) {
+        return;
+      }
+
+      // Set pending change
+      pendingChanges[jobNumber] = employeeName;
+
+      updateChangesCount();
+      renderCrews();
+    }
+
+    function clearAssignment(jobNumber) {
+      // Set to null to indicate removal of manual assignment
+      pendingChanges[jobNumber] = null;
+
+      updateChangesCount();
+      renderCrews();
+    }
+
+    function updateChangesCount() {
+      var count = 0;
+
+      for (var jobNumber in pendingChanges) {
+        var newValue = pendingChanges[jobNumber];
+        var originalValue = originalAssignments[jobNumber] || null;
+
+        // Count as change if different from original
+        if (newValue !== originalValue) {
+          count++;
+        }
+      }
+
+      document.getElementById('changesCount').textContent = count;
+      document.getElementById('saveBtn').disabled = count === 0;
+    }
+
+    function filterCrews() {
+      renderCrews();
+    }
+
+    function saveChanges() {
+      var saveBtn = document.getElementById('saveBtn');
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+
+      // Build assignments object (only include actual changes)
+      var assignments = {};
+      for (var jobNumber in pendingChanges) {
+        var newValue = pendingChanges[jobNumber];
+        var originalValue = originalAssignments[jobNumber] || null;
+
+        if (newValue !== originalValue) {
+          assignments[jobNumber] = newValue || '';  // Empty string to clear
+        }
+      }
+
+      if (Object.keys(assignments).length === 0) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save Changes';
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            alert('✅ ' + result.message);
+            google.script.host.close();
+          } else {
+            alert('Error: ' + result.message);
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save Changes';
+          }
+        })
+        .withFailureHandler(function(error) {
+          alert('Error saving: ' + error);
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save Changes';
+        })
+        .assignCrewLeadsBulk(assignments);
+    }
+  </script>
+</body>
+</html>
+
