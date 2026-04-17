@@ -235,6 +235,14 @@
     </div>
     <? } ?>
 
+    <? if (sheetName === 'Gloves' || sheetName === 'Sleeves') { ?>
+    <div class="form-group">
+      <label>ESL ID:</label>
+      <input type="text" id="eslId" name="eslId" placeholder="Enter ESL ID (optional)">
+      <div class="hint">External system link identifier</div>
+    </div>
+    <? } ?>
+
     <? if (sheetName !== 'HV Testers' && sheetName !== 'Phasing Sets' && sheetName !== 'AED') { ?>
     <div class="form-group">
       <label>Test Date:</label>
@@ -417,6 +425,11 @@
         formData.size = document.getElementById('size').value;
         formData.itemClass = document.getElementById('itemClass').value;
         formData.testDate = document.getElementById('testDate').value;
+        // ESL ID for Gloves/Sleeves only
+        var eslIdEl = document.getElementById('eslId');
+        if (eslIdEl) {
+          formData.eslId = eslIdEl.value;
+        }
       }
 
       google.script.run

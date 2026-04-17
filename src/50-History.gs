@@ -54,18 +54,18 @@ function saveHistory(silent) {
     // Process Gloves
     if (glovesSheet && glovesSheet.getLastRow() > 1 && glovesHistorySheet) {
       var numGloveRows = glovesSheet.getLastRow() - 1;
-      var glovesDisplay = glovesSheet.getRange(2, 1, numGloveRows, 11).getDisplayValues();
-      var glovesRawValues = glovesSheet.getRange(2, 1, numGloveRows, 11).getValues();
+      var glovesDisplay = glovesSheet.getRange(2, 1, numGloveRows, COLS.INVENTORY.NOTES).getDisplayValues();
+      var glovesRawValues = glovesSheet.getRange(2, 1, numGloveRows, COLS.INVENTORY.NOTES).getValues();
 
       for (var i = 0; i < glovesDisplay.length; i++) {
         var row = glovesDisplay[i];
         var rawRow = glovesRawValues[i];
-        var itemNum = formatItemNum(rawRow[0]);
-        var size = row[1];
-        var classVal = formatClass(rawRow[2]);
-        var dateAssigned = row[4];
-        var location = row[5];
-        var assignedTo = row[7];
+        var itemNum = formatItemNum(rawRow[COLS.INVENTORY.ITEM_NUM - 1]);
+        var size = row[COLS.INVENTORY.SIZE - 1];
+        var classVal = formatClass(rawRow[COLS.INVENTORY.CLASS - 1]);
+        var dateAssigned = row[COLS.INVENTORY.DATE_ASSIGNED - 1];
+        var location = row[COLS.INVENTORY.LOCATION - 1];
+        var assignedTo = row[COLS.INVENTORY.ASSIGNED_TO - 1];
 
         // Skip rows without item number or date assigned
         if (!itemNum || !dateAssigned) continue;
@@ -88,18 +88,18 @@ function saveHistory(silent) {
     // Process Sleeves
     if (sleevesSheet && sleevesSheet.getLastRow() > 1 && sleevesHistorySheet) {
       var numSleeveRows = sleevesSheet.getLastRow() - 1;
-      var sleevesDisplay = sleevesSheet.getRange(2, 1, numSleeveRows, 11).getDisplayValues();
-      var sleevesRawValues = sleevesSheet.getRange(2, 1, numSleeveRows, 11).getValues();
+      var sleevesDisplay = sleevesSheet.getRange(2, 1, numSleeveRows, COLS.INVENTORY.NOTES).getDisplayValues();
+      var sleevesRawValues = sleevesSheet.getRange(2, 1, numSleeveRows, COLS.INVENTORY.NOTES).getValues();
 
       for (var j = 0; j < sleevesDisplay.length; j++) {
         var row = sleevesDisplay[j];
         var rawRow = sleevesRawValues[j];
-        var itemNum = formatItemNum(rawRow[0]);
-        var size = row[1];
-        var classVal = formatClass(rawRow[2]);
-        var dateAssigned = row[4];
-        var location = row[5];
-        var assignedTo = row[7];
+        var itemNum = formatItemNum(rawRow[COLS.INVENTORY.ITEM_NUM - 1]);
+        var size = row[COLS.INVENTORY.SIZE - 1];
+        var classVal = formatClass(rawRow[COLS.INVENTORY.CLASS - 1]);
+        var dateAssigned = row[COLS.INVENTORY.DATE_ASSIGNED - 1];
+        var location = row[COLS.INVENTORY.LOCATION - 1];
+        var assignedTo = row[COLS.INVENTORY.ASSIGNED_TO - 1];
 
         // Skip rows without item number or date assigned
         if (!itemNum || !dateAssigned) continue;

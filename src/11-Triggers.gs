@@ -307,18 +307,18 @@ function onEdit(e) {
     }
 
     // Only process Gloves/Sleeves sheets for Date Assigned changes
-    if ((sheetName === SHEET_GLOVES || sheetName === SHEET_SLEEVES) && editedCol === 5) {
-      // Column E (5) = Date Assigned - directly update Change Out Date
+    if ((sheetName === SHEET_GLOVES || sheetName === SHEET_SLEEVES) && editedCol === COLS.INVENTORY.DATE_ASSIGNED) {
+      // Date Assigned - directly update Change Out Date
       var ss = SpreadsheetApp.getActiveSpreadsheet();
       var isSleeve = (sheetName === SHEET_SLEEVES);
-      var dateAssigned = sheet.getRange(editedRow, 5).getValue();  // Column E
-      var location = sheet.getRange(editedRow, 6).getValue();      // Column F
-      var assignedTo = sheet.getRange(editedRow, 8).getValue();    // Column H
+      var dateAssigned = sheet.getRange(editedRow, COLS.INVENTORY.DATE_ASSIGNED).getValue();
+      var location = sheet.getRange(editedRow, COLS.INVENTORY.LOCATION).getValue();
+      var assignedTo = sheet.getRange(editedRow, COLS.INVENTORY.ASSIGNED_TO).getValue();
 
       if (dateAssigned) {
         var changeOutDate = calculateChangeOutDate(dateAssigned, location, assignedTo, isSleeve);
         if (changeOutDate) {
-          var changeOutCell = sheet.getRange(editedRow, 9);  // Column I
+          var changeOutCell = sheet.getRange(editedRow, COLS.INVENTORY.CHANGE_OUT_DATE);
           try {
             if (changeOutDate === 'N/A') {
               changeOutCell.setNumberFormat('@');
@@ -518,6 +518,29 @@ function onEditHandler(e) {
       var oldItemNum = e.oldValue;
       var itemNumStr = String(newItemNum).trim();
 
+      // For Gloves/Sleeves, auto-set defaults when a new item number is entered
+      if ((sheetName === 'Gloves' || sheetName === 'Sleeves') && newItemNum && itemNumStr !== '') {
+        try {
+          // Auto-set Location to 'Helena' if empty
+          var currentLocation = sheet.getRange(editedRow, COLS.INVENTORY.LOCATION).getValue();
+          if (!currentLocation) {
+            sheet.getRange(editedRow, COLS.INVENTORY.LOCATION).setValue('Helena');
+          }
+          // Auto-set Status to 'On Shelf' if empty
+          var currentStatus = sheet.getRange(editedRow, COLS.INVENTORY.STATUS).getValue();
+          if (!currentStatus) {
+            sheet.getRange(editedRow, COLS.INVENTORY.STATUS).setValue('On Shelf');
+          }
+          // Auto-set Assigned To to 'On Shelf' if empty
+          var currentAssignedTo = sheet.getRange(editedRow, COLS.INVENTORY.ASSIGNED_TO).getValue();
+          if (!currentAssignedTo) {
+            sheet.getRange(editedRow, COLS.INVENTORY.ASSIGNED_TO).setValue('On Shelf');
+          }
+        } catch (autoPopErr) {
+          Logger.log('Gloves/Sleeves auto-population error (will show dialog): ' + autoPopErr);
+        }
+      }
+
       // For Blankets, auto-detect and set Type, Class, Status, Location, Assigned To
       // Wrapped in try-catch so validation errors don't prevent the dialog from showing
       if (sheetName === 'Blankets' && newItemNum && itemNumStr !== '') {
@@ -686,16 +709,16 @@ function onEditHandler(e) {
     }
 
     // Handle Date Assigned changes in Gloves/Sleeves directly
-    if ((sheetName === 'Gloves' || sheetName === 'Sleeves') && editedCol === 5 && editedRow >= 2) {
+    if ((sheetName === 'Gloves' || sheetName === 'Sleeves') && editedCol === COLS.INVENTORY.DATE_ASSIGNED && editedRow >= 2) {
       Logger.log('Date Assigned change detected in ' + sheetName + ' row ' + editedRow);
 
       var ss = SpreadsheetApp.getActiveSpreadsheet();
       var isSleeve = (sheetName === 'Sleeves');
 
-      // Read values directly using hardcoded column numbers
-      var dateAssigned = sheet.getRange(editedRow, 5).getValue();  // Column E = Date Assigned
-      var location = sheet.getRange(editedRow, 6).getValue();       // Column F = Location
-      var assignedTo = sheet.getRange(editedRow, 8).getValue();     // Column H = Assigned To
+      // Read values using COLS constants
+      var dateAssigned = sheet.getRange(editedRow, COLS.INVENTORY.DATE_ASSIGNED).getValue();
+      var location = sheet.getRange(editedRow, COLS.INVENTORY.LOCATION).getValue();
+      var assignedTo = sheet.getRange(editedRow, COLS.INVENTORY.ASSIGNED_TO).getValue();
 
       Logger.log('Values: dateAssigned=' + dateAssigned + ', location=' + location + ', assignedTo=' + assignedTo);
 
@@ -704,7 +727,7 @@ function onEditHandler(e) {
         Logger.log('Calculated changeOutDate=' + changeOutDate);
 
         if (changeOutDate) {
-          var changeOutCell = sheet.getRange(editedRow, 9);  // Column I = Change Out Date
+          var changeOutCell = sheet.getRange(editedRow, COLS.INVENTORY.CHANGE_OUT_DATE);
           try {
             if (changeOutDate === 'N/A') {
               changeOutCell.setNumberFormat('@');

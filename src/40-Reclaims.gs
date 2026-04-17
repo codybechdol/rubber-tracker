@@ -131,13 +131,14 @@ function updateReclaimsSheet_INCOMPLETE_DEPRECATED() {
 
     function processInventoryForReclaims(data, itemType) {
       data.forEach(function(item) {
-        var itemNum = item[0];
-        var size = item[1];
-        var itemClass = item[2];
-        var dateAssigned = item[4];
-        var location = (item[5] || '').toString().trim();
-        var status = (item[6] || '').toString().trim();
-        var assignedTo = (item[7] || '').toString().trim();
+        var itemNum = item[COLS.INVENTORY.ITEM_NUM - 1];
+
+        var size = item[COLS.INVENTORY.SIZE - 1];
+        var itemClass = item[COLS.INVENTORY.CLASS - 1];
+        var dateAssigned = item[COLS.INVENTORY.DATE_ASSIGNED - 1];
+        var location = (item[COLS.INVENTORY.LOCATION - 1] || '').toString().trim();
+        var status = (item[COLS.INVENTORY.STATUS - 1] || '').toString().trim();
+        var assignedTo = (item[COLS.INVENTORY.ASSIGNED_TO - 1] || '').toString().trim();
         var assignedToLower = assignedTo.toLowerCase();
 
         if (assignedToLower === 'lost') {

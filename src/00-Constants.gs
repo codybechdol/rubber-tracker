@@ -89,18 +89,28 @@ var BACKUP_FOLDER_NAME = 'Glove Manager Backups';
 // =============================================================================
 var COLS = {
   // Gloves & Sleeves Sheet (identical structure)
+  // ⚠️ ESL ID column (B) added April 2026 - all columns after A shifted +1
+  // ⚠️ ESL ID column (B) added April 2026 - all columns after A shifted +1
+  // ⚠️ ESL ID column (B) added April 2026 - all columns after A shifted +1
+  // ⚠️ ESL ID column (B) added April 2026 - all columns after A shifted +1
+  // ⚠️ ESL ID column (B) added April 2026 - all columns after A shifted +1
+  // ⚠️ ESL ID column (B) added April 2026 - all columns after A shifted +1
+  // ⚠️ ESL ID column (B) added April 2026 - all columns after A shifted +1
+  // ⚠️ ESL ID column (B) added April 2026 - all columns after A shifted +1
+  // ⚠️ ESL ID column (B) added April 2026 - all columns after A shifted +1
   INVENTORY: {
     ITEM_NUM: 1,        // A - "Glove" or "Sleeve" (Item #)
-    SIZE: 2,            // B
-    CLASS: 3,           // C
-    TEST_DATE: 4,       // D
-    DATE_ASSIGNED: 5,   // E
-    LOCATION: 6,        // F
-    STATUS: 7,          // G
-    ASSIGNED_TO: 8,     // H
-    CHANGE_OUT_DATE: 9, // I
-    PICKED_FOR: 10,     // J
-    NOTES: 11           // K
+    ESL_ID: 2,          // B - ESL ID (external system link)
+    SIZE: 3,            // C
+    CLASS: 4,           // D
+    TEST_DATE: 5,       // E
+    DATE_ASSIGNED: 6,   // F
+    LOCATION: 7,        // G
+    STATUS: 8,          // H
+    ASSIGNED_TO: 9,     // I
+    CHANGE_OUT_DATE: 10,// J
+    PICKED_FOR: 11,     // K
+    NOTES: 12           // L
   },
 
   // Blankets Sheet - Phase 1 (March 2026)
@@ -135,8 +145,7 @@ var COLS = {
     NOTES: 12           // L
   },
 
-  // Phasing Sets Sheet - Phase 2 (Future)
-  // Similar to HV_TESTERS but with KV column
+   // Matches HV_TESTERS layout // Similar to HV_TESTERS but with KV column
   PHASING_SETS: {
     ITEM_NUM: 1,        // A - Equipment identifier
     MODEL: 2,           // B - Equipment model

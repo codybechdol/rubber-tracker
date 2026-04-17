@@ -884,6 +884,58 @@ function addManualScheduleTask(task) {
 }
 
 /**
+ * Migrates Gloves and Sleeves sheets to add ESL ID column (B).
+ * Inserts a new column B and shifts existing data right.
+ * Safe to run multiple times - skips if column B is already "ESL ID".
+ * Menu: Glove Manager → Maintenance → 🏗️ Sheets Setup → Add ESL ID Column
+ */
+function migrateGlovesSleevesSheetsForESLID() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+  var sheetsToMigrate = ['Gloves', 'Sleeves'];
+  var migrated = [];
+  var skipped = [];
+
+  sheetsToMigrate.forEach(function(sheetName) {
+    var sheet = ss.getSheetByName(sheetName);
+    if (!sheet) {
+      skipped.push(sheetName + ' (not found)');
+      return;
+    }
+
+    // Check if column B header is already "ESL ID"
+    var headerB = sheet.getRange(1, 2).getValue().toString().trim();
+    if (headerB === 'ESL ID') {
+      skipped.push(sheetName + ' (already migrated)');
+      return;
+    }
+
+    // Insert a new column at position B (column 2)
+    sheet.insertColumnBefore(2);
+
+    // Set the header
+    sheet.getRange(1, 2).setValue('ESL ID').setFontWeight('bold');
+
+    // Set column width
+    sheet.setColumnWidth(2, 100);
+
+    migrated.push(sheetName);
+    logEvent('Migrated ' + sheetName + ' sheet: added ESL ID column B', 'INFO');
+  });
+
+  var msg = '';
+  if (migrated.length > 0) {
+    msg += '✅ Migrated: ' + migrated.join(', ') + '\n';
+  }
+  if (skipped.length > 0) {
+    msg += '⏭️ Skipped: ' + skipped.join(', ') + '\n';
+  }
+  msg += '\nColumn layout is now: A=Item#, B=ESL ID, C=Size, D=Class, E=Test Date, F=Date Assigned, G=Location, H=Status, I=Assigned To, J=Change Out Date, K=Picked For, L=Notes';
+
+  ui.alert('ESL ID Column Migration', msg, ui.ButtonSet.OK);
+}
+
+/**
  * Migrates the Manual Tasks sheet to the new unified column structure.
  * Call this once to update an existing sheet to the new format.
  * Menu: Glove Manager → Utilities → Migrate Manual Tasks Sheet
@@ -6951,6 +7003,7 @@ function onOpen() {
         .addItem('➕ Add Future Job', 'addFutureJob'))
       .addSubMenu(ui.createMenu('🏗️ Sheets Setup')
         .addItem('🏗️ Build Sheets', 'buildSheets')
+        .addItem('🔗 Add ESL ID Column (Gloves/Sleeves)', 'migrateGlovesSleevesSheetsForESLID')
         .addItem('⚡ Setup HV Tester & Phasing Set Sheets', 'setupHVTesterAndPhasingSetSheets')
         .addItem('🏥 Setup AED Sheet', 'setupAEDSheet')
         .addItem('⚡ Migrate HV Testers - Add KV Column', 'migrateHVTestersAddKVColumn')
@@ -8068,9 +8121,9 @@ function handlePickListManualEdit(ss, swapSheet, inventorySheet, editedRow, newV
     }
 
     // Get item data from inventory
-    var itemStatus = (itemData[6] || '').toString().trim();
-    var itemAssignedTo = (itemData[7] || '').toString().trim();
-    var itemDateAssigned = itemData[4] || '';
+    var itemStatus = (itemData[COLS.INVENTORY.STATUS - 1] || '').toString().trim();
+    var itemAssignedTo = (itemData[COLS.INVENTORY.ASSIGNED_TO - 1] || '').toString().trim();
+    var itemDateAssigned = itemData[COLS.INVENTORY.DATE_ASSIGNED - 1] || '';
     var itemStatusLower = itemStatus.toLowerCase();
 
     // Determine the status for column H
@@ -8164,14 +8217,13 @@ function handlePickedCheckboxChange(ss, swapSheet, inventorySheet, editedRow, ne
       return;
     }
 
-    // Inventory sheet columns (1-based) - structure: A=Item#, B=Size, C=Class,
-    // D=Test Date, E=Date Assigned(5), F=Location(6), G=Status(7),
-    // H=Assigned To(8), I=Change Out Date(9), J=Picked For(10)
-    var invColDateAssigned = 5;
-    var invColLocation = 6;
-    var invColStatus = 7;
-    var invColAssignedTo = 8;
-    var invColPickedFor = 10;
+    // Inventory sheet columns (1-based) using COLS.INVENTORY constants
+    var invColDateAssigned = COLS.INVENTORY.DATE_ASSIGNED;
+    var invColLocation = COLS.INVENTORY.LOCATION;
+    var invColStatus = COLS.INVENTORY.STATUS;
+    var invColAssignedTo = COLS.INVENTORY.ASSIGNED_TO;
+    var invColChangeOutDate = COLS.INVENTORY.CHANGE_OUT_DATE;
+    var invColPickedFor = COLS.INVENTORY.PICKED_FOR;
 
     var today = new Date();
     var todayStr = Utilities.formatDate(today, ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd');
@@ -8225,7 +8277,6 @@ function handlePickedCheckboxChange(ss, swapSheet, inventorySheet, editedRow, ne
       // Calculate and set Change Out Date based on new assignment (Packed For Delivery = 3 months)
       var changeOutDate = calculateChangeOutDate(today, "Cody's Truck", 'Packed For Delivery', isSleeve);
       if (changeOutDate && changeOutDate !== 'N/A') {
-        var invColChangeOutDate = 9;  // Column I
         var changeOutCell = inventorySheet.getRange(pickListRow, invColChangeOutDate);
         try {
           changeOutCell.setNumberFormat('MM/dd/yyyy');
@@ -8444,29 +8495,29 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
     swapSheet.getRange(editedRow, 6).setValue('Assigned').setFontWeight('bold').setFontColor('#2e7d32');
 
     // Update the Pick List item (NEW glove/sleeve) in inventory - assign to employee
-    inventorySheet.getRange(pickListRow, 7).setValue('Assigned');           // Status (G)
-    inventorySheet.getRange(pickListRow, 8).setValue(employeeName);         // Assigned To (H)
-    inventorySheet.getRange(pickListRow, 5).setNumberFormat('MM/dd/yyyy').setValue(dateChanged); // Date Assigned (E)
-    inventorySheet.getRange(pickListRow, 6).setValue(employeeLocation);     // Location (F)
+    inventorySheet.getRange(pickListRow, COLS.INVENTORY.STATUS).setValue('Assigned');
+    inventorySheet.getRange(pickListRow, COLS.INVENTORY.ASSIGNED_TO).setValue(employeeName);
+    inventorySheet.getRange(pickListRow, COLS.INVENTORY.DATE_ASSIGNED).setNumberFormat('MM/dd/yyyy').setValue(dateChanged);
+    inventorySheet.getRange(pickListRow, COLS.INVENTORY.LOCATION).setValue(employeeLocation);
     // Write Change Out Date to inventory with proper formatting
-    var changeOutCell = inventorySheet.getRange(pickListRow, 9); // Column I
+    var changeOutCell = inventorySheet.getRange(pickListRow, COLS.INVENTORY.CHANGE_OUT_DATE);
     if (changeOutDate === 'N/A') {
-      changeOutCell.setNumberFormat('@').setValue('N/A');  // Plain text for N/A
+      changeOutCell.setNumberFormat('@').setValue('N/A');
     } else if (changeOutDate) {
-      changeOutCell.setNumberFormat('MM/dd/yyyy').setValue(changeOutDate);  // Date object
+      changeOutCell.setNumberFormat('MM/dd/yyyy').setValue(changeOutDate);
     }
-    inventorySheet.getRange(pickListRow, 10).setValue('');                  // Clear Picked For (J)
+    inventorySheet.getRange(pickListRow, COLS.INVENTORY.PICKED_FOR).setValue('');
 
     // Update the Old glove - send for testing
     if (oldItemRow > 0) {
-      inventorySheet.getRange(oldItemRow, 7).setValue('Ready For Test');    // Status (G)
-      inventorySheet.getRange(oldItemRow, 8).setValue('Packed For Testing');// Assigned To (H)
-      inventorySheet.getRange(oldItemRow, 5).setNumberFormat('MM/dd/yyyy').setValue(dateChanged); // Date Assigned (E)
-      inventorySheet.getRange(oldItemRow, 6).setValue("Cody's Truck");      // Location (F)
+      inventorySheet.getRange(oldItemRow, COLS.INVENTORY.STATUS).setValue('Ready For Test');
+      inventorySheet.getRange(oldItemRow, COLS.INVENTORY.ASSIGNED_TO).setValue('Packed For Testing');
+      inventorySheet.getRange(oldItemRow, COLS.INVENTORY.DATE_ASSIGNED).setNumberFormat('MM/dd/yyyy').setValue(dateChanged);
+      inventorySheet.getRange(oldItemRow, COLS.INVENTORY.LOCATION).setValue("Cody's Truck");
 
       // Calculate Change Out Date for old item (Packed For Testing = 3 months for gloves, 12 months for sleeves)
       var oldItemChangeOutDate = calculateChangeOutDate(dateChanged, "Cody's Truck", 'Packed For Testing', isSleeve);
-      var oldItemChangeOutCell = inventorySheet.getRange(oldItemRow, 9); // Column I
+      var oldItemChangeOutCell = inventorySheet.getRange(oldItemRow, COLS.INVENTORY.CHANGE_OUT_DATE);
       if (oldItemChangeOutDate === 'N/A') {
         oldItemChangeOutCell.setNumberFormat('@').setValue('N/A');
       } else if (oldItemChangeOutDate) {
@@ -8497,53 +8548,53 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
     }
 
     // Revert Pick List item to Stage 2 values
-    inventorySheet.getRange(pickListRow, 7).setValue(stage2Status || 'Ready For Delivery');     // Status (G)
-    inventorySheet.getRange(pickListRow, 8).setValue(stage2AssignedTo || 'Packed For Delivery'); // Assigned To (H)
+    inventorySheet.getRange(pickListRow, COLS.INVENTORY.STATUS).setValue(stage2Status || 'Ready For Delivery');
+    inventorySheet.getRange(pickListRow, COLS.INVENTORY.ASSIGNED_TO).setValue(stage2AssignedTo || 'Packed For Delivery');
     if (stage2DateAssigned) {
       // Format the date properly before setting
       var stage2Date = new Date(stage2DateAssigned);
       if (!isNaN(stage2Date)) {
         var stage2DateFormatted = Utilities.formatDate(stage2Date, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
-        inventorySheet.getRange(pickListRow, 5).setValue(stage2DateFormatted);  // Date Assigned (E)
+        inventorySheet.getRange(pickListRow, COLS.INVENTORY.DATE_ASSIGNED).setValue(stage2DateFormatted);
 
         // Recalculate Change Out Date for pick list item reverting to Stage 2
         var pickListChangeOut = calculateChangeOutDate(stage2Date, "Cody's Truck", 'Packed For Delivery', isSleeve);
-        var pickListChangeOutCell = inventorySheet.getRange(pickListRow, 9);
+        var pickListChangeOutCell = inventorySheet.getRange(pickListRow, COLS.INVENTORY.CHANGE_OUT_DATE);
         if (pickListChangeOut === 'N/A') {
           pickListChangeOutCell.setNumberFormat('@').setValue('N/A');
         } else if (pickListChangeOut) {
           pickListChangeOutCell.setNumberFormat('MM/dd/yyyy').setValue(pickListChangeOut);
         }
       } else {
-        inventorySheet.getRange(pickListRow, 5).setValue(stage2DateAssigned);   // Use as-is if not a valid date
+        inventorySheet.getRange(pickListRow, COLS.INVENTORY.DATE_ASSIGNED).setValue(stage2DateAssigned);   // Use as-is if not a valid date
       }
     }
-    inventorySheet.getRange(pickListRow, 6).setValue("Cody's Truck");                           // Location (F)
-    inventorySheet.getRange(pickListRow, 10).setValue(stage2PickedFor || '');                   // Picked For (J)
+    inventorySheet.getRange(pickListRow, COLS.INVENTORY.LOCATION).setValue("Cody's Truck");
+    inventorySheet.getRange(pickListRow, COLS.INVENTORY.PICKED_FOR).setValue(stage2PickedFor || '');
 
     // Revert Old glove to Stage 1 values (columns N-P)
     if (oldItemRow > 0 && oldGloveStatus) {
-      inventorySheet.getRange(oldItemRow, 7).setValue(oldGloveStatus);       // Status (G)
-      inventorySheet.getRange(oldItemRow, 8).setValue(oldGloveAssignedTo);   // Assigned To (H)
-      inventorySheet.getRange(oldItemRow, 6).setValue(employeeLocation);     // Location (F)
+      inventorySheet.getRange(oldItemRow, COLS.INVENTORY.STATUS).setValue(oldGloveStatus);
+      inventorySheet.getRange(oldItemRow, COLS.INVENTORY.ASSIGNED_TO).setValue(oldGloveAssignedTo);
+      inventorySheet.getRange(oldItemRow, COLS.INVENTORY.LOCATION).setValue(employeeLocation);
 
       if (oldGloveDateAssigned) {
         // Format the date properly before setting
         var oldGloveDate = new Date(oldGloveDateAssigned);
         if (!isNaN(oldGloveDate)) {
           var oldGloveDateFormatted = Utilities.formatDate(oldGloveDate, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
-          inventorySheet.getRange(oldItemRow, 5).setValue(oldGloveDateFormatted); // Date Assigned (E)
+          inventorySheet.getRange(oldItemRow, COLS.INVENTORY.DATE_ASSIGNED).setValue(oldGloveDateFormatted);
 
           // Recalculate Change Out Date for old item reverting to employee assignment
           var oldItemChangeOut = calculateChangeOutDate(oldGloveDate, employeeLocation, oldGloveAssignedTo, isSleeve);
-          var oldItemChangeOutCell = inventorySheet.getRange(oldItemRow, 9);
+          var oldItemChangeOutCell = inventorySheet.getRange(oldItemRow, COLS.INVENTORY.CHANGE_OUT_DATE);
           if (oldItemChangeOut === 'N/A') {
             oldItemChangeOutCell.setNumberFormat('@').setValue('N/A');
           } else if (oldItemChangeOut) {
             oldItemChangeOutCell.setNumberFormat('MM/dd/yyyy').setValue(oldItemChangeOut);
           }
         } else {
-          inventorySheet.getRange(oldItemRow, 5).setValue(oldGloveDateAssigned);  // Use as-is if not valid
+          inventorySheet.getRange(oldItemRow, COLS.INVENTORY.DATE_ASSIGNED).setValue(oldGloveDateAssigned);  // Use as-is if not valid
         }
       }
     }
@@ -10846,6 +10897,7 @@ function lookupItem(itemType, itemNum) {
   var result = { found: true, itemNum: item[0] || '' };
 
   if (itemType === 'glove' || itemType === 'sleeve') {
+    result.eslId = item[COLS.INVENTORY.ESL_ID - 1] || '';
     result.size = item[COLS.INVENTORY.SIZE - 1] || '';
     result.itemClass = item[COLS.INVENTORY.CLASS - 1] || '';
     result.testDate = formatDateForDisplay(item[COLS.INVENTORY.TEST_DATE - 1]);
@@ -15750,12 +15802,12 @@ function fixChangeOutDatesSilent() {
     var isSleeve = (sheetName === 'Sleeves');
     var data = sheet.getDataRange().getValues();
 
-    // Column indices (0-based for array): E=4 (Date Assigned), F=5 (Location), H=7 (Assigned To), I=8 (Change Out Date)
+    // Use COLS.INVENTORY for array indices (0-based = col - 1)
     for (var i = 1; i < data.length; i++) {
-      var dateAssigned = data[i][4];  // Column E
-      var location = data[i][5];       // Column F
-      var assignedTo = data[i][7];     // Column H
-      var currentChangeOut = data[i][8]; // Column I
+      var dateAssigned = data[i][COLS.INVENTORY.DATE_ASSIGNED - 1];
+      var location = data[i][COLS.INVENTORY.LOCATION - 1];
+      var assignedTo = data[i][COLS.INVENTORY.ASSIGNED_TO - 1];
+      var currentChangeOut = data[i][COLS.INVENTORY.CHANGE_OUT_DATE - 1];
 
       if (!dateAssigned) continue;
 
@@ -15763,7 +15815,7 @@ function fixChangeOutDatesSilent() {
       if (!correctChangeOut) continue;
 
       // Always update to ensure correct value - simpler and more reliable
-      var cell = sheet.getRange(i + 1, 9);  // Column I (1-based row)
+      var cell = sheet.getRange(i + 1, COLS.INVENTORY.CHANGE_OUT_DATE);
       if (correctChangeOut === 'N/A') {
         if (currentChangeOut !== 'N/A') {
           cell.setNumberFormat('@');
@@ -16285,8 +16337,8 @@ function generateSwaps(itemType) {
       var swapMeta = [];
 
       inventoryData.forEach(function(item) {
-        if (parseInt(item[2], 10) !== itemClass) return;
-        var assignedTo = (item[7] || '').toString().trim().toLowerCase();
+        if (parseInt(item[COLS.INVENTORY.CLASS - 1], 10) !== itemClass) return;
+        var assignedTo = (item[COLS.INVENTORY.ASSIGNED_TO - 1] || '').toString().trim().toLowerCase();
         if (!assignedTo || ignoreNames.indexOf(assignedTo) !== -1 || !empMap[assignedTo]) {
           return;
         }
@@ -16300,11 +16352,11 @@ function generateSwaps(itemType) {
           return;
         }
 
-        var itemNum = item[0];
-        var size = item[1];
-        var dateAssigned = item[4];
-        var changeOutDate = item[8];
-        var status = item[6];
+        var itemNum = item[COLS.INVENTORY.ITEM_NUM - 1];
+        var size = item[COLS.INVENTORY.SIZE - 1];
+        var dateAssigned = item[COLS.INVENTORY.DATE_ASSIGNED - 1];
+        var changeOutDate = item[COLS.INVENTORY.CHANGE_OUT_DATE - 1];
+        var status = item[COLS.INVENTORY.STATUS - 1];
         var daysLeft = '';
         var daysLeftCell = {};
 
@@ -16339,7 +16391,7 @@ function generateSwaps(itemType) {
             empPreferredSize: emp[sizeColIndex],
             itemSize: isGloves ? parseFloat(size) : size,
             oldStatus: status,
-            oldAssignedTo: item[7],
+            oldAssignedTo: item[COLS.INVENTORY.ASSIGNED_TO - 1],
             oldDateAssigned: dateAssigned
           });
         }
@@ -16361,7 +16413,7 @@ function generateSwaps(itemType) {
 
       // Helper function to check if item has LOST-LOCATE marker
       var isLostLocate = function(item) {
-        var notes = (item[10] || '').toString().trim().toUpperCase();
+        var notes = (item[COLS.INVENTORY.NOTES - 1] || '').toString().trim().toUpperCase();
         return notes.indexOf('LOST-LOCATE') !== -1;
       };
 
@@ -16378,14 +16430,12 @@ function generateSwaps(itemType) {
         var employeeName = meta.emp[0];  // Employee name for Picked For matching
 
         // FIRST: Check if there's already an item "Picked For" this employee in the inventory
-        // Inventory columns: A=Item#(0), B=Size(1), C=Class(2), D=Test Date(3), E=Date Assigned(4),
-        //                    F=Location(5), G=Status(6), H=Assigned To(7), I=Change Out Date(8), J=Picked For(9)
         var pickedForMatch = inventoryData.find(function(item) {
-          var pickedFor = (item[9] || '').toString().trim();
-          var classMatch = parseInt(item[2], 10) === meta.itemClass;
+          var pickedFor = (item[COLS.INVENTORY.PICKED_FOR - 1] || '').toString().trim();
+          var classMatch = parseInt(item[COLS.INVENTORY.CLASS - 1], 10) === meta.itemClass;
           // Check if Picked For contains this employee's name (case-insensitive)
           var pickedForEmployee = pickedFor.toLowerCase().indexOf(employeeName.toLowerCase()) !== -1;
-          var notAlreadyUsed = !assignedItemNums.has(item[0]);
+          var notAlreadyUsed = !assignedItemNums.has(item[COLS.INVENTORY.ITEM_NUM - 1]);
           var notLost = !isLostLocate(item);
           return classMatch && pickedForEmployee && notAlreadyUsed && notLost;
         });
@@ -16394,14 +16444,14 @@ function generateSwaps(itemType) {
         // NOTE: Upgrades from "In Testing" to "On Shelf" are handled by upgradePickListItems() post-generation
         if (pickedForMatch) {
           // Found an item already picked for this employee!
-          pickListValue = pickedForMatch[0];
-          pickListStatusRaw = (pickedForMatch[6] || '').toString().trim().toLowerCase();
+          pickListValue = pickedForMatch[COLS.INVENTORY.ITEM_NUM - 1];
+          pickListStatusRaw = (pickedForMatch[COLS.INVENTORY.STATUS - 1] || '').toString().trim().toLowerCase();
           pickListItemData = pickedForMatch;
           isAlreadyPicked = true;
-          assignedItemNums.add(pickedForMatch[0]);
+          assignedItemNums.add(pickedForMatch[COLS.INVENTORY.ITEM_NUM - 1]);
 
           // Check if it's a size up
-          var pickedSize = isGloves ? parseFloat(pickedForMatch[1]) : pickedForMatch[1];
+          var pickedSize = isGloves ? parseFloat(pickedForMatch[COLS.INVENTORY.SIZE - 1]) : pickedForMatch[COLS.INVENTORY.SIZE - 1];
           if (isGloves && !isNaN(pickedSize) && !isNaN(useSize) && pickedSize > useSize) {
             pickListSizeUp = true;
           }
@@ -16414,92 +16464,92 @@ function generateSwaps(itemType) {
           // Try exact size On Shelf
           // IMPORTANT: Skip items that have a Picked For value for a DIFFERENT employee
           var match = inventoryData.find(function(item) {
-            var statusMatch = item[6] && item[6].toString().trim().toLowerCase() === 'on shelf';
-            var classMatch = parseInt(item[2], 10) === meta.itemClass;
+            var statusMatch = item[COLS.INVENTORY.STATUS - 1] && item[COLS.INVENTORY.STATUS - 1].toString().trim().toLowerCase() === 'on shelf';
+            var classMatch = parseInt(item[COLS.INVENTORY.CLASS - 1], 10) === meta.itemClass;
             var sizeMatch = isGloves ?
-              parseFloat(item[1]) === useSize :
-              (item[1] && useSize && item[1].toString().trim().toLowerCase() === useSize.toString().trim().toLowerCase());
-            var notAssigned = !assignedItemNums.has(item[0]);
+              parseFloat(item[COLS.INVENTORY.SIZE - 1]) === useSize :
+              (item[COLS.INVENTORY.SIZE - 1] && useSize && item[COLS.INVENTORY.SIZE - 1].toString().trim().toLowerCase() === useSize.toString().trim().toLowerCase());
+            var notAssigned = !assignedItemNums.has(item[COLS.INVENTORY.ITEM_NUM - 1]);
             // Check if this item is reserved for someone else via Picked For
-            var pickedFor = (item[9] || '').toString().trim();
+            var pickedFor = (item[COLS.INVENTORY.PICKED_FOR - 1] || '').toString().trim();
             var isReservedForOther = pickedFor !== '' && pickedFor.toLowerCase().indexOf(employeeName.toLowerCase()) === -1;
             var notLost = !isLostLocate(item);
             return statusMatch && classMatch && sizeMatch && notAssigned && !isReservedForOther && notLost;
           });
           if (match) {
-            pickListValue = match[0];
+            pickListValue = match[COLS.INVENTORY.ITEM_NUM - 1];
             pickListStatusRaw = 'on shelf';
             pickListItemData = match;
-            assignedItemNums.add(match[0]);
+            assignedItemNums.add(match[COLS.INVENTORY.ITEM_NUM - 1]);
           }
         }
 
         // Try size up On Shelf (Gloves only - sleeves don't have fractional sizes)
         if (!pickListItemData && isGloves && !isNaN(useSize)) {
           var match = inventoryData.find(function(item) {
-            var pickedFor = (item[9] || '').toString().trim();
+            var pickedFor = (item[COLS.INVENTORY.PICKED_FOR - 1] || '').toString().trim();
             var isReservedForOther = pickedFor !== '' && pickedFor.toLowerCase().indexOf(employeeName.toLowerCase()) === -1;
             var notLost = !isLostLocate(item);
-            return item[6] && item[6].toString().trim().toLowerCase() === 'on shelf' &&
-                   parseInt(item[2], 10) === meta.itemClass &&
-                   parseFloat(item[1]) === useSize + 0.5 &&
-                   !assignedItemNums.has(item[0]) &&
+            return item[COLS.INVENTORY.STATUS - 1] && item[COLS.INVENTORY.STATUS - 1].toString().trim().toLowerCase() === 'on shelf' &&
+                   parseInt(item[COLS.INVENTORY.CLASS - 1], 10) === meta.itemClass &&
+                   parseFloat(item[COLS.INVENTORY.SIZE - 1]) === useSize + 0.5 &&
+                   !assignedItemNums.has(item[COLS.INVENTORY.ITEM_NUM - 1]) &&
                    !isReservedForOther &&
                    notLost;
           });
           if (match) {
-            pickListValue = match[0];
+            pickListValue = match[COLS.INVENTORY.ITEM_NUM - 1];
             pickListStatusRaw = 'on shelf';
             pickListSizeUp = true;
             pickListItemData = match;
-            assignedItemNums.add(match[0]);
+            assignedItemNums.add(match[COLS.INVENTORY.ITEM_NUM - 1]);
           }
         }
 
         // Try Ready For Delivery or In Testing
         if (!pickListItemData) {
           var match = inventoryData.find(function(item) {
-            var stat = item[6] && item[6].toString().trim().toLowerCase();
+            var stat = item[COLS.INVENTORY.STATUS - 1] && item[COLS.INVENTORY.STATUS - 1].toString().trim().toLowerCase();
             var statusMatch = (stat === 'ready for delivery' || stat === 'in testing');
-            var classMatch = parseInt(item[2], 10) === meta.itemClass;
+            var classMatch = parseInt(item[COLS.INVENTORY.CLASS - 1], 10) === meta.itemClass;
             var sizeMatch = isGloves ?
-              parseFloat(item[1]) === useSize :
-              (item[1] && item[1].toString().trim().toLowerCase() === useSize.toString().trim().toLowerCase());
-            var notAssigned = !assignedItemNums.has(item[0]);
+              parseFloat(item[COLS.INVENTORY.SIZE - 1]) === useSize :
+              (item[COLS.INVENTORY.SIZE - 1] && item[COLS.INVENTORY.SIZE - 1].toString().trim().toLowerCase() === useSize.toString().trim().toLowerCase());
+            var notAssigned = !assignedItemNums.has(item[COLS.INVENTORY.ITEM_NUM - 1]);
             // Check if this item is reserved for someone else via Picked For
-            var pickedFor = (item[9] || '').toString().trim();
+            var pickedFor = (item[COLS.INVENTORY.PICKED_FOR - 1] || '').toString().trim();
             var isReservedForOther = pickedFor !== '' && pickedFor.toLowerCase().indexOf(employeeName.toLowerCase()) === -1;
             var notLost = !isLostLocate(item);
             return statusMatch && classMatch && sizeMatch && notAssigned && !isReservedForOther && notLost;
           });
           if (match) {
-            pickListValue = match[0];
-            pickListStatusRaw = match[6].toString().trim().toLowerCase();
+            pickListValue = match[COLS.INVENTORY.ITEM_NUM - 1];
+            pickListStatusRaw = match[COLS.INVENTORY.STATUS - 1].toString().trim().toLowerCase();
             pickListItemData = match;
-            assignedItemNums.add(match[0]);
+            assignedItemNums.add(match[COLS.INVENTORY.ITEM_NUM - 1]);
           }
         }
 
         // Try size up Ready For Delivery or In Testing (Gloves only)
         if (!pickListItemData && isGloves && !isNaN(useSize)) {
           var match = inventoryData.find(function(item) {
-            var stat = item[6] && item[6].toString().trim().toLowerCase();
-            var pickedFor = (item[9] || '').toString().trim();
+            var stat = item[COLS.INVENTORY.STATUS - 1] && item[COLS.INVENTORY.STATUS - 1].toString().trim().toLowerCase();
+            var pickedFor = (item[COLS.INVENTORY.PICKED_FOR - 1] || '').toString().trim();
             var isReservedForOther = pickedFor !== '' && pickedFor.toLowerCase().indexOf(employeeName.toLowerCase()) === -1;
             var notLost = !isLostLocate(item);
             return (stat === 'ready for delivery' || stat === 'in testing') &&
-                   parseInt(item[2], 10) === meta.itemClass &&
-                   parseFloat(item[1]) === useSize + 0.5 &&
-                   !assignedItemNums.has(item[0]) &&
+                   parseInt(item[COLS.INVENTORY.CLASS - 1], 10) === meta.itemClass &&
+                   parseFloat(item[COLS.INVENTORY.SIZE - 1]) === useSize + 0.5 &&
+                   !assignedItemNums.has(item[COLS.INVENTORY.ITEM_NUM - 1]) &&
                    !isReservedForOther &&
                    notLost;
           });
           if (match) {
-            pickListValue = match[0];
-            pickListStatusRaw = match[6].toString().trim().toLowerCase();
+            pickListValue = match[COLS.INVENTORY.ITEM_NUM - 1];
+            pickListStatusRaw = match[COLS.INVENTORY.STATUS - 1].toString().trim().toLowerCase();
             pickListSizeUp = true;
             pickListItemData = match;
-            assignedItemNums.add(match[0]);
+            assignedItemNums.add(match[COLS.INVENTORY.ITEM_NUM - 1]);
           }
         }
 
@@ -16534,10 +16584,10 @@ function generateSwaps(itemType) {
 
         if (isAlreadyPicked && pickListItemData) {
           // Get Stage 2 data from the inventory item
-          stage2Status = pickListItemData[6] || 'Ready For Delivery';
-          stage2AssignedTo = pickListItemData[7] || 'Packed For Delivery';
-          stage2DateAssigned = pickListItemData[4] || '';
-          stage2PickedFor = pickListItemData[9] || '';  // Picked For column
+          stage2Status = pickListItemData[COLS.INVENTORY.STATUS - 1] || 'Ready For Delivery';
+          stage2AssignedTo = pickListItemData[COLS.INVENTORY.ASSIGNED_TO - 1] || 'Packed For Delivery';
+          stage2DateAssigned = pickListItemData[COLS.INVENTORY.DATE_ASSIGNED - 1] || '';
+          stage2PickedFor = pickListItemData[COLS.INVENTORY.PICKED_FOR - 1] || '';  // Picked For column
         }
 
         // Build row data - all 23 columns (A-W)
@@ -16548,9 +16598,9 @@ function generateSwaps(itemType) {
           isAlreadyPicked,  // Picked checkbox - TRUE if already picked for this employee
           '',               // Date Changed - empty until swap completed
           // K-M: Pick List Item Before Check (Stage 1 - original state before picking)
-          pickListItemData ? (isAlreadyPicked ? 'On Shelf' : (pickListItemData[6] || '')) : '',
-          pickListItemData ? (isAlreadyPicked ? 'On Shelf' : (pickListItemData[7] || '')) : '',
-          pickListItemData ? (isAlreadyPicked ? '' : (pickListItemData[4] || '')) : '',
+          pickListItemData ? (isAlreadyPicked ? 'On Shelf' : (pickListItemData[COLS.INVENTORY.STATUS - 1] || '')) : '',
+          pickListItemData ? (isAlreadyPicked ? 'On Shelf' : (pickListItemData[COLS.INVENTORY.ASSIGNED_TO - 1] || '')) : '',
+          pickListItemData ? (isAlreadyPicked ? '' : (pickListItemData[COLS.INVENTORY.DATE_ASSIGNED - 1] || '')) : '',
           // N-P: Old Item Assignment (the employee's current item)
           meta.oldStatus || '', meta.oldAssignedTo || '', meta.oldDateAssigned || '',
           // Q-T: Stage 2 (Ready For Delivery state)
@@ -19654,8 +19704,8 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
 
     // Check if employee already has a Class 2 item assigned
     var hasClass2 = allInventoryData.some(function(item) {
-      var itemClass = safeParseClass(item[2]);
-      var assignedTo = (item[7] || '').toString().trim().toLowerCase();
+      var itemClass = safeParseClass(item[COLS.INVENTORY.CLASS - 1]);
+      var assignedTo = (item[COLS.INVENTORY.ASSIGNED_TO - 1] || '').toString().trim().toLowerCase();
       return itemClass === 2 && assignedTo === employeeName;
     });
 
@@ -19670,8 +19720,8 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
 
     // Check if employee already has a Class 3 item assigned
     var hasClass3 = allInventoryData.some(function(item) {
-      var itemClass = safeParseClass(item[2]);
-      var assignedTo = (item[7] || '').toString().trim().toLowerCase();
+      var itemClass = safeParseClass(item[COLS.INVENTORY.CLASS - 1]);
+      var assignedTo = (item[COLS.INVENTORY.ASSIGNED_TO - 1] || '').toString().trim().toLowerCase();
       return itemClass === 3 && assignedTo === employeeName;
     });
 
@@ -19718,7 +19768,7 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
   // Helper function to check if item has LOST-LOCATE marker
   // Items with this marker should NOT be assigned in pick lists
   function isLostLocate(item) {
-    var notes = (item[10] || '').toString().trim().toUpperCase();
+    var notes = (item[COLS.INVENTORY.NOTES - 1] || '').toString().trim().toUpperCase();
     return notes.indexOf('LOST-LOCATE') !== -1;
   }
 
@@ -19732,15 +19782,15 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
 
   // 1) Try exact size On Shelf
   var match = inventoryData.find(function(item) {
-    var itemClass = safeParseClass(item[2]);
-    var itemStatus = (item[6] || '').toString().trim().toLowerCase();
-    var itemNum = item[0].toString().trim();
+    var itemClass = safeParseClass(item[COLS.INVENTORY.CLASS - 1]);
+    var itemStatus = (item[COLS.INVENTORY.STATUS - 1] || '').toString().trim().toLowerCase();
+    var itemNum = item[COLS.INVENTORY.ITEM_NUM - 1].toString().trim();
 
     var classMatch = (itemClass === targetClass);
     var statusMatch = (itemStatus === 'on shelf');
     var notAssigned = !assignedItems.has(itemNum);
     var notLost = !isLostLocate(item);
-    var sizeMatch = isGlove ? (parseFloat(item[1]) === useSizeNum) : sleeveSizeMatch(item[1]);
+    var sizeMatch = isGlove ? (parseFloat(item[COLS.INVENTORY.SIZE - 1]) === useSizeNum) : sleeveSizeMatch(item[COLS.INVENTORY.SIZE - 1]);
 
     // Debug logging when filtering due to LOST-LOCATE
     if (classMatch && statusMatch && notAssigned && sizeMatch && !notLost) {
@@ -19751,7 +19801,7 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
   });
 
   if (match) {
-    result.itemNum = String(match[0]);
+    result.itemNum = String(match[COLS.INVENTORY.ITEM_NUM - 1]);
     result.status = 'In Stock ✅';
     result.inventoryData = match;
     return result;
@@ -19760,10 +19810,10 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
   // 2) Try size up On Shelf (gloves only)
   if (isGlove && !isNaN(useSizeNum)) {
     match = inventoryData.find(function(item) {
-      var itemClass = safeParseClass(item[2]);
-      var itemStatus = (item[6] || '').toString().trim().toLowerCase();
-      var itemNum = item[0].toString().trim();
-      var itemSize = parseFloat(item[1]);
+      var itemClass = safeParseClass(item[COLS.INVENTORY.CLASS - 1]);
+      var itemStatus = (item[COLS.INVENTORY.STATUS - 1] || '').toString().trim().toLowerCase();
+      var itemNum = item[COLS.INVENTORY.ITEM_NUM - 1].toString().trim();
+      var itemSize = parseFloat(item[COLS.INVENTORY.SIZE - 1]);
       var notLost = !isLostLocate(item);
 
       // Debug logging when filtering due to LOST-LOCATE
@@ -19779,7 +19829,7 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
     });
 
     if (match) {
-      result.itemNum = String(match[0]);
+      result.itemNum = String(match[COLS.INVENTORY.ITEM_NUM - 1]);
       result.status = 'In Stock (Size Up) ⚠️';
       result.inventoryData = match;
       return result;
@@ -19788,15 +19838,15 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
 
   // 3) Try Ready For Delivery
   match = inventoryData.find(function(item) {
-    var itemClass = safeParseClass(item[2]);
-    var itemStatus = (item[6] || '').toString().trim().toLowerCase();
-    var itemNum = item[0].toString().trim();
+    var itemClass = safeParseClass(item[COLS.INVENTORY.CLASS - 1]);
+    var itemStatus = (item[COLS.INVENTORY.STATUS - 1] || '').toString().trim().toLowerCase();
+    var itemNum = item[COLS.INVENTORY.ITEM_NUM - 1].toString().trim();
 
     var classMatch = (itemClass === targetClass);
     var statusMatch = (itemStatus === 'ready for delivery');
     var notAssigned = !assignedItems.has(itemNum);
     var notLost = !isLostLocate(item);
-    var sizeMatch = isGlove ? (parseFloat(item[1]) === useSizeNum) : sleeveSizeMatch(item[1]);
+    var sizeMatch = isGlove ? (parseFloat(item[COLS.INVENTORY.SIZE - 1]) === useSizeNum) : sleeveSizeMatch(item[COLS.INVENTORY.SIZE - 1]);
 
     // Debug logging when filtering due to LOST-LOCATE
     if (classMatch && statusMatch && notAssigned && sizeMatch && !notLost) {
@@ -19807,7 +19857,7 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
   });
 
   if (match) {
-    result.itemNum = String(match[0]);
+    result.itemNum = String(match[COLS.INVENTORY.ITEM_NUM - 1]);
     result.status = 'Ready For Delivery 🚚';
     result.inventoryData = match;
     return result;
@@ -19816,10 +19866,10 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
   // 3b) Try size up Ready For Delivery (gloves only)
   if (isGlove && !isNaN(useSizeNum)) {
     match = inventoryData.find(function(item) {
-      var itemClass = safeParseClass(item[2]);
-      var itemStatus = (item[6] || '').toString().trim().toLowerCase();
-      var itemNum = item[0].toString().trim();
-      var itemSize = parseFloat(item[1]);
+      var itemClass = safeParseClass(item[COLS.INVENTORY.CLASS - 1]);
+      var itemStatus = (item[COLS.INVENTORY.STATUS - 1] || '').toString().trim().toLowerCase();
+      var itemNum = item[COLS.INVENTORY.ITEM_NUM - 1].toString().trim();
+      var itemSize = parseFloat(item[COLS.INVENTORY.SIZE - 1]);
       var notLost = !isLostLocate(item);
 
       // Debug logging when filtering due to LOST-LOCATE
@@ -19835,7 +19885,7 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
     });
 
     if (match) {
-      result.itemNum = String(match[0]);
+      result.itemNum = String(match[COLS.INVENTORY.ITEM_NUM - 1]);
       result.status = 'Ready For Delivery (Size Up) ⚠️';
       result.inventoryData = match;
       return result;
@@ -19844,15 +19894,15 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
 
   // 4) Try In Testing
   match = inventoryData.find(function(item) {
-    var itemClass = safeParseClass(item[2]);
-    var itemStatus = (item[6] || '').toString().trim().toLowerCase();
-    var itemNum = item[0].toString().trim();
+    var itemClass = safeParseClass(item[COLS.INVENTORY.CLASS - 1]);
+    var itemStatus = (item[COLS.INVENTORY.STATUS - 1] || '').toString().trim().toLowerCase();
+    var itemNum = item[COLS.INVENTORY.ITEM_NUM - 1].toString().trim();
 
     var classMatch = (itemClass === targetClass);
     var statusMatch = (itemStatus === 'in testing');
     var notAssigned = !assignedItems.has(itemNum);
     var notLost = !isLostLocate(item);
-    var sizeMatch = isGlove ? (parseFloat(item[1]) === useSizeNum) : sleeveSizeMatch(item[1]);
+    var sizeMatch = isGlove ? (parseFloat(item[COLS.INVENTORY.SIZE - 1]) === useSizeNum) : sleeveSizeMatch(item[COLS.INVENTORY.SIZE - 1]);
 
     // Debug logging when filtering due to LOST-LOCATE
     if (classMatch && statusMatch && notAssigned && sizeMatch && !notLost) {
@@ -19863,7 +19913,7 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
   });
 
   if (match) {
-    result.itemNum = String(match[0]);
+    result.itemNum = String(match[COLS.INVENTORY.ITEM_NUM - 1]);
     result.status = 'In Testing 🔬';
     result.inventoryData = match;
     return result;
@@ -19872,10 +19922,10 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
   // 4b) Try size up In Testing (gloves only)
   if (isGlove && !isNaN(useSizeNum)) {
     match = inventoryData.find(function(item) {
-      var itemClass = safeParseClass(item[2]);
-      var itemStatus = (item[6] || '').toString().trim().toLowerCase();
-      var itemNum = item[0].toString().trim();
-      var itemSize = parseFloat(item[1]);
+      var itemClass = safeParseClass(item[COLS.INVENTORY.CLASS - 1]);
+      var itemStatus = (item[COLS.INVENTORY.STATUS - 1] || '').toString().trim().toLowerCase();
+      var itemNum = item[COLS.INVENTORY.ITEM_NUM - 1].toString().trim();
+      var itemSize = parseFloat(item[COLS.INVENTORY.SIZE - 1]);
       var notLost = !isLostLocate(item);
 
       // Debug logging when filtering due to LOST-LOCATE
@@ -19891,7 +19941,7 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
     });
 
     if (match) {
-      result.itemNum = String(match[0]);
+      result.itemNum = String(match[COLS.INVENTORY.ITEM_NUM - 1]);
       result.status = 'In Testing (Size Up) ⚠️';
       result.inventoryData = match;
       return result;
@@ -19901,8 +19951,8 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
   // Log when no match found - helps diagnose pick list issues
   var candidateCount = 0;
   inventoryData.forEach(function(item) {
-    var itemClass = safeParseClass(item[2]);
-    var itemStatus = (item[6] || '').toString().trim().toLowerCase();
+    var itemClass = safeParseClass(item[COLS.INVENTORY.CLASS - 1]);
+    var itemStatus = (item[COLS.INVENTORY.STATUS - 1] || '').toString().trim().toLowerCase();
     if (itemClass === targetClass && (itemStatus === 'on shelf' || itemStatus === 'ready for delivery' || itemStatus === 'in testing')) {
       candidateCount++;
     }
