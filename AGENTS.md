@@ -13,7 +13,7 @@ Google Apps Script-based inventory management system for tracking rubber gloves/
 Google Apps Script loads files **alphabetically**. Numbered prefixes control load order:
 ```
 00-Constants.gs  → loads FIRST (defines COLS, SHEET_* constants, STATUS_LOCATIONS, incl. Blankets/HV Testers/Phasing Sets/AED) (~225 lines)
-01-Utilities.gs  → utility functions (logEvent, normalizeApprovalValue, isStatusLocation, isEmployeePending) (~108 lines)
+01-Utilities.gs  → utility functions (logEvent, normalizeApprovalValue, isStatusLocation, isEmployeePending, parseDateNoon) (~135 lines)
 10-Menu.gs       → archived (menu now in Code.gs) (~18 lines)
 11-Triggers.gs   → edit/change triggers, auto change-out dates (Gloves, Sleeves, Blankets, HV Testers, Phasing Sets, AED) (~1.9k lines)
 20-InventoryHandlers.gs → inventory status/assignment handlers (~187 lines)
@@ -83,6 +83,13 @@ Available `COLS` namespaces: `INVENTORY` (Gloves/Sleeves — 12-column layout wi
 ```javascript
 logEvent('Task completed successfully', 'INFO');  // Levels: INFO, ERROR, WARNING, DEBUG
 Logger.log('Debug output');  // For quick debugging
+```
+
+### Date Parsing (YYYY-MM-DD from HTML inputs)
+**ALWAYS use `parseDateNoon(dateStr)` from `01-Utilities.gs`** when parsing YYYY-MM-DD strings from HTML date inputs. Never use `new Date(year, month, day)` — it creates midnight UTC which shifts back one day in US Mountain Time.
+```javascript
+var date = parseDateNoon('2026-04-13');  // Returns Apr 13 at noon — correct in all timezones
+// WRONG: var date = new Date(2026, 3, 13);  // Midnight UTC = Apr 12 in Mountain Time
 ```
 
 ### HTML Dialogs

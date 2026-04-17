@@ -734,6 +734,24 @@ Notes: [Any notes]
 
 ## Completed Features Log
 
+### April 17, 2026
+- ✅ **Fixed New Item Dialog Not Appearing When Adding Inventory**
+  - **Problem:** Entering a new glove number on the Gloves sheet did not show the New Item dialog popup
+  - **Root Cause:** `handleDuplicateItemNumber()` and `checkDuplicateItemNumber()` were accidentally removed from `61-InventoryReports.gs` during the April 17 ESL ID cleanup (~894 lines removed). The `onEditHandler` trigger called `handleDuplicateItemNumber` which threw `ReferenceError: handleDuplicateItemNumber is not defined`, aborting before `promptNewItemSource()` could run.
+  - **Solution:** Restored both functions to `61-InventoryReports.gs`
+  - **Files Modified:** `src/61-InventoryReports.gs`
+
+- ✅ **Fixed Timezone Date Shifting Project-Wide (Off-By-One Day)**
+  - **Problem:** Dates entered via HTML date inputs (YYYY-MM-DD) were saved one day earlier than expected (e.g., entering 04/13/2026 saved as 04/12/2026)
+  - **Root Cause:** `new Date(year, month, day)` creates dates at midnight. Google Apps Script runs server-side (UTC), but the spreadsheet renders in US Mountain Time (UTC-6/7). Midnight UTC = 6 PM previous day in Mountain Time → date displays one day earlier.
+  - **Solution:** Added `parseDateNoon(dateStr)` utility in `01-Utilities.gs` that creates dates at noon instead of midnight, preventing timezone shift. Updated 10 date parsing locations across 4 files.
+  - **Files Modified:**
+    - `src/01-Utilities.gs` — Added `parseDateNoon()` function
+    - `src/61-InventoryReports.gs` — 4 fixes (HV Tester/Phasing Set calibration, AED pad expiration, Gloves/Sleeves test date)
+    - `src/85-DataImport.gs` — 3 fixes (activation date, completion date, start date)
+    - `src/Code.gs` — 3 fixes (week date parsing x2, hire date comparison)
+  - **Impact:** All dates from HTML dialogs now save correctly in all US timezones
+
 ### April 13, 2026
 - ✅ **Fixed Crew Import Crash After Auto-Apply Special Circumstances**
   - **Problem:** `filterSpecialCircumstancesAlreadyMatched()` crashed with `TypeError: Cannot read properties of null (reading 'name')` on second pass (after new hires check)
