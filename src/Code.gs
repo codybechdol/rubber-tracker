@@ -15881,6 +15881,21 @@ function generateAllReports() {
       Logger.log('generateAllReports: Error syncing crews: ' + foremanError);
     }
 
+    // Clean up Safety Compliance: remove On Hold/Completed/Pending Start crews from current week
+    var complianceCleanupCount = 0;
+    try {
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      var tz = Session.getScriptTimeZone();
+      var compConfig = loadComplianceConfig();  // Only returns Active crews
+      var currentWeekBounds = getWeekBoundaries(new Date());
+      complianceCleanupCount = removeNonConfigCrewsFromCurrentWeekSilent(ss, currentWeekBounds.weekStart, compConfig, tz);
+      if (complianceCleanupCount > 0) {
+        Logger.log('generateAllReports: Removed ' + complianceCleanupCount + ' non-active crew(s) from current week Safety Compliance');
+      }
+    } catch (compCleanupError) {
+      Logger.log('generateAllReports: Safety Compliance cleanup error (non-critical): ' + compCleanupError);
+    }
+
     logEvent('All reports generated.');
     var successMsg = '✅ All reports generated successfully!';
     if (addedCrewsResults && addedCrewsResults.addedRows > 0) {
@@ -15900,6 +15915,9 @@ function generateAllReports() {
     }
     if (trainingWarnings.length > 0) {
       successMsg += '\n\n⚠️ Training Tracking warnings:\n' + trainingWarnings.join('\n');
+    }
+    if (complianceCleanupCount > 0) {
+      successMsg += '\n\n🛡️ Removed ' + complianceCleanupCount + ' non-active crew(s) from current week Safety Compliance.';
     }
     SpreadsheetApp.getUi().alert(successMsg);
   } catch (e) {
