@@ -1890,3 +1890,22 @@ Notes: [Any notes]
   - Called by `resortTrainingTrackingChronologically()` after sorting
   - **Files Modified:** `src/Code.gs` — Added ~50 lines
 
+### April 17, 2026
+- ✅ **ESL ID Column Added to Gloves/Sleeves Sheets**
+  - **Goal:** Add ESL ID column (B) to Gloves and Sleeves sheets for external system linking
+  - **What was built:**
+    1. **`migrateGlovesSleevesSheetsForESLID()`** - Migration function that inserts column B ("ESL ID") and shifts existing data right. Safe to run multiple times (skips if already migrated).
+    2. **Updated `COLS.INVENTORY`** - All column indices shifted +1: ESL_ID=2, SIZE=3, CLASS=4, TEST_DATE=5, DATE_ASSIGNED=6, LOCATION=7, STATUS=8, ASSIGNED_TO=9, CHANGE_OUT_DATE=10, PICKED_FOR=11, NOTES=12
+    3. **Updated all hardcoded column references** to use `COLS.INVENTORY` constants:
+       - `11-Triggers.gs` — onEdit/onEditHandler Date Assigned and Change Out Date handling
+       - `Code.gs` — handlePickListManualEdit(), auto-set defaults for new items
+       - `40-Reclaims.gs` — Reclaim pick list column references
+       - `50-History.gs` — History logging column awareness
+    4. **Auto-set defaults** for new Gloves/Sleeves items: Location=Helena, Status=On Shelf, Assigned To=On Shelf
+    5. **61-InventoryReports.gs** — Major cleanup (~894 lines removed), updated for new column layout
+    6. **LookupDialog.html** — ESL ID displayed in item lookup results
+    7. **NewItemDialog.html** — ESL ID field added to new item creation dialog
+  - **Menu Item:** Glove Manager → 🔧 Maintenance → 🏗️ Sheets Setup → Add ESL ID Column (Gloves/Sleeves)
+  - **IMPORTANT:** `BLANKETS` does NOT have ESL ID — still uses the old 11-column layout
+  - **Files Modified:** `00-Constants.gs`, `11-Triggers.gs`, `40-Reclaims.gs`, `50-History.gs`, `61-InventoryReports.gs`, `Code.gs`, `LookupDialog.html`, `NewItemDialog.html`
+
