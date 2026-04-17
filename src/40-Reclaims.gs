@@ -84,8 +84,9 @@ function updateReclaimsSheet_INCOMPLETE_DEPRECATED() {
       return;
     }
 
-    var glovesData = glovesSheet.getLastRow() > 1 ? glovesSheet.getRange(2, 1, glovesSheet.getLastRow() - 1, 11).getValues() : [];
-    var sleevesData = sleevesSheet.getLastRow() > 1 ? sleevesSheet.getRange(2, 1, sleevesSheet.getLastRow() - 1, 11).getValues() : [];
+    var glovesData = glovesSheet.getLastRow() > 1 ? glovesSheet.getRange(2, 1, glovesSheet.getLastRow() - 1, COLS.INVENTORY.NOTES).getValues() : [];
+    var glovesData = glovesSheet.getLastRow() > 1 ? glovesSheet.getRange(2, 1, glovesSheet.getLastRow() - 1, COLS.INVENTORY.NOTES).getValues() : [];
+    var sleevesData = sleevesSheet.getLastRow() > 1 ? sleevesSheet.getRange(2, 1, sleevesSheet.getLastRow() - 1, COLS.INVENTORY.NOTES).getValues() : [];
     var empData = employeesSheet.getDataRange().getValues();
     var empHeaders = empData[0];
     var empRows = empData.slice(1);

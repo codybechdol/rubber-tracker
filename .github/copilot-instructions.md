@@ -1909,3 +1909,18 @@ Notes: [Any notes]
   - **IMPORTANT:** `BLANKETS` does NOT have ESL ID — still uses the old 11-column layout
   - **Files Modified:** `00-Constants.gs`, `11-Triggers.gs`, `40-Reclaims.gs`, `50-History.gs`, `61-InventoryReports.gs`, `Code.gs`, `LookupDialog.html`, `NewItemDialog.html`
 
+- ✅ **Code Review: Fix Remaining Hardcoded Column Indices After ESL ID Migration**
+  - **Problem:** Several functions still used old 11-column layout indices (pre-ESL ID) causing **live bugs** — reading wrong columns for Location, Status, AssignedTo, PickedFor in Gloves/Sleeves data
+  - **Critical Bug Fixed:** `updateReclaimsSheet()` in Code.gs was reading `row[5]` as Location (actually DateAssigned), `row[7]` as AssignedTo (actually Status), `row[6]` as Status (actually Location) — all reclaim detection for Previous Employee items and Class 2/3 reclaims was broken
+  - **What was fixed:**
+    1. **`Code.gs` `saveHistoryFast()`** — Gloves/Sleeves: range width `11`→`COLS.INVENTORY.NOTES` (12), all array indices updated to `COLS.INVENTORY.*` constants, reduced 2 API calls to 1 (`getValues()` only)
+    2. **`Code.gs` `updateReclaimsSheet()`** — Range width `11`→`12`, all 4 `forEach` blocks (Previous Employee collection, Class 2/3 reclaims, Pick List previous employee check) updated with `COLS.INVENTORY.*` constants, 2 `oldItemData[4]` → `COLS.INVENTORY.DATE_ASSIGNED - 1`
+    3. **`Code.gs` `handleNotesChange()`** — Three hardcoded `11` → `COLS.INVENTORY.NOTES`
+    4. **`40-Reclaims.gs`** — Range width `11`→`COLS.INVENTORY.NOTES` for both Gloves/Sleeves reads
+    5. **`20-InventoryHandlers.gs`** — `handleNotesChange()` hardcoded `11` → `COLS.INVENTORY.NOTES`, `8` → `COLS.INVENTORY.ASSIGNED_TO`
+    6. **`50-History.gs`** — Updated to use `COLS.INVENTORY.*` constants, single API call, added deprecation note
+    7. **`00-Constants.gs`** — Removed 8 duplicate `⚠️ ESL ID column` comments (kept 1), fixed mangled Phasing Sets comment
+    8. **`Code.gs` `saveHistory()`** — Marked as `DEPRECATED` (active version is `saveHistoryFast()`)
+    9. **`NewItemDialog.html`** — Removed duplicate `<h2>` tag, consolidated repeated `sheetName` conditionals into shared variables (`isEquipment`, `isGlovesSleeves`, `isServiceStatus`), merged HV Testers/Phasing Sets form into single block, deduplicated Class dropdown, combined `submitForm()` HV Testers/Phasing Sets branches, used `Object.prototype.hasOwnProperty.call()` instead of direct `.hasOwnProperty()`
+  - **Files Modified:** `src/00-Constants.gs`, `src/20-InventoryHandlers.gs`, `src/40-Reclaims.gs`, `src/50-History.gs`, `src/Code.gs`, `src/NewItemDialog.html`
+

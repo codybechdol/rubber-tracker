@@ -9292,6 +9292,7 @@ function isDuplicateHistoryEntry(historySheet, itemNum, assignedTo, dateAssigned
  * Consolidated history save function.
  * @param {boolean} silent - If true, no UI alerts are shown (for automated backups)
  */
+// DEPRECATED - use saveHistoryFast() instead. Kept for reference only.
 function saveHistory(silent) {
   silent = silent || false;
 
@@ -9765,22 +9766,20 @@ function saveHistoryFast(silent) {
     var newAEDRows = [];
     var newAEDEntries = 0;
 
-    // Process Gloves
+    // Process Gloves (single API call - ESL ID column B added April 2026)
     if (glovesSheet && glovesSheet.getLastRow() > 1 && glovesHistorySheet) {
       var numGloveRows = glovesSheet.getLastRow() - 1;
-      var glovesDisplay = glovesSheet.getRange(2, 1, numGloveRows, 11).getDisplayValues();
-      var glovesRawValues = glovesSheet.getRange(2, 1, numGloveRows, 11).getValues();
+      var glovesRawValues = glovesSheet.getRange(2, 1, numGloveRows, COLS.INVENTORY.NOTES).getValues();
 
-      for (var i = 0; i < glovesDisplay.length; i++) {
-        var row = glovesDisplay[i];
+      for (var i = 0; i < glovesRawValues.length; i++) {
         var rawRow = glovesRawValues[i];
-        var itemNum = formatItemNum(rawRow[0]);
-        var size = row[1];
-        var classVal = formatClass(rawRow[2]);
-        var dateAssignedRaw = rawRow[4];   // Raw date for formatting
-        var dateAssignedDisplay = row[4];   // Display string for duplicate checking
-        var location = row[5];
-        var assignedTo = row[7];
+        var itemNum = formatItemNum(rawRow[COLS.INVENTORY.ITEM_NUM - 1]);
+        var size = String(rawRow[COLS.INVENTORY.SIZE - 1] || '');
+        var classVal = formatClass(rawRow[COLS.INVENTORY.CLASS - 1]);
+        var dateAssignedRaw = rawRow[COLS.INVENTORY.DATE_ASSIGNED - 1];
+        var dateAssignedDisplay = formatDateForHistory(dateAssignedRaw);
+        var location = String(rawRow[COLS.INVENTORY.LOCATION - 1] || '');
+        var assignedTo = String(rawRow[COLS.INVENTORY.ASSIGNED_TO - 1] || '');
 
         if (!itemNum || !dateAssignedDisplay) continue;
 
@@ -9788,7 +9787,7 @@ function saveHistoryFast(silent) {
         var changeResult = getChangeTypeFast(glovesLookup, itemNum, assignedTo, dateAssignedDisplay, location, 'Glove');
         if (!changeResult.isDuplicate) {
           newGloveRows.push([
-            silent ? formatDateForHistory(dateAssignedRaw) : dateAssignedDisplay,
+            dateAssignedDisplay,
             itemNum, size, classVal, location, assignedTo, changeResult.note || ''
           ]);
           newGloveEntries++;
@@ -9798,22 +9797,20 @@ function saveHistoryFast(silent) {
       }
     }
 
-    // Process Sleeves
+    // Process Sleeves (single API call - ESL ID column B added April 2026)
     if (sleevesSheet && sleevesSheet.getLastRow() > 1 && sleevesHistorySheet) {
       var numSleeveRows = sleevesSheet.getLastRow() - 1;
-      var sleevesDisplay = sleevesSheet.getRange(2, 1, numSleeveRows, 11).getDisplayValues();
-      var sleevesRawValues = sleevesSheet.getRange(2, 1, numSleeveRows, 11).getValues();
+      var sleevesRawValues = sleevesSheet.getRange(2, 1, numSleeveRows, COLS.INVENTORY.NOTES).getValues();
 
-      for (var j = 0; j < sleevesDisplay.length; j++) {
-        var sRow = sleevesDisplay[j];
+      for (var j = 0; j < sleevesRawValues.length; j++) {
         var sRawRow = sleevesRawValues[j];
-        var sItemNum = formatItemNum(sRawRow[0]);
-        var sSize = sRow[1];
-        var sClassVal = formatClass(sRawRow[2]);
-        var sDateAssignedRaw = sRawRow[4];   // Raw date for formatting
-        var sDateAssignedDisplay = sRow[4];   // Display string for duplicate checking
-        var sLocation = sRow[5];
-        var sAssignedTo = sRow[7];
+        var sItemNum = formatItemNum(sRawRow[COLS.INVENTORY.ITEM_NUM - 1]);
+        var sSize = String(sRawRow[COLS.INVENTORY.SIZE - 1] || '');
+        var sClassVal = formatClass(sRawRow[COLS.INVENTORY.CLASS - 1]);
+        var sDateAssignedRaw = sRawRow[COLS.INVENTORY.DATE_ASSIGNED - 1];
+        var sDateAssignedDisplay = formatDateForHistory(sDateAssignedRaw);
+        var sLocation = String(sRawRow[COLS.INVENTORY.LOCATION - 1] || '');
+        var sAssignedTo = String(sRawRow[COLS.INVENTORY.ASSIGNED_TO - 1] || '');
 
         if (!sItemNum || !sDateAssignedDisplay) continue;
 
@@ -9821,7 +9818,7 @@ function saveHistoryFast(silent) {
         var sChangeResult = getChangeTypeFast(sleevesLookup, sItemNum, sAssignedTo, sDateAssignedDisplay, sLocation, 'Sleeve');
         if (!sChangeResult.isDuplicate) {
           newSleeveRows.push([
-            silent ? formatDateForHistory(sDateAssignedRaw) : sDateAssignedDisplay,
+            sDateAssignedDisplay,
             sItemNum, sSize, sClassVal, sLocation, sAssignedTo, sChangeResult.note || ''
           ]);
           newSleeveEntries++;
@@ -17745,8 +17742,8 @@ function updateReclaimsSheet() {
     }
 
     // Get inventory data FIRST (needed to count Previous Employee items)
-    var glovesData = glovesSheet.getLastRow() > 1 ? glovesSheet.getRange(2, 1, glovesSheet.getLastRow() - 1, 11).getValues() : [];
-    var sleevesData = sleevesSheet.getLastRow() > 1 ? sleevesSheet.getRange(2, 1, sleevesSheet.getLastRow() - 1, 11).getValues() : [];
+    var glovesData = glovesSheet.getLastRow() > 1 ? glovesSheet.getRange(2, 1, glovesSheet.getLastRow() - 1, COLS.INVENTORY.NOTES).getValues() : [];
+    var sleevesData = sleevesSheet.getLastRow() > 1 ? sleevesSheet.getRange(2, 1, sleevesSheet.getLastRow() - 1, COLS.INVENTORY.NOTES).getValues() : [];
 
     // Build set of CURRENT active employee names from Employees sheet
     // These should NEVER appear in Previous Employee Reclaims
@@ -17934,12 +17931,12 @@ function updateReclaimsSheet() {
 
     // FIRST PASS: Collect Previous Employee items to get accurate count
     glovesData.forEach(function(row) {
-      var itemNum = row[0];
+      var itemNum = row[COLS.INVENTORY.ITEM_NUM - 1];
       // Skip rows without a valid item number
       if (!itemNum || itemNum === '' || itemNum === null) return;
 
-      var location = (row[5] || '').toString().trim();
-      var assignedTo = (row[7] || '').toString().trim();
+      var location = (row[COLS.INVENTORY.LOCATION - 1] || '').toString().trim();
+      var assignedTo = (row[COLS.INVENTORY.ASSIGNED_TO - 1] || '').toString().trim();
       var locationLower = location.toLowerCase();
       var assignedToLower = assignedTo.toLowerCase();
 
@@ -17947,18 +17944,18 @@ function updateReclaimsSheet() {
         if (assignedTo && assignedToLower !== 'on shelf' && assignedToLower !== 'in testing' &&
             assignedToLower !== 'packed for delivery' && assignedToLower !== 'packed for testing') {
           var lastDayValue = previousEmployeeLastDay[assignedToLower] || '';
-          prevEmpItems.push(['Glove', row[0], row[1], row[2], location, row[6], assignedTo, row[4], lastDayValue]);
+          prevEmpItems.push(['Glove', row[COLS.INVENTORY.ITEM_NUM - 1], row[COLS.INVENTORY.SIZE - 1], row[COLS.INVENTORY.CLASS - 1], location, row[COLS.INVENTORY.STATUS - 1], assignedTo, row[COLS.INVENTORY.DATE_ASSIGNED - 1], lastDayValue]);
         }
       }
     });
 
     sleevesData.forEach(function(row) {
-      var itemNum = row[0];
+      var itemNum = row[COLS.INVENTORY.ITEM_NUM - 1];
       // Skip rows without a valid item number
       if (!itemNum || itemNum === '' || itemNum === null) return;
 
-      var location = (row[5] || '').toString().trim();
-      var assignedTo = (row[7] || '').toString().trim();
+      var location = (row[COLS.INVENTORY.LOCATION - 1] || '').toString().trim();
+      var assignedTo = (row[COLS.INVENTORY.ASSIGNED_TO - 1] || '').toString().trim();
       var locationLower = location.toLowerCase();
       var assignedToLower = assignedTo.toLowerCase();
 
@@ -17966,7 +17963,7 @@ function updateReclaimsSheet() {
         if (assignedTo && assignedToLower !== 'on shelf' && assignedToLower !== 'in testing' &&
             assignedToLower !== 'packed for delivery' && assignedToLower !== 'packed for testing') {
           var lastDayValue = previousEmployeeLastDay[assignedToLower] || '';
-          prevEmpItems.push(['Sleeve', row[0], row[1], row[2], location, row[6], assignedTo, row[4], lastDayValue]);
+          prevEmpItems.push(['Sleeve', row[COLS.INVENTORY.ITEM_NUM - 1], row[COLS.INVENTORY.SIZE - 1], row[COLS.INVENTORY.CLASS - 1], location, row[COLS.INVENTORY.STATUS - 1], assignedTo, row[COLS.INVENTORY.DATE_ASSIGNED - 1], lastDayValue]);
         }
       }
     });
@@ -18031,13 +18028,13 @@ function updateReclaimsSheet() {
 
     // Process Gloves for Class 2/3 reclaims (Previous Employee items already collected above)
     glovesData.forEach(function(row) {
-      var itemNum = row[0];
-      var size = row[1];
-      var itemClass = row[2];
-      var dateAssigned = row[4];
-      var location = (row[5] || '').toString().trim();
-      var status = (row[6] || '').toString().trim();
-      var assignedTo = (row[7] || '').toString().trim();
+      var itemNum = row[COLS.INVENTORY.ITEM_NUM - 1];
+      var size = row[COLS.INVENTORY.SIZE - 1];
+      var itemClass = row[COLS.INVENTORY.CLASS - 1];
+      var dateAssigned = row[COLS.INVENTORY.DATE_ASSIGNED - 1];
+      var location = (row[COLS.INVENTORY.LOCATION - 1] || '').toString().trim();
+      var status = (row[COLS.INVENTORY.STATUS - 1] || '').toString().trim();
+      var assignedTo = (row[COLS.INVENTORY.ASSIGNED_TO - 1] || '').toString().trim();
       var locationLower = location.toLowerCase();
       var assignedToLower = assignedTo.toLowerCase();
 
@@ -18107,13 +18104,13 @@ function updateReclaimsSheet() {
 
     // Process Sleeves for Class 2/3 reclaims (Previous Employee items already collected above)
     sleevesData.forEach(function(row) {
-      var itemNum = row[0];
-      var size = row[1];
-      var itemClass = row[2];
-      var dateAssigned = row[4];
-      var location = (row[5] || '').toString().trim();
-      var status = (row[6] || '').toString().trim();
-      var assignedTo = (row[7] || '').toString().trim();
+      var itemNum = row[COLS.INVENTORY.ITEM_NUM - 1];
+      var size = row[COLS.INVENTORY.SIZE - 1];
+      var itemClass = row[COLS.INVENTORY.CLASS - 1];
+      var dateAssigned = row[COLS.INVENTORY.DATE_ASSIGNED - 1];
+      var location = (row[COLS.INVENTORY.LOCATION - 1] || '').toString().trim();
+      var status = (row[COLS.INVENTORY.STATUS - 1] || '').toString().trim();
+      var assignedTo = (row[COLS.INVENTORY.ASSIGNED_TO - 1] || '').toString().trim();
       var locationLower = location.toLowerCase();
       var assignedToLower = assignedTo.toLowerCase();
 
@@ -18256,7 +18253,7 @@ function updateReclaimsSheet() {
       var oldItemData = inventoryToSearch.find(function(item) {
         return String(item[0]).trim() === oldItemNum;
       });
-      reclaim.oldItemDateAssigned = oldItemData ? (oldItemData[4] || '') : '';  // Column E = Date Assigned
+      reclaim.oldItemDateAssigned = oldItemData ? (oldItemData[COLS.INVENTORY.DATE_ASSIGNED - 1] || '') : '';
     });
 
     // Process Class 2 reclaims for Pick List (need UPGRADE to Class 3)
@@ -18301,7 +18298,7 @@ function updateReclaimsSheet() {
       var oldItemData = inventoryToSearch.find(function(item) {
         return String(item[0]).trim() === oldItemNum;
       });
-      reclaim.oldItemDateAssigned = oldItemData ? (oldItemData[4] || '') : '';  // Column E = Date Assigned
+      reclaim.oldItemDateAssigned = oldItemData ? (oldItemData[COLS.INVENTORY.DATE_ASSIGNED - 1] || '') : '';
     });
 
     // Write Previous Employee data (row 3 = after title and headers)
@@ -18645,8 +18642,8 @@ function updateReclaimsSheet() {
 
     // Check Gloves
     glovesData.forEach(function(row) {
-      var status = (row[6] || '').toString().trim().toLowerCase();
-      var pickedFor = (row[9] || '').toString().trim();  // Column J - Picked For
+      var status = (row[COLS.INVENTORY.STATUS - 1] || '').toString().trim().toLowerCase();
+      var pickedFor = (row[COLS.INVENTORY.PICKED_FOR - 1] || '').toString().trim();
 
       if ((status === 'ready for delivery' || status === 'packed for delivery') && pickedFor) {
         // Check if picked for a previous employee
@@ -18654,10 +18651,10 @@ function updateReclaimsSheet() {
           if (pickedFor.toLowerCase().indexOf(empName.toLowerCase()) !== -1) {
             previousEmployeePickListItems.push({
               itemType: 'Glove',
-              itemNum: row[0],
-              size: row[1],
-              itemClass: row[2],
-              status: row[6],
+              itemNum: row[COLS.INVENTORY.ITEM_NUM - 1],
+              size: row[COLS.INVENTORY.SIZE - 1],
+              itemClass: row[COLS.INVENTORY.CLASS - 1],
+              status: row[COLS.INVENTORY.STATUS - 1],
               pickedFor: pickedFor,
               previousEmployee: empName
             });
@@ -18669,15 +18666,15 @@ function updateReclaimsSheet() {
           if (pickedFor.toLowerCase().indexOf(empNameLower) !== -1) {
             // Check if already added
             var alreadyAdded = previousEmployeePickListItems.some(function(item) {
-              return item.itemNum === row[0] && item.itemType === 'Glove';
+              return item.itemNum === row[COLS.INVENTORY.ITEM_NUM - 1] && item.itemType === 'Glove';
             });
             if (!alreadyAdded) {
               previousEmployeePickListItems.push({
                 itemType: 'Glove',
-                itemNum: row[0],
-                size: row[1],
-                itemClass: row[2],
-                status: row[6],
+                itemNum: row[COLS.INVENTORY.ITEM_NUM - 1],
+                size: row[COLS.INVENTORY.SIZE - 1],
+                itemClass: row[COLS.INVENTORY.CLASS - 1],
+                status: row[COLS.INVENTORY.STATUS - 1],
                 pickedFor: pickedFor,
                 previousEmployee: empNameLower
               });
@@ -18689,8 +18686,8 @@ function updateReclaimsSheet() {
 
     // Check Sleeves
     sleevesData.forEach(function(row) {
-      var status = (row[6] || '').toString().trim().toLowerCase();
-      var pickedFor = (row[9] || '').toString().trim();  // Column J - Picked For
+      var status = (row[COLS.INVENTORY.STATUS - 1] || '').toString().trim().toLowerCase();
+      var pickedFor = (row[COLS.INVENTORY.PICKED_FOR - 1] || '').toString().trim();
 
       if ((status === 'ready for delivery' || status === 'packed for delivery') && pickedFor) {
         // Check if picked for a previous employee
@@ -18698,10 +18695,10 @@ function updateReclaimsSheet() {
           if (pickedFor.toLowerCase().indexOf(empName.toLowerCase()) !== -1) {
             previousEmployeePickListItems.push({
               itemType: 'Sleeve',
-              itemNum: row[0],
-              size: row[1],
-              itemClass: row[2],
-              status: row[6],
+              itemNum: row[COLS.INVENTORY.ITEM_NUM - 1],
+              size: row[COLS.INVENTORY.SIZE - 1],
+              itemClass: row[COLS.INVENTORY.CLASS - 1],
+              status: row[COLS.INVENTORY.STATUS - 1],
               pickedFor: pickedFor,
               previousEmployee: empName
             });
@@ -18713,15 +18710,15 @@ function updateReclaimsSheet() {
           if (pickedFor.toLowerCase().indexOf(empNameLower) !== -1) {
             // Check if already added
             var alreadyAdded = previousEmployeePickListItems.some(function(item) {
-              return item.itemNum === row[0] && item.itemType === 'Sleeve';
+              return item.itemNum === row[COLS.INVENTORY.ITEM_NUM - 1] && item.itemType === 'Sleeve';
             });
             if (!alreadyAdded) {
               previousEmployeePickListItems.push({
                 itemType: 'Sleeve',
-                itemNum: row[0],
-                size: row[1],
-                itemClass: row[2],
-                status: row[6],
+                itemNum: row[COLS.INVENTORY.ITEM_NUM - 1],
+                size: row[COLS.INVENTORY.SIZE - 1],
+                itemClass: row[COLS.INVENTORY.CLASS - 1],
+                status: row[COLS.INVENTORY.STATUS - 1],
                 pickedFor: pickedFor,
                 previousEmployee: empNameLower
               });

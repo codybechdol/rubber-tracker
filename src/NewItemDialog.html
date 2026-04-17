@@ -78,7 +78,10 @@
   </style>
 </head>
 <body>
-  <h2><? if (sheetName === 'Blankets') { ?>🧱 New Blanket Detected<? } else if (sheetName === 'HV Testers') { ?>⚡ New HV Tester Detected<? } else if (sheetName === 'Phasing Sets') { ?>⚡ New Phasing Set Detected<? } else if (sheetName === 'AED') { ?>🏥 New AED Detected<? } else { ?>📦 New <?= itemType ?> Detected<? } ?></h2>
+  <? var isEquipment = (sheetName === 'HV Testers' || sheetName === 'Phasing Sets'); ?>
+  <? var isGlovesSleeves = (sheetName === 'Gloves' || sheetName === 'Sleeves'); ?>
+  <? var isServiceStatus = (isEquipment || sheetName === 'Blankets' || sheetName === 'AED'); ?>
+
   <h2><? if (sheetName === 'Blankets') { ?>🧱 New Blanket Detected<? } else if (sheetName === 'HV Testers') { ?>⚡ New HV Tester Detected<? } else if (sheetName === 'Phasing Sets') { ?>⚡ New Phasing Set Detected<? } else if (sheetName === 'AED') { ?>🏥 New AED Detected<? } else { ?>📦 New <?= itemType ?> Detected<? } ?></h2>
 
   <div class="item-info">
@@ -87,8 +90,8 @@
   </div>
 
   <form id="newItemForm">
-    <? if (sheetName === 'HV Testers') { ?>
-    <!-- HV Testers: Model, KV, Serial #, Calibration Date -->
+    <? if (isEquipment) { ?>
+    <!-- HV Testers / Phasing Sets: Model, KV, Serial #, Calibration Date -->
     <div class="form-group">
       <label>Model:</label>
       <select id="model" name="model">
@@ -113,36 +116,7 @@
     <div class="form-group">
       <label>Calibration Date:</label>
       <input type="date" id="calibrationDate" name="calibrationDate">
-      <div class="hint">Change Out Date will auto-calculate (Calibration + 10 years)</div>
-    </div>
-
-    <? } else if (sheetName === 'Phasing Sets') { ?>
-    <!-- Phasing Sets: Model, KV, Serial #, Calibration Date -->
-    <div class="form-group">
-      <label>Model:</label>
-      <select id="model" name="model">
-        <option value="">Select model...</option>
-        <option value="Chance">Chance</option>
-        <option value="HD Electric">HD Electric</option>
-        <option value="Megger">Megger</option>
-        <option value="Other">Other</option>
-      </select>
-    </div>
-
-    <div class="form-group">
-      <label>KV Rating:</label>
-      <input type="text" id="kv" name="kv" placeholder="e.g., 69, 138, 230">
-    </div>
-
-    <div class="form-group">
-      <label>Serial #:</label>
-      <input type="text" id="serialNum" name="serialNum" placeholder="Enter serial number">
-    </div>
-
-    <div class="form-group">
-      <label>Calibration Date:</label>
-      <input type="date" id="calibrationDate" name="calibrationDate">
-      <div class="hint">Replacement Date will auto-calculate (Calibration + 10 years)</div>
+      <div class="hint"><? if (sheetName === 'HV Testers') { ?>Change Out Date<? } else { ?>Replacement Date<? } ?> will auto-calculate (Calibration + 10 years)</div>
     </div>
 
     <? } else if (sheetName === 'AED') { ?>
@@ -202,16 +176,6 @@
         <option value="12">12</option>
       </select>
     </div>
-
-    <div class="form-group">
-      <label>Class:</label>
-      <select id="itemClass" name="itemClass">
-        <option value="">Select class...</option>
-        <option value="0">Class 0</option>
-        <option value="2" selected>Class 2</option>
-        <option value="3">Class 3</option>
-      </select>
-    </div>
     <? } else { ?>
     <!-- Sleeves: Size field -->
     <div class="form-group">
@@ -223,7 +187,9 @@
         <option value="X-Large">X-Large</option>
       </select>
     </div>
+    <? } ?>
 
+    <? if (isGlovesSleeves) { ?>
     <div class="form-group">
       <label>Class:</label>
       <select id="itemClass" name="itemClass">
@@ -243,7 +209,7 @@
     </div>
     <? } ?>
 
-    <? if (sheetName !== 'HV Testers' && sheetName !== 'Phasing Sets' && sheetName !== 'AED') { ?>
+    <? if (!isEquipment && sheetName !== 'AED') { ?>
     <div class="form-group">
       <label>Test Date:</label>
       <input type="date" id="testDate" name="testDate">
@@ -257,7 +223,7 @@
 
     <div class="form-group">
       <label>Status:</label>
-      <? if (sheetName === 'HV Testers' || sheetName === 'Phasing Sets' || sheetName === 'AED') { ?>
+      <? if (isEquipment || sheetName === 'AED') { ?>
       <select id="status" name="status">
         <option value="On Shelf" selected>On Shelf</option>
         <option value="In Service">In Service</option>
@@ -285,7 +251,7 @@
     <div class="form-group">
       <label>Assigned To:</label>
       <input type="text" id="assignedTo" name="assignedTo" placeholder="Employee name or leave blank for On Shelf" value="">
-      <div class="hint">Enter employee name to auto-set Status to <? if (sheetName === 'HV Testers' || sheetName === 'Phasing Sets' || sheetName === 'Blankets' || sheetName === 'AED') { ?>In Service<? } else { ?>Assigned<? } ?> and lookup their location</div>
+      <div class="hint">Enter employee name to auto-set Status to <? if (isServiceStatus) { ?>In Service<? } else { ?>Assigned<? } ?> and lookup their location</div>
     </div>
 
     <hr style="margin: 20px 0;">
@@ -345,7 +311,7 @@
       };
 
       var assignedToLower = assignedTo.toLowerCase();
-      var isStatusValue = statusValueMap.hasOwnProperty(assignedToLower);
+      var isStatusValue = Object.prototype.hasOwnProperty.call(statusValueMap, assignedToLower);
 
       console.log('Assigned To: "' + assignedTo + '", isStatusValue: ' + isStatusValue);
 
@@ -407,12 +373,7 @@
       };
 
       // Equipment-specific fields
-      if (sheetName === 'HV Testers') {
-        formData.model = document.getElementById('model').value;
-        formData.kv = document.getElementById('kv').value;
-        formData.serialNum = document.getElementById('serialNum').value;
-        formData.calibrationDate = document.getElementById('calibrationDate').value;
-      } else if (sheetName === 'Phasing Sets') {
+      if (sheetName === 'HV Testers' || sheetName === 'Phasing Sets') {
         formData.model = document.getElementById('model').value;
         formData.kv = document.getElementById('kv').value;
         formData.serialNum = document.getElementById('serialNum').value;

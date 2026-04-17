@@ -24,7 +24,7 @@ Google Apps Script loads files **alphabetically**. Numbered prefixes control loa
 31-SwapHandlers.gs → Swap stage handling (Stage 1/2/3 workflows) (~441 lines)
 32-SwapPreservation.gs → Swap checkbox/data preservation between regenerations (~124 lines)
 40-Reclaims.gs   → Reclaims logic and pick list generation (~928 lines)
-50-History.gs    → Item history (Gloves/Sleeves History) (~242 lines)
+50-History.gs    → Item history (Gloves/Sleeves History), DEPRECATED by saveHistoryFast() in Code.gs (~266 lines)
 51-EmployeeHistory.gs → Employee lifecycle, restore deleted employees (~1.3k lines)
 60-PurchaseNeeds.gs → Purchase Needs 3-tier priority report (High/Medium/Low with class grouping) (~701 lines)
 61-InventoryReports.gs → Inventory Reports with charts (~2k lines)
@@ -77,7 +77,7 @@ Available `COLS` namespaces: `INVENTORY` (Gloves/Sleeves — 12-column layout wi
 
 **Note:** `HV_TESTERS` and `PHASING_SETS` share the same 12-column layout (A-L): Item#, Model, KV, Serial#, Calibration Date, Date Assigned, Location, Status, Assigned To, Change Out Date, Picked For, Notes.
 
-**Note:** `INVENTORY` (Gloves/Sleeves) uses a 12-column layout (A-L): Item#, ESL ID, Size, Class, Test Date, Date Assigned, Location, Status, Assigned To, Change Out Date, Picked For, Notes. The ESL ID column (B=2) was added April 2026 via `migrateGlovesSleevesSheetsForESLID()`. **BLANKETS** does NOT have ESL ID — uses the old 11-column layout.
+**Note:** `INVENTORY` (Gloves/Sleeves) uses a 12-column layout (A-L): Item#, ESL ID, Size, Class, Test Date, Date Assigned, Location, Status, Assigned To, Change Out Date, Picked For, Notes. The ESL ID column (B=2) was added April 2026 via `migrateGlovesSleevesSheetsForESLID()`. **BLANKETS** does NOT have ESL ID — uses the old 11-column layout. **All Gloves/Sleeves code MUST use `COLS.INVENTORY.*` constants** — never hardcode indices like `row[5]` or `getRange(..., 11)`. As of April 17, 2026 all known hardcoded references have been updated.
 
 ### Logging
 ```javascript

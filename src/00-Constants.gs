@@ -90,14 +90,6 @@ var BACKUP_FOLDER_NAME = 'Glove Manager Backups';
 var COLS = {
   // Gloves & Sleeves Sheet (identical structure)
   // ⚠️ ESL ID column (B) added April 2026 - all columns after A shifted +1
-  // ⚠️ ESL ID column (B) added April 2026 - all columns after A shifted +1
-  // ⚠️ ESL ID column (B) added April 2026 - all columns after A shifted +1
-  // ⚠️ ESL ID column (B) added April 2026 - all columns after A shifted +1
-  // ⚠️ ESL ID column (B) added April 2026 - all columns after A shifted +1
-  // ⚠️ ESL ID column (B) added April 2026 - all columns after A shifted +1
-  // ⚠️ ESL ID column (B) added April 2026 - all columns after A shifted +1
-  // ⚠️ ESL ID column (B) added April 2026 - all columns after A shifted +1
-  // ⚠️ ESL ID column (B) added April 2026 - all columns after A shifted +1
   INVENTORY: {
     ITEM_NUM: 1,        // A - "Glove" or "Sleeve" (Item #)
     ESL_ID: 2,          // B - ESL ID (external system link)
@@ -145,7 +137,7 @@ var COLS = {
     NOTES: 12           // L
   },
 
-   // Matches HV_TESTERS layout // Similar to HV_TESTERS but with KV column
+  // Phasing Sets - Same layout as HV_TESTERS
   PHASING_SETS: {
     ITEM_NUM: 1,        // A - Equipment identifier
     MODEL: 2,           // B - Equipment model
