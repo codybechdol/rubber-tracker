@@ -54,7 +54,7 @@ TestRunner.gs    → Basic integration tests, run via Apps Script editor (~176 l
 
 ## ES6/Modern JavaScript Restrictions
 Google Apps Script V8 supports ES6, but this project uses ES5-style for consistency:
-- Use `var` not `const`/`let` (validation warns on ES6)
+- Use `var` not `const`/`let` (pre-push validation rejects ES6 syntax)
 - Use `function(){}` not arrow functions
 - Use string concatenation not template literals
 
@@ -372,7 +372,7 @@ Glove Manager
 └── Close & Save History
 ```
 
-**Important:** There is NO "🛡️ Safety" top-level menu. The safety section is called **"🛡️ Process Safety Emails"**.
+**Legacy naming note:** Some older docs or notes may refer to a top-level **"🛡️ Safety"** menu. In the current menu structure, this section is named **"🛡️ Process Safety Emails"**.
 
 After changes:
 1. Run `.\push.bat`

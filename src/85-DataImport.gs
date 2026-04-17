@@ -886,11 +886,9 @@ function setJobActivationDate(jobNumber, activationDateStr) {
       return { success: false, message: 'Job Tracking sheet not found' };
     }
 
-    // Parse YYYY-MM-DD explicitly to avoid timezone ambiguity
-    // (new Date('YYYY-MM-DDT00:00:00') can be treated as UTC in GAS V8, causing off-by-one day)
-    var dateParts = activationDateStr.split('-');
-    var dateObj = new Date(parseInt(dateParts[0], 10), parseInt(dateParts[1], 10) - 1, parseInt(dateParts[2], 10));
-    if (isNaN(dateObj.getTime())) {
+    // Parse YYYY-MM-DD at noon to avoid timezone off-by-one
+    var dateObj = parseDateNoon(activationDateStr);
+    if (!dateObj) {
       return { success: false, message: 'Invalid date: ' + activationDateStr };
     }
 
@@ -1194,8 +1192,7 @@ function markJobCompletedFromImport(jobNumber, completionDateStr) {
   // Parse the completion date
   var completionDate;
   if (completionDateStr) {
-    var parts = completionDateStr.split('-');
-    completionDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+    completionDate = parseDateNoon(completionDateStr) || new Date();
   } else {
     completionDate = new Date();
   }
@@ -1434,10 +1431,8 @@ function addOrUpdateJobTracking(jobNumber, location, foreman, crewSize, startDat
     // (new Date('YYYY-MM-DDT00:00:00') can be treated as UTC in GAS V8, causing off-by-one day)
     var startDateObj = null;
     if (startDate) {
-      var sdParts = startDate.split('-');
-      if (sdParts.length === 3) {
-        startDateObj = new Date(parseInt(sdParts[0], 10), parseInt(sdParts[1], 10) - 1, parseInt(sdParts[2], 10));
-      } else {
+      startDateObj = parseDateNoon(startDate);
+      if (!startDateObj) {
         startDateObj = new Date(startDate);
       }
       if (isNaN(startDateObj.getTime())) {

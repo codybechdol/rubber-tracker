@@ -118,3 +118,18 @@ function isEmployeePending(hireDate) {
   return date > today;
 }
 
+/**
+ * Parses a YYYY-MM-DD string into a Date at noon to avoid timezone shifting.
+ * Google Apps Script runs in UTC but spreadsheets use local timezone.
+ * Creating dates at midnight UTC can shift back one day in US timezones.
+ * @param {string} dateStr - Date string in YYYY-MM-DD format
+ * @returns {Date|null} - Parsed date at noon, or null if invalid
+ */
+function parseDateNoon(dateStr) {
+  if (!dateStr) return null;
+  var parts = String(dateStr).split('-');
+  if (parts.length !== 3) return null;
+  var d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]), 12, 0, 0, 0);
+  return isNaN(d.getTime()) ? null : d;
+}
+

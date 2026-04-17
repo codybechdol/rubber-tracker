@@ -1116,19 +1116,16 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
     }
     if (formData.calibrationDate) {
       var calCell = sheet.getRange(rowNum, COLS.HV_TESTERS.CALIBRATION_DATE);
-      var dateParts = formData.calibrationDate.split('-');
-      if (dateParts.length === 3) {
-        var parsedDate = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
-        if (!isNaN(parsedDate.getTime())) {
-          calCell.setValue(parsedDate);
-          try { calCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
-          // Calculate Replacement Date = Calibration Date + 10 years
-          var replacementDate = new Date(parsedDate);
-          replacementDate.setFullYear(replacementDate.getFullYear() + (typeof INTERVAL_CALIBRATION_YEARS !== 'undefined' ? INTERVAL_CALIBRATION_YEARS : 10));
-          var replCell = sheet.getRange(rowNum, COLS.HV_TESTERS.CHANGE_OUT_DATE);
-          replCell.setValue(replacementDate);
-          try { replCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
-        }
+      var parsedDate = parseDateNoon(formData.calibrationDate);
+      if (parsedDate) {
+        calCell.setValue(parsedDate);
+        try { calCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+        // Calculate Replacement Date = Calibration Date + 10 years
+        var replacementDate = new Date(parsedDate);
+        replacementDate.setFullYear(replacementDate.getFullYear() + (typeof INTERVAL_CALIBRATION_YEARS !== 'undefined' ? INTERVAL_CALIBRATION_YEARS : 10));
+        var replCell = sheet.getRange(rowNum, COLS.HV_TESTERS.CHANGE_OUT_DATE);
+        replCell.setValue(replacementDate);
+        try { replCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
       }
     }
     if (formData.location) {
@@ -1182,19 +1179,16 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
     }
     if (formData.calibrationDate) {
       var calCell = sheet.getRange(rowNum, COLS.PHASING_SETS.CALIBRATION_DATE);
-      var dateParts = formData.calibrationDate.split('-');
-      if (dateParts.length === 3) {
-        var parsedDate = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
-        if (!isNaN(parsedDate.getTime())) {
-          calCell.setValue(parsedDate);
-          try { calCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
-          // Calculate Replacement Date = Calibration Date + 10 years
-          var replacementDate = new Date(parsedDate);
-          replacementDate.setFullYear(replacementDate.getFullYear() + (typeof INTERVAL_CALIBRATION_YEARS !== 'undefined' ? INTERVAL_CALIBRATION_YEARS : 10));
-          var replCell = sheet.getRange(rowNum, COLS.PHASING_SETS.CHANGE_OUT_DATE);
-          replCell.setValue(replacementDate);
-          try { replCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
-        }
+      var parsedDate = parseDateNoon(formData.calibrationDate);
+      if (parsedDate) {
+        calCell.setValue(parsedDate);
+        try { calCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+        // Calculate Replacement Date = Calibration Date + 10 years
+        var replacementDate = new Date(parsedDate);
+        replacementDate.setFullYear(replacementDate.getFullYear() + (typeof INTERVAL_CALIBRATION_YEARS !== 'undefined' ? INTERVAL_CALIBRATION_YEARS : 10));
+        var replCell = sheet.getRange(rowNum, COLS.PHASING_SETS.CHANGE_OUT_DATE);
+        replCell.setValue(replacementDate);
+        try { replCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
       }
     }
     if (formData.location) {
@@ -1241,13 +1235,10 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
     }
     if (formData.padExpiration) {
       var padCell = sheet.getRange(rowNum, COLS.AED.PAD_EXPIRATION);
-      var dateParts = formData.padExpiration.split('-');
-      if (dateParts.length === 3) {
-        var parsedDate = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
-        if (!isNaN(parsedDate.getTime())) {
-          padCell.setValue(parsedDate);
-          try { padCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
-        }
+      var parsedDate = parseDateNoon(formData.padExpiration);
+      if (parsedDate) {
+        padCell.setValue(parsedDate);
+        try { padCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
       }
     }
     if (formData.location) {
@@ -1300,17 +1291,12 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
 
   if (formData.testDate) {
     var testDateCell = sheet.getRange(rowNum, COL.TEST_DATE);
-    // Parse date string (YYYY-MM-DD from HTML input) to avoid timezone issues
-    var dateParts = formData.testDate.split('-');
-    if (dateParts.length === 3) {
-      // Create date using local timezone (year, month-1, day)
-      var parsedTestDate = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
-      if (!isNaN(parsedTestDate.getTime())) {
-        testDateCell.setValue(parsedTestDate);
-        try {
-          testDateCell.setNumberFormat('MM/dd/yyyy');
-        } catch (fmtErr) { /* Ignore format errors on typed columns */ }
-      }
+    var parsedTestDate = parseDateNoon(formData.testDate);
+    if (parsedTestDate) {
+      testDateCell.setValue(parsedTestDate);
+      try {
+        testDateCell.setNumberFormat('MM/dd/yyyy');
+      } catch (fmtErr) { /* Ignore format errors on typed columns */ }
     }
   }
 
@@ -1447,3 +1433,72 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
   }
 }
 
+// =============================================================================
+// DUPLICATE ITEM NUMBER PROTECTION
+// =============================================================================
+
+/**
+ * Checks if an item number already exists in a sheet (excluding the current row).
+ * @param {string} itemNum - Item number to check
+ * @param {string} sheetName - 'Gloves', 'Sleeves', or 'Blankets'
+ * @param {number} excludeRow - Row to exclude from check (the current row being edited)
+ * @return {Object} {isDuplicate: boolean, existingRow: number or null}
+ */
+function checkDuplicateItemNumber(itemNum, sheetName, excludeRow) {
+  if (!itemNum || String(itemNum).trim() === '') {
+    return { isDuplicate: false, existingRow: null };
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet || sheet.getLastRow() < 2) {
+    return { isDuplicate: false, existingRow: null };
+  }
+
+  var itemNumStr = String(itemNum).trim().toUpperCase();
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
+
+  for (var i = 0; i < data.length; i++) {
+    var rowNum = i + 2;
+    if (rowNum === excludeRow) continue;
+
+    var existingItemNum = String(data[i][0] || '').trim().toUpperCase();
+    if (existingItemNum === itemNumStr) {
+      return { isDuplicate: true, existingRow: rowNum };
+    }
+  }
+
+  return { isDuplicate: false, existingRow: null };
+}
+
+/**
+ * Handles duplicate item number detection and warns the user.
+ * Called from the onEdit trigger when an item number is entered.
+ * @param {string} itemNum - Item number entered
+ * @param {string} sheetName - 'Gloves', 'Sleeves', or 'Blankets'
+ * @param {number} currentRow - Current row being edited
+ * @return {boolean} True if duplicate was found and handled
+ */
+function handleDuplicateItemNumber(itemNum, sheetName, currentRow) {
+  var result = checkDuplicateItemNumber(itemNum, sheetName, currentRow);
+
+  if (result.isDuplicate) {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(sheetName);
+
+    sheet.getRange(currentRow, 1).setValue('');
+
+    var ui = SpreadsheetApp.getUi();
+    ui.alert(
+      '⚠️ Duplicate Item Number',
+      'Item number "' + itemNum + '" already exists in row ' + result.existingRow + ' of the ' + sheetName + ' sheet.\n\n' +
+      'Please use a unique item number.',
+      ui.ButtonSet.OK
+    );
+
+    return true;
+  }
+
+  return false;
+}

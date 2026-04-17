@@ -1838,7 +1838,7 @@ function cleanupSafetyComplianceTaskData(taskInfo, taskKey, ss) {
         var weekParts = weekDate.split('-');
         if (weekParts.length === 3) {
           // Convert MM-DD-YYYY to comparable format
-          var targetWeek = new Date(parseInt(weekParts[2]), parseInt(weekParts[0]) - 1, parseInt(weekParts[1]));
+          var targetWeek = new Date(parseInt(weekParts[2]), parseInt(weekParts[0]) - 1, parseInt(weekParts[1]), 12, 0, 0, 0);
           targetWeekStr = targetWeek.toDateString();
         }
       }
@@ -1872,7 +1872,7 @@ function cleanupSafetyComplianceTaskData(taskInfo, taskKey, ss) {
     var weekStart = null;
     var weekEnd = null;
     if (weekParts.length === 3) {
-      weekStart = new Date(parseInt(weekParts[2]), parseInt(weekParts[0]) - 1, parseInt(weekParts[1]));
+      weekStart = new Date(parseInt(weekParts[2]), parseInt(weekParts[0]) - 1, parseInt(weekParts[1]), 12, 0, 0, 0);
       weekEnd = new Date(weekStart);
       weekEnd.setDate(weekEnd.getDate() + 6);
     }
@@ -9288,74 +9288,12 @@ function isDuplicateHistoryEntry(historySheet, itemNum, assignedTo, dateAssigned
  * Includes Notes column explaining what changed.
  * Triggered manually from the menu.
  */
+// saveHistory() was REMOVED April 17, 2026 — use saveHistoryFast() instead.
+// Had wrong column indices after ESL ID migration (read 11 cols instead of 12).
+// All callers now route through saveHistoryFast() via saveCurrentStateToHistory().
+
 /**
- * Consolidated history save function.
- * @param {boolean} silent - If true, no UI alerts are shown (for automated backups)
- */
-// DEPRECATED - use saveHistoryFast() instead. Kept for reference only.
-function saveHistory(silent) {
-  silent = silent || false;
-
-  if (silent) {
-    ensureSeparateHistorySheets();
-  }
-
-  try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var glovesSheet = ss.getSheetByName(SHEET_GLOVES);
-    var sleevesSheet = ss.getSheetByName(SHEET_SLEEVES);
-    var glovesHistorySheet = silent ?
-      ss.getSheetByName(SHEET_GLOVES_HISTORY) :
-      (ss.getSheetByName('Gloves History') || ss.insertSheet('Gloves History'));
-    var sleevesHistorySheet = silent ?
-      ss.getSheetByName(SHEET_SLEEVES_HISTORY) :
-      (ss.getSheetByName('Sleeves History') || ss.insertSheet('Sleeves History'));
-
-    function formatItemNum(val) {
-      if (val === null || val === undefined || val === '') return '';
-      if (val instanceof Date) return String(val);
-      return String(val);
-    }
-
-    function formatClass(val) {
-      if (val === null || val === undefined || val === '') return '';
-      if (val instanceof Date) return String(val);
-      var strVal = String(val).trim();
-      if (strVal === '1/1/1900') return 2;
-      if (strVal === '1/2/1900') return 2;
-      if (strVal === '1/3/1900') return 3;
-      if (strVal === '12/30/1899' || strVal === '12/31/1899') return 0;
-      var num = parseInt(strVal, 10);
-      if (!isNaN(num) && num >= 0 && num <= 4) return num;
-      return strVal;
-    }
-
-    var newGloveEntries = 0;
-    var newSleeveEntries = 0;
-
-    // Process Gloves
-    if (glovesSheet && glovesSheet.getLastRow() > 1 && glovesHistorySheet) {
-      var numGloveRows = glovesSheet.getLastRow() - 1;
-      var glovesDisplay = glovesSheet.getRange(2, 1, numGloveRows, 11).getDisplayValues();
-      var glovesRawValues = glovesSheet.getRange(2, 1, numGloveRows, 11).getValues();
-
-      for (var i = 0; i < glovesDisplay.length; i++) {
-        var row = glovesDisplay[i];
-        var rawRow = glovesRawValues[i];
-        var itemNum = formatItemNum(rawRow[0]);
-        var size = row[1];
-        var classVal = formatClass(rawRow[2]);
-        var dateAssigned = row[4];
-        var location = row[5];
-        var assignedTo = row[7];
-
-        // Skip rows without item number or date assigned
-        if (!itemNum || !dateAssigned) continue;
-
-        // Check if this is a duplicate entry
-        if (!isDuplicateHistoryEntry(glovesHistorySheet, itemNum, assignedTo, dateAssigned, location)) {
-          glovesHistorySheet.appendRow([
-            silent ? formatDateForHistory(dateAssigned) : dateAssigned,
+ * Public wrapper for interactive history save (called from menu)
             itemNum,
             size,
             classVal,
@@ -19423,12 +19361,9 @@ function saveNewEmployeeData(data) {
   // Validate: "Unknown" location only allowed for pending employees
   var isPending = false;
   if (data.hireDate) {
-    var hireParts = String(data.hireDate).split('-');
-    if (hireParts.length === 3) {
-      var parsedHireDate = new Date(Number(hireParts[0]), Number(hireParts[1]) - 1, Number(hireParts[2]));
-      if (!isNaN(parsedHireDate.getTime())) {
-        isPending = isEmployeePending(parsedHireDate);
-      }
+    var parsedHireDate = parseDateNoon(String(data.hireDate));
+    if (parsedHireDate) {
+      isPending = isEmployeePending(parsedHireDate);
     }
   }
 
