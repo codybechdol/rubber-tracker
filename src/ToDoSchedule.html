@@ -1530,12 +1530,8 @@
               '<div class="alert alert-danger">Error rendering tasks: ' + e.message + '<br><pre>' + e.stack + '</pre></div>';
           }
           // Calendar tab removed - use Trip Planner/Scheduler instead
-          try {
-            renderPersonalChecklist();
-            console.log('processTaskData: renderPersonalChecklist completed');
-          } catch (e) {
-            console.error('processTaskData: renderPersonalChecklist error:', e);
-          }
+          // Note: renderPersonalChecklist is called from getMissingSafetyReportTasks callback above
+          // Do NOT call it here synchronously - it would render before safety tasks are loaded
     }
 
     // ================== CALENDAR FUNCTIONS REMOVED ==================

@@ -2595,9 +2595,13 @@ function applySpecialCircumstanceUpdate(data) {
     // Uses LockService internally to prevent duplicate numbers from parallel calls
     // Light Duty is a STATUS, not a location — actual location is Helena
     var isLightDutyAssignment = (data.newLocation === 'Light Duty' || data.status === 'Light Duty');
-    if (isLightDutyAssignment && !data.clearJobNumber && !data.jobNumber) {
+    var existingJobNum = sheetData[rowIndex - 1] ? String(sheetData[rowIndex - 1][jobNumCol] || '') : '';
+    if (isLightDutyAssignment && !data.clearJobNumber && !data.jobNumber && !existingJobNum.match(/^005-/)) {
       newJobNumber = getNextLightDutyJobNumber(sheetData, jobNumCol, employeesSheet, rowIndex);
       Logger.log('Auto-assigned Light Duty job number: ' + newJobNumber);
+    } else if (isLightDutyAssignment && existingJobNum.match(/^005-/)) {
+      newJobNumber = existingJobNum; // Keep existing 005-26.N number
+      Logger.log('Light Duty: keeping existing job number ' + existingJobNum);
     }
 
     // Light Duty employees are physically in Helena — change location to real city

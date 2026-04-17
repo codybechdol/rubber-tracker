@@ -142,8 +142,16 @@ function syncSheetLocations(ss, sheetName, nameToLocation) {
 
   // Process each row
   for (var i = 1; i < data.length; i++) {
+    var rawAssignedTo = data[i][assignedToColIdx];
+
+    // Skip Date objects in Assigned To column (data corruption - not a real employee name)
+    if (rawAssignedTo instanceof Date) {
+      logEvent('syncSheetLocations: ' + sheetName + ' row ' + (i + 1) + ' - Skipping Date object in Assigned To: ' + rawAssignedTo, 'WARNING');
+      continue;
+    }
+
     var currentLocation = (data[i][locationColIdx] || '').toString().trim();
-    var assignedTo = (data[i][assignedToColIdx] || '').toString().trim();
+    var assignedTo = (rawAssignedTo || '').toString().trim();
     var assignedToLower = assignedTo.toLowerCase();
 
     // Skip empty assignments
