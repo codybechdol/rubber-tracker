@@ -248,8 +248,9 @@ Canonical source: `getCrewLead()` in `75-Scheduling.gs`. Also used by `syncCrews
 4. Generate all swap reports (Gloves, Sleeves, Blankets, HV Testers, Phasing Sets, AED)
 5. `updateReclaimsSheet()`, `updatePurchaseNeeds()`, `updateInventoryReports()`
 6. `updateTrainingTrackingCrewLeadsSilent()` — updates crew leads for current/future months
-7. `addMissingCrewsToTrainingTracking()` — adds new crew rows to Training Tracking
-8. `syncCrews(true)` — syncs foremen and schedules in Job Tracking
+7. `addMissingCrewsToTrainingTracking()` — adds new crew rows to Training Tracking (reads Training Config for topics/hours, excludes 005- prefix crews)
+8. `refreshTrainingAttendeesSilent()` — refreshes crew member lists and sizes for current/future months
+9. `syncCrews(true)` — syncs foremen and schedules in Job Tracking
 
 Key functions in `22-EmployeeValidation.gs`:
 - `setupJobTrackingSheet()` - Creates sheet with all 25 columns

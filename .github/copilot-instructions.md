@@ -1841,3 +1841,52 @@ Notes: [Any notes]
   - Also added `isEmployeeName()` rejection for pure day-range schedule cells (e.g., "Tues-Fri 1st wk, then Mon-Thurs afterwards")
   - **Files Modified:** `src/CrewImport.html` — `parseEmployeeName()` and `isEmployeeName()` functions
 
+### April 17, 2026
+- ✅ **Fixed Crew Import Not Updating Employee Sheet**
+  - **Problem:** After applying Crew Import changes, the Employees sheet showed 0 updates. All proposed changes had `apply: false` by default, meaning users had to manually check each row.
+  - **Root Cause:** `finishMatching()` set `apply: false` on all proposed changes, requiring manual selection.
+  - **Solution:** Changed default to `apply: true` and added a "Select All" checkbox in the changes table header. Added warning dialog if user clicks Apply with 0 changes selected.
+  - **Files Modified:** `src/CrewImport.html` — `finishMatching()` default changed, Select All checkbox added
+
+- ✅ **Fixed Training Tracking Missing New Crews (017-26, 011-26)**
+  - **Problem:** `addMissingCrewsToTrainingTracking()` failed with "Could not find Month or Crew columns" and later "This operation is not allowed on cells in typed columns"
+  - **Root Cause 1:** `findTrainingTrackingHeaderRow()` was not finding the header row because it required exact header name matches but the sheet had been set up as a Google Sheets Table with slightly different structure
+  - **Root Cause 2:** Google Sheets Tables restrict `appendRow()` and direct range writes on typed columns
+  - **Solution:** 
+    1. Added `findTrainingTrackingHeaderRow()` with flexible header detection (checks for partial matches)
+    2. Rewrote `addMissingCrewsToTrainingTracking()` to use `sheet.appendRow()` wrapped in try/catch, falling back to writing below last row
+    3. Added header validation logging to trace column detection issues
+  - **Files Modified:** `src/Code.gs` — `addMissingCrewsToTrainingTracking()`, `findTrainingTrackingHeaderRow()`
+
+- ✅ **Added `refreshTrainingAttendeesSilent()` Function**
+  - **Goal:** Auto-refresh crew member lists in Training Tracking during `generateAllReports()`
+  - **What it does:** Scans Training Tracking for current/future months, calls `getCrewMembers()` for each crew, updates the Attendees and Crew Size columns
+  - **Integrated into:** `generateAllReports()` pipeline — runs after `addMissingCrewsToTrainingTracking()`
+  - **Files Modified:** `src/Code.gs` — Added ~90 lines
+
+- ✅ **Added `resortTrainingTrackingChronologically()` Function**
+  - **Goal:** Re-sort Training Tracking rows by month (Jan→Dec) and crew number, fix TBD topics, remove excluded crews
+  - **What it does:**
+    1. Removes rows for excluded crews (005-26 prefix jobs)
+    2. Fixes "TBD" training topics by looking up correct topic from Training Config sheet or same-month peers
+    3. Sorts all data rows by month order then crew number
+    4. Applies formatting via `applyTrainingTrackingFormatting()`
+  - **Menu:** Glove Manager → 📅 Review & Schedule → 📚 Training → 🔄 Re-sort Training Tracking
+  - **Files Modified:** `src/Code.gs` — Added ~200 lines, menu item added
+
+- ✅ **Fixed TBD Training Topics for Newly Added Crews**
+  - **Problem:** When `addMissingCrewsToTrainingTracking()` added new crews (011-26, 017-26), it wrote "TBD" as the training topic instead of the correct monthly topic (e.g., "Trenching & Shoring / Haz-Com Awareness" for April)
+  - **Root Cause:** The function didn't look up the Training Config to find what topic each month should have
+  - **Solution:** `addMissingCrewsToTrainingTracking()` now reads Training Config to get monthly topics. For months without a config entry, it falls back to looking at existing rows for the same month. Only uses "TBD" if no topic can be determined. Also reads hours from config.
+  - **Files Modified:** `src/Code.gs` — Updated `addMissingCrewsToTrainingTracking()`
+
+- ✅ **Excluded 005-26 Prefix Jobs from Training Tracking**
+  - **Problem:** 005-26 (Office/Management/Light Duty) was being added to Training Tracking by `addMissingCrewsToTrainingTracking()` via `getActiveCrewsFromJobTracking()`
+  - **Solution:** Added exclusion check using `shouldExcludeCrew()` which checks `DEFAULT_EXCLUDED_JOB_PREFIXES` (002, 005). `resortTrainingTrackingChronologically()` also removes existing 005-26 rows.
+  - **Files Modified:** `src/Code.gs` — Added exclusion logic in `addMissingCrewsToTrainingTracking()`
+
+- ✅ **Added `applyTrainingTrackingFormatting()` Function**
+  - Applies consistent formatting to Training Tracking: alternating row colors per month group, bold headers, column widths
+  - Called by `resortTrainingTrackingChronologically()` after sorting
+  - **Files Modified:** `src/Code.gs` — Added ~50 lines
+
