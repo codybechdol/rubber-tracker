@@ -7607,10 +7607,11 @@ function handlePhasingSetAssignedToChange(ss, sheet, editedRow, newValue) {
       lock = null;
     }
 
-    var assignedToCol = COLS.PHASING_SETS.ASSIGNED_TO;  // Column I (9)
+    var psOff = getEquipmentColOffset(sheet);  // 0 for 12-col (has KV), -1 for 11-col
+    var assignedToCol = COLS.PHASING_SETS.ASSIGNED_TO + psOff;  // 9 (12-col) or 8 (11-col)
     var actualValue = sheet.getRange(editedRow, assignedToCol).getValue();
 
-    logEvent('handlePhasingSetAssignedToChange ENTRY: Row=' + editedRow + ', newValue=' + newValue + ', actualValue=' + actualValue, 'DEBUG');
+    logEvent('handlePhasingSetAssignedToChange ENTRY: Row=' + editedRow + ', newValue=' + newValue + ', actualValue=' + actualValue + ', psOff=' + psOff, 'DEBUG');
 
     var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
     if (!employeesSheet) {
@@ -7653,8 +7654,8 @@ function handlePhasingSetAssignedToChange(ss, sheet, editedRow, newValue) {
     var newStatus = '';
     var newLocation = '';
 
-    var colStatus = COLS.PHASING_SETS.STATUS + psOffset;      // 8 (12-col) or 7 (11-col)
-    var colLocation = COLS.PHASING_SETS.LOCATION + psOffset;  // 7 (12-col) or 6 (11-col)
+    var colStatus = COLS.PHASING_SETS.STATUS + psOff;      // 8 (12-col) or 7 (11-col)
+    var colLocation = COLS.PHASING_SETS.LOCATION + psOff;  // 7 (12-col) or 6 (11-col)
 
     if (assignedToLower === 'on shelf' || assignedToLower === '') {
       newStatus = 'On Shelf';
