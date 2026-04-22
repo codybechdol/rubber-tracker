@@ -902,11 +902,11 @@ function setJobActivationDate(jobNumber, activationDateStr) {
         if (status === 'On Hold') {
           // Save to Estimated Return (G, column 7)
           jobSheet.getRange(rowIdx, 7).setValue(dateObj);
-          jobSheet.getRange(rowIdx, 7).setNumberFormat('MM/dd/yyyy');
+          try { jobSheet.getRange(rowIdx, 7).setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) { Logger.log('setNumberFormat skipped (typed column): ' + fmtErr); }
         } else if (status === 'Pending Start') {
           // Save to Start Date (E, column 5)
           jobSheet.getRange(rowIdx, 5).setValue(dateObj);
-          jobSheet.getRange(rowIdx, 5).setNumberFormat('MM/dd/yyyy');
+          try { jobSheet.getRange(rowIdx, 5).setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) { Logger.log('setNumberFormat skipped (typed column): ' + fmtErr); }
         } else {
           return { success: false, message: 'Job ' + jobNumber + ' is "' + status + '", not On Hold or Pending Start' };
         }
@@ -926,6 +926,79 @@ function setJobActivationDate(jobNumber, activationDateStr) {
     return { success: false, message: 'Job ' + jobNumber + ' not found in Job Tracking' };
   } catch (e) {
     Logger.log('setJobActivationDate error: ' + e.toString());
+    return { success: false, message: 'Error: ' + e.toString() };
+  }
+}
+
+/**
+ * Sets a job to On Hold from Crew Import.
+ * Updates Status, Put On Hold Date, optional Estimated Return, Notes, and Last Updated.
+ *
+ * @param {string} jobNumber - Job number (e.g., "044-26")
+ * @param {string} holdDateStr - Hold date as YYYY-MM-DD
+ * @param {string} estimatedReturnStr - Optional estimated return date as YYYY-MM-DD
+ * @return {Object} Result with success status
+ */
+function setJobOnHoldFromImport(jobNumber, holdDateStr, estimatedReturnStr) {
+  Logger.log('setJobOnHoldFromImport: ' + jobNumber + ', hold=' + holdDateStr + ', return=' + (estimatedReturnStr || ''));
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var jobSheet = ss.getSheetByName('Job Tracking');
+    if (!jobSheet) {
+      return { success: false, message: 'Job Tracking sheet not found' };
+    }
+
+    var holdDateObj = parseDateNoon(holdDateStr);
+    if (!holdDateObj) {
+      return { success: false, message: 'Invalid hold date: ' + holdDateStr };
+    }
+
+    var returnDateObj = null;
+    if (estimatedReturnStr) {
+      returnDateObj = parseDateNoon(estimatedReturnStr);
+      if (!returnDateObj) {
+        return { success: false, message: 'Invalid estimated return date: ' + estimatedReturnStr };
+      }
+      if (returnDateObj.getTime() < holdDateObj.getTime()) {
+        return { success: false, message: 'Estimated return date cannot be before hold date' };
+      }
+    }
+
+    var data = jobSheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0] || '').trim() === jobNumber) {
+        var rowIdx = i + 1;
+        var timestamp = new Date();
+
+        jobSheet.getRange(rowIdx, 10).setValue('On Hold');   // Status (J)
+        jobSheet.getRange(rowIdx, 6).setValue(holdDateObj);  // Put On Hold Date (F)
+        try { jobSheet.getRange(rowIdx, 6).setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) { Logger.log('setNumberFormat skipped (typed column): ' + fmtErr); }
+
+        if (returnDateObj) {
+          jobSheet.getRange(rowIdx, 7).setValue(returnDateObj);  // Estimated Return (G)
+          try { jobSheet.getRange(rowIdx, 7).setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) { Logger.log('setNumberFormat skipped (typed column): ' + fmtErr); }
+        } else {
+          jobSheet.getRange(rowIdx, 7).setValue('');
+        }
+
+        var currentNotes = String(data[i][10] || '');
+        var holdNote = 'Set On Hold via Crew Import on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+        jobSheet.getRange(rowIdx, 11).setValue(currentNotes ? currentNotes + '; ' + holdNote : holdNote);  // Notes (K)
+        jobSheet.getRange(rowIdx, 21).setValue(timestamp);  // Last Updated (U)
+
+        return {
+          success: true,
+          message: 'Job ' + jobNumber + ' set to On Hold',
+          holdDate: Utilities.formatDate(holdDateObj, Session.getScriptTimeZone(), 'MM/dd/yyyy'),
+          estimatedReturn: returnDateObj ? Utilities.formatDate(returnDateObj, Session.getScriptTimeZone(), 'MM/dd/yyyy') : ''
+        };
+      }
+    }
+
+    return { success: false, message: 'Job ' + jobNumber + ' not found in Job Tracking' };
+  } catch (e) {
+    Logger.log('setJobOnHoldFromImport error: ' + e.toString());
     return { success: false, message: 'Error: ' + e.toString() };
   }
 }

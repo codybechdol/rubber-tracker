@@ -2495,6 +2495,8 @@
 
       // Nickname mappings - format: { nickname: [full name, ...], ... }
       var nicknameMappings = {
+        'ben': ['benjamin', 'benny', 'benji'],
+        'benjamin': ['ben', 'benny', 'benji'],
         'nick': ['nicholas', 'nicolas'],
         'nicholas': ['nick'],
         'nicolas': ['nick'],
@@ -2849,14 +2851,8 @@
       // Remove question marks (like "??" for uncertain schedules)
       cleanText = cleanText.replace(/\?+/g, ' ').trim();
 
-      // Clean up multiple spaces
-      cleanText = cleanText.replace(/\s+/g, ' ').trim();
-
-      // Remove trailing/leading punctuation (commas, periods, etc.)
-      cleanText = cleanText.replace(/^[,.\s]+|[,.\s]+$/g, '').trim();
-
-      // Remove any remaining single letters or short fragments at the end
-      cleanText = cleanText.replace(/\s+[a-z]{1,2}$/i, '').trim();
+      // Normalize known annotation patterns into a clean employee name.
+      cleanText = normalizeSpecialEmployeeName(cleanText);
 
       result.name = cleanText;
 
@@ -2878,6 +2874,38 @@
       }
 
       return null;
+    }
+
+    function normalizeSpecialEmployeeName(nameText) {
+      if (!nameText) return '';
+
+      var cleaned = String(nameText).trim();
+      var previous = '';
+
+      while (cleaned && cleaned !== previous) {
+        previous = cleaned;
+
+        // Remove inline notes after comma: "..., home stuff".
+        cleaned = cleaned.replace(/,.*$/, ' ').trim();
+
+        // Remove common time-off fragments that are not part of names.
+        cleaned = cleaned.replace(/\boff\s+(wk|week)\s*\d{1,2}[-\/]\d{1,2}(?:[-\/]\d{2,4})?\b.*$/i, ' ').trim();
+        cleaned = cleaned.replace(/\boff\s+(Mon|Tues?|Wed|Thur?s?|Fri|Sat|Sun)(day)?\b.*$/i, ' ').trim();
+        cleaned = cleaned.replace(/\b(wk|week)\s*\d{1,2}[-\/]\d{1,2}(?:[-\/]\d{2,4})?\b.*$/i, ' ').trim();
+
+        // Remove trailing date/annotation fragments.
+        cleaned = cleaned.replace(/\s+\d{1,2}[-\/]\d{1,2}(?:[-\/]\d{2,4})?\s*$/i, ' ').trim();
+        cleaned = cleaned.replace(/\s+(through|thru|awhile|early)\s*$/i, ' ').trim();
+        cleaned = cleaned.replace(/\s+\d+\s*wks?\s*$/i, ' ').trim();
+
+        // Remove trailing role/classification fragments if present.
+        cleaned = cleaned.replace(/\s+(jry\s*op|gto\s*f|ap\s*\d|eo\s*\d|f|jl|jry|gto|wt|sup|gf)\s*$/i, ' ').trim();
+        cleaned = cleaned.replace(/\s+(cdl-[ab]|no\s+cdl)\s*$/i, ' ').trim();
+
+        cleaned = cleaned.replace(/\s+/g, ' ').replace(/^[,.\s]+|[,.\s]+$/g, '').trim();
+      }
+
+      return cleaned;
     }
 
     /**
@@ -3760,6 +3788,9 @@
         if (!isPendingStart && !isOnHold) {
           html += '<li><a class="dropdown-item text-warning" href="#" onclick="showSetPendingStartDialog(\'' + crew.jobNumber + '\', \'' + escapeHtml(displayLocation) + '\'); return false;"><i class="bi bi-calendar-plus me-1"></i> Set as Pending Start...</a></li>';
         }
+        if (!isOnHold) {
+          html += '<li><a class="dropdown-item text-secondary" href="#" onclick="showSetOnHoldDialog(\'' + crew.jobNumber + '\', \'' + escapeHtml(displayLocation) + '\'); return false;"><i class="bi bi-pause-circle me-1"></i> Put Job On Hold...</a></li>';
+        }
         if (isPendingStart || isOnHold) {
           var fromStatus = isOnHold ? 'On Hold' : 'Pending Start';
           html += '<li><a class="dropdown-item text-success" href="#" onclick="markJobActive(\'' + crew.jobNumber + '\', \'' + fromStatus + '\'); return false;"><i class="bi bi-check-circle me-1"></i> Mark as Active Now</a></li>';
@@ -4278,6 +4309,90 @@
     }
 
     /**
+     * Shows a dialog to set a job as On Hold.
+     * This updates Job Tracking status and optional estimated return date.
+     * @param {string} jobNumber - The job number (e.g., "044-26")
+     * @param {string} location - The location name for display
+     */
+    function showSetOnHoldDialog(jobNumber, location) {
+      var today = new Date();
+      var defaultHoldDate = today.toISOString().split('T')[0];
+      var existingReturnDate = '';
+
+      if (jobTrackingData[jobNumber] && jobTrackingData[jobNumber].estimatedReturn) {
+        existingReturnDate = formatDateForInput(jobTrackingData[jobNumber].estimatedReturn);
+      }
+
+      var msg = '<p>Set <strong>' + jobNumber + '</strong> (' + location + ') to <span class="badge bg-secondary">On Hold</span>?</p>';
+      msg += '<p class="text-muted small">Employees on this job will be skipped during import updates until the job is reactivated.</p>';
+      msg += '<div class="mb-3">';
+      msg += '<label class="form-label"><i class="bi bi-calendar-minus"></i> Put On Hold Date:</label>';
+      msg += '<input type="date" class="form-control" id="onHoldDate" value="' + defaultHoldDate + '">';
+      msg += '</div>';
+      msg += '<div class="mb-3">';
+      msg += '<div class="form-check mb-2">';
+      msg += '<input type="checkbox" class="form-check-input" id="onHoldReturnTBD" onchange="document.getElementById(\'onHoldReturnDate\').disabled = this.checked; if(this.checked) document.getElementById(\'onHoldReturnDate\').value = \'' + existingReturnDate + '\';">';
+      msg += '<label class="form-check-label" for="onHoldReturnTBD"><strong>TBD</strong> — Return date not set yet</label>';
+      msg += '</div>';
+      msg += '<label class="form-label"><i class="bi bi-calendar-check"></i> Estimated Return Date:</label>';
+      msg += '<input type="date" class="form-control" id="onHoldReturnDate" value="' + existingReturnDate + '">';
+      msg += '</div>';
+
+      document.getElementById('notificationHeader').className = 'notification-header secondary';
+      document.getElementById('notificationIcon').className = 'bi bi-pause-circle';
+      document.getElementById('notificationTitle').textContent = 'Set Job On Hold';
+      document.getElementById('notificationBody').innerHTML = msg;
+      document.getElementById('notificationCancelBtn').style.display = 'inline-block';
+      document.getElementById('notificationCancelBtn').textContent = 'Cancel';
+      document.getElementById('notificationOkBtn').textContent = 'Set On Hold';
+
+      notificationCallback = function() {
+        var holdDate = document.getElementById('onHoldDate').value;
+        var returnTBD = document.getElementById('onHoldReturnTBD').checked;
+        var estimatedReturn = returnTBD ? '' : document.getElementById('onHoldReturnDate').value;
+
+        if (!holdDate) {
+          showNotification('Please enter a hold date.', 'warning');
+          return;
+        }
+
+        if (!returnTBD && estimatedReturn && estimatedReturn < holdDate) {
+          showNotification('Estimated return cannot be before the hold date.', 'warning');
+          return;
+        }
+
+        google.script.run
+          .withSuccessHandler(function(result) {
+            if (result.success) {
+              if (!jobTrackingData[jobNumber]) {
+                jobTrackingData[jobNumber] = {};
+              }
+              jobTrackingData[jobNumber].status = 'On Hold';
+              jobTrackingData[jobNumber].location = jobTrackingData[jobNumber].location || location;
+              jobTrackingData[jobNumber].estimatedReturn = estimatedReturn;
+              jobTrackingData[jobNumber].isOnHold = true;
+              jobTrackingData[jobNumber].isPendingStart = false;
+              jobTrackingData[jobNumber].isActive = false;
+              jobTrackingData[jobNumber].isCompleted = false;
+
+              showNotification('✅ ' + jobNumber + ' set to On Hold', 'success');
+              showCrewPreview();
+              matchEmployeesToSheet();
+            } else {
+              showNotification('Error: ' + result.message, 'error');
+            }
+          })
+          .withFailureHandler(function(error) {
+            showNotification('Error setting On Hold: ' + error, 'error');
+          })
+          .setJobOnHoldFromImport(jobNumber, holdDate, estimatedReturn);
+      };
+
+      notificationCancelCallback = null;
+      document.getElementById('notificationOverlay').classList.add('show');
+    }
+
+    /**
      * Shows a dialog to set a job as Pending Start with a start date.
      * This will add/update the job in Job Tracking sheet.
      * @param {string} jobNumber - The job number (e.g., "018-26")
@@ -4751,15 +4866,7 @@
               currentLocationOnSheet = (spec.employeeData.location || '').toLowerCase();
             } else {
               // Try to find in currentEmployees using fuzzy matching
-              var specNameLower = (spec.name || '').toLowerCase().trim();
-              // Clean name - remove status/classification suffixes like F, JL, /EO2, etc.
-              var cleanSpecName = specNameLower
-                .replace(/\s*[\/\-]\s*(eo\s*\d|gto|jry|jl|f)\s*$/i, '')  // Remove /EO2, /GTO, etc.
-                .replace(/\s+(f|jl|jry|gto|wt|sup|gf)\s*$/i, '')  // Remove single-letter roles
-                .replace(/\s+(ap\s*\d|eo\s*\d)\s*$/i, '')  // Remove AP #, EO #
-                .replace(/\s+(jry\s*op)\s*$/i, '')  // Remove "Jry Op"
-                .replace(/\s+no\s+cdl\s*$/i, '')  // Remove "No CDL"
-                .trim();
+              var cleanSpecName = normalizeSpecialEmployeeName(spec.name || '').toLowerCase();
 
               for (var e = 0; e < currentEmployees.length; e++) {
                 var emp = currentEmployees[e];
@@ -6371,7 +6478,8 @@
         }
 
         // Clean the special circumstance name - remove status words
-        var cleanedSpecName = specNameLower
+        var cleanedSpecName = normalizeSpecialEmployeeName(spec.name || '').toLowerCase();
+        cleanedSpecName = cleanedSpecName
           .replace(/\s*(fired|quit|resigned|layoff|laid off|terminated|light duty)\s*/gi, ' ')
           .replace(/\s+/g, ' ')
           .trim();
