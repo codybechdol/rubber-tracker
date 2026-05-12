@@ -1143,3 +1143,31 @@ Notes: [Any notes]
     - 🟡 Special circumstance deduplication (parseCrewCards) not applied
     - 🟢 Stale "Dawson" saved selection, hyphenated name matching, excessive debug logging
 
+### May 5, 2026
+- ✅ **Training Tracking — On Hold Crew Cleanup + Duplicate Row Removal**
+  - **New function `cleanupTrainingTrackingOnHoldRows()`** (Code.gs) — deletes rows from Training Tracking where:
+    1. Crew is **On Hold or Completed** in Job Tracking AND row status is **N/A** (marked by previous `refreshTrainingAttendeesSilent` runs)
+    2. **Duplicate rows** (same crew + month) — keeps first occurrence, deletes extras
+  - Deletes rows from bottom to top to prevent index shifting
+  - Re-applies Training Tracking formatting after deletion
+  - **Called automatically from `syncCrews`** after `refreshTrainingAttendeesSilent`
+  - Result shown in Sync Crews dialog: `• Inactive crew rows removed: N`
+  - **Menu item added**: Glove Manager → 📅 Review & Schedule → 📚 Training → 🧹 Remove On Hold / Duplicate Rows
+  - **Files Modified:** `src/Code.gs`, `src/22-EmployeeValidation.gs`, `src/99-MenuFix.gs`
+
+- ✅ **Training Tracking — Active Crew Reconciliation Logic Redesign**
+  - **Problem:** 5 active crews (010-26, 015-26, 020-26, 021-26, 050-26) were not appearing in the visible May Training Tracking section despite being confirmed active in Job Tracking. Their rows existed but were physically located in a separate cluster elsewhere in the sheet (appended in a prior run, never properly re-sorted into the main block).
+  - **Root cause:** `addMissingCrewsToTrainingTracking` previously only sorted the data when new rows were added — so rows added in earlier sessions were never consolidated.
+  - **Redesign of `addMissingCrewsToTrainingTracking`** (Code.gs):
+    1. **Status-aware `existingCombos` map** — stores row status string (`'Complete'`, `'Pending'`, `'N/A'`) instead of just `true`. Complete rows are **never touched or duplicated**.
+    2. **Foreman-level completion deduplication** — builds `foremanMonthComplete` map from all existing Complete rows. If a foreman already has Complete training for a month in *any* crew, no new row is added for other crews they lead that same month (avoids redundant training records when foremen move between job numbers).
+    3. **Sort runs ALWAYS** (not just when new rows are added) — fixes the visibility issue by consolidating all rows into one contiguous sorted block every Sync Crews run.
+    4. **Simple rule enforced**: Every Active crew in Job Tracking gets Training Tracking rows for current month through December. Complete rows are never modified. Foreman already completed → skip.
+  - **Behavior on every Sync Crews run:**
+    - Checks all active crews against current+future training months
+    - Adds any missing rows
+    - Skips crews whose foreman already has Complete for that month
+    - Sorts ALL data into one block (Jan→Dec, then alphabetically by crew number within each month)
+    - Cleans up On Hold/Completed N/A rows and duplicates
+  - **Files Modified:** `src/Code.gs`
+

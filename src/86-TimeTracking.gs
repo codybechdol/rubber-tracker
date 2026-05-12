@@ -986,24 +986,8 @@ function formatMinutes(minutes) {
   }
 }
 
-/**
- * Formats a time value to HH:MM string.
- */
-function formatTimeValue(timeValue) {
-  if (!timeValue) return '';
-
-  if (timeValue instanceof Date) {
-    return String(timeValue.getHours()).padStart(2, '0') + ':' +
-           String(timeValue.getMinutes()).padStart(2, '0');
-  }
-
-  var str = String(timeValue).trim();
-  if (str.match(/^\d{1,2}:\d{2}/)) {
-    return str.substring(0, 5);
-  }
-
-  return '';
-}
+// NOTE: formatTimeValue() is defined in 87-RoutePlanner.gs which loads after this file.
+// That version is used by all callers including this file's own calls at lines 342-343.
 
 /**
  * Gets date range presets.

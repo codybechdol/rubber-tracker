@@ -39,6 +39,11 @@ var SHEET_AED = 'AED';
 var SHEET_AED_SWAPS = 'AED Swaps';
 var SHEET_AED_HISTORY = 'AED History';
 
+// Phase 4: Grounds (Overhead/Underground electrical grounds)
+var SHEET_GROUNDS = 'Grounds';
+var SHEET_GROUND_SWAPS = 'Ground Swaps';
+var SHEET_GROUNDS_HISTORY = 'Grounds History';
+
 // =============================================================================
 // VISUAL CONSTANTS
 // =============================================================================
@@ -62,6 +67,10 @@ var INTERVAL_CALIBRATION_YEARS = 10;
 // Show AEDs with pads expiring within 90 days on the AED Swaps report
 var AED_SWAP_LOOKAHEAD_DAYS = 90;
 
+// Grounds test interval (months) - Phase 4
+// Grounds must be pulled for testing 1 year after their test date
+var INTERVAL_GROUNDS_TEST = 12;
+
 // Location values that represent employee STATUS, not physical cities.
 // These should NOT be used as crew locations in Job Tracking.
 var STATUS_LOCATIONS = ['vacation', 'light duty', 'weeds', 'leave', 'previous employee', 'unknown'];
@@ -79,6 +88,8 @@ var HISTORY_COLOR_PHASING_SET_1 = '#e0f7fa'; // Light cyan
 var HISTORY_COLOR_PHASING_SET_2 = '#ffffff'; // White
 var HISTORY_COLOR_AED_1 = '#ffebee'; // Light red
 var HISTORY_COLOR_AED_2 = '#ffffff'; // White
+var HISTORY_COLOR_GROUNDS_1 = '#fffde7'; // Light yellow
+var HISTORY_COLOR_GROUNDS_2 = '#ffffff'; // White
 
 // Backup folder name in Google Drive
 var BACKUP_FOLDER_NAME = 'Glove Manager Backups';
@@ -166,6 +177,26 @@ var COLS = {
     UNUSED_I: 9,        // I - (unused)
     PICKED_FOR: 10,     // J
     NOTES: 11           // K
+  },
+
+  // Grounds Sheet - Phase 4 (OH/UG electrical grounds, 1-year test cycle)
+  // A=Serial#, B=Type(OH/UG), C=Size(OH:4/0|2/0), D=KV(UG:15KV|25KV),
+  // E=Length, F=Test Date, G=Date Assigned, H=Location, I=Status,
+  // J=Assigned To, K=Change Out Date, L=Picked For, M=Notes
+  GROUNDS: {
+    SERIAL_NUM: 1,      // A - Serial number / item identifier
+    TYPE: 2,            // B - OH (Overhead) or UG (Underground)
+    SIZE: 3,            // C - 4/0 or 2/0 (OH only; blank for UG)
+    KV: 4,              // D - 15KV or 25KV (UG only; blank for OH)
+    LENGTH: 5,          // E - Length (OH: various; UG: auto "6'")
+    TEST_DATE: 6,       // F - Last electrical test date
+    DATE_ASSIGNED: 7,   // G
+    LOCATION: 8,        // H
+    STATUS: 9,          // I
+    ASSIGNED_TO: 10,    // J - Crew Lead
+    CHANGE_OUT_DATE: 11,// K - Test Date + 12 months
+    PICKED_FOR: 12,     // L
+    NOTES: 13           // M
   },
 
   // Glove/Sleeve Swaps Sheet (visible columns A-J)

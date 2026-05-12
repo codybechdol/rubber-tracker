@@ -98,6 +98,9 @@ function syncInventoryLocations() {
     // Process AED sheet
     updateCount += syncSheetLocations(ss, 'AED', nameToLocation);
 
+    // Process Grounds sheet
+    updateCount += syncSheetLocations(ss, SHEET_GROUNDS, nameToLocation);
+
     logEvent('syncInventoryLocations: Updated ' + updateCount + ' item locations');
 
   } catch (e) {

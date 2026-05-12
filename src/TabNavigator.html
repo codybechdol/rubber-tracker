@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <base target="_top">
+  <title>Tab Navigator</title>
+  <style>
+    * { box-sizing: border-box; font-family: Arial, sans-serif; }
+    body { margin: 0; padding: 10px; background: #f8f9fa; color: #202124; }
+    h2 { margin: 0 0 8px 0; font-size: 16px; color: #1a73e8; }
+    .sub { font-size: 11px; color: #5f6368; margin-bottom: 10px; }
+
+    .toolbar { display: flex; gap: 6px; margin-bottom: 10px; }
+    .search {
+      flex: 1;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      padding: 8px;
+      font-size: 12px;
+      background: #fff;
+    }
+    .btn {
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      background: #fff;
+      padding: 8px 10px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .btn:hover { background: #f1f3f4; }
+
+    .section { margin-bottom: 12px; }
+    .section-title {
+      font-size: 11px;
+      font-weight: bold;
+      text-transform: uppercase;
+      color: #5f6368;
+      margin-bottom: 6px;
+      letter-spacing: 0.3px;
+    }
+    .list {
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      background: #fff;
+      overflow: hidden;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      border-top: 1px solid #f1f3f4;
+      padding: 4px;
+    }
+    .row:first-child { border-top: none; }
+    .row.hidden-sheet { background: #fff8e1; }
+    .row.active > .sheet-btn { background: #d2e3fc; font-weight: bold; }
+
+    .sheet-btn {
+      flex: 1;
+      border: none;
+      background: transparent;
+      text-align: left;
+      padding: 7px 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+      color: #202124;
+    }
+    .sheet-btn:hover { background: #e8f0fe; }
+
+    .fav-btn {
+      width: 28px;
+      height: 28px;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      background: #fff;
+      cursor: pointer;
+      font-size: 12px;
+      line-height: 1;
+      color: #5f6368;
+    }
+    .fav-btn.active { color: #f9ab00; border-color: #f9ab00; }
+
+    .empty {
+      padding: 10px;
+      color: #5f6368;
+      font-size: 12px;
+      font-style: italic;
+    }
+    .status {
+      position: sticky;
+      bottom: 0;
+      margin-top: 10px;
+      padding: 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      display: none;
+    }
+    .status.show { display: block; }
+    .status.info { background: #e8f0fe; color: #174ea6; }
+    .status.error { background: #fce8e6; color: #c5221f; }
+    .status.success { background: #e6f4ea; color: #137333; }
+  </style>
+</head>
+<body>
+  <h2>Tab Navigator</h2>
+  <div class="sub">Favorites first, then grouped sheets.</div>
+
+  <div class="toolbar">
+    <label for="searchInput" style="display:none;">Filter sheets</label>
+    <input id="searchInput" class="search" type="text" placeholder="Filter sheets..." oninput="render()">
+    <button class="btn" onclick="loadData()">Refresh</button>
+  </div>
+
+  <div id="content"></div>
+  <div id="statusBar" class="status"></div>
+
+  <script>
+    var navData = null;
+
+    function showStatus(message, type) {
+      var el = document.getElementById('statusBar');
+      el.className = 'status show ' + (type || 'info');
+      el.textContent = message;
+      if (type !== 'error') {
+        setTimeout(function() {
+          el.className = 'status';
+        }, 1800);
+      }
+    }
+
+    function safeLower(value) {
+      return (value || '').toString().toLowerCase();
+    }
+
+    function isFavorite(name) {
+      if (!navData || !navData.favoriteNames) return false;
+      return navData.favoriteNames.indexOf(name) !== -1;
+    }
+
+    function loadData() {
+      showStatus('Loading sheet navigator...', 'info');
+      google.script.run
+        .withSuccessHandler(function(data) {
+          navData = data;
+          render();
+          showStatus('Navigator ready', 'success');
+        })
+        .withFailureHandler(function(err) {
+          showStatus('Error loading navigator: ' + err, 'error');
+        })
+        .getTabNavigatorData();
+    }
+
+    function toggleFavorite(name) {
+      var method = isFavorite(name) ? 'removeFavoriteSheet' : 'addFavoriteSheet';
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result && result.data) {
+            navData = result.data;
+            render();
+          }
+          showStatus(result && result.message ? result.message : 'Updated favorites', result && result.success ? 'success' : 'error');
+        })
+        .withFailureHandler(function(err) {
+          showStatus('Error updating favorites: ' + err, 'error');
+        })[method](name);
+    }
+
+    function openSheet(name, btnEl) {
+      // Visual feedback: highlight the clicked row immediately
+      var rows = document.querySelectorAll('.row.active');
+      for (var i = 0; i < rows.length; i++) rows[i].classList.remove('active');
+      if (btnEl) btnEl.closest('.row').classList.add('active');
+      showStatus('Switching to ' + name + '...', 'info');
+
+      // Fire-and-forget: sheet switches server-side, no need to wait for response.
+      // The environment was pre-warmed on sidebar load so this should be fast.
+      google.script.run
+        .withFailureHandler(function(err) { showStatus('Error: ' + err, 'error'); })
+        .goToSheet(name);
+    }
+
+    function buildSection(title, items, filterText, showEmptyMessage) {
+      var matches = [];
+      var i;
+      for (i = 0; i < items.length; i++) {
+        if (!filterText || safeLower(items[i].name).indexOf(filterText) !== -1) {
+          matches.push(items[i]);
+        }
+      }
+
+      var html = '';
+      html += '<div class="section">';
+      html += '<div class="section-title">' + title + '</div>';
+      html += '<div class="list">';
+
+      if (matches.length === 0) {
+        html += '<div class="empty">' + showEmptyMessage + '</div>';
+      } else {
+        for (i = 0; i < matches.length; i++) {
+          var row = matches[i];
+          var favoriteClass = isFavorite(row.name) ? 'fav-btn active' : 'fav-btn';
+          var favoriteLabel = isFavorite(row.name) ? '*' : '+';
+          var hiddenTag = row.hidden ? ' (hidden)' : '';
+          var rowClass = row.hidden ? 'row hidden-sheet' : 'row';
+
+          var safeName = row.name.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+          html += '<div class="' + rowClass + '">';
+          html += '<button class="sheet-btn" data-name="' + safeName + '" onclick="openSheet(this.getAttribute(\'data-name\'), this)">' + row.name + hiddenTag + '</button>';
+          html += '<button class="' + favoriteClass + '" title="Toggle favorite" data-name="' + safeName + '" onclick="toggleFavorite(this.getAttribute(\'data-name\'))">' + favoriteLabel + '</button>';
+          html += '</div>';
+        }
+      }
+
+      html += '</div>';
+      html += '</div>';
+      return html;
+    }
+
+    function render() {
+      var host = document.getElementById('content');
+      if (!navData) {
+        host.innerHTML = '<div class="empty">Loading...</div>';
+        return;
+      }
+
+      var filterText = safeLower(document.getElementById('searchInput').value.trim());
+      var html = '';
+      var groups = navData.groups || [];
+      var i;
+
+      html += buildSection('Favorites', navData.favorites || [], filterText, 'No favorites yet. Click + to add one.');
+
+      for (i = 0; i < groups.length; i++) {
+        html += buildSection(groups[i].label, groups[i].sheets || [], filterText, 'No matching sheets in this group.');
+      }
+
+      host.innerHTML = html;
+    }
+
+    // Fire warmup ping immediately so the execution environment is hot by
+    // the time the user clicks a sheet (reduces click-to-switch latency).
+    google.script.run.tabNavigatorPing();
+    loadData();
+  </script>
+</body>
+</html>
+

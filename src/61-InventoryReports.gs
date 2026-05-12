@@ -1083,8 +1083,9 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
   var isHVTester = (sheetName === 'HV Testers');
   var isPhasingSet = (sheetName === 'Phasing Sets');
   var isAED = (sheetName === 'AED');
+  var isGrounds = (sheetName === 'Grounds');
   var isEquipment = isHVTester || isPhasingSet || isAED;
-  var itemType = sheetName === 'Gloves' ? 'Glove' : (sheetName === 'Sleeves' ? 'Sleeve' : (isBlanket ? 'Blanket' : (isHVTester ? 'HV Tester' : (isPhasingSet ? 'Phasing Set' : (isAED ? 'AED' : 'Item')))));
+  var itemType = sheetName === 'Gloves' ? 'Glove' : (sheetName === 'Sleeves' ? 'Sleeve' : (isBlanket ? 'Blanket' : (isHVTester ? 'HV Tester' : (isPhasingSet ? 'Phasing Set' : (isAED ? 'AED' : (isGrounds ? 'Ground' : 'Item'))))));
 
   // ===========================================================================
   // DUPLICATE ITEM NUMBER VALIDATION
@@ -1266,6 +1267,80 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
     } else {
       sheet.getRange(rowNum, COLS.AED.ASSIGNED_TO).setValue('On Shelf');
       sheet.getRange(rowNum, COLS.AED.STATUS).setValue('On Shelf');
+    }
+    // Add to known items
+    addToKnownItemNumbers(itemNum, sheetName);
+    // Handle item source logging
+    processItemSourceLogging(formData, itemNum, itemType, sheetName, ss);
+    return;
+  }
+
+  // ===========================================================================
+  // GROUNDS: A=Serial#(1), B=Type(2), C=Size(3), D=KV(4), E=Length(5),
+  //          F=Test Date(6), G=Date Assigned(7), H=Location(8), I=Status(9),
+  //          J=Assigned To(10), K=Change Out Date(11), L=Picked For(12), M=Notes(13)
+  // ===========================================================================
+  if (isGrounds) {
+    // Write Type (col B)
+    if (formData.groundType) {
+      sheet.getRange(rowNum, COLS.GROUNDS.TYPE).setValue(formData.groundType);
+    }
+    // Write Size (col C) - OH only
+    if (formData.groundType === 'OH' && formData.groundSize) {
+      sheet.getRange(rowNum, COLS.GROUNDS.SIZE).setValue(formData.groundSize);
+      sheet.getRange(rowNum, COLS.GROUNDS.KV).clearContent();
+    }
+    // Write KV (col D) - UG only
+    if (formData.groundType === 'UG' && formData.groundKV) {
+      sheet.getRange(rowNum, COLS.GROUNDS.KV).setValue(formData.groundKV);
+      sheet.getRange(rowNum, COLS.GROUNDS.SIZE).clearContent();
+    }
+    // Write Length (col E)
+    var groundLength = formData.groundLength || (formData.groundType === 'UG' ? "6'" : '');
+    if (groundLength) {
+      sheet.getRange(rowNum, COLS.GROUNDS.LENGTH).setValue(groundLength);
+    }
+    // Write Test Date (col F) and compute Change Out Date (col K)
+    if (formData.testDate) {
+      var testDateCell = sheet.getRange(rowNum, COLS.GROUNDS.TEST_DATE);
+      var parsedTestDate = parseDateNoon(formData.testDate);
+      if (parsedTestDate) {
+        testDateCell.setValue(parsedTestDate);
+        try { testDateCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+        // Calculate Change Out Date = Test Date + 12 months
+        var changeOutDate = new Date(parsedTestDate);
+        changeOutDate.setMonth(changeOutDate.getMonth() + (typeof INTERVAL_GROUNDS_TEST !== 'undefined' ? INTERVAL_GROUNDS_TEST : 12));
+        var coCell = sheet.getRange(rowNum, COLS.GROUNDS.CHANGE_OUT_DATE);
+        coCell.setValue(changeOutDate);
+        try { coCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+      }
+    }
+    // Write Location (col H)
+    if (formData.location) {
+      sheet.getRange(rowNum, COLS.GROUNDS.LOCATION).setValue(formData.location);
+    }
+    // Write Status (col I)
+    if (formData.status) {
+      sheet.getRange(rowNum, COLS.GROUNDS.STATUS).setValue(formData.status);
+    }
+    // Write Assigned To (col J) + handle employee assignment
+    if (formData.assignedTo && formData.assignedTo.trim() !== '') {
+      var assignedTo = formData.assignedTo.trim();
+      sheet.getRange(rowNum, COLS.GROUNDS.ASSIGNED_TO).setValue(assignedTo);
+      if (assignedTo.toLowerCase() !== 'on shelf') {
+        var today = new Date();
+        var dateCell = sheet.getRange(rowNum, COLS.GROUNDS.DATE_ASSIGNED);
+        dateCell.setValue(today);
+        try { dateCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+        sheet.getRange(rowNum, COLS.GROUNDS.STATUS).setValue('In Service');
+        var empLoc = lookupEmployeeLocation(ss, assignedTo);
+        if (empLoc) {
+          sheet.getRange(rowNum, COLS.GROUNDS.LOCATION).setValue(empLoc);
+        }
+      }
+    } else {
+      sheet.getRange(rowNum, COLS.GROUNDS.ASSIGNED_TO).setValue('On Shelf');
+      sheet.getRange(rowNum, COLS.GROUNDS.STATUS).setValue('On Shelf');
     }
     // Add to known items
     addToKnownItemNumbers(itemNum, sheetName);
@@ -1502,3 +1577,109 @@ function handleDuplicateItemNumber(itemNum, sheetName, currentRow) {
 
   return false;
 }
+
+/**
+ * Handles item source logging after a new item is added via the NewItemDialog.
+ * @param {Object} formData - Form data from the dialog
+ * @param {string} itemNum - The item number that was added
+ * @param {string} itemType - e.g. 'glove', 'sleeve', 'hv_tester', 'aed', etc.
+ * @param {string} sheetName - Sheet the item was added to
+ * @param {Spreadsheet} ss - Active spreadsheet
+ */
+function processItemSourceLogging(formData, itemNum, itemType, sheetName, ss) {
+  var source = 'Purchased';
+  if (formData.itemSource === '2') {
+    source = 'Reclaimed';
+  } else if (formData.itemSource === '3') {
+    ss.toast('Item #' + itemNum + ' added (not logged as new)', '✅ Item Added', 5);
+    return;
+  }
+
+  // Log as new item
+  logNewItem({
+    itemNum: itemNum,
+    itemType: itemType,
+    itemClass: '',
+    size: formData.model || '',
+    source: source,
+    originalItems: '',
+    cost: '',
+    notes: 'Auto-detected from ' + sheetName + ' sheet'
+  });
+
+  ss.toast('Item #' + itemNum + ' logged as ' + source, '✅ New Item Logged', 3);
+}
+
+/**
+ * Logs a new item to the New Items Log section of Inventory Reports.
+ * @param {Object} itemData - Item data object
+ */
+function logNewItem(itemData) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var inventorySheet = ss.getSheetByName('Inventory Reports');
+
+  if (!inventorySheet) {
+    logEvent('Inventory Reports sheet not found - cannot log new item', 'ERROR');
+    return;
+  }
+
+  var data = inventorySheet.getDataRange().getValues();
+  var logHeaderRow = -1;
+
+  // Find the New Items Log section
+  for (var i = 0; i < data.length; i++) {
+    var firstCell = String(data[i][0]).trim();
+    if (firstCell === 'Date Added' && i > 0) {
+      var prevCell = String(data[i-1][0]).trim();
+      if (prevCell.indexOf('NEW ITEMS LOG') !== -1) {
+        logHeaderRow = i + 1;
+        break;
+      }
+    }
+  }
+
+  // If New Items Log section doesn't exist, silently skip (report not generated yet)
+  if (logHeaderRow === -1) {
+    logEvent('New Items Log section not found - run Update Inventory Reports first', 'WARN');
+    return;
+  }
+
+  // Find the next empty row after the header
+  var insertRow = logHeaderRow + 1;
+  var lastRow = inventorySheet.getLastRow();
+
+  for (var r = logHeaderRow + 1; r <= lastRow + 1; r++) {
+    var cellValue = inventorySheet.getRange(r, 1).getValue();
+    if (!cellValue || String(cellValue).trim() === '') {
+      insertRow = r;
+      break;
+    }
+    insertRow = r + 1;
+  }
+
+  var today = new Date();
+  var dateStr = Utilities.formatDate(today, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+
+  var rowData = [
+    dateStr,
+    itemData.itemNum || '',
+    itemData.itemType || '',
+    itemData.itemClass || '',
+    itemData.size || '',
+    itemData.source || 'Purchased',
+    itemData.cost || ''
+  ];
+
+  inventorySheet.getRange(insertRow, 1, 1, 7).setValues([rowData]);
+  inventorySheet.getRange(insertRow, 1, 1, 7).setHorizontalAlignment('center');
+
+  // Color code source column
+  if (itemData.source === 'Reclaimed') {
+    inventorySheet.getRange(insertRow, 6).setBackground('#fff9c4');
+  } else {
+    inventorySheet.getRange(insertRow, 6).setBackground('#c8e6c9');
+  }
+
+  logEvent('New item logged: ' + itemData.itemNum + ' (' + itemData.source + ')');
+}
+

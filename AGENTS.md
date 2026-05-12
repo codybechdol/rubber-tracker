@@ -234,10 +234,16 @@ Canonical source: `getCrewLead()` in `75-Scheduling.gs`. Also used by `syncCrews
 Key functions in `22-EmployeeValidation.gs`:
 - `setupJobTrackingSheet()` - Creates sheet with all 25 columns
 - `migrateJobTrackingForComplianceConfig()` - Adds columns L-T to existing sheets
-- `syncCrews(silent)` - Syncs foremen from Employees, applies default schedules
+- `syncCrews(silent)` - Syncs foremen from Employees, applies default schedules. **Automatically calls** (in order): `renumberAllCrewPositions()`, `addMissingCrewsToTrainingTracking()`, `refreshTrainingAttendeesSilent()`, `cleanupTrainingTrackingOnHoldRows()`
 - `syncCompletedJobsToTraining()` - Removes FUTURE training months after job end date
 - `cleanupPendingTrainingForCompletedJobs()` - Removes ANY pending training for completed jobs
 - `getCrewScheduleForWeek()` - Gets historical schedule for a week (supports schedule changes)
+- `renumberAllCrewPositions()` - Batch renumbers all crew position suffixes (.1=lead, .2-.N by classification hierarchy then alpha); single `setValues` write
+
+Key functions in `Code.gs` (Training Tracking):
+- `addMissingCrewsToTrainingTracking()` - Reconciles Training Tracking against active Job Tracking crews. **Rules**: (1) Active crew = must have rows for current month onward; (2) Complete rows are NEVER touched; (3) Foreman-level deduplication — if a foreman already has Complete for a month in ANY crew, no new row added for other crews they lead; (4) **Always sorts the entire data range** (Jan→Dec, then alpha by crew) to consolidate all rows into one contiguous block.
+- `refreshTrainingAttendeesSilent()` - Updates attendees/size/lead for Pending rows; marks On Hold/Completed crew Pending rows as N/A; uses per-crew caches for performance
+- `cleanupTrainingTrackingOnHoldRows()` - Deletes N/A rows for On Hold/Completed crews and exact duplicate rows (same crew+month). Safe to run any time.
 
 Key functions in `88-SafetyReports.gs`:
 - `loadComplianceConfig()` - NOW reads from Job Tracking columns L-T (not Safety Compliance Config)

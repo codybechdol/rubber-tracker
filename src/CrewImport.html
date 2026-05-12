@@ -6640,9 +6640,13 @@
       console.log('finishMatching: Complete. ' + proposedChanges.length + ' proposed changes (all default to apply:true)');
     }
 
-    // Non-field locations that should be excluded from crew card matching
-    // These employees are office/admin workers who won't appear in superintendent's crew assignments
-    var NON_FIELD_LOCATIONS = ['previous employee', 'weeds', 'vacation', 'leave', 'unknown'];
+    // Non-field locations that should be excluded from crew card matching.
+    // ONLY includes PERMANENT non-field statuses. Temporary statuses (vacation, weeds, unknown)
+    // are intentionally NOT excluded — when these employees return to a crew and appear in the
+    // superintendent's Excel, we want to match them and update their location/job number.
+    // - 'previous employee' = terminated, must use rehire workflow
+    // - 'leave' = FMLA/medical, won't appear in crew cards
+    var NON_FIELD_LOCATIONS = ['previous employee', 'leave'];
     // Job prefixes for office/management (005-) and equipment records (002-) - not field crews
     var EXCLUDED_JOB_PREFIXES = ['002', '005'];
 

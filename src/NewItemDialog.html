@@ -80,9 +80,10 @@
 <body>
   <? var isEquipment = (sheetName === 'HV Testers' || sheetName === 'Phasing Sets'); ?>
   <? var isGlovesSleeves = (sheetName === 'Gloves' || sheetName === 'Sleeves'); ?>
-  <? var isServiceStatus = (isEquipment || sheetName === 'Blankets' || sheetName === 'AED'); ?>
+  <? var isServiceStatus = (isEquipment || sheetName === 'Blankets' || sheetName === 'AED' || sheetName === 'Grounds'); ?>
+  <? var isGrounds = (sheetName === 'Grounds'); ?>
 
-  <h2><? if (sheetName === 'Blankets') { ?>🧱 New Blanket Detected<? } else if (sheetName === 'HV Testers') { ?>⚡ New HV Tester Detected<? } else if (sheetName === 'Phasing Sets') { ?>⚡ New Phasing Set Detected<? } else if (sheetName === 'AED') { ?>🏥 New AED Detected<? } else { ?>📦 New <?= itemType ?> Detected<? } ?></h2>
+  <h2><? if (sheetName === 'Blankets') { ?>🧱 New Blanket Detected<? } else if (sheetName === 'HV Testers') { ?>⚡ New HV Tester Detected<? } else if (sheetName === 'Phasing Sets') { ?>⚡ New Phasing Set Detected<? } else if (sheetName === 'AED') { ?>🏥 New AED Detected<? } else if (sheetName === 'Grounds') { ?>⚡ New Ground Detected<? } else { ?>📦 New <?= itemType ?> Detected<? } ?></h2>
 
   <div class="item-info">
     <strong>Item #:</strong> <?= itemNum ?><br>
@@ -138,6 +139,41 @@
       <label>Pad Expiration Date:</label>
       <input type="date" id="padExpiration" name="padExpiration">
       <div class="hint">When the defibrillator pads expire and need replacement</div>
+    </div>
+
+    <? } else if (sheetName === 'Grounds') { ?>
+    <!-- Grounds: Type (OH/UG), conditional Size or KV, Length, Test Date -->
+    <div class="form-group">
+      <label>Type:</label>
+      <select id="groundType" name="groundType" onchange="handleGroundTypeChange()">
+        <option value="">Select type...</option>
+        <option value="OH">OH (Overhead)</option>
+        <option value="UG">UG (Underground)</option>
+      </select>
+    </div>
+
+    <div class="form-group" id="sizeGroup" style="display:none;">
+      <label>Size (OH):</label>
+      <select id="groundSize" name="groundSize">
+        <option value="">Select size...</option>
+        <option value="4/0">4/0</option>
+        <option value="2/0">2/0</option>
+      </select>
+    </div>
+
+    <div class="form-group" id="kvGroup" style="display:none;">
+      <label>Voltage Rating (UG):</label>
+      <select id="groundKV" name="groundKV">
+        <option value="">Select KV rating...</option>
+        <option value="15KV">15KV</option>
+        <option value="25KV">25KV</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>Length:</label>
+      <input type="text" id="groundLength" name="groundLength" placeholder="e.g., 15', 25' (UG auto-fills 6')">
+      <div class="hint">UG grounds are always 6' — auto-filled on save</div>
     </div>
 
     <? } else if (sheetName === 'Blankets') { ?>
@@ -209,10 +245,16 @@
     </div>
     <? } ?>
 
-    <? if (!isEquipment && sheetName !== 'AED') { ?>
+    <? if (!isEquipment && sheetName !== 'AED' && !isGrounds) { ?>
     <div class="form-group">
       <label>Test Date:</label>
       <input type="date" id="testDate" name="testDate">
+    </div>
+    <? } else if (isGrounds) { ?>
+    <div class="form-group">
+      <label>Test Date:</label>
+      <input type="date" id="testDate" name="testDate">
+      <div class="hint">Change Out Date will auto-calculate (Test Date + 12 months)</div>
     </div>
     <? } ?>
 
@@ -235,6 +277,13 @@
         <option value="In Service">In Service</option>
         <option value="In Testing">In Testing</option>
         <option value="Failed Rubber">Failed Rubber</option>
+        <option value="Lost">Lost</option>
+      </select>
+      <? } else if (sheetName === 'Grounds') { ?>
+      <select id="status" name="status">
+        <option value="On Shelf" selected>On Shelf</option>
+        <option value="In Service">In Service</option>
+        <option value="In Testing">In Testing</option>
         <option value="Lost">Lost</option>
       </select>
       <? } else { ?>
@@ -274,6 +323,26 @@
   <script>
     var sheetName = '<?= sheetName ?>';
     var employeeLocations = {}; // Cache for employee locations
+
+    // Grounds: show/hide Size vs KV fields based on type selection
+    function handleGroundTypeChange() {
+      var typeVal = document.getElementById('groundType').value;
+      var sizeGroup = document.getElementById('sizeGroup');
+      var kvGroup = document.getElementById('kvGroup');
+      var lengthInput = document.getElementById('groundLength');
+      if (typeVal === 'OH') {
+        if (sizeGroup) sizeGroup.style.display = '';
+        if (kvGroup) kvGroup.style.display = 'none';
+        if (lengthInput && !lengthInput.value) lengthInput.value = '';
+      } else if (typeVal === 'UG') {
+        if (sizeGroup) sizeGroup.style.display = 'none';
+        if (kvGroup) kvGroup.style.display = '';
+        if (lengthInput) lengthInput.value = "6'";
+      } else {
+        if (sizeGroup) sizeGroup.style.display = 'none';
+        if (kvGroup) kvGroup.style.display = 'none';
+      }
+    }
 
     // Load employee locations when dialog opens
     google.script.run
@@ -326,7 +395,7 @@
       } else {
         // This looks like an employee name
         // Set Status to In Service for Blankets/HV Testers/Phasing Sets, Assigned for Gloves/Sleeves
-        if (sheetName === 'Blankets' || sheetName === 'HV Testers' || sheetName === 'Phasing Sets' || sheetName === 'AED') {
+        if (sheetName === 'Blankets' || sheetName === 'HV Testers' || sheetName === 'Phasing Sets' || sheetName === 'AED' || sheetName === 'Grounds') {
           statusSelect.value = 'In Service';
         } else {
           statusSelect.value = 'Assigned';
@@ -381,6 +450,12 @@
       } else if (sheetName === 'AED') {
         formData.model = document.getElementById('model').value;
         formData.padExpiration = document.getElementById('padExpiration').value;
+      } else if (sheetName === 'Grounds') {
+        formData.groundType = document.getElementById('groundType').value;
+        formData.groundSize = document.getElementById('groundSize') ? document.getElementById('groundSize').value : '';
+        formData.groundKV = document.getElementById('groundKV') ? document.getElementById('groundKV').value : '';
+        formData.groundLength = document.getElementById('groundLength').value;
+        formData.testDate = document.getElementById('testDate').value;
       } else {
         // Gloves/Sleeves/Blankets fields
         formData.size = document.getElementById('size').value;

@@ -166,6 +166,285 @@ function openQuickActionsSidebar() {
 }
 
 /**
+ * Opens the Tab Navigator sidebar.
+ */
+function showTabNavigatorSidebar() {
+  var html = HtmlService.createHtmlOutputFromFile('TabNavigator')
+    .setTitle('Tab Navigator')
+    .setWidth(320);
+  SpreadsheetApp.getUi().showSidebar(html);
+}
+
+/**
+ * Returns grouped sheet navigation data and per-user favorites.
+ * @return {Object}
+ */
+function getTabNavigatorData() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheets = ss.getSheets();
+  var allByName = {};
+  var allNames = [];
+  var groups = {
+    history: [],
+    reports: [],
+    core: [],
+    config: [],
+    other: []
+  };
+  var i;
+
+  for (i = 0; i < sheets.length; i++) {
+    var sheet = sheets[i];
+    var name = sheet.getName();
+    var meta = {
+      name: name,
+      hidden: sheet.isSheetHidden(),
+      gid: sheet.getSheetId()
+    };
+
+    allByName[name] = meta;
+    allNames.push(name);
+    groups[getTabNavigatorGroupKey_(name)].push(meta);
+  }
+
+  sortTabNavigatorGroup_(groups.history);
+  sortTabNavigatorGroup_(groups.reports);
+  sortTabNavigatorGroup_(groups.core);
+  sortTabNavigatorGroup_(groups.config);
+  sortTabNavigatorGroup_(groups.other);
+
+  var favoriteNames = getTabNavigatorFavoriteNames_(allNames);
+  var favorites = [];
+  for (i = 0; i < favoriteNames.length; i++) {
+    if (allByName[favoriteNames[i]]) {
+      favorites.push(allByName[favoriteNames[i]]);
+    }
+  }
+
+  return {
+    spreadsheetUrl: ss.getUrl(),
+    favorites: favorites,
+    favoriteNames: favoriteNames,
+    groups: [
+      { key: 'core',    label: 'Core Operations',  sheets: groups.core },
+      { key: 'reports', label: 'Swaps & Reports',   sheets: groups.reports },
+      { key: 'config',  label: 'Config & Admin',    sheets: groups.config },
+      { key: 'history', label: 'History Sheets',    sheets: groups.history },
+      { key: 'other',   label: 'Other Sheets',      sheets: groups.other }
+    ]
+  };
+}
+
+/**
+ * Navigates to a requested sheet.
+ * @param {string} sheetName
+ * @return {Object}
+ */
+// Lightweight warmup — called by Tab Navigator sidebar on load to pre-heat the
+// Apps Script execution environment so the first real goToSheet() call is fast.
+function tabNavigatorPing() {
+  return true;
+}
+
+function goToSheet(sheetName) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet) {
+    return {
+      success: false,
+      message: 'Sheet not found: ' + sheetName
+    };
+  }
+
+  try {
+    ss.setActiveSheet(sheet);
+    return {
+      success: true,
+      message: 'Opened: ' + sheetName
+    };
+  } catch (e) {
+    return {
+      success: false,
+      message: 'Could not open "' + sheetName + '". It may be hidden or protected.'
+    };
+  }
+}
+
+/**
+ * Adds a sheet to this user's favorites.
+ * @param {string} sheetName
+ * @return {Object}
+ */
+function addFavoriteSheet(sheetName) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) {
+    return {
+      success: false,
+      message: 'Sheet not found: ' + sheetName,
+      data: getTabNavigatorData()
+    };
+  }
+
+  var allNames = getTabNavigatorAllSheetNames_();
+  var favorites = getTabNavigatorFavoriteNames_(allNames);
+
+  if (favorites.indexOf(sheetName) === -1) {
+    if (favorites.length >= 20) {
+      return {
+        success: false,
+        message: 'Favorites limit reached (20). Remove one first.',
+        data: getTabNavigatorData()
+      };
+    }
+
+    favorites.push(sheetName);
+    saveTabNavigatorFavoriteNames_(favorites);
+  }
+
+  return {
+    success: true,
+    message: 'Added to favorites: ' + sheetName,
+    data: getTabNavigatorData()
+  };
+}
+
+/**
+ * Removes a sheet from this user's favorites.
+ * @param {string} sheetName
+ * @return {Object}
+ */
+function removeFavoriteSheet(sheetName) {
+  var allNames = getTabNavigatorAllSheetNames_();
+  var favorites = getTabNavigatorFavoriteNames_(allNames);
+  var filtered = [];
+  var i;
+
+  for (i = 0; i < favorites.length; i++) {
+    if (favorites[i] !== sheetName) {
+      filtered.push(favorites[i]);
+    }
+  }
+
+  saveTabNavigatorFavoriteNames_(filtered);
+
+  return {
+    success: true,
+    message: 'Removed from favorites: ' + sheetName,
+    data: getTabNavigatorData()
+  };
+}
+
+function getTabNavigatorAllSheetNames_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheets = ss.getSheets();
+  var names = [];
+  var i;
+  for (i = 0; i < sheets.length; i++) {
+    names.push(sheets[i].getName());
+  }
+  return names;
+}
+
+function getTabNavigatorFavoriteNames_(allSheetNames) {
+  var props = PropertiesService.getUserProperties();
+  var raw = props.getProperty('TAB_NAV_FAVORITES');
+  var parsed = [];
+
+  if (raw) {
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      parsed = [];
+    }
+  }
+
+  if (!parsed || Object.prototype.toString.call(parsed) !== '[object Array]') {
+    parsed = [];
+  }
+
+  var nameSet = {};
+  var i;
+  for (i = 0; i < allSheetNames.length; i++) {
+    nameSet[allSheetNames[i]] = true;
+  }
+
+  var cleaned = [];
+  for (i = 0; i < parsed.length; i++) {
+    var name = parsed[i];
+    if (nameSet[name] && cleaned.indexOf(name) === -1) {
+      cleaned.push(name);
+    }
+  }
+
+  if (JSON.stringify(cleaned) !== JSON.stringify(parsed)) {
+    saveTabNavigatorFavoriteNames_(cleaned);
+  }
+
+  return cleaned;
+}
+
+function saveTabNavigatorFavoriteNames_(favoriteNames) {
+  PropertiesService.getUserProperties().setProperty('TAB_NAV_FAVORITES', JSON.stringify(favoriteNames));
+}
+
+function sortTabNavigatorGroup_(group) {
+  group.sort(function(a, b) {
+    return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+  });
+}
+
+function getTabNavigatorGroupKey_(sheetName) {
+  var name = sheetName.toLowerCase();
+
+  if (name.indexOf('history') !== -1 || name.indexOf('archive') !== -1) {
+    return 'history';
+  }
+
+  if (name.indexOf('swap') !== -1 ||
+      name.indexOf('report') !== -1 ||
+      name.indexOf('dashboard') !== -1 ||
+      name.indexOf('compliance') !== -1 ||
+      name.indexOf('purchase needs') !== -1 ||
+      name.indexOf('reclaim') !== -1 ||
+      name.indexOf('expiring cert') !== -1 ||
+      name.indexOf('to do') !== -1) {
+    return 'reports';
+  }
+
+  if (name === 'employees' ||
+      name === 'locations' ||
+      name === 'manual tasks' ||
+      name === 'task metadata' ||
+      name === 'job tracking' ||
+      name === 'training tracking' ||
+      name === 'training config' ||
+      name === 'crew visit config' ||
+      name === 'safety equipment needs' ||
+      name === 'gloves' ||
+      name === 'sleeves' ||
+      name === 'blankets' ||
+      name === 'grounds' ||
+      name === 'hv testers' ||
+      name === 'phasing sets' ||
+      name === 'aed') {
+    return 'core';
+  }
+
+  if (name.indexOf('config') !== -1 ||
+      name.indexOf('setup') !== -1 ||
+      name.indexOf('metadata') !== -1 ||
+      name.indexOf('log') !== -1 ||
+      name.indexOf('mapping') !== -1 ||
+      name.indexOf('tracking') !== -1) {
+    return 'config';
+  }
+
+  return 'other';
+}
+
+/**
  * Opens the To Do Schedule dialog
  * Called from QuickActions sidebar
  */
@@ -322,7 +601,7 @@ function getEmployeePhoneMapForTasks(ss) {
         foundCount++;
         // Log first 5 entries for debugging
         if (foundCount <= 5) {
-          Logger.log('Phone map entry: "' + name.toLowerCase() + '" => ' + cleanPhone);
+          Logger.log('Phone map entry: "' + name.toLowerCase() + '" -> ' + cleanPhone);
         }
       } else {
         skippedCount++;
@@ -6775,6 +7054,7 @@ function onOpen() {
   ui.createMenu('Glove Manager')
     // === QUICK ACTIONS SIDEBAR ===
     .addItem('📱 Quick Actions', 'openQuickActionsSidebar')
+    .addItem('🧭 Tab Navigator', 'showTabNavigatorSidebar')
     .addSeparator()
 
     // === STEP 1: IMPORT CREW MAKEUP ===
@@ -6846,7 +7126,11 @@ function onOpen() {
         .addItem('📋 Setup Log Sheets', 'setupAllSafetyLogSheets')
         .addItem('📄 View JHA Log', 'openJHALogSheet')
         .addItem('📄 View Weekly Safety Log', 'openWeeklySafetyLogSheet')
-        .addItem('📄 View Monthly Checklist Log', 'openMonthlyChecklistLogSheet'))
+        .addItem('📄 View Monthly Checklist Log', 'openMonthlyChecklistLogSheet')
+        .addSeparator()
+        .addItem('🔗 Add Gmail Links to JHA Log', 'menuApplyJHALogEmailLinks')
+        .addItem('🔗 Add Gmail Links to Weekly Safety Log', 'menuApplyWeeklySafetyLogEmailLinks')
+        .addItem('🔗 Add Gmail Links to Equipment Needs', 'backfillSafetyEquipmentEmailLinks'))
       .addSubMenu(ui.createMenu('🔍 Debug')
         .addItem('🔍 Diagnose Compliance', 'diagnoseSafetyCompliance')
         .addItem('📊 Trace Compliance Calculation', 'traceComplianceCalculation')
@@ -9510,6 +9794,7 @@ function saveHistoryFast(silent) {
     var hvTestersSheet = ss.getSheetByName(SHEET_HV_TESTERS);
     var phasingSetsSheet = ss.getSheetByName(SHEET_PHASING_SETS);
     var aedSheet = ss.getSheetByName(SHEET_AED);
+    var groundsSheet = ss.getSheetByName(SHEET_GROUNDS);
     var glovesHistorySheet = silent ?
       ss.getSheetByName(SHEET_GLOVES_HISTORY) :
       (ss.getSheetByName('Gloves History') || ss.insertSheet('Gloves History'));
@@ -9520,6 +9805,7 @@ function saveHistoryFast(silent) {
     var hvTestersHistorySheet = ss.getSheetByName(SHEET_HV_TESTERS_HISTORY);
     var phasingSetsHistorySheet = ss.getSheetByName(SHEET_PHASING_SETS_HISTORY);
     var aedHistorySheet = ss.getSheetByName(SHEET_AED_HISTORY);
+    var groundsHistorySheet = ss.getSheetByName(SHEET_GROUNDS_HISTORY);
 
     // Ensure Blankets History sheet exists (only if source sheet exists)
     if (!blanketsHistorySheet && blanketsSheet) {
@@ -9539,6 +9825,11 @@ function saveHistoryFast(silent) {
     // Ensure AED History sheet exists (only if AED source sheet exists)
     if (!aedHistorySheet && aedSheet) {
       aedHistorySheet = ensureAEDHistorySheet();
+    }
+
+    // Ensure Grounds History sheet exists (only if Grounds source sheet exists)
+    if (!groundsHistorySheet && groundsSheet) {
+      groundsHistorySheet = ensureGroundsHistorySheet();
     }
 
     /**
@@ -9694,6 +9985,8 @@ function saveHistoryFast(silent) {
     var hvTestersLookup = buildHistoryLookup(hvTestersHistorySheet);   // defaults: 1, 4, 5
     var phasingSetsLookup = buildHistoryLookup(phasingSetsHistorySheet, 1, 5, 6);  // Phasing Sets layout
     var aedLookup = buildHistoryLookup(aedHistorySheet, 1, 3, 4);     // AED layout
+    // Grounds History: Date[0], Serial#[1], Type[2], Size[3], KV[4], Length[5], Location[6], AssignedTo[7], Notes[8]
+    var groundsLookup = buildHistoryLookup(groundsHistorySheet, 1, 6, 7); // Grounds layout
     Logger.log('saveHistoryFast: Built lookups in ' + (new Date().getTime() - startTime) + 'ms');
 
     // Collect new entries in arrays for batch write
@@ -9704,6 +9997,8 @@ function saveHistoryFast(silent) {
     var newPhasingSetRows = [];
     var newAEDRows = [];
     var newAEDEntries = 0;
+    var newGroundsRows = [];
+    var newGroundsEntries = 0;
 
     // Process Gloves (single API call - ESL ID column B added April 2026)
     if (glovesSheet && glovesSheet.getLastRow() > 1 && glovesHistorySheet) {
@@ -9922,6 +10217,49 @@ function saveHistoryFast(silent) {
       }
     }
 
+    // Process Grounds
+    // Grounds columns: A=Serial#, B=Type, C=Size, D=KV, E=Length, F=Test Date,
+    //                  G=Date Assigned, H=Location, I=Status, J=Assigned To, K=Change Out, L=Picked For, M=Notes
+    if (groundsSheet && groundsSheet.getLastRow() > 1 && groundsHistorySheet) {
+      var numGroundsRows = groundsSheet.getLastRow() - 1;
+      var groundsDisplay = groundsSheet.getRange(2, 1, numGroundsRows, COLS.GROUNDS.NOTES).getDisplayValues();
+      var groundsRawValues = groundsSheet.getRange(2, 1, numGroundsRows, COLS.GROUNDS.NOTES).getValues();
+
+      for (var gr = 0; gr < groundsDisplay.length; gr++) {
+        var gndRow = groundsDisplay[gr];
+        var gndRawRow = groundsRawValues[gr];
+        var gndSerialNum = formatItemNum(gndRawRow[COLS.GROUNDS.SERIAL_NUM - 1]);   // A
+        var gndType = gndRow[COLS.GROUNDS.TYPE - 1];                                // B
+        var gndSize = gndRow[COLS.GROUNDS.SIZE - 1];                                // C
+        var gndKV = gndRow[COLS.GROUNDS.KV - 1];                                    // D
+        var gndLength = gndRow[COLS.GROUNDS.LENGTH - 1];                            // E
+        var gndDateAssignedRaw = gndRawRow[COLS.GROUNDS.DATE_ASSIGNED - 1];         // G raw
+        var gndDateAssignedDisplay = gndRow[COLS.GROUNDS.DATE_ASSIGNED - 1];        // G display
+        var gndTestDateRaw = gndRawRow[COLS.GROUNDS.TEST_DATE - 1];                 // F raw (fallback)
+        var gndTestDateDisplay = gndRow[COLS.GROUNDS.TEST_DATE - 1];                // F display (fallback)
+        var gndLocation = gndRow[COLS.GROUNDS.LOCATION - 1];                        // H
+        var gndAssignedTo = gndRow[COLS.GROUNDS.ASSIGNED_TO - 1];                   // J
+
+        // Skip rows without serial number.
+        // Date Assigned is preferred; fall back to Test Date; last resort: today.
+        if (!gndSerialNum) continue;
+        var gndEffectiveDateRaw = gndDateAssignedRaw || gndTestDateRaw || new Date();
+        var gndEffectiveDateDisplay = gndDateAssignedDisplay || gndTestDateDisplay || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'M/d/yyyy');
+
+        var gndChangeResult = getChangeTypeFast(groundsLookup, gndSerialNum, gndAssignedTo, gndEffectiveDateDisplay, gndLocation, 'Ground');
+        if (!gndChangeResult.isDuplicate) {
+          // Grounds History: Date Assigned, Serial#, Type, Size, KV, Length, Location, Assigned To, Notes
+          newGroundsRows.push([
+            silent ? formatDateForHistory(gndEffectiveDateRaw) : gndEffectiveDateDisplay,
+            gndSerialNum, gndType, gndSize, gndKV, gndLength,
+            gndLocation, gndAssignedTo, gndChangeResult.note || ''
+          ]);
+          newGroundsEntries++;
+          groundsLookup[gndSerialNum] = { assignedTo: String(gndAssignedTo || '').toLowerCase().trim(), location: String(gndLocation || '').toLowerCase().trim() };
+        }
+      }
+    }
+
     // BATCH WRITE: Write all new entries at once (MUCH faster than appendRow)
     // Now includes 7 columns (added Notes column)
     if (newGloveRows.length > 0) {
@@ -9954,6 +10292,11 @@ function saveHistoryFast(silent) {
       aedHistorySheet.getRange(aedLastRow + 1, 1, newAEDRows.length, 6).setValues(newAEDRows);
     }
 
+    if (newGroundsRows.length > 0) {
+      var groundsLastRow = groundsHistorySheet.getLastRow();
+      groundsHistorySheet.getRange(groundsLastRow + 1, 1, newGroundsRows.length, 9).setValues(newGroundsRows);
+    }
+
     Logger.log('saveHistoryFast: All inventory types processed in ' + (new Date().getTime() - startTime) + 'ms');
 
     // Save Employee History (uses its own optimized function)
@@ -9968,9 +10311,9 @@ function saveHistoryFast(silent) {
 
     if (silent) {
       PropertiesService.getUserProperties().setProperty('historySavedThisSession', 'true');
-      logEvent('Fast history backup completed in ' + totalTime + 'ms. Gloves: ' + newGloveEntries + ', Sleeves: ' + newSleeveEntries + ', Blankets: ' + newBlanketEntries + ', HV Testers: ' + newHVTesterEntries + ', Phasing Sets: ' + newPhasingSetEntries + ', AED: ' + newAEDEntries + ', Employees: ' + newEmployeeEntries);
+      logEvent('Fast history backup completed in ' + totalTime + 'ms. Gloves: ' + newGloveEntries + ', Sleeves: ' + newSleeveEntries + ', Blankets: ' + newBlanketEntries + ', HV Testers: ' + newHVTesterEntries + ', Phasing Sets: ' + newPhasingSetEntries + ', AED: ' + newAEDEntries + ', Grounds: ' + newGroundsEntries + ', Employees: ' + newEmployeeEntries);
     } else {
-      Logger.log('History saved in ' + totalTime + 'ms - Gloves: ' + newGloveEntries + ', Sleeves: ' + newSleeveEntries + ', Blankets: ' + newBlanketEntries + ', HV Testers: ' + newHVTesterEntries + ', Phasing Sets: ' + newPhasingSetEntries + ', AED: ' + newAEDEntries + ', Employees: ' + newEmployeeEntries);
+      Logger.log('History saved in ' + totalTime + 'ms - Gloves: ' + newGloveEntries + ', Sleeves: ' + newSleeveEntries + ', Blankets: ' + newBlanketEntries + ', HV Testers: ' + newHVTesterEntries + ', Phasing Sets: ' + newPhasingSetEntries + ', AED: ' + newAEDEntries + ', Grounds: ' + newGroundsEntries + ', Employees: ' + newEmployeeEntries);
 
       var message = '✅ History Saved Successfully!\n\n';
       message += '🧤 Gloves: ' + newGloveEntries + ' new entries\n';
@@ -9979,9 +10322,10 @@ function saveHistoryFast(silent) {
       message += '⚡ HV Testers: ' + newHVTesterEntries + ' new entries\n';
       message += '⚡ Phasing Sets: ' + newPhasingSetEntries + ' new entries\n';
       message += '🏥 AED: ' + newAEDEntries + ' new entries\n';
+      message += '⚡ Grounds: ' + newGroundsEntries + ' new entries\n';
       message += '👤 Employees: ' + newEmployeeEntries + ' new entries\n\n';
       message += '🏗️ Completed in ' + (totalTime / 1000).toFixed(1) + ' seconds';
-      if (newGloveEntries === 0 && newSleeveEntries === 0 && newBlanketEntries === 0 && newHVTesterEntries === 0 && newPhasingSetEntries === 0 && newAEDEntries === 0 && newEmployeeEntries === 0) {
+      if (newGloveEntries === 0 && newSleeveEntries === 0 && newBlanketEntries === 0 && newHVTesterEntries === 0 && newPhasingSetEntries === 0 && newAEDEntries === 0 && newGroundsEntries === 0 && newEmployeeEntries === 0) {
         message += '\n\nNo changes detected since last save.';
       }
       SpreadsheetApp.getUi().alert(message);
@@ -24413,6 +24757,39 @@ function ensureAEDHistorySheet() {
       historySheet.setColumnWidth(6, 200);
       Logger.log('Added Notes column to AED History');
     }
+  }
+
+  return historySheet;
+}
+
+/**
+ * Ensures the Grounds History sheet exists with proper headers.
+ * History columns: Date Assigned, Serial#, Type, Size, KV, Length, Location, Assigned To, Notes (9 cols)
+ */
+function ensureGroundsHistorySheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var historySheet = ss.getSheetByName(SHEET_GROUNDS_HISTORY);
+
+  if (!historySheet) {
+    historySheet = ss.insertSheet(SHEET_GROUNDS_HISTORY);
+    var headers = ['Date Assigned', 'Serial #', 'Type', 'Size', 'KV', 'Length', 'Location', 'Assigned To', 'Notes'];
+    historySheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    historySheet.getRange(1, 1, 1, headers.length)
+      .setFontWeight('bold')
+      .setBackground('#f57f17')  // Amber/yellow for Grounds
+      .setFontColor('#ffffff')
+      .setHorizontalAlignment('center');
+    historySheet.setFrozenRows(1);
+    historySheet.setColumnWidth(1, 100);  // Date Assigned
+    historySheet.setColumnWidth(2, 90);   // Serial #
+    historySheet.setColumnWidth(3, 60);   // Type
+    historySheet.setColumnWidth(4, 60);   // Size
+    historySheet.setColumnWidth(5, 60);   // KV
+    historySheet.setColumnWidth(6, 60);   // Length
+    historySheet.setColumnWidth(7, 120);  // Location
+    historySheet.setColumnWidth(8, 150);  // Assigned To
+    historySheet.setColumnWidth(9, 200);  // Notes
+    Logger.log('Created Grounds History sheet');
   }
 
   return historySheet;

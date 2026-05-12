@@ -297,7 +297,7 @@ function onEdit(e) {
     // Check if this is an item number edit on one of the unique-item sheets
     if (editedCol === 1 && editedRow >= 2) {
       // UNIQUE_ITEM_SHEETS is defined in Code.gs - these sheets require unique item numbers
-      var uniqueSheets = [SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS, SHEET_HV_TESTERS, SHEET_PHASING_SETS, SHEET_AED];
+      var uniqueSheets = [SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS, SHEET_HV_TESTERS, SHEET_PHASING_SETS, SHEET_AED, SHEET_GROUNDS];
       if (uniqueSheets.indexOf(sheetName) !== -1) {
         // Validate uniqueness - this will clear the cell and show error if duplicate
         if (!validateUniqueItemNumber(e, sheetName)) {
@@ -416,6 +416,23 @@ function onEdit(e) {
       return;  // Don't call processEdit again, we handled it
     }
 
+    // Handle Grounds sheet - Type (col B), Test Date (col F), Assigned To (col J)
+    if (sheetName === SHEET_GROUNDS && editedRow >= 2) {
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      if (editedCol === COLS.GROUNDS.TYPE) {
+        handleGroundsTypeChange(sheet, editedRow, e.value);
+        return;
+      }
+      if (editedCol === COLS.GROUNDS.TEST_DATE) {
+        handleGroundsTestDateChange(sheet, editedRow);
+        return;
+      }
+      if (editedCol === COLS.GROUNDS.ASSIGNED_TO) {
+        handleGroundsAssignedToChange(ss, sheet, editedRow, e.value);
+        return;
+      }
+    }
+
     // For all other edits, use the standard processEdit
     processEdit(e);
   } catch (err) {
@@ -446,7 +463,7 @@ function onEditHandler(e) {
     // =========================================================================
     // Check if this is an item number edit on one of the unique-item sheets
     if (editedCol === 1 && editedRow >= 2) {
-      var uniqueSheets = [SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS, SHEET_HV_TESTERS, SHEET_PHASING_SETS, SHEET_AED];
+      var uniqueSheets = [SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS, SHEET_HV_TESTERS, SHEET_PHASING_SETS, SHEET_AED, SHEET_GROUNDS];
       if (uniqueSheets.indexOf(sheetName) !== -1) {
         // Validate uniqueness - this will clear the cell and show error if duplicate
         if (!validateUniqueItemNumber(e, sheetName)) {
@@ -454,6 +471,35 @@ function onEditHandler(e) {
           return;  // Stop processing if duplicate was found
         }
       }
+    }
+
+    // Handle Safety Equipment Needs sheet - auto-fill "Resolved On" date when Status set to Resolved
+    if ((sheetName === 'Safety Equipment Needs' || sheetName === 'Safety Reports') && editedRow >= 2) {
+      // Find Status column and Resolved On column from headers
+      var senHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+      var senStatusCol = -1;
+      var senResolvedOnCol = -1;
+      for (var sh = 0; sh < senHeaders.length; sh++) {
+        var shdr = String(senHeaders[sh]).toLowerCase().trim();
+        if (shdr === 'status') senStatusCol = sh + 1;
+        if (shdr === 'resolved on') senResolvedOnCol = sh + 1;
+      }
+      if (editedCol === senStatusCol && senResolvedOnCol > 0) {
+        var newStatus = String(e.range.getValue()).trim().toLowerCase();
+        if (newStatus === 'resolved') {
+          // Only set date if not already set
+          var existingDate = sheet.getRange(editedRow, senResolvedOnCol).getValue();
+          if (!existingDate) {
+            sheet.getRange(editedRow, senResolvedOnCol).setValue(new Date());
+            Logger.log('Auto-set Resolved On date for Safety Equipment Needs row ' + editedRow);
+          }
+        } else if (newStatus !== 'resolved' && newStatus !== '') {
+          // If status changed away from Resolved, clear the date
+          sheet.getRange(editedRow, senResolvedOnCol).clearContent();
+          Logger.log('Cleared Resolved On date for Safety Equipment Needs row ' + editedRow + ' (status changed to ' + newStatus + ')');
+        }
+      }
+      return; // Handled
     }
 
     // Handle Safety Compliance sheet edits (day columns, status, weekly meeting, monthly checklist)
@@ -512,8 +558,8 @@ function onEditHandler(e) {
       return;  // Handled - don't continue to processEdit
     }
 
-    // Handle new item number detection in Gloves/Sleeves/Blankets/HV Testers/Phasing Sets/AED (Column A = item number)
-    if ((sheetName === 'Gloves' || sheetName === 'Sleeves' || sheetName === 'Blankets' || sheetName === 'HV Testers' || sheetName === 'Phasing Sets' || sheetName === 'AED') && editedCol === 1 && editedRow >= 2) {
+    // Handle new item number detection in Gloves/Sleeves/Blankets/HV Testers/Phasing Sets/AED/Grounds (Column A = item number)
+    if ((sheetName === 'Gloves' || sheetName === 'Sleeves' || sheetName === 'Blankets' || sheetName === 'HV Testers' || sheetName === 'Phasing Sets' || sheetName === 'AED' || sheetName === 'Grounds') && editedCol === 1 && editedRow >= 2) {
       var newItemNum = e.range.getValue();
       var oldItemNum = e.oldValue;
       var itemNumStr = String(newItemNum).trim();
@@ -660,6 +706,38 @@ function onEditHandler(e) {
         }
       }
 
+      // For Grounds, auto-set defaults
+      if (sheetName === 'Grounds' && newItemNum && itemNumStr !== '') {
+        try {
+          // Auto-set Location to 'Helena' if empty (col H)
+          var currentLocation = sheet.getRange(editedRow, COLS.GROUNDS.LOCATION).getValue();
+          if (!currentLocation) {
+            sheet.getRange(editedRow, COLS.GROUNDS.LOCATION).setValue('Helena');
+          }
+          // Auto-set Status to 'On Shelf' if empty (col I)
+          var currentStatus = sheet.getRange(editedRow, COLS.GROUNDS.STATUS).getValue();
+          if (!currentStatus) {
+            try {
+              sheet.getRange(editedRow, COLS.GROUNDS.STATUS).setValue('On Shelf');
+            } catch (statusErr) {
+              Logger.log('Grounds auto-population: could not set Status - ' + statusErr);
+            }
+          }
+          // Auto-set Assigned To to 'On Shelf' if empty (col J)
+          var currentAssignedTo = sheet.getRange(editedRow, COLS.GROUNDS.ASSIGNED_TO).getValue();
+          if (!currentAssignedTo) {
+            sheet.getRange(editedRow, COLS.GROUNDS.ASSIGNED_TO).setValue('On Shelf');
+          }
+          // Auto-set Date Assigned to today if empty (col G)
+          var currentDateAssigned = sheet.getRange(editedRow, COLS.GROUNDS.DATE_ASSIGNED).getValue();
+          if (!currentDateAssigned) {
+            sheet.getRange(editedRow, COLS.GROUNDS.DATE_ASSIGNED).setValue(new Date());
+          }
+        } catch (autoPopErr) {
+          Logger.log('Grounds auto-population error (will show dialog): ' + autoPopErr);
+        }
+      }
+
       // Check if an item number was REMOVED (cleared or changed)
       if (oldItemNum && String(oldItemNum).trim() !== '' &&
           (!newItemNum || String(newItemNum).trim() === '')) {
@@ -709,8 +787,7 @@ function onEditHandler(e) {
     }
 
     // Handle Date Assigned changes in Gloves/Sleeves directly
-    if ((sheetName === 'Gloves' || sheetName === 'Sleeves') && editedCol === COLS.INVENTORY.DATE_ASSIGNED && editedRow >= 2) {
-      Logger.log('Date Assigned change detected in ' + sheetName + ' row ' + editedRow);
+    if ((sheetName === 'Gloves' || sheetName === 'Sleeves') && editedCol === COLS.INVENTORY.DATE_ASSIGNED && editedRow >= 2) {      Logger.log('Date Assigned change detected in ' + sheetName + ' row ' + editedRow);
 
       var ss = SpreadsheetApp.getActiveSpreadsheet();
       var isSleeve = (sheetName === 'Sleeves');
@@ -747,10 +824,26 @@ function onEditHandler(e) {
       return;  // Handled - don't continue to processEdit
     }
 
+    // Handle Grounds sheet - Type (col B), Test Date (col F), Assigned To (col J)
+    if (sheetName === SHEET_GROUNDS && editedRow >= 2) {
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      if (editedCol === COLS.GROUNDS.TYPE) {
+        handleGroundsTypeChange(sheet, editedRow, e.value);
+        return;
+      }
+      if (editedCol === COLS.GROUNDS.TEST_DATE) {
+        handleGroundsTestDateChange(sheet, editedRow);
+        return;
+      }
+      if (editedCol === COLS.GROUNDS.ASSIGNED_TO) {
+        handleGroundsAssignedToChange(ss, sheet, editedRow, e.value);
+        return;
+      }
+    }
+
     // SKIP Employees sheet Last Day Reason changes - already handled by onEdit → processEdit
     // This prevents the double popup issue when both simple and installable triggers fire
-    if (sheetName === 'Employees') {
-      var empHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    if (sheetName === 'Employees') {      var empHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
       for (var h = 0; h < empHeaders.length; h++) {
         if (String(empHeaders[h]).toLowerCase().trim() === 'last day reason' && editedCol === (h + 1)) {
           Logger.log('onEditHandler: Skipping Employees Last Day Reason change (handled by onEdit)');
@@ -792,7 +885,7 @@ function processEdit(e) {
   if (sheetName !== SHEET_GLOVE_SWAPS && sheetName !== SHEET_SLEEVE_SWAPS && sheetName !== SHEET_BLANKET_SWAPS &&
       sheetName !== SHEET_GLOVES && sheetName !== SHEET_SLEEVES && sheetName !== SHEET_BLANKETS &&
       sheetName !== SHEET_EMPLOYEES && sheetName !== 'Employee History' &&
-      sheetName !== SHEET_RECLAIMS) {
+      sheetName !== SHEET_RECLAIMS && sheetName !== SHEET_GROUNDS) {
     return;
   }
 
@@ -1006,7 +1099,9 @@ function processEdit(e) {
 
     // Handle Assigned To changes - auto-populate Location and Status from Employees sheet
     if (psEditedHeader === 'assigned to') {
-      handlePhasingSetAssignedToChange(ss, sheet, editedRow, newValue);
+      handlePhasingSetAssignedToChange(ss, sheet, editedRow, newValue, editedCol);
+      handlePhasingSetAssignedToChange(ss, sheet, editedRow, newValue, editedCol);
+      handlePhasingSetAssignedToChange(ss, sheet, editedRow, newValue, editedCol);
       return;
     }
 
@@ -1039,6 +1134,40 @@ function processEdit(e) {
     // Handle Assigned To changes - auto-populate Location and Status from Employees sheet
     if (editedCol === aedAssignedToCol) {
       handleAEDAssignedToChange(ss, sheet, editedRow, newValue);
+      return;
+    }
+  }
+
+  // Handle Grounds sheet edits - Type, Test Date, Assigned To, Status changes
+  if (sheetName === SHEET_GROUNDS) {
+    logEvent('processEdit: Grounds sheet, editedCol=' + editedCol, 'DEBUG');
+
+    // Handle Status changes - when 'On Shelf', auto-populate Location and Assigned To
+    if (editedCol === COLS.GROUNDS.STATUS) {
+      var statusValue = String(newValue || '').trim();
+      if (statusValue === 'On Shelf') {
+        sheet.getRange(editedRow, COLS.GROUNDS.LOCATION).setValue('Helena');
+        sheet.getRange(editedRow, COLS.GROUNDS.ASSIGNED_TO).setValue('On Shelf');
+        ss.toast('Location and Assigned To set to "On Shelf" / "Helena"', '📍 Auto-Updated', 3);
+      }
+      return;
+    }
+
+    // Handle Type changes - enforce Size/KV dropdown based on OH/UG
+    if (editedCol === COLS.GROUNDS.TYPE) {
+      handleGroundsTypeChange(sheet, editedRow, newValue);
+      return;
+    }
+
+    // Handle Test Date changes - auto-compute Change Out Date
+    if (editedCol === COLS.GROUNDS.TEST_DATE) {
+      handleGroundsTestDateChange(sheet, editedRow);
+      return;
+    }
+
+    // Handle Assigned To changes - auto-populate Location and Status
+    if (editedCol === COLS.GROUNDS.ASSIGNED_TO) {
+      handleGroundsAssignedToChange(ss, sheet, editedRow, newValue);
       return;
     }
   }

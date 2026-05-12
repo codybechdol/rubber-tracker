@@ -1633,7 +1633,15 @@ function syncCrews(silent) {
         jobData[dataIdx][colIndices.foreman] = crew.foreman;
         foremanUpdates++;
         jobDataModified = true;
-        Logger.log('syncCrews: Updated foreman for ' + crewNum + ': ' + existing.foreman + ' → ' + crew.foreman);
+        Logger.log('syncCrews: Updated foreman for ' + crewNum + ': ' + existing.foreman + ' -> ' + crew.foreman);
+      }
+
+      // Always update crew size (employees move between crews regularly)
+      var currentSize = jobData[dataIdx][colIndices.crewSize];
+      if (currentSize !== crew.crewSize) {
+        jobData[dataIdx][colIndices.crewSize] = crew.crewSize;
+        jobDataModified = true;
+        Logger.log('syncCrews: Updated crew size for ' + crewNum + ': ' + currentSize + ' -> ' + crew.crewSize);
       }
 
       // Set default schedule if not set (empty or undefined)
@@ -1665,6 +1673,10 @@ function syncCrews(silent) {
     var foremanValues = jobData.map(function(row) { return [row[colIndices.foreman]]; });
     jobSheet.getRange(1, colIndices.foreman + 1, jobData.length, 1).setValues(foremanValues);
 
+    // Write Crew Size (D) column
+    var crewSizeValues = jobData.map(function(row) { return [row[colIndices.crewSize]]; });
+    jobSheet.getRange(1, colIndices.crewSize + 1, jobData.length, 1).setValues(crewSizeValues);
+
     // Write Schedule columns (L-T, 9 columns)
     var scheduleValues = jobData.map(function(row) {
       return [
@@ -1679,7 +1691,7 @@ function syncCrews(silent) {
     var lastUpdatedValues = jobData.map(function(row) { return [row[colIndices.lastUpdated]]; });
     jobSheet.getRange(1, colIndices.lastUpdated + 1, jobData.length, 1).setValues(lastUpdatedValues);
 
-    Logger.log('syncCrews: Batch wrote Foreman, Schedule, and Last Updated columns (' + jobData.length + ' rows)');
+    Logger.log('syncCrews: Batch wrote Foreman, Crew Size, Schedule, and Last Updated columns (' + jobData.length + ' rows)');
   }
 
   // Add new crews that weren't in Job Tracking
@@ -1731,14 +1743,61 @@ function syncCrews(silent) {
   Logger.log('syncCrews: Complete - ' + foremanUpdates + ' foreman updates, ' +
              scheduleDefaults + ' schedule defaults, ' + newCrewRows.length + ' new crews');
 
+  // Renumber job position suffixes (.1 = lead, .2-.N by classification) for all crews
+  var renumberResult = null;
+  try {
+    renumberResult = renumberAllCrewPositions();
+    Logger.log('syncCrews: Position renumbering - ' + JSON.stringify(renumberResult));
+  } catch (rnErr) {
+    Logger.log('syncCrews: Error renumbering crew positions: ' + rnErr);
+  }
+
+  // Add Training Tracking rows for any newly active crews (runs after Job Tracking is updated)
+  var addedCrewsResult = null;
+  try {
+    addedCrewsResult = addMissingCrewsToTrainingTracking();
+    Logger.log('syncCrews: Training Tracking - added missing crews: ' + JSON.stringify(addedCrewsResult));
+  } catch (addErr) {
+    Logger.log('syncCrews: Error adding missing crews to Training Tracking: ' + addErr);
+  }
+
+  // Refresh Training Tracking attendee lists for current and future months
+  var attendeeResult = null;
+  try {
+    attendeeResult = refreshTrainingAttendeesSilent();
+    Logger.log('syncCrews: Training Tracking attendee refresh - ' + JSON.stringify(attendeeResult));
+  } catch (attendeeErr) {
+    Logger.log('syncCrews: Error refreshing Training Tracking attendees: ' + attendeeErr);
+  }
+
+  // Remove N/A rows for On Hold/Completed crews and duplicates
+  var cleanupResult = null;
+  try {
+    cleanupResult = cleanupTrainingTrackingOnHoldRows();
+    Logger.log('syncCrews: Training Tracking cleanup - ' + JSON.stringify(cleanupResult));
+  } catch (cleanErr) {
+    Logger.log('syncCrews: Error cleaning up Training Tracking: ' + cleanErr);
+  }
+
+  var renumberedCrews = (renumberResult && renumberResult.renumbered) ? renumberResult.renumbered : 0;
+  var addedCrewCount = (addedCrewsResult && addedCrewsResult.addedRows) ? addedCrewsResult.addedRows : 0;
+  var attendeeUpdated = (attendeeResult && attendeeResult.updatedRows) ? attendeeResult.updatedRows : 0;
+  var deletedRows = (cleanupResult && cleanupResult.deletedRows) ? cleanupResult.deletedRows : 0;
+
+  summary.renumberedCrews = renumberedCrews;
+
   if (!silent) {
     ui.alert(
-      '✅ Crew Sync Complete',
+      '\u2705 Crew Sync Complete',
       'Results:\n\n' +
-      '• Foreman updates: ' + foremanUpdates + '\n' +
-      '• Schedule defaults applied: ' + scheduleDefaults + '\n' +
-      '• New crews added: ' + newCrewRows.length + '\n\n' +
-      'Job Tracking is now in sync with Employees sheet.',
+      '\u2022 Foreman updates: ' + foremanUpdates + '\n' +
+      '\u2022 Schedule defaults applied: ' + scheduleDefaults + '\n' +
+      '\u2022 Crew positions renumbered: ' + renumberedCrews + ' crews\n' +
+      '\u2022 New crews added to Job Tracking: ' + newCrewRows.length + '\n' +
+      '\u2022 New crews added to Training Tracking: ' + addedCrewCount + '\n' +
+      '\u2022 Training attendees refreshed: ' + attendeeUpdated + ' rows\n' +
+      (deletedRows > 0 ? '\u2022 Inactive crew rows removed: ' + deletedRows + '\n' : '') +
+      '\nJob Tracking and Training Tracking are now in sync.',
       ui.ButtonSet.OK
     );
   }
