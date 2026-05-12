@@ -467,22 +467,136 @@ function getMonthlyChecklistLogSheet() {
 }
 
 /**
- * Sorts all three log sheets by Date Received (col A) descending so newest entries appear at the top.
- * Called from menu: Logs → Sort Log Sheets (Newest First)
+ * Core formatter: sorts a log sheet newest-month-first with job numbers grouped,
+ * and inserts styled blue separator rows between each month.
+ *
+ * Sort order: Year-Month descending → Job Number ascending → Date Received descending
+ *
+ * Separator rows are identified by an empty emailIdCol cell, so all existing duplicate-
+ * detection and ID-loading logic that skips empty cells handles them automatically.
+ *
+ * @param {string} sheetName - Name of the log sheet
+ * @param {number} emailIdCol  - 1-based column of the Email ID (used to identify real data rows)
+ * @param {number} dateReceivedCol - 1-based column of Date Received (col A = 1)
+ * @param {number} jobNumCol  - 1-based column of Job Number
+ */
+function sortAndFormatLogSheet(sheetName, emailIdCol, dateReceivedCol, jobNumCol) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet || sheet.getLastRow() < 2) return 0;
+
+  var tz = Session.getScriptTimeZone();
+  var lastCol = sheet.getLastColumn();
+  var MONTH_NAMES = ['January','February','March','April','May','June',
+                     'July','August','September','October','November','December'];
+
+  // ── 1. Read all rows ──────────────────────────────────────────────────────
+  var allVals = sheet.getRange(2, 1, sheet.getLastRow() - 1, lastCol).getValues();
+
+  // ── 2. Keep only real data rows (non-empty email ID) ─────────────────────
+  var dataRows = allVals.filter(function(row) {
+    return String(row[emailIdCol - 1] || '').trim() !== '';
+  });
+  if (dataRows.length === 0) return 0;
+
+  // ── 3. Sort ───────────────────────────────────────────────────────────────
+  dataRows.sort(function(a, b) {
+    var dA = a[dateReceivedCol - 1];
+    var dB = b[dateReceivedCol - 1];
+    if (!(dA instanceof Date)) { try { dA = new Date(dA); } catch(e) { dA = new Date(0); } }
+    if (!(dB instanceof Date)) { try { dB = new Date(dB); } catch(e) { dB = new Date(0); } }
+    var ymA = isNaN(dA) ? 0 : (dA.getFullYear() * 100 + dA.getMonth());
+    var ymB = isNaN(dB) ? 0 : (dB.getFullYear() * 100 + dB.getMonth());
+    if (ymB !== ymA) return ymB - ymA;                          // newest month first
+    var jA = String(a[jobNumCol - 1] || '');
+    var jB = String(b[jobNumCol - 1] || '');
+    if (jA !== jB) return jA < jB ? -1 : 1;                    // job number ascending
+    return (isNaN(dB) ? 0 : dB.getTime()) - (isNaN(dA) ? 0 : dA.getTime()); // date desc
+  });
+
+  // ── 4. Build rows with month separator rows inserted ─────────────────────
+  var rowsToWrite = [];
+  var separatorSheetRows = [];   // 1-based sheet row numbers of separator rows
+  var currentYM = null;
+
+  dataRows.forEach(function(row) {
+    var d = row[dateReceivedCol - 1];
+    if (!(d instanceof Date)) { try { d = new Date(d); } catch(e) { d = null; } }
+    var ym = (d && !isNaN(d)) ? (d.getFullYear() * 100 + d.getMonth()) : null;
+
+    if (ym !== currentYM) {
+      // Month separator row — all cells empty except col A which has the label
+      var sepRow = [];
+      for (var c = 0; c < lastCol; c++) sepRow.push('');
+      sepRow[0] = (d && !isNaN(d))
+        ? MONTH_NAMES[d.getMonth()] + ' ' + d.getFullYear()
+        : '— Unknown —';
+      // +2 = skip header row (row 1) and convert 0-based index to 1-based
+      separatorSheetRows.push(rowsToWrite.length + 2);
+      rowsToWrite.push(sepRow);
+      currentYM = ym;
+    }
+    rowsToWrite.push(row);
+  });
+
+  // ── 5. Clear data region and rewrite ─────────────────────────────────────
+  var clearRows = sheet.getLastRow() - 1;
+  sheet.getRange(2, 1, clearRows, lastCol).clearContent().clearFormat();
+
+  if (rowsToWrite.length > 0) {
+    sheet.getRange(2, 1, rowsToWrite.length, lastCol).setValues(rowsToWrite);
+  }
+
+  // ── 6. Style separator rows ───────────────────────────────────────────────
+  // Build one large range list and apply in a single call using banding-style hack,
+  // or just iterate (only a handful of separator rows per sheet).
+  separatorSheetRows.forEach(function(sheetRow) {
+    var sepRange = sheet.getRange(sheetRow, 1, 1, lastCol);
+    sepRange.setBackground('#3c78d8');
+    sepRange.setFontColor('#ffffff');
+    sepRange.setFontWeight('bold');
+    sepRange.setFontSize(11);
+    sepRange.setHorizontalAlignment('left');
+  });
+
+  // ── 7. Re-freeze header row if it was lost ───────────────────────────────
+  if (sheet.getFrozenRows() < 1) sheet.setFrozenRows(1);
+
+  Logger.log('sortAndFormatLogSheet: ' + sheetName + ' — ' + dataRows.length +
+             ' data rows, ' + separatorSheetRows.length + ' month separators');
+  return separatorSheetRows.length;
+}
+
+/**
+ * Formats both the JHA Log and Weekly Safety Log.
+ * Called automatically at the end of processSafetyEmails and available as a menu item.
+ * @param {boolean} silent - If true, no UI alert shown
+ */
+function sortAndFormatSafetyLogs(silent) {
+  var t0 = new Date().getTime();
+  // JHA Log: emailIdCol=6, dateReceivedCol=1, jobNumCol=3
+  var jhaMonths    = sortAndFormatLogSheet(JHA_LOG_SHEET_NAME,               6, 1, 3);
+  // Weekly Safety Log: emailIdCol=6, dateReceivedCol=1, jobNumCol=3
+  var weeklyMonths = sortAndFormatLogSheet(WEEKLY_SAFETY_LOG_SHEET_NAME,     6, 1, 3);
+  var elapsed = Math.round((new Date().getTime() - t0) / 1000);
+  Logger.log('sortAndFormatSafetyLogs: done in ' + elapsed + 's — JHA months: ' + jhaMonths + ', Weekly months: ' + weeklyMonths);
+  if (!silent) {
+    SpreadsheetApp.getUi().alert(
+      'Log Sheets Formatted',
+      'JHA Log and Weekly Safety Log sorted and grouped.\n' +
+      'JHA Log: ' + jhaMonths + ' month sections\n' +
+      'Weekly Safety Log: ' + weeklyMonths + ' month sections\n' +
+      'Completed in ' + elapsed + 's.',
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+  }
+}
+
+/**
+ * Menu wrapper — kept for backwards compatibility with old menu item name.
  */
 function sortLogSheetsNewestFirst() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetNames = [JHA_LOG_SHEET_NAME, WEEKLY_SAFETY_LOG_SHEET_NAME, MONTHLY_CHECKLIST_LOG_SHEET_NAME];
-  var sorted = [];
-  sheetNames.forEach(function(name) {
-    var sheet = ss.getSheetByName(name);
-    if (sheet && sheet.getLastRow() > 2) {
-      var dataRange = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn());
-      dataRange.sort({ column: 1, ascending: false });
-      sorted.push(name + ' (' + (sheet.getLastRow() - 1) + ' rows)');
-    }
-  });
-  SpreadsheetApp.getUi().alert('Sorted newest-first:\n' + sorted.join('\n'));
+  sortAndFormatSafetyLogs(false);
 }
 
 /**
@@ -5787,6 +5901,14 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   // V8 INTERNAL memory errors. Links are applied row-by-row when each email is first logged
   // (in logJHAEmail / logWeeklySafetyEmail). Use the Logs menu backfill items to add links
   // to any older rows that were logged before this feature was added.
+
+  // Auto-format JHA Log and Weekly Safety Log: sort by month desc → job number → date desc,
+  // with blue separator rows between each month for easy visual scanning.
+  try {
+    sortAndFormatSafetyLogs(true); // silent = no alert
+  } catch (fmtErr) {
+    Logger.log("Log sheet formatting error (non-fatal): " + fmtErr.toString());
+  }
 
   return result;
 }

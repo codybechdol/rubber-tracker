@@ -7131,7 +7131,7 @@ function onOpen() {
         .addItem('🔗 Add Gmail Links to JHA Log', 'menuApplyJHALogEmailLinks')
         .addItem('🔗 Add Gmail Links to Weekly Safety Log', 'menuApplyWeeklySafetyLogEmailLinks')
         .addItem('🔗 Add Gmail Links to Equipment Needs', 'backfillSafetyEquipmentEmailLinks')
-        .addItem('🔽 Sort Log Sheets (Newest First)', 'sortLogSheetsNewestFirst'))
+        .addItem('🔽 Sort & Format Log Sheets (by Month / Job)', 'sortLogSheetsNewestFirst'))
       .addSubMenu(ui.createMenu('🔍 Debug')
         .addItem('🔍 Diagnose Compliance', 'diagnoseSafetyCompliance')
         .addItem('📊 Trace Compliance Calculation', 'traceComplianceCalculation')
