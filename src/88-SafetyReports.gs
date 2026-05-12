@@ -467,6 +467,25 @@ function getMonthlyChecklistLogSheet() {
 }
 
 /**
+ * Sorts all three log sheets by Date Received (col A) descending so newest entries appear at the top.
+ * Called from menu: Logs → Sort Log Sheets (Newest First)
+ */
+function sortLogSheetsNewestFirst() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetNames = [JHA_LOG_SHEET_NAME, WEEKLY_SAFETY_LOG_SHEET_NAME, MONTHLY_CHECKLIST_LOG_SHEET_NAME];
+  var sorted = [];
+  sheetNames.forEach(function(name) {
+    var sheet = ss.getSheetByName(name);
+    if (sheet && sheet.getLastRow() > 2) {
+      var dataRange = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn());
+      dataRange.sort({ column: 1, ascending: false });
+      sorted.push(name + ' (' + (sheet.getLastRow() - 1) + ' rows)');
+    }
+  });
+  SpreadsheetApp.getUi().alert('Sorted newest-first:\n' + sorted.join('\n'));
+}
+
+/**
  * Checks if an email ID already exists in a log sheet (deduplication)
  * @param {Sheet} sheet - The log sheet to check
  * @param {string} emailId - Gmail message ID
@@ -16027,6 +16046,121 @@ function quickDiagnoseJHALog() {
 /**
  * Trace compliance calculation for a specific week - shows EXACTLY what's happening
  */
+/**
+ * Diagnoses why Gmail emails are being skipped in Process Safety Emails.
+ * Cross-references Gmail search results against all log sheets to show
+ * which sheet has each email ID, the date range of each sheet, and a
+ * breakdown of why emails are being marked as "alreadyLogged".
+ * Run from: Glove Manager → 🛡️ Process Safety Emails → 🔍 Debug → Diagnose Email Log Overlap
+ */
+function diagnoseEmailLogOverlap() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var tz = Session.getScriptTimeZone();
+  var report = [];
+
+  // ── 1. Load existing IDs from all log sheets ──────────────────────────────
+  var sources = {
+    jha:     { sheet: ss.getSheetByName('JHA Log'),               col: 6, ids: {}, rowCount: 0, minDate: null, maxDate: null },
+    weekly:  { sheet: ss.getSheetByName('Weekly Safety Log'),     col: 6, ids: {}, rowCount: 0, minDate: null, maxDate: null },
+    monthly: { sheet: ss.getSheetByName('Monthly Checklist Log'), col: 7, ids: {}, rowCount: 0, minDate: null, maxDate: null },
+    equip:   { sheet: ss.getSheetByName('Safety Equipment Needs'),col: 10, ids: {}, rowCount: 0, minDate: null, maxDate: null }
+  };
+
+  for (var key in sources) {
+    var src = sources[key];
+    if (!src.sheet || src.sheet.getLastRow() < 2) {
+      report.push(key.toUpperCase() + ' LOG: NOT FOUND or empty');
+      continue;
+    }
+    src.rowCount = src.sheet.getLastRow() - 1;
+    var idVals = src.sheet.getRange(2, src.col, src.rowCount, 1).getValues();
+    var dateVals = src.sheet.getRange(2, 1, src.rowCount, 1).getValues();
+    for (var r = 0; r < idVals.length; r++) {
+      var id = String(idVals[r][0] || '').trim();
+      if (id) {
+        src.ids[id] = true;
+        src.ids[id.split('_')[0]] = true; // base ID too
+      }
+      var d = dateVals[r][0];
+      if (d instanceof Date && !isNaN(d.getTime())) {
+        if (!src.minDate || d < src.minDate) src.minDate = d;
+        if (!src.maxDate || d > src.maxDate) src.maxDate = d;
+      }
+    }
+    report.push(key.toUpperCase() + ' LOG: ' + src.rowCount + ' rows | ' +
+      (src.minDate ? Utilities.formatDate(src.minDate, tz, 'MM/dd/yyyy') : '?') + ' → ' +
+      (src.maxDate ? Utilities.formatDate(src.maxDate, tz, 'MM/dd/yyyy') : '?'));
+  }
+
+  // ── 2. Run the same Gmail search ─────────────────────────────────────────
+  var queries = [
+    'subject:"Job Hazard Report" newer_than:14d',
+    'subject:"Safety Meeting Report" newer_than:14d',
+    'subject:"Weekly Safety Repairs" newer_than:14d',
+    'subject:"Safety Checklist Report" newer_than:14d'
+  ];
+  var allThreads = [];
+  queries.forEach(function(q) {
+    try { allThreads = allThreads.concat(GmailApp.search(q)); } catch(e) {}
+  });
+
+  // ── 3. For each thread/message, determine which source has the ID ────────
+  var notFound = 0, foundInJHA = 0, foundInWeekly = 0, foundInMonthly = 0, foundInEquip = 0, foundInMultiple = 0;
+  var samples = { notFound: [], jha: [], weekly: [], monthly: [], equip: [] };
+  var MAX_SAMPLE = 5;
+
+  allThreads.forEach(function(thread) {
+    var messages = thread.getMessages();
+    messages.forEach(function(msg) {
+      var msgId = msg.getId();
+      var inJHA     = !!sources.jha.ids[msgId];
+      var inWeekly  = !!sources.weekly.ids[msgId];
+      var inMonthly = !!sources.monthly.ids[msgId];
+      var inEquip   = !!sources.equip.ids[msgId];
+      var foundCount = (inJHA ? 1 : 0) + (inWeekly ? 1 : 0) + (inMonthly ? 1 : 0) + (inEquip ? 1 : 0);
+
+      if (foundCount === 0) {
+        notFound++;
+        if (samples.notFound.length < MAX_SAMPLE) {
+          samples.notFound.push(msgId + ' | ' + Utilities.formatDate(msg.getDate(), tz, 'MM/dd/yyyy') + ' | ' + msg.getSubject().substring(0, 60));
+        }
+      } else {
+        if (foundCount > 1) foundInMultiple++;
+        if (inJHA)     { foundInJHA++;     if (samples.jha.length < MAX_SAMPLE) samples.jha.push(msgId + ' | ' + Utilities.formatDate(msg.getDate(), tz, 'MM/dd/yyyy')); }
+        if (inWeekly)  { foundInWeekly++;  if (samples.weekly.length < MAX_SAMPLE) samples.weekly.push(msgId + ' | ' + Utilities.formatDate(msg.getDate(), tz, 'MM/dd/yyyy')); }
+        if (inMonthly) { foundInMonthly++; if (samples.monthly.length < MAX_SAMPLE) samples.monthly.push(msgId + ' | ' + Utilities.formatDate(msg.getDate(), tz, 'MM/dd/yyyy')); }
+        if (inEquip)   { foundInEquip++;   if (samples.equip.length < MAX_SAMPLE) samples.equip.push(msgId + ' | ' + Utilities.formatDate(msg.getDate(), tz, 'MM/dd/yyyy')); }
+      }
+    });
+  });
+
+  report.push('');
+  report.push('=== GMAIL vs LOG SHEET OVERLAP (last 14 days) ===');
+  report.push('Total Gmail threads: ' + allThreads.length);
+  report.push('Messages NOT in any log (would be processed): ' + notFound);
+  report.push('Messages in JHA Log only / any: ' + foundInJHA);
+  report.push('Messages in Weekly Safety Log only / any: ' + foundInWeekly);
+  report.push('Messages in Monthly Checklist Log only / any: ' + foundInMonthly);
+  report.push('Messages in Safety Equipment Needs only / any: ' + foundInEquip);
+  report.push('Messages found in MULTIPLE sources: ' + foundInMultiple);
+
+  if (samples.notFound.length) {
+    report.push('');
+    report.push('Sample NOT-FOUND (new) messages:');
+    samples.notFound.forEach(function(s) { report.push('  ' + s); });
+  }
+  if (samples.equip.length) {
+    report.push('');
+    report.push('Sample messages found only in Equipment Needs (NOT in log sheets):');
+    samples.equip.forEach(function(s) { report.push('  ' + s); });
+  }
+
+  var fullReport = report.join('\n');
+  Logger.log(fullReport);
+  ui.alert('Email Log Overlap Diagnostic', fullReport, ui.ButtonSet.OK);
+}
+
 function traceComplianceForWeek() {
   var ui = SpreadsheetApp.getUi();
   var response = ui.prompt('Enter week start (MM/DD/YYYY):', ui.ButtonSet.OK_CANCEL);
