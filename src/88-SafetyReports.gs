@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 88-SafetyReports.gs
  *
  * Gmail integration for processing JHAs, Safety Meetings, and Fleet Checklists
@@ -131,7 +131,7 @@ function showGmailStatus() {
         ui.ButtonSet.OK);
 
     } catch (e) {
-      ui.alert('âš ï¸ Gmail Partial Access',
+      ui.alert('\u26A0\uFE0F Gmail Partial Access',
         'Gmail is authorized but search failed.\n\n' +
         'Error: ' + e.message,
         ui.ButtonSet.OK);
@@ -1179,7 +1179,7 @@ function menuDiagnoseLogSheets() {
   // Recommendation
   report.push('\\n--- RECOMMENDATION ---');
   if (jhaSheet && jhaSheet.getLastRow() <= 1 && weeklySheet && weeklySheet.getLastRow() <= 1) {
-    report.push('âš ï¸ Log sheets are EMPTY. Run "Process Safety Emails" to populate them.');
+    report.push('\u26A0\uFE0F Log sheets are EMPTY. Run "Process Safety Emails" to populate them.');
   } else if (jhaSheet && jhaSheet.getLastRow() > 1) {
     report.push('\u2705 Log sheets have data. Run "ðŸ”„ Recalculate Compliance" to update Safety Compliance from logs.');
   }
@@ -1294,20 +1294,20 @@ function traceComplianceCalculation() {
 
       if (status !== 'Credited') {
         skippedNotCredited++;
-        report.push(rowInfo + ' | âš ï¸ Not Credited (status=' + status + ')');
+        report.push(rowInfo + ' | \u26A0\uFE0F Not Credited (status=' + status + ')');
         continue;
       }
 
       if (!creditedTo) {
         skippedNotCredited++;
-        report.push(rowInfo + ' | âš ï¸ No CreditedTo value');
+        report.push(rowInfo + ' | \u26A0\uFE0F No CreditedTo value');
         continue;
       }
 
       // Check if creditedTo is a tracked crew
       if (!crewSet[creditedTo]) {
         skippedCrewNotTracked++;
-        report.push(rowInfo + ' | âš ï¸ Crew "' + creditedTo + '" NOT in tracked crews list!');
+        report.push(rowInfo + ' | \u26A0\uFE0F Crew "' + creditedTo + '" NOT in tracked crews list!');
         continue;
       }
 
@@ -1357,7 +1357,7 @@ function traceComplianceCalculation() {
   var htmlReport = '<pre style="font-family: monospace; font-size: 11px; white-space: pre-wrap; max-height: 600px; overflow: auto;">' +
     report.join('\n').replace(/\u2705/g, '<span style="color:green">\u2705</span>')
                      .replace(/\u274C/g, '<span style="color:red">\u274C</span>')
-                     .replace(/âš ï¸/g, '<span style="color:orange">âš ï¸</span>') +
+                     .replace(/\u26A0\uFE0F/g, '<span style="color:orange">\u26A0\uFE0F</span>') +
     '</pre>';
 
   var html = HtmlService.createHtmlOutput(htmlReport)
@@ -1452,8 +1452,8 @@ function getIconExplanation(icon, cellType) {
     return '\u23F3 Pending (week not over)';
   } else if (iconStr === 'N/A') {
     return '(Skipped - crew scheduled off this day)';
-  } else if (iconStr === 'âš ï¸') {
-    return 'âš ï¸ Warning - Week 3, due soon';
+  } else if (iconStr === '\u26A0\uFE0F') {
+    return '\u26A0\uFE0F Warning - Week 3, due soon';
   } else if (iconStr === '\u274C\u23F3') {
     return '\u274C\u23F3 Urgent - Week 4, deadline approaching';
   } else if (iconStr === '') {
@@ -2708,7 +2708,7 @@ function recalculateAllComplianceFromLogs() {
 
   // Confirm with user
   var response = ui.alert(
-    'âš ï¸ Recalculate ALL Compliance',
+    '\u26A0\uFE0F Recalculate ALL Compliance',
     'This will recalculate compliance for ALL weeks in the Safety Compliance sheet from the log sheets.\n\n' +
     'This fixes any incorrectly credited reports (e.g., wrong week assignments).\n\n' +
     'Continue?',
@@ -2908,7 +2908,7 @@ function diagnoseSafetyCompliance() {
   report.push('Monthly Checklist Log: ' + (monthlyLog ? '\u2705 Exists (' + (monthlyLog.getLastRow() - 1) + ' records)' : '\u274C MISSING'));
 
   if (!jhaLog || !weeklyLog || !monthlyLog) {
-    report.push('\nâš ï¸ Missing log sheets! Run "Setup Log Sheets" from Safety menu.');
+    report.push('\n\u26A0\uFE0F Missing log sheets! Run "Setup Log Sheets" from Safety menu.');
   }
 
   // 2. Check Recent JHA Log Entries
@@ -3017,7 +3017,7 @@ function diagnoseSafetyCompliance() {
       if (jobMatch) {
         report.push('    Extracted Job: ' + jobMatch[1]);
       } else {
-        report.push('    âš ï¸ Could not extract job number from subject');
+        report.push('    \u26A0\uFE0F Could not extract job number from subject');
       }
 
       // Try to extract date
@@ -3025,7 +3025,7 @@ function diagnoseSafetyCompliance() {
       if (dateMatch) {
         report.push('    Extracted Date: ' + dateMatch[0]);
       } else {
-        report.push('    âš ï¸ Could not extract date from subject');
+        report.push('    \u26A0\uFE0F Could not extract date from subject');
       }
     }
   } catch (e) {
@@ -3070,7 +3070,7 @@ function diagnoseSafetyCompliance() {
       var resolution = resolveJobToCrew(testJob, testContext);
       report.push('  ' + testJob + ' â†’ found: ' + resolution.found + ', crew: ' + resolution.crew + ', source: ' + resolution.source);
       if (!resolution.found) {
-        report.push('    âš ï¸ Reason: ' + resolution.reason);
+        report.push('    \u26A0\uFE0F Reason: ' + resolution.reason);
       }
     }
   } catch (e) {
@@ -3081,7 +3081,7 @@ function diagnoseSafetyCompliance() {
   var htmlReport = '<pre style="font-family: monospace; font-size: 12px; white-space: pre-wrap;">' +
     report.join('\n').replace(/\u2705/g, '<span style="color:green">\u2705</span>')
                      .replace(/\u274C/g, '<span style="color:red">\u274C</span>')
-                     .replace(/âš ï¸/g, '<span style="color:orange">âš ï¸</span>') +
+                     .replace(/\u26A0\uFE0F/g, '<span style="color:orange">\u26A0\uFE0F</span>') +
     '</pre>';
 
   var htmlOutput = HtmlService.createHtmlOutput(htmlReport)
@@ -3138,7 +3138,7 @@ function testEmailParsing() {
           report.push('Parsed Report Date: ' + parsedData.reportDate);
           report.push('Parsed Foreman: ' + parsedData.foreman);
           if (parsedData.skippedReason) {
-            report.push('âš ï¸ Skipped: ' + parsedData.skippedReason);
+            report.push('\u26A0\uFE0F Skipped: ' + parsedData.skippedReason);
           }
         } else {
           report.push('\u274C parseSafetyEmail returned null');
@@ -3215,7 +3215,7 @@ function diagnoseCrewCompliance() {
   var isTracked = trackedCrews.indexOf(jobNum) !== -1;
   report.push('   Is tracked crew: ' + (isTracked ? '\u2705 YES' : '\u274C NO'));
   if (!isTracked) {
-    report.push('   âš ï¸ This crew is NOT in the tracked crews list - compliance won\'t be calculated!');
+    report.push('   \u26A0\uFE0F This crew is NOT in the tracked crews list - compliance won\'t be calculated!');
   }
 
   // 2. Check JHA Log for this crew (both job number AND creditedTo)
@@ -3253,10 +3253,10 @@ function diagnoseCrewCompliance() {
     for (var e = 0; e < jhaEntries.length; e++) {
       var entry = jhaEntries[e];
       var statusIcon = entry.status === 'Credited' ? '\u2705' : '\u274C';
-      var creditIcon = entry.creditedTo === jobNum ? '\u2705' : (entry.creditedTo ? 'âš ï¸' : '\u274C');
+      var creditIcon = entry.creditedTo === jobNum ? '\u2705' : (entry.creditedTo ? '\u26A0\uFE0F' : '\u274C');
       report.push('   Row ' + entry.row + ': ' + entry.created + ' | Status: ' + statusIcon + entry.status + ' | CreditedTo: ' + creditIcon + (entry.creditedTo || 'EMPTY'));
       if (entry.creditedTo && entry.creditedTo !== jobNum) {
-        report.push('      âš ï¸ Credited to different crew: ' + entry.creditedTo);
+        report.push('      \u26A0\uFE0F Credited to different crew: ' + entry.creditedTo);
       }
     }
 
@@ -3270,7 +3270,7 @@ function diagnoseCrewCompliance() {
       return e.status === 'Credited' && e.creditedTo !== jobNum;
     });
     if (wrongCrew.length > 0) {
-      report.push('   âš ï¸ Entries credited to WRONG crew: ' + wrongCrew.length);
+      report.push('   \u26A0\uFE0F Entries credited to WRONG crew: ' + wrongCrew.length);
     }
 
   } else {
@@ -3451,7 +3451,7 @@ function testComplianceCalculationForWeek() {
       var icon = row.willCredit ? '\u2705' : '\u274C';
       report.push('  ' + icon + ' Row ' + row.row + ': ' + row.dateCreated + ' (' + row.dayName + ') | Status: ' + row.status + ' | CreditedTo: ' + row.creditedTo);
       if (row.skipReason) {
-        report.push('      âš ï¸ ' + row.skipReason);
+        report.push('      \u26A0\uFE0F ' + row.skipReason);
       }
       if (row.willCredit) willCreditCount++;
     }
@@ -4558,7 +4558,7 @@ function createTasksFromSafetyIssues() {
   var safetySheet = getSafetyEquipmentSheet();
 
   if (!safetySheet || safetySheet.getLastRow() < 2) {
-    Browser.msgBox('âš ï¸ No Safety Reports',
+    Browser.msgBox('\u26A0\uFE0F No Safety Reports',
       'The Safety Equipment Needs sheet is empty or does not exist.\\n\\nRun "Process Safety Emails" first to populate the sheet.',
       Browser.Buttons.OK);
     return;
@@ -4566,7 +4566,7 @@ function createTasksFromSafetyIssues() {
 
   var taskSheet = ss.getSheetByName("Task Metadata");
   if (!taskSheet) {
-    Browser.msgBox('âš ï¸ Task Metadata Not Found',
+    Browser.msgBox('\u26A0\uFE0F Task Metadata Not Found',
       'Please run "Setup Task Metadata Sheet" first.',
       Browser.Buttons.OK);
     return;
@@ -6638,7 +6638,7 @@ function parseSafetyEmail(message, skipPdfExtraction) {
     if (isLate && (reportType === 'JHA' || reportType === 'Safety Meeting')) {
       var reportDateStr = Utilities.formatDate(reportDate, Session.getScriptTimeZone(), "MM/dd/yyyy");
       var receivedDateStr = Utilities.formatDate(date, Session.getScriptTimeZone(), "MM/dd/yyyy");
-      Logger.log("âš ï¸ LATE SUBMISSION: " + reportType + " for " + reportDateStr + " received on " + receivedDateStr + " (Job: " + jobNumber + ")");
+      Logger.log("\u26A0\uFE0F LATE SUBMISSION: " + reportType + " for " + reportDateStr + " received on " + receivedDateStr + " (Job: " + jobNumber + ")");
     }
 
     // Skip reports for job numbers not on the Employee sheet
@@ -7509,7 +7509,7 @@ function extractDatesCompletedFromJHAPDF(pdfText) {
   });
 
   if (dates.length === 0) {
-    Logger.log("extractDatesCompletedFromJHAPDF: âš ï¸ NO DATES FOUND in PDF text. First 200 chars: " + normalizedText.substring(0, 200));
+    Logger.log("extractDatesCompletedFromJHAPDF: \u26A0\uFE0F NO DATES FOUND in PDF text. First 200 chars: " + normalizedText.substring(0, 200));
   } else {
     Logger.log("extractDatesCompletedFromJHAPDF: Total unique dates found: " + dates.length);
   }
@@ -8809,7 +8809,7 @@ function getWeekOfMonth(date) {
  *
  * Monthly Checklist is due once per month, deadline is last work day of month
  * - Weeks 1-2: \u23F3 (yellow/pending) - plenty of time, does NOT affect crew status
- * - Week 3: âš ï¸ (orange/warning) - getting close, sets status to Pending
+ * - Week 3: \u26A0\uFE0F (orange/warning) - getting close, sets status to Pending
  * - Week 4/Final week: \u274C\u23F3 (red hourglass) - urgent, sets status to Pending
  * - After month ends: \u274C (red missing) - deadline passed, sets status to Missing Reports
  *
@@ -8873,7 +8873,7 @@ function getMonthlyChecklistStatus(weekStartDate, hasSubmitted, isSkipped, check
   } else if (todayWeekInfo.weekNumber === 3) {
     // Week 3 - warning (orange)
     // This DOES affect status (Pending) because deadline is approaching
-    return { status: 'âš ï¸', cssClass: 'warning', shouldCreateTask: false, affectsStatus: true };
+    return { status: '\u26A0\uFE0F', cssClass: 'warning', shouldCreateTask: false, affectsStatus: true };
   } else {
     // Weeks 1-2 - pending (yellow)
     // This does NOT affect status - crew is "Complete" for weekly items even if Monthly not submitted yet
@@ -8988,9 +8988,9 @@ function setupSafetyComplianceSheet() {
     .build();
   rules.push(checkRule);
 
-  // Orange for âš ï¸ (Monthly Checklist warning - Week 3)
+  // Orange for \u26A0\uFE0F (Monthly Checklist warning - Week 3)
   var warningRule = SpreadsheetApp.newConditionalFormatRule()
-    .whenTextContains("âš ï¸")
+    .whenTextContains("\u26A0\uFE0F")
     .setBackground("#FFE0B2")  // Light orange
     .setFontColor("#E65100")   // Dark orange text
     .setRanges([dayRange])
@@ -9334,7 +9334,7 @@ function migrateConfigToJobTracking() {
   if (skipSunIndex === -1) {
     // Need to add the columns first
     var addColumnsResponse = ui.alert(
-      'âš ï¸ Columns Needed',
+      '\u26A0\uFE0F Columns Needed',
       'Job Tracking sheet needs the new Schedule Compliance columns (L-T).\n\n' +
       'Would you like to add them now?\n\n' +
       '(This will insert 9 new columns after Notes)',
@@ -9486,7 +9486,7 @@ function migrateConfigToJobTracking() {
       'All schedule settings are now in Job Tracking (columns L-T).';
 
     if (notFoundCount > 0) {
-      message += '\n\nâš ï¸ ' + notFoundCount + ' crew(s) from Config were not found in Job Tracking:\n' +
+      message += '\n\n\u26A0\uFE0F ' + notFoundCount + ' crew(s) from Config were not found in Job Tracking:\n' +
         notFoundCrews.slice(0, 10).join(', ') +
         (notFoundCrews.length > 10 ? '...' : '');
     }
@@ -10275,7 +10275,7 @@ function loadComplianceConfig() {
       // Alert user that migration is needed
       try {
         SpreadsheetApp.getUi().alert(
-          'âš ï¸ Migration Required',
+          '\u26A0\uFE0F Migration Required',
           'Job Tracking needs Schedule Compliance columns (L-T).\n\n' +
           'Please run: Glove Manager â†’ ðŸ”§ Maintenance â†’ Sheets Setup â†’ ðŸ“‹ Migrate Config to Job Tracking',
           SpreadsheetApp.getUi().ButtonSet.OK
@@ -11208,7 +11208,7 @@ function menuReformatComplianceSheet() {
 
 /**
  * Adds the new Monthly Checklist progressive status formatting rules to existing Safety Compliance sheet
- * Rules: âš ï¸ = orange (week 3), \u274C\u23F3 = red (week 4/urgent), plus existing rules
+ * Rules: \u26A0\uFE0F = orange (week 3), \u274C\u23F3 = red (week 4/urgent), plus existing rules
  */
 function addMonthlyChecklistFormattingRules() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -11230,7 +11230,7 @@ function addMonthlyChecklistFormattingRules() {
     var criteria = rule.getBooleanCondition();
     if (criteria && criteria.getCriteriaType() === SpreadsheetApp.BooleanCriteria.TEXT_CONTAINS) {
       var values = criteria.getCriteriaValues();
-      return values && values[0] === 'âš ï¸';
+      return values && values[0] === '\u26A0\uFE0F';
     }
     return false;
   });
@@ -11242,9 +11242,9 @@ function addMonthlyChecklistFormattingRules() {
 
   // Add new rules at the beginning so they have priority
 
-  // Orange for âš ï¸ (Monthly Checklist warning - Week 3)
+  // Orange for \u26A0\uFE0F (Monthly Checklist warning - Week 3)
   var warningRule = SpreadsheetApp.newConditionalFormatRule()
-    .whenTextContains("âš ï¸")
+    .whenTextContains("\u26A0\uFE0F")
     .setBackground("#FFE0B2")  // Light orange
     .setFontColor("#E65100")   // Dark orange text
     .setRanges([dayRange])
@@ -11264,7 +11264,7 @@ function addMonthlyChecklistFormattingRules() {
 
   sheet.setConditionalFormatRules(rules);
 
-  Browser.msgBox("\u2705 Added Monthly Checklist progressive formatting rules.\n\nâ€¢ âš ï¸ = Orange (Week 3 - warning)\nâ€¢ \u274C\u23F3 = Red (Week 4 - urgent, deadline approaching)\nâ€¢ \u274C = Red (Month ended - missing)\nâ€¢ \u23F3 = Yellow (Weeks 1-2 - pending, no urgency)");
+  Browser.msgBox("\u2705 Added Monthly Checklist progressive formatting rules.\n\nâ€¢ \u26A0\uFE0F = Orange (Week 3 - warning)\nâ€¢ \u274C\u23F3 = Red (Week 4 - urgent, deadline approaching)\nâ€¢ \u274C = Red (Month ended - missing)\nâ€¢ \u23F3 = Yellow (Weeks 1-2 - pending, no urgency)");
 }
 
 /**
@@ -12341,7 +12341,7 @@ function showComplianceDashboard() {
 
     // Monthly Checklist with tooltip
     var mst = (crew.monthlyChecklistStatus) ? crew.monthlyChecklistStatus : '';
-    var moCls = mst === '\u2705' ? 'ok' : (mst === '\u274C' ? 'missing' : (mst === '\u23F3' ? 'pending' : (mst === 'âš ï¸' ? 'pending' : 'na')));
+    var moCls = mst === '\u2705' ? 'ok' : (mst === '\u274C' ? 'missing' : (mst === '\u23F3' ? 'pending' : (mst === '\u26A0\uFE0F' ? 'pending' : 'na')));
     var moDetails = crew.monthlyChecklistDetails || null;
     var moTooltipParts = [];
     moTooltipParts.push('ðŸ“‹ Monthly Fleet Checklist');
@@ -12363,7 +12363,7 @@ function showComplianceDashboard() {
 
   // Add legend at bottom
   html += '<div class="legend">' +
-    '\u2705 On time | \u2705L Late | \u274C Missing | \u23F3 Pending | N/A Skipped | âš ï¸ Warning (Monthly) | \u274C\u23F3 Urgent (Monthly)' +
+    '\u2705 On time | \u2705L Late | \u274C Missing | \u23F3 Pending | N/A Skipped | \u26A0\uFE0F Warning (Monthly) | \u274C\u23F3 Urgent (Monthly)' +
     '</div>';
 
   html += '<div style="margin-top: 15px; text-align: center;">' +
@@ -12396,8 +12396,8 @@ function getIconExplanationForHtml(icon, cellType) {
     return '\u23F3 = Pending';
   } else if (iconStr === 'N/A') {
     return 'N/A = Skipped per config';
-  } else if (iconStr === 'âš ï¸') {
-    return 'âš ï¸ = Warning (Week 3)';
+  } else if (iconStr === '\u26A0\uFE0F') {
+    return '\u26A0\uFE0F = Warning (Week 3)';
   } else if (iconStr === '\u274C\u23F3') {
     return '\u274C\u23F3 = Urgent (Week 4)';
   }
@@ -14105,7 +14105,7 @@ function clearAndReprocessSafetyEmails() {
   var ui = SpreadsheetApp.getUi();
 
   var response = ui.alert(
-    'âš ï¸ Clear and Reprocess ALL Safety Emails',
+    '\u26A0\uFE0F Clear and Reprocess ALL Safety Emails',
     'This will:\n' +
     '1. DELETE all data in JHA Log, Weekly Safety Log, Monthly Checklist Log\n' +
     '2. Clear the Safety Compliance sheet\n' +
@@ -14679,7 +14679,7 @@ function masterRecalculateCompliance() {
     'Current week: ' + currentWeekStr + '\n';
 
   if (nonConfigCrews.length > 0) {
-    dialogMsg += '\nâš ï¸ CURRENT WEEK has ' + nonConfigCrews.length + ' non-config crews:\n';
+    dialogMsg += '\n\u26A0\uFE0F CURRENT WEEK has ' + nonConfigCrews.length + ' non-config crews:\n';
     dialogMsg += nonConfigCrews.slice(0, 5).join(', ');
     if (nonConfigCrews.length > 5) dialogMsg += '... and ' + (nonConfigCrews.length - 5) + ' more';
     dialogMsg += '\n\nThese will be REMOVED from current week only.\n';
@@ -16973,7 +16973,7 @@ function diagnoseGmailSearch() {
 
           var isLogged = existingEmailIds[msgId];
           var statusClass = isLogged ? 'logged' : 'new';
-          var statusText = isLogged ? 'âš ï¸ Already in ' + isLogged : '\u2705 NEW';
+          var statusText = isLogged ? '\u26A0\uFE0F Already in ' + isLogged : '\u2705 NEW';
 
           if (isLogged) {
             totalLogged++;
@@ -17006,7 +17006,7 @@ function diagnoseGmailSearch() {
   html += '<strong class="success">NEW emails (not logged):</strong> ' + totalNew + '<br>';
   html += '<strong class="warning">Already logged:</strong> ' + totalLogged + '<br>';
   if (totalNew === 0 && totalLogged > 0) {
-    html += '<br><span class="warning">âš ï¸ All found emails are already in the log sheets. This is why "No NEW emails found" appears.</span>';
+    html += '<br><span class="warning">\u26A0\uFE0F All found emails are already in the log sheets. This is why "No NEW emails found" appears.</span>';
   }
   html += '</div>';
 
@@ -17085,9 +17085,9 @@ function ensureCurrentWeekInCompliance() {
 
   var message = 'ðŸ“… Ensure Current Week Results\n\n';
   message += 'ðŸ“† Previous Week (' + prevDateStr + '):\n';
-  message += results.previousWeek.updated ? '\u2705 Updated with ' + results.previousWeek.crewCount + ' crews\n' : 'âš ï¸ No data or already exists\n';
+  message += results.previousWeek.updated ? '\u2705 Updated with ' + results.previousWeek.crewCount + ' crews\n' : '\u26A0\uFE0F No data or already exists\n';
   message += '\nðŸ“† Current Week (' + currDateStr + '):\n';
-  message += results.currentWeek.updated ? '\u2705 Updated with ' + results.currentWeek.crewCount + ' crews\n' : 'âš ï¸ No data or already exists\n';
+  message += results.currentWeek.updated ? '\u2705 Updated with ' + results.currentWeek.crewCount + ' crews\n' : '\u26A0\uFE0F No data or already exists\n';
   message += '\n\u2705 Safety Compliance sheet has been formatted.';
 
   SpreadsheetApp.getUi().alert('Ensure Current Week', message, SpreadsheetApp.getUi().ButtonSet.OK);
@@ -17206,7 +17206,7 @@ function quickGmailCheck() {
     } catch (e) {
       html += '<p class="error">Error: ' + e.message + '</p>';
       if (e.message.indexOf('permission') !== -1) {
-        html += '<p class="error">âš ï¸ Gmail permission required. Please run Process Safety Emails from the spreadsheet and authorize when prompted.</p>';
+        html += '<p class="error">\u26A0\uFE0F Gmail permission required. Please run Process Safety Emails from the spreadsheet and authorize when prompted.</p>';
       }
     }
   });
@@ -17216,7 +17216,7 @@ function quickGmailCheck() {
   html += '<p class="warning">ðŸ“ Already logged: <strong>' + totalLogged + '</strong></p>';
 
   if (totalNew === 0 && totalLogged > 0) {
-    html += '<p class="warning">âš ï¸ All found emails are already in the log sheets.</p>';
+    html += '<p class="warning">\u26A0\uFE0F All found emails are already in the log sheets.</p>';
   }
 
   if (totalNew > 0) {
