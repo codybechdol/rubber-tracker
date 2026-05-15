@@ -5896,11 +5896,24 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     Logger.log("Gmail link application error (non-fatal): " + linkErr.toString());
   }
 
-  // NOTE: Bulk rich-text link application to JHA Log / Weekly Safety Log is intentionally
-  // NOT done here — building hundreds of RichTextValue objects at end of processing causes
-  // V8 INTERNAL memory errors. Links are applied row-by-row when each email is first logged
-  // (in logJHAEmail / logWeeklySafetyEmail). Use the Logs menu backfill items to add links
-  // to any older rows that were logged before this feature was added.
+  // Schedule Gmail link backfill to run in a fresh execution 2 minutes from now.
+  // Done as a one-shot time trigger instead of inline because building 1000+ RichTextValue
+  // objects in the same execution as heavy PDF OCR causes V8 INTERNAL memory errors.
+  try {
+    var existingTriggers = ScriptApp.getProjectTriggers();
+    for (var ti = 0; ti < existingTriggers.length; ti++) {
+      if (existingTriggers[ti].getHandlerFunction() === 'applyAllEmailLinksScheduled') {
+        ScriptApp.deleteTrigger(existingTriggers[ti]);
+      }
+    }
+    ScriptApp.newTrigger('applyAllEmailLinksScheduled')
+      .timeBased()
+      .after(2 * 60 * 1000) // 2 minutes
+      .create();
+    Logger.log("Gmail link backfill scheduled for 2 minutes from now");
+  } catch (trigErr) {
+    Logger.log("Could not schedule email link backfill (non-fatal): " + trigErr.toString());
+  }
 
   // Auto-format JHA Log and Weekly Safety Log: sort by month desc → job number → date desc,
   // with blue separator rows between each month for easy visual scanning.
@@ -6716,6 +6729,30 @@ function extractTextFromPDF(attachment) {
     }
     return "";
   }
+}
+
+/**
+ * One-shot time-triggered function that applies Gmail hyperlinks to JHA Log and
+ * Weekly Safety Log after processSafetyEmails completes. Runs in a fresh execution
+ * context (no PDF OCR memory pressure) to avoid V8 INTERNAL errors.
+ * Scheduled automatically by processSafetyEmails — do not call directly.
+ */
+function applyAllEmailLinksScheduled() {
+  // Delete this one-shot trigger first so it never fires again
+  try {
+    var triggers = ScriptApp.getProjectTriggers();
+    for (var i = 0; i < triggers.length; i++) {
+      if (triggers[i].getHandlerFunction() === 'applyAllEmailLinksScheduled') {
+        ScriptApp.deleteTrigger(triggers[i]);
+      }
+    }
+  } catch (e) {
+    Logger.log('applyAllEmailLinksScheduled: Could not delete trigger - ' + e);
+  }
+
+  var jhaCount = applyJHALogEmailLinksSilent();
+  var weeklyCount = applyWeeklySafetyLogEmailLinksSilent();
+  Logger.log('applyAllEmailLinksScheduled: Applied Gmail links — JHA Log: ' + jhaCount + ', Weekly Safety Log: ' + weeklyCount);
 }
 
 /**
