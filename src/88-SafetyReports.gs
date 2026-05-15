@@ -15716,7 +15716,8 @@ function creditUncreditedReport(assignmentDataJson) {
     }
 
     // Update Safety Compliance sheet if specified
-    if (complianceSheet && data.targetDay && data.reportDate) {
+    // Skip compliance update when logEntryOnly=true (day already has a ✅, user just needs the log corrected)
+    if (complianceSheet && data.targetDay && data.reportDate && !data.logEntryOnly) {
       var compData = complianceSheet.getDataRange().getValues();
       var compHeaders = compData[0];
 
@@ -15870,27 +15871,37 @@ function getMissingDaysForCrew(crewJobNumber, weekStartDate) {
       var rowWeekDate = new Date(rowWeekStart);
       rowWeekDate.setHours(0, 0, 0, 0);
 
-      if (rowWeekDate.getTime() === targetWeekStart.getTime() && rowJobNumber === crewJobNumber) {
-        // Found the row, check for missing days
+        if (rowWeekDate.getTime() === targetWeekStart.getTime() && rowJobNumber === crewJobNumber) {
+        // Found the row, check for missing and credited days
         var missingDays = [];
+        var creditedDays = [];
 
         for (var d = 0; d < dayColumns.length; d++) {
           var dc = dayColumns[d];
           var cellValue = String(row[dc.col] || '').trim();
 
-          // Skip N/A days (usually weekends)
+          // Skip N/A days (usually weekends) and empty cells
           if (cellValue === 'N/A' || cellValue === '') continue;
+
+          // Calculate the actual date for this day
+          var dayDate = new Date(targetWeekStart);
+          dayDate.setDate(dayDate.getDate() + dc.dayNum);
+          var dayDateStr = Utilities.formatDate(dayDate, Session.getScriptTimeZone(), 'MM/dd/yyyy');
 
           // Check if missing (\u274C or \u23F3)
           if (cellValue === '\u274C' || cellValue === '\u23F3' || cellValue.indexOf('\u274C') !== -1) {
-            // Calculate the actual date for this day
-            var dayDate = new Date(targetWeekStart);
-            dayDate.setDate(dayDate.getDate() + dc.dayNum);
-
             missingDays.push({
               dayName: dc.dayName,
               dayNum: dc.dayNum,
-              date: Utilities.formatDate(dayDate, Session.getScriptTimeZone(), 'MM/dd/yyyy'),
+              date: dayDateStr,
+              currentStatus: cellValue
+            });
+          } else if (cellValue === '\u2705' || cellValue.indexOf('\u2705') !== -1) {
+            // Already has a JHA credited - can still add log entry only
+            creditedDays.push({
+              dayName: dc.dayName,
+              dayNum: dc.dayNum,
+              date: dayDateStr,
               currentStatus: cellValue
             });
           }
@@ -15898,24 +15909,29 @@ function getMissingDaysForCrew(crewJobNumber, weekStartDate) {
 
         // Also check Weekly Meeting
         var weeklyMeetingMissing = false;
+        var weeklyMeetingCredited = false;
         if (weeklyMeetingCol >= 0) {
           var wmValue = String(row[weeklyMeetingCol] || '').trim();
           if (wmValue === '\u274C' || wmValue === '\u23F3' || wmValue.indexOf('\u274C') !== -1) {
             weeklyMeetingMissing = true;
+          } else if (wmValue === '\u2705' || wmValue.indexOf('\u2705') !== -1) {
+            weeklyMeetingCredited = true;
           }
         }
 
         return {
           success: true,
           missingDays: missingDays,
+          creditedDays: creditedDays,
           weeklyMeetingMissing: weeklyMeetingMissing,
+          weeklyMeetingCredited: weeklyMeetingCredited,
           crewJobNumber: crewJobNumber,
           weekStart: weekStartDate
         };
       }
     }
 
-    return { success: false, error: 'Crew ' + crewJobNumber + ' not found for week ' + weekStartDate, missingDays: [] };
+    return { success: false, error: 'Crew ' + crewJobNumber + ' not found for week ' + weekStartDate, missingDays: [], creditedDays: [] };
 
   } catch (e) {
     Logger.log('getMissingDaysForCrew error: ' + e.toString());
