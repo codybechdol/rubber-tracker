@@ -1576,13 +1576,41 @@
         // If we found a clear match (employee IS assigned to one of the crews), remove from others
         if (matchingCrewEntry && nonMatchingEntries.length > 0) {
           for (var r = 0; r < nonMatchingEntries.length; r++) {
-            removals.push({
-              crewIndex: nonMatchingEntries[r].crewIndex,
-              empIndex: nonMatchingEntries[r].empIndex,
-              name: match.employeeName,
-              fromJob: nonMatchingEntries[r].jobNumber,
-              correctJob: currentJobBase
-            });
+            var otherEntry = nonMatchingEntries[r];
+            var otherJT = jobTrackingData[otherEntry.jobNumber];
+
+            // EXCEPTION: If the "other" crew is On Hold returning within 7 days, it's the INTENDED
+            // new assignment — remove from the old/current crew instead, not from the returning crew
+            var isReturningOnHold = false;
+            if (otherJT && otherJT.isOnHold && otherJT.estimatedReturn) {
+              var estD = new Date(otherJT.estimatedReturn);
+              if (!isNaN(estD.getTime())) {
+                var sevenOut = new Date();
+                sevenOut.setDate(sevenOut.getDate() + 7);
+                sevenOut.setHours(23, 59, 59, 0);
+                isReturningOnHold = (estD <= sevenOut);
+              }
+            }
+
+            if (isReturningOnHold) {
+              // Employee is moving TO the On Hold crew — remove from old/current crew
+              console.log('PRE-RESOLVE: ' + match.employeeName + ' moving to returning On Hold crew ' + otherEntry.jobNumber + ' — will remove from old crew ' + currentJobBase);
+              removals.push({
+                crewIndex: matchingCrewEntry.crewIndex,
+                empIndex: matchingCrewEntry.empIndex,
+                name: match.employeeName,
+                fromJob: matchingCrewEntry.jobNumber,
+                correctJob: otherEntry.jobNumber
+              });
+            } else {
+              removals.push({
+                crewIndex: otherEntry.crewIndex,
+                empIndex: otherEntry.empIndex,
+                name: match.employeeName,
+                fromJob: otherEntry.jobNumber,
+                correctJob: currentJobBase
+              });
+            }
           }
         }
       }
@@ -1600,7 +1628,7 @@
         var rem = removals[m];
         var crew = parsedCrews[rem.crewIndex];
         console.log('PRE-RESOLVE: Removing "' + rem.name + '" from crew ' + crew.jobNumber +
-                    ' (stale data — employee is assigned to ' + rem.correctJob + ' on Employees sheet)');
+                    ' → moving to ' + rem.correctJob);
         crew.employees.splice(rem.empIndex, 1);
       }
 
@@ -6344,7 +6372,8 @@
       for (var key in employeeOccurrences) {
         var allOccurrences = employeeOccurrences[key];
 
-        // Filter out Pending Start, On Hold, and Completed job occurrences
+        // Filter out Pending Start, On Hold (far future), and Completed job occurrences
+        // EXCEPTION: On Hold crews returning within 7 days are treated as active
         var activeOccurrences = allOccurrences.filter(function(occ) {
           var jobInfo = jobTrackingData[occ.crew.jobNumber];
           if (jobInfo && jobInfo.isPendingStart) {
@@ -6352,6 +6381,18 @@
             return false;
           }
           if (jobInfo && jobInfo.isOnHold) {
+            // Allow On Hold crews returning within 7 days — they're being processed as active
+            if (jobInfo.estimatedReturn) {
+              var estD2 = new Date(jobInfo.estimatedReturn);
+              if (!isNaN(estD2.getTime())) {
+                var sevenOut2 = new Date();
+                sevenOut2.setDate(sevenOut2.getDate() + 7);
+                sevenOut2.setHours(23, 59, 59, 0);
+                if (estD2 <= sevenOut2) {
+                  return true; // Include this — it's the returning crew
+                }
+              }
+            }
             console.log('Filtering out On Hold job ' + occ.crew.jobNumber + ' from duplicate detection for ' + key);
             return false;
           }
@@ -6572,12 +6613,34 @@
         var crew = parsedCrews[i];
 
 
-        // Skip crews that are Pending Start, On Hold, or Completed - employees here shouldn't generate changes yet
+        // Skip crews that are Pending Start, Completed, or On Hold (far future) - shouldn't generate changes yet
+        // EXCEPTION: On Hold crews returning within 7 days ARE processed so employees can be moved in advance
         var jobInfo = jobTrackingData[crew.jobNumber];
-        if (jobInfo && (jobInfo.isPendingStart || jobInfo.isCompleted || jobInfo.isOnHold)) {
+        if (jobInfo && (jobInfo.isPendingStart || jobInfo.isCompleted)) {
           var skippedNames = crew.employees.map(function(e) { return e.name; }).join(', ');
           console.log('Skipping proposed changes for crew ' + crew.jobNumber + ' (status: ' + jobInfo.status + ') — ' + crew.employees.length + ' employees: ' + skippedNames);
           continue;
+        }
+        if (jobInfo && jobInfo.isOnHold) {
+          // Check if estimated return is within 7 days — if so, allow changes so manpower can be moved early
+          var allowOnHold = false;
+          if (jobInfo.estimatedReturn) {
+            var estRetDate = new Date(jobInfo.estimatedReturn);
+            if (!isNaN(estRetDate.getTime())) {
+              var sevenDaysOut = new Date();
+              sevenDaysOut.setDate(sevenDaysOut.getDate() + 7);
+              sevenDaysOut.setHours(23, 59, 59, 0);
+              if (estRetDate <= sevenDaysOut) {
+                allowOnHold = true;
+                console.log('Allowing changes for On Hold crew ' + crew.jobNumber + ' — returning ' + jobInfo.estimatedReturn + ' (within 7 days)');
+              }
+            }
+          }
+          if (!allowOnHold) {
+            var skippedNames = crew.employees.map(function(e) { return e.name; }).join(', ');
+            console.log('Skipping proposed changes for crew ' + crew.jobNumber + ' (status: On Hold, return not imminent) — ' + crew.employees.length + ' employees: ' + skippedNames);
+            continue;
+          }
         }
 
         for (var j = 0; j < crew.employees.length; j++) {
