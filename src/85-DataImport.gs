@@ -677,9 +677,37 @@ function syncJobTrackingAfterImport(ss, jobNameMap) {
           crewSize: crew.crewSize,
           startDate: existing.startDate,
           employees: crew.employees,
-          rowIndex: existing.rowIndex
+          rowIndex: existing.rowIndex,
+          isOnHold: false
         });
         Logger.log('syncJobTrackingAfterImport: Pending Start job ' + crewNum + ' has ' + crew.crewSize + ' employees - needs user decision');
+      }
+
+      // If status is "On Hold" and now has employees AND estimated return is within 7 days,
+      // also track for user decision (allows Friday activation for Monday returns)
+      if (existing.status === 'On Hold' && crew.crewSize > 0) {
+        var estReturn = existing.estimatedReturn;
+        var estReturnDate = (estReturn && estReturn instanceof Date) ? estReturn : (estReturn ? new Date(estReturn) : null);
+        if (estReturnDate && !isNaN(estReturnDate.getTime())) {
+          var sevenDaysOut = new Date();
+          sevenDaysOut.setDate(sevenDaysOut.getDate() + 7);
+          sevenDaysOut.setHours(23, 59, 59, 0);
+          if (estReturnDate <= sevenDaysOut) {
+            var estReturnStr = Utilities.formatDate(estReturnDate, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+            pendingJobsWithEmployees.push({
+              jobNumber: crewNum,
+              location: crew.location || existing.location || 'Unknown',
+              foreman: crew.foreman || '',
+              crewSize: crew.crewSize,
+              startDate: estReturnStr,
+              employees: crew.employees,
+              rowIndex: existing.rowIndex,
+              isOnHold: true,
+              estimatedReturn: estReturnStr
+            });
+            Logger.log('syncJobTrackingAfterImport: On Hold job ' + crewNum + ' returning ' + estReturnStr + ' has ' + crew.crewSize + ' employees - needs user decision');
+          }
+        }
       }
 
       updatedCount++;
@@ -776,7 +804,9 @@ function syncJobTrackingAfterImport(ss, jobNameMap) {
 
   Logger.log('syncJobTrackingAfterImport: ' + results.join(', '));
   if (pendingJobsWithEmployees.length > 0) {
-    Logger.log('syncJobTrackingAfterImport: ' + pendingJobsWithEmployees.length + ' Pending Start jobs need activation decision');
+    var pendingCount = pendingJobsWithEmployees.filter(function(j) { return !j.isOnHold; }).length;
+    var onHoldCount = pendingJobsWithEmployees.filter(function(j) { return j.isOnHold; }).length;
+    Logger.log('syncJobTrackingAfterImport: ' + pendingCount + ' Pending Start + ' + onHoldCount + ' On Hold (returning soon) jobs need activation decision');
   }
 
   // Also run syncCrews to ensure foremen and default schedules are applied

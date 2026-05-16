@@ -1710,6 +1710,7 @@
         var prefillGlove = (isRehire && history.gloveSize) ? history.gloveSize : '';
         var prefillSleeve = (isRehire && history.sleeveSize) ? history.sleeveSize : '';
         var prefillPhone = (isRehire && history.phone) ? history.phone : '';
+        var prefillDate = ''; // Leave blank — user enters the actual start date
 
         html += '<div class="card mb-2" id="new-hire-card-' + i + '">';
         html += '<div class="card-body p-2">';
@@ -1800,6 +1801,12 @@
         html += '<input type="tel" class="form-control form-control-sm" id="nh-phone-' + i + '" placeholder="(xxx) xxx-xxxx" style="width: 140px; font-size: 12px;" value="' + escapeHtml(prefillPhone) + '">';
         html += '</div>';
 
+        // Start Date input
+        html += '<div>';
+        html += '<label class="form-label mb-0" style="font-size: 11px; color: #5f6368;">Start Date</label>';
+        html += '<input type="date" class="form-control form-control-sm" id="nh-date-' + i + '" style="width: 140px; font-size: 12px;" value="' + escapeHtml(prefillDate) + '">';
+        html += '</div>';
+
         html += '</div>'; // end inline fields row
 
         html += '</div>'; // end left side
@@ -1868,9 +1875,11 @@
       var gloveEl = document.getElementById('nh-glove-' + index);
       var sleeveEl = document.getElementById('nh-sleeve-' + index);
       var phoneEl = document.getElementById('nh-phone-' + index);
+      var dateEl = document.getElementById('nh-date-' + index);
       if (gloveEl && gloveEl.value) employeeData.gloveSize = gloveEl.value;
       if (sleeveEl && sleeveEl.value) employeeData.sleeveSize = sleeveEl.value;
       if (phoneEl && phoneEl.value.trim()) employeeData.phoneNumber = phoneEl.value.trim();
+      if (dateEl && dateEl.value) employeeData.hireDate = dateEl.value; // YYYY-MM-DD from date input
 
       // Use rehire function if they're a Previous Employee, otherwise add new
       var useRehire = history && history.isPreviousEmployee;
@@ -1983,9 +1992,11 @@
         var gloveEl = document.getElementById('nh-glove-' + idx);
         var sleeveEl = document.getElementById('nh-sleeve-' + idx);
         var phoneEl = document.getElementById('nh-phone-' + idx);
+        var dateEl = document.getElementById('nh-date-' + idx);
         if (gloveEl && gloveEl.value) employeeData.gloveSize = gloveEl.value;
         if (sleeveEl && sleeveEl.value) employeeData.sleeveSize = sleeveEl.value;
         if (phoneEl && phoneEl.value.trim()) employeeData.phoneNumber = phoneEl.value.trim();
+        if (dateEl && dateEl.value) employeeData.hireDate = dateEl.value; // YYYY-MM-DD from date input
 
         var useRehire = history && history.isPreviousEmployee;
         var backendFn = useRehire ? 'rehireEmployeeFromImport' : 'addNewEmployeeFromImport';
@@ -7817,42 +7828,58 @@
 
     /**
      * Show dialog for pending jobs that need activation decision
-     * @param {Array} pendingJobs - Jobs that are Pending Start but have employees
+     * @param {Array} pendingJobs - Jobs that are Pending Start or On Hold (returning soon) with employees
      * @param {string} baseMessage - The base success message from import
      */
     function showPendingJobsDialog(pendingJobs, baseMessage) {
+      var pendingCount = pendingJobs.filter(function(j) { return !j.isOnHold; }).length;
+      var onHoldCount = pendingJobs.filter(function(j) { return j.isOnHold; }).length;
+
       var msg = '<p><strong>Import completed!</strong></p>';
       msg += '<p>' + baseMessage.replace(/\n/g, '<br>') + '</p>';
       msg += '<hr>';
-      msg += '<p><i class="bi bi-exclamation-triangle text-warning"></i> <strong>' + pendingJobs.length + ' "Pending Start" job(s)</strong> now have employees assigned:</p>';
+
+      if (onHoldCount > 0 && pendingCount === 0) {
+        msg += '<p><i class="bi bi-arrow-clockwise text-primary"></i> <strong>' + onHoldCount + ' "On Hold" job(s)</strong> are returning soon and now have employees assigned:</p>';
+      } else if (pendingCount > 0 && onHoldCount === 0) {
+        msg += '<p><i class="bi bi-exclamation-triangle text-warning"></i> <strong>' + pendingCount + ' "Pending Start" job(s)</strong> now have employees assigned:</p>';
+      } else {
+        msg += '<p><i class="bi bi-exclamation-triangle text-warning"></i> <strong>' + pendingJobs.length + ' job(s)</strong> now have employees and need activation:</p>';
+      }
+
       msg += '<div style="max-height: 300px; overflow-y: auto;">';
 
       for (var i = 0; i < pendingJobs.length; i++) {
         var job = pendingJobs[i];
-        var startDateStr = job.startDate ? formatDateForDisplay(job.startDate) : 'Not set';
+        var borderColor = job.isOnHold ? '#0d6efd' : '#ffc107';
+        var dateLabelStr = job.isOnHold ? 'Est. Return' : 'Start Date';
+        var dateStr = job.startDate ? formatDateForDisplay(job.startDate) : 'Not set';
+        var statusBadge = job.isOnHold
+          ? '<span class="badge bg-secondary ms-1" style="font-size:10px;">ON HOLD → ACTIVE</span>'
+          : '<span class="badge bg-warning text-dark ms-1" style="font-size:10px;">PENDING → ACTIVE</span>';
 
-        msg += '<div class="card mb-2" style="border-left: 4px solid #ffc107;">';
+        msg += '<div class="card mb-2" style="border-left: 4px solid ' + borderColor + ';">';
         msg += '<div class="card-body p-2">';
         msg += '<div class="d-flex align-items-center">';
         msg += '<input type="checkbox" class="form-check-input me-2 pending-job-checkbox" id="pendingJob_' + i + '" data-job="' + job.jobNumber + '" checked>';
         msg += '<div class="flex-grow-1">';
-        msg += '<strong>' + job.jobNumber + '</strong> - ' + job.location;
-        msg += '<br><small class="text-muted">Foreman: ' + (job.foreman || 'Not assigned') + ' | Crew: ' + job.crewSize + ' | Start: ' + startDateStr + '</small>';
+        msg += '<strong>' + job.jobNumber + '</strong>' + statusBadge + ' — ' + job.location;
+        msg += '<br><small class="text-muted">Foreman: ' + (job.foreman || 'Not assigned') + ' | Crew: ' + job.crewSize + ' | ' + dateLabelStr + ': ' + dateStr + '</small>';
         msg += '</div>';
         msg += '</div>';
         msg += '</div></div>';
       }
 
       msg += '</div>';
-      msg += '<p class="text-muted small mt-3"><i class="bi bi-info-circle"></i> <strong>Checked = Activate Now</strong> (job is active and will be tracked)<br>';
-      msg += '<strong>Unchecked = Keep Pending</strong> (job stays "Pending Start" - future planning only)</p>';
+      msg += '<p class="text-muted small mt-3"><i class="bi bi-info-circle"></i> <strong>Checked = Activate Now</strong> (job becomes Active and will be tracked for compliance)<br>';
+      msg += '<strong>Unchecked = Keep as-is</strong> (job stays "Pending Start" or "On Hold" — auto-activates on its scheduled date)</p>';
 
       document.getElementById('notificationHeader').className = 'notification-header warning';
       document.getElementById('notificationIcon').className = 'bi bi-calendar-check';
       document.getElementById('notificationTitle').textContent = 'Activate Jobs?';
       document.getElementById('notificationBody').innerHTML = msg;
       document.getElementById('notificationCancelBtn').style.display = 'inline-block';
-      document.getElementById('notificationCancelBtn').textContent = 'Keep All Pending';
+      document.getElementById('notificationCancelBtn').textContent = 'Keep All As-Is';
       document.getElementById('notificationOkBtn').textContent = 'Activate Selected';
 
       notificationCallback = function() {
@@ -7878,15 +7905,15 @@
             })
             .activatePendingJobs(jobsToActivate);
         } else {
-          showNotification(baseMessage + '\n\n📋 All pending jobs kept as "Pending Start"', 'success', 'Import Complete!', function() {
+          showNotification(baseMessage + '\n\n📋 All jobs kept as-is (will auto-activate on scheduled date)', 'success', 'Import Complete!', function() {
             google.script.host.close();
           });
         }
       };
 
       notificationCancelCallback = function() {
-        // Keep all as pending
-        showNotification(baseMessage + '\n\n📋 All pending jobs kept as "Pending Start"', 'success', 'Import Complete!', function() {
+        // Keep all as-is
+        showNotification(baseMessage + '\n\n📋 All jobs kept as-is (will auto-activate on scheduled date)', 'success', 'Import Complete!', function() {
           google.script.host.close();
         });
       };
