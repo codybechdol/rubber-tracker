@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 88-SafetyReports.gs
  *
  * Gmail integration for processing JHAs, Safety Meetings, and Fleet Checklists
@@ -8,7 +8,7 @@
  * Created: February 4, 2026
  * Updated: February 18, 2026 - Added secondary job number support for lookupForemanByJobNumber
  * Updated: February 24, 2026 - MAJOR REFACTOR: Direct compliance tracking from Gmail
- *   - Renamed "Safety Reports" â†’ "Safety Equipment Needs"
+ *   - Renamed "Safety Reports" → "Safety Equipment Needs"
  *   - JHA/Safety Meeting compliance tracked directly from parsed emails
  *   - Removed writing of "No Issues" records to Safety Equipment Needs
  *   - Added unified resolveJobToCrew() function
@@ -50,7 +50,7 @@ var MONTHLY_CHECKLIST_LOG_SHEET_NAME = "Monthly Checklist Log";
 /**
  * Tests Gmail access and forces re-authorization if needed
  * This function must be run manually to trigger the OAuth consent screen
- * Menu function: Glove Manager â†’ Safety â†’ ðŸ”‘ Authorize Gmail Access
+ * Menu function: Glove Manager → Safety → 🔑 Authorize Gmail Access
  */
 function authorizeGmailAccess() {
   var ui = SpreadsheetApp.getUi();
@@ -76,7 +76,7 @@ function authorizeGmailAccess() {
       'Error: ' + e.message + '\n\n' +
       'Please try again. When prompted, click "Allow" to grant Gmail access.\n\n' +
       'If you don\'t see an authorization prompt:\n' +
-      '1. Go to Extensions â†’ Apps Script\n' +
+      '1. Go to Extensions → Apps Script\n' +
       '2. Run "authorizeGmailAccess" function directly\n' +
       '3. Accept the permissions when prompted',
       ui.ButtonSet.OK);
@@ -103,7 +103,7 @@ function testGmailAccess() {
 
 /**
  * Shows current Gmail authorization status
- * Menu function: Glove Manager â†’ Safety â†’ ðŸ” Gmail Status
+ * Menu function: Glove Manager → Safety → 🔁 Gmail Status
  */
 function showGmailStatus() {
   var ui = SpreadsheetApp.getUi();
@@ -124,9 +124,9 @@ function showGmailStatus() {
       ui.alert('\u2705 Gmail Access Status',
         'Gmail is authorized and working!\n\n' +
         'Emails found in last 14 days:\n' +
-        'â€¢ Job Hazard Reports: ' + jhaCount + '\n' +
-        'â€¢ Safety Meeting Reports: ' + meetingCount + '\n' +
-        'â€¢ Weekly Safety Repairs: ' + checklistCount + '\n\n' +
+        '\u2022 Job Hazard Reports: ' + jhaCount + '\n' +
+        '\u2022 Safety Meeting Reports: ' + meetingCount + '\n' +
+        '\u2022 Weekly Safety Repairs: ' + checklistCount + '\n\n' +
         'Total emails to process: ' + (jhaCount + meetingCount + checklistCount),
         ui.ButtonSet.OK);
 
@@ -139,7 +139,7 @@ function showGmailStatus() {
   } else {
     ui.alert('\u274C Gmail Not Authorized',
       'Gmail access is NOT working.\n\n' +
-      'Run "ðŸ”‘ Authorize Gmail Access" from the Safety menu to fix this.',
+      'Run "🔑 Authorize Gmail Access" from the Safety menu to fix this.',
       ui.ButtonSet.OK);
   }
 }
@@ -408,7 +408,7 @@ function setupMonthlyChecklistLogSheet() {
 
 /**
  * Creates all three log sheets at once
- * Menu function: Glove Manager â†’ Safety â†’ Setup Log Sheets
+ * Menu function: Glove Manager → Safety → Setup Log Sheets
  */
 function setupAllSafetyLogSheets() {
   var jhaSheet = setupJHALogSheet();
@@ -417,9 +417,9 @@ function setupAllSafetyLogSheets() {
 
   SpreadsheetApp.getUi().alert('\u2705 Log Sheets Created',
     'Created 3 safety log sheets:\n\n' +
-    'â€¢ JHA Log - tracks all Job Hazard Reports\n' +
-    'â€¢ Weekly Safety Log - tracks Safety Meeting Reports\n' +
-    'â€¢ Monthly Checklist Log - tracks Fleet Safety Checklists\n\n' +
+    '\u2022 JHA Log - tracks all Job Hazard Reports\n' +
+    '\u2022 Weekly Safety Log - tracks Safety Meeting Reports\n' +
+    '\u2022 Monthly Checklist Log - tracks Fleet Safety Checklists\n\n' +
     'These sheets provide an audit trail for compliance tracking.',
     SpreadsheetApp.getUi().ButtonSet.OK);
 
@@ -493,6 +493,21 @@ function sortAndFormatLogSheet(sheetName, emailIdCol, dateReceivedCol, jobNumCol
   // ── 1. Read all rows ──────────────────────────────────────────────────────
   var allVals = sheet.getRange(2, 1, sheet.getLastRow() - 1, lastCol).getValues();
 
+  // ── 1b. Save existing rich text (hyperlinks) before we clear ─────────────
+  // Maps emailId → RichTextValue so links survive the sort+rewrite cycle.
+  var savedRichTexts = {};
+  try {
+    var rtData = sheet.getRange(2, emailIdCol, sheet.getLastRow() - 1, 1).getRichTextValues();
+    for (var rti = 0; rti < allVals.length; rti++) {
+      var rtEid = String(allVals[rti][emailIdCol - 1] || '').trim();
+      if (rtEid && rtData[rti] && rtData[rti][0]) {
+        savedRichTexts[rtEid] = rtData[rti][0];
+      }
+    }
+  } catch (rtSaveErr) {
+    Logger.log('sortAndFormatLogSheet: Could not save rich text — ' + rtSaveErr);
+  }
+
   // ── 2. Keep only real data rows (non-empty email ID) ─────────────────────
   var dataRows = allVals.filter(function(row) {
     return String(row[emailIdCol - 1] || '').trim() !== '';
@@ -547,17 +562,100 @@ function sortAndFormatLogSheet(sheetName, emailIdCol, dateReceivedCol, jobNumCol
     sheet.getRange(2, 1, rowsToWrite.length, lastCol).setValues(rowsToWrite);
   }
 
-  // ── 6. Style separator rows ───────────────────────────────────────────────
-  // Build one large range list and apply in a single call using banding-style hack,
-  // or just iterate (only a handful of separator rows per sheet).
-  separatorSheetRows.forEach(function(sheetRow) {
-    var sepRange = sheet.getRange(sheetRow, 1, 1, lastCol);
-    sepRange.setBackground('#3c78d8');
-    sepRange.setFontColor('#ffffff');
-    sepRange.setFontWeight('bold');
-    sepRange.setFontSize(11);
-    sepRange.setHorizontalAlignment('left');
-  });
+  // ── 6. Apply colors and group dividers ───────────────────────────────────
+  // Alternating colors per job-number group, medium top border between groups,
+  // blue header for month separator rows.  All applied via one setBackgrounds()
+  // call to minimise API quota usage.
+  if (rowsToWrite.length > 0) {
+    var separatorSet = {};
+    separatorSheetRows.forEach(function(r) { separatorSet[r] = true; });
+
+    var COLOR_A      = '#ffffff';   // white
+    var COLOR_B      = '#dce9fb';   // soft blue
+    var SEP_BG       = '#3c78d8';   // month header blue
+    var BORDER_COLOR = '#9e9e9e';   // medium-gray divider line
+
+    var bgMatrix       = [];
+    var currentJobKey  = null;
+    var colorToggle    = 0;          // 0 → COLOR_A, 1 → COLOR_B
+    var groupDividers  = [];         // 1-based sheet rows that get a top border
+
+    for (var ri = 0; ri < rowsToWrite.length; ri++) {
+      var sheetRow = ri + 2;  // +2: row 1 is the header
+      var color;
+
+      if (separatorSet[sheetRow]) {
+        // Month separator row — reset group tracking for the new month
+        color         = SEP_BG;
+        currentJobKey = null;
+        colorToggle   = 0;
+      } else {
+        var jobKey = String(rowsToWrite[ri][jobNumCol - 1] || '');
+        if (jobKey !== currentJobKey) {
+          if (currentJobKey !== null) {
+            // New group within the same month — flip color and mark for border
+            colorToggle = 1 - colorToggle;
+            groupDividers.push(sheetRow);
+          }
+          currentJobKey = jobKey;
+        }
+        color = (colorToggle === 0) ? COLOR_A : COLOR_B;
+      }
+
+      // Expand single color across all columns for this row
+      var rowColors = [];
+      for (var ci = 0; ci < lastCol; ci++) rowColors.push(color);
+      bgMatrix.push(rowColors);
+    }
+
+    // One bulk setBackgrounds call for the entire data region
+    sheet.getRange(2, 1, rowsToWrite.length, lastCol).setBackgrounds(bgMatrix);
+
+    // Reapply hyperlinks to email ID column (lost during clearFormat + setValues)
+    // Reuses saved rich text where available; builds a fresh link for any row that
+    // never had one (e.g. historical rows logged before the Gmail-link feature).
+    try {
+      var rtMatrix = [];
+      for (var rii = 0; rii < rowsToWrite.length; rii++) {
+        if (separatorSet[rii + 2]) {
+          rtMatrix.push([SpreadsheetApp.newRichTextValue().setText('').build()]);
+        } else {
+          var eid = String(rowsToWrite[rii][emailIdCol - 1] || '').trim();
+          if (eid) {
+            var rtVal = savedRichTexts[eid];
+            if (!rtVal) {
+              // Build fresh link for rows that never had one
+              var baseId = eid.split('_')[0];
+              var gmailUrl = 'https://mail.google.com/mail/u/0/#all/' + baseId;
+              rtVal = SpreadsheetApp.newRichTextValue().setText(eid).setLinkUrl(gmailUrl).build();
+            }
+            rtMatrix.push([rtVal]);
+          } else {
+            rtMatrix.push([SpreadsheetApp.newRichTextValue().setText('').build()]);
+          }
+        }
+      }
+      sheet.getRange(2, emailIdCol, rowsToWrite.length, 1).setRichTextValues(rtMatrix);
+    } catch (rtErr) {
+      Logger.log('sortAndFormatLogSheet: Could not reapply rich text — ' + rtErr);
+    }
+
+    // Separator row text styling (font/weight set after background to avoid reset)
+    separatorSheetRows.forEach(function(sheetRow) {
+      var sepRange = sheet.getRange(sheetRow, 1, 1, lastCol);
+      sepRange.setFontColor('#ffffff');
+      sepRange.setFontWeight('bold');
+      sepRange.setFontSize(11);
+      sepRange.setHorizontalAlignment('left');
+    });
+
+    // Top border at each foreman/job-group boundary within a month
+    groupDividers.forEach(function(sheetRow) {
+      sheet.getRange(sheetRow, 1, 1, lastCol)
+        .setBorder(true, null, null, null, null, null,
+                   BORDER_COLOR, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+    });
+  }
 
   // ── 7. Re-freeze header row if it was lost ───────────────────────────────
   if (sheet.getFrozenRows() < 1) sheet.setFrozenRows(1);
@@ -973,10 +1071,10 @@ function menuCleanupDuplicateLogEntries() {
     SpreadsheetApp.getUi().alert('\u2705 No Duplicates Found',
       'JHA Log and Weekly Safety Log have no duplicate entries.\n\nCheck the Execution Log for details on rows examined.', SpreadsheetApp.getUi().ButtonSet.OK);
   } else {
-    SpreadsheetApp.getUi().alert('ðŸ§¹ Duplicates Removed',
+    SpreadsheetApp.getUi().alert('🧹 Duplicates Removed',
       'Removed ' + total + ' duplicate log entries:\n\n' +
-      'â€¢ JHA Log: ' + result.jhaDuplicates + ' duplicates removed\n' +
-      'â€¢ Weekly Safety Log: ' + result.weeklyDuplicates + ' duplicates removed\n\n' +
+      '\u2022 JHA Log: ' + result.jhaDuplicates + ' duplicates removed\n' +
+      '\u2022 Weekly Safety Log: ' + result.weeklyDuplicates + ' duplicates removed\n\n' +
       'Run "Master Recalculate" to refresh compliance data.',
       SpreadsheetApp.getUi().ButtonSet.OK);
   }
@@ -1099,7 +1197,7 @@ function debugComplianceCalculation() {
 
 /**
  * Menu function to diagnose the state of safety log sheets
- * Run this from Glove Manager â†’ Safety â†’ ðŸ” Diagnose Log Sheets
+ * Run this from Glove Manager → Safety → 🔁 Diagnose Log Sheets
  */
 function menuDiagnoseLogSheets() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1110,7 +1208,7 @@ function menuDiagnoseLogSheets() {
   var jhaSheet = ss.getSheetByName(JHA_LOG_SHEET_NAME);
   if (jhaSheet) {
     var jhaCount = jhaSheet.getLastRow() - 1;
-    report.push('ðŸ“„ JHA Log: ' + jhaCount + ' records');
+    report.push('📄 JHA Log: ' + jhaCount + ' records');
 
     if (jhaCount > 0) {
       // Count by status
@@ -1136,14 +1234,14 @@ function menuDiagnoseLogSheets() {
       }
     }
   } else {
-    report.push('ðŸ“„ JHA Log: NOT FOUND');
+    report.push('📄 JHA Log: NOT FOUND');
   }
 
   // Check Weekly Safety Log
   var weeklySheet = ss.getSheetByName(WEEKLY_SAFETY_LOG_SHEET_NAME);
   if (weeklySheet) {
     var weeklyCount = weeklySheet.getLastRow() - 1;
-    report.push('ðŸ“„ Weekly Safety Log: ' + weeklyCount + ' records');
+    report.push('📄 Weekly Safety Log: ' + weeklyCount + ' records');
 
     if (weeklyCount > 0) {
       var weeklyData = weeklySheet.getRange(2, 7, weeklyCount, 2).getValues(); // Status, Credited To
@@ -1155,25 +1253,25 @@ function menuDiagnoseLogSheets() {
       report.push('   - Credited: ' + credited + ', Unknown Job: ' + unknown);
     }
   } else {
-    report.push('ðŸ“„ Weekly Safety Log: NOT FOUND');
+    report.push('📄 Weekly Safety Log: NOT FOUND');
   }
 
   // Check Monthly Checklist Log
   var monthlySheet = ss.getSheetByName(MONTHLY_CHECKLIST_LOG_SHEET_NAME);
   if (monthlySheet) {
     var monthlyCount = monthlySheet.getLastRow() - 1;
-    report.push('ðŸ“„ Monthly Checklist Log: ' + monthlyCount + ' records');
+    report.push('📄 Monthly Checklist Log: ' + monthlyCount + ' records');
   } else {
-    report.push('ðŸ“„ Monthly Checklist Log: NOT FOUND');
+    report.push('📄 Monthly Checklist Log: NOT FOUND');
   }
 
   // Check Safety Compliance
   var complianceSheet = ss.getSheetByName(SAFETY_COMPLIANCE_SHEET_NAME);
   if (complianceSheet) {
     var compCount = complianceSheet.getLastRow() - 1;
-    report.push('\\nðŸ“Š Safety Compliance: ' + compCount + ' records');
+    report.push('\\n\uD83D\uDCCA Safety Compliance: ' + compCount + ' records');
   } else {
-    report.push('\\nðŸ“Š Safety Compliance: NOT FOUND');
+    report.push('\\n\uD83D\uDCCA Safety Compliance: NOT FOUND');
   }
 
   // Recommendation
@@ -1181,10 +1279,10 @@ function menuDiagnoseLogSheets() {
   if (jhaSheet && jhaSheet.getLastRow() <= 1 && weeklySheet && weeklySheet.getLastRow() <= 1) {
     report.push('\u26A0\uFE0F Log sheets are EMPTY. Run "Process Safety Emails" to populate them.');
   } else if (jhaSheet && jhaSheet.getLastRow() > 1) {
-    report.push('\u2705 Log sheets have data. Run "ðŸ”„ Recalculate Compliance" to update Safety Compliance from logs.');
+    report.push('\u2705 Log sheets have data. Run "🔄 Recalculate Compliance" to update Safety Compliance from logs.');
   }
 
-  ui.alert('ðŸ” Safety Log Sheets Diagnostic', report.join('\\n'), ui.ButtonSet.OK);
+  ui.alert('🔁 Safety Log Sheets Diagnostic', report.join('\\n'), ui.ButtonSet.OK);
 }
 
 // ============================================================================
@@ -1194,7 +1292,7 @@ function menuDiagnoseLogSheets() {
 /**
  * DETAILED diagnostic that traces the exact compliance calculation
  * Shows: what dates are being compared, what matches, what doesn't
- * Menu function: Glove Manager â†’ Safety â†’ ðŸ“Š Trace Compliance Calculation
+ * Menu function: Glove Manager → Safety → \uD83D\uDCCA Trace Compliance Calculation
  */
 function traceComplianceCalculation() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1391,15 +1489,15 @@ function buildComplianceCellNote(cellType, dayDate, statusIcon, details) {
   if (cellType === 'jha' && dayDate) {
     var dayName = dayNames[dayDate.getDay()];
     var dateStr = Utilities.formatDate(dayDate, tz, 'MMM dd, yyyy');
-    lines.push('ðŸ“… ' + dayName + ', ' + dateStr);
+    lines.push('📅 ' + dayName + ', ' + dateStr);
   } else if (cellType === 'weekly') {
-    lines.push('ðŸ“‹ Weekly Safety Meeting');
+    lines.push('📋 Weekly Safety Meeting');
     if (details && details.weekOf) {
       var weekOfStr = Utilities.formatDate(new Date(details.weekOf), tz, 'MMM dd, yyyy');
       lines.push('Week of: ' + weekOfStr);
     }
   } else if (cellType === 'monthly') {
-    lines.push('ðŸ“‹ Monthly Fleet Checklist');
+    lines.push('📋 Monthly Fleet Checklist');
     if (details && details.reportDate) {
       var reportDateStr = Utilities.formatDate(new Date(details.reportDate), tz, 'MMM dd, yyyy');
       lines.push('Report Date: ' + reportDateStr);
@@ -1812,7 +1910,7 @@ function calculateComplianceFromLogs(weekStartDate, options) {
       }
       jhaCreditsApplied++;
 
-      Logger.log("calculateComplianceFromLogs: âœ“ Credited JHA to " + crewToCredit + " for day " + dayOfWeek + " (row " + (j+1) + ", original=" + originalJobNumber + ", creditedTo=" + creditedTo + ")");
+      Logger.log("calculateComplianceFromLogs: ✓ Credited JHA to " + crewToCredit + " for day " + dayOfWeek + " (row " + (j+1) + ", original=" + originalJobNumber + ", creditedTo=" + creditedTo + ")");
     }
   }
 
@@ -2699,7 +2797,7 @@ function logParsedSafetyEmail(parsed, message, context, existingEmailIds) {
 /**
  * Recalculates ALL weeks in the Safety Compliance sheet from log data
  * Use this to fix incorrectly credited weeks after bug fixes
- * Menu function: Glove Manager â†’ Safety â†’ Recalculate ALL Compliance
+ * Menu function: Glove Manager → Safety → Recalculate ALL Compliance
  */
 function recalculateAllComplianceFromLogs() {
   var ui = SpreadsheetApp.getUi();
@@ -2779,7 +2877,7 @@ function recalculateAllComplianceFromLogs() {
 
 /**
  * Recalculates compliance from log sheets and updates Safety Compliance sheet
- * Menu function: Glove Manager â†’ Safety â†’ Recalculate Compliance
+ * Menu function: Glove Manager → Safety → Recalculate Compliance
  */
 function recalculateComplianceFromLogs() {
   var ui = SpreadsheetApp.getUi();
@@ -2868,6 +2966,79 @@ function menuApplyWeeklySafetyLogEmailLinks() {
 }
 
 /**
+ * Applies Gmail hyperlinks to all Email ID values in the Monthly Checklist Log sheet (col G = 7).
+ * Silent version — called automatically at end of processSafetyEmails().
+ * @return {number} Number of links applied
+ */
+function applyMonthlyChecklistLogEmailLinksSilent() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(MONTHLY_CHECKLIST_LOG_SHEET_NAME);
+    if (!sheet || sheet.getLastRow() < 2) return 0;
+
+    var emailIdCol = 7; // Column G - Email ID
+    var lastRow = sheet.getLastRow();
+    var values = sheet.getRange(2, emailIdCol, lastRow - 1, 1).getValues();
+    var richTextValues = [];
+    var linkCount = 0;
+
+    for (var i = 0; i < values.length; i++) {
+      var msgId = String(values[i][0] || '').trim();
+      if (msgId) {
+        var baseId = msgId.split('_')[0];
+        var gmailUrl = 'https://mail.google.com/mail/u/0/#all/' + baseId;
+        richTextValues.push([SpreadsheetApp.newRichTextValue()
+          .setText(msgId)
+          .setLinkUrl(gmailUrl)
+          .build()]);
+        linkCount++;
+      } else {
+        richTextValues.push([SpreadsheetApp.newRichTextValue().setText('').build()]);
+      }
+    }
+
+    sheet.getRange(2, emailIdCol, lastRow - 1, 1).setRichTextValues(richTextValues);
+    Logger.log('applyMonthlyChecklistLogEmailLinksSilent: Applied links to ' + linkCount + ' rows');
+    return linkCount;
+  } catch (e) {
+    Logger.log('applyMonthlyChecklistLogEmailLinksSilent: Error (non-fatal) - ' + e.toString());
+    return 0;
+  }
+}
+
+/**
+ * Menu handler: backfills Gmail hyperlinks to all Email ID cells in Monthly Checklist Log.
+ */
+function menuApplyMonthlyChecklistLogEmailLinks() {
+  var linkCount = applyMonthlyChecklistLogEmailLinksSilent();
+  if (linkCount === 0) {
+    SpreadsheetApp.getUi().alert('No data rows found in Monthly Checklist Log, or sheet not found.');
+    return;
+  }
+  SpreadsheetApp.getUi().alert('\u2705 Added Gmail links to ' + linkCount + ' rows in Monthly Checklist Log.\n\nClick any Email ID cell to open the original email in Gmail.');
+}
+
+/**
+ * Menu handler: backfills Gmail hyperlinks to ALL log sheets at once
+ * (JHA Log, Weekly Safety Log, Monthly Checklist Log, Equipment Needs).
+ */
+function menuApplyAllEmailLinks() {
+  var jhaCount = applyJHALogEmailLinksSilent();
+  var weeklyCount = applyWeeklySafetyLogEmailLinksSilent();
+  var monthlyCount = applyMonthlyChecklistLogEmailLinksSilent();
+  var equipCount = backfillSafetyEquipmentEmailLinks();
+  var total = jhaCount + weeklyCount + monthlyCount + (typeof equipCount === 'number' ? equipCount : 0);
+  SpreadsheetApp.getUi().alert(
+    '\u2705 Gmail links applied to all log sheets:\n\n' +
+    '\u2022 JHA Log: ' + jhaCount + ' rows\n' +
+    '\u2022 Weekly Safety Log: ' + weeklyCount + ' rows\n' +
+    '\u2022 Monthly Checklist Log: ' + monthlyCount + ' rows\n' +
+    '\u2022 Equipment Needs: ' + (typeof equipCount === 'number' ? equipCount : '?') + ' rows\n\n' +
+    'Total: ' + total + ' links added.\n\nClick any Email ID cell to open the email in Gmail.'
+  );
+}
+
+/**
  * Opens the Monthly Checklist Log sheet
  * Menu function
  */
@@ -2885,7 +3056,7 @@ function openMonthlyChecklistLogSheet() {
 /**
  * Comprehensive diagnostic tool for safety compliance issues
  * Checks: Email parsing, job resolution, log writing, compliance calculation
- * Menu function: Glove Manager â†’ Safety â†’ ðŸ” Diagnose Compliance
+ * Menu function: Glove Manager → Safety → 🔁 Diagnose Compliance
  */
 function diagnoseSafetyCompliance() {
   var ui = SpreadsheetApp.getUi();
@@ -3039,7 +3210,7 @@ function diagnoseSafetyCompliance() {
     var mapKeys = Object.keys(customMappings);
     report.push('Custom mappings saved: ' + mapKeys.length);
     for (var m = 0; m < mapKeys.length; m++) {
-      report.push('  ' + mapKeys[m] + ' â†’ ' + customMappings[mapKeys[m]]);
+      report.push('  ' + mapKeys[m] + ' → ' + customMappings[mapKeys[m]]);
     }
   } catch (e) {
     report.push('Error reading custom mappings: ' + e.toString());
@@ -3068,7 +3239,7 @@ function diagnoseSafetyCompliance() {
     for (var tj = 0; tj < testJobs.length; tj++) {
       var testJob = testJobs[tj];
       var resolution = resolveJobToCrew(testJob, testContext);
-      report.push('  ' + testJob + ' â†’ found: ' + resolution.found + ', crew: ' + resolution.crew + ', source: ' + resolution.source);
+      report.push('  ' + testJob + ' → found: ' + resolution.found + ', crew: ' + resolution.crew + ', source: ' + resolution.source);
       if (!resolution.found) {
         report.push('    \u26A0\uFE0F Reason: ' + resolution.reason);
       }
@@ -3087,7 +3258,7 @@ function diagnoseSafetyCompliance() {
   var htmlOutput = HtmlService.createHtmlOutput(htmlReport)
     .setWidth(800)
     .setHeight(600);
-  ui.showModalDialog(htmlOutput, 'ðŸ” Safety Compliance Diagnostic Report');
+  ui.showModalDialog(htmlOutput, '🔁 Safety Compliance Diagnostic Report');
 
   Logger.log(report.join('\n'));
 }
@@ -3156,7 +3327,7 @@ function testEmailParsing() {
   var htmlOutput = HtmlService.createHtmlOutput(htmlReport)
     .setWidth(700)
     .setHeight(500);
-  ui.showModalDialog(htmlOutput, 'ðŸ”¬ Email Parsing Test Results');
+  ui.showModalDialog(htmlOutput, '🔬 Email Parsing Test Results');
 }
 
 /**
@@ -3340,7 +3511,7 @@ function diagnoseCrewCompliance() {
   var htmlOutput = HtmlService.createHtmlOutput(htmlReport)
     .setWidth(800)
     .setHeight(600);
-  ui.showModalDialog(htmlOutput, 'ðŸ” Crew Compliance Diagnosis: ' + jobNum);
+  ui.showModalDialog(htmlOutput, '🔁 Crew Compliance Diagnosis: ' + jobNum);
 }
 
 /**
@@ -3490,7 +3661,7 @@ function getSafetyEquipmentSheet() {
 /**
  * Migrates the Safety Reports sheet to Safety Equipment Needs
  * Safe to run multiple times - only renames if old name exists
- * Menu function: Glove Manager â†’ Safety â†’ Migrate Safety Reports Sheet
+ * Menu function: Glove Manager → Safety → Migrate Safety Reports Sheet
  */
 function migrateSafetyReportsToEquipmentNeeds() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -3505,7 +3676,7 @@ function migrateSafetyReportsToEquipmentNeeds() {
   }
 
   if (!oldSheet) {
-    SpreadsheetApp.getUi().alert('â„¹ï¸ No Sheet Found',
+    SpreadsheetApp.getUi().alert('ℹ\uFE0F No Sheet Found',
       'Neither "Safety Reports" nor "Safety Equipment Needs" sheet exists.\n\nRun "Setup Safety Equipment Sheet" to create one.',
       SpreadsheetApp.getUi().ButtonSet.OK);
     return;
@@ -3544,11 +3715,11 @@ function migrateSafetyReportsToEquipmentNeeds() {
 
 /**
  * Unified function to resolve a job number to its tracked crew
- * Consolidates all the jobâ†’foremanâ†’primary crew logic in one place
+ * Consolidates all the job→foreman→primary crew logic in one place
  *
  * @param {string} jobNumber - Job number to resolve (e.g., "013-26", "054-26.1")
  * @param {Object} context - Context object with cached lookups (optional)
- *   - customMappings: Custom jobâ†’foreman mappings from dialog
+ *   - customMappings: Custom job→foreman mappings from dialog
  *   - employeeData: Cached Employees sheet data
  *   - trackedCrews: Set of tracked crew job numbers
  * @returns {Object} Resolution result:
@@ -3587,7 +3758,7 @@ function resolveJobToCrew(jobNumber, context) {
     var customForeman = customMappings[baseJob];
     // Find this foreman's primary crew
     var primaryCrew = findForemanPrimaryCrew(customForeman, context.employeeData);
-    Logger.log("resolveJobToCrew: Custom mapping " + baseJob + " â†’ " + customForeman + ", primaryCrew=" + primaryCrew + ", tracked=" + (primaryCrew ? !!trackedCrews[primaryCrew] : false));
+    Logger.log("resolveJobToCrew: Custom mapping " + baseJob + " → " + customForeman + ", primaryCrew=" + primaryCrew + ", tracked=" + (primaryCrew ? !!trackedCrews[primaryCrew] : false));
 
     if (primaryCrew && trackedCrews[primaryCrew]) {
       // Best case: foreman's primary crew is tracked
@@ -3596,7 +3767,7 @@ function resolveJobToCrew(jobNumber, context) {
         crew: primaryCrew,
         foreman: customForeman,
         source: 'custom',
-        reason: 'Custom mapping: ' + baseJob + ' â†’ ' + customForeman + ' (primary: ' + primaryCrew + ')'
+        reason: 'Custom mapping: ' + baseJob + ' → ' + customForeman + ' (primary: ' + primaryCrew + ')'
       };
     } else if (primaryCrew) {
       // Foreman found, has a primary crew, but it's not in tracked list
@@ -3607,7 +3778,7 @@ function resolveJobToCrew(jobNumber, context) {
         crew: primaryCrew,
         foreman: customForeman,
         source: 'custom_untracked',
-        reason: 'Custom mapping: ' + baseJob + ' â†’ ' + customForeman + ' (crew ' + primaryCrew + ' not actively tracked)'
+        reason: 'Custom mapping: ' + baseJob + ' → ' + customForeman + ' (crew ' + primaryCrew + ' not actively tracked)'
       };
     } else {
       // Foreman name doesn't match anyone in Employees sheet
@@ -3618,7 +3789,7 @@ function resolveJobToCrew(jobNumber, context) {
         crew: baseJob, // Use the original job number as the "crew"
         foreman: customForeman,
         source: 'custom_manual',
-        reason: 'Custom mapping: ' + baseJob + ' â†’ ' + customForeman + ' (foreman not in Employees sheet)'
+        reason: 'Custom mapping: ' + baseJob + ' → ' + customForeman + ' (foreman not in Employees sheet)'
       };
     }
   }
@@ -3666,7 +3837,7 @@ function resolveJobToCrew(jobNumber, context) {
           foreman: empName,
           source: isSecondary ? 'secondary' : 'primary',
           reason: isSecondary
-            ? 'Secondary job ' + baseJob + ' â†’ primary crew ' + primaryCrew + ' (via ' + empName + ')'
+            ? 'Secondary job ' + baseJob + ' → primary crew ' + primaryCrew + ' (via ' + empName + ')'
             : 'Primary job match for ' + empName
         };
       }
@@ -4048,7 +4219,7 @@ function updateComplianceFromParsedRecords(complianceRecords) {
 
   // Read existing Safety Compliance data
   var data = sheet.getDataRange().getValues();
-  var existingRows = {}; // Key: "weekStart|jobNumber" â†’ { rowNum, data }
+  var existingRows = {}; // Key: "weekStart|jobNumber" → { rowNum, data }
 
   for (var i = 1; i < data.length; i++) {
     var rowWeek = data[i][0];
@@ -4229,7 +4400,7 @@ function setupSafetyReportsSheet() {
     // Offer to migrate instead of recreate
     var response = Browser.msgBox(
       "Found 'Safety Reports' sheet",
-      "Would you like to:\nâ€¢ YES = Migrate existing data to 'Safety Equipment Needs'\nâ€¢ NO = Delete and create fresh",
+      "Would you like to:\n\u2022 YES = Migrate existing data to 'Safety Equipment Needs'\n\u2022 NO = Delete and create fresh",
       Browser.Buttons.YES_NO
     );
     if (response === "yes") {
@@ -4348,7 +4519,7 @@ function setupSafetyReportsSheet() {
 
 /**
  * Opens the Safety Equipment Needs sheet (formerly Safety Reports)
- * Menu function: Glove Manager â†’ Safety â†’ View Safety Equipment Needs
+ * Menu function: Glove Manager → Safety → View Safety Equipment Needs
  */
 function openSafetyReports() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -4375,14 +4546,14 @@ function openSafetyReports() {
 /**
  * Cleans up Safety Equipment Needs sheet by removing "No Issues" compliance records.
  * These records are now tracked only in the Safety Compliance sheet.
- * Menu function: Glove Manager â†’ Safety â†’ Cleanup Safety Equipment Needs
+ * Menu function: Glove Manager → Safety → Cleanup Safety Equipment Needs
  */
 function cleanupSafetyReportsSheet() {
   Logger.log('=== cleanupSafetyReportsSheet START ===');
   var sheet = getSafetyEquipmentSheet();
 
   if (!sheet || sheet.getLastRow() < 2) {
-    Browser.msgBox('â„¹ï¸ No Data',
+    Browser.msgBox('ℹ\uFE0F No Data',
       'The Safety Equipment Needs sheet is empty or does not exist.',
       Browser.Buttons.OK);
     return;
@@ -4455,7 +4626,7 @@ function cleanupSafetyReportsSheet() {
 
   // Confirm with user
   var response = Browser.msgBox(
-    'ðŸ§¹ Cleanup Safety Reports',
+    '🧹 Cleanup Safety Reports',
     'Found ' + rowsToDelete.length + ' records to remove:\\n' + summaryMsg + '\\n\\n' +
     'JHA/Safety Meeting compliance is now tracked in the Safety Compliance sheet.\\n' +
     'Safety Reports should only contain actual equipment issues from Fleet Checklists.\\n\\n' +
@@ -4484,12 +4655,12 @@ function cleanupSafetyReportsSheet() {
  * Removes duplicate rows from the Safety Equipment Needs sheet.
  * Duplicates are identified by matching Email ID + Equipment Type + first 50 chars of Description.
  * Keeps the FIRST occurrence and removes subsequent duplicates.
- * Menu: Glove Manager â†’ Process Safety Emails â†’ Cleanup â†’ Remove Duplicate Equipment Needs
+ * Menu: Glove Manager → Process Safety Emails → Cleanup → Remove Duplicate Equipment Needs
  */
 function cleanupDuplicateEquipmentNeeds() {
   var sheet = getSafetyEquipmentSheet();
   if (!sheet || sheet.getLastRow() < 2) {
-    SpreadsheetApp.getUi().alert('â„¹ï¸ No Data', 'Safety Equipment Needs sheet is empty or does not exist.', SpreadsheetApp.getUi().ButtonSet.OK);
+    SpreadsheetApp.getUi().alert('ℹ\uFE0F No Data', 'Safety Equipment Needs sheet is empty or does not exist.', SpreadsheetApp.getUi().ButtonSet.OK);
     return;
   }
 
@@ -4533,7 +4704,7 @@ function cleanupDuplicateEquipmentNeeds() {
   }
 
   var response = SpreadsheetApp.getUi().alert(
-    'ðŸ§¹ Remove Duplicate Equipment Needs',
+    '🧹 Remove Duplicate Equipment Needs',
     'Found ' + rowsToDelete.length + ' duplicate rows out of ' + (data.length - 1) + ' total rows.\n\nRemove them?',
     SpreadsheetApp.getUi().ButtonSet.YES_NO
   );
@@ -4551,7 +4722,7 @@ function cleanupDuplicateEquipmentNeeds() {
 
 /**
  * Creates Manual Tasks from Safety Reports with "Needs Attention" status
- * Menu function: Glove Manager â†’ Safety â†’ Create Tasks from Issues
+ * Menu function: Glove Manager → Safety → Create Tasks from Issues
  */
 function createTasksFromSafetyIssues() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -4657,7 +4828,7 @@ function createTasksFromSafetyIssues() {
       'Created ' + tasksCreated + ' task(s) from Safety Reports with "Needs Attention" status.',
       Browser.Buttons.OK);
   } else {
-    Browser.msgBox('â„¹ï¸ No New Tasks',
+    Browser.msgBox('ℹ\uFE0F No New Tasks',
       'No new tasks to create. All "Needs Attention" items already have tasks.',
       Browser.Buttons.OK);
   }
@@ -4665,13 +4836,13 @@ function createTasksFromSafetyIssues() {
 
 /**
  * Refreshes Safety sheets - syncs completed tasks and recalculates compliance
- * Menu function: Glove Manager â†’ Safety â†’ Refresh Safety Sheets
+ * Menu function: Glove Manager → Safety → Refresh Safety Sheets
  */
 function refreshSafetySheets() {
   var ui = SpreadsheetApp.getUi();
 
-  ui.alert('ðŸ”„ Refreshing Safety Sheets...',
-    'This will:\\nâ€¢ Sync completed Safety Equipment tasks to Safety Reports\\nâ€¢ Recalculate current week compliance\\n\\nPlease wait...',
+  ui.alert('🔄 Refreshing Safety Sheets...',
+    'This will:\\n\u2022 Sync completed Safety Equipment tasks to Safety Reports\\n\u2022 Recalculate current week compliance\\n\\nPlease wait...',
     ui.ButtonSet.OK);
 
   var syncCount = 0;
@@ -4744,7 +4915,7 @@ function refreshSafetySheets() {
   }
 
   ui.alert('\u2705 Refresh Complete',
-    'Safety sheets refreshed:\\nâ€¢ Synced ' + syncCount + ' completed task(s) to Safety Reports\\nâ€¢ Recalculated current week compliance',
+    'Safety sheets refreshed:\\n\u2022 Synced ' + syncCount + ' completed task(s) to Safety Reports\\n\u2022 Recalculated current week compliance',
     ui.ButtonSet.OK);
 }
 
@@ -5352,7 +5523,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
           // Check time remaining - if under 30 seconds, stop processing
           var elapsedMs = new Date().getTime() - startTime;
           if (elapsedMs > MAX_EXECUTION_MS) {
-            Logger.log("â±ï¸ Timeout prevention: Stopping after " + Math.round(elapsedMs/1000) + " seconds to avoid 6-minute limit");
+            Logger.log("\u23F1\uFE0F Timeout prevention: Stopping after " + Math.round(elapsedMs/1000) + " seconds to avoid 6-minute limit");
             timedOut = true;
             break;
           }
@@ -6423,20 +6594,24 @@ function parseSafetyEmail(message, skipPdfExtraction) {
       reportType = "JHA";
       // Subject format: "Job Hazard Report 02-03-2026_009-26_24193851_HEL..."
       // or "Fwd: Job Hazard Report 02-03-2026_009-26_24193851_HEL..."
-      // Also handles: "Job Hazard Report 02-09-2026_015-26_24193885_560 huckleberry...(Modified-23)"
+      // Also handles: "Job Hazard Report 02-09-2026_015-26_24193885_...(Modified-23)"
+      // NOTE: Modified-N emails all share the SAME subject date but each PDF has the real work date.
+      //       PDF is the authoritative date source — subject date is only a fallback if PDF yields nothing.
       Logger.log("Processing JHA email subject: " + subject.substring(0, 100));
       var jhaMatch = subject.match(/Job Hazard Report\s+(\d{2}-\d{2}-\d{4})_(\d{3}-\d{2})/i);
-      var subjectDate = null; // Date from subject (fallback)
+      var subjectDate = null; // Date from subject — FALLBACK ONLY, NOT set as reportDate yet
       if (jhaMatch) {
-        // Parse the date from subject (format: MM-DD-YYYY) - used as fallback
         var dateParts = jhaMatch[1].split('-');
         if (dateParts.length === 3) {
           var month = parseInt(dateParts[0]) - 1; // 0-indexed
           var day = parseInt(dateParts[1]);
           var year = parseInt(dateParts[2]);
           subjectDate = new Date(year, month, day, 12, 0, 0);
-          reportDate = subjectDate; // Will be overridden by PDF date if found
-          Logger.log("Parsed JHA subject date: " + subjectDate.toDateString() + ", Job: " + jhaMatch[2] + (subject.indexOf("Modified") !== -1 ? " (Modified version)" : ""));
+          // DO NOT set reportDate here — PDF extraction below is the primary source.
+          // reportDate will be set after PDF processing.
+          Logger.log("JHA subject date (fallback only): " + subjectDate.toDateString() +
+                     ", Job: " + jhaMatch[2] +
+                     (subject.indexOf("Modified") !== -1 ? " ⚠️ Modified version — subject date may be stale" : ""));
         }
         jobNumber = jhaMatch[2];
       } else {
@@ -6510,7 +6685,7 @@ function parseSafetyEmail(message, skipPdfExtraction) {
         }
       }
     } else if (reportType === "Safety Checklist" && skipPdfExtraction) {
-      Logger.log("âš¡ FAST MODE: Skipping Safety Checklist PDF extraction for job " + jobNumber + " - equipment issues won't be extracted");
+      Logger.log("⚡ FAST MODE: Skipping Safety Checklist PDF extraction for job " + jobNumber + " - equipment issues won't be extracted");
     }
 
     // Extract PDF content for JHA reports to get actual "Date Completed" from the PDF
@@ -6584,14 +6759,33 @@ function parseSafetyEmail(message, skipPdfExtraction) {
         for (var d = 0; d < jhaDateOverrides.length; d++) {
           Logger.log("  - " + jhaDateOverrides[d].toDateString());
         }
-        // Use the FIRST date as the primary report date (for single-JHA emails)
+        // ✅ PDF is the authoritative date source — use it
         reportDate = jhaDateOverrides[0];
-        Logger.log("Using PDF Date Completed: " + reportDate.toDateString() + " (subject date was: " + (subjectDate ? subjectDate.toDateString() : "unknown") + ")");
+        Logger.log("✅ JHA date from PDF: " + reportDate.toDateString() +
+                   (subjectDate ? " (subject said: " + subjectDate.toDateString() + ")" : ""));
       } else {
-        Logger.log("No Date Completed found in any PDF, using subject date: " + (reportDate ? reportDate.toDateString() : "unknown"));
+        // PDF yielded no date — fall back to subject date, then email receipt date
+        if (subjectDate) {
+          reportDate = subjectDate;
+          var isModified = subject.indexOf("Modified") !== -1;
+          Logger.log("\u26A0\uFE0F JHA PDF had no date — falling back to subject date: " + reportDate.toDateString() +
+                     (isModified ? " ⚠️ WARNING: This is a Modified-N email; subject date is likely WRONG for this JHA. Check the PDF manually." : ""));
+        } else {
+          reportDate = date; // last resort: email receipt date
+          Logger.log("\u26A0\uFE0F JHA PDF had no date and subject had no date — using email receipt date: " + reportDate.toDateString());
+        }
       }
     } else if (reportType === "JHA" && skipPdfExtraction) {
-      Logger.log("âš¡ FAST MODE: Skipping JHA PDF extraction for job " + jobNumber + " - using subject date instead");
+      Logger.log("\u26A1 FAST MODE: Skipping JHA PDF extraction for job " + jobNumber + " — using subject date instead");
+      // In fast mode we must use the subject date; warn if it looks modified
+      if (subjectDate) {
+        reportDate = subjectDate;
+        if (subject.indexOf("Modified") !== -1) {
+          Logger.log("\u26A0\uFE0F Fast mode + Modified email — subject date " + subjectDate.toDateString() + " may not be the actual work date");
+        }
+      } else {
+        reportDate = date;
+      }
     }
 
     // Extract vehicle number from fleet checklist if not already set
@@ -6681,17 +6875,21 @@ function parseSafetyEmail(message, skipPdfExtraction) {
  * NOTE: This is slow (~5-10 seconds per PDF). Used sparingly for Safety Checklist reports.
  *
  * @param {GmailAttachment} attachment - PDF attachment
+ * @param {number} [maxSizeBytes] - Max PDF size to attempt (default 10MB). Pass larger value for reprocessing.
  * @returns {string} - Extracted text content
  */
-function extractTextFromPDF(attachment) {
+function extractTextFromPDF(attachment, maxSizeBytes) {
+  // Default: 10MB — large enough for all JHA PDFs (field tablets produce 2-18MB)
+  // Original 2MB limit was too restrictive; OCR API handles large files fine (~0.4s/file)
+  if (!maxSizeBytes) maxSizeBytes = 10 * 1024 * 1024;
+
   var file = null;
   var docFile = null;
 
   try {
-    // Limit PDF size to avoid timeouts (max 2MB)
     var size = attachment.getSize();
-    if (size > 2 * 1024 * 1024) {
-      Logger.log("PDF too large to process: " + (size / 1024 / 1024).toFixed(2) + "MB");
+    if (size > maxSizeBytes) {
+      Logger.log("PDF too large to process: " + (size / 1024 / 1024).toFixed(2) + "MB (limit: " + (maxSizeBytes / 1024 / 1024).toFixed(0) + "MB)");
       return "";
     }
 
@@ -6737,6 +6935,317 @@ function extractTextFromPDF(attachment) {
  * context (no PDF OCR memory pressure) to avoid V8 INTERNAL errors.
  * Scheduled automatically by processSafetyEmails — do not call directly.
  */
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REPROCESS SUBJECT-DATE FALLBACKS
+// When PDF extraction fails for JHA emails (e.g. Modified-N emails that all share
+// the same subject date), entries land in the JHA Log with the wrong Date Created.
+// These functions find those entries, re-extract the PDF date, and fix them.
+//
+// ARCHITECTURE: Each PDF OCR call takes ~10 seconds and there can be 100+ entries
+// (exceeding the 6-minute Apps Script hard limit). This uses a background continuation
+// trigger pattern: the user starts it via menu => it runs in ~18-entry batches via
+// time triggers => a final batch triggers compliance recalculation automatically.
+// ------------------------------------------------------------------------------------
+var JHA_REPROCESS_STATE_KEY  = 'JHA_REPROCESS_STATE';
+var JHA_REPROCESS_RESULT_KEY = 'JHA_REPROCESS_RESULT';
+/**
+ * Menu entry point - scans JHA Log for subject-fallback entries,
+ * saves state to ScriptProperties, and kicks off background processing.
+ */
+function showReprocessJHAFallbacksDialog() {
+  var ui = SpreadsheetApp.getUi();
+  var confirm = ui.alert(
+    '\uD83D\uDD04 Fix JHA Dates (Background Reprocess)',
+    'Scans the JHA Log for entries where the date came from the email subject line\n' +
+    'instead of the PDF. For each one, re-fetches the original email and extracts\n' +
+    'the real "Date Completed" from the PDF attachment.\n\n' +
+    'Common cause: "Modified-N" JHA emails that share the same subject date\n' +
+    'but have different dates inside each PDF.\n\n' +
+    'Scans the last 14 days. Runs in the BACKGROUND (batches of ~18 emails).\n' +
+    'Check progress: Safety Emails -> Utilities -> Check Fix JHA Progress\n\n' +
+    'Continue?',
+    ui.ButtonSet.YES_NO
+  );
+  if (confirm !== ui.Button.YES) return;
+  var started = startReprocessJHAContinuation(14);
+  if (started.total === 0) {
+    ui.alert('\u2705 Nothing to Fix',
+      'No subject-fallback JHA entries found in the last 14 days.\n' +
+      '(All recent JHAs already have dates from PDF or have been reprocessed.)',
+      ui.ButtonSet.OK);
+    return;
+  }
+  ui.alert('\uD83D\uDD04 Reprocessing Started',
+    started.total + ' entries queued for background processing.\n' +
+    'Runs in batches of ~18. Estimated time: ~' + Math.ceil(started.total * 10 / 60) + ' minutes.\n\n' +
+    'Check progress: Safety Emails -> Utilities -> Check Fix JHA Progress\n\n' +
+    'Compliance will be recalculated automatically when complete.',
+    ui.ButtonSet.OK);
+}
+/**
+ * Scans JHA Log for pending subject-fallback entries, stores them in
+ * ScriptProperties, and schedules the first processing batch trigger.
+ * @returns {{ total: number }}
+ */
+function startReprocessJHAContinuation(daysBack) {
+  if (!daysBack) daysBack = 14;
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var jhaSheet = ss.getSheetByName(JHA_LOG_SHEET_NAME);
+  if (!jhaSheet || jhaSheet.getLastRow() < 2) return { total: 0 };
+  var cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - daysBack);
+  var COL_DATE_RECEIVED = 0;
+  var COL_DATE_CREATED  = 1;
+  var COL_JOB_NUMBER    = 2;
+  var COL_EMAIL_ID      = 5;
+  var COL_SOURCE        = 6;
+  var COL_NOTES         = 9;
+  var data = jhaSheet.getDataRange().getValues();
+  var pending = [];
+  for (var i = 1; i < data.length; i++) {
+    var row    = data[i];
+    var source = String(row[COL_SOURCE] || '').trim().toLowerCase();
+    if (source !== 'subject') continue;
+    var recv = row[COL_DATE_RECEIVED];
+    if (recv instanceof Date && recv < cutoff) continue;
+    var emailId = String(row[COL_EMAIL_ID] || '').trim();
+    if (!emailId) continue;
+    var curDate = row[COL_DATE_CREATED];
+    pending.push({
+      sheetRow:     i + 1,
+      emailId:      emailId,
+      currentDate:  curDate instanceof Date ? curDate.getTime() : (curDate ? new Date(curDate).getTime() : null),
+      jobNumber:    String(row[COL_JOB_NUMBER] || ''),
+      currentNotes: String(row[COL_NOTES] || '')
+    });
+  }
+  if (pending.length === 0) return { total: 0 };
+  var props = PropertiesService.getScriptProperties();
+  var state = {
+    pending:     pending,
+    fixed:       0,
+    unchanged:   0,
+    failed:      0,
+    changes:     [],
+    affectedWeeks: {},
+    startedAt:   new Date().getTime(),
+    totalQueued: pending.length
+  };
+  props.setProperty(JHA_REPROCESS_STATE_KEY, JSON.stringify(state));
+  props.deleteProperty(JHA_REPROCESS_RESULT_KEY);
+  _deleteJHAReprocessTriggers_();
+  ScriptApp.newTrigger('runReprocessJHABatch').timeBased().after(5 * 1000).create();
+  Logger.log('startReprocessJHAContinuation: Queued ' + pending.length + ' entries, first batch triggered.');
+  return { total: pending.length };
+}
+/**
+ * Processes one batch of ~18 subject-fallback JHA rows.
+ * Auto-triggered by time trigger. Schedules next batch if more remain.
+ */
+function runReprocessJHABatch() {
+  _deleteJHAReprocessTriggers_();
+  var props = PropertiesService.getScriptProperties();
+  var stateJson = props.getProperty(JHA_REPROCESS_STATE_KEY);
+  if (!stateJson) {
+    Logger.log('runReprocessJHABatch: No state found.');
+    return;
+  }
+  var state;
+  try { state = JSON.parse(stateJson); } catch(e) {
+    Logger.log('runReprocessJHABatch: State parse error: ' + e);
+    return;
+  }
+  var pending = state.pending || [];
+  if (pending.length === 0) {
+    ScriptApp.newTrigger('finalizeReprocessJHA').timeBased().after(5 * 1000).create();
+    return;
+  }
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var jhaSheet = ss.getSheetByName(JHA_LOG_SHEET_NAME);
+  var tz = Session.getScriptTimeZone();
+  var COL_DATE_CREATED = 1;
+  var COL_SOURCE       = 6;
+  var COL_NOTES        = 9;
+  var BATCH_SIZE  = 18;
+  var MAX_ELAPSED = 4 * 60 * 1000;  // 4-minute hard ceiling per batch
+  var startTime   = new Date().getTime();
+  var batch = pending.splice(0, BATCH_SIZE);
+  for (var ri = 0; ri < batch.length; ri++) {
+    if (new Date().getTime() - startTime > MAX_ELAPSED) {
+      // Time guard: push remaining batch items back to front of pending
+      for (var bi = batch.length - 1; bi >= ri; bi--) {
+        pending.unshift(batch[bi]);
+      }
+      Logger.log('runReprocessJHABatch: 4-min guard after ' + ri + ' entries - rescheduling.');
+      break;
+    }
+    var entry = batch[ri];
+    try {
+      var msg = GmailApp.getMessageById(entry.emailId);
+      if (!msg) {
+        jhaSheet.getRange(entry.sheetRow, COL_SOURCE + 1).setValue('pdf (not found)');
+        state.failed++;
+        continue;
+      }
+      var attachments = msg.getAttachments();
+      var pdfDates = [];
+      for (var ai = 0; ai < attachments.length; ai++) {
+        var att = attachments[ai];
+        var ct  = att.getContentType();
+        var fn  = att.getName().toLowerCase();
+        if (ct !== 'application/pdf' && !fn.endsWith('.pdf')) continue;
+        try {
+          var pdfText = extractTextFromPDF(att, 25 * 1024 * 1024);
+          if (pdfText && pdfText.length > 50) {
+            var thisDates = extractDatesCompletedFromJHAPDF(pdfText);
+            for (var di = 0; di < thisDates.length; di++) {
+              var dup = pdfDates.some(function(d) { return d.getTime() === thisDates[di].getTime(); });
+              if (!dup) pdfDates.push(thisDates[di]);
+            }
+          }
+        } catch (pdfErr) {
+          Logger.log('runReprocessJHABatch: PDF error for ' + entry.emailId + ': ' + pdfErr);
+        }
+      }
+      if (pdfDates.length === 0) {
+        jhaSheet.getRange(entry.sheetRow, COL_SOURCE + 1).setValue('subject (no pdf date)');
+        state.unchanged++;
+        continue;
+      }
+      pdfDates.sort(function(a, b) { return a.getTime() - b.getTime(); });
+      var newDate = pdfDates[0];
+      var curDate = entry.currentDate ? new Date(entry.currentDate) : null;
+      if (curDate && !isNaN(curDate.getTime()) &&
+          curDate.toDateString() === newDate.toDateString()) {
+        jhaSheet.getRange(entry.sheetRow, COL_SOURCE + 1).setValue('pdf (verified)');
+        state.unchanged++;
+        continue;
+      }
+      var oldDateStr = curDate ? Utilities.formatDate(curDate, tz, 'MM/dd/yyyy') : 'unknown';
+      var newDateStr = Utilities.formatDate(newDate, tz, 'MM/dd/yyyy');
+      jhaSheet.getRange(entry.sheetRow, COL_DATE_CREATED + 1).setValue(newDate);
+      jhaSheet.getRange(entry.sheetRow, COL_SOURCE + 1).setValue('pdf (reprocessed)');
+      var updatedNotes = entry.currentNotes
+        .replace('Date from: subject',
+                 'Date from: pdf (reprocessed - was ' + oldDateStr + ')');
+      jhaSheet.getRange(entry.sheetRow, COL_NOTES + 1).setValue(updatedNotes);
+      var weekStart = new Date(newDate);
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+      weekStart.setHours(0, 0, 0, 0);
+      state.affectedWeeks[weekStart.getTime()] = true;
+      if (curDate && !isNaN(curDate.getTime())) {
+        var oldWeekStart = new Date(curDate);
+        oldWeekStart.setDate(oldWeekStart.getDate() - oldWeekStart.getDay());
+        oldWeekStart.setHours(0, 0, 0, 0);
+        state.affectedWeeks[oldWeekStart.getTime()] = true;
+      }
+      Logger.log('runReprocessJHABatch: Fixed ' + entry.jobNumber + ' - ' + oldDateStr + ' -> ' + newDateStr);
+      state.changes.push(entry.jobNumber + ': ' + oldDateStr + ' -> ' + newDateStr);
+      state.fixed++;
+    } catch (e) {
+      Logger.log('runReprocessJHABatch: Error for ' + entry.emailId + ': ' + e);
+      state.failed++;
+    }
+  }
+  state.pending = pending;
+  Logger.log('runReprocessJHABatch: Batch done. Fixed=' + state.fixed +
+             ' Unchanged=' + state.unchanged + ' Failed=' + state.failed +
+             ' Remaining=' + pending.length + '/' + state.totalQueued);
+  props.setProperty(JHA_REPROCESS_STATE_KEY, JSON.stringify(state));
+  if (pending.length > 0) {
+    ScriptApp.newTrigger('runReprocessJHABatch').timeBased().after(5 * 1000).create();
+    Logger.log('runReprocessJHABatch: Next batch scheduled. ' + pending.length + ' remain.');
+  } else {
+    ScriptApp.newTrigger('finalizeReprocessJHA').timeBased().after(5 * 1000).create();
+    Logger.log('runReprocessJHABatch: All done. Finalize scheduled.');
+  }
+}
+/**
+ * Final step after all batches complete.
+ * Recalculates compliance if any dates were fixed. Stores result for menu display.
+ */
+function finalizeReprocessJHA() {
+  _deleteJHAReprocessTriggers_();
+  var props = PropertiesService.getScriptProperties();
+  var stateJson = props.getProperty(JHA_REPROCESS_STATE_KEY);
+  var state = { fixed: 0, unchanged: 0, failed: 0, changes: [], affectedWeeks: {}, totalQueued: 0 };
+  if (stateJson) { try { state = JSON.parse(stateJson); } catch(e) {} }
+  props.deleteProperty(JHA_REPROCESS_STATE_KEY);
+  var affectedWeekCount = Object.keys(state.affectedWeeks || {}).length;
+  Logger.log('finalizeReprocessJHA: Fixed=' + state.fixed + ' Unchanged=' + state.unchanged +
+             ' Failed=' + state.failed + ' Weeks affected=' + affectedWeekCount);
+  if (state.fixed > 0 && affectedWeekCount > 0) {
+    Logger.log('finalizeReprocessJHA: Recalculating compliance (silent)...');
+    try {
+      var compResult = masterRecalculateComplianceSilent();
+      Logger.log('finalizeReprocessJHA: Compliance recalculated. Weeks=' + compResult.weeksProcessed +
+                 ' Compliant=' + compResult.compliant + ' Missing=' + compResult.missing);
+    }
+    catch(e) { Logger.log('finalizeReprocessJHA: Compliance recalc error: ' + e); }
+  }
+  try { sortAndFormatSafetyLogs(true); } catch(e) {}
+  var resultMsg = '\u2705 Fix JHA Dates - Complete!\n\n' +
+    'Fixed: ' + state.fixed + ' date(s) corrected\n' +
+    'Verified: ' + state.unchanged + ' already correct\n' +
+    (state.failed > 0 ? 'Errors: ' + state.failed + ' (email not found or PDF unreadable)\n' : '') +
+    (state.fixed > 0 ? '\nCompliance recalculated automatically.\n' : '') +
+    (state.changes && state.changes.length > 0
+      ? '\nChanges:\n' + state.changes.slice(0, 20).map(function(c) { return '  - ' + c; }).join('\n') +
+        (state.changes.length > 20 ? '\n  ... and ' + (state.changes.length - 20) + ' more' : '')
+      : '');
+  props.setProperty(JHA_REPROCESS_RESULT_KEY, resultMsg);
+  Logger.log('finalizeReprocessJHA: Result stored. Run "Check Fix JHA Progress" to view.');
+}
+/**
+ * Menu item - shows status of running or completed JHA reprocess job.
+ */
+function showReprocessJHAProgress() {
+  var ui = SpreadsheetApp.getUi();
+  var props = PropertiesService.getScriptProperties();
+  var resultMsg = props.getProperty(JHA_REPROCESS_RESULT_KEY);
+  if (resultMsg) {
+    ui.alert('\u2705 Fix JHA Dates - Complete', resultMsg, ui.ButtonSet.OK);
+    props.deleteProperty(JHA_REPROCESS_RESULT_KEY);
+    return;
+  }
+  var stateJson = props.getProperty(JHA_REPROCESS_STATE_KEY);
+  if (stateJson) {
+    try {
+      var state = JSON.parse(stateJson);
+      var done = state.totalQueued - (state.pending ? state.pending.length : 0);
+      var pct  = state.totalQueued > 0 ? Math.round(done / state.totalQueued * 100) : 0;
+      var elapsed = Math.round((new Date().getTime() - state.startedAt) / 1000);
+      ui.alert('\u23F3 Fix JHA Dates - In Progress',
+        'Progress: ' + done + ' / ' + state.totalQueued + ' (' + pct + '%)\n' +
+        'Fixed so far: ' + state.fixed + '\n' +
+        'Verified correct: ' + state.unchanged + '\n' +
+        'Elapsed: ' + elapsed + 's\n\n' +
+        'Check back in ~' + Math.ceil((state.pending ? state.pending.length : 0) * 10 / 60) + ' minute(s).',
+        ui.ButtonSet.OK);
+    } catch(e) {
+      ui.alert('Status Unknown', 'Could not read progress.', ui.ButtonSet.OK);
+    }
+    return;
+  }
+  ui.alert('\uD83D\uDCCB No Active Job',
+    'No Fix JHA Dates job is currently running.\n\n' +
+    'To start: Safety Emails -> Utilities -> Fix JHA Dates',
+    ui.ButtonSet.OK);
+}
+/** Removes any pending runReprocessJHABatch or finalizeReprocessJHA triggers. */
+function _deleteJHAReprocessTriggers_() {
+  try {
+    var triggers = ScriptApp.getProjectTriggers();
+    for (var i = 0; i < triggers.length; i++) {
+      var fn = triggers[i].getHandlerFunction();
+      if (fn === 'runReprocessJHABatch' || fn === 'finalizeReprocessJHA') {
+        ScriptApp.deleteTrigger(triggers[i]);
+      }
+    }
+  } catch(e) { Logger.log('_deleteJHAReprocessTriggers_: ' + e); }
+}
+
 function applyAllEmailLinksScheduled() {
   // Delete this one-shot trigger first so it never fires again
   try {
@@ -6752,7 +7261,8 @@ function applyAllEmailLinksScheduled() {
 
   var jhaCount = applyJHALogEmailLinksSilent();
   var weeklyCount = applyWeeklySafetyLogEmailLinksSilent();
-  Logger.log('applyAllEmailLinksScheduled: Applied Gmail links — JHA Log: ' + jhaCount + ', Weekly Safety Log: ' + weeklyCount);
+  var monthlyCount = applyMonthlyChecklistLogEmailLinksSilent();
+  Logger.log('applyAllEmailLinksScheduled: Applied Gmail links — JHA Log: ' + jhaCount + ', Weekly Safety Log: ' + weeklyCount + ', Monthly Checklist Log: ' + monthlyCount);
 }
 
 /**
@@ -6930,7 +7440,7 @@ function applyWeeklySafetyLogEmailLinksSilent() {
  * Re-fetches each unique email, extracts PDF text, and looks for the Comments field
  * near the equipment section that generated the issue.
  *
- * Menu: Glove Manager â†’ ðŸ›¡ï¸ Process Safety Emails â†’ ðŸ§¹ Cleanup â†’ ðŸ“ Backfill Notes from PDF Comments
+ * Menu: Glove Manager → 🛡\uFE0F Process Safety Emails → 🧹 Cleanup → \uD83D\uDD0D Backfill Notes from PDF Comments
  */
 function backfillEquipmentNotes() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -7187,7 +7697,7 @@ function backfillEquipmentNotes() {
       if (noteText) {
         sheet.getRange(row.rowNum, 11).setValue(noteText);  // col K = 11
         updatedCount++;
-        Logger.log('backfillEquipmentNotes: Row ' + row.rowNum + ' (' + row.equipType + ') â† "' + noteText.substring(0, 100) + '"');
+        Logger.log('backfillEquipmentNotes: Row ' + row.rowNum + ' (' + row.equipType + ') ↁ "' + noteText.substring(0, 100) + '"');
       } else {
         skippedCount++;
         Logger.log('backfillEquipmentNotes: Row ' + row.rowNum + ' (' + row.equipType + ') - no comment found');
@@ -7360,7 +7870,7 @@ function extractDatesCompletedFromJHAPDF(pdfText) {
     if (parsedDate && !isNaN(parsedDate.getTime())) {
       if (!dates.some(function(d) { return d.getTime() === parsedDate.getTime(); })) {
         dates.push(parsedDate);
-        Logger.log("extractDatesCompletedFromJHAPDF: âœ“ Added from Pattern1: " + parsedDate.toDateString());
+        Logger.log("extractDatesCompletedFromJHAPDF: ✓ Added from Pattern1: " + parsedDate.toDateString());
       }
     }
   }
@@ -7382,7 +7892,7 @@ function extractDatesCompletedFromJHAPDF(pdfText) {
         if (year >= 2024 && year <= 2030) {
           if (!dates.some(function(d) { return d.getTime() === parsedDate.getTime(); })) {
             dates.push(parsedDate);
-            Logger.log("extractDatesCompletedFromJHAPDF: âœ“ Added from Pattern1B: " + parsedDate.toDateString());
+            Logger.log("extractDatesCompletedFromJHAPDF: ✓ Added from Pattern1B: " + parsedDate.toDateString());
           }
         }
       }
@@ -7400,7 +7910,7 @@ function extractDatesCompletedFromJHAPDF(pdfText) {
       if (parsedDate && !isNaN(parsedDate.getTime())) {
         if (!dates.some(function(d) { return d.getTime() === parsedDate.getTime(); })) {
           dates.push(parsedDate);
-          Logger.log("extractDatesCompletedFromJHAPDF: âœ“ Added from Pattern2: " + parsedDate.toDateString());
+          Logger.log("extractDatesCompletedFromJHAPDF: ✓ Added from Pattern2: " + parsedDate.toDateString());
         }
       }
     }
@@ -7417,7 +7927,7 @@ function extractDatesCompletedFromJHAPDF(pdfText) {
       if (parsedDate && !isNaN(parsedDate.getTime())) {
         if (!dates.some(function(d) { return d.getTime() === parsedDate.getTime(); })) {
           dates.push(parsedDate);
-          Logger.log("extractDatesCompletedFromJHAPDF: âœ“ Added from Pattern3: " + parsedDate.toDateString());
+          Logger.log("extractDatesCompletedFromJHAPDF: ✓ Added from Pattern3: " + parsedDate.toDateString());
         }
       }
     }
@@ -7435,7 +7945,7 @@ function extractDatesCompletedFromJHAPDF(pdfText) {
       if (parsedDate && !isNaN(parsedDate.getTime())) {
         if (!dates.some(function(d) { return d.getTime() === parsedDate.getTime(); })) {
           dates.push(parsedDate);
-          Logger.log("extractDatesCompletedFromJHAPDF: âœ“ Added from Pattern4: " + parsedDate.toDateString());
+          Logger.log("extractDatesCompletedFromJHAPDF: ✓ Added from Pattern4: " + parsedDate.toDateString());
         }
       }
     }
@@ -7455,7 +7965,7 @@ function extractDatesCompletedFromJHAPDF(pdfText) {
         if (year >= 2024 && year <= 2027) {
           if (!dates.some(function(d) { return d.getTime() === parsedDate.getTime(); })) {
             dates.push(parsedDate);
-            Logger.log("extractDatesCompletedFromJHAPDF: âœ“ Added from Pattern5: " + parsedDate.toDateString());
+            Logger.log("extractDatesCompletedFromJHAPDF: ✓ Added from Pattern5: " + parsedDate.toDateString());
           }
         }
       }
@@ -7474,7 +7984,7 @@ function extractDatesCompletedFromJHAPDF(pdfText) {
       if (parsedDate && !isNaN(parsedDate.getTime())) {
         if (!dates.some(function(d) { return d.getTime() === parsedDate.getTime(); })) {
           dates.push(parsedDate);
-          Logger.log("extractDatesCompletedFromJHAPDF: âœ“ Added from Pattern6: " + parsedDate.toDateString());
+          Logger.log("extractDatesCompletedFromJHAPDF: ✓ Added from Pattern6: " + parsedDate.toDateString());
         }
       }
     }
@@ -7496,7 +8006,7 @@ function extractDatesCompletedFromJHAPDF(pdfText) {
         if (parsedDate && !isNaN(parsedDate.getTime())) {
           if (!dates.some(function(d) { return d.getTime() === parsedDate.getTime(); })) {
             dates.push(parsedDate);
-            Logger.log("extractDatesCompletedFromJHAPDF: âœ“ Added from Pattern6B: " + parsedDate.toDateString());
+            Logger.log("extractDatesCompletedFromJHAPDF: ✓ Added from Pattern6B: " + parsedDate.toDateString());
           }
         }
       }
@@ -8970,10 +9480,10 @@ function setupSafetyComplianceSheet() {
     .build();
   rules.push(lateRule);
 
-  // Light green for âœ“ with date (Monthly Checklist received earlier in month)
-  // e.g., "âœ“02/10" - shows date checklist was received
+  // Light green for ✓ with date (Monthly Checklist received earlier in month)
+  // e.g., "✓02/10" - shows date checklist was received
   var checkDateRule = SpreadsheetApp.newConditionalFormatRule()
-    .whenTextStartsWith("âœ“")
+    .whenTextStartsWith("✓")
     .setBackground("#E8F5E9")  // Very light green
     .setFontColor("#2E7D32")   // Dark green text
     .setRanges([dayRange])
@@ -9040,7 +9550,7 @@ function setupSafetyComplianceSheet() {
  * Adds dropdown data validation to existing Safety Compliance sheet.
  * This makes it easy to change values by clicking and selecting from a dropdown.
  *
- * Called from: Glove Manager â†’ Safety â†’ Add Dropdowns to Safety Compliance
+ * Called from: Glove Manager → Safety → Add Dropdowns to Safety Compliance
  */
 function addDropdownsToSafetyCompliance() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -9078,11 +9588,11 @@ function addDropdownsToSafetyCompliance() {
   SpreadsheetApp.getUi().alert(
     '\u2705 Dropdowns Added!',
     'You can now click any day/meeting cell and select from a dropdown:\n\n' +
-    'â€¢ \u2705 - Received on time\n' +
-    'â€¢ \u2705L - Received late\n' +
-    'â€¢ \u274C - Missing\n' +
-    'â€¢ N/A - Skipped\n' +
-    'â€¢ \u23F3 - Pending\n\n' +
+    '\u2022 \u2705 - Received on time\n' +
+    '\u2022 \u2705L - Received late\n' +
+    '\u2022 \u274C - Missing\n' +
+    '\u2022 N/A - Skipped\n' +
+    '\u2022 \u23F3 - Pending\n\n' +
     'Status column also has a dropdown.\nColumn widths adjusted to 55px.',
     SpreadsheetApp.getUi().ButtonSet.OK
   );
@@ -9095,7 +9605,7 @@ function addDropdownsToSafetyCompliance() {
  * Blank cells will still have gray background from conditional formatting.
  * Tooltips are preserved/updated to explain the blank means "skipped".
  *
- * Called from: Glove Manager â†’ Safety â†’ ðŸ§¹ Cleanup N/A Cells
+ * Called from: Glove Manager → Safety → 🧹 Cleanup N/A Cells
  */
 function cleanupNACellsInCompliance() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -9135,7 +9645,7 @@ function cleanupNACellsInCompliance() {
         var dateStr = Utilities.formatDate(dayDate, tz, 'MMM dd, yyyy');
 
         // Set tooltip to explain
-        cell.setNote('ðŸ“… ' + dayNames[dayIdx] + ', ' + dateStr + '\n\n(Skipped - crew scheduled off this day)');
+        cell.setNote('📅 ' + dayNames[dayIdx] + ', ' + dateStr + '\n\n(Skipped - crew scheduled off this day)');
         replacedCount++;
       }
     }
@@ -9145,7 +9655,7 @@ function cleanupNACellsInCompliance() {
     if (weeklyValue === 'N/A') {
       var weeklyCell = sheet.getRange(rowNum, 11);
       weeklyCell.setValue('');
-      weeklyCell.setNote('ðŸ“‹ Weekly Safety Meeting\n\n(Skipped per config)');
+      weeklyCell.setNote('📋 Weekly Safety Meeting\n\n(Skipped per config)');
       replacedCount++;
     }
 
@@ -9154,7 +9664,7 @@ function cleanupNACellsInCompliance() {
     if (monthlyValue === 'N/A') {
       var monthlyCell = sheet.getRange(rowNum, 12);
       monthlyCell.setValue('');
-      monthlyCell.setNote('ðŸ“‹ Monthly Fleet Checklist\n\n(Skipped per config)');
+      monthlyCell.setNote('📋 Monthly Fleet Checklist\n\n(Skipped per config)');
       replacedCount++;
     }
   }
@@ -9163,7 +9673,7 @@ function cleanupNACellsInCompliance() {
   addBlankCellFormatting(sheet);
 
   SpreadsheetApp.getUi().alert(
-    'ðŸ§¹ Cleanup Complete',
+    '🧹 Cleanup Complete',
     'Replaced ' + replacedCount + ' N/A cells with blank cells.\n\n' +
     'Blank cells now show gray background and have tooltips explaining they are skipped days.',
     SpreadsheetApp.getUi().ButtonSet.OK
@@ -9300,7 +9810,7 @@ function setupSafetyComplianceConfig() {
  * 3. Copies settings to matching crews in Job Tracking
  * 4. Optionally deletes the Safety Compliance Config sheet
  *
- * Called from: Glove Manager â†’ ðŸ”§ Maintenance â†’ Sheets Setup â†’ ðŸ“‹ Migrate Config to Job Tracking
+ * Called from: Glove Manager → 🔧 Maintenance → Sheets Setup → 📋 Migrate Config to Job Tracking
  */
 function migrateConfigToJobTracking() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -9309,7 +9819,7 @@ function migrateConfigToJobTracking() {
   // Check if Safety Compliance Config exists
   var configSheet = ss.getSheetByName('Safety Compliance Config');
   if (!configSheet) {
-    ui.alert('â„¹ï¸ Not Needed',
+    ui.alert('ℹ\uFE0F Not Needed',
       'Safety Compliance Config sheet not found.\n\n' +
       'This migration is only needed if you have existing settings in that sheet.\n\n' +
       'Your Job Tracking sheet will use default settings (Mon-Thu schedule).',
@@ -9360,7 +9870,7 @@ function migrateConfigToJobTracking() {
 
   // Confirm migration
   var confirmResponse = ui.alert(
-    'ðŸ“‹ Migrate Safety Compliance Config',
+    '📋 Migrate Safety Compliance Config',
     'This will:\n\n' +
     '1. Copy skip day settings from Safety Compliance Config to Job Tracking\n' +
     '2. Copy "Skip Weekly Meeting" and "Skip Monthly Checklist" flags\n' +
@@ -9481,8 +9991,8 @@ function migrateConfigToJobTracking() {
     Logger.log('migrateConfigToJobTracking: Deleted Safety Compliance Config sheet');
 
     var message = '\u2705 Migration Complete!\n\n' +
-      'â€¢ Settings copied: ' + updatedCount + ' crews\n' +
-      'â€¢ Safety Compliance Config sheet deleted\n\n' +
+      '\u2022 Settings copied: ' + updatedCount + ' crews\n' +
+      '\u2022 Safety Compliance Config sheet deleted\n\n' +
       'All schedule settings are now in Job Tracking (columns L-T).';
 
     if (notFoundCount > 0) {
@@ -9500,11 +10010,11 @@ function migrateConfigToJobTracking() {
 }
 
 /**
- * Returns a map of job number â†’ status (lowercase) from Job Tracking sheet.
+ * Returns a map of job number → status (lowercase) from Job Tracking sheet.
  * Used to identify On Hold/Completed/Pending Start crews that should not be
  * treated as "unknown" in compliance tracking.
  *
- * @returns {Object} Map of job number â†’ status string (e.g., { '041-26': 'on hold' })
+ * @returns {Object} Map of job number → status string (e.g., { '041-26': 'on hold' })
  */
 function getJobTrackingStatusMap() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -9704,7 +10214,7 @@ function populateComplianceConfigSilent() {
  * Fixes missing checkboxes in Safety Compliance Config sheet.
  * Run this if dropdown/checkbox columns are missing after adding new crews.
  *
- * Menu: Glove Manager â†’ Safety â†’ ðŸ”§ Fix Config Checkboxes
+ * Menu: Glove Manager → Safety → 🔧 Fix Config Checkboxes
  */
 function fixComplianceConfigCheckboxes() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -9730,7 +10240,7 @@ function fixComplianceConfigCheckboxes() {
  * Also updates foreman names for crews that still exist
  * Shows interactive dialog allowing user to select which changes to apply
  *
- * Menu: Glove Manager â†’ Safety â†’ ðŸ§¹ Cleanup Config Crews
+ * Menu: Glove Manager → Safety → 🧹 Cleanup Config Crews
  */
 function cleanupComplianceConfig() {
   var ui = SpreadsheetApp.getUi();
@@ -9799,7 +10309,7 @@ function cleanupComplianceConfig() {
   var html = HtmlService.createHtmlOutput(buildConfigCleanupHtml(crewsToRemove, foremansToUpdate))
     .setWidth(500)
     .setHeight(500);
-  ui.showModalDialog(html, 'ðŸ§¹ Cleanup Config - Select Changes');
+  ui.showModalDialog(html, '🧹 Cleanup Config - Select Changes');
 }
 
 /**
@@ -9827,7 +10337,7 @@ function buildConfigCleanupHtml(crewsToRemove, foremansToUpdate) {
 
   html += '<div class="section">';
   if (crewsToRemove.length > 0) {
-    html += '<div class="section-title">ðŸ—‘ï¸ Crews to REMOVE (not in Employees)</div>';
+    html += '<div class="section-title">\uD83D\uDDD1\uFE0F Crews to REMOVE (not in Employees)</div>';
     html += '<div class="select-all"><a onclick="toggleAll(\'remove\', true)">Select All</a> | <a onclick="toggleAll(\'remove\', false)">Deselect All</a></div>';
     for (var i = 0; i < crewsToRemove.length; i++) {
       var crew = crewsToRemove[i];
@@ -9841,7 +10351,7 @@ function buildConfigCleanupHtml(crewsToRemove, foremansToUpdate) {
 
   html += '<div class="section">';
   if (foremansToUpdate.length > 0) {
-    html += '<div class="section-title">âœï¸ Foreman Names to UPDATE</div>';
+    html += '<div class="section-title">✁\uFE0F Foreman Names to UPDATE</div>';
     html += '<div class="select-all"><a onclick="toggleAll(\'update\', true)">Select All</a> | <a onclick="toggleAll(\'update\', false)">Deselect All</a></div>';
     for (var j = 0; j < foremansToUpdate.length; j++) {
       var update = foremansToUpdate[j];
@@ -9849,7 +10359,7 @@ function buildConfigCleanupHtml(crewsToRemove, foremansToUpdate) {
       html += '<input type="checkbox" class="update-cb" id="update_' + j + '" checked>';
       html += '<label for="update_' + j + '">' + update.jobNumber + ': ';
       html += '<span class="old-val">' + update.oldForeman + '</span>';
-      html += '<span class="arrow">â†’</span>';
+      html += '<span class="arrow">→</span>';
       html += '<span class="new-val">' + update.newForeman + '</span>';
       html += '</label></div>';
     }
@@ -9916,7 +10426,7 @@ function applyConfigCleanupSelections(selectionsJson) {
       var updateInfo = foremansToUpdate[updateIdx];
       configSheet.getRange(updateInfo.row, 2).setValue(updateInfo.newForeman);
       updatedCount++;
-      Logger.log('Updated foreman for ' + updateInfo.jobNumber + ': ' + updateInfo.oldForeman + ' â†’ ' + updateInfo.newForeman);
+      Logger.log('Updated foreman for ' + updateInfo.jobNumber + ': ' + updateInfo.oldForeman + ' → ' + updateInfo.newForeman);
     }
   }
 
@@ -10092,7 +10602,7 @@ function openComplianceConfig() {
  * Refreshes foreman names in Job Tracking, Safety Compliance, and Safety Compliance Config sheets
  * based on current Employees data. Use when a foreman changes for a crew.
  *
- * Menu: Glove Manager â†’ Process Safety Emails â†’ Utilities â†’ Refresh Foreman Names
+ * Menu: Glove Manager → Process Safety Emails → Utilities → Refresh Foreman Names
  */
 function refreshComplianceForemenNames() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -10142,8 +10652,8 @@ function refreshComplianceForemenNames() {
       if (jtNewForeman && jtNewForeman !== jtCurrentForeman) {
         jobTrackingSheet.getRange(jt + 1, jForemanCol + 1).setValue(jtNewForeman);
         jobTrackingUpdates++;
-        changedJobs.push(jtJobNum + ': ' + (jtCurrentForeman || '(empty)') + ' â†’ ' + jtNewForeman);
-        Logger.log('Job Tracking: Updated ' + jtJobNum + ' foreman: ' + jtCurrentForeman + ' â†’ ' + jtNewForeman);
+        changedJobs.push(jtJobNum + ': ' + (jtCurrentForeman || '(empty)') + ' → ' + jtNewForeman);
+        Logger.log('Job Tracking: Updated ' + jtJobNum + ' foreman: ' + jtCurrentForeman + ' → ' + jtNewForeman);
       }
     }
   } else {
@@ -10166,10 +10676,10 @@ function refreshComplianceForemenNames() {
       if (newForeman && newForeman !== currentForeman) {
         configSheet.getRange(c + 1, 2).setValue(newForeman);
         configUpdates++;
-        if (changedJobs.indexOf(jobNum + ': ' + currentForeman + ' â†’ ' + newForeman) === -1) {
-          changedJobs.push(jobNum + ': ' + (currentForeman || '(empty)') + ' â†’ ' + newForeman);
+        if (changedJobs.indexOf(jobNum + ': ' + currentForeman + ' → ' + newForeman) === -1) {
+          changedJobs.push(jobNum + ': ' + (currentForeman || '(empty)') + ' → ' + newForeman);
         }
-        Logger.log('Config: Updated ' + jobNum + ' foreman: ' + currentForeman + ' â†’ ' + newForeman);
+        Logger.log('Config: Updated ' + jobNum + ' foreman: ' + currentForeman + ' → ' + newForeman);
       }
     }
   }
@@ -10203,7 +10713,7 @@ function refreshComplianceForemenNames() {
       if (newForeman && newForeman !== currentForeman) {
         complianceSheet.getRange(r + 1, foremanCol + 1).setValue(newForeman);
         complianceUpdates++;
-        Logger.log('Compliance row ' + (r + 1) + ': Updated ' + jobNum + ' foreman: ' + currentForeman + ' â†’ ' + newForeman);
+        Logger.log('Compliance row ' + (r + 1) + ': Updated ' + jobNum + ' foreman: ' + currentForeman + ' → ' + newForeman);
       }
     }
   }
@@ -10277,7 +10787,7 @@ function loadComplianceConfig() {
         SpreadsheetApp.getUi().alert(
           '\u26A0\uFE0F Migration Required',
           'Job Tracking needs Schedule Compliance columns (L-T).\n\n' +
-          'Please run: Glove Manager â†’ ðŸ”§ Maintenance â†’ Sheets Setup â†’ ðŸ“‹ Migrate Config to Job Tracking',
+          'Please run: Glove Manager → 🔧 Maintenance → Sheets Setup → 📋 Migrate Config to Job Tracking',
           SpreadsheetApp.getUi().ButtonSet.OK
         );
       } catch (e) {
@@ -10425,7 +10935,7 @@ function calculateSafetyCompliance(weekStartDate) {
   // Load existing compliance data from Safety Compliance sheet
   // This is now the PRIMARY source of JHA/Meeting compliance data
   var resolvedCrews = {};
-  var existingComplianceByJob = {};  // Job â†’ existing row data
+  var existingComplianceByJob = {};  // Job → existing row data
   var complianceSheet = ss.getSheetByName(SAFETY_COMPLIANCE_SHEET_NAME);
   if (complianceSheet) {
     var complianceData = complianceSheet.getDataRange().getValues();
@@ -10455,10 +10965,10 @@ function calculateSafetyCompliance(weekStartDate) {
   }
   Logger.log('calculateSafetyCompliance: Loaded existing data for ' + Object.keys(existingComplianceByJob).length + ' crews, ' + Object.keys(resolvedCrews).length + ' resolved');
 
-  // Build mappings for secondary/custom jobs â†’ primary crew
+  // Build mappings for secondary/custom jobs → primary crew
   // This allows reports submitted on secondary jobs (e.g., 006-26) to credit the foreman's primary crew (e.g., 052-25)
-  var foremanToPrimaryCrew = {};  // foreman name â†’ primary job number
-  var jobToForeman = {};          // job number â†’ foreman name (includes secondary jobs)
+  var foremanToPrimaryCrew = {};  // foreman name → primary job number
+  var jobToForeman = {};          // job number → foreman name (includes secondary jobs)
 
   // Load custom job mappings from dialog configuration
   var customMappings = getCustomJobForemanMappings() || {};
@@ -10485,12 +10995,12 @@ function calculateSafetyCompliance(weekStartDate) {
         // Extract base job (without position suffix)
         var baseJob = empJob.split('.')[0];
 
-        // Track this job â†’ employee
+        // Track this job → employee
         if (!jobToForeman[baseJob]) {
           jobToForeman[baseJob] = empName;
         }
 
-        // Track secondary job â†’ same employee
+        // Track secondary job → same employee
         if (empSecondaryJob) {
           var baseSecondaryJob = empSecondaryJob.split('.')[0];
           jobToForeman[baseSecondaryJob] = empName;
@@ -10532,8 +11042,8 @@ function calculateSafetyCompliance(weekStartDate) {
     }
   }
 
-  Logger.log('calculateSafetyCompliance: Built foremanâ†’crew map with ' + Object.keys(foremanToPrimaryCrew).length + ' foremen');
-  Logger.log('calculateSafetyCompliance: Built jobâ†’foreman map with ' + Object.keys(jobToForeman).length + ' jobs');
+  Logger.log('calculateSafetyCompliance: Built foreman→crew map with ' + Object.keys(foremanToPrimaryCrew).length + ' foremen');
+  Logger.log('calculateSafetyCompliance: Built job→foreman map with ' + Object.keys(jobToForeman).length + ' jobs');
 
   // Debug: Log the mappings for custom jobs
   for (var debugJob in customMappings) {
@@ -10623,7 +11133,7 @@ function calculateSafetyCompliance(weekStartDate) {
 
   // Track jobs that couldn't be resolved to a tracked crew
   // Now tracks individual reports with full details for assignment capability
-  var uncreditedJobs = {};  // jobNumber â†’ { reportTypes: {}, reports: [], foreman, reason }
+  var uncreditedJobs = {};  // jobNumber → { reportTypes: {}, reports: [], foreman, reason }
 
   /**
    * Helper to resolve a job number to its tracked primary crew
@@ -11236,7 +11746,7 @@ function addMonthlyChecklistFormattingRules() {
   });
 
   if (hasWarningRule) {
-    Browser.msgBox("â„¹ï¸ Monthly Checklist formatting rules already exist.");
+    Browser.msgBox("ℹ\uFE0F Monthly Checklist formatting rules already exist.");
     return;
   }
 
@@ -11264,7 +11774,7 @@ function addMonthlyChecklistFormattingRules() {
 
   sheet.setConditionalFormatRules(rules);
 
-  Browser.msgBox("\u2705 Added Monthly Checklist progressive formatting rules.\n\nâ€¢ \u26A0\uFE0F = Orange (Week 3 - warning)\nâ€¢ \u274C\u23F3 = Red (Week 4 - urgent, deadline approaching)\nâ€¢ \u274C = Red (Month ended - missing)\nâ€¢ \u23F3 = Yellow (Weeks 1-2 - pending, no urgency)");
+  Browser.msgBox("\u2705 Added Monthly Checklist progressive formatting rules.\n\n\u2022 \u26A0\uFE0F = Orange (Week 3 - warning)\n\u2022 \u274C\u23F3 = Red (Week 4 - urgent, deadline approaching)\n\u2022 \u274C = Red (Month ended - missing)\n\u2022 \u23F3 = Yellow (Weeks 1-2 - pending, no urgency)");
 }
 
 /**
@@ -11304,7 +11814,7 @@ function addLateSubmissionFormatting() {
   });
 
   if (hasLateRule) {
-    Browser.msgBox("â„¹ï¸ Late submission formatting (\u2705L) already exists.");
+    Browser.msgBox("ℹ\uFE0F Late submission formatting (\u2705L) already exists.");
     return;
   }
 
@@ -11322,7 +11832,7 @@ function addLateSubmissionFormatting() {
 
   sheet.setConditionalFormatRules(rules);
 
-  Browser.msgBox("\u2705 Added Late Submission formatting.\n\nâ€¢ \u2705L = Yellow background, amber text\n   (Report received but submitted after week deadline)\n\nâ€¢ \u2705 = Green background\n   (Report received on time)");
+  Browser.msgBox("\u2705 Added Late Submission formatting.\n\n\u2022 \u2705L = Yellow background, amber text\n   (Report received but submitted after week deadline)\n\n\u2022 \u2705 = Green background\n   (Report received on time)");
 }
 
 /**
@@ -11498,8 +12008,8 @@ function autoCorrectPastWeekCompliance(complianceRecords, currentWeekStart) {
 }
 
 /**
- * Adds Monthly Checklist date formatting (âœ“MM/DD) to existing Safety Compliance sheet
- * Shows light green background with dark green text for cells starting with âœ“
+ * Adds Monthly Checklist date formatting (✓MM/DD) to existing Safety Compliance sheet
+ * Shows light green background with dark green text for cells starting with ✓
  */
 function addMonthlyChecklistDateFormatting() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -11513,24 +12023,24 @@ function addMonthlyChecklistDateFormatting() {
   var rules = sheet.getConditionalFormatRules();
   var dayRange = sheet.getRange("D2:L1001");
 
-  // Check if we already have the âœ“ date rule
+  // Check if we already have the ✓ date rule
   var hasDateRule = rules.some(function(rule) {
     var criteria = rule.getBooleanCondition();
     if (criteria && criteria.getCriteriaType() === SpreadsheetApp.BooleanCriteria.TEXT_STARTS_WITH) {
       var values = criteria.getCriteriaValues();
-      return values && values[0] === 'âœ“';
+      return values && values[0] === '✓';
     }
     return false;
   });
 
   if (hasDateRule) {
-    Browser.msgBox("â„¹ï¸ Monthly Checklist date formatting (âœ“MM/DD) already exists.");
+    Browser.msgBox("ℹ\uFE0F Monthly Checklist date formatting (✓MM/DD) already exists.");
     return;
   }
 
-  // Light green for âœ“ with date (Monthly Checklist received earlier in month)
+  // Light green for ✓ with date (Monthly Checklist received earlier in month)
   var checkDateRule = SpreadsheetApp.newConditionalFormatRule()
-    .whenTextStartsWith("âœ“")
+    .whenTextStartsWith("✓")
     .setBackground("#E8F5E9")  // Very light green
     .setFontColor("#2E7D32")   // Dark green text
     .setRanges([dayRange])
@@ -11541,7 +12051,7 @@ function addMonthlyChecklistDateFormatting() {
 
   sheet.setConditionalFormatRules(rules);
 
-  Browser.msgBox("\u2705 Added Monthly Checklist date formatting.\n\nâ€¢ âœ“MM/DD = Light green background, dark green text\n   (Checklist received earlier in the month)\n\nâ€¢ \u2705 = Green (received this week)");
+  Browser.msgBox("\u2705 Added Monthly Checklist date formatting.\n\n\u2022 ✓MM/DD = Light green background, dark green text\n   (Checklist received earlier in the month)\n\n\u2022 \u2705 = Green (received this week)");
 }
 
 /**
@@ -11670,7 +12180,7 @@ function fixLateSubmissionsRetroactively() {
   Logger.log("Total late emails found: " + lateCount);
 
   if (lateCount === 0) {
-    Browser.msgBox("â„¹ï¸ No late submissions found for the week of 02/08/2026.");
+    Browser.msgBox("ℹ\uFE0F No late submissions found for the week of 02/08/2026.");
     return;
   }
 
@@ -11731,8 +12241,8 @@ function fixLateSubmissionsRetroactively() {
   addLateSubmissionFormatting();
 
   Browser.msgBox("\u2705 Late Submission Fix Complete!\n\n" +
-    "â€¢ Late emails found: " + lateCount + "\n" +
-    "â€¢ Safety Reports updated: " + updatedCount + "\n\n" +
+    "\u2022 Late emails found: " + lateCount + "\n" +
+    "\u2022 Safety Reports updated: " + updatedCount + "\n\n" +
     "Safety Compliance sheet now shows \u2705L for late submissions.");
 }
 
@@ -11742,7 +12252,7 @@ function fixLateSubmissionsRetroactively() {
 function menuFixLateSubmissions() {
   var ui = SpreadsheetApp.getUi();
   var response = ui.alert(
-    'ðŸ”§ Fix Late Submissions (Week of 02/08/2026)',
+    '🔧 Fix Late Submissions (Week of 02/08/2026)',
     'This will:\n' +
     '1. Search Gmail for JHAs/Safety Meetings from week of 02/08 received after 02/14\n' +
     '2. Mark them as LATE in Safety Reports\n' +
@@ -11797,7 +12307,7 @@ function menuBackfillPastWeeks() {
   var weekKeys = Object.keys(weeks).sort().reverse(); // Most recent first
 
   if (weekKeys.length === 0) {
-    Browser.msgBox("â„¹ï¸ No report dates found in Safety Reports sheet.");
+    Browser.msgBox("ℹ\uFE0F No report dates found in Safety Reports sheet.");
     return;
   }
 
@@ -11842,7 +12352,7 @@ function menuCleanupDuplicateComplianceRows() {
 
   if (data.length < 2) {
     Logger.log('No data rows to check');
-    Browser.msgBox("â„¹ï¸ No data rows to clean up.");
+    Browser.msgBox("ℹ\uFE0F No data rows to clean up.");
     return;
   }
 
@@ -12178,10 +12688,10 @@ function menuRegeneratePreviousWeekTasks() {
     return;
   }
 
-  var message = "ðŸ“‹ Previous Week: " + result.weekStart + " - " + result.weekEnd + "\n\n";
+  var message = "📋 Previous Week: " + result.weekStart + " - " + result.weekEnd + "\n\n";
   message += "\u2705 Compliant crews: " + result.compliantCount + "\n";
   message += "\u274C Crews with missing reports: " + result.missingCount + "\n\n";
-  message += "ðŸ“ Tasks created: " + result.tasksCreated;
+  message += "\uD83D\uDD0D Tasks created: " + result.tasksCreated;
 
   if (result.tasksCreated === 0 && result.missingCount > 0) {
     message += "\n\n(Tasks may already exist - check Task Metadata sheet)";
@@ -12263,7 +12773,7 @@ function showComplianceDashboard() {
     '</style>';
 
   html += '<div class="header">' +
-    '<h2>ðŸ“Š Safety Compliance Dashboard</h2>' +
+    '<h2>\uD83D\uDCCA Safety Compliance Dashboard</h2>' +
     '<div class="subtitle">Week of ' + weekStartStr + ' - ' + weekEndStr + '</div>' +
     '</div>';
 
@@ -12308,7 +12818,7 @@ function showComplianceDashboard() {
 
       // Build tooltip with &#10; for line breaks in HTML title attribute
       var tooltipParts = [];
-      tooltipParts.push('ðŸ“… ' + fullDayNames[d] + ', ' + dayDateStr);
+      tooltipParts.push('📅 ' + fullDayNames[d] + ', ' + dayDateStr);
       if (details && details.dateCreated) {
         tooltipParts.push('Created: ' + Utilities.formatDate(new Date(details.dateCreated), tz, 'MM/dd/yyyy'));
       }
@@ -12327,7 +12837,7 @@ function showComplianceDashboard() {
     var mCls = wst === '\u2705' ? 'ok' : (wst === '\u2705L' ? 'late' : (wst === '\u274C' ? 'missing' : (wst === '\u23F3' ? 'pending' : 'na')));
     var wkDetails = crew.weeklyMeetingDetails || null;
     var wkTooltipParts = [];
-    wkTooltipParts.push('ðŸ“‹ Weekly Safety Meeting');
+    wkTooltipParts.push('📋 Weekly Safety Meeting');
     if (wkDetails && wkDetails.weekOf) {
       wkTooltipParts.push('Week of: ' + Utilities.formatDate(new Date(wkDetails.weekOf), tz, 'MMM dd, yyyy'));
     }
@@ -12344,7 +12854,7 @@ function showComplianceDashboard() {
     var moCls = mst === '\u2705' ? 'ok' : (mst === '\u274C' ? 'missing' : (mst === '\u23F3' ? 'pending' : (mst === '\u26A0\uFE0F' ? 'pending' : 'na')));
     var moDetails = crew.monthlyChecklistDetails || null;
     var moTooltipParts = [];
-    moTooltipParts.push('ðŸ“‹ Monthly Fleet Checklist');
+    moTooltipParts.push('📋 Monthly Fleet Checklist');
     if (moDetails && moDetails.reportDate) {
       moTooltipParts.push('Report Date: ' + Utilities.formatDate(new Date(moDetails.reportDate), tz, 'MMM dd, yyyy'));
     }
@@ -12646,7 +13156,7 @@ function completeMissingSafetyReportTask(taskId, resolutionNotes) {
  * Regenerates the Notes field for all Safety Compliance tasks by reading from Safety Compliance sheet.
  * Use this to fix tasks that have empty or incorrect notes.
  *
- * Menu: Glove Manager â†’ Safety Reports â†’ ðŸ”§ Fix Missing Day Notes
+ * Menu: Glove Manager → Safety Reports → 🔧 Fix Missing Day Notes
  */
 function fixSafetyComplianceNotes() {
   Logger.log('=== fixSafetyComplianceNotes START ===');
@@ -12709,8 +13219,8 @@ function fixSafetyComplianceNotes() {
     for (var d = 0; d < dayNames.length; d++) {
       var cellValue = String(row[dayColumns[d]] || '').trim();
       // Check for \u274C that is NOT followed by a resolution code (D, F, A, W, L)
-      // \u274C alone or \u274CðŸ”” (notified) means still missing
-      if (cellValue === '\u274C' || cellValue === '\u274CðŸ””') {
+      // \u274C alone or \u274C🔔 (notified) means still missing
+      if (cellValue === '\u274C' || cellValue === '\u274C🔔') {
         // Calculate actual date
         var dayDate = new Date(weekStart);
         dayDate.setDate(dayDate.getDate() + d);
@@ -12722,7 +13232,7 @@ function fixSafetyComplianceNotes() {
     // Check Weekly Meeting
     var weeklyMeetingMissing = false;
     var wmValue = String(row[compColIdx.weeklyMeeting] || '').trim();
-    if (wmValue === '\u274C' || wmValue === '\u274CðŸ””') {
+    if (wmValue === '\u274C' || wmValue === '\u274C🔔') {
       weeklyMeetingMissing = true;
     }
 
@@ -13151,7 +13661,7 @@ function recordMissingReportResolutions(taskId, weekOf, resolutions, jobNumber, 
 
 /**
  * Marks a Safety Compliance task as notified (SMS sent).
- * Updates Safety Compliance sheet cells from \u274C to \u274CðŸ””.
+ * Updates Safety Compliance sheet cells from \u274C to \u274C🔔.
  */
 function markSafetyReportNotified(taskId, jobNumberParam, weekOfParam) {
   Logger.log('markSafetyReportNotified: taskId=' + taskId + ', jobNumberParam=' + jobNumberParam + ', weekOfParam=' + weekOfParam);
@@ -13299,12 +13809,12 @@ function markSafetyReportNotified(taskId, jobNumberParam, weekOfParam) {
       for (var d = 0; d < dayCols.length; d++) {
         var col = dayCols[d];
         if (col !== undefined && String(data[matchedRow][col]).trim() === '\u274C') {
-          complianceSheet.getRange(row, col + 1).setValue('\u274CðŸ””');
+          complianceSheet.getRange(row, col + 1).setValue('\u274C🔔');
           complianceSheet.getRange(row, col + 1).setDataValidation(dayValRule);
           updatedCount++;
         }
       }
-      Logger.log('markSafetyReportNotified: Updated row ' + row + ' (week ' + matchedRowWeek + '), ' + updatedCount + ' cells changed to \u274CðŸ””');
+      Logger.log('markSafetyReportNotified: Updated row ' + row + ' (week ' + matchedRowWeek + '), ' + updatedCount + ' cells changed to \u274C🔔');
       return { success: true, rowUpdated: row, cellsUpdated: updatedCount };
     }
 
@@ -13568,7 +14078,7 @@ function menuCleanupDuplicateSafetyTasks() {
       'Analyzed ' + result.totalSafetyTasks + ' Safety Compliance task(s) in ' + result.uniqueGroups + ' job+week group(s).\\n\\nNo duplicates detected in Task Metadata.',
       Browser.Buttons.OK);
   } else {
-    Browser.msgBox('ðŸ§¹ Cleanup Complete',
+    Browser.msgBox('🧹 Cleanup Complete',
       'Removed ' + result.duplicatesRemoved + ' duplicate Safety Compliance task(s).\\n\\n' +
       'Kept ' + result.tasksKept + ' unique task(s).\\n\\n' +
       'For each job+week, the task with best status (Complete > Resolved > Pending) was kept.',
@@ -13578,7 +14088,7 @@ function menuCleanupDuplicateSafetyTasks() {
 
 
 // ============================================================
-// JOB NUMBER â†’ FOREMAN MAPPING FUNCTIONS
+// JOB NUMBER → FOREMAN MAPPING FUNCTIONS
 // For Process Safety Emails dialog configuration
 // Added: February 18, 2026
 // ============================================================
@@ -13633,7 +14143,7 @@ function getJobForemanMappingsForDialog() {
     }
   }
 
-  // Collect crewâ†’foreman mappings
+  // Collect crew→foreman mappings
   // Key = crew number (without position suffix), Value = {foreman, priority, jobs: Set}
   var crewForemen = {};
   var allForemen = {};
@@ -13655,7 +14165,7 @@ function getJobForemanMappingsForDialog() {
     // Track all employee names for dropdown
     allForemen[name] = true;
 
-    // Extract crew number (e.g., "013-26.1" â†’ "013-26")
+    // Extract crew number (e.g., "013-26.1" → "013-26")
     var crewNumber = extractCrewNumber(jobNumber);
 
     if (crewNumber) {
@@ -13710,7 +14220,7 @@ function getJobForemanMappingsForDialog() {
 
   // Build result grouped by foreman
   // Keep PRIMARY jobs separate from CUSTOM jobs so we can order them correctly
-  var foremanJobs = {}; // foremanName â†’ { primaryJobs: [], customJobs: [] }
+  var foremanJobs = {}; // foremanName → { primaryJobs: [], customJobs: [] }
 
   // Add crews from Employees sheet (these are PRIMARY jobs)
   for (var crew in crewForemen) {
@@ -13769,7 +14279,7 @@ function getJobForemanMappingsForDialog() {
   // Build full foremen list for dropdown (all employees who could be foremen)
   var allForemenList = Object.keys(allForemen).sort();
 
-  Logger.log('Found ' + mappings.length + ' foremanâ†’jobs mappings, ' + allForemenList.length + ' total employees');
+  Logger.log('Found ' + mappings.length + ' foreman→jobs mappings, ' + allForemenList.length + ' total employees');
   Logger.log('=== getJobForemanMappingsForDialog END ===');
 
   return {
@@ -13779,8 +14289,8 @@ function getJobForemanMappingsForDialog() {
 }
 
 /**
- * Gets saved custom jobâ†’foreman mappings from ScriptProperties
- * @returns {Object} Map of jobNumber â†’ foremanName
+ * Gets saved custom job→foreman mappings from ScriptProperties
+ * @returns {Object} Map of jobNumber → foremanName
  */
 function getCustomJobForemanMappings() {
   // Return cached result if available
@@ -13802,7 +14312,7 @@ function getCustomJobForemanMappings() {
 }
 
 /**
- * Saves custom jobâ†’foreman mappings to ScriptProperties
+ * Saves custom job→foreman mappings to ScriptProperties
  * Called from dialog when user adds custom job numbers
  * MERGES with existing mappings (doesn't replace)
  * @param {string} mappingsJson - JSON string of {jobNumber: foremanName, ...}
@@ -13836,26 +14346,26 @@ function saveCustomJobForemanMappings(mappingsJson) {
   }
 
   props.setProperty('CUSTOM_JOB_FOREMAN_MAPPINGS', JSON.stringify(existingMappings));
-  Logger.log('Saved custom jobâ†’foreman mappings. Total: ' + Object.keys(existingMappings).length + ' mappings');
+  Logger.log('Saved custom job→foreman mappings. Total: ' + Object.keys(existingMappings).length + ' mappings');
   return { success: true, count: Object.keys(existingMappings).length };
 }
 
 /**
- * Clears all custom jobâ†’foreman mappings
+ * Clears all custom job→foreman mappings
  * Can be called from dialog (no alert) or from menu (shows alert)
  * @param {boolean} showAlert - Whether to show confirmation alert (default: false for dialog use)
  */
 function clearCustomJobForemanMappings(showAlert) {
   var props = PropertiesService.getScriptProperties();
   props.deleteProperty('CUSTOM_JOB_FOREMAN_MAPPINGS');
-  Logger.log('Cleared all custom jobâ†’foreman mappings');
+  Logger.log('Cleared all custom job→foreman mappings');
   if (showAlert) {
-    SpreadsheetApp.getUi().alert('\u2705 Custom jobâ†’foreman mappings cleared.');
+    SpreadsheetApp.getUi().alert('\u2705 Custom job→foreman mappings cleared.');
   }
 }
 
 /**
- * Removes a single custom jobâ†’foreman mapping
+ * Removes a single custom job→foreman mapping
  * @param {string} jobNumber - The job number to remove from mappings
  * @returns {Object} - {success: boolean, error?: string}
  */
@@ -14013,7 +14523,7 @@ function clearPendingUnknownJobs() {
 }
 
 /**
- * Menu function: Add missing jobâ†’foreman mappings manually
+ * Menu function: Add missing job→foreman mappings manually
  * Prompts for job numbers and foremen to add to the permanent custom mappings
  */
 function addMissingJobMappings() {
@@ -14022,11 +14532,11 @@ function addMissingJobMappings() {
   // Show current mappings first
   var currentMappings = getCustomJobForemanMappings();
   var currentList = Object.keys(currentMappings).map(function(j) {
-    return j + ' â†’ ' + currentMappings[j];
+    return j + ' → ' + currentMappings[j];
   }).join('\n') || 'None';
 
   var response = ui.prompt(
-    'Add Jobâ†’Foreman Mappings',
+    'Add Job→Foreman Mappings',
     'Current mappings:\n' + currentList + '\n\n' +
     'Enter mappings in format: jobNumber=foremanName (one per line)\n' +
     'Example:\n054-26=Benjamin Lapka\n006-26=Benjamin Lapka\n038-26=Erik Davis',
@@ -14090,7 +14600,7 @@ function addMissingJobMappings() {
   props.setProperty('CUSTOM_JOB_FOREMAN_MAPPINGS', JSON.stringify(existingMappings));
 
   var addedList = Object.keys(newMappings).map(function(j) {
-    return 'â€¢ ' + j + ' â†’ ' + newMappings[j];
+    return '\u2022 ' + j + ' → ' + newMappings[j];
   }).join('\n');
 
   ui.alert('Mappings Added', '\u2705 Added ' + Object.keys(newMappings).length + ' mapping(s):\n\n' + addedList +
@@ -14110,7 +14620,7 @@ function clearAndReprocessSafetyEmails() {
     '1. DELETE all data in JHA Log, Weekly Safety Log, Monthly Checklist Log\n' +
     '2. Clear the Safety Compliance sheet\n' +
     '3. Reset the "last processed" date so ALL emails are reprocessed\n\n' +
-    'Your custom jobâ†’foreman mappings will be PRESERVED.\n\n' +
+    'Your custom job→foreman mappings will be PRESERVED.\n\n' +
     'Are you sure you want to continue?',
     ui.ButtonSet.YES_NO
   );
@@ -14188,7 +14698,7 @@ function fixSkippedLogEntriesFromMappings() {
     var jobNumbers = Object.keys(customMappings);
 
     if (jobNumbers.length === 0) {
-      ui.alert('No Mappings Found', 'There are no saved jobâ†’foreman mappings.\n\nMappings are created when you assign a foreman to an unknown job during safety email processing.', ui.ButtonSet.OK);
+      ui.alert('No Mappings Found', 'There are no saved job→foreman mappings.\n\nMappings are created when you assign a foreman to an unknown job during safety email processing.', ui.ButtonSet.OK);
       return;
     }
 
@@ -14213,7 +14723,7 @@ function fixSkippedLogEntriesFromMappings() {
     }
 
     ui.alert('Log Entries Fixed', '\u2705 Updated ' + updatedCount + ' log entries from "Skipped" to "Credited".\n\n' +
-      'Job mappings used:\n' + jobNumbers.map(function(j) { return 'â€¢ ' + j + ' â†’ ' + customMappings[j]; }).join('\n') +
+      'Job mappings used:\n' + jobNumbers.map(function(j) { return '\u2022 ' + j + ' → ' + customMappings[j]; }).join('\n') +
       '\n\nCompliance has been recalculated.', ui.ButtonSet.OK);
 
   } catch (e) {
@@ -14248,7 +14758,7 @@ function applyUnknownJobDecisions(decisionsJson) {
       var decision = decisions[i];
       if (decision.action === 'assign' && decision.foreman) {
         tempMappings[decision.jobNumber] = decision.foreman;
-        Logger.log('Assigned: ' + decision.jobNumber + ' â†’ ' + decision.foreman);
+        Logger.log('Assigned: ' + decision.jobNumber + ' → ' + decision.foreman);
 
         // Track this assignment for updating existing log entries
         jobsToCredit.push({
@@ -14326,7 +14836,7 @@ function updateLogEntriesForAssignedJobs(assignments) {
   var empSheet = ss.getSheetByName('Employees');
   var employeeData = empSheet ? empSheet.getDataRange().getValues() : null;
 
-  // Build a map for quick lookup: jobNumber â†’ {foreman, primaryCrew}
+  // Build a map for quick lookup: jobNumber → {foreman, primaryCrew}
   var jobMap = {};
   for (var a = 0; a < assignments.length; a++) {
     var assignment = assignments[a];
@@ -14346,7 +14856,7 @@ function updateLogEntriesForAssignedJobs(assignments) {
     };
 
     if (primaryCrew) {
-      Logger.log('updateLogEntriesForAssignedJobs: ' + baseJob + ' â†’ ' + assignment.foreman + ' (primaryCrew: ' + primaryCrew + ')');
+      Logger.log('updateLogEntriesForAssignedJobs: ' + baseJob + ' → ' + assignment.foreman + ' (primaryCrew: ' + primaryCrew + ')');
     } else {
       Logger.log('updateLogEntriesForAssignedJobs: WARNING - Could not find primary crew for ' + assignment.foreman + ', using ' + baseJob);
     }
@@ -14374,14 +14884,14 @@ function updateLogEntriesForAssignedJobs(assignments) {
 
         // Append note about the assignment
         var existingNotes = String(jhaData[i][9] || '').trim(); // Column J
-        var newNote = 'Assigned via dialog: ' + rowJobNumber + ' â†’ ' + mapping.foreman;
+        var newNote = 'Assigned via dialog: ' + rowJobNumber + ' → ' + mapping.foreman;
         if (existingNotes && existingNotes.indexOf('Assigned via dialog') === -1) {
           newNote = existingNotes + '. ' + newNote;
         }
         jhaSheet.getRange(rowNum, 10).setValue(newNote); // Column J - Notes
 
         totalUpdated++;
-        Logger.log('Updated JHA Log row ' + rowNum + ': ' + rowJobNumber + ' â†’ Credited to ' + mapping.primaryCrew);
+        Logger.log('Updated JHA Log row ' + rowNum + ': ' + rowJobNumber + ' → Credited to ' + mapping.primaryCrew);
       }
     }
   }
@@ -14408,14 +14918,14 @@ function updateLogEntriesForAssignedJobs(assignments) {
 
         // Append note about the assignment
         var existingNotes = String(weeklyData[j][8] || '').trim(); // Column I
-        var newNote = 'Assigned via dialog: ' + rowJobNumber + ' â†’ ' + mapping.foreman;
+        var newNote = 'Assigned via dialog: ' + rowJobNumber + ' → ' + mapping.foreman;
         if (existingNotes && existingNotes.indexOf('Assigned via dialog') === -1) {
           newNote = existingNotes + '. ' + newNote;
         }
         weeklySheet.getRange(rowNum, 9).setValue(newNote); // Column I - Notes
 
         totalUpdated++;
-        Logger.log('Updated Weekly Safety Log row ' + rowNum + ': ' + rowJobNumber + ' â†’ Credited to ' + mapping.primaryCrew);
+        Logger.log('Updated Weekly Safety Log row ' + rowNum + ': ' + rowJobNumber + ' → Credited to ' + mapping.primaryCrew);
       }
     }
   }
@@ -14442,14 +14952,14 @@ function updateLogEntriesForAssignedJobs(assignments) {
 
         // Append note about the assignment
         var existingNotes = String(monthlyData[k][10] || '').trim(); // Column K
-        var newNote = 'Assigned via dialog: ' + rowJobNumber + ' â†’ ' + mapping.foreman;
+        var newNote = 'Assigned via dialog: ' + rowJobNumber + ' → ' + mapping.foreman;
         if (existingNotes && existingNotes.indexOf('Assigned via dialog') === -1) {
           newNote = existingNotes + '. ' + newNote;
         }
         monthlySheet.getRange(rowNum, 11).setValue(newNote); // Column K - Notes
 
         totalUpdated++;
-        Logger.log('Updated Monthly Checklist Log row ' + rowNum + ': ' + rowJobNumber + ' â†’ Credited to ' + mapping.primaryCrew);
+        Logger.log('Updated Monthly Checklist Log row ' + rowNum + ': ' + rowJobNumber + ' → Credited to ' + mapping.primaryCrew);
       }
     }
   }
@@ -14503,7 +15013,7 @@ function fixAllLogEntryCreditedTo() {
       if (!foreman && !jobNumber) continue;
 
       // Try to find the correct crew to credit:
-      // 1. First, try by job number (handles secondary job submissions like 053-26 â†’ 052-25)
+      // 1. First, try by job number (handles secondary job submissions like 053-26 → 052-25)
       // 2. Then, try by foreman name (handles named foreman lookups)
       var primaryCrew = null;
 
@@ -14532,12 +15042,12 @@ function fixAllLogEntryCreditedTo() {
           // Add note
           var existingNotes = String(jhaData[i][9] || '').trim(); // Column J
           if (existingNotes.indexOf('Fixed by fixAllLogEntryCreditedTo') === -1) {
-            var newNote = 'Fixed by fixAllLogEntryCreditedTo: ' + (currentCreditedTo || 'empty') + ' â†’ ' + primaryCrew;
+            var newNote = 'Fixed by fixAllLogEntryCreditedTo: ' + (currentCreditedTo || 'empty') + ' → ' + primaryCrew;
             jhaSheet.getRange(rowNum, 10).setValue(existingNotes ? existingNotes + '. ' + newNote : newNote);
           }
 
           jhaFixed++;
-          Logger.log('Fixed JHA Log row ' + rowNum + ': job=' + jobNumber + ', foreman=' + foreman + ' â†’ ' + primaryCrew + ' (was: ' + currentCreditedTo + ')');
+          Logger.log('Fixed JHA Log row ' + rowNum + ': job=' + jobNumber + ', foreman=' + foreman + ' → ' + primaryCrew + ' (was: ' + currentCreditedTo + ')');
         }
       }
     }
@@ -14582,12 +15092,12 @@ function fixAllLogEntryCreditedTo() {
 
           var existingNotes = String(weeklyData[j][8] || '').trim(); // Column I
           if (existingNotes.indexOf('Fixed by fixAllLogEntryCreditedTo') === -1) {
-            var newNote = 'Fixed by fixAllLogEntryCreditedTo: ' + (currentCreditedTo || 'empty') + ' â†’ ' + primaryCrew;
+            var newNote = 'Fixed by fixAllLogEntryCreditedTo: ' + (currentCreditedTo || 'empty') + ' → ' + primaryCrew;
             weeklySheet.getRange(rowNum, 9).setValue(existingNotes ? existingNotes + '. ' + newNote : newNote);
           }
 
           weeklyFixed++;
-          Logger.log('Fixed Weekly Safety Log row ' + rowNum + ': job=' + jobNumber + ', foreman=' + foreman + ' â†’ ' + primaryCrew);
+          Logger.log('Fixed Weekly Safety Log row ' + rowNum + ': job=' + jobNumber + ', foreman=' + foreman + ' → ' + primaryCrew);
         }
       }
     }
@@ -14619,12 +15129,12 @@ function fixAllLogEntryCreditedTo() {
 
           var existingNotes = String(monthlyData[k][10] || '').trim(); // Column K
           if (existingNotes.indexOf('Fixed by fixAllLogEntryCreditedTo') === -1) {
-            var newNote = 'Fixed by fixAllLogEntryCreditedTo: ' + (currentCreditedTo || 'empty') + ' â†’ ' + primaryCrew;
+            var newNote = 'Fixed by fixAllLogEntryCreditedTo: ' + (currentCreditedTo || 'empty') + ' → ' + primaryCrew;
             monthlySheet.getRange(rowNum, 11).setValue(existingNotes ? existingNotes + '. ' + newNote : newNote);
           }
 
           monthlyFixed++;
-          Logger.log('Fixed Monthly Checklist Log row ' + rowNum + ': ' + foreman + ' â†’ ' + primaryCrew);
+          Logger.log('Fixed Monthly Checklist Log row ' + rowNum + ': ' + foreman + ' → ' + primaryCrew);
         }
       }
     }
@@ -14650,7 +15160,7 @@ function fixAllLogEntryCreditedTo() {
  * 3. Recalculates ALL weeks from log data
  * 4. Refreshes tooltips
  *
- * Menu: Glove Manager â†’ Safety â†’ ðŸ”„ Master Recalculate
+ * Menu: Glove Manager → Safety → 🔄 Master Recalculate
  */
 function masterRecalculateCompliance() {
   var ui = SpreadsheetApp.getUi();
@@ -14670,7 +15180,7 @@ function masterRecalculateCompliance() {
   var configCrews = Object.keys(config);
   var nonConfigCrews = findNonConfigCrewsInCurrentWeek(ss, currentWeekBounds.weekStart, config, tz);
 
-  var dialogMsg = 'ðŸ”„ Master Recalculate Compliance\n\n' +
+  var dialogMsg = '🔄 Master Recalculate Compliance\n\n' +
     'This will perform a COMPLETE compliance refresh:\n\n' +
     '1. \u2705 Fix all log entries (Credited To values)\n' +
     '2. \u2705 Recalculate ALL weeks from JHA/Weekly Safety logs\n' +
@@ -14752,16 +15262,16 @@ function masterRecalculateCompliance() {
     var elapsed = Math.round((new Date().getTime() - startTime) / 1000);
 
     var msg = '\u2705 Master Recalculate Complete!\n\n' +
-      'ðŸ“ Log entries fixed:\n' +
-      '   â€¢ JHA Log: ' + results.logsFixes.jha + '\n' +
-      '   â€¢ Weekly Safety Log: ' + results.logsFixes.weekly + '\n' +
-      '   â€¢ Monthly Checklist Log: ' + results.logsFixes.monthly + '\n\n' +
-      'ðŸ—‘ï¸ Non-config crews removed (current week): ' + results.nonConfigRemoved + '\n\n' +
-      'ðŸ“Š Compliance recalculated:\n' +
-      '   â€¢ Weeks processed: ' + results.weeksProcessed + '\n' +
-      '   â€¢ Total compliant: ' + results.compliant + '\n' +
-      '   â€¢ Total missing: ' + results.missing + '\n\n' +
-      'â±ï¸ Completed in ' + elapsed + ' seconds';
+      '\uD83D\uDD0D Log entries fixed:\n' +
+      '   \u2022 JHA Log: ' + results.logsFixes.jha + '\n' +
+      '   \u2022 Weekly Safety Log: ' + results.logsFixes.weekly + '\n' +
+      '   \u2022 Monthly Checklist Log: ' + results.logsFixes.monthly + '\n\n' +
+      '\uD83D\uDDD1\uFE0F Non-config crews removed (current week): ' + results.nonConfigRemoved + '\n\n' +
+      '\uD83D\uDCCA Compliance recalculated:\n' +
+      '   \u2022 Weeks processed: ' + results.weeksProcessed + '\n' +
+      '   \u2022 Total compliant: ' + results.compliant + '\n' +
+      '   \u2022 Total missing: ' + results.missing + '\n\n' +
+      '\u23F1\uFE0F Completed in ' + elapsed + ' seconds';
 
     ui.alert('Master Recalculate Complete', msg, ui.ButtonSet.OK);
 
@@ -14769,6 +15279,78 @@ function masterRecalculateCompliance() {
     Logger.log('masterRecalculateCompliance error: ' + e.toString());
     ui.alert('Error', 'Failed: ' + e.toString(), ui.ButtonSet.OK);
   }
+}
+
+/**
+ * masterRecalculateComplianceSilent — same core logic as masterRecalculateCompliance
+ * but with NO SpreadsheetApp.getUi() calls. Safe to call from time triggers.
+ * @return {{ weeksProcessed, compliant, missing, logsFixes, nonConfigRemoved }}
+ */
+function masterRecalculateComplianceSilent() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var tz = Session.getScriptTimeZone();
+  var startTime = new Date().getTime();
+
+  clearComplianceConfigCache();
+
+  var today = new Date();
+  var currentWeekBounds = getWeekBoundaries(today);
+  var config = loadComplianceConfig();
+  var results = { logsFixes: { jha: 0, weekly: 0, monthly: 0 }, nonConfigRemoved: 0, weeksProcessed: 0, compliant: 0, missing: 0 };
+
+  // Step 1: Fix log entries
+  Logger.log('masterRecalculateComplianceSilent: Step 1 - Fixing log entries...');
+  try {
+    var fixResult = fixAllLogEntryCreditedTo();
+    results.logsFixes = { jha: fixResult.jhaFixed || 0, weekly: fixResult.weeklyFixed || 0, monthly: fixResult.monthlyFixed || 0 };
+  } catch(e) { Logger.log('masterRecalculateComplianceSilent: Step 1 error: ' + e); }
+
+  // Step 2: Remove non-config crews from CURRENT WEEK ONLY
+  try {
+    var nonConfigCrews = findNonConfigCrewsInCurrentWeek(ss, currentWeekBounds.weekStart, config, tz);
+    if (nonConfigCrews.length > 0) {
+      Logger.log('masterRecalculateComplianceSilent: Step 2 - Removing ' + nonConfigCrews.length + ' non-config crews from current week...');
+      results.nonConfigRemoved = removeNonConfigCrewsFromCurrentWeekSilent(ss, currentWeekBounds.weekStart, config, tz);
+    }
+  } catch(e) { Logger.log('masterRecalculateComplianceSilent: Step 2 error: ' + e); }
+
+  // Step 3: Recalculate ALL weeks
+  Logger.log('masterRecalculateComplianceSilent: Step 3 - Recalculating all weeks...');
+  try {
+    var complianceSheet = ss.getSheetByName('Safety Compliance');
+    if (complianceSheet && complianceSheet.getLastRow() >= 2) {
+      var data = complianceSheet.getDataRange().getValues();
+      var uniqueWeeks = {};
+      for (var i = 1; i < data.length; i++) {
+        var weekStart = data[i][0];
+        if (weekStart) {
+          var weekKey = Utilities.formatDate(new Date(weekStart), tz, 'yyyy-MM-dd');
+          uniqueWeeks[weekKey] = new Date(weekStart);
+        }
+      }
+      var weekKeys = Object.keys(uniqueWeeks).sort().reverse();
+      for (var w = 0; w < weekKeys.length; w++) {
+        var ws = uniqueWeeks[weekKeys[w]];
+        var complianceData = calculateComplianceFromLogs(ws, { ignoreResolved: true });
+        if (complianceData) {
+          updateComplianceSheetFromLogs(complianceData, { ignoreResolved: true });
+          results.compliant += complianceData.compliantCount || 0;
+          results.missing += complianceData.missingCount || 0;
+          results.weeksProcessed++;
+        }
+      }
+    }
+  } catch(e) { Logger.log('masterRecalculateComplianceSilent: Step 3 error: ' + e); }
+
+  // Step 4: Format and refresh tooltips
+  Logger.log('masterRecalculateComplianceSilent: Step 4 - Formatting and tooltips...');
+  try { formatComplianceSheetByWeek(); } catch(e) { Logger.log('masterRecalculateComplianceSilent: format error: ' + e); }
+  try { refreshSafetyComplianceTooltips(); } catch(e) { Logger.log('masterRecalculateComplianceSilent: tooltips error: ' + e); }
+
+  var elapsed = Math.round((new Date().getTime() - startTime) / 1000);
+  Logger.log('masterRecalculateComplianceSilent: Done in ' + elapsed + 's — weeks=' + results.weeksProcessed +
+             ' compliant=' + results.compliant + ' missing=' + results.missing);
+  return results;
 }
 
 /**
@@ -15081,7 +15663,7 @@ function resolveJobToTrackedCrew(jobNumber) {
 
         if (config[primaryJob]) {
           var source = matchesSecondary ? 'secondary_to_primary' : 'primary';
-          Logger.log('resolveJobToTrackedCrew: ' + baseJob + ' â†’ ' + primaryJob + ' via ' + empName + ' (' + source + ')');
+          Logger.log('resolveJobToTrackedCrew: ' + baseJob + ' → ' + primaryJob + ' via ' + empName + ' (' + source + ')');
           var result = { creditedTo: primaryJob, resolved: true, source: source, employee: empName };
           _resolveJobCache[baseJob] = result;
           return result;
@@ -15105,7 +15687,7 @@ function menuFixAndRecalculateCompliance() {
   var ui = SpreadsheetApp.getUi();
 
   var response = ui.alert(
-    'ðŸ”§ Fix Log Entries & Recalculate',
+    '🔧 Fix Log Entries & Recalculate',
     'This will:\n\n' +
     '1. Fix all log entries with incorrect "Credited To" values\n' +
     '2. Recalculate compliance for all weeks\n' +
@@ -15126,9 +15708,9 @@ function menuFixAndRecalculateCompliance() {
 
     var msg = '\u2705 Complete!\n\n' +
               'Log entries fixed:\n' +
-              'â€¢ JHA Log: ' + fixResult.jhaFixed + '\n' +
-              'â€¢ Weekly Safety Log: ' + fixResult.weeklyFixed + '\n' +
-              'â€¢ Monthly Checklist Log: ' + fixResult.monthlyFixed + '\n\n' +
+              '\u2022 JHA Log: ' + fixResult.jhaFixed + '\n' +
+              '\u2022 Weekly Safety Log: ' + fixResult.weeklyFixed + '\n' +
+              '\u2022 Monthly Checklist Log: ' + fixResult.monthlyFixed + '\n\n' +
               'Compliance has been recalculated and tooltips refreshed.';
 
     ui.alert('Fix Complete', msg, ui.ButtonSet.OK);
@@ -15144,7 +15726,7 @@ function menuFixAndRecalculateCompliance() {
  * This fixes Ben Lapka's issue where 006-26 and 053-25 created separate rows
  * instead of crediting to his primary crew 052-25
  *
- * Run from: Glove Manager â†’ Safety â†’ ðŸ”§ Fix Ben Lapka Weeks
+ * Run from: Glove Manager → Safety → 🔧 Fix Ben Lapka Weeks
  */
 function fixBenLapkaWeeks() {
   var ui = SpreadsheetApp.getUi();
@@ -15152,7 +15734,7 @@ function fixBenLapkaWeeks() {
   var tz = Session.getScriptTimeZone();
 
   var response = ui.alert(
-    'ðŸ”§ Fix Ben Lapka Weeks',
+    '🔧 Fix Ben Lapka Weeks',
     'This will:\n\n' +
     '1. Remove rows for 006-26 and 053-25 from weeks 02/15/2026 and 02/22/2026\n' +
     '2. Ensure their JHAs are credited to 052-25 (Ben\'s primary crew)\n' +
@@ -15280,7 +15862,7 @@ function fixBenLapkaWeeks() {
  * Removes non-Config crews from the CURRENT WEEK ONLY in Safety Compliance sheet
  * Past weeks are preserved to maintain historical data
  *
- * Run from: Glove Manager â†’ Safety â†’ ðŸ§¹ Remove Non-Config Crews
+ * Run from: Glove Manager → Safety → 🧹 Remove Non-Config Crews
  */
 function removeNonConfigCrewsFromCompliance() {
   var ui = SpreadsheetApp.getUi();
@@ -15302,7 +15884,7 @@ function removeNonConfigCrewsFromCompliance() {
   var configCount = Object.keys(configCrews).length;
 
   var response = ui.alert(
-    'ðŸ§¹ Remove Non-Config Crews (Current Week Only)',
+    '🧹 Remove Non-Config Crews (Current Week Only)',
     'This will remove rows from the CURRENT WEEK (' + currentWeekStr + ') that have job numbers NOT in Job Tracking (active crews).\n\n' +
     'Config has ' + configCount + ' tracked crews.\n\n' +
     'IMPORTANT: Past weeks will NOT be affected - historical data is preserved.\n\n' +
@@ -15384,7 +15966,7 @@ function removeNonConfigCrewsFromCompliance() {
  * Checks Job Tracking "Start Date" column and removes rows where the week is
  * BEFORE the job's start date.
  *
- * Run from: Glove Manager â†’ Safety â†’ ðŸ§¹ Remove Pre-Start Job Rows
+ * Run from: Glove Manager → Safety → 🧹 Remove Pre-Start Job Rows
  */
 function removePreStartJobRowsFromCompliance() {
   var ui = SpreadsheetApp.getUi();
@@ -15411,7 +15993,7 @@ function removePreStartJobRowsFromCompliance() {
   }
 
   var response = ui.alert(
-    'ðŸ§¹ Remove Pre-Start Job Rows',
+    '🧹 Remove Pre-Start Job Rows',
     'This will remove rows from the Safety Compliance sheet where the week is BEFORE the job\'s start date in Job Tracking.\n\n' +
     'Jobs with start dates:\n' + jobSummary.join('\n') + '\n\n' +
     'Example: Job 018-26 with start date 03/16/2026 will be removed from weeks before 03/16/2026.\n\n' +
@@ -15478,7 +16060,7 @@ function removePreStartJobRowsFromCompliance() {
     var summaryLines = [];
     for (var job in removedDetails) {
       var weeks = removedDetails[job];
-      summaryLines.push('â€¢ ' + job + ' (start: ' + Utilities.formatDate(startDates[job], tz, 'MM/dd/yyyy') + '): removed ' + weeks.length + ' week(s)');
+      summaryLines.push('\u2022 ' + job + ' (start: ' + Utilities.formatDate(startDates[job], tz, 'MM/dd/yyyy') + '): removed ' + weeks.length + ' week(s)');
       if (weeks.length <= 3) {
         summaryLines.push('  Weeks: ' + weeks.join(', '));
       }
@@ -15498,8 +16080,8 @@ function removePreStartJobRowsFromCompliance() {
 }
 
 /**
- * Gets temporary jobâ†’foreman mappings set during unknown job handling
- * @returns {Object} Map of jobNumber â†’ foremanName
+ * Gets temporary job→foreman mappings set during unknown job handling
+ * @returns {Object} Map of jobNumber → foremanName
  */
 function getTempJobForemanMappings() {
   var props = PropertiesService.getScriptProperties();
@@ -15544,8 +16126,8 @@ function clearTempProcessingData() {
 /**
  * Clears ALL saved data for Process Safety Emails - for a complete fresh start
  * This includes:
- * - Custom jobâ†’foreman mappings (permanent)
- * - Temp jobâ†’foreman mappings (session)
+ * - Custom job→foreman mappings (permanent)
+ * - Temp job→foreman mappings (session)
  * - Skipped unknown jobs
  * - Pending unknown jobs
  * - Last processed date (so "new only" mode won't filter)
@@ -15575,12 +16157,12 @@ function clearAllSafetyEmailData() {
 function menuClearAllSafetyEmailData() {
   var ui = SpreadsheetApp.getUi();
   var response = ui.alert(
-    'ðŸ—‘ï¸ Clear All Safety Email Data',
+    '\uD83D\uDDD1\uFE0F Clear All Safety Email Data',
     'This will clear ALL saved data for Process Safety Emails:\\n\\n' +
-    'â€¢ Custom jobâ†’foreman mappings\\n' +
-    'â€¢ Temporary session mappings\\n' +
-    'â€¢ Skipped job numbers\\n' +
-    'â€¢ Last processed date\\n\\n' +
+    '\u2022 Custom job→foreman mappings\\n' +
+    '\u2022 Temporary session mappings\\n' +
+    '\u2022 Skipped job numbers\\n' +
+    '\u2022 Last processed date\\n\\n' +
     'This gives you a completely fresh start.\\n\\n' +
     'Are you sure?',
     ui.ButtonSet.YES_NO
@@ -15716,7 +16298,7 @@ function creditUncreditedReport(assignmentDataJson) {
         var transferNote = 'Credited from ' + data.originalJobNumber + ' on ' + Utilities.formatDate(new Date(), tz, 'MM/dd/yyyy');
         var newNotes = currentNotes ? currentNotes + '; ' + transferNote : transferNote;
         logSheet.getRange(row.rowIndex, logNotesCol).setValue(newNotes);
-        Logger.log('creditUncreditedReport: Updated ' + logSheetName + ' row ' + row.rowIndex + ' â†’ ' + data.targetCrew);
+        Logger.log('creditUncreditedReport: Updated ' + logSheetName + ' row ' + row.rowIndex + ' → ' + data.targetCrew);
       }
     }
 
@@ -16401,7 +16983,7 @@ function traceComplianceForWeek() {
 
     if (status === 'Credited' && crewCredits[creditedTo]) {
       crewCredits[creditedTo][dayOfWeek] = true;
-      Logger.log('  â†’ Credited to ' + creditedTo + ' for ' + dayName);
+      Logger.log('  → Credited to ' + creditedTo + ' for ' + dayName);
     }
   }
 
@@ -16592,7 +17174,7 @@ function getHistoricalCrewsForWeek(weekBounds) {
 
 /**
  * Diagnose why historical foremen might not be appearing on the compliance sheet.
- * Menu: Glove Manager â†’ ðŸ›¡ï¸ Safety â†’ ðŸ” Diagnose Historical Crews
+ * Menu: Glove Manager → 🛡\uFE0F Safety → 🔁 Diagnose Historical Crews
  */
 function diagnoseHistoricalCrews() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -16748,7 +17330,7 @@ function clearLastSafetyProcessedDate() {
   }
   message += '\nContinue?';
 
-  var response = ui.alert('ðŸ”„ Reset Last Processed Date', message, ui.ButtonSet.YES_NO);
+  var response = ui.alert('🔄 Reset Last Processed Date', message, ui.ButtonSet.YES_NO);
 
   if (response === ui.Button.YES) {
     props.deleteProperty('LAST_SAFETY_EMAIL_DATE');
@@ -16839,33 +17421,33 @@ function showSafetyProcessingStatus() {
   html += '.ok { color: #1e8e3e; }';
   html += '</style></head><body>';
 
-  html += '<h2>ðŸ“‹ Safety Email Processing Status</h2>';
+  html += '<h2>📋 Safety Email Processing Status</h2>';
 
   html += '<div class="section">';
-  html += '<h3>ðŸ“… Last Processing</h3>';
+  html += '<h3>📅 Last Processing</h3>';
   html += '<div class="stat"><span class="label">Last Processed Date:</span><span class="value">' + lastDate + '</span></div>';
   html += '<div class="stat"><span class="label">Last Timestamp:</span><span class="value">' + lastTimestamp + '</span></div>';
   html += '</div>';
 
   html += '<div class="section">';
-  html += '<h3>ðŸ“Š Log Sheet Counts</h3>';
+  html += '<h3>\uD83D\uDCCA Log Sheet Counts</h3>';
   html += '<div class="stat"><span class="label">JHA Log entries:</span><span class="value">' + jhaLogCount + '</span></div>';
   html += '<div class="stat"><span class="label">Weekly Safety Log entries:</span><span class="value">' + weeklyLogCount + '</span></div>';
   html += '<div class="stat"><span class="label">Monthly Checklist Log entries:</span><span class="value">' + monthlyLogCount + '</span></div>';
   html += '</div>';
 
   html += '<div class="section">';
-  html += '<h3>ðŸ“ˆ Compliance Data</h3>';
+  html += '<h3>📈 Compliance Data</h3>';
   html += '<div class="stat"><span class="label">Safety Compliance rows:</span><span class="value">' + complianceCount + '</span></div>';
   html += '<div class="stat"><span class="label">Tracked crews:</span><span class="value">' + trackedCrewsCount + '</span></div>';
   html += '<div class="stat"><span class="label">Custom job mappings:</span><span class="value">' + customMappingsCount + '</span></div>';
   html += '</div>';
 
   html += '<div class="section">';
-  html += '<h3>ðŸ’¡ Tips</h3>';
-  html += '<p style="margin: 5px 0; font-size: 13px;">â€¢ Use "Reset Last Processed Date" to force a full re-scan</p>';
-  html += '<p style="margin: 5px 0; font-size: 13px;">â€¢ Already-logged emails are skipped (no duplicates)</p>';
-  html += '<p style="margin: 5px 0; font-size: 13px;">â€¢ Use "Recalculate ALL Weeks" to rebuild compliance from logs</p>';
+  html += '<h3>💡 Tips</h3>';
+  html += '<p style="margin: 5px 0; font-size: 13px;">\u2022 Use "Reset Last Processed Date" to force a full re-scan</p>';
+  html += '<p style="margin: 5px 0; font-size: 13px;">\u2022 Already-logged emails are skipped (no duplicates)</p>';
+  html += '<p style="margin: 5px 0; font-size: 13px;">\u2022 Use "Recalculate ALL Weeks" to rebuild compliance from logs</p>';
   html += '</div>';
 
   html += '</body></html>';
@@ -16901,7 +17483,7 @@ function diagnoseGmailSearch() {
   html += '.logged { background: #fce8e6; }';
   html += '</style></head><body>';
 
-  html += '<h2>ðŸ” Gmail Search Diagnostic</h2>';
+  html += '<h2>🔁 Gmail Search Diagnostic</h2>';
 
   // Test each query
   var queries = [
@@ -17027,7 +17609,7 @@ function diagnoseGmailSearch() {
 /**
  * Ensures current and previous week exist in Safety Compliance sheet
  * by calculating compliance from log data
- * Menu: Glove Manager â†’ ðŸ›¡ï¸ Safety â†’ ðŸ—“ï¸ Ensure Current Week Exists
+ * Menu: Glove Manager → 🛡\uFE0F Safety → \uD83D\uDDBC\uFE0F Ensure Current Week Exists
  */
 function ensureCurrentWeekInCompliance() {
   var today = new Date();
@@ -17083,10 +17665,10 @@ function ensureCurrentWeekInCompliance() {
   var prevDateStr = Utilities.formatDate(prevWeekBounds.weekStart, tz, 'MM/dd/yyyy');
   var currDateStr = Utilities.formatDate(currentWeekBounds.weekStart, tz, 'MM/dd/yyyy');
 
-  var message = 'ðŸ“… Ensure Current Week Results\n\n';
-  message += 'ðŸ“† Previous Week (' + prevDateStr + '):\n';
+  var message = '📅 Ensure Current Week Results\n\n';
+  message += '📆 Previous Week (' + prevDateStr + '):\n';
   message += results.previousWeek.updated ? '\u2705 Updated with ' + results.previousWeek.crewCount + ' crews\n' : '\u26A0\uFE0F No data or already exists\n';
-  message += '\nðŸ“† Current Week (' + currDateStr + '):\n';
+  message += '\n📆 Current Week (' + currDateStr + '):\n';
   message += results.currentWeek.updated ? '\u2705 Updated with ' + results.currentWeek.crewCount + ' crews\n' : '\u26A0\uFE0F No data or already exists\n';
   message += '\n\u2705 Safety Compliance sheet has been formatted.';
 
@@ -17098,7 +17680,7 @@ function ensureCurrentWeekInCompliance() {
 /**
  * Quick diagnostic showing Gmail emails vs already logged
  * Useful for debugging why emails aren't being found
- * Menu: Glove Manager â†’ ðŸ›¡ï¸ Safety â†’ ðŸ”Ž Quick Gmail Check
+ * Menu: Glove Manager → 🛡\uFE0F Safety → 🔎 Quick Gmail Check
  */
 function quickGmailCheck() {
   var ui = SpreadsheetApp.getUi();
@@ -17149,7 +17731,7 @@ function quickGmailCheck() {
   html += '.logged { background: #fef7e0; }';
   html += '</style></head><body>';
 
-  html += '<h3>ðŸ”Ž Quick Gmail Check</h3>';
+  html += '<h3>🔎 Quick Gmail Check</h3>';
   html += '<p>Existing logged email IDs: <strong>' + Object.keys(existingIds).length + '</strong></p>';
 
   var queries = [
@@ -17182,7 +17764,7 @@ function quickGmailCheck() {
 
           var isLogged = existingIds[msgId];
           var statusClass = isLogged ? 'logged' : 'new';
-          var statusText = isLogged ? 'ðŸ“ Already in ' + isLogged : 'ðŸ†• NEW';
+          var statusText = isLogged ? '\uD83D\uDD0D Already in ' + isLogged : '🆕 NEW';
 
           if (isLogged) {
             totalLogged++;
@@ -17212,8 +17794,8 @@ function quickGmailCheck() {
   });
 
   html += '<h4>Summary</h4>';
-  html += '<p class="success">ðŸ†• NEW emails (not logged): <strong>' + totalNew + '</strong></p>';
-  html += '<p class="warning">ðŸ“ Already logged: <strong>' + totalLogged + '</strong></p>';
+  html += '<p class="success">🆕 NEW emails (not logged): <strong>' + totalNew + '</strong></p>';
+  html += '<p class="warning">\uD83D\uDD0D Already logged: <strong>' + totalLogged + '</strong></p>';
 
   if (totalNew === 0 && totalLogged > 0) {
     html += '<p class="warning">\u26A0\uFE0F All found emails are already in the log sheets.</p>';
@@ -17256,7 +17838,7 @@ function diagnoseMissingCrews() {
   html += '.present { background: #e6f4ea; }';
   html += '</style></head><body>';
 
-  html += '<h2>ðŸ” Missing Crews Diagnostic</h2>';
+  html += '<h2>🔁 Missing Crews Diagnostic</h2>';
 
   // Get current week
   var today = new Date();
@@ -17282,7 +17864,7 @@ function diagnoseMissingCrews() {
     var startDateCol = headers.indexOf('Start Date');
 
     html += '<div class="section">';
-    html += '<h3>ðŸ“‹ Job Tracking Column Positions</h3>';
+    html += '<h3>📋 Job Tracking Column Positions</h3>';
     html += '<p>Job Number: col ' + jobNumCol + ', Foreman: col ' + foremanCol + ', Status: col ' + statusCol + ', Start Date: col ' + startDateCol + '</p>';
     html += '</div>';
 
@@ -17349,7 +17931,7 @@ function diagnoseMissingCrews() {
   }
 
   html += '<div class="section">';
-  html += '<h3>ðŸ“Š Crews in Safety Compliance for ' + weekStartStr + ' (' + crewsInCompliance.length + ')</h3>';
+  html += '<h3>\uD83D\uDCCA Crews in Safety Compliance for ' + weekStartStr + ' (' + crewsInCompliance.length + ')</h3>';
   html += '<p>' + crewsInCompliance.join(', ') + '</p>';
   html += '</div>';
 
@@ -17377,7 +17959,7 @@ function diagnoseMissingCrews() {
       html += '<tr><td>' + missingCrews[p].jobNumber + '</td><td>' + missingCrews[p].foreman + '</td></tr>';
     }
     html += '</table>';
-    html += '<p style="margin-top: 10px;">Use <strong>âž• Force Add Active Crews</strong> to add them.</p>';
+    html += '<p style="margin-top: 10px;">Use <strong>➕ Force Add Active Crews</strong> to add them.</p>';
     html += '</div>';
   } else {
     html += '<div class="section present">';
