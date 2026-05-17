@@ -1200,3 +1200,49 @@ Notes: [Any notes]
     3. `confirmNewJobs` (client) — only updates local `jobTrackingData` for confirmed-added jobs; shows explicit error with job number if any fail
   - **Files Modified:** `src/85-DataImport.gs`, `src/CrewImport.html`
 
+### May 17, 2026
+- ✅ **Crew Import — Persistent Crew Lead Selections**
+  - **Problem:** Every import required manually re-selecting the crew lead when a crew had multiple candidates (e.g., a foreman who is regularly on time-off while the journeyman runs the crew day-to-day). Users had to pick the same person every week.
+  - **Solution:** Lead selections are now saved to ScriptProperties (`CREW_IMPORT_LEAD_SELECTIONS`) and auto-applied on subsequent imports.
+  - **How it works:**
+    - Lead selection dialog shows a **"Remember this choice for next week's import"** checkbox (checked by default)
+    - On confirm + remember → calls `saveCrewImportLeadSelections()` server-side, stores `{ "013-26": "Matthew Wendt" }`
+    - On next import, `detectCrewsWithMultipleLeads()` checks `savedLeadSelections` before adding to the dialog queue — if a saved preference matches a candidate (exact or nickname variant), it's auto-applied and the dialog is skipped entirely
+    - If saved match found in dialog: shows **"✓ Saved preference"** green badge on the pre-selected radio
+    - Absent-lead case gets context-specific title: "Confirm Absent Crew Lead ← 013-26"
+    - "Skip" button renamed to "Skip (don't save)"
+  - **Nickname/variant deduplication:** `detectCrewsWithMultipleLeads()` now checks if an absent-from-Excel employee is already represented by a name variant (e.g., "Matt" vs "Matthew") of a present lead, and skips them to avoid a spurious absent-lead dialog
+  - **New functions in `85-DataImport.gs`:**
+    - `saveCrewImportLeadSelections(selections)` — writes to `CREW_IMPORT_LEAD_SELECTIONS` ScriptProperty
+    - `getCrewImportLeadSelections()` — reads saved selections
+    - `clearCrewLeadSelection(jobNumber)` — removes a specific crew's saved preference
+    - `getCrewImportSettings()` now includes `leadSelections` field
+    - `clearCrewImportSettings()` also clears `CREW_IMPORT_LEAD_SELECTIONS`
+    - `showCrewImportSavedSettings()` now shows lead selection count and data
+  - **Files Modified:** `src/85-DataImport.gs`, `src/CrewImport.html`
+
+- ✅ **Crew Import — UX & Parsing Fixes**
+  - **"Not an Employee" button** — The "Skip" button for unmatched employee rows was renamed to "Not an Employee" (slash-circle icon) with a tooltip clarifying it removes the cell from the import as a non-employee annotation or note
+  - **`_currentWizardStep` tracking variable** — `updateStepBar()` now sets `_currentWizardStep`. `skipUnmatchedEmployee()` and `resolveAllUnmatched()` check the step before calling `checkAutoProgressToSpecial()` — prevents the wizard from resetting backwards to Step 6 when an unmatched row is dismissed while already at Step 7 (crew cards visible)
+  - **Expanded `isEmployeeName()` placeholder filter** — `^Crew\s+(Here|back)` now also matches `in|at|to|from|for|working|coming|returning|staying` (e.g., "Crew in Bozeman", "Crew returning Wed" no longer treated as employee names)
+  - **Files Modified:** `src/CrewImport.html`
+
+- ✅ **Training Tracking — `cleanupTrainingTrackingOnHoldRows()` Implementation**
+  - New function added to `Code.gs` (matches May 5 design doc):
+    - Builds set of On Hold / Completed job numbers from Job Tracking
+    - Scans Training Tracking for N/A rows belonging to those inactive crews → marks for deletion
+    - Also finds exact duplicate rows (same crew + month) → keeps first, deletes rest
+    - Deletes bottom-to-top to preserve row indices
+    - Re-applies Training Tracking formatting after deletion
+  - `menuCleanupTrainingTrackingOnHoldRows()` — menu wrapper with alert showing counts
+  - **Menu:** Glove Manager → 📅 Review & Schedule → 📚 Training → 🧹 Remove On Hold / Duplicate Rows
+  - **Files Modified:** `src/Code.gs`, `src/99-MenuFix.gs`
+
+- ✅ **Menu Cleanup — Removed Legacy One-Time Migration Items**
+  - Removed from Import Crew Makeup → 🔧 Utilities: `Migrate Job Tracking for Compliance`, `Migrate Config to Job Tracking`, `Migrate Job Tracking (Add On Hold Columns)`, `Add Schedule History Columns`, `Add Job Name Column` (all migrations already run on production)
+  - Added to Import Crew Makeup → 🔧 Utilities: `View Saved Import Settings` (`showCrewImportSavedSettings`)
+  - Removed from Process Safety Emails → 🔧 Utilities: `Fix JHA Dates (Background)`, `Check Fix JHA Progress` (batch-trigger reprocess replaced by direct batch pattern)
+  - Removed from Process Safety Emails → 🧹 Cleanup: `Migrate Safety Reports Sheet`, `Add Resolved On Column`, `Cleanup Config Crews (Legacy)`, `Fix Config Checkboxes (Legacy)` (all one-time migrations done)
+  - Removed from Save & Backup → 📋 History: `Import Legacy History` (no longer needed)
+  - **Files Modified:** `src/Code.gs`, `src/99-MenuFix.gs`
+

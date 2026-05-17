@@ -856,6 +856,7 @@
     var selectedSheet = null;
     var savedDuplicateSelections = {}; // Loaded from server
     var savedSpecialSelections = {}; // Loaded from server - for JT = Light Duty, etc.
+    var savedLeadSelections = {}; // Loaded from server - persisted crew lead choices by job number
     var jobTrackingData = {}; // Job Tracking status and dates for filtering
     var crewLeadSelections = {}; // Stores selected crew lead by job number: { "005-26": "John Smith" }
     var crewsWithMultipleLeads = []; // Crews that need lead selection
@@ -863,6 +864,7 @@
     var _autoSelectionsAppliedForTab = null; // Track which tab was already auto-applied
     var _crewLeadCheckCompleted = false; // Guard: crew lead selection already done for this tab
     var _matchingCompleted = false; // Guard: finishMatching() already ran for this tab
+    var _currentWizardStep = 1; // Tracks the active wizard step (1-8); updated by updateStepBar()
     var _displayPreviewReached = false; // Guard: displayPreview() already rendered for this tab
     var detectedNewJobs = []; // Jobs found in Excel but not in Job Tracking
     var locationsDropdownList = []; // Location names from Locations sheet (for dropdowns)
@@ -937,6 +939,12 @@
           if (settings && settings.specialSelections) {
             savedSpecialSelections = settings.specialSelections;
             console.log('Loaded ' + Object.keys(savedSpecialSelections).length + ' saved special selections');
+          }
+
+          // Store saved crew lead selections for later use
+          if (settings && settings.leadSelections) {
+            savedLeadSelections = settings.leadSelections;
+            console.log('Loaded ' + Object.keys(savedLeadSelections).length + ' saved crew lead selections: ' + JSON.stringify(savedLeadSelections));
           }
 
           renderLocationMappings();
@@ -1307,6 +1315,7 @@
       _crewLeadCheckCompleted = false;
       _matchingCompleted = false;
       _displayPreviewReached = false;
+      _currentWizardStep = 2; // Back to "Choose Tab" when re-parsing
       crewLeadSelections = {};
       crewsWithMultipleLeads = [];
 
@@ -3205,8 +3214,8 @@
       if (text.match(/schedule|Released|Crane Cert|Summer|Fall|Start|weeks? work|Project|Install|Arrival/i)) return false;
       // Skip location-like text (Dock, Sub, Trans, Poles, etc.)
       if (text.match(/\b(Dock|Sub|Trans|Poles|Distro|Foundation|Cleanup|Northern|Lights)\b/i)) return false;
-      // Skip "Crew Here" placeholders (e.g., "Crew Here Wed 4-1 thru Thurs 4-9")
-      if (text.match(/^Crew\s+(Here|back)\b/i)) return false;
+      // Skip "Crew Here" / "Crew in [city]" / "Crew back" / "Crew at [location]" placeholders
+      if (text.match(/^Crew\s+(Here|back|in|at|to|from|for|working|coming|returning|staying)\b/i)) return false;
       // Skip entries with "thru" (date ranges like "Wed 4-1 thru Thurs 4-9")
       if (text.match(/\bthru\b/i)) return false;
       // Skip "Another Operator??" and similar notes
@@ -3609,8 +3618,26 @@
           // Must be on this crew
           if (sheetEmp.jobNum.indexOf(crew.jobNumber + '.') !== 0) continue;
           var sheetEmpNameLower = (sheetEmp.name || '').toLowerCase().trim();
-          // Skip if already in leads list
+          // Skip if already in leads list (exact match)
           if (leadsNameSet[sheetEmpNameLower]) continue;
+          // Skip if already in leads list via nickname/variant (e.g. "Matt" = "Matthew")
+          // Compare last names exactly + first names via nicknameMap
+          var sheetParts = sheetEmpNameLower.split(/\s+/);
+          var sheetFirst = sheetParts[0] || '';
+          var sheetLast = sheetParts.length > 1 ? sheetParts[sheetParts.length - 1] : '';
+          var alreadyRepresented = false;
+          for (var li2 = 0; li2 < leads.length; li2++) {
+            var existName = (leads[li2].employee.name || '').toLowerCase().trim();
+            var existParts = existName.split(/\s+/);
+            var existFirst = existParts[0] || '';
+            var existLast = existParts.length > 1 ? existParts[existParts.length - 1] : '';
+            if (existLast === sheetLast && firstNamesMatch(existFirst, sheetFirst)) {
+              alreadyRepresented = true;
+              console.log('detectCrewsWithMultipleLeads: "' + sheetEmp.name + '" is a name variant of present lead "' + leads[li2].employee.name + '" — skipping absent duplicate (same person)');
+              break;
+            }
+          }
+          if (alreadyRepresented) continue;
           // Must have a lead classification on the sheet
           var sheetClass = sheetEmp.jobClassification || '';
           if (!isLeadClassification(sheetClass)) continue;
@@ -3624,7 +3651,37 @@
           console.log('detectCrewsWithMultipleLeads: Adding absent lead candidate ' + sheetEmp.name + ' (' + sheetClass + ') for ' + crew.jobNumber);
         }
 
-        if (leads.length > 1) {
+        // Auto-apply saved lead selection if we have one and it matches a lead candidate.
+        // This prevents re-prompting when the same crew/situation appears every week.
+        if (leads.length > 0 && savedLeadSelections[crew.jobNumber] && !crewLeadSelections[crew.jobNumber]) {
+          var savedName = savedLeadSelections[crew.jobNumber].toLowerCase().trim();
+          var savedMatch = null;
+          for (var si = 0; si < leads.length; si++) {
+            var leadName = (leads[si].employee.name || '').toLowerCase().trim();
+            // Match exact OR nickname variant (Matt = Matthew)
+            var leadParts = leadName.split(/\s+/);
+            var savedParts = savedName.split(/\s+/);
+            var sameLastName = leadParts[leadParts.length - 1] === savedParts[savedParts.length - 1];
+            var sameFirstName = leadParts[0] === savedParts[0] || firstNamesMatch(leadParts[0], savedParts[0]);
+            if (sameLastName && sameFirstName) {
+              savedMatch = leads[si];
+              break;
+            }
+          }
+          if (savedMatch) {
+            crewLeadSelections[crew.jobNumber] = savedMatch.employee.name;
+            if (!savedMatch.isAbsent) {
+              reorderCrewWithSelectedLead(crew, savedMatch.index);
+            }
+            console.log('Auto-applied saved lead selection for ' + crew.jobNumber + ': ' + savedMatch.employee.name);
+            continue; // Skip adding to crewsWithMultipleLeads — already resolved
+          }
+        }
+
+        // Show dialog if: multiple leads present, OR a single lead who is absent this week
+        // (user must confirm absent person is still crew lead, or pick someone from the card)
+        var hasAbsentLead = leads.some(function(l) { return l.isAbsent; });
+        if (leads.length > 1 || (leads.length === 1 && hasAbsentLead)) {
           crewsWithMultipleLeads.push({
             crew: crew,
             leads: leads
@@ -3644,22 +3701,52 @@
       var crew = crewData.crew;
       var leads = crewData.leads;
 
-      var msg = '<p>Crew <strong>' + crew.jobNumber + '</strong> at <strong>' + crew.mappedLocation + '</strong> has multiple employees with lead classifications:</p>';
+      // Context-specific intro message
+      var isAbsentOnlyCase = leads.length === 1 && leads[0].isAbsent;
+      var msg;
+      if (isAbsentOnlyCase) {
+        msg = '<p>The established crew lead for <strong>' + crew.jobNumber + '</strong> at <strong>' + crew.mappedLocation + '</strong> is <strong>absent this week</strong> (Time Off / not in the Excel card).</p>';
+        msg += '<p class="text-muted small">Confirm they are still the crew lead, or select someone from the crew card below to temporarily take the lead position.</p>';
+      } else {
+        msg = '<p>Crew <strong>' + crew.jobNumber + '</strong> at <strong>' + crew.mappedLocation + '</strong> has multiple employees with lead classifications:</p>';
+      }
       msg += '<div style="max-height: 300px; overflow-y: auto;">';
+
+      // Determine the pre-selected index (saved preference wins over default first)
+      var savedName = (savedLeadSelections[crew.jobNumber] || '').toLowerCase().trim();
+      var preSelectedIndex = 0; // Default to first
+      var hasSavedPref = false;
+      if (savedName) {
+        for (var si = 0; si < leads.length; si++) {
+          var ln = (leads[si].employee.name || '').toLowerCase().trim();
+          var lnParts = ln.split(/\s+/);
+          var snParts = savedName.split(/\s+/);
+          var sameL = lnParts[lnParts.length - 1] === snParts[snParts.length - 1];
+          var sameF = lnParts[0] === snParts[0] || firstNamesMatch(lnParts[0], snParts[0]);
+          if (sameL && sameF) {
+            preSelectedIndex = si;
+            hasSavedPref = true;
+            break;
+          }
+        }
+      }
 
       for (var i = 0; i < leads.length; i++) {
         var lead = leads[i];
         var emp = lead.employee;
         var classificationName = getLeadClassificationName(lead.classification);
-        var isFirst = i === 0;
+        var isPreSelected = (i === preSelectedIndex);
 
-        msg += '<label class="lead-selection-card d-flex align-items-center' + (isFirst ? ' selected' : '') + '" onclick="selectLeadCard(this)">';
-        msg += '<input type="radio" name="leadSelection" value="' + i + '"' + (isFirst ? ' checked' : '') + '>';
+        msg += '<label class="lead-selection-card d-flex align-items-center' + (isPreSelected ? ' selected' : '') + '" onclick="selectLeadCard(this)">';
+        msg += '<input type="radio" name="leadSelection" value="' + i + '"' + (isPreSelected ? ' checked' : '') + '>';
         msg += '<div class="flex-grow-1">';
         msg += '<strong>' + emp.name + '</strong>';
         msg += '<span class="badge bg-primary lead-badge">' + lead.classification + '</span>';
         if (lead.isAbsent) {
           msg += '<span class="badge bg-warning text-dark ms-1" style="font-size:0.7em;">On Time Off</span>';
+        }
+        if (hasSavedPref && isPreSelected) {
+          msg += '<span class="badge bg-success ms-1" style="font-size:0.7em;" title="Remembered from last import">⭐ Saved preference</span>';
         }
         msg += '<br><small class="text-muted">' + classificationName + '</small>';
         msg += '</div>';
@@ -3668,14 +3755,21 @@
 
       msg += '</div>';
       msg += '<p class="text-muted small mt-3"><i class="bi bi-info-circle"></i> The selected person will be assigned job number <strong>' + crew.jobNumber + '.1</strong> and will be listed as the crew lead for this job.</p>';
+      // "Remember" checkbox
+      msg += '<div class="form-check mt-2">';
+      msg += '<input class="form-check-input" type="checkbox" id="rememberLeadCheck" checked>';
+      msg += '<label class="form-check-label small" for="rememberLeadCheck">Remember this choice for next week\'s import</label>';
+      msg += '</div>';
 
       document.getElementById('notificationHeader').className = 'notification-header info';
       document.getElementById('notificationIcon').className = 'bi bi-person-badge';
-      document.getElementById('notificationTitle').textContent = 'Select Crew Lead for ' + crew.jobNumber;
+      document.getElementById('notificationTitle').textContent = isAbsentOnlyCase
+        ? 'Confirm Absent Crew Lead — ' + crew.jobNumber
+        : 'Select Crew Lead for ' + crew.jobNumber;
       document.getElementById('notificationBody').innerHTML = msg;
       document.getElementById('notificationCancelBtn').style.display = 'inline-block';
-      document.getElementById('notificationCancelBtn').textContent = 'Skip';
-      document.getElementById('notificationOkBtn').textContent = 'Confirm Selection';
+      document.getElementById('notificationCancelBtn').textContent = 'Skip (don\'t save)';
+      document.getElementById('notificationOkBtn').textContent = isAbsentOnlyCase ? 'Confirm Lead' : 'Confirm Selection';
 
       notificationCallback = function() {
         var selected = document.querySelector('input[name="leadSelection"]:checked');
@@ -3692,12 +3786,26 @@
           }
 
           console.log('Selected ' + selectedLead.employee.name + ' as lead for ' + crew.jobNumber + (selectedLead.isAbsent ? ' (currently absent/time-off)' : ''));
+
+          // Save preference if "Remember" is checked
+          var rememberCheck = document.getElementById('rememberLeadCheck');
+          if (rememberCheck && rememberCheck.checked) {
+            savedLeadSelections[crew.jobNumber] = selectedLead.employee.name;
+            google.script.run
+              .withSuccessHandler(function() { console.log('Saved crew lead preference for ' + crew.jobNumber); })
+              .withFailureHandler(function(e) { console.error('Failed to save lead preference:', e); })
+              .saveCrewImportLeadSelections(savedLeadSelections);
+          }
         }
         if (callback) callback();
       };
 
       notificationCancelCallback = function() {
-        // Skip - use default ordering (first lead in hierarchy order)
+        // Skip - use default ordering (first lead in hierarchy order).
+        // For absent-only case, the absent lead still holds .1 on the sheet.
+        if (isAbsentOnlyCase && leads[0]) {
+          console.log('Confirmed (skipped dialog) — ' + leads[0].employee.name + ' remains lead for ' + crew.jobNumber + ' (currently absent/time-off)');
+        }
         if (callback) callback();
       };
 
@@ -7475,8 +7583,8 @@
         html += '<button class="btn btn-outline-secondary btn-sm me-2" onclick="showAllEmployeesDropdown(\'' + escapeAttr(uniqueKey) + '\')">';
         html += '<i class="bi bi-search"></i> Search Existing';
         html += '</button>';
-        html += '<button class="btn btn-outline-danger btn-sm" onclick="skipUnmatchedEmployee(\'' + escapeAttr(uniqueKey) + '\')">';
-        html += '<i class="bi bi-x"></i> Skip';
+        html += '<button class="btn btn-outline-danger btn-sm" onclick="skipUnmatchedEmployee(\'' + escapeAttr(uniqueKey) + '\')" title="Remove from import — this cell is not an employee (annotation, note, etc.)">';
+        html += '<i class="bi bi-slash-circle"></i> Not an Employee';
         html += '</button>';
         html += '</div>';
         html += '<div id="all-employees-dropdown-' + escapeAttr(uniqueKey) + '" style="display: none;" class="mt-2"></div>';
@@ -7733,7 +7841,12 @@
 
       if (remainingCount === 0) {
         document.getElementById('unmatchedSection').style.display = 'none';
-        checkAutoProgressToSpecial();
+        // Only trigger auto-progress to Special if still in step 5 (pre-crew-cards).
+        // If we're at step 7+ the unmatched section was re-shown by displayPreview()
+        // for informational purposes — don't reset the wizard back to step 6.
+        if (_currentWizardStep <= 5) {
+          checkAutoProgressToSpecial();
+        }
       } else {
         document.getElementById('unmatchedCount').textContent = remainingCount;
       }
@@ -7743,7 +7856,9 @@
       unmatchedList = [];
       unmatchedByKey = {};
       document.getElementById('unmatchedSection').style.display = 'none';
-      checkAutoProgressToSpecial();
+      if (_currentWizardStep <= 5) {
+        checkAutoProgressToSpecial();
+      }
     }
 
     function addAsNewEmployee(unmatchedKey) {
@@ -8285,6 +8400,7 @@
      * @param {number} activeStep - 1=Upload, 2=Tab, 3=NewJobs, 4=NewHires, 5=Resolve, 6=Special, 7=Crews, 8=Preview
      */
     function updateStepBar(activeStep) {
+      _currentWizardStep = activeStep; // Track for guards (e.g. skipUnmatchedEmployee)
       var stepIds = ['step-upload','step-tab','step-newjobs','step-newhires','step-resolve','step-special','step-crews','step-preview'];
       for (var i = 0; i < stepIds.length; i++) {
         var el = document.getElementById(stepIds[i]);

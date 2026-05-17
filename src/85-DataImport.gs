@@ -3534,15 +3534,74 @@ function getCrewImportSpecialSelections() {
 }
 
 /**
+ * Saves crew lead selections for crew import.
+ * Format: { "013-26": "Matthew Wendt", "028-26": "Jimmy Bailey" }
+ * Key = job number base (e.g. "028-26"), value = preferred lead name as it appears on the Employees sheet.
+ *
+ * @param {Object} selections - Object with job number -> lead name
+ * @return {Object} Result with success status
+ */
+function saveCrewImportLeadSelections(selections) {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    props.setProperty('CREW_IMPORT_LEAD_SELECTIONS', JSON.stringify(selections));
+    Logger.log('Saved ' + Object.keys(selections).length + ' crew lead selections');
+    return { success: true };
+  } catch (e) {
+    Logger.log('Error saving lead selections: ' + e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Loads crew lead selections for crew import.
+ *
+ * @return {Object} Selections object (empty if none saved)
+ */
+function getCrewImportLeadSelections() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var saved = props.getProperty('CREW_IMPORT_LEAD_SELECTIONS');
+    if (saved) {
+      return JSON.parse(saved);
+    }
+  } catch (e) {
+    Logger.log('Error loading lead selections: ' + e.message);
+  }
+  return {};
+}
+
+/**
+ * Clears the saved lead selection for a specific crew (call when a crew no longer exists).
+ * @param {string} jobNumber - Job number to clear (e.g. "028-26")
+ * @return {Object} Result with success status
+ */
+function clearCrewLeadSelection(jobNumber) {
+  try {
+    var selections = getCrewImportLeadSelections();
+    if (selections[jobNumber]) {
+      delete selections[jobNumber];
+      saveCrewImportLeadSelections(selections);
+      Logger.log('Cleared saved lead selection for ' + jobNumber);
+    }
+    return { success: true };
+  } catch (e) {
+    Logger.log('Error clearing lead selection: ' + e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
  * Gets all crew import settings at once (for dialog initialization).
  *
- * @return {Object} Object with locationMappings, duplicateSelections, and specialSelections
+ * @return {Object} Object with locationMappings, duplicateSelections, specialSelections, and leadSelections
  */
 function getCrewImportSettings() {
   return {
     locationMappings: getCrewImportLocationMappings(),
     duplicateSelections: getCrewImportDuplicateSelections(),
-    specialSelections: getCrewImportSpecialSelections()
+    specialSelections: getCrewImportSpecialSelections(),
+    leadSelections: getCrewImportLeadSelections()
   };
 }
 
@@ -3557,6 +3616,7 @@ function clearCrewImportSettings() {
     props.deleteProperty('CREW_IMPORT_LOCATION_MAPPINGS');
     props.deleteProperty('CREW_IMPORT_DUPLICATE_SELECTIONS');
     props.deleteProperty('CREW_IMPORT_SPECIAL_SELECTIONS');
+    props.deleteProperty('CREW_IMPORT_LEAD_SELECTIONS');
     Logger.log('Cleared crew import settings');
     return { success: true };
   } catch (e) {
@@ -3581,6 +3641,9 @@ function showCrewImportSavedSettings() {
 
   html += '<h4>Special Selections (' + Object.keys(settings.specialSelections || {}).length + ')</h4>';
   html += '<pre>' + JSON.stringify(settings.specialSelections, null, 2) + '</pre>';
+
+  html += '<h4>Crew Lead Selections (' + Object.keys(settings.leadSelections || {}).length + ')</h4>';
+  html += '<pre>' + JSON.stringify(settings.leadSelections, null, 2) + '</pre>';
 
   html += '<br><button onclick="google.script.run.withSuccessHandler(function() { alert(\'Settings cleared!\'); google.script.host.close(); }).clearCrewImportSettings()">Clear All Saved Settings</button>';
 

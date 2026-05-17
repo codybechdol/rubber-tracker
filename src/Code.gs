@@ -5007,7 +5007,122 @@ function updateTrainingTrackingCrewLeads() {
     ui.alert('✅ Update Complete', msg, ui.ButtonSet.OK);
   }
 
-  Logger.log('updateTrainingTrackingCrewLeads: Updated ' + updatedRows + ' rows, skipped ' + skippedPastMonths + ' past month rows');
+
+/**
+ * Menu wrapper for cleanupTrainingTrackingOnHoldRows.
+ * Menu: Glove Manager → 📅 Review & Schedule → 📚 Training → 🧹 Remove On Hold / Duplicate Rows
+ */
+function menuCleanupTrainingTrackingOnHoldRows() {
+  var result = cleanupTrainingTrackingOnHoldRows();
+  var msg = '';
+  if (result.removedInactive > 0) msg += '🧹 Removed ' + result.removedInactive + ' N/A row(s) for On Hold / Completed crews.\n';
+  if (result.removedDuplicates > 0) msg += '🧹 Removed ' + result.removedDuplicates + ' duplicate row(s) (same crew + month).\n';
+  if (msg === '') msg = '✅ No rows needed cleanup.';
+  SpreadsheetApp.getUi().alert('🧹 Training Tracking Cleanup', msg, SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+/**
+ * Removes two categories of stale rows from Training Tracking:
+ *  1. Rows where the crew is On Hold or Completed in Job Tracking AND the row status is N/A
+ *     (these were marked N/A by refreshTrainingAttendeesSilent and are safe to delete)
+ *  2. Exact duplicate rows (same Crew # + Month) — keeps the first occurrence, deletes the rest
+ *
+ * Deletes bottom-to-top to preserve row indices.
+ * Re-applies Training Tracking formatting after deletion.
+ *
+ * @return {Object} { removedInactive: number, removedDuplicates: number }
+ */
+function cleanupTrainingTrackingOnHoldRows() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Training Tracking');
+  if (!sheet || sheet.getLastRow() < 3) {
+    return { removedInactive: 0, removedDuplicates: 0 };
+  }
+
+  // Build set of On Hold / Completed job numbers from Job Tracking
+  var inactiveJobNumbers = {};
+  var jobSheet = ss.getSheetByName('Job Tracking');
+  if (jobSheet && jobSheet.getLastRow() > 1) {
+    var jobData = jobSheet.getDataRange().getValues();
+    var jobHeaders = jobData[0];
+    var jJobNumCol = jobHeaders.indexOf('Job Number');
+    var jStatusCol = jobHeaders.indexOf('Status');
+    if (jJobNumCol === -1) jJobNumCol = 0;
+    if (jStatusCol === -1) jStatusCol = 9;
+    for (var ji = 1; ji < jobData.length; ji++) {
+      var jStatus = String(jobData[ji][jStatusCol] || '').toLowerCase().trim();
+      if (jStatus === 'on hold' || jStatus === 'completed') {
+        var jNum = String(jobData[ji][jJobNumCol] || '').trim();
+        if (jNum) inactiveJobNumbers[jNum] = jStatus;
+      }
+    }
+  }
+
+  // Read Training Tracking data
+  var data = sheet.getDataRange().getValues();
+  var headerIdx = findTrainingTrackingHeaderRow(data);
+  if (headerIdx < 0) return { removedInactive: 0, removedDuplicates: 0 };
+
+  var headers = data[headerIdx];
+  var monthCol = -1, crewCol = -1, statusCol = -1;
+  for (var h = 0; h < headers.length; h++) {
+    var hdr = String(headers[h]).toLowerCase().trim();
+    if (hdr === 'month') monthCol = h;
+    if (hdr === 'job number' || hdr === 'crew' || hdr === 'crew #' || hdr === 'crew number') crewCol = h;
+    if (hdr === 'status') statusCol = h;
+  }
+  if (crewCol === -1 || monthCol === -1) return { removedInactive: 0, removedDuplicates: 0 };
+
+  // Identify rows to delete (1-based sheet row numbers)
+  var rowsToDelete = [];
+  var seenCombos = {}; // crew+month → true (first occurrence)
+  var removedInactive = 0;
+  var removedDuplicates = 0;
+
+  // Scan data rows top-to-bottom to identify candidates
+  for (var i = headerIdx + 1; i < data.length; i++) {
+    var row = data[i];
+    var crew = String(row[crewCol] || '').trim();
+    var month = String(row[monthCol] || '').trim();
+    var rowStatus = String(statusCol >= 0 ? row[statusCol] || '' : '').trim();
+
+    if (!crew || !month) continue; // Skip blank rows
+
+    var sheetRowNum = i + 1; // 1-based
+
+    // Rule 1: Duplicate rows - keep first, delete rest
+    var comboKey = crew + '|' + month;
+    if (seenCombos[comboKey]) {
+      rowsToDelete.push({ row: sheetRowNum, reason: 'duplicate' });
+      continue;
+    }
+    seenCombos[comboKey] = true;
+
+    // Rule 2: On Hold / Completed crew with N/A status
+    if (inactiveJobNumbers[crew] && rowStatus === 'N/A') {
+      rowsToDelete.push({ row: sheetRowNum, reason: 'inactive' });
+    }
+  }
+
+  if (rowsToDelete.length === 0) return { removedInactive: 0, removedDuplicates: 0 };
+
+  // Delete from bottom to top to preserve indices
+  rowsToDelete.sort(function(a, b) { return b.row - a.row; });
+  for (var d = 0; d < rowsToDelete.length; d++) {
+    sheet.deleteRow(rowsToDelete[d].row);
+    if (rowsToDelete[d].reason === 'inactive') removedInactive++;
+    else removedDuplicates++;
+  }
+
+  Logger.log('cleanupTrainingTrackingOnHoldRows: Removed ' + removedInactive + ' inactive N/A rows, ' + removedDuplicates + ' duplicate rows');
+
+  // Re-apply formatting if function exists
+  if (typeof menuApplyTrainingTrackingFormatting === 'function') {
+    try { menuApplyTrainingTrackingFormatting(); } catch (e) { Logger.log('Formatting reapply failed: ' + e.message); }
+  }
+
+  return { removedInactive: removedInactive, removedDuplicates: removedDuplicates };
+}  Logger.log('updateTrainingTrackingCrewLeads: Updated ' + updatedRows + ' rows, skipped ' + skippedPastMonths + ' past month rows');
   return { updatedRows: updatedRows, skippedPastMonths: skippedPastMonths };
 }
 
@@ -7065,24 +7180,21 @@ function onOpen() {
       .addSeparator()
       .addSubMenu(ui.createMenu('🔧 Utilities')
         .addItem('📋 Setup Job Tracking Sheet', 'setupJobTrackingSheet')
-        .addItem('📋 Migrate Job Tracking for Compliance', 'migrateJobTrackingForComplianceConfig')
-        .addItem('📋 Migrate Config to Job Tracking', 'migrateConfigToJobTracking')
         .addSeparator()
-        .addItem('🔄 Migrate Job Tracking (Add On Hold Columns)', 'migrateJobTrackingSheet')
         .addItem('🔄 Refresh Job Tracking', 'refreshJobTrackingFromEmployees')
         .addItem('👤 Refresh Job Tracking Foremen', 'refreshJobTrackingForemen')
         .addItem('✅ Mark Job Complete', 'markJobComplete')
         .addItem('➕ Add Future Job', 'addFutureJob')
         .addItem('🎨 Apply Job Tracking Formatting', 'menuApplyJobTrackingFormatting')
-        .addItem('📅 Add Schedule History Columns', 'migrateJobTrackingScheduleColumns')
-        .addItem('📝 Add Job Name Column', 'migrateJobTrackingAddJobName')
         .addItem('📝 Backfill Job Names', 'backfillJobNames')
         .addItem('📂 View Job Tracking', 'openJobTrackingSheet')
         .addSeparator()
         .addItem('🔄 Sync Employee Locations from Job Tracking', 'syncEmployeeLocationsFromJobTracking')
         .addItem('🔄 Sync Completed Jobs to Training', 'syncCompletedJobsToTraining')
         .addItem('🧹 Cleanup Pending Training for Completed Jobs', 'cleanupPendingTrainingForCompletedJobs')
-        .addItem('🔄 Sync Completed Job (Manual)', 'menuSyncCompletedJob')))
+        .addItem('🔄 Sync Completed Job (Manual)', 'menuSyncCompletedJob')
+        .addSeparator()
+        .addItem('🗂️ View Saved Import Settings', 'showCrewImportSavedSettings')))
 
     // === STEP 2: GENERATE ALL REPORTS ===
     .addSubMenu(ui.createMenu('📊 Generate All Reports')
@@ -7121,10 +7233,7 @@ function onOpen() {
         .addItem('🧹 Cleanup N/A Cells (make blank)', 'cleanupNACellsInCompliance')
         .addItem('💬 Refresh Compliance Tooltips', 'menuRefreshComplianceTooltips')
         .addItem('🔄 Master Recalculate', 'masterRecalculateCompliance')
-        .addItem('🔧 Fix Notes Column', 'fixNotesColumnCheckboxes')
-        .addSeparator()
-        .addItem('🔄 Fix JHA Dates (Background)', 'showReprocessJHAFallbacksDialog')
-        .addItem('📊 Check Fix JHA Progress', 'showReprocessJHAProgress'))
+        .addItem('🔧 Fix Notes Column', 'fixNotesColumnCheckboxes'))
       .addSubMenu(ui.createMenu('📄 Logs')
         .addItem('📋 Setup Log Sheets', 'setupAllSafetyLogSheets')
         .addItem('📄 View JHA Log', 'openJHALogSheet')
@@ -7163,12 +7272,8 @@ function onOpen() {
         .addItem('📅 Backfill Past Weeks', 'menuBackfillPastWeeks')
         .addItem('🎨 Reformat by Week', 'menuReformatComplianceSheet')
         .addSeparator()
-        .addItem('🔄 Migrate Safety Reports Sheet', 'migrateSafetyReportsToEquipmentNeeds')
         .addItem('🧹 Cleanup Equipment Sheet', 'cleanupSafetyReportsSheet')
         .addItem('🗄️ Archive Resolved Equipment', 'showArchiveResolvedEquipmentDialog')
-        .addItem('📅 Add Resolved On Column', 'addResolvedOnColumn')
-        .addItem('🧹 Cleanup Config Crews (Legacy)', 'cleanupComplianceConfig')
-        .addItem('🔧 Fix Config Checkboxes (Legacy)', 'fixComplianceConfigCheckboxes')
         .addItem('🧹 Remove Duplicate Rows', 'menuCleanupDuplicateComplianceRows')
         .addItem('🧹 Remove Duplicate Log Entries', 'menuCleanupDuplicateLogEntries')
         .addItem('🧹 Remove Duplicate Equipment Needs', 'cleanupDuplicateEquipmentNeeds')
@@ -7216,6 +7321,7 @@ function onOpen() {
         .addItem('📊 Recalculate Training Completion %', 'recalculateAllTrainingCompletionStatus')
         .addItem('📊 Generate Compliance Report', 'generateTrainingComplianceReport')
         .addItem('🔄 Sync Training Tracking with Config', 'syncTrainingTrackingWithConfig')
+        .addItem('🧹 Remove On Hold / Duplicate Rows', 'menuCleanupTrainingTrackingOnHoldRows')
         .addItem('🔍 Debug Training Config', 'debugTrainingConfig'))
       .addSubMenu(ui.createMenu('👷 Crew Visit')
         .addItem('Setup Crew Visit Config', 'setupCrewVisitConfig')
@@ -7239,7 +7345,6 @@ function onOpen() {
       .addItem('📂 View Backup Folder', 'openBackupFolder')
       .addSeparator()
       .addSubMenu(ui.createMenu('📋 History')
-        .addItem('Import Legacy History', 'showImportLegacyHistoryDialog')
         .addItem('Item History Lookup', 'showItemHistoryLookup')
         .addItem('View Full History', 'viewFullHistory'))
       .addSubMenu(ui.createMenu('📧 Email Reports')
@@ -7258,16 +7363,10 @@ function onOpen() {
         .addItem('↩️ Restore Item from Archive', 'showRestoreFromArchiveDialog')
         .addItem('📊 Update Inventory Reports', 'updateInventoryReports')
         .addItem('🔄 Sync New Items Log', 'syncNewItemsLogWithInventory')
-        .addItem('📦 Reset Known Item Numbers', 'resetKnownItemNumbers')
-        .addItem('🧱 Reset Blanket Tracking', 'resetBlanketTracking')
         .addSeparator()
         .addItem('⚡ View HV Testers', 'openHVTestersSheet')
         .addItem('⚡ View Phasing Sets', 'openPhasingSetsSheet')
-        .addItem('🏥 View AED', 'openAEDSheet')
-        .addItem('🔧 Fix Equipment Headers', 'fixEquipmentSheetHeaders')
-        .addItem('🔧 Repair History Sheet Columns', 'repairHistorySheetColumns')
-        .addItem('🔧 Fix History Overflow Data', 'fixHistorySheetOrphanedData')
-        .addItem('🔧 Regenerate History Notes', 'regenerateHistoryNotes'))
+        .addItem('🏥 View AED', 'openAEDSheet'))
       .addSubMenu(ui.createMenu('🛒 Purchase Orders')
         .addItem('📝 Create Purchase Order', 'showPurchaseOrderDialog')
         .addItem('📋 Order History', 'openPurchaseOrdersSheet')
@@ -7276,7 +7375,6 @@ function onOpen() {
         .addItem('🔍 Update Location Validation', 'updateEmployeesLocationValidation')
         .addItem('📤 Archive Previous Employees', 'archivePreviousEmployees')
         .addItem('🔄 Restore Deleted Employee', 'showRestoreEmployeeDialog')
-        .addItem('🔄 Update Employee History Headers', 'updateEmployeeHistoryHeaders')
         .addItem('🧹 Clean Up Duplicate Employee History', 'cleanupDuplicateEmployeeHistoryEntries')
         .addItem('🧹 Fix Bad Employee Names', 'cleanupBadEmployeeNames')
         .addItem('🧹 Clean Up Duplicate Item History', 'cleanupDuplicateItemHistory')
@@ -7288,8 +7386,6 @@ function onOpen() {
       .addSubMenu(ui.createMenu('📋 Job Tracking')
         .addItem('📂 View Job Tracking', 'openJobTrackingSheet')
         .addItem('🔄 Refresh Job Tracking', 'refreshJobTrackingFromEmployees')
-        .addItem('📅 Add Schedule History Columns', 'migrateJobTrackingScheduleColumns')
-        .addItem('🔄 Sync Config to Job Tracking Schedules', 'syncConfigToJobTrackingSchedule')
         .addItem('✅ Mark Job Complete', 'markJobComplete')
         .addItem('➕ Add Future Job', 'addFutureJob'))
       .addSubMenu(ui.createMenu('🏗️ Sheets Setup')
@@ -7297,16 +7393,11 @@ function onOpen() {
         .addItem('🔗 Add ESL ID Column (Gloves/Sleeves)', 'migrateGlovesSleevesSheetsForESLID')
         .addItem('⚡ Setup HV Tester & Phasing Set Sheets', 'setupHVTesterAndPhasingSetSheets')
         .addItem('🏥 Setup AED Sheet', 'setupAEDSheet')
-        .addItem('⚡ Migrate HV Testers - Add KV Column', 'migrateHVTestersAddKVColumn')
-        .addItem('⚡ Migrate HV/Phasing to Change Out Date', 'migrateHVAndPhasingSetsToChangeOutDate')
-        .addItem('⚡ Fix HV Tester Change Out Dates', 'fixHVTesterChangeOutDates')
-        .addItem('⚡ Fix Phasing Set Change Out Dates', 'fixPhasingSetChangeOutDates')
         .addItem('🔍 Setup Locations Sheet', 'setupLocationsSheet')
         .addItem('🔍 View Locations', 'openLocationsSheet')
         .addItem('📍 Review New Locations', 'reviewNewLocations')
         .addItem('📅 Fiscal Year Config', 'showFiscalYearConfig')
-        .addItem('📥 Import Data', 'showImportDialog')
-        .addItem('📥 Quick Import (1084)', 'importProvidedData'))
+        .addItem('📥 Import Data', 'showImportDialog'))
       .addSeparator()
       .addItem('🔍 Diagnose Auth Issues', 'diagnoseAuthIssues')
       .addItem('🗑️ Clear Background Triggers', 'clearAllBackgroundTriggers'))
@@ -7320,10 +7411,7 @@ function onOpen() {
       .addItem('📊 Show All Sleeve Swaps', 'runSleeveSwapDiagnostic')
       .addItem('📊 Show All Glove Swaps', 'runGloveSwapDiagnostic')
       .addSeparator()
-      .addItem('🧪 Test Trip Planner Data', 'debugTripPlannerData')
-      .addSeparator()
-      .addItem('🔍 Diagnose Crew 005-26', 'diagnoseCrew005')
-      .addItem('🔍 Diagnose Crew 045-26', 'diagnose045Crew'))
+      .addItem('🧪 Test Trip Planner Data', 'debugTripPlannerData'))
 
     .addSeparator()
     .addItem('Close & Save History', 'closeAndSaveHistory')

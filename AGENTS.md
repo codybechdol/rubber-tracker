@@ -307,6 +307,8 @@ The dialog uses a staged wizard with a step progress bar. Sections appear sequen
 - **`continueToSpecial()`** — hides resolution sections, shows Special Circumstances (or skips to crew cards if none)
 - **`continueToCrewCards()`** — shows crew cards, fires lead selection dialogs, then `displayPreview()`
 - **No auto-tab-select** — `showSheetSelection()` does NOT auto-parse tab 0; user must click deliberately
+- **`_currentWizardStep`** — tracks active step; `skipUnmatchedEmployee()` and `resolveAllUnmatched()` check this before calling `checkAutoProgressToSpecial()` to prevent backwards reset when at step 7+
+- **Persistent crew lead selections** — `savedLeadSelections` loaded from `getCrewImportSettings()` on init. `detectCrewsWithMultipleLeads()` auto-applies saved preference (skips dialog) when match found. Dialog shows "Remember" checkbox; on confirm saves via `saveCrewImportLeadSelections()`.
 - **Full flow docs:** `docs/CREW_IMPORT_FLOW.md`
 
 ## Inventory Location Sync

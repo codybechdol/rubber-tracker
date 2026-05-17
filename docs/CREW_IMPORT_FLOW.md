@@ -316,6 +316,7 @@ Position suffixes are assigned by this priority order: lead gets `.1`, remaining
 
 | Date | Change |
 |---|---|
+| **May 17, 2026** | Persistent crew lead selections: saved to ScriptProperties (`CREW_IMPORT_LEAD_SELECTIONS`), auto-applied on next import, "Remember" checkbox in dialog. Nickname/variant deduplication for absent leads. `_currentWizardStep` tracking to guard against backwards wizard reset. "Not an Employee" button replaces "Skip" for unmatched rows. Expanded `isEmployeeName()` to reject more "Crew in/at/to/from" annotations. Menu cleanup: removed legacy one-time migration items from all submenus. |
 | **May 16, 2026** | Redesigned as 8-step wizard. Removed auto-tab-select. Reordered sections: Unmatched → Special → Crew Cards (was: Crew Cards → Special → Unmatched). Added tab-reset on re-selection. Added absent-lead support in crew lead dialog. Added two explicit Continue buttons (Step 5→6, Step 6→7). |
 | **April 2026** | Added null-guard fixes for `specialCircumstances` array. Added `_autoSelectionsAppliedForTab` guard for tab-aware auto-apply. Fixed Light Duty job number increments. |
 | **March 2026** | Added Pending Start job filtering (completed jobs excluded from crew preview). Added activation dialog for pending jobs detected in Excel. Added "Set as Pending Start" dropdown option on crew cards. |

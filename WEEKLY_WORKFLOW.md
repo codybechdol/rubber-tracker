@@ -224,5 +224,6 @@ Copy this checklist to track your Monday workflow:
 
 ## Version History
 
+- **May 17, 2026** - Crew Import: persistent crew lead selections (saved to ScriptProperties, auto-applied next week); absent-lead dialog shows context-specific messaging + nickname deduplication; "Not an Employee" button for unmatched rows; wizard step guard prevents backwards reset; menu cleanup (removed legacy migration items)
 - **May 16, 2026** - Step 1 (Import Crew Makeup) redesigned as 8-step wizard: explicit tab selection (no auto-parse), Unmatched+Duplicates before Special before Crew Cards, tab re-selection resets all sections, two explicit Continue buttons, absent-lead support in crew lead dialog
 - **February 5, 2026** - Initial workflow documentation created
