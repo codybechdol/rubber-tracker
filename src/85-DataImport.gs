@@ -859,12 +859,40 @@ function activatePendingJobs(jobNumbers) {
 
       if (currentStatus === 'Pending Start' || currentStatus === 'On Hold') {
         var rowIdx = i + 1;
+        var todayDate = new Date();
+        todayDate.setHours(0, 0, 0, 0);
+
+        // For On Hold jobs: check if the estimated return date is still in the future.
+        // If the crew isn't back until a future date, set to Pending Start so
+        // checkAndActivateScheduledJobs() auto-activates it on the return date.
+        if (currentStatus === 'On Hold') {
+          var estimatedReturn = jobData[i][6]; // Estimated Return (G, index 6)
+          var estRetDate = estimatedReturn ? new Date(estimatedReturn) : null;
+          if (estRetDate) estRetDate.setHours(0, 0, 0, 0);
+
+          if (estRetDate && estRetDate > todayDate) {
+            // Return date is in the future — set to Pending Start, not Active
+            jobSheet.getRange(rowIdx, 10).setValue('Pending Start');  // Status (J)
+            jobSheet.getRange(rowIdx, 5).setValue(estRetDate);        // Start Date (E) = estimated return
+            // Keep the On Hold Date (F) and Estimated Return (G) for reference
+            var currentNotes = jobData[i][10] || '';
+            var pendingNote = 'Set to Pending Start (returns ' + Utilities.formatDate(estRetDate, Session.getScriptTimeZone(), 'MM/dd/yyyy') + ') via Crew Import on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+            jobSheet.getRange(rowIdx, 11).setValue(currentNotes ? currentNotes + '; ' + pendingNote : pendingNote);
+            jobSheet.getRange(rowIdx, 21).setValue(timestamp);  // Last Updated (U)
+            activatedCount++;
+            Logger.log('activatePendingJobs: Set ' + jobNum + ' to Pending Start (returns ' + Utilities.formatDate(estRetDate, Session.getScriptTimeZone(), 'MM/dd/yyyy') + ')');
+            continue;
+          }
+
+          // Return date is today or past — activate normally, clear On Hold fields
+          jobSheet.getRange(rowIdx, 6).setValue('');  // Put On Hold Date (F)
+          jobSheet.getRange(rowIdx, 7).setValue('');  // Estimated Return (G)
+        }
+
         jobSheet.getRange(rowIdx, 10).setValue('Active');  // Status (J, column 10)
 
         // Set Start Date to today if not already set or if it's in the future
         var currentStartDate = jobData[i][4]; // Start Date (E, index 4)
-        var todayDate = new Date();
-        todayDate.setHours(0, 0, 0, 0);
         var startDateObj = currentStartDate ? new Date(currentStartDate) : null;
         if (startDateObj) startDateObj.setHours(0, 0, 0, 0);
         if (!startDateObj || startDateObj > todayDate) {
@@ -872,13 +900,8 @@ function activatePendingJobs(jobNumbers) {
           Logger.log('activatePendingJobs: Set Start Date to today for ' + jobNum);
         }
 
-        // Clear Put On Hold Date (F) if coming from On Hold
-        if (currentStatus === 'On Hold') {
-          jobSheet.getRange(rowIdx, 6).setValue('');  // Put On Hold Date (F)
-          jobSheet.getRange(rowIdx, 7).setValue('');  // Estimated Return (G)
-        }
 
-        var currentNotes = jobData[i][10] || '';  // Notes (K, index 10)
+        currentNotes = String(jobData[i][10] || '');  // Notes (K, index 10)
         var activateNote = 'Activated from ' + currentStatus + ' on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy') + ' via Crew Import';
         jobSheet.getRange(rowIdx, 11).setValue(currentNotes ? currentNotes + '; ' + activateNote : activateNote);  // Notes (K)
         jobSheet.getRange(rowIdx, 21).setValue(timestamp);  // Last Updated (U)
@@ -1515,8 +1538,10 @@ function addOrUpdateJobTracking(jobNumber, location, foreman, crewSize, startDat
     for (var h = 0; h < allHeaders.length; h++) {
       if (String(allHeaders[h]).trim() === 'Job Name') { jobNameCol = h + 1; break; } // 1-based
     }
+    Logger.log('addOrUpdateJobTracking: Sheet has ' + allHeaders.length + ' columns, jobNameCol=' + jobNameCol);
 
     var data = jobSheet.getDataRange().getValues();
+    Logger.log('addOrUpdateJobTracking: Sheet has ' + data.length + ' rows of data');
     var existingRow = -1;
 
     // Find existing row for this job
@@ -1594,14 +1619,29 @@ function addOrUpdateJobTracking(jobNumber, location, foreman, crewSize, startDat
 
       jobSheet.appendRow(newRow);
       var newRowNum = jobSheet.getLastRow();
-      // Add checkboxes for skip day columns (L-T = cols 12-20)
-      jobSheet.getRange(newRowNum, 12, 1, 9).insertCheckboxes();
+
+      // Verify the row was written correctly
+      var verifyVal = String(jobSheet.getRange(newRowNum, 1).getValue() || '').trim();
+      if (verifyVal !== jobNumber) {
+        Logger.log('addOrUpdateJobTracking: VERIFY FAILED for ' + jobNumber + ' - row ' + newRowNum + ' has "' + verifyVal + '", trying direct setValue');
+        // Row might be empty/wrong - try to set the job number directly
+        jobSheet.getRange(newRowNum, 1).setValue(jobNumber);
+      } else {
+        Logger.log('addOrUpdateJobTracking: Verified row ' + newRowNum + ' = "' + verifyVal + '"');
+      }
+
+      // Add checkboxes for skip day columns (L-T = cols 12-20), non-fatal if it fails
+      try {
+        jobSheet.getRange(newRowNum, 12, 1, 9).insertCheckboxes();
+      } catch (cbErr) {
+        Logger.log('addOrUpdateJobTracking: insertCheckboxes failed (non-critical): ' + cbErr.toString());
+      }
 
       Logger.log('Added new job ' + jobNumber + ' at row ' + newRowNum);
       return { success: true, message: 'Added job ' + jobNumber, row: newRowNum, action: 'added' };
     }
   } catch (e) {
-    Logger.log('Error in addOrUpdateJobTracking: ' + e.toString());
+    Logger.log('Error in addOrUpdateJobTracking: ' + e.toString() + '\nStack: ' + (e.stack || 'no stack'));
     return { success: false, message: 'Error: ' + e.toString() };
   }
 }
@@ -1618,9 +1658,12 @@ function addNewJobsToTracking(jobsJson) {
   var jobs = JSON.parse(jobsJson);
   var results = [];
   var successCount = 0;
+  var addedJobNumbers = []; // Track which job numbers were actually written
+  var failedJobNumbers = [];
 
   for (var i = 0; i < jobs.length; i++) {
     var job = jobs[i];
+    Logger.log('addNewJobsToTracking: Processing job ' + job.jobNumber + ' at ' + job.location);
     var result = addOrUpdateJobTracking(
       job.jobNumber,
       job.location,
@@ -1630,12 +1673,29 @@ function addNewJobsToTracking(jobsJson) {
       'Active',    // default to Active
       job.jobName  // new Job Name field
     );
+    result.jobNumber = job.jobNumber; // Attach job number to result for client-side tracking
     results.push(result);
-    if (result.success) successCount++;
+    if (result.success) {
+      successCount++;
+      addedJobNumbers.push(job.jobNumber);
+    } else {
+      failedJobNumbers.push(job.jobNumber);
+      Logger.log('addNewJobsToTracking: FAILED to add ' + job.jobNumber + ': ' + result.message);
+    }
   }
 
   Logger.log('addNewJobsToTracking: Added ' + successCount + '/' + jobs.length + ' jobs');
-  return { success: true, added: successCount, total: jobs.length, results: results };
+  if (failedJobNumbers.length > 0) {
+    Logger.log('addNewJobsToTracking: FAILURES: ' + failedJobNumbers.join(', '));
+  }
+  return {
+    success: true,
+    added: successCount,
+    total: jobs.length,
+    results: results,
+    addedJobNumbers: addedJobNumbers,    // NEW: which job numbers were actually added
+    failedJobNumbers: failedJobNumbers   // NEW: which job numbers failed
+  };
 }
 
 /**

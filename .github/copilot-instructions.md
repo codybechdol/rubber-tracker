@@ -1171,3 +1171,32 @@ Notes: [Any notes]
     - Cleans up On Hold/Completed N/A rows and duplicates
   - **Files Modified:** `src/Code.gs`
 
+### May 16, 2026
+- ✅ **Crew Import — 8-Step Wizard Flow Redesign**
+  - **Problem:** The old Import Crew Makeup dialog auto-selected the first Excel tab on file load, then rendered crew cards before resolving unmatched employees and special circumstances. This caused: stale data mixing when switching tabs, crew cards rendering with wrong names before name resolution was done, and unclear flow for the user.
+  - **New flow:**
+    ```
+    ① Upload → ② Choose Tab → ③ New Jobs → ④ New Employees
+        → ⑤ Unmatched + Duplicates → [Continue →]
+        → ⑥ Special Circumstances → [Continue →]
+        → ⑦ Crew Cards + Lead Selection → ⑧ Preview + Apply
+    ```
+  - **Key changes:**
+    1. **No auto-tab-select** — `showSheetSelection()` shows a "Click a tab above" prompt; user must deliberately choose the week
+    2. **Tab re-selection resets all sections** — switching tabs clears all downstream panels (new jobs, new hires, unmatched, special, crew cards, preview, apply button)
+    3. **Section ordering fixed** — Unmatched + Duplicates (Step 5) resolves BEFORE Special Circumstances (Step 6), which resolves BEFORE Crew Cards render (Step 7). Correct because: new hires added in Step 4 become matchable in Step 5; special statuses applied in Step 6 affect crew card data in Step 7.
+    4. **Two explicit Continue buttons** — Step 5→6 ("Continue to Special Circumstances →") and Step 6→7 ("Continue to Crew Cards →"). Auto-progression at Step 5→6 if both sections are empty.
+    5. **Absent lead support** — `detectCrewsWithMultipleLeads()` now includes employees who are the established lead on the Employees sheet (`.1` position) but absent from the Excel this week (e.g., on Time Off). They appear in the lead selection dialog with an "On Time Off" badge.
+    6. **Visible step progress bar** — numbered circles turn green (done) / blue (active) at the top of the dialog throughout the flow
+  - **Files Modified:** `src/CrewImport.html`
+  - **Full documentation:** `docs/CREW_IMPORT_FLOW.md`
+
+- ✅ **Job Tracking — Silent Add Failure Fix for New Job Numbers**
+  - **Problem:** Job numbers from Excel (e.g., 026-26) were being detected as new and offered to the user, but silently failing to write to Job Tracking sheet. The client showed success even when the server write failed.
+  - **Root cause:** `insertCheckboxes()` was inside the main try/catch in `addOrUpdateJobTracking`. If it threw, the whole function returned `{success: false}` even if the row was already appended. Client-side `confirmNewJobs` updated `jobTrackingData` unconditionally, masking failures silently.
+  - **Fix:**
+    1. `addOrUpdateJobTracking` — `insertCheckboxes()` wrapped in its own try/catch; post-write verification read added; stack trace logged on error
+    2. `addNewJobsToTracking` — now returns `addedJobNumbers` and `failedJobNumbers` arrays
+    3. `confirmNewJobs` (client) — only updates local `jobTrackingData` for confirmed-added jobs; shows explicit error with job number if any fail
+  - **Files Modified:** `src/85-DataImport.gs`, `src/CrewImport.html`
+

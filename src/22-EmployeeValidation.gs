@@ -839,10 +839,18 @@ function refreshJobTrackingForemen() {
 
     if (!/^\d{3}-\d{2}$/.test(crewNumber)) continue;
 
+    // Use position suffix (.1 = designated lead) as tie-breaker for same-priority classifications
+    var posDotA = jobNumber.lastIndexOf('.');
+    var posNumA = posDotA !== -1 ? (parseInt(jobNumber.substring(posDotA + 1)) || 999) : 999;
+
     var priority = classificationPriority[classification] || 999;
 
-    if (!crewLeadMap[crewNumber] || priority < crewLeadMap[crewNumber].priority) {
-      crewLeadMap[crewNumber] = { name: name, priority: priority, classification: classification };
+    var isBetterA = !crewLeadMap[crewNumber] ||
+      priority < crewLeadMap[crewNumber].priority ||
+      (priority === crewLeadMap[crewNumber].priority && posNumA < crewLeadMap[crewNumber].position);
+
+    if (isBetterA) {
+      crewLeadMap[crewNumber] = { name: name, priority: priority, position: posNumA, classification: classification };
     }
   }
 
@@ -947,10 +955,18 @@ function refreshJobTrackingForemenSilent() {
 
     if (!/^\d{3}-\d{2}$/.test(crewNumber)) continue;
 
+    // Use position suffix (.1 = designated lead) as tie-breaker for same-priority classifications
+    var posDotB = jobNumber.lastIndexOf('.');
+    var posNumB = posDotB !== -1 ? (parseInt(jobNumber.substring(posDotB + 1)) || 999) : 999;
+
     var priority = classificationPriority[classification] || 999;
 
-    if (!crewLeadMap[crewNumber] || priority < crewLeadMap[crewNumber].priority) {
-      crewLeadMap[crewNumber] = { name: name, priority: priority, classification: classification };
+    var isBetterB = !crewLeadMap[crewNumber] ||
+      priority < crewLeadMap[crewNumber].priority ||
+      (priority === crewLeadMap[crewNumber].priority && posNumB < crewLeadMap[crewNumber].position);
+
+    if (isBetterB) {
+      crewLeadMap[crewNumber] = { name: name, priority: priority, position: posNumB, classification: classification };
     }
   }
 
@@ -1581,6 +1597,7 @@ function syncCrews(silent) {
         location: isRealLocation ? location : '',
         foreman: '',
         foremanPriority: 999,
+        foremanPosition: 999,
         manualLead: null,
         crewSize: 0
       };
@@ -1598,9 +1615,16 @@ function syncCrews(silent) {
     }
 
     // Track best classification-based lead
+    // When two employees tie on classification, prefer the one at position .1 (designated lead)
+    var posDotC = jobNumber.lastIndexOf('.');
+    var posNumC = posDotC !== -1 ? (parseInt(jobNumber.substring(posDotC + 1)) || 999) : 999;
+
     var priority = classificationPriority[classification] || 999;
-    if (priority < crewMap[crewNumber].foremanPriority) {
+    var isBetterC = priority < crewMap[crewNumber].foremanPriority ||
+      (priority === crewMap[crewNumber].foremanPriority && posNumC < crewMap[crewNumber].foremanPosition);
+    if (isBetterC) {
       crewMap[crewNumber].foremanPriority = priority;
+      crewMap[crewNumber].foremanPosition = posNumC;
       crewMap[crewNumber].foreman = name;
     }
   }
@@ -1633,15 +1657,7 @@ function syncCrews(silent) {
         jobData[dataIdx][colIndices.foreman] = crew.foreman;
         foremanUpdates++;
         jobDataModified = true;
-        Logger.log('syncCrews: Updated foreman for ' + crewNum + ': ' + existing.foreman + ' -> ' + crew.foreman);
-      }
-
-      // Always update crew size (employees move between crews regularly)
-      var currentSize = jobData[dataIdx][colIndices.crewSize];
-      if (currentSize !== crew.crewSize) {
-        jobData[dataIdx][colIndices.crewSize] = crew.crewSize;
-        jobDataModified = true;
-        Logger.log('syncCrews: Updated crew size for ' + crewNum + ': ' + currentSize + ' -> ' + crew.crewSize);
+        Logger.log('syncCrews: Updated foreman for ' + crewNum + ': ' + existing.foreman + ' → ' + crew.foreman);
       }
 
       // Set default schedule if not set (empty or undefined)
@@ -1673,10 +1689,6 @@ function syncCrews(silent) {
     var foremanValues = jobData.map(function(row) { return [row[colIndices.foreman]]; });
     jobSheet.getRange(1, colIndices.foreman + 1, jobData.length, 1).setValues(foremanValues);
 
-    // Write Crew Size (D) column
-    var crewSizeValues = jobData.map(function(row) { return [row[colIndices.crewSize]]; });
-    jobSheet.getRange(1, colIndices.crewSize + 1, jobData.length, 1).setValues(crewSizeValues);
-
     // Write Schedule columns (L-T, 9 columns)
     var scheduleValues = jobData.map(function(row) {
       return [
@@ -1691,7 +1703,7 @@ function syncCrews(silent) {
     var lastUpdatedValues = jobData.map(function(row) { return [row[colIndices.lastUpdated]]; });
     jobSheet.getRange(1, colIndices.lastUpdated + 1, jobData.length, 1).setValues(lastUpdatedValues);
 
-    Logger.log('syncCrews: Batch wrote Foreman, Crew Size, Schedule, and Last Updated columns (' + jobData.length + ' rows)');
+    Logger.log('syncCrews: Batch wrote Foreman, Schedule, and Last Updated columns (' + jobData.length + ' rows)');
   }
 
   // Add new crews that weren't in Job Tracking
@@ -1743,61 +1755,14 @@ function syncCrews(silent) {
   Logger.log('syncCrews: Complete - ' + foremanUpdates + ' foreman updates, ' +
              scheduleDefaults + ' schedule defaults, ' + newCrewRows.length + ' new crews');
 
-  // Renumber job position suffixes (.1 = lead, .2-.N by classification) for all crews
-  var renumberResult = null;
-  try {
-    renumberResult = renumberAllCrewPositions();
-    Logger.log('syncCrews: Position renumbering - ' + JSON.stringify(renumberResult));
-  } catch (rnErr) {
-    Logger.log('syncCrews: Error renumbering crew positions: ' + rnErr);
-  }
-
-  // Add Training Tracking rows for any newly active crews (runs after Job Tracking is updated)
-  var addedCrewsResult = null;
-  try {
-    addedCrewsResult = addMissingCrewsToTrainingTracking();
-    Logger.log('syncCrews: Training Tracking - added missing crews: ' + JSON.stringify(addedCrewsResult));
-  } catch (addErr) {
-    Logger.log('syncCrews: Error adding missing crews to Training Tracking: ' + addErr);
-  }
-
-  // Refresh Training Tracking attendee lists for current and future months
-  var attendeeResult = null;
-  try {
-    attendeeResult = refreshTrainingAttendeesSilent();
-    Logger.log('syncCrews: Training Tracking attendee refresh - ' + JSON.stringify(attendeeResult));
-  } catch (attendeeErr) {
-    Logger.log('syncCrews: Error refreshing Training Tracking attendees: ' + attendeeErr);
-  }
-
-  // Remove N/A rows for On Hold/Completed crews and duplicates
-  var cleanupResult = null;
-  try {
-    cleanupResult = cleanupTrainingTrackingOnHoldRows();
-    Logger.log('syncCrews: Training Tracking cleanup - ' + JSON.stringify(cleanupResult));
-  } catch (cleanErr) {
-    Logger.log('syncCrews: Error cleaning up Training Tracking: ' + cleanErr);
-  }
-
-  var renumberedCrews = (renumberResult && renumberResult.renumbered) ? renumberResult.renumbered : 0;
-  var addedCrewCount = (addedCrewsResult && addedCrewsResult.addedRows) ? addedCrewsResult.addedRows : 0;
-  var attendeeUpdated = (attendeeResult && attendeeResult.updatedRows) ? attendeeResult.updatedRows : 0;
-  var deletedRows = (cleanupResult && cleanupResult.deletedRows) ? cleanupResult.deletedRows : 0;
-
-  summary.renumberedCrews = renumberedCrews;
-
   if (!silent) {
     ui.alert(
-      '\u2705 Crew Sync Complete',
+      '✅ Crew Sync Complete',
       'Results:\n\n' +
-      '\u2022 Foreman updates: ' + foremanUpdates + '\n' +
-      '\u2022 Schedule defaults applied: ' + scheduleDefaults + '\n' +
-      '\u2022 Crew positions renumbered: ' + renumberedCrews + ' crews\n' +
-      '\u2022 New crews added to Job Tracking: ' + newCrewRows.length + '\n' +
-      '\u2022 New crews added to Training Tracking: ' + addedCrewCount + '\n' +
-      '\u2022 Training attendees refreshed: ' + attendeeUpdated + ' rows\n' +
-      (deletedRows > 0 ? '\u2022 Inactive crew rows removed: ' + deletedRows + '\n' : '') +
-      '\nJob Tracking and Training Tracking are now in sync.',
+      '• Foreman updates: ' + foremanUpdates + '\n' +
+      '• Schedule defaults applied: ' + scheduleDefaults + '\n' +
+      '• New crews added: ' + newCrewRows.length + '\n\n' +
+      'Job Tracking is now in sync with Employees sheet.',
       ui.ButtonSet.OK
     );
   }
@@ -2307,20 +2272,15 @@ function cleanupPendingTrainingForCompletedJobs() {
   Logger.log('Training Tracking: ' + (trainingData.length - 2) + ' data rows (skipping title + header)');
   Logger.log('Training Tracking headers: ' + String(trainingData[1]).substring(0, 150));
 
-  // Dynamically find column indices by header name
-  var headerIdx = findTrainingTrackingHeaderRow ? findTrainingTrackingHeaderRow(trainingData) : 1;
+  // Dynamically find column indices by header name (row 1 = headers)
   var ttCrewCol = 2;   // Default column C
   var ttStatusCol = 9;  // Default column J
-  var ttMonthCol = 0;  // Default column A
-  var ttTopicCol = 1;  // Default column B
-  for (var th = 0; th < trainingData[headerIdx].length; th++) {
-    var ttHdr = String(trainingData[headerIdx][th]).toLowerCase().trim();
-    if (ttHdr === 'crew #' || ttHdr === 'crew#' || ttHdr === 'job number' || ttHdr === 'crew' || ttHdr === 'crew number') ttCrewCol = th;
+  for (var th = 0; th < trainingData[1].length; th++) {
+    var ttHdr = String(trainingData[1][th]).toLowerCase().trim();
+    if (ttHdr === 'crew #' || ttHdr === 'crew#' || ttHdr === 'job number' || ttHdr === 'crew') ttCrewCol = th;
     if (ttHdr === 'status') ttStatusCol = th;
-    if (ttHdr === 'month') ttMonthCol = th;
-    if (ttHdr === 'training topic' || ttHdr === 'topic' || ttHdr === 'title') ttTopicCol = th;
   }
-  Logger.log('Training Tracking column indices - Crew: ' + ttCrewCol + ', Status: ' + ttStatusCol + ', headerIdx: ' + headerIdx);
+  Logger.log('Training Tracking column indices - Crew: ' + ttCrewCol + ', Status: ' + ttStatusCol);
 
   // Collect rows to delete (work backwards to avoid index shifting)
   var rowsToDelete = [];
@@ -2329,9 +2289,9 @@ function cleanupPendingTrainingForCompletedJobs() {
   var completeStatusCount = 0;
   var otherStatusCount = 0;
 
-  for (var t = headerIdx + 1; t < trainingData.length; t++) {
-    var month = String(trainingData[t][ttMonthCol] || '').trim();
-    var topic = String(trainingData[t][ttTopicCol] || '').trim();
+  for (var t = 2; t < trainingData.length; t++) {
+    var month = String(trainingData[t][0] || '').trim();
+    var topic = String(trainingData[t][1] || '').trim();
     var crew = String(trainingData[t][ttCrewCol] || '').trim();
     var status = String(trainingData[t][ttStatusCol] || '').trim();
 
@@ -2494,27 +2454,19 @@ function syncCompletedJobsToTraining() {
   var trainingData = trainingSheet.getDataRange().getValues();
   var currentYear = new Date().getFullYear();
 
-  // Dynamic header detection
-  var headerIdx = findTrainingTrackingHeaderRow ? findTrainingTrackingHeaderRow(trainingData) : 1;
-  var ttHeaders = trainingData[headerIdx];
-  var ttMonthCol = 0;   // Default column A
-  var ttCrewCol = 2;     // Default column C
-  var ttStatusCol = 9;   // Default column J
-  for (var th = 0; th < ttHeaders.length; th++) {
-    var ttHdr = String(ttHeaders[th]).toLowerCase().trim();
-    if (ttHdr === 'month') ttMonthCol = th;
-    if (ttHdr === 'crew #' || ttHdr === 'crew#' || ttHdr === 'job number' || ttHdr === 'crew' || ttHdr === 'crew number') ttCrewCol = th;
-    if (ttHdr === 'status') ttStatusCol = th;
-  }
-  Logger.log('syncCompletedJobsToTraining: headerIdx=' + headerIdx + ', monthCol=' + ttMonthCol + ', crewCol=' + ttCrewCol + ', statusCol=' + ttStatusCol);
+  // Training Tracking structure:
+  // Row 0: Title
+  // Row 1: Headers
+  // Row 2+: Data
+  // Columns: A=Month, B=Topic, C=Crew#, D=Lead, E=Size, F=CompletionDate, G=Attendees, H=Hours, I=Trainer, J=Status, K=Notes
 
   // Collect rows to delete (work backwards to avoid index shifting)
   var rowsToDelete = [];
 
-  for (var t = headerIdx + 1; t < trainingData.length; t++) {
-    var month = String(trainingData[t][ttMonthCol] || '').toLowerCase().trim();
-    var crew = String(trainingData[t][ttCrewCol] || '').trim();
-    var status = String(trainingData[t][ttStatusCol] || '').trim();
+  for (var t = 2; t < trainingData.length; t++) {
+    var month = String(trainingData[t][0] || '').toLowerCase().trim();
+    var crew = String(trainingData[t][2] || '').trim();
+    var status = String(trainingData[t][9] || '').trim();
 
     // Skip if already Complete (we want to preserve completed training records)
     if (status === 'Complete') continue;

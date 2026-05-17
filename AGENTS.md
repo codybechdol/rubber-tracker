@@ -299,6 +299,16 @@ The Excel crew structure uses a grid layout with crew "cards" arranged in column
 - **Schedule annotations stripped** — `parseEmployeeName()` strips "Crew to X XX's..." and standalone schedule patterns (e.g., "5 10's this wk") before role detection. Without this, "Waco Worts F Crew to 5 10's this wk" would fail the Foreman check since "F" must be at end of string.
 - **Trailing annotations stripped** — `parseEmployeeName()` strips trailing words like Hot, Cold, Weeds?, etc. before role detection
 
+**⚠️ CrewImport.html 8-Step Wizard Flow (as of May 2026):**
+The dialog uses a staged wizard with a step progress bar. Sections appear sequentially — crew cards only render AFTER special circumstances are resolved. Key control functions:
+- **`selectSheet()`** — resets ALL downstream sections on every tab click (tab re-selection is safe)
+- **`continueAfterNewJobs()`** — runs `matchEmployeesToSheet()` first; does NOT show crew cards yet
+- **`checkAutoProgressToSpecial()`** — if unmatched=0 AND duplicates=0 → auto-advances to Special; else shows "Continue" button
+- **`continueToSpecial()`** — hides resolution sections, shows Special Circumstances (or skips to crew cards if none)
+- **`continueToCrewCards()`** — shows crew cards, fires lead selection dialogs, then `displayPreview()`
+- **No auto-tab-select** — `showSheetSelection()` does NOT auto-parse tab 0; user must click deliberately
+- **Full flow docs:** `docs/CREW_IMPORT_FLOW.md`
+
 ## Inventory Location Sync
 `syncInventoryLocations()` in `22-LocationSync.gs` keeps all equipment sheet locations in sync with the Employees sheet:
 - Called automatically during `generateAllReports()`

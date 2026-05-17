@@ -13,21 +13,32 @@ Complete these 6 steps every Monday to start your week organized and up-to-date.
 **What it does:** Updates employee locations and job numbers based on the superintendent's weekly crew assignment spreadsheet.
 
 **How to do it:**
+
+The dialog uses an **8-step wizard** with a visible progress bar at the top:
+
 1. Click **Step 1: Import Crew Makeup** in the sidebar
 2. Drag & drop or select the Excel file from the superintendent
-3. Select the sheet tab for the current week (e.g., "2.3.26")
-4. Review the detected crews and proposed changes
-5. Click **Apply Changes** to update the Employees sheet
+3. **Click the correct week tab** (tabs are listed — no auto-select, pick deliberately)
+4. **Step 3 (New Jobs):** If any job numbers are new, provide job name + city → "Add to Job Tracking"
+5. **Step 4 (New Employees):** If NEW HIRE entries found, fill in details and add them
+6. **Step 5 (Unmatched + Duplicates):** Resolve employees that couldn't be auto-matched or appear in multiple crews → "Continue to Special Circumstances"
+7. **Step 6 (Special Circumstances):** Handle Time Off, Light Duty, Layoffs, etc. → "Continue to Crew Cards"
+8. **Step 7 (Crew Cards + Lead Selection):** Review crew cards; select crew lead when a crew has multiple Foremen/GFs
+9. **Step 8 (Preview):** Review the proposed changes table → click **Apply Changes**
 
-**Expected outcome:** 
+**Expected outcome:**
 - Employee locations updated to match crew assignments
 - Job numbers assigned with positions (e.g., 013-26.1, 013-26.2)
+- Job Classification updated (F, JRY, AP 1-7, etc.)
 - Changes logged to Employee History
 
-**Troubleshooting:**
-- If employees aren't matched, check for name spelling differences
-- Hidden rows in Excel are automatically skipped
-- Special statuses (Vacation, Light Duty, Layoff) are detected automatically
+**Notes:**
+- Switching to a different week tab resets all sections (safe to re-pick)
+- Absent leads (e.g., employee on Time Off who is the established crew lead) still appear in the crew lead selection dialog
+- Hidden rows and greyed-out cells in Excel are automatically skipped
+- Special statuses (Vacation, Light Duty, Layoff) are detected and handled in Step 6
+
+**Full documentation:** `docs/CREW_IMPORT_FLOW.md`
 
 ---
 
@@ -213,9 +224,5 @@ Copy this checklist to track your Monday workflow:
 
 ## Version History
 
+- **May 16, 2026** - Step 1 (Import Crew Makeup) redesigned as 8-step wizard: explicit tab selection (no auto-parse), Unmatched+Duplicates before Special before Crew Cards, tab re-selection resets all sections, two explicit Continue buttons, absent-lead support in crew lead dialog
 - **February 5, 2026** - Initial workflow documentation created
-- Reorganized sidebar from 4 steps to 6 steps
-- Added Safety Reports as Step 3
-- Moved Crew Import to Step 1 (weekly task)
-- Moved Cert Import to "As Needed" (monthly task)
-- Added Compliance Dashboard visibility

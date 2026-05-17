@@ -199,9 +199,107 @@
       margin-left: 4px;
       font-weight: bold;
     }
+
+    /* ===== STEP PROGRESS BAR ===== */
+    .step-bar {
+      display: flex;
+      align-items: center;
+      background: white;
+      border-radius: 8px;
+      padding: 12px 20px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      overflow-x: auto;
+      gap: 0;
+    }
+    .step-item {
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
+      opacity: 0.35;
+      transition: opacity 0.2s;
+    }
+    .step-item.active { opacity: 1; }
+    .step-item.done { opacity: 0.65; }
+    .step-bubble {
+      width: 26px; height: 26px;
+      border-radius: 50%;
+      background: #e0e0e0;
+      color: #555;
+      font-size: 11px;
+      font-weight: bold;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .step-item.active .step-bubble { background: #1a73e8; color: white; }
+    .step-item.done .step-bubble { background: #34a853; color: white; }
+    .step-label {
+      font-size: 11px;
+      margin-left: 6px;
+      white-space: nowrap;
+      color: #555;
+      font-weight: 500;
+    }
+    .step-item.active .step-label { color: #1a73e8; font-weight: 600; }
+    .step-item.done .step-label { color: #34a853; }
+    .step-arrow {
+      color: #bbb;
+      margin: 0 8px;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+    /* Continue button between stages */
+    .stage-continue-btn {
+      display: none;
+      width: 100%;
+      margin: 12px 0;
+    }
   </style>
 </head>
 <body>
+  <!-- Step Progress Bar -->
+  <div class="step-bar" id="stepBar" style="display:none;">
+    <div class="step-item" id="step-upload">
+      <div class="step-bubble">1</div>
+      <span class="step-label">Upload</span>
+    </div>
+    <span class="step-arrow">›</span>
+    <div class="step-item" id="step-tab">
+      <div class="step-bubble">2</div>
+      <span class="step-label">Choose Tab</span>
+    </div>
+    <span class="step-arrow">›</span>
+    <div class="step-item" id="step-newjobs">
+      <div class="step-bubble">3</div>
+      <span class="step-label">New Jobs</span>
+    </div>
+    <span class="step-arrow">›</span>
+    <div class="step-item" id="step-newhires">
+      <div class="step-bubble">4</div>
+      <span class="step-label">New Employees</span>
+    </div>
+    <span class="step-arrow">›</span>
+    <div class="step-item" id="step-resolve">
+      <div class="step-bubble">5</div>
+      <span class="step-label">Unmatched + Duplicates</span>
+    </div>
+    <span class="step-arrow">›</span>
+    <div class="step-item" id="step-special">
+      <div class="step-bubble">6</div>
+      <span class="step-label">Special Circumstances</span>
+    </div>
+    <span class="step-arrow">›</span>
+    <div class="step-item" id="step-crews">
+      <div class="step-bubble">7</div>
+      <span class="step-label">Crew Cards + Leads</span>
+    </div>
+    <span class="step-arrow">›</span>
+    <div class="step-item" id="step-preview">
+      <div class="step-bubble">8</div>
+      <span class="step-label">Preview + Apply</span>
+    </div>
+  </div>
+
   <div class="header">
     <h1><i class="bi bi-people-fill"></i> Import Crew Makeup</h1>
     <div>
@@ -248,9 +346,12 @@
 
   <!-- Sheet Selection -->
   <div id="sheetSelection" class="config-section" style="display: none;">
-    <h3><i class="bi bi-table"></i> Select Sheet</h3>
+    <h3><i class="bi bi-table"></i> Select Week Tab</h3>
     <p class="text-muted small mb-2">Choose the sheet tab that contains the current week's crew assignments.</p>
     <div class="sheet-tabs" id="sheetTabs"></div>
+    <div id="tabPrompt" class="alert alert-info mt-2 mb-0 small" style="display:block;">
+      <i class="bi bi-hand-index-thumb"></i> <strong>Click a tab above</strong> to load that week's crew data.
+    </div>
   </div>
 
   <!-- Location Mapping -->
@@ -268,20 +369,6 @@
     <h3><i class="bi bi-exclamation-triangle text-warning"></i> Unknown Locations</h3>
     <p class="text-muted small mb-3">These locations weren't recognized. Please provide the correct mapping.</p>
     <div id="unknownLocationsContainer"></div>
-  </div>
-
-  <!-- Parsed Crews Preview -->
-  <div id="crewsPreview" class="config-section" style="display: none;">
-    <h3><i class="bi bi-diagram-3"></i> Detected Crews <span class="badge bg-primary" id="crewCount">0</span></h3>
-    <p class="text-muted small mb-3">Verify that crews and employees are correctly identified.</p>
-    <div id="crewCardsContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px;"></div>
-
-    <!-- Special Locations (Weeds, Light Duty, Vacation) -->
-    <div id="specialLocationsSection" style="display: none; margin-top: 24px;">
-      <h4 class="text-secondary mb-3"><i class="bi bi-geo-alt-fill"></i> Non-Field Locations</h4>
-      <p class="text-muted small mb-3">Employees assigned to non-field locations based on Special Circumstances selections.</p>
-      <div id="specialLocationsContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px;"></div>
-    </div>
   </div>
 
   <!-- New Hires Section (processed BEFORE matching) -->
@@ -305,7 +392,19 @@
     </div>
   </div>
 
-  <!-- Duplicate Employee Selection -->
+  <!-- Unmatched Employees (STEP 5 - before duplicates and special) -->
+  <div id="unmatchedSection" class="config-section" style="display: none;">
+    <h3><i class="bi bi-person-x text-danger"></i> Unmatched Employees <span class="badge bg-danger" id="unmatchedCount">0</span></h3>
+    <p class="text-muted small mb-3">These employees couldn't be matched automatically. You can <strong>add them as new employees</strong>, match them to existing employees, or skip them.</p>
+    <div id="unmatchedContainer"></div>
+    <div class="mt-3">
+      <button class="btn btn-secondary btn-sm" onclick="skipAllUnmatched()">
+        <i class="bi bi-skip-forward"></i> Skip All Unmatched
+      </button>
+    </div>
+  </div>
+
+  <!-- Duplicate Employee Selection (STEP 5 continued) -->
   <div id="duplicateSection" class="config-section" style="display: none;">
     <h3><i class="bi bi-people text-warning"></i> Employees in Multiple Crews <span class="badge bg-warning text-dark" id="duplicateCount">0</span></h3>
     <p class="text-muted small mb-3">These employees appear in more than one crew. Select which assignment to use for each.</p>
@@ -315,19 +414,59 @@
     </button>
   </div>
 
-  <!-- Special Circumstances Section (Layoffs, Resigned, Light Duty) -->
+  <!-- Continue to Special Circumstances button (shown when resolution is ready) -->
+  <div id="continueToSpecialDiv" class="stage-continue-btn">
+    <div class="config-section" style="background: #e8f5e9; border-left: 4px solid #34a853; padding: 16px;">
+      <div class="d-flex align-items-center justify-content-between">
+        <div>
+          <strong><i class="bi bi-check-circle text-success"></i> Name Resolution Complete</strong>
+          <p class="text-muted small mb-0 mt-1">All employees have been matched or skipped. Continue to handle special circumstances.</p>
+        </div>
+        <button class="btn btn-success" onclick="continueToSpecial()">
+          <i class="bi bi-arrow-right-circle"></i> Continue to Special Circumstances
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Special Circumstances Section (STEP 6) -->
   <div id="specialSection" class="config-section" style="display: none;">
     <h3><i class="bi bi-exclamation-circle text-info"></i> Special Circumstances <span class="badge bg-info" id="specialCount">0</span></h3>
     <p class="text-muted small mb-3">These employees have special status (Layoff, Resigned, Light Duty, etc.). Choose how to handle each one.</p>
     <div id="specialContainer"></div>
-    <div class="mt-3">
+    <div class="mt-3 d-flex gap-2 align-items-center flex-wrap">
       <button class="btn btn-secondary btn-sm" onclick="skipAllSpecial()">
         <i class="bi bi-skip-forward"></i> Skip All Special Cases
       </button>
+      <button class="btn btn-success" id="continueToCrewsBtn" onclick="continueToCrewCards()" style="display:none;">
+        <i class="bi bi-arrow-right-circle"></i> Continue to Crew Cards
+      </button>
+    </div>
+    <div id="specialAllDoneBar" class="mt-3" style="display:none;">
+      <div style="background: #e8f5e9; border-left: 4px solid #34a853; padding: 12px; border-radius: 6px;" class="d-flex align-items-center justify-content-between">
+        <strong><i class="bi bi-check-circle text-success"></i> All special circumstances handled</strong>
+        <button class="btn btn-success btn-sm" onclick="continueToCrewCards()">
+          <i class="bi bi-arrow-right-circle"></i> Continue to Crew Cards
+        </button>
+      </div>
     </div>
   </div>
 
-  <!-- Preview Section -->
+  <!-- Parsed Crews Preview (STEP 7 - shown AFTER special circumstances) -->
+  <div id="crewsPreview" class="config-section" style="display: none;">
+    <h3><i class="bi bi-diagram-3"></i> Detected Crews <span class="badge bg-primary" id="crewCount">0</span></h3>
+    <p class="text-muted small mb-3">Verify that crews and employees are correctly identified.</p>
+    <div id="crewCardsContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px;"></div>
+
+    <!-- Special Locations (Weeds, Light Duty, Vacation) -->
+    <div id="specialLocationsSection" style="display: none; margin-top: 24px;">
+      <h4 class="text-secondary mb-3"><i class="bi bi-geo-alt-fill"></i> Non-Field Locations</h4>
+      <p class="text-muted small mb-3">Employees assigned to non-field locations based on Special Circumstances selections.</p>
+      <div id="specialLocationsContainer" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px;"></div>
+    </div>
+  </div>
+
+  <!-- Preview Section (STEP 8) -->
   <div id="previewSection" style="display: none;">
     <!-- Summary Statistics -->
     <div class="summary-card">
@@ -358,18 +497,6 @@
           </thead>
           <tbody id="changesTableBody"></tbody>
         </table>
-      </div>
-    </div>
-
-    <!-- Unmatched Employees -->
-    <div id="unmatchedSection" class="config-section" style="display: none;">
-      <h3><i class="bi bi-person-x text-danger"></i> Unmatched Employees <span class="badge bg-danger" id="unmatchedCount">0</span></h3>
-      <p class="text-muted small mb-3">These employees couldn't be matched automatically. You can <strong>add them as new employees</strong> (new hires), match them to existing employees, or skip them.</p>
-      <div id="unmatchedContainer"></div>
-      <div class="mt-3">
-        <button class="btn btn-secondary btn-sm" onclick="skipAllUnmatched()">
-          <i class="bi bi-skip-forward"></i> Skip All Unmatched
-        </button>
       </div>
     </div>
   </div>
@@ -913,6 +1040,10 @@
           document.getElementById('fileName').textContent = file.name;
           document.getElementById('fileSheets').textContent = workbook.SheetNames.length + ' sheet(s)';
 
+          // Show step bar at Step 1 done, Step 2 active
+          document.getElementById('stepBar').style.display = 'flex';
+          updateStepBar(1); // mark upload done  — showSheetSelection will move to 2
+
           // Show sheet selection
           showSheetSelection();
 
@@ -930,17 +1061,17 @@
 
       for (var i = 0; i < workbook.SheetNames.length; i++) {
         var sheetName = workbook.SheetNames[i];
-        var isActive = i === 0 ? 'active' : '';
-        html += '<span class="sheet-tab ' + isActive + '" onclick="selectSheet(\'' + escapeQuotes(sheetName) + '\', this)">' + sheetName + '</span>';
+        html += '<span class="sheet-tab" onclick="selectSheet(\'' + escapeQuotes(sheetName) + '\', this)">' + sheetName + '</span>';
       }
 
       container.innerHTML = html;
       document.getElementById('sheetSelection').style.display = 'block';
 
-      // Auto-select first sheet
-      if (workbook.SheetNames.length > 0) {
-        selectSheet(workbook.SheetNames[0], container.querySelector('.sheet-tab'));
-      }
+      // Show step bar and mark step 1 done, step 2 active
+      document.getElementById('stepBar').style.display = 'flex';
+      document.getElementById('tabPrompt').style.display = 'block';
+      updateStepBar(2);
+      // No auto-select - user must deliberately click the correct week tab
     }
 
     function selectSheet(sheetName, tabElement) {
@@ -949,6 +1080,28 @@
         tab.classList.remove('active');
       });
       if (tabElement) tabElement.classList.add('active');
+
+      // Reset ALL downstream sections (tab re-selection starts fresh)
+      var sectionsToHide = [
+        'newJobsSection', 'newHiresSection', 'unmatchedSection', 'duplicateSection',
+        'specialSection', 'crewsPreview', 'previewSection', 'unknownLocationsSection'
+      ];
+      for (var s = 0; s < sectionsToHide.length; s++) {
+        var el = document.getElementById(sectionsToHide[s]);
+        if (el) el.style.display = 'none';
+      }
+      // Hide continue buttons
+      var continueDiv = document.getElementById('continueToSpecialDiv');
+      if (continueDiv) continueDiv.style.display = 'none';
+      var specialDoneBar = document.getElementById('specialAllDoneBar');
+      if (specialDoneBar) specialDoneBar.style.display = 'none';
+      // Disable Apply button until we reach preview
+      var applyBtn = document.getElementById('btnApplyChanges');
+      if (applyBtn) { applyBtn.disabled = true; applyBtn.innerHTML = '<i class="bi bi-check-lg"></i> Apply Changes'; }
+      // Hide tab prompt - user just selected a tab
+      document.getElementById('tabPrompt').style.display = 'none';
+      // Mark step 2 done, step 3+ pending
+      updateStepBar(3);
 
       selectedSheet = sheetName;
       console.log('Selected sheet:', sheetName);
@@ -1507,26 +1660,16 @@
       filterSpecialCircumstancesAlreadyMatched();
 
       // Pre-resolve obvious cross-crew duplicates BEFORE rendering crew cards
-      // If the same employee appears in multiple crews but is already assigned to one on the
-      // Employees sheet, remove them from the wrong crew(s) immediately
       preResolveObviousDuplicates();
 
-      // Show crew preview and match employees
-      showCrewPreview();
+      updateStepBar(5);
 
-      // Show special circumstances section ONCE here (decoupled from showCrewPreview to prevent re-entry)
-      if (specialCircumstances.length > 0) {
-        showSpecialSection();
-      }
-
+      // Run matching first (builds proposedChanges and detects duplicates/unmatched)
+      // Crew cards are NOT shown yet — they render after Special Circumstances (Step 7)
       matchEmployeesToSheet();
 
-      // Note: if there are duplicates, matchEmployeesToSheet will show the duplicate UI
-      if (duplicateEmployees.length === 0) {
-        checkAndHandleMultipleLeads(function() {
-          displayPreview();
-        });
-      }
+      // Note: matchEmployeesToSheet calls checkAutoProgressToSpecial() when done
+      // (either immediately for no-dupes, or after resolveDuplicates() for dupes)
     }
 
     /**
@@ -1720,6 +1863,7 @@
      * Renders the New Hires section with cards for each new hire.
      */
     function showNewHiresSection() {
+      updateStepBar(4);
       var section = document.getElementById('newHiresSection');
       section.style.display = 'block';
       document.getElementById('newHireCount').textContent = detectedNewHires.length;
@@ -2094,6 +2238,7 @@
      * Show the New Jobs section for user to provide Job Name and Location for jobs not in Job Tracking.
      */
     function showNewJobsSection() {
+      updateStepBar(3);
       var section = document.getElementById('newJobsSection');
       if (!section) {
         // Create the section dynamically (insert before crewsPreview)
@@ -2221,9 +2366,24 @@
         .withSuccessHandler(function(result) {
           console.log('Added new jobs to Job Tracking:', result);
 
-          // Merge new jobs into local jobTrackingData
+          // Build a set of job numbers that were ACTUALLY added on the server
+          var successfullyAdded = {};
+          if (result.addedJobNumbers && result.addedJobNumbers.length > 0) {
+            for (var si = 0; si < result.addedJobNumbers.length; si++) {
+              successfullyAdded[result.addedJobNumbers[si]] = true;
+            }
+          }
+
+          // Merge jobs into local jobTrackingData ONLY if they were actually added on the server
           for (var j = 0; j < jobsToAdd.length; j++) {
             var newJob = jobsToAdd[j];
+
+            // Only update local state if server confirmed this job was added
+            if (!successfullyAdded[newJob.jobNumber]) {
+              console.warn('Job ' + newJob.jobNumber + ' was NOT added to Job Tracking on server - not updating local state');
+              continue;
+            }
+
             jobTrackingData[newJob.jobNumber] = {
               status: 'Active',
               location: newJob.location,
@@ -2247,6 +2407,17 @@
                 parsedCrews[pc].isUnknownLocation = false;
               }
             }
+          }
+
+          // Show errors for any jobs that failed
+          if (result.failedJobNumbers && result.failedJobNumbers.length > 0) {
+            console.error('FAILED to add jobs to Job Tracking:', result.failedJobNumbers);
+            // Re-enable button so user can retry
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-plus-circle"></i> Add to Job Tracking & Continue'; }
+            showNotification('⚠️ ' + result.failedJobNumbers.length + ' job(s) FAILED to add to Job Tracking: ' +
+              result.failedJobNumbers.join(', ') +
+              '\n\nCheck the Apps Script execution log for details (Extensions → Apps Script → Executions).', 'error');
+            return; // Don't continue — user needs to see the error
           }
 
           // Hide the new jobs section and continue to NEW HIRES check
@@ -2864,6 +3035,9 @@
         } else if (cleanText.match(/\bEO2\b/i)) {
           result.classification = 'EO 2';
           cleanText = cleanText.replace(/\bEO2\b/i, ' ').trim();
+        } else if (cleanText.match(/\bWT\b/i)) {
+          result.classification = 'WT';
+          cleanText = cleanText.replace(/\bWT\b/i, ' ').trim();
         }
       }
 
@@ -2937,8 +3111,21 @@
         cleaned = cleaned.replace(/\s+(through|thru|awhile|early)\s*$/i, ' ').trim();
         cleaned = cleaned.replace(/\s+\d+\s*wks?\s*$/i, ' ').trim();
 
+        // Strip standalone "wk" or "wks" at end (e.g., "Nathan Foster wk")
+        cleaned = cleaned.replace(/\s+wks?\s*$/i, ' ').trim();
+
+        // Strip word-number + week(s) duration fragments (e.g., "two weeks", "three wks")
+        cleaned = cleaned.replace(/\s+(one|two|three|four|five|six|seven|eight)\s+wks?\s*$/i, ' ').trim();
+        cleaned = cleaned.replace(/\s+(one|two|three|four|five|six|seven|eight)\s+weeks?\s*$/i, ' ').trim();
+
+        // Strip trailing single-word prepositions that are annotation remnants (e.g., "Jason Holdahl to")
+        cleaned = cleaned.replace(/\s+\b(to|for)\b\s*$/i, ' ').trim();
+
         // Remove trailing role/classification fragments if present.
-        cleaned = cleaned.replace(/\s+(jry\s*op|gto\s*f|ap\s*\d|eo\s*\d|f|jl|jry|gto|wt|sup|gf)\s*$/i, ' ').trim();
+        // First: strip role + any trailing annotation (e.g., "WT two weeks", "JL CDL-B 3 wks")
+        cleaned = cleaned.replace(/\s+(jry\s*op|gto\s*f|jry|jl|gto|wt|sup|gf)\b.*$/i, ' ').trim();
+        // Then: standalone trailing single role (F, AP #, EO #)
+        cleaned = cleaned.replace(/\s+(ap\s*\d|eo\s*\d|f)\s*$/i, ' ').trim();
         cleaned = cleaned.replace(/\s+(cdl-[ab]|no\s+cdl)\s*$/i, ' ').trim();
 
         cleaned = cleaned.replace(/\s+/g, ' ').replace(/^[,.\s]+|[,.\s]+$/g, '').trim();
@@ -3126,14 +3313,25 @@
       // Note: 'F' excluded from day abbreviations to avoid stripping Foreman role code
       cleanText = cleanText.replace(/\s+(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Tues|Thurs|M|Tu|W|Th|Sa|Su)[a-z]*\s*[-–]\s*(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Tues|Thurs|M|Tu|W|Th|F|Sa|Su)[a-z]*\b.*$/i, '').trim();
 
+      // Strip "crane class [day]" annotation: "Matt Miller F crane class Mon" → "Matt Miller F"
+      // This appears after the role code and prevents Foreman detection (F must be at string end)
+      cleanText = cleanText.replace(/\s+crane\s+class\b.*$/i, '').trim();
+
       // Strip trailing annotations that appear AFTER the classification and confuse role detection
       // Examples: "Christian Najarro 3 ap Hot" - "Hot" is not a role
       // "Christian Najarro 3 ap Hot Weeds?" - "Weeds?" is a status annotation
       // Must do this BEFORE role detection so "3 ap Hot" → "3 ap" → match
       cleanText = cleanText.replace(/\s+(Hot|Cold|Day|Night|Relief|Split|Swing|Temp|Travel|Local|Weeds\??)\s*$/i, '').trim();
 
+      // Check for General Foreman (GF suffix)
+      if (cleanText.match(/\sGF$/i)) {
+        result.isForeman = true;
+        result.role = 'GF';
+        result.classification = 'GF';
+        result.name = cleanText.replace(/\s+GF$/i, '').trim();
+      }
       // Check for Foreman (F suffix)
-      if (cleanText.match(/\sF$/i) && !cleanText.match(/GTO\s*F$/i)) {
+      else if (cleanText.match(/\sF$/i) && !cleanText.match(/GTO\s*F$/i)) {
         result.isForeman = true;
         result.role = 'Foreman';
         result.classification = 'F';
@@ -3173,10 +3371,16 @@
         result.name = cleanText.replace(/\s+GTO\b.*$/i, '').trim();
       }
       // EO2 (strip from EO2 to end of string)
-      else if (cleanText.match(/\sEO2\b/i)) {
+      else if (cleanText.match(/\sEO2\b/i) || cleanText.match(/\sEO\s*2\b/i)) {
         result.role = 'EO2';
         result.classification = 'EO 2';
-        result.name = cleanText.replace(/\s+EO2\b.*$/i, '').trim();
+        result.name = cleanText.replace(/\s+EO\s*2\b.*$/i, '').trim();
+      }
+      // EO1 (strip from EO1 to end of string)
+      else if (cleanText.match(/\sEO1\b/i) || cleanText.match(/\sEO\s*1\b/i)) {
+        result.role = 'EO1';
+        result.classification = 'EO 1';
+        result.name = cleanText.replace(/\s+EO\s*1\b.*$/i, '').trim();
       }
       // WT (strip from WT to end of string)
       else if (cleanText.match(/\sWT\b/i)) {
@@ -3189,6 +3393,11 @@
       else if (cleanText.match(/^JL$/i)) {
         result.role = 'JL';
         result.classification = 'JRY';
+        result.name = '';
+      } else if (cleanText.match(/^GF$/i)) {
+        result.isForeman = true;
+        result.role = 'GF';
+        result.classification = 'GF';
         result.name = '';
       } else if (cleanText.match(/^F$/i)) {
         result.isForeman = true;
@@ -3213,9 +3422,13 @@
         result.role = 'GTO';
         result.classification = 'GTO';
         result.name = '';
-      } else if (cleanText.match(/^EO2$/i)) {
+      } else if (cleanText.match(/^EO2$/i) || cleanText.match(/^EO\s*2$/i)) {
         result.role = 'EO2';
         result.classification = 'EO 2';
+        result.name = '';
+      } else if (cleanText.match(/^EO1$/i) || cleanText.match(/^EO\s*1$/i)) {
+        result.role = 'EO1';
+        result.classification = 'EO 1';
         result.name = '';
       } else if (cleanText.match(/^WT$/i)) {
         result.role = 'WT';
@@ -3382,6 +3595,35 @@
           }
         }
 
+        // Also check currentEmployees (Employees sheet) for crew members who are temporarily
+        // absent (e.g., Time Off) but still hold a lead classification for this crew.
+        // They won't appear in crew.employees (from the Excel card) this week but should
+        // still be selectable as crew lead.
+        var leadsNameSet = {};
+        for (var li = 0; li < leads.length; li++) {
+          leadsNameSet[(leads[li].employee.name || '').toLowerCase().trim()] = true;
+        }
+        for (var ce = 0; ce < currentEmployees.length; ce++) {
+          var sheetEmp = currentEmployees[ce];
+          if (!sheetEmp.jobNum) continue;
+          // Must be on this crew
+          if (sheetEmp.jobNum.indexOf(crew.jobNumber + '.') !== 0) continue;
+          var sheetEmpNameLower = (sheetEmp.name || '').toLowerCase().trim();
+          // Skip if already in leads list
+          if (leadsNameSet[sheetEmpNameLower]) continue;
+          // Must have a lead classification on the sheet
+          var sheetClass = sheetEmp.jobClassification || '';
+          if (!isLeadClassification(sheetClass)) continue;
+          // Add this absent crew lead as a candidate
+          leads.push({
+            employee: { name: sheetEmp.name, classification: sheetClass, classificationFromSheet: sheetClass },
+            classification: sheetClass,
+            index: -1,      // Not in crew.employees — skip reorder if selected
+            isAbsent: true  // Flag: temporarily absent this week (Time Off, etc.)
+          });
+          console.log('detectCrewsWithMultipleLeads: Adding absent lead candidate ' + sheetEmp.name + ' (' + sheetClass + ') for ' + crew.jobNumber);
+        }
+
         if (leads.length > 1) {
           crewsWithMultipleLeads.push({
             crew: crew,
@@ -3416,6 +3658,9 @@
         msg += '<div class="flex-grow-1">';
         msg += '<strong>' + emp.name + '</strong>';
         msg += '<span class="badge bg-primary lead-badge">' + lead.classification + '</span>';
+        if (lead.isAbsent) {
+          msg += '<span class="badge bg-warning text-dark ms-1" style="font-size:0.7em;">On Time Off</span>';
+        }
         msg += '<br><small class="text-muted">' + classificationName + '</small>';
         msg += '</div>';
         msg += '</label>';
@@ -3439,10 +3684,14 @@
           var selectedLead = leads[selectedIndex];
           crewLeadSelections[crew.jobNumber] = selectedLead.employee.name;
 
-          // Reorder employees so selected lead is first
-          reorderCrewWithSelectedLead(crew, selectedLead.index);
+          // Only reorder crew.employees if the selected lead is present in the
+          // crew card this week. Absent (time-off) leads are not in crew.employees,
+          // so their existing .1 position on the sheet is preserved.
+          if (!selectedLead.isAbsent) {
+            reorderCrewWithSelectedLead(crew, selectedLead.index);
+          }
 
-          console.log('Selected ' + selectedLead.employee.name + ' as lead for ' + crew.jobNumber);
+          console.log('Selected ' + selectedLead.employee.name + ' as lead for ' + crew.jobNumber + (selectedLead.isAbsent ? ' (currently absent/time-off)' : ''));
         }
         if (callback) callback();
       };
@@ -3513,6 +3762,11 @@
           // Refresh the preview (but do NOT re-run matchEmployeesToSheet
           // to avoid infinite loop with duplicate detection)
           showCrewPreview();
+          // Re-run finishMatching with the updated crew ordering (after crew lead reordering).
+          // finishMatching ran earlier (inside matchEmployeesToSheet) BEFORE the lead dialogs,
+          // so proposedChanges used the pre-reorder positions. Reset the guard and recompute.
+          _matchingCompleted = false;
+          finishMatching();
           if (finalCallback) finalCallback();
           return;
         }
@@ -5003,10 +5257,16 @@
           var cleanSpecName = specNameLower
             .replace(/\s+off\s+wk.*$/i, '')      // Remove "off wk ..." at end
             .replace(/\s+wk\s*\d.*$/i, '')        // Remove "wk 2-23" at end
+            .replace(/\s+wks?\s*$/i, '')           // Remove standalone "wk"/"wks" at end
+            .replace(/\s+\d+\s*wks?\s*$/i, '')    // Remove "3 wks" at end
+            .replace(/\s+(one|two|three|four|five|six|seven|eight)\s+weeks?\s*$/i, '')  // Remove "two weeks"
+            .replace(/\s+(one|two|three|four|five|six|seven|eight)\s+wks?\s*$/i, '')   // Remove "two wks"
+            .replace(/\s+\b(to|for)\b\s*$/i, '')  // Remove trailing "to", "for"
             .replace(/\s+no\s+cdl\s*$/i, '')     // Remove "No CDL" at end
-            .replace(/\s+(f|jl|jry|gto|wt|sup|gf)\s*$/i, '')  // Remove single-letter roles at end
-            .replace(/\s+(ap\s*\d|eo\s*\d)\s*$/i, '')         // Remove AP #, EO # at end
-            .replace(/\s+(jry\s*op)\s*$/i, '')               // Remove "Jry Op" at end
+            // Strip role keyword + any trailing annotation (e.g., "WT two weeks", "JL CDL-B 3 wks")
+            .replace(/\s+(jry\s*op|gto\s*f|jry|jl|gto|wt|sup|gf)\b.*$/i, '')
+            // Strip single-char role or AP/EO at end
+            .replace(/\s+(ap\s*\d|eo\s*\d|f)\s*$/i, '')
             .replace(/,.*$/, '')                            // Remove anything after comma
             .trim();
 
@@ -5776,13 +6036,15 @@
       document.getElementById('specialCount').textContent = remaining;
 
       if (remaining === 0) {
-        document.getElementById('specialSection').style.display = 'none';
+        // All cards handled — show the "all done" bar instead of hiding immediately
+        document.getElementById('specialAllDoneBar').style.display = 'block';
+        document.getElementById('continueToCrewsBtn').style.display = 'none';
       }
     }
 
     function skipAllSpecial() {
       specialCircumstances = [];
-      document.getElementById('specialSection').style.display = 'none';
+      continueToCrewCards();
     }
 
     function showUnknownLocations() {
@@ -6026,9 +6288,7 @@
       if (needsSelection.length === 0) {
         document.getElementById('duplicateSection').style.display = 'none';
         finishMatching();
-        // Re-render crew cards so skipped duplicates are removed from non-primary crew cards
-        showCrewPreview();
-        displayPreview();
+        checkAutoProgressToSpecial();
         return;
       }
 
@@ -6282,14 +6542,8 @@
       document.getElementById('duplicateSection').style.display = 'none';
       finishMatching();
 
-      // Re-render crew cards so skipped duplicates are removed from non-primary crew cards
-      showCrewPreview();
-
-      // Check for crews with multiple lead-type employees (SUP, GF, F, GTO F)
-      // If found, show selection dialogs before proceeding
-      checkAndHandleMultipleLeads(function() {
-        displayPreview();
-      });
+      // Advance to special circumstances (don't show crew cards yet)
+      checkAutoProgressToSpecial();
     }
 
     /**
@@ -6453,6 +6707,7 @@
       // No duplicates - hide section if it was visible from a previous run, then proceed
       document.getElementById('duplicateSection').style.display = 'none';
       finishMatching();
+      checkAutoProgressToSpecial();
     }
 
     function filterSpecialCircumstancesAlreadyMatched() {
@@ -6992,6 +7247,7 @@
 
     function displayPreview() {
       document.getElementById('previewSection').style.display = 'block';
+      updateStepBar(8);
 
       var totalEmployees = 0, matchedCount = 0, unmatchedCount = 0, noChangeCount = 0;
       for (var i = 0; i < parsedCrews.length; i++) {
@@ -7120,12 +7376,13 @@
       }
 
       if (unmatchedEmps.length > 0) {
+        // In the new flow the unmatchedSection was shown at Step 5 (before crew cards).
+        // If we somehow still have unmatched at preview time (e.g., manual flow), show it.
         document.getElementById('unmatchedSection').style.display = 'block';
         document.getElementById('unmatchedCount').textContent = unmatchedEmps.length;
         renderUnmatchedEmployees(unmatchedEmps);
-      } else {
-        document.getElementById('unmatchedSection').style.display = 'none';
       }
+      // (Don't hide unmatchedSection here — it may already be hidden from Step 5)
 
       var btn = document.getElementById('btnApplyChanges');
       if (proposedChanges.length === 0) {
@@ -7443,9 +7700,19 @@
       delete unmatchedByKey[unmatchedKey];
       console.log('Removed from unmatchedByKey. Remaining keys:', Object.keys(unmatchedByKey).length);
 
-      // Re-render displays
-      console.log('Calling displayPreview()...');
-      displayPreview();
+      // Update count badge
+      var remaining = Object.keys(unmatchedByKey).length;
+      if (remaining === 0) {
+        document.getElementById('unmatchedSection').style.display = 'none';
+        checkAutoProgressToSpecial();
+      } else {
+        document.getElementById('unmatchedCount').textContent = remaining;
+      }
+
+      // If we're already at the preview stage, refresh the table too
+      if (document.getElementById('previewSection').style.display !== 'none') {
+        displayPreview();
+      }
       console.log('=== manuallyMatchEmployee END ===');
     }
 
@@ -7466,6 +7733,7 @@
 
       if (remainingCount === 0) {
         document.getElementById('unmatchedSection').style.display = 'none';
+        checkAutoProgressToSpecial();
       } else {
         document.getElementById('unmatchedCount').textContent = remainingCount;
       }
@@ -7475,6 +7743,7 @@
       unmatchedList = [];
       unmatchedByKey = {};
       document.getElementById('unmatchedSection').style.display = 'none';
+      checkAutoProgressToSpecial();
     }
 
     function addAsNewEmployee(unmatchedKey) {
@@ -7917,9 +8186,24 @@
         var borderColor = job.isOnHold ? '#0d6efd' : '#ffc107';
         var dateLabelStr = job.isOnHold ? 'Est. Return' : 'Start Date';
         var dateStr = job.startDate ? formatDateForDisplay(job.startDate) : 'Not set';
-        var statusBadge = job.isOnHold
-          ? '<span class="badge bg-secondary ms-1" style="font-size:10px;">ON HOLD → ACTIVE</span>'
-          : '<span class="badge bg-warning text-dark ms-1" style="font-size:10px;">PENDING → ACTIVE</span>';
+        var statusBadge;
+        if (job.isOnHold) {
+          // Check if estimated return is in the future → will become Pending Start, not Active
+          var isFutureReturn = false;
+          if (job.estimatedReturn || job.startDate) {
+            var retDateStr = job.estimatedReturn || job.startDate;
+            var retDateObj = new Date(retDateStr);
+            var todayCheck = new Date();
+            todayCheck.setHours(0, 0, 0, 0);
+            retDateObj.setHours(0, 0, 0, 0);
+            if (retDateObj > todayCheck) isFutureReturn = true;
+          }
+          statusBadge = isFutureReturn
+            ? '<span class="badge bg-info ms-1" style="font-size:10px;">ON HOLD → PENDING START</span>'
+            : '<span class="badge bg-secondary ms-1" style="font-size:10px;">ON HOLD → ACTIVE</span>';
+        } else {
+          statusBadge = '<span class="badge bg-warning text-dark ms-1" style="font-size:10px;">PENDING → ACTIVE</span>';
+        }
 
         msg += '<div class="card mb-2" style="border-left: 4px solid ' + borderColor + ';">';
         msg += '<div class="card-body p-2">';
@@ -7934,7 +8218,7 @@
       }
 
       msg += '</div>';
-      msg += '<p class="text-muted small mt-3"><i class="bi bi-info-circle"></i> <strong>Checked = Activate Now</strong> (job becomes Active and will be tracked for compliance)<br>';
+      msg += '<p class="text-muted small mt-3"><i class="bi bi-info-circle"></i> <strong>Checked = Confirm Return</strong> — On Hold jobs with a future return date will become <em>Pending Start</em> (auto-activates on return date). Jobs returning today or already past will become <em>Active</em> immediately.<br>';
       msg += '<strong>Unchecked = Keep as-is</strong> (job stays "Pending Start" or "On Hold" — auto-activates on its scheduled date)</p>';
 
       document.getElementById('notificationHeader').className = 'notification-header warning';
@@ -7994,6 +8278,94 @@
       var d = date instanceof Date ? date : new Date(date);
       if (isNaN(d.getTime())) return 'N/A';
       return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
+    }
+
+    /**
+     * Update the step progress bar to show current step.
+     * @param {number} activeStep - 1=Upload, 2=Tab, 3=NewJobs, 4=NewHires, 5=Resolve, 6=Special, 7=Crews, 8=Preview
+     */
+    function updateStepBar(activeStep) {
+      var stepIds = ['step-upload','step-tab','step-newjobs','step-newhires','step-resolve','step-special','step-crews','step-preview'];
+      for (var i = 0; i < stepIds.length; i++) {
+        var el = document.getElementById(stepIds[i]);
+        if (!el) continue;
+        var stepNum = i + 1;
+        el.classList.remove('active', 'done');
+        if (stepNum < activeStep) el.classList.add('done');
+        else if (stepNum === activeStep) el.classList.add('active');
+      }
+    }
+
+    /**
+     * Called after unmatched/duplicate resolution is complete.
+     * If nothing left to resolve → auto-advance to special.
+     * Otherwise show the "Continue to Special" button.
+     */
+    function checkAutoProgressToSpecial() {
+      var unmatchedRemaining = Object.keys(unmatchedByKey).length;
+      var duplicatesRemaining = duplicateEmployees.length;
+
+      // Hide continue button initially
+      var continueDiv = document.getElementById('continueToSpecialDiv');
+      if (continueDiv) continueDiv.style.display = 'none';
+
+      if (unmatchedRemaining === 0 && duplicatesRemaining === 0) {
+        // Nothing to resolve — auto-advance
+        console.log('No unmatched/duplicates — auto-advancing to Special Circumstances');
+        continueToSpecial();
+      } else {
+        // Show explicit Continue button
+        if (continueDiv) continueDiv.style.display = 'block';
+        updateStepBar(5);
+      }
+    }
+
+    /**
+     * Advance from resolution stage (unmatched/duplicates) to Special Circumstances.
+     */
+    function continueToSpecial() {
+      // Hide resolution UI
+      document.getElementById('unmatchedSection').style.display = 'none';
+      document.getElementById('duplicateSection').style.display = 'none';
+      var continueDiv = document.getElementById('continueToSpecialDiv');
+      if (continueDiv) continueDiv.style.display = 'none';
+
+      updateStepBar(6);
+
+      // If there are special circumstances, show the section
+      var hasSpecial = false;
+      if (specialCircumstances) {
+        for (var i = 0; i < specialCircumstances.length; i++) {
+          if (specialCircumstances[i]) { hasSpecial = true; break; }
+        }
+      }
+
+      if (hasSpecial) {
+        document.getElementById('specialSection').style.display = 'block';
+        // Show the Continue to Crew Cards button
+        document.getElementById('continueToCrewsBtn').style.display = 'inline-block';
+      } else {
+        // No special circumstances — go straight to crew cards
+        console.log('No special circumstances — auto-advancing to Crew Cards');
+        continueToCrewCards();
+      }
+    }
+
+    /**
+     * Advance from Special Circumstances to Crew Cards + Lead selection + Preview.
+     */
+    function continueToCrewCards() {
+      document.getElementById('specialSection').style.display = 'none';
+      updateStepBar(7);
+
+      // Render crew cards now that all resolution is done
+      showCrewPreview();
+
+      // Check for crews with multiple lead-type employees; then show preview
+      checkAndHandleMultipleLeads(function() {
+        updateStepBar(8);
+        displayPreview();
+      });
     }
 
     // Initialize on load
