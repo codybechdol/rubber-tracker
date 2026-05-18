@@ -1003,13 +1003,7 @@
         google.script.run
           .withSuccessHandler(function(result) {
             alert(result.message);
-
-            // Ask if user wants to email report
-            if (confirm('Import complete! Would you like to email a certification report to managers?')) {
-              sendEmailReport();
-            } else {
-              google.script.host.close();
-            }
+            google.script.host.close();
           })
           .withFailureHandler(function(error) {
             alert('Error during import: ' + error);

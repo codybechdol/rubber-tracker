@@ -3805,10 +3805,24 @@ function processExpiringCertsImportMultiRow(parsedData, selectedCertTypes) {
     var location = matchedEmp ? matchedEmp.location : cert.excelLocation;
     var jobNum = matchedEmp ? matchedEmp.jobNum : cert.excelJobNum;
 
+    // PRESERVE NEWER DATES: compare incoming date with existing date; keep whichever is later
+    var finalExpDate = cert.expirationDate || '';
+    if (shouldPreserve && finalExpDate && !cert.isNonExpiring) {
+      var existKey = String(cert.convertedName || '').trim().toLowerCase() + '_' + String(cert.certType || '').trim().toLowerCase();
+      var existDate = existingDates[existKey];
+      if (existDate) {
+        var incomingDate = new Date(finalExpDate);
+        if (!isNaN(incomingDate.getTime()) && existDate > incomingDate) {
+          finalExpDate = Utilities.formatDate(existDate, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+          preservedCount++;
+        }
+      }
+    }
+
     batchData.push([
       cert.convertedName,
       cert.certType, // Always show the actual cert type
-      cert.expirationDate || '',
+      finalExpDate,
       location,
       jobNum,
       '', // Formula will be added
@@ -3862,7 +3876,11 @@ function processExpiringCertsImportMultiRow(parsedData, selectedCertTypes) {
  * @param {Object} empMap - Employee map for location lookup
  * @return {number} Number of tasks created
  */
-function generateToDoTasksFromCerts(certRows, selectedCertTypes, empMap) {
+function generateToDoTasksFromCerts(certRows, selectedCertTypes, empMap, skipTaskGeneration) {
+  if (skipTaskGeneration) {
+    Logger.log('generateToDoTasksFromCerts: skipped (skipTaskGeneration=true)');
+    return 0;
+  }
   if (!selectedCertTypes || selectedCertTypes.length === 0) {
     Logger.log('No cert types selected for task generation');
     return 0;
@@ -3878,6 +3896,28 @@ function generateToDoTasksFromCerts(certRows, selectedCertTypes, empMap) {
 
   var today = new Date();
   var tasksCreated = 0;
+  var tasksSkipped = 0;
+
+  // Build lookup of existing Manual Tasks to avoid duplicates
+  var existingTasks = {};
+  try {
+    var existingData = manualTasksSheet.getDataRange().getValues();
+    for (var ei = 1; ei < existingData.length; ei++) {
+      // Notes column (index 9) contains "Employee: NAME | Current Expiration: ..."
+      var notes = String(existingData[ei][9] || '');
+      var descCell = String(existingData[ei][2] || ''); // Task description e.g. "Renew CDL-A"
+      var empMatch = notes.match(/Employee:\s*(.+?)\s*\|/);
+      if (empMatch) {
+        var empName = empMatch[1].toLowerCase().trim();
+        // Extract cert type from description ("Renew CDL-A" → "CDL-A")
+        var certMatch = descCell.replace(/^Renew\s+/i, '').toLowerCase().trim();
+        if (certMatch) existingTasks[empName + '_' + certMatch] = true;
+      }
+    }
+    Logger.log('generateToDoTasksFromCerts: Loaded ' + Object.keys(existingTasks).length + ' existing task keys for dedup');
+  } catch (e) {
+    Logger.log('generateToDoTasksFromCerts: Could not load existing tasks for dedup: ' + e.message);
+  }
 
   for (var i = 0; i < certRows.length; i++) {
     var cert = certRows[i];
