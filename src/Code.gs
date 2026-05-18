@@ -2682,6 +2682,7 @@ function getCertTypeDefaults() {
     'CPR',
     'Crane Cert',
     'Crane Evaluation',
+    'Crane Evaluation Date',
     'OSHA 1910',
     'BNSF',
     'MSHA',
@@ -2693,11 +2694,18 @@ function getCertTypeDefaults() {
     'EICA Basic Helicopter Line Construction Safety'
   ];
 
+  // Truly non-expiring certs - dates not tracked (one-time certifications)
   var nonExpiring = [
-    'Crane Evaluation',
-    'OSHA 1910',
     'BNSF',
-    'MSHA',
+    'MSHA'
+  ];
+
+  // Completion-date certs - cert never expires, but date = when training was completed.
+  // Stored so we know who has the cert; status shows "COMPLETE" not "EXPIRED".
+  var completionDateCerts = [
+    'Crane Evaluation',
+    'Crane Evaluation Date',
+    'OSHA 1910',
     'EICA Basic Helicopter Line Construction Safety'
   ];
 
@@ -2725,12 +2733,14 @@ function getCertTypeDefaults() {
     'O': 'Forklift Operator Safety Training',
     'P': 'Rigging & Signaling/Signalperson & Spotter Cert',
     'Q': 'Harassment Training',
-    'R': 'EICA Basic Helicopter Line Construction Safety'
+    'R': 'EICA Basic Helicopter Line Construction Safety',
+    'S': 'Crane Evaluation Date'
   };
 
   return {
     allCertTypes: allCertTypes,
     nonExpiring: nonExpiring,
+    completionDateCerts: completionDateCerts,
     defaultChecked: defaultChecked,
     defaultMapping: defaultMapping
   };
@@ -2922,11 +2932,18 @@ function updateEmployeeNameOnSheet(oldName, newName) {
 function parseExcelCertDataMultiRow(pastedText, columnMapping) {
   Logger.log('=== parseExcelCertDataMultiRow START ===');
 
+  // Truly non-expiring certs - no date tracked at all (one-time, no renewal)
   var nonExpiring = [
-    'Crane Evaluation',
-    'OSHA 1910',
     'BNSF',
-    'MSHA',
+    'MSHA'
+  ];
+
+  // Completion-date certs - cert never expires, date = when training was completed.
+  // Date IS stored so we know who has the cert, but status shows "COMPLETE".
+  var completionDateCerts = [
+    'Crane Evaluation',
+    'Crane Evaluation Date',
+    'OSHA 1910',
     'EICA Basic Helicopter Line Construction Safety'
   ];
 
@@ -2994,8 +3011,8 @@ function parseExcelCertDataMultiRow(pastedText, columnMapping) {
 
     uniqueEmployees[convertedName] = true;
 
-    // Iterate through certification columns D-R (indices 3-17)
-    var columns = ['D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R'];
+      // Iterate through certification columns D-S (indices 3-18)
+      var columns = ['D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S'];
     for (var c = 0; c < columns.length && (c + 3) < cells.length; c++) {
       var cellValue = String(cells[c + 3] || '').trim();
       if (!cellValue) continue;
@@ -3004,6 +3021,7 @@ function parseExcelCertDataMultiRow(pastedText, columnMapping) {
       if (!certType) continue;
 
       var isNonExpiring = nonExpiring.indexOf(certType) !== -1;
+      var isCompletionDate = completionDateCerts.indexOf(certType) !== -1;
       var isPriority = false;
       var expirationDate = null;
 
@@ -3012,10 +3030,12 @@ function parseExcelCertDataMultiRow(pastedText, columnMapping) {
         isPriority = true;
         priorityCount++;
       } else if (isNonExpiring) {
-        // Non-expiring cert - ignore date value
+        // Truly non-expiring cert - no date tracked
         nonExpiringCount++;
       } else {
         // Parse date from "M.D.YY" or "MM.DD.YY" format
+        // For completion-date certs, this is the date training was completed.
+        // For all others, it is the expiration date.
         var dateMatch = cellValue.match(/(\d{1,2})\.(\d{1,2})\.(\d{2})/);
         if (dateMatch) {
           var month = String(dateMatch[1]).padStart(2, '0');
@@ -3032,6 +3052,7 @@ function parseExcelCertDataMultiRow(pastedText, columnMapping) {
         expirationDate: expirationDate,
         isPriority: isPriority,
         isNonExpiring: isNonExpiring,
+        isCompletionDate: isCompletionDate,
         excelJobNum: excelJobNum,
         excelLocation: excelLocation
       });
@@ -3839,12 +3860,21 @@ function processExpiringCertsImportMultiRow(parsedData, selectedCertTypes) {
     var formulas = [];
     for (var f = 0; f < batchData.length; f++) {
       var rowNum = f + 2;
-      formulas.push([
-        // Days Until Expiration: If no date, show N/A, otherwise calculate days
-        '=IF(ISBLANK(C' + rowNum + '),"N/A",DAYS(C' + rowNum + ',TODAY()))',
-        // Status: If no date show "No Date Set", otherwise calculate based on days
-        '=IF(F' + rowNum + '="PRIORITY - Need Copy","PRIORITY - Need Copy",IF(F' + rowNum + '="N/A","No Date Set",IF(F' + rowNum + '<0,"EXPIRED",IF(F' + rowNum + '<=7,"CRITICAL",IF(F' + rowNum + '<=30,"WARNING",IF(F' + rowNum + '<=60,"UPCOMING","OK"))))))'
-      ]);
+      // Completion-date certs (Crane Eval, OSHA 1910, EICA Helicopter):
+      // date = when training was completed, cert never expires → show "COMPLETE"
+      if (certRows[f] && certRows[f].isCompletionDate) {
+        formulas.push([
+          '="No Expiration"',
+          '="COMPLETE"'
+        ]);
+      } else {
+        formulas.push([
+          // Days Until Expiration: If no date, show N/A, otherwise calculate days
+          '=IF(ISBLANK(C' + rowNum + '),"N/A",DAYS(C' + rowNum + ',TODAY()))',
+          // Status: If no date show "No Date Set", otherwise calculate based on days
+          '=IF(F' + rowNum + '="PRIORITY - Need Copy","PRIORITY - Need Copy",IF(F' + rowNum + '="N/A","No Date Set",IF(F' + rowNum + '<0,"EXPIRED",IF(F' + rowNum + '<=7,"CRITICAL",IF(F' + rowNum + '<=30,"WARNING",IF(F' + rowNum + '<=60,"UPCOMING","OK"))))))'
+        ]);
+      }
     }
     formulaRange.setFormulas(formulas);
 
@@ -3929,6 +3959,11 @@ function generateToDoTasksFromCerts(certRows, selectedCertTypes, empMap, skipTas
 
     // Skip non-expiring certs
     if (cert.isNonExpiring) {
+      continue;
+    }
+
+    // Skip completion-date certs (Crane Eval, OSHA 1910, EICA Helicopter) - cert never expires
+    if (cert.isCompletionDate) {
       continue;
     }
 
@@ -6764,10 +6799,7 @@ function getExpiringCertsForConfig() {
       return (b.summary.expired + b.summary.critical) - (a.summary.expired + a.summary.critical);
     });
 
-    Logger.log('=== getExpiringCertsForConfig COMPLETE ===');
-    Logger.log('Returning ' + employees.length + ' employees, skipped ' + skippedPrevious + ' previous employees');
-
-    return {
+    var result = {
       employees: employees,
       summary: {
         totalEmployees: employees.length,
@@ -6775,10 +6807,38 @@ function getExpiringCertsForConfig() {
         expiredCount: expiredCount
       }
     };
+
+    // Store in ScriptProperties to avoid ~50KB return limit
+    // Client will call getStoredExpiringCertsData() to retrieve it
+    try {
+      var json = JSON.stringify(result);
+      PropertiesService.getScriptProperties().setProperty('EXPIRING_CERTS_CONFIG_DATA', json);
+      Logger.log('=== getExpiringCertsForConfig COMPLETE === Stored ' + employees.length + ' employees (' + Math.round(json.length / 1024) + 'KB), skipped ' + skippedPrevious);
+      return { stored: true, employeeCount: employees.length, summary: result.summary };
+    } catch (storeErr) {
+      Logger.log('ScriptProperties store failed (' + storeErr.message + '), returning inline');
+      Logger.log('=== getExpiringCertsForConfig COMPLETE === Returning inline, skipped ' + skippedPrevious);
+      return result;
+    }
   } catch (error) {
     Logger.log('ERROR in getExpiringCertsForConfig: ' + error.toString());
     Logger.log('Stack: ' + error.stack);
     throw error;
+  }
+}
+
+/**
+ * Retrieves stored Expiring Certs config data from ScriptProperties.
+ * Called by client after getExpiringCertsForConfig() returns {stored: true}.
+ */
+function getStoredExpiringCertsData() {
+  try {
+    var json = PropertiesService.getScriptProperties().getProperty('EXPIRING_CERTS_CONFIG_DATA');
+    if (!json) return { employees: [], summary: { totalEmployees: 0, priorityCount: 0, expiredCount: 0 } };
+    return JSON.parse(json);
+  } catch (e) {
+    Logger.log('getStoredExpiringCertsData error: ' + e.message);
+    return { employees: [], summary: { totalEmployees: 0, priorityCount: 0, expiredCount: 0 } };
   }
 }
 

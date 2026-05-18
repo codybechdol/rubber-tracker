@@ -886,8 +886,37 @@
       google.script.run
         .withSuccessHandler(function(data) {
           clearTimeout(timeoutId);
-          console.log('loadEmployeeCertsData: SUCCESS, got', (data && data.employees ? data.employees.length : 0), 'employees');
-          if (data && data.employees) {
+          if (!data) {
+            console.error('loadEmployeeCertsData: got null (data too large?)');
+            document.getElementById('certStatusOverview').innerHTML = '<div class="alert alert-danger">Failed to load cert data. <button class="btn btn-sm btn-primary ms-2" onclick="loadEmployeeCertsData()">Retry</button></div>';
+            document.getElementById('employeeCertsContainer').innerHTML = '';
+            return;
+          }
+          // ScriptProperties pattern: data may be stored server-side
+          if (data.stored) {
+            console.log('loadEmployeeCertsData: data stored server-side (' + data.employeeCount + ' employees), fetching...');
+            google.script.run
+              .withSuccessHandler(function(fullData) {
+                console.log('loadEmployeeCertsData: SUCCESS, got', (fullData && fullData.employees ? fullData.employees.length : 0), 'employees');
+                if (fullData && fullData.employees && fullData.employees.length > 0) {
+                  renderCertStatusOverview(fullData.employees);
+                  renderEmployeeCerts(fullData.employees);
+                  updateCertsSummary(fullData.summary);
+                } else {
+                  document.getElementById('certStatusOverview').innerHTML = '<div class="alert alert-warning">No data available. <button class="btn btn-sm btn-primary ms-2" onclick="loadEmployeeCertsData()">Retry</button></div>';
+                  document.getElementById('employeeCertsContainer').innerHTML = '<div class="alert alert-warning">No data returned. Please check if the Expiring Certs sheet has data. <button class="btn btn-sm btn-primary ms-2" onclick="loadEmployeeCertsData()">Retry</button></div>';
+                }
+              })
+              .withFailureHandler(function(error) {
+                console.error('loadEmployeeCertsData fetch error', error);
+                document.getElementById('certStatusOverview').innerHTML = '<div class="alert alert-danger">Error fetching stored data: ' + error + '</div>';
+              })
+              .getStoredExpiringCertsData();
+            return;
+          }
+          // Inline response (small enough to return directly)
+          console.log('loadEmployeeCertsData: SUCCESS (inline), got', (data.employees ? data.employees.length : 0), 'employees');
+          if (data && data.employees && data.employees.length > 0) {
             renderCertStatusOverview(data.employees);
             renderEmployeeCerts(data.employees);
             updateCertsSummary(data.summary);
@@ -2053,8 +2082,8 @@
         // Completion Date (editable)
         html += '<td><input type="date" class="form-control form-control-sm" value="' + formatDateForInput(record.completionDate) + '" onchange="onTrainingTrackingChange(' + originalIndex + ', \'completionDate\', this.value)"></td>';
 
-        // Attendees (editable)
-        html += '<td><input type="number" class="form-control form-control-sm" value="' + (record.attendees || '') + '" min="0" onchange="onTrainingTrackingChange(' + originalIndex + ', \'attendees\', this.value)"></td>';
+        // Attendees (names - read-only display, editable as text)
+        html += '<td><input type="text" class="form-control form-control-sm" value="' + escapeHtml(record.attendees || '') + '" style="min-width:160px;" onchange="onTrainingTrackingChange(' + originalIndex + ', \'attendees\', this.value)"></td>';
 
         // Trainer (editable)
         html += '<td><input type="text" class="form-control form-control-sm" value="' + escapeHtml(record.trainer || '') + '" style="width: 80px;" onchange="onTrainingTrackingChange(' + originalIndex + ', \'trainer\', this.value)"></td>';
