@@ -127,6 +127,7 @@ function forceCreateMenu() {
           .addItem('🧹 Remove Duplicate Rows', 'menuCleanupDuplicateComplianceRows')
           .addItem('🧹 Remove Duplicate Log Entries', 'menuCleanupDuplicateLogEntries')
           .addItem('🧹 Remove Duplicate Equipment Needs', 'cleanupDuplicateEquipmentNeeds')
+          .addItem('🚫 Remove False Positive Equipment Rows', 'cleanupFalsePositiveEquipmentNeeds')
           .addItem('🧹 Clear Saved Job Corrections', 'clearJobNumberCorrections')
           .addItem('🧹 Remove Non-Config Crews', 'removeNonConfigCrewsFromCompliance')
           .addItem('🧹 Remove Pre-Start Job Rows', 'removePreStartJobRowsFromCompliance')

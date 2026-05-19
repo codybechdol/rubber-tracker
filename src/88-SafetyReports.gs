@@ -4721,6 +4721,73 @@ function cleanupDuplicateEquipmentNeeds() {
 }
 
 /**
+ * Removes "false positive" rows from Safety Equipment Needs sheet.
+ * These are rows where the Equipment Type passed its check (Good Condition = Yes)
+ * but the parser incorrectly captured Trucks section content as an actionable comment.
+ * Indicators: description starts with "Barriers - Note:", "Cones - Note:", etc.
+ * AND the notes/description contains truck section keywords like "Wipers:", "Horn:", etc.
+ *
+ * Also offered as a manual cleanup for stale/incorrect rows.
+ * Menu: Glove Manager → 🛡️ Process Safety Emails → 🧹 Cleanup → Remove False Positive Rows
+ */
+function cleanupFalsePositiveEquipmentNeeds() {
+  var sheet = getSafetyEquipmentSheet();
+  if (!sheet || sheet.getLastRow() < 2) {
+    SpreadsheetApp.getUi().alert('\u2139\uFE0F No Data', 'Safety Equipment Needs sheet is empty.', SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+
+  var data = sheet.getDataRange().getValues();
+  var rowsToDelete = [];
+
+  // Truck section keywords that indicate the parser grabbed the wrong section
+  var truckKeywords = /Wipers:|Horn:|Heater:|Seat Belt|Warning Light|Wheel chocks:|Reflectors:|Are the following in good repair/i;
+
+  for (var i = 1; i < data.length; i++) {
+    var equipType = String(data[i][5] || '').trim();
+    var description = String(data[i][6] || '').trim();
+    var notes = String(data[i][10] || '').trim();
+
+    // Flag rows where the description is a "Note:" for an equipment that passed (Good Condition = Yes)
+    // AND the note content contains truck section data (garbage content)
+    var isNoteRow = /\s*-\s*Note\s*:/i.test(description);
+    var hasTruckContent = truckKeywords.test(description) || truckKeywords.test(notes);
+
+    if (isNoteRow && hasTruckContent) {
+      Logger.log('False positive row at ' + (i + 1) + ': ' + equipType + ' - ' + description.substring(0, 60));
+      rowsToDelete.push(i + 1); // 1-based row number
+    }
+  }
+
+  if (rowsToDelete.length === 0) {
+    SpreadsheetApp.getUi().alert('\u2705 No False Positives', 'No false positive equipment rows found. The sheet looks clean.', SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+
+  var response = SpreadsheetApp.getUi().alert(
+    '\uD83E\uDDF9 Remove False Positive Rows',
+    'Found ' + rowsToDelete.length + ' rows where equipment passed its check but the parser\n' +
+    'incorrectly captured Trucks section content as an actionable comment.\n\n' +
+    'These are NOT real equipment issues. Remove them?',
+    SpreadsheetApp.getUi().ButtonSet.YES_NO
+  );
+
+  if (response !== SpreadsheetApp.getUi().Button.YES) return;
+
+  // Delete from bottom to top to preserve row numbers
+  for (var r = rowsToDelete.length - 1; r >= 0; r--) {
+    sheet.deleteRow(rowsToDelete[r]);
+  }
+
+  SpreadsheetApp.getUi().alert('\u2705 Cleanup Complete',
+    'Removed ' + rowsToDelete.length + ' false positive equipment rows.\n\n' +
+    'These emails will be re-evaluated on the next "Process Safety Emails" run to detect\n' +
+    'any real issues (AED, Hot Sticks, Misc Comments) that were missed.',
+    SpreadsheetApp.getUi().ButtonSet.OK);
+  Logger.log('cleanupFalsePositiveEquipmentNeeds: Removed ' + rowsToDelete.length + ' false positive rows');
+}
+
+/**
  * Creates Manual Tasks from Safety Reports with "Needs Attention" status
  * Menu function: Glove Manager → Safety → Create Tasks from Issues
  */
@@ -6059,39 +6126,49 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     }
   }
 
-  // Auto-apply Gmail hyperlinks to all Source Email ID cells so every row is clickable
-  try {
-    var linkCount = applySafetyEquipmentEmailLinksSilent();
-    Logger.log("Gmail links applied to " + linkCount + " Source Email ID cells");
-  } catch (linkErr) {
-    Logger.log("Gmail link application error (non-fatal): " + linkErr.toString());
-  }
+  // Only run post-processing steps when something was actually added this batch or
+  // when it's the final batch. Skip for intermediate batches with 0 new emails to
+  // avoid wasting ~10s on sort/format/link-apply for no-op passes.
+  var hadNewLogs = (logsCreated.jha + logsCreated.weekly + logsCreated.monthly) > 0;
+  var shouldRunPostProcessing = hadNewLogs || isComplete;
 
-  // Schedule Gmail link backfill to run in a fresh execution 2 minutes from now.
-  // Done as a one-shot time trigger instead of inline because building 1000+ RichTextValue
-  // objects in the same execution as heavy PDF OCR causes V8 INTERNAL memory errors.
-  try {
-    var existingTriggers = ScriptApp.getProjectTriggers();
-    for (var ti = 0; ti < existingTriggers.length; ti++) {
-      if (existingTriggers[ti].getHandlerFunction() === 'applyAllEmailLinksScheduled') {
-        ScriptApp.deleteTrigger(existingTriggers[ti]);
-      }
+  if (shouldRunPostProcessing) {
+    // Auto-apply Gmail hyperlinks to all Source Email ID cells so every row is clickable
+    try {
+      var linkCount = applySafetyEquipmentEmailLinksSilent();
+      Logger.log("Gmail links applied to " + linkCount + " Source Email ID cells");
+    } catch (linkErr) {
+      Logger.log("Gmail link application error (non-fatal): " + linkErr.toString());
     }
-    ScriptApp.newTrigger('applyAllEmailLinksScheduled')
-      .timeBased()
-      .after(2 * 60 * 1000) // 2 minutes
-      .create();
-    Logger.log("Gmail link backfill scheduled for 2 minutes from now");
-  } catch (trigErr) {
-    Logger.log("Could not schedule email link backfill (non-fatal): " + trigErr.toString());
-  }
 
-  // Auto-format JHA Log and Weekly Safety Log: sort by month desc → job number → date desc,
-  // with blue separator rows between each month for easy visual scanning.
-  try {
-    sortAndFormatSafetyLogs(true); // silent = no alert
-  } catch (fmtErr) {
-    Logger.log("Log sheet formatting error (non-fatal): " + fmtErr.toString());
+    // Schedule Gmail link backfill to run in a fresh execution 2 minutes from now.
+    // Done as a one-shot time trigger instead of inline because building 1000+ RichTextValue
+    // objects in the same execution as heavy PDF OCR causes V8 INTERNAL memory errors.
+    try {
+      var existingTriggers = ScriptApp.getProjectTriggers();
+      for (var ti = 0; ti < existingTriggers.length; ti++) {
+        if (existingTriggers[ti].getHandlerFunction() === 'applyAllEmailLinksScheduled') {
+          ScriptApp.deleteTrigger(existingTriggers[ti]);
+        }
+      }
+      ScriptApp.newTrigger('applyAllEmailLinksScheduled')
+        .timeBased()
+        .after(2 * 60 * 1000) // 2 minutes
+        .create();
+      Logger.log("Gmail link backfill scheduled for 2 minutes from now");
+    } catch (trigErr) {
+      Logger.log("Could not schedule email link backfill (non-fatal): " + trigErr.toString());
+    }
+
+    // Auto-format JHA Log and Weekly Safety Log: sort by month desc → job number → date desc,
+    // with blue separator rows between each month for easy visual scanning.
+    try {
+      sortAndFormatSafetyLogs(true); // silent = no alert
+    } catch (fmtErr) {
+      Logger.log("Log sheet formatting error (non-fatal): " + fmtErr.toString());
+    }
+  } else {
+    Logger.log("Skipping post-processing (no new logs this batch, not final batch)");
   }
 
   return result;
@@ -8270,7 +8347,9 @@ function extractSafetyChecklistIssues(pdfText, context) {
     var cm = windowText.match(/comments?\s*:?\s*([A-Za-z0-9][^?]{4,300}?)(?=\s*(?:[A-Z][a-z].*?\?|$))/i);
     if (cm && cm[1]) {
       var c1 = cm[1].trim().replace(/\s+/g, ' ');
-      if (c1.length >= 5 && !/^(n\/?a|none|ok|good|yes|no|na|-+)$/i.test(c1) && !/\?:/.test(c1)) {
+      // Reject trivial/non-actionable values and section header words
+      if (c1.length >= 5 && !/^(n\/?a|none|ok|good|yes|no|na|-+)$/i.test(c1) && !/\?:/.test(c1)
+          && !/^(?:Trucks?|Misc\s*Comments?|Tools?|General|Are\s+the)$/i.test(c1)) {
         return c1;
       }
     }
@@ -8282,10 +8361,14 @@ function extractSafetyChecklistIssues(pdfText, context) {
 
     var nextCmIdx = afterLabel.search(/\s+comments?\s*:/i);
     // Stop at known question-style headers (e.g. "Good condition?:")
-    var fieldStop = afterLabel.search(/\s+(?:Test Date|Insulated Jumpers|Good condition|Fully Stocked|Properly charged|Monthly inspection|Expiration|AED|Fall Protection|Harnesses|Crane|Mileage|Signs|Triangles|Cones|Hot Hoist|Barriers|Fire Extinguisher|Hot Stick|Rubber|First Aid|Manuf)\s*[?:]/i);
+    // Also stop at Trucks section and Misc Comments to prevent comment bleed-through
+    var fieldStop = afterLabel.search(/\s+(?:Test Date|Insulated Jumpers|Good condition|Fully Stocked|Properly charged|Monthly inspection|Expiration|AED|Fall Protection|Harnesses|Crane|Mileage|Signs|Triangles|Cones|Hot Hoist|Barriers|Fire Extinguisher|Hot Stick|Rubber|First Aid|Manuf|Trucks|Misc\s*Comments?|Tires|Wheel\s*chocks?|Brakes?|Wipers?|Horn\b|Heater|Seat\s*Belts?|Reflectors?|Warning\s*Lights?)\s*[?:.]?\s*(?:Yes|No|NA|Are\s)/i);
     // Also stop at standalone section-header words at the start of a line (no ? or : required)
     // This prevents comment text from one section bleeding into the next section's header
-    var lineHeaderStop = afterLabel.search(/\n\s*(?:Cones|Triangles|Signs|Barriers|Hot Hoist|Hot Stick|Chains|Chokers|AED|Fall Protection|Harnesses|Crane|Mileage|Fire Extinguisher|Insulated Jumpers|First Aid|Rubber Goods)\s*\n/i);
+    var lineHeaderStop = afterLabel.search(/\n\s*(?:Cones|Triangles|Signs|Barriers|Hot Hoist|Hot Stick|Chains|Chokers|AED|Fall Protection|Harnesses|Crane|Mileage|Fire Extinguisher|Insulated Jumpers|First Aid|Rubber Goods|Trucks)\s*\n/i);
+    // Also stop at inline section headers (for normalized text without newlines)
+    var inlineStop = afterLabel.search(/\s+(?:Trucks|Misc\s*Comments?)\s+(?:Are\s|Comments?\s*:)/i);
+    if (inlineStop > 0) fieldStop = (fieldStop > 0) ? Math.min(fieldStop, inlineStop) : inlineStop;
 
     var stopAt = afterLabel.length;
     if (nextCmIdx  > 0) stopAt = Math.min(stopAt, nextCmIdx);
@@ -8515,6 +8598,31 @@ function extractSafetyChecklistIssues(pdfText, context) {
   checkEquipment("AED", "Damage Visible", /any\s*damage\s*visible\s*\??\s*:?\s*(yes|no)/i, "yes", "AED has visible damage");
   checkEquipment("AED", "2 Sets of Pads", /2\s*sets?\s*of\s*defibrillation\s*pads\s*\.?\s*:?\s*(yes|no)/i, "no", "AED does not have 2 sets of pads");
 
+  // AED = NA means the vehicle does not have an AED at all — flag it
+  // Pattern: "Any damage visible?:NA" indicates no AED present on this vehicle
+  if (!flagged['AED_Not Present']) {
+    var aedNaMatch = text.match(/any\s*damage\s*visible\s*\??\s*:?\s*(na|n\/a)/i);
+    if (aedNaMatch) {
+      flagged['AED_Not Present'] = true;
+      Logger.log("  ** ISSUE: AED - Not present on vehicle (NA)");
+      issues.push([
+        context.date,
+        context.reportType,
+        context.jobNumber,
+        context.foreman,
+        context.vehicleNumber,
+        "AED",
+        "AED not present on vehicle (N/A reported)",
+        "Needs Attention",
+        testDate || "",
+        context.messageId,
+        "",
+        context.subject || "",
+        context.receivedDate || ""
+      ]);
+    }
+  }
+
   // ==== FALL PROTECTION SECTION ====
   checkEquipment("Fall Protection", "Good Condition", /fall\s*protection\s*gear\s+good\s*condition\s*\??\s*:?\s*(yes|no)/i, "no", "Fall Protection gear not in good condition");
 
@@ -8537,9 +8645,58 @@ function extractSafetyChecklistIssues(pdfText, context) {
   // These are all vehicle mechanical/maintenance items that should go to Fleet, not Safety Manager
 
   // ==== MISC COMMENTS SECTION ====
-  // DISABLED: The OCR text is too messy to reliably extract meaningful comments
-  // The regex was picking up garbage like "Reflectors:Warning Lights:Windows:Defrost:Wind..."
-  // If there are real issues, they'll show up in the specific equipment checks above
+  // Extract from the normalized "Misc Comments Comments: [text]" structure.
+  // The text is normalized (no newlines), so we look for the section inline.
+  // Stop before page-2 duplicate content (starts with vehicle# pattern like "3015 028 26").
+  var miscMatch = text.match(/misc\s*comments?\s+comments?\s*:?\s*(.{5,400}?)(?=\s*\d{4}[\s\-]+\d{3}[\s\-]+\d{2}\s+\d{2}|$)/i);
+  if (miscMatch && miscMatch[1]) {
+    var miscText = miscMatch[1].trim().replace(/\s+/g, ' ');
+    Logger.log("  Misc Comments text: " + miscText.substring(0, 150));
+
+    if (miscText.length >= 5 && !/^(n\/?a|none|ok|good|-)$/i.test(miscText)) {
+
+      // --- AED missing from truck (overrides the generic NA check above) ---
+      if (/no\s+aed|aed\s+(?:not\s+in|missing|absent|not\s+present)|without\s+aed/i.test(miscText) && !flagged['AED_Not Present']) {
+        flagged['AED_Not Present'] = true;
+        Logger.log("  ** ISSUE: AED - Misc Comments says no AED");
+        issues.push([
+          context.date, context.reportType, context.jobNumber, context.foreman,
+          context.vehicleNumber, "AED",
+          "AED not present - Misc Comments: " + miscText.substring(0, 100),
+          "Needs Attention", testDate || "", context.messageId, miscText,
+          context.subject || "", context.receivedDate || ""
+        ]);
+      }
+
+      // --- Hot Sticks/rubber goods need retesting ---
+      if (/sticks?\s+need|needs?\s+retest|retest(?:ed|ing)?\s+sticks?|rubber\s+goods?\s+need/i.test(miscText) && !flagged['Hot Sticks_MiscNote']) {
+        flagged['Hot Sticks_MiscNote'] = true;
+        Logger.log("  ** ISSUE: Hot Sticks - Misc Comments indicate retesting needed");
+        issues.push([
+          context.date, context.reportType, context.jobNumber, context.foreman,
+          context.vehicleNumber, "Hot Sticks",
+          "Hot Sticks - Misc Comments: " + miscText.substring(0, 100),
+          "Needs Attention", testDate || "", context.messageId, miscText,
+          context.subject || "", context.receivedDate || ""
+        ]);
+      }
+
+      // --- Any other actionable Misc Comment (exclude pure vehicle/mechanical issues) ---
+      var isMiscActionable = /needs?\s|need\s|fell\s+off|damaged?|broken|missing|replac|requir|loose|leaking/i.test(miscText);
+      var isMechanicalOnly = /^(?:only\s+)?(?:oil|tire|brake|engine|fuel|coolant|battery|transmission)\b/i.test(miscText);
+      if (isMiscActionable && !isMechanicalOnly && !flagged['Misc_General']) {
+        flagged['Misc_General'] = true;
+        Logger.log("  ** ISSUE: General Misc Comment: " + miscText.substring(0, 80));
+        issues.push([
+          context.date, context.reportType, context.jobNumber, context.foreman,
+          context.vehicleNumber, "Other",
+          "Misc Comment: " + miscText.substring(0, 100),
+          "Needs Attention", testDate || "", context.messageId, miscText,
+          context.subject || "", context.receivedDate || ""
+        ]);
+      }
+    }
+  }
 
   Logger.log("Safety Checklist parsed - " + issues.length + " issues found");
   return issues;
@@ -14408,20 +14565,16 @@ function removeCustomJobForemanMapping(jobNumber) {
 function lookupForemanWithCustomMapping(jobNumber, dialogMappings) {
   if (!jobNumber) return { name: '', jobExists: false, source: 'none' };
 
-  Logger.log("lookupForemanWithCustomMapping: Looking up job " + jobNumber);
-
   // Check temporary mappings first (set during unknown job resolution in this session)
   var tempMappings = getTempJobForemanMappings();
-  Logger.log("lookupForemanWithCustomMapping: Temp mappings = " + JSON.stringify(tempMappings));
   if (tempMappings && tempMappings[jobNumber]) {
-    Logger.log("lookupForemanWithCustomMapping: FOUND in temp mappings -> " + tempMappings[jobNumber]);
+    Logger.log("lookupForemanWithCustomMapping: " + jobNumber + " -> temp_session: " + tempMappings[jobNumber]);
     return { name: tempMappings[jobNumber], jobExists: true, source: 'temp_session' };
   }
 
   // Check if this job was explicitly skipped in current session
   var props = PropertiesService.getScriptProperties();
   var skippedJobsStr = props.getProperty('SKIPPED_UNKNOWN_JOBS');
-  Logger.log("lookupForemanWithCustomMapping: Skipped jobs = " + skippedJobsStr);
   if (skippedJobsStr) {
     try {
       var skippedJobs = JSON.parse(skippedJobsStr);
@@ -14434,11 +14587,10 @@ function lookupForemanWithCustomMapping(jobNumber, dialogMappings) {
 
   // Check dialog mappings next (passed from current session)
   if (dialogMappings) {
-    Logger.log("lookupForemanWithCustomMapping: Checking dialog mappings...");
     for (var foreman in dialogMappings) {
       var jobs = dialogMappings[foreman];
       if (jobs && jobs.indexOf(jobNumber) !== -1) {
-        Logger.log("lookupForemanWithCustomMapping: FOUND in dialog mappings -> " + foreman);
+        Logger.log("lookupForemanWithCustomMapping: " + jobNumber + " -> dialog: " + foreman);
         return { name: foreman, jobExists: true, source: 'dialog' };
       }
     }
@@ -14446,9 +14598,8 @@ function lookupForemanWithCustomMapping(jobNumber, dialogMappings) {
 
   // Check saved custom mappings
   var savedCustom = getCustomJobForemanMappings();
-  Logger.log("lookupForemanWithCustomMapping: Saved custom mappings = " + JSON.stringify(savedCustom));
   if (savedCustom[jobNumber]) {
-    Logger.log("lookupForemanWithCustomMapping: FOUND in saved custom -> " + savedCustom[jobNumber]);
+    Logger.log("lookupForemanWithCustomMapping: " + jobNumber + " -> saved_custom: " + savedCustom[jobNumber]);
     return { name: savedCustom[jobNumber], jobExists: true, source: 'saved_custom' };
   }
 
@@ -14456,7 +14607,7 @@ function lookupForemanWithCustomMapping(jobNumber, dialogMappings) {
   // This allows new crews to be tracked even before they appear on Employees sheet
   var complianceConfig = loadComplianceConfig();
   if (complianceConfig[jobNumber] && complianceConfig[jobNumber].foreman) {
-    Logger.log("lookupForemanWithCustomMapping: FOUND in Safety Compliance Config -> " + complianceConfig[jobNumber].foreman);
+    Logger.log("lookupForemanWithCustomMapping: " + jobNumber + " -> compliance_config: " + complianceConfig[jobNumber].foreman);
     return { name: complianceConfig[jobNumber].foreman, jobExists: true, source: 'compliance_config' };
   }
 
@@ -14464,24 +14615,21 @@ function lookupForemanWithCustomMapping(jobNumber, dialogMappings) {
   // This takes precedence over Employees sheet classification-based lookup
   var jobTrackingCrews = getActiveCrewsFromJobTracking();
   var normalizedJobNumber = jobNumber.trim().toUpperCase();
-  Logger.log("lookupForemanWithCustomMapping: Checking Job Tracking for job '" + jobNumber + "' (normalized: '" + normalizedJobNumber + "'), " + jobTrackingCrews.length + " active crews");
   for (var j = 0; j < jobTrackingCrews.length; j++) {
     var jtJobNum = jobTrackingCrews[j].jobNumber.trim().toUpperCase();
     if (jtJobNum === normalizedJobNumber) {
       if (jobTrackingCrews[j].foreman) {
-        Logger.log("lookupForemanWithCustomMapping: FOUND in Job Tracking -> " + jobTrackingCrews[j].foreman);
+        Logger.log("lookupForemanWithCustomMapping: " + jobNumber + " -> job_tracking: " + jobTrackingCrews[j].foreman);
         return { name: jobTrackingCrews[j].foreman, jobExists: true, source: 'job_tracking' };
       } else {
-        // Job exists but no foreman - still mark as exists so it doesn't go to "unknown"
-        Logger.log("lookupForemanWithCustomMapping: Job found in Job Tracking but NO FOREMAN: " + jobNumber);
+        Logger.log("lookupForemanWithCustomMapping: " + jobNumber + " found in Job Tracking but NO FOREMAN");
         return { name: '', jobExists: true, source: 'job_tracking_no_foreman' };
       }
     }
   }
-  Logger.log("lookupForemanWithCustomMapping: NOT found in Job Tracking, proceeding to Employees lookup");
+  Logger.log("lookupForemanWithCustomMapping: " + jobNumber + " not found, trying Employees sheet...");
 
   // Fall back to Employees sheet lookup (uses classification hierarchy)
-  Logger.log("lookupForemanWithCustomMapping: Falling back to Employees sheet lookup...");
   var result = lookupForemanByJobNumber(jobNumber);
   result.source = 'employees';
   return result;

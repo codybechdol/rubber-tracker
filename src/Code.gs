@@ -7377,6 +7377,7 @@ function onOpen() {
         .addItem('🧹 Remove Duplicate Rows', 'menuCleanupDuplicateComplianceRows')
         .addItem('🧹 Remove Duplicate Log Entries', 'menuCleanupDuplicateLogEntries')
         .addItem('🧹 Remove Duplicate Equipment Needs', 'cleanupDuplicateEquipmentNeeds')
+        .addItem('🚫 Remove False Positive Equipment Rows', 'cleanupFalsePositiveEquipmentNeeds')
         .addItem('🧹 Clear Saved Job Corrections', 'clearJobNumberCorrections')
         .addItem('🛠️ Fix Shifted Safety Tasks', 'fixShiftedSafetyComplianceTasks')
         .addItem('🔧 Fix Skipped Log Entries', 'fixSkippedLogEntriesFromMappings')
