@@ -67,6 +67,60 @@ function getDayName(dayOfWeek) {
   return DAY_NAMES[dayOfWeek] || 'Unknown';
 }
 
+// ============================================================================
+// WORK SCHEDULE CONFIGURATION
+// ============================================================================
+
+/**
+ * Gets the current work schedule setting from ScriptProperties.
+ * @return {string} 'Mon-Thu' or 'Tue-Fri'
+ */
+function getWorkSchedule() {
+  var props = PropertiesService.getScriptProperties();
+  return props.getProperty('WORK_SCHEDULE') || SCHEDULE_MON_THU;
+}
+
+/**
+ * Saves the work schedule setting to ScriptProperties.
+ * @param {string} schedule - 'Mon-Thu' or 'Tue-Fri'
+ * @return {Object} {success: true}
+ */
+function setWorkSchedule(schedule) {
+  if (schedule !== SCHEDULE_MON_THU && schedule !== SCHEDULE_TUE_FRI) {
+    return { success: false, error: 'Invalid schedule: ' + schedule };
+  }
+  PropertiesService.getScriptProperties().setProperty('WORK_SCHEDULE', schedule);
+  // Clear saved trip plan so it regenerates with new schedule
+  clearTripPlan();
+  Logger.log('Work schedule set to: ' + schedule);
+  return { success: true, schedule: schedule };
+}
+
+/**
+ * Returns schedule configuration for a given work schedule.
+ * @param {string} schedule - 'Mon-Thu' or 'Tue-Fri'
+ * @return {Object} {workDays, skipDays, mustReturnDay, mustReturnDayName, avoidDay}
+ */
+function getScheduleConfig(schedule) {
+  if (schedule === SCHEDULE_TUE_FRI) {
+    return {
+      workDays: [2, 3, 4, 5],       // Tue, Wed, Thu, Fri
+      skipDays: [0, 1, 6],           // Sun, Mon, Sat
+      mustReturnDay: 5,              // Friday must return to Helena
+      mustReturnDayName: 'Friday',
+      avoidDay: null                 // No avoid day for Tue-Fri schedule
+    };
+  }
+  // Default: Mon-Thu
+  return {
+    workDays: [1, 2, 3, 4],         // Mon, Tue, Wed, Thu
+    skipDays: [0, 5, 6],             // Sun, Fri, Sat
+    mustReturnDay: 2,               // Tuesday must return to Helena
+    mustReturnDayName: 'Tuesday',
+    avoidDay: 5                     // Avoid Friday
+  };
+}
+
 /**
  * Formats a date as YYYY-MM-DD for use as object key.
  * Local implementation to avoid cross-file dependency.

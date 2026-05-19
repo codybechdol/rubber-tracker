@@ -906,8 +906,8 @@ function saveScheduleTaskDateChanges(changes) {
       if (startTime !== undefined && startTime !== null) metadataUpdates.StartTime = startTime;
       if (endTime !== undefined && endTime !== null) metadataUpdates.EndTime = endTime;
 
-      // Also update Status to "Scheduled" when scheduling
-      if (newDate) metadataUpdates.Status = 'Scheduled';
+      // Also update Status to "Assigned" when scheduling (allowed values: Unassigned, Assigned, Complete, Overdue, Deferred)
+      if (newDate) metadataUpdates.Status = 'Assigned';
 
       if (Object.keys(metadataUpdates).length > 0) {
         Logger.log('Updating Task Metadata with: ' + JSON.stringify(metadataUpdates));

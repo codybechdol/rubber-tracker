@@ -158,21 +158,24 @@
           <div class="col-auto">
             <select id="filterStatus" class="form-select form-select-sm" onchange="applyFilters()">
               <option value="">All Status</option>
-              <option value="Pending">Pending</option>
-              <option value="Complete">Complete</option>
-              <option value="Scheduled">Scheduled</option>
+              <option value="Unassigned">Unassigned</option>
+              <option value="Assigned">Assigned</option>
               <option value="Overdue">Overdue</option>
+              <option value="Deferred">Deferred</option>
+              <option value="Complete">Complete</option>
             </select>
           </div>
           <div class="col-auto">
             <select id="filterSource" class="form-select form-select-sm" onchange="applyFilters()">
               <option value="">All Sources</option>
               <option value="Training Tracking">Training</option>
-              <option value="Crew Visit Config">Crew Visits</option>
-              <option value="Expiring Certs">Certs (from Expiring Certs)</option>
               <option value="Glove Swaps">Glove Swaps</option>
               <option value="Sleeve Swaps">Sleeve Swaps</option>
+              <option value="Reclaims">Reclaims</option>
+              <option value="Safety Compliance">Missing Safety Report</option>
+              <option value="Safety Equipment Needs">Safety Equipment</option>
               <option value="Manual Tasks">Manual Tasks</option>
+              <option value="Expiring Certs">Expiring Certs</option>
             </select>
           </div>
           <div class="col-auto">
@@ -1391,6 +1394,21 @@
       });
 
       console.log('processTaskData: Expanded ' + allTasks.length + ' tasks');
+
+      // Compute priority from urgency data (server doesn't send priority field)
+      allTasks.forEach(function(task) {
+        if (!task.priority) {
+          if (task.isOverdue || task.daysTillDue < 0) {
+            task.priority = 'High';
+          } else if (task.daysTillDue !== null && task.daysTillDue !== undefined && task.daysTillDue <= 7) {
+            task.priority = 'High';
+          } else if (task.daysTillDue !== null && task.daysTillDue !== undefined && task.daysTillDue <= 30) {
+            task.priority = 'Medium';
+          } else {
+            task.priority = 'Low';
+          }
+        }
+      });
 
       // Normalize dates to YYYY-MM-DD string format
       allTasks.forEach(function(task, index) {
@@ -5577,8 +5595,11 @@
             renderExpiringCerts();
             console.log('loadExpiringCerts: renderExpiringCerts complete');
 
-            // Re-render Task List with any added certs
-            renderTasks(allTasks);
+            // Re-render Task List with any added certs - only if main task data is already loaded
+            // (avoids showing 6-task partial render before 327 tasks arrive)
+            if (allTasks.length > 10) {
+              renderTasks(allTasks);
+            }
             renderCalendar();
 
             // Re-render checklist in case phone numbers were added
