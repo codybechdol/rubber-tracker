@@ -366,6 +366,95 @@ function loadTripPlan() {
 }
 
 /**
+ * Loads the saved trip plan and strips any tasks that have since been completed.
+ * Task objects in the plan use {source, rowIndex} as identifiers matching the
+ * SourceSheet_SourceRow taskKey format used by Task Metadata.
+ *
+ * Called from TripPlanner.html on initialization instead of raw loadTripPlan().
+ *
+ * @return {Object|null} The cleaned trip plan, or null if none exists
+ */
+function loadValidatedTripPlan() {
+  try {
+    var plan = loadTripPlan();
+    if (!plan || !plan.workDays) return null;
+
+    // Build set of completed composite keys from Task Metadata sheet
+    // Key format: "<SourceSheet>_<SourceRow>" (e.g. "Training Tracking_78")
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var metaSheet = ss.getSheetByName('Task Metadata');
+    var completedKeys = {};
+
+    if (metaSheet && metaSheet.getLastRow() > 1) {
+      var metaData = metaSheet.getDataRange().getValues();
+      var headers = metaData[0];
+      var sourceSheetCol = -1;
+      var sourceRowCol = -1;
+      var statusCol = -1;
+      for (var h = 0; h < headers.length; h++) {
+        var hdr = String(headers[h]).trim();
+        if (hdr === 'SourceSheet') sourceSheetCol = h;
+        if (hdr === 'SourceRow') sourceRowCol = h;
+        if (hdr === 'Status') statusCol = h;
+      }
+      if (sourceSheetCol >= 0 && sourceRowCol >= 0 && statusCol >= 0) {
+        for (var r = 1; r < metaData.length; r++) {
+          var rowStatus = String(metaData[r][statusCol] || '').trim();
+          if (rowStatus === 'Complete') {
+            var compositeKey = String(metaData[r][sourceSheetCol] || '').trim() +
+                               '_' + String(metaData[r][sourceRowCol] || '').trim();
+            if (compositeKey !== '_') completedKeys[compositeKey] = true;
+          }
+        }
+        Logger.log('loadValidatedTripPlan: Found ' + Object.keys(completedKeys).length + ' completed tasks in metadata');
+      }
+    }
+
+    // Filter completed tasks out of each assigned location's task list
+    var removedTotal = 0;
+    plan.workDays.forEach(function(day) {
+      if (!day.assignedLocations) return;
+      var cleanedLocations = [];
+      day.assignedLocations.forEach(function(loc) {
+        if (loc.isLocked || loc.isManualTask) {
+          // Always keep manually locked tasks
+          cleanedLocations.push(loc);
+          return;
+        }
+        if (loc.tasks && loc.tasks.length > 0) {
+          var originalCount = loc.tasks.length;
+          loc.tasks = loc.tasks.filter(function(task) {
+            // Build composite key from source + rowIndex (matches Task Metadata format)
+            var src = String(task.source || task.sheetName || '').trim();
+            var row = String(task.rowIndex || '').trim();
+            if (!src || !row) return true; // No key to check — keep the task
+            var compositeKey = src + '_' + row;
+            return !completedKeys[compositeKey];
+          });
+          var removed = originalCount - loc.tasks.length;
+          removedTotal += removed;
+          loc.taskCount = loc.tasks.length;
+          if (loc.tasks.length > 0) {
+            cleanedLocations.push(loc);
+          }
+          // If all tasks removed, location is dropped (no visit needed)
+        } else {
+          cleanedLocations.push(loc);
+        }
+      });
+      day.assignedLocations = cleanedLocations;
+    });
+
+    Logger.log('loadValidatedTripPlan: Removed ' + removedTotal + ' completed tasks from saved plan');
+    return plan;
+  } catch (e) {
+    Logger.log('Error in loadValidatedTripPlan: ' + e.toString());
+    // Fall back to raw load if validation fails
+    return loadTripPlan();
+  }
+}
+
+/**
  * Clears the saved trip plan.
  * Called when user wants to start fresh.
  *
@@ -671,7 +760,10 @@ function collectTasksForTripPlanner() {
             rowIndex: t.row || 0,
             isManualTask: t.manual === 1,
             inTaskList: t.inList === 1,
-            isRegistered: t.reg === 1
+            isRegistered: t.reg === 1,
+            notes: t.n || '',
+            vehicleNumber: t.veh || '',
+            currentItem: t.cur || ''
           };
         });
         Logger.log('Deserialized ' + metadataResult.tasks.length + ' tasks');

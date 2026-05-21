@@ -2203,6 +2203,15 @@
           } else if (task.taskType === 'Missing Safety Report') {
             // Missing Safety Report
             taskTitle = '🛡️ Missing: ' + (task.itemType || 'Report');
+          } else if (task.taskType === 'Manual Task' || !task.taskType) {
+            // Manual/generic task - use notes as title if available
+            if (task.notes) {
+              taskTitle = '📋 ' + task.notes;
+            } else if (task.employee && task.employee !== 'N/A') {
+              taskTitle = '📋 Visit: ' + task.employee;
+            } else {
+              taskTitle = '📋 Manual Task';
+            }
           }
 
           // Show due date for all tasks
