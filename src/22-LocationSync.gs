@@ -101,6 +101,9 @@ function syncInventoryLocations() {
     // Process Grounds sheet
     updateCount += syncSheetLocations(ss, SHEET_GROUNDS, nameToLocation);
 
+    // Process Hot Sticks sheet
+    updateCount += syncSheetLocations(ss, SHEET_HOT_STICKS, nameToLocation);
+
     logEvent('syncInventoryLocations: Updated ' + updateCount + ' item locations');
 
   } catch (e) {

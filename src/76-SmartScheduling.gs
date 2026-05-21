@@ -380,6 +380,18 @@ function collectAndGroupTasks(ss) {
   var afterAED = countTasks(tasksByLocation);
   Logger.log('collectAndGroupTasks: AED Swaps added ' + (afterAED - beforeAED) + ' tasks');
 
+  // Collect from Ground Swaps (Phase 4 - equipment-based format)
+  var beforeGrounds = countTasks(tasksByLocation);
+  collectEquipmentSwapTasks(ss, SHEET_GROUND_SWAPS, 'Ground', tasksByLocation, employeeLocations, employeeForemen, employeePhones, today);
+  var afterGrounds = countTasks(tasksByLocation);
+  Logger.log('collectAndGroupTasks: Ground Swaps added ' + (afterGrounds - beforeGrounds) + ' tasks');
+
+  // Collect from Hot Stick Swaps (Phase 5 - equipment-based format)
+  var beforeHotStick = countTasks(tasksByLocation);
+  collectEquipmentSwapTasks(ss, SHEET_HOT_STICK_SWAPS, 'Hot Stick', tasksByLocation, employeeLocations, employeeForemen, employeePhones, today);
+  var afterHotStick = countTasks(tasksByLocation);
+  Logger.log('collectAndGroupTasks: Hot Stick Swaps added ' + (afterHotStick - beforeHotStick) + ' tasks');
+
   // Collect from Training Tracking
   var beforeTraining = countTasks(tasksByLocation);
   collectTrainingTasks(ss, tasksByLocation, employeePhones, today);

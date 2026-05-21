@@ -297,7 +297,7 @@ function onEdit(e) {
     // Check if this is an item number edit on one of the unique-item sheets
     if (editedCol === 1 && editedRow >= 2) {
       // UNIQUE_ITEM_SHEETS is defined in Code.gs - these sheets require unique item numbers
-      var uniqueSheets = [SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS, SHEET_HV_TESTERS, SHEET_PHASING_SETS, SHEET_AED, SHEET_GROUNDS];
+      var uniqueSheets = [SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS, SHEET_HV_TESTERS, SHEET_PHASING_SETS, SHEET_AED, SHEET_GROUNDS, SHEET_HOT_STICKS];
       if (uniqueSheets.indexOf(sheetName) !== -1) {
         // Validate uniqueness - this will clear the cell and show error if duplicate
         if (!validateUniqueItemNumber(e, sheetName)) {
@@ -433,6 +433,19 @@ function onEdit(e) {
       }
     }
 
+    // Handle Hot Sticks sheet - Test Date (col D = 4), Assigned To (col H = 8)
+    if (sheetName === SHEET_HOT_STICKS && editedRow >= 2) {
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      if (editedCol === COLS.HOT_STICKS.TEST_DATE) {
+        handleHotStickTestDateChange(ss, sheet, editedRow, e.value);
+        return;
+      }
+      if (editedCol === COLS.HOT_STICKS.ASSIGNED_TO) {
+        handleHotStickAssignedToChange(ss, sheet, editedRow, e.value);
+        return;
+      }
+    }
+
     // For all other edits, use the standard processEdit
     processEdit(e);
   } catch (err) {
@@ -463,7 +476,7 @@ function onEditHandler(e) {
     // =========================================================================
     // Check if this is an item number edit on one of the unique-item sheets
     if (editedCol === 1 && editedRow >= 2) {
-      var uniqueSheets = [SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS, SHEET_HV_TESTERS, SHEET_PHASING_SETS, SHEET_AED, SHEET_GROUNDS];
+      var uniqueSheets = [SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS, SHEET_HV_TESTERS, SHEET_PHASING_SETS, SHEET_AED, SHEET_GROUNDS, SHEET_HOT_STICKS];
       if (uniqueSheets.indexOf(sheetName) !== -1) {
         // Validate uniqueness - this will clear the cell and show error if duplicate
         if (!validateUniqueItemNumber(e, sheetName)) {
@@ -558,8 +571,8 @@ function onEditHandler(e) {
       return;  // Handled - don't continue to processEdit
     }
 
-    // Handle new item number detection in Gloves/Sleeves/Blankets/HV Testers/Phasing Sets/AED/Grounds (Column A = item number)
-    if ((sheetName === 'Gloves' || sheetName === 'Sleeves' || sheetName === 'Blankets' || sheetName === 'HV Testers' || sheetName === 'Phasing Sets' || sheetName === 'AED' || sheetName === 'Grounds') && editedCol === 1 && editedRow >= 2) {
+    // Handle new item number detection in Gloves/Sleeves/Blankets/HV Testers/Phasing Sets/AED/Grounds/Hot Sticks (Column A = item number)
+    if ((sheetName === 'Gloves' || sheetName === 'Sleeves' || sheetName === 'Blankets' || sheetName === 'HV Testers' || sheetName === 'Phasing Sets' || sheetName === 'AED' || sheetName === 'Grounds' || sheetName === 'Hot Sticks') && editedCol === 1 && editedRow >= 2) {
       var newItemNum = e.range.getValue();
       var oldItemNum = e.oldValue;
       var itemNumStr = String(newItemNum).trim();
@@ -738,6 +751,29 @@ function onEditHandler(e) {
         }
       }
 
+      // For Hot Sticks, auto-set defaults
+      if (sheetName === 'Hot Sticks' && newItemNum && itemNumStr !== '') {
+        try {
+          // Auto-set Location to 'Helena' if empty
+          var currentLocation = sheet.getRange(editedRow, COLS.HOT_STICKS.LOCATION).getValue();
+          if (!currentLocation) {
+            sheet.getRange(editedRow, COLS.HOT_STICKS.LOCATION).setValue('Helena');
+          }
+          // Auto-set Status to 'On Shelf' if empty
+          var currentStatus = sheet.getRange(editedRow, COLS.HOT_STICKS.STATUS).getValue();
+          if (!currentStatus) {
+            sheet.getRange(editedRow, COLS.HOT_STICKS.STATUS).setValue('On Shelf');
+          }
+          // Auto-set Assigned To to 'On Shelf' if empty
+          var currentAssignedTo = sheet.getRange(editedRow, COLS.HOT_STICKS.ASSIGNED_TO).getValue();
+          if (!currentAssignedTo) {
+            sheet.getRange(editedRow, COLS.HOT_STICKS.ASSIGNED_TO).setValue('On Shelf');
+          }
+        } catch (autoPopErr) {
+          Logger.log('Hot Sticks auto-population error (will show dialog): ' + autoPopErr);
+        }
+      }
+
       // Check if an item number was REMOVED (cleared or changed)
       if (oldItemNum && String(oldItemNum).trim() !== '' &&
           (!newItemNum || String(newItemNum).trim() === '')) {
@@ -885,7 +921,8 @@ function processEdit(e) {
   if (sheetName !== SHEET_GLOVE_SWAPS && sheetName !== SHEET_SLEEVE_SWAPS && sheetName !== SHEET_BLANKET_SWAPS &&
       sheetName !== SHEET_GLOVES && sheetName !== SHEET_SLEEVES && sheetName !== SHEET_BLANKETS &&
       sheetName !== SHEET_EMPLOYEES && sheetName !== 'Employee History' &&
-      sheetName !== SHEET_RECLAIMS && sheetName !== SHEET_GROUNDS) {
+      sheetName !== SHEET_RECLAIMS && sheetName !== SHEET_GROUNDS &&
+      sheetName !== SHEET_HOT_STICKS) {
     return;
   }
 
@@ -1168,6 +1205,34 @@ function processEdit(e) {
     // Handle Assigned To changes - auto-populate Location and Status
     if (editedCol === COLS.GROUNDS.ASSIGNED_TO) {
       handleGroundsAssignedToChange(ss, sheet, editedRow, newValue);
+      return;
+    }
+  }
+
+  // Handle Hot Sticks sheet edits
+  if (sheetName === SHEET_HOT_STICKS) {
+    logEvent('processEdit: Hot Sticks sheet, editedCol=' + editedCol, 'DEBUG');
+
+    // Handle Status changes - when 'On Shelf', auto-populate Location and Assigned To
+    if (editedCol === COLS.HOT_STICKS.STATUS) {
+      var statusValue = String(newValue || '').trim();
+      if (statusValue === 'On Shelf') {
+        sheet.getRange(editedRow, COLS.HOT_STICKS.LOCATION).setValue('Helena');
+        sheet.getRange(editedRow, COLS.HOT_STICKS.ASSIGNED_TO).setValue('On Shelf');
+        ss.toast('Location and Assigned To set to "On Shelf" / "Helena"', '\u{1F4CD} Auto-Updated', 3);
+      }
+      return;
+    }
+
+    // Handle Test Date changes - auto-compute Change Out Date (Test Date + 12 months)
+    if (editedCol === COLS.HOT_STICKS.TEST_DATE) {
+      handleHotStickTestDateChange(ss, sheet, editedRow, newValue);
+      return;
+    }
+
+    // Handle Assigned To changes - auto-populate Location and Status
+    if (editedCol === COLS.HOT_STICKS.ASSIGNED_TO) {
+      handleHotStickAssignedToChange(ss, sheet, editedRow, newValue);
       return;
     }
   }

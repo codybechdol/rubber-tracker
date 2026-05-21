@@ -80,10 +80,11 @@
 <body>
   <? var isEquipment = (sheetName === 'HV Testers' || sheetName === 'Phasing Sets'); ?>
   <? var isGlovesSleeves = (sheetName === 'Gloves' || sheetName === 'Sleeves'); ?>
-  <? var isServiceStatus = (isEquipment || sheetName === 'Blankets' || sheetName === 'AED' || sheetName === 'Grounds'); ?>
+  <? var isHotStick = (sheetName === 'Hot Sticks'); ?>
+  <? var isServiceStatus = (isEquipment || sheetName === 'Blankets' || sheetName === 'AED' || sheetName === 'Grounds' || isHotStick); ?>
   <? var isGrounds = (sheetName === 'Grounds'); ?>
 
-  <h2><? if (sheetName === 'Blankets') { ?>🧱 New Blanket Detected<? } else if (sheetName === 'HV Testers') { ?>⚡ New HV Tester Detected<? } else if (sheetName === 'Phasing Sets') { ?>⚡ New Phasing Set Detected<? } else if (sheetName === 'AED') { ?>🏥 New AED Detected<? } else if (sheetName === 'Grounds') { ?>⚡ New Ground Detected<? } else { ?>📦 New <?= itemType ?> Detected<? } ?></h2>
+  <h2><? if (sheetName === 'Blankets') { ?>🧱 New Blanket Detected<? } else if (sheetName === 'HV Testers') { ?>⚡ New HV Tester Detected<? } else if (sheetName === 'Phasing Sets') { ?>⚡ New Phasing Set Detected<? } else if (sheetName === 'AED') { ?>🏥 New AED Detected<? } else if (sheetName === 'Grounds') { ?>⚡ New Ground Detected<? } else if (sheetName === 'Hot Sticks') { ?>🔴 New Hot Stick Detected<? } else { ?>📦 New <?= itemType ?> Detected<? } ?></h2>
 
   <div class="item-info">
     <strong>Item #:</strong> <?= itemNum ?><br>
@@ -174,6 +175,38 @@
       <label>Length:</label>
       <input type="text" id="groundLength" name="groundLength" placeholder="e.g., 15', 25' (UG auto-fills 6')">
       <div class="hint">UG grounds are always 6' — auto-filled on save</div>
+    </div>
+
+    <? } else if (isHotStick) { ?>
+    <!-- Hot Sticks: Type, Length, Test Date -->
+    <div class="form-group">
+      <label>Type:</label>
+      <select id="hotStickType" name="hotStickType" onchange="updateHotStickLength()">
+        <option value="">Select type...</option>
+        <option value="Extendo">Extendo</option>
+        <option value="Universal">Universal</option>
+        <option value="Hot Cutters">Hot Cutters</option>
+        <option value="Shotgun">Shotgun</option>
+        <option value="Other">Other</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>Length:</label>
+      <select id="hotStickLength" name="hotStickLength">
+        <option value="">Select length...</option>
+        <option value="8'">8'</option>
+        <option value="10'">10'</option>
+        <option value="35'">35'</option>
+        <option value="40'">40'</option>
+        <option value="45'">45'</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>Test Date:</label>
+      <input type="date" id="hotStickTestDate" name="hotStickTestDate">
+      <div class="hint">Change Out Date auto-calculates (Test Date + 12 months)</div>
     </div>
 
     <? } else if (sheetName === 'Blankets') { ?>
@@ -344,6 +377,18 @@
       }
     }
 
+    function updateHotStickLength() {
+      var typeVal = document.getElementById('hotStickType').value;
+      var lengthSel = document.getElementById('hotStickLength');
+      if (!lengthSel) return;
+      // Pre-select the most common length for each type
+      if (typeVal === 'Extendo') {
+        lengthSel.value = "35'";
+      } else if (typeVal === 'Universal' || typeVal === 'Hot Cutters' || typeVal === 'Shotgun') {
+        lengthSel.value = "8'";
+      }
+    }
+
     // Load employee locations when dialog opens
     google.script.run
       .withSuccessHandler(function(data) {
@@ -395,7 +440,7 @@
       } else {
         // This looks like an employee name
         // Set Status to In Service for Blankets/HV Testers/Phasing Sets, Assigned for Gloves/Sleeves
-        if (sheetName === 'Blankets' || sheetName === 'HV Testers' || sheetName === 'Phasing Sets' || sheetName === 'AED' || sheetName === 'Grounds') {
+        if (sheetName === 'Blankets' || sheetName === 'HV Testers' || sheetName === 'Phasing Sets' || sheetName === 'AED' || sheetName === 'Grounds' || sheetName === 'Hot Sticks') {
           statusSelect.value = 'In Service';
         } else {
           statusSelect.value = 'Assigned';
@@ -456,6 +501,10 @@
         formData.groundKV = document.getElementById('groundKV') ? document.getElementById('groundKV').value : '';
         formData.groundLength = document.getElementById('groundLength').value;
         formData.testDate = document.getElementById('testDate').value;
+      } else if (sheetName === 'Hot Sticks') {
+        formData.hotStickType = document.getElementById('hotStickType').value;
+        formData.hotStickLength = document.getElementById('hotStickLength').value;
+        formData.hotStickTestDate = document.getElementById('hotStickTestDate').value;
       } else {
         // Gloves/Sleeves/Blankets fields
         formData.size = document.getElementById('size').value;

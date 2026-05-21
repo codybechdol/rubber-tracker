@@ -125,9 +125,55 @@
       opacity: 0.7;
     }
 
+    .day-card.is-holiday {
+      background: #f3e5f5;
+      border: 2px solid #9c27b0;
+    }
+
+    .day-card.is-holiday .location-cards {
+      pointer-events: none; /* Block location card drops on holidays */
+      opacity: 0.5;
+    }
+
+    .day-card.is-holiday .drop-zone-hint {
+      color: #9c27b0;
+      font-style: italic;
+    }
+
     .day-card.drag-over {
       background: #e3f2fd;
       border: 2px dashed #1565c0;
+    }
+
+    .holiday-overlay {
+      text-align: center;
+      padding: 8px 4px;
+      color: #7b1fa2;
+      font-size: 13px;
+      font-weight: 600;
+      background: #f8e8ff;
+      border-radius: 4px;
+      margin-bottom: 6px;
+    }
+
+    .holiday-checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      color: #555;
+      padding-top: 5px;
+      border-top: 1px solid #eee;
+      margin-top: 4px;
+    }
+
+    .holiday-checkbox-row input[type="checkbox"] {
+      cursor: pointer;
+    }
+
+    .badge-holiday {
+      background: #f3e5f5;
+      color: #7b1fa2;
     }
 
     .day-header {
@@ -1734,6 +1780,7 @@
       if (day.mustReturnToHelena) card.classList.add('is-tuesday');
       if (day.avoidIfPossible) card.classList.add('is-friday');
       if (day.overtimeApproved) card.classList.add('overtime-approved');
+      if (day.isHoliday) card.classList.add('is-holiday');
 
       // Header
       const header = document.createElement('div');
@@ -1756,6 +1803,9 @@
       if (day.avoidIfPossible) {
         badges.innerHTML += '<span class="badge badge-friday">Avoid</span>';
       }
+      if (day.isHoliday) {
+        badges.innerHTML += '<span class="badge badge-holiday">🏖️ Holiday</span>';
+      }
       if (day.overnightCity) {
         badges.innerHTML += '<span class="badge badge-overnight">🏨</span>';
       }
@@ -1770,6 +1820,23 @@
       header.appendChild(dateSpan);
       card.appendChild(header);
       card.appendChild(badges);
+
+      // === HOLIDAY CHECKBOX ===
+      var holidayRow = document.createElement('div');
+      holidayRow.className = 'holiday-checkbox-row';
+      var holidayChecked = day.isHoliday ? 'checked' : '';
+      holidayRow.innerHTML = '<input type="checkbox" id="hol-' + day.dateKey + '" ' + holidayChecked +
+        ' onchange="toggleHolidayDay(\'' + day.dateKey + '\', this.checked)">' +
+        '<label for="hol-' + day.dateKey + '">🏖️ Holiday (no crew visits)</label>';
+      card.appendChild(holidayRow);
+
+      // === HOLIDAY OVERLAY (when marked as holiday) ===
+      if (day.isHoliday) {
+        var overlay = document.createElement('div');
+        overlay.className = 'holiday-overlay';
+        overlay.textContent = '🏖️ ' + (day.holidayName || 'Holiday') + ' – No crew visits scheduled';
+        card.appendChild(overlay);
+      }
 
       // === START LOCATION SECTION ===
       const startDiv = document.createElement('div');
@@ -1969,7 +2036,57 @@
       }
     }
 
-    // Create a location card element
+    // Toggle a day as a holiday (called by checkbox in day card header)
+    function toggleHolidayDay(dateKey, isOn) {
+      // Ask for holiday name only when marking ON
+      var holidayName = 'Holiday';
+      if (isOn) {
+        var presets = ['Memorial Day', 'Independence Day', 'Labor Day', 'Thanksgiving', 'Christmas', 'New Year\'s Day', 'Other Holiday'];
+        var presetList = presets.map(function(p, i) { return (i + 1) + '. ' + p; }).join('\n');
+        var input = prompt('Holiday name for ' + formatDateKey(dateKey) + ':\n\n' + presetList + '\n\nType a number or custom name:');
+        if (input === null) {
+          // User cancelled — uncheck the box
+          var cb = document.getElementById('hol-' + dateKey);
+          if (cb) cb.checked = false;
+          return;
+        }
+        var num = parseInt(input, 10);
+        if (!isNaN(num) && num >= 1 && num <= presets.length) {
+          holidayName = presets[num - 1];
+        } else if (input.trim()) {
+          holidayName = input.trim();
+        }
+      }
+
+      // Update local tripPlan state immediately (optimistic)
+      if (tripPlan && tripPlan.workDays) {
+        for (var i = 0; i < tripPlan.workDays.length; i++) {
+          if (tripPlan.workDays[i].dateKey === dateKey) {
+            tripPlan.workDays[i].isHoliday = isOn;
+            tripPlan.workDays[i].holidayName = isOn ? holidayName : null;
+            break;
+          }
+        }
+      }
+
+      // Re-render immediately so the overlay appears
+      renderPlan();
+      showStatus((isOn ? ('🏖️ ' + holidayName + ' added') : '✓ Holiday removed') + ' – ' + formatDateKey(dateKey), 'info');
+
+      // Persist to server
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (!result || !result.success) {
+            showStatus('Error saving holiday — please try again', 'error');
+          }
+        })
+        .withFailureHandler(function(err) {
+          showStatus('Error saving holiday: ' + (err.message || err), 'error');
+        })
+        .toggleHoliday(dateKey, holidayName, isOn);
+    }
+
+
     function createLocationCard(loc, dayIndex, locIndex) {
       var card = document.createElement('div');
       card.className = 'location-card';
@@ -3898,10 +4015,21 @@
 
     function handleDragOver(e) {
       e.preventDefault();
+
+      // Block location-card drops on holiday days (manual tasks still allowed)
+      var dropZone = e.currentTarget;
+      var dayCard = dropZone.closest('.day-card');
+      if (dayCard && dayCard.classList.contains('is-holiday')) {
+        // Allow manual tasks (office tasks) but block location cards from unassigned pool
+        if (!draggedLocationData || draggedLocationData.type !== 'officeTask') {
+          e.dataTransfer.dropEffect = 'none';
+          return;
+        }
+      }
+
       e.dataTransfer.dropEffect = 'move';
 
-      var dropZone = e.currentTarget;
-      dropZone.closest('.day-card').classList.add('drag-over');
+      dayCard.classList.add('drag-over');
 
       // Clear previous indicators
       dropZone.querySelectorAll('.location-card').forEach(function(card) {
@@ -3950,6 +4078,15 @@
       dropZone.querySelectorAll('.location-card').forEach(function(card) {
         card.classList.remove('drag-over-above', 'drag-over-below');
       });
+
+      // Block non-office-task drops on holiday days
+      var dayCard = dropZone.closest('.day-card');
+      if (dayCard && dayCard.classList.contains('is-holiday')) {
+        if (!draggedLocationData || draggedLocationData.type !== 'officeTask') {
+          showStatus('🏖️ This day is a holiday. Only manual office tasks can be added.', 'error');
+          return;
+        }
+      }
 
       console.log('draggedLocationData:', draggedLocationData);
       if (!draggedLocationData || !draggedLocationData.location) {

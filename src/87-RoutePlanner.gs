@@ -1636,6 +1636,10 @@ function suggestOptimalTrips(daysAhead) {
     var scheduleConfig = getScheduleConfig(workSchedule);
     Logger.log('Step 3.5: Using work schedule: ' + workSchedule + ' (must return day: ' + scheduleConfig.mustReturnDayName + ')');
 
+    // Load holiday map once for the whole loop (date -> name)
+    var holidayMap = getHolidayMap();
+    Logger.log('Step 3.6: Loaded ' + Object.keys(holidayMap).length + ' holidays');
+
     // Get date range based on configured schedule
     var today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -1675,6 +1679,9 @@ function suggestOptimalTrips(daysAhead) {
           plan: null,
           startLocation: 'Helena',
           overnightCity: null,
+          // Holiday flag
+          isHoliday: holidayMap.hasOwnProperty(dateKey),
+          holidayName: holidayMap[dateKey] || null,
           // Manual task tracking
           manualTasks: manualTasksOnDay,
           lockedManualTasks: lockedTasksOnDay,
@@ -1836,6 +1843,11 @@ function suggestOptimalTrips(daysAhead) {
 
       for (var d = 0; d < workDays.length; d++) {
         var day = workDays[d];
+
+        // Skip holiday days - no automatic crew visit scheduling
+        if (day.isHoliday) {
+          continue;
+        }
 
         // Skip Fridays unless location is overdue
         if (day.isFriday && locData.maxUrgency < URGENCY_OVERDUE) {

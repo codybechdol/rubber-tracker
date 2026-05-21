@@ -1050,6 +1050,12 @@ function promptNewItemSource(itemNum, sheetName, rowNum) {
   } else if (sheetName === 'Phasing Sets') {
     itemType = 'Phasing Set';
     dialogTitle = '⚡ New Phasing Set Entry';
+  } else if (sheetName === 'Hot Sticks') {
+    itemType = 'Hot Stick';
+    dialogTitle = '🪵 New Hot Stick Entry';
+  } else if (sheetName === 'Grounds') {
+    itemType = 'Ground';
+    dialogTitle = '⚡ New Ground Entry';
   } else {
     itemType = 'Item';
     dialogTitle = '📦 New Item Entry';
@@ -1084,8 +1090,9 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
   var isPhasingSet = (sheetName === 'Phasing Sets');
   var isAED = (sheetName === 'AED');
   var isGrounds = (sheetName === 'Grounds');
+  var isHotStick = (sheetName === 'Hot Sticks');
   var isEquipment = isHVTester || isPhasingSet || isAED;
-  var itemType = sheetName === 'Gloves' ? 'Glove' : (sheetName === 'Sleeves' ? 'Sleeve' : (isBlanket ? 'Blanket' : (isHVTester ? 'HV Tester' : (isPhasingSet ? 'Phasing Set' : (isAED ? 'AED' : (isGrounds ? 'Ground' : 'Item'))))));
+  var itemType = sheetName === 'Gloves' ? 'Glove' : (sheetName === 'Sleeves' ? 'Sleeve' : (isBlanket ? 'Blanket' : (isHVTester ? 'HV Tester' : (isPhasingSet ? 'Phasing Set' : (isAED ? 'AED' : (isGrounds ? 'Ground' : (isHotStick ? 'Hot Stick' : 'Item')))))));
 
   // ===========================================================================
   // DUPLICATE ITEM NUMBER VALIDATION
@@ -1341,6 +1348,69 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
     } else {
       sheet.getRange(rowNum, COLS.GROUNDS.ASSIGNED_TO).setValue('On Shelf');
       sheet.getRange(rowNum, COLS.GROUNDS.STATUS).setValue('On Shelf');
+    }
+    // Add to known items
+    addToKnownItemNumbers(itemNum, sheetName);
+    // Handle item source logging
+    processItemSourceLogging(formData, itemNum, itemType, sheetName, ss);
+    return;
+  }
+
+  // ===========================================================================
+  // HOT STICKS: A=Item#(1), B=Type(2), C=Length(3), D=Test Date(4),
+  //             E=Date Assigned(5), F=Location(6), G=Status(7), H=Assigned To(8),
+  //             I=Change Out Date(9), J=Picked For(10), K=Notes(11)
+  // ===========================================================================
+  if (isHotStick) {
+    // Write Type (col B)
+    if (formData.hotStickType) {
+      sheet.getRange(rowNum, COLS.HOT_STICKS.TYPE).setValue(formData.hotStickType);
+    }
+    // Write Length (col C)
+    if (formData.hotStickLength) {
+      sheet.getRange(rowNum, COLS.HOT_STICKS.LENGTH).setValue(formData.hotStickLength);
+    }
+    // Write Test Date (col D) and compute Change Out Date (col I)
+    if (formData.hotStickTestDate) {
+      var testDateCell = sheet.getRange(rowNum, COLS.HOT_STICKS.TEST_DATE);
+      var parsedTestDate = parseDateNoon(formData.hotStickTestDate);
+      if (parsedTestDate) {
+        testDateCell.setValue(parsedTestDate);
+        try { testDateCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+        // Calculate Change Out Date = Test Date + 12 months
+        var coDate = new Date(parsedTestDate);
+        coDate.setMonth(coDate.getMonth() + (typeof INTERVAL_HOT_STICK_TEST !== 'undefined' ? INTERVAL_HOT_STICK_TEST : 12));
+        var coCell = sheet.getRange(rowNum, COLS.HOT_STICKS.CHANGE_OUT_DATE);
+        coCell.setValue(coDate);
+        try { coCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+      }
+    }
+    // Write Location (col F)
+    if (formData.location) {
+      sheet.getRange(rowNum, COLS.HOT_STICKS.LOCATION).setValue(formData.location);
+    }
+    // Write Status (col G)
+    if (formData.status) {
+      sheet.getRange(rowNum, COLS.HOT_STICKS.STATUS).setValue(formData.status);
+    }
+    // Write Assigned To (col H) + handle employee assignment
+    if (formData.assignedTo && formData.assignedTo.trim() !== '') {
+      var assignedTo = formData.assignedTo.trim();
+      sheet.getRange(rowNum, COLS.HOT_STICKS.ASSIGNED_TO).setValue(assignedTo);
+      if (assignedTo.toLowerCase() !== 'on shelf') {
+        var today = new Date();
+        var dateCell = sheet.getRange(rowNum, COLS.HOT_STICKS.DATE_ASSIGNED);
+        dateCell.setValue(today);
+        try { dateCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+        sheet.getRange(rowNum, COLS.HOT_STICKS.STATUS).setValue('In Service');
+        var empLoc = lookupEmployeeLocation(ss, assignedTo);
+        if (empLoc) {
+          sheet.getRange(rowNum, COLS.HOT_STICKS.LOCATION).setValue(empLoc);
+        }
+      }
+    } else {
+      sheet.getRange(rowNum, COLS.HOT_STICKS.ASSIGNED_TO).setValue('On Shelf');
+      sheet.getRange(rowNum, COLS.HOT_STICKS.STATUS).setValue('On Shelf');
     }
     // Add to known items
     addToKnownItemNumbers(itemNum, sheetName);

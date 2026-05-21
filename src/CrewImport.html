@@ -3332,6 +3332,11 @@
       // Must do this BEFORE role detection so "3 ap Hot" → "3 ap" → match
       cleanText = cleanText.replace(/\s+(Hot|Cold|Day|Night|Relief|Split|Swing|Temp|Travel|Local|Weeds\??)\s*$/i, '').trim();
 
+      // Strip trailing time/duration annotations: "awhile", "3 wks", "few weeks"
+      cleanText = cleanText.replace(/\s+(awhile|soon)\s*$/i, '').trim();
+      cleanText = cleanText.replace(/\s+\d+\s*wks?\s*$/i, '').trim();
+      cleanText = cleanText.replace(/\s+(few|several|couple|more)\s+(weeks?|wks?)\s*$/i, '').trim();
+
       // Check for General Foreman (GF suffix)
       if (cleanText.match(/\sGF$/i)) {
         result.isForeman = true;

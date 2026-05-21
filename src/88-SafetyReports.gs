@@ -1578,6 +1578,20 @@ function calculateComplianceFromLogs(weekStartDate, options) {
   Logger.log("calculateComplianceFromLogs: Calculating for week " + weekStartStr + " to " + weekEndStr);
   Logger.log("calculateComplianceFromLogs: isCurrentWeek = " + isCurrentWeek);
 
+  // Load holiday map once for the week (date -> name)
+  var holidayMap = getHolidayMap();
+  var holidayDatesThisWeek = [];
+  for (var hd = 0; hd < 7; hd++) {
+    var dayDate = new Date(weekBounds.weekStart.getTime());
+    dayDate.setDate(dayDate.getDate() + hd);
+    var dayKey = Utilities.formatDate(dayDate, tz, 'yyyy-MM-dd');
+    if (holidayMap[dayKey]) {
+      holidayDatesThisWeek.push(hd); // day-of-week index (0=Sun)
+      Logger.log("calculateComplianceFromLogs: holiday on day " + hd + " (" + dayKey + " = " + holidayMap[dayKey] + ")");
+    }
+  }
+  var weekHasHoliday = holidayDatesThisWeek.length > 0;
+
   // === LOAD RESOLVED CREWS FROM SAFETY COMPLIANCE SHEET ===
   // Crews with "Resolved" status should NOT be recalculated or have tasks created
   // UNLESS ignoreResolved=true (used by masterRecalculateCompliance for full refresh)
@@ -1905,7 +1919,14 @@ function calculateComplianceFromLogs(weekStartDate, options) {
         dateReceived: dateReceived,
         dateCreated: dateCreated
       };
-      if (notes && notes.indexOf('LATE') !== -1) {
+      // Compute lateness directly from dateReceived vs dateCreated (not from notes column,
+      // which may be missing "LATE SUBMISSION" for older log entries logged before this fix).
+      if (dateReceived && dateCreated) {
+        if (isReportLate(new Date(dateCreated), new Date(dateReceived))) {
+          crewCompliance[crewToCredit].jhaLateByDay[dayOfWeek] = true;
+        }
+      } else if (notes && notes.indexOf('LATE') !== -1) {
+        // Fallback: notes-based check for entries missing dateReceived
         crewCompliance[crewToCredit].jhaLateByDay[dayOfWeek] = true;
       }
       jhaCreditsApplied++;
@@ -1985,7 +2006,12 @@ function calculateComplianceFromLogs(weekStartDate, options) {
             dateReceived: weeklyDateReceived,
             weekOf: weekOf
           };
-          if (notes && notes.indexOf('LATE') !== -1) {
+          // Compute lateness directly from dateReceived vs meetingWeekDate (not from notes column).
+          if (weeklyDateReceived && meetingWeekDate) {
+            if (isReportLate(meetingWeekDate, new Date(weeklyDateReceived))) {
+              crewCompliance[crewToCredit].weeklyMeetingLate = true;
+            }
+          } else if (notes && notes.indexOf('LATE') !== -1) {
             crewCompliance[crewToCredit].weeklyMeetingLate = true;
           }
           Logger.log("calculateComplianceFromLogs: Credited Weekly Meeting to " + crewToCredit + " (original=" + originalJobNumber + ", creditedTo=" + creditedTo + ")");
@@ -2007,7 +2033,12 @@ function calculateComplianceFromLogs(weekStartDate, options) {
             dateReceived: weeklyDateReceived,
             weekOf: weekOf
           };
-          if (notes && notes.indexOf('LATE') !== -1) {
+          // Compute lateness directly from dateReceived vs meetingWeekDate (not from notes column).
+          if (weeklyDateReceived && meetingWeekDate) {
+            if (isReportLate(meetingWeekDate, new Date(weeklyDateReceived))) {
+              crewCompliance[baseJob].weeklyMeetingLate = true;
+            }
+          } else if (notes && notes.indexOf('LATE') !== -1) {
             crewCompliance[baseJob].weeklyMeetingLate = true;
           }
           continue;
@@ -2139,6 +2170,9 @@ function calculateComplianceFromLogs(weekStartDate, options) {
 
       if (crew.skipDays[d]) {
         crew.days[dayNames[d]] = 'N/A';
+      } else if (holidayDatesThisWeek.indexOf(d) !== -1) {
+        // Holiday – excuse this day for all crews
+        crew.days[dayNames[d]] = 'N/A';
       } else if (crew.jhaByDay[d]) {
         if (crew.jhaLateByDay[d]) {
           crew.days[dayNames[d]] = '\u2705L';
@@ -2158,6 +2192,9 @@ function calculateComplianceFromLogs(weekStartDate, options) {
 
     // Weekly meeting status
     if (crew.skipWeeklyMeeting) {
+      crew.weeklyMeetingStatus = 'N/A';
+    } else if (weekHasHoliday && !crew.weeklyMeeting) {
+      // Holiday week - excuse weekly meeting if not already submitted
       crew.weeklyMeetingStatus = 'N/A';
     } else if (crew.weeklyMeeting) {
       crew.weeklyMeetingStatus = crew.weeklyMeetingLate ? '\u2705L' : '\u2705';
@@ -2181,6 +2218,12 @@ function calculateComplianceFromLogs(weekStartDate, options) {
       monthlyChecklistDate
     );
     crew.monthlyChecklistStatus = monthlyStatus.status;
+
+    // If there's a holiday this week and monthly checklist was going to fail, excuse it
+    if (weekHasHoliday && !crew.monthlyChecklist && monthlyStatus.affectsStatus) {
+      crew.monthlyChecklistStatus = 'N/A';
+      monthlyStatus = { status: 'N/A', affectsStatus: false, shouldCreateTask: false };
+    }
 
     if (monthlyStatus.affectsStatus && monthlyStatus.shouldCreateTask) {
       missingItems.push('Monthly Checklist');
@@ -10984,6 +11027,13 @@ function loadComplianceConfig() {
 
     if (!jobNumber) continue;
 
+    // Exclude office/management crews (002- = lost/destroyed, 005- = office/light duty)
+    var jobPrefix = jobNumber.split('-')[0];
+    if (jobPrefix === '002' || jobPrefix === '005') {
+      Logger.log('loadComplianceConfig: Skipping excluded prefix job: ' + jobNumber);
+      continue;
+    }
+
     // Only include Active crews (skip Completed, Pending Start, On Hold)
     if (status !== 'active' && status !== '') {
       continue;
@@ -15162,8 +15212,12 @@ function fixAllLogEntryCreditedTo() {
 
       // Try to find the correct crew to credit:
       // 1. First, try by job number (handles secondary job submissions like 053-26 → 052-25)
-      // 2. Then, try by foreman name (handles named foreman lookups)
+      // 2. Then, try by foreman name ONLY if there is no valid-format job number.
+      //    If a well-formed job number (NNN-YY) exists but is untracked, it's a genuinely
+      //    foreign/untracked job — don't claim it for the foreman's primary crew.
+      //    Example: 045-16 (Abilene TX) should NOT be credited to Tony Harmon's 039-26 crew.
       var primaryCrew = null;
+      var jobNumberIsWellFormed = /^\d{3}-\d{2}(\.\d+)?$/.test(jobNumber);
 
       if (jobNumber) {
         var resolution = resolveJobToTrackedCrew(jobNumber);
@@ -15172,7 +15226,9 @@ function fixAllLogEntryCreditedTo() {
         }
       }
 
-      if (!primaryCrew && foreman && foreman !== 'UNKNOWN') {
+      // Only fall back to foreman lookup when there is NO well-formed job number.
+      // A real job number that simply isn't tracked means it's a different/out-of-state job.
+      if (!primaryCrew && !jobNumberIsWellFormed && foreman && foreman !== 'UNKNOWN') {
         primaryCrew = findForemanPrimaryCrew(foreman, employeeData);
       }
 
@@ -15215,8 +15271,9 @@ function fixAllLogEntryCreditedTo() {
 
       if (!foreman && !jobNumber) continue;
 
-      // Try by job number first, then by foreman
+      // Try by job number first, then by foreman (same guard as JHA log above)
       var primaryCrew = null;
+      var jobNumberIsWellFormed = /^\d{3}-\d{2}(\.\d+)?$/.test(jobNumber);
 
       if (jobNumber) {
         var resolution = resolveJobToTrackedCrew(jobNumber);
@@ -15225,7 +15282,7 @@ function fixAllLogEntryCreditedTo() {
         }
       }
 
-      if (!primaryCrew && foreman && foreman !== 'UNKNOWN') {
+      if (!primaryCrew && !jobNumberIsWellFormed && foreman && foreman !== 'UNKNOWN') {
         primaryCrew = findForemanPrimaryCrew(foreman, employeeData);
       }
 
@@ -15298,6 +15355,283 @@ function fixAllLogEntryCreditedTo() {
     monthlyFixed: monthlyFixed,
     totalFixed: totalFixed
   };
+}
+
+/**
+ * Audit all log sheet CreditedTo values using the current (fixed) resolution logic.
+ *
+ * For every row in JHA Log, Weekly Safety Log, and Monthly Checklist Log this function:
+ *   1. Recomputes what creditedTo SHOULD be under the current fixed logic.
+ *   2. Flags rows whose current value differs from the computed value.
+ *   3. Specially identifies rows whose Notes show they were previously changed by
+ *      fixAllLogEntryCreditedTo, and whether the foreman-fallback bug may have applied.
+ *
+ * This is a READ-ONLY dry run — nothing is changed.
+ * Menu: Glove Manager -> Safety -> Debug -> Audit CreditedTo Values
+ */
+function auditCreditedToAccuracy() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+
+  var empSheet = ss.getSheetByName('Employees');
+  if (!empSheet) {
+    ui.alert('Error', 'Employees sheet not found', ui.ButtonSet.OK);
+    return;
+  }
+  var employeeData = empSheet.getDataRange().getValues();
+
+  var config = loadComplianceConfig();
+  var trackedCrewSet = {};
+  for (var crew in config) {
+    trackedCrewSet[crew] = true;
+  }
+
+  var wouldChange = [];    // rows where current != computed
+  var bugAffected = [];    // rows changed by old buggy run that appear wrong
+
+  // Helper: compute correct creditedTo using the fixed logic
+  function computeCorrect(jobNumber, foreman) {
+    var primaryCrew = null;
+    var jobNumberIsWellFormed = /^\d{3}-\d{2}(\.\d+)?$/.test(String(jobNumber || '').trim());
+
+    if (jobNumber) {
+      var resolution = resolveJobToTrackedCrew(jobNumber);
+      if (resolution.resolved && resolution.creditedTo) {
+        primaryCrew = resolution.creditedTo;
+      }
+    }
+
+    // Only fall back to foreman when there is NO well-formed job number
+    if (!primaryCrew && !jobNumberIsWellFormed && foreman && foreman !== 'UNKNOWN') {
+      primaryCrew = findForemanPrimaryCrew(foreman, employeeData);
+    }
+
+    return { crew: primaryCrew, jobNumberIsWellFormed: jobNumberIsWellFormed };
+  }
+
+  // Helper: parse "Fixed by fixAllLogEntryCreditedTo: ORIG → NEW" from note text
+  function parseFixNote(notes) {
+    var match = String(notes || '').match(/Fixed by fixAllLogEntryCreditedTo:\s*(.+?)\s*\u2192\s*(.+?)(?:\.|$)/);
+    if (!match) {
+      // Try plain ASCII arrow "-> "
+      match = String(notes || '').match(/Fixed by fixAllLogEntryCreditedTo:\s*(.+?)\s*->\s*(.+?)(?:\.|$)/);
+    }
+    if (match) {
+      return { original: match[1].trim(), changedTo: match[2].trim() };
+    }
+    return null;
+  }
+
+  // === Audit JHA Log ===
+  var jhaSheet = getJHALogSheet();
+  if (jhaSheet && jhaSheet.getLastRow() > 1) {
+    var jhaData = jhaSheet.getDataRange().getValues();
+    // Columns: A=DateReceived, B=DateCreated, C=JobNumber, D=Foreman, E=Subject, F=EmailID, G=Source, H=Status, I=CreditedTo, J=Notes
+    for (var i = 1; i < jhaData.length; i++) {
+      var jobNumber = String(jhaData[i][2] || '').trim();
+      var foreman   = String(jhaData[i][3] || '').trim();
+      var current   = String(jhaData[i][8] || '').trim();
+      var notes     = String(jhaData[i][9] || '').trim();
+      var rowNum    = i + 1;
+
+      var computed = computeCorrect(jobNumber, foreman);
+      var fixNote  = parseFixNote(notes);
+
+      // Was the change made by the old function likely a bug?
+      // Bug condition: job IS well-formed (NNN-YY) but untracked → foreman fallback fired incorrectly
+      if (fixNote) {
+        var resolution = resolveJobToTrackedCrew(jobNumber);
+        var wasBug = computed.jobNumberIsWellFormed && !resolution.resolved;
+        if (wasBug) {
+          bugAffected.push({
+            sheet: 'JHA Log', row: rowNum, jobNumber: jobNumber, foreman: foreman,
+            original: fixNote.original, changedTo: fixNote.changedTo, current: current,
+            correct: computed.crew
+          });
+        }
+      }
+
+      if (computed.crew && trackedCrewSet[computed.crew] && computed.crew !== current) {
+        wouldChange.push({
+          sheet: 'JHA Log', row: rowNum, jobNumber: jobNumber, foreman: foreman,
+          current: current, correct: computed.crew
+        });
+      }
+    }
+  }
+
+  // === Audit Weekly Safety Log ===
+  var weeklySheet = getWeeklySafetyLogSheet();
+  if (weeklySheet && weeklySheet.getLastRow() > 1) {
+    var weeklyData = weeklySheet.getDataRange().getValues();
+    // Columns: A=DateReceived, B=WeekOf, C=JobNumber, D=Foreman, E=Subject, F=EmailID, G=Status, H=CreditedTo, I=Notes
+    for (var j = 1; j < weeklyData.length; j++) {
+      var jobNumber = String(weeklyData[j][2] || '').trim();
+      var foreman   = String(weeklyData[j][3] || '').trim();
+      var current   = String(weeklyData[j][7] || '').trim();
+      var notes     = String(weeklyData[j][8] || '').trim();
+      var rowNum    = j + 1;
+
+      var computed = computeCorrect(jobNumber, foreman);
+      var fixNote  = parseFixNote(notes);
+
+      if (fixNote) {
+        var resolution = resolveJobToTrackedCrew(jobNumber);
+        var wasBug = computed.jobNumberIsWellFormed && !resolution.resolved;
+        if (wasBug) {
+          bugAffected.push({
+            sheet: 'Weekly Safety Log', row: rowNum, jobNumber: jobNumber, foreman: foreman,
+            original: fixNote.original, changedTo: fixNote.changedTo, current: current,
+            correct: computed.crew
+          });
+        }
+      }
+
+      if (computed.crew && trackedCrewSet[computed.crew] && computed.crew !== current) {
+        wouldChange.push({
+          sheet: 'Weekly Safety Log', row: rowNum, jobNumber: jobNumber, foreman: foreman,
+          current: current, correct: computed.crew
+        });
+      }
+    }
+  }
+
+  // === Audit Monthly Checklist Log ===
+  // Monthly checklists have no job number field — foreman fallback is always intended here.
+  // No bug risk for monthly entries.
+
+  // Build summary text
+  var lines = [];
+  lines.push('=== CreditedTo Audit Results ===\n');
+  lines.push('Entries that would change under current logic: ' + wouldChange.length);
+  lines.push('Entries previously touched by fixAllLogEntryCreditedTo where foreman-fallback bug may have applied: ' + bugAffected.length);
+
+  if (bugAffected.length > 0) {
+    lines.push('\n--- Likely Bug-Affected Entries ---');
+    for (var b = 0; b < bugAffected.length; b++) {
+      var e = bugAffected[b];
+      lines.push(e.sheet + ' row ' + e.row + ': job=' + e.jobNumber +
+                 ' | original=' + e.original + ' | bug changed to=' + e.changedTo +
+                 ' | current=' + e.current + ' | correct under fixed logic=' + (e.correct || '(unchanged)'));
+    }
+  }
+
+  if (wouldChange.length > 0) {
+    lines.push('\n--- Would Change Under Current Logic ---');
+    for (var w = 0; w < wouldChange.length; w++) {
+      var c = wouldChange[w];
+      lines.push(c.sheet + ' row ' + c.row + ': job=' + c.jobNumber +
+                 ', foreman=' + c.foreman + ' | current=' + c.current + ' -> ' + c.correct);
+    }
+  }
+
+  var summary = lines.join('\n');
+  Logger.log(summary);
+
+  // Show concise UI message (details in Logger)
+  var uiMsg = 'Entries that would change under current logic: ' + wouldChange.length + '\n' +
+              'Likely bug-affected (well-formed untracked job + old foreman fallback): ' + bugAffected.length + '\n\n';
+  if (bugAffected.length === 0 && wouldChange.length === 0) {
+    uiMsg += 'All CreditedTo values look correct. No issues found.';
+  } else {
+    uiMsg += 'Full details written to Execution Log (Extensions > Apps Script > Executions).\n\n';
+    if (bugAffected.length > 0) {
+      uiMsg += 'Bug-affected rows:\n';
+      for (var b2 = 0; b2 < bugAffected.length; b2++) {
+        var e2 = bugAffected[b2];
+        uiMsg += '  ' + e2.sheet + ' row ' + e2.row + ': ' + e2.jobNumber +
+                 ' | ' + e2.original + ' -> (was changed to) ' + e2.changedTo + '\n';
+      }
+      uiMsg += '\nRun "Revert Bug-Fixed CreditedTo" to restore the original values.';
+    }
+  }
+
+  ui.alert('CreditedTo Audit', uiMsg, ui.ButtonSet.OK);
+
+  return { wouldChange: wouldChange, bugAffected: bugAffected };
+}
+
+/**
+ * Revert CreditedTo values that were incorrectly set by the old buggy fixAllLogEntryCreditedTo.
+ *
+ * The bug: when a JHA or Weekly log entry had a well-formed job number (NNN-YY) that was NOT
+ * in the tracked crew set, the old function fell back to the foreman's primary crew — wrong.
+ * The Note column records the original value as "Fixed by fixAllLogEntryCreditedTo: ORIG -> NEW".
+ *
+ * This function:
+ *   1. Shows a dry-run preview of what it would revert.
+ *   2. Asks for confirmation.
+ *   3. Reverts creditedTo to ORIG for bug-affected rows and appends a note.
+ *
+ * Menu: Glove Manager -> Safety -> Debug -> Revert Bug-Fixed CreditedTo
+ */
+function menuRevertBuggyFixedCreditedTo() {
+  var ui = SpreadsheetApp.getUi();
+
+  // First show the audit so the user can see what will be reverted
+  var auditResult = auditCreditedToAccuracy();
+  if (!auditResult) return;
+
+  var bugAffected = auditResult.bugAffected;
+  if (bugAffected.length === 0) {
+    ui.alert('Nothing to Revert', 'No bug-affected CreditedTo entries found. Everything looks correct.', ui.ButtonSet.OK);
+    return;
+  }
+
+  var previewLines = [
+    'Found ' + bugAffected.length + ' entry(ies) to revert:\n'
+  ];
+  for (var b = 0; b < bugAffected.length; b++) {
+    var e = bugAffected[b];
+    previewLines.push(e.sheet + ' row ' + e.row + ': ' + e.changedTo + ' -> ' + e.original +
+                      ' (job: ' + e.jobNumber + ')');
+  }
+  previewLines.push('\nProceed with revert?');
+
+  var response = ui.alert('Revert Bug-Fixed CreditedTo', previewLines.join('\n'), ui.ButtonSet.YES_NO);
+  if (response !== ui.Button.YES) {
+    ui.alert('Cancelled', 'No changes were made.', ui.ButtonSet.OK);
+    return;
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var config = loadComplianceConfig();
+  var reverted = 0;
+  var skipped  = 0;
+
+  for (var i = 0; i < bugAffected.length; i++) {
+    var entry = bugAffected[i];
+    var sheet = entry.sheet === 'JHA Log' ? getJHALogSheet()
+              : entry.sheet === 'Weekly Safety Log' ? getWeeklySafetyLogSheet()
+              : null;
+    if (!sheet) { skipped++; continue; }
+
+    var creditedToCol, notesCol;
+    if (entry.sheet === 'JHA Log') {
+      creditedToCol = 9;  // Column I (1-based)
+      notesCol      = 10; // Column J
+    } else {
+      creditedToCol = 8;  // Column H
+      notesCol      = 9;  // Column I
+    }
+
+    // Read current notes to append revert note
+    var currentNotes = String(sheet.getRange(entry.row, notesCol).getValue() || '').trim();
+    var revertNote   = 'BugReverted: ' + entry.changedTo + ' -> ' + entry.original + ' (bug fix reversal ' + new Date().toLocaleDateString() + ')';
+    var updatedNotes = currentNotes ? currentNotes + '. ' + revertNote : revertNote;
+
+    sheet.getRange(entry.row, creditedToCol).setValue(entry.original);
+    sheet.getRange(entry.row, notesCol).setValue(updatedNotes);
+
+    Logger.log('Reverted ' + entry.sheet + ' row ' + entry.row + ': ' + entry.changedTo + ' -> ' + entry.original);
+    reverted++;
+  }
+
+  ui.alert('Revert Complete',
+    'Reverted ' + reverted + ' entry(ies).\n' +
+    (skipped > 0 ? 'Skipped ' + skipped + ' (sheet not found).\n' : '') +
+    '\nYou should now run Master Recalculate Compliance to rebuild compliance from the corrected log data.',
+    ui.ButtonSet.OK);
 }
 
 /**
@@ -15403,9 +15737,23 @@ function masterRecalculateCompliance() {
     }
 
     // Step 4: Format and refresh tooltips
+    // Guard: Google Apps Script has a 6-minute execution limit.
+    // If Steps 1-3 consumed more than 5 minutes, skip the tooltip refresh
+    // (data is correct; tooltips are cosmetic) and tell the user to run it separately.
+    var TOOLTIP_TIMEOUT_GUARD_MS = 5 * 60 * 1000; // 5 minutes
+    var elapsedBeforeTooltips = new Date().getTime() - startTime;
+    var tooltipsSkipped = false;
+
     Logger.log('masterRecalculateCompliance: Step 4 - Formatting and refreshing tooltips...');
     formatComplianceSheetByWeek();
-    refreshSafetyComplianceTooltips();
+
+    if (elapsedBeforeTooltips < TOOLTIP_TIMEOUT_GUARD_MS) {
+      refreshSafetyComplianceTooltips();
+    } else {
+      tooltipsSkipped = true;
+      Logger.log('masterRecalculateCompliance: Skipping tooltip refresh - elapsed ' +
+                 Math.round(elapsedBeforeTooltips / 1000) + 's, too close to 6-min limit.');
+    }
 
     var elapsed = Math.round((new Date().getTime() - startTime) / 1000);
 
@@ -15419,7 +15767,8 @@ function masterRecalculateCompliance() {
       '   \u2022 Weeks processed: ' + results.weeksProcessed + '\n' +
       '   \u2022 Total compliant: ' + results.compliant + '\n' +
       '   \u2022 Total missing: ' + results.missing + '\n\n' +
-      '\u23F1\uFE0F Completed in ' + elapsed + ' seconds';
+      '\u23F1\uFE0F Completed in ' + elapsed + ' seconds' +
+      (tooltipsSkipped ? '\n\n\u26A0\uFE0F Tooltip refresh was skipped (took too long).\nRun \u201C\uD83D\uDCAC Refresh Compliance Tooltips\u201D from Utilities to finish.' : '');
 
     ui.alert('Master Recalculate Complete', msg, ui.ButtonSet.OK);
 

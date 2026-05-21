@@ -44,6 +44,11 @@ var SHEET_GROUNDS = 'Grounds';
 var SHEET_GROUND_SWAPS = 'Ground Swaps';
 var SHEET_GROUNDS_HISTORY = 'Grounds History';
 
+// Phase 5: Hot Sticks (live-line tools, 1-year test cycle)
+var SHEET_HOT_STICKS = 'Hot Sticks';
+var SHEET_HOT_STICK_SWAPS = 'Hot Stick Swaps';
+var SHEET_HOT_STICKS_HISTORY = 'Hot Sticks History';
+
 // =============================================================================
 // VISUAL CONSTANTS
 // =============================================================================
@@ -71,6 +76,10 @@ var AED_SWAP_LOOKAHEAD_DAYS = 90;
 // Grounds must be pulled for testing 1 year after their test date
 var INTERVAL_GROUNDS_TEST = 12;
 
+// Hot Stick test interval (months) - Phase 5
+// Hot sticks (live-line tools) must be tested annually per OSHA 1910.269 / ASTM F711
+var INTERVAL_HOT_STICK_TEST = 12;
+
 // Location values that represent employee STATUS, not physical cities.
 // These should NOT be used as crew locations in Job Tracking.
 var STATUS_LOCATIONS = ['vacation', 'light duty', 'weeds', 'leave', 'previous employee', 'unknown'];
@@ -90,6 +99,8 @@ var HISTORY_COLOR_AED_1 = '#ffebee'; // Light red
 var HISTORY_COLOR_AED_2 = '#ffffff'; // White
 var HISTORY_COLOR_GROUNDS_1 = '#fffde7'; // Light yellow
 var HISTORY_COLOR_GROUNDS_2 = '#ffffff'; // White
+var HISTORY_COLOR_HOT_STICK_1 = '#e8eaf6'; // Light indigo
+var HISTORY_COLOR_HOT_STICK_2 = '#ffffff'; // White
 
 // Backup folder name in Google Drive
 var BACKUP_FOLDER_NAME = 'Glove Manager Backups';
@@ -197,6 +208,23 @@ var COLS = {
     CHANGE_OUT_DATE: 11,// K - Test Date + 12 months
     PICKED_FOR: 12,     // L
     NOTES: 13           // M
+  },
+
+  // Hot Sticks Sheet - Phase 5 (live-line tools, 1-year test cycle)
+  // A=Item#, B=Type, C=Length, D=Test Date, E=Date Assigned, F=Location,
+  // G=Status, H=Assigned To, I=Change Out Date, J=Picked For, K=Notes
+  HOT_STICKS: {
+    ITEM_NUM: 1,        // A - Item identifier
+    TYPE: 2,            // B - Solid, Extendable, Shotgun, etc.
+    LENGTH: 3,          // C - Length (e.g., "6 ft", "8 ft", "10 ft")
+    TEST_DATE: 4,       // D - Last electrical test date
+    DATE_ASSIGNED: 5,   // E
+    LOCATION: 6,        // F
+    STATUS: 7,          // G - On Shelf, In Service
+    ASSIGNED_TO: 8,     // H - Crew Lead
+    CHANGE_OUT_DATE: 9, // I - Test Date + 12 months
+    PICKED_FOR: 10,     // J
+    NOTES: 11           // K
   },
 
   // Glove/Sleeve Swaps Sheet (visible columns A-J)

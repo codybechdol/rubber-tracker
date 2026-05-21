@@ -12,7 +12,7 @@ Google Apps Script-based inventory management system for tracking rubber gloves/
 ## Architecture: File Load Order & Function Ownership
 Google Apps Script loads files **alphabetically**. Numbered prefixes control load order:
 ```
-00-Constants.gs  → loads FIRST (defines COLS, SHEET_* constants, STATUS_LOCATIONS, incl. Blankets/HV Testers/Phasing Sets/AED) (~249 lines)
+00-Constants.gs  → loads FIRST (defines COLS, SHEET_* constants, STATUS_LOCATIONS, incl. Blankets/HV Testers/Phasing Sets/AED/Grounds/Hot Sticks) (~310 lines)
 01-Utilities.gs  → utility functions (logEvent, normalizeApprovalValue, isStatusLocation, isEmployeePending, parseDateNoon) (~135 lines)
 10-Menu.gs       → archived (menu now in Code.gs) (~19 lines)
 11-Triggers.gs   → edit/change triggers, auto change-out dates (Gloves, Sleeves, Blankets, HV Testers, Phasing Sets, AED) (~2.2k lines)
