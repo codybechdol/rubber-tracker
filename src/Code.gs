@@ -24243,13 +24243,16 @@ function fixJobTrackingScheduleColumns() {
     // Write all 4 columns for this specific row (skip row i+1 in sheet terms)
     var sheetRow = i + 1; // allData index 1 = sheet row 2
     try {
-      sheet.getRange(sheetRow, COL_V, 1, 4).setValues([[scheduleType, skipDaysStr, today, validHistory]]);
+      sheet.getRange(sheetRow, COL_V, 1, 3).setValues([[scheduleType, skipDaysStr, today]]);
       fixedCount++;
       Logger.log('fixJobTrackingScheduleColumns: ' + jobNum + ' -> ' + scheduleType + ' (skip: ' + skipDaysStr + ')');
     } catch (writeErr) {
       Logger.log('fixJobTrackingScheduleColumns: ERROR writing row ' + sheetRow + ' (' + jobNum + '): ' + writeErr.message);
     }
   }
+
+  // Hide columns V-Y (they are internal data, not for display)
+  try { sheet.hideColumns(22, 4); } catch(e) { Logger.log("Could not hide columns: " + e.message); }
   SpreadsheetApp.getUi().alert(
     'Fix Complete',
     'Schedule columns V-Y fixed for ' + fixedCount + ' job(s).\n' +
