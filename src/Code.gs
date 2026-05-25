@@ -24154,6 +24154,9 @@ function showManageHolidaysDialog() {
  * columns (V-Y = cols 22-25) in Job Tracking by re-deriving their
  * values from the L-T checkbox columns (12-20) which are correct.
  *
+ * Handles Google Sheets Table (Table19) constraint: skips duplicate
+ * header rows and writes row-by-row to avoid empty table header errors.
+ *
  * Run once from: Glove Manager -> Maintenance -> Job Tracking -> Fix Schedule Columns (V-Y)
  */
 function fixJobTrackingScheduleColumns() {
@@ -24170,42 +24173,36 @@ function fixJobTrackingScheduleColumns() {
   }
   // Read ALL data at once (cols 1-25)
   var allData = sheet.getRange(1, 1, lastRow, 25).getValues();
-  var headers = allData[0].map(function(h) { return String(h).trim().toLowerCase(); });
-  // Verify we have the right columns
-  var colV = 21; // 0-based index, column 22 (V)
-  var colW = 22; // column 23 (W)
-  var colX = 23; // column 24 (X)
-  var colY = 24; // column 25 (Y)
-  // L-T checkbox indices (0-based)
-  var colSkipSun = 11; // L=12 -> index 11
-  var colSkipMon = 12;
+  // L-T checkbox column indices (0-based in allData row arrays)
+  var colSkipSun = 11; // col L
+  var colSkipMon = 12; // col M
   var colSkipTue = 13;
   var colSkipWed = 14;
   var colSkipThu = 15;
-  var colSkipFri = 16;
-  var colSkipSat = 17;
+  var colSkipFri = 16; // col Q
+  var colSkipSat = 17; // col R
   var dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   var skipCols  = [colSkipSun, colSkipMon, colSkipTue, colSkipWed, colSkipThu, colSkipFri, colSkipSat];
+  // V-Y column indices (1-based sheet columns for getRange)
+  var COL_V = 22; // Work Schedule
+  var COL_W = 23; // Skip Days
+  var COL_X = 24; // Schedule Effective
+  var COL_Y = 25; // Schedule History
   var today = new Date();
   var fixedCount = 0;
   var skippedCount = 0;
-  // Build write arrays for V, W, X, Y
-  var vVals = [];
-  var wVals = [];
-  var xVals = [];
-  var yVals = [];
+  var jobNumRegex = /^\d{3}-\d{2,4}$/; // e.g. 009-26, 053-26
+  // Process rows starting at index 1 (skip row 1 header)
+  // Skip any row where col A does not look like a real job number (catches duplicate header rows)
   for (var i = 1; i < allData.length; i++) {
     var row = allData[i];
     var jobNum = String(row[0] || '').trim();
-    if (!jobNum) {
-      vVals.push(['']);
-      wVals.push(['']);
-      xVals.push(['']);
-      yVals.push(['']);
+    // Skip empty rows and non-job-number rows (e.g. duplicate header "Job Number")
+    if (!jobNum || !jobNumRegex.test(jobNum)) {
       skippedCount++;
       continue;
     }
-    // Read L-T checkboxes
+    // Build skip days list from L-T checkboxes
     var skipDayList = [];
     for (var d = 0; d < skipCols.length; d++) {
       if (row[skipCols[d]] === true) {
@@ -24213,9 +24210,8 @@ function fixJobTrackingScheduleColumns() {
       }
     }
     var skipDaysStr = skipDayList.join(',');
-    // Derive schedule type from skip days
+    // Derive schedule type
     var skipsArr = skipDayList.map(function(s) { return s.toLowerCase(); });
-    var scheduleType;
     var skipsSun = skipsArr.indexOf('sun') !== -1;
     var skipsMon = skipsArr.indexOf('mon') !== -1;
     var skipsTue = skipsArr.indexOf('tue') !== -1;
@@ -24223,6 +24219,7 @@ function fixJobTrackingScheduleColumns() {
     var skipsThu = skipsArr.indexOf('thu') !== -1;
     var skipsFri = skipsArr.indexOf('fri') !== -1;
     var skipsSat = skipsArr.indexOf('sat') !== -1;
+    var scheduleType;
     if (skipsSun && !skipsMon && !skipsTue && !skipsWed && !skipsThu && skipsFri && skipsSat) {
       scheduleType = 'Mon-Thu';
     } else if (skipsSun && skipsMon && !skipsTue && !skipsWed && !skipsThu && !skipsFri && skipsSat) {
@@ -24230,12 +24227,12 @@ function fixJobTrackingScheduleColumns() {
     } else if (skipsSun && !skipsMon && !skipsTue && !skipsWed && !skipsThu && !skipsFri && skipsSat) {
       scheduleType = 'Mon-Fri';
     } else if (skipDayList.length === 0) {
-      scheduleType = 'Mon-Fri'; // No days skipped - assume Mon-Fri
+      scheduleType = 'Mon-Fri';
     } else {
       scheduleType = 'Custom';
     }
-    // Keep existing schedule history if it's valid JSON; otherwise reset to []
-    var currentHistory = String(row[colY] || '').trim();
+    // Keep existing schedule history if valid JSON array; otherwise reset
+    var currentHistory = String(row[COL_Y - 1] || '').trim();
     var validHistory;
     try {
       var parsed = JSON.parse(currentHistory);
@@ -24243,30 +24240,27 @@ function fixJobTrackingScheduleColumns() {
     } catch (e) {
       validHistory = '[]';
     }
-    vVals.push([scheduleType]);
-    wVals.push([skipDaysStr]);
-    xVals.push([today]);
-    yVals.push([validHistory]);
-    fixedCount++;
-    Logger.log('fixJobTrackingScheduleColumns: ' + jobNum + ' -> ' + scheduleType + ' (skip: ' + skipDaysStr + ')');
+    // Write all 4 columns for this specific row (skip row i+1 in sheet terms)
+    var sheetRow = i + 1; // allData index 1 = sheet row 2
+    try {
+      sheet.getRange(sheetRow, COL_V, 1, 4).setValues([[scheduleType, skipDaysStr, today, validHistory]]);
+      sheet.getRange(sheetRow, COL_X, 1, 1).setNumberFormat('mm/dd/yyyy');
+      fixedCount++;
+      Logger.log('fixJobTrackingScheduleColumns: ' + jobNum + ' -> ' + scheduleType + ' (skip: ' + skipDaysStr + ')');
+    } catch (writeErr) {
+      Logger.log('fixJobTrackingScheduleColumns: ERROR writing row ' + sheetRow + ' (' + jobNum + '): ' + writeErr.message);
+    }
   }
-  // Write all columns at once
-  var dataRows = lastRow - 1;
-  sheet.getRange(2, 22, dataRows, 1).setValues(vVals); // Work Schedule (V)
-  sheet.getRange(2, 23, dataRows, 1).setValues(wVals); // Skip Days (W)
-  sheet.getRange(2, 24, dataRows, 1).setValues(xVals); // Schedule Effective (X)
-  sheet.getRange(2, 24, dataRows, 1).setNumberFormat('mm/dd/yyyy');
-  sheet.getRange(2, 25, dataRows, 1).setValues(yVals); // Schedule History (Y)
   SpreadsheetApp.getUi().alert(
     'Fix Complete',
-    'Schedule columns V-Y fixed for ' + fixedCount + ' job(s).\n\n' +
-    'Work Schedule now derived from L-T checkboxes:\n' +
+    'Schedule columns V-Y fixed for ' + fixedCount + ' job(s).\n' +
+    'Skipped ' + skippedCount + ' header/empty rows.\n\n' +
+    'Schedule type mapping:\n' +
     '  Mon-Thu: Sun/Fri/Sat skipped\n' +
     '  Tue-Fri: Sun/Mon/Sat skipped\n' +
     '  Mon-Fri: Sun/Sat skipped\n' +
     '  Custom: any other combination',
     SpreadsheetApp.getUi().ButtonSet.OK
   );
-  Logger.log('fixJobTrackingScheduleColumns: Fixed ' + fixedCount + ' rows, skipped ' + skippedCount + ' empty rows');
+  Logger.log('fixJobTrackingScheduleColumns: Complete. Fixed=' + fixedCount + ' Skipped=' + skippedCount);
 }
- 
