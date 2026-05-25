@@ -24244,7 +24244,6 @@ function fixJobTrackingScheduleColumns() {
     var sheetRow = i + 1; // allData index 1 = sheet row 2
     try {
       sheet.getRange(sheetRow, COL_V, 1, 4).setValues([[scheduleType, skipDaysStr, today, validHistory]]);
-      sheet.getRange(sheetRow, COL_X, 1, 1).setNumberFormat('mm/dd/yyyy');
       fixedCount++;
       Logger.log('fixJobTrackingScheduleColumns: ' + jobNum + ' -> ' + scheduleType + ' (skip: ' + skipDaysStr + ')');
     } catch (writeErr) {
