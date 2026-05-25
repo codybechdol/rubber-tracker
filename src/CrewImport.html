@@ -2302,9 +2302,29 @@
         html += '<span class="badge bg-success" id="newjob-status-' + i + '" style="display:none;"><i class="bi bi-check"></i> Ready</span>';
         html += '</div>';
 
+        html += '</div>'; // close row.g-2
+
+        // Pending Start row
+        var defaultStartDate = (function() {
+          var d = new Date(); d.setDate(d.getDate() + 7);
+          var mm = d.getMonth() + 1; var dd = d.getDate();
+          return d.getFullYear() + '-' + (mm < 10 ? '0' : '') + mm + '-' + (dd < 10 ? '0' : '') + dd;
+        })();
+        html += '<div class="row g-2 mt-2 align-items-center">';
+        html += '<div class="col-12">';
+        html += '<div class="form-check form-check-inline">';
+        html += '<input class="form-check-input" type="checkbox" id="newjob-pending-' + i + '" onchange="toggleNewJobPendingStart(' + i + ')">';
+        html += '<label class="form-check-label fw-bold text-warning" for="newjob-pending-' + i + '">⏳ Pending Start — this job hasn\'t started yet</label>';
         html += '</div>';
+        html += '<span id="newjob-startdate-wrap-' + i + '" style="display:none;">';
+        html += '<label class="small me-1 ms-2">Planned Start:</label>';
+        html += '<input type="date" class="form-control form-control-sm d-inline-block" style="width:160px;" id="newjob-startdate-' + i + '" value="' + defaultStartDate + '">';
+        html += '</span>';
         html += '</div>';
-        html += '</div>';
+        html += '</div>'; // close pending row
+
+        html += '</div>'; // close card-body
+        html += '</div>'; // close card
       }
 
       html += '<div class="mt-3 d-flex gap-2">';
@@ -2334,6 +2354,15 @@
     }
 
     /**
+     * Toggle the pending start date picker visibility for a new job card.
+     */
+    function toggleNewJobPendingStart(idx) {
+      var checked = document.getElementById('newjob-pending-' + idx).checked;
+      var wrap = document.getElementById('newjob-startdate-wrap-' + idx);
+      if (wrap) wrap.style.display = checked ? 'inline' : 'none';
+    }
+
+    /**
      * User confirms new jobs — save to Job Tracking and continue import.
      */
     function confirmNewJobs() {
@@ -2355,10 +2384,17 @@
           continue;
         }
 
+        var pendingChk = document.getElementById('newjob-pending-' + i);
+        var isPendingStart = pendingChk && pendingChk.checked;
+        var startDateEl = document.getElementById('newjob-startdate-' + i);
+        var startDate = (isPendingStart && startDateEl) ? (startDateEl.value || '') : '';
+
         jobsToAdd.push({
           jobNumber: detectedNewJobs[i].jobNumber,
           jobName: jobName || detectedNewJobs[i].excelJobName,
-          location: location
+          location: location,
+          isPendingStart: isPendingStart,
+          startDate: startDate
         });
       }
 
@@ -2394,15 +2430,15 @@
             }
 
             jobTrackingData[newJob.jobNumber] = {
-              status: 'Active',
+              status: newJob.isPendingStart ? 'Pending Start' : 'Active',
               location: newJob.location,
               jobName: newJob.jobName,
               foreman: '',
-              startDate: '',
+              startDate: newJob.startDate || '',
               estEndDate: '',
               isCompleted: false,
-              isPendingStart: false,
-              isActive: true,
+              isPendingStart: newJob.isPendingStart || false,
+              isActive: !newJob.isPendingStart,
               isOnHold: false,
               schedule: ''
             };
@@ -2431,7 +2467,15 @@
 
           // Hide the new jobs section and continue to NEW HIRES check
           document.getElementById('newJobsSection').style.display = 'none';
-          showNotification('✅ Added ' + result.added + ' job(s) to Job Tracking', 'success');
+          var pendingAdded = jobsToAdd.filter(function(j) { return j.isPendingStart; }).length;
+          var activeAdded = result.added - pendingAdded;
+          var msg = '✅ Added ' + result.added + ' job(s) to Job Tracking';
+          if (pendingAdded > 0 && activeAdded > 0) {
+            msg += ' (' + activeAdded + ' Active, ' + pendingAdded + ' Pending Start)';
+          } else if (pendingAdded > 0) {
+            msg += ' as Pending Start';
+          }
+          showNotification(msg, 'success');
           checkForNewHires();
         })
         .withFailureHandler(function(error) {

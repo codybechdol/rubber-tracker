@@ -1663,15 +1663,16 @@ function addNewJobsToTracking(jobsJson) {
 
   for (var i = 0; i < jobs.length; i++) {
     var job = jobs[i];
-    Logger.log('addNewJobsToTracking: Processing job ' + job.jobNumber + ' at ' + job.location);
+    Logger.log('addNewJobsToTracking: Processing job ' + job.jobNumber + ' at ' + job.location + (job.isPendingStart ? ' [PENDING START: ' + (job.startDate || 'TBD') + ']' : ' [ACTIVE]'));
+    var jobStatus = job.isPendingStart ? 'Pending Start' : 'Active';
     var result = addOrUpdateJobTracking(
       job.jobNumber,
       job.location,
-      '',          // foreman (unknown yet)
-      0,           // crew size (unknown yet)
-      '',          // start date
-      'Active',    // default to Active
-      job.jobName  // new Job Name field
+      '',                // foreman (unknown yet)
+      0,                 // crew size (unknown yet)
+      job.startDate || '',  // start date (from pending start picker, or empty)
+      jobStatus,         // 'Pending Start' or 'Active'
+      job.jobName        // Job Name field
     );
     result.jobNumber = job.jobNumber; // Attach job number to result for client-side tracking
     results.push(result);
