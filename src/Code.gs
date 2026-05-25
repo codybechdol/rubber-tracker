@@ -6201,7 +6201,7 @@ function syncEmployeeLocationsFromJobTracking() {
  * Also automatically opens the Quick Actions sidebar.
  */
 function onOpen() {
-  ensurePickedForColumn();
+  try { ensurePickedForColumn(); } catch(e) { Logger.log("ensurePickedForColumn error: " + e.message); }
   var ui = SpreadsheetApp.getUi();
   ui.createMenu('Glove Manager')
     // === QUICK ACTIONS SIDEBAR ===
@@ -6573,10 +6573,15 @@ function ensurePickedForColumn() {
     var pickedForIdx = headers.indexOf('Picked For');
 
     if (pickedForIdx === -1) {
-      // Find 'Notes' to insert before it, or just append
+      // Find Notes to insert before it, or just append
       var notesIdx = headers.indexOf('Notes');
       var insertAt = (notesIdx !== -1) ? notesIdx + 1 : lastCol + 1;
-      sheet.insertColumnBefore(insertAt);
+      try {
+        sheet.insertColumnBefore(insertAt);
+      } catch(insertErr) {
+        // Sheet may be a Google Table - append to end instead
+        insertAt = lastCol + 1;
+      }
       sheet.getRange(1, insertAt).setValue('Picked For')
         .setFontWeight('bold')
         .setBackground(HEADER_BG_COLOR)
