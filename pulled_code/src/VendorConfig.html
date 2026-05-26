@@ -35,20 +35,6 @@
 
     .pricing-section { margin-top: 20px; }
     .pricing-section h3 { font-size: 14px; color: #1a73e8; margin: 0 0 10px 0; }
-    .pricing-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; background: white; padding: 15px; border-radius: 8px; border: 1px solid #dadce0; }
-    .pricing-card { background: #f8f9fa; border-radius: 6px; padding: 12px; }
-    .pricing-card h4 { margin: 0 0 10px 0; font-size: 13px; color: #333; }
-    .pricing-row { display: flex; align-items: center; margin-bottom: 8px; gap: 6px; }
-    .pricing-row:last-child { margin-bottom: 0; }
-    .pricing-row label { font-size: 12px; color: #5f6368; white-space: nowrap; min-width: 52px; }
-    .pricing-row input.item-num { width: 110px; padding: 6px 8px; border: 1px solid #dadce0; border-radius: 4px; font-size: 12px; }
-    .pricing-row input.price { width: 80px; padding: 6px 8px; border: 1px solid #dadce0; border-radius: 4px; font-size: 12px; text-align: right; }
-    .pricing-row input:focus { border-color: #1a73e8; outline: none; }
-    .pricing-header-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid #e0e0e0; }
-    .pricing-header-row span { font-size: 10px; color: #999; font-weight: 600; text-transform: uppercase; }
-    .pricing-header-row .lbl-spacer { min-width: 52px; }
-    .pricing-header-row .lbl-itemnum { width: 110px; text-align: center; }
-    .pricing-header-row .lbl-price { width: 80px; text-align: center; }
 
     .vendor-select { margin-bottom: 15px; }
     .vendor-select label { font-weight: 600; margin-right: 10px; }
@@ -84,7 +70,7 @@
 </head>
 <body>
   <h2>⚙️ Manage Vendors</h2>
-  <div class="subtitle">Add vendors and set pricing for rubber goods</div>
+  <div class="subtitle">Add vendors and manage their product catalog</div>
 
   <div id="loading" class="loading">
     <div class="spinner"></div>
@@ -115,73 +101,23 @@
       <p>Click "➕ Add Vendor" to add your first vendor.</p>
     </div>
 
-    <!-- Pricing Section - appears when vendor is selected -->
+    <!-- Catalog Section - appears when vendor is selected -->
     <div id="pricingSection" class="pricing-section" style="display: none;">
       <div class="vendor-select">
-        <label>Edit pricing for:</label>
+        <label>Edit catalog for:</label>
         <select id="pricingVendorSelect" onchange="showVendorPricing()">
           <option value="">Select a vendor...</option>
         </select>
-        <span id="pricingHint" style="margin-left: 10px; color: #ea4335; font-size: 11px;">← Select a vendor first to edit prices</span>
+        <span id="pricingHint" style="margin-left: 10px; color: #ea4335; font-size: 11px;">← Select a vendor first to edit catalog</span>
       </div>
 
-      <div class="pricing-grid">
-        <div class="pricing-card">
-          <h4>🧤 Glove Prices</h4>
-          <div class="pricing-header-row">
-            <span class="lbl-spacer"></span>
-            <span class="lbl-itemnum">Item #</span>
-            <span class="lbl-price">Price</span>
-          </div>
-          <div class="pricing-row">
-            <label>Class 0:</label>
-            <input type="text" class="item-num" id="class0GloveItemNum" placeholder="Item #" oninput="autoSavePricing()">
-            <input type="text" class="price" id="class0GlovePrice" placeholder="$0.00" oninput="formatPrice(this); autoSavePricing()">
-          </div>
-          <div class="pricing-row">
-            <label>Class 2:</label>
-            <input type="text" class="item-num" id="class2GloveItemNum" placeholder="Item #" oninput="autoSavePricing()">
-            <input type="text" class="price" id="class2GlovePrice" placeholder="$0.00" oninput="formatPrice(this); autoSavePricing()">
-          </div>
-          <div class="pricing-row">
-            <label>Class 3:</label>
-            <input type="text" class="item-num" id="class3GloveItemNum" placeholder="Item #" oninput="autoSavePricing()">
-            <input type="text" class="price" id="class3GlovePrice" placeholder="$0.00" oninput="formatPrice(this); autoSavePricing()">
-          </div>
-        </div>
-
-        <div class="pricing-card">
-          <h4>💪 Sleeve Prices</h4>
-          <div class="pricing-header-row">
-            <span class="lbl-spacer"></span>
-            <span class="lbl-itemnum">Item #</span>
-            <span class="lbl-price">Price</span>
-          </div>
-          <div class="pricing-row">
-            <label>Class 0:</label>
-            <input type="text" class="item-num" id="class0SleeveItemNum" placeholder="Item #" oninput="autoSavePricing()">
-            <input type="text" class="price" id="class0SleevePrice" placeholder="$0.00" oninput="formatPrice(this); autoSavePricing()">
-          </div>
-          <div class="pricing-row">
-            <label>Class 2:</label>
-            <input type="text" class="item-num" id="class2SleeveItemNum" placeholder="Item #" oninput="autoSavePricing()">
-            <input type="text" class="price" id="class2SleevePrice" placeholder="$0.00" oninput="formatPrice(this); autoSavePricing()">
-          </div>
-          <div class="pricing-row">
-            <label>Class 3:</label>
-            <input type="text" class="item-num" id="class3SleeveItemNum" placeholder="Item #" oninput="autoSavePricing()">
-            <input type="text" class="price" id="class3SleevePrice" placeholder="$0.00" oninput="formatPrice(this); autoSavePricing()">
-          </div>
-        </div>
-      </div>
-
-      <!-- Custom Items Section -->
-      <div id="customItemsSection" style="margin-top: 15px;">
+      <!-- Catalog Items Section -->
+      <div id="customItemsSection">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-          <h4 style="margin: 0; color: #1a73e8; font-size: 13px;">📦 Additional Items</h4>
+          <h4 style="margin: 0; color: #1a73e8; font-size: 13px;">📦 Catalog</h4>
           <button class="success" style="padding: 5px 12px; font-size: 11px;" onclick="addCustomItem()">➕ Add Item</button>
         </div>
-        <div class="custom-items-table-wrap" style="max-height: 200px; overflow-y: auto; border: 1px solid #dadce0; border-radius: 6px; background: white;">
+        <div class="custom-items-table-wrap" style="max-height: 450px; overflow-y: auto; border: 1px solid #dadce0; border-radius: 6px; background: white;">
           <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
             <thead>
               <tr>
@@ -196,7 +132,7 @@
           </table>
         </div>
         <div id="noCustomItems" style="display: none; text-align: center; padding: 15px; color: #999; font-size: 11px; background: white; border: 1px solid #dadce0; border-radius: 6px;">
-          No custom items yet. Click "➕ Add Item" to add items.
+          No catalog items yet. Click "➕ Add Item" to add items.
         </div>
       </div>
     </div>
@@ -276,18 +212,6 @@
         email: '',
         phone: '',
         notes: '',
-        class0GlovePrice: '',
-        class2GlovePrice: '',
-        class3GlovePrice: '',
-        class0SleevePrice: '',
-        class2SleevePrice: '',
-        class3SleevePrice: '',
-        class0GloveItemNum: '',
-        class2GloveItemNum: '',
-        class3GloveItemNum: '',
-        class0SleeveItemNum: '',
-        class2SleeveItemNum: '',
-        class3SleeveItemNum: '',
         customItems: []
       });
       renderTable();
@@ -328,49 +252,33 @@
     }
 
     function showVendorPricing() {
-      // Save current vendor pricing first if one was selected
+      // Save current vendor catalog first if one was selected
       if (currentPricingVendorIndex >= 0) {
-        savePricingToVendor(currentPricingVendorIndex);
         saveCustomItemsToVendor(currentPricingVendorIndex);
       }
 
       var select = document.getElementById('pricingVendorSelect');
       var index = parseInt(select.value);
       var hint = document.getElementById('pricingHint');
-      var priceInputs = document.querySelectorAll('.pricing-card input');
 
       if (isNaN(index) || index < 0) {
         currentPricingVendorIndex = -1;
-        clearPricingFields();
         renderCustomItems([]);
         hint.style.display = 'inline';
-        priceInputs.forEach(function(input) { input.disabled = true; input.style.background = '#f5f5f5'; });
         return;
       }
 
-      // Hide hint and enable inputs
+      // Hide hint
       hint.style.display = 'none';
-      priceInputs.forEach(function(input) { input.disabled = false; input.style.background = '#fff'; });
-
       currentPricingVendorIndex = index;
       var v = vendors[index];
 
-      document.getElementById('class0GlovePrice').value = formatPriceValue(v.class0GlovePrice);
-      document.getElementById('class2GlovePrice').value = formatPriceValue(v.class2GlovePrice);
-      document.getElementById('class3GlovePrice').value = formatPriceValue(v.class3GlovePrice);
-      document.getElementById('class0SleevePrice').value = formatPriceValue(v.class0SleevePrice);
-      document.getElementById('class2SleevePrice').value = formatPriceValue(v.class2SleevePrice);
-      document.getElementById('class3SleevePrice').value = formatPriceValue(v.class3SleevePrice);
-
-      document.getElementById('class0GloveItemNum').value = v.class0GloveItemNum || '';
-      document.getElementById('class2GloveItemNum').value = v.class2GloveItemNum || '';
-      document.getElementById('class3GloveItemNum').value = v.class3GloveItemNum || '';
-      document.getElementById('class0SleeveItemNum').value = v.class0SleeveItemNum || '';
-      document.getElementById('class2SleeveItemNum').value = v.class2SleeveItemNum || '';
-      document.getElementById('class3SleeveItemNum').value = v.class3SleeveItemNum || '';
-
-      // Render custom items
+      // Render catalog items
       renderCustomItems(v.customItems || []);
+    }
+
+    function clearPricingFields() {
+      renderCustomItems([]);
     }
 
     function formatPriceValue(val) {
@@ -391,46 +299,6 @@
       input.value = val;
     }
 
-    function autoSavePricing() {
-      // Auto-save pricing to the currently selected vendor as user types
-      if (currentPricingVendorIndex >= 0) {
-        savePricingToVendor(currentPricingVendorIndex);
-      }
-    }
-
-    function clearPricingFields() {
-      document.getElementById('class0GlovePrice').value = '';
-      document.getElementById('class2GlovePrice').value = '';
-      document.getElementById('class3GlovePrice').value = '';
-      document.getElementById('class0SleevePrice').value = '';
-      document.getElementById('class2SleevePrice').value = '';
-      document.getElementById('class3SleevePrice').value = '';
-      document.getElementById('class0GloveItemNum').value = '';
-      document.getElementById('class2GloveItemNum').value = '';
-      document.getElementById('class3GloveItemNum').value = '';
-      document.getElementById('class0SleeveItemNum').value = '';
-      document.getElementById('class2SleeveItemNum').value = '';
-      document.getElementById('class3SleeveItemNum').value = '';
-      renderCustomItems([]);
-    }
-
-    function savePricingToVendor(index) {
-      if (index < 0 || index >= vendors.length) return;
-
-      vendors[index].class0GlovePrice = parseFloat(document.getElementById('class0GlovePrice').value) || '';
-      vendors[index].class2GlovePrice = parseFloat(document.getElementById('class2GlovePrice').value) || '';
-      vendors[index].class3GlovePrice = parseFloat(document.getElementById('class3GlovePrice').value) || '';
-      vendors[index].class0SleevePrice = parseFloat(document.getElementById('class0SleevePrice').value) || '';
-      vendors[index].class2SleevePrice = parseFloat(document.getElementById('class2SleevePrice').value) || '';
-      vendors[index].class3SleevePrice = parseFloat(document.getElementById('class3SleevePrice').value) || '';
-
-      vendors[index].class0GloveItemNum = document.getElementById('class0GloveItemNum').value.trim();
-      vendors[index].class2GloveItemNum = document.getElementById('class2GloveItemNum').value.trim();
-      vendors[index].class3GloveItemNum = document.getElementById('class3GloveItemNum').value.trim();
-      vendors[index].class0SleeveItemNum = document.getElementById('class0SleeveItemNum').value.trim();
-      vendors[index].class2SleeveItemNum = document.getElementById('class2SleeveItemNum').value.trim();
-      vendors[index].class3SleeveItemNum = document.getElementById('class3SleeveItemNum').value.trim();
-    }
 
     function renderCustomItems(items) {
       var tbody = document.getElementById('customItemsBody');
@@ -536,9 +404,8 @@
       // Collect all data from table
       collectTableData();
 
-      // Save current pricing if a vendor is selected
+      // Save current catalog if a vendor is selected
       if (currentPricingVendorIndex >= 0) {
-        savePricingToVendor(currentPricingVendorIndex);
         saveCustomItemsToVendor(currentPricingVendorIndex);
       }
 

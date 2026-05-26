@@ -839,10 +839,18 @@ function refreshJobTrackingForemen() {
 
     if (!/^\d{3}-\d{2}$/.test(crewNumber)) continue;
 
+    // Use position suffix (.1 = designated lead) as tie-breaker for same-priority classifications
+    var posDotA = jobNumber.lastIndexOf('.');
+    var posNumA = posDotA !== -1 ? (parseInt(jobNumber.substring(posDotA + 1)) || 999) : 999;
+
     var priority = classificationPriority[classification] || 999;
 
-    if (!crewLeadMap[crewNumber] || priority < crewLeadMap[crewNumber].priority) {
-      crewLeadMap[crewNumber] = { name: name, priority: priority, classification: classification };
+    var isBetterA = !crewLeadMap[crewNumber] ||
+      priority < crewLeadMap[crewNumber].priority ||
+      (priority === crewLeadMap[crewNumber].priority && posNumA < crewLeadMap[crewNumber].position);
+
+    if (isBetterA) {
+      crewLeadMap[crewNumber] = { name: name, priority: priority, position: posNumA, classification: classification };
     }
   }
 
@@ -947,10 +955,18 @@ function refreshJobTrackingForemenSilent() {
 
     if (!/^\d{3}-\d{2}$/.test(crewNumber)) continue;
 
+    // Use position suffix (.1 = designated lead) as tie-breaker for same-priority classifications
+    var posDotB = jobNumber.lastIndexOf('.');
+    var posNumB = posDotB !== -1 ? (parseInt(jobNumber.substring(posDotB + 1)) || 999) : 999;
+
     var priority = classificationPriority[classification] || 999;
 
-    if (!crewLeadMap[crewNumber] || priority < crewLeadMap[crewNumber].priority) {
-      crewLeadMap[crewNumber] = { name: name, priority: priority, classification: classification };
+    var isBetterB = !crewLeadMap[crewNumber] ||
+      priority < crewLeadMap[crewNumber].priority ||
+      (priority === crewLeadMap[crewNumber].priority && posNumB < crewLeadMap[crewNumber].position);
+
+    if (isBetterB) {
+      crewLeadMap[crewNumber] = { name: name, priority: priority, position: posNumB, classification: classification };
     }
   }
 
@@ -1581,6 +1597,7 @@ function syncCrews(silent) {
         location: isRealLocation ? location : '',
         foreman: '',
         foremanPriority: 999,
+        foremanPosition: 999,
         manualLead: null,
         crewSize: 0
       };
@@ -1598,9 +1615,16 @@ function syncCrews(silent) {
     }
 
     // Track best classification-based lead
+    // When two employees tie on classification, prefer the one at position .1 (designated lead)
+    var posDotC = jobNumber.lastIndexOf('.');
+    var posNumC = posDotC !== -1 ? (parseInt(jobNumber.substring(posDotC + 1)) || 999) : 999;
+
     var priority = classificationPriority[classification] || 999;
-    if (priority < crewMap[crewNumber].foremanPriority) {
+    var isBetterC = priority < crewMap[crewNumber].foremanPriority ||
+      (priority === crewMap[crewNumber].foremanPriority && posNumC < crewMap[crewNumber].foremanPosition);
+    if (isBetterC) {
       crewMap[crewNumber].foremanPriority = priority;
+      crewMap[crewNumber].foremanPosition = posNumC;
       crewMap[crewNumber].foreman = name;
     }
   }

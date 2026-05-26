@@ -371,6 +371,7 @@
       if (data.model) html += '<span class="item-badge ' + badgeClass + '">' + data.model + '</span>';
       html += '</h3>';
       if (data.size) html += row('Size', data.size);
+      if (data.eslId) html += row('ESL ID', data.eslId);
       if (data.type) html += row('Type', data.type);
       if (data.serialNum) html += row('Serial #', data.serialNum);
       if (data.kv) html += row('KV', data.kv);

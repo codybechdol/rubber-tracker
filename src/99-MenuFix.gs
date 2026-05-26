@@ -197,7 +197,7 @@ function forceCreateMenu() {
 
       // === STEP 6: SAVE & BACKUP ===
       .addSubMenu(ui.createMenu('💾 Save & Backup')
-        .addItem('💾 Save Current State to History', 'saveHistory')
+        .addItem('💾 Save Current State to History', 'saveHistoryFast')
         .addItem('💾 Create Backup Snapshot', 'createBackupSnapshot')
         .addItem('📂 View Backup Folder', 'openBackupFolder')
         .addSeparator()
@@ -251,6 +251,9 @@ function forceCreateMenu() {
         .addSubMenu(ui.createMenu('🏗️ Sheets Setup')
           .addItem('🏗️ Build Sheets', 'buildSheets')
           .addItem('🔗 Add ESL ID Column (Gloves/Sleeves)', 'migrateGlovesSleevesSheetsForESLID')
+          .addItem('🔍 Diagnose Gloves/Sleeves Columns', 'diagnoseInventoryColumns')
+          .addItem('🔧 Repair Gloves/Sleeves Column Order', 'repairInventoryColumnOrder')
+          .addItem('🔧 Restore Assigned To Column', 'restoreInventoryAssignedTo')
           .addItem('⚡ Setup HV Tester & Phasing Set Sheets', 'setupHVTesterAndPhasingSetSheets')
           .addItem('🔴 Setup Hot Sticks Sheet', 'setupHotSticksSheet')
           .addItem('🏥 Setup AED Sheet', 'setupAEDSheet')

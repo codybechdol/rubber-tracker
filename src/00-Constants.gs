@@ -77,8 +77,8 @@ var AED_SWAP_LOOKAHEAD_DAYS = 90;
 var INTERVAL_GROUNDS_TEST = 12;
 
 // Hot Stick test interval (months) - Phase 5
-// Hot sticks (live-line tools) must be tested annually per OSHA 1910.269 / ASTM F711
-var INTERVAL_HOT_STICK_TEST = 12;
+// Hot sticks (live-line tools) must be tested every 2 years per OSHA 1910.269 / ASTM F711
+var INTERVAL_HOT_STICK_TEST = 24;
 
 // Location values that represent employee STATUS, not physical cities.
 // These should NOT be used as crew locations in Job Tracking.

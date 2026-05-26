@@ -42,7 +42,7 @@ function handleInventoryAssignedToChange(ss, sheet, sheetName, editedRow, newVal
       lock = null;
     }
 
-    var assignedToCol = getCol(sheetName, 'Assigned To') || 8;
+    var assignedToCol = getCol(sheetName, 'Assigned To') || COLS.INVENTORY.ASSIGNED_TO;
     var actualValue = sheet.getRange(editedRow, assignedToCol).getValue();
 
     logEvent('handleInventoryAssignedToChange ENTRY: Row=' + editedRow + ', newValue=' + newValue + ', actualValue=' + actualValue, 'DEBUG');
@@ -192,17 +192,17 @@ function handleNotesChange(ss, sheet, sheetName, editedRow, newValue) {
                        notesValue === 'LOCATE';
 
     var lastCol = sheet.getLastColumn();
-    var numCols = Math.min(lastCol || 11, 11);
+    var numCols = Math.min(lastCol || COLS.INVENTORY.NOTES, COLS.INVENTORY.NOTES);
 
     if (isLostLocate) {
       sheet.getRange(editedRow, 1, 1, numCols).setBackground('#ffccbc');
-      sheet.getRange(editedRow, 11).setFontWeight('bold').setFontColor('#d32f2f');
+      sheet.getRange(editedRow, COLS.INVENTORY.NOTES).setFontWeight('bold').setFontColor('#d32f2f');
 
       var itemNum = sheet.getRange(editedRow, 1).getValue();
       logEvent(sheetName + ' item ' + itemNum + ' marked as LOST-LOCATE at row ' + editedRow, 'INFO');
     } else {
       sheet.getRange(editedRow, 1, 1, numCols).setBackground(null);
-      sheet.getRange(editedRow, 11).setFontWeight('normal').setFontColor(null);
+      sheet.getRange(editedRow, COLS.INVENTORY.NOTES).setFontWeight('normal').setFontColor(null);
 
       var itemNum2 = sheet.getRange(editedRow, 1).getValue();
       logEvent(sheetName + ' item ' + itemNum2 + ' LOST-LOCATE marker removed at row ' + editedRow, 'INFO');

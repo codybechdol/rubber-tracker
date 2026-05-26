@@ -677,9 +677,37 @@ function syncJobTrackingAfterImport(ss, jobNameMap) {
           crewSize: crew.crewSize,
           startDate: existing.startDate,
           employees: crew.employees,
-          rowIndex: existing.rowIndex
+          rowIndex: existing.rowIndex,
+          isOnHold: false
         });
         Logger.log('syncJobTrackingAfterImport: Pending Start job ' + crewNum + ' has ' + crew.crewSize + ' employees - needs user decision');
+      }
+
+      // If status is "On Hold" and now has employees AND estimated return is within 7 days,
+      // also track for user decision (allows Friday activation for Monday returns)
+      if (existing.status === 'On Hold' && crew.crewSize > 0) {
+        var estReturn = existing.estimatedReturn;
+        var estReturnDate = (estReturn && estReturn instanceof Date) ? estReturn : (estReturn ? new Date(estReturn) : null);
+        if (estReturnDate && !isNaN(estReturnDate.getTime())) {
+          var sevenDaysOut = new Date();
+          sevenDaysOut.setDate(sevenDaysOut.getDate() + 7);
+          sevenDaysOut.setHours(23, 59, 59, 0);
+          if (estReturnDate <= sevenDaysOut) {
+            var estReturnStr = Utilities.formatDate(estReturnDate, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+            pendingJobsWithEmployees.push({
+              jobNumber: crewNum,
+              location: crew.location || existing.location || 'Unknown',
+              foreman: crew.foreman || '',
+              crewSize: crew.crewSize,
+              startDate: estReturnStr,
+              employees: crew.employees,
+              rowIndex: existing.rowIndex,
+              isOnHold: true,
+              estimatedReturn: estReturnStr
+            });
+            Logger.log('syncJobTrackingAfterImport: On Hold job ' + crewNum + ' returning ' + estReturnStr + ' has ' + crew.crewSize + ' employees - needs user decision');
+          }
+        }
       }
 
       updatedCount++;
@@ -776,7 +804,9 @@ function syncJobTrackingAfterImport(ss, jobNameMap) {
 
   Logger.log('syncJobTrackingAfterImport: ' + results.join(', '));
   if (pendingJobsWithEmployees.length > 0) {
-    Logger.log('syncJobTrackingAfterImport: ' + pendingJobsWithEmployees.length + ' Pending Start jobs need activation decision');
+    var pendingCount = pendingJobsWithEmployees.filter(function(j) { return !j.isOnHold; }).length;
+    var onHoldCount = pendingJobsWithEmployees.filter(function(j) { return j.isOnHold; }).length;
+    Logger.log('syncJobTrackingAfterImport: ' + pendingCount + ' Pending Start + ' + onHoldCount + ' On Hold (returning soon) jobs need activation decision');
   }
 
   // Also run syncCrews to ensure foremen and default schedules are applied
@@ -829,15 +859,49 @@ function activatePendingJobs(jobNumbers) {
 
       if (currentStatus === 'Pending Start' || currentStatus === 'On Hold') {
         var rowIdx = i + 1;
-        jobSheet.getRange(rowIdx, 10).setValue('Active');  // Status (J, column 10)
+        var todayDate = new Date();
+        todayDate.setHours(0, 0, 0, 0);
 
-        // Clear Put On Hold Date (F) if coming from On Hold
+        // For On Hold jobs: check if the estimated return date is still in the future.
+        // If the crew isn't back until a future date, set to Pending Start so
+        // checkAndActivateScheduledJobs() auto-activates it on the return date.
         if (currentStatus === 'On Hold') {
+          var estimatedReturn = jobData[i][6]; // Estimated Return (G, index 6)
+          var estRetDate = estimatedReturn ? new Date(estimatedReturn) : null;
+          if (estRetDate) estRetDate.setHours(0, 0, 0, 0);
+
+          if (estRetDate && estRetDate > todayDate) {
+            // Return date is in the future — set to Pending Start, not Active
+            jobSheet.getRange(rowIdx, 10).setValue('Pending Start');  // Status (J)
+            jobSheet.getRange(rowIdx, 5).setValue(estRetDate);        // Start Date (E) = estimated return
+            // Keep the On Hold Date (F) and Estimated Return (G) for reference
+            var currentNotes = jobData[i][10] || '';
+            var pendingNote = 'Set to Pending Start (returns ' + Utilities.formatDate(estRetDate, Session.getScriptTimeZone(), 'MM/dd/yyyy') + ') via Crew Import on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+            jobSheet.getRange(rowIdx, 11).setValue(currentNotes ? currentNotes + '; ' + pendingNote : pendingNote);
+            jobSheet.getRange(rowIdx, 21).setValue(timestamp);  // Last Updated (U)
+            activatedCount++;
+            Logger.log('activatePendingJobs: Set ' + jobNum + ' to Pending Start (returns ' + Utilities.formatDate(estRetDate, Session.getScriptTimeZone(), 'MM/dd/yyyy') + ')');
+            continue;
+          }
+
+          // Return date is today or past — activate normally, clear On Hold fields
           jobSheet.getRange(rowIdx, 6).setValue('');  // Put On Hold Date (F)
           jobSheet.getRange(rowIdx, 7).setValue('');  // Estimated Return (G)
         }
 
-        var currentNotes = jobData[i][10] || '';  // Notes (K, index 10)
+        jobSheet.getRange(rowIdx, 10).setValue('Active');  // Status (J, column 10)
+
+        // Set Start Date to today if not already set or if it's in the future
+        var currentStartDate = jobData[i][4]; // Start Date (E, index 4)
+        var startDateObj = currentStartDate ? new Date(currentStartDate) : null;
+        if (startDateObj) startDateObj.setHours(0, 0, 0, 0);
+        if (!startDateObj || startDateObj > todayDate) {
+          jobSheet.getRange(rowIdx, 5).setValue(todayDate);  // Start Date (E, column 5)
+          Logger.log('activatePendingJobs: Set Start Date to today for ' + jobNum);
+        }
+
+
+        currentNotes = String(jobData[i][10] || '');  // Notes (K, index 10)
         var activateNote = 'Activated from ' + currentStatus + ' on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy') + ' via Crew Import';
         jobSheet.getRange(rowIdx, 11).setValue(currentNotes ? currentNotes + '; ' + activateNote : activateNote);  // Notes (K)
         jobSheet.getRange(rowIdx, 21).setValue(timestamp);  // Last Updated (U)
@@ -875,11 +939,9 @@ function setJobActivationDate(jobNumber, activationDateStr) {
       return { success: false, message: 'Job Tracking sheet not found' };
     }
 
-    // Parse YYYY-MM-DD explicitly to avoid timezone ambiguity
-    // (new Date('YYYY-MM-DDT00:00:00') can be treated as UTC in GAS V8, causing off-by-one day)
-    var dateParts = activationDateStr.split('-');
-    var dateObj = new Date(parseInt(dateParts[0], 10), parseInt(dateParts[1], 10) - 1, parseInt(dateParts[2], 10));
-    if (isNaN(dateObj.getTime())) {
+    // Parse YYYY-MM-DD at noon to avoid timezone off-by-one
+    var dateObj = parseDateNoon(activationDateStr);
+    if (!dateObj) {
       return { success: false, message: 'Invalid date: ' + activationDateStr };
     }
 
@@ -893,11 +955,11 @@ function setJobActivationDate(jobNumber, activationDateStr) {
         if (status === 'On Hold') {
           // Save to Estimated Return (G, column 7)
           jobSheet.getRange(rowIdx, 7).setValue(dateObj);
-          jobSheet.getRange(rowIdx, 7).setNumberFormat('MM/dd/yyyy');
+          try { jobSheet.getRange(rowIdx, 7).setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) { Logger.log('setNumberFormat skipped (typed column): ' + fmtErr); }
         } else if (status === 'Pending Start') {
           // Save to Start Date (E, column 5)
           jobSheet.getRange(rowIdx, 5).setValue(dateObj);
-          jobSheet.getRange(rowIdx, 5).setNumberFormat('MM/dd/yyyy');
+          try { jobSheet.getRange(rowIdx, 5).setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) { Logger.log('setNumberFormat skipped (typed column): ' + fmtErr); }
         } else {
           return { success: false, message: 'Job ' + jobNumber + ' is "' + status + '", not On Hold or Pending Start' };
         }
@@ -917,6 +979,79 @@ function setJobActivationDate(jobNumber, activationDateStr) {
     return { success: false, message: 'Job ' + jobNumber + ' not found in Job Tracking' };
   } catch (e) {
     Logger.log('setJobActivationDate error: ' + e.toString());
+    return { success: false, message: 'Error: ' + e.toString() };
+  }
+}
+
+/**
+ * Sets a job to On Hold from Crew Import.
+ * Updates Status, Put On Hold Date, optional Estimated Return, Notes, and Last Updated.
+ *
+ * @param {string} jobNumber - Job number (e.g., "044-26")
+ * @param {string} holdDateStr - Hold date as YYYY-MM-DD
+ * @param {string} estimatedReturnStr - Optional estimated return date as YYYY-MM-DD
+ * @return {Object} Result with success status
+ */
+function setJobOnHoldFromImport(jobNumber, holdDateStr, estimatedReturnStr) {
+  Logger.log('setJobOnHoldFromImport: ' + jobNumber + ', hold=' + holdDateStr + ', return=' + (estimatedReturnStr || ''));
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var jobSheet = ss.getSheetByName('Job Tracking');
+    if (!jobSheet) {
+      return { success: false, message: 'Job Tracking sheet not found' };
+    }
+
+    var holdDateObj = parseDateNoon(holdDateStr);
+    if (!holdDateObj) {
+      return { success: false, message: 'Invalid hold date: ' + holdDateStr };
+    }
+
+    var returnDateObj = null;
+    if (estimatedReturnStr) {
+      returnDateObj = parseDateNoon(estimatedReturnStr);
+      if (!returnDateObj) {
+        return { success: false, message: 'Invalid estimated return date: ' + estimatedReturnStr };
+      }
+      if (returnDateObj.getTime() < holdDateObj.getTime()) {
+        return { success: false, message: 'Estimated return date cannot be before hold date' };
+      }
+    }
+
+    var data = jobSheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0] || '').trim() === jobNumber) {
+        var rowIdx = i + 1;
+        var timestamp = new Date();
+
+        jobSheet.getRange(rowIdx, 10).setValue('On Hold');   // Status (J)
+        jobSheet.getRange(rowIdx, 6).setValue(holdDateObj);  // Put On Hold Date (F)
+        try { jobSheet.getRange(rowIdx, 6).setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) { Logger.log('setNumberFormat skipped (typed column): ' + fmtErr); }
+
+        if (returnDateObj) {
+          jobSheet.getRange(rowIdx, 7).setValue(returnDateObj);  // Estimated Return (G)
+          try { jobSheet.getRange(rowIdx, 7).setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) { Logger.log('setNumberFormat skipped (typed column): ' + fmtErr); }
+        } else {
+          jobSheet.getRange(rowIdx, 7).setValue('');
+        }
+
+        var currentNotes = String(data[i][10] || '');
+        var holdNote = 'Set On Hold via Crew Import on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+        jobSheet.getRange(rowIdx, 11).setValue(currentNotes ? currentNotes + '; ' + holdNote : holdNote);  // Notes (K)
+        jobSheet.getRange(rowIdx, 21).setValue(timestamp);  // Last Updated (U)
+
+        return {
+          success: true,
+          message: 'Job ' + jobNumber + ' set to On Hold',
+          holdDate: Utilities.formatDate(holdDateObj, Session.getScriptTimeZone(), 'MM/dd/yyyy'),
+          estimatedReturn: returnDateObj ? Utilities.formatDate(returnDateObj, Session.getScriptTimeZone(), 'MM/dd/yyyy') : ''
+        };
+      }
+    }
+
+    return { success: false, message: 'Job ' + jobNumber + ' not found in Job Tracking' };
+  } catch (e) {
+    Logger.log('setJobOnHoldFromImport error: ' + e.toString());
     return { success: false, message: 'Error: ' + e.toString() };
   }
 }
@@ -1183,8 +1318,7 @@ function markJobCompletedFromImport(jobNumber, completionDateStr) {
   // Parse the completion date
   var completionDate;
   if (completionDateStr) {
-    var parts = completionDateStr.split('-');
-    completionDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+    completionDate = parseDateNoon(completionDateStr) || new Date();
   } else {
     completionDate = new Date();
   }
@@ -1404,8 +1538,10 @@ function addOrUpdateJobTracking(jobNumber, location, foreman, crewSize, startDat
     for (var h = 0; h < allHeaders.length; h++) {
       if (String(allHeaders[h]).trim() === 'Job Name') { jobNameCol = h + 1; break; } // 1-based
     }
+    Logger.log('addOrUpdateJobTracking: Sheet has ' + allHeaders.length + ' columns, jobNameCol=' + jobNameCol);
 
     var data = jobSheet.getDataRange().getValues();
+    Logger.log('addOrUpdateJobTracking: Sheet has ' + data.length + ' rows of data');
     var existingRow = -1;
 
     // Find existing row for this job
@@ -1423,10 +1559,8 @@ function addOrUpdateJobTracking(jobNumber, location, foreman, crewSize, startDat
     // (new Date('YYYY-MM-DDT00:00:00') can be treated as UTC in GAS V8, causing off-by-one day)
     var startDateObj = null;
     if (startDate) {
-      var sdParts = startDate.split('-');
-      if (sdParts.length === 3) {
-        startDateObj = new Date(parseInt(sdParts[0], 10), parseInt(sdParts[1], 10) - 1, parseInt(sdParts[2], 10));
-      } else {
+      startDateObj = parseDateNoon(startDate);
+      if (!startDateObj) {
         startDateObj = new Date(startDate);
       }
       if (isNaN(startDateObj.getTime())) {
@@ -1485,14 +1619,29 @@ function addOrUpdateJobTracking(jobNumber, location, foreman, crewSize, startDat
 
       jobSheet.appendRow(newRow);
       var newRowNum = jobSheet.getLastRow();
-      // Add checkboxes for skip day columns (L-T = cols 12-20)
-      jobSheet.getRange(newRowNum, 12, 1, 9).insertCheckboxes();
+
+      // Verify the row was written correctly
+      var verifyVal = String(jobSheet.getRange(newRowNum, 1).getValue() || '').trim();
+      if (verifyVal !== jobNumber) {
+        Logger.log('addOrUpdateJobTracking: VERIFY FAILED for ' + jobNumber + ' - row ' + newRowNum + ' has "' + verifyVal + '", trying direct setValue');
+        // Row might be empty/wrong - try to set the job number directly
+        jobSheet.getRange(newRowNum, 1).setValue(jobNumber);
+      } else {
+        Logger.log('addOrUpdateJobTracking: Verified row ' + newRowNum + ' = "' + verifyVal + '"');
+      }
+
+      // Add checkboxes for skip day columns (L-T = cols 12-20), non-fatal if it fails
+      try {
+        jobSheet.getRange(newRowNum, 12, 1, 9).insertCheckboxes();
+      } catch (cbErr) {
+        Logger.log('addOrUpdateJobTracking: insertCheckboxes failed (non-critical): ' + cbErr.toString());
+      }
 
       Logger.log('Added new job ' + jobNumber + ' at row ' + newRowNum);
       return { success: true, message: 'Added job ' + jobNumber, row: newRowNum, action: 'added' };
     }
   } catch (e) {
-    Logger.log('Error in addOrUpdateJobTracking: ' + e.toString());
+    Logger.log('Error in addOrUpdateJobTracking: ' + e.toString() + '\nStack: ' + (e.stack || 'no stack'));
     return { success: false, message: 'Error: ' + e.toString() };
   }
 }
@@ -1509,9 +1658,12 @@ function addNewJobsToTracking(jobsJson) {
   var jobs = JSON.parse(jobsJson);
   var results = [];
   var successCount = 0;
+  var addedJobNumbers = []; // Track which job numbers were actually written
+  var failedJobNumbers = [];
 
   for (var i = 0; i < jobs.length; i++) {
     var job = jobs[i];
+    Logger.log('addNewJobsToTracking: Processing job ' + job.jobNumber + ' at ' + job.location);
     var result = addOrUpdateJobTracking(
       job.jobNumber,
       job.location,
@@ -1521,12 +1673,29 @@ function addNewJobsToTracking(jobsJson) {
       'Active',    // default to Active
       job.jobName  // new Job Name field
     );
+    result.jobNumber = job.jobNumber; // Attach job number to result for client-side tracking
     results.push(result);
-    if (result.success) successCount++;
+    if (result.success) {
+      successCount++;
+      addedJobNumbers.push(job.jobNumber);
+    } else {
+      failedJobNumbers.push(job.jobNumber);
+      Logger.log('addNewJobsToTracking: FAILED to add ' + job.jobNumber + ': ' + result.message);
+    }
   }
 
   Logger.log('addNewJobsToTracking: Added ' + successCount + '/' + jobs.length + ' jobs');
-  return { success: true, added: successCount, total: jobs.length, results: results };
+  if (failedJobNumbers.length > 0) {
+    Logger.log('addNewJobsToTracking: FAILURES: ' + failedJobNumbers.join(', '));
+  }
+  return {
+    success: true,
+    added: successCount,
+    total: jobs.length,
+    results: results,
+    addedJobNumbers: addedJobNumbers,    // NEW: which job numbers were actually added
+    failedJobNumbers: failedJobNumbers   // NEW: which job numbers failed
+  };
 }
 
 /**
@@ -1816,7 +1985,7 @@ function searchEmployeeHistoryBatch(namesJson) {
 
   for (var h = 0; h < historyData.length; h++) {
     var row = historyData[h];
-    var histName = String(row[1] || '').trim();
+    var histName = String(row[1] || '').replace(/^["']+|["']+$/g, '').trim();
     var histNameLower = histName.toLowerCase();
 
     // Only process names we're looking for
@@ -2589,9 +2758,13 @@ function applySpecialCircumstanceUpdate(data) {
     // Uses LockService internally to prevent duplicate numbers from parallel calls
     // Light Duty is a STATUS, not a location — actual location is Helena
     var isLightDutyAssignment = (data.newLocation === 'Light Duty' || data.status === 'Light Duty');
-    if (isLightDutyAssignment && !data.clearJobNumber && !data.jobNumber) {
+    var existingJobNum = sheetData[rowIndex - 1] ? String(sheetData[rowIndex - 1][jobNumCol] || '') : '';
+    if (isLightDutyAssignment && !data.clearJobNumber && !data.jobNumber && !existingJobNum.match(/^005-/)) {
       newJobNumber = getNextLightDutyJobNumber(sheetData, jobNumCol, employeesSheet, rowIndex);
       Logger.log('Auto-assigned Light Duty job number: ' + newJobNumber);
+    } else if (isLightDutyAssignment && existingJobNum.match(/^005-/)) {
+      newJobNumber = existingJobNum; // Keep existing 005-26.N number
+      Logger.log('Light Duty: keeping existing job number ' + existingJobNum);
     }
 
     // Light Duty employees are physically in Helena — change location to real city
@@ -3361,15 +3534,74 @@ function getCrewImportSpecialSelections() {
 }
 
 /**
+ * Saves crew lead selections for crew import.
+ * Format: { "013-26": "Matthew Wendt", "028-26": "Jimmy Bailey" }
+ * Key = job number base (e.g. "028-26"), value = preferred lead name as it appears on the Employees sheet.
+ *
+ * @param {Object} selections - Object with job number -> lead name
+ * @return {Object} Result with success status
+ */
+function saveCrewImportLeadSelections(selections) {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    props.setProperty('CREW_IMPORT_LEAD_SELECTIONS', JSON.stringify(selections));
+    Logger.log('Saved ' + Object.keys(selections).length + ' crew lead selections');
+    return { success: true };
+  } catch (e) {
+    Logger.log('Error saving lead selections: ' + e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Loads crew lead selections for crew import.
+ *
+ * @return {Object} Selections object (empty if none saved)
+ */
+function getCrewImportLeadSelections() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var saved = props.getProperty('CREW_IMPORT_LEAD_SELECTIONS');
+    if (saved) {
+      return JSON.parse(saved);
+    }
+  } catch (e) {
+    Logger.log('Error loading lead selections: ' + e.message);
+  }
+  return {};
+}
+
+/**
+ * Clears the saved lead selection for a specific crew (call when a crew no longer exists).
+ * @param {string} jobNumber - Job number to clear (e.g. "028-26")
+ * @return {Object} Result with success status
+ */
+function clearCrewLeadSelection(jobNumber) {
+  try {
+    var selections = getCrewImportLeadSelections();
+    if (selections[jobNumber]) {
+      delete selections[jobNumber];
+      saveCrewImportLeadSelections(selections);
+      Logger.log('Cleared saved lead selection for ' + jobNumber);
+    }
+    return { success: true };
+  } catch (e) {
+    Logger.log('Error clearing lead selection: ' + e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+/**
  * Gets all crew import settings at once (for dialog initialization).
  *
- * @return {Object} Object with locationMappings, duplicateSelections, and specialSelections
+ * @return {Object} Object with locationMappings, duplicateSelections, specialSelections, and leadSelections
  */
 function getCrewImportSettings() {
   return {
     locationMappings: getCrewImportLocationMappings(),
     duplicateSelections: getCrewImportDuplicateSelections(),
-    specialSelections: getCrewImportSpecialSelections()
+    specialSelections: getCrewImportSpecialSelections(),
+    leadSelections: getCrewImportLeadSelections()
   };
 }
 
@@ -3384,6 +3616,7 @@ function clearCrewImportSettings() {
     props.deleteProperty('CREW_IMPORT_LOCATION_MAPPINGS');
     props.deleteProperty('CREW_IMPORT_DUPLICATE_SELECTIONS');
     props.deleteProperty('CREW_IMPORT_SPECIAL_SELECTIONS');
+    props.deleteProperty('CREW_IMPORT_LEAD_SELECTIONS');
     Logger.log('Cleared crew import settings');
     return { success: true };
   } catch (e) {
@@ -3408,6 +3641,9 @@ function showCrewImportSavedSettings() {
 
   html += '<h4>Special Selections (' + Object.keys(settings.specialSelections || {}).length + ')</h4>';
   html += '<pre>' + JSON.stringify(settings.specialSelections, null, 2) + '</pre>';
+
+  html += '<h4>Crew Lead Selections (' + Object.keys(settings.leadSelections || {}).length + ')</h4>';
+  html += '<pre>' + JSON.stringify(settings.leadSelections, null, 2) + '</pre>';
 
   html += '<br><button onclick="google.script.run.withSuccessHandler(function() { alert(\'Settings cleared!\'); google.script.host.close(); }).clearCrewImportSettings()">Clear All Saved Settings</button>';
 

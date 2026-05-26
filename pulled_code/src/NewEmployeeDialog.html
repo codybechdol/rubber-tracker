@@ -118,9 +118,9 @@
           </div>
         </div>
         <div class="col-md-6 mb-3">
-          <label class="form-label">Job Number <span class="required-star">*</span></label>
-          <input type="text" class="form-control" id="jobNumber" placeholder="e.g., 005-26.1" required>
-          <div class="info-text">Format: XXX-YY.Z (e.g., 005-26.1)</div>
+          <label class="form-label">Job Number</label>
+          <input type="text" class="form-control" id="jobNumber" placeholder="e.g., 005-26.1">
+          <div class="info-text">Format: XXX-YY.Z — Leave blank if location is TBD</div>
         </div>
       </div>
       <div class="row">
@@ -228,10 +228,10 @@
 
   <script>
     // Get data passed from the template
-    var employeeName = <?= JSON.stringify(employeeName || '') ?>;
+    var employeeName = <?!= JSON.stringify(employeeName || '') ?>;
     var rowIndex = <?= rowIndex || 0 ?>;
-    var passedLocations = <?= locations || '[]' ?>;
-    var historyData = <?= historyData || 'null' ?>;
+    var passedLocations = <?!= locations || '[]' ?>;
+    var historyData = <?!= historyData || 'null' ?>;
     var isRehire = false;
 
     // Initialize dialog on load
@@ -256,7 +256,6 @@
         var unknownOpt = document.createElement('option');
         unknownOpt.value = 'Unknown';
         unknownOpt.textContent = 'Unknown (TBD)';
-        unknownOpt.disabled = true; // disabled by default until pending
         locationSelect.appendChild(unknownOpt);
       }
 
@@ -284,8 +283,11 @@
         // Don't pre-fill hire date — user must set new one
       }
 
-      // Set today as default hire date
-      var today = new Date().toISOString().split('T')[0];
+      // Set today as default hire date (use local date, not UTC)
+      var now = new Date();
+      var mm = ('0' + (now.getMonth() + 1)).slice(-2);
+      var dd = ('0' + now.getDate()).slice(-2);
+      var today = now.getFullYear() + '-' + mm + '-' + dd;
       if (!document.getElementById('hireDate').value) {
         document.getElementById('hireDate').value = today;
       }
@@ -325,19 +327,6 @@
         badge.classList.add('visible');
       } else {
         badge.classList.remove('visible');
-        // If not pending and "Unknown" is selected, clear it
-        if (locationSelect.value.toLowerCase() === 'unknown') {
-          locationSelect.value = '';
-        }
-      }
-
-      // Enable/disable "Unknown" option based on pending status
-      for (var i = 0; i < locationSelect.options.length; i++) {
-        if (locationSelect.options[i].value.toLowerCase() === 'unknown') {
-          locationSelect.options[i].disabled = !isPending;
-          locationSelect.options[i].textContent = isPending ? 'Unknown (TBD)' : 'Unknown (pending only)';
-          break;
-        }
       }
     }
 
@@ -475,14 +464,6 @@
       }
 
       var hireDateStr = document.getElementById('hireDate').value;
-      if (locVal.toLowerCase() === 'unknown') {
-        var hd = new Date(hireDateStr + 'T00:00:00');
-        var now = new Date(); now.setHours(0,0,0,0);
-        if (hd <= now) {
-          alert('"Unknown" location is only allowed for Pending New Hires (future Hire Date).\n\nPlease select a real location or set a future Hire Date.');
-          return;
-        }
-      }
 
       var employeeData = {
         name: employeeName,

@@ -67,6 +67,60 @@ function getDayName(dayOfWeek) {
   return DAY_NAMES[dayOfWeek] || 'Unknown';
 }
 
+// ============================================================================
+// WORK SCHEDULE CONFIGURATION
+// ============================================================================
+
+/**
+ * Gets the current work schedule setting from ScriptProperties.
+ * @return {string} 'Mon-Thu' or 'Tue-Fri'
+ */
+function getWorkSchedule() {
+  var props = PropertiesService.getScriptProperties();
+  return props.getProperty('WORK_SCHEDULE') || SCHEDULE_MON_THU;
+}
+
+/**
+ * Saves the work schedule setting to ScriptProperties.
+ * @param {string} schedule - 'Mon-Thu' or 'Tue-Fri'
+ * @return {Object} {success: true}
+ */
+function setWorkSchedule(schedule) {
+  if (schedule !== SCHEDULE_MON_THU && schedule !== SCHEDULE_TUE_FRI) {
+    return { success: false, error: 'Invalid schedule: ' + schedule };
+  }
+  PropertiesService.getScriptProperties().setProperty('WORK_SCHEDULE', schedule);
+  // Clear saved trip plan so it regenerates with new schedule
+  clearTripPlan();
+  Logger.log('Work schedule set to: ' + schedule);
+  return { success: true, schedule: schedule };
+}
+
+/**
+ * Returns schedule configuration for a given work schedule.
+ * @param {string} schedule - 'Mon-Thu' or 'Tue-Fri'
+ * @return {Object} {workDays, skipDays, mustReturnDay, mustReturnDayName, avoidDay}
+ */
+function getScheduleConfig(schedule) {
+  if (schedule === SCHEDULE_TUE_FRI) {
+    return {
+      workDays: [2, 3, 4, 5],       // Tue, Wed, Thu, Fri
+      skipDays: [0, 1, 6],           // Sun, Mon, Sat
+      mustReturnDay: 5,              // Friday must return to Helena
+      mustReturnDayName: 'Friday',
+      avoidDay: null                 // No avoid day for Tue-Fri schedule
+    };
+  }
+  // Default: Mon-Thu
+  return {
+    workDays: [1, 2, 3, 4],         // Mon, Tue, Wed, Thu
+    skipDays: [0, 5, 6],             // Sun, Fri, Sat
+    mustReturnDay: 2,               // Tuesday must return to Helena
+    mustReturnDayName: 'Tuesday',
+    avoidDay: 5                     // Avoid Friday
+  };
+}
+
 /**
  * Formats a date as YYYY-MM-DD for use as object key.
  * Local implementation to avoid cross-file dependency.
@@ -308,6 +362,95 @@ function loadTripPlan() {
   } catch (e) {
     Logger.log('Error loading trip plan: ' + e.toString());
     return null;
+  }
+}
+
+/**
+ * Loads the saved trip plan and strips any tasks that have since been completed.
+ * Task objects in the plan use {source, rowIndex} as identifiers matching the
+ * SourceSheet_SourceRow taskKey format used by Task Metadata.
+ *
+ * Called from TripPlanner.html on initialization instead of raw loadTripPlan().
+ *
+ * @return {Object|null} The cleaned trip plan, or null if none exists
+ */
+function loadValidatedTripPlan() {
+  try {
+    var plan = loadTripPlan();
+    if (!plan || !plan.workDays) return null;
+
+    // Build set of completed composite keys from Task Metadata sheet
+    // Key format: "<SourceSheet>_<SourceRow>" (e.g. "Training Tracking_78")
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var metaSheet = ss.getSheetByName('Task Metadata');
+    var completedKeys = {};
+
+    if (metaSheet && metaSheet.getLastRow() > 1) {
+      var metaData = metaSheet.getDataRange().getValues();
+      var headers = metaData[0];
+      var sourceSheetCol = -1;
+      var sourceRowCol = -1;
+      var statusCol = -1;
+      for (var h = 0; h < headers.length; h++) {
+        var hdr = String(headers[h]).trim();
+        if (hdr === 'SourceSheet') sourceSheetCol = h;
+        if (hdr === 'SourceRow') sourceRowCol = h;
+        if (hdr === 'Status') statusCol = h;
+      }
+      if (sourceSheetCol >= 0 && sourceRowCol >= 0 && statusCol >= 0) {
+        for (var r = 1; r < metaData.length; r++) {
+          var rowStatus = String(metaData[r][statusCol] || '').trim();
+          if (rowStatus === 'Complete') {
+            var compositeKey = String(metaData[r][sourceSheetCol] || '').trim() +
+                               '_' + String(metaData[r][sourceRowCol] || '').trim();
+            if (compositeKey !== '_') completedKeys[compositeKey] = true;
+          }
+        }
+        Logger.log('loadValidatedTripPlan: Found ' + Object.keys(completedKeys).length + ' completed tasks in metadata');
+      }
+    }
+
+    // Filter completed tasks out of each assigned location's task list
+    var removedTotal = 0;
+    plan.workDays.forEach(function(day) {
+      if (!day.assignedLocations) return;
+      var cleanedLocations = [];
+      day.assignedLocations.forEach(function(loc) {
+        if (loc.isLocked || loc.isManualTask) {
+          // Always keep manually locked tasks
+          cleanedLocations.push(loc);
+          return;
+        }
+        if (loc.tasks && loc.tasks.length > 0) {
+          var originalCount = loc.tasks.length;
+          loc.tasks = loc.tasks.filter(function(task) {
+            // Build composite key from source + rowIndex (matches Task Metadata format)
+            var src = String(task.source || task.sheetName || '').trim();
+            var row = String(task.rowIndex || '').trim();
+            if (!src || !row) return true; // No key to check — keep the task
+            var compositeKey = src + '_' + row;
+            return !completedKeys[compositeKey];
+          });
+          var removed = originalCount - loc.tasks.length;
+          removedTotal += removed;
+          loc.taskCount = loc.tasks.length;
+          if (loc.tasks.length > 0) {
+            cleanedLocations.push(loc);
+          }
+          // If all tasks removed, location is dropped (no visit needed)
+        } else {
+          cleanedLocations.push(loc);
+        }
+      });
+      day.assignedLocations = cleanedLocations;
+    });
+
+    Logger.log('loadValidatedTripPlan: Removed ' + removedTotal + ' completed tasks from saved plan');
+    return plan;
+  } catch (e) {
+    Logger.log('Error in loadValidatedTripPlan: ' + e.toString());
+    // Fall back to raw load if validation fails
+    return loadTripPlan();
   }
 }
 
@@ -617,7 +760,10 @@ function collectTasksForTripPlanner() {
             rowIndex: t.row || 0,
             isManualTask: t.manual === 1,
             inTaskList: t.inList === 1,
-            isRegistered: t.reg === 1
+            isRegistered: t.reg === 1,
+            notes: t.n || '',
+            vehicleNumber: t.veh || '',
+            currentItem: t.cur || ''
           };
         });
         Logger.log('Deserialized ' + metadataResult.tasks.length + ' tasks');
@@ -1490,6 +1636,10 @@ function suggestOptimalTrips(daysAhead) {
     var scheduleConfig = getScheduleConfig(workSchedule);
     Logger.log('Step 3.5: Using work schedule: ' + workSchedule + ' (must return day: ' + scheduleConfig.mustReturnDayName + ')');
 
+    // Load holiday map once for the whole loop (date -> name)
+    var holidayMap = getHolidayMap();
+    Logger.log('Step 3.6: Loaded ' + Object.keys(holidayMap).length + ' holidays');
+
     // Get date range based on configured schedule
     var today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -1529,6 +1679,9 @@ function suggestOptimalTrips(daysAhead) {
           plan: null,
           startLocation: 'Helena',
           overnightCity: null,
+          // Holiday flag
+          isHoliday: holidayMap.hasOwnProperty(dateKey),
+          holidayName: holidayMap[dateKey] || null,
           // Manual task tracking
           manualTasks: manualTasksOnDay,
           lockedManualTasks: lockedTasksOnDay,
@@ -1690,6 +1843,11 @@ function suggestOptimalTrips(daysAhead) {
 
       for (var d = 0; d < workDays.length; d++) {
         var day = workDays[d];
+
+        // Skip holiday days - no automatic crew visit scheduling
+        if (day.isHoliday) {
+          continue;
+        }
 
         // Skip Fridays unless location is overdue
         if (day.isFriday && locData.maxUrgency < URGENCY_OVERDUE) {

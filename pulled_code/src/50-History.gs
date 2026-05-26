@@ -3,6 +3,10 @@
  *
  * Functions for saving and viewing glove/sleeve history.
  * Creates timestamped snapshots of current assignments.
+ *
+ * NOTE: This file's saveHistory() is OVERRIDDEN by Code.gs (loads last).
+ * The active version is saveHistoryFast() in Code.gs.
+ * This file is kept for reference and as a fallback.
  */
 
 /**
@@ -35,14 +39,24 @@ function saveHistory(silent) {
       return String(val);
     }
 
+    // Google Sheets sometimes coerces small numeric class values into date displays
+    // when a cell is formatted as a date. These are the known display strings we've
+    // seen for class values in inventory/history data, so map them back explicitly.
+    var GOOGLE_SHEETS_CLASS_DATE_MAP = {
+      '12/30/1899': 0,
+      '12/31/1899': 0,
+      '1/1/1900': 2,
+      '1/2/1900': 2,
+      '1/3/1900': 3
+    };
+
     function formatClass(val) {
       if (val === null || val === undefined || val === '') return '';
       if (val instanceof Date) return String(val);
       var strVal = String(val).trim();
-      if (strVal === '1/1/1900') return 2;
-      if (strVal === '1/2/1900') return 2;
-      if (strVal === '1/3/1900') return 3;
-      if (strVal === '12/30/1899' || strVal === '12/31/1899') return 0;
+      if (GOOGLE_SHEETS_CLASS_DATE_MAP.hasOwnProperty(strVal)) {
+        return GOOGLE_SHEETS_CLASS_DATE_MAP[strVal];
+      }
       var num = parseInt(strVal, 10);
       if (!isNaN(num) && num >= 0 && num <= 4) return num;
       return strVal;
@@ -51,69 +65,47 @@ function saveHistory(silent) {
     var newGloveEntries = 0;
     var newSleeveEntries = 0;
 
-    // Process Gloves
+    // Process Gloves (single API call - uses COLS.INVENTORY constants for ESL ID layout)
     if (glovesSheet && glovesSheet.getLastRow() > 1 && glovesHistorySheet) {
       var numGloveRows = glovesSheet.getLastRow() - 1;
-      var glovesDisplay = glovesSheet.getRange(2, 1, numGloveRows, 11).getDisplayValues();
-      var glovesRawValues = glovesSheet.getRange(2, 1, numGloveRows, 11).getValues();
+      var glovesData = glovesSheet.getRange(2, 1, numGloveRows, COLS.INVENTORY.NOTES).getValues();
 
-      for (var i = 0; i < glovesDisplay.length; i++) {
-        var row = glovesDisplay[i];
-        var rawRow = glovesRawValues[i];
-        var itemNum = formatItemNum(rawRow[0]);
-        var size = row[1];
-        var classVal = formatClass(rawRow[2]);
-        var dateAssigned = row[4];
-        var location = row[5];
-        var assignedTo = row[7];
+      for (var i = 0; i < glovesData.length; i++) {
+        var rawRow = glovesData[i];
+        var itemNum = formatItemNum(rawRow[COLS.INVENTORY.ITEM_NUM - 1]);
+        var size = String(rawRow[COLS.INVENTORY.SIZE - 1] || '');
+        var classVal = formatClass(rawRow[COLS.INVENTORY.CLASS - 1]);
+        var dateAssigned = formatDateForHistory(rawRow[COLS.INVENTORY.DATE_ASSIGNED - 1]);
+        var location = String(rawRow[COLS.INVENTORY.LOCATION - 1] || '');
+        var assignedTo = String(rawRow[COLS.INVENTORY.ASSIGNED_TO - 1] || '');
 
-        // Skip rows without item number or date assigned
         if (!itemNum || !dateAssigned) continue;
 
-        // Check if this is a duplicate entry
         if (!isDuplicateHistoryEntry(glovesHistorySheet, itemNum, assignedTo, dateAssigned, location)) {
-          glovesHistorySheet.appendRow([
-            silent ? formatDateForHistory(dateAssigned) : dateAssigned,
-            itemNum,
-            size,
-            classVal,
-            location,
-            assignedTo
-          ]);
+          glovesHistorySheet.appendRow([dateAssigned, itemNum, size, classVal, location, assignedTo]);
           newGloveEntries++;
         }
       }
     }
 
-    // Process Sleeves
+    // Process Sleeves (single API call - uses COLS.INVENTORY constants for ESL ID layout)
     if (sleevesSheet && sleevesSheet.getLastRow() > 1 && sleevesHistorySheet) {
       var numSleeveRows = sleevesSheet.getLastRow() - 1;
-      var sleevesDisplay = sleevesSheet.getRange(2, 1, numSleeveRows, 11).getDisplayValues();
-      var sleevesRawValues = sleevesSheet.getRange(2, 1, numSleeveRows, 11).getValues();
+      var sleevesData = sleevesSheet.getRange(2, 1, numSleeveRows, COLS.INVENTORY.NOTES).getValues();
 
-      for (var j = 0; j < sleevesDisplay.length; j++) {
-        var row = sleevesDisplay[j];
-        var rawRow = sleevesRawValues[j];
-        var itemNum = formatItemNum(rawRow[0]);
-        var size = row[1];
-        var classVal = formatClass(rawRow[2]);
-        var dateAssigned = row[4];
-        var location = row[5];
-        var assignedTo = row[7];
+      for (var j = 0; j < sleevesData.length; j++) {
+        var rawRow = sleevesData[j];
+        var itemNum = formatItemNum(rawRow[COLS.INVENTORY.ITEM_NUM - 1]);
+        var size = String(rawRow[COLS.INVENTORY.SIZE - 1] || '');
+        var classVal = formatClass(rawRow[COLS.INVENTORY.CLASS - 1]);
+        var dateAssigned = formatDateForHistory(rawRow[COLS.INVENTORY.DATE_ASSIGNED - 1]);
+        var location = String(rawRow[COLS.INVENTORY.LOCATION - 1] || '');
+        var assignedTo = String(rawRow[COLS.INVENTORY.ASSIGNED_TO - 1] || '');
 
-        // Skip rows without item number or date assigned
         if (!itemNum || !dateAssigned) continue;
 
-        // Check if this is a duplicate entry
         if (!isDuplicateHistoryEntry(sleevesHistorySheet, itemNum, assignedTo, dateAssigned, location)) {
-          sleevesHistorySheet.appendRow([
-            silent ? formatDateForHistory(dateAssigned) : dateAssigned,
-            itemNum,
-            size,
-            classVal,
-            location,
-            assignedTo
-          ]);
+          sleevesHistorySheet.appendRow([dateAssigned, itemNum, size, classVal, location, assignedTo]);
           newSleeveEntries++;
         }
       }
@@ -271,4 +263,3 @@ function dailyHistoryBackup() {
     logEvent('Error in dailyHistoryBackup: ' + e, 'ERROR');
   }
 }
-

@@ -910,7 +910,7 @@ function saveEmployeeHistory() {
   // Also track Last Day, Last Day Reason, and Rehire Date to preserve them
   var lastKnownState = {};
   for (var hi = 0; hi < historyData.length; hi++) {
-    var histName = (historyData[hi][1] || '').toString().trim().toLowerCase();
+    var histName = (historyData[hi][1] || '').toString().replace(/^["']+|["']+$/g, '').trim().toLowerCase();
     if (histName) {
       // Get current stored values
       var existing = lastKnownState[histName] || {};

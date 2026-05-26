@@ -380,6 +380,18 @@ function collectAndGroupTasks(ss) {
   var afterAED = countTasks(tasksByLocation);
   Logger.log('collectAndGroupTasks: AED Swaps added ' + (afterAED - beforeAED) + ' tasks');
 
+  // Collect from Ground Swaps (Phase 4 - equipment-based format)
+  var beforeGrounds = countTasks(tasksByLocation);
+  collectEquipmentSwapTasks(ss, SHEET_GROUND_SWAPS, 'Ground', tasksByLocation, employeeLocations, employeeForemen, employeePhones, today);
+  var afterGrounds = countTasks(tasksByLocation);
+  Logger.log('collectAndGroupTasks: Ground Swaps added ' + (afterGrounds - beforeGrounds) + ' tasks');
+
+  // Collect from Hot Stick Swaps (Phase 5 - equipment-based format)
+  var beforeHotStick = countTasks(tasksByLocation);
+  collectEquipmentSwapTasks(ss, SHEET_HOT_STICK_SWAPS, 'Hot Stick', tasksByLocation, employeeLocations, employeeForemen, employeePhones, today);
+  var afterHotStick = countTasks(tasksByLocation);
+  Logger.log('collectAndGroupTasks: Hot Stick Swaps added ' + (afterHotStick - beforeHotStick) + ' tasks');
+
   // Collect from Training Tracking
   var beforeTraining = countTasks(tasksByLocation);
   collectTrainingTasks(ss, tasksByLocation, employeePhones, today);
@@ -1668,8 +1680,6 @@ function collectTrainingTasks(ss, tasksByLocation, employeePhones, today) {
   var skippedNoAssignee = 0;
 
   Logger.log('collectTrainingTasks: DEBUG - currentMonth=' + currentMonth + ' (' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][currentMonth] + '), currentYear=' + currentYear);
-  Logger.log('collectTrainingTasks: DEBUG - selectedCrews=' + (selectedCrews ? JSON.stringify(selectedCrews) : 'null (all crews)'));
-  Logger.log('collectTrainingTasks: DEBUG - crewLocations keys=' + Object.keys(crewLocations).join(', '));
 
   for (var i = 2; i < data.length; i++) {
     var row = data[i];
@@ -1680,29 +1690,13 @@ function collectTrainingTasks(ss, tasksByLocation, employeePhones, today) {
     var status = String(row[statusCol]).trim();
     var completionDate = row[dateCol];
 
-    // DEBUG: Log Keenan's training to understand location assignment
-    var isKeenan = crewLead.toLowerCase().indexOf('keenan') !== -1;
-    if (isKeenan) {
-      Logger.log('collectTrainingTasks: KEENAN DEBUG row=' + (i+1) +
-                 ' crew=' + crew +
-                 ' crewLead=' + crewLead +
-                 ' crewLocations[' + crew + ']=' + (crewLocations[crew] || 'NOT FOUND') +
-                 ' month=' + month + ' topic=' + topic);
-    }
-
     // Skip if complete, N/A, or already has completion date
     if (status === 'Complete' || status === 'N/A') {
-      if (month.toLowerCase() === 'february') {
-        Logger.log('collectTrainingTasks: DEBUG - Skipping Feb row ' + (i+1) + ' crew=' + crew + ' status=' + status + ' (complete/N/A)');
-        skippedComplete++;
-      }
+      skippedComplete++;
       continue;
     }
     if (completionDate && completionDate instanceof Date) {
-      if (month.toLowerCase() === 'february') {
-        Logger.log('collectTrainingTasks: DEBUG - Skipping Feb row ' + (i+1) + ' crew=' + crew + ' (has completion date)');
-        skippedComplete++;
-      }
+      skippedComplete++;
       continue;
     }
 
@@ -1710,9 +1704,6 @@ function collectTrainingTasks(ss, tasksByLocation, employeePhones, today) {
     // NOTE: null OR empty array means "all crews" - only filter if array has items
     if (selectedCrews !== null && selectedCrews.length > 0 && selectedCrews.indexOf(crew) === -1) {
       skippedCrews++;
-      if (month.toLowerCase() === 'february') {
-        Logger.log('collectTrainingTasks: DEBUG - Skipping Feb row ' + (i+1) + ' crew=' + crew + ' - not in selected crews');
-      }
       continue;
     }
 
@@ -1768,9 +1759,6 @@ function collectTrainingTasks(ss, tasksByLocation, employeePhones, today) {
     if (!assignee) {
       Logger.log('collectTrainingTasks: Skipping crew ' + crew + ' - no foreman and no employees found');
       skippedNoAssignee++;
-      if (month.toLowerCase() === 'february') {
-        Logger.log('collectTrainingTasks: DEBUG - Skipping Feb row ' + (i+1) + ' crew=' + crew + ' - no assignee');
-      }
       continue;
     }
 
@@ -1824,15 +1812,7 @@ function collectTrainingTasks(ss, tasksByLocation, employeePhones, today) {
     if (monthNum !== undefined && monthNum > currentMonth + 1) {
       // Skip training beyond next month
       skippedFutureMonth++;
-      if (month.toLowerCase() === 'february') {
-        Logger.log('collectTrainingTasks: DEBUG - UNEXPECTED! Feb row ' + (i+1) + ' skipped as future month! monthNum=' + monthNum + ' currentMonth=' + currentMonth);
-      }
       continue;
-    }
-
-    // DEBUG: Log every February task that passes all filters
-    if (month.toLowerCase() === 'february') {
-      Logger.log('collectTrainingTasks: DEBUG - ADDING Feb task! row=' + (i+1) + ' crew=' + crew + ' assignee=' + assignee + ' location=' + location);
     }
 
     // Add to location group
@@ -2336,6 +2316,7 @@ function collectSafetyReportsTasks(ss, tasksByLocation, employeeLocations, today
       estimatedTime: 30,
       priority: isOverdue ? 'High' : 'Medium',
       notes: notes,
+      taskId: 'Safety Equipment Needs_' + (i + 1),
       sheetName: 'Safety Equipment Needs',
       rowIndex: i + 1
     };

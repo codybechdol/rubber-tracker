@@ -6368,7 +6368,9 @@ function onOpen() {
         .addSeparator()
         .addItem('🔄 Migrate Manual Tasks Sheet', 'migrateManualTasksSheet')
         .addItem('🧹 Clean Up Manual Tasks', 'cleanupDuplicateManualTasks')
-        .addItem('🗑️ Purge Stuck Task by Location', 'promptPurgeTaskByLocation')))
+        .addItem('🗑️ Purge Stuck Task by Location', 'promptPurgeTaskByLocation')
+        .addSeparator()
+        .addItem('Manage Holidays / Blackout Days', 'showManageHolidaysDialog')))
 
     // === STEP 6: SAVE & BACKUP ===
     .addSubMenu(ui.createMenu('💾 Save & Backup')
@@ -24013,3 +24015,125 @@ function setupAEDSheet() {
 
 
 
+// ============================================================================
+// HOLIDAY / BLACKOUT DAY FUNCTIONS
+// ============================================================================
+/**
+ * Returns the array of holiday objects stored in ScriptProperties.
+ * Each holiday: { date: 'YYYY-MM-DD', name: 'Holiday Name' }
+ * @return {Array}
+ */
+function getHolidays() {
+  var props = PropertiesService.getScriptProperties();
+  var raw = props.getProperty('HOLIDAYS');
+  if (!raw) return [];
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    Logger.log('getHolidays parse error: ' + e);
+    return [];
+  }
+}
+/**
+ * Saves the full holidays array to ScriptProperties.
+ * @param {Array} holidays
+ */
+function saveHolidays(holidays) {
+  PropertiesService.getScriptProperties().setProperty('HOLIDAYS', JSON.stringify(holidays || []));
+}
+/**
+ * Checks whether a given dateKey (YYYY-MM-DD) is a holiday.
+ * @param {string} dateKey
+ * @return {boolean}
+ */
+function isHoliday(dateKey) {
+  var holidays = getHolidays();
+  for (var i = 0; i < holidays.length; i++) {
+    if (holidays[i].date === dateKey) return true;
+  }
+  return false;
+}
+/**
+ * Toggles a date as a holiday (adds if absent, removes if present).
+ * Called from TripPlanner.html checkbox.
+ * @param {string} dateKey  - 'YYYY-MM-DD'
+ * @param {string} name     - Holiday name (used when adding)
+ * @param {boolean} isOn    - true = add, false = remove
+ * @return {Object} { success: true, holidays: [...] }
+ */
+function toggleHoliday(dateKey, name, isOn) {
+  var holidays = getHolidays();
+  var idx = -1;
+  for (var i = 0; i < holidays.length; i++) {
+    if (holidays[i].date === dateKey) { idx = i; break; }
+  }
+  if (isOn && idx === -1) {
+    holidays.push({ date: dateKey, name: name || 'Holiday' });
+  } else if (!isOn && idx !== -1) {
+    holidays.splice(idx, 1);
+  }
+  saveHolidays(holidays);
+  return { success: true, holidays: holidays };
+}
+/**
+ * Returns the holiday name for a date, or null if not a holiday.
+ * @param {string} dateKey
+ * @return {string|null}
+ */
+function getHolidayName(dateKey) {
+  var holidays = getHolidays();
+  for (var i = 0; i < holidays.length; i++) {
+    if (holidays[i].date === dateKey) return holidays[i].name;
+  }
+  return null;
+}
+/**
+ * Returns a lookup map of holiday date strings for fast batch checks.
+ * @return {Object}  { 'YYYY-MM-DD': 'Holiday Name', ... }
+ */
+function getHolidayMap() {
+  var holidays = getHolidays();
+  var map = {};
+  for (var i = 0; i < holidays.length; i++) {
+    map[holidays[i].date] = holidays[i].name;
+  }
+  return map;
+}
+/**
+ * Shows the Manage Holidays dialog (menu entry point).
+ */
+function showManageHolidaysDialog() {
+  var holidays = getHolidays();
+  var ui = SpreadsheetApp.getUi();
+  var lines = ['Current holidays:'];
+  if (holidays.length === 0) {
+    lines.push('  (none)');
+  } else {
+    for (var i = 0; i < holidays.length; i++) {
+      lines.push('  ' + holidays[i].date + '  ' + holidays[i].name);
+    }
+  }
+  lines.push('');
+  lines.push('Use the Trip Planner checkboxes to add/remove days.');
+  lines.push('Or type a date below to add one manually (YYYY-MM-DD, Name):');
+  var result = ui.prompt('Manage Holidays', lines.join('\n'), ui.ButtonSet.OK_CANCEL);
+  if (result.getSelectedButton() !== ui.Button.OK) return;
+  var input = (result.getResponseText() || '').trim();
+  if (!input) return;
+  var parts = input.split(',');
+  var dateStr = (parts[0] || '').trim();
+  var nameStr = (parts[1] || 'Holiday').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    ui.alert('Invalid date format. Please use YYYY-MM-DD.');
+    return;
+  }
+  var existing = getHolidays();
+  for (var j = 0; j < existing.length; j++) {
+    if (existing[j].date === dateStr) {
+      ui.alert('That date is already marked as a holiday.');
+      return;
+    }
+  }
+  toggleHoliday(dateStr, nameStr, true);
+  ui.alert('Added holiday: ' + nameStr + ' on ' + dateStr);
+}

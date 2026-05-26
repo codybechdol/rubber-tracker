@@ -158,21 +158,24 @@
           <div class="col-auto">
             <select id="filterStatus" class="form-select form-select-sm" onchange="applyFilters()">
               <option value="">All Status</option>
-              <option value="Pending">Pending</option>
-              <option value="Complete">Complete</option>
-              <option value="Scheduled">Scheduled</option>
+              <option value="Unassigned">Unassigned</option>
+              <option value="Assigned">Assigned</option>
               <option value="Overdue">Overdue</option>
+              <option value="Deferred">Deferred</option>
+              <option value="Complete">Complete</option>
             </select>
           </div>
           <div class="col-auto">
             <select id="filterSource" class="form-select form-select-sm" onchange="applyFilters()">
               <option value="">All Sources</option>
               <option value="Training Tracking">Training</option>
-              <option value="Crew Visit Config">Crew Visits</option>
-              <option value="Expiring Certs">Certs (from Expiring Certs)</option>
               <option value="Glove Swaps">Glove Swaps</option>
               <option value="Sleeve Swaps">Sleeve Swaps</option>
+              <option value="Reclaims">Reclaims</option>
+              <option value="Safety Compliance">Missing Safety Report</option>
+              <option value="Safety Equipment Needs">Safety Equipment</option>
               <option value="Manual Tasks">Manual Tasks</option>
+              <option value="Expiring Certs">Expiring Certs</option>
             </select>
           </div>
           <div class="col-auto">
@@ -831,6 +834,11 @@
       var itemType = task.itemType || '';
       var currentItem = task.currentItem || '';
 
+      // If taskType is just 'Manual Task', use notes as the display label
+      if ((taskType === 'Manual Task' || taskType === 'manual task') && task.notes) {
+        return '📋 ' + task.notes;
+      }
+
       // Determine if it's a Glove or Sleeve based on itemType
       var itemLabel = '';
       if (itemType) {
@@ -1178,29 +1186,13 @@
         return;
       }
 
-      // DEBUG: Log what we're sending
-      console.log('=== SAVING CHANGES ===');
-      console.log('Total changes:', changes.length);
-      changes.forEach(function(change, i) {
-        console.log('Change ' + i + ':', {
-          index: change.index,
-          taskKey: change.taskKey,
-          newDate: change.newDate,
-          startTime: change.startTime,
-          endTime: change.endTime,
-          hasSource: !!change.task.source,
-          hasRowIndex: !!change.task.rowIndex,
-          source: change.task.source,
-          rowIndex: change.task.rowIndex
-        });
-      });
+      console.log('Saving ' + changes.length + ' task change(s)...');
 
       showToast('Saving ' + changes.length + ' change(s)...');
 
       google.script.run
         .withSuccessHandler(function(result) {
-          console.log('=== SAVE SUCCESS ===');
-          console.log('Result:', result);
+          console.log('Save succeeded:', result);
           pendingDateChanges = {};
           setUnsaved(false);
           // Remove changed styling from inputs
@@ -1233,31 +1225,23 @@
           }
         })
         .withFailureHandler(function(error) {
-          console.error('=== SAVE FAILED ===');
-          console.error('Error:', error);
+          console.error('Save failed:', error);
           showToast('Error saving: ' + error, 'error');
         })
         .saveScheduleTaskDateChanges(changes);
     }
 
     function loadTasks() {
-      console.log('loadTasks: Starting (using Task Metadata)...');
       google.script.run
         .withSuccessHandler(function(response) {
-          console.log('loadTasks: Server response:', response);
 
           // Check if response is null - try fetching from ScriptProperties as fallback
           if (!response) {
-            console.warn('loadTasks: Received NULL response - trying ScriptProperties fallback...');
+            console.warn('loadTasks: Got null response, trying ScriptProperties fallback...');
 
-            // The server may have stored data but failed to return confirmation
-            // Try fetching directly from ScriptProperties
             google.script.run
               .withSuccessHandler(function(storedData) {
-                console.log('loadTasks: Fallback fetch result:', storedData);
-
                 if (storedData && storedData.tasks && !storedData.error) {
-                  console.log('loadTasks: Fallback succeeded! Found ' + storedData.totalTasks + ' tasks');
                   processTaskData(storedData);
                 } else {
                   console.error('loadTasks: Fallback also failed');
@@ -1285,15 +1269,11 @@
             return;
           }
 
-          // Check if data was stored (new approach)
+          // Check if data was stored in ScriptProperties (large dataset path)
           if (response.stored === true) {
-            console.log('loadTasks: Data stored in ScriptProperties, fetching...');
-            console.log('Total tasks:', response.totalTasks);
-
             // Fetch the stored data
             google.script.run
               .withSuccessHandler(function(data) {
-                console.log('loadTasks: Retrieved stored data:', data);
 
                 if (data.error) {
                   console.error('Storage error:', data.message);
@@ -1347,9 +1327,6 @@
 
     // Process task data (used by both cache and direct paths)
     function processTaskData(data) {
-      console.log('processTaskData: Processing', data.totalTasks, 'tasks');
-      console.log('processTaskData: data.tasks array length:', (data.tasks || []).length);
-      console.log('processTaskData: First task sample:', JSON.stringify((data.tasks || [])[0]));
 
       // Expand shortened property names from server (for smaller transfer size)
       var rawTasks = data.tasks || [];
@@ -1390,7 +1367,22 @@
         return t;
       });
 
-      console.log('processTaskData: Expanded ' + allTasks.length + ' tasks');
+      console.log('Task List: Loaded ' + allTasks.length + ' tasks');
+
+      // Compute priority from urgency data (server doesn't send priority field)
+      allTasks.forEach(function(task) {
+        if (!task.priority) {
+          if (task.isOverdue || task.daysTillDue < 0) {
+            task.priority = 'High';
+          } else if (task.daysTillDue !== null && task.daysTillDue !== undefined && task.daysTillDue <= 7) {
+            task.priority = 'High';
+          } else if (task.daysTillDue !== null && task.daysTillDue !== undefined && task.daysTillDue <= 30) {
+            task.priority = 'Medium';
+          } else {
+            task.priority = 'Low';
+          }
+        }
+      });
 
       // Normalize dates to YYYY-MM-DD string format
       allTasks.forEach(function(task, index) {
@@ -1420,7 +1412,6 @@
               task.taskType = task.type;
             }
           });
-          console.log('processTaskData: Normalized dates for ' + allTasks.length + ' tasks');
 
           // DEDUPLICATION: Remove duplicate Safety Compliance tasks (same job+week but different date formats)
           // e.g., SafetyCompliance_013-26_02-08-2026 vs SafetyCompliance_013-26_20260208
@@ -1461,7 +1452,6 @@
             var normalizedKey = jobNum + '_' + normalizedDate;
 
             if (seenSafetyJobWeeks[normalizedKey]) {
-              console.log('processTaskData: Removing duplicate Safety task: ' + taskId + ' (normalized: ' + normalizedKey + ')');
               return false; // Duplicate, filter out
             }
 
@@ -1470,12 +1460,11 @@
           });
 
           if (beforeDedup !== allTasks.length) {
-            console.log('processTaskData: Removed ' + (beforeDedup - allTasks.length) + ' duplicate Safety Compliance tasks');
+            console.log('Removed ' + (beforeDedup - allTasks.length) + ' duplicate Safety Compliance tasks');
           }
 
           // Build employee phone map from tasks that already have phone numbers
           buildEmployeePhoneMap();
-          console.log('processTaskData: Built initial phone map with ' + Object.keys(employeePhoneMap).length + ' entries from tasks');
 
           // Also fetch phone numbers directly from Employees sheet to fill gaps
           google.script.run
@@ -1488,7 +1477,7 @@
                     addedCount++;
                   }
                 }
-                console.log('processTaskData: Added ' + addedCount + ' phone numbers from server. Total: ' + Object.keys(employeePhoneMap).length);
+                console.log('Added ' + addedCount + ' phone numbers from server.');
               }
               // Update localStorage checklist items with phone numbers
               updateChecklistPhoneNumbers();
@@ -1530,12 +1519,8 @@
               '<div class="alert alert-danger">Error rendering tasks: ' + e.message + '<br><pre>' + e.stack + '</pre></div>';
           }
           // Calendar tab removed - use Trip Planner/Scheduler instead
-          try {
-            renderPersonalChecklist();
-            console.log('processTaskData: renderPersonalChecklist completed');
-          } catch (e) {
-            console.error('processTaskData: renderPersonalChecklist error:', e);
-          }
+          // Note: renderPersonalChecklist is called from getMissingSafetyReportTasks callback above
+          // Do NOT call it here synchronously - it would render before safety tasks are loaded
     }
 
     // ================== CALENDAR FUNCTIONS REMOVED ==================
@@ -1548,34 +1533,11 @@
     }
 
     // ================== TASK LIST FUNCTIONS ==================
-    var renderTasksCallCount = 0;
     function renderTasks(tasks) {
-      renderTasksCallCount++;
       var container = document.getElementById('taskContainer');
 
-      // VISIBLE DEBUG - temporary
-      var debugInfo = 'RENDER #' + renderTasksCallCount + ': tasks=' + (tasks ? tasks.length : 'null') +
-                      ', allTasks=' + allTasks.length;
-      console.log('renderTasks: ' + debugInfo);
-
-      // Extra debug: Log task types distribution
-      if (tasks && tasks.length > 0) {
-        var typeCounts = {};
-        var sourceCounts = {};
-        tasks.forEach(function(t) {
-          var tt = (t.taskType || 'NO_TYPE').toLowerCase();
-          var ss = (t.source || 'NO_SOURCE').toLowerCase();
-          typeCounts[tt] = (typeCounts[tt] || 0) + 1;
-          sourceCounts[ss] = (sourceCounts[ss] || 0) + 1;
-        });
-        console.log('renderTasks: Task types:', JSON.stringify(typeCounts));
-        console.log('renderTasks: Sources:', JSON.stringify(sourceCounts));
-      }
-
       if (!tasks || tasks.length === 0) {
-        console.log('renderTasks: Empty tasks array, showing empty state');
-        container.innerHTML = '<div class="alert alert-warning">' + debugInfo + '</div>' +
-          '<div class="empty-state"><i class="bi bi-calendar-x" style="font-size: 48px;"></i><p class="mt-3">No tasks found</p><p class="text-muted">Tasks will appear from Training, Crew Visits, Expiring Certs, and Swaps</p></div>';
+        container.innerHTML = '<div class="empty-state"><i class="bi bi-calendar-x" style="font-size: 48px;"></i><p class="mt-3">No tasks found</p><p class="text-muted">Tasks will appear from Training, Crew Visits, Expiring Certs, and Swaps</p></div>';
         return;
       }
 
@@ -1628,25 +1590,8 @@
         return true;
       });
 
-      console.log('renderTasks: Filter stats:', JSON.stringify(filterStats));
-
-      console.log('renderTasks: After filtering - filteredTasks=' + filteredTasks.length + ' (from ' + tasks.length + ' input)');
-
-      // VISIBLE DEBUG: Show filter stats as banner if low task count
-      var filterDebugHtml = '<div class="alert alert-secondary mb-2 small" style="font-family: monospace;">' +
-        '<strong>DEBUG Filter:</strong> total=' + filterStats.total +
-        ', manual=' + filterStats.manual +
-        ', certInList=' + filterStats.certInList +
-        ', certNotInList=' + filterStats.certNotInList +
-        ', other=' + filterStats.other +
-        ', completed=' + filterStats.completed +
-        ' → <strong>' + filteredTasks.length + ' passed</strong>' +
-        '</div>';
-
       if (filteredTasks.length === 0) {
-        container.innerHTML = filterDebugHtml +
-          '<div class="alert alert-info">DEBUG: ' + tasks.length + ' tasks received, 0 after filtering</div>' +
-          '<div class="empty-state"><i class="bi bi-calendar-check" style="font-size: 48px;"></i><p class="mt-3">All tasks handled</p><p class="text-muted">Some tasks may have been moved to your personal checklist</p></div>';
+        container.innerHTML = '<div class="empty-state"><i class="bi bi-calendar-check" style="font-size: 48px;"></i><p class="mt-3">All tasks handled</p><p class="text-muted">Some tasks may have been moved to your personal checklist</p></div>';
         return;
       }
 
@@ -1825,6 +1770,13 @@
       html += '<div class="task-source"><i class="bi bi-box-arrow-in-right"></i> ' + (task.source || 'Unknown') + '</div>';
       if (task.employee) {
         html += '<div class="text-muted small"><i class="bi bi-person"></i> ' + task.employee + '</div>';
+
+        // Show notes for Manual Tasks (when notes contain the task description)
+        var taskTypeLower = (task.taskType || '').toLowerCase();
+        var sourceLower = (task.source || '').toLowerCase();
+        if (task.notes && (taskTypeLower === 'manual task' || sourceLower === 'manual tasks')) {
+          html += '<div class="text-muted small" style="margin-left:20px;"><i class="bi bi-card-text"></i> ' + task.notes + '</div>';
+        }
 
         // Show report dates for Safety Compliance tasks (Missing Safety Reports)
         var taskType = (task.taskType || '').toLowerCase();
@@ -3539,13 +3491,8 @@
     }
 
     function openNotifyModal(index) {
-      console.log('openNotifyModal called with index:', index);
       var task = allTasks[index];
-      if (!task) {
-        console.log('openNotifyModal: No task found at index', index);
-        return;
-      }
-      console.log('openNotifyModal: Task found:', task);
+      if (!task) return;
 
       currentSmsTask = { task: task, index: index };
 
@@ -3557,12 +3504,10 @@
       if ((!phoneNumber || String(phoneNumber).length < 10) && task.employee) {
         var empLower = task.employee.toLowerCase().trim();
         phoneNumber = employeePhoneMap[empLower] || '';
-        console.log('openNotifyModal: Looked up phone for "' + empLower + '" = "' + phoneNumber + '"');
       }
       // Also try getPhoneForChecklistItem as final fallback
       if (!phoneNumber || String(phoneNumber).length < 10) {
         phoneNumber = getPhoneForChecklistItem(task);
-        console.log('openNotifyModal: getPhoneForChecklistItem returned "' + phoneNumber + '"');
       }
       // Store phone on task for later use by sendNotifySMS
       if (phoneNumber && String(phoneNumber).length >= 10) {
@@ -3806,19 +3751,12 @@
 
     // Build SMS message for missing JHA/Weekly Safety Meeting reports
     function buildMissingSafetyReportMessage(task) {
-      console.log('buildMissingSafetyReportMessage: task =', task);
-      console.log('buildMissingSafetyReportMessage: task.notes =', task ? task.notes : 'TASK IS NULL');
-      console.log('buildMissingSafetyReportMessage: task.Notes =', task ? task.Notes : 'TASK IS NULL');
-
       var itemType = task.itemType || task.ItemType || '';
       var notes = task.notes || task.Notes || '';
 
       // Extract foreman name for personalization
       var foremanName = task.employee || task.Employee || task.foreman || task.Foreman || '';
       var firstName = foremanName.split(' ')[0] || '';
-
-      console.log('buildMissingSafetyReportMessage: itemType=' + itemType + ', notes="' + notes + '"');
-      console.log('buildMissingSafetyReportMessage: foremanName="' + foremanName + '", firstName="' + firstName + '"');
 
       // Extract dates from notes
       // Notes format: "Missing JHA: 02/03/2026, 02/04/2026; Missing Weekly Safety Meeting for week of 02/02/2026"
@@ -3831,7 +3769,6 @@
       var lateJhaDates = lateJhaMatch ? lateJhaMatch[1].trim() : '';
       var weekOf = weekOfMatch ? weekOfMatch[1] : '';
 
-      console.log('buildMissingSafetyReportMessage: jhaDates="' + jhaDates + '", lateJhaDates="' + lateJhaDates + '", weekOf="' + weekOf + '"');
 
       // Count JHA dates for grammar
       var jhaDateCount = jhaDates ? jhaDates.split(',').length : 0;
@@ -3899,7 +3836,6 @@
         }
       }
 
-      console.log('buildMissingSafetyReportMessage: RETURNING message="' + message + '"');
       return message;
     }
 
@@ -4075,8 +4011,6 @@
       var notes = task.notes || task.n || '';
       var itemType = task.itemType || task.item || 'JHA';
 
-      console.log('openMissingReportResolutionModal: DEBUG notes="' + notes + '"');
-      console.log('openMissingReportResolutionModal: DEBUG task.notes="' + task.notes + '", task.n="' + task.n + '"');
 
       // Parse the task notes to extract missing days
       // Format: "Missing JHA: 02/05/2026, 02/06/2026; Missing Weekly Safety Meeting for week of 02/01/2026"
@@ -4084,14 +4018,11 @@
       var weekOfMatch = notes.match(/week of\s+(\d{2}\/\d{2}\/\d{4})/i);
       var weekOf = weekOfMatch ? weekOfMatch[1] : '';
 
-      console.log('openMissingReportResolutionModal: DEBUG jhaMatch=', jhaMatch, ', weekOfMatch=', weekOfMatch);
 
       // If weekOf not found in notes, calculate it from the missing date
       if (!weekOf && jhaMatch) {
         var firstDateStr = jhaMatch[1].trim().split(',')[0].trim();
-        console.log('openMissingReportResolutionModal: DEBUG firstDateStr="' + firstDateStr + '"');
         var dateParts = firstDateStr.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-        console.log('openMissingReportResolutionModal: DEBUG dateParts=', dateParts);
         if (dateParts) {
           var missingDate = new Date(parseInt(dateParts[3]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
           var dayOfWeek = missingDate.getDay();
@@ -4100,7 +4031,6 @@
           weekOf = String(weekStart.getMonth() + 1).padStart(2, '0') + '/' +
                    String(weekStart.getDate()).padStart(2, '0') + '/' +
                    weekStart.getFullYear();
-          console.log('openMissingReportResolutionModal: Calculated weekOf=' + weekOf + ' from date ' + firstDateStr);
         }
       }
 
@@ -4123,7 +4053,6 @@
             weekOf = String(ws.getMonth() + 1).padStart(2, '0') + '/' +
                      String(ws.getDate()).padStart(2, '0') + '/' +
                      ws.getFullYear();
-            console.log('openMissingReportResolutionModal: Calculated weekOf=' + weekOf + ' from tid date');
           }
         }
       }
@@ -4144,7 +4073,6 @@
           weekOf = String(weekSunday.getMonth() + 1).padStart(2, '0') + '/' +
                    String(weekSunday.getDate()).padStart(2, '0') + '/' +
                    weekSunday.getFullYear();
-          console.log('openMissingReportResolutionModal: Calculated weekOf=' + weekOf + ' from dueDate');
         }
       }
 
@@ -4176,7 +4104,6 @@
         if (taskIdMatch) jobNumber = taskIdMatch[1];
       }
 
-      console.log('openMissingReportResolutionModal: task=', task, 'tid=' + task.tid, 'jobNumber=' + jobNumber, 'weekOf=' + weekOf);
 
       // Populate modal header info
       document.getElementById('resolutionForemanName').textContent = employeeName;
@@ -4719,7 +4646,6 @@
       // If this is a Safety Compliance task, also update the Safety Compliance sheet
       if (certCategory === 'missing_safety_report') {
         var taskId = task.taskId || task.TaskID || task.tid || task.taskKey || '';
-        console.log('sendNotifySMS: Safety Compliance task, taskId=' + taskId);
 
         // Extract jobNumber and weekOf from task data for more reliable matching
         var jobNumber = task.jobNumber || '';
@@ -4750,19 +4676,14 @@
           }
         }
 
-        console.log('sendNotifySMS: Extracted jobNumber=' + jobNumber + ', weekOf=' + weekOf);
 
         if (taskId || jobNumber) {
           google.script.run
             .withSuccessHandler(function(result) {
-              if (result && result.success) {
-                console.log('Safety Compliance sheet updated to notified status:', result);
-              } else {
-                console.log('Failed to update Safety Compliance sheet:', result);
-              }
+              // Safety Compliance sheet updated to notified status
             })
             .withFailureHandler(function(err) {
-              console.log('Error updating Safety Compliance sheet:', err);
+              console.error('Error updating Safety Compliance sheet:', err);
             })
             .markSafetyReportNotified(taskId, jobNumber, weekOf);
         }
@@ -5014,13 +4935,10 @@
         return;
       }
 
-      console.log('sendSafetyComplianceSms: task=', task);
-      console.log('sendSafetyComplianceSms: notes=' + task.notes + ', itemType=' + task.itemType);
 
       // Build SMS message using server function
       google.script.run
         .withSuccessHandler(function(message) {
-          console.log('SMS message from server: ' + message);
           if (message) {
             // Clean phone number - remove all non-digit characters for SMS URL
             var cleanPhone = phoneNumber.replace(/\D/g, '');
@@ -5446,16 +5364,6 @@
       var isCertTask = isChecklistCertTask(item);
       var isCertWithPhone = isCertTask && itemPhone && itemPhone.length >= 10;
 
-      // Debug logging for cert tasks
-      if (item.source === 'Expiring Certs' || (item.itemType && item.itemType.toLowerCase().indexOf('cert') !== -1)) {
-        console.log('DEBUG Checklist Item:', item.employee, '- itemType:', item.itemType, '- source:', item.source);
-        console.log('  isCertTask:', isCertTask, '- itemPhone:', itemPhone, '- isCertWithPhone:', isCertWithPhone);
-        console.log('  employeePhoneMap keys:', Object.keys(employeePhoneMap).slice(0, 5));
-        if (item.employee) {
-          var empLower = item.employee.toLowerCase().trim();
-          console.log('  Looking for:', empLower, '- found:', employeePhoneMap[empLower]);
-        }
-      }
 
       if (isCertWithPhone) {
         // SMS Notify button for cert items with phone
@@ -5581,8 +5489,11 @@
             renderExpiringCerts();
             console.log('loadExpiringCerts: renderExpiringCerts complete');
 
-            // Re-render Task List with any added certs
-            renderTasks(allTasks);
+            // Re-render Task List with any added certs - only if main task data is already loaded
+            // (avoids showing 6-task partial render before 327 tasks arrive)
+            if (allTasks.length > 10) {
+              renderTasks(allTasks);
+            }
             renderCalendar();
 
             // Re-render checklist in case phone numbers were added

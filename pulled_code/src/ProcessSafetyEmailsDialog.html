@@ -1143,56 +1143,80 @@
       google.script.run
         .withSuccessHandler(function(result) {
           if (result && result.success) {
-            daySelect.innerHTML = '<option value="">Select Missing Day...</option>';
+            daySelect.innerHTML = '<option value="">Select Day...</option>';
             var hasOptions = false;
 
-            // Only show JHA days if this is a JHA report
             if (isJHA) {
-              if (result.missingDays.length === 0) {
-                daySelect.innerHTML = '<option value="">No missing JHA days</option>';
-                daySelect.disabled = true;
-                return;
+              // --- Missing JHA days (will update compliance + log) ---
+              if (result.missingDays && result.missingDays.length > 0) {
+                var missingGroup = document.createElement('optgroup');
+                missingGroup.label = '⏳ Missing — credits compliance';
+                for (var d = 0; d < result.missingDays.length; d++) {
+                  var day = result.missingDays[d];
+                  var opt = document.createElement('option');
+                  opt.value = 'JHA|' + day.dayName + '|' + day.date + '|false';
+                  opt.text = '⏳ ' + day.dayName + ' (' + day.date + ')';
+                  missingGroup.appendChild(opt);
+                  hasOptions = true;
+                }
+                daySelect.appendChild(missingGroup);
               }
 
-              for (var d = 0; d < result.missingDays.length; d++) {
-                var day = result.missingDays[d];
-                daySelect.innerHTML += '<option value="JHA|' + day.dayName + '|' + day.date + '">' +
-                  'JHA - ' + day.dayName + ' (' + day.date + ')</option>';
-                hasOptions = true;
+              // --- Already-credited JHA days (log entry only, no compliance change) ---
+              if (result.creditedDays && result.creditedDays.length > 0) {
+                var creditedGroup = document.createElement('optgroup');
+                creditedGroup.label = '✅ Already credited — log entry only';
+                for (var c = 0; c < result.creditedDays.length; c++) {
+                  var cday = result.creditedDays[c];
+                  var copt = document.createElement('option');
+                  copt.value = 'JHA|' + cday.dayName + '|' + cday.date + '|true';
+                  copt.text = '✅ ' + cday.dayName + ' (' + cday.date + ') — log only';
+                  creditedGroup.appendChild(copt);
+                  hasOptions = true;
+                }
+                daySelect.appendChild(creditedGroup);
               }
             }
 
-            // Only show Weekly Meeting if this is a Safety Meeting report
             if (isSafetyMeeting) {
-              if (!result.weeklyMeetingMissing) {
-                daySelect.innerHTML = '<option value="">Weekly Meeting not missing</option>';
-                daySelect.disabled = true;
-                return;
+              if (result.weeklyMeetingMissing) {
+                var wopt = document.createElement('option');
+                wopt.value = 'WeeklyMeeting||' + weekStartStr + '|false';
+                wopt.text = '⏳ Weekly Meeting (week of ' + weekStartStr + ')';
+                daySelect.appendChild(wopt);
+                hasOptions = true;
+              } else if (result.weeklyMeetingCredited) {
+                var wcopt = document.createElement('option');
+                wcopt.value = 'WeeklyMeeting||' + weekStartStr + '|true';
+                wcopt.text = '✅ Weekly Meeting (week of ' + weekStartStr + ') — log only';
+                daySelect.appendChild(wcopt);
+                hasOptions = true;
               }
-
-              daySelect.innerHTML += '<option value="WeeklyMeeting||' + weekStartStr + '">Weekly Meeting (week of ' + weekStartStr + ')</option>';
-              hasOptions = true;
             }
 
             // Fallback: show all if report type is unknown
             if (!isJHA && !isSafetyMeeting) {
-              // Add JHA days
-              for (var d = 0; d < result.missingDays.length; d++) {
-                var day = result.missingDays[d];
-                daySelect.innerHTML += '<option value="JHA|' + day.dayName + '|' + day.date + '">' +
-                  'JHA - ' + day.dayName + ' (' + day.date + ')</option>';
-                hasOptions = true;
+              if (result.missingDays) {
+                for (var fd = 0; fd < result.missingDays.length; fd++) {
+                  var fday = result.missingDays[fd];
+                  var fopt = document.createElement('option');
+                  fopt.value = 'JHA|' + fday.dayName + '|' + fday.date + '|false';
+                  fopt.text = '⏳ JHA - ' + fday.dayName + ' (' + fday.date + ')';
+                  daySelect.appendChild(fopt);
+                  hasOptions = true;
+                }
               }
-
-              // Add Weekly Meeting if missing
               if (result.weeklyMeetingMissing) {
-                daySelect.innerHTML += '<option value="WeeklyMeeting||' + weekStartStr + '">Weekly Meeting (week of ' + weekStartStr + ')</option>';
+                var fwopt = document.createElement('option');
+                fwopt.value = 'WeeklyMeeting||' + weekStartStr + '|false';
+                fwopt.text = '⏳ Weekly Meeting (week of ' + weekStartStr + ')';
+                daySelect.appendChild(fwopt);
                 hasOptions = true;
               }
             }
 
             if (!hasOptions) {
-              daySelect.innerHTML = '<option value="">No missing days for this report type</option>';
+              daySelect.innerHTML = '<option value="">No days available for this crew/week</option>';
               daySelect.disabled = true;
               return;
             }
@@ -1229,12 +1253,17 @@
       // Parse day selection
       var targetDay = '';
       var targetReportType = reportType;
+      var logEntryOnly = false;
       if (dayValue) {
         var parts = dayValue.split('|');
         if (parts[0] === 'WeeklyMeeting') {
           targetReportType = 'Safety Meeting';
         } else if (parts[1]) {
           targetDay = parts[1];
+        }
+        // 4th segment encodes logEntryOnly flag
+        if (parts[3] === 'true') {
+          logEntryOnly = true;
         }
       }
 
@@ -1247,7 +1276,8 @@
         targetCrew: targetCrew,
         targetForeman: targetForeman,
         targetDay: targetDay,
-        saveMapping: saveMapping
+        saveMapping: saveMapping,
+        logEntryOnly: logEntryOnly
       };
 
       // Show loading state
@@ -1261,8 +1291,9 @@
           if (result && result.success) {
             reportDiv.style.background = '#d4edda';
             reportDiv.style.borderLeftColor = '#28a745';
+            var creditLabel = logEntryOnly ? ' (log entry only — compliance unchanged)' : '';
             assignRow.innerHTML = '<span style="color:#155724;font-size:10px;">✅ Credited to ' + targetCrew +
-              (targetDay ? ' (' + targetDay + ')' : '') + '</span>';
+              (targetDay ? ' (' + targetDay + ')' : '') + creditLabel + '</span>';
 
             // If mapping was saved, update the job config table
             if (saveMapping) {

@@ -268,8 +268,8 @@ function getPurchaseOrderNumber() {
 
 /**
  * Gets all vendors from the combined Vendors sheet.
- * Groups rows by vendor name and maps known glove/sleeve items to legacy properties.
- * @returns {Array} Array of vendor objects with pricing and customItems
+ * Groups rows by vendor name. All items (including gloves/sleeves) are in customItems.
+ * @returns {Array} Array of vendor objects with customItems catalog
  */
 function getVendors() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -290,16 +290,6 @@ function getVendors() {
 
   var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 8).getValues();
 
-  // Known item names that map to legacy glove/sleeve fields
-  var KNOWN_MAP = {
-    'Class 0 Glove': { priceField: 'class0GlovePrice', numField: 'class0GloveItemNum' },
-    'Class 2 Glove': { priceField: 'class2GlovePrice', numField: 'class2GloveItemNum' },
-    'Class 3 Glove': { priceField: 'class3GlovePrice', numField: 'class3GloveItemNum' },
-    'Class 0 Sleeve': { priceField: 'class0SleevePrice', numField: 'class0SleeveItemNum' },
-    'Class 2 Sleeve': { priceField: 'class2SleevePrice', numField: 'class2SleeveItemNum' },
-    'Class 3 Sleeve': { priceField: 'class3SleevePrice', numField: 'class3SleeveItemNum' }
-  };
-
   // Group rows by vendor name
   var vendorMap = {};
   var vendorOrder = [];
@@ -316,10 +306,6 @@ function getVendors() {
         email: String(row[2] || ''),
         phone: String(row[3] || ''),
         notes: String(row[4] || ''),
-        class0GlovePrice: 0, class2GlovePrice: 0, class3GlovePrice: 0,
-        class0SleevePrice: 0, class2SleevePrice: 0, class3SleevePrice: 0,
-        class0GloveItemNum: '', class2GloveItemNum: '', class3GloveItemNum: '',
-        class0SleeveItemNum: '', class2SleeveItemNum: '', class3SleeveItemNum: '',
         customItems: []
       };
       vendorOrder.push(name);
@@ -331,18 +317,12 @@ function getVendors() {
 
     if (!itemName) continue; // Empty item row (contact-info-only placeholder)
 
-    // Check if it's a known glove/sleeve item
-    var mapped = KNOWN_MAP[itemName];
-    if (mapped) {
-      vendorMap[name][mapped.priceField] = price;
-      vendorMap[name][mapped.numField] = itemNum;
-    } else {
-      vendorMap[name].customItems.push({
-        item: itemName,
-        itemNumber: itemNum,
-        price: price
-      });
-    }
+    // All items go into customItems (unified catalog)
+    vendorMap[name].customItems.push({
+      item: itemName,
+      itemNumber: itemNum,
+      price: price
+    });
   }
 
   // Return in order
@@ -356,7 +336,7 @@ function getVendors() {
 
 /**
  * Saves vendor data to the combined Vendors sheet (8 columns).
- * Converts legacy glove/sleeve fields + customItems into item rows.
+ * Writes all items from customItems array as individual rows.
  * @param {Array} vendors - Array of vendor objects
  */
 function saveVendors(vendors) {
@@ -383,16 +363,6 @@ function saveVendors(vendors) {
     return { success: true, message: 'Vendors cleared.' };
   }
 
-  // Known glove/sleeve fields to write as standard item rows
-  var KNOWN_ITEMS = [
-    { priceField: 'class0GlovePrice', numField: 'class0GloveItemNum', item: 'Class 0 Glove' },
-    { priceField: 'class2GlovePrice', numField: 'class2GloveItemNum', item: 'Class 2 Glove' },
-    { priceField: 'class3GlovePrice', numField: 'class3GloveItemNum', item: 'Class 3 Glove' },
-    { priceField: 'class0SleevePrice', numField: 'class0SleeveItemNum', item: 'Class 0 Sleeve' },
-    { priceField: 'class2SleevePrice', numField: 'class2SleeveItemNum', item: 'Class 2 Sleeve' },
-    { priceField: 'class3SleevePrice', numField: 'class3SleeveItemNum', item: 'Class 3 Sleeve' }
-  ];
-
   var allRows = [];
   var totalItems = 0;
 
@@ -400,22 +370,7 @@ function saveVendors(vendors) {
     var v = vendors[i];
     var hasItems = false;
 
-    // Write known glove/sleeve items
-    for (var k = 0; k < KNOWN_ITEMS.length; k++) {
-      var ki = KNOWN_ITEMS[k];
-      var price = v[ki.priceField] || 0;
-      var itemNum = v[ki.numField] || '';
-      if (price || itemNum) {
-        allRows.push([
-          v.vendorName || '', v.contactName || '', v.email || '', v.phone || '', v.notes || '',
-          ki.item, itemNum, price
-        ]);
-        hasItems = true;
-        totalItems++;
-      }
-    }
-
-    // Write custom items
+    // Write all catalog items
     if (v.customItems && v.customItems.length > 0) {
       for (var j = 0; j < v.customItems.length; j++) {
         var ci = v.customItems[j];
@@ -484,22 +439,20 @@ function getItemsToOrder() {
   var currentSection = null;
   var headerRowIndex = -1;
 
-  // Section definitions for matching
+  // Section definitions for matching (simplified 3-tier system)
   var sectionInfo = {
-    'NEED TO ORDER': { priority: 1, timeframe: 'Immediate', emoji: '🛒' },
-    'READY FOR DELIVERY (SIZE UP)': { priority: 2, timeframe: 'In 2 Weeks', emoji: '📦⚠️' },
-    'IN TESTING': { priority: 3, timeframe: 'In 3 Weeks', emoji: '⏳' },
-    'IN TESTING (SIZE UP)': { priority: 4, timeframe: 'In 3 Weeks', emoji: '⏳⚠️' },
-    'SIZE UP ASSIGNMENTS': { priority: 5, timeframe: 'Consider', emoji: '⚠️' }
+    'HIGH PRIORITY': { priority: 1, timeframe: 'Immediate', emoji: '🔴' },
+    'MEDIUM PRIORITY': { priority: 2, timeframe: 'Soon', emoji: '🟠' },
+    'LOW PRIORITY': { priority: 3, timeframe: 'Consider', emoji: '🟢' }
   };
 
   // Column indices (will be set when we find each header row)
   var cols = {
-    severity: -1,
-    timeframe: -1,
+    priority: -1,
     itemType: -1,
     size: -1,
     classNum: -1,
+    onShelf: -1,
     quantity: -1,
     reason: -1,
     status: -1,
@@ -528,18 +481,18 @@ function getItemsToOrder() {
       continue;
     }
 
-    // Detect header row within section (check for "Severity" case-insensitive)
-    if (currentSection && (firstCell === 'Severity' || firstCell.toLowerCase() === 'severity')) {
+    // Detect header row within section (check for "Priority" case-insensitive)
+    if (currentSection && (firstCell === 'Priority' || firstCell.toLowerCase() === 'priority')) {
       headerRowIndex = i;
       // Map columns
       for (var c = 0; c < row.length; c++) {
         var header = String(row[c]).toLowerCase().trim();
-        if (header === 'severity') cols.severity = c;
-        if (header === 'timeframe') cols.timeframe = c;
+        if (header === 'priority') cols.priority = c;
         if (header === 'item type') cols.itemType = c;
         if (header === 'size') cols.size = c;
         if (header === 'class') cols.classNum = c;
-        if (header === 'quantity needed') cols.quantity = c;
+        if (header === 'on shelf') cols.onShelf = c;
+        if (header === 'qty to order') cols.quantity = c;
         if (header === 'reason') cols.reason = c;
         if (header === 'status') cols.status = c;
         if (header === 'notes') cols.notes = c;
@@ -572,7 +525,7 @@ function getItemsToOrder() {
     var classNum = cols.classNum !== -1 ? String(row[cols.classNum] || '').trim() : '';
     var quantity = cols.quantity !== -1 ? parseInt(row[cols.quantity]) || 0 : 0;
     var notes = cols.notes !== -1 ? String(row[cols.notes] || '').trim() : '';
-    var timeframe = cols.timeframe !== -1 ? String(row[cols.timeframe] || '').trim() : '';
+    var reason = cols.reason !== -1 ? String(row[cols.reason] || '').trim() : '';
 
     if (itemType && size && classNum && quantity > 0) {
       var info = sectionInfo[currentSection] || { priority: 99, timeframe: 'Unknown', emoji: '' };
@@ -586,9 +539,10 @@ function getItemsToOrder() {
         key: itemType + '|' + size + '|' + classNum,
         category: currentSection,
         categoryEmoji: info.emoji,
-        timeframe: timeframe || info.timeframe,
+        timeframe: info.timeframe,
         priority: info.priority,
-        isSizeUp: currentSection.indexOf('SIZE UP') !== -1
+        reason: reason,
+        isSizeUp: currentSection.indexOf('LOW PRIORITY') !== -1
       });
     }
   }
@@ -732,7 +686,6 @@ function markItemsAsOrdered(items, expectedDelivery) {
 
   var data = sheet.getDataRange().getValues();
   var statusColIndex = -1;
-  var inNeedToOrderSection = false;
   var updatedCount = 0;
 
   // Build a lookup map for items to order
@@ -742,16 +695,18 @@ function markItemsAsOrdered(items, expectedDelivery) {
     itemsToMark[key] = true;
   });
 
-  // First pass: find the status column in NEED TO ORDER section
+  // Find the status column by scanning for header rows in any section
+  var inSection = false;
+
   for (var i = 0; i < data.length; i++) {
     var firstCell = String(data[i][0] || '').trim();
 
-    if (firstCell.indexOf('NEED TO ORDER') !== -1) {
-      inNeedToOrderSection = true;
+    if (firstCell.indexOf('HIGH PRIORITY') !== -1 || firstCell.indexOf('MEDIUM PRIORITY') !== -1 || firstCell.indexOf('LOW PRIORITY') !== -1) {
+      inSection = true;
       continue;
     }
 
-    if (inNeedToOrderSection && firstCell === 'Severity') {
+    if (inSection && firstCell === 'Priority') {
       // Find status column
       for (var c = 0; c < data[i].length; c++) {
         if (String(data[i][c]).toLowerCase().trim() === 'status') {
@@ -771,8 +726,8 @@ function markItemsAsOrdered(items, expectedDelivery) {
   var deliveryStr = expectedDelivery || '???';
   var newStatus = 'ORDERED! Est. Receive date (' + deliveryStr + ')';
 
-  // Second pass: update matching items
-  inNeedToOrderSection = false;
+  // Second pass: update matching items across all sections
+  inSection = false;
   var headerFound = false;
   var itemTypeCol = -1, sizeCol = -1, classCol = -1;
 
@@ -780,12 +735,13 @@ function markItemsAsOrdered(items, expectedDelivery) {
     var row = data[i];
     var firstCell = String(row[0] || '').trim();
 
-    if (firstCell.indexOf('NEED TO ORDER') !== -1) {
-      inNeedToOrderSection = true;
+    if (firstCell.indexOf('HIGH PRIORITY') !== -1 || firstCell.indexOf('MEDIUM PRIORITY') !== -1 || firstCell.indexOf('LOW PRIORITY') !== -1) {
+      inSection = true;
+      headerFound = false;
       continue;
     }
 
-    if (inNeedToOrderSection && firstCell === 'Severity') {
+    if (inSection && firstCell === 'Priority') {
       headerFound = true;
       // Find columns
       for (var c = 0; c < row.length; c++) {
@@ -797,12 +753,13 @@ function markItemsAsOrdered(items, expectedDelivery) {
       continue;
     }
 
-    // Exit section
-    if (inNeedToOrderSection && (firstCell === 'TOTAL' || firstCell.indexOf('📦') !== -1 || firstCell.indexOf('⏳') !== -1)) {
-      break;
+    // Skip TOTAL rows
+    if (inSection && headerFound && firstCell === 'TOTAL') {
+      headerFound = false;
+      continue;
     }
 
-    if (!inNeedToOrderSection || !headerFound) continue;
+    if (!inSection || !headerFound) continue;
     if (!firstCell || firstCell === '') continue;
 
     // Check if this item matches one we're marking
@@ -852,7 +809,7 @@ function showVendorConfigDialog() {
 
   var html = HtmlService.createHtmlOutputFromFile('VendorConfig')
     .setWidth(900)
-    .setHeight(650);
+    .setHeight(900);
   SpreadsheetApp.getUi().showModalDialog(html, '⚙️ Manage Vendors');
 }
 

@@ -59,8 +59,8 @@ function updateInventoryReports() {
     }
     setStoredYear(currentYear);
 
-    var glovesData = glovesSheet.getLastRow() > 1 ? glovesSheet.getRange(2, 1, glovesSheet.getLastRow() - 1, 11).getValues() : [];
-    var sleevesData = sleevesSheet.getLastRow() > 1 ? sleevesSheet.getRange(2, 1, sleevesSheet.getLastRow() - 1, 11).getValues() : [];
+    var glovesData = glovesSheet.getLastRow() > 1 ? glovesSheet.getRange(2, 1, glovesSheet.getLastRow() - 1, COLS.INVENTORY.NOTES).getValues() : [];
+    var sleevesData = sleevesSheet.getLastRow() > 1 ? sleevesSheet.getRange(2, 1, sleevesSheet.getLastRow() - 1, COLS.INVENTORY.NOTES).getValues() : [];
 
     var totalGloves = glovesData.length;
     var totalSleeves = sleevesData.length;
@@ -92,11 +92,11 @@ function updateInventoryReports() {
 
     // Process gloves
     glovesData.forEach(function(row) {
-      var status = normalizeStatusForReport(row[6]);
-      var itemClass = String(row[2]).trim();
-      var location = (row[5] || '').toString().trim();
-      var dateAssigned = row[4];
-      var assignedTo = String(row[7] || '').trim();
+      var status = normalizeStatusForReport(row[COLS.INVENTORY.STATUS - 1]);
+      var itemClass = String(row[COLS.INVENTORY.CLASS - 1]).trim();
+      var location = (row[COLS.INVENTORY.LOCATION - 1] || '').toString().trim();
+      var dateAssigned = row[COLS.INVENTORY.DATE_ASSIGNED - 1];
+      var assignedTo = String(row[COLS.INVENTORY.ASSIGNED_TO - 1] || '').trim();
       var assignedToLower = assignedTo.toLowerCase();
 
       gloveStatusCounts[status] = (gloveStatusCounts[status] || 0) + 1;
@@ -132,11 +132,11 @@ function updateInventoryReports() {
 
     // Process sleeves
     sleevesData.forEach(function(row) {
-      var status = normalizeStatusForReport(row[6]);
-      var itemClass = String(row[2]).trim();
-      var location = (row[5] || '').toString().trim();
-      var dateAssigned = row[4];
-      var assignedTo = String(row[7] || '').trim();
+      var status = normalizeStatusForReport(row[COLS.INVENTORY.STATUS - 1]);
+      var itemClass = String(row[COLS.INVENTORY.CLASS - 1]).trim();
+      var location = (row[COLS.INVENTORY.LOCATION - 1] || '').toString().trim();
+      var dateAssigned = row[COLS.INVENTORY.DATE_ASSIGNED - 1];
+      var assignedTo = String(row[COLS.INVENTORY.ASSIGNED_TO - 1] || '').trim();
       var assignedToLower = assignedTo.toLowerCase();
 
       sleeveStatusCounts[status] = (sleeveStatusCounts[status] || 0) + 1;
@@ -635,8 +635,8 @@ function initialize2025AnnualData() {
     return;
   }
 
-  var glovesData = glovesSheet.getLastRow() > 1 ? glovesSheet.getRange(2, 1, glovesSheet.getLastRow() - 1, 11).getValues() : [];
-  var sleevesData = sleevesSheet.getLastRow() > 1 ? sleevesSheet.getRange(2, 1, sleevesSheet.getLastRow() - 1, 11).getValues() : [];
+  var glovesData = glovesSheet.getLastRow() > 1 ? glovesSheet.getRange(2, 1, glovesSheet.getLastRow() - 1, COLS.INVENTORY.NOTES).getValues() : [];
+  var sleevesData = sleevesSheet.getLastRow() > 1 ? sleevesSheet.getRange(2, 1, sleevesSheet.getLastRow() - 1, COLS.INVENTORY.NOTES).getValues() : [];
 
   var totalGloves = glovesData.length;
   var totalSleeves = sleevesData.length;
@@ -646,14 +646,14 @@ function initialize2025AnnualData() {
   var sleevesLost = 0, sleevesFailed = 0, sleevesAssigned = 0;
 
   glovesData.forEach(function(row) {
-    var status = normalizeStatusForReport(row[6]);
+    var status = normalizeStatusForReport(row[COLS.INVENTORY.STATUS - 1]);
     if (status === 'Lost') glovesLost++;
     if (status === 'Failed Rubber') glovesFailed++;
     if (status === 'Assigned') glovesAssigned++;
   });
 
   sleevesData.forEach(function(row) {
-    var status = normalizeStatusForReport(row[6]);
+    var status = normalizeStatusForReport(row[COLS.INVENTORY.STATUS - 1]);
     if (status === 'Lost') sleevesLost++;
     if (status === 'Failed Rubber') sleevesFailed++;
     if (status === 'Assigned') sleevesAssigned++;
@@ -1050,6 +1050,12 @@ function promptNewItemSource(itemNum, sheetName, rowNum) {
   } else if (sheetName === 'Phasing Sets') {
     itemType = 'Phasing Set';
     dialogTitle = '⚡ New Phasing Set Entry';
+  } else if (sheetName === 'Hot Sticks') {
+    itemType = 'Hot Stick';
+    dialogTitle = '🪵 New Hot Stick Entry';
+  } else if (sheetName === 'Grounds') {
+    itemType = 'Ground';
+    dialogTitle = '⚡ New Ground Entry';
   } else {
     itemType = 'Item';
     dialogTitle = '📦 New Item Entry';
@@ -1083,8 +1089,10 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
   var isHVTester = (sheetName === 'HV Testers');
   var isPhasingSet = (sheetName === 'Phasing Sets');
   var isAED = (sheetName === 'AED');
+  var isGrounds = (sheetName === 'Grounds');
+  var isHotStick = (sheetName === 'Hot Sticks');
   var isEquipment = isHVTester || isPhasingSet || isAED;
-  var itemType = sheetName === 'Gloves' ? 'Glove' : (sheetName === 'Sleeves' ? 'Sleeve' : (isBlanket ? 'Blanket' : (isHVTester ? 'HV Tester' : (isPhasingSet ? 'Phasing Set' : (isAED ? 'AED' : 'Item')))));
+  var itemType = sheetName === 'Gloves' ? 'Glove' : (sheetName === 'Sleeves' ? 'Sleeve' : (isBlanket ? 'Blanket' : (isHVTester ? 'HV Tester' : (isPhasingSet ? 'Phasing Set' : (isAED ? 'AED' : (isGrounds ? 'Ground' : (isHotStick ? 'Hot Stick' : 'Item')))))));
 
   // ===========================================================================
   // DUPLICATE ITEM NUMBER VALIDATION
@@ -1116,19 +1124,16 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
     }
     if (formData.calibrationDate) {
       var calCell = sheet.getRange(rowNum, COLS.HV_TESTERS.CALIBRATION_DATE);
-      var dateParts = formData.calibrationDate.split('-');
-      if (dateParts.length === 3) {
-        var parsedDate = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
-        if (!isNaN(parsedDate.getTime())) {
-          calCell.setValue(parsedDate);
-          try { calCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
-          // Calculate Replacement Date = Calibration Date + 10 years
-          var replacementDate = new Date(parsedDate);
-          replacementDate.setFullYear(replacementDate.getFullYear() + (typeof INTERVAL_CALIBRATION_YEARS !== 'undefined' ? INTERVAL_CALIBRATION_YEARS : 10));
-          var replCell = sheet.getRange(rowNum, COLS.HV_TESTERS.CHANGE_OUT_DATE);
-          replCell.setValue(replacementDate);
-          try { replCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
-        }
+      var parsedDate = parseDateNoon(formData.calibrationDate);
+      if (parsedDate) {
+        calCell.setValue(parsedDate);
+        try { calCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+        // Calculate Replacement Date = Calibration Date + 10 years
+        var replacementDate = new Date(parsedDate);
+        replacementDate.setFullYear(replacementDate.getFullYear() + (typeof INTERVAL_CALIBRATION_YEARS !== 'undefined' ? INTERVAL_CALIBRATION_YEARS : 10));
+        var replCell = sheet.getRange(rowNum, COLS.HV_TESTERS.CHANGE_OUT_DATE);
+        replCell.setValue(replacementDate);
+        try { replCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
       }
     }
     if (formData.location) {
@@ -1182,19 +1187,16 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
     }
     if (formData.calibrationDate) {
       var calCell = sheet.getRange(rowNum, COLS.PHASING_SETS.CALIBRATION_DATE);
-      var dateParts = formData.calibrationDate.split('-');
-      if (dateParts.length === 3) {
-        var parsedDate = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
-        if (!isNaN(parsedDate.getTime())) {
-          calCell.setValue(parsedDate);
-          try { calCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
-          // Calculate Replacement Date = Calibration Date + 10 years
-          var replacementDate = new Date(parsedDate);
-          replacementDate.setFullYear(replacementDate.getFullYear() + (typeof INTERVAL_CALIBRATION_YEARS !== 'undefined' ? INTERVAL_CALIBRATION_YEARS : 10));
-          var replCell = sheet.getRange(rowNum, COLS.PHASING_SETS.CHANGE_OUT_DATE);
-          replCell.setValue(replacementDate);
-          try { replCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
-        }
+      var parsedDate = parseDateNoon(formData.calibrationDate);
+      if (parsedDate) {
+        calCell.setValue(parsedDate);
+        try { calCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+        // Calculate Replacement Date = Calibration Date + 10 years
+        var replacementDate = new Date(parsedDate);
+        replacementDate.setFullYear(replacementDate.getFullYear() + (typeof INTERVAL_CALIBRATION_YEARS !== 'undefined' ? INTERVAL_CALIBRATION_YEARS : 10));
+        var replCell = sheet.getRange(rowNum, COLS.PHASING_SETS.CHANGE_OUT_DATE);
+        replCell.setValue(replacementDate);
+        try { replCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
       }
     }
     if (formData.location) {
@@ -1241,13 +1243,10 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
     }
     if (formData.padExpiration) {
       var padCell = sheet.getRange(rowNum, COLS.AED.PAD_EXPIRATION);
-      var dateParts = formData.padExpiration.split('-');
-      if (dateParts.length === 3) {
-        var parsedDate = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
-        if (!isNaN(parsedDate.getTime())) {
-          padCell.setValue(parsedDate);
-          try { padCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
-        }
+      var parsedDate = parseDateNoon(formData.padExpiration);
+      if (parsedDate) {
+        padCell.setValue(parsedDate);
+        try { padCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
       }
     }
     if (formData.location) {
@@ -1284,32 +1283,171 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
   }
 
   // ===========================================================================
-  // GLOVES / SLEEVES / BLANKETS (original logic)
+  // GROUNDS: A=Serial#(1), B=Type(2), C=Size(3), D=KV(4), E=Length(5),
+  //          F=Test Date(6), G=Date Assigned(7), H=Location(8), I=Status(9),
+  //          J=Assigned To(10), K=Change Out Date(11), L=Picked For(12), M=Notes(13)
   // ===========================================================================
+  if (isGrounds) {
+    // Write Type (col B)
+    if (formData.groundType) {
+      sheet.getRange(rowNum, COLS.GROUNDS.TYPE).setValue(formData.groundType);
+    }
+    // Write Size (col C) - OH only
+    if (formData.groundType === 'OH' && formData.groundSize) {
+      sheet.getRange(rowNum, COLS.GROUNDS.SIZE).setValue(formData.groundSize);
+      sheet.getRange(rowNum, COLS.GROUNDS.KV).clearContent();
+    }
+    // Write KV (col D) - UG only
+    if (formData.groundType === 'UG' && formData.groundKV) {
+      sheet.getRange(rowNum, COLS.GROUNDS.KV).setValue(formData.groundKV);
+      sheet.getRange(rowNum, COLS.GROUNDS.SIZE).clearContent();
+    }
+    // Write Length (col E)
+    var groundLength = formData.groundLength || (formData.groundType === 'UG' ? "6'" : '');
+    if (groundLength) {
+      sheet.getRange(rowNum, COLS.GROUNDS.LENGTH).setValue(groundLength);
+    }
+    // Write Test Date (col F) and compute Change Out Date (col K)
+    if (formData.testDate) {
+      var testDateCell = sheet.getRange(rowNum, COLS.GROUNDS.TEST_DATE);
+      var parsedTestDate = parseDateNoon(formData.testDate);
+      if (parsedTestDate) {
+        testDateCell.setValue(parsedTestDate);
+        try { testDateCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+        // Calculate Change Out Date = Test Date + 12 months
+        var changeOutDate = new Date(parsedTestDate);
+        changeOutDate.setMonth(changeOutDate.getMonth() + (typeof INTERVAL_GROUNDS_TEST !== 'undefined' ? INTERVAL_GROUNDS_TEST : 12));
+        var coCell = sheet.getRange(rowNum, COLS.GROUNDS.CHANGE_OUT_DATE);
+        coCell.setValue(changeOutDate);
+        try { coCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+      }
+    }
+    // Write Location (col H)
+    if (formData.location) {
+      sheet.getRange(rowNum, COLS.GROUNDS.LOCATION).setValue(formData.location);
+    }
+    // Write Status (col I)
+    if (formData.status) {
+      sheet.getRange(rowNum, COLS.GROUNDS.STATUS).setValue(formData.status);
+    }
+    // Write Assigned To (col J) + handle employee assignment
+    if (formData.assignedTo && formData.assignedTo.trim() !== '') {
+      var assignedTo = formData.assignedTo.trim();
+      sheet.getRange(rowNum, COLS.GROUNDS.ASSIGNED_TO).setValue(assignedTo);
+      if (assignedTo.toLowerCase() !== 'on shelf') {
+        var today = new Date();
+        var dateCell = sheet.getRange(rowNum, COLS.GROUNDS.DATE_ASSIGNED);
+        dateCell.setValue(today);
+        try { dateCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+        sheet.getRange(rowNum, COLS.GROUNDS.STATUS).setValue('In Service');
+        var empLoc = lookupEmployeeLocation(ss, assignedTo);
+        if (empLoc) {
+          sheet.getRange(rowNum, COLS.GROUNDS.LOCATION).setValue(empLoc);
+        }
+      }
+    } else {
+      sheet.getRange(rowNum, COLS.GROUNDS.ASSIGNED_TO).setValue('On Shelf');
+      sheet.getRange(rowNum, COLS.GROUNDS.STATUS).setValue('On Shelf');
+    }
+    // Add to known items
+    addToKnownItemNumbers(itemNum, sheetName);
+    // Handle item source logging
+    processItemSourceLogging(formData, itemNum, itemType, sheetName, ss);
+    return;
+  }
+
+  // ===========================================================================
+  // HOT STICKS: A=Item#(1), B=Type(2), C=Length(3), D=Test Date(4),
+  //             E=Date Assigned(5), F=Location(6), G=Status(7), H=Assigned To(8),
+  //             I=Change Out Date(9), J=Picked For(10), K=Notes(11)
+  // ===========================================================================
+  if (isHotStick) {
+    // Write Type (col B)
+    if (formData.hotStickType) {
+      sheet.getRange(rowNum, COLS.HOT_STICKS.TYPE).setValue(formData.hotStickType);
+    }
+    // Write Length (col C)
+    if (formData.hotStickLength) {
+      sheet.getRange(rowNum, COLS.HOT_STICKS.LENGTH).setValue(formData.hotStickLength);
+    }
+    // Write Test Date (col D) and compute Change Out Date (col I)
+    if (formData.hotStickTestDate) {
+      var testDateCell = sheet.getRange(rowNum, COLS.HOT_STICKS.TEST_DATE);
+      var parsedTestDate = parseDateNoon(formData.hotStickTestDate);
+      if (parsedTestDate) {
+        testDateCell.setValue(parsedTestDate);
+        try { testDateCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+        // Calculate Change Out Date = Test Date + 12 months
+        var coDate = new Date(parsedTestDate);
+        coDate.setMonth(coDate.getMonth() + (typeof INTERVAL_HOT_STICK_TEST !== 'undefined' ? INTERVAL_HOT_STICK_TEST : 12));
+        var coCell = sheet.getRange(rowNum, COLS.HOT_STICKS.CHANGE_OUT_DATE);
+        coCell.setValue(coDate);
+        try { coCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+      }
+    }
+    // Write Location (col F)
+    if (formData.location) {
+      sheet.getRange(rowNum, COLS.HOT_STICKS.LOCATION).setValue(formData.location);
+    }
+    // Write Status (col G)
+    if (formData.status) {
+      sheet.getRange(rowNum, COLS.HOT_STICKS.STATUS).setValue(formData.status);
+    }
+    // Write Assigned To (col H) + handle employee assignment
+    if (formData.assignedTo && formData.assignedTo.trim() !== '') {
+      var assignedTo = formData.assignedTo.trim();
+      sheet.getRange(rowNum, COLS.HOT_STICKS.ASSIGNED_TO).setValue(assignedTo);
+      if (assignedTo.toLowerCase() !== 'on shelf') {
+        var today = new Date();
+        var dateCell = sheet.getRange(rowNum, COLS.HOT_STICKS.DATE_ASSIGNED);
+        dateCell.setValue(today);
+        try { dateCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+        sheet.getRange(rowNum, COLS.HOT_STICKS.STATUS).setValue('In Service');
+        var empLoc = lookupEmployeeLocation(ss, assignedTo);
+        if (empLoc) {
+          sheet.getRange(rowNum, COLS.HOT_STICKS.LOCATION).setValue(empLoc);
+        }
+      }
+    } else {
+      sheet.getRange(rowNum, COLS.HOT_STICKS.ASSIGNED_TO).setValue('On Shelf');
+      sheet.getRange(rowNum, COLS.HOT_STICKS.STATUS).setValue('On Shelf');
+    }
+    // Add to known items
+    addToKnownItemNumbers(itemNum, sheetName);
+    // Handle item source logging
+    processItemSourceLogging(formData, itemNum, itemType, sheetName, ss);
+    return;
+  }
+
+  // ===========================================================================
+  // GLOVES / SLEEVES / BLANKETS (original logic)
+  // Use appropriate COLS namespace: INVENTORY for Gloves/Sleeves, BLANKETS for Blankets
+  // ===========================================================================
+  var COL = isBlanket ? COLS.BLANKETS : COLS.INVENTORY;
 
   // Fill in the basic data
   if (formData.size) {
-    sheet.getRange(rowNum, 2).setValue(formData.size);  // Column B = Size/Type
+    sheet.getRange(rowNum, isBlanket ? COL.TYPE : COL.SIZE).setValue(formData.size);
   }
 
   if (formData.itemClass) {
-    sheet.getRange(rowNum, 3).setValue(formData.itemClass);  // Column C = Class
+    sheet.getRange(rowNum, COL.CLASS).setValue(formData.itemClass);
   }
 
   if (formData.testDate) {
-    var testDateCell = sheet.getRange(rowNum, 4);  // Column D = Test Date
-    // Parse date string (YYYY-MM-DD from HTML input) to avoid timezone issues
-    var dateParts = formData.testDate.split('-');
-    if (dateParts.length === 3) {
-      // Create date using local timezone (year, month-1, day)
-      var parsedTestDate = new Date(parseInt(dateParts[0]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
-      if (!isNaN(parsedTestDate.getTime())) {
-        testDateCell.setValue(parsedTestDate);
-        try {
-          testDateCell.setNumberFormat('MM/dd/yyyy');
-        } catch (fmtErr) { /* Ignore format errors on typed columns */ }
-      }
+    var testDateCell = sheet.getRange(rowNum, COL.TEST_DATE);
+    var parsedTestDate = parseDateNoon(formData.testDate);
+    if (parsedTestDate) {
+      testDateCell.setValue(parsedTestDate);
+      try {
+        testDateCell.setNumberFormat('MM/dd/yyyy');
+      } catch (fmtErr) { /* Ignore format errors on typed columns */ }
     }
+  }
+
+  // Handle ESL ID for Gloves/Sleeves
+  if (!isBlanket && formData.eslId) {
+    sheet.getRange(rowNum, COL.ESL_ID).setValue(formData.eslId);
   }
 
   // Handle Assigned To - this triggers location/status updates and Change Out Date calculation
@@ -1326,23 +1464,22 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
 
     if (isStatusValue) {
       // This is a status value, not an employee assignment
-      // Set Assigned To column to the status value
-      sheet.getRange(rowNum, 8).setValue(assignedTo);  // Column H = Assigned To
+      sheet.getRange(rowNum, COL.ASSIGNED_TO).setValue(assignedTo);
 
       // Set Status based on the form's status field (which should match)
       var statusToSet = formData.status || assignedTo;
-      sheet.getRange(rowNum, 7).setValue(statusToSet);  // Column G = Status
+      sheet.getRange(rowNum, COL.STATUS).setValue(statusToSet);
 
       // Set Location from form or default to Helena for On Shelf items
       if (formData.location && formData.location.trim() !== '') {
-        sheet.getRange(rowNum, 6).setValue(formData.location.trim());  // Column F = Location
+        sheet.getRange(rowNum, COL.LOCATION).setValue(formData.location.trim());
       } else if (assignedToLower === 'on shelf') {
-        sheet.getRange(rowNum, 6).setValue('Helena');  // Default location for On Shelf items
+        sheet.getRange(rowNum, COL.LOCATION).setValue('Helena');
       }
 
       // Set Date Assigned to today for tracking purposes
       var today = new Date();
-      var dateAssignedCell = sheet.getRange(rowNum, 5);  // Column E = Date Assigned
+      var dateAssignedCell = sheet.getRange(rowNum, COL.DATE_ASSIGNED);
       dateAssignedCell.setValue(today);
       try {
         dateAssignedCell.setNumberFormat('MM/dd/yyyy');
@@ -1351,10 +1488,10 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
       // Calculate Change Out Date based on test date (only for non-failed/lost items)
       if (formData.testDate && assignedToLower !== 'lost' && assignedToLower !== 'failed' && assignedToLower !== 'failed rubber') {
         var isSleeve = (sheetName === 'Sleeves');
-        var location = sheet.getRange(rowNum, 6).getValue();
+        var location = sheet.getRange(rowNum, COL.LOCATION).getValue();
         var changeOutDate = calculateChangeOutDate(today, location, assignedTo, isSleeve);
         if (changeOutDate) {
-          var changeOutCell = sheet.getRange(rowNum, 9);  // Column I = Change Out Date
+          var changeOutCell = sheet.getRange(rowNum, COL.CHANGE_OUT_DATE);
           try {
             if (changeOutDate === 'N/A') {
               changeOutCell.setNumberFormat('@');
@@ -1368,12 +1505,11 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
 
     } else {
       // This is an actual employee assignment
-      // Set Assigned To
-      sheet.getRange(rowNum, 8).setValue(assignedTo);  // Column H = Assigned To
+      sheet.getRange(rowNum, COL.ASSIGNED_TO).setValue(assignedTo);
 
       // Set Date Assigned to today
       var today = new Date();
-      var dateAssignedCell = sheet.getRange(rowNum, 5);  // Column E = Date Assigned
+      var dateAssignedCell = sheet.getRange(rowNum, COL.DATE_ASSIGNED);
       dateAssignedCell.setValue(today);
       try {
         dateAssignedCell.setNumberFormat('MM/dd/yyyy');
@@ -1381,7 +1517,7 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
 
       // Set Status - "In Service" for Blankets, "Assigned" for Gloves/Sleeves
       var assignedStatus = isBlanket ? 'In Service' : 'Assigned';
-      sheet.getRange(rowNum, 7).setValue(assignedStatus);  // Column G = Status
+      sheet.getRange(rowNum, COL.STATUS).setValue(assignedStatus);
 
       // Look up employee's location from Employees sheet
       var employeesSheet = ss.getSheetByName('Employees');
@@ -1403,7 +1539,7 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
             if (empName === assignedTo.toLowerCase()) {
               var empLocation = String(empData[i][locCol]).trim();
               if (empLocation) {
-                sheet.getRange(rowNum, 6).setValue(empLocation);  // Column F = Location
+                sheet.getRange(rowNum, COL.LOCATION).setValue(empLocation);
               }
               break;
             }
@@ -1414,11 +1550,11 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
       // Calculate and set Change Out Date (for Gloves/Sleeves, not Blankets)
       if (!isBlanket) {
         var isSleeve = (sheetName === 'Sleeves');
-        var location = sheet.getRange(rowNum, 6).getValue();
+        var location = sheet.getRange(rowNum, COL.LOCATION).getValue();
         var changeOutDate = calculateChangeOutDate(today, location, assignedTo, isSleeve);
 
         if (changeOutDate) {
-          var changeOutCell = sheet.getRange(rowNum, 9);  // Column I = Change Out Date
+          var changeOutCell = sheet.getRange(rowNum, COL.CHANGE_OUT_DATE);
           try {
             if (changeOutDate === 'N/A') {
               changeOutCell.setNumberFormat('@');
@@ -1434,97 +1570,90 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
   } else {
     // Not assigned - just set location and status from form
     if (formData.location) {
-      sheet.getRange(rowNum, 6).setValue(formData.location);  // Column F = Location
+      sheet.getRange(rowNum, COL.LOCATION).setValue(formData.location);
     }
     if (formData.status) {
-      sheet.getRange(rowNum, 7).setValue(formData.status);  // Column G = Status
+      sheet.getRange(rowNum, COL.STATUS).setValue(formData.status);
     }
-  }
-
-  // Add to known items to prevent re-prompting
-  addToKnownItemNumbers(itemNum, sheetName);
-
-  // Handle item source type
-  var source = 'Purchased';
-  if (formData.itemSource === '2') {
-    source = 'Reclaimed';
-  } else if (formData.itemSource === '3') {
-    // Not a new item - don't log to New Items Log
-    ss.toast('Item #' + itemNum + ' added (not logged as new)', '✅ Item Added', 5);
-
-    // Still regenerate Inventory Reports to reflect updated inventory counts
-    try {
-      updateInventoryReports();
-      ss.toast('Inventory Reports updated automatically', '📊 Reports Updated', 3);
-    } catch (reportErr) {
-      logEvent('Error auto-updating Inventory Reports: ' + reportErr, 'WARN');
-    }
-    return;
-  }
-
-  // Log as new item (Purchased or Reclaimed)
-  logNewItem({
-    itemNum: itemNum,
-    itemType: itemType,
-    itemClass: String(formData.itemClass || ''),
-    size: String(formData.size || ''),
-    source: source,
-    originalItems: '',
-    cost: '',
-    notes: 'Auto-detected from ' + sheetName + ' sheet'
-  });
-
-  ss.toast('Item #' + itemNum + ' logged as ' + source, '✅ New Item Logged', 3);
-
-  // Auto-regenerate Inventory Reports to reflect the new item
-  try {
-    updateInventoryReports();
-    ss.toast('Inventory Reports updated automatically', '📊 Reports Updated', 3);
-  } catch (reportErr) {
-    logEvent('Error auto-updating Inventory Reports: ' + reportErr, 'WARN');
   }
 }
 
+// =============================================================================
+// DUPLICATE ITEM NUMBER PROTECTION
+// =============================================================================
+
 /**
- * Looks up an employee's location from the Employees sheet.
- * @param {Spreadsheet} ss - Active spreadsheet
- * @param {string} employeeName - Employee name to look up
- * @return {string|null} Location or null if not found
+ * Checks if an item number already exists in a sheet (excluding the current row).
+ * @param {string} itemNum - Item number to check
+ * @param {string} sheetName - 'Gloves', 'Sleeves', or 'Blankets'
+ * @param {number} excludeRow - Row to exclude from check (the current row being edited)
+ * @return {Object} {isDuplicate: boolean, existingRow: number or null}
  */
-function lookupEmployeeLocation(ss, employeeName) {
-  var employeesSheet = ss.getSheetByName('Employees');
-  if (!employeesSheet || employeesSheet.getLastRow() < 2) return null;
-
-  var empData = employeesSheet.getDataRange().getValues();
-  var empHeaders = empData[0];
-  var nameCol = -1;
-  var locCol = -1;
-
-  for (var h = 0; h < empHeaders.length; h++) {
-    var hdr = String(empHeaders[h]).toLowerCase().trim();
-    if (hdr === 'name') nameCol = h;
-    if (hdr === 'location') locCol = h;
+function checkDuplicateItemNumber(itemNum, sheetName, excludeRow) {
+  if (!itemNum || String(itemNum).trim() === '') {
+    return { isDuplicate: false, existingRow: null };
   }
 
-  if (nameCol === -1 || locCol === -1) return null;
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(sheetName);
 
-  var targetName = employeeName.toLowerCase().trim();
-  for (var i = 1; i < empData.length; i++) {
-    var empName = String(empData[i][nameCol]).trim().toLowerCase();
-    if (empName === targetName) {
-      var empLocation = String(empData[i][locCol]).trim();
-      return empLocation || null;
+  if (!sheet || sheet.getLastRow() < 2) {
+    return { isDuplicate: false, existingRow: null };
+  }
+
+  var itemNumStr = String(itemNum).trim().toUpperCase();
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
+
+  for (var i = 0; i < data.length; i++) {
+    var rowNum = i + 2;
+    if (rowNum === excludeRow) continue;
+
+    var existingItemNum = String(data[i][0] || '').trim().toUpperCase();
+    if (existingItemNum === itemNumStr) {
+      return { isDuplicate: true, existingRow: rowNum };
     }
   }
-  return null;
+
+  return { isDuplicate: false, existingRow: null };
 }
 
 /**
- * Handles item source logging (New Purchase, Reclaimed, Not New) for any equipment type.
- * @param {Object} formData - Form data from dialog
- * @param {string} itemNum - Item number
- * @param {string} itemType - 'HV Tester', 'Phasing Set', etc.
- * @param {string} sheetName - Sheet name
+ * Handles duplicate item number detection and warns the user.
+ * Called from the onEdit trigger when an item number is entered.
+ * @param {string} itemNum - Item number entered
+ * @param {string} sheetName - 'Gloves', 'Sleeves', or 'Blankets'
+ * @param {number} currentRow - Current row being edited
+ * @return {boolean} True if duplicate was found and handled
+ */
+function handleDuplicateItemNumber(itemNum, sheetName, currentRow) {
+  var result = checkDuplicateItemNumber(itemNum, sheetName, currentRow);
+
+  if (result.isDuplicate) {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName(sheetName);
+
+    sheet.getRange(currentRow, 1).setValue('');
+
+    var ui = SpreadsheetApp.getUi();
+    ui.alert(
+      '⚠️ Duplicate Item Number',
+      'Item number "' + itemNum + '" already exists in row ' + result.existingRow + ' of the ' + sheetName + ' sheet.\n\n' +
+      'Please use a unique item number.',
+      ui.ButtonSet.OK
+    );
+
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Handles item source logging after a new item is added via the NewItemDialog.
+ * @param {Object} formData - Form data from the dialog
+ * @param {string} itemNum - The item number that was added
+ * @param {string} itemType - e.g. 'glove', 'sleeve', 'hv_tester', 'aed', etc.
+ * @param {string} sheetName - Sheet the item was added to
  * @param {Spreadsheet} ss - Active spreadsheet
  */
 function processItemSourceLogging(formData, itemNum, itemType, sheetName, ss) {
@@ -1579,7 +1708,7 @@ function logNewItem(itemData) {
     }
   }
 
-  // If New Items Log section doesn't exist, we need to regenerate the report
+  // If New Items Log section doesn't exist, silently skip (report not generated yet)
   if (logHeaderRow === -1) {
     logEvent('New Items Log section not found - run Update Inventory Reports first', 'WARN');
     return;
@@ -1622,681 +1751,5 @@ function logNewItem(itemData) {
   }
 
   logEvent('New item logged: ' + itemData.itemNum + ' (' + itemData.source + ')');
-}
-
-/**
- * Removes an item from the New Items Log section.
- * Called when an item is deleted from Gloves/Sleeves sheets.
- * @param {string} itemNum - The item number to remove
- * @param {string} itemType - 'Glove' or 'Sleeve' (optional, for more specific removal)
- * @return {boolean} True if an item was removed
- */
-function removeFromNewItemsLog(itemNum, itemType) {
-  if (!itemNum || String(itemNum).trim() === '') return false;
-
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var inventorySheet = ss.getSheetByName('Inventory Reports');
-
-  if (!inventorySheet || inventorySheet.getLastRow() < 1) return false;
-
-  var data = inventorySheet.getDataRange().getValues();
-  var inLogSection = false;
-  var headerFound = false;
-  var removedCount = 0;
-  var rowsToDelete = [];
-
-  var itemNumStr = String(itemNum).trim();
-
-  for (var i = 0; i < data.length; i++) {
-    var firstCell = String(data[i][0]).trim();
-
-    if (firstCell.indexOf('NEW ITEMS LOG') !== -1) {
-      inLogSection = true;
-      continue;
-    }
-
-    if (inLogSection && firstCell === 'Date Added') {
-      headerFound = true;
-      continue;
-    }
-
-    if (inLogSection && headerFound && firstCell && firstCell !== '') {
-      // Column B (index 1) = Item #, Column C (index 2) = Item Type
-      var logItemNum = String(data[i][1]).trim();
-      var logItemType = String(data[i][2]).trim();
-
-      // Match by item number, optionally filter by type
-      if (logItemNum === itemNumStr) {
-        if (!itemType || logItemType === itemType) {
-          rowsToDelete.push(i + 1);  // 1-based row number
-          removedCount++;
-        }
-      }
-    }
-  }
-
-  // Delete rows from bottom to top to preserve row indices
-  rowsToDelete.reverse();
-  for (var r = 0; r < rowsToDelete.length; r++) {
-    inventorySheet.deleteRow(rowsToDelete[r]);
-  }
-
-  if (removedCount > 0) {
-    logEvent('Removed ' + removedCount + ' entries from New Items Log for item #' + itemNumStr);
-  }
-
-  return removedCount > 0;
-}
-
-/**
- * Removes an item number from the known items tracking.
- * @param {string} itemNum - Item number to remove
- * @param {string} sheetName - 'Gloves' or 'Sleeves'
- */
-function removeFromKnownItemNumbers(itemNum, sheetName) {
-  if (!itemNum || String(itemNum).trim() === '') return;
-
-  var props = PropertiesService.getScriptProperties();
-  var key = NEW_ITEMS_PROPERTY_KEY + '_' + sheetName;
-  var knownItems = props.getProperty(key) || '';
-
-  var knownSet = knownItems ? knownItems.split(',') : [];
-  var itemStr = String(itemNum).trim();
-
-  var idx = knownSet.indexOf(itemStr);
-  if (idx !== -1) {
-    knownSet.splice(idx, 1);
-    props.setProperty(key, knownSet.join(','));
-    logEvent('Removed item #' + itemStr + ' from known items for ' + sheetName);
-  }
-}
-
-/**
- * Handles removal of an item from Gloves/Sleeves sheet.
- * Removes from known items and New Items Log, then updates reports.
- * @param {string} itemNum - The removed item number
- * @param {string} sheetName - 'Gloves' or 'Sleeves'
- */
-function handleItemRemoval(itemNum, sheetName) {
-  if (!itemNum || String(itemNum).trim() === '') return;
-
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var itemType = sheetName === 'Gloves' ? 'Glove' : 'Sleeve';
-
-  logEvent('Handling removal of item #' + itemNum + ' from ' + sheetName);
-
-  // Remove from known items tracking
-  removeFromKnownItemNumbers(itemNum, sheetName);
-
-  // Remove from New Items Log
-  var removed = removeFromNewItemsLog(itemNum, itemType);
-
-  // Update Inventory Reports to reflect the removal
-  if (removed) {
-    try {
-      updateInventoryReports();
-      ss.toast('Item #' + itemNum + ' removed from log and reports updated', '🗑️ Item Removed', 3);
-    } catch (e) {
-      logEvent('Error updating Inventory Reports after item removal: ' + e, 'WARN');
-    }
-  }
-}
-
-/**
- * Syncs the New Items Log with current inventory.
- * Removes any entries for items that no longer exist in Gloves/Sleeves sheets.
- * Can be called manually or as part of maintenance.
- */
-function syncNewItemsLogWithInventory() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var glovesSheet = ss.getSheetByName('Gloves');
-  var sleevesSheet = ss.getSheetByName('Sleeves');
-  var inventorySheet = ss.getSheetByName('Inventory Reports');
-
-  if (!inventorySheet) {
-    SpreadsheetApp.getUi().alert('Inventory Reports sheet not found.');
-    return;
-  }
-
-  // Build sets of current item numbers
-  var currentGloves = new Set();
-  var currentSleeves = new Set();
-
-  if (glovesSheet && glovesSheet.getLastRow() > 1) {
-    var gloveData = glovesSheet.getRange(2, 1, glovesSheet.getLastRow() - 1, 1).getValues();
-    gloveData.forEach(function(row) {
-      var itemNum = String(row[0]).trim();
-      if (itemNum) currentGloves.add(itemNum);
-    });
-  }
-
-  if (sleevesSheet && sleevesSheet.getLastRow() > 1) {
-    var sleeveData = sleevesSheet.getRange(2, 1, sleevesSheet.getLastRow() - 1, 1).getValues();
-    sleeveData.forEach(function(row) {
-      var itemNum = String(row[0]).trim();
-      if (itemNum) currentSleeves.add(itemNum);
-    });
-  }
-
-  // Check New Items Log entries against current inventory
-  var data = inventorySheet.getDataRange().getValues();
-  var inLogSection = false;
-  var headerFound = false;
-  var rowsToDelete = [];
-  var removedItems = [];
-
-  for (var i = 0; i < data.length; i++) {
-    var firstCell = String(data[i][0]).trim();
-
-    if (firstCell.indexOf('NEW ITEMS LOG') !== -1) {
-      inLogSection = true;
-      continue;
-    }
-
-    if (inLogSection && firstCell === 'Date Added') {
-      headerFound = true;
-      continue;
-    }
-
-    if (inLogSection && headerFound && firstCell && firstCell !== '') {
-      var logItemNum = String(data[i][1]).trim();
-      var logItemType = String(data[i][2]).trim();
-
-      // Check if item still exists in inventory
-      var exists = false;
-      if (logItemType === 'Glove') {
-        exists = currentGloves.has(logItemNum);
-      } else if (logItemType === 'Sleeve') {
-        exists = currentSleeves.has(logItemNum);
-      }
-
-      if (!exists && logItemNum) {
-        rowsToDelete.push(i + 1);
-        removedItems.push(logItemNum + ' (' + logItemType + ')');
-      }
-    }
-  }
-
-  // Delete orphaned entries (from bottom to top)
-  rowsToDelete.reverse();
-  for (var r = 0; r < rowsToDelete.length; r++) {
-    inventorySheet.deleteRow(rowsToDelete[r]);
-  }
-
-  // Also reset and reinitialize known item numbers
-  initializeKnownItemNumbers('Gloves');
-  initializeKnownItemNumbers('Sleeves');
-
-  // Update the inventory reports
-  if (rowsToDelete.length > 0) {
-    updateInventoryReports();
-  }
-
-  var message = 'Sync complete.\n\n';
-  if (removedItems.length > 0) {
-    message += 'Removed ' + removedItems.length + ' orphaned entries:\n• ' + removedItems.join('\n• ');
-  } else {
-    message += 'No orphaned entries found. Log is already in sync.';
-  }
-
-  SpreadsheetApp.getUi().alert('📊 New Items Log Sync', message, SpreadsheetApp.getUi().ButtonSet.OK);
-  logEvent('Synced New Items Log: removed ' + rowsToDelete.length + ' orphaned entries');
-}
-
-// =============================================================================
-// DUPLICATE ITEM NUMBER PROTECTION
-// =============================================================================
-
-/**
- * Checks if an item number already exists in a sheet (excluding the current row).
- * @param {string} itemNum - Item number to check
- * @param {string} sheetName - 'Gloves', 'Sleeves', or 'Blankets'
- * @param {number} excludeRow - Row to exclude from check (the current row being edited)
- * @return {Object} {isDuplicate: boolean, existingRow: number or null}
- */
-function checkDuplicateItemNumber(itemNum, sheetName, excludeRow) {
-  if (!itemNum || String(itemNum).trim() === '') {
-    return { isDuplicate: false, existingRow: null };
-  }
-
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName(sheetName);
-
-  if (!sheet || sheet.getLastRow() < 2) {
-    return { isDuplicate: false, existingRow: null };
-  }
-
-  var itemNumStr = String(itemNum).trim().toUpperCase();
-  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
-
-  for (var i = 0; i < data.length; i++) {
-    var rowNum = i + 2;  // Data starts at row 2
-    if (rowNum === excludeRow) continue;  // Skip the current row
-
-    var existingItemNum = String(data[i][0] || '').trim().toUpperCase();
-    if (existingItemNum === itemNumStr) {
-      return { isDuplicate: true, existingRow: rowNum };
-    }
-  }
-
-  return { isDuplicate: false, existingRow: null };
-}
-
-/**
- * Handles duplicate item number detection and warns the user.
- * Called from the onEdit trigger when an item number is entered.
- * @param {string} itemNum - Item number entered
- * @param {string} sheetName - 'Gloves', 'Sleeves', or 'Blankets'
- * @param {number} currentRow - Current row being edited
- * @return {boolean} True if duplicate was found and handled
- */
-function handleDuplicateItemNumber(itemNum, sheetName, currentRow) {
-  var result = checkDuplicateItemNumber(itemNum, sheetName, currentRow);
-
-  if (result.isDuplicate) {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var sheet = ss.getSheetByName(sheetName);
-
-    // Clear the duplicate item number
-    sheet.getRange(currentRow, 1).setValue('');
-
-    // Show warning to user
-    var ui = SpreadsheetApp.getUi();
-    ui.alert(
-      '⚠️ Duplicate Item Number',
-      'Item number "' + itemNum + '" already exists in row ' + result.existingRow + ' of the ' + sheetName + ' sheet.\n\n' +
-      'Please use a unique item number.',
-      ui.ButtonSet.OK
-    );
-
-    return true;  // Duplicate was found
-  }
-
-  return false;  // No duplicate
-}
-
-// =============================================================================
-// ARCHIVE LOST/FAILED ITEMS
-// =============================================================================
-
-/**
- * Archives Lost and Failed items from Gloves, Sleeves, and Blankets to archive sheets.
- * This removes them from the main inventory so counts are accurate.
- * @param {string} itemType - 'Gloves', 'Sleeves', 'Blankets', or 'All'
- * @return {Object} Summary of archived items
- */
-function archiveLostAndFailedItems(itemType) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var results = {
-    gloves: { lost: 0, failed: 0, skipped: 0 },
-    sleeves: { lost: 0, failed: 0, skipped: 0 },
-    blankets: { lost: 0, failed: 0, skipped: 0 }
-  };
-
-  var sheetsToProcess = [];
-  if (itemType === 'All' || itemType === 'Gloves') sheetsToProcess.push('Gloves');
-  if (itemType === 'All' || itemType === 'Sleeves') sheetsToProcess.push('Sleeves');
-  if (itemType === 'All' || itemType === 'Blankets') sheetsToProcess.push('Blankets');
-
-  sheetsToProcess.forEach(function(sheetName) {
-    var sheet = ss.getSheetByName(sheetName);
-    if (!sheet || sheet.getLastRow() < 2) return;
-
-    var archiveSheetName = sheetName + ' Archive';
-    var archiveSheet = ss.getSheetByName(archiveSheetName);
-
-    // Create archive sheet if it doesn't exist
-    if (!archiveSheet) {
-      archiveSheet = ss.insertSheet(archiveSheetName);
-      // Copy headers from main sheet
-      var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues();
-      archiveSheet.getRange(1, 1, 1, headers[0].length).setValues(headers);
-      archiveSheet.getRange(1, 1, 1, headers[0].length)
-        .setBackground('#9e9e9e')
-        .setFontColor('#ffffff')
-        .setFontWeight('bold');
-      archiveSheet.setFrozenRows(1);
-
-      // Add "Archived Date" and "Archive Reason" columns
-      var lastCol = headers[0].length;
-      archiveSheet.getRange(1, lastCol + 1).setValue('Archived Date').setBackground('#9e9e9e').setFontColor('#ffffff').setFontWeight('bold');
-      archiveSheet.getRange(1, lastCol + 2).setValue('Archive Reason').setBackground('#9e9e9e').setFontColor('#ffffff').setFontWeight('bold');
-
-      Logger.log('Created archive sheet: ' + archiveSheetName);
-    }
-
-    var data = sheet.getDataRange().getValues();
-    var headers = data[0];
-    var statusColIdx = -1;
-    var assignedToColIdx = -1;
-    var dateAssignedColIdx = -1;
-
-    // Find Status, Assigned To, and Date Assigned columns
-    for (var h = 0; h < headers.length; h++) {
-      var headerLower = String(headers[h]).toLowerCase().trim();
-      if (headerLower === 'status') statusColIdx = h;
-      if (headerLower === 'assigned to') assignedToColIdx = h;
-      if (headerLower === 'date assigned') dateAssignedColIdx = h;
-    }
-
-    if (statusColIdx === -1) {
-      Logger.log('Could not find Status column in ' + sheetName);
-      return;
-    }
-
-    var rowsToArchive = [];
-    var skippedCurrentYear = 0;
-    var today = new Date();
-    var currentYear = today.getFullYear();
-    var archiveDate = Utilities.formatDate(today, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
-
-    // Find rows to archive (Lost or Failed status FROM PREVIOUS YEAR ONLY)
-    for (var i = 1; i < data.length; i++) {
-      var status = String(data[i][statusColIdx] || '').trim().toLowerCase();
-      var assignedTo = assignedToColIdx !== -1 ? String(data[i][assignedToColIdx] || '').trim().toLowerCase() : '';
-
-      var isLost = status === 'lost' || assignedTo === 'lost';
-      var isFailed = status === 'failed' || status === 'failed rubber' ||
-                     assignedTo === 'failed rubber' || assignedTo === 'failed';
-
-      if (isLost || isFailed) {
-        // Check if the status was assigned in a PREVIOUS year (not current year)
-        var shouldArchive = false;
-        var dateAssigned = dateAssignedColIdx !== -1 ? data[i][dateAssignedColIdx] : null;
-
-        if (dateAssigned) {
-          var assignedDate = dateAssigned instanceof Date ? dateAssigned : new Date(dateAssigned);
-          if (!isNaN(assignedDate.getTime())) {
-            var assignedYear = assignedDate.getFullYear();
-            // Only archive if assigned in a previous year
-            if (assignedYear < currentYear) {
-              shouldArchive = true;
-            } else {
-              skippedCurrentYear++;
-              results[sheetName.toLowerCase()].skipped++;
-              Logger.log('Skipping ' + data[i][0] + ' - Lost/Failed status assigned in ' + assignedYear + ' (current year)');
-            }
-          } else {
-            // If date is invalid/empty, archive it (legacy data)
-            shouldArchive = true;
-            Logger.log('Archiving ' + data[i][0] + ' - no valid date assigned (legacy data)');
-          }
-        } else {
-          // If no date assigned column or empty, archive it (legacy data)
-          shouldArchive = true;
-          Logger.log('Archiving ' + data[i][0] + ' - no date assigned (legacy data)');
-        }
-
-        if (shouldArchive) {
-          var reason = isLost ? 'Lost' : 'Failed';
-          rowsToArchive.push({
-            rowIndex: i + 1,  // 1-based row number
-            data: data[i],
-            reason: reason
-          });
-
-          if (isLost) {
-            results[sheetName.toLowerCase()].lost++;
-          } else {
-            results[sheetName.toLowerCase()].failed++;
-          }
-        }
-      }
-    }
-
-    if (skippedCurrentYear > 0) {
-      Logger.log('Skipped ' + skippedCurrentYear + ' items in ' + sheetName + ' with Lost/Failed status assigned in ' + currentYear);
-    }
-
-    // Archive rows (add to archive sheet)
-    if (rowsToArchive.length > 0) {
-      var archiveLastRow = archiveSheet.getLastRow();
-      var numCols = data[0].length;
-
-      rowsToArchive.forEach(function(item) {
-        archiveLastRow++;
-        // Copy row data
-        archiveSheet.getRange(archiveLastRow, 1, 1, numCols).setValues([item.data]);
-        // Add archived date and reason
-        archiveSheet.getRange(archiveLastRow, numCols + 1).setValue(archiveDate);
-        archiveSheet.getRange(archiveLastRow, numCols + 2).setValue(item.reason);
-      });
-
-      // Delete rows from main sheet (from bottom to top to preserve indices)
-      rowsToArchive.sort(function(a, b) { return b.rowIndex - a.rowIndex; });
-      rowsToArchive.forEach(function(item) {
-        sheet.deleteRow(item.rowIndex);
-      });
-
-      // Also remove from known items tracking
-      rowsToArchive.forEach(function(item) {
-        var itemNum = String(item.data[0] || '').trim();
-        if (itemNum) {
-          removeFromKnownItemNumbers(itemNum, sheetName);
-        }
-      });
-
-      Logger.log('Archived ' + rowsToArchive.length + ' items from ' + sheetName);
-    }
-  });
-
-  return results;
-}
-
-/**
- * Shows a dialog to archive Lost and Failed items.
- * Menu item handler.
- */
-function showArchiveLostFailedDialog() {
-  var ui = SpreadsheetApp.getUi();
-  var currentYear = new Date().getFullYear();
-
-  var response = ui.alert(
-    '🗄️ Archive Lost & Failed Items',
-    'This will move Lost and Failed items from PREVIOUS YEARS to archive sheets.\n\n' +
-    '📅 Year-Based Archiving:\n' +
-    '• Items marked Lost/Failed in ' + (currentYear - 1) + ' or earlier → ARCHIVED\n' +
-    '• Items marked Lost/Failed in ' + currentYear + ' → REMAIN on main sheet\n\n' +
-    'Archived items:\n' +
-    '• Will be removed from the main inventory sheets\n' +
-    '• Will be stored in "[Sheet] Archive" sheets\n' +
-    '• Will no longer count in Inventory Reports\n' +
-    '• Can be viewed in the archive sheets at any time\n\n' +
-    'Do you want to proceed?',
-    ui.ButtonSet.YES_NO
-  );
-
-  if (response !== ui.Button.YES) {
-    return;
-  }
-
-  var results = archiveLostAndFailedItems('All');
-
-  var totalGloves = results.gloves.lost + results.gloves.failed;
-  var totalSleeves = results.sleeves.lost + results.sleeves.failed;
-  var totalBlankets = results.blankets.lost + results.blankets.failed;
-  var grandTotal = totalGloves + totalSleeves + totalBlankets;
-
-  var totalSkipped = (results.gloves.skipped || 0) + (results.sleeves.skipped || 0) + (results.blankets.skipped || 0);
-  var currentYear = new Date().getFullYear();
-
-  var message = '✅ Archive Complete!\n\n';
-
-  if (grandTotal === 0 && totalSkipped === 0) {
-    message += 'No Lost or Failed items found.';
-  } else if (grandTotal === 0 && totalSkipped > 0) {
-    message += 'No items archived.\n\n';
-    message += '📅 Remaining on sheets (' + currentYear + ' items):\n';
-    if (results.gloves.skipped > 0) message += '🧤 Gloves: ' + results.gloves.skipped + '\n';
-    if (results.sleeves.skipped > 0) message += '💪 Sleeves: ' + results.sleeves.skipped + '\n';
-    if (results.blankets.skipped > 0) message += '🧱 Blankets: ' + results.blankets.skipped + '\n';
-    message += '\nThese items have Lost/Failed status from ' + currentYear + ' and will remain on the main sheets.';
-  } else {
-    message += 'Archived Items (from previous years):\n\n';
-
-    if (totalGloves > 0) {
-      message += '🧤 Gloves: ' + totalGloves + ' (' + results.gloves.lost + ' lost, ' + results.gloves.failed + ' failed)\n';
-    }
-    if (totalSleeves > 0) {
-      message += '💪 Sleeves: ' + totalSleeves + ' (' + results.sleeves.lost + ' lost, ' + results.sleeves.failed + ' failed)\n';
-    }
-    if (totalBlankets > 0) {
-      message += '🧱 Blankets: ' + totalBlankets + ' (' + results.blankets.lost + ' lost, ' + results.blankets.failed + ' failed)\n';
-    }
-
-    message += '\nTotal: ' + grandTotal + ' items archived.\n';
-    message += '\nItems have been moved to their respective Archive sheets.';
-
-    // Also show skipped items if any
-    if (totalSkipped > 0) {
-      message += '\n\n📅 Remaining on sheets (' + currentYear + ' items):\n';
-      if (results.gloves.skipped > 0) message += '🧤 Gloves: ' + results.gloves.skipped + '\n';
-      if (results.sleeves.skipped > 0) message += '💪 Sleeves: ' + results.sleeves.skipped + '\n';
-      if (results.blankets.skipped > 0) message += '🧱 Blankets: ' + results.blankets.skipped + '\n';
-    }
-  }
-
-  ui.alert('🗄️ Archive Results', message, ui.ButtonSet.OK);
-
-  // Update inventory reports to reflect the changes
-  if (grandTotal > 0) {
-    try {
-      updateInventoryReports();
-      SpreadsheetApp.getActiveSpreadsheet().toast('Inventory Reports updated', '📊 Updated', 3);
-    } catch (e) {
-      Logger.log('Error updating inventory reports after archive: ' + e);
-    }
-  }
-}
-
-/**
- * Views the archive sheet for a specific item type.
- * @param {string} itemType - 'Gloves', 'Sleeves', or 'Blankets'
- */
-function viewArchiveSheet(itemType) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var archiveSheetName = itemType + ' Archive';
-  var archiveSheet = ss.getSheetByName(archiveSheetName);
-
-  if (!archiveSheet) {
-    SpreadsheetApp.getUi().alert(
-      '📋 No Archive Found',
-      'The "' + archiveSheetName + '" sheet does not exist yet.\n\n' +
-      'Run "Archive Lost & Failed Items" to create it.',
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
-    return;
-  }
-
-  ss.setActiveSheet(archiveSheet);
-}
-
-/**
- * Restores an item from an archive sheet back to the main inventory.
- * @param {string} itemType - 'Gloves', 'Sleeves', or 'Blankets'
- * @param {number} archiveRow - Row number in the archive sheet to restore
- * @return {boolean} True if successful
- */
-function restoreFromArchive(itemType, archiveRow) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var archiveSheet = ss.getSheetByName(itemType + ' Archive');
-  var mainSheet = ss.getSheetByName(itemType);
-
-  if (!archiveSheet || !mainSheet) {
-    return false;
-  }
-
-  if (archiveRow < 2 || archiveRow > archiveSheet.getLastRow()) {
-    return false;
-  }
-
-  // Get the main sheet's column count (exclude Archived Date and Archive Reason)
-  var mainColCount = mainSheet.getLastColumn();
-
-  // Get the row data (only the original columns, not the archive metadata)
-  var rowData = archiveSheet.getRange(archiveRow, 1, 1, mainColCount).getValues()[0];
-
-  // Set status to "On Shelf" for restored items
-  var statusColIdx = -1;
-  var assignedToColIdx = -1;
-  var headers = mainSheet.getRange(1, 1, 1, mainColCount).getValues()[0];
-
-  for (var h = 0; h < headers.length; h++) {
-    var headerLower = String(headers[h]).toLowerCase().trim();
-    if (headerLower === 'status') statusColIdx = h;
-    if (headerLower === 'assigned to') assignedToColIdx = h;
-  }
-
-  if (statusColIdx !== -1) {
-    rowData[statusColIdx] = 'On Shelf';
-  }
-  if (assignedToColIdx !== -1) {
-    rowData[assignedToColIdx] = 'On Shelf';
-  }
-
-  // Add to main sheet
-  mainSheet.appendRow(rowData);
-
-  // Add to known items tracking
-  var itemNum = String(rowData[0] || '').trim();
-  if (itemNum) {
-    addToKnownItemNumbers(itemNum, itemType);
-  }
-
-  // Delete from archive
-  archiveSheet.deleteRow(archiveRow);
-
-  Logger.log('Restored item ' + itemNum + ' from ' + itemType + ' Archive');
-  return true;
-}
-
-/**
- * Shows dialog to restore selected item from archive.
- */
-function showRestoreFromArchiveDialog() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var activeSheet = ss.getActiveSheet();
-  var sheetName = activeSheet.getName();
-
-  // Check if we're on an archive sheet
-  if (!sheetName.endsWith(' Archive')) {
-    SpreadsheetApp.getUi().alert(
-      '⚠️ Wrong Sheet',
-      'Please select a row in an Archive sheet (Gloves Archive, Sleeves Archive, or Blankets Archive) and try again.',
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
-    return;
-  }
-
-  var activeRange = activeSheet.getActiveRange();
-  if (!activeRange || activeRange.getRow() < 2) {
-    SpreadsheetApp.getUi().alert(
-      '⚠️ No Row Selected',
-      'Please select a row to restore and try again.',
-      SpreadsheetApp.getUi().ButtonSet.OK
-    );
-    return;
-  }
-
-  var rowNum = activeRange.getRow();
-  var itemType = sheetName.replace(' Archive', '');
-  var itemNum = activeSheet.getRange(rowNum, 1).getValue();
-
-  var ui = SpreadsheetApp.getUi();
-  var response = ui.alert(
-    '↩️ Restore Item',
-    'Restore item "' + itemNum + '" from ' + sheetName + ' back to ' + itemType + '?\n\n' +
-    'The item will be set to "On Shelf" status.',
-    ui.ButtonSet.YES_NO
-  );
-
-  if (response === ui.Button.YES) {
-    var success = restoreFromArchive(itemType, rowNum);
-    if (success) {
-      ui.alert('✅ Item Restored', 'Item "' + itemNum + '" has been restored to ' + itemType + '.', ui.ButtonSet.OK);
-    } else {
-      ui.alert('❌ Restore Failed', 'Could not restore the item. Please try again.', ui.ButtonSet.OK);
-    }
-  }
 }
 

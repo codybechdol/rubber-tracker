@@ -1,5 +1,5 @@
-/**
- * Glove Manager – Inventory Reports
+﻿/**
+ * Glove Manager â€“ Inventory Reports
  *
  * Functions for generating inventory statistics and dashboards.
  * Provides status breakdowns, counts, and analytics.
@@ -252,7 +252,7 @@ function updateInventoryReports() {
 
     // Year-to-Date Statistics Section
     inventorySheet.getRange(row, 1, 1, 6).merge()
-      .setValue('📊 YEAR-TO-DATE STATISTICS (' + currentYear + ')')
+      .setValue('ðŸ“Š YEAR-TO-DATE STATISTICS (' + currentYear + ')')
       .setFontWeight('bold').setFontSize(12).setBackground('#37474f').setFontColor('white').setHorizontalAlignment('center');
     inventorySheet.setRowHeight(row, 28);
     row++;
@@ -342,7 +342,7 @@ function updateInventoryReports() {
     var totalReclaimed = glovesReclaimed + sleevesReclaimed;
 
     inventorySheet.getRange(row, 1, 1, 7).merge()
-      .setValue('📦 NEW ITEMS LOG - ' + currentYear + ' (Total: ' + totalNew + ' | Purchased: ' + totalPurchased + ' | Reclaimed: ' + totalReclaimed + ')')
+      .setValue('ðŸ“¦ NEW ITEMS LOG - ' + currentYear + ' (Total: ' + totalNew + ' | Purchased: ' + totalPurchased + ' | Reclaimed: ' + totalReclaimed + ')')
       .setFontWeight('bold').setFontSize(14).setBackground('#6a1b9a').setFontColor('white').setHorizontalAlignment('center');
     inventorySheet.setRowHeight(row, 35);
     row++;
@@ -383,7 +383,7 @@ function updateInventoryReports() {
     // ANNUAL HISTORY SECTION
     // =========================================================================
     inventorySheet.getRange(row, 1, 1, 11).merge()
-      .setValue('📅 ANNUAL HISTORY')
+      .setValue('ðŸ“… ANNUAL HISTORY')
       .setFontWeight('bold').setFontSize(14).setBackground('#1a237e').setFontColor('white').setHorizontalAlignment('center');
     inventorySheet.setRowHeight(row, 35);
     row++;
@@ -704,7 +704,7 @@ function initialize2025AnnualData() {
   // Now update the report - it will read the 2025 history from properties
   updateInventoryReports();
 
-  SpreadsheetApp.getUi().alert('✅ 2025 Annual Data Initialized!\n\nThe 2025 year has been added to Annual History with current stats.\n2026 tracking has been started.\n\nNote: YTD Lost/Failed counters start at 0 for 2026.');
+  SpreadsheetApp.getUi().alert('âœ… 2025 Annual Data Initialized!\n\nThe 2025 year has been added to Annual History with current stats.\n2026 tracking has been started.\n\nNote: YTD Lost/Failed counters start at 0 for 2026.');
 }
 
 /**
@@ -803,7 +803,7 @@ function getNewItemsLogDataFromSheet(sheet) {
 
     // Read data rows using the column map
     if (inLogSection && headerRow && firstCell && firstCell !== '' &&
-        firstCell !== 'ANNUAL HISTORY' && firstCell.indexOf('📅') === -1) {
+        firstCell !== 'ANNUAL HISTORY' && firstCell.indexOf('ðŸ“…') === -1) {
       // Stop if we hit the next section
       if (firstCell.indexOf('ANNUAL') !== -1 || firstCell.indexOf('Year') === 0) {
         break;
@@ -1009,7 +1009,7 @@ function resetKnownItemNumbers() {
   initializeKnownItemNumbers('HV Testers');
   initializeKnownItemNumbers('Phasing Sets');
 
-  SpreadsheetApp.getUi().alert('✅ Known item numbers have been reset and re-initialized from current inventory.');
+  SpreadsheetApp.getUi().alert('âœ… Known item numbers have been reset and re-initialized from current inventory.');
 }
 
 /**
@@ -1021,7 +1021,7 @@ function resetBlanketTracking() {
   props.deleteProperty(NEW_ITEMS_PROPERTY_KEY + '_Blankets');
 
   // Don't initialize - let it be empty so the next blanket is detected as "new"
-  SpreadsheetApp.getUi().alert('✅ Blanket tracking has been reset.\n\nThe next blanket number you enter will trigger the New Blanket Entry dialog.');
+  SpreadsheetApp.getUi().alert('âœ… Blanket tracking has been reset.\n\nThe next blanket number you enter will trigger the New Blanket Entry dialog.');
 }
 
 /**
@@ -1037,28 +1037,28 @@ function promptNewItemSource(itemNum, sheetName, rowNum) {
 
   if (sheetName === 'Gloves') {
     itemType = 'Glove';
-    dialogTitle = '📦 New Glove Entry';
+    dialogTitle = 'ðŸ“¦ New Glove Entry';
   } else if (sheetName === 'Sleeves') {
     itemType = 'Sleeve';
-    dialogTitle = '📦 New Sleeve Entry';
+    dialogTitle = 'ðŸ“¦ New Sleeve Entry';
   } else if (sheetName === 'Blankets') {
     itemType = 'Blanket';
-    dialogTitle = '🧱 New Blanket Entry';
+    dialogTitle = 'ðŸ§± New Blanket Entry';
   } else if (sheetName === 'HV Testers') {
     itemType = 'HV Tester';
-    dialogTitle = '⚡ New HV Tester Entry';
+    dialogTitle = 'âš¡ New HV Tester Entry';
   } else if (sheetName === 'Phasing Sets') {
     itemType = 'Phasing Set';
-    dialogTitle = '⚡ New Phasing Set Entry';
+    dialogTitle = 'âš¡ New Phasing Set Entry';
   } else if (sheetName === 'Hot Sticks') {
     itemType = 'Hot Stick';
-    dialogTitle = '🪵 New Hot Stick Entry';
+    dialogTitle = 'ðŸªµ New Hot Stick Entry';
   } else if (sheetName === 'Grounds') {
     itemType = 'Ground';
-    dialogTitle = '⚡ New Ground Entry';
+    dialogTitle = 'âš¡ New Ground Entry';
   } else {
     itemType = 'Item';
-    dialogTitle = '📦 New Item Entry';
+    dialogTitle = 'ðŸ“¦ New Item Entry';
   }
 
   var template = HtmlService.createTemplateFromFile('NewItemDialog');
@@ -1313,13 +1313,13 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
       var parsedTestDate = parseDateNoon(formData.testDate);
       if (parsedTestDate) {
         testDateCell.setValue(parsedTestDate);
-        try { testDateCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+        try { testDateCell.setNumberFormat('MM/dd/yyyy'); SpreadsheetApp.flush(); } catch (fmtErr) {}
         // Calculate Change Out Date = Test Date + 12 months
         var changeOutDate = new Date(parsedTestDate);
         changeOutDate.setMonth(changeOutDate.getMonth() + (typeof INTERVAL_GROUNDS_TEST !== 'undefined' ? INTERVAL_GROUNDS_TEST : 12));
         var coCell = sheet.getRange(rowNum, COLS.GROUNDS.CHANGE_OUT_DATE);
         coCell.setValue(changeOutDate);
-        try { coCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+        try { coCell.setNumberFormat('MM/dd/yyyy'); SpreadsheetApp.flush(); } catch (fmtErr) {}
       }
     }
     // Write Location (col H)
@@ -1338,7 +1338,7 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
         var today = new Date();
         var dateCell = sheet.getRange(rowNum, COLS.GROUNDS.DATE_ASSIGNED);
         dateCell.setValue(today);
-        try { dateCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+        try { dateCell.setNumberFormat('MM/dd/yyyy'); SpreadsheetApp.flush(); } catch (fmtErr) {}
         sheet.getRange(rowNum, COLS.GROUNDS.STATUS).setValue('In Service');
         var empLoc = lookupEmployeeLocation(ss, assignedTo);
         if (empLoc) {
@@ -1376,13 +1376,14 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
       var parsedTestDate = parseDateNoon(formData.hotStickTestDate);
       if (parsedTestDate) {
         testDateCell.setValue(parsedTestDate);
-        try { testDateCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
-        // Calculate Change Out Date = Test Date + 12 months
+        // Note: flush() inside try ensures deferred batched error from typed Table column is caught here
+        try { testDateCell.setNumberFormat('MM/dd/yyyy'); SpreadsheetApp.flush(); } catch (fmtErr) {}
+        // Calculate Change Out Date = Test Date + 24 months (2-year cycle per OSHA 1910.269)
         var coDate = new Date(parsedTestDate);
-        coDate.setMonth(coDate.getMonth() + (typeof INTERVAL_HOT_STICK_TEST !== 'undefined' ? INTERVAL_HOT_STICK_TEST : 12));
+        coDate.setMonth(coDate.getMonth() + (typeof INTERVAL_HOT_STICK_TEST !== 'undefined' ? INTERVAL_HOT_STICK_TEST : 24));
         var coCell = sheet.getRange(rowNum, COLS.HOT_STICKS.CHANGE_OUT_DATE);
         coCell.setValue(coDate);
-        try { coCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+        try { coCell.setNumberFormat('MM/dd/yyyy'); SpreadsheetApp.flush(); } catch (fmtErr) {}
       }
     }
     // Write Location (col F)
@@ -1397,11 +1398,22 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
     if (formData.assignedTo && formData.assignedTo.trim() !== '') {
       var assignedTo = formData.assignedTo.trim();
       sheet.getRange(rowNum, COLS.HOT_STICKS.ASSIGNED_TO).setValue(assignedTo);
+      // Always write Date Assigned if user provided one (even for On Shelf items)
+      if (formData.hotStickDateAssigned) {
+        var dateToUse = parseDateNoon(formData.hotStickDateAssigned);
+        if (dateToUse) {
+          var dateCell = sheet.getRange(rowNum, COLS.HOT_STICKS.DATE_ASSIGNED);
+          dateCell.setValue(dateToUse);
+          try { dateCell.setNumberFormat('MM/dd/yyyy'); SpreadsheetApp.flush(); } catch (fmtErr) {}
+        }
+      }
       if (assignedTo.toLowerCase() !== 'on shelf') {
-        var today = new Date();
-        var dateCell = sheet.getRange(rowNum, COLS.HOT_STICKS.DATE_ASSIGNED);
-        dateCell.setValue(today);
-        try { dateCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+        // Non-shelf assignment: set Date Assigned to today if not already provided
+        if (!formData.hotStickDateAssigned) {
+          var dateCell2 = sheet.getRange(rowNum, COLS.HOT_STICKS.DATE_ASSIGNED);
+          dateCell2.setValue(new Date());
+          try { dateCell2.setNumberFormat('MM/dd/yyyy'); SpreadsheetApp.flush(); } catch (fmtErr) {}
+        }
         sheet.getRange(rowNum, COLS.HOT_STICKS.STATUS).setValue('In Service');
         var empLoc = lookupEmployeeLocation(ss, assignedTo);
         if (empLoc) {
@@ -1636,7 +1648,7 @@ function handleDuplicateItemNumber(itemNum, sheetName, currentRow) {
 
     var ui = SpreadsheetApp.getUi();
     ui.alert(
-      '⚠️ Duplicate Item Number',
+      'âš ï¸ Duplicate Item Number',
       'Item number "' + itemNum + '" already exists in row ' + result.existingRow + ' of the ' + sheetName + ' sheet.\n\n' +
       'Please use a unique item number.',
       ui.ButtonSet.OK
@@ -1661,7 +1673,7 @@ function processItemSourceLogging(formData, itemNum, itemType, sheetName, ss) {
   if (formData.itemSource === '2') {
     source = 'Reclaimed';
   } else if (formData.itemSource === '3') {
-    ss.toast('Item #' + itemNum + ' added (not logged as new)', '✅ Item Added', 5);
+    ss.toast('Item #' + itemNum + ' added (not logged as new)', 'âœ… Item Added', 5);
     return;
   }
 
@@ -1677,7 +1689,7 @@ function processItemSourceLogging(formData, itemNum, itemType, sheetName, ss) {
     notes: 'Auto-detected from ' + sheetName + ' sheet'
   });
 
-  ss.toast('Item #' + itemNum + ' logged as ' + source, '✅ New Item Logged', 3);
+  ss.toast('Item #' + itemNum + ' logged as ' + source, 'âœ… New Item Logged', 3);
 }
 
 /**

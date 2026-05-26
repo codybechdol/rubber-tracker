@@ -195,6 +195,7 @@
       <label>Length:</label>
       <select id="hotStickLength" name="hotStickLength">
         <option value="">Select length...</option>
+        <option value="6'">6'</option>
         <option value="8'">8'</option>
         <option value="10'">10'</option>
         <option value="35'">35'</option>
@@ -206,7 +207,13 @@
     <div class="form-group">
       <label>Test Date:</label>
       <input type="date" id="hotStickTestDate" name="hotStickTestDate">
-      <div class="hint">Change Out Date auto-calculates (Test Date + 12 months)</div>
+      <div class="hint">Change Out Date auto-calculates (Test Date + 24 months)</div>
+    </div>
+
+    <div class="form-group">
+      <label>Date Assigned:</label>
+      <input type="date" id="hotStickDateAssigned" name="hotStickDateAssigned">
+      <div class="hint">Date the stick was assigned to a crew (leave blank to use today)</div>
     </div>
 
     <? } else if (sheetName === 'Blankets') { ?>
@@ -278,7 +285,7 @@
     </div>
     <? } ?>
 
-    <? if (!isEquipment && sheetName !== 'AED' && !isGrounds) { ?>
+    <? if (!isEquipment && sheetName !== 'AED' && !isGrounds && !isHotStick) { ?>
     <div class="form-group">
       <label>Test Date:</label>
       <input type="date" id="testDate" name="testDate">
@@ -312,7 +319,7 @@
         <option value="Failed Rubber">Failed Rubber</option>
         <option value="Lost">Lost</option>
       </select>
-      <? } else if (sheetName === 'Grounds') { ?>
+      <? } else if (sheetName === 'Grounds' || sheetName === 'Hot Sticks') { ?>
       <select id="status" name="status">
         <option value="On Shelf" selected>On Shelf</option>
         <option value="In Service">In Service</option>
@@ -505,6 +512,7 @@
         formData.hotStickType = document.getElementById('hotStickType').value;
         formData.hotStickLength = document.getElementById('hotStickLength').value;
         formData.hotStickTestDate = document.getElementById('hotStickTestDate').value;
+        formData.hotStickDateAssigned = document.getElementById('hotStickDateAssigned').value;
       } else {
         // Gloves/Sleeves/Blankets fields
         formData.size = document.getElementById('size').value;
