@@ -113,6 +113,14 @@ function collectCompletedFromTaskMetadata(ss, startDate, endDate) {
   var notesCol = colMap['Notes'];
   var sourceSheetCol = colMap['SourceSheet'];
 
+  // Task types that are compliance/tracking records, NOT actual work performed.
+  // These should never appear in Daily Accomplishments.
+  var EXCLUDED_TASK_TYPES_LOWER = ['missing safety report'];
+
+  // Task types done over the phone from Helena — no field visit needed.
+  // Force their location to Helena so they don't generate bogus drive times.
+  var OFFICE_TASK_TYPES_LOWER = ['cert expiring'];
+
   for (var i = 1; i < data.length; i++) {
     var row = data[i];
 
@@ -145,6 +153,21 @@ function collectCompletedFromTaskMetadata(ss, startDate, endDate) {
     var endTime = endTimeCol !== undefined ? formatTimeValueForBreakdown(row[endTimeCol]) : '';
     var notes = notesCol !== undefined ? String(row[notesCol] || '') : '';
     var sourceSheet = sourceSheetCol !== undefined ? String(row[sourceSheetCol] || '') : '';
+
+    // Exclude tasks that are pure tracking records (not physical work performed)
+    var taskTypeLowerCheck = taskType.toLowerCase();
+    var isExcluded = false;
+    for (var ex = 0; ex < EXCLUDED_TASK_TYPES_LOWER.length; ex++) {
+      if (taskTypeLowerCheck === EXCLUDED_TASK_TYPES_LOWER[ex]) { isExcluded = true; break; }
+    }
+    if (isExcluded) continue;
+
+    // Force office-only task types to Helena (phone/desk work, no field trip)
+    var isOfficeTask = false;
+    for (var ot = 0; ot < OFFICE_TASK_TYPES_LOWER.length; ot++) {
+      if (taskTypeLowerCheck === OFFICE_TASK_TYPES_LOWER[ot]) { isOfficeTask = true; break; }
+    }
+    if (isOfficeTask) { location = 'Helena'; }
 
     // Estimate time based on task type
     var estimatedTime = getTaskEstimatedTime(taskType);
@@ -514,6 +537,28 @@ function getDailyBreakdown(tasks) {
   // Calculate drive times for each day
   var driveTimeMap = getDriveTimeMap();
 
+  // Sort each day's non-Helena locations by drive distance from Helena (closest first).
+  // This gives a more realistic outbound route (visiting nearest crew on the way out,
+  // farthest in the middle, then nearest again on the return — approximated by ascending order).
+  for (var ds = 0; ds < breakdown.dayOrder.length; ds++) {
+    var dayDataS = breakdown.days[breakdown.dayOrder[ds]];
+    if (!dayDataS.isOfficeDay && dayDataS.locationOrder.length > 1) {
+      var helena = [];
+      var nonHelena = [];
+      for (var ls = 0; ls < dayDataS.locationOrder.length; ls++) {
+        var locS = dayDataS.locationOrder[ls];
+        if (locS.toLowerCase() === 'helena') { helena.push(locS); }
+        else { nonHelena.push(locS); }
+      }
+      // Sort non-Helena by drive time from Helena ascending
+      nonHelena.sort(function(a, b) {
+        return (driveTimeMap[a.toLowerCase()] || 0) - (driveTimeMap[b.toLowerCase()] || 0);
+      });
+      // Helena tasks always go at the end (office/admin work done at home base)
+      dayDataS.locationOrder = nonHelena.concat(helena);
+    }
+  }
+
   for (var d = 0; d < breakdown.dayOrder.length; d++) {
     var dayKey = breakdown.dayOrder[d];
     var dayData = breakdown.days[dayKey];
@@ -745,22 +790,28 @@ function formatBreakdownForTimesheet(breakdown, format) {
         }
       }
     } else {
-      // Field day - list by crew/location with drive times
+      // Field day - list by crew/location with drive times.
+      // Non-Helena locations first (sorted closest→farthest by getDailyBreakdown),
+      // then "Drove back to Helena", then any Helena tasks at the end (done after returning).
       var prevLoc = 'Helena';
       var driveTimeMap = getDriveTimeMap();
+      var helenaLocDataFmt = null; // Save Helena tasks to show after drive-back
 
       for (var l = 0; l < day.locationOrder.length; l++) {
         var locName = day.locationOrder[l];
         var locData = day.locations[locName];
 
-        if (locName.toLowerCase() !== 'helena') {
-          // Add drive line
-          var driveTime = getDriveTimeBetween(prevLoc.toLowerCase(), locName.toLowerCase(), driveTimeMap);
-          if (driveTime > 0) {
-            output.push('- Drove to ' + locName + ' - ' + formatMinutes(driveTime));
-          }
-          prevLoc = locName;
+        if (locName.toLowerCase() === 'helena') {
+          helenaLocDataFmt = locData; // Defer Helena to after drive-back
+          continue;
         }
+
+        // Add drive line
+        var driveTime = getDriveTimeBetween(prevLoc.toLowerCase(), locName.toLowerCase(), driveTimeMap);
+        if (driveTime > 0) {
+          output.push('- Drove to ' + locName + ' - ' + formatMinutes(driveTime));
+        }
+        prevLoc = locName;
 
         // Crew header with time
         var crewLabel = locData.crew ? 'Crew ' + locData.crew + ' (' + locName + ')' : locName;
@@ -778,6 +829,15 @@ function formatBreakdownForTimesheet(breakdown, format) {
         var returnDrive = getDriveTimeBetween(prevLoc.toLowerCase(), 'helena', driveTimeMap);
         if (returnDrive > 0) {
           output.push('- Drove back to Helena - ' + formatMinutes(returnDrive));
+        }
+      }
+
+      // Helena tasks (office/shop work done after returning)
+      if (helenaLocDataFmt && helenaLocDataFmt.tasks.length > 0) {
+        output.push('- Helena (after return) - ' + formatMinutes(helenaLocDataFmt.totalMinutes) + ' total:');
+        var helenaTaskLines = formatLocationTasks(helenaLocDataFmt, format);
+        for (var ht = 0; ht < helenaTaskLines.length; ht++) {
+          output.push('  ' + helenaTaskLines[ht]);
         }
       }
     }
