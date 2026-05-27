@@ -151,7 +151,6 @@ function collectCompletedFromTaskMetadata(ss, startDate, endDate) {
 
     tasks.push({
       date: formatDateKey(taskDate),
-      dateObj: taskDate,
       location: location || 'Helena',
       taskType: taskType,
       employee: employee,
@@ -272,7 +271,6 @@ function collectCompletedFromToDoList(ss, startDate, endDate) {
 
     tasks.push({
       date: formatDateKey(taskDate),
-      dateObj: taskDate,
       location: location || 'Helena',
       taskType: taskType,
       employee: employee,
@@ -345,7 +343,6 @@ function collectCompletedFromManualTasks(ss, startDate, endDate) {
 
     tasks.push({
       date: formatDateKey(taskDate),
-      dateObj: taskDate,
       location: location || 'Helena',
       taskType: taskType || 'Manual Task',
       employee: employee,
@@ -397,7 +394,6 @@ function collectCompletedFromTrainingTracking(ss, startDate, endDate) {
 
     tasks.push({
       date: formatDateKey(taskDate),
-      dateObj: taskDate,
       location: location || 'Helena',
       taskType: 'Training: ' + topic,
       employee: lead,
@@ -435,9 +431,12 @@ function getDailyBreakdown(tasks) {
     var dateKey = task.date;
 
     if (!breakdown.days[dateKey]) {
+      // Parse dateKey (YYYY-MM-DD) at noon to avoid timezone shift
+      var keyParts = dateKey.split('-');
+      var keyDate = new Date(parseInt(keyParts[0]), parseInt(keyParts[1]) - 1, parseInt(keyParts[2]), 12, 0, 0);
       breakdown.days[dateKey] = {
-        date: task.dateObj,
-        dateFormatted: formatDisplayDate(task.dateObj),
+        dateMs: keyDate.getTime(),  // epoch ms (Date objects can't be serialized via google.script.run)
+        dateFormatted: formatDisplayDate(keyDate),
         locations: {},
         locationOrder: [],
         isOfficeDay: true, // Assume office day until proven otherwise
@@ -509,10 +508,8 @@ function getDailyBreakdown(tasks) {
     locGroup.tasks.push(task);
   }
 
-  // Sort days chronologically
-  breakdown.dayOrder.sort(function(a, b) {
-    return breakdown.days[a].date - breakdown.days[b].date;
-  });
+  // Sort days chronologically (YYYY-MM-DD keys sort lexicographically = chronologically)
+  breakdown.dayOrder.sort();
 
   // Calculate drive times for each day
   var driveTimeMap = getDriveTimeMap();

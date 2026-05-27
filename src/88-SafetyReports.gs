@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 88-SafetyReports.gs
  *
  * Gmail integration for processing JHAs, Safety Meetings, and Fleet Checklists
@@ -2193,9 +2193,9 @@ function calculateComplianceFromLogs(weekStartDate, options) {
     // Weekly meeting status
     if (crew.skipWeeklyMeeting) {
       crew.weeklyMeetingStatus = 'N/A';
-    } else if (weekHasHoliday && !crew.weeklyMeeting) {
-      // Holiday week - excuse weekly meeting if not already submitted
-      crew.weeklyMeetingStatus = 'N/A';
+    // NOTE: Holiday excuse for weekly meeting removed (May 2026).
+    // Holidays only excuse the specific JHA day, NOT the weekly meeting report.
+    // (was: } else if (weekHasHoliday && !crew.weeklyMeeting) { weeklyMeetingStatus='N/A'; }
     } else if (crew.weeklyMeeting) {
       crew.weeklyMeetingStatus = crew.weeklyMeetingLate ? '\u2705L' : '\u2705';
       if (crew.weeklyMeetingLate) lateCount++;

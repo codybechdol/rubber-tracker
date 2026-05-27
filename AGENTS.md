@@ -178,6 +178,8 @@ Key functions in `Code.gs`:
 
 In `TripPlanner.html`: `toggleHolidayDay(dateKey, isOn)` prompts for holiday name (with presets: Memorial Day, Independence Day, Labor Day, Thanksgiving, Christmas, New Year's Day), then calls server-side `toggleHoliday()`. Manual tasks (office work) can still be dropped on holiday days; location cards cannot.
 
+**Holiday scope in Safety Compliance:** Holidays excuse the **specific JHA day** only (e.g., Memorial Day on Monday = Monday JHA is N/A). They do **NOT** excuse the weekly safety meeting or monthly checklist — those remain ⏳ pending even during holiday weeks. (The holiday-excuse-for-weekly-meeting behavior was removed May 2026.)
+
 ## Safety Compliance System
 Gmail is processed to track JHA/Safety Meeting compliance per crew:
 - **Log Sheets** (JHA Log, Weekly Safety Log, Monthly Checklist Log) store raw email data
