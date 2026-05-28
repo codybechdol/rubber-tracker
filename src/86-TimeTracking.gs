@@ -115,11 +115,12 @@ function collectCompletedFromTaskMetadata(ss, startDate, endDate) {
 
   // Task types that are compliance/tracking records, NOT actual work performed.
   // These should never appear in Daily Accomplishments.
-  var EXCLUDED_TASK_TYPES_LOWER = ['missing safety report'];
+  var EXCLUDED_TASK_TYPES_LOWER = [];
 
   // Task types done over the phone from Helena — no field visit needed.
   // Force their location to Helena so they don't generate bogus drive times.
-  var OFFICE_TASK_TYPES_LOWER = ['cert expiring'];
+  // 'missing safety report' = phone/text notification to foreman; always Helena, renders specially.
+  var OFFICE_TASK_TYPES_LOWER = ['cert expiring', 'missing safety report'];
 
   for (var i = 1; i < data.length; i++) {
     var row = data[i];
@@ -184,7 +185,8 @@ function collectCompletedFromTaskMetadata(ss, startDate, endDate) {
       startTime: startTime,
       endTime: endTime,
       notes: notes,
-      source: 'Task Metadata (' + sourceSheet + ')'
+      source: 'Task Metadata (' + sourceSheet + ')',
+      isMissingSafetyReport: (taskTypeLowerCheck === 'missing safety report')
     });
   }
 
@@ -490,6 +492,8 @@ function getDailyBreakdown(tasks) {
         trainings: [],
         certTasks: [],
         otherTasks: [],
+        // Keyed by foreman name; each entry = { jhaItems: ['Mon','Wed'], otherItems: ['Weekly Meeting'] }
+        missingSafetyNotices: {},
         totalMinutes: 0
       };
       day.locationOrder.push(location);
@@ -514,7 +518,24 @@ function getDailyBreakdown(tasks) {
 
     // Categorize task
     var taskTypeLower = String(task.taskType).toLowerCase();
-    if (taskTypeLower.indexOf('swap') !== -1) {
+    if (task.isMissingSafetyReport) {
+      // Consolidate per foreman: JHAs accumulate, Meetings/Checklists are separate items
+      var foremanKey = (task.employee || task.foreman || 'Unknown Foreman').trim();
+      if (!locGroup.missingSafetyNotices[foremanKey]) {
+        locGroup.missingSafetyNotices[foremanKey] = { jhaItems: [], otherItems: [] };
+      }
+      var rawItemType = String(task.itemType || '').trim();
+      if (rawItemType.toUpperCase().indexOf('JHA') !== -1) {
+        // Extract day label from "JHA (Mon)" → "Mon"
+        var dayMatch = rawItemType.match(/\(([^)]+)\)/);
+        var dayLabel = dayMatch ? dayMatch[1] : rawItemType;
+        locGroup.missingSafetyNotices[foremanKey].jhaItems.push(dayLabel);
+      } else if (rawItemType) {
+        locGroup.missingSafetyNotices[foremanKey].otherItems.push(rawItemType);
+      } else {
+        locGroup.missingSafetyNotices[foremanKey].otherItems.push('report');
+      }
+    } else if (taskTypeLower.indexOf('swap') !== -1) {
       if (task.itemType && task.itemType.toLowerCase().indexOf('sleeve') !== -1) {
         locGroup.sleeveSwaps.push(task);
       } else {
@@ -691,7 +712,8 @@ function getWeekSummary(breakdown) {
       trainings: 0,
       certs: 0,
       reclaims: 0,
-      other: 0
+      other: 0,
+      missingReportFollowUps: 0
     }
   };
 
@@ -720,6 +742,16 @@ function getWeekSummary(breakdown) {
       summary.taskCounts.swaps += locData.gloveSwaps.length + locData.sleeveSwaps.length;
       summary.taskCounts.trainings += locData.trainings.length;
       summary.taskCounts.certs += locData.certTasks.length;
+
+      // Count missing safety report follow-ups
+      if (locData.missingSafetyNotices) {
+        for (var fn in locData.missingSafetyNotices) {
+          if (!locData.missingSafetyNotices.hasOwnProperty(fn)) continue;
+          var n = locData.missingSafetyNotices[fn];
+          if (n.jhaItems.length > 0) summary.taskCounts.missingReportFollowUps++;
+          summary.taskCounts.missingReportFollowUps += n.otherItems.length;
+        }
+      }
 
       for (var t = 0; t < locData.otherTasks.length; t++) {
         var taskType = String(locData.otherTasks[t].taskType).toLowerCase();
@@ -864,6 +896,7 @@ function formatBreakdownForTimesheet(breakdown, format) {
     if (ws.taskCounts.trainings > 0) taskParts.push(ws.taskCounts.trainings + ' trainings');
     if (ws.taskCounts.certs > 0) taskParts.push(ws.taskCounts.certs + ' cert tasks');
     if (ws.taskCounts.reclaims > 0) taskParts.push(ws.taskCounts.reclaims + ' reclaims');
+    if (ws.taskCounts.missingReportFollowUps > 0) taskParts.push(ws.taskCounts.missingReportFollowUps + ' missing report follow-up' + (ws.taskCounts.missingReportFollowUps === 1 ? '' : 's'));
     if (ws.taskCounts.other > 0) taskParts.push(ws.taskCounts.other + ' other');
 
     if (taskParts.length > 0) {
@@ -883,7 +916,15 @@ function formatBreakdownForTimesheet(breakdown, format) {
  */
 function formatLocationTasks(locData, format) {
   var lines = [];
-  var bullet = format === 'bullets' ? '• ' : '• ';
+  var bullet = format === 'bullets' ? '\u2022 ' : '\u2022 ';
+
+  // Missing Safety Report notifications (always first in Helena office block)
+  if (locData.missingSafetyNotices && Object.keys(locData.missingSafetyNotices).length > 0) {
+    var safetyLines = formatMissingSafetyNotices(locData.missingSafetyNotices);
+    for (var si = 0; si < safetyLines.length; si++) {
+      lines.push(safetyLines[si]);
+    }
+  }
 
   // Consolidate swaps
   if (locData.gloveSwaps.length > 0 || locData.sleeveSwaps.length > 0) {
@@ -918,6 +959,44 @@ function formatLocationTasks(locData, format) {
     var otherTime = other.startTime && other.endTime ?
       ' (' + other.startTime + ' - ' + other.endTime + ')' : '';
     lines.push(bullet + other.taskType + otherTime);
+  }
+
+  return lines;
+}
+
+/**
+ * Formats Missing Safety Report notifications for a location group.
+ * Rules:
+ *   - Multiple missing JHAs for the same foreman are consolidated on one line:
+ *     "• Informed Matthew Wendt of missing JHA (Mon, Wed)"
+ *   - Safety Meetings and Monthly Checklists are separate lines per foreman:
+ *     "• Informed Matthew Wendt of missing Weekly Meeting"
+ *
+ * @param {Object} missingSafetyNotices - Map keyed by foreman name
+ * @return {Array} Array of formatted line strings
+ */
+function formatMissingSafetyNotices(missingSafetyNotices) {
+  var lines = [];
+  var bullet = '\u2022 '; // •
+
+  for (var foreman in missingSafetyNotices) {
+    if (!missingSafetyNotices.hasOwnProperty(foreman)) continue;
+    var notice = missingSafetyNotices[foreman];
+
+    // Consolidated JHA line (if any JHAs)
+    if (notice.jhaItems.length > 0) {
+      var dayList = notice.jhaItems.join(', ');
+      if (notice.jhaItems.length === 1) {
+        lines.push(bullet + 'Informed ' + foreman + ' of missing JHA (' + dayList + ')');
+      } else {
+        lines.push(bullet + 'Informed ' + foreman + ' of missing JHAs (' + dayList + ')');
+      }
+    }
+
+    // Separate line for each non-JHA item (Weekly Meeting, Monthly Checklist, etc.)
+    for (var oi = 0; oi < notice.otherItems.length; oi++) {
+      lines.push(bullet + 'Informed ' + foreman + ' of missing ' + notice.otherItems[oi]);
+    }
   }
 
   return lines;
