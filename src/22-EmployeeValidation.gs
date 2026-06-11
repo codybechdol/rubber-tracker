@@ -815,7 +815,14 @@ function refreshJobTrackingForemen() {
     'AP 4': 14,
     'AP 3': 15,
     'AP 2': 16,
-    'AP 1': 17     // 1st Year Apprentice (least senior)
+    'AP 1': 17,    // 1st Year Apprentice (least senior)
+    'ST 7': 11,    // 7th Year Sub Tech (equivalent to AP 7)
+    'ST 6': 12,
+    'ST 5': 13,
+    'ST 4': 14,
+    'ST 3': 15,
+    'ST 2': 16,
+    'ST 1': 17     // 1st Year Sub Tech (least senior)
   };
 
   // Build crew lead map from Employees
@@ -932,7 +939,8 @@ function refreshJobTrackingForemenSilent() {
   var classificationPriority = {
     'SUP': 1, 'GF': 2, 'F': 3, 'GTO F': 4, 'JRY': 5, 'JRY OP': 6,
     'WT': 7, 'GTO': 8, 'EO 1': 9, 'EO 2': 10,
-    'AP 7': 11, 'AP 6': 12, 'AP 5': 13, 'AP 4': 14, 'AP 3': 15, 'AP 2': 16, 'AP 1': 17
+    'AP 7': 11, 'AP 6': 12, 'AP 5': 13, 'AP 4': 14, 'AP 3': 15, 'AP 2': 16, 'AP 1': 17,
+    'ST 7': 11, 'ST 6': 12, 'ST 5': 13, 'ST 4': 14, 'ST 3': 15, 'ST 2': 16, 'ST 1': 17
   };
 
   // Build crew lead map from Employees
@@ -1558,7 +1566,8 @@ function syncCrews(silent) {
   var classificationPriority = {
     'SUP': 1, 'GF': 2, 'F': 3, 'GTO F': 4, 'JRY': 5, 'JRY OP': 6,
     'WT': 7, 'GTO': 8, 'EO 1': 9, 'EO 2': 10,
-    'AP 7': 11, 'AP 6': 12, 'AP 5': 13, 'AP 4': 14, 'AP 3': 15, 'AP 2': 16, 'AP 1': 17
+    'AP 7': 11, 'AP 6': 12, 'AP 5': 13, 'AP 4': 14, 'AP 3': 15, 'AP 2': 16, 'AP 1': 17,
+    'ST 7': 11, 'ST 6': 12, 'ST 5': 13, 'ST 4': 14, 'ST 3': 15, 'ST 2': 16, 'ST 1': 17
   };
 
   // Build crew map from Employees

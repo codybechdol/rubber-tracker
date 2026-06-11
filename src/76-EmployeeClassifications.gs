@@ -20,7 +20,7 @@ function setupJobClassificationDropdown() {
   }
 
   // Job Classifications
-  // AP = Apprentice, JRY = Journeyman, F = Foreman, OP = Operator
+  // AP = Apprentice, ST = Sub Tech (equivalent to AP, 1-7), JRY = Journeyman, F = Foreman, OP = Operator
   // GF = General Foreman, GTO = General Trade Operator, SUP = Supervisor, EO = Equipment Operator
   // WT = White Ticket Lineman
   var classifications = [
@@ -31,6 +31,13 @@ function setupJobClassificationDropdown() {
     'AP 5',
     'AP 6',
     'AP 7',
+    'ST 1',
+    'ST 2',
+    'ST 3',
+    'ST 4',
+    'ST 5',
+    'ST 6',
+    'ST 7',
     'JRY',
     'WT',
     'F',
@@ -89,7 +96,7 @@ function setupJobClassificationDropdown() {
   SpreadsheetApp.getUi().alert(
     '✅ Job Classification Dropdown Created!\n\n' +
     'Column: N (Job Classification)\n' +
-    'Values: AP 1-7, JRY, WT, F, GF, SUP, JRY OP, OP, GTO F, GTO, EO 1-2\n\n' +
+    'Values: AP 1-7, ST 1-7, JRY, WT, F, GF, SUP, JRY OP, OP, GTO F, GTO, EO 1-2\n\n' +
     '⚠️ Only approved classifications allowed (strict validation)\n' +
     '⭐ Only "F" and "GTO F" are recognized as crew leads for training tracking'
   );
@@ -123,6 +130,7 @@ function isCrewLead(classification) {
 function getClassificationDescriptions() {
   var descriptions = 'Job Classification Reference:\n\n';
   descriptions += 'AP 1-7 = Apprentice (1st through 7th year)\n';
+  descriptions += 'ST 1-7 = Sub Tech (equivalent to AP 1-7, different trade name)\n';
   descriptions += 'JRY = Journeyman Lineman\n';
   descriptions += 'WT = White Ticket Lineman\n';
   descriptions += 'F = Foreman (Crew Lead) ⭐\n';

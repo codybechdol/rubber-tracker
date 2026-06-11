@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Glove Manager – Trigger Functions
  *
  * Functions for setting up and handling edit/change triggers.
@@ -1136,8 +1136,6 @@ function processEdit(e) {
 
     // Handle Assigned To changes - auto-populate Location and Status from Employees sheet
     if (psEditedHeader === 'assigned to') {
-      handlePhasingSetAssignedToChange(ss, sheet, editedRow, newValue, editedCol);
-      handlePhasingSetAssignedToChange(ss, sheet, editedRow, newValue, editedCol);
       handlePhasingSetAssignedToChange(ss, sheet, editedRow, newValue, editedCol);
       return;
     }

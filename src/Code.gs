@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Glove Manager – Rubber Glove & Sleeve Inventory System
  *
  * Google Apps Script foundation for automating and managing PPE inventory, assignments, swaps, compliance, and reporting.
@@ -184,7 +184,7 @@ function showToDoConfig() {
   var html = HtmlService.createHtmlOutputFromFile('ToDoConfig')
     .setWidth(1400)
     .setHeight(900);
-  SpreadsheetApp.getUi().showModalDialog(html, '⚙️ To Do Config');
+  SpreadsheetApp.getUi().showModalDialog(html, '⚙️ To Do Config');
 }
 
 /**
@@ -1455,6 +1455,21 @@ function markScheduleTaskComplete(taskIndexOrTask) {
       Logger.log('WARNING: Safety Equipment Needs sheet not found or row out of range');
       updated = true; // Task Metadata was already updated above
     }
+  } else if (source === 'Glove Swaps' || source === 'Sleeve Swaps') {
+    // Swap completion: write today's date to "Date Changed" column J and trigger Stage 3
+    var swapSheet = ss.getSheetByName(source);
+    var inventorySheetName = (source === 'Glove Swaps') ? SHEET_GLOVES : SHEET_SLEEVES;
+    var inventorySheet = ss.getSheetByName(inventorySheetName);
+    var isGloveSwaps = (source === 'Glove Swaps');
+    if (swapSheet && inventorySheet && task.rowIndex) {
+      var completionDate = new Date();
+      swapSheet.getRange(task.rowIndex, 10).setNumberFormat('MM/dd/yyyy').setValue(completionDate);
+      handleDateChangedEdit(ss, swapSheet, inventorySheet, task.rowIndex, completionDate, isGloveSwaps);
+      Logger.log('Swap completion: wrote Date Changed and ran Stage 3 for ' + source + ' row ' + task.rowIndex);
+      updated = true;
+    } else {
+      Logger.log('ERROR: Could not complete swap - missing sheet or rowIndex');
+    }
   } else if (source === 'To Do List' || !source) {
     // Legacy To Do List handling - To Do List sheet has been archived since Phase 6
     // Tasks should now go through Task Metadata only
@@ -1724,6 +1739,30 @@ function deleteScheduleTask(taskIndex, taskKey, taskData) {
   }
 
   return { success: true, deleted: deletedFrom.join(', '), key: taskKey };
+}
+
+/**
+ * Deletes a specific row from the Manual Tasks sheet.
+ * Used by the Task List dialog to remove stale or unwanted manual tasks.
+ * @param {number} rowIndex - 1-based row index in the Manual Tasks sheet
+ * @return {Object} Result with success status
+ */
+function deleteManualTask(rowIndex) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('Manual Tasks');
+    if (!sheet) return { success: false, error: 'Manual Tasks sheet not found' };
+    var lastRow = sheet.getLastRow();
+    if (rowIndex < 2 || rowIndex > lastRow) {
+      return { success: false, error: 'Invalid row index: ' + rowIndex + ' (sheet has ' + lastRow + ' rows)' };
+    }
+    sheet.deleteRow(rowIndex);
+    Logger.log('deleteManualTask: Deleted row ' + rowIndex + ' from Manual Tasks sheet');
+    return { success: true, deleted: 'Manual Tasks row ' + rowIndex };
+  } catch (e) {
+    Logger.log('deleteManualTask error: ' + e.message);
+    return { success: false, error: e.message };
+  }
 }
 
 /**
@@ -2427,6 +2466,7 @@ function getEmployeeNamesForMatching() {
     var gloveSizeCol = -1;
     var sleeveSizeCol = -1;
     var jobClassificationCol = -1;
+    var alternateNamesCol = -1;
 
     for (var h = 0; h < headers.length; h++) {
       var header = String(headers[h]).toLowerCase().trim();
@@ -2436,6 +2476,7 @@ function getEmployeeNamesForMatching() {
       if (header === 'glove size') gloveSizeCol = h;
       if (header === 'sleeve size') sleeveSizeCol = h;
       if (header === 'job classification') jobClassificationCol = h;
+      if (header === 'alternate names' || header === 'also known as' || header === 'aka') alternateNamesCol = h;
     }
 
     for (var i = 1; i < data.length; i++) {
@@ -2451,6 +2492,7 @@ function getEmployeeNamesForMatching() {
           gloveSize: gloveSizeCol !== -1 ? row[gloveSizeCol] : '',
           sleeveSize: sleeveSizeCol !== -1 ? row[sleeveSizeCol] : '',
           jobClassification: jobClassificationCol !== -1 ? String(row[jobClassificationCol] || '') : '',
+          alternateNames: alternateNamesCol !== -1 ? String(row[alternateNamesCol] || '') : '',
           rowIndex: i + 1,
           source: 'Employees'
         });
@@ -2622,7 +2664,8 @@ function parseExcelCertDataMultiRow(pastedText, columnMapping) {
 
     var cells = line.split('\t');
     if (cells.length < 3) {
-      validationWarnings.push('Row ' + (i + 1) + ': Insufficient columns');
+      // Silently skip short rows — these are header lines, section titles, or separators
+      Logger.log('Skipping short row ' + (i + 1) + ' (' + cells.length + ' cols): ' + line.substring(0, 50));
       continue;
     }
 
@@ -2681,8 +2724,21 @@ function parseExcelCertDataMultiRow(pastedText, columnMapping) {
         isPriority = true;
         priorityCount++;
       } else if (isNonExpiring) {
-        // Non-expiring cert - ignore date value
         nonExpiringCount++;
+        // Crane Evaluation: still import the date even though it doesn't expire.
+        // The date means the evaluation was performed; absence of a date triggers a To Do task
+        // for employees who have a valid Crane Cert.
+        if (certType === 'Crane Evaluation') {
+          var ceDotMatch = cellValue.match(/(\d{1,2})\.(\d{1,2})\.(\d{2,4})/);
+          var ceSlashMatch = cellValue.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+          var ceDm = ceDotMatch || ceSlashMatch;
+          if (ceDm) {
+            var ceMonth = String(ceDm[1]).padStart(2, '0');
+            var ceDay = String(ceDm[2]).padStart(2, '0');
+            var ceYear = ceDm[3].length === 2 ? '20' + ceDm[3] : ceDm[3];
+            expirationDate = ceMonth + '/' + ceDay + '/' + ceYear;
+          }
+        }
       } else {
         // Parse date from "M.D.YY" or "MM.DD.YY" format
         var dateMatch = cellValue.match(/(\d{1,2})\.(\d{1,2})\.(\d{2})/);
@@ -2745,6 +2801,72 @@ function parseExcelCertDataMultiRow(pastedText, columnMapping) {
       validationWarnings: validationWarnings
     }
   };
+}
+
+/**
+ * Builds a reverse-lookup map of alias → canonical employee name
+ * from the "Alternate Names" column in the Employees sheet.
+ * Alias entries are semicolon-separated (e.g. "Josh; Josh Arredondo").
+ * @param {Array} employees - Array from getEmployeeNamesForMatching()
+ * @return {Object} { "alias_lowercase" → "Canonical Name" }
+ */
+function buildAlternateNameMap(employees) {
+  var map = {};
+  for (var i = 0; i < employees.length; i++) {
+    var emp = employees[i];
+    if (!emp.alternateNames) continue;
+    var alts = emp.alternateNames.split(';');
+    for (var j = 0; j < alts.length; j++) {
+      var alt = alts[j].trim().toLowerCase();
+      if (alt) map[alt] = emp.name;
+    }
+  }
+  return map;
+}
+
+/**
+ * Resolves a name to its canonical Employees-sheet name using the alternate name map.
+ * Returns the canonical name if found, otherwise returns the original.
+ * @param {string} name - Name to resolve
+ * @param {Object} alternateMap - Map from buildAlternateNameMap()
+ * @return {string} Canonical name
+ */
+function resolveEmployeeName(name, alternateMap) {
+  if (!name || !alternateMap) return name;
+  return alternateMap[name.toLowerCase().trim()] || name;
+}
+
+/**
+ * Adds an "Alternate Names" column to the Employees sheet if it doesn't already exist.
+ * Users enter semicolon-separated aliases for each employee
+ * (e.g. "Josh; Josh Arredondo" for Joshua Arredondo).
+ */
+function setupAlternateNamesColumn() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_EMPLOYEES);
+  if (!sheet) { SpreadsheetApp.getUi().alert('Employees sheet not found.'); return; }
+
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  for (var h = 0; h < headers.length; h++) {
+    var hdr = String(headers[h]).toLowerCase().trim();
+    if (hdr === 'alternate names' || hdr === 'also known as' || hdr === 'aka') {
+      SpreadsheetApp.getUi().alert('Alternate Names column already exists (column ' + (h + 1) + ').');
+      return;
+    }
+  }
+
+  var newCol = sheet.getLastColumn() + 1;
+  sheet.getRange(1, newCol).setValue('Alternate Names')
+    .setBackground('#e8f0fe').setFontWeight('bold');
+  sheet.setColumnWidth(newCol, 200);
+  SpreadsheetApp.getUi().alert(
+    'Added "Alternate Names" column (column ' + newCol + ').\n\n' +
+    'For each employee who goes by a different name, enter semicolon-separated aliases.\n' +
+    'Examples:\n' +
+    '  Joshua Arredondo  →  Josh; Josh Arredondo\n' +
+    '  Anthony Harmon    →  Tony Harmon\n' +
+    '  Payton Miller-Johnson  →  Payton Johnson'
+  );
 }
 
 /**
@@ -3474,10 +3596,28 @@ function processExpiringCertsImportMultiRow(parsedData, selectedCertTypes) {
     var location = matchedEmp ? matchedEmp.location : cert.excelLocation;
     var jobNum = matchedEmp ? matchedEmp.jobNum : cert.excelJobNum;
 
+    var expirationDate = cert.expirationDate || '';
+
+    // PRESERVE NEWER DATES: compare import date vs existing date, keep the later one
+    if (shouldPreserve && expirationDate) {
+      var key = String(cert.convertedName || '').trim().toLowerCase() + '_' + String(cert.certType || '').trim().toLowerCase();
+      var existingDate = existingDates[key];
+      if (existingDate) {
+        var importDate = new Date(expirationDate);
+        if (!isNaN(importDate.getTime()) && existingDate > importDate) {
+          expirationDate = Utilities.formatDate(existingDate, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+          preservedCount++;
+          Logger.log('Preserved newer date for ' + cert.convertedName + ' / ' + cert.certType + ': ' + expirationDate);
+        }
+      }
+    }
+
     batchData.push([
-      cert.convertedName,
-      cert.certType, // Always show the actual cert type
-      cert.expirationDate || '',
+      // Use the canonical Employees-sheet name when matched, so all downstream
+      // lookups (location, task generation, phone) use the same spelling
+      (matchedEmp && matchedEmp.name) ? matchedEmp.name : cert.convertedName,
+      cert.certType,
+      expirationDate,
       location,
       jobNum,
       '', // Formula will be added
@@ -3512,113 +3652,64 @@ function processExpiringCertsImportMultiRow(parsedData, selectedCertTypes) {
     // Create row groups by employee
     createEmployeeGroups(expiringSheet, batchData.length);
 
-    // Generate To Do tasks for selected cert types (unless disabled)
-    var tasksCreated = generateToDoTasksFromCerts(certRows, selectedCertTypes, empMap, parsedData.skipTaskGeneration);
+    // NOTE: Cert tasks are now handled via Task Metadata (collectExpiringCertTasks in 76-SmartScheduling.gs)
+    // generateToDoTasksFromCerts is deprecated — cert tasks no longer go to Manual Tasks sheet.
   }
 
   Logger.log('Import complete: ' + batchData.length + ' certifications, ' + preservedCount + ' dates preserved from existing sheet');
 
   return {
     success: true,
-    message: '✅ Import Complete!\n\nImported ' + batchData.length + ' certifications for ' + parsedData.summary.totalEmployees + ' employees.\n\nPriority Items: ' + parsedData.summary.priorityCount + '\nNon-Expiring: ' + parsedData.summary.nonExpiringCount + '\n🔒 Newer Dates Preserved: ' + preservedCount + '\nTo Do Tasks Created: ' + (tasksCreated || 0)
+    message: '✅ Import Complete!\n\nImported ' + batchData.length + ' certifications for ' + parsedData.summary.totalEmployees + ' employees.\n\nPriority Items: ' + parsedData.summary.priorityCount + '\nNon-Expiring: ' + parsedData.summary.nonExpiringCount + '\n🔒 Newer Dates Preserved: ' + preservedCount + '\n\nRun "Generate Task Metadata" to create tasks in the Task List.'
   };
 }
 
 /**
- * Generates To Do tasks from certification data.
- * @param {Array} certRows - Array of certification rows
- * @param {Array} selectedCertTypes - Cert types to create tasks for
- * @param {Object} empMap - Employee map for location lookup
- * @return {number} Number of tasks created
+ * DEPRECATED — Cert tasks now flow through Task Metadata (collectExpiringCertTasks → generateTaskMetadata).
+ * This function is retained as a no-op so any stale callers don't throw errors.
+ * Manual Tasks sheet should only contain user-created tasks.
  */
-function generateToDoTasksFromCerts(certRows, selectedCertTypes, empMap) {
-  if (!selectedCertTypes || selectedCertTypes.length === 0) {
-    Logger.log('No cert types selected for task generation');
-    return 0;
-  }
+function generateToDoTasksFromCerts(certRows, selectedCertTypes, empMap, skipTaskGeneration) {
+  Logger.log('generateToDoTasksFromCerts: DEPRECATED — cert tasks now use Task Metadata flow. Returning 0.');
+  return 0;
+}
 
+/**
+ * Removes auto-generated cert renewal tasks from the Manual Tasks sheet.
+ * These tasks (with Notes matching "Renew X | Employee: Y | Current Expiration: ...") were
+ * written by the old generateToDoTasksFromCerts() and should no longer exist in Manual Tasks.
+ * Cert tasks now flow through Task Metadata via collectExpiringCertTasks().
+ * @return {number} Number of rows removed
+ */
+function cleanupCertTasksFromManualTasks() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var manualTasksSheet = ss.getSheetByName('Manual Tasks');
+  var sheet = ss.getSheetByName('Manual Tasks');
+  if (!sheet || sheet.getLastRow() < 2) return 0;
 
-  if (!manualTasksSheet) {
-    Logger.log('Manual Tasks sheet not found, skipping task generation');
-    return 0;
-  }
+  var data = sheet.getDataRange().getValues();
+  // Pattern for auto-generated cert notes: "Renew X | Employee: Y | Current Expiration: ..."
+  var certNotesPattern = /^Renew\s+.+\|\s*Employee:\s*.+\|\s*Current Expiration:/i;
+  var rowsToDelete = [];
 
-  var today = new Date();
-  var tasksCreated = 0;
+  for (var i = data.length - 1; i >= 1; i--) {
+    var taskType = String(data[i][2] || '').trim();
+    var notes = String(data[i][8] || '').trim();
+    var manuallyCreated = data[i][14]; // Column O (index 14)
 
-  for (var i = 0; i < certRows.length; i++) {
-    var cert = certRows[i];
-
-    // Skip if not in selected cert types
-    if (selectedCertTypes.indexOf(cert.certType) === -1) {
-      continue;
-    }
-
-    // Skip non-expiring certs
-    if (cert.isNonExpiring) {
-      continue;
-    }
-
-    // Create task if priority OR expiring soon
-    var shouldCreateTask = false;
-    var priority = 'Medium';
-
-    if (cert.isPriority) {
-      shouldCreateTask = true;
-      priority = 'High';
-    } else if (cert.expirationDate) {
-      try {
-        var expDate = new Date(cert.expirationDate);
-        var daysUntil = Math.floor((expDate - today) / (1000 * 60 * 60 * 24));
-
-        if (daysUntil <= 30) {
-          shouldCreateTask = true;
-          priority = daysUntil <= 7 ? 'High' : 'Medium';
-        }
-      } catch (e) {
-        Logger.log('Error parsing date for cert: ' + cert.certType + ', date: ' + cert.expirationDate);
-      }
-    }
-
-    if (shouldCreateTask) {
-      var emp = empMap[cert.convertedName];
-      var location = emp ? emp.location : cert.excelLocation;
-
-      // Check for duplicate - skip if task already exists for this employee+cert
-      var taskKey = String(cert.convertedName || '').toLowerCase() + '_' + String(cert.certType || '').toLowerCase();
-      if (existingTasks[taskKey]) {
-        tasksSkipped++;
-        continue;
-      }
-
-      var taskRow = [
-        location || '',
-        priority,
-        'Renew ' + cert.certType,
-        cert.expirationDate || '',
-        '', // Start Time
-        '', // End Time
-        1, // Estimated Time
-        location || 'Helena', // Start Location
-        location || '', // End Location
-        'Employee: ' + cert.convertedName + ' | Current Expiration: ' + (cert.expirationDate || 'Unknown'),
-        new Date(), // Date Added
-        'Pending' // Status
-      ];
-
-      try {
-        manualTasksSheet.appendRow(taskRow);
-        tasksCreated++;
-      } catch (e) {
-        Logger.log('Error appending task row: ' + e);
-      }
+    // Only delete rows that look like auto-generated cert tasks (not user-created)
+    if (taskType.indexOf('Renew ') === 0 && certNotesPattern.test(notes) && !manuallyCreated) {
+      rowsToDelete.push(i + 1); // 1-based
     }
   }
 
-  Logger.log('Created ' + tasksCreated + ' To Do tasks from certifications, skipped ' + tasksSkipped + ' duplicates');
-  return tasksCreated;
+  for (var d = 0; d < rowsToDelete.length; d++) {
+    sheet.deleteRow(rowsToDelete[d]);
+  }
+
+  if (rowsToDelete.length > 0) {
+    Logger.log('cleanupCertTasksFromManualTasks: Removed ' + rowsToDelete.length + ' auto-generated cert tasks from Manual Tasks sheet');
+  }
+  return rowsToDelete.length;
 }
 
 /**
@@ -3712,6 +3803,35 @@ function createEmployeeGroups(sheet, dataRows) {
     var range = sheet.getRange(groupStart + 2, 1, dataRows - groupStart, 7);
     range.shiftRowGroupDepth(1);
     sheet.getRowGroup(groupStart + 2, 1).collapse();
+  }
+}
+
+/**
+ * Removes all row groups (+/- collapse buttons) from the Expiring Certs sheet.
+ * These groups are created by createEmployeeGroups() and are confusing in the UI.
+ * Menu: Maintenance → Sheets Setup → Remove Expiring Certs Row Groups
+ */
+function removeExpCertRowGroups() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Expiring Certs');
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert('Expiring Certs sheet not found.');
+    return;
+  }
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    SpreadsheetApp.getUi().alert('Expiring Certs sheet is empty — no row groups to remove.');
+    return;
+  }
+
+  // Shift depth of all data rows by -1 to remove depth-1 groups.
+  // Rows without groups are unaffected. Safe to call on the full range.
+  try {
+    sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).shiftRowGroupDepth(-1);
+    SpreadsheetApp.getUi().alert('✅ Row groups removed from Expiring Certs sheet. The +/- buttons will no longer appear.');
+  } catch (e) {
+    SpreadsheetApp.getUi().alert('Error removing row groups: ' + e.message);
   }
 }
 
@@ -3854,7 +3974,14 @@ function getTrainingConfig() {
     'AP 4': 14,
     'AP 3': 15,
     'AP 2': 16,
-    'AP 1': 17     // 1st Year Apprentice (least senior)
+    'AP 1': 17,    // 1st Year Apprentice (least senior)
+    'ST 7': 11,    // 7th Year Sub Tech (equivalent to AP 7)
+    'ST 6': 12,
+    'ST 5': 13,
+    'ST 4': 14,
+    'ST 3': 15,
+    'ST 2': 16,
+    'ST 1': 17     // 1st Year Sub Tech (least senior)
   };
 
   for (var i = 1; i < data.length; i++) {
@@ -4352,23 +4479,24 @@ function addCrewsToTrainingTracking(crewNumbers) {
 function syncTrainingTrackingWithConfig() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var ui = SpreadsheetApp.getUi();
-  var properties = PropertiesService.getScriptProperties();
 
-  // Get selected crews from config
-  var selectedJson = properties.getProperty('trainingCrews');
-  var selectedCrews = [];
-  if (selectedJson) {
-    try {
-      selectedCrews = JSON.parse(selectedJson);
-    } catch (e) {
-      selectedCrews = [];
-    }
+  // Authority: Job Tracking Active status (not trainingCrews ScriptProperty)
+  var activeCrewsRaw = getActiveCrewsFromJobTracking ? getActiveCrewsFromJobTracking() : [];
+  var activeCrewSet = {};
+  for (var a = 0; a < activeCrewsRaw.length; a++) {
+    var jn = String(activeCrewsRaw[a].jobNumber || '').trim();
+    if (jn) activeCrewSet[jn] = true;
   }
 
-  if (selectedCrews.length === 0) {
-    ui.alert('⚠️ No Crews Selected',
-      'No crews are selected in Training Config.\n\n' +
-      'Go to To Do Config → Training: Select Crews and select the crews you want to track.',
+  // Also include crews from Employees sheet (active employees not yet in Job Tracking)
+  var activeFromEmp = getActiveCrews ? getActiveCrews() : [];
+  for (var ae = 0; ae < activeFromEmp.length; ae++) {
+    if (activeFromEmp[ae]) activeCrewSet[String(activeFromEmp[ae]).trim()] = true;
+  }
+
+  if (Object.keys(activeCrewSet).length === 0) {
+    ui.alert('⚠️ No Active Crews',
+      'No active crews found in Job Tracking.\n\nMake sure Job Tracking has crews with Status = "Active".',
       ui.ButtonSet.OK);
     return { removedRows: 0, crewsRemoved: [] };
   }
@@ -4397,7 +4525,7 @@ function syncTrainingTrackingWithConfig() {
     return { removedRows: 0, crewsRemoved: [] };
   }
 
-  // Find crews in Training Tracking that are NOT in selectedCrews
+  // Find crews in Training Tracking that are NOT active in Job Tracking
   var crewsInSheet = {};
   for (var i = 2; i < data.length; i++) {
     var crew = String(data[i][crewCol]).trim();
@@ -4407,25 +4535,25 @@ function syncTrainingTrackingWithConfig() {
   }
 
   var crewsToRemove = [];
-  for (var crew in crewsInSheet) {
-    if (selectedCrews.indexOf(crew) === -1) {
-      crewsToRemove.push(crew);
+  for (var crewKey in crewsInSheet) {
+    if (!activeCrewSet[crewKey]) {
+      crewsToRemove.push(crewKey);
     }
   }
 
   if (crewsToRemove.length === 0) {
     ui.alert('✅ Already Synced',
-      'Training Tracking is already in sync with your config.\n\n' +
-      'All crews in the sheet are selected in config.',
+      'Training Tracking is already in sync.\n\n' +
+      'All ' + Object.keys(crewsInSheet).length + ' crews in the sheet are active in Job Tracking.',
       ui.ButtonSet.OK);
     return { removedRows: 0, crewsRemoved: [] };
   }
 
   // Confirm before removing
   var response = ui.alert('⚠️ Sync Training Tracking',
-    'Found ' + crewsToRemove.length + ' crew(s) in Training Tracking that are NOT selected in config:\n\n' +
+    'Found ' + crewsToRemove.length + ' crew(s) in Training Tracking that are NOT active in Job Tracking:\n\n' +
     crewsToRemove.join(', ') + '\n\n' +
-    'This will remove their PENDING rows for current month (March) and future months.\n' +
+    'This will remove their PENDING rows for current and future months.\n' +
     'Past months and completed training will be preserved.\n\n' +
     'Continue?',
     ui.ButtonSet.YES_NO);
@@ -4434,7 +4562,7 @@ function syncTrainingTrackingWithConfig() {
     return { removedRows: 0, crewsRemoved: [] };
   }
 
-  // Remove the unchecked crews
+  // Remove the inactive crews
   var result = removeCrewsFromTrainingTracking(crewsToRemove);
 
   ui.alert('✅ Sync Complete',
@@ -4583,7 +4711,7 @@ function refreshTrainingAttendeesSilent() {
   }
 
   var data = sheet.getDataRange().getValues();
-  var headerIdx = typeof findTrainingTrackingHeaderRow === 'function' ? findTrainingTrackingHeaderRow(data) : 1;
+  var headerIdx = typeof findTrainingTrackingHeaderRow === 'function' ? findTrainingTrackingHeaderRow(data) : findTrainingHeaderRow(data);
   var headers = data[headerIdx];
   var dataStartIdx = headerIdx + 1;
 
@@ -4591,6 +4719,7 @@ function refreshTrainingAttendeesSilent() {
   var attendeesCol = -1;
   var statusCol = -1;
   var sizeCol = -1;
+  var leadCol = -1;
 
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
@@ -4598,22 +4727,67 @@ function refreshTrainingAttendeesSilent() {
     if (header === 'attendees') attendeesCol = h;
     if (header === 'status') statusCol = h;
     if (header === 'size' || header === 'crew size') sizeCol = h;
+    if (header === 'crew lead' || header === 'foreman' || header === 'lead') leadCol = h;
   }
 
   if (crewCol === -1 || attendeesCol === -1) {
-    Logger.log('refreshTrainingAttendeesSilent: Required columns not found');
+    Logger.log('refreshTrainingAttendeesSilent: Required columns not found (headerIdx=' + headerIdx + ')');
     return { updatedCount: 0, skippedCount: 0 };
+  }
+
+  // Build crew→members and crew→lead maps with a single Employees sheet read.
+  var crewAttendeesMapR = {};
+  var crewLeadCandidatesR = {};
+  try {
+    var empSheetR = ss.getSheetByName(SHEET_EMPLOYEES);
+    if (empSheetR && empSheetR.getLastRow() >= 2) {
+      var empDataR = empSheetR.getDataRange().getValues();
+      var empHeadersR = empDataR[0];
+      var empNameColR = -1, empJobNumColR = -1, empLastDayColR = -1, empClassColR = -1;
+      for (var erh = 0; erh < empHeadersR.length; erh++) {
+        var erhVal = String(empHeadersR[erh]).toLowerCase().trim();
+        if (erhVal === 'name') empNameColR = erh;
+        if (erhVal === 'job number') empJobNumColR = erh;
+        if (erhVal === 'last day') empLastDayColR = erh;
+        if (erhVal === 'job classification') empClassColR = erh;
+      }
+      // Classification priority for determining crew lead (lower = higher rank)
+      var classRankR = { 'SUP': 1, 'GF': 2, 'F': 3, 'GTO F': 4, 'JRY': 5,
+                         'JRY OP': 6, 'WT': 7, 'GTO': 8, 'EO 1': 9, 'EO 2': 10,
+                         'AP 7': 11, 'AP 6': 12, 'AP 5': 13, 'AP 4': 14, 'AP 3': 15,
+                         'AP 2': 16, 'AP 1': 17,
+                         'ST 7': 11, 'ST 6': 12, 'ST 5': 13, 'ST 4': 14, 'ST 3': 15,
+                         'ST 2': 16, 'ST 1': 17 };
+      var crewLeadCandidatesR = {}; // crewNum -> {name, rank}
+      if (empNameColR !== -1 && empJobNumColR !== -1) {
+        for (var eri = 1; eri < empDataR.length; eri++) {
+          var erRow = empDataR[eri];
+          var erName = String(erRow[empNameColR] || '').trim();
+          var erJobNum = String(erRow[empJobNumColR] || '').trim();
+          var erLastDay = empLastDayColR !== -1 ? erRow[empLastDayColR] : '';
+          if (!erName || !erJobNum || erLastDay) continue;
+          var erDot = erJobNum.lastIndexOf('.');
+          var erCrew = erDot !== -1 ? erJobNum.substring(0, erDot) : erJobNum;
+          if (!crewAttendeesMapR[erCrew]) crewAttendeesMapR[erCrew] = [];
+          crewAttendeesMapR[erCrew].push(erName);
+          // Track best crew lead candidate by classification rank
+          var erClass = empClassColR !== -1 ? String(erRow[empClassColR] || '').trim() : '';
+          var erRank = classRankR[erClass] !== undefined ? classRankR[erClass] : 99;
+          if (!crewLeadCandidatesR[erCrew] || erRank < crewLeadCandidatesR[erCrew].rank) {
+            crewLeadCandidatesR[erCrew] = { name: erName, rank: erRank };
+          }
+        }
+      }
+    }
+  } catch (empErrR) {
+    Logger.log('refreshTrainingAttendeesSilent: Could not build attendees map: ' + empErrR);
   }
 
   var updatedCount = 0;
   var skippedCount = 0;
-  var crewMembersCache = {};
 
   function getCachedCrewMembers(crewNum) {
-    if (!crewMembersCache.hasOwnProperty(crewNum)) {
-      crewMembersCache[crewNum] = (typeof getCrewMembers === 'function') ? getCrewMembers(crewNum) : [];
-    }
-    return crewMembersCache[crewNum];
+    return crewAttendeesMapR[crewNum] || [];
   }
 
   var statusesToUpdate = ['pending', '', 'n/a'];
@@ -4624,6 +4798,7 @@ function refreshTrainingAttendeesSilent() {
     var crewNum = String(row[crewCol] || '').trim();
     var currentStatus = String(row[statusCol] || '').trim().toLowerCase();
     var currentAttendees = String(row[attendeesCol] || '').trim();
+    var currentLead = leadCol !== -1 ? String(row[leadCol] || '').trim() : null;
 
     if (!crewNum) continue;
     if (statusesToUpdate.indexOf(currentStatus) === -1) {
@@ -4638,8 +4813,12 @@ function refreshTrainingAttendeesSilent() {
     }
 
     var newAttendees = members.join(', ');
-    if (newAttendees !== currentAttendees) {
-      rowsToUpdate.push({ rowIdx: i + 1, attendees: newAttendees, size: members.length });
+    var newLead = (crewLeadCandidatesR && crewLeadCandidatesR[crewNum]) ? crewLeadCandidatesR[crewNum].name : '';
+    var attendeesChanged = newAttendees !== currentAttendees;
+    var leadChanged = leadCol !== -1 && currentLead === '' && newLead !== '';
+
+    if (attendeesChanged || leadChanged) {
+      rowsToUpdate.push({ rowIdx: i + 1, attendees: newAttendees, size: members.length, lead: newLead, attendeesChanged: attendeesChanged, leadChanged: leadChanged });
       updatedCount++;
     } else {
       skippedCount++;
@@ -4648,8 +4827,12 @@ function refreshTrainingAttendeesSilent() {
 
   // Batch write updates
   rowsToUpdate.forEach(function(upd) {
-    if (attendeesCol !== -1) sheet.getRange(upd.rowIdx, attendeesCol + 1).setValue(upd.attendees);
-    if (sizeCol !== -1) sheet.getRange(upd.rowIdx, sizeCol + 1).setValue(upd.size);
+    if (upd.attendeesChanged && attendeesCol !== -1) sheet.getRange(upd.rowIdx, attendeesCol + 1).setValue(upd.attendees);
+    if (attendeesCol !== -1 && upd.attendeesChanged) {
+      // size update only when attendees changed (keeps size accurate)
+      if (sizeCol !== -1) sheet.getRange(upd.rowIdx, sizeCol + 1).setValue(upd.size);
+    }
+    if (upd.leadChanged && leadCol !== -1) sheet.getRange(upd.rowIdx, leadCol + 1).setValue(upd.lead);
   });
 
   Logger.log('refreshTrainingAttendeesSilent: Updated ' + updatedCount + ', skipped ' + skippedCount);
@@ -4770,7 +4953,9 @@ function updateTrainingTrackingCrewLeadsSilent() {
   }
 
   var data = sheet.getDataRange().getValues();
-  var headers = data[1]; // Row 2 is headers
+  var headerIdx = findTrainingHeaderRow(data);
+  var headers = data[headerIdx];
+  var dataStartIdx = headerIdx + 1;
 
   // Find column indices
   var monthCol = -1;
@@ -4785,7 +4970,7 @@ function updateTrainingTrackingCrewLeadsSilent() {
   }
 
   if (crewCol === -1 || leadCol === -1) {
-    Logger.log('updateTrainingTrackingCrewLeadsSilent: Could not find Job Number or Crew Lead columns');
+    Logger.log('updateTrainingTrackingCrewLeadsSilent: Could not find Job Number or Crew Lead columns (headerIdx=' + headerIdx + ')');
     return { updatedRows: 0 };
   }
 
@@ -4804,7 +4989,7 @@ function updateTrainingTrackingCrewLeadsSilent() {
   var skippedPastMonths = 0;
 
   // First pass: collect all unique crew numbers
-  for (var i = 2; i < data.length; i++) {
+  for (var i = dataStartIdx; i < data.length; i++) {
     var crewNum = String(data[i][crewCol]).trim();
     if (crewNum && !crewLeadMap.hasOwnProperty(crewNum)) {
       // Get the current crew lead from Employees sheet
@@ -4814,7 +4999,7 @@ function updateTrainingTrackingCrewLeadsSilent() {
   }
 
   // Second pass: update rows where crew lead doesn't match (ONLY current and future months)
-  for (var j = 2; j < data.length; j++) {
+  for (var j = dataStartIdx; j < data.length; j++) {
     var rowMonth = monthCol >= 0 ? String(data[j][monthCol]).trim() : '';
     var crewNum = String(data[j][crewCol]).trim();
     var currentLead = String(data[j][leadCol]).trim();
@@ -4845,6 +5030,25 @@ function updateTrainingTrackingCrewLeadsSilent() {
 }
 
 /**
+ * Finds the header row index in Training Tracking data array.
+ * Searches the first 5 rows for a row that contains "Month" or "Crew #".
+ * @param {Array} data - 2D array from sheet.getDataRange().getValues()
+ * @return {number} Index of the header row (0-based)
+ */
+function findTrainingHeaderRow(data) {
+  for (var i = 0; i < Math.min(data.length, 5); i++) {
+    var row = data[i];
+    for (var h = 0; h < row.length; h++) {
+      var val = String(row[h]).toLowerCase().trim();
+      if (val === 'month' || val === 'crew #' || val === 'crew') {
+        return i;
+      }
+    }
+  }
+  return 1; // default fallback
+}
+
+/**
  * Adds missing crews to Training Tracking for current and future months.
  * Only adds rows for months that haven't happened yet (current month forward).
  * Called by generateAllReports to ensure new crews get added to training schedule.
@@ -4861,7 +5065,9 @@ function addMissingCrewsToTrainingTracking() {
   }
 
   var data = sheet.getDataRange().getValues();
-  var headers = data[1]; // Row 2 is headers
+  var headerIdx = findTrainingHeaderRow(data);
+  var headers = data[headerIdx];
+  var dataStartIdx = headerIdx + 1;
 
   // Find column indices
   var monthCol = -1;
@@ -4884,7 +5090,7 @@ function addMissingCrewsToTrainingTracking() {
   }
 
   if (monthCol === -1 || crewCol === -1) {
-    Logger.log('addMissingCrewsToTrainingTracking: Could not find Month or Crew columns');
+    Logger.log('addMissingCrewsToTrainingTracking: Could not find Month or Crew columns (headerIdx=' + headerIdx + ')');
     return { addedRows: 0, crews: [] };
   }
 
@@ -4918,7 +5124,7 @@ function addMissingCrewsToTrainingTracking() {
 
   // Build set of existing crew+month combinations
   var existingCombos = {};
-  for (var i = 2; i < data.length; i++) {
+  for (var i = dataStartIdx; i < data.length; i++) {
     var rowMonth = String(data[i][monthCol] || '').trim();
     var rowCrew = String(data[i][crewCol] || '').trim();
     if (rowMonth && rowCrew) {
@@ -4928,7 +5134,7 @@ function addMissingCrewsToTrainingTracking() {
 
   // Get training topics - collect from existing rows (month -> topic, hours)
   var monthTopics = {};
-  for (var m = 2; m < data.length; m++) {
+  for (var m = dataStartIdx; m < data.length; m++) {
     var month = String(data[m][monthCol] || '').trim();
     var topic = topicCol >= 0 ? String(data[m][topicCol] || '').trim() : '';
     var hours = hoursCol >= 0 ? data[m][hoursCol] : 2;
@@ -4936,6 +5142,40 @@ function addMissingCrewsToTrainingTracking() {
     if (month && topic && !monthTopics[month]) {
       monthTopics[month] = { topic: topic, hours: hours };
     }
+  }
+
+  // Build crew→attendees map ONCE from Employees sheet (avoids 30+ repeated reads
+  // that cause throttling and "Required columns not found" errors in getCrewMembers).
+  var crewAttendeesMap = {};
+  try {
+    var empSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_EMPLOYEES);
+    if (empSheet && empSheet.getLastRow() >= 2) {
+      var empAllData = empSheet.getDataRange().getValues();
+      var empHeaders = empAllData[0];
+      var empNameCol = -1, empJobNumCol = -1, empLastDayCol = -1;
+      for (var eh = 0; eh < empHeaders.length; eh++) {
+        var ehVal = String(empHeaders[eh]).toLowerCase().trim();
+        if (ehVal === 'name') empNameCol = eh;
+        if (ehVal === 'job number') empJobNumCol = eh;
+        if (ehVal === 'last day') empLastDayCol = eh;
+      }
+      if (empNameCol !== -1 && empJobNumCol !== -1) {
+        for (var ei = 1; ei < empAllData.length; ei++) {
+          var eRow = empAllData[ei];
+          var eName = String(eRow[empNameCol] || '').trim();
+          var eJobNum = String(eRow[empJobNumCol] || '').trim();
+          var eLastDay = empLastDayCol !== -1 ? eRow[empLastDayCol] : '';
+          if (!eName || !eJobNum || eLastDay) continue;
+          var eDot = eJobNum.lastIndexOf('.');
+          var eCrew = eDot !== -1 ? eJobNum.substring(0, eDot) : eJobNum;
+          if (!crewAttendeesMap[eCrew]) crewAttendeesMap[eCrew] = [];
+          crewAttendeesMap[eCrew].push(eName);
+        }
+        Logger.log('addMissingCrewsToTrainingTracking: Built attendees map for ' + Object.keys(crewAttendeesMap).length + ' crews');
+      }
+    }
+  } catch (empErr) {
+    Logger.log('addMissingCrewsToTrainingTracking: Could not build attendees map (non-critical): ' + empErr);
   }
 
   // Create rows for missing crew+month combinations (current month and forward only)
@@ -4949,10 +5189,11 @@ function addMissingCrewsToTrainingTracking() {
     var shouldExclude = shouldExcludeCrew ? shouldExcludeCrew(crew) : false;
     if (shouldExclude) continue;
 
-    // Get crew info
+    // Get crew info (read once per crew, not per month)
     var crewLead = getCrewLead ? getCrewLead(crew) : null;
     var leadName = crewLead ? crewLead.name : '';
     var crewSize = getCrewSize ? getCrewSize(crew) : '';
+    var crewAttendees = (crewAttendeesMap[crew] || []).join(', ');
 
     // Check each month from current month onward
     for (var mi = currentMonthIndex; mi < 12; mi++) {
@@ -4968,7 +5209,6 @@ function addMissingCrewsToTrainingTracking() {
       var trainingHours = monthInfo ? monthInfo.hours : 2;
 
       // Create new row: Month, Topic, Crew #, Crew Lead, Crew Size, Completion Date, Attendees, Hours, Trainer, Status, Notes
-      var crewAttendees = getCrewMembers ? getCrewMembers(crew) : '';
       var newRow = [
         monthName,
         trainingTopic,
@@ -4976,7 +5216,7 @@ function addMissingCrewsToTrainingTracking() {
         leadName,
         crewSize,
         '', // Completion Date
-        crewAttendees, // Attendees - auto-populated from Employees
+        crewAttendees,
         trainingHours,
         '', // Trainer
         'Pending', // Status
@@ -5001,38 +5241,39 @@ function addMissingCrewsToTrainingTracking() {
     return a[2].localeCompare(b[2]); // Sort by crew
   });
 
-  // Append new rows to sheet
-  var lastRow = sheet.getLastRow();
-  sheet.getRange(lastRow + 1, 1, newRows.length, 11).setValues(newRows);
+  // Append new rows one at a time. This handles Google Sheets Tables with typed columns,
+  // where bulk setValues() is blocked. appendRow() works on both regular sheets and Tables.
+  var appendedCount = 0;
+  for (var ri = 0; ri < newRows.length; ri++) {
+    try {
+      sheet.appendRow(newRows[ri]);
+      appendedCount++;
+    } catch (appendErr) {
+      Logger.log('addMissingCrewsToTrainingTracking: appendRow failed for row ' + ri + ': ' + appendErr);
+    }
+  }
 
-  // Add status validation to new rows
-  var statusRule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(['Pending', 'In Progress', 'Complete', 'Overdue', 'N/A'], true)
-    .setAllowInvalid(false)
-    .build();
-  sheet.getRange(lastRow + 1, statusCol + 1, newRows.length, 1).setDataValidation(statusRule);
-
-  // Sort entire sheet by Month then Crew
-  if (sheet.getLastRow() > 2) {
-    // Convert month names to numbers for proper sorting
-    // We'll re-sort after adding by using a helper approach
-    var allData = sheet.getRange(3, 1, sheet.getLastRow() - 2, 11).getValues();
-    allData.sort(function(a, b) {
-      var monthA = monthNames.indexOf(String(a[0]).trim());
-      var monthB = monthNames.indexOf(String(b[0]).trim());
-      if (monthA !== monthB) return monthA - monthB;
-      return String(a[2]).localeCompare(String(b[2])); // Then by crew
-    });
-    sheet.getRange(3, 1, allData.length, 11).setValues(allData);
-
-    // Re-apply formatting after sorting
-    applyTrainingTrackingFormatting(sheet);
+  // Re-sort the full sheet by Month then Crew (skip on typed-column Tables — they manage sort internally)
+  try {
+    if (sheet.getLastRow() > dataStartIdx + 1) {
+      var allData = sheet.getRange(dataStartIdx + 1, 1, sheet.getLastRow() - dataStartIdx, 11).getValues();
+      allData.sort(function(a, b) {
+        var monthA = monthNames.indexOf(String(a[0]).trim());
+        var monthB = monthNames.indexOf(String(b[0]).trim());
+        if (monthA !== monthB) return monthA - monthB;
+        return String(a[2]).localeCompare(String(b[2]));
+      });
+      sheet.getRange(dataStartIdx + 1, 1, allData.length, 11).setValues(allData);
+      try { applyTrainingTrackingFormatting(sheet); } catch (fmtErr) {}
+    }
+  } catch (sortErr) {
+    Logger.log('addMissingCrewsToTrainingTracking: Sort skipped (typed column sheet): ' + sortErr);
   }
 
   var addedCrewsList = Object.keys(addedCrewSet).sort();
-  Logger.log('addMissingCrewsToTrainingTracking: Added ' + newRows.length + ' rows for crews: ' + addedCrewsList.join(', '));
+  Logger.log('addMissingCrewsToTrainingTracking: Added ' + appendedCount + ' rows for crews: ' + addedCrewsList.join(', '));
 
-  return { addedRows: newRows.length, crews: addedCrewsList };
+  return { addedRows: appendedCount, crews: addedCrewsList };
 }
 
 
@@ -5143,17 +5384,52 @@ function getCrewVisitConfig() {
     return String(dateVal);
   }
 
+  // Build foreman lookup from Job Tracking (authoritative source for crew leads)
+  // Job Tracking cols: A=Job Number, B=Location, C=Foreman, ...
+  var foremanMap = {};
+  try {
+    var jtSheet = ss.getSheetByName('Job Tracking');
+    if (jtSheet && jtSheet.getLastRow() > 1) {
+      var jtData = jtSheet.getDataRange().getValues();
+      var jtHeaders = jtData[0];
+      var jtJobNumCol = -1, jtForemanCol = -1, jtStatusCol = -1;
+      for (var h = 0; h < jtHeaders.length; h++) {
+        var hdr = String(jtHeaders[h]).toLowerCase().trim();
+        if (hdr === 'job number') jtJobNumCol = h;
+        if (hdr === 'foreman') jtForemanCol = h;
+        if (hdr === 'status') jtStatusCol = h;
+      }
+      if (jtJobNumCol !== -1 && jtForemanCol !== -1) {
+        for (var j = 1; j < jtData.length; j++) {
+          var jtRow = jtData[j];
+          var jtJob = String(jtRow[jtJobNumCol] || '').trim();
+          var jtForeman = String(jtRow[jtForemanCol] || '').trim();
+          var jtStatus = jtStatusCol !== -1 ? String(jtRow[jtStatusCol] || '').trim() : '';
+          if (jtJob && jtForeman && jtStatus !== 'Completed') {
+            foremanMap[jtJob] = jtForeman;
+          }
+        }
+      }
+    }
+  } catch(e) {
+    Logger.log('getCrewVisitConfig: Could not read Job Tracking for foreman data: ' + e);
+  }
+
   // Headers: Job Number, Location, Crew Lead, Crew Size, Visit Frequency, Est. Visit Time,
   //          Last Visit Date, Next Visit Date, Drive Time From Helena, Priority, Notes
   for (var i = 1; i < data.length; i++) {
     var row = data[i];
     if (!row[0]) continue; // Skip empty rows
 
+    var jobNum = String(row[0] || '').trim();
+    // Use Job Tracking foreman if available, fall back to what's stored in the sheet
+    var crewLead = foremanMap[jobNum] || String(row[2] || '').trim();
+
     crews.push({
       rowIndex: i + 1, // 1-based for sheet operations
-      jobNumber: String(row[0] || '').trim(),
+      jobNumber: jobNum,
       location: String(row[1] || '').trim(),
-      crewLead: String(row[2] || '').trim(),
+      crewLead: crewLead,
       crewSize: row[3] || 0,
       frequency: String(row[4] || 'Monthly').trim(),
       estVisitTime: row[5] || 60,
@@ -5988,54 +6264,44 @@ function getExpiringCertsForSchedule() {
     var employeeLocations = {};
     var employeePhones = {};
     var currentEmployees = new Set();
+    var alternateNameMap = {}; // alias_lower → canonical name
     var employeesSheet = ss.getSheetByName('Employees');
     if (employeesSheet && employeesSheet.getLastRow() > 1) {
+      // Use getEmployeeNamesForMatching to get alternateNames too
+      var empList = getEmployeeNamesForMatching();
+      alternateNameMap = buildAlternateNameMap(empList);
+      for (var el = 0; el < empList.length; el++) {
+        var emp = empList[el];
+        if (!emp.name) continue;
+        var empLocLower = (emp.location || '').toLowerCase();
+        if (empLocLower === 'previous employee') {
+          currentEmployees.add('PREV:' + emp.name.toLowerCase());
+        } else {
+          currentEmployees.add(emp.name.toLowerCase());
+          employeeLocations[emp.name.toLowerCase()] = emp.location;
+          // Re-read phone since getEmployeeNamesForMatching doesn't return it
+        }
+      }
+      // Also read phone numbers directly from the sheet
       var empData = employeesSheet.getDataRange().getValues();
       var empHeaders = empData[0];
       var empNameCol = -1, empLocCol = -1, empPhoneCol = -1;
-
       for (var eh = 0; eh < empHeaders.length; eh++) {
         var hdr = String(empHeaders[eh]).toLowerCase().trim();
         if (hdr === 'name') empNameCol = eh;
         if (hdr === 'location') empLocCol = eh;
-        // Match various phone column header formats
         if (hdr === 'phone number' || hdr === 'phone' || hdr === 'phone #' || hdr === 'cell' || hdr === 'cell phone') empPhoneCol = eh;
       }
-
-      // Use COLS constants as fallback if headers don't match
-      // COLS.EMPLOYEES.NAME = 1 (column A, 0-based index 0)
-      // COLS.EMPLOYEES.LOCATION = 3 (column C, 0-based index 2)
-      // COLS.EMPLOYEES.PHONE = 5 (column E, 0-based index 4)
-      if (empNameCol === -1) {
-        empNameCol = 0; // Column A (0-based)
-        Logger.log('getExpiringCertsForSchedule: Using fallback empNameCol=0');
-      }
-      if (empLocCol === -1) {
-        empLocCol = 2; // Column C (0-based)
-        Logger.log('getExpiringCertsForSchedule: Using fallback empLocCol=2');
-      }
-      if (empPhoneCol === -1) {
-        empPhoneCol = 4; // Column E (0-based)
-        Logger.log('getExpiringCertsForSchedule: Using fallback empPhoneCol=4');
-      }
-
-      if (empNameCol !== -1) {
-        for (var ei = 1; ei < empData.length; ei++) {
-          var empName = (empData[ei][empNameCol] || '').toString().trim();
-          var empLoc = empLocCol !== -1 ? (empData[ei][empLocCol] || '').toString().trim() : '';
-          var empPhone = empPhoneCol !== -1 ? (empData[ei][empPhoneCol] || '').toString().trim() : '';
-          if (empName && empLoc.toLowerCase() !== 'previous employee') {
-            currentEmployees.add(empName.toLowerCase());
-            employeeLocations[empName.toLowerCase()] = empLoc;
-            // Clean and store phone number
-            if (empPhone) {
-              var cleanPhone = empPhone.replace(/\D/g, '');
-              if (cleanPhone.length === 10) cleanPhone = '1' + cleanPhone;
-              if (cleanPhone.length >= 10) {
-                employeePhones[empName.toLowerCase()] = cleanPhone;
-              }
-            }
-          }
+      if (empNameCol === -1) empNameCol = 0;
+      if (empLocCol === -1) empLocCol = 2;
+      if (empPhoneCol === -1) empPhoneCol = 4;
+      for (var ei = 0; ei < empData.length; ei++) {
+        var eName = (empData[ei][empNameCol] || '').toString().trim();
+        var ePhone = empPhoneCol !== -1 ? (empData[ei][empPhoneCol] || '').toString().trim() : '';
+        if (eName && ePhone) {
+          var cleanPhone = ePhone.replace(/\D/g, '');
+          if (cleanPhone.length === 10) cleanPhone = '1' + cleanPhone;
+          if (cleanPhone.length >= 10) employeePhones[eName.toLowerCase()] = cleanPhone;
         }
       }
     }
@@ -6066,7 +6332,16 @@ function getExpiringCertsForSchedule() {
       var daysUntil = dataF[i][0];
 
       if (!empName || !certType) continue;
-      if (!currentEmployees.has(empName.toLowerCase())) continue;
+
+      // Resolve alternate names (e.g. "Josh Arredondo" → "Joshua Arredondo")
+      var resolvedName = resolveEmployeeName(empName, alternateNameMap);
+
+      // Skip employees explicitly marked as "Previous Employee" in the Employees sheet
+      if (currentEmployees.has('PREV:' + resolvedName.toLowerCase())) continue;
+      // Employees in Expiring Certs but not in Employees sheet are still shown (name mismatch tolerance)
+
+      // Use the resolved canonical name going forward
+      empName = resolvedName;
 
       var expDateStr = '';
       if (expDate instanceof Date && !isNaN(expDate.getTime())) {
@@ -6393,293 +6668,13 @@ function syncEmployeeLocationsFromJobTracking() {
  */
 function onOpen() {
   try { ensurePickedForColumn(); } catch(e) { Logger.log("ensurePickedForColumn error: " + e.message); }
-  var ui = SpreadsheetApp.getUi();
-  ui.createMenu('Glove Manager')
-    // === QUICK ACTIONS SIDEBAR ===
-    .addItem('📱 Quick Actions', 'openQuickActionsSidebar')
-    .addSeparator()
-
-    // === STEP 1: IMPORT CREW MAKEUP ===
-    .addSubMenu(ui.createMenu('📥 Import Crew Makeup')
-      .addItem('👥 Import Crew Makeup', 'showCrewImportDialog')
-      .addItem('👷 Assign Crew Leads', 'showAssignCrewLeadsDialog')
-      .addItem('🔄 Sync Crews', 'menuSyncCrews')
-      .addSeparator()
-      .addSubMenu(ui.createMenu('🔧 Utilities')
-        .addItem('📋 Setup Job Tracking Sheet', 'setupJobTrackingSheet')
-        .addItem('📋 Migrate Job Tracking for Compliance', 'migrateJobTrackingForComplianceConfig')
-        .addItem('📋 Migrate Config to Job Tracking', 'migrateConfigToJobTracking')
-        .addSeparator()
-        .addItem('🔄 Migrate Job Tracking (Add On Hold Columns)', 'migrateJobTrackingSheet')
-        .addItem('🔄 Refresh Job Tracking', 'refreshJobTrackingFromEmployees')
-        .addItem('👤 Refresh Job Tracking Foremen', 'refreshJobTrackingForemen')
-        .addItem('✅ Mark Job Complete', 'markJobComplete')
-        .addItem('➕ Add Future Job', 'addFutureJob')
-        .addItem('🎨 Apply Job Tracking Formatting', 'menuApplyJobTrackingFormatting')
-        .addItem('📅 Add Schedule History Columns', 'migrateJobTrackingScheduleColumns')
-        .addItem('📝 Add Job Name Column', 'migrateJobTrackingAddJobName')
-        .addItem('📝 Backfill Job Names', 'backfillJobNames')
-        .addItem('📂 View Job Tracking', 'openJobTrackingSheet')
-        .addSeparator()
-        .addItem('🔄 Sync Employee Locations from Job Tracking', 'syncEmployeeLocationsFromJobTracking')
-        .addItem('🔄 Sync Completed Jobs to Training', 'syncCompletedJobsToTraining')
-        .addItem('🧹 Cleanup Pending Training for Completed Jobs', 'cleanupPendingTrainingForCompletedJobs')
-        .addItem('🔄 Sync Completed Job (Manual)', 'menuSyncCompletedJob')
-        .addSeparator()
-        .addItem('🔧 Fix Schedule Columns (V-Y)', 'fixJobTrackingScheduleColumns')))
-
-    // === STEP 2: GENERATE ALL REPORTS ===
-    .addSubMenu(ui.createMenu('📊 Generate All Reports')
-      .addItem('⚡ Generate All Reports', 'generateAllReports')
-      .addSeparator()
-      .addItem('Generate Glove Swaps', 'generateGloveSwaps')
-      .addItem('Generate Sleeve Swaps', 'generateSleeveSwaps')
-      .addItem('🧱 Generate Blanket Swaps', 'menuGenerateBlanketSwaps')
-      .addItem('⚡ Generate HV Tester Swaps', 'menuGenerateHVTesterSwaps')
-      .addItem('⚡ Generate Phasing Set Swaps', 'menuGeneratePhasingSetSwaps')
-      .addItem('🏥 Generate AED Swaps', 'menuGenerateAEDSwaps')
-      .addItem('Update Purchase Needs', 'updatePurchaseNeeds')
-      .addItem('Update Inventory Reports', 'updateInventoryReports')
-      .addItem('Run Reclaims Check', 'runReclaimsCheck')
-      .addItem('Update Reclaims Sheet', 'updateReclaimsSheet')
-      .addSeparator()
-      .addSubMenu(ui.createMenu('🔧 Utilities')
-        .addItem('Fix All Change Out Dates', 'fixAllChangeOutDates')
-        .addItem('🧱 Fix Blanket Change Out Dates', 'fixBlanketChangeOutDates')
-        .addItem('⚡ Setup Auto Change Out Dates', 'createEditTrigger')
-        .addItem('🔄 Update Training Tracking Crew Leads', 'updateTrainingTrackingCrewLeads')))
-
-    // === STEP 3: PROCESS SAFETY EMAILS ===
-    .addSubMenu(ui.createMenu('🛡️ Process Safety Emails')
-      .addItem('📥 Process Safety Emails', 'showProcessSafetyEmailsDialog')
-      .addItem('📊 View Equipment Needs', 'openSafetyReports')
-      .addItem('📈 View Compliance History', 'openComplianceSheet')
-      .addItem('⚙️ Manage Schedules (Job Tracking)', 'openJobTrackingSheet')
-      .addSeparator()
-      .addSubMenu(ui.createMenu('🔧 Utilities')
-        .addItem('🔑 Authorize Gmail Access', 'authorizeGmailAccess')
-        .addItem('📊 Gmail Status', 'showGmailStatus')
-        .addItem('🔄 Sync Crews', 'menuSyncCrews')
-        .addItem('👤 Refresh Foreman Names', 'refreshComplianceForemenNames')
-        .addItem('🔽 Add Dropdowns to Compliance Sheet', 'addDropdownsToSafetyCompliance')
-        .addItem('🧹 Cleanup N/A Cells (make blank)', 'cleanupNACellsInCompliance')
-        .addItem('💬 Refresh Compliance Tooltips', 'menuRefreshComplianceTooltips')
-        .addItem('🔄 Master Recalculate', 'masterRecalculateCompliance')
-        .addItem('🔧 Fix Notes Column', 'fixNotesColumnCheckboxes'))
-      .addSubMenu(ui.createMenu('📄 Logs')
-        .addItem('📋 Setup Log Sheets', 'setupAllSafetyLogSheets')
-        .addItem('📄 View JHA Log', 'openJHALogSheet')
-        .addItem('📄 View Weekly Safety Log', 'openWeeklySafetyLogSheet')
-        .addItem('📄 View Monthly Checklist Log', 'openMonthlyChecklistLogSheet'))
-      .addSubMenu(ui.createMenu('🔍 Debug')
-        .addItem('🔍 Diagnose Compliance', 'diagnoseSafetyCompliance')
-        .addItem('📊 Trace Compliance Calculation', 'traceComplianceCalculation')
-        .addItem('🧪 Test Week Calculation', 'testComplianceCalculationForWeek')
-        .addItem('📋 Quick JHA Log Diagnostic', 'quickDiagnoseJHALog')
-        .addItem('🔬 Trace Week Compliance', 'traceComplianceForWeek')
-        .addItem('⚡ Force Update Single Week', 'forceUpdateSingleWeek')
-        .addItem('🔬 Test Email Parsing', 'testEmailParsing')
-        .addItem('🔎 Diagnose Specific Crew', 'diagnoseCrewCompliance')
-        .addItem('🔎 Diagnose Historical Crews', 'diagnoseHistoricalCrews')
-        .addItem('📋 Processing Status', 'showSafetyProcessingStatus')
-        .addItem('🔍 Diagnose Gmail Search', 'diagnoseGmailSearch')
-        .addItem('🔄 Reset Last Processed Date', 'clearLastSafetyProcessedDate')
-        .addItem('🗓️ Ensure Current Week Exists', 'ensureCurrentWeekInCompliance')
-        .addItem('🔎 Quick Gmail Check', 'quickGmailCheck')
-        .addSeparator()
-        .addItem('🔍 Diagnose Missing Crews', 'diagnoseMissingCrews')
-        .addItem('➕ Force Add Active Crews', 'forceAddMissingCrewsToCompliance'))
-      .addSubMenu(ui.createMenu('🧹 Cleanup')
-        .addItem('📋 Create Tasks from Issues', 'createTasksFromSafetyIssues')
-        .addItem('🔄 Refresh Safety Sheets', 'refreshSafetySheets')
-        .addItem('📅 Regenerate Previous Week Tasks', 'menuRegeneratePreviousWeekTasks')
-        .addItem('📅 Backfill Past Weeks', 'menuBackfillPastWeeks')
-        .addItem('🎨 Reformat by Week', 'menuReformatComplianceSheet')
-        .addSeparator()
-        .addItem('🔄 Migrate Safety Reports Sheet', 'migrateSafetyReportsToEquipmentNeeds')
-        .addItem('🧹 Cleanup Equipment Sheet', 'cleanupSafetyReportsSheet')
-        .addItem('🗄️ Archive Resolved Equipment', 'showArchiveResolvedEquipmentDialog')
-        .addItem('📅 Add Resolved On Column', 'addResolvedOnColumn')
-        .addItem('🧹 Cleanup Config Crews (Legacy)', 'cleanupComplianceConfig')
-        .addItem('🔧 Fix Config Checkboxes (Legacy)', 'fixComplianceConfigCheckboxes')
-        .addItem('🧹 Remove Duplicate Rows', 'menuCleanupDuplicateComplianceRows')
-        .addItem('🧹 Remove Duplicate Log Entries', 'menuCleanupDuplicateLogEntries')
-        .addItem('🧹 Remove Duplicate Equipment Needs', 'cleanupDuplicateEquipmentNeeds')
-        .addItem('🧹 Clear Saved Job Corrections', 'clearJobNumberCorrections')
-        .addItem('🛠️ Fix Shifted Safety Tasks', 'fixShiftedSafetyComplianceTasks')
-        .addItem('🔧 Fix Skipped Log Entries', 'fixSkippedLogEntriesFromMappings')
-        .addItem('🔧 Fix Ben Lapka Weeks', 'fixBenLapkaWeeks')
-        .addItem('🧹 Remove Non-Config Crews', 'removeNonConfigCrewsFromCompliance')
-        .addItem('🧹 Remove Pre-Start Job Rows', 'removePreStartJobRowsFromCompliance')
-        .addItem('➕ Add Job Mappings Manually', 'addMissingJobMappings')
-        .addItem('🗑️ Clear & Reprocess All Emails', 'clearAndReprocessSafetyEmails')))
-
-    // === STEP 4: GENERATE TASK METADATA ===
-    .addSubMenu(ui.createMenu('🎯 Generate Task Metadata')
-      .addItem('🎯 Generate Task Metadata', 'generateTaskMetadata')
-      .addItem('📊 Task Dashboard', 'showTaskDashboard')
-      .addItem('🗄️ Archive Completed Tasks', 'showArchiveCompletedTasksDialog')
-      .addSeparator()
-      .addSubMenu(ui.createMenu('🔧 Utilities')
-        .addItem('📋 Setup Task Metadata Sheet', 'setupTaskMetadataSheet')
-        .addItem('🎨 Standardize Task Metadata Formatting', 'standardizeTaskMetadataFormatting')
-        .addItem('🔧 Fix Task Metadata Status Validation', 'fixTaskMetadataStatusValidation')
-        .addItem('🏥 Task Metadata Health Check', 'showTaskMetadataHealthCheck')
-        .addItem('🧹 Remove Duplicate Task Metadata', 'removeDuplicateTaskMetadata')
-        .addItem('🧽 Cleanup Orphaned Metadata', 'cleanupOrphanedTaskMetadata')
-        .addItem('🧹 Cleanup Incorrect Safety Tasks', 'cleanupIncorrectSafetyReportTasks')
-        .addItem('🗺️ Fix Training Task Locations', 'fixTrainingTaskLocations')))
-
-    // === STEP 5: REVIEW & SCHEDULE ===
-    .addSubMenu(ui.createMenu('📅 Review & Schedule')
-      .addItem('📋 Tasks & Calendar', 'showToDoSchedule')
-      .addItem('🗺️ Trip Planner', 'showTripPlannerDialog')
-      .addItem('⚙️ Schedule Config', 'showToDoConfig')
-      .addItem('📝 Daily Accomplishments', 'showTimeBreakdownDialog')
-      .addSeparator()
-      .addSubMenu(ui.createMenu('📚 Training')
-        .addItem('Setup Training Config', 'setupTrainingConfig')
-        .addItem('Setup Training Tracking', 'setupTrainingTracking')
-        .addItem('🎨 Apply Training Tracking Formatting', 'menuApplyTrainingTrackingFormatting')
-        .addItem('Refresh Training Attendees', 'refreshTrainingAttendees')
-        .addItem('🔄 Update December Catch-Ups', 'updateDecemberCatchUps')
-        .addItem('🕐 Setup Auto December Updates', 'setupAutoDecemberUpdates')
-        .addItem('📊 Recalculate Training Completion %', 'recalculateAllTrainingCompletionStatus')
-        .addItem('📊 Generate Compliance Report', 'generateTrainingComplianceReport')
-        .addItem('🔄 Sync Training Tracking with Config', 'syncTrainingTrackingWithConfig')
-        .addItem('🔍 Debug Training Config', 'debugTrainingConfig'))
-      .addSubMenu(ui.createMenu('👷 Crew Visit')
-        .addItem('Setup Crew Visit Config', 'setupCrewVisitConfig')
-        .addItem('🔄 Refresh Crew Visit Config', 'refreshCrewVisitConfig'))
-      .addSubMenu(ui.createMenu('🔧 Utilities')
-        .addItem('📅 Generate Monthly Schedule', 'generateMonthlySchedule')
-        .addItem('🔄 Refresh Calendar', 'refreshCalendar')
-        .addItem('✅ Mark Visit Complete', 'markVisitComplete')
-        .addItem('🧹 Clear Completed Tasks', 'clearCompletedTasks')
-        .addItem('Setup All Schedule Sheets', 'setupAllScheduleSheets')
-        .addItem('🗑️ Archive Old To Do List (Legacy)', 'archiveToDoListSheet')
-        .addSeparator()
-        .addItem('🔄 Migrate Manual Tasks Sheet', 'migrateManualTasksSheet')
-        .addItem('🧹 Clean Up Manual Tasks', 'cleanupDuplicateManualTasks')
-        .addItem('🗑️ Purge Stuck Task by Location', 'promptPurgeTaskByLocation')
-        .addSeparator()
-        .addItem('Manage Holidays / Blackout Days', 'showManageHolidaysDialog')))
-
-    // === STEP 6: SAVE & BACKUP ===
-    .addSubMenu(ui.createMenu('💾 Save & Backup')
-      .addItem('💾 Save Current State to History', 'saveHistoryFast')
-      .addItem('💾 Create Backup Snapshot', 'createBackupSnapshot')
-      .addItem('📂 View Backup Folder', 'openBackupFolder')
-      .addSeparator()
-      .addSubMenu(ui.createMenu('📋 History')
-        .addItem('Import Legacy History', 'showImportLegacyHistoryDialog')
-        .addItem('Item History Lookup', 'showItemHistoryLookup')
-        .addItem('View Full History', 'viewFullHistory'))
-      .addSubMenu(ui.createMenu('📧 Email Reports')
-        .addItem('📤 Send Report Now', 'sendEmailReport')
-        .addItem('👁️ Preview My Report', 'previewEmailReport')
-        .addItem('⚙️ Configure Email Reports', 'openEmailReportConfig')
-        .addItem('🕐 Set Up Weekly Email (Mon 12 PM)', 'createWeeklyEmailTrigger')
-        .addItem('🚫 Remove Scheduled Email', 'removeEmailTrigger')))
-
-    .addSeparator()
-
-    // === MAINTENANCE (Rarely Used) ===
-    .addSubMenu(ui.createMenu('🔧 Maintenance')
-      .addSubMenu(ui.createMenu('📦 Inventory')
-        .addItem('🗄️ Archive Lost & Failed Items', 'showArchiveLostFailedDialog')
-        .addItem('↩️ Restore Item from Archive', 'showRestoreFromArchiveDialog')
-        .addItem('📊 Update Inventory Reports', 'updateInventoryReports')
-        .addItem('🔄 Sync New Items Log', 'syncNewItemsLogWithInventory')
-        .addItem('📦 Reset Known Item Numbers', 'resetKnownItemNumbers')
-        .addItem('🧱 Reset Blanket Tracking', 'resetBlanketTracking')
-        .addSeparator()
-        .addItem('⚡ View HV Testers', 'openHVTestersSheet')
-        .addItem('⚡ View Phasing Sets', 'openPhasingSetsSheet')
-        .addItem('🏥 View AED', 'openAEDSheet')
-        .addItem('🔧 Fix Equipment Headers', 'fixEquipmentSheetHeaders')
-        .addItem('🔧 Repair History Sheet Columns', 'repairHistorySheetColumns')
-        .addItem('🔧 Fix History Overflow Data', 'fixHistorySheetOrphanedData')
-        .addItem('🔧 Regenerate History Notes', 'regenerateHistoryNotes'))
-      .addSubMenu(ui.createMenu('🛒 Purchase Orders')
-        .addItem('📝 Create Purchase Order', 'showPurchaseOrderDialog')
-        .addItem('📋 Order History', 'openPurchaseOrdersSheet')
-        .addItem('⚙️ Manage Vendors', 'showVendorConfigDialog'))
-      .addSubMenu(ui.createMenu('👥 Employees')
-        .addItem('🔍 Update Location Validation', 'updateEmployeesLocationValidation')
-        .addItem('📤 Archive Previous Employees', 'archivePreviousEmployees')
-        .addItem('🔄 Restore Deleted Employee', 'showRestoreEmployeeDialog')
-        .addItem('🔄 Update Employee History Headers', 'updateEmployeeHistoryHeaders')
-        .addItem('🧹 Clean Up Duplicate Employee History', 'cleanupDuplicateEmployeeHistoryEntries')
-        .addItem('🧹 Fix Bad Employee Names', 'cleanupBadEmployeeNames')
-        .addItem('🧹 Clean Up Duplicate Item History', 'cleanupDuplicateItemHistory')
-        .addItem('🔍 Scan for Bad Dates in History', 'scanEmployeeHistoryForBadDates')
-        .addItem('📱 Format Phone Numbers', 'formatEmployeePhoneNumbers')
-        .addItem('✅ Fix Last Day Reason Dropdown', 'fixLastDayReasonValidation')
-        .addItem('👷 Setup Job Classification Dropdown', 'setupJobClassificationDropdown')
-        .addItem('📖 View Classification Guide', 'showClassificationGuide'))
-      .addSubMenu(ui.createMenu('📋 Job Tracking')
-        .addItem('📂 View Job Tracking', 'openJobTrackingSheet')
-        .addItem('🔄 Refresh Job Tracking', 'refreshJobTrackingFromEmployees')
-        .addItem('📅 Add Schedule History Columns', 'migrateJobTrackingScheduleColumns')
-        .addItem('🔄 Sync Config to Job Tracking Schedules', 'syncConfigToJobTrackingSchedule')
-        .addItem('✅ Mark Job Complete', 'markJobComplete')
-        .addItem('+ Add Future Job', 'addFutureJob')
-        .addSeparator()
-        .addItem('Fix Schedule Columns (V-Y)', 'fixJobTrackingScheduleColumns'))
-      .addSubMenu(ui.createMenu('🏗️ Sheets Setup')
-        .addItem('🏗️ Build Sheets', 'buildSheets')
-        .addItem('🔗 Add ESL ID Column (Gloves/Sleeves)', 'migrateGlovesSleevesSheetsForESLID')
-        .addItem('🔍 Diagnose Gloves/Sleeves Columns', 'diagnoseInventoryColumns')
-        .addItem('🔧 Repair Gloves/Sleeves Column Order', 'repairInventoryColumnOrder')
-        .addItem('🔧 Restore Assigned To Column', 'restoreInventoryAssignedTo')
-        .addItem('🔧 Restore Assigned To from History', 'restoreAssignedToFromHistory')
-        .addItem('⚡ Setup HV Tester & Phasing Set Sheets', 'setupHVTesterAndPhasingSetSheets')
-        .addItem('🏥 Setup AED Sheet', 'setupAEDSheet')
-        .addItem('⚡ Migrate HV Testers - Add KV Column', 'migrateHVTestersAddKVColumn')
-        .addItem('⚡ Migrate HV/Phasing to Change Out Date', 'migrateHVAndPhasingSetsToChangeOutDate')
-        .addItem('⚡ Fix HV Tester Change Out Dates', 'fixHVTesterChangeOutDates')
-        .addItem('⚡ Fix Phasing Set Change Out Dates', 'fixPhasingSetChangeOutDates')
-        .addItem('🔍 Setup Locations Sheet', 'setupLocationsSheet')
-        .addItem('🔍 View Locations', 'openLocationsSheet')
-        .addItem('📍 Review New Locations', 'reviewNewLocations')
-        .addItem('📅 Fiscal Year Config', 'showFiscalYearConfig')
-        .addItem('📥 Import Data', 'showImportDialog')
-        .addItem('📥 Quick Import (1084)', 'importProvidedData'))
-      .addSeparator()
-      .addItem('🔍 Diagnose Auth Issues', 'diagnoseAuthIssues')
-      .addItem('🗑️ Clear Background Triggers', 'clearAllBackgroundTriggers'))
-
-    // === DEBUG ===
-    .addSubMenu(ui.createMenu('🔍 Debug')
-      .addItem('Test Edit Trigger', 'testEditTrigger')
-      .addItem('Recalc Current Row', 'recalcCurrentRow')
-      .addSeparator()
-      .addItem('🔍 Diagnose Employee Pick List', 'runDiagnostic')
-      .addItem('📊 Show All Sleeve Swaps', 'runSleeveSwapDiagnostic')
-      .addItem('📊 Show All Glove Swaps', 'runGloveSwapDiagnostic')
-      .addSeparator()
-      .addItem('🧪 Test Trip Planner Data', 'debugTripPlannerData')
-      .addSeparator()
-      .addItem('🔍 Diagnose Crew 005-26', 'diagnoseCrew005')
-      .addItem('🔍 Diagnose Crew 045-26', 'diagnose045Crew'))
-
-    .addSeparator()
-    .addItem('Close & Save History', 'closeAndSaveHistory')
-    .addToUi();
-
-  // Reset the previous sheet tracker for this session
-  PropertiesService.getUserProperties().setProperty('previousSheet', '');
-
-  // Note: Cannot auto-open sidebar from onOpen() due to Google Apps Script restrictions
-  // Simple triggers cannot call services that require authorization (like showSidebar)
-  // Users can click "Glove Manager → Quick Actions" to open the sidebar
+  try {
+    _buildGloveManagerMenu();
+  } catch(e) {
+    Logger.log("onOpen menu error: " + e);
+  }
 }
 
-/**
- * Test function to verify the edit trigger is working.
- * Run this from the menu to see if triggers are properly set up.
- */
 function testEditTrigger() {
   var ui = SpreadsheetApp.getUi();
   var triggers = ScriptApp.getProjectTriggers();
@@ -7341,7 +7336,9 @@ function handleBlanketAssignedToChange(ss, sheet, editedRow, newValue) {
     }
 
     // Get the actual cell value directly from the sheet
-    var assignedToCol = 8;  // Column H
+    // Use offset so this works for both 11-col (no KV) and 12-col (with KV) layouts
+    var hvOffset = getEquipmentColOffset(sheet);  // 0 for 12-col, -1 for 11-col
+    var assignedToCol = COLS.HV_TESTERS.ASSIGNED_TO + hvOffset;  // 9 (12-col) or 8 (11-col)
     var actualValue = sheet.getRange(editedRow, assignedToCol).getValue();
 
     logEvent('handleBlanketAssignedToChange ENTRY: Row=' + editedRow + ', newValue=' + newValue + ', actualValue=' + actualValue, 'DEBUG');
@@ -7394,8 +7391,8 @@ function handleBlanketAssignedToChange(ss, sheet, editedRow, newValue) {
     var newLocation = '';
 
     // Blanket column indices
-    var colStatus = 7;        // Column G = Status
-    var colLocation = 6;      // Column F = Location
+    var colStatus = COLS.HV_TESTERS.STATUS + hvOffset;      // 8 (12-col) or 7 (11-col)
+    var colLocation = COLS.HV_TESTERS.LOCATION + hvOffset;  // 7 (12-col) or 6 (11-col)
     var colTestDate = 4;      // Column D = Test Date
     var colChangeOutDate = 9; // Column I = Change Out Date
 
@@ -7473,7 +7470,6 @@ function handleBlanketAssignedToChange(ss, sheet, editedRow, newValue) {
  */
 function handleHVTesterAssignedToChange(ss, sheet, editedRow, newValue) {
   if (editedRow < 2) return; // Skip header row
-
   var lock = null;
   try {
     try {
@@ -7482,95 +7478,106 @@ function handleHVTesterAssignedToChange(ss, sheet, editedRow, newValue) {
     } catch (lockErr) {
       lock = null;
     }
-
-    var assignedToCol = 8;  // Column H
+    // Use header-based column detection — works for both 11-col and 12-col layouts
+    // regardless of whether the KV column exists or not.
+    var headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    var assignedToCol = -1, locationCol = -1, statusCol = -1, dateAssignedCol = -1;
+    for (var hIdx = 0; hIdx < headerRow.length; hIdx++) {
+      var hdr = String(headerRow[hIdx]).toLowerCase().trim();
+      if (hdr === 'assigned to')    assignedToCol   = hIdx + 1;
+      else if (hdr === 'location')  locationCol     = hIdx + 1;
+      else if (hdr === 'status')    statusCol       = hIdx + 1;
+      else if (hdr === 'date assigned') dateAssignedCol = hIdx + 1;
+    }
+    // Fallback to COLS constants if headers not found
+    if (assignedToCol   === -1) assignedToCol   = COLS.HV_TESTERS.ASSIGNED_TO;
+    if (locationCol     === -1) locationCol     = COLS.HV_TESTERS.LOCATION;
+    if (statusCol       === -1) statusCol       = COLS.HV_TESTERS.STATUS;
+    if (dateAssignedCol === -1) dateAssignedCol = COLS.HV_TESTERS.DATE_ASSIGNED;
     var actualValue = sheet.getRange(editedRow, assignedToCol).getValue();
-
-    logEvent('handleHVTesterAssignedToChange ENTRY: Row=' + editedRow + ', newValue=' + newValue + ', actualValue=' + actualValue, 'DEBUG');
-
+    logEvent('handleHVTesterAssignedToChange ENTRY: Row=' + editedRow +
+             ', newValue=' + newValue + ', actualValue=' + actualValue +
+             ', assignedToCol=' + assignedToCol + ', locationCol=' + locationCol +
+             ', statusCol=' + statusCol, 'DEBUG');
     var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
     if (!employeesSheet) {
       logEvent('handleHVTesterAssignedToChange: Employees sheet not found!', 'ERROR');
       return;
     }
-
     // Build name to location map from Employees sheet
     var empData = employeesSheet.getDataRange().getValues();
     var empHeaders = empData[0];
     var nameColIdx = 0;
     var locationColIdx = -1;
-
     for (var h = 0; h < empHeaders.length; h++) {
       if (String(empHeaders[h]).trim().toLowerCase() === 'location') {
         locationColIdx = h;
         break;
       }
     }
-
     if (locationColIdx === -1) {
       logEvent('handleHVTesterAssignedToChange: Location column not found in Employees sheet!', 'ERROR');
       locationColIdx = 1;
     }
-
     var nameToLocation = {};
     for (var i = 1; i < empData.length; i++) {
       var name = (empData[i][nameColIdx] || '').toString().trim().toLowerCase();
       var loc = empData[i][locationColIdx] || '';
       if (name) nameToLocation[name] = loc;
     }
-
+    // Prefer the live sheet value; fall back to the event value if cell is blank
     var assignedTo = (actualValue !== undefined && actualValue !== null && actualValue !== '')
                      ? actualValue.toString().trim()
                      : (newValue || '').toString().trim();
     var assignedToLower = assignedTo.toLowerCase();
-
     logEvent('handleHVTesterAssignedToChange: Processing assignedTo="' + assignedTo + '"', 'DEBUG');
-
     var newStatus = '';
     var newLocation = '';
-
-    var colStatus = 7;    // Column G = Status
-    var colLocation = 6;  // Column F = Location
-
+    var setDateAssigned = false;
     if (assignedToLower === 'on shelf' || assignedToLower === '') {
-      newStatus = 'On Shelf';
+      newStatus   = 'On Shelf';
       newLocation = 'Helena';
     } else if (assignedToLower === 'in calibration') {
-      newStatus = 'In Calibration';
+      newStatus   = 'In Calibration';
       newLocation = 'Calibration Lab';
     } else if (assignedToLower === 'out of service') {
-      newStatus = 'Out of Service';
+      newStatus   = 'Out of Service';
       newLocation = 'Helena';
     } else if (assignedToLower === 'retired') {
-      newStatus = 'Retired';
+      newStatus   = 'Retired';
       newLocation = 'Retired';
     } else if (assignedToLower === 'lost') {
-      newStatus = 'Lost';
+      newStatus   = 'Lost';
       newLocation = 'Lost';
     } else if (nameToLocation[assignedToLower]) {
-      newStatus = 'In Service';
+      newStatus   = 'In Service';
       newLocation = nameToLocation[assignedToLower];
+      setDateAssigned = true; // Record today as the assignment date
     } else if (assignedTo !== '') {
       logEvent('handleHVTesterAssignedToChange: Employee "' + assignedTo + '" not found in ' + SHEET_EMPLOYEES, 'WARNING');
-      newStatus = 'In Service';
+      newStatus   = 'In Service';
       newLocation = 'Unknown';
+      setDateAssigned = true;
     }
-
-    logEvent('handleHVTesterAssignedToChange: Row=' + editedRow + ', AssignedTo=' + assignedTo +
-             ', newStatus=' + newStatus + ', newLocation=' + newLocation, 'DEBUG');
-
+    logEvent('handleHVTesterAssignedToChange: Row=' + editedRow +
+             ', AssignedTo=' + assignedTo + ', newStatus=' + newStatus +
+             ', newLocation=' + newLocation, 'DEBUG');
     if (newLocation) {
-      sheet.getRange(editedRow, colLocation).setValue(newLocation);
-      logEvent('Set Location to "' + newLocation + '" at row ' + editedRow, 'DEBUG');
+      sheet.getRange(editedRow, locationCol).setValue(newLocation);
+      logEvent('Set Location to "' + newLocation + '" at col ' + locationCol + ' row ' + editedRow, 'DEBUG');
     }
-
     if (newStatus) {
-      sheet.getRange(editedRow, colStatus).setValue(newStatus);
-      logEvent('Set Status to "' + newStatus + '" at row ' + editedRow, 'DEBUG');
+      sheet.getRange(editedRow, statusCol).setValue(newStatus);
+      logEvent('Set Status to "' + newStatus + '" at col ' + statusCol + ' row ' + editedRow, 'DEBUG');
     }
-
-    ss.toast('Location: ' + newLocation + ', Status: ' + newStatus, '🔍 Auto-Updated', 3);
-
+    if (setDateAssigned && dateAssignedCol > 0) {
+      var today = new Date();
+      today.setHours(0, 0, 0, 0);
+      sheet.getRange(editedRow, dateAssignedCol).setValue(today);
+      try { sheet.getRange(editedRow, dateAssignedCol).setNumberFormat('mm/dd/yyyy'); } catch (e) {}
+      logEvent('Set Date Assigned to today at col ' + dateAssignedCol + ' row ' + editedRow, 'DEBUG');
+    }
+    ss.toast('Location: ' + newLocation + ', Status: ' + newStatus, 'Auto-Updated', 3);
   } catch (e) {
     logEvent('handleHVTesterAssignedToChange error: ' + e, 'ERROR');
   } finally {
@@ -7642,6 +7649,7 @@ function handlePhasingSetAssignedToChange(ss, sheet, editedRow, newValue) {
     var newStatus = '';
     var newLocation = '';
 
+    var psOffset = getEquipmentColOffset(sheet);  // 0 for 12-col, -1 for 11-col
     var colStatus = COLS.PHASING_SETS.STATUS + psOffset;      // 8 (12-col) or 7 (11-col)
     var colLocation = COLS.PHASING_SETS.LOCATION + psOffset;  // 7 (12-col) or 6 (11-col)
 
@@ -12412,6 +12420,17 @@ function generateTaskMetadata() {
     }
   }
 
+  // Cleanup: remove any auto-generated cert tasks from Manual Tasks sheet
+  // (these were written by the old generateToDoTasksFromCerts flow, now deprecated)
+  try {
+    var certCleanupCount = cleanupCertTasksFromManualTasks();
+    if (certCleanupCount > 0) {
+      Logger.log('generateTaskMetadata: Cleaned up ' + certCleanupCount + ' stale cert tasks from Manual Tasks');
+    }
+  } catch (certCleanupErr) {
+    Logger.log('generateTaskMetadata: cert cleanup error (non-critical): ' + certCleanupErr);
+  }
+
   // Show progress
   ui.alert('⏳ Generating Task Metadata\n\nThis may take 30-60 seconds.\nReading from source sheets and creating metadata records...');
 
@@ -12882,6 +12901,63 @@ function extractJobNumberFromTaskID(taskID) {
   // Match pattern: SafetyCompliance_XXX-XX_date
   var match = taskID.match(/SafetyCompliance_(\d{3}-\d{2})_/);
   return match ? match[1] : '';
+}
+
+/**
+ * Returns job context for crew card view in To Do List.
+ * Maps employees to their job numbers and provides job metadata from Job Tracking.
+ * @returns {{ byEmployee: Object, jobs: Object }} byEmployee = name→jobNumber, jobs = jobNumber→metadata
+ */
+function getJobContext() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var empSheet = ss.getSheetByName('Employees');
+  var jtSheet = ss.getSheetByName('Job Tracking');
+
+  var byEmployee = {};   // normalizedName → jobNumber (without position suffix)
+  var jobs = {};         // jobNumber → {location, jobName, foreman, size, status}
+
+  // Build employee → job number map
+  if (empSheet && empSheet.getLastRow() > 1) {
+    var empData = empSheet.getRange(2, 1, empSheet.getLastRow() - 1, COLS.EMPLOYEES.JOB_NUMBER).getValues();
+    for (var ei = 0; ei < empData.length; ei++) {
+      var empName = String(empData[ei][COLS.EMPLOYEES.NAME - 1] || '').trim();
+      var empJob  = String(empData[ei][COLS.EMPLOYEES.JOB_NUMBER - 1] || '').trim();
+      if (!empName || !empJob) continue;
+      // Strip position suffix (e.g. "013-26.3" → "013-26")
+      var baseJob = empJob.replace(/\.\d+$/, '');
+      byEmployee[empName.toLowerCase()] = baseJob;
+    }
+  }
+
+  // Build job metadata from Job Tracking (Active jobs only)
+  if (jtSheet && jtSheet.getLastRow() > 1) {
+    var jtHeaders = jtSheet.getRange(1, 1, 1, jtSheet.getLastColumn()).getValues()[0];
+    var jtData    = jtSheet.getRange(2, 1, jtSheet.getLastRow() - 1, jtSheet.getLastColumn()).getValues();
+
+    // Locate columns by header name (flexible)
+    var jtCol = {};
+    for (var hh = 0; hh < jtHeaders.length; hh++) {
+      jtCol[String(jtHeaders[hh]).toLowerCase().trim()] = hh;
+    }
+
+    for (var ji = 0; ji < jtData.length; ji++) {
+      var row = jtData[ji];
+      var status = String(row[jtCol['status'] !== undefined ? jtCol['status'] : 7] || '').trim();
+      if (status !== 'Active') continue;
+
+      var jobNum  = String(row[jtCol['job number'] !== undefined ? jtCol['job number'] : 0] || '').trim();
+      var loc     = String(row[jtCol['location']   !== undefined ? jtCol['location']   : 1] || '').trim();
+      var foreman = String(row[jtCol['foreman']     !== undefined ? jtCol['foreman']     : 2] || '').trim();
+      var size    = row[jtCol['crew size']           !== undefined ? jtCol['crew size']   : 3] || 0;
+      var jobName = String(row[jtCol['job name']     !== undefined ? jtCol['job name']    : (jtCol['z'] !== undefined ? jtCol['z'] : 25)] || '').trim();
+
+      if (!jobNum) continue;
+      jobs[jobNum] = { jobNumber: jobNum, location: loc, jobName: jobName, foreman: foreman, size: Number(size) || 0, status: status };
+    }
+  }
+
+  Logger.log('getJobContext: ' + Object.keys(byEmployee).length + ' employees, ' + Object.keys(jobs).length + ' active jobs');
+  return { byEmployee: byEmployee, jobs: jobs };
 }
 
 function getTasksWithMetadata() {
@@ -15935,7 +16011,135 @@ function fixChangeOutDatesSilent() {
 /**
  * Calls all report-generation/update functions to refresh all reports/tabs.
  */
+/**
+ * Opens a progress dialog that runs generateAllReports in 3 sequential parts,
+ * each with its own 6-minute execution window to avoid timeout.
+ */
+function showGenerateAllReportsDialog() {
+  var html = HtmlService.createHtmlOutputFromFile('GenerateAllReportsDialog')
+    .setWidth(480).setHeight(440);
+  SpreadsheetApp.getUi().showModalDialog(html, '📊 Generate All Reports');
+}
+
+/**
+ * Part 1: Fix dates, sync inventory, generate swap reports (Gloves, Sleeves, Blankets).
+ * Returns a result object with any relevant counts.
+ */
+function generateAllReportsPart1() {
+  logEvent('generateAllReports Part 1: Starting (dates, inventory sync, swap reports)...');
+
+  try {
+    var result = checkAndActivateScheduledJobs();
+    if (result && result.activated > 0) {
+      Logger.log('Part1: Auto-activated ' + result.activated + ' job(s): ' + result.jobs.join(', '));
+    }
+  } catch (e) {
+    Logger.log('Part1: Auto-activation check failed (non-critical): ' + e);
+  }
+
+  fixChangeOutDatesSilent();
+  fixBlanketChangeOutDatesSilent();
+  syncInventoryLocations();
+  generateGloveSwaps();
+  generateSleeveSwaps();
+  generateBlanketSwaps(true);
+
+  logEvent('generateAllReports Part 1: Complete.');
+  return { success: true };
+}
+
+/**
+ * Part 2: Upgrade pick lists, generate HV Tester/Phasing Set/AED swaps,
+ * update Reclaims, Purchase Needs, and Inventory Reports.
+ */
+function generateAllReportsPart2() {
+  logEvent('generateAllReports Part 2: Starting (pick list upgrades, specialty swaps, reports)...');
+
+  SpreadsheetApp.flush();
+
+  var upgradeResults = null;
+  try {
+    upgradeResults = upgradePickListItems();
+    if (upgradeResults && upgradeResults.totalUpgrades > 0) {
+      Logger.log('Part2: Pick list upgrades: ' + upgradeResults.totalUpgrades + ' item(s) upgraded');
+    }
+  } catch (e) {
+    Logger.log('Part2: upgradePickListItems failed (non-critical): ' + e);
+  }
+
+  generateHVTesterSwaps(true);
+  generatePhasingSetSwaps(true);
+  generateAEDSwaps(true);
+  updateReclaimsSheet();
+  updatePurchaseNeeds();
+  updateInventoryReports();
+
+  logEvent('generateAllReports Part 2: Complete.');
+  return {
+    success: true,
+    upgradeCount: (upgradeResults && upgradeResults.totalUpgrades) || 0
+  };
+}
+
+/**
+ * Part 3: Training tracking crew leads, missing crews, attendee refresh, crew sync.
+ * Returns result counts for the success message.
+ */
+function generateAllReportsPart3() {
+  logEvent('generateAllReports Part 3: Starting (training sync, crew sync)...');
+
+  var crewLeadResults = null;
+  try {
+    crewLeadResults = updateTrainingTrackingCrewLeadsSilent();
+    Logger.log('Part3: Crew lead update: ' + JSON.stringify(crewLeadResults));
+  } catch (e) {
+    Logger.log('Part3: updateTrainingTrackingCrewLeadsSilent failed: ' + e);
+  }
+
+  var addedCrewsResults = null;
+  try {
+    addedCrewsResults = addMissingCrewsToTrainingTracking();
+    Logger.log('Part3: addMissingCrewsToTrainingTracking: ' + JSON.stringify(addedCrewsResults));
+  } catch (e) {
+    Logger.log('Part3: addMissingCrewsToTrainingTracking failed: ' + e);
+  }
+
+  var attendeeResults = null;
+  try {
+    attendeeResults = refreshTrainingAttendeesSilent();
+    Logger.log('Part3: refreshTrainingAttendeesSilent: ' + JSON.stringify(attendeeResults));
+  } catch (e) {
+    Logger.log('Part3: refreshTrainingAttendeesSilent failed: ' + e);
+  }
+
+  var syncResult = null;
+  try {
+    syncResult = syncCrews(true);
+    Logger.log('Part3: syncCrews: ' + JSON.stringify(syncResult));
+  } catch (e) {
+    Logger.log('Part3: syncCrews failed: ' + e);
+  }
+
+  logEvent('generateAllReports Part 3: Complete.');
+  return {
+    success: true,
+    crewLeadsUpdated: (crewLeadResults && crewLeadResults.updatedRows) || 0,
+    crewsAdded: (addedCrewsResults && addedCrewsResults.addedRows) || 0,
+    attendeesRefreshed: (attendeeResults && attendeeResults.updatedRows) || 0,
+    foremanUpdates: (syncResult && syncResult.foremanUpdates) || 0
+  };
+}
+
 function generateAllReports() {
+  // Open the multi-part progress dialog to avoid 6-minute execution timeout.
+  showGenerateAllReportsDialog();
+}
+
+/**
+ * Legacy single-shot version kept for reference / direct trigger use.
+ * Prefer showGenerateAllReportsDialog() for interactive use.
+ */
+function generateAllReportsLegacy() {
   try {
     logEvent('Generating all reports...');
 
@@ -17085,10 +17289,10 @@ function updatePurchaseNeeds_OLD() {
 
     // Summary stats row (9 columns)
     var topSummaryData = [
-      ['1️⃣ Immediate: ' + grandTotals.needToOrder,
-       '2️⃣ In 2 Weeks: ' + grandTotals.readyForDeliverySizeUp,
-       '3️⃣ In 3 Weeks: ' + grandTotals.inTestingSizeUp,
-       '4️⃣ Consider: ' + grandTotals.sizeUp,
+      ['1ï¸⃣ Immediate: ' + grandTotals.needToOrder,
+       '2ï¸⃣ In 2 Weeks: ' + grandTotals.readyForDeliverySizeUp,
+       '3ï¸⃣ In 3 Weeks: ' + grandTotals.inTestingSizeUp,
+       '4ï¸⃣ Consider: ' + grandTotals.sizeUp,
        '',
        '', '', '', '']
     ];
@@ -17170,10 +17374,10 @@ function updatePurchaseNeeds_OLD() {
       .setFontWeight('bold').setBackground('#b0bec5').setFontColor('#333333').setHorizontalAlignment('center');
 
     var summaryData = [
-      ['1️⃣ Immediate', grandTotals.needToOrder, '#ef9a9a'],
-      ['2️⃣ In 2 Weeks', grandTotals.readyForDeliverySizeUp, '#80cbc4'],
-      ['3️⃣ In 3 Weeks', grandTotals.inTestingSizeUp, '#ce93d8'],
-      ['4️⃣ Consider', grandTotals.sizeUp, '#ffcc80']
+      ['1ï¸⃣ Immediate', grandTotals.needToOrder, '#ef9a9a'],
+      ['2ï¸⃣ In 2 Weeks', grandTotals.readyForDeliverySizeUp, '#80cbc4'],
+      ['3ï¸⃣ In 3 Weeks', grandTotals.inTestingSizeUp, '#ce93d8'],
+      ['4ï¸⃣ Consider', grandTotals.sizeUp, '#ffcc80']
     ];
 
     for (var s = 0; s < summaryData.length; s++) {
@@ -22218,8 +22422,8 @@ function generateBlanketSwaps(silent) {
 
     var daysLeft = Math.ceil((changeOut - now) / (1000 * 60 * 60 * 24));
 
-    // Include if due within 90 days (3 months) or overdue - blankets have longer lead time
-    if (daysLeft <= 90) {
+    // Include if due within 30 days or overdue
+    if (daysLeft <= 30) {
       var assignedToLower = (assignedTo || '').toString().trim().toLowerCase();
       blanketsNeedingSwap.push({
         itemNum: itemNum,
@@ -22240,9 +22444,9 @@ function generateBlanketSwaps(silent) {
   }
 
   if (blanketsNeedingSwap.length === 0) {
-    logEvent('No blankets due for swap in the next 90 days (3 months).', 'INFO');
+    logEvent('No blankets due for swap in the next 30 days.', 'INFO');
     if (!silent) {
-      ui.alert('✅ No Blanket Swaps Needed\n\nNo blankets are due for swap in the next 90 days (3 months).');
+      ui.alert('No Blanket Swaps Needed\n\nNo blankets are due for swap in the next 30 days.');
     }
     return;
   }
@@ -26084,4 +26288,3 @@ function generateHotStickSwaps(silent) {
 function menuGenerateHotStickSwaps() {
   generateHotStickSwaps(false);
 }
-

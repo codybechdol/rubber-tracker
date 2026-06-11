@@ -552,10 +552,15 @@
         } else if (result && result.complete) {
           console.log("Processing complete, full result:", JSON.stringify(result, null, 2));
           progressBar.style.width = "100%";
-          progressBar.textContent = result.totalThreads + " of " + result.totalThreads + " (100%)";
+          progressBar.textContent = result.earlyExit
+            ? (result.threadsProcessed + " of " + result.totalThreads + " checked (100%)")
+            : (result.totalThreads + " of " + result.totalThreads + " (100%)");
           progressBar.style.background = "linear-gradient(90deg, #34A853, #137333)";
 
           var modeInfo = result.newOnlyMode ? " (new only since " + result.lastProcessedDate + ")" : " (last " + currentDays + " days)";
+          if (result.earlyExit) {
+            modeInfo += " — stopped early (no new emails after batch " + (result.batchNumber - 1) + ")";
+          }
 
           // Build logs info from the new Option B logging
           var logsInfo = "";
@@ -623,7 +628,9 @@
 
           status.innerHTML =
             "✅ <span class='progress'>All Complete!</span>" + modeInfo + "<br>" +
-            "<div class='info'>📧 Total emails processed: " + result.totalThreads + "</div>" +
+            "<div class='info'>📧 " + (result.earlyExit
+              ? "Threads checked: " + result.threadsProcessed + " of " + result.totalThreads + " (stopped early — no new emails in remaining batches)"
+              : "Total emails processed: " + result.totalThreads) + "</div>" +
             "<div class='info'>This batch: " + result.processedThisBatch + " processed, " + result.skippedThisBatch + " skipped</div>" +
             "<div class='info'>Equipment issues found: " + result.issuesThisBatch + "</div>" +
             logsInfo + complianceInfo + skipInfo + pdfWarningInfo;
@@ -643,9 +650,10 @@
           }
 
           // Show uncredited jobs FIRST if any were found (higher priority)
-          console.log("Checking for uncreditedJobs:", result.uncreditedJobs);
-          if (result.uncreditedJobs && result.uncreditedJobs.length > 0) {
-            console.log("Showing " + result.uncreditedJobs.length + " uncredited jobs");
+          var uncreditedCount = (result.uncreditedJobs && result.uncreditedJobs.length) || 0;
+          console.log("Uncredited jobs from server:", uncreditedCount);
+          if (uncreditedCount > 0) {
+            console.log("Showing " + uncreditedCount + " uncredited jobs");
             showUncreditedJobs(result.uncreditedJobs);
             // Scroll to uncredited section so user sees it
             setTimeout(function() {
@@ -655,7 +663,7 @@
               }
             }, 100);
           } else {
-            console.log("No uncredited jobs to show (uncreditedJobs is:", result.uncreditedJobs, ")");
+            console.log("No uncredited jobs to show - all reports were credited to tracked crews.");
           }
 
           // Then show compliance grid

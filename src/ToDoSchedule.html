@@ -108,15 +108,110 @@
     .classtype-online { background: #e8f5e9; color: #2e7d32; }
     .classtype-inperson-mpc { background: #fff3e0; color: #e65100; }
     .classtype-inperson-mslcat { background: #e3f2fd; color: #1565c0; }
+
+    /* Task Card Layout (redesign) */
+    .task-card { background: white; border-radius: 8px; margin-bottom: 8px; border-left: 4px solid #dadce0; box-shadow: 0 1px 4px rgba(0,0,0,0.08); overflow: hidden; transition: box-shadow 0.15s; }
+    .task-card:hover { box-shadow: 0 3px 10px rgba(0,0,0,0.14); }
+    .task-card.priority-high { border-left-color: #ea4335; }
+    .task-card.priority-medium { border-left-color: #fbbc04; }
+    .task-card.priority-low { border-left-color: #34a853; }
+    .task-card.registered { background: linear-gradient(135deg, #e8f5e9 0%, #f1f8f2 100%); border-left-color: #4caf50 !important; }
+    .task-card.stale { border-left-color: #ff7043 !important; }
+    .task-card-body { padding: 10px 14px 8px 14px; }
+    .task-card-title { font-weight: 600; font-size: 14px; color: #202124; line-height: 1.4; display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+    .task-card-title-text { flex: 1; min-width: 0; }
+    .task-card-badges { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-top: 2px; }
+    .task-card-meta { font-size: 12px; color: #5f6368; margin-top: 5px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .task-card-meta-item { display: flex; align-items: center; gap: 3px; }
+    .task-card-notes { font-size: 12px; color: #3c4043; margin-top: 7px; background: #f8f9fa; border-radius: 4px; padding: 5px 9px; border-left: 2px solid #dadce0; word-break: break-word; }
+    .task-card-safety-detail { font-size: 12px; margin-top: 5px; padding-left: 4px; }
+    .task-card-footer { padding: 7px 14px 8px 14px; background: #f8f9fa; border-top: 1px solid #f1f3f4; display: flex; align-items: center; gap: 8px; justify-content: space-between; flex-wrap: wrap; }
+    .task-card-schedule { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .task-card-schedule-label { font-size: 11px; color: #5f6368; white-space: nowrap; }
+    .task-card-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+    .stale-badge { background: #fff3e0; color: #e65100; font-size: 10px; padding: 2px 7px; border-radius: 10px; font-weight: 700; white-space: nowrap; }
+    .stale-section-header { background: #fff8e1; border: 1px solid #ffe082; border-radius: 8px; padding: 10px 16px; margin: 16px 0 4px 0; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none; }
+    .stale-section-header:hover { background: #fff3cd; }
+    .stale-section-body { padding: 4px 0; }
+    .stale-section-body.collapsed { display: none; }
+
+    /* ── Crew Card View ──────────────────────────────── */
+    .btn-crew-view { transition: all 0.15s; }
+    .btn-crew-view.active { background: #667eea; color: white; border-color: #667eea; }
+    #crewViewContainer { display: block; }
+
+    .crew-card {
+      background: white;
+      border-radius: 10px;
+      margin-bottom: 14px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.10);
+      overflow: hidden;
+    }
+    .crew-card-header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .crew-card-job { font-weight: 700; font-size: 15px; }
+    .crew-card-loc { font-size: 13px; opacity: 0.88; }
+    .crew-card-name { font-size: 12px; opacity: 0.75; font-style: italic; }
+    .crew-card-foreman { font-size: 12px; opacity: 0.88; }
+    .crew-card-size { font-size: 11px; background: rgba(255,255,255,0.20); border-radius: 8px; padding: 1px 8px; margin-left: auto; }
+    .crew-card-body { padding: 0; }
+
+    .crew-section-header {
+      background: #f8f9fa;
+      padding: 6px 14px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #5f6368;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      border-bottom: 1px solid #e8eaed;
+    }
+    .crew-section-header.training { background: #e8f0fe; color: #1967d2; }
+    .crew-section-header.safety   { background: #fce8e6; color: #c5221f; }
+    .crew-section-header.employee { background: #f8f9fa; color: #3c4043; border-top: 1px solid #e8eaed; }
+
+    .crew-task-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 14px;
+      border-bottom: 1px solid #f1f3f4;
+    }
+    .crew-task-row:last-child { border-bottom: none; }
+    .crew-task-row:hover { background: #f8f9fa; }
+    .crew-task-row.employee-indent { padding-left: 30px; }
+    .crew-task-check { flex-shrink: 0; width: 18px; height: 18px; cursor: pointer; accent-color: #667eea; }
+    .crew-task-label { flex: 1; font-size: 13px; color: #202124; }
+    .crew-task-label.complete { text-decoration: line-through; color: #9aa0a6; }
+    .crew-task-badge { font-size: 10px; padding: 2px 7px; border-radius: 9px; white-space: nowrap; }
+    .crew-task-due { font-size: 11px; color: #5f6368; white-space: nowrap; }
+    .crew-task-due.overdue { color: #c5221f; font-weight: 600; }
+    .crew-emp-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 14px 5px 14px;
+      background: #f8f9fa;
+      border-bottom: 1px solid #e8eaed;
+      font-size: 12px;
+      font-weight: 600;
+      color: #3c4043;
+    }
+    .crew-emp-header:first-child { border-top: 1px solid #e8eaed; }
+    .crew-unassigned-card .crew-card-header { background: linear-gradient(135deg, #9aa0a6 0%, #5f6368 100%); }
   </style>
 </head>
 <body>
   <div class="header">
-    <h1><i class="bi bi-calendar-check"></i> To Do Schedule <span class="unsaved-indicator" id="unsavedIndicator">● Unsaved changes</span></h1>
+    <h1><i class="bi bi-calendar-check"></i> To Do Schedule</h1>
     <div>
-      <button class="btn btn-success btn-sm me-2" onclick="saveAllChanges()">
-        <i class="bi bi-check-lg"></i> Save
-      </button>
       <button class="btn btn-outline-secondary btn-sm me-2" onclick="refreshData()">
         <i class="bi bi-arrow-clockwise"></i> Refresh
       </button>
@@ -179,9 +274,6 @@
             </select>
           </div>
           <div class="col-auto">
-            <input type="date" id="filterDate" class="form-control form-control-sm" onchange="applyFilters()">
-          </div>
-          <div class="col-auto">
             <button class="btn btn-outline-secondary btn-sm" onclick="clearFilters()">Clear</button>
           </div>
           <div class="col-auto ms-auto">
@@ -192,7 +284,9 @@
         </div>
       </div>
 
-      <div id="taskContainer">
+      <div id="taskContainer" style="display:none;"></div>
+
+      <div id="crewViewContainer">
         <div class="loading">
           <div class="spinner-border text-primary" role="status">
             <span class="visually-hidden">Loading...</span>
@@ -283,6 +377,11 @@
           <div class="col-auto">
             <select id="certFilterLocation" class="form-select form-select-sm" onchange="applyCertFilters()">
               <option value="">All Locations</option>
+            </select>
+          </div>
+          <div class="col-auto">
+            <select id="certFilterEmployee" class="form-select form-select-sm" onchange="applyCertFilters()">
+              <option value="">All Employees</option>
             </select>
           </div>
           <div class="col-auto">
@@ -753,6 +852,8 @@
     var notifiedTasks = {}; // Track notified status by task key
     var scheduledTasks = {}; // Track scheduled status by task key (Stage 2)
     var classTypeTasks = {}; // Track class type by task key (Online, InPersonMPC, InPersonMSLCAT)
+    var crewViewActive = true;
+    var jobContext = null; // Cached job context for crew card view
     var officeTasks = {}; // Track office status by task key
     var currentSmsTask = null; // Currently selected task for SMS
 
@@ -836,7 +937,28 @@
 
       // If taskType is just 'Manual Task', use notes as the display label
       if ((taskType === 'Manual Task' || taskType === 'manual task') && task.notes) {
-        return '📋 ' + task.notes;
+        var notesText = task.notes.trim();
+        // Check if notes reveal this is actually a cert renewal task (stale/corrupted taskType)
+        // Notes format: "Renew [CertType] | Employee: X | Current Expiration: MM/DD/YYYY"
+        var certRenewMatch = notesText.match(/^Renew\s+([^|]+?)\s*\|/i);
+        if (certRenewMatch) {
+          var certTypeFromNotes = certRenewMatch[1].trim();
+          // Extract expiration date too
+          var expFromNotes = notesText.match(/expir(?:es?|ation)[:\s]+(\d{1,2}\/\d{1,2}\/\d{4})/i);
+          var label = '📜 Renew ' + certTypeFromNotes;
+          if (expFromNotes) label += ' (exp: ' + expFromNotes[1] + ')';
+          return label;
+        }
+        // If notes looks like a location name with no action verb, prefix with "Visit:"
+        var actionVerbs = ['schedule','call','order','send','check','fix','update','review','complete',
+                           'deliver','pick','meet','contact','prepare','submit','train','inspect',
+                           'test','email','follow','remind','process','verify','confirm','create'];
+        var firstWord = notesText.split(/[\s,]/)[0].toLowerCase().replace(/[^a-z]/g,'');
+        var hasActionVerb = actionVerbs.some(function(v) { return firstWord === v; });
+        if (!hasActionVerb && notesText.length < 45) {
+          return '📋 Visit: ' + notesText;
+        }
+        return '📋 ' + notesText;
       }
 
       // Determine if it's a Glove or Sleeve based on itemType
@@ -877,24 +999,32 @@
         return taskType;
       } else if (taskType === 'Cert Expiring' || taskType.indexOf('Renew') !== -1) {
         // Show cert type and expiration date
-        var certLabel = 'Renew';
-        if (itemType) {
-          certLabel += ' ' + itemType;
+        var certLabel;
+        if (taskType.indexOf('Renew') !== -1) {
+          // taskType is already "Renew [CertType]" - use it directly (Manual Tasks source)
+          certLabel = '📜 ' + taskType;
+        } else if (itemType && itemType !== 'Manual') {
+          // Task Metadata source: cert type is in itemType
+          certLabel = '📜 Renew ' + itemType;
         } else {
-          certLabel = taskType;
+          certLabel = '📜 Renew Cert';
         }
 
-        // Add expiration date from notes or dueDate if available
+        // Add expiration date from notes, scheduledDate, or dueDate
         var expDate = '';
         if (task.notes) {
-          // Extract expiration date from notes (format: "... expires: MM/DD/YYYY" or "Due: MM/DD/YYYY")
-          var expiresMatch = task.notes.match(/expires?[:\s]+(\d{1,2}\/\d{1,2}\/\d{4})/i);
+          // Match "Expiration: MM/DD/YYYY", "expires: MM/DD/YYYY", "Due: MM/DD/YYYY"
+          var expiresMatch = task.notes.match(/expir(?:es?|ation)[:\s]+(\d{1,2}\/\d{1,2}\/\d{4})/i);
           var dueMatch = task.notes.match(/due[:\s]+(\d{1,2}\/\d{1,2}\/\d{4})/i);
           if (expiresMatch) {
             expDate = expiresMatch[1];
           } else if (dueMatch) {
             expDate = dueMatch[1];
           }
+        }
+        // Fallback to scheduledDate (cert tasks write expiration date as scheduled date)
+        if (!expDate && task.scheduledDate && /\d{1,2}\/\d{1,2}\/\d{4}/.test(task.scheduledDate)) {
+          expDate = task.scheduledDate;
         }
         // Also check dueDate field directly
         if (!expDate && task.dueDate) {
@@ -1002,6 +1132,16 @@
         return foreman;
       }
       return null;
+    }
+
+    // Parse "Location Name (Foreman)" → {baseLocation, foreman}
+    function parseLocation(locString) {
+      var loc = locString || 'No Location';
+      var match = loc.match(/^([^(]+)\s*\(([^)]+)\)$/);
+      if (match) {
+        return { baseLocation: match[1].trim(), foreman: match[2].trim() };
+      }
+      return { baseLocation: loc.trim(), foreman: '' };
     }
 
     // Helper: Get the group name (foreman/supervisor) for a task
@@ -1169,12 +1309,264 @@
     }
 
     function closeDialog() {
-      if (hasUnsavedChanges) {
-        alert('You have unsaved changes. Please click Save before closing, or click Refresh to discard changes.');
-        return; // Don't allow closing
-      }
       google.script.host.close();
     }
+
+    // ── CREW CARD VIEW ─────────────────────────────────────────────────────
+
+    // toggleCrewView kept as no-op — crew view is now always active
+    function toggleCrewView() {}
+
+    function loadJobContextAndRender() {
+      var crewContainer = document.getElementById('crewViewContainer');
+      if (jobContext) {
+        renderCrewCards(allTasks);
+        return;
+      }
+      crewContainer.innerHTML = '<div class="loading"><div class="spinner-border text-primary" role="status"></div><p class="mt-3">Loading crew data...</p></div>';
+      google.script.run
+        .withSuccessHandler(function(ctx) {
+          jobContext = ctx;
+          renderCrewCards(allTasks);
+        })
+        .withFailureHandler(function(err) {
+          crewContainer.innerHTML = '<div class="alert alert-danger">Failed to load crew context: ' + err + '</div>';
+        })
+        .getJobContext();
+    }
+
+    function getJobNumberForTask(task) {
+      if (!jobContext) return null;
+      // Training / Missing Safety Report tasks have a crew field
+      if (task.crew) return task.crew.replace(/\.\d+$/, '');
+      // Employee-based tasks
+      var emp = (task.employee || '').toLowerCase();
+      if (emp && jobContext.byEmployee[emp]) return jobContext.byEmployee[emp];
+      // Foreman-based fallback
+      var fore = (task.foreman || '').toLowerCase();
+      if (fore && jobContext.byEmployee[fore]) return jobContext.byEmployee[fore];
+      return null;
+    }
+
+    function getTaskIcon(task) {
+      var src = task.source || task.sheetName || '';
+      if (src.indexOf('Glove') !== -1) return '🧤';
+      if (src.indexOf('Sleeve') !== -1) return '💪';
+      if (src.indexOf('Blanket') !== -1) return '🟦';
+      if (src === 'Training Tracking') return '🎓';
+      if (src === 'Expiring Certs' || task.taskType === 'Cert Expiring') return '📜';
+      if (src === 'Safety Equipment Needs') return '🔧';
+      if (src === 'Safety Compliance' || task.taskType === 'Missing Safety Report') return '📋';
+      if (src === 'Reclaims') return '↩️';
+      return '✅';
+    }
+
+    function getTaskLabel(task) {
+      var label = getTaskIcon(task) + ' ';
+      var src = task.source || task.sheetName || '';
+
+      if (task.taskType === 'Missing Safety Report') {
+        return label + 'Missing Safety Report';
+      }
+      if (task.taskType === 'Training' || src === 'Training Tracking') {
+        return label + 'Training: ' + (task.itemType || task.topic || 'Unknown Topic');
+      }
+      if (task.taskType === 'Cert Expiring' || src === 'Expiring Certs') {
+        var cert = task.itemType || task.certType || 'Cert';
+        return label + 'Cert Renewal: ' + cert;
+      }
+      if (src === 'Safety Equipment Needs') {
+        var equip = task.itemType || 'Equipment';
+        var veh = task.vehicleNumber ? ' (#' + task.vehicleNumber + ')' : '';
+        return label + equip + veh;
+      }
+      if (src.indexOf('Swaps') !== -1 || src.indexOf('Swap') !== -1) {
+        var itype = task.itemType || task.taskType || 'Swap';
+        var size  = task.size ? ', Size ' + task.size : '';
+        var curr  = task.currentItem ? ' (Item ' + task.currentItem + ')' : '';
+        return label + itype + size + curr;
+      }
+      if (src === 'Reclaims') {
+        return label + 'Reclaim: ' + (task.itemType || task.taskType || '');
+      }
+      return label + (task.taskType || task.itemType || task.topic || 'Task');
+    }
+
+    function getDueText(task) {
+      var d = task.scheduledDate || task.dueDate || task.changeOutDate || '';
+      if (!d) return '';
+      var dt;
+      if (typeof d === 'string') dt = new Date(d);
+      else dt = new Date(d);
+      if (isNaN(dt)) return '';
+      var today = new Date(); today.setHours(0,0,0,0);
+      dt.setHours(0,0,0,0);
+      var diffDays = Math.round((dt - today) / 86400000);
+      var fmt = (dt.getMonth()+1) + '/' + dt.getDate();
+      if (diffDays < 0) return { text: fmt + ' (OVERDUE)', overdue: true };
+      if (diffDays === 0) return { text: 'Today', overdue: false };
+      if (diffDays <= 7) return { text: fmt + ' (' + diffDays + 'd)', overdue: false };
+      return { text: fmt, overdue: false };
+    }
+
+    function buildCrewTaskRowHtml(task) {
+      var isComplete = task.status === 'Complete' || task.status === 'Completed';
+      var label = getTaskLabel(task);
+      var due   = getDueText(task);
+
+      // Status + notification badges
+      var badgesHtml = '';
+      var statusClass = getStatusClass(task.status);
+      badgesHtml += '<span class="status-badge ' + statusClass + '" style="font-size:10px;">' + (task.status || 'Unassigned') + '</span>';
+      if (isTaskNotified(task)) badgesHtml += ' <span class="notified-badge" style="font-size:10px;"><i class="bi bi-bell-fill"></i> Notified</span>';
+      if (isTaskScheduled(task)) badgesHtml += ' <span class="scheduled-badge" style="font-size:10px;"><i class="bi bi-calendar-check-fill"></i> Scheduled</span>';
+
+      var dueHtml = '';
+      if (due) {
+        dueHtml = '<span class="crew-task-due' + (due.overdue ? ' overdue' : '') + '" style="font-size:11px;white-space:nowrap;margin-right:6px;">' + due.text + '</span>';
+      }
+
+      var labelClass = 'crew-task-label' + (isComplete ? ' complete' : '');
+      var actionsHtml = buildTaskCardActions(task);
+
+      return '<div class="crew-task-row employee-indent" style="flex-wrap:wrap;gap:6px;">' +
+             '<span class="' + labelClass + '" style="flex:1;min-width:120px;">' + label + '</span>' +
+             '<span style="display:flex;align-items:center;gap:4px;flex-shrink:0;">' + badgesHtml + '</span>' +
+             dueHtml +
+             '<span class="task-card-actions" style="display:flex;gap:4px;flex-shrink:0;">' + actionsHtml + '</span>' +
+             '</div>';
+    }
+
+    function renderCrewCards(tasks) {
+      var crewContainer = document.getElementById('crewViewContainer');
+      if (!jobContext) { loadJobContextAndRender(); return; }
+
+      // Assign _originalIndex to each task (needed for markComplete)
+      var activeTasks = tasks.filter(function(t) {
+        return t.status !== 'Complete' && t.status !== 'Completed';
+      });
+
+      // Group tasks by job number
+      var byJob = {};      // jobNumber → { crewTasks:[], byEmployee:{name:[]} }
+      var unassigned = []; // tasks with no job
+
+      tasks.forEach(function(task, idx) {
+        task._originalIndex = idx;
+        var jobNum = getJobNumberForTask(task);
+        if (!jobNum) { unassigned.push(task); return; }
+
+        if (!byJob[jobNum]) byJob[jobNum] = { crewTasks: [], byEmployee: {} };
+        var src = task.source || task.sheetName || '';
+        var isCrew = (src === 'Training Tracking' || src === 'Safety Compliance' ||
+                      task.taskType === 'Missing Safety Report' || src === 'Safety Equipment Needs');
+
+        if (isCrew) {
+          byJob[jobNum].crewTasks.push(task);
+        } else {
+          var empKey = (task.employee || task.foreman || 'Unknown').trim();
+          if (!byJob[jobNum].byEmployee[empKey]) byJob[jobNum].byEmployee[empKey] = [];
+          byJob[jobNum].byEmployee[empKey].push(task);
+        }
+      });
+
+      // Sort job numbers: active jobs first (from jobContext.jobs), then unrecognized
+      var sortedJobs = Object.keys(byJob).sort(function(a, b) {
+        var aKnown = jobContext.jobs[a] ? 0 : 1;
+        var bKnown = jobContext.jobs[b] ? 0 : 1;
+        if (aKnown !== bKnown) return aKnown - bKnown;
+        return a < b ? -1 : a > b ? 1 : 0;
+      });
+
+      var html = '';
+
+      // Render each crew card
+      sortedJobs.forEach(function(jobNum) {
+        var meta = jobContext.jobs[jobNum] || { jobNumber: jobNum, location: '', jobName: '', foreman: '', size: 0 };
+        var group = byJob[jobNum];
+
+        var pendingCount = 0;
+        group.crewTasks.forEach(function(t) { if (t.status !== 'Complete' && t.status !== 'Completed') pendingCount++; });
+        Object.keys(group.byEmployee).forEach(function(emp) {
+          group.byEmployee[emp].forEach(function(t) { if (t.status !== 'Complete' && t.status !== 'Completed') pendingCount++; });
+        });
+
+        var countBadge = pendingCount > 0 ? '<span class="crew-card-size">' + pendingCount + ' task' + (pendingCount !== 1 ? 's' : '') + '</span>' : '';
+        var locText  = meta.location ? '📍 ' + meta.location : '';
+        var nameText = meta.jobName  ? '<span class="crew-card-name">' + meta.jobName + '</span>' : '';
+        var foreText = meta.foreman  ? '<span class="crew-card-foreman">👷 ' + meta.foreman + '</span>' : '';
+
+        html += '<div class="crew-card">';
+        html += '<div class="crew-card-header">';
+        html += '<span class="crew-card-job">' + jobNum + '</span>';
+        if (locText)  html += '<span class="crew-card-loc">' + locText + '</span>';
+        if (nameText) html += nameText;
+        if (foreText) html += foreText;
+        html += countBadge;
+        html += '</div>';
+        html += '<div class="crew-card-body">';
+
+        // Crew-level tasks (Training, Safety Equipment, Missing Safety Report)
+        var trainTasks = group.crewTasks.filter(function(t) { return (t.source || t.sheetName || '') === 'Training Tracking'; });
+        var safetyTasks = group.crewTasks.filter(function(t) {
+          return (t.source || t.sheetName || '') === 'Safety Equipment Needs' || t.taskType === 'Missing Safety Report' || (t.source || '') === 'Safety Compliance';
+        });
+
+        if (trainTasks.length > 0) {
+          html += '<div class="crew-section-header training">🎓 Training</div>';
+          trainTasks.forEach(function(t) { html += buildCrewTaskRowHtml(t); });
+        }
+        if (safetyTasks.length > 0) {
+          html += '<div class="crew-section-header safety">🛡️ Safety</div>';
+          safetyTasks.forEach(function(t) { html += buildCrewTaskRowHtml(t); });
+        }
+
+        // Employee tasks
+        var empNames = Object.keys(group.byEmployee).sort();
+        if (empNames.length > 0) {
+          html += '<div class="crew-section-header employee">👤 Employees</div>';
+          empNames.forEach(function(empName) {
+            var empTasks = group.byEmployee[empName];
+            var empPending = empTasks.filter(function(t) { return t.status !== 'Complete' && t.status !== 'Completed'; }).length;
+            html += '<div class="crew-emp-header"><span>' + empName + '</span>';
+            if (empPending > 0) html += '<span class="badge bg-secondary" style="font-size:10px">' + empPending + '</span>';
+            html += '</div>';
+            empTasks.forEach(function(t) { html += buildCrewTaskRowHtml(t); });
+          });
+        }
+
+        html += '</div></div>'; // end body + card
+      });
+
+      // Unassigned tasks
+      if (unassigned.length > 0) {
+        var unassignedPending = unassigned.filter(function(t) { return t.status !== 'Complete' && t.status !== 'Completed'; }).length;
+        html += '<div class="crew-card crew-unassigned-card">';
+        html += '<div class="crew-card-header"><span class="crew-card-job">Unassigned</span>';
+        html += '<span class="crew-card-loc">No crew match</span>';
+        html += '<span class="crew-card-size">' + unassignedPending + ' task' + (unassignedPending !== 1 ? 's' : '') + '</span>';
+        html += '</div><div class="crew-card-body">';
+        unassigned.forEach(function(t) { html += buildCrewTaskRowHtml(t); });
+        html += '</div></div>';
+      }
+
+      if (!html) {
+        html = '<div class="empty-state"><i class="bi bi-check2-all" style="font-size:40px;color:#34a853"></i><p class="mt-3">All tasks complete!</p></div>';
+      }
+
+      crewContainer.innerHTML = html;
+    }
+
+    function completeFromCrewView(event, taskIndex) {
+      var cb = event.target;
+      cb.disabled = true;
+      markComplete(taskIndex);
+      // markComplete re-renders the flat list; also refresh crew cards
+      setTimeout(function() {
+        if (crewViewActive) renderCrewCards(allTasks);
+      }, 1200);
+    }
+
+    // ── END CREW CARD VIEW ──────────────────────────────────────────────────
 
     function saveAllChanges() {
       var changes = Object.keys(pendingDateChanges).map(function(key) {
@@ -1508,19 +1900,29 @@
             })
             .getMissingSafetyReportTasks();
 
-          console.log('processTaskData: About to call renderTasks with ' + allTasks.length + ' tasks');
+          console.log('processTaskData: About to render ' + allTasks.length + ' tasks');
           try {
-            renderTasks(allTasks);
-            console.log('processTaskData: renderTasks completed successfully');
+            // Load job context in parallel with task rendering
+            if (!jobContext) {
+              google.script.run
+                .withSuccessHandler(function(ctx) {
+                  jobContext = ctx;
+                  renderTasks(allTasks);
+                })
+                .withFailureHandler(function(err) {
+                  console.error('Failed to load job context:', err);
+                  renderTasks(allTasks); // Still render, Unassigned card for all
+                })
+                .getJobContext();
+            } else {
+              renderTasks(allTasks);
+            }
           } catch (e) {
-            console.error('processTaskData: renderTasks error:', e);
-            console.error('processTaskData: Error stack:', e.stack);
-            document.getElementById('taskContainer').innerHTML =
-              '<div class="alert alert-danger">Error rendering tasks: ' + e.message + '<br><pre>' + e.stack + '</pre></div>';
+            console.error('processTaskData: render error:', e);
+            document.getElementById('crewViewContainer').innerHTML =
+              '<div class="alert alert-danger">Error rendering tasks: ' + e.message + '</div>';
           }
-          // Calendar tab removed - use Trip Planner/Scheduler instead
           // Note: renderPersonalChecklist is called from getMissingSafetyReportTasks callback above
-          // Do NOT call it here synchronously - it would render before safety tasks are loaded
     }
 
     // ================== CALENDAR FUNCTIONS REMOVED ==================
@@ -1534,406 +1936,170 @@
 
     // ================== TASK LIST FUNCTIONS ==================
     function renderTasks(tasks) {
-      var container = document.getElementById('taskContainer');
+      // Crew view is the primary view — delegate to renderCrewCards.
+      // The taskContainer is kept hidden; this function handles filtering/stale logic
+      // so all existing callsites continue to work without change.
+
+      var crewContainer = document.getElementById('crewViewContainer');
 
       if (!tasks || tasks.length === 0) {
-        container.innerHTML = '<div class="empty-state"><i class="bi bi-calendar-x" style="font-size: 48px;"></i><p class="mt-3">No tasks found</p><p class="text-muted">Tasks will appear from Training, Crew Visits, Expiring Certs, and Swaps</p></div>';
+        crewContainer.innerHTML = '<div class="empty-state"><i class="bi bi-calendar-x" style="font-size: 48px;"></i><p class="mt-3">No tasks found</p><p class="text-muted">Tasks will appear from Training, Crew Visits, Expiring Certs, and Swaps</p></div>';
         return;
       }
 
-      // Phase 5: Unified Task List
-      // - Include Manual Tasks (grouped by location/foreman like other tasks)
-      // - Include Cert tasks that have inTaskList=true (added from Expiring Certs tab)
-      // - Exclude cert tasks that have NOT been added to checklist (they stay in Expiring Certs tab)
-      var filterStats = { total: 0, manual: 0, certInList: 0, certNotInList: 0, other: 0, completed: 0 };
+      // Apply the same include/exclude rules as before so filters still work
       var filteredTasks = tasks.filter(function(task, index) {
-        filterStats.total++;
-        task._originalIndex = index; // Preserve original index for actions
+        task._originalIndex = index;
 
-        // Get task type/source info
         var taskType = (task.taskType || '').toLowerCase();
         var source = (task.source || '').toLowerCase();
         var itemType = (task.itemType || '').toLowerCase();
 
-        // INCLUDE: Manual Tasks - they now appear in Task List
         if (source === 'manual tasks' || itemType === 'manual' ||
             taskType === 'manual' || taskType === 'manual task') {
-          // Skip completed manual tasks
-          if (task.status === 'Complete' || task.completed) { filterStats.completed++; return false; }
-          filterStats.manual++;
+          if (task.status === 'Complete' || task.completed) return false;
           return true;
         }
 
-        // INCLUDE: Cert tasks that are in Task List (inTaskList=true)
-        // These were added from the Expiring Certs tab
         if (taskType === 'cert expiring' || source === 'expiring certs') {
-          // Only show if user added it to their Task List
           if (task.inTaskList === true) {
-            // Skip completed cert tasks
-            if (task.status === 'Complete' || task.completed) { filterStats.completed++; return false; }
-            filterStats.certInList++;
+            if (task.status === 'Complete' || task.completed) return false;
             return true;
           }
-          // Cert tasks NOT in checklist stay in Expiring Certs tab only
-          filterStats.certNotInList++;
           return false;
         }
 
-        // Exclude tasks with foreman "Manual" extracted from location string
         var foremanFromLoc = extractForemanFromLocation(task.location);
         if (foremanFromLoc && foremanFromLoc.toLowerCase() === 'manual') return false;
 
-        // Include other task types (Training, Swaps, etc.)
-        // Skip if completed
-        if (task.status === 'Complete' || task.completed) { filterStats.completed++; return false; }
-        filterStats.other++;
+        if (task.status === 'Complete' || task.completed) return false;
         return true;
       });
 
       if (filteredTasks.length === 0) {
-        container.innerHTML = '<div class="empty-state"><i class="bi bi-calendar-check" style="font-size: 48px;"></i><p class="mt-3">All tasks handled</p><p class="text-muted">Some tasks may have been moved to your personal checklist</p></div>';
+        crewContainer.innerHTML = '<div class="empty-state"><i class="bi bi-calendar-check" style="font-size: 48px;"></i><p class="mt-3">All tasks handled</p></div>';
         return;
       }
 
-      // Extract base location from location string (remove foreman parentheses)
-      function parseLocation(locString) {
-        var loc = locString || 'No Location';
-        var match = loc.match(/^([^(]+)\s*\(([^)]+)\)$/);
-        if (match) {
-          return { baseLocation: match[1].trim(), foreman: match[2].trim() };
-        }
-        return { baseLocation: loc.trim(), foreman: '' };
+      // Delegate to crew card renderer
+      if (jobContext) {
+        renderCrewCards(filteredTasks);
+      } else {
+        loadJobContextAndRender();
       }
-
-      // Group tasks: Location > Foreman > Category
-      var tasksByBaseLocation = {};
-      filteredTasks.forEach(function(task) {
-        var parsed = parseLocation(task.location);
-        var baseLoc = parsed.baseLocation;
-        var groupName = getTaskGroupName(task);
-        var category = getTaskCategory(task);
-
-        if (!tasksByBaseLocation[baseLoc]) {
-          tasksByBaseLocation[baseLoc] = {};
-        }
-        if (!tasksByBaseLocation[baseLoc][groupName]) {
-          tasksByBaseLocation[baseLoc][groupName] = {};
-        }
-        if (!tasksByBaseLocation[baseLoc][groupName][category]) {
-          tasksByBaseLocation[baseLoc][groupName][category] = [];
-        }
-        tasksByBaseLocation[baseLoc][groupName][category].push(task);
-      });
-
-      // Sort base locations alphabetically
-      var baseLocations = Object.keys(tasksByBaseLocation).sort();
-
-      var html = '';
-
-      baseLocations.forEach(function(baseLocation, locIndex) {
-        var foremanGroups = tasksByBaseLocation[baseLocation];
-        var foremen = Object.keys(foremanGroups).sort(function(a, b) {
-          if (a === 'Unassigned') return 1;
-          if (b === 'Unassigned') return -1;
-          return a.localeCompare(b);
-        });
-
-        // Count totals for this location
-        var totalTasks = 0;
-        var highCount = 0, medCount = 0, lowCount = 0;
-        foremen.forEach(function(f) {
-          var categories = foremanGroups[f];
-          Object.keys(categories).forEach(function(cat) {
-            categories[cat].forEach(function(t) {
-              totalTasks++;
-              if (t.priority === 'High') highCount++;
-              else if (t.priority === 'Medium') medCount++;
-              else lowCount++;
-            });
-          });
-        });
-
-        html += '<div class="card mb-2">';
-        html += '<div class="card-header location-header" style="cursor: pointer; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">';
-        html += '<div class="d-flex justify-content-between align-items-center">';
-        var isOpen = openLocationGroups[locIndex] === true;
-        html += '<div onclick="toggleLocationGroup(' + locIndex + ')" style="flex: 1;"><i class="bi ' + (isOpen ? 'bi-chevron-down' : 'bi-chevron-right') + ' me-2" id="loc-chevron-' + locIndex + '"></i>';
-        html += '<i class="bi bi-geo-alt me-1"></i><strong>' + baseLocation + '</strong>';
-        html += '<span class="badge bg-white text-dark ms-2" style="opacity: 0.9;">' + totalTasks + ' tasks</span></div>';
-        html += '<div class="d-flex align-items-center">';
-        if (highCount > 0) html += '<span class="badge me-1" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3);">' + highCount + ' High</span>';
-        if (medCount > 0) html += '<span class="badge me-1" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3);">' + medCount + ' Med</span>';
-        if (lowCount > 0) html += '<span class="badge" style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3);">' + lowCount + ' Low</span>';
-        html += '</div></div></div>';
-
-        // Location body - respect saved open/closed state
-        html += '<div class="card-body p-0 location-body" id="loc-body-' + locIndex + '" style="display: ' + (isOpen ? 'block' : 'none') + ';">';
-
-        // Bulk Edit Section (hidden by default)
-        html += '<div class="location-edit-section" id="loc-edit-' + locIndex + '" style="display: none;">';
-        html += '<div class="d-flex justify-content-between align-items-center mb-2">';
-        html += '<strong><i class="bi bi-pencil-square text-primary"></i> Bulk Edit: ' + baseLocation + '</strong>';
-        html += '<button class="btn btn-sm btn-outline-secondary" onclick="toggleLocationEdit(' + locIndex + ')"><i class="bi bi-x"></i></button>';
-        html += '</div>';
-        html += '<div class="location-edit-row">';
-        html += '<div><label class="form-label">Set Date for All</label><input type="date" class="form-control form-control-sm" id="bulk-date-' + locIndex + '" style="width: 140px;"></div>';
-        html += '<div><label class="form-label">Start Time</label><input type="time" class="form-control form-control-sm" id="bulk-start-' + locIndex + '" style="width: 100px;"></div>';
-        html += '<div><label class="form-label">End Time</label><input type="time" class="form-control form-control-sm" id="bulk-end-' + locIndex + '" style="width: 100px;"></div>';
-        html += '<div class="d-flex align-items-end"><button class="btn btn-primary btn-sm" onclick="applyBulkEdit(' + locIndex + ', \'' + escapeHtml(baseLocation) + '\')"><i class="bi bi-check-lg"></i> Apply to All</button></div>';
-        html += '</div>';
-        html += '<div class="text-muted small mt-2"><i class="bi bi-info-circle"></i> This will update the date and time for all ' + totalTasks + ' tasks at this location.</div>';
-        html += '</div>';
-
-        // Render each foreman group
-        foremen.forEach(function(foreman, foremanIndex) {
-          var categoryGroups = foremanGroups[foreman];
-
-          // Count total tasks for this foreman
-          var foremanTaskCount = 0;
-          Object.keys(categoryGroups).forEach(function(cat) {
-            foremanTaskCount += categoryGroups[cat].length;
-          });
-
-          // Show foreman sub-header
-          if (foremen.length > 1 || foreman !== 'Unassigned') {
-            html += '<div class="foreman-header" style="background: #e8eaed; padding: 10px 16px; border-bottom: 1px solid #dadce0;">';
-            html += '<i class="bi bi-person-badge me-2" style="color: #667eea;"></i>';
-            html += '<strong>' + foreman + '</strong>';
-            html += '<span class="badge bg-secondary ms-2">' + foremanTaskCount + ' task(s)</span>';
-            html += '</div>';
-          }
-
-          // Table headers
-          html += '<div class="task-row bg-light" style="font-weight: 600; font-size: 12px; padding: 8px 12px;">';
-          html += '<div class="row align-items-center">';
-          html += '<div class="col-md-3">Task / Source</div>';
-          html += '<div class="col-md-2">Scheduled Date</div>';
-          html += '<div class="col-md-2">Start / End Time</div>';
-          html += '<div class="col-md-2">Status</div>';
-          html += '<div class="col-md-3 text-end">Actions</div>';
-          html += '</div></div>';
-
-          // Render each category in order: Training, Rubber Changes, Expiring Certs, Other
-          categoryOrder.forEach(function(category) {
-            var categoryTasks = categoryGroups[category];
-            if (!categoryTasks || categoryTasks.length === 0) return;
-
-            // Sort tasks by employee name within category
-            categoryTasks.sort(function(a, b) {
-              var empA = (a.employee || '').toLowerCase();
-              var empB = (b.employee || '').toLowerCase();
-              return empA.localeCompare(empB);
-            });
-
-            // Category sub-header
-            var icon = categoryIcons[category] || 'bi-list';
-            var color = categoryColors[category] || '#5f6368';
-            html += '<div class="category-subheader" style="background: #f8f9fa; padding: 6px 16px; border-bottom: 1px solid #dadce0; font-size: 12px; margin-left: 20px;">';
-            html += '<i class="bi ' + icon + ' me-1" style="color: ' + color + ';"></i>';
-            html += '<strong>' + category + '</strong>';
-            html += '<span class="badge ms-2" style="background: ' + color + '; color: white;">' + categoryTasks.length + '</span>';
-            html += '</div>';
-
-            categoryTasks.forEach(function(task) {
-              html += renderTaskRow(task);
-            });
-          });
-        });
-
-        html += '</div></div>'; // location-body and card
-      });
-
-      container.innerHTML = html;
     }
 
-    // Helper function to render a single task row
-    function renderTaskRow(task) {
-      var priorityClass = 'priority-' + (task.priority || 'medium').toLowerCase();
-      var statusClass = getStatusClass(task.status);
-      var displayTaskType = formatTaskType(task);
+    // Helper: Is this task stale? (scheduled date > 30 days in the past)
+    function isStaleTask(task) {
+      if (!task.scheduledDate) return false;
+      var m = String(task.scheduledDate).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!m) return false;
+      var taskDate = new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
+      var cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 30);
+      return taskDate < cutoff;
+    }
 
-      // Check if task is registered (green highlight)
-      var isRegistered = task.isRegistered === true || task.status === 'Registered';
-      var rowStyle = '';
-      if (isRegistered) {
-        rowStyle = 'background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); border-left-color: #4caf50 !important;';
+    // Helper: Is employee value actually a person name (not a Date object string)?
+    function isValidEmployeeName(emp) {
+      if (!emp) return false;
+      var s = String(emp).trim();
+      if (!s) return false;
+      // Reject strings that look like serialized Date objects
+      if (/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/.test(s) && /\d{4}/.test(s)) return false;
+      if (/GMT[+-]\d{4}/.test(s)) return false;
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) return false;
+      return true;
+    }
+
+    // Helper: Build the safety report detail HTML (for Missing Safety Report tasks)
+    function buildSafetyReportDetail(task) {
+      var notes = task.notes || '';
+      var displayParts = [];
+
+      var weekOfMatch = notes.match(/week of\s+(\d{2}\/\d{2}\/\d{4})/i);
+      var weekOfDate = weekOfMatch ? weekOfMatch[1] : '';
+
+      var jhaMatch = notes.match(/Missing JHA:\s*([^;]+)/);
+      var jhaDates = jhaMatch ? jhaMatch[1].trim().split(',') : [];
+
+      if (!weekOfDate && jhaDates.length > 0) {
+        var firstDateStr = jhaDates[0].trim();
+        var dateParts = firstDateStr.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+        if (dateParts) {
+          var missingDate = new Date(parseInt(dateParts[3]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
+          var weekStart = new Date(missingDate);
+          weekStart.setDate(missingDate.getDate() - missingDate.getDay());
+          weekOfDate = String(weekStart.getMonth() + 1).padStart(2, '0') + '/' +
+                       String(weekStart.getDate()).padStart(2, '0') + '/' + weekStart.getFullYear();
+        }
       }
 
+      if (!weekOfDate && task.dueDate) {
+        var dueParts = task.dueDate.match(/(\d{4})-(\d{2})-(\d{2})/);
+        if (!dueParts) dueParts = task.dueDate.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+        if (dueParts) {
+          var yr, mo, dy;
+          if (dueParts[1].length === 4) { yr = dueParts[1]; mo = dueParts[2]; dy = dueParts[3]; }
+          else { mo = dueParts[1]; dy = dueParts[2]; yr = dueParts[3]; }
+          var dueDate = new Date(parseInt(yr), parseInt(mo) - 1, parseInt(dy));
+          var weekSunday = new Date(dueDate);
+          weekSunday.setDate(dueDate.getDate() - 6);
+          weekOfDate = String(weekSunday.getMonth() + 1).padStart(2, '0') + '/' +
+                       String(weekSunday.getDate()).padStart(2, '0') + '/' + weekSunday.getFullYear();
+        }
+      }
+
+      var out = '';
+      if (weekOfDate) {
+        out += '<div class="text-primary" style="font-weight: 600;"><i class="bi bi-calendar-week"></i> Week of ' + weekOfDate + '</div>';
+      }
+
+      if (jhaDates.length > 0) {
+        if (jhaDates.length === 5) displayParts.push('JHA: Full week');
+        else if (jhaDates.length <= 2) displayParts.push('JHA: ' + jhaDates.map(function(d){ return d.trim(); }).join(', '));
+        else displayParts.push('JHA: ' + jhaDates.length + ' days missing');
+      }
+      if (notes.indexOf('Missing Weekly Safety Meeting') !== -1) displayParts.push('Weekly Meeting');
+      if (displayParts.length > 0) {
+        var today = new Date(); today.setHours(0,0,0,0);
+        var dueD = task.dueDate ? new Date(task.dueDate) : null;
+        if (dueD) dueD.setHours(0,0,0,0);
+        var col = (dueD && dueD < today) ? '#d32f2f' : '#5f6368';
+        out += '<div style="color:' + col + ';">Missing: ' + displayParts.join(', ') + '</div>';
+      }
+      return out;
+    }
+
+    // Helper: Build action buttons HTML for a task card
+    function buildTaskCardActions(task) {
       var html = '';
 
-      html += '<div class="task-row ' + priorityClass + '" style="' + rowStyle + '">';
-      html += '<div class="row align-items-center">';
-
-      // Task Type & Source
-      html += '<div class="col-md-3">';
-      html += '<div class="task-type" style="font-weight: 500;">' + displayTaskType + '</div>';
-      html += '<div class="task-source"><i class="bi bi-box-arrow-in-right"></i> ' + (task.source || 'Unknown') + '</div>';
-      if (task.employee) {
-        html += '<div class="text-muted small"><i class="bi bi-person"></i> ' + task.employee + '</div>';
-
-        // Show notes for Manual Tasks (when notes contain the task description)
-        var taskTypeLower = (task.taskType || '').toLowerCase();
-        var sourceLower = (task.source || '').toLowerCase();
-        if (task.notes && (taskTypeLower === 'manual task' || sourceLower === 'manual tasks')) {
-          html += '<div class="text-muted small" style="margin-left:20px;"><i class="bi bi-card-text"></i> ' + task.notes + '</div>';
-        }
-
-        // Show report dates for Safety Compliance tasks (Missing Safety Reports)
-        var taskType = (task.taskType || '').toLowerCase();
-        if (taskType === 'missing safety report' || taskType.indexOf('missing safety') !== -1) {
-          // Parse notes to extract missing dates
-          var notes = task.notes || '';
-          var displayParts = [];
-
-          // Extract Week of date from notes (this identifies which week the task is for)
-          var weekOfMatch = notes.match(/week of\s+(\d{2}\/\d{2}\/\d{4})/i);
-          var weekOfDate = weekOfMatch ? weekOfMatch[1] : '';
-
-          // Extract JHA dates first (we need this for fallback week calculation)
-          var jhaMatch = notes.match(/Missing JHA:\s*([^;]+)/);
-          var jhaDates = jhaMatch ? jhaMatch[1].trim().split(',') : [];
-
-          // If weekOfDate not found in notes, calculate it from JHA date or dueDate
-          if (!weekOfDate && jhaDates.length > 0) {
-            var firstDateStr = jhaDates[0].trim();
-            var dateParts = firstDateStr.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-            if (dateParts) {
-              var missingDate = new Date(parseInt(dateParts[3]), parseInt(dateParts[1]) - 1, parseInt(dateParts[2]));
-              var dayOfWeek = missingDate.getDay();
-              var weekStart = new Date(missingDate);
-              weekStart.setDate(missingDate.getDate() - dayOfWeek);
-              weekOfDate = String(weekStart.getMonth() + 1).padStart(2, '0') + '/' +
-                           String(weekStart.getDate()).padStart(2, '0') + '/' +
-                           weekStart.getFullYear();
-            }
-          }
-
-          // Last fallback: calculate from dueDate (Saturday = end of week)
-          if (!weekOfDate && task.dueDate) {
-            var dueParts = task.dueDate.match(/(\d{4})-(\d{2})-(\d{2})/);
-            if (!dueParts) dueParts = task.dueDate.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-            if (dueParts) {
-              var yr, mo, dy;
-              if (dueParts[1].length === 4) { yr = dueParts[1]; mo = dueParts[2]; dy = dueParts[3]; }
-              else { mo = dueParts[1]; dy = dueParts[2]; yr = dueParts[3]; }
-              var dueDate = new Date(parseInt(yr), parseInt(mo) - 1, parseInt(dy));
-              var weekSunday = new Date(dueDate);
-              weekSunday.setDate(dueDate.getDate() - 6); // Saturday - 6 = Sunday
-              weekOfDate = String(weekSunday.getMonth() + 1).padStart(2, '0') + '/' +
-                           String(weekSunday.getDate()).padStart(2, '0') + '/' +
-                           weekSunday.getFullYear();
-            }
-          }
-
-          // Show WEEK prominently first (now always calculated)
-          if (weekOfDate) {
-            html += '<div class="text-primary small" style="margin-left: 20px; font-weight: 600;"><i class="bi bi-calendar-week"></i> Week of ' + weekOfDate + '</div>';
-          }
-
-          // Build JHA display
-          if (jhaDates.length > 0) {
-            if (jhaDates.length === 5) {
-              displayParts.push('JHA: Full week');
-            } else if (jhaDates.length <= 2) {
-              // Show specific dates if 2 or fewer
-              displayParts.push('JHA: ' + jhaDates.map(function(d) { return d.trim(); }).join(', '));
-            } else {
-              // Show count
-              displayParts.push('JHA: ' + jhaDates.length + ' days missing');
-            }
-          }
-
-          // Show if Weekly Meeting is missing
-          if (notes.indexOf('Missing Weekly Safety Meeting') !== -1) {
-            displayParts.push('Weekly Meeting');
-          }
-
-          if (displayParts.length > 0) {
-            var today = new Date();
-            today.setHours(0, 0, 0, 0);
-            var dueDate = task.dueDate ? new Date(task.dueDate) : null;
-            if (dueDate) dueDate.setHours(0, 0, 0, 0);
-            var isOverdue = dueDate && dueDate < today;
-            var dueDateColor = isOverdue ? '#d32f2f' : '#5f6368';
-            html += '<div class="text-muted small" style="color: ' + dueDateColor + '; margin-left: 20px;">Missing: ' + displayParts.join(', ') + '</div>';
-          }
-        }
-      }
-      html += '</div>';
-
-      // Scheduled Date (editable)
-      html += '<div class="col-md-2">';
-      html += '<input type="date" class="date-input" value="' + (task.scheduledDate || '') + '" onchange="updateTaskDate(' + task._originalIndex + ', this.value, this)">';
-      html += '</div>';
-
-      // Time (editable start and end) - display in 12-hour format
-      html += '<div class="col-md-2">';
-      var startTime24 = convertTo24Hour(task.startTime);
-      var endTime24 = convertTo24Hour(task.endTime);
-      var startDisplay = task.startTime ? convertTo12Hour(task.startTime) : '';
-      var endDisplay = task.endTime ? convertTo12Hour(task.endTime) : '';
-      html += '<div class="d-flex gap-1 align-items-center">';
-      html += '<input type="time" class="time-input" value="' + startTime24 + '" onchange="updateTaskTime(' + task._originalIndex + ', \'start\', this.value, this)" title="' + (startDisplay || 'Set start time') + '">';
-      html += '<span class="text-muted">-</span>';
-      html += '<input type="time" class="time-input" value="' + endTime24 + '" onchange="updateTaskTime(' + task._originalIndex + ', \'end\', this.value, this)" title="' + (endDisplay || 'Set end time') + '">';
-      html += '</div>';
-      html += '</div>';
-
-      // Status
-      html += '<div class="col-md-2">';
-      html += '<span class="status-badge ' + statusClass + '">' + (task.status || 'Pending') + '</span>';
-      if ( isTaskNotified(task)) {
-        html += '<span class="notified-badge"><i class="bi bi-bell-fill"></i> Notified</span>';
-      }
-      if (isTaskScheduled(task)) {
-        html += '<span class="scheduled-badge"><i class="bi bi-calendar-check-fill"></i> Scheduled</span>';
-        // Show class type badge
-        html += getClassTypeBadgeHtml(getTaskClassType(task));
-      }
-      if (isTaskOffice(task)) {
-        html += '<span class="office-badge"><i class="bi bi-building"></i> Office</span>';
-      }
-      html += '</div>';
-
-      // Actions
-      html += '<div class="col-md-3 text-end">';
-
-      // Check if this is a cert task with a phone number
-      // Also look up phone from employeePhoneMap if not directly on the task
+      // Resolve phone number
       var taskPhone = task.phoneNumber;
-      if ((!taskPhone || String(taskPhone).length < 10) && task.employee) {
+      if ((!taskPhone || String(taskPhone).length < 10) && task.employee && isValidEmployeeName(task.employee)) {
         var empLower = task.employee.toLowerCase().trim();
         taskPhone = employeePhoneMap[empLower] || '';
       }
-      // Also try to find from allExpiringCerts if still no phone
       if ((!taskPhone || String(taskPhone).length < 10) && task.employee) {
         var matchingCert = allExpiringCerts.find(function(c) {
-          return c.employee && c.employee.toLowerCase() === task.employee.toLowerCase();
+          return c.employee && c.employee.toLowerCase() === (task.employee || '').toLowerCase();
         });
-        if (matchingCert && matchingCert.phoneNumber) {
-          taskPhone = matchingCert.phoneNumber;
-        }
+        if (matchingCert && matchingCert.phoneNumber) taskPhone = matchingCert.phoneNumber;
       }
       var isCertWithPhone = isCertTask(task) && taskPhone && String(taskPhone).length >= 10;
 
       if (isCertWithPhone) {
-        // Store the phone on the task for later use
         task.phoneNumber = taskPhone;
-        // SMS Notify button (Stage 1)
         var notifyBtnClass = isTaskNotified(task) ? 'btn-notified' : 'btn-sms';
         var notifyIcon = isTaskNotified(task) ? 'bi-chat-fill' : 'bi-chat-text';
         var notifyTitle = isTaskNotified(task) ? 'Resend notification' : 'Send notification text';
-        html += '<button class="btn ' + notifyBtnClass + ' btn-sm me-1" onclick="event.stopPropagation(); openNotifyModal(' + task._originalIndex + ')" title="' + notifyTitle + '"><i class="bi ' + notifyIcon + '"></i></button>';
+        html += '<button class="btn ' + notifyBtnClass + ' btn-sm" onclick="event.stopPropagation(); openNotifyModal(' + task._originalIndex + ')" title="' + notifyTitle + '"><i class="bi ' + notifyIcon + '"></i></button>';
 
-        // SMS Scheduled button (Stage 2) - only show if notified
         if (isTaskNotified(task)) {
           var isSafetyCompliance = (task.taskType || '').toLowerCase() === 'missing safety report';
-          var itemTypeLower = (task.itemType || task.certType || '').toLowerCase();
-          // Check for non-class certs that don't need class scheduling
-          var isNonClassCert = ['dl', 'driver license', 'driver\'s license', 'drivers license',
-                                'mec', 'medical examiner', 'forklift', 'cdl'].some(function(c) {
-            return itemTypeLower.indexOf(c) !== -1;
-          });
+          var itemTypeLower2 = (task.itemType || task.certType || '').toLowerCase();
+          var isNonClassCert = ['dl','driver license','driver\'s license','drivers license','mec','medical examiner','forklift','cdl'].some(function(c){ return itemTypeLower2.indexOf(c) !== -1; });
           var scheduledBtnClass = isTaskScheduled(task) ? 'btn-scheduled' : 'btn-sms';
           var scheduledIcon = isTaskScheduled(task) ? 'bi-clipboard-check-fill' : (isSafetyCompliance ? 'bi-clipboard-check' : (isNonClassCert ? 'bi-calendar-date' : 'bi-calendar-plus'));
           var scheduledTitle = isSafetyCompliance
@@ -1941,45 +2107,105 @@
             : isNonClassCert
               ? (isTaskScheduled(task) ? 'Update expiration date' : 'Enter new expiration date')
               : (isTaskScheduled(task) ? 'Resend class schedule' : 'Send class schedule text');
-          html += '<button class="btn ' + scheduledBtnClass + ' btn-sm me-1" onclick="event.stopPropagation(); openScheduledModal(' + task._originalIndex + ')" title="' + scheduledTitle + '"><i class="bi ' + scheduledIcon + '"></i></button>';
+          html += '<button class="btn ' + scheduledBtnClass + ' btn-sm" onclick="event.stopPropagation(); openScheduledModal(' + task._originalIndex + ')" title="' + scheduledTitle + '"><i class="bi ' + scheduledIcon + '"></i></button>';
         }
-
-        // Remove from Task List button for cert tasks (added from Expiring Certs tab)
-        html += '<button class="btn btn-outline-warning btn-sm me-1" onclick="event.stopPropagation(); removeFromTaskList(' + task._originalIndex + ')" title="Remove from Task List"><i class="bi bi-x-circle"></i></button>';
+        html += '<button class="btn btn-outline-warning btn-sm" onclick="event.stopPropagation(); removeFromTaskList(' + task._originalIndex + ')" title="Remove from Task List"><i class="bi bi-x-circle"></i></button>';
       } else {
-
-        // Notified toggle button (for non-cert tasks)
         var notifiedBtnClass = isTaskNotified(task) ? 'btn-notified' : 'btn-outline-secondary';
         var notifiedIcon = isTaskNotified(task) ? 'bi-bell-fill' : 'bi-bell';
         var notifiedTitle = isTaskNotified(task) ? 'Click to clear notified status' : 'Mark as notified';
-        html += '<button class="btn ' + notifiedBtnClass + ' btn-sm me-1" onclick="event.stopPropagation(); toggleNotified(' + task._originalIndex + ')" title="' + notifiedTitle + '"><i class="bi ' + notifiedIcon + '"></i></button>';
+        html += '<button class="btn ' + notifiedBtnClass + ' btn-sm" onclick="event.stopPropagation(); toggleNotified(' + task._originalIndex + ')" title="' + notifiedTitle + '"><i class="bi ' + notifiedIcon + '"></i></button>';
       }
 
-      // Mark Complete button - skip for Safety Compliance (uses Resolutions dialog instead)
       var isSafetyComplianceTask = (task.taskType || '').toLowerCase() === 'missing safety report' ||
                                     (task.source || '').toLowerCase() === 'safety compliance' ||
                                     (task.sheetName || '').toLowerCase() === 'safety compliance' ||
-                                    ((task.itemType || '').toLowerCase().indexOf('jha') !== -1 && (task.notes || '').toLowerCase().indexOf('missing') !== -1) ||
                                     ((task.notes || '').toLowerCase().indexOf('missing jha') !== -1) ||
                                     ((task.notes || '').toLowerCase().indexOf('missing weekly safety') !== -1);
       if (!isSafetyComplianceTask) {
-        html += '<button class="btn btn-outline-success btn-sm me-1" onclick="event.stopPropagation(); markComplete(' + task._originalIndex + ')" title="Mark Complete"><i class="bi bi-check-lg"></i></button>';
+        html += '<button class="btn btn-outline-success btn-sm" onclick="event.stopPropagation(); markComplete(' + task._originalIndex + ')" title="Mark Complete"><i class="bi bi-check-lg"></i></button>';
       }
 
-      // Delete button - available for all tasks now
-      var taskKeyAttr = task.taskKey ? ' data-taskkey="' + task.taskKey + '"' : '';
-      html += '<button class="btn btn-outline-danger btn-sm" onclick="event.stopPropagation(); deleteTask(' + task._originalIndex + ', \'' + (task.taskKey || '') + '\')" title="Delete"' + taskKeyAttr + '><i class="bi bi-trash"></i></button>';
+      // Delete: for Manual Tasks use dedicated deleteManualTask; for others use deleteTask
+      var isManualSource = (task.source || '').toLowerCase() === 'manual tasks';
+      if (isManualSource && task.rowIndex) {
+        html += '<button class="btn btn-outline-danger btn-sm" onclick="event.stopPropagation(); deleteManualTaskRow(' + task._originalIndex + ', ' + task.rowIndex + ')" title="Delete this task"><i class="bi bi-trash"></i></button>';
+      } else {
+        var taskKeyAttr = task.taskKey ? ' data-taskkey="' + task.taskKey + '"' : '';
+        html += '<button class="btn btn-outline-danger btn-sm" onclick="event.stopPropagation(); deleteTask(' + task._originalIndex + ', \'' + (task.taskKey || '') + '\')" title="Delete"' + taskKeyAttr + '><i class="bi bi-trash"></i></button>';
+      }
+
+      return html;
+    }
+
+    // Render a single task as a card (replaces renderTaskRow)
+    function renderTaskCard(task) {
+      var priorityClass = 'priority-' + (task.priority || 'medium').toLowerCase();
+      var statusClass = getStatusClass(task.status);
+      var displayTaskType = formatTaskType(task);
+      var stale = isStaleTask(task);
+      var isRegistered = task.isRegistered === true || task.status === 'Registered';
+
+      var cardClasses = 'task-card ' + priorityClass;
+      if (isRegistered) cardClasses += ' registered';
+      if (stale) cardClasses += ' stale';
+
+      var html = '<div class="' + cardClasses + '">';
+      html += '<div class="task-card-body">';
+
+      // Title row: task type + badges
+      html += '<div class="task-card-title">';
+      html += '<span class="task-card-title-text">' + displayTaskType + '</span>';
+      html += '<span class="task-card-badges">';
+      if (stale) html += '<span class="stale-badge"><i class="bi bi-clock-history"></i> Stale</span>';
+      html += '<span class="status-badge ' + statusClass + '">' + (task.status || 'Pending') + '</span>';
+      if (isTaskNotified(task)) html += '<span class="notified-badge"><i class="bi bi-bell-fill"></i> Notified</span>';
+      if (isTaskScheduled(task)) {
+        html += '<span class="scheduled-badge"><i class="bi bi-calendar-check-fill"></i> Scheduled</span>';
+        html += getClassTypeBadgeHtml(getTaskClassType(task));
+      }
+      if (isTaskOffice(task)) html += '<span class="office-badge"><i class="bi bi-building"></i> Office</span>';
+      html += '</span>';
       html += '</div>';
 
-      html += '</div>'; // row
+      // Meta row: source + employee (only valid names)
+      html += '<div class="task-card-meta">';
+      html += '<span class="task-card-meta-item"><i class="bi bi-box-arrow-in-right"></i> ' + (task.source || 'Unknown') + '</span>';
+      if (task.employee && isValidEmployeeName(task.employee)) {
+        html += '<span class="task-card-meta-item"><i class="bi bi-person"></i> ' + task.employee + '</span>';
+      }
+      html += '</div>';
 
-      // Notes row
-      if (task.notes) {
-        html += '<div class="text-muted small mt-1"><i class="bi bi-info-circle"></i> ' + task.notes + '</div>';
+      // Notes: always shown for Manual Tasks; also shown for other tasks with notes
+      var sourceLower = (task.source || '').toLowerCase();
+      var taskTypeLower2 = (task.taskType || '').toLowerCase();
+      var isManual = sourceLower === 'manual tasks' || taskTypeLower2 === 'manual task';
+      var isMissingReport = taskTypeLower2 === 'missing safety report' || taskTypeLower2.indexOf('missing safety') !== -1;
+
+      if (isMissingReport) {
+        var safetyDetail = buildSafetyReportDetail(task);
+        if (safetyDetail) {
+          html += '<div class="task-card-safety-detail">' + safetyDetail + '</div>';
+        }
+      } else if (task.notes) {
+        // Show notes for manual tasks always; for other tasks show them too (was hidden before for non-employees)
+        html += '<div class="task-card-notes"><i class="bi bi-card-text"></i> ' + task.notes + '</div>';
       }
 
-      html += '</div>'; // task-row
+      html += '</div>'; // task-card-body
+
+      // Footer: action buttons only (date/time scheduling is handled via Trip Planner)
+      html += '<div class="task-card-footer">';
+      html += '<div class="task-card-actions ms-auto">' + buildTaskCardActions(task) + '</div>';
+      html += '</div>'; // task-card-footer
+
+      html += '</div>'; // task-card
       return html;
+    }
+
+    // Keep renderTaskRow as alias for backwards compatibility (e.g. if called elsewhere)
+    function renderTaskRow(task) {
+      return renderTaskCard(task);
     }
 
     function getStatusClass(status) {
@@ -2303,6 +2529,7 @@
           allTasks[index].status = 'Complete';
           renderTasks(allTasks);
           renderCalendar();
+          if (crewViewActive) renderCrewCards(allTasks);
           showToast('Task marked complete');
         })
         .withFailureHandler(function(error) {
@@ -2514,17 +2741,53 @@
         .deleteScheduleTask(index, taskKey, taskData);
     }
 
+    // Delete a Manual Task row directly from the Manual Tasks sheet
+    function deleteManualTaskRow(index, rowIndex) {
+      var task = allTasks[index];
+      var taskLabel = task ? (task.notes || task.taskType || 'Manual Task') : 'this task';
+      if (!confirm('Delete "' + taskLabel + '"?\n\nThis removes it permanently from the Manual Tasks sheet.')) return;
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result && result.success) {
+            allTasks.splice(index, 1);
+            renderTasks(allTasks);
+            renderCalendar();
+            showToast('Task deleted from Manual Tasks');
+          } else {
+            showToast('Error: ' + (result ? result.error : 'Unknown error'));
+          }
+        })
+        .withFailureHandler(function(error) {
+          showToast('Error deleting task: ' + error.message);
+        })
+        .deleteManualTask(rowIndex);
+    }
+
+    // Toggle the stale tasks collapsible section
+    function toggleStaleSection(sectionId) {
+      var body = document.getElementById(sectionId);
+      var chevron = document.getElementById(sectionId + '-chevron');
+      if (!body) return;
+      if (body.classList.contains('collapsed')) {
+        body.classList.remove('collapsed');
+        if (chevron) chevron.className = 'bi bi-chevron-up';
+      } else {
+        body.classList.add('collapsed');
+        if (chevron) chevron.className = 'bi bi-chevron-down';
+      }
+    }
+
+
     function applyFilters() {
       var priority = document.getElementById('filterPriority').value;
       var status = document.getElementById('filterStatus').value;
       var source = document.getElementById('filterSource').value;
-      var date = document.getElementById('filterDate').value;
 
       var filtered = allTasks.filter(function(task) {
         if (priority && task.priority !== priority) return false;
         if (status && task.status !== status) return false;
         if (source && task.source !== source) return false;
-        if (date && task.scheduledDate !== date) return false;
         return true;
       });
 
@@ -2535,12 +2798,12 @@
       document.getElementById('filterPriority').value = '';
       document.getElementById('filterStatus').value = '';
       document.getElementById('filterSource').value = '';
-      document.getElementById('filterDate').value = '';
       renderTasks(allTasks);
     }
 
     function refreshData() {
-      document.getElementById('taskContainer').innerHTML = '<div class="loading"><div class="spinner-border text-primary"></div><p class="mt-3">Refreshing...</p></div>';
+      document.getElementById('crewViewContainer').innerHTML = '<div class="loading"><div class="spinner-border text-primary"></div><p class="mt-3">Refreshing...</p></div>';
+      jobContext = null; // Force job context reload
       loadTasks();
     }
 
@@ -5412,7 +5675,7 @@
 
     // ================== EXPIRING CERTS TAB FUNCTIONS ==================
     var allExpiringCerts = [];
-    var certFilterState = { status: '', type: '', location: '' };
+    var certFilterState = { status: '', type: '', location: '', employee: '' };
     var declinedCertsMap = {};  // Cache of declined certs from Task Metadata
 
     // Enrich certs with declined status from Task Metadata
@@ -5602,9 +5865,11 @@
       // Populate cert type filter
       var certTypes = new Set();
       var locations = new Set();
+      var employees = new Set();
       allExpiringCerts.forEach(function(cert) {
         if (cert.certType) certTypes.add(cert.certType);
         if (cert.location) locations.add(cert.location);
+        if (cert.employee) employees.add(cert.employee);
       });
 
       var typeSelect = document.getElementById('certFilterType');
@@ -5618,12 +5883,19 @@
       Array.from(locations).sort().forEach(function(loc) {
         locSelect.innerHTML += '<option value="' + loc + '">' + loc + '</option>';
       });
+
+      var empSelect = document.getElementById('certFilterEmployee');
+      empSelect.innerHTML = '<option value="">All Employees</option>';
+      Array.from(employees).sort().forEach(function(emp) {
+        empSelect.innerHTML += '<option value="' + emp + '">' + emp + '</option>';
+      });
     }
 
     function applyCertFilters() {
       certFilterState.status = document.getElementById('certFilterStatus').value;
       certFilterState.type = document.getElementById('certFilterType').value;
       certFilterState.location = document.getElementById('certFilterLocation').value;
+      certFilterState.employee = document.getElementById('certFilterEmployee').value;
       renderExpiringCerts();
     }
 
@@ -5631,7 +5903,8 @@
       document.getElementById('certFilterStatus').value = '';
       document.getElementById('certFilterType').value = '';
       document.getElementById('certFilterLocation').value = '';
-      certFilterState = { status: '', type: '', location: '' };
+      document.getElementById('certFilterEmployee').value = '';
+      certFilterState = { status: '', type: '', location: '', employee: '' };
       renderExpiringCerts();
     }
 
@@ -5658,6 +5931,7 @@
           if (certFilterState.status && status !== certFilterState.status) return false;
           if (certFilterState.type && cert.certType !== certFilterState.type) return false;
           if (certFilterState.location && cert.location !== certFilterState.location) return false;
+          if (certFilterState.employee && cert.employee !== certFilterState.employee) return false;
           return true;
         });
 
@@ -5758,18 +6032,11 @@
           });
         });
 
-        // Determine month header color
-        var monthHeaderGradient;
-        if (monthData.isExpired || expiredInMonth > 0) {
-          monthHeaderGradient = 'linear-gradient(135deg, #b71c1c 0%, #880e0e 100%)'; // Dark red for expired
-        } else if (criticalInMonth > 0) {
-          monthHeaderGradient = 'linear-gradient(135deg, #e65100 0%, #bf360c 100%)'; // Orange for critical
-        } else {
-          monthHeaderGradient = 'linear-gradient(135deg, #1565c0 0%, #0d47a1 100%)'; // Blue for future months
-        }
+        // Month header always uses the app's purple accent; urgency shown via badges
+        var monthHeaderGradient = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
 
-        // Month header (outer dropdown)
-        html += '<div class="card mb-3" style="border: 2px solid #1565c0;">';
+        // Month header (outer dropdown) — matches crew-card styling
+        html += '<div class="card mb-3" style="border: none; box-shadow: 0 2px 8px rgba(0,0,0,0.10); border-radius: 10px; overflow: hidden;">';
         html += '<div class="card-header" style="cursor: pointer; background: ' + monthHeaderGradient + '; color: white; padding: 12px 16px;" onclick="toggleWeekGroup(' + monthIndex + ')">';
         html += '<div style="display: flex; justify-content: space-between; align-items: center;">';
         html += '<div>';

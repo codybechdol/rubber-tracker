@@ -546,6 +546,13 @@
                   <option value="AP 5">AP 5 - Apprentice 5th Year</option>
                   <option value="AP 6">AP 6 - Apprentice 6th Year</option>
                   <option value="AP 7">AP 7 - Apprentice 7th Year</option>
+                  <option value="ST 1">ST 1 - Sub Tech 1st Year</option>
+                  <option value="ST 2">ST 2 - Sub Tech 2nd Year</option>
+                  <option value="ST 3">ST 3 - Sub Tech 3rd Year</option>
+                  <option value="ST 4">ST 4 - Sub Tech 4th Year</option>
+                  <option value="ST 5">ST 5 - Sub Tech 5th Year</option>
+                  <option value="ST 6">ST 6 - Sub Tech 6th Year</option>
+                  <option value="ST 7">ST 7 - Sub Tech 7th Year</option>
                   <option value="JRY">JRY - Journeyman Lineman</option>
                   <option value="WT">WT - White Ticket Lineman</option>
                   <option value="F">F - Foreman</option>
@@ -866,6 +873,7 @@
     var _matchingCompleted = false; // Guard: finishMatching() already ran for this tab
     var _currentWizardStep = 1; // Tracks the active wizard step (1-8); updated by updateStepBar()
     var _displayPreviewReached = false; // Guard: displayPreview() already rendered for this tab
+    var _earlyActivatedJobs = []; // Jobs the user chose to activate pre-apply (cleared on tab change)
     var detectedNewJobs = []; // Jobs found in Excel but not in Job Tracking
     var locationsDropdownList = []; // Location names from Locations sheet (for dropdowns)
     var _jobTrackingLoaded = false; // Whether getJobTrackingForCrewImport has completed
@@ -1315,6 +1323,7 @@
       _crewLeadCheckCompleted = false;
       _matchingCompleted = false;
       _displayPreviewReached = false;
+      _earlyActivatedJobs = [];
       _currentWizardStep = 2; // Back to "Choose Tab" when re-parsing
       crewLeadSelections = {};
       crewsWithMultipleLeads = [];
@@ -1673,12 +1682,131 @@
 
       updateStepBar(5);
 
+      // Check for Pending Start jobs that have employees in this week's Excel.
+      // Ask the user NOW (before matching) so activated jobs get included in proposed changes.
+      var pendingWithEmps = detectPendingJobsWithEmployees();
+      if (pendingWithEmps.length > 0) {
+        showEarlyActivationDialog(pendingWithEmps, function() {
+          matchEmployeesToSheet();
+        });
+        return;
+      }
+
       // Run matching first (builds proposedChanges and detects duplicates/unmatched)
       // Crew cards are NOT shown yet — they render after Special Circumstances (Step 7)
       matchEmployeesToSheet();
 
       // Note: matchEmployeesToSheet calls checkAutoProgressToSpecial() when done
       // (either immediately for no-dupes, or after resolveDuplicates() for dupes)
+    }
+
+    /**
+     * Detect Pending Start jobs in parsedCrews that have real (non-contractor) employees.
+     * Used to ask the user about activation BEFORE matchEmployeesToSheet() runs.
+     * @return {Array} Array of {jobNumber, location, foreman, crewSize, employees, startDate}
+     */
+    function detectPendingJobsWithEmployees() {
+      var result = [];
+      if (!parsedCrews || !jobTrackingData) return result;
+
+      // Keywords that identify boring/contractor placeholder rows (not real employees)
+      var CONTRACTOR_KEYWORDS = ['boring', 'utilities boring', 'capital boring', 'contractor', 'subcontract'];
+
+      for (var i = 0; i < parsedCrews.length; i++) {
+        var crew = parsedCrews[i];
+        var jobInfo = jobTrackingData[crew.jobNumber];
+        if (!jobInfo || !jobInfo.isPendingStart) continue;
+
+        // Count real employees only
+        var realEmps = crew.employees.filter(function(e) {
+          var nameLow = e.name.toLowerCase();
+          return !CONTRACTOR_KEYWORDS.some(function(kw) { return nameLow.indexOf(kw) !== -1; });
+        });
+        if (realEmps.length === 0) continue;
+
+        result.push({
+          jobNumber: crew.jobNumber,
+          location: crew.location || (jobInfo && jobInfo.location) || crew.jobNumber,
+          foreman: (jobInfo && jobInfo.foreman) || '',
+          crewSize: realEmps.length,
+          employees: realEmps.map(function(e) { return e.name; }),
+          startDate: (jobInfo && jobInfo.startDate) || ''
+        });
+      }
+      return result;
+    }
+
+    /**
+     * Show an "Activate Pending Start jobs?" dialog BEFORE matchEmployeesToSheet() runs.
+     * If the user activates jobs, jobTrackingData is updated locally so finishMatching()
+     * includes those crews in the proposed changes.
+     * @param {Array} pendingJobs - From detectPendingJobsWithEmployees()
+     * @param {Function} onContinue - Callback to run after dialog closes (calls matchEmployeesToSheet)
+     */
+    function showEarlyActivationDialog(pendingJobs, onContinue) {
+      var msg = '<p><strong>🚀 The following <em>Pending Start</em> job(s) now have employees assigned in this week\'s Excel:</strong></p>';
+      msg += '<p class="text-muted small">Activate them now so their employees are included in this import\'s changes?</p>';
+      msg += '<div style="max-height: 280px; overflow-y: auto;">';
+
+      for (var i = 0; i < pendingJobs.length; i++) {
+        var job = pendingJobs[i];
+        var dateStr = job.startDate ? (' — Start: ' + formatDateForDisplay(job.startDate)) : '';
+        var empList = job.employees.slice(0, 4).join(', ') + (job.employees.length > 4 ? ' +' + (job.employees.length - 4) + ' more' : '');
+        msg += '<div class="card mb-2" style="border-left: 4px solid #ffc107;">';
+        msg += '<div class="card-body p-2">';
+        msg += '<div class="d-flex align-items-center">';
+        msg += '<input type="checkbox" class="form-check-input me-2 early-activate-chk" id="earlyJob_' + i + '" data-job="' + escapeHtml(job.jobNumber) + '" checked>';
+        msg += '<div class="flex-grow-1">';
+        msg += '<strong>' + escapeHtml(job.jobNumber) + '</strong> <span class="badge bg-warning text-dark ms-1">Pending Start → Active</span>';
+        msg += ' — ' + escapeHtml(job.location);
+        msg += '<br><small class="text-muted">' + job.crewSize + ' employee(s): ' + escapeHtml(empList) + dateStr + '</small>';
+        msg += '</div></div></div></div>';
+      }
+
+      msg += '</div>';
+      msg += '<p class="text-muted small mt-2"><i class="bi bi-info-circle"></i> <strong>Checked = Activate Now</strong> — employees will be moved to this job in this import.<br>';
+      msg += '<strong>Unchecked = Keep as Pending Start</strong> — employees skipped until job is activated.</p>';
+
+      document.getElementById('notificationHeader').className = 'notification-header warning';
+      document.getElementById('notificationIcon').className = 'bi bi-calendar-check';
+      document.getElementById('notificationTitle').textContent = 'Activate Pending Jobs?';
+      document.getElementById('notificationBody').innerHTML = msg;
+      document.getElementById('notificationCancelBtn').style.display = 'inline-block';
+      document.getElementById('notificationCancelBtn').textContent = 'Keep All Pending';
+      document.getElementById('notificationOkBtn').textContent = 'Activate Selected & Continue';
+
+      notificationCallback = function() {
+        var jobsToActivate = [];
+        var checkboxes = document.querySelectorAll('.early-activate-chk:checked');
+        checkboxes.forEach(function(cb) {
+          jobsToActivate.push(cb.getAttribute('data-job'));
+        });
+
+        if (jobsToActivate.length > 0) {
+          // Update local jobTrackingData so finishMatching() treats these as Active
+          for (var j = 0; j < jobsToActivate.length; j++) {
+            var jn = jobsToActivate[j];
+            if (jobTrackingData[jn]) {
+              jobTrackingData[jn].isPendingStart = false;
+              jobTrackingData[jn].isActive = true;
+              jobTrackingData[jn].isCompleted = false;
+              jobTrackingData[jn].status = 'Active';
+            }
+          }
+          // Track for applyCrewChanges so server also activates them in Job Tracking
+          _earlyActivatedJobs = jobsToActivate;
+          console.log('Early activation: ' + jobsToActivate.join(', ') + ' marked Active locally');
+        }
+
+        onContinue();
+      };
+
+      notificationCancelCallback = function() {
+        // Keep all as pending — skip their employees (existing behavior)
+        onContinue();
+      };
+
+      document.getElementById('notificationOverlay').classList.add('show');
     }
 
     /**
@@ -3300,6 +3428,13 @@
       '5 ap': 'AP 5',
       '6 ap': 'AP 6',
       '7 ap': 'AP 7',
+      'ST 1': 'ST 1',
+      'ST 2': 'ST 2',
+      'ST 3': 'ST 3',
+      'ST 4': 'ST 4',
+      'ST 5': 'ST 5',
+      'ST 6': 'ST 6',
+      'ST 7': 'ST 7',
       'Jry Op': 'JRY OP',
       'GTO': 'GTO',
       'EO2': 'EO 2',
@@ -3332,9 +3467,10 @@
       cleanText = cleanText.replace(/\bNEW\s*HIRE\b/gi, ' ').replace(/\bNEWHIRE\b/gi, ' ').replace(/\s+/g, ' ').trim();
       cleanText = cleanText.replace(/\s+(TEMP|TEMPORARY|CONTRACTOR|TRAINEE)\b/gi, ' ').replace(/\s+/g, ' ').trim();
 
-      // Strip "ST #" start date indicators (e.g., "Ivan Gomez ST 1" → "Ivan Gomez")
-      // NOT anchored to $ - can appear before role suffix (e.g., "Ivan Gomez ST 1 3 ap")
-      cleanText = cleanText.replace(/\bST\s*\d+\b/gi, ' ').replace(/\s+/g, ' ').trim();
+      // Strip "ST #" start-date indicators ONLY when NOT at end of string (end = Sub Tech classification)
+      // e.g., "Ivan Gomez ST 1 3 ap" → strip ST 1 (followed by more content) → "Ivan Gomez 3 ap"
+      // but "John Smith ST 3" → keep (at end, it's a Sub Tech classification role suffix)
+      cleanText = cleanText.replace(/\bST\s*\d+\b(?!\s*$)/gi, ' ').replace(/\s+/g, ' ').trim();
 
       // Strip "off [date] [day]" annotations: "off 4-2 Thurs", "off 4-6 Mon", "off 4-15"
       // Must come BEFORE the simpler V/Off check. Handles format: off + date (M-D) + optional day name
@@ -3416,6 +3552,13 @@
         // Strip from the digit before "ap" to the end (removes "3 ap Hot", "5 ap Cold", etc.)
         result.name = cleanText.replace(/\s+\d\s*ap\b.*$/i, '').trim();
       }
+      // Sub Tech (various formats: "ST 3", "ST3" at end of name)
+      else if (cleanText.match(/\sST\s*([1-7])\b\s*$/i)) {
+        var stMatch = cleanText.match(/\sST\s*([1-7])\b\s*$/i);
+        result.role = 'ST ' + stMatch[1];
+        result.classification = 'ST ' + stMatch[1];
+        result.name = cleanText.replace(/\s+ST\s*[1-7]\b\s*$/i, '').trim();
+      }
       // Journey Operator
       else if (cleanText.match(/\sJry\s*Op\b/i) || cleanText.match(/\sJourney\s*Op/i)) {
         result.role = 'Jry Op';
@@ -3471,6 +3614,11 @@
         var standaloneApMatch = cleanText.match(/^(\d)\s*ap$/i);
         result.role = standaloneApMatch[1] + ' ap';
         result.classification = 'AP ' + standaloneApMatch[1];
+        result.name = '';
+      } else if (cleanText.match(/^ST\s*([1-7])$/i)) {
+        var standaloneStMatch = cleanText.match(/^ST\s*([1-7])$/i);
+        result.role = 'ST ' + standaloneStMatch[1];
+        result.classification = 'ST ' + standaloneStMatch[1];
         result.name = '';
       } else if (cleanText.match(/^Jry\s*Op$/i) || cleanText.match(/^Journey\s*Op$/i)) {
         result.role = 'Jry Op';
@@ -3573,6 +3721,13 @@
         return 17 - level2;
       }
 
+      // Sub Tech format: "ST 3", "ST3" (equivalent to AP)
+      var stMatchP = roleUpper.match(/ST\s*([1-7])/);
+      if (stMatchP) {
+        var stLevel = parseInt(stMatchP[1]);
+        return 17 - stLevel;
+      }
+
       // GTO variations
       if (roleUpper.match(/GTO\s*F/i)) return 20;
       if (roleUpper.match(/^GTO$/i)) return 21;
@@ -3627,6 +3782,15 @@
 
       for (var i = 0; i < parsedCrews.length; i++) {
         var crew = parsedCrews[i];
+
+        // Skip Completed jobs entirely — no point confirming crew lead for a closed job.
+        // Also skip Pending Start jobs that weren't activated in Step 3.5, because
+        // finishMatching() will skip them anyway so the lead selection is meaningless.
+        var jobInfo = jobTrackingData[crew.jobNumber];
+        if (jobInfo) {
+          if (jobInfo.isCompleted) continue;
+          if (jobInfo.isPendingStart && _earlyActivatedJobs.indexOf(crew.jobNumber) === -1) continue;
+        }
 
         // Skip crews that already have a crew lead selection — don't re-prompt
         if (crewLeadSelections[crew.jobNumber]) {
@@ -5583,8 +5747,7 @@
           html += '<label class="form-label small mb-1">Job Classification</label>';
           html += '<select class="form-select form-select-sm" id="spec-classification-' + i + '">';
           html += '<option value="">Select...</option>';
-          var classifications = ['F', 'JRY', 'AP 1', 'AP 2', 'AP 3', 'AP 4', 'AP 5', 'AP 6', 'AP 7', 'GTO', 'GTO F', 'JRY OP', 'EO 2', 'WT'];
-          for (var c = 0; c < classifications.length; c++) {
+          var classifications = ['F', 'JRY', 'AP 1', 'AP 2', 'AP 3', 'AP 4', 'AP 5', 'AP 6', 'AP 7', 'ST 1', 'ST 2', 'ST 3', 'ST 4', 'ST 5', 'ST 6', 'ST 7', 'GTO', 'GTO F', 'JRY OP', 'EO 2', 'WT'];          for (var c = 0; c < classifications.length; c++) {
             var isSelected = spec.classification === classifications[c] ? ' selected' : '';
             html += '<option value="' + classifications[c] + '"' + isSelected + '>' + classifications[c] + '</option>';
           }
@@ -5643,7 +5806,7 @@
         html += '<label class="form-label small mb-1">Job Classification</label>';
         html += '<select class="form-select form-select-sm" id="spec-classification-' + i + '">';
         html += '<option value="">-- No Change --</option>';
-        var classifications = ['F', 'JRY', 'AP 1', 'AP 2', 'AP 3', 'AP 4', 'AP 5', 'AP 6', 'AP 7', 'GTO', 'GTO F', 'JRY OP', 'EO 2', 'WT'];
+        var classifications = ['F', 'JRY', 'AP 1', 'AP 2', 'AP 3', 'AP 4', 'AP 5', 'AP 6', 'AP 7', 'ST 1', 'ST 2', 'ST 3', 'ST 4', 'ST 5', 'ST 6', 'ST 7', 'GTO', 'GTO F', 'JRY OP', 'EO 2', 'WT'];
         for (var c = 0; c < classifications.length; c++) {
           var isSelected = spec.classification === classifications[c] ? ' selected' : '';
           html += '<option value="' + classifications[c] + '"' + isSelected + '>' + classifications[c] + '</option>';
@@ -8274,14 +8437,36 @@
       // Attach jobNameMap so it's available server-side for Job Tracking sync
       if (changes.length > 0) {
         changes[0].jobNameMap = jobNameMap;
+        // Include any jobs the user activated pre-apply so server activates them in Job Tracking
+        if (_earlyActivatedJobs && _earlyActivatedJobs.length > 0) {
+          changes[0].earlyActivatedJobs = _earlyActivatedJobs;
+        }
       } else {
         // No crew changes but still need to sync Job Tracking
         // Pass a synthetic entry with just the jobNameMap
-        changes.push({ _syncOnly: true, jobNameMap: jobNameMap });
+        var syncEntry = { _syncOnly: true, jobNameMap: jobNameMap };
+        if (_earlyActivatedJobs && _earlyActivatedJobs.length > 0) {
+          syncEntry.earlyActivatedJobs = _earlyActivatedJobs;
+        }
+        changes.push(syncEntry);
       }
 
       google.script.run
         .withSuccessHandler(function(result) {
+          // Guard against null result (GAS 50KB limit or Date serialization issue)
+          // The import likely succeeded on the server — show a generic success dialog
+          if (!result) {
+            document.getElementById('btnApplyChanges').disabled = false;
+            document.getElementById('btnApplyChanges').innerHTML = '<i class="bi bi-check-lg"></i> Apply Changes';
+            showNotification(
+              '<p>✅ Crew Makeup Import completed successfully on the server.</p>' +
+              '<p class="text-muted small">If any Pending Start jobs need activation, please use ' +
+              'Glove Manager → 📥 Import Crew Makeup → 🔧 Utilities → View Saved Import Settings ' +
+              'and manually activate via Job Tracking.</p>',
+              'success', 'Import Complete', function() { google.script.host.close(); }
+            );
+            return;
+          }
           // Build detailed message with specific changes
           var detailMsg = result.message;
           if (result.changeDetails && result.changeDetails.length > 0) {

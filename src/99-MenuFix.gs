@@ -7,13 +7,17 @@
  * 3. Click Run
  * 4. Go back to spreadsheet and refresh
  *
- * LAST SYNCED: May 17, 2026 - Matches onOpen() in Code.gs (one-off items removed)
+ * LAST SYNCED: June 1, 2026 - onOpen() now delegates here; single source of truth
  */
-function forceCreateMenu() {
-  try {
-    var ui = SpreadsheetApp.getUi();
 
-    ui.createMenu('Glove Manager')
+/**
+ * Shared menu builder — called by both onOpen() and forceCreateMenu().
+ * Keeping all menu strings here avoids emoji encoding issues in Code.gs.
+ */
+function _buildGloveManagerMenu() {
+  var ui = SpreadsheetApp.getUi();
+
+  ui.createMenu('Glove Manager')
       // === QUICK ACTIONS SIDEBAR ===
       .addItem('📱 Quick Actions', 'openQuickActionsSidebar')
       .addItem('🧭 Tab Navigator', 'showTabNavigatorSidebar')
@@ -242,7 +246,8 @@ function forceCreateMenu() {
           .addItem('📱 Format Phone Numbers', 'formatEmployeePhoneNumbers')
           .addItem('✅ Fix Last Day Reason Dropdown', 'fixLastDayReasonValidation')
           .addItem('👷 Setup Job Classification Dropdown', 'setupJobClassificationDropdown')
-          .addItem('📖 View Classification Guide', 'showClassificationGuide'))
+          .addItem('📖 View Classification Guide', 'showClassificationGuide')
+          .addItem('🏷️ Add Alternate Names Column', 'setupAlternateNamesColumn'))
         .addSubMenu(ui.createMenu('📋 Job Tracking')
           .addItem('📂 View Job Tracking', 'openJobTrackingSheet')
           .addItem('🔄 Refresh Job Tracking', 'refreshJobTrackingFromEmployees')
@@ -263,7 +268,9 @@ function forceCreateMenu() {
           .addItem('🔍 View Locations', 'openLocationsSheet')
           .addItem('📍 Review New Locations', 'reviewNewLocations')
           .addItem('📅 Fiscal Year Config', 'showFiscalYearConfig')
-          .addItem('📥 Import Data', 'showImportDialog'))
+          .addItem('📥 Import Data', 'showImportDialog')
+          .addSeparator()
+          .addItem('➖ Remove Expiring Certs Row Groups', 'removeExpCertRowGroups'))
         .addSeparator()
         .addItem('🔍 Diagnose Auth Issues', 'diagnoseAuthIssues')
         .addItem('🗑️ Clear Background Triggers', 'clearAllBackgroundTriggers'))
@@ -282,7 +289,14 @@ function forceCreateMenu() {
       .addSeparator()
       .addItem('Close & Save History', 'closeAndSaveHistory')
       .addToUi();
+}
 
+/**
+ * Manually recreate the menu (run from Apps Script editor if menu is missing).
+ */
+function forceCreateMenu() {
+  try {
+    _buildGloveManagerMenu();
     SpreadsheetApp.getUi().alert('✅ Menu Created!\n\nThe Glove Manager menu has been added.\nIt now matches the 6-step Monday workflow.\n\nRefresh your spreadsheet (Ctrl+R) to see it.');
 
   } catch (e) {

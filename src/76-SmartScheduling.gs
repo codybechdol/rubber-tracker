@@ -37,7 +37,7 @@ function getCrewLocationMap(ss) {
   var nameCol = -1, jobNumCol = -1, locationCol = -1, lastDayCol = -1, classificationCol = -1;
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'name') nameCol = h;
+    if (header === 'name' || header === 'employee name') nameCol = h;
     if (header === 'job number') jobNumCol = h;
     if (header === 'location') locationCol = h;
     if (header === 'last day') lastDayCol = h;
@@ -53,7 +53,8 @@ function getCrewLocationMap(ss) {
   var classificationPriority = {
     'F': 1, 'GTO F': 2, 'GF': 3, 'SUP': 4, 'JRY': 5, 'JRY OP': 6,
     'WT': 7, 'GTO': 8, 'EO 1': 9, 'EO 2': 10,
-    'AP 7': 11, 'AP 6': 12, 'AP 5': 13, 'AP 4': 14, 'AP 3': 15, 'AP 2': 16, 'AP 1': 17
+    'AP 7': 11, 'AP 6': 12, 'AP 5': 13, 'AP 4': 14, 'AP 3': 15, 'AP 2': 16, 'AP 1': 17,
+    'ST 7': 11, 'ST 6': 12, 'ST 5': 13, 'ST 4': 14, 'ST 3': 15, 'ST 2': 16, 'ST 1': 17
   };
 
   // First pass: collect all employees grouped by crew
@@ -482,7 +483,7 @@ function getPendingEmployeeSet(ss) {
   var nameCol = -1, hireDateCol = -1;
   for (var h = 0; h < headers.length; h++) {
     var hdr = String(headers[h]).toLowerCase().trim();
-    if (hdr === 'name') nameCol = h;
+    if (hdr === 'name' || hdr === 'employee name') nameCol = h;
     if (hdr === 'hire date') hireDateCol = h;
   }
   if (nameCol === -1 || hireDateCol === -1) return {};
@@ -517,7 +518,7 @@ function getEmployeeLocationMap(ss) {
   // Find columns
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'name') nameCol = h;
+    if (header === 'name' || header === 'employee name') nameCol = h;
     if (header === 'location') locationCol = h;
   }
 
@@ -559,8 +560,7 @@ function getEmployeePhoneMapInternal(ss) {
   // Find columns - check various header name formats
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'name') nameCol = h;
-    // Match various phone column header formats
+    if (header === 'name' || header === 'employee name') nameCol = h;
     if (header === 'phone number' || header === 'phone' || header === 'phone #' || header === 'cell' || header === 'cell phone') phoneCol = h;
   }
 
@@ -628,7 +628,7 @@ function getEmployeeForemanMap(ss) {
   // Find columns
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'name') nameCol = h;
+    if (header === 'name' || header === 'employee name') nameCol = h;
     if (header === 'location') locationCol = h;
     if (header === 'job number') jobNumCol = h;
     if (header === 'job classification') classificationCol = h;
@@ -834,12 +834,12 @@ function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLoca
         Logger.log('collectSwapTasks: Row ' + (i+1) + ' Employee="' + employee + '" pickedValue=' + JSON.stringify(pickedValue) + ' (type=' + typeof pickedValue + ') isPicked=' + isPicked + ' dateChanged="' + dateChanged + '"');
       }
 
-      // ONLY include items where Picked=TRUE AND Date Changed is empty
-      // These are items ready for delivery but not yet delivered
-      if (!isPicked) {
-        continue; // Skip if NOT picked
+      // For Gloves/Sleeves: only include if Picked=TRUE (item is ready for delivery)
+      // For Blankets: include any item on the swap sheet (no Picked requirement)
+      if (itemType !== 'Blanket' && !isPicked) {
+        continue; // Skip if NOT picked (Gloves/Sleeves only)
       }
-      rowsPicked++;
+      if (isPicked) rowsPicked++;
 
       if (dateChanged) {
         continue; // Skip if already delivered
@@ -1374,10 +1374,43 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
 
   var tasksAdded = 0;
   var skippedCompleted = 0;
-  var daysThreshold = 365; // Include certs expiring within this many days
+  var daysThreshold = 30; // Include certs expiring within this many days (1 month)
 
   // Build pending employee set once (outside loop)
   var pendingEmps = getPendingEmployeeSet(ss);
+
+  // Pre-scan: build Crane Cert validity and Crane Evaluation date maps
+  // Used to detect employees who have a valid Crane Cert but no Crane Evaluation form date
+  var craneCertValidSet = {};   // empNameLower → true if Crane Cert is not expired
+  var craneEvalHasDateSet = {}; // empNameLower → true if Crane Evaluation date is present
+
+  for (var pre = 1; pre < data.length; pre++) {
+    var preRow = data[pre];
+    var preEmp = String(preRow[nameCol] || '').trim();
+    var preCertType = String(preRow[certTypeCol] || '').trim();
+    var preExpDate = expDateCol !== -1 ? preRow[expDateCol] : null;
+    var preDaysUntil = daysUntilCol !== -1 ? preRow[daysUntilCol] : null;
+    if (!preEmp) continue;
+    var preEmpLower = preEmp.toLowerCase();
+
+    if (preCertType === 'Crane Cert') {
+      var craneExpired = false;
+      if (typeof preDaysUntil === 'number') {
+        craneExpired = preDaysUntil < 0;
+      } else if (preExpDate instanceof Date && !isNaN(preExpDate.getTime())) {
+        craneExpired = preExpDate.getTime() < today.getTime();
+      }
+      if (!craneExpired && (preExpDate || preDaysUntil !== null)) {
+        craneCertValidSet[preEmpLower] = true;
+      }
+    }
+
+    if (preCertType === 'Crane Evaluation') {
+      if (preExpDate && preExpDate !== '') {
+        craneEvalHasDateSet[preEmpLower] = true;
+      }
+    }
+  }
 
   for (var i = 1; i < data.length; i++) {
     var row = data[i];
@@ -1405,8 +1438,40 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
       if (selectedCertTypes.indexOf(certType) === -1) continue;
     }
 
-    // Skip Crane Evaluation - it's non-expiring
-    if (certType === 'Crane Evaluation') continue;
+    // Crane Evaluation: non-expiring, but task is needed when employee has a valid Crane Cert
+    // and the Crane Evaluation form date is missing — only if "Crane Evaluation" is selected
+    if (certType === 'Crane Evaluation') {
+      if (!selectedCertTypes || selectedCertTypes.indexOf('Crane Evaluation') === -1) continue;
+      var empLowerCE = employee.toLowerCase();
+      var hasCraneCert = craneCertValidSet[empLowerCE];
+      var hasEvalDate = craneEvalHasDateSet[empLowerCE];
+      if (!hasCraneCert || hasEvalDate) continue; // No task needed
+      // Create task: valid Crane Cert but missing Crane Evaluation form
+      var ceLocation = employeeLocations[empLowerCE] || 'Unknown';
+      var task = {
+        type: 'Cert Expiring',
+        taskType: 'Cert Expiring',
+        itemType: 'Crane Evaluation',
+        certType: 'Crane Evaluation',
+        employee: employee,
+        location: ceLocation,
+        foreman: employeeForemen[empLowerCE] || 'Unknown',
+        phoneNumber: employeePhones[empLowerCE] || '',
+        dueDate: null,
+        isOverdue: false,
+        daysTillDue: null,
+        status: 'Missing',
+        estimatedTime: 15,
+        priority: 'Medium',
+        sheetName: 'Expiring Certs',
+        rowIndex: i + 1,
+        isNonExpiring: true
+      };
+      if (!tasksByLocation[ceLocation]) tasksByLocation[ceLocation] = [];
+      tasksByLocation[ceLocation].push(task);
+      tasksAdded++;
+      continue;
+    }
 
     // Only include expired or expiring soon
     var isExpired = false;
@@ -1632,7 +1697,7 @@ function collectTrainingTasks(ss, tasksByLocation, employeePhones, today) {
 
     for (var eh = 0; eh < empHeaders.length; eh++) {
       var hdr = String(empHeaders[eh]).toLowerCase().trim();
-      if (hdr === 'name') empNameCol = eh;
+      if (hdr === 'name' || hdr === 'employee name') empNameCol = eh;
       if (hdr === 'job number') empJobNumCol = eh;
     }
 
@@ -1846,7 +1911,7 @@ function debugKeenanTrainingLocation() {
 
     for (var h = 0; h < empHeaders.length; h++) {
       var hdr = String(empHeaders[h]).toLowerCase().trim();
-      if (hdr === 'name') nameCol = h;
+      if (hdr === 'name' || hdr === 'employee name') nameCol = h;
       if (hdr === 'location') locCol = h;
       if (hdr === 'job number') jobCol = h;
     }

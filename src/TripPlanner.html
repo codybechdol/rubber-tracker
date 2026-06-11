@@ -1387,7 +1387,23 @@
       <button class="btn btn-secondary" onclick="resetPlan()">↩️ Reset</button>
       <button class="btn btn-primary" onclick="savePlan()">💾 Save Plan</button>
       <button class="btn btn-success" onclick="applyToSchedule()">✅ Apply to Schedule</button>
+      <button class="btn btn-outline-secondary" onclick="toggleCrewVisitPanel()" title="Crew Visit Settings">⚙️ Crew Visit</button>
       <button class="btn btn-secondary" onclick="backToHub()" style="margin-left: 8px;">✕ Close</button>
+    </div>
+  </div>
+
+  <!-- Crew Visit Config Panel -->
+  <div id="crewVisitPanel" style="display:none; background:#f8f9fa; border-bottom:1px solid #dee2e6; padding:12px 16px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+      <strong>⚙️ Crew Visit Configuration</strong>
+      <div>
+        <button class="btn btn-outline-primary btn-sm me-2" onclick="refreshCrewVisitConfig()">🔄 Refresh from Employees</button>
+        <button class="btn btn-success btn-sm" onclick="saveCrewVisitConfig()">💾 Save</button>
+      </div>
+    </div>
+    <p class="text-muted small mb-2">Configure visit frequency, drive times, and priorities for each crew.</p>
+    <div id="crewVisitContainer" style="max-height:350px; overflow-y:auto;">
+      <div class="text-center py-2"><div class="spinner-border spinner-border-sm text-primary"></div> Loading...</div>
     </div>
   </div>
 
@@ -5148,6 +5164,116 @@
         })
         .saveOfficeTasks(dateKey, officeTasks);
     }
+
+    // ================== CREW VISIT CONFIG ==================
+    var crewVisitData = [];
+    var crewVisitPanelOpen = false;
+
+    function toggleCrewVisitPanel() {
+      var panel = document.getElementById('crewVisitPanel');
+      crewVisitPanelOpen = !crewVisitPanelOpen;
+      panel.style.display = crewVisitPanelOpen ? 'block' : 'none';
+      if (crewVisitPanelOpen && crewVisitData.length === 0) {
+        loadCrewVisitConfig();
+      }
+    }
+
+    function loadCrewVisitConfig() {
+      var container = document.getElementById('crewVisitContainer');
+      container.innerHTML = '<div class="text-center py-2"><div class="spinner-border spinner-border-sm text-primary"></div> Loading...</div>';
+      google.script.run
+        .withSuccessHandler(function(data) {
+          crewVisitData = data || [];
+          renderCrewVisitTable(crewVisitData);
+        })
+        .withFailureHandler(function(error) {
+          container.innerHTML = '<div class="alert alert-danger alert-sm">Error loading: ' + error + ' <button class="btn btn-sm btn-primary ms-2" onclick="loadCrewVisitConfig()">Retry</button></div>';
+        })
+        .getCrewVisitConfig();
+    }
+
+    function renderCrewVisitTable(crews) {
+      var container = document.getElementById('crewVisitContainer');
+      if (!crews || crews.length === 0) {
+        container.innerHTML = '<div class="alert alert-warning alert-sm">No crews found. Click "Refresh from Employees" to populate.</div>';
+        return;
+      }
+      var html = '<table style="width:100%;font-size:12px;border-collapse:collapse;">';
+      html += '<thead><tr style="background:#e9ecef;">';
+      html += '<th style="padding:4px 6px;">Crew #</th><th style="padding:4px 6px;">Location</th>';
+      html += '<th style="padding:4px 6px;">Lead</th><th style="padding:4px 6px;">Size</th>';
+      html += '<th style="padding:4px 6px;">Frequency</th><th style="padding:4px 6px;">Est. Time (min)</th>';
+      html += '<th style="padding:4px 6px;">Last Visit</th><th style="padding:4px 6px;">Next Visit</th>';
+      html += '<th style="padding:4px 6px;">Drive Time (min)</th><th style="padding:4px 6px;">Priority</th>';
+      html += '</tr></thead><tbody>';
+      crews.forEach(function(crew, index) {
+        var odd = index % 2 === 1 ? 'background:#f8f9fa;' : '';
+        html += '<tr style="' + odd + '">';
+        html += '<td style="padding:3px 6px;"><strong>' + (crew.jobNumber || '') + '</strong></td>';
+        html += '<td style="padding:3px 6px;">' + (crew.location || '') + '</td>';
+        html += '<td style="padding:3px 6px;">' + (crew.crewLead || '') + '</td>';
+        html += '<td style="padding:3px 6px;">' + (crew.crewSize || '') + '</td>';
+        html += '<td style="padding:3px 6px;"><select style="font-size:11px;padding:1px 2px;" onchange="onCrewVisitChange(' + index + ',\'frequency\',this.value)">';
+        ['Weekly','Bi-Weekly','Monthly','Quarterly'].forEach(function(f) {
+          html += '<option value="' + f + '"' + (crew.frequency === f ? ' selected' : '') + '>' + f + '</option>';
+        });
+        html += '</select></td>';
+        html += '<td style="padding:3px 6px;"><input type="number" style="width:60px;font-size:11px;" value="' + (crew.estVisitTime || 60) + '" min="15" step="15" onchange="onCrewVisitChange(' + index + ',\'estVisitTime\',this.value)"></td>';
+        html += '<td style="padding:3px 6px;"><input type="date" style="font-size:11px;" value="' + crewVisitFormatDate(crew.lastVisit) + '" onchange="onCrewVisitChange(' + index + ',\'lastVisit\',this.value)"></td>';
+        html += '<td style="padding:3px 6px;"><input type="date" style="font-size:11px;" value="' + crewVisitFormatDate(crew.nextVisit) + '" onchange="onCrewVisitChange(' + index + ',\'nextVisit\',this.value)"></td>';
+        html += '<td style="padding:3px 6px;"><input type="number" style="width:60px;font-size:11px;" value="' + (crew.driveTime || 0) + '" min="0" step="15" onchange="onCrewVisitChange(' + index + ',\'driveTime\',this.value)"></td>';
+        html += '<td style="padding:3px 6px;"><select style="font-size:11px;padding:1px 2px;" onchange="onCrewVisitChange(' + index + ',\'priority\',this.value)">';
+        ['High','Medium','Low'].forEach(function(p) {
+          html += '<option value="' + p + '"' + (crew.priority === p ? ' selected' : '') + '>' + p + '</option>';
+        });
+        html += '</select></td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      container.innerHTML = html;
+    }
+
+    function crewVisitFormatDate(dateVal) {
+      if (!dateVal) return '';
+      try {
+        var d = (dateVal instanceof Date) ? dateVal : new Date(dateVal);
+        if (isNaN(d.getTime())) return '';
+        return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+      } catch(e) { return ''; }
+    }
+
+    function onCrewVisitChange(index, field, value) {
+      if (crewVisitData[index]) crewVisitData[index][field] = value;
+    }
+
+    function saveCrewVisitConfig() {
+      google.script.run
+        .withSuccessHandler(function() {
+          showStatus('Crew visit config saved!', 'success');
+        })
+        .withFailureHandler(function(error) {
+          showStatus('Error saving crew visit config: ' + error, 'error');
+        })
+        .saveCrewVisitConfig(crewVisitData);
+    }
+
+    function refreshCrewVisitConfig() {
+      if (!confirm('Refresh crew data from the Employees sheet? Unsaved changes will be lost.')) return;
+      document.getElementById('crewVisitContainer').innerHTML =
+        '<div class="text-center py-2"><div class="spinner-border spinner-border-sm text-primary"></div> Refreshing...</div>';
+      google.script.run
+        .withSuccessHandler(function(data) {
+          crewVisitData = data || [];
+          renderCrewVisitTable(crewVisitData);
+          showStatus('Crew visit config refreshed!', 'success');
+        })
+        .withFailureHandler(function(error) {
+          showStatus('Error refreshing: ' + error, 'error');
+          loadCrewVisitConfig();
+        })
+        .refreshCrewVisitConfigFromEmployees();
+    }
+    // ================== END CREW VISIT CONFIG ==================
 
     // Close the Trip Planner dialog
     function backToHub() {

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>To Do Config</title>
+  <title>Glove Manager Config</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
   <style>
@@ -30,10 +30,7 @@
     .nav-tabs .nav-link { color: #5f6368; }
     .nav-tabs .nav-link.active { color: #1a73e8; border-color: #1a73e8; border-bottom-color: white; }
     .loading { text-align: center; padding: 40px; }
-    .cert-table { font-size: 12px; margin-bottom: 0; }
-    .cert-table th { font-size: 11px; padding: 4px 8px !important; }
-    .cert-table td { padding: 4px 8px !important; }
-    .cert-checkboxes-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .cert-checkboxes-grid{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
     .cert-overview-card { border: 1px solid #e0e0e0; border-radius: 8px; padding: 10px; margin-bottom: 6px; transition: all 0.2s; }
     .cert-overview-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
     .cert-overview-card h6 { margin: 0 0 6px 0; font-size: 13px; font-weight: 600; }
@@ -122,7 +119,7 @@
 </head>
 <body>
   <div class="header">
-    <h1><i class="bi bi-gear"></i> To Do Config <span class="unsaved-indicator" id="unsavedIndicator">● Unsaved changes</span></h1>
+    <h1><i class="bi bi-gear"></i> Glove Manager Config <span class="unsaved-indicator" id="unsavedIndicator">● Unsaved changes</span></h1>
     <div>
       <button class="btn btn-success btn-sm me-2" onclick="saveConfig()">
         <i class="bi bi-check-lg"></i> Save Changes
@@ -135,168 +132,22 @@
 
   <ul class="nav nav-tabs mb-3" id="configTabs" role="tablist">
     <li class="nav-item" role="presentation">
-      <button class="nav-link active" id="locations-tab" data-bs-toggle="tab" data-bs-target="#locations" type="button">
-        <i class="bi bi-geo-alt"></i> Locations
-      </button>
-    </li>
-    <li class="nav-item" role="presentation">
-      <button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings" type="button">
+      <button class="nav-link active" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings" type="button">
         <i class="bi bi-gear"></i> Settings
-      </button>
-    </li>
-    <li class="nav-item" role="presentation">
-      <button class="nav-link" id="certs-tab" data-bs-toggle="tab" data-bs-target="#certs" type="button">
-        <i class="bi bi-file-earmark-medical"></i> Expiring Certs
       </button>
     </li>
   </ul>
 
   <div class="tab-content" id="configTabContent">
-    <!-- Locations Tab -->
-    <div class="tab-pane fade show active" id="locations" role="tabpanel">
-      <div class="config-section">
-        <h3><i class="bi bi-geo-alt"></i> Location Management</h3>
-        <p class="text-muted mb-3">Configure locations for task scheduling and travel time calculations.</p>
-
-        <div class="row mb-3">
-          <div class="col-md-8">
-            <input type="text" id="newLocation" class="form-control" placeholder="Enter new location name">
-          </div>
-          <div class="col-md-4">
-            <button class="btn btn-primary w-100" onclick="addLocation()">
-              <i class="bi bi-plus-lg"></i> Add Location
-            </button>
-          </div>
-        </div>
-
-        <div class="location-list" id="locationList">
-          <div class="loading">
-            <div class="spinner-border spinner-border-sm text-primary"></div>
-            Loading locations...
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Settings Tab (merged Schedule Settings + Task Sources) -->
-    <div class="tab-pane fade" id="settings" role="tabpanel">
-      <div class="config-section">
-        <h3><i class="bi bi-clock"></i> Schedule Settings</h3>
-        <p class="text-muted mb-3">Configure working hours and scheduling preferences.</p>
-
-        <div class="row">
-          <div class="col-md-6">
-            <div class="mb-3">
-              <label class="form-label">Work Start Time</label>
-              <input type="time" class="form-control" id="workStartTime" value="08:00">
-            </div>
-            <div class="mb-3">
-              <label class="form-label">Work End Time</label>
-              <input type="time" class="form-control" id="workEndTime" value="17:00">
-            </div>
-          </div>
-          <div class="col-md-6">
-            <div class="mb-3">
-              <label class="form-label">Default Task Duration (hours)</label>
-              <input type="number" class="form-control" id="defaultDuration" value="1" step="0.5" min="0.5">
-            </div>
-            <div class="mb-3">
-              <label class="form-label">Buffer Time Between Tasks (minutes)</label>
-              <input type="number" class="form-control" id="bufferTime" value="15" step="5" min="0">
-            </div>
-          </div>
-        </div>
-
-        <h5 class="mt-4 mb-3">Working Days</h5>
-        <div class="btn-group" role="group">
-          <input type="checkbox" class="btn-check" id="day-sun" autocomplete="off">
-          <label class="btn btn-outline-primary" for="day-sun">Sun</label>
-          <input type="checkbox" class="btn-check" id="day-mon" autocomplete="off" checked>
-          <label class="btn btn-outline-primary" for="day-mon">Mon</label>
-          <input type="checkbox" class="btn-check" id="day-tue" autocomplete="off" checked>
-          <label class="btn btn-outline-primary" for="day-tue">Tue</label>
-          <input type="checkbox" class="btn-check" id="day-wed" autocomplete="off" checked>
-          <label class="btn btn-outline-primary" for="day-wed">Wed</label>
-          <input type="checkbox" class="btn-check" id="day-thu" autocomplete="off" checked>
-          <label class="btn btn-outline-primary" for="day-thu">Thu</label>
-          <input type="checkbox" class="btn-check" id="day-fri" autocomplete="off" checked>
-          <label class="btn btn-outline-primary" for="day-fri">Fri</label>
-          <input type="checkbox" class="btn-check" id="day-sat" autocomplete="off">
-          <label class="btn btn-outline-primary" for="day-sat">Sat</label>
-        </div>
-      </div>
-
-      <!-- Priority Settings (merged from old Priorities tab) -->
-      <div class="config-section">
-        <h3><i class="bi bi-flag"></i> Priority Thresholds</h3>
-        <p class="text-muted mb-3">Configure how tasks are prioritized based on due date.</p>
-
-        <div class="priority-config">
-          <div class="priority-card priority-high">
-            <h5>🔴 High Priority</h5>
-            <div class="form-group mt-3">
-              <label class="form-label">Max Days Before Due</label>
-              <input type="number" class="form-control form-control-sm" id="highPriorityDays" value="3">
-            </div>
-          </div>
-          <div class="priority-card priority-medium">
-            <h5>🟡 Medium Priority</h5>
-            <div class="form-group mt-3">
-              <label class="form-label">Max Days Before Due</label>
-              <input type="number" class="form-control form-control-sm" id="mediumPriorityDays" value="7">
-            </div>
-          </div>
-          <div class="priority-card priority-low">
-            <h5>🟢 Low Priority</h5>
-            <div class="form-group mt-3">
-              <label class="form-label">Max Days Before Due</label>
-              <input type="number" class="form-control form-control-sm" id="lowPriorityDays" value="14">
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Crew Visit Config -->
-      <div class="config-section">
-        <h3><i class="bi bi-truck"></i> Crew Visit Schedule</h3>
-        <p class="text-muted mb-3">Configure visit frequency, drive times, and priorities for each crew.</p>
-
-        <div class="mb-3">
-          <button class="btn btn-outline-primary btn-sm me-2" onclick="refreshCrewVisitConfig()">
-            <i class="bi bi-arrow-clockwise"></i> Refresh from Employees
-          </button>
-          <button class="btn btn-success btn-sm" onclick="saveCrewVisitConfig()">
-            <i class="bi bi-check-lg"></i> Save Changes
-          </button>
-        </div>
-
-        <div id="crewVisitContainer" style="max-height: 400px; overflow-y: auto;">
-          <div class="text-center py-3">
-            <div class="spinner-border spinner-border-sm text-primary"></div>
-            <p class="text-muted small mt-2">Loading crew visit config...</p>
-          </div>
-        </div>
-      </div>
-
+    <!-- Settings Tab -->
+    <div class="tab-pane fade show active" id="settings" role="tabpanel">
       <!-- Task Sources Section (merged from Task Sources tab) -->
       <div class="config-section">
-        <h3><i class="bi bi-mortarboard"></i> 🎯 Training: Select Crews</h3>
-        <p class="text-muted mb-3">Select which crews should have training tasks in the Task List.</p>
-
-        <div class="mb-3">
-          <button class="btn btn-outline-primary btn-sm me-2" onclick="selectAllCrews()">
-            <i class="bi bi-check-all"></i> Select All
-          </button>
-          <button class="btn btn-outline-secondary btn-sm" onclick="deselectAllCrews()">
-            <i class="bi bi-x-lg"></i> Deselect All
-          </button>
-        </div>
-
-        <div id="crewCheckboxes" class="row">
-          <div class="col-12 text-center">
-            <div class="spinner-border spinner-border-sm text-primary"></div>
-            <p class="text-muted small mt-2">Loading crews from Employees sheet...</p>
-          </div>
+        <div class="alert alert-info mb-0">
+          <i class="bi bi-info-circle"></i> <strong>Training crew selection removed.</strong>
+          Training tracking crews are now determined by <strong>Job Tracking → Active status</strong>.
+          Any crew marked Active in Job Tracking will automatically appear in Training Tracking.
+          Use <em>Glove Manager → Import Crew Makeup → Sync Crews</em> to update.
         </div>
       </div>
 
@@ -347,7 +198,7 @@
           <i class="bi bi-lightbulb"></i> <strong>Your Task List pulls from these sources:</strong>
           <ul class="mb-0 mt-2">
             <li><strong>Glove/Sleeve Swaps</strong> - Auto-detected from swap sheets (always included)</li>
-            <li><strong>Training Tasks</strong> - Only crews checked above appear in Task List</li>
+            <li><strong>Training Tasks</strong> - All crews Active in Job Tracking (auto-managed)</li>
             <li><strong>Expiring Certs</strong> - Only cert types checked above appear in Task List</li>
             <li><strong>Manual Tasks</strong> - Tasks you add manually (always included)</li>
           </ul>
@@ -470,85 +321,12 @@
       </div>
     </div>
 
-    <!-- Expiring Certs Tab (view/edit cert dates and status) -->
-    <div class="tab-pane fade" id="certs" role="tabpanel">
-
-      <div class="config-section">
-        <h3><i class="bi bi-bar-chart"></i> 📊 Certification Status Overview</h3>
-        <p class="text-muted mb-3">Status breakdown by certification type.</p>
-        <div id="certStatusOverview">
-          <div class="text-center py-3">
-            <div class="spinner-border spinner-border-sm text-primary"></div>
-            <p class="text-muted small mt-2">Loading status overview...</p>
-          </div>
-        </div>
-      </div>
-
-      <div class="config-section">
-        <h3><i class="bi bi-people"></i> Employee Certification Status</h3>
-        <p class="text-muted mb-3">View and manage certification status by employee. Click to expand/collapse employee details.</p>
-        <div id="employeeCertsContainer">
-          <div class="text-center py-4">
-            <div class="spinner-border text-primary"></div>
-            <p class="text-muted mt-2">Loading employee certifications...</p>
-          </div>
-        </div>
-      </div>
-
-      <div class="config-section">
-        <h3><i class="bi bi-graph-up"></i> Summary Statistics</h3>
-        <div id="certsSummary" class="row g-3">
-          <div class="col-md-4">
-            <div class="text-center p-3 bg-light rounded">
-              <h4 class="mb-1" id="totalCertHolders">-</h4>
-              <small class="text-muted">Total Cert Holders</small>
-            </div>
-          </div>
-          <div class="col-md-4">
-            <div class="text-center p-3 bg-light rounded">
-              <h4 class="mb-1 text-danger" id="priorityCount">-</h4>
-              <small class="text-muted">Priority Items</small>
-            </div>
-          </div>
-          <div class="col-md-4">
-            <div class="text-center p-3 bg-light rounded">
-              <h4 class="mb-1 text-warning" id="expiredCount">-</h4>
-              <small class="text-muted">Expired</small>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Cert Employee List Modal -->
-  <div class="modal fade" id="certEmployeeModal" tabindex="-1" aria-labelledby="certEmployeeModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-      <div class="modal-content">
-        <div class="modal-header" id="certEmployeeModalHeader" style="color: white;">
-          <h5 class="modal-title" id="certEmployeeModalLabel">Employees</h5>
-          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body">
-          <div id="certEmployeeList" class="cert-employee-list">
-            <!-- Employee list will be populated here -->
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-        </div>
-      </div>
-    </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   <script>
     var configData = {};
-    var locations = [];
     var hasUnsavedChanges = false;
-    var certDateChanges = {}; // Track changed cert expiration dates
-    var allEmployeesData = []; // Store employee data for saving
-    var currentCertModalInfo = null; // Store current cert modal info for add to checklist
 
     function setUnsaved(value) {
       hasUnsavedChanges = value;
@@ -571,147 +349,13 @@
     }
 
     function loadConfig() {
-      google.script.run
-        .withSuccessHandler(function(config) {
-          configData = config || {};
-          applyConfig();
-        })
-        .withFailureHandler(function(error) {
-          showToast('Error loading config: ' + error, 'error');
-        })
-        .getToDoConfig();
-
-      loadLocations();
       loadExcludedPrefixes();
     }
 
-    function loadLocations() {
-      google.script.run
-        .withSuccessHandler(function(locs) {
-          locations = locs || ['Home', 'Office', 'Waco', 'Temple', 'Austin'];
-          renderLocations();
-        })
-        .withFailureHandler(function(error) {
-          // Use default locations
-          locations = ['Home', 'Office', 'Waco', 'Temple', 'Austin'];
-          renderLocations();
-        })
-        .getConfiguredLocations();
-    }
-
-    function renderLocations() {
-      var container = document.getElementById('locationList');
-      if (locations.length === 0) {
-        container.innerHTML = '<p class="text-muted">No locations configured. Add your first location above.</p>';
-        return;
-      }
-
-      var html = '';
-      locations.forEach(function(loc, index) {
-        html += '<div class="location-item">';
-        html += '<span><i class="bi bi-geo-alt"></i> ' + loc + '</span>';
-        html += '<button class="btn btn-outline-danger btn-sm" onclick="removeLocation(' + index + ')"><i class="bi bi-trash"></i></button>';
-        html += '</div>';
-      });
-      container.innerHTML = html;
-    }
-
-    function addLocation() {
-      var input = document.getElementById('newLocation');
-      var name = input.value.trim();
-      if (!name) {
-        showToast('Please enter a location name', 'error');
-        return;
-      }
-      if (locations.includes(name)) {
-        showToast('Location already exists', 'error');
-        return;
-      }
-      locations.push(name);
-      input.value = '';
-      renderLocations();
-      showToast('Location added');
-    }
-
-    function removeLocation(index) {
-      if (confirm('Remove this location?')) {
-        locations.splice(index, 1);
-        renderLocations();
-        showToast('Location removed');
-      }
-    }
-
-    function applyConfig() {
-      console.log('Applying config:', configData);
-
-      if (configData.workStartTime) document.getElementById('workStartTime').value = configData.workStartTime;
-      if (configData.workEndTime) document.getElementById('workEndTime').value = configData.workEndTime;
-      if (configData.defaultDuration) document.getElementById('defaultDuration').value = configData.defaultDuration;
-      if (configData.bufferTime) document.getElementById('bufferTime').value = configData.bufferTime;
-      if (configData.highPriorityDays) document.getElementById('highPriorityDays').value = configData.highPriorityDays;
-      if (configData.mediumPriorityDays) document.getElementById('mediumPriorityDays').value = configData.mediumPriorityDays;
-      if (configData.lowPriorityDays) document.getElementById('lowPriorityDays').value = configData.lowPriorityDays;
-
-      // Apply working days - first uncheck all, then check the saved ones
-      var allDays = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-      var savedDays = configData.workingDays || ['mon', 'tue', 'wed', 'thu', 'fri']; // Default to Mon-Fri
-
-      console.log('Applying working days:', savedDays);
-
-      allDays.forEach(function(day) {
-        var checkbox = document.getElementById('day-' + day);
-        if (checkbox) {
-          checkbox.checked = savedDays.indexOf(day) !== -1;
-        }
-      });
-    }
-
     function saveConfig() {
-      // Get existing config to preserve notification settings (if any)
-      var existingConfig = {};
-
-      // Build config from existing form elements
-      var config = {
-        workStartTime: document.getElementById('workStartTime').value,
-        workEndTime: document.getElementById('workEndTime').value,
-        defaultDuration: parseFloat(document.getElementById('defaultDuration').value) || 1,
-        bufferTime: parseInt(document.getElementById('bufferTime').value) || 15,
-        highPriorityDays: parseInt(document.getElementById('highPriorityDays').value) || 3,
-        mediumPriorityDays: parseInt(document.getElementById('mediumPriorityDays').value) || 7,
-        lowPriorityDays: parseInt(document.getElementById('lowPriorityDays').value) || 14,
-        locations: locations,
-        workingDays: getWorkingDays()
-      };
-
-      console.log('Saving config:', config);
-
       var errors = [];
 
-      // Save general config
-      google.script.run
-        .withSuccessHandler(function() {
-          console.log('General config saved successfully');
-          // Save Crew Visit Config if there's data
-          if (crewVisitData && crewVisitData.length > 0) {
-            google.script.run
-              .withSuccessHandler(function() {
-                // Continue with training config
-                saveTrainingIfNeeded();
-              })
-              .withFailureHandler(function(error) {
-                errors.push('Crew Visit: ' + error);
-                saveTrainingIfNeeded();
-              })
-              .saveCrewVisitConfig(crewVisitData);
-          } else {
-            saveTrainingIfNeeded();
-          }
-        })
-        .withFailureHandler(function(error) {
-          console.error('Error saving config:', error);
-          showToast('Error saving config: ' + error, 'error');
-        })
-        .saveToDoConfig(config);
+      saveTrainingIfNeeded();
 
       function saveTrainingIfNeeded() {
         // Save Training Config if there's data
@@ -749,56 +393,13 @@
       }
 
       function finalizeSave() {
-        // Handle cert date changes
-        if (Object.keys(certDateChanges).length > 0) {
-          saveCertDateChanges();
-        } else {
-          setUnsaved(false);
-          if (errors.length > 0) {
-            showToast('Saved with warnings: ' + errors.join('; '), 'warning');
-          } else {
-            showToast('All configuration saved successfully!', 'success');
-          }
-        }
-      }
-    }
-
-    function saveCertDateChanges() {
-      var changes = Object.keys(certDateChanges).map(function(key) {
-        return certDateChanges[key];
-      });
-
-      if (changes.length === 0) {
         setUnsaved(false);
-        showToast('Configuration saved!', 'success');
-        return;
-      }
-
-      google.script.run
-        .withSuccessHandler(function(result) {
-          certDateChanges = {};
-          setUnsaved(false);
-          // Remove changed styling from inputs
-          var inputs = document.querySelectorAll('.date-input-small.changed');
-          inputs.forEach(function(input) { input.classList.remove('changed'); });
-          showToast('Saved ' + changes.length + ' cert date change(s) and configuration!', 'success');
-          // Reload to refresh data
-          loadEmployeeCertsData();
-        })
-        .withFailureHandler(function(error) {
-          showToast('Error saving cert dates: ' + error, 'error');
-        })
-        .updateCertExpirationDates(changes);
-    }
-
-    function getWorkingDays() {
-      var days = [];
-      ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].forEach(function(day) {
-        if (document.getElementById('day-' + day).checked) {
-          days.push(day);
+        if (errors.length > 0) {
+          showToast('Saved with warnings: ' + errors.join('; '), 'warning');
+        } else {
+          showToast('All configuration saved successfully!', 'success');
         }
-      });
-      return days;
+      }
     }
 
     function showToast(message, type) {
@@ -868,366 +469,10 @@
         .saveExpiringCertsConfig(selected);
     }
 
-    function loadEmployeeCertsData() {
-      console.log('loadEmployeeCertsData: Starting...');
+    // Load config on page load
+    loadConfig();
 
-      // Set a timeout to show a message if it takes too long
-      var timeoutId = setTimeout(function() {
-        var container = document.getElementById('employeeCertsContainer');
-        if (container.innerHTML.indexOf('Loading') !== -1) {
-          container.innerHTML = '<div class="alert alert-warning">Loading is taking longer than expected. <button class="btn btn-sm btn-primary ms-2" onclick="loadEmployeeCertsData()">Retry</button></div>';
-        }
-        var overviewContainer = document.getElementById('certStatusOverview');
-        if (overviewContainer.innerHTML.indexOf('Loading') !== -1) {
-          overviewContainer.innerHTML = '<div class="alert alert-warning">Loading is taking longer than expected.</div>';
-        }
-      }, 15000);
-
-      google.script.run
-        .withSuccessHandler(function(data) {
-          clearTimeout(timeoutId);
-          if (!data) {
-            console.error('loadEmployeeCertsData: got null (data too large?)');
-            document.getElementById('certStatusOverview').innerHTML = '<div class="alert alert-danger">Failed to load cert data. <button class="btn btn-sm btn-primary ms-2" onclick="loadEmployeeCertsData()">Retry</button></div>';
-            document.getElementById('employeeCertsContainer').innerHTML = '';
-            return;
-          }
-          // ScriptProperties pattern: data may be stored server-side
-          if (data.stored) {
-            console.log('loadEmployeeCertsData: data stored server-side (' + data.employeeCount + ' employees), fetching...');
-            google.script.run
-              .withSuccessHandler(function(fullData) {
-                console.log('loadEmployeeCertsData: SUCCESS, got', (fullData && fullData.employees ? fullData.employees.length : 0), 'employees');
-                if (fullData && fullData.employees && fullData.employees.length > 0) {
-                  renderCertStatusOverview(fullData.employees);
-                  renderEmployeeCerts(fullData.employees);
-                  updateCertsSummary(fullData.summary);
-                } else {
-                  document.getElementById('certStatusOverview').innerHTML = '<div class="alert alert-warning">No data available. <button class="btn btn-sm btn-primary ms-2" onclick="loadEmployeeCertsData()">Retry</button></div>';
-                  document.getElementById('employeeCertsContainer').innerHTML = '<div class="alert alert-warning">No data returned. Please check if the Expiring Certs sheet has data. <button class="btn btn-sm btn-primary ms-2" onclick="loadEmployeeCertsData()">Retry</button></div>';
-                }
-              })
-              .withFailureHandler(function(error) {
-                console.error('loadEmployeeCertsData fetch error', error);
-                document.getElementById('certStatusOverview').innerHTML = '<div class="alert alert-danger">Error fetching stored data: ' + error + '</div>';
-              })
-              .getStoredExpiringCertsData();
-            return;
-          }
-          // Inline response (small enough to return directly)
-          console.log('loadEmployeeCertsData: SUCCESS (inline), got', (data.employees ? data.employees.length : 0), 'employees');
-          if (data && data.employees && data.employees.length > 0) {
-            renderCertStatusOverview(data.employees);
-            renderEmployeeCerts(data.employees);
-            updateCertsSummary(data.summary);
-          } else {
-            document.getElementById('certStatusOverview').innerHTML = '<div class="alert alert-warning">No data available. <button class="btn btn-sm btn-primary ms-2" onclick="loadEmployeeCertsData()">Retry</button></div>';
-            document.getElementById('employeeCertsContainer').innerHTML = '<div class="alert alert-warning">No data returned. Please check if the Expiring Certs sheet has data. <button class="btn btn-sm btn-primary ms-2" onclick="loadEmployeeCertsData()">Retry</button></div>';
-          }
-        })
-        .withFailureHandler(function(error) {
-          clearTimeout(timeoutId);
-          console.error('loadEmployeeCertsData: ERROR', error);
-          document.getElementById('certStatusOverview').innerHTML = '<div class="alert alert-danger">Error loading data: ' + error + ' <button class="btn btn-sm btn-primary ms-2" onclick="loadEmployeeCertsData()">Retry</button></div>';
-          document.getElementById('employeeCertsContainer').innerHTML = '<div class="alert alert-danger">Error loading data: ' + error + ' <button class="btn btn-sm btn-primary ms-2" onclick="loadEmployeeCertsData()">Retry</button></div>';
-        })
-        .getExpiringCertsForConfig();
-    }
-
-    // Global storage for employees by cert type and status
-    var certEmployeesByTypeStatus = {};
-
-    function renderCertStatusOverview(employees) {
-      var container = document.getElementById('certStatusOverview');
-
-      // Aggregate stats by cert type AND store employee lists
-      var certStats = {};
-      certEmployeesByTypeStatus = {}; // Reset
-
-      employees.forEach(function(emp) {
-        if (emp.certs) {
-          emp.certs.forEach(function(cert) {
-            var type = cert.type || 'Unknown';
-            if (!certStats[type]) {
-              certStats[type] = { total: 0, expired: 0, critical: 0, warning: 0, ok: 0 };
-              certEmployeesByTypeStatus[type] = { expired: [], critical: [], warning: [], ok: [] };
-            }
-            certStats[type].total++;
-            var status = (cert.status || '').toUpperCase();
-
-            var empInfo = {
-              name: emp.name,
-              location: emp.location || '',
-              expiration: cert.expiration,
-              daysUntil: cert.daysUntil,
-              status: cert.status
-            };
-
-            if (status === 'EXPIRED' || status.indexOf('EXPIRED') !== -1) {
-              certStats[type].expired++;
-              certEmployeesByTypeStatus[type].expired.push(empInfo);
-            } else if (status === 'CRITICAL') {
-              certStats[type].critical++;
-              certEmployeesByTypeStatus[type].critical.push(empInfo);
-            } else if (status === 'WARNING') {
-              certStats[type].warning++;
-              certEmployeesByTypeStatus[type].warning.push(empInfo);
-            } else if (status === 'OK' || status === 'NO DATE SET' || status.indexOf('NON-EXPIRING') !== -1) {
-              certStats[type].ok++;
-              certEmployeesByTypeStatus[type].ok.push(empInfo);
-            }
-          });
-        }
-      });
-
-      // Sort cert types by urgency (most expired/critical first)
-      var sortedTypes = Object.keys(certStats).sort(function(a, b) {
-        var urgencyA = certStats[a].expired * 100 + certStats[a].critical * 10;
-        var urgencyB = certStats[b].expired * 100 + certStats[b].critical * 10;
-        return urgencyB - urgencyA;
-      });
-
-      if (sortedTypes.length === 0) {
-        container.innerHTML = '<p class="text-muted text-center">No certification data available.</p>';
-        return;
-      }
-
-      var html = '<div class="row">';
-      sortedTypes.forEach(function(type) {
-        var stats = certStats[type];
-        var escapedType = type.replace(/'/g, "\\'");
-        html += '<div class="col-md-6 col-lg-4 mb-2">';
-        html += '<div class="cert-overview-card">';
-        html += '<h6>' + type + '</h6>';
-        html += '<div class="cert-overview-stats">';
-        if (stats.expired > 0) html += '<span class="cert-stat cert-stat-expired" onclick="showCertEmployees(\'' + escapedType + '\', \'expired\')">🔴 ' + stats.expired + ' Expired</span>';
-        if (stats.critical > 0) html += '<span class="cert-stat cert-stat-critical" onclick="showCertEmployees(\'' + escapedType + '\', \'critical\')">🟠 ' + stats.critical + ' Critical</span>';
-        if (stats.warning > 0) html += '<span class="cert-stat cert-stat-warning" onclick="showCertEmployees(\'' + escapedType + '\', \'warning\')">🟡 ' + stats.warning + ' Warning</span>';
-        if (stats.ok > 0) html += '<span class="cert-stat cert-stat-ok" onclick="showCertEmployees(\'' + escapedType + '\', \'ok\')">🟢 ' + stats.ok + ' OK</span>';
-        html += '<span class="cert-stat cert-stat-total">' + stats.total + ' Total</span>';
-        html += '</div></div></div>';
-      });
-      html += '</div>';
-
-      container.innerHTML = html;
-    }
-
-    function showCertEmployees(certType, status) {
-      var employees = certEmployeesByTypeStatus[certType] && certEmployeesByTypeStatus[certType][status];
-
-      if (!employees || employees.length === 0) {
-        return;
-      }
-
-      // Store current cert info for add to checklist feature
-      currentCertModalInfo = {
-        certType: certType,
-        status: status,
-        employees: employees
-      };
-
-      // Set modal header color and title based on status
-      var headerEl = document.getElementById('certEmployeeModalHeader');
-      var titleEl = document.getElementById('certEmployeeModalLabel');
-      var statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
-
-      titleEl.textContent = certType + ' - ' + statusLabel + ' (' + employees.length + ')';
-
-      if (status === 'expired') {
-        headerEl.style.background = 'linear-gradient(135deg, #c5221f 0%, #ea4335 100%)';
-      } else if (status === 'critical') {
-        headerEl.style.background = 'linear-gradient(135deg, #b06000 0%, #f9ab00 100%)';
-      } else if (status === 'warning') {
-        headerEl.style.background = 'linear-gradient(135deg, #856404 0%, #ffc107 100%)';
-      } else {
-        headerEl.style.background = 'linear-gradient(135deg, #137333 0%, #34a853 100%)';
-      }
-
-      // Sort employees by days until expiration (most urgent first)
-      employees.sort(function(a, b) {
-        if (a.daysUntil === null) return 1;
-        if (b.daysUntil === null) return -1;
-        return a.daysUntil - b.daysUntil;
-      });
-
-      // Build employee list HTML
-      var html = '';
-      employees.forEach(function(emp, index) {
-        var dateStr = '';
-        if (emp.expiration) {
-          try {
-            var d = new Date(emp.expiration);
-            if (!isNaN(d.getTime())) {
-              dateStr = (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
-            } else {
-              dateStr = String(emp.expiration);
-            }
-          } catch(e) {
-            dateStr = String(emp.expiration);
-          }
-        }
-
-        var daysText = '';
-        if (emp.daysUntil !== null && emp.daysUntil !== undefined) {
-          if (emp.daysUntil < 0) {
-            daysText = '<span class="text-danger">(' + Math.abs(emp.daysUntil) + ' days ago)</span>';
-          } else if (emp.daysUntil === 0) {
-            daysText = '<span class="text-danger">(Today)</span>';
-          } else {
-            daysText = '<span class="text-muted">(' + emp.daysUntil + ' days)</span>';
-          }
-        }
-
-        html += '<div class="cert-employee-item">';
-        html += '<div style="flex: 1;">';
-        html += '<div class="cert-employee-name">' + emp.name + '</div>';
-        if (emp.location) {
-          html += '<div class="cert-employee-location">' + emp.location + '</div>';
-        }
-        html += '</div>';
-        html += '<div class="text-end me-2">';
-        if (dateStr) {
-          html += '<div class="cert-employee-date">' + dateStr + '</div>';
-        }
-        if (daysText) {
-          html += '<div class="cert-employee-days">' + daysText + '</div>';
-        }
-        html += '</div>';
-        html += '<div>';
-        html += '<button class="btn btn-sm btn-outline-primary" onclick="addCertToChecklist(' + index + ')" title="Add to My Checklist"><i class="bi bi-plus-circle"></i></button>';
-        html += '</div>';
-        html += '</div>';
-      });
-
-      document.getElementById('certEmployeeList').innerHTML = html;
-
-      // Show the modal
-      var modal = new bootstrap.Modal(document.getElementById('certEmployeeModal'));
-      modal.show();
-    }
-
-    function addCertToChecklist(empIndex) {
-      if (!currentCertModalInfo || !currentCertModalInfo.employees[empIndex]) {
-        showToast('Error: Could not find employee data', 'error');
-        return;
-      }
-
-      var emp = currentCertModalInfo.employees[empIndex];
-      var certType = currentCertModalInfo.certType;
-      var status = currentCertModalInfo.status;
-
-      // Create a unique key for this cert task
-      var taskKey = emp.name + '|' + certType;
-
-      // Check if already in checklist (stored in localStorage)
-      var existingChecklist = [];
-      try {
-        var stored = localStorage.getItem('toDoScheduleChecklist');
-        if (stored) {
-          existingChecklist = JSON.parse(stored);
-        }
-      } catch(e) {
-        existingChecklist = [];
-      }
-
-      // Check for duplicate
-      var isDuplicate = existingChecklist.some(function(item) {
-        return item.employee === emp.name && item.itemType === certType;
-      });
-
-      if (isDuplicate) {
-        showToast('⚠️ ' + emp.name + ' - ' + certType + ' is already in your checklist!', 'warning');
-        return;
-      }
-
-      // Create checklist item
-      var checklistItem = {
-        id: Date.now(),
-        employee: emp.name,
-        taskType: 'Cert Expiring',
-        itemType: certType,
-        location: emp.location || '',
-        scheduledDate: '',
-        source: 'Expiring Certs',
-        subject: 'Follow up on ' + certType,
-        addedDate: new Date().toISOString().split('T')[0],
-        completed: false
-      };
-
-      // Add to checklist
-      existingChecklist.push(checklistItem);
-      localStorage.setItem('toDoScheduleChecklist', JSON.stringify(existingChecklist));
-
-      // Also mark as office task
-      var officeTasks = {};
-      try {
-        var storedOffice = localStorage.getItem('toDoScheduleOfficeTasks');
-        if (storedOffice) {
-          officeTasks = JSON.parse(storedOffice);
-        }
-      } catch(e) {
-        officeTasks = {};
-      }
-      officeTasks[taskKey] = true;
-      localStorage.setItem('toDoScheduleOfficeTasks', JSON.stringify(officeTasks));
-
-      showToast('✓ Added ' + emp.name + ' - ' + certType + ' to My Checklist with Office status');
-    }
-
-    function renderEmployeeCerts(employees) {
-      var container = document.getElementById('employeeCertsContainer');
-      allEmployeesData = employees; // Store for later use
-
-      if (!employees || employees.length === 0) {
-        container.innerHTML = '<p class="text-muted text-center">No certification data found. Import certifications to get started.</p>';
-        return;
-      }
-
-      var html = '';
-      employees.forEach(function(emp, index) {
-        var badges = '';
-        if (emp.summary.expired > 0) badges += '<span class="cert-badge cert-badge-expired">' + emp.summary.expired + ' Exp</span>';
-        if (emp.summary.critical > 0) badges += '<span class="cert-badge cert-badge-critical">' + emp.summary.critical + ' Crit</span>';
-        badges += '<span class="cert-badge cert-badge-ok">' + emp.summary.total + '</span>';
-
-        html += '<div class="employee-cert-card">';
-        html += '<div class="employee-cert-header" onclick="toggleEmployeeCerts(' + index + ')">';
-        html += '<div><strong style="font-size: 13px;">' + emp.name + '</strong>' + badges + '</div>';
-        html += '<i class="bi bi-chevron-down" id="chevron-' + index + '" style="font-size: 12px;"></i>';
-        html += '</div>';
-        html += '<div class="employee-cert-body" id="certs-' + index + '">';
-
-        if (emp.certs && emp.certs.length > 0) {
-          html += '<table class="table table-sm cert-table">';
-          html += '<thead><tr><th>Cert</th><th>Expiration</th><th>Days</th><th>Status</th></tr></thead>';
-          html += '<tbody>';
-          emp.certs.forEach(function(cert, certIndex) {
-            var dateValue = formatDateForInput(cert.expiration);
-            var certKey = emp.name + '|' + cert.type;
-
-            html += '<tr>';
-            html += '<td style="font-size: 11px;">' + cert.type + '</td>';
-            html += '<td><input type="date" class="date-input-small" value="' + dateValue + '" onchange="onCertDateChange(\'' + escapeQuotes(emp.name) + '\', \'' + escapeQuotes(cert.type) + '\', this.value, this)">';
-            html += '</td>';
-            html += '<td style="font-size: 11px;">' + (cert.daysUntil !== null ? cert.daysUntil : '-') + '</td>';
-            html += '<td><span class="badge bg-' + getStatusColor(cert.status) + '" style="font-size: 9px;">' + cert.status + '</span></td>';
-            html += '</tr>';
-          });
-          html += '</tbody></table>';
-        } else {
-          html += '<p class="text-muted small">No certifications found</p>';
-        }
-
-        html += '</div>';
-        html += '</div>';
-      });
-
-      container.innerHTML = html;
-    }
-
-    function escapeQuotes(str) {
-      return str.replace(/'/g, "\\'").replace(/"/g, '\\"');
-    }
+    // Note: Tab event listeners are defined at the bottom of the script to ensure all functions exist
 
     function formatDateForInput(dateVal) {
       if (!dateVal || dateVal === 'N/A' || dateVal === 'Non-Expiring') return '';
@@ -1272,53 +517,6 @@
       }
       return '';
     }
-
-    function onCertDateChange(employeeName, certType, newDate, inputElement) {
-      var key = employeeName + '|' + certType;
-      certDateChanges[key] = {
-        employee: employeeName,
-        certType: certType,
-        newDate: newDate
-      };
-      inputElement.classList.add('changed');
-      setUnsaved(true);
-    }
-
-    function toggleEmployeeCerts(index) {
-      var body = document.getElementById('certs-' + index);
-      var chevron = document.getElementById('chevron-' + index);
-      if (body.classList.contains('show')) {
-        body.classList.remove('show');
-        chevron.className = 'bi bi-chevron-down';
-      } else {
-        body.classList.add('show');
-        chevron.className = 'bi bi-chevron-up';
-      }
-    }
-
-    function updateCertsSummary(summary) {
-      document.getElementById('totalCertHolders').textContent = summary.totalEmployees || 0;
-      document.getElementById('priorityCount').textContent = summary.priorityCount || 0;
-      document.getElementById('expiredCount').textContent = summary.expiredCount || 0;
-    }
-
-    function getStatusColor(status) {
-      var colors = {
-        'EXPIRED': 'danger',
-        'CRITICAL': 'warning',
-        'WARNING': 'warning',
-        'UPCOMING': 'info',
-        'OK': 'success',
-        'Non-Expiring': 'secondary',
-        'PRIORITY - Need Copy': 'danger'
-      };
-      return colors[status] || 'secondary';
-    }
-
-    // Load config on page load
-    loadConfig();
-
-    // Note: Tab event listeners are defined at the bottom of the script to ensure all functions exist
 
     // ================== EXCLUDED JOB PREFIXES FUNCTIONS ==================
     var excludedPrefixes = [];
@@ -1705,139 +903,6 @@
         })
         .saveTrainingConfig(selected);
     }
-
-    // ================== CREW VISIT CONFIG FUNCTIONS ==================
-    var crewVisitData = [];
-
-    function loadCrewVisitConfig() {
-      console.log('loadCrewVisitConfig: Starting...');
-
-      var timeoutId = setTimeout(function() {
-        var container = document.getElementById('crewVisitContainer');
-        if (container && container.innerHTML.indexOf('Loading') !== -1) {
-          container.innerHTML = '<div class="alert alert-warning">Loading is taking longer than expected. <button class="btn btn-sm btn-primary ms-2" onclick="loadCrewVisitConfig()">Retry</button></div>';
-        }
-      }, 10000);
-
-      google.script.run
-        .withSuccessHandler(function(data) {
-          clearTimeout(timeoutId);
-          console.log('loadCrewVisitConfig: SUCCESS, got', (data ? data.length : 0), 'crews');
-          crewVisitData = data || [];
-          renderCrewVisitTable(crewVisitData);
-        })
-        .withFailureHandler(function(error) {
-          clearTimeout(timeoutId);
-          console.error('loadCrewVisitConfig: ERROR', error);
-          document.getElementById('crewVisitContainer').innerHTML =
-            '<div class="alert alert-danger">Error loading crew visit config: ' + error + ' <button class="btn btn-sm btn-primary ms-2" onclick="loadCrewVisitConfig()">Retry</button></div>';
-        })
-        .getCrewVisitConfig();
-    }
-
-    function renderCrewVisitTable(crews) {
-      var container = document.getElementById('crewVisitContainer');
-
-      if (!crews || crews.length === 0) {
-        container.innerHTML = '<div class="alert alert-warning">No crews found. Click "Refresh from Employees" to populate.</div>';
-        return;
-      }
-
-      var html = '<table class="table table-sm table-hover crew-visit-table">';
-      html += '<thead><tr>';
-      html += '<th>Crew #</th>';
-      html += '<th>Location</th>';
-      html += '<th>Crew Lead</th>';
-      html += '<th>Size</th>';
-      html += '<th>Frequency</th>';
-      html += '<th>Est. Time</th>';
-      html += '<th>Last Visit</th>';
-      html += '<th>Next Visit</th>';
-      html += '<th>Drive Time</th>';
-      html += '<th>Priority</th>';
-      html += '</tr></thead>';
-      html += '<tbody>';
-
-      crews.forEach(function(crew, index) {
-        html += '<tr data-index="' + index + '">';
-        html += '<td><strong>' + (crew.jobNumber || '') + '</strong></td>';
-        html += '<td>' + (crew.location || '') + '</td>';
-        html += '<td>' + (crew.crewLead || '') + '</td>';
-        html += '<td>' + (crew.crewSize || '') + '</td>';
-
-        // Frequency dropdown
-        html += '<td><select class="form-select form-select-sm" onchange="onCrewVisitChange(' + index + ', \'frequency\', this.value)">';
-        ['Weekly', 'Bi-Weekly', 'Monthly', 'Quarterly'].forEach(function(freq) {
-          var selected = (crew.frequency === freq) ? 'selected' : '';
-          html += '<option value="' + freq + '" ' + selected + '>' + freq + '</option>';
-        });
-        html += '</select></td>';
-
-        // Est. Visit Time
-        html += '<td><input type="number" class="form-control form-control-sm crew-input" value="' + (crew.estVisitTime || 60) + '" min="15" step="15" onchange="onCrewVisitChange(' + index + ', \'estVisitTime\', this.value)"></td>';
-
-        // Last Visit Date
-        html += '<td><input type="date" class="form-control form-control-sm crew-input-date" value="' + formatDateForInput(crew.lastVisit) + '" onchange="onCrewVisitChange(' + index + ', \'lastVisit\', this.value)"></td>';
-
-        // Next Visit Date
-        html += '<td><input type="date" class="form-control form-control-sm crew-input-date" value="' + formatDateForInput(crew.nextVisit) + '" onchange="onCrewVisitChange(' + index + ', \'nextVisit\', this.value)"></td>';
-
-        // Drive Time
-        html += '<td><input type="number" class="form-control form-control-sm crew-input" value="' + (crew.driveTime || 0) + '" min="0" step="15" onchange="onCrewVisitChange(' + index + ', \'driveTime\', this.value)"></td>';
-
-        // Priority dropdown
-        html += '<td><select class="form-select form-select-sm" onchange="onCrewVisitChange(' + index + ', \'priority\', this.value)">';
-        ['High', 'Medium', 'Low'].forEach(function(pri) {
-          var selected = (crew.priority === pri) ? 'selected' : '';
-          html += '<option value="' + pri + '" ' + selected + '>' + pri + '</option>';
-        });
-        html += '</select></td>';
-
-        html += '</tr>';
-      });
-
-      html += '</tbody></table>';
-      container.innerHTML = html;
-    }
-
-    function onCrewVisitChange(index, field, value) {
-      if (crewVisitData[index]) {
-        crewVisitData[index][field] = value;
-        setUnsaved(true);
-      }
-    }
-
-    function saveCrewVisitConfig() {
-      google.script.run
-        .withSuccessHandler(function(result) {
-          setUnsaved(false);
-          showToast('Crew visit config saved!', 'success');
-        })
-        .withFailureHandler(function(error) {
-          showToast('Error saving crew visit config: ' + error, 'error');
-        })
-        .saveCrewVisitConfig(crewVisitData);
-    }
-
-    function refreshCrewVisitConfig() {
-      if (confirm('This will refresh crew data from the Employees sheet. Any unsaved changes will be lost. Continue?')) {
-        document.getElementById('crewVisitContainer').innerHTML =
-          '<div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div><p class="text-muted small mt-2">Refreshing...</p></div>';
-
-        google.script.run
-          .withSuccessHandler(function(data) {
-            crewVisitData = data || [];
-            renderCrewVisitTable(crewVisitData);
-            showToast('Crew visit config refreshed!', 'success');
-          })
-          .withFailureHandler(function(error) {
-            showToast('Error refreshing: ' + error, 'error');
-            loadCrewVisitConfig(); // Try to reload existing data
-          })
-          .refreshCrewVisitConfigFromEmployees();
-      }
-    }
-
 
     // ================== TRAINING CONFIG FUNCTIONS ==================
     var trainingConfigData = [];
@@ -2296,26 +1361,19 @@
     }
 
     // ================== TAB EVENT LISTENERS ==================
-    // Settings tab - load Crew Visit Config and Training data
+    // Settings tab - load Training data
     document.getElementById('settings-tab').addEventListener('shown.bs.tab', function() {
-      loadCrewVisitConfig();
       loadTrainingConfig();
       loadExpiringCertsConfig();
       loadTrainingConfigData();
       loadTrainingTrackingData();
     });
 
-    // Expiring Certs tab - load employee cert data
-    document.getElementById('certs-tab').addEventListener('shown.bs.tab', function() {
-      loadEmployeeCertsData();
-    });
-
     // ================== INITIAL DATA LOAD ==================
     // Preload data for all tabs when the dialog opens
     // This ensures data is available even if the user hasn't clicked on a tab yet
     setTimeout(function() {
-      // Load Settings tab data (Crew Visit Config + Training)
-      loadCrewVisitConfig();
+      // Load Settings tab data (Training)
       loadTrainingConfig();
       loadExpiringCertsConfig();
       loadTrainingConfigData();

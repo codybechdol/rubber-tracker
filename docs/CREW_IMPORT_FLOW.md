@@ -35,7 +35,8 @@ The dialog uses a visible **step progress bar** at the top. Each circle turns **
 |---|---|---|
 | 1 → 2 | Upload complete | Auto when SheetJS finishes parsing tabs |
 | 2 → 3 | Tab clicked | Auto when `parseCrewCards()` completes |
-| 3 → 4 | New jobs handled | Auto when last new-job card is confirmed or skipped |
+| 3 → 3.5 | New jobs handled | Auto when last new-job card is confirmed or skipped |
+| 3.5 → 4 | Pending Start jobs with employees | **Auto** if none; **"Activate Pending Jobs?"** dialog if any Pending Start jobs have real employees this week — user confirms activation before matching runs |
 | 4 → 5 | New employees handled | Auto when `refreshEmployeesAndContinue()` completes |
 | 5 → 6 | Unmatched + dupes resolved | **Auto** if both sections are empty; **Manual "Continue →" button** if any remain |
 | 6 → 7 | Special circumstances handled | Always **manual "Continue to Crew Cards →" button** (server calls involved) |
@@ -66,9 +67,23 @@ The dialog uses a visible **step progress bar** at the top. Each circle turns **
 - **Triggered when:** A job number in the Excel file is not found in the Job Tracking sheet
 - User provides: **Job Name** (project/site), **Location** (city dropdown)
 - Buttons: **Add to Job Tracking & Continue** | **Skip**
-- After handling → moves to Step 4
+- After handling → moves to Step 3.5
 
 **Skipped automatically if:** all job numbers are already in Job Tracking.
+
+### Step 3.5 — Activate Pending Start Jobs? *(conditional)*
+
+- **Triggered when:** Any **Pending Start** job in Job Tracking has real employees assigned in this week's Excel
+- Shows a dialog listing each such job with a checkbox (checked by default)
+- **Checked = Activate Now** — `jobTrackingData` updated locally so `finishMatching()` includes their employees in proposed changes. Server activates the job in Job Tracking during `applyCrewChanges`.
+- **Unchecked = Keep as Pending Start** — employees for that crew are skipped (existing behavior)
+- **"Keep All Pending" cancel** — skips all activations, proceeds to matching
+- Contractor/boring-company rows (e.g., "Big Sky Utilities Boring") are excluded when counting real employees
+
+**Why this step must come BEFORE matching:**  
+`finishMatching()` skips Pending Start crews entirely. If the user wants those employees moved this week, the job must be flipped to Active *before* matching runs. The post-apply dialog that previously handled this only updated Job Tracking status — it could never retroactively generate the employee-move changes.
+
+**Skipped automatically if:** no Pending Start jobs have real employees in the Excel.
 
 ### Step 4 — Add New Employees *(conditional)*
 
@@ -148,9 +163,11 @@ After all lead dialogs are resolved → automatically shows Step 8.
 
 **If no crew changes detected:** Button shows **"Finish & Sync"** — still syncs Job Tracking (foremen, schedules, job activation dates).
 
-**Post-apply — Pending Jobs dialog:** If any imported crew matches a Pending Start or On Hold job, a dialog asks which jobs to activate:
+**Post-apply — Pending Jobs dialog:** If any imported crew matches an **On Hold** job that is returning soon and wasn't handled earlier, a dialog asks which jobs to activate:
 - Checked = Confirm Return / Activate Now
 - Unchecked = Keep as-is (auto-activates on scheduled date)
+
+*(Pending Start jobs with employees are now handled pre-apply in Step 3.5 — they will not appear here.)*
 
 ---
 
@@ -183,6 +200,7 @@ This prevents stale data from a previous tab's parse from mixing with the new ta
 | `proposedChanges` | Array | Final list of changes to apply (location, job#, classification) |
 | `crewLeadSelections` | Object | `{jobNumber: selectedEmployeeName}` — remembered across tab switches |
 | `savedDuplicateSelections` | Object | Persisted to server via `saveCrewImportDuplicateSelections()` |
+| `_earlyActivatedJobs` | Array | Job numbers the user confirmed activating in Step 3.5. Passed to server via `earlyActivatedJobs` field on first change; cleared on tab switch |
 
 ---
 
@@ -201,7 +219,9 @@ This prevents stale data from a previous tab's parse from mixing with the new ta
 | `checkForNewHires()` | Step 4 | Scans `parsedCrews` for NEW HIRE entries |
 | `showNewHiresSection()` | Step 4 | Renders hire cards, history lookup |
 | `refreshEmployeesAndContinue()` | Step 4 | Reloads employees after adding → `continueAfterNewJobs()` |
-| `continueAfterNewJobs()` | Step 5 | Runs `filterSpecialCircumstancesAlreadyMatched()` + `preResolveObviousDuplicates()` + `matchEmployeesToSheet()` |
+| `continueAfterNewJobs()` | Step 3.5 | Runs `filterSpecialCircumstancesAlreadyMatched()` + `preResolveObviousDuplicates()`, then checks for Pending Start jobs with employees. Shows `showEarlyActivationDialog()` if any; else calls `matchEmployeesToSheet()` directly |
+| `detectPendingJobsWithEmployees()` | Step 3.5 | Scans `parsedCrews` for Pending Start jobs with ≥1 real employee (excludes boring/contractor rows) |
+| `showEarlyActivationDialog()` | Step 3.5 | Dialog to activate Pending Start jobs before matching. Updates `jobTrackingData` locally and sets `_earlyActivatedJobs` for server-side activation in `applyCrewChanges` |
 | `matchEmployeesToSheet()` | Step 5 | Fuzzy-matches names, finds duplicates/unmatched |
 | `showDuplicateSelectionUI()` | Step 5 | Renders duplicate resolution cards |
 | `resolveDuplicates()` | Step 5 | Saves selections, calls `finishMatching()` → `checkAutoProgressToSpecial()` |
@@ -304,6 +324,8 @@ Position suffixes are assigned by this priority order: lead gets `.1`, remaining
 
 | Symptom | Likely Cause | Fix |
 |---|---|---|
+| "Confirm Absent Crew Lead" dialog fires for a Completed job | `detectCrewsWithMultipleLeads()` checked absent leads from Employees sheet without filtering Completed jobs. Ryan Taylor still shows as `044-26.1` on Employees sheet until import applies. | Fixed (June 2026): Added early-exit for Completed and non-activated Pending Start jobs in `detectCrewsWithMultipleLeads()` before absent-lead check runs. |
+| Pending Start crew employees not moved during import | Activation dialog was post-apply; `finishMatching()` had already skipped them | Fixed (June 2026): activation dialog now fires in Step 3.5, before `matchEmployeesToSheet()`. `jobTrackingData` updated locally so employees are included in proposed changes. |
 | Employee not appearing in crew lead dialog | They're in Time Off section (absent this week) but established lead on sheet | Fixed: `detectCrewsWithMultipleLeads()` now includes absent leads from Employees sheet |
 | Auto-applied special cards repeating on tab switch | `_autoSelectionsAppliedForTab` guard was not tab-aware | Fixed: guard checks both flag AND current tab name |
 | Light Duty job numbers incrementing on each parse | `applySpecialCircumstanceUpdate()` allocated new 005- number each call | Fixed: checks if employee already has 005- prefix job before allocating |
@@ -316,6 +338,7 @@ Position suffixes are assigned by this priority order: lead gets `.1`, remaining
 
 | Date | Change |
 |---|---|
+| **June 1, 2026** | Added Step 3.5 — early Pending Start job activation dialog. Fires BEFORE `matchEmployeesToSheet()` so employees of activated jobs are included in proposed changes. `_earlyActivatedJobs` array tracks selections and passes them to server (`earlyActivatedJobs` field on changes payload). `syncJobTrackingAfterImport` activates those jobs server-side instead of returning them in `pendingJobs`. Post-apply dialog now only covers On Hold jobs. |
 | **May 17, 2026** | Persistent crew lead selections: saved to ScriptProperties (`CREW_IMPORT_LEAD_SELECTIONS`), auto-applied on next import, "Remember" checkbox in dialog. Nickname/variant deduplication for absent leads. `_currentWizardStep` tracking to guard against backwards wizard reset. "Not an Employee" button replaces "Skip" for unmatched rows. Expanded `isEmployeeName()` to reject more "Crew in/at/to/from" annotations. Menu cleanup: removed legacy one-time migration items from all submenus. |
 | **May 16, 2026** | Redesigned as 8-step wizard. Removed auto-tab-select. Reordered sections: Unmatched → Special → Crew Cards (was: Crew Cards → Special → Unmatched). Added tab-reset on re-selection. Added absent-lead support in crew lead dialog. Added two explicit Continue buttons (Step 5→6, Step 6→7). |
 | **April 2026** | Added null-guard fixes for `specialCircumstances` array. Added `_autoSelectionsAppliedForTab` guard for tab-aware auto-apply. Fixed Light Duty job number increments. |

@@ -131,11 +131,15 @@ function upgradePickListItems() {
         var employeeSize = (swapData[row][2] || '').toString().trim(); // Column C - Size
         var pickListBgColor = (swapBackgrounds[row][6] || '').toString().toLowerCase(); // Column G background
 
-        // Skip header rows and empty rows
-        if (!employeeName || employeeName === 'Employee' ||
+        // Skip header rows and empty rows.
+        // Real employee rows always have a current item number in column B.
+        // Merged location/foreman header rows have empty column B (merged cells).
+        var currentItemNum = (swapData[row][1] || '').toString().trim();
+        if (!employeeName || !currentItemNum ||
+            employeeName === 'Employee' ||
             employeeName.indexOf('Class') !== -1 ||
             employeeName.indexOf('STAGE') !== -1 ||
-            employeeName.indexOf('📍') !== -1) {
+            employeeName === 'No swaps due for this class') {
           continue;
         }
 

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    * { box-sizing: border-box; font-family: 'Google Sans', Arial, sans-serif; }
+    body { margin: 0; padding: 20px; background: #f8f9fa; }
+    h2 { color: #1a73e8; margin: 0 0 6px 0; font-size: 16px; font-weight: 500; }
+    .subtitle { font-size: 11px; color: #5f6368; margin-bottom: 20px; }
+    .step {
+      display: flex; align-items: flex-start; margin-bottom: 14px;
+      background: white; border: 1px solid #dadce0; border-radius: 8px; padding: 12px 14px;
+    }
+    .step.running { border-color: #1a73e8; background: #e8f0fe; }
+    .step.done { border-color: #34a853; background: #e6f4ea; }
+    .step.error { border-color: #ea4335; background: #fce8e6; }
+    .icon {
+      width: 28px; height: 28px; border-radius: 50%; display: flex;
+      align-items: center; justify-content: center; font-size: 13px;
+      font-weight: 700; flex-shrink: 0; margin-right: 12px; margin-top: 1px;
+      background: #dadce0; color: #5f6368;
+    }
+    .step.running .icon { background: #1a73e8; color: white; animation: spin 1s linear infinite; }
+    .step.done .icon { background: #34a853; color: white; }
+    .step.error .icon { background: #ea4335; color: white; }
+    @keyframes spin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
+    .step-title { font-size: 13px; font-weight: 500; color: #202124; }
+    .step.running .step-title { color: #1a73e8; }
+    .step.done .step-title { color: #137333; }
+    .step.error .step-title { color: #c5221f; }
+    .step-sub { font-size: 11px; color: #5f6368; margin-top: 2px; }
+    .step-msg { font-size: 11px; color: #5f6368; margin-top: 4px; font-style: italic; }
+    .step.error .step-msg { color: #c5221f; font-style: normal; }
+    .footer { margin-top: 20px; text-align: center; }
+    .close-btn {
+      padding: 10px 28px; background: #1a73e8; color: white; border: none;
+      border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; display: none;
+    }
+    .close-btn:hover { background: #1557b0; }
+    .close-btn.show { display: inline-block; }
+    .overall-msg { font-size: 13px; font-weight: 500; text-align: center; margin-bottom: 10px; display: none; }
+    .overall-msg.show { display: block; }
+    .overall-msg.success { color: #137333; }
+    .overall-msg.error { color: #c5221f; }
+    .progress-bar-wrap { background: #dadce0; border-radius: 4px; height: 6px; margin-bottom: 18px; overflow: hidden; }
+    .progress-bar { background: #1a73e8; height: 6px; width: 0%; transition: width 0.4s ease; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h2>📊 Generate All Reports</h2>
+  <div class="subtitle">Running in 3 parts to avoid timeout — each part has its own time window.</div>
+
+  <div class="progress-bar-wrap"><div class="progress-bar" id="progressBar"></div></div>
+
+  <div class="step" id="step1">
+    <div class="icon" id="icon1">1</div>
+    <div>
+      <div class="step-title">Fix Dates · Sync Inventory · Generate Swap Reports</div>
+      <div class="step-sub">Gloves, Sleeves, Blankets — change-out dates, inventory locations</div>
+      <div class="step-msg" id="msg1">Waiting…</div>
+    </div>
+  </div>
+
+  <div class="step" id="step2">
+    <div class="icon" id="icon2">2</div>
+    <div>
+      <div class="step-title">Pick List Upgrades · Specialty Swaps · Reports</div>
+      <div class="step-sub">HV Testers, Phasing Sets, AED — Reclaims, Purchase Needs, Inventory</div>
+      <div class="step-msg" id="msg2">Waiting…</div>
+    </div>
+  </div>
+
+  <div class="step" id="step3">
+    <div class="icon" id="icon3">3</div>
+    <div>
+      <div class="step-title">Training Sync · Crew Sync</div>
+      <div class="step-sub">Crew leads, missing rows, attendees, Job Tracking foremen</div>
+      <div class="step-msg" id="msg3">Waiting…</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="overall-msg" id="overallMsg"></div>
+    <button class="close-btn" id="closeBtn" onclick="google.script.host.close()">✓ Close</button>
+  </div>
+
+  <script>
+    function setStep(n, state, msg) {
+      var el = document.getElementById('step' + n);
+      var icon = document.getElementById('icon' + n);
+      el.className = 'step ' + state;
+      if (state === 'running') icon.textContent = '↻';
+      else if (state === 'done') icon.textContent = '✓';
+      else if (state === 'error') icon.textContent = '✕';
+      else icon.textContent = n;
+      if (msg) document.getElementById('msg' + n).textContent = msg;
+      document.getElementById('progressBar').style.width =
+        (state === 'done' ? (n / 3 * 100) : ((n - 1) / 3 * 100)) + '%';
+    }
+
+    function runPart1() {
+      setStep(1, 'running', 'Fixing change-out dates, syncing inventory, generating swap reports…');
+      google.script.run
+        .withSuccessHandler(function(res) {
+          setStep(1, 'done', 'Complete.');
+          runPart2();
+        })
+        .withFailureHandler(function(e) {
+          setStep(1, 'error', 'Error: ' + e);
+          showFinalState(false, 'Part 1 failed: ' + e);
+        })
+        .generateAllReportsPart1();
+    }
+
+    function runPart2() {
+      setStep(2, 'running', 'Upgrading pick lists, generating specialty swaps and reports…');
+      google.script.run
+        .withSuccessHandler(function(res) {
+          var msg = 'Complete.';
+          if (res && res.upgradeCount > 0) msg += ' (' + res.upgradeCount + ' pick list item(s) upgraded)';
+          setStep(2, 'done', msg);
+          runPart3();
+        })
+        .withFailureHandler(function(e) {
+          setStep(2, 'error', 'Error: ' + e);
+          showFinalState(false, 'Part 2 failed: ' + e);
+        })
+        .generateAllReportsPart2();
+    }
+
+    function runPart3() {
+      setStep(3, 'running', 'Syncing training tracking and crew foremen…');
+      google.script.run
+        .withSuccessHandler(function(res) {
+          var parts = ['Complete.'];
+          if (res) {
+            if (res.crewLeadsUpdated > 0) parts.push(res.crewLeadsUpdated + ' crew lead(s) updated');
+            if (res.crewsAdded > 0) parts.push(res.crewsAdded + ' training row(s) added');
+            if (res.attendeesRefreshed > 0) parts.push(res.attendeesRefreshed + ' attendee list(s) refreshed');
+            if (res.foremanUpdates > 0) parts.push(res.foremanUpdates + ' foreman(s) synced');
+          }
+          setStep(3, 'done', parts.join(' · '));
+          document.getElementById('progressBar').style.width = '100%';
+          showFinalState(true);
+        })
+        .withFailureHandler(function(e) {
+          setStep(3, 'error', 'Error: ' + e);
+          showFinalState(false, 'Part 3 failed: ' + e);
+        })
+        .generateAllReportsPart3();
+    }
+
+    function showFinalState(success, errMsg) {
+      var msg = document.getElementById('overallMsg');
+      var btn = document.getElementById('closeBtn');
+      msg.className = 'overall-msg show ' + (success ? 'success' : 'error');
+      msg.textContent = success ? '✅ All reports generated successfully!' : ('❌ ' + (errMsg || 'An error occurred.'));
+      btn.className = 'close-btn show';
+    }
+
+    // Auto-start when dialog loads
+    runPart1();
+  </script>
+</body>
+</html>

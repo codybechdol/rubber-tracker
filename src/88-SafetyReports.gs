@@ -2092,8 +2092,13 @@ function calculateComplianceFromLogs(weekStartDate, options) {
 
   // === READ MONTHLY CHECKLIST LOG ===
   var monthlySheet = getMonthlyChecklistLogSheet();
-  var monthStart = new Date(weekBounds.weekStart.getFullYear(), weekBounds.weekStart.getMonth(), 1);
-  var monthEnd = new Date(weekBounds.weekStart.getFullYear(), weekBounds.weekStart.getMonth() + 1, 0, 23, 59, 59);
+  // Use Monday of the week (weekStart + 1 day) as the month reference, NOT Sunday weekStart.
+  // Reason: weeks start on Sunday, but the first actual work day is Monday. When a week spans
+  // a month boundary (e.g., week of 05/31 where Sun=May but Mon-Fri=June), using Sunday's month
+  // would incorrectly credit May checklists to a June compliance week.
+  var mondayOfWeek = new Date(weekBounds.weekStart.getTime() + 24 * 60 * 60 * 1000);
+  var monthStart = new Date(mondayOfWeek.getFullYear(), mondayOfWeek.getMonth(), 1);
+  var monthEnd = new Date(mondayOfWeek.getFullYear(), mondayOfWeek.getMonth() + 1, 0, 23, 59, 59);
 
   if (monthlySheet && monthlySheet.getLastRow() > 1) {
     var monthlyData = monthlySheet.getDataRange().getValues();
@@ -2219,11 +2224,10 @@ function calculateComplianceFromLogs(weekStartDate, options) {
     );
     crew.monthlyChecklistStatus = monthlyStatus.status;
 
-    // If there's a holiday this week and monthly checklist was going to fail, excuse it
-    if (weekHasHoliday && !crew.monthlyChecklist && monthlyStatus.affectsStatus) {
-      crew.monthlyChecklistStatus = 'N/A';
-      monthlyStatus = { status: 'N/A', affectsStatus: false, shouldCreateTask: false };
-    }
+    // NOTE: Holiday excuse for monthly checklist removed (June 2026).
+    // Holidays only excuse the specific JHA day. Monthly checklist is tracked by month,
+    // not by day, so a holiday on one day does NOT excuse the monthly checklist.
+    // (was: if weekHasHoliday && !crew.monthlyChecklist → set N/A)
 
     if (monthlyStatus.affectsStatus && monthlyStatus.shouldCreateTask) {
       missingItems.push('Monthly Checklist');
@@ -2481,18 +2485,23 @@ function refreshSafetyComplianceTooltips() {
 
   if (!sheet || sheet.getLastRow() < 2) {
     Logger.log("refreshSafetyComplianceTooltips: No Safety Compliance data found");
-    return;
+    return 0;
   }
 
   var tz = Session.getScriptTimeZone();
   var data = sheet.getDataRange().getValues();
-  var dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  var numDataRows = data.length - 1; // exclude header
 
-  // Load all log data for lookups
+  if (numDataRows < 1) return 0;
+
+  // Load all log data once into memory (3 API calls total)
   var jhaLog = loadJHALogData();
   var weeklyLog = loadWeeklySafetyLogData();
   var monthlyLog = loadMonthlyChecklistLogData();
 
+  // Build 2D notes array for columns D-L (9 columns, indices 0-8 in this array)
+  // Column D=4, E=5, F=6, G=7, H=8, I=9, J=10 (days 0-6), K=11 (weekly), L=12 (monthly)
+  var notesArray = [];
   var updatedRows = 0;
 
   for (var i = 1; i < data.length; i++) {
@@ -2500,43 +2509,42 @@ function refreshSafetyComplianceTooltips() {
     var weekStart = row[0];
     var jobNumber = String(row[1] || '').trim();
 
-    if (!weekStart || !jobNumber) continue;
-
-    var weekBounds = getWeekBoundaries(new Date(weekStart));
-    var rowNum = i + 1;
-
-    // Add tooltips for each day column (D-J)
-    for (var dayIdx = 0; dayIdx < 7; dayIdx++) {
-      var colIdx = 3 + dayIdx; // Column D=3 (0-based), but getRange uses 1-based so 4+dayIdx
-      var statusIcon = String(row[colIdx] || '').trim();
-
-      // Calculate actual date for this day
-      var dayDate = new Date(weekBounds.weekStart.getTime());
-      dayDate.setDate(dayDate.getDate() + dayIdx);
-
-      // Look up details from JHA Log
-      var details = lookupJHADetails(jhaLog, jobNumber, dayDate, tz);
-
-      var note = buildComplianceCellNote('jha', dayDate, statusIcon, details);
-      sheet.getRange(rowNum, 4 + dayIdx).setNote(note);
+    if (!weekStart || !jobNumber) {
+      // Push empty notes to keep array aligned with sheet rows
+      notesArray.push(['', '', '', '', '', '', '', '', '']);
+      continue;
     }
 
-    // Add tooltip for Weekly Meeting (column K = 11)
+    var weekBounds = getWeekBoundaries(new Date(weekStart));
+    var rowNotes = [];
+
+    // Day columns D-J (7 days)
+    for (var dayIdx = 0; dayIdx < 7; dayIdx++) {
+      var statusIcon = String(row[3 + dayIdx] || '').trim();
+      var dayDate = new Date(weekBounds.weekStart.getTime());
+      dayDate.setDate(dayDate.getDate() + dayIdx);
+      var details = lookupJHADetails(jhaLog, jobNumber, dayDate, tz);
+      rowNotes.push(buildComplianceCellNote('jha', dayDate, statusIcon, details));
+    }
+
+    // Weekly Meeting (column K)
     var weeklyStatus = String(row[10] || '').trim();
     var weeklyDetails = lookupWeeklyMeetingDetails(weeklyLog, jobNumber, weekBounds.weekStart, tz);
-    var weeklyNote = buildComplianceCellNote('weekly', null, weeklyStatus, weeklyDetails);
-    sheet.getRange(rowNum, 11).setNote(weeklyNote);
+    rowNotes.push(buildComplianceCellNote('weekly', null, weeklyStatus, weeklyDetails));
 
-    // Add tooltip for Monthly Checklist (column L = 12)
+    // Monthly Checklist (column L)
     var monthlyStatus = String(row[11] || '').trim();
     var monthlyDetails = lookupMonthlyChecklistDetails(monthlyLog, jobNumber, weekBounds.weekStart, tz);
-    var monthlyNote = buildComplianceCellNote('monthly', null, monthlyStatus, monthlyDetails);
-    sheet.getRange(rowNum, 12).setNote(monthlyNote);
+    rowNotes.push(buildComplianceCellNote('monthly', null, monthlyStatus, monthlyDetails));
 
+    notesArray.push(rowNotes);
     updatedRows++;
   }
 
-  Logger.log("refreshSafetyComplianceTooltips: Added tooltips to " + updatedRows + " rows");
+  // Write ALL notes in a single API call instead of one per cell
+  sheet.getRange(2, 4, numDataRows, 9).setNotes(notesArray);
+
+  Logger.log("refreshSafetyComplianceTooltips: Added tooltips to " + updatedRows + " rows (batch write)");
   return updatedRows;
 }
 
@@ -5946,6 +5954,17 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
       // Update batch progress
       var isComplete = batchEnd >= allThreads.length;
 
+      // Early exit: if this is a continuation batch (not the first) and we processed 0 new emails,
+      // stop early. Gmail returns threads newest-first, so new emails are concentrated in early batches.
+      // Remaining batches with 0 new emails are already-logged or non-parseable threads that can be skipped.
+      // The lastProcessedDate timestamp will still be updated, so the next run filters correctly.
+      if (!isComplete && !isFirstBatch && processedCount === 0) {
+        Logger.log('Early exit: Continuation batch ' + (Math.floor(batchStart / batchSize) + 1) +
+          ' processed 0 new emails (' + skippedCount + ' already logged/skipped). ' +
+          'Stopping early - remaining ' + (allThreads.length - batchEnd) + ' threads likely have no new content.');
+        isComplete = true;
+      }
+
       // Cache email IDs for next continuation batch (includes newly logged IDs)
       try {
         batchCache.put('SAFETY_BATCH_EMAIL_IDS', JSON.stringify(existingEmailIds), 600);
@@ -5977,8 +5996,10 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   // Get the full timestamp for display (if available)
   var lastProcessedTimestamp = props.getProperty('LAST_SAFETY_EMAIL_TIMESTAMP') || lastProcessedDate || 'Never';
 
+  var earlyExit = (isComplete && batchEnd < allThreads.length);
   var result = {
     complete: isComplete,
+    earlyExit: earlyExit, // true when stopped early because continuation batch had 0 new emails
     batchNumber: Math.floor(batchStart / batchSize) + 1,
     totalBatches: Math.ceil(allThreads.length / batchSize),
     processedThisBatch: processedCount,
@@ -5989,7 +6010,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     logsCreated: logsCreated, // Option B: show log counts
     totalThreads: allThreads.length,
     threadsProcessed: batchEnd,
-    threadsRemaining: allThreads.length - batchEnd,
+    threadsRemaining: earlyExit ? 0 : (allThreads.length - batchEnd),
     newOnlyMode: newOnlyMode,
     lastProcessedDate: lastProcessedTimestamp
   };
@@ -6153,12 +6174,13 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
         uncreditedJobsList.push(allUncreditedJobs[ujKey]);
       }
 
+      // Always set uncreditedJobs (empty array if none) so the UI always receives [] not undefined
+      result.uncreditedJobs = uncreditedJobsList;
       if (uncreditedJobsList.length > 0) {
-        result.uncreditedJobs = uncreditedJobsList;
         Logger.log("Found " + uncreditedJobsList.length + " uncredited job(s) in Safety Reports not matched to any tracked crew");
         Logger.log("Uncredited jobs being returned to UI: " + JSON.stringify(uncreditedJobsList.map(function(j) { return j.jobNumber; })));
       } else {
-        Logger.log("No uncredited jobs to return to UI");
+        Logger.log("No uncredited jobs to return to UI (returning empty array)");
       }
       } // Close if (complianceData)
 
@@ -8786,6 +8808,14 @@ function getClassificationPriority(classification) {
   if (classLower.match(/^ap\s*3/)) return 24;
   if (classLower.match(/^ap\s*2/)) return 25;
   if (classLower.match(/^ap\s*1/)) return 26;
+  // Sub Tech (equivalent to Apprentice)
+  if (classLower.match(/^st\s*7/)) return 20;
+  if (classLower.match(/^st\s*6/)) return 21;
+  if (classLower.match(/^st\s*5/)) return 22;
+  if (classLower.match(/^st\s*4/)) return 23;
+  if (classLower.match(/^st\s*3/)) return 24;
+  if (classLower.match(/^st\s*2/)) return 25;
+  if (classLower.match(/^st\s*1/)) return 26;
   // All others
   return 99;
 }
@@ -14615,13 +14645,6 @@ function removeCustomJobForemanMapping(jobNumber) {
 function lookupForemanWithCustomMapping(jobNumber, dialogMappings) {
   if (!jobNumber) return { name: '', jobExists: false, source: 'none' };
 
-  // Check temporary mappings first (set during unknown job resolution in this session)
-  var tempMappings = getTempJobForemanMappings();
-  if (tempMappings && tempMappings[jobNumber]) {
-    Logger.log("lookupForemanWithCustomMapping: " + jobNumber + " -> temp_session: " + tempMappings[jobNumber]);
-    return { name: tempMappings[jobNumber], jobExists: true, source: 'temp_session' };
-  }
-
   // Check if this job was explicitly skipped in current session
   var props = PropertiesService.getScriptProperties();
   var skippedJobsStr = props.getProperty('SKIPPED_UNKNOWN_JOBS');
@@ -14635,7 +14658,31 @@ function lookupForemanWithCustomMapping(jobNumber, dialogMappings) {
     } catch (e) {}
   }
 
-  // Check dialog mappings next (passed from current session)
+  // Check saved custom mappings (permanent user overrides e.g. 005-26 -> Sydney Wade)
+  var savedCustom = getCustomJobForemanMappings();
+  if (savedCustom[jobNumber]) {
+    Logger.log("lookupForemanWithCustomMapping: " + jobNumber + " -> saved_custom: " + savedCustom[jobNumber]);
+    return { name: savedCustom[jobNumber], jobExists: true, source: 'saved_custom' };
+  }
+
+  // Check Safety Compliance Config (Job Tracking) - authoritative for ALL known active crews.
+  // This is checked BEFORE temp_session so a stale temp_session from a prior run cannot
+  // override the correct Job Tracking foreman for a known crew (e.g. 010-26 → Tyler Pierce).
+  var complianceConfig = loadComplianceConfig();
+  if (complianceConfig[jobNumber] && complianceConfig[jobNumber].foreman) {
+    Logger.log("lookupForemanWithCustomMapping: " + jobNumber + " -> compliance_config: " + complianceConfig[jobNumber].foreman);
+    return { name: complianceConfig[jobNumber].foreman, jobExists: true, source: 'compliance_config' };
+  }
+
+  // Check temporary mappings (set during unknown job resolution in this session).
+  // Only reached for jobs NOT in compliance_config — i.e. truly unknown jobs the user resolved.
+  var tempMappings = getTempJobForemanMappings();
+  if (tempMappings && tempMappings[jobNumber]) {
+    Logger.log("lookupForemanWithCustomMapping: " + jobNumber + " -> temp_session: " + tempMappings[jobNumber]);
+    return { name: tempMappings[jobNumber], jobExists: true, source: 'temp_session' };
+  }
+
+  // Check dialog mappings (passed from current session)
   if (dialogMappings) {
     for (var foreman in dialogMappings) {
       var jobs = dialogMappings[foreman];
@@ -14644,21 +14691,6 @@ function lookupForemanWithCustomMapping(jobNumber, dialogMappings) {
         return { name: foreman, jobExists: true, source: 'dialog' };
       }
     }
-  }
-
-  // Check saved custom mappings
-  var savedCustom = getCustomJobForemanMappings();
-  if (savedCustom[jobNumber]) {
-    Logger.log("lookupForemanWithCustomMapping: " + jobNumber + " -> saved_custom: " + savedCustom[jobNumber]);
-    return { name: savedCustom[jobNumber], jobExists: true, source: 'saved_custom' };
-  }
-
-  // Check Safety Compliance Config sheet - this is where new crews are configured
-  // This allows new crews to be tracked even before they appear on Employees sheet
-  var complianceConfig = loadComplianceConfig();
-  if (complianceConfig[jobNumber] && complianceConfig[jobNumber].foreman) {
-    Logger.log("lookupForemanWithCustomMapping: " + jobNumber + " -> compliance_config: " + complianceConfig[jobNumber].foreman);
-    return { name: complianceConfig[jobNumber].foreman, jobExists: true, source: 'compliance_config' };
   }
 
   // Check Job Tracking sheet - this is the authoritative source updated from Excel crew import

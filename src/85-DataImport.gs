@@ -500,8 +500,15 @@ function applyCrewChanges(changes) {
     Logger.log('applyCrewChanges: Received jobNameMap with ' + Object.keys(jobNameMap).length + ' entries');
   }
 
+  // Extract earlyActivatedJobs — jobs the user confirmed activating pre-apply
+  var earlyActivatedJobs = [];
+  if (changes.length > 0 && changes[0].earlyActivatedJobs && changes[0].earlyActivatedJobs.length > 0) {
+    earlyActivatedJobs = changes[0].earlyActivatedJobs;
+    Logger.log('applyCrewChanges: Early-activated jobs: ' + earlyActivatedJobs.join(', '));
+  }
+
   // Sync with Job Tracking sheet if it exists
-  var jobTrackingResult = syncJobTrackingAfterImport(ss, jobNameMap);
+  var jobTrackingResult = syncJobTrackingAfterImport(ss, jobNameMap, earlyActivatedJobs);
   var pendingJobs = [];
 
   if (jobTrackingResult) {
@@ -530,9 +537,12 @@ function applyCrewChanges(changes) {
  * - Marks jobs with no employees as needing review
  *
  * @param {Spreadsheet} ss - Active spreadsheet
+ * @param {Object} jobNameMap - Optional map of jobNumber → Excel header text for backfilling Job Name
+ * @param {Array} earlyActivatedJobs - Jobs the user pre-confirmed as Active (activate in Job Tracking)
  * @return {Object} Result with message and pendingJobs array
  */
-function syncJobTrackingAfterImport(ss, jobNameMap) {
+function syncJobTrackingAfterImport(ss, jobNameMap, earlyActivatedJobs) {
+  earlyActivatedJobs = earlyActivatedJobs || [];
   var jobSheet = ss.getSheetByName('Job Tracking');
   if (!jobSheet) {
     Logger.log('syncJobTrackingAfterImport: Job Tracking sheet not found, skipping');
@@ -667,20 +677,41 @@ function syncJobTrackingAfterImport(ss, jobNameMap) {
       jobData[dataIdx][20] = timestamp;                                       // Last Updated (U)
       jobDataModified = true;
 
-      // If status is "Pending Start" and now has employees, DON'T auto-activate
-      // Instead, track for user decision
+      // If status is "Pending Start" and now has employees — check if user pre-activated it
       if (existing.status === 'Pending Start' && crew.crewSize > 0) {
-        pendingJobsWithEmployees.push({
-          jobNumber: crewNum,
-          location: crew.location || existing.location || 'Unknown',
-          foreman: crew.foreman || '',
-          crewSize: crew.crewSize,
-          startDate: existing.startDate,
-          employees: crew.employees,
-          rowIndex: existing.rowIndex,
-          isOnHold: false
-        });
-        Logger.log('syncJobTrackingAfterImport: Pending Start job ' + crewNum + ' has ' + crew.crewSize + ' employees - needs user decision');
+        if (earlyActivatedJobs.indexOf(crewNum) !== -1) {
+          // User confirmed activation pre-apply — activate it now in Job Tracking
+          jobData[dataIdx][9] = 'Active';  // Status (J)
+          var today = new Date();
+          today.setHours(0, 0, 0, 0);
+          if (!jobData[dataIdx][4] || jobData[dataIdx][4] === '') {
+            jobData[dataIdx][4] = today;   // Start Date (E) — set to today if not already set
+          }
+          jobDataModified = true;
+          Logger.log('syncJobTrackingAfterImport: Early-activated ' + crewNum + ' → Active');
+        } else {
+          // Track for post-apply user decision (legacy path for non-early-activated jobs)
+          // Convert startDate to string to avoid GAS serialization issues with Date objects
+          var startDateStr = '';
+          if (existing.startDate) {
+            if (existing.startDate instanceof Date && !isNaN(existing.startDate.getTime())) {
+              startDateStr = Utilities.formatDate(existing.startDate, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+            } else if (existing.startDate) {
+              startDateStr = String(existing.startDate);
+            }
+          }
+          pendingJobsWithEmployees.push({
+            jobNumber: crewNum,
+            location: crew.location || existing.location || 'Unknown',
+            foreman: crew.foreman || '',
+            crewSize: crew.crewSize,
+            startDate: startDateStr,
+            employees: crew.employees,
+            rowIndex: existing.rowIndex,
+            isOnHold: false
+          });
+          Logger.log('syncJobTrackingAfterImport: Pending Start job ' + crewNum + ' has ' + crew.crewSize + ' employees - needs user decision');
+        }
       }
 
       // If status is "On Hold" and now has employees AND estimated return is within 7 days,

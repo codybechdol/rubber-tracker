@@ -597,7 +597,14 @@ function getCrewLead(crewNumber) {
     'AP 4': 14,
     'AP 3': 15,
     'AP 2': 16,
-    'AP 1': 17     // 1st Year Apprentice (least senior)
+    'AP 1': 17,    // 1st Year Apprentice (least senior)
+    'ST 7': 11,    // 7th Year Sub Tech (equivalent to AP 7)
+    'ST 6': 12,
+    'ST 5': 13,
+    'ST 4': 14,
+    'ST 3': 15,
+    'ST 2': 16,
+    'ST 1': 17     // 1st Year Sub Tech (least senior)
   };
 
   var bestCandidate = null;

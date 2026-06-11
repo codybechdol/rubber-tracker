@@ -69,8 +69,8 @@ var INTERVAL_BLANKET_TEST = 12;
 var INTERVAL_CALIBRATION_YEARS = 10;
 
 // AED pad replacement lookahead (days) - Phase 3
-// Show AEDs with pads expiring within 90 days on the AED Swaps report
-var AED_SWAP_LOOKAHEAD_DAYS = 90;
+// Show AEDs with pads expiring within 30 days on the AED Swaps report
+var AED_SWAP_LOOKAHEAD_DAYS = 30;
 
 // Grounds test interval (months) - Phase 4
 // Grounds must be pulled for testing 1 year after their test date
