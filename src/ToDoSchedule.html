@@ -1451,7 +1451,10 @@
       var unassigned = []; // tasks with no job
 
       tasks.forEach(function(task, idx) {
-        task._originalIndex = idx;
+        // Use allTasks position so openNotifyModal(task._originalIndex) looks up the right task.
+        // filteredTasks and allTasks share the same object references, so indexOf is O(n) but safe.
+        var allTasksIdx = allTasks.indexOf(task);
+        task._originalIndex = allTasksIdx !== -1 ? allTasksIdx : idx;
         var jobNum = getJobNumberForTask(task);
         if (!jobNum) { unassigned.push(task); return; }
 

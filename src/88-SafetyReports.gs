@@ -539,6 +539,12 @@ function sortAndFormatLogSheet(sheetName, emailIdCol, dateReceivedCol, jobNumCol
     if (!(d instanceof Date)) { try { d = new Date(d); } catch(e) { d = null; } }
     var ym = (d && !isNaN(d)) ? (d.getFullYear() * 100 + d.getMonth()) : null;
 
+    // Normalize Date Received to a proper Date object so it doesn't persist as
+    // "June 2026" text (from older logging format) through sort cycles.
+    if (d && !isNaN(d) && !(row[dateReceivedCol - 1] instanceof Date)) {
+      row[dateReceivedCol - 1] = d;
+    }
+
     if (ym !== currentYM) {
       // Month separator row — all cells empty except col A which has the label
       var sepRow = [];
@@ -560,6 +566,14 @@ function sortAndFormatLogSheet(sheetName, emailIdCol, dateReceivedCol, jobNumCol
 
   if (rowsToWrite.length > 0) {
     sheet.getRange(2, 1, rowsToWrite.length, lastCol).setValues(rowsToWrite);
+
+    // Apply date format to the Date Received column in one call, then override
+    // separator rows with plain-text '@' format.  Avoids building a huge per-cell
+    // matrix that causes Apps Script INTERNAL errors on large logs (1000+ rows).
+    sheet.getRange(2, dateReceivedCol, rowsToWrite.length, 1).setNumberFormat('MM/dd/yyyy H:mm');
+    separatorSheetRows.forEach(function(sheetRow) {
+      sheet.getRange(sheetRow, dateReceivedCol, 1, 1).setNumberFormat('@');
+    });
   }
 
   // ── 6. Apply colors and group dividers ───────────────────────────────────
@@ -5954,16 +5968,13 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
       // Update batch progress
       var isComplete = batchEnd >= allThreads.length;
 
-      // Early exit: if this is a continuation batch (not the first) and we processed 0 new emails,
-      // stop early. Gmail returns threads newest-first, so new emails are concentrated in early batches.
-      // Remaining batches with 0 new emails are already-logged or non-parseable threads that can be skipped.
-      // The lastProcessedDate timestamp will still be updated, so the next run filters correctly.
-      if (!isComplete && !isFirstBatch && processedCount === 0) {
-        Logger.log('Early exit: Continuation batch ' + (Math.floor(batchStart / batchSize) + 1) +
-          ' processed 0 new emails (' + skippedCount + ' already logged/skipped). ' +
-          'Stopping early - remaining ' + (allThreads.length - batchEnd) + ' threads likely have no new content.');
-        isComplete = true;
-      }
+      // Note: early exit removed. Gmail does NOT guarantee newest-first order — threads
+      // for a given crew (e.g. 042-26) may appear later in the result set regardless of
+      // date. Exiting early when a batch has 0 new emails causes those threads to be
+      // silently missed. The timeout guard (MAX_EXECUTION_MS) is sufficient to prevent
+      // the 6-minute limit from being hit.
+      Logger.log('Batch ' + (Math.floor(batchStart / batchSize) + 1) +
+        ' processed ' + processedCount + ' new email(s), skipped ' + skippedCount + '.');
 
       // Cache email IDs for next continuation batch (includes newly logged IDs)
       try {
@@ -11057,9 +11068,9 @@ function loadComplianceConfig() {
 
     if (!jobNumber) continue;
 
-    // Exclude office/management crews (002- = lost/destroyed, 005- = office/light duty)
+    // Exclude lost/destroyed record jobs (002- prefix); 005- office crews may track weekly meetings
     var jobPrefix = jobNumber.split('-')[0];
-    if (jobPrefix === '002' || jobPrefix === '005') {
+    if (jobPrefix === '002') {
       Logger.log('loadComplianceConfig: Skipping excluded prefix job: ' + jobNumber);
       continue;
     }

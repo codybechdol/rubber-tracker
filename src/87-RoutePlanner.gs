@@ -111,13 +111,13 @@ function getScheduleConfig(schedule) {
       avoidDay: null                 // No avoid day for Tue-Fri schedule
     };
   }
-  // Default: Mon-Thu
+  // Default: Mon-Thu (Friday shown but marked "Avoid" so auto-planner skips it unless overdue)
   return {
-    workDays: [1, 2, 3, 4],         // Mon, Tue, Wed, Thu
-    skipDays: [0, 5, 6],             // Sun, Fri, Sat
+    workDays: [1, 2, 3, 4, 5],      // Mon, Tue, Wed, Thu, Fri
+    skipDays: [0, 6],                // Sun, Sat
     mustReturnDay: 2,               // Tuesday must return to Helena
     mustReturnDayName: 'Tuesday',
-    avoidDay: 5                     // Avoid Friday
+    avoidDay: 5                     // Avoid Friday (shown with Avoid badge, manual scheduling allowed)
   };
 }
 
@@ -197,8 +197,8 @@ function parseDateAsLocal(dateValue) {
  */
 function showTripPlannerDialog() {
   var html = HtmlService.createHtmlOutputFromFile('TripPlanner')
-    .setWidth(1400)
-    .setHeight(900)
+    .setWidth(1800)
+    .setHeight(1000)
     .setTitle('Trip Planner');
   SpreadsheetApp.getUi().showModalDialog(html, '🗺️ Trip Planner');
 }
@@ -1225,9 +1225,10 @@ function getPendingTasksWithLocations() {
     // Phase 6: Use Task Metadata as single source of truth
     var result = collectTasksForTripPlanner();
 
-    // Add drive time map and overnight cities for the Trip Planner UI
+    // Add drive time map, overnight cities, and per-location crew time config for the Trip Planner UI
     result.driveTimeMap = getDriveTimeMap();
     result.overnightCities = getOvernightCities();
+    result.crewTimeMap = getCrewTimeMap();
 
     return result;
 
@@ -1377,7 +1378,7 @@ function calculateTripSavings(workDays, byLocation, driveTimeMap) {
  * @param {number} startHour - Start hour (default 7)
  * @return {Object} Day plan with route, times, and warnings
  */
-function calculateDayPlan(startLocation, destinations, startHour, endLocation) {
+function calculateDayPlan(startLocation, destinations, startHour, endLocation, crewTimeMap) {
   startHour = startHour || WORK_START_HOUR;
   endLocation = endLocation || 'Helena'; // Default end location is Helena
   var driveTimeMap = getDriveTimeMap();
@@ -1422,8 +1423,11 @@ function calculateDayPlan(startLocation, destinations, startHour, endLocation) {
     currentMinutes += driveTime;
     plan.driveMinutes += driveTime;
 
-    // Add crew time at this location
-    var crewTime = dest.estimatedTime || (CREW_BASE_TIME + (dest.taskCount || 1) * CREW_PER_TASK);
+    // Add crew time at this location (use per-location config if available)
+    var locCrewCfg = crewTimeMap && crewTimeMap[destLoc];
+    var crewBase    = locCrewCfg ? locCrewCfg.baseTime : CREW_BASE_TIME;
+    var crewPerTask = locCrewCfg ? locCrewCfg.perTask  : CREW_PER_TASK;
+    var crewTime = dest.estimatedTime || (crewBase + (dest.taskCount || 1) * crewPerTask);
     currentMinutes += crewTime;
     plan.crewMinutes += crewTime;
 
@@ -1492,8 +1496,9 @@ function recalculateDayPlan(params) {
     };
   });
 
-  // Calculate the plan
-  var plan = calculateDayPlan(startLocation, destinations, WORK_START_HOUR, endLocation);
+  // Calculate the plan (with per-location crew time config)
+  var crewTimeMap = getCrewTimeMap();
+  var plan = calculateDayPlan(startLocation, destinations, WORK_START_HOUR, endLocation, crewTimeMap);
 
   // Handle early arrival option
   if (arriveFirstBy7am && destinations.length > 0) {
@@ -1524,18 +1529,18 @@ function recalculateDayPlan(params) {
 function getDriveTimeBetweenLocations(from, to, driveTimeMap) {
   if (from === to) return 0;
 
-  // Try to use coordinate-based calculation (more accurate)
-  try {
-    var driveTime = calculateDriveTimeBetween(from, to);
-    if (driveTime > 0) {
-      return driveTime;
-    }
-  } catch (e) {
-    // Fall through to legacy calculation
-    Logger.log('Coordinate calculation failed for ' + from + ' to ' + to + ': ' + e);
+  // Check for an exact pairwise route entry (most accurate)
+  var pairKey = from + '|' + to;
+  if (driveTimeMap[pairKey] > 0) {
+    return driveTimeMap[pairKey];
+  }
+  // Check reverse direction (routes are symmetric unless specified otherwise)
+  var reversePairKey = to + '|' + from;
+  if (driveTimeMap[reversePairKey] > 0) {
+    return driveTimeMap[reversePairKey];
   }
 
-  // Fallback to legacy calculation using Helena-based times
+  // Fallback to Helena-based estimation
   var fromTime = driveTimeMap[from] || 0;
   var toTime = driveTimeMap[to] || 0;
 
@@ -1550,7 +1555,8 @@ function getDriveTimeBetweenLocations(from, to, driveTimeMap) {
 
     if (fromDir === toDir && fromDir !== 'Other' && fromDir !== 'Unknown') {
       // Same direction - drive time is roughly the difference
-      return Math.abs(toTime - fromTime) + 10; // 10 min buffer
+      // Use sum * 0.6 as a better estimate than pure difference (avoids underestimating loops)
+      return Math.round(Math.max(Math.abs(toTime - fromTime) + 10, (fromTime + toTime) * 0.35));
     } else {
       // Different directions - need to go back through Helena area
       return fromTime + toTime;
@@ -1628,6 +1634,9 @@ function suggestOptimalTrips(daysAhead) {
 
     var byLocation = pendingData.byLocation;
     var driveTimeMap = pendingData.driveTimeMap;
+
+    // Load per-location crew time config once for the entire plan
+    var crewTimeMap = getCrewTimeMap();
 
     Logger.log('Step 3: Got ' + Object.keys(byLocation).length + ' locations with tasks');
 
@@ -1978,7 +1987,9 @@ function suggestOptimalTrips(daysAhead) {
               estimatedTime: otherLoc.estimatedTime,
               tasks: otherLoc.tasks
             }]),
-            WORK_START_HOUR
+            WORK_START_HOUR,
+            undefined,
+            crewTimeMap
           );
 
           // Add if it fits within 10 hours (or day allows overnight)
@@ -2008,7 +2019,7 @@ function suggestOptimalTrips(daysAhead) {
       var day = workDays[d];
 
       if (day.assignedLocations.length > 0) {
-        day.plan = calculateDayPlan(day.startLocation, day.assignedLocations, WORK_START_HOUR);
+        day.plan = calculateDayPlan(day.startLocation, day.assignedLocations, WORK_START_HOUR, undefined, crewTimeMap);
 
         // Handle overnight - next day starts from overnight city
         if (day.plan.overnightSuggested && !day.mustReturnToHelena && d < workDays.length - 1) {

@@ -109,9 +109,22 @@ function getCrewLocationMap(ss) {
       return a.position - b.position; // Lower position = earlier
     });
 
-    // Use the first (best) employee's location
-    if (employees.length > 0 && employees[0].location) {
-      crewLocations[crew] = employees[0].location;
+    // Use the first employee with a non-blank, non-status location
+    for (var e = 0; e < employees.length; e++) {
+      var empLoc = employees[e].location;
+      if (empLoc && !isStatusLocation(empLoc)) {
+        crewLocations[crew] = empLoc;
+        break;
+      }
+    }
+    // Fallback: use first employee with any non-blank location
+    if (!crewLocations[crew]) {
+      for (var e2 = 0; e2 < employees.length; e2++) {
+        if (employees[e2].location) {
+          crewLocations[crew] = employees[e2].location;
+          break;
+        }
+      }
     }
   }
 
@@ -242,20 +255,64 @@ function getDriveTimeMap() {
     return {};
   }
 
-  // Read all location data
-  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 2).getValues();
+  // Read all rows (up to 4 columns to detect the ROUTES section marker)
+  var lastRow = sheet.getLastRow();
+  var data = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
   var driveTimeMap = {};
+  var pairCount = 0;
+  var inRoutesSection = false;
 
   for (var i = 0; i < data.length; i++) {
-    var locationName = String(data[i][0] || '').toLowerCase().trim();
-    var driveTime = Number(data[i][1]) || 0;
+    var col1 = String(data[i][0] || '').trim();
+    var col2 = data[i][1];
+    var col3 = String(data[i][2] || '').trim();
 
-    if (locationName) {
-      driveTimeMap[locationName] = driveTime;
+    // Detect the ROUTES section separator row
+    if (col1.toUpperCase().indexOf('ROUTES') !== -1 && col2 === '') {
+      inRoutesSection = true;
+      continue;
+    }
+
+    // Skip header rows within the routes section
+    if (inRoutesSection && col1.toLowerCase() === 'from') {
+      continue;
+    }
+
+    if (!col1) continue; // Skip blank rows
+
+    if (!inRoutesSection) {
+      // Normal location row: Location | Drive Time (min)
+      var driveTime = Number(col2) || 0;
+      driveTimeMap[col1.toLowerCase()] = driveTime;
+    } else {
+      // Route pair row: From | To | Drive Time (min)
+      var toCity = col3;
+      var routeMinutes = Number(data[i][3]) || 0;
+      if (col1 && toCity && routeMinutes > 0) {
+        var key = col1.toLowerCase() + '|' + toCity.toLowerCase();
+        driveTimeMap[key] = routeMinutes;
+        pairCount++;
+      }
     }
   }
 
-  Logger.log('getDriveTimeMap: Loaded ' + Object.keys(driveTimeMap).length + ' locations from Locations sheet');
+  // Also read from the dedicated "Drive Time Routes" sheet (written by refreshDriveTimesFromGoogleMaps).
+  // Pairs here override any matching entry from the ROUTES section above.
+  var routesSheet = ss.getSheetByName('Drive Time Routes');
+  if (routesSheet && routesSheet.getLastRow() > 1) {
+    var routesData = routesSheet.getRange(2, 1, routesSheet.getLastRow() - 1, 3).getValues();
+    for (var ri = 0; ri < routesData.length; ri++) {
+      var rFrom = String(routesData[ri][0] || '').trim().toLowerCase();
+      var rTo   = String(routesData[ri][1] || '').trim().toLowerCase();
+      var rMins = Number(routesData[ri][2]) || 0;
+      if (rFrom && rTo && rMins > 0) {
+        driveTimeMap[rFrom + '|' + rTo] = rMins;
+        pairCount++;
+      }
+    }
+  }
+
+  Logger.log('getDriveTimeMap: Loaded ' + Object.keys(driveTimeMap).length + ' entries (' + pairCount + ' route pairs) from Locations + Drive Time Routes sheets');
   return driveTimeMap;
 }
 
@@ -526,6 +583,13 @@ function getEmployeeLocationMap(ss) {
     return {};
   }
 
+  // Also find Alternate Names column
+  var altNamesCol = -1;
+  for (var h = 0; h < headers.length; h++) {
+    var hdr = String(headers[h]).toLowerCase().trim();
+    if (hdr === 'alternate names' || hdr === 'alternatenames') altNamesCol = h;
+  }
+
   var locationMap = {};
   for (var i = 1; i < data.length; i++) {
     var name = String(data[i][nameCol]).trim();
@@ -533,6 +597,14 @@ function getEmployeeLocationMap(ss) {
 
     if (name && location) {
       locationMap[name.toLowerCase()] = location;
+      // Also register alternate names so Expiring Certs nicknames resolve correctly
+      if (altNamesCol !== -1 && data[i][altNamesCol]) {
+        var alts = String(data[i][altNamesCol]).split(';');
+        for (var a = 0; a < alts.length; a++) {
+          var alt = alts[a].trim().toLowerCase();
+          if (alt && !locationMap[alt]) locationMap[alt] = location;
+        }
+      }
     }
   }
 
@@ -558,10 +630,12 @@ function getEmployeePhoneMapInternal(ss) {
   var phoneCol = -1;
 
   // Find columns - check various header name formats
+  var altNamesCol = -1;
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
     if (header === 'name' || header === 'employee name') nameCol = h;
     if (header === 'phone number' || header === 'phone' || header === 'phone #' || header === 'cell' || header === 'cell phone') phoneCol = h;
+    if (header === 'alternate names' || header === 'alternatenames') altNamesCol = h;
   }
 
   // Use COLS constants as fallback if headers don't match
@@ -597,6 +671,14 @@ function getEmployeePhoneMapInternal(ss) {
       }
       if (cleanPhone.length >= 10) {
         phoneMap[name.toLowerCase()] = cleanPhone;
+        // Also register alternate names → same phone
+        if (altNamesCol !== -1 && data[i][altNamesCol]) {
+          var alts = String(data[i][altNamesCol]).split(';');
+          for (var a = 0; a < alts.length; a++) {
+            var alt = alts[a].trim().toLowerCase();
+            if (alt && !phoneMap[alt]) phoneMap[alt] = cleanPhone;
+          }
+        }
       }
     }
   }
@@ -626,12 +708,14 @@ function getEmployeeForemanMap(ss) {
   var classificationCol = -1;
 
   // Find columns
+  var altNamesColF = -1;
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
     if (header === 'name' || header === 'employee name') nameCol = h;
     if (header === 'location') locationCol = h;
     if (header === 'job number') jobNumCol = h;
     if (header === 'job classification') classificationCol = h;
+    if (header === 'alternate names' || header === 'alternatenames') altNamesColF = h;
   }
 
   if (nameCol === -1) {
@@ -663,6 +747,19 @@ function getEmployeeForemanMap(ss) {
       empLocationMap[nameLower] = locationCol !== -1 ? String(data[i][locationCol]).trim() : '';
       empJobNumMap[nameLower] = jobNumCol !== -1 ? String(data[i][jobNumCol]).trim() : '';
       empClassificationMap[nameLower] = classificationCol !== -1 ? String(data[i][classificationCol]).trim() : '';
+      // Register alternate names → same canonical name (for nickname resolution)
+      if (altNamesColF !== -1 && data[i][altNamesColF]) {
+        var altsF = String(data[i][altNamesColF]).split(';');
+        for (var af = 0; af < altsF.length; af++) {
+          var altF = altsF[af].trim().toLowerCase();
+          if (altF && !empNames[altF]) {
+            empNames[altF] = name; // canonical name
+            empLocationMap[altF] = empLocationMap[nameLower];
+            empJobNumMap[altF] = empJobNumMap[nameLower];
+            empClassificationMap[altF] = empClassificationMap[nameLower];
+          }
+        }
+      }
     }
   }
 
@@ -1367,6 +1464,10 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
     if (hdr === 'days until' || hdr === 'days until expiration') daysUntilCol = h;
   }
 
+  Logger.log('collectExpiringCertTasks: headers=' + JSON.stringify(headers) +
+    ' nameCol=' + nameCol + ' certTypeCol=' + certTypeCol +
+    ' expDateCol=' + expDateCol + ' daysUntilCol=' + daysUntilCol);
+
   if (nameCol === -1 || certTypeCol === -1) {
     Logger.log('collectExpiringCertTasks: Required columns not found. nameCol=' + nameCol + ', certTypeCol=' + certTypeCol + '. Headers: ' + JSON.stringify(headers));
     return;
@@ -1381,8 +1482,9 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
 
   // Pre-scan: build Crane Cert validity and Crane Evaluation date maps
   // Used to detect employees who have a valid Crane Cert but no Crane Evaluation form date
-  var craneCertValidSet = {};   // empNameLower → true if Crane Cert is not expired
+  var craneCertValidSet = {};   // empNameLower → canonical employee name
   var craneEvalHasDateSet = {}; // empNameLower → true if Crane Evaluation date is present
+  var craneEvalTaskCreated = {}; // empNameLower → true once a task is created (dedup guard)
 
   for (var pre = 1; pre < data.length; pre++) {
     var preRow = data[pre];
@@ -1400,8 +1502,12 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
       } else if (preExpDate instanceof Date && !isNaN(preExpDate.getTime())) {
         craneExpired = preExpDate.getTime() < today.getTime();
       }
+      Logger.log('collectExpiringCertTasks: CraneCert pre-scan: emp=' + preEmp +
+        ' expired=' + craneExpired + ' preExpDate=' + preExpDate + ' preDaysUntil=' + preDaysUntil +
+        ' condition=' + (!craneExpired && (preExpDate || preDaysUntil !== null)));
       if (!craneExpired && (preExpDate || preDaysUntil !== null)) {
-        craneCertValidSet[preEmpLower] = true;
+        // Store canonical name so post-loop sweep can display it correctly
+        craneCertValidSet[preEmpLower] = preEmp;
       }
     }
 
@@ -1411,6 +1517,9 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
       }
     }
   }
+
+  Logger.log('collectExpiringCertTasks: craneCertValidSet=' + JSON.stringify(craneCertValidSet));
+  Logger.log('collectExpiringCertTasks: craneEvalHasDateSet=' + JSON.stringify(craneEvalHasDateSet));
 
   for (var i = 1; i < data.length; i++) {
     var row = data[i];
@@ -1439,9 +1548,8 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
     }
 
     // Crane Evaluation: non-expiring, but task is needed when employee has a valid Crane Cert
-    // and the Crane Evaluation form date is missing — only if "Crane Evaluation" is selected
+    // and the Crane Evaluation form date is missing — always checked regardless of selectedCertTypes
     if (certType === 'Crane Evaluation') {
-      if (!selectedCertTypes || selectedCertTypes.indexOf('Crane Evaluation') === -1) continue;
       var empLowerCE = employee.toLowerCase();
       var hasCraneCert = craneCertValidSet[empLowerCE];
       var hasEvalDate = craneEvalHasDateSet[empLowerCE];
@@ -1469,6 +1577,7 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
       };
       if (!tasksByLocation[ceLocation]) tasksByLocation[ceLocation] = [];
       tasksByLocation[ceLocation].push(task);
+      craneEvalTaskCreated[empLowerCE] = true;
       tasksAdded++;
       continue;
     }
@@ -1524,6 +1633,53 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
   }
 
   Logger.log('collectExpiringCertTasks: Added ' + tasksAdded + ' cert tasks (skipped ' + skippedCompleted + ' completed)');
+
+  // Post-loop sweep: catch employees who have a valid Crane Cert but NO Crane Evaluation row
+  // at all in the Expiring Certs sheet. The main loop can only create tasks when a row exists;
+  // this handles the case where the Crane Evaluation column was blank during import.
+  // NOTE: This sweep always runs regardless of selectedCertTypes — Crane Evaluation is a
+  // derived safety requirement, not a user-selected cert type, so it must always be checked.
+  if (true) {
+    for (var ceEmpLower in craneCertValidSet) {
+      if (craneEvalHasDateSet[ceEmpLower]) continue; // Has an eval date — all good
+      if (craneEvalTaskCreated[ceEmpLower]) continue; // Already created a task in main loop
+
+      // Check completed certs skip list
+      var ceEmpKey = 'emp_' + ceEmpLower + '_crane evaluation';
+      if (completedCerts[ceEmpKey]) continue;
+
+      // Skip pending new hires
+      if (pendingEmps[ceEmpLower]) continue;
+
+      var ceCanonicalName = craneCertValidSet[ceEmpLower];
+      var ceLocation2 = employeeLocations[ceEmpLower] || 'Unknown';
+      var ceTask = {
+        type: 'Cert Expiring',
+        taskType: 'Cert Expiring',
+        itemType: 'Crane Evaluation',
+        certType: 'Crane Evaluation',
+        employee: ceCanonicalName,
+        location: ceLocation2,
+        foreman: employeeForemen[ceEmpLower] || 'Unknown',
+        phoneNumber: employeePhones[ceEmpLower] || '',
+        dueDate: null,
+        isOverdue: false,
+        daysTillDue: null,
+        status: 'Missing',
+        estimatedTime: 15,
+        priority: 'Medium',
+        sheetName: 'Expiring Certs',
+        rowIndex: 'crane_eval_' + ceEmpLower, // Unique per-employee key (no sheet row exists)
+        isNonExpiring: true
+      };
+      if (!tasksByLocation[ceLocation2]) tasksByLocation[ceLocation2] = [];
+      tasksByLocation[ceLocation2].push(ceTask);
+      tasksAdded++;
+      Logger.log('collectExpiringCertTasks: Added Crane Eval task for ' + ceCanonicalName + ' (no eval row in sheet)');
+    }
+  }
+
+  Logger.log('collectExpiringCertTasks: Total after Crane Eval sweep: ' + tasksAdded + ' tasks');
 }
 
 

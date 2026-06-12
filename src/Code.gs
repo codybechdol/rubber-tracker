@@ -271,12 +271,14 @@ function getEmployeePhoneMapForTasks(ss) {
   var phoneCol = -1;
 
   // Find columns - log all headers for debugging
+  var altNamesColT = -1;
   Logger.log('Employees sheet headers: ' + JSON.stringify(headers));
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'name') nameCol = h;
+    if (header === 'name' || header === 'employee name') nameCol = h;
     // Match various phone column header formats
     if (header === 'phone number' || header === 'phone' || header === 'phone #' || header === 'cell' || header === 'cell phone') phoneCol = h;
+    if (header === 'alternate names' || header === 'alternatenames') altNamesColT = h;
   }
 
   Logger.log('Found columns - nameCol: ' + nameCol + ', phoneCol: ' + phoneCol);
@@ -323,6 +325,14 @@ function getEmployeePhoneMapForTasks(ss) {
         // Log first 5 entries for debugging
         if (foundCount <= 5) {
           Logger.log('Phone map entry: "' + name.toLowerCase() + '" => ' + cleanPhone);
+        }
+        // Also register alternate names → same phone
+        if (altNamesColT !== -1 && data[i][altNamesColT]) {
+          var altsT = String(data[i][altNamesColT]).split(';');
+          for (var at = 0; at < altsT.length; at++) {
+            var altT = altsT[at].trim().toLowerCase();
+            if (altT && !phoneMap[altT]) phoneMap[altT] = cleanPhone;
+          }
         }
       } else {
         skippedCount++;
@@ -2767,6 +2777,12 @@ function parseExcelCertDataMultiRow(pastedText, columnMapping) {
 
   // Fuzzy match employees
   var employees = getEmployeeNamesForMatching();
+
+  // Debug: log alternate names for all employees to verify column is being read
+  var altNameDebug = employees.filter(function(e) { return e.alternateNames && e.alternateNames.trim() !== ''; });
+  Logger.log('DEBUG alternateNames populated for ' + altNameDebug.length + ' employees: ' +
+    altNameDebug.map(function(e) { return e.name + '=[' + e.alternateNames + ']'; }).join(', '));
+
   var employeeMatches = [];
   var employeeNames = Object.keys(uniqueEmployees);
 
@@ -2887,7 +2903,7 @@ function fuzzyMatchEmployeeName(convertedName, employeeList) {
     var emp = employeeList[i];
     var empNormalized = emp.name.toLowerCase().trim().replace(/\s+/g, ' ');
 
-    // Exact match
+    // Exact match on canonical name
     if (normalized === empNormalized) {
       return {
         employeeName: emp.name,
@@ -2896,6 +2912,23 @@ function fuzzyMatchEmployeeName(convertedName, employeeList) {
         suggestions: [],
         matchType: 'exact'
       };
+    }
+
+    // Exact match on any alternate name (semicolon-separated in Alternate Names column)
+    if (emp.alternateNames) {
+      var alts = emp.alternateNames.split(';');
+      for (var a = 0; a < alts.length; a++) {
+        var altNorm = alts[a].toLowerCase().trim().replace(/\s+/g, ' ');
+        if (altNorm && normalized === altNorm) {
+          return {
+            employeeName: emp.name,
+            confidence: 100,
+            employeeData: emp,
+            suggestions: [],
+            matchType: 'alternate_name'
+          };
+        }
+      }
     }
 
     // Check for reversed name
@@ -11849,7 +11882,7 @@ function setupLocationsSheet() {
   }
 
   // Set up headers
-  var headers = ['Location', 'Drive Time (min)', 'Direction', 'Overnight City'];
+  var headers = ['Location', 'Drive Time (min)', 'Direction', 'Overnight City', 'Base Time (min)', 'Per Task (min)'];
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
 
   // Format header row
@@ -11863,54 +11896,60 @@ function setupLocationsSheet() {
   sheet.setFrozenRows(1);
 
   // Set column widths
-  sheet.setColumnWidth(1, 150); // Location
-  sheet.setColumnWidth(2, 120); // Drive Time (min)
-  sheet.setColumnWidth(3, 100); // Direction
-  sheet.setColumnWidth(4, 120); // Overnight City
+  sheet.setColumnWidth(1, 160); // Location
+  sheet.setColumnWidth(2, 130); // Drive Time (min)
+  sheet.setColumnWidth(3, 110); // Direction
+  sheet.setColumnWidth(4, 130); // Overnight City
+  sheet.setColumnWidth(5, 120); // Base Time (min)
+  sheet.setColumnWidth(6, 120); // Per Task (min)
 
-  // Default locations data - migrated from hardcoded getDriveTimeMap()
+  // Default locations data [Location, Drive Time from Helena (min), Direction, Overnight City, Base Time (min), Per Task (min)]
+  // Base Time: minimum time at location regardless of task count (default 15 min)
+  // Per Task: minutes added per task at this location (default 10 min)
+  // Adjust these per-location to tune how long you actually spend at each crew.
   var defaultLocations = [
-    ['Helena', 0, 'Home', 'Helena'],
-    ['Bozeman', 90, 'East', 'Bozeman'],
-    ['Livingston', 90, 'East', 'Bozeman'],
-    ['Big Sky', 90, 'East', 'Bozeman'],
-    ['Ennis', 60, 'East', 'Ennis'],
-    ['Great Falls', 90, 'North', 'Great Falls'],
-    ['Stanford', 120, 'North', 'Great Falls'],
-    ['Butte', 90, 'Southwest', 'Butte'],
-    ['Anaconda', 90, 'Southwest', 'Butte'],
-    ['Anaconda City Sub', 90, 'Southwest', 'Butte'],
-    ['Missoula', 120, 'West', 'Missoula'],
-    ['Lolo', 130, 'West', 'Missoula'],
-    ['Rattlesnake Sub', 120, 'West', 'Missoula'],
-    ['Three Rivers Sub', 120, 'West', 'Missoula'],
-    ['Elliston', 45, 'West', 'Helena'],
-    ['Gold Creek', 75, 'West', 'Butte'],
-    ['Kalispell', 180, 'Northwest', 'Kalispell'],
-    ['Billings', 180, 'East', 'Billings'],
-    ['Miles City', 240, 'East', 'Billings'],
-    ['Sidney', 300, 'East', 'Sidney'],
-    ['Glendive', 270, 'East', 'Glendive'],
-    ['Rapelje', 120, 'East', 'Billings'],
-    ['Greycliff', 120, 'East', 'Bozeman'],
-    ['Manhattan', 90, 'East', 'Bozeman'],
-    ['South Dakota', 420, 'Far', 'South Dakota'],
-    ['Northern Lights', 420, 'Far', 'Northern Lights'],
-    ['California', 960, 'Far', 'California'],
-    ['CA Sub', 960, 'Far', 'California'],
-    ['Texas', 960, 'Far', 'Texas'],
-    ['South Dakota Dock', 420, 'Far', 'South Dakota'],
-    ['Weeds', 0, 'Office', 'Helena'],
-    ['Light Duty', 0, 'Office', 'Helena'],
-    ['Vacation', 0, 'Office', 'Helena'],
-    ['Leave', 0, 'Office', 'Helena'],
-    ['Previous Employee', 0, 'Office', 'Helena'],
-    ['Unknown', 0, 'Office', 'Helena']
+    ['Helena', 0, 'Home', 'Helena', 15, 10],
+    ['Bozeman', 100, 'East', 'Bozeman', 15, 10],
+    ['Livingston', 135, 'East', 'Livingston', 15, 10],
+    ['Big Sky', 140, 'East', 'Bozeman', 15, 10],
+    ['Ennis', 120, 'East', 'Ennis', 15, 10],
+    ['Great Falls', 90, 'North', 'Great Falls', 15, 10],
+    ['Stanford', 120, 'North', 'Great Falls', 15, 10],
+    ['Butte', 90, 'Southwest', 'Butte', 15, 10],
+    ['Anaconda', 95, 'Southwest', 'Butte', 15, 10],
+    ['Anaconda City Sub', 95, 'Southwest', 'Butte', 15, 10],
+    ['Missoula', 120, 'West', 'Missoula', 15, 10],
+    ['Lolo', 130, 'West', 'Missoula', 15, 10],
+    ['Rattlesnake Sub', 120, 'West', 'Missoula', 15, 10],
+    ['Three Rivers Sub', 120, 'West', 'Missoula', 15, 10],
+    ['Elliston', 45, 'West', 'Helena', 15, 10],
+    ['Gold Creek', 75, 'West', 'Butte', 15, 10],
+    ['Kalispell', 180, 'Northwest', 'Kalispell', 15, 10],
+    ['Billings', 180, 'East', 'Billings', 15, 10],
+    ['Miles City', 240, 'East', 'Billings', 15, 10],
+    ['Sidney', 300, 'East', 'Sidney', 15, 10],
+    ['Glendive', 270, 'East', 'Glendive', 15, 10],
+    ['Rapelje', 120, 'East', 'Billings', 15, 10],
+    ['Greycliff', 120, 'East', 'Bozeman', 15, 10],
+    ['Manhattan', 100, 'East', 'Bozeman', 15, 10],
+    ['South Dakota', 420, 'Far', 'South Dakota', 15, 10],
+    ['Northern Lights', 420, 'Far', 'Northern Lights', 15, 10],
+    ['California', 960, 'Far', 'California', 15, 10],
+    ['CA Sub', 960, 'Far', 'California', 15, 10],
+    ['Texas', 960, 'Far', 'Texas', 15, 10],
+    ['South Dakota Dock', 420, 'Far', 'South Dakota', 15, 10],
+    ['Weeds', 0, 'Office', 'Helena', 0, 0],
+    ['Light Duty', 0, 'Office', 'Helena', 0, 0],
+    ['Vacation', 0, 'Office', 'Helena', 0, 0],
+    ['Leave', 0, 'Office', 'Helena', 0, 0],
+    ['Previous Employee', 0, 'Office', 'Helena', 0, 0],
+    ['Unknown', 0, 'Office', 'Helena', 0, 0]
   ];
 
-  // Write data
+  // Write location data and sort
   if (defaultLocations.length > 0) {
-    sheet.getRange(2, 1, defaultLocations.length, 4).setValues(defaultLocations);
+    sheet.getRange(2, 1, defaultLocations.length, 6).setValues(defaultLocations);
+    sheet.getRange(2, 1, defaultLocations.length, 6).sort(1);
   }
 
   // Add data validation for Direction column
@@ -11919,31 +11958,422 @@ function setupLocationsSheet() {
     .requireValueInList(directionValues)
     .setAllowInvalid(true)
     .build();
-  sheet.getRange(2, 3, sheet.getMaxRows() - 1, 1).setDataValidation(directionRule);
+  sheet.getRange(2, 3, defaultLocations.length, 1).setDataValidation(directionRule);
 
-  // Add number validation for Drive Time column
-  var driveTimeRule = SpreadsheetApp.newDataValidation()
+  // Add number validation for Drive Time, Base Time, Per Task columns (advisory only)
+  var numRule = SpreadsheetApp.newDataValidation()
     .requireNumberGreaterThanOrEqualTo(0)
-    .setAllowInvalid(false)
+    .setAllowInvalid(true)
     .build();
-  sheet.getRange(2, 2, sheet.getMaxRows() - 1, 1).setDataValidation(driveTimeRule);
+  sheet.getRange(2, 2, defaultLocations.length, 1).setDataValidation(numRule);
+  sheet.getRange(2, 5, defaultLocations.length, 2).setDataValidation(numRule);
 
-  // Sort by Location name
-  sheet.getRange(2, 1, defaultLocations.length, 4).sort(1);
+  // Create (or refresh) the companion Drive Time Routes sheet for city-to-city pairs
+  setupDriveTimeRoutesSheet(ss);
 
   Logger.log('setupLocationsSheet: Created with ' + defaultLocations.length + ' locations');
 
   SpreadsheetApp.getUi().alert(
     '✅ Locations Sheet Created!\n\n' +
-    'Added ' + defaultLocations.length + ' locations with drive times.\n\n' +
-    'This sheet is now the source of truth for:\n' +
-    '• Trip Planner route calculations\n' +
-    '• Time Tracking travel estimates\n' +
-    '• Crew Import location validation\n\n' +
-    'To add a new location, simply add a row with the location name and drive time from Helena.'
+    'Added ' + defaultLocations.length + ' locations with drive times from Helena.\n\n' +
+    'Columns E & F (Base Time, Per Task) control how long you spend at each crew:\n' +
+    '• Base Time: minimum time at that location (default 15 min)\n' +
+    '• Per Task: time added per task (default 10 min)\n' +
+    'Adjust these per-location to match reality.\n\n' +
+    'City-to-city drive times are stored on the "Drive Time Routes" sheet tab.\n' +
+    'Use Maintenance → Sheets Setup → 🗺️ Refresh Drive Times (Google Maps) to update them.'
   );
 
   return { success: true, message: 'Created Locations sheet with ' + defaultLocations.length + ' locations' };
+}
+
+/**
+ * Creates (or resets) the "Drive Time Routes" sheet that stores city-to-city drive time pairs.
+ * This sheet is written by refreshDriveTimesFromGoogleMaps() and read by getDriveTimeMap().
+ * Keeping routes on a separate sheet avoids Google Sheets Table "typed column" conflicts.
+ *
+ * @param {Spreadsheet} ss - Optional spreadsheet object; fetched if not provided.
+ */
+function setupDriveTimeRoutesSheet(ss) {
+  ss = ss || SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Drive Time Routes');
+
+  if (!sheet) {
+    sheet = ss.insertSheet('Drive Time Routes');
+  } else {
+    sheet.clear();
+  }
+
+  // Headers
+  var headers = [['From', 'To', 'Drive Time (min)', 'Notes']];
+  sheet.getRange(1, 1, 1, 4).setValues(headers);
+  var hdrRange = sheet.getRange(1, 1, 1, 4);
+  hdrRange.setFontWeight('bold').setBackground('#34a853').setFontColor('white').setHorizontalAlignment('center');
+  sheet.setFrozenRows(1);
+  sheet.setColumnWidth(1, 140);
+  sheet.setColumnWidth(2, 140);
+  sheet.setColumnWidth(3, 140);
+  sheet.setColumnWidth(4, 220);
+
+  // Default city-to-city pairs (both directions stored so either A→B or B→A lookup works)
+  var defaultRoutes = [
+    ['Big Sky', 'Bozeman', 45, 'US-191 north to I-90'],
+    ['Bozeman', 'Big Sky', 45, 'US-191 south from I-90'],
+    ['Big Sky', 'Ennis', 90, 'US-191 south through Gallatin Canyon'],
+    ['Ennis', 'Big Sky', 90, 'US-191 north through Gallatin Canyon'],
+    ['Big Sky', 'Livingston', 90, 'US-191 north, then I-90 east'],
+    ['Livingston', 'Big Sky', 90, 'I-90 west then US-191 south'],
+    ['Bozeman', 'Ennis', 60, 'US-287 south through Norris'],
+    ['Ennis', 'Bozeman', 60, 'US-287 north through Norris'],
+    ['Bozeman', 'Livingston', 45, 'I-90 east'],
+    ['Livingston', 'Bozeman', 45, 'I-90 west'],
+    ['Bozeman', 'Great Falls', 200, 'I-90 west to US-89 north'],
+    ['Great Falls', 'Bozeman', 200, 'US-89 south to I-90 east'],
+    ['Bozeman', 'Billings', 140, 'I-90 east'],
+    ['Billings', 'Bozeman', 140, 'I-90 west'],
+    ['Bozeman', 'Missoula', 200, 'I-90 west'],
+    ['Missoula', 'Bozeman', 200, 'I-90 east'],
+    ['Bozeman', 'Butte', 95, 'I-90 west'],
+    ['Butte', 'Bozeman', 95, 'I-90 east'],
+    ['Ennis', 'Livingston', 100, 'US-287 north then I-90 east'],
+    ['Livingston', 'Ennis', 100, 'I-90 west then US-287 south'],
+    ['Livingston', 'Billings', 110, 'I-90 east'],
+    ['Billings', 'Livingston', 110, 'I-90 west'],
+    ['Great Falls', 'Stanford', 60, 'US-87 east'],
+    ['Stanford', 'Great Falls', 60, 'US-87 west'],
+    ['Great Falls', 'Missoula', 190, 'US-89 south then I-90 west'],
+    ['Missoula', 'Great Falls', 190, 'I-90 east then US-89 north'],
+    ['Missoula', 'Lolo', 20, 'US-93 south'],
+    ['Lolo', 'Missoula', 20, 'US-93 north'],
+    ['Missoula', 'Butte', 120, 'I-90 east'],
+    ['Butte', 'Missoula', 120, 'I-90 west'],
+    ['Butte', 'Anaconda', 25, 'I-90 west then MT-1'],
+    ['Anaconda', 'Butte', 25, 'MT-1 then I-90 east']
+  ];
+
+  if (defaultRoutes.length > 0) {
+    sheet.getRange(2, 1, defaultRoutes.length, 4).setValues(defaultRoutes);
+  }
+
+  Logger.log('setupDriveTimeRoutesSheet: Created with ' + defaultRoutes.length + ' route pairs');
+  return sheet;
+}
+
+/**
+ * Adds (or replaces) the ROUTES section on an existing Locations sheet without
+ * touching the top location rows. Safe to run on a live sheet.
+ */
+function migrateLocationsRoutes() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Locations');
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert('Locations sheet not found. Run "Setup Locations Sheet" first.');
+    return;
+  }
+
+  // Find the last non-empty row in column 1, then check if ROUTES already exists
+  var lastRow = sheet.getLastRow();
+  var data = lastRow >= 2 ? sheet.getRange(2, 1, lastRow - 1, 1).getValues() : [];
+  var existingRoutesRow = -1;
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i][0]).toUpperCase().indexOf('ROUTES') !== -1) {
+      existingRoutesRow = i + 2; // 1-indexed, +1 for header row
+      break;
+    }
+  }
+
+  // Remove old ROUTES section if it exists
+  if (existingRoutesRow !== -1) {
+    var rowsToDelete = lastRow - existingRoutesRow + 1;
+    if (rowsToDelete > 0) {
+      sheet.deleteRows(existingRoutesRow, rowsToDelete);
+    }
+    lastRow = sheet.getLastRow();
+  }
+
+  // Also fix the base drive times for key locations
+  var driveTimeUpdates = {
+    'bozeman': 100,
+    'livingston': 135,
+    'big sky': 140,
+    'ennis': 120,
+    'manhattan': 100
+  };
+  var locData = lastRow >= 2 ? sheet.getRange(2, 1, lastRow - 1, 2).getValues() : [];
+  for (var r = 0; r < locData.length; r++) {
+    var locName = String(locData[r][0]).toLowerCase().trim();
+    if (driveTimeUpdates[locName] !== undefined) {
+      sheet.getRange(r + 2, 2).setValue(driveTimeUpdates[locName]);
+    }
+  }
+
+  // Append ROUTES section
+  var sepRow = lastRow + 2;
+  sheet.getRange(sepRow, 1, 1, 4).setValues([['--- ROUTES ---', '', '', '']]);
+  sheet.getRange(sepRow, 1, 1, 4).setBackground('#f5f5f5').setFontWeight('bold').setFontStyle('italic');
+  sheet.getRange(sepRow, 1).setFontColor('#555555');
+
+  var routesHeaderRow = sepRow + 1;
+  sheet.getRange(routesHeaderRow, 1, 1, 4).setValues([['From', 'To', 'Drive Time (min)', 'Notes']]);
+  var routesHeader = sheet.getRange(routesHeaderRow, 1, 1, 4);
+  routesHeader.setFontWeight('bold');
+  routesHeader.setBackground('#34a853');
+  routesHeader.setFontColor('white');
+  routesHeader.setHorizontalAlignment('center');
+
+  var defaultRoutes = [
+    ['Big Sky', 'Bozeman', 45, 'US-191 north to I-90'],
+    ['Big Sky', 'Ennis', 90, 'US-191 south through Gallatin Canyon'],
+    ['Big Sky', 'Livingston', 90, 'US-191 north, then I-90 east'],
+    ['Bozeman', 'Ennis', 60, 'US-287 south through Norris'],
+    ['Bozeman', 'Livingston', 45, 'I-90 east'],
+    ['Bozeman', 'Great Falls', 200, 'I-90 west to US-89 north'],
+    ['Bozeman', 'Billings', 140, 'I-90 east'],
+    ['Bozeman', 'Missoula', 200, 'I-90 west'],
+    ['Bozeman', 'Butte', 95, 'I-90 west'],
+    ['Ennis', 'Livingston', 100, 'US-287 north, then I-90 east'],
+    ['Livingston', 'Billings', 110, 'I-90 east'],
+    ['Great Falls', 'Stanford', 60, 'US-87 east'],
+    ['Great Falls', 'Missoula', 190, 'US-89 south then I-90 west'],
+    ['Missoula', 'Lolo', 20, 'US-93 south'],
+    ['Missoula', 'Butte', 120, 'I-90 east'],
+    ['Butte', 'Anaconda', 25, 'I-90 west then MT-1'],
+    ['Butte', 'Missoula', 120, 'I-90 west']
+  ];
+
+  var routesDataRow = routesHeaderRow + 1;
+  sheet.getRange(routesDataRow, 1, defaultRoutes.length, 4).setValues(defaultRoutes);
+
+  SpreadsheetApp.getUi().alert(
+    '✅ Locations Sheet Updated!\n\n' +
+    'Updated drive times:\n' +
+    '• Bozeman: 100 min\n' +
+    '• Livingston: 135 min\n' +
+    '• Big Sky: 140 min\n' +
+    '• Ennis: 120 min\n\n' +
+    'Added ' + defaultRoutes.length + ' city-to-city route pairs to the ROUTES section.\n\n' +
+    'You can edit any row in the ROUTES section to fine-tune drive times.'
+  );
+}
+
+
+/**
+ * Refreshes drive times in the Locations sheet using real Google Maps Directions data.
+ * Updates both Helena→city times (column B) and city-to-city ROUTES pairs.
+ * Uses Apps Script built-in Maps service — no external API key required.
+ * Menu: Maintenance → Sheets Setup → 🗺️ Refresh Drive Times (Google Maps)
+ */
+function refreshDriveTimesFromGoogleMaps() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Locations');
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert('Locations sheet not found. Run "Setup Locations Sheet" first (Maintenance → Sheets Setup).');
+    return;
+  }
+
+  var ui = SpreadsheetApp.getUi();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    ui.alert('Locations sheet is empty. Run "Setup Locations Sheet" first.');
+    return;
+  }
+
+  var data = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
+
+  // Parse location rows and find the ROUTES section separator
+  var STATUS_SKIP = ['weeds', 'light duty', 'vacation', 'leave', 'previous employee', 'unknown', 'helena'];
+  var FAR_SKIP    = ['south dakota', 'south dakota dock', 'northern lights', 'california', 'ca sub', 'texas',
+                     'miles city', 'sidney', 'glendive'];
+
+  var locations = [];         // real cities to query
+  var routesSepSheetRow = -1; // 1-based sheet row of the --- ROUTES --- separator
+
+  for (var i = 0; i < data.length; i++) {
+    var col1 = String(data[i][0] || '').trim();
+    if (!col1) continue;
+    if (col1.toUpperCase().indexOf('ROUTES') !== -1) {
+      routesSepSheetRow = i + 2; // convert 0-based data index → 1-based sheet row
+      break;
+    }
+    var lower = col1.toLowerCase();
+    if (STATUS_SKIP.indexOf(lower) === -1 && FAR_SKIP.indexOf(lower) === -1) {
+      locations.push({ name: col1, sheetRow: i + 2 });
+    }
+  }
+
+  // Friendly Google Maps addresses for locations that aren't plain "<City>, Montana"
+  var ADDRESS_MAP = {
+    'Big Sky':           'Big Sky, Montana',
+    'Lolo':              'Lolo, Montana',
+    'Elliston':          'Elliston, Montana',
+    'Gold Creek':        'Gold Creek, Montana',
+    'Greycliff':         'Greycliff, Montana',
+    'Rapelje':           'Rapelje, Montana',
+    'Manhattan':         'Manhattan, Montana',
+    'Rattlesnake Sub':   'Missoula, Montana',
+    'Three Rivers Sub':  'Missoula, Montana',
+    'Anaconda City Sub': 'Anaconda, Montana'
+  };
+
+  function getAddress(name) {
+    return ADDRESS_MAP[name] || (name + ', Montana');
+  }
+
+  // --- Load existing Drive Time Routes to skip already-populated pairs ---
+  var routesSheet = ss.getSheetByName('Drive Time Routes');
+  if (!routesSheet) {
+    routesSheet = setupDriveTimeRoutesSheet(ss);
+  }
+  var existingRouteKeys = {};
+  var routesLastRow = routesSheet.getLastRow();
+  if (routesLastRow >= 2) {
+    var existingRoutes = routesSheet.getRange(2, 1, routesLastRow - 1, 4).getValues();
+    for (var r = 0; r < existingRoutes.length; r++) {
+      var rfrom = String(existingRoutes[r][0] || '').trim();
+      var rto   = String(existingRoutes[r][1] || '').trim();
+      var rnote = String(existingRoutes[r][3] || '').trim();
+      if (rfrom && rto && rnote === 'Google Maps') {
+        existingRouteKeys[rfrom + '|' + rto] = true;
+        existingRouteKeys[rto + '|' + rfrom] = true;
+      }
+    }
+  }
+
+  // --- Check which Helena → city times are already populated ---
+  var locData = sheet.getRange(2, 1, (routesSepSheetRow > 0 ? routesSepSheetRow - 2 : locations.length), 2).getValues();
+  var existingHelenaMap = {};
+  for (var ld = 0; ld < locData.length; ld++) {
+    var ldName = String(locData[ld][0] || '').trim();
+    var ldVal  = locData[ld][1];
+    if (ldName && typeof ldVal === 'number' && ldVal > 0) {
+      existingHelenaMap[ldName] = true;
+    }
+  }
+
+  var missingHelena = locations.filter(function(l) { return !existingHelenaMap[l.name]; });
+  var missingPairs  = 0;
+  for (var a0 = 0; a0 < locations.length; a0++) {
+    for (var b0 = a0 + 1; b0 < locations.length; b0++) {
+      var key0 = locations[a0].name + '|' + locations[b0].name;
+      if (!existingRouteKeys[key0]) missingPairs++;
+    }
+  }
+
+  var totalExisting = Object.keys(existingRouteKeys).length / 2; // each pair stored twice
+  var confirmMsg = '🗺️ Refresh Drive Times from Google Maps\n\n';
+  if (missingHelena.length === 0 && missingPairs === 0) {
+    confirmMsg += '✅ All drive times are already populated from Google Maps.\n\n' +
+                  'Force re-query all ' + locations.length + ' Helena→city + ' +
+                  Math.round(locations.length * (locations.length - 1) / 2) + ' route pairs?';
+  } else {
+    confirmMsg += 'Will only query MISSING routes:\n' +
+                  '• ' + missingHelena.length + ' Helena → city times (of ' + locations.length + ')\n' +
+                  '• ' + missingPairs + ' city-to-city pairs (of ' + Math.round(locations.length * (locations.length - 1) / 2) + ')\n\n' +
+                  'Already populated routes will be skipped (preserves daily quota).\n' +
+                  'To re-query everything, delete the Drive Time Routes sheet first.';
+  }
+
+  var confirm = ui.alert('🗺️ Refresh Drive Times', confirmMsg, ui.ButtonSet.YES_NO);
+  if (confirm !== ui.Button.YES) return;
+
+  var helenaMT = 'Helena, Montana';
+  var updatedBase = 0;
+  var updatedRoutes = 0;
+  var skippedBase = 0;
+  var skippedRoutes = 0;
+  var errors = 0;
+
+  // --- Step 1: Helena → each city (only missing ones) ---
+  if (missingHelena.length > 0) {
+    SpreadsheetApp.getActiveSpreadsheet().toast('Querying ' + missingHelena.length + ' Helena → city times…', 'Google Maps', -1);
+    var lastLocRow = (routesSepSheetRow > 0) ? routesSepSheetRow - 2 : locations.length;
+    if (lastLocRow > 0) {
+      try { sheet.getRange(2, 2, lastLocRow, 1).clearDataValidations(); } catch(e) {}
+    }
+    for (var j = 0; j < locations.length; j++) {
+      var loc = locations[j];
+      if (existingHelenaMap[loc.name]) { skippedBase++; continue; }
+      var mins = queryGoogleMapsMinutes_(helenaMT, getAddress(loc.name));
+      if (mins > 0) {
+        try { sheet.getRange(loc.sheetRow, 2).setValue(mins); } catch(eWrite) {
+          Logger.log('refreshDriveTimesFromGoogleMaps: could not write row ' + loc.sheetRow + ': ' + eWrite);
+        }
+        updatedBase++;
+      } else {
+        errors++;
+      }
+      Utilities.sleep(300);
+    }
+  } else {
+    skippedBase = locations.length;
+  }
+
+  // --- Step 2: City-to-city pairs (only missing ones) ---
+  var newRoutePairs = [];
+  if (missingPairs > 0) {
+    SpreadsheetApp.getActiveSpreadsheet().toast('Querying ' + missingPairs + ' missing route pairs…', 'Google Maps', -1);
+    for (var a = 0; a < locations.length; a++) {
+      for (var b = a + 1; b < locations.length; b++) {
+        var cityA = locations[a].name;
+        var cityB = locations[b].name;
+        var pairKey = cityA + '|' + cityB;
+        if (existingRouteKeys[pairKey]) { skippedRoutes++; continue; }
+        var mins2 = queryGoogleMapsMinutes_(getAddress(cityA), getAddress(cityB));
+        if (mins2 > 0) {
+          newRoutePairs.push([cityA, cityB, mins2, 'Google Maps']);
+          existingRouteKeys[pairKey] = true;
+          existingRouteKeys[cityB + '|' + cityA] = true;
+          updatedRoutes++;
+        } else {
+          errors++;
+        }
+        Utilities.sleep(300);
+      }
+    }
+  } else {
+    skippedRoutes = Math.round(locations.length * (locations.length - 1) / 2);
+  }
+
+  // --- Step 3: Append only new route pairs (preserves existing data) ---
+  if (newRoutePairs.length > 0) {
+    var appendRow = routesSheet.getLastRow() + 1;
+    routesSheet.getRange(appendRow, 1, newRoutePairs.length, 4).setValues(newRoutePairs);
+  }
+
+  SpreadsheetApp.getActiveSpreadsheet().toast('Done!', 'Google Maps', 3);
+  ui.alert(
+    '✅ Drive Times Updated!',
+    '• ' + updatedBase + ' Helena → city times updated' + (skippedBase > 0 ? ' (' + skippedBase + ' already had data, skipped)' : '') + '\n' +
+    '• ' + updatedRoutes + ' new city-to-city pairs added' + (skippedRoutes > 0 ? ' (' + skippedRoutes + ' already existed, skipped)' : '') + '\n' +
+    (errors > 0 ? '• ' + errors + ' lookups failed (quota may be exceeded — try again tomorrow)\n' : '') +
+    '\nTotal routes in Drive Time Routes sheet: ' + (skippedRoutes + updatedRoutes) + '\n' +
+    'Open Trip Planner to see accurate day estimates.',
+    ui.ButtonSet.OK
+  );
+}
+
+/**
+ * Queries Google Maps Directions API for driving time between two locations.
+ * Uses Apps Script built-in Maps service — no external API key required.
+ * @param {string} origin - Origin address string
+ * @param {string} destination - Destination address string
+ * @return {number} Drive time in minutes, or 0 on error / no result
+ */
+function queryGoogleMapsMinutes_(origin, destination) {
+  try {
+    var result = Maps.newDirectionFinder()
+      .setOrigin(origin)
+      .setDestination(destination)
+      .setMode(Maps.DirectionFinder.Mode.DRIVING)
+      .getDirections();
+    if (!result || !result.routes || !result.routes.length) return 0;
+    var legs = result.routes[0].legs;
+    if (!legs || !legs.length) return 0;
+    return Math.round(legs[0].duration.value / 60);
+  } catch (e) {
+    Logger.log('queryGoogleMapsMinutes_: ' + origin + ' → ' + destination + ' — ' + e);
+    return 0;
+  }
 }
 
 /**
@@ -11993,18 +12423,23 @@ function getLocationsSheetData() {
     return [];
   }
 
-  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 4).getValues();
+  var numCols = Math.min(sheet.getLastColumn(), 6);
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, numCols).getValues();
   var locations = [];
 
   for (var i = 0; i < data.length; i++) {
-    if (data[i][0]) {
-      locations.push({
-        name: String(data[i][0]).trim(),
-        driveTime: Number(data[i][1]) || 0,
-        direction: String(data[i][2] || '').trim(),
-        overnightCity: String(data[i][3] || '').trim()
-      });
-    }
+    var name = String(data[i][0] || '').trim();
+    if (!name || name.toUpperCase().indexOf('ROUTES') !== -1) continue; // skip separator
+    var baseTime = (numCols >= 5 && data[i][4] !== '') ? Number(data[i][4]) : -1;
+    var perTask  = (numCols >= 6 && data[i][5] !== '') ? Number(data[i][5]) : -1;
+    locations.push({
+      name: name,
+      driveTime: Number(data[i][1]) || 0,
+      direction: String(data[i][2] || '').trim(),
+      overnightCity: String(data[i][3] || '').trim(),
+      baseTime: baseTime >= 0 ? baseTime : 15,  // default 15 min
+      perTask:  perTask  >= 0 ? perTask  : 10   // default 10 min per task
+    });
   }
 
   return locations;
@@ -12048,12 +12483,14 @@ function addLocationWithDriveTime(locationName, driveTime, direction, overnightC
     }
   }
 
-  // Add the new location
+  // Add the new location (6 columns: Location, Drive Time, Direction, Overnight City, Base Time, Per Task)
   var newRow = [
     locationName.trim(),
     Number(driveTime) || 0,
     direction || '',
-    overnightCity || locationName.trim()
+    overnightCity || locationName.trim(),
+    15,
+    10
   ];
 
   sheet.appendRow(newRow);
@@ -12076,6 +12513,97 @@ function addLocationWithDriveTime(locationName, driveTime, direction, overnightC
       overnightCity: overnightCity || locationName.trim()
     }
   };
+}
+
+/**
+ * Returns a map of location name (lowercase) → {baseTime, perTask} crew time config.
+ * Used by calculateDayPlan() to estimate time spent at each location.
+ * Falls back to CREW_BASE_TIME / CREW_PER_TASK if a location is not in the sheet.
+ *
+ * @return {Object} e.g. { 'bozeman': {baseTime:15, perTask:10}, ... }
+ */
+function getCrewTimeMap() {
+  var locations = getLocationsSheetData();
+  var map = {};
+  for (var i = 0; i < locations.length; i++) {
+    map[locations[i].name.toLowerCase()] = {
+      baseTime: locations[i].baseTime,
+      perTask:  locations[i].perTask
+    };
+  }
+  return map;
+}
+
+/**
+ * Migration: adds "Base Time (min)" (col E) and "Per Task (min)" (col F) to an
+ * existing Locations sheet that only has 4 columns.  Safe to run multiple times.
+ * Menu: Maintenance → Sheets Setup → ➕ Add Crew Time Columns (Locations)
+ */
+function migrateLocationsCrewTime() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Locations');
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert('Locations sheet not found. Run Setup Locations Sheet first.');
+    return;
+  }
+
+  var lastCol = sheet.getLastColumn();
+
+  // Add headers if missing
+  if (lastCol < 5) {
+    sheet.getRange(1, 5).setValue('Base Time (min)');
+  }
+  if (lastCol < 6) {
+    sheet.getRange(1, 6).setValue('Per Task (min)');
+  }
+
+  // Format the new headers
+  var hdr = sheet.getRange(1, 5, 1, 2);
+  hdr.setFontWeight('bold').setBackground('#1a73e8').setFontColor('white').setHorizontalAlignment('center');
+  sheet.setColumnWidth(5, 120);
+  sheet.setColumnWidth(6, 120);
+
+  // Fill missing values in data rows (default 15 / 10; 0 / 0 for Office direction)
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    SpreadsheetApp.getUi().alert('Locations sheet is empty — nothing to migrate.');
+    return;
+  }
+
+  var data = sheet.getRange(2, 1, lastRow - 1, Math.min(sheet.getLastColumn(), 6)).getValues();
+  var updates = [];
+  for (var i = 0; i < data.length; i++) {
+    var name = String(data[i][0] || '').trim();
+    if (!name || name.toUpperCase().indexOf('ROUTES') !== -1) {
+      updates.push([data[i][4] || '', data[i][5] || '']);
+      continue;
+    }
+    var direction = String(data[i][2] || '').trim();
+    var isOffice = (direction.toLowerCase() === 'office');
+    var existBase = (data[i][4] !== '' && data[i][4] !== undefined) ? data[i][4] : null;
+    var existPer  = (data[i][5] !== '' && data[i][5] !== undefined) ? data[i][5] : null;
+    updates.push([
+      existBase !== null ? existBase : (isOffice ? 0 : 15),
+      existPer  !== null ? existPer  : (isOffice ? 0 : 10)
+    ]);
+  }
+  sheet.getRange(2, 5, updates.length, 2).setValues(updates);
+
+  // Also add number validation for cols E and F
+  var numRule = SpreadsheetApp.newDataValidation()
+    .requireNumberGreaterThanOrEqualTo(0).setAllowInvalid(true).build();
+  sheet.getRange(2, 5, lastRow - 1, 2).setDataValidation(numRule);
+
+  // Ensure Drive Time Routes sheet exists
+  setupDriveTimeRoutesSheet(ss);
+
+  SpreadsheetApp.getUi().alert(
+    '✅ Locations Sheet Updated!\n\n' +
+    'Added "Base Time (min)" and "Per Task (min)" columns.\n' +
+    'Defaults: 15 min base + 10 min per task for field locations; 0 for office/status.\n\n' +
+    'Edit any row to tune how long you spend at a specific location.\n' +
+    'Also created/refreshed the "Drive Time Routes" sheet tab for city-to-city times.'
+  );
 }
 
 /**
@@ -12564,7 +13092,8 @@ function generateTaskMetadata() {
         isDeclined: existingData[i][20],       // Column U: IsDeclined
         completedDate: existingData[i][21],    // Column V: CompletedDate
         notes: existingData[i][22],            // Column W: Notes
-        createdDate: existingData[i][23]       // Column X: CreatedDate
+        createdDate: existingData[i][23],      // Column X: CreatedDate
+        inTaskList: existingData[i].length > 25 ? existingData[i][25] : '' // Column Z: InTaskList
       };
     }
   }
@@ -12623,7 +13152,8 @@ function generateTaskMetadata() {
 
       updateRecords.push({
         rowIndex: existing.rowIndex,
-        data: updatedRecord
+        data: updatedRecord,
+        inTaskList: existing.inTaskList
       });
       updatedCount++;
 
@@ -12676,6 +13206,12 @@ function generateTaskMetadata() {
       for (var u = 0; u < updateRecords.length; u++) {
         var update = updateRecords[u];
         metadataSheet.getRange(update.rowIndex, 1, 1, 25).setValues([update.data]);
+        // For crane_eval records, ensure InTaskList=TRUE is set (mandatory safety requirement)
+        if (String(update.data[2] || '').indexOf('crane_eval_') === 0 &&
+            String(update.inTaskList || '') !== 'TRUE') {
+          metadataSheet.getRange(update.rowIndex, 26).setValue('TRUE');
+          Logger.log('generateTaskMetadata: Auto-set InTaskList=TRUE on existing crane eval at row ' + update.rowIndex);
+        }
       }
       Logger.log('generateTaskMetadata: Updated ' + updateRecords.length + ' existing records');
     } catch (writeErr) {
@@ -12719,6 +13255,16 @@ function generateTaskMetadata() {
           'Then run Generate Task Metadata again.');
       }
       throw newWriteErr;
+    }
+
+    // Auto-set InTaskList=TRUE for Crane Evaluation tasks (mandatory safety requirement)
+    // These have rowIndex='crane_eval_<emp>' and would otherwise be filtered out of the To Do List
+    for (var crn = 0; crn < newRecords.length; crn++) {
+      var crnSourceRow = String(newRecords[crn][2] || '');
+      if (crnSourceRow.indexOf('crane_eval_') === 0) {
+        metadataSheet.getRange(startRow + crn, 26).setValue('TRUE'); // Column Z = InTaskList
+        Logger.log('generateTaskMetadata: Auto-set InTaskList=TRUE for crane eval at row ' + (startRow + crn));
+      }
     }
 
     // THEN clear any inherited validation on the Status column for new rows
@@ -13197,7 +13743,7 @@ function getTasksWithMetadata() {
     for (var ch = 0; ch < certHeaders.length; ch++) {
       var certHdr = String(certHeaders[ch]).toLowerCase().trim();
       if (certHdr === 'employee name' || certHdr === 'name') certNameCol = ch;
-      if (certHdr === 'cert type' || certHdr === 'certification type') certTypeCol = ch;
+      if (certHdr === 'cert type' || certHdr === 'certification type' || certHdr === 'item type') certTypeCol = ch;
       if (certHdr === 'days until' || certHdr === 'days until expiration') certDaysUntilCol = ch;
       if (certHdr === 'expiration date' || certHdr === 'exp date') certExpDateCol = ch;
     }
@@ -13257,11 +13803,16 @@ function getTasksWithMetadata() {
           continue;
         }
       } else {
-        // Cert no longer exists in source sheet - skip it
-        Logger.log('getTasksWithMetadata: Skipping ORPHANED cert task - ' + metadata.employee +
-                   ' ' + metadata.itemType + ' no longer in Expiring Certs sheet');
-        skippedStaleCerts++;
-        continue;
+        // Crane Eval tasks generated from post-loop sweep have no real Expiring Certs row — don't orphan them
+        if (String(metadata.sourceRow || '').indexOf('crane_eval_') === 0) {
+          // This is a valid auto-generated Crane Evaluation task — let it through
+        } else {
+          // Cert no longer exists in source sheet - skip it
+          Logger.log('getTasksWithMetadata: Skipping ORPHANED cert task - ' + metadata.employee +
+                     ' ' + metadata.itemType + ' no longer in Expiring Certs sheet');
+          skippedStaleCerts++;
+          continue;
+        }
       }
     }
 
