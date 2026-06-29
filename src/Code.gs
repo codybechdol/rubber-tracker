@@ -26156,36 +26156,37 @@ function deploySwapsDashboards() {
     headerRange.setFormula('="' + config.title + ' Swaps Overview - Class: " & IF($Z$22="All", "All", $Z$22) & " | Size: " & IF($AB$22="All", "All", $AB$22)');
     headerRange.setFontSize(16).setFontWeight("bold").setHorizontalAlignment("center").setVerticalAlignment("middle");
 
-    // 4. Set Up Row Headers for the Helper Grid Matrix
-    sheet.getRange("AF1:AJ1").setValues([["Status", "Count", "Newest Date Assigned", "Expected Return Date", "Chart Label"]]).setFontWeight("bold");
-    
-    // Status column (AF) has dynamic labels containing counts/dates for the chart legend
-    sheet.getRange("AF2").setFormula('="On Shelf (" & AG2 & ")"');
-    sheet.getRange("AF3").setFormula('="Packed For Testing" & IF(AG3=0, "", " (" & AJ3 & ")")');
-    sheet.getRange("AF4").setFormula('="In Testing" & IF(AG4=0, "", " (" & AJ4 & ")")');
+    // 4. Set Up Helper Grid Matrix in Horizontal Layout
+    sheet.getRange("AF1:AF4").setValues([
+      ["Status"],
+      ["Count"],
+      ["Newest Date Assigned"],
+      ["Expected Return Date"]
+    ]).setFontWeight("bold");
 
-    // 5. Build Dynamic Cross-Tab Filter Formula Sets (Corrected Column mapping: Size is C, Class is D)
-    // Formulas use hardcoded status strings to prevent circular references with dynamic AF labels
+    // Row 1 (Dynamic Series Names for Legend)
+    sheet.getRange("AG1").setFormula('="On Shelf (" & AG2 & ")"');
+    sheet.getRange("AH1").setFormula('="Packed For Testing" & IF(AH2=0, "", " (Due: " & TEXT(AH4, "m/d/yyyy") & ")")');
+    sheet.getRange("AI1").setFormula('="In Testing" & IF(AI2=0, "", " (Due: " & TEXT(AI4, "m/d/yyyy") & ")")');
+
+    // Row 2 (Counts)
     sheet.getRange("AG2").setFormula('=COUNTIFS(' + config.sourceTab + '!$H:$H, "On Shelf", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22))');
-    sheet.getRange("AG3").setFormula('=COUNTIFS(' + config.sourceTab + '!$H:$H, "Packed For Testing", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22))');
-    sheet.getRange("AG4").setFormula('=COUNTIFS(' + config.sourceTab + '!$H:$H, "In Testing", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22))');
+    sheet.getRange("AH2").setFormula('=COUNTIFS(' + config.sourceTab + '!$H:$H, "Packed For Testing", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22))');
+    sheet.getRange("AI2").setFormula('=COUNTIFS(' + config.sourceTab + '!$H:$H, "In Testing", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22))');
 
-    // AH formulas use IF(AGx=0, "", ...) to prevent showing 1899-12-30 (date 0) when count is 0
-    sheet.getRange("AH2").setFormula('=IF(AG2=0, "", MAXIFS(' + config.sourceTab + '!$F:$F, ' + config.sourceTab + '!$H:$H, "On Shelf", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22)))');
-    sheet.getRange("AH3").setFormula('=IF(AG3=0, "", MAXIFS(' + config.sourceTab + '!$F:$F, ' + config.sourceTab + '!$H:$H, "Packed For Testing", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22)))');
-    sheet.getRange("AH4").setFormula('=IF(AG4=0, "", MAXIFS(' + config.sourceTab + '!$F:$F, ' + config.sourceTab + '!$H:$H, "In Testing", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22)))');
+    // Row 3 (Newest Date Assigned)
+    sheet.getRange("AG3").setFormula('=IF(AG2=0, "", MAXIFS(' + config.sourceTab + '!$F:$F, ' + config.sourceTab + '!$H:$H, "On Shelf", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22)))');
+    sheet.getRange("AH3").setFormula('=IF(AH2=0, "", MAXIFS(' + config.sourceTab + '!$F:$F, ' + config.sourceTab + '!$H:$H, "Packed For Testing", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22)))');
+    sheet.getRange("AI3").setFormula('=IF(AI2=0, "", MAXIFS(' + config.sourceTab + '!$F:$F, ' + config.sourceTab + '!$H:$H, "In Testing", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22)))');
 
-    sheet.getRange("AI2").setValue("N/A");
-    sheet.getRange("AI3").setFormula('=IF(OR(AH3="", AH3=0), "", EDATE(AH3, 1))');
-    sheet.getRange("AI4").setFormula('=IF(OR(AH4="", AH4=0), "", AH4 + 14)');
-
-    sheet.getRange("AJ2").setFormula('=IF(AG2=0, "", TEXT(AG2, "#"))');
-    sheet.getRange("AJ3").setFormula('=IF(OR(AI3="", AI3=0), "", "Due: " & TEXT(AI3, "m/d/yyyy"))');
-    sheet.getRange("AJ4").setFormula('=IF(OR(AI4="", AI4=0), "", "Due: " & TEXT(AI4, "m/d/yyyy"))');
+    // Row 4 (Expected Return Date)
+    sheet.getRange("AG4").setValue("N/A");
+    sheet.getRange("AH4").setFormula('=IF(OR(AH3="", AH3=0), "", EDATE(AH3, 1))');
+    sheet.getRange("AI4").setFormula('=IF(OR(AI3="", AI3=0), "", AI3 + 14)');
 
     // 6. Enforce Layout Formatting Rules (Numbers & Timestamps)
-    sheet.getRange("AH2:AI4").setNumberFormat("yyyy-mm-dd");
-    sheet.getRange("AG2:AG4").setNumberFormat("#,##0");
+    sheet.getRange("AG3:AI4").setNumberFormat("yyyy-mm-dd");
+    sheet.getRange("AG2:AI2").setNumberFormat("#,##0");
 
     // 7. Programmatic Generation of the Separated Bar Charts
     var existingCharts = sheet.getCharts();
@@ -26195,14 +26196,14 @@ function deploySwapsDashboards() {
 
     var chart = sheet.newChart()
         .setChartType(Charts.ChartType.COLUMN)
-        .addRange(sheet.getRange("AF1:AG4")) // Category & Core Metric Counts
+        .addRange(sheet.getRange("AF1:AI2")) // Category & Core Metric Counts
         .setPosition(2, 25, 10, 10)         // Anchored nicely starting at cell Y2
         .setOption("title", "")              // Cleaned out to use the cell header blueprint instead
         .setOption("legend", { position: "top" }) // Show the legend at the top to explain the 3 status series
         .setOption("colors", ["#2ea44f", "#e3b341", "#cb2431"]) // Set Green, Yellow, Red branding colors
         .setOption("vAxis", { title: "Counts" })
         .setOption("dataLabels", "value")    // Configures core labels
-        .setTransposeRowsAndColumns(true)    // Transpose so each status is its own series (colored separately)
+        .setTransposeRowsAndColumns(false)   // False because columns are already series (horizontal layout)
         .build();
 
     sheet.insertChart(chart);
