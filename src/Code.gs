@@ -26166,27 +26166,35 @@ function deploySwapsDashboards() {
 
     // Row 1 (Dynamic Series Names for Legend)
     sheet.getRange("AG1").setFormula('="On Shelf (" & AG2 & ")"');
-    sheet.getRange("AH1").setFormula('="Packed For Testing" & IF(AH2=0, "", " (Due: " & TEXT(AH4, "m/d/yyyy") & ")")');
-    sheet.getRange("AI1").setFormula('="In Testing" & IF(AI2=0, "", " (Due: " & TEXT(AI4, "m/d/yyyy") & ")")');
+    sheet.getRange("AH1").setValue(" ");
+    sheet.getRange("AI1").setFormula('="Packed For Testing (" & AI2 & ")"');
+    sheet.getRange("AJ1").setValue(" ");
+    sheet.getRange("AK1").setFormula('="In Testing (" & AK2 & ")"');
 
     // Row 2 (Counts)
     sheet.getRange("AG2").setFormula('=COUNTIFS(' + config.sourceTab + '!$H:$H, "On Shelf", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22))');
-    sheet.getRange("AH2").setFormula('=COUNTIFS(' + config.sourceTab + '!$H:$H, "Packed For Testing", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22))');
-    sheet.getRange("AI2").setFormula('=COUNTIFS(' + config.sourceTab + '!$H:$H, "In Testing", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22))');
+    sheet.getRange("AH2").setValue(0);
+    sheet.getRange("AI2").setFormula('=COUNTIFS(' + config.sourceTab + '!$H:$H, "Ready For Test", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22))');
+    sheet.getRange("AJ2").setValue(0);
+    sheet.getRange("AK2").setFormula('=COUNTIFS(' + config.sourceTab + '!$H:$H, "In Testing", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22))');
 
     // Row 3 (Newest Date Assigned)
     sheet.getRange("AG3").setFormula('=IF(AG2=0, "", MAXIFS(' + config.sourceTab + '!$F:$F, ' + config.sourceTab + '!$H:$H, "On Shelf", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22)))');
-    sheet.getRange("AH3").setFormula('=IF(AH2=0, "", MAXIFS(' + config.sourceTab + '!$F:$F, ' + config.sourceTab + '!$H:$H, "Packed For Testing", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22)))');
-    sheet.getRange("AI3").setFormula('=IF(AI2=0, "", MAXIFS(' + config.sourceTab + '!$F:$F, ' + config.sourceTab + '!$H:$H, "In Testing", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22)))');
+    sheet.getRange("AH3").setValue("");
+    sheet.getRange("AI3").setFormula('=IF(AI2=0, "", MAXIFS(' + config.sourceTab + '!$F:$F, ' + config.sourceTab + '!$H:$H, "Ready For Test", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22)))');
+    sheet.getRange("AJ3").setValue("");
+    sheet.getRange("AK3").setFormula('=IF(AK2=0, "", MAXIFS(' + config.sourceTab + '!$F:$F, ' + config.sourceTab + '!$H:$H, "In Testing", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22)))');
 
-    // Row 4 (Expected Return Date)
+    // Row 4 (Expected Return Date formatted directly as a Due string)
     sheet.getRange("AG4").setValue("N/A");
-    sheet.getRange("AH4").setFormula('=IF(OR(AH3="", AH3=0), "", EDATE(AH3, 1))');
-    sheet.getRange("AI4").setFormula('=IF(OR(AI3="", AI3=0), "", AI3 + 14)');
+    sheet.getRange("AH4").setValue("");
+    sheet.getRange("AI4").setFormula('=IF(OR(AI3="", AI3=0), "", "Due: " & TEXT(EDATE(AI3, 1), "m/d/yyyy"))');
+    sheet.getRange("AJ4").setValue("");
+    sheet.getRange("AK4").setFormula('=IF(OR(AK3="", AK3=0), "", "Due: " & TEXT(AK3 + 14, "m/d/yyyy"))');
 
     // 6. Enforce Layout Formatting Rules (Numbers & Timestamps)
-    sheet.getRange("AG3:AI4").setNumberFormat("yyyy-mm-dd");
-    sheet.getRange("AG2:AI2").setNumberFormat("#,##0");
+    sheet.getRange("AG3:AK4").setNumberFormat("yyyy-mm-dd");
+    sheet.getRange("AG2:AK2").setNumberFormat("#,##0");
 
     // 7. Programmatic Generation of the Separated Bar Charts
     var existingCharts = sheet.getCharts();
@@ -26196,16 +26204,141 @@ function deploySwapsDashboards() {
 
     var chart = sheet.newChart()
         .setChartType(Charts.ChartType.COLUMN)
-        .addRange(sheet.getRange("AF1:AI2")) // Category & Core Metric Counts
+        .addRange(sheet.getRange("AF1:AK2")) // Category & Core Metric Counts with Spacer Columns
+        .setNumHeaders(1)                    // Treat the first row as headers to properly label the legend
         .setPosition(2, 25, 10, 10)         // Anchored nicely starting at cell Y2
         .setOption("title", "")              // Cleaned out to use the cell header blueprint instead
         .setOption("legend", { position: "top" }) // Show the legend at the top to explain the 3 status series
-        .setOption("colors", ["#2ea44f", "#e3b341", "#cb2431"]) // Set Green, Yellow, Red branding colors
+        .setOption("colors", ["#2ea44f", "#ffffff", "#e3b341", "#ffffff", "#cb2431"]) // Green, Spacer (White), Yellow, Spacer (White), Red
         .setOption("vAxis", { title: "Counts" })
-        .setOption("dataLabels", "value")    // Configures core labels
+        .setOption("hAxis", { textPosition: "none" }) // Hide category labels along horizontal axis
+        .setOption("series", {
+          0: { dataLabel: "value" },
+          1: { visibleInLegend: false, enableInteractivity: false },
+          2: { dataLabel: "value" },
+          3: { visibleInLegend: false, enableInteractivity: false },
+          4: { dataLabel: "value" }
+        })
         .setTransposeRowsAndColumns(false)   // False because columns are already series (horizontal layout)
         .build();
 
     sheet.insertChart(chart);
+
+    // Apply custom data labels via Sheets API v4
+    try {
+      applyCustomChartLabels(sheet);
+    } catch (e) {
+      logEvent("Failed to apply custom chart labels via Sheets API: " + e.message, "WARNING");
+    }
   });
+}
+
+/**
+ * Apply custom data labels to the Column chart using the Google Sheets API v4.
+ * This maps Series 2 (Packed For Testing) and Series 4 (In Testing) to cells AI4 and AK4
+ * to show expected return dates directly above the bars.
+ * 
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet - The glove/sleeve swaps sheet
+ */
+function applyCustomChartLabels(sheet) {
+  var spreadsheetId = SpreadsheetApp.getActiveSpreadsheet().getId();
+  var sheetId = sheet.getSheetId();
+  
+  sheet.getRange("AF5").setValue("Starting labels update...");
+  
+  try {
+    // 1. Get the existing chart from the sheet
+    var charts = sheet.getCharts();
+    if (charts.length === 0) {
+      sheet.getRange("AF5").setValue("Error: No charts found on sheet.");
+      return;
+    }
+    var targetChart = charts[0];
+    var chartId = targetChart.getChartId();
+    
+    // 2. Fetch spreadsheet charts metadata (omitting ranges to avoid sheet name space syntax issues)
+    var ssData = Sheets.Spreadsheets.get(spreadsheetId, {
+      fields: "sheets(charts,properties)"
+    });
+    
+    // Find our sheet and chart
+    var sheetData = ssData.sheets.find(function(s) {
+      return s.properties.sheetId === sheetId;
+    });
+    if (!sheetData || !sheetData.charts) {
+      sheet.getRange("AF5").setValue("Error: Sheet charts not found in API.");
+      return;
+    }
+    
+    var chartObj = sheetData.charts.find(function(c) {
+      return c.chartId === chartId;
+    });
+    if (!chartObj || !chartObj.spec) {
+      sheet.getRange("AF5").setValue("Error: Chart spec not found in API for ID: " + chartId);
+      return;
+    }
+    
+    var spec = chartObj.spec;
+    if (!spec.basicChart || !spec.basicChart.series) {
+      sheet.getRange("AF5").setValue("Error: basicChart or series not found in spec.");
+      return;
+    }
+    
+    // 3. Update the series specifications to use CUSTOM label type pointing to the due date cells
+    // Series 0: On Shelf (AG) - standard numeric value
+    if (spec.basicChart.series[0]) {
+      spec.basicChart.series[0].dataLabel = {
+        type: "DATA"
+      };
+    }
+    // Series 2: Packed For Testing (AI) - custom label pointing to AI3:AI4
+    if (spec.basicChart.series[2]) {
+      spec.basicChart.series[2].dataLabel = {
+        type: "CUSTOM",
+        customLabelData: {
+          sourceRange: {
+            sources: [{
+              sheetId: sheetId,
+              startRowIndex: 2, // Row 3 (0-based index)
+              endRowIndex: 4,   // Row 4 (exclusive)
+              startColumnIndex: 34, // Column AI (0-based)
+              endColumnIndex: 35
+            }]
+          }
+        }
+      };
+    }
+    // Series 4: In Testing (AK) - custom label pointing to AK3:AK4
+    if (spec.basicChart.series[4]) {
+      spec.basicChart.series[4].dataLabel = {
+        type: "CUSTOM",
+        customLabelData: {
+          sourceRange: {
+            sources: [{
+              sheetId: sheetId,
+              startRowIndex: 2, // Row 3 (0-based index)
+              endRowIndex: 4,   // Row 4 (exclusive)
+              startColumnIndex: 36, // Column AK (0-based)
+              endColumnIndex: 37
+            }]
+          }
+        }
+      };
+    }
+    
+    // 4. Send the batchUpdate request to update the chart spec
+    var request = {
+      requests: [{
+        updateChartSpec: {
+          chartId: chartId,
+          spec: spec
+        }
+      }]
+    };
+    
+    Sheets.Spreadsheets.batchUpdate(request, spreadsheetId);
+    sheet.getRange("AF5").setValue("Labels updated successfully!");
+  } catch (e) {
+    sheet.getRange("AF5").setValue("Error: " + e.message);
+  }
 }

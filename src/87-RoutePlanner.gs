@@ -785,13 +785,38 @@ function collectTasksForTripPlanner() {
     return collectTasksForTripPlannerLegacy();
   }
 
-  // Group tasks by location from the metadata result
+  // Build fresh employee location map to correct "Unknown" locations on cert tasks
+  // (Task Metadata may store "Unknown" if the employee name didn't match at generation time)
+  var freshEmployeeLocations = {};
+  try {
+    freshEmployeeLocations = getEmployeeLocationMap(SpreadsheetApp.getActiveSpreadsheet());
+    Logger.log('collectTasksForTripPlanner: Loaded ' + Object.keys(freshEmployeeLocations).length + ' fresh employee locations');
+  } catch (elErr) {
+    Logger.log('collectTasksForTripPlanner: Could not load employee locations: ' + elErr);
+  }
+
+  // Group tasks by location from the metadata result.
+  // For Cert Expiring tasks with an Unknown/status location, re-look up from Employees sheet.
   var tasksByLocation = {};
   var allTasks = metadataResult.tasks || [];
+  var STATUS_LOCS_LOWER = ['unknown', 'leave', 'vacation', 'light duty', 'weeds', 'previous employee'];
 
   for (var i = 0; i < allTasks.length; i++) {
     var task = allTasks[i];
     var location = task.location || 'Unknown';
+
+    // Cert Expiring tasks: if the stored location is a status/unknown value,
+    // try a fresh look-up from the Employees sheet so the cert card shows the real city.
+    var taskTypeLower0 = (task.taskType || task.type || '').toLowerCase();
+    if (STATUS_LOCS_LOWER.indexOf(location.toLowerCase()) !== -1 && taskTypeLower0.indexOf('cert expir') !== -1) {
+      var freshLoc = freshEmployeeLocations[(task.employee || '').toLowerCase()];
+      if (freshLoc && STATUS_LOCS_LOWER.indexOf(freshLoc.toLowerCase()) === -1) {
+        Logger.log('collectTasksForTripPlanner: Correcting cert task location for ' + task.employee + ': "' + location + '" -> "' + freshLoc + '"');
+        location = freshLoc;
+        task.location = freshLoc;
+      }
+    }
+
     if (!tasksByLocation[location]) {
       tasksByLocation[location] = [];
     }
@@ -866,7 +891,7 @@ function collectTasksForTripPlanner() {
 
         officeTasks.push({
           rowIndex: officeTask.rowIndex || rowCounter++,
-          location: locationName,
+          location: officeTask.location || locationName,  // Use task's corrected location first
           taskType: taskType,
           employee: officeTask.employee || '',
           itemType: officeTask.itemType || '',
@@ -879,7 +904,8 @@ function collectTasksForTripPlanner() {
           urgency: calculateUrgencyScore(daysTillDue),
           urgencyLabel: getUrgencyLabel(calculateUrgencyScore(daysTillDue)),
           source: officeTask.sheetName || officeTask.source || '',
-          isOfficeTask: true
+          isOfficeTask: true,
+          isCertTask: taskType.toLowerCase().indexOf('cert expir') !== -1
         });
       }
       skippedCount.helena += locationTasks.length;

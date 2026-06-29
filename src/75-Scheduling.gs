@@ -567,7 +567,7 @@ function getCrewLead(crewNumber) {
   // Find columns
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'name') nameCol = h;
+    if (header === 'name' || header === 'employee name') nameCol = h;
     if (header === 'job number') jobNumCol = h;
     if (header === 'crew lead') crewLeadCol = h;
     if (header === 'job classification') classificationCol = h;
@@ -2332,7 +2332,7 @@ function getCrewMembers(crewNumber) {
     // Find columns
     for (var h = 0; h < headers.length; h++) {
       var header = String(headers[h]).toLowerCase().trim();
-      if (header === 'name') nameCol = h;
+      if (header === 'name' || header === 'employee name') nameCol = h;
       if (header === 'job number') jobNumCol = h;
       if (header === 'last day') lastDayCol = h;
     }
@@ -2391,21 +2391,15 @@ function refreshTrainingAttendees() {
 
   var data = sheet.getDataRange().getValues();
   // Use dynamic header detection (handles extra rows between title and headers)
-  var headerIdx = typeof findTrainingTrackingHeaderRow === 'function' ? findTrainingTrackingHeaderRow(data) : 1;
+  var headerIdx = findTrainingTrackingHeaderRow(data);
   var headers = data[headerIdx];
   var dataStartIdx = headerIdx + 1;
+  var cols = getTrainingTrackingColIndices(headers);
 
   // Find column indices
-  var crewCol = -1;
-  var attendeesCol = -1;
-  var statusCol = -1;
-
-  for (var h = 0; h < headers.length; h++) {
-    var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'crew #' || header === 'crew' || header === 'job number' || header === 'crew number') crewCol = h;
-    if (header === 'attendees') attendeesCol = h;
-    if (header === 'status') statusCol = h;
-  }
+  var crewCol = cols.crew;
+  var attendeesCol = cols.attendees;
+  var statusCol = cols.status;
 
   if (crewCol === -1 || attendeesCol === -1) {
     SpreadsheetApp.getUi().alert('❌ Required columns not found in Training Tracking sheet!');
@@ -2509,26 +2503,21 @@ function updateDecemberCatchUps() {
   }
 
   var data = sheet.getDataRange().getValues();
-  var headerIdx = findTrainingTrackingHeaderRow ? findTrainingTrackingHeaderRow(data) : 1;
+  var headerIdx = findTrainingTrackingHeaderRow(data);
   var headers = data[headerIdx];
+  var cols = getTrainingTrackingColIndices(headers);
 
   // Find columns dynamically
-  var monthCol = 0, topicCol = 1, crewCol = 2, leadCol = 3, sizeCol = 4;
-  var dateCol = 5, attendeesCol = 6, hoursCol = 7, statusCol = 8, notesCol = 9;
-
-  for (var hc = 0; hc < headers.length; hc++) {
-    var hdr = String(headers[hc]).toLowerCase().trim();
-    if (hdr === 'month') monthCol = hc;
-    if (hdr === 'training topic' || hdr === 'topic' || hdr === 'title') topicCol = hc;
-    if (hdr === 'crew #' || hdr === 'crew#' || hdr === 'job number' || hdr === 'crew' || hdr === 'crew number') crewCol = hc;
-    if (hdr === 'crew lead' || hdr === 'foreman') leadCol = hc;
-    if (hdr === 'crew size' || hdr === 'size') sizeCol = hc;
-    if (hdr === 'completion date' || hdr === 'date') dateCol = hc;
-    if (hdr === 'attendees') attendeesCol = hc;
-    if (hdr === 'hours trainer' || hdr === 'hours') hoursCol = hc;
-    if (hdr === 'status') statusCol = hc;
-    if (hdr === 'notes') notesCol = hc;
-  }
+  var monthCol = cols.month;
+  var topicCol = cols.topic;
+  var crewCol = cols.crew;
+  var leadCol = cols.lead;
+  var sizeCol = cols.size;
+  var dateCol = cols.completionDate;
+  var attendeesCol = cols.attendees;
+  var hoursCol = cols.hours;
+  var statusCol = cols.status;
+  var notesCol = cols.notes;
 
   // Get current month to determine which months are "complete" (past)
   var today = new Date();
@@ -2691,19 +2680,18 @@ function getTrainingComplianceStatus(jobNumber, month) {
   }
 
   var data = trackingSheet.getDataRange().getValues();
-  var headerIdx = findTrainingTrackingHeaderRow ? findTrainingTrackingHeaderRow(data) : 1;
+  var headerIdx = findTrainingTrackingHeaderRow(data);
   var headers = data[headerIdx];
+  var cols = getTrainingTrackingColIndices(headers);
 
   // Find column indices
-  var colIndices = {};
-  for (var h = 0; h < headers.length; h++) {
-    var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'month') colIndices.month = h;
-    if (header === 'job number' || header === 'crew' || header === 'crew #' || header === 'crew number') colIndices.jobNumber = h;
-    if (header === 'status') colIndices.status = h;
-    if (header === 'completion date') colIndices.completionDate = h;
-    if (header === 'training topic' || header === 'title' || header === 'topic') colIndices.topic = h;
-  }
+  var colIndices = {
+    month: cols.month,
+    jobNumber: cols.crew,
+    status: cols.status,
+    completionDate: cols.completionDate,
+    topic: cols.topic
+  };
 
   // Search for this job number and month
   for (var i = headerIdx + 1; i < data.length; i++) {
@@ -3223,7 +3211,7 @@ function getJobNumberForEmployee(employeeName, location) {
   // Find columns
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'name') nameCol = h;
+    if (header === 'name' || header === 'employee name') nameCol = h;
     if (header === 'job number') jobNumCol = h;
     if (header === 'location') locationCol = h;
     if (header === 'last day') lastDayCol = h;

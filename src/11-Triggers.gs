@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Glove Manager – Trigger Functions
  *
  * Functions for setting up and handling edit/change triggers.
@@ -921,7 +921,7 @@ function processEdit(e) {
   if (sheetName !== SHEET_GLOVE_SWAPS && sheetName !== SHEET_SLEEVE_SWAPS && sheetName !== SHEET_BLANKET_SWAPS &&
       sheetName !== SHEET_GLOVES && sheetName !== SHEET_SLEEVES && sheetName !== SHEET_BLANKETS &&
       sheetName !== SHEET_EMPLOYEES && sheetName !== 'Employee History' &&
-      sheetName !== SHEET_RECLAIMS && sheetName !== SHEET_GROUNDS &&
+      sheetName !== SHEET_GROUNDS &&
       sheetName !== SHEET_HOT_STICKS) {
     return;
   }
@@ -1235,45 +1235,6 @@ function processEdit(e) {
     }
   }
 
-  // Handle Reclaims sheet edits (Pick List Item #, Picked checkbox and Date Changed)
-  if (sheetName === SHEET_RECLAIMS) {
-    // Reclaims sheet has multiple sections - we need to handle the Class 2/3 Reclaims sections
-    // Columns for reclaim rows: G (7) = Pick List Item #, I (9) = Picked checkbox, J (10) = Date Changed
-    // But first, check if this row is in a reclaim section (has Item Type in column B)
-
-    var rowData = sheet.getRange(editedRow, 1, 1, 10).getValues()[0];
-    var itemType = String(rowData[1] || '').trim();  // Column B = Item Type
-    var pickListNum = rowData[6];  // Column G = Pick List Item #
-
-    // Only process if this is a reclaim data row (has Item Type: Glove or Sleeve)
-    if (itemType === 'Glove' || itemType === 'Sleeve') {
-      var isGlove = (itemType === 'Glove');
-      var inventorySheetName = isGlove ? SHEET_GLOVES : SHEET_SLEEVES;
-      var inventorySheet = ss.getSheetByName(inventorySheetName);
-
-      if (!inventorySheet) {
-        logEvent('processEdit: Inventory sheet not found for Reclaims: ' + inventorySheetName, 'ERROR');
-        return;
-      }
-
-      // Column G (7) = Pick List Item # (manual edit), Column I (9) = Picked checkbox, Column J (10) = Date Changed
-      if (editedCol === 7) {
-        // Pick List Item # manually edited
-        logEvent('Reclaims Pick List Item # manual edit: row=' + editedRow + ', itemType=' + itemType + ', newValue=' + newValue);
-        handleReclaimsPickListManualEdit(ss, sheet, inventorySheet, editedRow, newValue, isGlove);
-      } else if (editedCol === 9 && pickListNum) {
-        // Picked checkbox changed (only if there's a pick list item)
-        logEvent('Reclaims Picked checkbox changed: row=' + editedRow + ', itemType=' + itemType + ', pickList=' + pickListNum);
-        handleReclaimsPickedCheckbox(ss, sheet, inventorySheet, editedRow, newValue, isGlove);
-      } else if (editedCol === 10 && pickListNum) {
-        // Date Changed column edited (only if there's a pick list item)
-        var cellValue = sheet.getRange(editedRow, 10).getValue();
-        logEvent('Reclaims Date Changed: row=' + editedRow + ', itemType=' + itemType + ', pickList=' + pickListNum);
-        handleReclaimsDateChanged(ss, sheet, inventorySheet, editedRow, cellValue, isGlove);
-      }
-    }
-    return;
-  }
 
   // Handle Glove Swaps or Sleeve Swaps tab edits
   if (sheetName === SHEET_GLOVE_SWAPS || sheetName === SHEET_SLEEVE_SWAPS) {

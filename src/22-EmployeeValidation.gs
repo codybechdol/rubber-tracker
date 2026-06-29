@@ -786,7 +786,7 @@ function refreshJobTrackingForemen() {
   var nameCol = -1, jobNumCol = -1, classificationCol = -1, lastDayCol = -1;
   for (var h = 0; h < empHeaders.length; h++) {
     var header = String(empHeaders[h]).toLowerCase().trim();
-    if (header === 'name') nameCol = h;
+    if (header === 'name' || header === 'employee name') nameCol = h;
     if (header === 'job number') jobNumCol = h;
     if (header === 'job classification') classificationCol = h;
     if (header === 'last day') lastDayCol = h;
@@ -924,7 +924,7 @@ function refreshJobTrackingForemenSilent() {
   var nameCol = -1, jobNumCol = -1, classificationCol = -1, lastDayCol = -1;
   for (var h = 0; h < empHeaders.length; h++) {
     var header = String(empHeaders[h]).toLowerCase().trim();
-    if (header === 'name') nameCol = h;
+    if (header === 'name' || header === 'employee name') nameCol = h;
     if (header === 'job number') jobNumCol = h;
     if (header === 'job classification') classificationCol = h;
     if (header === 'last day') lastDayCol = h;
@@ -1016,8 +1016,8 @@ function updateEmployeesLocationValidation() {
     return;
   }
 
-  // Complete list of valid locations (including new ones)
-  var validLocations = [
+  // Physical cities/bases
+  var physicalCities = [
     'Anaconda',
     'Anaconda City Sub',
     'Big Sky',
@@ -1033,8 +1033,6 @@ function updateEmployeesLocationValidation() {
     'Great Falls',
     'Helena',
     'Kalispell',
-    'Leave',
-    'Light Duty',
     'Livingston',
     'Lolo',
     'Miles City',
@@ -1047,11 +1045,42 @@ function updateEmployeesLocationValidation() {
     'South Dakota Dock',
     'Stanford',
     'Texas',
-    'Three Rivers Sub',
+    'Three Rivers Sub'
+  ];
+
+  // Employee statuses to combine with locations
+  var statuses = [
     'Vacation',
+    'Light Duty',
     'Weeds',
-    'Previous Employee'
-  ].sort();
+    'Leave',
+    'Medical',
+    'Worker\'s Comp'
+  ];
+
+  var validLocations = [];
+
+  // 1. Add physical cities
+  for (var c = 0; c < physicalCities.length; c++) {
+    validLocations.push(physicalCities[c]);
+  }
+
+  // 2. Add combined City (Status) values
+  for (var c = 0; c < physicalCities.length; c++) {
+    for (var s = 0; s < statuses.length; s++) {
+      validLocations.push(physicalCities[c] + ' (' + statuses[s] + ')');
+    }
+  }
+
+  // 3. Add raw status values for backward compatibility
+  var legacyStatuses = ['Vacation', 'Light Duty', 'Weeds', 'Leave', 'Previous Employee', 'Medical', 'Worker\'s Comp', 'Unknown'];
+  for (var ls = 0; ls < legacyStatuses.length; ls++) {
+    if (validLocations.indexOf(legacyStatuses[ls]) === -1) {
+      validLocations.push(legacyStatuses[ls]);
+    }
+  }
+
+  validLocations.sort();
 
   // Find the Location column
   var headers = employeesSheet.getRange(1, 1, 1, employeesSheet.getLastColumn()).getValues()[0];
@@ -1071,12 +1100,40 @@ function updateEmployeesLocationValidation() {
   // Create the new validation rule
   var rule = SpreadsheetApp.newDataValidation()
     .requireValueInList(validLocations, true)
-    .setAllowInvalid(false)
+    .setAllowInvalid(true) // Changed to true to allow City (Status) combined values
     .build();
 
-  // Apply to the Location column (from row 2 to 500)
-  var lastRow = Math.max(employeesSheet.getLastRow(), 500);
-  employeesSheet.getRange(2, locationCol, lastRow - 1, 1).setDataValidation(rule);
+  // Apply to the Location column (from row 2 to active last row)
+  var lastRow = employeesSheet.getLastRow();
+  if (lastRow > 1) {
+    try {
+      employeesSheet.getRange(2, locationCol, lastRow - 1, 1).setDataValidation(rule);
+      SpreadsheetApp.flush(); // Force immediate execution to catch Google Table/typed column errors
+    } catch (e) {
+      Logger.log('updateEmployeesLocationValidation: Table detected or range validation blocked. Trying fallback... ' + e.message);
+      try {
+        // In Google Tables, try setting it on just the column's first cell to trigger Table-wide validation
+        employeesSheet.getRange(2, locationCol).setDataValidation(rule);
+        SpreadsheetApp.flush(); // Force immediate execution for fallback
+      } catch (innerErr) {
+        Logger.log('updateEmployeesLocationValidation: Fallback failed: ' + innerErr.message);
+        ui.alert('⚠️ Google Sheets Table Restriction',
+          'The "Employees" sheet uses a Google Sheets Table with typed columns, which prevents the script from updating the validation list automatically.\n\n' +
+          'To apply this update, please choose one of these options:\n\n' +
+          'Option A: Convert the Table to a Range temporarily:\n' +
+          '  1. Right-click anywhere in the Employees table.\n' +
+          '  2. Select "Convert to range" (or Format → Table → Convert to range).\n' +
+          '  3. Run this validation tool again from the menu.\n' +
+          '  4. (Optional) Reconvert back to a Table (Format → Table).\n\n' +
+          'Option B: Add the locations manually in Google Sheets:\n' +
+          '  1. Select the Location column in the Employees sheet.\n' +
+          '  2. Go to Data → Data validation (or click the dropdown arrow on any location cell and edit the rule).\n' +
+          '  3. In the Data Validation rules sidebar, edit the dropdown list to add the new locations.',
+          ui.ButtonSet.OK);
+        return;
+      }
+    }
+  }
 
   ui.alert('✅ Location Validation Updated',
     'The Location column now accepts the following ' + validLocations.length + ' locations:\n\n' +
@@ -1107,7 +1164,7 @@ function populateJobTrackingFromEmployees(sheet) {
   var nameCol = -1, jobNumCol = -1, locationCol = -1, classificationCol = -1, lastDayCol = -1;
   for (var h = 0; h < empHeaders.length; h++) {
     var header = String(empHeaders[h]).toLowerCase().trim();
-    if (header === 'name') nameCol = h;
+    if (header === 'name' || header === 'employee name') nameCol = h;
     if (header === 'job number') jobNumCol = h;
     if (header === 'location') locationCol = h;
     if (header === 'job classification') classificationCol = h;
@@ -1148,10 +1205,11 @@ function populateJobTrackingFromEmployees(sheet) {
 
     // Filter out status locations (Vacation, Light Duty, Weeds, Leave, etc.)
     var isRealLocation = location && !isStatusLocation(location);
+    var physicalLocation = location ? getPhysicalLocation(location) : '';
 
     if (!crewMap[crewNumber]) {
       crewMap[crewNumber] = {
-        location: isRealLocation ? location : '',
+        location: isRealLocation ? physicalLocation : '',
         foreman: '',
         crewSize: 0,
         employees: []
@@ -1163,7 +1221,7 @@ function populateJobTrackingFromEmployees(sheet) {
 
     // Update location if not set (skip status locations)
     if (!crewMap[crewNumber].location && isRealLocation) {
-      crewMap[crewNumber].location = location;
+      crewMap[crewNumber].location = physicalLocation;
     }
 
     // Check if this employee is a foreman (using classification hierarchy)
@@ -1289,7 +1347,7 @@ function refreshJobTrackingFromEmployees() {
   var nameCol = -1, jobNumCol = -1, locationCol = -1, classificationCol = -1, lastDayCol = -1;
   for (var h = 0; h < empHeaders.length; h++) {
     var header = String(empHeaders[h]).toLowerCase().trim();
-    if (header === 'name') nameCol = h;
+    if (header === 'name' || header === 'employee name') nameCol = h;
     if (header === 'job number') jobNumCol = h;
     if (header === 'location') locationCol = h;
     if (header === 'job classification') classificationCol = h;
@@ -1327,10 +1385,11 @@ function refreshJobTrackingFromEmployees() {
     // Filter out status locations (Vacation, Light Duty, Weeds, Leave, etc.)
     // These are employee statuses, not physical cities - should not appear in Job Tracking
     var isRealLocation = location && !isStatusLocation(location);
+    var physicalLocation = location ? getPhysicalLocation(location) : '';
 
     if (!crewMap[crewNumber]) {
       crewMap[crewNumber] = {
-        location: isRealLocation ? location : '',
+        location: isRealLocation ? physicalLocation : '',
         foreman: '',
         crewSize: 0
       };
@@ -1339,7 +1398,7 @@ function refreshJobTrackingFromEmployees() {
     crewMap[crewNumber].crewSize++;
 
     if (!crewMap[crewNumber].location && isRealLocation) {
-      crewMap[crewNumber].location = location;
+      crewMap[crewNumber].location = physicalLocation;
     }
 
     if (classification === 'F' || classification === 'GTO F' || classification === 'GF' || classification === 'SUP') {
@@ -1547,7 +1606,7 @@ function syncCrews(silent) {
   var nameCol = -1, jobNumCol = -1, locationCol = -1, classificationCol = -1, lastDayCol = -1, crewLeadCol = -1;
   for (var h = 0; h < empHeaders.length; h++) {
     var header = String(empHeaders[h]).toLowerCase().trim();
-    if (header === 'name') nameCol = h;
+    if (header === 'name' || header === 'employee name') nameCol = h;
     if (header === 'job number') jobNumCol = h;
     if (header === 'location') locationCol = h;
     if (header === 'job classification') classificationCol = h;
@@ -1600,10 +1659,11 @@ function syncCrews(silent) {
 
     // Filter out status locations (Vacation, Light Duty, Weeds, Leave, etc.)
     var isRealLocation = location && !isStatusLocation(location);
+    var physicalLocation = location ? getPhysicalLocation(location) : '';
 
     if (!crewMap[crewNumber]) {
       crewMap[crewNumber] = {
-        location: isRealLocation ? location : '',
+        location: isRealLocation ? physicalLocation : '',
         foreman: '',
         foremanPriority: 999,
         foremanPosition: 999,
@@ -1615,7 +1675,7 @@ function syncCrews(silent) {
     crewMap[crewNumber].crewSize++;
 
     if (!crewMap[crewNumber].location && isRealLocation) {
-      crewMap[crewNumber].location = location;
+      crewMap[crewNumber].location = physicalLocation;
     }
 
     // Track manual lead (highest priority)
@@ -2277,18 +2337,15 @@ function cleanupPendingTrainingForCompletedJobs() {
 
   // Get Training Tracking data
   var trainingData = trainingSheet.getDataRange().getValues();
+  var headerIdx = findTrainingTrackingHeaderRow(trainingData);
+  var headers = trainingData[headerIdx];
+  var cols = getTrainingTrackingColIndices(headers);
 
-  Logger.log('Training Tracking: ' + (trainingData.length - 2) + ' data rows (skipping title + header)');
-  Logger.log('Training Tracking headers: ' + String(trainingData[1]).substring(0, 150));
+  Logger.log('Training Tracking: ' + (trainingData.length - headerIdx - 1) + ' data rows (skipping title + header)');
+  Logger.log('Training Tracking headers: ' + String(headers).substring(0, 150));
 
-  // Dynamically find column indices by header name (row 1 = headers)
-  var ttCrewCol = 2;   // Default column C
-  var ttStatusCol = 9;  // Default column J
-  for (var th = 0; th < trainingData[1].length; th++) {
-    var ttHdr = String(trainingData[1][th]).toLowerCase().trim();
-    if (ttHdr === 'crew #' || ttHdr === 'crew#' || ttHdr === 'job number' || ttHdr === 'crew') ttCrewCol = th;
-    if (ttHdr === 'status') ttStatusCol = th;
-  }
+  var ttCrewCol = cols.crew;
+  var ttStatusCol = cols.status;
   Logger.log('Training Tracking column indices - Crew: ' + ttCrewCol + ', Status: ' + ttStatusCol);
 
   // Collect rows to delete (work backwards to avoid index shifting)
@@ -2298,9 +2355,9 @@ function cleanupPendingTrainingForCompletedJobs() {
   var completeStatusCount = 0;
   var otherStatusCount = 0;
 
-  for (var t = 2; t < trainingData.length; t++) {
-    var month = String(trainingData[t][0] || '').trim();
-    var topic = String(trainingData[t][1] || '').trim();
+  for (var t = headerIdx + 1; t < trainingData.length; t++) {
+    var month = String(trainingData[t][cols.month] || '').trim();
+    var topic = String(trainingData[t][cols.topic] || '').trim();
     var crew = String(trainingData[t][ttCrewCol] || '').trim();
     var status = String(trainingData[t][ttStatusCol] || '').trim();
 
@@ -2461,21 +2518,18 @@ function syncCompletedJobsToTraining() {
 
   // Get Training Tracking data
   var trainingData = trainingSheet.getDataRange().getValues();
+  var headerIdx = findTrainingTrackingHeaderRow(trainingData);
+  var headers = trainingData[headerIdx];
+  var cols = getTrainingTrackingColIndices(headers);
   var currentYear = new Date().getFullYear();
-
-  // Training Tracking structure:
-  // Row 0: Title
-  // Row 1: Headers
-  // Row 2+: Data
-  // Columns: A=Month, B=Topic, C=Crew#, D=Lead, E=Size, F=CompletionDate, G=Attendees, H=Hours, I=Trainer, J=Status, K=Notes
 
   // Collect rows to delete (work backwards to avoid index shifting)
   var rowsToDelete = [];
 
-  for (var t = 2; t < trainingData.length; t++) {
-    var month = String(trainingData[t][0] || '').toLowerCase().trim();
-    var crew = String(trainingData[t][2] || '').trim();
-    var status = String(trainingData[t][9] || '').trim();
+  for (var t = headerIdx + 1; t < trainingData.length; t++) {
+    var month = String(trainingData[t][cols.month] || '').toLowerCase().trim();
+    var crew = String(trainingData[t][cols.crew] || '').trim();
+    var status = String(trainingData[t][cols.status] || '').trim();
 
     // Skip if already Complete (we want to preserve completed training records)
     if (status === 'Complete') continue;
@@ -2606,6 +2660,9 @@ function autoSyncCompletedJobToTraining(jobNumber, actualEndDate) {
   };
 
   var trainingData = trainingSheet.getDataRange().getValues();
+  var headerIdx = findTrainingTrackingHeaderRow(trainingData);
+  var headers = trainingData[headerIdx];
+  var cols = getTrainingTrackingColIndices(headers);
   var currentYear = new Date().getFullYear();
   var endDate = (actualEndDate instanceof Date) ? actualEndDate : new Date(actualEndDate);
   var endMonth = endDate.getMonth();  // 0-11
@@ -2614,10 +2671,10 @@ function autoSyncCompletedJobToTraining(jobNumber, actualEndDate) {
   // Collect rows to delete (work backwards to avoid index shifting)
   var rowsToDelete = [];
 
-  for (var t = 2; t < trainingData.length; t++) {
-    var month = String(trainingData[t][0] || '').toLowerCase().trim();
-    var crew = String(trainingData[t][2] || '').trim();
-    var status = String(trainingData[t][9] || '').trim();
+  for (var t = headerIdx + 1; t < trainingData.length; t++) {
+    var month = String(trainingData[t][cols.month] || '').toLowerCase().trim();
+    var crew = String(trainingData[t][cols.crew] || '').trim();
+    var status = String(trainingData[t][cols.status] || '').trim();
 
     // Only process rows for this specific job
     if (crew !== jobNumber) continue;

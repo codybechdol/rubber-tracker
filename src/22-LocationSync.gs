@@ -59,7 +59,7 @@ function syncInventoryLocations() {
       var name = (empData[i][nameColIdx] || '').toString().trim().toLowerCase();
       var loc = (empData[i][locationColIdx] || '').toString().trim();
       if (name && loc) {
-        nameToLocation[name] = loc;
+        nameToLocation[name] = getPhysicalLocation(loc);
       }
     }
 

@@ -113,7 +113,7 @@ function getCrewLocationMap(ss) {
     for (var e = 0; e < employees.length; e++) {
       var empLoc = employees[e].location;
       if (empLoc && !isStatusLocation(empLoc)) {
-        crewLocations[crew] = empLoc;
+        crewLocations[crew] = getPhysicalLocation(empLoc);
         break;
       }
     }
@@ -121,7 +121,7 @@ function getCrewLocationMap(ss) {
     if (!crewLocations[crew]) {
       for (var e2 = 0; e2 < employees.length; e2++) {
         if (employees[e2].location) {
-          crewLocations[crew] = employees[e2].location;
+          crewLocations[crew] = getPhysicalLocation(employees[e2].location);
           break;
         }
       }
@@ -456,11 +456,8 @@ function collectAndGroupTasks(ss) {
   var afterTraining = countTasks(tasksByLocation);
   Logger.log('collectAndGroupTasks: Training added ' + (afterTraining - beforeTraining) + ' tasks');
 
-  // Collect from Reclaims
-  var beforeReclaims = countTasks(tasksByLocation);
-  collectReclaimTasks(ss, tasksByLocation, employeeLocations, employeeForemen, today);
-  var afterReclaims = countTasks(tasksByLocation);
-  Logger.log('collectAndGroupTasks: Reclaims added ' + (afterReclaims - beforeReclaims) + ' tasks');
+  // Collect from Reclaims (reclaims are now integrated directly into Glove/Sleeve swaps and collected by collectSwapTasks)
+  Logger.log('collectAndGroupTasks: Reclaims are now collected within collectSwapTasks');
 
   // Collect from Expiring Certs (based on selected cert types in ToDoConfig)
   var beforeCerts = countTasks(tasksByLocation);
@@ -596,13 +593,14 @@ function getEmployeeLocationMap(ss) {
     var location = String(data[i][locationCol]).trim();
 
     if (name && location) {
-      locationMap[name.toLowerCase()] = location;
+      var physicalLoc = getPhysicalLocation(location);
+      locationMap[name.toLowerCase()] = physicalLoc;
       // Also register alternate names so Expiring Certs nicknames resolve correctly
       if (altNamesCol !== -1 && data[i][altNamesCol]) {
         var alts = String(data[i][altNamesCol]).split(';');
         for (var a = 0; a < alts.length; a++) {
           var alt = alts[a].trim().toLowerCase();
-          if (alt && !locationMap[alt]) locationMap[alt] = location;
+          if (alt && !locationMap[alt]) locationMap[alt] = physicalLoc;
         }
       }
     }
@@ -863,6 +861,27 @@ function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLoca
 
     var headers = data[headerRowIndex];
 
+    // Find section title by scanning upwards (checking column A)
+    var sectionTitle = '';
+    for (var r = headerRowIndex - 1; r >= 0 && r >= headerRowIndex - 4; r--) {
+      var cellVal = String(data[r][0] || '').trim();
+      if (cellVal && (
+          cellVal.indexOf('Swaps') !== -1 ||
+          cellVal.indexOf('Reclaims') !== -1 ||
+          cellVal.indexOf('Lost') !== -1 ||
+          cellVal.indexOf('Locate') !== -1
+      )) {
+        sectionTitle = cellVal;
+        break;
+      }
+    }
+    Logger.log('collectSwapTasks: Found section title="' + sectionTitle + '" for header row ' + headerRowIndex);
+
+    var isPreviousEmployeeReclaim = sectionTitle.toLowerCase().indexOf('previous employee') !== -1;
+    var isLostItemReclaim = sectionTitle.toLowerCase().indexOf('lost') !== -1;
+    var isClassReclaim = sectionTitle.toLowerCase().indexOf('class reclaim') !== -1;
+    var isAnyReclaim = isPreviousEmployeeReclaim || isLostItemReclaim || isClassReclaim;
+
     // Find column indices
     var employeeCol = -1;
     var currentItemCol = -1;
@@ -931,10 +950,10 @@ function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLoca
         Logger.log('collectSwapTasks: Row ' + (i+1) + ' Employee="' + employee + '" pickedValue=' + JSON.stringify(pickedValue) + ' (type=' + typeof pickedValue + ') isPicked=' + isPicked + ' dateChanged="' + dateChanged + '"');
       }
 
-      // For Gloves/Sleeves: only include if Picked=TRUE (item is ready for delivery)
-      // For Blankets: include any item on the swap sheet (no Picked requirement)
-      if (itemType !== 'Blanket' && !isPicked) {
-        continue; // Skip if NOT picked (Gloves/Sleeves only)
+      // For Gloves/Sleeves standard swaps and Class reclaims: only include if Picked=TRUE (item is ready for delivery)
+      // For Blankets, Previous Employee reclaims, and Lost items: include regardless of Picked status
+      if (itemType !== 'Blanket' && !isPreviousEmployeeReclaim && !isLostItemReclaim && !isPicked) {
+        continue; // Skip if NOT picked
       }
       if (isPicked) rowsPicked++;
 
@@ -1030,9 +1049,32 @@ function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLoca
       // Get phone number for this employee
       var phoneNumber = employeePhones[employee.toLowerCase()] || '';
 
+      // Determine task type and attributes for reclaims vs swaps
+      var typeVal = 'Swap';
+      var taskTypeVal = '';
+      var estimatedTimeVal = 10;
+      var priorityVal = isOverdue ? 'High' : (daysTillDue !== null && daysTillDue <= 7 ? 'Medium' : 'Low');
+
+      if (isAnyReclaim) {
+        typeVal = 'Reclaim';
+        estimatedTimeVal = 15; // 15 minutes per reclaim
+        if (isPreviousEmployeeReclaim) {
+          taskTypeVal = 'Previous Employee Reclaim';
+          priorityVal = 'Medium';
+        } else if (isLostItemReclaim) {
+          taskTypeVal = 'Lost Item Reclaim';
+          priorityVal = 'Medium';
+        } else if (isClassReclaim) {
+          var daysLeft = daysLeftValue || '';
+          taskTypeVal = 'Reclaim ' + daysLeft; // e.g. 'Reclaim CL3→CL2'
+          // Keep priority calculated based on daysLeft/overdue
+        }
+      }
+
       // Create task object
       var task = {
-        type: 'Swap',
+        type: typeVal,
+        taskType: taskTypeVal,
         itemType: itemType,
         employee: employee,
         location: location,
@@ -1045,8 +1087,8 @@ function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLoca
         isOverdue: isOverdue,
         daysTillDue: daysTillDue,
         status: status,
-        estimatedTime: 10, // 10 minutes per swap
-        priority: isOverdue ? 'High' : (daysTillDue !== null && daysTillDue <= 7 ? 'Medium' : 'Low'),
+        estimatedTime: estimatedTimeVal,
+        priority: priorityVal,
         sheetName: sheetName,
         rowIndex: i + 1 // 1-based row number
       };
@@ -1258,121 +1300,6 @@ function collectEquipmentSwapTasks(ss, sheetName, itemType, tasksByLocation, emp
  * @param {Object} employeeForemen - Map of employee names to foremen
  * @param {Date} today - Today's date
  */
-function collectReclaimTasks(ss, tasksByLocation, employeeLocations, employeeForemen, today) {
-  var reclaimsSheet = ss.getSheetByName('Reclaims');
-  if (!reclaimsSheet) {
-    Logger.log('collectReclaimTasks: Reclaims sheet not found');
-    return;
-  }
-
-  var lastRow = reclaimsSheet.getLastRow();
-  if (lastRow < 2) {
-    Logger.log('collectReclaimTasks: Reclaims sheet has too few rows');
-    return;
-  }
-
-  var data = reclaimsSheet.getDataRange().getValues();
-  Logger.log('collectReclaimTasks: Processing ' + data.length + ' rows');
-
-  var inClass3Table = false;
-  var inClass2Table = false;
-  var inLostItemsTable = false;
-  var tasksAdded = 0;
-
-  for (var i = 0; i < data.length; i++) {
-    var row = data[i];
-    var firstCell = String(row[0] || '').trim();
-
-    // Detect table headers
-    if (firstCell.indexOf('Class 3 Reclaims') !== -1) {
-      inClass3Table = true;
-      inClass2Table = false;
-      inLostItemsTable = false;
-      continue;
-    }
-    if (firstCell.indexOf('Class 2 Reclaims') !== -1) {
-      inClass3Table = false;
-      inClass2Table = true;
-      inLostItemsTable = false;
-      continue;
-    }
-    if (firstCell.indexOf('Lost Items') !== -1) {
-      inClass3Table = false;
-      inClass2Table = false;
-      inLostItemsTable = true;
-      continue;
-    }
-
-    // End of Lost Items table
-    if (inLostItemsTable && (firstCell.indexOf('Previous') !== -1 ||
-        firstCell.indexOf('Approved') !== -1 || firstCell.indexOf('Class') !== -1)) {
-      inLostItemsTable = false;
-      continue;
-    }
-
-    // Skip header rows and non-data rows
-    if (firstCell === 'Employee' || firstCell === 'Item Type' || firstCell === '' ||
-        firstCell.indexOf('Previous') !== -1 ||
-        firstCell.indexOf('Approved') !== -1 || firstCell.indexOf('Location') !== -1 ||
-        firstCell.indexOf('✅') !== -1 || firstCell.indexOf('📍') !== -1 ||
-        firstCell.toLowerCase() === 'no reclaims') {
-      continue;
-    }
-
-    if (inClass3Table || inClass2Table) {
-      // Reclaims table structure: Employee, Item Type, Item #, Size, Class, Location, Pick List Item #, Pick List Status
-      var employee = String(row[0] || '').trim();
-      var itemType = String(row[1] || '').trim();
-      var itemNum = String(row[2] || '').trim();
-      var size = String(row[3] || '').trim();
-      var itemClass = String(row[4] || '').trim();
-      var location = String(row[5] || '').trim();
-
-      // Skip if no employee name
-      if (!employee) continue;
-
-      // Get location from employee map if not in sheet
-      if (!location || location === '') {
-        location = employeeLocations[employee.toLowerCase()] || 'Unknown';
-      }
-
-      // Get foreman for this employee
-      var foreman = employeeForemen[employee.toLowerCase()] || 'Unknown';
-
-      var reclaimType = inClass3Table ? 'Reclaim CL3→CL2' : 'Reclaim CL2→CL3';
-
-      var task = {
-        type: 'Reclaim',
-        taskType: reclaimType,
-        itemType: itemType || 'Glove',
-        employee: employee,
-        location: location,
-        foreman: foreman,
-        currentItem: itemNum,
-        pickListItem: '',
-        size: size,
-        itemClass: itemClass,
-        dueDate: null,
-        isOverdue: false,
-        daysTillDue: null,
-        status: 'Unassigned',
-        estimatedTime: 15, // 15 minutes per reclaim
-        priority: 'Medium',
-        sheetName: 'Reclaims',
-        rowIndex: i + 1
-      };
-
-      // Add to location group
-      if (!tasksByLocation[location]) {
-        tasksByLocation[location] = [];
-      }
-      tasksByLocation[location].push(task);
-      tasksAdded++;
-    }
-  }
-
-  Logger.log('collectReclaimTasks: Added ' + tasksAdded + ' reclaim tasks');
-}
 
 
 /**

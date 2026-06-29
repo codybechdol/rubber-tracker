@@ -396,13 +396,15 @@ function collectCompletedFromTrainingTracking(ss, startDate, endDate) {
   }
 
   var data = trainingSheet.getDataRange().getValues();
+  var headerIdx = findTrainingTrackingHeaderRow(data);
+  var headers = data[headerIdx];
+  var cols = getTrainingTrackingColIndices(headers);
 
-  // Headers in row 2 (index 1), data starts row 3 (index 2)
-  // Columns: A=Month, B=Topic, C=Crew#, D=Lead, E=Location, F=CompletionDate, ...
-  for (var i = 2; i < data.length; i++) {
+  // Process data rows starting dynamically after header row
+  for (var i = headerIdx + 1; i < data.length; i++) {
     var row = data[i];
 
-    var completionDate = row[5]; // Column F
+    var completionDate = row[cols.completionDate]; // Completion Date column
     if (!completionDate) continue;
 
     var taskDate = completionDate instanceof Date ? completionDate : new Date(completionDate);
@@ -412,10 +414,10 @@ function collectCompletedFromTrainingTracking(ss, startDate, endDate) {
     // Check if within date range
     if (taskDate < startDate || taskDate > endDate) continue;
 
-    var topic = String(row[1] || '');
-    var crew = String(row[2] || '');
-    var lead = String(row[3] || '');
-    var location = String(row[4] || '');
+    var topic = String(row[cols.topic] || '');
+    var crew = String(row[cols.crew] || '');
+    var lead = String(row[cols.lead] || '');
+    var location = String(row[cols.size] || ''); // Historically mapped to index 4 (Crew Size)
 
     tasks.push({
       date: formatDateKey(taskDate),

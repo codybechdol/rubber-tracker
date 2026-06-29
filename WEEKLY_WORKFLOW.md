@@ -2,7 +2,7 @@
 
 ## 🧤 Monday Morning Workflow
 
-Complete these 6 steps every Monday to start your week organized and up-to-date.
+Complete these 8 steps every Monday to start your week organized and up-to-date.
 
 **Access the Workflow:** `Glove Manager` → `📱 Quick Actions` (opens sidebar)
 
@@ -42,7 +42,22 @@ The dialog uses an **8-step wizard** with a visible progress bar at the top:
 
 ---
 
-## Step 2: 📊 Generate All Reports
+## Step 2: 🔄 Sync Crews
+
+**What it does:** Updates foremen and default schedules in the Job Tracking sheet.
+
+**How to do it:**
+1. Click **Step 2: Sync Crews** in the sidebar.
+2. Wait for completion (usually 5-10 seconds).
+
+**Expected outcome:**
+- Syncs foremen from Employees.
+- Renumbers crew position suffixes (e.g., `.1` for lead, `.2` to `.N` based on classification rank).
+- Synchronizes monthly training tracking crew lists and size calculations.
+
+---
+
+## Step 3: 📊 Generate All Reports
 
 **What it does:** Updates all swap reports and purchase needs based on current inventory and employee assignments.
 
@@ -63,7 +78,7 @@ The dialog uses an **8-step wizard** with a visible progress bar at the top:
 
 ---
 
-## Step 3: 🛡️ Process Safety Emails
+## Step 4: 🛡️ Process Safety Emails
 
 **What it does:** Scans Gmail for JHAs, Safety Meeting Reports, and Fleet Checklists. Extracts equipment issues and tracks crew compliance.
 
@@ -87,7 +102,7 @@ The dialog uses an **8-step wizard** with a visible progress bar at the top:
 
 ---
 
-## Step 4: 🎯 Generate Task Metadata
+## Step 5: 🎯 Generate Task Metadata
 
 **What it does:** Consolidates all pending tasks from multiple sources into the Task Metadata sheet - your single source of truth.
 
@@ -111,7 +126,7 @@ The dialog uses an **8-step wizard** with a visible progress bar at the top:
 
 ---
 
-## Step 5: 📅 Review & Schedule
+## Step 6: 📅 Review & Schedule
 
 **What it does:** Opens the Tasks & Calendar dialog where you can review, schedule, and manage all your tasks for the week.
 
@@ -139,7 +154,23 @@ The dialog uses an **8-step wizard** with a visible progress bar at the top:
 
 ---
 
-## Step 6: 💾 Save & Backup
+## Step 7: 🛒 Create Purchase Order
+
+**What it does:** Allows creating and managing Purchase Orders for PPE (gloves, sleeves) and vendor configurations.
+
+**How to do it:**
+1. Click **Step 7: Create Purchase Order** in the sidebar.
+2. Select outstanding items from the Purchase Needs section.
+3. Configure quantities, choose a vendor (which auto-applies their catalog pricing), and generate the PO.
+4. (Optional) Email the PO directly to the vendor rep using the generated draft.
+
+**Expected outcome:**
+- A new PO entry logged in the Purchase Orders sheet.
+- Email drafts compiled or sent directly to vendors.
+
+---
+
+## Step 8: 💾 Save & Backup
 
 **What it does:** Saves current state to history sheets and creates a backup snapshot in Google Drive.
 
@@ -213,11 +244,13 @@ Copy this checklist to track your Monday workflow:
 
 ```
 □ Step 1: Import Crew Makeup (upload superintendent's Excel)
-□ Step 2: Generate All Reports (update swaps and purchase needs)
-□ Step 3: Process Safety Emails (check JHAs and compliance)
-□ Step 4: Generate Task Metadata (refresh task database)
-□ Step 5: Review & Schedule (plan your week)
-□ Step 6: Save & Backup (preserve current state)
+□ Step 2: Sync Crews (update foremen & schedules in Job Tracking)
+□ Step 3: Generate All Reports (update swaps and purchase needs)
+□ Step 4: Process Safety Emails (check JHAs and compliance)
+□ Step 5: Generate Task Metadata (refresh task database)
+□ Step 6: Review & Schedule (plan your week)
+□ Step 7: Create Purchase Order (order gloves/sleeves/supplies)
+□ Step 8: Save & Backup (preserve current state)
 ```
 
 ---

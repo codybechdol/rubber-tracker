@@ -5834,6 +5834,9 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
         };
       }
 
+      // Bypassed: Let email processing run to completion without intermediate user prompting.
+      // Unknown and uncredited jobs will be handled at the end of the run in the scrollable assignment section.
+      /*
       // Check if we have unknown jobs that need user assignment FIRST
       // This takes priority over corrections - user must assign foremen before processing can continue
       if (unknownJobsEncountered.length > 0) {
@@ -5884,6 +5887,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
           complianceRecordsCount: complianceRecords.length
         };
       }
+      */
 
       // Write equipment issues to sheet (NOT compliance records - those go only to Safety Compliance sheet)
       // De-duplicate using BOTH email-ID-based AND content-based keys
@@ -14365,7 +14369,7 @@ function getJobForemanMappingsForDialog() {
   var nameCol = -1, jobCol = -1, secondaryJobCol = -1, classCol = -1, lastDayCol = -1;
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'name') nameCol = h;
+    if (header === 'name' || header === 'employee name') nameCol = h;
     if (header === 'job number') jobCol = h;
     if (header === 'secondary job number' || header === 'secondary job') secondaryJobCol = h;
     if (header === 'job classification' || header === 'classification') classCol = h;
@@ -16897,8 +16901,10 @@ function creditUncreditedReport(assignmentDataJson) {
         if (hdr === 'weekly meeting' || hdr === 'weekly') weeklyMeetingCol = h;
       }
 
-      // Calculate week start for the report date
-      var reportDateObj = new Date(data.reportDate);
+      // Calculate week start for the compliance date
+      var complianceDateStr = data.targetDate || data.reportDate;
+      Logger.log('creditUncreditedReport: Using complianceDateStr=' + complianceDateStr + ' (targetDate=' + data.targetDate + ', reportDate=' + data.reportDate + ')');
+      var reportDateObj = new Date(complianceDateStr);
       var dayOfWeekNum = reportDateObj.getDay();
       var weekStart = new Date(reportDateObj);
       weekStart.setDate(weekStart.getDate() - dayOfWeekNum); // Move to Sunday
@@ -16992,7 +16998,7 @@ function getMissingDaysForCrew(crewJobNumber, weekStartDate) {
     var complianceSheet = ss.getSheetByName('Safety Compliance');
 
     if (!complianceSheet) {
-      return { success: false, error: 'Safety Compliance sheet not found', missingDays: [] };
+      return { success: false, error: 'Safety Compliance sheet not found', weeks: [] };
     }
 
     var compData = complianceSheet.getDataRange().getValues();
@@ -17015,11 +17021,21 @@ function getMissingDaysForCrew(crewJobNumber, weekStartDate) {
       if (hdr === 'weekly meeting' || hdr === 'weekly') weeklyMeetingCol = h;
     }
 
-    // Parse week start date
-    var targetWeekStart = new Date(weekStartDate);
-    targetWeekStart.setHours(0, 0, 0, 0);
+    // Parse base week start date (Sunday)
+    var baseDate = new Date(weekStartDate);
+    baseDate.setHours(0, 0, 0, 0);
 
-    // Find matching row
+    // Calculate week starts for 3 weeks: target week, 1 week ago, 2 weeks ago
+    var weekStarts = [];
+    for (var w = 0; w < 3; w++) {
+      var wStart = new Date(baseDate.getTime());
+      wStart.setDate(wStart.getDate() - (w * 7));
+      weekStarts.push(wStart);
+    }
+
+    var matchingRows = [null, null, null]; // [target week, 1 week ago, 2 weeks ago]
+
+    // Find matching rows in compliance sheet
     for (var i = 1; i < compData.length; i++) {
       var row = compData[i];
       var rowWeekStart = row[colIdx.weekStart];
@@ -17030,34 +17046,55 @@ function getMissingDaysForCrew(crewJobNumber, weekStartDate) {
       var rowWeekDate = new Date(rowWeekStart);
       rowWeekDate.setHours(0, 0, 0, 0);
 
-        if (rowWeekDate.getTime() === targetWeekStart.getTime() && rowJobNumber === crewJobNumber) {
-        // Found the row, check for missing and credited days
-        var missingDays = [];
-        var creditedDays = [];
+      if (rowJobNumber === crewJobNumber) {
+        for (var w = 0; w < weekStarts.length; w++) {
+          if (rowWeekDate.getTime() === weekStarts[w].getTime()) {
+            matchingRows[w] = row;
+            break;
+          }
+        }
+      }
+    }
 
+    var result = {
+      success: true,
+      crewJobNumber: crewJobNumber,
+      weekStart: weekStartDate,
+      weeks: []
+    };
+
+    for (var w = 0; w < weekStarts.length; w++) {
+      var wStart = weekStarts[w];
+      var row = matchingRows[w];
+      var wStartStr = Utilities.formatDate(wStart, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+
+      var weekInfo = {
+        weekStart: wStartStr,
+        missingDays: [],
+        creditedDays: [],
+        weeklyMeetingMissing: false,
+        weeklyMeetingCredited: false
+      };
+
+      if (row) {
         for (var d = 0; d < dayColumns.length; d++) {
           var dc = dayColumns[d];
           var cellValue = String(row[dc.col] || '').trim();
-
-          // Skip N/A days (usually weekends) and empty cells
           if (cellValue === 'N/A' || cellValue === '') continue;
 
-          // Calculate the actual date for this day
-          var dayDate = new Date(targetWeekStart);
+          var dayDate = new Date(wStart.getTime());
           dayDate.setDate(dayDate.getDate() + dc.dayNum);
           var dayDateStr = Utilities.formatDate(dayDate, Session.getScriptTimeZone(), 'MM/dd/yyyy');
 
-          // Check if missing (\u274C or \u23F3)
           if (cellValue === '\u274C' || cellValue === '\u23F3' || cellValue.indexOf('\u274C') !== -1) {
-            missingDays.push({
+            weekInfo.missingDays.push({
               dayName: dc.dayName,
               dayNum: dc.dayNum,
               date: dayDateStr,
               currentStatus: cellValue
             });
           } else if (cellValue === '\u2705' || cellValue.indexOf('\u2705') !== -1) {
-            // Already has a JHA credited - can still add log entry only
-            creditedDays.push({
+            weekInfo.creditedDays.push({
               dayName: dc.dayName,
               dayNum: dc.dayNum,
               date: dayDateStr,
@@ -17066,35 +17103,24 @@ function getMissingDaysForCrew(crewJobNumber, weekStartDate) {
           }
         }
 
-        // Also check Weekly Meeting
-        var weeklyMeetingMissing = false;
-        var weeklyMeetingCredited = false;
         if (weeklyMeetingCol >= 0) {
           var wmValue = String(row[weeklyMeetingCol] || '').trim();
           if (wmValue === '\u274C' || wmValue === '\u23F3' || wmValue.indexOf('\u274C') !== -1) {
-            weeklyMeetingMissing = true;
+            weekInfo.weeklyMeetingMissing = true;
           } else if (wmValue === '\u2705' || wmValue.indexOf('\u2705') !== -1) {
-            weeklyMeetingCredited = true;
+            weekInfo.weeklyMeetingCredited = true;
           }
         }
-
-        return {
-          success: true,
-          missingDays: missingDays,
-          creditedDays: creditedDays,
-          weeklyMeetingMissing: weeklyMeetingMissing,
-          weeklyMeetingCredited: weeklyMeetingCredited,
-          crewJobNumber: crewJobNumber,
-          weekStart: weekStartDate
-        };
       }
+
+      result.weeks.push(weekInfo);
     }
 
-    return { success: false, error: 'Crew ' + crewJobNumber + ' not found for week ' + weekStartDate, missingDays: [], creditedDays: [] };
+    return result;
 
   } catch (e) {
     Logger.log('getMissingDaysForCrew error: ' + e.toString());
-    return { success: false, error: e.toString(), missingDays: [] };
+    return { success: false, error: e.toString(), weeks: [] };
   }
 }
 

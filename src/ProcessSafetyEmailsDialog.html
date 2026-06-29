@@ -1155,71 +1155,92 @@
             var hasOptions = false;
 
             if (isJHA) {
-              // --- Missing JHA days (will update compliance + log) ---
-              if (result.missingDays && result.missingDays.length > 0) {
-                var missingGroup = document.createElement('optgroup');
-                missingGroup.label = '⏳ Missing — credits compliance';
-                for (var d = 0; d < result.missingDays.length; d++) {
-                  var day = result.missingDays[d];
-                  var opt = document.createElement('option');
-                  opt.value = 'JHA|' + day.dayName + '|' + day.date + '|false';
-                  opt.text = '⏳ ' + day.dayName + ' (' + day.date + ')';
-                  missingGroup.appendChild(opt);
-                  hasOptions = true;
-                }
-                daySelect.appendChild(missingGroup);
-              }
+              if (result.weeks) {
+                for (var w = 0; w < result.weeks.length; w++) {
+                  var week = result.weeks[w];
+                  var weekStartStr = week.weekStart;
 
-              // --- Already-credited JHA days (log entry only, no compliance change) ---
-              if (result.creditedDays && result.creditedDays.length > 0) {
-                var creditedGroup = document.createElement('optgroup');
-                creditedGroup.label = '✅ Already credited — log entry only';
-                for (var c = 0; c < result.creditedDays.length; c++) {
-                  var cday = result.creditedDays[c];
-                  var copt = document.createElement('option');
-                  copt.value = 'JHA|' + cday.dayName + '|' + cday.date + '|true';
-                  copt.text = '✅ ' + cday.dayName + ' (' + cday.date + ') — log only';
-                  creditedGroup.appendChild(copt);
-                  hasOptions = true;
+                  // --- Missing JHA days (will update compliance + log) ---
+                  if (week.missingDays && week.missingDays.length > 0) {
+                    var missingGroup = document.createElement('optgroup');
+                    missingGroup.label = '⏳ Missing (Week of ' + weekStartStr + ') — credits compliance';
+                    for (var d = 0; d < week.missingDays.length; d++) {
+                      var day = week.missingDays[d];
+                      var opt = document.createElement('option');
+                      opt.value = 'JHA|' + day.dayName + '|' + day.date + '|false';
+                      opt.text = '⏳ ' + day.dayName + ' (' + day.date + ')';
+                      missingGroup.appendChild(opt);
+                      hasOptions = true;
+                    }
+                    daySelect.appendChild(missingGroup);
+                  }
+
+                  // --- Already-credited JHA days (log entry only, no compliance change) ---
+                  if (week.creditedDays && week.creditedDays.length > 0) {
+                    var creditedGroup = document.createElement('optgroup');
+                    creditedGroup.label = '✅ Already Credited (Week of ' + weekStartStr + ') — log only';
+                    for (var c = 0; c < week.creditedDays.length; c++) {
+                      var cday = week.creditedDays[c];
+                      var copt = document.createElement('option');
+                      copt.value = 'JHA|' + cday.dayName + '|' + cday.date + '|true';
+                      copt.text = '✅ ' + cday.dayName + ' (' + cday.date + ') — log only';
+                      creditedGroup.appendChild(copt);
+                      hasOptions = true;
+                    }
+                    daySelect.appendChild(creditedGroup);
+                  }
                 }
-                daySelect.appendChild(creditedGroup);
               }
             }
 
             if (isSafetyMeeting) {
-              if (result.weeklyMeetingMissing) {
-                var wopt = document.createElement('option');
-                wopt.value = 'WeeklyMeeting||' + weekStartStr + '|false';
-                wopt.text = '⏳ Weekly Meeting (week of ' + weekStartStr + ')';
-                daySelect.appendChild(wopt);
-                hasOptions = true;
-              } else if (result.weeklyMeetingCredited) {
-                var wcopt = document.createElement('option');
-                wcopt.value = 'WeeklyMeeting||' + weekStartStr + '|true';
-                wcopt.text = '✅ Weekly Meeting (week of ' + weekStartStr + ') — log only';
-                daySelect.appendChild(wcopt);
-                hasOptions = true;
+              if (result.weeks) {
+                for (var w = 0; w < result.weeks.length; w++) {
+                  var week = result.weeks[w];
+                  var weekStartStr = week.weekStart;
+
+                  if (week.weeklyMeetingMissing) {
+                    var wopt = document.createElement('option');
+                    wopt.value = 'WeeklyMeeting||' + weekStartStr + '|false';
+                    wopt.text = '⏳ Weekly Meeting (Week of ' + weekStartStr + ')';
+                    daySelect.appendChild(wopt);
+                    hasOptions = true;
+                  } else if (week.weeklyMeetingCredited) {
+                    var wcopt = document.createElement('option');
+                    wcopt.value = 'WeeklyMeeting||' + weekStartStr + '|true';
+                    wcopt.text = '✅ Weekly Meeting (Week of ' + weekStartStr + ') — log only';
+                    daySelect.appendChild(wcopt);
+                    hasOptions = true;
+                  }
+                }
               }
             }
 
             // Fallback: show all if report type is unknown
             if (!isJHA && !isSafetyMeeting) {
-              if (result.missingDays) {
-                for (var fd = 0; fd < result.missingDays.length; fd++) {
-                  var fday = result.missingDays[fd];
-                  var fopt = document.createElement('option');
-                  fopt.value = 'JHA|' + fday.dayName + '|' + fday.date + '|false';
-                  fopt.text = '⏳ JHA - ' + fday.dayName + ' (' + fday.date + ')';
-                  daySelect.appendChild(fopt);
-                  hasOptions = true;
+              if (result.weeks) {
+                for (var w = 0; w < result.weeks.length; w++) {
+                  var week = result.weeks[w];
+                  var weekStartStr = week.weekStart;
+
+                  if (week.missingDays) {
+                    for (var fd = 0; fd < week.missingDays.length; fd++) {
+                      var fday = week.missingDays[fd];
+                      var fopt = document.createElement('option');
+                      fopt.value = 'JHA|' + fday.dayName + '|' + fday.date + '|false';
+                      fopt.text = '⏳ JHA - ' + fday.dayName + ' (' + fday.date + ') (Week of ' + weekStartStr + ')';
+                      daySelect.appendChild(fopt);
+                      hasOptions = true;
+                    }
+                  }
+                  if (week.weeklyMeetingMissing) {
+                    var fwopt = document.createElement('option');
+                    fwopt.value = 'WeeklyMeeting||' + weekStartStr + '|false';
+                    fwopt.text = '⏳ Weekly Meeting (Week of ' + weekStartStr + ')';
+                    daySelect.appendChild(fwopt);
+                    hasOptions = true;
+                  }
                 }
-              }
-              if (result.weeklyMeetingMissing) {
-                var fwopt = document.createElement('option');
-                fwopt.value = 'WeeklyMeeting||' + weekStartStr + '|false';
-                fwopt.text = '⏳ Weekly Meeting (week of ' + weekStartStr + ')';
-                daySelect.appendChild(fwopt);
-                hasOptions = true;
               }
             }
 
@@ -1262,12 +1283,15 @@
       var targetDay = '';
       var targetReportType = reportType;
       var logEntryOnly = false;
+      var targetDate = '';
       if (dayValue) {
         var parts = dayValue.split('|');
         if (parts[0] === 'WeeklyMeeting') {
           targetReportType = 'Safety Meeting';
+          targetDate = parts[2] || '';
         } else if (parts[1]) {
           targetDay = parts[1];
+          targetDate = parts[2] || '';
         }
         // 4th segment encodes logEntryOnly flag
         if (parts[3] === 'true') {
@@ -1284,6 +1308,7 @@
         targetCrew: targetCrew,
         targetForeman: targetForeman,
         targetDay: targetDay,
+        targetDate: targetDate,
         saveMapping: saveMapping,
         logEntryOnly: logEntryOnly
       };

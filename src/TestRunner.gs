@@ -4,7 +4,7 @@
  * Run this function in the Apps Script editor to execute all tests and log results.
  */
 
-/* global buildSheets, saveCurrentStateToHistory, generateAllReports, processEdit, onEditHandler, updateInventoryReports, updatePurchaseNeeds, runReclaimsCheck */
+/* global buildSheets, saveCurrentStateToHistory, generateAllReports, processEdit, onEditHandler, updateInventoryReports, updatePurchaseNeeds */
 
 // eslint-disable-next-line no-unused-vars
 function runAllTests() {
@@ -54,9 +54,14 @@ function runAllTests() {
     results.push('testUpdatePurchaseNeeds FAILED: ' + e);
   }
   try {
-    results.push(testRunReclaimsCheck());
+    results.push(testGetPhysicalLocation());
   } catch (e) {
-    results.push('testRunReclaimsCheck FAILED: ' + e);
+    results.push('testGetPhysicalLocation FAILED: ' + e);
+  }
+  try {
+    results.push(testIsStatusLocation());
+  } catch (e) {
+    results.push('testIsStatusLocation FAILED: ' + e);
   }
 
   Logger.log('Test Results:');
@@ -176,15 +181,133 @@ function testUpdatePurchaseNeeds() {
   }
 }
 
-// Test for runReclaimsCheck
-function testRunReclaimsCheck() {
-  try {
-    runReclaimsCheck();
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var sheet = ss.getSheetByName('Reclaims');
-    if (!sheet) throw 'Reclaims sheet missing after run.';
-    return 'testRunReclaimsCheck PASSED';
-  } catch (e) {
-    throw 'runReclaimsCheck error: ' + e;
+
+// Test for getPhysicalLocation
+function testGetPhysicalLocation() {
+  var cases = [
+    { input: 'Helena', expected: 'Helena' },
+    { input: 'Helena (Vacation)', expected: 'Helena' },
+    { input: 'Bozeman (Light Duty)', expected: 'Bozeman' },
+    { input: 'Great Falls', expected: 'Great Falls' },
+    { input: '', expected: '' },
+    { input: null, expected: '' }
+  ];
+
+  for (var i = 0; i < cases.length; i++) {
+    var actual = getPhysicalLocation(cases[i].input);
+    if (actual !== cases[i].expected) {
+      throw 'getPhysicalLocation("' + cases[i].input + '") expected "' + cases[i].expected + '", got "' + actual + '"';
+    }
+  }
+  return 'testGetPhysicalLocation PASSED';
+}
+
+// Test for isStatusLocation
+function testIsStatusLocation() {
+  var cases = [
+    { input: 'Helena', expected: false },
+    { input: 'Helena (Vacation)', expected: true },
+    { input: 'Vacation', expected: true },
+    { input: 'light duty', expected: true },
+    { input: 'Bozeman (Light Duty)', expected: true },
+    { input: 'Great Falls', expected: false },
+    { input: '', expected: false },
+    { input: null, expected: false }
+  ];
+
+  for (var i = 0; i < cases.length; i++) {
+    var actual = isStatusLocation(cases[i].input);
+    if (actual !== cases[i].expected) {
+      throw 'isStatusLocation("' + cases[i].input + '") expected ' + cases[i].expected + ', got ' + actual;
+    }
+  }
+  return 'testIsStatusLocation PASSED';
+}
+
+function testGetCrewLeadBug() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Employees');
+  if (!sheet) return 'Employees sheet not found';
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  
+  var nameCol = -1;
+  var jobNumCol = -1;
+  var classificationCol = -1;
+  var lastDayCol = -1;
+  var crewLeadCol = -1;
+  
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'name' || header === 'employee name') nameCol = h;
+    if (header === 'job number') jobNumCol = h;
+    if (header === 'crew lead') crewLeadCol = h;
+    if (header === 'job classification') classificationCol = h;
+    if (header === 'last day') lastDayCol = h;
+  }
+  
+  Logger.log('Columns found: name=' + nameCol + ', jobNum=' + jobNumCol + ', class=' + classificationCol + ', lastDay=' + lastDayCol + ', crewLead=' + crewLeadCol);
+  
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var jobNum = String(row[jobNumCol]).trim();
+    if (jobNum.indexOf('042-26') !== -1) {
+      Logger.log('Row ' + (i+1) + ': Name=' + row[nameCol] + ', JobNum=' + jobNum + ', Class=' + (classificationCol !== -1 ? row[classificationCol] : 'N/A') + ', CrewLead=' + (crewLeadCol !== -1 ? row[crewLeadCol] : 'N/A') + ', LastDay=' + (lastDayCol !== -1 ? row[lastDayCol] : 'N/A'));
+    }
+  }
+  
+  var lead = getCrewLead('042-26');
+  Logger.log('Result from getCrewLead("042-26"): ' + JSON.stringify(lead));
+  return 'testGetCrewLeadBug PASSED: ' + JSON.stringify(lead);
+}
+
+function debugSearchLogs() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var jhaSheet = ss.getSheetByName('JHA Log');
+  Logger.log('=== DEBUG JHA LOG SEARCH ===');
+  if (jhaSheet) {
+    var data = jhaSheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      var job = String(data[i][2] || '').trim();
+      var credited = String(data[i][8] || '').trim();
+      if (job.indexOf('046-29') !== -1 || job.indexOf('049-26') !== -1 || credited.indexOf('046-29') !== -1 || credited.indexOf('049-26') !== -1) {
+        Logger.log('JHA Row ' + (i+1) + ': Received=' + data[i][0] + ', Created=' + data[i][1] + ', Job=' + job + ', Foreman=' + data[i][3] + ', Subject=' + data[i][4] + ', EmailId=' + data[i][5] + ', Status=' + data[i][7] + ', CreditedTo=' + credited + ', Notes=' + data[i][9]);
+      }
+    }
+  } else {
+    Logger.log('JHA Log sheet not found');
+  }
+
+  var weeklySheet = ss.getSheetByName('Weekly Safety Log');
+  Logger.log('=== DEBUG WEEKLY SAFETY LOG SEARCH ===');
+  if (weeklySheet) {
+    var data = weeklySheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      var job = String(data[i][2] || '').trim();
+      var credited = String(data[i][7] || '').trim();
+      if (job.indexOf('046-29') !== -1 || job.indexOf('049-26') !== -1 || credited.indexOf('046-29') !== -1 || credited.indexOf('049-26') !== -1) {
+        Logger.log('Weekly Row ' + (i+1) + ': Received=' + data[i][0] + ', WeekOf=' + data[i][1] + ', Job=' + job + ', Foreman=' + data[i][3] + ', Subject=' + data[i][4] + ', EmailId=' + data[i][5] + ', Status=' + data[i][6] + ', CreditedTo=' + credited + ', Notes=' + data[i][8]);
+      }
+    }
+  } else {
+    Logger.log('Weekly Safety Log sheet not found');
   }
 }
+
+function debugGetMessages() {
+  var ids = ['19edc0dbf916dfc8', '19ecc3176dd49359', '19eb700e6775da6d'];
+  for (var i = 0; i < ids.length; i++) {
+    try {
+      var msg = GmailApp.getMessageById(ids[i]);
+      if (msg) {
+        Logger.log('ID: ' + ids[i] + ' -> Subject: ' + msg.getSubject() + ', Date: ' + msg.getDate() + ', ThreadId: ' + msg.getThread().getId());
+      } else {
+        Logger.log('ID: ' + ids[i] + ' -> Not found');
+      }
+    } catch (e) {
+      Logger.log('ID: ' + ids[i] + ' -> Error: ' + e.toString());
+    }
+  }
+}
+
+

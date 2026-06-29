@@ -1,5 +1,5 @@
 {
-  "name": "rubber-tracker",
+  "name": "safety-assistant",
   "version": "1.0.0",
   "description": "The Glove Manager is a Google Sheets-based inventory management and tracking system for rubber gloves and sleeves used by electrical workers. It is designed to centralize, automate, and streamline PPE inventory, assignment workflows, compliance, and reporting.",
   "main": "index.js",

@@ -106,66 +106,89 @@ function ensureLocationsInValidation(sheet, locationColNum, locationsToAdd) {
  * @return {number} Number of locations added
  */
 function ensureLocationsInLocationsSheet(ss, locations) {
-  var locationsSheet = ss.getSheetByName('Locations');
-  if (!locationsSheet) {
-    Logger.log('ensureLocationsInLocationsSheet: Locations sheet not found');
+  // Wrap everything — the Locations sheet may be a Google Sheets Table (typed columns)
+  // which causes ANY write operation (appendRow, setValue, etc.) to throw.
+  // We never want this to crash the import, so we catch all errors and log them.
+  try {
+    var locationsSheet = ss.getSheetByName('Locations');
+    if (!locationsSheet) {
+      Logger.log('ensureLocationsInLocationsSheet: Locations sheet not found');
+      return { count: 0, names: [] };
+    }
+
+    var existingLocations = {};
+    try {
+      var data = locationsSheet.getDataRange().getValues();
+      for (var i = 1; i < data.length; i++) {
+        var loc = String(data[i][0] || '').trim();
+        if (loc) {
+          existingLocations[loc.toLowerCase()] = true;
+        }
+      }
+    } catch (eRead) {
+      Logger.log('ensureLocationsInLocationsSheet: Could not read sheet (Table?): ' + eRead.toString());
+      return { count: 0, names: [] };
+    }
+
+    var addedCount = 0;
+    var addedNames = [];
+    var newLocations = [];
+
+    var skipLocations = ['Light Duty', 'Weeds', 'Vacation', 'Leave', 'Previous Employee', 'Unknown'];
+    for (var j = 0; j < locations.length; j++) {
+      var location = locations[j];
+      if (!location) continue;
+      if (skipLocations.indexOf(location) !== -1) continue;
+      if (existingLocations[location.toLowerCase()]) continue;
+      newLocations.push(location);
+    }
+
+    if (newLocations.length === 0) {
+      return { count: 0, names: [] };
+    }
+
+    // Try to write new rows — will silently fail if sheet is a Table
+    var lastRow = locationsSheet.getLastRow();
+    for (var k = 0; k < newLocations.length; k++) {
+      var newLoc = newLocations[k];
+      try {
+        var targetRow = lastRow + k + 1;
+        locationsSheet.getRange(targetRow, 1, 1, 7).setValues([[
+          newLoc,
+          0,
+          'NEEDS REVIEW',
+          newLoc,
+          15,
+          10,
+          DEFAULT_LOCATION_APPROVALS[newLoc] || 'CL2'
+        ]]);
+        try {
+          locationsSheet.getRange(targetRow, 3).setBackground('#ffa726').setFontWeight('bold');
+          // Add validation for the new Rubber Class Approval cell
+          var approvalCell = locationsSheet.getRange(targetRow, 7);
+          var rule = SpreadsheetApp.newDataValidation()
+            .requireValueInList(['None', 'CL2', 'CL3', 'CL2 & CL3'], true)
+            .setAllowInvalid(false)
+            .build();
+          approvalCell.setDataValidation(rule);
+        } catch (eHL) {}
+        addedNames.push(newLoc);
+        addedCount++;
+        Logger.log('ensureLocationsInLocationsSheet: Added "' + newLoc + '" (row ' + targetRow + ')');
+      } catch (eWrite) {
+        // Sheet is likely a Table — log and move on, do NOT crash the import
+        Logger.log('ensureLocationsInLocationsSheet: Cannot write "' + newLoc + '" to Locations sheet (Table?). Add manually: ' + eWrite.toString());
+        addedNames.push(newLoc + ' [NEEDS MANUAL ADD]');
+      }
+    }
+
+    return { count: addedCount, names: addedNames };
+
+  } catch (eFatal) {
+    // Absolute last resort — never let this crash the import
+    Logger.log('ensureLocationsInLocationsSheet: Unexpected error (non-fatal): ' + eFatal.toString());
     return { count: 0, names: [] };
   }
-
-  var data = locationsSheet.getDataRange().getValues();
-  var existingLocations = {};
-
-  // Build map of existing locations (column A)
-  for (var i = 1; i < data.length; i++) {
-    var loc = String(data[i][0] || '').trim();
-    if (loc) {
-      existingLocations[loc.toLowerCase()] = true;
-    }
-  }
-
-  var addedCount = 0;
-  var newRows = [];
-  var addedNames = [];
-
-  for (var j = 0; j < locations.length; j++) {
-    var location = locations[j];
-    if (!location) continue;
-
-    // Skip special status locations (not physical locations)
-    // "Light Duty" kept for backwards compatibility - new ones get Location = "Helena"
-    var skipLocations = ['Light Duty', 'Weeds', 'Vacation', 'Leave', 'Previous Employee', 'Unknown'];
-    if (skipLocations.indexOf(location) !== -1) continue;
-
-    // Check if location already exists
-    if (existingLocations[location.toLowerCase()]) continue;
-
-    // Add new location flagged for review
-    // Columns: Location, Drive Time (min), Direction, Overnight City
-    newRows.push([
-      location,
-      0,                      // Default 0 — needs user input
-      'NEEDS REVIEW',         // Flag for review instead of guessing
-      location                // Overnight city defaults to location name
-    ]);
-
-    addedNames.push(location);
-    Logger.log('ensureLocationsInLocationsSheet: Adding new location (needs review): ' + location);
-    addedCount++;
-  }
-
-  if (newRows.length > 0) {
-    var lastRow = locationsSheet.getLastRow();
-    locationsSheet.getRange(lastRow + 1, 1, newRows.length, 4).setValues(newRows);
-
-    // Highlight the "NEEDS REVIEW" cells in orange
-    for (var k = 0; k < newRows.length; k++) {
-      locationsSheet.getRange(lastRow + 1 + k, 3).setBackground('#ffa726').setFontWeight('bold');
-    }
-
-    Logger.log('ensureLocationsInLocationsSheet: Added ' + addedCount + ' new location(s) flagged for review');
-  }
-
-  return { count: addedCount, names: addedNames };
 }
 
 /**
@@ -337,6 +360,26 @@ function applyCrewChanges(changes) {
       var secondaryJobChanged = false;
       var classificationChanged = false;
 
+      // AUTO-ASSIGN 005-26.X for Leave/Vacation employees.
+      // When an employee moves to a non-field status location, give them a 005-26.X job
+      // number so their old crew job number (e.g., 019-26.2) is freed up for the active crew.
+      // Also handles the case where they're already at Leave but still have an old crew job number.
+      // Skip if they already have a 005- number (idempotent).
+      var LEAVE_LOCATIONS = ['Leave', 'Vacation'];
+      var empCurrentJob = String(data[dataIdx][jobNumCol] || '').trim();
+      var needsJobNumFix = change.needsJobNumberFix && !empCurrentJob.match(/^005-/);
+      var movingToLeave = change.newLocation && LEAVE_LOCATIONS.indexOf(change.newLocation) !== -1;
+      if (movingToLeave || needsJobNumFix) {
+        if (!empCurrentJob.match(/^005-/)) {
+          change.newJobNumber = allocateNext005JobNumber(data, jobNumCol);
+          Logger.log('applyCrewChanges: Auto-assigned 005 job# for Leave/Vacation: ' + change.employeeName + ' → ' + change.newJobNumber);
+        } else {
+          // Already has 005-, keep it (ensure newJobNumber reflects it so no spurious change)
+          change.newJobNumber = empCurrentJob;
+          Logger.log('applyCrewChanges: ' + change.employeeName + ' already has 005 job# ' + empCurrentJob + ', keeping');
+        }
+      }
+
       // BATCH: Modify in memory instead of individual setValue calls
       if (change.newLocation && change.newLocation !== change.oldLocation) {
         data[dataIdx][locationCol] = change.newLocation;
@@ -431,7 +474,11 @@ function applyCrewChanges(changes) {
     // Temporarily clear location validation to avoid errors from existing values
     // that might not be in the validation list (e.g., old locations like "Bonner", "Unknown")
     var locationRange = employeesSheet.getRange(2, locationCol + 1, data.length - 1, 1);
-    locationRange.clearDataValidations();
+    try {
+      locationRange.clearDataValidations();
+    } catch (e) {
+      Logger.log('applyCrewChanges: clearDataValidations failed (likely typed Google Table columns): ' + e.message);
+    }
 
     var locationValues = data.map(function(row) { return [row[locationCol]]; });
     employeesSheet.getRange(1, locationCol + 1, data.length, 1).setValues(locationValues);
@@ -449,8 +496,12 @@ function applyCrewChanges(changes) {
         .requireValueInList(allLocs, true)
         .setAllowInvalid(false)
         .build();
-      locationRange.setDataValidation(revalidationRule);
-      Logger.log('applyCrewChanges: Re-applied location validation with ' + allLocs.length + ' values');
+      try {
+        locationRange.setDataValidation(revalidationRule);
+        Logger.log('applyCrewChanges: Re-applied location validation with ' + allLocs.length + ' values');
+      } catch (e) {
+        Logger.log('applyCrewChanges: setDataValidation failed (likely typed Google Table columns): ' + e.message);
+      }
     }
   }
   if (columnsModified.jobNum) {
@@ -472,9 +523,33 @@ function applyCrewChanges(changes) {
 
   // ========== BATCH WRITE: Write all history rows at once ==========
   if (historyRows.length > 0 && historySheet) {
-    var lastHistRow = historySheet.getLastRow();
-    historySheet.getRange(lastHistRow + 1, 1, historyRows.length, historyRows[0].length).setValues(historyRows);
-    Logger.log('applyCrewChanges: Batch wrote ' + historyRows.length + ' history row(s)');
+    var histWritten = 0;
+    // Try batch setValues first, fall back to appendRow, then skip (never crash import)
+    var histSucceeded = false;
+    try {
+      var lastHistRow = historySheet.getLastRow();
+      historySheet.getRange(lastHistRow + 1, 1, historyRows.length, historyRows[0].length).setValues(historyRows);
+      histWritten = historyRows.length;
+      histSucceeded = true;
+      Logger.log('applyCrewChanges: Batch wrote ' + histWritten + ' history row(s)');
+    } catch (eHistBatch) {
+      Logger.log('applyCrewChanges: setValues failed (' + eHistBatch.toString().substr(0, 80) + '), trying appendRow');
+    }
+    if (!histSucceeded) {
+      for (var hk = 0; hk < historyRows.length; hk++) {
+        try {
+          historySheet.appendRow(historyRows[hk]);
+          histWritten++;
+        } catch (eHistRow) {
+          Logger.log('applyCrewChanges: appendRow failed for row ' + hk + ' - history may be a Table. Row data: ' + JSON.stringify(historyRows[hk]).substr(0, 120));
+        }
+      }
+      if (histWritten > 0) {
+        Logger.log('applyCrewChanges: appendRow wrote ' + histWritten + '/' + historyRows.length + ' history row(s)');
+      } else {
+        Logger.log('applyCrewChanges: WARNING - Could not write history (Employee History may be a Table). Convert to range in Google Sheets to restore logging.');
+      }
+    }
   }
 
   Logger.log('=== applyCrewChanges END ===');
@@ -507,8 +582,15 @@ function applyCrewChanges(changes) {
     Logger.log('applyCrewChanges: Early-activated jobs: ' + earlyActivatedJobs.join(', '));
   }
 
+  // Extract crewSchedules — schedule labels from the Crew Import dropdown (e.g. "Fri Only", "M-Th")
+  var crewSchedules = {};
+  if (changes.length > 0 && changes[0].crewSchedules) {
+    crewSchedules = changes[0].crewSchedules;
+    Logger.log('applyCrewChanges: Received crewSchedules for ' + Object.keys(crewSchedules).length + ' crews');
+  }
+
   // Sync with Job Tracking sheet if it exists
-  var jobTrackingResult = syncJobTrackingAfterImport(ss, jobNameMap, earlyActivatedJobs);
+  var jobTrackingResult = syncJobTrackingAfterImport(ss, jobNameMap, earlyActivatedJobs, crewSchedules);
   var pendingJobs = [];
 
   if (jobTrackingResult) {
@@ -541,8 +623,9 @@ function applyCrewChanges(changes) {
  * @param {Array} earlyActivatedJobs - Jobs the user pre-confirmed as Active (activate in Job Tracking)
  * @return {Object} Result with message and pendingJobs array
  */
-function syncJobTrackingAfterImport(ss, jobNameMap, earlyActivatedJobs) {
+function syncJobTrackingAfterImport(ss, jobNameMap, earlyActivatedJobs, crewSchedules) {
   earlyActivatedJobs = earlyActivatedJobs || [];
+  crewSchedules = crewSchedules || {};
   var jobSheet = ss.getSheetByName('Job Tracking');
   if (!jobSheet) {
     Logger.log('syncJobTrackingAfterImport: Job Tracking sheet not found, skipping');
@@ -632,10 +715,11 @@ function syncJobTrackingAfterImport(ss, jobNameMap, earlyActivatedJobs) {
     // Filter out status locations (Vacation, Light Duty, Weeds, Leave, etc.)
     // These are employee statuses, not physical cities - should not appear in Job Tracking
     var isRealLocation = location && !isStatusLocation(location);
+    var physicalLocation = location ? getPhysicalLocation(location) : '';
 
     if (!crewMap[crewNumber]) {
       crewMap[crewNumber] = {
-        location: isRealLocation ? location : '',
+        location: isRealLocation ? physicalLocation : '',
         foreman: '',
         crewSize: 0,
         employees: []
@@ -646,7 +730,7 @@ function syncJobTrackingAfterImport(ss, jobNameMap, earlyActivatedJobs) {
     crewMap[crewNumber].employees.push(name);
 
     if (!crewMap[crewNumber].location && isRealLocation) {
-      crewMap[crewNumber].location = location;
+      crewMap[crewNumber].location = physicalLocation;
     }
 
     // Check for foreman classification (includes F, GTO F, GF, SUP)
@@ -838,6 +922,51 @@ function syncJobTrackingAfterImport(ss, jobNameMap, earlyActivatedJobs) {
     var pendingCount = pendingJobsWithEmployees.filter(function(j) { return !j.isOnHold; }).length;
     var onHoldCount = pendingJobsWithEmployees.filter(function(j) { return j.isOnHold; }).length;
     Logger.log('syncJobTrackingAfterImport: ' + pendingCount + ' Pending Start + ' + onHoldCount + ' On Hold (returning soon) jobs need activation decision');
+  }
+
+  // Apply schedule labels from Crew Import dropdown to Job Tracking skip-day columns
+  // Maps schedule labels (e.g., "Fri Only", "M-Th") to [skipSun, skipMon, skipTue, skipWed, skipThu, skipFri, skipSat]
+  if (Object.keys(crewSchedules).length > 0) {
+    var scheduleMap = {
+      'M-Th':      [true,  false, false, false, false, true,  true],
+      'Mon-Thu':   [true,  false, false, false, false, true,  true],
+      'Mon-Fri':   [true,  false, false, false, false, false, true],
+      'M-F':       [true,  false, false, false, false, false, true],
+      'Tue-Fri':   [true,  true,  false, false, false, false, true],
+      'M-Sat':     [true,  false, false, false, false, false, false],
+      'Mon-Sat':   [true,  false, false, false, false, false, false],
+      'Fri-Sat':   [true,  true,  true,  true,  true,  false, false],
+      'Weekend':   [false, true,  true,  true,  true,  true,  false],
+      'Mon-Wed':   [true,  false, false, false, true,  true,  true],
+      'Thu-Fri':   [true,  true,  true,  true,  false, false, true],
+      'Mon Only':  [true,  false, true,  true,  true,  true,  true],
+      'Tue Only':  [true,  true,  false, true,  true,  true,  true],
+      'Thu Only':  [true,  true,  true,  true,  false, true,  true],
+      'Fri Only':  [true,  true,  true,  true,  true,  false, true],
+      'Sat Only':  [true,  true,  true,  true,  true,  true,  false],
+      'Sun Only':  [false, true,  true,  true,  true,  true,  true]
+    };
+
+    var reloadedJobData = jobSheet.getDataRange().getValues();
+    var schedUpdated = 0;
+    for (var sJobNum in crewSchedules) {
+      var sLabel = crewSchedules[sJobNum];
+      var skipDays = scheduleMap[sLabel];
+      if (!skipDays) continue; // Unknown label, skip
+      // Find row in Job Tracking
+      for (var sr = 1; sr < reloadedJobData.length; sr++) {
+        if (String(reloadedJobData[sr][0] || '').trim() === sJobNum) {
+          // Write skip days to columns L-R (cols 12-18, 1-based)
+          jobSheet.getRange(sr + 1, 12, 1, 7).setValues([skipDays]);
+          schedUpdated++;
+          Logger.log('syncJobTrackingAfterImport: Set schedule "' + sLabel + '" for job ' + sJobNum);
+          break;
+        }
+      }
+    }
+    if (schedUpdated > 0) {
+      results.push(schedUpdated + ' schedule(s) updated');
+    }
   }
 
   // Also run syncCrews to ensure foremen and default schedules are applied
@@ -1478,10 +1607,17 @@ function getLocationsForDropdown() {
   if (!sheet || sheet.getLastRow() < 2) return [];
 
   var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
+  var seen = {};
   var locations = [];
   for (var i = 0; i < data.length; i++) {
     var loc = String(data[i][0] || '').trim();
-    if (loc) locations.push(loc);
+    // Stop at the routes section separator
+    if (loc === '--- ROUTES ---' || loc === 'From') break;
+    // Skip blanks, status pseudo-locations, and already-seen names
+    if (!loc) continue;
+    if (seen[loc]) continue;
+    seen[loc] = true;
+    locations.push(loc);
   }
   return locations.sort();
 }
@@ -2799,10 +2935,54 @@ function applySpecialCircumstanceUpdate(data) {
       Logger.log('Light Duty: keeping existing job number ' + existingJobNum);
     }
 
-    // Light Duty employees are physically in Helena — change location to real city
-    if (data.newLocation === 'Light Duty') {
-      data.newLocation = 'Helena';
-      Logger.log('Light Duty → Helena (Light Duty is a status, not a location)');
+    // Special handling for Leave/Vacation/Time Off - auto-assign 005-26.#
+    // Frees up the employee's crew job number (e.g., 019-26.2) for active crew members.
+    var isLeaveAssignment = !isLightDutyAssignment &&
+      (data.newLocation === 'Leave' || data.newLocation === 'Vacation' ||
+       data.status === 'Time Off' || data.status === 'Vacation' ||
+       data.status === 'Leave' || data.status === 'FMLA');
+    if (isLeaveAssignment && !data.clearJobNumber && !data.jobNumber && !existingJobNum.match(/^005-/)) {
+      newJobNumber = getNextLightDutyJobNumber(sheetData, jobNumCol, employeesSheet, rowIndex);
+      Logger.log('Auto-assigned Leave/Vacation job number: ' + newJobNumber);
+    } else if (isLeaveAssignment && existingJobNum.match(/^005-/)) {
+      newJobNumber = existingJobNum; // Keep existing 005-26.N number
+      Logger.log('Leave/Vacation: keeping existing job number ' + existingJobNum);
+    }
+
+    // Format status location into combined format City (Status)
+    var physCity = getPhysicalLocation(oldLocation);
+    if (!physCity || isStatusLocation(physCity)) {
+      physCity = 'Helena'; // Fallback default city
+    }
+
+    if (data.newLocation) {
+      var targetLoc = data.newLocation;
+      var statusLabel = '';
+      if (targetLoc === 'Vacation' || data.status === 'Vacation' || data.status === 'Time Off') {
+        statusLabel = 'Vacation';
+      } else if (targetLoc === 'Light Duty' || data.status === 'Light Duty') {
+        statusLabel = 'Light Duty';
+      } else if (targetLoc === 'Weeds' || data.status === 'Weeds') {
+        statusLabel = 'Weeds';
+      } else if (targetLoc === 'Leave' || data.status === 'Leave' || data.status === 'FMLA') {
+        statusLabel = 'Leave';
+      } else if (data.status === 'Medical') {
+        statusLabel = 'Medical';
+      } else if (data.status === 'Worker\'s Comp' || data.status === 'Worker\'s comp') {
+        statusLabel = 'Worker\'s Comp';
+      }
+
+      if (statusLabel && targetLoc !== 'Previous Employee') {
+        var city = physCity;
+        if (targetLoc !== 'Vacation' && targetLoc !== 'Light Duty' && targetLoc !== 'Weeds' && targetLoc !== 'Leave') {
+          var cleanedLoc = getPhysicalLocation(targetLoc);
+          if (cleanedLoc && !isStatusLocation(cleanedLoc)) {
+            city = cleanedLoc;
+          }
+        }
+        data.newLocation = city + ' (' + statusLabel + ')';
+        Logger.log('applySpecialCircumstanceUpdate: Formatted combined location: ' + data.newLocation);
+      }
     }
 
     // Update Location if specified
@@ -2940,61 +3120,73 @@ function applySpecialCircumstanceUpdate(data) {
  *
  * @param {Array} sheetData - 2D array of employee sheet data
  * @param {number} jobNumCol - Index of the job number column
- * @return {string} Next available Light Duty job number (e.g., "005-26.3")
+/**
+ * Allocates the next available 005-26.X job number for non-field employees
+ * (Light Duty, Leave, Vacation). Shared by both applyCrewChanges and
+ * applySpecialCircumstanceUpdate. Uses LockService to prevent duplicates.
+ * Does NOT write to the sheet — caller is responsible for writing.
+ *
+ * @param {Array} freshData - Current Employees sheet data (2D array)
+ * @param {number} jobNumCol - Zero-based index of the Job Number column
+ * @return {string} Next available 005-26.X job number (e.g., "005-26.4")
  */
-function getNextLightDutyJobNumber(sheetData, jobNumCol, employeesSheet, rowIndex) {
-  // Use LockService to prevent race condition when multiple parallel calls
-  // each try to assign the next Light Duty job number simultaneously
+function allocateNext005JobNumber(freshData, jobNumCol) {
   var lock = LockService.getScriptLock();
-  lock.waitLock(30000); // Wait up to 30 seconds - throws on failure (intentional)
+  lock.waitLock(30000);
 
   try {
-    var lightDutyPrefix = '005-26';
+    var prefix = '005-26';
     var maxFromSheet = 0;
-
-    // Scan sheet data for existing 005-26.# job numbers
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var freshSheet = employeesSheet || ss.getSheetByName('Employees');
-    var freshData = freshSheet ? freshSheet.getDataRange().getValues() : sheetData;
 
     for (var i = 1; i < freshData.length; i++) {
       var jobNum = String(freshData[i][jobNumCol] || '').trim();
-      if (jobNum.indexOf(lightDutyPrefix) === 0) {
+      if (jobNum.indexOf(prefix) === 0) {
         var match = jobNum.match(/005-26\.(\d+)/);
         if (match) {
-          var position = parseInt(match[1], 10);
-          if (position > maxFromSheet) {
-            maxFromSheet = position;
-          }
+          var pos = parseInt(match[1], 10);
+          if (pos > maxFromSheet) maxFromSheet = pos;
         }
       }
     }
 
-    // ALSO check ScriptProperties for recently assigned numbers.
-    // This handles the case where Google Sheets read cache returns stale data
-    // even after a prior call did flush(). Properties are always fresh.
     var props = PropertiesService.getScriptProperties();
     var recentMax = parseInt(props.getProperty('LIGHT_DUTY_RECENT_MAX') || '0', 10);
+    var nextPosition = Math.max(maxFromSheet, recentMax) + 1;
+    var newJobNumber = prefix + '.' + nextPosition;
 
-    // Use the higher of sheet scan vs properties counter
-    var maxPosition = Math.max(maxFromSheet, recentMax);
-    var nextPosition = maxPosition + 1;
-    var newJobNumber = lightDutyPrefix + '.' + nextPosition;
-
-    // Save to ScriptProperties FIRST (so next caller sees it even with stale sheet cache)
+    // Save to ScriptProperties so next caller sees it even with stale sheet cache
     props.setProperty('LIGHT_DUTY_RECENT_MAX', String(nextPosition));
 
-    // Also write to the sheet
-    if (freshSheet && rowIndex) {
-      freshSheet.getRange(rowIndex, jobNumCol + 1).setValue(newJobNumber);
-      SpreadsheetApp.flush();
-    }
-
-    Logger.log('getNextLightDutyJobNumber: sheet max=' + maxFromSheet + ', props max=' + recentMax + ', assigned=' + newJobNumber);
+    Logger.log('allocateNext005JobNumber: sheetMax=' + maxFromSheet + ', propsMax=' + recentMax + ', assigned=' + newJobNumber);
     return newJobNumber;
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * Gets the next available 005-26.X job number for Light Duty employees and
+ * writes it to the sheet immediately (for use with individual-write paths).
+ * @param {Array} sheetData - Current Employees sheet data (2D array)
+ * @param {number} jobNumCol - Zero-based index of the Job Number column
+ * @param {Sheet} employeesSheet - The Employees sheet object
+ * @param {number} rowIndex - 1-based row index of the employee's row
+ * @return {string} Next available Light Duty job number (e.g., "005-26.3")
+ */
+function getNextLightDutyJobNumber(sheetData, jobNumCol, employeesSheet, rowIndex) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var freshSheet = employeesSheet || ss.getSheetByName('Employees');
+  var freshData = freshSheet ? freshSheet.getDataRange().getValues() : sheetData;
+
+  var newJobNumber = allocateNext005JobNumber(freshData, jobNumCol);
+
+  // Write directly to sheet (individual-write path used by applySpecialCircumstanceUpdate)
+  if (freshSheet && rowIndex) {
+    freshSheet.getRange(rowIndex, jobNumCol + 1).setValue(newJobNumber);
+    SpreadsheetApp.flush();
+  }
+
+  return newJobNumber;
 }
 
 // ============================================================================
@@ -3397,9 +3589,12 @@ function applyFiscalYearTransition(oldFY, newFY, crewsToTransition) {
   var trainingUpdated = 0;
   if (trainingSheet && trainingSheet.getLastRow() > 2) {
     var trainingData = trainingSheet.getDataRange().getValues();
-    var trainingCrewCol = 2; // Column C = Crew #
+    var headerIdx = findTrainingTrackingHeaderRow(trainingData);
+    var headers = trainingData[headerIdx];
+    var cols = getTrainingTrackingColIndices(headers);
+    var trainingCrewCol = cols.crew;
 
-    for (var t = 2; t < trainingData.length; t++) {
+    for (var t = headerIdx + 1; t < trainingData.length; t++) {
       var trainCrew = String(trainingData[t][trainingCrewCol] || '').trim();
       if (transitionSet[trainCrew]) {
         var newTrainCrew = trainCrew.replace('-' + oldFY, '-' + newFY);

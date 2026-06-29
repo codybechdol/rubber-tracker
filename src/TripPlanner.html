@@ -3316,8 +3316,10 @@
 
           // Build task display
           var employeeText = task.employee || 'Unknown';
-          var certType = task.isCertTask ? (task.certType || task.itemType || 'Cert') : '';
-          var locationText = task.location && task.location.toLowerCase() !== 'helena' ? task.location : '';
+          var isCertDisplay = task.isCertTask || (task.taskType && task.taskType.toLowerCase().indexOf('cert expir') !== -1);
+          var certType = isCertDisplay ? (task.certType || task.itemType || 'Cert') : '';
+          var taskLocLower = (task.location || '').toLowerCase();
+          var locationText = task.location && taskLocLower !== 'helena' && taskLocLower !== 'unknown' ? task.location : '';
           var dueDateText = task.dueDate ? task.dueDate : '';
 
           var detailParts = [];

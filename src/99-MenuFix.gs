@@ -63,14 +63,13 @@ function _buildGloveManagerMenu() {
         .addItem('⚡ Generate Ground Swaps', 'menuGenerateGroundSwaps')
         .addItem('Update Purchase Needs', 'updatePurchaseNeeds')
         .addItem('Update Inventory Reports', 'updateInventoryReports')
-        .addItem('Run Reclaims Check', 'runReclaimsCheck')
-        .addItem('Update Reclaims Sheet', 'updateReclaimsSheet')
         .addSeparator()
         .addSubMenu(ui.createMenu('🔧 Utilities')
           .addItem('Fix All Change Out Dates', 'fixAllChangeOutDates')
           .addItem('🧱 Fix Blanket Change Out Dates', 'fixBlanketChangeOutDates')
           .addItem('⚡ Setup Auto Change Out Dates', 'createEditTrigger')
-          .addItem('🔄 Update Training Tracking Crew Leads', 'updateTrainingTrackingCrewLeads')))
+          .addItem('🔄 Update Training Tracking Crew Leads', 'updateTrainingTrackingCrewLeads')
+          .addItem('📊 Deploy Swaps Dashboards', 'deploySwapsDashboards')))
 
       // === STEP 3: PROCESS SAFETY EMAILS ===
       .addSubMenu(ui.createMenu('🛡️ Process Safety Emails')
@@ -265,6 +264,7 @@ function _buildGloveManagerMenu() {
           .addItem('⚡ Setup Grounds Sheet', 'setupGroundsSheet')
           .addItem('⚡ Setup Grounds History & Swaps Sheets', 'setupGroundsCompanionSheets')
           .addItem('🔍 Setup Locations Sheet', 'setupLocationsSheet')
+          .addItem('🎨 Migrate Locations Rubber Class', 'migrateLocationsSheetForRubberClass')
           .addItem('➕ Add Crew Time Columns (Locations)', 'migrateLocationsCrewTime')
           .addItem('🗺️ Update Locations Routes (Fix Drive Times)', 'migrateLocationsRoutes')
           .addItem('🛰️ Refresh Drive Times (Google Maps)', 'refreshDriveTimesFromGoogleMaps')
@@ -304,5 +304,169 @@ function forceCreateMenu() {
 
   } catch (e) {
     SpreadsheetApp.getUi().alert('❌ Error creating menu: ' + e.toString());
+  }
+}
+
+// =============================================================================
+// MENU STUBS & WRAPPERS FOR UNIMPLEMENTED FEATURES
+// =============================================================================
+
+/**
+ * Stub for "Repair Misassigned Foremen"
+ */
+function repairMisassignedForemen() {
+  SpreadsheetApp.getUi().alert(
+    '🔧 Repair Misassigned Foremen',
+    'This diagnostic utility is under development.\n\nIt is designed to audit and repair foreman assignment discrepancies between Job Tracking and Employees sheets.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+/**
+ * Stub for "Diagnose Crew Lead Dialog Skips"
+ */
+function diagnoseCrewLeadDialogSkips() {
+  SpreadsheetApp.getUi().alert(
+    '🔍 Diagnose Crew Lead Dialog Skips',
+    'This diagnostic utility is under development.\n\nIt will analyze and report why crew lead assignments are skipped during crew imports or Dialog creation.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+/**
+ * Stub for "Fix Bad JHA Credit — Row 277"
+ */
+function fixBadJHACreditRow277() {
+  SpreadsheetApp.getUi().alert(
+    '🔧 Fix Bad JHA Credit — Row 277',
+    'This cleanup routine is a one-off task for Row 277 JHA credit. Its implementation is currently archived.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+/**
+ * Wrapper for "Add Missing Crews to Training"
+ */
+function menuAddMissingCrewsToTraining() {
+  var ui = SpreadsheetApp.getUi();
+  try {
+    var result = addMissingCrewsToTrainingTracking();
+    var count = result.addedRows;
+    var list = result.crews;
+    var details = count > 0 ? 
+      'Added ' + count + ' training rows for: ' + list.join(', ') : 
+      'No missing training rows were found.';
+    ui.alert('➕ Add Missing Crews to Training', 'Check complete!\n\n' + details, ui.ButtonSet.OK);
+  } catch (e) {
+    ui.alert('❌ Error Adding Crews to Training', 'Failed to add missing crews: ' + e.toString(), ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * Stub for "Remove On Hold / Duplicate Rows" (Training)
+ */
+function menuCleanupTrainingTrackingOnHoldRows() {
+  SpreadsheetApp.getUi().alert(
+    '🧹 Remove On Hold / Duplicate Rows',
+    'This cleanup feature is currently a placeholder.\n\nTraining Tracking automatically cleans up completed/on-hold rows during execution.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+/**
+ * Re-sort Training Tracking chronologically then alphabetically by crew
+ */
+function resortTrainingTrackingChronologically() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Training Tracking');
+  if (!sheet) {
+    ui.alert('❌ Error', 'Training Tracking sheet not found.', ui.ButtonSet.OK);
+    return;
+  }
+  
+  var data = sheet.getDataRange().getValues();
+  var headerRowIdx = findTrainingTrackingHeaderRow(data);
+  var headers = data[headerRowIdx];
+  var cols = getTrainingTrackingColIndices(headers);
+  var dataStartIdx = headerRowIdx + 1;
+  var monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  
+  var sortSuccess = false;
+  try {
+    if (data.length > dataStartIdx + 1) {
+      var range = sheet.getRange(dataStartIdx + 1, 1, data.length - dataStartIdx, headers.length);
+      var allData = range.getValues();
+      allData.sort(function(a, b) {
+        var monthA = monthNames.indexOf(String(a[cols.month] || '').trim());
+        var monthB = monthNames.indexOf(String(b[cols.month] || '').trim());
+        if (monthA !== monthB) return monthA - monthB;
+        return String(a[cols.crew] || '').localeCompare(String(b[cols.crew] || ''));
+      });
+      range.setValues(allData);
+      sortSuccess = true;
+    }
+  } catch (e) {
+    Logger.log('resortTrainingTrackingChronologically: Sort skipped (typed column sheet): ' + e.toString());
+  }
+
+  // ALWAYS apply formatting to refresh alternating colors and conditional formatting rules
+  try {
+    applyTrainingTrackingFormatting(sheet);
+    if (sortSuccess) {
+      ui.alert('✅ Re-sorted and Formatted', 'Successfully re-sorted Training Tracking chronologically by month, then alphabetically by crew, and refreshed visual formatting.', ui.ButtonSet.OK);
+    } else {
+      ui.alert('✅ Formatted', 'Refreshed conditional formatting and month colors.\n\nNote: Row sorting was skipped because this sheet contains a Google Table (which handles sorting internally).', ui.ButtonSet.OK);
+    }
+  } catch (fmtErr) {
+    ui.alert('❌ Error applying formatting: ' + fmtErr.toString(), ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * Wrapper for "Remove Auto-Generated Cert Tasks"
+ */
+function cleanupAutoGeneratedCertTasksFromManualTasks() {
+  var ui = SpreadsheetApp.getUi();
+  try {
+    var count = cleanupCertTasksFromManualTasks();
+    ui.alert('🧹 Cert Tasks Cleaned Up', 'Removed ' + count + ' auto-generated certification tasks from Manual Tasks.', ui.ButtonSet.OK);
+  } catch (e) {
+    ui.alert('❌ Error Cleaning Cert Tasks', e.toString(), ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * Stub for "Archive Lost & Failed Items"
+ */
+function showArchiveLostFailedDialog() {
+  SpreadsheetApp.getUi().alert(
+    '🗄️ Archive Lost & Failed Items',
+    'The "Archive Lost & Failed Items" dialog is currently a placeholder and is planned for a future release.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+/**
+ * Stub for "Restore Item from Archive"
+ */
+function showRestoreFromArchiveDialog() {
+  SpreadsheetApp.getUi().alert(
+    '↩️ Restore Item from Archive',
+    'The "Restore Item from Archive" dialog is currently a placeholder and is planned for a future release.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+}
+
+/**
+ * Wrapper for "Sync New Items Log"
+ */
+function syncNewItemsLogWithInventory() {
+  var ui = SpreadsheetApp.getUi();
+  try {
+    syncNewItemsLogSilent();
+    ui.alert('🔄 Sync New Items Log', 'Successfully synced New Items Log with current inventory.', ui.ButtonSet.OK);
+  } catch (e) {
+    ui.alert('❌ Error', 'Failed to sync New Items Log: ' + e.toString(), ui.ButtonSet.OK);
   }
 }

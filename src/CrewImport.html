@@ -1859,6 +1859,16 @@
             var otherEntry = nonMatchingEntries[r];
             var otherJT = jobTrackingData[otherEntry.jobNumber];
 
+            // EXCEPTION: If the "other" crew has ≥3 employees in this week's Excel, it's a real
+            // active secondary-crew assignment (e.g., a Friday-only crew), not stale data.
+            // Don't silently remove — let the multi-crew dialog show it to the user.
+            var otherCrewEmployeeCount = (parsedCrews[otherEntry.crewIndex] || {employees: []}).employees.length;
+            if (otherCrewEmployeeCount >= 3) {
+              console.log('PRE-RESOLVE SKIP: "' + name + '" in ' + otherEntry.jobNumber +
+                          ' — crew has ' + otherCrewEmployeeCount + ' employees, treating as secondary crew (not stale). Multi-crew dialog will handle.');
+              continue;
+            }
+
             // EXCEPTION: If the "other" crew is On Hold returning within 7 days, it's the INTENDED
             // new assignment — remove from the old/current crew instead, not from the returning crew
             var isReturningOnHold = false;
@@ -3392,6 +3402,8 @@
       if (text.match(/\bthru\b/i)) return false;
       // Skip "Another Operator??" and similar notes
       if (text.match(/^Another\s/i) || text.match(/\?\?/)) return false;
+      // Skip company/project names ending in construction/drilling/contracting terms
+      if (text.match(/\b(Boring|Construction|Contracting|Drilling|Excavating|Electric|LLC|Inc\.?|Corp\.?)\s*$/i)) return false;
       // Skip appointment/meeting/PT/doctor text
       if (text.match(/\b(Appointment|Meeting|Call|Interview|PT\b|Physical\s*Therapy|Appt)\b/i)) return false;
       // Skip time patterns (9am, 10:30, etc.)
@@ -3449,7 +3461,8 @@
         classification: '',  // The Google Sheet classification value
         isForeman: false,
         isNewHire: false,     // Detected "NEW HIRE" annotation in Excel
-        vacationDay: ''  // Partial vacation day if detected (e.g., "Thursday")
+        vacationDay: '',      // Partial vacation day if detected (e.g., "Thursday")
+        scheduleNote: ''      // Day-restriction note if detected (e.g., "Friday Only")
       };
 
       var cleanText = text.trim();
@@ -3505,6 +3518,14 @@
       // Strip "crane class [day]" annotation: "Matt Miller F crane class Mon" → "Matt Miller F"
       // This appears after the role code and prevents Foreman detection (F must be at string end)
       cleanText = cleanText.replace(/\s+crane\s+class\b.*$/i, '').trim();
+
+      // Strip "Friday Only", "Monday Only" etc. - day-restriction annotations meaning the employee
+      // only works that day (e.g., "Jimmy Bailey F Friday Only" → "Jimmy Bailey F")
+      var dayOnlyMatch = cleanText.match(/\s+(Mon(?:day)?|Tue(?:s(?:day)?)?|Wed(?:nesday)?|Thu(?:rs(?:day)?)?|Fri(?:day)?|Sat(?:urday)?|Sun(?:day)?)\s+Only\s*$/i);
+      if (dayOnlyMatch) {
+        result.scheduleNote = dayOnlyMatch[1] + ' Only';
+        cleanText = cleanText.replace(dayOnlyMatch[0], '').trim();
+      }
 
       // Strip trailing annotations that appear AFTER the classification and confuse role detection
       // Examples: "Christian Najarro 3 ap Hot" - "Hot" is not a role
@@ -4395,6 +4416,14 @@
         html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Secondary\', \'Fri-Sat\'); return false;"><span class="badge bg-warning text-dark me-1">Secondary</span> Fri-Sat</a></li>';
         html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Secondary\', \'Weekend\'); return false;"><span class="badge bg-warning text-dark me-1">Secondary</span> Weekend</a></li>';
         html += '<li><hr class="dropdown-divider"></li>';
+        html += '<li class="dropdown-header text-muted small px-3 py-1">Single Day Only</li>';
+        html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Secondary\', \'Mon Only\'); return false;"><span class="badge bg-warning text-dark me-1">Secondary</span> Monday Only</a></li>';
+        html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Secondary\', \'Tue Only\'); return false;"><span class="badge bg-warning text-dark me-1">Secondary</span> Tuesday Only</a></li>';
+        html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Secondary\', \'Thu Only\'); return false;"><span class="badge bg-warning text-dark me-1">Secondary</span> Thursday Only</a></li>';
+        html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Secondary\', \'Fri Only\'); return false;"><span class="badge bg-warning text-dark me-1">Secondary</span> Friday Only</a></li>';
+        html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Secondary\', \'Sat Only\'); return false;"><span class="badge bg-warning text-dark me-1">Secondary</span> Saturday Only</a></li>';
+        html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Secondary\', \'Sun Only\'); return false;"><span class="badge bg-warning text-dark me-1">Secondary</span> Sunday Only</a></li>';
+        html += '<li><hr class="dropdown-divider"></li>';
         html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Split\', \'Mon-Wed\'); return false;"><span class="badge bg-info me-1">Split</span> Mon-Wed</a></li>';
         html += '<li><a class="dropdown-item" href="#" onclick="setCrewScheduleByJob(\'' + crew.jobNumber + '\', \'Split\', \'Thu-Fri\'); return false;"><span class="badge bg-info me-1">Split</span> Thu-Fri</a></li>';
         html += '<li><hr class="dropdown-divider"></li>';
@@ -4433,10 +4462,37 @@
             var emp = crew.employees[e];
             var empNameLower = emp.name.toLowerCase().trim();
 
-            // NUKE: Skip employees that were resolved as non-primary duplicates
-            // They belong to a different crew - don't show them here at all
+            // SECONDARY: Employees resolved as non-primary duplicates — show them
+            // in secondary crew cards with dimmed style + primary crew badge.
             if (emp.skippedDuplicate) {
-              console.log('Hiding ' + emp.name + ' from crew card ' + crew.jobNumber + ' (resolved as non-primary duplicate)');
+              // Find their primary crew job number from duplicateEmployees
+              var primJobNum = '';
+              var skippedNameLower = emp.name.toLowerCase().trim();
+              // Also try matching on the Employees-sheet name (matchedEmployee), since the
+              // Excel name (e.g. "Jimmy Bailey") may differ from the sheet name
+              // (e.g. "Jimmy James Bailey") stored in duplicateEmployees.
+              var skippedMatchedNameLower = (emp.matchedEmployee && emp.matchedEmployee.employeeName)
+                ? emp.matchedEmployee.employeeName.toLowerCase().trim() : '';
+              for (var dupIdx2 = 0; dupIdx2 < duplicateEmployees.length; dupIdx2++) {
+                var dup2 = duplicateEmployees[dupIdx2];
+                var dup2NameLower = (dup2.employeeName || '').toLowerCase().trim();
+                if (!dup2 || (dup2NameLower !== skippedNameLower && dup2NameLower !== skippedMatchedNameLower)) continue;
+                var primOcc = dup2.occurrences[dup2.selectedIndex];
+                if (primOcc) {
+                  var primCrew = parsedCrews[primOcc.crewIndex];
+                  primJobNum = primCrew ? primCrew.jobNumber : '';
+                }
+                break;
+              }
+              html += '<div class="crew-card-employee" style="color: #6c757d; font-size: 12px;" title="Primary crew: ' + primJobNum + '">';
+              html += '↗ ' + emp.fullJobNumber + '. ' + emp.name;
+              if (primJobNum) {
+                html += ' <span class="badge bg-secondary" style="font-size: 9px;">Primary: ' + primJobNum + '</span>';
+              }
+              if (emp.scheduleNote) {
+                html += ' <span class="badge bg-warning text-dark" style="font-size: 9px;">' + escapeHtml(emp.scheduleNote) + '</span>';
+              }
+              html += '</div>';
               continue;
             }
 
@@ -4490,6 +4546,11 @@
 
             html += '<div class="crew-card-employee"' + rowStyle + '>';
             html += dupIcon + emp.fullJobNumber + '. ' + emp.name + specialBadge;
+
+            // Show schedule note (e.g., "Friday Only") if present
+            if (emp.scheduleNote) {
+              html += ' <span class="badge bg-warning text-dark" style="font-size: 9px;" title="Schedule restriction">' + escapeHtml(emp.scheduleNote) + '</span>';
+            }
 
             // Show role badge - use role from Excel, or classificationFromSheet if looked up from Google Sheet
             var displayRole = emp.role || emp.classificationFromSheet || '';
@@ -7285,6 +7346,249 @@
         }
       }
 
+      // ── Secondary Job Numbers ──────────────────────────────────────────
+      // For employees in multiple crews, populate newSecondaryJobNumber on the
+      // relevant proposedChange so the server writes it to the Secondary Job Number column.
+      // Also handles employees whose PRIMARY assignment didn't change but who need
+      // a secondary job number written (e.g., first time being dual-crew this week).
+      for (var di = 0; di < duplicateEmployees.length; di++) {
+        var dup = duplicateEmployees[di];
+        if (!dup || !dup.occurrences || dup.occurrences.length < 2) continue;
+
+        var primaryOcc = dup.occurrences[dup.selectedIndex];
+        if (!primaryOcc) continue;
+
+        // Collect secondary job numbers from all non-primary occurrences
+        var secondaryJobNums = [];
+        for (var oi = 0; oi < dup.occurrences.length; oi++) {
+          if (oi === dup.selectedIndex) continue;
+          var secOcc = dup.occurrences[oi];
+          var secCrew = parsedCrews[secOcc.crewIndex];
+          // Skip if secondary crew is Pending Start or Completed
+          var secJobInfo = jobTrackingData[secCrew ? secCrew.jobNumber : ''];
+          if (secJobInfo && (secJobInfo.isPendingStart || secJobInfo.isCompleted)) continue;
+          var secEmp = secCrew && secCrew.employees[secOcc.empIndex];
+          if (secEmp && secEmp.fullJobNumber) {
+            secondaryJobNums.push(secEmp.fullJobNumber);
+          }
+        }
+        if (secondaryJobNums.length === 0) continue;
+        var newSecondaryJobNumber = secondaryJobNums.join(', ');
+
+        // Find or create the proposedChange for this employee's primary assignment
+        var foundChange = false;
+        for (var pc = 0; pc < proposedChanges.length; pc++) {
+          var chg = proposedChanges[pc];
+          if (chg.match && chg.match.employeeName.toLowerCase() === dup.employeeName.toLowerCase()) {
+            // Attach secondary job number to existing change
+            var oldSecondary = chg.match.employeeData ? (chg.match.employeeData.secondaryJobNum || '') : '';
+            if (newSecondaryJobNumber !== oldSecondary) {
+              chg.newSecondaryJobNumber = newSecondaryJobNumber;
+              chg.secondaryJobChanged = true;
+            }
+            foundChange = true;
+            break;
+          }
+        }
+        if (!foundChange) {
+          // No primary change was detected — add a synthetic change just for secondary job
+          var primaryCrew = parsedCrews[primaryOcc.crewIndex];
+          var primaryEmp = primaryCrew && primaryCrew.employees[primaryOcc.empIndex];
+          var primaryMatch = primaryEmp && primaryEmp.matchedEmployee;
+          if (primaryMatch) {
+            var oldSecondary2 = primaryMatch.employeeData ? (primaryMatch.employeeData.secondaryJobNum || '') : '';
+            if (newSecondaryJobNumber !== oldSecondary2) {
+              proposedChanges.push({
+                employee: primaryEmp,
+                crew: primaryCrew,
+                match: primaryMatch,
+                oldLocation: primaryMatch.employeeData.location || '',
+                newLocation: primaryCrew.mappedLocation,
+                oldJobNumber: primaryMatch.employeeData.jobNum || '',
+                newJobNumber: primaryEmp.fullJobNumber,
+                oldClassification: primaryMatch.employeeData.jobClassification || '',
+                newClassification: primaryEmp.classification || '',
+                locationChanged: false,
+                jobChanged: false,
+                classificationChanged: false,
+                newSecondaryJobNumber: newSecondaryJobNumber,
+                secondaryJobChanged: true,
+                apply: true
+              });
+            }
+          }
+        }
+      }
+
+      // ── Time Off / Leave Auto-Changes ────────────────────────────────────
+      // Employees detected in the Excel's Time Off section (not in any crew) should
+      // automatically get Location set to 'Leave' so the Employees sheet reflects their absence.
+      // This generates a proposed change so the user can review/uncheck it, but doesn't
+      // require manually applying the Step 6 special circumstance card.
+      var LEAVE_TYPE_STATUSES = ['Time Off', 'Leave', 'Vacation', 'FMLA'];
+      var ALREADY_LEAVE_LOCATIONS = ['Leave', 'Vacation', 'Light Duty', 'Weeds', 'Previous Employee', 'Unknown'];
+
+      for (var ti = 0; ti < specialCircumstances.length; ti++) {
+        var tspec = specialCircumstances[ti];
+        if (!tspec) continue;
+        if (LEAVE_TYPE_STATUSES.indexOf(tspec.status) === -1) continue;
+
+        // Skip if this employee is still in a crew card this week (they'll be matched normally)
+        var tIsInCrew = false;
+        for (var tci = 0; tci < parsedCrews.length; tci++) {
+          var tcrew = parsedCrews[tci];
+          for (var tei = 0; tei < tcrew.employees.length; tei++) {
+            var temp = tcrew.employees[tei];
+            if ((temp.name || '').toLowerCase().trim() === (tspec.name || '').toLowerCase().trim()) {
+              tIsInCrew = true;
+              break;
+            }
+            // Also check matched name
+            if (temp.matchedEmployee && temp.matchedEmployee.employeeName &&
+                temp.matchedEmployee.employeeName.toLowerCase() === (tspec.name || '').toLowerCase().trim()) {
+              tIsInCrew = true;
+              break;
+            }
+          }
+          if (tIsInCrew) break;
+        }
+        if (tIsInCrew) continue;
+
+        // Find their row on the Employees sheet.
+        // Can't use findBestMatch() here — currentEmployees use .employeeName not .name.
+        // Also clean the spec name: strip trailing annotations like "CDL-B 3", "awhile", etc.
+        // by taking only the first two words (First Last).
+        var rawSpecName = (tspec.name || '').trim();
+        var rawParts = rawSpecName.split(/\s+/);
+        var cleanSpecName = rawParts.slice(0, 2).join(' ');
+        var cleanLower = cleanSpecName.toLowerCase();
+        var cleanFirst = (rawParts[0] || '').toLowerCase();
+        var cleanLast = (rawParts[1] || '').toLowerCase();
+
+        var tMatchedEmp = null;
+        var tMatchConf = 0;
+        for (var tei2 = 0; tei2 < currentEmployees.length; tei2++) {
+          var tEmp = currentEmployees[tei2];
+          // currentEmployees entries use .name (not .employeeName) and have location/jobNum directly
+          var tEmpName = (tEmp.name || '').toLowerCase().trim();
+          if (!tEmpName) continue;
+          var tEmpParts = tEmpName.split(/\s+/);
+          var tEmpFirst = tEmpParts[0] || '';
+          var tEmpLast = tEmpParts[tEmpParts.length - 1] || '';
+
+          var tScore = 0;
+          if (tEmpName === cleanLower) {
+            tScore = 100;
+          } else {
+            if (cleanFirst && firstNamesMatch(cleanFirst, tEmpFirst)) tScore += 55;
+            else if (cleanFirst && calculateSimilarity(cleanFirst, tEmpFirst) >= 80) tScore += 40;
+            if (cleanLast && tEmpLast === cleanLast) tScore += 45;
+            else if (cleanLast && calculateSimilarity(tEmpLast, cleanLast) >= 80) tScore += 35;
+          }
+
+          if (tScore > tMatchConf) {
+            tMatchConf = tScore;
+            tMatchedEmp = tEmp;
+          }
+        }
+
+        if (!tMatchedEmp || tMatchConf < 75) {
+          console.log('Time Off auto-change: No confident match for "' + tspec.name + '" (cleaned: "' + cleanSpecName + '", confidence: ' + tMatchConf + ')');
+          continue;
+        }
+
+        // currentEmployees entries have .name, .location, .jobNum, .jobClassification, .rowIndex directly
+        var tMatchedName = tMatchedEmp.name;
+        var tCurrentLocation = tMatchedEmp.location || '';
+        var tCurrentJobNum = tMatchedEmp.jobNum || '';
+        var tCurrentClassification = tMatchedEmp.jobClassification || '';
+        // Build a synthetic employeeData for the match object (format expected by doApplyChanges)
+        var tEmployeeData = {
+          location: tCurrentLocation,
+          jobNum: tCurrentJobNum,
+          jobClassification: tCurrentClassification,
+          rowIndex: tMatchedEmp.rowIndex
+        };
+        var tAlreadyAtLeave = ALREADY_LEAVE_LOCATIONS.indexOf(tCurrentLocation) !== -1;
+        var tHas005JobNum = tCurrentJobNum.indexOf('005-') === 0;
+
+        if (tAlreadyAtLeave && tHas005JobNum) {
+          // Already at a leave-type location AND already has a 005- job number — nothing to do
+          console.log('Time Off auto-change: ' + tMatchedName + ' already at "' + tCurrentLocation + '" with 005- job number "' + tCurrentJobNum + '" — skipping');
+          continue;
+        }
+
+        if (tAlreadyAtLeave && !tHas005JobNum) {
+          // Already at Leave but job number is still from their old crew (e.g. 016-26.3).
+          // Generate a job-number-only fix so the server assigns a 005-26.X number.
+          console.log('Time Off auto-change: ' + tMatchedName + ' already at "' + tCurrentLocation + '" but job number "' + tCurrentJobNum + '" needs 005- fix');
+          proposedChanges.push({
+            employee: { name: tspec.name, isForeman: false },
+            crew: null,
+            match: {
+              employeeName: tMatchedName,
+              confidence: tMatchConf,
+              employeeData: tEmployeeData,
+              source: 'Employees'
+            },
+            oldLocation: tCurrentLocation,
+            newLocation: tCurrentLocation,
+            oldJobNumber: tCurrentJobNum,
+            newJobNumber: tCurrentJobNum,
+            oldClassification: tCurrentClassification,
+            newClassification: tCurrentClassification,
+            locationChanged: false,
+            jobChanged: false,
+            classificationChanged: false,
+            isTimeOffChange: true,
+            needsJobNumberFix: true,
+            apply: true
+          });
+          continue;
+        }
+
+        // Check if a proposedChange already exists for this employee
+        var tFoundChange = false;
+        for (var tpc = 0; tpc < proposedChanges.length; tpc++) {
+          var tchg = proposedChanges[tpc];
+          if (tchg.match && tchg.match.employeeName.toLowerCase() === tMatchedName.toLowerCase()) {
+            // Update existing change to also include Leave location
+            if (!tchg.locationChanged) {
+              tchg.newLocation = 'Leave';
+              tchg.locationChanged = true;
+              tchg.isTimeOffChange = true;
+            }
+            tFoundChange = true;
+            break;
+          }
+        }
+
+        if (!tFoundChange) {
+          console.log('Time Off auto-change: Adding Leave change for ' + tMatchedName + ' (currently ' + tCurrentLocation + ')');
+          proposedChanges.push({
+            employee: { name: tspec.name, isForeman: false },
+            crew: null,
+            match: {
+              employeeName: tMatchedName,
+              confidence: tMatchConf,
+              employeeData: tEmployeeData,
+              source: 'Employees'
+            },
+            oldLocation: tCurrentLocation,
+            newLocation: 'Leave',
+            oldJobNumber: tCurrentJobNum,
+            newJobNumber: tCurrentJobNum,
+            oldClassification: tCurrentClassification,
+            newClassification: tCurrentClassification,
+            locationChanged: true,
+            jobChanged: false,
+            classificationChanged: false,
+            isTimeOffChange: true,
+            apply: true
+          });
+        }
+      }
+
       _matchingCompleted = true;
       console.log('finishMatching: Complete. ' + proposedChanges.length + ' proposed changes (all default to apply:true)');
     }
@@ -7336,9 +7640,19 @@
         // Skip non-field employees unless includeNonField is true
         if (!includeNonField && isNonFieldEmployee(emp)) continue;
 
-        // Exact match - highest priority
+        // Exact match on primary name - highest priority
         if (normalizedName === empName) {
           return { employeeName: emp.name, confidence: 100, employeeData: emp };
+        }
+
+        // Alternate name exact match - treated as 100% confidence
+        if (emp.alternateNames) {
+          var altNames = String(emp.alternateNames).split(',');
+          for (var an = 0; an < altNames.length; an++) {
+            if (altNames[an].trim().toLowerCase() === normalizedName) {
+              return { employeeName: emp.name, confidence: 100, employeeData: emp };
+            }
+          }
         }
 
         // Parse employee name into first/last
@@ -7394,9 +7708,19 @@
         // Skip non-field employees unless includeNonField is true
         if (!includeNonField && isNonFieldEmployee(emp)) continue;
 
-        // Exact match - highest priority
+        // Exact match on primary name - highest priority
         if (normalizedName === empName) {
           return { employeeName: emp.name, confidence: 100, employeeData: emp };
+        }
+
+        // Alternate name exact match - treated as 100% confidence
+        if (emp.alternateNames) {
+          var altNames = String(emp.alternateNames).split(',');
+          for (var an = 0; an < altNames.length; an++) {
+            if (altNames[an].trim().toLowerCase() === normalizedName) {
+              return { employeeName: emp.name, confidence: 100, employeeData: emp };
+            }
+          }
         }
 
         // Parse employee name into first/last
@@ -7610,6 +7934,11 @@
             html += ' <span class="badge bg-success" title="Rehiring from Employee History">🔄 REHIRE</span>';
           }
 
+          // Show badge if this is an auto-detected Time Off change (from special circumstances)
+          if (ch.isTimeOffChange) {
+            html += ' <span class="badge bg-info" title="Detected as Time Off / Leave in Excel — auto-setting Location to Leave">🏥 TIME OFF</span>';
+          }
+
           if (ch.match.confidence < 100) {
             html += ' <span class="badge bg-warning text-dark badge-role">' + ch.match.confidence + '%</span>';
           }
@@ -7640,6 +7969,8 @@
           html += '<td>';
           if (ch.jobChanged) {
             html += '<span class="text-unchanged">' + (ch.oldJobNumber || 'None') + '</span> → <span class="text-changed">' + ch.newJobNumber + '</span>';
+          } else if (ch.needsJobNumberFix) {
+            html += '<span class="text-unchanged">' + (ch.oldJobNumber || 'None') + '</span> → <span class="text-changed">005-26.? (auto)</span>';
           } else {
             html += '<span class="text-muted">' + ch.newJobNumber + '</span>';
           }
@@ -8421,18 +8752,25 @@
         document.getElementById('btnApplyChanges').innerHTML = '<span class="spinner-border spinner-border-sm"></span> Applying...';
 
         var changes = changesToApply.map(function(c) {
-          return {
+          var ch = {
             employeeName: c.match.employeeName,
             rowIndex: c.match.employeeData.rowIndex,
             newLocation: c.newLocation,
             newJobNumber: c.newJobNumber,
             newClassification: c.newClassification || '',
             oldLocation: c.oldLocation,
-          oldJobNumber: c.oldJobNumber,
-          oldClassification: c.oldClassification || '',
-          isForeman: c.employee.isForeman
-        };
-      });
+            oldJobNumber: c.oldJobNumber,
+            oldClassification: c.oldClassification || '',
+            isForeman: c.employee.isForeman
+          };
+          if (c.newSecondaryJobNumber) {
+            ch.newSecondaryJobNumber = c.newSecondaryJobNumber;
+          }
+          if (c.needsJobNumberFix) {
+            ch.needsJobNumberFix = true;
+          }
+          return ch;
+        });
 
       // Attach jobNameMap so it's available server-side for Job Tracking sync
       if (changes.length > 0) {
@@ -8441,6 +8779,15 @@
         if (_earlyActivatedJobs && _earlyActivatedJobs.length > 0) {
           changes[0].earlyActivatedJobs = _earlyActivatedJobs;
         }
+        // Include crew schedules (from dropdown selections) so Job Tracking skip-day columns are updated
+        var crewSchedules = {};
+        for (var cs = 0; cs < parsedCrews.length; cs++) {
+          var sc = parsedCrews[cs];
+          if (sc.jobNumber && sc.scheduleLabel) {
+            crewSchedules[sc.jobNumber] = sc.scheduleLabel;
+          }
+        }
+        changes[0].crewSchedules = crewSchedules;
       } else {
         // No crew changes but still need to sync Job Tracking
         // Pass a synthetic entry with just the jobNameMap
@@ -8448,6 +8795,15 @@
         if (_earlyActivatedJobs && _earlyActivatedJobs.length > 0) {
           syncEntry.earlyActivatedJobs = _earlyActivatedJobs;
         }
+        // Include crew schedules in sync-only path too
+        var crewSchedules2 = {};
+        for (var cs2 = 0; cs2 < parsedCrews.length; cs2++) {
+          var sc2 = parsedCrews[cs2];
+          if (sc2.jobNumber && sc2.scheduleLabel) {
+            crewSchedules2[sc2.jobNumber] = sc2.scheduleLabel;
+          }
+        }
+        syncEntry.crewSchedules = crewSchedules2;
         changes.push(syncEntry);
       }
 

@@ -1,4 +1,4 @@
-# Copilot Instructions for Rubber Tracker
+# Copilot Instructions for Safety Assistant
 
 ## Deployment
 - **ALWAYS use `.\push.bat`** to deploy changes to Google Apps Script
