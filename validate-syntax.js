@@ -41,9 +41,7 @@ files.forEach(file => {
     checkUnmatchedBraces(file, content);
     checkDuplicateFiles(file);
 
-    if (file.endsWith('.gs')) {
-        checkES6Syntax(file, lines);
-    }
+    // checkES6Syntax(file, lines); // Skipped: Project supports V8/ES6+ syntax on this branch
 });
 
 console.log('\n========================================');

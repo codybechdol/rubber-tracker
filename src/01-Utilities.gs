@@ -10,20 +10,19 @@
  * @param {string} message - The message to log
  * @param {string} level - Log level: 'INFO', 'ERROR', 'WARNING', 'DEBUG'
  */
-function logEvent(message, level) {
-  level = level || 'INFO';
-  var now = new Date();
-  var logMessage = '[' + level + '] [' + now.toISOString() + '] ' + message;
+const logEvent = (message, level = 'INFO') => {
+  const now = new Date();
+  const logMessage = `[${level}] [${now.toISOString()}] ${message}`;
   Logger.log(logMessage);
 
   if (level === 'ERROR') {
     try {
-      SpreadsheetApp.getUi().alert('Error: ' + message);
+      SpreadsheetApp.getUi().alert(`Error: ${message}`);
     } catch (e) {
       // Ignore if no UI (e.g. trigger execution)
     }
   }
-}
+};
 
 /**
  * Normalizes approval values to standard format.
@@ -32,18 +31,18 @@ function logEvent(message, level) {
  * @param {string} value - The approval value to normalize
  * @returns {string} - Normalized approval value
  */
-function normalizeApprovalValue(value) {
+const normalizeApprovalValue = (value) => {
   if (!value) return 'CL2'; // Default
 
   // Clean the value - decode HTML entities and normalize
-  var cleaned = String(value).trim();
+  let cleaned = String(value).trim();
   // Decode &amp; and &#38; to &
   cleaned = cleaned.split('&amp;').join('&');
   cleaned = cleaned.split('&#38;').join('&');
   cleaned = cleaned.toUpperCase();
 
   // Map to valid values
-  switch(cleaned) {
+  switch (cleaned) {
     case 'NONE':
       return 'None';
     case 'CL2':
@@ -64,10 +63,10 @@ function normalizeApprovalValue(value) {
     default:
       // Check if it's already a valid value (case-insensitive match)
       if (cleaned === 'CL2 & CL3' || value === 'CL2 & CL3') return 'CL2 & CL3';
-      Logger.log('[WARN] Unrecognized approval value "' + value + '" - defaulting to CL2');
+      Logger.log(`[WARN] Unrecognized approval value "${value}" - defaulting to CL2`);
       return 'CL2';
   }
-}
+};
 
 /**
  * Gets the significant portion of a job number (###-## format).
@@ -76,29 +75,65 @@ function normalizeApprovalValue(value) {
  * @param {string} jobNumber - The job number to process
  * @returns {string} - The significant portion (###-##)
  */
-function getSignificantJobNumber(jobNumber) {
+const getSignificantJobNumber = (jobNumber) => {
   if (!jobNumber) return '';
 
-  var jobStr = String(jobNumber).trim();
+  const jobStr = String(jobNumber).trim();
 
   // Match pattern: digits-digits (ignore anything after second dash or decimal)
   // eslint-disable-next-line no-useless-escape
-  var match = jobStr.match(/^(\d+\-\d+)/);
+  const match = jobStr.match(/^(\d+\-\d+)/);
 
   return match ? match[1] : jobStr;
-}
+};
 
 /**
- * Checks if a location value is actually an employee status, not a physical city.
+ * Extracts the physical city/base from a location string by removing parenthesized status suffixes.
+ * E.g., "Helena (Vacation)" -> "Helena", "Bozeman (Light Duty)" -> "Bozeman".
+ * If no parenthesis is found, returns the location as-is.
+ * @param {string} location - The raw location string
+ * @returns {string} - The physical location city
+ */
+const getPhysicalLocation = (location) => {
+  if (!location) return '';
+  const locStr = String(location).trim();
+  const parenIdx = locStr.indexOf('(');
+  if (parenIdx !== -1) {
+    return locStr.substring(0, parenIdx).trim();
+  }
+  return locStr;
+};
+
+/**
+ * Checks if a location value is actually an employee status, not a physical city,
+ * or if it contains a parenthesized employee status.
  * Uses the STATUS_LOCATIONS constant from 00-Constants.gs.
  * @param {string} location - The location string to check
- * @returns {boolean} - True if the location is a status value (Vacation, Light Duty, etc.)
+ * @returns {boolean} - True if the location represents a status or contains a status suffix
  */
-function isStatusLocation(location) {
+const isStatusLocation = (location) => {
   if (!location) return false;
-  var loc = String(location).trim().toLowerCase();
-  return STATUS_LOCATIONS.indexOf(loc) !== -1;
-}
+  const loc = String(location).trim().toLowerCase();
+  
+  // 1. Direct match (old format)
+  if (STATUS_LOCATIONS.indexOf(loc) !== -1) {
+    return true;
+  }
+  
+  // 2. Check parenthesized status suffix (new format: e.g. "Helena (Vacation)")
+  const parenIdx = loc.indexOf('(');
+  if (parenIdx !== -1) {
+    const endParenIdx = loc.indexOf(')', parenIdx);
+    if (endParenIdx !== -1) {
+      const status = loc.substring(parenIdx + 1, endParenIdx).trim();
+      if (STATUS_LOCATIONS.indexOf(status) !== -1) {
+        return true;
+      }
+    }
+  }
+  
+  return false;
+};
 
 /**
  * Checks if an employee is a pending new hire (Hire Date is in the future).
@@ -108,15 +143,15 @@ function isStatusLocation(location) {
  * @param {*} hireDate - The Hire Date value from the Employees sheet (col K)
  * @returns {boolean} - True if the employee is pending (hire date in the future)
  */
-function isEmployeePending(hireDate) {
+const isEmployeePending = (hireDate) => {
   if (!hireDate) return false;
-  var date = (hireDate instanceof Date) ? hireDate : new Date(hireDate);
+  const date = (hireDate instanceof Date) ? hireDate : new Date(hireDate);
   if (isNaN(date.getTime())) return false;
-  var today = new Date();
+  const today = new Date();
   today.setHours(0, 0, 0, 0);
   date.setHours(0, 0, 0, 0);
   return date > today;
-}
+};
 
 /**
  * Parses a YYYY-MM-DD string into a Date at noon to avoid timezone shifting.
@@ -125,11 +160,196 @@ function isEmployeePending(hireDate) {
  * @param {string} dateStr - Date string in YYYY-MM-DD format
  * @returns {Date|null} - Parsed date at noon, or null if invalid
  */
-function parseDateNoon(dateStr) {
+const parseDateNoon = (dateStr) => {
   if (!dateStr) return null;
-  var parts = String(dateStr).split('-');
+  const parts = String(dateStr).split('-');
   if (parts.length !== 3) return null;
-  var d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]), 12, 0, 0, 0);
+  const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 12, 0, 0, 0);
   return isNaN(d.getTime()) ? null : d;
-}
+};
 
+/**
+ * Saves a large string value to ScriptProperties by splitting it into 8KB chunks.
+ * Clears any older chunks to prevent leftover stale chunks.
+ * 
+ * @param {string} baseKey - The prefix key to use (e.g., 'TASKS_DATA')
+ * @param {string} value - The large string to store
+ */
+const setChunkedScriptProperty = (baseKey, value) => {
+  const props = PropertiesService.getScriptProperties();
+  
+  // First, clear any existing chunks of this key
+  const keys = props.getKeys();
+  const chunksToDelete = keys.filter(k => k.indexOf(`${baseKey}_chunk_`) === 0 || k === `${baseKey}_chunks`);
+  if (chunksToDelete.length > 0) {
+    props.deleteProperties(chunksToDelete);
+  }
+  
+  if (!value) return;
+  
+  const chunkSize = 8000; // 8KB is safely under the 9KB limit
+  const totalChunks = Math.ceil(value.length / chunkSize);
+  
+  const newProps = {};
+  newProps[`${baseKey}_chunks`] = String(totalChunks);
+  
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * chunkSize;
+    const end = Math.min(start + chunkSize, value.length);
+    newProps[`${baseKey}_chunk_${i}`] = value.substring(start, end);
+  }
+  
+  props.setProperties(newProps);
+  Logger.log(`setChunkedScriptProperty: Saved key "${baseKey}" across ${totalChunks} chunk(s)`);
+};
+
+/**
+ * Retrieves a large string value from ScriptProperties by combining its 8KB chunks.
+ * 
+ * @param {string} baseKey - The prefix key to retrieve
+ * @return {string|null} The combined string, or null if not found
+ */
+const getChunkedScriptProperty = (baseKey) => {
+  const props = PropertiesService.getScriptProperties();
+  const chunksStr = props.getProperty(`${baseKey}_chunks`);
+  
+  if (!chunksStr) {
+    // Fall back to check if it was stored in old non-chunked format
+    const legacyVal = props.getProperty(baseKey);
+    if (legacyVal) {
+      Logger.log(`getChunkedScriptProperty: Retrieved legacy non-chunked key "${baseKey}"`);
+      return legacyVal;
+    }
+    return null;
+  }
+  
+  const totalChunks = parseInt(chunksStr, 10);
+  if (isNaN(totalChunks) || totalChunks <= 0) return null;
+  
+  // Batch retrieve properties for efficiency
+  const chunkKeys = [];
+  for (let i = 0; i < totalChunks; i++) {
+    chunkKeys.push(`${baseKey}_chunk_${i}`);
+  }
+  
+  const values = props.getProperties();
+  let combined = '';
+  for (let j = 0; j < totalChunks; j++) {
+    const chunkVal = values[`${baseKey}_chunk_${j}`];
+    if (chunkVal === undefined) {
+      Logger.log(`getChunkedScriptProperty: Error - Missing chunk ${j} for key ${baseKey}`);
+      return null;
+    }
+    combined += chunkVal;
+  }
+  
+  Logger.log(`getChunkedScriptProperty: Retrieved and merged ${totalChunks} chunk(s) for key "${baseKey}"`);
+  return combined;
+};
+
+/**
+ * Finds the header row index in Training Tracking data array.
+ * Searches the first 20 rows for a row that contains at least two standard headers.
+ * @param {Array} data - 2D array from sheet.getDataRange().getValues()
+ * @return {number} Index of the header row (0-based)
+ */
+const findTrainingTrackingHeaderRow = (data) => {
+  for (let i = 0; i < Math.min(data.length, 20); i++) {
+    const row = data[i];
+    let matchCount = 0;
+    for (let h = 0; h < row.length; h++) {
+      const val = String(row[h]).toLowerCase().trim();
+      if (val === 'month' || val === 'scheduled month' ||
+          val === 'crew #' || val === 'crew' || val === 'job number' || val === 'crew number' ||
+          val === 'crew lead' || val === 'foreman' || val === 'lead' ||
+          val === 'training topic' || val === 'topic' ||
+          val === 'status' || val === 'completion date' || val === 'date completed') {
+        matchCount++;
+      }
+    }
+    if (matchCount >= 2) {
+      Logger.log(`findTrainingTrackingHeaderRow: Found header row at index ${i} (row ${i + 1}) with ${matchCount} matches`);
+      return i;
+    }
+  }
+  Logger.log('findTrainingTrackingHeaderRow: Header row not found, falling back to index 1');
+  return 1; // default fallback
+};
+
+/**
+ * Maps Training Tracking headers to column indices dynamically.
+ * Provides fallback defaults if critical columns are not found.
+ * @param {Array} headers - The header row values
+ * @return {Object} Object mapping column names to 0-based indices
+ */
+const getTrainingTrackingColIndices = (headers) => {
+  const indices = {
+    month: -1,
+    topic: -1,
+    crew: -1,
+    lead: -1,
+    size: -1,
+    completionDate: -1,
+    attendees: -1,
+    hours: -1,
+    trainer: -1,
+    status: -1,
+    notes: -1
+  };
+  
+  if (!headers) return indices;
+  
+  for (let h = 0; h < headers.length; h++) {
+    const header = String(headers[h]).toLowerCase().trim();
+    if (header === 'month' || header === 'scheduled month') indices.month = h;
+    if (header === 'training topic' || header === 'topic') indices.topic = h;
+    if (header === 'job number' || header === 'crew' || header === 'crew #' || header === 'crew number') indices.crew = h;
+    if (header === 'crew lead' || header === 'foreman' || header === 'lead') indices.lead = h;
+    if (header === 'crew size' || header === 'size') indices.size = h;
+    if (header === 'completion date' || header === 'date completed' || header === 'date') indices.completionDate = h;
+    if (header === 'attendees' || header === 'attendee list') indices.attendees = h;
+    if (header === 'hours' || header === 'training hours') indices.hours = h;
+    if (header === 'trainer' || header === 'instructor') indices.trainer = h;
+    if (header === 'status' || header === 'training status') indices.status = h;
+    if (header === 'notes' || header === 'comments') indices.notes = h;
+  }
+  
+  // Track which fields were actually found
+  indices._found = {
+    month: indices.month !== -1,
+    topic: indices.topic !== -1,
+    crew: indices.crew !== -1,
+    lead: indices.lead !== -1,
+    size: indices.size !== -1,
+    completionDate: indices.completionDate !== -1,
+    attendees: indices.attendees !== -1,
+    hours: indices.hours !== -1,
+    trainer: indices.trainer !== -1,
+    status: indices.status !== -1,
+    notes: indices.notes !== -1
+  };
+  
+  // Apply defaults for any columns that were not found, to avoid crash, but log warnings
+  const defaults = {
+    month: 0,
+    topic: 1,
+    crew: 2,
+    lead: 3,
+    size: 4,
+    completionDate: 5,
+    attendees: 6,
+    hours: 7,
+    trainer: 8,
+    status: 9,
+    notes: 10
+  };
+  
+  for (const key in indices) {
+    if (key !== '_found' && indices[key] === -1) {
+      indices[key] = defaults[key];
+      Logger.log(`getTrainingTrackingColIndices: Column "${key}" not found in headers, defaulting to index ${defaults[key]}`);
+    }
+  }
+  
+  return indices;
+};

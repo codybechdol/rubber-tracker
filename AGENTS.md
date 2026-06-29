@@ -1,4 +1,4 @@
-# AGENTS.md - AI Coding Agent Guide for Rubber Tracker
+# AGENTS.md - AI Coding Agent Guide for Safety Assistant
 
 ## Project Overview
 Google Apps Script-based inventory management system for tracking rubber gloves/sleeves (PPE) for electrical workers. Deployed to Google Sheets via `clasp`.
@@ -6,7 +6,7 @@ Google Apps Script-based inventory management system for tracking rubber gloves/
 ## Critical Deployment Rule
 **ALWAYS use `.\push.bat`** to deploy - NEVER use `clasp push` directly.
 - `push.bat` runs `validate-syntax.js` first to catch errors
-- Validates: duplicate `*/` closers, ES6 syntax (not allowed), unmatched braces
+- Validates: duplicate `*/` closers, unmatched braces, syntax errors
 - Auto-removes duplicate `.js` files (only `.gs` files should exist in `src/`)
 
 ## Architecture: File Load Order & Function Ownership
@@ -52,11 +52,11 @@ TestRunner.gs    → Basic integration tests, run via Apps Script editor (~190 l
 - **DO NOT add complete implementations to module files** - add to `Code.gs` only
 - Functions suffixed `_INCOMPLETE_DEPRECATED` are intentional placeholders
 
-## ES6/Modern JavaScript Restrictions
-Google Apps Script V8 supports ES6, but this project uses ES5-style for consistency:
-- Use `var` not `const`/`let` (pre-push validation rejects ES6 syntax)
-- Use `function(){}` not arrow functions
-- Use string concatenation not template literals
+## ES6+ JavaScript Guidelines
+This project supports and encourages modern ES6+ JavaScript syntax on the V8 runtime:
+- Use `const` for variables that won't be reassigned, and `let` for block-scoped variables that will be. Avoid `var`.
+- Use arrow functions (`() => {}`) for callbacks, map/filter handlers, or concise function declarations.
+- Use template literals (backticks with `${}`) for dynamic strings and HTML templates.
 
 ## Key Patterns
 

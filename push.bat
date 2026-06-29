@@ -4,7 +4,7 @@ echo ========================================
 echo    CLASP PUSH DEPLOYMENT
 echo ========================================
 echo.
-cd /d "C:\Users\codyb\WebstormProjects\Rubber Tracker"
+cd /d "%~dp0"
 echo Current directory: %CD%
 echo.
 
