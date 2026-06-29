@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Glove Manager – Rubber Glove & Sleeve Inventory System
  *
  * Google Apps Script foundation for automating and managing PPE inventory, assignments, swaps, compliance, and reporting.
@@ -324,7 +324,7 @@ function getEmployeePhoneMapForTasks(ss) {
         foundCount++;
         // Log first 5 entries for debugging
         if (foundCount <= 5) {
-          Logger.log('Phone map entry: "' + name.toLowerCase() + '" => ' + cleanPhone);
+          Logger.log('Phone map entry: "' + name.toLowerCase() + '" -> ' + cleanPhone);
         }
         // Also register alternate names → same phone
         if (altNamesColT !== -1 && data[i][altNamesColT]) {
@@ -1425,9 +1425,14 @@ function markScheduleTaskComplete(taskIndexOrTask) {
     var trainingSheet = ss.getSheetByName('Training Tracking');
     if (trainingSheet) {
       Logger.log('Marking Training Tracking row ' + task.rowIndex + ' as Complete');
-      // Set status to Complete (column J = 10) and add completion date (column F = 6)
-      trainingSheet.getRange(task.rowIndex, 10).setValue('Complete');
-      trainingSheet.getRange(task.rowIndex, 6).setValue(new Date());
+      // Resolve column indices dynamically
+      var trainingData = trainingSheet.getDataRange().getValues();
+      var trainingHeaderIdx = findTrainingHeaderRow(trainingData);
+      var trainingCols = getTrainingTrackingColIndices(trainingData[trainingHeaderIdx]);
+      
+      // Set status to Complete and add completion date dynamically
+      trainingSheet.getRange(task.rowIndex, trainingCols.status + 1).setValue('Complete');
+      trainingSheet.getRange(task.rowIndex, trainingCols.completionDate + 1).setValue(new Date());
       updated = true;
 
       // Update Training Config completion status
@@ -1508,27 +1513,29 @@ function updateTrainingTrackingFromToDo(task) {
   if (!trainingSheet || trainingSheet.getLastRow() < 3) return;
 
   var data = trainingSheet.getDataRange().getValues();
+  var headerIdx = findTrainingHeaderRow(data);
+  var cols = getTrainingTrackingColIndices(data[headerIdx]);
 
   // Try to find matching training record by crew and topic
   var crew = task.employee || task.crew || '';
   var topic = task.itemType || task.topic || ''; // itemType contains training topic
 
-  for (var i = 2; i < data.length; i++) {
-    var rowCrew = String(data[i][2] || '').trim();
-    var rowTopic = String(data[i][1] || '').trim();
-    var rowStatus = String(data[i][9] || '').trim();
+  for (var i = headerIdx + 1; i < data.length; i++) {
+    var rowCrew = String(data[i][cols.crew] || '').trim();
+    var rowTopic = String(data[i][cols.topic] || '').trim();
+    var rowStatus = String(data[i][cols.status] || '').trim();
 
     // Match by crew (could be crew lead name or crew number)
     var crewMatch = rowCrew === crew ||
-                    String(data[i][3] || '').trim() === crew; // Check crew lead too
+                    String(data[i][cols.lead] || '').trim() === crew; // Check crew lead too
 
     // Match by topic (partial match)
     var topicMatch = rowTopic.indexOf(topic) !== -1 || topic.indexOf(rowTopic) !== -1;
 
     if (crewMatch && topicMatch && rowStatus !== 'Complete') {
       // Found matching incomplete training - mark it complete
-      trainingSheet.getRange(i + 1, 10).setValue('Complete'); // Status
-      trainingSheet.getRange(i + 1, 6).setValue(new Date()); // Completion Date
+      trainingSheet.getRange(i + 1, cols.status + 1).setValue('Complete'); // Status
+      trainingSheet.getRange(i + 1, cols.completionDate + 1).setValue(new Date()); // Completion Date
       Logger.log('Updated Training Tracking: row ' + (i + 1) + ' for crew ' + rowCrew);
       break;
     }
@@ -2472,6 +2479,7 @@ function getEmployeeNamesForMatching() {
     var nameCol = 0;
     var locationCol = -1;
     var jobNumCol = -1;
+    var secondaryJobNumCol = -1;
     var classCol = -1;
     var gloveSizeCol = -1;
     var sleeveSizeCol = -1;
@@ -2482,6 +2490,7 @@ function getEmployeeNamesForMatching() {
       var header = String(headers[h]).toLowerCase().trim();
       if (header === 'location') locationCol = h;
       if (header === 'job number') jobNumCol = h;
+      if (header === 'secondary job number' || header === 'secondary job') secondaryJobNumCol = h;
       if (header === 'class') classCol = h;
       if (header === 'glove size') gloveSizeCol = h;
       if (header === 'sleeve size') sleeveSizeCol = h;
@@ -2498,6 +2507,7 @@ function getEmployeeNamesForMatching() {
           name: String(row[nameCol]),
           location: location,
           jobNum: jobNumCol !== -1 ? String(row[jobNumCol] || '') : '',
+          secondaryJobNum: secondaryJobNumCol !== -1 ? String(row[secondaryJobNumCol] || '') : '',
           class: classCol !== -1 ? row[classCol] : '',
           gloveSize: gloveSizeCol !== -1 ? row[gloveSizeCol] : '',
           sleeveSize: sleeveSizeCol !== -1 ? row[sleeveSizeCol] : '',
@@ -3972,7 +3982,7 @@ function getTrainingConfig() {
 
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'name') nameCol = h;
+    if (header === 'name' || header === 'employee name') nameCol = h;
     if (header === 'job number') jobNumCol = h;
     if (header === 'location') locationCol = h;
     if (header === 'job classification') classificationCol = h;
@@ -4284,23 +4294,16 @@ function removeCrewsFromTrainingTracking(crewNumbers) {
   }
 
   var data = sheet.getDataRange().getValues();
-  // Row 1 is title, Row 2 is headers
-  var headers = data[1];
+  var headerIdx = findTrainingHeaderRow(data);
+  var headers = data[headerIdx];
+  var cols = getTrainingTrackingColIndices(headers);
   var currentMonth = getCurrentMonthInfo();
 
   // Find column indices
-  var monthCol = -1;
-  var crewCol = -1;
-  var statusCol = -1;
-  var completionDateCol = -1;
-
-  for (var h = 0; h < headers.length; h++) {
-    var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'month') monthCol = h;
-    if (header === 'job number' || header === 'crew' || header === 'crew #') crewCol = h;
-    if (header === 'status') statusCol = h;
-    if (header === 'completion date') completionDateCol = h;
-  }
+  var monthCol = cols.month;
+  var crewCol = cols.crew;
+  var statusCol = cols.status;
+  var completionDateCol = cols.completionDate;
 
   if (crewCol === -1 || monthCol === -1) {
     Logger.log('removeCrewsFromTrainingTracking: Could not find required columns');
@@ -4311,7 +4314,7 @@ function removeCrewsFromTrainingTracking(crewNumbers) {
   var rowsToDelete = [];
   var preservedRows = 0;
 
-  for (var i = data.length - 1; i >= 2; i--) { // Start from row 3 (index 2)
+  for (var i = data.length - 1; i >= headerIdx + 1; i--) { // Start dynamically after header row
     var row = data[i];
     var crewValue = String(row[crewCol]).trim();
 
@@ -4394,21 +4397,16 @@ function addCrewsToTrainingTracking(crewNumbers) {
 
   // Get training topics from the sheet (derive from existing data)
   var data = sheet.getDataRange().getValues();
-  if (data.length < 3) {
+  var headerIdx = findTrainingHeaderRow(data);
+  if (data.length <= headerIdx + 1) {
     return { addedRows: 0 };
   }
 
-  var headers = data[1];
-  var monthCol = -1;
-  var topicCol = -1;
-  var crewCol = -1;
-
-  for (var h = 0; h < headers.length; h++) {
-    var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'month') monthCol = h;
-    if (header === 'training topic' || header === 'topic') topicCol = h;
-    if (header === 'job number' || header === 'crew') crewCol = h;
-  }
+  var headers = data[headerIdx];
+  var cols = getTrainingTrackingColIndices(headers);
+  var monthCol = cols.month;
+  var topicCol = cols.topic;
+  var crewCol = cols.crew;
 
   if (monthCol === -1 || topicCol === -1 || crewCol === -1) {
     Logger.log('addCrewsToTrainingTracking: Could not find required columns');
@@ -4419,7 +4417,7 @@ function addCrewsToTrainingTracking(crewNumbers) {
   var existingMap = {}; // key: "month|topic", value: array of crews
   var monthTopics = {}; // key: "month|topic", value: {month, topic}
 
-  for (var i = 2; i < data.length; i++) {
+  for (var i = headerIdx + 1; i < data.length; i++) {
     var row = data[i];
     var month = String(row[monthCol]).trim();
     var topic = String(row[topicCol]).trim();
@@ -4544,14 +4542,10 @@ function syncTrainingTrackingWithConfig() {
   }
 
   var data = sheet.getDataRange().getValues();
-  var headers = data[1];
-
-  // Find crew column
-  var crewCol = -1;
-  for (var h = 0; h < headers.length; h++) {
-    var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'job number' || header === 'crew' || header === 'crew #') crewCol = h;
-  }
+  var headerIdx = findTrainingHeaderRow(data);
+  var headers = data[headerIdx];
+  var cols = getTrainingTrackingColIndices(headers);
+  var crewCol = cols.crew;
 
   if (crewCol === -1) {
     ui.alert('❌ Error', 'Could not find Job Number column in Training Tracking.', ui.ButtonSet.OK);
@@ -4560,7 +4554,7 @@ function syncTrainingTrackingWithConfig() {
 
   // Find crews in Training Tracking that are NOT active in Job Tracking
   var crewsInSheet = {};
-  for (var i = 2; i < data.length; i++) {
+  for (var i = headerIdx + 1; i < data.length; i++) {
     var crew = String(data[i][crewCol]).trim();
     if (crew) {
       crewsInSheet[crew] = true;
@@ -4629,22 +4623,18 @@ function updateTrainingTrackingCrewLeads() {
   }
 
   var data = sheet.getDataRange().getValues();
-  var headers = data[1]; // Row 2 is headers
+  var headerIdx = findTrainingHeaderRow(data);
+  var headers = data[headerIdx];
+  var dataStartIdx = headerIdx + 1;
+  var cols = getTrainingTrackingColIndices(headers);
 
-  // Find column indices
-  var monthCol = -1;
-  var crewCol = -1;
-  var leadCol = -1;
+  var monthCol = cols.month;
+  var crewCol = cols.crew;
+  var leadCol = cols.lead;
 
-  for (var h = 0; h < headers.length; h++) {
-    var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'month') monthCol = h;
-    if (header === 'job number' || header === 'crew' || header === 'crew #') crewCol = h;
-    if (header === 'crew lead' || header === 'foreman') leadCol = h;
-  }
-
-  if (crewCol === -1 || leadCol === -1) {
-    ui.alert('❌ Error', 'Could not find Job Number or Crew Lead columns in Training Tracking.', ui.ButtonSet.OK);
+  if (!cols._found.crew || !cols._found.lead) {
+    var sampleHeaders = headers ? headers.slice(0, 5).join(', ') : 'null';
+    ui.alert('❌ Error', 'Could not find Job Number or Crew Lead columns in Training Tracking.\n\nDetected Header Row Index: ' + headerIdx + '\nFirst 5 columns found: [' + sampleHeaders + ']\n\nExpected headers like "Crew #" and "Crew Lead".', ui.ButtonSet.OK);
     return { updatedRows: 0 };
   }
 
@@ -4662,7 +4652,7 @@ function updateTrainingTrackingCrewLeads() {
   var changes = [];
 
   // First pass: collect all unique crew numbers
-  for (var i = 2; i < data.length; i++) {
+  for (var i = dataStartIdx; i < data.length; i++) {
     var crewNum = String(data[i][crewCol]).trim();
     if (crewNum && !crewLeadMap.hasOwnProperty(crewNum)) {
       // Get the current crew lead from Employees sheet
@@ -4672,7 +4662,7 @@ function updateTrainingTrackingCrewLeads() {
   }
 
   // Second pass: update rows where crew lead doesn't match (ONLY current and future months)
-  for (var j = 2; j < data.length; j++) {
+  for (var j = dataStartIdx; j < data.length; j++) {
     var rowMonth = monthCol >= 0 ? String(data[j][monthCol]).trim() : '';
     var crewNum = String(data[j][crewCol]).trim();
     var currentLead = String(data[j][leadCol]).trim();
@@ -4779,7 +4769,7 @@ function refreshTrainingAttendeesSilent() {
       var empNameColR = -1, empJobNumColR = -1, empLastDayColR = -1, empClassColR = -1;
       for (var erh = 0; erh < empHeadersR.length; erh++) {
         var erhVal = String(empHeadersR[erh]).toLowerCase().trim();
-        if (erhVal === 'name') empNameColR = erh;
+        if (erhVal === 'name' || erhVal === 'employee name') empNameColR = erh;
         if (erhVal === 'job number') empJobNumColR = erh;
         if (erhVal === 'last day') empLastDayColR = erh;
         if (erhVal === 'job classification') empClassColR = erh;
@@ -4989,20 +4979,13 @@ function updateTrainingTrackingCrewLeadsSilent() {
   var headerIdx = findTrainingHeaderRow(data);
   var headers = data[headerIdx];
   var dataStartIdx = headerIdx + 1;
+  var cols = getTrainingTrackingColIndices(headers);
 
-  // Find column indices
-  var monthCol = -1;
-  var crewCol = -1;
-  var leadCol = -1;
+  var monthCol = cols.month;
+  var crewCol = cols.crew;
+  var leadCol = cols.lead;
 
-  for (var h = 0; h < headers.length; h++) {
-    var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'month') monthCol = h;
-    if (header === 'job number' || header === 'crew' || header === 'crew #') crewCol = h;
-    if (header === 'crew lead' || header === 'foreman') leadCol = h;
-  }
-
-  if (crewCol === -1 || leadCol === -1) {
+  if (!cols._found.crew || !cols._found.lead) {
     Logger.log('updateTrainingTrackingCrewLeadsSilent: Could not find Job Number or Crew Lead columns (headerIdx=' + headerIdx + ')');
     return { updatedRows: 0 };
   }
@@ -5069,16 +5052,7 @@ function updateTrainingTrackingCrewLeadsSilent() {
  * @return {number} Index of the header row (0-based)
  */
 function findTrainingHeaderRow(data) {
-  for (var i = 0; i < Math.min(data.length, 5); i++) {
-    var row = data[i];
-    for (var h = 0; h < row.length; h++) {
-      var val = String(row[h]).toLowerCase().trim();
-      if (val === 'month' || val === 'crew #' || val === 'crew') {
-        return i;
-      }
-    }
-  }
-  return 1; // default fallback
+  return findTrainingTrackingHeaderRow(data);
 }
 
 /**
@@ -5102,27 +5076,16 @@ function addMissingCrewsToTrainingTracking() {
   var headers = data[headerIdx];
   var dataStartIdx = headerIdx + 1;
 
-  // Find column indices
-  var monthCol = -1;
-  var topicCol = -1;
-  var crewCol = -1;
-  var leadCol = -1;
-  var sizeCol = -1;
-  var statusCol = -1;
-  var hoursCol = -1;
+  var cols = getTrainingTrackingColIndices(headers);
+  var monthCol = cols.month;
+  var topicCol = cols.topic;
+  var crewCol = cols.crew;
+  var leadCol = cols.lead;
+  var sizeCol = cols.size;
+  var statusCol = cols.status;
+  var hoursCol = cols.hours;
 
-  for (var h = 0; h < headers.length; h++) {
-    var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'month') monthCol = h;
-    if (header === 'training topic') topicCol = h;
-    if (header === 'job number' || header === 'crew' || header === 'crew #') crewCol = h;
-    if (header === 'crew lead' || header === 'foreman') leadCol = h;
-    if (header === 'crew size') sizeCol = h;
-    if (header === 'status') statusCol = h;
-    if (header === 'hours') hoursCol = h;
-  }
-
-  if (monthCol === -1 || crewCol === -1) {
+  if (!cols._found.month || !cols._found.crew) {
     Logger.log('addMissingCrewsToTrainingTracking: Could not find Month or Crew columns (headerIdx=' + headerIdx + ')');
     return { addedRows: 0, crews: [] };
   }
@@ -5188,7 +5151,7 @@ function addMissingCrewsToTrainingTracking() {
       var empNameCol = -1, empJobNumCol = -1, empLastDayCol = -1;
       for (var eh = 0; eh < empHeaders.length; eh++) {
         var ehVal = String(empHeaders[eh]).toLowerCase().trim();
-        if (ehVal === 'name') empNameCol = eh;
+        if (ehVal === 'name' || ehVal === 'employee name') empNameCol = eh;
         if (ehVal === 'job number') empJobNumCol = eh;
         if (ehVal === 'last day') empLastDayCol = eh;
       }
@@ -5297,10 +5260,16 @@ function addMissingCrewsToTrainingTracking() {
         return String(a[2]).localeCompare(String(b[2]));
       });
       sheet.getRange(dataStartIdx + 1, 1, allData.length, 11).setValues(allData);
-      try { applyTrainingTrackingFormatting(sheet); } catch (fmtErr) {}
     }
   } catch (sortErr) {
     Logger.log('addMissingCrewsToTrainingTracking: Sort skipped (typed column sheet): ' + sortErr);
+  }
+
+  // ALWAYS apply formatting to ensure conditional formatting range is updated to cover all rows
+  try {
+    applyTrainingTrackingFormatting(sheet);
+  } catch (fmtErr) {
+    Logger.log('addMissingCrewsToTrainingTracking: Formatting failed: ' + fmtErr);
   }
 
   var addedCrewsList = Object.keys(addedCrewSet).sort();
@@ -5329,27 +5298,31 @@ function applyTrainingTrackingFormatting(sheet) {
   }
 
   var data = sheet.getDataRange().getValues();
-  var numCols = Math.min(data[1].length, 11); // Use header row column count, max 11
+  var headerIdx = findTrainingHeaderRow(data);
+  var numCols = Math.min(data[headerIdx].length, 11); // Use header row column count, max 11
+  var cols = getTrainingTrackingColIndices(data[headerIdx]);
 
   // Month order for coloring
   var monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
                     'July', 'August', 'September', 'October', 'November', 'December'];
   var monthColors = ['#e8f4f8', '#ffffff']; // Alternating light blue and white
 
+  var dataStartRow = headerIdx + 2; // 1-based first data row
+
   // First, clear any existing backgrounds (except headers)
-  if (sheet.getLastRow() > 2) {
-    sheet.getRange(3, 1, sheet.getLastRow() - 2, numCols).setBackground(null);
+  if (sheet.getLastRow() >= dataStartRow) {
+    sheet.getRange(dataStartRow, 1, sheet.getLastRow() - dataStartRow + 1, numCols).setBackground(null);
     // Clear all existing borders in data area
-    sheet.getRange(3, 1, sheet.getLastRow() - 2, numCols).setBorder(false, false, false, false, false, false);
+    sheet.getRange(dataStartRow, 1, sheet.getLastRow() - dataStartRow + 1, numCols).setBorder(false, false, false, false, false, false);
   }
 
   // Group rows by month
   var currentMonth = '';
-  var monthStartRow = 3;
+  var monthStartRow = dataStartRow;
   var colorIndex = -1;
 
-  for (var i = 2; i < data.length; i++) {
-    var rowMonth = String(data[i][0]).trim();
+  for (var i = headerIdx + 1; i < data.length; i++) {
+    var rowMonth = String(data[i][cols.month]).trim();
     var rowNum = i + 1; // 1-based
 
     // If month changed, apply formatting to previous month group
@@ -5376,6 +5349,38 @@ function applyTrainingTrackingFormatting(sheet) {
     var lastMonthRange = sheet.getRange(monthStartRow, 1, sheet.getLastRow() - monthStartRow + 1, numCols);
     lastMonthRange.setBackground(monthColors[colorIndex % 2]);
     lastMonthRange.setBorder(null, null, true, null, null, null, '#666666', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+  }
+
+  // Reapply conditional formatting rules for Status column to ensure it covers all rows dynamically
+  var statusColNum = cols.status !== -1 ? cols.status + 1 : 10;
+  var lastRow = sheet.getLastRow();
+  var numRows = lastRow - headerIdx - 1;
+  
+  if (numRows > 0) {
+    var completeRange = sheet.getRange(headerIdx + 2, statusColNum, numRows, 1);
+    
+    var completeRule = SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo('Complete')
+      .setBackground('#d9ead3')
+      .setFontColor('#38761d')
+      .setRanges([completeRange])
+      .build();
+
+    var overdueRule = SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo('Overdue')
+      .setBackground('#f4cccc')
+      .setFontColor('#cc0000')
+      .setRanges([completeRange])
+      .build();
+
+    var inProgressRule = SpreadsheetApp.newConditionalFormatRule()
+      .whenTextEqualTo('In Progress')
+      .setBackground('#fff2cc')
+      .setFontColor('#bf9000')
+      .setRanges([completeRange])
+      .build();
+      
+    sheet.setConditionalFormatRules([completeRule, overdueRule, inProgressRule]);
   }
 
   Logger.log('applyTrainingTrackingFormatting: Formatting applied successfully');
@@ -5575,7 +5580,7 @@ function refreshCrewVisitConfigFromEmployees() {
   var nameCol = -1, jobNumCol = -1, locationCol = -1, classificationCol = -1, lastDayCol = -1;
   for (var h = 0; h < empHeaders.length; h++) {
     var header = String(empHeaders[h]).toLowerCase().trim();
-    if (header === 'name') nameCol = h;
+    if (header === 'name' || header === 'employee name') nameCol = h;
     if (header === 'job number') jobNumCol = h;
     if (header === 'location') locationCol = h;
     if (header === 'job classification') classificationCol = h;
@@ -6143,7 +6148,7 @@ function getExpiringCertsForConfig() {
 
       for (var eh = 0; eh < empHeaders.length; eh++) {
         var hdr = String(empHeaders[eh]).toLowerCase().trim();
-        if (hdr === 'name') empNameCol = eh;
+        if (hdr === 'name' || hdr === 'employee name') empNameCol = eh;
         if (hdr === 'location') empLocCol = eh;
       }
 
@@ -6321,7 +6326,7 @@ function getExpiringCertsForSchedule() {
       var empNameCol = -1, empLocCol = -1, empPhoneCol = -1;
       for (var eh = 0; eh < empHeaders.length; eh++) {
         var hdr = String(empHeaders[eh]).toLowerCase().trim();
-        if (hdr === 'name') empNameCol = eh;
+        if (hdr === 'name' || hdr === 'employee name') empNameCol = eh;
         if (hdr === 'location') empLocCol = eh;
         if (hdr === 'phone number' || hdr === 'phone' || hdr === 'phone #' || hdr === 'cell' || hdr === 'cell phone') empPhoneCol = eh;
       }
@@ -6567,9 +6572,6 @@ function syncEmployeeLocationsFromJobTracking() {
     return;
   }
 
-  // Non-field locations to skip (both as current location AND as destination)
-  var nonFieldLocations = ['previous employee', 'weeds', 'vacation', 'leave', 'light duty', 'unknown'];
-
   var mismatches = [];
   for (var i = 1; i < empData.length; i++) {
     var empName = String(empData[i][nameCol] || '').trim();
@@ -6580,16 +6582,16 @@ function syncEmployeeLocationsFromJobTracking() {
     if (!empName || !empJobNum) continue;
     // Skip terminated employees
     if (empLastDay && empLastDay instanceof Date && !isNaN(empLastDay.getTime())) continue;
-    // Skip employees already in non-field locations
-    if (nonFieldLocations.indexOf(empLocation.toLowerCase()) !== -1) continue;
+    // Skip employees already in status locations
+    if (isStatusLocation(empLocation)) continue;
 
     // Strip position suffix (041-26.3 → 041-26)
     var baseJobNum = empJobNum.replace(/\.\d+$/, '');
     var jtLocation = jobLocationMap[baseJobNum];
 
-    if (!jtLocation || jtLocation === empLocation) continue;
-    // Skip if Job Tracking location is a non-field location (Vacation, Weeds, etc.)
-    if (nonFieldLocations.indexOf(jtLocation.toLowerCase()) !== -1) continue;
+    if (!jtLocation || jtLocation === getPhysicalLocation(empLocation)) continue;
+    // Skip if Job Tracking location is a status location (Vacation, Weeds, etc.)
+    if (isStatusLocation(jtLocation)) continue;
 
     mismatches.push({
       row: i,
@@ -8217,14 +8219,20 @@ function handlePickedCheckboxChange(ss, swapSheet, inventorySheet, editedRow, ne
     var stage1DateAssignedIdx = 12;
 
     var employeeName = rowData[colEmpIdx];
-    var pickListNum = rowData[colPickNumIdx];
+    var oldItemNum = rowData[1];             // Column B - Current/Old glove/sleeve number
+    var pickListNum = String(rowData[colPickNumIdx] || '').trim();
     var currentStatus = rowData[colStatusIdx];
 
     var stage1Status = rowData[stage1StatusIdx];
     var stage1AssignedTo = rowData[stage1AssignedToIdx];
     var stage1DateAssigned = rowData[stage1DateAssignedIdx];
 
-    if (!pickListNum || pickListNum === '—') {
+    if (!pickListNum || pickListNum === '—' || pickListNum === '-' || pickListNum === '') {
+      if (employeeName && oldItemNum && oldItemNum !== '—' && oldItemNum !== '-') {
+        // Handle previous employee reclaim picked
+        handlePreviousEmployeeReclaimPicked(ss, inventorySheet, oldItemNum, employeeName, isChecked);
+        return;
+      }
       logEvent('handlePickedCheckboxChange: No Pick List item for row ' + editedRow, 'WARNING');
       return;
     }
@@ -8416,7 +8424,7 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
 
   var employeeName = rowData[0];     // Column A
   var oldItemNum = rowData[1];       // Column B - Current/Old glove number
-  var pickListNum = rowData[6];      // Column G - Pick List glove/sleeve number
+  var pickListNum = String(rowData[6] || '').trim();
   var isPicked = rowData[8];         // Column I - Picked checkbox
 
   // Stage 2 stored values (columns Q-T, indices 16-19)
@@ -8430,7 +8438,12 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
   var oldGloveAssignedTo = rowData[14];
   var oldGloveDateAssigned = rowData[15];
 
-  if (!pickListNum || pickListNum === '—') {
+  if (!pickListNum || pickListNum === '—' || pickListNum === '-' || pickListNum === '') {
+    if (employeeName && oldItemNum && oldItemNum !== '—' && oldItemNum !== '-') {
+      // Handle previous employee reclaim date changed
+      handlePreviousEmployeeReclaimDateChanged(ss, inventorySheet, oldItemNum, employeeName, hasDate, newValue);
+      return;
+    }
     Logger.log('processEdit: No Pick List item for row ' + editedRow);
     return;
   }
@@ -8580,56 +8593,144 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
     }
 
     // Revert Pick List item to Stage 2 values
-    inventorySheet.getRange(pickListRow, 7).setValue(stage2Status || 'Ready For Delivery');     // Status (G)
-    inventorySheet.getRange(pickListRow, 8).setValue(stage2AssignedTo || 'Packed For Delivery'); // Assigned To (H)
+    inventorySheet.getRange(pickListRow, COLS.INVENTORY.STATUS).setValue(stage2Status || 'Ready For Delivery');
+    inventorySheet.getRange(pickListRow, COLS.INVENTORY.ASSIGNED_TO).setValue(stage2AssignedTo || 'Packed For Delivery');
     if (stage2DateAssigned) {
       // Format the date properly before setting
       var stage2Date = new Date(stage2DateAssigned);
-      if (!isNaN(stage2Date)) {
+      if (!isNaN(stage2Date.getTime())) {
         var stage2DateFormatted = Utilities.formatDate(stage2Date, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
-        inventorySheet.getRange(pickListRow, 5).setValue(stage2DateFormatted);  // Date Assigned (E)
+        inventorySheet.getRange(pickListRow, COLS.INVENTORY.DATE_ASSIGNED).setValue(stage2DateFormatted);
 
         // Recalculate Change Out Date for pick list item reverting to Stage 2
         var pickListChangeOut = calculateChangeOutDate(stage2Date, "Cody's Truck", 'Packed For Delivery', isSleeve);
-        var pickListChangeOutCell = inventorySheet.getRange(pickListRow, 9);
+        var pickListChangeOutCell = inventorySheet.getRange(pickListRow, COLS.INVENTORY.CHANGE_OUT_DATE);
         if (pickListChangeOut === 'N/A') {
           pickListChangeOutCell.setNumberFormat('@').setValue('N/A');
         } else if (pickListChangeOut) {
           pickListChangeOutCell.setNumberFormat('MM/dd/yyyy').setValue(pickListChangeOut);
         }
       } else {
-        inventorySheet.getRange(pickListRow, 5).setValue(stage2DateAssigned);   // Use as-is if not a valid date
+        inventorySheet.getRange(pickListRow, COLS.INVENTORY.DATE_ASSIGNED).setValue(stage2DateAssigned);   // Use as-is if not a valid date
       }
     }
-    inventorySheet.getRange(pickListRow, 6).setValue("Cody's Truck");                           // Location (F)
-    inventorySheet.getRange(pickListRow, 10).setValue(stage2PickedFor || '');                   // Picked For (J)
+    inventorySheet.getRange(pickListRow, COLS.INVENTORY.LOCATION).setValue("Cody's Truck");
+    inventorySheet.getRange(pickListRow, COLS.INVENTORY.PICKED_FOR).setValue(stage2PickedFor || '');
 
     // Revert Old glove to Stage 1 values (columns N-P)
     if (oldItemRow > 0 && oldGloveStatus) {
-      inventorySheet.getRange(oldItemRow, 7).setValue(oldGloveStatus);       // Status (G)
-      inventorySheet.getRange(oldItemRow, 8).setValue(oldGloveAssignedTo);   // Assigned To (H)
-      inventorySheet.getRange(oldItemRow, 6).setValue(employeeLocation);     // Location (F)
+      inventorySheet.getRange(oldItemRow, COLS.INVENTORY.STATUS).setValue(oldGloveStatus);
+      inventorySheet.getRange(oldItemRow, COLS.INVENTORY.ASSIGNED_TO).setValue(oldGloveAssignedTo);
+      inventorySheet.getRange(oldItemRow, COLS.INVENTORY.LOCATION).setValue(employeeLocation);
 
       if (oldGloveDateAssigned) {
         // Format the date properly before setting
         var oldGloveDate = new Date(oldGloveDateAssigned);
-        if (!isNaN(oldGloveDate)) {
+        if (!isNaN(oldGloveDate.getTime())) {
           var oldGloveDateFormatted = Utilities.formatDate(oldGloveDate, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
-          inventorySheet.getRange(oldItemRow, 5).setValue(oldGloveDateFormatted); // Date Assigned (E)
+          inventorySheet.getRange(oldItemRow, COLS.INVENTORY.DATE_ASSIGNED).setValue(oldGloveDateFormatted);
 
           // Recalculate Change Out Date for old item reverting to employee assignment
           var oldItemChangeOut = calculateChangeOutDate(oldGloveDate, employeeLocation, oldGloveAssignedTo, isSleeve);
-          var oldItemChangeOutCell = inventorySheet.getRange(oldItemRow, 9);
+          var oldItemChangeOutCell = inventorySheet.getRange(oldItemRow, COLS.INVENTORY.CHANGE_OUT_DATE);
           if (oldItemChangeOut === 'N/A') {
             oldItemChangeOutCell.setNumberFormat('@').setValue('N/A');
           } else if (oldItemChangeOut) {
             oldItemChangeOutCell.setNumberFormat('MM/dd/yyyy').setValue(oldItemChangeOut);
           }
         } else {
-          inventorySheet.getRange(oldItemRow, 5).setValue(oldGloveDateAssigned);  // Use as-is if not valid
+          inventorySheet.getRange(oldItemRow, COLS.INVENTORY.DATE_ASSIGNED).setValue(oldGloveDateAssigned);  // Use as-is if not valid
         }
       }
     }
+  }
+}
+
+/**
+ * Handles Picked checkbox change for a Previous Employee reclaim row.
+ * Sets the reclaimed item to "Ready For Test" on Cody's Truck.
+ */
+function handlePreviousEmployeeReclaimPicked(ss, inventorySheet, itemNum, employeeName, isChecked) {
+  try {
+    var inventoryData = inventorySheet.getDataRange().getValues();
+    var itemRow = -1;
+    for (var i = 1; i < inventoryData.length; i++) {
+      if (String(inventoryData[i][0]).trim() === String(itemNum).trim()) {
+        itemRow = i + 1;
+        break;
+      }
+    }
+    if (itemRow === -1) {
+      logEvent('handlePreviousEmployeeReclaimPicked: Item ' + itemNum + ' not found', 'ERROR');
+      return;
+    }
+
+    var today = new Date();
+    var todayFormatted = Utilities.formatDate(today, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+    var isSleeve = (inventorySheet.getName() === SHEET_SLEEVES);
+
+    if (isChecked) {
+      // Set to Cody's Truck for testing
+      inventorySheet.getRange(itemRow, COLS.INVENTORY.STATUS).setValue('Ready For Test');
+      inventorySheet.getRange(itemRow, COLS.INVENTORY.ASSIGNED_TO).setValue('Packed For Testing');
+      inventorySheet.getRange(itemRow, COLS.INVENTORY.LOCATION).setValue("Cody's Truck");
+      inventorySheet.getRange(itemRow, COLS.INVENTORY.DATE_ASSIGNED).setValue(todayFormatted);
+      
+      // Calculate Change Out Date for Packed For Testing (3 months)
+      var changeOut = calculateChangeOutDate(today, "Cody's Truck", 'Packed For Testing', isSleeve);
+      if (changeOut && changeOut !== 'N/A') {
+        inventorySheet.getRange(itemRow, COLS.INVENTORY.CHANGE_OUT_DATE).setNumberFormat('MM/dd/yyyy').setValue(changeOut);
+      }
+      logEvent('Previous Employee item ' + itemNum + ' marked Picked (Ready For Test on Cody\'s Truck)');
+    } else {
+      // Revert to Assigned to Previous Employee
+      inventorySheet.getRange(itemRow, COLS.INVENTORY.STATUS).setValue('Assigned');
+      inventorySheet.getRange(itemRow, COLS.INVENTORY.ASSIGNED_TO).setValue(employeeName);
+      inventorySheet.getRange(itemRow, COLS.INVENTORY.LOCATION).setValue('Previous Employee');
+      logEvent('Previous Employee item ' + itemNum + ' reverted to Assigned');
+    }
+  } catch (e) {
+    logEvent('handlePreviousEmployeeReclaimPicked error: ' + e, 'ERROR');
+  }
+}
+
+/**
+ * Handles Date Changed for a Previous Employee reclaim row.
+ * Completes the reclaim: returns the item to "On Shelf" in Helena.
+ */
+function handlePreviousEmployeeReclaimDateChanged(ss, inventorySheet, itemNum, employeeName, hasDate, newValue) {
+  try {
+    var inventoryData = inventorySheet.getDataRange().getValues();
+    var itemRow = -1;
+    for (var i = 1; i < inventoryData.length; i++) {
+      if (String(inventoryData[i][0]).trim() === String(itemNum).trim()) {
+        itemRow = i + 1;
+        break;
+      }
+    }
+    if (itemRow === -1) {
+      logEvent('handlePreviousEmployeeReclaimDateChanged: Item ' + itemNum + ' not found', 'ERROR');
+      return;
+    }
+
+    if (hasDate) {
+      // Reclaim complete - return item to shelf
+      inventorySheet.getRange(itemRow, COLS.INVENTORY.STATUS).setValue('On Shelf');
+      inventorySheet.getRange(itemRow, COLS.INVENTORY.ASSIGNED_TO).setValue('On Shelf');
+      inventorySheet.getRange(itemRow, COLS.INVENTORY.LOCATION).setValue('Helena');
+      inventorySheet.getRange(itemRow, COLS.INVENTORY.DATE_ASSIGNED).setValue('');
+      inventorySheet.getRange(itemRow, COLS.INVENTORY.CHANGE_OUT_DATE).setNumberFormat('@').setValue('N/A');
+      inventorySheet.getRange(itemRow, COLS.INVENTORY.PICKED_FOR).setValue('');
+      logEvent('Previous Employee item ' + itemNum + ' returned to On Shelf (Helena)');
+    } else {
+      // Date removed - revert to Ready For Test (Stage 2)
+      inventorySheet.getRange(itemRow, COLS.INVENTORY.STATUS).setValue('Ready For Test');
+      inventorySheet.getRange(itemRow, COLS.INVENTORY.ASSIGNED_TO).setValue('Packed For Testing');
+      inventorySheet.getRange(itemRow, COLS.INVENTORY.LOCATION).setValue("Cody's Truck");
+      logEvent('Previous Employee item ' + itemNum + ' reverted to Ready For Test');
+    }
+  } catch (e) {
+    logEvent('handlePreviousEmployeeReclaimDateChanged error: ' + e, 'ERROR');
   }
 }
 
@@ -11882,7 +11983,7 @@ function setupLocationsSheet() {
   }
 
   // Set up headers
-  var headers = ['Location', 'Drive Time (min)', 'Direction', 'Overnight City', 'Base Time (min)', 'Per Task (min)'];
+  var headers = ['Location', 'Drive Time (min)', 'Direction', 'Overnight City', 'Base Time (min)', 'Per Task (min)', 'Rubber Class Approval'];
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
 
   // Format header row
@@ -11902,6 +12003,7 @@ function setupLocationsSheet() {
   sheet.setColumnWidth(4, 130); // Overnight City
   sheet.setColumnWidth(5, 120); // Base Time (min)
   sheet.setColumnWidth(6, 120); // Per Task (min)
+  sheet.setColumnWidth(7, 160); // Rubber Class Approval
 
   // Default locations data [Location, Drive Time from Helena (min), Direction, Overnight City, Base Time (min), Per Task (min)]
   // Base Time: minimum time at location regardless of task count (default 15 min)
@@ -11946,10 +12048,17 @@ function setupLocationsSheet() {
     ['Unknown', 0, 'Office', 'Helena', 0, 0]
   ];
 
+  // Map to include G column (Rubber Class Approval)
+  var defaultLocationsWithApproval = defaultLocations.map(function(row) {
+    var locName = row[0];
+    var approval = DEFAULT_LOCATION_APPROVALS[locName] || 'CL2';
+    return [row[0], row[1], row[2], row[3], row[4], row[5], approval];
+  });
+
   // Write location data and sort
-  if (defaultLocations.length > 0) {
-    sheet.getRange(2, 1, defaultLocations.length, 6).setValues(defaultLocations);
-    sheet.getRange(2, 1, defaultLocations.length, 6).sort(1);
+  if (defaultLocationsWithApproval.length > 0) {
+    sheet.getRange(2, 1, defaultLocationsWithApproval.length, 7).setValues(defaultLocationsWithApproval);
+    sheet.getRange(2, 1, defaultLocationsWithApproval.length, 7).sort(1);
   }
 
   // Add data validation for Direction column
@@ -11958,24 +12067,31 @@ function setupLocationsSheet() {
     .requireValueInList(directionValues)
     .setAllowInvalid(true)
     .build();
-  sheet.getRange(2, 3, defaultLocations.length, 1).setDataValidation(directionRule);
+  sheet.getRange(2, 3, defaultLocationsWithApproval.length, 1).setDataValidation(directionRule);
 
   // Add number validation for Drive Time, Base Time, Per Task columns (advisory only)
   var numRule = SpreadsheetApp.newDataValidation()
     .requireNumberGreaterThanOrEqualTo(0)
     .setAllowInvalid(true)
     .build();
-  sheet.getRange(2, 2, defaultLocations.length, 1).setDataValidation(numRule);
-  sheet.getRange(2, 5, defaultLocations.length, 2).setDataValidation(numRule);
+  sheet.getRange(2, 2, defaultLocationsWithApproval.length, 1).setDataValidation(numRule);
+  sheet.getRange(2, 5, defaultLocationsWithApproval.length, 2).setDataValidation(numRule);
+
+  // Add data validation for Rubber Class Approval column
+  var approvalRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['None', 'CL2', 'CL3', 'CL2 & CL3'], true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, 7, defaultLocationsWithApproval.length, 1).setDataValidation(approvalRule);
 
   // Create (or refresh) the companion Drive Time Routes sheet for city-to-city pairs
   setupDriveTimeRoutesSheet(ss);
 
-  Logger.log('setupLocationsSheet: Created with ' + defaultLocations.length + ' locations');
+  Logger.log('setupLocationsSheet: Created with ' + defaultLocationsWithApproval.length + ' locations');
 
   SpreadsheetApp.getUi().alert(
     '✅ Locations Sheet Created!\n\n' +
-    'Added ' + defaultLocations.length + ' locations with drive times from Helena.\n\n' +
+    'Added ' + defaultLocationsWithApproval.length + ' locations with drive times from Helena.\n\n' +
     'Columns E & F (Base Time, Per Task) control how long you spend at each crew:\n' +
     '• Base Time: minimum time at that location (default 15 min)\n' +
     '• Per Task: time added per task (default 10 min)\n' +
@@ -11984,7 +12100,120 @@ function setupLocationsSheet() {
     'Use Maintenance → Sheets Setup → 🗺️ Refresh Drive Times (Google Maps) to update them.'
   );
 
-  return { success: true, message: 'Created Locations sheet with ' + defaultLocations.length + ' locations' };
+  return { success: true, message: 'Created Locations sheet with ' + defaultLocationsWithApproval.length + ' locations' };
+}
+
+
+/**
+ * Migrates existing Location Approvals from the Reclaims sheet (or defaults)
+ * to a new \'Rubber Class Approval\' column (Column G) on the Locations sheet.
+ * Adds validation dropdowns. Safe to run multiple times.
+ */
+function migrateLocationsSheetForRubberClass() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var locationsSheet = ss.getSheetByName('Locations');
+  
+  if (!locationsSheet) {
+    SpreadsheetApp.getUi().alert('❌ Error', 'Locations sheet not found. Please run "Setup Locations Sheet" first.', SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+  
+  var lastRow = locationsSheet.getLastRow();
+  if (lastRow < 1) {
+    SpreadsheetApp.getUi().alert('❌ Error', 'Locations sheet is empty.', SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+  
+  var headers = locationsSheet.getRange(1, 1, 1, locationsSheet.getLastColumn()).getValues()[0];
+  var approvalColIdx = -1;
+  for (var h = 0; h < headers.length; h++) {
+    var hdr = String(headers[h]).toLowerCase().trim();
+    if (hdr.indexOf('approval') !== -1 || hdr.indexOf('rubber class') !== -1) {
+      approvalColIdx = h;
+      break;
+    }
+  }
+  
+  // If Column G (Rubber Class Approval) is not found, insert or append it
+  var targetCol = -1;
+  if (approvalColIdx === -1) {
+    // Append at the end (column 7)
+    targetCol = 7;
+    locationsSheet.getRange(1, targetCol).setValue('Rubber Class Approval')
+      .setFontWeight('bold')
+      .setBackground('#1a73e8')
+      .setFontColor('white')
+      .setHorizontalAlignment('center');
+    locationsSheet.setColumnWidth(targetCol, 160);
+    Logger.log('migrateLocationsSheetForRubberClass: Added "Rubber Class Approval" header at column ' + targetCol);
+  } else {
+    targetCol = approvalColIdx + 1;
+    Logger.log('migrateLocationsSheetForRubberClass: Found existing header at column ' + targetCol);
+  }
+  
+  // Parse existing approvals from Reclaims sheet (if present)
+  var savedApprovals = {};
+  var reclaimsSheet = ss.getSheetByName('Reclaims');
+  if (reclaimsSheet && reclaimsSheet.getLastRow() > 0) {
+    var reclaimsData = reclaimsSheet.getDataRange().getValues();
+    var inLocTable = false;
+    for (var r = 0; r < reclaimsData.length; r++) {
+      var cellVal = (reclaimsData[r][0] || '').toString();
+      if (cellVal.indexOf('Class Location Approvals') !== -1 || cellVal.indexOf('Approved Class 3 Locations') !== -1) {
+        inLocTable = true;
+        continue;
+      }
+      if (inLocTable && (!cellVal || cellVal === '')) {
+        inLocTable = false;
+        continue;
+      }
+      if (inLocTable && cellVal && cellVal !== 'Location') {
+        var approvalVal = (reclaimsData[r][1] || '').toString().trim();
+        if (approvalVal) {
+          savedApprovals[cellVal] = approvalVal;
+        }
+      }
+    }
+  }
+  
+  // Read location names from Locations sheet
+  var locationValues = locationsSheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  var approvalValuesToSet = [];
+  
+  for (var i = 0; i < locationValues.length; i++) {
+    var locName = String(locationValues[i][0]).trim();
+    var existingApproval = '';
+    
+    // If the column already exists and has a value, keep it
+    if (approvalColIdx !== -1) {
+      existingApproval = String(locationsSheet.getRange(i + 2, targetCol).getValue()).trim();
+    }
+    
+    var approvalVal = existingApproval || savedApprovals[locName] || DEFAULT_LOCATION_APPROVALS[locName] || 'CL2';
+    approvalValuesToSet.push([normalizeApprovalValue(approvalVal)]);
+  }
+  
+  // Write values to G column
+  if (approvalValuesToSet.length > 0) {
+    locationsSheet.getRange(2, targetCol, approvalValuesToSet.length, 1).setValues(approvalValuesToSet);
+  }
+  
+  // Set validation rule
+  var approvalRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['None', 'CL2', 'CL3', 'CL2 & CL3'], true)
+    .setAllowInvalid(false)
+    .build();
+  locationsSheet.getRange(2, targetCol, lastRow - 1, 1).setDataValidation(approvalRule);
+  
+  SpreadsheetApp.getUi().alert(
+    '✅ Migration Complete',
+    'Locations sheet has been successfully updated with the "Rubber Class Approval" column.\n\n' +
+    'Location approvals have been migrated from your existing Reclaims configuration (or populated with defaults).\n\n' +
+    'You can now manage these rubber class permissions directly on the Locations sheet.',
+    SpreadsheetApp.getUi().ButtonSet.OK
+  );
+  
+  Logger.log('migrateLocationsSheetForRubberClass: Migrated ' + approvalValuesToSet.length + ' locations');
 }
 
 /**
@@ -13980,14 +14209,14 @@ function getTasksWithMetadata() {
       throw new Error('Failed to serialize task data');
     }
 
-    // Store in ScriptProperties (500KB limit) to bypass transfer limit
+    // Store in ScriptProperties (500KB limit) using chunked utility to bypass 9KB value limit
     try {
+      setChunkedScriptProperty('TASKS_DATA', jsonStr);
       var props = PropertiesService.getScriptProperties();
-      props.setProperty('TASKS_DATA', jsonStr);
       props.setProperty('TASKS_TIMESTAMP', new Date().toISOString());
-      Logger.log('getTasksWithMetadata: Stored ' + result.totalTasks + ' tasks in ScriptProperties');
+      Logger.log('getTasksWithMetadata: Stored ' + result.totalTasks + ' tasks in ScriptProperties via chunking');
     } catch (propErr) {
-      Logger.log('getTasksWithMetadata: ScriptProperties storage failed: ' + propErr);
+      Logger.log('getTasksWithMetadata: ScriptProperties chunked storage failed: ' + propErr);
       // Fall back to direct return
       Logger.log('getTasksWithMetadata: Attempting direct return...');
       return result;
@@ -14019,11 +14248,10 @@ function getStoredTasks() {
   try {
     Logger.log('=== getStoredTasks START ===');
 
-    var props = PropertiesService.getScriptProperties();
-    var jsonStr = props.getProperty('TASKS_DATA');
+    var jsonStr = getChunkedScriptProperty('TASKS_DATA');
 
     if (!jsonStr) {
-      Logger.log('getStoredTasks: No data found in ScriptProperties');
+      Logger.log('getStoredTasks: No data found in ScriptProperties (chunked or legacy)');
       return {
         error: true,
         message: 'No task data found. Please refresh.'
@@ -16083,8 +16311,7 @@ function buildSheets() {
     { name: SHEET_AED, headers: ['AED', 'Model', '', 'Pad Expiration', 'Date Assigned', 'Location', 'Status', 'Assigned To', '', 'Picked For', 'Notes'] },
     { name: SHEET_AED_SWAPS, headers: ['Item #', 'Model', 'Date Assigned', 'Pad Expiration', 'Days Left', 'Location', 'Assigned To', 'Status', 'Replacement Pads', 'Notes'] },
     { name: SHEET_PURCHASE_NEEDS, headers: ['Item Type', 'Size', 'Class', 'Quantity Needed', 'Reason', 'Status/Notes'] },
-    { name: SHEET_INVENTORY_REPORTS, headers: null, customSetup: true },
-    { name: SHEET_RECLAIMS, headers: null, customSetup: true }
+    { name: SHEET_INVENTORY_REPORTS, headers: null, customSetup: true }
     // Note: Item History Lookup sheet removed - lookup now displays in popup dialog
   ];
   sheetDefs.forEach(function(def) {
@@ -16292,12 +16519,7 @@ function buildSheets() {
   ensurePickedForColumn();
 
 
-  // Custom setup for Reclaims sheet - set up all required tables
-  var reclaimsSheet = ss.getSheetByName(SHEET_RECLAIMS);
-  if (!reclaimsSheet) {
-    reclaimsSheet = ss.insertSheet(SHEET_RECLAIMS);
-  }
-  setupReclaimsSheet(reclaimsSheet);
+  // Reclaims are now integrated directly into Glove/Sleeve swaps
 
   // Custom setup for Employee History sheet
   var empHistorySheet = ss.getSheetByName('Employee History');
@@ -16452,20 +16674,24 @@ function buildSheets() {
         }
       }
 
-      var lastRow = Math.max(employeesSheet.getLastRow(), 100);  // At least 100 rows
+      var lastRow = employeesSheet.getLastRow();
 
       // Set dropdown for Last Day Reason column
-      if (lastDayReasonColIdx !== -1) {
-        var reasonRange = employeesSheet.getRange(2, lastDayReasonColIdx, Math.max(1, lastRow - 1), 1);
-        var reasonRule = SpreadsheetApp.newDataValidation()
-          .requireValueInList(['Quit', 'Fired', 'Layoff', 'Resigned'], true)
-          .setAllowInvalid(false)
-          .build();
-        reasonRange.setDataValidation(reasonRule);
+      if (lastDayReasonColIdx !== -1 && lastRow > 1) {
+        try {
+          var reasonRange = employeesSheet.getRange(2, lastDayReasonColIdx, lastRow - 1, 1);
+          var reasonRule = SpreadsheetApp.newDataValidation()
+            .requireValueInList(['Quit', 'Fired', 'Layoff', 'Resigned'], true)
+            .setAllowInvalid(false)
+            .build();
+          reasonRange.setDataValidation(reasonRule);
+        } catch (e) {
+          Logger.log('buildSheets: Warning - could not set Last Day Reason validation: ' + e.message);
+        }
       }
 
       // Set dropdown for Location column - valid locations only (no Unknown)
-      if (locationColIdx !== -1) {
+      if (locationColIdx !== -1 && lastRow > 1) {
         var validLocations = [
           'Anaconda', 'Big Sky', 'Billings', 'Bonner', 'Bozeman', 'Butte', 'CA Sub', 'California',
           'Elliston', 'Ennis', 'Glendive', 'Gold Creek', 'Great Falls', 'Helena',
@@ -16473,13 +16699,17 @@ function buildSheets() {
           'Missoula', 'Northern Lights', 'Rapelje', 'Sidney', 'South Dakota',
           'South Dakota Dock', 'Stanford', 'Texas', 'Three Forks', 'Vacation', 'Weeds', 'Previous Employee'
         ];
-        var locationRange = employeesSheet.getRange(2, locationColIdx, Math.max(1, lastRow - 1), 1);
-        var locationRule = SpreadsheetApp.newDataValidation()
-          .requireValueInList(validLocations, true)
-          .setAllowInvalid(false)
-          .build();
-        locationRange.setDataValidation(locationRule);
-        Logger.log('buildSheets: Added Location dropdown validation with ' + validLocations.length + ' options');
+        try {
+          var locationRange = employeesSheet.getRange(2, locationColIdx, lastRow - 1, 1);
+          var locationRule = SpreadsheetApp.newDataValidation()
+            .requireValueInList(validLocations, true)
+            .setAllowInvalid(true) // Changed to true to allow City (Status) combined values
+            .build();
+          locationRange.setDataValidation(locationRule);
+          Logger.log('buildSheets: Added Location dropdown validation with ' + validLocations.length + ' options');
+        } catch (e) {
+          Logger.log('buildSheets: Warning - could not set Location validation: ' + e.message);
+        }
       }
     }
   } catch (empValidationError) {
@@ -16621,7 +16851,6 @@ function generateAllReportsPart2() {
   generateHVTesterSwaps(true);
   generatePhasingSetSwaps(true);
   generateAEDSwaps(true);
-  updateReclaimsSheet();
   updatePurchaseNeeds();
   updateInventoryReports();
 
@@ -16735,8 +16964,7 @@ function generateAllReportsLegacy() {
     // Generate AED pad replacement report (90-day lookahead)
     generateAEDSwaps(true);  // Silent mode for batch operations
 
-    // Update Reclaims BEFORE Purchase Needs so reclaim data is available
-    updateReclaimsSheet();
+    // Update Purchase Needs
     updatePurchaseNeeds();
     updateInventoryReports();
 
@@ -16838,9 +17066,11 @@ function preserveManualPickLists(swapSheet) {
       var bgRow = backgrounds[i];
 
       // Column A (index 0) = Employee name
+      // Column B (index 1) = Current Item #
       // Column G (index 6) = Pick List Item #
       // Column H (index 7) = Status
       var employeeName = (row[0] || '').toString().trim();
+      var currentItemNum = (row[1] || '').toString().trim();
       var pickListNum = (row[6] || '').toString().trim();
       var status = (row[7] || '').toString().trim();
       var pickListBg = (bgRow[6] || '').toString().toLowerCase();
@@ -16855,12 +17085,17 @@ function preserveManualPickLists(swapSheet) {
 
       // Check if Pick List cell has light blue background (manual edit indicator)
       if (pickListBg === manualEditColor && pickListNum && pickListNum !== '—') {
-        var empKey = employeeName.toLowerCase();
+        var empKey = employeeName.toLowerCase() + '|' + currentItemNum;
         manualPicks[empKey] = {
           pickListNum: pickListNum,
           status: status
         };
-        Logger.log('Preserved manual pick for ' + employeeName + ': ' + pickListNum);
+        // Also save simple employeeName key as fallback
+        manualPicks[employeeName.toLowerCase()] = {
+          pickListNum: pickListNum,
+          status: status
+        };
+        Logger.log('Preserved manual pick for ' + employeeName + ' (item ' + currentItemNum + '): ' + pickListNum);
       }
     }
   } catch (e) {
@@ -16872,7 +17107,7 @@ function preserveManualPickLists(swapSheet) {
 
 /**
  * Restores manual Pick List edits after regenerating swap sheets.
- * Searches for employee names in the preserved map and restores their manual picks.
+ * Searches for employee names/keys in the preserved map and restores their manual picks.
  * @param {Sheet} swapSheet - The regenerated Glove/Sleeve Swaps sheet
  * @param {Object} manualPicks - Map from preserveManualPickLists
  * @param {number} startRow - First data row to search (1-based, after headers)
@@ -16898,6 +17133,7 @@ function restoreManualPickLists(swapSheet, manualPicks, startRow, endRow) {
     for (var i = 0; i < values.length; i++) {
       var row = values[i];
       var employeeName = (row[0] || '').toString().trim();
+      var currentItemNum = (row[1] || '').toString().trim();
 
       // Skip header rows and empty
       if (!employeeName || employeeName === 'Employee' ||
@@ -16907,12 +17143,13 @@ function restoreManualPickLists(swapSheet, manualPicks, startRow, endRow) {
         continue;
       }
 
-      var empKey = employeeName.toLowerCase();
+      var empKey = employeeName.toLowerCase() + '|' + currentItemNum;
+      var fallbackKey = employeeName.toLowerCase();
+      var preserved = manualPicks[empKey] || manualPicks[fallbackKey];
 
-      // Check if this employee has a preserved manual pick
-      if (manualPicks[empKey]) {
+      // Check if this employee/item has a preserved manual pick
+      if (preserved) {
         var actualRow = startRow + i;
-        var preserved = manualPicks[empKey];
 
         // Restore the Pick List item number and status
         swapSheet.getRange(actualRow, 7).setValue(preserved.pickListNum);  // Column G
@@ -16921,7 +17158,7 @@ function restoreManualPickLists(swapSheet, manualPicks, startRow, endRow) {
         // Reapply the light blue background
         swapSheet.getRange(actualRow, 7).setBackground(manualEditColor);
 
-        Logger.log('Restored manual pick for ' + employeeName + ': ' + preserved.pickListNum);
+        Logger.log('Restored manual pick for ' + employeeName + ' (item ' + currentItemNum + '): ' + preserved.pickListNum);
         restoredCount++;
       }
     }
@@ -16965,7 +17202,11 @@ function generateSwaps(itemType) {
     var manualPicks = preserveManualPickLists(swapSheet);
     logEvent('Preserved ' + Object.keys(manualPicks).length + ' manual pick list entries');
 
-    swapSheet.clear();
+    // Clear only columns A-W (columns 1-23) to preserve user helper tables in Y-AS
+    var maxRows = swapSheet.getMaxRows();
+    if (maxRows > 0) {
+      swapSheet.getRange(1, 1, maxRows, 23).clear();
+    }
 
     // Schema cache removed during refactoring (Jan 2026)
 
@@ -16987,6 +17228,7 @@ function generateSwaps(itemType) {
 
     var empData = employees.slice(1);
     var inventoryData = inventory.slice(1);
+    var assignedItemNums = new Set();
 
     // Find Location and Job Number columns in Employees sheet dynamically
     var empHeaders = employees[0];
@@ -17074,27 +17316,31 @@ function generateSwaps(itemType) {
       return foremanName || empCrew || 'Unknown';  // Return foreman name, or crew number, or Unknown
     }
 
-    // Read location approvals from Reclaims sheet to exclude employees
-    // whose location is not approved for a given class (they go to Reclaims instead)
+    // Read location approvals from Locations sheet (Column G = index 6)
     var locationApprovals = {};
-    var reclaimsSheet = ss.getSheetByName(SHEET_RECLAIMS);
-    if (reclaimsSheet && reclaimsSheet.getLastRow() > 0) {
-      var reclaimsData = reclaimsSheet.getDataRange().getValues();
-      var inLocTable = false;
-      for (var ri = 0; ri < reclaimsData.length; ri++) {
-        var cellVal = (reclaimsData[ri][0] || '').toString();
-        if (cellVal.indexOf('Class Location Approvals') !== -1 || cellVal.indexOf('Approved Class 3 Locations') !== -1) {
-          inLocTable = true;
-          continue;
+    var locationsSheet = ss.getSheetByName('Locations');
+    if (locationsSheet && locationsSheet.getLastRow() > 0) {
+      var locationsData = locationsSheet.getDataRange().getValues();
+      var locHeaders = locationsData[0];
+      var locColIdx = 0; // Column A
+      var appColIdx = -1;
+      for (var lh = 0; lh < locHeaders.length; lh++) {
+        var lHdr = String(locHeaders[lh]).toLowerCase().trim();
+        if (lHdr.indexOf('approval') !== -1 || lHdr.indexOf('rubber class') !== -1) {
+          appColIdx = lh;
+          break;
         }
-        if (inLocTable && (!cellVal || cellVal === '')) {
-          inLocTable = false;
-          continue;
-        }
-        if (inLocTable && cellVal && cellVal !== 'Location') {
-          var approvalVal = (reclaimsData[ri][1] || '').toString().trim();
-          if (approvalVal) {
-            locationApprovals[cellVal] = approvalVal;
+      }
+      // If not found by header, default to column index 6 (G)
+      if (appColIdx === -1 && locHeaders.length >= 7) {
+        appColIdx = 6;
+      }
+      if (appColIdx !== -1) {
+        for (var li = 1; li < locationsData.length; li++) {
+          var locVal = String(locationsData[li][locColIdx]).trim();
+          var appVal = String(locationsData[li][appColIdx]).trim();
+          if (locVal && appVal) {
+            locationApprovals[locVal] = appVal;
           }
         }
       }
@@ -17111,8 +17357,11 @@ function generateSwaps(itemType) {
         return true;  // Class 0 is always allowed (not voltage-rated)
       }
       var approval = locationApprovals[location];
-      // If location is NOT in the approval table at all → treat as approved
-      // (approval table may not be fully configured; only explicit "None" blocks)
+      // If location is NOT in the approval table at all → check DEFAULT_LOCATION_APPROVALS
+      if (approval === undefined || approval === null) {
+        approval = DEFAULT_LOCATION_APPROVALS[location];
+      }
+      // If still not found, default to approved
       if (approval === undefined || approval === null) {
         return true;
       }
@@ -17280,7 +17529,7 @@ function generateSwaps(itemType) {
         return new Date(a.changeOutDate) - new Date(b.changeOutDate);
       });
 
-      var assignedItemNums = new Set();
+      // assignedItemNums is defined at the function level
 
       // Helper function to check if item has LOST-LOCATE marker
       // Using COLS.INVENTORY constants (12-col layout with ESL ID at B)
@@ -17582,6 +17831,490 @@ function generateSwaps(itemType) {
       currentRow += 2;
     }); // closes classes.forEach
 
+    // =============================================================================
+    // INTEGRATED RECLAIMS GENERATION
+    // =============================================================================
+    try {
+      Logger.log('generateSwaps(' + itemType + '): Generating reclaims...');
+
+      var C_ITEM_NUM = COLS.INVENTORY.ITEM_NUM - 1;
+      var C_SIZE = COLS.INVENTORY.SIZE - 1;
+      var C_CLASS = COLS.INVENTORY.CLASS - 1;
+      var C_DATE_ASSIGNED = COLS.INVENTORY.DATE_ASSIGNED - 1;
+      var C_LOCATION = COLS.INVENTORY.LOCATION - 1;
+      var C_STATUS = COLS.INVENTORY.STATUS - 1;
+      var C_ASSIGNED_TO = COLS.INVENTORY.ASSIGNED_TO - 1;
+      var C_CHANGE_OUT = COLS.INVENTORY.CHANGE_OUT_DATE - 1;
+      var C_PICKED_FOR = COLS.INVENTORY.PICKED_FOR - 1;
+      var C_NOTES = COLS.INVENTORY.NOTES - 1;
+
+      // 1. Get current active employees
+      var currentActiveEmployees = new Set();
+      var systemPlaceholders = [
+        'on shelf', 'in testing', 'packed for delivery', 'packed for testing',
+        'failed rubber', 'lost', 'not repairable', 'ready for test', 'ready for delivery',
+        'assigned', 'destroyed', 'n/a', ''
+      ];
+
+      empData.forEach(function(row) {
+        var empName = (row[0] || '').toString().trim();
+        var empNameLower = empName.toLowerCase();
+        var empLocation = (row[locationColIdx] || '').toString().trim().toLowerCase();
+
+        if (systemPlaceholders.indexOf(empNameLower) !== -1) {
+          return;
+        }
+
+        if (hireDateColIdx !== -1 && isEmployeePending(row[hireDateColIdx])) {
+          if (empName) currentActiveEmployees.add(empNameLower);
+          return;
+        }
+
+        if (empName && empLocation !== 'previous employee') {
+          currentActiveEmployees.add(empNameLower);
+        }
+      });
+
+      // 2. Get Previous Employee names from Employee History
+      var previousEmployeeNames = new Set();
+      var previousEmployeeLastDay = {};
+      var employeeHistorySheet = ss.getSheetByName('Employee History');
+      if (employeeHistorySheet && employeeHistorySheet.getLastRow() > 2) {
+        var historyData = employeeHistorySheet.getRange(3, 1, employeeHistorySheet.getLastRow() - 2, 10).getValues();
+        var employeeTerminationInfo = {};
+
+        for (var hi = 0; hi < historyData.length; hi++) {
+          var histName = (historyData[hi][1] || '').toString().trim();
+          var histDate = historyData[hi][0];
+          var histLocation = (historyData[hi][3] || '').toString().trim();
+          var histEventType = (historyData[hi][2] || '').toString().trim();
+          var histLastDay = historyData[hi][6];
+
+          if (!histName) continue;
+
+          var histNameLower = histName.toLowerCase();
+          var entryDate = histDate instanceof Date ? histDate : new Date(histDate);
+          var eventTypeLower = histEventType.toLowerCase();
+          var locationLower = histLocation.toLowerCase();
+
+          var isValidDate = entryDate instanceof Date && !isNaN(entryDate.getTime());
+          if (isValidDate) {
+            var year = entryDate.getFullYear();
+            if (year < 1900 || year > 2100) isValidDate = false;
+          }
+
+          if (!employeeTerminationInfo[histNameLower]) {
+            employeeTerminationInfo[histNameLower] = {
+              terminationDates: [],
+              rehireDates: [],
+              lastDay: null,
+              latestTerminationDate: null,
+              latestRehireDate: null
+            };
+          }
+
+          var info = employeeTerminationInfo[histNameLower];
+          if (eventTypeLower === 'terminated' || locationLower === 'previous employee') {
+            if (isValidDate) {
+              info.terminationDates.push(entryDate);
+              if (!info.latestTerminationDate || entryDate > info.latestTerminationDate) {
+                info.latestTerminationDate = entryDate;
+                info.lastDay = histLastDay || info.lastDay;
+              }
+            }
+          }
+          if (eventTypeLower === 'rehired') {
+            if (isValidDate) {
+              info.rehireDates.push(entryDate);
+              if (!info.latestRehireDate || entryDate > info.latestRehireDate) {
+                info.latestRehireDate = entryDate;
+              }
+            }
+          }
+        }
+
+        for (var empNameKey in employeeTerminationInfo) {
+          if (currentActiveEmployees.has(empNameKey)) continue;
+          var info = employeeTerminationInfo[empNameKey];
+          if (info.terminationDates.length === 0) continue;
+          var wasRehiredAfterLatestTermination = false;
+          if (info.latestRehireDate && info.latestTerminationDate) {
+            wasRehiredAfterLatestTermination = info.latestRehireDate >= info.latestTerminationDate;
+          }
+          if (!wasRehiredAfterLatestTermination) {
+            previousEmployeeNames.add(empNameKey);
+            previousEmployeeLastDay[empNameKey] = info.lastDay || '';
+          }
+        }
+      }
+
+      // 3. Scan Inventory for Previous Employee items and Reclaims
+      var prevEmpItems = [];
+      var classReclaims = [];
+      var lostItems = [];
+
+      var ignoreLocations = [
+        "cody's truck", "destroyed", "kalispell gas dock", "lost",
+        "previous employee", "weeds", "arnett / jm test"
+      ];
+
+      inventoryData.forEach(function(row) {
+        var itemNum = row[C_ITEM_NUM];
+        if (!itemNum || itemNum === '' || itemNum === null) return;
+
+        var status = (row[C_STATUS] || '').toString().trim();
+        var location = (row[C_LOCATION] || '').toString().trim();
+        var assignedTo = (row[C_ASSIGNED_TO] || '').toString().trim();
+        var pickedFor = (row[C_PICKED_FOR] || '').toString().trim();
+        var itemClass = row[C_CLASS];
+        var locationLower = location.toLowerCase();
+        var assignedToLower = assignedTo.toLowerCase();
+        var pickedForLower = pickedFor.toLowerCase();
+
+        // --- PREVIOUS EMPLOYEE RECLAIM SCAN ---
+        var isPrevEmpItem = false;
+        var isAlreadyPicked = false;
+        var employeeName = '';
+
+        if (locationLower === 'previous employee' || previousEmployeeNames.has(assignedToLower)) {
+          if (assignedTo && ignoreNames.indexOf(assignedToLower) === -1) {
+            isPrevEmpItem = true;
+            employeeName = assignedTo;
+          }
+        } else if (status.toLowerCase() === 'ready for test' && pickedForLower.indexOf('reclaim') !== -1) {
+          var suffixIdx = pickedForLower.indexOf(' reclaim');
+          if (suffixIdx !== -1) {
+            var empNameStr = pickedFor.substring(0, suffixIdx).trim();
+            if (previousEmployeeNames.has(empNameStr.toLowerCase())) {
+              isPrevEmpItem = true;
+              isAlreadyPicked = true;
+              employeeName = empNameStr;
+            }
+          }
+        }
+
+        if (isPrevEmpItem) {
+          var lastDayValue = previousEmployeeLastDay[employeeName.toLowerCase()] || '';
+          var rowData = [
+            employeeName,       // Employee (A)
+            itemNum,            // Current Item (B)
+            row[C_SIZE],        // Size (C)
+            row[C_DATE_ASSIGNED],// Date Assigned (D)
+            row[C_CHANGE_OUT],  // Change Out Date (E)
+            'PREV EMP',         // Days Left (F)
+            '—',                // Pick List Item # (G)
+            isAlreadyPicked ? 'Ready For Delivery 🚚' : 'Return to Shelf', // Status (H)
+            isAlreadyPicked,    // Picked checkbox (I)
+            '',                 // Date Changed (J)
+            // Stage 1 (K-M)
+            status, assignedTo, row[C_DATE_ASSIGNED],
+            // Stage 1 Old Item (N-P)
+            status, assignedTo, row[C_DATE_ASSIGNED],
+            // Stage 2 (Q-T)
+            isAlreadyPicked ? 'Ready For Test' : '',
+            isAlreadyPicked ? 'Packed For Testing' : '',
+            isAlreadyPicked ? row[C_DATE_ASSIGNED] : '',
+            isAlreadyPicked ? pickedFor : '',
+            // Stage 3 (U-W)
+            '', '', ''
+          ];
+          prevEmpItems.push(rowData);
+          return;
+        }
+
+        // --- LOST ITEMS SCAN ---
+        var notes = (row[C_NOTES] || '').toString().trim().toUpperCase();
+        var isLost = notes.indexOf('LOST-LOCATE') !== -1 ||
+                     notes.indexOf('LOST LOCATE') !== -1 ||
+                     notes === 'LOCATE';
+        if (isLost) {
+          var rowData = [
+            assignedTo || 'Unknown', // Employee (A)
+            itemNum,            // Current Item (B)
+            row[C_SIZE],        // Size (C)
+            row[C_DATE_ASSIGNED],// Date Assigned (D)
+            row[C_CHANGE_OUT],  // Change Out Date (E)
+            'LOST-LOCATE',      // Days Left (F)
+            '—',                // Pick List Item # (G)
+            'Locate Item 🔍',   // Status (H)
+            false,              // Picked checkbox (I)
+            '',                 // Date Changed (J)
+            // Stage 1 (K-M)
+            '', '', '',
+            // Stage 1 Old Item (N-P)
+            status, assignedTo, row[C_DATE_ASSIGNED],
+            // Stage 2 (Q-T)
+            '', '', '', '',
+            // Stage 3 (U-W)
+            '', '', ''
+          ];
+          lostItems.push(rowData);
+          return;
+        }
+
+        // --- CLASS RECLAIM SCAN ---
+        if (ignoreNames.indexOf(assignedToLower) !== -1 || ignoreLocations.indexOf(locationLower) !== -1) {
+          return;
+        }
+
+        var approvalStatus = locationApprovals[location] || '';
+        var itemClassNum = parseInt(itemClass, 10) || 0;
+        var needsReclaim = false;
+        var targetClass = 0;
+        var reclaimTypeLabel = '';
+
+        if (approvalStatus === 'None') {
+          if (itemClassNum === 3) {
+            needsReclaim = true;
+            targetClass = 2;
+            reclaimTypeLabel = 'CL3→CL2';
+          } else if (itemClassNum === 2) {
+            needsReclaim = true;
+            targetClass = 3;
+            reclaimTypeLabel = 'CL2→CL3';
+          }
+        } else if (itemClassNum === 3 && (approvalStatus === '' || approvalStatus === 'CL2')) {
+          needsReclaim = true;
+          targetClass = 2;
+          reclaimTypeLabel = 'CL3→CL2';
+        } else if (itemClassNum === 2 && approvalStatus === 'CL3') {
+          needsReclaim = true;
+          targetClass = 3;
+          reclaimTypeLabel = 'CL2→CL3';
+        }
+
+        if (needsReclaim) {
+          classReclaims.push({
+            employee: assignedTo,
+            itemNum: itemNum,
+            size: row[C_SIZE],
+            itemClass: itemClass,
+            location: location,
+            dateAssigned: row[C_DATE_ASSIGNED],
+            changeOutDate: row[C_CHANGE_OUT],
+            status: status,
+            targetClass: targetClass,
+            reclaimTypeLabel: reclaimTypeLabel
+          });
+        }
+      });
+
+      // 4. Assign pick list items to Class Reclaims
+      classReclaims.forEach(function(reclaim) {
+        var key = reclaim.employee.toLowerCase() + '|' + reclaim.itemNum;
+        var preserved = manualPicks[key] || manualPicks[reclaim.employee.toLowerCase()];
+        
+        var pickListValue = '—';
+        var pickListStatus = '';
+        var isAlreadyPicked = false;
+        var pickListItemData = null;
+        var pickListStatusRaw = '';
+
+        // Search for item already picked for this employee
+        var pickedForMatch = inventoryData.find(function(item) {
+          var pickedFor = (item[C_PICKED_FOR] || '').toString().trim();
+          var classMatch = parseInt(item[C_CLASS], 10) === reclaim.targetClass;
+          var pickedForEmployee = pickedFor.toLowerCase().indexOf(reclaim.employee.toLowerCase()) !== -1;
+          var notAlreadyUsed = !assignedItemNums.has(item[0]);
+          var notLost = (item[C_NOTES] || '').toString().toUpperCase().indexOf('LOST-LOCATE') === -1;
+          return classMatch && pickedForEmployee && notAlreadyUsed && notLost;
+        });
+
+        if (pickedForMatch) {
+          pickListValue = pickedForMatch[0];
+          pickListStatusRaw = (pickedForMatch[C_STATUS] || '').toString().trim().toLowerCase();
+          pickListItemData = pickedForMatch;
+          isAlreadyPicked = true;
+          assignedItemNums.add(pickedForMatch[0]);
+        }
+
+        if (!pickListItemData && preserved && preserved.pickListNum && preserved.pickListNum !== '—') {
+          pickListValue = preserved.pickListNum;
+          pickListStatus = preserved.status;
+          assignedItemNums.add(preserved.pickListNum);
+          
+          var match = inventoryData.find(function(item) {
+            return String(item[0]).trim() === String(preserved.pickListNum).trim();
+          });
+          if (match) {
+            pickListItemData = match;
+            pickListStatusRaw = (match[C_STATUS] || '').toString().toLowerCase();
+          }
+        }
+
+        if (!pickListItemData) {
+          var preferredSize = reclaim.size;
+          var empKey = reclaim.employee.toLowerCase();
+          if (empMap[empKey]) {
+            var empSize = empMap[empKey][sizeColIndex];
+            if (empSize && String(empSize).trim().toLowerCase() !== 'n/a') {
+              preferredSize = empSize;
+            }
+          }
+
+          var match = inventoryData.find(function(item) {
+            var statusMatch = item[C_STATUS] && item[C_STATUS].toString().trim().toLowerCase() === 'on shelf';
+            var classMatch = parseInt(item[C_CLASS], 10) === reclaim.targetClass;
+            var sizeMatch = isGloves ?
+              parseFloat(item[C_SIZE]) === parseFloat(preferredSize) :
+              (item[C_SIZE] && preferredSize && item[C_SIZE].toString().trim().toLowerCase() === preferredSize.toString().trim().toLowerCase());
+            var notAssigned = !assignedItemNums.has(item[0]);
+            var pickedFor = (item[C_PICKED_FOR] || '').toString().trim();
+            var isReservedForOther = pickedFor !== '' && pickedFor.toLowerCase().indexOf(reclaim.employee.toLowerCase()) === -1;
+            var notLost = (item[C_NOTES] || '').toString().toUpperCase().indexOf('LOST-LOCATE') === -1;
+            return statusMatch && classMatch && sizeMatch && notAssigned && !isReservedForOther && !notLost;
+          });
+
+          if (match) {
+            pickListValue = match[0];
+            pickListStatusRaw = 'on shelf';
+            pickListItemData = match;
+            assignedItemNums.add(match[0]);
+          }
+        }
+
+        if (pickListValue === '—' || pickListValue === '-') {
+          pickListStatus = 'Need to Purchase ❌';
+        } else if (!pickListStatus) {
+          if (pickListStatusRaw === 'on shelf') {
+            pickListStatus = 'In Stock ✅';
+          } else if (pickListStatusRaw === 'ready for delivery') {
+            pickListStatus = 'Ready For Delivery 🚚';
+          } else if (pickListStatusRaw === 'in testing') {
+            pickListStatus = 'In Testing 🔬';
+          } else {
+            pickListStatus = 'In Stock ✅';
+          }
+        }
+
+        var stage2Status = '';
+        var stage2AssignedTo = '';
+        var stage2DateAssigned = '';
+        var stage2PickedFor = '';
+
+        if (isAlreadyPicked && pickListItemData) {
+          stage2Status = pickListItemData[C_STATUS] || 'Ready For Delivery';
+          stage2AssignedTo = pickListItemData[C_ASSIGNED_TO] || 'Packed For Delivery';
+          stage2DateAssigned = pickListItemData[C_DATE_ASSIGNED] || '';
+          stage2PickedFor = pickListItemData[C_PICKED_FOR] || '';
+        }
+
+        reclaim.rowData = [
+          reclaim.employee,     // Employee (A)
+          reclaim.itemNum,      // Current Item (B)
+          reclaim.size,         // Size (C)
+          reclaim.dateAssigned, // Date Assigned (D)
+          reclaim.changeOutDate,// Change Out Date (E)
+          reclaim.reclaimTypeLabel, // Days Left (F)
+          pickListValue,        // Pick List Item # (G)
+          pickListStatus,       // Status (H)
+          isAlreadyPicked,      // Picked checkbox (I)
+          '',                   // Date Changed (J)
+          // Stage 1 (K-M)
+          pickListItemData ? (isAlreadyPicked ? 'On Shelf' : (pickListItemData[C_STATUS] || '')) : '',
+          pickListItemData ? (isAlreadyPicked ? 'On Shelf' : (pickListItemData[C_ASSIGNED_TO] || '')) : '',
+          pickListItemData ? (isAlreadyPicked ? '' : (pickListItemData[C_DATE_ASSIGNED] || '')) : '',
+          // Stage 1 Old Item (N-P)
+          reclaim.status || '', reclaim.employee || '', reclaim.dateAssigned || '',
+          // Stage 2 (Q-T)
+          stage2Status, stage2AssignedTo, stage2DateAssigned, stage2PickedFor,
+          // Stage 3 (U-W)
+          '', '', ''
+        ];
+      });
+
+      // Sort class reclaims by location fallback or employee
+      classReclaims.sort(function(a, b) {
+        return a.employee.localeCompare(b.employee);
+      });
+
+      // 5. Write Reclaims tables to Swap Sheet
+      var headers = [
+        'Employee', 'Current ' + itemLabel + ' #', 'Size', 'Date Assigned', 'Change Out Date', 'Days Left', 'Pick List Item #', 'Status', 'Picked', 'Date Changed',
+        'Status', 'Assigned To', 'Date Assigned',
+        'Status', 'Assigned To', 'Date Assigned',
+        'Status', 'Assigned To', 'Date Assigned', 'Picked For',
+        'Assigned To', 'Date Assigned', 'Change Out Date'
+      ];
+
+      // Write Previous Employee Reclaims
+      if (prevEmpItems.length > 0) {
+        swapSheet.getRange(currentRow, 1, 1, 23).merge().setValue('Previous Employee ' + itemLabel + ' Reclaims');
+        swapSheet.getRange(currentRow, 1, 1, 23)
+          .setFontWeight('bold').setFontSize(12).setBackground('#ffcdd2').setFontColor('#b71c1c').setHorizontalAlignment('center');
+        currentRow++;
+
+        swapSheet.getRange(currentRow, 1, 1, headers.length).setValues([headers]);
+        swapSheet.getRange(currentRow, 1, 1, 10).setFontWeight('bold').setFontColor('#ffffff').setHorizontalAlignment('center').setBackground('#e53935');
+        swapSheet.getRange(currentRow, 11, 1, 13).setFontWeight('bold').setBackground('#9e9e9e').setFontColor('#ffffff').setHorizontalAlignment('center').setFontSize(9);
+        currentRow++;
+
+        swapSheet.getRange(currentRow, 1, prevEmpItems.length, 23).setValues(prevEmpItems);
+        swapSheet.getRange(currentRow, 1, prevEmpItems.length, 23).setHorizontalAlignment('center');
+        swapSheet.getRange(currentRow, 9, prevEmpItems.length, 1).insertCheckboxes();
+        currentRow += prevEmpItems.length;
+        currentRow += 2;
+      }
+
+      // Write Class Reclaims
+      if (classReclaims.length > 0) {
+        var clReclaimsData = classReclaims.map(function(r) { return r.rowData; });
+
+        swapSheet.getRange(currentRow, 1, 1, 23).merge().setValue(itemLabel + ' Class Reclaims (Upgrades/Downgrades)');
+        swapSheet.getRange(currentRow, 1, 1, 23)
+          .setFontWeight('bold').setFontSize(12).setBackground('#ffe0b2').setFontColor('#e65100').setHorizontalAlignment('center');
+        currentRow++;
+
+        swapSheet.getRange(currentRow, 1, 1, headers.length).setValues([headers]);
+        swapSheet.getRange(currentRow, 1, 1, 10).setFontWeight('bold').setFontColor('#ffffff').setHorizontalAlignment('center').setBackground('#fb8c00');
+        swapSheet.getRange(currentRow, 11, 1, 13).setFontWeight('bold').setBackground('#9e9e9e').setFontColor('#ffffff').setHorizontalAlignment('center').setFontSize(9);
+        currentRow++;
+
+        swapSheet.getRange(currentRow, 1, clReclaimsData.length, 23).setValues(clReclaimsData);
+        swapSheet.getRange(currentRow, 1, clReclaimsData.length, 23).setHorizontalAlignment('center');
+        swapSheet.getRange(currentRow, 9, clReclaimsData.length, 1).insertCheckboxes();
+
+        // Apply colors to Pick List Status column
+        for (var ci = 0; ci < clReclaimsData.length; ci++) {
+          var statusCell = swapSheet.getRange(currentRow + ci, 8);
+          var statusVal = clReclaimsData[ci][7];
+          if (statusVal.indexOf('In Stock') !== -1) {
+            statusCell.setBackground('#c8e6c9');
+          } else if (statusVal.indexOf('Need to Purchase') !== -1) {
+            statusCell.setBackground('#ffcdd2');
+          } else if (statusVal.indexOf('Ready For Delivery') !== -1) {
+            statusCell.setBackground('#e1bee7');
+          } else if (statusVal.indexOf('In Testing') !== -1) {
+            statusCell.setBackground('#fff9c4');
+          }
+        }
+
+        currentRow += clReclaimsData.length;
+        currentRow += 2;
+      }
+
+      // Write Lost Items
+      if (lostItems.length > 0) {
+        swapSheet.getRange(currentRow, 1, 1, 23).merge().setValue('🔍 Lost ' + itemLabel + ' Items - Need to Locate');
+        swapSheet.getRange(currentRow, 1, 1, 23)
+          .setFontWeight('bold').setFontSize(12).setBackground('#cfd8dc').setFontColor('#37474f').setHorizontalAlignment('center');
+        currentRow++;
+
+        swapSheet.getRange(currentRow, 1, 1, headers.length).setValues([headers]);
+        swapSheet.getRange(currentRow, 1, 1, 10).setFontWeight('bold').setFontColor('#ffffff').setHorizontalAlignment('center').setBackground('#78909c');
+        swapSheet.getRange(currentRow, 11, 1, 13).setFontWeight('bold').setBackground('#9e9e9e').setFontColor('#ffffff').setHorizontalAlignment('center').setFontSize(9);
+        currentRow++;
+
+        swapSheet.getRange(currentRow, 1, lostItems.length, 23).setValues(lostItems);
+        swapSheet.getRange(currentRow, 1, lostItems.length, 23).setHorizontalAlignment('center');
+        currentRow += lostItems.length;
+        currentRow += 2;
+      }
+
+    } catch (reclaimErr) {
+      Logger.log('[ERROR] generateSwaps Reclaims block: ' + reclaimErr);
+    }
+
     // Flush to ensure all data is written before resizing
     SpreadsheetApp.flush();
 
@@ -17623,6 +18356,12 @@ function generateSwaps(itemType) {
         }
       }
       restoreManualPickLists(swapSheet, manualPicks, firstDataRow, swapSheet.getLastRow());
+    }
+
+    try {
+      deploySwapsDashboards();
+    } catch (dashErr) {
+      logEvent('Error deploying swaps dashboards (non-critical): ' + dashErr, 'WARNING');
     }
 
     logEvent(itemType + ' Swaps report generated successfully.');
@@ -18248,1482 +18987,19 @@ function getStatusColorForReport(status) {
 // Location updates are now handled by handleInventoryAssignedToChange()
 
 /**
- * Run Reclaims check.
- * Cross-checks assignments for compliance with location rules and updates the Reclaims sheet.
- * This is a wrapper for updateReclaimsSheet() for menu consistency.
+ * @deprecated Reclaims are now integrated directly into Glove/Sleeve swaps sheets.
  */
 function runReclaimsCheck() {
-  try {
-    logEvent('Running Reclaims check...');
-    updateReclaimsSheet();
-    logEvent('Reclaims check completed.');
-  } catch (e) {
-    logEvent('Error in runReclaimsCheck: ' + e, 'ERROR');
-    throw e;
-  }
+  Logger.log("runReclaimsCheck: Deprecated.");
 }
-
-/**
- * Sets up the Reclaims sheet structure with all required tables.
- * Called by buildSheets to create the initial layout.
- * @param {Sheet} sheet - The Reclaims sheet to set up
- * @param {Object} savedApprovals - Optional object mapping location names to their approval values
- * @param {number} prevEmpCount - Optional number of Previous Employee items to allocate space for
- */
-function setupReclaimsSheet(sheet, savedApprovals, prevEmpCount) {
-  try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var employeesSheet = ss.getSheetByName('Employees');
-    savedApprovals = savedApprovals || {};
-    prevEmpCount = prevEmpCount || 0;
-
-    // Locations to exclude from Class Location Approvals table (lowercase for comparison)
-    var excludeFromApprovalTable = [
-      'weeds', 'previous employee', 'lost', 'kalispell gas dock',
-      'destroyed', "cody's truck", 'arnett / jm test'
-    ];
-
-    // Helper function to normalize apostrophes in a string
-    function normalizeApostrophes(str) {
-      if (!str) return '';
-      // Replace various apostrophe characters with standard apostrophe
-      var result = String(str);
-      result = result.split('\u2018').join("'");
-      result = result.split('\u2019').join("'");
-      return result;
-    }
-
-    // Helper function to check if location should be excluded (handles apostrophe variants)
-    function shouldExcludeLocation(loc) {
-      var locLower = normalizeApostrophes(loc.toLowerCase());
-      for (var i = 0; i < excludeFromApprovalTable.length; i++) {
-        var excludeLoc = normalizeApostrophes(excludeFromApprovalTable[i]);
-        if (locLower === excludeLoc) {
-          return true;
-        }
-      }
-      return false;
-    }
-
-    // Filter out excluded locations from savedApprovals and normalize values
-    var filteredApprovals = {};
-    for (var locKey in savedApprovals) {
-      if (!shouldExcludeLocation(locKey)) {
-        // Normalize the approval value to fix HTML-encoded characters
-        filteredApprovals[locKey] = normalizeApprovalValue(savedApprovals[locKey]);
-      }
-    }
-    savedApprovals = filteredApprovals;
-
-    // Completely clear the sheet including data validations
-    // IMPORTANT: Clear validations BEFORE clearing content to avoid conflicts
-    try {
-      var maxRows = Math.max(sheet.getMaxRows(), 100);
-      var maxCols = Math.max(sheet.getMaxColumns(), 10);
-      Logger.log('Clearing data validations for ' + maxRows + ' rows x ' + maxCols + ' cols');
-      sheet.getRange(1, 1, maxRows, maxCols).clearDataValidations();
-
-      // Force the operation to complete before continuing
-      SpreadsheetApp.flush();
-      Logger.log('Data validations cleared successfully');
-    } catch (clearErr) {
-      Logger.log('[ERROR] Failed to clear data validations: ' + clearErr);
-    }
-
-    // Now clear the content
-    sheet.clear();
-
-    // Force flush again to ensure clear is complete
-    SpreadsheetApp.flush();
-    Logger.log('Sheet content cleared');
-
-    var currentRow = 1;
-
-    // Table 1: Previous Employee Reclaims
-    sheet.getRange(currentRow, 1, 1, 10).merge()
-      .setValue('Previous Employee Reclaims')
-      .setFontWeight('bold').setFontSize(14).setBackground('#ffcdd2').setHorizontalAlignment('center');
-    currentRow++;
-
-    // Headers for Previous Employee table (10 columns with empty column J for alignment)
-    var prevEmpHeaders = ['Item Type', 'Item #', 'Size', 'Class', 'Location', 'Status', 'Assigned To', 'Date Assigned', 'Last Day', ''];
-    sheet.getRange(currentRow, 1, 1, prevEmpHeaders.length).setValues([prevEmpHeaders]).setFontWeight('bold').setBackground('#ef9a9a').setHorizontalAlignment('center');
-    currentRow++;
-
-    // Leave space for Previous Employee data (dynamic based on actual count)
-    // Minimum 1 row for "No items" message, otherwise allocate exact count
-    var prevEmpDataRows = Math.max(1, prevEmpCount);
-    currentRow += prevEmpDataRows;
-    currentRow++; // Add 1 blank row before next table
-
-    // --- Table 2: Class Location Approvals ---
-    sheet.getRange(currentRow, 1, 1, 8).merge()
-      .setValue('🔍 Class Location Approvals')
-      .setFontWeight('bold').setFontSize(14).setBackground('#c8e6c9').setHorizontalAlignment('center');
-    currentRow++;
-
-    // Headers for Approved Locations table
-    sheet.getRange(currentRow, 1, 1, 2).setValues([['Location', 'Approval']])
-      .setFontWeight('bold').setBackground('#a5d6a7').setHorizontalAlignment('center');
-    currentRow++;
-
-    // Default location approvals
-    var defaultApprovals = {
-      'Big Sky': 'CL3',
-      'Billings': 'CL2',
-      'Bozeman': 'CL2',
-      'Butte': 'CL2',
-      'CA Sub': 'CL2',
-      'California': 'CL2',
-      'Elliston': 'CL2',
-      'Ennis': 'CL2',
-      'Glendive': 'CL2',
-      'Gold Creek': 'CL2',
-      'Great Falls': 'CL2 & CL3',
-      'Helena': 'CL2',
-      'Kalispell': 'CL2',
-      'Leave': 'CL2 & CL3',
-      'Livingston': 'CL2 & CL3',
-      'Lolo': 'CL2',
-      'Miles City': 'CL2',
-      'Missoula': 'CL2',
-      'Northern Lights': 'CL2',
-      'Rapelje': 'CL2',
-      'Sidney': 'CL2',
-      'South Dakota': 'CL2',
-      'South Dakota Dock': 'CL2',
-      'Stanford': 'CL2',
-      'Vacation': 'CL2 & CL3'
-    };
-
-    // Get unique locations from Employees sheet
-    if (employeesSheet && employeesSheet.getLastRow() > 1) {
-      var employeesData = employeesSheet.getDataRange().getValues();
-      var locations = new Set();
-      for (var i = 1; i < employeesData.length; i++) {
-        var loc = employeesData[i][2]; // Column C (Location)
-        if (loc && loc !== 'Location' && loc !== '' && loc !== 'N/A') {
-          // Filter out excluded locations using helper function
-          if (!shouldExcludeLocation(loc)) {
-            locations.add(loc);
-          }
-        }
-      }
-      var locationsArr = Array.from(locations).sort();
-
-      if (locationsArr.length > 0) {
-        // Check for new locations that don't have a default or saved approval
-        var newLocations = [];
-        locationsArr.forEach(function(loc) {
-          if (!savedApprovals[loc] && !defaultApprovals[loc]) {
-            newLocations.push(loc);
-          }
-        });
-
-        // Prompt user for approval class for new locations
-        if (newLocations.length > 0) {
-          var ui = SpreadsheetApp.getUi();
-          newLocations.forEach(function(newLoc) {
-            var response = ui.prompt(
-              '🆕 New Location Found: ' + newLoc,
-              'Please select the Approved Rubber Class for "' + newLoc + '":\n\n' +
-              'Enter one of the following:\n' +
-              '• CL2 - Class 2 only\n' +
-              '• CL3 - Class 3 only\n' +
-              '• CL2 & CL3 - Both Class 2 and Class 3',
-              ui.ButtonSet.OK_CANCEL
-            );
-
-            if (response.getSelectedButton() === ui.Button.OK) {
-              var input = response.getResponseText().trim().toUpperCase();
-              // Normalize the input
-              if (input === 'CL2' || input === '2' || input === 'CLASS 2') {
-                savedApprovals[newLoc] = 'CL2';
-              } else if (input === 'CL3' || input === '3' || input === 'CLASS 3') {
-                savedApprovals[newLoc] = 'CL3';
-              } else if (input === 'CL2 & CL3' || input === 'CL2 AND CL3' || input === 'CL2&CL3' ||
-                         input === 'BOTH' || input === '2 & 3' || input === '2&3') {
-                savedApprovals[newLoc] = 'CL2 & CL3';
-              } else {
-                // Default to CL2 if invalid input
-                ui.alert('Invalid input "' + input + '" - defaulting to CL2 for ' + newLoc);
-                savedApprovals[newLoc] = 'CL2';
-              }
-            } else {
-              // User cancelled - default to CL2
-              savedApprovals[newLoc] = 'CL2';
-            }
-          });
-        }
-
-        // Write locations with approval values (priority: savedApprovals > defaultApprovals)
-        var locationData = locationsArr.map(function(loc) {
-          var approval = savedApprovals[loc] || defaultApprovals[loc] || 'CL2';
-          // Normalize one more time to ensure valid value is written
-          return [loc, normalizeApprovalValue(approval)];
-        });
-        sheet.getRange(currentRow, 1, locationData.length, 2).setValues(locationData);
-
-        // Add dropdown validation for Approval column
-        var approvalRange = sheet.getRange(currentRow, 2, locationData.length, 1);
-        var rule = SpreadsheetApp.newDataValidation()
-          .requireValueInList(['None', 'CL2', 'CL3', 'CL2 & CL3'], true)
-          .setAllowInvalid(false)
-          .build();
-        approvalRange.setDataValidation(rule);
-
-        currentRow += locationData.length;
-      }
-    }
-    currentRow += 2;
-
-    // Note: Class 3 Reclaims and Class 2 Reclaims tables are created dynamically
-    // in updateReclaimsSheet after data collection to properly size them
-
-    // Auto-resize columns to fit content
-    for (var col = 1; col <= 8; col++) {
-      sheet.autoResizeColumn(col);
-    }
-
-    // Return the current row so updateReclaimsSheet knows where to start
-    return currentRow;
-
-  } catch (e) {
-    Logger.log('[ERROR] setupReclaimsSheet: ' + e);
-  }
+function setupReclaimsSheet() {
+  Logger.log("setupReclaimsSheet: Deprecated.");
 }
-
-/**
- * Updates the Reclaims sheet with current data from Gloves and Sleeves tabs.
- * Populates Previous Employee Reclaims, Class 3 Reclaims, and Class 2 Reclaims tables.
- * Includes Auto Pick List for reclaim items (runs AFTER swap pick lists to respect reservations).
- * Preserves Approved Class 3 Locations selections.
- * Called by generateAllReports.
- */
 function updateReclaimsSheet() {
-  try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var reclaimsSheet = ss.getSheetByName('Reclaims');
-
-    // Locations to ignore for Class 2/3 reclaims checks (lowercase)
-    var ignoreLocations = [
-      "cody's truck", "destroyed", "kalispell gas dock", "lost",
-      "previous employee", "weeds", "arnett / jm test"
-    ];
-
-    // Get items already assigned in Glove Swaps and Sleeve Swaps (to respect their priority)
-    var swapAssignedItems = getSwapAssignedItems(ss);
-
-    // --- Preserve existing Class Location Approvals selections FIRST ---
-    var savedApprovals = {};
-
-    // --- Preserve existing reclaim workflow state (Picked, Date Changed, Stage data) ---
-    // Key: employee + itemType + itemNum, Value: full row data including Picked, Date Changed, and all Stage columns
-    var savedReclaimState = {};
-
-    if (reclaimsSheet && reclaimsSheet.getLastRow() > 0) {
-      var sheetData = reclaimsSheet.getDataRange().getValues();
-      var inLocationsTable = false;
-      var inReclaimsTable = false;
-
-      for (var i = 0; i < sheetData.length; i++) {
-        var cellA = (sheetData[i][0] || '').toString();
-        var cellB = (sheetData[i][1] || '').toString().trim();
-
-        if (cellA.indexOf('Class Location Approvals') !== -1 || cellA.indexOf('Approved Class 3 Locations') !== -1) {
-          inLocationsTable = true;
-          inReclaimsTable = false;
-          continue;
-        }
-
-        if (cellA.indexOf('Class 3 Reclaims') !== -1 || cellA.indexOf('Class 2 Reclaims') !== -1) {
-          inLocationsTable = false;
-          inReclaimsTable = true;
-          continue;
-        }
-
-        // Skip header rows
-        if (cellA === 'Employee' || cellA === 'Item Type' || cellA === 'Location') {
-          continue;
-        }
-
-        if (inLocationsTable && cellA && cellA !== '') {
-          var approval = (sheetData[i][1] || '').toString();
-          if (approval) {
-            // Normalize the approval value to fix HTML-encoded characters
-            savedApprovals[cellA] = normalizeApprovalValue(approval);
-          }
-        }
-
-        // Preserve reclaim workflow state for data rows (has Item Type: Glove or Sleeve)
-        if (inReclaimsTable && (cellB === 'Glove' || cellB === 'Sleeve')) {
-          var employee = cellA;
-          var itemType = cellB;
-          var itemNum = String(sheetData[i][2] || '').trim();
-          var pickListNum = String(sheetData[i][6] || '').trim();
-          var isPicked = sheetData[i][8];  // Column I - Picked checkbox
-          var dateChanged = sheetData[i][9];  // Column J - Date Changed
-
-          // Only preserve if there's actual workflow state (picked or has date changed or has stage data)
-          // NOTE: We preserve here temporarily - filtering for previous employees happens later
-          // after previousEmployeeNames is populated
-          if (isPicked === true || dateChanged || pickListNum) {
-            var key = employee + '|' + itemType + '|' + itemNum;
-            savedReclaimState[key] = {
-              employee: employee,
-              itemType: itemType,
-              itemNum: itemNum,
-              pickListNum: pickListNum,
-              pickListStatus: sheetData[i][7],  // Column H
-              isPicked: isPicked,
-              dateChanged: dateChanged,
-              // Stage 1 Pick List Item (K-M)
-              stage1Status: sheetData[i][10],
-              stage1AssignedTo: sheetData[i][11],
-              stage1DateAssigned: sheetData[i][12],
-              // Stage 1 Old Item (N-P)
-              stage1OldStatus: sheetData[i][13],
-              stage1OldAssignedTo: sheetData[i][14],
-              stage1OldDateAssigned: sheetData[i][15],
-              // Stage 2 (Q-T)
-              stage2Status: sheetData[i][16],
-              stage2PickedFor: sheetData[i][17],
-              stage2AssignedTo: sheetData[i][18],
-              stage2DateAssigned: sheetData[i][19],
-              // Stage 3 (U-W)
-              stage3AssignedTo: sheetData[i][20],
-              stage3DateAssigned: sheetData[i][21],
-              stage3ChangeOutDate: sheetData[i][22],
-              // Manual edit indicator (check for blue background)
-              isManualEdit: false  // Will check background below
-            };
-
-            // Check if Pick List column has manual edit background
-            var pickListCell = reclaimsSheet.getRange(i + 1, 7);
-            var bgColor = pickListCell.getBackground();
-            if (bgColor === '#e3f2fd') {
-              savedReclaimState[key].isManualEdit = true;
-            }
-          }
-        }
-      }
-
-      Logger.log('Preserved ' + Object.keys(savedApprovals).length + ' location approvals');
-      Logger.log('Preserved ' + Object.keys(savedReclaimState).length + ' reclaim workflow states');
-    }
-
-    if (!reclaimsSheet) {
-      reclaimsSheet = ss.insertSheet('Reclaims');
-    }
-
-    var glovesSheet = ss.getSheetByName('Gloves');
-    var sleevesSheet = ss.getSheetByName('Sleeves');
-    var employeesSheet = ss.getSheetByName('Employees');
-
-    if (!glovesSheet || !sleevesSheet || !employeesSheet) {
-      SpreadsheetApp.getUi().alert('Missing required sheet(s): Gloves, Sleeves, or Employees.');
-      return;
-    }
-
-    // Get inventory data FIRST (needed to count Previous Employee items)
-    var glovesData = glovesSheet.getLastRow() > 1 ? glovesSheet.getRange(2, 1, glovesSheet.getLastRow() - 1, 11).getValues() : [];
-    var sleevesData = sleevesSheet.getLastRow() > 1 ? sleevesSheet.getRange(2, 1, sleevesSheet.getLastRow() - 1, 11).getValues() : [];
-
-    // Build set of CURRENT active employee names from Employees sheet
-    // These should NEVER appear in Previous Employee Reclaims
-    var currentActiveEmployees = new Set();
-    // System placeholder names that should NOT be treated as employees
-    var systemPlaceholders = [
-      'on shelf', 'in testing', 'packed for delivery', 'packed for testing',
-      'failed rubber', 'lost', 'not repairable', 'ready for test', 'ready for delivery',
-      'assigned', 'destroyed', 'n/a', ''
-    ];
-
-    if (employeesSheet && employeesSheet.getLastRow() > 1) {
-      var empSheetData = employeesSheet.getDataRange().getValues();
-      // Find Location and Hire Date columns dynamically
-      var empHeaders = empSheetData[0];
-      var empLocationColIdx = 2; // Default
-      var empHireDateColIdx = -1;
-      for (var h = 0; h < empHeaders.length; h++) {
-        var hdrLower = String(empHeaders[h]).toLowerCase().trim();
-        if (hdrLower === 'location') empLocationColIdx = h;
-        if (hdrLower === 'hire date') empHireDateColIdx = h;
-      }
-
-      for (var ei = 1; ei < empSheetData.length; ei++) {
-        var empName = (empSheetData[ei][0] || '').toString().trim();
-        var empNameLower = empName.toLowerCase();
-        var empLocation = (empSheetData[ei][empLocationColIdx] || '').toString().trim().toLowerCase();
-
-        // Skip system placeholder entries (these are not real employees)
-        if (systemPlaceholders.indexOf(empNameLower) !== -1) {
-          continue;
-        }
-
-        // Pending new hires (future Hire Date) are treated as active
-        // Their equipment is intentionally pre-staged and should NOT be reclaimed
-        if (empHireDateColIdx !== -1 && isEmployeePending(empSheetData[ei][empHireDateColIdx])) {
-          if (empName) currentActiveEmployees.add(empNameLower);
-          continue;
-        }
-
-        // If the employee is on the Employees sheet and their location is NOT "Previous Employee",
-        // they are currently active
-        if (empName && empLocation !== 'previous employee') {
-          currentActiveEmployees.add(empNameLower);
-        }
-      }
-    }
-    Logger.log('Found ' + currentActiveEmployees.size + ' current active employees');
-
-    // Build set of Previous Employee names from Employee History sheet
-    // Only include employees who are NOT currently active on the Employees sheet
-    var previousEmployeeNames = new Set();
-    var previousEmployeeLastDay = {};  // Map of employee name -> Last Day date
-    var employeeHistorySheet = ss.getSheetByName('Employee History');
-    if (employeeHistorySheet && employeeHistorySheet.getLastRow() > 2) {
-      var historyData = employeeHistorySheet.getRange(3, 1, employeeHistorySheet.getLastRow() - 2, 10).getValues();
-
-      // Build a map of employee name -> termination info and rehire info
-      // We need to track: Was terminated? When? Was rehired after termination?
-      var employeeTerminationInfo = {};
-
-      // First pass: collect ALL termination and rehire events for each employee
-      for (var hi = 0; hi < historyData.length; hi++) {
-        var histName = (historyData[hi][1] || '').toString().trim();
-        var histDate = historyData[hi][0];  // Date column (Column A)
-        var histLocation = (historyData[hi][3] || '').toString().trim();  // Column D
-        var histEventType = (historyData[hi][2] || '').toString().trim();  // Column C
-        var histLastDay = historyData[hi][6];  // Column G - Last Day
-
-        if (!histName) continue;
-
-        var histNameLower = histName.toLowerCase();
-        var entryDate = histDate instanceof Date ? histDate : new Date(histDate);
-        var eventTypeLower = histEventType.toLowerCase();
-        var locationLower = histLocation.toLowerCase();
-
-        // Validate date - skip if invalid or unreasonable (year > 2100 or < 1900)
-        var isValidDate = entryDate instanceof Date && !isNaN(entryDate);
-        if (isValidDate) {
-          var year = entryDate.getFullYear();
-          if (year < 1900 || year > 2100) {
-            Logger.log('WARNING: Invalid date year (' + year + ') for employee ' + histName + ' - skipping this history entry');
-            isValidDate = false;
-          }
-        }
-
-        // Initialize tracking for this employee if needed
-        if (!employeeTerminationInfo[histNameLower]) {
-          employeeTerminationInfo[histNameLower] = {
-            terminationDates: [],  // All termination dates
-            rehireDates: [],       // All rehire dates
-            lastDay: null,
-            latestTerminationDate: null,
-            latestRehireDate: null
-          };
-        }
-
-        var info = employeeTerminationInfo[histNameLower];
-
-        // Check for termination events
-        if (eventTypeLower === 'terminated' || locationLower === 'previous employee') {
-          if (isValidDate) {
-            info.terminationDates.push(entryDate);
-            if (!info.latestTerminationDate || entryDate > info.latestTerminationDate) {
-              info.latestTerminationDate = entryDate;
-              info.lastDay = histLastDay || info.lastDay;
-            }
-          }
-        }
-
-        // Check for rehire events
-        if (eventTypeLower === 'rehired') {
-          if (isValidDate) {
-            info.rehireDates.push(entryDate);
-            if (!info.latestRehireDate || entryDate > info.latestRehireDate) {
-              info.latestRehireDate = entryDate;
-            }
-          }
-        }
-      }
-
-      // Second pass: Determine who is currently a previous employee
-      // Logic: They are a previous employee if:
-      // 1. They have at least one termination event, AND
-      // 2. Their most recent termination is AFTER their most recent rehire (or no rehire), AND
-      // 3. They are NOT currently active on the Employees sheet
-      var skippedActiveCount = 0;
-      var rehiredAfterTermCount = 0;
-
-      for (var empNameKey in employeeTerminationInfo) {
-        // SKIP if this employee is currently active on the Employees sheet
-        // (this is the most reliable indicator - if they're on the sheet, they're active)
-        if (currentActiveEmployees.has(empNameKey)) {
-          skippedActiveCount++;
-          continue;
-        }
-
-        var info = employeeTerminationInfo[empNameKey];
-
-        // Must have at least one termination
-        if (info.terminationDates.length === 0) {
-          continue;
-        }
-
-        // Check if they were rehired AFTER their latest termination
-        var wasRehiredAfterLatestTermination = false;
-        if (info.latestRehireDate && info.latestTerminationDate) {
-          wasRehiredAfterLatestTermination = info.latestRehireDate >= info.latestTerminationDate;
-        }
-
-        if (!wasRehiredAfterLatestTermination) {
-          previousEmployeeNames.add(empNameKey);
-          // Store the Last Day date for this employee
-          previousEmployeeLastDay[empNameKey] = info.lastDay || '';
-        } else {
-          rehiredAfterTermCount++;
-        }
-      }
-
-      Logger.log('Previous employee processing: ' + previousEmployeeNames.size + ' previous employees found, ' +
-                 skippedActiveCount + ' skipped (currently active), ' + rehiredAfterTermCount + ' rehired after termination');
-
-      // Now filter out any preserved reclaim states for previous employees
-      // This handles cases where an employee became a previous employee after the reclaim was preserved
-      var keysToRemove = [];
-      for (var savedKey in savedReclaimState) {
-        var savedEmployee = savedReclaimState[savedKey].employee || '';
-        if (previousEmployeeNames.has(savedEmployee.toLowerCase())) {
-          keysToRemove.push(savedKey);
-          Logger.log('Removing preserved reclaim state for previous employee: ' + savedEmployee);
-        }
-      }
-      keysToRemove.forEach(function(key) {
-        delete savedReclaimState[key];
-      });
-      if (keysToRemove.length > 0) {
-        Logger.log('Removed ' + keysToRemove.length + ' preserved reclaim states for previous employees');
-      }
-    }
-
-    // Collect items for each table - do this FIRST to get counts
-    var prevEmpItems = [];
-    var class3Reclaims = [];
-    var class2Reclaims = [];
-
-    // FIRST PASS: Collect Previous Employee items to get accurate count
-    glovesData.forEach(function(row) {
-      var itemNum = row[0];
-      // Skip rows without a valid item number
-      if (!itemNum || itemNum === '' || itemNum === null) return;
-
-      var location = (row[5] || '').toString().trim();
-      var assignedTo = (row[7] || '').toString().trim();
-      var locationLower = location.toLowerCase();
-      var assignedToLower = assignedTo.toLowerCase();
-
-      if (locationLower === 'previous employee' || previousEmployeeNames.has(assignedToLower)) {
-        if (assignedTo && assignedToLower !== 'on shelf' && assignedToLower !== 'in testing' &&
-            assignedToLower !== 'packed for delivery' && assignedToLower !== 'packed for testing') {
-          var lastDayValue = previousEmployeeLastDay[assignedToLower] || '';
-          prevEmpItems.push(['Glove', row[0], row[1], row[2], location, row[6], assignedTo, row[4], lastDayValue]);
-        }
-      }
-    });
-
-    sleevesData.forEach(function(row) {
-      var itemNum = row[0];
-      // Skip rows without a valid item number
-      if (!itemNum || itemNum === '' || itemNum === null) return;
-
-      var location = (row[5] || '').toString().trim();
-      var assignedTo = (row[7] || '').toString().trim();
-      var locationLower = location.toLowerCase();
-      var assignedToLower = assignedTo.toLowerCase();
-
-      if (locationLower === 'previous employee' || previousEmployeeNames.has(assignedToLower)) {
-        if (assignedTo && assignedToLower !== 'on shelf' && assignedToLower !== 'in testing' &&
-            assignedToLower !== 'packed for delivery' && assignedToLower !== 'packed for testing') {
-          var lastDayValue = previousEmployeeLastDay[assignedToLower] || '';
-          prevEmpItems.push(['Sleeve', row[0], row[1], row[2], location, row[6], assignedTo, row[4], lastDayValue]);
-        }
-      }
-    });
-
-    Logger.log('Found ' + prevEmpItems.length + ' Previous Employee items');
-
-    // Re-setup the sheet structure, passing savedApprovals AND prevEmpCount to allocate correct space
-    setupReclaimsSheet(reclaimsSheet, savedApprovals, prevEmpItems.length);
-
-    // Re-read the sheet to find table positions and get current approvals
-    var newSheetData = reclaimsSheet.getDataRange().getValues();
-
-    // Build location approval map from the rebuilt sheet
-    var locationApprovals = {};
-    var inLocTable = false;
-    for (var r = 0; r < newSheetData.length; r++) {
-      var cellVal = (newSheetData[r][0] || '').toString();
-
-      if (cellVal.indexOf('Class Location Approvals') !== -1 || cellVal.indexOf('Approved Class 3 Locations') !== -1) {
-        inLocTable = true;
-        continue;
-      }
-      if (inLocTable && (!cellVal || cellVal === '')) {
-        inLocTable = false;
-        continue;
-      }
-
-      if (inLocTable && cellVal && cellVal !== 'Location') {
-        var approvalVal = (newSheetData[r][1] || '').toString().trim();
-        if (approvalVal) {
-          locationApprovals[cellVal] = approvalVal;
-        }
-      }
-    }
-
-
-    // Get employee data for preferred sizes
-    var employeeMap = {};
-    if (employeesSheet && employeesSheet.getLastRow() > 1) {
-      var empData = employeesSheet.getDataRange().getValues();
-      var empHeaders = empData[0];
-      var gloveSizeColIdx = 8;  // Column I
-      var sleeveSizeColIdx = 9;  // Column J
-
-      // Find size columns dynamically
-      for (var h = 0; h < empHeaders.length; h++) {
-        var header = String(empHeaders[h]).toLowerCase().trim();
-        if (header === 'glove size') gloveSizeColIdx = h;
-        if (header === 'sleeve size') sleeveSizeColIdx = h;
-      }
-
-      for (var e = 1; e < empData.length; e++) {
-        var empName = (empData[e][0] || '').toString().trim().toLowerCase();
-        if (empName) {
-          employeeMap[empName] = {
-            gloveSize: empData[e][gloveSizeColIdx],
-            sleeveSize: empData[e][sleeveSizeColIdx]
-          };
-        }
-      }
-    }
-
-    // Process Gloves for Class 2/3 reclaims (Previous Employee items already collected above)
-    glovesData.forEach(function(row) {
-      var itemNum = row[0];
-      var size = row[1];
-      var itemClass = row[2];
-      var dateAssigned = row[4];
-      var location = (row[5] || '').toString().trim();
-      var status = (row[6] || '').toString().trim();
-      var assignedTo = (row[7] || '').toString().trim();
-      var locationLower = location.toLowerCase();
-      var assignedToLower = assignedTo.toLowerCase();
-
-      // Skip Previous Employee items - already collected above
-      if (locationLower === 'previous employee' || previousEmployeeNames.has(assignedToLower)) {
-        return;
-      }
-
-      // Skip non-assigned items and ignored locations for Class reclaims
-      var skipStatuses = ['on shelf', 'failed rubber', 'lost', 'ready for test', 'ready for testing',
-                          'packed for testing', 'packed for delivery', 'in testing', 'ready for delivery'];
-      if (skipStatuses.indexOf(status.toLowerCase()) !== -1) {
-        return;
-      }
-
-      if (ignoreLocations.indexOf(locationLower) !== -1) {
-        return;
-      }
-
-      var approvalStatus = locationApprovals[location] || '';
-      var itemClassNum = parseInt(itemClass, 10) || 0;
-
-      // Get employee's preferred glove size
-      var empKey = assignedToLower;
-      var empGloveSize = employeeMap[empKey] ? employeeMap[empKey].gloveSize : null;
-      // Fall back to actual item size if employee's glove size is missing or "N/A"
-      var preferredSize = (empGloveSize && String(empGloveSize).trim().toLowerCase() !== 'n/a') ? empGloveSize : size;
-
-      if (approvalStatus === 'None') {
-        if (itemClassNum === 3) {
-          class3Reclaims.push({
-            employee: assignedTo, itemType: 'Glove', itemNum: itemNum, size: size,
-            itemClass: itemClass, location: location, assignedTo: assignedTo,
-            preferredSize: preferredSize, classNum: itemClassNum
-          });
-        }
-        if (itemClassNum === 2) {
-          class2Reclaims.push({
-            employee: assignedTo, itemType: 'Glove', itemNum: itemNum, size: size,
-            itemClass: itemClass, location: location, assignedTo: assignedTo,
-            preferredSize: preferredSize, classNum: itemClassNum
-          });
-        }
-        return;
-      }
-
-      if (itemClassNum === 3) {
-        if (approvalStatus === '' || approvalStatus === 'CL2') {
-          class3Reclaims.push({
-            employee: assignedTo, itemType: 'Glove', itemNum: itemNum, size: size,
-            itemClass: itemClass, location: location, assignedTo: assignedTo,
-            preferredSize: preferredSize, classNum: itemClassNum
-          });
-        }
-      }
-
-      if (itemClassNum === 2) {
-        if (approvalStatus === 'CL3') {
-          class2Reclaims.push({
-            employee: assignedTo, itemType: 'Glove', itemNum: itemNum, size: size,
-            itemClass: itemClass, location: location, assignedTo: assignedTo,
-            preferredSize: preferredSize, classNum: itemClassNum
-          });
-        }
-      }
-    });
-
-    // Process Sleeves for Class 2/3 reclaims (Previous Employee items already collected above)
-    sleevesData.forEach(function(row) {
-      var itemNum = row[0];
-      var size = row[1];
-      var itemClass = row[2];
-      var dateAssigned = row[4];
-      var location = (row[5] || '').toString().trim();
-      var status = (row[6] || '').toString().trim();
-      var assignedTo = (row[7] || '').toString().trim();
-      var locationLower = location.toLowerCase();
-      var assignedToLower = assignedTo.toLowerCase();
-
-      // Skip Previous Employee items - already collected above
-      if (locationLower === 'previous employee' || previousEmployeeNames.has(assignedToLower)) {
-        return;
-      }
-
-      var skipStatuses = ['on shelf', 'failed rubber', 'lost', 'ready for test',
-                          'packed for testing', 'packed for delivery', 'in testing', 'ready for delivery'];
-      if (skipStatuses.indexOf(status.toLowerCase()) !== -1) {
-        return;
-      }
-
-      if (ignoreLocations.indexOf(locationLower) !== -1) {
-        return;
-      }
-
-      var approvalStatus = locationApprovals[location] || '';
-      var itemClassNum = parseInt(itemClass, 10) || 0;
-
-      var empKey = assignedToLower;
-      var empSleeveSize = employeeMap[empKey] ? employeeMap[empKey].sleeveSize : null;
-      // Fall back to actual item size if employee's sleeve size is missing or "N/A"
-      var preferredSize = (empSleeveSize && String(empSleeveSize).trim().toLowerCase() !== 'n/a') ? empSleeveSize : size;
-
-      if (approvalStatus === 'None') {
-        if (itemClassNum === 3) {
-          class3Reclaims.push({
-            employee: assignedTo, itemType: 'Sleeve', itemNum: itemNum, size: size,
-            itemClass: itemClass, location: location, assignedTo: assignedTo,
-            preferredSize: preferredSize, classNum: itemClassNum
-          });
-        }
-        if (itemClassNum === 2) {
-          class2Reclaims.push({
-            employee: assignedTo, itemType: 'Sleeve', itemNum: itemNum, size: size,
-            itemClass: itemClass, location: location, assignedTo: assignedTo,
-            preferredSize: preferredSize, classNum: itemClassNum
-          });
-        }
-        return;
-      }
-
-      if (itemClassNum === 3) {
-        if (approvalStatus === '' || approvalStatus === 'CL2') {
-          class3Reclaims.push({
-            employee: assignedTo, itemType: 'Sleeve', itemNum: itemNum, size: size,
-            itemClass: itemClass, location: location, assignedTo: assignedTo,
-            preferredSize: preferredSize, classNum: itemClassNum
-          });
-        }
-      }
-
-      if (itemClassNum === 2) {
-        if (approvalStatus === 'CL3') {
-          class2Reclaims.push({
-            employee: assignedTo, itemType: 'Sleeve', itemNum: itemNum, size: size,
-            itemClass: itemClass, location: location, assignedTo: assignedTo,
-            preferredSize: preferredSize, classNum: itemClassNum
-          });
-        }
-      }
-    });
-
-    // Filter out reclaims for employees who are now Previous Employees
-    // This handles cases where an employee became a previous employee after the reclaim was created
-    class3Reclaims = class3Reclaims.filter(function(reclaim) {
-      var empLower = (reclaim.employee || '').toLowerCase();
-      if (previousEmployeeNames.has(empLower)) {
-        Logger.log('Filtered out Class 3 reclaim for previous employee: ' + reclaim.employee);
-        return false;
-      }
-      return true;
-    });
-
-    class2Reclaims = class2Reclaims.filter(function(reclaim) {
-      var empLower = (reclaim.employee || '').toLowerCase();
-      if (previousEmployeeNames.has(empLower)) {
-        Logger.log('Filtered out Class 2 reclaim for previous employee: ' + reclaim.employee);
-        return false;
-      }
-      return true;
-    });
-
-    // Sort reclaims by location, then by employee name (for weekly planning)
-    class3Reclaims.sort(function(a, b) {
-      var locCompare = (a.location || '').localeCompare(b.location || '');
-      if (locCompare !== 0) return locCompare;
-      return (a.employee || '').localeCompare(b.employee || '');
-    });
-    class2Reclaims.sort(function(a, b) {
-      var locCompare = (a.location || '').localeCompare(b.location || '');
-      if (locCompare !== 0) return locCompare;
-      return (a.employee || '').localeCompare(b.employee || '');
-    });
-
-    // Generate Pick List for reclaims (respects swap assignments)
-    var reclaimAssignedItems = new Set(swapAssignedItems);  // Start with swap-assigned items
-
-    // Process Class 3 reclaims for Pick List (need DOWNGRADE to Class 2)
-    class3Reclaims.forEach(function(reclaim) {
-      var inventoryToSearch = reclaim.itemType === 'Glove' ? glovesData : sleevesData;
-
-      // Check if there's a preserved pick list item for this reclaim
-      var key = reclaim.employee + '|' + reclaim.itemType + '|' + reclaim.itemNum;
-      var savedState = savedReclaimState[key];
-
-      if (savedState && savedState.pickListNum && savedState.pickListNum !== '—' && savedState.pickListNum !== '') {
-        // Use the preserved pick list item instead of finding a new one
-        reclaim.pickListNum = savedState.pickListNum;
-        reclaim.pickListStatus = savedState.pickListStatus || 'Ready For Delivery 🚚';
-        reclaim.preservedState = savedState;  // Store for later restoration
-
-        // Look up the preserved pick list item in inventory to get current data
-        var preservedItemData = inventoryToSearch.find(function(item) {
-          return String(item[0]).trim() === String(savedState.pickListNum).trim();
-        });
-        reclaim.pickListInvData = preservedItemData || null;
-
-        // Add to assigned items to prevent duplicates
-        reclaimAssignedItems.add(savedState.pickListNum);
-        Logger.log('Preserved pick list item ' + savedState.pickListNum + ' for reclaim ' + key);
-      } else {
-        // No preserved state - find a new pick list item
-        var pickResult = findReclaimPickListItem(
-          inventoryToSearch, reclaim, reclaimAssignedItems, 'class3', inventoryToSearch
-        );
-        reclaim.pickListNum = pickResult.itemNum;
-        reclaim.pickListStatus = pickResult.status;
-        reclaim.pickListInvData = pickResult.inventoryData;
-
-        if (pickResult.itemNum !== '—') {
-          reclaimAssignedItems.add(pickResult.itemNum);
-        }
-      }
-
-      // Look up the old item (the one being reclaimed) to get its Date Assigned
-      var oldItemNum = String(reclaim.itemNum).trim();
-      var oldItemData = inventoryToSearch.find(function(item) {
-        return String(item[0]).trim() === oldItemNum;
-      });
-      reclaim.oldItemDateAssigned = oldItemData ? (oldItemData[4] || '') : '';  // Column E = Date Assigned
-    });
-
-    // Process Class 2 reclaims for Pick List (need UPGRADE to Class 3)
-    class2Reclaims.forEach(function(reclaim) {
-      var inventoryToSearch = reclaim.itemType === 'Glove' ? glovesData : sleevesData;
-
-      // Check if there's a preserved pick list item for this reclaim
-      var key = reclaim.employee + '|' + reclaim.itemType + '|' + reclaim.itemNum;
-      var savedState = savedReclaimState[key];
-
-      if (savedState && savedState.pickListNum && savedState.pickListNum !== '—' && savedState.pickListNum !== '') {
-        // Use the preserved pick list item instead of finding a new one
-        reclaim.pickListNum = savedState.pickListNum;
-        reclaim.pickListStatus = savedState.pickListStatus || 'Ready For Delivery 🚚';
-        reclaim.preservedState = savedState;  // Store for later restoration
-
-        // Look up the preserved pick list item in inventory to get current data
-        var preservedItemData = inventoryToSearch.find(function(item) {
-          return String(item[0]).trim() === String(savedState.pickListNum).trim();
-        });
-        reclaim.pickListInvData = preservedItemData || null;
-
-        // Add to assigned items to prevent duplicates
-        reclaimAssignedItems.add(savedState.pickListNum);
-        Logger.log('Preserved pick list item ' + savedState.pickListNum + ' for reclaim ' + key);
-      } else {
-        // No preserved state - find a new pick list item
-        var pickResult = findReclaimPickListItem(
-          inventoryToSearch, reclaim, reclaimAssignedItems, 'class2', inventoryToSearch
-        );
-        reclaim.pickListNum = pickResult.itemNum;
-        reclaim.pickListStatus = pickResult.status;
-        reclaim.pickListInvData = pickResult.inventoryData;
-
-        if (pickResult.itemNum !== '—') {
-          reclaimAssignedItems.add(pickResult.itemNum);
-        }
-      }
-
-      // Look up the old item (the one being reclaimed) to get its Date Assigned
-      var oldItemNum = String(reclaim.itemNum).trim();
-      var oldItemData = inventoryToSearch.find(function(item) {
-        return String(item[0]).trim() === oldItemNum;
-      });
-      reclaim.oldItemDateAssigned = oldItemData ? (oldItemData[4] || '') : '';  // Column E = Date Assigned
-    });
-
-    // Write Previous Employee data (row 3 = after title and headers)
-    if (prevEmpItems.length > 0) {
-      // Add empty column J to each row for alignment
-      var prevEmpItemsWithCol = prevEmpItems.map(function(row) {
-        return row.concat(['']);  // Add empty column J
-      });
-
-      // Clear any data validation on these rows first (in case of overlap with previous structure)
-      var prevEmpRange = reclaimsSheet.getRange(3, 1, prevEmpItemsWithCol.length, 10);
-      prevEmpRange.clearDataValidations();
-      prevEmpRange.setValues(prevEmpItemsWithCol);
-    }
-
-    // Find where to start Class 3 table (after Approved Locations table)
-    var sheetLastRow = reclaimsSheet.getLastRow();
-    var currentRow = sheetLastRow + 2;
-
-    // --- Create Class 3 Reclaims Table ---
-    var reclaimsHeaders = ['Employee', 'Item Type', 'Item #', 'Size', 'Class', 'Location', 'Pick List Item #', 'Pick List Status', 'Picked', 'Date Changed'];
-    var hiddenHeaders = ['Status', 'Assigned To', 'Date Assigned', 'Status', 'Assigned To', 'Date Assigned', 'Status', 'Assigned To', 'Date Assigned', 'Picked For', 'Assigned To', 'Date Assigned', 'Change Out Date'];
-
-    reclaimsSheet.getRange(currentRow, 1, 1, 23).merge()
-      .setValue('⚠️ Class 3 Reclaims - Need Downgrade to Class 2')
-      .setFontWeight('bold').setFontSize(14).setBackground('#bbdefb').setHorizontalAlignment('center');
-    currentRow++;
-
-    // Add STAGE headers
-    reclaimsSheet.getRange(currentRow, 11, 1, 3).merge().setValue('STAGE 1').setBackground('#e0e0e0').setFontWeight('bold').setHorizontalAlignment('center');
-    reclaimsSheet.getRange(currentRow, 14, 1, 3).merge().setValue('STAGE 1').setBackground('#e0e0e0').setFontWeight('bold').setHorizontalAlignment('center');
-    reclaimsSheet.getRange(currentRow, 17, 1, 4).merge().setValue('STAGE 2').setBackground('#e0e0e0').setFontWeight('bold').setHorizontalAlignment('center');
-    reclaimsSheet.getRange(currentRow, 21, 1, 3).merge().setValue('STAGE 3').setBackground('#e0e0e0').setFontWeight('bold').setHorizontalAlignment('center');
-    currentRow++;
-
-    // Add stage descriptions
-    reclaimsSheet.getRange(currentRow, 11, 1, 3).merge().setValue('Pick List Item Before Check').setBackground('#bdbdbd').setFontWeight('bold').setHorizontalAlignment('center').setFontSize(9);
-    reclaimsSheet.getRange(currentRow, 14, 1, 3).merge().setValue('Old Item Assignment').setBackground('#bdbdbd').setFontWeight('bold').setHorizontalAlignment('center').setFontSize(9);
-    reclaimsSheet.getRange(currentRow, 17, 1, 4).merge().setValue('Pick List Item After Check').setBackground('#bdbdbd').setFontWeight('bold').setHorizontalAlignment('center').setFontSize(9);
-    reclaimsSheet.getRange(currentRow, 21, 1, 3).merge().setValue('Pick List Item New Assignment').setBackground('#bdbdbd').setFontWeight('bold').setHorizontalAlignment('center').setFontSize(9);
-    currentRow++;
-
-    var allHeaders = reclaimsHeaders.concat(hiddenHeaders);
-    reclaimsSheet.getRange(currentRow, 1, 1, allHeaders.length).setValues([allHeaders]);
-    reclaimsSheet.getRange(currentRow, 1, 1, 10).setFontWeight('bold').setBackground('#90caf9').setHorizontalAlignment('center');
-    reclaimsSheet.getRange(currentRow, 11, 1, 13).setFontWeight('bold').setBackground('#9e9e9e').setFontColor('#ffffff').setHorizontalAlignment('center').setFontSize(9);
-    currentRow++;
-
-    if (class3Reclaims.length > 0) {
-      var class3Data = class3Reclaims.map(function(r) {
-        // Check if this reclaim has preserved state
-        var preserved = r.preservedState;
-
-        // If there's a pick list item, populate Stage 1 columns from inventory data or preserved state
-        var hasPickListItem = r.pickListNum && r.pickListNum !== '—';
-        var invData = r.pickListInvData;
-
-        // Use preserved Stage 1 data if available, otherwise get from current inventory
-        var pickListStatus, pickListAssignedTo, pickListDateAssigned;
-        var oldItemStatus, oldItemAssignedTo, oldItemDateAssigned;
-        var stage2Status, stage2PickedFor, stage2AssignedTo, stage2DateAssigned;
-        var stage3AssignedTo, stage3DateAssigned, stage3ChangeOutDate;
-        var isPicked, dateChanged;
-
-        if (preserved) {
-          // Use preserved data
-          pickListStatus = preserved.stage1Status || '';
-          pickListAssignedTo = preserved.stage1AssignedTo || '';
-          pickListDateAssigned = preserved.stage1DateAssigned || '';
-          oldItemStatus = preserved.stage1OldStatus || 'Assigned';
-          oldItemAssignedTo = preserved.stage1OldAssignedTo || r.employee;
-          oldItemDateAssigned = preserved.stage1OldDateAssigned || r.oldItemDateAssigned || '';
-          stage2Status = preserved.stage2Status || '';
-          stage2PickedFor = preserved.stage2PickedFor || '';
-          stage2AssignedTo = preserved.stage2AssignedTo || '';
-          stage2DateAssigned = preserved.stage2DateAssigned || '';
-          stage3AssignedTo = preserved.stage3AssignedTo || '';
-          stage3DateAssigned = preserved.stage3DateAssigned || '';
-          stage3ChangeOutDate = preserved.stage3ChangeOutDate || '';
-          isPicked = preserved.isPicked === true;
-          dateChanged = preserved.dateChanged || '';
-        } else {
-          // Get from current inventory
-          pickListStatus = hasPickListItem && invData ? (invData[6] || 'On Shelf') : '';
-          pickListAssignedTo = hasPickListItem && invData ? (invData[7] || 'On Shelf') : '';
-          pickListDateAssigned = hasPickListItem && invData ? (invData[4] || '') : '';
-          oldItemStatus = 'Assigned';
-          oldItemAssignedTo = r.employee;
-          oldItemDateAssigned = r.oldItemDateAssigned || '';
-          stage2Status = '';
-          stage2PickedFor = '';
-          stage2AssignedTo = '';
-          stage2DateAssigned = '';
-          stage3AssignedTo = '';
-          stage3DateAssigned = '';
-          stage3ChangeOutDate = '';
-          isPicked = false;
-          dateChanged = '';
-        }
-
-        return [
-          r.employee, r.itemType, r.itemNum, r.size, r.itemClass, r.location,
-          r.pickListNum || '—', r.pickListStatus || 'Need to Purchase ❌',
-          isPicked, dateChanged,
-          // Stage 1 - Pick List Item Before Check (K-M)
-          pickListStatus, pickListAssignedTo, pickListDateAssigned,
-          // Stage 1 - Old Item Assignment (N-P)
-          oldItemStatus, oldItemAssignedTo, oldItemDateAssigned,
-          // Stage 2 (Q-T)
-          stage2Status, stage2PickedFor, stage2AssignedTo, stage2DateAssigned,
-          // Stage 3 (U-W)
-          stage3AssignedTo, stage3DateAssigned, stage3ChangeOutDate
-        ];
-      });
-      var class3StartRow = currentRow;
-      reclaimsSheet.getRange(currentRow, 1, class3Data.length, 23).setValues(class3Data);
-      reclaimsSheet.getRange(currentRow, 1, class3Data.length, 10).setHorizontalAlignment('center');
-
-      // Insert checkboxes in Picked column (I)
-      reclaimsSheet.getRange(currentRow, 9, class3Data.length, 1).insertCheckboxes();
-
-      // Hide columns K-W (STAGE data)
-      reclaimsSheet.hideColumns(11, 13);
-
-      // Apply conditional formatting to Pick List Status column
-      for (var ci = 0; ci < class3Data.length; ci++) {
-        var statusCell = reclaimsSheet.getRange(currentRow + ci, 8);
-        var statusVal = class3Data[ci][7];
-        if (statusVal.indexOf('Reclaim Only') !== -1) {
-          statusCell.setBackground('#c8e6c9');  // Green for reclaim only
-        } else if (statusVal.indexOf('In Stock') !== -1) {
-          statusCell.setBackground('#c8e6c9');
-        } else if (statusVal.indexOf('Need to Purchase') !== -1) {
-          statusCell.setBackground('#ffcdd2');
-        } else if (statusVal.indexOf('Ready For Delivery') !== -1) {
-          statusCell.setBackground('#e1bee7');
-        } else if (statusVal.indexOf('In Testing') !== -1) {
-          statusCell.setBackground('#fff9c4');
-        }
-      }
-
-      // Restore preserved workflow state for Class 3 reclaims
-      restoreReclaimWorkflowState(reclaimsSheet, class3Reclaims, class3StartRow, savedReclaimState);
-
-      currentRow += class3Data.length;
-    } else {
-      reclaimsSheet.getRange(currentRow, 1, 1, 23).merge()
-        .setValue('✅ No Class 3 reclaims needed')
-        .setFontStyle('italic').setHorizontalAlignment('center').setBackground('#c8e6c9');
-      currentRow++;
-    }
-
-    currentRow += 2;
-
-    // --- Create Class 2 Reclaims Table ---
-    reclaimsSheet.getRange(currentRow, 1, 1, 23).merge()
-      .setValue('⚠️ Class 2 Reclaims - Need Upgrade to Class 3')
-      .setFontWeight('bold').setFontSize(14).setBackground('#ffe0b2').setHorizontalAlignment('center');
-    currentRow++;
-
-    // Add STAGE headers
-    reclaimsSheet.getRange(currentRow, 11, 1, 3).merge().setValue('STAGE 1').setBackground('#e0e0e0').setFontWeight('bold').setHorizontalAlignment('center');
-    reclaimsSheet.getRange(currentRow, 14, 1, 3).merge().setValue('STAGE 1').setBackground('#e0e0e0').setFontWeight('bold').setHorizontalAlignment('center');
-    reclaimsSheet.getRange(currentRow, 17, 1, 4).merge().setValue('STAGE 2').setBackground('#e0e0e0').setFontWeight('bold').setHorizontalAlignment('center');
-    reclaimsSheet.getRange(currentRow, 21, 1, 3).merge().setValue('STAGE 3').setBackground('#e0e0e0').setFontWeight('bold').setHorizontalAlignment('center');
-    currentRow++;
-
-    // Add stage descriptions
-    reclaimsSheet.getRange(currentRow, 11, 1, 3).merge().setValue('Pick List Item Before Check').setBackground('#bdbdbd').setFontWeight('bold').setHorizontalAlignment('center').setFontSize(9);
-    reclaimsSheet.getRange(currentRow, 14, 1, 3).merge().setValue('Old Item Assignment').setBackground('#bdbdbd').setFontWeight('bold').setHorizontalAlignment('center').setFontSize(9);
-    reclaimsSheet.getRange(currentRow, 17, 1, 4).merge().setValue('Pick List Item After Check').setBackground('#bdbdbd').setFontWeight('bold').setHorizontalAlignment('center').setFontSize(9);
-    reclaimsSheet.getRange(currentRow, 21, 1, 3).merge().setValue('Pick List Item New Assignment').setBackground('#bdbdbd').setFontWeight('bold').setHorizontalAlignment('center').setFontSize(9);
-    currentRow++;
-
-    reclaimsSheet.getRange(currentRow, 1, 1, allHeaders.length).setValues([allHeaders]);
-    reclaimsSheet.getRange(currentRow, 1, 1, 10).setFontWeight('bold').setBackground('#ffcc80').setHorizontalAlignment('center');
-    reclaimsSheet.getRange(currentRow, 11, 1, 13).setFontWeight('bold').setBackground('#9e9e9e').setFontColor('#ffffff').setHorizontalAlignment('center').setFontSize(9);
-    currentRow++;
-
-    if (class2Reclaims.length > 0) {
-      var class2Data = class2Reclaims.map(function(r) {
-        // Check if this reclaim has preserved state
-        var preserved = r.preservedState;
-
-        // If there's a pick list item, populate Stage 1 columns from inventory data or preserved state
-        var hasPickListItem = r.pickListNum && r.pickListNum !== '—';
-        var invData = r.pickListInvData;
-
-        // Use preserved Stage 1 data if available, otherwise get from current inventory
-        var pickListStatus, pickListAssignedTo, pickListDateAssigned;
-        var oldItemStatus, oldItemAssignedTo, oldItemDateAssigned;
-        var stage2Status, stage2PickedFor, stage2AssignedTo, stage2DateAssigned;
-        var stage3AssignedTo, stage3DateAssigned, stage3ChangeOutDate;
-        var isPicked, dateChanged;
-
-        if (preserved) {
-          // Use preserved data
-          pickListStatus = preserved.stage1Status || '';
-          pickListAssignedTo = preserved.stage1AssignedTo || '';
-          pickListDateAssigned = preserved.stage1DateAssigned || '';
-          oldItemStatus = preserved.stage1OldStatus || 'Assigned';
-          oldItemAssignedTo = preserved.stage1OldAssignedTo || r.employee;
-          oldItemDateAssigned = preserved.stage1OldDateAssigned || r.oldItemDateAssigned || '';
-          stage2Status = preserved.stage2Status || '';
-          stage2PickedFor = preserved.stage2PickedFor || '';
-          stage2AssignedTo = preserved.stage2AssignedTo || '';
-          stage2DateAssigned = preserved.stage2DateAssigned || '';
-          stage3AssignedTo = preserved.stage3AssignedTo || '';
-          stage3DateAssigned = preserved.stage3DateAssigned || '';
-          stage3ChangeOutDate = preserved.stage3ChangeOutDate || '';
-          isPicked = preserved.isPicked === true;
-          dateChanged = preserved.dateChanged || '';
-        } else {
-          // Get from current inventory
-          pickListStatus = hasPickListItem && invData ? (invData[6] || 'On Shelf') : '';
-          pickListAssignedTo = hasPickListItem && invData ? (invData[7] || 'On Shelf') : '';
-          pickListDateAssigned = hasPickListItem && invData ? (invData[4] || '') : '';
-          oldItemStatus = 'Assigned';
-          oldItemAssignedTo = r.employee;
-          oldItemDateAssigned = r.oldItemDateAssigned || '';
-          stage2Status = '';
-          stage2PickedFor = '';
-          stage2AssignedTo = '';
-          stage2DateAssigned = '';
-          stage3AssignedTo = '';
-          stage3DateAssigned = '';
-          stage3ChangeOutDate = '';
-          isPicked = false;
-          dateChanged = '';
-        }
-
-        return [
-          r.employee, r.itemType, r.itemNum, r.size, r.itemClass, r.location,
-          r.pickListNum || '—', r.pickListStatus || 'Need to Purchase ❌',
-          isPicked, dateChanged,
-          // Stage 1 - Pick List Item Before Check (K-M)
-          pickListStatus, pickListAssignedTo, pickListDateAssigned,
-          // Stage 1 - Old Item Assignment (N-P)
-          oldItemStatus, oldItemAssignedTo, oldItemDateAssigned,
-          // Stage 2 (Q-T)
-          stage2Status, stage2PickedFor, stage2AssignedTo, stage2DateAssigned,
-          // Stage 3 (U-W)
-          stage3AssignedTo, stage3DateAssigned, stage3ChangeOutDate
-        ];
-      });
-      var class2StartRow = currentRow;
-      reclaimsSheet.getRange(currentRow, 1, class2Data.length, 23).setValues(class2Data);
-      reclaimsSheet.getRange(currentRow, 1, class2Data.length, 10).setHorizontalAlignment('center');
-
-      // Insert checkboxes in Picked column (I)
-      reclaimsSheet.getRange(currentRow, 9, class2Data.length, 1).insertCheckboxes();
-
-      // Hide columns K-W (STAGE data)
-      reclaimsSheet.hideColumns(11, 13);
-
-      // Apply conditional formatting to Pick List Status column
-      for (var cj = 0; cj < class2Data.length; cj++) {
-        var statusCell2 = reclaimsSheet.getRange(currentRow + cj, 8);
-        var statusVal2 = class2Data[cj][7];
-        if (statusVal2.indexOf('Reclaim Only') !== -1) {
-          statusCell2.setBackground('#c8e6c9');
-        } else if (statusVal2.indexOf('In Stock') !== -1) {
-          statusCell2.setBackground('#c8e6c9');
-        } else if (statusVal2.indexOf('Need to Purchase') !== -1) {
-          statusCell2.setBackground('#ffcdd2');
-        } else if (statusVal2.indexOf('Ready For Delivery') !== -1) {
-          statusCell2.setBackground('#e1bee7');
-        } else if (statusVal2.indexOf('In Testing') !== -1) {
-          statusCell2.setBackground('#fff9c4');
-        }
-      }
-
-      // Restore preserved workflow state for Class 2 reclaims
-      restoreReclaimWorkflowState(reclaimsSheet, class2Reclaims, class2StartRow, savedReclaimState);
-
-      currentRow += class2Data.length;
-    } else {
-      reclaimsSheet.getRange(currentRow, 1, 1, 23).merge()
-        .setValue('✅ No Class 2 reclaims needed')
-        .setFontStyle('italic').setHorizontalAlignment('center').setBackground('#c8e6c9');
-      currentRow++;
-    }
-
-    currentRow += 2;
-
-    // --- Create Lost Items - Need to Locate Table ---
-    var lostItems = [];
-
-    function hasLostLocateMarker(notesValue) {
-      if (!notesValue) return false;
-      var notes = notesValue.toString().trim().toUpperCase();
-      return notes.indexOf('LOST-LOCATE') !== -1 ||
-             notes.indexOf('LOST LOCATE') !== -1 ||
-             notes === 'LOCATE';
-    }
-
-    // Scan Gloves
-    glovesData.forEach(function(row) {
-      var notes = row[10];  // Column K - Notes
-      if (hasLostLocateMarker(notes)) {
-        lostItems.push(['Glove', row[0], row[1], row[2], row[5], row[7], row[4], row[10]]);
-      }
-    });
-
-    // Scan Sleeves
-    sleevesData.forEach(function(row) {
-      var notes = row[10];
-      if (hasLostLocateMarker(notes)) {
-        lostItems.push(['Sleeve', row[0], row[1], row[2], row[5], row[7], row[4], row[10]]);
-      }
-    });
-
-    // Write Lost Items table
-    reclaimsSheet.getRange(currentRow, 1, 1, 8).merge()
-      .setValue('🔍 Lost Items - Need to Locate')
-      .setFontWeight('bold').setFontSize(14).setBackground('#ffccbc').setHorizontalAlignment('center');
-    currentRow++;
-
-    var lostItemsHeaders = ['Item Type', 'Item #', 'Size', 'Class', 'Last Location', 'Last Assigned To', 'Date Assigned', 'Notes'];
-    reclaimsSheet.getRange(currentRow, 1, 1, lostItemsHeaders.length).setValues([lostItemsHeaders])
-      .setFontWeight('bold').setBackground('#ffab91').setHorizontalAlignment('center');
-    currentRow++;
-
-    if (lostItems.length > 0) {
-      reclaimsSheet.getRange(currentRow, 1, lostItems.length, 8).setValues(lostItems);
-      reclaimsSheet.getRange(currentRow, 1, lostItems.length, 8).setBackground('#fff3e0');
-    } else {
-      reclaimsSheet.getRange(currentRow, 1, 1, 8).merge()
-        .setValue('✅ No items marked as LOST-LOCATE')
-        .setFontStyle('italic').setHorizontalAlignment('center').setBackground('#c8e6c9');
-    }
-
-    // Auto-resize columns to fit content
-    for (var col = 1; col <= 8; col++) {
-      reclaimsSheet.autoResizeColumn(col);
-    }
-
-    // ===== CHECK FOR PICK LIST ITEMS MARKED FOR PREVIOUS EMPLOYEES =====
-    // Find items that are "Ready For Delivery" or "Packed For Delivery" with Picked For containing a previous employee name
-    var previousEmployeePickListItems = [];
-
-    // Check Gloves
-    glovesData.forEach(function(row) {
-      var status = (row[6] || '').toString().trim().toLowerCase();
-      var pickedFor = (row[9] || '').toString().trim();  // Column J - Picked For
-
-      if ((status === 'ready for delivery' || status === 'packed for delivery') && pickedFor) {
-        // Check if picked for a previous employee
-        for (var empName in previousEmployeeLastDay) {
-          if (pickedFor.toLowerCase().indexOf(empName.toLowerCase()) !== -1) {
-            previousEmployeePickListItems.push({
-              itemType: 'Glove',
-              itemNum: row[0],
-              size: row[1],
-              itemClass: row[2],
-              status: row[6],
-              pickedFor: pickedFor,
-              previousEmployee: empName
-            });
-            break;
-          }
-        }
-        // Also check the previousEmployeeNames Set
-        previousEmployeeNames.forEach(function(empNameLower) {
-          if (pickedFor.toLowerCase().indexOf(empNameLower) !== -1) {
-            // Check if already added
-            var alreadyAdded = previousEmployeePickListItems.some(function(item) {
-              return item.itemNum === row[0] && item.itemType === 'Glove';
-            });
-            if (!alreadyAdded) {
-              previousEmployeePickListItems.push({
-                itemType: 'Glove',
-                itemNum: row[0],
-                size: row[1],
-                itemClass: row[2],
-                status: row[6],
-                pickedFor: pickedFor,
-                previousEmployee: empNameLower
-              });
-            }
-          }
-        });
-      }
-    });
-
-    // Check Sleeves
-    sleevesData.forEach(function(row) {
-      var status = (row[6] || '').toString().trim().toLowerCase();
-      var pickedFor = (row[9] || '').toString().trim();  // Column J - Picked For
-
-      if ((status === 'ready for delivery' || status === 'packed for delivery') && pickedFor) {
-        // Check if picked for a previous employee
-        for (var empName in previousEmployeeLastDay) {
-          if (pickedFor.toLowerCase().indexOf(empName.toLowerCase()) !== -1) {
-            previousEmployeePickListItems.push({
-              itemType: 'Sleeve',
-              itemNum: row[0],
-              size: row[1],
-              itemClass: row[2],
-              status: row[6],
-              pickedFor: pickedFor,
-              previousEmployee: empName
-            });
-            break;
-          }
-        }
-        // Also check the previousEmployeeNames Set
-        previousEmployeeNames.forEach(function(empNameLower) {
-          if (pickedFor.toLowerCase().indexOf(empNameLower) !== -1) {
-            // Check if already added
-            var alreadyAdded = previousEmployeePickListItems.some(function(item) {
-              return item.itemNum === row[0] && item.itemType === 'Sleeve';
-            });
-            if (!alreadyAdded) {
-              previousEmployeePickListItems.push({
-                itemType: 'Sleeve',
-                itemNum: row[0],
-                size: row[1],
-                itemClass: row[2],
-                status: row[6],
-                pickedFor: pickedFor,
-                previousEmployee: empNameLower
-              });
-            }
-          }
-        });
-      }
-    });
-
-    // If there are pick list items for previous employees, add to To Do List and show popup
-    if (previousEmployeePickListItems.length > 0) {
-      // Add to To Do Schedule config
-      addPreviousEmployeePickListToToDo(ss, previousEmployeePickListItems);
-
-      // Build popup message
-      var popupMessage = '⚠️ The following pick list items are marked for PREVIOUS EMPLOYEES and need to be returned to "On Shelf":\n\n';
-      previousEmployeePickListItems.forEach(function(item) {
-        popupMessage += '• ' + item.itemType + ' #' + item.itemNum + ' (Class ' + item.itemClass + ') - was picked for ' + item.previousEmployee + '\n';
-      });
-      popupMessage += '\nThese items have been added to your To Do List.';
-
-      // Show popup
-      SpreadsheetApp.getUi().alert('Previous Employee Pick List Items Found', popupMessage, SpreadsheetApp.getUi().ButtonSet.OK);
-    }
-
-    Logger.log('Reclaims sheet updated - Previous Employee: ' + prevEmpItems.length +
-               ', Class 3 Reclaims: ' + class3Reclaims.length +
-               ', Class 2 Reclaims: ' + class2Reclaims.length +
-               ', Lost Items: ' + lostItems.length +
-               ', Previous Employee Pick List Items: ' + previousEmployeePickListItems.length);
-
-  } catch (e) {
-    Logger.log('[ERROR] updateReclaimsSheet: ' + e);
-    SpreadsheetApp.getUi().alert('Error updating Reclaims sheet: ' + e);
-  }
+  Logger.log("updateReclaimsSheet: Deprecated.");
 }
-
-/**
- * Adds previous employee pick list items to the To Do List.
- * Creates tasks to return these items to "On Shelf" status.
- *
- * @param {Spreadsheet} ss - The active spreadsheet
- * @param {Array} items - Array of pick list item objects for previous employees
- */
-function addPreviousEmployeePickListToToDo(ss, items) {
-  if (!items || items.length === 0) return;
-
-  try {
-    var toDoConfigSheet = ss.getSheetByName('ToDoConfig');
-
-    // If ToDoConfig sheet doesn't exist, create a simple log entry
-    if (!toDoConfigSheet) {
-      Logger.log('ToDoConfig sheet not found - logging items to return to shelf:');
-      items.forEach(function(item) {
-        Logger.log('  ' + item.itemType + ' #' + item.itemNum + ' - ' + item.pickedFor);
-      });
-      return;
-    }
-
-    // Add manual tasks to the ToDoConfig sheet
-    // Find the Manual Tasks section or append to the end
-    var lastRow = toDoConfigSheet.getLastRow();
-    var data = toDoConfigSheet.getDataRange().getValues();
-
-    // Look for existing "Return to Shelf" tasks and don't duplicate
-    var existingTasks = new Set();
-    for (var i = 0; i < data.length; i++) {
-      var taskDesc = (data[i][1] || '').toString();
-      if (taskDesc.indexOf('Return to Shelf') !== -1) {
-        existingTasks.add(taskDesc);
-      }
-    }
-
-    // Find the row to insert new manual tasks (after any existing manual tasks header)
-    var manualTasksRow = -1;
-    for (var j = 0; j < data.length; j++) {
-      if ((data[j][0] || '').toString().indexOf('Manual Tasks') !== -1 ||
-          (data[j][0] || '').toString().indexOf('Personal Tasks') !== -1) {
-        manualTasksRow = j + 2;  // Row after the header
-        break;
-      }
-    }
-
-    // If no manual tasks section found, append at end
-    if (manualTasksRow === -1) {
-      manualTasksRow = lastRow + 2;
-      toDoConfigSheet.getRange(lastRow + 1, 1).setValue('Personal Tasks');
-      toDoConfigSheet.getRange(lastRow + 1, 1).setFontWeight('bold').setBackground('#e1bee7');
-    }
-
-    // Add tasks for each item
-    var tasksAdded = 0;
-    var today = new Date();
-    var todayStr = Utilities.formatDate(today, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
-
-    items.forEach(function(item) {
-      var taskDesc = 'Return to Shelf: ' + item.itemType + ' #' + item.itemNum + ' (was picked for ' + item.previousEmployee + ')';
-
-      // Skip if already exists
-      if (existingTasks.has(taskDesc)) {
-        return;
-      }
-
-      // Insert the task
-      toDoConfigSheet.insertRowAfter(manualTasksRow);
-      toDoConfigSheet.getRange(manualTasksRow + 1, 1).setValue('Previous Employee');  // Category
-      toDoConfigSheet.getRange(manualTasksRow + 1, 2).setValue(taskDesc);  // Task description
-      toDoConfigSheet.getRange(manualTasksRow + 1, 3).setValue(todayStr);  // Date added
-      toDoConfigSheet.getRange(manualTasksRow + 1, 4).insertCheckboxes();  // Completed checkbox
-
-      tasksAdded++;
-      manualTasksRow++;
-    });
-
-    if (tasksAdded > 0) {
-      Logger.log('Added ' + tasksAdded + ' "Return to Shelf" tasks to To Do List');
-    }
-
-  } catch (e) {
-    Logger.log('Error adding previous employee items to To Do: ' + e);
-  }
+function addPreviousEmployeePickListToToDo() {
+  Logger.log("addPreviousEmployeePickListToToDo: Deprecated.");
 }
 
 /**
@@ -20809,7 +20085,7 @@ function findReclaimPickListItem(inventoryData, reclaim, assignedItems, reclaimT
 /**
  * Helper function to format dates for display
  */
-function formatDateForDisplay(dateValue) {
+function formatDateForDisplayLocal(dateValue) {
   if (!dateValue) return '';
   if (dateValue === 'N/A') return 'N/A';
   try {
@@ -21299,7 +20575,7 @@ function collectSwapTasksLegacy(swapData, itemType, todoItems, today, empLocatio
       pickListNum: pickListNum || '—',
       itemType: itemType,
       itemClass: currentClass,
-      dueDate: formatDateForDisplay(changeOutDate),
+      dueDate: formatDateForDisplayLocal(changeOutDate),
       daysLeft: daysLeft,
       daysLeftNum: daysLeftNum,
       status: taskStatus,
@@ -22944,7 +22220,11 @@ function generateBlanketSwaps(silent) {
   if (!swapsSheet) {
     swapsSheet = ss.insertSheet(SHEET_BLANKET_SWAPS);
   }
-  swapsSheet.clear();
+  // Clear only columns A-W (columns 1-23) to preserve user helper tables in Y-AS
+  var maxRows = swapsSheet.getMaxRows();
+  if (maxRows > 0) {
+    swapsSheet.getRange(1, 1, maxRows, 23).clear();
+  }
 
   // Read blankets data
   var data = blanketsSheet.getDataRange().getValues();
@@ -23430,14 +22710,13 @@ function generateHVTesterSwaps(silent) {
   if (!swapsSheet) {
     swapsSheet = ss.insertSheet(SHEET_HV_TESTER_SWAPS);
   }
-  // Clear everything including data validation rules on the entire sheet
+  // Clear columns A-W (columns 1-23) to preserve user helper tables in Y-AS
   var maxRows = swapsSheet.getMaxRows();
-  var maxCols = swapsSheet.getMaxColumns();
-  if (maxRows > 0 && maxCols > 0) {
-    var fullRange = swapsSheet.getRange(1, 1, maxRows, maxCols);
-    fullRange.clearDataValidations();
-    fullRange.clearContent();
-    fullRange.clearFormat();
+  if (maxRows > 0) {
+    var clearRange = swapsSheet.getRange(1, 1, maxRows, 23);
+    clearRange.clearDataValidations();
+    clearRange.clearContent();
+    clearRange.clearFormat();
   }
 
   // Build the swap report
@@ -23637,14 +22916,13 @@ function generatePhasingSetSwaps(silent) {
   if (!swapsSheet) {
     swapsSheet = ss.insertSheet(SHEET_PHASING_SET_SWAPS);
   }
-  // Clear everything including data validation rules on the entire sheet
+  // Clear columns A-W (columns 1-23) to preserve user helper tables in Y-AS
   var maxRows = swapsSheet.getMaxRows();
-  var maxCols = swapsSheet.getMaxColumns();
-  if (maxRows > 0 && maxCols > 0) {
-    var fullRange = swapsSheet.getRange(1, 1, maxRows, maxCols);
-    fullRange.clearDataValidations();
-    fullRange.clearContent();
-    fullRange.clearFormat();
+  if (maxRows > 0) {
+    var clearRange = swapsSheet.getRange(1, 1, maxRows, 23);
+    clearRange.clearDataValidations();
+    clearRange.clearContent();
+    clearRange.clearFormat();
   }
 
 
@@ -25089,14 +24367,13 @@ function generateAEDSwaps(silent) {
   if (!swapsSheet) {
     swapsSheet = ss.insertSheet(SHEET_AED_SWAPS);
   }
-  // Clear everything including data validation rules on the entire sheet
+  // Clear columns A-W (columns 1-23) to preserve user helper tables in Y-AS
   var maxRows = swapsSheet.getMaxRows();
-  var maxCols = swapsSheet.getMaxColumns();
-  if (maxRows > 0 && maxCols > 0) {
-    var fullRange = swapsSheet.getRange(1, 1, maxRows, maxCols);
-    fullRange.clearDataValidations();
-    fullRange.clearContent();
-    fullRange.clearFormat();
+  if (maxRows > 0) {
+    var clearRange = swapsSheet.getRange(1, 1, maxRows, 23);
+    clearRange.clearDataValidations();
+    clearRange.clearContent();
+    clearRange.clearFormat();
   }
 
   // Build the swap report
@@ -26463,11 +25740,13 @@ function generateGroundSwaps(silent) {
   var swapsSheet = ss.getSheetByName(SHEET_GROUND_SWAPS);
   if (!swapsSheet) swapsSheet = ss.insertSheet(SHEET_GROUND_SWAPS);
 
-  // Clear sheet
+  // Clear columns A-W (columns 1-23) to preserve user helper tables in Y-AS
   var maxRows = swapsSheet.getMaxRows();
-  var maxCols = swapsSheet.getMaxColumns();
-  if (maxRows > 0 && maxCols > 0) {
-    swapsSheet.getRange(1, 1, maxRows, maxCols).clearDataValidations().clearContent().clearFormat();
+  if (maxRows > 0) {
+    var clearRange = swapsSheet.getRange(1, 1, maxRows, 23);
+    clearRange.clearDataValidations();
+    clearRange.clearContent();
+    clearRange.clearFormat();
   }
 
   var currentRow = 1;
@@ -26767,11 +26046,13 @@ function generateHotStickSwaps(silent) {
   var swapsSheet = ss.getSheetByName(SHEET_HOT_STICK_SWAPS);
   if (!swapsSheet) swapsSheet = ss.insertSheet(SHEET_HOT_STICK_SWAPS);
 
-  // Clear sheet
+  // Clear columns A-W (columns 1-23) to preserve user helper tables in Y-AS
   var maxRows = swapsSheet.getMaxRows();
-  var maxCols = swapsSheet.getMaxColumns();
-  if (maxRows > 0 && maxCols > 0) {
-    swapsSheet.getRange(1, 1, maxRows, maxCols).clearDataValidations().clearContent().clearFormat();
+  if (maxRows > 0) {
+    var clearRange = swapsSheet.getRange(1, 1, maxRows, 23);
+    clearRange.clearDataValidations();
+    clearRange.clearContent();
+    clearRange.clearFormat();
   }
 
   var currentRow = 1;
@@ -26838,4 +26119,92 @@ function generateHotStickSwaps(silent) {
  */
 function menuGenerateHotStickSwaps() {
   generateHotStickSwaps(false);
+}
+
+/**
+ * Deploys and locks down the Inventory Swaps Dashboards on both tabs.
+ * Run this to instantly regenerate the entire system programmatically.
+ */
+function deploySwapsDashboards() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var configurations = [
+    { swapTab: "Glove Swaps", sourceTab: "Gloves", sizes: ["All", "8", "8.5", "9", "9.5", "10", "10.5", "11", "12"], title: "Glove" },
+    { swapTab: "Sleeve Swaps", sourceTab: "Sleeves", sizes: ["All", "Regular", "Large", "X-Large"], title: "Sleeve" }
+  ];
+
+  configurations.forEach(function(config) {
+    var sheet = ss.getSheetByName(config.swapTab);
+    if (!sheet) return;
+
+    // 1. Clear previous conflicting layout structures
+    sheet.getRange("Y1:AS100").clearContent().clearFormat().clearDataValidations();
+
+    // 2. Build Slicing Inputs & Dropdowns
+    sheet.getRange("Y22").setValue("Class Filter:").setFontWeight("bold");
+    sheet.getRange("AA22").setValue("Size Filter:").setFontWeight("bold");
+    
+    var classList = config.title === "Glove" ? ["All", "0", "2", "3"] : ["All", "2", "3"];
+    var classRule = SpreadsheetApp.newDataValidation().requireValueInList(classList).build();
+    var sizeRule = SpreadsheetApp.newDataValidation().requireValueInList(config.sizes).build();
+    
+    sheet.getRange("Z22").setDataValidation(classRule).setValue("All");
+    sheet.getRange("AB22").setDataValidation(sizeRule).setValue("All");
+
+    // 3. Deploy Dynamic Title Header Block
+    var headerRange = sheet.getRange("Y1:AC1");
+    headerRange.merge();
+    headerRange.setFormula('="' + config.title + ' Swaps Overview - Class: " & IF($Z$22="All", "All", $Z$22) & " | Size: " & IF($AB$22="All", "All", $AB$22)');
+    headerRange.setFontSize(16).setFontWeight("bold").setHorizontalAlignment("center").setVerticalAlignment("middle");
+
+    // 4. Set Up Row Headers for the Helper Grid Matrix
+    sheet.getRange("AF1:AJ1").setValues([["Status", "Count", "Newest Date Assigned", "Expected Return Date", "Chart Label"]]).setFontWeight("bold");
+    
+    // Status column (AF) has dynamic labels containing counts/dates for the chart legend
+    sheet.getRange("AF2").setFormula('="On Shelf (" & AG2 & ")"');
+    sheet.getRange("AF3").setFormula('="Packed For Testing" & IF(AG3=0, "", " (" & AJ3 & ")")');
+    sheet.getRange("AF4").setFormula('="In Testing" & IF(AG4=0, "", " (" & AJ4 & ")")');
+
+    // 5. Build Dynamic Cross-Tab Filter Formula Sets (Corrected Column mapping: Size is C, Class is D)
+    // Formulas use hardcoded status strings to prevent circular references with dynamic AF labels
+    sheet.getRange("AG2").setFormula('=COUNTIFS(' + config.sourceTab + '!$H:$H, "On Shelf", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22))');
+    sheet.getRange("AG3").setFormula('=COUNTIFS(' + config.sourceTab + '!$H:$H, "Packed For Testing", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22))');
+    sheet.getRange("AG4").setFormula('=COUNTIFS(' + config.sourceTab + '!$H:$H, "In Testing", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22))');
+
+    // AH formulas use IF(AGx=0, "", ...) to prevent showing 1899-12-30 (date 0) when count is 0
+    sheet.getRange("AH2").setFormula('=IF(AG2=0, "", MAXIFS(' + config.sourceTab + '!$F:$F, ' + config.sourceTab + '!$H:$H, "On Shelf", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22)))');
+    sheet.getRange("AH3").setFormula('=IF(AG3=0, "", MAXIFS(' + config.sourceTab + '!$F:$F, ' + config.sourceTab + '!$H:$H, "Packed For Testing", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22)))');
+    sheet.getRange("AH4").setFormula('=IF(AG4=0, "", MAXIFS(' + config.sourceTab + '!$F:$F, ' + config.sourceTab + '!$H:$H, "In Testing", ' + config.sourceTab + '!$D:$D, IF($Z$22="All", "<>", $Z$22), ' + config.sourceTab + '!$C:$C, IF($AB$22="All", "<>", $AB$22)))');
+
+    sheet.getRange("AI2").setValue("N/A");
+    sheet.getRange("AI3").setFormula('=IF(OR(AH3="", AH3=0), "", EDATE(AH3, 1))');
+    sheet.getRange("AI4").setFormula('=IF(OR(AH4="", AH4=0), "", AH4 + 14)');
+
+    sheet.getRange("AJ2").setFormula('=IF(AG2=0, "", TEXT(AG2, "#"))');
+    sheet.getRange("AJ3").setFormula('=IF(OR(AI3="", AI3=0), "", "Due: " & TEXT(AI3, "m/d/yyyy"))');
+    sheet.getRange("AJ4").setFormula('=IF(OR(AI4="", AI4=0), "", "Due: " & TEXT(AI4, "m/d/yyyy"))');
+
+    // 6. Enforce Layout Formatting Rules (Numbers & Timestamps)
+    sheet.getRange("AH2:AI4").setNumberFormat("yyyy-mm-dd");
+    sheet.getRange("AG2:AG4").setNumberFormat("#,##0");
+
+    // 7. Programmatic Generation of the Separated Bar Charts
+    var existingCharts = sheet.getCharts();
+    existingCharts.forEach(function(c) { 
+      sheet.removeChart(c); 
+    }); // Clear old artifacts
+
+    var chart = sheet.newChart()
+        .setChartType(Charts.ChartType.COLUMN)
+        .addRange(sheet.getRange("AF1:AG4")) // Category & Core Metric Counts
+        .setPosition(2, 25, 10, 10)         // Anchored nicely starting at cell Y2
+        .setOption("title", "")              // Cleaned out to use the cell header blueprint instead
+        .setOption("legend", { position: "top" }) // Show the legend at the top to explain the 3 status series
+        .setOption("colors", ["#2ea44f", "#e3b341", "#cb2431"]) // Set Green, Yellow, Red branding colors
+        .setOption("vAxis", { title: "Counts" })
+        .setOption("dataLabels", "value")    // Configures core labels
+        .setTransposeRowsAndColumns(true)    // Transpose so each status is its own series (colored separately)
+        .build();
+
+    sheet.insertChart(chart);
+  });
 }
