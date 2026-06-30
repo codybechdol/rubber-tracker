@@ -273,7 +273,7 @@ function _buildGloveManagerMenu() {
           .addItem('📅 Fiscal Year Config', 'showFiscalYearConfig')
           .addItem('📥 Import Data', 'showImportDialog')
           .addSeparator()
-          .addItem('➖ Remove Expiring Certs Row Groups', 'removeExpCertRowGroups'))
+          .addItem('🧹 Clean & Sort Expiring Certs Sheet', 'removeExpCertRowGroups'))
         .addSeparator()
         .addItem('🔍 Diagnose Auth Issues', 'diagnoseAuthIssues')
         .addItem('🗑️ Clear Background Triggers', 'clearAllBackgroundTriggers'))

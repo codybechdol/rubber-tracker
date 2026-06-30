@@ -3672,28 +3672,12 @@ function processExpiringCertsImportMultiRow(parsedData, selectedCertTypes) {
   if (batchData.length > 0) {
     expiringSheet.getRange(2, 1, batchData.length, headers.length).setValues(batchData);
 
-    // Add formulas - simple calculation for all certs
-    var formulaRange = expiringSheet.getRange(2, 6, batchData.length, 2);
-    var formulas = [];
-    for (var f = 0; f < batchData.length; f++) {
-      var rowNum = f + 2;
-      formulas.push([
-        // Days Until Expiration: If no date, show N/A, otherwise calculate days
-        '=IF(ISBLANK(C' + rowNum + '),"N/A",DAYS(C' + rowNum + ',TODAY()))',
-        // Status: If no date show "No Date Set", otherwise calculate based on days
-        '=IF(F' + rowNum + '="PRIORITY - Need Copy","PRIORITY - Need Copy",IF(F' + rowNum + '="N/A","No Date Set",IF(F' + rowNum + '<0,"EXPIRED",IF(F' + rowNum + '<=7,"CRITICAL",IF(F' + rowNum + '<=30,"WARNING",IF(F' + rowNum + '<=60,"UPCOMING","OK"))))))'
-      ]);
-    }
-    formulaRange.setFormulas(formulas);
-
-    // Sort by employee name (column 1) then days (column 6)
-    expiringSheet.getRange(2, 1, batchData.length, headers.length).sort([1, 6]);
+    // Clear row groups and sort using custom order (which also sets all formulas)
+    clearAllRowGroups(expiringSheet);
+    sortExpiringCertsSheet(expiringSheet);
 
     // Apply conditional formatting
     applyExpiringCertsFormatting(expiringSheet, batchData.length);
-
-    // Create row groups by employee
-    createEmployeeGroups(expiringSheet, batchData.length);
 
     // NOTE: Cert tasks are now handled via Task Metadata (collectExpiringCertTasks in 76-SmartScheduling.gs)
     // generateToDoTasksFromCerts is deprecated — cert tasks no longer go to Manual Tasks sheet.
@@ -3818,35 +3802,8 @@ function applyExpiringCertsFormatting(sheet, dataRows) {
  * Creates collapsed row groups by employee in Expiring Certs sheet.
  */
 function createEmployeeGroups(sheet, dataRows) {
-  if (dataRows < 2) return;
-
-  var data = sheet.getRange(2, 1, dataRows, 1).getValues();
-  var currentEmployee = null;
-  var groupStart = -1;
-
-  for (var i = 0; i < data.length; i++) {
-    var empName = data[i][0];
-
-    if (empName !== currentEmployee) {
-      // Close previous group
-      if (groupStart !== -1 && (i - groupStart) > 1) {
-        var range = sheet.getRange(groupStart + 2, 1, i - groupStart, 7);
-        range.shiftRowGroupDepth(1);
-        sheet.getRowGroup(groupStart + 2, 1).collapse();
-      }
-
-      // Start new group
-      currentEmployee = empName;
-      groupStart = i;
-    }
-  }
-
-  // Close final group
-  if (groupStart !== -1 && (dataRows - groupStart) > 1) {
-    var range = sheet.getRange(groupStart + 2, 1, dataRows - groupStart, 7);
-    range.shiftRowGroupDepth(1);
-    sheet.getRowGroup(groupStart + 2, 1).collapse();
-  }
+  Logger.log('createEmployeeGroups: Row grouping disabled per user request to avoid visual clutter.');
+  return;
 }
 
 /**
@@ -3864,18 +3821,120 @@ function removeExpCertRowGroups() {
 
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) {
-    SpreadsheetApp.getUi().alert('Expiring Certs sheet is empty — no row groups to remove.');
+    SpreadsheetApp.getUi().alert('Expiring Certs sheet is empty — nothing to sort or clear.');
     return;
   }
 
-  // Shift depth of all data rows by -1 to remove depth-1 groups.
-  // Rows without groups are unaffected. Safe to call on the full range.
   try {
-    sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).shiftRowGroupDepth(-1);
-    SpreadsheetApp.getUi().alert('✅ Row groups removed from Expiring Certs sheet. The +/- buttons will no longer appear.');
+    clearAllRowGroups(sheet);
+    sortExpiringCertsSheet(sheet);
+    applyExpiringCertsFormatting(sheet, lastRow - 1);
+    SpreadsheetApp.getUi().alert('✅ Expiring Certs sheet has been sorted and all row groups have been removed.');
   } catch (e) {
-    SpreadsheetApp.getUi().alert('Error removing row groups: ' + e.message);
+    SpreadsheetApp.getUi().alert('Error cleaning sheet: ' + e.message);
   }
+}
+
+/**
+ * Silently clears all row groups on a sheet by shifting group depth back to 0.
+ * @param {Sheet} sheet - The Google Sheet
+ */
+function clearAllRowGroups(sheet) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  try {
+    // Shift row group depth by -8 to fully flatten any nested groups (Google Sheets max depth is 8)
+    sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).shiftRowGroupDepth(-8);
+    Logger.log('clearAllRowGroups: Cleared row groups successfully.');
+  } catch (e) {
+    Logger.log('clearAllRowGroups error: ' + e.message);
+  }
+}
+
+/**
+ * Sorts the Expiring Certs sheet by Employee Name (alphabetical) and then by
+ * Item Type in a fixed custom order.
+ * @param {Sheet} sheet - The Expiring Certs sheet
+ */
+function sortExpiringCertsSheet(sheet) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+
+  var lastCol = sheet.getLastColumn();
+  var range = sheet.getRange(2, 1, lastRow - 1, lastCol);
+  var values = range.getValues();
+
+  var CERT_ORDER = [
+    'DL',
+    'MEC Expiration',
+    'MEC',
+    '1st Aid',
+    'CPR',
+    'Harassment Training',
+    'Crane Cert',
+    'Crane Evaluation',
+    'Rigging & Signaling/Signalperson & Spotter Cert',
+    'OSHA 1910',
+    'BNSF',
+    'MSHA',
+    'OSHA Trench Comp Person',
+    'Forklift',
+    'Forklift Operator Safety Training',
+    'EICA Basic Helicopter Line Construction Safety'
+  ];
+
+  function getCertSortIndex(certType) {
+    var idx = CERT_ORDER.indexOf(certType);
+    return idx === -1 ? 999 : idx;
+  }
+
+  // Sort values in memory
+  values.sort(function(a, b) {
+    var nameA = String(a[0] || '').trim().toLowerCase();
+    var nameB = String(b[0] || '').trim().toLowerCase();
+    if (nameA !== nameB) {
+      return nameA < nameB ? -1 : 1;
+    }
+    var certA = String(a[1] || '').trim();
+    var certB = String(b[1] || '').trim();
+    return getCertSortIndex(certA) - getCertSortIndex(certB);
+  });
+
+  // Write values back
+  range.setValues(values);
+
+  // Set number format for Expiration Date column (Column C) to MM/dd/yyyy to strip time values
+  sheet.getRange(2, 3, values.length, 1).setNumberFormat('MM/dd/yyyy');
+
+  // Re-write formulas for Column F (Days Until) and Column G (Status)
+  var nonExpiringList = [
+    'Crane Evaluation',
+    'OSHA 1910',
+    'BNSF',
+    'MSHA',
+    'EICA Basic Helicopter Line Construction Safety'
+  ];
+
+  var formulas = [];
+  for (var f = 0; f < values.length; f++) {
+    var rowNum = f + 2;
+    var certType = String(values[f][1] || '').trim();
+    var isNonExpiring = nonExpiringList.indexOf(certType) !== -1;
+
+    if (isNonExpiring) {
+      formulas.push([
+        '="N/A"',
+        '=IF(ISBLANK(C' + rowNum + '),"No Date Set","OK")'
+      ]);
+    } else {
+      formulas.push([
+        '=IF(ISBLANK(C' + rowNum + '),"N/A",DAYS(C' + rowNum + ',TODAY()))',
+        '=IF(F' + rowNum + '="PRIORITY - Need Copy","PRIORITY - Need Copy",IF(F' + rowNum + '="N/A","No Date Set",IF(F' + rowNum + '<0,"EXPIRED",IF(F' + rowNum + '<=7,"CRITICAL",IF(F' + rowNum + '<=30,"WARNING",IF(F' + rowNum + '<=60,"UPCOMING","OK"))))))'
+      ]);
+    }
+  }
+  sheet.getRange(2, 6, values.length, 2).setFormulas(formulas);
+  Logger.log('sortExpiringCertsSheet: Sorted ' + values.length + ' rows with formulas refreshed.');
 }
 
 /**
@@ -5959,15 +6018,16 @@ function updateCertExpirationFromTask(employee, certType, newExpiration, task) {
     var expirationCol = 2;
 
     // Find and update the matching row
+    var searchEmp = String(employee || '').trim().toLowerCase();
+    var searchCert = String(certType || '').trim().toLowerCase();
+
     for (var i = 1; i < data.length; i++) {
       var rowEmp = String(data[i][empCol] || '').trim().toLowerCase();
       var rowCert = String(data[i][certTypeCol] || '').trim().toLowerCase();
-      var searchEmp = String(employee || '').trim().toLowerCase();
-      var searchCert = String(certType || '').trim().toLowerCase();
 
       if (rowEmp === searchEmp && rowCert === searchCert) {
         // Update the expiration date
-        var dateValue = newExpiration ? new Date(newExpiration + 'T12:00:00') : '';
+        var dateValue = newExpiration ? parseDateNoon(newExpiration) : '';
         expiringSheet.getRange(i + 1, expirationCol + 1).setValue(dateValue);
         updated = true;
         Logger.log('updateCertExpirationFromTask: Updated row ' + (i + 1) + ' for ' + employee + ' - ' + certType);
@@ -5976,7 +6036,48 @@ function updateCertExpirationFromTask(employee, certType, newExpiration, task) {
     }
 
     if (!updated) {
-      Logger.log('updateCertExpirationFromTask: No matching row found for ' + employee + ' - ' + certType);
+      Logger.log('updateCertExpirationFromTask: No matching row found for ' + employee + ' - ' + certType + '. Appending new row.');
+      
+      var employeesList = getEmployeeNamesForMatching();
+      var matchedEmp = null;
+      for (var k = 0; k < employeesList.length; k++) {
+        if (employeesList[k].name.trim().toLowerCase() === searchEmp) {
+          matchedEmp = employeesList[k];
+          break;
+        }
+      }
+
+      var newLocation = matchedEmp ? matchedEmp.location : '';
+      var newJobNum = matchedEmp ? matchedEmp.jobNum : '';
+      var dateValue = newExpiration ? parseDateNoon(newExpiration) : '';
+      var newRowIndex = expiringSheet.getLastRow() + 1;
+
+      // Column structure: Employee Name, Item Type, Expiration Date, Location, Job #, Days Until Expiration, Status
+      expiringSheet.appendRow([
+        employee,      // Employee Name
+        certType,      // Item Type
+        dateValue,     // Expiration Date
+        newLocation,
+        newJobNum,
+        '',            // Formula will be set next
+        ''             // Formula will be set next
+      ]);
+
+      // Set formulas
+      expiringSheet.getRange(newRowIndex, 6).setFormula('=IF(ISBLANK(C' + newRowIndex + '),"N/A",DAYS(C' + newRowIndex + ',TODAY()))');
+      expiringSheet.getRange(newRowIndex, 7).setFormula('=IF(F' + newRowIndex + '="PRIORITY - Need Copy","PRIORITY - Need Copy",IF(F' + newRowIndex + '="N/A","No Date Set",IF(F' + newRowIndex + '<0,"EXPIRED",IF(F' + newRowIndex + '<=7,"CRITICAL",IF(F' + newRowIndex + '<=30,"WARNING",IF(F' + newRowIndex + '<=60,"UPCOMING","OK"))))))');
+
+      updated = true;
+      Logger.log('updateCertExpirationFromTask: Created new row for ' + employee + ' - ' + certType);
+    }
+
+    // Clear row groups, apply custom sorting, and format the sheet
+    var totalRows = expiringSheet.getLastRow();
+    if (totalRows > 1) {
+      var numDataRows = totalRows - 1;
+      clearAllRowGroups(expiringSheet);
+      sortExpiringCertsSheet(expiringSheet);
+      applyExpiringCertsFormatting(expiringSheet, numDataRows);
     }
 
     // Mark task as complete in Task Metadata if task provided
@@ -6218,20 +6319,27 @@ function getExpiringCertsForConfig() {
         }
       }
 
-      // Special handling for Crane Evaluation:
-      // Crane Evaluation is a non-expiring cert - the date is when evaluation was PERFORMED, not expiration
-      // If the row exists with a date, the evaluation is complete and status should be "OK"
-      // The evaluation never "expires" - it's a one-time requirement for employees with Crane Cert
+      // Special handling for non-expiring certs:
+      // The date is when evaluation/training was PERFORMED, not expiration.
+      // If the row exists with a date, it is complete and status should be "OK".
+      var nonExpiringList = [
+        'Crane Evaluation',
+        'OSHA 1910',
+        'BNSF',
+        'MSHA',
+        'EICA Basic Helicopter Line Construction Safety'
+      ];
+      var isNonExpiring = nonExpiringList.indexOf(certType) !== -1;
       var adjustedStatus = status;
       var adjustedDaysUntil = (daysUntil !== null && daysUntil !== undefined && daysUntil !== '' && daysUntil !== 'N/A') ? Number(daysUntil) : null;
 
-      if (certType === 'Crane Evaluation') {
-        // If there's a date, the evaluation is complete - show as OK
+      if (isNonExpiring) {
+        // If there's a date, it is complete - show as OK
         if (expiration && expDateStr !== 'N/A') {
           adjustedStatus = 'OK';
           adjustedDaysUntil = null; // No "days until" for non-expiring cert
         } else {
-          // No date means evaluation is missing/needed
+          // No date means evaluation/training is missing/needed
           adjustedStatus = 'MISSING';
         }
       }
@@ -6241,7 +6349,7 @@ function getExpiringCertsForConfig() {
         expiration: expDateStr || 'N/A',
         daysUntil: adjustedDaysUntil,
         status: adjustedStatus || 'Unknown',
-        isNonExpiring: certType === 'Crane Evaluation' // Flag for UI
+        isNonExpiring: isNonExpiring // Flag for UI
       });
 
       empMap[empName].summary.total++;
@@ -6402,15 +6510,21 @@ function getExpiringCertsForSchedule() {
         }
       }
 
-      // Special handling for Crane Evaluation:
-      // It's a non-expiring cert - the date is when evaluation was PERFORMED, not expiration
-      // If date exists, it's complete (status OK), otherwise it's missing
+      // Special handling for non-expiring certs:
+      // It's a non-expiring cert - the date is when evaluation/training was PERFORMED, not expiration
+      // If date exists, it's complete, otherwise it's missing
+      var nonExpiringList = [
+        'Crane Evaluation',
+        'OSHA 1910',
+        'BNSF',
+        'MSHA',
+        'EICA Basic Helicopter Line Construction Safety'
+      ];
+      var isNonExpiring = nonExpiringList.indexOf(certType) !== -1;
       var adjustedDaysUntil = typeof daysUntil === 'number' ? daysUntil : null;
-      var isNonExpiring = false;
 
-      if (certType === 'Crane Evaluation') {
-        isNonExpiring = true;
-        // If there's a date, evaluation is complete - don't treat as "expired"
+      if (isNonExpiring) {
+        // If there's a date, it is complete - don't treat as "expired"
         if (expDateStr) {
           adjustedDaysUntil = null; // No "days until" for completed non-expiring cert
         }

@@ -2636,15 +2636,47 @@
       return match ? match[1].trim() : '';
     }
 
+    var NON_EXPIRING_CERTS = [
+      'Crane Evaluation',
+      'OSHA 1910',
+      'BNSF',
+      'MSHA',
+      'EICA Basic Helicopter Line Construction Safety'
+    ];
+
+    function isCertNonExpiring(certType) {
+      return NON_EXPIRING_CERTS.indexOf(certType) !== -1;
+    }
+
     function showCertExpirationModal(employee, certType, taskIndex) {
+      var isNonExpiring = isCertNonExpiring(certType);
+      
+      // Determine appropriate terminology
+      var modalTitle = isNonExpiring ? '📜 Enter Certification Date' : '📜 Enter New Expiration Date';
+      if (certType === 'Crane Evaluation') {
+        modalTitle = '📜 Enter Crane Evaluation Date';
+      }
+      
+      var labelText = isNonExpiring ? 'Date Performed / Issued' : 'New Expiration Date';
+      if (certType === 'Crane Evaluation') {
+        labelText = 'Evaluation Date';
+      }
+      
+      var formText = isNonExpiring ? 
+        'Enter the date this certification was issued or completed.' : 
+        'Enter the expiration date from the new certification.';
+      if (certType === 'Crane Evaluation') {
+        formText = 'Enter the date the crane evaluation was performed.';
+      }
+
       var modalHtml = '<div class="modal fade" id="certExpirationModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">';
-      modalHtml += '<div class="modal-header bg-success text-white"><h5 class="modal-title">📜 Enter New Expiration Date</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>';
+      modalHtml += '<div class="modal-header bg-success text-white"><h5 class="modal-title">' + modalTitle + '</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>';
       modalHtml += '<div class="modal-body">';
       modalHtml += '<p><strong>Employee:</strong> ' + employee + '</p>';
       modalHtml += '<p><strong>Certification:</strong> ' + certType + '</p>';
-      modalHtml += '<div class="mb-3"><label class="form-label">New Expiration Date <span class="text-danger">*</span></label>';
+      modalHtml += '<div class="mb-3"><label class="form-label">' + labelText + ' <span class="text-danger">*</span></label>';
       modalHtml += '<input type="date" class="form-control" id="newCertExpiration" required>';
-      modalHtml += '<div class="form-text">Enter the expiration date from the new certification.</div></div>';
+      modalHtml += '<div class="form-text">' + formText + '</div></div>';
       modalHtml += '</div><div class="modal-footer">';
       modalHtml += '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>';
       modalHtml += '<button type="button" class="btn btn-success" onclick="saveCertExpiration(\'' + employee.replace(/'/g, "\\'") + '\', \'' + certType.replace(/'/g, "\\'") + '\', ' + taskIndex + ')"><i class="bi bi-check-lg"></i> Save & Complete</button>';
@@ -2660,9 +2692,14 @@
 
     function saveCertExpiration(employee, certType, taskIndex) {
       var newExpiration = document.getElementById('newCertExpiration').value;
+      var isNonExpiring = isCertNonExpiring(certType);
 
       if (!newExpiration) {
-        showToast('Please enter the new expiration date', 'error');
+        var errorMsg = isNonExpiring ? 'Please enter the certification date' : 'Please enter the new expiration date';
+        if (certType === 'Crane Evaluation') {
+          errorMsg = 'Please enter the evaluation date';
+        }
+        showToast(errorMsg, 'error');
         return;
       }
 
@@ -2680,7 +2717,13 @@
       google.script.run
         .withSuccessHandler(function(result) {
           console.log('saveCertExpiration: Success!', result);
-          showToast('✓ Certification updated with new expiration: ' + newExpiration);
+          var successMsg = isNonExpiring ? 
+            '✓ Certification updated: ' + newExpiration : 
+            '✓ Certification updated with new expiration: ' + newExpiration;
+          if (certType === 'Crane Evaluation') {
+            successMsg = '✓ Crane Evaluation date updated: ' + newExpiration;
+          }
+          showToast(successMsg);
 
           // Remove from allTasks (completed tasks shouldn't remain)
           if (taskIndex !== undefined && taskIndex >= 0 && taskIndex < allTasks.length) {
