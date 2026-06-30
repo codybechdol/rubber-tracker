@@ -2843,7 +2843,7 @@
             console.log('  Ambiguous header, defaulting to Time Off for ' + specialInfo.name);
           }
 
-          // FUTURE DATE FILTER: Skip employees with dates far in the future (>14 days from import week)
+          // FUTURE DATE FILTER: Skip employees with dates far in the future (>4 days from import week)
           // Columns C & D typically contain future time off entries that shouldn't be processed this week
           if (specialInfo.date && selectedSheet) {
             var importWeekDate = parseSheetTabDate(selectedSheet);
@@ -2851,7 +2851,7 @@
               var specDate = parseSpecialDate(specialInfo.date);
               if (specDate) {
                 var daysDiff = Math.floor((specDate - importWeekDate) / (1000 * 60 * 60 * 24));
-                if (daysDiff > 14) {
+                if (daysDiff > 4) {
                   console.log('  Skipping FUTURE entry: ' + specialInfo.name + ' (date: ' + specialInfo.date + ', ' + daysDiff + ' days from import week)');
                   continue;
                 }
@@ -3386,6 +3386,8 @@
     function isEmployeeName(text) {
       if (!text || text.length < 4) return false;
       if (text.match(/^\d/)) return false; // Starts with number
+      // Skip "Last day..." or "Return approx..." comments
+      if (text.match(/\b(Last\s*day|Return\s*ap?rox|Back\s*ap?rox|Out\s*until|Off\s*until|Back\s*on)\b/i)) return false;
       // Skip "NEW HIRE [role]" placeholders with no actual name (e.g., "NEW HIRE JL", "NEW HIRE EO2")
       if (text.match(/^NEW\s*HIRE\s*(JL|F|GTO\s*F?|EO\s*\d|WT|Jry\s*Op|\d\s*ap)?\s*$/i)) return false;
       // Skip "Need [something]" placeholders (e.g., "Need Guy Here With CDL")
@@ -7310,7 +7312,7 @@
             var oldJobNum = match.employeeData.jobNum || '';
             var oldClassification = match.employeeData.jobClassification || '';
 
-            var locationChanged = oldLocation !== crew.mappedLocation;
+            var locationChanged = !areLocationsEqual(oldLocation, crew.mappedLocation);
             var jobChanged = oldJobNum !== emp.fullJobNumber;
 
             // Classification changes only if:
@@ -7509,7 +7511,7 @@
           jobClassification: tCurrentClassification,
           rowIndex: tMatchedEmp.rowIndex
         };
-        var tAlreadyAtLeave = ALREADY_LEAVE_LOCATIONS.indexOf(tCurrentLocation) !== -1;
+        var tAlreadyAtLeave = isLeaveLocation(tCurrentLocation);
         var tHas005JobNum = tCurrentJobNum.indexOf('005-') === 0;
 
         if (tAlreadyAtLeave && tHas005JobNum) {
@@ -7871,6 +7873,40 @@
       for (var i = 0; i < nicknames1.length; i++) {
         if (nicknames2.indexOf(nicknames1[i]) !== -1) return true;
       }
+
+      return false;
+    }
+
+    function isLeaveLocation(loc) {
+      if (!loc) return false;
+      var l = loc.toLowerCase();
+      return l.indexOf('leave') !== -1 ||
+             l.indexOf('vacation') !== -1 ||
+             l.indexOf('medical') !== -1 ||
+             l.indexOf('light duty') !== -1 ||
+             l.indexOf('weeds') !== -1 ||
+             l.indexOf('fmla') !== -1 ||
+             l.indexOf('layoff') !== -1 ||
+             l.indexOf('previous employee') !== -1 ||
+             l.indexOf('unknown') !== -1;
+    }
+
+    function getBaseCity(loc) {
+      if (!loc) return '';
+      // Remove parenthesis like "Helena (Vacation)" -> "Helena"
+      var clean = loc.replace(/\s*\(.*?\)\s*/g, '');
+      return clean.trim().toLowerCase();
+    }
+
+    function areLocationsEqual(loc1, loc2) {
+      var clean1 = String(loc1 || '').trim().toLowerCase();
+      var clean2 = String(loc2 || '').trim().toLowerCase();
+      if (clean1 === clean2) return true;
+
+      // Compare base cities
+      var base1 = getBaseCity(clean1);
+      var base2 = getBaseCity(clean2);
+      if (base1 && base2 && base1 === base2) return true;
 
       return false;
     }
@@ -8319,7 +8355,7 @@
       var oldJobNum = empData.jobNum || '';
       var oldClassification = empData.jobClassification || '';
 
-      var locationChanged = oldLocation !== crew.mappedLocation;
+      var locationChanged = !areLocationsEqual(oldLocation, crew.mappedLocation);
       var jobChanged = oldJobNum !== emp.fullJobNumber;
       var classificationChanged = emp.classification && emp.classification !== oldClassification;
 
