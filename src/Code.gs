@@ -17169,11 +17169,20 @@ function preserveManualPickLists(swapSheet) {
       var status = (row[7] || '').toString().trim();
       var pickListBg = (bgRow[6] || '').toString().toLowerCase();
 
-      // Skip header rows and empty employees
+      // Skip header rows, system placeholder names, and lost items/employees
+      var employeeNameLower = employeeName.toLowerCase();
+      var daysLeft = (row[5] || '').toString().trim().toUpperCase();
+      var skipNames = [
+        'lost', 'unknown', 'n/a', 'on shelf', 'in testing', 'packed for delivery',
+        'packed for testing', 'failed rubber', 'not repairable', 'ready for test',
+        'ready for delivery', 'assigned', 'destroyed'
+      ];
       if (!employeeName || employeeName === 'Employee' ||
           employeeName.indexOf('Class') !== -1 ||
           employeeName.indexOf('STAGE') !== -1 ||
-          employeeName.indexOf('🔍') !== -1) {
+          employeeName.indexOf('🔍') !== -1 ||
+          skipNames.indexOf(employeeNameLower) !== -1 ||
+          daysLeft === 'LOST-LOCATE') {
         continue;
       }
 
@@ -17229,11 +17238,20 @@ function restoreManualPickLists(swapSheet, manualPicks, startRow, endRow) {
       var employeeName = (row[0] || '').toString().trim();
       var currentItemNum = (row[1] || '').toString().trim();
 
-      // Skip header rows and empty
+      // Skip header rows, system placeholder names, and lost items/employees
+      var employeeNameLower = employeeName.toLowerCase();
+      var daysLeft = (row[5] || '').toString().trim().toUpperCase();
+      var skipNames = [
+        'lost', 'unknown', 'n/a', 'on shelf', 'in testing', 'packed for delivery',
+        'packed for testing', 'failed rubber', 'not repairable', 'ready for test',
+        'ready for delivery', 'assigned', 'destroyed'
+      ];
       if (!employeeName || employeeName === 'Employee' ||
           employeeName.indexOf('Class') !== -1 ||
           employeeName.indexOf('STAGE') !== -1 ||
-          employeeName.indexOf('🔍') !== -1) {
+          employeeName.indexOf('🔍') !== -1 ||
+          skipNames.indexOf(employeeNameLower) !== -1 ||
+          daysLeft === 'LOST-LOCATE') {
         continue;
       }
 
