@@ -515,6 +515,34 @@ function onEditHandler(e) {
       return; // Handled
     }
 
+    // Handle Expiring Certs sheet edits (auto-fill formulas for new/edited rows)
+    if (sheetName === 'Expiring Certs' && editedRow >= 2) {
+      if (editedCol <= 5) {
+        var certType = String(sheet.getRange(editedRow, 2).getValue()).trim();
+        if (certType) {
+          var nonExpiring = [
+            'Crane Evaluation',
+            'OSHA 1910',
+            'BNSF',
+            'MSHA',
+            'EICA Basic Helicopter Line Construction Safety'
+          ];
+          var isNonExpiring = nonExpiring.indexOf(certType) !== -1;
+          var fCell = sheet.getRange(editedRow, 6);
+          var gCell = sheet.getRange(editedRow, 7);
+          if (isNonExpiring) {
+            fCell.setFormula('="N/A"');
+            gCell.setFormula('=IF(ISBLANK(C' + editedRow + '),"No Date Set","OK")');
+          } else {
+            fCell.setFormula('=IF(ISBLANK(C' + editedRow + '),"N/A",DAYS(C' + editedRow + ',TODAY()))');
+            gCell.setFormula('=IF(F' + editedRow + '="PRIORITY - Need Copy","PRIORITY - Need Copy",IF(F' + editedRow + '="N/A","No Date Set",IF(F' + editedRow + '<0,"EXPIRED",IF(F' + editedRow + '<=7,"CRITICAL",IF(F' + editedRow + '<=30,"WARNING",IF(F' + editedRow + '<=60,"UPCOMING","OK"))))))');
+          }
+          Logger.log('Auto-set formulas for Expiring Certs row ' + editedRow);
+        }
+      }
+      return; // Handled
+    }
+
     // Handle Safety Compliance sheet edits (day columns, status, weekly meeting, monthly checklist)
     if (sheetName === 'Safety Compliance' && editedRow >= 2) {
       // Columns: A=Week Start, B=Job Number, C=Foreman, D-J=Days (Sun-Sat), K=Weekly Meeting, L=Monthly Checklist, M=Status
