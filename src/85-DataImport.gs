@@ -2388,7 +2388,8 @@ function addNewEmployeeFromImport(employeeData) {
         employeeData.sleeveSize || ''     // Sleeve Size
       ];
 
-      historySheet.appendRow(historyRow);
+      var nextHistRow = historySheet.getLastRow() + 1;
+      safeWriteRowToTable(historySheet, nextHistRow, historyRow);
     }
 
     Logger.log('Added new employee: ' + employeeData.name + ' at row ' + newRowIndex);
@@ -2573,7 +2574,8 @@ function rehireEmployeeFromImport(employeeData) {
         employeeData.sleeveSize || ''     // Sleeve Size
       ];
 
-      historySheet.appendRow(historyRow);
+      var nextHistRow = historySheet.getLastRow() + 1;
+      safeWriteRowToTable(historySheet, nextHistRow, historyRow);
     }
 
     Logger.log('Rehired employee: ' + employeeData.name + ' at row ' + newRowIndex);

@@ -362,9 +362,10 @@ function safeWriteRowToTable(sheet, rowIndex, rowData, headers) {
   if (!headers) {
     headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   }
+  Logger.log('safeWriteRowToTable: Writing row ' + rowIndex + ' with ' + rowData.length + ' columns to sheet "' + sheet.getName() + '"');
   for (var col = 0; col < rowData.length; col++) {
     var val = rowData[col];
-    if (val === undefined) continue;
+    if (val === undefined || val === '') continue;
     var cell = sheet.getRange(rowIndex, col + 1);
     try {
       cell.setValue(val);
