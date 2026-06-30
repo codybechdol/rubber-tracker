@@ -13401,7 +13401,7 @@ function generateTaskMetadata() {
     }
   }
 
-  Logger.log('generateTaskMetadata: Created ' + metadataRecords.length + ' metadata records');
+  Logger.log('generateTaskMetadata: Created ' + metadataRecords.length + ' metadata records from source');
 
   // Check for existing metadata to preserve user edits (scheduled dates/times)
   var existingData = metadataSheet.getDataRange().getValues();
@@ -13412,6 +13412,8 @@ function generateTaskMetadata() {
     for (var i = 1; i < existingData.length; i++) {
       var existingSourceSheet = existingData[i][1]; // Column B: SourceSheet
       var existingSourceRow = existingData[i][2];   // Column C: SourceRow
+      if (!existingSourceSheet || !existingSourceRow) continue;
+      
       var key = existingSourceSheet + '_' + existingSourceRow;
       existingMap[key] = {
         rowIndex: i + 1, // 1-based row number
@@ -13428,127 +13430,181 @@ function generateTaskMetadata() {
         completedDate: existingData[i][21],    // Column V: CompletedDate
         notes: existingData[i][22],            // Column W: Notes
         createdDate: existingData[i][23],      // Column X: CreatedDate
-        inTaskList: existingData[i].length > 25 ? existingData[i][25] : '' // Column Z: InTaskList
+        inTaskList: existingData[i].length > 25 ? existingData[i][25] : '', // Column Z: InTaskList
+        originalRow: existingData[i]           // Store full original row for preserving safety tasks
       };
     }
   }
 
-  // Separate new vs update records
-  var newRecords = [];
-  var updateRecords = [];
+  var finalRecords = [];
+  var matchedKeys = {};
   var updatedCount = 0;
+  var newCount = 0;
 
+  // Process all collected active source tasks
   for (var r = 0; r < metadataRecords.length; r++) {
     var rec = metadataRecords[r];
     var recSourceSheet = rec[1];
     var recSourceRow = rec[2];
     var recKey = recSourceSheet + '_' + recSourceRow;
 
+    var inTaskListVal = '';
+
     if (existingMap[recKey]) {
       // Task exists - PRESERVE user-edited fields, UPDATE source fields
       var existing = existingMap[recKey];
+      matchedKeys[recKey] = true;
 
       // Update columns A-K (source-derived data) and Y (LastModified)
       // Preserve columns L-X (user-edited scheduling state)
-      // For Safety Equipment tasks, always update notes to include vehicle number
-      var taskType = rec[4]; // TaskType from source
+      var taskType = rec[4];
       var notesToUse = existing.notes || rec[22];
       if (taskType === 'Safety Equipment' && rec[22]) {
-        notesToUse = rec[22]; // Always use source notes for Safety Equipment (contains vehicle #)
+        notesToUse = rec[22]; // Always use source notes for Safety Equipment (vehicle #)
+      }
+
+      inTaskListVal = existing.inTaskList || '';
+      // For crane_eval records, ensure InTaskList=TRUE is set (mandatory safety requirement)
+      if (String(rec[2] || '').indexOf('crane_eval_') === 0) {
+        inTaskListVal = 'TRUE';
+      }
+
+      // Convert Date values to string in correct format if they are Date objects to avoid serialization issues
+      var schedDateVal = existing.scheduledDate;
+      if (schedDateVal instanceof Date && !isNaN(schedDateVal.getTime())) {
+        schedDateVal = Utilities.formatDate(schedDateVal, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      }
+      var notifiedDateVal = existing.notifiedDate;
+      if (notifiedDateVal instanceof Date && !isNaN(notifiedDateVal.getTime())) {
+        notifiedDateVal = Utilities.formatDate(notifiedDateVal, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      }
+      var schedClassDateVal = existing.scheduledClassDate;
+      if (schedClassDateVal instanceof Date && !isNaN(schedClassDateVal.getTime())) {
+        schedClassDateVal = Utilities.formatDate(schedClassDateVal, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      }
+      var completedDateVal = existing.completedDate;
+      if (completedDateVal instanceof Date && !isNaN(completedDateVal.getTime())) {
+        completedDateVal = Utilities.formatDate(completedDateVal, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      }
+      var createdDateVal = existing.createdDate || rec[23];
+      if (createdDateVal instanceof Date && !isNaN(createdDateVal.getTime())) {
+        createdDateVal = Utilities.formatDate(createdDateVal, Session.getScriptTimeZone(), 'yyyy-MM-dd');
       }
 
       var updatedRecord = [
-        rec[0],  // A: TaskID (regenerate)
+        rec[0],  // A: TaskID
         rec[1],  // B: SourceSheet
         rec[2],  // C: SourceRow
-        rec[3],  // D: Employee (from source)
-        rec[4],  // E: TaskType (from source)
-        rec[5],  // F: ItemType (from source)
-        rec[6],  // G: CurrentItem (from source)
-        rec[7],  // H: Location (from source)
-        rec[8],  // I: Foreman (from source)
-        rec[9],  // J: PhoneNumber (from source)
-        rec[10], // K: DueDate (from source)
-        existing.scheduledDate || '',      // L: PRESERVE ScheduledDate
-        existing.startTime || '',          // M: PRESERVE StartTime
-        existing.endTime || '',            // N: PRESERVE EndTime
-        normalizeTaskStatus(existing.status || rec[14]), // O: PRESERVE Status (normalized to valid value)
-        existing.notifiedDate || '',       // P: PRESERVE NotifiedDate
-        existing.scheduledClassDate || '', // Q: PRESERVE ScheduledClassDate
-        existing.classType || '',          // R: PRESERVE ClassType
-        existing.isOffice || 'FALSE',      // S: PRESERVE IsOffice
-        existing.isRegistered || 'FALSE',  // T: PRESERVE IsRegistered
-        existing.isDeclined || 'FALSE',    // U: PRESERVE IsDeclined
-        existing.completedDate || '',      // V: PRESERVE CompletedDate
-        notesToUse,                        // W: Notes (use vehicle # for Safety Equipment)
-        existing.createdDate || rec[23],   // X: PRESERVE CreatedDate
-        rec[24]  // Y: UPDATE LastModified (new timestamp)
+        rec[3],  // D: Employee
+        rec[4],  // E: TaskType
+        rec[5],  // F: ItemType
+        rec[6],  // G: CurrentItem
+        rec[7],  // H: Location
+        rec[8],  // I: Foreman
+        rec[9],  // J: PhoneNumber
+        rec[10], // K: DueDate
+        schedDateVal || '',                  // L: ScheduledDate
+        existing.startTime || '',            // M: StartTime
+        existing.endTime || '',              // N: EndTime
+        normalizeTaskStatus(existing.status || rec[14]), // O: Status
+        notifiedDateVal || '',               // P: NotifiedDate
+        schedClassDateVal || '',             // Q: ScheduledClassDate
+        existing.classType || '',            // R: ClassType
+        existing.isOffice || 'FALSE',        // S: IsOffice
+        existing.isRegistered || 'FALSE',    // T: IsRegistered
+        existing.isDeclined || 'FALSE',      // U: IsDeclined
+        completedDateVal || '',              // V: CompletedDate
+        notesToUse,                          // W: Notes
+        createdDateVal,                      // X: CreatedDate
+        rec[24],                             // Y: LastModified
+        inTaskListVal                        // Z: InTaskList
       ];
 
-      updateRecords.push({
-        rowIndex: existing.rowIndex,
-        data: updatedRecord,
-        inTaskList: existing.inTaskList
-      });
+      // Pad to 26 elements
+      while (updatedRecord.length < 26) updatedRecord.push('');
+      finalRecords.push(updatedRecord);
       updatedCount++;
-
     } else {
       // New task - add to sheet
-      newRecords.push(rec);
+      inTaskListVal = '';
+      if (String(rec[2] || '').indexOf('crane_eval_') === 0) {
+        inTaskListVal = 'TRUE';
+      }
+
+      var newRecord = rec.slice(); // Copy
+      while (newRecord.length < 25) newRecord.push('');
+      newRecord.push(inTaskListVal); // Add column Z
+      
+      finalRecords.push(newRecord);
+      newCount++;
     }
   }
 
-  Logger.log('generateTaskMetadata: ' + newRecords.length + ' new records, ' + updatedCount + ' existing records to update');
+  // Preserve Safety Compliance / Missing Safety Report tasks (they don't come from source)
+  var preservedCount = 0;
+  for (var key in existingMap) {
+    if (!matchedKeys[key]) {
+      var existing = existingMap[key];
+      var sourceSheet = String(existing.originalRow[1] || '').trim();
+      var taskType = String(existing.originalRow[4] || '').trim();
+
+      if (sourceSheet === 'Safety Compliance' ||
+          sourceSheet === 'Task Metadata' ||
+          taskType === 'Missing Safety Report') {
+        
+        var preservedRecord = existing.originalRow.slice();
+        while (preservedRecord.length < 26) preservedRecord.push('');
+        finalRecords.push(preservedRecord.slice(0, 26));
+        preservedCount++;
+      }
+    }
+  }
+  Logger.log('generateTaskMetadata: Preserved ' + preservedCount + ' Safety Compliance/Missing Safety Report tasks');
 
   // Remove any bandings/table formatting that may cause "typed columns" errors
-  // Google Sheets Tables with typed columns block setValues/clearDataValidations
   try {
     var bandings = metadataSheet.getBandings();
     if (bandings.length > 0) {
       for (var bn = 0; bn < bandings.length; bn++) {
         bandings[bn].remove();
       }
-      Logger.log('generateTaskMetadata: Removed ' + bandings.length + ' banding(s) to prevent typed column errors');
+      Logger.log('generateTaskMetadata: Removed ' + bandings.length + ' banding(s)');
     }
   } catch (bandErr) {
     Logger.log('generateTaskMetadata: Warning removing bandings: ' + bandErr.message);
   }
 
-  // Clear data validation on ENTIRE Status column (O = column 15) to prevent validation errors during write
-  // This is needed because old rows may have legacy status values that fail new validation rules
-  // Clear ALL rows (use max rows to cover any new rows that will be added)
-  var maxRows = metadataSheet.getMaxRows();
-  if (maxRows > 1) {
-    try {
-      var statusColumnRange = metadataSheet.getRange(2, 15, maxRows - 1, 1);
-      statusColumnRange.clearDataValidations();
-      Logger.log('generateTaskMetadata: Cleared validation on Status column (rows 2-' + maxRows + ')');
-    } catch (clearValErr) {
-      Logger.log('generateTaskMetadata: Warning - Could not clear validation (typed columns?): ' + clearValErr.message);
-      // Try clearing ALL data validations on data range as fallback
-      try {
-        metadataSheet.getDataRange().clearDataValidations();
-        Logger.log('generateTaskMetadata: Cleared ALL data validations as fallback');
-      } catch (clearAllErr) {
-        Logger.log('generateTaskMetadata: Warning - Could not clear any validations: ' + clearAllErr.message);
-      }
-    }
+  // Clear ALL data validation first
+  try {
+    metadataSheet.getDataRange().clearDataValidations();
+    Logger.log('generateTaskMetadata: Cleared all validations before batch rewrite');
+  } catch (clearValErr) {
+    Logger.log('generateTaskMetadata: Warning clearing validations: ' + clearValErr.message);
   }
 
-  // Write updates to existing rows
-  if (updateRecords.length > 0) {
+  // Clear data from row 2 onwards
+  var finalLastRowVal = metadataSheet.getLastRow();
+  if (finalLastRowVal > 1) {
+    metadataSheet.getRange(2, 1, finalLastRowVal - 1, metadataSheet.getMaxColumns()).clearContent();
+  }
+
+  // Write batch data
+  if (finalRecords.length > 0) {
+    var endRow = finalRecords.length + 1;
+
+    // Ensure sheet has enough rows and columns
+    var currentMaxRows = metadataSheet.getMaxRows();
+    if (endRow > currentMaxRows) {
+      metadataSheet.insertRowsAfter(currentMaxRows, endRow - currentMaxRows);
+    }
+    var currentMaxCols = metadataSheet.getMaxColumns();
+    if (currentMaxCols < 26) {
+      metadataSheet.insertColumnsAfter(currentMaxCols, 26 - currentMaxCols);
+    }
+
     try {
-      for (var u = 0; u < updateRecords.length; u++) {
-        var update = updateRecords[u];
-        metadataSheet.getRange(update.rowIndex, 1, 1, 25).setValues([update.data]);
-        // For crane_eval records, ensure InTaskList=TRUE is set (mandatory safety requirement)
-        if (String(update.data[2] || '').indexOf('crane_eval_') === 0 &&
-            String(update.inTaskList || '') !== 'TRUE') {
-          metadataSheet.getRange(update.rowIndex, 26).setValue('TRUE');
-          Logger.log('generateTaskMetadata: Auto-set InTaskList=TRUE on existing crane eval at row ' + update.rowIndex);
-        }
-      }
-      Logger.log('generateTaskMetadata: Updated ' + updateRecords.length + ' existing records');
+      metadataSheet.getRange(2, 1, finalRecords.length, 26).setValues(finalRecords);
+      Logger.log('generateTaskMetadata: Batch wrote ' + finalRecords.length + ' records');
     } catch (writeErr) {
       if (writeErr.message && writeErr.message.indexOf('typed columns') !== -1) {
         throw new Error('Cannot write to Task Metadata sheet - it has been converted to a Google Sheets Table with typed columns.\n\n' +
@@ -13559,67 +13615,12 @@ function generateTaskMetadata() {
     }
   }
 
-  // Write new records to sheet
-  if (newRecords.length > 0) {
-    var startRow = metadataSheet.getLastRow() + 1;
-    var endRow = startRow + newRecords.length - 1;
-
-    // Ensure sheet has enough rows
-    var currentMaxRows = metadataSheet.getMaxRows();
-    if (endRow > currentMaxRows) {
-      var rowsToAdd = endRow - currentMaxRows;
-      metadataSheet.insertRowsAfter(currentMaxRows, rowsToAdd);
-      Logger.log('generateTaskMetadata: Added ' + rowsToAdd + ' rows to sheet');
-    }
-
-    // Ensure sheet has enough columns (need 25 columns)
-    var currentMaxCols = metadataSheet.getMaxColumns();
-    if (currentMaxCols < 25) {
-      metadataSheet.insertColumnsAfter(currentMaxCols, 25 - currentMaxCols);
-      Logger.log('generateTaskMetadata: Added ' + (25 - currentMaxCols) + ' columns to sheet');
-    }
-
-    // Write the data
-    try {
-      metadataSheet.getRange(startRow, 1, newRecords.length, 25).setValues(newRecords);
-      Logger.log('generateTaskMetadata: Wrote ' + newRecords.length + ' records starting at row ' + startRow);
-    } catch (newWriteErr) {
-      if (newWriteErr.message && newWriteErr.message.indexOf('typed columns') !== -1) {
-        throw new Error('Cannot write to Task Metadata sheet - it has been converted to a Google Sheets Table with typed columns.\n\n' +
-          'Fix: In Google Sheets, click on the table → right-click → "Convert back to range" (or Format → Table → Convert to range).\n' +
-          'Then run Generate Task Metadata again.');
-      }
-      throw newWriteErr;
-    }
-
-    // Auto-set InTaskList=TRUE for Crane Evaluation tasks (mandatory safety requirement)
-    // These have rowIndex='crane_eval_<emp>' and would otherwise be filtered out of the To Do List
-    for (var crn = 0; crn < newRecords.length; crn++) {
-      var crnSourceRow = String(newRecords[crn][2] || '');
-      if (crnSourceRow.indexOf('crane_eval_') === 0) {
-        metadataSheet.getRange(startRow + crn, 26).setValue('TRUE'); // Column Z = InTaskList
-        Logger.log('generateTaskMetadata: Auto-set InTaskList=TRUE for crane eval at row ' + (startRow + crn));
-      }
-    }
-
-    // THEN clear any inherited validation on the Status column for new rows
-    try {
-      var newRowsStatusRange = metadataSheet.getRange(startRow, 15, newRecords.length, 1);
-      newRowsStatusRange.clearDataValidations();
-      Logger.log('generateTaskMetadata: Cleared validation on new record rows ' + startRow + '-' + (startRow + newRecords.length - 1));
-    } catch (clearNewValErr) {
-      Logger.log('generateTaskMetadata: Warning - Could not clear new row validation: ' + clearNewValErr.message);
-    }
-  }
-
-  // Flush changes to ensure sheet dimensions are updated before getting final row count
+  // Flush changes
   SpreadsheetApp.flush();
 
-  // Reapply data validation on Status column with standardized values
+  // Reapply data validation on Status column (O = column 15)
   try {
     var finalLastRow = metadataSheet.getLastRow();
-    Logger.log('generateTaskMetadata: Final last row after flush: ' + finalLastRow);
-
     if (finalLastRow > 1) {
       var validStatuses = ['Unassigned', 'Assigned', 'Complete', 'Overdue', 'Deferred'];
       var statusValidation = SpreadsheetApp.newDataValidation()
@@ -13627,50 +13628,37 @@ function generateTaskMetadata() {
         .setAllowInvalid(false)
         .build();
 
-      // Make sure we don't exceed the actual sheet dimensions
       var sheetMaxRow = metadataSheet.getMaxRows();
-      var sheetMaxCol = metadataSheet.getMaxColumns();
-      Logger.log('generateTaskMetadata: Sheet max rows=' + sheetMaxRow + ', max cols=' + sheetMaxCol);
-
       var rowCount = Math.min(finalLastRow - 1, sheetMaxRow - 1);
-      if (rowCount > 0 && sheetMaxCol >= 15) {
-        var finalStatusRange = metadataSheet.getRange(2, 15, rowCount, 1);
-        finalStatusRange.setDataValidation(statusValidation);
-        Logger.log('generateTaskMetadata: Reapplied validation on Status column (rows 2-' + (rowCount + 1) + ')');
-      } else {
-        Logger.log('generateTaskMetadata: Skipped validation - rowCount=' + rowCount + ', maxCol=' + sheetMaxCol);
+      if (rowCount > 0) {
+        metadataSheet.getRange(2, 15, rowCount, 1).setDataValidation(statusValidation);
+        Logger.log('generateTaskMetadata: Reapplied Status validation');
       }
     }
   } catch (validationError) {
-    Logger.log('generateTaskMetadata: Warning - Could not apply validation: ' + validationError.message);
-    // Continue with the rest of the function - validation is not critical
+    Logger.log('generateTaskMetadata: Warning reapplying validation: ' + validationError.message);
   }
 
   // Show success message
   var message = '✅ Task Metadata Generated!\n\n';
   message += '📊 Statistics:\n';
-  message += '• Total tasks found: ' + totalTasks + '\n';
-  message += '• New metadata records: ' + newRecords.length + '\n';
-  message += '• Updated existing records: ' + updatedCount + '\n';
+  message += '• Total active tasks: ' + finalRecords.length + '\n';
+  message += '• New metadata records: ' + newCount + '\n';
+  message += '• Preserved/Updated records: ' + updatedCount + '\n';
+  message += '• Safety Compliance tasks preserved: ' + preservedCount + '\n';
   message += '\n';
   message += '🔍 Sources:\n';
 
-  // Count by source
   var sourceCounts = {};
-  for (var i = 0; i < metadataRecords.length; i++) {
-    var source = metadataRecords[i][1];
+  for (var i = 0; i < finalRecords.length; i++) {
+    var source = finalRecords[i][1];
     sourceCounts[source] = (sourceCounts[source] || 0) + 1;
   }
   for (var src in sourceCounts) {
     message += '• ' + src + ': ' + sourceCounts[src] + '\n';
   }
 
-  message += '\n✅ Task Metadata sheet is ready for scheduling!';
-
-  if (updatedCount > 0) {
-    message += '\n\n💡 Note: Existing tasks were updated with fresh source data while preserving your scheduled dates, times, and completion status.';
-  }
-
+  message += '\n✅ Task Metadata sheet is clean and ready!';
   ui.alert('Generate Task Metadata Complete', message, ui.ButtonSet.OK);
   Logger.log('=== generateTaskMetadata END ===');
 }
