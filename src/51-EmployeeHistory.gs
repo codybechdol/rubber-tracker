@@ -693,7 +693,8 @@ function handleRehireDateChange(ss, sheet, editedRow, newValue) {
     if (empHireDateColIdx !== -1) newEmpRow[empHireDateColIdx] = rehireDateStr;
     if (empJobClassificationColIdx !== -1) newEmpRow[empJobClassificationColIdx] = newJobClassification;
 
-    employeesSheet.appendRow(newEmpRow);
+    var newRowIndex = employeesSheet.getLastRow() + 1;
+    employeesSheet.getRange(newRowIndex, 1, 1, newEmpRow.length).setValues([newEmpRow]);
 
     var todayStr = Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
 
@@ -1462,7 +1463,8 @@ function restoreEmployeeToSheet(dataJson) {
   }
 
   // Append the row
-  employeesSheet.appendRow(newRow);
+  var newRowIndex = employeesSheet.getLastRow() + 1;
+  employeesSheet.getRange(newRowIndex, 1, 1, newRow.length).setValues([newRow]);
 
   // Log to Employee History
   if (historySheet) {
