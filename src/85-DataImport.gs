@@ -316,7 +316,18 @@ function applyCrewChanges(changes) {
           var header = String(headers[col]).toLowerCase().trim();
           if (col === nameCol) newRow.push(change.employeeName);
           else if (header === 'location') newRow.push(change.newLocation || '');
-          else if (header === 'job number') newRow.push(change.newJobNumber || '');
+          else if (header === 'job number') {
+            var baseJobNumber = String(change.newJobNumber || '').trim();
+            var dotIdx = baseJobNumber.lastIndexOf('.');
+            if (dotIdx !== -1) {
+              baseJobNumber = baseJobNumber.substring(0, dotIdx);
+            }
+            var finalJobNumber = baseJobNumber;
+            if (/^\d{3}-\d{2}$/.test(baseJobNumber)) {
+              finalJobNumber = calculateNextJobNumberSuffix(employeesSheet, baseJobNumber, change.newClassification);
+            }
+            newRow.push(finalJobNumber);
+          }
           else if (header === 'job classification') newRow.push(change.newClassification || '');
           else newRow.push(''); // Empty for other columns
         }
@@ -2313,7 +2324,18 @@ function addNewEmployeeFromImport(employeeData) {
     var newRow = new Array(headers.length).fill('');
     newRow[colIndices.name] = employeeData.name;
     newRow[colIndices.location] = employeeData.location;
-    newRow[colIndices.jobNumber] = employeeData.jobNumber;
+    // Calculate Job Number with Suffix if standard format
+    var baseJobNumber = String(employeeData.jobNumber || '').trim();
+    var dotIdx = baseJobNumber.lastIndexOf('.');
+    if (dotIdx !== -1) {
+      baseJobNumber = baseJobNumber.substring(0, dotIdx);
+    }
+    var finalJobNumber = baseJobNumber;
+    if (/^\d{3}-\d{2}$/.test(baseJobNumber)) {
+      finalJobNumber = calculateNextJobNumberSuffix(employeesSheet, baseJobNumber, employeeData.classification);
+      Logger.log('addNewEmployeeFromImport: Calculated job number suffix: ' + employeeData.jobNumber + ' -> ' + finalJobNumber);
+    }
+    newRow[colIndices.jobNumber] = finalJobNumber;
 
     // Set optional fields if columns exist and data provided
     if (colIndices.jobClassification !== -1 && employeeData.classification) {
@@ -2523,7 +2545,18 @@ function rehireEmployeeFromImport(employeeData) {
     var newRow = new Array(headers.length).fill('');
     newRow[colIndices.name] = employeeData.name;
     newRow[colIndices.location] = employeeData.location;
-    newRow[colIndices.jobNumber] = employeeData.jobNumber;
+    // Calculate Job Number with Suffix if standard format
+    var baseJobNumber = String(employeeData.jobNumber || '').trim();
+    var dotIdx = baseJobNumber.lastIndexOf('.');
+    if (dotIdx !== -1) {
+      baseJobNumber = baseJobNumber.substring(0, dotIdx);
+    }
+    var finalJobNumber = baseJobNumber;
+    if (/^\d{3}-\d{2}$/.test(baseJobNumber)) {
+      finalJobNumber = calculateNextJobNumberSuffix(employeesSheet, baseJobNumber, employeeData.classification);
+      Logger.log('rehireEmployeeFromImport: Calculated job number suffix: ' + employeeData.jobNumber + ' -> ' + finalJobNumber);
+    }
+    newRow[colIndices.jobNumber] = finalJobNumber;
 
     // Set optional fields
     if (colIndices.jobClassification !== -1 && employeeData.classification) {

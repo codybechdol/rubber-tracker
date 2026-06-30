@@ -689,7 +689,18 @@ function handleRehireDateChange(ss, sheet, editedRow, newValue) {
 
     newEmpRow[empNameColIdx] = empName;
     if (empLocationColIdx !== -1) newEmpRow[empLocationColIdx] = newLocation;
-    if (empJobNumberColIdx !== -1) newEmpRow[empJobNumberColIdx] = newJobNumber;
+    if (empJobNumberColIdx !== -1) {
+      var baseJobNumber = String(newJobNumber || '').trim();
+      var dotIdx = baseJobNumber.lastIndexOf('.');
+      if (dotIdx !== -1) {
+        baseJobNumber = baseJobNumber.substring(0, dotIdx);
+      }
+      var finalJobNumber = baseJobNumber;
+      if (/^\d{3}-\d{2}$/.test(baseJobNumber)) {
+        finalJobNumber = calculateNextJobNumberSuffix(employeesSheet, baseJobNumber, newJobClassification);
+      }
+      newEmpRow[empJobNumberColIdx] = finalJobNumber;
+    }
     if (empHireDateColIdx !== -1) newEmpRow[empHireDateColIdx] = rehireDateStr;
     if (empJobClassificationColIdx !== -1) newEmpRow[empJobClassificationColIdx] = newJobClassification;
 

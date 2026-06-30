@@ -405,3 +405,58 @@ function safeWriteRowToTable(sheet, rowIndex, rowData, headers) {
     }
   }
 }
+
+/**
+ * Calculates the next job number with suffix based on classification (.1 for leads, next sequential number for others).
+ */
+function calculateNextJobNumberSuffix(sheet, baseJobNumber, classification) {
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  var jobNumColIdx = -1;
+  var lastDayColIdx = -1;
+  
+  for (var h = 0; h < headers.length; h++) {
+    var hdr = String(headers[h]).toLowerCase().trim();
+    if (hdr === 'job number') jobNumColIdx = h;
+    if (hdr === 'last day') lastDayColIdx = h;
+  }
+  
+  if (jobNumColIdx === -1) jobNumColIdx = 3; // Default fallback to column D
+  
+  var existingSuffixes = [];
+  
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var jobVal = String(row[jobNumColIdx] || '').trim();
+    var lastDay = lastDayColIdx !== -1 ? row[lastDayColIdx] : '';
+    if (lastDay) continue; // Skip past/terminated employees
+    
+    if (jobVal.indexOf(baseJobNumber) === 0) {
+      var dotIdx = jobVal.lastIndexOf('.');
+      if (dotIdx !== -1) {
+        var sufStr = jobVal.substring(dotIdx + 1);
+        var sufVal = parseInt(sufStr);
+        if (!isNaN(sufVal)) {
+          existingSuffixes.push(sufVal);
+        }
+      }
+    }
+  }
+  
+  // Determine if lead classification
+  var isLead = ['SUP', 'F', 'GTO F', 'GF'].indexOf(String(classification).toUpperCase().trim()) !== -1;
+  
+  if (isLead) {
+    return baseJobNumber + '.1';
+  } else {
+    var nextSuf = 2;
+    existingSuffixes.sort(function(a, b) { return a - b; });
+    for (var s = 0; s < existingSuffixes.length; s++) {
+      var val = existingSuffixes[s];
+      if (val >= nextSuf) {
+        nextSuf = val + 1;
+      }
+    }
+    return baseJobNumber + '.' + nextSuf;
+  }
+}
