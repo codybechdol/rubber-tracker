@@ -308,7 +308,9 @@ function applyCrewChanges(changes) {
           else newRow.push(''); // Empty for other columns
         }
 
-        var newRowIndex = employeesSheet.getLastRow() + 1;
+        var lastRowVal = employeesSheet.getLastRow();
+        employeesSheet.insertRowAfter(lastRowVal);
+        var newRowIndex = lastRowVal + 1;
         safeWriteRowToTable(employeesSheet, newRowIndex, newRow, headers);
         updatedCount++;
 
@@ -2337,7 +2339,15 @@ function addNewEmployeeFromImport(employeeData) {
     }
 
     // Add to sheet
-    var newRowIndex = employeesSheet.getLastRow() + 1;
+    Logger.log('addNewEmployeeFromImport: Getting last row...');
+    var lastRowVal = employeesSheet.getLastRow();
+    Logger.log('addNewEmployeeFromImport: Last row is ' + lastRowVal);
+    
+    Logger.log('addNewEmployeeFromImport: Inserting row after ' + lastRowVal + '...');
+    employeesSheet.insertRowAfter(lastRowVal);
+    Logger.log('addNewEmployeeFromImport: Row inserted successfully');
+    
+    var newRowIndex = lastRowVal + 1;
     safeWriteRowToTable(employeesSheet, newRowIndex, newRow, headers);
 
     // Log to Employee History
@@ -2388,7 +2398,13 @@ function addNewEmployeeFromImport(employeeData) {
         employeeData.sleeveSize || ''     // Sleeve Size
       ];
 
-      var nextHistRow = historySheet.getLastRow() + 1;
+      Logger.log('addNewEmployeeFromImport: Getting history last row...');
+      var histLastRow = historySheet.getLastRow();
+      Logger.log('addNewEmployeeFromImport: History last row is ' + histLastRow);
+      Logger.log('addNewEmployeeFromImport: Inserting history row after ' + histLastRow + '...');
+      historySheet.insertRowAfter(histLastRow);
+      Logger.log('addNewEmployeeFromImport: History row inserted successfully');
+      var nextHistRow = histLastRow + 1;
       safeWriteRowToTable(historySheet, nextHistRow, historyRow);
     }
 
@@ -2531,8 +2547,9 @@ function rehireEmployeeFromImport(employeeData) {
       ensureLocationsInValidation(employeesSheet, colIndices.location + 1, [employeeData.location]);
     }
 
-    // Add to Employees sheet
-    var newRowIndex = employeesSheet.getLastRow() + 1;
+    var lastRowVal = employeesSheet.getLastRow();
+    employeesSheet.insertRowAfter(lastRowVal);
+    var newRowIndex = lastRowVal + 1;
     safeWriteRowToTable(employeesSheet, newRowIndex, newRow, headers);
 
     // Log to Employee History with "Rehired" event type and Rehire Date
@@ -2574,7 +2591,9 @@ function rehireEmployeeFromImport(employeeData) {
         employeeData.sleeveSize || ''     // Sleeve Size
       ];
 
-      var nextHistRow = historySheet.getLastRow() + 1;
+      var histLastRow = historySheet.getLastRow();
+      historySheet.insertRowAfter(histLastRow);
+      var nextHistRow = histLastRow + 1;
       safeWriteRowToTable(historySheet, nextHistRow, historyRow);
     }
 

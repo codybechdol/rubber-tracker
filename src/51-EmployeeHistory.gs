@@ -693,7 +693,9 @@ function handleRehireDateChange(ss, sheet, editedRow, newValue) {
     if (empHireDateColIdx !== -1) newEmpRow[empHireDateColIdx] = rehireDateStr;
     if (empJobClassificationColIdx !== -1) newEmpRow[empJobClassificationColIdx] = newJobClassification;
 
-    var newRowIndex = employeesSheet.getLastRow() + 1;
+    var lastRowVal = employeesSheet.getLastRow();
+    employeesSheet.insertRowAfter(lastRowVal);
+    var newRowIndex = lastRowVal + 1;
     safeWriteRowToTable(employeesSheet, newRowIndex, newEmpRow, empHeaders);
 
     var todayStr = Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
@@ -716,7 +718,10 @@ function handleRehireDateChange(ss, sheet, editedRow, newValue) {
         '',                                   // Glove Size
         ''                                    // Sleeve Size
       ];
-      sheet.appendRow(rehiredHistoryRow);
+      var histLastRow = sheet.getLastRow();
+      sheet.insertRowAfter(histLastRow);
+      var nextHistRow = histLastRow + 1;
+      safeWriteRowToTable(sheet, nextHistRow, rehiredHistoryRow);
     } else {
       Logger.log('Skipped duplicate Rehired entry for ' + empName);
     }
@@ -1463,7 +1468,9 @@ function restoreEmployeeToSheet(dataJson) {
   }
 
   // Append the row
-  var newRowIndex = employeesSheet.getLastRow() + 1;
+  var lastRowVal = employeesSheet.getLastRow();
+  employeesSheet.insertRowAfter(lastRowVal);
+  var newRowIndex = lastRowVal + 1;
   safeWriteRowToTable(employeesSheet, newRowIndex, newRow, headers);
 
   // Log to Employee History
@@ -1476,7 +1483,7 @@ function restoreEmployeeToSheet(dataJson) {
       ? 'Rehired as Pending New Hire (start date: ' + hireDateForSheet + '). Restored from Employee History.'
       : 'Restored from Employee History - accidentally deleted';
 
-    historySheet.appendRow([
+    var histRow = [
       todayStr,                    // Date
       data.name,                   // Employee Name
       eventType,                   // Event Type
@@ -1491,7 +1498,11 @@ function restoreEmployeeToSheet(dataJson) {
       data.email || '',            // Email
       data.gloveSize || '',        // Glove Size
       data.sleeveSize || ''        // Sleeve Size
-    ]);
+    ];
+    var histLastRow = historySheet.getLastRow();
+    historySheet.insertRowAfter(histLastRow);
+    var nextHistRow = histLastRow + 1;
+    safeWriteRowToTable(historySheet, nextHistRow, histRow);
   }
 
   Logger.log('restoreEmployeeToSheet: Restored ' + data.name + ' to Employees sheet' + (isPending ? ' (PENDING)' : ''));
