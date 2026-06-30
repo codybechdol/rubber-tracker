@@ -309,7 +309,7 @@ function applyCrewChanges(changes) {
         }
 
         var newRowIndex = employeesSheet.getLastRow() + 1;
-        employeesSheet.getRange(newRowIndex, 1, 1, newRow.length).setValues([newRow]);
+        safeWriteRowToTable(employeesSheet, newRowIndex, newRow, headers);
         updatedCount++;
 
         // Collect rehire history for batch write
@@ -2338,7 +2338,7 @@ function addNewEmployeeFromImport(employeeData) {
 
     // Add to sheet
     var newRowIndex = employeesSheet.getLastRow() + 1;
-    employeesSheet.getRange(newRowIndex, 1, 1, newRow.length).setValues([newRow]);
+    safeWriteRowToTable(employeesSheet, newRowIndex, newRow, headers);
 
     // Log to Employee History
     var historySheet = ss.getSheetByName('Employee History');
@@ -2532,7 +2532,7 @@ function rehireEmployeeFromImport(employeeData) {
 
     // Add to Employees sheet
     var newRowIndex = employeesSheet.getLastRow() + 1;
-    employeesSheet.getRange(newRowIndex, 1, 1, newRow.length).setValues([newRow]);
+    safeWriteRowToTable(employeesSheet, newRowIndex, newRow, headers);
 
     // Log to Employee History with "Rehired" event type and Rehire Date
     var historySheet = ss.getSheetByName('Employee History');

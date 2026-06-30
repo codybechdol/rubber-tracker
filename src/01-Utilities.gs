@@ -353,3 +353,54 @@ const getTrainingTrackingColIndices = (headers) => {
   
   return indices;
 };
+
+/**
+ * Safely writes a row of data to a sheet that may be a Google Sheets Table with typed columns.
+ * Writes cell-by-cell, performing auto-conversions (e.g. string to Date) and skipping empty string writes.
+ */
+function safeWriteRowToTable(sheet, rowIndex, rowData, headers) {
+  if (!headers) {
+    headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  }
+  for (var col = 0; col < rowData.length; col++) {
+    var val = rowData[col];
+    if (val === undefined) continue;
+    var cell = sheet.getRange(rowIndex, col + 1);
+    try {
+      cell.setValue(val);
+    } catch (err) {
+      var headerName = headers[col] || ('Col ' + (col + 1));
+      Logger.log('safeWriteRowToTable warning: Col ' + (col + 1) + ' (' + headerName + ') value "' + val + '" threw: ' + err.toString());
+      
+      // Auto-convert dates if they throw
+      var headerLower = String(headerName).toLowerCase().trim();
+      if (headerLower.indexOf('date') !== -1 && typeof val === 'string' && val) {
+        var parsedDate = new Date(val);
+        if (!isNaN(parsedDate.getTime())) {
+          try {
+            cell.setValue(parsedDate);
+            Logger.log('  -> Auto-converted string to Date object successfully');
+            continue;
+          } catch (errDate) {
+            Logger.log('  -> Date conversion fallback failed: ' + errDate.toString());
+          }
+        }
+      }
+      
+      // If empty string failed, it might be a typed cell that doesn't accept empty strings.
+      // We can try clearing content or setting to null, or skipping if already blank.
+      if (val === '') {
+        try {
+          cell.clearContent();
+          Logger.log('  -> Cleared content instead of setting empty string');
+          continue;
+        } catch (errClear) {
+          Logger.log('  -> Clear content failed: ' + errClear.toString());
+        }
+      }
+      
+      // Re-throw if unhandled
+      throw err;
+    }
+  }
+}
