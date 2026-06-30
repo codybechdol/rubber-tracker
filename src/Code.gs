@@ -3516,93 +3516,127 @@ function processExpiringCertsImportMultiRow(parsedData, selectedCertTypes) {
   Logger.log('=== processExpiringCertsImportMultiRow START ===');
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-
-  // Add new employees first if any
-  if (parsedData.newEmployees && parsedData.newEmployees.length > 0) {
-    var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
-    if (!employeesSheet) {
-      employeesSheet = ss.insertSheet(SHEET_EMPLOYEES);
-      // Add headers
-      var empHeaders = ['Name', 'Class', 'Location', 'Job Number', 'Phone Number', 'Notification Emails', 'MP Email', 'Email Address', 'Glove Size', 'Sleeve Size', 'Hire Date', 'Last Day', 'Last Day Reason', 'Job Classification'];
-      employeesSheet.getRange(1, 1, 1, empHeaders.length).setValues([empHeaders]);
-      employeesSheet.getRange(1, 1, 1, empHeaders.length)
-        .setBackground('#1a73e8')
-        .setFontColor('#ffffff')
-        .setFontWeight('bold');
-    }
-
-    // Add each new employee
-    for (var ne = 0; ne < parsedData.newEmployees.length; ne++) {
-      var newEmp = parsedData.newEmployees[ne];
-      var newRow = [
-        newEmp.name,
-        newEmp.class,
-        newEmp.location,
-        newEmp.jobNum || '',
-        newEmp.phone || '',
-        '', // Notification Emails
-        '', // MP Email
-        newEmp.email || '',
-        newEmp.gloveSize || '',
-        newEmp.sleeveSize || '',
-        newEmp.hireDate || new Date(),
-        '', // Last Day
-        '', // Last Day Reason
-        '' // Job Classification
-      ];
-      employeesSheet.appendRow(newRow);
-      Logger.log('Added new employee: ' + newEmp.name);
-
-      // Log to Employee History
-      logNewEmployeeFromImport(newEmp);
-    }
-  }
-
   var expiringSheet = ss.getSheetByName('Expiring Certs');
 
   if (!expiringSheet) {
     expiringSheet = ss.insertSheet('Expiring Certs');
   }
 
-  // PRESERVE NEWER DATES: Load existing expiration dates before clearing
-  // Only if parsedData.preserveNewerDates is true (default)
-  var existingDates = {};
-  var shouldPreserve = parsedData.preserveNewerDates !== false; // Default to true if not specified
-
-  if (shouldPreserve) {
-    var existingData = expiringSheet.getDataRange().getValues();
-
-    if (existingData.length > 1) {
-      Logger.log('Loading ' + (existingData.length - 1) + ' existing cert records to preserve newer dates');
-      for (var ex = 1; ex < existingData.length; ex++) {
-        var empName = String(existingData[ex][0] || '').trim().toLowerCase();
-        var certType = String(existingData[ex][1] || '').trim().toLowerCase();
-        var expDate = existingData[ex][2];
-
-        if (empName && certType && expDate) {
-          var key = empName + '_' + certType;
-          // Convert to Date if needed
-          if (expDate instanceof Date) {
-            existingDates[key] = expDate;
-          } else if (typeof expDate === 'string' && expDate) {
-            var parsed = new Date(expDate);
-            if (!isNaN(parsed.getTime())) {
-              existingDates[key] = parsed;
-            }
-          }
-        }
-      }
-      Logger.log('Loaded ' + Object.keys(existingDates).length + ' existing expiration dates');
-    }
-  } else {
-    Logger.log('preserveNewerDates is OFF - all existing dates will be overwritten');
+  // Load existing records from Expiring Certs sheet to merge
+  var existingRecords = {};
+  var headers = ['Employee Name', 'Item Type', 'Expiration Date', 'Location', 'Job #', 'Days Until Expiration', 'Status'];
+  var existingData = [];
+  
+  if (expiringSheet.getLastRow() > 1) {
+    existingData = expiringSheet.getRange(2, 1, expiringSheet.getLastRow() - 1, headers.length).getValues();
   }
 
-  // Clear sheet
+  for (var ex = 0; ex < existingData.length; ex++) {
+    var row = existingData[ex];
+    var empName = String(row[0] || '').trim();
+    var certType = String(row[1] || '').trim();
+    var dateVal = row[2];
+    var locVal = row[3] || '';
+    var jobVal = row[4] || '';
+
+    if (empName && certType) {
+      var key = empName.toLowerCase() + '_' + certType.toLowerCase();
+      // Parse the date safely
+      var parsedDate = null;
+      if (dateVal instanceof Date) {
+        parsedDate = dateVal;
+      } else if (typeof dateVal === 'string' && dateVal) {
+        var parsed = new Date(dateVal);
+        if (!isNaN(parsed.getTime())) {
+          parsedDate = parsed;
+        }
+      }
+      existingRecords[key] = {
+        name: empName,
+        certType: certType,
+        expirationDate: parsedDate,
+        location: locVal,
+        jobNum: jobVal
+      };
+    }
+  }
+
+  // Get employees for location/job lookup
+  var employees = getEmployeeNamesForMatching();
+  var empMap = {};
+  for (var e = 0; e < employees.length; e++) {
+    empMap[employees[e].name.toLowerCase()] = employees[e];
+  }
+
+  var shouldPreserve = parsedData.preserveNewerDates !== false;
+  var preservedCount = 0;
+  var addedCount = 0;
+  var updatedCount = 0;
+
+  var certRows = parsedData.certRows || [];
+
+  for (var i = 0; i < certRows.length; i++) {
+    var cert = certRows[i];
+
+    // Find matched employee name
+    var matchedName = '';
+    for (var m = 0; m < parsedData.employeeMatches.length; m++) {
+      if (parsedData.employeeMatches[m].excelName === cert.convertedName) {
+        if (parsedData.employeeMatches[m].matchedName) {
+          matchedName = parsedData.employeeMatches[m].matchedName;
+        }
+        break;
+      }
+    }
+
+    var finalName = matchedName || cert.convertedName;
+    var matchedEmp = empMap[finalName.toLowerCase()];
+
+    var location = matchedEmp ? matchedEmp.location : cert.excelLocation;
+    var jobNum = matchedEmp ? matchedEmp.jobNum : cert.excelJobNum;
+
+    var expirationDate = cert.expirationDate || '';
+    var importDate = expirationDate ? new Date(expirationDate) : null;
+
+    var key = finalName.toLowerCase() + '_' + cert.certType.toLowerCase();
+    var existingRecord = existingRecords[key];
+
+    if (existingRecord) {
+      // Record exists - merge date
+      var existingDate = existingRecord.expirationDate;
+      var finalDateStr = expirationDate;
+
+      if (shouldPreserve && existingDate && importDate) {
+        if (existingDate > importDate) {
+          finalDateStr = Utilities.formatDate(existingDate, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+          preservedCount++;
+        } else {
+          updatedCount++;
+        }
+      } else {
+        updatedCount++;
+      }
+
+      existingRecord.expirationDate = finalDateStr ? new Date(finalDateStr) : null;
+      if (location) existingRecord.location = location;
+      if (jobNum) existingRecord.jobNum = jobNum;
+    } else {
+      // Record does not exist - add new
+      addedCount++;
+      existingRecords[key] = {
+        name: finalName,
+        certType: cert.certType,
+        expirationDate: importDate,
+        location: location,
+        jobNum: jobNum
+      };
+    }
+  }
+
+  // Clear sheet to rewrite the merged records
   expiringSheet.clear();
 
   // Set headers
-  var headers = ['Employee Name', 'Item Type', 'Expiration Date', 'Location', 'Job #', 'Days Until Expiration', 'Status'];
   expiringSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   expiringSheet.getRange(1, 1, 1, headers.length)
     .setBackground('#1a73e8')
@@ -3610,61 +3644,22 @@ function processExpiringCertsImportMultiRow(parsedData, selectedCertTypes) {
     .setFontWeight('bold');
   expiringSheet.setFrozenRows(1);
 
-  // Get employees for location/job lookup
-  var employees = getEmployeeNamesForMatching();
-  var empMap = {};
-  for (var e = 0; e < employees.length; e++) {
-    empMap[employees[e].name] = employees[e];
-  }
-
-  // Prepare batch data
+  // Convert map to batchData array
   var batchData = [];
-  var certRows = parsedData.certRows;
-  var preservedCount = 0;
-
-  for (var i = 0; i < certRows.length; i++) {
-    var cert = certRows[i];
-
-    // Find matched employee
-    var matchedEmp = null;
-    for (var m = 0; m < parsedData.employeeMatches.length; m++) {
-      if (parsedData.employeeMatches[m].excelName === cert.convertedName) {
-        if (parsedData.employeeMatches[m].matchedName) {
-          matchedEmp = empMap[parsedData.employeeMatches[m].matchedName];
-        }
-        break;
-      }
+  for (var key in existingRecords) {
+    var rec = existingRecords[key];
+    var dateStr = '';
+    if (rec.expirationDate) {
+      dateStr = Utilities.formatDate(rec.expirationDate, Session.getScriptTimeZone(), 'MM/dd/yyyy');
     }
-
-    var location = matchedEmp ? matchedEmp.location : cert.excelLocation;
-    var jobNum = matchedEmp ? matchedEmp.jobNum : cert.excelJobNum;
-
-    var expirationDate = cert.expirationDate || '';
-
-    // PRESERVE NEWER DATES: compare import date vs existing date, keep the later one
-    if (shouldPreserve && expirationDate) {
-      var key = String(cert.convertedName || '').trim().toLowerCase() + '_' + String(cert.certType || '').trim().toLowerCase();
-      var existingDate = existingDates[key];
-      if (existingDate) {
-        var importDate = new Date(expirationDate);
-        if (!isNaN(importDate.getTime()) && existingDate > importDate) {
-          expirationDate = Utilities.formatDate(existingDate, Session.getScriptTimeZone(), 'MM/dd/yyyy');
-          preservedCount++;
-          Logger.log('Preserved newer date for ' + cert.convertedName + ' / ' + cert.certType + ': ' + expirationDate);
-        }
-      }
-    }
-
     batchData.push([
-      // Use the canonical Employees-sheet name when matched, so all downstream
-      // lookups (location, task generation, phone) use the same spelling
-      (matchedEmp && matchedEmp.name) ? matchedEmp.name : cert.convertedName,
-      cert.certType,
-      expirationDate,
-      location,
-      jobNum,
-      '', // Formula will be added
-      ''  // Formula will be added
+      rec.name,
+      rec.certType,
+      dateStr,
+      rec.location,
+      rec.jobNum,
+      '', // Formula column (Days Until)
+      ''  // Formula column (Status)
     ]);
   }
 
@@ -3678,16 +3673,13 @@ function processExpiringCertsImportMultiRow(parsedData, selectedCertTypes) {
 
     // Apply conditional formatting
     applyExpiringCertsFormatting(expiringSheet, batchData.length);
-
-    // NOTE: Cert tasks are now handled via Task Metadata (collectExpiringCertTasks in 76-SmartScheduling.gs)
-    // generateToDoTasksFromCerts is deprecated — cert tasks no longer go to Manual Tasks sheet.
   }
 
-  Logger.log('Import complete: ' + batchData.length + ' certifications, ' + preservedCount + ' dates preserved from existing sheet');
+  Logger.log('Import complete: Merged into ' + batchData.length + ' total records. ' + addedCount + ' added, ' + updatedCount + ' updated, ' + preservedCount + ' dates preserved.');
 
   return {
     success: true,
-    message: '✅ Import Complete!\n\nImported ' + batchData.length + ' certifications for ' + parsedData.summary.totalEmployees + ' employees.\n\nPriority Items: ' + parsedData.summary.priorityCount + '\nNon-Expiring: ' + parsedData.summary.nonExpiringCount + '\n🔒 Newer Dates Preserved: ' + preservedCount + '\n\nRun "Generate Task Metadata" to create tasks in the Task List.'
+    message: '✅ Import Complete!\n\nImported ' + certRows.length + ' certifications.\nTotal records on sheet: ' + batchData.length + '\n\nNew records added: ' + addedCount + '\nRecords updated: ' + updatedCount + '\n🔒 Newer Dates Preserved: ' + preservedCount + '\n\nRun "Generate Task Metadata" to create tasks in the Task List.'
   };
 }
 

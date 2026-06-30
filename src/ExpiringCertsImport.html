@@ -928,16 +928,18 @@
         return;
       }
 
-      var newEmpData = {
+      var newEmployeeData = {
         name: name,
-        class: empClass,
         location: location,
-        jobNum: document.getElementById('newEmpJobNum').value.trim(),
-        phone: document.getElementById('newEmpPhone').value.trim(),
-        email: document.getElementById('newEmpEmail').value.trim(),
+        jobNumber: document.getElementById('newEmpJobNum').value.trim(),
+        classification: empClass,
+        hireDate: document.getElementById('newEmpHireDate').value,
+        phoneNumber: document.getElementById('newEmpPhone').value.trim(),
+        emailAddress: document.getElementById('newEmpEmail').value.trim(),
+        mpEmail: '',
+        notificationEmails: '',
         gloveSize: document.getElementById('newEmpGloveSize').value,
-        sleeveSize: document.getElementById('newEmpSleeveSize').value,
-        hireDate: document.getElementById('newEmpHireDate').value
+        sleeveSize: document.getElementById('newEmpSleeveSize').value
       };
 
       // Final confirmation showing what will be added
@@ -946,11 +948,11 @@
       confirmMsg += '👤 Name: ' + name + '\n';
       confirmMsg += '📍 Location: ' + location + '\n';
       confirmMsg += '🏷️ Class: ' + empClass + '\n';
-      if (newEmpData.jobNum) confirmMsg += '🔢 Job #: ' + newEmpData.jobNum + '\n';
-      if (newEmpData.phone) confirmMsg += '📞 Phone: ' + newEmpData.phone + '\n';
-      if (newEmpData.email) confirmMsg += '📧 Email: ' + newEmpData.email + '\n';
-      if (newEmpData.gloveSize) confirmMsg += '🧤 Glove Size: ' + newEmpData.gloveSize + '\n';
-      if (newEmpData.sleeveSize) confirmMsg += '👕 Sleeve Size: ' + newEmpData.sleeveSize + '\n';
+      if (newEmployeeData.jobNumber) confirmMsg += '🔢 Job #: ' + newEmployeeData.jobNumber + '\n';
+      if (newEmployeeData.phoneNumber) confirmMsg += '📞 Phone: ' + newEmployeeData.phoneNumber + '\n';
+      if (newEmployeeData.emailAddress) confirmMsg += '📧 Email: ' + newEmployeeData.emailAddress + '\n';
+      if (newEmployeeData.gloveSize) confirmMsg += '🧤 Glove Size: ' + newEmployeeData.gloveSize + '\n';
+      if (newEmployeeData.sleeveSize) confirmMsg += '👕 Sleeve Size: ' + newEmployeeData.sleeveSize + '\n';
       confirmMsg += '\nThis will also be logged in Employee History.\n\n';
       confirmMsg += 'Proceed?';
 
@@ -958,23 +960,53 @@
         return;
       }
 
-      // Store new employee data
-      if (!parsedData.newEmployees) {
-        parsedData.newEmployees = [];
-      }
-      parsedData.newEmployees.push(newEmpData);
+      var submitBtn = document.querySelector('#newEmployeeModal .btn-success');
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Adding...';
 
-      resolvedEmployees[excelName] = { action: 'addNew', data: newEmpData };
+      google.script.run
+        .withSuccessHandler(function(result) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = 'Save Employee';
 
-      // Close modal
-      var modal = bootstrap.Modal.getInstance(document.getElementById('newEmployeeModal'));
-      modal.hide();
+          if (result.success) {
+            // Close modal
+            var modal = bootstrap.Modal.getInstance(document.getElementById('newEmployeeModal'));
+            modal.hide();
 
-      // Remove card and check if done
-      removeCardAndCheckCompletion(index);
+            // Mark as resolved with the new employee name
+            resolvedEmployees[excelName] = {
+              action: 'match',
+              matchedName: result.employeeName
+            };
 
-      showStatus('✓ New employee ' + name + ' will be added', 'success');
-      setTimeout(hideStatus, 2000);
+            // Update parsedData to use the matched name
+            if (parsedData && parsedData.employeeMatches) {
+              for (var i = 0; i < parsedData.employeeMatches.length; i++) {
+                if (parsedData.employeeMatches[i].excelName === excelName) {
+                  parsedData.employeeMatches[i].matchedName = result.employeeName;
+                  parsedData.employeeMatches[i].confidence = 100;
+                  parsedData.employeeMatches[i].userConfirmed = true;
+                  break;
+                }
+              }
+            }
+
+            // Remove card and check if done
+            removeCardAndCheckCompletion(index);
+
+            showStatus('✓ Added new employee ' + result.employeeName, 'success');
+            setTimeout(hideStatus, 2000);
+          } else {
+            alert(result.message || 'Failed to add employee');
+          }
+        })
+        .withFailureHandler(function(error) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = 'Save Employee';
+          alert('Error adding employee: ' + error);
+        })
+        .addNewEmployeeFromImport(newEmployeeData);
     }
 
     function confirmImport() {
