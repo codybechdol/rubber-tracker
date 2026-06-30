@@ -90,8 +90,18 @@ function setupJobClassificationDropdown() {
 
   // Apply to column N, rows 2 onwards (skip header)
   var lastRow = Math.max(employeesSheet.getLastRow(), 100); // At least 100 rows
-  var validationRange = employeesSheet.getRange(2, classificationCol, lastRow - 1, 1);
-  validationRange.setDataValidation(rule);
+  try {
+    employeesSheet.getRange(2, classificationCol, lastRow - 1, 1).setDataValidation(rule);
+    SpreadsheetApp.flush();
+  } catch (e) {
+    Logger.log('setupJobClassificationDropdown: Table detected or validation blocked. Trying fallback... ' + e.toString());
+    try {
+      employeesSheet.getRange(2, classificationCol).setDataValidation(rule);
+      SpreadsheetApp.flush();
+    } catch (innerErr) {
+      Logger.log('setupJobClassificationDropdown: Fallback failed: ' + innerErr.toString());
+    }
+  }
 
   SpreadsheetApp.getUi().alert(
     '✅ Job Classification Dropdown Created!\n\n' +

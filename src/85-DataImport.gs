@@ -85,7 +85,20 @@ function ensureLocationsInValidation(sheet, locationColNum, locationsToAdd) {
 
     // Apply to entire Location column (rows 2-500)
     var lastRow = Math.max(sheet.getLastRow(), 500);
-    sheet.getRange(2, locationColNum, lastRow - 1, 1).setDataValidation(newRule);
+    try {
+      sheet.getRange(2, locationColNum, lastRow - 1, 1).setDataValidation(newRule);
+      SpreadsheetApp.flush(); // Force immediate execution to catch Google Table/typed column errors
+    } catch (e) {
+      Logger.log('ensureLocationsInValidation: Table detected or range validation blocked. Trying fallback... ' + e.toString());
+      try {
+        // In Google Tables, try setting it on just the column's first cell to trigger Table-wide validation
+        sheet.getRange(2, locationColNum).setDataValidation(newRule);
+        SpreadsheetApp.flush(); // Force immediate execution for fallback
+      } catch (innerErr) {
+        Logger.log('ensureLocationsInValidation: Fallback failed: ' + innerErr.toString());
+        // Do not fail adding new employee if data validation list update fails
+      }
+    }
 
     Logger.log('ensureLocationsInValidation: Updated validation with ' + existingLocations.length + ' locations');
     return true;
