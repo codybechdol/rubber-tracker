@@ -1369,7 +1369,9 @@
         return label + 'Missing Safety Report';
       }
       if (task.taskType === 'Training' || src === 'Training Tracking') {
-        return label + 'Training: ' + (task.itemType || task.topic || 'Unknown Topic');
+        var topic = task.topic || (task.itemType ? task.itemType.replace('Monthly Training: ', '') : '') || 'Unknown Topic';
+        var monthStr = task.month ? ' (' + task.month + ')' : '';
+        return label + 'Training' + monthStr + ': ' + topic;
       }
       if (task.taskType === 'Cert Expiring' || src === 'Expiring Certs') {
         var cert = task.itemType || task.certType || 'Cert';
@@ -5850,8 +5852,16 @@
           });
 
           // Build taskKey for server sync
-          var rowIndex = certData ? certData.rowIndex : (item.taskKey ? parseInt(item.taskKey.split('_')[1]) : -1);
-          var taskKey = rowIndex !== -1 ? 'Expiring Certs_' + rowIndex : '';
+          var rowIndex = -1;
+          if (certData) {
+            rowIndex = certData.rowIndex;
+          } else if (item.taskKey) {
+            var parts = item.taskKey.split('_');
+            parts.shift(); // remove "Expiring Certs"
+            var suffix = parts.join('_');
+            rowIndex = (suffix && suffix !== 'NaN') ? (isNaN(suffix) ? suffix : parseInt(suffix, 10)) : -1;
+          }
+          var taskKey = (rowIndex !== -1 && rowIndex !== 'NaN' && rowIndex !== '') ? 'Expiring Certs_' + rowIndex : '';
 
           // Create task object from cert
           var certTask = {

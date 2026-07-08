@@ -14930,10 +14930,14 @@ function toggleTaskChecklist(taskKey, inTaskList, taskInfo) {
     Logger.log('toggleTaskChecklist: Task not found, attempting to create record for: ' + taskKey);
 
     // Parse taskKey to get source sheet and row
-    var parts = taskKey.split('_');
-    if (parts.length >= 2) {
-      var sourceSheet = parts.slice(0, -1).join('_'); // Handle "Expiring Certs_123" format
-      var sourceRow = parseInt(parts[parts.length - 1]);
+    var firstUnderscoreIdx = taskKey.indexOf('_');
+    if (firstUnderscoreIdx !== -1) {
+      var sourceSheet = taskKey.substring(0, firstUnderscoreIdx);
+      var sourceRow = taskKey.substring(firstUnderscoreIdx + 1);
+      // If it's a number, convert to integer, otherwise keep as string/suffix
+      if (!isNaN(sourceRow) && sourceRow.trim() !== '') {
+        sourceRow = parseInt(sourceRow, 10);
+      }
 
       // Try to create a minimal Task Metadata record
       var createResult = createTaskMetadataRecord(sourceSheet, sourceRow, taskInfo);
