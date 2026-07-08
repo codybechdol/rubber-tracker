@@ -544,8 +544,8 @@ function onEditHandler(e) {
       return;  // Handled - don't continue to processEdit
     }
 
-    // Handle new item number detection in Gloves/Sleeves/Blankets/HV Testers/Phasing Sets/AED/Grounds/Hot Sticks (Column A = item number)
-    if ((sheetName === 'Gloves' || sheetName === 'Sleeves' || sheetName === 'Blankets' || sheetName === 'HV Testers' || sheetName === 'Phasing Sets' || sheetName === 'AED' || sheetName === 'Grounds' || sheetName === 'Hot Sticks') && editedCol === 1 && editedRow >= 2) {
+    // Handle new item number detection in Gloves/Sleeves/Blankets/HV Testers/Phasing Sets/AED/Grounds/Hot Sticks/MACKs (Column A = item number)
+    if ((sheetName === 'Gloves' || sheetName === 'Sleeves' || sheetName === 'Blankets' || sheetName === 'HV Testers' || sheetName === 'Phasing Sets' || sheetName === 'AED' || sheetName === 'Grounds' || sheetName === 'Hot Sticks' || sheetName === 'MACKs') && editedCol === 1 && editedRow >= 2) {
       var newItemNum = e.range.getValue();
       var oldItemNum = e.oldValue;
       var itemNumStr = String(newItemNum).trim();
@@ -744,6 +744,29 @@ function onEditHandler(e) {
           }
         } catch (autoPopErr) {
           Logger.log('Hot Sticks auto-population error (will show dialog): ' + autoPopErr);
+        }
+      }
+
+      // For MACKs, auto-set defaults
+      if (sheetName === 'MACKs' && newItemNum && itemNumStr !== '') {
+        try {
+          // Auto-set Location to 'Helena' if empty (col G)
+          var currentLocation = sheet.getRange(editedRow, COLS.MACKS.LOCATION).getValue();
+          if (!currentLocation) {
+            sheet.getRange(editedRow, COLS.MACKS.LOCATION).setValue('Helena');
+          }
+          // Auto-set Status to 'On Shelf' if empty (col H)
+          var currentStatus = sheet.getRange(editedRow, COLS.MACKS.STATUS).getValue();
+          if (!currentStatus) {
+            sheet.getRange(editedRow, COLS.MACKS.STATUS).setValue('On Shelf');
+          }
+          // Auto-set Assigned To to 'On Shelf' if empty (col I)
+          var currentAssignedTo = sheet.getRange(editedRow, COLS.MACKS.ASSIGNED_TO).getValue();
+          if (!currentAssignedTo) {
+            sheet.getRange(editedRow, COLS.MACKS.ASSIGNED_TO).setValue('On Shelf');
+          }
+        } catch (autoPopErr) {
+          Logger.log('MACKs auto-population error (will show dialog): ' + autoPopErr);
         }
       }
 

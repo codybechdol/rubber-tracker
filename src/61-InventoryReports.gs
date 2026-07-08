@@ -148,6 +148,9 @@ function promptNewItemSource(itemNum, sheetName, rowNum) {
   } else if (sheetName === 'Grounds') {
     itemType = 'Ground';
     dialogTitle = '⚡ New Ground Entry';
+  } else if (sheetName === 'MACKs') {
+    itemType = 'MACK';
+    dialogTitle = '🧱 New MACK Entry';
   } else {
     itemType = 'Item';
     dialogTitle = '📦 New Item Entry';
