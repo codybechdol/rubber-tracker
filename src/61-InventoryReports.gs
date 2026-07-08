@@ -193,7 +193,7 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
   // DUPLICATE ITEM NUMBER VALIDATION
   // ===========================================================================
   // Check if this item number already exists (excluding the current row being edited)
-  var duplicateCheck = checkDuplicateItemNumber(itemNum, sheetName);
+  var duplicateCheck = checkDuplicateItemNumber(itemNum, sheetName, rowNum);
   if (duplicateCheck.isDuplicate) {
     // Clear the item number from the cell
     sheet.getRange(rowNum, 1).clearContent();
