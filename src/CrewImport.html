@@ -7969,6 +7969,11 @@
       var clean2 = String(loc2 || '').trim().toLowerCase();
       if (clean1 === clean2) return true;
 
+      // If either location has a parenthesized status/annotation, they are not equal if they aren't exactly the same
+      if (clean1.indexOf('(') !== -1 || clean2.indexOf('(') !== -1) {
+        return false;
+      }
+
       // Compare base cities
       var base1 = getBaseCity(clean1);
       var base2 = getBaseCity(clean2);
