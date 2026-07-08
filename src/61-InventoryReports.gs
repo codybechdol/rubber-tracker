@@ -757,7 +757,7 @@ function checkDuplicateItemNumber(itemNum, sheetName, excludeRow) {
 
   for (var i = 0; i < data.length; i++) {
     var rowNum = i + 2;
-    if (rowNum === excludeRow) continue;
+    if (Number(rowNum) === Number(excludeRow)) continue;
 
     var existingItemNum = String(data[i][0] || '').trim().toUpperCase();
     if (existingItemNum === itemNumStr) {
