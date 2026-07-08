@@ -30,14 +30,13 @@ function calculateChangeOutDate(dateAssigned, location, assignedTo, isSleeve) {
 
   var assignedToLower = (assignedTo || '').toString().trim().toLowerCase();
   var locationLower = getPhysicalLocation(location).toLowerCase();
-  var isStatusLoc = isStatusLocation(location);
 
   // SLEEVES: Always 12 months (hardcoded)
   if (isSleeve) {
     // Lost, Failed Rubber, and Previous Employee sleeves get N/A
     if (assignedToLower === 'lost' || assignedToLower === 'failed rubber' ||
         assignedToLower === 'not repairable' || locationLower === 'previous employee' ||
-        locationLower === 'destroyed' || locationLower === 'lost' || isStatusLoc) {
+        locationLower === 'destroyed' || locationLower === 'lost') {
       return 'N/A';
     }
     var d = new Date(dateAssigned);
@@ -50,7 +49,7 @@ function calculateChangeOutDate(dateAssigned, location, assignedTo, isSleeve) {
   // Lost, Failed Rubber, and Previous Employee items get N/A
   if (assignedToLower === 'lost' || assignedToLower === 'failed rubber' ||
       assignedToLower === 'not repairable' || locationLower === 'previous employee' ||
-      locationLower === 'destroyed' || locationLower === 'lost' || isStatusLoc) {
+      locationLower === 'destroyed' || locationLower === 'lost') {
     return 'N/A';
   }
 
