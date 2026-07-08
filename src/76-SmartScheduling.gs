@@ -1161,7 +1161,7 @@ function collectEquipmentSwapTasks(ss, sheetName, itemType, tasksByLocation, emp
   var headerRowIndex = -1;
   for (var i = 0; i < Math.min(data.length, 5); i++) {
     var firstCell = String(data[i][0]).toLowerCase().trim();
-    if (firstCell === 'item #' || firstCell === 'item') {
+    if (firstCell === 'item #' || firstCell === 'item' || firstCell === 'serial#' || firstCell === 'serial' || firstCell === 'serial number') {
       headerRowIndex = i;
       break;
     }
@@ -1186,7 +1186,7 @@ function collectEquipmentSwapTasks(ss, sheetName, itemType, tasksByLocation, emp
 
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'item #' || header === 'item') itemNumCol = h;
+    if (header === 'item #' || header === 'item' || header === 'serial#' || header === 'serial' || header === 'serial number') itemNumCol = h;
     if (header === 'model') modelCol = h;
     if (header === 'location') locationCol = h;
     if (header === 'assigned to') assignedToCol = h;
@@ -1198,7 +1198,7 @@ function collectEquipmentSwapTasks(ss, sheetName, itemType, tasksByLocation, emp
   Logger.log('collectEquipmentSwapTasks: ' + sheetName + ' columns - itemNum=' + itemNumCol + ', assignedTo=' + assignedToCol + ', dueDate=' + dueDateCol + ', location=' + locationCol);
 
   if (itemNumCol === -1) {
-    Logger.log('collectEquipmentSwapTasks: Could not find Item # column in ' + sheetName);
+    Logger.log('collectEquipmentSwapTasks: Could not find Item # or Serial # column in ' + sheetName);
     return;
   }
 
