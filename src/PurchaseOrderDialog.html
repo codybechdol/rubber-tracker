@@ -165,7 +165,7 @@
       </div>
 
       <div id="emptyItems" class="empty-state" style="display: none;">
-        <p>✅ No items currently need ordering from Purchase Needs.</p>
+        <p>✅ No items currently need ordering.</p>
         <p>Select a vendor and use "➕ Add from Vendor Catalog" below to add items.</p>
       </div>
     </div>
@@ -819,7 +819,7 @@
       var btn = document.getElementById('orderBtn');
       btn.disabled = true;
       btn.textContent = 'Processing...';
-      showStatus('Logging order and updating Purchase Needs...', '');
+      showStatus('Logging order...', '');
 
       google.script.run
         .withSuccessHandler(function(result) {

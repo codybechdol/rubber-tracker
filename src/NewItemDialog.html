@@ -81,10 +81,10 @@
   <? var isEquipment = (sheetName === 'HV Testers' || sheetName === 'Phasing Sets'); ?>
   <? var isGlovesSleeves = (sheetName === 'Gloves' || sheetName === 'Sleeves'); ?>
   <? var isHotStick = (sheetName === 'Hot Sticks'); ?>
-  <? var isServiceStatus = (isEquipment || sheetName === 'Blankets' || sheetName === 'AED' || sheetName === 'Grounds' || isHotStick); ?>
+  <? var isServiceStatus = (isEquipment || sheetName === 'Blankets' || sheetName === 'AED' || sheetName === 'Grounds' || isHotStick || sheetName === 'MACKs'); ?>
   <? var isGrounds = (sheetName === 'Grounds'); ?>
 
-  <h2><? if (sheetName === 'Blankets') { ?>🧱 New Blanket Detected<? } else if (sheetName === 'HV Testers') { ?>⚡ New HV Tester Detected<? } else if (sheetName === 'Phasing Sets') { ?>⚡ New Phasing Set Detected<? } else if (sheetName === 'AED') { ?>🏥 New AED Detected<? } else if (sheetName === 'Grounds') { ?>⚡ New Ground Detected<? } else if (sheetName === 'Hot Sticks') { ?>🔴 New Hot Stick Detected<? } else { ?>📦 New <?= itemType ?> Detected<? } ?></h2>
+  <h2><? if (sheetName === 'Blankets') { ?>🧱 New Blanket Detected<? } else if (sheetName === 'MACKs') { ?>🧱 New MACK Detected<? } else if (sheetName === 'HV Testers') { ?>⚡ New HV Tester Detected<? } else if (sheetName === 'Phasing Sets') { ?>⚡ New Phasing Set Detected<? } else if (sheetName === 'AED') { ?>🏥 New AED Detected<? } else if (sheetName === 'Grounds') { ?>⚡ New Ground Detected<? } else if (sheetName === 'Hot Sticks') { ?>🔴 New Hot Stick Detected<? } else { ?>📦 New <?= itemType ?> Detected<? } ?></h2>
 
   <div class="item-info">
     <strong>Item #:</strong> <?= itemNum ?><br>
@@ -216,6 +216,29 @@
       <div class="hint">Date the stick was assigned to a crew (leave blank to use today)</div>
     </div>
 
+    <? } else if (sheetName === 'MACKs') { ?>
+    <!-- MACKs: KV, Size, Length, Test Date -->
+    <div class="form-group">
+      <label>KV Rating:</label>
+      <input type="text" id="mackKV" name="kv" placeholder="e.g., 15KV, 25KV" value="15KV">
+    </div>
+
+    <div class="form-group">
+      <label>Size:</label>
+      <input type="text" id="mackSize" name="size" placeholder="e.g., 10">
+    </div>
+
+    <div class="form-group">
+      <label>Length:</label>
+      <input type="text" id="mackLength" name="length" placeholder="e.g., 20">
+    </div>
+
+    <div class="form-group">
+      <label>Test Date:</label>
+      <input type="date" id="mackTestDate" name="testDate">
+      <div class="hint">Change Out Date will auto-calculate (Test Date + 12 months)</div>
+    </div>
+
     <? } else if (sheetName === 'Blankets') { ?>
     <!-- Blankets: Type field instead of Size -->
     <div class="form-group">
@@ -285,7 +308,7 @@
     </div>
     <? } ?>
 
-    <? if (!isEquipment && sheetName !== 'AED' && !isGrounds && !isHotStick) { ?>
+    <? if (!isEquipment && sheetName !== 'AED' && !isGrounds && !isHotStick && sheetName !== 'MACKs') { ?>
     <div class="form-group">
       <label>Test Date:</label>
       <input type="date" id="testDate" name="testDate">
@@ -319,7 +342,7 @@
         <option value="Failed Rubber">Failed Rubber</option>
         <option value="Lost">Lost</option>
       </select>
-      <? } else if (sheetName === 'Grounds' || sheetName === 'Hot Sticks') { ?>
+      <? } else if (sheetName === 'Grounds' || sheetName === 'Hot Sticks' || sheetName === 'MACKs') { ?>
       <select id="status" name="status">
         <option value="On Shelf" selected>On Shelf</option>
         <option value="In Service">In Service</option>
@@ -447,7 +470,7 @@
       } else {
         // This looks like an employee name
         // Set Status to In Service for Blankets/HV Testers/Phasing Sets, Assigned for Gloves/Sleeves
-        if (sheetName === 'Blankets' || sheetName === 'HV Testers' || sheetName === 'Phasing Sets' || sheetName === 'AED' || sheetName === 'Grounds' || sheetName === 'Hot Sticks') {
+        if (sheetName === 'Blankets' || sheetName === 'HV Testers' || sheetName === 'Phasing Sets' || sheetName === 'AED' || sheetName === 'Grounds' || sheetName === 'Hot Sticks' || sheetName === 'MACKs') {
           statusSelect.value = 'In Service';
         } else {
           statusSelect.value = 'Assigned';
@@ -513,6 +536,11 @@
         formData.hotStickLength = document.getElementById('hotStickLength').value;
         formData.hotStickTestDate = document.getElementById('hotStickTestDate').value;
         formData.hotStickDateAssigned = document.getElementById('hotStickDateAssigned').value;
+      } else if (sheetName === 'MACKs') {
+        formData.kv = document.getElementById('mackKV').value;
+        formData.size = document.getElementById('mackSize').value;
+        formData.length = document.getElementById('mackLength').value;
+        formData.testDate = document.getElementById('mackTestDate').value;
       } else {
         // Gloves/Sleeves/Blankets fields
         formData.size = document.getElementById('size').value;

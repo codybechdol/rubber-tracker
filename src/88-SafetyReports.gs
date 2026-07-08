@@ -2626,8 +2626,6 @@ function lookupJHADetails(jhaLog, jobNumber, dayDate, tz) {
 function lookupWeeklyMeetingDetails(weeklyLog, jobNumber, weekStart, tz) {
   if (!weeklyLog || weeklyLog.length < 2) return null;
 
-  var weekStartStr = Utilities.formatDate(weekStart, tz, 'MM/dd/yyyy');
-
   for (var i = 1; i < weeklyLog.length; i++) {
     var row = weeklyLog[i];
     var creditedTo = String(row[7] || '').trim(); // Column H - Credited To
@@ -2638,10 +2636,10 @@ function lookupWeeklyMeetingDetails(weeklyLog, jobNumber, weekStart, tz) {
     // Check if this row matches our crew
     if (creditedTo !== jobNumber) continue;
 
-    // Check if the week matches (within 6 days)
+    // Check if the week matches (exact boundaries of the compliance week)
+    var weekBounds = getWeekBoundaries(weekStart);
     var weekOfDate = new Date(weekOf);
-    var daysDiff = Math.abs((weekOfDate.getTime() - weekStart.getTime()) / (1000 * 60 * 60 * 24));
-    if (daysDiff <= 6) {
+    if (weekOfDate >= weekBounds.weekStart && weekOfDate <= weekBounds.weekEnd) {
       return {
         dateReceived: row[0], // Column A
         weekOf: weekOf
@@ -2658,8 +2656,11 @@ function lookupWeeklyMeetingDetails(weeklyLog, jobNumber, weekStart, tz) {
 function lookupMonthlyChecklistDetails(monthlyLog, jobNumber, weekStart, tz) {
   if (!monthlyLog || monthlyLog.length < 2) return null;
 
-  var targetMonth = weekStart.getMonth();
-  var targetYear = weekStart.getFullYear();
+  // Use Monday of the week (weekStart + 1 day) as the month reference, matching calculateComplianceFromLogs.
+  var weekBounds = getWeekBoundaries(weekStart);
+  var mondayOfWeek = new Date(weekBounds.weekStart.getTime() + 24 * 60 * 60 * 1000);
+  var targetMonth = mondayOfWeek.getMonth();
+  var targetYear = mondayOfWeek.getFullYear();
   var newestDetails = null;
   var newestDate = null;
 
@@ -4578,8 +4579,58 @@ function setupSafetyReportsSheet() {
   // Add conditional formatting for Resolved status - grey out entire row
   addResolvedRowFormatting(sheet);
 
+  // Setup the Archive button in cell O2
+  try {
+    ensureSafetyReportsArchiveButtonExists();
+  } catch (buttonErr) {
+    Logger.log("Error creating archive button in setupSafetyReportsSheet: " + buttonErr);
+  }
+
   Browser.msgBox("\u2705 Safety Reports sheet created successfully!");
   Logger.log("Safety Reports sheet created");
+}
+
+/**
+ * Ensures the Safety Equipment Needs sheet has the Archive checkbox button in cell O2.
+ */
+function ensureSafetyReportsArchiveButtonExists() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Safety Equipment Needs') || ss.getSheetByName('Safety Reports');
+  if (!sheet) return;
+  
+  // Check if O2 already has a checkbox data validation rule
+  var cell = sheet.getRange("O2");
+  var rule = cell.getDataValidation();
+  
+  if (!rule || rule.getCriteriaType() !== SpreadsheetApp.DataValidationCriteria.CHECKBOX) {
+    // Need to set up the button
+    Logger.log('ensureSafetyReportsArchiveButtonExists: Button missing. Setting up...');
+    
+    // Set up header in O1
+    var headerCell = sheet.getRange("O1");
+    headerCell.setValue("Archive Controller")
+      .setFontWeight("bold")
+      .setBackground("#4A86E8")
+      .setFontColor("white")
+      .setHorizontalAlignment("center");
+      
+    // Set up checkbox in O2
+    cell.insertCheckboxes();
+    cell.setValue(false);
+    cell.setHorizontalAlignment("center");
+    
+    // Set up label in P2
+    var labelCell = sheet.getRange("P2");
+    labelCell.setValue("Check to Archive Resolved Items")
+      .setFontWeight("bold")
+      .setFontColor("#333333");
+      
+    // Format column O & P width
+    sheet.setColumnWidth(15, 140); // Column O
+    sheet.setColumnWidth(16, 220); // Column P
+    
+    Logger.log('ensureSafetyReportsArchiveButtonExists: Successfully set up Archive button in cell O2.');
+  }
 }
 
 /**
@@ -7663,7 +7714,7 @@ function backfillEquipmentNotes() {
     'fall protection':   /fall\s*protection\s*gear\s+good\s*condition\s*\??\s*:?\s*(yes|no)/i,
     'harnesses':         /harnesses?\s*\/?\s*lanyards?\s+good\s*condition\s*\??\s*:?\s*(yes|no)/i,
     'first aid':         /fully\s*stocked\s*:?\s*(yes|no)/i,
-    'aed':               /(?:any\s*damage\s*visible|2\s*sets.*?defibrillation)\s*\??\s*:?\s*(yes|no|na)/i,
+    'aed':               /any\s*damage\s*visible\s*\??\s*:?\s*(yes|no|na)/i,
     'rubber goods':      /rubber\s*(?:goods?|gloves?|sleeves?)\s+good\s*condition\s*\??\s*:?\s*(yes|no)/i,
     'hot hoist':         /hot\s*hoist\s+good\s*condition\s*\??\s*:?\s*(yes|no)/i,
     'barriers':          /barriers?\s+good\s*condition\s*\??\s*:?\s*(yes|no)/i,
@@ -7685,7 +7736,7 @@ function backfillEquipmentNotes() {
     Logger.log('backfillEquipmentNotes: segment[0:280]="' + segment.substring(0, 280) + '"');
 
     // — Strategy 1: original lookahead regex —
-    var cm = segment.match(/comments?\s*:?\s*([A-Za-z0-9][^?]{4,300}?)(?=\s*(?:[A-Z][a-z].*?\?|$))/i);
+    var cm = segment.match(/comments?\s*:?\s*([A-Za-z0-9][^?]{4,300}?)(?=\s*(?:[A-Z][a-z][^?:\n]{0,45}?\?|$))/i);
     if (cm && cm[1]) {
       var c1 = cm[1].trim().replace(/\s+/g, ' ');
       if (c1.length >= 10 && !/^(n\/?a|none|ok|good|yes|no|na|-+)$/i.test(c1)) {
@@ -7701,10 +7752,13 @@ function backfillEquipmentNotes() {
     // Stop at the next "Comments:" (next section) OR a common multi-word field header
     var nextCmIdx  = afterLabel.search(/\s+comments?\s*:/i);
     var fieldStop  = afterLabel.search(/\s+(?:Test Date|Insulated Jumpers|Good condition|Fully Stocked|Properly charged|Monthly inspection|Expiration|AED|Fall Protection|Harnesses|Crane|Mileage|Signs|Triangles|Cones|Hot Hoist|Barriers|Fire Extinguisher|Hot Stick|Rubber|First Aid|Manuf)\s*[?:]/i);
+    // Stop on AED-specific line items to prevent them from bleeding into previous comments
+    var aedStop    = afterLabel.search(/\s*(?:2\s*sets?\s*of\s*defibrillation\s*pads|Expiration\s*date\s*of\s*pads\s*Set\s*[1-2]|Visual\s*Rescue\s*Ready\s*Light\s*is)\b/i);
 
     var stopAt = afterLabel.length; // default: take everything up to 500 chars
-    if (nextCmIdx  > 0) stopAt = Math.min(stopAt, nextCmIdx);
-    if (fieldStop  > 0) stopAt = Math.min(stopAt, fieldStop);
+    if (nextCmIdx  >= 0) stopAt = Math.min(stopAt, nextCmIdx);
+    if (fieldStop  >= 0) stopAt = Math.min(stopAt, fieldStop);
+    if (aedStop   >= 0) stopAt = Math.min(stopAt, aedStop);
     stopAt = Math.min(stopAt, 500);
 
     var rawComment = afterLabel.substring(0, stopAt).trim().replace(/\s+/g, ' ');
@@ -7854,7 +7908,7 @@ function backfillEquipmentNotes() {
       if (noteText) {
         sheet.getRange(row.rowNum, 11).setValue(noteText);  // col K = 11
         updatedCount++;
-        Logger.log('backfillEquipmentNotes: Row ' + row.rowNum + ' (' + row.equipType + ') ↁ "' + noteText.substring(0, 100) + '"');
+        Logger.log('backfillEquipmentNotes: Row ' + row.rowNum + ' (' + row.equipType + ') ↁ  "' + noteText.substring(0, 100) + '"');
       } else {
         skippedCount++;
         Logger.log('backfillEquipmentNotes: Row ' + row.rowNum + ' (' + row.equipType + ') - no comment found');
@@ -8424,7 +8478,7 @@ function extractSafetyChecklistIssues(pdfText, context) {
     var windowText = text.substring(afterPos, Math.min(afterPos + 700, text.length));
 
     // Strategy 1: original lookahead regex (stops before next capitalized section with "?")
-    var cm = windowText.match(/comments?\s*:?\s*([A-Za-z0-9][^?]{4,300}?)(?=\s*(?:[A-Z][a-z].*?\?|$))/i);
+    var cm = windowText.match(/comments?\s*:?\s*([A-Za-z0-9][^?]{4,300}?)(?=\s*(?:[A-Z][a-z][^?:\n]{0,45}?\?|$))/i);
     if (cm && cm[1]) {
       var c1 = cm[1].trim().replace(/\s+/g, ' ');
       // Reject trivial/non-actionable values and section header words
@@ -8443,17 +8497,20 @@ function extractSafetyChecklistIssues(pdfText, context) {
     // Stop at known question-style headers (e.g. "Good condition?:")
     // Also stop at Trucks section and Misc Comments to prevent comment bleed-through
     var fieldStop = afterLabel.search(/\s+(?:Test Date|Insulated Jumpers|Good condition|Fully Stocked|Properly charged|Monthly inspection|Expiration|AED|Fall Protection|Harnesses|Crane|Mileage|Signs|Triangles|Cones|Hot Hoist|Barriers|Fire Extinguisher|Hot Stick|Rubber|First Aid|Manuf|Trucks|Misc\s*Comments?|Tires|Wheel\s*chocks?|Brakes?|Wipers?|Horn\b|Heater|Seat\s*Belts?|Reflectors?|Warning\s*Lights?)\s*[?:.]?\s*(?:Yes|No|NA|Are\s)/i);
+    // Stop on AED-specific line items to prevent them from bleeding into previous comments
+    var aedStop = afterLabel.search(/\s*(?:2\s*sets?\s*of\s*defibrillation\s*pads|Expiration\s*date\s*of\s*pads\s*Set\s*[1-2]|Visual\s*Rescue\s*Ready\s*Light\s*is)\b/i);
     // Also stop at standalone section-header words at the start of a line (no ? or : required)
     // This prevents comment text from one section bleeding into the next section's header
     var lineHeaderStop = afterLabel.search(/\n\s*(?:Cones|Triangles|Signs|Barriers|Hot Hoist|Hot Stick|Chains|Chokers|AED|Fall Protection|Harnesses|Crane|Mileage|Fire Extinguisher|Insulated Jumpers|First Aid|Rubber Goods|Trucks)\s*\n/i);
     // Also stop at inline section headers (for normalized text without newlines)
     var inlineStop = afterLabel.search(/\s+(?:Trucks|Misc\s*Comments?)\s+(?:Are\s|Comments?\s*:)/i);
-    if (inlineStop > 0) fieldStop = (fieldStop > 0) ? Math.min(fieldStop, inlineStop) : inlineStop;
+    if (inlineStop >= 0) fieldStop = (fieldStop >= 0) ? Math.min(fieldStop, inlineStop) : inlineStop;
 
     var stopAt = afterLabel.length;
-    if (nextCmIdx  > 0) stopAt = Math.min(stopAt, nextCmIdx);
-    if (fieldStop  > 0) stopAt = Math.min(stopAt, fieldStop);
-    if (lineHeaderStop > 0) stopAt = Math.min(stopAt, lineHeaderStop);
+    if (nextCmIdx  >= 0) stopAt = Math.min(stopAt, nextCmIdx);
+    if (fieldStop  >= 0) stopAt = Math.min(stopAt, fieldStop);
+    if (aedStop   >= 0) stopAt = Math.min(stopAt, aedStop);
+    if (lineHeaderStop >= 0) stopAt = Math.min(stopAt, lineHeaderStop);
     stopAt = Math.min(stopAt, 500);
 
     var rawComment = afterLabel.substring(0, stopAt).trim().replace(/\s+/g, ' ');
@@ -8676,7 +8733,53 @@ function extractSafetyChecklistIssues(pdfText, context) {
 
   // ==== AED SECTION ====
   checkEquipment("AED", "Damage Visible", /any\s*damage\s*visible\s*\??\s*:?\s*(yes|no)/i, "yes", "AED has visible damage");
-  checkEquipment("AED", "2 Sets of Pads", /2\s*sets?\s*of\s*defibrillation\s*pads\s*\.?\s*:?\s*(yes|no)/i, "no", "AED does not have 2 sets of pads");
+  
+  // We can ignore 2 sets of defibrillation pads and Expiration date of pads Set 2 line items per user request
+  // checkEquipment("AED", "2 Sets of Pads", /2\s*sets?\s*of\s*defibrillation\s*pads\s*\.?\s*:?\s*(yes|no)/i, "no", "AED does not have 2 sets of pads");
+
+  // Check AED Pad Set 1 Expiration Date (Set 1 is the only pad date we need to look at)
+  var aedPad1Match = text.match(/expiration\s*date\s*of\s*pads\s*set\s*1\s*:?\s*([A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4})/i);
+  if (!aedPad1Match) {
+    aedPad1Match = text.match(/expiration\s*date\s*of\s*pads\s*set\s*1\s*:?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i);
+  }
+
+  var aedPad1Date = null;
+  var aedPad1IsExpired = false;
+
+  if (aedPad1Match) {
+    var aedPad1DateStr = aedPad1Match[1];
+    Logger.log("  Found AED Pad Set 1 Expiration Date: " + aedPad1DateStr);
+    try {
+      var parsedDate = new Date(aedPad1DateStr);
+      if (!isNaN(parsedDate.getTime())) {
+        aedPad1Date = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), parsedDate.getDate(), 12, 0, 0);
+        aedPad1IsExpired = (new Date() > aedPad1Date);
+        Logger.log("  AED Pad Set 1 Date: " + aedPad1Date.toDateString() + ", Expired: " + aedPad1IsExpired);
+      }
+    } catch (e) {
+      Logger.log("  Could not parse AED Pad Set 1 Expiration Date: " + e);
+    }
+  }
+
+  if (aedPad1IsExpired && !flagged["AED_Pads_Expired"]) {
+    flagged["AED_Pads_Expired"] = true;
+    issues.push([
+      context.date,
+      context.reportType,
+      context.jobNumber,
+      context.foreman,
+      context.vehicleNumber,
+      "AED",
+      "AED Pads EXPIRED - Set 1 Expiration: " + Utilities.formatDate(aedPad1Date, Session.getScriptTimeZone(), "MMM dd, yyyy"),
+      "Needs Attention",
+      aedPad1Date,  // Column I: Test/Expiration Date
+      context.messageId,
+      "", // Note
+      context.subject || "",
+      context.receivedDate || ""
+    ]);
+    Logger.log("  ** ISSUE: AED Pads Expired (Set 1)");
+  }
 
   // AED = NA means the vehicle does not have an AED at all — flag it
   // Pattern: "Any damage visible?:NA" indicates no AED present on this vehicle
@@ -17704,9 +17807,8 @@ function getHistoricalCrewsForWeek(weekBounds) {
 
       var meetingDate = new Date(weekOf);
 
-      // Check if within week bounds (allowing some tolerance)
-      var daysDiff = Math.abs((meetingDate.getTime() - weekBounds.weekStart.getTime()) / (1000 * 60 * 60 * 24));
-      if (daysDiff > 6) continue;
+      // Check if within week bounds
+      if (meetingDate < weekBounds.weekStart || meetingDate > weekBounds.weekEnd) continue;
 
       // Track original job number
       if (originalJob && /^\d{3}-\d{2}$/.test(originalJob) && !originalJob.startsWith('000-')) {

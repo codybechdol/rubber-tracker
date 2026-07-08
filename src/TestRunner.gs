@@ -44,16 +44,6 @@ function runAllTests() {
     results.push('testOnEditHandler FAILED: ' + e);
   }
   try {
-    results.push(testUpdateInventoryReports());
-  } catch (e) {
-    results.push('testUpdateInventoryReports FAILED: ' + e);
-  }
-  try {
-    results.push(testUpdatePurchaseNeeds());
-  } catch (e) {
-    results.push('testUpdatePurchaseNeeds FAILED: ' + e);
-  }
-  try {
     results.push(testGetPhysicalLocation());
   } catch (e) {
     results.push('testGetPhysicalLocation FAILED: ' + e);
@@ -62,6 +52,11 @@ function runAllTests() {
     results.push(testIsStatusLocation());
   } catch (e) {
     results.push('testIsStatusLocation FAILED: ' + e);
+  }
+  try {
+    results.push(testMacksWorkflow());
+  } catch (e) {
+    results.push('testMacksWorkflow FAILED: ' + e);
   }
 
   Logger.log('Test Results:');
@@ -84,7 +79,7 @@ function testBuildSheets() {
     buildSheets();
     // Optionally, check if key sheets exist after running buildSheets
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var expectedSheets = ['Gloves', 'Sleeves', 'Gloves History', 'Sleeves History', 'Inventory Reports', 'Reclaims'];
+    var expectedSheets = ['Gloves', 'Sleeves', 'Gloves History', 'Sleeves History', 'Reclaims'];
     var missing = expectedSheets.filter(function(name) {
       return !ss.getSheetByName(name);
     });
@@ -120,11 +115,10 @@ function testSaveCurrentStateToHistory() {
 function testGenerateAllReports() {
   try {
     generateAllReports();
-    // Optionally, check if Inventory Reports and Reclaims sheets are updated
+    // Optionally, check if Reclaims sheet is updated
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var inventorySheet = ss.getSheetByName('Inventory Reports');
     var reclaimsSheet = ss.getSheetByName('Reclaims');
-    if (!inventorySheet || !reclaimsSheet) throw 'Missing Inventory Reports or Reclaims sheet';
+    if (!reclaimsSheet) throw 'Missing Reclaims sheet';
     return 'testGenerateAllReports PASSED';
   } catch (e) {
     throw 'generateAllReports error: ' + e;
@@ -155,31 +149,7 @@ function testOnEditHandler() {
   }
 }
 
-// Test for updateInventoryReports
-function testUpdateInventoryReports() {
-  try {
-    updateInventoryReports();
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var sheet = ss.getSheetByName('Inventory Reports');
-    if (!sheet) throw 'Inventory Reports sheet missing after update.';
-    return 'testUpdateInventoryReports PASSED';
-  } catch (e) {
-    throw 'updateInventoryReports error: ' + e;
-  }
-}
 
-// Test for updatePurchaseNeeds
-function testUpdatePurchaseNeeds() {
-  try {
-    updatePurchaseNeeds();
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var sheet = ss.getSheetByName('Purchase Needs');
-    if (!sheet) throw 'Purchase Needs sheet missing after update.';
-    return 'testUpdatePurchaseNeeds PASSED';
-  } catch (e) {
-    throw 'updatePurchaseNeeds error: ' + e;
-  }
-}
 
 
 // Test for getPhysicalLocation
@@ -307,6 +277,57 @@ function debugGetMessages() {
     } catch (e) {
       Logger.log('ID: ' + ids[i] + ' -> Error: ' + e.toString());
     }
+  }
+}
+
+function checkEmployeesForMatchingTest() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Employees');
+  if (!sheet) {
+    Logger.log('Employees sheet not found');
+    return;
+  }
+  var data = sheet.getDataRange().getValues();
+  Logger.log('Total employee rows: ' + data.length);
+  var targetNames = ['darrell swann', 'dillon hahnkamp', 'tyson smith', 'daniel cole'];
+  for (var i = 1; i < data.length; i++) {
+    var name = String(data[i][0] || '').trim();
+    var nameLower = name.toLowerCase();
+    for (var j = 0; j < targetNames.length; j++) {
+      if (nameLower.indexOf(targetNames[j]) !== -1) {
+        Logger.log('Match found in row ' + (i+1) + ': Name="' + name + '", Location="' + data[i][1] + '", JobNum="' + data[i][2] + '"');
+      }
+    }
+  }
+}
+
+// Test for MACKs workflow functions
+function testMacksWorkflow() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    
+    // Check if sheets exist
+    var macksSheet = ss.getSheetByName(SHEET_MACKS);
+    if (!macksSheet) throw 'MACKs sheet missing';
+    var mackSwapsSheet = ss.getSheetByName(SHEET_MACK_SWAPS);
+    if (!mackSwapsSheet) throw 'MACK Swaps sheet missing';
+    
+    // Check ensureMackHistorySheet
+    var historySheet = ensureMackHistorySheet();
+    if (!historySheet) throw 'ensureMackHistorySheet failed to return sheet';
+    
+    // Check date calculation
+    var testDate = new Date(2026, 3, 15); // Apr 15, 2026
+    var expected = new Date(testDate);
+    expected.setMonth(expected.getMonth() + 12);
+    var actual = calculateMackChangeOut(testDate, 'Test Employee', 'Helena');
+    if (actual.getTime() !== expected.getTime()) {
+      throw 'calculateMackChangeOut returned incorrect date. Expected ' + expected + ', got ' + actual;
+    }
+    
+    return 'testMacksWorkflow PASSED';
+  } catch (e) {
+    throw 'testMacksWorkflow error: ' + e;
   }
 }
 

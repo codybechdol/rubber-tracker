@@ -89,6 +89,9 @@ function syncInventoryLocations() {
     // Process Blankets sheet
     updateCount += syncSheetLocations(ss, 'Blankets', nameToLocation);
 
+    // Process MACKs sheet
+    updateCount += syncSheetLocations(ss, SHEET_MACKS, nameToLocation);
+
     // Process HV Testers sheet
     updateCount += syncSheetLocations(ss, 'HV Testers', nameToLocation);
 

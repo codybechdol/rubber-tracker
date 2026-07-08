@@ -14,8 +14,6 @@ const SHEET_GLOVES = 'Gloves';
 const SHEET_SLEEVES = 'Sleeves';
 const SHEET_GLOVE_SWAPS = 'Glove Swaps';
 const SHEET_SLEEVE_SWAPS = 'Sleeve Swaps';
-const SHEET_PURCHASE_NEEDS = 'Purchase Needs';
-const SHEET_INVENTORY_REPORTS = 'Inventory Reports';
 const SHEET_RECLAIMS = 'Reclaims';
 const SHEET_ITEM_HISTORY_LOOKUP = 'Item History Lookup';
 const SHEET_GLOVES_HISTORY = 'Gloves History';
@@ -25,6 +23,11 @@ const SHEET_SLEEVES_HISTORY = 'Sleeves History';
 const SHEET_BLANKETS = 'Blankets';
 const SHEET_BLANKET_SWAPS = 'Blanket Swaps';
 const SHEET_BLANKETS_HISTORY = 'Blankets History';
+
+// Phase 6: MACKs (July 2026)
+const SHEET_MACKS = 'MACKs';
+const SHEET_MACK_SWAPS = 'MACK Swaps';
+const SHEET_MACKS_HISTORY = 'MACKs History';
 
 // Phase 2: HV Testers & Phasing Sets (Future)
 const SHEET_HV_TESTERS = 'HV Testers';
@@ -65,6 +68,9 @@ const INTERVAL_DEFAULT = 6;
 // Blanket test interval (months) - 1 year from test date
 const INTERVAL_BLANKET_TEST = 12;
 
+// MACK test interval (months) - 1 year from test date
+const INTERVAL_MACK_TEST = 12;
+
 // HV Tester/Phasing Set calibration interval (years) - Phase 2
 const INTERVAL_CALIBRATION_YEARS = 10;
 
@@ -91,6 +97,10 @@ const HISTORY_COLOR_SLEEVE_1 = '#e8f5e9'; // Light green
 const HISTORY_COLOR_SLEEVE_2 = '#ffffff'; // White
 const HISTORY_COLOR_BLANKET_1 = '#fff3e0'; // Light orange
 const HISTORY_COLOR_BLANKET_2 = '#ffffff'; // White
+
+// Alternating colors for MACK history grouping
+const HISTORY_COLOR_MACK_1 = '#e0f2f1'; // Light teal
+const HISTORY_COLOR_MACK_2 = '#ffffff'; // White
 const HISTORY_COLOR_HV_TESTER_1 = '#f3e5f5'; // Light purple
 const HISTORY_COLOR_HV_TESTER_2 = '#ffffff'; // White
 const HISTORY_COLOR_PHASING_SET_1 = '#e0f7fa'; // Light cyan
@@ -141,6 +151,22 @@ const COLS = {
     CHANGE_OUT_DATE: 9, // I - Test Date + 12 months
     PICKED_FOR: 10,     // J
     NOTES: 11           // K
+  },
+
+  // MACKs Sheet - Phase 6 (July 2026)
+  MACKS: {
+    ITEM_NUM: 1,        // A - MACK item number (ESL ID, e.g., 64977789)
+    KV: 2,              // B
+    SIZE: 3,            // C
+    LENGTH: 4,          // D
+    TEST_DATE: 5,       // E - Last test date
+    DATE_ASSIGNED: 6,   // F
+    LOCATION: 7,        // G
+    STATUS: 8,          // H
+    ASSIGNED_TO: 9,     // I - Crew Lead
+    CHANGE_OUT_DATE: 10,// J - Test Date + 12 months
+    PICKED_FOR: 11,     // K
+    NOTES: 12           // L
   },
 
   // HV Testers Sheet - Phase 2 (matches Phasing Sets layout)
@@ -254,6 +280,22 @@ const COLS = {
     STATUS: 8,          // H
     PICKED: 9,          // I
     DATE_CHANGED: 10    // J
+  },
+
+  // MACK Swaps Sheet - Phase 6 (July 2026)
+  MACK_SWAPS: {
+    EMPLOYEE: 1,        // A - Crew Lead
+    CURRENT_ITEM: 2,    // B - Current MACK #
+    KV: 3,              // C
+    SIZE: 4,            // D
+    LENGTH: 5,          // E
+    DATE_ASSIGNED: 6,   // F
+    CHANGE_OUT_DATE: 7, // G
+    DAYS_LEFT: 8,       // H
+    PICK_LIST: 9,       // I - New MACK to assign
+    STATUS: 10,         // J
+    PICKED: 11,         // K
+    DATE_CHANGED: 12    // L
   },
 
   // Swaps Hidden Columns (Stage tracking K-W)

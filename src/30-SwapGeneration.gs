@@ -130,16 +130,17 @@ function upgradePickListItems() {
         var changeOutDate = swapData[row][4]; // Column E - Change Out Date
         var employeeSize = (swapData[row][2] || '').toString().trim(); // Column C - Size
         var pickListBgColor = (swapBackgrounds[row][6] || '').toString().toLowerCase(); // Column G background
+        var daysLeft = (swapData[row][5] || '').toString().trim().toUpperCase();
 
-        // Skip header rows and empty rows.
-        // Real employee rows always have a current item number in column B.
-        // Merged location/foreman header rows have empty column B (merged cells).
+        // Skip header rows, previous employees, lost items, etc.
         var currentItemNum = (swapData[row][1] || '').toString().trim();
         if (!employeeName || !currentItemNum ||
             employeeName === 'Employee' ||
             employeeName.indexOf('Class') !== -1 ||
             employeeName.indexOf('STAGE') !== -1 ||
-            employeeName === 'No swaps due for this class') {
+            employeeName === 'No swaps due for this class' ||
+            daysLeft === 'PREV EMP' ||
+            daysLeft === 'LOST-LOCATE') {
           continue;
         }
 
@@ -183,12 +184,28 @@ function upgradePickListItems() {
         }
 
         if (needsUpgradeFlag) {
-          // Get the item's class from inventory (or from section header for Need to Purchase)
+          // Get the item's class (reclaim direction check first, then currentItemNum lookup, then pickListNum lookup, then fallback backwards header search)
           var itemClass = null;
 
-          if (pickListNum && pickListNum !== '—' && pickListNum !== '') {
-            // Find class from current pick list item
-            // Uses COLS.INVENTORY.CLASS - 1 = index 3 (12-col layout with ESL ID at col B)
+          // 1. Reclaim direction check
+          if (daysLeft.indexOf('CL3→CL2') !== -1) {
+            itemClass = 2;
+          } else if (daysLeft.indexOf('CL2→CL3') !== -1) {
+            itemClass = 3;
+          }
+
+          // 2. Look up in current item class
+          if (itemClass === null && currentItemNum && currentItemNum !== '—') {
+            for (var j = 1; j < inventoryData.length; j++) {
+              if (String(inventoryData[j][COLS.INVENTORY.ITEM_NUM - 1]).trim() === currentItemNum) {
+                itemClass = parseInt(inventoryData[j][COLS.INVENTORY.CLASS - 1], 10);
+                break;
+              }
+            }
+          }
+
+          // 3. Look up in current pick list item
+          if (itemClass === null && pickListNum && pickListNum !== '—' && pickListNum !== '') {
             for (var j = 1; j < inventoryData.length; j++) {
               if (String(inventoryData[j][COLS.INVENTORY.ITEM_NUM - 1]).trim() === pickListNum) {
                 itemClass = parseInt(inventoryData[j][COLS.INVENTORY.CLASS - 1], 10);
@@ -197,7 +214,7 @@ function upgradePickListItems() {
             }
           }
 
-          // If no class found, look backwards to find the class header
+          // 4. Fallback backwards search
           if (itemClass === null) {
             for (var k = row - 1; k >= 0; k--) {
               var headerCell = (swapData[k][0] || '').toString();

@@ -194,22 +194,31 @@ function fixAllChangeOutDates() {
         if (needsUpdate) {
           var cell = sheet.getRange(i + 1, colChangeOutDateIdx + 1);  // +1 for 1-based column
           try {
-            if (correctChangeOut === 'N/A') {
-              cell.setNumberFormat('@');  // Plain text for N/A
-            } else {
-              cell.setNumberFormat('MM/dd/yyyy');
+            try {
+              if (correctChangeOut === 'N/A') {
+                cell.setNumberFormat('@');  // Plain text for N/A
+              } else {
+                cell.setNumberFormat('MM/dd/yyyy');
+              }
+            } catch (fmtErr) { /* Ignore format errors on typed columns */ }
+            
+            try {
+              cell.setValue(correctChangeOut);
+              fixedCount++;
+              
+              var newValueStr = (correctChangeOut === 'N/A') ? 'N/A' : Utilities.formatDate(correctChangeOut, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+              Logger.log('Fixed row ' + (i + 1) + ' in ' + sheetName +
+                         ': DateAssigned=' + dateAssigned +
+                         ', Location=' + location +
+                         ', AssignedTo=' + assignedTo +
+                         ', Old=' + currentChangeOutStr +
+                         ', New=' + newValueStr);
+            } catch (valErr) {
+              Logger.log('fixAllChangeOutDates: Warning - could not set value for row ' + (i + 1) + ' in ' + sheetName + ': ' + valErr.message);
             }
-          } catch (fmtErr) { /* Ignore format errors on typed columns */ }
-          cell.setValue(correctChangeOut);
-          fixedCount++;
-
-          var newValueStr = (correctChangeOut === 'N/A') ? 'N/A' : Utilities.formatDate(correctChangeOut, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
-          Logger.log('Fixed row ' + (i + 1) + ' in ' + sheetName +
-                     ': DateAssigned=' + dateAssigned +
-                     ', Location=' + location +
-                     ', AssignedTo=' + assignedTo +
-                     ', Old=' + currentChangeOutStr +
-                     ', New=' + newValueStr);
+          } catch (cellErr) {
+            Logger.log('fixAllChangeOutDates: Warning - could not update cell for row ' + (i + 1) + ' in ' + sheetName + ': ' + cellErr.message);
+          }
         }
       }
     }

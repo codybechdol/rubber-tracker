@@ -56,17 +56,17 @@ function _buildGloveManagerMenu() {
         .addItem('Generate Glove Swaps', 'generateGloveSwaps')
         .addItem('Generate Sleeve Swaps', 'generateSleeveSwaps')
         .addItem('🧱 Generate Blanket Swaps', 'menuGenerateBlanketSwaps')
+        .addItem('🧱 Generate MACK Swaps', 'menuGenerateMackSwaps')
         .addItem('⚡ Generate HV Tester Swaps', 'menuGenerateHVTesterSwaps')
         .addItem('⚡ Generate Phasing Set Swaps', 'menuGeneratePhasingSetSwaps')
         .addItem('🔴 Generate Hot Stick Swaps', 'menuGenerateHotStickSwaps')
         .addItem('🏥 Generate AED Swaps', 'menuGenerateAEDSwaps')
         .addItem('⚡ Generate Ground Swaps', 'menuGenerateGroundSwaps')
-        .addItem('Update Purchase Needs', 'updatePurchaseNeeds')
-        .addItem('Update Inventory Reports', 'updateInventoryReports')
         .addSeparator()
         .addSubMenu(ui.createMenu('🔧 Utilities')
           .addItem('Fix All Change Out Dates', 'fixAllChangeOutDates')
           .addItem('🧱 Fix Blanket Change Out Dates', 'fixBlanketChangeOutDates')
+          .addItem('🧱 Fix MACK Change Out Dates', 'fixMackChangeOutDates')
           .addItem('⚡ Setup Auto Change Out Dates', 'createEditTrigger')
           .addItem('🔄 Update Training Tracking Crew Leads', 'updateTrainingTrackingCrewLeads')
           .addItem('📊 Deploy Swaps Dashboards', 'deploySwapsDashboards')))
@@ -221,13 +221,12 @@ function _buildGloveManagerMenu() {
         .addSubMenu(ui.createMenu('📦 Inventory')
           .addItem('🗄️ Archive Lost & Failed Items', 'showArchiveLostFailedDialog')
           .addItem('↩️ Restore Item from Archive', 'showRestoreFromArchiveDialog')
-          .addItem('📊 Update Inventory Reports', 'updateInventoryReports')
-          .addItem('🔄 Sync New Items Log', 'syncNewItemsLogWithInventory')
           .addSeparator()
           .addItem('⚡ View HV Testers', 'openHVTestersSheet')
           .addItem('⚡ View Phasing Sets', 'openPhasingSetsSheet')
           .addItem('🔴 View Hot Sticks', 'openHotSticksSheet')
           .addItem('🏥 View AED', 'openAEDSheet')
+          .addItem('🧱 View MACKs', 'openMacksSheet')
           .addItem('⚡ View Grounds', 'openGroundsSheet')
           .addItem('⚡ Setup Grounds Sheet', 'setupGroundsSheet'))
         .addSubMenu(ui.createMenu('🛒 Purchase Orders')
@@ -458,15 +457,3 @@ function showRestoreFromArchiveDialog() {
   );
 }
 
-/**
- * Wrapper for "Sync New Items Log"
- */
-function syncNewItemsLogWithInventory() {
-  var ui = SpreadsheetApp.getUi();
-  try {
-    syncNewItemsLogSilent();
-    ui.alert('🔄 Sync New Items Log', 'Successfully synced New Items Log with current inventory.', ui.ButtonSet.OK);
-  } catch (e) {
-    ui.alert('❌ Error', 'Failed to sync New Items Log: ' + e.toString(), ui.ButtonSet.OK);
-  }
-}

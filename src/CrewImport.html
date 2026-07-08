@@ -327,6 +327,12 @@
     </div>
   </div>
 
+  <!-- DEBUG SELF TEST SECTION -->
+  <div id="debugSelfTestSection" class="alert alert-warning small mt-3" style="display: block;">
+    <h5><i class="bi bi-bug"></i> Suffix Parser Self-Test Results</h5>
+    <div id="debugSelfTestResults">Testing...</div>
+  </div>
+
   <!-- File Upload -->
   <div class="config-section">
     <h3><i class="bi bi-file-earmark-excel"></i> Upload Excel File</h3>
@@ -883,6 +889,25 @@
     function init() {
       setupDragDrop();
       setupPotentialMatchClickHandler();
+
+      // RUN SELF-TEST
+      try {
+        var testNames = [
+          "Darrell Swann F",
+          "Dillon Hahnkamp JL",
+          "Tyson Smith 4 ap",
+          "Daniel Cole 4 ap Tues-Fri"
+        ];
+        var debugHtml = '<ul class="list-unstyled mb-0">';
+        testNames.forEach(function(name) {
+          var res = parseEmployeeName(name);
+          debugHtml += '<li><code>"' + name + '"</code> &rarr; name: <code>"' + res.name + '"</code>, role: <code>"' + res.role + '"</code>, class: <code>"' + res.classification + '"</code></li>';
+        });
+        debugHtml += '</ul>';
+        document.getElementById('debugSelfTestResults').innerHTML = debugHtml;
+      } catch (err) {
+        document.getElementById('debugSelfTestResults').innerHTML = '<span class="text-danger">Self-test error: ' + err.message + '</span>';
+      }
 
       // Load Job Tracking data first (for filtering completed jobs)
       google.script.run
@@ -7589,6 +7614,47 @@
             apply: true
           });
         }
+      }
+
+      // Send logs to server-side diagnostic sheet
+      try {
+        var logLines = [];
+        logLines.push('currentEmployees count: ' + (currentEmployees ? currentEmployees.length : 0));
+        if (currentEmployees) {
+          currentEmployees.forEach(function(e) {
+            var eName = String(e.name || '').toLowerCase();
+            if (eName.indexOf('swann') !== -1 || eName.indexOf('hahnkamp') !== -1 || eName.indexOf('cole') !== -1 || eName.indexOf('tyson') !== -1) {
+              logLines.push('DB Employee: ' + JSON.stringify(e));
+            }
+          });
+        }
+        
+        if (parsedCrews) {
+          parsedCrews.forEach(function(crew) {
+            logLines.push('Crew: ' + crew.jobNumber + ' (' + crew.mappedLocation + ')');
+            if (crew.employees) {
+              crew.employees.forEach(function(emp) {
+                var isTarget = false;
+                var empOrig = String(emp.originalText || '').toLowerCase();
+                if (empOrig.indexOf('swann') !== -1 || empOrig.indexOf('hahnkamp') !== -1 || empOrig.indexOf('cole') !== -1 || empOrig.indexOf('tyson') !== -1) {
+                  isTarget = true;
+                }
+                
+                if (isTarget) {
+                  logLines.push('  Parsed Target Employee: name="' + emp.name + '" (original="' + emp.originalText + '"), role="' + emp.role + '", class="' + emp.classification + '"');
+                  var match = findBestMatchWithoutSkip(emp.name, currentEmployees, true);
+                  logLines.push('    findBestMatchWithoutSkip match: ' + (match ? JSON.stringify(match) : 'NULL'));
+                  var match2 = findBestMatch(emp.name, currentEmployees);
+                  logLines.push('    findBestMatch match: ' + (match2 ? JSON.stringify(match2) : 'NULL'));
+                }
+              });
+            }
+          });
+        }
+        
+        google.script.run.logImportDebug(logLines);
+      } catch (err) {
+        console.error('Error logging debug info: ', err);
       }
 
       _matchingCompleted = true;

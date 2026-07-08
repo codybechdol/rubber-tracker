@@ -408,13 +408,39 @@ function showAllSwapAssignments(itemType) {
  */
 // eslint-disable-next-line no-unused-vars
 function runDiagnostic() {
-  // CHANGE THESE VALUES:
-  var employeeName = 'Waco Worts';
-  var itemType = 'Sleeves';
-
-  diagnosePurchaseNeed(employeeName, itemType);
-
-  SpreadsheetApp.getUi().alert('Diagnostic complete. Check the execution log:\nExtensions → Apps Script → View Logs');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Employees');
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert('Employees sheet not found');
+    return;
+  }
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  var targetNames = ['darrell swann', 'dillon hahnkamp', 'tyson smith', 'daniel cole'];
+  var matches = [];
+  
+  for (var i = 1; i < data.length; i++) {
+    var name = String(data[i][0] || '').trim();
+    var nameLower = name.toLowerCase();
+    for (var j = 0; j < targetNames.length; j++) {
+      if (nameLower.indexOf(targetNames[j]) !== -1) {
+        var rowDetails = [];
+        for (var c = 0; c < data[i].length; c++) {
+          rowDetails.push(headers[c] + ': "' + data[i][c] + '"');
+        }
+        matches.push('Row ' + (i+1) + ':\n' + rowDetails.join('\n'));
+      }
+    }
+  }
+  
+  var alertMsg = 'Employee Database Headers:\n' + headers.map(function(h, idx) { return idx + ': ' + h; }).join(', ') + '\n\n';
+  if (matches.length > 0) {
+    alertMsg += matches.join('\n\n');
+  } else {
+    alertMsg += 'No matching employees found for ' + targetNames.join(', ');
+  }
+  
+  SpreadsheetApp.getUi().alert(alertMsg);
 }
 
 /**

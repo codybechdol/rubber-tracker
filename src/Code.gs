@@ -9806,6 +9806,7 @@ function saveHistoryFast(silent) {
     var glovesSheet = ss.getSheetByName(SHEET_GLOVES);
     var sleevesSheet = ss.getSheetByName(SHEET_SLEEVES);
     var blanketsSheet = ss.getSheetByName(SHEET_BLANKETS);
+    var macksSheet = ss.getSheetByName(SHEET_MACKS);
     var hvTestersSheet = ss.getSheetByName(SHEET_HV_TESTERS);
     var phasingSetsSheet = ss.getSheetByName(SHEET_PHASING_SETS);
     var aedSheet = ss.getSheetByName(SHEET_AED);
@@ -9818,6 +9819,7 @@ function saveHistoryFast(silent) {
       ss.getSheetByName(SHEET_SLEEVES_HISTORY) :
       (ss.getSheetByName('Sleeves History') || ss.insertSheet('Sleeves History'));
     var blanketsHistorySheet = ss.getSheetByName(SHEET_BLANKETS_HISTORY);
+    var macksHistorySheet = ss.getSheetByName(SHEET_MACKS_HISTORY);
     var hvTestersHistorySheet = ss.getSheetByName(SHEET_HV_TESTERS_HISTORY);
     var phasingSetsHistorySheet = ss.getSheetByName(SHEET_PHASING_SETS_HISTORY);
     var aedHistorySheet = ss.getSheetByName(SHEET_AED_HISTORY);
@@ -9827,6 +9829,11 @@ function saveHistoryFast(silent) {
     // Ensure Blankets History sheet exists (only if source sheet exists)
     if (!blanketsHistorySheet && blanketsSheet) {
       blanketsHistorySheet = ensureBlanketHistorySheet();
+    }
+
+    // Ensure MACKs History sheet exists (only if source sheet exists)
+    if (!macksHistorySheet && macksSheet) {
+      macksHistorySheet = ensureMackHistorySheet();
     }
 
     // Ensure HV Testers History sheet exists (only if source sheet exists)
@@ -10003,6 +10010,7 @@ function saveHistoryFast(silent) {
     var glovesLookup = buildHistoryLookup(glovesHistorySheet);         // defaults: 1, 4, 5
     var sleevesLookup = buildHistoryLookup(sleevesHistorySheet);       // defaults: 1, 4, 5
     var blanketsLookup = buildHistoryLookup(blanketsHistorySheet);     // defaults: 1, 4, 5
+    var macksLookup = buildHistoryLookup(macksHistorySheet, 1, 5, 6);  // MACKs layout
     var hvTestersLookup = buildHistoryLookup(hvTestersHistorySheet);   // defaults: 1, 4, 5
     var phasingSetsLookup = buildHistoryLookup(phasingSetsHistorySheet, 1, 5, 6);  // Phasing Sets layout
     var aedLookup = buildHistoryLookup(aedHistorySheet, 1, 3, 4);     // AED layout
@@ -10014,9 +10022,11 @@ function saveHistoryFast(silent) {
     var newGloveRows = [];
     var newSleeveRows = [];
     var newBlanketRows = [];
+    var newMackRows = [];
     var newHVTesterRows = [];
     var newPhasingSetRows = [];
     var newAEDRows = [];
+    var newMackEntries = 0;
     var newAEDEntries = 0;
     var newGroundsRows = [];
     var newHotStickRows = [];
@@ -10120,6 +10130,39 @@ function saveHistoryFast(silent) {
           ]);
           newBlanketEntries++;
           blanketsLookup[bItemNum] = { assignedTo: String(bAssignedTo || '').toLowerCase().trim(), location: String(bLocation || '').toLowerCase().trim() };
+        }
+      }
+    }
+
+    // Process MACKs
+    if (macksSheet && macksSheet.getLastRow() > 1 && macksHistorySheet) {
+      var numMackRows = macksSheet.getLastRow() - 1;
+      var macksDisplay = macksSheet.getRange(2, 1, numMackRows, 9).getDisplayValues();
+      var macksRawValues = macksSheet.getRange(2, 1, numMackRows, 9).getValues();
+
+      for (var m = 0; m < macksDisplay.length; m++) {
+        var mRow = macksDisplay[m];
+        var mRawRow = macksRawValues[m];
+        var mItemNum = formatItemNum(mRawRow[0]); // Column A - Item # (ESL ID)
+        var mKV = mRow[1];                        // Column B - KV
+        var mSize = mRow[2];                      // Column C - Size
+        var mLength = mRow[3];                    // Column D - Length
+        var mDateAssignedRaw = mRawRow[5];        // Column F - Date Assigned
+        var mDateAssignedDisplay = mRow[5];       // Column F - Date Assigned Display
+        var mLocation = mRow[6];                  // Column G - Location
+        var mAssignedTo = mRow[8];                // Column I - Assigned To
+
+        if (!mItemNum || !mDateAssignedDisplay) continue;
+
+        var mChangeResult = getChangeTypeFast(macksLookup, mItemNum, mAssignedTo, mDateAssignedDisplay, mLocation, 'MACK');
+        if (!mChangeResult.isDuplicate) {
+          // MACKs History columns: Date Assigned, Item#, KV, Size, Length, Location, Assigned To, Notes (8 columns)
+          newMackRows.push([
+            silent ? formatDateForHistory(mDateAssignedRaw) : mDateAssignedDisplay,
+            mItemNum, mKV, mSize, mLength, mLocation, mAssignedTo, mChangeResult.note || ''
+          ]);
+          newMackEntries++;
+          macksLookup[mItemNum] = { assignedTo: String(mAssignedTo || '').toLowerCase().trim(), location: String(mLocation || '').toLowerCase().trim() };
         }
       }
     }
@@ -10325,6 +10368,11 @@ function saveHistoryFast(silent) {
       blanketsHistorySheet.getRange(blanketsLastRow + 1, 1, newBlanketRows.length, 7).setValues(newBlanketRows);
     }
 
+    if (newMackRows.length > 0) {
+      var macksLastRow = macksHistorySheet.getLastRow();
+      macksHistorySheet.getRange(macksLastRow + 1, 1, newMackRows.length, 8).setValues(newMackRows);
+    }
+
     if (newHVTesterRows.length > 0) {
       var hvTestersLastRow = hvTestersHistorySheet.getLastRow();
       hvTestersHistorySheet.getRange(hvTestersLastRow + 1, 1, newHVTesterRows.length, 7).setValues(newHVTesterRows);
@@ -10364,20 +10412,21 @@ function saveHistoryFast(silent) {
 
     if (silent) {
       PropertiesService.getUserProperties().setProperty('historySavedThisSession', 'true');
-      logEvent('Fast history backup completed in ' + totalTime + 'ms. Gloves: ' + newGloveEntries + ', Sleeves: ' + newSleeveEntries + ', Blankets: ' + newBlanketEntries + ', HV Testers: ' + newHVTesterEntries + ', Phasing Sets: ' + newPhasingSetEntries + ', AED: ' + newAEDEntries + ', Employees: ' + newEmployeeEntries);
+      logEvent('Fast history backup completed in ' + totalTime + 'ms. Gloves: ' + newGloveEntries + ', Sleeves: ' + newSleeveEntries + ', Blankets: ' + newBlanketEntries + ', MACKs: ' + newMackEntries + ', HV Testers: ' + newHVTesterEntries + ', Phasing Sets: ' + newPhasingSetEntries + ', AED: ' + newAEDEntries + ', Employees: ' + newEmployeeEntries);
     } else {
-      Logger.log('History saved in ' + totalTime + 'ms - Gloves: ' + newGloveEntries + ', Sleeves: ' + newSleeveEntries + ', Blankets: ' + newBlanketEntries + ', HV Testers: ' + newHVTesterEntries + ', Phasing Sets: ' + newPhasingSetEntries + ', AED: ' + newAEDEntries + ', Employees: ' + newEmployeeEntries);
+      Logger.log('History saved in ' + totalTime + 'ms - Gloves: ' + newGloveEntries + ', Sleeves: ' + newSleeveEntries + ', Blankets: ' + newBlanketEntries + ', MACKs: ' + newMackEntries + ', HV Testers: ' + newHVTesterEntries + ', Phasing Sets: ' + newPhasingSetEntries + ', AED: ' + newAEDEntries + ', Employees: ' + newEmployeeEntries);
 
       var message = '✅ History Saved Successfully!\n\n';
       message += '🧤 Gloves: ' + newGloveEntries + ' new entries\n';
       message += '🦺 Sleeves: ' + newSleeveEntries + ' new entries\n';
       message += '🧱 Blankets: ' + newBlanketEntries + ' new entries\n';
+      message += '🧱 MACKs: ' + newMackEntries + ' new entries\n';
       message += '⚡ HV Testers: ' + newHVTesterEntries + ' new entries\n';
       message += '⚡ Phasing Sets: ' + newPhasingSetEntries + ' new entries\n';
       message += '🏥 AED: ' + newAEDEntries + ' new entries\n';
       message += '👤 Employees: ' + newEmployeeEntries + ' new entries\n\n';
       message += '🏗️ Completed in ' + (totalTime / 1000).toFixed(1) + ' seconds';
-      if (newGloveEntries === 0 && newSleeveEntries === 0 && newBlanketEntries === 0 && newHVTesterEntries === 0 && newPhasingSetEntries === 0 && newAEDEntries === 0 && newEmployeeEntries === 0) {
+      if (newGloveEntries === 0 && newSleeveEntries === 0 && newBlanketEntries === 0 && newMackEntries === 0 && newHVTesterEntries === 0 && newPhasingSetEntries === 0 && newAEDEntries === 0 && newEmployeeEntries === 0) {
         message += '\n\nNo changes detected since last save.';
       }
       SpreadsheetApp.getUi().alert(message);
@@ -11031,6 +11080,7 @@ function lookupEmployee(name) {
     gloves: [],
     sleeves: [],
     blankets: [],
+    macks: [],
     hvTesters: [],
     phasingSets: [],
     aeds: []
@@ -11153,6 +11203,27 @@ function lookupEmployee(name) {
         });
       }
     }
+
+    // Find assigned MACKs
+    var macksSheet = ss.getSheetByName(SHEET_MACKS);
+    if (macksSheet && macksSheet.getLastRow() > 1) {
+      var macksData = macksSheet.getDataRange().getValues();
+      for (var m = 1; m < macksData.length; m++) {
+        var mackAssignedTo = String(macksData[m][8] || '').toLowerCase().trim(); // Column I = index 8
+        if (mackAssignedTo.indexOf(searchName) !== -1) {
+          result.macks.push({
+            itemNum: macksData[m][0] || '', // Column A
+            kv: macksData[m][1] || '',       // Column B
+            size: macksData[m][2] || '',     // Column C
+            length: macksData[m][3] || '',   // Column D
+            testDate: formatDateForDisplay(macksData[m][4]), // Column E
+            dateAssigned: formatDateForDisplay(macksData[m][5]), // Column F
+            status: macksData[m][7] || '',  // Column H
+            changeOutDate: formatDateForDisplay(macksData[m][9]) // Column J
+          });
+        }
+      }
+    }
   }
 
   // Collect past assignment history from History sheets (wrapped in try/catch to prevent timeout/errors)
@@ -11164,6 +11235,7 @@ function lookupEmployee(name) {
     result.hvTesterHistory = getEquipmentHistoryForEmployee(ss, SHEET_HV_TESTERS_HISTORY, employeeFullName);
     result.phasingSetHistory = getEquipmentHistoryForEmployee(ss, SHEET_PHASING_SETS_HISTORY, employeeFullName);
     result.aedHistory = getEquipmentHistoryForEmployee(ss, SHEET_AED_HISTORY, employeeFullName);
+    result.mackHistory = getEquipmentHistoryForEmployee(ss, SHEET_MACKS_HISTORY, employeeFullName);
   } catch (histErr) {
     Logger.log('History lookup error (non-fatal): ' + histErr.message);
     // Return result without history rather than failing entirely
@@ -11191,6 +11263,7 @@ function lookupItem(itemType, itemNum) {
     glove: { sheet: SHEET_GLOVES, history: SHEET_GLOVES_HISTORY },
     sleeve: { sheet: SHEET_SLEEVES, history: SHEET_SLEEVES_HISTORY },
     blanket: { sheet: SHEET_BLANKETS, history: SHEET_BLANKETS_HISTORY },
+    mack: { sheet: SHEET_MACKS, history: SHEET_MACKS_HISTORY },
     hv_tester: { sheet: SHEET_HV_TESTERS, history: SHEET_HV_TESTERS_HISTORY },
     phasing_set: { sheet: SHEET_PHASING_SETS, history: SHEET_PHASING_SETS_HISTORY },
     aed: { sheet: SHEET_AED, history: SHEET_AED_HISTORY }
@@ -11280,18 +11353,41 @@ function lookupItem(itemType, itemNum) {
     result.status = item[COLS.AED.STATUS - 1] || '';
     result.assignedTo = item[COLS.AED.ASSIGNED_TO - 1] || '';
     result.notes = item[COLS.AED.NOTES - 1] || '';
+  } else if (itemType === 'mack') {
+    result.kv = item[1] || '';
+    result.size = item[2] || '';
+    result.length = item[3] || '';
+    result.testDate = formatDateForDisplay(item[4]);
+    result.dateAssigned = formatDateForDisplay(item[5]);
+    result.location = item[6] || '';
+    result.status = item[7] || '';
+    result.assignedTo = item[8] || '';
+    result.changeOutDate = formatDateForDisplay(item[9]);
+    result.notes = item[11] || '';
   }
 
   // Get history if available
   result.history = [];
   if (historySheet && historySheet.getLastRow() > 1) {
     var historyData = historySheet.getDataRange().getValues();
+    var headers = historyData[0];
+    var itemColIdx = 1;
+    var locationColIdx = 4;
+    var assignedToColIdx = 5;
+
+    for (var h = 0; h < headers.length; h++) {
+      var head = String(headers[h]).toLowerCase().trim();
+      if (head === 'item #') itemColIdx = h;
+      if (head === 'location') locationColIdx = h;
+      if (head === 'assigned to') assignedToColIdx = h;
+    }
+
     for (var h = 1; h < historyData.length; h++) {
-      if (String(historyData[h][1]).trim() === String(itemNum).trim()) {
+      if (String(historyData[h][itemColIdx]).trim() === String(itemNum).trim()) {
         result.history.push({
           date: formatDateForDisplay(historyData[h][0]),
-          assignedTo: historyData[h][5] || '',
-          location: historyData[h][4] || ''
+          assignedTo: historyData[h][assignedToColIdx] || '',
+          location: historyData[h][locationColIdx] || ''
         });
       }
     }
@@ -11318,17 +11414,48 @@ function getEquipmentHistoryForEmployee(ss, historySheetName, employeeName) {
   if (!sheet || sheet.getLastRow() < 2) return results;
 
   var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+
+  // Dynamically map columns by header name to support different layouts
+  var dateColIdx = 0;
+  var itemNumColIdx = 1;
+  var locationColIdx = 4;
+  var assignedToColIdx = 5;
+
+  for (var h = 0; h < headers.length; h++) {
+    var head = String(headers[h]).toLowerCase().trim();
+    if (head === 'date assigned') dateColIdx = h;
+    if (head === 'item #') itemNumColIdx = h;
+    if (head === 'location') locationColIdx = h;
+    if (head === 'assigned to') assignedToColIdx = h;
+  }
+
   var searchName = employeeName.toLowerCase().trim();
 
   for (var i = 1; i < data.length; i++) {
-    var assignedTo = String(data[i][5] || '').toLowerCase().trim();
+    var assignedTo = String(data[i][assignedToColIdx] || '').toLowerCase().trim();
     if (assignedTo === searchName) {
+      var sizeOrType = '';
+      var itemClass = '';
+
+      if (historySheetName === SHEET_MACKS_HISTORY) {
+        // MACKs: Date Assigned[0], Item#[1], KV[2], Size[3], Length[4], Location[5], Assigned To[6], Notes[7]
+        sizeOrType = String(data[i][3] || '') + ' / ' + String(data[i][4] || ''); // Size / Length
+        itemClass = String(data[i][2] || ''); // KV
+      } else if (historySheetName === SHEET_PHASING_SETS_HISTORY) {
+        sizeOrType = String(data[i][2] || ''); // Model
+        itemClass = String(data[i][3] || '');  // KV
+      } else {
+        sizeOrType = String(data[i][2] || ''); // Size or Type
+        itemClass = String(data[i][3] || '');  // Class
+      }
+
       results.push({
-        date: formatDateForDisplay(data[i][0]),
-        itemNum: String(data[i][1] || ''),
-        sizeOrType: String(data[i][2] || ''),
-        itemClass: String(data[i][3] || ''),
-        location: String(data[i][4] || '')
+        date: formatDateForDisplay(data[i][dateColIdx]),
+        itemNum: String(data[i][itemNumColIdx] || ''),
+        sizeOrType: sizeOrType,
+        itemClass: itemClass,
+        location: String(data[i][locationColIdx] || '')
       });
     }
   }
@@ -11357,6 +11484,7 @@ function lookupEmployeeHistory(name) {
     result.hvTesterHistory = getEquipmentHistoryForEmployee(ss, SHEET_HV_TESTERS_HISTORY, name);
     result.phasingSetHistory = getEquipmentHistoryForEmployee(ss, SHEET_PHASING_SETS_HISTORY, name);
     result.aedHistory = getEquipmentHistoryForEmployee(ss, SHEET_AED_HISTORY, name);
+    result.mackHistory = getEquipmentHistoryForEmployee(ss, SHEET_MACKS_HISTORY, name);
     return result;
   } catch (e) {
     Logger.log('lookupEmployeeHistory error: ' + e.message);
@@ -11422,7 +11550,8 @@ function getAllEmployeeAssignments() {
     { name: SHEET_BLANKET_SWAPS, col: COLS.BLANKET_SWAPS.CURRENT_ITEM - 1 },
     { name: SHEET_HV_TESTER_SWAPS, col: 1 },
     { name: SHEET_PHASING_SET_SWAPS, col: 1 },
-    { name: SHEET_AED_SWAPS, col: 1 }
+    { name: SHEET_AED_SWAPS, col: 1 },
+    { name: SHEET_MACK_SWAPS, col: 1 }
   ];
 
   for (var sw = 0; sw < swapSheets.length; sw++) {
@@ -11493,6 +11622,7 @@ function getAllEmployeeAssignments() {
   collectItems(SHEET_HV_TESTERS, 'HV Tester', COLS.HV_TESTERS);
   collectItems(SHEET_PHASING_SETS, 'Phasing Set', COLS.PHASING_SETS);
   collectItems(SHEET_AED, 'AED', COLS.AED);
+  collectItems(SHEET_MACKS, 'MACK', { ITEM_NUM: 1, CLASS: 2, SIZE: 3, TYPE: 4, DATE_ASSIGNED: 6, STATUS: 8, ASSIGNED_TO: 9, CHANGE_OUT_DATE: 10 });
 
   // Filter to only employees with items, sort alphabetically
   var result = [];
@@ -16395,17 +16525,21 @@ function buildSheets() {
     { name: SHEET_GLOVES, headers: ['Glove', 'Size', 'Class', 'Test Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'] },
     { name: SHEET_SLEEVES, headers: ['Sleeve', 'Size', 'Class', 'Test Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'] },
     { name: SHEET_BLANKETS, headers: ['Blanket', 'Type', 'Class', 'Test Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'] },
+    { name: SHEET_MACKS, headers: ['MACK', 'KV', 'Size', 'Length', 'Test Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'] },
     { name: SHEET_HV_TESTERS, headers: ['HV Tester', 'Model', 'KV', 'Serial #', 'Calibration Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'] },
     { name: SHEET_PHASING_SETS, headers: ['Phasing Set', 'Model', 'KV', 'Serial #', 'Calibration Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'] },
     { name: SHEET_GLOVE_SWAPS, headers: ['Employee', 'Item Number', 'Size', 'Date Assigned', 'Change Out Date', 'Days Left', 'Pick List', 'Status', 'Picked', 'Date Changed'] },
     { name: SHEET_SLEEVE_SWAPS, headers: ['Employee', 'Item Number', 'Size', 'Date Assigned', 'Change Out Date', 'Days Left', 'Pick List', 'Status', 'Picked', 'Date Changed'] },
     { name: SHEET_BLANKET_SWAPS, headers: ['Employee', 'Item Number', 'Type', 'Date Assigned', 'Change Out Date', 'Days Left', 'Pick List', 'Status', 'Picked', 'Date Changed'] },
+    { name: SHEET_MACK_SWAPS, headers: ['Employee', 'Item Number', 'KV', 'Size', 'Length', 'Date Assigned', 'Change Out Date', 'Days Left', 'Pick List', 'Status', 'Picked', 'Date Changed'] },
     { name: SHEET_HV_TESTER_SWAPS, headers: ['Employee', 'Item Number', 'Model', 'Date Assigned', 'Change Out Date', 'Days Left', 'Pick List', 'Status', 'Picked', 'Date Changed'] },
     { name: SHEET_PHASING_SET_SWAPS, headers: ['Employee', 'Item Number', 'Model', 'Date Assigned', 'Change Out Date', 'Days Left', 'Pick List', 'Status', 'Picked', 'Date Changed'] },
     { name: SHEET_AED, headers: ['AED', 'Model', '', 'Pad Expiration', 'Date Assigned', 'Location', 'Status', 'Assigned To', '', 'Picked For', 'Notes'] },
     { name: SHEET_AED_SWAPS, headers: ['Item #', 'Model', 'Date Assigned', 'Pad Expiration', 'Days Left', 'Location', 'Assigned To', 'Status', 'Replacement Pads', 'Notes'] },
-    { name: SHEET_PURCHASE_NEEDS, headers: ['Item Type', 'Size', 'Class', 'Quantity Needed', 'Reason', 'Status/Notes'] },
-    { name: SHEET_INVENTORY_REPORTS, headers: null, customSetup: true }
+    { name: SHEET_GROUNDS, headers: ['Serial #', 'Type', 'Size', 'KV', 'Length', 'Test Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'] },
+    { name: SHEET_GROUND_SWAPS, headers: ['Serial #', 'Type', 'Size', 'KV', 'Length', 'Last Test Date', 'Test Due Date', 'Days Left', 'Location', 'Assigned To', 'Status'] },
+    { name: SHEET_HOT_STICKS, headers: ['Item #', 'Type', 'Length', 'Test Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'] },
+    { name: SHEET_HOT_STICK_SWAPS, headers: ['Item #', 'Type', 'Length', 'Last Test Date', 'Test Due Date', 'Days Left', 'Location', 'Assigned To', 'Status'] }
     // Note: Item History Lookup sheet removed - lookup now displays in popup dialog
   ];
   sheetDefs.forEach(function(def) {
@@ -16445,8 +16579,14 @@ function buildSheets() {
 
         // Header handling - wrapped in try-catch so errors don't prevent formatting
         try {
-          if ([SHEET_EMPLOYEES, SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS, SHEET_HV_TESTERS, SHEET_PHASING_SETS, SHEET_AED].includes(def.name)) {
-            // Only EMPLOYEES needs header management - skip for Gloves/Sleeves/Blankets/HV Testers/Phasing Sets
+          if ([
+            SHEET_EMPLOYEES, SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS, SHEET_MACKS, 
+            SHEET_HV_TESTERS, SHEET_PHASING_SETS, SHEET_AED,
+            SHEET_GLOVE_SWAPS, SHEET_SLEEVE_SWAPS, SHEET_BLANKET_SWAPS, SHEET_MACK_SWAPS, 
+            SHEET_HV_TESTER_SWAPS, SHEET_PHASING_SET_SWAPS, SHEET_AED_SWAPS, SHEET_RECLAIMS,
+            SHEET_GROUNDS, SHEET_GROUND_SWAPS, SHEET_HOT_STICKS, SHEET_HOT_STICK_SWAPS
+          ].includes(def.name)) {
+            // Only EMPLOYEES needs header management - skip for Gloves/Sleeves/Blankets/MACKs/HV Testers/Phasing Sets
             if (def.name === SHEET_EMPLOYEES) {
               Logger.log('buildSheets: Handling headers for "' + def.name + '"');
               // For Employees, ensure all headers exist (add missing ones without clearing data)
@@ -16492,8 +16632,11 @@ function buildSheets() {
           Logger.log('buildSheets: Header handling error for "' + def.name + '": ' + headerErr.message + ' - proceeding to formatting');
         }
       }
-      // Formatting for Employees, Gloves, Sleeves, Blankets, HV Testers, Phasing Sets
-      if ([SHEET_EMPLOYEES, SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS, SHEET_HV_TESTERS, SHEET_PHASING_SETS].includes(def.name)) {
+      // Formatting for Employees, Gloves, Sleeves, Blankets, MACKs, HV Testers, Phasing Sets, Grounds, Hot Sticks
+      if ([
+        SHEET_EMPLOYEES, SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS, SHEET_MACKS, 
+        SHEET_HV_TESTERS, SHEET_PHASING_SETS, SHEET_GROUNDS, SHEET_HOT_STICKS
+      ].includes(def.name)) {
         Logger.log('buildSheets: Formatting sheet "' + def.name + '"');
         sheet.setFrozenRows(1);
         sheet.setFrozenColumns(1);
@@ -16563,7 +16706,7 @@ function buildSheets() {
           sheet.setColumnWidth(11, 200);
         }
 
-        if (def.name === SHEET_HV_TESTERS || def.name === SHEET_PHASING_SETS) {
+        if (def.name === SHEET_HV_TESTERS || def.name === SHEET_PHASING_SETS || def.name === SHEET_MACKS) {
           var totalRows = Math.max(lastRow, 1);
           // Ensure sheet has at least 12 columns for HV Testers/Phasing Sets (A-L)
           var currentMaxCol = sheet.getMaxColumns();
@@ -16592,8 +16735,8 @@ function buildSheets() {
           sheet.setColumnWidth(12, 200);
         }
       }
-      // Formatting for Glove Swaps, Sleeve Swaps, Blanket Swaps, HV Tester Swaps, Phasing Set Swaps, AED Swaps
-      if ([SHEET_GLOVE_SWAPS, SHEET_SLEEVE_SWAPS, SHEET_BLANKET_SWAPS, SHEET_HV_TESTER_SWAPS, SHEET_PHASING_SET_SWAPS, SHEET_AED_SWAPS].includes(def.name)) {
+      // Formatting for Glove Swaps, Sleeve Swaps, Blanket Swaps, MACK Swaps, HV Tester Swaps, Phasing Set Swaps, AED Swaps
+      if ([SHEET_GLOVE_SWAPS, SHEET_SLEEVE_SWAPS, SHEET_BLANKET_SWAPS, SHEET_MACK_SWAPS, SHEET_HV_TESTER_SWAPS, SHEET_PHASING_SET_SWAPS, SHEET_AED_SWAPS].includes(def.name)) {
         var swapSheet = sheet;
         var swapHeaders = def.headers.length;
         swapSheet.getRange(1, 1, 1, swapHeaders).setHorizontalAlignment('center');
@@ -16624,6 +16767,9 @@ function buildSheets() {
 
   // Custom setup for Blankets History sheet
   ensureBlanketHistorySheet();
+
+  // Custom setup for MACKs History sheet
+  ensureMackHistorySheet();
 
   // Custom setup for AED History sheet
   ensureAEDHistorySheet();
@@ -16663,6 +16809,28 @@ function buildSheets() {
   } catch (blanketValidationError) {
     Logger.log('buildSheets: Warning - Blankets validation failed: ' + blanketValidationError.message);
     // Continue with the rest of the function
+  }
+
+  // Add dropdown validations for MACKs sheet
+  try {
+    var macksSheet = ss.getSheetByName(SHEET_MACKS);
+    if (macksSheet) {
+      // Ensure sheet has enough rows for validation (at least 101 rows total)
+      var mackSheetRows = macksSheet.getMaxRows();
+      if (mackSheetRows < 101) {
+        macksSheet.insertRowsAfter(Math.max(1, mackSheetRows), 101 - mackSheetRows);
+      }
+      var mackRowCount = 100; // Apply validation to 100 rows starting at row 2
+
+      // Status dropdown (Column H) - same as blankets
+      var mackStatusRule = SpreadsheetApp.newDataValidation()
+        .requireValueInList(['In Service', 'On Shelf', 'In Testing', 'Failed', 'Lost'], true)
+        .setAllowInvalid(false)
+        .build();
+      macksSheet.getRange(2, 8, mackRowCount, 1).setDataValidation(mackStatusRule);
+    }
+  } catch (mackValidationError) {
+    Logger.log('buildSheets: Warning - MACKs validation failed: ' + mackValidationError.message);
   }
 
   // Add dropdown validations for HV Testers sheet
@@ -16824,62 +16992,91 @@ function buildSheets() {
  * Called automatically before generating reports and after building sheets.
  */
 function fixChangeOutDatesSilent() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var tz = ss.getSpreadsheetTimeZone();
-  var sheetsToFix = ['Gloves', 'Sleeves'];
-  var totalFixed = 0;
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var tz = ss.getSpreadsheetTimeZone();
+    var sheetsToFix = ['Gloves', 'Sleeves'];
+    var totalFixed = 0;
 
-  sheetsToFix.forEach(function(sheetName) {
-    var sheet = ss.getSheetByName(sheetName);
-    if (!sheet || sheet.getLastRow() < 2) return;
-
-    var isSleeve = (sheetName === 'Sleeves');
-    var data = sheet.getDataRange().getValues();
-
-    // Column indices use COLS.INVENTORY constants (12-col layout with ESL ID at B)
-    for (var i = 1; i < data.length; i++) {
-      var dateAssigned = data[i][COLS.INVENTORY.DATE_ASSIGNED - 1];     // Column F (index 5)
-      var location = data[i][COLS.INVENTORY.LOCATION - 1];               // Column G (index 6)
-      var assignedTo = data[i][COLS.INVENTORY.ASSIGNED_TO - 1];          // Column I (index 8)
-      var currentChangeOut = data[i][COLS.INVENTORY.CHANGE_OUT_DATE - 1]; // Column J (index 9)
-
-      if (!dateAssigned) continue;
-
-      var correctChangeOut = calculateChangeOutDate(dateAssigned, location, assignedTo, isSleeve);
-      if (!correctChangeOut) continue;
-
-      // Always update to ensure correct value - simpler and more reliable
-      var cell = sheet.getRange(i + 1, COLS.INVENTORY.CHANGE_OUT_DATE);  // Column J (1-based)
-      if (correctChangeOut === 'N/A') {
-        if (currentChangeOut !== 'N/A') {
-          cell.setNumberFormat('@');
-          cell.setValue('N/A');
-          totalFixed++;
-        }
-      } else {
-        // Format both dates for comparison
-        var correctStr = Utilities.formatDate(correctChangeOut, tz, 'MM/dd/yyyy');
-        var currentStr = '';
-
-        if (currentChangeOut instanceof Date) {
-          currentStr = Utilities.formatDate(currentChangeOut, tz, 'MM/dd/yyyy');
-        } else if (typeof currentChangeOut === 'number' && currentChangeOut > 0) {
-          // Serial date number
-          var tempDate = new Date((currentChangeOut - 25569) * 86400 * 1000);
-          currentStr = Utilities.formatDate(tempDate, tz, 'MM/dd/yyyy');
+    sheetsToFix.forEach(function(sheetName) {
+      try {
+        var sheet = ss.getSheetByName(sheetName);
+        if (!sheet) return;
+        
+        var isSleeve = (sheetName === 'Sleeves');
+        var data = [];
+        try {
+          data = sheet.getDataRange().getValues();
+        } catch (dataErr) {
+          Logger.log('fixChangeOutDatesSilent: Warning - could not get data range values for ' + sheetName + ': ' + dataErr.message);
+          return;
         }
 
-        if (correctStr !== currentStr) {
-          cell.setNumberFormat('MM/dd/yyyy');
-          cell.setValue(correctChangeOut);
-          totalFixed++;
+        if (data.length < 2) return;
+
+        // Column indices use COLS.INVENTORY constants (12-col layout with ESL ID at B)
+        for (var i = 1; i < data.length; i++) {
+          try {
+            var dateAssigned = data[i][COLS.INVENTORY.DATE_ASSIGNED - 1];     // Column F (index 5)
+            var location = data[i][COLS.INVENTORY.LOCATION - 1];               // Column G (index 6)
+            var assignedTo = data[i][COLS.INVENTORY.ASSIGNED_TO - 1];          // Column I (index 8)
+            var currentChangeOut = data[i][COLS.INVENTORY.CHANGE_OUT_DATE - 1]; // Column J (index 9)
+
+            if (!dateAssigned) continue;
+
+            var correctChangeOut = calculateChangeOutDate(dateAssigned, location, assignedTo, isSleeve);
+            if (!correctChangeOut) continue;
+
+            // Always update to ensure correct value - simpler and more reliable
+            var cell = sheet.getRange(i + 1, COLS.INVENTORY.CHANGE_OUT_DATE);  // Column J (1-based)
+            
+            try {
+              if (correctChangeOut === 'N/A') {
+                if (currentChangeOut !== 'N/A') {
+                  try { cell.setNumberFormat('@'); } catch (fmtErr) {}
+                  try { cell.setValue('N/A'); } catch (valErr) {
+                    Logger.log('fixChangeOutDatesSilent: Could not set N/A for row ' + (i + 1) + ' on sheet ' + sheetName + ': ' + valErr.message);
+                  }
+                  totalFixed++;
+                }
+              } else {
+                // Format both dates for comparison
+                var correctStr = Utilities.formatDate(correctChangeOut, tz, 'MM/dd/yyyy');
+                var currentStr = '';
+
+                if (currentChangeOut instanceof Date) {
+                  currentStr = Utilities.formatDate(currentChangeOut, tz, 'MM/dd/yyyy');
+                } else if (typeof currentChangeOut === 'number' && currentChangeOut > 0) {
+                  // Serial date number
+                  var tempDate = new Date((currentChangeOut - 25569) * 86400 * 1000);
+                  currentStr = Utilities.formatDate(tempDate, tz, 'MM/dd/yyyy');
+                }
+
+                if (correctStr !== currentStr) {
+                  try { cell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) {}
+                  try { cell.setValue(correctChangeOut); } catch (valErr) {
+                    Logger.log('fixChangeOutDatesSilent: Could not set date for row ' + (i + 1) + ' on sheet ' + sheetName + ': ' + valErr.message);
+                  }
+                  totalFixed++;
+                }
+              }
+            } catch (innerErr) {
+              Logger.log('fixChangeOutDatesSilent: Error updating change out cell for row ' + (i + 1) + ' on sheet ' + sheetName + ': ' + innerErr.message);
+            }
+          } catch (rowErr) {
+            Logger.log('fixChangeOutDatesSilent: Warning - could not process row ' + (i + 1) + ' on sheet ' + sheetName + ': ' + rowErr.message);
+          }
         }
+      } catch (sheetErr) {
+        Logger.log('fixChangeOutDatesSilent: Warning - error processing sheet ' + sheetName + ': ' + sheetErr.message);
       }
-    }
-  });
+    });
 
-  if (totalFixed > 0) {
-    Logger.log('fixChangeOutDatesSilent: Fixed ' + totalFixed + ' Change Out Dates');
+    if (totalFixed > 0) {
+      Logger.log('fixChangeOutDatesSilent: Fixed ' + totalFixed + ' Change Out Dates');
+    }
+  } catch (globalErr) {
+    Logger.log('fixChangeOutDatesSilent: Global error: ' + globalErr.message);
   }
 }
 
@@ -16914,10 +17111,12 @@ function generateAllReportsPart1() {
 
   fixChangeOutDatesSilent();
   fixBlanketChangeOutDatesSilent();
+  fixMackChangeOutDatesSilent();
   syncInventoryLocations();
   generateGloveSwaps();
   generateSleeveSwaps();
   generateBlanketSwaps(true);
+  generateMackSwaps(true);
 
   logEvent('generateAllReports Part 1: Complete.');
   return { success: true };
@@ -16945,8 +17144,8 @@ function generateAllReportsPart2() {
   generateHVTesterSwaps(true);
   generatePhasingSetSwaps(true);
   generateAEDSwaps(true);
-  updatePurchaseNeeds();
-  updateInventoryReports();
+  generateGroundSwaps(true);
+  generateHotStickSwaps(true);
 
   logEvent('generateAllReports Part 2: Complete.');
   return {
@@ -17030,6 +17229,7 @@ function generateAllReportsLegacy() {
     // First, ensure all Change Out Dates are correct (in case triggers didn't fire)
     fixChangeOutDatesSilent();
     fixBlanketChangeOutDatesSilent();
+    fixMackChangeOutDatesSilent();
 
     // Sync inventory locations with current employee data
     syncInventoryLocations();
@@ -17037,6 +17237,7 @@ function generateAllReportsLegacy() {
     generateGloveSwaps();
     generateSleeveSwaps();
     generateBlanketSwaps(true);  // Silent mode for batch operations
+    generateMackSwaps(true);
 
     // Run pick list upgrades AFTER generating glove/sleeve swap reports
     // Upgrades "In Testing" or "Need to Purchase" items to available "On Shelf" items
@@ -17057,10 +17258,6 @@ function generateAllReportsLegacy() {
 
     // Generate AED pad replacement report (90-day lookahead)
     generateAEDSwaps(true);  // Silent mode for batch operations
-
-    // Update Purchase Needs
-    updatePurchaseNeeds();
-    updateInventoryReports();
 
     // Update Training Tracking crew leads to reflect current assignments
     // Only updates current and future months (preserves historical data)
@@ -17133,7 +17330,7 @@ function generateAllReportsLegacy() {
  * Preserves manual Pick List edits before regenerating swap sheets.
  * Scans for cells with light blue background (#e3f2fd) in Pick List column.
  * Returns a map of employee name (lowercase) to pick list data.
- * @param {Sheet} swapSheet - The Glove/Sleeve Swaps sheet
+ * @param {Sheet} swapSheet - The Glove/Sleeve/Blanket/MACK Swaps sheet
  * @return {Object} Map of employeeName -> { pickListNum, status }
  */
 function preserveManualPickLists(swapSheet) {
@@ -17145,7 +17342,8 @@ function preserveManualPickLists(swapSheet) {
 
   try {
     var lastRow = swapSheet.getLastRow();
-    var lastCol = Math.min(swapSheet.getLastColumn(), 23);  // Only scan up to column W
+    var isMack = swapSheet.getName() === SHEET_MACK_SWAPS;
+    var lastCol = isMack ? Math.min(swapSheet.getLastColumn(), 25) : Math.min(swapSheet.getLastColumn(), 23);  // Scan up to hidden columns
 
     // Get all data and backgrounds for the entire sheet
     var dataRange = swapSheet.getRange(1, 1, lastRow, lastCol);
@@ -17155,23 +17353,25 @@ function preserveManualPickLists(swapSheet) {
     // Light blue color for manual edits
     var manualEditColor = '#e3f2fd';
 
+    var pickListIdx = isMack ? 8 : 6;  // Column I (index 8) for MACKs, Column G (index 6) for others
+    var statusIdx = isMack ? 9 : 7;    // Column J (index 9) for MACKs, Column H (index 7) for others
+    var daysLeftIdx = isMack ? 7 : 5;  // Column H (index 7) for MACKs, Column F (index 5) for others
+
     for (var i = 0; i < values.length; i++) {
       var row = values[i];
       var bgRow = backgrounds[i];
 
       // Column A (index 0) = Employee name
       // Column B (index 1) = Current Item #
-      // Column G (index 6) = Pick List Item #
-      // Column H (index 7) = Status
       var employeeName = (row[0] || '').toString().trim();
       var currentItemNum = (row[1] || '').toString().trim();
-      var pickListNum = (row[6] || '').toString().trim();
-      var status = (row[7] || '').toString().trim();
-      var pickListBg = (bgRow[6] || '').toString().toLowerCase();
+      var pickListNum = (row[pickListIdx] || '').toString().trim();
+      var status = (row[statusIdx] || '').toString().trim();
+      var pickListBg = (bgRow[pickListIdx] || '').toString().toLowerCase();
 
       // Skip header rows, system placeholder names, and lost items/employees
       var employeeNameLower = employeeName.toLowerCase();
-      var daysLeft = (row[5] || '').toString().trim().toUpperCase();
+      var daysLeft = (row[daysLeftIdx] || '').toString().trim().toUpperCase();
       var skipNames = [
         'lost', 'unknown', 'n/a', 'on shelf', 'in testing', 'packed for delivery',
         'packed for testing', 'failed rubber', 'not repairable', 'ready for test',
@@ -17211,12 +17411,12 @@ function preserveManualPickLists(swapSheet) {
 /**
  * Restores manual Pick List edits after regenerating swap sheets.
  * Searches for employee names/keys in the preserved map and restores their manual picks.
- * @param {Sheet} swapSheet - The regenerated Glove/Sleeve Swaps sheet
+ * @param {Sheet} swapSheet - The regenerated Glove/Sleeve/Blanket/MACK Swaps sheet
  * @param {Object} manualPicks - Map from preserveManualPickLists
  * @param {number} startRow - First data row to search (1-based, after headers)
  * @param {number} endRow - Last row to search (1-based)
  */
-function restoreManualPickLists(swapSheet, manualPicks, startRow, endRow) {
+function restoreManualPickLists(swapSheet, manualPicks, startRow, endRow, inventoryData) {
   if (!swapSheet || !manualPicks || Object.keys(manualPicks).length === 0) {
     return;
   }
@@ -17227,11 +17427,18 @@ function restoreManualPickLists(swapSheet, manualPicks, startRow, endRow) {
 
     if (numRows <= 0) return;
 
+    var isMack = swapSheet.getName() === SHEET_MACK_SWAPS;
+    var colsToRead = isMack ? 10 : 8; // Column A-J (10) for MACKs, A-H (8) for others
+    var pickListCol = isMack ? 9 : 7; // Column I (9) for MACKs, Column G (7) for others
+    var statusCol = isMack ? 10 : 8;  // Column J (10) for MACKs, Column H (8) for others
+    var daysLeftIdx = isMack ? 7 : 5; // Column H (index 7) for MACKs, Column F (index 5) for others
+
     // Get data for the range we're checking
-    var dataRange = swapSheet.getRange(startRow, 1, numRows, 8);  // A-H columns
+    var dataRange = swapSheet.getRange(startRow, 1, numRows, colsToRead);
     var values = dataRange.getValues();
 
     var restoredCount = 0;
+    var C_CLASS = (swapSheet.getName() === SHEET_BLANKET_SWAPS) ? COLS.BLANKETS.CLASS - 1 : COLS.INVENTORY.CLASS - 1;
 
     for (var i = 0; i < values.length; i++) {
       var row = values[i];
@@ -17240,7 +17447,7 @@ function restoreManualPickLists(swapSheet, manualPicks, startRow, endRow) {
 
       // Skip header rows, system placeholder names, and lost items/employees
       var employeeNameLower = employeeName.toLowerCase();
-      var daysLeft = (row[5] || '').toString().trim().toUpperCase();
+      var daysLeft = (row[daysLeftIdx] || '').toString().trim().toUpperCase();
       var skipNames = [
         'lost', 'unknown', 'n/a', 'on shelf', 'in testing', 'packed for delivery',
         'packed for testing', 'failed rubber', 'not repairable', 'ready for test',
@@ -17251,7 +17458,8 @@ function restoreManualPickLists(swapSheet, manualPicks, startRow, endRow) {
           employeeName.indexOf('STAGE') !== -1 ||
           employeeName.indexOf('🔍') !== -1 ||
           skipNames.indexOf(employeeNameLower) !== -1 ||
-          daysLeft === 'LOST-LOCATE') {
+          daysLeft === 'LOST-LOCATE' ||
+          daysLeft === 'PREV EMP') {
         continue;
       }
 
@@ -17260,15 +17468,56 @@ function restoreManualPickLists(swapSheet, manualPicks, startRow, endRow) {
       var preserved = manualPicks[empKey] || manualPicks[fallbackKey];
 
       // Check if this employee/item has a preserved manual pick
-      if (preserved) {
+      if (preserved && preserved.pickListNum && preserved.pickListNum !== '—') {
+        // Skip validation check for MACKs since they do not have a Class column
+        if (isMack) {
+          var actualRow = startRow + i;
+          swapSheet.getRange(actualRow, pickListCol).setValue(preserved.pickListNum);
+          swapSheet.getRange(actualRow, statusCol).setValue(preserved.status);
+          swapSheet.getRange(actualRow, pickListCol).setBackground(manualEditColor);
+          Logger.log('Restored manual pick for MACK ' + employeeName + ' (item ' + currentItemNum + '): ' + preserved.pickListNum);
+          restoredCount++;
+          continue;
+        }
+
+        // Validate class if inventoryData is provided
+        if (inventoryData) {
+          var targetClass = null;
+          if (daysLeft.indexOf('CL3→CL2') !== -1) {
+            targetClass = 2;
+          } else if (daysLeft.indexOf('CL2→CL3') !== -1) {
+            targetClass = 3;
+          } else {
+            // Normal swap - target class is same as current item's class
+            var currentItem = inventoryData.find(function(item) {
+              return String(item[0]).trim() === String(currentItemNum).trim();
+            });
+            if (currentItem) {
+              targetClass = parseInt(currentItem[C_CLASS], 10);
+            }
+          }
+
+          var preservedItem = inventoryData.find(function(item) {
+            return String(item[0]).trim() === String(preserved.pickListNum).trim();
+          });
+
+          if (preservedItem && targetClass !== null) {
+            var preservedClass = parseInt(preservedItem[C_CLASS], 10);
+            if (preservedClass !== targetClass) {
+              Logger.log('Ignoring preserved manual pick ' + preserved.pickListNum + ' for ' + employeeName + ' because class (' + preservedClass + ') does not match target class (' + targetClass + ')');
+              continue;
+            }
+          }
+        }
+
         var actualRow = startRow + i;
 
         // Restore the Pick List item number and status
-        swapSheet.getRange(actualRow, 7).setValue(preserved.pickListNum);  // Column G
-        swapSheet.getRange(actualRow, 8).setValue(preserved.status);       // Column H
+        swapSheet.getRange(actualRow, pickListCol).setValue(preserved.pickListNum);
+        swapSheet.getRange(actualRow, statusCol).setValue(preserved.status);
 
         // Reapply the light blue background
-        swapSheet.getRange(actualRow, 7).setBackground(manualEditColor);
+        swapSheet.getRange(actualRow, pickListCol).setBackground(manualEditColor);
 
         Logger.log('Restored manual pick for ' + employeeName + ' (item ' + currentItemNum + '): ' + preserved.pickListNum);
         restoredCount++;
@@ -17348,6 +17597,8 @@ function generateSwaps(itemType) {
     var jobNumColIdx = 3; // Default fallback (column D)
     var classificationColIdx = 13; // Default fallback (column N)
     var hireDateColIdx = -1; // Hire Date column for pending detection
+    var gloveSizeColIdx = -1;
+    var sleeveSizeColIdx = -1;
     for (var h = 0; h < empHeaders.length; h++) {
       var headerLower = String(empHeaders[h]).trim().toLowerCase();
       if (headerLower === 'location') {
@@ -17361,6 +17612,12 @@ function generateSwaps(itemType) {
       }
       if (headerLower === 'hire date') {
         hireDateColIdx = h;
+      }
+      if (headerLower === 'glove size') {
+        gloveSizeColIdx = h;
+      }
+      if (headerLower === 'sleeve size') {
+        sleeveSizeColIdx = h;
       }
     }
 
@@ -17490,7 +17747,10 @@ function generateSwaps(itemType) {
     }
 
     var itemLabel = isGloves ? 'Glove' : 'Sleeve';
-    var sizeColIndex = isGloves ? 8 : 9; // Glove Size in col I (8), Sleeve Size in col J (9)
+    var sizeColIndex = isGloves ? gloveSizeColIdx : sleeveSizeColIdx;
+    if (sizeColIndex === -1) {
+      sizeColIndex = isGloves ? 7 : 8; // Fallback to Glove Size (7 = Col H) / Sleeve Size (8 = Col I)
+    }
 
     // Build location-to-crew-lead map for fallback when AssignedTo is a city name (old-style assignment)
     // Old inventory used location name ("Rapelje", "Bozeman") as AssignedTo identifier instead of employee name.
@@ -18241,16 +18501,20 @@ function generateSwaps(itemType) {
         }
 
         if (!pickListItemData && preserved && preserved.pickListNum && preserved.pickListNum !== '—') {
-          pickListValue = preserved.pickListNum;
-          pickListStatus = preserved.status;
-          assignedItemNums.add(preserved.pickListNum);
-          
           var match = inventoryData.find(function(item) {
             return String(item[0]).trim() === String(preserved.pickListNum).trim();
           });
           if (match) {
-            pickListItemData = match;
-            pickListStatusRaw = (match[C_STATUS] || '').toString().toLowerCase();
+            var preservedClass = parseInt(match[C_CLASS], 10);
+            if (preservedClass === reclaim.targetClass) {
+              pickListValue = preserved.pickListNum;
+              pickListStatus = preserved.status;
+              assignedItemNums.add(preserved.pickListNum);
+              pickListItemData = match;
+              pickListStatusRaw = (match[C_STATUS] || '').toString().toLowerCase();
+            } else {
+              Logger.log('Ignoring preserved manual pick ' + preserved.pickListNum + ' for ' + reclaim.employee + ' because class (' + preservedClass + ') does not match target class (' + reclaim.targetClass + ')');
+            }
           }
         }
 
@@ -18467,7 +18731,7 @@ function generateSwaps(itemType) {
           break;
         }
       }
-      restoreManualPickLists(swapSheet, manualPicks, firstDataRow, swapSheet.getLastRow());
+      restoreManualPickLists(swapSheet, manualPicks, firstDataRow, swapSheet.getLastRow(), inventoryData);
     }
 
     try {
@@ -21504,9 +21768,17 @@ function fixBlanketChangeOutDatesSilent() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(SHEET_BLANKETS);
 
-  if (!sheet || sheet.getLastRow() < 2) return 0;
+  if (!sheet) return 0;
 
-  var data = sheet.getDataRange().getValues();
+  var data = [];
+  try {
+    data = sheet.getDataRange().getValues();
+  } catch (e) {
+    Logger.log('fixBlanketChangeOutDatesSilent: Warning - could not read data range: ' + e.message);
+    return 0;
+  }
+
+  if (data.length < 2) return 0;
   var fixed = 0;
 
   // Column indices (0-based): D=3 (Test Date), F=5 (Location), H=7 (Assigned To), I=8 (Change Out Date)
@@ -21523,20 +21795,24 @@ function fixBlanketChangeOutDatesSilent() {
 
     // Update if different
     var cell = sheet.getRange(i + 1, 9);  // Column I (1-based row)
-    if (correctChangeOut === 'N/A') {
-      if (currentChangeOut !== 'N/A') {
-        cell.setNumberFormat('@');
-        cell.setValue('N/A');
-        fixed++;
+    try {
+      if (correctChangeOut === 'N/A') {
+        if (currentChangeOut !== 'N/A') {
+          try { cell.setNumberFormat('@'); } catch (fmtErr) {}
+          cell.setValue('N/A');
+          fixed++;
+        }
+      } else {
+        // Compare dates
+        var currentDate = currentChangeOut instanceof Date ? currentChangeOut : new Date(currentChangeOut);
+        if (isNaN(currentDate.getTime()) || currentDate.getTime() !== correctChangeOut.getTime()) {
+          try { cell.setNumberFormat('mm/dd/yyyy'); } catch (fmtErr) {}
+          cell.setValue(correctChangeOut);
+          fixed++;
+        }
       }
-    } else {
-      // Compare dates
-      var currentDate = currentChangeOut instanceof Date ? currentChangeOut : new Date(currentChangeOut);
-      if (isNaN(currentDate.getTime()) || currentDate.getTime() !== correctChangeOut.getTime()) {
-        cell.setNumberFormat('mm/dd/yyyy');
-        cell.setValue(correctChangeOut);
-        fixed++;
-      }
+    } catch (cellErr) {
+      Logger.log('fixBlanketChangeOutDatesSilent: Warning - could not update Change Out Date for row ' + (i + 1) + ': ' + cellErr.message);
     }
   }
 
@@ -21587,6 +21863,38 @@ function ensureBlanketHistorySheet() {
 }
 
 /**
+ * Ensures the MACKs History sheet exists with proper structure.
+ * Creates the sheet if it doesn't exist.
+ */
+function ensureMackHistorySheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var historySheet = ss.getSheetByName(SHEET_MACKS_HISTORY);
+
+  if (!historySheet) {
+    historySheet = ss.insertSheet(SHEET_MACKS_HISTORY);
+    var headers = ['Date Assigned', 'Item #', 'KV', 'Size', 'Length', 'Location', 'Assigned To', 'Notes'];
+    historySheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    historySheet.getRange(1, 1, 1, headers.length)
+      .setFontWeight('bold')
+      .setBackground('#004d40')  // Teal for MACKs
+      .setFontColor('#ffffff')
+      .setHorizontalAlignment('center');
+    historySheet.setFrozenRows(1);
+    historySheet.setColumnWidth(1, 100); // Date Assigned
+    historySheet.setColumnWidth(2, 90);  // Item # (ESL ID)
+    historySheet.setColumnWidth(3, 70);  // KV
+    historySheet.setColumnWidth(4, 70);  // Size
+    historySheet.setColumnWidth(5, 70);  // Length
+    historySheet.setColumnWidth(6, 120); // Location
+    historySheet.setColumnWidth(7, 150); // Assigned To
+    historySheet.setColumnWidth(8, 200); // Notes
+    Logger.log('Created MACKs History sheet');
+  }
+
+  return historySheet;
+}
+
+/**
  * Saves a blanket assignment to the Blankets History sheet.
  *
  * @param {string} itemNumber - The blanket item number
@@ -21627,6 +21935,238 @@ function saveBlanketAssignmentToHistory(itemNumber, type, blanketClass, location
     }
     var bgColor = colorToggle ? HISTORY_COLOR_BLANKET_1 : HISTORY_COLOR_BLANKET_2;
     historySheet.getRange(i + 2, 1, 1, 6).setBackground(bgColor);
+  }
+}
+
+/**
+ * Calculates the MACK Change Out Date based on Test Date.
+ * MACKs have a 12-month (1 year) test interval from the test date.
+ *
+ * @param {Date|string} testDate - The last electrical test date
+ * @param {string} assignedTo - Who the MACK is assigned to (for N/A logic)
+ * @param {string} location - The location (for N/A logic)
+ * @return {Date|string|null} The calculated change out date, 'N/A', or null if invalid
+ */
+function calculateMackChangeOut(testDate, assignedTo, location) {
+  if (!testDate) return null;
+
+  var assignedToLower = (assignedTo || '').toString().trim().toLowerCase();
+  var locationLower = (location || '').toString().trim().toLowerCase();
+
+  // Lost, Failed, Retired items get N/A
+  if (assignedToLower === 'lost' || assignedToLower === 'failed' ||
+      assignedToLower === 'retired' || locationLower === 'previous employee' ||
+      locationLower === 'destroyed' || locationLower === 'lost') {
+    return 'N/A';
+  }
+
+  var d = new Date(testDate);
+  if (isNaN(d.getTime())) return null;
+
+  // MACKs: Test Date + 12 months
+  d.setMonth(d.getMonth() + INTERVAL_MACK_TEST);
+  return d;
+}
+
+/**
+ * Recalculates all Change Out Dates in the MACKs sheet.
+ * Called from Glove Manager menu → 🔧 Utilities → Fix MACK Change Out Dates
+ */
+function fixMackChangeOutDates() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+
+  var result = ui.alert(
+    'Recalculate MACK Change Out Dates',
+    'This will recalculate ALL Change Out Dates in the MACKs sheet.\n\n' +
+    'MACKs: Test Date + 12 months\n\n' +
+    'Continue?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (result !== ui.Button.YES) return;
+
+  var fixed = fixMackChangeOutDatesSilent();
+
+  ui.alert('✅ MACK Change Out Dates Updated!\n\n' +
+    'Fixed ' + fixed + ' MACK change out date(s).');
+}
+
+/**
+ * Silently fixes all MACK Change Out Dates without showing any UI prompts.
+ * @return {number} Number of dates fixed
+ */
+function fixMackChangeOutDatesSilent() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_MACKS);
+
+  if (!sheet) return 0;
+
+  var data = [];
+  try {
+    data = sheet.getDataRange().getValues();
+  } catch (e) {
+    Logger.log('fixMackChangeOutDatesSilent: Warning - could not read data range: ' + e.message);
+    return 0;
+  }
+
+  if (data.length < 2) return 0;
+  var fixed = 0;
+
+  // Column indices (0-based): E=4 (Test Date), G=6 (Location), I=8 (Assigned To), J=9 (Change Out Date)
+  for (var i = 1; i < data.length; i++) {
+    var testDate = data[i][4];      // Column E - Test Date
+    var location = data[i][6];       // Column G - Location
+    var assignedTo = data[i][8];     // Column I - Assigned To
+    var currentChangeOut = data[i][9]; // Column J - Change Out Date
+
+    if (!testDate) continue;
+
+    var correctChangeOut = calculateMackChangeOut(testDate, assignedTo, location);
+    if (!correctChangeOut) continue;
+
+    // Update if different
+    var cell = sheet.getRange(i + 1, 10);  // Column J (1-based row)
+    try {
+      if (correctChangeOut === 'N/A') {
+        if (currentChangeOut !== 'N/A') {
+          try { cell.setNumberFormat('@'); } catch (fmtErr) {}
+          cell.setValue('N/A');
+          fixed++;
+        }
+      } else {
+        // Compare dates
+        var currentDate = currentChangeOut instanceof Date ? currentChangeOut : new Date(currentChangeOut);
+        if (isNaN(currentDate.getTime()) || currentDate.getTime() !== correctChangeOut.getTime()) {
+          try { cell.setNumberFormat('mm/dd/yyyy'); } catch (fmtErr) {}
+          cell.setValue(correctChangeOut);
+          fixed++;
+        }
+      }
+    } catch (cellErr) {
+      Logger.log('fixMackChangeOutDatesSilent: Warning - could not update Change Out Date for row ' + (i + 1) + ': ' + cellErr.message);
+    }
+  }
+
+  return fixed;
+}
+
+/**
+ * Handles changes to the Assigned To column (I) in MACKs sheet.
+ * Auto-populates Status (H) and Location (G) based on the assigned value.
+ *
+ * Status values: In Service, On Shelf, In Testing, Failed, Lost
+ */
+function handleMackAssignedToChange(ss, sheet, editedRow, newValue) {
+  if (editedRow < 2) return; // Skip header row
+
+  var lock = null;
+  try {
+    try {
+      lock = LockService.getScriptLock();
+      lock.waitLock(30000);
+    } catch (lockErr) {
+      lock = null;
+    }
+
+    var assignedToCol = 9;  // Column I
+    var actualValue = sheet.getRange(editedRow, assignedToCol).getValue();
+
+    logEvent('handleMackAssignedToChange ENTRY: Row=' + editedRow + ', newValue=' + newValue + ', actualValue=' + actualValue, 'DEBUG');
+
+    var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+    if (!employeesSheet) {
+      logEvent('handleMackAssignedToChange: Employees sheet not found!', 'ERROR');
+      return;
+    }
+
+    var empData = employeesSheet.getDataRange().getValues();
+    var empHeaders = empData[0];
+    var nameColIdx = 0; // Name is always first column (A)
+    var locationColIdx = -1;
+
+    for (var h = 0; h < empHeaders.length; h++) {
+      if (String(empHeaders[h]).trim().toLowerCase() === 'location') {
+        locationColIdx = h;
+        break;
+      }
+    }
+
+    if (locationColIdx === -1) {
+      logEvent('handleMackAssignedToChange: Location column not found in Employees sheet!', 'ERROR');
+      locationColIdx = 1; // Fallback to column B
+    }
+
+    var nameToLocation = {};
+    for (var i = 1; i < empData.length; i++) {
+      var name = (empData[i][nameColIdx] || '').toString().trim().toLowerCase();
+      var loc = empData[i][locationColIdx] || '';
+      if (name) nameToLocation[name] = loc;
+    }
+
+    var assignedTo = (actualValue !== undefined && actualValue !== null && actualValue !== '')
+                     ? actualValue.toString().trim()
+                     : (newValue || '').toString().trim();
+    var assignedToLower = assignedTo.toLowerCase();
+
+    var newStatus = '';
+    var newLocation = '';
+
+    var colStatus = 8;      // Column H = Status
+    var colLocation = 7;    // Column G = Location
+    var colTestDate = 5;    // Column E = Test Date
+    var colChangeOutDate = 10; // Column J = Change Out Date
+
+    if (assignedToLower === 'on shelf' || assignedToLower === '') {
+      newStatus = 'On Shelf';
+      newLocation = 'Helena';
+    } else if (assignedToLower === 'in testing') {
+      newStatus = 'In Testing';
+      newLocation = 'Arnett / JM Test';
+    } else if (assignedToLower === 'failed rubber' || assignedToLower === 'failed') {
+      newStatus = 'Failed';
+      newLocation = 'Destroyed';
+    } else if (assignedToLower === 'lost') {
+      newStatus = 'Lost';
+      newLocation = 'Lost';
+    } else if (nameToLocation[assignedToLower]) {
+      newStatus = 'In Service';
+      newLocation = nameToLocation[assignedToLower];
+    } else if (assignedTo !== '') {
+      logEvent('handleMackAssignedToChange: Employee "' + assignedTo + '" not found in ' + SHEET_EMPLOYEES, 'WARNING');
+      newStatus = 'In Service';
+      newLocation = 'Unknown';
+    }
+
+    if (newLocation) {
+      sheet.getRange(editedRow, colLocation).setValue(newLocation);
+    }
+    if (newStatus) {
+      sheet.getRange(editedRow, colStatus).setValue(newStatus);
+    }
+
+    var testDate = sheet.getRange(editedRow, colTestDate).getValue();
+    if (testDate) {
+      var changeOutDate = calculateMackChangeOut(testDate, assignedTo, newLocation);
+      if (changeOutDate) {
+        var changeOutCell = sheet.getRange(editedRow, colChangeOutDate);
+        try {
+          if (changeOutDate === 'N/A') {
+            changeOutCell.setNumberFormat('@');
+          } else {
+            changeOutCell.setNumberFormat('MM/dd/yyyy');
+          }
+        } catch (fmtErr) { /* Ignore format errors on typed columns */ }
+        changeOutCell.setValue(changeOutDate);
+      }
+    }
+
+    ss.toast('Location updated to ' + newLocation, '🔍 Auto-Updated', 3);
+
+  } catch (e) {
+    logEvent('handleMackAssignedToChange error: ' + e, 'ERROR');
+  } finally {
+    if (lock) lock.releaseLock();
   }
 }
 
@@ -22132,6 +22672,489 @@ function handleBlanketDateChangedEdit(ss, swapSheet, blanketsSheet, editedRow, n
     }
 
     logEvent('Blanket Stage 4 complete: Reverted to Stage 2 state', 'INFO');
+  }
+}
+
+/**
+ * Handles manual edits to the Pick List Item # column (I = 9) in MACK Swaps.
+ * Applies light blue background to indicate manual entry.
+ * Updates status based on inventory item status and populates Stage 1 columns.
+ *
+ * @param {Spreadsheet} ss - The active spreadsheet
+ * @param {Sheet} swapSheet - The MACK Swaps sheet
+ * @param {Sheet} macksSheet - The MACKs inventory sheet
+ * @param {number} editedRow - Row that was edited
+ * @param {string} newValue - The new Pick List item number
+ */
+function handleMackPickListManualEdit(ss, swapSheet, macksSheet, editedRow, newValue) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000);
+
+    logEvent('Manual MACK Pick List edit at row ' + editedRow + ': ' + newValue, 'DEBUG');
+
+    // Mark with blue background (I = column 9)
+    var editedCell = swapSheet.getRange(editedRow, 9);
+    editedCell.setBackground('#e3f2fd');
+
+    // If cleared, reset status
+    if (!newValue || newValue === '—' || newValue.toString().trim() === '') {
+      swapSheet.getRange(editedRow, 10).setValue('Need to Purchase ❌'); // Column J
+      swapSheet.getRange(editedRow, 13, 1, 3).clearContent(); // Clear Stage 1 columns M, N, O (indices 13-15)
+      logEvent('MACK Pick List cleared for row ' + editedRow, 'INFO');
+      return;
+    }
+
+    // Look up the item in MACKs sheet
+    var macksData = macksSheet.getDataRange().getValues();
+    var itemRow = -1;
+    var itemData = null;
+
+    for (var i = 1; i < macksData.length; i++) {
+      if (String(macksData[i][0]).trim() === String(newValue).trim()) {
+        itemRow = i;
+        itemData = macksData[i];
+        break;
+      }
+    }
+
+    if (!itemData) {
+      swapSheet.getRange(editedRow, 10).setValue('Item Not Found ❌ (Manual)');
+      swapSheet.getRange(editedRow, 13, 1, 3).clearContent();
+      logEvent('Manual MACK Pick List item ' + newValue + ' not found', 'WARNING');
+      return;
+    }
+
+    // MACKs sheet: A=0 MACK, H=7 Status, I=8 Assigned To, F=5 Date Assigned
+    var itemStatus = (itemData[7] || '').toString().trim();
+    var itemAssignedTo = (itemData[8] || '').toString().trim();
+    var itemDateAssigned = itemData[5] || '';
+    var itemStatusLower = itemStatus.toLowerCase();
+
+    // Determine display status for column J
+    var displayStatus = '';
+    if (itemStatusLower === 'on shelf' || itemStatusLower === 'available') {
+      displayStatus = 'In Stock ✅ (Manual)';
+    } else if (itemStatusLower === 'ready for delivery') {
+      displayStatus = 'Ready For Delivery 🚚 (Manual)';
+    } else if (itemStatusLower === 'in testing') {
+      displayStatus = 'In Testing 🔬 (Manual)';
+    } else {
+      displayStatus = itemStatus + ' (Manual)';
+    }
+
+    // Update Status column (J = column 10)
+    swapSheet.getRange(editedRow, 10).setValue(displayStatus);
+
+    // Populate Stage 1 columns (M-O = columns 13-15)
+    var stage1Data = [[
+      itemStatus,        // M - Status
+      itemAssignedTo,    // N - Assigned To
+      itemDateAssigned   // O - Date Assigned
+    ]];
+    swapSheet.getRange(editedRow, 13, 1, 3).setValues(stage1Data);
+
+    // Update Picked For on MACKs sheet
+    var employeeName = swapSheet.getRange(editedRow, 1).getValue();
+    if (employeeName && itemRow >= 0) {
+      macksSheet.getRange(itemRow + 1, 11).setValue(employeeName); // Column K = Picked For
+    }
+
+    logEvent('Manual MACK Pick List entry updated for row ' + editedRow + ': Item #' + newValue, 'INFO');
+
+  } catch (e) {
+    logEvent('handleMackPickListManualEdit error: ' + e, 'ERROR');
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Handles changes to the Picked checkbox (column K = 11) in MACK Swaps.
+ * Stage 2: When checked - marks item as Ready for Delivery and assigns to Cody's Truck
+ * Stage 5: When unchecked - reverts MACK back to original Stage 1 state
+ *
+ * @param {Spreadsheet} ss - The active spreadsheet
+ * @param {Sheet} swapSheet - The MACK Swaps sheet
+ * @param {Sheet} macksSheet - The MACKs inventory sheet
+ * @param {number} editedRow - Row that was edited
+ * @param {*} newValue - The checkbox value
+ */
+function handleMackPickedCheckboxChange(ss, swapSheet, macksSheet, editedRow, newValue) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000);
+
+    var isChecked = (newValue === true || newValue === 'TRUE' || newValue === true);
+
+    // Get the row data (columns A-Y, 1-25)
+    var rowData = swapSheet.getRange(editedRow, 1, 1, 25).getValues()[0];
+
+    // MACK Swaps columns:
+    // A=0 Employee, B=1 Current MACK#, C=2 KV, D=3 Size, E=4 Length, F=5 Date Assigned,
+    // G=6 Change Out Date, H=7 Days Left, I=8 Pick List, J=9 Status, K=10 Picked, L=11 Date Changed
+    // M-O (12-14): Stage 1 Pick List Before (Status, Assigned To, Date Assigned)
+    // P-R (15-17): Stage 1 Old MACK (Status, Assigned To, Date Assigned)
+    // S-V (18-21): Stage 2 Pick List After (Status, Assigned To, Date Assigned, Picked For)
+    // W-Y (22-24): Stage 3 (Assigned To, Date Assigned, Change Out Date)
+
+    var employeeName = rowData[0];          // Column A - Employee name
+    var pickListNum = rowData[8];           // Column I - Pick List Item #
+    var currentStatus = rowData[9];         // Column J - Status
+
+    var stage1Status = rowData[12];         // Column M - Stage 1 Pick List Status
+    var stage1AssignedTo = rowData[13];     // Column N - Stage 1 Assigned To
+    var stage1DateAssigned = rowData[14];   // Column O - Stage 1 Date Assigned
+
+    if (!pickListNum || pickListNum === '—') {
+      logEvent('handleMackPickedCheckboxChange: No Pick List item for row ' + editedRow, 'WARNING');
+      return;
+    }
+
+    // Find the Pick List item in the MACKs sheet
+    var macksData = macksSheet.getDataRange().getValues();
+    var pickListRow = -1;
+    for (var i = 1; i < macksData.length; i++) {
+      if (String(macksData[i][0]).trim() === String(pickListNum).trim()) {
+        pickListRow = i + 1;
+        break;
+      }
+    }
+
+    if (pickListRow === -1) {
+      logEvent('handleMackPickedCheckboxChange: Pick List item ' + pickListNum + ' not found in MACKs', 'ERROR');
+      return;
+    }
+
+    // MACKs inventory columns (1-based):
+    var invColDateAssigned = 6;  // F=6 Date Assigned
+    var invColLocation = 7;      // G=7 Location
+    var invColStatus = 8;        // H=8 Status
+    var invColAssignedTo = 9;    // I=9 Assigned To
+    var invColPickedFor = 11;    // K=11 Picked For
+
+    var today = new Date();
+    var todayStr = Utilities.formatDate(today, ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd');
+
+    if (isChecked) {
+      // STAGE 2: Picked checkbox checked
+      logEvent('MACK Stage 2: Picked checked for row ' + editedRow + ', Pick List: ' + pickListNum);
+
+      // VALIDATION: Check if item is "In Testing"
+      var currentInvStatus = macksSheet.getRange(pickListRow, invColStatus).getValue();
+      var isInTesting = currentInvStatus && currentInvStatus.toString().trim().toLowerCase() === 'in testing';
+
+      if (isInTesting) {
+        logEvent('MACK Stage 2 BLOCKED: Cannot pick item ' + pickListNum + ' - status is "In Testing"', 'WARNING');
+        swapSheet.getRange(editedRow, 11).setValue(false); // Column K
+        SpreadsheetApp.getUi().alert(
+          '⚠️ Cannot Pick Item',
+          'Item ' + pickListNum + ' is currently "In Testing" and cannot be picked for delivery.\n\n' +
+          'Please wait until testing is complete.',
+          SpreadsheetApp.getUi().ButtonSet.OK
+        );
+        return;
+      }
+
+      // Update visible Status column (J = column 10)
+      swapSheet.getRange(editedRow, 10).setValue('Ready For Delivery 🚚');
+
+      // Populate Stage 2 columns (S-V = columns 19-22, indices 18-21)
+      var pickedForStage2 = employeeName + ' - ' + Utilities.formatDate(today, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+      var stage2Values = [
+        'Ready For Delivery',     // S - Status (index 18)
+        'Packed For Delivery',    // T - Assigned To (index 19)
+        todayStr,                 // U - Date Assigned (index 20)
+        pickedForStage2           // V - Picked For (index 21)
+      ];
+      swapSheet.getRange(editedRow, 19, 1, 4).setValues([stage2Values]);
+
+      // Update MACKs sheet
+      var todayFormatted = Utilities.formatDate(today, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+      var pickedForValue = employeeName + ' - ' + todayFormatted;
+
+      logEvent('MACK Stage 2: Updating MACKs row ' + pickListRow + ' with Picked For = "' + pickedForValue + '"', 'INFO');
+
+      macksSheet.getRange(pickListRow, invColStatus).setValue('Ready For Delivery');
+      macksSheet.getRange(pickListRow, invColAssignedTo).setValue('Packed For Delivery');
+      macksSheet.getRange(pickListRow, invColDateAssigned).setValue(today);
+      macksSheet.getRange(pickListRow, invColLocation).setValue("Cody's Truck");
+      macksSheet.getRange(pickListRow, invColPickedFor).setValue(pickedForValue);
+
+      SpreadsheetApp.flush();
+      logEvent('MACK Stage 2 complete: ' + pickListNum + ' marked Ready For Delivery for ' + employeeName, 'INFO');
+
+    } else {
+      // STAGE 5: Picked checkbox unchecked - revert to Stage 1 state
+      logEvent('MACK Stage 5 Revert: ' + pickListNum + ' returned to Stage 1 state');
+
+      // Clear Stage 2 columns (S-V = columns 19-22)
+      swapSheet.getRange(editedRow, 19, 1, 4).clearContent();
+
+      // Clear Stage 3 columns if any (W-Y = columns 23-25)
+      swapSheet.getRange(editedRow, 23, 1, 3).clearContent();
+
+      // Determine reverted status
+      var revertedStatus = stage1Status || 'In Stock ✅';
+      if (stage1Status) {
+        var statusLower = stage1Status.toString().toLowerCase();
+        if (statusLower === 'on shelf' || statusLower === 'available') {
+          revertedStatus = 'In Stock ✅';
+        } else if (statusLower === 'ready for delivery') {
+          revertedStatus = 'Ready For Delivery 🚚';
+        } else if (statusLower === 'in testing') {
+          revertedStatus = 'In Testing 🔬';
+        }
+      }
+      swapSheet.getRange(editedRow, 10).setValue(revertedStatus);
+
+      // Revert MACKs sheet
+      var revertStatus = stage1Status || 'On Shelf';
+      var revertAssignedTo = stage1AssignedTo || 'On Shelf';
+      var revertLocation = 'Helena';
+
+      macksSheet.getRange(pickListRow, invColStatus).setValue(revertStatus);
+      macksSheet.getRange(pickListRow, invColAssignedTo).setValue(revertAssignedTo);
+      macksSheet.getRange(pickListRow, invColLocation).setValue(revertLocation);
+      macksSheet.getRange(pickListRow, invColPickedFor).clearContent();
+
+      if (stage1DateAssigned) {
+        var stage1Date = new Date(stage1DateAssigned);
+        if (!isNaN(stage1Date.getTime())) {
+          macksSheet.getRange(pickListRow, invColDateAssigned).setValue(stage1Date);
+        }
+      }
+
+      logEvent('MACK Stage 5 complete: ' + pickListNum + ' reverted to ' + revertStatus, 'INFO');
+    }
+
+  } catch (e) {
+    logEvent('handleMackPickedCheckboxChange error: ' + e, 'ERROR');
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Handles Date Changed edits (column L = 12) in MACK Swaps.
+ * Stage 3: When date entered - completes swap, assigns new MACK to employee
+ * Stage 4: When date removed - reverts to Stage 2 state
+ *
+ * @param {Spreadsheet} ss - The active spreadsheet
+ * @param {Sheet} swapSheet - The MACK Swaps sheet
+ * @param {Sheet} macksSheet - The MACKs inventory sheet
+ * @param {number} editedRow - Row that was edited
+ * @param {*} newValue - The date value
+ */
+function handleMackDateChangedEdit(ss, swapSheet, macksSheet, editedRow, newValue) {
+  var hasDate = (newValue !== null && newValue !== undefined && newValue !== '');
+
+  // Get the row data
+  var rowData = swapSheet.getRange(editedRow, 1, 1, 25).getValues()[0];
+
+  var employeeName = rowData[0];     // Column A
+  var oldMackNum = rowData[1];       // Column B - Current MACK #
+  var pickListNum = rowData[8];      // Column I - Pick List Item #
+  var isPicked = rowData[10];        // Column K - Picked checkbox
+
+  // Stage 2 values (S-V = indices 18-21)
+  var stage2Status = rowData[18];
+  var stage2AssignedTo = rowData[19];
+  var stage2DateAssigned = rowData[20];
+  var stage2PickedFor = rowData[21];
+
+  // Old MACK values (P-R = indices 15-17)
+  var oldMackStatus = rowData[15];
+  var oldMackAssignedTo = rowData[16];
+  var oldMackDateAssigned = rowData[17];
+
+  if (!pickListNum || pickListNum === '—') {
+    Logger.log('handleMackDateChangedEdit: No Pick List item for row ' + editedRow);
+    return;
+  }
+
+  if (!isPicked && hasDate) {
+    Logger.log('handleMackDateChangedEdit: Date Changed entered but Picked not checked - ignoring');
+    return;
+  }
+
+  // Find items in MACKs sheet
+  var macksData = macksSheet.getDataRange().getValues();
+  var pickListRow = -1;
+  var oldMackRow = -1;
+
+  for (var i = 1; i < macksData.length; i++) {
+    var itemNum = String(macksData[i][0]).trim();
+    if (itemNum === String(pickListNum).trim()) {
+      pickListRow = i + 1;
+    }
+    if (oldMackNum && itemNum === String(oldMackNum).trim()) {
+      oldMackRow = i + 1;
+    }
+  }
+
+  if (pickListRow === -1) {
+    Logger.log('handleMackDateChangedEdit: Pick List item not found: ' + pickListNum);
+    return;
+  }
+
+  // Get employee location
+  var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+  var employeeLocation = 'Helena';
+  if (employeesSheet) {
+    var empData = employeesSheet.getDataRange().getValues();
+    for (var j = 1; j < empData.length; j++) {
+      if ((empData[j][0] || '').toString().trim().toLowerCase() === employeeName.toString().trim().toLowerCase()) {
+        employeeLocation = empData[j][2] || 'Helena';
+        break;
+      }
+    }
+  }
+
+  // MACKs sheet columns (1-based)
+  var invColTestDate = 5;
+  var invColDateAssigned = 6;  // F=6 Date Assigned
+  var invColLocation = 7;      // G=7 Location
+  var invColStatus = 8;        // H=8 Status
+  var invColAssignedTo = 9;    // I=9 Assigned To
+  var invColChangeOutDate = 10;// J=10 Change Out Date
+  var invColPickedFor = 11;    // K=11 Picked For
+
+  if (hasDate) {
+    // STAGE 3: Date Changed entered - complete the swap
+    Logger.log('MACK Stage 3: Date Changed entered for row ' + editedRow + ', completing swap');
+
+    var dateChanged;
+    if (newValue instanceof Date) {
+      dateChanged = newValue;
+    } else {
+      dateChanged = new Date(newValue);
+    }
+
+    if (isNaN(dateChanged.getTime())) {
+      var parts = String(newValue).split('/');
+      if (parts.length === 3) {
+        dateChanged = new Date(parseInt(parts[2]), parseInt(parts[0]) - 1, parseInt(parts[1]));
+      }
+    }
+
+    if (isNaN(dateChanged.getTime())) {
+      Logger.log('Could not parse date, using today');
+      dateChanged = new Date();
+    }
+
+    var dateChangedStr = Utilities.formatDate(dateChanged, ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd');
+    var dateChangedFormatted = Utilities.formatDate(dateChanged, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+
+    // Calculate change out date for MACK (12 months from test date)
+    var changeOutDate = new Date(dateChanged);
+    changeOutDate.setMonth(changeOutDate.getMonth() + INTERVAL_MACK_TEST);
+    var changeOutDateFormatted = Utilities.formatDate(changeOutDate, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+
+    // Populate Stage 3 columns (W-Y = columns 23-25, indices 22-24)
+    var stage3Values = [
+      employeeName,              // W - Assigned To (index 22)
+      dateChangedStr,            // X - Date Assigned (index 23)
+      changeOutDateFormatted     // Y - Change Out Date (index 24)
+    ];
+    swapSheet.getRange(editedRow, 23, 1, 3).setValues([stage3Values]);
+
+    // Update visible status columns
+    swapSheet.getRange(editedRow, 10).setValue('Assigned').setFontWeight('bold').setFontColor('#2e7d32'); // Column J
+    swapSheet.getRange(editedRow, 8).setValue('Assigned').setFontWeight('bold').setFontColor('#2e7d32');  // Column H
+
+    // Update Pick List MACK in MACKs sheet - now assigned to employee
+    macksSheet.getRange(pickListRow, invColStatus).setValue('In Service');
+    macksSheet.getRange(pickListRow, invColAssignedTo).setValue(employeeName);
+    macksSheet.getRange(pickListRow, invColDateAssigned).setValue(dateChanged);
+    macksSheet.getRange(pickListRow, invColLocation).setValue(employeeLocation);
+    macksSheet.getRange(pickListRow, invColChangeOutDate).setValue(changeOutDate);
+    macksSheet.getRange(pickListRow, invColPickedFor).clearContent();
+
+    // Update old MACK - now ready for testing
+    if (oldMackRow > 0) {
+      macksSheet.getRange(oldMackRow, invColStatus).setValue('Ready For Test');
+      macksSheet.getRange(oldMackRow, invColAssignedTo).setValue('Packed For Testing');
+      macksSheet.getRange(oldMackRow, invColDateAssigned).setValue(dateChanged);
+      macksSheet.getRange(oldMackRow, invColLocation).setValue("Cody's Truck");
+      macksSheet.getRange(oldMackRow, invColChangeOutDate).setValue('N/A');
+    }
+
+    logEvent('MACK Stage 3 complete: ' + pickListNum + ' assigned to ' + employeeName, 'INFO');
+
+  } else {
+    // STAGE 4: Date Changed removed - revert to Stage 2 state
+    Logger.log('MACK Stage 4: Date Changed removed for row ' + editedRow + ', reverting to Stage 2');
+
+    // Clear Stage 3 columns (W-Y = columns 23-25)
+    swapSheet.getRange(editedRow, 23, 1, 3).clearContent();
+
+    // Revert status to Ready For Delivery
+    swapSheet.getRange(editedRow, 10).setValue('Ready For Delivery 🚚').setFontWeight('normal').setFontColor(null);
+
+    // Recalculate days left for original change out date
+    var changeOutDateVal = swapSheet.getRange(editedRow, 7).getValue(); // Column G
+    if (changeOutDateVal) {
+      var today = new Date();
+      var changeOut = new Date(changeOutDateVal);
+      var diffDays = Math.ceil((changeOut - today) / (1000 * 60 * 60 * 24));
+      var daysLeftText = diffDays < 0 ? 'OVERDUE' : String(diffDays);
+      var daysLeftColor = diffDays < 0 ? '#d32f2f' : (diffDays <= 14 ? '#ff9800' : '#2e7d32');
+      swapSheet.getRange(editedRow, 8).setValue(daysLeftText).setFontColor(daysLeftColor).setFontWeight('normal'); // Column H
+    }
+
+    // Revert Pick List MACK to Stage 2 state
+    macksSheet.getRange(pickListRow, invColStatus).setValue(stage2Status || 'Ready For Delivery');
+    macksSheet.getRange(pickListRow, invColAssignedTo).setValue(stage2AssignedTo || 'Packed For Delivery');
+    macksSheet.getRange(pickListRow, invColLocation).setValue("Cody's Truck");
+    macksSheet.getRange(pickListRow, invColPickedFor).setValue(stage2PickedFor || '');
+
+    if (stage2DateAssigned) {
+      var stage2Date = new Date(stage2DateAssigned);
+      if (!isNaN(stage2Date.getTime())) {
+        macksSheet.getRange(pickListRow, invColDateAssigned).setValue(stage2Date);
+      }
+    }
+
+    // Restore original Change Out Date - calculate from Test Date (12 months from test)
+    var testDateVal = macksSheet.getRange(pickListRow, invColTestDate).getValue();
+    if (testDateVal) {
+      var testDate = new Date(testDateVal);
+      if (!isNaN(testDate.getTime())) {
+        var originalChangeOutDate = new Date(testDate);
+        originalChangeOutDate.setMonth(originalChangeOutDate.getMonth() + INTERVAL_MACK_TEST);
+        macksSheet.getRange(pickListRow, invColChangeOutDate).setValue(originalChangeOutDate);
+        Logger.log('MACK Stage 4: Restored Change Out Date to ' + originalChangeOutDate + ' (from Test Date ' + testDate + ')');
+      }
+    }
+
+    // Revert old MACK to original state
+    if (oldMackRow > 0 && oldMackStatus) {
+      macksSheet.getRange(oldMackRow, invColStatus).setValue(oldMackStatus);
+      macksSheet.getRange(oldMackRow, invColAssignedTo).setValue(oldMackAssignedTo);
+      macksSheet.getRange(oldMackRow, invColLocation).setValue(employeeLocation);
+
+      if (oldMackDateAssigned) {
+        var oldDate = new Date(oldMackDateAssigned);
+        if (!isNaN(oldDate.getTime())) {
+          macksSheet.getRange(oldMackRow, invColDateAssigned).setValue(oldDate);
+        }
+      }
+
+      // Restore old MACK's Change Out Date - calculate from Test Date
+      var oldMackTestDate = macksSheet.getRange(oldMackRow, invColTestDate).getValue();
+      if (oldMackTestDate) {
+        var oldTestDate = new Date(oldMackTestDate);
+        if (!isNaN(oldTestDate.getTime())) {
+          var oldOriginalChangeOutDate = new Date(oldTestDate);
+          oldOriginalChangeOutDate.setMonth(oldOriginalChangeOutDate.getMonth() + INTERVAL_MACK_TEST);
+          macksSheet.getRange(oldMackRow, invColChangeOutDate).setValue(oldOriginalChangeOutDate);
+          Logger.log('MACK Stage 4: Restored old MACK Change Out Date to ' + oldOriginalChangeOutDate);
+        }
+      }
+    }
+
+    logEvent('MACK Stage 4 complete: Reverted to Stage 2 state', 'INFO');
   }
 }
 
@@ -22667,6 +23690,430 @@ function generateBlanketSwaps(silent) {
  */
 function menuGenerateBlanketSwaps() {
   generateBlanketSwaps(false);
+}
+
+/**
+ * Generates the MACK Swaps report.
+ * Identifies MACKs with upcoming change out dates and creates swap entries.
+ * Groups by crew lead / job number.
+ */
+function generateMackSwaps(silent) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+  var tz = ss.getSpreadsheetTimeZone();
+  var now = new Date();
+
+  logEvent('Generating MACK Swaps report...');
+
+  // Get MACKs sheet
+  var macksSheet = ss.getSheetByName(SHEET_MACKS);
+  if (!macksSheet || macksSheet.getLastRow() < 2) {
+    logEvent('No MACKs found in the MACKs sheet - skipping.', 'INFO');
+    if (!silent) {
+      ui.alert('No MACKs found in the MACKs sheet.');
+    }
+    return;
+  }
+
+  // Get Employees sheet for location and job number lookups
+  var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+  var empMap = {};
+  var empLocationMap = {};
+  var empJobNumMap = {};
+  var empClassificationMap = {};
+
+  if (employeesSheet && employeesSheet.getLastRow() > 1) {
+    var empData = employeesSheet.getDataRange().getValues();
+    var empHeaders = empData[0];
+    var locationColIdx = 2;
+    var jobNumColIdx = 3;
+    var classificationColIdx = 12;
+    var hireDateColIdx = -1;
+
+    for (var h = 0; h < empHeaders.length; h++) {
+      var headerLower = String(empHeaders[h]).trim().toLowerCase();
+      if (headerLower === 'location') locationColIdx = h;
+      if (headerLower === 'job number') jobNumColIdx = h;
+      if (headerLower === 'job classification') classificationColIdx = h;
+      if (headerLower === 'hire date') hireDateColIdx = h;
+    }
+
+    for (var e = 1; e < empData.length; e++) {
+      var row = empData[e];
+      var name = (row[0] || '').toString().trim().toLowerCase();
+      if (name) {
+        if (hireDateColIdx !== -1 && isEmployeePending(row[hireDateColIdx])) continue;
+        empMap[name] = row;
+        empLocationMap[name] = (row[locationColIdx] || 'Unknown').toString().trim();
+        empJobNumMap[name] = (row[jobNumColIdx] || '').toString().trim();
+        empClassificationMap[name] = (row[classificationColIdx] || '').toString().trim();
+      }
+    }
+  }
+
+  function extractCrewNum(jobNum) {
+    if (!jobNum) return '';
+    var jobStr = String(jobNum).trim();
+    var lastDotIndex = jobStr.lastIndexOf('.');
+    if (lastDotIndex !== -1) {
+      return jobStr.substring(0, lastDotIndex);
+    }
+    return jobStr;
+  }
+
+  function getForemanForEmployee(employeeName) {
+    var empNameLower = employeeName.toString().trim().toLowerCase();
+    var empLocation = empLocationMap[empNameLower];
+    var empJobNum = empJobNumMap[empNameLower];
+    var empCrew = extractCrewNum(empJobNum);
+
+    if (!empCrew || !empLocation) {
+      return empCrew || 'Unknown';
+    }
+
+    var foremanName = null;
+    Object.keys(empMap).forEach(function(name) {
+      if (empLocationMap[name] === empLocation) {
+        var theirCrew = extractCrewNum(empJobNumMap[name]);
+        if (theirCrew === empCrew) {
+          var classification = empClassificationMap[name];
+          if (classification === 'F' || classification === 'GTO F') {
+            foremanName = empMap[name][0];
+          }
+        }
+      }
+    });
+
+    return foremanName || empCrew || 'Unknown';
+  }
+
+  // Get or create MACK Swaps sheet
+  var swapsSheet = ss.getSheetByName(SHEET_MACK_SWAPS);
+  if (!swapsSheet) {
+    swapsSheet = ss.insertSheet(SHEET_MACK_SWAPS);
+  }
+
+  // Preserve manual Pick List selections before clearing
+  var manualPicks = preserveManualPickLists(swapsSheet);
+
+  // Clear columns A-Y (columns 1-25) to preserve user helper tables beyond
+  var maxRows = swapsSheet.getMaxRows();
+  if (maxRows > 0) {
+    swapsSheet.getRange(1, 1, maxRows, 25).clear();
+  }
+
+  // Read MACKs data
+  var macksData = macksSheet.getDataRange().getValues();
+  var macksNeedingSwap = [];
+
+  // MACKs inventory columns (0-based): A=0 Item#, B=1 KV, C=2 Size, D=3 Length, E=4 Test Date, F=5 Date Assigned, G=6 Location, H=7 Status, I=8 Assigned To, J=9 Change Out Date
+  for (var i = 1; i < macksData.length; i++) {
+    var row = macksData[i];
+    var itemNum = row[0];
+    var kv = row[1];
+    var size = row[2];
+    var length = row[3];
+    var testDate = row[4];
+    var dateAssigned = row[5];
+    var location = row[6];
+    var status = String(row[7] || '').trim();
+    var assignedTo = row[8];
+    var changeOutDate = row[9];
+
+    if (status !== 'In Service' || !changeOutDate || changeOutDate === 'N/A') continue;
+
+    var changeOut = changeOutDate instanceof Date ? changeOutDate : new Date(changeOutDate);
+    if (isNaN(changeOut.getTime())) continue;
+
+    var daysLeft = Math.ceil((changeOut - now) / (1000 * 60 * 60 * 24));
+
+    if (daysLeft <= 30) {
+      var assignedToLower = (assignedTo || '').toString().trim().toLowerCase();
+      macksNeedingSwap.push({
+        itemNum: itemNum,
+        kv: kv,
+        size: size,
+        length: length,
+        dateAssigned: dateAssigned,
+        changeOutDate: changeOut,
+        daysLeft: daysLeft,
+        location: empLocationMap[assignedToLower] || location,
+        assignedTo: assignedTo,
+        foreman: getForemanForEmployee(assignedTo),
+        rowIndex: i + 1,
+        oldStatus: status,
+        oldAssignedTo: assignedTo,
+        oldDateAssigned: dateAssigned
+      });
+    }
+  }
+
+  if (macksNeedingSwap.length === 0) {
+    logEvent('No MACKs due for swap in the next 30 days.', 'INFO');
+    if (!silent) {
+      ui.alert('No MACK Swaps Needed\n\nNo MACKs are due for swap in the next 30 days.');
+    }
+    return;
+  }
+
+  // Sort by location, then by foreman, then by days left
+  macksNeedingSwap.sort(function(a, b) {
+    var locCompare = (a.location || 'ZZZ').localeCompare(b.location || 'ZZZ');
+    if (locCompare !== 0) return locCompare;
+    var foremanCompare = (a.foreman || 'ZZZ').localeCompare(b.foreman || 'ZZZ');
+    if (foremanCompare !== 0) return foremanCompare;
+    var specCompare = String(a.kv).localeCompare(String(b.kv));
+    if (specCompare !== 0) return specCompare;
+    return a.daysLeft - b.daysLeft;
+  });
+
+  // Get available MACKs for pick list (Status = Available or On Shelf)
+  var availableMacks = [];
+  for (var i = 1; i < macksData.length; i++) {
+    var status = String(macksData[i][7] || '').trim().toLowerCase();
+    if (status === 'available' || status === 'on shelf') {
+      availableMacks.push({
+        itemNum: macksData[i][0],
+        kv: macksData[i][1],
+        size: macksData[i][2],
+        length: macksData[i][3],
+        status: macksData[i][7],
+        assignedTo: macksData[i][8],
+        dateAssigned: macksData[i][5],
+        rowIndex: i + 1
+      });
+    }
+  }
+
+  var assignedItemNums = new Set();
+  var pickedForUpdates = [];
+
+  var currentRow = 1;
+
+  // Title row - merge across all columns (A-Y = 25 columns)
+  swapsSheet.getRange(currentRow, 1, 1, 25).merge().setValue('🧱 MACK Swaps');
+  swapsSheet.getRange(currentRow, 1, 1, 25)
+    .setFontWeight('bold').setFontSize(12).setBackground('#e0f2f1').setFontColor('#004d40').setHorizontalAlignment('center');
+  currentRow++;
+
+  // Stage group headers row
+  swapsSheet.getRange(currentRow, 13, 1, 3).merge().setValue('STAGE 1').setBackground('#e0e0e0').setFontWeight('bold').setHorizontalAlignment('center');
+  swapsSheet.getRange(currentRow, 16, 1, 3).merge().setValue('STAGE 1').setBackground('#e0e0e0').setFontWeight('bold').setHorizontalAlignment('center');
+  swapsSheet.getRange(currentRow, 19, 1, 4).merge().setValue('STAGE 2').setBackground('#e0e0e0').setFontWeight('bold').setHorizontalAlignment('center');
+  swapsSheet.getRange(currentRow, 23, 1, 3).merge().setValue('STAGE 3').setBackground('#e0e0e0').setFontWeight('bold').setHorizontalAlignment('center');
+  currentRow++;
+
+  // Stage description headers row
+  swapsSheet.getRange(currentRow, 13, 1, 3).merge().setValue('Pick List MACK Before Check').setBackground('#bdbdbd').setFontWeight('bold').setHorizontalAlignment('center').setFontSize(9);
+  swapsSheet.getRange(currentRow, 16, 1, 3).merge().setValue('Old MACK Assignment').setBackground('#bdbdbd').setFontWeight('bold').setHorizontalAlignment('center').setFontSize(9);
+  swapsSheet.getRange(currentRow, 19, 1, 4).merge().setValue('Pick List MACK After Check').setBackground('#bdbdbd').setFontWeight('bold').setHorizontalAlignment('center').setFontSize(9);
+  swapsSheet.getRange(currentRow, 23, 1, 3).merge().setValue('Pick List MACK New Assignment').setBackground('#bdbdbd').setFontWeight('bold').setHorizontalAlignment('center').setFontSize(9);
+  currentRow++;
+
+  // Column headers row - visible (A-L) and hidden (M-Y)
+  var allHeaders = [
+    'Employee', 'Current MACK #', 'KV', 'Size', 'Length', 'Date Assigned', 'Change Out Date', 'Days Left', 'Pick List Item #', 'Status', 'Picked', 'Date Changed',
+    'Status', 'Assigned To', 'Date Assigned',
+    'Status', 'Assigned To', 'Date Assigned',
+    'Status', 'Assigned To', 'Date Assigned', 'Picked For',
+    'Assigned To', 'Date Assigned', 'Change Out Date'
+  ];
+  swapsSheet.getRange(currentRow, 1, 1, allHeaders.length).setValues([allHeaders]);
+  swapsSheet.getRange(currentRow, 1, 1, 12).setFontWeight('bold').setFontColor('#ffffff').setHorizontalAlignment('center').setBackground('#00796b');
+  swapsSheet.getRange(currentRow, 13, 1, 13).setFontWeight('bold').setBackground('#9e9e9e').setFontColor('#ffffff').setHorizontalAlignment('center').setFontSize(9);
+  swapsSheet.setFrozenRows(currentRow);
+  currentRow++;
+
+  var startDataRow = currentRow;
+
+  // Group by location, then by foreman
+  var locationGroups = {};
+  macksNeedingSwap.forEach(function(swap) {
+    var loc = swap.location || 'Unknown';
+    var foreman = swap.foreman || 'Unknown';
+    if (!locationGroups[loc]) {
+      locationGroups[loc] = {};
+    }
+    if (!locationGroups[loc][foreman]) {
+      locationGroups[loc][foreman] = [];
+    }
+    locationGroups[loc][foreman].push(swap);
+  });
+
+  var sortedLocations = Object.keys(locationGroups).sort();
+
+  sortedLocations.forEach(function(location) {
+    var foremanGroups = locationGroups[location];
+    var sortedForemen = Object.keys(foremanGroups).sort();
+
+    swapsSheet.getRange(currentRow, 1, 1, 12).merge().setValue('🔍 ' + location);
+    swapsSheet.getRange(currentRow, 1, 1, 12)
+      .setFontWeight('bold').setFontSize(10).setBackground('#e0f2f1').setFontColor('#004d40').setHorizontalAlignment('left');
+    currentRow++;
+
+    sortedForemen.forEach(function(foreman) {
+      var foremanSwaps = foremanGroups[foreman];
+
+      if (sortedForemen.length > 1 || foreman !== 'Unknown') {
+        swapsSheet.getRange(currentRow, 1, 1, 12).merge().setValue('    👷 ' + foreman);
+        swapsSheet.getRange(currentRow, 1, 1, 12)
+          .setFontWeight('bold').setFontSize(9).setBackground('#e0f2f1').setFontColor('#00796b').setHorizontalAlignment('left');
+        currentRow++;
+      }
+
+      var rowDataArray = [];
+
+      foremanSwaps.forEach(function(swap) {
+        var pickListValue = '—';
+        var pickListStatus = 'Need to Purchase ❌';
+        var pickListItemData = null;
+        var isAlreadyPicked = false;
+        var employeeName = swap.assignedTo || '';
+
+        // Find matching available MACK (matching KV, Size, and Length)
+        var match = availableMacks.find(function(b) {
+          return !assignedItemNums.has(b.itemNum) &&
+                 String(b.kv).trim().toLowerCase() === String(swap.kv).trim().toLowerCase() &&
+                 String(b.size).trim().toLowerCase() === String(swap.size).trim().toLowerCase() &&
+                 String(b.length).trim().toLowerCase() === String(swap.length).trim().toLowerCase();
+        });
+
+        if (match) {
+          pickListValue = match.itemNum;
+          pickListStatus = 'In Stock ✅';
+          pickListItemData = match;
+          assignedItemNums.add(match.itemNum);
+
+          pickedForUpdates.push({
+            rowIndex: match.rowIndex,
+            pickedFor: employeeName
+          });
+        }
+
+        var dateAssignedFormatted = '';
+        if (swap.dateAssigned instanceof Date) {
+          dateAssignedFormatted = Utilities.formatDate(swap.dateAssigned, tz, 'MM/dd/yyyy');
+        } else if (swap.dateAssigned) {
+          dateAssignedFormatted = swap.dateAssigned;
+        }
+
+        var displayStatus = pickListStatus;
+        if (swap.daysLeft < 0) {
+          displayStatus = 'OVERDUE ❌';
+        } else if (swap.daysLeft <= 14) {
+          displayStatus = pickListStatus.replace('✅', '⚠️');
+        }
+
+        var rowData = [
+          swap.assignedTo || '',
+          swap.itemNum || '',
+          swap.kv || '',
+          swap.size || '',
+          swap.length || '',
+          dateAssignedFormatted,
+          swap.changeOutDate,
+          swap.daysLeft,
+          pickListValue,
+          displayStatus,
+          isAlreadyPicked,  // Picked checkbox (Column K)
+          '',               // Date Changed (Column L)
+          // M-O: Pick List Item Before Check
+          pickListItemData ? (pickListItemData.status || '') : '',
+          pickListItemData ? (pickListItemData.assignedTo || '') : '',
+          pickListItemData ? (pickListItemData.dateAssigned || '') : '',
+          // P-R: Old Item Assignment
+          swap.oldStatus || '',
+          swap.oldAssignedTo || '',
+          swap.oldDateAssigned || '',
+          // S-V: Stage 2
+          '', '', '', '',
+          // W-Y: Stage 3
+          '', '', ''
+        ];
+
+        rowDataArray.push({
+          data: rowData,
+          daysLeft: swap.daysLeft
+        });
+      });
+
+      if (rowDataArray.length > 0) {
+        var rowValues = rowDataArray.map(function(r) { return r.data; });
+        swapsSheet.getRange(currentRow, 1, rowValues.length, 25).setValues(rowValues);
+        swapsSheet.getRange(currentRow, 1, rowValues.length, 25).setHorizontalAlignment('center');
+        swapsSheet.getRange(currentRow, 11, rowValues.length, 1).insertCheckboxes(); // Checkbox in Column K
+
+        for (var i = 0; i < rowDataArray.length; i++) {
+          var daysLeft = rowDataArray[i].daysLeft;
+          var daysLeftCell = swapsSheet.getRange(currentRow + i, 8); // Column H
+          if (daysLeft < 0) {
+            daysLeftCell.setFontWeight('bold').setFontColor('#ff5252');
+            swapsSheet.getRange(currentRow + i, 1, 1, 12).setBackground('#ffcdd2');  // Light red for overdue
+          } else if (daysLeft <= 14) {
+            daysLeftCell.setFontWeight('bold').setFontColor('#ff9800');
+            swapsSheet.getRange(currentRow + i, 1, 1, 12).setBackground('#fff9c4');  // Light yellow for urgent
+          } else {
+            daysLeftCell.setFontColor('#388e3c');
+          }
+        }
+
+        currentRow += rowValues.length;
+      }
+    });
+  });
+
+  SpreadsheetApp.flush();
+
+  // Restore manual Pick List selections
+  restoreManualPickLists(swapsSheet, manualPicks, startDataRow, currentRow - 1, macksData);
+
+  // Auto-resize visible columns (A-L = columns 1-12)
+  for (var c = 1; c <= 12; c++) {
+    swapsSheet.autoResizeColumn(c);
+  }
+
+  swapsSheet.setColumnWidth(1, Math.max(swapsSheet.getColumnWidth(1), 120));  // Employee
+  swapsSheet.setColumnWidth(2, Math.max(swapsSheet.getColumnWidth(2), 100));  // Current MACK #
+  swapsSheet.setColumnWidth(7, Math.max(swapsSheet.getColumnWidth(7), 110));  // Change Out Date
+  swapsSheet.setColumnWidth(8, Math.max(swapsSheet.getColumnWidth(8), 90));   // Days Left
+  swapsSheet.setColumnWidth(9, Math.max(swapsSheet.getColumnWidth(9), 100));  // Pick List
+  swapsSheet.setColumnWidth(10, Math.max(swapsSheet.getColumnWidth(10), 180)); // Status
+
+  // Hide columns M-Y (columns 13-25, which is 13 columns)
+  swapsSheet.hideColumns(13, 13);
+
+  // Format date columns
+  var lastDataRow = swapsSheet.getLastRow();
+  if (lastDataRow >= startDataRow) {
+    swapsSheet.getRange(startDataRow, 7, lastDataRow - startDataRow + 1, 1).setNumberFormat('mm/dd/yyyy');   // Change Out Date
+    swapsSheet.getRange(startDataRow, 12, lastDataRow - startDataRow + 1, 1).setNumberFormat('mm/dd/yyyy');  // Date Changed
+  }
+
+  // UPDATE "Picked For" column on MACKs sheet (Column K = 11)
+  if (pickedForUpdates.length > 0) {
+    Logger.log('generateMackSwaps: Updating ' + pickedForUpdates.length + ' Picked For entries on MACKs sheet');
+    pickedForUpdates.forEach(function(update) {
+      macksSheet.getRange(update.rowIndex, 11).setValue(update.pickedFor);
+    });
+    Logger.log('generateMackSwaps: Picked For column updated');
+  }
+
+  logEvent('MACK Swaps report generated successfully. Found ' + macksNeedingSwap.length + ' due for swap, ' + availableMacks.length + ' available, ' + pickedForUpdates.length + ' picked for assignments.');
+
+  if (!silent) {
+    ui.alert('✅ MACK Swaps Generated!\n\n' +
+      'Found ' + macksNeedingSwap.length + ' MACK(s) due for swap.\n' +
+      'Available for assignment: ' + availableMacks.length + ' MACK(s).\n' +
+      'Picked For updated: ' + pickedForUpdates.length + ' MACK(s).\n\n' +
+      'Use the Pick List dropdown to select replacement MACKs.');
+  }
+}
+
+/**
+ * Menu function to generate MACK swaps report.
+ */
+function menuGenerateMackSwaps() {
+  generateMackSwaps(false);
 }
 
 // =============================================================================
@@ -24816,6 +26263,32 @@ function openAEDSwapsSheet() {
 }
 
 /**
+ * Opens the MACKs sheet.
+ */
+function openMacksSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_MACKS);
+  if (sheet) {
+    ss.setActiveSheet(sheet);
+  } else {
+    SpreadsheetApp.getUi().alert('MACKs sheet not found. Run Build Sheets first.');
+  }
+}
+
+/**
+ * Opens the MACK Swaps sheet.
+ */
+function openMackSwapsSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_MACK_SWAPS);
+  if (sheet) {
+    ss.setActiveSheet(sheet);
+  } else {
+    SpreadsheetApp.getUi().alert('MACK Swaps sheet not found. Run Generate MACK Swaps first.');
+  }
+}
+
+/**
  * Sets up the AED sheet with proper structure, formatting, and data validation.
  * Creates the sheet if it doesn't exist, or configures an existing empty sheet.
  * AED columns: A=Item#, B=Model, C=(unused), D=Pad Expiration, E=Date Assigned,
@@ -26452,5 +27925,33 @@ function applyCustomChartLabels(sheet) {
     sheet.getRange("AF5").setValue("Labels updated successfully!");
   } catch (e) {
     sheet.getRange("AF5").setValue("Error: " + e.message);
+  }
+}
+
+/**
+ * Appends debug logs from the Crew Import client side to the 'Import Debug Logs' sheet.
+ * Used for debugging name parsing/matching discrepancies.
+ *
+ * @param {Array<string>} logs - List of log messages from the client
+ */
+function logImportDebug(logs) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('Import Debug Logs');
+    if (!sheet) {
+      sheet = ss.insertSheet('Import Debug Logs');
+    }
+    sheet.clear();
+    sheet.getRange(1, 1, 1, 2).setValues([['Timestamp', 'Log Message']]);
+    if (logs && logs.length > 0) {
+      var values = logs.map(function(log) {
+        return [new Date(), String(log)];
+      });
+      sheet.getRange(2, 1, values.length, 2).setValues(values);
+    }
+    return 'Logged ' + (logs ? logs.length : 0) + ' items successfully';
+  } catch (e) {
+    Logger.log('Error in logImportDebug: ' + e.message);
+    return 'Error: ' + e.message;
   }
 }

@@ -66,6 +66,7 @@
     .badge-hv_tester, .badge-HV-Tester { background: #f3e5f5; color: #7b1fa2; }
     .badge-phasing_set, .badge-Phasing-Set { background: #e0f7fa; color: #00695c; }
     .badge-aed, .badge-AED { background: #ffebee; color: #c62828; }
+    .badge-mack, .badge-MACK { background: #e0f2f1; color: #004d40; }
 
     /* History toggle */
     .history-toggle {
@@ -144,6 +145,7 @@
       <option value="hv_tester">⚡ HV Tester</option>
       <option value="phasing_set">🔌 Phasing Set</option>
       <option value="aed">❤️ AED</option>
+      <option value="mack">🧱 MACK</option>
     </select>
     <label>Item Number:</label>
     <input type="text" id="itemNum" placeholder="e.g., 667" onkeypress="if(event.key==='Enter')searchItem()">
@@ -226,10 +228,12 @@
       html += equipSection('⚡ HV Testers', 'hv_tester', data.hvTesters, null);
       html += equipSection('🔌 Phasing Sets', 'phasing_set', data.phasingSets, null);
       html += equipSection('❤️ AEDs', 'aed', data.aeds, null);
+      html += equipSection('🧱 MACKs', 'mack', data.macks, null);
 
       var hasCurrent = (data.gloves && data.gloves.length) || (data.sleeves && data.sleeves.length) ||
-        (data.blankets && data.blankets.length) || (data.hvTesters && data.hvTesters.length) ||
-        (data.phasingSets && data.phasingSets.length) || (data.aeds && data.aeds.length);
+        (data.blankets && data.blankets.length) || (data.macks && data.macks.length) ||
+        (data.hvTesters && data.hvTesters.length) || (data.phasingSets && data.phasingSets.length) ||
+        (data.aeds && data.aeds.length);
       if (!hasCurrent) {
         html += '<div class="no-results">No equipment currently assigned</div>';
       }
@@ -259,7 +263,8 @@
         { key: 'blanketHistory', title: '🟫 Blankets', typeKey: 'blanket' },
         { key: 'hvTesterHistory', title: '⚡ HV Testers', typeKey: 'hv_tester' },
         { key: 'phasingSetHistory', title: '🔌 Phasing Sets', typeKey: 'phasing_set' },
-        { key: 'aedHistory', title: '❤️ AEDs', typeKey: 'aed' }
+        { key: 'aedHistory', title: '❤️ AEDs', typeKey: 'aed' },
+        { key: 'mackHistory', title: '🧱 MACKs', typeKey: 'mack' }
       ];
 
       types.forEach(function(t) {
@@ -361,7 +366,7 @@
         return;
       }
       var typeLabels = { glove:'🧤 Glove', sleeve:'💪 Sleeve', blanket:'🟫 Blanket',
-        hv_tester:'⚡ HV Tester', phasing_set:'🔌 Phasing Set', aed:'❤️ AED' };
+        hv_tester:'⚡ HV Tester', phasing_set:'🔌 Phasing Set', aed:'❤️ AED', mack:'🧱 MACK' };
       var typeLabel = typeLabels[itemType] || itemType;
       var badgeClass = 'badge-' + itemType;
 

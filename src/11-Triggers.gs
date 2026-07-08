@@ -187,93 +187,7 @@ function onChangeHandler(e) {
  * Used for automatic sync when rows are deleted.
  */
 function syncNewItemsLogSilent() {
-  try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var glovesSheet = ss.getSheetByName('Gloves');
-    var sleevesSheet = ss.getSheetByName('Sleeves');
-    var inventorySheet = ss.getSheetByName('Inventory Reports');
-
-    if (!inventorySheet) return;
-
-    // Build sets of current item numbers
-    var currentGloves = new Set();
-    var currentSleeves = new Set();
-
-    if (glovesSheet && glovesSheet.getLastRow() > 1) {
-      var gloveData = glovesSheet.getRange(2, 1, glovesSheet.getLastRow() - 1, 1).getValues();
-      gloveData.forEach(function(row) {
-        var itemNum = String(row[0]).trim();
-        if (itemNum) currentGloves.add(itemNum);
-      });
-    }
-
-    if (sleevesSheet && sleevesSheet.getLastRow() > 1) {
-      var sleeveData = sleevesSheet.getRange(2, 1, sleevesSheet.getLastRow() - 1, 1).getValues();
-      sleeveData.forEach(function(row) {
-        var itemNum = String(row[0]).trim();
-        if (itemNum) currentSleeves.add(itemNum);
-      });
-    }
-
-    // Check New Items Log entries against current inventory
-    var data = inventorySheet.getDataRange().getValues();
-    var inLogSection = false;
-    var headerFound = false;
-    var rowsToDelete = [];
-    var removedItems = [];
-
-    for (var i = 0; i < data.length; i++) {
-      var firstCell = String(data[i][0]).trim();
-
-      if (firstCell.indexOf('NEW ITEMS LOG') !== -1) {
-        inLogSection = true;
-        continue;
-      }
-
-      if (inLogSection && firstCell === 'Date Added') {
-        headerFound = true;
-        continue;
-      }
-
-      if (inLogSection && headerFound && firstCell && firstCell !== '') {
-        var logItemNum = String(data[i][1]).trim();
-        var logItemType = String(data[i][2]).trim();
-
-        // Check if item still exists in inventory
-        var exists = false;
-        if (logItemType === 'Glove') {
-          exists = currentGloves.has(logItemNum);
-        } else if (logItemType === 'Sleeve') {
-          exists = currentSleeves.has(logItemNum);
-        }
-
-        if (!exists && logItemNum) {
-          rowsToDelete.push(i + 1);
-          removedItems.push(logItemNum);
-        }
-      }
-    }
-
-    // Delete orphaned entries (from bottom to top)
-    if (rowsToDelete.length > 0) {
-      rowsToDelete.reverse();
-      for (var r = 0; r < rowsToDelete.length; r++) {
-        inventorySheet.deleteRow(rowsToDelete[r]);
-      }
-
-      // Also reinitialize known item numbers
-      initializeKnownItemNumbers('Gloves');
-      initializeKnownItemNumbers('Sleeves');
-
-      // Update the inventory reports
-      updateInventoryReports();
-
-      ss.toast('Removed ' + removedItems.length + ' item(s) from New Items Log', '🗑️ Auto-Synced', 3);
-      logEvent('Auto-synced New Items Log: removed items ' + removedItems.join(', '));
-    }
-  } catch (err) {
-    Logger.log('Error in syncNewItemsLogSilent: ' + err);
-  }
+  return; // No-op: Inventory Reports sheet is deleted
 }
 
 /**
@@ -291,13 +205,19 @@ function onEdit(e) {
     var editedCol = e.range.getColumn();
     var editedRow = e.range.getRow();
 
+    // Ignore edits to the Archive checkbox in cell O2 (row 2, col 15) in simple onEdit -
+    // the installable onEditHandler will handle it because it requires full auth.
+    if ((sheetName === 'Safety Equipment Needs' || sheetName === 'Safety Reports') && editedRow === 2 && editedCol === 15) {
+      return;
+    }
+
     // =========================================================================
     // DUPLICATE ITEM NUMBER VALIDATION (Column A edits on inventory sheets)
     // =========================================================================
     // Check if this is an item number edit on one of the unique-item sheets
     if (editedCol === 1 && editedRow >= 2) {
       // UNIQUE_ITEM_SHEETS is defined in Code.gs - these sheets require unique item numbers
-      var uniqueSheets = [SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS, SHEET_HV_TESTERS, SHEET_PHASING_SETS, SHEET_AED, SHEET_GROUNDS, SHEET_HOT_STICKS];
+      var uniqueSheets = [SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS, SHEET_MACKS, SHEET_HV_TESTERS, SHEET_PHASING_SETS, SHEET_AED, SHEET_GROUNDS, SHEET_HOT_STICKS];
       if (uniqueSheets.indexOf(sheetName) !== -1) {
         // Validate uniqueness - this will clear the cell and show error if duplicate
         if (!validateUniqueItemNumber(e, sheetName)) {
@@ -472,11 +392,29 @@ function onEditHandler(e) {
     Logger.log('onEditHandler fired: sheet=' + sheetName + ', row=' + editedRow + ', col=' + editedCol);
 
     // =========================================================================
+    // ARCHIVE CHECKBOX BUTTON (Cell O2 = row 2, col 15 on Safety Equipment Needs)
+    // =========================================================================
+    if ((sheetName === 'Safety Equipment Needs' || sheetName === 'Safety Reports') && editedRow === 2 && editedCol === 15) {
+      var val = sheet.getRange(2, 15).getValue();
+      if (val === true) {
+        // Immediately reset checkbox to false
+        sheet.getRange(2, 15).setValue(false);
+        // Show archive dialog
+        try {
+          showArchiveResolvedEquipmentDialog();
+        } catch (dialogErr) {
+          Logger.log('Error opening archive dialog from checkbox: ' + dialogErr);
+        }
+      }
+      return; // Handled
+    }
+
+    // =========================================================================
     // DUPLICATE ITEM NUMBER VALIDATION (Column A edits on inventory sheets)
     // =========================================================================
     // Check if this is an item number edit on one of the unique-item sheets
     if (editedCol === 1 && editedRow >= 2) {
-      var uniqueSheets = [SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS, SHEET_HV_TESTERS, SHEET_PHASING_SETS, SHEET_AED, SHEET_GROUNDS, SHEET_HOT_STICKS];
+      var uniqueSheets = [SHEET_GLOVES, SHEET_SLEEVES, SHEET_BLANKETS, SHEET_MACKS, SHEET_HV_TESTERS, SHEET_PHASING_SETS, SHEET_AED, SHEET_GROUNDS, SHEET_HOT_STICKS];
       if (uniqueSheets.indexOf(sheetName) !== -1) {
         // Validate uniqueness - this will clear the cell and show error if duplicate
         if (!validateUniqueItemNumber(e, sheetName)) {
@@ -505,6 +443,13 @@ function onEditHandler(e) {
           if (!existingDate) {
             sheet.getRange(editedRow, senResolvedOnCol).setValue(new Date());
             Logger.log('Auto-set Resolved On date for Safety Equipment Needs row ' + editedRow);
+          }
+          // Archive immediately
+          try {
+            archiveSingleSafetyEquipmentRow(sheet, editedRow);
+            Logger.log('Archived Safety Equipment Needs row ' + editedRow + ' immediately on edit');
+          } catch (archErr) {
+            Logger.log('Error archiving row in onEditHandler: ' + archErr);
           }
         } else if (newStatus !== 'resolved' && newStatus !== '') {
           // If status changed away from Resolved, clear the date
@@ -945,9 +890,9 @@ function processEdit(e) {
   // Ignore header rows
   if (editedRow < 2) return;
 
-  // Only process edits in Glove Swaps, Sleeve Swaps, Blanket Swaps, Gloves, Sleeves, Blankets, Employees, Employee History, or Reclaims tabs
-  if (sheetName !== SHEET_GLOVE_SWAPS && sheetName !== SHEET_SLEEVE_SWAPS && sheetName !== SHEET_BLANKET_SWAPS &&
-      sheetName !== SHEET_GLOVES && sheetName !== SHEET_SLEEVES && sheetName !== SHEET_BLANKETS &&
+  // Only process edits in Glove Swaps, Sleeve Swaps, Blanket Swaps, MACK Swaps, Gloves, Sleeves, Blankets, MACKs, Employees, Employee History, or Reclaims tabs
+  if (sheetName !== SHEET_GLOVE_SWAPS && sheetName !== SHEET_SLEEVE_SWAPS && sheetName !== SHEET_BLANKET_SWAPS && sheetName !== SHEET_MACK_SWAPS &&
+      sheetName !== SHEET_GLOVES && sheetName !== SHEET_SLEEVES && sheetName !== SHEET_BLANKETS && sheetName !== SHEET_MACKS &&
       sheetName !== SHEET_EMPLOYEES && sheetName !== 'Employee History' &&
       sheetName !== SHEET_GROUNDS &&
       sheetName !== SHEET_HOT_STICKS) {
@@ -1101,6 +1046,57 @@ function processEdit(e) {
         var changeOutDate = calculateBlanketChangeOut(testDate, assignedTo, location);
         if (changeOutDate) {
           var changeOutCell = sheet.getRange(editedRow, 9);  // Column I
+          try {
+            if (changeOutDate === 'N/A') {
+              changeOutCell.setNumberFormat('@');
+            } else {
+              changeOutCell.setNumberFormat('MM/dd/yyyy');
+            }
+          } catch (fmtErr) { /* Ignore format errors on typed columns */ }
+          changeOutCell.setValue(changeOutDate);
+        }
+      }
+      return;
+    }
+  }
+
+  // Handle MACKs tab edits (Assigned To, Status, Test Date columns)
+  if (sheetName === SHEET_MACKS) {
+    var mackAssignedToCol = 9;   // Column I = Assigned To
+    var mackTestDateCol = 5;     // Column E = Test Date
+    var mackStatusCol = 8;       // Column H = Status
+    var mackLocationCol = 7;     // Column G = Location
+    var mackNotesCol = 12;       // Column L = Notes
+
+    logEvent('processEdit: MACKs sheet, editedCol=' + editedCol, 'DEBUG');
+
+    // Handle Status changes - when 'On Shelf', auto-populate Location and Assigned To
+    if (editedCol === mackStatusCol) {
+      var statusValue = String(newValue || '').trim();
+      if (statusValue === 'On Shelf') {
+        sheet.getRange(editedRow, mackLocationCol).setValue('Helena');
+        sheet.getRange(editedRow, mackAssignedToCol).setValue('On Shelf');
+        ss.toast('Location and Assigned To set to "On Shelf" / "Helena"', '📍 Auto-Updated', 3);
+      }
+      return;
+    }
+
+    // Handle Assigned To changes - auto-populate Location from Employees sheet
+    if (editedCol === mackAssignedToCol) {
+      handleMackAssignedToChange(ss, sheet, editedRow, newValue);
+      return;
+    }
+
+    // Handle Test Date changes - update Change Out Date
+    if (editedCol === mackTestDateCol) {
+      var testDate = sheet.getRange(editedRow, 5).getValue();      // Column E
+      var location = sheet.getRange(editedRow, 7).getValue();      // Column G
+      var assignedTo = sheet.getRange(editedRow, 9).getValue();    // Column I
+
+      if (testDate) {
+        var changeOutDate = calculateMackChangeOut(testDate, assignedTo, location);
+        if (changeOutDate) {
+          var changeOutCell = sheet.getRange(editedRow, 10);  // Column J
           try {
             if (changeOutDate === 'N/A') {
               changeOutCell.setNumberFormat('@');
@@ -1310,6 +1306,29 @@ function processEdit(e) {
       // Date Changed column edited - read actual cell value to get Date object
       var cellValue = sheet.getRange(editedRow, 10).getValue();
       handleBlanketDateChangedEdit(ss, sheet, blanketsSheet, editedRow, cellValue);
+    }
+  }
+
+  // Handle MACK Swaps tab edits
+  if (sheetName === SHEET_MACK_SWAPS) {
+    var macksSheet = ss.getSheetByName(SHEET_MACKS);
+
+    if (!macksSheet) {
+      logEvent('processEdit: MACKs sheet not found', 'ERROR');
+      return;
+    }
+
+    // Column I (9) = Pick List Item # (manual edit), Column K (11) = Picked checkbox, Column L (12) = Date Changed
+    if (editedCol === 9) {
+      // Pick List Item # manually edited
+      handleMackPickListManualEdit(ss, sheet, macksSheet, editedRow, newValue);
+    } else if (editedCol === 11) {
+      // Picked checkbox changed
+      handleMackPickedCheckboxChange(ss, sheet, macksSheet, editedRow, newValue);
+    } else if (editedCol === 12) {
+      // Date Changed column edited - read actual cell value to get Date object
+      var cellValue = sheet.getRange(editedRow, 12).getValue();
+      handleMackDateChangedEdit(ss, sheet, macksSheet, editedRow, cellValue);
     }
   }
 }

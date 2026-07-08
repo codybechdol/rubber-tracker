@@ -420,6 +420,12 @@ function collectAndGroupTasks(ss) {
   var afterBlanket = countTasks(tasksByLocation);
   Logger.log('collectAndGroupTasks: Blanket Swaps added ' + (afterBlanket - beforeBlanket) + ' tasks');
 
+  // Collect from MACK Swaps
+  var beforeMack = countTasks(tasksByLocation);
+  collectSwapTasks(ss, SHEET_MACK_SWAPS, 'MACK', tasksByLocation, employeeLocations, employeeForemen, employeePhones, today);
+  var afterMack = countTasks(tasksByLocation);
+  Logger.log('collectAndGroupTasks: MACK Swaps added ' + (afterMack - beforeMack) + ' tasks');
+
   // Collect from HV Tester Swaps (Phase 2 - equipment-based format)
   var beforeHVTester = countTasks(tasksByLocation);
   collectEquipmentSwapTasks(ss, SHEET_HV_TESTER_SWAPS, 'HV Tester', tasksByLocation, employeeLocations, employeeForemen, employeePhones, today);

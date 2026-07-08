@@ -460,3 +460,22 @@ function calculateNextJobNumberSuffix(sheet, baseJobNumber, classification) {
     return baseJobNumber + '.' + nextSuf;
   }
 }
+
+/**
+ * Safely sets the number format of a range, catching any exceptions that might
+ * occur when calling this on typed columns inside Google Sheets Tables.
+ * 
+ * @param {Range} range - The range to set format for
+ * @param {string} format - The format pattern (e.g. 'MM/dd/yyyy')
+ * @returns {Range} - The input range to preserve method chaining
+ */
+function safeSetNumberFormat(range, format) {
+  if (!range) return range;
+  try {
+    range.setNumberFormat(format);
+  } catch (e) {
+    // Ignore format errors on typed columns
+  }
+  return range;
+}
+
