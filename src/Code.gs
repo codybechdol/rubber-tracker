@@ -14475,7 +14475,9 @@ function getTasksWithMetadata() {
         // Safety Equipment fields
         veh: task.vehicleNumber || '',
         cur: task.currentItem || '',
-        esubj: task.emailSubject || ''
+        esubj: task.emailSubject || '',
+        mon: task.month || '',
+        topic: task.topic || ''
       };
     });
 

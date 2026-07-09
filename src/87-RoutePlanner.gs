@@ -763,7 +763,9 @@ function collectTasksForTripPlanner() {
             isRegistered: t.reg === 1,
             notes: t.n || '',
             vehicleNumber: t.veh || '',
-            currentItem: t.cur || ''
+            currentItem: t.cur || '',
+            month: t.mon || '',
+            topic: t.topic || ''
           };
         });
         Logger.log('Deserialized ' + metadataResult.tasks.length + ' tasks');
