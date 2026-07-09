@@ -11974,7 +11974,69 @@ function setupTaskMetadataSheet() {
     'Next step: Click "Generate Task Metadata" to populate from source sheets.'
   );
 
-  Logger.log('setupTaskMetadataSheet: Complete');
+}
+
+/**
+ * Ensures that the Task Metadata sheet has the correct headers in Row 1.
+ * If the headers are missing or incorrect, it inserts a new row at Row 1 and writes the headers.
+ * This is non-destructive to existing data rows.
+ */
+function ensureTaskMetadataHeaders(sheet) {
+  if (!sheet) return;
+  
+  var firstCell = String(sheet.getRange(1, 1).getValue()).trim();
+  if (firstCell === 'TaskID') {
+    // Headers are already correct
+    return;
+  }
+  
+  Logger.log('ensureTaskMetadataHeaders: Headers missing or incorrect (first cell is "' + firstCell + '"). Repairing...');
+  
+  // Try to clear existing filters first to avoid range conflict errors
+  try {
+    var filter = sheet.getFilter();
+    if (filter) {
+      filter.remove();
+    }
+  } catch (filterErr) {
+    Logger.log('ensureTaskMetadataHeaders: Warning removing filter: ' + filterErr.message);
+  }
+
+  // Insert a row before row 1
+  sheet.insertRowBefore(1);
+  
+  var headers = [
+    'TaskID', 'SourceSheet', 'SourceRow', 'Employee', 'TaskType', 'ItemType',
+    'CurrentItem', 'Location', 'Foreman', 'PhoneNumber', 'DueDate',
+    'ScheduledDate', 'StartTime', 'EndTime', 'Status', 'NotifiedDate',
+    'ScheduledClassDate', 'ClassType', 'IsOffice', 'IsRegistered',
+    'IsDeclined', 'CompletedDate', 'Notes', 'CreatedDate', 'LastModified',
+    'InTaskList'
+  ];
+  
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  
+  // Format header row
+  var headerRange = sheet.getRange(1, 1, 1, headers.length);
+  headerRange.setFontWeight('bold');
+  headerRange.setBackground('#4285f4');
+  headerRange.setFontColor('white');
+  headerRange.setHorizontalAlignment('center');
+  
+  // Freeze header row
+  sheet.setFrozenRows(1);
+  
+  // Re-create filter
+  try {
+    var lastRow = sheet.getLastRow();
+    if (lastRow > 0) {
+      sheet.getRange(1, 1, lastRow, headers.length).createFilter();
+    }
+  } catch (filterCreateErr) {
+    Logger.log('ensureTaskMetadataHeaders: Warning creating filter: ' + filterCreateErr.message);
+  }
+  
+  Logger.log('ensureTaskMetadataHeaders: Headers repaired successfully.');
 }
 
 /**
@@ -13411,6 +13473,8 @@ function generateTaskMetadata() {
     } else {
       return;
     }
+  } else {
+    ensureTaskMetadataHeaders(metadataSheet);
   }
 
   // Cleanup: remove any auto-generated cert tasks from Manual Tasks sheet
@@ -13967,6 +14031,7 @@ function getTasksWithMetadata() {
   if (!metadataSheet) {
     throw new Error('TASK_METADATA_NOT_FOUND: Please run "Generate Task Metadata" first.');
   }
+  ensureTaskMetadataHeaders(metadataSheet);
 
   // Check if metadata sheet is empty
   if (metadataSheet.getLastRow() <= 1) {

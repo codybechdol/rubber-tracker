@@ -12779,6 +12779,7 @@ function createMissingReportTasks(complianceData) {
     Logger.log("createMissingReportTasks: Task Metadata sheet not found");
     return 0;
   }
+  ensureTaskMetadataHeaders(taskSheet);
 
   var weekStartStr = Utilities.formatDate(complianceData.weekStart, Session.getScriptTimeZone(), "MM/dd/yyyy");
   var now = new Date();
