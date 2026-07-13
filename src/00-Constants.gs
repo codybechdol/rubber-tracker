@@ -9,6 +9,7 @@
 // =============================================================================
 // SHEET/TAB NAME CONSTANTS
 // =============================================================================
+const SHEET_DASHBOARD = 'Dashboard';
 const SHEET_EMPLOYEES = 'Employees';
 const SHEET_GLOVES = 'Gloves';
 const SHEET_SLEEVES = 'Sleeves';

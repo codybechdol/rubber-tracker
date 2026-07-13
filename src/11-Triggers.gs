@@ -147,6 +147,8 @@ function createEditTrigger() {
     'The Change Out Date will now auto-update when you edit Date Assigned.');
 }
 
+
+
 /**
  * onChange handler - catches changes that onEdit might miss.
  * This is a backup trigger for more reliable change detection.
@@ -408,6 +410,121 @@ function onEditHandler(e) {
       }
       return; // Handled
     }
+
+    // =========================================================================
+    // EXECUTIVE DASHBOARD & EXPIRING CERTS SMS NOTIFY CHECKBOXES
+    // =========================================================================
+    if ((sheetName === 'Dashboard' && editedCol === 18 && editedRow >= 8 && editedRow <= 11) ||
+        (sheetName === 'Expiring Certs' && editedCol === 8 && editedRow >= 2)) {
+      var val = e.range.getValue();
+      if (val === true) {
+        // Reset checkbox to false immediately
+        e.range.setValue(false);
+        
+        var employeeName, certType, expirationDate;
+        if (sheetName === 'Dashboard') {
+          employeeName = sheet.getRange(editedRow, 19).getValue();
+          certType = sheet.getRange(editedRow, 20).getValue();
+          expirationDate = sheet.getRange(editedRow, 21).getValue();
+        } else {
+          employeeName = sheet.getRange(editedRow, 1).getValue();
+          certType = sheet.getRange(editedRow, 2).getValue();
+          expirationDate = sheet.getRange(editedRow, 3).getValue();
+        }
+        
+        Logger.log('SMS Dialog Trigger: emp=' + employeeName + ', cert=' + certType + ', date=' + expirationDate);
+        
+        if (employeeName && certType) {
+          try {
+            showDashboardSMSDialog(employeeName, certType, expirationDate);
+          } catch (dialogErr) {
+            Logger.log('Error opening dashboard SMS dialog from checkbox: ' + dialogErr);
+          }
+        }
+      }
+      return; // Handled
+    }
+
+    // =========================================================================
+    // EXECUTIVE DASHBOARD - MANUAL PURCHASE LOG EDIT SAVING
+    // =========================================================================
+    if (sheetName === 'Dashboard' && editedRow === 17 && editedCol >= 14 && editedCol <= 17) {
+      var yearVal = sheet.getRange("N15").getValue();
+      if (yearVal && yearVal !== 'All') {
+        var yearKey = String(yearVal);
+        var newVal = Number(e.range.getValue()) || 0;
+        
+        var manualPurchases = {
+          '2026': [0, 0, 0, 0],
+          '2027': [0, 0, 0, 0],
+          '2028': [0, 0, 0, 0]
+        };
+        var savedStr = PropertiesService.getScriptProperties().getProperty('DASHBOARD_NEW_PURCHASES');
+        if (savedStr) {
+          try {
+            manualPurchases = JSON.parse(savedStr);
+          } catch (parseErr) {}
+        }
+        
+        if (!manualPurchases[yearKey]) {
+          manualPurchases[yearKey] = [0, 0, 0, 0];
+        }
+        
+        // Map column index to array index: N=14 (idx 0), O=15 (idx 1), P=16 (idx 2), Q=17 (idx 3)
+        var arrayIdx = editedCol - 14;
+        manualPurchases[yearKey][arrayIdx] = newVal;
+        
+        PropertiesService.getScriptProperties().setProperty('DASHBOARD_NEW_PURCHASES', JSON.stringify(manualPurchases));
+        Logger.log('Saved manual purchases for ' + yearKey + ': ' + JSON.stringify(manualPurchases[yearKey]));
+        
+        // Force refresh total sum in column R
+        var sumCell = sheet.getRange("R17");
+        sumCell.setFormula('=SUM(N17:Q17)');
+      }
+      return; // Handled
+    }
+
+    // =========================================================================
+    // EXPIRING CERTS DATE CHANGE - CLEAR NOTIFIED STATUS
+    // =========================================================================
+    if (sheetName === 'Expiring Certs' && editedCol === 3 && editedRow >= 2) {
+      var employeeName = sheet.getRange(editedRow, 1).getValue();
+      var certType = sheet.getRange(editedRow, 2).getValue();
+      
+      if (employeeName && certType) {
+        clearCertNotifiedStatus(employeeName, certType);
+        
+        // Refresh this row's Column H SMS checkbox state
+        var empSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+        var hasPhone = false;
+        if (empSheet) {
+          var empData = empSheet.getDataRange().getValues();
+          for (var k = 1; k < empData.length; k++) {
+            if (String(empData[k][0]).toLowerCase().trim() === String(employeeName).toLowerCase().trim()) {
+              if (empData[k][4]) hasPhone = true;
+              break;
+            }
+          }
+        }
+        
+        var cellH = sheet.getRange(editedRow, 8);
+        cellH.clearDataValidations().clearContent();
+        if (hasPhone) {
+          var ruleCheckbox = SpreadsheetApp.newDataValidation().requireCheckbox().build();
+          cellH.setValue(false).setDataValidation(ruleCheckbox);
+        } else {
+          cellH.setValue("No Phone");
+        }
+        
+        // Refresh dashboard
+        var dashSheet = ss.getSheetByName(SHEET_DASHBOARD);
+        if (dashSheet) {
+          setupDashboardLayout(dashSheet);
+        }
+      }
+    }
+
+
 
     // =========================================================================
     // DUPLICATE ITEM NUMBER VALIDATION (Column A edits on inventory sheets)

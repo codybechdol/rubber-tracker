@@ -896,7 +896,8 @@
           "Darrell Swann F",
           "Dillon Hahnkamp JL",
           "Tyson Smith 4 ap",
-          "Daniel Cole 4 ap Tues-Fri"
+          "Daniel Cole 4 ap Tues-Fri",
+          "Waco Worts F Cutover set up Sat 7-18"
         ];
         var debugHtml = '<ul class="list-unstyled mb-0">';
         testNames.forEach(function(name) {
@@ -3531,6 +3532,10 @@
       // Example: "Waco Worts F Crew to 5 10's this wk" → "Waco Worts F"
       // "Crew to X XX's..." means a temporary schedule change (can be ignored)
       cleanText = cleanText.replace(/\s+Crew\s+to\s+.*$/i, '').trim();
+
+      // Strip cutover annotations that appear after role codes
+      // Example: "Waco Worts F Cutover set up Sat 7-18" → "Waco Worts F"
+      cleanText = cleanText.replace(/\s+Cut[-\s]?over\b.*$/i, '').trim();
 
       // Strip standalone schedule pattern: "4 10's M-Th", "5 8's Mon-Fri", "5 10's this wk", "4-10's", "5 10s"
       // These can appear after role without "Crew to" prefix

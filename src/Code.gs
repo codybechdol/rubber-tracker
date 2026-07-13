@@ -3524,7 +3524,7 @@ function processExpiringCertsImportMultiRow(parsedData, selectedCertTypes) {
 
   // Load existing records from Expiring Certs sheet to merge
   var existingRecords = {};
-  var headers = ['Employee Name', 'Item Type', 'Expiration Date', 'Location', 'Job #', 'Days Until Expiration', 'Status'];
+  var headers = ['Employee Name', 'Item Type', 'Expiration Date', 'Location', 'Job #', 'Days Until Expiration', 'Status', 'SMS'];
   var existingData = [];
   
   if (expiringSheet.getLastRow() > 1) {
@@ -3907,12 +3907,55 @@ function sortExpiringCertsSheet(sheet) {
     'EICA Basic Helicopter Line Construction Safety'
   ];
 
+  // Get notified tasks from Task Metadata once for efficiency
+  var metaSheet = sheet.getParent().getSheetByName('Task Metadata');
+  var notifiedTasks = {};
+  if (metaSheet) {
+    var metaData = metaSheet.getDataRange().getValues();
+    var metaHeaders = metaData[0];
+    var empCol = metaHeaders.indexOf('Employee');
+    var typeCol = metaHeaders.indexOf('ItemType');
+    var taskTypeCol = metaHeaders.indexOf('TaskType');
+    var notifiedCol = metaHeaders.indexOf('NotifiedDate');
+    if (empCol !== -1 && typeCol !== -1 && notifiedCol !== -1 && taskTypeCol !== -1) {
+      for (var i = 1; i < metaData.length; i++) {
+        var emp = String(metaData[i][empCol]).toLowerCase().trim();
+        var itm = String(metaData[i][typeCol]).toLowerCase().trim();
+        var tsk = String(metaData[i][taskTypeCol]).toLowerCase().trim();
+        var hasNotified = metaData[i][notifiedCol];
+        if (tsk === 'cert expiring' && hasNotified) {
+          notifiedTasks[emp + '|' + itm] = true;
+        }
+      }
+    }
+  }
+
+  // Get employee phones from Employees sheet
+  var empSheet = sheet.getParent().getSheetByName(SHEET_EMPLOYEES);
+  var empPhones = {};
+  if (empSheet) {
+    var empData = empSheet.getDataRange().getValues();
+    for (var i = 1; i < empData.length; i++) {
+      var name = String(empData[i][0]).toLowerCase().trim();
+      var phone = empData[i][4]; // Column E
+      if (phone) {
+        empPhones[name] = phone;
+      }
+    }
+  }
+
   var formulas = [];
+  var smsValues = [];
+  var smsValidations = [];
+  var ruleCheckbox = SpreadsheetApp.newDataValidation().requireCheckbox().build();
+
   for (var f = 0; f < values.length; f++) {
     var rowNum = f + 2;
+    var empName = String(values[f][0] || '').trim();
     var certType = String(values[f][1] || '').trim();
     var isNonExpiring = nonExpiringList.indexOf(certType) !== -1;
 
+    // Formulas for Column F and Column G
     if (isNonExpiring) {
       formulas.push([
         '="N/A"',
@@ -3924,8 +3967,34 @@ function sortExpiringCertsSheet(sheet) {
         '=IF(F' + rowNum + '="PRIORITY - Need Copy","PRIORITY - Need Copy",IF(F' + rowNum + '="N/A","No Date Set",IF(F' + rowNum + '<0,"EXPIRED",IF(F' + rowNum + '<=7,"CRITICAL",IF(F' + rowNum + '<=30,"WARNING",IF(F' + rowNum + '<=60,"UPCOMING","OK"))))))'
       ]);
     }
+
+    // Static Column H
+    var taskKey = empName.toLowerCase().trim() + '|' + certType.toLowerCase().trim();
+    var hasPhone = !!empPhones[empName.toLowerCase().trim()];
+    var isNotified = !!notifiedTasks[taskKey];
+
+    if (isNotified) {
+      smsValues.push(["💬 Notified"]);
+      smsValidations.push([null]);
+    } else if (!hasPhone) {
+      smsValues.push(["No Phone"]);
+      smsValidations.push([null]);
+    } else {
+      smsValues.push([false]);
+      smsValidations.push([ruleCheckbox]);
+    }
   }
+
+  // Set formulas for F and G
   sheet.getRange(2, 6, values.length, 2).setFormulas(formulas);
+
+  // Set values and validations for H
+  var smsRange = sheet.getRange(2, 8, values.length, 1);
+  smsRange.clearDataValidations().clearContent();
+  smsRange.setValues(smsValues);
+  smsRange.setDataValidations(smsValidations);
+  smsRange.setHorizontalAlignment("center");
+  
   Logger.log('sortExpiringCertsSheet: Sorted ' + values.length + ' rows with formulas refreshed.');
 }
 
@@ -13602,14 +13671,17 @@ function generateTaskMetadata() {
   var existingMap = {};
 
   if (existingData.length > 1) {
-    // Build map of existing sourceSheet_sourceRow keys with their data
+    // Build map of existing keys with their data
     for (var i = 1; i < existingData.length; i++) {
       var existingSourceSheet = existingData[i][1]; // Column B: SourceSheet
       var existingSourceRow = existingData[i][2];   // Column C: SourceRow
       if (!existingSourceSheet || !existingSourceRow) continue;
       
-      var key = existingSourceSheet + '_' + existingSourceRow;
-      existingMap[key] = {
+      var employeeVal = String(existingData[i][3] || '').trim().toLowerCase();
+      var taskTypeVal = String(existingData[i][4] || '').trim().toLowerCase();
+      var itemTypeVal = String(existingData[i][5] || '').trim().toLowerCase();
+      
+      var recordObj = {
         rowIndex: i + 1, // 1-based row number
         scheduledDate: existingData[i][11],    // Column L: ScheduledDate
         startTime: existingData[i][12],        // Column M: StartTime
@@ -13627,6 +13699,22 @@ function generateTaskMetadata() {
         inTaskList: existingData[i].length > 25 ? existingData[i][25] : '', // Column Z: InTaskList
         originalRow: existingData[i]           // Store full original row for preserving safety tasks
       };
+      
+      // Primary Key
+      var primaryKey = existingSourceSheet + '_' + existingSourceRow;
+      existingMap[primaryKey] = recordObj;
+      
+      // Secondary Keys for self-healing when rows are sorted/shuffled
+      if (existingSourceSheet === 'Expiring Certs' || taskTypeVal === 'cert expiring') {
+        var secKey = 'cert_' + employeeVal + '_' + itemTypeVal;
+        existingMap[secKey] = recordObj;
+      } else if (existingSourceSheet.indexOf('Swap') !== -1 || taskTypeVal.indexOf('swap') !== -1) {
+        var secKey = 'swap_' + existingSourceSheet.replace(/\s+/g, '') + '_' + employeeVal;
+        existingMap[secKey] = recordObj;
+      } else if (existingSourceSheet === 'Reclaims') {
+        var secKey = 'reclaim_' + employeeVal;
+        existingMap[secKey] = recordObj;
+      }
     }
   }
 
@@ -13640,14 +13728,43 @@ function generateTaskMetadata() {
     var rec = metadataRecords[r];
     var recSourceSheet = rec[1];
     var recSourceRow = rec[2];
+    var recEmployee = String(rec[3] || '').trim().toLowerCase();
+    var recTaskType = String(rec[4] || '').trim().toLowerCase();
+    var recItemType = String(rec[5] || '').trim().toLowerCase();
+    
     var recKey = recSourceSheet + '_' + recSourceRow;
+    var secKey = '';
+    
+    if (recSourceSheet === 'Expiring Certs' || recTaskType === 'cert expiring') {
+      secKey = 'cert_' + recEmployee + '_' + recItemType;
+    } else if (recSourceSheet.indexOf('Swap') !== -1 || recTaskType.indexOf('swap') !== -1) {
+      secKey = 'swap_' + recSourceSheet.replace(/\s+/g, '') + '_' + recEmployee;
+    } else if (recSourceSheet === 'Reclaims') {
+      secKey = 'reclaim_' + recEmployee;
+    }
 
     var inTaskListVal = '';
+    var existing = null;
+    var matchedKeyToMark = '';
 
     if (existingMap[recKey]) {
+      existing = existingMap[recKey];
+      matchedKeyToMark = recKey;
+    } else if (secKey && existingMap[secKey]) {
+      existing = existingMap[secKey];
+      matchedKeyToMark = secKey;
+      Logger.log('generateTaskMetadata: Self-healed key match via secondary key: ' + secKey + ' (mapped row ' + existing.originalRow[2] + ' -> ' + recSourceRow + ')');
+    }
+
+    if (existing) {
       // Task exists - PRESERVE user-edited fields, UPDATE source fields
-      var existing = existingMap[recKey];
-      matchedKeys[recKey] = true;
+      matchedKeys[matchedKeyToMark] = true;
+      if (matchedKeyToMark !== recKey) {
+        // Also mark primary key as matched so it isn't treated as stale
+        var oldPrimaryKey = existing.originalRow[1] + '_' + existing.originalRow[2];
+        matchedKeys[oldPrimaryKey] = true;
+        matchedKeys[recKey] = true;
+      }
 
       // Update columns A-K (source-derived data) and Y (LastModified)
       // Preserve columns L-X (user-edited scheduling state)
@@ -16591,6 +16708,7 @@ function buildSheets() {
   ensureSeparateHistorySheets(); // Remove old History tab and ensure separate history sheets
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheetDefs = [
+    { name: SHEET_DASHBOARD, headers: null, customSetup: true },
     { name: SHEET_EMPLOYEES, headers: ['Name', 'Location', 'Job Number', 'Phone Number', 'Notification Emails', 'MP Email', 'Email Address', 'Glove Size', 'Sleeve Size', 'Hire Date', 'Last Day', 'Last Day Reason', 'Job Classification'] },
     { name: 'Employee History', headers: null, customSetup: true },
     { name: SHEET_GLOVES, headers: ['Glove', 'Size', 'Class', 'Test Date', 'Date Assigned', 'Location', 'Status', 'Assigned To', 'Change Out Date', 'Picked For', 'Notes'] },
@@ -16619,11 +16737,19 @@ function buildSheets() {
       var sheet = ss.getSheetByName(def.name);
       if (!sheet) {
         Logger.log('buildSheets: Creating new sheet "' + def.name + '"');
-        sheet = ss.insertSheet(def.name);
+        if (def.name === SHEET_DASHBOARD) {
+          sheet = ss.insertSheet(def.name, 0);
+        } else {
+          sheet = ss.insertSheet(def.name);
+        }
         if (def.headers) {
           sheet.getRange(1, 1, 1, def.headers.length).setValues([def.headers]);
         }
       } else {
+        if (def.name === SHEET_DASHBOARD) {
+          ss.setActiveSheet(sheet);
+          ss.moveActiveSheet(1); // Move to first tab position
+        }
         // Reset any active selection FIRST to avoid "column level actions" errors
         try {
           SpreadsheetApp.setActiveSheet(sheet);
@@ -16828,6 +16954,12 @@ function buildSheets() {
 
 
   // Reclaims are now integrated directly into Glove/Sleeve swaps
+
+  // Custom setup for Dashboard sheet
+  var dashboardSheet = ss.getSheetByName(SHEET_DASHBOARD);
+  if (dashboardSheet) {
+    setupDashboardLayout(dashboardSheet);
+  }
 
   // Custom setup for Employee History sheet
   var empHistorySheet = ss.getSheetByName('Employee History');
@@ -17231,6 +17363,7 @@ function generateAllReportsPart2() {
  */
 function generateAllReportsPart3() {
   logEvent('generateAllReports Part 3: Starting (training sync, crew sync)...');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
 
   var crewLeadResults = null;
   try {
@@ -17264,6 +17397,17 @@ function generateAllReportsPart3() {
     Logger.log('Part3: syncCrews failed: ' + e);
   }
 
+  // Re-initialize and format the Dashboard layout
+  try {
+    var dashboardSheet = ss.getSheetByName(SHEET_DASHBOARD);
+    if (dashboardSheet) {
+      setupDashboardLayout(dashboardSheet);
+      Logger.log('Part3: Refreshed Dashboard layout');
+    }
+  } catch (dashErr) {
+    Logger.log('Part3: Failed to refresh Dashboard layout: ' + dashErr.message);
+  }
+
   logEvent('generateAllReports Part 3: Complete.');
   return {
     success: true,
@@ -17284,6 +17428,7 @@ function generateAllReports() {
  * Prefer showGenerateAllReportsDialog() for interactive use.
  */
 function generateAllReportsLegacy() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
   try {
     logEvent('Generating all reports...');
 
@@ -17368,6 +17513,17 @@ function generateAllReportsLegacy() {
       Logger.log('generateAllReports: syncCrews returned: ' + JSON.stringify(syncResult));
     } catch (foremanError) {
       Logger.log('generateAllReports: Error syncing crews: ' + foremanError);
+    }
+
+    // Re-initialize and format the Dashboard layout
+    try {
+      var dashboardSheet = ss.getSheetByName(SHEET_DASHBOARD);
+      if (dashboardSheet) {
+        setupDashboardLayout(dashboardSheet);
+        Logger.log('generateAllReportsLegacy: Refreshed Dashboard layout');
+      }
+    } catch (dashErr) {
+      Logger.log('generateAllReportsLegacy: Failed to refresh Dashboard layout: ' + dashErr.message);
     }
 
     logEvent('All reports generated.');
@@ -28024,5 +28180,1040 @@ function logImportDebug(logs) {
   } catch (e) {
     Logger.log('Error in logImportDebug: ' + e.message);
     return 'Error: ' + e.message;
+  }
+}
+
+/**
+ * One-time count of new assignments in 2026 from the history sheets.
+ * Criteria: earliest entry for the item must be in 2026, note is 'New Assignment', Assigned To is 'On Shelf'.
+ */
+function countOneTimeNewPurchases2026(sheetName) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var historySheetName = sheetName + ' History';
+    var historySheet = ss.getSheetByName(historySheetName);
+    if (!historySheet) return 0;
+    
+    var data = historySheet.getDataRange().getValues();
+    if (data.length <= 1) return 0;
+    
+    // Track earliest entry per item
+    var earliestEntries = {}; // itemNum -> { date: Date, assignedTo: string, note: string }
+    
+    var assignedToCol = 5; // Column F (0-indexed 5) for Gloves/Sleeves/Blankets
+    var noteCol = 6;       // Column G (0-indexed 6)
+    if (sheetName === 'MACKs') {
+      assignedToCol = 6;   // Column G (0-indexed 6)
+      noteCol = 7;         // Column H (0-indexed 7)
+    }
+    
+    for (var i = 1; i < data.length; i++) {
+      var dateVal = data[i][0];
+      var itemNum = String(data[i][1]).trim();
+      if (!itemNum) continue;
+      
+      var dateObj = null;
+      if (dateVal instanceof Date) {
+        dateObj = dateVal;
+      } else if (dateVal) {
+        dateObj = parseDateNoon(String(dateVal));
+      }
+      if (!dateObj || isNaN(dateObj.getTime())) continue;
+      
+      var assignedTo = String(data[i][assignedToCol] || '').trim();
+      var note = String(data[i][noteCol] || '').trim();
+      
+      if (!earliestEntries[itemNum] || dateObj.getTime() < earliestEntries[itemNum].date.getTime()) {
+        earliestEntries[itemNum] = {
+          date: dateObj,
+          assignedTo: assignedTo,
+          note: note
+        };
+      }
+    }
+    
+    // Count matches in 2026
+    var count = 0;
+    for (var item in earliestEntries) {
+      var entry = earliestEntries[item];
+      var year = entry.date.getFullYear();
+      var noteLower = entry.note.toLowerCase();
+      var assignedLower = entry.assignedTo.toLowerCase();
+      
+      if (year === 2026 && 
+          noteLower === 'new assignment' && 
+          assignedLower === 'on shelf') {
+        count++;
+      }
+    }
+    
+    return count;
+  } catch (e) {
+    Logger.log('Error in countOneTimeNewPurchases2026 for ' + sheetName + ': ' + e.message);
+    return 0;
+  }
+}
+
+/**
+ * Sets up the professional layout, formulas, dropdowns, and formatting for the Executive Dashboard.
+ * @param {Sheet} sheet - The active Dashboard sheet tab
+ */
+function setupDashboardLayout(sheet) {
+  if (!sheet) return;
+
+  var ss = sheet.getParent();
+
+  // 1. Get active year filter before clearing the sheet
+  var filterYear = "2026";
+  try {
+    var yearVal = sheet.getRange("N15").getValue();
+    if (yearVal) {
+      filterYear = String(yearVal);
+    }
+  } catch (e) {}
+
+  // 2. Load saved manual purchases map from ScriptProperties
+  var manualPurchases = {
+    '2026': null,
+    '2027': [0, 0, 0, 0],
+    '2028': [0, 0, 0, 0]
+  };
+  var savedStr = PropertiesService.getScriptProperties().getProperty('DASHBOARD_NEW_PURCHASES');
+  if (savedStr) {
+    try {
+      var parsed = JSON.parse(savedStr);
+      if (parsed) {
+        for (var y in parsed) {
+          manualPurchases[y] = parsed[y];
+        }
+      }
+    } catch (parseErr) {
+      Logger.log('Error parsing DASHBOARD_NEW_PURCHASES: ' + parseErr.message);
+    }
+  }
+
+  // If 2026 is null, compute the one-time 2026 counts
+  if (manualPurchases['2026'] === null) {
+    var gloves2026 = countOneTimeNewPurchases2026('Gloves');
+    var sleeves2026 = countOneTimeNewPurchases2026('Sleeves');
+    var blankets2026 = countOneTimeNewPurchases2026('Blankets');
+    var macks2026 = countOneTimeNewPurchases2026('MACKs');
+    
+    manualPurchases['2026'] = [gloves2026, sleeves2026, blankets2026, macks2026];
+    PropertiesService.getScriptProperties().setProperty('DASHBOARD_NEW_PURCHASES', JSON.stringify(manualPurchases));
+  }
+
+  // Get current year's counts (default to [0,0,0,0] if not defined)
+  var currentYearCounts = [0, 0, 0, 0];
+  if (filterYear === 'All') {
+    for (var y in manualPurchases) {
+      var arr = manualPurchases[y];
+      if (Array.isArray(arr)) {
+        for (var idx = 0; idx < 4; idx++) {
+          currentYearCounts[idx] += (arr[idx] || 0);
+        }
+      }
+    }
+  } else {
+    var arr = manualPurchases[filterYear];
+    if (Array.isArray(arr)) {
+      currentYearCounts = arr;
+    }
+  }
+
+  // Refresh Expiring Certs formulas so Column H (SMS) is populated
+  var expiringSheet = ss.getSheetByName('Expiring Certs');
+  if (expiringSheet && expiringSheet.getLastRow() > 1) {
+    try {
+      // Ensure the header has Column H
+      var headerRange = expiringSheet.getRange("H1");
+      if (headerRange.getValue() !== "SMS") {
+        headerRange.setValue("SMS");
+      }
+      sortExpiringCertsSheet(expiringSheet);
+    } catch (e) {
+      Logger.log("setupDashboardLayout: Could not refresh expiring certs formulas: " + e.message);
+    }
+  }
+
+  sheet.clear();
+  try {
+    sheet.getDataRange().clearDataValidations();
+  } catch (e) {
+    Logger.log("setupDashboardLayout: Could not clear data validations: " + e.message);
+  }
+  sheet.setHiddenGridlines(false);
+
+  // Set up column widths
+  sheet.setColumnWidth(1, 80);   // A: Category / Item Type
+  sheet.setColumnWidth(2, 70);   // B: Total Personnel / Size
+  sheet.setColumnWidth(3, 70);   // C: Total Assigned / Class
+  sheet.setColumnWidth(4, 80);   // D: Missing / Target Available
+  sheet.setColumnWidth(5, 80);   // E: On Shelf / Swaps
+  sheet.setColumnWidth(6, 80);   // F: In Testing / Total Needed
+  sheet.setColumnWidth(7, 85);   // G: Packed For Testing / Available Stock
+  sheet.setColumnWidth(8, 85);   // H: Packed For Delivery / Expected Inbound
+  sheet.setColumnWidth(9, 90);   // I: Coverage % / Projected Order
+  sheet.setColumnWidth(10, 50);  // J: Spacer
+  sheet.setColumnWidth(11, 50);  // K: Spacer
+  sheet.setColumnWidth(12, 30);  // L: Border spacer
+  sheet.setColumnWidth(13, 140); // M: AED Item / Category
+  sheet.setColumnWidth(14, 90);  // N: Qty On Hand / Gloves
+  sheet.setColumnWidth(15, 90);  // O: Min Threshold / Sleeves
+  sheet.setColumnWidth(16, 90);  // P: Status / Blankets
+  sheet.setColumnWidth(17, 90);  // Q: MACKs
+  sheet.setColumnWidth(18, 90);  // R: Total / Employee
+  sheet.setColumnWidth(19, 100); // S: Cert Type
+  sheet.setColumnWidth(20, 100); // T: Expiration Date
+  sheet.setColumnWidth(21, 80);  // U: Days Left
+  sheet.setColumnWidth(22, 10);  // V: Helper (hidden)
+  sheet.setColumnWidth(23, 10);  // W: Helper (hidden)
+
+  // Hide V and W
+  try {
+    sheet.hideColumns(22, 2);
+  } catch (hideErr) {
+    Logger.log("setupDashboardLayout: Could not hide helper columns: " + hideErr.message);
+  }
+
+  // Row 1: Merged Title Block
+  var titleRange = sheet.getRange("A1:U1");
+  titleRange.merge();
+  titleRange.setValue("📊 EXECUTIVE OPERATIONS & INVENTORY DASHBOARD");
+  titleRange.setFontSize(16).setFontWeight("bold").setFontColor("#ffffff").setBackground("#0f172a").setHorizontalAlignment("center").setVerticalAlignment("middle");
+  sheet.setRowHeight(1, 45);
+
+  // Active Crews
+  sheet.getRange("B2").setValue("Active Crews").setFontWeight("bold").setFontColor("#475569").setHorizontalAlignment("center").setFontSize(9);
+  sheet.getRange("B3").setFormula("=COUNTIF('Job Tracking'!$J:$J, \"Active\")").setFontWeight("bold").setFontSize(18).setFontColor("#1e3a8a").setHorizontalAlignment("center");
+  sheet.getRange("B2:B3").setBackground("#f1f5f9");
+
+  // Field Personnel
+  sheet.getRange("D2").setValue("Field Personnel").setFontWeight("bold").setFontColor("#475569").setHorizontalAlignment("center").setFontSize(9);
+  sheet.getRange("D3").setFormula("=COUNTIFS(Employees!$A:$A, \"<>\", Employees!$C:$C, \"<>previous employee\", Employees!$D:$D, \"<>005-*\")").setFontWeight("bold").setFontSize(18).setFontColor("#1e3a8a").setHorizontalAlignment("center");
+  sheet.getRange("D2:D3").setBackground("#f1f5f9");
+
+  // Pending Swaps (14 Days)
+  sheet.getRange("F2").setValue("Pending Swaps").setFontWeight("bold").setFontColor("#475569").setHorizontalAlignment("center").setFontSize(9);
+  sheet.getRange("F3").setFormula("=N33").setFontWeight("bold").setFontSize(18).setFontColor("#1e3a8a").setHorizontalAlignment("center");
+  sheet.getRange("F2:F3").setBackground("#f1f5f9");
+
+  // Weekly Compliance
+  sheet.getRange("H2").setValue("Compliance Rate").setFontWeight("bold").setFontColor("#475569").setHorizontalAlignment("center").setFontSize(9);
+  sheet.getRange("H3").setFormula(
+    "=IFERROR(COUNTIF('Safety Compliance'!D:J, \"✅\") / (COUNTIF('Safety Compliance'!D:J, \"✅\") + COUNTIF('Safety Compliance'!D:J, \"❌\") + COUNTIF('Safety Compliance'!D:J, \"⏳\")), 1)"
+  ).setFontWeight("bold").setFontSize(18).setFontColor("#1e3a8a").setHorizontalAlignment("center").setNumberFormat("0.0%");
+  sheet.getRange("H2:H3").setBackground("#f1f5f9");
+
+  // Set borders for KPI Cards
+  ["B2:B3", "D2:D3", "F2:F3", "H2:H3"].forEach(function(rng) {
+    sheet.getRange(rng).setBorder(true, true, true, true, false, false, "#cbd5e1", SpreadsheetApp.BorderStyle.SOLID);
+  });
+
+  // Row 5: Spacer
+  sheet.setRowHeight(4, 15);
+  sheet.setRowHeight(5, 10);
+
+  // Row 6: Section Headers
+  var leftSection = sheet.getRange("A6:I6");
+  leftSection.merge().setValue("⚙️ GEAR ALLOCATION & COVERAGE MATRIX");
+  leftSection.setFontWeight("bold").setFontColor("#ffffff").setBackground("#1e293b").setHorizontalAlignment("center").setFontSize(11);
+  
+  var rightSection = sheet.getRange("M6:P6");
+  rightSection.merge().setValue("📋 AED CONSUMABLES & ALERTS");
+  rightSection.setFontWeight("bold").setFontColor("#ffffff").setBackground("#1e293b").setHorizontalAlignment("center").setFontSize(11);
+
+  // Row 6 Right Side: Expiration Header
+  var certHeader = sheet.getRange("R6:V6");
+  certHeader.merge().setFormula(
+    '=IF(COUNTIFS(\'Expiring Certs\'!$C$2:$C, ">="&TODAY(), \'Expiring Certs\'!$C$2:$C, "<="&TODAY()+30) > 4, ' +
+    '"📜 TOP 4 OF " & COUNTIFS(\'Expiring Certs\'!$C$2:$C, ">="&TODAY(), \'Expiring Certs\'!$C$2:$C, "<="&TODAY()+30) & " EXPIRING CERTS", ' +
+    '"📜 UPCOMING CERT EXPIRATIONS (30 DAYS)")'
+  );
+  certHeader.setFontWeight("bold").setFontColor("#ffffff").setBackground("#1e293b").setHorizontalAlignment("center").setFontSize(11);
+
+  // Row 7: Sub-headers
+  var leftSubHeaders = ["Category", "Total Personnel", "Total Assigned", "Missing Gear", "On Shelf", "In Testing", "Packed For Test", "Packed For Delivery", "Coverage %"];
+  sheet.getRange("A7:I7").setValues([leftSubHeaders]).setFontWeight("bold").setFontColor("#1e293b").setBackground("#f8fafc").setHorizontalAlignment("center").setFontSize(9);
+  
+  var rightSubHeaders = ["AED Consumable", "Qty On Hand", "Min Threshold", "Status"];
+  sheet.getRange("M7:P7").setValues([rightSubHeaders]).setFontWeight("bold").setFontColor("#1e293b").setBackground("#f8fafc").setHorizontalAlignment("center").setFontSize(9);
+
+  // Row 7 Right Side: Cert sub-headers
+  sheet.getRange("R7:V7").setValues([["SMS", "Employee", "Cert Type", "Expiration Date", "Days Left"]]).setFontWeight("bold").setFontColor("#1e293b").setBackground("#f8fafc").setHorizontalAlignment("center").setFontSize(9);
+
+  // Row 8 Right Side: Expiring Certs query
+  // Query expiring certs in Apps Script and write statically (with checkbox)
+  var certRows = [];
+  var expiringSheet = ss.getSheetByName('Expiring Certs');
+  if (expiringSheet && expiringSheet.getLastRow() > 1) {
+    var certData = expiringSheet.getRange(2, 1, expiringSheet.getLastRow() - 1, 8).getValues();
+    var today = new Date();
+    today.setHours(0,0,0,0);
+    var thirtyDaysOut = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
+    
+    for (var c = 0; c < certData.length; c++) {
+      var name = certData[c][0];
+      var type = certData[c][1];
+      var expDate = certData[c][2];
+      var daysLeft = certData[c][5];
+      
+      if (expDate instanceof Date) {
+        var expTime = expDate.getTime();
+        if (expTime >= today.getTime() && expTime <= thirtyDaysOut.getTime()) {
+          certRows.push({
+            name: name,
+            type: type,
+            date: expDate,
+            daysLeft: daysLeft
+          });
+        }
+      }
+    }
+    
+    // Sort by date ascending
+    certRows.sort(function(a, b) {
+      return a.date.getTime() - b.date.getTime();
+    });
+  }
+
+  // Get notified tasks from Task Metadata once for efficiency
+  var metaSheet = ss.getSheetByName('Task Metadata');
+  var notifiedTasks = {};
+  if (metaSheet) {
+    var metaData = metaSheet.getDataRange().getValues();
+    var metaHeaders = metaData[0];
+    var empCol = metaHeaders.indexOf('Employee');
+    var typeCol = metaHeaders.indexOf('ItemType');
+    var taskTypeCol = metaHeaders.indexOf('TaskType');
+    var notifiedCol = metaHeaders.indexOf('NotifiedDate');
+    if (empCol !== -1 && typeCol !== -1 && notifiedCol !== -1 && taskTypeCol !== -1) {
+      for (var i = 1; i < metaData.length; i++) {
+        var emp = String(metaData[i][empCol]).toLowerCase().trim();
+        var itm = String(metaData[i][typeCol]).toLowerCase().trim();
+        var tsk = String(metaData[i][taskTypeCol]).toLowerCase().trim();
+        var hasNotified = metaData[i][notifiedCol];
+        if (tsk === 'cert expiring' && hasNotified) {
+          notifiedTasks[emp + '|' + itm] = true;
+        }
+      }
+    }
+  }
+
+  for (var r = 0; r < 4; r++) {
+    var rowNum = r + 8;
+    if (r < certRows.length) {
+      var item = certRows[r];
+      sheet.getRange(rowNum, 19).setValue(item.name); // S: Employee
+      sheet.getRange(rowNum, 20).setValue(item.type); // T: Cert Type
+      sheet.getRange(rowNum, 21).setValue(item.date).setNumberFormat("mm/dd/yyyy"); // U: Expiration Date
+      sheet.getRange(rowNum, 22).setValue(item.daysLeft); // V: Days Left
+      
+      var taskKey = String(item.name).toLowerCase().trim() + '|' + String(item.type).toLowerCase().trim();
+      var isNotified = !!notifiedTasks[taskKey];
+      
+      var smsCell = sheet.getRange(rowNum, 18);
+      smsCell.clearDataValidations().clearContent();
+      
+      if (isNotified) {
+        smsCell.setValue("💬 Notified").setFontColor("#475569").setFontWeight("normal");
+      } else {
+        // Set checkbox for clicking to notify
+        var rule = SpreadsheetApp.newDataValidation().requireCheckbox().build();
+        smsCell.setDataValidation(rule).setValue(false);
+      }
+      smsCell.setHorizontalAlignment("center");
+      sheet.getRange(rowNum, 19, 1, 4).setHorizontalAlignment("center");
+    } else {
+      // Clear empty rows
+      sheet.getRange(rowNum, 18, 1, 5).clearContent().clearDataValidations();
+    }
+  }
+
+  // Rows 8-11: Data rows for Coverage & AED
+  // Row 8: Gloves / Adult Pads
+  sheet.getRange("A8:I8").setValues([[
+    "Gloves",
+    "=COUNTIFS(Employees!$A:$A, \"<>\", Employees!$C:$C, \"<>previous employee\", Employees!$D:$D, \"<>005-*\", Employees!$I:$I, \"<>\")",
+    "=COUNTIFS(Gloves!$H:$H, \"In Service\") + COUNTIFS(Gloves!$H:$H, \"Assigned\")",
+    "=MAX(0, B8 - C8)",
+    "=COUNTIF(Gloves!$H:$H, \"On Shelf\")",
+    "=COUNTIF(Gloves!$H:$H, \"In Testing\")",
+    "=COUNTIF(Gloves!$H:$H, \"Ready For Test\") + COUNTIF(Gloves!$H:$H, \"Packed For Testing\")",
+    "=COUNTIF(Gloves!$H:$H, \"Packed For Delivery\")",
+    "=IF(B8=0, 1, C8/B8)"
+  ]]).setHorizontalAlignment("center");
+  sheet.getRange("I8").setNumberFormat("0.0%");
+
+  sheet.getRange("M8:P8").setValues([[
+    "Adult Pads",
+    5, // User editable count
+    4,
+    "=IF(N8>=O8, \"✅ OK\", \"🚨 REORDER\")"
+  ]]).setHorizontalAlignment("center");
+
+  // Row 9: Sleeves / AED Batteries
+  sheet.getRange("A9:I9").setValues([[
+    "Sleeves",
+    "=COUNTIFS(Employees!$A:$A, \"<>\", Employees!$C:$C, \"<>previous employee\", Employees!$D:$D, \"<>005-*\", Employees!$J:$J, \"<>\")",
+    "=COUNTIFS(Sleeves!$H:$H, \"In Service\") + COUNTIFS(Sleeves!$H:$H, \"Assigned\")",
+    "=MAX(0, B9 - C9)",
+    "=COUNTIF(Sleeves!$H:$H, \"On Shelf\")",
+    "=COUNTIF(Sleeves!$H:$H, \"In Testing\")",
+    "=COUNTIF(Sleeves!$H:$H, \"Ready For Test\") + COUNTIF(Sleeves!$H:$H, \"Packed For Testing\")",
+    "=COUNTIF(Sleeves!$H:$H, \"Packed For Delivery\")",
+    "=IF(B9=0, 1, C9/B9)"
+  ]]).setHorizontalAlignment("center");
+  sheet.getRange("I9").setNumberFormat("0.0%");
+
+  sheet.getRange("M9:P9").setValues([[
+    "AED Batteries",
+    3, // User editable count
+    2,
+    "=IF(N9>=O9, \"✅ OK\", \"🚨 REORDER\")"
+  ]]).setHorizontalAlignment("center");
+
+  // Format status colors for AED
+  var aedStatusRange = sheet.getRange("P8:P9");
+  var aedStatusRule1 = SpreadsheetApp.newConditionalFormatRule()
+    .whenTextContains("🚨")
+    .setBackground("#fef2f2")
+    .setFontColor("#b91c1c")
+    .setRanges([aedStatusRange])
+    .build();
+  var aedStatusRule2 = SpreadsheetApp.newConditionalFormatRule()
+    .whenTextContains("✅")
+    .setBackground("#f0fdf4")
+    .setFontColor("#15803d")
+    .setRanges([aedStatusRange])
+    .build();
+  
+  // Row 10: Blankets
+  sheet.getRange("A10:I10").setValues([[
+    "Blankets",
+    "=B3", // Matches total active crews/foremen count
+    "=COUNTIFS(Blankets!$G:$G, \"In Service\") + COUNTIFS(Blankets!$G:$G, \"Assigned\")",
+    "=MAX(0, B10 - C10)",
+    "=COUNTIF(Blankets!$G:$G, \"On Shelf\")",
+    "=COUNTIF(Blankets!$G:$G, \"In Testing\")",
+    "=COUNTIF(Blankets!$G:$G, \"Ready For Test\") + COUNTIF(Blankets!$G:$G, \"Packed For Testing\")",
+    "=COUNTIF(Blankets!$G:$G, \"Packed For Delivery\")",
+    "=IF(B10=0, 1, C10/B10)"
+  ]]).setHorizontalAlignment("center");
+  sheet.getRange("I10").setNumberFormat("0.0%");
+
+  // Row 11: MACKs
+  sheet.getRange("A11:I11").setValues([[
+    "MACKs",
+    "=B3 * 2", // 2 MACKs per active crew/foreman
+    "=COUNTIFS(MACKs!$H:$H, \"In Service\") + COUNTIFS(MACKs!$H:$H, \"Assigned\")",
+    "=MAX(0, B11 - C11)",
+    "=COUNTIF(MACKs!$H:$H, \"On Shelf\")",
+    "=COUNTIF(MACKs!$H:$H, \"In Testing\")",
+    "=COUNTIF(MACKs!$H:$H, \"Ready For Test\")",
+    "=COUNTIF(MACKs!$H:$H, \"Packed For Delivery\")",
+    "=IF(B11=0, 1, C11/B11)"
+  ]]).setHorizontalAlignment("center");
+  sheet.getRange("I11").setNumberFormat("0.0%");
+
+  // Grid styling for upper section
+  sheet.getRange("A6:I11").setBorder(true, true, true, true, true, true, "#e2e8f0", SpreadsheetApp.BorderStyle.SOLID);
+  sheet.getRange("M6:P9").setBorder(true, true, true, true, true, true, "#e2e8f0", SpreadsheetApp.BorderStyle.SOLID);
+  sheet.getRange("R6:V11").setBorder(true, true, true, true, true, true, "#e2e8f0", SpreadsheetApp.BorderStyle.SOLID);
+
+  // Spacer
+  sheet.setRowHeight(12, 20);
+  sheet.setRowHeight(13, 20);
+
+  // Row 14: Bottom Section Headers
+  var leftProjHeader = sheet.getRange("A14:I14");
+  leftProjHeader.merge().setValue("🛒 SMART PURCHASING PROJECTIONS");
+  leftProjHeader.setFontWeight("bold").setFontColor("#ffffff").setBackground("#1e293b").setHorizontalAlignment("center").setFontSize(11);
+
+  var rightLogHeader = sheet.getRange("M14:U14");
+  rightLogHeader.merge().setValue("📊 INTERACTIVE LOSS & PURCHASE LOG");
+  rightLogHeader.setFontWeight("bold").setFontColor("#ffffff").setBackground("#1e293b").setHorizontalAlignment("center").setFontSize(11);
+
+  // Row 15: Sub-headers
+  var projHeaders = ["Item Type", "Size", "Class", "Target Min", "Swaps (14d)", "Total Needed", "Available", "Expected In", "Projected Order"];
+  sheet.getRange("A15:I15").setValues([projHeaders]).setFontWeight("bold").setFontColor("#1e293b").setBackground("#f8fafc").setHorizontalAlignment("center").setFontSize(9);
+
+  // Row 15 Right Side: Filters
+  sheet.getRange("M15").setValue("Year:").setFontWeight("bold").setHorizontalAlignment("right").setFontSize(9);
+  sheet.getRange("N15").setValue("2026").setHorizontalAlignment("center");
+  sheet.getRange("P15").setValue("Quarter:").setFontWeight("bold").setHorizontalAlignment("right").setFontSize(9);
+  sheet.getRange("Q15").setValue("All").setHorizontalAlignment("center");
+  sheet.getRange("S15").setValue("Month:").setFontWeight("bold").setHorizontalAlignment("right").setFontSize(9);
+  sheet.getRange("T15").setValue("All").setHorizontalAlignment("center");
+
+  // Dropdown validations
+  var yearRule = SpreadsheetApp.newDataValidation().requireValueInList(["All", "2026", "2027", "2028"], true).setAllowInvalid(false).build();
+  var quarterRule = SpreadsheetApp.newDataValidation().requireValueInList(["All", "Q1", "Q2", "Q3", "Q4"], true).setAllowInvalid(false).build();
+  var monthRule = SpreadsheetApp.newDataValidation().requireValueInList(["All", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"], true).setAllowInvalid(false).build();
+
+  sheet.getRange("N15").setDataValidation(yearRule);
+  sheet.getRange("Q15").setDataValidation(quarterRule);
+  sheet.getRange("T15").setDataValidation(monthRule);
+
+  // Dynamic filter helpers (written in hidden V15/W15)
+  sheet.getRange("V15").setFormula(
+    '=IF($N$15="All", DATE(2000,1,1), DATE(VALUE($N$15), IF($T$15="All", IF($Q$15="All", 1, VALUE(RIGHT($Q$15,1))*3-2), MATCH($T$15, {"January","February","March","April","May","June","July","August","September","October","November","December"}, 0)), 1))'
+  );
+  sheet.getRange("W15").setFormula(
+    '=IF($N$15="All", DATE(2099,12,31), EOMONTH(DATE(VALUE($N$15), IF($T$15="All", IF($Q$15="All", 12, VALUE(RIGHT($Q$15,1))*3), MATCH($T$15, {"January","February","March","April","May","June","July","August","September","October","November","December"}, 0)), 1), 0))'
+  );
+
+  // Row 16 Right Side: Loss Log Headers
+  sheet.getRange("M16:R16").setValues([["Category", "Gloves", "Sleeves", "Blankets", "MACKs", "Total"]]).setFontWeight("bold").setFontColor("#1e293b").setBackground("#f8fafc").setHorizontalAlignment("center").setFontSize(9);
+
+  // Row 17: New Purchases row
+  sheet.getRange("M17:R17").setValues([[
+    "New Purchases",
+    currentYearCounts[0],
+    currentYearCounts[1],
+    currentYearCounts[2],
+    currentYearCounts[3],
+    '=SUM(N17:Q17)'
+  ]]).setHorizontalAlignment("center");
+
+  // Row 18: Failed Rubber
+  sheet.getRange("M18:R18").setValues([[
+    "Failed Rubber",
+    '=COUNTIFS(Gloves!$I:$I, "Failed Rubber", Gloves!$F:$F, ">="&$V$15, Gloves!$F:$F, "<="&$W$15)',
+    '=COUNTIFS(Sleeves!$I:$I, "Failed Rubber", Sleeves!$F:$F, ">="&$V$15, Sleeves!$F:$F, "<="&$W$15)',
+    '=COUNTIFS(Blankets!$H:$H, "Failed Rubber", Blankets!$E:$E, ">="&$V$15, Blankets!$E:$E, "<="&$W$15)',
+    '=COUNTIFS(MACKs!$I:$I, "Failed Rubber", MACKs!$F:$F, ">="&$V$15, MACKs!$F:$F, "<="&$W$15)',
+    '=SUM(N18:Q18)'
+  ]]).setHorizontalAlignment("center");
+
+  // Row 19: Lost
+  sheet.getRange("M19:R19").setValues([[
+    "Lost Items",
+    '=COUNTIFS(Gloves!$I:$I, "Lost", Gloves!$F:$F, ">="&$V$15, Gloves!$F:$F, "<="&$W$15)',
+    '=COUNTIFS(Sleeves!$I:$I, "Lost", Sleeves!$F:$F, ">="&$V$15, Sleeves!$F:$F, "<="&$W$15)',
+    '=COUNTIFS(Blankets!$H:$H, "Lost", Blankets!$E:$E, ">="&$V$15, Blankets!$E:$E, "<="&$W$15)',
+    '=COUNTIFS(MACKs!$I:$I, "Lost", MACKs!$F:$F, ">="&$V$15, MACKs!$F:$F, "<="&$W$15)',
+    '=SUM(N19:Q19)'
+  ]]).setHorizontalAlignment("center");
+
+  // Row 20: Destroyed
+  sheet.getRange("M20:R20").setValues([[
+    "Destroyed Items",
+    '=COUNTIFS(Gloves!$I:$I, "Retired", Gloves!$F:$F, ">="&$V$15, Gloves!$F:$F, "<="&$W$15) + COUNTIFS(Gloves!$I:$I, "Destroyed", Gloves!$F:$F, ">="&$V$15, Gloves!$F:$F, "<="&$W$15)',
+    '=COUNTIFS(Sleeves!$I:$I, "Retired", Sleeves!$F:$F, ">="&$V$15, Sleeves!$F:$F, "<="&$W$15) + COUNTIFS(Sleeves!$I:$I, "Destroyed", Sleeves!$F:$F, ">="&$V$15, Sleeves!$F:$F, "<="&$W$15)',
+    '=COUNTIFS(Blankets!$H:$H, "Retired", Blankets!$E:$E, ">="&$V$15, Blankets!$E:$E, "<="&$W$15) + COUNTIFS(Blankets!$H:$H, "Destroyed", Blankets!$E:$E, ">="&$V$15, Blankets!$E:$E, "<="&$W$15)',
+    '=COUNTIFS(MACKs!$I:$I, "Retired", MACKs!$F:$F, ">="&$V$15, MACKs!$F:$F, "<="&$W$15) + COUNTIFS(MACKs!$I:$I, "Destroyed", MACKs!$F:$F, ">="&$V$15, MACKs!$F:$F, "<="&$W$15)',
+    '=SUM(N20:Q20)'
+  ]]).setHorizontalAlignment("center");
+
+  // Border formatting for Loss Log
+  sheet.getRange("M16:R20").setBorder(true, true, true, true, true, true, "#e2e8f0", SpreadsheetApp.BorderStyle.SOLID);
+  sheet.getRange("M17:M20").setFontWeight("bold").setFontColor("#1e293b");
+  sheet.getRange("R17:R20").setFontWeight("bold");
+
+  // Row 16 to 45: Purchasing Projections Table Rows (30 Combinations)
+  var projCombinations = [
+    // Gloves Class 0
+    ["Glove", "8", "0"], ["Glove", "8.5", "0"], ["Glove", "9", "0"], ["Glove", "9.5", "0"],
+    ["Glove", "10", "0"], ["Glove", "10.5", "0"], ["Glove", "11", "0"], ["Glove", "12", "0"],
+    // Gloves Class 2
+    ["Glove", "8", "2"], ["Glove", "8.5", "2"], ["Glove", "9", "2"], ["Glove", "9.5", "2"],
+    ["Glove", "10", "2"], ["Glove", "10.5", "2"], ["Glove", "11", "2"], ["Glove", "12", "2"],
+    // Gloves Class 3
+    ["Glove", "8", "3"], ["Glove", "8.5", "3"], ["Glove", "9", "3"], ["Glove", "9.5", "3"],
+    ["Glove", "10", "3"], ["Glove", "10.5", "3"], ["Glove", "11", "3"], ["Glove", "12", "3"],
+    // Sleeves Class 2
+    ["Sleeve", "Regular", "2"], ["Sleeve", "Large", "2"], ["Sleeve", "X-Large", "2"],
+    // Sleeves Class 3
+    ["Sleeve", "Regular", "3"], ["Sleeve", "Large", "3"], ["Sleeve", "X-Large", "3"]
+  ];
+
+  var projRows = [];
+  for (var r = 0; r < projCombinations.length; r++) {
+    var itemType = projCombinations[r][0];
+    var size = projCombinations[r][1];
+    var classVal = projCombinations[r][2];
+    var rowIdx = 16 + r;
+
+    var swapsFormula = "";
+    var availFormula = "";
+    var inboundFormula = "";
+
+    if (itemType === "Glove") {
+      swapsFormula = '=COUNTIFS(Gloves!$C:$C, B' + rowIdx + ', Gloves!$D:$D, C' + rowIdx + ', Gloves!$H:$H, "Assigned", Gloves!$J:$J, "<=" & (TODAY() + 14)) + COUNTIFS(Gloves!$C:$C, B' + rowIdx + ', Gloves!$D:$D, C' + rowIdx + ', Gloves!$H:$H, "In Service", Gloves!$J:$J, "<=" & (TODAY() + 14))';
+      availFormula = '=COUNTIFS(Gloves!$C:$C, B' + rowIdx + ', Gloves!$D:$D, C' + rowIdx + ', Gloves!$H:$H, "On Shelf") + COUNTIFS(Gloves!$C:$C, B' + rowIdx + ', Gloves!$D:$D, C' + rowIdx + ', Gloves!$H:$H, "Packed For Delivery")';
+      inboundFormula = '=COUNTIFS(Gloves!$C:$C, B' + rowIdx + ', Gloves!$D:$D, C' + rowIdx + ', Gloves!$H:$H, "In Testing") + COUNTIFS(Gloves!$C:$C, B' + rowIdx + ', Gloves!$D:$D, C' + rowIdx + ', Gloves!$H:$H, "Ready For Test") + COUNTIFS(Gloves!$C:$C, B' + rowIdx + ', Gloves!$D:$D, C' + rowIdx + ', Gloves!$H:$H, "Packed For Testing")';
+    } else {
+      swapsFormula = '=COUNTIFS(Sleeves!$C:$C, B' + rowIdx + ', Sleeves!$D:$D, C' + rowIdx + ', Sleeves!$H:$H, "Assigned", Sleeves!$J:$J, "<=" & (TODAY() + 14)) + COUNTIFS(Sleeves!$C:$C, B' + rowIdx + ', Sleeves!$D:$D, C' + rowIdx + ', Sleeves!$H:$H, "In Service", Sleeves!$J:$J, "<=" & (TODAY() + 14))';
+      availFormula = '=COUNTIFS(Sleeves!$C:$C, B' + rowIdx + ', Sleeves!$D:$D, C' + rowIdx + ', Sleeves!$H:$H, "On Shelf") + COUNTIFS(Sleeves!$C:$C, B' + rowIdx + ', Sleeves!$D:$D, C' + rowIdx + ', Sleeves!$H:$H, "Packed For Delivery")';
+      inboundFormula = '=COUNTIFS(Sleeves!$C:$C, B' + rowIdx + ', Sleeves!$D:$D, C' + rowIdx + ', Sleeves!$H:$H, "In Testing") + COUNTIFS(Sleeves!$C:$C, B' + rowIdx + ', Sleeves!$D:$D, C' + rowIdx + ', Sleeves!$H:$H, "Ready For Test") + COUNTIFS(Sleeves!$C:$C, B' + rowIdx + ', Sleeves!$D:$D, C' + rowIdx + ', Sleeves!$H:$H, "Packed For Testing")';
+    }
+
+    projRows.push([
+      itemType,
+      size,
+      classVal,
+      2, // Target Min
+      swapsFormula,
+      '=D' + rowIdx + ' + E' + rowIdx, // Total Needed
+      availFormula,
+      inboundFormula,
+      '=MAX(0, F' + rowIdx + ' - (G' + rowIdx + ' + H' + rowIdx + '))' // Projected Order
+    ]);
+  }
+
+  var projRange = sheet.getRange("A16:I45");
+  projRange.setValues(projRows).setHorizontalAlignment("center").setFontSize(9);
+  projRange.setBorder(true, true, true, true, true, true, "#e2e8f0", SpreadsheetApp.BorderStyle.SOLID);
+
+  // Apply bolding to headers and total columns
+  sheet.getRange("I16:I45").setFontWeight("bold").setFontColor("#b91c1c");
+
+  // Conditional formatting to highlight projected orders > 0
+  var orderRange = sheet.getRange("I16:I45");
+  var orderRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenNumberGreaterThan(0)
+    .setBackground("#fef2f2")
+    .setFontColor("#b91c1c")
+    .setRanges([orderRange])
+    .build();
+
+  var coverageRange = sheet.getRange("I8:I11");
+  var coverageRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenNumberLessThan(1.0)
+    .setBackground("#fffbeb")
+    .setFontColor("#d97706")
+    .setRanges([coverageRange])
+    .build();
+
+  // Set all conditional formatting rules
+  var rules = sheet.getConditionalFormatRules();
+  rules.push(aedStatusRule1);
+  rules.push(aedStatusRule2);
+  rules.push(orderRule);
+  rules.push(coverageRule);
+  sheet.setConditionalFormatRules(rules);
+
+  // Row 22: Pending Swaps Title
+  var swapsHeader = sheet.getRange("M22:P22");
+  swapsHeader.merge().setValue("🔄 PENDING SWAPS BREAKDOWN");
+  swapsHeader.setFontWeight("bold").setFontColor("#1e293b").setBackground("#f8fafc").setHorizontalAlignment("center").setFontSize(9);
+
+  // Row 23: Sub-headers
+  sheet.getRange("M23").setValue("Gear Type").setFontWeight("bold").setFontColor("#475569").setHorizontalAlignment("center").setFontSize(8);
+  var pendingValHeader = sheet.getRange("N23:P23");
+  pendingValHeader.merge().setValue("Pending Count").setFontWeight("bold").setFontColor("#475569").setHorizontalAlignment("center").setFontSize(8);
+
+  // Rows 24-32: Data rows
+  var swapData = [
+    ["Gloves", "=COUNTIFS('Glove Swaps'!$H$2:$H, \"<>Complete\", 'Glove Swaps'!$H$2:$H, \"<>Deferred\", 'Glove Swaps'!$H$2:$H, \"<>Status\", 'Glove Swaps'!$H$2:$H, \"<>\")"],
+    ["Sleeves", "=COUNTIFS('Sleeve Swaps'!$H$2:$H, \"<>Complete\", 'Sleeve Swaps'!$H$2:$H, \"<>Deferred\", 'Sleeve Swaps'!$H$2:$H, \"<>Status\", 'Sleeve Swaps'!$H$2:$H, \"<>\")"],
+    ["Blankets", "=COUNTIFS('Blanket Swaps'!$H$2:$H, \"<>Complete\", 'Blanket Swaps'!$H$2:$H, \"<>Deferred\", 'Blanket Swaps'!$H$2:$H, \"<>Status\", 'Blanket Swaps'!$H$2:$H, \"<>\")"],
+    ["MACKs", "=COUNTIFS('MACK Swaps'!$J$2:$J, \"<>Complete\", 'MACK Swaps'!$J$2:$J, \"<>Deferred\", 'MACK Swaps'!$J$2:$J, \"<>Status\", 'MACK Swaps'!$J$2:$J, \"<>\")"],
+    ["HV Testers", "=COUNTIFS('HV Tester Swaps'!$J$2:$J, \"<>Complete\", 'HV Tester Swaps'!$J$2:$J, \"<>Deferred\", 'HV Tester Swaps'!$J$2:$J, \"<>Status\", 'HV Tester Swaps'!$J$2:$J, \"<>\")"],
+    ["Phasing Sets", "=COUNTIFS('Phasing Set Swaps'!$J$2:$J, \"<>Complete\", 'Phasing Set Swaps'!$J$2:$J, \"<>Deferred\", 'Phasing Set Swaps'!$J$2:$J, \"<>Status\", 'Phasing Set Swaps'!$J$2:$J, \"<>\")"],
+    ["AEDs", "=COUNTIFS('AED Swaps'!$H$2:$H, \"<>Complete\", 'AED Swaps'!$H$2:$H, \"<>Deferred\", 'AED Swaps'!$H$2:$H, \"<>Status\", 'AED Swaps'!$H$2:$H, \"<>\")"],
+    ["Grounds", "=COUNTIFS('Ground Swaps'!$K$2:$K, \"<>Complete\", 'Ground Swaps'!$K$2:$K, \"<>Deferred\", 'Ground Swaps'!$K$2:$K, \"<>Status\", 'Ground Swaps'!$K$2:$K, \"<>\")"],
+    ["Hot Sticks", "=COUNTIFS('Hot Stick Swaps'!$I$2:$I, \"<>Complete\", 'Hot Stick Swaps'!$I$2:$I, \"<>Deferred\", 'Hot Stick Swaps'!$I$2:$I, \"<>Status\", 'Hot Stick Swaps'!$I$2:$I, \"<>\")"]
+  ];
+
+  for (var i = 0; i < swapData.length; i++) {
+    var rNum = 24 + i;
+    sheet.getRange("M" + rNum).setValue(swapData[i][0]).setHorizontalAlignment("center").setFontSize(9);
+    var valRange = sheet.getRange("N" + rNum + ":P" + rNum);
+    valRange.merge().setFormula(swapData[i][1]).setHorizontalAlignment("center").setFontSize(9);
+  }
+
+  // Row 33: Total
+  sheet.getRange("M33").setValue("Total Swaps").setFontWeight("bold").setFontColor("#1e293b").setHorizontalAlignment("center").setFontSize(9);
+  var totalValRange = sheet.getRange("N33:P33");
+  totalValRange.merge().setFormula("=SUM(N24:N32)").setFontWeight("bold").setFontColor("#1e3a8a").setHorizontalAlignment("center").setFontSize(9);
+
+  // Style borders for breakdown table
+  sheet.getRange("M22:P33").setBorder(true, true, true, true, true, true, "#e2e8f0", SpreadsheetApp.BorderStyle.SOLID);
+  sheet.getRange("M24:M32").setFontWeight("bold").setFontColor("#1e293b");
+
+  Logger.log("setupDashboardLayout: Completed dashboard grid setup.");
+}
+
+/**
+ * Opens a modal dialog for confirming and opening native SMS app.
+ */
+function showDashboardSMSDialog(employeeName, certType, expirationDate) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var empSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+  var phone = '';
+  if (empSheet) {
+    var data = empSheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]).toLowerCase().trim() === String(employeeName).toLowerCase().trim()) {
+        phone = data[i][4]; // Column E
+        break;
+      }
+    }
+  }
+  
+  var cleanPhone = String(phone || '').replace(/[^0-9]/g, '');
+  if (cleanPhone.length === 10) {
+    cleanPhone = '1' + cleanPhone;
+  }
+  var firstName = String(employeeName).split(' ')[0];
+  var dateStr = '';
+  if (expirationDate) {
+    var d = new Date(expirationDate);
+    if (!isNaN(d.getTime())) {
+      dateStr = Utilities.formatDate(d, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+    }
+  }
+  
+  var certLower = String(certType).toLowerCase();
+  var defaultMsg = "";
+  if (certLower.indexOf('mec') !== -1 || certLower.indexOf('medical exam') !== -1 || certLower.indexOf('dot physical') !== -1 || certLower.indexOf('medical card') !== -1) {
+    defaultMsg = "Hi " + firstName + ", your DOT Medical Card will expire on " + dateStr + ". Can you send me a picture of your new one?";
+  } else if (certLower.indexOf('driver') !== -1 || certLower.indexOf('license') !== -1 || certLower.indexOf('dl') !== -1) {
+    defaultMsg = "Hi " + firstName + ", your Driver's License will expire on " + dateStr + ". Can you send me a picture (front and back) of your new one?";
+  } else if (certLower.indexOf('harassment') !== -1) {
+    defaultMsg = "Hi " + firstName + ", your Harassment Training will expire on " + dateStr + ". Can you let me know when you get it done? This is required by the NJATC if you are going to be assigned apprentices and the Federal Govt in general. Go to SafetyWallet.org or the mobile app, sign in with your last name and phone number, upper left is a menu with Training and then On Line Training. Make sure you take the 65 minute class and not the 120 minute class.";
+  } else {
+    defaultMsg = "Hi " + firstName + ", your " + certType + " certification expires on " + dateStr + ". Please let us know when you can attend training.";
+  }
+  
+  var template = HtmlService.createTemplateFromFile('DashboardSMSDialog');
+  template.employeeName = employeeName;
+  template.certType = certType;
+  template.phone = phone;
+  template.cleanPhone = cleanPhone;
+  template.message = defaultMsg;
+  
+  var html = template.evaluate()
+    .setWidth(450)
+    .setHeight(320);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Send Notification SMS');
+}
+
+/**
+ * Marks a certification as notified in Task Metadata, then refreshes the dashboard.
+ */
+function markCertNotifiedAndReload(employeeName, certType) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var metaSheet = ss.getSheetByName('Task Metadata');
+    var foundCount = 0;
+    
+    if (metaSheet) {
+      var data = metaSheet.getDataRange().getValues();
+      var headers = data[0];
+      var empCol = headers.indexOf('Employee');
+      var typeCol = headers.indexOf('ItemType');
+      var taskTypeCol = headers.indexOf('TaskType');
+      var notifiedCol = headers.indexOf('NotifiedDate');
+      
+      if (empCol !== -1 && typeCol !== -1 && notifiedCol !== -1 && taskTypeCol !== -1) {
+        var now = new Date();
+        for (var i = 1; i < data.length; i++) {
+          var taskType = String(data[i][taskTypeCol] || '').toLowerCase().trim();
+          var empName = String(data[i][empCol]).toLowerCase().trim();
+          var itemType = String(data[i][typeCol]).toLowerCase().trim();
+          
+          if (taskType === 'cert expiring' && 
+              empName === String(employeeName).toLowerCase().trim() && 
+              itemType === String(certType).toLowerCase().trim()) {
+            
+            metaSheet.getRange(i + 1, notifiedCol + 1).setValue(now);
+            Logger.log('markCertNotifiedAndReload: Marked ' + employeeName + ' for ' + certType + ' as notified.');
+            foundCount++;
+          }
+        }
+      }
+    }
+    
+    // Auto-create task if not found in Task Metadata
+    if (foundCount === 0 && metaSheet) {
+      Logger.log('markCertNotifiedAndReload: No existing task found on Task Metadata. Attempting auto-creation...');
+      var expiringSheet = ss.getSheetByName('Expiring Certs');
+      if (expiringSheet) {
+        var expData = expiringSheet.getDataRange().getValues();
+        var expEmpCol = 0;  // Column A
+        var expTypeCol = 1; // Column B
+        var expDateCol = 2; // Column C
+        
+        var targetRowIndex = -1;
+        var expDateVal = null;
+        for (var j = 1; j < expData.length; j++) {
+          var rowEmp = String(expData[j][expEmpCol]).toLowerCase().trim();
+          var rowType = String(expData[j][expTypeCol]).toLowerCase().trim();
+          if (rowEmp === String(employeeName).toLowerCase().trim() && 
+              rowType === String(certType).toLowerCase().trim()) {
+            targetRowIndex = j + 1; // 1-based row number
+            expDateVal = expData[j][expDateCol];
+            break;
+          }
+        }
+        
+        if (targetRowIndex !== -1) {
+          var empSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+          var empLocation = 'Unknown';
+          var empForeman = 'Unknown';
+          var empPhone = '';
+          if (empSheet) {
+            var empData = empSheet.getDataRange().getValues();
+            for (var k = 1; k < empData.length; k++) {
+              if (String(empData[k][0]).toLowerCase().trim() === String(employeeName).toLowerCase().trim()) {
+                empPhone = empData[k][4]; // Column E
+                empLocation = empData[k][1] || 'Unknown'; // Column B
+                empForeman = empData[k][2] || 'Unknown'; // Column C
+                break;
+              }
+            }
+          }
+          
+          var now = new Date();
+          var dateCreatedStr = Utilities.formatDate(now, Session.getScriptTimeZone() || 'GMT', 'yyyyMMdd');
+          var taskID = 'ExpiringCerts_' + targetRowIndex + '_' + dateCreatedStr;
+          
+          var dueDateStr = '';
+          if (expDateVal) {
+            var d = new Date(expDateVal);
+            if (!isNaN(d.getTime())) {
+              dueDateStr = Utilities.formatDate(d, Session.getScriptTimeZone() || 'GMT', 'yyyy-MM-23 HH:mm:ss');
+            }
+          }
+          
+          var createdDateFormatted = Utilities.formatDate(now, Session.getScriptTimeZone() || 'GMT', 'yyyy-MM-dd');
+          var lastModified = Utilities.formatDate(now, Session.getScriptTimeZone() || 'GMT', 'yyyy-MM-dd HH:mm:ss');
+          var localDateStr = Utilities.formatDate(now, Session.getScriptTimeZone() || 'GMT', 'yyyy-MM-dd');
+          
+          var record = [
+            taskID,                    // A: TaskID
+            'Expiring Certs',          // B: SourceSheet
+            targetRowIndex,            // C: SourceRow
+            employeeName,              // D: Employee
+            'Cert Expiring',           // E: TaskType
+            certType,                  // F: ItemType
+            '',                        // G: CurrentItem
+            empLocation,               // H: Location
+            empForeman,                // I: Foreman
+            empPhone,                  // J: PhoneNumber
+            dueDateStr,                // K: DueDate
+            '',                        // L: ScheduledDate
+            '',                        // M: StartTime
+            '',                        // N: EndTime
+            'Unassigned',              // O: Status
+            localDateStr,              // P: NotifiedDate
+            '',                        // Q: ScheduledClassDate
+            '',                        // R: ClassType
+            'FALSE',                   // S: IsOffice
+            'FALSE',                   // T: IsRegistered
+            'FALSE',                   // U: IsDeclined
+            '',                        // V: CompletedDate
+            '',                        // W: Notes
+            createdDateFormatted,      // X: CreatedDate
+            lastModified,              // Y: LastModified
+            'TRUE'                     // Z: InTaskList
+          ];
+          
+          metaSheet.appendRow(record);
+          Logger.log('markCertNotifiedAndReload: Auto-created task metadata row for ' + employeeName + ' - ' + certType);
+          foundCount++;
+        }
+      }
+    }
+    
+    // Refresh the dashboard
+    var dashSheet = ss.getSheetByName(SHEET_DASHBOARD);
+    if (dashSheet) {
+      setupDashboardLayout(dashSheet);
+    }
+    
+    if (foundCount === 0) {
+      return { success: false, error: 'No active certification task found in Task Metadata for ' + employeeName + ' - ' + certType };
+    }
+    
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+/**
+ * Clears notified, scheduled, and completion statuses from a certification task in Task Metadata.
+ */
+function clearCertNotifiedStatus(employeeName, certType) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var metaSheet = ss.getSheetByName('Task Metadata');
+    if (!metaSheet) return;
+    
+    var data = metaSheet.getDataRange().getValues();
+    var headers = data[0];
+    var empCol = headers.indexOf('Employee');
+    var typeCol = headers.indexOf('ItemType');
+    var taskTypeCol = headers.indexOf('TaskType');
+    var notifiedCol = headers.indexOf('NotifiedDate');
+    var schedCol = headers.indexOf('ScheduledDate');
+    var startCol = headers.indexOf('StartTime');
+    var endCol = headers.indexOf('EndTime');
+    var statusCol = headers.indexOf('Status');
+    var completedCol = headers.indexOf('CompletedDate');
+    
+    if (empCol !== -1 && typeCol !== -1 && taskTypeCol !== -1) {
+      for (var i = 1; i < data.length; i++) {
+        var taskType = String(data[i][taskTypeCol] || '').toLowerCase().trim();
+        var empName = String(data[i][empCol]).toLowerCase().trim();
+        var itemType = String(data[i][typeCol]).toLowerCase().trim();
+        
+        if (taskType === 'cert expiring' && 
+            empName === String(employeeName).toLowerCase().trim() && 
+            itemType === String(certType).toLowerCase().trim()) {
+          
+          if (notifiedCol !== -1) metaSheet.getRange(i + 1, notifiedCol + 1).setValue('');
+          if (schedCol !== -1) metaSheet.getRange(i + 1, schedCol + 1).setValue('');
+          if (startCol !== -1) metaSheet.getRange(i + 1, startCol + 1).setValue('');
+          if (endCol !== -1) metaSheet.getRange(i + 1, endCol + 1).setValue('');
+          if (statusCol !== -1) metaSheet.getRange(i + 1, statusCol + 1).setValue('Unassigned');
+          if (completedCol !== -1) metaSheet.getRange(i + 1, completedCol + 1).setValue('');
+          
+          Logger.log('clearCertNotifiedStatus: Cleared notified/scheduled status for ' + employeeName + ' (' + certType + ').');
+        }
+      }
+    }
+  } catch (e) {
+    Logger.log('clearCertNotifiedStatus ERROR: ' + e.message);
+  }
+}
+
+/**
+ * Handles HTTP GET requests to the Web App.
+ * Used for launching the SMS dialog from the Dashboard sheet without Warden Error 10.
+ */
+function doGet(e) {
+  try {
+    var action = e.parameter.action;
+    if (action === 'sms') {
+      var employeeName = e.parameter.emp || '';
+      var certType = e.parameter.cert || '';
+      var phone = e.parameter.phone || '';
+      var dateStr = e.parameter.date || '';
+      
+      var cleanPhone = String(phone).replace(/[^0-9]/g, '');
+      if (cleanPhone.length === 10) {
+        cleanPhone = '1' + cleanPhone;
+      }
+      var firstName = employeeName.split(' ')[0];
+      var webAppUrl = PropertiesService.getScriptProperties().getProperty('WEB_APP_URL') || '';
+      
+      var certLower = String(certType).toLowerCase();
+      var defaultMsg = "";
+      if (certLower.indexOf('mec') !== -1 || certLower.indexOf('medical exam') !== -1 || certLower.indexOf('dot physical') !== -1 || certLower.indexOf('medical card') !== -1) {
+        defaultMsg = "Hi " + firstName + ", your DOT Medical Card will expire on " + dateStr + ". Can you send me a picture of your new one?";
+      } else if (certLower.indexOf('driver') !== -1 || certLower.indexOf('license') !== -1 || certLower.indexOf('dl') !== -1) {
+        defaultMsg = "Hi " + firstName + ", your Driver's License will expire on " + dateStr + ". Can you send me a picture (front and back) of your new one?";
+      } else if (certLower.indexOf('harassment') !== -1) {
+        defaultMsg = "Hi " + firstName + ", your Harassment Training will expire on " + dateStr + ". Can you let me know when you get it done? This is required by the NJATC if you are going to be assigned apprentices and the Federal Govt in general. Go to SafetyWallet.org or the mobile app, sign in with your last name and phone number, upper left is a menu with Training and then On Line Training. Make sure you take the 65 minute class and not the 120 minute class.";
+      } else {
+        defaultMsg = "Hi " + firstName + ", your " + certType + " certification expires on " + dateStr + ". Please let us know when you can attend training.";
+      }
+      
+      var safeEmpName = employeeName.replace(/'/g, "\\'");
+      var safeCertType = certType.replace(/'/g, "\\'");
+      
+      var html = '<!DOCTYPE html>' +
+        '<html>' +
+        '<head>' +
+        '  <title>Send Notification SMS</title>' +
+        '  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">' +
+        '  <style>' +
+        '    body { font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; padding: 25px; background-color: #f8fafc; color: #1e293b; max-width: 500px; margin: 0 auto; }' +
+        '    .card { border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); background-color: #fff; padding: 20px; }' +
+        '    .header { font-size: 18px; font-weight: 600; margin-bottom: 20px; color: #1e3a8a; }' +
+        '    .footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }' +
+        '  </style>' +
+        '</head>' +
+        '<body>' +
+        '  <div id="mainCard" class="card">' +
+        '    <div class="header">Send Expiration Notification SMS</div>' +
+        '    <div class="mb-3">' +
+        '      <strong>Employee:</strong> ' + employeeName + '<br>' +
+        '      <strong>Phone:</strong> ' + phone + '<br>' +
+        '      <strong>Certification:</strong> ' + certType + '' +
+        '    </div>' +
+        '    <div class="mb-2"><strong>Message Preview:</strong></div>' +
+        '    <textarea id="smsText" class="form-control mb-3" rows="3">' + defaultMsg + '</textarea>' +
+        '    <div class="footer">' +
+        '      <button class="btn btn-secondary btn-sm" onclick="window.close()">Close Window</button>' +
+        '      <button class="btn btn-success btn-sm" onclick="sendSms(\'' + cleanPhone + '\', \'' + safeEmpName + '\', \'' + safeCertType + '\')">💬 Open SMS App</button>' +
+        '    </div>' +
+        '  </div>' +
+        '  <div id="successCard" class="card" style="display:none; text-align:center;">' +
+        '    <div class="header" style="color:#15803d;">✅ Expiration Notification Logged!</div>' +
+        '    <p>The SMS client was launched. You can close this tab now.</p>' +
+        '    <button class="btn btn-secondary btn-sm" onclick="window.close()">Close Tab</button>' +
+        '  </div>' +
+        '  <script>' +
+        '    var webAppUrl = "' + webAppUrl + '";' +
+        '    function sendSms(phone, name, cert) {' +
+        '      var msg = document.getElementById("smsText").value;' +
+        '      var smsUrl = "sms:" + phone + "?body=" + encodeURIComponent(msg);' +
+        '      ' +
+        '      // Notify backend via Image request' +
+        '      var img = new Image();' +
+        '      img.src = webAppUrl + "?action=log&emp=" + encodeURIComponent(name) + "&cert=" + encodeURIComponent(cert);' +
+        '      ' +
+        '      // Open SMS protocol in a separate flow' +
+        '      window.open(smsUrl, "_blank");' +
+        '      ' +
+        '      // Show success message and hide editor' +
+        '      document.getElementById("mainCard").style.display = "none";' +
+        '      document.getElementById("successCard").style.display = "block";' +
+        '      ' +
+        '      setTimeout(function() {' +
+        '        try { google.script.host.close(); } catch(err) {}' +
+        '        try { window.close(); } catch(err) {}' +
+        '      }, 2500);' +
+        '    }' +
+        '  </script>' +
+        '</body>' +
+        '</html>';
+      
+      return HtmlService.createHtmlOutput(html).setSandboxMode(HtmlService.SandboxMode.IFRAME).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    } else if (action === 'log') {
+      var employeeName = e.parameter.emp || '';
+      var certType = e.parameter.cert || '';
+      markCertNotifiedAndReload(employeeName, certType);
+      return ContentService.createTextOutput("Logged").setMimeType(ContentService.MimeType.TEXT);
+    }
+  } catch (err) {
+    return HtmlService.createHtmlOutput("Error: " + err.message);
+  }
+}
+
+/**
+ * Prompt user to configure the deployed SMS Web App URL.
+ */
+function menuConfigureSMSWebApp() {
+  var ui = SpreadsheetApp.getUi();
+  var currentUrl = PropertiesService.getScriptProperties().getProperty('WEB_APP_URL') || '';
+  
+  var response = ui.prompt(
+    'Configure SMS Web App',
+    'Please paste the deployed Web App URL here (from Deploy -> New deployment):\n\n' +
+    'Current URL: ' + (currentUrl || 'Not Configured') + '\n\n' +
+    'Example: https://script.google.com/macros/s/AKfyc.../exec',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (response.getSelectedButton() === ui.Button.OK) {
+    var url = response.getResponseText().trim();
+    if (url.indexOf('https://script.google.com/') === 0) {
+      PropertiesService.getScriptProperties().setProperty('WEB_APP_URL', url);
+      ui.alert('✅ SMS Web App URL saved successfully! Regenerating dashboard...');
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      var dash = ss.getSheetByName(SHEET_DASHBOARD);
+      if (dash) {
+        setupDashboardLayout(dash);
+      }
+    } else {
+      ui.alert('❌ Invalid URL. It must start with https://script.google.com/');
+    }
   }
 }

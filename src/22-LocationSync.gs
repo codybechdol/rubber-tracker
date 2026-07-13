@@ -189,7 +189,24 @@ function syncSheetLocations(ss, sheetName, nameToLocation) {
   if (updates.length > 0) {
     for (var u = 0; u < updates.length; u++) {
       var update = updates[u];
-      sheet.getRange(update.row, locationColIdx + 1).setValue(update.newLocation);
+      try {
+        sheet.getRange(update.row, locationColIdx + 1).setValue(update.newLocation);
+      } catch (err) {
+        logEvent('syncSheetLocations: Validation error on ' + sheetName + ' row ' + update.row + ' col ' + (locationColIdx + 1) + ' (' + err.message + '). Clearing validation for the column and retrying...', 'WARNING');
+        
+        try {
+          // Clear validation for the entire Location column (from row 2 down) to avoid repeating this for other cells
+          var lastRow = sheet.getMaxRows();
+          if (lastRow > 1) {
+            sheet.getRange(2, locationColIdx + 1, lastRow - 1, 1).clearDataValidations();
+          }
+        } catch (clearErr) {
+          logEvent('syncSheetLocations: Failed to clear validation for ' + sheetName + ' column: ' + clearErr.message, 'WARNING');
+        }
+        
+        // Retry setting the value
+        sheet.getRange(update.row, locationColIdx + 1).setValue(update.newLocation);
+      }
       updateCount++;
 
       logEvent('syncSheetLocations: ' + sheetName + ' row ' + update.row +

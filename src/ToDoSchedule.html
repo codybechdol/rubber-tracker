@@ -6267,8 +6267,13 @@
 
       // Check notified/scheduled status
       var certKey = (cert.employee + '_' + cert.certType).toLowerCase().replace(/\s+/g, '_');
-      var isNotified = notifiedTasks[certKey] === true;
-      var isScheduled = scheduledTasks[certKey] === true;
+      var matchingTask = allTasks.find(function(t) {
+        return (t.employee || '').toLowerCase() === (cert.employee || '').toLowerCase() &&
+               ((t.itemType || '').toLowerCase() === (cert.certType || '').toLowerCase() ||
+                (t.certType || '').toLowerCase() === (cert.certType || '').toLowerCase());
+      });
+      var isNotified = (notifiedTasks[certKey] === true) || (matchingTask && matchingTask.notifiedDate);
+      var isScheduled = (scheduledTasks[certKey] === true) || (matchingTask && matchingTask.scheduledDate);
 
       // Get phone number for this employee
       // First use cert.phoneNumber from server (most reliable), then fallback to employeePhoneMap

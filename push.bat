@@ -58,7 +58,7 @@ echo ----------------------------------------
 echo.
 
 REM Push and capture output
-call "%APPDATA%\npm\clasp.cmd" push > push_output.txt 2>&1
+call "%APPDATA%\npm\clasp.cmd" push --force > push_output.txt 2>&1
 set PUSH_RESULT=%ERRORLEVEL%
 type push_output.txt
 

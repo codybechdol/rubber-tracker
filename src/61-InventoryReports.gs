@@ -259,7 +259,7 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
     // Add to known items
     addToKnownItemNumbers(itemNum, sheetName);
     // Handle item source logging
-    processItemSourceLogging(formData, itemNum, itemType, sheetName, ss);
+    processItemSourceLogging(formData, itemNum, itemType, sheetName, ss, rowNum);
     return;
   }
 
@@ -322,7 +322,7 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
     // Add to known items
     addToKnownItemNumbers(itemNum, sheetName);
     // Handle item source logging
-    processItemSourceLogging(formData, itemNum, itemType, sheetName, ss);
+    processItemSourceLogging(formData, itemNum, itemType, sheetName, ss, rowNum);
     return;
   }
 
@@ -372,7 +372,7 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
     // Add to known items
     addToKnownItemNumbers(itemNum, sheetName);
     // Handle item source logging
-    processItemSourceLogging(formData, itemNum, itemType, sheetName, ss);
+    processItemSourceLogging(formData, itemNum, itemType, sheetName, ss, rowNum);
     return;
   }
 
@@ -438,7 +438,7 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
     // Add to known items
     addToKnownItemNumbers(itemNum, sheetName);
     // Handle item source logging
-    processItemSourceLogging(formData, itemNum, itemType, sheetName, ss);
+    processItemSourceLogging(formData, itemNum, itemType, sheetName, ss, rowNum);
     return;
   }
 
@@ -504,7 +504,7 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
     // Add to known items
     addToKnownItemNumbers(itemNum, sheetName);
     // Handle item source logging
-    processItemSourceLogging(formData, itemNum, itemType, sheetName, ss);
+    processItemSourceLogging(formData, itemNum, itemType, sheetName, ss, rowNum);
     return;
   }
 
@@ -566,7 +566,7 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
     // Add to known items
     addToKnownItemNumbers(itemNum, sheetName);
     // Handle item source logging
-    processItemSourceLogging(formData, itemNum, itemType, sheetName, ss);
+    processItemSourceLogging(formData, itemNum, itemType, sheetName, ss, rowNum);
     return;
   }
 
@@ -727,6 +727,9 @@ function processNewItemDialogSubmit(formData, itemNum, sheetName, rowNum) {
       sheet.getRange(rowNum, COL.STATUS).setValue(formData.status);
     }
   }
+
+  // Handle item source logging for Gloves, Sleeves, and Blankets
+  processItemSourceLogging(formData, itemNum, itemType, sheetName, ss, rowNum);
 }
 
 // =============================================================================
@@ -806,14 +809,91 @@ function handleDuplicateItemNumber(itemNum, sheetName, currentRow) {
  * @param {string} itemType - e.g. 'glove', 'sleeve', 'hv_tester', 'aed', etc.
  * @param {string} sheetName - Sheet the item was added to
  * @param {Spreadsheet} ss - Active spreadsheet
+ * @param {number} rowNum - The row index where the item was written
  */
-function processItemSourceLogging(formData, itemNum, itemType, sheetName, ss) {
+function processItemSourceLogging(formData, itemNum, itemType, sheetName, ss, rowNum) {
   var source = 'Purchased';
   if (formData.itemSource === '2') {
     source = 'Reclaimed';
   } else if (formData.itemSource === '3') {
     ss.toast('Item #' + itemNum + ' added', '✅ Item Added', 5);
     return;
+  }
+
+  // Write to the corresponding history sheet
+  try {
+    var historySheetName = sheetName + ' History';
+    var historySheet = ss.getSheetByName(historySheetName);
+    if (historySheet && rowNum) {
+      var sourceSheet = ss.getSheetByName(sheetName);
+      if (sourceSheet) {
+        var rowValues = sourceSheet.getRange(rowNum, 1, 1, sourceSheet.getLastColumn()).getValues()[0];
+        var now = new Date();
+        var dateStr = Utilities.formatDate(now, Session.getScriptTimeZone(), "MM/dd/yyyy");
+        var noteVal = source === 'Purchased' ? 'New Purchase' : 'Reclaimed';
+        var historyRow = [];
+
+        if (sheetName === 'Gloves' || sheetName === 'Sleeves') {
+          // Columns: Date, Item#, Size, Class, Location, AssignedTo, Note
+          var size = rowValues[COLS.INVENTORY.SIZE - 1];
+          var classVal = rowValues[COLS.INVENTORY.CLASS - 1];
+          var location = rowValues[COLS.INVENTORY.LOCATION - 1];
+          var assignedTo = rowValues[COLS.INVENTORY.ASSIGNED_TO - 1];
+          historyRow = [dateStr, itemNum, size, classVal, location, assignedTo, noteVal];
+        } else if (sheetName === 'Blankets') {
+          // Columns: Date, Item#, Type, Class, Location, AssignedTo, Note
+          var type = rowValues[COLS.BLANKETS.TYPE - 1];
+          var classVal = rowValues[COLS.BLANKETS.CLASS - 1];
+          var location = rowValues[COLS.BLANKETS.LOCATION - 1];
+          var assignedTo = rowValues[COLS.BLANKETS.ASSIGNED_TO - 1];
+          historyRow = [dateStr, itemNum, type, classVal, location, assignedTo, noteVal];
+        } else if (sheetName === 'MACKs') {
+          // Columns: Date, Item#, KV, Size, Length, Location, AssignedTo, Note
+          var kv = rowValues[1];
+          var size = rowValues[2];
+          var length = rowValues[3];
+          var location = rowValues[6];
+          var assignedTo = rowValues[8];
+          historyRow = [dateStr, itemNum, kv, size, length, location, assignedTo, noteVal];
+        } else if (sheetName === 'HV Testers' || sheetName === 'Phasing Sets') {
+          // Columns: Date, Item#, Model, KV, Location, AssignedTo, Note
+          var model = rowValues[1];
+          var kv = rowValues[2];
+          var location = rowValues[6];
+          var assignedTo = rowValues[8];
+          historyRow = [dateStr, itemNum, model, kv, location, assignedTo, noteVal];
+        } else if (sheetName === 'AED') {
+          // Columns: Date, Item#, Model, Location, AssignedTo, Note
+          var model = rowValues[1];
+          var location = rowValues[5];
+          var assignedTo = rowValues[7];
+          historyRow = [dateStr, itemNum, model, location, assignedTo, noteVal];
+        } else if (sheetName === 'Grounds') {
+          // Columns: Date, Serial#, Type, Size, KV, Length, Location, AssignedTo, Note
+          var type = rowValues[1];
+          var size = rowValues[2];
+          var kv = rowValues[3];
+          var length = rowValues[4];
+          var location = rowValues[7];
+          var assignedTo = rowValues[9];
+          historyRow = [dateStr, itemNum, type, size, kv, length, location, assignedTo, noteVal];
+        } else if (sheetName === 'Hot Sticks') {
+          // Columns: Date, Item#, Type, Length, Location, AssignedTo, Note
+          var type = rowValues[1];
+          var length = rowValues[2];
+          var location = rowValues[5];
+          var assignedTo = rowValues[7];
+          historyRow = [dateStr, itemNum, type, length, location, assignedTo, noteVal];
+        }
+
+        if (historyRow.length > 0) {
+          historySheet.appendRow(historyRow);
+          Logger.log('processItemSourceLogging: Appended history row to ' + historySheetName + ': ' + JSON.stringify(historyRow));
+        }
+      }
+    }
+  } catch (err) {
+    Logger.log('processItemSourceLogging: Error writing history: ' + err.message);
   }
 
   ss.toast('Item #' + itemNum + ' added as ' + source, '✅ Item Added', 3);
