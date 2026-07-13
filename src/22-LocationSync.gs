@@ -187,31 +187,52 @@ function syncSheetLocations(ss, sheetName, nameToLocation) {
 
   // Apply updates in batch
   if (updates.length > 0) {
-    for (var u = 0; u < updates.length; u++) {
-      var update = updates[u];
-      try {
-        sheet.getRange(update.row, locationColIdx + 1).setValue(update.newLocation);
-      } catch (err) {
-        logEvent('syncSheetLocations: Validation error on ' + sheetName + ' row ' + update.row + ' col ' + (locationColIdx + 1) + ' (' + err.message + '). Clearing validation for the column and retrying...', 'WARNING');
-        
-        try {
-          // Clear validation for the entire Location column (from row 2 down) to avoid repeating this for other cells
-          var lastRow = sheet.getMaxRows();
-          if (lastRow > 1) {
-            sheet.getRange(2, locationColIdx + 1, lastRow - 1, 1).clearDataValidations();
-          }
-        } catch (clearErr) {
-          logEvent('syncSheetLocations: Failed to clear validation for ' + sheetName + ' column: ' + clearErr.message, 'WARNING');
-        }
-        
-        // Retry setting the value
+    try {
+      // Try to apply all updates to the sheet
+      for (var u = 0; u < updates.length; u++) {
+        var update = updates[u];
         sheet.getRange(update.row, locationColIdx + 1).setValue(update.newLocation);
       }
-      updateCount++;
-
-      logEvent('syncSheetLocations: ' + sheetName + ' row ' + update.row +
-               ' - Updated location for ' + update.assignedTo +
-               ' from "' + update.oldLocation + '" to "' + update.newLocation + '"', 'DEBUG');
+      // Force immediate execution to catch validation errors on this sheet
+      SpreadsheetApp.flush();
+      
+      // If flush succeeded, count and log all updates
+      for (var u = 0; u < updates.length; u++) {
+        var update = updates[u];
+        updateCount++;
+        logEvent('syncSheetLocations: ' + sheetName + ' row ' + update.row +
+                 ' - Updated location for ' + update.assignedTo +
+                 ' from "' + update.oldLocation + '" to "' + update.newLocation + '"', 'DEBUG');
+      }
+    } catch (err) {
+      logEvent('syncSheetLocations: Validation error during batch update on ' + sheetName + ' (' + err.message + '). Clearing validation for the column and retrying...', 'WARNING');
+      
+      try {
+        // Clear validation for the entire Location column (from row 2 down)
+        var lastRow = sheet.getMaxRows();
+        if (lastRow > 1) {
+          sheet.getRange(2, locationColIdx + 1, lastRow - 1, 1).clearDataValidations();
+        }
+        SpreadsheetApp.flush();
+      } catch (clearErr) {
+        logEvent('syncSheetLocations: Failed to clear validation for ' + sheetName + ' column: ' + clearErr.message, 'WARNING');
+      }
+      
+      // Retry applying updates
+      for (var u = 0; u < updates.length; u++) {
+        var update = updates[u];
+        sheet.getRange(update.row, locationColIdx + 1).setValue(update.newLocation);
+      }
+      SpreadsheetApp.flush();
+      
+      // Count and log updates on success
+      for (var u = 0; u < updates.length; u++) {
+        var update = updates[u];
+        updateCount++;
+        logEvent('syncSheetLocations: ' + sheetName + ' row ' + update.row +
+                 ' - Updated location for ' + update.assignedTo +
+                 ' from "' + update.oldLocation + '" to "' + update.newLocation + '"', 'DEBUG');
+      }
     }
   }
 
