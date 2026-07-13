@@ -275,11 +275,11 @@ function getEmployeePhoneMapForTasks(ss) {
   Logger.log('Employees sheet headers: ' + JSON.stringify(headers));
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'name' || header === 'employee name') nameCol = h;
     // Match various phone column header formats
     if (header === 'phone number' || header === 'phone' || header === 'phone #' || header === 'cell' || header === 'cell phone') phoneCol = h;
     if (header === 'alternate names' || header === 'alternatenames') altNamesColT = h;
   }
+  nameCol = getEmployeeNameColumnIndex(headers);
 
   Logger.log('Found columns - nameCol: ' + nameCol + ', phoneCol: ' + phoneCol);
 
@@ -4102,11 +4102,11 @@ function getTrainingConfig() {
 
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'name' || header === 'employee name') nameCol = h;
     if (header === 'job number') jobNumCol = h;
     if (header === 'location') locationCol = h;
     if (header === 'job classification') classificationCol = h;
   }
+  nameCol = getEmployeeNameColumnIndex(headers);
 
   if (jobNumCol === -1) {
     return {
@@ -5700,12 +5700,12 @@ function refreshCrewVisitConfigFromEmployees() {
   var nameCol = -1, jobNumCol = -1, locationCol = -1, classificationCol = -1, lastDayCol = -1;
   for (var h = 0; h < empHeaders.length; h++) {
     var header = String(empHeaders[h]).toLowerCase().trim();
-    if (header === 'name' || header === 'employee name') nameCol = h;
     if (header === 'job number') jobNumCol = h;
     if (header === 'location') locationCol = h;
     if (header === 'job classification') classificationCol = h;
     if (header === 'last day') lastDayCol = h;
   }
+  nameCol = getEmployeeNameColumnIndex(empHeaders);
 
   if (jobNumCol === -1) {
     return [];
@@ -6736,11 +6736,11 @@ function syncEmployeeLocationsFromJobTracking() {
   var nameCol = -1, locationCol = -1, jobNumCol = -1, lastDayCol = -1;
   for (var h = 0; h < empHeaders.length; h++) {
     var hdr = String(empHeaders[h]).toLowerCase().trim();
-    if (hdr === 'name' || hdr === 'employee name') nameCol = h;
     if (hdr === 'location') locationCol = h;
     if (hdr === 'job number') jobNumCol = h;
     if (hdr === 'last day') lastDayCol = h;
   }
+  nameCol = getEmployeeNameColumnIndex(empHeaders);
 
   if (nameCol === -1 || locationCol === -1 || jobNumCol === -1) {
     ui.alert('❌ Error', 'Missing required columns (Name, Location, Job Number) in Employees sheet.', ui.ButtonSet.OK);

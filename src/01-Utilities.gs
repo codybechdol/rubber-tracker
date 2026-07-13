@@ -479,3 +479,31 @@ function safeSetNumberFormat(range, format) {
   return range;
 }
 
+/**
+ * Resolves the 0-based column index of the employee name column from headers in a prioritized way.
+ * Prioritizes "employee name" and "employee" over generic "name" to prevent generic columns from overriding it.
+ * @param {Array} headers - Array of header strings
+ * @returns {number} - 0-based column index, or -1 if not found
+ */
+function getEmployeeNameColumnIndex(headers) {
+  if (!headers || !headers.length) return -1;
+  
+  // 1. First priority: specific "employee name" or "employee"
+  for (var i = 0; i < headers.length; i++) {
+    var header = String(headers[i]).toLowerCase().trim();
+    if (header === 'employee name' || header === 'employee') {
+      return i;
+    }
+  }
+  
+  // 2. Second priority: generic "name"
+  for (var i = 0; i < headers.length; i++) {
+    var header = String(headers[i]).toLowerCase().trim();
+    if (header === 'name') {
+      return i;
+    }
+  }
+  
+  return -1;
+}
+

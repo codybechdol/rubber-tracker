@@ -3807,6 +3807,11 @@ function resolveJobToCrew(jobNumber, context) {
   // Extract base job (remove position suffix like .1, .2)
   var baseJob = String(jobNumber).split('.')[0].trim();
 
+  // Exclude placeholder/invalid jobs (starting with 000 or 002)
+  if (baseJob.indexOf('000-') === 0 || baseJob.indexOf('002-') === 0) {
+    return { found: false, crew: null, foreman: null, source: 'excluded', reason: 'Placeholder or excluded job number' };
+  }
+
   // 1. Check if job is directly a tracked crew
   if (trackedCrews[baseJob]) {
     var directForeman = lookupForemanByJobNumber(baseJob);
@@ -3870,9 +3875,7 @@ function resolveJobToCrew(jobNumber, context) {
   var empData = context.employeeData || empSheet.getDataRange().getValues();
   var headers = empData[0].map(function(h) { return String(h).toLowerCase().trim(); });
 
-  var nameCol = headers.indexOf('name');
-  if (nameCol === -1) nameCol = headers.indexOf('employee');
-  if (nameCol === -1) nameCol = headers.indexOf('employee name');
+  var nameCol = getEmployeeNameColumnIndex(empData[0]);
   if (nameCol === -1) nameCol = 0;
 
   var jobCol = headers.indexOf('job number');
@@ -3927,8 +3930,7 @@ function findForemanPrimaryCrew(foremanName, employeeData) {
   if (!foremanName || !employeeData) return null;
 
   var headers = employeeData[0].map(function(h) { return String(h).toLowerCase().trim(); });
-  var nameCol = headers.indexOf('name');
-  if (nameCol === -1) nameCol = headers.indexOf('employee');
+  var nameCol = getEmployeeNameColumnIndex(employeeData[0]);
   if (nameCol === -1) nameCol = 0;
   var jobCol = headers.indexOf('job number');
   if (jobCol === -1) return null;
@@ -5531,7 +5533,21 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   var allThreads = [];
   queries.forEach(function(query) {
     try {
-      var threads = GmailApp.search(query);
+      var threads = [];
+      if (!newOnlyMode) {
+        // Paged search to overcome GmailApp's default 500-thread search limit during full reprocesses
+        var start = 0;
+        var pageSize = 500;
+        var page;
+        do {
+          page = GmailApp.search(query, start, pageSize);
+          threads = threads.concat(page);
+          start += pageSize;
+        } while (page.length === pageSize && threads.length < 3000);
+      } else {
+        // Single search for normal fast daily processing
+        threads = GmailApp.search(query);
+      }
       allThreads = allThreads.concat(threads);
       Logger.log("Query: " + query + " - Found " + threads.length + " threads");
     } catch (e) {
@@ -9009,11 +9025,11 @@ function lookupForemanByJobNumber(jobNumber) {
   var nameCol = -1, jobCol = -1, classCol = -1, secondaryJobCol = -1;
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
-    if (header === "name" || header === "employee" || header === "employee name") nameCol = h;
     if (header === "job number") jobCol = h;
     if (header === "secondary job number") secondaryJobCol = h;
     if (header === "job classification" || header === "classification") classCol = h;
   }
+  nameCol = getEmployeeNameColumnIndex(headers);
 
   if (nameCol === -1) nameCol = 0;
   if (jobCol === -1) return { name: "", jobExists: false };
@@ -9091,13 +9107,13 @@ function lookupForemanPhoneByJobNumber(jobNumber) {
   var nameCol = -1, jobCol = -1, classCol = -1, phoneCol = -1, secondaryJobCol = -1;
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
-    if (header === "name" || header === "employee" || header === "employee name") nameCol = h;
     if (header === "job number") jobCol = h;
     if (header === "secondary job number") secondaryJobCol = h;
     if (header === "job classification" || header === "classification") classCol = h;
     // Match various phone column header formats
     if (header === "phone" || header === "phone number" || header === "phone #" || header === "cell" || header === "cell phone") phoneCol = h;
   }
+  nameCol = getEmployeeNameColumnIndex(headers);
 
   // Use COLS constants as fallback if headers don't match
   // COLS.EMPLOYEES.NAME = 1 (column A, 0-based index 0)
@@ -13801,9 +13817,9 @@ function recordMissingReportResolutions(taskId, weekOf, resolutions, jobNumber, 
           var empNameCol = -1, empJobCol = -1;
           for (var e = 0; e < empHeaders.length; e++) {
             var empHdr = String(empHeaders[e]).toLowerCase().trim();
-            if (empHdr === 'name' || empHdr === 'employee name') empNameCol = e;
             if (empHdr === 'job number' || empHdr === 'job') empJobCol = e;
           }
+          empNameCol = getEmployeeNameColumnIndex(empHeaders);
 
           if (empNameCol >= 0 && empJobCol >= 0) {
             var employeeNameLower = employeeName.toLowerCase().trim();
@@ -14503,12 +14519,12 @@ function getJobForemanMappingsForDialog() {
   var nameCol = -1, jobCol = -1, secondaryJobCol = -1, classCol = -1, lastDayCol = -1;
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'name' || header === 'employee name') nameCol = h;
     if (header === 'job number') jobCol = h;
     if (header === 'secondary job number' || header === 'secondary job') secondaryJobCol = h;
     if (header === 'job classification' || header === 'classification') classCol = h;
     if (header === 'last day') lastDayCol = h;
   }
+  nameCol = getEmployeeNameColumnIndex(headers);
 
   Logger.log('Columns found - name: ' + nameCol + ', job: ' + jobCol + ', secondaryJob: ' + secondaryJobCol + ', class: ' + classCol);
 
@@ -16264,7 +16280,12 @@ function fixLogEntriesForWeeks(weeks) {
 function resolveJobToTrackedCrew(jobNumber) {
   if (!jobNumber) return { creditedTo: '', resolved: false };
 
-  var baseJob = String(jobNumber).split('.')[0];
+  var baseJob = String(jobNumber).split('.')[0].trim();
+
+  // Exclude placeholder/invalid jobs (starting with 000 or 002)
+  if (baseJob.indexOf('000-') === 0 || baseJob.indexOf('002-') === 0) {
+    return { creditedTo: '', resolved: false };
+  }
 
   // Return cached result if available
   if (_resolveJobCache[baseJob]) {
@@ -16810,18 +16831,20 @@ function clearTempProcessingData() {
  * - Pending unknown jobs
  * - Last processed date (so "new only" mode won't filter)
  */
-function clearAllSafetyEmailData() {
+function clearAllSafetyEmailData(keepCustomMappings) {
   var props = PropertiesService.getScriptProperties();
 
   // Clear all safety email related properties
-  props.deleteProperty('CUSTOM_JOB_FOREMAN_MAPPINGS');
+  if (!keepCustomMappings) {
+    props.deleteProperty('CUSTOM_JOB_FOREMAN_MAPPINGS');
+  }
   props.deleteProperty('TEMP_JOB_FOREMAN_MAPPINGS');
   props.deleteProperty('SKIPPED_UNKNOWN_JOBS');
   props.deleteProperty('PENDING_UNKNOWN_JOBS');
   props.deleteProperty('LAST_SAFETY_EMAIL_DATE');
   props.deleteProperty('LAST_SAFETY_EMAIL_TIMESTAMP');  // Fixed: was PROCESSED_TIME
 
-  Logger.log('clearAllSafetyEmailData: Cleared all safety email processing data');
+  Logger.log('clearAllSafetyEmailData: Cleared all safety email processing data' + (keepCustomMappings ? ' (preserved custom mappings)' : ''));
 
   return {
     success: true,
@@ -16867,7 +16890,7 @@ function reprocessAllSafetyEmails(daysBack) {
 
   // Step 1: Clear ALL saved data for a fresh start
   Logger.log('Step 1: Clearing all safety email data...');
-  clearAllSafetyEmailData();
+  clearAllSafetyEmailData(true);
 
   // Step 2: Also clear batch position data
   var props = PropertiesService.getScriptProperties();

@@ -786,11 +786,11 @@ function refreshJobTrackingForemen() {
   var nameCol = -1, jobNumCol = -1, classificationCol = -1, lastDayCol = -1;
   for (var h = 0; h < empHeaders.length; h++) {
     var header = String(empHeaders[h]).toLowerCase().trim();
-    if (header === 'name' || header === 'employee name') nameCol = h;
     if (header === 'job number') jobNumCol = h;
     if (header === 'job classification') classificationCol = h;
     if (header === 'last day') lastDayCol = h;
   }
+  nameCol = getEmployeeNameColumnIndex(empHeaders);
 
   if (nameCol === -1 || jobNumCol === -1) {
     ui.alert('❌ Error', 'Could not find Name or Job Number columns in Employees sheet!', ui.ButtonSet.OK);
@@ -924,11 +924,11 @@ function refreshJobTrackingForemenSilent() {
   var nameCol = -1, jobNumCol = -1, classificationCol = -1, lastDayCol = -1;
   for (var h = 0; h < empHeaders.length; h++) {
     var header = String(empHeaders[h]).toLowerCase().trim();
-    if (header === 'name' || header === 'employee name') nameCol = h;
     if (header === 'job number') jobNumCol = h;
     if (header === 'job classification') classificationCol = h;
     if (header === 'last day') lastDayCol = h;
   }
+  nameCol = getEmployeeNameColumnIndex(empHeaders);
 
   if (nameCol === -1 || jobNumCol === -1) {
     return { updatedCount: 0, changedJobs: [], error: 'Could not find Name or Job Number columns' };
@@ -1164,12 +1164,12 @@ function populateJobTrackingFromEmployees(sheet) {
   var nameCol = -1, jobNumCol = -1, locationCol = -1, classificationCol = -1, lastDayCol = -1;
   for (var h = 0; h < empHeaders.length; h++) {
     var header = String(empHeaders[h]).toLowerCase().trim();
-    if (header === 'name' || header === 'employee name') nameCol = h;
     if (header === 'job number') jobNumCol = h;
     if (header === 'location') locationCol = h;
     if (header === 'job classification') classificationCol = h;
     if (header === 'last day') lastDayCol = h;
   }
+  nameCol = getEmployeeNameColumnIndex(empHeaders);
 
   if (jobNumCol === -1) {
     Logger.log('populateJobTrackingFromEmployees: Job Number column not found');
@@ -1347,12 +1347,12 @@ function refreshJobTrackingFromEmployees() {
   var nameCol = -1, jobNumCol = -1, locationCol = -1, classificationCol = -1, lastDayCol = -1;
   for (var h = 0; h < empHeaders.length; h++) {
     var header = String(empHeaders[h]).toLowerCase().trim();
-    if (header === 'name' || header === 'employee name') nameCol = h;
     if (header === 'job number') jobNumCol = h;
     if (header === 'location') locationCol = h;
     if (header === 'job classification') classificationCol = h;
     if (header === 'last day') lastDayCol = h;
   }
+  nameCol = getEmployeeNameColumnIndex(empHeaders);
 
   if (jobNumCol === -1) {
     ui.alert('❌ Error', 'Job Number column not found in Employees sheet!', ui.ButtonSet.OK);
@@ -1606,13 +1606,13 @@ function syncCrews(silent) {
   var nameCol = -1, jobNumCol = -1, locationCol = -1, classificationCol = -1, lastDayCol = -1, crewLeadCol = -1;
   for (var h = 0; h < empHeaders.length; h++) {
     var header = String(empHeaders[h]).toLowerCase().trim();
-    if (header === 'name' || header === 'employee name') nameCol = h;
     if (header === 'job number') jobNumCol = h;
     if (header === 'location') locationCol = h;
     if (header === 'job classification') classificationCol = h;
     if (header === 'last day') lastDayCol = h;
     if (header === 'crew lead') crewLeadCol = h;
   }
+  nameCol = getEmployeeNameColumnIndex(empHeaders);
 
   if (jobNumCol === -1) {
     if (!silent) {
