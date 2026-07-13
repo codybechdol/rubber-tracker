@@ -145,7 +145,13 @@
   </select>
   <button id="processBtn" onclick="processEmails()">Start Processing</button>
   <button id="continueBtn" onclick="continueProcessing()" class="success" style="display:none;">▶ Continue Processing</button>
-  <button id="reprocessAllBtn" onclick="reprocessAll()" class="secondary" style="background:#dc3545; margin-top:5px;">🔄 Reprocess All (Clear & Restart)</button>
+  <div style="margin-top: 15px; border-top: 1px solid #ddd; padding-top: 10px;">
+    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+      <label style="margin: 0; font-weight: bold; font-size: 11px; white-space: nowrap; color: #555;">Reprocess Start Date:</label>
+      <input type="date" id="reprocessStartDate" style="flex: 1; padding: 4px 6px; font-size: 11px; border: 1px solid #ccc; border-radius: 4px;">
+    </div>
+    <button id="reprocessAllBtn" onclick="reprocessAll()" class="secondary" style="background:#dc3545; margin-top: 0; width: 100%;">🔄 Reprocess All (Clear & Restart)</button>
+  </div>
   <button id="viewMappingsBtn" onclick="viewSavedMappings()" class="secondary" style="background:#6c757d; margin-top:5px;">📋 View Saved Mappings</button>
   <div id="progressContainer" class="progress-bar-container" style="display:none;">
     <div id="progressBar" class="progress-bar" style="width:0%;">0%</div>
@@ -211,6 +217,10 @@
     document.addEventListener('DOMContentLoaded', function() {
       loadLastProcessedTime();
       loadJobMappings();
+      
+      // Set default reprocess start date to Jan 1 of current year
+      var currentYear = new Date().getFullYear();
+      document.getElementById('reprocessStartDate').value = currentYear + '-01-01';
     });
 
     function loadLastProcessedTime() {
@@ -429,13 +439,32 @@
       }
     }
 
+    // Set default Reprocess Start Date to Jan 1st of current year
+    document.addEventListener("DOMContentLoaded", function() {
+      var dateInput = document.getElementById("reprocessStartDate");
+      if (dateInput) {
+        var year = new Date().getFullYear();
+        dateInput.value = year + "-01-01";
+      }
+    });
+
     function reprocessAll() {
-      // Confirm with user - this is a destructive action
-      if (!confirm('⚠️ REPROCESS ALL\\n\\nThis will:\\n1. Clear ALL saved job mappings\\n2. Clear last processed date\\n3. Process emails from last 90 days\\n\\nThis may take several minutes.\\n\\nContinue?')) {
+      var startDateVal = document.getElementById("reprocessStartDate").value;
+      if (!startDateVal) {
+        alert("⚠️ Please select a valid Reprocess Start Date.");
         return;
       }
 
-      console.log("reprocessAll function called");
+      // Convert date format from YYYY-MM-DD to MM/DD/YYYY for confirmation display
+      var dateParts = startDateVal.split('-');
+      var displayDate = dateParts[1] + '/' + dateParts[2] + '/' + dateParts[0];
+
+      // Confirm with user - this is a destructive action
+      if (!confirm('⚠️ REPROCESS ALL\n\nThis will:\n1. Clear ALL saved job mappings\n2. Clear last processed date\n3. Process emails starting from ' + displayDate + '\n\nThis may take several minutes.\n\nContinue?')) {
+        return;
+      }
+
+      console.log("reprocessAll function called with start date: " + startDateVal);
 
       var btn = document.getElementById("processBtn");
       var reprocessBtn = document.getElementById("reprocessAllBtn");
@@ -457,20 +486,18 @@
         .withSuccessHandler(function(result) {
           console.log("reprocessAllSafetyEmails result:", result);
           if (result && result.success) {
-            status.innerHTML = "✅ Data cleared! Starting processing for last 90 days...";
+            status.innerHTML = "✅ Data cleared! Starting processing from " + displayDate + "...";
             progressBar.textContent = "Starting...";
             reprocessBtn.textContent = "Processing...";
 
             // Update "Last processed" display
             document.getElementById('lastRunDisplay').innerHTML = '📅 Last processed: <strong>Never (just cleared)</strong>';
 
-            // Step 2: Start processing with 90 days, newOnlyMode = false
-            currentDays = 90;
+            // Step 2: Start processing with start date, newOnlyMode = false
+            currentDays = startDateVal; // Storing date string as the query parameter
             newOnlyMode = false;
             isFirstCall = false;
 
-            // Update the dropdown to show 90 days
-            document.getElementById("daysBack").value = "90";
             document.getElementById("newOnlyMode").checked = false;
             updateDaysBackState();
 
@@ -485,7 +512,7 @@
                 reprocessBtn.disabled = false;
                 reprocessBtn.textContent = "🔄 Reprocess All (Clear & Restart)";
               })
-              .processSafetyEmails(90, 5, false, fastMode);  // BATCH SIZE 5 + fastMode
+              .processSafetyEmails(startDateVal, 5, false, fastMode);  // Pass date string instead of daysBack number
           } else {
             status.innerHTML = "<span style='color: red;'>❌ Failed to clear data</span>";
             btn.disabled = false;
@@ -500,7 +527,7 @@
           reprocessBtn.disabled = false;
           reprocessBtn.textContent = "🔄 Reprocess All (Clear & Restart)";
         })
-        .reprocessAllSafetyEmails(90);
+        .reprocessAllSafetyEmails(startDateVal); // Pass date string to backend reprocessAllSafetyEmails
     }
 
     function handleBatchComplete(result) {
@@ -638,7 +665,7 @@
           btn.style.background = "#34A853";
           btn.innerHTML = "✅ Close";
           btn.disabled = false;
-          btn.onclick = function() { google.script.host.close(); };
+          btn.onclick = handleCloseClick;
 
           // Hide continue button
           if (continueBtn) continueBtn.style.display = "none";
@@ -1540,6 +1567,137 @@
       var div = document.createElement('div');
       div.textContent = text;
       return div.innerHTML;
+    }
+
+    function handleCloseClick() {
+      var btn = document.getElementById("processBtn");
+      btn.disabled = true;
+      btn.innerHTML = "🔍 Scanning logs for uncredited entries...";
+
+      google.script.run
+        .withSuccessHandler(function(uncredited) {
+          var jhaCount = (uncredited.jha && uncredited.jha.length) || 0;
+          var weeklyCount = (uncredited.weekly && uncredited.weekly.length) || 0;
+          var monthlyCount = (uncredited.monthly && uncredited.monthly.length) || 0;
+          var totalUncredited = jhaCount + weeklyCount + monthlyCount;
+
+          if (totalUncredited === 0) {
+            google.script.host.close();
+          } else {
+            // Display uncredited list to the user
+            showFullUncreditedLogList(uncredited);
+          }
+        })
+        .withFailureHandler(function(err) {
+          console.error("Scan failed: ", err);
+          google.script.host.close(); // Close anyway if script fails
+        })
+        .scanForUncreditedLogs();
+    }
+
+    function showFullUncreditedLogList(uncredited) {
+      var btn = document.getElementById("processBtn");
+      var status = document.getElementById("status");
+      var continueBtn = document.getElementById("continueBtn");
+      var reprocessBtn = document.getElementById("reprocessAllBtn");
+
+      // Hide other buttons
+      if (continueBtn) continueBtn.style.display = "none";
+      if (reprocessBtn) reprocessBtn.style.display = "none";
+
+      var jhaCount = uncredited.jha.length;
+      var weeklyCount = uncredited.weekly.length;
+      var monthlyCount = uncredited.monthly.length;
+      var totalUncredited = jhaCount + weeklyCount + monthlyCount;
+
+      var html = '<div style="margin-top:15px;padding:12px;background:#fce8e6;border-radius:6px;border:1px solid #f5c2c7;text-align:left;">' +
+        '<h4 style="margin:0 0 10px 0;color:#c5221f;font-size:14px;">⚠️ Uncredited Log Entries Found (' + totalUncredited + ')</h4>' +
+        '<p style="font-size:12px;color:#5f6368;margin-bottom:12px;">The following rows in the log sheets are missing a <strong>"Credited To"</strong> job number. Please correct them manually on their respective sheets so they credit correctly to the Safety Compliance sheet.</p>';
+
+      if (jhaCount > 0) {
+        html += '<div style="margin-bottom:12px;">' +
+          '<strong style="color:#c5221f;font-size:12px;">📄 JHA Log (JHA Log sheet):</strong>' +
+          '<div style="max-height:150px;overflow-y:auto;border:1px solid #f5c2c7;border-radius:4px;margin-top:4px;">' +
+          '<table style="width:100%;font-size:11px;border-collapse:collapse;background:white;">' +
+          '<tr style="background:#fad2cf;text-align:left;position:sticky;top:0;">' +
+          '<th style="padding:4px 6px;border-bottom:1px solid #f5c2c7;width:50px;">Row</th>' +
+          '<th style="padding:4px 6px;border-bottom:1px solid #f5c2c7;width:80px;">JHA Date</th>' +
+          '<th style="padding:4px 6px;border-bottom:1px solid #f5c2c7;width:70px;">Orig Job</th>' +
+          '<th style="padding:4px 6px;border-bottom:1px solid #f5c2c7;">Foreman</th>' +
+          '</tr>';
+        for (var i = 0; i < jhaCount; i++) {
+          var item = uncredited.jha[i];
+          html += '<tr style="border-bottom:1px solid #fbe7e5;">' +
+            '<td style="padding:4px 6px;font-weight:bold;color:#c5221f;">Row ' + item.row + '</td>' +
+            '<td style="padding:4px 6px;">' + item.date + '</td>' +
+            '<td style="padding:4px 6px;font-family:monospace;">' + item.jobNumber + '</td>' +
+            '<td style="padding:4px 6px;">' + item.foreman + '</td>' +
+            '</tr>';
+        }
+        html += '</table></div></div>';
+      }
+
+      if (weeklyCount > 0) {
+        html += '<div style="margin-bottom:12px;">' +
+          '<strong style="color:#c5221f;font-size:12px;">📅 Weekly Safety Log (Weekly Safety Log sheet):</strong>' +
+          '<div style="max-height:150px;overflow-y:auto;border:1px solid #f5c2c7;border-radius:4px;margin-top:4px;">' +
+          '<table style="width:100%;font-size:11px;border-collapse:collapse;background:white;">' +
+          '<tr style="background:#fad2cf;text-align:left;position:sticky;top:0;">' +
+          '<th style="padding:4px 6px;border-bottom:1px solid #f5c2c7;width:50px;">Row</th>' +
+          '<th style="padding:4px 6px;border-bottom:1px solid #f5c2c7;width:80px;">Week Of</th>' +
+          '<th style="padding:4px 6px;border-bottom:1px solid #f5c2c7;width:70px;">Orig Job</th>' +
+          '<th style="padding:4px 6px;border-bottom:1px solid #f5c2c7;">Foreman</th>' +
+          '</tr>';
+        for (var i = 0; i < weeklyCount; i++) {
+          var item = uncredited.weekly[i];
+          html += '<tr style="border-bottom:1px solid #fbe7e5;">' +
+            '<td style="padding:4px 6px;font-weight:bold;color:#c5221f;">Row ' + item.row + '</td>' +
+            '<td style="padding:4px 6px;">' + item.date + '</td>' +
+            '<td style="padding:4px 6px;font-family:monospace;">' + item.jobNumber + '</td>' +
+            '<td style="padding:4px 6px;">' + item.foreman + '</td>' +
+            '</tr>';
+        }
+        html += '</table></div></div>';
+      }
+
+      if (monthlyCount > 0) {
+        html += '<div style="margin-bottom:12px;">' +
+          '<strong style="color:#c5221f;font-size:12px;">🚛 Monthly Checklist Log (Monthly Checklist Log sheet):</strong>' +
+          '<div style="max-height:150px;overflow-y:auto;border:1px solid #f5c2c7;border-radius:4px;margin-top:4px;">' +
+          '<table style="width:100%;font-size:11px;border-collapse:collapse;background:white;">' +
+          '<tr style="background:#fad2cf;text-align:left;position:sticky;top:0;">' +
+          '<th style="padding:4px 6px;border-bottom:1px solid #f5c2c7;width:50px;">Row</th>' +
+          '<th style="padding:4px 6px;border-bottom:1px solid #f5c2c7;width:80px;">Report Date</th>' +
+          '<th style="padding:4px 6px;border-bottom:1px solid #f5c2c7;width:70px;">Orig Job</th>' +
+          '<th style="padding:4px 6px;border-bottom:1px solid #f5c2c7;">Foreman</th>' +
+          '</tr>';
+        for (var i = 0; i < monthlyCount; i++) {
+          var item = uncredited.monthly[i];
+          html += '<tr style="border-bottom:1px solid #fbe7e5;">' +
+            '<td style="padding:4px 6px;font-weight:bold;color:#c5221f;">Row ' + item.row + '</td>' +
+            '<td style="padding:4px 6px;">' + item.date + '</td>' +
+            '<td style="padding:4px 6px;font-family:monospace;">' + item.jobNumber + '</td>' +
+            '<td style="padding:4px 6px;">' + item.foreman + '</td>' +
+            '</tr>';
+        }
+        html += '</table></div></div>';
+      }
+
+      html += '</div>';
+
+      status.innerHTML = html;
+      status.style.display = "block";
+
+      // Scroll status into view so they see the red box
+      setTimeout(function() {
+        status.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
+
+      // Change button to allow closing anyway
+      btn.style.background = "#dc3545";
+      btn.innerHTML = "❌ Close Anyway";
+      btn.disabled = false;
+      btn.onclick = function() { google.script.host.close(); };
     }
   </script>
 </body>

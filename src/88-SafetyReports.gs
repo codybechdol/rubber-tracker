@@ -5444,6 +5444,26 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   var lastProcessedDate = props.getProperty('LAST_SAFETY_EMAIL_DATE');
   var dateFilter = '';
 
+  // Parse if daysBack is a date string (YYYY-MM-DD or MM/DD/YYYY)
+  var isDateStr = false;
+  var formattedFilterDate = '';
+  if (typeof daysBack === 'string') {
+    var dateParts = daysBack.split(/[\-\/]/);
+    if (dateParts.length === 3) {
+      try {
+        var parsedDate = new Date(daysBack.replace(/\//g, '-'));
+        if (!isNaN(parsedDate.getTime())) {
+          isDateStr = true;
+          // Go back 1 day to ensure it's inclusive of the start date (Gmail's after: is exclusive)
+          parsedDate.setDate(parsedDate.getDate() - 1);
+          formattedFilterDate = Utilities.formatDate(parsedDate, Session.getScriptTimeZone(), 'yyyy/MM/dd');
+        }
+      } catch (e) {
+        Logger.log('Error parsing daysBack as date: ' + e);
+      }
+    }
+  }
+
   // On continuation batches, restore the SAME dateFilter used by batch 1
   // This prevents the thread list from changing between batches (41 vs 72 threads)
   if (!isFirstBatch) {
@@ -5452,8 +5472,12 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
       dateFilter = cachedDateFilter;
       Logger.log('Continuation batch: restored dateFilter from batch 1: ' + dateFilter);
     } else {
-      // Fallback if cache was lost - use day range
-      dateFilter = ' newer_than:' + daysBack + 'd';
+      // Fallback if cache was lost
+      if (isDateStr) {
+        dateFilter = ' after:' + formattedFilterDate;
+      } else {
+        dateFilter = ' newer_than:' + daysBack + 'd';
+      }
       Logger.log('Continuation batch: no cached dateFilter, using fallback: ' + dateFilter);
     }
   } else if (newOnlyMode && lastProcessedDate) {
@@ -5470,9 +5494,14 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     // Save dateFilter for continuation batches so thread list stays consistent
     props.setProperty('SAFETY_BATCH_DATE_FILTER', dateFilter);
   } else {
-    // Use the explicit day range specified by user (14 days, 30 days, etc.)
-    dateFilter = ' newer_than:' + daysBack + 'd';
-    Logger.log('Date range mode: filtering emails from last ' + daysBack + ' days');
+    // Use the explicit day range or start date specified by user
+    if (isDateStr) {
+      dateFilter = ' after:' + formattedFilterDate;
+      Logger.log('Date range mode: filtering emails after ' + formattedFilterDate + ' (inclusive of start date: ' + daysBack + ')');
+    } else {
+      dateFilter = ' newer_than:' + daysBack + 'd';
+      Logger.log('Date range mode: filtering emails from last ' + daysBack + ' days');
+    }
     // Save dateFilter for continuation batches so thread list stays consistent
     props.setProperty('SAFETY_BATCH_DATE_FILTER', dateFilter);
   }
@@ -5546,7 +5575,8 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
       Logger.log("Error ensuring weeks exist: " + e.toString());
     }
 
-    Browser.msgBox("No NEW safety emails found in the last " + daysBack + " days.\n\nAll emails in this period have already been processed. Safety Compliance sheet has been updated.");
+    var periodStr = isDateStr ? "since " + daysBack : "in the last " + daysBack + " days";
+    Browser.msgBox("No NEW safety emails found " + periodStr + ".\n\nAll emails in this period have already been processed. Safety Compliance sheet has been updated.");
     return { complete: true, totalThreads: 0, message: "No new emails found - all already processed" };
   }
 
@@ -18829,4 +18859,102 @@ function forceAddMissingCrewsToCompliance() {
   ui.alert('Success', 'Added ' + addedCount + ' missing crew(s) to Safety Compliance for week ' + weekStartStr + '\n\nThe sheet has been formatted with alternating week colors and borders.', ui.ButtonSet.OK);
 }
 
- 
+/**
+ * Scans JHA Log, Weekly Safety Log, and Monthly Checklist Log for any rows
+ * that do not have a credited to entry (status is not Skipped or Duplicate, and creditedTo is empty).
+ * Returns an object with array lists of uncredited items.
+ */
+function scanForUncreditedLogs() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var result = {
+    jha: [],
+    weekly: [],
+    monthly: []
+  };
+
+  // 1. Scan JHA Log
+  var jhaSheet = ss.getSheetByName(JHA_LOG_SHEET_NAME);
+  if (jhaSheet) {
+    var lastRow = jhaSheet.getLastRow();
+    if (lastRow > 1) {
+      var data = jhaSheet.getRange(2, 1, lastRow - 1, 10).getValues();
+      for (var i = 0; i < data.length; i++) {
+        var rowNum = i + 2;
+        var dateCreated = data[i][1];
+        var jobNum = String(data[i][2] || '').trim();
+        var foreman = String(data[i][3] || '').trim();
+        var status = String(data[i][7] || '').trim();
+        var creditedTo = String(data[i][8] || '').trim();
+        var subject = String(data[i][4] || '').trim();
+
+        if (status !== 'Skipped' && status !== 'Duplicate' && !creditedTo) {
+          result.jha.push({
+            row: rowNum,
+            date: dateCreated ? (dateCreated instanceof Date ? Utilities.formatDate(dateCreated, Session.getScriptTimeZone(), 'MM/dd/yyyy') : String(dateCreated)) : 'Unknown',
+            jobNumber: jobNum,
+            foreman: foreman,
+            subject: subject
+          });
+        }
+      }
+    }
+  }
+
+  // 2. Scan Weekly Safety Log
+  var weeklySheet = ss.getSheetByName(WEEKLY_SAFETY_LOG_SHEET_NAME);
+  if (weeklySheet) {
+    var lastRow = weeklySheet.getLastRow();
+    if (lastRow > 1) {
+      var data = weeklySheet.getRange(2, 1, lastRow - 1, 9).getValues();
+      for (var i = 0; i < data.length; i++) {
+        var rowNum = i + 2;
+        var weekOf = data[i][1];
+        var jobNum = String(data[i][2] || '').trim();
+        var foreman = String(data[i][3] || '').trim();
+        var status = String(data[i][6] || '').trim();
+        var creditedTo = String(data[i][7] || '').trim();
+        var subject = String(data[i][4] || '').trim();
+
+        if (status !== 'Skipped' && status !== 'Duplicate' && !creditedTo) {
+          result.weekly.push({
+            row: rowNum,
+            date: weekOf ? (weekOf instanceof Date ? Utilities.formatDate(weekOf, Session.getScriptTimeZone(), 'MM/dd/yyyy') : String(weekOf)) : 'Unknown',
+            jobNumber: jobNum,
+            foreman: foreman,
+            subject: subject
+          });
+        }
+      }
+    }
+  }
+
+  // 3. Scan Monthly Checklist Log
+  var monthlySheet = ss.getSheetByName(MONTHLY_CHECKLIST_LOG_SHEET_NAME);
+  if (monthlySheet) {
+    var lastRow = monthlySheet.getLastRow();
+    if (lastRow > 1) {
+      var data = monthlySheet.getRange(2, 1, lastRow - 1, 11).getValues();
+      for (var i = 0; i < data.length; i++) {
+        var rowNum = i + 2;
+        var reportDate = data[i][1];
+        var jobNum = String(data[i][2] || '').trim();
+        var foreman = String(data[i][3] || '').trim();
+        var status = String(data[i][7] || '').trim();
+        var creditedTo = String(data[i][8] || '').trim();
+        var subject = String(data[i][5] || '').trim();
+
+        if (status !== 'Skipped' && status !== 'Duplicate' && !creditedTo) {
+          result.monthly.push({
+            row: rowNum,
+            date: reportDate ? (reportDate instanceof Date ? Utilities.formatDate(reportDate, Session.getScriptTimeZone(), 'MM/dd/yyyy') : String(reportDate)) : 'Unknown',
+            jobNumber: jobNum,
+            foreman: foreman,
+            subject: subject
+          });
+        }
+      }
+    }
+  }
+
+  return result;
+}

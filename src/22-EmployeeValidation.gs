@@ -1652,6 +1652,17 @@ function syncCrews(silent) {
     var name = nameCol !== -1 ? String(row[nameCol] || '').trim() : '';
     var location = locationCol !== -1 ? String(row[locationCol] || '').trim() : '';
     var classification = classificationCol !== -1 ? String(row[classificationCol] || '').trim() : '';
+
+    // Skip previous employees (inactive)
+    if (location.toLowerCase().trim() === 'previous employee') continue;
+
+    // Skip legacy job numbers (older than 2025)
+    var parts = crewNumber.split('-');
+    if (parts.length > 1) {
+      var jobYear = parseInt(parts[1], 10);
+      if (!isNaN(jobYear) && jobYear < 25) continue;
+    }
+
     var isManualLead = crewLeadCol !== -1 &&
       (String(row[crewLeadCol] || '').toLowerCase() === 'yes' ||
        String(row[crewLeadCol] || '').toLowerCase() === 'true' ||
@@ -1668,10 +1679,12 @@ function syncCrews(silent) {
         foremanPriority: 999,
         foremanPosition: 999,
         manualLead: null,
-        crewSize: 0
+        crewSize: 0,
+        employees: []
       };
     }
 
+    crewMap[crewNumber].employees.push(name);
     crewMap[crewNumber].crewSize++;
 
     if (!crewMap[crewNumber].location && isRealLocation) {
@@ -1812,6 +1825,10 @@ function syncCrews(silent) {
     // Add checkboxes for new rows
     jobSheet.getRange(lastRow + 1, 12, newCrewRows.length, 9).insertCheckboxes();
     Logger.log('syncCrews: Added ' + newCrewRows.length + ' new crews');
+    for (var n = 0; n < newCrewRows.length; n++) {
+      var cn = newCrewRows[n][0];
+      Logger.log('syncCrews: Added new crew ' + cn + ' with location=' + crewMap[cn].location + ', foreman=' + crewMap[cn].foreman + ', size=' + crewMap[cn].crewSize + ' (employees: ' + crewMap[cn].employees.join(', ') + ')');
+    }
   }
 
   var summary = {

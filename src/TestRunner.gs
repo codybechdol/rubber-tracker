@@ -331,4 +331,34 @@ function testMacksWorkflow() {
   }
 }
 
+// Diagnostic function to locate the source of the 018-16 job number
+function debugFind018() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Employees');
+  if (!sheet) {
+    Logger.log('Employees sheet not found');
+    return;
+  }
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  var jobNumCol = -1;
+  var nameCol = -1;
+  var locationCol = -1;
+  var lastDayCol = -1;
+  
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim();
+    if (header === 'job number') jobNumCol = h;
+    if (header === 'name' || header === 'employee name') nameCol = h;
+    if (header === 'location') locationCol = h;
+    if (header === 'last day') lastDayCol = h;
+  }
 
+  Logger.log('Scanning Employees sheet...');
+  for (var i = 1; i < data.length; i++) {
+    var jobNum = String(data[i][jobNumCol] || '').trim();
+    if (jobNum.indexOf('018-16') !== -1) {
+      Logger.log('Row ' + (i + 1) + ': Name="' + data[i][nameCol] + '", Job Number="' + jobNum + '", Location="' + data[i][locationCol] + '", Last Day="' + data[i][lastDayCol] + '"');
+    }
+  }
+}
