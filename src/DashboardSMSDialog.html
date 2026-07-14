@@ -402,26 +402,31 @@
         document.querySelector('.dialog-container').style.display = 'none';
         document.getElementById('successCard').style.display = 'block';
         
-        // Open SMS app in a new tab/window
-        window.open(smsUrl, '_blank');
+        // Open SMS app via location to avoid popup blockers and context death
+        window.location.href = smsUrl;
         setTimeout(closeDialog, 2000);
       } else {
+        // Disable the button to prevent multiple clicks
+        var btn = document.getElementById('sendBtn');
+        if (btn) btn.disabled = true;
+        
         // Modal dialog context: call markCertNotifiedAndReload on server FIRST
         google.script.run
           .withSuccessHandler(function(result) {
             if (result && result.success === false) {
               alert('Failed to mark notified: ' + result.error);
+              if (btn) btn.disabled = false;
             } else {
-              closeDialog();
+              // Trigger SMS app via location
+              window.location.href = smsUrl;
+              setTimeout(closeDialog, 1500);
             }
           })
           .withFailureHandler(function(err) {
             alert('Server Error: ' + err.message);
+            if (btn) btn.disabled = false;
           })
           .markCertNotifiedAndReload(employeeName, certType);
-          
-        // Then open SMS app in a new tab/window
-        window.open(smsUrl, '_blank');
       }
     }
   </script>
