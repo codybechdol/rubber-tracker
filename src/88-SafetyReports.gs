@@ -2076,6 +2076,14 @@ function calculateComplianceFromLogs(weekStartDate, options) {
       // Priority 1: ORIGINAL job number if it's a tracked crew (historical foremen like Matt Miller on 015-26)
       // Priority 2: CreditedTo job number if original is NOT tracked (for typo corrections like 054-26 -> 052-25)
       var crewToCredit = null;
+      var jhaForeman = String(jhaRow[3] || '').trim();
+
+      if (status === 'Credited' && jhaForeman && jhaForeman !== 'UNKNOWN') {
+        var crewKey = originalJobNumber || creditedTo;
+        if (crewKey) {
+          historicalForemanMap[crewKey] = jhaForeman;
+        }
+      }
 
       if (originalJobNumber && crewCompliance[originalJobNumber]) {
         // Original job is tracked - credit it directly
@@ -2169,6 +2177,14 @@ function calculateComplianceFromLogs(weekStartDate, options) {
       }
 
       if (status === 'Credited') {
+        var weeklyForeman = String(weeklyRow[3] || '').trim();
+        if (weeklyForeman && weeklyForeman !== 'UNKNOWN') {
+          var crewKey = originalJobNumber || creditedTo;
+          if (crewKey) {
+            historicalForemanMap[crewKey] = weeklyForeman;
+          }
+        }
+
         // Determine which crew to credit (same priority logic as JHA)
         // Priority 1: ORIGINAL job number if it's a tracked crew
         // Priority 2: CreditedTo job number if original is NOT tracked
@@ -2315,6 +2331,11 @@ function calculateComplianceFromLogs(weekStartDate, options) {
       }
 
       if (status === 'Credited' && creditedTo && crewCompliance[creditedTo]) {
+        var monthlyForeman = String(monthlyRow[3] || '').trim();
+        if (monthlyForeman && monthlyForeman !== 'UNKNOWN') {
+          historicalForemanMap[creditedTo] = monthlyForeman;
+        }
+
         // Keep track of the newest checklist received in the month
         var existingDetails = crewCompliance[creditedTo].monthlyChecklistDetails;
         var receivedTime = monthlyDateReceived ? new Date(monthlyDateReceived).getTime() : 0;
