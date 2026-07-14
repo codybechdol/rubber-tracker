@@ -147,8 +147,14 @@
   <button id="continueBtn" onclick="continueProcessing()" class="success" style="display:none;">▶ Continue Processing</button>
   <div style="margin-top: 15px; border-top: 1px solid #ddd; padding-top: 10px;">
     <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
-      <label style="margin: 0; font-weight: bold; font-size: 11px; white-space: nowrap; color: #555;">Reprocess Start Date:</label>
-      <input type="date" id="reprocessStartDate" style="flex: 1; padding: 4px 6px; font-size: 11px; border: 1px solid #ccc; border-radius: 4px;">
+      <div style="display: flex; flex: 1; align-items: center; gap: 4px;">
+        <label style="margin: 0; font-weight: bold; font-size: 11px; white-space: nowrap; color: #555;">Start:</label>
+        <input type="date" id="reprocessStartDate" style="flex: 1; padding: 4px 6px; font-size: 11px; border: 1px solid #ccc; border-radius: 4px;">
+      </div>
+      <div style="display: flex; flex: 1; align-items: center; gap: 4px;">
+        <label style="margin: 0; font-weight: bold; font-size: 11px; white-space: nowrap; color: #555;">End (Opt):</label>
+        <input type="date" id="reprocessEndDate" style="flex: 1; padding: 4px 6px; font-size: 11px; border: 1px solid #ccc; border-radius: 4px;">
+      </div>
     </div>
     <button id="reprocessAllBtn" onclick="reprocessAll()" class="secondary" style="background:#dc3545; margin-top: 0; width: 100%;">🔄 Reprocess All (Clear & Restart)</button>
   </div>
@@ -457,6 +463,7 @@
 
     function reprocessAll() {
       var startDateVal = document.getElementById("reprocessStartDate").value;
+      var endDateVal = document.getElementById("reprocessEndDate").value;
       if (!startDateVal) {
         alert("⚠️ Please select a valid Reprocess Start Date.");
         return;
@@ -466,12 +473,18 @@
       var dateParts = startDateVal.split('-');
       var displayDate = dateParts[1] + '/' + dateParts[2] + '/' + dateParts[0];
 
+      var displayRange = displayDate;
+      if (endDateVal) {
+        var endDateParts = endDateVal.split('-');
+        displayRange += ' to ' + endDateParts[1] + '/' + endDateParts[2] + '/' + endDateParts[0];
+      }
+
       // Confirm with user - this is a destructive action
-      if (!confirm('⚠️ REPROCESS ALL\n\nThis will:\n1. Clear ALL saved job mappings\n2. Clear last processed date\n3. Process emails starting from ' + displayDate + '\n\nThis may take several minutes.\n\nContinue?')) {
+      if (!confirm('⚠️ REPROCESS ALL\n\nThis will:\n1. Clear ALL saved job mappings\n2. Clear last processed date\n3. Process emails for range: ' + displayRange + '\n\nThis may take several minutes.\n\nContinue?')) {
         return;
       }
 
-      console.log("reprocessAll function called with start date: " + startDateVal);
+      console.log("reprocessAll function called with start date: " + startDateVal + ", end date: " + endDateVal);
 
       var btn = document.getElementById("processBtn");
       var reprocessBtn = document.getElementById("reprocessAllBtn");
@@ -493,7 +506,7 @@
         .withSuccessHandler(function(result) {
           console.log("reprocessAllSafetyEmails result:", result);
           if (result && result.success) {
-            status.innerHTML = "✅ Data cleared! Starting processing from " + displayDate + "...";
+            status.innerHTML = "✅ Data cleared! Starting processing for " + displayRange + "...";
             progressBar.textContent = "Starting...";
             reprocessBtn.textContent = "Processing...";
 
@@ -527,7 +540,7 @@
                   continueBtn.textContent = "▶ Continue Processing";
                 }
               })
-              .processSafetyEmails(startDateVal, 5, false, fastMode);  // Pass date string instead of daysBack number
+              .processSafetyEmails(startDateVal, 5, false, fastMode, endDateVal);  // Pass endDateVal here
           } else {
             status.innerHTML = "<span style='color: red;'>❌ Failed to clear data</span>";
             btn.disabled = false;

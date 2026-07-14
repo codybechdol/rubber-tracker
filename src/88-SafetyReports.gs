@@ -968,25 +968,39 @@ function cleanupOldLogEntries(daysToKeep) {
  * @returns {number} - Number of rows deleted
  */
 function deleteOldRowsFromSheet(sheet, cutoffDate, dateCol) {
-  var data = sheet.getDataRange().getValues();
-  var rowsToDelete = [];
-
-  for (var i = data.length - 1; i >= 1; i--) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return 0;
+  var lastCol = sheet.getLastColumn();
+  var range = sheet.getRange(2, 1, lastRow - 1, lastCol);
+  var data = range.getValues();
+  
+  var rowsToKeep = [];
+  var deletedCount = 0;
+  
+  for (var i = 0; i < data.length; i++) {
     var cellValue = data[i][dateCol];
+    var keep = true;
     if (cellValue) {
       var rowDate = new Date(cellValue);
-      if (rowDate < cutoffDate) {
-        rowsToDelete.push(i + 1); // 1-based row number
+      if (!isNaN(rowDate.getTime()) && rowDate < cutoffDate) {
+        keep = false;
+        deletedCount++;
       }
+    }
+    if (keep) {
+      rowsToKeep.push(data[i]);
     }
   }
 
-  // Delete from bottom to top
-  for (var r = 0; r < rowsToDelete.length; r++) {
-    sheet.deleteRow(rowsToDelete[r]);
+  if (deletedCount > 0) {
+    // Clear content of the old data range (preserving cell formats/borders)
+    range.clearContent();
+    if (rowsToKeep.length > 0) {
+      sheet.getRange(2, 1, rowsToKeep.length, lastCol).setValues(rowsToKeep);
+    }
   }
 
-  return rowsToDelete.length;
+  return deletedCount;
 }
 
 /**
@@ -5394,7 +5408,7 @@ function applyStatusFormatting(sheet, startRow, numRows) {
  * @param {boolean} newOnlyMode - Only process emails since last run (default true)
  * @param {boolean} skipPdfExtraction - Skip slow PDF extraction, use subject date only (default false)
  */
-function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction) {
+function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction, endDate) {
   if (!daysBack) daysBack = 7;
   if (!batchSize) batchSize = 5; // REDUCED from 10 to 5 for better timeout handling
   if (newOnlyMode === undefined) newOnlyMode = true; // Default to new-only mode
@@ -5445,6 +5459,24 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   // Get last processed date for smart filtering
   var lastProcessedDate = props.getProperty('LAST_SAFETY_EMAIL_DATE');
   var dateFilter = '';
+
+  // Parse optional endDate
+  var formattedEndDate = '';
+  if (endDate && typeof endDate === 'string') {
+    var endParts = endDate.split(/[\-\/]/);
+    if (endParts.length === 3) {
+      try {
+        var parsedEndDate = new Date(endDate.replace(/\//g, '-'));
+        if (!isNaN(parsedEndDate.getTime())) {
+          // Go forward 1 day to ensure it's inclusive of the end date (Gmail's before: is exclusive)
+          parsedEndDate.setDate(parsedEndDate.getDate() + 1);
+          formattedEndDate = Utilities.formatDate(parsedEndDate, Session.getScriptTimeZone(), 'yyyy/MM/dd');
+        }
+      } catch (e) {
+        Logger.log('Error parsing endDate: ' + e);
+      }
+    }
+  }
 
   // Parse if daysBack is a date string (YYYY-MM-DD or MM/DD/YYYY)
   var isDateStr = false;
@@ -5499,7 +5531,12 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     // Use the explicit day range or start date specified by user
     if (isDateStr) {
       dateFilter = ' after:' + formattedFilterDate;
-      Logger.log('Date range mode: filtering emails after ' + formattedFilterDate + ' (inclusive of start date: ' + daysBack + ')');
+      if (formattedEndDate) {
+        dateFilter += ' before:' + formattedEndDate;
+        Logger.log('Date range mode: filtering emails between ' + formattedFilterDate + ' and ' + formattedEndDate + ' (inclusive)');
+      } else {
+        Logger.log('Date range mode: filtering emails after ' + formattedFilterDate + ' (inclusive of start date: ' + daysBack + ')');
+      }
     } else {
       dateFilter = ' newer_than:' + daysBack + 'd';
       Logger.log('Date range mode: filtering emails from last ' + daysBack + ' days');
@@ -5715,8 +5752,9 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     employeeData: employeeData
   };
 
-  // Auto-cleanup old log entries (>90 days) on first batch only
-  if (batchStart === 0) {
+  // Auto-cleanup old log entries (>90 days) on first batch of normal runs only.
+  // Skipping cleanup during historical reprocesses prevents deleting the data we are trying to rebuild.
+  if (batchStart === 0 && newOnlyMode) {
     var cleanupResult = cleanupOldLogEntries(90);
     Logger.log("Auto-cleanup: Removed " + (cleanupResult.jhaDeleted + cleanupResult.weeklyDeleted + cleanupResult.monthlyDeleted) + " old log entries");
   }
@@ -16878,14 +16916,16 @@ function menuClearAllSafetyEmailData() {
  * Reprocess all safety emails from scratch
  * This clears ALL saved data first, then processes emails for the specified number of days
  *
- * @param {number} daysBack - Number of days to search back (default: 90)
- * @returns {Object} Result from processSafetyEmails
+ * @param {number|string} daysBack - Number of days to search back or a YYYY-MM-DD start date
+ * @param {string} [endDate] - Optional YYYY-MM-DD end date for range processing
+ * @returns {Object} Result
  */
-function reprocessAllSafetyEmails(daysBack) {
+function reprocessAllSafetyEmails(daysBack, endDate) {
   daysBack = daysBack || 90;
 
   Logger.log('=== reprocessAllSafetyEmails START ===');
-  Logger.log('Days back: ' + daysBack);
+  Logger.log('Days back (Start Date): ' + daysBack);
+  if (endDate) Logger.log('End Date: ' + endDate);
 
   // Step 1: Clear ALL saved data for a fresh start
   Logger.log('Step 1: Clearing all safety email data...');
@@ -16902,16 +16942,15 @@ function reprocessAllSafetyEmails(daysBack) {
     CacheService.getScriptCache().removeAll(['SAFETY_BATCH_CREWS', 'SAFETY_BATCH_EMP_DATA', 'SAFETY_BATCH_EMAIL_IDS']);
   } catch(e) { /* ignore */ }
 
-  Logger.log('Step 2: Starting processing for last ' + daysBack + ' days...');
+  Logger.log('Step 2: Ready to process starting from ' + daysBack + (endDate ? ' to ' + endDate : '') + '...');
 
-  // Step 3: Process emails with newOnlyMode = false (use day range)
-  // Note: processSafetyEmails will be called by the dialog iteratively
-  // This function just clears data and returns success
+  // Step 3: Return details to dialog
   return {
     success: true,
     dataCleared: true,
-    message: 'All data cleared. Ready to process last ' + daysBack + ' days.',
-    daysBack: daysBack
+    message: 'All data cleared. Ready to process from ' + daysBack + (endDate ? ' to ' + endDate : '') + '.',
+    daysBack: daysBack,
+    endDate: endDate
   };
 }
 
