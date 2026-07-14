@@ -28986,6 +28986,10 @@ function markCertNotifiedAndReload(employeeName, certType) {
       return tLower.indexOf('cpr') !== -1 || tLower.indexOf('1st aid') !== -1 || tLower.indexOf('first aid') !== -1;
     };
 
+    var empList = getEmployeeNamesForMatching();
+    var alternateNameMap = buildAlternateNameMap(empList);
+    var resolvedTargetEmp = resolveEmployeeName(employeeName, alternateNameMap).toLowerCase().trim();
+
     if (metaSheet) {
       var data = metaSheet.getDataRange().getValues();
       var headers = data[0];
@@ -29024,15 +29028,12 @@ function markCertNotifiedAndReload(employeeName, certType) {
         var expTypeCol = 1; // Column B
         var expDateCol = 2; // Column C
         
-        var empList = getEmployeeNamesForMatching();
-        var alternateNameMap = buildAlternateNameMap(empList);
-        
         var targetRowIndex = -1;
         var expDateVal = null;
         for (var j = 1; j < expData.length; j++) {
           var rowEmp = String(expData[j][expEmpCol]).toLowerCase().trim();
           var resolvedRowEmp = resolveEmployeeName(rowEmp, alternateNameMap).toLowerCase().trim();
-          var resolvedEmpName = resolveEmployeeName(employeeName, alternateNameMap).toLowerCase().trim();
+          var resolvedEmpName = resolvedTargetEmp;
           
           var rowType = String(expData[j][expTypeCol]).toLowerCase().trim();
           if (resolvedRowEmp === resolvedEmpName && 
