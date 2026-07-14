@@ -6303,11 +6303,10 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     }
   }
 
-  // Only run post-processing steps when something was actually added this batch or
-  // when it's the final batch. Skip for intermediate batches with 0 new emails to
-  // avoid wasting ~10s on sort/format/link-apply for no-op passes.
-  var hadNewLogs = (logsCreated.jha + logsCreated.weekly + logsCreated.monthly) > 0;
-  var shouldRunPostProcessing = hadNewLogs || isComplete;
+  // Only run post-processing steps (sorting/formatting/hyperlink backfill) when the 
+  // entire processing run is complete. Skipping these on intermediate batches saves
+  // a huge amount of time, reduces API calls, and avoids V8 INTERNAL engine crashes.
+  var shouldRunPostProcessing = isComplete;
 
   if (shouldRunPostProcessing) {
     // Auto-apply Gmail hyperlinks to all Source Email ID cells so every row is clickable

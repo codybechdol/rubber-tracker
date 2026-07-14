@@ -428,8 +428,15 @@
             console.error("Server error: ", err);
             status.innerHTML = "<span style='color: red;'>❌ Error: " + err.message + "</span>";
             btn.disabled = false;
-            btn.textContent = "Retry";
+            btn.textContent = "Resume / Retry";
+            btn.onclick = function() { continueProcessing(); };
             if (reprocessBtn) reprocessBtn.disabled = false;
+            var continueBtn = document.getElementById("continueBtn");
+            if (continueBtn) {
+              continueBtn.style.display = "block";
+              continueBtn.disabled = false;
+              continueBtn.textContent = "▶ Continue Processing";
+            }
           })
           .processSafetyEmails(days, 5, newOnlyMode, fastMode);  // BATCH SIZE 5 + fastMode
         console.log("google.script.run initiated");
@@ -509,8 +516,16 @@
                 console.error("Server error during reprocess: ", err);
                 status.innerHTML = "<span style='color: red;'>❌ Error: " + err.message + "</span>";
                 btn.disabled = false;
+                btn.textContent = "Resume / Retry";
+                btn.onclick = function() { continueProcessing(); };
                 reprocessBtn.disabled = false;
                 reprocessBtn.textContent = "🔄 Reprocess All (Clear & Restart)";
+                var continueBtn = document.getElementById("continueBtn");
+                if (continueBtn) {
+                  continueBtn.style.display = "block";
+                  continueBtn.disabled = false;
+                  continueBtn.textContent = "▶ Continue Processing";
+                }
               })
               .processSafetyEmails(startDateVal, 5, false, fastMode);  // Pass date string instead of daysBack number
           } else {
@@ -822,8 +837,14 @@
           var btn = document.getElementById("processBtn");
           status.innerHTML = "<span style='color: red;'>❌ Error: " + err.message + "</span>";
           btn.disabled = false;
-          btn.textContent = "Retry";
-          btn.onclick = function() { isFirstCall = true; processEmails(); };
+          btn.textContent = "Resume / Retry";
+          btn.onclick = function() { continueProcessing(); };
+          var continueBtn = document.getElementById("continueBtn");
+          if (continueBtn) {
+            continueBtn.style.display = "block";
+            continueBtn.disabled = false;
+            continueBtn.textContent = "▶ Continue Processing";
+          }
         })
         .processSafetyEmails(currentDays, 5, newOnlyMode, fastMode);  // BATCH SIZE 5
     }
