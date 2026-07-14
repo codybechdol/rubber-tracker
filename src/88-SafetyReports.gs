@@ -748,7 +748,7 @@ function emailExistsInLog(sheet, emailId, emailIdCol) {
  * @param {Object} existingEmailIds - Optional pre-loaded set for fast duplicate check
  * @returns {Object} - { success: boolean, row: number }
  */
-function logJHAEmail(params, existingEmailIds) {
+function logJHAEmail(params, existingEmailIds, rowsCollector) {
   var sheet = getJHALogSheet();
   var tz = Session.getScriptTimeZone();
 
@@ -775,6 +775,15 @@ function logJHAEmail(params, existingEmailIds) {
     params.creditedTo || '',
     params.notes || ''
   ];
+
+  if (rowsCollector) {
+    rowsCollector.push({
+      sheetName: JHA_LOG_SHEET_NAME,
+      row: row,
+      emailId: params.emailId
+    });
+    return { success: true };
+  }
 
   sheet.appendRow(row);
   var lastRow = sheet.getLastRow();
@@ -813,7 +822,7 @@ function logJHAEmail(params, existingEmailIds) {
  * @param {Object} existingEmailIds - Optional pre-loaded set for fast duplicate check
  * @returns {Object} - { success: boolean, row: number }
  */
-function logWeeklySafetyEmail(params, existingEmailIds) {
+function logWeeklySafetyEmail(params, existingEmailIds, rowsCollector) {
   var sheet = getWeeklySafetyLogSheet();
   var tz = Session.getScriptTimeZone();
 
@@ -839,6 +848,15 @@ function logWeeklySafetyEmail(params, existingEmailIds) {
     params.creditedTo || '',
     params.notes || ''
   ];
+
+  if (rowsCollector) {
+    rowsCollector.push({
+      sheetName: WEEKLY_SAFETY_LOG_SHEET_NAME,
+      row: row,
+      emailId: params.emailId
+    });
+    return { success: true };
+  }
 
   sheet.appendRow(row);
   var lastRow = sheet.getLastRow();
@@ -879,7 +897,7 @@ function logWeeklySafetyEmail(params, existingEmailIds) {
  * @param {Object} existingEmailIds - Optional pre-loaded set for fast duplicate check
  * @returns {Object} - { success: boolean, row: number }
  */
-function logMonthlyChecklistEmail(params, existingEmailIds) {
+function logMonthlyChecklistEmail(params, existingEmailIds, rowsCollector) {
   var sheet = getMonthlyChecklistLogSheet();
   var tz = Session.getScriptTimeZone();
 
@@ -907,6 +925,15 @@ function logMonthlyChecklistEmail(params, existingEmailIds) {
     params.hasEquipmentIssues ? 'Yes' : 'No',
     params.notes || ''
   ];
+
+  if (rowsCollector) {
+    rowsCollector.push({
+      sheetName: MONTHLY_CHECKLIST_LOG_SHEET_NAME,
+      row: row,
+      emailId: params.emailId
+    });
+    return { success: true };
+  }
 
   sheet.appendRow(row);
   var lastRow = sheet.getLastRow();
@@ -1088,6 +1115,59 @@ function clearSafetyLogsInRange(startDate, endDate) {
   }
   
   Logger.log('clearSafetyLogsInRange: Cleared rows in range [' + startDate + ', ' + (endDate || 'today') + '] - JHA Log: ' + jhaDeleted + ', Weekly: ' + weeklyDeleted + ', Monthly: ' + monthlyDeleted + ', Compliance: ' + complianceDeleted);
+}
+
+/**
+ * Batch writes collected logs to JHA Log, Weekly Safety Log, and Monthly Checklist Log
+ * @param {Array<Object>} rowsCollector - Array of log entries to batch write
+ */
+function writeCollectedSafetyLogs(rowsCollector) {
+  if (!rowsCollector || rowsCollector.length === 0) return;
+  Logger.log("writeCollectedSafetyLogs: Batch writing " + rowsCollector.length + " queued logs...");
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // Group rows by sheetName
+  var rowsBySheet = {};
+  rowsCollector.forEach(function(item) {
+    if (!rowsBySheet[item.sheetName]) {
+      rowsBySheet[item.sheetName] = [];
+    }
+    rowsBySheet[item.sheetName].push(item);
+  });
+  
+  for (var sName in rowsBySheet) {
+    var sheet = ss.getSheetByName(sName);
+    if (!sheet) continue;
+    var items = rowsBySheet[sName];
+    var lastRow = sheet.getLastRow();
+    var valuesToWrite = items.map(function(item) { return item.row; });
+    var lastCol = sheet.getLastColumn();
+    
+    // Batch write values
+    sheet.getRange(lastRow + 1, 1, valuesToWrite.length, lastCol).setValues(valuesToWrite);
+    
+    // Batch write rich text hyperlinks (only JHA and Weekly logs have them)
+    var richTextValues = [];
+    var hasHyperlinks = false;
+    for (var rIdx = 0; rIdx < items.length; rIdx++) {
+      var item = items[rIdx];
+      var rtCell = [null];
+      if ((sName === JHA_LOG_SHEET_NAME || sName === WEEKLY_SAFETY_LOG_SHEET_NAME) && item.emailId) {
+        var baseId = item.emailId.split('_')[0];
+        var url = 'https://mail.google.com/mail/u/0/#all/' + baseId;
+        rtCell[0] = SpreadsheetApp.newRichTextValue().setText(item.emailId).setLinkUrl(url).build();
+        hasHyperlinks = true;
+      }
+      richTextValues.push(rtCell);
+    }
+    
+    if (hasHyperlinks) {
+      var linkColIndex = 6; // Column F
+      sheet.getRange(lastRow + 1, linkColIndex, richTextValues.length, 1).setRichTextValues(richTextValues);
+    }
+    
+    Logger.log("writeCollectedSafetyLogs: Batch wrote " + items.length + " rows to " + sName);
+  }
 }
 
 /**
@@ -2816,7 +2896,7 @@ function menuRefreshComplianceTooltips() {
  * @param {Object} existingEmailIds - Optional pre-loaded set of existing email IDs (for fast lookup)
  * @returns {Object} - { logged: boolean, status: string, creditedTo: string|null, logSheet: string }
  */
-function logParsedSafetyEmail(parsed, message, context, existingEmailIds) {
+function logParsedSafetyEmail(parsed, message, context, existingEmailIds, rowsCollector) {
   if (!parsed || !parsed.reportMeta) {
     return { logged: false, status: 'Error', error: 'No parsed data' };
   }
@@ -2892,7 +2972,7 @@ function logParsedSafetyEmail(parsed, message, context, existingEmailIds) {
         status: status,
         creditedTo: creditedTo,
         notes: logNotes
-      }, existingEmailIds);
+      }, existingEmailIds, rowsCollector);
 
       if (logResult.success) {
         result.logged = true;
@@ -2915,7 +2995,7 @@ function logParsedSafetyEmail(parsed, message, context, existingEmailIds) {
       status: status,
       creditedTo: creditedTo,
       notes: notes
-    }, existingEmailIds);
+    }, existingEmailIds, rowsCollector);
 
     if (logResult.success) {
       result.logged = true;
@@ -2943,7 +3023,7 @@ function logParsedSafetyEmail(parsed, message, context, existingEmailIds) {
       creditedTo: creditedTo,
       hasEquipmentIssues: hasEquipmentIssues,
       notes: notes
-    }, existingEmailIds);
+    }, existingEmailIds, rowsCollector);
 
     if (logResult.success) {
       result.logged = true;
@@ -5855,6 +5935,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
       var skippedCount = 0;
       var lastProcessedIndex = 0;
       var logsCreated = { jha: 0, weekly: 0, monthly: 0 }; // Track Option B logs
+      var rowsCollector = [];
 
       // Track skip reasons for UI display
       var skipReasons = {
@@ -5895,7 +5976,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
             // === OPTION B: Log to audit trail sheets ===
             // This creates a complete audit trail in JHA Log, Weekly Safety Log, Monthly Checklist Log
             // Pass existingEmailIds for fast duplicate check and to track newly logged items
-            var logResult = logParsedSafetyEmail(parsed, message, jobResolutionContext, existingEmailIds);
+            var logResult = logParsedSafetyEmail(parsed, message, jobResolutionContext, existingEmailIds, rowsCollector);
             if (logResult.logged) {
               if (logResult.logSheet === JHA_LOG_SHEET_NAME) logsCreated.jha++;
               else if (logResult.logSheet === WEEKLY_SAFETY_LOG_SHEET_NAME) logsCreated.weekly++;
@@ -6035,6 +6116,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
 
       // If we timed out, save progress and return early
       if (timedOut) {
+        writeCollectedSafetyLogs(rowsCollector);
         var actualProcessed = batchStart + lastProcessedIndex;
         props.setProperty('SAFETY_BATCH_START', actualProcessed.toString());
         Logger.log("Timed out - saved progress at thread " + actualProcessed + " of " + allThreads.length);
@@ -6199,6 +6281,8 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
       // date. Exiting early when a batch has 0 new emails causes those threads to be
       // silently missed. The timeout guard (MAX_EXECUTION_MS) is sufficient to prevent
       // the 6-minute limit from being hit.
+      writeCollectedSafetyLogs(rowsCollector);
+
       Logger.log('Batch ' + (Math.floor(batchStart / batchSize) + 1) +
         ' processed ' + processedCount + ' new email(s), skipped ' + skippedCount + '.');
 
