@@ -1004,6 +1004,93 @@ function deleteOldRowsFromSheet(sheet, cutoffDate, dateCol) {
 }
 
 /**
+ * Helper to delete rows in a date range from a sheet (in-memory)
+ * @param {Sheet} sheet - The sheet to clean
+ * @param {string|Date} startDate - Start of date range (inclusive)
+ * @param {string|Date} endDate - End of date range (inclusive)
+ * @param {number} dateCol - Column index (0-based) containing the date
+ * @returns {number} - Number of rows deleted
+ */
+function deleteRowsInRangeFromSheet(sheet, startDate, endDate, dateCol) {
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return 0;
+  var lastCol = sheet.getLastColumn();
+  var range = sheet.getRange(2, 1, lastRow - 1, lastCol);
+  var data = range.getValues();
+  
+  var rowsToKeep = [];
+  var deletedCount = 0;
+  
+  var start = new Date(typeof startDate === 'string' ? startDate.replace(/\//g, '-') : startDate);
+  var end = endDate ? new Date(typeof endDate === 'string' ? endDate.replace(/\//g, '-') : endDate) : new Date();
+  
+  // Set start to midnight
+  start.setHours(0, 0, 0, 0);
+  // Set end to 23:59:59.999
+  end.setHours(23, 59, 59, 999);
+  
+  for (var i = 0; i < data.length; i++) {
+    var cellValue = data[i][dateCol];
+    var keep = true;
+    if (cellValue) {
+      var rowDate = new Date(cellValue);
+      if (!isNaN(rowDate.getTime())) {
+        if (rowDate >= start && rowDate <= end) {
+          keep = false;
+          deletedCount++;
+        }
+      }
+    }
+    if (keep) {
+      rowsToKeep.push(data[i]);
+    }
+  }
+
+  if (deletedCount > 0) {
+    range.clearContent();
+    if (rowsToKeep.length > 0) {
+      sheet.getRange(2, 1, rowsToKeep.length, lastCol).setValues(rowsToKeep);
+    }
+  }
+
+  return deletedCount;
+}
+
+/**
+ * Clears JHA, Weekly Safety, Monthly Checklist logs, and Safety Compliance rows in a date range
+ * @param {string|Date} startDate - Start of date range
+ * @param {string|Date} endDate - End of date range
+ */
+function clearSafetyLogsInRange(startDate, endDate) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var jhaSheet = getJHALogSheet();
+  var jhaDeleted = 0;
+  if (jhaSheet) {
+    jhaDeleted = deleteRowsInRangeFromSheet(jhaSheet, startDate, endDate, 0);
+  }
+  
+  var weeklySheet = getWeeklySafetyLogSheet();
+  var weeklyDeleted = 0;
+  if (weeklySheet) {
+    weeklyDeleted = deleteRowsInRangeFromSheet(weeklySheet, startDate, endDate, 0);
+  }
+  
+  var monthlySheet = getMonthlyChecklistLogSheet();
+  var monthlyDeleted = 0;
+  if (monthlySheet) {
+    monthlyDeleted = deleteRowsInRangeFromSheet(monthlySheet, startDate, endDate, 0);
+  }
+  
+  var complianceSheet = ss.getSheetByName('Safety Compliance');
+  var complianceDeleted = 0;
+  if (complianceSheet) {
+    complianceDeleted = deleteRowsInRangeFromSheet(complianceSheet, startDate, endDate, 0);
+  }
+  
+  Logger.log('clearSafetyLogsInRange: Cleared rows in range [' + startDate + ', ' + (endDate || 'today') + '] - JHA Log: ' + jhaDeleted + ', Weekly: ' + weeklyDeleted + ', Monthly: ' + monthlyDeleted + ', Compliance: ' + complianceDeleted);
+}
+
+/**
  * Removes duplicate entries from JHA Log and Weekly Safety Log.
  * Duplicates are identified by matching: Job Number + Date Created/Week Of + Email Subject.
  * Keeps the FIRST occurrence (lowest row) and removes later duplicates.
@@ -16927,11 +17014,15 @@ function reprocessAllSafetyEmails(daysBack, endDate) {
   Logger.log('Days back (Start Date): ' + daysBack);
   if (endDate) Logger.log('End Date: ' + endDate);
 
-  // Step 1: Clear ALL saved data for a fresh start
-  Logger.log('Step 1: Clearing all safety email data...');
+  // Step 1: Clear existing log/compliance rows in range first so they can be reprocessed
+  Logger.log('Step 1: Clearing existing log/compliance rows in range...');
+  clearSafetyLogsInRange(daysBack, endDate);
+
+  // Step 2: Clear ALL saved data for a fresh start (preserving custom mappings)
+  Logger.log('Step 2: Clearing all safety email properties...');
   clearAllSafetyEmailData(true);
 
-  // Step 2: Also clear batch position data
+  // Step 3: Also clear batch position data
   var props = PropertiesService.getScriptProperties();
   props.deleteProperty('SAFETY_BATCH_START');
   props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
@@ -16942,13 +17033,13 @@ function reprocessAllSafetyEmails(daysBack, endDate) {
     CacheService.getScriptCache().removeAll(['SAFETY_BATCH_CREWS', 'SAFETY_BATCH_EMP_DATA', 'SAFETY_BATCH_EMAIL_IDS']);
   } catch(e) { /* ignore */ }
 
-  Logger.log('Step 2: Ready to process starting from ' + daysBack + (endDate ? ' to ' + endDate : '') + '...');
+  Logger.log('Step 3: Ready to process starting from ' + daysBack + (endDate ? ' to ' + endDate : '') + '...');
 
-  // Step 3: Return details to dialog
+  // Step 4: Return details to dialog
   return {
     success: true,
     dataCleared: true,
-    message: 'All data cleared. Ready to process from ' + daysBack + (endDate ? ' to ' + endDate : '') + '.',
+    message: 'All data and log sheets in range cleared. Ready to process from ' + daysBack + (endDate ? ' to ' + endDate : '') + '.',
     daysBack: daysBack,
     endDate: endDate
   };
