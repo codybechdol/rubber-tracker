@@ -215,6 +215,8 @@
     var currentDays = 7;
     var newOnlyMode = true;
     var isFirstCall = true;
+    var retryCount = 0;
+    var maxRetries = 3;
     var allForemen = [];
     var jobMappings = [];
     var pendingUnknownJobs = [];
@@ -428,23 +430,15 @@
         document.getElementById("complianceSection").style.display = "none";
 
         console.log("Calling google.script.run.processSafetyEmails with batch size 5 and fastMode=" + fastMode);
-        google.script.run
-          .withSuccessHandler(handleBatchComplete)
-          .withFailureHandler(function(err) {
-            console.error("Server error: ", err);
-            status.innerHTML = "<span style='color: red;'>❌ Error: " + err.message + "</span>";
-            btn.disabled = false;
-            btn.textContent = "Resume / Retry";
-            btn.onclick = function() { continueProcessing(); };
-            if (reprocessBtn) reprocessBtn.disabled = false;
-            var continueBtn = document.getElementById("continueBtn");
-            if (continueBtn) {
-              continueBtn.style.display = "block";
-              continueBtn.disabled = false;
-              continueBtn.textContent = "▶ Continue Processing";
-            }
-          })
-          .processSafetyEmails(days, 5, newOnlyMode, fastMode);  // BATCH SIZE 5 + fastMode
+        var runNormalCall = function() {
+          google.script.run
+            .withSuccessHandler(handleBatchComplete)
+            .withFailureHandler(function(err) {
+              handleBatchFailure(err, runNormalCall);
+            })
+            .processSafetyEmails(days, 5, newOnlyMode, fastMode);  // BATCH SIZE 5 + fastMode
+        };
+        runNormalCall();
         console.log("google.script.run initiated");
       } catch(e) {
         console.error("Error in processEmails:", e);
@@ -523,24 +517,15 @@
 
             // Start the processing
             var fastMode = document.getElementById("fastMode").checked;
-            google.script.run
-              .withSuccessHandler(handleBatchComplete)
-              .withFailureHandler(function(err) {
-                console.error("Server error during reprocess: ", err);
-                status.innerHTML = "<span style='color: red;'>❌ Error: " + err.message + "</span>";
-                btn.disabled = false;
-                btn.textContent = "Resume / Retry";
-                btn.onclick = function() { continueProcessing(); };
-                reprocessBtn.disabled = false;
-                reprocessBtn.textContent = "🔄 Reprocess All (Clear & Restart)";
-                var continueBtn = document.getElementById("continueBtn");
-                if (continueBtn) {
-                  continueBtn.style.display = "block";
-                  continueBtn.disabled = false;
-                  continueBtn.textContent = "▶ Continue Processing";
-                }
-              })
-              .processSafetyEmails(startDateVal, 5, false, fastMode, endDateVal);  // Pass endDateVal here
+            var runReprocessCall = function() {
+              google.script.run
+                .withSuccessHandler(handleBatchComplete)
+                .withFailureHandler(function(err) {
+                  handleBatchFailure(err, runReprocessCall);
+                })
+                .processSafetyEmails(startDateVal, 5, false, fastMode, endDateVal);  // Pass endDateVal here
+            };
+            runReprocessCall();
           } else {
             status.innerHTML = "<span style='color: red;'>❌ Failed to clear data</span>";
             btn.disabled = false;
@@ -560,6 +545,7 @@
 
     function handleBatchComplete(result) {
       console.log("handleBatchComplete called", result);
+      retryCount = 0; // Reset retry count on successful response
       var btn = document.getElementById("processBtn");
       var continueBtn = document.getElementById("continueBtn");
       var reprocessBtn = document.getElementById("reprocessAllBtn");
@@ -843,23 +829,67 @@
 
     function continueBatch() {
       var fastMode = document.getElementById("fastMode").checked;
-      google.script.run
-        .withSuccessHandler(handleBatchComplete)
-        .withFailureHandler(function(err) {
-          var status = document.getElementById("status");
-          var btn = document.getElementById("processBtn");
-          status.innerHTML = "<span style='color: red;'>❌ Error: " + err.message + "</span>";
-          btn.disabled = false;
-          btn.textContent = "Resume / Retry";
-          btn.onclick = function() { continueProcessing(); };
-          var continueBtn = document.getElementById("continueBtn");
-          if (continueBtn) {
-            continueBtn.style.display = "block";
-            continueBtn.disabled = false;
-            continueBtn.textContent = "▶ Continue Processing";
-          }
-        })
-        .processSafetyEmails(currentDays, 5, newOnlyMode, fastMode);  // BATCH SIZE 5
+      var runContinueCall = function() {
+        google.script.run
+          .withSuccessHandler(handleBatchComplete)
+          .withFailureHandler(function(err) {
+            handleBatchFailure(err, runContinueCall);
+          })
+          .processSafetyEmails(currentDays, 5, newOnlyMode, fastMode);  // BATCH SIZE 5
+      };
+      runContinueCall();
+    }
+
+    // Handles transient server/storage errors by automatically retrying the same batch with exponential backoff
+    function handleBatchFailure(err, retryAction) {
+      console.error("Server error encountered:", err);
+      
+      // Check if it looks like a transient/storage error and we have retries left
+      var isStorageError = err && err.message && (
+        err.message.indexOf("storage") !== -1 ||
+        err.message.indexOf("DEADLINE_EXCEEDED") !== -1 ||
+        err.message.indexOf("deadline exceeded") !== -1 ||
+        err.message.indexOf("Service Spreadsheets") !== -1 ||
+        err.message.indexOf("timed out") !== -1 ||
+        err.message.indexOf("rate limit") !== -1 ||
+        err.message.indexOf("internal error") !== -1
+      );
+      
+      if (isStorageError && retryCount < maxRetries) {
+        retryCount++;
+        var status = document.getElementById("status");
+        var delay = 2000 * retryCount; // Exponential backoff: 2s, 4s, 6s...
+        
+        status.innerHTML = "<div style='color:#e67c00;padding:10px;background:#fff3cd;border:1px solid #ffc107;border-radius:4px;margin-bottom:10px;font-size:11px;'>" +
+                           "<strong>⚠️ Transient Server Error:</strong> " + err.message + "<br>" +
+                           "Retrying batch (Attempt " + retryCount + " of " + maxRetries + ") in " + (delay/1000) + " seconds...</div>";
+                           
+        setTimeout(function() {
+          console.log("Retrying call after storage/timeout error...");
+          retryAction();
+        }, delay);
+        return;
+      }
+      
+      // If we ran out of retries or it's not a retryable error, proceed with normal error display
+      var status = document.getElementById("status");
+      var btn = document.getElementById("processBtn");
+      var reprocessBtn = document.getElementById("reprocessAllBtn");
+      
+      status.innerHTML = "<span style='color: red;'>❌ Error: " + err.message + "</span>";
+      btn.disabled = false;
+      btn.textContent = "Resume / Retry";
+      btn.onclick = function() { continueProcessing(); };
+      if (reprocessBtn) {
+        reprocessBtn.disabled = false;
+        reprocessBtn.textContent = "🔄 Reprocess All (Clear & Restart)";
+      }
+      var continueBtn = document.getElementById("continueBtn");
+      if (continueBtn) {
+        continueBtn.style.display = "block";
+        continueBtn.disabled = false;
+        continueBtn.textContent = "▶ Continue Processing";
+      }
     }
 
     // Called when user clicks "Continue Processing" after a timeout
