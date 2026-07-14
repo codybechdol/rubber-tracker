@@ -4115,13 +4115,38 @@ function resolveJobToCrew(jobNumber, context) {
     }
   }
 
-  // 4. Not found
+  // 4. Check Job Tracking sheet (which preserves historical/completed jobs)
+  var jobTrackingData = getCachedJobTrackingData();
+  if (jobTrackingData && jobTrackingData.length > 1) {
+    var jtHeaders = jobTrackingData[0];
+    var jtJobNumCol = jtHeaders.indexOf('Job Number');
+    var jtForemanCol = jtHeaders.indexOf('Foreman');
+    if (jtJobNumCol !== -1 && jtForemanCol !== -1) {
+      for (var j = 1; j < jobTrackingData.length; j++) {
+        var jtJobNum = String(jobTrackingData[j][jtJobNumCol] || '').split('.')[0].trim();
+        if (jtJobNum === baseJob) {
+          var jtForeman = String(jobTrackingData[j][jtForemanCol] || '').trim();
+          if (jtForeman) {
+            return {
+              found: true,
+              crew: baseJob,
+              foreman: jtForeman,
+              source: 'job_tracking',
+              reason: 'Job found in Job Tracking sheet (historical/completed)'
+            };
+          }
+        }
+      }
+    }
+  }
+
+  // 5. Not found
   return {
     found: false,
     crew: null,
     foreman: null,
     source: 'notfound',
-    reason: 'Job ' + baseJob + ' not found in Employees sheet (primary or secondary)'
+    reason: 'Job ' + baseJob + ' not found in Employees or Job Tracking sheets'
   };
 }
 

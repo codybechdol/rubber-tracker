@@ -12,39 +12,39 @@ Google Apps Script-based inventory management system for tracking rubber gloves/
 ## Architecture: File Load Order & Function Ownership
 Google Apps Script loads files **alphabetically**. Numbered prefixes control load order:
 ```
-00-Constants.gs  → loads FIRST (defines COLS, SHEET_* constants, STATUS_LOCATIONS, incl. Blankets/HV Testers/Phasing Sets/AED/Grounds/Hot Sticks) (~309 lines)
-01-Utilities.gs  → utility functions (logEvent, normalizeApprovalValue, isStatusLocation, isEmployeePending, parseDateNoon) (~135 lines)
+00-Constants.gs  → loads FIRST (defines COLS, SHEET_* constants, STATUS_LOCATIONS, incl. Blankets/MACKs/HV Testers/Phasing Sets/AED/Grounds/Hot Sticks) (~380 lines)
+01-Utilities.gs  → utility functions (logEvent, normalizeApprovalValue, isStatusLocation, isEmployeePending, parseDateNoon, getPhysicalLocation, getSignificantJobNumber, setChunkedScriptProperty, getChunkedScriptProperty, findTrainingTrackingHeaderRow, getTrainingTrackingColIndices, safeWriteRowToTable, safeSetNumberFormat, getEmployeeNameColumnIndex) (~510 lines)
 10-Menu.gs       → archived (menu now in Code.gs) (~19 lines)
 11-Triggers.gs   → edit/change triggers, auto change-out dates (Gloves, Sleeves, Blankets, HV Testers, Phasing Sets, AED) (~2.4k lines)
 20-InventoryHandlers.gs → inventory status/assignment handlers (~215 lines)
 21-ChangeOutDate.gs → change-out date calculation logic (~220 lines)
-22-EmployeeValidation.gs → Job Tracking functions, Employee validation, training sync (~3.2k lines)
-22-LocationSync.gs → Inventory location sync with Employees (Gloves, Sleeves, Blankets, HV Testers, Phasing Sets, AED) (~186 lines)
-30-SwapGeneration.gs → Swap report generation (~1.4k lines)
+22-EmployeeValidation.gs → Job Tracking functions, Employee validation, training sync (~3.3k lines)
+22-LocationSync.gs → Inventory location sync with Employees (Gloves, Sleeves, Blankets, HV Testers, Phasing Sets, AED) (~242 lines)
+30-SwapGeneration.gs → Swap report generation stubs (~378 lines — most logic in Code.gs)
 31-SwapHandlers.gs → Swap stage handling (Stage 1/2/3 workflows) (~515 lines)
-32-SwapPreservation.gs → Swap checkbox/data preservation between regenerations (~151 lines)
-40-Reclaims.gs   → Reclaims logic and pick list generation (~1.1k lines)
+32-SwapPreservation.gs → stub (~21 lines — logic in Code.gs)
+40-Reclaims.gs   → stub (~8 lines — logic in Code.gs)
 50-History.gs    → Item history (Gloves/Sleeves History), DEPRECATED by saveHistoryFast() in Code.gs (~265 lines)
 51-EmployeeHistory.gs → Employee lifecycle, restore deleted employees (~1.5k lines)
-60-PurchaseNeeds.gs → Purchase Needs 3-tier priority report (High/Medium/Low with class grouping) (~832 lines)
-61-InventoryReports.gs → Inventory Reports with charts (~1.8k lines)
+60-PurchaseNeeds.gs → stub (~10 lines — logic in Code.gs)
+61-InventoryReports.gs → Inventory Reports with charts (~901 lines)
 62-PurchaseOrders.gs → PO generation, vendor catalog and management (~917 lines)
 70-ToDoList.gs   → archived (To Do List functionality now in Code.gs) (~52 lines)
 75-Scheduling.gs → Crew visit scheduling, training calendar, attendee management (~3.6k lines)
-76-SmartScheduling.gs → Task collection (incl. all equipment swap types), getDriveTimeMap() (~2.5k lines)
+76-SmartScheduling.gs → Task collection (incl. all equipment swap types incl. MACKs), getDriveTimeMap() (~2.6k lines)
 76-EmployeeClassifications.gs → Job classification dropdowns (~152 lines)
 80-EmailReports.gs → Weekly HTML email reports (~1.5k lines)
-85-DataImport.gs → Crew Import, Job Tracking sync, new hire/rehire, job activation scheduling, fiscal year transition (~3.7k lines)
+85-DataImport.gs → Crew Import, Job Tracking sync, new hire/rehire, job activation scheduling, fiscal year transition (~4k lines)
 86-TimeTracking.gs → Daily Accomplishments (~1.1k lines)
 87-RoutePlanner.gs → Trip Planner (~2.6k lines)
-88-SafetyReports.gs → Gmail processing, Safety Compliance (~18.7k lines)
+88-SafetyReports.gs → Gmail processing, Safety Compliance (~19.2k lines)
 90-Backup.gs     → Google Drive backup snapshot (~108 lines)
 95-BuildSheets.gs → Sheet creation/setup utilities (~92 lines)
-95-DiagnosticTools.gs → Pick list diagnostics (~631 lines)
+95-DiagnosticTools.gs → Pick list diagnostics (~658 lines)
 98-LegacyArchive.gs → Archived legacy functions (DO NOT USE) (~615 lines)
-99-MenuFix.gs    → Full menu backup (run forceCreateMenu if menu missing); KEPT MORE UP-TO-DATE than Code.gs onOpen() — use as canonical menu reference (~292 lines)
-Code.gs          → loads LAST, contains ALL working implementations (~24.9k lines)
-TestRunner.gs    → Basic integration tests, run via Apps Script editor (~190 lines)
+99-MenuFix.gs    → Canonical menu builder; `onOpen()` in Code.gs DELEGATES to `_buildGloveManagerMenu()` here. Run `forceCreateMenu()` if menu missing. (~462 lines)
+Code.gs          → loads LAST, contains ALL working implementations (~29.2k lines)
+TestRunner.gs    → Basic integration tests, run via Apps Script editor (~365 lines)
 ```
 
 **Key Rule:** When functions appear in multiple files, **Code.gs always wins** (loads last).
@@ -73,17 +73,20 @@ var itemNum = row[COLS.INVENTORY.ITEM_NUM - 1];  // -1 for array index
 var status = row[COLS.INVENTORY.STATUS - 1];
 ```
 
-Available `COLS` namespaces: `INVENTORY` (Gloves/Sleeves — 12-column layout with ESL_ID), `BLANKETS`, `HV_TESTERS`, `PHASING_SETS`, `AED`, `GROUNDS`, `HOT_STICKS`, `SWAPS`, `BLANKET_SWAPS`, `SWAPS_HIDDEN`, `EMPLOYEES`, `EMPLOYEE_HISTORY`.
+Available `COLS` namespaces: `INVENTORY` (Gloves/Sleeves — 12-column layout with ESL_ID), `BLANKETS`, `MACKS`, `HV_TESTERS`, `PHASING_SETS`, `AED`, `GROUNDS`, `HOT_STICKS`, `SWAPS`, `BLANKET_SWAPS`, `MACK_SWAPS`, `SWAPS_HIDDEN`, `EMPLOYEES`, `EMPLOYEE_HISTORY`.
 
 **Note:** `HV_TESTERS` and `PHASING_SETS` share the same 12-column layout (A-L): Item#, Model, KV, Serial#, Calibration Date, Date Assigned, Location, Status, Assigned To, Change Out Date, Picked For, Notes.
 
 **Note:** `GROUNDS` uses a 13-column layout (A-M): Serial#, Type(OH/UG), Size, KV, Length, Test Date, Date Assigned, Location, Status, Assigned To, Change Out Date, Picked For, Notes. Test interval: `INTERVAL_GROUNDS_TEST = 12` months (1-year cycle).
 
-**Note:** `HOT_STICKS` uses an 11-column layout (A-K): Item#, Type, Length, Test Date, Date Assigned, Location, Status, Assigned To, Change Out Date, Picked For, Notes. Test interval: `INTERVAL_HOT_STICK_TEST = 12` months (1-year cycle, per OSHA 1910.269 / ASTM F711).
+**Note:** `HOT_STICKS` uses an 11-column layout (A-K): Item#, Type, Length, Test Date, Date Assigned, Location, Status, Assigned To, Change Out Date, Picked For, Notes. Test interval: `INTERVAL_HOT_STICK_TEST = 24` months (2-year cycle, per OSHA 1910.269 / ASTM F711).
+
+**Note:** `MACKS` (Phase 6 — July 2026) uses a 12-column layout (A-L): Item#(ESL ID), KV, Size, Length, Test Date, Date Assigned, Location, Status, Assigned To, Change Out Date, Picked For, Notes. Test interval: `INTERVAL_MACK_TEST = 12` months. Sheet constants: `SHEET_MACKS`, `SHEET_MACK_SWAPS`, `SHEET_MACKS_HISTORY`. Task collection from MACK Swaps is integrated into `collectAndGroupTasks()` in `76-SmartScheduling.gs`. Menu: Generate MACK Swaps (`menuGenerateMackSwaps`), Fix MACK Change Out Dates (`fixMackChangeOutDates`), View MACKs (`openMacksSheet`).
 
 **⚠️ Grounds and Hot Sticks (Phase 4/5 — May 2026):** Sheet name constants (`SHEET_GROUNDS`, `SHEET_GROUND_SWAPS`, `SHEET_GROUNDS_HISTORY`, `SHEET_HOT_STICKS`, `SHEET_HOT_STICK_SWAPS`, `SHEET_HOT_STICKS_HISTORY`) and `COLS.GROUNDS`/`COLS.HOT_STICKS` are defined in `00-Constants.gs`. Task collection from these swap sheets is integrated into `collectAndGroupTasks()` in `76-SmartScheduling.gs`. **Swap generation functions (`menuGenerateGroundSwaps`, `menuGenerateHotStickSwaps`, `openGroundsSheet`, `openHotSticksSheet`, `setupGroundsSheet`, `setupGroundsCompanionSheets`, `setupHotSticksSheet`) are referenced in the menu but implementation is still pending** — do not attempt to call them from triggers.
 
 **Note:** `INVENTORY` (Gloves/Sleeves) uses a 12-column layout (A-L): Item#, ESL ID, Size, Class, Test Date, Date Assigned, Location, Status, Assigned To, Change Out Date, Picked For, Notes. The ESL ID column (B=2) was added April 2026 via `migrateGlovesSleevesSheetsForESLID()`. **BLANKETS** does NOT have ESL ID — uses the old 11-column layout. **All Gloves/Sleeves code MUST use `COLS.INVENTORY.*` constants** — never hardcode indices like `row[5]` or `getRange(..., 11)`. As of April 17, 2026 all known hardcoded references have been updated.
+
 
 ### Logging
 ```javascript
@@ -96,6 +99,25 @@ Logger.log('Debug output');  // For quick debugging
 ```javascript
 var date = parseDateNoon('2026-04-13');  // Returns Apr 13 at noon — correct in all timezones
 // WRONG: var date = new Date(2026, 3, 13);  // Midnight UTC = Apr 12 in Mountain Time
+```
+
+### Google Sheets Tables (typed columns)
+Some sheets are formatted as Google Sheets Tables with typed columns, which reject standard `setValues()` calls. Use helpers from `01-Utilities.gs`:
+```javascript
+// Write a full row to a Table (cell-by-cell, skips empty strings, auto-converts dates)
+safeWriteRowToTable(sheet, rowIndex, rowData, headers);
+
+// Set number format without crashing on typed columns
+safeSetNumberFormat(range, 'MM/dd/yyyy');
+```
+
+### Training Tracking column access
+Training Tracking headers may shift. Always use dynamic lookup helpers from `01-Utilities.gs`:
+```javascript
+var data = sheet.getDataRange().getValues();
+var headerRowIdx = findTrainingTrackingHeaderRow(data);  // searches first 20 rows
+var cols = getTrainingTrackingColIndices(data[headerRowIdx]);  // returns {month, crew, lead, status, ...}
+// Access: row[cols.status], row[cols.month], etc.
 ```
 
 ### HTML Dialogs
@@ -115,44 +137,53 @@ function showMyDialog() {
 - **Standardized Statuses:** Unassigned, Assigned, Complete, Overdue, Deferred
 
 **ScriptProperties keys in use (key reference):**
-- `TASKS_DATA` - Cached task list for getTasksWithMetadata() large-payload pattern
+- `TASKS_DATA_chunks` / `TASKS_DATA_chunk_N` - Chunked task list for getTasksWithMetadata() (uses chunked pattern)
 - `ALL_ASSIGNMENTS_DATA` - All-employee equipment map for LookupDialog All Assignments tab
 - `EMPLOYEE_PHONES` - 6-hour cached phone lookup (TTL: 6 hours)
 - `HOLIDAYS` - JSON array of `{date:'YYYY-MM-DD', name:'String'}` — holiday/blackout days for Trip Planner
 - `CREW_IMPORT_LEAD_SELECTIONS` - Saved crew lead preference per job number for CrewImport
 
+**⚠️ Chunked ScriptProperties pattern (June 2026):** ScriptProperties has a 9KB per-key limit. For payloads that may exceed this, use the chunked helpers in `01-Utilities.gs`:
+```javascript
+setChunkedScriptProperty('TASKS_DATA', jsonStr);   // splits into 8KB chunks
+var data = getChunkedScriptProperty('TASKS_DATA'); // reassembles chunks; falls back to legacy single-key format
+```
+Keys are stored as `TASKS_DATA_chunks` (count) + `TASKS_DATA_chunk_0`, `TASKS_DATA_chunk_1`, etc.
+
 ## Key Files
 | File | Purpose |
 |------|---------|
-| `Code.gs` | Main file - ALL working functions go here (~24.9k lines) |
-| `00-Constants.gs` | Sheet names, column indices (`COLS`), `STATUS_LOCATIONS`, business constants (~309 lines) |
+| `Code.gs` | Main file - ALL working functions go here (~29.2k lines) |
+| `00-Constants.gs` | Sheet names, column indices (`COLS`), `STATUS_LOCATIONS`, business constants (~380 lines) |
 | `11-Triggers.gs` | Edit triggers, auto change-out date recalculation (~2.4k lines) |
-| `22-EmployeeValidation.gs` | Job Tracking sheet functions, employee validation, training sync (~3.2k lines) |
+| `22-EmployeeValidation.gs` | Job Tracking sheet functions, employee validation, training sync (~3.3k lines) |
 | `51-EmployeeHistory.gs` | Employee lifecycle tracking, restore deleted employees (~1.5k lines) |
 | `75-Scheduling.gs` | Crew visit scheduling, training calendar, attendee management (~3.6k lines) |
-| `76-SmartScheduling.gs` | Task collection (all equipment types incl. Grounds/Hot Sticks), `getDriveTimeMap()` (~2.5k lines) |
-| `85-DataImport.gs` | Crew Import from Excel, Job Tracking sync, new hire/rehire, job activation scheduling, fiscal year transition (~3.7k lines) |
+| `76-SmartScheduling.gs` | Task collection (all equipment types incl. MACKs/Grounds/Hot Sticks), `getDriveTimeMap()` (~2.6k lines) |
+| `85-DataImport.gs` | Crew Import from Excel, Job Tracking sync, new hire/rehire, job activation scheduling, fiscal year transition (~4k lines) |
 | `87-RoutePlanner.gs` | Trip planning and route optimization (~2.6k lines) |
-| `88-SafetyReports.gs` | Gmail processing, Safety Compliance tracking (~18.7k lines) |
-| `99-MenuFix.gs` | Full menu backup (run `forceCreateMenu` if menu missing); more up-to-date than Code.gs onOpen() — use as canonical menu reference (~292 lines) |
-| `TestRunner.gs` | Integration tests - run `runAllTests()` in Apps Script editor (~190 lines) |
-| `ToDoSchedule.html` | Task List dialog (~6.5k lines) |
-| `TripPlanner.html` | Trip Planner / Scheduler (primary scheduling interface, ~5.2k lines) |
-| `CrewImport.html` | Excel crew import with SheetJS (~8.5k lines) |
+| `88-SafetyReports.gs` | Gmail processing, Safety Compliance tracking (~19.2k lines) |
+| `99-MenuFix.gs` | Canonical menu builder — `onOpen()` delegates to `_buildGloveManagerMenu()` here; run `forceCreateMenu()` if menu missing (~462 lines) |
+| `TestRunner.gs` | Integration tests - run `runAllTests()` in Apps Script editor (~365 lines) |
+| `ToDoSchedule.html` | Task List dialog (~6.7k lines) |
+| `TripPlanner.html` | Trip Planner / Scheduler (primary scheduling interface, ~5.3k lines) |
+| `CrewImport.html` | Excel crew import with SheetJS (~9.2k lines) |
 | `QuickActions.html` | Monday workflow sidebar (~375 lines) |
-| `ProcessSafetyEmailsDialog.html` | Safety email processing dialog (~1.5k lines) |
-| `ToDoConfig.html` | Schedule configuration dialog (~2.3k lines) |
+| `ProcessSafetyEmailsDialog.html` | Safety email processing dialog (~1.8k lines) |
+| `GenerateAllReportsDialog.html` | 3-part progress dialog for Generate All Reports — calls `generateAllReportsPart1/2/3()` sequentially to avoid 6-min timeout (~166 lines) |
+| `DashboardSMSDialog.html` | SMS notification dialog for cert expiration — calls `markCertNotifiedAndReload(employeeName, certType)` on send (~71 lines) |
+| `ToDoConfig.html` | Schedule configuration dialog (~1.4k lines) |
 | `PurchaseOrderDialog.html` | Purchase order creation dialog (~943 lines) |
 | `VendorConfig.html` | Vendor management with unified catalog (~450 lines) |
 | `ComplianceConfig.html` | Safety Compliance configuration (~200 lines) |
 | `AssignCrewLeads.html` | Crew lead assignment dialog (~540 lines) |
 | `LookupDialog.html` | Employee & item lookup dialog, all assignments view (~520 lines) |
-| `NewItemDialog.html` | New inventory item dialog (Gloves, Sleeves, HV Testers, Phasing Sets) (~407 lines) |
-| `NewEmployeeDialog.html` | New employee creation dialog with pending new hire support (~507 lines) |
+| `NewItemDialog.html` | New inventory item dialog (Gloves, Sleeves, HV Testers, Phasing Sets) (~568 lines) |
+| `NewEmployeeDialog.html` | New employee creation dialog with pending new hire support (~515 lines) |
 | `Dashboard.html` | Task dashboard display (~710 lines) |
 | `ExpiringCertsImport.html` | Expiring certs import dialog (~1.1k lines) |
 | `ExpiringCertsChoice.html` | Cert management choice dialog (Import / Refresh / Scan) (~95 lines) |
-| `TimeBreakdown.html` | Daily Accomplishments / time tracking dialog (~500 lines) |
+| `TimeBreakdown.html` | Daily Accomplishments / time tracking dialog (~519 lines) |
 | `FiscalYearConfig.html` | Fiscal year configuration dialog (~342 lines) |
 | `TabNavigator.html` | Spreadsheet tab navigator sidebar — favorites, grouped sheets, live filter, click-to-switch. Backend functions (`showTabNavigatorSidebar`, `getTabNavigatorData`, `goToSheet`, `addFavoriteSheet`, `removeFavoriteSheet`, `tabNavigatorPing`) not yet implemented in .gs files; menu item in 99-MenuFix.gs only (~249 lines) |
 
@@ -217,9 +248,9 @@ The `Location` column on the Employees sheet currently serves double duty:
 **⚠️ Status Location Filtering (April 2026 fix):**
 `STATUS_LOCATIONS` constant in `00-Constants.gs` lists values that are statuses, NOT physical cities:
 ```javascript
-var STATUS_LOCATIONS = ['vacation', 'light duty', 'weeds', 'leave', 'previous employee', 'unknown'];
+var STATUS_LOCATIONS = ['vacation', 'light duty', 'weeds', 'leave', 'previous employee', 'medical', "worker's comp", 'unknown'];
 ```
-Use `isStatusLocation(location)` from `01-Utilities.gs` to check if a location is a status value.
+Use `isStatusLocation(location)` from `01-Utilities.gs` to check if a location is a status value. **As of June 2026, `isStatusLocation()` also handles the parenthesized format** `"Helena (Vacation)"` — the status inside parentheses is checked against STATUS_LOCATIONS. Use `getPhysicalLocation(location)` (also in `01-Utilities.gs`) to strip the parenthesized suffix and get the physical city.
 **All functions that determine crew location for Job Tracking MUST filter out status locations.** Otherwise, if the first employee processed for a crew has Location="Vacation", the entire crew gets "Vacation" as its location in Job Tracking. Functions already fixed:
 - `syncJobTrackingAfterImport()` in `85-DataImport.gs`
 - `refreshJobTrackingFromEmployees()` in `22-EmployeeValidation.gs`
@@ -257,15 +288,24 @@ SUP(1) > GF(2) > F(3) > GTO F(4) > JRY(5) > JRY OP(6) > WT(7) > GTO(8) > EO 1(9)
 Canonical source: `getCrewLead()` in `75-Scheduling.gs`. Also used by `syncCrews()` and `refreshJobTrackingForemenSilent()`.
 
 **`generateAllReports()` pipeline** (Code.gs):
+`generateAllReports()` opens `GenerateAllReportsDialog.html` which runs 3 sequential server-side functions to avoid the 6-minute Apps Script timeout:
+
+**Part 1 — `generateAllReportsPart1()`:**
 1. `checkAndActivateScheduledJobs()` — auto-activates On Hold/Pending Start jobs
-2. `fixChangeOutDatesSilent()` + `fixBlanketChangeOutDatesSilent()`
+2. `fixChangeOutDatesSilent()` + `fixBlanketChangeOutDatesSilent()` + `fixMackChangeOutDates()`
 3. `syncInventoryLocations()` — syncs equipment locations with Employees
-4. Generate all swap reports (Gloves, Sleeves, Blankets, HV Testers, Phasing Sets, AED)
-5. `updateReclaimsSheet()`, `updatePurchaseNeeds()`, `updateInventoryReports()`
-6. `updateTrainingTrackingCrewLeadsSilent()` — updates crew leads for current/future months
-7. `addMissingCrewsToTrainingTracking()` — adds new crew rows to Training Tracking (reads Training Config for topics/hours, excludes 005- prefix crews)
-8. `refreshTrainingAttendeesSilent()` — refreshes crew member lists and sizes for current/future months
-9. `syncCrews(true)` — syncs foremen and schedules in Job Tracking
+4. Generate Glove, Sleeve, Blanket swap reports
+
+**Part 2 — `generateAllReportsPart2()`:**
+1. Upgrade pick lists (returns `{upgradeCount}`)
+2. Generate HV Tester, Phasing Set, AED, MACK swap reports
+3. `updateReclaimsSheet()`, `updatePurchaseNeeds()`, `updateInventoryReports()`
+
+**Part 3 — `generateAllReportsPart3()`:**
+1. `updateTrainingTrackingCrewLeadsSilent()` — updates crew leads for current/future months
+2. `addMissingCrewsToTrainingTracking()` — adds new crew rows to Training Tracking
+3. `refreshTrainingAttendeesSilent()` — refreshes crew member lists and sizes
+4. `syncCrews(true)` — syncs foremen and schedules in Job Tracking
 
 Key functions in `22-EmployeeValidation.gs`:
 - `setupJobTrackingSheet()` - Creates sheet with all 25 columns
@@ -374,13 +414,9 @@ Key backend functions:
 - `getStoredAllAssignments()` - Retrieves stored data for client
 
 ## Menu System
-Menu defined in `Code.gs` `onOpen()` function. Organized as a 6-step Monday workflow under **Glove Manager**.
+Menu defined in `99-MenuFix.gs` `_buildGloveManagerMenu()`. As of June 1, 2026, **`onOpen()` in Code.gs delegates to `_buildGloveManagerMenu()`** — `99-MenuFix.gs` is the single source of truth for all menu strings. Organized as a 6-step Monday workflow under **Glove Manager**.
 
-**⚠️ Menu sync note (May 2026):** `99-MenuFix.gs` (`forceCreateMenu`) is now **more up-to-date** than `Code.gs` `onOpen()`. Code.gs still contains several legacy one-time migration items (e.g., "Migrate Job Tracking for Compliance") that were removed from 99-MenuFix. When checking current menu structure, treat 99-MenuFix.gs as the canonical reference. Key additions in 99-MenuFix but not yet in Code.gs onOpen():
-- `🧭 Tab Navigator` (top level, `showTabNavigatorSidebar` — backend not yet implemented)
-- `🔴 Generate Hot Stick Swaps` / `⚡ Generate Ground Swaps` (stubs, implementation pending)
-- `📊 Gmail Status` (`showGmailStatus`), `🔧 Repair Misassigned Foremen`, `🔍 Diagnose Crew Lead Dialog Skips`
-- Additional Training items: `➕ Add Missing Crews to Training`, `🔄 Re-sort Training Tracking`, log link functions
+**⚠️ Menu sync note (June 2026):** `99-MenuFix.gs` is canonical. `onOpen()` in Code.gs now simply calls `_buildGloveManagerMenu()`. When adding menu items, add them ONLY in `99-MenuFix.gs`.
 
 ```
 Glove Manager
@@ -393,13 +429,11 @@ Glove Manager
 │   ├── 🔄 Sync Crews
 │   └── 🔧 Utilities →                 (Job Tracking setup, refresh, foremen, backfill, saved settings, etc.)
 ├── 📊 Generate All Reports            ← STEP 2
-│   ├── ⚡ Generate All Reports
-│   ├── Generate Glove/Sleeve/Blanket/HV Tester/Phasing Set/AED Swaps
+│   ├── ⚡ Generate All Reports         ← Opens GenerateAllReportsDialog.html (3-part timeout-safe)
+│   ├── Generate Glove/Sleeve/Blanket/MACK/HV Tester/Phasing Set/AED Swaps
 │   ├── 🔴 Generate Hot Stick Swaps (stub — implementation pending)
 │   ├── ⚡ Generate Ground Swaps (stub — implementation pending)
-│   ├── Update Purchase Needs / Inventory Reports
-│   ├── Run Reclaims Check / Update Reclaims Sheet
-│   └── 🔧 Utilities →                 (Fix change-out dates, training crew leads)
+│   └── 🔧 Utilities →                 (Fix change-out dates incl. MACK, training crew leads, Configure SMS Web App, Deploy Swaps Dashboards)
 ├── 🛡️ Process Safety Emails           ← STEP 3
 │   ├── 📥 Process Safety Emails
 │   ├── 📊 View Equipment Needs
@@ -421,7 +455,7 @@ Glove Manager
 │   ├── 📝 Daily Accomplishments
 │   ├── 📚 Training →                  (Setup config/tracking, add missing crews, cleanup on-hold rows, re-sort, format, refresh attendees, December catch-ups, compliance report, sync with config, debug)
 │   ├── 👷 Crew Visit →                (Setup/refresh crew visit config)
-│   └── 🔧 Utilities →                 (Monthly schedule, refresh calendar, manage holidays/blackout days, migrate manual tasks, clean up manual tasks, purge stuck tasks)
+│   └── 🔧 Utilities →                 (Monthly schedule, refresh calendar, manage holidays/blackout days, Configure SMS Web App, migrate manual tasks, clean up manual tasks, purge stuck tasks)
 ├── 💾 Save & Backup                   ← STEP 6
 │   ├── 💾 Save Current State to History
 │   ├── 💾 Create Backup Snapshot
@@ -430,18 +464,17 @@ Glove Manager
 │   └── 📧 Email Reports →             (Send, preview, configure, schedule)
 ├── ─────────────────────────
 ├── 🔧 Maintenance                     ← RARELY USED
-│   ├── 📦 Inventory →                 (Archive, restore, sync, HV testers, phasing sets, AED, grounds, hot sticks)
+│   ├── 📦 Inventory →                 (Archive, restore, View MACKs, HV testers, phasing sets, AED, grounds, hot sticks, Setup Grounds)
 │   ├── 🛒 Purchase Orders →           (Create PO, order history, manage vendors)
 │   ├── 👥 Employees →                 (Location validation, archive, restore, phone format, etc.)
-│   ├── 📋 Job Tracking →              (View, refresh, mark complete, add future, Fix Schedule Columns V-Y)
+│   ├── 📋 Job Tracking →              (View, refresh, mark complete, add future)
 │   ├── 🏗️ Sheets Setup →             (Build sheets, ESL ID migration, setup locations, AED/grounds/hot sticks setup, fiscal year, import data)
 │   ├── 🔍 Diagnose Auth Issues
 │   └── 🗑️ Clear Background Triggers
 ├── 🔍 Debug                           ← DIAGNOSTIC TOOLS
 │   ├── Test Edit Trigger / Recalc Current Row
 │   ├── Diagnose Pick Lists / Show Swaps
-│   ├── Test Trip Planner / Debug Task List / Debug Training
-│   └── Diagnose specific crews (005-26, 045-26)
+│   └── Test Trip Planner Data
 ├── ─────────────────────────
 └── Close & Save History
 ```
