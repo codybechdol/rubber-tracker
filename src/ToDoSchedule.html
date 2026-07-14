@@ -3786,7 +3786,20 @@
 
     function formatDateMMDDYYYY(date) {
       if (!date) return '';
+      if (typeof date === 'string') {
+        // If it is in YYYY-MM-DD format (from HTML date inputs)
+        var parts = date.split('-');
+        if (parts.length === 3 && parts[0].length === 4) {
+          return parts[1] + '/' + parts[2] + '/' + parts[0];
+        }
+        // If it is in MM/DD/YYYY format or similar
+        var partsSlash = date.split('/');
+        if (partsSlash.length === 3) {
+          return String(partsSlash[0]).padStart(2, '0') + '/' + String(partsSlash[1]).padStart(2, '0') + '/' + partsSlash[2];
+        }
+      }
       var d = date instanceof Date ? date : new Date(date);
+      if (isNaN(d.getTime())) return String(date);
       var month = String(d.getMonth() + 1).padStart(2, '0');
       var day = String(d.getDate()).padStart(2, '0');
       var year = d.getFullYear();
@@ -5000,6 +5013,17 @@
             })
             .markSafetyReportNotified(taskId, jobNumber, weekOf);
         }
+      } else {
+        // Certification task - update Task Metadata and Expiring Certs sheet
+        google.script.run
+          .withSuccessHandler(function(result) {
+            console.log('markCertNotifiedAndReload success:', result);
+            refreshData();
+          })
+          .withFailureHandler(function(err) {
+            console.error('markCertNotifiedAndReload error:', err);
+          })
+          .markCertNotifiedAndReload(task.employee, task.itemType || task.certType);
       }
 
       // Open SMS link - use link click method for better compatibility
@@ -6272,7 +6296,7 @@
                ((t.itemType || '').toLowerCase() === (cert.certType || '').toLowerCase() ||
                 (t.certType || '').toLowerCase() === (cert.certType || '').toLowerCase());
       });
-      var isNotified = (notifiedTasks[certKey] === true) || (matchingTask && matchingTask.notifiedDate);
+      var isNotified = (notifiedTasks[certKey] === true) || cert.isNotified || (matchingTask && (matchingTask.notifiedDate || matchingTask.isNotified));
       var isScheduled = (scheduledTasks[certKey] === true) || (matchingTask && matchingTask.scheduledDate);
 
       // Get phone number for this employee

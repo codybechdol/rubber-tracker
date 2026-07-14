@@ -3659,7 +3659,8 @@ function processExpiringCertsImportMultiRow(parsedData, selectedCertTypes) {
       rec.location,
       rec.jobNum,
       '', // Formula column (Days Until)
-      ''  // Formula column (Status)
+      '', // Formula column (Status)
+      ''  // Column H (SMS)
     ]);
   }
 
@@ -3910,6 +3911,10 @@ function sortExpiringCertsSheet(sheet) {
   // Get notified tasks from Task Metadata once for efficiency
   var metaSheet = sheet.getParent().getSheetByName('Task Metadata');
   var notifiedTasks = {};
+  var is1stAidOrCPR = function(t) {
+    var tLower = String(t).toLowerCase().trim();
+    return tLower.indexOf('cpr') !== -1 || tLower.indexOf('1st aid') !== -1 || tLower.indexOf('first aid') !== -1;
+  };
   if (metaSheet) {
     var metaData = metaSheet.getDataRange().getValues();
     var metaHeaders = metaData[0];
@@ -3918,36 +3923,37 @@ function sortExpiringCertsSheet(sheet) {
     var taskTypeCol = metaHeaders.indexOf('TaskType');
     var notifiedCol = metaHeaders.indexOf('NotifiedDate');
     if (empCol !== -1 && typeCol !== -1 && notifiedCol !== -1 && taskTypeCol !== -1) {
+      var empList = getEmployeeNamesForMatching();
+      var alternateNameMap = buildAlternateNameMap(empList);
+      
       for (var i = 1; i < metaData.length; i++) {
         var emp = String(metaData[i][empCol]).toLowerCase().trim();
+        var resolvedEmp = resolveEmployeeName(emp, alternateNameMap).toLowerCase().trim();
         var itm = String(metaData[i][typeCol]).toLowerCase().trim();
         var tsk = String(metaData[i][taskTypeCol]).toLowerCase().trim();
         var hasNotified = metaData[i][notifiedCol];
+        
         if (tsk === 'cert expiring' && hasNotified) {
-          notifiedTasks[emp + '|' + itm] = true;
+          notifiedTasks[resolvedEmp + '|' + itm] = true;
+          if (is1stAidOrCPR(itm)) {
+            notifiedTasks[resolvedEmp + '|cpr'] = true;
+            notifiedTasks[resolvedEmp + '|1st aid'] = true;
+            notifiedTasks[resolvedEmp + '|first aid'] = true;
+          }
         }
       }
     }
   }
 
-  // Get employee phones from Employees sheet
-  var empSheet = sheet.getParent().getSheetByName(SHEET_EMPLOYEES);
-  var empPhones = {};
-  if (empSheet) {
-    var empData = empSheet.getDataRange().getValues();
-    for (var i = 1; i < empData.length; i++) {
-      var name = String(empData[i][0]).toLowerCase().trim();
-      var phone = empData[i][4]; // Column E
-      if (phone) {
-        empPhones[name] = phone;
-      }
-    }
-  }
+  // Get employee phones and alternate names map
+  var empPhones = getEmployeePhonesCached(false);
+  var empList = getEmployeeNamesForMatching();
+  var alternateNameMap = buildAlternateNameMap(empList);
 
   var formulas = [];
   var smsValues = [];
   var smsValidations = [];
-  var ruleCheckbox = SpreadsheetApp.newDataValidation().requireCheckbox().build();
+  var ruleCheckbox = SpreadsheetApp.newDataValidation().requireCheckbox(true, "💬 Send SMS").build();
 
   for (var f = 0; f < values.length; f++) {
     var rowNum = f + 2;
@@ -3969,8 +3975,9 @@ function sortExpiringCertsSheet(sheet) {
     }
 
     // Static Column H
-    var taskKey = empName.toLowerCase().trim() + '|' + certType.toLowerCase().trim();
-    var hasPhone = !!empPhones[empName.toLowerCase().trim()];
+    var resolvedName = resolveEmployeeName(empName, alternateNameMap);
+    var taskKey = resolvedName.toLowerCase().trim() + '|' + certType.toLowerCase().trim();
+    var hasPhone = !!empPhones[resolvedName.toLowerCase().trim()];
     var isNotified = !!notifiedTasks[taskKey];
 
     if (isNotified) {
@@ -3980,7 +3987,7 @@ function sortExpiringCertsSheet(sheet) {
       smsValues.push(["No Phone"]);
       smsValidations.push([null]);
     } else {
-      smsValues.push([false]);
+      smsValues.push(["💬 Send SMS"]);
       smsValidations.push([ruleCheckbox]);
     }
   }
@@ -6079,11 +6086,14 @@ function updateCertExpirationFromTask(employee, certType, newExpiration, task) {
     var expirationCol = 2;
 
     // Find and update the matching row
-    var searchEmp = String(employee || '').trim().toLowerCase();
+    var empList = getEmployeeNamesForMatching();
+    var alternateNameMap = buildAlternateNameMap(empList);
+    
+    var searchEmp = resolveEmployeeName(employee || '', alternateNameMap).trim().toLowerCase();
     var searchCert = String(certType || '').trim().toLowerCase();
 
     for (var i = 1; i < data.length; i++) {
-      var rowEmp = String(data[i][empCol] || '').trim().toLowerCase();
+      var rowEmp = resolveEmployeeName(data[i][empCol] || '', alternateNameMap).trim().toLowerCase();
       var rowCert = String(data[i][certTypeCol] || '').trim().toLowerCase();
 
       if (rowEmp === searchEmp && rowCert === searchCert) {
@@ -6235,18 +6245,24 @@ function updateCertExpirationDates(changes) {
     var certTypeCol = 1;
     var expirationCol = 2;
 
+    var empList = getEmployeeNamesForMatching();
+    var alternateNameMap = buildAlternateNameMap(empList);
+
     for (var c = 0; c < changes.length; c++) {
       var change = changes[c];
       var employee = change.employee;
       var certType = change.certType;
       var newDate = change.newDate;
 
+      var searchEmp = resolveEmployeeName(employee || '', alternateNameMap).trim().toLowerCase();
+      var searchCert = String(certType || '').trim().toLowerCase();
+
       // Find the matching row
       for (var i = 1; i < data.length; i++) {
-        var rowEmp = String(data[i][empCol] || '').trim();
-        var rowCert = String(data[i][certTypeCol] || '').trim();
+        var rowEmp = resolveEmployeeName(data[i][empCol] || '', alternateNameMap).trim().toLowerCase();
+        var rowCert = String(data[i][certTypeCol] || '').trim().toLowerCase();
 
-        if (rowEmp === employee && rowCert === certType) {
+        if (rowEmp === searchEmp && rowCert === searchCert) {
           // Update the expiration date (column C, which is column 3 in 1-based)
           var dateValue = newDate ? new Date(newDate + 'T12:00:00') : '';
           expiringSheet.getRange(i + 1, expirationCol + 1).setValue(dateValue);
@@ -6467,11 +6483,43 @@ function getExpiringCertsForSchedule() {
       return { certs: [] };
     }
 
+    // Build notified tasks map from Task Metadata
+    var metaSheet = ss.getSheetByName('Task Metadata');
+    var notifiedTasks = {};
+    var is1stAidOrCPR = function(t) {
+      var tLower = String(t).toLowerCase().trim();
+      return tLower.indexOf('cpr') !== -1 || tLower.indexOf('1st aid') !== -1 || tLower.indexOf('first aid') !== -1;
+    };
+    if (metaSheet && metaSheet.getLastRow() > 1) {
+      var metaData = metaSheet.getDataRange().getValues();
+      var metaHeaders = metaData[0];
+      var empCol = metaHeaders.indexOf('Employee');
+      var typeCol = metaHeaders.indexOf('ItemType');
+      var taskTypeCol = metaHeaders.indexOf('TaskType');
+      var notifiedCol = metaHeaders.indexOf('NotifiedDate');
+      if (empCol !== -1 && typeCol !== -1 && notifiedCol !== -1 && taskTypeCol !== -1) {
+        for (var m = 1; m < metaData.length; m++) {
+          var tskType = String(metaData[m][taskTypeCol] || '').toLowerCase().trim();
+          var emp = String(metaData[m][empCol] || '').toLowerCase().trim();
+          var itm = String(metaData[m][typeCol] || '').toLowerCase().trim();
+          var notifiedVal = metaData[m][notifiedCol];
+          if (tskType === 'cert expiring' && notifiedVal) {
+            notifiedTasks[emp + '|' + itm] = true;
+            if (is1stAidOrCPR(itm)) {
+              notifiedTasks[emp + '|cpr'] = true;
+              notifiedTasks[emp + '|1st aid'] = true;
+              notifiedTasks[emp + '|first aid'] = true;
+            }
+          }
+        }
+      }
+    }
+
     // Build current employee map with locations AND phone numbers
     var employeeLocations = {};
     var employeePhones = {};
     var currentEmployees = new Set();
-    var alternateNameMap = {}; // alias_lower → canonical name
+    var alternateNameMap = {}; // alias_lower  canonical name
     var employeesSheet = ss.getSheetByName('Employees');
     if (employeesSheet && employeesSheet.getLastRow() > 1) {
       // Use getEmployeeNamesForMatching to get alternateNames too
@@ -6591,6 +6639,9 @@ function getExpiringCertsForSchedule() {
         }
       }
 
+      var taskKey = empName.toLowerCase().trim() + '|' + certType.toLowerCase().trim();
+      var isNotified = !!notifiedTasks[taskKey];
+
       certs.push({
         employee: empName,
         certType: certType,
@@ -6601,7 +6652,8 @@ function getExpiringCertsForSchedule() {
         isNonExpiring: isNonExpiring,
         rowIndex: i + 2,  // Row number in Expiring Certs sheet (1-based, +1 for header)
         isDeclined: isDeclined,
-        declinedDate: declinedDate
+        declinedDate: declinedDate,
+        isNotified: isNotified
       });
     }
 
@@ -14974,16 +15026,21 @@ function markCertDeclinedAndRemove(taskKey, employee, certType) {
     }
 
     // Find the row for this employee + cert type
+    var empList = getEmployeeNamesForMatching();
+    var alternateNameMap = buildAlternateNameMap(empList);
+    
     var data = expiringSheet.getDataRange().getValues();
     var empCol = 0;  // Column A - Employee Name
     var certCol = 1; // Column B - Cert Type
 
-    for (var i = 1; i < data.length; i++) {
-      var rowEmployee = String(data[i][empCol] || '').trim();
-      var rowCertType = String(data[i][certCol] || '').trim();
+    var searchEmp = resolveEmployeeName(employee || '', alternateNameMap).trim().toLowerCase();
+    var searchCert = String(certType || '').trim().toLowerCase();
 
-      if (rowEmployee.toLowerCase() === employee.toLowerCase() &&
-          rowCertType.toLowerCase() === certType.toLowerCase()) {
+    for (var i = 1; i < data.length; i++) {
+      var rowEmployee = resolveEmployeeName(data[i][empCol] || '', alternateNameMap).trim().toLowerCase();
+      var rowCertType = String(data[i][certCol] || '').trim().toLowerCase();
+
+      if (rowEmployee === searchEmp && rowCertType === searchCert) {
         // Found the row - write declined date
         expiringSheet.getRange(i + 1, declinedColIndex).setValue(today);
         expiringSheet.getRange(i + 1, declinedColIndex).setNumberFormat('yyyy-mm-dd');
@@ -15046,19 +15103,26 @@ function reAddDeclinedCertToTaskList(taskKey, employee, certType) {
 
     if (declinedColIndex !== -1) {
       // Find the row for this employee + cert type
+      var empList = getEmployeeNamesForMatching();
+      var alternateNameMap = buildAlternateNameMap(empList);
+      
       var data = expiringSheet.getDataRange().getValues();
       var empCol = 0;  // Column A - Employee Name
       var certCol = 1; // Column B - Cert Type
 
-      for (var i = 1; i < data.length; i++) {
-        var rowEmployee = String(data[i][empCol] || '').trim();
-        var rowCertType = String(data[i][certCol] || '').trim();
+      var searchEmp = resolveEmployeeName(employee || '', alternateNameMap).trim().toLowerCase();
+      var searchCert = String(certType || '').trim().toLowerCase();
 
-        if (rowEmployee.toLowerCase() === employee.toLowerCase() &&
-            rowCertType.toLowerCase() === certType.toLowerCase()) {
+      for (var i = 1; i < data.length; i++) {
+        var rowEmployee = resolveEmployeeName(data[i][empCol] || '', alternateNameMap).trim().toLowerCase();
+        var rowCertType = String(data[i][certCol] || '').trim().toLowerCase();
+
+        if (rowEmployee === searchEmp && rowCertType === searchCert) {
           // Found the row - clear declined date
           expiringSheet.getRange(i + 1, declinedColIndex).setValue('');
-          Logger.log('reAddDeclinedCertToTaskList: Cleared declined date at row ' + (i + 1));
+          var ruleCheckbox = SpreadsheetApp.newDataValidation().requireCheckbox(true, "💬 Send SMS").build();
+          expiringSheet.getRange(i + 1, 8).setDataValidation(ruleCheckbox).setValue("💬 Send SMS");
+          Logger.log('reAddDeclinedCertToTaskList: Cleared declined date and restored checkbox at row ' + (i + 1));
           break;
         }
       }
@@ -28859,10 +28923,14 @@ function showDashboardSMSDialog(employeeName, certType, expirationDate) {
   }
   var firstName = String(employeeName).split(' ')[0];
   var dateStr = '';
+  var isExpired = false;
   if (expirationDate) {
     var d = new Date(expirationDate);
     if (!isNaN(d.getTime())) {
       dateStr = Utilities.formatDate(d, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+      var today = new Date();
+      today.setHours(0, 0, 0, 0);
+      isExpired = d < today;
     }
   }
   
@@ -28874,21 +28942,34 @@ function showDashboardSMSDialog(employeeName, certType, expirationDate) {
     defaultMsg = "Hi " + firstName + ", your Driver's License will expire on " + dateStr + ". Can you send me a picture (front and back) of your new one?";
   } else if (certLower.indexOf('harassment') !== -1) {
     defaultMsg = "Hi " + firstName + ", your Harassment Training will expire on " + dateStr + ". Can you let me know when you get it done? This is required by the NJATC if you are going to be assigned apprentices and the Federal Govt in general. Go to SafetyWallet.org or the mobile app, sign in with your last name and phone number, upper left is a menu with Training and then On Line Training. Make sure you take the 65 minute class and not the 120 minute class.";
+  } else if (certLower.indexOf('cpr') !== -1 || certLower.indexOf('1st aid') !== -1 || certLower.indexOf('first aid') !== -1) {
+    var expStatusForFirstAid = isExpired ? 'is expired' : 'will expire on ' + dateStr;
+    defaultMsg = "Hi " + firstName + ", your 1st Aid/CPR certification " + expStatusForFirstAid + ". Please let me know your availability for a renewal class.";
   } else {
     defaultMsg = "Hi " + firstName + ", your " + certType + " certification expires on " + dateStr + ". Please let us know when you can attend training.";
   }
   
+  var certLower = String(certType).toLowerCase();
+  var isFirstAidCpr = certLower.indexOf('cpr') !== -1 || certLower.indexOf('1st aid') !== -1 || certLower.indexOf('first aid') !== -1;
+  var width = isFirstAidCpr ? 620 : 480;
+  var height = isFirstAidCpr ? 680 : 360;
+
   var template = HtmlService.createTemplateFromFile('DashboardSMSDialog');
   template.employeeName = employeeName;
+  template.firstName = firstName;
   template.certType = certType;
   template.phone = phone;
   template.cleanPhone = cleanPhone;
   template.message = defaultMsg;
+  template.dateStr = dateStr;
+  template.isExpired = isExpired;
+  template.isWebApp = false;
+  template.webAppUrl = PropertiesService.getScriptProperties().getProperty('WEB_APP_URL') || '';
   
   var html = template.evaluate()
-    .setWidth(450)
-    .setHeight(320);
-  SpreadsheetApp.getUi().showModalDialog(html, 'Send Notification SMS');
+    .setWidth(width)
+    .setHeight(height);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Send Notification');
 }
 
 /**
@@ -28900,6 +28981,11 @@ function markCertNotifiedAndReload(employeeName, certType) {
     var metaSheet = ss.getSheetByName('Task Metadata');
     var foundCount = 0;
     
+    var is1stAidOrCPR = function(t) {
+      var tLower = String(t).toLowerCase().trim();
+      return tLower.indexOf('cpr') !== -1 || tLower.indexOf('1st aid') !== -1 || tLower.indexOf('first aid') !== -1;
+    };
+
     if (metaSheet) {
       var data = metaSheet.getDataRange().getValues();
       var headers = data[0];
@@ -28915,12 +29001,13 @@ function markCertNotifiedAndReload(employeeName, certType) {
           var empName = String(data[i][empCol]).toLowerCase().trim();
           var itemType = String(data[i][typeCol]).toLowerCase().trim();
           
-          if (taskType === 'cert expiring' && 
-              empName === String(employeeName).toLowerCase().trim() && 
-              itemType === String(certType).toLowerCase().trim()) {
-            
+          var matchesEmp = resolveEmployeeName(empName, alternateNameMap).toLowerCase().trim() === resolvedTargetEmp;
+          var matchesType = itemType === String(certType).toLowerCase().trim() || 
+                            (is1stAidOrCPR(itemType) && is1stAidOrCPR(certType));
+
+          if (taskType === 'cert expiring' && matchesEmp && matchesType) {
             metaSheet.getRange(i + 1, notifiedCol + 1).setValue(now);
-            Logger.log('markCertNotifiedAndReload: Marked ' + employeeName + ' for ' + certType + ' as notified.');
+            Logger.log('markCertNotifiedAndReload: Marked ' + employeeName + ' for ' + itemType + ' as notified.');
             foundCount++;
           }
         }
@@ -28937,12 +29024,18 @@ function markCertNotifiedAndReload(employeeName, certType) {
         var expTypeCol = 1; // Column B
         var expDateCol = 2; // Column C
         
+        var empList = getEmployeeNamesForMatching();
+        var alternateNameMap = buildAlternateNameMap(empList);
+        
         var targetRowIndex = -1;
         var expDateVal = null;
         for (var j = 1; j < expData.length; j++) {
           var rowEmp = String(expData[j][expEmpCol]).toLowerCase().trim();
+          var resolvedRowEmp = resolveEmployeeName(rowEmp, alternateNameMap).toLowerCase().trim();
+          var resolvedEmpName = resolveEmployeeName(employeeName, alternateNameMap).toLowerCase().trim();
+          
           var rowType = String(expData[j][expTypeCol]).toLowerCase().trim();
-          if (rowEmp === String(employeeName).toLowerCase().trim() && 
+          if (resolvedRowEmp === resolvedEmpName && 
               rowType === String(certType).toLowerCase().trim()) {
             targetRowIndex = j + 1; // 1-based row number
             expDateVal = expData[j][expDateCol];
@@ -29019,6 +29112,30 @@ function markCertNotifiedAndReload(employeeName, certType) {
       }
     }
     
+    // Update Expiring Certs sheet to show Notified
+    var expiringSheet = ss.getSheetByName('Expiring Certs');
+    if (expiringSheet) {
+      var empList = getEmployeeNamesForMatching();
+      var alternateNameMap = buildAlternateNameMap(empList);
+      
+      var expData = expiringSheet.getDataRange().getValues();
+      for (var j = 1; j < expData.length; j++) {
+        var rowEmp = String(expData[j][0]).toLowerCase().trim();
+        var resolvedRowEmp = resolveEmployeeName(rowEmp, alternateNameMap).toLowerCase().trim();
+        var resolvedEmpName = resolveEmployeeName(employeeName, alternateNameMap).toLowerCase().trim();
+        
+        var rowType = String(expData[j][1]).toLowerCase().trim();
+        if (resolvedRowEmp === resolvedEmpName && 
+            (rowType === String(certType).toLowerCase().trim() || (is1stAidOrCPR(rowType) && is1stAidOrCPR(certType)))) {
+          expiringSheet.getRange(j + 1, 8).clearDataValidations().setValue("💬 Notified");
+          Logger.log('markCertNotifiedAndReload: Updated Expiring Certs row ' + (j + 1) + ' to 💬 Notified.');
+        }
+      }
+    }
+    
+    // Flush changes so that subsequent setupDashboardLayout and sortExpiringCertsSheet see the updated data
+    SpreadsheetApp.flush();
+    
     // Refresh the dashboard
     var dashSheet = ss.getSheetByName(SHEET_DASHBOARD);
     if (dashSheet) {
@@ -29044,6 +29161,16 @@ function clearCertNotifiedStatus(employeeName, certType) {
     var metaSheet = ss.getSheetByName('Task Metadata');
     if (!metaSheet) return;
     
+    var is1stAidOrCPR = function(t) {
+      var tLower = String(t).toLowerCase().trim();
+      return tLower.indexOf('cpr') !== -1 || tLower.indexOf('1st aid') !== -1 || tLower.indexOf('first aid') !== -1;
+    };
+    
+    // Get alternate names map for robust matching
+    var empList = getEmployeeNamesForMatching();
+    var alternateNameMap = buildAlternateNameMap(empList);
+    var resolvedTargetEmp = resolveEmployeeName(employeeName, alternateNameMap).toLowerCase().trim();
+
     var data = metaSheet.getDataRange().getValues();
     var headers = data[0];
     var empCol = headers.indexOf('Employee');
@@ -29062,10 +29189,11 @@ function clearCertNotifiedStatus(employeeName, certType) {
         var empName = String(data[i][empCol]).toLowerCase().trim();
         var itemType = String(data[i][typeCol]).toLowerCase().trim();
         
-        if (taskType === 'cert expiring' && 
-            empName === String(employeeName).toLowerCase().trim() && 
-            itemType === String(certType).toLowerCase().trim()) {
-          
+        var matchesEmp = resolveEmployeeName(empName, alternateNameMap).toLowerCase().trim() === resolvedTargetEmp;
+        var matchesType = itemType === String(certType).toLowerCase().trim() ||
+                          (is1stAidOrCPR(itemType) && is1stAidOrCPR(certType));
+
+        if (taskType === 'cert expiring' && matchesEmp && matchesType) {
           if (notifiedCol !== -1) metaSheet.getRange(i + 1, notifiedCol + 1).setValue('');
           if (schedCol !== -1) metaSheet.getRange(i + 1, schedCol + 1).setValue('');
           if (startCol !== -1) metaSheet.getRange(i + 1, startCol + 1).setValue('');
@@ -29073,10 +29201,33 @@ function clearCertNotifiedStatus(employeeName, certType) {
           if (statusCol !== -1) metaSheet.getRange(i + 1, statusCol + 1).setValue('Unassigned');
           if (completedCol !== -1) metaSheet.getRange(i + 1, completedCol + 1).setValue('');
           
-          Logger.log('clearCertNotifiedStatus: Cleared notified/scheduled status for ' + employeeName + ' (' + certType + ').');
+          Logger.log('clearCertNotifiedStatus: Cleared notified/scheduled status for ' + employeeName + ' (' + itemType + ').');
         }
       }
     }
+
+    // Restore checkbox on Expiring Certs sheet
+    var expiringSheet = ss.getSheetByName('Expiring Certs');
+    if (expiringSheet) {
+      var empList = getEmployeeNamesForMatching();
+      var alternateNameMap = buildAlternateNameMap(empList);
+      
+      var expData = expiringSheet.getDataRange().getValues();
+      var ruleCheckbox = SpreadsheetApp.newDataValidation().requireCheckbox(true, "💬 Send SMS").build();
+      for (var j = 1; j < expData.length; j++) {
+        var rowEmp = String(expData[j][0]).toLowerCase().trim();
+        var resolvedRowEmp = resolveEmployeeName(rowEmp, alternateNameMap).toLowerCase().trim();
+        var resolvedEmpName = resolveEmployeeName(employeeName, alternateNameMap).toLowerCase().trim();
+        
+        var rowType = String(expData[j][1]).toLowerCase().trim();
+        if (resolvedRowEmp === resolvedEmpName &&
+            (rowType === String(certType).toLowerCase().trim() || (is1stAidOrCPR(rowType) && is1stAidOrCPR(certType)))) {
+          expiringSheet.getRange(j + 1, 8).setDataValidation(ruleCheckbox).setValue("💬 Send SMS");
+          Logger.log('clearCertNotifiedStatus: Restored checkbox on Expiring Certs row ' + (j + 1));
+        }
+      }
+    }
+    SpreadsheetApp.flush();
   } catch (e) {
     Logger.log('clearCertNotifiedStatus ERROR: ' + e.message);
   }
@@ -29102,6 +29253,22 @@ function doGet(e) {
       var firstName = employeeName.split(' ')[0];
       var webAppUrl = PropertiesService.getScriptProperties().getProperty('WEB_APP_URL') || '';
       
+      var isExpired = false;
+      if (dateStr) {
+        var d = new Date(dateStr);
+        if (isNaN(d.getTime())) {
+          var parts = dateStr.split('/');
+          if (parts.length === 3) {
+            d = new Date(parts[2], parts[0] - 1, parts[1]);
+          }
+        }
+        if (!isNaN(d.getTime())) {
+          var today = new Date();
+          today.setHours(0, 0, 0, 0);
+          isExpired = d < today;
+        }
+      }
+      
       var certLower = String(certType).toLowerCase();
       var defaultMsg = "";
       if (certLower.indexOf('mec') !== -1 || certLower.indexOf('medical exam') !== -1 || certLower.indexOf('dot physical') !== -1 || certLower.indexOf('medical card') !== -1) {
@@ -29110,72 +29277,29 @@ function doGet(e) {
         defaultMsg = "Hi " + firstName + ", your Driver's License will expire on " + dateStr + ". Can you send me a picture (front and back) of your new one?";
       } else if (certLower.indexOf('harassment') !== -1) {
         defaultMsg = "Hi " + firstName + ", your Harassment Training will expire on " + dateStr + ". Can you let me know when you get it done? This is required by the NJATC if you are going to be assigned apprentices and the Federal Govt in general. Go to SafetyWallet.org or the mobile app, sign in with your last name and phone number, upper left is a menu with Training and then On Line Training. Make sure you take the 65 minute class and not the 120 minute class.";
+      } else if (certLower.indexOf('cpr') !== -1 || certLower.indexOf('1st aid') !== -1 || certLower.indexOf('first aid') !== -1) {
+        var expStatusForFirstAid = isExpired ? 'is expired' : 'will expire on ' + dateStr;
+        defaultMsg = "Hi " + firstName + ", your 1st Aid/CPR certification " + expStatusForFirstAid + ". Please let me know your availability for a renewal class.";
       } else {
         defaultMsg = "Hi " + firstName + ", your " + certType + " certification expires on " + dateStr + ". Please let us know when you can attend training.";
       }
       
-      var safeEmpName = employeeName.replace(/'/g, "\\'");
-      var safeCertType = certType.replace(/'/g, "\\'");
+      var template = HtmlService.createTemplateFromFile('DashboardSMSDialog');
+      template.employeeName = employeeName;
+      template.firstName = firstName;
+      template.certType = certType;
+      template.phone = phone;
+      template.cleanPhone = cleanPhone;
+      template.message = defaultMsg;
+      template.dateStr = dateStr;
+      template.isExpired = isExpired;
+      template.isWebApp = true;
+      template.webAppUrl = PropertiesService.getScriptProperties().getProperty('WEB_APP_URL') || '';
       
-      var html = '<!DOCTYPE html>' +
-        '<html>' +
-        '<head>' +
-        '  <title>Send Notification SMS</title>' +
-        '  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">' +
-        '  <style>' +
-        '    body { font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; padding: 25px; background-color: #f8fafc; color: #1e293b; max-width: 500px; margin: 0 auto; }' +
-        '    .card { border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); background-color: #fff; padding: 20px; }' +
-        '    .header { font-size: 18px; font-weight: 600; margin-bottom: 20px; color: #1e3a8a; }' +
-        '    .footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }' +
-        '  </style>' +
-        '</head>' +
-        '<body>' +
-        '  <div id="mainCard" class="card">' +
-        '    <div class="header">Send Expiration Notification SMS</div>' +
-        '    <div class="mb-3">' +
-        '      <strong>Employee:</strong> ' + employeeName + '<br>' +
-        '      <strong>Phone:</strong> ' + phone + '<br>' +
-        '      <strong>Certification:</strong> ' + certType + '' +
-        '    </div>' +
-        '    <div class="mb-2"><strong>Message Preview:</strong></div>' +
-        '    <textarea id="smsText" class="form-control mb-3" rows="3">' + defaultMsg + '</textarea>' +
-        '    <div class="footer">' +
-        '      <button class="btn btn-secondary btn-sm" onclick="window.close()">Close Window</button>' +
-        '      <button class="btn btn-success btn-sm" onclick="sendSms(\'' + cleanPhone + '\', \'' + safeEmpName + '\', \'' + safeCertType + '\')">💬 Open SMS App</button>' +
-        '    </div>' +
-        '  </div>' +
-        '  <div id="successCard" class="card" style="display:none; text-align:center;">' +
-        '    <div class="header" style="color:#15803d;">✅ Expiration Notification Logged!</div>' +
-        '    <p>The SMS client was launched. You can close this tab now.</p>' +
-        '    <button class="btn btn-secondary btn-sm" onclick="window.close()">Close Tab</button>' +
-        '  </div>' +
-        '  <script>' +
-        '    var webAppUrl = "' + webAppUrl + '";' +
-        '    function sendSms(phone, name, cert) {' +
-        '      var msg = document.getElementById("smsText").value;' +
-        '      var smsUrl = "sms:" + phone + "?body=" + encodeURIComponent(msg);' +
-        '      ' +
-        '      // Notify backend via Image request' +
-        '      var img = new Image();' +
-        '      img.src = webAppUrl + "?action=log&emp=" + encodeURIComponent(name) + "&cert=" + encodeURIComponent(cert);' +
-        '      ' +
-        '      // Open SMS protocol in a separate flow' +
-        '      window.open(smsUrl, "_blank");' +
-        '      ' +
-        '      // Show success message and hide editor' +
-        '      document.getElementById("mainCard").style.display = "none";' +
-        '      document.getElementById("successCard").style.display = "block";' +
-        '      ' +
-        '      setTimeout(function() {' +
-        '        try { google.script.host.close(); } catch(err) {}' +
-        '        try { window.close(); } catch(err) {}' +
-        '      }, 2500);' +
-        '    }' +
-        '  </script>' +
-        '</body>' +
-        '</html>';
-      
-      return HtmlService.createHtmlOutput(html).setSandboxMode(HtmlService.SandboxMode.IFRAME).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+      return template.evaluate()
+        .setSandboxMode(HtmlService.SandboxMode.IFRAME)
+        .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+        .setTitle('Send Notification');
     } else if (action === 'log') {
       var employeeName = e.parameter.emp || '';
       var certType = e.parameter.cert || '';

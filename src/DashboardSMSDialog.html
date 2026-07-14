@@ -3,67 +3,426 @@
 <head>
   <base target="_top">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
   <style>
     body {
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      padding: 15px;
+      padding: 0;
+      margin: 0;
       background-color: #f8fafc;
       color: #1e293b;
     }
-    .dialog-header {
-      font-size: 16px;
+    .modal-header {
+      background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+      color: white;
+      padding: 12px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .modal-title {
+      font-size: 18px;
       font-weight: 600;
+      margin: 0;
+    }
+    .btn-close-white {
+      filter: invert(1) grayscale(1) brightness(2);
+      background: none;
+      border: none;
+      color: white;
+      font-size: 20px;
+      cursor: pointer;
+      line-height: 1;
+    }
+    .dialog-container {
+      padding: 20px;
+    }
+    .info-card {
+      background-color: #e0f7fa;
+      border: none;
+      border-radius: 8px;
+      padding: 15px;
+      color: #006064;
+      margin-bottom: 20px;
+    }
+    .info-card .emp-name {
+      font-size: 16px;
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+    .info-card .details {
+      font-size: 14px;
+      margin-bottom: 2px;
+    }
+    .options-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: #334155;
+    }
+    .option-card {
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      margin-bottom: 10px;
+      background: white;
+      transition: all 0.2s;
+    }
+    .option-card:hover {
+      border-color: #cbd5e1;
+    }
+    .option-body {
+      padding: 12px;
+    }
+    .form-check-label {
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .details-row {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px dashed #e2e8f0;
+    }
+    .warning-box {
+      background-color: #fef2f2;
+      border: 1px solid #fee2e2;
+      color: #991b1b;
+      padding: 10px 15px;
+      border-radius: 8px;
+      font-size: 13px;
       margin-bottom: 15px;
+    }
+    .notice-box {
+      background-color: #fffde7;
+      border: 1px solid #fff59d;
+      color: #827717;
+      padding: 10px 15px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin-bottom: 20px;
     }
     .btn-container {
       display: flex;
       justify-content: flex-end;
-      gap: 10px;
+      gap: 12px;
+      margin-top: 15px;
+    }
+    .btn-send {
+      background-color: #ffb300;
+      color: white;
+      border: none;
+      font-weight: 600;
+    }
+    .btn-send:hover {
+      background-color: #ffa000;
+      color: white;
+    }
+    .btn-secondary {
+      background-color: #64748b;
+      border: none;
+    }
+    .btn-secondary:hover {
+      background-color: #475569;
+    }
+    textarea {
+      font-size: 14px;
     }
   </style>
 </head>
 <body>
-  <div class="dialog-header">Send Expiration Notification SMS</div>
-  
-  <div class="mb-3">
-    <strong>Employee:</strong> <?= employeeName ?><br>
-    <strong>Phone:</strong> <?= phone ?><br>
-    <strong>Certification:</strong> <?= certType ?>
+  <div class="modal-header">
+    <div class="modal-title"><i class="bi bi-chat-text"></i> Send Notification</div>
+    <button type="button" class="btn-close-white" onclick="closeDialog()">&times;</button>
   </div>
 
-  <div class="mb-2"><strong>Message Preview:</strong></div>
-  <textarea id="smsText" class="form-control mb-3" rows="3"><?= message ?></textarea>
+  <div class="dialog-container">
+    <div class="info-card">
+      <div class="emp-name"><i class="bi bi-person"></i> <?= employeeName ?></div>
+      <div class="details"><strong><?= certType ?></strong></div>
+      <div class="details">Expires <?= dateStr ? dateStr : 'N/A' ?></div>
+      <div class="details"><i class="bi bi-telephone"></i> <?= phone ? phone : 'No Phone' ?></div>
+    </div>
 
-  <div class="btn-container">
-    <button type="button" class="btn btn-secondary btn-sm" onclick="google.script.host.close()">Cancel</button>
-    <button type="button" class="btn btn-success btn-sm" onclick="sendSms()">💬 Open SMS App</button>
+    <!-- 1st Aid/CPR Options Section -->
+    <div id="firstAidCprSection" style="display: none;">
+      <div class="options-title"><i class="bi bi-list-check"></i> Class Options (select which to offer)</div>
+      
+      <div class="warning-box" id="noOptionWarning" style="display: none;">
+        <i class="bi bi-exclamation-triangle"></i> Please select at least one class option.
+      </div>
+
+      <!-- Online Class Option -->
+      <div class="option-card">
+        <div class="option-body">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="notifyOptionOnline" onchange="updateNotifyMessage()">
+            <label class="form-check-label fw-bold" for="notifyOptionOnline">
+              <i class="bi bi-laptop"></i> Online Class <span class="text-muted small fw-normal ms-2">(no date/time needed)</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- In Person with Me Option -->
+      <div class="option-card">
+        <div class="option-body">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="notifyOptionInPerson" onchange="updateNotifyMessage()">
+            <label class="form-check-label fw-bold" for="notifyOptionInPerson">
+              <i class="bi bi-person-workspace"></i> In Person with Me
+            </label>
+          </div>
+          <div class="details-row" id="notifyInPersonDetails" style="display: none;">
+            <div class="row g-2">
+              <div class="col-md-3">
+                <label class="form-label small mb-1">Date</label>
+                <input type="date" class="form-control form-control-sm" id="notifyInPersonDate" onchange="updateNotifyMessage()">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small mb-1">Start Time</label>
+                <input type="time" class="form-control form-control-sm" id="notifyInPersonStartTime" onchange="updateNotifyMessage()">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small mb-1">End Time</label>
+                <input type="time" class="form-control form-control-sm" id="notifyInPersonEndTime" onchange="updateNotifyMessage()">
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small mb-1">Location</label>
+                <input type="text" class="form-control form-control-sm" id="notifyInPersonLocation" placeholder="e.g. Helena" onkeyup="updateNotifyMessage()">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MSLCAT Helena Option -->
+      <div class="option-card">
+        <div class="option-body">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="notifyOptionMSLCAT" onchange="updateNotifyMessage()">
+            <label class="form-check-label fw-bold" for="notifyOptionMSLCAT">
+              <i class="bi bi-building"></i> In Person at MSLCAT (Helena)
+            </label>
+          </div>
+          <div class="details-row" id="notifyMSLCATDetails" style="display: none;">
+            <div class="row g-2">
+              <div class="col-md-6">
+                <label class="form-label small mb-1">Date</label>
+                <input type="date" class="form-control form-control-sm" id="notifyMSLCATDate" onchange="updateNotifyMessage()">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Message Preview Section -->
+    <div class="mb-3">
+      <div class="d-flex justify-content-between align-items-center mb-1">
+        <label class="form-label fw-bold mb-0">Message Preview</label>
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" id="notifyEditMode" onchange="toggleNotifyEditMode()">
+          <label class="form-check-label small" for="notifyEditMode">Edit manually</label>
+        </div>
+      </div>
+      <textarea id="smsText" class="form-control mb-3" rows="4" onkeyup="updateNotifyMessage()"><?= message ?></textarea>
+    </div>
+
+    <div class="notice-box">
+      <i class="bi bi-info-circle"></i> This will open your messaging app with the message pre-filled. You can edit before sending.
+    </div>
+
+    <div class="btn-container">
+      <button type="button" class="btn btn-secondary btn-sm px-3" onclick="closeDialog()">Cancel</button>
+      <button type="button" class="btn btn-send btn-sm px-3" id="sendBtn" onclick="sendSms()"><i class="bi bi-send"></i> Send Text</button>
+    </div>
+  </div>
+
+  <div id="successCard" class="card" style="display:none; text-align:center; padding: 30px; margin: 20px;">
+    <div class="header" style="font-size: 20px; font-weight: bold; color:#15803d; margin-bottom: 10px;">✅ Expiration Notification Logged!</div>
+    <p>The SMS client was launched. You can close this tab/window now.</p>
+    <button class="btn btn-secondary btn-sm" onclick="closeDialog()">Close</button>
   </div>
 
   <script>
     var phone = '<?= cleanPhone ?>';
     var employeeName = '<?= employeeName ?>';
     var certType = '<?= certType ?>';
+    var isWebApp = <?= isWebApp ? 'true' : 'false' ?>;
+    var webAppUrl = '<?= webAppUrl ?>';
+
+    var certLower = certType.toLowerCase();
+    var isFirstAidCpr = certLower.indexOf('cpr') !== -1 || certLower.indexOf('1st aid') !== -1 || certLower.indexOf('first aid') !== -1;
+
+    // Run on startup
+    window.onload = function() {
+      if (isFirstAidCpr) {
+        document.getElementById('firstAidCprSection').style.display = 'block';
+        document.getElementById('notifyOptionOnline').checked = true;
+        // Trigger update to show/hide sections and rebuild message
+        updateNotifyMessage();
+      }
+    };
+
+    function closeDialog() {
+      try {
+        google.script.host.close();
+      } catch (err) {
+        try {
+          window.close();
+        } catch (e) {}
+      }
+    }
+
+    function toggleNotifyEditMode() {
+      var editMode = document.getElementById('notifyEditMode').checked;
+      var textarea = document.getElementById('smsText');
+      textarea.readOnly = !editMode;
+      if (!editMode) {
+        updateNotifyMessage();
+      }
+    }
+
+    function formatDateMMDDYYYY(dateStr) {
+      if (!dateStr) return '';
+      var parts = dateStr.split('-');
+      if (parts.length === 3) {
+        return parts[1] + '/' + parts[2] + '/' + parts[0];
+      }
+      var partsSlash = dateStr.split('/');
+      if (partsSlash.length === 3) {
+        return dateStr;
+      }
+      var d = new Date(dateStr);
+      if (isNaN(d.getTime())) return dateStr;
+      var month = String(d.getMonth() + 1).padStart(2, '0');
+      var day = String(d.getDate()).padStart(2, '0');
+      var year = d.getFullYear();
+      return month + '/' + day + '/' + year;
+    }
+
+    function formatTimeAMPM(timeStr) {
+      if (!timeStr) return '';
+      var parts = timeStr.split(':');
+      var hours = parseInt(parts[0]);
+      var minutes = parts[1];
+      var ampm = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12 || 12;
+      return hours + ':' + minutes + ' ' + ampm;
+    }
+
+    function updateNotifyMessage() {
+      // If manually editing, do not regenerate the preview message
+      if (document.getElementById('notifyEditMode').checked) {
+        return;
+      }
+
+      if (!isFirstAidCpr) {
+        return;
+      }
+
+      var firstName = '<?= firstName ?>';
+      var dateStr = '<?= dateStr ?>';
+      var isExpired = <?= isExpired ? 'true' : 'false' ?>;
+
+      var onlineChecked = document.getElementById('notifyOptionOnline').checked;
+      var inPersonChecked = document.getElementById('notifyOptionInPerson').checked;
+      var mslcatChecked = document.getElementById('notifyOptionMSLCAT').checked;
+
+      // Show/hide sections
+      document.getElementById('notifyInPersonDetails').style.display = inPersonChecked ? 'block' : 'none';
+      document.getElementById('notifyMSLCATDetails').style.display = mslcatChecked ? 'block' : 'none';
+
+      // Warning visibility
+      var hasOption = onlineChecked || inPersonChecked || mslcatChecked;
+      document.getElementById('noOptionWarning').style.display = hasOption ? 'none' : 'block';
+      document.getElementById('sendBtn').disabled = !hasOption;
+
+      var expStatus = isExpired ? 'is expired' : 'will expire on ' + dateStr;
+      var message = 'Hi ' + firstName + ', your 1st Aid/CPR certification ' + expStatus + '. ';
+
+      var options = [];
+
+      if (onlineChecked) {
+        options.push('get into my next Online Class');
+      }
+
+      if (inPersonChecked) {
+        var ipDate = document.getElementById('notifyInPersonDate').value;
+        var ipStartTime = document.getElementById('notifyInPersonStartTime').value;
+        var ipEndTime = document.getElementById('notifyInPersonEndTime').value;
+        var ipLocation = document.getElementById('notifyInPersonLocation').value.trim();
+
+        var inPersonText = 'take my next In Person class';
+        if (ipDate) {
+          inPersonText += ' on ' + formatDateMMDDYYYY(ipDate);
+          if (ipStartTime) {
+            inPersonText += ' from ' + formatTimeAMPM(ipStartTime);
+            if (ipEndTime) {
+              inPersonText += ' - ' + formatTimeAMPM(ipEndTime);
+            }
+          }
+          if (ipLocation) {
+            inPersonText += ' in ' + ipLocation;
+          }
+        }
+        options.push(inPersonText);
+      }
+
+      if (mslcatChecked) {
+        var mslcatDate = document.getElementById('notifyMSLCATDate').value;
+        var mslcatText = 'let Tim know that you are taking the one in Helena at the MSLCAT Training Center';
+        if (mslcatDate) {
+          mslcatText += ' on ' + formatDateMMDDYYYY(mslcatDate);
+        }
+        options.push(mslcatText);
+      }
+
+      if (options.length === 0) {
+        message += 'Please let me know your availability for a renewal class.';
+      } else if (options.length === 1) {
+        message += 'Would you like to ' + options[0] + '?';
+      } else if (options.length === 2) {
+        message += 'Would you like to ' + options[0] + ' or ' + options[1] + '?';
+      } else if (options.length === 3) {
+        message += 'Would you like to ' + options[0] + ', ' + options[1] + ', or ' + options[2] + '?';
+      }
+
+      document.getElementById('smsText').value = message;
+    }
 
     function sendSms() {
       var msg = document.getElementById('smsText').value;
       var smsUrl = 'sms:' + phone + '?body=' + encodeURIComponent(msg);
       
-      // Open native app
-      window.open(smsUrl, '_blank');
-      
-      // Call backend to mark as notified
-      google.script.run
-        .withSuccessHandler(function(result) {
-          if (result && result.success === false) {
-            alert('Failed to mark notified: ' + result.error);
-          } else {
-            google.script.host.close();
-          }
-        })
-        .withFailureHandler(function(err) {
-          alert('Server Error: ' + err.message);
-        })
-        .markCertNotifiedAndReload(employeeName, certType);
+      if (isWebApp) {
+        // WebApp context: log to server using Fetch/Image, then show success screen
+        var img = new Image();
+        img.src = webAppUrl + "?action=log&emp=" + encodeURIComponent(employeeName) + "&cert=" + encodeURIComponent(certType);
+        
+        document.querySelector('.dialog-container').style.display = 'none';
+        document.getElementById('successCard').style.display = 'block';
+        
+        // Open SMS app in a new tab/window
+        window.open(smsUrl, '_blank');
+        setTimeout(closeDialog, 2000);
+      } else {
+        // Modal dialog context: call markCertNotifiedAndReload on server FIRST
+        google.script.run
+          .withSuccessHandler(function(result) {
+            if (result && result.success === false) {
+              alert('Failed to mark notified: ' + result.error);
+            } else {
+              closeDialog();
+            }
+          })
+          .withFailureHandler(function(err) {
+            alert('Server Error: ' + err.message);
+          })
+          .markCertNotifiedAndReload(employeeName, certType);
+          
+        // Then open SMS app in a new tab/window
+        window.open(smsUrl, '_blank');
+      }
     }
   </script>
 </body>

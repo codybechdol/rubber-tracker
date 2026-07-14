@@ -417,9 +417,19 @@ function onEditHandler(e) {
     if ((sheetName === 'Dashboard' && editedCol === 18 && editedRow >= 8 && editedRow <= 11) ||
         (sheetName === 'Expiring Certs' && editedCol === 8 && editedRow >= 2)) {
       var val = e.range.getValue();
-      if (val === true) {
-        // Reset checkbox to false immediately
-        e.range.setValue(false);
+      if (val === true || val === "💬 Notified") {
+        // Reset checkbox immediately using custom unchecked value if configured
+        var criteria = e.range.getDataValidation();
+        if (criteria && criteria.getCriteriaType() === SpreadsheetApp.DataValidationCriteria.CHECKBOX) {
+          var args = criteria.getCriteriaValues();
+          if (args && args.length >= 2 && args[1] !== null && args[1] !== "") {
+            e.range.setValue(args[1]); // Custom unchecked value (e.g. "💬 Send SMS")
+          } else {
+            e.range.setValue(false);
+          }
+        } else {
+          e.range.setValue(false);
+        }
         
         var employeeName, certType, expirationDate;
         if (sheetName === 'Dashboard') {
@@ -510,8 +520,8 @@ function onEditHandler(e) {
         var cellH = sheet.getRange(editedRow, 8);
         cellH.clearDataValidations().clearContent();
         if (hasPhone) {
-          var ruleCheckbox = SpreadsheetApp.newDataValidation().requireCheckbox().build();
-          cellH.setValue(false).setDataValidation(ruleCheckbox);
+          var ruleCheckbox = SpreadsheetApp.newDataValidation().requireCheckbox(true, "💬 Send SMS").build();
+          cellH.setValue("💬 Send SMS").setDataValidation(ruleCheckbox);
         } else {
           cellH.setValue("No Phone");
         }
