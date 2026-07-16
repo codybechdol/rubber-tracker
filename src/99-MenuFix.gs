@@ -40,6 +40,7 @@ function _buildGloveManagerMenu() {
           .addItem('📝 Backfill Job Names', 'backfillJobNames')
           .addItem('🔧 Repair Misassigned Foremen', 'repairMisassignedForemen')
           .addItem('🔍 Diagnose Crew Lead Dialog Skips', 'diagnoseCrewLeadDialogSkips')
+          .addItem('🔍 Diagnose Crew Lead (026-26)', 'debugDiagnoseChris')
           .addItem('📂 View Job Tracking', 'openJobTrackingSheet')
           .addSeparator()
           .addItem('🔄 Sync Employee Locations from Job Tracking', 'syncEmployeeLocationsFromJobTracking')

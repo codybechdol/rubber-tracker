@@ -362,3 +362,92 @@ function debugFind018() {
     }
   }
 }
+
+// Diagnostic function to locate the source of the 026-26 crew lead issue
+function debugDiagnoseChris() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Employees');
+  if (!sheet) {
+    SpreadsheetApp.getUi().alert('Employees sheet not found');
+    return;
+  }
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  
+  var nameCol = -1;
+  var jobNumCol = -1;
+  for (var h = 0; h < headers.length; h++) {
+    var header = String(headers[h]).toLowerCase().trim(); // safe check
+    if (header === 'name' || header === 'employee name') nameCol = h;
+    if (header === 'job number') jobNumCol = h;
+  }
+  if (nameCol === -1) {
+    nameCol = getEmployeeNameColumnIndex(headers);
+  }
+
+  var html = '<html><head><style>';
+  html += 'body { font-family: Arial, sans-serif; padding: 15px; font-size: 13px; }';
+  html += 'table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 11px; }';
+  html += 'th, td { padding: 5px; border: 1px solid #ddd; text-align: left; }';
+  html += 'th { background: #e8eaed; }';
+  html += '</style></head><body>';
+  html += '<h2>🔍 Chris Sugrue / Crew 026-26 Diagnostic</h2>';
+  html += '<p><strong>Resolved Name Col Index:</strong> ' + nameCol + ' | <strong>Job Num Col Index:</strong> ' + jobNumCol + '</p>';
+  html += '<p><strong>Headers:</strong> ' + JSON.stringify(headers) + '</p>';
+
+  // 1. Sugrue Rows
+  html += '<h3>1. Employees Matching "Sugrue"</h3>';
+  html += '<table><thead><tr>';
+  for (var h = 0; h < headers.length; h++) {
+    html += '<th>' + headers[h] + '</th>';
+  }
+  html += '</tr></thead><tbody>';
+  
+  var foundSugrue = false;
+  for (var i = 1; i < data.length; i++) {
+    var name = String(data[i][nameCol] || '').trim();
+    if (name.toLowerCase().indexOf('sugrue') !== -1) {
+      foundSugrue = true;
+      html += '<tr>';
+      for (var h = 0; h < headers.length; h++) {
+        html += '<td>' + String(data[i][h] || '') + '</td>';
+      }
+      html += '</tr>';
+    }
+  }
+  if (!foundSugrue) {
+    html += '<tr><td colspan="' + headers.length + '">None found</td></tr>';
+  }
+  html += '</tbody></table>';
+
+  // 2. Crew 026-26 Rows
+  html += '<h3>2. Employees in Crew "026-26"</h3>';
+  html += '<table><thead><tr>';
+  for (var h = 0; h < headers.length; h++) {
+    html += '<th>' + headers[h] + '</th>';
+  }
+  html += '</tr></thead><tbody>';
+  
+  var foundCrew = false;
+  for (var i = 1; i < data.length; i++) {
+    var jobNum = String(data[i][jobNumCol] || '').trim();
+    if (jobNum.indexOf('026-26') !== -1) {
+      foundCrew = true;
+      html += '<tr>';
+      for (var h = 0; h < headers.length; h++) {
+        html += '<td>' + String(data[i][h] || '') + '</td>';
+      }
+      html += '</tr>';
+    }
+  }
+  if (!foundCrew) {
+    html += '<tr><td colspan="' + headers.length + '">None found</td></tr>';
+  }
+  html += '</tbody></table>';
+  html += '</body></html>';
+
+  SpreadsheetApp.getUi().showModalDialog(
+    HtmlService.createHtmlOutput(html).setWidth(900).setHeight(600),
+    'Christian Sugrue / Crew 026-26 Diagnostic'
+  );
+}
