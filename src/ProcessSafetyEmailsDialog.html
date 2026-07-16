@@ -540,7 +540,7 @@
           reprocessBtn.disabled = false;
           reprocessBtn.textContent = "🔄 Reprocess All (Clear & Restart)";
         })
-        .reprocessAllSafetyEmails(startDateVal); // Pass date string to backend reprocessAllSafetyEmails
+        .reprocessAllSafetyEmails(startDateVal, endDateVal || null); // Pass both start and end dates
     }
 
     function handleBatchComplete(result) {

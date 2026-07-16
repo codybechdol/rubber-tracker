@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    * { box-sizing: border-box; font-family: 'Google Sans', Arial, sans-serif; }
+    body { margin: 0; padding: 24px; background: #f8f9fa; color: #202124; }
+    
+    h2 { 
+      color: #1a73e8; 
+      margin: 0 0 8px 0; 
+      font-size: 18px; 
+      font-weight: 500; 
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .subtitle { 
+      font-size: 12px; 
+      color: #5f6368; 
+      margin-bottom: 24px; 
+    }
+    
+    .status-card {
+      background: white; 
+      border: 1px solid #dadce0; 
+      border-radius: 8px; 
+      padding: 16px;
+      margin-bottom: 20px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    }
+    
+    .status-text {
+      font-size: 13px;
+      font-weight: 500;
+      color: #1a73e8;
+      margin-bottom: 4px;
+    }
+    
+    .status-sub {
+      font-size: 11px;
+      color: #5f6368;
+      margin-bottom: 12px;
+    }
+    
+    .progress-bar-wrap { 
+      background: #e8eaed; 
+      border-radius: 100px; 
+      height: 8px; 
+      overflow: hidden; 
+      position: relative;
+    }
+    
+    .progress-bar { 
+      background: linear-gradient(90deg, #1a73e8, #34a853); 
+      height: 100%; 
+      width: 0%; 
+      transition: width 0.4s ease; 
+      border-radius: 100px; 
+    }
+    
+    .step-log {
+      max-height: 120px;
+      overflow-y: auto;
+      border: 1px solid #e8eaed;
+      background: #f1f3f4;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-family: monospace;
+      font-size: 11px;
+      color: #3c4043;
+      white-space: pre-line;
+    }
+    
+    .footer { 
+      margin-top: 24px; 
+      text-align: right; 
+    }
+    
+    .btn {
+      padding: 8px 24px; 
+      background: #1a73e8; 
+      color: white; 
+      border: none;
+      border-radius: 4px; 
+      cursor: pointer; 
+      font-size: 13px; 
+      font-weight: 500; 
+      display: none;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+      transition: background 0.2s, box-shadow 0.2s;
+    }
+    
+    .btn:hover { 
+      background: #1557b0; 
+      box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+    }
+    
+    .btn.show { 
+      display: inline-block; 
+    }
+  </style>
+</head>
+<body>
+  <h2>🔄 Master Recalculate Compliance</h2>
+  <div class="subtitle">Processing in sequential batches to prevent timeout limits. Please keep this dialog open.</div>
+
+  <div class="status-card">
+    <div class="status-text" id="statusText">Initializing...</div>
+    <div class="status-sub" id="statusSub">Preparing log databases and configs.</div>
+    <div class="progress-bar-wrap">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+  </div>
+
+  <div class="step-log" id="stepLog">Starting recalculation flow...</div>
+
+  <div class="footer">
+    <button class="btn" id="closeBtn" onclick="google.script.host.close()">✓ Close</button>
+  </div>
+
+  <script>
+    var allWeeks = [];
+    var currentBatchIdx = 0;
+    var batchSize = 3; // Process 3 weeks at a time (safe for GAS 30-sec execution comfort)
+    var stats = {
+      compliant: 0,
+      missing: 0,
+      weeksProcessed: 0,
+      logsFixes: { jha: 0, weekly: 0, monthly: 0 },
+      nonConfigRemoved: 0
+    };
+
+    function log(message) {
+      var logEl = document.getElementById('stepLog');
+      logEl.textContent += '\n' + message;
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function setStatus(text, sub, pct) {
+      document.getElementById('statusText').textContent = text;
+      if (sub) document.getElementById('statusSub').textContent = sub;
+      if (pct !== undefined) document.getElementById('progressBar').style.width = pct + '%';
+    }
+
+    function startRecalculate() {
+      setStatus('Step 1 of 3: Fixing logs', 'Checking custom mappings and cleaning up duplicates...', 5);
+      log('Running pre-calculations (log fix + config sync)...');
+      
+      google.script.run
+        .withSuccessHandler(function(res) {
+          if (res && res.success) {
+            allWeeks = res.weeks || [];
+            stats.logsFixes = res.logsFixes || { jha: 0, weekly: 0, monthly: 0 };
+            stats.nonConfigRemoved = res.nonConfigRemoved || 0;
+            
+            log('✓ Finished log validation:');
+            log('  • JHA Log fixed: ' + stats.logsFixes.jha);
+            log('  • Weekly Safety Log fixed: ' + stats.logsFixes.weekly);
+            log('  • Monthly Checklist Log fixed: ' + stats.logsFixes.monthly);
+            log('  • Non-config crews removed: ' + stats.nonConfigRemoved);
+            log('Found ' + allWeeks.length + ' unique weeks to process.');
+            
+            if (allWeeks.length === 0) {
+              log('No weeks found to recalculate.');
+              finalizeRecalculate();
+            } else {
+              processNextBatch();
+            }
+          } else {
+            handleError('Initialization failed.');
+          }
+        })
+        .withFailureHandler(function(err) {
+          handleError(err);
+        })
+        .startMasterRecalculate();
+    }
+
+    function processNextBatch() {
+      if (currentBatchIdx >= allWeeks.length) {
+        finalizeRecalculate();
+        return;
+      }
+
+      var batch = allWeeks.slice(currentBatchIdx, currentBatchIdx + batchSize);
+      var displayBatch = batch.map(function(w) {
+        // Convert yyyy-mm-dd to mm/dd
+        var parts = w.split('-');
+        return parts[1] + '/' + parts[2];
+      }).join(', ');
+      
+      var progressPct = Math.round((currentBatchIdx / allWeeks.length) * 85) + 10;
+      setStatus(
+        'Step 2 of 3: Recalculating weeks', 
+        'Processing ' + (currentBatchIdx + 1) + '-' + Math.min(currentBatchIdx + batchSize, allWeeks.length) + ' of ' + allWeeks.length + ' weeks (' + displayBatch + ')...', 
+        progressPct
+      );
+      
+      log('Processing batch: ' + batch.join(', ') + '...');
+      
+      google.script.run
+        .withSuccessHandler(function(batchRes) {
+          if (batchRes) {
+            stats.compliant += batchRes.compliant || 0;
+            stats.missing += batchRes.missing || 0;
+            stats.weeksProcessed += batchRes.weeksProcessed || 0;
+            
+            currentBatchIdx += batchSize;
+            processNextBatch();
+          } else {
+            handleError('Batch processing returned empty response.');
+          }
+        })
+        .withFailureHandler(function(err) {
+          handleError(err);
+        })
+        .recalculateWeeksBatch(batch);
+    }
+
+    function finalizeRecalculate() {
+      setStatus('Step 3 of 3: Finalizing', 'Applying formatting and refreshing tooltips...', 95);
+      log('Formatting compliance sheet and building tooltips...');
+      
+      google.script.run
+        .withSuccessHandler(function(res) {
+          setStatus('✅ Recalculate Complete!', 'Compliance sheet is fully updated.', 100);
+          log('✓ Compliance sheet formatted and tooltips refreshed.');
+          log('\n🎉 SUMMARY:');
+          log('  • Weeks processed: ' + stats.weeksProcessed);
+          log('  • Total compliant: ' + stats.compliant);
+          log('  • Total missing: ' + stats.missing);
+          
+          document.getElementById('closeBtn').classList.add('show');
+        })
+        .withFailureHandler(function(err) {
+          handleError(err);
+        })
+        .finishMasterRecalculate();
+    }
+
+    function handleError(err) {
+      setStatus('❌ Recalculate Failed', 'Error: ' + err, 100);
+      document.getElementById('progressBar').style.background = '#dc3545';
+      log('\n❌ ERROR: ' + err);
+      document.getElementById('closeBtn').classList.add('show');
+    }
+
+    // Start processing automatically when dialog loads
+    window.onload = startRecalculate;
+  </script>
+</body>
+</html>

@@ -450,6 +450,16 @@ function onEditHandler(e) {
           } catch (dialogErr) {
             Logger.log('Error opening dashboard SMS dialog from checkbox: ' + dialogErr);
           }
+          
+          // Mark as notified IMMEDIATELY in the trigger, rather than relying on
+          // the dialog's google.script.run callback (which never reaches the server).
+          // showModalDialog() is non-blocking, so this runs right after the dialog opens.
+          try {
+            markCertNotifiedAndReload(employeeName, certType);
+            Logger.log('SMS Trigger: markCertNotifiedAndReload completed for ' + employeeName + ' - ' + certType);
+          } catch (notifyErr) {
+            Logger.log('SMS Trigger: Error in markCertNotifiedAndReload: ' + notifyErr);
+          }
         }
       }
       return; // Handled

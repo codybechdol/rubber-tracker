@@ -28954,7 +28954,7 @@ function showDashboardSMSDialog(employeeName, certType, expirationDate) {
   var width = isFirstAidCpr ? 620 : 480;
   var height = isFirstAidCpr ? 680 : 360;
 
-  var template = HtmlService.createTemplateFromFile('DashboardSMSDialog');
+  var template = HtmlService.createTemplateFromFile('DashboardSMSDialogV2');
   template.employeeName = employeeName;
   template.firstName = firstName;
   template.certType = certType;
@@ -29036,8 +29036,10 @@ function markCertNotifiedAndReload(employeeName, certType) {
           var resolvedEmpName = resolvedTargetEmp;
           
           var rowType = String(expData[j][expTypeCol]).toLowerCase().trim();
-          if (resolvedRowEmp === resolvedEmpName && 
-              rowType === String(certType).toLowerCase().trim()) {
+          var matchesType = rowType === String(certType).toLowerCase().trim() || 
+                            (is1stAidOrCPR(rowType) && is1stAidOrCPR(certType));
+                            
+          if (resolvedRowEmp === resolvedEmpName && matchesType) {
             targetRowIndex = j + 1; // 1-based row number
             expDateVal = expData[j][expDateCol];
             break;
@@ -29069,7 +29071,7 @@ function markCertNotifiedAndReload(employeeName, certType) {
           if (expDateVal) {
             var d = new Date(expDateVal);
             if (!isNaN(d.getTime())) {
-              dueDateStr = Utilities.formatDate(d, Session.getScriptTimeZone() || 'GMT', 'yyyy-MM-23 HH:mm:ss');
+              dueDateStr = Utilities.formatDate(d, Session.getScriptTimeZone() || 'GMT', 'yyyy-MM-dd HH:mm:ss');
             }
           }
           
@@ -29113,42 +29115,54 @@ function markCertNotifiedAndReload(employeeName, certType) {
       }
     }
     
-    // Update Expiring Certs sheet to show Notified
-    var expiringSheet = ss.getSheetByName('Expiring Certs');
-    if (expiringSheet) {
-      var empList = getEmployeeNamesForMatching();
-      var alternateNameMap = buildAlternateNameMap(empList);
-      
-      var expData = expiringSheet.getDataRange().getValues();
-      for (var j = 1; j < expData.length; j++) {
-        var rowEmp = String(expData[j][0]).toLowerCase().trim();
-        var resolvedRowEmp = resolveEmployeeName(rowEmp, alternateNameMap).toLowerCase().trim();
-        var resolvedEmpName = resolveEmployeeName(employeeName, alternateNameMap).toLowerCase().trim();
-        
-        var rowType = String(expData[j][1]).toLowerCase().trim();
-        if (resolvedRowEmp === resolvedEmpName && 
-            (rowType === String(certType).toLowerCase().trim() || (is1stAidOrCPR(rowType) && is1stAidOrCPR(certType)))) {
-          expiringSheet.getRange(j + 1, 8).clearDataValidations().setValue("💬 Notified");
-          Logger.log('markCertNotifiedAndReload: Updated Expiring Certs row ' + (j + 1) + ' to 💬 Notified.');
-        }
-      }
-    }
-    
-    // Flush changes so that subsequent setupDashboardLayout and sortExpiringCertsSheet see the updated data
+    // CRITICAL: Flush Task Metadata writes FIRST so that sortExpiringCertsSheet
+    // (called inside setupDashboardLayout) can read the updated NotifiedDate.
+    // Without this flush, sortExpiringCertsSheet rebuilds column H from stale Task Metadata
+    // and overwrites any direct "💬 Notified" value we set.
     SpreadsheetApp.flush();
+    Logger.log('markCertNotifiedAndReload: Flushed Task Metadata writes. foundCount=' + foundCount);
     
-    // Refresh the dashboard
+    // Refresh the dashboard (this calls sortExpiringCertsSheet which rebuilds column H from Task Metadata)
     var dashSheet = ss.getSheetByName(SHEET_DASHBOARD);
     if (dashSheet) {
       setupDashboardLayout(dashSheet);
+      Logger.log('markCertNotifiedAndReload: Dashboard refreshed via setupDashboardLayout.');
+    }
+    
+    // SAFETY NET: After setupDashboardLayout/sortExpiringCertsSheet has run,
+    // verify that column H was actually set to "💬 Notified". If not, force it.
+    var expiringSheet = ss.getSheetByName('Expiring Certs');
+    if (expiringSheet) {
+      var expData = expiringSheet.getDataRange().getValues();
+      var empList2 = getEmployeeNamesForMatching();
+      var alternateNameMap2 = buildAlternateNameMap(empList2);
+      
+      for (var j = 1; j < expData.length; j++) {
+        var rowEmp = String(expData[j][0]).toLowerCase().trim();
+        var resolvedRowEmp = resolveEmployeeName(rowEmp, alternateNameMap2).toLowerCase().trim();
+        var rowType = String(expData[j][1]).toLowerCase().trim();
+        var currentSmsVal = String(expData[j][7] || '').trim();
+        
+        if (resolvedRowEmp === resolvedTargetEmp && 
+            (rowType === String(certType).toLowerCase().trim() || (is1stAidOrCPR(rowType) && is1stAidOrCPR(certType)))) {
+          if (currentSmsVal !== '💬 Notified') {
+            Logger.log('markCertNotifiedAndReload: SAFETY NET - Row ' + (j + 1) + ' col H was "' + currentSmsVal + '", forcing to "💬 Notified"');
+            expiringSheet.getRange(j + 1, 8).clearDataValidations().setValue("💬 Notified");
+          } else {
+            Logger.log('markCertNotifiedAndReload: Row ' + (j + 1) + ' col H is already "💬 Notified" ✓');
+          }
+        }
+      }
+      SpreadsheetApp.flush();
     }
     
     if (foundCount === 0) {
-      return { success: false, error: 'No active certification task found in Task Metadata for ' + employeeName + ' - ' + certType };
+      Logger.log('markCertNotifiedAndReload: WARNING - No task found in Task Metadata for ' + employeeName + ' - ' + certType + '. Safety net may have forced col H update.');
     }
     
     return { success: true };
   } catch (e) {
+    Logger.log('markCertNotifiedAndReload: ERROR - ' + e.message);
     return { success: false, error: e.message };
   }
 }
@@ -29285,7 +29299,7 @@ function doGet(e) {
         defaultMsg = "Hi " + firstName + ", your " + certType + " certification expires on " + dateStr + ". Please let us know when you can attend training.";
       }
       
-      var template = HtmlService.createTemplateFromFile('DashboardSMSDialog');
+      var template = HtmlService.createTemplateFromFile('DashboardSMSDialogV2');
       template.employeeName = employeeName;
       template.firstName = firstName;
       template.certType = certType;

@@ -1030,6 +1030,62 @@ function deleteOldRowsFromSheet(sheet, cutoffDate, dateCol) {
   return deletedCount;
 }
 
+
+/**
+ * Parses a date input (string or Date) in local timezone to avoid UTC shifting.
+ * @param {string|Date} dateInput - The date value to parse
+ * @param {boolean} isEnd - If true, sets time to end of day (23:59:59.999); else start of day (00:00:00.000)
+ * @returns {Date|null} - Local Date object
+ */
+function parseLocalDate(dateInput, isEnd) {
+  if (!dateInput) return null;
+  if (dateInput instanceof Date) {
+    var d = new Date(dateInput.getTime());
+    if (isEnd) d.setHours(23, 59, 59, 999);
+    else d.setHours(0, 0, 0, 0);
+    return d;
+  }
+  
+  var dateStr = String(dateInput).trim();
+  var parts = dateStr.split(/[\-\/]/);
+  if (parts.length !== 3) {
+    var d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+      if (isEnd) d.setHours(23, 59, 59, 999);
+      else d.setHours(0, 0, 0, 0);
+      return d;
+    }
+    return null;
+  }
+  
+  var year, month, day;
+  if (parts[0].length === 4) {
+    // YYYY-MM-DD
+    year = parseInt(parts[0], 10);
+    month = parseInt(parts[1], 10) - 1;
+    day = parseInt(parts[2], 10);
+  } else if (parts[2].length === 4) {
+    // MM/DD/YYYY
+    month = parseInt(parts[0], 10) - 1;
+    day = parseInt(parts[1], 10);
+    year = parseInt(parts[2], 10);
+  } else {
+    var d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+      if (isEnd) d.setHours(23, 59, 59, 999);
+      else d.setHours(0, 0, 0, 0);
+      return d;
+    }
+    return null;
+  }
+  
+  if (isEnd) {
+    return new Date(year, month, day, 23, 59, 59, 999);
+  } else {
+    return new Date(year, month, day, 0, 0, 0, 0);
+  }
+}
+
 /**
  * Helper to delete rows in a date range from a sheet (in-memory)
  * @param {Sheet} sheet - The sheet to clean
@@ -1048,13 +1104,8 @@ function deleteRowsInRangeFromSheet(sheet, startDate, endDate, dateCol) {
   var rowsToKeep = [];
   var deletedCount = 0;
   
-  var start = new Date(typeof startDate === 'string' ? startDate.replace(/\//g, '-') : startDate);
-  var end = endDate ? new Date(typeof endDate === 'string' ? endDate.replace(/\//g, '-') : endDate) : new Date();
-  
-  // Set start to midnight
-  start.setHours(0, 0, 0, 0);
-  // Set end to 23:59:59.999
-  end.setHours(23, 59, 59, 999);
+  var start = parseLocalDate(startDate, false) || new Date(0);
+  var end = parseLocalDate(endDate, true) || new Date();
   
   for (var i = 0; i < data.length; i++) {
     var cellValue = data[i][dateCol];
@@ -3063,17 +3114,87 @@ function logParsedSafetyEmail(parsed, message, context, existingEmailIds, rowsCo
 }
 
 /**
+ * Helper to get all unique week start dates (Sundays) to process.
+ * Gathers dates from:
+ * 1. The existing rows in the Safety Compliance sheet (if any exist)
+ * 2. The dates in the log sheets (JHA Log, Weekly Safety Log, Monthly Checklist Log)
+ * 
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @param {string} tz - Script timezone
+ * @returns {Object} Map of yyyy-MM-dd -> Date object
+ */
+function getUniqueWeeksToProcess(ss, tz) {
+  const uniqueWeeks = {};
+
+  // 1. Get weeks from Safety Compliance sheet (if any exist)
+  const complianceSheet = ss.getSheetByName('Safety Compliance');
+  if (complianceSheet && complianceSheet.getLastRow() >= 2) {
+    const data = complianceSheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      const weekStart = data[i][0];
+      if (weekStart) {
+        try {
+          const weekStartDay = new Date(weekStart);
+          if (!isNaN(weekStartDay.getTime())) {
+            const weekBounds = getWeekBoundaries(weekStartDay);
+            const weekKey = Utilities.formatDate(weekBounds.weekStart, tz, 'yyyy-MM-dd');
+            uniqueWeeks[weekKey] = weekBounds.weekStart;
+          }
+        } catch(e) {
+          Logger.log("getUniqueWeeksToProcess: Error parsing compliance week: " + weekStart + " - " + e.toString());
+        }
+      }
+    }
+  }
+
+  // Helper to process dates from a sheet column
+  const addWeeksFromSheet = (sheetName, dateColIndex) => {
+    const sheet = ss.getSheetByName(sheetName);
+    if (sheet && sheet.getLastRow() >= 2) {
+      const lastRow = sheet.getLastRow();
+      const data = sheet.getRange(2, dateColIndex, lastRow - 1, 1).getValues();
+      for (let i = 0; i < data.length; i++) {
+        const dateVal = data[i][0];
+        if (dateVal) {
+          try {
+            const dateObj = new Date(dateVal);
+            if (!isNaN(dateObj.getTime())) {
+              const weekBounds = getWeekBoundaries(dateObj);
+              const weekKey = Utilities.formatDate(weekBounds.weekStart, tz, 'yyyy-MM-dd');
+              uniqueWeeks[weekKey] = weekBounds.weekStart;
+            }
+          } catch(e) {
+            // ignore parse errors
+          }
+        }
+      }
+    }
+  };
+
+  // 2. Add weeks from JHA Log column B (Date Created, 1-based col 2)
+  addWeeksFromSheet('JHA Log', 2);
+
+  // 3. Add weeks from Weekly Safety Log column B (Week Of, 1-based col 2)
+  addWeeksFromSheet('Weekly Safety Log', 2);
+
+  // 4. Add weeks from Monthly Checklist Log column B (Report Date, 1-based col 2)
+  addWeeksFromSheet('Monthly Checklist Log', 2);
+
+  return uniqueWeeks;
+}
+
+/**
  * Recalculates ALL weeks in the Safety Compliance sheet from log data
  * Use this to fix incorrectly credited weeks after bug fixes
  * Menu function: Glove Manager → Safety → Recalculate ALL Compliance
  */
 function recalculateAllComplianceFromLogs() {
-  var ui = SpreadsheetApp.getUi();
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var tz = Session.getScriptTimeZone();
+  const ui = SpreadsheetApp.getUi();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const tz = Session.getScriptTimeZone();
 
   // Confirm with user
-  var response = ui.alert(
+  const response = ui.alert(
     '\u26A0\uFE0F Recalculate ALL Compliance',
     'This will recalculate compliance for ALL weeks in the Safety Compliance sheet from the log sheets.\n\n' +
     'This fixes any incorrectly credited reports (e.g., wrong week assignments).\n\n' +
@@ -3086,36 +3207,24 @@ function recalculateAllComplianceFromLogs() {
   }
 
   try {
-    var complianceSheet = ss.getSheetByName('Safety Compliance');
-    if (!complianceSheet || complianceSheet.getLastRow() < 2) {
-      ui.alert('No Data', 'Safety Compliance sheet is empty or not found.', ui.ButtonSet.OK);
+    const uniqueWeeks = getUniqueWeeksToProcess(ss, tz);
+    const weekKeys = Object.keys(uniqueWeeks).sort().reverse(); // Most recent first
+    Logger.log("recalculateAllComplianceFromLogs: Found " + weekKeys.length + " unique weeks to process");
+
+    if (weekKeys.length === 0) {
+      ui.alert('No Data', 'No unique weeks found in Safety Compliance or log sheets.', ui.ButtonSet.OK);
       return;
     }
 
-    // Get all unique week starts from the sheet
-    var data = complianceSheet.getDataRange().getValues();
-    var uniqueWeeks = {};
+    let processedCount = 0;
+    let totalCompliant = 0;
+    let totalMissing = 0;
 
-    for (var i = 1; i < data.length; i++) {
-      var weekStart = data[i][0]; // Column A - Week Start
-      if (weekStart) {
-        var weekKey = Utilities.formatDate(new Date(weekStart), tz, 'yyyy-MM-dd');
-        uniqueWeeks[weekKey] = new Date(weekStart);
-      }
-    }
-
-    var weekKeys = Object.keys(uniqueWeeks).sort().reverse(); // Most recent first
-    Logger.log("recalculateAllComplianceFromLogs: Found " + weekKeys.length + " unique weeks to process");
-
-    var processedCount = 0;
-    var totalCompliant = 0;
-    var totalMissing = 0;
-
-    for (var w = 0; w < weekKeys.length; w++) {
-      var weekStart = uniqueWeeks[weekKeys[w]];
+    for (let w = 0; w < weekKeys.length; w++) {
+      const weekStart = uniqueWeeks[weekKeys[w]];
       Logger.log("Processing week: " + weekKeys[w]);
 
-      var complianceData = calculateComplianceFromLogs(weekStart);
+      const complianceData = calculateComplianceFromLogs(weekStart);
       if (complianceData) {
         updateComplianceSheetFromLogs(complianceData);
         totalCompliant += complianceData.compliantCount || 0;
@@ -5694,6 +5803,8 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   // Parse if daysBack is a date string (YYYY-MM-DD or MM/DD/YYYY)
   var isDateStr = false;
   var formattedFilterDate = '';
+  var startLimit = null;
+  var endLimit = null;
   if (typeof daysBack === 'string') {
     var dateParts = daysBack.split(/[\-\/]/);
     if (dateParts.length === 3) {
@@ -5704,6 +5815,13 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
           // Go back 1 day to ensure it's inclusive of the start date (Gmail's after: is exclusive)
           parsedDate.setDate(parsedDate.getDate() - 1);
           formattedFilterDate = Utilities.formatDate(parsedDate, Session.getScriptTimeZone(), 'yyyy/MM/dd');
+          
+          // Parse start and end limit dates timezone-safely
+          startLimit = parseLocalDate(daysBack, false);
+          if (endDate) {
+            endLimit = parseLocalDate(endDate, true);
+          }
+          Logger.log('Date limits parsed: startLimit=' + startLimit + ', endLimit=' + endLimit);
         }
       } catch (e) {
         Logger.log('Error parsing daysBack as date: ' + e);
@@ -6014,6 +6132,19 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
             skippedCount++;
             skipReasons.alreadyLogged++;
             continue;
+          }
+
+          // Skip if message date is outside range when filtering by explicit date range
+          if (isDateStr) {
+            var msgDate = message.getDate();
+            if (startLimit && msgDate < startLimit) {
+              skippedCount++;
+              continue;
+            }
+            if (endLimit && msgDate > endLimit) {
+              skippedCount++;
+              continue;
+            }
           }
 
           var parsed = parseSafetyEmail(message, skipPdfExtraction);
@@ -16096,137 +16227,98 @@ function menuRevertBuggyFixedCreditedTo() {
  * Menu: Glove Manager → Safety → 🔄 Master Recalculate
  */
 function masterRecalculateCompliance() {
-  var ui = SpreadsheetApp.getUi();
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var tz = Session.getScriptTimeZone();
+  const html = HtmlService.createHtmlOutputFromFile('MasterRecalculateDialog')
+    .setWidth(450)
+    .setHeight(320);
+  SpreadsheetApp.getUi().showModalDialog(html, 'Master Recalculate Compliance');
+}
 
-  // Clear all execution-level caches at the start of this top-level entry point
+/**
+ * Starts the master recalculation process.
+ * Fixes log entries, removes non-config crews for the current week,
+ * and returns the list of unique weeks to recalculate.
+ * 
+ * @returns {Object} Result metadata and array of unique week keys (yyyy-MM-dd)
+ */
+function startMasterRecalculate() {
   clearComplianceConfigCache();
 
-  // Build info about current state
-  var today = new Date();
-  var currentWeekBounds = getWeekBoundaries(today);
-  var currentWeekStr = Utilities.formatDate(currentWeekBounds.weekStart, tz, 'MM/dd/yyyy');
+  const today = new Date();
+  const currentWeekBounds = getWeekBoundaries(today);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const tz = Session.getScriptTimeZone();
+  const config = loadComplianceConfig();
 
-  // Load config to check for non-config crews
-  var config = loadComplianceConfig();
-  var configCrews = Object.keys(config);
-  var nonConfigCrews = findNonConfigCrewsInCurrentWeek(ss, currentWeekBounds.weekStart, config, tz);
+  // Step 1: Fix log entries
+  Logger.log('startMasterRecalculate: Step 1 - Fixing log entries...');
+  const fixResult = fixAllLogEntryCreditedTo();
+  const logsFixes = {
+    jha: fixResult.jhaFixed || 0,
+    weekly: fixResult.weeklyFixed || 0,
+    monthly: fixResult.monthlyFixed || 0
+  };
 
-  var dialogMsg = '🔄 Master Recalculate Compliance\n\n' +
-    'This will perform a COMPLETE compliance refresh:\n\n' +
-    '1. \u2705 Fix all log entries (Credited To values)\n' +
-    '2. \u2705 Recalculate ALL weeks from JHA/Weekly Safety logs\n' +
-    '3. \u2705 Refresh all tooltips\n\n' +
-    'Config has ' + configCrews.length + ' tracked crews.\n' +
-    'Current week: ' + currentWeekStr + '\n';
-
+  // Step 2: Remove non-config crews from CURRENT WEEK ONLY
+  const nonConfigCrews = findNonConfigCrewsInCurrentWeek(ss, currentWeekBounds.weekStart, config, tz);
+  let nonConfigRemoved = 0;
   if (nonConfigCrews.length > 0) {
-    dialogMsg += '\n\u26A0\uFE0F CURRENT WEEK has ' + nonConfigCrews.length + ' non-config crews:\n';
-    dialogMsg += nonConfigCrews.slice(0, 5).join(', ');
-    if (nonConfigCrews.length > 5) dialogMsg += '... and ' + (nonConfigCrews.length - 5) + ' more';
-    dialogMsg += '\n\nThese will be REMOVED from current week only.\n';
+    Logger.log('startMasterRecalculate: Step 2 - Removing ' + nonConfigCrews.length + ' non-config crews from current week...');
+    nonConfigRemoved = removeNonConfigCrewsFromCurrentWeekSilent(ss, currentWeekBounds.weekStart, config, tz);
   }
 
-  dialogMsg += '\nPast weeks will NOT have crews removed (historical data preserved).\n\nThis may take 1-2 minutes. Continue?';
+  // Get all unique weeks to recalculate
+  const uniqueWeeks = getUniqueWeeksToProcess(ss, tz);
+  const weekKeys = Object.keys(uniqueWeeks).sort().reverse();
 
-  var response = ui.alert('Master Recalculate', dialogMsg, ui.ButtonSet.YES_NO);
-  if (response !== ui.Button.YES) return;
+  return {
+    success: true,
+    weeks: weekKeys,
+    logsFixes: logsFixes,
+    nonConfigRemoved: nonConfigRemoved
+  };
+}
 
-  try {
-    var startTime = new Date().getTime();
-    var results = {
-      logsFixes: { jha: 0, weekly: 0, monthly: 0 },
-      nonConfigRemoved: 0,
-      weeksProcessed: 0,
-      compliant: 0,
-      missing: 0
-    };
+/**
+ * Processes a batch of weeks during master recalculation.
+ * 
+ * @param {Array<string>} weekKeysBatch - Array of week start date keys (yyyy-MM-dd)
+ * @returns {Object} Result of batch recalculation
+ */
+function recalculateWeeksBatch(weekKeysBatch) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const tz = Session.getScriptTimeZone();
+  const results = {
+    compliant: 0,
+    missing: 0,
+    weeksProcessed: 0
+  };
 
-    // Step 1: Fix log entries
-    Logger.log('masterRecalculateCompliance: Step 1 - Fixing log entries...');
-    var fixResult = fixAllLogEntryCreditedTo();
-    results.logsFixes = {
-      jha: fixResult.jhaFixed || 0,
-      weekly: fixResult.weeklyFixed || 0,
-      monthly: fixResult.monthlyFixed || 0
-    };
+  for (let w = 0; w < weekKeysBatch.length; w++) {
+    const weekKey = weekKeysBatch[w];
+    const weekStart = parseDateNoon(weekKey);
+    if (!weekStart) continue;
 
-    // Step 2: Remove non-config crews from CURRENT WEEK ONLY
-    if (nonConfigCrews.length > 0) {
-      Logger.log('masterRecalculateCompliance: Step 2 - Removing ' + nonConfigCrews.length + ' non-config crews from current week...');
-      results.nonConfigRemoved = removeNonConfigCrewsFromCurrentWeekSilent(ss, currentWeekBounds.weekStart, config, tz);
+    const complianceData = calculateComplianceFromLogs(weekStart, { ignoreResolved: true });
+    if (complianceData) {
+      updateComplianceSheetFromLogs(complianceData, { ignoreResolved: true });
+      results.compliant += complianceData.compliantCount || 0;
+      results.missing += complianceData.missingCount || 0;
+      results.weeksProcessed++;
     }
-
-    // Step 3: Recalculate ALL weeks
-    Logger.log('masterRecalculateCompliance: Step 3 - Recalculating all weeks...');
-    var complianceSheet = ss.getSheetByName('Safety Compliance');
-    if (complianceSheet && complianceSheet.getLastRow() >= 2) {
-      var data = complianceSheet.getDataRange().getValues();
-      var uniqueWeeks = {};
-
-      for (var i = 1; i < data.length; i++) {
-        var weekStart = data[i][0];
-        if (weekStart) {
-          var weekKey = Utilities.formatDate(new Date(weekStart), tz, 'yyyy-MM-dd');
-          uniqueWeeks[weekKey] = new Date(weekStart);
-        }
-      }
-
-      var weekKeys = Object.keys(uniqueWeeks).sort().reverse();
-
-      for (var w = 0; w < weekKeys.length; w++) {
-        var weekStart = uniqueWeeks[weekKeys[w]];
-        var complianceData = calculateComplianceFromLogs(weekStart, { ignoreResolved: true });
-        if (complianceData) {
-          updateComplianceSheetFromLogs(complianceData, { ignoreResolved: true });
-          results.compliant += complianceData.compliantCount || 0;
-          results.missing += complianceData.missingCount || 0;
-          results.weeksProcessed++;
-        }
-      }
-    }
-
-    // Step 4: Format and refresh tooltips
-    // Guard: Google Apps Script has a 6-minute execution limit.
-    // If Steps 1-3 consumed more than 5 minutes, skip the tooltip refresh
-    // (data is correct; tooltips are cosmetic) and tell the user to run it separately.
-    var TOOLTIP_TIMEOUT_GUARD_MS = 5 * 60 * 1000; // 5 minutes
-    var elapsedBeforeTooltips = new Date().getTime() - startTime;
-    var tooltipsSkipped = false;
-
-    Logger.log('masterRecalculateCompliance: Step 4 - Formatting and refreshing tooltips...');
-    formatComplianceSheetByWeek();
-
-    if (elapsedBeforeTooltips < TOOLTIP_TIMEOUT_GUARD_MS) {
-      refreshSafetyComplianceTooltips();
-    } else {
-      tooltipsSkipped = true;
-      Logger.log('masterRecalculateCompliance: Skipping tooltip refresh - elapsed ' +
-                 Math.round(elapsedBeforeTooltips / 1000) + 's, too close to 6-min limit.');
-    }
-
-    var elapsed = Math.round((new Date().getTime() - startTime) / 1000);
-
-    var msg = '\u2705 Master Recalculate Complete!\n\n' +
-      '\uD83D\uDD0D Log entries fixed:\n' +
-      '   \u2022 JHA Log: ' + results.logsFixes.jha + '\n' +
-      '   \u2022 Weekly Safety Log: ' + results.logsFixes.weekly + '\n' +
-      '   \u2022 Monthly Checklist Log: ' + results.logsFixes.monthly + '\n\n' +
-      '\uD83D\uDDD1\uFE0F Non-config crews removed (current week): ' + results.nonConfigRemoved + '\n\n' +
-      '\uD83D\uDCCA Compliance recalculated:\n' +
-      '   \u2022 Weeks processed: ' + results.weeksProcessed + '\n' +
-      '   \u2022 Total compliant: ' + results.compliant + '\n' +
-      '   \u2022 Total missing: ' + results.missing + '\n\n' +
-      '\u23F1\uFE0F Completed in ' + elapsed + ' seconds' +
-      (tooltipsSkipped ? '\n\n\u26A0\uFE0F Tooltip refresh was skipped (took too long).\nRun \u201C\uD83D\uDCAC Refresh Compliance Tooltips\u201D from Utilities to finish.' : '');
-
-    ui.alert('Master Recalculate Complete', msg, ui.ButtonSet.OK);
-
-  } catch (e) {
-    Logger.log('masterRecalculateCompliance error: ' + e.toString());
-    ui.alert('Error', 'Failed: ' + e.toString(), ui.ButtonSet.OK);
   }
+
+  return results;
+}
+
+/**
+ * Finalizes the master recalculation process by formatting and refreshing tooltips.
+ * 
+ * @returns {Object} Success status
+ */
+function finishMasterRecalculate() {
+  formatComplianceSheetByWeek();
+  refreshSafetyComplianceTooltips();
+  return { success: true };
 }
 
 /**
@@ -16265,27 +16357,16 @@ function masterRecalculateComplianceSilent() {
   // Step 3: Recalculate ALL weeks
   Logger.log('masterRecalculateComplianceSilent: Step 3 - Recalculating all weeks...');
   try {
-    var complianceSheet = ss.getSheetByName('Safety Compliance');
-    if (complianceSheet && complianceSheet.getLastRow() >= 2) {
-      var data = complianceSheet.getDataRange().getValues();
-      var uniqueWeeks = {};
-      for (var i = 1; i < data.length; i++) {
-        var weekStart = data[i][0];
-        if (weekStart) {
-          var weekKey = Utilities.formatDate(new Date(weekStart), tz, 'yyyy-MM-dd');
-          uniqueWeeks[weekKey] = new Date(weekStart);
-        }
-      }
-      var weekKeys = Object.keys(uniqueWeeks).sort().reverse();
-      for (var w = 0; w < weekKeys.length; w++) {
-        var ws = uniqueWeeks[weekKeys[w]];
-        var complianceData = calculateComplianceFromLogs(ws, { ignoreResolved: true });
-        if (complianceData) {
-          updateComplianceSheetFromLogs(complianceData, { ignoreResolved: true });
-          results.compliant += complianceData.compliantCount || 0;
-          results.missing += complianceData.missingCount || 0;
-          results.weeksProcessed++;
-        }
+    const uniqueWeeks = getUniqueWeeksToProcess(ss, tz);
+    const weekKeys = Object.keys(uniqueWeeks).sort().reverse();
+    for (let w = 0; w < weekKeys.length; w++) {
+      const ws = uniqueWeeks[weekKeys[w]];
+      const complianceData = calculateComplianceFromLogs(ws, { ignoreResolved: true });
+      if (complianceData) {
+        updateComplianceSheetFromLogs(complianceData, { ignoreResolved: true });
+        results.compliant += complianceData.compliantCount || 0;
+        results.missing += complianceData.missingCount || 0;
+        results.weeksProcessed++;
       }
     }
   } catch(e) { Logger.log('masterRecalculateComplianceSilent: Step 3 error: ' + e); }
@@ -17148,12 +17229,15 @@ function reprocessAllSafetyEmails(daysBack, endDate) {
   Logger.log('Step 1: Clearing existing log/compliance rows in range...');
   clearSafetyLogsInRange(daysBack, endDate);
 
-  // Step 2: Clear ALL saved data for a fresh start (preserving custom mappings)
-  Logger.log('Step 2: Clearing all safety email properties...');
-  clearAllSafetyEmailData(true);
+  // Step 2: Clear temporary/session data only — preserve LAST_SAFETY_EMAIL_DATE
+  //         so data outside the range isn't orphaned
+  Logger.log('Step 2: Clearing session-only safety email properties (preserving last processed date)...');
+  var props = PropertiesService.getScriptProperties();
+  props.deleteProperty('TEMP_JOB_FOREMAN_MAPPINGS');
+  props.deleteProperty('SKIPPED_UNKNOWN_JOBS');
+  props.deleteProperty('PENDING_UNKNOWN_JOBS');
 
   // Step 3: Also clear batch position data
-  var props = PropertiesService.getScriptProperties();
   props.deleteProperty('SAFETY_BATCH_START');
   props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
   props.deleteProperty('PENDING_BATCH_START');
