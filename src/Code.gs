@@ -5704,19 +5704,28 @@ function refreshCrewVisitConfigFromEmployees() {
   var empHeaders = empData[0];
 
   // Find column indices
-  var nameCol = -1, jobNumCol = -1, locationCol = -1, classificationCol = -1, lastDayCol = -1;
+  var nameCol = -1, jobNumCol = -1, locationCol = -1, classificationCol = -1, lastDayCol = -1, crewLeadCol = -1;
   for (var h = 0; h < empHeaders.length; h++) {
     var header = String(empHeaders[h]).toLowerCase().trim();
     if (header === 'job number') jobNumCol = h;
     if (header === 'location') locationCol = h;
     if (header === 'job classification') classificationCol = h;
     if (header === 'last day') lastDayCol = h;
+    if (header === 'crew lead') crewLeadCol = h;
   }
   nameCol = getEmployeeNameColumnIndex(empHeaders);
 
   if (jobNumCol === -1) {
     return [];
   }
+
+  // Classification hierarchy (lower number = higher priority)
+  var classificationPriority = {
+    'SUP': 1, 'GF': 2, 'F': 3, 'GTO F': 4, 'JRY': 5, 'JRY OP': 6,
+    'WT': 7, 'GTO': 8, 'EO 1': 9, 'EO 2': 10,
+    'AP 7': 11, 'AP 6': 12, 'AP 5': 13, 'AP 4': 14, 'AP 3': 15, 'AP 2': 16, 'AP 1': 17,
+    'ST 7': 11, 'ST 6': 12, 'ST 5': 13, 'ST 4': 14, 'ST 3': 15, 'ST 2': 16, 'ST 1': 17
+  };
 
   // Build crew data
   var crewMap = {};
@@ -5735,22 +5744,57 @@ function refreshCrewVisitConfigFromEmployees() {
       crewNumber = jobNumber.substring(0, dotIndex);
     }
 
+    var location = locationCol !== -1 ? String(row[locationCol] || '').trim() : '';
+    var isRealLocation = location && !isStatusLocation(location);
+    var physicalLocation = location ? getPhysicalLocation(location) : '';
+
     if (!crewMap[crewNumber]) {
       crewMap[crewNumber] = {
-        location: locationCol !== -1 ? String(row[locationCol] || '').trim() : '',
+        location: isRealLocation ? physicalLocation : '',
         crewLead: '',
+        leadPriority: 999,
+        leadPosition: 999,
+        manualLead: null,
         crewSize: 0,
         employees: []
       };
     }
 
-    crewMap[crewNumber].crewSize++;
-    crewMap[crewNumber].employees.push(nameCol !== -1 ? String(row[nameCol] || '').trim() : '');
+    if (!crewMap[crewNumber].location && isRealLocation) {
+      crewMap[crewNumber].location = physicalLocation;
+    }
 
-    // Check if foreman
+    var empName = nameCol !== -1 ? String(row[nameCol] || '').trim() : '';
+    crewMap[crewNumber].crewSize++;
+    crewMap[crewNumber].employees.push(empName);
+
     var classification = classificationCol !== -1 ? String(row[classificationCol] || '').trim() : '';
-    if (classification === 'F' || classification === 'GTO F' || classification === 'GF') {
-      crewMap[crewNumber].crewLead = nameCol !== -1 ? String(row[nameCol] || '').trim() : '';
+    var isManualLead = crewLeadCol !== -1 &&
+      (String(row[crewLeadCol] || '').toLowerCase() === 'yes' ||
+       String(row[crewLeadCol] || '').toLowerCase() === 'true' ||
+       row[crewLeadCol] === true);
+
+    if (isManualLead) {
+      crewMap[crewNumber].manualLead = empName;
+    }
+
+    var posDot = jobNumber.lastIndexOf('.');
+    var posNum = posDot !== -1 ? (parseInt(jobNumber.substring(posDot + 1)) || 999) : 999;
+    var priority = classificationPriority[classification] || 999;
+
+    var isBetter = priority < crewMap[crewNumber].leadPriority ||
+      (priority === crewMap[crewNumber].leadPriority && posNum < crewMap[crewNumber].leadPosition);
+    if (isBetter) {
+      crewMap[crewNumber].leadPriority = priority;
+      crewMap[crewNumber].leadPosition = posNum;
+      crewMap[crewNumber].crewLead = empName;
+    }
+  }
+
+  // Finalize foreman/lead for each crew (manual lead takes priority)
+  for (var crewNum in crewMap) {
+    if (crewMap[crewNum].manualLead) {
+      crewMap[crewNum].crewLead = crewMap[crewNum].manualLead;
     }
   }
 
