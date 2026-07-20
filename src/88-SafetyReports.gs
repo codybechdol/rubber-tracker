@@ -1849,21 +1849,19 @@ function calculateComplianceFromLogs(weekStartDate, options) {
     Logger.log("calculateComplianceFromLogs: ignoreResolved=true, recalculating ALL crews including Resolved");
   }
 
-  // Load ALL compliance config crews (both active and completed) so historical active weeks track completed jobs
-  var config = loadComplianceConfig({ includeAll: true });
-  var configCrews = Object.keys(config).sort();
-
   var crews = [];
   var historicalForemanMap = {};
 
   if (isCurrentWeek) {
-    // CURRENT WEEK: Use all config crews (active + completed in current week)
+    // CURRENT WEEK: Strictly use ACTIVE crews only from Job Tracking
+    var activeConfig = loadComplianceConfig({ includeAll: false });
+    var activeConfigCrews = Object.keys(activeConfig).sort();
     var activeCrewsFromTrackingData = getActiveCrewsFromJobTracking();
     var activeCrewsFromTracking = activeCrewsFromTrackingData.map(function(c) { return c.jobNumber; });
 
     var crewSet = {};
-    for (var cc = 0; cc < configCrews.length; cc++) {
-      crewSet[configCrews[cc]] = true;
+    for (var cc = 0; cc < activeConfigCrews.length; cc++) {
+      crewSet[activeConfigCrews[cc]] = true;
     }
     for (var ac = 0; ac < activeCrewsFromTracking.length; ac++) {
       if (!crewSet[activeCrewsFromTracking[ac]]) {
@@ -1871,10 +1869,12 @@ function calculateComplianceFromLogs(weekStartDate, options) {
       }
     }
     crews = Object.keys(crewSet).sort();
-    Logger.log("calculateComplianceFromLogs: Current week - using " + crews.length + " crews");
+    Logger.log("calculateComplianceFromLogs: Current week - using " + crews.length + " active crews");
   } else {
-    // PAST WEEKS: Use crews that ALREADY EXIST in Safety Compliance sheet for this week
-    // PLUS any crews that have data in the logs for this week (to handle deleted rows)
+    // PAST WEEKS: Load all crews (active + completed) and filter by dates active during that historical week
+    var configAll = loadComplianceConfig({ includeAll: true });
+    var configCrews = Object.keys(configAll).sort();
+
     var existingCrewsForWeek = getExistingCrewsForWeek(ss, weekBounds.weekStart, tz);
     var crewsWithLogData = getCrewsWithLogDataForWeek(ss, weekBounds, configCrews);
 

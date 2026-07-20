@@ -448,8 +448,11 @@ function getJobTrackingStartDates() {
 
     if (!jobNum) continue;
 
-    if (startDate instanceof Date && !isNaN(startDate.getTime())) {
-      result[jobNum] = startDate;
+    var parsed = startDate instanceof Date ? startDate : (startDate ? parseDateNoon(String(startDate)) : null);
+    if (parsed && !isNaN(parsed.getTime())) {
+      result[jobNum] = parsed;
+      var crewNum = extractCrewNumber(jobNum);
+      if (crewNum) result[crewNum] = parsed;
     }
   }
 
@@ -479,8 +482,11 @@ function getJobTrackingEndDates() {
 
     if (!jobNum) continue;
 
-    if (endDate instanceof Date && !isNaN(endDate.getTime())) {
-      result[jobNum] = endDate;
+    var parsed = endDate instanceof Date ? endDate : (endDate ? parseDateNoon(String(endDate)) : null);
+    if (parsed && !isNaN(parsed.getTime())) {
+      result[jobNum] = parsed;
+      var crewNum = extractCrewNumber(jobNum);
+      if (crewNum) result[crewNum] = parsed;
     }
   }
 
