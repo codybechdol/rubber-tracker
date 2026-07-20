@@ -1525,15 +1525,11 @@
         var mappedLocation = mapLocation(header.locationName);
         var isUnknown = mappedLocation === header.locationName && !locationMappings[header.locationName];
 
-        // Override with Job Tracking location if available (authoritative source)
-        // This prevents wrong mappings when Excel header text is ambiguous
-        // e.g., 041-26 is "Gold Creek" in Job Tracking but header might fuzzy-match to "Rapelje"
-        if (jobTrackingData && jobTrackingData[header.jobNumber]) {
+        // Use Job Tracking location as a FALLBACK if Excel header location is unmapped/unknown
+        if (isUnknown && jobTrackingData && jobTrackingData[header.jobNumber]) {
           var jtInfo = jobTrackingData[header.jobNumber];
           if (jtInfo.location && !jtInfo.isCompleted) {
-            if (jtInfo.location !== mappedLocation) {
-              console.log('  Job Tracking override: ' + header.jobNumber + ' location "' + mappedLocation + '" → "' + jtInfo.location + '"');
-            }
+            console.log('  Job Tracking fallback for unknown location: ' + header.jobNumber + ' → "' + jtInfo.location + '"');
             mappedLocation = jtInfo.location;
             isUnknown = false;
           }
@@ -1584,17 +1580,16 @@
       console.log('After merge: ' + parsedCrews.length + ' crews');
 
       // Fill in missing schedule data from Job Tracking
-      // AND use Job Tracking as PRIMARY location source (job number → city)
       for (var si = 0; si < parsedCrews.length; si++) {
         var crew = parsedCrews[si];
         var jtData = jobTrackingData[crew.jobNumber];
 
         if (jtData) {
-          // PRIMARY: Use Job Tracking location (most authoritative - set by user)
-          if (jtData.location) {
+          // Fallback ONLY: Use Job Tracking location if Excel header location was unknown
+          if (jtData.location && (crew.isUnknownLocation || !crew.mappedLocation)) {
             var jtLocation = jtData.location;
             if (crew.mappedLocation !== jtLocation) {
-              console.log('Job Tracking location for ' + crew.jobNumber + ': "' + jtLocation + '" (was "' + crew.mappedLocation + '" from name mapping)');
+              console.log('Job Tracking fallback location for ' + crew.jobNumber + ': "' + jtLocation + '"');
               crew.mappedLocation = jtLocation;
               crew.location = jtLocation;
               crew.locationFromJobTracking = true;
