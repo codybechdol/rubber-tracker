@@ -357,6 +357,11 @@ function applyCrewChanges(changes) {
         ]);
         historyLogged++;
 
+        // Keep memory data array in sync with inserted row
+        data.push(newRow);
+        columnsModified.location = true;
+        columnsModified.jobNum = true;
+
         Logger.log('Rehired employee: ' + change.employeeName + ' | Location: ' + change.newLocation + ' | Job #: ' + change.newJobNumber);
         changeDetails.push({
           name: change.employeeName,
@@ -365,23 +370,31 @@ function applyCrewChanges(changes) {
         continue; // Skip to next employee
       }
 
-      if (!rowIndex || rowIndex < 2) {
-        // Try to find by name
+      // Verify row index matches employee name to prevent row-shift corruptions
+      var dataIdx = -1;
+      if (rowIndex >= 2 && rowIndex <= data.length) {
+        if (String(data[rowIndex - 1][nameCol]).toLowerCase().trim() === change.employeeName.toLowerCase().trim()) {
+          dataIdx = rowIndex - 1;
+        }
+      }
+
+      if (dataIdx === -1) {
+        // Find by name in data array
         var empNameLower = change.employeeName.toLowerCase().trim();
         for (var r = 1; r < data.length; r++) {
           if (String(data[r][nameCol]).toLowerCase().trim() === empNameLower) {
+            dataIdx = r;
             rowIndex = r + 1;
             break;
           }
         }
       }
 
-      if (!rowIndex || rowIndex < 2) {
+      if (dataIdx === -1) {
         Logger.log('Could not find row for employee: ' + change.employeeName);
         continue;
       }
 
-      var dataIdx = rowIndex - 1; // Array index into data[]
       var locationChanged = false;
       var jobChanged = false;
       var secondaryJobChanged = false;
@@ -397,6 +410,13 @@ function applyCrewChanges(changes) {
           date: change.date || todayStr
         });
         if (specResult && specResult.success) {
+          // Keep memory data array in sync so batch write doesn't overwrite termination!
+          if (dataIdx !== -1 && dataIdx < data.length) {
+            data[dataIdx][locationCol] = 'Previous Employee';
+            data[dataIdx][jobNumCol] = '';
+            columnsModified.location = true;
+            columnsModified.jobNum = true;
+          }
           updatedCount++;
           historyLogged++;
           changeDetails.push({
@@ -428,13 +448,13 @@ function applyCrewChanges(changes) {
       }
 
       // BATCH: Modify in memory instead of individual setValue calls
-      if (change.newLocation && change.newLocation !== change.oldLocation) {
+      if (change.newLocation && change.newLocation !== String(data[dataIdx][locationCol] || '')) {
         data[dataIdx][locationCol] = change.newLocation;
         locationChanged = true;
         columnsModified.location = true;
       }
 
-      if (change.newJobNumber && change.newJobNumber !== change.oldJobNumber) {
+      if (change.newJobNumber && change.newJobNumber !== String(data[dataIdx][jobNumCol] || '')) {
         data[dataIdx][jobNumCol] = change.newJobNumber;
         jobChanged = true;
         columnsModified.jobNum = true;
