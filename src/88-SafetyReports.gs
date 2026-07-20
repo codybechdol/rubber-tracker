@@ -2055,8 +2055,8 @@ function calculateComplianceFromLogs(weekStartDate, options) {
       // Compute dayOfWeek BEFORE the status check so it's available for Unknown Job tracking too
       var dayOfWeek = jhaDate.getDay(); // 0=Sun, 6=Sat
 
-      // Check if this is a credited entry
-      if (status !== 'Credited') {
+      // Check if this is a credited entry (or if CreditedTo has a valid tracked crew)
+      if (status !== 'Credited' && !(creditedTo && crewCompliance[creditedTo])) {
         // Track unknown JHA jobs for user assignment
         // But ONLY if it's truly unknown - not if it's now a tracked crew
         if (status === 'Unknown Job') {
@@ -2227,7 +2227,7 @@ function calculateComplianceFromLogs(weekStartDate, options) {
         continue;
       }
 
-      if (status === 'Credited') {
+      if (status === 'Credited' || (creditedTo && crewCompliance[creditedTo])) {
         var weeklyForeman = String(weeklyRow[3] || '').trim();
         if (weeklyForeman && weeklyForeman !== 'UNKNOWN') {
           var crewKey = originalJobNumber || creditedTo;
@@ -2381,7 +2381,7 @@ function calculateComplianceFromLogs(weekStartDate, options) {
         continue;
       }
 
-      if (status === 'Credited' && creditedTo && crewCompliance[creditedTo]) {
+      if ((status === 'Credited' || status === 'Unknown Job' || status === 'Skipped') && creditedTo && crewCompliance[creditedTo]) {
         var monthlyForeman = String(monthlyRow[3] || '').trim();
         if (monthlyForeman && monthlyForeman !== 'UNKNOWN') {
           historicalForemanMap[creditedTo] = monthlyForeman;
@@ -15797,9 +15797,9 @@ function fixAllLogEntryCreditedTo() {
       // 2. Then, try by foreman name ONLY if there is no valid-format job number.
       //    If a well-formed job number (NNN-YY) exists but is untracked, it's a genuinely
       //    foreign/untracked job — don't claim it for the foreman's primary crew.
-      //    Example: 045-16 (Abilene TX) should NOT be credited to Tony Harmon's 039-26 crew.
+      //    Note: Dummy job numbers like 000-00 are NOT well-formed real jobs.
       var primaryCrew = null;
-      var jobNumberIsWellFormed = /^\d{3}-\d{2}(\.\d+)?$/.test(jobNumber);
+      var jobNumberIsWellFormed = /^\d{3}-\d{2}(\.\d+)?$/.test(jobNumber) && !jobNumber.startsWith('000-');
 
       if (jobNumber) {
         var resolution = resolveJobToTrackedCrew(jobNumber);
@@ -15814,26 +15814,29 @@ function fixAllLogEntryCreditedTo() {
         primaryCrew = findForemanPrimaryCrew(foreman, employeeData);
       }
 
-      if (primaryCrew && primaryCrew !== currentCreditedTo) {
-        // Only update if the primary crew is a tracked crew
-        if (trackedCrewSet[primaryCrew]) {
-          var rowNum = i + 1;
-          jhaSheet.getRange(rowNum, 9).setValue(primaryCrew); // Column I - Credited To
+      var targetCrew = primaryCrew || (trackedCrewSet[currentCreditedTo] ? currentCreditedTo : null);
 
-          // Update status to Credited if it was Unknown Job or Skipped
-          if (status === 'Unknown Job' || status === 'Skipped') {
+      if (targetCrew && trackedCrewSet[targetCrew]) {
+        var rowNum = i + 1;
+        var needsCreditedToUpdate = (primaryCrew && primaryCrew !== currentCreditedTo);
+        var needsStatusUpdate = (status !== 'Credited' && (status === 'Unknown Job' || status === 'Skipped' || !status));
+
+        if (needsCreditedToUpdate || needsStatusUpdate) {
+          if (needsCreditedToUpdate) {
+            jhaSheet.getRange(rowNum, 9).setValue(primaryCrew); // Column I - Credited To
+          }
+          if (needsStatusUpdate) {
             jhaSheet.getRange(rowNum, 8).setValue('Credited'); // Column H - Status
           }
 
-          // Add note
           var existingNotes = String(jhaData[i][9] || '').trim(); // Column J
           if (existingNotes.indexOf('Fixed by fixAllLogEntryCreditedTo') === -1) {
-            var newNote = 'Fixed by fixAllLogEntryCreditedTo: ' + (currentCreditedTo || 'empty') + ' → ' + primaryCrew;
+            var newNote = 'Fixed by fixAllLogEntryCreditedTo: ' + (currentCreditedTo || 'empty') + ' → ' + targetCrew;
             jhaSheet.getRange(rowNum, 10).setValue(existingNotes ? existingNotes + '. ' + newNote : newNote);
           }
 
           jhaFixed++;
-          Logger.log('Fixed JHA Log row ' + rowNum + ': job=' + jobNumber + ', foreman=' + foreman + ' → ' + primaryCrew + ' (was: ' + currentCreditedTo + ')');
+          Logger.log('Fixed JHA Log row ' + rowNum + ': job=' + jobNumber + ', foreman=' + foreman + ' → ' + targetCrew + ' (was: ' + currentCreditedTo + ')');
         }
       }
     }
@@ -15855,7 +15858,7 @@ function fixAllLogEntryCreditedTo() {
 
       // Try by job number first, then by foreman (same guard as JHA log above)
       var primaryCrew = null;
-      var jobNumberIsWellFormed = /^\d{3}-\d{2}(\.\d+)?$/.test(jobNumber);
+      var jobNumberIsWellFormed = /^\d{3}-\d{2}(\.\d+)?$/.test(jobNumber) && !jobNumber.startsWith('000-');
 
       if (jobNumber) {
         var resolution = resolveJobToTrackedCrew(jobNumber);
@@ -15868,23 +15871,29 @@ function fixAllLogEntryCreditedTo() {
         primaryCrew = findForemanPrimaryCrew(foreman, employeeData);
       }
 
-      if (primaryCrew && primaryCrew !== currentCreditedTo) {
-        if (trackedCrewSet[primaryCrew]) {
-          var rowNum = j + 1;
-          weeklySheet.getRange(rowNum, 8).setValue(primaryCrew); // Column H - Credited To
+      var targetCrew = primaryCrew || (trackedCrewSet[currentCreditedTo] ? currentCreditedTo : null);
 
-          if (status === 'Unknown Job' || status === 'Skipped') {
+      if (targetCrew && trackedCrewSet[targetCrew]) {
+        var rowNum = j + 1;
+        var needsCreditedToUpdate = (primaryCrew && primaryCrew !== currentCreditedTo);
+        var needsStatusUpdate = (status !== 'Credited' && (status === 'Unknown Job' || status === 'Skipped' || !status));
+
+        if (needsCreditedToUpdate || needsStatusUpdate) {
+          if (needsCreditedToUpdate) {
+            weeklySheet.getRange(rowNum, 8).setValue(primaryCrew); // Column H - Credited To
+          }
+          if (needsStatusUpdate) {
             weeklySheet.getRange(rowNum, 7).setValue('Credited'); // Column G - Status
           }
 
           var existingNotes = String(weeklyData[j][8] || '').trim(); // Column I
           if (existingNotes.indexOf('Fixed by fixAllLogEntryCreditedTo') === -1) {
-            var newNote = 'Fixed by fixAllLogEntryCreditedTo: ' + (currentCreditedTo || 'empty') + ' → ' + primaryCrew;
+            var newNote = 'Fixed by fixAllLogEntryCreditedTo: ' + (currentCreditedTo || 'empty') + ' → ' + targetCrew;
             weeklySheet.getRange(rowNum, 9).setValue(existingNotes ? existingNotes + '. ' + newNote : newNote);
           }
 
           weeklyFixed++;
-          Logger.log('Fixed Weekly Safety Log row ' + rowNum + ': job=' + jobNumber + ', foreman=' + foreman + ' → ' + primaryCrew);
+          Logger.log('Fixed Weekly Safety Log row ' + rowNum + ': job=' + jobNumber + ', foreman=' + foreman + ' → ' + targetCrew);
         }
       }
     }
@@ -15904,24 +15913,29 @@ function fixAllLogEntryCreditedTo() {
       if (!foreman || foreman === 'UNKNOWN') continue;
 
       var primaryCrew = findForemanPrimaryCrew(foreman, employeeData);
+      var targetCrew = primaryCrew || (trackedCrewSet[currentCreditedTo] ? currentCreditedTo : null);
 
-      if (primaryCrew && primaryCrew !== currentCreditedTo) {
-        if (trackedCrewSet[primaryCrew]) {
-          var rowNum = k + 1;
-          monthlySheet.getRange(rowNum, 9).setValue(primaryCrew); // Column I - Credited To
+      if (targetCrew && trackedCrewSet[targetCrew]) {
+        var rowNum = k + 1;
+        var needsCreditedToUpdate = (primaryCrew && primaryCrew !== currentCreditedTo);
+        var needsStatusUpdate = (status !== 'Credited' && (status === 'Unknown Job' || status === 'Skipped' || !status));
 
-          if (status === 'Unknown Job' || status === 'Skipped') {
+        if (needsCreditedToUpdate || needsStatusUpdate) {
+          if (needsCreditedToUpdate) {
+            monthlySheet.getRange(rowNum, 9).setValue(primaryCrew); // Column I - Credited To
+          }
+          if (needsStatusUpdate) {
             monthlySheet.getRange(rowNum, 8).setValue('Credited'); // Column H - Status
           }
 
           var existingNotes = String(monthlyData[k][10] || '').trim(); // Column K
           if (existingNotes.indexOf('Fixed by fixAllLogEntryCreditedTo') === -1) {
-            var newNote = 'Fixed by fixAllLogEntryCreditedTo: ' + (currentCreditedTo || 'empty') + ' → ' + primaryCrew;
+            var newNote = 'Fixed by fixAllLogEntryCreditedTo: ' + (currentCreditedTo || 'empty') + ' → ' + targetCrew;
             monthlySheet.getRange(rowNum, 11).setValue(existingNotes ? existingNotes + '. ' + newNote : newNote);
           }
 
           monthlyFixed++;
-          Logger.log('Fixed Monthly Checklist Log row ' + rowNum + ': ' + foreman + ' → ' + primaryCrew);
+          Logger.log('Fixed Monthly Checklist Log row ' + rowNum + ': ' + foreman + ' → ' + targetCrew);
         }
       }
     }
@@ -15973,8 +15987,8 @@ function auditCreditedToAccuracy() {
 
   // Helper: compute correct creditedTo using the fixed logic
   function computeCorrect(jobNumber, foreman) {
-    var primaryCrew = null;
-    var jobNumberIsWellFormed = /^\d{3}-\d{2}(\.\d+)?$/.test(String(jobNumber || '').trim());
+    var cleanJob = String(jobNumber || '').trim();
+    var jobNumberIsWellFormed = /^\d{3}-\d{2}(\.\d+)?$/.test(cleanJob) && !cleanJob.startsWith('000-');
 
     if (jobNumber) {
       var resolution = resolveJobToTrackedCrew(jobNumber);
