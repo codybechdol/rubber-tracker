@@ -151,7 +151,7 @@ function ensureLocationsInLocationsSheet(ss, locations) {
     for (var j = 0; j < locations.length; j++) {
       var location = locations[j];
       if (!location) continue;
-      if (skipLocations.indexOf(location) !== -1) continue;
+      if (skipLocations.indexOf(location) !== -1 || isStatusLocation(location)) continue;
       if (existingLocations[location.toLowerCase()]) continue;
       newLocations.push(location);
     }
