@@ -412,6 +412,47 @@ function onEditHandler(e) {
     }
 
     // =========================================================================
+    // SAFETY EQUIPMENT NEEDS STATUS EDIT (Column H / Col 8 = Status)
+    // =========================================================================
+    if ((sheetName === 'Safety Equipment Needs' || sheetName === 'Safety Reports') && editedCol === 8 && editedRow >= 2) {
+      var statusVal = String(e.range.getValue() || '').trim();
+      Logger.log('onEditHandler: Safety Equipment Needs row ' + editedRow + ' status changed to: ' + statusVal);
+      if (statusVal === 'Resolved' || statusVal === 'Complete' || statusVal === 'Completed') {
+        // Set Resolved On date if empty
+        var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+        var resCol = -1;
+        for (var rh = 0; rh < headers.length; rh++) {
+          if (String(headers[rh]).toLowerCase().trim() === 'resolved on') { resCol = rh + 1; break; }
+        }
+        if (resCol > 0 && !sheet.getRange(editedRow, resCol).getValue()) {
+          sheet.getRange(editedRow, resCol).setValue(new Date());
+        }
+
+        // Sync completion to Task Metadata
+        try {
+          var taskMetaSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Task Metadata');
+          if (taskMetaSheet) {
+            var metaData = taskMetaSheet.getDataRange().getValues();
+            for (var m = 1; m < metaData.length; m++) {
+              var mSheet = String(metaData[m][1] || '').trim();
+              var mRow = parseInt(metaData[m][2]);
+              var mTaskId = String(metaData[m][0] || '').trim();
+              if ((mSheet === 'Safety Equipment Needs' || mSheet === 'Safety Reports') &&
+                  (mRow === editedRow || extractSourceRowFromTaskKey(mTaskId) === editedRow)) {
+                taskMetaSheet.getRange(m + 1, 15).setValue('Complete'); // Status (O)
+                taskMetaSheet.getRange(m + 1, 22).setValue(new Date()); // CompletedDate (V)
+                Logger.log('onEditHandler: Marked Task Metadata row ' + (m + 1) + ' as Complete for Safety Equipment row ' + editedRow);
+              }
+            }
+          }
+        } catch (metaErr) {
+          Logger.log('onEditHandler error syncing Safety Equipment completion to Task Metadata: ' + metaErr);
+        }
+      }
+      return; // Handled
+    }
+
+    // =========================================================================
     // EXECUTIVE DASHBOARD & EXPIRING CERTS SMS NOTIFY CHECKBOXES
     // =========================================================================
     if ((sheetName === 'Dashboard' && editedCol === 18 && editedRow >= 8 && editedRow <= 11) ||

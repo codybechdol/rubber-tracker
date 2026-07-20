@@ -507,3 +507,31 @@ function getEmployeeNameColumnIndex(headers) {
   return -1;
 }
 
+/**
+ * Safely extracts the source row number from a task key or task ID string.
+ * Handles formats like:
+ * - "Safety Equipment Needs_15"
+ * - "SafetyEquipmentNeeds_15_20260720"
+ * - "SafetyReports_15"
+ * - "Glove Swaps_12"
+ *
+ * @param {string} taskKey - Task key or ID
+ * @returns {number} Source row number (1-indexed), or -1 if invalid
+ */
+function extractSourceRowFromTaskKey(taskKey) {
+  if (!taskKey) return -1;
+  var keyStr = String(taskKey).trim();
+  var parts = keyStr.split('_');
+  for (var i = 0; i < parts.length; i++) {
+    var part = parts[i].trim();
+    if (/^\d+$/.test(part)) {
+      var num = parseInt(part, 10);
+      // Skip YYYYMMDD date format numbers (e.g. 20260720)
+      if (num > 0 && num < 100000) {
+        return num;
+      }
+    }
+  }
+  return -1;
+}
+

@@ -14932,7 +14932,7 @@ function markTaskComplete(taskKey, options) {
   if (result.success) {
     // For Safety Equipment tasks, sync completion to Safety Reports sheet
     // This updates the source row status from "Needs Attention" to "Resolved"
-    if (taskKey && (taskKey.indexOf('SafetyReports') === 0 || taskKey.indexOf('Safety Reports') === 0 || taskKey.indexOf('Safety Equipment Needs') === 0)) {
+    if (taskKey && (taskKey.indexOf('SafetyReports') === 0 || taskKey.indexOf('Safety Reports') === 0 || taskKey.indexOf('Safety Equipment Needs') === 0 || taskKey.indexOf('SafetyEquipmentNeeds') === 0)) {
       try {
         var syncResult = syncSafetyReportCompletion(taskKey);
         if (syncResult && syncResult.synced) {

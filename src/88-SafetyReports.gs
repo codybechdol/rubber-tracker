@@ -5389,13 +5389,10 @@ function refreshSafetySheets() {
       if (!isSafetyReportsTask) continue;
       if (status !== 'Complete' && status !== 'Completed' && !completedDate) continue;
 
-      // Extract source row from taskId or source row column
+      // Extract source row safely
       var sourceRow = parseInt(taskData[t][2]); // Column C = SourceRow (0-indexed = 2)
       if (isNaN(sourceRow) || sourceRow < 1) {
-        // Fallback: parse from taskId
-        var normalizedTaskId = taskId.replace('Safety Reports_', 'SafetyReports_').replace('Safety Equipment Needs_', 'SafetyEquipmentNeeds_');
-        var parts = normalizedTaskId.split('_');
-        sourceRow = parseInt(parts[parts.length - 1]);
+        sourceRow = extractSourceRowFromTaskKey(taskId);
       }
 
       if (sourceRow > 0 && sourceRow <= safetyData.length) {
@@ -5407,6 +5404,29 @@ function refreshSafetySheets() {
             safetySheet.getRange(sourceRow, resolvedOnColIdx + 1).setValue(completedDate || new Date());
           }
           syncCount++;
+        }
+      }
+    }
+
+    // REVERSE SYNC: If Safety Equipment Needs row is Resolved, mark corresponding Task Metadata task as Complete
+    for (var s = 1; s < safetyData.length; s++) {
+      var sStatus = String(safetyData[s][7] || '').trim();
+      if (sStatus === 'Resolved') {
+        var sRow = s + 1;
+        var sResolvedOn = resolvedOnColIdx >= 0 ? safetyData[s][resolvedOnColIdx] : new Date();
+        for (var t2 = 1; t2 < taskData.length; t2++) {
+          var t2SourceSheet = String(taskData[t2][1] || '').trim();
+          var t2SourceRow = parseInt(taskData[t2][2]);
+          var t2TaskId = String(taskData[t2][0] || '').trim();
+          if ((t2SourceSheet === 'Safety Equipment Needs' || t2SourceSheet === 'Safety Reports') &&
+              (t2SourceRow === sRow || extractSourceRowFromTaskKey(t2TaskId) === sRow)) {
+            var t2Status = String(taskData[t2][14] || '').trim();
+            if (t2Status !== 'Complete' && t2Status !== 'Completed') {
+              taskSheet.getRange(t2 + 1, 15).setValue('Complete'); // Status (O)
+              taskSheet.getRange(t2 + 1, 22).setValue(sResolvedOn || new Date()); // CompletedDate (V)
+              syncCount++;
+            }
+          }
         }
       }
     }
@@ -5444,21 +5464,10 @@ function syncSafetyReportCompletion(taskKey) {
     return { synced: false, message: 'No taskKey provided' };
   }
 
-  // Normalize the taskKey - handle both "Safety Reports_X" and "SafetyReports_X" formats
-  // Normalize the taskKey - handle both "Safety Reports_X" and "SafetyReports_X" formats
-  var normalizedKey = taskKey.replace('Safety Reports_', 'SafetyReports_');
-
-  // Extract row index from taskKey
-  var parts = normalizedKey.split('_');
-  if (parts.length < 2) {
-    Logger.log('syncSafetyReportCompletion: Could not parse taskKey');
+  var sourceRow = extractSourceRowFromTaskKey(taskKey);
+  if (sourceRow < 1) {
+    Logger.log('syncSafetyReportCompletion: Could not extract row index from taskKey=' + taskKey);
     return { synced: false, message: 'Invalid taskKey format' };
-  }
-
-  var sourceRow = parseInt(parts[1]);
-  if (isNaN(sourceRow) || sourceRow < 1) {
-    Logger.log('syncSafetyReportCompletion: Invalid row index: ' + parts[1]);
-    return { synced: false, message: 'Invalid row index' };
   }
 
   var safetySheet = getSafetyEquipmentSheet();
@@ -5474,17 +5483,33 @@ function syncSafetyReportCompletion(taskKey) {
     return { synced: false, message: 'Row out of range' };
   }
 
+  // Find Resolved On column
+  var headers = safetySheet.getRange(1, 1, 1, safetySheet.getLastColumn()).getValues()[0];
+  var resolvedOnCol = -1;
+  for (var h = 0; h < headers.length; h++) {
+    if (String(headers[h]).toLowerCase().trim() === 'resolved on') {
+      resolvedOnCol = h + 1;
+      break;
+    }
+  }
+
   // Get current status (column H = 8)
   var statusCell = safetySheet.getRange(sourceRow, 8);
   var currentStatus = String(statusCell.getValue() || '').trim();
 
   if (currentStatus === 'Resolved') {
     Logger.log('syncSafetyReportCompletion: Row ' + sourceRow + ' already Resolved');
+    if (resolvedOnCol > 0 && !safetySheet.getRange(sourceRow, resolvedOnCol).getValue()) {
+      safetySheet.getRange(sourceRow, resolvedOnCol).setValue(new Date());
+    }
     return { synced: true, message: 'Already resolved' };
   }
 
   // Update to Resolved
   statusCell.setValue('Resolved');
+  if (resolvedOnCol > 0) {
+    safetySheet.getRange(sourceRow, resolvedOnCol).setValue(new Date());
+  }
   Logger.log('syncSafetyReportCompletion: Updated row ' + sourceRow + ' to Resolved');
 
   return { synced: true, message: 'Updated to Resolved' };
