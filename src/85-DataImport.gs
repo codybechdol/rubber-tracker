@@ -387,6 +387,26 @@ function applyCrewChanges(changes) {
       var secondaryJobChanged = false;
       var classificationChanged = false;
 
+      // Handle Previous Employee terminations (Quit, Layoff, Fired, Resigned)
+      if (change.newLocation === 'Previous Employee' || change.isTerminationChange) {
+        Logger.log('applyCrewChanges: Processing Previous Employee termination for: ' + change.employeeName);
+        var specResult = applySpecialCircumstanceUpdate({
+          name: change.employeeName,
+          newLocation: 'Previous Employee',
+          status: change.status || change.statusBadge || 'Quit',
+          date: change.date || todayStr
+        });
+        if (specResult && specResult.success) {
+          updatedCount++;
+          historyLogged++;
+          changeDetails.push({
+            name: change.employeeName,
+            changes: ['Departed — Location set to Previous Employee (' + (change.status || change.statusBadge || 'Quit') + ')']
+          });
+        }
+        continue;
+      }
+
       // AUTO-ASSIGN 005-26.X for Leave/Vacation employees.
       // When an employee moves to a non-field status location, give them a 005-26.X job
       // number so their old crew job number (e.g., 019-26.2) is freed up for the active crew.

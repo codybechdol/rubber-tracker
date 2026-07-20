@@ -1379,7 +1379,11 @@
 
           // Check for special section headers (Light Duty, Time off, Quit, Layoff, Weeds, etc.)
           // Skip cells that have a job number (those are crew headers, not special sections)
-          if (cell.match(/Light\s*Duty|Time\s*off|Quit|Other|Layoff|Resign|Leave|Vacation|MT\s*Misc|Weeds/i) && !cell.match(/\d{3}-\d{2}/)) {
+          // MUST use word boundaries \b and NOT match employee names or NEW HIRE entries
+          if (cell.match(/\b(Light\s*Duty|Time\s*off|Quits?|Other|Layoffs?|Resigns?|Resignations?|Leave|Vacations?|MT\s*Misc|Weeds)\b/i) &&
+              !cell.match(/\d{3}-\d{2}/) &&
+              !isEmployeeName(cell) &&
+              !cell.match(/\bNEW\s*HIRE\b/i)) {
             console.log('Found special section header at [' + r + ',' + c + ']: ' + cell);
             specialSectionHeaders.push({
               row: r,
@@ -1490,7 +1494,9 @@
             break;
           }
           // Break on special section headers (Vacation, Time Off, Quit, Layoff, etc.)
-          if (cell.match(/^(Time\s*Off|Quit|Other|Layoff|Resign|Leave|Vacation|Light\s*Duty|Weeds|MT\s*Misc)\b/i) && !cell.match(/\d{3}-\d{2}/)) {
+          if (cell.match(/^(Time\s*Off|Quit|Other|Layoff|Resign|Leave|Vacation|Light\s*Duty|Weeds|MT\s*Misc)\b/i) &&
+              !cell.match(/\d{3}-\d{2}/) &&
+              !isEmployeeName(cell)) {
             console.log('  Breaking at special section header: ' + cell);
             break;
           }
@@ -3037,16 +3043,16 @@
       // If multiple are found (e.g., "Time off/Quit/Other"), the header is ambiguous
       // and we should NOT assign a default - let per-employee parsing decide
       var statusKeywords = [
-        { pattern: /light\s*duty/i, status: 'Light Duty' },
-        { pattern: /weeds/i, status: 'Weeds' },
-        { pattern: /layoff|laid\s*off/i, status: 'Layoff' },
-        { pattern: /resign/i, status: 'Resigned' },
-        { pattern: /quit/i, status: 'Quit' },
-        { pattern: /fired|terminated/i, status: 'Fired' },
-        { pattern: /vacation/i, status: 'Vacation' },
-        { pattern: /time\s*off/i, status: 'Time Off' },
-        { pattern: /leave|fmla/i, status: 'Leave' },
-        { pattern: /mt\s*misc/i, status: 'MT Misc' }
+        { pattern: /\blight\s*duty\b/i, status: 'Light Duty' },
+        { pattern: /\bweeds\b/i, status: 'Weeds' },
+        { pattern: /\b(layoff|laid\s*off)\b/i, status: 'Layoff' },
+        { pattern: /\bresigns?\b/i, status: 'Resigned' },
+        { pattern: /\bquits?\b/i, status: 'Quit' },
+        { pattern: /\b(fired|terminated)\b/i, status: 'Fired' },
+        { pattern: /\bvacations?\b/i, status: 'Vacation' },
+        { pattern: /\btime\s*off\b/i, status: 'Time Off' },
+        { pattern: /\b(leave|fmla)\b/i, status: 'Leave' },
+        { pattern: /\bmt\s*misc\b/i, status: 'MT Misc' }
       ];
 
       var matchedStatuses = [];
@@ -7452,44 +7458,59 @@
         }
       }
 
-      // ── Time Off / Leave Auto-Changes ────────────────────────────────────
-      // Employees detected in the Excel's Time Off section (not in any crew) should
-      // automatically get Location set to 'Leave' so the Employees sheet reflects their absence.
-      // This generates a proposed change so the user can review/uncheck it, but doesn't
-      // require manually applying the Step 6 special circumstance card.
+      // ── Special Circumstance Auto-Changes (Time Off, Leave, Quits, Layoffs, etc.) ──────
+      // Employees detected in Excel Special Sections (Time Off, Quits, Layoffs, etc.)
+      // automatically generate proposed changes so the user can review/uncheck them.
       var LEAVE_TYPE_STATUSES = ['Time Off', 'Leave', 'Vacation', 'FMLA'];
-      var ALREADY_LEAVE_LOCATIONS = ['Leave', 'Vacation', 'Light Duty', 'Weeds', 'Previous Employee', 'Unknown'];
+      var TERMINATION_STATUSES = ['Quit', 'Resigned', 'Layoff', 'Fired', 'Terminated', 'Resign'];
+      var SPECIAL_LOC_STATUSES = ['Light Duty', 'Weeds'];
 
       for (var ti = 0; ti < specialCircumstances.length; ti++) {
         var tspec = specialCircumstances[ti];
         if (!tspec) continue;
-        if (LEAVE_TYPE_STATUSES.indexOf(tspec.status) === -1) continue;
 
-        // Skip if this employee is still in a crew card this week (they'll be matched normally)
-        var tIsInCrew = false;
-        for (var tci = 0; tci < parsedCrews.length; tci++) {
-          var tcrew = parsedCrews[tci];
-          for (var tei = 0; tei < tcrew.employees.length; tei++) {
-            var temp = tcrew.employees[tei];
-            if ((temp.name || '').toLowerCase().trim() === (tspec.name || '').toLowerCase().trim()) {
-              tIsInCrew = true;
-              break;
-            }
-            // Also check matched name
-            if (temp.matchedEmployee && temp.matchedEmployee.employeeName &&
-                temp.matchedEmployee.employeeName.toLowerCase() === (tspec.name || '').toLowerCase().trim()) {
-              tIsInCrew = true;
-              break;
-            }
-          }
-          if (tIsInCrew) break;
+        var statusTrimmed = (tspec.status || '').trim();
+        var statusLower = statusTrimmed.toLowerCase();
+
+        var isTermination = (TERMINATION_STATUSES.map(function(s){ return s.toLowerCase(); }).indexOf(statusLower) !== -1);
+        var isLeave = (LEAVE_TYPE_STATUSES.map(function(s){ return s.toLowerCase(); }).indexOf(statusLower) !== -1);
+        var isSpecialLoc = (SPECIAL_LOC_STATUSES.map(function(s){ return s.toLowerCase(); }).indexOf(statusLower) !== -1);
+
+        if (!isTermination && !isLeave && !isSpecialLoc) continue;
+
+        var targetLocation = 'Leave';
+        if (isTermination) {
+          targetLocation = 'Previous Employee';
+        } else if (isSpecialLoc) {
+          targetLocation = statusTrimmed;
+        } else if (statusLower === 'vacation') {
+          targetLocation = 'Vacation';
         }
-        if (tIsInCrew) continue;
 
-        // Find their row on the Employees sheet.
-        // Can't use findBestMatch() here — currentEmployees use .employeeName not .name.
-        // Also clean the spec name: strip trailing annotations like "CDL-B 3", "awhile", etc.
-        // by taking only the first two words (First Last).
+        // For Leave / Time Off, skip if employee is on an active crew card (they'll be matched normally)
+        // BUT for Termination (Quit/Layoff/etc), termination ALWAYS takes precedence over crew matching!
+        if (!isTermination) {
+          var tIsInCrew = false;
+          for (var tci = 0; tci < parsedCrews.length; tci++) {
+            var tcrew = parsedCrews[tci];
+            for (var tei = 0; tei < tcrew.employees.length; tei++) {
+              var temp = tcrew.employees[tei];
+              if ((temp.name || '').toLowerCase().trim() === (tspec.name || '').toLowerCase().trim()) {
+                tIsInCrew = true;
+                break;
+              }
+              if (temp.matchedEmployee && temp.matchedEmployee.employeeName &&
+                  temp.matchedEmployee.employeeName.toLowerCase() === (tspec.name || '').toLowerCase().trim()) {
+                tIsInCrew = true;
+                break;
+              }
+            }
+            if (tIsInCrew) break;
+          }
+          if (tIsInCrew) continue;
+        }
+
+        // Find employee row on Employees sheet
         var rawSpecName = (tspec.name || '').trim();
         var rawParts = rawSpecName.split(/\s+/);
         var cleanSpecName = rawParts.slice(0, 2).join(' ');
@@ -7501,7 +7522,6 @@
         var tMatchConf = 0;
         for (var tei2 = 0; tei2 < currentEmployees.length; tei2++) {
           var tEmp = currentEmployees[tei2];
-          // currentEmployees entries use .name (not .employeeName) and have location/jobNum directly
           var tEmpName = (tEmp.name || '').toLowerCase().trim();
           if (!tEmpName) continue;
           var tEmpParts = tEmpName.split(/\s+/);
@@ -7525,35 +7545,33 @@
         }
 
         if (!tMatchedEmp || tMatchConf < 75) {
-          console.log('Time Off auto-change: No confident match for "' + tspec.name + '" (cleaned: "' + cleanSpecName + '", confidence: ' + tMatchConf + ')');
+          console.log('Special circumstance auto-change: No confident match for "' + tspec.name + '" (cleaned: "' + cleanSpecName + '", confidence: ' + tMatchConf + ')');
           continue;
         }
 
-        // currentEmployees entries have .name, .location, .jobNum, .jobClassification, .rowIndex directly
         var tMatchedName = tMatchedEmp.name;
         var tCurrentLocation = tMatchedEmp.location || '';
         var tCurrentJobNum = tMatchedEmp.jobNum || '';
         var tCurrentClassification = tMatchedEmp.jobClassification || '';
-        // Build a synthetic employeeData for the match object (format expected by doApplyChanges)
         var tEmployeeData = {
           location: tCurrentLocation,
           jobNum: tCurrentJobNum,
           jobClassification: tCurrentClassification,
           rowIndex: tMatchedEmp.rowIndex
         };
-        var tAlreadyAtLeave = isLeaveLocation(tCurrentLocation);
-        var tHas005JobNum = tCurrentJobNum.indexOf('005-') === 0;
 
-        if (tAlreadyAtLeave && tHas005JobNum) {
-          // Already at a leave-type location AND already has a 005- job number — nothing to do
-          console.log('Time Off auto-change: ' + tMatchedName + ' already at "' + tCurrentLocation + '" with 005- job number "' + tCurrentJobNum + '" — skipping');
+        if (isTermination && tCurrentLocation.toLowerCase() === 'previous employee') {
+          console.log('Special circumstance auto-change: ' + tMatchedName + ' already Previous Employee — skipping');
           continue;
         }
 
-        if (tAlreadyAtLeave && !tHas005JobNum) {
-          // Already at Leave but job number is still from their old crew (e.g. 016-26.3).
-          // Generate a job-number-only fix so the server assigns a 005-26.X number.
-          console.log('Time Off auto-change: ' + tMatchedName + ' already at "' + tCurrentLocation + '" but job number "' + tCurrentJobNum + '" needs 005- fix');
+        if (isLeave && isLeaveLocation(tCurrentLocation) && tCurrentJobNum.indexOf('005-') === 0) {
+          console.log('Special circumstance auto-change: ' + tMatchedName + ' already at "' + tCurrentLocation + '" with 005- job number — skipping');
+          continue;
+        }
+
+        if (isLeave && isLeaveLocation(tCurrentLocation) && !tCurrentJobNum.match(/^005-/)) {
+          console.log('Special circumstance auto-change: ' + tMatchedName + ' already at "' + tCurrentLocation + '" but job number "' + tCurrentJobNum + '" needs 005- fix');
           proposedChanges.push({
             employee: { name: tspec.name, isForeman: false },
             crew: null,
@@ -7579,14 +7597,23 @@
           continue;
         }
 
-        // Check if a proposedChange already exists for this employee
+        // Check if a proposedChange ALREADY exists for this employee (e.g. from crew matching)
         var tFoundChange = false;
         for (var tpc = 0; tpc < proposedChanges.length; tpc++) {
           var tchg = proposedChanges[tpc];
           if (tchg.match && tchg.match.employeeName.toLowerCase() === tMatchedName.toLowerCase()) {
-            // Update existing change to also include Leave location
-            if (!tchg.locationChanged) {
-              tchg.newLocation = 'Leave';
+            if (isTermination) {
+              console.log('Termination auto-change: Overriding proposed change for ' + tMatchedName + ' to Previous Employee (was ' + tchg.newLocation + ')');
+              tchg.newLocation = 'Previous Employee';
+              tchg.locationChanged = true;
+              tchg.isTerminationChange = true;
+              tchg.statusBadge = statusTrimmed;
+              tchg.status = statusTrimmed;
+              tchg.date = tspec.date || '';
+              tchg.newJobNumber = '';
+              tchg.jobChanged = (tchg.oldJobNumber !== '');
+            } else if (!tchg.locationChanged) {
+              tchg.newLocation = targetLocation;
               tchg.locationChanged = true;
               tchg.isTimeOffChange = true;
             }
@@ -7596,7 +7623,7 @@
         }
 
         if (!tFoundChange) {
-          console.log('Time Off auto-change: Adding Leave change for ' + tMatchedName + ' (currently ' + tCurrentLocation + ')');
+          console.log('Special circumstance auto-change: Adding ' + targetLocation + ' change for ' + tMatchedName + ' (currently ' + tCurrentLocation + ')');
           proposedChanges.push({
             employee: { name: tspec.name, isForeman: false },
             crew: null,
@@ -7607,15 +7634,19 @@
               source: 'Employees'
             },
             oldLocation: tCurrentLocation,
-            newLocation: 'Leave',
+            newLocation: targetLocation,
             oldJobNumber: tCurrentJobNum,
-            newJobNumber: tCurrentJobNum,
+            newJobNumber: isTermination ? '' : tCurrentJobNum,
             oldClassification: tCurrentClassification,
             newClassification: tCurrentClassification,
-            locationChanged: true,
-            jobChanged: false,
+            locationChanged: (tCurrentLocation !== targetLocation),
+            jobChanged: isTermination ? (tCurrentJobNum !== '') : false,
             classificationChanged: false,
-            isTimeOffChange: true,
+            isTimeOffChange: isLeave,
+            isTerminationChange: isTermination,
+            statusBadge: statusTrimmed,
+            status: statusTrimmed,
+            date: tspec.date || '',
             apply: true
           });
         }
@@ -8049,6 +8080,12 @@
           // Show badge if this is an auto-detected Time Off change (from special circumstances)
           if (ch.isTimeOffChange) {
             html += ' <span class="badge bg-info" title="Detected as Time Off / Leave in Excel — auto-setting Location to Leave">🏥 TIME OFF</span>';
+          }
+
+          // Show badge if this is an auto-detected Termination change (Quit / Layoff / Fired / Resigned)
+          if (ch.isTerminationChange) {
+            var termBadge = (ch.statusBadge || 'Quit').toUpperCase();
+            html += ' <span class="badge bg-danger" title="Detected as ' + escapeHtml(ch.statusBadge || 'Quit') + ' in Excel — setting Location to Previous Employee">🚪 ' + escapeHtml(termBadge) + '</span>';
           }
 
           if (ch.match.confidence < 100) {
