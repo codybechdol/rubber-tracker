@@ -9940,6 +9940,8 @@ function getExistingCrewsForWeek(ss, weekStart, tz) {
     var rowJob = String(row[jobNumberCol] || '').trim();
 
     if (!rowWeekStart || !rowJob) continue;
+    var lowerJob = rowJob.toLowerCase();
+    if (lowerJob === 'job number' || lowerJob === 'job #' || lowerJob === 'job' || lowerJob === 'foreman') continue;
 
     // Match week
     var rowWeekDate = (rowWeekStart instanceof Date) ? rowWeekStart : new Date(rowWeekStart);
@@ -9990,6 +9992,8 @@ function getCrewsWithLogDataForWeek(ss, weekBounds, configCrews) {
         var creditedTo = String(jhaData[i][creditedToCol] || '').trim();
 
         if (!dateCreated || !creditedTo) continue;
+        var lowerCredited = creditedTo.toLowerCase();
+        if (lowerCredited === 'job number' || lowerCredited === 'credited to' || lowerCredited === 'job #') continue;
 
         var d = new Date(dateCreated);
         if (isNaN(d.getTime())) continue;
@@ -16247,6 +16251,49 @@ function masterRecalculateCompliance() {
 }
 
 /**
+ * Removes any stray header rows (e.g. Job Number = "Job Number" or Foreman = "Foreman")
+ * that accidentally got inserted as data rows on the Safety Compliance sheet.
+ *
+ * @returns {number} Count of removed rows
+ */
+function cleanUpHeaderRowsInSafetyCompliance() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Safety Compliance');
+  if (!sheet || sheet.getLastRow() < 2) return 0;
+
+  var data = sheet.getDataRange().getValues();
+  var headers = data[0];
+  var jobCol = -1, foremanCol = -1;
+
+  for (var h = 0; h < headers.length; h++) {
+    var hdr = String(headers[h]).toLowerCase().trim().replace(/\s+/g, '');
+    if (hdr === 'jobnumber' || hdr === 'crew') jobCol = h;
+    if (hdr === 'foreman' || hdr === 'lead') foremanCol = h;
+  }
+
+  if (jobCol === -1) jobCol = 1;
+
+  var rowsToDelete = [];
+  for (var i = data.length - 1; i >= 1; i--) {
+    var jobVal = String(data[i][jobCol] || '').trim().toLowerCase();
+    var foremanVal = foremanCol >= 0 ? String(data[i][foremanCol] || '').trim().toLowerCase() : '';
+
+    if (jobVal === 'job number' || jobVal === 'job #' || jobVal === 'job' || foremanVal === 'foreman') {
+      rowsToDelete.push(i + 1);
+    }
+  }
+
+  if (rowsToDelete.length > 0) {
+    for (var r = 0; r < rowsToDelete.length; r++) {
+      sheet.deleteRow(rowsToDelete[r]);
+    }
+    Logger.log('cleanUpHeaderRowsInSafetyCompliance: Cleaned up ' + rowsToDelete.length + ' invalid header rows');
+  }
+
+  return rowsToDelete.length;
+}
+
+/**
  * Starts the master recalculation process.
  * Fixes log entries, removes non-config crews for the current week,
  * and returns the list of unique weeks to recalculate.
@@ -16255,6 +16302,7 @@ function masterRecalculateCompliance() {
  */
 function startMasterRecalculate() {
   clearComplianceConfigCache();
+  cleanUpHeaderRowsInSafetyCompliance();
 
   const today = new Date();
   const currentWeekBounds = getWeekBoundaries(today);

@@ -512,6 +512,12 @@ function filterCrewsByJobTrackingStartDate(crews, weekEndDate, weekStartDate) {
 
   for (var i = 0; i < crews.length; i++) {
     var crew = crews[i];
+    var lowerCrew = String(crew || '').trim().toLowerCase();
+    if (lowerCrew === 'job number' || lowerCrew === 'job #' || lowerCrew === 'job' || lowerCrew === 'foreman') {
+      excludedCrews.push(crew);
+      continue;
+    }
+
     var startDate = startDates[crew];
     var endDate = endDates[crew];
 
