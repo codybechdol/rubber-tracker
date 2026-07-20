@@ -1849,19 +1849,21 @@ function calculateComplianceFromLogs(weekStartDate, options) {
     Logger.log("calculateComplianceFromLogs: ignoreResolved=true, recalculating ALL crews including Resolved");
   }
 
+  // Load compliance config: Active crews for current week, All crews for past weeks
+  var config = loadComplianceConfig({ includeAll: !isCurrentWeek });
+  var configCrews = Object.keys(config).sort();
+
   var crews = [];
   var historicalForemanMap = {};
 
   if (isCurrentWeek) {
     // CURRENT WEEK: Strictly use ACTIVE crews only from Job Tracking
-    var activeConfig = loadComplianceConfig({ includeAll: false });
-    var activeConfigCrews = Object.keys(activeConfig).sort();
     var activeCrewsFromTrackingData = getActiveCrewsFromJobTracking();
     var activeCrewsFromTracking = activeCrewsFromTrackingData.map(function(c) { return c.jobNumber; });
 
     var crewSet = {};
-    for (var cc = 0; cc < activeConfigCrews.length; cc++) {
-      crewSet[activeConfigCrews[cc]] = true;
+    for (var cc = 0; cc < configCrews.length; cc++) {
+      crewSet[configCrews[cc]] = true;
     }
     for (var ac = 0; ac < activeCrewsFromTracking.length; ac++) {
       if (!crewSet[activeCrewsFromTracking[ac]]) {
@@ -1872,9 +1874,6 @@ function calculateComplianceFromLogs(weekStartDate, options) {
     Logger.log("calculateComplianceFromLogs: Current week - using " + crews.length + " active crews");
   } else {
     // PAST WEEKS: Load all crews (active + completed) and filter by dates active during that historical week
-    var configAll = loadComplianceConfig({ includeAll: true });
-    var configCrews = Object.keys(configAll).sort();
-
     var existingCrewsForWeek = getExistingCrewsForWeek(ss, weekBounds.weekStart, tz);
     var crewsWithLogData = getCrewsWithLogDataForWeek(ss, weekBounds, configCrews);
 
