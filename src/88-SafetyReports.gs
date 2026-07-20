@@ -1849,20 +1849,18 @@ function calculateComplianceFromLogs(weekStartDate, options) {
     Logger.log("calculateComplianceFromLogs: ignoreResolved=true, recalculating ALL crews including Resolved");
   }
 
-  // Load compliance config - this is the authoritative source for CURRENT week crews
-  var config = loadComplianceConfig();
+  // Load ALL compliance config crews (both active and completed) so historical active weeks track completed jobs
+  var config = loadComplianceConfig({ includeAll: true });
   var configCrews = Object.keys(config).sort();
 
   var crews = [];
   var historicalForemanMap = {};
 
   if (isCurrentWeek) {
-    // CURRENT WEEK: Use Config crews PLUS any active crews from Job Tracking that aren't in Config yet
-    // This ensures newly activated crews are automatically included
-    var activeCrewsFromTrackingData = getActiveCrewsFromJobTracking();  // Gets crews directly from Job Tracking with Active status
+    // CURRENT WEEK: Use all config crews (active + completed in current week)
+    var activeCrewsFromTrackingData = getActiveCrewsFromJobTracking();
     var activeCrewsFromTracking = activeCrewsFromTrackingData.map(function(c) { return c.jobNumber; });
 
-    // Merge Config crews with active crews from Job Tracking
     var crewSet = {};
     for (var cc = 0; cc < configCrews.length; cc++) {
       crewSet[configCrews[cc]] = true;
@@ -1870,21 +1868,16 @@ function calculateComplianceFromLogs(weekStartDate, options) {
     for (var ac = 0; ac < activeCrewsFromTracking.length; ac++) {
       if (!crewSet[activeCrewsFromTracking[ac]]) {
         crewSet[activeCrewsFromTracking[ac]] = true;
-        Logger.log("calculateComplianceFromLogs: Adding active crew from Job Tracking (not in Config): " + activeCrewsFromTracking[ac]);
       }
     }
     crews = Object.keys(crewSet).sort();
-    Logger.log("calculateComplianceFromLogs: Current week - using " + crews.length + " crews (Config: " + configCrews.length + ", from Job Tracking: " + activeCrewsFromTracking.length + ")");
+    Logger.log("calculateComplianceFromLogs: Current week - using " + crews.length + " crews");
   } else {
     // PAST WEEKS: Use crews that ALREADY EXIST in Safety Compliance sheet for this week
     // PLUS any crews that have data in the logs for this week (to handle deleted rows)
-    // This preserves historical data even if crews are no longer in Config
     var existingCrewsForWeek = getExistingCrewsForWeek(ss, weekBounds.weekStart, tz);
-
-    // Also get crews that have log data for this week (in case rows were deleted)
     var crewsWithLogData = getCrewsWithLogDataForWeek(ss, weekBounds, configCrews);
 
-    // Merge the two lists, removing duplicates
     var crewSet = {};
     for (var ec = 0; ec < existingCrewsForWeek.length; ec++) {
       crewSet[existingCrewsForWeek[ec]] = true;
@@ -1898,19 +1891,17 @@ function calculateComplianceFromLogs(weekStartDate, options) {
     if (crews.length > 0) {
       Logger.log("calculateComplianceFromLogs: Past week - using " + crews.length + " crews (existing: " + existingCrewsForWeek.length + ", from logs: " + crewsWithLogData.length + ")");
     } else {
-      // If no existing data for this week, use Config crews (first time calculation)
       crews = configCrews;
       Logger.log("calculateComplianceFromLogs: Past week (no existing data) - using " + crews.length + " crews from Config");
     }
   }
 
-  // === FILTER CREWS BY JOB TRACKING START DATE ===
-  // Remove crews whose start date in Job Tracking is AFTER the week being calculated
-  // This prevents adding compliance rows for jobs that hadn't started yet
-  var filterResult = filterCrewsByJobTrackingStartDate(crews, weekBounds.weekEnd);
+  // === FILTER CREWS BY JOB TRACKING START AND END DATES ===
+  // Remove crews that hadn't started yet OR completed in a prior week
+  var filterResult = filterCrewsByJobTrackingStartDate(crews, weekBounds.weekEnd, weekBounds.weekStart);
   if (filterResult.excludedCrews.length > 0) {
     Logger.log("calculateComplianceFromLogs: Excluded " + filterResult.excludedCrews.length +
-               " crews due to Job Tracking start date: " + filterResult.excludedCrews.join(', '));
+               " crews due to Job Tracking start/end dates: " + filterResult.excludedCrews.join(', '));
     crews = filterResult.filteredCrews;
   }
 
@@ -11519,17 +11510,17 @@ function refreshComplianceForemenNames() {
 /**
  * Loads compliance config settings for crews from Job Tracking sheet.
  *
- * NEW STRUCTURE (March 2026): Config is now stored in Job Tracking columns L-T:
- *   L: Skip Sun, M: Skip Mon, N: Skip Tue, O: Skip Wed, P: Skip Thu, Q: Skip Fri, R: Skip Sat
- *   S: Skip Weekly Meeting, T: Skip Monthly Checklist
- *
- * This replaces the separate "Safety Compliance Config" sheet.
- *
+ * @param {Object} [options] - Optional settings (e.g. { includeAll: true })
  * @returns {Object} - Map of job number to config settings
  */
-function loadComplianceConfig() {
+function loadComplianceConfig(options) {
+  var includeAll = (options && options.includeAll) || false;
+
   // Return cached result if available (cleared at start of each top-level operation)
-  if (_complianceConfigCache) {
+  if (includeAll && typeof _complianceConfigCacheAll !== 'undefined' && _complianceConfigCacheAll) {
+    return _complianceConfigCacheAll;
+  }
+  if (!includeAll && typeof _complianceConfigCache !== 'undefined' && _complianceConfigCache) {
     return _complianceConfigCache;
   }
 
@@ -11561,7 +11552,6 @@ function loadComplianceConfig() {
     // Check if old Safety Compliance Config exists
     var oldConfigSheet = ss.getSheetByName("Safety Compliance Config");
     if (oldConfigSheet) {
-      // Alert user that migration is needed
       try {
         SpreadsheetApp.getUi().alert(
           '\u26A0\uFE0F Migration Required',
@@ -11570,7 +11560,6 @@ function loadComplianceConfig() {
           SpreadsheetApp.getUi().ButtonSet.OK
         );
       } catch (e) {
-        // UI not available (running from trigger)
         Logger.log('loadComplianceConfig: Migration required - Safety Compliance Config exists but Job Tracking columns not found');
       }
     }
@@ -11581,13 +11570,12 @@ function loadComplianceConfig() {
   var data = jobSheet.getDataRange().getValues();
   var config = {};
 
-  // Column indices for new structure:
-  // A(0)=Job#, B(1)=Location, C(2)=Foreman, ..., J(9)=Status, K(10)=Notes
-  // L(11)=Skip Sun, M(12)=Skip Mon, N(13)=Skip Tue, O(14)=Skip Wed, P(15)=Skip Thu, Q(16)=Skip Fri, R(17)=Skip Sat
-  // S(18)=Skip Weekly Meeting, T(19)=Skip Monthly Checklist
   var colJobNumber = 0;
   var colForeman = 2;
-  var colStatus = 9;
+  var colStartDate = 4; // E
+  var colEstEndDate = 7; // H
+  var colActualEndDate = 8; // I
+  var colStatus = 9; // J
   var colNotes = 10;
   var colSkipSun = 11;  // L
   var colSkipMon = 12;  // M
@@ -11613,13 +11601,19 @@ function loadComplianceConfig() {
       continue;
     }
 
-    // Only include Active crews (skip Completed, Pending Start, On Hold)
-    if (status !== 'active' && status !== '') {
+    // Only include Active crews unless includeAll is requested
+    if (!includeAll && status !== 'active' && status !== '') {
       continue;
     }
 
+    var rawStartDate = row[colStartDate];
+    var rawActualEndDate = row[colActualEndDate] || row[colEstEndDate];
+
     config[jobNumber] = {
       foreman: row[colForeman] || '',
+      status: status,
+      startDate: rawStartDate ? (rawStartDate instanceof Date ? rawStartDate : parseDateNoon(String(rawStartDate))) : null,
+      actualEndDate: rawActualEndDate ? (rawActualEndDate instanceof Date ? rawActualEndDate : parseDateNoon(String(rawActualEndDate))) : null,
       skipDays: [
         !!row[colSkipSun],  // Sun (index 0)
         !!row[colSkipMon],  // Mon (index 1)
@@ -11635,8 +11629,12 @@ function loadComplianceConfig() {
     };
   }
 
-  Logger.log('loadComplianceConfig: Loaded config for ' + Object.keys(config).length + ' active crews from Job Tracking');
-  _complianceConfigCache = config;
+  Logger.log('loadComplianceConfig: Loaded config for ' + Object.keys(config).length + ' crews (includeAll=' + includeAll + ') from Job Tracking');
+  if (includeAll) {
+    _complianceConfigCacheAll = config;
+  } else {
+    _complianceConfigCache = config;
+  }
   return config;
 }
 
@@ -11647,6 +11645,7 @@ function loadComplianceConfig() {
  */
 function clearComplianceConfigCache() {
   _complianceConfigCache = null;
+  _complianceConfigCacheAll = null;
   _customMappingsCache = null;
   _employeesDataCache = null;
   _jobTrackingDataCache = null;
@@ -16261,7 +16260,7 @@ function startMasterRecalculate() {
   const currentWeekBounds = getWeekBoundaries(today);
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const tz = Session.getScriptTimeZone();
-  const config = loadComplianceConfig();
+  const config = loadComplianceConfig({ includeAll: true });
 
   // Step 1: Fix log entries
   Logger.log('startMasterRecalculate: Step 1 - Fixing log entries...');

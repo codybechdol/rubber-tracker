@@ -441,16 +441,46 @@ function getJobTrackingStartDates() {
   var data = jobTrackingSheet.getDataRange().getValues();
   var result = {};
 
-  // Columns: A=Job Number(0), E=Start Date(4), J=Status(9) (after adding Put On Hold Date and Estimated Return)
+  // Columns: A=Job Number(0), E=Start Date(4), J=Status(9)
   for (var i = 1; i < data.length; i++) {
     var jobNum = String(data[i][0] || '').trim();
     var startDate = data[i][4];
 
     if (!jobNum) continue;
 
-    // Only store if there's a valid start date
     if (startDate instanceof Date && !isNaN(startDate.getTime())) {
       result[jobNum] = startDate;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Gets actual end dates (completion dates) for all jobs in Job Tracking.
+ *
+ * @return {Object} { jobNumber: actualEndDate, ... }
+ */
+function getJobTrackingEndDates() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var jobTrackingSheet = ss.getSheetByName('Job Tracking');
+
+  if (!jobTrackingSheet || jobTrackingSheet.getLastRow() < 2) {
+    return {};
+  }
+
+  var data = jobTrackingSheet.getDataRange().getValues();
+  var result = {};
+
+  // Columns: A=Job Number(0), H=Est End Date(7), I=Actual End Date(8)
+  for (var i = 1; i < data.length; i++) {
+    var jobNum = String(data[i][0] || '').trim();
+    var endDate = data[i][8] || data[i][7];
+
+    if (!jobNum) continue;
+
+    if (endDate instanceof Date && !isNaN(endDate.getTime())) {
+      result[jobNum] = endDate;
     }
   }
 
@@ -461,16 +491,21 @@ function getJobTrackingStartDates() {
  * Filters a list of crews to only include those that were active during a specific week.
  * A crew is considered active during a week if:
  *   1. The job is NOT in Job Tracking (backwards compatibility) OR
- *   2. The job's start date is ON or BEFORE the week's END date
+ *   2. The job's start date is ON or BEFORE the week's END date AND
+ *   3. If completed, the job's actual end date is ON or AFTER the week's START date
  *
  * @param {Array} crews - Array of crew numbers to filter
  * @param {Date} weekEndDate - The end date of the week being calculated
+ * @param {Date} [weekStartDate] - Optional start date of the week being calculated
  * @return {Object} { filteredCrews: Array, excludedCrews: Array }
  */
-function filterCrewsByJobTrackingStartDate(crews, weekEndDate) {
+function filterCrewsByJobTrackingStartDate(crews, weekEndDate, weekStartDate) {
   var startDates = getJobTrackingStartDates();
+  var endDates = getJobTrackingEndDates();
   var weekEnd = new Date(weekEndDate);
   weekEnd.setHours(23, 59, 59, 999);
+  var weekStart = weekStartDate ? new Date(weekStartDate) : null;
+  if (weekStart) weekStart.setHours(0, 0, 0, 0);
 
   var filteredCrews = [];
   var excludedCrews = [];
@@ -478,19 +513,16 @@ function filterCrewsByJobTrackingStartDate(crews, weekEndDate) {
   for (var i = 0; i < crews.length; i++) {
     var crew = crews[i];
     var startDate = startDates[crew];
+    var endDate = endDates[crew];
 
-    if (!startDate) {
-      // Not in Job Tracking - include for backwards compatibility
-      filteredCrews.push(crew);
-    } else if (startDate <= weekEnd) {
-      // Job had started by the end of this week
-      filteredCrews.push(crew);
-    } else {
+    if (startDate && startDate > weekEnd) {
       // Job hadn't started yet during this week - exclude
       excludedCrews.push(crew);
-      Logger.log("filterCrewsByJobTrackingStartDate: Excluding " + crew + " - start date " +
-                 Utilities.formatDate(startDate, Session.getScriptTimeZone(), 'MM/dd/yyyy') +
-                 " is after week end " + Utilities.formatDate(weekEnd, Session.getScriptTimeZone(), 'MM/dd/yyyy'));
+    } else if (weekStart && endDate && endDate < weekStart) {
+      // Job was completed in a prior week before this week started - exclude
+      excludedCrews.push(crew);
+    } else {
+      filteredCrews.push(crew);
     }
   }
 
