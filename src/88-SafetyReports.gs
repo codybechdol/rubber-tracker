@@ -19331,12 +19331,19 @@ function scanForUncreditedLogs() {
       var data = jhaSheet.getRange(2, 1, lastRow - 1, 10).getValues();
       for (var i = 0; i < data.length; i++) {
         var rowNum = i + 2;
+        var dateReceived = data[i][0];
         var dateCreated = data[i][1];
         var jobNum = String(data[i][2] || '').trim();
         var foreman = String(data[i][3] || '').trim();
+        var subject = String(data[i][4] || '').trim();
+        var emailId = String(data[i][5] || '').trim();
         var status = String(data[i][7] || '').trim();
         var creditedTo = String(data[i][8] || '').trim();
-        var subject = String(data[i][4] || '').trim();
+
+        // Skip month headers, section dividers, and empty rows
+        if (isMonthHeaderOrEmptyLogRow(dateReceived, jobNum, foreman, subject, emailId)) {
+          continue;
+        }
 
         if (status !== 'Skipped' && status !== 'Duplicate' && !creditedTo) {
           result.jha.push({
@@ -19359,12 +19366,19 @@ function scanForUncreditedLogs() {
       var data = weeklySheet.getRange(2, 1, lastRow - 1, 9).getValues();
       for (var i = 0; i < data.length; i++) {
         var rowNum = i + 2;
+        var dateReceived = data[i][0];
         var weekOf = data[i][1];
         var jobNum = String(data[i][2] || '').trim();
         var foreman = String(data[i][3] || '').trim();
+        var subject = String(data[i][4] || '').trim();
+        var emailId = String(data[i][5] || '').trim();
         var status = String(data[i][6] || '').trim();
         var creditedTo = String(data[i][7] || '').trim();
-        var subject = String(data[i][4] || '').trim();
+
+        // Skip month headers, section dividers, and empty rows
+        if (isMonthHeaderOrEmptyLogRow(dateReceived, jobNum, foreman, subject, emailId)) {
+          continue;
+        }
 
         if (status !== 'Skipped' && status !== 'Duplicate' && !creditedTo) {
           result.weekly.push({
@@ -19387,12 +19401,19 @@ function scanForUncreditedLogs() {
       var data = monthlySheet.getRange(2, 1, lastRow - 1, 11).getValues();
       for (var i = 0; i < data.length; i++) {
         var rowNum = i + 2;
+        var dateReceived = data[i][0];
         var reportDate = data[i][1];
         var jobNum = String(data[i][2] || '').trim();
         var foreman = String(data[i][3] || '').trim();
+        var subject = String(data[i][5] || '').trim();
+        var emailId = String(data[i][6] || '').trim();
         var status = String(data[i][7] || '').trim();
         var creditedTo = String(data[i][8] || '').trim();
-        var subject = String(data[i][5] || '').trim();
+
+        // Skip month headers, section dividers, and empty rows
+        if (isMonthHeaderOrEmptyLogRow(dateReceived, jobNum, foreman, subject, emailId)) {
+          continue;
+        }
 
         if (status !== 'Skipped' && status !== 'Duplicate' && !creditedTo) {
           result.monthly.push({

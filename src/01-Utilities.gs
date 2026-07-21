@@ -535,3 +535,37 @@ function extractSourceRowFromTaskKey(taskKey) {
   return -1;
 }
 
+/**
+ * Checks if a log sheet row is a month header / section separator or empty row that should be ignored.
+ *
+ * @param {string|Date} dateVal - Column A text or date
+ * @param {string} jobNum - Original job number
+ * @param {string} foreman - Foreman name
+ * @param {string} subject - Email subject / report title
+ * @param {string} emailId - Gmail Message ID
+ * @returns {boolean} True if the row is a month header, separator, or blank row
+ */
+function isMonthHeaderOrEmptyLogRow(dateVal, jobNum, foreman, subject, emailId) {
+  var dStr = String(dateVal || '').trim();
+  var jStr = String(jobNum || '').trim();
+  var fStr = String(foreman || '').trim();
+  var sStr = String(subject || '').trim();
+  var eStr = String(emailId || '').trim();
+
+  // If job number, foreman, subject, and email ID are all empty, it is a section divider or empty row
+  if (!jStr && !fStr && !sStr && !eStr) {
+    return true;
+  }
+
+  // Check if dateVal or Column A string matches a Month Year header pattern (e.g., "July 2026", "— Unknown —")
+  if (!jStr && !fStr) {
+    if (/^(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}$/i.test(dStr) ||
+        /^[\s—\-]*Unknown[\s—\-]*$/i.test(dStr) ||
+        /^Header/i.test(dStr)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
