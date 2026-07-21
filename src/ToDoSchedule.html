@@ -4695,8 +4695,11 @@
         } else {
           message += 'Class starts on (start date) and the last day is (end date). ';
         }
-        message += 'There will be ' + classSize + ' other employee' + (parseInt(classSize) > 1 ? 's' : '') + ' in the class with you so you guys will need to work out a time to run the skills portion when you are done. ';
-        message += 'Let me know if you have any questions!';
+        var empText = (parseInt(classSize) === 1 ? '1 other employee' : (classSize + ' other employees'));
+        message += 'There will be ' + empText + ' in the class with you and I cannot complete the class until everyone has finished with the online portion. ';
+        message += 'Don\'t be the guy that makes everyone else wait. ';
+        message += 'The class is through Red Cross but the invitation email will come from "Sales Force". ';
+        message += 'If you don\'t see it double check your spam folder. If you still don\'t see it, let me know.';
       } else if (classType === 'InPersonMPC') {
         message = 'Hi ' + firstName + ', I have you scheduled for the In Person class with me. ';
         if (startDate) {
