@@ -246,7 +246,9 @@
         const fn = cleanCsvField(e.firstName);
         const ln = cleanCsvField(e.lastName);
         const email = cleanCsvField(e.email || '');
-        const phone = cleanCsvField(e.phone || '');
+        let rawPhone = String(e.phone || '').replace(/\D/g, '');
+        if (rawPhone.length === 11 && rawPhone.startsWith('1')) rawPhone = rawPhone.substring(1);
+        const phone = cleanCsvField(rawPhone);
         csvLines.push(`${fn},${ln},${email},${phone}`);
       });
 

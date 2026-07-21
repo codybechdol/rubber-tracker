@@ -2504,7 +2504,12 @@ function getRedCrossCprData() {
 
     // Email priority: EMAIL || MP_EMAIL || NOTIFICATION_EMAILS
     var email = String(row[emailCol] || row[mpEmailCol] || row[notifEmailCol] || '').trim();
-    var phone = String(row[phoneCol] || '').trim();
+    var rawPhone = String(row[phoneCol] || '').trim();
+    // Format phone as digits only (no parens, dashes, or spaces)
+    var phone = rawPhone.replace(/\D/g, '');
+    if (phone.length === 11 && phone.indexOf('1') === 0) {
+      phone = phone.substring(1);
+    }
 
     // Check Cert Expirations
     var empKey = rawName.toLowerCase();
