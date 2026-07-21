@@ -71,18 +71,20 @@
     </button>
     <div class="sub-actions">
       <button class="quick-btn sub-btn" onclick="runQuick('showAssignCrewLeadsDialog', 'Assign Crew Leads', 'Opening Crew Lead assignments...')">👷 Assign Crew Leads</button>
-      <button class="quick-btn sub-btn" onclick="runQuick('showExpiringCertsImportDialog', 'Import Expiring Certs', 'Opening Certs Import...')">📜 Import Expiring Certs</button>
       <button class="quick-btn sub-btn" onclick="runQuick('reviewNewLocations', 'Review New Locations', 'Checking locations...')">🔍 Review New Locations</button>
       <button class="quick-btn sub-btn" onclick="runQuick('refreshDriveTimesFromGoogleMaps', 'Refresh Drive Times', 'Querying drive times...')">🗺️ Refresh Drive Times</button>
     </div>
   </div>
 
-  <!-- STEP 2: Sync Crews -->
+  <!-- STEP 2: Import Expiring Certs -->
   <div class="step-container">
-    <button class="step-btn" id="step2" onclick="runStep(2, 'menuSyncCrews')">
+    <button class="step-btn" id="step2" onclick="runQuick('showExpiringCertsChoiceDialog', 'Import Expiring Certs', 'Opening Certs Management...')">
       <span class="step-num"><span>2</span></span>
-      <div class="step-text">🔄 Sync Crews<div class="step-subtitle">Update foremen & schedules in Job Tracking</div></div>
+      <div class="step-text">📜 Import Expiring Certs<div class="step-subtitle">Upload & refresh expiring cert records</div></div>
     </button>
+    <div class="sub-actions">
+      <button class="quick-btn sub-btn" onclick="runQuick('showRedCrossCprDialog', 'Red Cross CPR Roster', 'Opening Red Cross Roster...')">🚑 Red Cross CPR CSV</button>
+    </div>
   </div>
 
   <!-- STEP 3: Generate All Reports -->

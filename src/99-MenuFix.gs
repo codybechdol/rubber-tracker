@@ -180,6 +180,7 @@ function _buildGloveManagerMenu() {
           .addItem('🕐 Setup Auto December Updates', 'setupAutoDecemberUpdates')
           .addItem('📊 Recalculate Training Completion %', 'recalculateAllTrainingCompletionStatus')
           .addItem('📊 Generate Compliance Report', 'generateTrainingComplianceReport')
+          .addItem('🚑 Red Cross CPR CSV Roster', 'showRedCrossCprDialog')
           .addItem('🔄 Sync Training Tracking with Config', 'syncTrainingTrackingWithConfig')
           .addItem('🔍 Debug Training Config', 'debugTrainingConfig'))
         .addSubMenu(ui.createMenu('👷 Crew Visit')

@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <title>Red Cross CPR & 1st Aid Roster</title>
+  <style>
+    * { box-sizing: border-box; font-family: 'Google Sans', Roboto, Arial, sans-serif; }
+    body { margin: 0; padding: 20px; background-color: #f8f9fa; color: #202124; }
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; background: white; padding: 16px 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .header h2 { margin: 0; font-size: 20px; color: #d93025; display: flex; align-items: center; gap: 8px; }
+    .header-desc { font-size: 13px; color: #5f6368; margin-top: 4px; }
+    
+    .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+    .search-box { flex: 1; min-width: 240px; position: relative; }
+    .search-box input { width: 100%; padding: 10px 14px; border: 1px solid #dadce0; border-radius: 6px; font-size: 14px; outline: none; }
+    .search-box input:focus { border-color: #1a73e8; box-shadow: 0 0 0 2px rgba(26,115,232,0.2); }
+
+    .btn-group { display: flex; gap: 8px; }
+    .btn { padding: 9px 16px; font-size: 13px; font-weight: 500; border-radius: 6px; cursor: pointer; border: 1px solid #dadce0; background: white; color: #3c4043; transition: all 0.15s ease; display: inline-flex; align-items: center; gap: 6px; }
+    .btn:hover { background: #f1f3f4; border-color: #bdc1c6; }
+    .btn-primary { background: #d93025; color: white; border: none; }
+    .btn-primary:hover { background: #b3261e; }
+    .btn-secondary { background: #1a73e8; color: white; border: none; }
+    .btn-secondary:hover { background: #1557b0; }
+
+    .stats-bar { background: #e8f0fe; color: #1a73e8; padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 500; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+
+    .table-container { background: white; border-radius: 8px; border: 1px solid #dadce0; max-height: 480px; overflow-y: auto; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
+    th { position: sticky; top: 0; background: #f1f3f4; z-index: 10; padding: 10px 12px; font-weight: 600; color: #3c4043; border-bottom: 1px solid #dadce0; }
+    td { padding: 10px 12px; border-bottom: 1px solid #f1f3f4; color: #202124; }
+    tr:hover { background-color: #f8f9fa; }
+    tr.selected { background-color: #fce8e6; }
+
+    .badge { padding: 3px 8px; border-radius: 12px; font-size: 11px; font-weight: 500; display: inline-block; }
+    .badge-expiring { background: #fce8e6; color: #c5221f; }
+    .badge-scheduled { background: #feefc3; color: #b06000; }
+    .badge-ok { background: #e6f4ea; color: #137333; }
+    .badge-none { background: #f1f3f4; color: #5f6368; }
+
+    .missing-info { color: #d93025; font-style: italic; }
+    .loading-overlay { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px; color: #5f6368; }
+    .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #d93025; border-radius: 50%; width: 28px; height: 28px; animation: spin 1s linear infinite; margin-bottom: 12px; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div>
+      <h2>🚑 Red Cross CPR & 1st Aid Class Roster</h2>
+      <div class="header-desc">Export employee roster CSV formatted for uploading to the Red Cross website</div>
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-secondary" onclick="copyCsvToClipboard()">📋 Copy CSV</button>
+      <button class="btn btn-primary" onclick="downloadCsv()">📥 Download CSV</button>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <div class="search-box">
+      <input type="text" id="searchInput" placeholder="🔍 Search name, location, or job #..." oninput="filterTable()">
+    </div>
+    <div class="btn-group">
+      <button class="btn" onclick="selectExpiringOrScheduled()" title="Pre-select employees who have expiring certs or are scheduled">⚡ Pre-Select CPR Candidates</button>
+      <button class="btn" onclick="selectAll(true)">☑️ Select All</button>
+      <button class="btn" onclick="selectAll(false)">☐ Deselect All</button>
+    </div>
+  </div>
+
+  <div class="stats-bar" id="statsBar">
+    <span>Selected: <strong id="selectedCount">0</strong> / <span id="totalCount">0</span> employees</span>
+    <span id="missingNotice" style="display:none; color:#c5221f;">⚠️ Some selected employees are missing Email or Phone</span>
+  </div>
+
+  <div class="table-container">
+    <div id="loading" class="loading-overlay">
+      <div class="spinner"></div>
+      <div>Loading employee records & CPR status...</div>
+    </div>
+
+    <table id="employeeTable" style="display:none;">
+      <thead>
+        <tr>
+          <th style="width:40px; text-align:center;"><input type="checkbox" id="masterCheckbox" onchange="toggleMasterCheckbox(this)"></th>
+          <th>First Name</th>
+          <th>Last Name</th>
+          <th>Email Address</th>
+          <th>Phone Number</th>
+          <th>Location / Job</th>
+          <th>CPR / 1st Aid Status</th>
+        </tr>
+      </thead>
+      <tbody id="employeeTableBody">
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    let employeesData = [];
+
+    window.onload = function() {
+      google.script.run
+        .withSuccessHandler(renderEmployees)
+        .withFailureHandler(handleError)
+        .getRedCrossCprData();
+    };
+
+    function renderEmployees(data) {
+      employeesData = data || [];
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('employeeTable').style.display = 'table';
+      
+      const tbody = document.getElementById('employeeTableBody');
+      tbody.innerHTML = '';
+
+      if (employeesData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding: 20px;">No employee records found.</td></tr>';
+        updateStats();
+        return;
+      }
+
+      employeesData.forEach((emp, index) => {
+        const tr = document.createElement('tr');
+        tr.id = 'emp-row-' + index;
+        if (emp.selected) tr.classList.add('selected');
+
+        let statusBadge = '<span class="badge badge-none">No Data</span>';
+        if (emp.isScheduled) {
+          statusBadge = '<span class="badge badge-scheduled">📅 Scheduled</span>';
+        } else if (emp.isExpiringSoon) {
+          statusBadge = '<span class="badge badge-expiring">⚠️ Expiring / Overdue</span>';
+        } else if (emp.cprExpDate || emp.firstAidExpDate) {
+          statusBadge = `<span class="badge badge-ok">✅ CPR: ${emp.cprExpDate || 'OK'}</span>`;
+        }
+
+        const emailDisplay = emp.email ? emp.email : '<span class="missing-info">Missing Email</span>';
+        const phoneDisplay = emp.phone ? emp.phone : '<span class="missing-info">Missing Phone</span>';
+
+        tr.innerHTML = `
+          <td style="text-align:center;">
+            <input type="checkbox" class="emp-checkbox" data-index="${index}" ${emp.selected ? 'checked' : ''} onchange="toggleEmployeeSelection(${index}, this.checked)">
+          </td>
+          <td><strong>${escapeHtml(emp.firstName)}</strong></td>
+          <td><strong>${escapeHtml(emp.lastName)}</strong></td>
+          <td>${emailDisplay}</td>
+          <td>${phoneDisplay}</td>
+          <td>${escapeHtml(emp.location || '')} ${emp.jobNumber ? '(' + escapeHtml(emp.jobNumber) + ')' : ''}</td>
+          <td>${statusBadge}</td>
+        `;
+
+        tbody.appendChild(tr);
+      });
+
+      updateStats();
+    }
+
+    function toggleEmployeeSelection(index, checked) {
+      if (employeesData[index]) {
+        employeesData[index].selected = checked;
+        const tr = document.getElementById('emp-row-' + index);
+        if (tr) {
+          if (checked) tr.classList.add('selected');
+          else tr.classList.remove('selected');
+        }
+      }
+      updateStats();
+    }
+
+    function toggleMasterCheckbox(master) {
+      const visibleCheckboxes = document.querySelectorAll('#employeeTableBody tr:not([style*="display: none"]) .emp-checkbox');
+      visibleCheckboxes.forEach(cb => {
+        cb.checked = master.checked;
+        const idx = parseInt(cb.getAttribute('data-index'), 10);
+        toggleEmployeeSelection(idx, master.checked);
+      });
+    }
+
+    function selectAll(checked) {
+      document.getElementById('masterCheckbox').checked = checked;
+      employeesData.forEach((emp, idx) => {
+        emp.selected = checked;
+        const cb = document.querySelector(`.emp-checkbox[data-index="${idx}"]`);
+        if (cb) cb.checked = checked;
+        const tr = document.getElementById('emp-row-' + idx);
+        if (tr) {
+          if (checked) tr.classList.add('selected');
+          else tr.classList.remove('selected');
+        }
+      });
+      updateStats();
+    }
+
+    function selectExpiringOrScheduled() {
+      document.getElementById('masterCheckbox').checked = false;
+      employeesData.forEach((emp, idx) => {
+        const shouldSelect = emp.isExpiringSoon || emp.isScheduled;
+        emp.selected = shouldSelect;
+        const cb = document.querySelector(`.emp-checkbox[data-index="${idx}"]`);
+        if (cb) cb.checked = shouldSelect;
+        const tr = document.getElementById('emp-row-' + idx);
+        if (tr) {
+          if (shouldSelect) tr.classList.add('selected');
+          else tr.classList.remove('selected');
+        }
+      });
+      updateStats();
+    }
+
+    function filterTable() {
+      const query = document.getElementById('searchInput').value.toLowerCase().trim();
+      employeesData.forEach((emp, idx) => {
+        const tr = document.getElementById('emp-row-' + idx);
+        if (!tr) return;
+        const matchName = (emp.firstName + ' ' + emp.lastName).toLowerCase().includes(query);
+        const matchLoc = (emp.location || '').toLowerCase().includes(query);
+        const matchJob = (emp.jobNumber || '').toLowerCase().includes(query);
+        const matchEmail = (emp.email || '').toLowerCase().includes(query);
+
+        if (matchName || matchLoc || matchJob || matchEmail) {
+          tr.style.display = '';
+        } else {
+          tr.style.display = 'none';
+        }
+      });
+    }
+
+    function updateStats() {
+      const selected = employeesData.filter(e => e.selected);
+      document.getElementById('selectedCount').innerText = selected.length;
+      document.getElementById('totalCount').innerText = employeesData.length;
+
+      const missingData = selected.some(e => !e.email || !e.phone);
+      document.getElementById('missingNotice').style.display = missingData ? 'inline' : 'none';
+    }
+
+    function getSelectedCsvContent() {
+      const selected = employeesData.filter(e => e.selected);
+      if (selected.length === 0) return null;
+
+      // Red Cross header: First Name,Last Name,Email,Phone Number
+      let csvLines = ['First Name,Last Name,Email,Phone Number'];
+
+      selected.forEach(e => {
+        const fn = cleanCsvField(e.firstName);
+        const ln = cleanCsvField(e.lastName);
+        const email = cleanCsvField(e.email || '');
+        const phone = cleanCsvField(e.phone || '');
+        csvLines.push(`${fn},${ln},${email},${phone}`);
+      });
+
+      return csvLines.join('\n');
+    }
+
+    function cleanCsvField(str) {
+      if (!str) return '';
+      let val = String(str).trim();
+      if (val.includes(',') || val.includes('"') || val.includes('\n')) {
+        val = '"' + val.replace(/"/g, '""') + '"';
+      }
+      return val;
+    }
+
+    function downloadCsv() {
+      const csvContent = getSelectedCsvContent();
+      if (!csvContent) {
+        alert('Please select at least one employee to export.');
+        return;
+      }
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `Red_Cross_CPR_Roster_${formatTodayDate()}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    function copyCsvToClipboard() {
+      const csvContent = getSelectedCsvContent();
+      if (!csvContent) {
+        alert('Please select at least one employee to copy.');
+        return;
+      }
+
+      navigator.clipboard.writeText(csvContent).then(() => {
+        alert('CSV content copied to clipboard successfully!');
+      }).catch(err => {
+        alert('Failed to copy to clipboard: ' + err);
+      });
+    }
+
+    function formatTodayDate() {
+      const d = new Date();
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function handleError(err) {
+      document.getElementById('loading').style.display = 'none';
+      alert('Error loading employee roster: ' + err);
+    }
+  </script>
+</body>
+</html>

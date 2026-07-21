@@ -2396,6 +2396,161 @@ function showExpiringCertsImportDialog() {
 }
 
 /**
+ * Shows the Red Cross CPR Roster CSV export dialog.
+ */
+function showRedCrossCprDialog() {
+  var html = HtmlService.createHtmlOutputFromFile('RedCrossCprDialog')
+    .setWidth(950)
+    .setHeight(750);
+  SpreadsheetApp.getUi().showModalDialog(html, '🚑 Red Cross CPR & 1st Aid Class Roster');
+}
+
+/**
+ * Retrieves employee roster data formatted for the Red Cross CPR CSV export dialog.
+ * Cross-references Employees sheet with Expiring Certs and Task Metadata.
+ *
+ * @returns {Array<Object>} List of employee objects with first/last name, email, phone, location, CPR status
+ */
+function getRedCrossCprData() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var empSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+
+  if (!empSheet || empSheet.getLastRow() < 2) {
+    return [];
+  }
+
+  var empData = empSheet.getDataRange().getValues();
+  
+  var nameCol = COLS.EMPLOYEES.NAME - 1;              // 0 (A)
+  var locationCol = COLS.EMPLOYEES.LOCATION - 1;      // 2 (C)
+  var jobNumCol = COLS.EMPLOYEES.JOB_NUMBER - 1;        // 3 (D)
+  var phoneCol = COLS.EMPLOYEES.PHONE - 1;            // 4 (E)
+  var notifEmailCol = COLS.EMPLOYEES.NOTIFICATION_EMAILS - 1; // 5 (F)
+  var mpEmailCol = COLS.EMPLOYEES.MP_EMAIL - 1;       // 6 (G)
+  var emailCol = COLS.EMPLOYEES.EMAIL - 1;            // 7 (H)
+
+  // Map CPR / 1st Aid expiration dates from Expiring Certs sheet if available
+  var certsMap = {};
+  var certsSheet = ss.getSheetByName('Expiring Certs');
+  if (certsSheet && certsSheet.getLastRow() >= 2) {
+    var certsData = certsSheet.getDataRange().getValues();
+    var certsHeader = certsData[0];
+    var c1stAidIdx = -1;
+    var cCprIdx = -1;
+    for (var c = 0; c < certsHeader.length; c++) {
+      var hdr = String(certsHeader[c]).toLowerCase().trim();
+      if (hdr === '1st aid' || hdr === 'first aid') c1stAidIdx = c;
+      if (hdr === 'cpr') cCprIdx = c;
+    }
+
+    for (var cr = 1; cr < certsData.length; cr++) {
+      var cName = String(certsData[cr][0] || '').toLowerCase().trim();
+      if (!cName) continue;
+      certsMap[cName] = {
+        firstAid: c1stAidIdx >= 0 ? certsData[cr][c1stAidIdx] : null,
+        cpr: cCprIdx >= 0 ? certsData[cr][cCprIdx] : null
+      };
+    }
+  }
+
+  // Map scheduled CPR/1st Aid tasks from Task Metadata sheet
+  var scheduledMap = {};
+  var taskMetaSheet = ss.getSheetByName('Task Metadata');
+  if (taskMetaSheet && taskMetaSheet.getLastRow() >= 2) {
+    var metaData = taskMetaSheet.getDataRange().getValues();
+    for (var m = 1; m < metaData.length; m++) {
+      var mEmp = String(metaData[m][3] || '').toLowerCase().trim();
+      var mType = String(metaData[m][4] || '').toLowerCase().trim();
+      var mItem = String(metaData[m][5] || '').toLowerCase().trim();
+      var mStatus = String(metaData[m][14] || '').trim();
+
+      if (mStatus !== 'Complete' && mStatus !== 'Completed') {
+        if (mType.indexOf('cpr') !== -1 || mItem.indexOf('cpr') !== -1 || mType.indexOf('1st aid') !== -1 || mItem.indexOf('1st aid') !== -1) {
+          if (mEmp) scheduledMap[mEmp] = true;
+        }
+      }
+    }
+  }
+
+  var now = new Date();
+  var sixtyDaysFromNow = new Date(now.getTime() + (60 * 24 * 60 * 60 * 1000));
+  var result = [];
+
+  for (var i = 1; i < empData.length; i++) {
+    var row = empData[i];
+    var rawName = String(row[nameCol] || '').trim();
+    if (!rawName) continue;
+
+    var location = String(row[locationCol] || '').trim();
+    var jobNumber = String(row[jobNumCol] || '').trim();
+
+    // Skip previous employees
+    if (location.toLowerCase() === 'previous employee' || isStatusLocation(location)) {
+      if (location.toLowerCase() === 'previous employee') continue;
+    }
+
+    // Parse First Name & Last Name
+    var firstName = '';
+    var lastName = '';
+    if (rawName.indexOf(',') !== -1) {
+      var parts = rawName.split(',');
+      lastName = parts[0].trim();
+      firstName = parts.slice(1).join(' ').trim();
+    } else {
+      var parts = rawName.split(/\s+/);
+      firstName = parts[0].trim();
+      lastName = parts.slice(1).join(' ').trim();
+    }
+
+    // Email priority: EMAIL || MP_EMAIL || NOTIFICATION_EMAILS
+    var email = String(row[emailCol] || row[mpEmailCol] || row[notifEmailCol] || '').trim();
+    var phone = String(row[phoneCol] || '').trim();
+
+    // Check Cert Expirations
+    var empKey = rawName.toLowerCase();
+    var certInfo = certsMap[empKey] || {};
+    var cprDate = certInfo.cpr;
+    var faDate = certInfo.firstAid;
+
+    var isScheduled = !!scheduledMap[empKey];
+    var isExpiringSoon = false;
+
+    var formatCertDate = function(dt) {
+      if (!dt) return '';
+      if (dt instanceof Date && !isNaN(dt.getTime())) {
+        if (dt < sixtyDaysFromNow) isExpiringSoon = true;
+        return Utilities.formatDate(dt, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+      }
+      return String(dt);
+    };
+
+    var cprExpStr = formatCertDate(cprDate);
+    var faExpStr = formatCertDate(faDate);
+
+    // Default selection: pre-select if scheduled or expiring soon
+    var selected = isScheduled || isExpiringSoon;
+
+    result.push({
+      id: i,
+      name: rawName,
+      firstName: firstName,
+      lastName: lastName,
+      email: email,
+      phone: phone,
+      location: location,
+      jobNumber: jobNumber,
+      cprExpDate: cprExpStr,
+      firstAidExpDate: faExpStr,
+      isScheduled: isScheduled,
+      isExpiringSoon: isExpiringSoon,
+      selected: selected
+    });
+  }
+
+  return result;
+}
+
+/**
  * Gets certification type defaults including non-expiring certs and default checked certs.
  * @return {Object} Configuration object with cert types, defaults, and mappings
  */
