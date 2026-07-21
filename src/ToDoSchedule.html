@@ -4755,13 +4755,28 @@
         return;
       }
 
-      // Mark as scheduled - also mark related 1st Aid/CPR certs for same employee
+      // Mark as scheduled AND notified - also mark related 1st Aid/CPR certs for same employee
       var key = getTaskKey(task);
       scheduledTasks[key] = true;
+      notifiedTasks[key] = true;
       classTypeTasks[key] = classType;
+
       markRelatedCertsScheduled(task, classType);
+      markRelatedCertsNotified(task);
+
       saveScheduledToStorage();
+      saveNotifiedToStorage();
       saveClassTypeToStorage();
+
+      // Update Task Metadata on server if taskKey exists
+      var tKey = task.taskKey || (task.sheetName ? (task.sheetName + '_' + task.rowIndex) : '');
+      if (tKey) {
+        var startDate = document.getElementById('scheduledStartDate').value;
+        google.script.run.scheduleTask(tKey, startDate, 'Assigned');
+        google.script.run.updateTaskMetadata(tKey, { NotifiedDate: formatDateMMDDYYYY(new Date()) });
+      } else if (task.employee && (task.certType || task.itemType)) {
+        google.script.run.markCertNotifiedAndReload(task.employee, task.certType || task.itemType);
+      }
 
       // Open SMS link
       // Clean phone number - remove all non-digit characters for SMS URL
@@ -4772,11 +4787,12 @@
 
       // Close modal and refresh
       var modal = bootstrap.Modal.getInstance(document.getElementById('smsScheduledModal'));
-      modal.hide();
+      if (modal) modal.hide();
 
       showToast('✓ Opening messaging app for class registration...');
       renderTasks(allTasks);
       renderPersonalChecklist();
+      renderExpiringCerts();
     }
 
     // Mark Crane Cert as Registered (employee will attend class)
@@ -4873,70 +4889,90 @@
     // Helper function to mark related 1st Aid and CPR certs for the same employee
     function markRelatedCertsNotified(task) {
       var employee = (task.employee || '').toLowerCase();
-      var taskItemType = (task.itemType || '').toLowerCase();
+      var empClean = employee.replace(/\s+/g, '_');
+      var taskItemType = (task.itemType || task.certType || '').toLowerCase();
+
+      // Always set card-level key for this cert
+      var directCertKey = (employee + '_' + (task.certType || task.itemType || '')).toLowerCase().replace(/\s+/g, '_');
+      notifiedTasks[directCertKey] = true;
 
       // Check if this is a 1st Aid or CPR cert
       var is1stAidOrCPR = taskItemType.indexOf('1st aid') !== -1 ||
                           taskItemType.indexOf('first aid') !== -1 ||
                           taskItemType.indexOf('cpr') !== -1;
 
-      if (!is1stAidOrCPR || !employee) return;
+      if (is1stAidOrCPR && employee) {
+        notifiedTasks[empClean + '_cpr'] = true;
+        notifiedTasks[empClean + '_1st_aid'] = true;
+        notifiedTasks[empClean + '_first_aid'] = true;
 
-      // Find all related cert tasks for this employee and mark them as notified
-      allTasks.forEach(function(t) {
-        var tEmployee = (t.employee || '').toLowerCase();
-        var tItemType = (t.itemType || '').toLowerCase();
-        var tSource = (t.source || '').toLowerCase();
+        // Find all related cert tasks for this employee and mark them as notified
+        allTasks.forEach(function(t) {
+          var tEmployee = (t.employee || '').toLowerCase();
+          var tItemType = (t.itemType || '').toLowerCase();
+          var tSource = (t.source || '').toLowerCase();
 
-        // Check if same employee and is a cert task
-        if (tEmployee === employee && tSource.indexOf('cert') !== -1) {
-          // Check if it's a 1st Aid or CPR cert
-          var tIs1stAidOrCPR = tItemType.indexOf('1st aid') !== -1 ||
-                               tItemType.indexOf('first aid') !== -1 ||
-                               tItemType.indexOf('cpr') !== -1;
+          if (tEmployee === employee && tSource.indexOf('cert') !== -1) {
+            var tIs1stAidOrCPR = tItemType.indexOf('1st aid') !== -1 ||
+                                 tItemType.indexOf('first aid') !== -1 ||
+                                 tItemType.indexOf('cpr') !== -1;
 
-          if (tIs1stAidOrCPR) {
-            var key = getTaskKey(t);
-            notifiedTasks[key] = true;
+            if (tIs1stAidOrCPR) {
+              var key = getTaskKey(t);
+              notifiedTasks[key] = true;
+            }
           }
-        }
-      });
+        });
+      }
     }
 
     // Helper function to mark related 1st Aid and CPR certs for the same employee as scheduled
     function markRelatedCertsScheduled(task, classType) {
       var employee = (task.employee || '').toLowerCase();
-      var taskItemType = (task.itemType || '').toLowerCase();
+      var empClean = employee.replace(/\s+/g, '_');
+      var taskItemType = (task.itemType || task.certType || '').toLowerCase();
+
+      // Always set card-level key for this cert
+      var directCertKey = (employee + '_' + (task.certType || task.itemType || '')).toLowerCase().replace(/\s+/g, '_');
+      scheduledTasks[directCertKey] = true;
+      if (classType) classTypeTasks[directCertKey] = classType;
 
       // Check if this is a 1st Aid or CPR cert
       var is1stAidOrCPR = taskItemType.indexOf('1st aid') !== -1 ||
                           taskItemType.indexOf('first aid') !== -1 ||
                           taskItemType.indexOf('cpr') !== -1;
 
-      if (!is1stAidOrCPR || !employee) return;
+      if (is1stAidOrCPR && employee) {
+        scheduledTasks[empClean + '_cpr'] = true;
+        scheduledTasks[empClean + '_1st_aid'] = true;
+        scheduledTasks[empClean + '_first_aid'] = true;
+        if (classType) {
+          classTypeTasks[empClean + '_cpr'] = classType;
+          classTypeTasks[empClean + '_1st_aid'] = classType;
+          classTypeTasks[empClean + '_first_aid'] = classType;
+        }
 
-      // Find all related cert tasks for this employee and mark them as scheduled
-      allTasks.forEach(function(t) {
-        var tEmployee = (t.employee || '').toLowerCase();
-        var tItemType = (t.itemType || '').toLowerCase();
-        var tSource = (t.source || '').toLowerCase();
+        // Find all related cert tasks for this employee and mark them as scheduled
+        allTasks.forEach(function(t) {
+          var tEmployee = (t.employee || '').toLowerCase();
+          var tItemType = (t.itemType || '').toLowerCase();
+          var tSource = (t.source || '').toLowerCase();
 
-        // Check if same employee and is a cert task
-        if (tEmployee === employee && tSource.indexOf('cert') !== -1) {
-          // Check if it's a 1st Aid or CPR cert
-          var tIs1stAidOrCPR = tItemType.indexOf('1st aid') !== -1 ||
-                               tItemType.indexOf('first aid') !== -1 ||
-                               tItemType.indexOf('cpr') !== -1;
+          if (tEmployee === employee && tSource.indexOf('cert') !== -1) {
+            var tIs1stAidOrCPR = tItemType.indexOf('1st aid') !== -1 ||
+                                 tItemType.indexOf('first aid') !== -1 ||
+                                 tItemType.indexOf('cpr') !== -1;
 
-          if (tIs1stAidOrCPR) {
-            var key = getTaskKey(t);
-            scheduledTasks[key] = true;
-            if (classType) {
-              classTypeTasks[key] = classType;
+            if (tIs1stAidOrCPR) {
+              var key = getTaskKey(t);
+              scheduledTasks[key] = true;
+              if (classType) {
+                classTypeTasks[key] = classType;
+              }
             }
           }
-        }
-      });
+        });
+      }
     }
 
     function sendNotifySMS() {
@@ -5054,6 +5090,7 @@
       showToast('✓ Opening messaging app...');
       renderTasks(allTasks);
       renderPersonalChecklist();
+      renderExpiringCerts();
     }
 
     // Open notify modal for a localStorage checklist item
