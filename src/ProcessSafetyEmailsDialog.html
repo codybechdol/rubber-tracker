@@ -212,6 +212,10 @@
   </div>
 
   <script>
+    var currentReportTypeFilter = "<?= typeof initialReportType !== 'undefined' ? initialReportType : 'ALL' ?>";
+    if (!currentReportTypeFilter || currentReportTypeFilter.indexOf("<?") !== -1 || currentReportTypeFilter.indexOf("undefined") !== -1) {
+      currentReportTypeFilter = "ALL";
+    }
     var currentDays = 7;
     var newOnlyMode = true;
     var isFirstCall = true;
@@ -429,14 +433,14 @@
         status.innerHTML = "🔍 Searching Gmail for safety emails (" + modeText + ")" + fastModeText + "...";
         document.getElementById("complianceSection").style.display = "none";
 
-        console.log("Calling google.script.run.processSafetyEmails with batch size 5 and fastMode=" + fastMode);
+        console.log("Calling google.script.run.processSafetyEmails with batch size 5, fastMode=" + fastMode + ", filter=" + currentReportTypeFilter);
         var runNormalCall = function() {
           google.script.run
             .withSuccessHandler(handleBatchComplete)
             .withFailureHandler(function(err) {
               handleBatchFailure(err, runNormalCall);
             })
-            .processSafetyEmails(days, 5, newOnlyMode, fastMode);  // BATCH SIZE 5 + fastMode
+            .processSafetyEmails(days, 5, newOnlyMode, fastMode, null, currentReportTypeFilter);  // BATCH SIZE 5 + fastMode
         };
         runNormalCall();
         console.log("google.script.run initiated");
@@ -523,7 +527,7 @@
                 .withFailureHandler(function(err) {
                   handleBatchFailure(err, runReprocessCall);
                 })
-                .processSafetyEmails(startDateVal, 5, false, fastMode, endDateVal);  // Pass endDateVal here
+                .processSafetyEmails(startDateVal, 5, false, fastMode, endDateVal, currentReportTypeFilter);  // Pass endDateVal and filter here
             };
             runReprocessCall();
           } else {
@@ -835,7 +839,7 @@
           .withFailureHandler(function(err) {
             handleBatchFailure(err, runContinueCall);
           })
-          .processSafetyEmails(currentDays, 5, newOnlyMode, fastMode);  // BATCH SIZE 5
+          .processSafetyEmails(currentDays, 5, newOnlyMode, fastMode, null, currentReportTypeFilter);  // BATCH SIZE 5
       };
       runContinueCall();
     }
