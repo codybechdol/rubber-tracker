@@ -99,22 +99,40 @@
     </div>
   </div>
 
-  <!-- STEP 4: Process Safety Emails -->
+  <!-- STEP 4: Process JHA Emails -->
   <div class="step-container">
-    <button class="step-btn" id="step4" onclick="openSafetyEmails()">
+    <button class="step-btn" id="step4" onclick="openSafetyEmailsForType(4, 'JHA')">
       <span class="step-num"><span>4</span></span>
-      <div class="step-text">🛡️ Process Safety Emails<div class="step-subtitle">JHAs, Meetings, Fleet Checklists</div></div>
+      <div class="step-text">📋 Process JHA Emails<div class="step-subtitle">Job Hazard Analysis reports</div></div>
     </button>
     <div class="sub-actions">
       <button class="quick-btn sub-btn" onclick="runQuick('showComplianceDashboard', 'Compliance Dashboard', 'Opening dashboard...')">📊 Compliance Dashboard</button>
+    </div>
+  </div>
+
+  <!-- STEP 5: Process Weekly Safety Emails -->
+  <div class="step-container">
+    <button class="step-btn" id="step5" onclick="openSafetyEmailsForType(5, 'WEEKLY')">
+      <span class="step-num"><span>5</span></span>
+      <div class="step-text">🗣️ Process Weekly Safety Emails<div class="step-subtitle">Weekly Safety Meeting reports</div></div>
+    </button>
+    <div class="sub-actions">
       <button class="quick-btn sub-btn" onclick="runQuick('masterRecalculateCompliance', 'Master Recalculate', 'Recalculating compliance...')">🔄 Master Recalculate</button>
     </div>
   </div>
 
-  <!-- STEP 5: Generate Task Metadata -->
+  <!-- STEP 6: Process Monthly Checklist Emails -->
   <div class="step-container">
-    <button class="step-btn" id="step5" onclick="runStep(5, 'generateTaskMetadata')">
-      <span class="step-num"><span>5</span></span>
+    <button class="step-btn" id="step6" onclick="openSafetyEmailsForType(6, 'MONTHLY')">
+      <span class="step-num"><span>6</span></span>
+      <div class="step-text">🚛 Process Monthly Checklist<div class="step-subtitle">Fleet & Safety Checklists</div></div>
+    </button>
+  </div>
+
+  <!-- STEP 7: Generate Task Metadata -->
+  <div class="step-container">
+    <button class="step-btn" id="step7" onclick="runStep(7, 'generateTaskMetadata')">
+      <span class="step-num"><span>7</span></span>
       <div class="step-text">🎯 Generate Task Metadata<div class="step-subtitle">Build task database</div></div>
     </button>
     <div class="sub-actions">
@@ -122,10 +140,10 @@
     </div>
   </div>
 
-  <!-- STEP 6: Review & Schedule -->
+  <!-- STEP 8: Review & Schedule -->
   <div class="step-container">
-    <button class="step-btn" id="step6" onclick="openToDoSchedule()">
-      <span class="step-num"><span>6</span></span>
+    <button class="step-btn" id="step8" onclick="openToDoSchedule()">
+      <span class="step-num"><span>8</span></span>
       <div class="step-text">📅 Review & Schedule<div class="step-subtitle">Tasks & Trip Planner</div></div>
     </button>
     <div class="sub-actions">
@@ -134,10 +152,10 @@
     </div>
   </div>
 
-  <!-- STEP 7: Create Purchase Order -->
+  <!-- STEP 9: Create Purchase Order -->
   <div class="step-container">
-    <button class="step-btn" id="step7" onclick="runQuick('showPurchaseOrderDialog', 'Purchase Order', 'Opening Purchase Order...')">
-      <span class="step-num"><span>7</span></span>
+    <button class="step-btn" id="step9" onclick="runQuick('showPurchaseOrderDialog', 'Purchase Order', 'Opening Purchase Order...')">
+      <span class="step-num"><span>9</span></span>
       <div class="step-text">🛒 Create Purchase Order<div class="step-subtitle">Order gloves, sleeves & supplies</div></div>
     </button>
     <div class="sub-actions">
@@ -146,10 +164,10 @@
     </div>
   </div>
 
-  <!-- STEP 8: Save & Backup -->
+  <!-- STEP 10: Save & Backup -->
   <div class="step-container">
-    <button class="step-btn" id="step8" onclick="runStep(8, 'saveAndBackup')">
-      <span class="step-num"><span>8</span></span>
+    <button class="step-btn" id="step10" onclick="runStep(10, 'saveAndBackup')">
+      <span class="step-num"><span>10</span></span>
       <div class="step-text">💾 Save & Backup<div class="step-subtitle">History + Drive backup</div></div>
     </button>
     <div class="sub-actions">
@@ -270,21 +288,23 @@
       }).showCrewImportDialog();
     }
 
-    function openSafetyEmails() {
-      var btn = document.getElementById('step4');
-      btn.classList.add('running');
-      showStatus('⏳ Opening Safety Emails...');
+    function openSafetyEmailsForType(stepNum, filterType) {
+      var btn = document.getElementById('step' + stepNum);
+      if (btn) btn.classList.add('running');
+      var label = filterType === 'JHA' ? 'JHA Emails' : (filterType === 'WEEKLY' ? 'Weekly Safety Emails' : 'Monthly Checklist Emails');
+      showStatus('⏳ Opening ' + label + '...');
+      var serverFunc = filterType === 'JHA' ? 'showProcessJHAEmailsDialog' : (filterType === 'WEEKLY' ? 'showProcessWeeklySafetyEmailsDialog' : 'showProcessMonthlyChecklistDialog');
       google.script.run.withSuccessHandler(function() {
-        btn.classList.remove('running'); btn.classList.add('done');
+        if (btn) { btn.classList.remove('running'); btn.classList.add('done'); }
         hideStatus();
       }).withFailureHandler(function(e) {
-        btn.classList.remove('running');
+        if (btn) btn.classList.remove('running');
         showStatus('Error: ' + e, 'error');
-      }).showProcessSafetyEmailsDialog();
+      })[serverFunc]();
     }
 
     function openToDoSchedule() {
-      var btn = document.getElementById('step6');
+      var btn = document.getElementById('step8');
       if (btn) btn.classList.add('running');
       showStatus('⏳ Opening Tasks & Calendar...');
       google.script.run.withSuccessHandler(function() {
@@ -297,7 +317,7 @@
     }
 
     function resetSteps() {
-      for(var i=1;i<=8;i++){var b=document.getElementById('step'+i);if(b){b.classList.remove('done','running');b.disabled=false;}}
+      for(var i=1;i<=10;i++){var b=document.getElementById('step'+i);if(b){b.classList.remove('done','running');b.disabled=false;}}
       showStatus('Reset', 'success'); setTimeout(hideStatus, 1500);
     }
 

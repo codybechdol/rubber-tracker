@@ -5745,11 +5745,12 @@ function applyStatusFormatting(sheet, startRow, numRows) {
  * @param {boolean} newOnlyMode - Only process emails since last run (default true)
  * @param {boolean} skipPdfExtraction - Skip slow PDF extraction, use subject date only (default false)
  */
-function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction, endDate) {
+function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction, endDate, reportTypeFilter) {
   if (!daysBack) daysBack = 7;
   if (!batchSize) batchSize = 5; // REDUCED from 10 to 5 for better timeout handling
   if (newOnlyMode === undefined) newOnlyMode = true; // Default to new-only mode
   if (skipPdfExtraction === undefined) skipPdfExtraction = false; // Default to extracting PDFs
+  if (!reportTypeFilter) reportTypeFilter = 'ALL';
 
   // Read batch state FIRST so we can skip expensive init on continuation batches
   var props = PropertiesService.getScriptProperties();
@@ -5848,6 +5849,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   // This prevents the thread list from changing between batches (41 vs 72 threads)
   if (!isFirstBatch) {
     var cachedDateFilter = props.getProperty('SAFETY_BATCH_DATE_FILTER');
+    var cachedReportTypeFilter = props.getProperty('SAFETY_BATCH_REPORT_TYPE_FILTER');
     if (cachedDateFilter) {
       dateFilter = cachedDateFilter;
       Logger.log('Continuation batch: restored dateFilter from batch 1: ' + dateFilter);
@@ -5860,46 +5862,71 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
       }
       Logger.log('Continuation batch: no cached dateFilter, using fallback: ' + dateFilter);
     }
-  } else if (newOnlyMode && lastProcessedDate) {
-    // Use after: filter to only get emails newer than last processed
-    // Format: YYYY/MM/DD
-    // IMPORTANT: Go back 14 days prior to lastProcessedDate so un-logged emails from prior days
-    // are not permanently skipped if LAST_SAFETY_EMAIL_DATE was set on a day with no new emails.
-    // Duplicate prevention via memory-cached existingEmailIds handles already-logged emails instantly.
-    var lastDate = new Date(lastProcessedDate.replace(/\//g, '-'));
-    lastDate.setDate(lastDate.getDate() - 14); // 14-day safety window
-    var filterDate = Utilities.formatDate(lastDate, Session.getScriptTimeZone(), 'yyyy/MM/dd');
-    dateFilter = ' after:' + filterDate;
-    Logger.log('New-only mode: filtering emails after ' + filterDate + ' (14-day safety window from last processed: ' + lastProcessedDate + ')');
-    // Save dateFilter for continuation batches so thread list stays consistent
-    props.setProperty('SAFETY_BATCH_DATE_FILTER', dateFilter);
-  } else {
-    // Use the explicit day range or start date specified by user
-    if (isDateStr) {
-      dateFilter = ' after:' + formattedFilterDate;
-      if (formattedEndDate) {
-        dateFilter += ' before:' + formattedEndDate;
-        Logger.log('Date range mode: filtering emails between ' + formattedFilterDate + ' and ' + formattedEndDate + ' (inclusive)');
-      } else {
-        Logger.log('Date range mode: filtering emails after ' + formattedFilterDate + ' (inclusive of start date: ' + daysBack + ')');
-      }
-    } else {
-      dateFilter = ' newer_than:' + daysBack + 'd';
-      Logger.log('Date range mode: filtering emails from last ' + daysBack + ' days');
+    if (cachedReportTypeFilter) {
+      reportTypeFilter = cachedReportTypeFilter;
     }
-    // Save dateFilter for continuation batches so thread list stays consistent
-    props.setProperty('SAFETY_BATCH_DATE_FILTER', dateFilter);
+  } else {
+    if (reportTypeFilter) {
+      props.setProperty('SAFETY_BATCH_REPORT_TYPE_FILTER', reportTypeFilter);
+    }
+    if (newOnlyMode && lastProcessedDate) {
+      // Use after: filter to only get emails newer than last processed
+      // Format: YYYY/MM/DD
+      // IMPORTANT: Go back 14 days prior to lastProcessedDate so un-logged emails from prior days
+      // are not permanently skipped if LAST_SAFETY_EMAIL_DATE was set on a day with no new emails.
+      // Duplicate prevention via memory-cached existingEmailIds handles already-logged emails instantly.
+      var lastDate = new Date(lastProcessedDate.replace(/\//g, '-'));
+      lastDate.setDate(lastDate.getDate() - 14); // 14-day safety window
+      var filterDate = Utilities.formatDate(lastDate, Session.getScriptTimeZone(), 'yyyy/MM/dd');
+      dateFilter = ' after:' + filterDate;
+      Logger.log('New-only mode: filtering emails after ' + filterDate + ' (14-day safety window from last processed: ' + lastProcessedDate + ')');
+      // Save dateFilter for continuation batches so thread list stays consistent
+      props.setProperty('SAFETY_BATCH_DATE_FILTER', dateFilter);
+    } else {
+      // Use the explicit day range or start date specified by user
+      if (isDateStr) {
+        dateFilter = ' after:' + formattedFilterDate;
+        if (formattedEndDate) {
+          dateFilter += ' before:' + formattedEndDate;
+          Logger.log('Date range mode: filtering emails between ' + formattedFilterDate + ' and ' + formattedEndDate + ' (inclusive)');
+        } else {
+          Logger.log('Date range mode: filtering emails after ' + formattedFilterDate + ' (inclusive of start date: ' + daysBack + ')');
+        }
+      } else {
+        dateFilter = ' newer_than:' + daysBack + 'd';
+        Logger.log('Date range mode: filtering emails from last ' + daysBack + ' days');
+      }
+      // Save dateFilter for continuation batches so thread list stays consistent
+      props.setProperty('SAFETY_BATCH_DATE_FILTER', dateFilter);
+    }
   }
 
   // Search queries for different report types
   // Search by subject only (works for both original and forwarded emails)
-  var baseQueries = [
-    'subject:"Job Hazard Report"',
-    'subject:"Safety Meeting Report"',
-    'subject:"Weekly Safety Repairs"',
-    'subject:"Safety Checklist Report"',
-    'subject:"Safety Check List Report"'
-  ];
+  var baseQueries = [];
+  if (!reportTypeFilter || reportTypeFilter === 'ALL') {
+    baseQueries = [
+      'subject:"Job Hazard Report"',
+      'subject:"Safety Meeting Report"',
+      'subject:"Weekly Safety Repairs"',
+      'subject:"Safety Checklist Report"',
+      'subject:"Safety Check List Report"'
+    ];
+  } else if (reportTypeFilter === 'JHA') {
+    baseQueries = [
+      'subject:"Job Hazard Report"'
+    ];
+  } else if (reportTypeFilter === 'WEEKLY') {
+    baseQueries = [
+      'subject:"Safety Meeting Report"',
+      'subject:"Weekly Safety Repairs"'
+    ];
+  } else if (reportTypeFilter === 'MONTHLY') {
+    baseQueries = [
+      'subject:"Safety Checklist Report"',
+      'subject:"Safety Check List Report"'
+    ];
+  }
 
   // Build queries with date filters - ALWAYS apply the date filter
   var queries = baseQueries.map(function(q) {
@@ -6489,7 +6516,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
       if (isComplete) {
         props.deleteProperty('SAFETY_BATCH_START');
         props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
-        props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
+        props.deleteProperty('SAFETY_BATCH_REPORT_TYPE_FILTER');
         // Clear batch caches - no longer needed
         batchCache.removeAll(['SAFETY_BATCH_CREWS', 'SAFETY_BATCH_EMP_DATA', 'SAFETY_BATCH_EMAIL_IDS']);
 
@@ -6753,13 +6780,32 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
 }
 
 /**
- * Shows dialog to process safety emails with custom date range
+ * Shows dialog to process safety emails with custom date range and optional report type filter
+ * @param {string} [reportTypeFilter] - Optional filter ('JHA', 'WEEKLY', 'MONTHLY', 'ALL')
  */
-function showProcessSafetyEmailsDialog() {
-  var html = HtmlService.createHtmlOutputFromFile('ProcessSafetyEmailsDialog')
+function showProcessSafetyEmailsDialog(reportTypeFilter) {
+  var template = HtmlService.createTemplateFromFile('ProcessSafetyEmailsDialog');
+  template.initialReportType = (typeof reportTypeFilter === 'string') ? reportTypeFilter : 'ALL';
+  var html = template.evaluate()
     .setWidth(550)
     .setHeight(700);
-  SpreadsheetApp.getUi().showModalDialog(html, "Process Safety Emails");
+  var title = "Process Safety Emails";
+  if (reportTypeFilter === 'JHA') title = "Process JHA Emails (Step 4)";
+  else if (reportTypeFilter === 'WEEKLY') title = "Process Weekly Safety Emails (Step 5)";
+  else if (reportTypeFilter === 'MONTHLY') title = "Process Monthly Checklist Emails (Step 6)";
+  SpreadsheetApp.getUi().showModalDialog(html, title);
+}
+
+function showProcessJHAEmailsDialog() {
+  showProcessSafetyEmailsDialog('JHA');
+}
+
+function showProcessWeeklySafetyEmailsDialog() {
+  showProcessSafetyEmailsDialog('WEEKLY');
+}
+
+function showProcessMonthlyChecklistDialog() {
+  showProcessSafetyEmailsDialog('MONTHLY');
 }
 
 /**

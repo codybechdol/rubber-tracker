@@ -73,9 +73,12 @@ function _buildGloveManagerMenu() {
           .addItem('🔄 Update Training Tracking Crew Leads', 'updateTrainingTrackingCrewLeads')
           .addItem('📊 Deploy Swaps Dashboards', 'deploySwapsDashboards')))
 
-      // === STEP 3: PROCESS SAFETY EMAILS ===
+      // === STEPS 4, 5, 6: PROCESS SAFETY EMAILS ===
       .addSubMenu(ui.createMenu('🛡️ Process Safety Emails')
-        .addItem('📥 Process Safety Emails', 'showProcessSafetyEmailsDialog')
+        .addItem('📥 Process Safety Emails (All)', 'showProcessSafetyEmailsDialog')
+        .addItem('📋 Step 4: Process JHA Emails', 'showProcessJHAEmailsDialog')
+        .addItem('🗣️ Step 5: Process Weekly Safety Emails', 'showProcessWeeklySafetyEmailsDialog')
+        .addItem('🚛 Step 6: Process Monthly Checklist Emails', 'showProcessMonthlyChecklistDialog')
         .addItem('📊 View Equipment Needs', 'openSafetyReports')
         .addItem('📈 View Compliance History', 'openComplianceSheet')
         .addItem('⚙️ Manage Schedules (Job Tracking)', 'openJobTrackingSheet')
@@ -145,7 +148,7 @@ function _buildGloveManagerMenu() {
           .addItem('🔧 Fix Bad JHA Credit — Row 277 (045-16/Abilene)', 'fixBadJHACreditRow277')
           .addItem('↩️ Revert Bug-Fixed CreditedTo Entries', 'menuRevertBuggyFixedCreditedTo')))
 
-      // === STEP 4: GENERATE TASK METADATA ===
+      // === STEP 7: GENERATE TASK METADATA ===
       .addSubMenu(ui.createMenu('🎯 Generate Task Metadata')
         .addItem('🎯 Generate Task Metadata', 'generateTaskMetadata')
         .addItem('📊 Task Dashboard', 'showTaskDashboard')
