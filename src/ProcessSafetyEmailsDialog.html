@@ -213,7 +213,7 @@
 
   <script>
     var currentReportTypeFilter = "<?= initialReportType ?>";
-    if (!currentReportTypeFilter || currentReportTypeFilter.indexOf("<?") !== -1) {
+    if (currentReportTypeFilter !== "JHA" && currentReportTypeFilter !== "WEEKLY" && currentReportTypeFilter !== "MONTHLY") {
       currentReportTypeFilter = "ALL";
     }
     var currentDays = 7;
