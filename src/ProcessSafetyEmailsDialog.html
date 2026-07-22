@@ -212,8 +212,8 @@
   </div>
 
   <script>
-    var currentReportTypeFilter = "<?= typeof initialReportType !== 'undefined' ? initialReportType : 'ALL' ?>";
-    if (!currentReportTypeFilter || currentReportTypeFilter.indexOf("<?") !== -1 || currentReportTypeFilter.indexOf("undefined") !== -1) {
+    var currentReportTypeFilter = "<?= initialReportType ?>";
+    if (!currentReportTypeFilter || currentReportTypeFilter.indexOf("<?") !== -1) {
       currentReportTypeFilter = "ALL";
     }
     var currentDays = 7;

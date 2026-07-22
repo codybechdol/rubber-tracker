@@ -6785,7 +6785,8 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
  */
 function showProcessSafetyEmailsDialog(reportTypeFilter) {
   var template = HtmlService.createTemplateFromFile('ProcessSafetyEmailsDialog');
-  template.initialReportType = (typeof reportTypeFilter === 'string') ? reportTypeFilter : 'ALL';
+  var filter = (typeof reportTypeFilter === 'string' && reportTypeFilter) ? reportTypeFilter : 'ALL';
+  template.initialReportType = filter;
   var html = template.evaluate()
     .setWidth(550)
     .setHeight(700);
