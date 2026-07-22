@@ -5908,7 +5908,6 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     baseQueries = [
       'subject:"Job Hazard Report"',
       'subject:"Safety Meeting Report"',
-      'subject:"Weekly Safety Repairs"',
       'subject:"Safety Checklist Report"',
       'subject:"Safety Check List Report"'
     ];
@@ -5918,8 +5917,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     ];
   } else if (reportTypeFilter === 'WEEKLY') {
     baseQueries = [
-      'subject:"Safety Meeting Report"',
-      'subject:"Weekly Safety Repairs"'
+      'subject:"Safety Meeting Report"'
     ];
   } else if (reportTypeFilter === 'MONTHLY') {
     baseQueries = [
@@ -18052,7 +18050,6 @@ function diagnoseEmailLogOverlap() {
   var queries = [
     'subject:"Job Hazard Report" newer_than:14d',
     'subject:"Safety Meeting Report" newer_than:14d',
-    'subject:"Weekly Safety Repairs" newer_than:14d',
     'subject:"Safety Checklist Report" newer_than:14d',
     'subject:"Safety Check List Report" newer_than:14d'
   ];
