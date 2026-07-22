@@ -142,6 +142,8 @@
     <option value="30">30 days</option>
     <option value="60">60 days</option>
     <option value="90">90 days</option>
+    <option value="180">180 days (6 months)</option>
+    <option value="365">365 days (1 year)</option>
   </select>
   <button id="processBtn" onclick="processEmails()">Start Processing</button>
   <button id="continueBtn" onclick="continueProcessing()" class="success" style="display:none;">▶ Continue Processing</button>
@@ -1692,6 +1694,7 @@
           '<th style="padding:4px 6px;border-bottom:1px solid #f5c2c7;width:80px;">JHA Date</th>' +
           '<th style="padding:4px 6px;border-bottom:1px solid #f5c2c7;width:70px;">Orig Job</th>' +
           '<th style="padding:4px 6px;border-bottom:1px solid #f5c2c7;">Foreman</th>' +
+          '<th style="padding:4px 6px;border-bottom:1px solid #f5c2c7;width:70px;">Status</th>' +
           '</tr>';
         for (var i = 0; i < jhaCount; i++) {
           var item = uncredited.jha[i];
@@ -1700,6 +1703,7 @@
             '<td style="padding:4px 6px;">' + item.date + '</td>' +
             '<td style="padding:4px 6px;font-family:monospace;">' + item.jobNumber + '</td>' +
             '<td style="padding:4px 6px;">' + item.foreman + '</td>' +
+            '<td style="padding:4px 6px;"><span style="background:#fff3cd;color:#856404;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:bold;">' + (item.status || 'Skipped') + '</span></td>' +
             '</tr>';
         }
         html += '</table></div></div>';
@@ -1715,6 +1719,7 @@
           '<th style="padding:4px 6px;border-bottom:1px solid #f5c2c7;width:80px;">Week Of</th>' +
           '<th style="padding:4px 6px;border-bottom:1px solid #f5c2c7;width:70px;">Orig Job</th>' +
           '<th style="padding:4px 6px;border-bottom:1px solid #f5c2c7;">Foreman</th>' +
+          '<th style="padding:4px 6px;border-bottom:1px solid #f5c2c7;width:70px;">Status</th>' +
           '</tr>';
         for (var i = 0; i < weeklyCount; i++) {
           var item = uncredited.weekly[i];
@@ -1723,6 +1728,7 @@
             '<td style="padding:4px 6px;">' + item.date + '</td>' +
             '<td style="padding:4px 6px;font-family:monospace;">' + item.jobNumber + '</td>' +
             '<td style="padding:4px 6px;">' + item.foreman + '</td>' +
+            '<td style="padding:4px 6px;"><span style="background:#fff3cd;color:#856404;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:bold;">' + (item.status || 'Skipped') + '</span></td>' +
             '</tr>';
         }
         html += '</table></div></div>';
@@ -1738,6 +1744,7 @@
           '<th style="padding:4px 6px;border-bottom:1px solid #f5c2c7;width:80px;">Report Date</th>' +
           '<th style="padding:4px 6px;border-bottom:1px solid #f5c2c7;width:70px;">Orig Job</th>' +
           '<th style="padding:4px 6px;border-bottom:1px solid #f5c2c7;">Foreman</th>' +
+          '<th style="padding:4px 6px;border-bottom:1px solid #f5c2c7;width:70px;">Status</th>' +
           '</tr>';
         for (var i = 0; i < monthlyCount; i++) {
           var item = uncredited.monthly[i];
@@ -1746,6 +1753,7 @@
             '<td style="padding:4px 6px;">' + item.date + '</td>' +
             '<td style="padding:4px 6px;font-family:monospace;">' + item.jobNumber + '</td>' +
             '<td style="padding:4px 6px;">' + item.foreman + '</td>' +
+            '<td style="padding:4px 6px;"><span style="background:#fff3cd;color:#856404;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:bold;">' + (item.status || 'Skipped') + '</span></td>' +
             '</tr>';
         }
         html += '</table></div></div>';

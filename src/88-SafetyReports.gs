@@ -682,22 +682,29 @@ function sortAndFormatLogSheet(sheetName, emailIdCol, dateReceivedCol, jobNumCol
 /**
  * Formats both the JHA Log and Weekly Safety Log.
  * Called automatically at the end of processSafetyEmails and available as a menu item.
+/**
+ * Formats JHA Log, Weekly Safety Log, and Monthly Checklist Log.
+ * Sorts data rows (newest month first, job number ascending within month)
+ * and inserts green/yellow month header banner rows.
  * @param {boolean} silent - If true, no UI alert shown
  */
 function sortAndFormatSafetyLogs(silent) {
   var t0 = new Date().getTime();
   // JHA Log: emailIdCol=6, dateReceivedCol=1, jobNumCol=3
-  var jhaMonths    = sortAndFormatLogSheet(JHA_LOG_SHEET_NAME,               6, 1, 3);
+  var jhaMonths     = sortAndFormatLogSheet(JHA_LOG_SHEET_NAME,               6, 1, 3);
   // Weekly Safety Log: emailIdCol=6, dateReceivedCol=1, jobNumCol=3
-  var weeklyMonths = sortAndFormatLogSheet(WEEKLY_SAFETY_LOG_SHEET_NAME,     6, 1, 3);
+  var weeklyMonths  = sortAndFormatLogSheet(WEEKLY_SAFETY_LOG_SHEET_NAME,     6, 1, 3);
+  // Monthly Checklist Log: emailIdCol=7, dateReceivedCol=1, jobNumCol=3
+  var monthlyMonths = sortAndFormatLogSheet(MONTHLY_CHECKLIST_LOG_SHEET_NAME, 7, 1, 3);
   var elapsed = Math.round((new Date().getTime() - t0) / 1000);
-  Logger.log('sortAndFormatSafetyLogs: done in ' + elapsed + 's — JHA months: ' + jhaMonths + ', Weekly months: ' + weeklyMonths);
+  Logger.log('sortAndFormatSafetyLogs: done in ' + elapsed + 's — JHA: ' + jhaMonths + ', Weekly: ' + weeklyMonths + ', Monthly: ' + monthlyMonths);
   if (!silent) {
     SpreadsheetApp.getUi().alert(
       'Log Sheets Formatted',
-      'JHA Log and Weekly Safety Log sorted and grouped.\n' +
+      'JHA Log, Weekly Safety Log, and Monthly Checklist Log sorted and grouped.\n' +
       'JHA Log: ' + jhaMonths + ' month sections\n' +
       'Weekly Safety Log: ' + weeklyMonths + ' month sections\n' +
+      'Monthly Checklist Log: ' + monthlyMonths + ' month sections\n' +
       'Completed in ' + elapsed + 's.',
       SpreadsheetApp.getUi().ButtonSet.OK
     );
@@ -7390,9 +7397,10 @@ function parseSafetyEmail(message, skipPdfExtraction) {
     // Extract PDF content for JHA reports to get actual "Date Completed" from the PDF
     // This is important because the email subject date may differ from actual work dates
     // PROCESSES ALL PDFs in the email (some emails have multiple JHA PDFs)
+    // Extract text from PDF attachments (JHA, Safety Checklist, Fleet Checklist)
     // NOTE: This is SLOW (~5-10 sec per PDF). Can be skipped with skipPdfExtraction=true
-    if (reportType === "JHA" && !skipPdfExtraction) {
-      Logger.log("Processing ALL JHA PDFs for job " + jobNumber + " to extract Date Completed...");
+    if ((reportType === "JHA" || reportType === "Safety Checklist" || reportType === "Fleet Checklist") && !skipPdfExtraction) {
+      Logger.log("Processing PDF attachments for " + reportType + " (Job: " + jobNumber + ")...");
       var attachments = message.getAttachments();
       var pdfCount = 0;
       var allPdfDates = []; // Collect dates from ALL PDFs
@@ -7409,32 +7417,33 @@ function parseSafetyEmail(message, skipPdfExtraction) {
         }
 
         pdfCount++;
-        Logger.log("Extracting JHA PDF #" + pdfCount + ": " + attachment.getName() + " (" + Math.round(attachment.getSize()/1024) + "KB)");
+        Logger.log("Extracting " + reportType + " PDF #" + pdfCount + ": " + attachment.getName() + " (" + Math.round(attachment.getSize()/1024) + "KB)");
 
         try {
-          // Convert PDF to text using Drive API
+          // Convert PDF to text using Drive API OCR
           var pdfText = extractTextFromPDF(attachment);
           if (pdfText && pdfText.length > 50) {
             fullText += "\n\n[PDF #" + pdfCount + " CONTENT]\n" + pdfText;
             Logger.log("Extracted " + pdfText.length + " chars from PDF #" + pdfCount);
 
-            // Extract all "Date Completed" values from THIS PDF
-            var thisPdfDates = extractDatesCompletedFromJHAPDF(pdfText);
+            if (reportType === "JHA") {
+              // Extract all "Date Completed" values from THIS PDF
+              var thisPdfDates = extractDatesCompletedFromJHAPDF(pdfText);
 
-            if (thisPdfDates.length > 0) {
-              Logger.log("PDF #" + pdfCount + " contains " + thisPdfDates.length + " Date Completed entries:");
-              for (var d = 0; d < thisPdfDates.length; d++) {
-                Logger.log("  - " + thisPdfDates[d].toDateString());
-                // Add to allPdfDates if not duplicate
-                var isDup = allPdfDates.some(function(existing) {
-                  return existing.getTime() === thisPdfDates[d].getTime();
-                });
-                if (!isDup) {
-                  allPdfDates.push(thisPdfDates[d]);
+              if (thisPdfDates.length > 0) {
+                Logger.log("PDF #" + pdfCount + " contains " + thisPdfDates.length + " Date Completed entries:");
+                for (var d = 0; d < thisPdfDates.length; d++) {
+                  Logger.log("  - " + thisPdfDates[d].toDateString());
+                  var isDup = allPdfDates.some(function(existing) {
+                    return existing.getTime() === thisPdfDates[d].getTime();
+                  });
+                  if (!isDup) {
+                    allPdfDates.push(thisPdfDates[d]);
+                  }
                 }
+              } else {
+                Logger.log("PDF #" + pdfCount + ": No Date Completed found in this PDF");
               }
-            } else {
-              Logger.log("PDF #" + pdfCount + ": No Date Completed found in this PDF");
             }
           } else {
             Logger.log("PDF #" + pdfCount + ": Extraction returned empty or minimal text");
@@ -7442,45 +7451,35 @@ function parseSafetyEmail(message, skipPdfExtraction) {
         } catch (pdfError) {
           Logger.log("PDF #" + pdfCount + " extraction failed: " + pdfError.toString());
         }
-        // DO NOT BREAK - process ALL PDFs in the email
       }
 
-      Logger.log("Total PDFs processed: " + pdfCount + ", Total unique dates found: " + allPdfDates.length);
+      if (reportType === "JHA") {
+        Logger.log("Total JHA PDFs processed: " + pdfCount + ", Total unique dates found: " + allPdfDates.length);
+        jhaDateOverrides = allPdfDates;
 
-      // Use all collected dates
-      jhaDateOverrides = allPdfDates;
-
-      if (jhaDateOverrides.length > 0) {
-        // Sort dates chronologically
-        jhaDateOverrides.sort(function(a, b) { return a.getTime() - b.getTime(); });
-
-        Logger.log("Final combined Date Completed entries from all PDFs:");
-        for (var d = 0; d < jhaDateOverrides.length; d++) {
-          Logger.log("  - " + jhaDateOverrides[d].toDateString());
-        }
-        // ✅ PDF is the authoritative date source — use it
-        reportDate = jhaDateOverrides[0];
-        Logger.log("✅ JHA date from PDF: " + reportDate.toDateString() +
-                   (subjectDate ? " (subject said: " + subjectDate.toDateString() + ")" : ""));
-      } else {
-        // PDF yielded no date — fall back to subject date, then email receipt date
-        if (subjectDate) {
-          reportDate = subjectDate;
-          var isModified = subject.indexOf("Modified") !== -1;
-          Logger.log("\u26A0\uFE0F JHA PDF had no date — falling back to subject date: " + reportDate.toDateString() +
-                     (isModified ? " ⚠️ WARNING: This is a Modified-N email; subject date is likely WRONG for this JHA. Check the PDF manually." : ""));
+        if (jhaDateOverrides.length > 0) {
+          jhaDateOverrides.sort(function(a, b) { return a.getTime() - b.getTime(); });
+          reportDate = jhaDateOverrides[0];
+          Logger.log("✅ JHA date from PDF: " + reportDate.toDateString() +
+                     (subjectDate ? " (subject said: " + subjectDate.toDateString() + ")" : ""));
         } else {
-          reportDate = date; // last resort: email receipt date
-          Logger.log("\u26A0\uFE0F JHA PDF had no date and subject had no date — using email receipt date: " + reportDate.toDateString());
+          if (subjectDate) {
+            reportDate = subjectDate;
+            var isModified = subject.indexOf("Modified") !== -1;
+            Logger.log("⚠️ JHA PDF had no date — falling back to subject date: " + reportDate.toDateString() +
+                       (isModified ? " ⚠️ WARNING: This is a Modified-N email; subject date is likely WRONG for this JHA. Check the PDF manually." : ""));
+          } else {
+            reportDate = date;
+            Logger.log("⚠️ JHA PDF had no date and subject had no date — using email receipt date: " + reportDate.toDateString());
+          }
         }
       }
     } else if (reportType === "JHA" && skipPdfExtraction) {
-      Logger.log("\u26A1 FAST MODE: Skipping JHA PDF extraction for job " + jobNumber + " — using subject date instead");
-      // In fast mode we must use the subject date; warn if it looks modified
+      Logger.log("⚡ FAST MODE: Skipping JHA PDF extraction for job " + jobNumber + " — using subject date instead");
       if (subjectDate) {
         reportDate = subjectDate;
         if (subject.indexOf("Modified") !== -1) {
-          Logger.log("\u26A0\uFE0F Fast mode + Modified email — subject date " + subjectDate.toDateString() + " may not be the actual work date");
+          Logger.log("⚠️ Fast mode + Modified email — subject date " + subjectDate.toDateString() + " may not be the actual work date");
         }
       } else {
         reportDate = date;
@@ -9068,7 +9067,7 @@ function extractSafetyChecklistIssues(pdfText, context) {
             var passComment = extractPdfComment(match);
             if (passComment) {
               // Only create a row if the comment contains actionable language
-              var isActionable = /needs?\s|need\s|requir|replac|expir|missing|broken|fix|repair|no\s+(?:log|book|manual)|not\s+in|not\s+have|do\s+not\s+have|don'?t\s+have|without|absent|lack|test(?:ed|ing)\s/i.test(passComment);
+              var isActionable = /needs?\s|need\s|requir|replac|expir|missing|broken|fix|repair|no\s+(?:log|book|manual)|not\s+in|not\s+have|do\s+not\s+have|don'?t\s+have|without|absent|lack|test(?:ed|ing)?\s|due|date\s+of\s+\d{4}|200\d|201\d|202[0-5]/i.test(passComment);
               if (isActionable) {
                 flagged[commentFlagKey] = true;
                 Logger.log("  ** NOTE (passed check but has actionable comment): " + equipmentType + " - " + passComment.substring(0, 80));
@@ -9309,6 +9308,9 @@ function extractSafetyChecklistIssues(pdfText, context) {
   checkEquipment("Barriers", "Good Condition", /barriers?\s+good\s*condition\s*\??\s*:?\s*(yes|no)/i, "no", "Barriers not in good condition");
 
   // ==== TRUCKS SECTION ====
+  // Wheel chocks are safety equipment required on all trucks
+  checkEquipment("Wheel Chocks", "Wheel Chocks", /wheel\s*chocks?\s*:?\s*(yes|no)/i, "no", "Wheel chocks missing or needed");
+
   // NOTE: We intentionally do NOT track mechanical items like Brakes, Lights, Mirrors, Windows, etc.
   // These are vehicle maintenance issues, not safety equipment issues.
   // Only Horn and Wipers are safety-related (visibility and signaling) but even those
@@ -16705,7 +16707,7 @@ function fixLogEntriesForWeeks(weeks) {
   var weeklySheet = ss.getSheetByName('Weekly Safety Log');
   if (weeklySheet && weeklySheet.getLastRow() >= 2) {
     var weeklyData = weeklySheet.getDataRange().getValues();
-    var creditedToCol = 8; // Column I (0-indexed)
+    var creditedToCol = 7; // Column H (0-indexed)
 
     for (var i = 1; i < weeklyData.length; i++) {
       var dateReceived = weeklyData[i][0];
@@ -16720,6 +16722,7 @@ function fixLogEntriesForWeeks(weeks) {
       if (!inTargetWeek) continue;
 
       var currentCreditedTo = String(weeklyData[i][creditedToCol] || '').trim();
+      var currentStatus = String(weeklyData[i][6] || '').trim();
       var jobNumber = String(weeklyData[i][2] || '').trim();
 
       if (!jobNumber) continue;
@@ -16727,8 +16730,19 @@ function fixLogEntriesForWeeks(weeks) {
       var resolution = resolveJobToTrackedCrew(jobNumber);
       var expectedCreditedTo = resolution.creditedTo || jobNumber.split('.')[0];
 
-      if (currentCreditedTo !== expectedCreditedTo && currentCreditedTo !== 'Unknown') {
+      if (expectedCreditedTo && (currentCreditedTo !== expectedCreditedTo || currentStatus !== 'Credited')) {
         weeklySheet.getRange(i + 1, creditedToCol + 1).setValue(expectedCreditedTo);
+        if (resolution.resolved) {
+          weeklySheet.getRange(i + 1, 7).setValue('Credited'); // Column G - Status
+          var foremanToSet = resolution.foreman;
+          if (!foremanToSet || foremanToSet === 'UNKNOWN') {
+            var fLookup = lookupForemanByJobNumber(expectedCreditedTo);
+            if (fLookup && fLookup.name) foremanToSet = fLookup.name;
+          }
+          if (foremanToSet && foremanToSet !== 'UNKNOWN') {
+            weeklySheet.getRange(i + 1, 4).setValue(foremanToSet); // Column D - Foreman
+          }
+        }
         result.weeklyFixed++;
       }
     }
@@ -19358,8 +19372,8 @@ function forceAddMissingCrewsToCompliance() {
 
 /**
  * Scans JHA Log, Weekly Safety Log, and Monthly Checklist Log for any rows
- * that do not have a credited to entry (status is not Skipped or Duplicate, and creditedTo is empty).
- * Returns an object with array lists of uncredited items.
+ * that are uncredited or Skipped (status is not Credited or Duplicate, or creditedTo is empty).
+ * Returns an object with array lists of uncredited/skipped items.
  */
 function scanForUncreditedLogs() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -19391,13 +19405,15 @@ function scanForUncreditedLogs() {
           continue;
         }
 
-        if (status !== 'Skipped' && status !== 'Duplicate' && !creditedTo) {
+        // Include any row that is NOT Duplicate and is NOT Credited (or has no creditedTo)
+        if (status !== 'Duplicate' && (status !== 'Credited' || !creditedTo)) {
           result.jha.push({
             row: rowNum,
             date: dateCreated ? (dateCreated instanceof Date ? Utilities.formatDate(dateCreated, Session.getScriptTimeZone(), 'MM/dd/yyyy') : String(dateCreated)) : 'Unknown',
             jobNumber: jobNum,
             foreman: foreman,
-            subject: subject
+            subject: subject,
+            status: status || 'Uncredited'
           });
         }
       }
@@ -19426,13 +19442,14 @@ function scanForUncreditedLogs() {
           continue;
         }
 
-        if (status !== 'Skipped' && status !== 'Duplicate' && !creditedTo) {
+        if (status !== 'Duplicate' && (status !== 'Credited' || !creditedTo)) {
           result.weekly.push({
             row: rowNum,
             date: weekOf ? (weekOf instanceof Date ? Utilities.formatDate(weekOf, Session.getScriptTimeZone(), 'MM/dd/yyyy') : String(weekOf)) : 'Unknown',
             jobNumber: jobNum,
             foreman: foreman,
-            subject: subject
+            subject: subject,
+            status: status || 'Uncredited'
           });
         }
       }
@@ -19461,13 +19478,14 @@ function scanForUncreditedLogs() {
           continue;
         }
 
-        if (status !== 'Skipped' && status !== 'Duplicate' && !creditedTo) {
+        if (status !== 'Duplicate' && (status !== 'Credited' || !creditedTo)) {
           result.monthly.push({
             row: rowNum,
             date: reportDate ? (reportDate instanceof Date ? Utilities.formatDate(reportDate, Session.getScriptTimeZone(), 'MM/dd/yyyy') : String(reportDate)) : 'Unknown',
             jobNumber: jobNum,
             foreman: foreman,
-            subject: subject
+            subject: subject,
+            status: status || 'Uncredited'
           });
         }
       }
