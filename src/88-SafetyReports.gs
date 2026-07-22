@@ -5863,14 +5863,14 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   } else if (newOnlyMode && lastProcessedDate) {
     // Use after: filter to only get emails newer than last processed
     // Format: YYYY/MM/DD
-    // IMPORTANT: Gmail's after: is EXCLUSIVE, so we need to use the day BEFORE
-    // to catch emails received on the same day as last processed
-    // This is safe because we check existingEmailIds to avoid duplicates
+    // IMPORTANT: Go back 14 days prior to lastProcessedDate so un-logged emails from prior days
+    // are not permanently skipped if LAST_SAFETY_EMAIL_DATE was set on a day with no new emails.
+    // Duplicate prevention via memory-cached existingEmailIds handles already-logged emails instantly.
     var lastDate = new Date(lastProcessedDate.replace(/\//g, '-'));
-    lastDate.setDate(lastDate.getDate() - 1); // Go back one day
+    lastDate.setDate(lastDate.getDate() - 14); // 14-day safety window
     var filterDate = Utilities.formatDate(lastDate, Session.getScriptTimeZone(), 'yyyy/MM/dd');
     dateFilter = ' after:' + filterDate;
-    Logger.log('New-only mode: filtering emails after ' + filterDate + ' (last processed: ' + lastProcessedDate + ')');
+    Logger.log('New-only mode: filtering emails after ' + filterDate + ' (14-day safety window from last processed: ' + lastProcessedDate + ')');
     // Save dateFilter for continuation batches so thread list stays consistent
     props.setProperty('SAFETY_BATCH_DATE_FILTER', dateFilter);
   } else {
@@ -5897,7 +5897,8 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     'subject:"Job Hazard Report"',
     'subject:"Safety Meeting Report"',
     'subject:"Weekly Safety Repairs"',
-    'subject:"Safety Checklist Report"'
+    'subject:"Safety Checklist Report"',
+    'subject:"Safety Check List Report"'
   ];
 
   // Build queries with date filters - ALWAYS apply the date filter
@@ -7192,21 +7193,21 @@ function parseSafetyEmail(message, skipPdfExtraction) {
     var vehicleNumber = "";
     var reportDate = date;
 
-    if (subject.indexOf("Safety Checklist Report") !== -1) {
+    if (subject.indexOf("Safety Checklist Report") !== -1 || subject.indexOf("Safety Check List Report") !== -1) {
       // Safety Checklist Report format: "Safety Checklist Report 578-033-26 01-15-2026"
-      // Also supports X# format: "Safety Checklist Report X6-033-26 01-15-2026"
+      // Also supports X# / spaced format: "Safety Check List Report 3017-016-26 07-16-2026"
       // or "Fwd: Safety Checklist Report 578-033-26 01-15-2026"
       reportType = "Safety Checklist";
 
       // Extract equipment number and job number from subject
-      // Format: 578-033-26 or X6-033-26 where 578/X6 is equipment#, 033-26 is job number
-      // Equipment can be: numeric (578) or X# format (X1, X6, etc.)
+      // Format: 578-033-26 or 3017-016-26 or X6-033-26 where 578/3017/X6 is equipment#, 033-26 is job number
+      // Equipment can be: numeric (578/3017), X# format (X1, X6), or alphanumeric (TRK3017)
 
-      // First, try to extract the standard format
-      var checklistMatch = subject.match(/Safety Checklist Report\s+(X?\d+)-(\d{3}-\d{1,2})\s+(\d{2}-\d{2}-\d{4})/i);
+      // First, try to extract standard/alphanumeric format
+      var checklistMatch = subject.match(/Safety Check\s*list Report\s+([A-Z0-9]+)-(\d{3}-\d{1,2})\s+(\d{2}-\d{2}-\d{4})/i);
       if (checklistMatch) {
-        vehicleNumber = checklistMatch[1].toUpperCase(); // Equipment number (578 or X6)
-        jobNumber = checklistMatch[2];      // Job number (033-26)
+        vehicleNumber = checklistMatch[1].toUpperCase(); // Equipment number (3017, 578, X6, etc.)
+        jobNumber = checklistMatch[2];      // Job number (016-26, 033-26)
         // Parse the date from subject (format: MM-DD-YYYY)
         var dateParts = checklistMatch[3].split('-');
         if (dateParts.length === 3) {
@@ -7218,11 +7219,10 @@ function parseSafetyEmail(message, skipPdfExtraction) {
           Logger.log("Parsed date from subject: " + reportDate.toDateString());
         }
       } else {
-        // Try more flexible parsing for X# vehicles
-        // Match: X followed by digits, then a dash, then anything until a space/date
-        var xVehicleMatch = subject.match(/Safety Checklist Report\s+(X\d+)-([^\s]+)\s+(\d{2}-\d{2}-\d{4})/i);
+        // Try more flexible parsing for X# / non-standard vehicles
+        var xVehicleMatch = subject.match(/Safety Check\s*list Report\s+([A-Z0-9]+)-([^\s]+)\s+(\d{2}-\d{2}-\d{4})/i);
         if (xVehicleMatch) {
-          vehicleNumber = xVehicleMatch[1].toUpperCase(); // X6, X1, etc.
+          vehicleNumber = xVehicleMatch[1].toUpperCase(); // X6, 3017, etc.
           jobNumber = xVehicleMatch[2];      // Whatever follows (may be malformed)
           // Try to parse the date
           var dateParts = xVehicleMatch[3].split('-');
@@ -7232,10 +7232,10 @@ function parseSafetyEmail(message, skipPdfExtraction) {
             var year = parseInt(dateParts[2]);
             reportDate = new Date(year, month, day, 12, 0, 0);
           }
-          Logger.log("Parsed X# vehicle from subject: " + vehicleNumber);
+          Logger.log("Parsed vehicle from subject: " + vehicleNumber);
         } else {
-          // Fallback: try to extract any numeric equipment number
-          var altMatch = subject.match(/(X?\d+)\s*-\s*(\d{3}-\d{1,2})/i);
+          // Fallback: try to extract any equipment number and job number
+          var altMatch = subject.match(/([A-Z0-9]+)\s*-\s*(\d{3}-\d{1,2})/i);
           if (altMatch) {
             vehicleNumber = altMatch[1].toUpperCase();
             jobNumber = altMatch[2];
@@ -18006,7 +18006,8 @@ function diagnoseEmailLogOverlap() {
     'subject:"Job Hazard Report" newer_than:14d',
     'subject:"Safety Meeting Report" newer_than:14d',
     'subject:"Weekly Safety Repairs" newer_than:14d',
-    'subject:"Safety Checklist Report" newer_than:14d'
+    'subject:"Safety Checklist Report" newer_than:14d',
+    'subject:"Safety Check List Report" newer_than:14d'
   ];
   var allThreads = [];
   queries.forEach(function(q) {
@@ -18640,7 +18641,8 @@ function diagnoseGmailSearch() {
     { name: 'Job Hazard Report', query: 'subject:"Job Hazard Report" newer_than:14d' },
     { name: 'Safety Meeting Report', query: 'subject:"Safety Meeting Report" newer_than:14d' },
     { name: 'Weekly Safety Repairs', query: 'subject:"Weekly Safety Repairs" newer_than:14d' },
-    { name: 'Safety Checklist Report', query: 'subject:"Safety Checklist Report" newer_than:14d' }
+    { name: 'Safety Checklist Report', query: 'subject:"Safety Checklist Report" newer_than:14d' },
+    { name: 'Safety Check List Report', query: 'subject:"Safety Check List Report" newer_than:14d' }
   ];
 
   // Load existing email IDs from log sheets
