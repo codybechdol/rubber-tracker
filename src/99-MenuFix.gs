@@ -280,6 +280,7 @@ function _buildGloveManagerMenu() {
           .addItem('📥 Import Data', 'showImportDialog')
           .addSeparator()
           .addItem('🧹 Clean & Sort Expiring Certs Sheet', 'removeExpCertRowGroups')
+          .addItem('✨ Migrate Expiring Certs (Add Date Acquired Column)', 'migrateExpiringCertsSheetForDateAcquired')
           .addItem('📜 Expiring Certs Setup', 'showExpiringCertsSetupDialog'))
         .addSeparator()
         .addItem('🔍 Diagnose Auth Issues', 'diagnoseAuthIssues')

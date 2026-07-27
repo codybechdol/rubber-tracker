@@ -2845,8 +2845,9 @@ function invalidateCertsOnEmployeeRehire(employeeName) {
       var rowCert = String(data[i][1] || '').trim().toLowerCase();
 
       if (rowEmp === searchEmp && rehireCertNames.indexOf(rowCert) !== -1) {
-        // Clear expiration date so new To Do tasks are created upon rehire
+        // Clear Date Acquired (Col C = 3) and Expiration Date (Col D = 4) so new To Do tasks are created upon rehire
         expiringSheet.getRange(i + 1, 3).setValue('');
+        expiringSheet.getRange(i + 1, 4).setValue('');
         resetCount++;
         Logger.log('Reset cert date for rehired employee ' + employeeName + ' - Cert: ' + data[i][1]);
       }
@@ -2859,6 +2860,60 @@ function invalidateCertsOnEmployeeRehire(employeeName) {
   } catch (e) {
     Logger.log('Error in invalidateCertsOnEmployeeRehire: ' + e.message);
     return 0;
+  }
+}
+
+/**
+ * Migrates the Expiring Certs sheet to 9 columns by inserting Column C ("Date Acquired").
+ * Safely shifts existing Expiration Date (Col C -> D), Location (Col D -> E), Job # (Col E -> F),
+ * Days Until Expiration (Col F -> G), Status (Col G -> H), and SMS (Col H -> I).
+ * @return {Object} Result with status and message
+ */
+function migrateExpiringCertsSheetForDateAcquired() {
+  try {
+    Logger.log('=== migrateExpiringCertsSheetForDateAcquired START ===');
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('Expiring Certs');
+    if (!sheet) {
+      return { success: false, message: 'Expiring Certs sheet not found' };
+    }
+
+    var lastCol = sheet.getLastColumn();
+    var headers = sheet.getRange(1, 1, 1, Math.max(lastCol, 1)).getValues()[0];
+    var col3Header = String(headers[2] || '').trim().toLowerCase();
+
+    if (col3Header === 'date acquired' || col3Header === 'acquired date') {
+      Logger.log('Expiring Certs sheet already has Date Acquired as Column C. No migration needed.');
+      return { success: true, message: 'Expiring Certs sheet already migrated (Date Acquired exists as Column C).' };
+    }
+
+    // Insert new Column C
+    sheet.insertColumnAfter(2); // Inserts column at index 3 (Column C)
+
+    // Set new 9-column headers
+    var newHeaders = ['Employee Name', 'Item Type', 'Date Acquired', 'Expiration Date', 'Location', 'Job #', 'Days Until Expiration', 'Status', 'SMS'];
+    sheet.getRange(1, 1, 1, newHeaders.length).setValues([newHeaders]);
+    sheet.getRange(1, 1, 1, newHeaders.length).setFontWeight('bold').setBackground('#1a73e8').setFontColor('#ffffff');
+
+    var lastRow = sheet.getLastRow();
+    if (lastRow >= 2) {
+      var numRows = lastRow - 1;
+
+      // Update formulas for Column G (Days Until Expiration) and Column H (Status)
+      for (var r = 2; r <= lastRow; r++) {
+        sheet.getRange(r, 7).setFormula('=IF(ISBLANK(D' + r + '),"N/A",DAYS(D' + r + ',TODAY()))');
+        sheet.getRange(r, 8).setFormula('=IF(G' + r + '="PRIORITY - Need Copy","PRIORITY - Need Copy",IF(G' + r + '="N/A","No Date Set",IF(G' + r + '<0,"EXPIRED",IF(G' + r + '<=7,"CRITICAL",IF(G' + r + '<=30,"WARNING",IF(G' + r + '<=60,"UPCOMING","OK"))))))');
+      }
+
+      // Format date columns C and D
+      sheet.getRange(2, 3, numRows, 2).setNumberFormat('yyyy-mm-dd');
+    }
+
+    Logger.log('Successfully migrated Expiring Certs sheet to 9 columns (Date Acquired as Column C).');
+    return { success: true, message: '✅ Expiring Certs sheet successfully migrated! Added Column C: Date Acquired.' };
+  } catch (e) {
+    Logger.log('Error in migrateExpiringCertsSheetForDateAcquired: ' + e.message);
+    return { success: false, message: 'Migration failed: ' + e.message };
   }
 }
 
@@ -4298,10 +4353,10 @@ function sortExpiringCertsSheet(sheet) {
   // Write values back
   range.setValues(values);
 
-  // Set number format for Expiration Date column (Column C) to MM/dd/yyyy to strip time values
-  sheet.getRange(2, 3, values.length, 1).setNumberFormat('MM/dd/yyyy');
+  // Set number format for Date Acquired (Col C) and Expiration Date (Col D) to yyyy-mm-dd
+  sheet.getRange(2, 3, values.length, 2).setNumberFormat('yyyy-mm-dd');
 
-  // Re-write formulas for Column F (Days Until) and Column G (Status)
+  // Re-write formulas for Column G (Days Until) and Column H (Status)
   var nonExpiringList = [
     'Crane Evaluation',
     'OSHA 1910',
@@ -4363,7 +4418,7 @@ function sortExpiringCertsSheet(sheet) {
     var certType = String(values[f][1] || '').trim();
     var isNonExpiring = nonExpiringList.indexOf(certType) !== -1;
 
-    // Formulas for Column F and Column G
+    // Formulas for Column G (7) and Column H (8)
     if (isNonExpiring) {
       formulas.push([
         '="N/A"',
@@ -4371,12 +4426,12 @@ function sortExpiringCertsSheet(sheet) {
       ]);
     } else {
       formulas.push([
-        '=IF(ISBLANK(C' + rowNum + '),"N/A",DAYS(C' + rowNum + ',TODAY()))',
-        '=IF(F' + rowNum + '="PRIORITY - Need Copy","PRIORITY - Need Copy",IF(F' + rowNum + '="N/A","No Date Set",IF(F' + rowNum + '<0,"EXPIRED",IF(F' + rowNum + '<=7,"CRITICAL",IF(F' + rowNum + '<=30,"WARNING",IF(F' + rowNum + '<=60,"UPCOMING","OK"))))))'
+        '=IF(ISBLANK(D' + rowNum + '),"N/A",DAYS(D' + rowNum + ',TODAY()))',
+        '=IF(G' + rowNum + '="PRIORITY - Need Copy","PRIORITY - Need Copy",IF(G' + rowNum + '="N/A","No Date Set",IF(G' + rowNum + '<0,"EXPIRED",IF(G' + rowNum + '<=7,"CRITICAL",IF(G' + rowNum + '<=30,"WARNING",IF(G' + rowNum + '<=60,"UPCOMING","OK"))))))'
       ]);
     }
 
-    // Static Column H
+    // Static Column I (SMS)
     var resolvedName = resolveEmployeeName(empName, alternateNameMap);
     var taskKey = resolvedName.toLowerCase().trim() + '|' + certType.toLowerCase().trim();
     var hasPhone = !!empPhones[resolvedName.toLowerCase().trim()];
@@ -4394,11 +4449,11 @@ function sortExpiringCertsSheet(sheet) {
     }
   }
 
-  // Set formulas for F and G
-  sheet.getRange(2, 6, values.length, 2).setFormulas(formulas);
+  // Set formulas for G and H
+  sheet.getRange(2, 7, values.length, 2).setFormulas(formulas);
 
-  // Set values and validations for H
-  var smsRange = sheet.getRange(2, 8, values.length, 1);
+  // Set values and validations for I (SMS)
+  var smsRange = sheet.getRange(2, 9, values.length, 1);
   smsRange.clearDataValidations().clearContent();
   smsRange.setValues(smsValues);
   smsRange.setDataValidations(smsValidations);
@@ -6525,6 +6580,9 @@ function updateCertExpirationFromTask(employee, certType, newExpiration, task, a
       }
     }
 
+    // Ensure migration check has run
+    migrateExpiringCertsSheetForDateAcquired();
+
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var expiringSheet = ss.getSheetByName('Expiring Certs');
 
@@ -6535,10 +6593,11 @@ function updateCertExpirationFromTask(employee, certType, newExpiration, task, a
     var data = expiringSheet.getDataRange().getValues();
     var updated = false;
 
-    // Column indices (0-based) - A=Employee Name, B=Item Type, C=Expiration Date
+    // 9-Column layout: A=Employee Name, B=Item Type, C=Date Acquired, D=Expiration Date, E=Location, F=Job #, G=Days, H=Status, I=SMS
     var empCol = 0;
     var certTypeCol = 1;
-    var expirationCol = 2;
+    var acqCol = 2;       // Column C
+    var expirationCol = 3; // Column D
 
     // Find and update the matching row
     var empList = getEmployeeNamesForMatching();
@@ -6547,14 +6606,17 @@ function updateCertExpirationFromTask(employee, certType, newExpiration, task, a
     var searchEmp = resolveEmployeeName(employee || '', alternateNameMap).trim().toLowerCase();
     var searchCert = String(certType || '').trim().toLowerCase();
 
+    var acqDateVal = acquiredDate ? parseDateNoon(acquiredDate) : '';
+    var expDateVal = newExpiration ? parseDateNoon(newExpiration) : '';
+
     for (var i = 1; i < data.length; i++) {
       var rowEmp = resolveEmployeeName(data[i][empCol] || '', alternateNameMap).trim().toLowerCase();
       var rowCert = String(data[i][certTypeCol] || '').trim().toLowerCase();
 
       if (rowEmp === searchEmp && rowCert === searchCert) {
-        // Update the expiration date
-        var dateValue = newExpiration ? parseDateNoon(newExpiration) : '';
-        expiringSheet.getRange(i + 1, expirationCol + 1).setValue(dateValue);
+        // Update Date Acquired (Col C = 3) and Expiration Date (Col D = 4)
+        if (acqDateVal) expiringSheet.getRange(i + 1, 3).setValue(acqDateVal);
+        if (expDateVal) expiringSheet.getRange(i + 1, 4).setValue(expDateVal);
         updated = true;
         Logger.log('updateCertExpirationFromTask: Updated row ' + (i + 1) + ' for ' + employee + ' - ' + certType);
         break;
@@ -6575,23 +6637,24 @@ function updateCertExpirationFromTask(employee, certType, newExpiration, task, a
 
       var newLocation = matchedEmp ? matchedEmp.location : '';
       var newJobNum = matchedEmp ? matchedEmp.jobNum : '';
-      var dateValue = newExpiration ? parseDateNoon(newExpiration) : '';
       var newRowIndex = expiringSheet.getLastRow() + 1;
 
-      // Column structure: Employee Name, Item Type, Expiration Date, Location, Job #, Days Until Expiration, Status
+      // 9-Column structure: Employee Name, Item Type, Date Acquired, Expiration Date, Location, Job #, Days Until Expiration, Status, SMS
       expiringSheet.appendRow([
-        employee,      // Employee Name
-        certType,      // Item Type
-        dateValue,     // Expiration Date
-        newLocation,
-        newJobNum,
-        '',            // Formula will be set next
-        ''             // Formula will be set next
+        employee,      // Col A: Employee Name
+        certType,      // Col B: Item Type
+        acqDateVal,    // Col C: Date Acquired
+        expDateVal,    // Col D: Expiration Date
+        newLocation,   // Col E: Location
+        newJobNum,     // Col F: Job #
+        '',            // Col G: Formula (Days Until Expiration)
+        '',            // Col H: Formula (Status)
+        ''             // Col I: SMS Checkbox
       ]);
 
-      // Set formulas
-      expiringSheet.getRange(newRowIndex, 6).setFormula('=IF(ISBLANK(C' + newRowIndex + '),"N/A",DAYS(C' + newRowIndex + ',TODAY()))');
-      expiringSheet.getRange(newRowIndex, 7).setFormula('=IF(F' + newRowIndex + '="PRIORITY - Need Copy","PRIORITY - Need Copy",IF(F' + newRowIndex + '="N/A","No Date Set",IF(F' + newRowIndex + '<0,"EXPIRED",IF(F' + newRowIndex + '<=7,"CRITICAL",IF(F' + newRowIndex + '<=30,"WARNING",IF(F' + newRowIndex + '<=60,"UPCOMING","OK"))))))');
+      // Set formulas for Col G and Col H
+      expiringSheet.getRange(newRowIndex, 7).setFormula('=IF(ISBLANK(D' + newRowIndex + '),"N/A",DAYS(D' + newRowIndex + ',TODAY()))');
+      expiringSheet.getRange(newRowIndex, 8).setFormula('=IF(G' + newRowIndex + '="PRIORITY - Need Copy","PRIORITY - Need Copy",IF(G' + newRowIndex + '="N/A","No Date Set",IF(G' + newRowIndex + '<0,"EXPIRED",IF(G' + newRowIndex + '<=7,"CRITICAL",IF(G' + newRowIndex + '<=30,"WARNING",IF(G' + newRowIndex + '<=60,"UPCOMING","OK"))))))');
 
       updated = true;
       Logger.log('updateCertExpirationFromTask: Created new row for ' + employee + ' - ' + certType);
@@ -7017,29 +7080,28 @@ function getExpiringCertsForSchedule() {
     }
 
     var numRows = expiringSheet.getLastRow() - 1;
-    var dataA = expiringSheet.getRange(2, 1, numRows, 1).getValues(); // Employee Name
-    var dataB = expiringSheet.getRange(2, 2, numRows, 1).getValues(); // Cert Type
-    var dataC = expiringSheet.getRange(2, 3, numRows, 1).getValues(); // Expiration Date
-    var dataF = expiringSheet.getRange(2, 6, numRows, 1).getValues(); // Days Until
-
-    // Check for Declined Date column
+    var rawData = expiringSheet.getRange(2, 1, numRows, expiringSheet.getLastColumn()).getValues();
     var headers = expiringSheet.getRange(1, 1, 1, expiringSheet.getLastColumn()).getValues()[0];
-    var declinedColIndex = -1;
+
+    var nameColIdx = 0, certTypeColIdx = 1, acqColIdx = -1, expColIdx = 2, daysColIdx = 5, declinedColIndex = -1;
+
     for (var h = 0; h < headers.length; h++) {
-      if (String(headers[h]).toLowerCase().trim() === 'declined date') {
-        declinedColIndex = h;
-        break;
-      }
+      var hdr = String(headers[h]).toLowerCase().trim();
+      if (hdr === 'employee name' || hdr === 'name') nameColIdx = h;
+      if (hdr === 'item type' || hdr === 'cert type' || hdr === 'certification type') certTypeColIdx = h;
+      if (hdr === 'date acquired' || hdr === 'acquired date' || hdr === 'class date') acqColIdx = h;
+      if (hdr === 'expiration date' || hdr === 'exp date') expColIdx = h;
+      if (hdr === 'days until expiration' || hdr === 'days until') daysColIdx = h;
+      if (hdr === 'declined date') declinedColIndex = h;
     }
-    var declinedData = declinedColIndex >= 0 ?
-      expiringSheet.getRange(2, declinedColIndex + 1, numRows, 1).getValues() : null;
 
     var certs = [];
     for (var i = 0; i < numRows; i++) {
-      var empName = String(dataA[i][0] || '').trim();
-      var certType = String(dataB[i][0] || '').trim();
-      var expDate = dataC[i][0];
-      var daysUntil = dataF[i][0];
+      var empName = String(rawData[i][nameColIdx] || '').trim();
+      var certType = String(rawData[i][certTypeColIdx] || '').trim();
+      var acqDate = acqColIdx >= 0 ? rawData[i][acqColIdx] : null;
+      var expDate = expColIdx >= 0 ? rawData[i][expColIdx] : null;
+      var daysUntil = daysColIdx >= 0 ? rawData[i][daysColIdx] : null;
 
       if (!empName || !certType) continue;
 
@@ -7052,6 +7114,13 @@ function getExpiringCertsForSchedule() {
 
       // Use the resolved canonical name going forward
       empName = resolvedName;
+
+      var acqDateStr = '';
+      if (acqDate instanceof Date && !isNaN(acqDate.getTime())) {
+        acqDateStr = Utilities.formatDate(acqDate, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+      } else if (acqDate) {
+        acqDateStr = String(acqDate);
+      }
 
       var expDateStr = '';
       if (expDate instanceof Date && !isNaN(expDate.getTime())) {
@@ -7089,7 +7158,7 @@ function getExpiringCertsForSchedule() {
 
       if (isNonExpiring) {
         // If there's a date, it is complete - don't treat as "expired"
-        if (expDateStr) {
+        if (expDateStr || acqDateStr) {
           adjustedDaysUntil = null; // No "days until" for completed non-expiring cert
         }
       }
@@ -7100,6 +7169,7 @@ function getExpiringCertsForSchedule() {
       certs.push({
         employee: empName,
         certType: certType,
+        dateAcquired: acqDateStr,
         expirationDate: expDateStr,
         daysUntilExpiration: adjustedDaysUntil,
         location: employeeLocations[empName.toLowerCase()] || 'Unknown',
@@ -7152,41 +7222,36 @@ function markCertAsRenewed(employee, certType) {
 
       if (empName.toLowerCase() === employee.toLowerCase() &&
           rowCertType.toLowerCase() === certType.toLowerCase()) {
-        // Update expiration date to today (for non-expiring like Crane Evaluation)
-        // or to 2 years from now (for expiring certs like CPR)
+        var todayDate = new Date();
         var newDate = new Date();
         if (certType === 'Crane Evaluation') {
           // Non-expiring cert - just update the date to today
-          expiringSheet.getRange(i + 1, 3).setValue(newDate);
         } else if (certType === '1st Aid' || certType === 'CPR' || certType === 'First Aid') {
           // These expire in 2 years
           newDate.setFullYear(newDate.getFullYear() + 2);
-          expiringSheet.getRange(i + 1, 3).setValue(newDate);
         } else if (certType === 'Pole Top Rescue' || certType === 'Coin CPR' || certType === 'Harassment Training') {
           // Annual certs expire in 1 year
           newDate.setFullYear(newDate.getFullYear() + 1);
-          expiringSheet.getRange(i + 1, 3).setValue(newDate);
         } else if (certType === 'Crane Cert') {
           // Crane cert expires in 5 years
           newDate.setFullYear(newDate.getFullYear() + 5);
-          expiringSheet.getRange(i + 1, 3).setValue(newDate);
         } else if (certType === 'MEC Expiration' || certType === 'MEC') {
           // MEC expires in 2 years
           newDate.setFullYear(newDate.getFullYear() + 2);
-          expiringSheet.getRange(i + 1, 3).setValue(newDate);
         } else if (certType === 'DL Expiration' || certType === 'DL') {
           // DL expires in 8 years (varies by state)
           newDate.setFullYear(newDate.getFullYear() + 8);
-          expiringSheet.getRange(i + 1, 3).setValue(newDate);
         } else if (certType === 'Harassment Training') {
           // Harassment training typically annual
           newDate.setFullYear(newDate.getFullYear() + 1);
-          expiringSheet.getRange(i + 1, 3).setValue(newDate);
         } else {
           // Default: 2 years
           newDate.setFullYear(newDate.getFullYear() + 2);
-          expiringSheet.getRange(i + 1, 3).setValue(newDate);
         }
+
+        // Write Date Acquired to Col C (3) and Expiration Date to Col D (4)
+        expiringSheet.getRange(i + 1, 3).setValue(todayDate);
+        expiringSheet.getRange(i + 1, 4).setValue(newDate);
 
         found = true;
         Logger.log('Updated ' + certType + ' for ' + employee + ' to ' + newDate);

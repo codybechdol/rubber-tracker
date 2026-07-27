@@ -6456,10 +6456,15 @@
       }
       if (cert.isDeclined && cert.declinedDate) {
         html += '<div class="text-danger small"><i class="bi bi-x-circle"></i> Declined: ' + cert.declinedDate + '</div>';
-      } else if (cert.isNonExpiring && cert.expirationDate) {
-        html += '<div class="text-muted small"><i class="bi bi-calendar-check"></i> Completed: ' + cert.expirationDate + '</div>';
-      } else if (cert.expirationDate) {
-        html += '<div class="text-muted small"><i class="bi bi-calendar"></i> Expires: ' + cert.expirationDate + '</div>';
+      } else if (cert.isNonExpiring && (cert.expirationDate || cert.dateAcquired)) {
+        html += '<div class="text-muted small"><i class="bi bi-calendar-check"></i> Issued/Acquired: ' + (cert.dateAcquired || cert.expirationDate) + '</div>';
+      } else {
+        if (cert.dateAcquired) {
+          html += '<div class="text-muted small"><i class="bi bi-calendar-event"></i> Acquired: ' + cert.dateAcquired + '</div>';
+        }
+        if (cert.expirationDate) {
+          html += '<div class="text-muted small"><i class="bi bi-calendar"></i> Expires: ' + cert.expirationDate + '</div>';
+        }
       }
       html += '</div>';
 
