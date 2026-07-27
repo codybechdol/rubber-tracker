@@ -2887,23 +2887,32 @@ function migrateExpiringCertsSheetForDateAcquired() {
       return { success: true, message: 'Expiring Certs sheet already migrated (Date Acquired exists as Column C).' };
     }
 
-    // Insert new Column C
-    sheet.insertColumnAfter(2); // Inserts column at index 3 (Column C)
+    var lastRow = sheet.getLastRow();
+    if (lastRow >= 2) {
+      // Clear contents of old formula columns F and G so shifted formulas don't corrupt
+      sheet.getRange(2, 6, lastRow - 1, 2).clearContent().clearDataValidations();
+    }
+
+    // Insert new Column C at position 3
+    sheet.insertColumnAfter(2); // Col A=1, B=2. Inserts blank column C at position 3!
 
     // Set new 9-column headers
     var newHeaders = ['Employee Name', 'Item Type', 'Date Acquired', 'Expiration Date', 'Location', 'Job #', 'Days Until Expiration', 'Status', 'SMS'];
     sheet.getRange(1, 1, 1, newHeaders.length).setValues([newHeaders]);
     sheet.getRange(1, 1, 1, newHeaders.length).setFontWeight('bold').setBackground('#1a73e8').setFontColor('#ffffff');
 
-    var lastRow = sheet.getLastRow();
     if (lastRow >= 2) {
       var numRows = lastRow - 1;
 
       // Update formulas for Column G (Days Until Expiration) and Column H (Status)
+      var formulas = [];
       for (var r = 2; r <= lastRow; r++) {
-        sheet.getRange(r, 7).setFormula('=IF(ISBLANK(D' + r + '),"N/A",DAYS(D' + r + ',TODAY()))');
-        sheet.getRange(r, 8).setFormula('=IF(G' + r + '="PRIORITY - Need Copy","PRIORITY - Need Copy",IF(G' + r + '="N/A","No Date Set",IF(G' + r + '<0,"EXPIRED",IF(G' + r + '<=7,"CRITICAL",IF(G' + r + '<=30,"WARNING",IF(G' + r + '<=60,"UPCOMING","OK"))))))');
+        formulas.push([
+          '=IF(ISBLANK(D' + r + '),"N/A",DAYS(D' + r + ',TODAY()))',
+          '=IF(G' + r + '="PRIORITY - Need Copy","PRIORITY - Need Copy",IF(G' + r + '="N/A","No Date Set",IF(G' + r + '<0,"EXPIRED",IF(G' + r + '<=7,"CRITICAL",IF(G' + r + '<=30,"WARNING",IF(G' + r + '<=60,"UPCOMING","OK"))))))'
+        ]);
       }
+      sheet.getRange(2, 7, numRows, 2).setFormulas(formulas);
 
       // Format date columns C and D
       sheet.getRange(2, 3, numRows, 2).setNumberFormat('yyyy-mm-dd');
@@ -4310,6 +4319,17 @@ function sortExpiringCertsSheet(sheet) {
   if (lastRow < 2) return;
 
   var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(1, 1, 1, Math.max(lastCol, 1)).getValues()[0];
+  var col3Header = String(headers[2] || '').trim().toLowerCase();
+
+  // If sheet is in legacy 8-column layout (Col C is Expiration Date), auto-migrate to 9 columns first!
+  if (col3Header !== 'date acquired' && col3Header !== 'acquired date') {
+    Logger.log('sortExpiringCertsSheet: Auto-migrating 8-column Expiring Certs sheet to 9 columns...');
+    migrateExpiringCertsSheetForDateAcquired();
+    lastRow = sheet.getLastRow();
+    lastCol = sheet.getLastColumn();
+  }
+
   var range = sheet.getRange(2, 1, lastRow - 1, lastCol);
   var values = range.getValues();
 
