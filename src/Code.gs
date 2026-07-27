@@ -4501,6 +4501,12 @@ function sortExpiringCertsSheet(sheet) {
   smsRange.setValues(smsValues);
   smsRange.setDataValidations(smsValidations);
   smsRange.setHorizontalAlignment("center");
+
+  // Clear any stray extra columns beyond Column I (Column 9)
+  var currentLastCol = sheet.getLastColumn();
+  if (currentLastCol > 9) {
+    sheet.getRange(1, 10, sheet.getLastRow(), currentLastCol - 9).clearContent().clearDataValidations().clearFormat();
+  }
   
   // Re-apply conditional formatting rules to Status column (Col H)
   applyExpiringCertsFormatting(sheet, values.length);
