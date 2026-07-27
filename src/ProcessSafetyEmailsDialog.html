@@ -226,6 +226,10 @@
     var allForemen = [];
     var jobMappings = [];
     var pendingUnknownJobs = [];
+    var totalProcessed = 0;
+    var totalSkipped = 0;
+    var totalUncredited = 0;
+    var totalIssues = 0;
 
     // Initialize
     document.addEventListener('DOMContentLoaded', function() {
@@ -428,6 +432,10 @@
           progressBar.style.width = "0%";
           progressBar.textContent = "Starting...";
           isFirstCall = false;
+          totalProcessed = 0;
+          totalSkipped = 0;
+          totalUncredited = 0;
+          totalIssues = 0;
         }
 
         var modeText = newOnlyMode ? "new emails only" : "last " + days + " days";
@@ -517,6 +525,10 @@
             currentDays = startDateVal; // Storing date string as the query parameter
             newOnlyMode = false;
             isFirstCall = false;
+            totalProcessed = 0;
+            totalSkipped = 0;
+            totalUncredited = 0;
+            totalIssues = 0;
 
             document.getElementById("newOnlyMode").checked = false;
             updateDaysBackState();
@@ -560,6 +572,13 @@
       var progressBar = document.getElementById("progressBar");
 
       try {
+        if (result && !result.needsJobAssignment && !result.needsApproval) {
+          totalProcessed += (result.processedThisBatch || 0);
+          totalSkipped += (result.skippedThisBatch || 0);
+          totalUncredited += (result.uncreditedThisBatch || 0);
+          totalIssues += (result.issuesThisBatch || 0);
+        }
+
         // Check for unknown jobs that need user decision
         if (result && result.needsJobAssignment && result.unknownJobs && result.unknownJobs.length > 0) {
           showUnknownJobsModal(result.unknownJobs);
@@ -579,7 +598,7 @@
             "⏱️ <span class='progress' style='color:#e67c00;'>Stopped to prevent timeout</span><br>" +
             "<div class='info'>⏱️ Elapsed time: " + result.elapsedSeconds + " seconds</div>" +
             "<div class='info'>Progress: " + result.threadsProcessed + " / " + result.totalThreads + " emails (" + pct + "%)</div>" +
-            "<div class='info'>This batch: " + result.processedThisBatch + " processed, " + result.skippedThisBatch + " skipped</div>" +
+            "<div class='info'>Running totals: " + totalProcessed + " processed, " + totalSkipped + " skipped, " + totalUncredited + " not credited, " + totalIssues + " equipment issues found</div>" +
             "<div class='info' style='color:#28a745;font-weight:bold;'>✅ Progress saved! Click 'Continue Processing' to resume.</div>";
 
           btn.disabled = false;
@@ -678,8 +697,7 @@
             "<div class='info'>📧 " + (result.earlyExit
               ? "Threads checked: " + result.threadsProcessed + " of " + result.totalThreads + " (stopped early — no new emails in remaining batches)"
               : "Total emails processed: " + result.totalThreads) + "</div>" +
-            "<div class='info'>This batch: " + result.processedThisBatch + " processed, " + result.skippedThisBatch + " skipped</div>" +
-            "<div class='info'>Equipment issues found: " + result.issuesThisBatch + "</div>" +
+            "<div class='info'>Running totals: " + totalProcessed + " processed, " + totalSkipped + " skipped, " + totalUncredited + " not credited, " + totalIssues + " equipment issues found</div>" +
             logsInfo + complianceInfo + skipInfo + pdfWarningInfo;
 
           btn.style.background = "#34A853";
@@ -723,7 +741,6 @@
           progressBar.textContent = result.threadsProcessed + " of " + result.totalThreads + " (" + pct + "%)";
 
           // Build in-progress skip summary for display during processing
-          // Build in-progress skip summary for display during processing
           var inProgressSkipInfo = "";
           if (result.skipReasons) {
             var sr = result.skipReasons;
@@ -741,7 +758,7 @@
           status.innerHTML =
             "📊 <span class='progress'>Processing emails...</span><br>" +
             "<div class='info'>Progress: " + result.threadsProcessed + " / " + result.totalThreads + " emails (" + pct + "%)</div>" +
-            "<div class='info'>This batch: " + result.processedThisBatch + " processed, " + result.skippedThisBatch + " skipped" + inProgressSkipInfo + ", " + result.issuesThisBatch + " issues</div>" +
+            "<div class='info'>Running totals: " + totalProcessed + " processed, " + totalSkipped + " skipped" + inProgressSkipInfo + ", " + totalUncredited + " not credited, " + totalIssues + " equipment issues found</div>" +
             "<div class='info'>⏳ Auto-continuing in 1 second...</div>";
 
           btn.innerHTML = "Processing... (" + result.threadsRemaining + " remaining)";

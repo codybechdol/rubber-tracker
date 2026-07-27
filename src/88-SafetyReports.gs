@@ -6177,6 +6177,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
       var unknownJobsEncountered = []; // Track unknown jobs for user assignment
       var processedCount = 0;
       var skippedCount = 0;
+      var uncreditedThisBatch = 0;
       var lastProcessedIndex = 0;
       var logsCreated = { jha: 0, weekly: 0, monthly: 0 }; // Track Option B logs
       var rowsCollector = [];
@@ -6240,6 +6241,9 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
               else if (logResult.logSheet === MONTHLY_CHECKLIST_LOG_SHEET_NAME) logsCreated.monthly++;
               // Mark this email as processed to avoid re-processing in subsequent batches
               existingEmailIds[messageId] = true;
+              if (!logResult.creditedTo || logResult.status === 'Unknown Job' || logResult.status === 'Uncredited') {
+                uncreditedThisBatch++;
+              }
             } else if (logResult.reason === 'duplicate') {
               skippedCount++;
               skipReasons.logDuplicate++;
@@ -6270,6 +6274,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
                 skipReasons.unknownJob++;
               }
               skippedCount++;
+              uncreditedThisBatch++;
             } else if (parsed.skippedReason === "User skipped") {
               // User already decided to skip this job - log it but don't prompt again
               Logger.log("Silently skipping user-skipped job: " + (parsed.reportMeta ? parsed.reportMeta.jobNumber : 'unknown'));
@@ -6385,6 +6390,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
           totalBatches: Math.ceil(allThreads.length / batchSize),
           processedThisBatch: processedCount,
           skippedThisBatch: skippedCount,
+          uncreditedThisBatch: uncreditedThisBatch,
           skipReasons: skipReasons,
           issuesThisBatch: issues.length,
           totalThreads: allThreads.length,
@@ -6590,6 +6596,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     totalBatches: Math.ceil(allThreads.length / batchSize),
     processedThisBatch: processedCount,
     skippedThisBatch: skippedCount,
+    uncreditedThisBatch: uncreditedThisBatch,
     skipReasons: skipReasons, // Breakdown of why emails were skipped
     issuesThisBatch: issues.length,
     complianceRecordsAdded: complianceRecords.length,
