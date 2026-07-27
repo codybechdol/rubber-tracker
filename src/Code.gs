@@ -2902,20 +2902,8 @@ function migrateExpiringCertsSheetForDateAcquired() {
     sheet.getRange(1, 1, 1, newHeaders.length).setFontWeight('bold').setBackground('#1a73e8').setFontColor('#ffffff');
 
     if (lastRow >= 2) {
-      var numRows = lastRow - 1;
-
-      // Update formulas for Column G (Days Until Expiration) and Column H (Status)
-      var formulas = [];
-      for (var r = 2; r <= lastRow; r++) {
-        formulas.push([
-          '=IF(ISBLANK(D' + r + '),"N/A",DAYS(D' + r + ',TODAY()))',
-          '=IF(G' + r + '="PRIORITY - Need Copy","PRIORITY - Need Copy",IF(G' + r + '="N/A","No Date Set",IF(G' + r + '<0,"EXPIRED",IF(G' + r + '<=7,"CRITICAL",IF(G' + r + '<=30,"WARNING",IF(G' + r + '<=60,"UPCOMING","OK"))))))'
-        ]);
-      }
-      sheet.getRange(2, 7, numRows, 2).setFormulas(formulas);
-
-      // Format date columns C and D
-      sheet.getRange(2, 3, numRows, 2).setNumberFormat('yyyy-mm-dd');
+      // Delegate sorting, date placement (shifting date to Col C for non-expiring certs), formula generation, and formatting to sortExpiringCertsSheet
+      sortExpiringCertsSheet(sheet);
     }
 
     Logger.log('Successfully migrated Expiring Certs sheet to 9 columns (Date Acquired as Column C).');
@@ -4358,6 +4346,42 @@ function sortExpiringCertsSheet(sheet) {
     return idx === -1 ? 999 : idx;
   }
 
+  // Re-write formulas for Column G (Days Until) and Column H (Status)
+  var nonExpiringList = [
+    'Crane Evaluation',
+    'OSHA 1910',
+    'BNSF',
+    'MSHA',
+    'EICA Basic Helicopter Line Construction Safety'
+  ];
+  try {
+    var configRaw = PropertiesService.getScriptProperties().getProperty('EXPIRING_CERTS_CONFIG');
+    if (configRaw) {
+      var parsedCfg = JSON.parse(configRaw);
+      if (parsedCfg && Array.isArray(parsedCfg.certs)) {
+        parsedCfg.certs.forEach(function(c) {
+          if (c.category === 'non_expiring' && c.name) {
+            var n = String(c.name).trim();
+            if (nonExpiringList.indexOf(n) === -1) nonExpiringList.push(n);
+          }
+        });
+      }
+    }
+  } catch (e) {}
+
+  // For non-expiring certs: if Date Acquired (Col C) is blank and Expiration Date (Col D) has a date, move date to Col C
+  for (var v = 0; v < values.length; v++) {
+    var rowCert = String(values[v][1] || '').trim();
+    if (nonExpiringList.indexOf(rowCert) !== -1) {
+      var acqVal = values[v][2];
+      var expVal = values[v][3];
+      if (!acqVal && expVal) {
+        values[v][2] = expVal;
+        values[v][3] = '';
+      }
+    }
+  }
+
   // Sort values in memory
   values.sort(function(a, b) {
     var nameA = String(a[0] || '').trim().toLowerCase();
@@ -4375,15 +4399,6 @@ function sortExpiringCertsSheet(sheet) {
 
   // Set number format for Date Acquired (Col C) and Expiration Date (Col D) to yyyy-mm-dd
   sheet.getRange(2, 3, values.length, 2).setNumberFormat('yyyy-mm-dd');
-
-  // Re-write formulas for Column G (Days Until) and Column H (Status)
-  var nonExpiringList = [
-    'Crane Evaluation',
-    'OSHA 1910',
-    'BNSF',
-    'MSHA',
-    'EICA Basic Helicopter Line Construction Safety'
-  ];
 
   // Get notified tasks from Task Metadata once for efficiency
   var metaSheet = sheet.getParent().getSheetByName('Task Metadata');
@@ -4442,7 +4457,7 @@ function sortExpiringCertsSheet(sheet) {
     if (isNonExpiring) {
       formulas.push([
         '="N/A"',
-        '=IF(ISBLANK(C' + rowNum + '),"No Date Set","OK")'
+        '=IF(AND(ISBLANK(C' + rowNum + '),ISBLANK(D' + rowNum + ')),"No Date Set","OK")'
       ]);
     } else {
       formulas.push([
