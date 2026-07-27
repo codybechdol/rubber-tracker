@@ -420,7 +420,7 @@
       var segments = Math.ceil(len / 160) || 1;
       var countEl = document.getElementById('cnt_' + el.id);
       if (countEl) {
-        countEl.textContent = len + ' chars (' + segments + ' SMS' + (segments > 1 ? 's' : '') + ')';
+        countEl.textContent = len + ' chars (' + segments + ' SMS message' + (segments > 1 ? 's' : '') + ')';
         countEl.className = 'char-counter' + (len > 160 ? (len > 320 ? ' danger' : ' warning') : '');
       }
     }
