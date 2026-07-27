@@ -4189,7 +4189,8 @@ function cleanupCertTasksFromManualTasks() {
  * Applies conditional formatting to Expiring Certs sheet.
  */
 function applyExpiringCertsFormatting(sheet, dataRows) {
-  var statusRange = sheet.getRange(2, 7, dataRows, 1);
+  if (!dataRows || dataRows < 1) return;
+  var statusRange = sheet.getRange(2, 8, dataRows, 1); // Column H (Column 8)
   var rules = [];
 
   rules.push(SpreadsheetApp.newConditionalFormatRule()
@@ -4236,6 +4237,13 @@ function applyExpiringCertsFormatting(sheet, dataRows) {
 
   rules.push(SpreadsheetApp.newConditionalFormatRule()
     .whenTextEqualTo('Non-Expiring')
+    .setBackground('#757575')
+    .setFontColor('#ffffff')
+    .setRanges([statusRange])
+    .build());
+
+  rules.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo('No Date Set')
     .setBackground('#757575')
     .setFontColor('#ffffff')
     .setRanges([statusRange])
@@ -4494,6 +4502,9 @@ function sortExpiringCertsSheet(sheet) {
   smsRange.setDataValidations(smsValidations);
   smsRange.setHorizontalAlignment("center");
   
+  // Re-apply conditional formatting rules to Status column (Col H)
+  applyExpiringCertsFormatting(sheet, values.length);
+
   Logger.log('sortExpiringCertsSheet: Sorted ' + values.length + ' rows with formulas refreshed.');
 }
 
