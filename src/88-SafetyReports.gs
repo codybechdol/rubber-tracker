@@ -5612,20 +5612,51 @@ function addResolvedRowFormatting(sheet) {
 /**
  * Gets the timestamp of when safety emails were last processed.
  * Called by ProcessSafetyEmailsDialog.html to display last run time.
+/**
+ * Helper to get property keys for last processed date/timestamp by report type filter
+ * @param {string} [reportTypeFilter] - 'JHA', 'WEEKLY', 'MONTHLY', or 'ALL'
+ * @param {boolean} [isTimestamp] - True for timestamp key, false for date key
+ * @return {string} Property key name
+ */
+function getSafetyEmailPropKey(reportTypeFilter, isTimestamp) {
+  var suffix = '';
+  if (reportTypeFilter === 'JHA') suffix = '_JHA';
+  else if (reportTypeFilter === 'WEEKLY') suffix = '_WEEKLY';
+  else if (reportTypeFilter === 'MONTHLY') suffix = '_MONTHLY';
+
+  return isTimestamp ? ('LAST_SAFETY_EMAIL_TIMESTAMP' + suffix) : ('LAST_SAFETY_EMAIL_DATE' + suffix);
+}
+
+/**
+ * Gets the last time safety emails were processed
  *
+ * @param {string} [reportTypeFilter] - Optional filter ('JHA', 'WEEKLY', 'MONTHLY', 'ALL')
  * @return {string} Timestamp string or 'Never' if not processed before
  */
-function getLastSafetyEmailProcessedTime() {
+function getLastSafetyEmailProcessedTime(reportTypeFilter) {
   var props = PropertiesService.getScriptProperties();
-  var timestamp = props.getProperty('LAST_SAFETY_EMAIL_TIMESTAMP');
+  var tsKey = getSafetyEmailPropKey(reportTypeFilter, true);
+  var dateKey = getSafetyEmailPropKey(reportTypeFilter, false);
+
+  var timestamp = props.getProperty(tsKey);
   if (timestamp) {
     return timestamp;
   }
-  // Fallback to date-only format if timestamp not available
-  var dateOnly = props.getProperty('LAST_SAFETY_EMAIL_DATE');
+  var dateOnly = props.getProperty(dateKey);
   if (dateOnly) {
     return dateOnly;
   }
+
+  // Fallback to legacy shared property if specific report type timestamp isn't set yet
+  var legacyTimestamp = props.getProperty('LAST_SAFETY_EMAIL_TIMESTAMP');
+  if (legacyTimestamp) {
+    return legacyTimestamp;
+  }
+  var legacyDateOnly = props.getProperty('LAST_SAFETY_EMAIL_DATE');
+  if (legacyDateOnly) {
+    return legacyDateOnly;
+  }
+
   return 'Never';
 }
 
@@ -5801,8 +5832,9 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   }
 
 
-  // Get last processed date for smart filtering
-  var lastProcessedDate = props.getProperty('LAST_SAFETY_EMAIL_DATE');
+  // Get last processed date for smart filtering (type-specific key first)
+  var datePropKey = getSafetyEmailPropKey(reportTypeFilter, false);
+  var lastProcessedDate = props.getProperty(datePropKey) || props.getProperty('LAST_SAFETY_EMAIL_DATE');
   var dateFilter = '';
 
   // Parse optional endDate
@@ -6531,16 +6563,24 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     var today = new Date();
     var dateStr = Utilities.formatDate(today, Session.getScriptTimeZone(), 'yyyy/MM/dd');
     var fullTimestamp = Utilities.formatDate(today, Session.getScriptTimeZone(), 'yyyy/MM/dd HH:mm:ss');
-    props.setProperty('LAST_SAFETY_EMAIL_DATE', dateStr); // For Gmail filter
-    props.setProperty('LAST_SAFETY_EMAIL_TIMESTAMP', fullTimestamp); // For display
-    Logger.log("All batches complete! Set last processed: " + fullTimestamp);
+
+    var typeDateKey = getSafetyEmailPropKey(reportTypeFilter, false);
+    var typeTsKey = getSafetyEmailPropKey(reportTypeFilter, true);
+    props.setProperty(typeDateKey, dateStr);
+    props.setProperty(typeTsKey, fullTimestamp);
+
+    if (!reportTypeFilter || reportTypeFilter === 'ALL') {
+      props.setProperty('LAST_SAFETY_EMAIL_DATE', dateStr); // For legacy / ALL Gmail filter
+      props.setProperty('LAST_SAFETY_EMAIL_TIMESTAMP', fullTimestamp); // For legacy / ALL display
+    }
+    Logger.log("All batches complete for filter '" + (reportTypeFilter || 'ALL') + "'! Set last processed: " + fullTimestamp);
   } else {
     props.setProperty('SAFETY_BATCH_START', batchEnd.toString());
     Logger.log("Batch complete. Progress: " + batchEnd + " / " + allThreads.length);
   }
 
   // Get the full timestamp for display (if available)
-  var lastProcessedTimestamp = props.getProperty('LAST_SAFETY_EMAIL_TIMESTAMP') || lastProcessedDate || 'Never';
+  var lastProcessedTimestamp = getLastSafetyEmailProcessedTime(reportTypeFilter);
 
   var earlyExit = (isComplete && batchEnd < allThreads.length);
   var result = {
@@ -7124,8 +7164,14 @@ function applyJobNumberCorrections(approvalsJson) {
     var today = new Date();
     var dateStr = Utilities.formatDate(today, Session.getScriptTimeZone(), 'yyyy/MM/dd');
     var fullTimestamp = Utilities.formatDate(today, Session.getScriptTimeZone(), 'yyyy/MM/dd HH:mm:ss');
-    props.setProperty('LAST_SAFETY_EMAIL_DATE', dateStr);
-    props.setProperty('LAST_SAFETY_EMAIL_TIMESTAMP', fullTimestamp);
+    var typeDateKey = getSafetyEmailPropKey(reportTypeFilter, false);
+    var typeTsKey = getSafetyEmailPropKey(reportTypeFilter, true);
+    props.setProperty(typeDateKey, dateStr);
+    props.setProperty(typeTsKey, fullTimestamp);
+    if (!reportTypeFilter || reportTypeFilter === 'ALL') {
+      props.setProperty('LAST_SAFETY_EMAIL_DATE', dateStr);
+      props.setProperty('LAST_SAFETY_EMAIL_TIMESTAMP', fullTimestamp);
+    }
 
     // Run compliance tracking
     var complianceResult = null;
@@ -18544,6 +18590,12 @@ function clearLastSafetyProcessedDate() {
   if (response === ui.Button.YES) {
     props.deleteProperty('LAST_SAFETY_EMAIL_DATE');
     props.deleteProperty('LAST_SAFETY_EMAIL_TIMESTAMP');
+    props.deleteProperty('LAST_SAFETY_EMAIL_DATE_JHA');
+    props.deleteProperty('LAST_SAFETY_EMAIL_TIMESTAMP_JHA');
+    props.deleteProperty('LAST_SAFETY_EMAIL_DATE_WEEKLY');
+    props.deleteProperty('LAST_SAFETY_EMAIL_TIMESTAMP_WEEKLY');
+    props.deleteProperty('LAST_SAFETY_EMAIL_DATE_MONTHLY');
+    props.deleteProperty('LAST_SAFETY_EMAIL_TIMESTAMP_MONTHLY');
 
     ui.alert('\u2705 Last Processed Date Cleared',
       'The last processed date has been cleared.\n\n' +

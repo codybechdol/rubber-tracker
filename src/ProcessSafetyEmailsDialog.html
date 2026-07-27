@@ -246,7 +246,7 @@
           console.error('Failed to get last processed time:', error);
           document.getElementById('lastRunDisplay').innerHTML = '📅 Last processed: <strong>Unknown</strong>';
         })
-        .getLastSafetyEmailProcessedTime();
+        .getLastSafetyEmailProcessedTime(currentReportTypeFilter);
     }
 
     function loadJobMappings() {
