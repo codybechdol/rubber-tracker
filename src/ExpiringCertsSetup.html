@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Expiring Certifications Setup</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  <style>
+    body { font-family: 'Google Sans', Arial, sans-serif; background: #f8f9fa; margin: 0; padding: 20px; font-size: 14px; }
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .header h1 { color: #1a73e8; font-size: 22px; margin: 0; display: flex; align-items: center; gap: 8px; }
+    .card-section { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .card-section h3 { font-size: 16px; color: #202124; margin-bottom: 12px; font-weight: 600; border-bottom: 1px solid #e0e0e0; padding-bottom: 8px; }
+    .cat-guide { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+    .cat-guide-box { padding: 12px; border-radius: 6px; font-size: 12px; }
+    .cat-standard { background: #e6f4ea; border: 1px solid #ceead6; color: #137333; }
+    .cat-variable { background: #fef7e0; border: 1px solid #feefc3; color: #b06000; }
+    .cat-nonexpiring { background: #e8f0fe; border: 1px solid #d2e3fc; color: #1a73e8; }
+    .table-certs th { background: #f1f3f4; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: #5f6368; }
+    .table-certs td { vertical-align: middle; }
+    .term-input { width: 90px; }
+    .badge-rule { font-size: 11px; padding: 4px 8px; border-radius: 12px; font-weight: 500; }
+    .toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 9999; }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <div class="header">
+    <h1><i class="bi bi-patch-check-fill text-primary"></i> Expiring Certifications Setup</h1>
+    <div>
+      <button class="btn btn-outline-secondary btn-sm me-2" onclick="resetToDefaults()">
+        <i class="bi bi-arrow-counterclockwise"></i> Reset Defaults
+      </button>
+      <button class="btn btn-success btn-sm me-2" id="saveBtn" onclick="saveConfiguration()">
+        <i class="bi bi-check-circle-fill"></i> Save & Apply Configuration
+      </button>
+      <button class="btn btn-secondary btn-sm" onclick="google.script.host.close()">
+        <i class="bi bi-x-lg"></i> Close
+      </button>
+    </div>
+  </div>
+
+  <!-- Category Guide -->
+  <div class="card-section">
+    <h3><i class="bi bi-info-circle"></i> Certification Categories & Behavior Rules</h3>
+    <div class="cat-guide">
+      <div class="cat-guide-box cat-standard">
+        <strong>🟢 Standard Auto-Term</strong>
+        <p class="mb-0 mt-1">Has fixed duration (e.g. 12, 24, 36, 60 mos). Selecting <em>Date Acquired</em> automatically calculates the Expiration Date.</p>
+      </div>
+      <div class="cat-guide-box cat-variable">
+        <strong>🟡 Variable / Manual</strong>
+        <p class="mb-0 mt-1">Expiration varies by doctor or state (e.g. MEC, DL). Entering <em>Date Acquired</em> <strong>requires</strong> specifying an Expiration Date.</p>
+      </div>
+      <div class="cat-guide-box cat-nonexpiring">
+        <strong>🔵 Non-Expiring (Lifetime / Eval)</strong>
+        <p class="mb-0 mt-1">One-time evaluation or lifetime cert (e.g. Crane Eval, OSHA 1910). Only <em>Date Issued / Performed</em> is tracked.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add New Cert -->
+  <div class="card-section">
+    <h3><i class="bi bi-plus-circle-fill text-success"></i> Add New Certification Type</h3>
+    <div class="row g-2 align-items-center">
+      <div class="col-md-3">
+        <input type="text" class="form-control form-control-sm" id="newCertName" placeholder="Cert Name (e.g. Bucket Truck Rescue)">
+      </div>
+      <div class="col-md-3">
+        <select class="form-select form-select-sm" id="newCertCategory" onchange="toggleNewTermInput()">
+          <option value="standard">Standard Auto-Term</option>
+          <option value="variable">Variable / Manual (MEC/DL)</option>
+          <option value="non_expiring">Non-Expiring (Evaluation)</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <input type="number" class="form-control form-control-sm term-input" id="newCertTerm" placeholder="Months" value="12">
+      </div>
+      <div class="col-md-3">
+        <div class="form-check form-switch mb-0">
+          <input class="form-check-input" type="checkbox" id="newCertRehire">
+          <label class="form-check-label small" for="newCertRehire">Re-evaluate on Rehire</label>
+        </div>
+      </div>
+      <div class="col-md-1 text-end">
+        <button class="btn btn-primary btn-sm w-100" onclick="addNewCert()">
+          <i class="bi bi-plus-lg"></i> Add
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Certifications Table -->
+  <div class="card-section">
+    <h3><i class="bi bi-list-task"></i> Active Certification Rules</h3>
+    <div class="table-responsive">
+      <table class="table table-hover table-bordered table-certs align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Certification Name</th>
+            <th style="width: 220px;">Category</th>
+            <th style="width: 120px;">Term (Months)</th>
+            <th style="width: 200px;">Re-evaluate on Rehire</th>
+            <th style="width: 90px;" class="text-center">Active</th>
+            <th style="width: 70px;" class="text-center">Action</th>
+          </tr>
+        </thead>
+        <tbody id="certTableBody">
+          <tr><td colspan="6" class="text-center py-4 text-muted"><div class="spinner-border spinner-border-sm me-2"></div> Loading certification configuration...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div class="toast-container">
+    <div id="liveToast" class="toast align-items-center text-white bg-dark border-0" role="alert" aria-live="assertive" aria-atomic="true">
+      <div class="d-flex">
+        <div class="toast-body" id="toastMessage">Configuration updated.</div>
+        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    var currentConfig = { certs: [] };
+
+    document.addEventListener('DOMContentLoaded', function() {
+      loadConfiguration();
+    });
+
+    function loadConfiguration() {
+      google.script.run
+        .withSuccessHandler(function(config) {
+          currentConfig = config || { certs: [] };
+          renderCertTable();
+        })
+        .withFailureHandler(function(err) {
+          showToast('Failed to load configuration: ' + err.message, 'danger');
+        })
+        .getExpiringCertsSetupConfig();
+    }
+
+    function renderCertTable() {
+      var tbody = document.getElementById('certTableBody');
+      if (!currentConfig.certs || currentConfig.certs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-3 text-muted">No certifications configured.</td></tr>';
+        return;
+      }
+
+      var html = '';
+      currentConfig.certs.forEach(function(c, index) {
+        var isStandard = c.category === 'standard';
+        var termDisabled = !isStandard ? 'disabled' : '';
+        var termVal = isStandard ? (c.termMonths || 12) : 0;
+
+        html += '<tr>';
+        html += '<td><strong>' + escapeHtml(c.name) + '</strong></td>';
+        html += '<td>';
+        html += '<select class="form-select form-select-sm" onchange="updateCertCategory(' + index + ', this.value)">';
+        html += '<option value="standard" ' + (c.category === 'standard' ? 'selected' : '') + '>🟢 Standard Auto-Term</option>';
+        html += '<option value="variable" ' + (c.category === 'variable' ? 'selected' : '') + '>🟡 Variable / Manual</option>';
+        html += '<option value="non_expiring" ' + (c.category === 'non_expiring' ? 'selected' : '') + '>🔵 Non-Expiring</option>';
+        html += '</select>';
+        html += '</td>';
+        html += '<td>';
+        html += '<input type="number" class="form-control form-control-sm term-input" value="' + termVal + '" ' + termDisabled + ' onchange="updateCertTerm(' + index + ', this.value)">';
+        html += '</td>';
+        html += '<td>';
+        html += '<div class="form-check form-switch">';
+        html += '<input class="form-check-input" type="checkbox" id="rehire_' + index + '" ' + (c.requireRehireReevaluation ? 'checked' : '') + ' onchange="updateCertRehire(' + index + ', this.checked)">';
+        html += '<label class="form-check-label small" for="rehire_' + index + '">Re-evaluate on Rehire</label>';
+        html += '</div>';
+        html += '</td>';
+        html += '<td class="text-center">';
+        html += '<input class="form-check-input" type="checkbox" ' + (c.active !== false ? 'checked' : '') + ' onchange="updateCertActive(' + index + ', this.checked)">';
+        html += '</td>';
+        html += '<td class="text-center">';
+        html += '<button class="btn btn-outline-danger btn-sm px-2 py-0" onclick="deleteCert(' + index + ')" title="Delete Certification"><i class="bi bi-trash"></i></button>';
+        html += '</td>';
+        html += '</tr>';
+      });
+
+      tbody.innerHTML = html;
+    }
+
+    function toggleNewTermInput() {
+      var cat = document.getElementById('newCertCategory').value;
+      var termInput = document.getElementById('newCertTerm');
+      if (cat === 'standard') {
+        termInput.disabled = false;
+        if (!termInput.value || termInput.value == 0) termInput.value = 12;
+      } else {
+        termInput.disabled = true;
+        termInput.value = 0;
+      }
+    }
+
+    function updateCertCategory(index, cat) {
+      currentConfig.certs[index].category = cat;
+      if (cat !== 'standard') {
+        currentConfig.certs[index].termMonths = 0;
+      } else if (!currentConfig.certs[index].termMonths || currentConfig.certs[index].termMonths == 0) {
+        currentConfig.certs[index].termMonths = 12;
+      }
+      renderCertTable();
+    }
+
+    function updateCertTerm(index, val) {
+      currentConfig.certs[index].termMonths = parseInt(val) || 0;
+    }
+
+    function updateCertRehire(index, checked) {
+      currentConfig.certs[index].requireRehireReevaluation = checked;
+    }
+
+    function updateCertActive(index, checked) {
+      currentConfig.certs[index].active = checked;
+    }
+
+    function deleteCert(index) {
+      if (confirm('Delete certification rule for "' + currentConfig.certs[index].name + '"?')) {
+        currentConfig.certs.splice(index, 1);
+        renderCertTable();
+      }
+    }
+
+    function addNewCert() {
+      var nameInput = document.getElementById('newCertName');
+      var name = nameInput.value.trim();
+      if (!name) {
+        showToast('Please enter a certification name.', 'warning');
+        return;
+      }
+
+      var category = document.getElementById('newCertCategory').value;
+      var termMonths = category === 'standard' ? (parseInt(document.getElementById('newCertTerm').value) || 12) : 0;
+      var requireRehire = document.getElementById('newCertRehire').checked;
+
+      // Check duplicates
+      var exists = currentConfig.certs.some(function(c) { return c.name.toLowerCase() === name.toLowerCase(); });
+      if (exists) {
+        showToast('Certification "' + name + '" already exists.', 'warning');
+        return;
+      }
+
+      currentConfig.certs.push({
+        name: name,
+        category: category,
+        termMonths: termMonths,
+        requireRehireReevaluation: requireRehire,
+        active: true
+      });
+
+      nameInput.value = '';
+      document.getElementById('newCertRehire').checked = false;
+      renderCertTable();
+      showToast('Added "' + name + '". Click "Save & Apply Configuration" when finished.', 'info');
+    }
+
+    function resetToDefaults() {
+      if (confirm('Reset certification list to standard system defaults? This will remove custom certs and restore default categories.')) {
+        currentConfig.certs = [
+          { name: 'Pole Top Rescue', category: 'standard', termMonths: 12, requireRehireReevaluation: true, active: true },
+          { name: '1st Aid', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true },
+          { name: 'CPR', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true },
+          { name: 'Harassment Training', category: 'standard', termMonths: 12, requireRehireReevaluation: false, active: true },
+          { name: 'Forklift', category: 'standard', termMonths: 36, requireRehireReevaluation: true, active: true },
+          { name: 'Forklift Operator Safety Training', category: 'standard', termMonths: 36, requireRehireReevaluation: true, active: true },
+          { name: 'Crane Cert', category: 'standard', termMonths: 60, requireRehireReevaluation: false, active: true },
+          { name: 'MEC Expiration', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true },
+          { name: 'DL', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true },
+          { name: 'Crane Evaluation', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: true, active: true },
+          { name: 'OSHA 1910', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true },
+          { name: 'BNSF', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true },
+          { name: 'MSHA', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true },
+          { name: 'OSHA Trench Comp Person', category: 'standard', termMonths: 36, requireRehireReevaluation: false, active: true },
+          { name: 'Rigging & Signaling/Signalperson & Spotter Cert', category: 'standard', termMonths: 36, requireRehireReevaluation: false, active: true },
+          { name: 'EICA Basic Helicopter Line Construction Safety', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true }
+        ];
+        renderCertTable();
+        showToast('Reset to defaults. Click "Save & Apply Configuration" to save.', 'info');
+      }
+    }
+
+    function saveConfiguration() {
+      var saveBtn = document.getElementById('saveBtn');
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Saving...';
+
+      google.script.run
+        .withSuccessHandler(function(res) {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = '<i class="bi bi-check-circle-fill"></i> Save & Apply Configuration';
+          showToast('✅ Configuration saved successfully (' + res.count + ' cert rules).', 'success');
+        })
+        .withFailureHandler(function(err) {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = '<i class="bi bi-check-circle-fill"></i> Save & Apply Configuration';
+          showToast('❌ Error saving configuration: ' + err.message, 'danger');
+        })
+        .saveExpiringCertsSetupConfig(currentConfig);
+    }
+
+    function showToast(msg, type) {
+      var toastElem = document.getElementById('liveToast');
+      var msgElem = document.getElementById('toastMessage');
+      msgElem.innerText = msg;
+      
+      toastElem.className = 'toast align-items-center text-white bg-' + (type || 'dark') + ' border-0';
+      var toast = new bootstrap.Toast(toastElem);
+      toast.show();
+    }
+
+    function escapeHtml(text) {
+      var map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+      return String(text || '').replace(/[&<>"']/g, function(m) { return map[m]; });
+    }
+  </script>
+</body>
+</html>

@@ -2686,6 +2686,13 @@ function rehireEmployeeFromImport(employeeData) {
     Logger.log('Rehired employee: ' + employeeData.name + ' at row ' + newRowIndex);
     logEvent('Employee Rehired: ' + employeeData.name + ' from Crew Makeup Import');
 
+    // Invalidate certifications requiring re-evaluation on rehire (e.g. Forklift, Crane Eval, Pole Top Rescue)
+    try {
+      invalidateCertsOnEmployeeRehire(employeeData.name);
+    } catch (e) {
+      Logger.log('Error invalidating certs on rehire for ' + employeeData.name + ': ' + e.message);
+    }
+
     return {
       success: true,
       message: 'Employee rehired successfully',

@@ -2565,6 +2565,7 @@ function getCertTypeDefaults() {
     'MEC Expiration',
     '1st Aid',
     'CPR',
+    'Pole Top Rescue',
     'Crane Cert',
     'Crane Evaluation',
     'OSHA 1910',
@@ -2591,6 +2592,7 @@ function getCertTypeDefaults() {
     'MEC Expiration',
     '1st Aid',
     'CPR',
+    'Pole Top Rescue',
     'Crane Cert',
     'Harassment Training'
   ];
@@ -2610,15 +2612,254 @@ function getCertTypeDefaults() {
     'O': 'Forklift Operator Safety Training',
     'P': 'Rigging & Signaling/Signalperson & Spotter Cert',
     'Q': 'Harassment Training',
-    'R': 'EICA Basic Helicopter Line Construction Safety'
+    'R': 'EICA Basic Helicopter Line Construction Safety',
+    'S': 'Pole Top Rescue'
+  };
+
+  var validityTerms = {
+    'Pole Top Rescue': { years: 1, label: '1 Year (Annual)' },
+    'Coin CPR': { years: 1, label: '1 Year' },
+    'Red Cross CPR': { years: 2, label: '2 Years' },
+    'CPR': { years: 2, label: '2 Years' },
+    '1st Aid': { years: 2, label: '2 Years' },
+    'Harassment Training': { years: 1, label: '1 Year' },
+    'Forklift': { years: 3, label: '3 Years' },
+    'Forklift Operator Safety Training': { years: 3, label: '3 Years' },
+    'Crane Cert': { years: 5, label: '5 Years' },
+    'MEC Expiration': { custom: true, label: 'Doctor Assigned (Custom)' }
   };
 
   return {
     allCertTypes: allCertTypes,
     nonExpiring: nonExpiring,
     defaultChecked: defaultChecked,
-    defaultMapping: defaultMapping
+    defaultMapping: defaultMapping,
+    validityTerms: validityTerms
   };
+}
+
+/**
+ * Calculates certification expiration date given a cert type and acquired date / class date.
+ * @param {string} certType - Type of certification
+ * @param {Date|string} acquiredDate - Date acquired or class date
+ * @return {Date|null} Calculated expiration date object
+ */
+function calculateCertExpirationDate(certType, acquiredDate) {
+  if (!acquiredDate) return null;
+  var acq = (acquiredDate instanceof Date) ? acquiredDate : parseDateNoon(String(acquiredDate));
+  if (!acq || isNaN(acq.getTime())) return null;
+
+  var exp = new Date(acq.getTime());
+  var typeLower = String(certType || '').trim().toLowerCase();
+
+  if (typeLower === 'pole top rescue' || typeLower === 'coin cpr' || typeLower === 'harassment training') {
+    exp.setFullYear(exp.getFullYear() + 1);
+  } else if (typeLower === 'red cross cpr' || typeLower === 'cpr' || typeLower === '1st aid' || typeLower === 'first aid') {
+    exp.setFullYear(exp.getFullYear() + 2);
+  } else if (typeLower.indexOf('forklift') !== -1 || typeLower.indexOf('trench') !== -1 || typeLower.indexOf('rigging') !== -1) {
+    exp.setFullYear(exp.getFullYear() + 3);
+  } else if (typeLower === 'crane cert') {
+    exp.setFullYear(exp.getFullYear() + 5);
+  } else if (typeLower === 'dl' || typeLower === 'dl expiration') {
+    exp.setFullYear(exp.getFullYear() + 8);
+  } else {
+    // Default standard expiring cert validity: 1 year for annuals, 2 years for standard
+    exp.setFullYear(exp.getFullYear() + 1);
+  }
+  return exp;
+}
+
+/**
+ * Opens the Expiring Certifications Setup dialog.
+ */
+function showExpiringCertsSetupDialog() {
+  var html = HtmlService.createHtmlOutputFromFile('ExpiringCertsSetup')
+    .setWidth(1050)
+    .setHeight(800)
+    .setTitle('Expiring Certifications Setup');
+  SpreadsheetApp.getUi().showModalDialog(html, '📜 Expiring Certifications Setup');
+}
+
+/**
+ * Gets dynamic certification configuration from ScriptProperties or default values.
+ * @return {Object} Object containing array of cert objects
+ */
+function getExpiringCertsSetupConfig() {
+  var props = PropertiesService.getScriptProperties();
+  var raw = props.getProperty('EXPIRING_CERTS_CONFIG');
+  if (raw) {
+    try {
+      var parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.certs)) {
+        // Clean saved configuration: filter out deprecated Coin CPR and Red Cross CPR entries
+        var cleaned = parsed.certs.filter(function(c) {
+          var nameLower = String(c.name || '').trim().toLowerCase();
+          return nameLower !== 'coin cpr' && nameLower !== 'red cross cpr';
+        });
+
+        // Ensure 1st Aid and CPR are categorized as variable
+        cleaned.forEach(function(c) {
+          var nameLower = String(c.name || '').trim().toLowerCase();
+          if (nameLower === '1st aid' || nameLower === 'cpr' || nameLower === 'first aid') {
+            c.category = 'variable';
+            c.termMonths = 0;
+          }
+        });
+
+        parsed.certs = cleaned;
+        props.setProperty('EXPIRING_CERTS_CONFIG', JSON.stringify(parsed));
+        return parsed;
+      }
+    } catch (e) {
+      Logger.log('Error parsing EXPIRING_CERTS_CONFIG: ' + e.message);
+    }
+  }
+
+  // Default initial configuration if non-existent
+  var defaultCerts = [
+    { name: 'Pole Top Rescue', category: 'standard', termMonths: 12, requireRehireReevaluation: true, active: true },
+    { name: '1st Aid', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true },
+    { name: 'CPR', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true },
+    { name: 'Harassment Training', category: 'standard', termMonths: 12, requireRehireReevaluation: false, active: true },
+    { name: 'Forklift', category: 'standard', termMonths: 36, requireRehireReevaluation: true, active: true },
+    { name: 'Forklift Operator Safety Training', category: 'standard', termMonths: 36, requireRehireReevaluation: true, active: true },
+    { name: 'Crane Cert', category: 'standard', termMonths: 60, requireRehireReevaluation: false, active: true },
+    { name: 'MEC Expiration', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true },
+    { name: 'DL', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true },
+    { name: 'Crane Evaluation', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: true, active: true },
+    { name: 'OSHA 1910', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true },
+    { name: 'BNSF', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true },
+    { name: 'MSHA', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true },
+    { name: 'OSHA Trench Comp Person', category: 'standard', termMonths: 36, requireRehireReevaluation: false, active: true },
+    { name: 'Rigging & Signaling/Signalperson & Spotter Cert', category: 'standard', termMonths: 36, requireRehireReevaluation: false, active: true },
+    { name: 'EICA Basic Helicopter Line Construction Safety', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true }
+  ];
+
+  return { certs: defaultCerts };
+}
+
+/**
+ * Displays interactive HTML popup modal prompting for provider (Red Cross vs Coin) and expiration date for CPR / 1st Aid.
+ * @param {string} employee - Employee Name
+ * @param {string} certType - Certification Type (1st Aid / CPR)
+ * @param {string} acquiredDate - Date Acquired string (YYYY-MM-DD)
+ */
+function showCprFirstAidDatePopup(employee, certType, acquiredDate) {
+  var htmlContent = '<!DOCTYPE html><html><head>' +
+    '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">' +
+    '<style>body{font-family:"Google Sans",Arial,sans-serif;padding:16px;background:#f8f9fa;}</style></head><body>' +
+    '<div class="text-center mb-3"><h5 class="text-primary mb-1">🚑 Select Training Provider</h5>' +
+    '<p class="small text-muted mb-0">Employee: <strong>' + employee + '</strong><br>Cert: <strong>' + certType + '</strong>' + (acquiredDate ? (' | Acquired: ' + acquiredDate) : '') + '</p></div>' +
+    '<div class="card p-3 mb-3 border-0 shadow-sm">' +
+    '<p class="small text-muted mb-2">Choose training provider to set expiration date:</p>' +
+    '<div class="d-grid gap-2 mb-3">' +
+    '<button type="button" class="btn btn-outline-danger btn-sm text-start py-2" onclick="selectProvider(24)">' +
+    '🔴 <strong>Red Cross CPR / 1st Aid</strong> <span class="d-block small text-muted">2 Years Expiration</span></button>' +
+    '<button type="button" class="btn btn-outline-warning btn-sm text-start text-dark py-2" onclick="selectProvider(12)">' +
+    '🪙 <strong>Coin CPR / 1st Aid</strong> <span class="d-block small text-muted">1 Year Expiration</span></button>' +
+    '</div>' +
+    '<hr class="my-2">' +
+    '<div class="mt-2"><label class="form-label small font-weight-bold">Or Enter Custom Expiration Date:</label>' +
+    '<input type="date" class="form-control form-control-sm mb-2" id="customExp">' +
+    '<button type="button" class="btn btn-success btn-sm w-100" onclick="submitCustom()">Save Custom Date</button>' +
+    '</div></div>' +
+    '<script>' +
+    'function selectProvider(months) {' +
+    '  var acqVal = "' + (acquiredDate || '') + '";' +
+    '  var base = acqVal ? new Date(acqVal + "T12:00:00") : new Date();' +
+    '  if (isNaN(base.getTime())) base = new Date();' +
+    '  base.setMonth(base.getMonth() + months);' +
+    '  var yyyy = base.getFullYear(), mm = String(base.getMonth() + 1).padStart(2,"0"), dd = String(base.getDate()).padStart(2,"0");' +
+    '  save("' + employee.replace(/'/g, "\\'") + '", "' + certType.replace(/'/g, "\\'") + '", yyyy + "-" + mm + "-" + dd);' +
+    '}' +
+    'function submitCustom() {' +
+    '  var val = document.getElementById("customExp").value;' +
+    '  if (!val) { alert("Please select an expiration date."); return; }' +
+    '  save("' + employee.replace(/'/g, "\\'") + '", "' + certType.replace(/'/g, "\\'") + '", val);' +
+    '}' +
+    'function save(emp, cert, exp) {' +
+    '  google.script.run.withSuccessHandler(function() { google.script.host.close(); }).updateCertExpirationFromTask(emp, cert, exp, null, "' + (acquiredDate || '') + '");' +
+    '}' +
+    '</script></body></html>';
+
+  var html = HtmlService.createHtmlOutput(htmlContent).setWidth(420).setHeight(400);
+  SpreadsheetApp.getUi().showModalDialog(html, '🚑 Select ' + certType + ' Expiration');
+}
+
+/**
+ * Saves dynamic certification configuration to ScriptProperties.
+ * @param {Object} config - Object containing array of cert objects
+ * @return {Object} Success status
+ */
+function saveExpiringCertsSetupConfig(config) {
+  try {
+    if (!config || !Array.isArray(config.certs)) {
+      throw new Error('Invalid certification configuration format');
+    }
+    var jsonStr = JSON.stringify(config);
+    PropertiesService.getScriptProperties().setProperty('EXPIRING_CERTS_CONFIG', jsonStr);
+    Logger.log('Successfully saved EXPIRING_CERTS_CONFIG with ' + config.certs.length + ' certs');
+    return { success: true, count: config.certs.length };
+  } catch (e) {
+    Logger.log('Error saving EXPIRING_CERTS_CONFIG: ' + e.message);
+    throw new Error('Failed to save configuration: ' + e.message);
+  }
+}
+
+/**
+ * Invalidates certifications requiring re-evaluation upon employee rehire.
+ * @param {string} employeeName - Name of the rehired employee
+ * @return {number} Count of certs reset
+ */
+function invalidateCertsOnEmployeeRehire(employeeName) {
+  try {
+    if (!employeeName) return 0;
+    Logger.log('invalidateCertsOnEmployeeRehire for: ' + employeeName);
+
+    var configObj = getExpiringCertsSetupConfig();
+    var rehireCertNames = [];
+    (configObj.certs || []).forEach(function(c) {
+      if (c.requireRehireReevaluation && c.active) {
+        rehireCertNames.push(String(c.name || '').trim().toLowerCase());
+      }
+    });
+
+    if (rehireCertNames.length === 0) {
+      Logger.log('No certs configured for rehire re-evaluation.');
+      return 0;
+    }
+
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var expiringSheet = ss.getSheetByName('Expiring Certs');
+    if (!expiringSheet || expiringSheet.getLastRow() < 2) return 0;
+
+    var data = expiringSheet.getDataRange().getValues();
+    var empList = getEmployeeNamesForMatching();
+    var alternateNameMap = buildAlternateNameMap(empList);
+    var searchEmp = resolveEmployeeName(employeeName, alternateNameMap).trim().toLowerCase();
+
+    var resetCount = 0;
+
+    for (var i = 1; i < data.length; i++) {
+      var rowEmp = resolveEmployeeName(data[i][0] || '', alternateNameMap).trim().toLowerCase();
+      var rowCert = String(data[i][1] || '').trim().toLowerCase();
+
+      if (rowEmp === searchEmp && rehireCertNames.indexOf(rowCert) !== -1) {
+        // Clear expiration date so new To Do tasks are created upon rehire
+        expiringSheet.getRange(i + 1, 3).setValue('');
+        resetCount++;
+        Logger.log('Reset cert date for rehired employee ' + employeeName + ' - Cert: ' + data[i][1]);
+      }
+    }
+
+    if (resetCount > 0) {
+      sortExpiringCertsSheet(expiringSheet);
+    }
+    return resetCount;
+  } catch (e) {
+    Logger.log('Error in invalidateCertsOnEmployeeRehire: ' + e.message);
+    return 0;
+  }
 }
 
 /**
@@ -4023,6 +4264,7 @@ function sortExpiringCertsSheet(sheet) {
     'MEC',
     '1st Aid',
     'CPR',
+    'Pole Top Rescue',
     'Harassment Training',
     'Crane Cert',
     'Crane Evaluation',
@@ -6270,9 +6512,18 @@ function updateTrainingConfigCompletionStatus() {
  * @param {Object} task - The task object (optional, for Task Metadata update)
  * @return {Object} Result with success status
  */
-function updateCertExpirationFromTask(employee, certType, newExpiration, task) {
+function updateCertExpirationFromTask(employee, certType, newExpiration, task, acquiredDate) {
   try {
-    Logger.log('updateCertExpirationFromTask: employee=' + employee + ', certType=' + certType + ', newExpiration=' + newExpiration);
+    Logger.log('updateCertExpirationFromTask: employee=' + employee + ', certType=' + certType + ', newExpiration=' + newExpiration + ', acquiredDate=' + acquiredDate);
+
+    // If newExpiration is missing but acquiredDate is provided, calculate expiration date
+    if (!newExpiration && acquiredDate) {
+      var calculated = calculateCertExpirationDate(certType, acquiredDate);
+      if (calculated) {
+        newExpiration = Utilities.formatDate(calculated, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+        Logger.log('Auto-calculated expiration date from acquired date: ' + acquiredDate + ' -> ' + newExpiration);
+      }
+    }
 
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var expiringSheet = ss.getSheetByName('Expiring Certs');
@@ -6910,6 +7161,10 @@ function markCertAsRenewed(employee, certType) {
         } else if (certType === '1st Aid' || certType === 'CPR' || certType === 'First Aid') {
           // These expire in 2 years
           newDate.setFullYear(newDate.getFullYear() + 2);
+          expiringSheet.getRange(i + 1, 3).setValue(newDate);
+        } else if (certType === 'Pole Top Rescue' || certType === 'Coin CPR' || certType === 'Harassment Training') {
+          // Annual certs expire in 1 year
+          newDate.setFullYear(newDate.getFullYear() + 1);
           expiringSheet.getRange(i + 1, 3).setValue(newDate);
         } else if (certType === 'Crane Cert') {
           // Crane cert expires in 5 years

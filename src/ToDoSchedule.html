@@ -2656,7 +2656,7 @@
       var isNonExpiring = isCertNonExpiring(certType);
       
       // Determine appropriate terminology
-      var modalTitle = isNonExpiring ? '📜 Enter Certification Date' : '📜 Enter New Expiration Date';
+      var modalTitle = isNonExpiring ? '📜 Enter Certification Date' : '📜 Update Certification Date';
       if (certType === 'Crane Evaluation') {
         modalTitle = '📜 Enter Crane Evaluation Date';
       }
@@ -2668,19 +2668,61 @@
       
       var formText = isNonExpiring ? 
         'Enter the date this certification was issued or completed.' : 
-        'Enter the expiration date from the new certification.';
+        'Enter expiration date directly, or enter Date Acquired to auto-calculate.';
       if (certType === 'Crane Evaluation') {
         formText = 'Enter the date the crane evaluation was performed.';
+      }
+
+      // Default info text based on cert type
+      var certInfoBadge = '';
+      var typeLower = String(certType || '').toLowerCase().trim();
+      var isCprFirstAid = (typeLower === 'cpr' || typeLower === '1st aid' || typeLower === 'first aid');
+
+      if (typeLower === 'pole top rescue') {
+        certInfoBadge = '⚡ Pole Top Rescue: Every employee must be trained annually (expires 1 year from class date).';
+      } else if (isCprFirstAid) {
+        certInfoBadge = '🚑 1st Aid / CPR: Expiration depends on training provider (Red Cross = 2 years, Coin CPR = 1 year). Select provider or enter expiration date below.';
+      } else if (typeLower === 'mec expiration' || typeLower === 'mec') {
+        certInfoBadge = '🩺 Medical Evaluation Expiration (MEC): Doctor assigned (usually 6 months, 1 year, or 2 years).';
       }
 
       var modalHtml = '<div class="modal fade" id="certExpirationModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">';
       modalHtml += '<div class="modal-header bg-success text-white"><h5 class="modal-title">' + modalTitle + '</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>';
       modalHtml += '<div class="modal-body">';
-      modalHtml += '<p><strong>Employee:</strong> ' + employee + '</p>';
-      modalHtml += '<p><strong>Certification:</strong> ' + certType + '</p>';
-      modalHtml += '<div class="mb-3"><label class="form-label">' + labelText + ' <span class="text-danger">*</span></label>';
+      modalHtml += '<p class="mb-1"><strong>Employee:</strong> ' + employee + '</p>';
+      modalHtml += '<p class="mb-2"><strong>Certification:</strong> ' + certType + '</p>';
+      
+      if (certInfoBadge) {
+        modalHtml += '<div class="alert alert-info py-2 px-3 mb-3 small">' + certInfoBadge + '</div>';
+      }
+
+      if (!isNonExpiring) {
+        modalHtml += '<div class="mb-3"><label class="form-label font-weight-bold">Date Acquired / Class Date <span class="text-muted">(Required for CPR/1st Aid)</span></label>';
+        modalHtml += '<input type="date" class="form-control" id="certAcquiredDate" onchange="onAcquiredDateChanged(\'' + certType.replace(/'/g, "\\'") + '\')">';
+        modalHtml += '<div class="form-text">Selecting Date Acquired auto-calculates the Expiration Date below.</div></div>';
+      }
+
+      if (isCprFirstAid) {
+        modalHtml += '<div class="mb-3"><label class="form-label font-weight-bold small">Select Training Provider:</label><div class="d-grid gap-2 mb-2">';
+        modalHtml += '<button type="button" class="btn btn-outline-danger btn-sm text-start py-2" onclick="applyTermPreset(24)">🔴 <strong>Red Cross CPR / 1st Aid</strong> <span class="d-block small text-muted">Sets Expiration Date to +2 Years from Acquired Date</span></button>';
+        modalHtml += '<button type="button" class="btn btn-outline-warning btn-sm text-start text-dark py-2" onclick="applyTermPreset(12)">🪙 <strong>Coin CPR / 1st Aid</strong> <span class="d-block small text-muted">Sets Expiration Date to +1 Year from Acquired Date</span></button>';
+        modalHtml += '</div></div>';
+      }
+
+      modalHtml += '<div class="mb-3"><label class="form-label font-weight-bold">' + labelText + ' <span class="text-danger">*</span></label>';
       modalHtml += '<input type="date" class="form-control" id="newCertExpiration" required>';
       modalHtml += '<div class="form-text">' + formText + '</div></div>';
+
+      if (!isNonExpiring && !isCprFirstAid) {
+        modalHtml += '<div class="mb-3"><label class="form-label font-weight-bold small">Quick Term Presets:</label><div class="btn-group btn-group-sm w-100">';
+        modalHtml += '<button type="button" class="btn btn-outline-secondary" onclick="applyTermPreset(6)">+6 Mos</button>';
+        modalHtml += '<button type="button" class="btn btn-outline-secondary" onclick="applyTermPreset(12)">+1 Year</button>';
+        modalHtml += '<button type="button" class="btn btn-outline-secondary" onclick="applyTermPreset(24)">+2 Years</button>';
+        modalHtml += '<button type="button" class="btn btn-outline-secondary" onclick="applyTermPreset(36)">+3 Years</button>';
+        modalHtml += '<button type="button" class="btn btn-outline-secondary" onclick="applyTermPreset(60)">+5 Years</button>';
+        modalHtml += '</div></div>';
+      }
+
       modalHtml += '</div><div class="modal-footer">';
       modalHtml += '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>';
       modalHtml += '<button type="button" class="btn btn-success" onclick="saveCertExpiration(\'' + employee.replace(/'/g, "\\'") + '\', \'' + certType.replace(/'/g, "\\'") + '\', ' + taskIndex + ')"><i class="bi bi-check-lg"></i> Save & Complete</button>';
@@ -2694,12 +2736,64 @@
       modal.show();
     }
 
+    function onAcquiredDateChanged(certType) {
+      var acqVal = document.getElementById('certAcquiredDate').value;
+      if (!acqVal) return;
+      var acqParts = acqVal.split('-');
+      if (acqParts.length !== 3) return;
+      var acq = new Date(parseInt(acqParts[0]), parseInt(acqParts[1]) - 1, parseInt(acqParts[2]));
+
+      var typeLower = String(certType || '').trim().toLowerCase();
+      var exp = new Date(acq.getTime());
+
+      if (typeLower === 'pole top rescue' || typeLower === 'coin cpr' || typeLower === 'harassment training') {
+        exp.setFullYear(exp.getFullYear() + 1);
+      } else if (typeLower === 'red cross cpr' || typeLower === 'cpr' || typeLower === '1st aid' || typeLower === 'first aid') {
+        exp.setFullYear(exp.getFullYear() + 2);
+      } else if (typeLower.indexOf('forklift') !== -1 || typeLower.indexOf('trench') !== -1 || typeLower.indexOf('rigging') !== -1) {
+        exp.setFullYear(exp.getFullYear() + 3);
+      } else if (typeLower === 'crane cert') {
+        exp.setFullYear(exp.getFullYear() + 5);
+      } else if (typeLower === 'dl' || typeLower === 'dl expiration') {
+        exp.setFullYear(exp.getFullYear() + 8);
+      } else {
+        exp.setFullYear(exp.getFullYear() + 1);
+      }
+
+      var yyyy = exp.getFullYear();
+      var mm = String(exp.getMonth() + 1).padStart(2, '0');
+      var dd = String(exp.getDate()).padStart(2, '0');
+      document.getElementById('newCertExpiration').value = yyyy + '-' + mm + '-' + dd;
+    }
+
+    function applyTermPreset(months) {
+      var acqElem = document.getElementById('certAcquiredDate');
+      var acqVal = acqElem ? acqElem.value : '';
+      var baseDate = null;
+
+      if (acqVal) {
+        var parts = acqVal.split('-');
+        if (parts.length === 3) baseDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+      }
+      if (!baseDate || isNaN(baseDate.getTime())) baseDate = new Date();
+
+      var exp = new Date(baseDate.getTime());
+      exp.setMonth(exp.getMonth() + months);
+
+      var yyyy = exp.getFullYear();
+      var mm = String(exp.getMonth() + 1).padStart(2, '0');
+      var dd = String(exp.getDate()).padStart(2, '0');
+      document.getElementById('newCertExpiration').value = yyyy + '-' + mm + '-' + dd;
+    }
+
     function saveCertExpiration(employee, certType, taskIndex) {
       var newExpiration = document.getElementById('newCertExpiration').value;
+      var acqElem = document.getElementById('certAcquiredDate');
+      var acquiredDate = acqElem ? acqElem.value : '';
       var isNonExpiring = isCertNonExpiring(certType);
 
-      if (!newExpiration) {
-        var errorMsg = isNonExpiring ? 'Please enter the certification date' : 'Please enter the new expiration date';
+      if (!newExpiration && !acquiredDate) {
+        var errorMsg = isNonExpiring ? 'Please enter the certification date' : 'Please enter the new expiration date or class acquired date';
         if (certType === 'Crane Evaluation') {
           errorMsg = 'Please enter the evaluation date';
         }
@@ -2712,7 +2806,7 @@
       modal.hide();
 
       showToast('Updating certification...');
-      console.log('saveCertExpiration: Calling server with employee="' + employee + '", certType="' + certType + '", date="' + newExpiration + '"');
+      console.log('saveCertExpiration: Calling server with employee="' + employee + '", certType="' + certType + '", date="' + newExpiration + '", acquiredDate="' + acquiredDate + '"');
 
       // Get the task for passing to server (may be undefined if taskIndex is -1)
       var taskToPass = (taskIndex >= 0 && taskIndex < allTasks.length) ? allTasks[taskIndex] : null;
@@ -2722,8 +2816,8 @@
         .withSuccessHandler(function(result) {
           console.log('saveCertExpiration: Success!', result);
           var successMsg = isNonExpiring ? 
-            '✓ Certification updated: ' + newExpiration : 
-            '✓ Certification updated with new expiration: ' + newExpiration;
+            '✓ Certification updated: ' + (newExpiration || acquiredDate) : 
+            '✓ Certification updated with expiration date: ' + (newExpiration || 'auto-calculated');
           if (certType === 'Crane Evaluation') {
             successMsg = '✓ Crane Evaluation date updated: ' + newExpiration;
           }
@@ -2752,7 +2846,7 @@
           console.error('saveCertExpiration: Error!', error);
           showToast('Error: ' + error.message, 'error');
         })
-        .updateCertExpirationFromTask(employee, certType, newExpiration, taskToPass);
+        .updateCertExpirationFromTask(employee, certType, newExpiration, taskToPass, acquiredDate);
     }
 
     function deleteTask(index, taskKey) {

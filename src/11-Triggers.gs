@@ -455,6 +455,7 @@ function onEditHandler(e) {
     // =========================================================================
     // EXECUTIVE DASHBOARD & EXPIRING CERTS SMS NOTIFY CHECKBOXES
     // =========================================================================
+
     if ((sheetName === 'Dashboard' && editedCol === 18 && editedRow >= 8 && editedRow <= 11) ||
         (sheetName === 'Expiring Certs' && editedCol === 8 && editedRow >= 2)) {
       var val = e.range.getValue();
