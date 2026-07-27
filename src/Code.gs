@@ -2739,6 +2739,96 @@ function getExpiringCertsSetupConfig() {
 }
 
 /**
+ * Opens the Stock SMS Message Templates configuration dialog.
+ */
+function showSmsTemplateConfigDialog() {
+  var html = HtmlService.createHtmlOutputFromFile('SmsTemplateConfig')
+    .setWidth(1100)
+    .setHeight(820)
+    .setTitle('💬 Stock SMS Message Templates');
+  SpreadsheetApp.getUi().showModalDialog(html, '💬 Stock SMS Message Templates');
+}
+
+/**
+ * Returns default SMS template stock messages.
+ */
+function getDefaultSmsTemplatesConfig() {
+  return {
+    certs_firstaid_cpr: 'Hi {firstName}, your {certName} {expirationStatus}.',
+    certs_dl: 'Hi {firstName}, your Driver\'s License {expirationStatus}. Can you send me a picture (front and back) of your new one?',
+    certs_mec: 'Hi {firstName}, your DOT Medical Card {expirationStatus} on {expirationDate}. Can you send me a picture of your new one?',
+    certs_harassment: 'Hi {firstName}, your Harassment Training {expirationStatus}. Can you let me know when you get it done? This is required by the NJATC if you are going to be assigned apprentices and the Federal Govt in general. Go to SafetyWallet.org or the mobile app, sign in with your last name and phone number, upper left is a menu with Training and then On Line Training. Make sure you take the 65 minute class and not the 120 minute class. If you have trouble logging in call Safety Wallet at 424-342-7233 and they can get you straightened out.',
+    certs_crane: 'Hi {firstName}, your Crane Cert is expiring and needs to be renewed. There is a class at MSLCAT starting {startDate} and ending {endDate}. You will need to contact MSLCAT directly to register: Phone: (801) 562-2929 Email: office@mslcat.org Website: mslcat.org (Mon-Fri 7:30am-4pm MT). Have your Name, Email Address, and last 4 of your SSN ready when you call. Let me know when you get signed up!',
+    certs_general: 'Hi {firstName}, your {certName} {expirationStatus}. Can you send me a picture of your new one?',
+    safety_missing_jha: 'Hi {firstName}, we did not receive a JHA for {dates} from your crew. This is just a reminder not to miss {itThem} this week. Was there an issue turning {itThem} in that you need help with?',
+    safety_missing_weekly: 'Hi {firstName}, we did not receive a Weekly Safety Meeting for the week of {weekOf} from your crew. This is just a reminder not to miss it this week. Was there an issue turning it in that you need help with?',
+    safety_late_submission: 'Hi {firstName}, the {reportType} for {dates} was received late. Be sure to submit it in the same week that it is due.',
+    equipment_changeout: 'Hi {firstName}, your {itemType} for job {jobNum} is due for change-out on {changeOutDate}. Please coordinate with your foreman to return the current set and collect your new set.'
+  };
+}
+
+/**
+ * Gets customized SMS templates configuration from ScriptProperties or returns defaults.
+ * @return {Object} SMS templates object
+ */
+function getSmsTemplatesConfig() {
+  var props = PropertiesService.getScriptProperties();
+  var raw = props.getProperty('SMS_TEMPLATES_CONFIG');
+  var defaults = getDefaultSmsTemplatesConfig();
+  if (raw) {
+    try {
+      var parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        Object.keys(defaults).forEach(function(k) {
+          if (!parsed[k]) {
+            parsed[k] = defaults[k];
+          }
+        });
+        return parsed;
+      }
+    } catch (e) {
+      Logger.log('Error parsing SMS_TEMPLATES_CONFIG: ' + e.message);
+    }
+  }
+  return defaults;
+}
+
+/**
+ * Saves customized SMS templates to ScriptProperties.
+ * @param {Object} config - Templates object
+ * @return {Object} Result
+ */
+function saveSmsTemplatesConfig(config) {
+  try {
+    if (!config || typeof config !== 'object') {
+      return { success: false, message: 'Invalid configuration payload' };
+    }
+    var props = PropertiesService.getScriptProperties();
+    props.setProperty('SMS_TEMPLATES_CONFIG', JSON.stringify(config));
+    Logger.log('saveSmsTemplatesConfig: Saved SMS_TEMPLATES_CONFIG to ScriptProperties');
+    return { success: true, message: 'SMS templates saved successfully' };
+  } catch (e) {
+    Logger.log('saveSmsTemplatesConfig error: ' + e.message);
+    return { success: false, message: 'Failed to save SMS templates: ' + e.message };
+  }
+}
+
+/**
+ * Resets SMS templates back to factory defaults.
+ * @return {Object} Result
+ */
+function resetSmsTemplatesConfig() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    props.deleteProperty('SMS_TEMPLATES_CONFIG');
+    Logger.log('resetSmsTemplatesConfig: Deleted SMS_TEMPLATES_CONFIG property.');
+    return { success: true, message: 'Reset SMS templates to factory defaults' };
+  } catch (e) {
+    return { success: false, message: e.message };
+  }
+}
+
+/**
  * Displays interactive HTML popup modal prompting for provider (Red Cross vs Coin) and expiration date for CPR / 1st Aid.
  * @param {string} employee - Employee Name
  * @param {string} certType - Certification Type (1st Aid / CPR)

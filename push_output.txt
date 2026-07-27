@@ -1,4 +1,4 @@
-Pushed 59 files.
+Pushed 60 files.
 └─ src\00-Constants.gs
 └─ src\01-Utilities.gs
 └─ src\10-Menu.gs
@@ -51,6 +51,7 @@ Pushed 59 files.
 └─ src\QuickActions.html
 └─ src\RedCrossCprDialog.html
 └─ src\Schedule.html
+└─ src\SmsTemplateConfig.html
 └─ src\TabNavigator.html
 └─ src\TestRunner.gs
 └─ src\TimeBreakdown.html
