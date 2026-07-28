@@ -6519,212 +6519,216 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
         }
       }
 
-      // NOTE: Compliance records (JHA/Safety Meeting tracking) are NO LONGER written to Safety Reports
-      // JHA tracking is handled by the Safety Compliance sheet which shows the \u2705/\u274C grid per crew per day
-      // Safety Reports is now ONLY for actual equipment issues that need attention
-      //
-      // We still process complianceRecords for the auto-correction feature, but don't write them to Safety Reports
-      if (complianceRecords.length > 0) {
-        Logger.log("Processed " + complianceRecords.length + " compliance records (for Safety Compliance sheet - NOT written to Safety Reports)");
-
-        // Auto-correct past week compliance data when JHA PDFs have dates from earlier weeks
-        // This handles batched JHAs where email is received in current week but contains work from past weeks
-        var currentWeekForCorrection = getWeekBoundaries(new Date());
-        var correctionResult = autoCorrectPastWeekCompliance(complianceRecords, currentWeekForCorrection.weekStart);
-        if (correctionResult.correctionsApplied > 0) {
-          Logger.log("Auto-corrected " + correctionResult.correctionsApplied + " past week compliance entries");
-        }
-      }
-
-      // Update batch progress
       var isComplete = batchEnd >= allThreads.length;
-
-      // Note: early exit removed. Gmail does NOT guarantee newest-first order — threads
-      // for a given crew (e.g. 042-26) may appear later in the result set regardless of
-      // date. Exiting early when a batch has 0 new emails causes those threads to be
-      // silently missed. The timeout guard (MAX_EXECUTION_MS) is sufficient to prevent
-      // the 6-minute limit from being hit.
       writeCollectedSafetyLogs(rowsCollector);
 
-      Logger.log('Batch ' + (Math.floor(batchStart / batchSize) + 1) +
-        ' processed ' + processedCount + ' new email(s), skipped ' + skippedCount + '.');
+      Logger.log('Batch processed ' + processedCount + ' new email(s), skipped ' + skippedCount + '. Progress: ' + batchEnd + ' / ' + allThreads.length);
 
-      // Cache email IDs for next continuation batch (includes newly logged IDs)
+      // Cache email IDs for next batch
       try {
         batchCache.put('SAFETY_BATCH_EMAIL_IDS', JSON.stringify(existingEmailIds), 600);
-      } catch(e) {
-        Logger.log("Could not cache email IDs: " + e.toString());
-      }
+      } catch(e) {}
+
+      var lastProcessedTimestamp = getLastSafetyEmailProcessedTime(reportTypeFilter);
 
       if (isComplete) {
         props.deleteProperty('SAFETY_BATCH_START');
         props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
         props.deleteProperty('SAFETY_BATCH_REPORT_TYPE_FILTER');
-        // Clear batch caches - no longer needed
         batchCache.removeAll(['SAFETY_BATCH_CREWS', 'SAFETY_BATCH_EMP_DATA', 'SAFETY_BATCH_EMAIL_IDS']);
 
-    // Store timestamp with date AND time for accurate tracking
-    // Note: Gmail after: filter only supports dates, but we track time for user display
-    // Duplicate prevention via existingEmailIds handles same-day processing
-    var today = new Date();
-    var dateStr = Utilities.formatDate(today, Session.getScriptTimeZone(), 'yyyy/MM/dd');
-    var fullTimestamp = Utilities.formatDate(today, Session.getScriptTimeZone(), 'yyyy/MM/dd HH:mm:ss');
+        var today = new Date();
+        var dateStr = Utilities.formatDate(today, Session.getScriptTimeZone(), 'yyyy/MM/dd');
+        var fullTimestamp = Utilities.formatDate(today, Session.getScriptTimeZone(), 'yyyy/MM/dd HH:mm:ss');
 
-    var typeDateKey = getSafetyEmailPropKey(reportTypeFilter, false);
-    var typeTsKey = getSafetyEmailPropKey(reportTypeFilter, true);
-    props.setProperty(typeDateKey, dateStr);
-    props.setProperty(typeTsKey, fullTimestamp);
+        var typeDateKey = getSafetyEmailPropKey(reportTypeFilter, false);
+        var typeTsKey = getSafetyEmailPropKey(reportTypeFilter, true);
+        props.setProperty(typeDateKey, dateStr);
+        props.setProperty(typeTsKey, fullTimestamp);
 
-    if (!reportTypeFilter || reportTypeFilter === 'ALL') {
-      props.setProperty('LAST_SAFETY_EMAIL_DATE', dateStr); // For legacy / ALL Gmail filter
-      props.setProperty('LAST_SAFETY_EMAIL_TIMESTAMP', fullTimestamp); // For legacy / ALL display
-    }
-    Logger.log("All batches complete for filter '" + (reportTypeFilter || 'ALL') + "'! Set last processed: " + fullTimestamp);
-  } else {
-    props.setProperty('SAFETY_BATCH_START', batchEnd.toString());
-    Logger.log("Batch complete. Progress: " + batchEnd + " / " + allThreads.length);
-  }
+        if (!reportTypeFilter || reportTypeFilter === 'ALL') {
+          props.setProperty('LAST_SAFETY_EMAIL_DATE', dateStr);
+          props.setProperty('LAST_SAFETY_EMAIL_TIMESTAMP', fullTimestamp);
+        }
+        Logger.log("Email thread scanning complete! Delegating compliance tracking & formatting to runSafetyEmailPostProcessing...");
 
-  // Get the full timestamp for display (if available)
-  var lastProcessedTimestamp = getLastSafetyEmailProcessedTime(reportTypeFilter);
+        return {
+          complete: false,
+          isPostProcessing: true, // Signals client dialog to call runSafetyEmailPostProcessing
+          batchNumber: Math.floor(batchStart / batchSize) + 1,
+          totalBatches: Math.ceil(allThreads.length / batchSize),
+          processedThisBatch: processedCount,
+          skippedThisBatch: skippedCount,
+          uncreditedThisBatch: uncreditedThisBatch,
+          skipReasons: skipReasons,
+          issuesThisBatch: issues.length,
+          complianceRecordsAdded: complianceRecords.length,
+          logsCreated: logsCreated,
+          totalThreads: allThreads.length,
+          threadsProcessed: batchEnd,
+          threadsRemaining: 0,
+          newOnlyMode: newOnlyMode,
+          lastProcessedDate: fullTimestamp || dateStr
+        };
+      } else {
+        props.setProperty('SAFETY_BATCH_START', batchEnd.toString());
+        Logger.log("Batch complete. Progress: " + batchEnd + " / " + allThreads.length);
+      }
 
-  var earlyExit = (isComplete && batchEnd < allThreads.length);
+      var result = {
+        complete: isComplete,
+        earlyExit: false,
+        batchNumber: Math.floor(batchStart / batchSize) + 1,
+        totalBatches: Math.ceil(allThreads.length / batchSize),
+        processedThisBatch: processedCount,
+        skippedThisBatch: skippedCount,
+        uncreditedThisBatch: uncreditedThisBatch,
+        skipReasons: skipReasons,
+        issuesThisBatch: issues.length,
+        complianceRecordsAdded: complianceRecords.length,
+        logsCreated: logsCreated,
+        totalThreads: allThreads.length,
+        threadsProcessed: batchEnd,
+        threadsRemaining: allThreads.length - batchEnd,
+        newOnlyMode: newOnlyMode,
+        lastProcessedDate: lastProcessedTimestamp
+      };
+
+  return result;
+}
+
+/**
+ * Runs post-processing steps (compliance calculation, log formatting, link backfill)
+ * in a dedicated execution window after email thread processing completes.
+ * Prevents 60-second client timeouts and keeps processing fast and reliable.
+ *
+ * @param {string} reportTypeFilter - Filter type ('JHA', 'WEEKLY', 'MONTHLY', 'ALL')
+ * @param {Object} [prevResult] - Cumulative results from processSafetyEmails batch
+ * @return {Object} Final result object for UI dialog
+ */
+function runSafetyEmailPostProcessing(reportTypeFilter, prevResult) {
+  Logger.log("=== runSafetyEmailPostProcessing START (filter=" + (reportTypeFilter || 'ALL') + ") ===");
+  if (!reportTypeFilter) reportTypeFilter = 'ALL';
+  prevResult = prevResult || {};
+
   var result = {
-    complete: isComplete,
-    earlyExit: earlyExit, // true when stopped early because continuation batch had 0 new emails
-    batchNumber: Math.floor(batchStart / batchSize) + 1,
-    totalBatches: Math.ceil(allThreads.length / batchSize),
-    processedThisBatch: processedCount,
-    skippedThisBatch: skippedCount,
-    uncreditedThisBatch: uncreditedThisBatch,
-    skipReasons: skipReasons, // Breakdown of why emails were skipped
-    issuesThisBatch: issues.length,
-    complianceRecordsAdded: complianceRecords.length,
-    logsCreated: logsCreated, // Option B: show log counts
-    totalThreads: allThreads.length,
-    threadsProcessed: batchEnd,
-    threadsRemaining: earlyExit ? 0 : (allThreads.length - batchEnd),
-    newOnlyMode: newOnlyMode,
-    lastProcessedDate: lastProcessedTimestamp
+    complete: true,
+    earlyExit: false,
+    batchNumber: prevResult.batchNumber || 1,
+    totalBatches: prevResult.totalBatches || 1,
+    processedThisBatch: prevResult.processedThisBatch || 0,
+    skippedThisBatch: prevResult.skippedThisBatch || 0,
+    uncreditedThisBatch: prevResult.uncreditedThisBatch || 0,
+    skipReasons: prevResult.skipReasons || {},
+    issuesThisBatch: prevResult.issuesThisBatch || 0,
+    complianceRecordsAdded: prevResult.complianceRecordsAdded || 0,
+    logsCreated: prevResult.logsCreated || { jha: 0, weekly: 0, monthly: 0 },
+    totalThreads: prevResult.totalThreads || 0,
+    threadsProcessed: prevResult.totalThreads || prevResult.threadsProcessed || 0,
+    threadsRemaining: 0,
+    newOnlyMode: prevResult.newOnlyMode !== undefined ? prevResult.newOnlyMode : true,
+    lastProcessedDate: getLastSafetyEmailProcessedTime(reportTypeFilter)
   };
 
-  // When all batches are complete, run compliance tracking
-  if (isComplete) {
+  try {
+    Logger.log("Running compliance tracking from log sheets (Option B)...");
+    var today = new Date();
+    var currentWeekBounds = getWeekBoundaries(today);
+
+    // ALWAYS process the PREVIOUS week first
+    var previousWeekStart = new Date(currentWeekBounds.weekStart);
+    previousWeekStart.setDate(previousWeekStart.getDate() - 7);
+    var previousWeekBounds = getWeekBoundaries(previousWeekStart);
+
+    Logger.log("Processing PREVIOUS week from logs: " + Utilities.formatDate(previousWeekBounds.weekStart, Session.getScriptTimeZone(), "MM/dd/yyyy"));
+    var previousWeekData = calculateComplianceFromLogs(previousWeekBounds.weekStart);
+
+    var tasksCreated = 0;
+    if (previousWeekData) {
+      updateComplianceSheetFromLogs(previousWeekData);
+      tasksCreated = createMissingReportTasks(previousWeekData);
+      Logger.log("Previous week tasks created: " + tasksCreated);
+    }
+
+    // Process current week
+    Logger.log("Processing CURRENT week from logs: " + Utilities.formatDate(currentWeekBounds.weekStart, Session.getScriptTimeZone(), "MM/dd/yyyy"));
+    var complianceData = calculateComplianceFromLogs(currentWeekBounds.weekStart);
+
+    if (complianceData) {
+      updateComplianceSheetFromLogs(complianceData);
+    }
+
+    // Finalize older past weeks
+    var pastWeekResult = finalizePastWeeksCompliance();
+    tasksCreated += pastWeekResult.tasksCreated;
+
+    // Format compliance sheet
+    formatComplianceSheetByWeek();
+    Logger.log("Compliance sheet formatted - newest week now at top");
+
+    // Auto-cleanup
     try {
-      Logger.log("Running compliance tracking from log sheets (Option B)...");
-      var today = new Date();
-      var currentWeekBounds = getWeekBoundaries(today);
+      var cleanupResult = autoComplianceCleanup(true);
+      Logger.log("Auto-cleanup complete - LogFixes: JHA=" + cleanupResult.logsFixes.jha +
+                 ", Weekly=" + cleanupResult.logsFixes.weekly +
+                 ", NonConfigRemoved=" + cleanupResult.nonConfigRemoved);
+    } catch (cleanupErr) {
+      Logger.log("Auto-cleanup error (non-fatal): " + cleanupErr.toString());
+    }
 
-      // ALWAYS process the PREVIOUS week first (this is where tasks should be created)
-      // The previous week's deadline has definitely passed, so we can create tasks for missing reports
-      var previousWeekStart = new Date(currentWeekBounds.weekStart);
-      previousWeekStart.setDate(previousWeekStart.getDate() - 7);
-      var previousWeekBounds = getWeekBoundaries(previousWeekStart);
+    if (complianceData) {
+      result.compliance = {
+        weekStart: Utilities.formatDate(complianceData.weekStart, Session.getScriptTimeZone(), "MM/dd"),
+        weekEnd: Utilities.formatDate(complianceData.weekEnd, Session.getScriptTimeZone(), "MM/dd/yyyy"),
+        compliantCount: complianceData.compliantCount,
+        missingCount: complianceData.missingCount,
+        totalCrews: complianceData.totalCrews,
+        isPastDeadline: complianceData.isPastDeadline,
+        tasksCreated: tasksCreated,
+        crews: []
+      };
 
-      Logger.log("Processing PREVIOUS week from logs: " + Utilities.formatDate(previousWeekBounds.weekStart, Session.getScriptTimeZone(), "MM/dd/yyyy"));
-      var previousWeekData = calculateComplianceFromLogs(previousWeekBounds.weekStart);
-
-      var tasksCreated = 0;
       if (previousWeekData) {
-        updateComplianceSheetFromLogs(previousWeekData);
-        // Previous week is always past deadline, so create tasks for missing reports
-        tasksCreated = createMissingReportTasks(previousWeekData);
-        Logger.log("Previous week tasks created: " + tasksCreated);
-      }
-
-      // Now process current week (for display purposes - won't create tasks since not past deadline)
-      Logger.log("Processing CURRENT week from logs: " + Utilities.formatDate(currentWeekBounds.weekStart, Session.getScriptTimeZone(), "MM/dd/yyyy"));
-      var complianceData = calculateComplianceFromLogs(currentWeekBounds.weekStart);
-
-      // Update compliance sheet for current week
-      if (complianceData) {
-        updateComplianceSheetFromLogs(complianceData);
-      }
-
-      // Also finalize any OTHER past weeks that still show "Pending" (older than previous week)
-      var pastWeekResult = finalizePastWeeksCompliance();
-      tasksCreated += pastWeekResult.tasksCreated;
-
-      // Sort and format the compliance sheet (newest weeks at top)
-      formatComplianceSheetByWeek();
-      Logger.log("Compliance sheet formatted - newest week now at top");
-
-      // Auto-cleanup: Fix log entries and remove non-config crews (runs silently)
-      // Pass true to skip syncCrews since we already ran it at the start of processSafetyEmails
-      try {
-        var cleanupResult = autoComplianceCleanup(true);
-        Logger.log("Auto-cleanup complete - LogFixes: JHA=" + cleanupResult.logsFixes.jha +
-                   ", Weekly=" + cleanupResult.logsFixes.weekly +
-                   ", NonConfigRemoved=" + cleanupResult.nonConfigRemoved);
-      } catch (cleanupErr) {
-        Logger.log("Auto-cleanup error (non-fatal): " + cleanupErr.toString());
-      }
-
-      // Add compliance stats to result (show current week to user)
-      if (complianceData) {
-        result.compliance = {
-          weekStart: Utilities.formatDate(complianceData.weekStart, Session.getScriptTimeZone(), "MM/dd"),
-          weekEnd: Utilities.formatDate(complianceData.weekEnd, Session.getScriptTimeZone(), "MM/dd/yyyy"),
-          compliantCount: complianceData.compliantCount,
-          missingCount: complianceData.missingCount,
-          totalCrews: complianceData.totalCrews,
-          isPastDeadline: complianceData.isPastDeadline,
-          tasksCreated: tasksCreated,
-          crews: []
+        result.previousWeek = {
+          weekStart: Utilities.formatDate(previousWeekData.weekStart, Session.getScriptTimeZone(), "MM/dd"),
+          weekEnd: Utilities.formatDate(previousWeekData.weekEnd, Session.getScriptTimeZone(), "MM/dd/yyyy"),
+          compliantCount: previousWeekData.compliantCount,
+          missingCount: previousWeekData.missingCount,
+          totalCrews: previousWeekData.totalCrews,
+          tasksCreated: tasksCreated
         };
+      }
 
-        // Also add previous week stats for reference
-        if (previousWeekData) {
-          result.previousWeek = {
-            weekStart: Utilities.formatDate(previousWeekData.weekStart, Session.getScriptTimeZone(), "MM/dd"),
-            weekEnd: Utilities.formatDate(previousWeekData.weekEnd, Session.getScriptTimeZone(), "MM/dd/yyyy"),
-            compliantCount: previousWeekData.compliantCount,
-            missingCount: previousWeekData.missingCount,
-            totalCrews: previousWeekData.totalCrews,
-            tasksCreated: tasksCreated
-          };
-        }
+      for (var jobNumber in complianceData.crews) {
+        var crew = complianceData.crews[jobNumber];
+        var days = crew.days || {};
+        var jhaArray = [
+          days['Sun'] || 'N/A',
+          days['Mon'] || '\u23F3',
+          days['Tue'] || '\u23F3',
+          days['Wed'] || '\u23F3',
+          days['Thu'] || '\u23F3',
+          days['Fri'] || '\u23F3',
+          days['Sat'] || 'N/A'
+        ];
+        result.compliance.crews.push({
+          jobNumber: jobNumber,
+          foreman: crew.foreman || '',
+          jha: jhaArray,
+          weeklyMeeting: crew.weeklyMeetingStatus || '\u23F3',
+          monthlyChecklist: crew.monthlyChecklistStatus || '\u23F3',
+          status: crew.status || 'Unassigned'
+        });
+      }
 
-        // Add crew details for display
-        for (var jobNumber in complianceData.crews) {
-          var crew = complianceData.crews[jobNumber];
-          // Convert crew.days object to jha array for UI (days are stored as crew.days['Sun'], etc.)
-          // Use defensive access in case days object is missing
-          var days = crew.days || {};
-          var jhaArray = [
-            days['Sun'] || 'N/A',
-            days['Mon'] || '\u23F3',
-            days['Tue'] || '\u23F3',
-            days['Wed'] || '\u23F3',
-            days['Thu'] || '\u23F3',
-            days['Fri'] || '\u23F3',
-            days['Sat'] || 'N/A'
-          ];
-          result.compliance.crews.push({
-            jobNumber: jobNumber,
-            foreman: crew.foreman || '',
-            jha: jhaArray,
-            weeklyMeeting: crew.weeklyMeetingStatus || '\u23F3',
-            monthlyChecklist: crew.monthlyChecklistStatus || '\u23F3',
-            status: crew.status || 'Unassigned'
-          });
-        }
-
-        // Combine uncredited jobs from both weeks (deduplicated)
-        var allUncreditedJobs = {};
-
-        // Add from current week
-        Logger.log("Building uncreditedJobs - current week has " + (complianceData.uncreditedJobs ? complianceData.uncreditedJobs.length : 0) + " uncredited");
-        Logger.log("Building uncreditedJobs - previous week has " + (previousWeekData && previousWeekData.uncreditedJobs ? previousWeekData.uncreditedJobs.length : 0) + " uncredited");
-
-        if (complianceData.uncreditedJobs) {
-          for (var ui = 0; ui < complianceData.uncreditedJobs.length; ui++) {
-            var uj = complianceData.uncreditedJobs[ui];
-            Logger.log("Current week uncredited job: " + uj.jobNumber + " with " + (uj.reports ? uj.reports.length : 0) + " reports");
-            if (!allUncreditedJobs[uj.jobNumber]) {
-              allUncreditedJobs[uj.jobNumber] = uj;
-            } else {
-            // Merge dates and report types
+      // Combine uncredited jobs
+      var allUncreditedJobs = {};
+      if (complianceData.uncreditedJobs) {
+        for (var ui = 0; ui < complianceData.uncreditedJobs.length; ui++) {
+          var uj = complianceData.uncreditedJobs[ui];
+          if (!allUncreditedJobs[uj.jobNumber]) {
+            allUncreditedJobs[uj.jobNumber] = uj;
+          } else {
             for (var rt = 0; rt < uj.reportTypes.length; rt++) {
               if (allUncreditedJobs[uj.jobNumber].reportTypes.indexOf(uj.reportTypes[rt]) === -1) {
                 allUncreditedJobs[uj.jobNumber].reportTypes.push(uj.reportTypes[rt]);
@@ -6739,14 +6743,12 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
         }
       }
 
-      // Add from previous week
       if (previousWeekData && previousWeekData.uncreditedJobs) {
         for (var pi = 0; pi < previousWeekData.uncreditedJobs.length; pi++) {
           var puj = previousWeekData.uncreditedJobs[pi];
           if (!allUncreditedJobs[puj.jobNumber]) {
             allUncreditedJobs[puj.jobNumber] = puj;
           } else {
-            // Merge dates and report types
             for (var prt = 0; prt < puj.reportTypes.length; prt++) {
               if (allUncreditedJobs[puj.jobNumber].reportTypes.indexOf(puj.reportTypes[prt]) === -1) {
                 allUncreditedJobs[puj.jobNumber].reportTypes.push(puj.reportTypes[prt]);
@@ -6761,73 +6763,47 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
         }
       }
 
-      // Convert to array for UI
       var uncreditedJobsList = [];
       for (var ujKey in allUncreditedJobs) {
         uncreditedJobsList.push(allUncreditedJobs[ujKey]);
       }
-
-      // Always set uncreditedJobs (empty array if none) so the UI always receives [] not undefined
       result.uncreditedJobs = uncreditedJobsList;
-      if (uncreditedJobsList.length > 0) {
-        Logger.log("Found " + uncreditedJobsList.length + " uncredited job(s) in Safety Reports not matched to any tracked crew");
-        Logger.log("Uncredited jobs being returned to UI: " + JSON.stringify(uncreditedJobsList.map(function(j) { return j.jobNumber; })));
-      } else {
-        Logger.log("No uncredited jobs to return to UI (returning empty array)");
-      }
-      } // Close if (complianceData)
-
-      Logger.log("Compliance tracking complete. Tasks created: " + tasksCreated);
-    } catch (compError) {
-      Logger.log("Error in compliance tracking: " + compError.toString());
-      result.complianceError = compError.toString();
     }
+
+    Logger.log("Compliance tracking complete.");
+  } catch (compError) {
+    Logger.log("Error in compliance tracking: " + compError.toString());
+    result.complianceError = compError.toString();
   }
 
-  // Only run post-processing steps (sorting/formatting/hyperlink backfill) when the 
-  // entire processing run is complete. Skipping these on intermediate batches saves
-  // a huge amount of time, reduces API calls, and avoids V8 INTERNAL engine crashes.
-  var shouldRunPostProcessing = isComplete;
-
-  if (shouldRunPostProcessing) {
-    // Auto-apply Gmail hyperlinks to all Source Email ID cells so every row is clickable
-    try {
-      var linkCount = applySafetyEquipmentEmailLinksSilent();
-      Logger.log("Gmail links applied to " + linkCount + " Source Email ID cells");
-    } catch (linkErr) {
-      Logger.log("Gmail link application error (non-fatal): " + linkErr.toString());
-    }
-
-    // Schedule Gmail link backfill to run in a fresh execution 2 minutes from now.
-    // Done as a one-shot time trigger instead of inline because building 1000+ RichTextValue
-    // objects in the same execution as heavy PDF OCR causes V8 INTERNAL memory errors.
-    try {
-      var existingTriggers = ScriptApp.getProjectTriggers();
-      for (var ti = 0; ti < existingTriggers.length; ti++) {
-        if (existingTriggers[ti].getHandlerFunction() === 'applyAllEmailLinksScheduled') {
-          ScriptApp.deleteTrigger(existingTriggers[ti]);
-        }
-      }
-      ScriptApp.newTrigger('applyAllEmailLinksScheduled')
-        .timeBased()
-        .after(2 * 60 * 1000) // 2 minutes
-        .create();
-      Logger.log("Gmail link backfill scheduled for 2 minutes from now");
-    } catch (trigErr) {
-      Logger.log("Could not schedule email link backfill (non-fatal): " + trigErr.toString());
-    }
-
-    // Auto-format JHA Log and Weekly Safety Log: sort by month desc → job number → date desc,
-    // with blue separator rows between each month for easy visual scanning.
-    try {
-      sortAndFormatSafetyLogs(true); // silent = no alert
-    } catch (fmtErr) {
-      Logger.log("Log sheet formatting error (non-fatal): " + fmtErr.toString());
-    }
-  } else {
-    Logger.log("Skipping post-processing (no new logs this batch, not final batch)");
+  // Gmail links and log sheet formatting
+  try {
+    var linkCount = applySafetyEquipmentEmailLinksSilent();
+    Logger.log("Gmail links applied to " + linkCount + " Source Email ID cells");
+  } catch (linkErr) {
+    Logger.log("Gmail link application error: " + linkErr.toString());
   }
 
+  try {
+    var existingTriggers = ScriptApp.getProjectTriggers();
+    for (var ti = 0; ti < existingTriggers.length; ti++) {
+      if (existingTriggers[ti].getHandlerFunction() === 'applyAllEmailLinksScheduled') {
+        ScriptApp.deleteTrigger(existingTriggers[ti]);
+      }
+    }
+    ScriptApp.newTrigger('applyAllEmailLinksScheduled')
+      .timeBased()
+      .after(2 * 60 * 1000)
+      .create();
+  } catch (trigErr) {}
+
+  try {
+    sortAndFormatSafetyLogs(true);
+  } catch (fmtErr) {
+    Logger.log("Log sheet formatting error: " + fmtErr.toString());
+  }
+
+  Logger.log("=== runSafetyEmailPostProcessing END ===");
   return result;
 }
 

@@ -443,14 +443,14 @@
         status.innerHTML = "🔍 Searching Gmail for safety emails (" + modeText + ")" + fastModeText + "...";
         document.getElementById("complianceSection").style.display = "none";
 
-        console.log("Calling google.script.run.processSafetyEmails with batch size 5, fastMode=" + fastMode + ", filter=" + currentReportTypeFilter);
+        console.log("Calling google.script.run.processSafetyEmails with batch size 50, fastMode=" + fastMode + ", filter=" + currentReportTypeFilter);
         var runNormalCall = function() {
           google.script.run
             .withSuccessHandler(handleBatchComplete)
             .withFailureHandler(function(err) {
               handleBatchFailure(err, runNormalCall);
             })
-            .processSafetyEmails(days, 5, newOnlyMode, fastMode, null, currentReportTypeFilter);  // BATCH SIZE 5 + fastMode
+            .processSafetyEmails(days, 50, newOnlyMode, fastMode, null, currentReportTypeFilter);  // BATCH SIZE 50 + fastMode
         };
         runNormalCall();
         console.log("google.script.run initiated");
@@ -541,7 +541,7 @@
                 .withFailureHandler(function(err) {
                   handleBatchFailure(err, runReprocessCall);
                 })
-                .processSafetyEmails(startDateVal, 5, false, fastMode, endDateVal, currentReportTypeFilter);  // Pass endDateVal and filter here
+                .processSafetyEmails(startDateVal, 50, false, fastMode, endDateVal, currentReportTypeFilter);  // BATCH SIZE 50
             };
             runReprocessCall();
           } else {
@@ -577,6 +577,29 @@
           totalSkipped += (result.skippedThisBatch || 0);
           totalUncredited += (result.uncreditedThisBatch || 0);
           totalIssues += (result.issuesThisBatch || 0);
+        }
+
+        // Check for post-processing continuation step
+        if (result && result.isPostProcessing) {
+          progressBar.style.width = "100%";
+          progressBar.textContent = "Finalizing compliance & logs...";
+          progressBar.style.background = "linear-gradient(90deg, #ffc107, #34a853)";
+
+          status.innerHTML =
+            "⏳ <span class='progress'>Finalizing compliance tracking & log formatting...</span><br>" +
+            "<div class='info'>Emails scanned: " + result.threadsProcessed + " / " + result.totalThreads + " (100%)</div>" +
+            "<div class='info'>Running totals: " + totalProcessed + " processed, " + totalSkipped + " skipped, " + totalUncredited + " not credited</div>";
+
+          var runPostCall = function() {
+            google.script.run
+              .withSuccessHandler(handleBatchComplete)
+              .withFailureHandler(function(err) {
+                handleBatchFailure(err, runPostCall);
+              })
+              .runSafetyEmailPostProcessing(currentReportTypeFilter, result);
+          };
+          runPostCall();
+          return;
         }
 
         // Check for unknown jobs that need user decision
@@ -858,7 +881,7 @@
           .withFailureHandler(function(err) {
             handleBatchFailure(err, runContinueCall);
           })
-          .processSafetyEmails(currentDays, 5, newOnlyMode, fastMode, null, currentReportTypeFilter);  // BATCH SIZE 5
+          .processSafetyEmails(currentDays, 50, newOnlyMode, fastMode, null, currentReportTypeFilter);  // BATCH SIZE 50
       };
       runContinueCall();
     }
