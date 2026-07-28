@@ -549,14 +549,14 @@ function onEditHandler(e) {
     // =========================================================================
     // EXPIRING CERTS DATE CHANGE - CLEAR NOTIFIED STATUS
     // =========================================================================
-    if (sheetName === 'Expiring Certs' && editedCol === 3 && editedRow >= 2) {
+    if (sheetName === 'Expiring Certs' && (editedCol === 3 || editedCol === 4) && editedRow >= 2) {
       var employeeName = sheet.getRange(editedRow, 1).getValue();
       var certType = sheet.getRange(editedRow, 2).getValue();
       
       if (employeeName && certType) {
         clearCertNotifiedStatus(employeeName, certType);
         
-        // Refresh this row's Column H SMS checkbox state
+        // Refresh this row's Column I (9) SMS checkbox state
         var empSheet = ss.getSheetByName(SHEET_EMPLOYEES);
         var hasPhone = false;
         if (empSheet) {
@@ -569,13 +569,13 @@ function onEditHandler(e) {
           }
         }
         
-        var cellH = sheet.getRange(editedRow, 8);
-        cellH.clearDataValidations().clearContent();
+        var cellI = sheet.getRange(editedRow, 9);
+        cellI.clearDataValidations().clearContent();
         if (hasPhone) {
           var ruleCheckbox = SpreadsheetApp.newDataValidation().requireCheckbox(true, "💬 Send SMS").build();
-          cellH.setValue("💬 Send SMS").setDataValidation(ruleCheckbox);
+          cellI.setValue("💬 Send SMS").setDataValidation(ruleCheckbox);
         } else {
-          cellH.setValue("No Phone");
+          cellI.setValue("No Phone");
         }
         
         // Refresh dashboard
@@ -641,7 +641,7 @@ function onEditHandler(e) {
 
     // Handle Expiring Certs sheet edits (auto-fill formulas for new/edited rows)
     if (sheetName === 'Expiring Certs' && editedRow >= 2) {
-      if (editedCol <= 5) {
+      if (editedCol <= 6) {
         var certType = String(sheet.getRange(editedRow, 2).getValue()).trim();
         if (certType) {
           var nonExpiring = [
@@ -651,15 +651,47 @@ function onEditHandler(e) {
             'MSHA',
             'EICA Basic Helicopter Line Construction Safety'
           ];
+          try {
+            var configRaw = PropertiesService.getScriptProperties().getProperty('EXPIRING_CERTS_CONFIG');
+            if (configRaw) {
+              var parsedCfg = JSON.parse(configRaw);
+              if (parsedCfg && Array.isArray(parsedCfg.certs)) {
+                parsedCfg.certs.forEach(function(c) {
+                  if (c.category === 'non_expiring' && c.name) {
+                    var n = String(c.name).trim();
+                    if (nonExpiring.indexOf(n) === -1) nonExpiring.push(n);
+                  }
+                });
+              }
+            }
+          } catch (e) {}
+
           var isNonExpiring = nonExpiring.indexOf(certType) !== -1;
-          var fCell = sheet.getRange(editedRow, 6);
-          var gCell = sheet.getRange(editedRow, 7);
+          var acqDateCell = sheet.getRange(editedRow, 3); // Col C (3): Date Acquired
+          var expDateCell = sheet.getRange(editedRow, 4); // Col D (4): Expiration Date
+          var daysCell = sheet.getRange(editedRow, 7);    // Col G (7): Days Until Expiration
+          var statusCell = sheet.getRange(editedRow, 8);  // Col H (8): Status
+
           if (isNonExpiring) {
-            fCell.setFormula('="N/A"');
-            gCell.setFormula('=IF(ISBLANK(C' + editedRow + '),"No Date Set","OK")');
+            if (String(expDateCell.getValue()).trim() !== 'N/A') {
+              expDateCell.setValue('N/A');
+            }
+            daysCell.setFormula('="N/A"');
+            statusCell.setFormula('=IF(AND(ISBLANK(C' + editedRow + '),OR(D' + editedRow + '="",D' + editedRow + '="N/A")),"No Date Set","OK")');
           } else {
-            fCell.setFormula('=IF(ISBLANK(C' + editedRow + '),"N/A",DAYS(C' + editedRow + ',TODAY()))');
-            gCell.setFormula('=IF(F' + editedRow + '="PRIORITY - Need Copy","PRIORITY - Need Copy",IF(F' + editedRow + '="N/A","No Date Set",IF(F' + editedRow + '<0,"EXPIRED",IF(F' + editedRow + '<=7,"CRITICAL",IF(F' + editedRow + '<=30,"WARNING",IF(F' + editedRow + '<=60,"UPCOMING","OK"))))))');
+            // If Date Acquired (Col 3) was edited, auto-calculate Expiration Date (Col 4)
+            if (editedCol === 3) {
+              var acqVal = acqDateCell.getValue();
+              if (acqVal) {
+                var calcExp = calculateCertExpirationDate(certType, acqVal);
+                if (calcExp) {
+                  expDateCell.setValue(Utilities.formatDate(calcExp, Session.getScriptTimeZone(), 'yyyy-MM-dd'));
+                  Logger.log('Auto-calculated Expiration Date for row ' + editedRow + ' (' + certType + '): ' + Utilities.formatDate(calcExp, Session.getScriptTimeZone(), 'yyyy-MM-dd'));
+                }
+              }
+            }
+            daysCell.setFormula('=IF(ISBLANK(D' + editedRow + '),"N/A",DAYS(D' + editedRow + ',TODAY()))');
+            statusCell.setFormula('=IF(G' + editedRow + '="PRIORITY - Need Copy","PRIORITY - Need Copy",IF(G' + editedRow + '="N/A","No Date Set",IF(G' + editedRow + '<0,"EXPIRED",IF(G' + editedRow + '<=7,"CRITICAL",IF(G' + editedRow + '<=30,"WARNING",IF(G' + editedRow + '<=60,"UPCOMING","OK"))))))');
           }
           Logger.log('Auto-set formulas for Expiring Certs row ' + editedRow);
         }

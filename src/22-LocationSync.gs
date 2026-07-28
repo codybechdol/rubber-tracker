@@ -107,6 +107,9 @@ function syncInventoryLocations() {
     // Process Hot Sticks sheet
     updateCount += syncSheetLocations(ss, SHEET_HOT_STICKS, nameToLocation);
 
+    // Process Expiring Certs sheet
+    updateCount += syncSheetLocations(ss, 'Expiring Certs', nameToLocation);
+
     logEvent('syncInventoryLocations: Updated ' + updateCount + ' item locations');
 
   } catch (e) {
@@ -115,10 +118,10 @@ function syncInventoryLocations() {
 }
 
 /**
- * Syncs locations for a specific inventory sheet (Gloves or Sleeves).
+ * Syncs locations for a specific inventory sheet (Gloves or Sleeves or Expiring Certs).
  *
  * @param {Spreadsheet} ss - The active spreadsheet
- * @param {string} sheetName - Name of the sheet ('Gloves' or 'Sleeves')
+ * @param {string} sheetName - Name of the sheet
  * @param {Object} nameToLocation - Map of employee names to locations
  * @returns {number} Count of updated rows
  */
@@ -138,7 +141,7 @@ function syncSheetLocations(ss, sheetName, nameToLocation) {
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).trim().toLowerCase();
     if (header === 'location') locationColIdx = h;
-    if (header === 'assigned to') assignedToColIdx = h;
+    if (header === 'assigned to' || header === 'employee name' || header === 'employee') assignedToColIdx = h;
   }
 
   if (locationColIdx === -1 || assignedToColIdx === -1) {

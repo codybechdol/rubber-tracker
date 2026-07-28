@@ -2670,6 +2670,36 @@ function calculateCertExpirationDate(certType, acquiredDate) {
 }
 
 /**
+ * Calculates certification date acquired given a cert type and expiration date.
+ * @param {string} certType - Type of certification
+ * @param {Date|string} expirationDate - Expiration date
+ * @return {Date|null} Calculated acquired date object
+ */
+function calculateCertAcquiredDate(certType, expirationDate) {
+  if (!expirationDate) return null;
+  var exp = (expirationDate instanceof Date) ? expirationDate : parseDateNoon(String(expirationDate));
+  if (!exp || isNaN(exp.getTime())) return null;
+
+  var acq = new Date(exp.getTime());
+  var typeLower = String(certType || '').trim().toLowerCase();
+
+  if (typeLower === 'pole top rescue' || typeLower === 'coin cpr' || typeLower === 'harassment training') {
+    acq.setFullYear(acq.getFullYear() - 1);
+  } else if (typeLower === 'red cross cpr' || typeLower === 'cpr' || typeLower === '1st aid' || typeLower === 'first aid') {
+    acq.setFullYear(acq.getFullYear() - 2);
+  } else if (typeLower.indexOf('forklift') !== -1 || typeLower.indexOf('trench') !== -1 || typeLower.indexOf('rigging') !== -1) {
+    acq.setFullYear(acq.getFullYear() - 3);
+  } else if (typeLower === 'crane cert') {
+    acq.setFullYear(acq.getFullYear() - 5);
+  } else if (typeLower === 'dl' || typeLower === 'dl expiration') {
+    acq.setFullYear(acq.getFullYear() - 8);
+  } else {
+    acq.setFullYear(acq.getFullYear() - 1);
+  }
+  return acq;
+}
+
+/**
  * Opens the Expiring Certifications Setup dialog.
  */
 function showExpiringCertsSetupDialog() {
@@ -3308,8 +3338,8 @@ function parseExcelCertDataMultiRow(pastedText, columnMapping) {
 
     uniqueEmployees[convertedName] = true;
 
-    // Iterate through certification columns D-R (indices 3-17)
-    var columns = ['D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R'];
+    // Iterate through certification columns D-S (indices 3-18)
+    var columns = ['D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S'];
     for (var c = 0; c < columns.length && (c + 3) < cells.length; c++) {
       var cellValue = String(cells[c + 3] || '').trim();
       if (!cellValue) continue;
@@ -3319,44 +3349,73 @@ function parseExcelCertDataMultiRow(pastedText, columnMapping) {
 
       var isNonExpiring = nonExpiring.indexOf(certType) !== -1;
       var isPriority = false;
-      var expirationDate = null;
+      var parsedDateStr = null;
 
       // Check for "Need Copy"
       if (cellValue.toLowerCase().indexOf('need copy') !== -1) {
         isPriority = true;
         priorityCount++;
-      } else if (isNonExpiring) {
-        nonExpiringCount++;
-        // Crane Evaluation: still import the date even though it doesn't expire.
-        // The date means the evaluation was performed; absence of a date triggers a To Do task
-        // for employees who have a valid Crane Cert.
-        if (certType === 'Crane Evaluation') {
-          var ceDotMatch = cellValue.match(/(\d{1,2})\.(\d{1,2})\.(\d{2,4})/);
-          var ceSlashMatch = cellValue.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
-          var ceDm = ceDotMatch || ceSlashMatch;
-          if (ceDm) {
-            var ceMonth = String(ceDm[1]).padStart(2, '0');
-            var ceDay = String(ceDm[2]).padStart(2, '0');
-            var ceYear = ceDm[3].length === 2 ? '20' + ceDm[3] : ceDm[3];
-            expirationDate = ceMonth + '/' + ceDay + '/' + ceYear;
+      } else {
+        // Parse date from cellValue for ANY cert type (expiring or non-expiring)
+        var slashMatch = cellValue.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+        var dotMatch = cellValue.match(/(\d{1,2})\.(\d{1,2})\.(\d{2,4})/);
+        var dashMatch = cellValue.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+
+        if (slashMatch) {
+          var month = String(slashMatch[1]).padStart(2, '0');
+          var day = String(slashMatch[2]).padStart(2, '0');
+          var yr = slashMatch[3];
+          var year = yr.length === 2 ? '20' + yr : yr;
+          parsedDateStr = month + '/' + day + '/' + year;
+        } else if (dotMatch) {
+          var month = String(dotMatch[1]).padStart(2, '0');
+          var day = String(dotMatch[2]).padStart(2, '0');
+          var yr = dotMatch[3];
+          var year = yr.length === 2 ? '20' + yr : yr;
+          parsedDateStr = month + '/' + day + '/' + year;
+        } else if (dashMatch) {
+          var year = dashMatch[1];
+          var month = String(dashMatch[2]).padStart(2, '0');
+          var day = String(dashMatch[3]).padStart(2, '0');
+          parsedDateStr = month + '/' + day + '/' + year;
+        } else {
+          var dObj = new Date(cellValue);
+          if (!isNaN(dObj.getTime()) && dObj.getFullYear() > 1990) {
+            parsedDateStr = Utilities.formatDate(dObj, Session.getScriptTimeZone(), 'MM/dd/yyyy');
           }
         }
-      } else {
-        // Parse date from "M.D.YY" or "MM.DD.YY" format
-        var dateMatch = cellValue.match(/(\d{1,2})\.(\d{1,2})\.(\d{2})/);
-        if (dateMatch) {
-          var month = String(dateMatch[1]).padStart(2, '0');
-          var day = String(dateMatch[2]).padStart(2, '0');
-          var year = '20' + dateMatch[3];
-          expirationDate = month + '/' + day + '/' + year;
+      }
+
+      var isIssuedType = (certType === 'Crane Evaluation' || certType === 'OSHA 1910' || certType === 'MSHA' || certType === 'OSHA Trench Comp Person' || certType.indexOf('Operator Safety') !== -1);
+
+      var finalAcqDateStr = null;
+      var finalExpDateStr = null;
+
+      if (parsedDateStr) {
+        var parsedDateObj = parseDateNoon(parsedDateStr);
+        if (isIssuedType) {
+          finalAcqDateStr = parsedDateStr;
+          if (!isNonExpiring) {
+            var calcExp = calculateCertExpirationDate(certType, parsedDateObj);
+            if (calcExp) finalExpDateStr = Utilities.formatDate(calcExp, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+          }
+        } else {
+          finalExpDateStr = isNonExpiring ? null : parsedDateStr;
+          var calcAcq = calculateCertAcquiredDate(certType, parsedDateObj);
+          if (calcAcq) finalAcqDateStr = Utilities.formatDate(calcAcq, Session.getScriptTimeZone(), 'MM/dd/yyyy');
         }
+      }
+
+      if (isNonExpiring) {
+        nonExpiringCount++;
       }
 
       certRows.push({
         excelName: excelName,
         convertedName: convertedName,
         certType: certType,
-        expirationDate: expirationDate,
+        expirationDate: finalExpDateStr,
+        dateAcquired: finalAcqDateStr,
         isPriority: isPriority,
         isNonExpiring: isNonExpiring,
         excelJobNum: excelJobNum,
@@ -4106,7 +4165,7 @@ function processExpiringCertsImportMultiRow(parsedData, selectedCertTypes) {
 
   // Load existing records from Expiring Certs sheet to merge
   var existingRecords = {};
-  var headers = ['Employee Name', 'Item Type', 'Expiration Date', 'Location', 'Job #', 'Days Until Expiration', 'Status', 'SMS'];
+  var headers = ['Employee Name', 'Item Type', 'Date Acquired', 'Expiration Date', 'Location', 'Job #', 'Days Until Expiration', 'Status', 'SMS'];
   var existingData = [];
   
   if (expiringSheet.getLastRow() > 1) {
@@ -4117,9 +4176,10 @@ function processExpiringCertsImportMultiRow(parsedData, selectedCertTypes) {
     var row = existingData[ex];
     var empName = String(row[0] || '').trim();
     var certType = String(row[1] || '').trim();
-    var dateVal = row[2];
-    var locVal = row[3] || '';
-    var jobVal = row[4] || '';
+    var acqVal = row[2];
+    var dateVal = row[3];
+    var locVal = row[4] || '';
+    var jobVal = row[5] || '';
 
     if (empName && certType) {
       var key = empName.toLowerCase() + '_' + certType.toLowerCase();
@@ -4137,6 +4197,7 @@ function processExpiringCertsImportMultiRow(parsedData, selectedCertTypes) {
         name: empName,
         certType: certType,
         expirationDate: parsedDate,
+        dateAcquired: acqVal,
         location: locVal,
         jobNum: jobVal
       };
@@ -4179,6 +4240,8 @@ function processExpiringCertsImportMultiRow(parsedData, selectedCertTypes) {
 
     var expirationDate = cert.expirationDate || '';
     var importDate = expirationDate ? new Date(expirationDate) : null;
+    var dateAcquired = cert.dateAcquired || '';
+    var importAcqDate = dateAcquired ? new Date(dateAcquired) : null;
 
     var key = finalName.toLowerCase() + '_' + cert.certType.toLowerCase();
     var existingRecord = existingRecords[key];
@@ -4200,6 +4263,9 @@ function processExpiringCertsImportMultiRow(parsedData, selectedCertTypes) {
       }
 
       existingRecord.expirationDate = finalDateStr ? new Date(finalDateStr) : null;
+      if (dateAcquired) {
+        existingRecord.dateAcquired = dateAcquired;
+      }
       if (location) existingRecord.location = location;
       if (jobNum) existingRecord.jobNum = jobNum;
     } else {
@@ -4208,6 +4274,7 @@ function processExpiringCertsImportMultiRow(parsedData, selectedCertTypes) {
       existingRecords[key] = {
         name: finalName,
         certType: cert.certType,
+        dateAcquired: dateAcquired,
         expirationDate: importDate,
         location: location,
         jobNum: jobNum
@@ -4237,12 +4304,13 @@ function processExpiringCertsImportMultiRow(parsedData, selectedCertTypes) {
     batchData.push([
       rec.name,
       rec.certType,
+      rec.dateAcquired || '',
       dateStr,
       rec.location,
       rec.jobNum,
-      '', // Formula column (Days Until)
-      '', // Formula column (Status)
-      ''  // Column H (SMS)
+      '', // Col G: Formula (Days Until)
+      '', // Col H: Formula (Status)
+      ''  // Col I: SMS Checkbox
     ]);
   }
 
@@ -4465,7 +4533,12 @@ function sortExpiringCertsSheet(sheet) {
     lastCol = sheet.getLastColumn();
   }
 
-  var range = sheet.getRange(2, 1, lastRow - 1, lastCol);
+  // Always enforce proper 9-column headers
+  var canonicalHeaders = ['Employee Name', 'Item Type', 'Date Acquired', 'Expiration Date', 'Location', 'Job #', 'Days Until Expiration', 'Status', 'SMS'];
+  sheet.getRange(1, 1, 1, canonicalHeaders.length).setValues([canonicalHeaders]);
+  sheet.getRange(1, 1, 1, canonicalHeaders.length).setFontWeight('bold').setBackground('#1a73e8').setFontColor('#ffffff');
+
+  var range = sheet.getRange(2, 1, lastRow - 1, Math.max(lastCol, 9));
   var values = range.getValues();
 
   var CERT_ORDER = [
@@ -4516,15 +4589,60 @@ function sortExpiringCertsSheet(sheet) {
     }
   } catch (e) {}
 
-  // For non-expiring certs: if Date Acquired (Col C) is blank and Expiration Date (Col D) has a date, move date to Col C
+  // Load employee matching map to sync Location & Job Number
+  var empListForSync = getEmployeeNamesForMatching();
+  var empSyncMap = {};
+  for (var e = 0; e < empListForSync.length; e++) {
+    var empObj = empListForSync[e];
+    if (empObj && empObj.name) {
+      empSyncMap[empObj.name.toLowerCase().trim()] = empObj;
+    }
+  }
+
+  // For non-expiring certs: if Date Acquired (Col C) is blank and Expiration Date (Col D) has a date, move date to Col C. Always set Col D to 'N/A'.
+  // Also sync Location (Col E) and Job # (Col F) from Employees sheet if missing or N/A.
   for (var v = 0; v < values.length; v++) {
+    var empNameRow = String(values[v][0] || '').trim();
     var rowCert = String(values[v][1] || '').trim();
+
+    // Sync Location and Job Number from Employees sheet
+    if (empNameRow) {
+      var matchedEmpSync = empSyncMap[empNameRow.toLowerCase().trim()];
+      if (matchedEmpSync) {
+        var curLoc = String(values[v][4] || '').trim();
+        var curJob = String(values[v][5] || '').trim();
+        if (matchedEmpSync.location && (curLoc === '' || curLoc === 'Unknown' || curLoc === 'N/A' || isStatusLocation(curLoc))) {
+          values[v][4] = getPhysicalLocation(matchedEmpSync.location);
+        }
+        if (matchedEmpSync.jobNum && (curJob === '' || curJob === 'N/A')) {
+          values[v][5] = matchedEmpSync.jobNum;
+        }
+      }
+    }
+
     if (nonExpiringList.indexOf(rowCert) !== -1) {
       var acqVal = values[v][2];
       var expVal = values[v][3];
-      if (!acqVal && expVal) {
+      if (!acqVal && expVal && String(expVal).trim() !== 'N/A') {
         values[v][2] = expVal;
-        values[v][3] = '';
+      }
+      values[v][3] = 'N/A';
+    } else {
+      // Standard expiring cert: auto-calculate Expiration Date (Col D) if Date Acquired (Col C) is present
+      var acqVal = values[v][2];
+      var expVal = values[v][3];
+      if (acqVal) {
+        var parsedAcq = (acqVal instanceof Date) ? acqVal : parseDateNoon(String(acqVal));
+        if (parsedAcq && !isNaN(parsedAcq.getTime())) {
+          var calcExp = calculateCertExpirationDate(rowCert, parsedAcq);
+          if (calcExp) {
+            var parsedExp = (expVal instanceof Date) ? expVal : (expVal && String(expVal).trim() !== 'N/A' ? parseDateNoon(String(expVal)) : null);
+            // Update expiration date if missing, N/A, or if calculated expiration date is greater than current exp date
+            if (!parsedExp || isNaN(parsedExp.getTime()) || calcExp > parsedExp) {
+              values[v][3] = Utilities.formatDate(calcExp, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+            }
+          }
+        }
       }
     }
   }
@@ -4604,7 +4722,7 @@ function sortExpiringCertsSheet(sheet) {
     if (isNonExpiring) {
       formulas.push([
         '="N/A"',
-        '=IF(AND(ISBLANK(C' + rowNum + '),ISBLANK(D' + rowNum + ')),"No Date Set","OK")'
+        '=IF(AND(ISBLANK(C' + rowNum + '),OR(D' + rowNum + '="",D' + rowNum + '="N/A")),"No Date Set","OK")'
       ]);
     } else {
       formulas.push([
@@ -4617,7 +4735,15 @@ function sortExpiringCertsSheet(sheet) {
     var resolvedName = resolveEmployeeName(empName, alternateNameMap);
     var taskKey = resolvedName.toLowerCase().trim() + '|' + certType.toLowerCase().trim();
     var hasPhone = !!empPhones[resolvedName.toLowerCase().trim()];
-    var isNotified = !!notifiedTasks[taskKey];
+    var acqVal = values[f][2];
+    var hasAcquiredDate = !!acqVal && String(acqVal).trim() !== '' && String(acqVal).trim() !== 'N/A';
+    var isNotified = !hasAcquiredDate && !!notifiedTasks[taskKey];
+
+    if (hasAcquiredDate && notifiedTasks[taskKey]) {
+      try {
+        clearCertNotifiedStatus(empName, certType);
+      } catch (err) {}
+    }
 
     if (isNotified) {
       smsValues.push(["💬 Notified"]);
@@ -15836,7 +15962,7 @@ function reAddDeclinedCertToTaskList(taskKey, employee, certType) {
           // Found the row - clear declined date
           expiringSheet.getRange(i + 1, declinedColIndex).setValue('');
           var ruleCheckbox = SpreadsheetApp.newDataValidation().requireCheckbox(true, "💬 Send SMS").build();
-          expiringSheet.getRange(i + 1, 8).setDataValidation(ruleCheckbox).setValue("💬 Send SMS");
+          expiringSheet.getRange(i + 1, 9).setDataValidation(ruleCheckbox).setValue("💬 Send SMS");
           Logger.log('reAddDeclinedCertToTaskList: Cleared declined date and restored checkbox at row ' + (i + 1));
           break;
         }
@@ -29100,15 +29226,13 @@ function setupDashboardLayout(sheet) {
     }
   }
 
-  // Refresh Expiring Certs formulas so Column H (SMS) is populated
+  // Refresh Expiring Certs formulas so Column I (SMS) is populated
   var expiringSheet = ss.getSheetByName('Expiring Certs');
   if (expiringSheet && expiringSheet.getLastRow() > 1) {
     try {
-      // Ensure the header has Column H
-      var headerRange = expiringSheet.getRange("H1");
-      if (headerRange.getValue() !== "SMS") {
-        headerRange.setValue("SMS");
-      }
+      // Ensure headers for Column H (Status) and Column I (SMS)
+      expiringSheet.getRange("H1").setValue("Status");
+      expiringSheet.getRange("I1").setValue("SMS");
       sortExpiringCertsSheet(expiringSheet);
     } catch (e) {
       Logger.log("setupDashboardLayout: Could not refresh expiring certs formulas: " + e.message);
@@ -29226,7 +29350,7 @@ function setupDashboardLayout(sheet) {
   var certRows = [];
   var expiringSheet = ss.getSheetByName('Expiring Certs');
   if (expiringSheet && expiringSheet.getLastRow() > 1) {
-    var certData = expiringSheet.getRange(2, 1, expiringSheet.getLastRow() - 1, 8).getValues();
+    var certData = expiringSheet.getRange(2, 1, expiringSheet.getLastRow() - 1, 9).getValues();
     var today = new Date();
     today.setHours(0,0,0,0);
     var thirtyDaysOut = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
@@ -29234,8 +29358,8 @@ function setupDashboardLayout(sheet) {
     for (var c = 0; c < certData.length; c++) {
       var name = certData[c][0];
       var type = certData[c][1];
-      var expDate = certData[c][2];
-      var daysLeft = certData[c][5];
+      var expDate = certData[c][3];  // Col D (4): Expiration Date
+      var daysLeft = certData[c][6]; // Col G (7): Days Until Expiration
       
       if (expDate instanceof Date) {
         var expTime = expDate.getTime();
@@ -29868,15 +29992,15 @@ function markCertNotifiedAndReload(employeeName, certType) {
         var rowEmp = String(expData[j][0]).toLowerCase().trim();
         var resolvedRowEmp = resolveEmployeeName(rowEmp, alternateNameMap2).toLowerCase().trim();
         var rowType = String(expData[j][1]).toLowerCase().trim();
-        var currentSmsVal = String(expData[j][7] || '').trim();
+        var currentSmsVal = String(expData[j][8] || '').trim();
         
         if (resolvedRowEmp === resolvedTargetEmp && 
             (rowType === String(certType).toLowerCase().trim() || (is1stAidOrCPR(rowType) && is1stAidOrCPR(certType)))) {
           if (currentSmsVal !== '💬 Notified') {
-            Logger.log('markCertNotifiedAndReload: SAFETY NET - Row ' + (j + 1) + ' col H was "' + currentSmsVal + '", forcing to "💬 Notified"');
-            expiringSheet.getRange(j + 1, 8).clearDataValidations().setValue("💬 Notified");
+            Logger.log('markCertNotifiedAndReload: SAFETY NET - Row ' + (j + 1) + ' col I was "' + currentSmsVal + '", forcing to "💬 Notified"');
+            expiringSheet.getRange(j + 1, 9).clearDataValidations().setValue("💬 Notified");
           } else {
-            Logger.log('markCertNotifiedAndReload: Row ' + (j + 1) + ' col H is already "💬 Notified" ✓');
+            Logger.log('markCertNotifiedAndReload: Row ' + (j + 1) + ' col I is already "💬 Notified" ✓');
           }
         }
       }
@@ -29884,7 +30008,7 @@ function markCertNotifiedAndReload(employeeName, certType) {
     }
     
     if (foundCount === 0) {
-      Logger.log('markCertNotifiedAndReload: WARNING - No task found in Task Metadata for ' + employeeName + ' - ' + certType + '. Safety net may have forced col H update.');
+      Logger.log('markCertNotifiedAndReload: WARNING - No task found in Task Metadata for ' + employeeName + ' - ' + certType + '. Safety net may have forced col I update.');
     }
     
     return { success: true };
@@ -29964,7 +30088,7 @@ function clearCertNotifiedStatus(employeeName, certType) {
         var rowType = String(expData[j][1]).toLowerCase().trim();
         if (resolvedRowEmp === resolvedEmpName &&
             (rowType === String(certType).toLowerCase().trim() || (is1stAidOrCPR(rowType) && is1stAidOrCPR(certType)))) {
-          expiringSheet.getRange(j + 1, 8).setDataValidation(ruleCheckbox).setValue("💬 Send SMS");
+          expiringSheet.getRange(j + 1, 9).setDataValidation(ruleCheckbox).setValue("💬 Send SMS");
           Logger.log('clearCertNotifiedStatus: Restored checkbox on Expiring Certs row ' + (j + 1));
         }
       }
