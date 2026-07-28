@@ -7479,14 +7479,14 @@ function getExpiringCertsForSchedule() {
       // Check if this cert was declined
       var declinedDate = null;
       var isDeclined = false;
-      if (declinedData && declinedData[i][0]) {
-        var decVal = declinedData[i][0];
+      var decVal = (declinedColIndex >= 0 && rawData[i]) ? rawData[i][declinedColIndex] : null;
+      if (decVal) {
         if (decVal instanceof Date && !isNaN(decVal.getTime())) {
           declinedDate = Utilities.formatDate(decVal, Session.getScriptTimeZone(), 'MM/dd/yyyy');
           isDeclined = true;
-        } else if (decVal) {
-          declinedDate = String(decVal);
-          isDeclined = true;
+        } else {
+          declinedDate = String(decVal).trim();
+          if (declinedDate) isDeclined = true;
         }
       }
 
