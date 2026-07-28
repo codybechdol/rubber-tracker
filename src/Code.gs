@@ -4280,44 +4280,52 @@ function cleanupCertTasksFromManualTasks() {
  */
 function applyExpiringCertsFormatting(sheet, dataRows) {
   if (!dataRows || dataRows < 1) return;
-  var statusRange = sheet.getRange(2, 8, dataRows, 1); // Column H (Column 8)
+
+  var fullRowRange = sheet.getRange(2, 1, dataRows, 9); // Columns A through I
+  var statusRange = sheet.getRange(2, 8, dataRows, 1);  // Column H (Status column)
   var rules = [];
 
+  // 1. PRIORITY - Need Copy (Full Row A-I - Purple)
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenTextEqualTo('PRIORITY - Need Copy')
+    .whenFormulaSatisfied('=$H2="PRIORITY - Need Copy"')
     .setBackground('#9c27b0')
     .setFontColor('#ffffff')
-    .setRanges([statusRange])
+    .setRanges([fullRowRange])
     .build());
 
+  // 2. EXPIRED (Full Row A-I - Red)
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenTextEqualTo('EXPIRED')
+    .whenFormulaSatisfied('=$H2="EXPIRED"')
     .setBackground('#ea4335')
     .setFontColor('#ffffff')
-    .setRanges([statusRange])
+    .setRanges([fullRowRange])
     .build());
 
+  // 3. CRITICAL (Full Row A-I - Dark Orange)
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenTextEqualTo('CRITICAL')
+    .whenFormulaSatisfied('=$H2="CRITICAL"')
     .setBackground('#ff6d00')
     .setFontColor('#ffffff')
-    .setRanges([statusRange])
+    .setRanges([fullRowRange])
     .build());
 
+  // 4. WARNING (Full Row A-I - Yellow)
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenTextEqualTo('WARNING')
+    .whenFormulaSatisfied('=$H2="WARNING"')
     .setBackground('#fbbc04')
     .setFontColor('#000000')
-    .setRanges([statusRange])
+    .setRanges([fullRowRange])
     .build());
 
+  // 5. UPCOMING (Full Row A-I - Soft Blue)
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenTextEqualTo('UPCOMING')
+    .whenFormulaSatisfied('=$H2="UPCOMING"')
     .setBackground('#4285f4')
     .setFontColor('#ffffff')
-    .setRanges([statusRange])
+    .setRanges([fullRowRange])
     .build());
 
+  // 6. OK (Status Column H only - Green)
   rules.push(SpreadsheetApp.newConditionalFormatRule()
     .whenTextEqualTo('OK')
     .setBackground('#34a853')
@@ -4325,6 +4333,7 @@ function applyExpiringCertsFormatting(sheet, dataRows) {
     .setRanges([statusRange])
     .build());
 
+  // 7. Non-Expiring (Status Column H only - Gray)
   rules.push(SpreadsheetApp.newConditionalFormatRule()
     .whenTextEqualTo('Non-Expiring')
     .setBackground('#757575')
@@ -4332,6 +4341,7 @@ function applyExpiringCertsFormatting(sheet, dataRows) {
     .setRanges([statusRange])
     .build());
 
+  // 8. No Date Set (Status Column H only - Gray)
   rules.push(SpreadsheetApp.newConditionalFormatRule()
     .whenTextEqualTo('No Date Set')
     .setBackground('#757575')
