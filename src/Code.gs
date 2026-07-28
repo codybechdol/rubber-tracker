@@ -4589,34 +4589,51 @@ function sortExpiringCertsSheet(sheet) {
     }
   } catch (e) {}
 
-  // Load employee matching map to sync Location & Job Number
+  // Load active employee map from Employees sheet to purge Previous Employees
+  var activeEmployees = new Set();
   var empListForSync = getEmployeeNamesForMatching();
   var empSyncMap = {};
   for (var e = 0; e < empListForSync.length; e++) {
     var empObj = empListForSync[e];
     if (empObj && empObj.name) {
       empSyncMap[empObj.name.toLowerCase().trim()] = empObj;
+      var locLower = String(empObj.location || '').toLowerCase().trim();
+      if (locLower !== 'previous employee' && isStatusLocation(locLower) !== 'previous employee') {
+        activeEmployees.add(empObj.name.toLowerCase().trim());
+      }
     }
   }
 
-  // For non-expiring certs: if Date Acquired (Col C) is blank and Expiration Date (Col D) has a date, move date to Col C. Always set Col D to 'N/A'.
-  // Also sync Location (Col E) and Job # (Col F) from Employees sheet if missing or N/A.
+  // Filter out any rows for Previous Employees or employees no longer active
+  var filteredValues = [];
+  var removedCount = 0;
+
   for (var v = 0; v < values.length; v++) {
     var empNameRow = String(values[v][0] || '').trim();
     var rowCert = String(values[v][1] || '').trim();
+    if (!empNameRow || !rowCert) continue;
 
-    // Sync Location and Job Number from Employees sheet
-    if (empNameRow) {
-      var matchedEmpSync = empSyncMap[empNameRow.toLowerCase().trim()];
-      if (matchedEmpSync) {
-        var curLoc = String(values[v][4] || '').trim();
-        var curJob = String(values[v][5] || '').trim();
-        if (matchedEmpSync.location && (curLoc === '' || curLoc === 'Unknown' || curLoc === 'N/A' || isStatusLocation(curLoc))) {
-          values[v][4] = getPhysicalLocation(matchedEmpSync.location);
-        }
-        if (matchedEmpSync.jobNum && (curJob === '' || curJob === 'N/A')) {
-          values[v][5] = matchedEmpSync.jobNum;
-        }
+    var matchedEmpSync = empSyncMap[empNameRow.toLowerCase().trim()];
+    var curLoc = String(values[v][4] || '').toLowerCase().trim();
+
+    var isPreviousLoc = (curLoc === 'previous employee' || isStatusLocation(curLoc) === 'previous employee');
+    var isMatchedPrevious = matchedEmpSync && String(matchedEmpSync.location || '').toLowerCase().trim() === 'previous employee';
+    var isCurrent = activeEmployees.has(empNameRow.toLowerCase().trim()) || (matchedEmpSync && activeEmployees.has(matchedEmpSync.name.toLowerCase().trim()));
+
+    if (isPreviousLoc || isMatchedPrevious || !isCurrent) {
+      Logger.log('sortExpiringCertsSheet: Purged previous/inactive employee row: ' + empNameRow + ' (' + rowCert + ')');
+      removedCount++;
+      continue;
+    }
+
+    // Sync Location and Job Number from Employees sheet for current active employees
+    if (matchedEmpSync) {
+      var curJob = String(values[v][5] || '').trim();
+      if (matchedEmpSync.location && (curLoc === '' || curLoc === 'unknown' || curLoc === 'n/a' || isStatusLocation(curLoc))) {
+        values[v][4] = getPhysicalLocation(matchedEmpSync.location);
+      }
+      if (matchedEmpSync.jobNum && (curJob === '' || curJob === 'N/A')) {
+        values[v][5] = matchedEmpSync.jobNum;
       }
     }
 
@@ -4645,7 +4662,11 @@ function sortExpiringCertsSheet(sheet) {
         }
       }
     }
+
+    filteredValues.push(values[v]);
   }
+
+  values = filteredValues;
 
   // Sort values in memory
   values.sort(function(a, b) {
@@ -4659,8 +4680,15 @@ function sortExpiringCertsSheet(sheet) {
     return getCertSortIndex(certA) - getCertSortIndex(certB);
   });
 
-  // Write values back
-  range.setValues(values);
+  // Clear data range to remove any old stray/purged rows
+  if (lastRow >= 2) {
+    sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).clearContent().clearDataValidations();
+  }
+
+  // Write values back if any remain
+  if (values.length > 0) {
+    sheet.getRange(2, 1, values.length, canonicalHeaders.length).setValues(values);
+  }
 
   // Set number format for Date Acquired (Col C) and Expiration Date (Col D) to yyyy-mm-dd
   sheet.getRange(2, 3, values.length, 2).setNumberFormat('yyyy-mm-dd');
@@ -4703,7 +4731,7 @@ function sortExpiringCertsSheet(sheet) {
   }
 
   // Get employee phones and alternate names map
-  var empPhones = getEmployeePhonesCached(false);
+  var empPhones = getEmployeePhonesCached(true);
   var empList = getEmployeeNamesForMatching();
   var alternateNameMap = buildAlternateNameMap(empList);
 
@@ -4734,7 +4762,9 @@ function sortExpiringCertsSheet(sheet) {
     // Static Column I (SMS)
     var resolvedName = resolveEmployeeName(empName, alternateNameMap);
     var taskKey = resolvedName.toLowerCase().trim() + '|' + certType.toLowerCase().trim();
-    var hasPhone = !!empPhones[resolvedName.toLowerCase().trim()];
+    var empKey1 = resolvedName.toLowerCase().trim();
+    var empKey2 = empName.toLowerCase().trim();
+    var hasPhone = !!empPhones[empKey1] || !!empPhones[empKey2];
     var acqVal = values[f][2];
     var hasAcquiredDate = !!acqVal && String(acqVal).trim() !== '' && String(acqVal).trim() !== 'N/A';
     var isNotified = !hasAcquiredDate && !!notifiedTasks[taskKey];

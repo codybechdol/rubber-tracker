@@ -520,6 +520,16 @@ function handleLastDayReasonChange(ss, sheet, editedRow, newValue) {
       ss.toast('Employee "' + empName + '" added to history. Row may have already been removed.', '⚠️ Check', 5);
     }
 
+    // Purge terminated employee from Expiring Certs sheet
+    try {
+      var expSheet = ss.getSheetByName('Expiring Certs');
+      if (expSheet) {
+        sortExpiringCertsSheet(expSheet);
+      }
+    } catch (expErr) {
+      Logger.log('handleLastDayReasonChange: Error sorting Expiring Certs: ' + expErr);
+    }
+
   } catch (e) {
     Logger.log('[ERROR] handleLastDayReasonChange: ' + e);
   } finally {

@@ -1157,6 +1157,7 @@ function processEdit(e) {
 
   // Handle Employees sheet edits (Last Day Reason, Location, Job Number, or Hire Date columns)
   if (sheetName === SHEET_EMPLOYEES) {
+    clearPhoneCache();
     // Get column indices dynamically
     var empHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     var lastDayReasonColIdx = -1;
