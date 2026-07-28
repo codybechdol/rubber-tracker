@@ -29194,6 +29194,10 @@ function countOneTimeNewPurchases2026(sheetName) {
  * @param {Sheet} sheet - The active Dashboard sheet tab
  */
 function setupDashboardLayout(sheet) {
+  if (!sheet) {
+    var activeSs = SpreadsheetApp.getActiveSpreadsheet();
+    sheet = activeSs ? activeSs.getSheetByName('Dashboard') : null;
+  }
   if (!sheet) return;
 
   var ss = sheet.getParent();
@@ -29201,9 +29205,16 @@ function setupDashboardLayout(sheet) {
   // 1. Get active year filter before clearing the sheet
   var filterYear = "2026";
   try {
-    var yearVal = sheet.getRange("N15").getValue();
-    if (yearVal) {
-      filterYear = String(yearVal);
+    var lastR = sheet.getLastRow();
+    if (lastR >= 14) {
+      var mVals = sheet.getRange(14, 13, Math.min(lastR - 13, 30), 1).getValues();
+      for (var r = 0; r < mVals.length; r++) {
+        if (String(mVals[r][0]).trim() === 'Year:') {
+          var yVal = sheet.getRange(14 + r, 14).getValue();
+          if (yVal) filterYear = String(yVal);
+          break;
+        }
+      }
     }
   } catch (e) {}
 
@@ -29271,9 +29282,13 @@ function setupDashboardLayout(sheet) {
 
   sheet.clear();
   try {
-    sheet.getDataRange().clearDataValidations();
+    var maxR = Math.max(sheet.getMaxRows(), 100);
+    var maxC = Math.max(sheet.getMaxColumns(), 26);
+    var fullRange = sheet.getRange(1, 1, maxR, maxC);
+    fullRange.clearDataValidations();
+    fullRange.clearFormat();
   } catch (e) {
-    Logger.log("setupDashboardLayout: Could not clear data validations: " + e.message);
+    Logger.log("setupDashboardLayout: Could not clear formats/validations: " + e.message);
   }
   sheet.setHiddenGridlines(false);
 
@@ -29295,22 +29310,22 @@ function setupDashboardLayout(sheet) {
   sheet.setColumnWidth(15, 90);  // O: Min Threshold / Sleeves
   sheet.setColumnWidth(16, 90);  // P: Status / Blankets
   sheet.setColumnWidth(17, 90);  // Q: MACKs
-  sheet.setColumnWidth(18, 90);  // R: Total / Employee
-  sheet.setColumnWidth(19, 100); // S: Cert Type
-  sheet.setColumnWidth(20, 100); // T: Expiration Date
-  sheet.setColumnWidth(21, 80);  // U: Days Left
-  sheet.setColumnWidth(22, 10);  // V: Helper (hidden)
+  sheet.setColumnWidth(18, 120); // R: Cert Type
+  sheet.setColumnWidth(19, 65);  // S: Expired
+  sheet.setColumnWidth(20, 65);  // T: Critical
+  sheet.setColumnWidth(21, 65);  // U: Warning
+  sheet.setColumnWidth(22, 65);  // V: Upcoming
   sheet.setColumnWidth(23, 10);  // W: Helper (hidden)
 
-  // Hide V and W
+  // Hide W
   try {
-    sheet.hideColumns(22, 2);
+    sheet.hideColumns(23, 1);
   } catch (hideErr) {
-    Logger.log("setupDashboardLayout: Could not hide helper columns: " + hideErr.message);
+    Logger.log("setupDashboardLayout: Could not hide helper column: " + hideErr.message);
   }
 
   // Row 1: Merged Title Block
-  var titleRange = sheet.getRange("A1:U1");
+  var titleRange = sheet.getRange("A1:V1");
   titleRange.merge();
   titleRange.setValue("📊 EXECUTIVE OPERATIONS & INVENTORY DASHBOARD");
   titleRange.setFontSize(16).setFontWeight("bold").setFontColor("#ffffff").setBackground("#0f172a").setHorizontalAlignment("center").setVerticalAlignment("middle");
@@ -29356,13 +29371,9 @@ function setupDashboardLayout(sheet) {
   rightSection.merge().setValue("📋 AED CONSUMABLES & ALERTS");
   rightSection.setFontWeight("bold").setFontColor("#ffffff").setBackground("#1e293b").setHorizontalAlignment("center").setFontSize(11);
 
-  // Row 6 Right Side: Expiration Header
+  // Row 6 Right Side: Certification Expiration Summary Header
   var certHeader = sheet.getRange("R6:V6");
-  certHeader.merge().setFormula(
-    '=IF(COUNTIFS(\'Expiring Certs\'!$C$2:$C, ">="&TODAY(), \'Expiring Certs\'!$C$2:$C, "<="&TODAY()+30) > 4, ' +
-    '"📜 TOP 4 OF " & COUNTIFS(\'Expiring Certs\'!$C$2:$C, ">="&TODAY(), \'Expiring Certs\'!$C$2:$C, "<="&TODAY()+30) & " EXPIRING CERTS", ' +
-    '"📜 UPCOMING CERT EXPIRATIONS (30 DAYS)")'
-  );
+  certHeader.merge().setValue("📜 CERTIFICATION EXPIRATION SUMMARY");
   certHeader.setFontWeight("bold").setFontColor("#ffffff").setBackground("#1e293b").setHorizontalAlignment("center").setFontSize(11);
 
   // Row 7: Sub-headers
@@ -29372,96 +29383,50 @@ function setupDashboardLayout(sheet) {
   var rightSubHeaders = ["AED Consumable", "Qty On Hand", "Min Threshold", "Status"];
   sheet.getRange("M7:P7").setValues([rightSubHeaders]).setFontWeight("bold").setFontColor("#1e293b").setBackground("#f8fafc").setHorizontalAlignment("center").setFontSize(9);
 
-  // Row 7 Right Side: Cert sub-headers
-  sheet.getRange("R7:V7").setValues([["SMS", "Employee", "Cert Type", "Expiration Date", "Days Left"]]).setFontWeight("bold").setFontColor("#1e293b").setBackground("#f8fafc").setHorizontalAlignment("center").setFontSize(9);
+  // Row 7 Right Side: Cert summary sub-headers
+  sheet.getRange("R7:V7").setValues([["Cert Type", "Expired", "Critical", "Warning", "Upcoming"]]).setFontWeight("bold").setFontColor("#1e293b").setBackground("#f8fafc").setHorizontalAlignment("center").setFontSize(9);
 
-  // Row 8 Right Side: Expiring Certs query
-  // Query expiring certs in Apps Script and write statically (with checkbox)
-  var certRows = [];
+  // Row 8 Right Side: Expiring Certs Summary counts per certification type (ALL Cert Types)
+  var certTypesList = [];
+  var certTypesSeen = {};
   var expiringSheet = ss.getSheetByName('Expiring Certs');
   if (expiringSheet && expiringSheet.getLastRow() > 1) {
-    var certData = expiringSheet.getRange(2, 1, expiringSheet.getLastRow() - 1, 9).getValues();
-    var today = new Date();
-    today.setHours(0,0,0,0);
-    var thirtyDaysOut = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
-    
+    var certData = expiringSheet.getRange(2, 2, expiringSheet.getLastRow() - 1, 1).getValues(); // Col B (Item Type)
     for (var c = 0; c < certData.length; c++) {
-      var name = certData[c][0];
-      var type = certData[c][1];
-      var expDate = certData[c][3];  // Col D (4): Expiration Date
-      var daysLeft = certData[c][6]; // Col G (7): Days Until Expiration
-      
-      if (expDate instanceof Date) {
-        var expTime = expDate.getTime();
-        if (expTime >= today.getTime() && expTime <= thirtyDaysOut.getTime()) {
-          certRows.push({
-            name: name,
-            type: type,
-            date: expDate,
-            daysLeft: daysLeft
-          });
-        }
+      var cName = String(certData[c][0] || '').trim();
+      if (cName && cName.toLowerCase() !== 'item type' && !certTypesSeen[cName.toLowerCase()]) {
+        certTypesSeen[cName.toLowerCase()] = true;
+        certTypesList.push(cName);
       }
     }
-    
-    // Sort by date ascending
-    certRows.sort(function(a, b) {
-      return a.date.getTime() - b.date.getTime();
+  }
+
+  if (certTypesList.length === 0) {
+    certTypesList = ["1st Aid", "CPR", "Crane Cert", "Forklift", "Harassment Training", "OQ - Gas", "OSHA 10", "Pole Top Rescue"];
+  } else {
+    certTypesList.sort(function(a, b) {
+      return a.localeCompare(b);
     });
   }
 
-  // Get notified tasks from Task Metadata once for efficiency
-  var metaSheet = ss.getSheetByName('Task Metadata');
-  var notifiedTasks = {};
-  if (metaSheet) {
-    var metaData = metaSheet.getDataRange().getValues();
-    var metaHeaders = metaData[0];
-    var empCol = metaHeaders.indexOf('Employee');
-    var typeCol = metaHeaders.indexOf('ItemType');
-    var taskTypeCol = metaHeaders.indexOf('TaskType');
-    var notifiedCol = metaHeaders.indexOf('NotifiedDate');
-    if (empCol !== -1 && typeCol !== -1 && notifiedCol !== -1 && taskTypeCol !== -1) {
-      for (var i = 1; i < metaData.length; i++) {
-        var emp = String(metaData[i][empCol]).toLowerCase().trim();
-        var itm = String(metaData[i][typeCol]).toLowerCase().trim();
-        var tsk = String(metaData[i][taskTypeCol]).toLowerCase().trim();
-        var hasNotified = metaData[i][notifiedCol];
-        if (tsk === 'cert expiring' && hasNotified) {
-          notifiedTasks[emp + '|' + itm] = true;
-        }
-      }
-    }
+  var numCerts = certTypesList.length;
+  var certSummaryRows = [];
+  for (var r = 0; r < numCerts; r++) {
+    var rowNum = 8 + r;
+    var cName = certTypesList[r];
+    var expiredFormula = '=COUNTIFS(\'Expiring Certs\'!$B:$B, R' + rowNum + ', \'Expiring Certs\'!$H:$H, "EXPIRED")';
+    var criticalFormula = '=COUNTIFS(\'Expiring Certs\'!$B:$B, R' + rowNum + ', \'Expiring Certs\'!$H:$H, "CRITICAL")';
+    var warningFormula = '=COUNTIFS(\'Expiring Certs\'!$B:$B, R' + rowNum + ', \'Expiring Certs\'!$H:$H, "WARNING")';
+    var upcomingFormula = '=COUNTIFS(\'Expiring Certs\'!$B:$B, R' + rowNum + ', \'Expiring Certs\'!$H:$H, "UPCOMING")';
+    certSummaryRows.push([cName, expiredFormula, criticalFormula, warningFormula, upcomingFormula]);
   }
 
-  for (var r = 0; r < 4; r++) {
-    var rowNum = r + 8;
-    if (r < certRows.length) {
-      var item = certRows[r];
-      sheet.getRange(rowNum, 19).setValue(item.name); // S: Employee
-      sheet.getRange(rowNum, 20).setValue(item.type); // T: Cert Type
-      sheet.getRange(rowNum, 21).setValue(item.date).setNumberFormat("mm/dd/yyyy"); // U: Expiration Date
-      sheet.getRange(rowNum, 22).setValue(item.daysLeft); // V: Days Left
-      
-      var taskKey = String(item.name).toLowerCase().trim() + '|' + String(item.type).toLowerCase().trim();
-      var isNotified = !!notifiedTasks[taskKey];
-      
-      var smsCell = sheet.getRange(rowNum, 18);
-      smsCell.clearDataValidations().clearContent();
-      
-      if (isNotified) {
-        smsCell.setValue("💬 Notified").setFontColor("#475569").setFontWeight("normal");
-      } else {
-        // Set checkbox for clicking to notify
-        var rule = SpreadsheetApp.newDataValidation().requireCheckbox().build();
-        smsCell.setDataValidation(rule).setValue(false);
-      }
-      smsCell.setHorizontalAlignment("center");
-      sheet.getRange(rowNum, 19, 1, 4).setHorizontalAlignment("center");
-    } else {
-      // Clear empty rows
-      sheet.getRange(rowNum, 18, 1, 5).clearContent().clearDataValidations();
-    }
-  }
+  var certRange = sheet.getRange(8, 18, numCerts, 5);
+  certRange.setValues(certSummaryRows).setFontSize(9);
+  sheet.getRange(8, 18, numCerts, 1).setHorizontalAlignment("left").setFontWeight("medium");
+  sheet.getRange(8, 19, numCerts, 4).setHorizontalAlignment("center").setFontWeight("bold").setNumberFormat("0");
+
+  var maxUpperRow = Math.max(11, 7 + numCerts);
 
   // Rows 8-11: Data rows for Coverage & AED
   // Row 8: Gloves / Adult Pads
@@ -29552,121 +29517,127 @@ function setupDashboardLayout(sheet) {
   // Grid styling for upper section
   sheet.getRange("A6:I11").setBorder(true, true, true, true, true, true, "#e2e8f0", SpreadsheetApp.BorderStyle.SOLID);
   sheet.getRange("M6:P9").setBorder(true, true, true, true, true, true, "#e2e8f0", SpreadsheetApp.BorderStyle.SOLID);
-  sheet.getRange("R6:V11").setBorder(true, true, true, true, true, true, "#e2e8f0", SpreadsheetApp.BorderStyle.SOLID);
+  sheet.getRange(6, 18, (maxUpperRow - 6 + 1), 5).setBorder(true, true, true, true, true, true, "#e2e8f0", SpreadsheetApp.BorderStyle.SOLID);
 
-  // Spacer
-  sheet.setRowHeight(12, 20);
-  sheet.setRowHeight(13, 20);
+  // Dynamic bottom section start row (leaving 2 spacer rows below upper section)
+  var bottomStartRow = maxUpperRow + 3;
+  sheet.setRowHeight(bottomStartRow - 2, 20);
+  sheet.setRowHeight(bottomStartRow - 1, 20);
 
-  // Row 14: Bottom Section Headers
-  var leftProjHeader = sheet.getRange("A14:I14");
+  // Bottom Section Headers
+  var leftProjHeader = sheet.getRange("A" + bottomStartRow + ":I" + bottomStartRow);
   leftProjHeader.merge().setValue("🛒 SMART PURCHASING PROJECTIONS");
   leftProjHeader.setFontWeight("bold").setFontColor("#ffffff").setBackground("#1e293b").setHorizontalAlignment("center").setFontSize(11);
 
-  var rightLogHeader = sheet.getRange("M14:U14");
+  var rightLogHeader = sheet.getRange("M" + bottomStartRow + ":U" + bottomStartRow);
   rightLogHeader.merge().setValue("📊 INTERACTIVE LOSS & PURCHASE LOG");
   rightLogHeader.setFontWeight("bold").setFontColor("#ffffff").setBackground("#1e293b").setHorizontalAlignment("center").setFontSize(11);
 
-  // Row 15: Sub-headers
-  var projHeaders = ["Item Type", "Size", "Class", "Target Min", "Swaps (14d)", "Total Needed", "Available", "Expected In", "Projected Order"];
-  sheet.getRange("A15:I15").setValues([projHeaders]).setFontWeight("bold").setFontColor("#1e293b").setBackground("#f8fafc").setHorizontalAlignment("center").setFontSize(9);
+  // Filter Row
+  var filterRow = bottomStartRow + 1;
 
-  // Row 15 Right Side: Filters
-  sheet.getRange("M15").setValue("Year:").setFontWeight("bold").setHorizontalAlignment("right").setFontSize(9);
-  sheet.getRange("N15").setValue("2026").setHorizontalAlignment("center");
-  sheet.getRange("P15").setValue("Quarter:").setFontWeight("bold").setHorizontalAlignment("right").setFontSize(9);
-  sheet.getRange("Q15").setValue("All").setHorizontalAlignment("center");
-  sheet.getRange("S15").setValue("Month:").setFontWeight("bold").setHorizontalAlignment("right").setFontSize(9);
-  sheet.getRange("T15").setValue("All").setHorizontalAlignment("center");
+  // Sub-headers
+  var projHeaders = ["Item Type", "Size", "Class", "Target Min", "Swaps (14d)", "Total Needed", "Available", "Expected In", "Projected Order"];
+  sheet.getRange("A" + filterRow + ":I" + filterRow).setValues([projHeaders]).setFontWeight("bold").setFontColor("#1e293b").setBackground("#f8fafc").setHorizontalAlignment("center").setFontSize(9);
+
+  // Loss Log Filters
+  sheet.getRange("M" + filterRow).setValue("Year:").setFontWeight("bold").setHorizontalAlignment("right").setFontSize(9);
+  sheet.getRange("N" + filterRow).setValue(filterYear).setHorizontalAlignment("center");
+  sheet.getRange("P" + filterRow).setValue("Quarter:").setFontWeight("bold").setHorizontalAlignment("right").setFontSize(9);
+  sheet.getRange("Q" + filterRow).setValue("All").setHorizontalAlignment("center");
+  sheet.getRange("S" + filterRow).setValue("Month:").setFontWeight("bold").setHorizontalAlignment("right").setFontSize(9);
+  sheet.getRange("T" + filterRow).setValue("All").setHorizontalAlignment("center");
 
   // Dropdown validations
   var yearRule = SpreadsheetApp.newDataValidation().requireValueInList(["All", "2026", "2027", "2028"], true).setAllowInvalid(false).build();
   var quarterRule = SpreadsheetApp.newDataValidation().requireValueInList(["All", "Q1", "Q2", "Q3", "Q4"], true).setAllowInvalid(false).build();
   var monthRule = SpreadsheetApp.newDataValidation().requireValueInList(["All", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"], true).setAllowInvalid(false).build();
 
-  sheet.getRange("N15").setDataValidation(yearRule);
-  sheet.getRange("Q15").setDataValidation(quarterRule);
-  sheet.getRange("T15").setDataValidation(monthRule);
+  sheet.getRange("N" + filterRow).setDataValidation(yearRule);
+  sheet.getRange("Q" + filterRow).setDataValidation(quarterRule);
+  sheet.getRange("T" + filterRow).setDataValidation(monthRule);
 
-  // Dynamic filter helpers (written in hidden V15/W15)
-  sheet.getRange("V15").setFormula(
-    '=IF($N$15="All", DATE(2000,1,1), DATE(VALUE($N$15), IF($T$15="All", IF($Q$15="All", 1, VALUE(RIGHT($Q$15,1))*3-2), MATCH($T$15, {"January","February","March","April","May","June","July","August","September","October","November","December"}, 0)), 1))'
+  // Dynamic filter helpers (written in hidden V/W)
+  var nCell = "$N$" + filterRow;
+  var qCell = "$Q$" + filterRow;
+  var tCell = "$T$" + filterRow;
+  var vCell = "$V$" + filterRow;
+  var wCell = "$W$" + filterRow;
+
+  sheet.getRange("V" + filterRow).setFormula(
+    '=IF(' + nCell + '="All", DATE(2000,1,1), DATE(VALUE(' + nCell + '), IF(' + tCell + '="All", IF(' + qCell + '="All", 1, VALUE(RIGHT(' + qCell + ',1))*3-2), MATCH(' + tCell + ', {"January","February","March","April","May","June","July","August","September","October","November","December"}, 0)), 1))'
   );
-  sheet.getRange("W15").setFormula(
-    '=IF($N$15="All", DATE(2099,12,31), EOMONTH(DATE(VALUE($N$15), IF($T$15="All", IF($Q$15="All", 12, VALUE(RIGHT($Q$15,1))*3), MATCH($T$15, {"January","February","March","April","May","June","July","August","September","October","November","December"}, 0)), 1), 0))'
+  sheet.getRange("W" + filterRow).setFormula(
+    '=IF(' + nCell + '="All", DATE(2099,12,31), EOMONTH(DATE(VALUE(' + nCell + '), IF(' + tCell + '="All", IF(' + qCell + '="All", 12, VALUE(RIGHT(' + qCell + ',1))*3), MATCH(' + tCell + ', {"January","February","March","April","May","June","July","August","September","October","November","December"}, 0)), 1), 0))'
   );
 
-  // Row 16 Right Side: Loss Log Headers
-  sheet.getRange("M16:R16").setValues([["Category", "Gloves", "Sleeves", "Blankets", "MACKs", "Total"]]).setFontWeight("bold").setFontColor("#1e293b").setBackground("#f8fafc").setHorizontalAlignment("center").setFontSize(9);
+  var lossHeaderRow = filterRow + 1;
+  sheet.getRange("M" + lossHeaderRow + ":R" + lossHeaderRow).setValues([["Category", "Gloves", "Sleeves", "Blankets", "MACKs", "Total"]]).setFontWeight("bold").setFontColor("#1e293b").setBackground("#f8fafc").setHorizontalAlignment("center").setFontSize(9);
 
-  // Row 17: New Purchases row
-  sheet.getRange("M17:R17").setValues([[
+  // Loss Log rows
+  var r17 = lossHeaderRow + 1;
+  sheet.getRange("M" + r17 + ":R" + r17).setValues([[
     "New Purchases",
     currentYearCounts[0],
     currentYearCounts[1],
     currentYearCounts[2],
     currentYearCounts[3],
-    '=SUM(N17:Q17)'
+    '=SUM(N' + r17 + ':Q' + r17 + ')'
   ]]).setHorizontalAlignment("center");
 
-  // Row 18: Failed Rubber
-  sheet.getRange("M18:R18").setValues([[
+  var r18 = r17 + 1;
+  sheet.getRange("M" + r18 + ":R" + r18).setValues([[
     "Failed Rubber",
-    '=COUNTIFS(Gloves!$I:$I, "Failed Rubber", Gloves!$F:$F, ">="&$V$15, Gloves!$F:$F, "<="&$W$15)',
-    '=COUNTIFS(Sleeves!$I:$I, "Failed Rubber", Sleeves!$F:$F, ">="&$V$15, Sleeves!$F:$F, "<="&$W$15)',
-    '=COUNTIFS(Blankets!$H:$H, "Failed Rubber", Blankets!$E:$E, ">="&$V$15, Blankets!$E:$E, "<="&$W$15)',
-    '=COUNTIFS(MACKs!$I:$I, "Failed Rubber", MACKs!$F:$F, ">="&$V$15, MACKs!$F:$F, "<="&$W$15)',
-    '=SUM(N18:Q18)'
+    '=COUNTIFS(Gloves!$I:$I, "Failed Rubber", Gloves!$F:$F, ">="&' + vCell + ', Gloves!$F:$F, "<="&' + wCell + ')',
+    '=COUNTIFS(Sleeves!$I:$I, "Failed Rubber", Sleeves!$F:$F, ">="&' + vCell + ', Sleeves!$F:$F, "<="&' + wCell + ')',
+    '=COUNTIFS(Blankets!$H:$H, "Failed Rubber", Blankets!$E:$E, ">="&' + vCell + ', Blankets!$E:$E, "<="&' + wCell + ')',
+    '=COUNTIFS(MACKs!$I:$I, "Failed Rubber", MACKs!$F:$F, ">="&' + vCell + ', MACKs!$F:$F, "<="&' + wCell + ')',
+    '=SUM(N' + r18 + ':Q' + r18 + ')'
   ]]).setHorizontalAlignment("center");
 
-  // Row 19: Lost
-  sheet.getRange("M19:R19").setValues([[
+  var r19 = r18 + 1;
+  sheet.getRange("M" + r19 + ":R" + r19).setValues([[
     "Lost Items",
-    '=COUNTIFS(Gloves!$I:$I, "Lost", Gloves!$F:$F, ">="&$V$15, Gloves!$F:$F, "<="&$W$15)',
-    '=COUNTIFS(Sleeves!$I:$I, "Lost", Sleeves!$F:$F, ">="&$V$15, Sleeves!$F:$F, "<="&$W$15)',
-    '=COUNTIFS(Blankets!$H:$H, "Lost", Blankets!$E:$E, ">="&$V$15, Blankets!$E:$E, "<="&$W$15)',
-    '=COUNTIFS(MACKs!$I:$I, "Lost", MACKs!$F:$F, ">="&$V$15, MACKs!$F:$F, "<="&$W$15)',
-    '=SUM(N19:Q19)'
+    '=COUNTIFS(Gloves!$I:$I, "Lost", Gloves!$F:$F, ">="&' + vCell + ', Gloves!$F:$F, "<="&' + wCell + ')',
+    '=COUNTIFS(Sleeves!$I:$I, "Lost", Sleeves!$F:$F, ">="&' + vCell + ', Sleeves!$F:$F, "<="&' + wCell + ')',
+    '=COUNTIFS(Blankets!$H:$H, "Lost", Blankets!$E:$E, ">="&' + vCell + ', Blankets!$E:$E, "<="&' + wCell + ')',
+    '=COUNTIFS(MACKs!$I:$I, "Lost", MACKs!$F:$F, ">="&' + vCell + ', MACKs!$F:$F, "<="&' + wCell + ')',
+    '=SUM(N' + r19 + ':Q' + r19 + ')'
   ]]).setHorizontalAlignment("center");
 
-  // Row 20: Destroyed
-  sheet.getRange("M20:R20").setValues([[
+  var r20 = r19 + 1;
+  sheet.getRange("M" + r20 + ":R" + r20).setValues([[
     "Destroyed Items",
-    '=COUNTIFS(Gloves!$I:$I, "Retired", Gloves!$F:$F, ">="&$V$15, Gloves!$F:$F, "<="&$W$15) + COUNTIFS(Gloves!$I:$I, "Destroyed", Gloves!$F:$F, ">="&$V$15, Gloves!$F:$F, "<="&$W$15)',
-    '=COUNTIFS(Sleeves!$I:$I, "Retired", Sleeves!$F:$F, ">="&$V$15, Sleeves!$F:$F, "<="&$W$15) + COUNTIFS(Sleeves!$I:$I, "Destroyed", Sleeves!$F:$F, ">="&$V$15, Sleeves!$F:$F, "<="&$W$15)',
-    '=COUNTIFS(Blankets!$H:$H, "Retired", Blankets!$E:$E, ">="&$V$15, Blankets!$E:$E, "<="&$W$15) + COUNTIFS(Blankets!$H:$H, "Destroyed", Blankets!$E:$E, ">="&$V$15, Blankets!$E:$E, "<="&$W$15)',
-    '=COUNTIFS(MACKs!$I:$I, "Retired", MACKs!$F:$F, ">="&$V$15, MACKs!$F:$F, "<="&$W$15) + COUNTIFS(MACKs!$I:$I, "Destroyed", MACKs!$F:$F, ">="&$V$15, MACKs!$F:$F, "<="&$W$15)',
-    '=SUM(N20:Q20)'
+    '=COUNTIFS(Gloves!$I:$I, "Retired", Gloves!$F:$F, ">="&' + vCell + ', Gloves!$F:$F, "<="&' + wCell + ') + COUNTIFS(Gloves!$I:$I, "Destroyed", Gloves!$F:$F, ">="&' + vCell + ', Gloves!$F:$F, "<="&' + wCell + ')',
+    '=COUNTIFS(Sleeves!$I:$I, "Retired", Sleeves!$F:$F, ">="&' + vCell + ', Sleeves!$F:$F, "<="&' + wCell + ') + COUNTIFS(Sleeves!$I:$I, "Destroyed", Sleeves!$F:$F, ">="&' + vCell + ', Sleeves!$F:$F, "<="&' + wCell + ')',
+    '=COUNTIFS(Blankets!$H:$H, "Retired", Blankets!$E:$E, ">="&' + vCell + ', Blankets!$E:$E, "<="&' + wCell + ') + COUNTIFS(Blankets!$H:$H, "Destroyed", Blankets!$E:$E, ">="&' + vCell + ', Blankets!$E:$E, "<="&' + wCell + ')',
+    '=COUNTIFS(MACKs!$I:$I, "Retired", MACKs!$F:$F, ">="&' + vCell + ', MACKs!$F:$F, "<="&' + wCell + ') + COUNTIFS(MACKs!$I:$I, "Destroyed", MACKs!$F:$F, ">="&' + vCell + ', MACKs!$F:$F, "<="&' + wCell + ')',
+    '=SUM(N' + r20 + ':Q' + r20 + ')'
   ]]).setHorizontalAlignment("center");
 
-  // Border formatting for Loss Log
-  sheet.getRange("M16:R20").setBorder(true, true, true, true, true, true, "#e2e8f0", SpreadsheetApp.BorderStyle.SOLID);
-  sheet.getRange("M17:M20").setFontWeight("bold").setFontColor("#1e293b");
-  sheet.getRange("R17:R20").setFontWeight("bold");
+  sheet.getRange("M" + lossHeaderRow + ":R" + r20).setBorder(true, true, true, true, true, true, "#e2e8f0", SpreadsheetApp.BorderStyle.SOLID);
+  sheet.getRange("M" + r17 + ":M" + r20).setFontWeight("bold").setFontColor("#1e293b");
+  sheet.getRange("R" + r17 + ":R" + r20).setFontWeight("bold");
 
-  // Row 16 to 45: Purchasing Projections Table Rows (30 Combinations)
+  // Purchasing Projections Table Rows
   var projCombinations = [
-    // Gloves Class 0
     ["Glove", "8", "0"], ["Glove", "8.5", "0"], ["Glove", "9", "0"], ["Glove", "9.5", "0"],
     ["Glove", "10", "0"], ["Glove", "10.5", "0"], ["Glove", "11", "0"], ["Glove", "12", "0"],
-    // Gloves Class 2
     ["Glove", "8", "2"], ["Glove", "8.5", "2"], ["Glove", "9", "2"], ["Glove", "9.5", "2"],
     ["Glove", "10", "2"], ["Glove", "10.5", "2"], ["Glove", "11", "2"], ["Glove", "12", "2"],
-    // Gloves Class 3
     ["Glove", "8", "3"], ["Glove", "8.5", "3"], ["Glove", "9", "3"], ["Glove", "9.5", "3"],
     ["Glove", "10", "3"], ["Glove", "10.5", "3"], ["Glove", "11", "3"], ["Glove", "12", "3"],
-    // Sleeves Class 2
     ["Sleeve", "Regular", "2"], ["Sleeve", "Large", "2"], ["Sleeve", "X-Large", "2"],
-    // Sleeves Class 3
     ["Sleeve", "Regular", "3"], ["Sleeve", "Large", "3"], ["Sleeve", "X-Large", "3"]
   ];
 
+  var projStartRow = filterRow + 1;
   var projRows = [];
-  for (var r = 0; r < projCombinations.length; r++) {
-    var itemType = projCombinations[r][0];
-    var size = projCombinations[r][1];
-    var classVal = projCombinations[r][2];
-    var rowIdx = 16 + r;
+  for (var pr = 0; pr < projCombinations.length; pr++) {
+    var itemType = projCombinations[pr][0];
+    var size = projCombinations[pr][1];
+    var classVal = projCombinations[pr][2];
+    var rowIdx = projStartRow + pr;
 
     var swapsFormula = "";
     var availFormula = "";
@@ -29695,15 +29666,14 @@ function setupDashboardLayout(sheet) {
     ]);
   }
 
-  var projRange = sheet.getRange("A16:I45");
+  var projEndRow = projStartRow + projCombinations.length - 1;
+  var projRange = sheet.getRange("A" + projStartRow + ":I" + projEndRow);
   projRange.setValues(projRows).setHorizontalAlignment("center").setFontSize(9);
   projRange.setBorder(true, true, true, true, true, true, "#e2e8f0", SpreadsheetApp.BorderStyle.SOLID);
 
-  // Apply bolding to headers and total columns
-  sheet.getRange("I16:I45").setFontWeight("bold").setFontColor("#b91c1c");
+  sheet.getRange("I" + projStartRow + ":I" + projEndRow).setFontWeight("bold").setFontColor("#b91c1c");
 
-  // Conditional formatting to highlight projected orders > 0
-  var orderRange = sheet.getRange("I16:I45");
+  var orderRange = sheet.getRange("I" + projStartRow + ":I" + projEndRow);
   var orderRule = SpreadsheetApp.newConditionalFormatRule()
     .whenNumberGreaterThan(0)
     .setBackground("#fef2f2")
@@ -29719,25 +29689,64 @@ function setupDashboardLayout(sheet) {
     .setRanges([coverageRange])
     .build();
 
-  // Set all conditional formatting rules
   var rules = sheet.getConditionalFormatRules();
   rules.push(aedStatusRule1);
   rules.push(aedStatusRule2);
   rules.push(orderRule);
   rules.push(coverageRule);
+
+  var certLastRow = 7 + numCerts;
+  var certExpiredRange = sheet.getRange("S8:S" + certLastRow);
+  var certCriticalRange = sheet.getRange("T8:T" + certLastRow);
+  var certWarningRange = sheet.getRange("U8:U" + certLastRow);
+  var certUpcomingRange = sheet.getRange("V8:V" + certLastRow);
+
+  var certExpiredRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenNumberGreaterThan(0)
+    .setBackground("#fef2f2")
+    .setFontColor("#b91c1c")
+    .setRanges([certExpiredRange])
+    .build();
+
+  var certCriticalRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenNumberGreaterThan(0)
+    .setBackground("#fff7ed")
+    .setFontColor("#c2410c")
+    .setRanges([certCriticalRange])
+    .build();
+
+  var certWarningRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenNumberGreaterThan(0)
+    .setBackground("#fefce8")
+    .setFontColor("#a16207")
+    .setRanges([certWarningRange])
+    .build();
+
+  var certUpcomingRule = SpreadsheetApp.newConditionalFormatRule()
+    .whenNumberGreaterThan(0)
+    .setBackground("#eff6ff")
+    .setFontColor("#1d4ed8")
+    .setRanges([certUpcomingRange])
+    .build();
+
+  rules.push(certExpiredRule);
+  rules.push(certCriticalRule);
+  rules.push(certWarningRule);
+  rules.push(certUpcomingRule);
+
   sheet.setConditionalFormatRules(rules);
 
-  // Row 22: Pending Swaps Title
-  var swapsHeader = sheet.getRange("M22:P22");
+  // Pending Swaps Breakdown Title & Table
+  var swapsTitleRow = r20 + 2;
+  var swapsHeader = sheet.getRange("M" + swapsTitleRow + ":P" + swapsTitleRow);
   swapsHeader.merge().setValue("🔄 PENDING SWAPS BREAKDOWN");
   swapsHeader.setFontWeight("bold").setFontColor("#1e293b").setBackground("#f8fafc").setHorizontalAlignment("center").setFontSize(9);
 
-  // Row 23: Sub-headers
-  sheet.getRange("M23").setValue("Gear Type").setFontWeight("bold").setFontColor("#475569").setHorizontalAlignment("center").setFontSize(8);
-  var pendingValHeader = sheet.getRange("N23:P23");
+  var swapsSubRow = swapsTitleRow + 1;
+  sheet.getRange("M" + swapsSubRow).setValue("Gear Type").setFontWeight("bold").setFontColor("#475569").setHorizontalAlignment("center").setFontSize(8);
+  var pendingValHeader = sheet.getRange("N" + swapsSubRow + ":P" + swapsSubRow);
   pendingValHeader.merge().setValue("Pending Count").setFontWeight("bold").setFontColor("#475569").setHorizontalAlignment("center").setFontSize(8);
 
-  // Rows 24-32: Data rows
   var swapData = [
     ["Gloves", "=COUNTIFS('Glove Swaps'!$H$2:$H, \"<>Complete\", 'Glove Swaps'!$H$2:$H, \"<>Deferred\", 'Glove Swaps'!$H$2:$H, \"<>Status\", 'Glove Swaps'!$H$2:$H, \"<>\")"],
     ["Sleeves", "=COUNTIFS('Sleeve Swaps'!$H$2:$H, \"<>Complete\", 'Sleeve Swaps'!$H$2:$H, \"<>Deferred\", 'Sleeve Swaps'!$H$2:$H, \"<>Status\", 'Sleeve Swaps'!$H$2:$H, \"<>\")"],
@@ -29750,21 +29759,26 @@ function setupDashboardLayout(sheet) {
     ["Hot Sticks", "=COUNTIFS('Hot Stick Swaps'!$I$2:$I, \"<>Complete\", 'Hot Stick Swaps'!$I$2:$I, \"<>Deferred\", 'Hot Stick Swaps'!$I$2:$I, \"<>Status\", 'Hot Stick Swaps'!$I$2:$I, \"<>\")"]
   ];
 
+  var swapStartRow = swapsSubRow + 1;
   for (var i = 0; i < swapData.length; i++) {
-    var rNum = 24 + i;
+    var rNum = swapStartRow + i;
     sheet.getRange("M" + rNum).setValue(swapData[i][0]).setHorizontalAlignment("center").setFontSize(9);
     var valRange = sheet.getRange("N" + rNum + ":P" + rNum);
     valRange.merge().setFormula(swapData[i][1]).setHorizontalAlignment("center").setFontSize(9);
   }
 
-  // Row 33: Total
-  sheet.getRange("M33").setValue("Total Swaps").setFontWeight("bold").setFontColor("#1e293b").setHorizontalAlignment("center").setFontSize(9);
-  var totalValRange = sheet.getRange("N33:P33");
-  totalValRange.merge().setFormula("=SUM(N24:N32)").setFontWeight("bold").setFontColor("#1e3a8a").setHorizontalAlignment("center").setFontSize(9);
+  // Dynamic Total Row for Swaps
+  var swapTotalRow = swapStartRow + swapData.length;
+  sheet.getRange("M" + swapTotalRow).setValue("Total Swaps").setFontWeight("bold").setFontColor("#1e293b").setHorizontalAlignment("center").setFontSize(9);
+  var totalValRange = sheet.getRange("N" + swapTotalRow + ":P" + swapTotalRow);
+  totalValRange.merge().setFormula("=SUM(N" + swapStartRow + ":N" + (swapTotalRow - 1) + ")").setFontWeight("bold").setFontColor("#1e3a8a").setHorizontalAlignment("center").setFontSize(9);
 
   // Style borders for breakdown table
-  sheet.getRange("M22:P33").setBorder(true, true, true, true, true, true, "#e2e8f0", SpreadsheetApp.BorderStyle.SOLID);
-  sheet.getRange("M24:M32").setFontWeight("bold").setFontColor("#1e293b");
+  sheet.getRange("M" + swapsTitleRow + ":P" + swapTotalRow).setBorder(true, true, true, true, true, true, "#e2e8f0", SpreadsheetApp.BorderStyle.SOLID);
+  sheet.getRange("M" + swapStartRow + ":M" + (swapTotalRow - 1)).setFontWeight("bold").setFontColor("#1e293b");
+
+  // Dynamic formula for KPI card F3
+  sheet.getRange("F3").setFormula("=N" + swapTotalRow);
 
   Logger.log("setupDashboardLayout: Completed dashboard grid setup.");
 }

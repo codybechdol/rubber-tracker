@@ -510,9 +510,22 @@ function onEditHandler(e) {
     // =========================================================================
     // EXECUTIVE DASHBOARD - MANUAL PURCHASE LOG EDIT SAVING
     // =========================================================================
-    if (sheetName === 'Dashboard' && editedRow === 17 && editedCol >= 14 && editedCol <= 17) {
-      var yearVal = sheet.getRange("N15").getValue();
-      if (yearVal && yearVal !== 'All') {
+    if (sheetName === 'Dashboard' && editedCol >= 14 && editedCol <= 17) {
+      var filterRow = 15;
+      var lastR = sheet.getLastRow();
+      if (lastR >= 14) {
+        var mVals = sheet.getRange(14, 13, Math.min(lastR - 13, 30), 1).getValues();
+        for (var r = 0; r < mVals.length; r++) {
+          if (String(mVals[r][0]).trim() === 'Year:') {
+            filterRow = 14 + r;
+            break;
+          }
+        }
+      }
+      var manualPurchasesRow = filterRow + 2;
+      if (editedRow === manualPurchasesRow) {
+        var yearVal = sheet.getRange(filterRow, 14).getValue();
+        if (yearVal && yearVal !== 'All') {
         var yearKey = String(yearVal);
         var newVal = Number(e.range.getValue()) || 0;
         
@@ -540,8 +553,9 @@ function onEditHandler(e) {
         Logger.log('Saved manual purchases for ' + yearKey + ': ' + JSON.stringify(manualPurchases[yearKey]));
         
         // Force refresh total sum in column R
-        var sumCell = sheet.getRange("R17");
-        sumCell.setFormula('=SUM(N17:Q17)');
+        var sumCell = sheet.getRange(manualPurchasesRow, 18);
+        sumCell.setFormula('=SUM(N' + manualPurchasesRow + ':Q' + manualPurchasesRow + ')');
+        }
       }
       return; // Handled
     }
