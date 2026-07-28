@@ -29190,6 +29190,70 @@ function countOneTimeNewPurchases2026(sheetName) {
 }
 
 /**
+ * Updates the 2026 New Purchases counts to match verified 2026 orders (15 Gloves, 10 Sleeves, 0 Blankets, 0 MACKs)
+ * and logs the purchase orders to the Purchase Orders sheet.
+ */
+function sync2026PurchasesData() {
+  var manualPurchases = {
+    '2026': [15, 10, 0, 0],
+    '2027': [0, 0, 0, 0],
+    '2028': [0, 0, 0, 0]
+  };
+  
+  var savedStr = PropertiesService.getScriptProperties().getProperty('DASHBOARD_NEW_PURCHASES');
+  if (savedStr) {
+    try {
+      var parsed = JSON.parse(savedStr);
+      if (parsed) {
+        manualPurchases = parsed;
+      }
+    } catch (e) {}
+  }
+  
+  // Enforce correct 2026 counts if unset or invalid (e.g. legacy blanket count 22)
+  if (!manualPurchases['2026'] || manualPurchases['2026'][2] === 22) {
+    manualPurchases['2026'] = [15, 10, 0, 0];
+    PropertiesService.getScriptProperties().setProperty('DASHBOARD_NEW_PURCHASES', JSON.stringify(manualPurchases));
+  }
+  
+  // Log 2026 Orders to Purchase Orders sheet if not already present
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var poSheet = ss.getSheetByName('Purchase Orders');
+    if (!poSheet) {
+      setupPurchaseOrdersSheet();
+      poSheet = ss.getSheetByName('Purchase Orders');
+    }
+    
+    if (poSheet) {
+      var existingData = poSheet.getDataRange().getValues();
+      var existingPOs = {};
+      for (var r = 1; r < existingData.length; r++) {
+        var poNum = String(existingData[r][1] || '').trim();
+        if (poNum) existingPOs[poNum] = true;
+      }
+      
+      var ordersToLog = [
+        { date: '01/08/2026', po: 'PO-2026-001', vendor: 'Wagner Smith', items: '3 x Glove Class 2 Size 9.5, 2 x Glove Class 2 Size 10 (Total 5 Gloves)', status: 'Received', notes: 'Initial 2026 Glove Purchase' },
+        { date: '04/13/2026', po: 'PO-2026-002', vendor: 'Wagner Smith', items: '2 x Glove Class 2 Size 9, 2 x Glove Class 2 Size 9.5, 1 x Glove Class 2 Size 10, 2 x Glove Class 2 Size 10.5 (Total 7 Gloves)', status: 'Received', notes: 'Spring 2026 Glove Restock' },
+        { date: '06/17/2026', po: 'PO-2026-003', vendor: 'Wagner Smith', items: '2 x Sleeve Class 3 Size Large, 2 x Sleeve Class 3 Size Regular (Total 4 Sleeves)', status: 'Received', notes: 'Class 3 Sleeve Order' },
+        { date: '06/18/2026', po: 'PO-2026-004', vendor: 'Wagner Smith', items: '3 x Glove Class 2 Size 9, 2 x Sleeve Class 2 Size Regular (Total 3 Gloves, 2 Sleeves)', status: 'Received', notes: 'June Restock' },
+        { date: '06/22/2026', po: 'PO-2026-005', vendor: 'JM Test Systems', items: '3 x Sleeve Class 3 Size Regular (#3010, #3011, #3012), 1 x Sleeve Class 3 Size Large (#3013) (Total 4 Sleeves)', status: 'Received', notes: 'JM Test Systems Order (Sleeves #3010-3013)' }
+      ];
+      
+      for (var o = 0; o < ordersToLog.length; o++) {
+        var ord = ordersToLog[o];
+        if (!existingPOs[ord.po]) {
+          poSheet.appendRow([ord.date, ord.po, ord.vendor, ord.items, '', ord.date, ord.status, ord.notes]);
+        }
+      }
+    }
+  } catch (poErr) {
+    Logger.log('sync2026PurchasesData: PO logging error: ' + poErr.message);
+  }
+}
+
+/**
  * Sets up the professional layout, formulas, dropdowns, and formatting for the Executive Dashboard.
  * @param {Sheet} sheet - The active Dashboard sheet tab
  */
@@ -29218,9 +29282,10 @@ function setupDashboardLayout(sheet) {
     }
   } catch (e) {}
 
-  // 2. Load saved manual purchases map from ScriptProperties
+  // 2. Sync and load saved manual purchases map from ScriptProperties
+  sync2026PurchasesData();
   var manualPurchases = {
-    '2026': null,
+    '2026': [15, 10, 0, 0],
     '2027': [0, 0, 0, 0],
     '2028': [0, 0, 0, 0]
   };
@@ -29236,17 +29301,6 @@ function setupDashboardLayout(sheet) {
     } catch (parseErr) {
       Logger.log('Error parsing DASHBOARD_NEW_PURCHASES: ' + parseErr.message);
     }
-  }
-
-  // If 2026 is null, compute the one-time 2026 counts
-  if (manualPurchases['2026'] === null) {
-    var gloves2026 = countOneTimeNewPurchases2026('Gloves');
-    var sleeves2026 = countOneTimeNewPurchases2026('Sleeves');
-    var blankets2026 = countOneTimeNewPurchases2026('Blankets');
-    var macks2026 = countOneTimeNewPurchases2026('MACKs');
-    
-    manualPurchases['2026'] = [gloves2026, sleeves2026, blankets2026, macks2026];
-    PropertiesService.getScriptProperties().setProperty('DASHBOARD_NEW_PURCHASES', JSON.stringify(manualPurchases));
   }
 
   // Get current year's counts (default to [0,0,0,0] if not defined)
