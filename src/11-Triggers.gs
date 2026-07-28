@@ -457,7 +457,7 @@ function onEditHandler(e) {
     // =========================================================================
 
     if ((sheetName === 'Dashboard' && editedCol === 18 && editedRow >= 8 && editedRow <= 11) ||
-        (sheetName === 'Expiring Certs' && editedCol === 8 && editedRow >= 2)) {
+        (sheetName === 'Expiring Certs' && (editedCol === 9 || editedCol === 8) && editedRow >= 2)) {
       var val = e.range.getValue();
       if (val === true || val === "💬 Notified") {
         // Reset checkbox immediately using custom unchecked value if configured
@@ -479,9 +479,9 @@ function onEditHandler(e) {
           certType = sheet.getRange(editedRow, 20).getValue();
           expirationDate = sheet.getRange(editedRow, 21).getValue();
         } else {
-          employeeName = sheet.getRange(editedRow, 1).getValue();
-          certType = sheet.getRange(editedRow, 2).getValue();
-          expirationDate = sheet.getRange(editedRow, 3).getValue();
+          employeeName = sheet.getRange(editedRow, 1).getValue(); // Col A (1)
+          certType = sheet.getRange(editedRow, 2).getValue();     // Col B (2)
+          expirationDate = sheet.getRange(editedRow, 4).getValue(); // Col D (4) - Expiration Date
         }
         
         Logger.log('SMS Dialog Trigger: emp=' + employeeName + ', cert=' + certType + ', date=' + expirationDate);

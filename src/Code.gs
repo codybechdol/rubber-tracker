@@ -29649,17 +29649,29 @@ function showDashboardSMSDialog(employeeName, certType, expirationDate) {
     }
   }
   
-  var certLower = String(certType).toLowerCase();
-  var defaultMsg = "";
-  if (certLower.indexOf('mec') !== -1 || certLower.indexOf('medical exam') !== -1 || certLower.indexOf('dot physical') !== -1 || certLower.indexOf('medical card') !== -1) {
-    defaultMsg = "Hi " + firstName + ", your DOT Medical Card will expire on " + dateStr + ". Can you send me a picture of your new one?";
-  } else if (certLower.indexOf('driver') !== -1 || certLower.indexOf('license') !== -1 || certLower.indexOf('dl') !== -1) {
-    defaultMsg = "Hi " + firstName + ", your Driver's License will expire on " + dateStr + ". Can you send me a picture (front and back) of your new one?";
-  } else if (certLower.indexOf('harassment') !== -1) {
-    defaultMsg = "Hi " + firstName + ", your Harassment Training will expire on " + dateStr + ". Can you let me know when you get it done? This is required by the NJATC if you are going to be assigned apprentices and the Federal Govt in general. Go to SafetyWallet.org or the mobile app, sign in with your last name and phone number, upper left is a menu with Training and then On Line Training. Make sure you take the 65 minute class and not the 120 minute class.";
-  } else if (certLower.indexOf('cpr') !== -1 || certLower.indexOf('1st aid') !== -1 || certLower.indexOf('first aid') !== -1) {
-    var expStatusForFirstAid = isExpired ? 'is expired' : 'will expire on ' + dateStr;
-    defaultMsg = "Hi " + firstName + ", your 1st Aid/CPR certification " + expStatusForFirstAid + ". Please let me know your availability for a renewal class.";
+  var templatesCfg = getSmsTemplatesConfig();
+  var templates = templatesCfg.templates || templatesCfg || {};
+  var certKey = 'cert_' + String(certType).toLowerCase().trim();
+
+  var expStatusStr = isExpired ? 'is expired' : ('expires on ' + dateStr);
+  var vars = {
+    firstName: firstName,
+    certName: certType,
+    expirationStatus: expStatusStr,
+    expirationDate: dateStr
+  };
+
+  var defaultMsg = '';
+  if (templates[certKey]) {
+    defaultMsg = templates[certKey];
+    Object.keys(vars).forEach(function(k) {
+      defaultMsg = defaultMsg.split('{' + k + '}').join(vars[k]);
+    });
+  } else if (templates['certs_general']) {
+    defaultMsg = templates['certs_general'];
+    Object.keys(vars).forEach(function(k) {
+      defaultMsg = defaultMsg.split('{' + k + '}').join(vars[k]);
+    });
   } else {
     defaultMsg = "Hi " + firstName + ", your " + certType + " certification expires on " + dateStr + ". Please let us know when you can attend training.";
   }
