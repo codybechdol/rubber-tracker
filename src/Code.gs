@@ -4333,20 +4333,20 @@ function applyExpiringCertsFormatting(sheet, dataRows) {
     .setRanges([statusRange])
     .build());
 
-  // 7. Non-Expiring (Status Column H only - Gray)
+  // 7. Non-Expiring (Full Row A-I - Gray)
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenTextEqualTo('Non-Expiring')
+    .whenFormulaSatisfied('=$H2="Non-Expiring"')
     .setBackground('#757575')
     .setFontColor('#ffffff')
-    .setRanges([statusRange])
+    .setRanges([fullRowRange])
     .build());
 
-  // 8. No Date Set (Status Column H only - Gray)
+  // 8. No Date Set (Full Row A-I - Gray)
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenTextEqualTo('No Date Set')
+    .whenFormulaSatisfied('=$H2="No Date Set"')
     .setBackground('#757575')
     .setFontColor('#ffffff')
-    .setRanges([statusRange])
+    .setRanges([fullRowRange])
     .build());
 
   sheet.setConditionalFormatRules(rules);
