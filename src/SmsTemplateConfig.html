@@ -18,7 +18,7 @@
     .card-template:hover { box-shadow: 0 3px 8px rgba(0,0,0,0.08); }
     .card-header-template { background: #f8f9fa; border-bottom: 1px solid #dadce0; padding: 12px 18px; border-radius: 10px 10px 0 0; display: flex; align-items: center; justify-content: space-between; }
     .template-title { font-weight: 600; font-size: 15px; color: #202124; display: flex; align-items: center; gap: 8px; }
-    .template-key { font-size: 12px; color: #70757a; font-family: monospace; background: #e8eaed; padding: 2px 8px; border-radius: 4px; }
+    .template-key { font-size: 11px; color: #70757a; font-family: monospace; background: #e8eaed; padding: 2px 8px; border-radius: 4px; }
     
     .card-body-template { padding: 18px; }
     
@@ -73,130 +73,17 @@
     
     <!-- TAB 1: EXPIRING CERTS -->
     <div class="tab-pane fade show active" id="certs-pane" role="tabpanel">
-      <p class="text-muted small mb-3">Customize SMS text sent to employees when their certifications are expiring or due for renewal.</p>
+      <p class="text-muted small mb-3">Customize SMS text sent to employees for every specific certification type.</p>
       
-      <!-- 1st Aid / CPR Intro -->
-      <div class="card-template">
-        <div class="card-header-template">
-          <span class="template-title"><i class="bi bi-heart-pulse text-danger"></i> 1st Aid / CPR Renewal Intro</span>
-          <span class="template-key">certs_firstaid_cpr</span>
-        </div>
-        <div class="card-body-template">
-          <div class="placeholder-bar">
-            <span class="placeholder-label">Insert:</span>
-            <span class="placeholder-chip" onclick="insertPlaceholder('tpl_certs_firstaid_cpr', '{firstName}')">{firstName}</span>
-            <span class="placeholder-chip" onclick="insertPlaceholder('tpl_certs_firstaid_cpr', '{certName}')">{certName}</span>
-            <span class="placeholder-chip" onclick="insertPlaceholder('tpl_certs_firstaid_cpr', '{expirationStatus}')">{expirationStatus}</span>
-          </div>
-          <textarea class="form-control" id="tpl_certs_firstaid_cpr" rows="2" oninput="updateCharCount(this); updatePreview('certs_firstaid_cpr');"></textarea>
-          <div class="d-flex justify-content-between align-items-center mt-1">
-            <div class="preview-box flex-grow-1 me-3" id="prev_certs_firstaid_cpr">
-              <div class="preview-title">Sample Output</div>
-              <span id="prev_text_certs_firstaid_cpr"></span>
-            </div>
-            <div class="char-counter" id="cnt_tpl_certs_firstaid_cpr">0 chars (0 SMS)</div>
-          </div>
-        </div>
+      <!-- DYNAMIC CONTAINER FOR ALL CERT TYPES -->
+      <div id="certs-container">
+        <div class="text-center py-4 text-muted"><div class="spinner-border spinner-border-sm me-2"></div> Loading certification types...</div>
       </div>
 
-      <!-- Driver's License -->
-      <div class="card-template">
-        <div class="card-header-template">
-          <span class="template-title"><i class="bi bi-card-heading text-primary"></i> Driver's License (DL)</span>
-          <span class="template-key">certs_dl</span>
-        </div>
-        <div class="card-body-template">
-          <div class="placeholder-bar">
-            <span class="placeholder-label">Insert:</span>
-            <span class="placeholder-chip" onclick="insertPlaceholder('tpl_certs_dl', '{firstName}')">{firstName}</span>
-            <span class="placeholder-chip" onclick="insertPlaceholder('tpl_certs_dl', '{expirationStatus}')">{expirationStatus}</span>
-          </div>
-          <textarea class="form-control" id="tpl_certs_dl" rows="2" oninput="updateCharCount(this); updatePreview('certs_dl');"></textarea>
-          <div class="d-flex justify-content-between align-items-center mt-1">
-            <div class="preview-box flex-grow-1 me-3" id="prev_certs_dl">
-              <div class="preview-title">Sample Output</div>
-              <span id="prev_text_certs_dl"></span>
-            </div>
-            <div class="char-counter" id="cnt_tpl_certs_dl">0 chars (0 SMS)</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Medical Examiner Card (MEC) -->
-      <div class="card-template">
-        <div class="card-header-template">
-          <span class="template-title"><i class="bi bi-hospital text-info"></i> Medical Examiner's Certificate (MEC / DOT)</span>
-          <span class="template-key">certs_mec</span>
-        </div>
-        <div class="card-body-template">
-          <div class="placeholder-bar">
-            <span class="placeholder-label">Insert:</span>
-            <span class="placeholder-chip" onclick="insertPlaceholder('tpl_certs_mec', '{firstName}')">{firstName}</span>
-            <span class="placeholder-chip" onclick="insertPlaceholder('tpl_certs_mec', '{expirationStatus}')">{expirationStatus}</span>
-            <span class="placeholder-chip" onclick="insertPlaceholder('tpl_certs_mec', '{expirationDate}')">{expirationDate}</span>
-          </div>
-          <textarea class="form-control" id="tpl_certs_mec" rows="2" oninput="updateCharCount(this); updatePreview('certs_mec');"></textarea>
-          <div class="d-flex justify-content-between align-items-center mt-1">
-            <div class="preview-box flex-grow-1 me-3" id="prev_certs_mec">
-              <div class="preview-title">Sample Output</div>
-              <span id="prev_text_certs_mec"></span>
-            </div>
-            <div class="char-counter" id="cnt_tpl_certs_mec">0 chars (0 SMS)</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Harassment Training -->
-      <div class="card-template">
-        <div class="card-header-template">
-          <span class="template-title"><i class="bi bi-shield-lock text-warning"></i> Harassment Training</span>
-          <span class="template-key">certs_harassment</span>
-        </div>
-        <div class="card-body-template">
-          <div class="placeholder-bar">
-            <span class="placeholder-label">Insert:</span>
-            <span class="placeholder-chip" onclick="insertPlaceholder('tpl_certs_harassment', '{firstName}')">{firstName}</span>
-            <span class="placeholder-chip" onclick="insertPlaceholder('tpl_certs_harassment', '{expirationStatus}')">{expirationStatus}</span>
-          </div>
-          <textarea class="form-control" id="tpl_certs_harassment" rows="3" oninput="updateCharCount(this); updatePreview('certs_harassment');"></textarea>
-          <div class="d-flex justify-content-between align-items-center mt-1">
-            <div class="preview-box flex-grow-1 me-3" id="prev_certs_harassment">
-              <div class="preview-title">Sample Output</div>
-              <span id="prev_text_certs_harassment"></span>
-            </div>
-            <div class="char-counter" id="cnt_tpl_certs_harassment">0 chars (0 SMS)</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Crane Cert -->
-      <div class="card-template">
-        <div class="card-header-template">
-          <span class="template-title"><i class="bi bi-truck text-dark"></i> Crane Cert Registration (MSLCAT)</span>
-          <span class="template-key">certs_crane</span>
-        </div>
-        <div class="card-body-template">
-          <div class="placeholder-bar">
-            <span class="placeholder-label">Insert:</span>
-            <span class="placeholder-chip" onclick="insertPlaceholder('tpl_certs_crane', '{firstName}')">{firstName}</span>
-            <span class="placeholder-chip" onclick="insertPlaceholder('tpl_certs_crane', '{startDate}')">{startDate}</span>
-            <span class="placeholder-chip" onclick="insertPlaceholder('tpl_certs_crane', '{endDate}')">{endDate}</span>
-          </div>
-          <textarea class="form-control" id="tpl_certs_crane" rows="3" oninput="updateCharCount(this); updatePreview('certs_crane');"></textarea>
-          <div class="d-flex justify-content-between align-items-center mt-1">
-            <div class="preview-box flex-grow-1 me-3" id="prev_certs_crane">
-              <div class="preview-title">Sample Output</div>
-              <span id="prev_text_certs_crane"></span>
-            </div>
-            <div class="char-counter" id="cnt_tpl_certs_crane">0 chars (0 SMS)</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- General / Other Certs -->
-      <div class="card-template">
-        <div class="card-header-template">
-          <span class="template-title"><i class="bi bi-file-earmark-text text-secondary"></i> General / Other Certifications</span>
+      <!-- General / Fallback Cert Template -->
+      <div class="card-template border-secondary">
+        <div class="card-header-template bg-light">
+          <span class="template-title text-secondary"><i class="bi bi-file-earmark-text"></i> General / Fallback Cert Template</span>
           <span class="template-key">certs_general</span>
         </div>
         <div class="card-body-template">
@@ -212,7 +99,7 @@
               <div class="preview-title">Sample Output</div>
               <span id="prev_text_certs_general"></span>
             </div>
-            <div class="char-counter" id="cnt_tpl_certs_general">0 chars (0 SMS)</div>
+            <div class="char-counter" id="cnt_tpl_certs_general">0 chars (0 SMS messages)</div>
           </div>
         </div>
       </div>
@@ -242,7 +129,7 @@
               <div class="preview-title">Sample Output</div>
               <span id="prev_text_safety_missing_jha"></span>
             </div>
-            <div class="char-counter" id="cnt_tpl_safety_missing_jha">0 chars (0 SMS)</div>
+            <div class="char-counter" id="cnt_tpl_safety_missing_jha">0 chars (0 SMS messages)</div>
           </div>
         </div>
       </div>
@@ -265,7 +152,7 @@
               <div class="preview-title">Sample Output</div>
               <span id="prev_text_safety_missing_weekly"></span>
             </div>
-            <div class="char-counter" id="cnt_tpl_safety_missing_weekly">0 chars (0 SMS)</div>
+            <div class="char-counter" id="cnt_tpl_safety_missing_weekly">0 chars (0 SMS messages)</div>
           </div>
         </div>
       </div>
@@ -289,7 +176,7 @@
               <div class="preview-title">Sample Output</div>
               <span id="prev_text_safety_late_submission"></span>
             </div>
-            <div class="char-counter" id="cnt_tpl_safety_late_submission">0 chars (0 SMS)</div>
+            <div class="char-counter" id="cnt_tpl_safety_late_submission">0 chars (0 SMS messages)</div>
           </div>
         </div>
       </div>
@@ -320,7 +207,7 @@
               <div class="preview-title">Sample Output</div>
               <span id="prev_text_equipment_changeout"></span>
             </div>
-            <div class="char-counter" id="cnt_tpl_equipment_changeout">0 chars (0 SMS)</div>
+            <div class="char-counter" id="cnt_tpl_equipment_changeout">0 chars (0 SMS messages)</div>
           </div>
         </div>
       </div>
@@ -346,10 +233,9 @@
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
   <script>
-    // Sample replacement values for live previews
     var SAMPLE_DATA = {
       '{firstName}': 'Aarron',
-      '{certName}': 'CPR',
+      '{certName}': 'Certification',
       '{expirationStatus}': 'expires on 08/15/2026',
       '{expirationDate}': '08/15/2026',
       '{startDate}': '09/10/2026',
@@ -364,6 +250,7 @@
     };
 
     var currentConfig = {};
+    var activeCertTypes = [];
 
     document.addEventListener('DOMContentLoaded', function() {
       loadConfig();
@@ -371,9 +258,11 @@
 
     function loadConfig() {
       google.script.run
-        .withSuccessHandler(function(config) {
-          currentConfig = config || {};
-          populateFields(currentConfig);
+        .withSuccessHandler(function(res) {
+          currentConfig = (res && res.templates) ? res.templates : {};
+          activeCertTypes = (res && res.certTypes) ? res.certTypes : [];
+          renderCertCards(activeCertTypes, currentConfig);
+          populateStaticFields(currentConfig);
         })
         .withFailureHandler(function(err) {
           showToast('Error loading SMS templates: ' + err.message, 'danger');
@@ -381,14 +270,60 @@
         .getSmsTemplatesConfig();
     }
 
-    function populateFields(cfg) {
-      var keys = [
-        'certs_firstaid_cpr', 'certs_dl', 'certs_mec', 'certs_harassment', 'certs_crane', 'certs_general',
-        'safety_missing_jha', 'safety_missing_weekly', 'safety_late_submission',
-        'equipment_changeout'
-      ];
+    function renderCertCards(certTypes, cfg) {
+      var container = document.getElementById('certs-container');
+      container.innerHTML = '';
 
-      keys.forEach(function(k) {
+      if (!certTypes || certTypes.length === 0) {
+        container.innerHTML = '<div class="alert alert-warning">No active certification types found. Add cert types in Expiring Certs Setup.</div>';
+        return;
+      }
+
+      certTypes.forEach(function(certName) {
+        var key = 'cert_' + certName.toLowerCase().trim();
+        var val = cfg[key] || '';
+
+        var card = document.createElement('div');
+        card.className = 'card-template';
+
+        var sampleCertData = Object.assign({}, SAMPLE_DATA, { '{certName}': certName });
+
+        var html = '<div class="card-header-template">' +
+          '<span class="template-title"><i class="bi bi-patch-check-fill text-primary"></i> ' + escapeHtml(certName) + '</span>' +
+          '<span class="template-key">' + escapeHtml(key) + '</span>' +
+          '</div>' +
+          '<div class="card-body-template">' +
+          '<div class="placeholder-bar">' +
+          '<span class="placeholder-label">Insert:</span>' +
+          '<span class="placeholder-chip" onclick="insertPlaceholder(\'tpl_' + key + '\', \'{firstName}\')">{firstName}</span>' +
+          '<span class="placeholder-chip" onclick="insertPlaceholder(\'tpl_' + key + '\', \'{certName}\')">{certName}</span>' +
+          '<span class="placeholder-chip" onclick="insertPlaceholder(\'tpl_' + key + '\', \'{expirationStatus}\')">{expirationStatus}</span>' +
+          '<span class="placeholder-chip" onclick="insertPlaceholder(\'tpl_' + key + '\', \'{expirationDate}\')">{expirationDate}</span>' +
+          '<span class="placeholder-chip" onclick="insertPlaceholder(\'tpl_' + key + '\', \'{startDate}\')">{startDate}</span>' +
+          '<span class="placeholder-chip" onclick="insertPlaceholder(\'tpl_' + key + '\', \'{endDate}\')">{endDate}</span>' +
+          '</div>' +
+          '<textarea class="form-control" id="tpl_' + key + '" rows="2" data-cert="' + escapeHtml(certName) + '" oninput="updateCharCount(this); updateCertPreview(\'' + key + '\', \'' + escapeHtml(certName) + '\');">' + escapeHtml(val) + '</textarea>' +
+          '<div class="d-flex justify-content-between align-items-center mt-1">' +
+          '<div class="preview-box flex-grow-1 me-3" id="prev_' + key + '">' +
+          '<div class="preview-title">Sample Output</div>' +
+          '<span id="prev_text_' + key + '"></span>' +
+          '</div>' +
+          '<div class="char-counter" id="cnt_tpl_' + key + '">0 chars (0 SMS messages)</div>' +
+          '</div>' +
+          '</div>';
+
+        card.innerHTML = html;
+        container.appendChild(card);
+
+        var txtEl = document.getElementById('tpl_' + key);
+        updateCharCount(txtEl);
+        updateCertPreview(key, certName);
+      });
+    }
+
+    function populateStaticFields(cfg) {
+      var staticKeys = ['certs_general', 'safety_missing_jha', 'safety_missing_weekly', 'safety_late_submission', 'equipment_changeout'];
+      staticKeys.forEach(function(k) {
         var el = document.getElementById('tpl_' + k);
         if (el) {
           el.value = cfg[k] || '';
@@ -411,11 +346,19 @@
       el.focus();
 
       updateCharCount(el);
-      var key = targetId.replace('tpl_', '');
-      updatePreview(key);
+
+      var certAttr = el.getAttribute('data-cert');
+      if (certAttr) {
+        var key = targetId.replace('tpl_', '');
+        updateCertPreview(key, certAttr);
+      } else {
+        var key = targetId.replace('tpl_', '');
+        updatePreview(key);
+      }
     }
 
     function updateCharCount(el) {
+      if (!el) return;
       var len = el.value.length;
       var segments = Math.ceil(len / 160) || 1;
       var countEl = document.getElementById('cnt_' + el.id);
@@ -438,15 +381,36 @@
       prevTextEl.textContent = text || '(empty template)';
     }
 
-    function saveTemplates() {
-      var keys = [
-        'certs_firstaid_cpr', 'certs_dl', 'certs_mec', 'certs_harassment', 'certs_crane', 'certs_general',
-        'safety_missing_jha', 'safety_missing_weekly', 'safety_late_submission',
-        'equipment_changeout'
-      ];
+    function updateCertPreview(key, certName) {
+      var el = document.getElementById('tpl_' + key);
+      var prevTextEl = document.getElementById('prev_text_' + key);
+      if (!el || !prevTextEl) return;
 
+      var text = el.value || '';
+      var localSample = Object.assign({}, SAMPLE_DATA, { '{certName}': certName });
+
+      Object.keys(localSample).forEach(function(placeholder) {
+        text = text.split(placeholder).join(localSample[placeholder]);
+      });
+
+      prevTextEl.textContent = text || '(empty template)';
+    }
+
+    function saveTemplates() {
       var updated = {};
-      keys.forEach(function(k) {
+
+      // Save cert templates
+      activeCertTypes.forEach(function(certName) {
+        var key = 'cert_' + certName.toLowerCase().trim();
+        var el = document.getElementById('tpl_' + key);
+        if (el) {
+          updated[key] = el.value.trim();
+        }
+      });
+
+      // Save static templates
+      var staticKeys = ['certs_general', 'safety_missing_jha', 'safety_missing_weekly', 'safety_late_submission', 'equipment_changeout'];
+      staticKeys.forEach(function(k) {
         var el = document.getElementById('tpl_' + k);
         if (el) {
           updated[k] = el.value.trim();
@@ -486,6 +450,16 @@
           })
           .resetSmsTemplatesConfig();
       }
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
     }
 
     function showToast(msg, type) {

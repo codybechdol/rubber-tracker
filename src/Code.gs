@@ -2753,44 +2753,83 @@ function showSmsTemplateConfigDialog() {
  * Returns default SMS template stock messages.
  */
 function getDefaultSmsTemplatesConfig() {
-  return {
-    certs_firstaid_cpr: 'Hi {firstName}, your {certName} {expirationStatus}.',
-    certs_dl: 'Hi {firstName}, your Driver\'s License {expirationStatus}. Can you send me a picture (front and back) of your new one?',
-    certs_mec: 'Hi {firstName}, your DOT Medical Card {expirationStatus} on {expirationDate}. Can you send me a picture of your new one?',
-    certs_harassment: 'Hi {firstName}, your Harassment Training {expirationStatus}. Can you let me know when you get it done? This is required by the NJATC if you are going to be assigned apprentices and the Federal Govt in general. Go to SafetyWallet.org or the mobile app, sign in with your last name and phone number, upper left is a menu with Training and then On Line Training. Make sure you take the 65 minute class and not the 120 minute class. If you have trouble logging in call Safety Wallet at 424-342-7233 and they can get you straightened out.',
-    certs_crane: 'Hi {firstName}, your Crane Cert is expiring and needs to be renewed. There is a class at MSLCAT starting {startDate} and ending {endDate}. You will need to contact MSLCAT directly to register: Phone: (801) 562-2929 Email: office@mslcat.org Website: mslcat.org (Mon-Fri 7:30am-4pm MT). Have your Name, Email Address, and last 4 of your SSN ready when you call. Let me know when you get signed up!',
-    certs_general: 'Hi {firstName}, your {certName} {expirationStatus}. Can you send me a picture of your new one?',
+  var defaults = {
     safety_missing_jha: 'Hi {firstName}, we did not receive a JHA for {dates} from your crew. This is just a reminder not to miss {itThem} this week. Was there an issue turning {itThem} in that you need help with?',
     safety_missing_weekly: 'Hi {firstName}, we did not receive a Weekly Safety Meeting for the week of {weekOf} from your crew. This is just a reminder not to miss it this week. Was there an issue turning it in that you need help with?',
     safety_late_submission: 'Hi {firstName}, the {reportType} for {dates} was received late. Be sure to submit it in the same week that it is due.',
-    equipment_changeout: 'Hi {firstName}, your {itemType} for job {jobNum} is due for change-out on {changeOutDate}. Please coordinate with your foreman to return the current set and collect your new set.'
+    equipment_changeout: 'Hi {firstName}, your {itemType} for job {jobNum} is due for change-out on {changeOutDate}. Please coordinate with your foreman to return the current set and collect your new set.',
+    certs_general: 'Hi {firstName}, your {certName} {expirationStatus}. Can you send me a picture of your new one?'
   };
+
+  // Default specific templates for known cert types
+  defaults['cert_1st aid'] = 'Hi {firstName}, your 1st Aid cert {expirationStatus}.';
+  defaults['cert_cpr'] = 'Hi {firstName}, your CPR cert {expirationStatus}.';
+  defaults['cert_dl'] = 'Hi {firstName}, your Driver\'s License {expirationStatus}. Can you send me a picture (front and back) of your new one?';
+  defaults['cert_mec expiration'] = 'Hi {firstName}, your DOT Medical Card {expirationStatus} on {expirationDate}. Can you send me a picture of your new one?';
+  defaults['cert_harassment training'] = 'Hi {firstName}, your Harassment Training {expirationStatus}. Can you let me know when you get it done? This is required by the NJATC if you are going to be assigned apprentices and the Federal Govt in general. Go to SafetyWallet.org or the mobile app, sign in with your last name and phone number, upper left is a menu with Training and then On Line Training. Make sure you take the 65 minute class and not the 120 minute class. If you have trouble logging in call Safety Wallet at 424-342-7233 and they can get you straightened out.';
+  defaults['cert_crane cert'] = 'Hi {firstName}, your Crane Cert is expiring and needs to be renewed. There is a class at MSLCAT starting {startDate} and ending {endDate}. You will need to contact MSLCAT directly to register: Phone: (801) 562-2929 Email: office@mslcat.org Website: mslcat.org (Mon-Fri 7:30am-4pm MT). Have your Name, Email Address, and last 4 of your SSN ready when you call. Let me know when you get signed up!';
+  defaults['cert_pole top rescue'] = 'Hi {firstName}, your Pole Top Rescue certification {expirationStatus}. Please let me know when you have scheduled your annual re-evaluation.';
+  defaults['cert_forklift'] = 'Hi {firstName}, your Forklift Operator certification {expirationStatus}. Can you send me a copy of your new card when completed?';
+  defaults['cert_forklift operator safety training'] = 'Hi {firstName}, your Forklift Operator certification {expirationStatus}. Can you send me a copy of your new card when completed?';
+
+  return defaults;
 }
 
 /**
  * Gets customized SMS templates configuration from ScriptProperties or returns defaults.
- * @return {Object} SMS templates object
+ * @return {Object} Payload with templates object and certTypes array
  */
 function getSmsTemplatesConfig() {
   var props = PropertiesService.getScriptProperties();
   var raw = props.getProperty('SMS_TEMPLATES_CONFIG');
   var defaults = getDefaultSmsTemplatesConfig();
+
+  // Load all active cert types from Expiring Certs Setup config
+  var setupConfig = getExpiringCertsSetupConfig();
+  var certList = (setupConfig && Array.isArray(setupConfig.certs)) ? setupConfig.certs : [];
+  
+  var certTypes = [];
+  certList.forEach(function(c) {
+    if (c.active !== false && c.name) {
+      certTypes.push(c.name.trim());
+    }
+  });
+
+  var resultConfig = {};
   if (raw) {
     try {
       var parsed = JSON.parse(raw);
       if (parsed && typeof parsed === 'object') {
-        Object.keys(defaults).forEach(function(k) {
-          if (!parsed[k]) {
-            parsed[k] = defaults[k];
-          }
-        });
-        return parsed;
+        resultConfig = parsed;
       }
     } catch (e) {
       Logger.log('Error parsing SMS_TEMPLATES_CONFIG: ' + e.message);
     }
   }
-  return defaults;
+
+  // Ensure defaults for safety compliance & equipment change-outs
+  Object.keys(defaults).forEach(function(k) {
+    if (!resultConfig[k]) {
+      resultConfig[k] = defaults[k];
+    }
+  });
+
+  // Ensure every active cert type has a template entry
+  certTypes.forEach(function(certName) {
+    var key = 'cert_' + certName.toLowerCase().trim();
+    if (!resultConfig[key]) {
+      if (defaults[key]) {
+        resultConfig[key] = defaults[key];
+      } else {
+        resultConfig[key] = 'Hi {firstName}, your ' + certName + ' {expirationStatus}. Can you send me a picture of your new one?';
+      }
+    }
+  });
+
+  return {
+    templates: resultConfig,
+    certTypes: certTypes
+  };
 }
 
 /**
