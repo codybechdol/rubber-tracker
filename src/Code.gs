@@ -29291,6 +29291,11 @@ function setupDashboardLayout(sheet) {
     Logger.log("setupDashboardLayout: Could not clear formats/validations: " + e.message);
   }
   sheet.setHiddenGridlines(false);
+  try {
+    sheet.showColumns(1, 22);
+  } catch (showErr) {
+    Logger.log("setupDashboardLayout: Could not show columns: " + showErr.message);
+  }
 
   // Set up column widths
   sheet.setColumnWidth(1, 80);   // A: Category / Item Type
@@ -29302,18 +29307,18 @@ function setupDashboardLayout(sheet) {
   sheet.setColumnWidth(7, 85);   // G: Packed For Testing / Available Stock
   sheet.setColumnWidth(8, 85);   // H: Packed For Delivery / Expected Inbound
   sheet.setColumnWidth(9, 90);   // I: Coverage % / Projected Order
-  sheet.setColumnWidth(10, 50);  // J: Spacer
-  sheet.setColumnWidth(11, 50);  // K: Spacer
-  sheet.setColumnWidth(12, 30);  // L: Border spacer
-  sheet.setColumnWidth(13, 140); // M: AED Item / Category
-  sheet.setColumnWidth(14, 90);  // N: Qty On Hand / Gloves
-  sheet.setColumnWidth(15, 90);  // O: Min Threshold / Sleeves
-  sheet.setColumnWidth(16, 90);  // P: Status / Blankets
-  sheet.setColumnWidth(17, 90);  // Q: MACKs
-  sheet.setColumnWidth(18, 120); // R: Cert Type
-  sheet.setColumnWidth(19, 65);  // S: Expired
-  sheet.setColumnWidth(20, 65);  // T: Critical
-  sheet.setColumnWidth(21, 65);  // U: Warning
+  sheet.setColumnWidth(10, 20);  // J: Spacer
+  sheet.setColumnWidth(11, 20);  // K: Spacer
+  sheet.setColumnWidth(12, 15);  // L: Border spacer
+  sheet.setColumnWidth(13, 120); // M: AED Item / Category
+  sheet.setColumnWidth(14, 75);  // N: Qty On Hand / Gloves
+  sheet.setColumnWidth(15, 75);  // O: Min Threshold / Sleeves
+  sheet.setColumnWidth(16, 75);  // P: Status / Blankets
+  sheet.setColumnWidth(17, 75);  // Q: MACKs
+  sheet.setColumnWidth(18, 150); // R: Cert Type (Wider for long cert names)
+  sheet.setColumnWidth(19, 60);  // S: Expired
+  sheet.setColumnWidth(20, 60);  // T: Critical
+  sheet.setColumnWidth(21, 60);  // U: Warning
   sheet.setColumnWidth(22, 65);  // V: Upcoming
   sheet.setColumnWidth(23, 10);  // W: Helper (hidden)
 
