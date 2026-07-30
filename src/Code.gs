@@ -1562,6 +1562,15 @@ function deleteScheduleTask(taskIndex, taskKey, taskData) {
   var taskMetaSheet = ss.getSheetByName('Task Metadata');
   var taskInfo = null;
 
+  // Fallback: reconstruct taskKey from taskData if not provided directly
+  if (!taskKey && taskData) {
+    if (taskData.source && taskData.rowIndex) {
+      taskKey = taskData.source + '_' + taskData.rowIndex;
+    } else if (taskData.sheetName && taskData.rowIndex) {
+      taskKey = taskData.sheetName + '_' + taskData.rowIndex;
+    }
+  }
+
   // First, find the task info from Task Metadata if we have a key
   // taskKey format is usually "SourceSheet_SourceRow" (e.g., "Glove Swaps_15" or "Safety Compliance_013-26")
   // For Safety Compliance, taskKey can also be "SafetyCompliance_XXX-XX_MM-DD-YYYY"
@@ -1589,7 +1598,7 @@ function deleteScheduleTask(taskIndex, taskKey, taskData) {
       var rowKey = rowSourceSheet + '_' + rowSourceRow;
 
       // Match by: SourceSheet_SourceRow key, or TaskID starts with the taskKey
-      if (rowKey === taskKey || rowTaskId === taskKey || rowTaskId.indexOf(taskKey) === 0) {
+      if (rowKey === taskKey || rowTaskId === taskKey || rowTaskId.indexOf(taskKey) === 0 || (taskData && taskData.taskId && rowTaskId === taskData.taskId)) {
         taskInfo = {
           rowIndex: i + 1,
           taskKey: taskKey,
@@ -1618,6 +1627,22 @@ function deleteScheduleTask(taskIndex, taskKey, taskData) {
     taskInfo.employee = taskData.employee || taskData.foreman || '';
   }
 
+  // Check if this is a Manual Task (delete from Manual Tasks sheet ifApplicable)
+  var isManualTask = (taskData && (taskData.source === 'Manual Tasks' || taskData.sheetName === 'Manual Tasks')) ||
+                     (taskInfo && taskInfo.source === 'Manual Tasks');
+  if (isManualTask) {
+    var manualRow = (taskData && taskData.rowIndex) || (taskInfo && taskInfo.sourceRow);
+    if (manualRow && !isNaN(Number(manualRow))) {
+      var manualSheet = ss.getSheetByName('Manual Tasks');
+      var rIdx = Number(manualRow);
+      if (manualSheet && rIdx >= 2 && rIdx <= manualSheet.getLastRow()) {
+        manualSheet.deleteRow(rIdx);
+        Logger.log('Deleted row ' + rIdx + ' from Manual Tasks sheet');
+        deletedFrom.push('Manual Tasks');
+      }
+    }
+  }
+
   // Check if this is a Safety Compliance task
   var isSafetyCompliance = (taskInfo && (
     taskInfo.taskType === 'Missing Safety Report' ||
@@ -1637,8 +1662,7 @@ function deleteScheduleTask(taskIndex, taskKey, taskData) {
     Logger.log('Safety Compliance cleanup result: ' + JSON.stringify(cleanupResult));
   }
 
-  // Check if this is a Safety Equipment task - Updated Apr 2, 2026 for backward compat with both sheet names
-  // Safety Equipment tasks come from "Safety Equipment Needs" sheet (formerly "Safety Reports")
+  // Check if this is a Safety Equipment task
   var isSafetyEquipment = (taskInfo && (
     taskInfo.taskType === 'Safety Equipment' ||
     taskInfo.source === 'Safety Reports' ||
@@ -1647,20 +1671,14 @@ function deleteScheduleTask(taskIndex, taskKey, taskData) {
        (taskData && (taskData.taskType === 'Safety Equipment' || taskData.source === 'Safety Reports' || taskData.source === 'Safety Equipment Needs'));
 
   Logger.log('isSafetyEquipment: ' + isSafetyEquipment);
-  Logger.log('isSafetyEquipment check: taskInfo=' + (taskInfo ? 'exists' : 'null') +
-             ', taskKey=' + taskKey +
-             ', taskData.source=' + (taskData ? taskData.source : 'null'));
 
-  // If Safety Equipment task, handle special cleanup (update source sheet status to "Resolved")
   if (isSafetyEquipment) {
-    // Build taskInfo from taskData/taskKey if not already available
     var cleanupTaskInfo = taskInfo || {};
     if (taskData) {
       cleanupTaskInfo.taskType = cleanupTaskInfo.taskType || taskData.taskType || 'Safety Equipment';
       cleanupTaskInfo.source = cleanupTaskInfo.source || taskData.source || 'Safety Equipment Needs';
       cleanupTaskInfo.sourceRow = cleanupTaskInfo.sourceRow || taskData.rowIndex || null;
     }
-    // Parse sourceRow from taskKey if not in taskInfo (format: "Safety Reports_2" or "SafetyReports_2")
     if (!cleanupTaskInfo.sourceRow && taskKey && (taskKey.indexOf('Safety Reports_') === 0 || taskKey.indexOf('SafetyReports_') === 0)) {
       var parts = taskKey.split('_');
       if (parts.length >= 2) {
@@ -1681,7 +1699,6 @@ function deleteScheduleTask(taskIndex, taskKey, taskData) {
     Logger.log('Deleted task from Task Metadata at row ' + taskInfo.rowIndex + ': ' + taskKey);
     deletedFrom.push('Task Metadata');
   } else if (taskKey && taskMetaSheet) {
-    // Fallback: try to find by key again
     var data = taskMetaSheet.getDataRange().getValues();
     var headers = data[0];
     var colMap = {};
@@ -1707,52 +1724,9 @@ function deleteScheduleTask(taskIndex, taskKey, taskData) {
     }
   }
 
-  // If we have a task index, try to delete using that
-  if (taskIndex !== undefined && taskIndex >= 0 && !taskKey) {
-    var tasks = getScheduleTasks();
-    if (taskIndex < tasks.length) {
-      var task = tasks[taskIndex];
-      Logger.log('Task to delete by index: source=' + task.source + ', rowIndex=' + task.rowIndex);
-
-      // Handle deletion based on source
-      if (task.source === 'Manual Tasks') {
-        var manualSheet = ss.getSheetByName('Manual Tasks');
-        if (manualSheet && task.rowIndex) {
-          manualSheet.deleteRow(task.rowIndex);
-          Logger.log('Deleted from Manual Tasks sheet');
-          deletedFrom.push('Manual Tasks');
-        }
-      } else if (task.taskKey && taskMetaSheet) {
-        // Delete from Task Metadata by taskKey (SourceSheet_SourceRow format)
-        var data = taskMetaSheet.getDataRange().getValues();
-        var headers = data[0];
-        var colMap = {};
-        for (var h = 0; h < headers.length; h++) {
-          colMap[String(headers[h]).toLowerCase().replace(/\s+/g, '')] = h;
-        }
-        var sourceSheetCol = colMap['sourcesheet'] !== undefined ? colMap['sourcesheet'] : 1;
-        var sourceRowCol = colMap['sourcerow'] !== undefined ? colMap['sourcerow'] : 2;
-        var taskIdCol = colMap['taskid'] !== undefined ? colMap['taskid'] : 0;
-
-        for (var i = data.length - 1; i >= 1; i--) {
-          var rowSourceSheet = String(data[i][sourceSheetCol] || '');
-          var rowSourceRow = String(data[i][sourceRowCol] || '');
-          var rowTaskId = String(data[i][taskIdCol] || '');
-          var rowKey = rowSourceSheet + '_' + rowSourceRow;
-
-          if (rowKey === task.taskKey || rowTaskId === task.taskKey || rowTaskId.indexOf(task.taskKey) === 0) {
-            taskMetaSheet.deleteRow(i + 1);
-            Logger.log('Deleted from Task Metadata by taskKey: ' + task.taskKey);
-            deletedFrom.push('Task Metadata');
-            break;
-          }
-        }
-      }
-    }
-  }
-
   if (deletedFrom.length === 0) {
-    throw new Error('Could not find task to delete. Please try refreshing the page.');
+    Logger.log('deleteScheduleTask: Task not found in metadata or source sheet (key=' + taskKey + '). Returning success to clean up UI.');
+    return { success: true, deleted: 'Task', key: taskKey };
   }
 
   return { success: true, deleted: deletedFrom.join(', '), key: taskKey };
@@ -2727,12 +2701,19 @@ function getExpiringCertsSetupConfig() {
           return nameLower !== 'coin cpr' && nameLower !== 'red cross cpr';
         });
 
-        // Ensure 1st Aid and CPR are categorized as variable
+        // Ensure default fields exist for expectation controls
         cleaned.forEach(function(c) {
           var nameLower = String(c.name || '').trim().toLowerCase();
           if (nameLower === '1st aid' || nameLower === 'cpr' || nameLower === 'first aid') {
             c.category = 'variable';
             c.termMonths = 0;
+          }
+          if (!c.requirementScope) {
+            c.requirementScope = (nameLower === 'bnsf' || nameLower === 'msha' || nameLower.indexOf('helicopter') !== -1) ? 'optional' : 'all';
+          }
+          if (!Array.isArray(c.requiredJobClasses)) c.requiredJobClasses = [];
+          if (typeof c.allowDeclined !== 'boolean') {
+            c.allowDeclined = (nameLower !== 'dl' && nameLower !== 'mec expiration' && nameLower !== '1st aid' && nameLower !== 'cpr' && nameLower !== 'first aid');
           }
         });
 
@@ -2747,22 +2728,22 @@ function getExpiringCertsSetupConfig() {
 
   // Default initial configuration if non-existent
   var defaultCerts = [
-    { name: 'Pole Top Rescue', category: 'standard', termMonths: 12, requireRehireReevaluation: true, active: true },
-    { name: '1st Aid', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true },
-    { name: 'CPR', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true },
-    { name: 'Harassment Training', category: 'standard', termMonths: 12, requireRehireReevaluation: false, active: true },
-    { name: 'Forklift', category: 'standard', termMonths: 36, requireRehireReevaluation: true, active: true },
-    { name: 'Forklift Operator Safety Training', category: 'standard', termMonths: 36, requireRehireReevaluation: true, active: true },
-    { name: 'Crane Cert', category: 'standard', termMonths: 60, requireRehireReevaluation: false, active: true },
-    { name: 'MEC Expiration', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true },
-    { name: 'DL', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true },
-    { name: 'Crane Evaluation', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: true, active: true },
-    { name: 'OSHA 1910', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true },
-    { name: 'BNSF', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true },
-    { name: 'MSHA', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true },
-    { name: 'OSHA Trench Comp Person', category: 'standard', termMonths: 36, requireRehireReevaluation: false, active: true },
-    { name: 'Rigging & Signaling/Signalperson & Spotter Cert', category: 'standard', termMonths: 36, requireRehireReevaluation: false, active: true },
-    { name: 'EICA Basic Helicopter Line Construction Safety', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true }
+    { name: 'Pole Top Rescue', category: 'standard', termMonths: 12, requireRehireReevaluation: true, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'JRY', 'WT', 'GTO', 'AP 7-1'], allowDeclined: true },
+    { name: '1st Aid', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'all', requiredJobClasses: [], allowDeclined: false },
+    { name: 'CPR', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'all', requiredJobClasses: [], allowDeclined: false },
+    { name: 'Harassment Training', category: 'standard', termMonths: 12, requireRehireReevaluation: false, active: true, requirementScope: 'all', requiredJobClasses: [], allowDeclined: true },
+    { name: 'Forklift', category: 'standard', termMonths: 36, requireRehireReevaluation: true, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'JRY OP', 'EO 1', 'EO 2', 'WT'], allowDeclined: true },
+    { name: 'Forklift Operator Safety Training', category: 'standard', termMonths: 36, requireRehireReevaluation: true, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'JRY OP', 'EO 1', 'EO 2', 'WT'], allowDeclined: true },
+    { name: 'Crane Cert', category: 'standard', termMonths: 60, requireRehireReevaluation: false, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'JRY OP', 'EO 1', 'EO 2'], allowDeclined: true },
+    { name: 'MEC Expiration', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'all', requiredJobClasses: [], allowDeclined: false },
+    { name: 'DL', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'all', requiredJobClasses: [], allowDeclined: false },
+    { name: 'Crane Evaluation', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: true, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'JRY OP', 'EO 1', 'EO 2'], allowDeclined: true },
+    { name: 'OSHA 1910', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'all', requiredJobClasses: [], allowDeclined: false },
+    { name: 'BNSF', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'optional', requiredJobClasses: [], allowDeclined: true },
+    { name: 'MSHA', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'optional', requiredJobClasses: [], allowDeclined: true },
+    { name: 'OSHA Trench Comp Person', category: 'standard', termMonths: 36, requireRehireReevaluation: false, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'SUP'], allowDeclined: true },
+    { name: 'Rigging & Signaling/Signalperson & Spotter Cert', category: 'standard', termMonths: 36, requireRehireReevaluation: false, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'JRY', 'JRY OP'], allowDeclined: true },
+    { name: 'EICA Basic Helicopter Line Construction Safety', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'optional', requiredJobClasses: [], allowDeclined: true }
   ];
 
   return { certs: defaultCerts };
@@ -2958,10 +2939,240 @@ function saveExpiringCertsSetupConfig(config) {
     var jsonStr = JSON.stringify(config);
     PropertiesService.getScriptProperties().setProperty('EXPIRING_CERTS_CONFIG', jsonStr);
     Logger.log('Successfully saved EXPIRING_CERTS_CONFIG with ' + config.certs.length + ' certs');
-    return { success: true, count: config.certs.length };
+
+    // Automatically sync matrix across all employees on saving config
+    var syncResult = syncExpiringCertsSheetFullRoster();
+
+    return { success: true, count: config.certs.length, matrixCount: syncResult.count };
   } catch (e) {
     Logger.log('Error saving EXPIRING_CERTS_CONFIG: ' + e.message);
     throw new Error('Failed to save configuration: ' + e.message);
+  }
+}
+
+/**
+ * Synchronizes the Expiring Certs sheet to ensure ALL active employees have a row for EVERY active certification.
+ * Preserves existing acquired dates, expiration dates, notes, and declined statuses.
+ * Calculates status: OK, UPCOMING, WARNING, CRITICAL, EXPIRED, MISSING, DECLINED, NOT REQUIRED.
+ * @return {Object} Status object with summary counts
+ */
+function syncExpiringCertsSheetFullRoster() {
+  try {
+    Logger.log('=== syncExpiringCertsSheetFullRoster START ===');
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var expiringSheet = ss.getSheetByName('Expiring Certs');
+    if (!expiringSheet) {
+      expiringSheet = ss.insertSheet('Expiring Certs');
+    }
+
+    // Ensure 9 column headers
+    var headers = ['Employee Name', 'Item Type', 'Date Acquired', 'Expiration Date', 'Location', 'Job #', 'Days Until Expiration', 'Status', 'SMS'];
+    expiringSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    expiringSheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#1a73e8').setFontColor('#ffffff');
+    expiringSheet.setFrozenRows(1);
+
+    // Get active employees from Employees sheet
+    var empList = getEmployeeNamesForMatching(); // Returns active and recent employees
+    var activeEmployees = [];
+
+    for (var e = 0; e < empList.length; e++) {
+      var empObj = empList[e];
+      if (!empObj.name) continue;
+      var locLower = (empObj.location || '').trim().toLowerCase();
+      if (locLower === 'previous employee' || isStatusLocation(locLower)) {
+        if (locLower === 'previous employee') continue; // Skip former employees
+      }
+      activeEmployees.push(empObj);
+    }
+
+    // Get Cert Rules configuration
+    var configObj = getExpiringCertsSetupConfig();
+    var activeCerts = (configObj.certs || []).filter(function(c) { return c.active !== false; });
+
+    // Read existing data from Expiring Certs sheet to preserve dates, declined state, and SMS status
+    var existingRowMap = {};
+    if (expiringSheet.getLastRow() >= 2) {
+      var existingData = expiringSheet.getDataRange().getValues();
+      var exHeaders = existingData[0];
+      var exEmpCol = -1, exCertCol = -1, exAcqCol = -1, exExpCol = -1, exLocCol = -1, exJobCol = -1, exDaysCol = -1, exStatusCol = -1, exSmsCol = -1;
+
+      for (var eh = 0; eh < exHeaders.length; eh++) {
+        var hStr = String(exHeaders[eh]).trim().toLowerCase();
+        if (hStr === 'employee name' || hStr === 'name') exEmpCol = eh;
+        if (hStr === 'item type' || hStr === 'cert type' || hStr === 'certification type') exCertCol = eh;
+        if (hStr === 'date acquired' || hStr === 'acquired date') exAcqCol = eh;
+        if (hStr === 'expiration date' || hStr === 'exp date') exExpCol = eh;
+        if (hStr === 'location') exLocCol = eh;
+        if (hStr === 'job #') exJobCol = eh;
+        if (hStr === 'days until expiration' || hStr === 'days until') exDaysCol = eh;
+        if (hStr === 'status') exStatusCol = eh;
+        if (hStr === 'sms') exSmsCol = eh;
+      }
+
+      for (var r = 1; r < existingData.length; r++) {
+        var rRow = existingData[r];
+        var rEmp = exEmpCol !== -1 ? String(rRow[exEmpCol] || '').trim() : '';
+        var rCert = exCertCol !== -1 ? String(rRow[exCertCol] || '').trim() : '';
+        if (!rEmp || !rCert) continue;
+
+        var key = rEmp.toLowerCase() + '|' + rCert.toLowerCase();
+        existingRowMap[key] = {
+          acqDate: exAcqCol !== -1 ? rRow[exAcqCol] : null,
+          expDate: exExpCol !== -1 ? rRow[exExpCol] : null,
+          location: exLocCol !== -1 ? rRow[exLocCol] : '',
+          jobNum: exJobCol !== -1 ? rRow[exJobCol] : '',
+          status: exStatusCol !== -1 ? String(rRow[exStatusCol] || '').trim() : '',
+          sms: exSmsCol !== -1 ? rRow[exSmsCol] : ''
+        };
+      }
+    }
+
+    // Build map of declined certs from Task Metadata
+    var metaDeclinedMap = {};
+    var taskMetaSheet = ss.getSheetByName('Task Metadata');
+    if (taskMetaSheet && taskMetaSheet.getLastRow() >= 2) {
+      var mData = taskMetaSheet.getDataRange().getValues();
+      var mHeaders = mData[0];
+      var mEmpCol = mHeaders.indexOf('Employee');
+      var mItemCol = mHeaders.indexOf('ItemType');
+      var mStatCol = mHeaders.indexOf('Status');
+      if (mEmpCol !== -1 && mItemCol !== -1 && mStatCol !== -1) {
+        for (var tm = 1; tm < mData.length; tm++) {
+          var mStat = String(mData[tm][mStatCol] || '').trim();
+          if (mStat === 'Declined') {
+            var mE = String(mData[tm][mEmpCol] || '').trim().toLowerCase();
+            var mI = String(mData[tm][mItemCol] || '').trim().toLowerCase();
+            if (mE && mI) metaDeclinedMap[mE + '|' + mI] = true;
+          }
+        }
+      }
+    }
+
+    var newRows = [];
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    var counts = { total: 0, ok: 0, upcoming: 0, warning: 0, critical: 0, expired: 0, missing: 0, declined: 0, notRequired: 0 };
+
+    for (var i = 0; i < activeEmployees.length; i++) {
+      var emp = activeEmployees[i];
+      var empName = emp.name.trim();
+      var empNameLower = empName.toLowerCase();
+      var empJobClass = String(emp.jobClassification || emp.class || '').trim().toUpperCase();
+      var empLoc = emp.location || 'Helena';
+      var empJob = emp.jobNum || '';
+
+      for (var c = 0; c < activeCerts.length; c++) {
+        var certRule = activeCerts[c];
+        var certName = certRule.name.trim();
+        var certKey = empNameLower + '|' + certName.toLowerCase();
+        var existing = existingRowMap[certKey] || {};
+
+        // 1. Evaluate requirement
+        var isRequired = false;
+        var scope = certRule.requirementScope || 'all';
+        if (scope === 'all') {
+          isRequired = true;
+        } else if (scope === 'job_class') {
+          var reqClasses = (certRule.requiredJobClasses || []).map(function(cls) { return String(cls).trim().toUpperCase(); });
+          if (empJobClass && reqClasses.indexOf(empJobClass) !== -1) {
+            isRequired = true;
+          } else {
+            // Check partial matching for Apprentice group
+            for (var rc = 0; rc < reqClasses.length; rc++) {
+              if (reqClasses[rc] === 'AP 7-1' && empJobClass.indexOf('AP') !== -1) {
+                isRequired = true;
+                break;
+              }
+            }
+          }
+        }
+
+        // 2. Evaluate dates & days until expiration
+        var acqDateVal = existing.acqDate || null;
+        var expDateVal = existing.expDate || null;
+
+        // Auto-calculate expDate if acqDate exists and cert is standard auto-term
+        if (acqDateVal && certRule.category === 'standard' && certRule.termMonths > 0) {
+          var calcExp = calculateCertExpirationDate(certName, acqDateVal);
+          if (calcExp) expDateVal = calcExp;
+        }
+
+        var daysUntil = null;
+        if (expDateVal) {
+          var expDateObj = (expDateVal instanceof Date) ? expDateVal : parseDateNoon(String(expDateVal));
+          if (expDateObj && !isNaN(expDateObj.getTime())) {
+            expDateObj.setHours(0,0,0,0);
+            daysUntil = Math.ceil((expDateObj - today) / (1000 * 60 * 60 * 24));
+          }
+        }
+
+        // 3. Determine status
+        var status = 'MISSING';
+        var isDeclined = (existing.status === 'DECLINED' || metaDeclinedMap[certKey] === true) && (certRule.allowDeclined !== false);
+
+        if (isDeclined) {
+          status = 'DECLINED';
+          counts.declined++;
+        } else if (expDateVal && daysUntil !== null) {
+          if (daysUntil < 0) {
+            status = 'EXPIRED';
+            counts.expired++;
+          } else if (daysUntil <= 7) {
+            status = 'CRITICAL';
+            counts.critical++;
+          } else if (daysUntil <= 30) {
+            status = 'WARNING';
+            counts.warning++;
+          } else if (daysUntil <= 60) {
+            status = 'UPCOMING';
+            counts.upcoming++;
+          } else {
+            status = 'OK';
+            counts.ok++;
+          }
+        } else if (acqDateVal && certRule.category === 'non_expiring') {
+          status = 'OK';
+          counts.ok++;
+        } else if (isRequired) {
+          status = 'MISSING';
+          counts.missing++;
+        } else {
+          status = 'NOT REQUIRED';
+          counts.notRequired++;
+        }
+
+        counts.total++;
+
+        newRows.push([
+          empName,
+          certName,
+          acqDateVal || '',
+          expDateVal || '',
+          empLoc,
+          empJob,
+          daysUntil !== null ? daysUntil : (certRule.category === 'non_expiring' ? 'N/A' : ''),
+          status,
+          existing.sms || ''
+        ]);
+      }
+    }
+
+    // Write matrix back to sheet
+    if (expiringSheet.getLastRow() >= 2) {
+      expiringSheet.getRange(2, 1, expiringSheet.getLastRow() - 1, expiringSheet.getLastColumn()).clearContent().clearDataValidations();
+    }
+
+    if (newRows.length > 0) {
+      expiringSheet.getRange(2, 1, newRows.length, headers.length).setValues(newRows);
+      sortExpiringCertsSheet(expiringSheet);
+    }
+
+    Logger.log('syncExpiringCertsSheetFullRoster: Complete. Total matrix rows: ' + newRows.length);
+    return { success: true, count: newRows.length, counts: counts };
+  } catch (e) {
+    Logger.log('Error in syncExpiringCertsSheetFullRoster: ' + e.message);
+    throw e;
   }
 }
 
@@ -7430,7 +7641,7 @@ function getExpiringCertsForSchedule() {
     var rawData = expiringSheet.getRange(2, 1, numRows, expiringSheet.getLastColumn()).getValues();
     var headers = expiringSheet.getRange(1, 1, 1, expiringSheet.getLastColumn()).getValues()[0];
 
-    var nameColIdx = 0, certTypeColIdx = 1, acqColIdx = -1, expColIdx = 2, daysColIdx = 5, declinedColIndex = -1;
+    var nameColIdx = 0, certTypeColIdx = 1, acqColIdx = -1, expColIdx = 2, daysColIdx = 5, statusColIdx = -1, declinedColIndex = -1;
 
     for (var h = 0; h < headers.length; h++) {
       var hdr = String(headers[h]).toLowerCase().trim();
@@ -7439,8 +7650,16 @@ function getExpiringCertsForSchedule() {
       if (hdr === 'date acquired' || hdr === 'acquired date' || hdr === 'class date') acqColIdx = h;
       if (hdr === 'expiration date' || hdr === 'exp date') expColIdx = h;
       if (hdr === 'days until expiration' || hdr === 'days until') daysColIdx = h;
+      if (hdr === 'status') statusColIdx = h;
       if (hdr === 'declined date') declinedColIndex = h;
     }
+
+    // Build allowDeclined lookup map from setup config
+    var setupConfig = getExpiringCertsSetupConfig();
+    var allowDeclinedMap = {};
+    (setupConfig.certs || []).forEach(function(sc) {
+      if (sc.name) allowDeclinedMap[sc.name.trim().toLowerCase()] = sc.allowDeclined !== false;
+    });
 
     var certs = [];
     for (var i = 0; i < numRows; i++) {
@@ -7449,6 +7668,7 @@ function getExpiringCertsForSchedule() {
       var acqDate = acqColIdx >= 0 ? rawData[i][acqColIdx] : null;
       var expDate = expColIdx >= 0 ? rawData[i][expColIdx] : null;
       var daysUntil = daysColIdx >= 0 ? rawData[i][daysColIdx] : null;
+      var rowStatus = statusColIdx >= 0 ? String(rawData[i][statusColIdx] || '').trim() : '';
 
       if (!empName || !certType) continue;
 
@@ -7478,7 +7698,7 @@ function getExpiringCertsForSchedule() {
 
       // Check if this cert was declined
       var declinedDate = null;
-      var isDeclined = false;
+      var isDeclined = (rowStatus === 'DECLINED');
       var decVal = (declinedColIndex >= 0 && rawData[i]) ? rawData[i][declinedColIndex] : null;
       if (decVal) {
         if (decVal instanceof Date && !isNaN(decVal.getTime())) {
@@ -7512,6 +7732,7 @@ function getExpiringCertsForSchedule() {
 
       var taskKey = empName.toLowerCase().trim() + '|' + certType.toLowerCase().trim();
       var isNotified = !!notifiedTasks[taskKey];
+      var allowDeclined = allowDeclinedMap[certType.toLowerCase()] !== false;
 
       certs.push({
         employee: empName,
@@ -7519,6 +7740,8 @@ function getExpiringCertsForSchedule() {
         dateAcquired: acqDateStr,
         expirationDate: expDateStr,
         daysUntilExpiration: adjustedDaysUntil,
+        status: rowStatus || 'MISSING',
+        allowDeclined: allowDeclined,
         location: employeeLocations[empName.toLowerCase()] || 'Unknown',
         phoneNumber: employeePhones[empName.toLowerCase()] || '',
         isNonExpiring: isNonExpiring,
@@ -15227,7 +15450,8 @@ function getTasksWithMetadata() {
           daysTillDue: task.daysTillDue,
 
           // Safety Compliance fields
-          jobNumber: task.jobNumber || ''
+          jobNumber: task.jobNumber || '',
+          taskKey: key
         };
 
         enrichedTasks.push(enrichedTask);
@@ -15263,6 +15487,7 @@ function getTasksWithMetadata() {
           isOverdue: task.isOverdue,
           daysTillDue: task.daysTillDue,
           needsMetadata: true, // Flag for regeneration
+          taskKey: key,
           // Safety Compliance fields
           jobNumber: task.jobNumber || '',
           notes: task.notes || ''

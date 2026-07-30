@@ -94,14 +94,39 @@ const getSignificantJobNumber = (jobNumber) => {
  * @param {string} location - The raw location string
  * @returns {string} - The physical location city
  */
+const DOCK_TO_CITY_MAP = {
+  'livingston dock': 'Livingston',
+  'belgrade dock': 'Bozeman',
+  'belgrade': 'Bozeman',
+  'helena trans dock': 'Helena',
+  'great falls dock': 'Great Falls',
+  'butte dock': 'Butte',
+  'big sky dock': 'Big Sky',
+  'ennis dock': 'Ennis',
+  'stanford trans dock': 'Stanford',
+  'south dakota dock': 'South Dakota',
+  'lolo sub dock': 'Lolo',
+  'elliston distro poles': 'Elliston',
+  'alkali/rapelje trans': 'Rapelje',
+  'manhattan sub': 'Manhattan',
+  'anaconda city sub dock': 'Anaconda',
+  'three rivers sub dock': 'Three Forks',
+  'rattlesnake sub dock': 'Bonner',
+  'northern lights dock': 'Northern Lights',
+  'ca sub foundation': 'California',
+  'gold creek trans dock': 'Gold Creek',
+  'texas dock': 'Texas'
+};
+
 const getPhysicalLocation = (location) => {
   if (!location) return '';
-  const locStr = String(location).trim();
+  let locStr = String(location).trim();
   const parenIdx = locStr.indexOf('(');
   if (parenIdx !== -1) {
-    return locStr.substring(0, parenIdx).trim();
+    locStr = locStr.substring(0, parenIdx).trim();
   }
-  return locStr;
+  const mapped = DOCK_TO_CITY_MAP[locStr.toLowerCase()];
+  return mapped || locStr;
 };
 
 /**
