@@ -2165,184 +2165,26 @@ function getConfiguredLocations() {
  */
 function setupExpiringCertsSheet() {
   Logger.log('=== setupExpiringCertsSheet START ===');
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var ui = SpreadsheetApp.getUi();
-
-  // Create or get Expiring Certs sheet
-  var expiringSheet = ss.getSheetByName('Expiring Certs');
-  if (!expiringSheet) {
-    expiringSheet = ss.insertSheet('Expiring Certs');
-    Logger.log('Created new Expiring Certs sheet');
+  var res = syncExpiringCertsSheetFullRoster();
+  try {
+    var ui = SpreadsheetApp.getUi();
+    if (ui) {
+      ui.alert('✅ Expiring Certs Sheet Updated', 'Successfully generated full certification matrix for all active employees (' + res.count + ' total rows).\n\n' +
+        '🟢 OK: ' + res.counts.ok + '\n' +
+        '🔵 UPCOMING: ' + res.counts.upcoming + '\n' +
+        '🟡 WARNING: ' + res.counts.warning + '\n' +
+        '🟠 CRITICAL: ' + res.counts.critical + '\n' +
+        '🔴 EXPIRED: ' + res.counts.expired + '\n' +
+        '❌ MISSING: ' + res.counts.missing + '\n' +
+        '🚫 DECLINED: ' + res.counts.declined + '\n' +
+        '⚪ NOT REQUIRED: ' + res.counts.notRequired,
+        ui.ButtonSet.OK);
+    }
+  } catch (e) {
+    // Ignore UI alert if executed in trigger context
   }
-
-  // Clear and set up headers
-  expiringSheet.clear();
-  var headers = ['Item #', 'Expiration Date', 'Employee', 'Location', 'Item Type', 'Class', 'Days Until Expiration', 'Status'];
-  expiringSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-  expiringSheet.getRange(1, 1, 1, headers.length)
-    .setBackground('#1a73e8')
-    .setFontColor('#ffffff')
-    .setFontWeight('bold');
-  expiringSheet.setFrozenRows(1);
-
-  var expiringItems = [];
-  var today = new Date();
-  var warningDays = 60; // Items expiring within 60 days
-
-  // Scan Gloves sheet
-  var glovesSheet = ss.getSheetByName('Gloves');
-  if (glovesSheet && glovesSheet.getLastRow() > 1) {
-    var gloveData = glovesSheet.getDataRange().getValues();
-    var gloveHeaders = gloveData[0];
-
-    // Find columns
-    var gCols = { item: -1, exp: -1, employee: -1, location: -1, class: -1 };
-    for (var h = 0; h < gloveHeaders.length; h++) {
-      var header = String(gloveHeaders[h]).toLowerCase().trim();
-      if (header === 'item #' || header === 'item') gCols.item = h;
-      if (header.indexOf('expir') !== -1 || header.indexOf('cert') !== -1) gCols.exp = h;
-      if (header === 'employee' || header === 'assigned to') gCols.employee = h;
-      if (header === 'location') gCols.location = h;
-      if (header === 'class') gCols.class = h;
-    }
-
-    for (var g = 1; g < gloveData.length; g++) {
-      var gRow = gloveData[g];
-      var itemNum = gRow[gCols.item];
-      var expDate = gCols.exp !== -1 ? gRow[gCols.exp] : null;
-
-      if (itemNum && expDate) {
-        var expDateObj = new Date(expDate);
-        if (!isNaN(expDateObj.getTime())) {
-          var daysUntil = Math.ceil((expDateObj - today) / (1000 * 60 * 60 * 24));
-          if (daysUntil <= warningDays) {
-            var status = daysUntil < 0 ? 'EXPIRED' : daysUntil <= 7 ? 'CRITICAL' : daysUntil <= 30 ? 'WARNING' : 'UPCOMING';
-            expiringItems.push([
-              itemNum,
-              expDate,
-              gCols.employee !== -1 ? gRow[gCols.employee] : '',
-              gCols.location !== -1 ? gRow[gCols.location] : 'Helena',
-              'Glove',
-              gCols.class !== -1 ? gRow[gCols.class] : '',
-              daysUntil,
-              status
-            ]);
-          }
-        }
-      }
-    }
-  }
-
-  // Scan Sleeves sheet
-  var sleevesSheet = ss.getSheetByName('Sleeves');
-  if (sleevesSheet && sleevesSheet.getLastRow() > 1) {
-    var sleeveData = sleevesSheet.getDataRange().getValues();
-    var sleeveHeaders = sleeveData[0];
-
-    // Find columns
-    var sCols = { item: -1, exp: -1, employee: -1, location: -1, class: -1 };
-    for (var sh = 0; sh < sleeveHeaders.length; sh++) {
-      var sHeader = String(sleeveHeaders[sh]).toLowerCase().trim();
-      if (sHeader === 'item #' || sHeader === 'item') sCols.item = sh;
-      if (sHeader.indexOf('expir') !== -1 || sHeader.indexOf('cert') !== -1) sCols.exp = sh;
-      if (sHeader === 'employee' || sHeader === 'assigned to') sCols.employee = sh;
-      if (sHeader === 'location') sCols.location = sh;
-      if (sHeader === 'class') sCols.class = sh;
-    }
-
-    for (var s = 1; s < sleeveData.length; s++) {
-      var sRow = sleeveData[s];
-      var sItemNum = sRow[sCols.item];
-      var sExpDate = sCols.exp !== -1 ? sRow[sCols.exp] : null;
-
-      if (sItemNum && sExpDate) {
-        var sExpDateObj = new Date(sExpDate);
-        if (!isNaN(sExpDateObj.getTime())) {
-          var sDaysUntil = Math.ceil((sExpDateObj - today) / (1000 * 60 * 60 * 24));
-          if (sDaysUntil <= warningDays) {
-            var sStatus = sDaysUntil < 0 ? 'EXPIRED' : sDaysUntil <= 7 ? 'CRITICAL' : sDaysUntil <= 30 ? 'WARNING' : 'UPCOMING';
-            expiringItems.push([
-              sItemNum,
-              sExpDate,
-              sCols.employee !== -1 ? sRow[sCols.employee] : '',
-              sCols.location !== -1 ? sRow[sCols.location] : 'Helena',
-              'Sleeve',
-              sCols.class !== -1 ? sRow[sCols.class] : '',
-              sDaysUntil,
-              sStatus
-            ]);
-          }
-        }
-      }
-    }
-  }
-
-  // Sort by days until expiration (soonest first)
-  expiringItems.sort(function(a, b) { return a[6] - b[6]; });
-
-  // Write data
-  if (expiringItems.length > 0) {
-    expiringSheet.getRange(2, 1, expiringItems.length, headers.length).setValues(expiringItems);
-
-    // Apply conditional formatting
-    var dataRange = expiringSheet.getRange(2, 8, expiringItems.length, 1); // Status column
-    var rules = expiringSheet.getConditionalFormatRules();
-
-    // EXPIRED - red
-    rules.push(SpreadsheetApp.newConditionalFormatRule()
-      .whenTextEqualTo('EXPIRED')
-      .setBackground('#ea4335')
-      .setFontColor('#ffffff')
-      .setRanges([dataRange])
-      .build());
-
-    // CRITICAL - orange
-    rules.push(SpreadsheetApp.newConditionalFormatRule()
-      .whenTextEqualTo('CRITICAL')
-      .setBackground('#ff6d00')
-      .setFontColor('#ffffff')
-      .setRanges([dataRange])
-      .build());
-
-    // WARNING - yellow
-    rules.push(SpreadsheetApp.newConditionalFormatRule()
-      .whenTextEqualTo('WARNING')
-      .setBackground('#fbbc04')
-      .setFontColor('#000000')
-      .setRanges([dataRange])
-      .build());
-
-    // UPCOMING - blue
-    rules.push(SpreadsheetApp.newConditionalFormatRule()
-      .whenTextEqualTo('UPCOMING')
-      .setBackground('#4285f4')
-      .setFontColor('#ffffff')
-      .setRanges([dataRange])
-      .build());
-
-    expiringSheet.setConditionalFormatRules(rules);
-
-    // Format date column
-    expiringSheet.getRange(2, 2, expiringItems.length, 1).setNumberFormat('MM/dd/yyyy');
-
-    // Auto-resize columns
-    for (var col = 1; col <= headers.length; col++) {
-      expiringSheet.autoResizeColumn(col);
-    }
-
-    Logger.log('Found ' + expiringItems.length + ' items with expiring certifications');
-    ui.alert('✅ Expiring Certs Updated', 'Found ' + expiringItems.length + ' items expiring within 60 days.\n\n' +
-      '🔴 EXPIRED: ' + expiringItems.filter(function(i) { return i[7] === 'EXPIRED'; }).length + '\n' +
-      '🟠 CRITICAL (≤7 days): ' + expiringItems.filter(function(i) { return i[7] === 'CRITICAL'; }).length + '\n' +
-      '🟡 WARNING (≤30 days): ' + expiringItems.filter(function(i) { return i[7] === 'WARNING'; }).length + '\n' +
-      '🔵 UPCOMING (≤60 days): ' + expiringItems.filter(function(i) { return i[7] === 'UPCOMING'; }).length,
-      ui.ButtonSet.OK);
-  } else {
-    expiringSheet.getRange(2, 1).setValue('No items with expiring certifications found within 60 days.');
-    ui.alert('✅ Expiring Certs Updated', 'No items found with certifications expiring within 60 days.', ui.ButtonSet.OK);
-  }
-
   Logger.log('=== setupExpiringCertsSheet END ===');
+  return res;
 }
 
 // ============================================================================
@@ -2701,6 +2543,33 @@ function getExpiringCertsSetupConfig() {
           return nameLower !== 'coin cpr' && nameLower !== 'red cross cpr';
         });
 
+        // Ensure all 16 standard cert types exist in config
+        var existingNames = cleaned.map(function(c) { return String(c.name || '').trim().toLowerCase(); });
+        var defaultCertsList = [
+          { name: 'Pole Top Rescue', category: 'standard', termMonths: 12, requireRehireReevaluation: true, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'JRY', 'WT', 'GTO', 'AP 7-1'], allowDeclined: true },
+          { name: '1st Aid', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'all', requiredJobClasses: [], allowDeclined: false },
+          { name: 'CPR', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'all', requiredJobClasses: [], allowDeclined: false },
+          { name: 'Harassment Training', category: 'standard', termMonths: 12, requireRehireReevaluation: false, active: true, requirementScope: 'all', requiredJobClasses: [], allowDeclined: true },
+          { name: 'Forklift', category: 'standard', termMonths: 36, requireRehireReevaluation: true, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'JRY OP', 'EO 1', 'EO 2', 'WT'], allowDeclined: true },
+          { name: 'Forklift Operator Safety Training', category: 'standard', termMonths: 36, requireRehireReevaluation: true, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'JRY OP', 'EO 1', 'EO 2', 'WT'], allowDeclined: true },
+          { name: 'Crane Cert', category: 'standard', termMonths: 60, requireRehireReevaluation: false, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'JRY OP', 'EO 1', 'EO 2'], allowDeclined: true },
+          { name: 'MEC Expiration', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'all', requiredJobClasses: [], allowDeclined: false },
+          { name: 'DL', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'all', requiredJobClasses: [], allowDeclined: false },
+          { name: 'Crane Evaluation', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: true, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'JRY OP', 'EO 1', 'EO 2'], allowDeclined: true },
+          { name: 'OSHA 1910', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'all', requiredJobClasses: [], allowDeclined: false },
+          { name: 'BNSF', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'optional', requiredJobClasses: [], allowDeclined: true },
+          { name: 'MSHA', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'optional', requiredJobClasses: [], allowDeclined: true },
+          { name: 'OSHA Trench Comp Person', category: 'standard', termMonths: 36, requireRehireReevaluation: false, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'SUP'], allowDeclined: true },
+          { name: 'Rigging & Signaling/Signalperson & Spotter Cert', category: 'standard', termMonths: 36, requireRehireReevaluation: false, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'JRY', 'JRY OP'], allowDeclined: true },
+          { name: 'EICA Basic Helicopter Line Construction Safety', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'optional', requiredJobClasses: [], allowDeclined: true }
+        ];
+
+        defaultCertsList.forEach(function(dc) {
+          if (existingNames.indexOf(dc.name.toLowerCase()) === -1) {
+            cleaned.push(dc);
+          }
+        });
+
         // Ensure default fields exist for expectation controls
         cleaned.forEach(function(c) {
           var nameLower = String(c.name || '').trim().toLowerCase();
@@ -2715,6 +2584,7 @@ function getExpiringCertsSetupConfig() {
           if (typeof c.allowDeclined !== 'boolean') {
             c.allowDeclined = (nameLower !== 'dl' && nameLower !== 'mec expiration' && nameLower !== '1st aid' && nameLower !== 'cpr' && nameLower !== 'first aid');
           }
+          if (typeof c.active !== 'boolean') c.active = true;
         });
 
         parsed.certs = cleaned;
