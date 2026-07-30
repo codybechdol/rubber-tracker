@@ -3012,6 +3012,12 @@ function syncExpiringCertsSheetFullRoster() {
           counts.notRequired++;
         }
 
+        // If cert is not required for this employee (specific job class or optional)
+        // AND employee has no date recorded and is not declined, omit row from sheet for this employee
+        if (!isRequired && !acqDateVal && !expDateVal && !isDeclined) {
+          continue;
+        }
+
         counts.total++;
 
         newRows.push([

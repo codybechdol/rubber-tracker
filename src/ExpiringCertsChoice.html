@@ -35,6 +35,14 @@
       </div>
     </div>
 
+    <div class="choice-card" onclick="selectOption('setup')">
+      <div class="choice-icon">📜</div>
+      <div class="choice-title">Certification Expectations & Setup</div>
+      <div class="choice-description">
+        Configure required vs optional certifications, set required job classifications per cert, enable/disable employee decline options, and re-sync the cert matrix.
+      </div>
+    </div>
+
     <div class="choice-card" onclick="selectOption('refresh')">
       <div class="choice-icon">🔄</div>
       <div class="choice-title">Refresh from Completed Tasks</div>
@@ -70,6 +78,15 @@
             alert('Error: ' + error);
           })
           .showExpiringCertsImportDialog();
+      } else if (option === 'setup') {
+        google.script.run
+          .withSuccessHandler(function() {
+            google.script.host.close();
+          })
+          .withFailureHandler(function(error) {
+            alert('Error: ' + error);
+          })
+          .showExpiringCertsSetupDialog();
       } else if (option === 'refresh') {
         google.script.run
           .withSuccessHandler(function(result) {
