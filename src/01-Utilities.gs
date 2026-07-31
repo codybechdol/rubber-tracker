@@ -161,6 +161,34 @@ const isStatusLocation = (location) => {
 };
 
 /**
+ * Checks if a string represents a non-employee value (e.g. equipment locations/statuses like "Not Repairable", "On Shelf", "In Testing", etc.)
+ * @param {string} name - The name to check
+ * @returns {boolean} - True if name is a non-employee value
+ */
+const isNonEmployeeName = (name) => {
+  if (!name) return true;
+  const str = String(name).trim().toLowerCase();
+  if (!str || str === 'n/a' || str === 'none' || str === 'unknown') return true;
+
+  const nonEmpList = [
+    'on shelf',
+    'not repairable',
+    'in testing',
+    'packed for testing',
+    'packed for delivery',
+    'destroyed',
+    'failed rubber',
+    'reclaimed',
+    'previous employee'
+  ];
+
+  if (nonEmpList.indexOf(str) !== -1) return true;
+  if (typeof isStatusLocation === 'function' && isStatusLocation(str)) return true;
+
+  return false;
+};
+
+/**
  * Checks if an employee is a pending new hire (Hire Date is in the future).
  * Used to exclude pending employees from swap reports, task collection,
  * safety compliance, and training until their start date.

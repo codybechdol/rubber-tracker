@@ -2847,11 +2847,9 @@ function syncExpiringCertsSheetFullRoster() {
 
     for (var e = 0; e < empList.length; e++) {
       var empObj = empList[e];
-      if (!empObj.name) continue;
+      if (!empObj.name || isNonEmployeeName(empObj.name)) continue;
       var locLower = (empObj.location || '').trim().toLowerCase();
-      if (locLower === 'previous employee' || isStatusLocation(locLower)) {
-        if (locLower === 'previous employee') continue; // Skip former employees
-      }
+      if (locLower === 'previous employee') continue; // Skip former employees
       activeEmployees.push(empObj);
     }
 
@@ -3199,11 +3197,12 @@ function getEmployeeNamesForMatching() {
 
     for (var i = 1; i < data.length; i++) {
       var row = data[i];
-      if (row[nameCol]) {
+      var empName = String(row[nameCol] || '').trim();
+      if (empName && !isNonEmployeeName(empName)) {
         var location = locationCol !== -1 ? String(row[locationCol] || '') : '';
-        // Include all employees, even "Previous Employee" (they may be on crew temporarily)
+        // Include all valid active employees
         employees.push({
-          name: String(row[nameCol]),
+          name: empName,
           location: location,
           jobNum: jobNumCol !== -1 ? String(row[jobNumCol] || '') : '',
           secondaryJobNum: secondaryJobNumCol !== -1 ? String(row[secondaryJobNumCol] || '') : '',
@@ -4552,6 +4551,47 @@ function applyExpiringCertsFormatting(sheet, dataRows) {
 function createEmployeeGroups(sheet, dataRows) {
   Logger.log('createEmployeeGroups: Row grouping disabled per user request to avoid visual clutter.');
   return;
+}
+
+/**
+ * Purges non-employee rows (e.g. "Not Repairable", "On Shelf", "In Testing", etc.) from the Expiring Certs sheet.
+ * @return {number} Count of purged rows
+ */
+function cleanExpiringCertsSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Expiring Certs');
+  if (!sheet || sheet.getLastRow() < 2) return 0;
+
+  var data = sheet.getDataRange().getValues();
+  var rowsToDelete = [];
+
+  for (var i = 1; i < data.length; i++) {
+    var empName = String(data[i][0] || '').trim();
+    if (!empName || isNonEmployeeName(empName)) {
+      rowsToDelete.push(i + 1);
+    }
+  }
+
+  if (rowsToDelete.length > 0) {
+    for (var r = rowsToDelete.length - 1; r >= 0; r--) {
+      sheet.deleteRow(rowsToDelete[r]);
+    }
+    Logger.log('cleanExpiringCertsSheet: Purged ' + rowsToDelete.length + ' non-employee rows from Expiring Certs.');
+  }
+  return rowsToDelete.length;
+}
+
+/**
+ * Menu entry point to purge non-employee rows from Expiring Certs sheet.
+ */
+function menuCleanExpiringCertsSheet() {
+  var purgedCount = cleanExpiringCertsSheet();
+  var ui = SpreadsheetApp.getUi();
+  if (purgedCount > 0) {
+    ui.alert('🧹 Cleanup Complete', 'Successfully removed ' + purgedCount + ' non-employee rows (e.g. "Not Repairable", "On Shelf") from the Expiring Certs sheet.', ui.ButtonSet.OK);
+  } else {
+    ui.alert('✅ Expiring Certs Clean', 'No non-employee rows found on the Expiring Certs sheet.', ui.ButtonSet.OK);
+  }
 }
 
 /**

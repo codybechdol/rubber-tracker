@@ -89,7 +89,7 @@ const INTERVAL_HOT_STICK_TEST = 24;
 
 // Location values that represent employee STATUS, not physical cities.
 // These should NOT be used as crew locations in Job Tracking.
-const STATUS_LOCATIONS = ['vacation', 'light duty', 'weeds', 'leave', 'previous employee', 'medical', "worker's comp", 'unknown'];
+const STATUS_LOCATIONS = ['vacation', 'light duty', 'weeds', 'leave', 'previous employee', 'medical', "worker's comp", 'unknown', 'on shelf', 'not repairable', 'in testing', 'packed for testing', 'packed for delivery', 'destroyed', 'failed rubber', 'reclaimed'];
 
 // Alternating colors for history grouping
 const HISTORY_COLOR_GLOVE_1 = '#e3f2fd';  // Light blue
