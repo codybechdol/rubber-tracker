@@ -368,6 +368,13 @@ function onEdit(e) {
       }
     }
 
+    // Handle Expiring Certs sheet - Date Acquired (col C = 3) or Expiration Date (col D = 4) changes
+    if (sheetName === 'Expiring Certs' && editedRow >= 2 && (editedCol === 3 || editedCol === 4)) {
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      handleExpiringCertDateChange(ss, sheet, editedRow, editedCol);
+      return;
+    }
+
     // For all other edits, use the standard processEdit
     processEdit(e);
   } catch (err) {
@@ -561,43 +568,11 @@ function onEditHandler(e) {
     }
 
     // =========================================================================
-    // EXPIRING CERTS DATE CHANGE - CLEAR NOTIFIED STATUS
+    // EXPIRING CERTS DATE CHANGE - AUTO CALC EXPIRATION & CLEAR NOTIFIED STATUS
     // =========================================================================
     if (sheetName === 'Expiring Certs' && (editedCol === 3 || editedCol === 4) && editedRow >= 2) {
-      var employeeName = sheet.getRange(editedRow, 1).getValue();
-      var certType = sheet.getRange(editedRow, 2).getValue();
-      
-      if (employeeName && certType) {
-        clearCertNotifiedStatus(employeeName, certType);
-        
-        // Refresh this row's Column I (9) SMS checkbox state
-        var empSheet = ss.getSheetByName(SHEET_EMPLOYEES);
-        var hasPhone = false;
-        if (empSheet) {
-          var empData = empSheet.getDataRange().getValues();
-          for (var k = 1; k < empData.length; k++) {
-            if (String(empData[k][0]).toLowerCase().trim() === String(employeeName).toLowerCase().trim()) {
-              if (empData[k][4]) hasPhone = true;
-              break;
-            }
-          }
-        }
-        
-        var cellI = sheet.getRange(editedRow, 9);
-        cellI.clearDataValidations().clearContent();
-        if (hasPhone) {
-          var ruleCheckbox = SpreadsheetApp.newDataValidation().requireCheckbox(true, "💬 Send SMS").build();
-          cellI.setValue("💬 Send SMS").setDataValidation(ruleCheckbox);
-        } else {
-          cellI.setValue("No Phone");
-        }
-        
-        // Refresh dashboard
-        var dashSheet = ss.getSheetByName(SHEET_DASHBOARD);
-        if (dashSheet) {
-          setupDashboardLayout(dashSheet);
-        }
-      }
+      handleExpiringCertDateChange(ss, sheet, editedRow, editedCol);
+      return; // Handled
     }
 
 
@@ -655,7 +630,9 @@ function onEditHandler(e) {
 
     // Handle Expiring Certs sheet edits (auto-fill formulas for new/edited rows)
     if (sheetName === 'Expiring Certs' && editedRow >= 2) {
-      if (editedCol <= 6) {
+      if (editedCol === 3 || editedCol === 4) {
+        handleExpiringCertDateChange(ss, sheet, editedRow, editedCol);
+      } else if (editedCol <= 6) {
         var certType = String(sheet.getRange(editedRow, 2).getValue()).trim();
         if (certType) {
           var nonExpiring = [
@@ -681,7 +658,6 @@ function onEditHandler(e) {
           } catch (e) {}
 
           var isNonExpiring = nonExpiring.indexOf(certType) !== -1;
-          var acqDateCell = sheet.getRange(editedRow, 3); // Col C (3): Date Acquired
           var expDateCell = sheet.getRange(editedRow, 4); // Col D (4): Expiration Date
           var daysCell = sheet.getRange(editedRow, 7);    // Col G (7): Days Until Expiration
           var statusCell = sheet.getRange(editedRow, 8);  // Col H (8): Status
@@ -693,17 +669,6 @@ function onEditHandler(e) {
             daysCell.setFormula('="N/A"');
             statusCell.setFormula('=IF(AND(ISBLANK(C' + editedRow + '),OR(D' + editedRow + '="",D' + editedRow + '="N/A")),"No Date Set","OK")');
           } else {
-            // If Date Acquired (Col 3) was edited, auto-calculate Expiration Date (Col 4)
-            if (editedCol === 3) {
-              var acqVal = acqDateCell.getValue();
-              if (acqVal) {
-                var calcExp = calculateCertExpirationDate(certType, acqVal);
-                if (calcExp) {
-                  expDateCell.setValue(Utilities.formatDate(calcExp, Session.getScriptTimeZone(), 'yyyy-MM-dd'));
-                  Logger.log('Auto-calculated Expiration Date for row ' + editedRow + ' (' + certType + '): ' + Utilities.formatDate(calcExp, Session.getScriptTimeZone(), 'yyyy-MM-dd'));
-                }
-              }
-            }
             daysCell.setFormula('=IF(ISBLANK(D' + editedRow + '),"N/A",DAYS(D' + editedRow + ',TODAY()))');
             statusCell.setFormula('=IF(G' + editedRow + '="PRIORITY - Need Copy","PRIORITY - Need Copy",IF(G' + editedRow + '="N/A","No Date Set",IF(G' + editedRow + '<0,"EXPIRED",IF(G' + editedRow + '<=7,"CRITICAL",IF(G' + editedRow + '<=30,"WARNING",IF(G' + editedRow + '<=60,"UPCOMING","OK"))))))');
           }

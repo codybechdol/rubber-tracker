@@ -28394,6 +28394,125 @@ function handleHotStickAssignedToChange(ss, sheet, editedRow, newValue) {
 }
 
 // =============================================================================
+// EXPIRING CERTS TRIGGER HANDLERS
+// Called from 11-Triggers.gs onEdit / onEditHandler
+// =============================================================================
+
+/**
+ * Handles Date Acquired (Col C = 3) or Expiration Date (Col D = 4) changes on the Expiring Certs sheet.
+ * Auto-calculates Expiration Date from Date Acquired (or vice-versa), updates formulas, and clears SMS notification status.
+ */
+function handleExpiringCertDateChange(ss, sheet, editedRow, editedCol) {
+  try {
+    if (!sheet || editedRow < 2) return;
+
+    var employeeName = String(sheet.getRange(editedRow, 1).getValue() || '').trim();
+    var certType = String(sheet.getRange(editedRow, 2).getValue() || '').trim();
+
+    if (!certType) return;
+
+    var nonExpiring = [
+      'Crane Evaluation',
+      'OSHA 1910',
+      'BNSF',
+      'MSHA',
+      'EICA Basic Helicopter Line Construction Safety'
+    ];
+    try {
+      var configRaw = PropertiesService.getScriptProperties().getProperty('EXPIRING_CERTS_CONFIG');
+      if (configRaw) {
+        var parsedCfg = JSON.parse(configRaw);
+        if (parsedCfg && Array.isArray(parsedCfg.certs)) {
+          parsedCfg.certs.forEach(function(c) {
+            if (c.category === 'non_expiring' && c.name) {
+              var n = String(c.name).trim();
+              if (nonExpiring.indexOf(n) === -1) nonExpiring.push(n);
+            }
+          });
+        }
+      }
+    } catch (cfgErr) {}
+
+    var isNonExpiring = nonExpiring.indexOf(certType) !== -1;
+    var acqDateCell = sheet.getRange(editedRow, 3); // Col C (3): Date Acquired
+    var expDateCell = sheet.getRange(editedRow, 4); // Col D (4): Expiration Date
+    var daysCell = sheet.getRange(editedRow, 7);    // Col G (7): Days Until Expiration
+    var statusCell = sheet.getRange(editedRow, 8);  // Col H (8): Status
+
+    if (isNonExpiring) {
+      if (String(expDateCell.getValue()).trim() !== 'N/A') {
+        expDateCell.setValue('N/A');
+      }
+      daysCell.setFormula('="N/A"');
+      statusCell.setFormula('=IF(AND(ISBLANK(C' + editedRow + '),OR(D' + editedRow + '="",D' + editedRow + '="N/A")),"No Date Set","OK")');
+    } else {
+      // If Date Acquired (Col 3) was edited, auto-calculate Expiration Date (Col 4)
+      if (editedCol === 3) {
+        var acqVal = acqDateCell.getValue();
+        if (acqVal) {
+          var calcExp = calculateCertExpirationDate(certType, acqVal);
+          if (calcExp) {
+            try { safeSetNumberFormat(expDateCell, 'yyyy-MM-dd'); } catch(fmtErr) {}
+            expDateCell.setValue(calcExp);
+            var expDateFormatted = Utilities.formatDate(calcExp, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+            if (ss && ss.toast) {
+              ss.toast('Expiration Date updated to ' + expDateFormatted, 'Auto-Calc', 3);
+            }
+            Logger.log('handleExpiringCertDateChange: Auto-calculated Expiration Date for row ' + editedRow + ' (' + certType + '): ' + expDateFormatted);
+          }
+        }
+      } else if (editedCol === 4) {
+        // If Expiration Date (Col 4) was edited and Date Acquired is blank, auto-calculate Date Acquired
+        var expVal = expDateCell.getValue();
+        if (expVal && expVal !== 'N/A' && !acqDateCell.getValue()) {
+          var calcAcq = calculateCertAcquiredDate(certType, expVal);
+          if (calcAcq) {
+            try { safeSetNumberFormat(acqDateCell, 'yyyy-MM-dd'); } catch(fmtErr) {}
+            acqDateCell.setValue(calcAcq);
+            Logger.log('handleExpiringCertDateChange: Auto-calculated Date Acquired for row ' + editedRow + ' (' + certType + ')');
+          }
+        }
+      }
+      daysCell.setFormula('=IF(ISBLANK(D' + editedRow + '),"N/A",DAYS(D' + editedRow + ',TODAY()))');
+      statusCell.setFormula('=IF(G' + editedRow + '="PRIORITY - Need Copy","PRIORITY - Need Copy",IF(G' + editedRow + '="N/A","No Date Set",IF(G' + editedRow + '<0,"EXPIRED",IF(G' + editedRow + '<=7,"CRITICAL",IF(G' + editedRow + '<=30,"WARNING",IF(G' + editedRow + '<=60,"UPCOMING","OK"))))))');
+    }
+
+    // Clear SMS notified status and refresh SMS checkbox
+    if (employeeName && certType) {
+      clearCertNotifiedStatus(employeeName, certType);
+
+      var empSheet = ss ? ss.getSheetByName(SHEET_EMPLOYEES) : null;
+      var hasPhone = false;
+      if (empSheet) {
+        var empData = empSheet.getDataRange().getValues();
+        for (var k = 1; k < empData.length; k++) {
+          if (String(empData[k][0]).toLowerCase().trim() === employeeName.toLowerCase()) {
+            if (empData[k][4]) hasPhone = true;
+            break;
+          }
+        }
+      }
+
+      var cellI = sheet.getRange(editedRow, 9);
+      cellI.clearDataValidations().clearContent();
+      if (hasPhone) {
+        var ruleCheckbox = SpreadsheetApp.newDataValidation().requireCheckbox(true, "💬 Send SMS").build();
+        cellI.setValue("💬 Send SMS").setDataValidation(ruleCheckbox);
+      } else {
+        cellI.setValue("No Phone");
+      }
+
+      var dashSheet = ss ? ss.getSheetByName(SHEET_DASHBOARD) : null;
+      if (dashSheet) {
+        setupDashboardLayout(dashSheet);
+      }
+    }
+  } catch (err) {
+    Logger.log('handleExpiringCertDateChange error: ' + err);
+  }
+}
+
+// =============================================================================
 // GROUNDS TRIGGER HANDLERS
 // Called from 11-Triggers.gs onEdit / processEdit / onEditHandler
 // =============================================================================
