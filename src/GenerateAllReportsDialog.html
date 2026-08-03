@@ -82,6 +82,7 @@
   <div class="footer">
     <div class="overall-msg" id="overallMsg"></div>
     <button class="close-btn" id="closeBtn" onclick="google.script.host.close()">✓ Close</button>
+    <button class="close-btn show" id="bgBtn" style="background: #5f6368;" onclick="switchToBackground()">⚡ Run in Background</button>
   </div>
 
   <script>
@@ -156,6 +157,12 @@
       msg.className = 'overall-msg show ' + (success ? 'success' : 'error');
       msg.textContent = success ? '✅ All reports generated successfully!' : ('❌ ' + (errMsg || 'An error occurred.'));
       btn.className = 'close-btn show';
+    }
+
+    function switchToBackground() {
+      document.getElementById('bgBtn').style.display = 'none';
+      google.script.run.startGenerateAllReportsInBackground();
+      google.script.host.close();
     }
 
     // Auto-start when dialog loads

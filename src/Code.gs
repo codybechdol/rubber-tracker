@@ -18547,6 +18547,62 @@ function generateAllReportsPart3() {
   };
 }
 
+/**
+ * Triggers background report generation using a 1-shot time-driven trigger.
+ * Closes the UI dialog immediately and runs on Google servers safely.
+ */
+function startGenerateAllReportsInBackground() {
+  try {
+    ScriptApp.newTrigger('executeGenerateAllReportsBackgroundJob')
+      .timeBased()
+      .after(100)
+      .create();
+
+    logEvent('startGenerateAllReportsInBackground: Background trigger scheduled successfully.');
+    return { success: true, message: 'Background report generation started! You can close this dialog and continue using Google Sheets.' };
+  } catch (e) {
+    logEvent('startGenerateAllReportsInBackground ERROR: ' + e, 'ERROR');
+    return { success: false, error: e.toString() };
+  }
+}
+
+/**
+ * Background worker triggered by 1-shot trigger.
+ * Runs Parts 1, 2, and 3 sequentially and cleans up the trigger.
+ */
+function executeGenerateAllReportsBackgroundJob(e) {
+  // Clean up trigger
+  try {
+    if (e && e.triggerUid) {
+      var triggers = ScriptApp.getProjectTriggers();
+      for (var i = 0; i < triggers.length; i++) {
+        if (triggers[i].getUniqueId() === e.triggerUid) {
+          ScriptApp.deleteTrigger(triggers[i]);
+          break;
+        }
+      }
+    }
+  } catch (err) {
+    Logger.log('executeGenerateAllReportsBackgroundJob: Trigger cleanup note: ' + err);
+  }
+
+  var lock = LockService.getDocumentLock();
+  try {
+    lock.waitLock(10000);
+    logEvent('executeGenerateAllReportsBackgroundJob: STARTING background execution...');
+
+    generateAllReportsPart1();
+    generateAllReportsPart2();
+    generateAllReportsPart3();
+
+    logEvent('executeGenerateAllReportsBackgroundJob: COMPLETE - All reports generated in background.');
+  } catch (err) {
+    logEvent('executeGenerateAllReportsBackgroundJob ERROR: ' + err, 'ERROR');
+  } finally {
+    try { lock.releaseLock(); } catch (lErr) {}
+  }
+}
+
 function generateAllReports() {
   // Open the multi-part progress dialog to avoid 6-minute execution timeout.
   showGenerateAllReportsDialog();

@@ -150,24 +150,20 @@ function syncSheetLocations(ss, sheetName, nameToLocation) {
   }
 
   var updateCount = 0;
-  var updates = [];
+  var locationColumnValues = [];
 
-  // Process each row
+  // Process each row in memory
   for (var i = 1; i < data.length; i++) {
     var rawAssignedTo = data[i][assignedToColIdx];
-
-    // Skip Date objects in Assigned To column (data corruption - not a real employee name)
-    if (rawAssignedTo instanceof Date) {
-      logEvent('syncSheetLocations: ' + sheetName + ' row ' + (i + 1) + ' - Skipping Date object in Assigned To: ' + rawAssignedTo, 'WARNING');
-      continue;
-    }
-
     var currentLocation = (data[i][locationColIdx] || '').toString().trim();
     var assignedTo = (rawAssignedTo || '').toString().trim();
     var assignedToLower = assignedTo.toLowerCase();
 
-    // Skip empty assignments
-    if (!assignedTo) continue;
+    // Skip Date objects or empty assignments
+    if (rawAssignedTo instanceof Date || !assignedTo) {
+      locationColumnValues.push([currentLocation]);
+      continue;
+    }
 
     // Look up correct location
     var correctLocation = nameToLocation[assignedToLower];
@@ -177,64 +173,30 @@ function syncSheetLocations(ss, sheetName, nameToLocation) {
       correctLocation = 'Unknown';
     }
 
-    // Update if location has changed
     if (correctLocation && currentLocation !== correctLocation) {
-      updates.push({
-        row: i + 1, // Convert to 1-based
-        newLocation: correctLocation,
-        oldLocation: currentLocation,
-        assignedTo: assignedTo
-      });
+      locationColumnValues.push([correctLocation]);
+      updateCount++;
+    } else {
+      locationColumnValues.push([currentLocation]);
     }
   }
 
-  // Apply updates in batch
-  if (updates.length > 0) {
+  // Apply all location updates in a SINGLE setValues call
+  if (updateCount > 0) {
     try {
-      // Try to apply all updates to the sheet
-      for (var u = 0; u < updates.length; u++) {
-        var update = updates[u];
-        sheet.getRange(update.row, locationColIdx + 1).setValue(update.newLocation);
-      }
-      // Force immediate execution to catch validation errors on this sheet
-      SpreadsheetApp.flush();
-      
-      // If flush succeeded, count and log all updates
-      for (var u = 0; u < updates.length; u++) {
-        var update = updates[u];
-        updateCount++;
-        logEvent('syncSheetLocations: ' + sheetName + ' row ' + update.row +
-                 ' - Updated location for ' + update.assignedTo +
-                 ' from "' + update.oldLocation + '" to "' + update.newLocation + '"', 'DEBUG');
-      }
+      sheet.getRange(2, locationColIdx + 1, locationColumnValues.length, 1).setValues(locationColumnValues);
+      logEvent('syncSheetLocations: ' + sheetName + ' - Batch updated ' + updateCount + ' location(s)', 'INFO');
     } catch (err) {
-      logEvent('syncSheetLocations: Validation error during batch update on ' + sheetName + ' (' + err.message + '). Clearing validation for the column and retrying...', 'WARNING');
-      
+      logEvent('syncSheetLocations: Validation blocked setValues on ' + sheetName + ' (' + err.message + '). Clearing validation & retrying...', 'WARNING');
       try {
-        // Clear validation for the entire Location column (from row 2 down)
         var lastRow = sheet.getMaxRows();
         if (lastRow > 1) {
           sheet.getRange(2, locationColIdx + 1, lastRow - 1, 1).clearDataValidations();
         }
-        SpreadsheetApp.flush();
-      } catch (clearErr) {
-        logEvent('syncSheetLocations: Failed to clear validation for ' + sheetName + ' column: ' + clearErr.message, 'WARNING');
-      }
-      
-      // Retry applying updates
-      for (var u = 0; u < updates.length; u++) {
-        var update = updates[u];
-        sheet.getRange(update.row, locationColIdx + 1).setValue(update.newLocation);
-      }
-      SpreadsheetApp.flush();
-      
-      // Count and log updates on success
-      for (var u = 0; u < updates.length; u++) {
-        var update = updates[u];
-        updateCount++;
-        logEvent('syncSheetLocations: ' + sheetName + ' row ' + update.row +
-                 ' - Updated location for ' + update.assignedTo +
-                 ' from "' + update.oldLocation + '" to "' + update.newLocation + '"', 'DEBUG');
+        sheet.getRange(2, locationColIdx + 1, locationColumnValues.length, 1).setValues(locationColumnValues);
+        logEvent('syncSheetLocations: ' + sheetName + ' - Batch updated ' + updateCount + ' location(s) after clearing validation', 'INFO');
+      } catch (retryErr) {
+        logEvent('syncSheetLocations: Fallback failed on ' + sheetName + ': ' + retryErr.message, 'ERROR');
       }
     }
   }
