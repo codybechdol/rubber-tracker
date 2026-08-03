@@ -6913,7 +6913,11 @@ function executeProcessSafetyEmailsBackgroundJob(e) {
       );
       if (result) {
         lastResult = result;
-        if (result.complete) {
+        if (result.isPostProcessing) {
+          logEvent('executeProcessSafetyEmailsBackgroundJob: Email scanning complete. Running post-processing for ' + filter + '...');
+          lastResult = runSafetyEmailPostProcessing(filter, result);
+          finished = true;
+        } else if (result.complete) {
           finished = true;
         }
       }
