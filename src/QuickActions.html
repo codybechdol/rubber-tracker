@@ -427,12 +427,10 @@
               step3.classList.add('running');
               showStatus('⚡ Generate All Reports running in background...');
             } else if (res.generateAllReports === 'COMPLETE') {
-              if (step3.classList.contains('running')) {
-                step3.classList.remove('running');
-                step3.classList.add('done');
-                showStatus('✓ Background report generation complete!', 'success');
-                setTimeout(hideStatus, 4000);
-              }
+              step3.classList.remove('running');
+              step3.classList.add('done');
+              showStatus('✓ Background report generation complete!', 'success');
+              setTimeout(hideStatus, 4000);
             } else if (step3.classList.contains('running')) {
               step3.classList.remove('running');
               hideStatus();
@@ -482,16 +480,14 @@
         showStatus('⚡ ' + label + ' processing in background...');
         return true;
       } else if (isComplete) {
-        if (btn.classList.contains('running')) {
-          btn.classList.remove('running');
-          btn.classList.add('done');
-          showStatus('✓ ' + label + ' processing complete! Opening summary review...', 'success');
-          setTimeout(function() {
-            hideStatus();
-            // Automatically pop up dialog with results so user can review and run uncredited log scan
-            google.script.run.showProcessSafetyEmailsDialogWithResults(filterType);
-          }, 1200);
-        }
+        btn.classList.remove('running');
+        btn.classList.add('done');
+        showStatus('✓ ' + label + ' processing complete! Opening summary review...', 'success');
+        setTimeout(function() {
+          hideStatus();
+          // Automatically pop up dialog with results so user can review and run uncredited log scan
+          google.script.run.showProcessSafetyEmailsDialogWithResults(filterType);
+        }, 1200);
         return false;
       } else if (btn.classList.contains('running')) {
         btn.classList.remove('running');
