@@ -266,8 +266,7 @@
       google.script.run.withSuccessHandler(function() {
         btn.disabled = false;
         if (func === 'generateAllReports') {
-          // Immediately check background status when dialog opens/closes
-          checkBackgroundReportStatus();
+          startModalOpenPolling();
         } else {
           btn.classList.remove('running'); btn.classList.add('done');
           showStatus('✓ Step ' + n + ' complete!', 'success');
@@ -312,7 +311,7 @@
       var serverFunc = filterType === 'JHA' ? 'showProcessJHAEmailsDialog' : (filterType === 'WEEKLY' ? 'showProcessWeeklySafetyEmailsDialog' : 'showProcessMonthlyChecklistDialog');
       google.script.run.withSuccessHandler(function() {
         if (btn) btn.disabled = false;
-        checkBackgroundReportStatus();
+        startModalOpenPolling();
       }).withFailureHandler(function(e) {
         if (btn) btn.classList.remove('running');
         showStatus('Error: ' + e, 'error');
@@ -502,11 +501,29 @@
       return false;
     }
 
+    var modalOpenPollCount = 0;
+    function startModalOpenPolling() {
+      modalOpenPollCount = 0;
+      checkBackgroundReportStatus();
+      var pollInterval = setInterval(function() {
+        modalOpenPollCount++;
+        checkBackgroundReportStatus();
+        if (modalOpenPollCount >= 10) {
+          clearInterval(pollInterval);
+        }
+      }, 3000);
+    }
+
     // Function called when a background job is started from a dialog
     function triggerBackgroundPolling() {
       if (bgPollingTimer) clearTimeout(bgPollingTimer);
-      bgPollingTimer = setTimeout(checkBackgroundReportStatus, 1500);
+      bgPollingTimer = setTimeout(checkBackgroundReportStatus, 1000);
     }
+
+    // Window focus listener - re-checks status immediately whenever user closes a modal or returns to spreadsheet
+    window.addEventListener('focus', function() {
+      checkBackgroundReportStatus();
+    });
 
     // Initial single check on sidebar load (only starts loop if a job is actively RUNNING)
     checkBackgroundReportStatus();
