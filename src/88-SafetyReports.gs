@@ -6916,7 +6916,7 @@ function executeProcessSafetyEmailsBackgroundJob(e) {
       count++;
       var result = processSafetyEmails(
         params.daysBack,
-        15,
+        100,
         params.newOnlyMode,
         params.fastMode,
         params.endDate || null,
@@ -12750,31 +12750,37 @@ function formatComplianceSheetByWeek() {
   dataRange.setBorder(false, false, false, false, false, false);
   dataRange.setBackground(null);
 
-  // Now apply week coloring
+  // Fast batch apply week background colors in 1 single API call
+  var bgColors = [];
   var lastWeek = "";
   var weekIndex = -1;
   var weekColors = ['#ffffff', '#e3f2fd']; // White, Light Blue alternating
 
   for (var i = 0; i < sortedData.length; i++) {
     var weekKey = sortedWeekKeys[i];
-    var rowNum = i + 2; // 1-based, skip header
-
     if (weekKey !== lastWeek) {
-      // New week - add thick border above this row (if not first data row)
-      if (i > 0) {
-        var borderRange = sheet.getRange(rowNum, 1, 1, 14);
-        borderRange.setBorder(true, null, null, null, null, null, '#1565c0', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
-      }
       weekIndex++;
       lastWeek = weekKey;
     }
-
-    // Apply alternating background color for this week
     var color = weekColors[weekIndex % 2];
-    sheet.getRange(rowNum, 1, 1, 14).setBackground(color);
+    var rowBg = [];
+    for (var c = 0; c < 14; c++) {
+      rowBg.push(color);
+    }
+    bgColors.push(rowBg);
   }
 
-  Logger.log("formatComplianceSheetByWeek: Applied week formatting to " + sortedData.length + " rows across " + (weekIndex + 1) + " weeks");
+  // 1 single API call for all row background colors
+  sheet.getRange(2, 1, bgColors.length, 14).setBackgrounds(bgColors);
+
+  // Apply top borders for week boundaries by block range (1 call per week transition)
+  for (var i = 1; i < sortedData.length; i++) {
+    if (sortedWeekKeys[i] !== sortedWeekKeys[i - 1]) {
+      sheet.getRange(i + 2, 1, 1, 14).setBorder(true, null, null, null, null, null, '#1565c0', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+    }
+  }
+
+  Logger.log("formatComplianceSheetByWeek: Fast-applied week formatting to " + sortedData.length + " rows across " + (weekIndex + 1) + " weeks");
 }
 
 /**
