@@ -18589,42 +18589,28 @@ function getGenerateAllReportsStatus() {
 function getAllBackgroundStatuses() {
   try {
     var props = PropertiesService.getScriptProperties();
-    var genStatus = props.getProperty('GENERATE_ALL_REPORTS_STATUS') || 'IDLE';
-    var jhaStatus = props.getProperty('SAFETY_EMAILS_STATUS_JHA') || 'IDLE';
-    var weeklyStatus = props.getProperty('SAFETY_EMAILS_STATUS_WEEKLY') || 'IDLE';
-    var monthlyStatus = props.getProperty('SAFETY_EMAILS_STATUS_MONTHLY') || 'IDLE';
-    var allStatus = props.getProperty('SAFETY_EMAILS_STATUS_ALL') || 'IDLE';
+    var now = new Date().getTime();
+    var maxRunningTime = 10 * 60 * 1000; // 10-minute max background execution window
 
-    // Verify if active project triggers actually exist for any RUNNING job
-    var isAnyRunning = genStatus === 'RUNNING' || jhaStatus === 'RUNNING' || weeklyStatus === 'RUNNING' || monthlyStatus === 'RUNNING' || allStatus === 'RUNNING';
-    if (isAnyRunning) {
-      var triggers = ScriptApp.getProjectTriggers();
-      var hasGenTrigger = false;
-      var hasEmailTrigger = false;
-      for (var i = 0; i < triggers.length; i++) {
-        var funcName = triggers[i].getHandlerFunction();
-        if (funcName === 'executeGenerateAllReportsBackgroundJob') hasGenTrigger = true;
-        if (funcName === 'executeProcessSafetyEmailsBackgroundJob') hasEmailTrigger = true;
+    function checkStatus(statusKey, timeKey) {
+      var status = props.getProperty(statusKey) || 'IDLE';
+      if (status === 'RUNNING') {
+        var startTs = parseInt(props.getProperty(timeKey) || '0', 10);
+        if (startTs > 0 && (now - startTs) > maxRunningTime) {
+          props.deleteProperty(statusKey);
+          props.deleteProperty(timeKey);
+          return 'IDLE';
+        }
       }
-
-      if (genStatus === 'RUNNING' && !hasGenTrigger) {
-        props.deleteProperty('GENERATE_ALL_REPORTS_STATUS');
-        genStatus = 'IDLE';
-      }
-      if (!hasEmailTrigger) {
-        if (jhaStatus === 'RUNNING') { props.deleteProperty('SAFETY_EMAILS_STATUS_JHA'); jhaStatus = 'IDLE'; }
-        if (weeklyStatus === 'RUNNING') { props.deleteProperty('SAFETY_EMAILS_STATUS_WEEKLY'); weeklyStatus = 'IDLE'; }
-        if (monthlyStatus === 'RUNNING') { props.deleteProperty('SAFETY_EMAILS_STATUS_MONTHLY'); monthlyStatus = 'IDLE'; }
-        if (allStatus === 'RUNNING') { props.deleteProperty('SAFETY_EMAILS_STATUS_ALL'); allStatus = 'IDLE'; }
-      }
+      return status;
     }
 
     return {
-      generateAllReports: genStatus,
-      jha: jhaStatus,
-      weekly: weeklyStatus,
-      monthly: monthlyStatus,
-      safetyAll: allStatus
+      generateAllReports: checkStatus('GENERATE_ALL_REPORTS_STATUS', 'GENERATE_ALL_REPORTS_START_TIME'),
+      jha: checkStatus('SAFETY_EMAILS_STATUS_JHA', 'SAFETY_EMAILS_START_TIME_JHA'),
+      weekly: checkStatus('SAFETY_EMAILS_STATUS_WEEKLY', 'SAFETY_EMAILS_START_TIME_WEEKLY'),
+      monthly: checkStatus('SAFETY_EMAILS_STATUS_MONTHLY', 'SAFETY_EMAILS_START_TIME_MONTHLY'),
+      safetyAll: checkStatus('SAFETY_EMAILS_STATUS_ALL', 'SAFETY_EMAILS_START_TIME_ALL')
     };
   } catch (e) {
     return {
@@ -18638,35 +18624,40 @@ function getAllBackgroundStatuses() {
 }
 
 /**
- * Resets background status keys to IDLE in ScriptProperties ONLY if no active trigger is running.
- * Prevents old statuses from re-triggering popups while preserving active background jobs across workbook reloads.
+ * Resets background status keys to IDLE in ScriptProperties.
+ * Clears stale keys while preserving active RUNNING states under 10 minutes.
  */
 function clearAllBackgroundStatuses() {
   try {
     var props = PropertiesService.getScriptProperties();
-    var triggers = ScriptApp.getProjectTriggers();
-    var hasEmailTrigger = false;
-    var hasGenTrigger = false;
-    for (var i = 0; i < triggers.length; i++) {
-      var fn = triggers[i].getHandlerFunction();
-      if (fn === 'executeProcessSafetyEmailsBackgroundJob') hasEmailTrigger = true;
-      if (fn === 'executeGenerateAllReportsBackgroundJob') hasGenTrigger = true;
+    var now = new Date().getTime();
+    var maxRunningTime = 10 * 60 * 1000;
+
+    function cleanIfStale(statusKey, timeKey) {
+      var st = props.getProperty(statusKey);
+      if (st === 'RUNNING') {
+        var ts = parseInt(props.getProperty(timeKey) || '0', 10);
+        if (ts > 0 && (now - ts) < maxRunningTime) {
+          // Keep active running job
+          return;
+        }
+      }
+      props.deleteProperty(statusKey);
+      props.deleteProperty(timeKey);
     }
 
-    if (!hasGenTrigger) {
-      props.deleteProperty('GENERATE_ALL_REPORTS_STATUS');
-    }
-    if (!hasEmailTrigger) {
-      props.deleteProperty('SAFETY_EMAILS_STATUS_JHA');
-      props.deleteProperty('SAFETY_EMAILS_STATUS_WEEKLY');
-      props.deleteProperty('SAFETY_EMAILS_STATUS_MONTHLY');
-      props.deleteProperty('SAFETY_EMAILS_STATUS_ALL');
-      props.deleteProperty('BG_SAFETY_EMAIL_PARAMS');
-      props.deleteProperty('BG_SAFETY_EMAIL_RESULT_JHA');
-      props.deleteProperty('BG_SAFETY_EMAIL_RESULT_WEEKLY');
-      props.deleteProperty('BG_SAFETY_EMAIL_RESULT_MONTHLY');
-      props.deleteProperty('BG_SAFETY_EMAIL_RESULT_ALL');
-    }
+    cleanIfStale('GENERATE_ALL_REPORTS_STATUS', 'GENERATE_ALL_REPORTS_START_TIME');
+    cleanIfStale('SAFETY_EMAILS_STATUS_JHA', 'SAFETY_EMAILS_START_TIME_JHA');
+    cleanIfStale('SAFETY_EMAILS_STATUS_WEEKLY', 'SAFETY_EMAILS_START_TIME_WEEKLY');
+    cleanIfStale('SAFETY_EMAILS_STATUS_MONTHLY', 'SAFETY_EMAILS_START_TIME_MONTHLY');
+    cleanIfStale('SAFETY_EMAILS_STATUS_ALL', 'SAFETY_EMAILS_START_TIME_ALL');
+
+    props.deleteProperty('BG_SAFETY_EMAIL_PARAMS');
+    props.deleteProperty('BG_SAFETY_EMAIL_RESULT_JHA');
+    props.deleteProperty('BG_SAFETY_EMAIL_RESULT_WEEKLY');
+    props.deleteProperty('BG_SAFETY_EMAIL_RESULT_MONTHLY');
+    props.deleteProperty('BG_SAFETY_EMAIL_RESULT_ALL');
+
     return { success: true };
   } catch (e) {
     return { success: false, error: e.toString() };

@@ -6851,9 +6851,12 @@ function startProcessSafetyEmailsInBackground(reportTypeFilter, daysBack, newOnl
       }
     } catch (tErr) {}
 
+    var nowTs = Date.now().toString();
     PropertiesService.getScriptProperties().setProperty(propKey, 'RUNNING');
+    PropertiesService.getScriptProperties().setProperty('SAFETY_EMAILS_START_TIME_' + filter, nowTs);
     if (filter === 'ALL') {
       PropertiesService.getScriptProperties().setProperty('SAFETY_EMAILS_STATUS_ALL', 'RUNNING');
+      PropertiesService.getScriptProperties().setProperty('SAFETY_EMAILS_START_TIME_ALL', nowTs);
     }
 
     var params = {
