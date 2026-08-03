@@ -1126,8 +1126,7 @@ function activatePendingJobs(jobNumbers, jobScheduleMap) {
           if (estRetDate && estRetDate > todayDate) {
             // Return date is in the future — set to Pending Start, not Active
             jobSheet.getRange(rowIdx, 10).setValue('Pending Start');  // Status (J)
-            jobSheet.getRange(rowIdx, 5).setValue(estRetDate);        // Start Date (E) = estimated return
-            // Keep the On Hold Date (F) and Estimated Return (G) for reference
+            // Keep original Start Date (E) untouched; On Hold Date (F) and Estimated Return (G) remain for reference
             var currentNotes = jobData[i][10] || '';
             var pendingNote = 'Set to Pending Start (returns ' + Utilities.formatDate(estRetDate, Session.getScriptTimeZone(), 'MM/dd/yyyy') + ') via Crew Import on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy');
             jobSheet.getRange(rowIdx, 11).setValue(currentNotes ? currentNotes + '; ' + pendingNote : pendingNote);
@@ -1144,13 +1143,11 @@ function activatePendingJobs(jobNumbers, jobScheduleMap) {
 
         jobSheet.getRange(rowIdx, 10).setValue('Active');  // Status (J, column 10)
 
-        // Set Start Date to today if not already set or if it's in the future
+        // Set Start Date ONLY IF completely blank (preserve original official start date!)
         var currentStartDate = jobData[i][4]; // Start Date (E, index 4)
-        var startDateObj = currentStartDate ? new Date(currentStartDate) : null;
-        if (startDateObj) startDateObj.setHours(0, 0, 0, 0);
-        if (!startDateObj || startDateObj > todayDate) {
+        if (!currentStartDate || currentStartDate === '') {
           jobSheet.getRange(rowIdx, 5).setValue(todayDate);  // Start Date (E, column 5)
-          Logger.log('activatePendingJobs: Set Start Date to today for ' + jobNum);
+          Logger.log('activatePendingJobs: Set initial Start Date to today for ' + jobNum);
         }
 
         // Apply schedule changes if specified in jobScheduleMap
@@ -1848,7 +1845,8 @@ function addOrUpdateJobTracking(jobNumber, location, foreman, crewSize, startDat
       jobSheet.getRange(existingRow, 2).setValue(location);                      // Location (B)
       if (foreman) jobSheet.getRange(existingRow, 3).setValue(foreman);          // Foreman (C)
       if (crewSize > 0) jobSheet.getRange(existingRow, 4).setValue(crewSize);    // Crew Size (D)
-      if (startDateObj) jobSheet.getRange(existingRow, 5).setValue(startDateObj);// Start Date (E)
+      var existingStartDate = jobSheet.getRange(existingRow, 5).getValue();
+      if (!existingStartDate && startDateObj) jobSheet.getRange(existingRow, 5).setValue(startDateObj); // Start Date (E) — ONLY if blank!
       jobSheet.getRange(existingRow, 10).setValue(status);                       // Status (J)
       jobSheet.getRange(existingRow, 21).setValue(formattedTimestamp);           // Last Updated (U)
       // Write Job Name if column exists and value provided
