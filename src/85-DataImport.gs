@@ -947,6 +947,14 @@ function syncJobTrackingAfterImport(ss, jobNameMap, earlyActivatedJobs, crewSche
     var colBCD = jobData.map(function(row) { return [row[1], row[2], row[3]]; });
     jobSheet.getRange(1, 2, jobData.length, 3).setValues(colBCD);
 
+    // Write Start Date (E) column
+    var colE = jobData.map(function(row) { return [row[4]]; });
+    jobSheet.getRange(1, 5, jobData.length, 1).setValues(colE);
+
+    // Write Status (J) column
+    var colJ = jobData.map(function(row) { return [row[9]]; });
+    jobSheet.getRange(1, 10, jobData.length, 1).setValues(colJ);
+
     // Write Notes (K) column
     var colK = jobData.map(function(row) { return [row[10]]; });
     jobSheet.getRange(1, 11, jobData.length, 1).setValues(colK);
@@ -955,7 +963,7 @@ function syncJobTrackingAfterImport(ss, jobNameMap, earlyActivatedJobs, crewSche
     var colU = jobData.map(function(row) { return [row[20]]; });
     jobSheet.getRange(1, 21, jobData.length, 1).setValues(colU);
 
-    Logger.log('syncJobTrackingAfterImport: Batch wrote Job Tracking columns (B,C,D,K,U) for ' + jobData.length + ' rows');
+    Logger.log('syncJobTrackingAfterImport: Batch wrote Job Tracking columns (B,C,D,E,J,K,U) for ' + jobData.length + ' rows');
   }
 
   // Add new rows (already batched)
