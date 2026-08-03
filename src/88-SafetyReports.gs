@@ -2969,7 +2969,7 @@ function logParsedSafetyEmail(parsed, message, context, existingEmailIds, rowsCo
   var meta = parsed.reportMeta;
   var reportType = meta.reportType || 'Unknown';
   var jobNumber = meta.jobNumber || '';
-  var messageId = message.getId();
+  var messageId = (message.getThread ? message.getThread().getId() : '') || message.getId();
   var receivedDate = message.getDate();
   var subject = message.getSubject();
 
@@ -6193,7 +6193,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
 
         for (var midx = 0; midx < messages.length && !timedOut; midx++) {
           var message = messages[midx];
-          var messageId = message.getId();
+          var messageId = (thread ? thread.getId() : '') || message.getId();
 
           // Check time remaining - if under 30 seconds, stop processing
           var elapsedMs = new Date().getTime() - startTime;
@@ -7253,7 +7253,7 @@ function parseSafetyEmail(message, skipPdfExtraction) {
     var subject = message.getSubject();
     var body = message.getPlainBody();
     var date = message.getDate();
-    var messageId = message.getId();
+    var messageId = (message.getThread ? message.getThread().getId() : '') || message.getId();
     var sender = message.getFrom();
 
     // Skip "not received" notification emails - these are reports ABOUT missing reports, not actual reports
@@ -7997,7 +7997,7 @@ function buildGmailUrl(emailId) {
   if (!emailId) return '';
   var baseId = String(emailId).trim().split('_')[0];
   if (!baseId) return '';
-  return 'https://mail.google.com/mail/#search/id%3A' + encodeURIComponent(baseId);
+  return 'https://mail.google.com/mail/#all/' + baseId;
 }
 
 /**
