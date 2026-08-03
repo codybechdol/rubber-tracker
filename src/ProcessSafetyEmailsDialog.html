@@ -223,21 +223,36 @@
     }
 
     function processEmailsInBackground() {
+      var bgBtn = document.getElementById('bgProcessBtn');
+      if (bgBtn) {
+        bgBtn.disabled = true;
+        bgBtn.textContent = '⚡ Starting...';
+      }
       var daysBack = document.getElementById('daysBack').value;
       var newOnly = document.getElementById('newOnlyMode').checked;
       var fastMode = document.getElementById('fastMode').checked;
       var startDate = document.getElementById('reprocessStartDate').value;
       var endDate = document.getElementById('reprocessEndDate').value;
 
-      google.script.run.startProcessSafetyEmailsInBackground(
-        currentReportTypeFilter,
-        daysBack,
-        newOnly,
-        fastMode,
-        startDate,
-        endDate
-      );
-      google.script.host.close();
+      google.script.run
+        .withSuccessHandler(function() {
+          google.script.host.close();
+        })
+        .withFailureHandler(function(err) {
+          alert('Error starting background processing: ' + err);
+          if (bgBtn) {
+            bgBtn.disabled = false;
+            bgBtn.textContent = '⚡ Run in Background';
+          }
+        })
+        .startProcessSafetyEmailsInBackground(
+          currentReportTypeFilter,
+          daysBack,
+          newOnly,
+          fastMode,
+          startDate,
+          endDate
+        );
     }
     var currentDays = 7;
     var newOnlyMode = true;

@@ -309,6 +309,9 @@
       var label = filterType === 'JHA' ? 'JHA Emails' : (filterType === 'WEEKLY' ? 'Weekly Safety Emails' : 'Monthly Checklist Emails');
       showStatus('⏳ Opening ' + label + '...');
       var serverFunc = filterType === 'JHA' ? 'showProcessJHAEmailsDialog' : (filterType === 'WEEKLY' ? 'showProcessWeeklySafetyEmailsDialog' : 'showProcessMonthlyChecklistDialog');
+      
+      startModalOpenPolling();
+
       google.script.run.withSuccessHandler(function() {
         if (btn) btn.disabled = false;
         startModalOpenPolling();
