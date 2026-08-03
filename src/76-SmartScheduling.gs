@@ -935,9 +935,9 @@ function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLoca
       var row = data[i];
       var employee = String(row[employeeCol]).trim();
 
-      // Skip header rows, location markers, and empty rows
+      // Skip header rows, location markers, foreman markers, and empty rows
       if (!employee) continue;
-      if (employee.indexOf('📍') !== -1) continue; // Skip location sub-headers
+      if (employee.indexOf('📍') !== -1 || employee.indexOf('🔍') !== -1 || employee.indexOf('👷') !== -1) continue; // Skip location & foreman sub-headers
       if (employee.toLowerCase().indexOf('class') !== -1) continue; // Skip class headers
       if (employee.toLowerCase() === 'employee') continue; // Skip if header repeated
       if (employee.toLowerCase() === 'stage') continue; // Skip stage headers
