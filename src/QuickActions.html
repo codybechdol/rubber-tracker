@@ -408,7 +408,6 @@
     }
 
     // ── BACKGROUND REPORT STATUS TRACKING ───────────────────────────────────
-    // ── BACKGROUND REPORT STATUS TRACKING ───────────────────────────────────
     var bgPollingTimer = null;
 
     function checkBackgroundReportStatus() {
@@ -421,15 +420,17 @@
           // 1. Generate All Reports status (Step 3)
           var step3 = document.getElementById('step3');
           if (step3) {
-            if (res.generateAllReports === 'RUNNING') {
+            if (res.generateAllReports === 'RUNNING' || (step3.classList.contains('running') && res.generateAllReports !== 'COMPLETE')) {
               anyRunning = true;
               step3.classList.remove('done');
               step3.classList.add('running');
-              showStatus('⚡ Generate All Reports running in background...');
+              if (res.generateAllReports === 'RUNNING') {
+                showStatus('⚡ Generate All Reports running in background...');
+              }
             } else if (res.generateAllReports === 'COMPLETE') {
               step3.classList.remove('running');
               step3.classList.add('done');
-              showStatus('✓ Background report generation complete!', 'success');
+              showStatus('✓ Report generation complete!', 'success');
               setTimeout(hideStatus, 4000);
               // Clear completed status so it doesn't re-trigger when re-opening workbook later
               google.script.run.clearAllBackgroundStatuses();
@@ -453,7 +454,7 @@
           // SMART POLLING: Only schedule next poll if at least ONE job is currently RUNNING!
           if (anyRunning) {
             if (bgPollingTimer) clearTimeout(bgPollingTimer);
-            bgPollingTimer = setTimeout(checkBackgroundReportStatus, 5000);
+            bgPollingTimer = setTimeout(checkBackgroundReportStatus, 4000);
           } else {
             // STOP POLLING COMPLETELY when idle! Zero server executions logged!
             if (bgPollingTimer) {
@@ -499,17 +500,10 @@
       return false;
     }
 
-    var modalOpenPollCount = 0;
     function startModalOpenPolling() {
-      modalOpenPollCount = 0;
+      if (bgPollingTimer) clearTimeout(bgPollingTimer);
       checkBackgroundReportStatus();
-      var pollInterval = setInterval(function() {
-        modalOpenPollCount++;
-        checkBackgroundReportStatus();
-        if (modalOpenPollCount >= 10) {
-          clearInterval(pollInterval);
-        }
-      }, 3000);
+      bgPollingTimer = setTimeout(checkBackgroundReportStatus, 2000);
     }
 
     // Function called when a background job is started from a dialog
