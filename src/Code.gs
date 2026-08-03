@@ -18538,6 +18538,7 @@ function generateAllReportsPart3() {
     Logger.log('Part3: Failed to refresh Dashboard layout: ' + dashErr.message);
   }
 
+  PropertiesService.getScriptProperties().setProperty('GENERATE_ALL_REPORTS_STATUS', 'COMPLETE');
   logEvent('generateAllReports Part 3: Complete.');
   return {
     success: true,
