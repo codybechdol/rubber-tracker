@@ -1427,6 +1427,8 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
     var preDaysUntil = daysUntilCol !== -1 ? preRow[daysUntilCol] : null;
     if (!preEmp) continue;
     var preEmpLower = preEmp.toLowerCase();
+    var preLoc = employeeLocations[preEmpLower];
+    if (!preLoc || isStatusLocation(preLoc) || preLoc === 'Previous Employee' || preLoc === 'Unknown') continue;
 
     if (preCertType === 'Crane Cert') {
       var craneExpired = false;
@@ -1465,6 +1467,10 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
 
     // Skip pending new hire employees (future Hire Date)
     if (pendingEmps[employee.toLowerCase()]) continue;
+
+    // Skip terminated / Previous Employees or employees no longer active on the Employees sheet
+    var empLoc = employeeLocations[employee.toLowerCase()];
+    if (!empLoc || isStatusLocation(empLoc) || empLoc === 'Previous Employee' || empLoc === 'Unknown') continue;
 
     // Skip certs that have been marked Complete in Task Metadata
     // Check both by row number and by employee+certType combo
@@ -1583,6 +1589,10 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
 
       // Skip pending new hires
       if (pendingEmps[ceEmpLower]) continue;
+
+      // Skip terminated / Previous Employees or employees no longer active on the Employees sheet
+      var ceLoc2 = employeeLocations[ceEmpLower];
+      if (!ceLoc2 || isStatusLocation(ceLoc2) || ceLoc2 === 'Previous Employee' || ceLoc2 === 'Unknown') continue;
 
       var ceCanonicalName = craneCertValidSet[ceEmpLower];
       var ceLocation2 = employeeLocations[ceEmpLower] || 'Unknown';
