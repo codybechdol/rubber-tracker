@@ -989,39 +989,47 @@ function syncJobTrackingAfterImport(ss, jobNameMap, earlyActivatedJobs, crewSche
   }
 
   // Apply schedule labels from Crew Import dropdown to Job Tracking skip-day columns
-  // Maps schedule labels (e.g., "Fri Only", "M-Th") to [skipSun, skipMon, skipTue, skipWed, skipThu, skipFri, skipSat]
+  // Maps schedule labels (e.g., "Fri Only", "M-Th") to skip flags and skip days string
   if (Object.keys(crewSchedules).length > 0) {
     var scheduleMap = {
-      'M-Th':      [true,  false, false, false, false, true,  true],
-      'Mon-Thu':   [true,  false, false, false, false, true,  true],
-      'Mon-Fri':   [true,  false, false, false, false, false, true],
-      'M-F':       [true,  false, false, false, false, false, true],
-      'Tue-Fri':   [true,  true,  false, false, false, false, true],
-      'M-Sat':     [true,  false, false, false, false, false, false],
-      'Mon-Sat':   [true,  false, false, false, false, false, false],
-      'Fri-Sat':   [true,  true,  true,  true,  true,  false, false],
-      'Weekend':   [false, true,  true,  true,  true,  true,  false],
-      'Mon-Wed':   [true,  false, false, false, true,  true,  true],
-      'Thu-Fri':   [true,  true,  true,  true,  false, false, true],
-      'Mon Only':  [true,  false, true,  true,  true,  true,  true],
-      'Tue Only':  [true,  true,  false, true,  true,  true,  true],
-      'Thu Only':  [true,  true,  true,  true,  false, true,  true],
-      'Fri Only':  [true,  true,  true,  true,  true,  false, true],
-      'Sat Only':  [true,  true,  true,  true,  true,  true,  false],
-      'Sun Only':  [false, true,  true,  true,  true,  true,  true]
+      'M-Th':      { skipFlags: [true,  false, false, false, false, true,  true], skipDaysStr: 'Sun,Fri,Sat' },
+      'Mon-Thu':   { skipFlags: [true,  false, false, false, false, true,  true], skipDaysStr: 'Sun,Fri,Sat' },
+      'Mon-Fri':   { skipFlags: [true,  false, false, false, false, false, true], skipDaysStr: 'Sun,Sat' },
+      'M-F':       { skipFlags: [true,  false, false, false, false, false, true], skipDaysStr: 'Sun,Sat' },
+      'Tue-Fri':   { skipFlags: [true,  true,  false, false, false, false, true], skipDaysStr: 'Sun,Mon,Sat' },
+      'M-Sat':     { skipFlags: [true,  false, false, false, false, false, false], skipDaysStr: 'Sun' },
+      'Mon-Sat':   { skipFlags: [true,  false, false, false, false, false, false], skipDaysStr: 'Sun' },
+      'Fri-Sat':   { skipFlags: [true,  true,  true,  true,  true,  false, false], skipDaysStr: 'Sun,Mon,Tue,Wed,Thu' },
+      'Weekend':   { skipFlags: [false, true,  true,  true,  true,  true,  false], skipDaysStr: 'Mon,Tue,Wed,Thu,Fri' },
+      'Mon-Wed':   { skipFlags: [true,  false, false, false, true,  true,  true], skipDaysStr: 'Sun,Thu,Fri,Sat' },
+      'Thu-Fri':   { skipFlags: [true,  true,  true,  true,  false, false, true], skipDaysStr: 'Sun,Mon,Tue,Wed,Sat' },
+      'Mon Only':  { skipFlags: [true,  false, true,  true,  true,  true,  true], skipDaysStr: 'Sun,Tue,Wed,Thu,Fri,Sat' },
+      'Tue Only':  { skipFlags: [true,  true,  false, true,  true,  true,  true], skipDaysStr: 'Sun,Mon,Wed,Thu,Fri,Sat' },
+      'Thu Only':  { skipFlags: [true,  true,  true,  true,  false, true,  true], skipDaysStr: 'Sun,Mon,Tue,Wed,Fri,Sat' },
+      'Fri Only':  { skipFlags: [true,  true,  true,  true,  true,  false, true], skipDaysStr: 'Sun,Mon,Tue,Wed,Thu,Sat' },
+      'Sat Only':  { skipFlags: [true,  true,  true,  true,  true,  true,  false], skipDaysStr: 'Sun,Mon,Tue,Wed,Thu,Fri' },
+      'Sun Only':  { skipFlags: [false, true,  true,  true,  true,  true,  true], skipDaysStr: 'Mon,Tue,Wed,Thu,Fri,Sat' }
     };
 
     var reloadedJobData = jobSheet.getDataRange().getValues();
     var schedUpdated = 0;
     for (var sJobNum in crewSchedules) {
       var sLabel = crewSchedules[sJobNum];
-      var skipDays = scheduleMap[sLabel];
-      if (!skipDays) continue; // Unknown label, skip
+      var schedInfo = scheduleMap[sLabel];
+      if (!schedInfo) continue; // Unknown label, skip
       // Find row in Job Tracking
       for (var sr = 1; sr < reloadedJobData.length; sr++) {
         if (String(reloadedJobData[sr][0] || '').trim() === sJobNum) {
+          var rowNum = sr + 1;
           // Write skip days to columns L-R (cols 12-18, 1-based)
-          jobSheet.getRange(sr + 1, 12, 1, 7).setValues([skipDays]);
+          jobSheet.getRange(rowNum, 12, 1, 7).setValues([schedInfo.skipFlags]);
+
+          // Write hidden schedule columns V-X (cols 22-24: Work Schedule, Skip Days, Schedule Effective)
+          if (reloadedJobData[0].length >= 22) {
+            jobSheet.getRange(rowNum, 22).setValue(sLabel);               // Work Schedule (V)
+            jobSheet.getRange(rowNum, 23).setValue(schedInfo.skipDaysStr); // Skip Days (W)
+            jobSheet.getRange(rowNum, 24).setValue(new Date());            // Schedule Effective (X)
+          }
           schedUpdated++;
           Logger.log('syncJobTrackingAfterImport: Set schedule "' + sLabel + '" for job ' + sJobNum);
           break;
@@ -1053,16 +1061,19 @@ function syncJobTrackingAfterImport(ss, jobNameMap, earlyActivatedJobs, crewSche
 }
 
 /**
- * Activates specified jobs from Pending Start to Active status.
- * Called from CrewImport.html after user confirms which jobs to activate.
+ * Activates Pending Start or On Hold jobs in Job Tracking.
+ * Also applies schedule updates (e.g., Mon-Thu, Tue-Fri) to Job Tracking skip checkboxes & columns V-X.
  *
- * @param {Array} jobNumbers - Array of job numbers to activate
+ * @param {Array|string} jobNumbers - Job numbers to activate
+ * @param {Object} [jobScheduleMap] - Optional map of jobNumber → scheduleLabel (e.g. {'043-26': 'Mon-Thu'})
  * @return {Object} Result with count of activated jobs
  */
-function activatePendingJobs(jobNumbers) {
-  if (!jobNumbers || jobNumbers.length === 0) {
+function activatePendingJobs(jobNumbers, jobScheduleMap) {
+  if (!jobNumbers) {
     return { success: true, activated: 0, message: 'No jobs to activate' };
   }
+  if (typeof jobNumbers === 'string') jobNumbers = [jobNumbers];
+  jobScheduleMap = jobScheduleMap || {};
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var jobSheet = ss.getSheetByName('Job Tracking');
@@ -1070,6 +1081,16 @@ function activatePendingJobs(jobNumbers) {
   if (!jobSheet) {
     return { success: false, message: 'Job Tracking sheet not found' };
   }
+
+  var scheduleMap = {
+    'Mon-Thu':   { skipFlags: [true,  false, false, false, false, true,  true], skipDaysStr: 'Sun,Fri,Sat' },
+    'M-Th':      { skipFlags: [true,  false, false, false, false, true,  true], skipDaysStr: 'Sun,Fri,Sat' },
+    'Tue-Fri':   { skipFlags: [true,  true,  false, false, false, false, true], skipDaysStr: 'Sun,Mon,Sat' },
+    'Mon-Fri':   { skipFlags: [true,  false, false, false, false, false, true], skipDaysStr: 'Sun,Sat' },
+    'M-F':       { skipFlags: [true,  false, false, false, false, false, true], skipDaysStr: 'Sun,Sat' },
+    'Mon-Sat':   { skipFlags: [true,  false, false, false, false, false, false], skipDaysStr: 'Sun' },
+    'Custom':    { skipFlags: [true,  false, false, false, false, true,  true], skipDaysStr: 'Sun,Fri,Sat' }
+  };
 
   var jobData = jobSheet.getDataRange().getValues();
   var timestamp = new Date();
@@ -1124,14 +1145,29 @@ function activatePendingJobs(jobNumbers) {
           Logger.log('activatePendingJobs: Set Start Date to today for ' + jobNum);
         }
 
+        // Apply schedule changes if specified in jobScheduleMap
+        var chosenSched = jobScheduleMap[jobNum] || 'Mon-Thu';
+        var schedInfo = scheduleMap[chosenSched] || scheduleMap['Mon-Thu'];
+        if (schedInfo) {
+          // Write skip days to columns L-R (cols 12-18)
+          jobSheet.getRange(rowIdx, 12, 1, 7).setValues([schedInfo.skipFlags]);
+
+          // Write hidden schedule columns V-X (cols 22-24: Work Schedule, Skip Days, Schedule Effective)
+          if (jobData[0].length >= 22) {
+            jobSheet.getRange(rowIdx, 22).setValue(chosenSched);           // Work Schedule (V)
+            jobSheet.getRange(rowIdx, 23).setValue(schedInfo.skipDaysStr); // Skip Days (W)
+            jobSheet.getRange(rowIdx, 24).setValue(todayDate);             // Schedule Effective (X)
+          }
+          Logger.log('activatePendingJobs: Applied schedule ' + chosenSched + ' to ' + jobNum);
+        }
 
         currentNotes = String(jobData[i][10] || '');  // Notes (K, index 10)
-        var activateNote = 'Activated from ' + currentStatus + ' on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy') + ' via Crew Import';
+        var activateNote = 'Activated from ' + currentStatus + ' (Schedule: ' + chosenSched + ') on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy') + ' via Crew Import';
         jobSheet.getRange(rowIdx, 11).setValue(currentNotes ? currentNotes + '; ' + activateNote : activateNote);  // Notes (K)
         jobSheet.getRange(rowIdx, 21).setValue(timestamp);  // Last Updated (U)
 
         activatedCount++;
-        Logger.log('activatePendingJobs: Activated ' + jobNum);
+        Logger.log('activatePendingJobs: Activated ' + jobNum + ' (' + chosenSched + ')');
       }
     }
   }

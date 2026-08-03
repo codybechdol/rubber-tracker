@@ -1787,15 +1787,32 @@
         var job = pendingJobs[i];
         var dateStr = job.startDate ? (' — Start: ' + formatDateForDisplay(job.startDate)) : '';
         var empList = job.employees.slice(0, 4).join(', ') + (job.employees.length > 4 ? ' +' + (job.employees.length - 4) + ' more' : '');
+        var existingSched = (jobTrackingData[job.jobNumber] && jobTrackingData[job.jobNumber].scheduleLabel) || 'Mon-Thu';
+
         msg += '<div class="card mb-2" style="border-left: 4px solid #ffc107;">';
         msg += '<div class="card-body p-2">';
-        msg += '<div class="d-flex align-items-center">';
+        msg += '<div class="d-flex align-items-center justify-content-between flex-wrap gap-2">';
+        msg += '<div class="d-flex align-items-center flex-grow-1">';
         msg += '<input type="checkbox" class="form-check-input me-2 early-activate-chk" id="earlyJob_' + i + '" data-job="' + escapeHtml(job.jobNumber) + '" checked>';
-        msg += '<div class="flex-grow-1">';
+        msg += '<div>';
         msg += '<strong>' + escapeHtml(job.jobNumber) + '</strong> <span class="badge bg-warning text-dark ms-1">Pending Start → Active</span>';
         msg += ' — ' + escapeHtml(job.location);
         msg += '<br><small class="text-muted">' + job.crewSize + ' employee(s): ' + escapeHtml(empList) + dateStr + '</small>';
-        msg += '</div></div></div></div>';
+        msg += '</div></div>';
+
+        // Schedule Selector
+        msg += '<div style="min-width: 140px;">';
+        msg += '<label class="form-label mb-0 small text-muted" style="font-size: 11px;">Schedule:</label>';
+        msg += '<select class="form-select form-select-sm early-activate-sched" data-job="' + escapeHtml(job.jobNumber) + '">';
+        msg += '<option value="Mon-Thu"' + (existingSched === 'Mon-Thu' || existingSched === 'M-Th' ? ' selected' : '') + '>Mon-Thu (M-Th)</option>';
+        msg += '<option value="Tue-Fri"' + (existingSched === 'Tue-Fri' ? ' selected' : '') + '>Tue-Fri (T-F)</option>';
+        msg += '<option value="Mon-Fri"' + (existingSched === 'Mon-Fri' || existingSched === 'M-F' ? ' selected' : '') + '>Mon-Fri (M-F)</option>';
+        msg += '<option value="Mon-Sat"' + (existingSched === 'Mon-Sat' || existingSched === 'M-Sat' ? ' selected' : '') + '>Mon-Sat</option>';
+        msg += '<option value="Custom"' + (existingSched === 'Custom' ? ' selected' : '') + '>Custom</option>';
+        msg += '</select>';
+        msg += '</div>';
+
+        msg += '</div></div></div>';
       }
 
       msg += '</div>';
@@ -1812,9 +1829,15 @@
 
       notificationCallback = function() {
         var jobsToActivate = [];
+        var jobSchedules = {};
         var checkboxes = document.querySelectorAll('.early-activate-chk:checked');
         checkboxes.forEach(function(cb) {
-          jobsToActivate.push(cb.getAttribute('data-job'));
+          var jn = cb.getAttribute('data-job');
+          jobsToActivate.push(jn);
+          var schedSelect = document.querySelector('.early-activate-sched[data-job="' + jn + '"]');
+          if (schedSelect) {
+            jobSchedules[jn] = schedSelect.value;
+          }
         });
 
         if (jobsToActivate.length > 0) {
@@ -1826,11 +1849,15 @@
               jobTrackingData[jn].isActive = true;
               jobTrackingData[jn].isCompleted = false;
               jobTrackingData[jn].status = 'Active';
+              if (jobSchedules[jn]) {
+                jobTrackingData[jn].scheduleLabel = jobSchedules[jn];
+              }
             }
           }
-          // Track for applyCrewChanges so server also activates them in Job Tracking
+          // Track for applyCrewChanges so server also activates them in Job Tracking with the selected schedule
           _earlyActivatedJobs = jobsToActivate;
-          console.log('Early activation: ' + jobsToActivate.join(', ') + ' marked Active locally');
+          _earlyActivatedSchedules = jobSchedules;
+          console.log('Early activation: ' + jobsToActivate.join(', ') + ' marked Active with schedules: ' + JSON.stringify(jobSchedules));
         }
 
         onContinue();
@@ -9079,16 +9106,31 @@
           statusBadge = '<span class="badge bg-warning text-dark ms-1" style="font-size:10px;">PENDING → ACTIVE</span>';
         }
 
+        var existingSched = (jobTrackingData[job.jobNumber] && jobTrackingData[job.jobNumber].scheduleLabel) || 'Mon-Thu';
+
         msg += '<div class="card mb-2" style="border-left: 4px solid ' + borderColor + ';">';
         msg += '<div class="card-body p-2">';
-        msg += '<div class="d-flex align-items-center">';
+        msg += '<div class="d-flex align-items-center justify-content-between flex-wrap gap-2">';
+        msg += '<div class="d-flex align-items-center flex-grow-1">';
         msg += '<input type="checkbox" class="form-check-input me-2 pending-job-checkbox" id="pendingJob_' + i + '" data-job="' + job.jobNumber + '" checked>';
-        msg += '<div class="flex-grow-1">';
+        msg += '<div>';
         msg += '<strong>' + job.jobNumber + '</strong>' + statusBadge + ' — ' + job.location;
         msg += '<br><small class="text-muted">Foreman: ' + (job.foreman || 'Not assigned') + ' | Crew: ' + job.crewSize + ' | ' + dateLabelStr + ': ' + dateStr + '</small>';
-        msg += '</div>';
-        msg += '</div>';
         msg += '</div></div>';
+
+        // Schedule Selector
+        msg += '<div style="min-width: 140px;">';
+        msg += '<label class="form-label mb-0 small text-muted" style="font-size: 11px;">Schedule:</label>';
+        msg += '<select class="form-select form-select-sm pending-job-sched" data-job="' + escapeHtml(job.jobNumber) + '">';
+        msg += '<option value="Mon-Thu"' + (existingSched === 'Mon-Thu' || existingSched === 'M-Th' ? ' selected' : '') + '>Mon-Thu (M-Th)</option>';
+        msg += '<option value="Tue-Fri"' + (existingSched === 'Tue-Fri' ? ' selected' : '') + '>Tue-Fri (T-F)</option>';
+        msg += '<option value="Mon-Fri"' + (existingSched === 'Mon-Fri' || existingSched === 'M-F' ? ' selected' : '') + '>Mon-Fri (M-F)</option>';
+        msg += '<option value="Mon-Sat"' + (existingSched === 'Mon-Sat' || existingSched === 'M-Sat' ? ' selected' : '') + '>Mon-Sat</option>';
+        msg += '<option value="Custom"' + (existingSched === 'Custom' ? ' selected' : '') + '>Custom</option>';
+        msg += '</select>';
+        msg += '</div>';
+
+        msg += '</div></div></div>';
       }
 
       msg += '</div>';
@@ -9104,15 +9146,21 @@
       document.getElementById('notificationOkBtn').textContent = 'Activate Selected';
 
       notificationCallback = function() {
-        // Get selected jobs to activate
+        // Get selected jobs to activate and their schedules
         var jobsToActivate = [];
+        var jobScheduleMap = {};
         var checkboxes = document.querySelectorAll('.pending-job-checkbox:checked');
         checkboxes.forEach(function(cb) {
-          jobsToActivate.push(cb.getAttribute('data-job'));
+          var jn = cb.getAttribute('data-job');
+          jobsToActivate.push(jn);
+          var schedSelect = document.querySelector('.pending-job-sched[data-job="' + jn + '"]');
+          if (schedSelect) {
+            jobScheduleMap[jn] = schedSelect.value;
+          }
         });
 
         if (jobsToActivate.length > 0) {
-          // Call server to activate selected jobs
+          // Call server to activate selected jobs with schedule map
           google.script.run
             .withSuccessHandler(function(activateResult) {
               showNotification(baseMessage + '\n\n✅ ' + activateResult.message, 'success', 'Import Complete!', function() {
@@ -9124,7 +9172,7 @@
                 google.script.host.close();
               });
             })
-            .activatePendingJobs(jobsToActivate);
+            .activatePendingJobs(jobsToActivate, jobScheduleMap);
         } else {
           showNotification(baseMessage + '\n\n📋 All jobs kept as-is (will auto-activate on scheduled date)', 'success', 'Import Complete!', function() {
             google.script.host.close();
