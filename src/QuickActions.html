@@ -264,9 +264,15 @@
       btn.classList.add('running'); btn.disabled = true;
       showStatus('Running Step ' + n + '...');
       google.script.run.withSuccessHandler(function() {
-        btn.classList.remove('running'); btn.classList.add('done'); btn.disabled = false;
-        showStatus('✓ Step ' + n + ' complete!', 'success');
-        setTimeout(hideStatus, 2000);
+        btn.disabled = false;
+        if (func === 'generateAllReports') {
+          // Immediately check background status when dialog opens/closes
+          checkBackgroundReportStatus();
+        } else {
+          btn.classList.remove('running'); btn.classList.add('done');
+          showStatus('✓ Step ' + n + ' complete!', 'success');
+          setTimeout(hideStatus, 2000);
+        }
       }).withFailureHandler(function(e) {
         btn.classList.remove('running'); btn.disabled = false;
         showStatus('Error: ' + e, 'error');
@@ -403,8 +409,6 @@
     }
 
     // ── BACKGROUND REPORT STATUS TRACKING ───────────────────────────────────
-    var bgPollInterval = null;
-
     function checkBackgroundReportStatus() {
       google.script.run
         .withSuccessHandler(function(res) {
@@ -416,17 +420,8 @@
             step3.classList.remove('done');
             step3.classList.add('running');
             showStatus('⚡ Generate All Reports running in background...');
-
-            // Poll status every 3 seconds
-            if (!bgPollInterval) {
-              bgPollInterval = setInterval(checkBackgroundReportStatus, 3000);
-            }
           } else if (res && res.status === 'COMPLETE') {
             // Background job completed
-            if (bgPollInterval) {
-              clearInterval(bgPollInterval);
-              bgPollInterval = null;
-            }
             if (step3.classList.contains('running')) {
               step3.classList.remove('running');
               step3.classList.add('done');
@@ -435,10 +430,6 @@
             }
           } else {
             // Idle or Error
-            if (bgPollInterval) {
-              clearInterval(bgPollInterval);
-              bgPollInterval = null;
-            }
             if (step3.classList.contains('running')) {
               step3.classList.remove('running');
               hideStatus();
@@ -451,8 +442,9 @@
         .getGenerateAllReportsStatus();
     }
 
-    // Initial background status check on load
+    // Check background status immediately and poll continuously every 3 seconds while sidebar is open
     checkBackgroundReportStatus();
+    setInterval(checkBackgroundReportStatus, 3000);
   </script>
 </body>
 </html>
