@@ -6901,13 +6901,12 @@ function executeProcessSafetyEmailsBackgroundJob(e) {
 
     while (!finished && count < maxIterations) {
       count++;
-      var result = processSafetyEmailsChunk(
+      var result = processSafetyEmails(
         params.daysBack,
         15,
         params.newOnlyMode,
         params.fastMode,
-        params.startDate,
-        params.endDate,
+        params.endDate || null,
         filter
       );
       if (result) {
