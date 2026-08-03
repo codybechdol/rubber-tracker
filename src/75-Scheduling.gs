@@ -208,22 +208,24 @@ function calculateNextTrainingDate(lastDate, frequency) {
  * Default job number prefixes to exclude from Crew Visits and Training tasks.
  * Employees with job numbers starting with these prefixes are excluded.
  * - 002: Lost/Destroyed/In Testing equipment records (not real employees)
- * - 005: Light Duty employees (office-based, no field visits needed)
+ * Note: 005-26 is the Helena shop crew (mechanics, office workers, supervisors). It is NOT excluded.
  */
-var DEFAULT_EXCLUDED_JOB_PREFIXES = ['002', '005'];
+var DEFAULT_EXCLUDED_JOB_PREFIXES = ['002'];
 
 /**
  * Gets the list of excluded job number prefixes from ScriptProperties.
  * Falls back to default if not configured.
  *
- * @return {Array} Array of excluded job prefixes (e.g., ['002', '005'])
+ * @return {Array} Array of excluded job prefixes (e.g., ['002'])
  */
 function getExcludedJobPrefixesInternal() {
   var props = PropertiesService.getScriptProperties();
   var json = props.getProperty('excludedJobPrefixes');
   if (json) {
     try {
-      return JSON.parse(json);
+      var arr = JSON.parse(json);
+      // Ensure '005' (Helena shop crew) is NOT excluded
+      return arr.filter(function(p) { return p !== '005'; });
     } catch (e) {
       Logger.log('getExcludedJobPrefixesInternal: Error parsing JSON: ' + e);
     }
