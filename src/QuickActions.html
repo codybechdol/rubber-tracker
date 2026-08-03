@@ -496,9 +496,9 @@
         }, 1200);
         return false;
       } else if (btn.classList.contains('running')) {
-        btn.classList.remove('running');
-        hideStatus();
-        return false;
+        // Step button is in active/pending state (dialog open or background task starting)
+        // Keep polling active so background execution is picked up smoothly
+        return true;
       }
       return false;
     }
