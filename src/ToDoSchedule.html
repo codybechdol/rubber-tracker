@@ -609,6 +609,9 @@
           <button type="button" class="btn btn-outline-primary" id="addToTaskListBtn" onclick="addCurrentTaskToChecklist()">
             <i class="bi bi-plus-circle"></i> Add to My Checklist
           </button>
+          <button type="button" class="btn btn-outline-secondary" onclick="copyNotifyMessageToClipboard()">
+            <i class="bi bi-clipboard"></i> Copy Message
+          </button>
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
           <button type="button" class="btn btn-warning text-white" id="sendNotifyBtn" onclick="sendNotifySMS()">
             <i class="bi bi-send"></i> Send Text
@@ -5238,32 +5241,74 @@
           .markCertNotifiedAndReload(task.employee, task.itemType || task.certType);
       }
 
-      // Open SMS link - use link click method for better compatibility
-      // Clean phone number - remove all non-digit characters for SMS URL
+      // Auto-copy message text to clipboard so user can paste into any text app (Google Messages, Teams, Email, etc.)
+      copyTextToClipboard(message);
+
+      // Open SMS link with cross-platform URL format
       var cleanPhone = phoneNumber.replace(/\D/g, '');
-      // Ensure it has country code (add 1 for US if 10 digits)
       if (cleanPhone.length === 10) {
         cleanPhone = '1' + cleanPhone;
       }
-      var smsUrl = 'sms:' + cleanPhone + '?body=' + encodeURIComponent(message);
+      var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+      var smsUrl = 'sms:' + cleanPhone + (isIOS ? '&body=' : '?body=') + encodeURIComponent(message);
       console.log('Opening SMS URL:', smsUrl);
 
-      // Create a temporary link and click it (most reliable method)
-      var link = document.createElement('a');
-      link.href = smsUrl;
-      link.style.display = 'none';
-      document.body.appendChild(link);
-      link.click();
-      setTimeout(function() { document.body.removeChild(link); }, 100);
+      try {
+        window.open(smsUrl, '_blank');
+      } catch (e1) {
+        try {
+          window.location.href = smsUrl;
+        } catch (e2) {}
+      }
 
       // Close modal and refresh
       var modal = bootstrap.Modal.getInstance(document.getElementById('smsNotifyModal'));
-      modal.hide();
+      if (modal) modal.hide();
 
-      showToast('✓ Opening messaging app...');
+      showToast('✓ Text copied to clipboard & messaging app opened!', 'success');
       renderTasks(allTasks);
       renderPersonalChecklist();
       renderExpiringCerts();
+    }
+
+    function copyNotifyMessageToClipboard() {
+      var message = document.getElementById('notifyMessage').value;
+      if (!message) {
+        showToast('No message to copy', 'error');
+        return;
+      }
+      copyTextToClipboard(message);
+      showToast('✓ Message copied to clipboard!', 'success');
+    }
+
+    function copyTextToClipboard(text) {
+      if (!text) return;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).catch(function() {
+            fallbackCopyText(text);
+          });
+        } else {
+          fallbackCopyText(text);
+        }
+      } catch (e) {
+        fallbackCopyText(text);
+      }
+    }
+
+    function fallbackCopyText(text) {
+      var textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.style.top = '0';
+      textArea.style.left = '0';
+      textArea.style.position = 'fixed';
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      try {
+        document.execCommand('copy');
+      } catch (err) {}
+      document.body.removeChild(textArea);
     }
 
     // Open notify modal for a localStorage checklist item
@@ -5490,12 +5535,19 @@
       google.script.run
         .withSuccessHandler(function(message) {
           if (message) {
-            // Clean phone number - remove all non-digit characters for SMS URL
+            copyTextToClipboard(message);
             var cleanPhone = phoneNumber.replace(/\D/g, '');
             if (cleanPhone.length === 10) cleanPhone = '1' + cleanPhone;
-            var smsUrl = 'sms:' + cleanPhone + '?body=' + encodeURIComponent(message);
-            window.open(smsUrl, '_blank');
-            showToast('✓ Opening messaging app...');
+            var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+            var smsUrl = 'sms:' + cleanPhone + (isIOS ? '&body=' : '?body=') + encodeURIComponent(message);
+            try {
+              window.open(smsUrl, '_blank');
+            } catch (e1) {
+              try {
+                window.location.href = smsUrl;
+              } catch (e2) {}
+            }
+            showToast('✓ Text copied to clipboard & messaging app opened!', 'success');
           } else {
             showToast('❌ Error building message', 'error');
           }
