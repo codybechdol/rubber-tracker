@@ -6954,10 +6954,20 @@ function getSafetyEmailsStatus() {
  */
 function showProcessSafetyEmailsDialogWithResults(reportTypeFilter) {
   var filter = (typeof reportTypeFilter === 'string' && reportTypeFilter) ? reportTypeFilter.toUpperCase() : 'ALL';
+  var props = PropertiesService.getScriptProperties();
   var template = HtmlService.createTemplateFromFile('ProcessSafetyEmailsDialog');
   template.initialReportType = filter;
-  var bgResultRaw = PropertiesService.getScriptProperties().getProperty('BG_SAFETY_EMAIL_RESULT_' + filter) || '';
+  var bgResultRaw = props.getProperty('BG_SAFETY_EMAIL_RESULT_' + filter) || '';
   template.bgResultJson = bgResultRaw;
+
+  // Clear completed status property immediately so it won't re-trigger when re-opening the workbook/sidebar later
+  props.deleteProperty('SAFETY_EMAILS_STATUS_' + filter);
+  props.deleteProperty('SAFETY_EMAILS_STATUS_ALL');
+  if (filter === 'ALL') {
+    props.deleteProperty('SAFETY_EMAILS_STATUS_JHA');
+    props.deleteProperty('SAFETY_EMAILS_STATUS_WEEKLY');
+    props.deleteProperty('SAFETY_EMAILS_STATUS_MONTHLY');
+  }
 
   var html = template.evaluate()
     .setWidth(550)

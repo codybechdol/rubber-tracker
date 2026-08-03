@@ -18607,6 +18607,29 @@ function getAllBackgroundStatuses() {
 }
 
 /**
+ * Resets all background status keys to IDLE in ScriptProperties.
+ * Prevents old COMPLETE statuses from re-triggering popups when reopening the spreadsheet.
+ */
+function clearAllBackgroundStatuses() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    props.deleteProperty('GENERATE_ALL_REPORTS_STATUS');
+    props.deleteProperty('SAFETY_EMAILS_STATUS_JHA');
+    props.deleteProperty('SAFETY_EMAILS_STATUS_WEEKLY');
+    props.deleteProperty('SAFETY_EMAILS_STATUS_MONTHLY');
+    props.deleteProperty('SAFETY_EMAILS_STATUS_ALL');
+    props.deleteProperty('BG_SAFETY_EMAIL_PARAMS');
+    props.deleteProperty('BG_SAFETY_EMAIL_RESULT_JHA');
+    props.deleteProperty('BG_SAFETY_EMAIL_RESULT_WEEKLY');
+    props.deleteProperty('BG_SAFETY_EMAIL_RESULT_MONTHLY');
+    props.deleteProperty('BG_SAFETY_EMAIL_RESULT_ALL');
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.toString() };
+  }
+}
+
+/**
  * Background worker triggered by 1-shot trigger.
  * Runs Parts 1, 2, and 3 sequentially and cleans up the trigger.
  */

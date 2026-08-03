@@ -431,6 +431,8 @@
               step3.classList.add('done');
               showStatus('✓ Background report generation complete!', 'success');
               setTimeout(hideStatus, 4000);
+              // Clear completed status so it doesn't re-trigger when re-opening workbook later
+              google.script.run.clearAllBackgroundStatuses();
             } else if (step3.classList.contains('running')) {
               step3.classList.remove('running');
               hideStatus();
