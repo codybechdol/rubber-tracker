@@ -440,13 +440,13 @@
           }
 
           // 2. Safety Emails status (Steps 4, 5, 6)
-          if (updateStepStatus(4, res.jha === 'RUNNING' || res.safetyAll === 'RUNNING', res.jha === 'COMPLETE' || res.safetyAll === 'COMPLETE', 'JHA Emails', 'JHA')) {
+          if (updateStepStatus(4, res.jha === 'RUNNING' || (res.safetyAll === 'RUNNING' && res.jha !== 'IDLE'), res.jha === 'COMPLETE' || (res.safetyAll === 'COMPLETE' && res.jha !== 'IDLE'), 'JHA Emails', 'JHA')) {
             anyRunning = true;
           }
-          if (updateStepStatus(5, res.weekly === 'RUNNING' || res.safetyAll === 'RUNNING', res.weekly === 'COMPLETE' || res.safetyAll === 'COMPLETE', 'Weekly Safety Emails', 'WEEKLY')) {
+          if (updateStepStatus(5, res.weekly === 'RUNNING' || (res.safetyAll === 'RUNNING' && res.weekly !== 'IDLE'), res.weekly === 'COMPLETE' || (res.safetyAll === 'COMPLETE' && res.weekly !== 'IDLE'), 'Weekly Safety Emails', 'WEEKLY')) {
             anyRunning = true;
           }
-          if (updateStepStatus(6, res.monthly === 'RUNNING' || res.safetyAll === 'RUNNING', res.monthly === 'COMPLETE' || res.safetyAll === 'COMPLETE', 'Monthly Checklist Emails', 'MONTHLY')) {
+          if (updateStepStatus(6, res.monthly === 'RUNNING' || (res.safetyAll === 'RUNNING' && res.monthly !== 'IDLE'), res.monthly === 'COMPLETE' || (res.safetyAll === 'COMPLETE' && res.monthly !== 'IDLE'), 'Monthly Checklist Emails', 'MONTHLY')) {
             anyRunning = true;
           }
 

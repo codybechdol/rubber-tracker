@@ -6841,7 +6841,9 @@ function startProcessSafetyEmailsInBackground(reportTypeFilter, daysBack, newOnl
     var filter = (typeof reportTypeFilter === 'string' && reportTypeFilter) ? reportTypeFilter.toUpperCase() : 'ALL';
     var propKey = 'SAFETY_EMAILS_STATUS_' + filter;
     PropertiesService.getScriptProperties().setProperty(propKey, 'RUNNING');
-    PropertiesService.getScriptProperties().setProperty('SAFETY_EMAILS_STATUS_ALL', 'RUNNING');
+    if (filter === 'ALL') {
+      PropertiesService.getScriptProperties().setProperty('SAFETY_EMAILS_STATUS_ALL', 'RUNNING');
+    }
 
     var params = {
       filterType: filter,
@@ -6921,11 +6923,15 @@ function executeProcessSafetyEmailsBackgroundJob(e) {
       PropertiesService.getScriptProperties().setProperty('BG_SAFETY_EMAIL_RESULT_' + filter, JSON.stringify(lastResult));
     }
     PropertiesService.getScriptProperties().setProperty(propKey, 'COMPLETE');
-    PropertiesService.getScriptProperties().setProperty('SAFETY_EMAILS_STATUS_ALL', 'COMPLETE');
+    if (filter === 'ALL') {
+      PropertiesService.getScriptProperties().setProperty('SAFETY_EMAILS_STATUS_ALL', 'COMPLETE');
+    }
     logEvent('executeProcessSafetyEmailsBackgroundJob: COMPLETE processing for ' + filter);
   } catch (err) {
     PropertiesService.getScriptProperties().setProperty(propKey, 'ERROR: ' + err);
-    PropertiesService.getScriptProperties().setProperty('SAFETY_EMAILS_STATUS_ALL', 'ERROR: ' + err);
+    if (filter === 'ALL') {
+      PropertiesService.getScriptProperties().setProperty('SAFETY_EMAILS_STATUS_ALL', 'ERROR: ' + err);
+    }
     logEvent('executeProcessSafetyEmailsBackgroundJob ERROR: ' + err, 'ERROR');
   } finally {
     try { lock.releaseLock(); } catch (lErr) {}
