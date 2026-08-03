@@ -6840,6 +6840,17 @@ function startProcessSafetyEmailsInBackground(reportTypeFilter, daysBack, newOnl
   try {
     var filter = (typeof reportTypeFilter === 'string' && reportTypeFilter) ? reportTypeFilter.toUpperCase() : 'ALL';
     var propKey = 'SAFETY_EMAILS_STATUS_' + filter;
+
+    // Clean up any existing triggers for this background job handler first
+    try {
+      var existingTriggers = ScriptApp.getProjectTriggers();
+      for (var tIdx = 0; tIdx < existingTriggers.length; tIdx++) {
+        if (existingTriggers[tIdx].getHandlerFunction() === 'executeProcessSafetyEmailsBackgroundJob') {
+          ScriptApp.deleteTrigger(existingTriggers[tIdx]);
+        }
+      }
+    } catch (tErr) {}
+
     PropertiesService.getScriptProperties().setProperty(propKey, 'RUNNING');
     if (filter === 'ALL') {
       PropertiesService.getScriptProperties().setProperty('SAFETY_EMAILS_STATUS_ALL', 'RUNNING');

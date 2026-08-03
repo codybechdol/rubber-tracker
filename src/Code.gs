@@ -18638,22 +18638,35 @@ function getAllBackgroundStatuses() {
 }
 
 /**
- * Resets all background status keys to IDLE in ScriptProperties.
- * Prevents old COMPLETE statuses from re-triggering popups when reopening the spreadsheet.
+ * Resets background status keys to IDLE in ScriptProperties ONLY if no active trigger is running.
+ * Prevents old statuses from re-triggering popups while preserving active background jobs across workbook reloads.
  */
 function clearAllBackgroundStatuses() {
   try {
     var props = PropertiesService.getScriptProperties();
-    props.deleteProperty('GENERATE_ALL_REPORTS_STATUS');
-    props.deleteProperty('SAFETY_EMAILS_STATUS_JHA');
-    props.deleteProperty('SAFETY_EMAILS_STATUS_WEEKLY');
-    props.deleteProperty('SAFETY_EMAILS_STATUS_MONTHLY');
-    props.deleteProperty('SAFETY_EMAILS_STATUS_ALL');
-    props.deleteProperty('BG_SAFETY_EMAIL_PARAMS');
-    props.deleteProperty('BG_SAFETY_EMAIL_RESULT_JHA');
-    props.deleteProperty('BG_SAFETY_EMAIL_RESULT_WEEKLY');
-    props.deleteProperty('BG_SAFETY_EMAIL_RESULT_MONTHLY');
-    props.deleteProperty('BG_SAFETY_EMAIL_RESULT_ALL');
+    var triggers = ScriptApp.getProjectTriggers();
+    var hasEmailTrigger = false;
+    var hasGenTrigger = false;
+    for (var i = 0; i < triggers.length; i++) {
+      var fn = triggers[i].getHandlerFunction();
+      if (fn === 'executeProcessSafetyEmailsBackgroundJob') hasEmailTrigger = true;
+      if (fn === 'executeGenerateAllReportsBackgroundJob') hasGenTrigger = true;
+    }
+
+    if (!hasGenTrigger) {
+      props.deleteProperty('GENERATE_ALL_REPORTS_STATUS');
+    }
+    if (!hasEmailTrigger) {
+      props.deleteProperty('SAFETY_EMAILS_STATUS_JHA');
+      props.deleteProperty('SAFETY_EMAILS_STATUS_WEEKLY');
+      props.deleteProperty('SAFETY_EMAILS_STATUS_MONTHLY');
+      props.deleteProperty('SAFETY_EMAILS_STATUS_ALL');
+      props.deleteProperty('BG_SAFETY_EMAIL_PARAMS');
+      props.deleteProperty('BG_SAFETY_EMAIL_RESULT_JHA');
+      props.deleteProperty('BG_SAFETY_EMAIL_RESULT_WEEKLY');
+      props.deleteProperty('BG_SAFETY_EMAIL_RESULT_MONTHLY');
+      props.deleteProperty('BG_SAFETY_EMAIL_RESULT_ALL');
+    }
     return { success: true };
   } catch (e) {
     return { success: false, error: e.toString() };
