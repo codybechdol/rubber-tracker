@@ -7940,6 +7940,7 @@ function syncEmployeeLocationsFromJobTracking() {
  */
 function onOpen() {
   try { ensurePickedForColumn(); } catch(e) { Logger.log("ensurePickedForColumn error: " + e.message); }
+  try { clearAllBackgroundStatuses(); } catch(e) { Logger.log("clearAllBackgroundStatuses onOpen error: " + e.message); }
   try {
     _buildGloveManagerMenu();
   } catch(e) {
@@ -18588,12 +18589,42 @@ function getGenerateAllReportsStatus() {
 function getAllBackgroundStatuses() {
   try {
     var props = PropertiesService.getScriptProperties();
+    var genStatus = props.getProperty('GENERATE_ALL_REPORTS_STATUS') || 'IDLE';
+    var jhaStatus = props.getProperty('SAFETY_EMAILS_STATUS_JHA') || 'IDLE';
+    var weeklyStatus = props.getProperty('SAFETY_EMAILS_STATUS_WEEKLY') || 'IDLE';
+    var monthlyStatus = props.getProperty('SAFETY_EMAILS_STATUS_MONTHLY') || 'IDLE';
+    var allStatus = props.getProperty('SAFETY_EMAILS_STATUS_ALL') || 'IDLE';
+
+    // Verify if active project triggers actually exist for any RUNNING job
+    var isAnyRunning = genStatus === 'RUNNING' || jhaStatus === 'RUNNING' || weeklyStatus === 'RUNNING' || monthlyStatus === 'RUNNING' || allStatus === 'RUNNING';
+    if (isAnyRunning) {
+      var triggers = ScriptApp.getProjectTriggers();
+      var hasGenTrigger = false;
+      var hasEmailTrigger = false;
+      for (var i = 0; i < triggers.length; i++) {
+        var funcName = triggers[i].getHandlerFunction();
+        if (funcName === 'executeGenerateAllReportsBackgroundJob') hasGenTrigger = true;
+        if (funcName === 'executeProcessSafetyEmailsBackgroundJob') hasEmailTrigger = true;
+      }
+
+      if (genStatus === 'RUNNING' && !hasGenTrigger) {
+        props.deleteProperty('GENERATE_ALL_REPORTS_STATUS');
+        genStatus = 'IDLE';
+      }
+      if (!hasEmailTrigger) {
+        if (jhaStatus === 'RUNNING') { props.deleteProperty('SAFETY_EMAILS_STATUS_JHA'); jhaStatus = 'IDLE'; }
+        if (weeklyStatus === 'RUNNING') { props.deleteProperty('SAFETY_EMAILS_STATUS_WEEKLY'); weeklyStatus = 'IDLE'; }
+        if (monthlyStatus === 'RUNNING') { props.deleteProperty('SAFETY_EMAILS_STATUS_MONTHLY'); monthlyStatus = 'IDLE'; }
+        if (allStatus === 'RUNNING') { props.deleteProperty('SAFETY_EMAILS_STATUS_ALL'); allStatus = 'IDLE'; }
+      }
+    }
+
     return {
-      generateAllReports: props.getProperty('GENERATE_ALL_REPORTS_STATUS') || 'IDLE',
-      jha: props.getProperty('SAFETY_EMAILS_STATUS_JHA') || 'IDLE',
-      weekly: props.getProperty('SAFETY_EMAILS_STATUS_WEEKLY') || 'IDLE',
-      monthly: props.getProperty('SAFETY_EMAILS_STATUS_MONTHLY') || 'IDLE',
-      safetyAll: props.getProperty('SAFETY_EMAILS_STATUS_ALL') || 'IDLE'
+      generateAllReports: genStatus,
+      jha: jhaStatus,
+      weekly: weeklyStatus,
+      monthly: monthlyStatus,
+      safetyAll: allStatus
     };
   } catch (e) {
     return {
