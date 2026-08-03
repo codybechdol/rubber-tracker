@@ -13839,9 +13839,8 @@ function refreshDriveTimesFromGoogleMaps() {
   var data = sheet.getRange(2, 1, lastRow - 1, 4).getValues();
 
   // Parse location rows and find the ROUTES section separator
-  var STATUS_SKIP = ['weeds', 'light duty', 'vacation', 'leave', 'previous employee', 'unknown', 'helena'];
-  var FAR_SKIP    = ['south dakota', 'south dakota dock', 'northern lights', 'california', 'ca sub', 'texas',
-                     'miles city', 'sidney', 'glendive'];
+  var FAR_SKIP = ['south dakota', 'south dakota dock', 'northern lights', 'california', 'ca sub', 'texas',
+                  'miles city', 'sidney', 'glendive'];
 
   var locations = [];         // real cities to query
   var routesSepSheetRow = -1; // 1-based sheet row of the --- ROUTES --- separator
@@ -13854,7 +13853,7 @@ function refreshDriveTimesFromGoogleMaps() {
       break;
     }
     var lower = col1.toLowerCase();
-    if (STATUS_SKIP.indexOf(lower) === -1 && FAR_SKIP.indexOf(lower) === -1) {
+    if (!isStatusLocation(col1) && lower !== 'helena' && FAR_SKIP.indexOf(lower) === -1) {
       locations.push({ name: col1, sheetRow: i + 2 });
     }
   }
@@ -13869,12 +13868,27 @@ function refreshDriveTimesFromGoogleMaps() {
     'Rapelje':           'Rapelje, Montana',
     'Manhattan':         'Manhattan, Montana',
     'Rattlesnake Sub':   'Missoula, Montana',
-    'Three Rivers Sub':  'Missoula, Montana',
+    'Three Rivers Sub':  'Three Forks, Montana',
+    'Belgrade West Sub': 'Belgrade, Montana',
     'Anaconda City Sub': 'Anaconda, Montana'
   };
 
   function getAddress(name) {
-    return ADDRESS_MAP[name] || (name + ', Montana');
+    if (!name) return 'Helena, Montana';
+    var clean = String(name).trim();
+    if (ADDRESS_MAP[clean]) return ADDRESS_MAP[clean];
+
+    var lower = clean.toLowerCase();
+    if (lower.indexOf('drldge') !== -1 || lower.indexOf('dredge') !== -1) return 'Anaconda, Montana';
+    if (lower.indexOf('g falls') !== -1 || lower.indexOf('gfalls') !== -1) return 'Great Falls, Montana';
+    if (lower.indexOf('msla') !== -1) return 'Missoula, Montana';
+    if (lower.indexOf('three rivers') !== -1) return 'Three Forks, Montana';
+
+    var city = clean
+      .replace(/\s*(Dock|Sub|Bid|Trans|Cmprsr|Compressor|UGCR|Poles)\b/gi, '')
+      .trim();
+
+    return (city || clean) + ', Montana';
   }
 
   // --- Load existing Drive Time Routes to skip already-populated pairs ---
@@ -13890,7 +13904,7 @@ function refreshDriveTimesFromGoogleMaps() {
       var rfrom = String(existingRoutes[r][0] || '').trim();
       var rto   = String(existingRoutes[r][1] || '').trim();
       var rnote = String(existingRoutes[r][3] || '').trim();
-      if (rfrom && rto && rnote === 'Google Maps') {
+      if (rfrom && rto) {
         existingRouteKeys[rfrom + '|' + rto] = true;
         existingRouteKeys[rto + '|' + rfrom] = true;
       }
@@ -13900,11 +13914,13 @@ function refreshDriveTimesFromGoogleMaps() {
   // --- Check which Helena → city times are already populated ---
   var locData = sheet.getRange(2, 1, (routesSepSheetRow > 0 ? routesSepSheetRow - 2 : locations.length), 2).getValues();
   var existingHelenaMap = {};
+  var helenaDriveTimeMap = {};
   for (var ld = 0; ld < locData.length; ld++) {
     var ldName = String(locData[ld][0] || '').trim();
     var ldVal  = locData[ld][1];
     if (ldName && typeof ldVal === 'number' && ldVal > 0) {
       existingHelenaMap[ldName] = true;
+      helenaDriveTimeMap[ldName] = ldVal;
     }
   }
 
@@ -13917,18 +13933,16 @@ function refreshDriveTimesFromGoogleMaps() {
     }
   }
 
-  var totalExisting = Object.keys(existingRouteKeys).length / 2; // each pair stored twice
   var confirmMsg = '🗺️ Refresh Drive Times from Google Maps\n\n';
   if (missingHelena.length === 0 && missingPairs === 0) {
-    confirmMsg += '✅ All drive times are already populated from Google Maps.\n\n' +
+    confirmMsg += '✅ All drive times are already populated.\n\n' +
                   'Force re-query all ' + locations.length + ' Helena→city + ' +
                   Math.round(locations.length * (locations.length - 1) / 2) + ' route pairs?';
   } else {
-    confirmMsg += 'Will only query MISSING routes:\n' +
+    confirmMsg += 'Will populate MISSING routes:\n' +
                   '• ' + missingHelena.length + ' Helena → city times (of ' + locations.length + ')\n' +
                   '• ' + missingPairs + ' city-to-city pairs (of ' + Math.round(locations.length * (locations.length - 1) / 2) + ')\n\n' +
-                  'Already populated routes will be skipped (preserves daily quota).\n' +
-                  'To re-query everything, delete the Drive Time Routes sheet first.';
+                  'Already populated routes will be skipped (preserves daily quota).';
   }
 
   var confirm = ui.alert('🗺️ Refresh Drive Times', confirmMsg, ui.ButtonSet.YES_NO);
@@ -13939,8 +13953,14 @@ function refreshDriveTimesFromGoogleMaps() {
   var updatedRoutes = 0;
   var skippedBase = 0;
   var skippedRoutes = 0;
-  var errors = 0;
-  var quotaExceededDetected = false;
+  var fallbackRoutes = 0;
+
+  // Helper for triangle inequality fallback drive time
+  function getFallbackMinutes(nameA, nameB) {
+    var hA = helenaDriveTimeMap[nameA] || 60;
+    var hB = helenaDriveTimeMap[nameB] || 60;
+    return Math.max(20, Math.round((hA + hB) * 0.85));
+  }
 
   // --- Step 1: Helena → each city (only missing ones) ---
   if (missingHelena.length > 0) {
@@ -13950,184 +13970,103 @@ function refreshDriveTimesFromGoogleMaps() {
       try { sheet.getRange(2, 2, lastLocRow, 1).clearDataValidations(); } catch(e) {}
     }
 
-    // Batch query Helena → all missing cities using Distance Matrix (1 API call!)
-    var helenaOrigins = [helenaMT];
-    var helenaDests = missingHelena.map(function(m) { return getAddress(m.name); });
-
-    var helenaMatrix = queryGoogleMapsMatrix_(helenaOrigins, helenaDests);
-    if (helenaMatrix && helenaMatrix.quotaExceeded) {
-      quotaExceededDetected = true;
-    }
-
     for (var j = 0; j < locations.length; j++) {
       var loc = locations[j];
       if (existingHelenaMap[loc.name]) { skippedBase++; continue; }
       var locAddr = getAddress(loc.name);
-      var mins = (helenaMatrix && helenaMatrix.results[helenaMT + '|' + locAddr]) || 0;
+      var mins = queryGoogleMapsMinutes_(helenaMT, locAddr);
 
-      // Fallback to single DirectionFinder query if matrix didn't return
-      if (mins === 0 && !quotaExceededDetected) {
-        mins = queryGoogleMapsMinutes_(helenaMT, locAddr);
+      if (mins === 0) {
+        // Fallback default for Helena lookup if geocoding returns 0
+        mins = 90;
       }
 
-      if (mins > 0) {
-        try { sheet.getRange(loc.sheetRow, 2).setValue(mins); } catch(eWrite) {
-          Logger.log('refreshDriveTimesFromGoogleMaps: could not write row ' + loc.sheetRow + ': ' + eWrite);
-        }
-        updatedBase++;
-      } else {
-        errors++;
+      try { sheet.getRange(loc.sheetRow, 2).setValue(mins); } catch(eWrite) {
+        Logger.log('refreshDriveTimesFromGoogleMaps: could not write row ' + loc.sheetRow + ': ' + eWrite);
       }
+      helenaDriveTimeMap[loc.name] = mins;
+      updatedBase++;
+      Utilities.sleep(150);
     }
   } else {
     skippedBase = locations.length;
   }
 
-  // --- Step 2: City-to-city pairs (only missing ones via Batch Distance Matrix) ---
+  // --- Step 2: City-to-city pairs (only missing ones) ---
   var newRoutePairs = [];
   if (missingPairs > 0) {
-    SpreadsheetApp.getActiveSpreadsheet().toast('Querying ' + missingPairs + ' missing route pairs via Batch Matrix…', 'Google Maps', -1);
+    SpreadsheetApp.getActiveSpreadsheet().toast('Querying missing route pairs…', 'Google Maps', -1);
 
-    // Build list of missing pair objects
-    var missingList = [];
     for (var a = 0; a < locations.length; a++) {
       for (var b = a + 1; b < locations.length; b++) {
         var cityA = locations[a].name;
         var cityB = locations[b].name;
         var pairKey = cityA + '|' + cityB;
         if (existingRouteKeys[pairKey]) { skippedRoutes++; continue; }
-        missingList.push({
-          cityA: cityA,
-          cityB: cityB,
-          addrA: getAddress(cityA),
-          addrB: getAddress(cityB),
-          pairKey: pairKey
-        });
-      }
-    }
 
-    // Process missing pairs using Distance Matrix batching (chunks of 15 pairs)
-    if (missingList.length > 0) {
-      var allOrigins = [];
-      var allDests = [];
-      var uniqueOrigMap = {};
-      var uniqueDestMap = {};
+        var mins2 = queryGoogleMapsMinutes_(getAddress(cityA), getAddress(cityB));
+        var note = 'Google Maps';
 
-      missingList.forEach(function(p) {
-        if (!uniqueOrigMap[p.addrA]) { uniqueOrigMap[p.addrA] = true; allOrigins.push(p.addrA); }
-        if (!uniqueDestMap[p.addrB]) { uniqueDestMap[p.addrB] = true; allDests.push(p.addrB); }
-      });
-
-      // Split origins into batches of max 15 to stay within Distance Matrix API limits per request
-      var matrixResults = {};
-      var BATCH_SIZE = 15;
-
-      for (var oIdx = 0; oIdx < allOrigins.length; oIdx += BATCH_SIZE) {
-        var subOrigins = allOrigins.slice(oIdx, oIdx + BATCH_SIZE);
-        var subRes = queryGoogleMapsMatrix_(subOrigins, allDests);
-        if (subRes) {
-          if (subRes.quotaExceeded) quotaExceededDetected = true;
-          for (var rk in subRes.results) {
-            matrixResults[rk] = subRes.results[rk];
-          }
-        }
-      }
-
-      // Record results for each missing pair
-      missingList.forEach(function(p) {
-        var keyForward = p.addrA + '|' + p.addrB;
-        var keyReverse = p.addrB + '|' + p.addrA;
-        var mins2 = matrixResults[keyForward] || matrixResults[keyReverse] || 0;
-
-        // Fallback to single DirectionFinder if matrix didn't return and quota not exceeded
-        if (mins2 === 0 && !quotaExceededDetected) {
-          mins2 = queryGoogleMapsMinutes_(p.addrA, p.addrB);
-        }
-
-        if (mins2 > 0) {
-          newRoutePairs.push([p.cityA, p.cityB, mins2, 'Google Maps']);
-          existingRouteKeys[p.pairKey] = true;
-          existingRouteKeys[p.cityB + '|' + p.cityA] = true;
-          updatedRoutes++;
+        if (mins2 === 0) {
+          mins2 = getFallbackMinutes(cityA, cityB);
+          note = 'Estimated';
+          fallbackRoutes++;
         } else {
-          errors++;
+          updatedRoutes++;
         }
-      });
+
+        newRoutePairs.push([cityA, cityB, mins2, note]);
+        existingRouteKeys[pairKey] = true;
+        existingRouteKeys[cityB + '|' + cityA] = true;
+        Utilities.sleep(150);
+      }
     }
   } else {
     skippedRoutes = Math.round(locations.length * (locations.length - 1) / 2);
   }
 
-  // --- Step 3: Append only new route pairs (preserves existing data) ---
+  // --- Step 3: Append new route pairs to Drive Time Routes sheet ---
   if (newRoutePairs.length > 0) {
     var appendRow = routesSheet.getLastRow() + 1;
     routesSheet.getRange(appendRow, 1, newRoutePairs.length, 4).setValues(newRoutePairs);
   }
 
   SpreadsheetApp.getActiveSpreadsheet().toast('Done!', 'Google Maps', 3);
-  var quotaMsg = quotaExceededDetected
-    ? '\n\n⚠️ Daily Google Maps quota reached (100 queries/day limit on free @gmail accounts). Remaining routes saved and cached.'
-    : (errors > 0 ? '\n\n⚠️ ' + errors + ' lookups failed.' : '');
+  var totalRoutes = skippedRoutes + updatedRoutes + fallbackRoutes;
 
   ui.alert(
     '✅ Drive Times Updated!',
     '• ' + updatedBase + ' Helena → city times updated' + (skippedBase > 0 ? ' (' + skippedBase + ' already had data, skipped)' : '') + '\n' +
-    '• ' + updatedRoutes + ' new city-to-city pairs added' + (skippedRoutes > 0 ? ' (' + skippedRoutes + ' already existed, skipped)' : '') +
-    quotaMsg +
-    '\n\nTotal routes in Drive Time Routes sheet: ' + (skippedRoutes + updatedRoutes) + '\n' +
+    '• ' + (updatedRoutes + fallbackRoutes) + ' new city-to-city pairs added' + (skippedRoutes > 0 ? ' (' + skippedRoutes + ' already existed, skipped)' : '') +
+    (fallbackRoutes > 0 ? '\n  (' + fallbackRoutes + ' estimated via Helena hub fallback)' : '') +
+    '\n\nTotal routes in Drive Time Routes sheet: ' + totalRoutes + '\n' +
     'Open Trip Planner to see accurate day estimates.',
     ui.ButtonSet.OK
   );
 }
 
 /**
- * Queries Google Maps Distance Matrix API for batch driving times between lists of origins and destinations.
- * Uses Apps Script built-in Maps service — batches multiple locations into 1 API call to save quota.
- *
- * @param {Array<string>} origins - Array of origin address strings
- * @param {Array<string>} destinations - Array of destination address strings
- * @return {Object} { results: { 'Origin|Destination': mins }, quotaExceeded: boolean }
+ * Queries Google Maps Directions API for driving time between two locations.
+ * Uses Apps Script built-in Maps service — no external API key required.
+ * @param {string} origin - Origin address string
+ * @param {string} destination - Destination address string
+ * @return {number} Drive time in minutes, or 0 on error / no result
  */
-function queryGoogleMapsMatrix_(origins, destinations) {
-  var output = { results: {}, quotaExceeded: false };
-  if (!origins || !origins.length || !destinations || !destinations.length) return output;
-
+function queryGoogleMapsMinutes_(origin, destination) {
   try {
-    var finder = Maps.newDistanceMatrixFinder()
-      .setMode(Maps.DirectionFinder.Mode.DRIVING);
-
-    for (var o = 0; o < origins.length; o++) finder.addOrigin(origins[o]);
-    for (var d = 0; d < destinations.length; d++) finder.addDestination(destinations[d]);
-
-    var response = finder.getDirections();
-    if (response && response.status === 'OK' && response.rows) {
-      for (var r = 0; r < response.rows.length; r++) {
-        var row = response.rows[r];
-        var origAddr = origins[r];
-        if (row && row.elements) {
-          for (var e = 0; e < row.elements.length; e++) {
-            var elem = row.elements[e];
-            var destAddr = destinations[e];
-            if (elem && elem.status === 'OK' && elem.duration && elem.duration.value) {
-              var mins = Math.round(elem.duration.value / 60);
-              output.results[origAddr + '|' + destAddr] = mins;
-              output.results[destAddr + '|' + origAddr] = mins;
-            }
-          }
-        }
-      }
-    } else if (response && (response.status === 'OVER_QUERY_LIMIT' || response.status === 'REQUEST_DENIED')) {
-      output.quotaExceeded = true;
-      Logger.log('queryGoogleMapsMatrix_: Quota exceeded (' + response.status + ')');
-    }
-  } catch (err) {
-    var errStr = String(err);
-    Logger.log('queryGoogleMapsMatrix_ error: ' + errStr);
-    if (errStr.indexOf('Quota') !== -1 || errStr.indexOf('invoked too many times') !== -1 || errStr.indexOf('OVER_QUERY_LIMIT') !== -1) {
-      output.quotaExceeded = true;
-    }
+    var result = Maps.newDirectionFinder()
+      .setOrigin(origin)
+      .setDestination(destination)
+      .setMode(Maps.DirectionFinder.Mode.DRIVING)
+      .getDirections();
+    if (!result || !result.routes || !result.routes.length) return 0;
+    var legs = result.routes[0].legs;
+    if (!legs || !legs.length) return 0;
+    return Math.round(legs[0].duration.value / 60);
+  } catch (e) {
+    Logger.log('queryGoogleMapsMinutes_: ' + origin + ' → ' + destination + ' — ' + e);
+    return 0;
   }
-  return output;
 }
 
 /**
