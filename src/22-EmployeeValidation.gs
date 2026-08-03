@@ -2030,23 +2030,15 @@ function addFutureJob() {
     var directionResponse = ui.prompt(
       '📍 New Location: ' + location + ' (Step 2/3)',
       'Enter the direction from Helena:\n\n' +
-      'Options: East, North, West, Southwest, Northwest, Far\n\n' +
+      'Options: North, Northeast, East, Southeast, South, Southwest, West, Northwest, Far\n\n' +
       '(e.g., "Southwest" for Butte area, "East" for Bozeman area)',
       ui.ButtonSet.OK_CANCEL
     );
     if (directionResponse.getSelectedButton() !== ui.Button.OK) return;
     var direction = directionResponse.getResponseText().trim();
-    var validDirections = ['East', 'North', 'West', 'Southwest', 'Northwest', 'Far'];
-    // Case-insensitive match
-    var matchedDirection = '';
-    for (var vd = 0; vd < validDirections.length; vd++) {
-      if (validDirections[vd].toLowerCase() === direction.toLowerCase()) {
-        matchedDirection = validDirections[vd];
-        break;
-      }
-    }
+    var matchedDirection = normalizeDirection(direction);
     if (!matchedDirection) {
-      ui.alert('❌ Invalid Direction', 'Please enter one of: East, North, West, Southwest, Northwest, Far', ui.ButtonSet.OK);
+      ui.alert('❌ Invalid Direction', 'Please enter one of: North, Northeast, East, Southeast, South, Southwest, West, Northwest, Far', ui.ButtonSet.OK);
       return;
     }
 

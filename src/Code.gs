@@ -13491,7 +13491,7 @@ function setupLocationsSheet() {
   }
 
   // Add data validation for Direction column
-  var directionValues = ['Home', 'East', 'North', 'West', 'Southwest', 'Northwest', 'Far', 'Office'];
+  var directionValues = ['Home', 'North', 'Northeast', 'East', 'Southeast', 'South', 'Southwest', 'West', 'Northwest', 'Far', 'Office'];
   var directionRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(directionValues)
     .setAllowInvalid(true)
@@ -14398,21 +14398,15 @@ function reviewNewLocations() {
     var dirResponse = ui.prompt(
       '📍 ' + loc.name + ' - Direction (' + (j + 1) + '/' + needsReviewRows.length + ')',
       'Enter the direction from Helena to "' + loc.name + '":\n\n' +
-      'Options: East, North, West, Southwest, Northwest, Far',
+      'Options: North, Northeast, East, Southeast, South, Southwest, West, Northwest, Far',
       ui.ButtonSet.OK_CANCEL
     );
     if (dirResponse.getSelectedButton() !== ui.Button.OK) break;
 
     var direction = dirResponse.getResponseText().trim();
-    var matchedDir = '';
-    for (var vd = 0; vd < validDirections.length; vd++) {
-      if (validDirections[vd].toLowerCase() === direction.toLowerCase()) {
-        matchedDir = validDirections[vd];
-        break;
-      }
-    }
+    var matchedDir = normalizeDirection(direction);
     if (!matchedDir) {
-      ui.alert('Skipping', 'Invalid direction — skipping "' + loc.name + '".\nUse: East, North, West, Southwest, Northwest, Far', ui.ButtonSet.OK);
+      ui.alert('Skipping', 'Invalid direction — skipping "' + loc.name + '".\nOptions: North, Northeast, East, Southeast, South, Southwest, West, Northwest, Far', ui.ButtonSet.OK);
       continue;
     }
 

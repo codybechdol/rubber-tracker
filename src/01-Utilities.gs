@@ -622,3 +622,32 @@ function isMonthHeaderOrEmptyLogRow(dateVal, jobNum, foreman, subject, emailId) 
   return false;
 }
 
+/**
+ * Normalizes an input direction string to standard Title Case direction.
+ * Accepts all 8 principal compass directions, Far, Home, Office, plus standard abbreviations (N, NE, E, SE, S, SW, W, NW).
+ *
+ * @param {string} input - User input direction (e.g., 'east', 'ne', 'South West')
+ * @return {string|null} Normalized direction (e.g. 'Northeast') or null if invalid
+ */
+function normalizeDirection(input) {
+  if (!input) return null;
+  var str = String(input).trim().toLowerCase().replace(/[-_]/g, ' ');
+
+  var dirMap = {
+    'n': 'North', 'north': 'North',
+    'ne': 'Northeast', 'northeast': 'Northeast', 'north east': 'Northeast',
+    'e': 'East', 'east': 'East',
+    'se': 'Southeast', 'southeast': 'Southeast', 'south east': 'Southeast',
+    's': 'South', 'south': 'South',
+    'sw': 'Southwest', 'southwest': 'Southwest', 'south west': 'Southwest',
+    'w': 'West', 'west': 'West',
+    'nw': 'Northwest', 'northwest': 'Northwest', 'north west': 'Northwest',
+    'far': 'Far',
+    'home': 'Home',
+    'office': 'Office'
+  };
+
+  return dirMap[str] || null;
+}
+
+
