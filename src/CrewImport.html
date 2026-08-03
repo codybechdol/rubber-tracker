@@ -7736,15 +7736,12 @@
         var emp = employeeList[i];
         var empName = (emp.name || '').toLowerCase().trim();
 
-        // Skip non-field employees unless includeNonField is true
-        if (!includeNonField && isNonFieldEmployee(emp)) continue;
-
-        // Exact match on primary name - highest priority
+        // Exact match on primary name - highest priority (allows exact rehire matching)
         if (normalizedName === empName) {
           return { employeeName: emp.name, confidence: 100, employeeData: emp };
         }
 
-        // Alternate name exact match - treated as 100% confidence
+        // Alternate name exact match - treated as 100% confidence (allows exact nickname rehire matching)
         if (emp.alternateNames) {
           var altNames = String(emp.alternateNames).split(',');
           for (var an = 0; an < altNames.length; an++) {
@@ -7753,6 +7750,9 @@
             }
           }
         }
+
+        // Skip non-field employees for fuzzy matching unless includeNonField is true
+        if (!includeNonField && isNonFieldEmployee(emp)) continue;
 
         // Parse employee name into first/last
         var empParts = empName.split(/\s+/);
@@ -7804,15 +7804,12 @@
         var emp = employeeList[i];
         var empName = (emp.name || '').toLowerCase().trim();
 
-        // Skip non-field employees unless includeNonField is true
-        if (!includeNonField && isNonFieldEmployee(emp)) continue;
-
-        // Exact match on primary name - highest priority
+        // Exact match on primary name - highest priority (allows exact rehire matching)
         if (normalizedName === empName) {
           return { employeeName: emp.name, confidence: 100, employeeData: emp };
         }
 
-        // Alternate name exact match - treated as 100% confidence
+        // Alternate name exact match - treated as 100% confidence (allows exact nickname rehire matching)
         if (emp.alternateNames) {
           var altNames = String(emp.alternateNames).split(',');
           for (var an = 0; an < altNames.length; an++) {
@@ -7821,6 +7818,9 @@
             }
           }
         }
+
+        // Skip non-field employees for fuzzy matching unless includeNonField is true
+        if (!includeNonField && isNonFieldEmployee(emp)) continue;
 
         // Parse employee name into first/last
         var empParts = empName.split(/\s+/);
@@ -8312,9 +8312,22 @@
       for (var i = 0; i < currentEmployees.length; i++) {
         var emp = currentEmployees[i];
         var empName = (emp.name || '').toLowerCase().trim();
+        var isPrev = (emp.location || '').toLowerCase() === 'previous employee';
 
-        // Skip Previous Employees
-        if ((emp.location || '').toLowerCase() === 'previous employee') continue;
+        // Check alternate names (nicknames) for match scoring
+        var altMatchScore = 0;
+        if (emp.alternateNames) {
+          var altNames = String(emp.alternateNames).split(',');
+          for (var an = 0; an < altNames.length; an++) {
+            var altClean = altNames[an].trim().toLowerCase();
+            if (altClean === normalizedName) {
+              altMatchScore = 100;
+              break;
+            } else if (altClean.indexOf(normalizedName) !== -1 || normalizedName.indexOf(altClean) !== -1) {
+              altMatchScore = 85;
+            }
+          }
+        }
 
         // Parse employee name
         var empParts = empName.split(/\s+/);
@@ -8331,15 +8344,17 @@
           firstNameSim = calculateSimilarity(searchFirst, empFirst);
         }
 
-        // Use looser threshold for potential matches
-        if (lastNameSim >= 60 || firstNameSim >= 60) {
-          var confidence = (firstNameSim * 0.5) + (lastNameSim * 0.5);
+        var confidence = Math.max(altMatchScore, Math.round((firstNameSim * 0.5) + (lastNameSim * 0.5)));
+
+        // Use looser threshold for potential matches (include Previous Employees for rehire)
+        if (confidence >= 60 || lastNameSim >= 60 || firstNameSim >= 60) {
           matches.push({
             name: emp.name,
-            location: emp.location,
+            location: isPrev ? 'Previous Employee (Rehire)' : emp.location,
             jobNum: emp.jobNum,
             rowIndex: emp.rowIndex,
-            similarity: Math.round(confidence),
+            similarity: confidence,
+            isPrevious: isPrev,
             employeeData: emp
           });
         }
@@ -8370,21 +8385,23 @@
       html += '</div>';
       html += '<div class="list-group" id="employee-list-' + escapeAttr(unmatchedKey) + '" style="max-height: 200px; overflow-y: auto;">';
 
-      // Show all non-matched employees, sorted alphabetically
+      // Show all non-matched employees, sorted alphabetically (including Previous Employees for rehire)
       var availableEmps = currentEmployees.filter(function(emp) {
         var isMatched = matchedSheetEmployees[emp.name.toLowerCase()];
-        var isPrevious = (emp.location || '').toLowerCase() === 'previous employee';
-        return !isMatched && !isPrevious;
+        return !isMatched;
       }).sort(function(a, b) {
         return a.name.localeCompare(b.name);
       });
 
       for (var i = 0; i < availableEmps.length; i++) {
         var emp = availableEmps[i];
+        var isPrev = (emp.location || '').toLowerCase() === 'previous employee';
+        var prevBadge = isPrev ? ' <span class="badge bg-secondary ms-1" style="font-size: 10px;">Previous Employee (Rehire)</span>' : '';
+        var searchTerms = (emp.name + ' ' + (emp.alternateNames || '')).toLowerCase();
         html += '<button type="button" class="list-group-item list-group-item-action py-1 employee-option" ';
-        html += 'data-name="' + escapeHtml(emp.name.toLowerCase()) + '" ';
+        html += 'data-name="' + escapeHtml(searchTerms) + '" ';
         html += 'onclick="manuallyMatchEmployee(\'' + escapeAttr(unmatchedKey) + '\', ' + emp.rowIndex + ', \'' + escapeQuotes(emp.name) + '\')">';
-        html += '<small>' + escapeHtml(emp.name) + '</small>';
+        html += '<small>' + escapeHtml(emp.name) + prevBadge + '</small>';
         html += '</button>';
       }
 
@@ -8399,12 +8416,12 @@
       var searchInput = document.getElementById('employee-search-' + unmatchedKey);
       if (!searchInput) return;
 
-      var searchText = searchInput.value.toLowerCase();
+      var searchText = searchInput.value.toLowerCase().trim();
       var items = document.querySelectorAll('#employee-list-' + unmatchedKey + ' .employee-option');
 
       for (var i = 0; i < items.length; i++) {
-        var name = items[i].getAttribute('data-name');
-        if (name.indexOf(searchText) !== -1) {
+        var name = items[i].getAttribute('data-name') || '';
+        if (!searchText || name.indexOf(searchText) !== -1) {
           items[i].style.display = '';
         } else {
           items[i].style.display = 'none';

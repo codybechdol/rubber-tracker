@@ -89,13 +89,13 @@ function ensureLocationsInValidation(sheet, locationColNum, locationsToAdd) {
       sheet.getRange(2, locationColNum, lastRow - 1, 1).setDataValidation(newRule);
       SpreadsheetApp.flush(); // Force immediate execution to catch Google Table/typed column errors
     } catch (e) {
-      Logger.log('ensureLocationsInValidation: Table detected or range validation blocked. Trying fallback... ' + e.toString());
+      Logger.log('ensureLocationsInValidation: Table detected or range validation blocked (handled): ' + e.message);
       try {
         // In Google Tables, try setting it on just the column's first cell to trigger Table-wide validation
         sheet.getRange(2, locationColNum).setDataValidation(newRule);
         SpreadsheetApp.flush(); // Force immediate execution for fallback
       } catch (innerErr) {
-        Logger.log('ensureLocationsInValidation: Fallback failed: ' + innerErr.toString());
+        Logger.log('ensureLocationsInValidation: Google Table manages column validation schema. Range validation skipped.');
         // Do not fail adding new employee if data validation list update fails
       }
     }
@@ -410,12 +410,9 @@ function applyCrewChanges(changes) {
           date: change.date || todayStr
         });
         if (specResult && specResult.success) {
-          // Keep memory data array in sync so batch write doesn't overwrite termination!
+          // Remove deleted row from memory array so batch write doesn't restore or corrupt the deleted row!
           if (dataIdx !== -1 && dataIdx < data.length) {
-            data[dataIdx][locationCol] = 'Previous Employee';
-            data[dataIdx][jobNumCol] = '';
-            columnsModified.location = true;
-            columnsModified.jobNum = true;
+            data.splice(dataIdx, 1);
           }
           updatedCount++;
           historyLogged++;
@@ -496,7 +493,7 @@ function applyCrewChanges(changes) {
           if (classificationChanged) notes += 'Role: ' + (change.oldClassification || 'None') + ' → ' + change.newClassification + '.';
 
           historyRows.push([
-            todayStr,                    // Date
+            today,                       // Date (Date object for Google Tables typed column support)
             change.employeeName,         // Employee Name
             eventType,                   // Event Type
             change.newLocation || '',    // Location
