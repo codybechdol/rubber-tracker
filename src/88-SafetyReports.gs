@@ -5903,12 +5903,13 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     if (reportTypeFilter) {
       props.setProperty('SAFETY_BATCH_REPORT_TYPE_FILTER', reportTypeFilter);
     }
-    if (newOnlyMode && lastProcessedDate) {
-      // Use after: filter to only get emails newer than last processed
-      // Format: YYYY/MM/DD
-      // IMPORTANT: Go back 14 days prior to lastProcessedDate so un-logged emails from prior days
-      // are not permanently skipped if LAST_SAFETY_EMAIL_DATE was set on a day with no new emails.
-      // Duplicate prevention via memory-cached existingEmailIds handles already-logged emails instantly.
+    if (newOnlyMode) {
+      if (!lastProcessedDate) {
+        var fallbackDate = new Date();
+        fallbackDate.setDate(fallbackDate.getDate() - 30);
+        lastProcessedDate = Utilities.formatDate(fallbackDate, Session.getScriptTimeZone(), 'yyyy/MM/dd');
+        Logger.log('New-only mode: no prior lastProcessedDate found for ' + reportTypeFilter + ', defaulting to 30 days ago: ' + lastProcessedDate);
+      }
       var lastDate = new Date(lastProcessedDate.replace(/\//g, '-'));
       lastDate.setDate(lastDate.getDate() - 14); // 14-day safety window
       var filterDate = Utilities.formatDate(lastDate, Session.getScriptTimeZone(), 'yyyy/MM/dd');
@@ -6663,7 +6664,7 @@ function runSafetyEmailPostProcessing(reportTypeFilter, prevResult) {
 
     // Auto-cleanup
     try {
-      var cleanupResult = autoComplianceCleanup(true);
+      var cleanupResult = autoComplianceCleanup(true, reportTypeFilter);
       Logger.log("Auto-cleanup complete - LogFixes: JHA=" + cleanupResult.logsFixes.jha +
                  ", Weekly=" + cleanupResult.logsFixes.weekly +
                  ", NonConfigRemoved=" + cleanupResult.nonConfigRemoved);
@@ -16766,49 +16767,7 @@ function findNonConfigCrewsInCurrentWeek(ss, currentWeekStart, config, tz) {
   return nonConfigCrews;
 }
 
-/**
- * Helper: Remove non-config crews from current week (silent, no UI)
- */
-function removeNonConfigCrewsFromCurrentWeekSilent(ss, currentWeekStart, config, tz) {
-  var sheet = ss.getSheetByName('Safety Compliance');
-  if (!sheet || sheet.getLastRow() < 2) return 0;
-
-  var currentWeekKey = Utilities.formatDate(currentWeekStart, tz, 'yyyy-MM-dd');
-  var data = sheet.getDataRange().getValues();
-  var rowsToDelete = [];
-
-  for (var i = data.length - 1; i >= 1; i--) {
-    var rowWeek = data[i][0];
-    var rowJob = String(data[i][1] || '').trim();
-
-    if (!rowWeek || !rowJob) continue;
-
-    var rowWeekKey = Utilities.formatDate(new Date(rowWeek), tz, 'yyyy-MM-dd');
-
-    if (rowWeekKey === currentWeekKey && !config[rowJob]) {
-      rowsToDelete.push(i + 1);
-    }
-  }
-
-  for (var r = 0; r < rowsToDelete.length; r++) {
-    sheet.deleteRow(rowsToDelete[r]);
-  }
-
-  return rowsToDelete.length;
-}
-
-/**
- * Lightweight auto-cleanup that runs at end of processSafetyEmails
- * Does NOT show UI dialogs - runs silently
- * Only fixes current + previous week (not all weeks)
-/**
-/**
- * Auto-cleanup: Fix log entries and remove non-config crews from current week.
- * Runs silently at the end of processSafetyEmails.
- * @param {boolean} skipSyncCrews - If true, skip the syncCrews step (already done by caller)
- * @returns {Object} - Results of cleanup operations
- */
-function autoComplianceCleanup(skipSyncCrews) {
+function autoComplianceCleanup(skipSyncCrews, reportTypeFilter) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var tz = Session.getScriptTimeZone();
   var results = {
@@ -16861,13 +16820,20 @@ function autoComplianceCleanup(skipSyncCrews) {
       Logger.log('autoComplianceCleanup: Non-config removal error (non-fatal): ' + e.toString());
     }
 
-    // Step 4: Re-apply Gmail hyperlinks to all log sheets (ensures links are active and clickable)
+    // Step 4: Re-apply Gmail hyperlinks to log sheets matching target filter type
     try {
-      applyJHALogEmailLinksSilent();
-      applyWeeklySafetyLogEmailLinksSilent();
-      applyMonthlyChecklistLogEmailLinksSilent();
+      var filter = (reportTypeFilter || 'ALL').toUpperCase();
+      if (filter === 'ALL' || filter === 'JHA') {
+        applyJHALogEmailLinksSilent();
+      }
+      if (filter === 'ALL' || filter === 'WEEKLY') {
+        applyWeeklySafetyLogEmailLinksSilent();
+      }
+      if (filter === 'ALL' || filter === 'MONTHLY') {
+        applyMonthlyChecklistLogEmailLinksSilent();
+      }
       applySafetyEquipmentEmailLinksSilent();
-      Logger.log('autoComplianceCleanup: Re-applied Gmail hyperlinks across all log sheets');
+      Logger.log('autoComplianceCleanup: Re-applied Gmail hyperlinks for filter=' + filter);
     } catch (e) {
       Logger.log('autoComplianceCleanup: Link re-apply error (non-fatal): ' + e.toString());
     }
