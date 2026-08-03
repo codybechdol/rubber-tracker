@@ -18553,6 +18553,8 @@ function generateAllReportsPart3() {
  */
 function startGenerateAllReportsInBackground() {
   try {
+    PropertiesService.getScriptProperties().setProperty('GENERATE_ALL_REPORTS_STATUS', 'RUNNING');
+
     ScriptApp.newTrigger('executeGenerateAllReportsBackgroundJob')
       .timeBased()
       .after(100)
@@ -18563,6 +18565,19 @@ function startGenerateAllReportsInBackground() {
   } catch (e) {
     logEvent('startGenerateAllReportsInBackground ERROR: ' + e, 'ERROR');
     return { success: false, error: e.toString() };
+  }
+}
+
+/**
+ * Returns current background execution status for Generate All Reports.
+ * Called by QuickActions sidebar to display spinning arrows or checkmark.
+ */
+function getGenerateAllReportsStatus() {
+  try {
+    var status = PropertiesService.getScriptProperties().getProperty('GENERATE_ALL_REPORTS_STATUS') || 'IDLE';
+    return { status: status };
+  } catch (e) {
+    return { status: 'IDLE' };
   }
 }
 
@@ -18595,8 +18610,10 @@ function executeGenerateAllReportsBackgroundJob(e) {
     generateAllReportsPart2();
     generateAllReportsPart3();
 
+    PropertiesService.getScriptProperties().setProperty('GENERATE_ALL_REPORTS_STATUS', 'COMPLETE');
     logEvent('executeGenerateAllReportsBackgroundJob: COMPLETE - All reports generated in background.');
   } catch (err) {
+    PropertiesService.getScriptProperties().setProperty('GENERATE_ALL_REPORTS_STATUS', 'ERROR: ' + err);
     logEvent('executeGenerateAllReportsBackgroundJob ERROR: ' + err, 'ERROR');
   } finally {
     try { lock.releaseLock(); } catch (lErr) {}

@@ -16,6 +16,15 @@
     .step-btn:hover:not(:disabled) { background: #e8f0fe; border-color: #1a73e8; }
     .step-btn:disabled { opacity: 0.5; cursor: not-allowed; }
     .step-btn.running { background: #e8f0fe; border-color: #1a73e8; }
+    .step-btn.running .step-num { background: #1a73e8; }
+    .step-btn.running .step-num::after {
+      content: '↻';
+      display: inline-block;
+      font-size: 13px;
+      line-height: 1;
+      animation: spin 1s linear infinite;
+    }
+    .step-btn.running .step-num span { display: none; }
     .step-btn.done { background: #e6f4ea; border-color: #34a853; }
     .step-num {
       width: 22px; height: 22px; background: #1a73e8; color: white; border-radius: 50%;
@@ -25,6 +34,7 @@
     .step-btn.done .step-num { background: #34a853; }
     .step-btn.done .step-num::after { content: '✓'; }
     .step-btn.done .step-num span { display: none; }
+    @keyframes spin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
     .step-text { flex: 1; }
     .step-subtitle { font-size: 10px; color: #5f6368; margin-top: 1px; }
     .divider { height: 1px; background: #dadce0; margin: 14px 0; }
@@ -391,6 +401,58 @@
         })
         .addManualScheduleTask(taskData);
     }
+
+    // ── BACKGROUND REPORT STATUS TRACKING ───────────────────────────────────
+    var bgPollInterval = null;
+
+    function checkBackgroundReportStatus() {
+      google.script.run
+        .withSuccessHandler(function(res) {
+          var step3 = document.getElementById('step3');
+          if (!step3) return;
+
+          if (res && res.status === 'RUNNING') {
+            // Background job is currently running on Google servers!
+            step3.classList.remove('done');
+            step3.classList.add('running');
+            showStatus('⚡ Generate All Reports running in background...');
+
+            // Poll status every 3 seconds
+            if (!bgPollInterval) {
+              bgPollInterval = setInterval(checkBackgroundReportStatus, 3000);
+            }
+          } else if (res && res.status === 'COMPLETE') {
+            // Background job completed
+            if (bgPollInterval) {
+              clearInterval(bgPollInterval);
+              bgPollInterval = null;
+            }
+            if (step3.classList.contains('running')) {
+              step3.classList.remove('running');
+              step3.classList.add('done');
+              showStatus('✓ Background report generation complete!', 'success');
+              setTimeout(hideStatus, 4000);
+            }
+          } else {
+            // Idle or Error
+            if (bgPollInterval) {
+              clearInterval(bgPollInterval);
+              bgPollInterval = null;
+            }
+            if (step3.classList.contains('running')) {
+              step3.classList.remove('running');
+              hideStatus();
+            }
+          }
+        })
+        .withFailureHandler(function(err) {
+          console.warn('checkBackgroundReportStatus failure:', err);
+        })
+        .getGenerateAllReportsStatus();
+    }
+
+    // Initial background status check on load
+    checkBackgroundReportStatus();
   </script>
 </body>
 </html>
