@@ -409,56 +409,79 @@
     }
 
     // ── BACKGROUND REPORT STATUS TRACKING ───────────────────────────────────
+    // ── BACKGROUND REPORT STATUS TRACKING ───────────────────────────────────
+    var bgPollingTimer = null;
+
     function checkBackgroundReportStatus() {
-      // 1. Generate All Reports status (Step 3)
-      google.script.run
-        .withSuccessHandler(function(res) {
-          var step3 = document.getElementById('step3');
-          if (!step3) return;
-
-          if (res && res.status === 'RUNNING') {
-            step3.classList.remove('done');
-            step3.classList.add('running');
-            showStatus('⚡ Generate All Reports running in background...');
-          } else if (res && res.status === 'COMPLETE') {
-            if (step3.classList.contains('running')) {
-              step3.classList.remove('running');
-              step3.classList.add('done');
-              showStatus('✓ Background report generation complete!', 'success');
-              setTimeout(hideStatus, 4000);
-            }
-          } else if (step3.classList.contains('running')) {
-            step3.classList.remove('running');
-            hideStatus();
-          }
-        })
-        .withFailureHandler(function(err) {
-          console.warn('checkBackgroundReportStatus failure (Step 3):', err);
-        })
-        .getGenerateAllReportsStatus();
-
-      // 2. Safety Emails status (Steps 4, 5, 6)
       google.script.run
         .withSuccessHandler(function(res) {
           if (!res) return;
-          updateStepStatus(4, res.jha === 'RUNNING' || res.all === 'RUNNING', res.jha === 'COMPLETE' || res.all === 'COMPLETE', 'JHA Emails', 'JHA');
-          updateStepStatus(5, res.weekly === 'RUNNING' || res.all === 'RUNNING', res.weekly === 'COMPLETE' || res.all === 'COMPLETE', 'Weekly Safety Emails', 'WEEKLY');
-          updateStepStatus(6, res.monthly === 'RUNNING' || res.all === 'RUNNING', res.monthly === 'COMPLETE' || res.all === 'COMPLETE', 'Monthly Checklist Emails', 'MONTHLY');
+
+          var anyRunning = false;
+
+          // 1. Generate All Reports status (Step 3)
+          var step3 = document.getElementById('step3');
+          if (step3) {
+            if (res.generateAllReports === 'RUNNING') {
+              anyRunning = true;
+              step3.classList.remove('done');
+              step3.classList.add('running');
+              showStatus('⚡ Generate All Reports running in background...');
+            } else if (res.generateAllReports === 'COMPLETE') {
+              if (step3.classList.contains('running')) {
+                step3.classList.remove('running');
+                step3.classList.add('done');
+                showStatus('✓ Background report generation complete!', 'success');
+                setTimeout(hideStatus, 4000);
+              }
+            } else if (step3.classList.contains('running')) {
+              step3.classList.remove('running');
+              hideStatus();
+            }
+          }
+
+          // 2. Safety Emails status (Steps 4, 5, 6)
+          if (updateStepStatus(4, res.jha === 'RUNNING' || res.safetyAll === 'RUNNING', res.jha === 'COMPLETE' || res.safetyAll === 'COMPLETE', 'JHA Emails', 'JHA')) {
+            anyRunning = true;
+          }
+          if (updateStepStatus(5, res.weekly === 'RUNNING' || res.safetyAll === 'RUNNING', res.weekly === 'COMPLETE' || res.safetyAll === 'COMPLETE', 'Weekly Safety Emails', 'WEEKLY')) {
+            anyRunning = true;
+          }
+          if (updateStepStatus(6, res.monthly === 'RUNNING' || res.safetyAll === 'RUNNING', res.monthly === 'COMPLETE' || res.safetyAll === 'COMPLETE', 'Monthly Checklist Emails', 'MONTHLY')) {
+            anyRunning = true;
+          }
+
+          // SMART POLLING: Only schedule next poll if at least ONE job is currently RUNNING!
+          if (anyRunning) {
+            if (bgPollingTimer) clearTimeout(bgPollingTimer);
+            bgPollingTimer = setTimeout(checkBackgroundReportStatus, 5000);
+          } else {
+            // STOP POLLING COMPLETELY when idle! Zero server executions logged!
+            if (bgPollingTimer) {
+              clearTimeout(bgPollingTimer);
+              bgPollingTimer = null;
+            }
+          }
         })
         .withFailureHandler(function(err) {
-          console.warn('checkBackgroundReportStatus failure (Steps 4-6):', err);
+          console.warn('checkBackgroundReportStatus error:', err);
+          if (bgPollingTimer) {
+            clearTimeout(bgPollingTimer);
+            bgPollingTimer = null;
+          }
         })
-        .getSafetyEmailsStatus();
+        .getAllBackgroundStatuses();
     }
 
     function updateStepStatus(stepNum, isRunning, isComplete, label, filterType) {
       var btn = document.getElementById('step' + stepNum);
-      if (!btn) return;
+      if (!btn) return isRunning;
 
       if (isRunning) {
         btn.classList.remove('done');
         btn.classList.add('running');
         showStatus('⚡ ' + label + ' processing in background...');
+        return true;
       } else if (isComplete) {
         if (btn.classList.contains('running')) {
           btn.classList.remove('running');
@@ -470,15 +493,23 @@
             google.script.run.showProcessSafetyEmailsDialogWithResults(filterType);
           }, 1200);
         }
+        return false;
       } else if (btn.classList.contains('running')) {
         btn.classList.remove('running');
         hideStatus();
+        return false;
       }
+      return false;
     }
 
-    // Check background status immediately and poll continuously every 3 seconds while sidebar is open
+    // Function called when a background job is started from a dialog
+    function triggerBackgroundPolling() {
+      if (bgPollingTimer) clearTimeout(bgPollingTimer);
+      bgPollingTimer = setTimeout(checkBackgroundReportStatus, 1500);
+    }
+
+    // Initial single check on sidebar load (only starts loop if a job is actively RUNNING)
     checkBackgroundReportStatus();
-    setInterval(checkBackgroundReportStatus, 3000);
   </script>
 </body>
 </html>

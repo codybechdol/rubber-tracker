@@ -18582,6 +18582,31 @@ function getGenerateAllReportsStatus() {
 }
 
 /**
+ * Returns combined status for ALL background jobs in a single call.
+ * Eliminates repetitive polling executions in Google Apps Script log when idle.
+ */
+function getAllBackgroundStatuses() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    return {
+      generateAllReports: props.getProperty('GENERATE_ALL_REPORTS_STATUS') || 'IDLE',
+      jha: props.getProperty('SAFETY_EMAILS_STATUS_JHA') || 'IDLE',
+      weekly: props.getProperty('SAFETY_EMAILS_STATUS_WEEKLY') || 'IDLE',
+      monthly: props.getProperty('SAFETY_EMAILS_STATUS_MONTHLY') || 'IDLE',
+      safetyAll: props.getProperty('SAFETY_EMAILS_STATUS_ALL') || 'IDLE'
+    };
+  } catch (e) {
+    return {
+      generateAllReports: 'IDLE',
+      jha: 'IDLE',
+      weekly: 'IDLE',
+      monthly: 'IDLE',
+      safetyAll: 'IDLE'
+    };
+  }
+}
+
+/**
  * Background worker triggered by 1-shot trigger.
  * Runs Parts 1, 2, and 3 sequentially and cleans up the trigger.
  */
