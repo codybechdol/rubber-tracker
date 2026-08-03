@@ -54,12 +54,28 @@ function syncInventoryLocations() {
     nameToLocation['not repairable'] = 'Destroyed';
     nameToLocation['lost'] = 'Lost';
 
+    // Find Alternate Names column
+    var altNamesColIdx = -1;
+    for (var h = 0; h < empHeaders.length; h++) {
+      var hdr = String(empHeaders[h]).trim().toLowerCase();
+      if (hdr === 'alternate names' || hdr === 'alternatenames') altNamesColIdx = h;
+    }
+
     // Add current employees
     for (var i = 1; i < empData.length; i++) {
       var name = (empData[i][nameColIdx] || '').toString().trim().toLowerCase();
       var loc = (empData[i][locationColIdx] || '').toString().trim();
       if (name && loc) {
-        nameToLocation[name] = getPhysicalLocation(loc);
+        var physLoc = getPhysicalLocation(loc);
+        nameToLocation[name] = physLoc;
+        // Also register alternate names (e.g. Josh Roberts -> Joshua Roberts)
+        if (altNamesColIdx !== -1 && empData[i][altNamesColIdx]) {
+          var alts = String(empData[i][altNamesColIdx]).split(';');
+          for (var a = 0; a < alts.length; a++) {
+            var alt = alts[a].trim().toLowerCase();
+            if (alt && !nameToLocation[alt]) nameToLocation[alt] = physLoc;
+          }
+        }
       }
     }
 
