@@ -261,7 +261,7 @@
       document.getElementById('reprocessStartDate').value = currentYear + '-01-01';
 
       // Pre-load background completion results if passed from server
-      var bgResultRaw = "<?= bgResultJson ?>";
+      var bgResultRaw = <?!= JSON.stringify(typeof bgResultJson !== 'undefined' ? bgResultJson : '') ?>;
       if (bgResultRaw && bgResultRaw.indexOf('{') !== -1) {
         try {
           var bgResult = JSON.parse(bgResultRaw);

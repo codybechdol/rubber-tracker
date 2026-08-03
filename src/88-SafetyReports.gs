@@ -6810,6 +6810,7 @@ function showProcessSafetyEmailsDialog(reportTypeFilter) {
   var template = HtmlService.createTemplateFromFile('ProcessSafetyEmailsDialog');
   var filter = (typeof reportTypeFilter === 'string' && reportTypeFilter) ? reportTypeFilter : 'ALL';
   template.initialReportType = filter;
+  template.bgResultJson = '';
   var html = template.evaluate()
     .setWidth(550)
     .setHeight(700);
