@@ -1633,7 +1633,30 @@
         .saveScheduleTaskDateChanges(changes);
     }
 
-    function loadTasks() {
+    function loadTasks(forceRefresh) {
+      if (!forceRefresh) {
+        // FAST PATH: Fetch cached task data from ScriptProperties (< 1 second)
+        google.script.run
+          .withSuccessHandler(function(storedData) {
+            if (storedData && storedData.tasks && !storedData.error) {
+              console.log('loadTasks: Fast path loaded ' + storedData.tasks.length + ' tasks from cache');
+              processTaskData(storedData);
+            } else {
+              console.log('loadTasks: Cache empty or error, running full metadata fetch...');
+              fetchFullTasksWithMetadata();
+            }
+          })
+          .withFailureHandler(function(err) {
+            console.warn('loadTasks: Fast path failed, falling back to full metadata:', err);
+            fetchFullTasksWithMetadata();
+          })
+          .getStoredTasks();
+      } else {
+        fetchFullTasksWithMetadata();
+      }
+    }
+
+    function fetchFullTasksWithMetadata() {
       google.script.run
         .withSuccessHandler(function(response) {
 
@@ -2844,12 +2867,26 @@
           });
           saveChecklistToStorage();
 
-          // Refresh UI
-          loadExpiringCerts();
+          // Update cert in local allExpiringCerts array so UI updates instantly without reloading entire tab
+          var certToUpdate = allExpiringCerts.find(function(c) {
+            return c.employee === employee && (c.certType === certType || c.itemType === certType);
+          });
+          if (certToUpdate) {
+            if (newExpiration) certToUpdate.expirationDate = newExpiration;
+            if (acquiredDate) certToUpdate.dateAcquired = acquiredDate;
+            certToUpdate.status = getCertStatus(certToUpdate);
+          }
+
+          // Refresh UI instantly
+          populateCertFilters();
+          renderExpiringCerts();
           renderTasks(allTasks);
           renderCalendar();
           renderPersonalChecklist();
           updateChecklistBadge();
+
+          // Sync server state in background silently (no loading spinner wipeout)
+          loadExpiringCertsSilent();
         })
         .withFailureHandler(function(error) {
           console.error('saveCertExpiration: Error!', error);
@@ -2990,7 +3027,7 @@
     function refreshData() {
       document.getElementById('crewViewContainer').innerHTML = '<div class="loading"><div class="spinner-border text-primary"></div><p class="mt-3">Refreshing...</p></div>';
       jobContext = null; // Force job context reload
-      loadTasks();
+      loadTasks(true);
     }
 
     function showToast(message, type, duration) {
@@ -6025,6 +6062,19 @@
         .getExpiringCertsForSchedule();
     }
 
+    function loadExpiringCertsSilent() {
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result && result.certs) {
+            allExpiringCerts = result.certs;
+            enrichCertsWithMetadataStatus();
+            populateCertFilters();
+            renderExpiringCerts();
+          }
+        })
+        .getExpiringCertsForSchedule();
+    }
+
     // Phase 5: Add certs from personalChecklist to allTasks so they appear in Task List
     // Also syncs localStorage items to Task Metadata on server
     function addChecklistCertsToAllTasks() {
@@ -6120,6 +6170,12 @@
     }
 
     function populateCertFilters() {
+      // Preserve currently selected filter values so updates don't reset filters
+      var curStatus = certFilterState.status || (document.getElementById('certFilterStatus') ? document.getElementById('certFilterStatus').value : '');
+      var curType = certFilterState.type || (document.getElementById('certFilterType') ? document.getElementById('certFilterType').value : '');
+      var curLoc = certFilterState.location || (document.getElementById('certFilterLocation') ? document.getElementById('certFilterLocation').value : '');
+      var curEmp = certFilterState.employee || (document.getElementById('certFilterEmployee') ? document.getElementById('certFilterEmployee').value : '');
+
       // Populate cert type filter
       var certTypes = new Set();
       var locations = new Set();
@@ -6131,22 +6187,38 @@
       });
 
       var typeSelect = document.getElementById('certFilterType');
-      typeSelect.innerHTML = '<option value="">All Cert Types</option>';
-      Array.from(certTypes).sort().forEach(function(type) {
-        typeSelect.innerHTML += '<option value="' + type + '">' + type + '</option>';
-      });
+      if (typeSelect) {
+        typeSelect.innerHTML = '<option value="">All Cert Types</option>';
+        Array.from(certTypes).sort().forEach(function(type) {
+          typeSelect.innerHTML += '<option value="' + type + '">' + type + '</option>';
+        });
+        typeSelect.value = curType;
+      }
 
       var locSelect = document.getElementById('certFilterLocation');
-      locSelect.innerHTML = '<option value="">All Locations</option>';
-      Array.from(locations).sort().forEach(function(loc) {
-        locSelect.innerHTML += '<option value="' + loc + '">' + loc + '</option>';
-      });
+      if (locSelect) {
+        locSelect.innerHTML = '<option value="">All Locations</option>';
+        Array.from(locations).sort().forEach(function(loc) {
+          locSelect.innerHTML += '<option value="' + loc + '">' + loc + '</option>';
+        });
+        locSelect.value = curLoc;
+      }
 
       var empSelect = document.getElementById('certFilterEmployee');
-      empSelect.innerHTML = '<option value="">All Employees</option>';
-      Array.from(employees).sort().forEach(function(emp) {
-        empSelect.innerHTML += '<option value="' + emp + '">' + emp + '</option>';
-      });
+      if (empSelect) {
+        empSelect.innerHTML = '<option value="">All Employees</option>';
+        Array.from(employees).sort().forEach(function(emp) {
+          empSelect.innerHTML += '<option value="' + emp + '">' + emp + '</option>';
+        });
+        empSelect.value = curEmp;
+      }
+
+      var statusSelect = document.getElementById('certFilterStatus');
+      if (statusSelect) {
+        statusSelect.value = curStatus;
+      }
+
+      certFilterState = { status: curStatus, type: curType, location: curLoc, employee: curEmp };
     }
 
     function applyCertFilters() {
