@@ -311,8 +311,8 @@
       showStatus('⏳ Opening ' + label + '...');
       var serverFunc = filterType === 'JHA' ? 'showProcessJHAEmailsDialog' : (filterType === 'WEEKLY' ? 'showProcessWeeklySafetyEmailsDialog' : 'showProcessMonthlyChecklistDialog');
       google.script.run.withSuccessHandler(function() {
-        if (btn) { btn.classList.remove('running'); btn.classList.add('done'); }
-        hideStatus();
+        if (btn) btn.disabled = false;
+        checkBackgroundReportStatus();
       }).withFailureHandler(function(e) {
         if (btn) btn.classList.remove('running');
         showStatus('Error: ' + e, 'error');
@@ -410,36 +410,66 @@
 
     // ── BACKGROUND REPORT STATUS TRACKING ───────────────────────────────────
     function checkBackgroundReportStatus() {
+      // 1. Generate All Reports status (Step 3)
       google.script.run
         .withSuccessHandler(function(res) {
           var step3 = document.getElementById('step3');
           if (!step3) return;
 
           if (res && res.status === 'RUNNING') {
-            // Background job is currently running on Google servers!
             step3.classList.remove('done');
             step3.classList.add('running');
             showStatus('⚡ Generate All Reports running in background...');
           } else if (res && res.status === 'COMPLETE') {
-            // Background job completed
             if (step3.classList.contains('running')) {
               step3.classList.remove('running');
               step3.classList.add('done');
               showStatus('✓ Background report generation complete!', 'success');
               setTimeout(hideStatus, 4000);
             }
-          } else {
-            // Idle or Error
-            if (step3.classList.contains('running')) {
-              step3.classList.remove('running');
-              hideStatus();
-            }
+          } else if (step3.classList.contains('running')) {
+            step3.classList.remove('running');
+            hideStatus();
           }
         })
         .withFailureHandler(function(err) {
-          console.warn('checkBackgroundReportStatus failure:', err);
+          console.warn('checkBackgroundReportStatus failure (Step 3):', err);
         })
         .getGenerateAllReportsStatus();
+
+      // 2. Safety Emails status (Steps 4, 5, 6)
+      google.script.run
+        .withSuccessHandler(function(res) {
+          if (!res) return;
+          updateStepStatus(4, res.jha === 'RUNNING' || res.all === 'RUNNING', res.jha === 'COMPLETE' || res.all === 'COMPLETE', 'JHA Emails');
+          updateStepStatus(5, res.weekly === 'RUNNING' || res.all === 'RUNNING', res.weekly === 'COMPLETE' || res.all === 'COMPLETE', 'Weekly Safety Emails');
+          updateStepStatus(6, res.monthly === 'RUNNING' || res.all === 'RUNNING', res.monthly === 'COMPLETE' || res.all === 'COMPLETE', 'Monthly Checklist Emails');
+        })
+        .withFailureHandler(function(err) {
+          console.warn('checkBackgroundReportStatus failure (Steps 4-6):', err);
+        })
+        .getSafetyEmailsStatus();
+    }
+
+    function updateStepStatus(stepNum, isRunning, isComplete, label) {
+      var btn = document.getElementById('step' + stepNum);
+      if (!btn) return;
+
+      if (isRunning) {
+        btn.classList.remove('done');
+        btn.classList.add('running');
+        showStatus('⚡ ' + label + ' processing in background...');
+      } else if (isComplete) {
+        if (btn.classList.contains('running')) {
+          btn.classList.remove('running');
+          btn.classList.add('done');
+          showStatus('✓ ' + label + ' processing complete!', 'success');
+          setTimeout(hideStatus, 4000);
+        }
+      } else if (btn.classList.contains('running')) {
+        btn.classList.remove('running');
+        hideStatus();
+      }
     }
 
     // Check background status immediately and poll continuously every 3 seconds while sidebar is open

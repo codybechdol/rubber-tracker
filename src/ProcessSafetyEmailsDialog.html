@@ -144,8 +144,10 @@
     <option value="90">90 days</option>
     <option value="180">180 days (6 months)</option>
     <option value="365">365 days (1 year)</option>
-  </select>
-  <button id="processBtn" onclick="processEmails()">Start Processing</button>
+  <div style="display:flex; gap:8px;">
+    <button id="processBtn" onclick="processEmails()" style="flex:1;">Start Processing</button>
+    <button id="bgProcessBtn" onclick="processEmailsInBackground()" style="flex:1; background:#5f6368;">⚡ Run in Background</button>
+  </div>
   <button id="continueBtn" onclick="continueProcessing()" class="success" style="display:none;">▶ Continue Processing</button>
   <div style="margin-top: 15px; border-top: 1px solid #ddd; padding-top: 10px;">
     <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
@@ -217,6 +219,24 @@
     var currentReportTypeFilter = "<?= initialReportType ?>";
     if (currentReportTypeFilter !== "JHA" && currentReportTypeFilter !== "WEEKLY" && currentReportTypeFilter !== "MONTHLY") {
       currentReportTypeFilter = "ALL";
+    }
+
+    function processEmailsInBackground() {
+      var daysBack = document.getElementById('daysBack').value;
+      var newOnly = document.getElementById('newOnlyMode').checked;
+      var fastMode = document.getElementById('fastMode').checked;
+      var startDate = document.getElementById('reprocessStartDate').value;
+      var endDate = document.getElementById('reprocessEndDate').value;
+
+      google.script.run.startProcessSafetyEmailsInBackground(
+        currentReportTypeFilter,
+        daysBack,
+        newOnly,
+        fastMode,
+        startDate,
+        endDate
+      );
+      google.script.host.close();
     }
     var currentDays = 7;
     var newOnlyMode = true;

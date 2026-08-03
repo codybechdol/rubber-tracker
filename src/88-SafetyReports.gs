@@ -6833,6 +6833,116 @@ function showProcessMonthlyChecklistDialog() {
 }
 
 /**
+ * Triggers background safety email processing using a 1-shot time-driven trigger.
+ */
+function startProcessSafetyEmailsInBackground(reportTypeFilter, daysBack, newOnlyMode, fastMode, startDate, endDate) {
+  try {
+    var filter = (typeof reportTypeFilter === 'string' && reportTypeFilter) ? reportTypeFilter.toUpperCase() : 'ALL';
+    var propKey = 'SAFETY_EMAILS_STATUS_' + filter;
+    PropertiesService.getScriptProperties().setProperty(propKey, 'RUNNING');
+    PropertiesService.getScriptProperties().setProperty('SAFETY_EMAILS_STATUS_ALL', 'RUNNING');
+
+    var params = {
+      filterType: filter,
+      daysBack: Number(daysBack) || 7,
+      newOnlyMode: newOnlyMode === true || newOnlyMode === 'true',
+      fastMode: fastMode === true || fastMode === 'true',
+      startDate: startDate || '',
+      endDate: endDate || ''
+    };
+    PropertiesService.getScriptProperties().setProperty('BG_SAFETY_EMAIL_PARAMS', JSON.stringify(params));
+
+    ScriptApp.newTrigger('executeProcessSafetyEmailsBackgroundJob')
+      .timeBased()
+      .after(100)
+      .create();
+
+    logEvent('startProcessSafetyEmailsInBackground: Background trigger created for filter=' + filter);
+    return { success: true, message: 'Background email processing started for ' + filter };
+  } catch (e) {
+    logEvent('startProcessSafetyEmailsInBackground ERROR: ' + e, 'ERROR');
+    return { success: false, error: e.toString() };
+  }
+}
+
+/**
+ * Background worker for safety email processing.
+ */
+function executeProcessSafetyEmailsBackgroundJob(e) {
+  try {
+    if (e && e.triggerUid) {
+      var triggers = ScriptApp.getProjectTriggers();
+      for (var i = 0; i < triggers.length; i++) {
+        if (triggers[i].getUniqueId() === e.triggerUid) {
+          ScriptApp.deleteTrigger(triggers[i]);
+          break;
+        }
+      }
+    }
+  } catch (err) {}
+
+  var lock = LockService.getDocumentLock();
+  var paramsRaw = PropertiesService.getScriptProperties().getProperty('BG_SAFETY_EMAIL_PARAMS');
+  var params = paramsRaw ? JSON.parse(paramsRaw) : { filterType: 'ALL', daysBack: 7, newOnlyMode: true, fastMode: false };
+  var filter = params.filterType || 'ALL';
+  var propKey = 'SAFETY_EMAILS_STATUS_' + filter;
+
+  try {
+    lock.waitLock(10000);
+    logEvent('executeProcessSafetyEmailsBackgroundJob: STARTING background processing for ' + filter + '...');
+
+    PropertiesService.getScriptProperties().deleteProperty('SAFETY_BATCH_START');
+
+    var finished = false;
+    var maxIterations = 50;
+    var count = 0;
+
+    while (!finished && count < maxIterations) {
+      count++;
+      var result = processSafetyEmailsChunk(
+        params.daysBack,
+        15,
+        params.newOnlyMode,
+        params.fastMode,
+        params.startDate,
+        params.endDate,
+        filter
+      );
+      if (result && result.complete) {
+        finished = true;
+      }
+    }
+
+    PropertiesService.getScriptProperties().setProperty(propKey, 'COMPLETE');
+    PropertiesService.getScriptProperties().setProperty('SAFETY_EMAILS_STATUS_ALL', 'COMPLETE');
+    logEvent('executeProcessSafetyEmailsBackgroundJob: COMPLETE processing for ' + filter);
+  } catch (err) {
+    PropertiesService.getScriptProperties().setProperty(propKey, 'ERROR: ' + err);
+    PropertiesService.getScriptProperties().setProperty('SAFETY_EMAILS_STATUS_ALL', 'ERROR: ' + err);
+    logEvent('executeProcessSafetyEmailsBackgroundJob ERROR: ' + err, 'ERROR');
+  } finally {
+    try { lock.releaseLock(); } catch (lErr) {}
+  }
+}
+
+/**
+ * Returns background status for safety email processing (for Steps 4, 5, 6).
+ */
+function getSafetyEmailsStatus() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    return {
+      jha: props.getProperty('SAFETY_EMAILS_STATUS_JHA') || 'IDLE',
+      weekly: props.getProperty('SAFETY_EMAILS_STATUS_WEEKLY') || 'IDLE',
+      monthly: props.getProperty('SAFETY_EMAILS_STATUS_MONTHLY') || 'IDLE',
+      all: props.getProperty('SAFETY_EMAILS_STATUS_ALL') || 'IDLE'
+    };
+  } catch (e) {
+    return { jha: 'IDLE', weekly: 'IDLE', monthly: 'IDLE', all: 'IDLE' };
+  }
+}
+
+/**
  * Normalizes malformed job numbers from OCR or text extraction errors
  * Examples:
  *   "332-6" -> "033-26" (missing leading zero, truncated year)
