@@ -13940,6 +13940,7 @@ function refreshDriveTimesFromGoogleMaps() {
   var skippedBase = 0;
   var skippedRoutes = 0;
   var errors = 0;
+  var quotaExceededDetected = false;
 
   // --- Step 1: Helena → each city (only missing ones) ---
   if (missingHelena.length > 0) {
@@ -13948,10 +13949,27 @@ function refreshDriveTimesFromGoogleMaps() {
     if (lastLocRow > 0) {
       try { sheet.getRange(2, 2, lastLocRow, 1).clearDataValidations(); } catch(e) {}
     }
+
+    // Batch query Helena → all missing cities using Distance Matrix (1 API call!)
+    var helenaOrigins = [helenaMT];
+    var helenaDests = missingHelena.map(function(m) { return getAddress(m.name); });
+
+    var helenaMatrix = queryGoogleMapsMatrix_(helenaOrigins, helenaDests);
+    if (helenaMatrix && helenaMatrix.quotaExceeded) {
+      quotaExceededDetected = true;
+    }
+
     for (var j = 0; j < locations.length; j++) {
       var loc = locations[j];
       if (existingHelenaMap[loc.name]) { skippedBase++; continue; }
-      var mins = queryGoogleMapsMinutes_(helenaMT, getAddress(loc.name));
+      var locAddr = getAddress(loc.name);
+      var mins = (helenaMatrix && helenaMatrix.results[helenaMT + '|' + locAddr]) || 0;
+
+      // Fallback to single DirectionFinder query if matrix didn't return
+      if (mins === 0 && !quotaExceededDetected) {
+        mins = queryGoogleMapsMinutes_(helenaMT, locAddr);
+      }
+
       if (mins > 0) {
         try { sheet.getRange(loc.sheetRow, 2).setValue(mins); } catch(eWrite) {
           Logger.log('refreshDriveTimesFromGoogleMaps: could not write row ' + loc.sheetRow + ': ' + eWrite);
@@ -13960,33 +13978,81 @@ function refreshDriveTimesFromGoogleMaps() {
       } else {
         errors++;
       }
-      Utilities.sleep(300);
     }
   } else {
     skippedBase = locations.length;
   }
 
-  // --- Step 2: City-to-city pairs (only missing ones) ---
+  // --- Step 2: City-to-city pairs (only missing ones via Batch Distance Matrix) ---
   var newRoutePairs = [];
   if (missingPairs > 0) {
-    SpreadsheetApp.getActiveSpreadsheet().toast('Querying ' + missingPairs + ' missing route pairs…', 'Google Maps', -1);
+    SpreadsheetApp.getActiveSpreadsheet().toast('Querying ' + missingPairs + ' missing route pairs via Batch Matrix…', 'Google Maps', -1);
+
+    // Build list of missing pair objects
+    var missingList = [];
     for (var a = 0; a < locations.length; a++) {
       for (var b = a + 1; b < locations.length; b++) {
         var cityA = locations[a].name;
         var cityB = locations[b].name;
         var pairKey = cityA + '|' + cityB;
         if (existingRouteKeys[pairKey]) { skippedRoutes++; continue; }
-        var mins2 = queryGoogleMapsMinutes_(getAddress(cityA), getAddress(cityB));
+        missingList.push({
+          cityA: cityA,
+          cityB: cityB,
+          addrA: getAddress(cityA),
+          addrB: getAddress(cityB),
+          pairKey: pairKey
+        });
+      }
+    }
+
+    // Process missing pairs using Distance Matrix batching (chunks of 15 pairs)
+    if (missingList.length > 0) {
+      var allOrigins = [];
+      var allDests = [];
+      var uniqueOrigMap = {};
+      var uniqueDestMap = {};
+
+      missingList.forEach(function(p) {
+        if (!uniqueOrigMap[p.addrA]) { uniqueOrigMap[p.addrA] = true; allOrigins.push(p.addrA); }
+        if (!uniqueDestMap[p.addrB]) { uniqueDestMap[p.addrB] = true; allDests.push(p.addrB); }
+      });
+
+      // Split origins into batches of max 15 to stay within Distance Matrix API limits per request
+      var matrixResults = {};
+      var BATCH_SIZE = 15;
+
+      for (var oIdx = 0; oIdx < allOrigins.length; oIdx += BATCH_SIZE) {
+        var subOrigins = allOrigins.slice(oIdx, oIdx + BATCH_SIZE);
+        var subRes = queryGoogleMapsMatrix_(subOrigins, allDests);
+        if (subRes) {
+          if (subRes.quotaExceeded) quotaExceededDetected = true;
+          for (var rk in subRes.results) {
+            matrixResults[rk] = subRes.results[rk];
+          }
+        }
+      }
+
+      // Record results for each missing pair
+      missingList.forEach(function(p) {
+        var keyForward = p.addrA + '|' + p.addrB;
+        var keyReverse = p.addrB + '|' + p.addrA;
+        var mins2 = matrixResults[keyForward] || matrixResults[keyReverse] || 0;
+
+        // Fallback to single DirectionFinder if matrix didn't return and quota not exceeded
+        if (mins2 === 0 && !quotaExceededDetected) {
+          mins2 = queryGoogleMapsMinutes_(p.addrA, p.addrB);
+        }
+
         if (mins2 > 0) {
-          newRoutePairs.push([cityA, cityB, mins2, 'Google Maps']);
-          existingRouteKeys[pairKey] = true;
-          existingRouteKeys[cityB + '|' + cityA] = true;
+          newRoutePairs.push([p.cityA, p.cityB, mins2, 'Google Maps']);
+          existingRouteKeys[p.pairKey] = true;
+          existingRouteKeys[p.cityB + '|' + p.cityA] = true;
           updatedRoutes++;
         } else {
           errors++;
         }
-        Utilities.sleep(300);
-      }
+      });
     }
   } else {
     skippedRoutes = Math.round(locations.length * (locations.length - 1) / 2);
@@ -13999,15 +14065,69 @@ function refreshDriveTimesFromGoogleMaps() {
   }
 
   SpreadsheetApp.getActiveSpreadsheet().toast('Done!', 'Google Maps', 3);
+  var quotaMsg = quotaExceededDetected
+    ? '\n\n⚠️ Daily Google Maps quota reached (100 queries/day limit on free @gmail accounts). Remaining routes saved and cached.'
+    : (errors > 0 ? '\n\n⚠️ ' + errors + ' lookups failed.' : '');
+
   ui.alert(
     '✅ Drive Times Updated!',
     '• ' + updatedBase + ' Helena → city times updated' + (skippedBase > 0 ? ' (' + skippedBase + ' already had data, skipped)' : '') + '\n' +
-    '• ' + updatedRoutes + ' new city-to-city pairs added' + (skippedRoutes > 0 ? ' (' + skippedRoutes + ' already existed, skipped)' : '') + '\n' +
-    (errors > 0 ? '• ' + errors + ' lookups failed (quota may be exceeded — try again tomorrow)\n' : '') +
-    '\nTotal routes in Drive Time Routes sheet: ' + (skippedRoutes + updatedRoutes) + '\n' +
+    '• ' + updatedRoutes + ' new city-to-city pairs added' + (skippedRoutes > 0 ? ' (' + skippedRoutes + ' already existed, skipped)' : '') +
+    quotaMsg +
+    '\n\nTotal routes in Drive Time Routes sheet: ' + (skippedRoutes + updatedRoutes) + '\n' +
     'Open Trip Planner to see accurate day estimates.',
     ui.ButtonSet.OK
   );
+}
+
+/**
+ * Queries Google Maps Distance Matrix API for batch driving times between lists of origins and destinations.
+ * Uses Apps Script built-in Maps service — batches multiple locations into 1 API call to save quota.
+ *
+ * @param {Array<string>} origins - Array of origin address strings
+ * @param {Array<string>} destinations - Array of destination address strings
+ * @return {Object} { results: { 'Origin|Destination': mins }, quotaExceeded: boolean }
+ */
+function queryGoogleMapsMatrix_(origins, destinations) {
+  var output = { results: {}, quotaExceeded: false };
+  if (!origins || !origins.length || !destinations || !destinations.length) return output;
+
+  try {
+    var finder = Maps.newDistanceMatrixFinder()
+      .setMode(Maps.DirectionFinder.Mode.DRIVING);
+
+    for (var o = 0; o < origins.length; o++) finder.addOrigin(origins[o]);
+    for (var d = 0; d < destinations.length; d++) finder.addDestination(destinations[d]);
+
+    var response = finder.getDirections();
+    if (response && response.status === 'OK' && response.rows) {
+      for (var r = 0; r < response.rows.length; r++) {
+        var row = response.rows[r];
+        var origAddr = origins[r];
+        if (row && row.elements) {
+          for (var e = 0; e < row.elements.length; e++) {
+            var elem = row.elements[e];
+            var destAddr = destinations[e];
+            if (elem && elem.status === 'OK' && elem.duration && elem.duration.value) {
+              var mins = Math.round(elem.duration.value / 60);
+              output.results[origAddr + '|' + destAddr] = mins;
+              output.results[destAddr + '|' + origAddr] = mins;
+            }
+          }
+        }
+      }
+    } else if (response && (response.status === 'OVER_QUERY_LIMIT' || response.status === 'REQUEST_DENIED')) {
+      output.quotaExceeded = true;
+      Logger.log('queryGoogleMapsMatrix_: Quota exceeded (' + response.status + ')');
+    }
+  } catch (err) {
+    var errStr = String(err);
+    Logger.log('queryGoogleMapsMatrix_ error: ' + errStr);
+    if (errStr.indexOf('Quota') !== -1 || errStr.indexOf('invoked too many times') !== -1 || errStr.indexOf('OVER_QUERY_LIMIT') !== -1) {
+      output.quotaExceeded = true;
+    }
+  }
+  return output;
 }
 
 /**
