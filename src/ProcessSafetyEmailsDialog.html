@@ -259,6 +259,22 @@
       // Set default reprocess start date to Jan 1 of current year
       var currentYear = new Date().getFullYear();
       document.getElementById('reprocessStartDate').value = currentYear + '-01-01';
+
+      // Pre-load background completion results if passed from server
+      var bgResultRaw = "<?= bgResultJson ?>";
+      if (bgResultRaw && bgResultRaw.indexOf('{') !== -1) {
+        try {
+          var bgResult = JSON.parse(bgResultRaw);
+          console.log("Pre-loading background completion results:", bgResult);
+          var status = document.getElementById("status");
+          var progressContainer = document.getElementById("progressContainer");
+          if (status) status.style.display = "block";
+          if (progressContainer) progressContainer.style.display = "block";
+          handleBatchComplete(bgResult);
+        } catch (e) {
+          console.warn("Failed to parse bgResultJson:", e);
+        }
+      }
     });
 
     function loadLastProcessedTime() {
@@ -1711,6 +1727,8 @@
           var monthlyCount = (uncredited.monthly && uncredited.monthly.length) || 0;
           var totalUncredited = jhaCount + weeklyCount + monthlyCount;
 
+          google.script.run.finishSafetyEmailPostProcessing(currentReportTypeFilter);
+
           if (totalUncredited === 0) {
             google.script.host.close();
           } else {
@@ -1720,6 +1738,7 @@
         })
         .withFailureHandler(function(err) {
           console.error("Scan failed: ", err);
+          google.script.run.finishSafetyEmailPostProcessing(currentReportTypeFilter);
           google.script.host.close(); // Close anyway if script fails
         })
         .scanForUncreditedLogs();

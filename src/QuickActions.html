@@ -441,9 +441,9 @@
       google.script.run
         .withSuccessHandler(function(res) {
           if (!res) return;
-          updateStepStatus(4, res.jha === 'RUNNING' || res.all === 'RUNNING', res.jha === 'COMPLETE' || res.all === 'COMPLETE', 'JHA Emails');
-          updateStepStatus(5, res.weekly === 'RUNNING' || res.all === 'RUNNING', res.weekly === 'COMPLETE' || res.all === 'COMPLETE', 'Weekly Safety Emails');
-          updateStepStatus(6, res.monthly === 'RUNNING' || res.all === 'RUNNING', res.monthly === 'COMPLETE' || res.all === 'COMPLETE', 'Monthly Checklist Emails');
+          updateStepStatus(4, res.jha === 'RUNNING' || res.all === 'RUNNING', res.jha === 'COMPLETE' || res.all === 'COMPLETE', 'JHA Emails', 'JHA');
+          updateStepStatus(5, res.weekly === 'RUNNING' || res.all === 'RUNNING', res.weekly === 'COMPLETE' || res.all === 'COMPLETE', 'Weekly Safety Emails', 'WEEKLY');
+          updateStepStatus(6, res.monthly === 'RUNNING' || res.all === 'RUNNING', res.monthly === 'COMPLETE' || res.all === 'COMPLETE', 'Monthly Checklist Emails', 'MONTHLY');
         })
         .withFailureHandler(function(err) {
           console.warn('checkBackgroundReportStatus failure (Steps 4-6):', err);
@@ -451,7 +451,7 @@
         .getSafetyEmailsStatus();
     }
 
-    function updateStepStatus(stepNum, isRunning, isComplete, label) {
+    function updateStepStatus(stepNum, isRunning, isComplete, label, filterType) {
       var btn = document.getElementById('step' + stepNum);
       if (!btn) return;
 
@@ -463,8 +463,12 @@
         if (btn.classList.contains('running')) {
           btn.classList.remove('running');
           btn.classList.add('done');
-          showStatus('✓ ' + label + ' processing complete!', 'success');
-          setTimeout(hideStatus, 4000);
+          showStatus('✓ ' + label + ' processing complete! Opening summary review...', 'success');
+          setTimeout(function() {
+            hideStatus();
+            // Automatically pop up dialog with results so user can review and run uncredited log scan
+            google.script.run.showProcessSafetyEmailsDialogWithResults(filterType);
+          }, 1200);
         }
       } else if (btn.classList.contains('running')) {
         btn.classList.remove('running');

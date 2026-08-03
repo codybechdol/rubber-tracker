@@ -6896,6 +6896,7 @@ function executeProcessSafetyEmailsBackgroundJob(e) {
     var finished = false;
     var maxIterations = 50;
     var count = 0;
+    var lastResult = null;
 
     while (!finished && count < maxIterations) {
       count++;
@@ -6908,11 +6909,17 @@ function executeProcessSafetyEmailsBackgroundJob(e) {
         params.endDate,
         filter
       );
-      if (result && result.complete) {
-        finished = true;
+      if (result) {
+        lastResult = result;
+        if (result.complete) {
+          finished = true;
+        }
       }
     }
 
+    if (lastResult) {
+      PropertiesService.getScriptProperties().setProperty('BG_SAFETY_EMAIL_RESULT_' + filter, JSON.stringify(lastResult));
+    }
     PropertiesService.getScriptProperties().setProperty(propKey, 'COMPLETE');
     PropertiesService.getScriptProperties().setProperty('SAFETY_EMAILS_STATUS_ALL', 'COMPLETE');
     logEvent('executeProcessSafetyEmailsBackgroundJob: COMPLETE processing for ' + filter);
@@ -6940,6 +6947,43 @@ function getSafetyEmailsStatus() {
   } catch (e) {
     return { jha: 'IDLE', weekly: 'IDLE', monthly: 'IDLE', all: 'IDLE' };
   }
+}
+
+/**
+ * Shows dialog pre-loaded with completion results when a background safety email job completes.
+ */
+function showProcessSafetyEmailsDialogWithResults(reportTypeFilter) {
+  var filter = (typeof reportTypeFilter === 'string' && reportTypeFilter) ? reportTypeFilter.toUpperCase() : 'ALL';
+  var template = HtmlService.createTemplateFromFile('ProcessSafetyEmailsDialog');
+  template.initialReportType = filter;
+  var bgResultRaw = PropertiesService.getScriptProperties().getProperty('BG_SAFETY_EMAIL_RESULT_' + filter) || '';
+  template.bgResultJson = bgResultRaw;
+
+  var html = template.evaluate()
+    .setWidth(550)
+    .setHeight(700);
+  var title = "Process Safety Emails Summary (" + filter + ")";
+  SpreadsheetApp.getUi().showModalDialog(html, title);
+}
+
+/**
+ * Called when user clicks "Close & Update Compliance" in the dialog.
+ * Clears background status keys, scans log sheets for uncredited/skipped rows, and updates compliance.
+ */
+function finishSafetyEmailPostProcessing(reportTypeFilter) {
+  var filter = (typeof reportTypeFilter === 'string' && reportTypeFilter) ? reportTypeFilter.toUpperCase() : 'ALL';
+  var props = PropertiesService.getScriptProperties();
+
+  props.deleteProperty('SAFETY_EMAILS_STATUS_' + filter);
+  props.deleteProperty('BG_SAFETY_EMAIL_RESULT_' + filter);
+  if (filter === 'ALL') {
+    props.deleteProperty('SAFETY_EMAILS_STATUS_JHA');
+    props.deleteProperty('SAFETY_EMAILS_STATUS_WEEKLY');
+    props.deleteProperty('SAFETY_EMAILS_STATUS_MONTHLY');
+  }
+
+  logEvent('finishSafetyEmailPostProcessing: Scanning log sheets and updating compliance for ' + filter + '...');
+  return runSafetyEmailPostProcessing(filter, {});
 }
 
 /**
