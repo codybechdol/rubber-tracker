@@ -18658,6 +18658,16 @@ function clearAllBackgroundStatuses() {
     props.deleteProperty('BG_SAFETY_EMAIL_RESULT_MONTHLY');
     props.deleteProperty('BG_SAFETY_EMAIL_RESULT_ALL');
 
+    // Clean up any lingering applyAllEmailLinksScheduled triggers
+    try {
+      var allTriggers = ScriptApp.getProjectTriggers();
+      for (var tIdx = 0; tIdx < allTriggers.length; tIdx++) {
+        if (allTriggers[tIdx].getHandlerFunction() === 'applyAllEmailLinksScheduled') {
+          ScriptApp.deleteTrigger(allTriggers[tIdx]);
+        }
+      }
+    } catch (trigErr) {}
+
     return { success: true };
   } catch (e) {
     return { success: false, error: e.toString() };

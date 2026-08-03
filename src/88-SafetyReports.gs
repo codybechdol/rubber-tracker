@@ -6779,6 +6779,7 @@ function runSafetyEmailPostProcessing(reportTypeFilter, prevResult) {
     Logger.log("Gmail link application error: " + linkErr.toString());
   }
 
+  // Clean up any legacy/pending applyAllEmailLinksScheduled triggers so none run in background
   try {
     var existingTriggers = ScriptApp.getProjectTriggers();
     for (var ti = 0; ti < existingTriggers.length; ti++) {
@@ -6786,10 +6787,6 @@ function runSafetyEmailPostProcessing(reportTypeFilter, prevResult) {
         ScriptApp.deleteTrigger(existingTriggers[ti]);
       }
     }
-    ScriptApp.newTrigger('applyAllEmailLinksScheduled')
-      .timeBased()
-      .after(2 * 60 * 1000)
-      .create();
   } catch (trigErr) {}
 
   try {
