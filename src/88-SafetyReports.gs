@@ -639,8 +639,7 @@ function sortAndFormatLogSheet(sheetName, emailIdCol, dateReceivedCol, jobNumCol
             var rtVal = savedRichTexts[eid];
             if (!rtVal) {
               // Build fresh link for rows that never had one
-              var baseId = eid.split('_')[0];
-              var gmailUrl = 'https://mail.google.com/mail/u/0/#all/' + baseId;
+              var gmailUrl = buildGmailUrl(eid);
               rtVal = SpreadsheetApp.newRichTextValue().setText(eid).setLinkUrl(gmailUrl).build();
             }
             rtMatrix.push([rtVal]);
@@ -799,8 +798,7 @@ function logJHAEmail(params, existingEmailIds, rowsCollector) {
   try {
     var jhaEmailId = params.emailId || '';
     if (jhaEmailId) {
-      var jhaBaseId = jhaEmailId.split('_')[0];
-      var jhaUrl = 'https://mail.google.com/mail/u/0/#all/' + jhaBaseId;
+      var jhaUrl = buildGmailUrl(jhaEmailId);
       sheet.getRange(lastRow, 6).setRichTextValue(
         SpreadsheetApp.newRichTextValue().setText(jhaEmailId).setLinkUrl(jhaUrl).build()
       );
@@ -872,8 +870,7 @@ function logWeeklySafetyEmail(params, existingEmailIds, rowsCollector) {
   try {
     var wslEmailId = params.emailId || '';
     if (wslEmailId) {
-      var wslBaseId = wslEmailId.split('_')[0];
-      var wslUrl = 'https://mail.google.com/mail/u/0/#all/' + wslBaseId;
+      var wslUrl = buildGmailUrl(wslEmailId);
       sheet.getRange(lastRow, 6).setRichTextValue(
         SpreadsheetApp.newRichTextValue().setText(wslEmailId).setLinkUrl(wslUrl).build()
       );
@@ -1211,8 +1208,7 @@ function writeCollectedSafetyLogs(rowsCollector) {
       var item = items[rIdx];
       var rtCell = [null];
       if ((sName === JHA_LOG_SHEET_NAME || sName === WEEKLY_SAFETY_LOG_SHEET_NAME) && item.emailId) {
-        var baseId = item.emailId.split('_')[0];
-        var url = 'https://mail.google.com/mail/u/0/#all/' + baseId;
+        var url = buildGmailUrl(item.emailId);
         rtCell[0] = SpreadsheetApp.newRichTextValue().setText(item.emailId).setLinkUrl(url).build();
         hasHyperlinks = true;
       }
@@ -3359,8 +3355,7 @@ function applyMonthlyChecklistLogEmailLinksSilent() {
     for (var i = 0; i < values.length; i++) {
       var msgId = String(values[i][0] || '').trim();
       if (msgId) {
-        var baseId = msgId.split('_')[0];
-        var gmailUrl = 'https://mail.google.com/mail/u/0/#all/' + baseId;
+        var gmailUrl = buildGmailUrl(msgId);
         richTextValues.push([SpreadsheetApp.newRichTextValue()
           .setText(msgId)
           .setLinkUrl(gmailUrl)
@@ -7993,6 +7988,19 @@ function applyAllEmailLinksScheduled() {
 }
 
 /**
+ * Builds a universal Gmail search URL for a given message ID.
+ * Works seamlessly across multi-account logins and active user sessions.
+ * @param {string} emailId - Gmail message ID (supports composite IDs like "18a123_0")
+ * @return {string} Canonical Gmail URL
+ */
+function buildGmailUrl(emailId) {
+  if (!emailId) return '';
+  var baseId = String(emailId).trim().split('_')[0];
+  if (!baseId) return '';
+  return 'https://mail.google.com/mail/#search/id%3A' + encodeURIComponent(baseId);
+}
+
+/**
  * Applies clickable Gmail hyperlinks to the Source Email ID column (col 10) for newly written rows.
  * The cell text stays as the messageId (for deduplication), but clicking it opens the Gmail email
  * where the user can view/download the PDF attachment.
@@ -8007,9 +8015,7 @@ function applyEmailLinks(sheet, startRow, issues) {
     for (var i = 0; i < issues.length; i++) {
       var msgId = String(issues[i][9] || '');
       if (msgId) {
-        // Strip composite suffix (e.g. "abc123_0" -> "abc123") for the Gmail URL
-        var baseId = msgId.split('_')[0];
-        var gmailUrl = 'https://mail.google.com/mail/u/0/#all/' + baseId;
+        var gmailUrl = buildGmailUrl(msgId);
         richTextValues.push([SpreadsheetApp.newRichTextValue()
           .setText(msgId)
           .setLinkUrl(gmailUrl)
@@ -8046,8 +8052,7 @@ function applySafetyEquipmentEmailLinksSilent() {
     for (var i = 0; i < values.length; i++) {
       var msgId = String(values[i][0] || '').trim();
       if (msgId) {
-        var baseId = msgId.split('_')[0];
-        var gmailUrl = 'https://mail.google.com/mail/u/0/#all/' + baseId;
+        var gmailUrl = buildGmailUrl(msgId);
         richTextValues.push([SpreadsheetApp.newRichTextValue()
           .setText(msgId)
           .setLinkUrl(gmailUrl)
@@ -8100,8 +8105,7 @@ function applyJHALogEmailLinksSilent() {
     for (var i = 0; i < values.length; i++) {
       var msgId = String(values[i][0] || '').trim();
       if (msgId) {
-        var baseId = msgId.split('_')[0];
-        var gmailUrl = 'https://mail.google.com/mail/u/0/#all/' + baseId;
+        var gmailUrl = buildGmailUrl(msgId);
         richTextValues.push([SpreadsheetApp.newRichTextValue()
           .setText(msgId)
           .setLinkUrl(gmailUrl)
@@ -8141,8 +8145,7 @@ function applyWeeklySafetyLogEmailLinksSilent() {
     for (var i = 0; i < values.length; i++) {
       var msgId = String(values[i][0] || '').trim();
       if (msgId) {
-        var baseId = msgId.split('_')[0];
-        var gmailUrl = 'https://mail.google.com/mail/u/0/#all/' + baseId;
+        var gmailUrl = buildGmailUrl(msgId);
         richTextValues.push([SpreadsheetApp.newRichTextValue()
           .setText(msgId)
           .setLinkUrl(gmailUrl)
@@ -16665,6 +16668,17 @@ function autoComplianceCleanup(skipSyncCrews) {
       Logger.log('autoComplianceCleanup: Removed ' + results.nonConfigRemoved + ' non-config crews from current week');
     } catch (e) {
       Logger.log('autoComplianceCleanup: Non-config removal error (non-fatal): ' + e.toString());
+    }
+
+    // Step 4: Re-apply Gmail hyperlinks to all log sheets (ensures links are active and clickable)
+    try {
+      applyJHALogEmailLinksSilent();
+      applyWeeklySafetyLogEmailLinksSilent();
+      applyMonthlyChecklistLogEmailLinksSilent();
+      applySafetyEquipmentEmailLinksSilent();
+      Logger.log('autoComplianceCleanup: Re-applied Gmail hyperlinks across all log sheets');
+    } catch (e) {
+      Logger.log('autoComplianceCleanup: Link re-apply error (non-fatal): ' + e.toString());
     }
 
     Logger.log('autoComplianceCleanup: Complete');
