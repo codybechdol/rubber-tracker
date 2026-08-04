@@ -1446,7 +1446,7 @@ function markScheduleTaskComplete(taskIndexOrTask) {
       Logger.log('ERROR: Training Tracking sheet not found');
     }
   } else if (source === 'Safety Equipment Needs' || source === 'Safety Reports') {
-    // Safety Equipment task - update source sheet status to "Resolved" and set "Resolved On" date
+    // Safety Equipment task - update source sheet status to "Resolved", set "Resolved On" date, and archive
     var safetySheet = ss.getSheetByName('Safety Equipment Needs') || ss.getSheetByName('Safety Reports');
     if (safetySheet && task.rowIndex <= safetySheet.getLastRow()) {
       var safetyHeaders = safetySheet.getRange(1, 1, 1, safetySheet.getLastColumn()).getValues()[0];
@@ -1465,6 +1465,13 @@ function markScheduleTaskComplete(taskIndexOrTask) {
       if (resolvedOnCol > 0) {
         safetySheet.getRange(task.rowIndex, resolvedOnCol).setValue(new Date());
         Logger.log('Set Resolved On date for Safety Equipment Needs row ' + task.rowIndex);
+      }
+      // Archive row immediately to Safety Equipment Archive
+      try {
+        archiveSingleSafetyEquipmentRow(safetySheet, task.rowIndex);
+        Logger.log('Archived Safety Equipment Needs row ' + task.rowIndex + ' immediately on task completion');
+      } catch (archErr) {
+        Logger.log('Error archiving Safety Equipment Needs row: ' + archErr);
       }
     } else {
       Logger.log('WARNING: Safety Equipment Needs sheet not found or row out of range');
@@ -17083,8 +17090,42 @@ function archiveResolvedSafetyEquipment(daysOld) {
 }
 
 /**
+ * Archives a single row from Safety Equipment Needs to Safety Equipment Archive and deletes it from source.
+ * 
+ * @param {Sheet} sourceSheet - The Safety Equipment Needs sheet
+ * @param {number} rowIndex - The 1-based row index to archive
+ * @return {boolean} True if archived successfully
+ */
+function archiveSingleSafetyEquipmentRow(sourceSheet, rowIndex) {
+  if (!sourceSheet || !rowIndex || rowIndex < 2 || rowIndex > sourceSheet.getLastRow()) {
+    return false;
+  }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Get or create archive sheet
+  var archiveSheet = ss.getSheetByName('Safety Equipment Archive');
+  if (!archiveSheet) {
+    archiveSheet = ss.insertSheet('Safety Equipment Archive');
+    var headers = sourceSheet.getRange(1, 1, 1, sourceSheet.getLastColumn()).getValues();
+    archiveSheet.getRange(1, 1, 1, headers[0].length).setValues(headers);
+    archiveSheet.getRange(1, 1, 1, headers[0].length)
+      .setFontWeight('bold')
+      .setBackground('#4A86E8')
+      .setFontColor('white');
+    archiveSheet.setFrozenRows(1);
+  }
+
+  var rowData = sourceSheet.getRange(rowIndex, 1, 1, sourceSheet.getLastColumn()).getValues();
+  archiveSheet.appendRow(rowData[0]);
+  sourceSheet.deleteRow(rowIndex);
+  Logger.log('archiveSingleSafetyEquipmentRow: Moved row ' + rowIndex + ' from ' + sourceSheet.getName() + ' to Safety Equipment Archive');
+  return true;
+}
+
+/**
  * Shows dialog to archive resolved Safety Equipment Needs items.
- * Menu item: Glove Manager → 🛡️ Process Safety Emails → 🧹 Cleanup → 🗄️ Archive Resolved Equipment
+ * Menu item: Safety Assistant → 🛡️ Process Safety Emails → 🗄️ Archive Resolved Equipment
  */
 function showArchiveResolvedEquipmentDialog() {
   var ui = SpreadsheetApp.getUi();

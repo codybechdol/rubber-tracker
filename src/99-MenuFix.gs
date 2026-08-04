@@ -48,6 +48,7 @@ function _buildGloveManagerMenu() {
         .addItem('📥 Process Safety Emails (All)', 'showProcessSafetyEmailsDialog')
         .addItem('📊 View Equipment Needs', 'openSafetyReports')
         .addItem('📈 View Compliance History', 'openComplianceSheet')
+        .addItem('🗄️ Archive Resolved Equipment', 'showArchiveResolvedEquipmentDialog')
         .addItem('🔗 Restore Email Links (All Logs)', 'menuApplyAllEmailLinks')
         .addItem('📊 Gmail Status', 'showGmailStatus'))
 
