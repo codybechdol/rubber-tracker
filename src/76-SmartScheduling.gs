@@ -1521,24 +1521,38 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
       continue;
     }
 
-    // Only include expired or expiring soon
+    // Only include expired, expiring soon, or missing dates
     var isExpired = false;
     var daysLeft = null;
 
     if (typeof daysUntil === 'number') {
       daysLeft = daysUntil;
       isExpired = daysUntil < 0;
-    } else if (expDate instanceof Date && !isNaN(expDate.getTime())) {
-      var todayStart = new Date(today);
-      todayStart.setHours(0, 0, 0, 0);
-      var expDateStart = new Date(expDate);
-      expDateStart.setHours(0, 0, 0, 0);
-      daysLeft = Math.ceil((expDateStart - todayStart) / (1000 * 60 * 60 * 24));
+    } else if (daysUntil !== null && daysUntil !== '' && !isNaN(parseInt(daysUntil, 10))) {
+      daysLeft = parseInt(daysUntil, 10);
       isExpired = daysLeft < 0;
+    } else {
+      var parsedExpDate = null;
+      if (expDate instanceof Date && !isNaN(expDate.getTime())) {
+        parsedExpDate = expDate;
+      } else if (typeof expDate === 'string' && expDate.trim() !== '') {
+        parsedExpDate = parseDateNoon(expDate);
+      }
+      if (parsedExpDate && !isNaN(parsedExpDate.getTime())) {
+        var todayStart = new Date(today);
+        todayStart.setHours(0, 0, 0, 0);
+        var expDateStart = new Date(parsedExpDate);
+        expDateStart.setHours(0, 0, 0, 0);
+        daysLeft = Math.ceil((expDateStart - todayStart) / (1000 * 60 * 60 * 24));
+        isExpired = daysLeft < 0;
+      }
     }
 
-    // Only include if expired or expiring within threshold
-    if (daysLeft === null || daysLeft > daysThreshold) continue;
+    // Skip valid future certs (expiration date is > daysThreshold e.g. 30 days in future)
+    if (daysLeft !== null && daysLeft > daysThreshold) continue;
+
+    // If daysLeft is null (no acquired or expiration date on sheet), it's a missing cert requirement
+    var isMissing = (daysLeft === null);
 
     var location = employeeLocations[employee.toLowerCase()] || 'Unknown';
     var foreman = employeeForemen[employee.toLowerCase()] || 'Unknown';
@@ -1553,12 +1567,12 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
       location: location,
       foreman: foreman,
       phoneNumber: phone,
-      dueDate: expDate instanceof Date ? expDate : null,
-      isOverdue: isExpired,
+      dueDate: (expDate instanceof Date && !isNaN(expDate.getTime())) ? expDate : null,
+      isOverdue: isExpired || isMissing,
       daysTillDue: daysLeft,
-      status: isExpired ? 'Expired' : 'Expiring',
+      status: isMissing ? 'Missing' : (isExpired ? 'Expired' : 'Expiring'),
       estimatedTime: 15, // 15 minutes for phone call
-      priority: isExpired ? 'High' : (daysLeft <= 30 ? 'Medium' : 'Low'),
+      priority: (isExpired || isMissing) ? 'High' : (daysLeft <= 30 ? 'Medium' : 'Low'),
       sheetName: 'Expiring Certs',
       rowIndex: i + 1
     };
