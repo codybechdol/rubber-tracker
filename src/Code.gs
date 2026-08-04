@@ -15559,14 +15559,29 @@ function getTasksWithMetadata() {
       for (var ci = 1; ci < certData.length; ci++) {
         var certEmployee = String(certData[ci][certNameCol] || '').trim().toLowerCase();
         var certType = String(certData[ci][certTypeCol] || '').trim().toLowerCase();
-        var daysUntil = certDaysUntilCol !== -1 ? certData[ci][certDaysUntilCol] : null;
-        var expDate = certExpDateCol !== -1 ? certData[ci][certExpDateCol] : null;
+        if (!certEmployee || !certType) continue;
 
-        // Calculate days until if we have expiration date but not days until
-        if (daysUntil === null && expDate instanceof Date && !isNaN(expDate.getTime())) {
+        var rawDays = certDaysUntilCol !== -1 ? certData[ci][certDaysUntilCol] : null;
+        var daysUntil = null;
+        if (typeof rawDays === 'number') {
+          daysUntil = rawDays;
+        } else if (rawDays !== null && rawDays !== '' && !isNaN(parseInt(rawDays, 10))) {
+          daysUntil = parseInt(rawDays, 10);
+        }
+
+        var expDate = certExpDateCol !== -1 ? certData[ci][certExpDateCol] : null;
+        var expDateObj = null;
+        if (expDate instanceof Date && !isNaN(expDate.getTime())) {
+          expDateObj = expDate;
+        } else if (typeof expDate === 'string' && expDate.trim() !== '') {
+          expDateObj = parseDateNoon(expDate);
+        }
+
+        // Calculate days until if we have expiration date but not numeric days until
+        if (daysUntil === null && expDateObj && !isNaN(expDateObj.getTime())) {
           var todayStart = new Date(today);
           todayStart.setHours(0, 0, 0, 0);
-          var expDateStart = new Date(expDate);
+          var expDateStart = new Date(expDateObj);
           expDateStart.setHours(0, 0, 0, 0);
           daysUntil = Math.ceil((expDateStart - todayStart) / (1000 * 60 * 60 * 24));
         }
@@ -15574,6 +15589,7 @@ function getTasksWithMetadata() {
         var certKey = certEmployee + '_' + certType;
         currentCertData[certKey] = {
           daysUntil: daysUntil,
+          expDate: expDateObj,
           rowIndex: ci + 1
         };
       }
@@ -15583,6 +15599,8 @@ function getTasksWithMetadata() {
 
   var taskListAdditions = 0;
   var skippedStaleCerts = 0;
+  var addedCertKeys = {};
+
   for (var metaKey in metadataLookup) {
     var metadata = metadataLookup[metaKey];
 
@@ -15593,18 +15611,25 @@ function getTasksWithMetadata() {
     if (!metadata.inTaskList) continue;
 
     // Skip completed tasks
-    if (metadata.status === 'Complete') continue;
+    if (metadata.status === 'Complete' || metadata.status === 'Completed') continue;
 
     // CRITICAL FIX: For Cert Expiring tasks NOT already collected, verify cert is STILL expiring
     // This prevents stale cert tasks from reappearing when the expiration date was updated to far future
-    if (metadata.taskType === 'Cert Expiring' && metadata.sourceSheet === 'Expiring Certs') {
+    if (metadata.taskType === 'Cert Expiring' && (metadata.sourceSheet === 'Expiring Certs' || metadata.sourceSheet === 'Task Metadata')) {
       var certLookupKey = String(metadata.employee || '').trim().toLowerCase() + '_' +
                           String(metadata.itemType || '').trim().toLowerCase();
+
+      // Deduplicate: If we already added a task for this employee + cert type combo, skip duplicate rows!
+      if (addedCertKeys[certLookupKey]) {
+        Logger.log('getTasksWithMetadata: Skipping DUPLICATE cert task - ' + metadata.employee + ' ' + metadata.itemType);
+        continue;
+      }
+
       var currentCert = currentCertData[certLookupKey];
 
       if (currentCert) {
-        // Check if cert is now > 365 days out (no longer needs action)
-        if (typeof currentCert.daysUntil === 'number' && currentCert.daysUntil > 365) {
+        // Check if cert is > 30 days out (no longer expiring soon)
+        if (typeof currentCert.daysUntil === 'number' && currentCert.daysUntil > 30) {
           Logger.log('getTasksWithMetadata: Skipping STALE cert task - ' + metadata.employee +
                      ' ' + metadata.itemType + ' now has ' + currentCert.daysUntil + ' days until expiration');
           skippedStaleCerts++;
@@ -15622,6 +15647,7 @@ function getTasksWithMetadata() {
           continue;
         }
       }
+      addedCertKeys[certLookupKey] = true;
     }
 
     // FILTER: Missing Safety Report tasks - only include from PREVIOUS work week
