@@ -15868,7 +15868,32 @@ function getStoredTasks() {
       };
     }
 
+    var props = PropertiesService.getScriptProperties();
+    var timestampStr = props.getProperty('TASKS_TIMESTAMP');
+    var isStale = false;
+
+    if (timestampStr) {
+      var timeDiffMs = new Date().getTime() - new Date(timestampStr).getTime();
+      // If cache is older than 15 minutes (900,000 ms), consider it stale and auto-refresh
+      if (isNaN(timeDiffMs) || timeDiffMs > 15 * 60 * 1000) {
+        isStale = true;
+        Logger.log('getStoredTasks: Cache is stale (' + Math.round(timeDiffMs / 60000) + ' min old)');
+      }
+    } else {
+      isStale = true;
+    }
+
     var jsonStr = getChunkedScriptProperty('TASKS_DATA');
+
+    // If cache is missing OR stale, automatically generate fresh data from source sheets
+    if (!jsonStr || isStale) {
+      Logger.log('getStoredTasks: Cache missing or stale - generating fresh tasks with metadata...');
+      var freshResult = getTasksWithMetadata();
+      jsonStr = getChunkedScriptProperty('TASKS_DATA');
+      if (!jsonStr && freshResult && freshResult.tasks) {
+        return freshResult;
+      }
+    }
 
     if (!jsonStr) {
       Logger.log('getStoredTasks: No data found in ScriptProperties (chunked or legacy)');
