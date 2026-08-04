@@ -14642,21 +14642,31 @@ function fixTaskMetadataStatusValidation() {
 function generateTaskMetadata() {
   Logger.log('=== generateTaskMetadata START ===');
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var ui = SpreadsheetApp.getUi();
+  var ui = null;
+  try {
+    ui = SpreadsheetApp.getUi();
+  } catch (uiErr) {
+    // Background / trigger execution without active UI
+  }
 
   // Check if Task Metadata sheet exists
   var metadataSheet = ss.getSheetByName('Task Metadata');
   if (!metadataSheet) {
-    var response = ui.alert(
-      'Task Metadata Sheet Not Found',
-      'The Task Metadata sheet does not exist. Would you like to create it now?',
-      ui.ButtonSet.YES_NO
-    );
-    if (response === ui.Button.YES) {
+    if (ui) {
+      var response = ui.alert(
+        'Task Metadata Sheet Not Found',
+        'The Task Metadata sheet does not exist. Would you like to create it now?',
+        ui.ButtonSet.YES_NO
+      );
+      if (response === ui.Button.YES) {
+        setupTaskMetadataSheet();
+        metadataSheet = ss.getSheetByName('Task Metadata');
+      } else {
+        return;
+      }
+    } else {
       setupTaskMetadataSheet();
       metadataSheet = ss.getSheetByName('Task Metadata');
-    } else {
-      return;
     }
   } else {
     ensureTaskMetadataHeaders(metadataSheet);
@@ -14673,8 +14683,8 @@ function generateTaskMetadata() {
     Logger.log('generateTaskMetadata: cert cleanup error (non-critical): ' + certCleanupErr);
   }
 
-  // Show progress
-  ui.alert('⏳ Generating Task Metadata\n\nThis may take 30-60 seconds.\nReading from source sheets and creating metadata records...');
+  // Show progress toast (non-blocking)
+  ss.toast('⏳ Reading from source sheets and creating metadata records...', 'Generating Task Metadata', 5);
 
   // Collect all tasks from source sheets using existing function
   var tasksByLocation = collectAndGroupTasks(ss);
@@ -14687,7 +14697,9 @@ function generateTaskMetadata() {
   Logger.log('generateTaskMetadata: Collected ' + totalTasks + ' tasks from source sheets');
 
   if (totalTasks === 0) {
-    ui.alert('⚠️ No Tasks Found\n\nNo pending tasks found in source sheets.\n\nMake sure you have:\n• Pending glove or sleeve swaps\n• Upcoming training\n• Expiring certifications\n• Manual tasks');
+    if (ui) {
+      ui.alert('⚠️ No Tasks Found\n\nNo pending tasks found in source sheets.\n\nMake sure you have:\n• Pending glove or sleeve swaps\n• Upcoming training\n• Expiring certifications\n• Manual tasks');
+    }
     return;
   }
 
@@ -14728,9 +14740,21 @@ function generateTaskMetadata() {
       var empNameLower = (task.employee || '').toLowerCase().trim();
       var phoneNumber = employeePhones[empNameLower] || '';
 
-      // Format dates
-      var dueDate = task.dueDate ? Utilities.formatDate(task.dueDate, Session.getScriptTimeZone(), 'yyyy-MM-dd') : '';
-      var scheduledDate = task.scheduledDate ? Utilities.formatDate(task.scheduledDate, Session.getScriptTimeZone(), 'yyyy-MM-dd') : '';
+      // Format dates safely (check instanceof Date before Utilities.formatDate)
+      var dueDate = '';
+      if (task.dueDate instanceof Date && !isNaN(task.dueDate.getTime())) {
+        dueDate = Utilities.formatDate(task.dueDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      } else if (typeof task.dueDate === 'string') {
+        dueDate = task.dueDate.trim();
+      }
+
+      var scheduledDate = '';
+      if (task.scheduledDate instanceof Date && !isNaN(task.scheduledDate.getTime())) {
+        scheduledDate = Utilities.formatDate(task.scheduledDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      } else if (typeof task.scheduledDate === 'string') {
+        scheduledDate = task.scheduledDate.trim();
+      }
+
       var createdDateFormatted = Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'yyyy-MM-dd');
       var lastModified = Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
 
@@ -14900,22 +14924,36 @@ function generateTaskMetadata() {
       var schedDateVal = existing.scheduledDate;
       if (schedDateVal instanceof Date && !isNaN(schedDateVal.getTime())) {
         schedDateVal = Utilities.formatDate(schedDateVal, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      } else if (typeof schedDateVal === 'string') {
+        schedDateVal = schedDateVal.trim();
       }
+
       var notifiedDateVal = existing.notifiedDate;
       if (notifiedDateVal instanceof Date && !isNaN(notifiedDateVal.getTime())) {
         notifiedDateVal = Utilities.formatDate(notifiedDateVal, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      } else if (typeof notifiedDateVal === 'string') {
+        notifiedDateVal = notifiedDateVal.trim();
       }
+
       var schedClassDateVal = existing.scheduledClassDate;
       if (schedClassDateVal instanceof Date && !isNaN(schedClassDateVal.getTime())) {
         schedClassDateVal = Utilities.formatDate(schedClassDateVal, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      } else if (typeof schedClassDateVal === 'string') {
+        schedClassDateVal = schedClassDateVal.trim();
       }
+
       var completedDateVal = existing.completedDate;
       if (completedDateVal instanceof Date && !isNaN(completedDateVal.getTime())) {
         completedDateVal = Utilities.formatDate(completedDateVal, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      } else if (typeof completedDateVal === 'string') {
+        completedDateVal = completedDateVal.trim();
       }
+
       var createdDateVal = existing.createdDate || rec[23];
       if (createdDateVal instanceof Date && !isNaN(createdDateVal.getTime())) {
         createdDateVal = Utilities.formatDate(createdDateVal, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      } else if (typeof createdDateVal === 'string') {
+        createdDateVal = createdDateVal.trim();
       }
 
       var updatedRecord = [
@@ -14980,6 +15018,12 @@ function generateTaskMetadata() {
           taskType === 'Missing Safety Report') {
         
         var preservedRecord = existing.originalRow.slice();
+        // Sanitize any Date objects in preservedRecord to string format so setValues never fails
+        for (var pr = 0; pr < preservedRecord.length; pr++) {
+          if (preservedRecord[pr] instanceof Date && !isNaN(preservedRecord[pr].getTime())) {
+            preservedRecord[pr] = Utilities.formatDate(preservedRecord[pr], Session.getScriptTimeZone(), 'yyyy-MM-dd');
+          }
+        }
         while (preservedRecord.length < 26) preservedRecord.push('');
         finalRecords.push(preservedRecord.slice(0, 26));
         preservedCount++;
@@ -15086,7 +15130,9 @@ function generateTaskMetadata() {
   }
 
   message += '\n✅ Task Metadata sheet is clean and ready!';
-  ui.alert('Generate Task Metadata Complete', message, ui.ButtonSet.OK);
+  if (ui) {
+    ui.alert('Generate Task Metadata Complete', message, ui.ButtonSet.OK);
+  }
   Logger.log('=== generateTaskMetadata END ===');
 }
 
