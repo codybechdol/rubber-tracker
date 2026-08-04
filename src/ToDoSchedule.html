@@ -1344,15 +1344,37 @@
     }
 
     function getJobNumberForTask(task) {
+      if (!task) return null;
+
+      // 1. Direct job number or crew field on task
+      if (task.job) return String(task.job).replace(/\.\d+$/, '').trim();
+      if (task.jobNumber) return String(task.jobNumber).replace(/\.\d+$/, '').trim();
+      if (task.crew) return String(task.crew).replace(/\.\d+$/, '').trim();
+
+      // 2. Check if task.foreman or task.location starts with a job number pattern (e.g. "027-26" or "027-26.3")
+      if (task.foreman) {
+        var matchFore = String(task.foreman).match(/^(\d{3}-\d{2})/);
+        if (matchFore) return matchFore[1];
+      }
+      if (task.location) {
+        var matchLoc = String(task.location).match(/^(\d{3}-\d{2})/);
+        if (matchLoc) return matchLoc[1];
+      }
+
       if (!jobContext) return null;
-      // Training / Missing Safety Report tasks have a crew field
-      if (task.crew) return task.crew.replace(/\.\d+$/, '');
-      // Employee-based tasks
-      var emp = (task.employee || '').toLowerCase();
-      if (emp && jobContext.byEmployee[emp]) return jobContext.byEmployee[emp];
-      // Foreman-based fallback
-      var fore = (task.foreman || '').toLowerCase();
-      if (fore && jobContext.byEmployee[fore]) return jobContext.byEmployee[fore];
+
+      // 3. Employee-based lookup in jobContext
+      var emp = (task.employee || '').toLowerCase().trim();
+      if (emp && jobContext.byEmployee && jobContext.byEmployee[emp]) {
+        return String(jobContext.byEmployee[emp]).replace(/\.\d+$/, '').trim();
+      }
+
+      // 4. Foreman-based lookup in jobContext
+      var fore = (task.foreman || '').toLowerCase().trim();
+      if (fore && jobContext.byEmployee && jobContext.byEmployee[fore]) {
+        return String(jobContext.byEmployee[fore]).replace(/\.\d+$/, '').trim();
+      }
+
       return null;
     }
 
