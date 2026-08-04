@@ -1359,12 +1359,9 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
           var metaEmployee = String(metaData[mi][metaEmployeeCol] || '').trim().toLowerCase();
           var metaItemType = String(metaData[mi][metaItemTypeCol] || '').trim().toLowerCase();
 
-          // Track by row number AND by employee+certType combo
+          // Track completed certs by exact source row number
           if (metaSourceRow) {
             completedCerts['row_' + metaSourceRow] = true;
-          }
-          if (metaEmployee && metaItemType) {
-            completedCerts['emp_' + metaEmployee + '_' + metaItemType] = true;
           }
         }
       }
@@ -1472,11 +1469,9 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
     var empLoc = employeeLocations[employee.toLowerCase()];
     if (!empLoc || isStatusLocation(empLoc) || empLoc === 'Previous Employee' || empLoc === 'Unknown') continue;
 
-    // Skip certs that have been marked Complete in Task Metadata
-    // Check both by row number and by employee+certType combo
+    // Skip certs that have been marked Complete in Task Metadata by exact source row number
     var rowKey = 'row_' + (i + 1);
-    var empCertKey = 'emp_' + employee.toLowerCase() + '_' + certType.toLowerCase();
-    if (completedCerts[rowKey] || completedCerts[empCertKey]) {
+    if (completedCerts[rowKey]) {
       skippedCompleted++;
       continue;
     }
