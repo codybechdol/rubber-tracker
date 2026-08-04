@@ -2004,11 +2004,8 @@
         }
 
         if (taskType === 'cert expiring' || source === 'expiring certs') {
-          if (task.inTaskList === true) {
-            if (task.status === 'Complete' || task.completed) return false;
-            return true;
-          }
-          return false;
+          if (task.status === 'Complete' || task.completed) return false;
+          return true;
         }
 
         var foremanFromLoc = extractForemanFromLocation(task.location);
