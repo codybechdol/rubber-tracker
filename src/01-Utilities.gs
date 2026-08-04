@@ -301,6 +301,21 @@ const getChunkedScriptProperty = (baseKey) => {
 };
 
 /**
+ * Deletes a chunked string value and legacy key from ScriptProperties.
+ * 
+ * @param {string} baseKey - The prefix key to delete (e.g., 'TASKS_DATA')
+ */
+const deleteChunkedScriptProperty = (baseKey) => {
+  const props = PropertiesService.getScriptProperties();
+  const keys = props.getKeys();
+  const chunksToDelete = keys.filter(k => k.indexOf(`${baseKey}_chunk_`) === 0 || k === `${baseKey}_chunks` || k === baseKey);
+  if (chunksToDelete.length > 0) {
+    props.deleteProperties(chunksToDelete);
+    Logger.log(`deleteChunkedScriptProperty: Deleted ${chunksToDelete.length} chunk property key(s) for "${baseKey}"`);
+  }
+};
+
+/**
  * Finds the header row index in Training Tracking data array.
  * Searches the first 20 rows for a row that contains at least two standard headers.
  * @param {Array} data - 2D array from sheet.getDataRange().getValues()

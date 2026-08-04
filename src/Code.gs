@@ -15314,6 +15314,8 @@ function getTasksWithMetadata() {
 
   // Check if metadata sheet is empty
   if (metadataSheet.getLastRow() <= 1) {
+    deleteChunkedScriptProperty('TASKS_DATA');
+    PropertiesService.getScriptProperties().deleteProperty('TASKS_TIMESTAMP');
     throw new Error('TASK_METADATA_EMPTY: Please run "Generate Task Metadata" to populate data.');
   }
 
@@ -15819,6 +15821,19 @@ function getTasksWithMetadata() {
 function getStoredTasks() {
   try {
     Logger.log('=== getStoredTasks START ===');
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var metadataSheet = ss.getSheetByName('Task Metadata');
+
+    // If Task Metadata sheet is missing or empty, clear cached tasks in ScriptProperties
+    if (!metadataSheet || metadataSheet.getLastRow() <= 1) {
+      deleteChunkedScriptProperty('TASKS_DATA');
+      PropertiesService.getScriptProperties().deleteProperty('TASKS_TIMESTAMP');
+      Logger.log('getStoredTasks: Task Metadata sheet is empty - cleared ScriptProperties cache');
+      return {
+        error: true,
+        message: 'Task Metadata sheet is empty. Please run "Generate Task Metadata" to populate data.'
+      };
+    }
 
     var jsonStr = getChunkedScriptProperty('TASKS_DATA');
 
