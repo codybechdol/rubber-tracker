@@ -15649,14 +15649,14 @@ function getTasksWithMetadata() {
   // Load Expiring Certifications Setup expectation rules
   var certExpectationMap = {};
   try {
-    var expiringCertsConfig = getExpiringCertsConfig();
+    var expiringCertsConfig = getExpiringCertsSetupConfig();
     if (expiringCertsConfig && expiringCertsConfig.certs) {
       expiringCertsConfig.certs.forEach(function(c) {
         if (c.name) certExpectationMap[c.name.trim().toLowerCase()] = c;
       });
     }
   } catch (configErr) {
-    Logger.log('getTasksWithMetadata: Error loading getExpiringCertsConfig: ' + configErr);
+    Logger.log('getTasksWithMetadata: Error loading getExpiringCertsSetupConfig: ' + configErr);
   }
 
   var taskListAdditions = 0;

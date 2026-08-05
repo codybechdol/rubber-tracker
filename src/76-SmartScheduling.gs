@@ -1434,14 +1434,14 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
   // Load Expiring Certifications Setup expectation rules
   var certExpectationMap = {};
   try {
-    var expiringCertsConfig = getExpiringCertsConfig();
+    var expiringCertsConfig = getExpiringCertsSetupConfig();
     if (expiringCertsConfig && expiringCertsConfig.certs) {
       expiringCertsConfig.certs.forEach(function(c) {
         if (c.name) certExpectationMap[c.name.trim().toLowerCase()] = c;
       });
     }
   } catch (configErr) {
-    Logger.log('collectExpiringCertTasks: Error loading getExpiringCertsConfig: ' + configErr);
+    Logger.log('collectExpiringCertTasks: Error loading getExpiringCertsSetupConfig: ' + configErr);
   }
 
   // Pre-scan: build Crane Cert validity and Crane Evaluation date maps
