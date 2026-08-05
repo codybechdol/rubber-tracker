@@ -2577,6 +2577,17 @@ function getExpiringCertsSetupConfig() {
           }
         });
 
+        // Default canonical rules for job-class certs
+        var defaultJobClassCerts = {
+          'pole top rescue': ['F', 'GTO F', 'GF', 'JRY', 'WT', 'GTO', 'AP 7-1'],
+          'forklift': ['F', 'GTO F', 'GF', 'JRY OP', 'EO 1', 'EO 2', 'WT'],
+          'forklift operator safety training': ['F', 'GTO F', 'GF', 'JRY OP', 'EO 1', 'EO 2', 'WT'],
+          'crane cert': ['F', 'GTO F', 'GF', 'JRY OP', 'EO 1', 'EO 2'],
+          'crane evaluation': ['F', 'GTO F', 'GF', 'JRY OP', 'EO 1', 'EO 2'],
+          'osha trench comp person': ['F', 'GTO F', 'GF', 'SUP'],
+          'rigging & signaling/signalperson & spotter cert': ['F', 'GTO F', 'GF', 'JRY', 'JRY OP']
+        };
+
         // Ensure default fields exist for expectation controls
         cleaned.forEach(function(c) {
           var nameLower = String(c.name || '').trim().toLowerCase();
@@ -2584,7 +2595,14 @@ function getExpiringCertsSetupConfig() {
             c.category = 'variable';
             c.termMonths = 0;
           }
-          if (!c.requirementScope) {
+          if (defaultJobClassCerts[nameLower]) {
+            if (!c.requirementScope || c.requirementScope === 'all') {
+              c.requirementScope = 'job_class';
+            }
+            if (!Array.isArray(c.requiredJobClasses) || c.requiredJobClasses.length === 0) {
+              c.requiredJobClasses = defaultJobClassCerts[nameLower];
+            }
+          } else if (!c.requirementScope) {
             c.requirementScope = (nameLower === 'bnsf' || nameLower === 'msha' || nameLower.indexOf('helicopter') !== -1) ? 'optional' : 'all';
           }
           if (!Array.isArray(c.requiredJobClasses)) c.requiredJobClasses = [];
