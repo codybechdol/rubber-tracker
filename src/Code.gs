@@ -15117,6 +15117,16 @@ function generateTaskMetadata() {
     Logger.log('generateTaskMetadata: Warning reapplying validation: ' + validationError.message);
   }
 
+  // Refresh ScriptProperties task cache so To Do Schedule loads updated data without needing a manual refresh
+  try {
+    deleteChunkedScriptProperty('TASKS_DATA');
+    PropertiesService.getScriptProperties().deleteProperty('TASKS_TIMESTAMP');
+    getTasksWithMetadata();
+    Logger.log('generateTaskMetadata: Refreshed ScriptProperties TASKS_DATA cache');
+  } catch (cacheErr) {
+    Logger.log('generateTaskMetadata: Warning refreshing task cache: ' + cacheErr.message);
+  }
+
   // Show success message
   var message = '✅ Task Metadata Generated!\n\n';
   message += '📊 Statistics:\n';

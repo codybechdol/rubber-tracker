@@ -1410,6 +1410,40 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
   // Build pending employee set once (outside loop)
   var pendingEmps = getPendingEmployeeSet(ss);
 
+  // Build employee job classification map from Employees sheet
+  var employeeJobClasses = {};
+  var empSheet = ss.getSheetByName('Employees');
+  if (empSheet && empSheet.getLastRow() > 1) {
+    var empValData = empSheet.getDataRange().getValues();
+    var empValHeaders = empValData[0];
+    var empValNameCol = -1, empValTitleCol = -1;
+    for (var evh = 0; evh < empValHeaders.length; evh++) {
+      var evHdr = String(empValHeaders[evh]).toLowerCase().trim();
+      if (evHdr === 'name' || evHdr === 'employee name') empValNameCol = evh;
+      if (evHdr === 'job title' || evHdr === 'classification' || evHdr === 'title') empValTitleCol = evh;
+    }
+    if (empValNameCol !== -1 && empValTitleCol !== -1) {
+      for (var evi = 1; evi < empValData.length; evi++) {
+        var evName = String(empValData[evi][empValNameCol] || '').trim().toLowerCase();
+        var evTitle = String(empValData[evi][empValTitleCol] || '').trim().toUpperCase();
+        if (evName) employeeJobClasses[evName] = evTitle;
+      }
+    }
+  }
+
+  // Load Expiring Certifications Setup expectation rules
+  var certExpectationMap = {};
+  try {
+    var expiringCertsConfig = getExpiringCertsConfig();
+    if (expiringCertsConfig && expiringCertsConfig.certs) {
+      expiringCertsConfig.certs.forEach(function(c) {
+        if (c.name) certExpectationMap[c.name.trim().toLowerCase()] = c;
+      });
+    }
+  } catch (configErr) {
+    Logger.log('collectExpiringCertTasks: Error loading getExpiringCertsConfig: ' + configErr);
+  }
+
   // Pre-scan: build Crane Cert validity and Crane Evaluation date maps
   // Used to detect employees who have a valid Crane Cert but no Crane Evaluation form date
   var craneCertValidSet = {};   // empNameLower → canonical employee name
@@ -1546,7 +1580,38 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
     // Skip valid future certs (expiration date is > daysThreshold e.g. 30 days in future)
     if (daysLeft !== null && daysLeft > daysThreshold) continue;
 
-    // If daysLeft is null (no acquired or expiration date on sheet), it's a missing cert requirement
+    // Evaluate requirement scope & job classification rule from Expiring Certifications Setup
+    var certRule = certExpectationMap[certType.toLowerCase()];
+    var isRequiredForEmp = true; // Default to true if no rule found
+
+    if (certRule) {
+      var scope = certRule.requirementScope || 'all';
+      if (scope === 'optional') {
+        isRequiredForEmp = false;
+      } else if (scope === 'job_class') {
+        isRequiredForEmp = false;
+        var empJobClass = employeeJobClasses[employee.toLowerCase()] || '';
+        var reqClasses = (certRule.requiredJobClasses || []).map(function(cls) { return String(cls).trim().toUpperCase(); });
+        if (empJobClass && reqClasses.indexOf(empJobClass) !== -1) {
+          isRequiredForEmp = true;
+        } else if (empJobClass) {
+          // Apprentice partial match check (e.g. "AP 7-1" matches "AP 4", "AP 1", etc.)
+          for (var rc = 0; rc < reqClasses.length; rc++) {
+            if (reqClasses[rc] === 'AP 7-1' && empJobClass.indexOf('AP') !== -1) {
+              isRequiredForEmp = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // If daysLeft is null (no acquired or expiration date on sheet):
+    // Only generate a Missing task if this cert is REQUIRED for this employee's job classification!
+    if (daysLeft === null && !isRequiredForEmp) {
+      continue;
+    }
+
     var isMissing = (daysLeft === null);
 
     var location = employeeLocations[employee.toLowerCase()] || 'Unknown';
