@@ -1420,7 +1420,7 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
     for (var evh = 0; evh < empValHeaders.length; evh++) {
       var evHdr = String(empValHeaders[evh]).toLowerCase().trim();
       if (evHdr === 'name' || evHdr === 'employee name') empValNameCol = evh;
-      if (evHdr === 'job title' || evHdr === 'classification' || evHdr === 'title') empValTitleCol = evh;
+      if (evHdr === 'job classification' || evHdr === 'job title' || evHdr === 'classification' || evHdr === 'title' || evHdr.indexOf('class') !== -1) empValTitleCol = evh;
     }
     if (empValNameCol !== -1 && empValTitleCol !== -1) {
       for (var evi = 1; evi < empValData.length; evi++) {
@@ -1606,9 +1606,8 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
       }
     }
 
-    // If daysLeft is null (no acquired or expiration date on sheet):
-    // Only generate a Missing task if this cert is REQUIRED for this employee's job classification!
-    if (daysLeft === null && !isRequiredForEmp) {
+    // If cert is NOT required for this employee's job classification, skip task generation entirely!
+    if (!isRequiredForEmp) {
       continue;
     }
 
