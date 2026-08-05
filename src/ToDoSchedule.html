@@ -1976,6 +1976,41 @@
       // Calendar tab removed - no-op
     }
 
+    // Helper: Filter tasks based on active main task list filter dropdowns
+    function getActiveFilteredTasks(taskList) {
+      var tasksToFilter = taskList || allTasks;
+      if (!tasksToFilter || tasksToFilter.length === 0) return [];
+
+      var priorityElem = document.getElementById('filterPriority');
+      var statusElem = document.getElementById('filterStatus');
+      var sourceElem = document.getElementById('filterSource');
+      var locFilterSelect = document.getElementById('filterLocation');
+
+      var priority = priorityElem ? priorityElem.value : '';
+      var status = statusElem ? statusElem.value : '';
+      var source = sourceElem ? sourceElem.value : '';
+      var locationVal = locFilterSelect ? locFilterSelect.value : '';
+
+      if (!priority && !status && !source && !locationVal) {
+        return tasksToFilter;
+      }
+
+      return tasksToFilter.filter(function(task) {
+        if (priority && task.priority !== priority) return false;
+        if (status && task.status !== status) return false;
+        if (source && task.source !== source) return false;
+        if (locationVal) {
+          var taskLoc = task.location || '';
+          if (!taskLoc && task.employee && jobContext && jobContext.byEmployee[task.employee.toLowerCase()]) {
+            var jobNum = jobContext.byEmployee[task.employee.toLowerCase()];
+            if (jobContext.jobs[jobNum]) taskLoc = jobContext.jobs[jobNum].location;
+          }
+          if (taskLoc.toLowerCase() !== locationVal.toLowerCase()) return false;
+        }
+        return true;
+      });
+    }
+
     // ================== TASK LIST FUNCTIONS ==================
     function renderTasks(tasks) {
       // Crew view is the primary view — delegate to renderCrewCards.
@@ -1986,15 +2021,18 @@
         populateLocationFilter(allTasks);
       }
 
+      // Automatically apply active filters if available
+      var tasksToRender = getActiveFilteredTasks(tasks || allTasks);
+
       var crewContainer = document.getElementById('crewViewContainer');
 
-      if (!tasks || tasks.length === 0) {
+      if (!tasksToRender || tasksToRender.length === 0) {
         crewContainer.innerHTML = '<div class="empty-state"><i class="bi bi-calendar-x" style="font-size: 48px;"></i><p class="mt-3">No tasks found</p><p class="text-muted">Tasks will appear from Training, Crew Visits, Expiring Certs, and Swaps</p></div>';
         return;
       }
 
       // Apply the same include/exclude rules as before so filters still work
-      var filteredTasks = tasks.filter(function(task, index) {
+      var filteredTasks = tasksToRender.filter(function(task, index) {
         task._originalIndex = index;
 
         var taskType = (task.taskType || '').toLowerCase();
@@ -6222,14 +6260,40 @@
       }
     }
 
+    function setSelectValuePreservingMatch(selectElem, targetVal) {
+      if (!selectElem) return;
+      if (!targetVal) {
+        selectElem.value = '';
+        return;
+      }
+      selectElem.value = targetVal;
+      // If direct value match failed (e.g. case difference or trimmed space), find matching option
+      if (selectElem.value !== targetVal) {
+        var targetLower = String(targetVal).trim().toLowerCase();
+        for (var i = 0; i < selectElem.options.length; i++) {
+          var optVal = String(selectElem.options[i].value).trim().toLowerCase();
+          if (optVal === targetLower) {
+            selectElem.selectedIndex = i;
+            break;
+          }
+        }
+      }
+    }
+
     function populateCertFilters() {
       // Preserve currently selected filter values so updates don't reset filters
-      var curStatus = certFilterState.status || (document.getElementById('certFilterStatus') ? document.getElementById('certFilterStatus').value : '');
-      var curType = certFilterState.type || (document.getElementById('certFilterType') ? document.getElementById('certFilterType').value : '');
-      var curLoc = certFilterState.location || (document.getElementById('certFilterLocation') ? document.getElementById('certFilterLocation').value : '');
-      var curEmp = certFilterState.employee || (document.getElementById('certFilterEmployee') ? document.getElementById('certFilterEmployee').value : '');
+      var statusElem = document.getElementById('certFilterStatus');
+      var typeElem = document.getElementById('certFilterType');
+      var locElem = document.getElementById('certFilterLocation');
+      var empElem = document.getElementById('certFilterEmployee');
 
-      // Populate cert type filter
+      // Read from live DOM selects first (if non-empty), fallback to certFilterState
+      var curStatus = (statusElem && statusElem.value !== undefined && statusElem.value !== '') ? statusElem.value : (certFilterState.status || '');
+      var curType = (typeElem && typeElem.value !== undefined && typeElem.value !== '') ? typeElem.value : (certFilterState.type || '');
+      var curLoc = (locElem && locElem.value !== undefined && locElem.value !== '') ? locElem.value : (certFilterState.location || '');
+      var curEmp = (empElem && empElem.value !== undefined && empElem.value !== '') ? empElem.value : (certFilterState.employee || '');
+
+      // Populate cert type, location, and employee filter options
       var certTypes = new Set();
       var locations = new Set();
       var employees = new Set();
@@ -6239,54 +6303,60 @@
         if (cert.employee) employees.add(cert.employee);
       });
 
-      var typeSelect = document.getElementById('certFilterType');
-      if (typeSelect) {
-        typeSelect.innerHTML = '<option value="">All Cert Types</option>';
+      if (typeElem) {
+        typeElem.innerHTML = '<option value="">All Cert Types</option>';
         Array.from(certTypes).sort().forEach(function(type) {
-          typeSelect.innerHTML += '<option value="' + type + '">' + type + '</option>';
+          typeElem.innerHTML += '<option value="' + type + '">' + type + '</option>';
         });
-        typeSelect.value = curType;
+        setSelectValuePreservingMatch(typeElem, curType);
       }
 
-      var locSelect = document.getElementById('certFilterLocation');
-      if (locSelect) {
-        locSelect.innerHTML = '<option value="">All Locations</option>';
+      if (locElem) {
+        locElem.innerHTML = '<option value="">All Locations</option>';
         Array.from(locations).sort().forEach(function(loc) {
-          locSelect.innerHTML += '<option value="' + loc + '">' + loc + '</option>';
+          locElem.innerHTML += '<option value="' + loc + '">' + loc + '</option>';
         });
-        locSelect.value = curLoc;
+        setSelectValuePreservingMatch(locElem, curLoc);
       }
 
-      var empSelect = document.getElementById('certFilterEmployee');
-      if (empSelect) {
-        empSelect.innerHTML = '<option value="">All Employees</option>';
+      if (empElem) {
+        empElem.innerHTML = '<option value="">All Employees</option>';
         Array.from(employees).sort().forEach(function(emp) {
-          empSelect.innerHTML += '<option value="' + emp + '">' + emp + '</option>';
+          empElem.innerHTML += '<option value="' + emp + '">' + emp + '</option>';
         });
-        empSelect.value = curEmp;
+        setSelectValuePreservingMatch(empElem, curEmp);
       }
 
-      var statusSelect = document.getElementById('certFilterStatus');
-      if (statusSelect) {
-        statusSelect.value = curStatus;
+      if (statusElem) {
+        setSelectValuePreservingMatch(statusElem, curStatus);
       }
 
-      certFilterState = { status: curStatus, type: curType, location: curLoc, employee: curEmp };
+      certFilterState = {
+        status: statusElem ? statusElem.value : curStatus,
+        type: typeElem ? typeElem.value : curType,
+        location: locElem ? locElem.value : curLoc,
+        employee: empElem ? empElem.value : curEmp
+      };
     }
 
     function applyCertFilters() {
-      certFilterState.status = document.getElementById('certFilterStatus').value;
-      certFilterState.type = document.getElementById('certFilterType').value;
-      certFilterState.location = document.getElementById('certFilterLocation').value;
-      certFilterState.employee = document.getElementById('certFilterEmployee').value;
+      var statusElem = document.getElementById('certFilterStatus');
+      var typeElem = document.getElementById('certFilterType');
+      var locElem = document.getElementById('certFilterLocation');
+      var empElem = document.getElementById('certFilterEmployee');
+
+      certFilterState.status = statusElem ? statusElem.value : '';
+      certFilterState.type = typeElem ? typeElem.value : '';
+      certFilterState.location = locElem ? locElem.value : '';
+      certFilterState.employee = empElem ? empElem.value : '';
       renderExpiringCerts();
     }
 
     function clearCertFilters() {
-      document.getElementById('certFilterStatus').value = '';
-      document.getElementById('certFilterType').value = '';
-      document.getElementById('certFilterLocation').value = '';
-      document.getElementById('certFilterEmployee').value = '';
+      if (document.getElementById('certFilterStatus')) document.getElementById('certFilterStatus').value = '';
+      if (document.getElementById('certFilterType')) document.getElementById('certFilterType').value = '';
+      if (document.getElementById('certFilterLocation')) document.getElementById('certFilterLocation').value = '';
+      if (document.getElementById('certFilterEmployee')) document.getElementById('certFilterEmployee').value = '';
       certFilterState = { status: '', type: '', location: '', employee: '' };
       renderExpiringCerts();
     }
@@ -6313,10 +6383,17 @@
         // Apply filters
         var filteredCerts = allExpiringCerts.filter(function(cert) {
           var status = getCertStatus(cert);
-          if (certFilterState.status && status !== certFilterState.status) return false;
-          if (certFilterState.type && cert.certType !== certFilterState.type) return false;
-          if (certFilterState.location && cert.location !== certFilterState.location) return false;
-          if (certFilterState.employee && cert.employee !== certFilterState.employee) return false;
+          if (certFilterState.status) {
+            var filterStat = certFilterState.status;
+            if (filterStat === 'Expired') {
+              if (status !== 'Expired' && status !== 'Missing') return false;
+            } else if (status !== filterStat) {
+              return false;
+            }
+          }
+          if (certFilterState.type && String(cert.certType || '').trim().toLowerCase() !== String(certFilterState.type).trim().toLowerCase()) return false;
+          if (certFilterState.location && String(cert.location || '').trim().toLowerCase() !== String(certFilterState.location).trim().toLowerCase()) return false;
+          if (certFilterState.employee && String(cert.employee || '').trim().toLowerCase() !== String(certFilterState.employee).trim().toLowerCase()) return false;
           return true;
         });
 

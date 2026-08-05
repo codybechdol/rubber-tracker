@@ -5006,6 +5006,29 @@ function sortExpiringCertsSheet(sheet) {
   var empList = getEmployeeNamesForMatching();
   var alternateNameMap = buildAlternateNameMap(empList);
 
+  // Get non-expiring cert types for formula logic
+  var nonExpiringList = [
+    'Crane Evaluation',
+    'OSHA 1910',
+    'BNSF',
+    'MSHA',
+    'EICA Basic Helicopter Line Construction Safety'
+  ];
+  try {
+    var configRaw = PropertiesService.getScriptProperties().getProperty('EXPIRING_CERTS_CONFIG');
+    if (configRaw) {
+      var parsedCfg = JSON.parse(configRaw);
+      if (parsedCfg && Array.isArray(parsedCfg.certs)) {
+        parsedCfg.certs.forEach(function(c) {
+          if (c.category === 'non_expiring' && c.name) {
+            var n = String(c.name).trim();
+            if (nonExpiringList.indexOf(n) === -1) nonExpiringList.push(n);
+          }
+        });
+      }
+    }
+  } catch (e) {}
+
   var formulas = [];
   var smsValues = [];
   var smsValidations = [];
@@ -5016,6 +5039,7 @@ function sortExpiringCertsSheet(sheet) {
     var empName = String(values[f][0] || '').trim();
     var certType = String(values[f][1] || '').trim();
     var cTypeLower = certType.toLowerCase();
+    var isNonExpiring = nonExpiringList.indexOf(certType) !== -1;
     var isDlCert = (cTypeLower === 'dl' || cTypeLower === 'drivers license' || cTypeLower === "driver's license");
     var isNonCdlStatus = String(values[f][7] || '').trim().toLowerCase().indexOf('non-cdl') !== -1;
 
