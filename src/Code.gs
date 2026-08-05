@@ -15863,11 +15863,10 @@ function getTasksWithMetadata() {
  */
 function getStoredTasks() {
   try {
-    Logger.log('=== getStoredTasks START ===');
+    Logger.log('=== getStoredTasks (LIVE FETCH) START ===');
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var metadataSheet = ss.getSheetByName('Task Metadata');
 
-    // If Task Metadata sheet is missing or empty, clear cached tasks in ScriptProperties
     if (!metadataSheet || metadataSheet.getLastRow() <= 1) {
       deleteChunkedScriptProperty('TASKS_DATA');
       PropertiesService.getScriptProperties().deleteProperty('TASKS_TIMESTAMP');
@@ -15878,47 +15877,11 @@ function getStoredTasks() {
       };
     }
 
-    var props = PropertiesService.getScriptProperties();
-    var timestampStr = props.getProperty('TASKS_TIMESTAMP');
-    var isStale = false;
-
-    if (timestampStr) {
-      var timeDiffMs = new Date().getTime() - new Date(timestampStr).getTime();
-      // If cache is older than 15 minutes (900,000 ms), consider it stale and auto-refresh
-      if (isNaN(timeDiffMs) || timeDiffMs > 15 * 60 * 1000) {
-        isStale = true;
-        Logger.log('getStoredTasks: Cache is stale (' + Math.round(timeDiffMs / 60000) + ' min old)');
-      }
-    } else {
-      isStale = true;
-    }
-
-    var jsonStr = getChunkedScriptProperty('TASKS_DATA');
-
-    // If cache is missing OR stale, automatically generate fresh data from source sheets
-    if (!jsonStr || isStale) {
-      Logger.log('getStoredTasks: Cache missing or stale - generating fresh tasks with metadata...');
-      var freshResult = getTasksWithMetadata();
-      jsonStr = getChunkedScriptProperty('TASKS_DATA');
-      if (!jsonStr && freshResult && freshResult.tasks) {
-        return freshResult;
-      }
-    }
-
-    if (!jsonStr) {
-      Logger.log('getStoredTasks: No data found in ScriptProperties (chunked or legacy)');
-      return {
-        error: true,
-        message: 'No task data found. Please refresh.'
-      };
-    }
-
-    var data = JSON.parse(jsonStr);
-    Logger.log('getStoredTasks: Retrieved ' + data.totalTasks + ' tasks from ScriptProperties');
-    Logger.log('=== getStoredTasks END ===');
-
-    return data;
-
+    // Always purge old cache and fetch fresh live tasks to eliminate stale data issues
+    deleteChunkedScriptProperty('TASKS_DATA');
+    PropertiesService.getScriptProperties().deleteProperty('TASKS_TIMESTAMP');
+    
+    return getTasksWithMetadata();
   } catch (e) {
     Logger.log('getStoredTasks: ERROR: ' + e);
     return {

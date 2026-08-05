@@ -1659,26 +1659,8 @@
     }
 
     function loadTasks(forceRefresh) {
-      if (!forceRefresh) {
-        // FAST PATH: Fetch cached task data from ScriptProperties (< 1 second)
-        google.script.run
-          .withSuccessHandler(function(storedData) {
-            if (storedData && storedData.tasks && !storedData.error) {
-              console.log('loadTasks: Fast path loaded ' + storedData.tasks.length + ' tasks from cache');
-              processTaskData(storedData);
-            } else {
-              console.log('loadTasks: Cache empty or error, running full metadata fetch...');
-              fetchFullTasksWithMetadata();
-            }
-          })
-          .withFailureHandler(function(err) {
-            console.warn('loadTasks: Fast path failed, falling back to full metadata:', err);
-            fetchFullTasksWithMetadata();
-          })
-          .getStoredTasks();
-      } else {
-        fetchFullTasksWithMetadata();
-      }
+      // Always fetch live task data on dialog open to eliminate stale cached data
+      fetchFullTasksWithMetadata();
     }
 
     function fetchFullTasksWithMetadata() {
