@@ -15607,6 +15607,40 @@ function getTasksWithMetadata() {
     Logger.log('getTasksWithMetadata: Built cert validation lookup with ' + Object.keys(currentCertData).length + ' entries');
   }
 
+  // Load employee job classification map from Employees sheet for requirement validation
+  var employeeJobClasses = {};
+  var empSheet = ss.getSheetByName('Employees');
+  if (empSheet && empSheet.getLastRow() > 1) {
+    var empValData = empSheet.getDataRange().getValues();
+    var empValHeaders = empValData[0];
+    var empValNameCol = -1, empValTitleCol = -1;
+    for (var evh = 0; evh < empValHeaders.length; evh++) {
+      var evHdr = String(empValHeaders[evh]).toLowerCase().trim();
+      if (evHdr === 'name' || evHdr === 'employee name') empValNameCol = evh;
+      if (evHdr === 'job classification' || evHdr === 'job title' || evHdr === 'classification' || evHdr === 'title' || evHdr.indexOf('class') !== -1) empValTitleCol = evh;
+    }
+    if (empValNameCol !== -1 && empValTitleCol !== -1) {
+      for (var evi = 1; evi < empValData.length; evi++) {
+        var evName = String(empValData[evi][empValNameCol] || '').trim().toLowerCase();
+        var evTitle = String(empValData[evi][empValTitleCol] || '').trim().toUpperCase();
+        if (evName) employeeJobClasses[evName] = evTitle;
+      }
+    }
+  }
+
+  // Load Expiring Certifications Setup expectation rules
+  var certExpectationMap = {};
+  try {
+    var expiringCertsConfig = getExpiringCertsConfig();
+    if (expiringCertsConfig && expiringCertsConfig.certs) {
+      expiringCertsConfig.certs.forEach(function(c) {
+        if (c.name) certExpectationMap[c.name.trim().toLowerCase()] = c;
+      });
+    }
+  } catch (configErr) {
+    Logger.log('getTasksWithMetadata: Error loading getExpiringCertsConfig: ' + configErr);
+  }
+
   var taskListAdditions = 0;
   var skippedStaleCerts = 0;
   var addedCertKeys = {};
@@ -15633,6 +15667,36 @@ function getTasksWithMetadata() {
       if (addedCertKeys[certLookupKey]) {
         Logger.log('getTasksWithMetadata: Skipping DUPLICATE cert task - ' + metadata.employee + ' ' + metadata.itemType);
         continue;
+      }
+
+      // Check job classification requirement rule from Expiring Certifications Setup
+      var certRule = certExpectationMap[String(metadata.itemType || '').trim().toLowerCase()];
+      if (certRule) {
+        var scope = certRule.requirementScope || 'all';
+        if (scope === 'optional') {
+          Logger.log('getTasksWithMetadata: Skipping OPTIONAL cert task - ' + metadata.employee + ' ' + metadata.itemType);
+          skippedStaleCerts++;
+          continue;
+        } else if (scope === 'job_class') {
+          var empClass = employeeJobClasses[String(metadata.employee || '').trim().toLowerCase()] || '';
+          var reqClasses = (certRule.requiredJobClasses || []).map(function(cls) { return String(cls).trim().toUpperCase(); });
+          var isRequiredForEmp = false;
+          if (empClass && reqClasses.indexOf(empClass) !== -1) {
+            isRequiredForEmp = true;
+          } else if (empClass) {
+            for (var rc = 0; rc < reqClasses.length; rc++) {
+              if (reqClasses[rc] === 'AP 7-1' && empClass.indexOf('AP') !== -1) {
+                isRequiredForEmp = true;
+                break;
+              }
+            }
+          }
+          if (!isRequiredForEmp) {
+            Logger.log('getTasksWithMetadata: Skipping cert task NOT REQUIRED for job classification - ' + metadata.employee + ' (' + empClass + ') ' + metadata.itemType);
+            skippedStaleCerts++;
+            continue;
+          }
+        }
       }
 
       var currentCert = currentCertData[certLookupKey];
