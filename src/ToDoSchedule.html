@@ -1976,6 +1976,8 @@
       // Calendar tab removed - no-op
     }
 
+    var mainFilterState = { priority: '', status: '', source: '', location: '' };
+
     // Helper: Filter tasks based on active main task list filter dropdowns
     function getActiveFilteredTasks(taskList) {
       var tasksToFilter = taskList || allTasks;
@@ -1986,10 +1988,15 @@
       var sourceElem = document.getElementById('filterSource');
       var locFilterSelect = document.getElementById('filterLocation');
 
-      var priority = priorityElem ? priorityElem.value : '';
-      var status = statusElem ? statusElem.value : '';
-      var source = sourceElem ? sourceElem.value : '';
-      var locationVal = locFilterSelect ? locFilterSelect.value : '';
+      var priority = (priorityElem && priorityElem.value !== undefined && priorityElem.value !== '') ? priorityElem.value : mainFilterState.priority;
+      var status = (statusElem && statusElem.value !== undefined && statusElem.value !== '') ? statusElem.value : mainFilterState.status;
+      var source = (sourceElem && sourceElem.value !== undefined && sourceElem.value !== '') ? sourceElem.value : mainFilterState.source;
+      var locationVal = (locFilterSelect && locFilterSelect.value !== undefined && locFilterSelect.value !== '') ? locFilterSelect.value : mainFilterState.location;
+
+      mainFilterState.priority = priority;
+      mainFilterState.status = status;
+      mainFilterState.source = source;
+      mainFilterState.location = locationVal;
 
       if (!priority && !status && !source && !locationVal) {
         return tasksToFilter;
@@ -3014,8 +3021,12 @@
     function populateLocationFilter(tasks) {
       var locSelect = document.getElementById('filterLocation');
       if (!locSelect) return;
-      var currentVal = locSelect.value;
+      var currentVal = (locSelect.value !== undefined && locSelect.value !== '') ? locSelect.value : (mainFilterState.location || '');
+      mainFilterState.location = currentVal;
+
       var locSet = new Set();
+      if (currentVal) locSet.add(currentVal);
+
       (tasks || []).forEach(function(t) {
         var loc = t.location || '';
         if (!loc && t.employee && jobContext && jobContext.byEmployee[t.employee.toLowerCase()]) {
@@ -3024,45 +3035,39 @@
             loc = jobContext.jobs[jobNum].location;
           }
         }
-        if (loc) locSet.add(loc);
+        if (loc) {
+          var match = loc.match(/^([^(]+)/);
+          var base = match ? match[1].trim() : loc.trim();
+          if (base) locSet.add(base);
+        }
       });
       locSelect.innerHTML = '<option value="">All Locations</option>';
       Array.from(locSet).sort().forEach(function(l) {
         locSelect.innerHTML += '<option value="' + l + '">' + l + '</option>';
       });
-      if (currentVal) locSelect.value = currentVal;
+      if (currentVal) setSelectValuePreservingMatch(locSelect, currentVal);
     }
 
     function applyFilters() {
-      var priority = document.getElementById('filterPriority').value;
-      var status = document.getElementById('filterStatus').value;
-      var source = document.getElementById('filterSource').value;
-      var locFilterSelect = document.getElementById('filterLocation');
-      var locationVal = locFilterSelect ? locFilterSelect.value : '';
+      var priorityElem = document.getElementById('filterPriority');
+      var statusElem = document.getElementById('filterStatus');
+      var sourceElem = document.getElementById('filterSource');
+      var locElem = document.getElementById('filterLocation');
 
-      var filtered = allTasks.filter(function(task) {
-        if (priority && task.priority !== priority) return false;
-        if (status && task.status !== status) return false;
-        if (source && task.source !== source) return false;
-        if (locationVal) {
-          var taskLoc = task.location || '';
-          if (!taskLoc && task.employee && jobContext && jobContext.byEmployee[task.employee.toLowerCase()]) {
-            var jobNum = jobContext.byEmployee[task.employee.toLowerCase()];
-            if (jobContext.jobs[jobNum]) taskLoc = jobContext.jobs[jobNum].location;
-          }
-          if (taskLoc.toLowerCase() !== locationVal.toLowerCase()) return false;
-        }
-        return true;
-      });
+      mainFilterState.priority = (priorityElem && priorityElem.value !== undefined) ? priorityElem.value : '';
+      mainFilterState.status = (statusElem && statusElem.value !== undefined) ? statusElem.value : '';
+      mainFilterState.source = (sourceElem && sourceElem.value !== undefined) ? sourceElem.value : '';
+      mainFilterState.location = (locElem && locElem.value !== undefined) ? locElem.value : '';
 
-      renderTasks(filtered);
+      renderTasks(allTasks);
     }
 
     function clearFilters() {
-      document.getElementById('filterPriority').value = '';
-      document.getElementById('filterStatus').value = '';
-      document.getElementById('filterSource').value = '';
+      if (document.getElementById('filterPriority')) document.getElementById('filterPriority').value = '';
+      if (document.getElementById('filterStatus')) document.getElementById('filterStatus').value = '';
+      if (document.getElementById('filterSource')) document.getElementById('filterSource').value = '';
       if (document.getElementById('filterLocation')) document.getElementById('filterLocation').value = '';
+      mainFilterState = { priority: '', status: '', source: '', location: '' };
       renderTasks(allTasks);
     }
 
@@ -6297,6 +6302,12 @@
       var certTypes = new Set();
       var locations = new Set();
       var employees = new Set();
+
+      // ALWAYS include currently selected values in the option sets so active filters are NEVER dropped during option rebuilding
+      if (curType) certTypes.add(curType);
+      if (curLoc) locations.add(curLoc);
+      if (curEmp) employees.add(curEmp);
+
       allExpiringCerts.forEach(function(cert) {
         if (cert.certType) certTypes.add(cert.certType);
         if (cert.location) locations.add(cert.location);
