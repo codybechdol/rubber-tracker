@@ -73,6 +73,7 @@ function _buildGloveManagerMenu() {
         .addSubMenu(ui.createMenu('🏗️ Sheets Setup')
           .addItem('📜 Certification Expectations & Requirements', 'showExpiringCertsSetupDialog')
           .addItem('🔄 Sync Full Certs Matrix (All Employees)', 'syncExpiringCertsSheetFullRoster')
+          .addItem('🎨 Fix Expiring Certs Colors & Formatting', 'menuFixExpiringCertsFormatting')
           .addItem('🧹 Purge Non-Employee Rows (Expiring Certs)', 'menuCleanExpiringCertsSheet')
           .addSeparator()
           .addItem('🏗️ Build Sheets', 'buildSheets')

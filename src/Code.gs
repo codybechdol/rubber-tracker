@@ -2740,6 +2740,12 @@ function setEmployeeDriverLicenseType(employeeName, isNonCdl) {
       }
     }
 
+    // 3. Immediately re-apply conditional formatting rules and sort Expiring Certs sheet
+    if (expiringSheet && expiringSheet.getLastRow() >= 2) {
+      sortExpiringCertsSheet(expiringSheet);
+      applyExpiringCertsFormatting(expiringSheet, expiringSheet.getLastRow() - 1);
+    }
+
     return {
       success: true,
       message: 'Updated ' + employeeName + ' to ' + (isNonCdl ? 'Non-CDL' : 'CDL') + '. MEC Expiration ' + (isNonCdl ? 'set to Not Required' : 'restored') + '.',
@@ -4611,7 +4617,7 @@ function applyExpiringCertsFormatting(sheet, dataRows) {
 
   // 2. EXPIRED (Full Row A-I - Red)
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=OR($H2="EXPIRED", AND(LEFT($H2,7)="Non-CDL", ISNUMBER($G2), $G2<0))')
+    .whenFormulaSatisfied('=OR($H2="EXPIRED", AND(ISNUMBER(SEARCH("Non-CDL",$H2)), ISNUMBER($G2), $G2<0))')
     .setBackground('#ea4335')
     .setFontColor('#ffffff')
     .setRanges([fullRowRange])
@@ -4619,7 +4625,7 @@ function applyExpiringCertsFormatting(sheet, dataRows) {
 
   // 3. CRITICAL (Full Row A-I - Dark Orange)
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=OR($H2="CRITICAL", AND(LEFT($H2,7)="Non-CDL", ISNUMBER($G2), $G2>=0, $G2<=7))')
+    .whenFormulaSatisfied('=OR($H2="CRITICAL", AND(ISNUMBER(SEARCH("Non-CDL",$H2)), ISNUMBER($G2), $G2>=0, $G2<=7))')
     .setBackground('#ff6d00')
     .setFontColor('#ffffff')
     .setRanges([fullRowRange])
@@ -4627,7 +4633,7 @@ function applyExpiringCertsFormatting(sheet, dataRows) {
 
   // 4. WARNING (Full Row A-I - Yellow)
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=OR($H2="WARNING", AND(LEFT($H2,7)="Non-CDL", ISNUMBER($G2), $G2>7, $G2<=30))')
+    .whenFormulaSatisfied('=OR($H2="WARNING", AND(ISNUMBER(SEARCH("Non-CDL",$H2)), ISNUMBER($G2), $G2>7, $G2<=30))')
     .setBackground('#fbbc04')
     .setFontColor('#000000')
     .setRanges([fullRowRange])
@@ -4635,7 +4641,7 @@ function applyExpiringCertsFormatting(sheet, dataRows) {
 
   // 5. UPCOMING (Full Row A-I - Soft Blue)
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=OR($H2="UPCOMING", AND(LEFT($H2,7)="Non-CDL", ISNUMBER($G2), $G2>30, $G2<=60))')
+    .whenFormulaSatisfied('=OR($H2="UPCOMING", AND(ISNUMBER(SEARCH("Non-CDL",$H2)), ISNUMBER($G2), $G2>30, $G2<=60))')
     .setBackground('#4285f4')
     .setFontColor('#ffffff')
     .setRanges([fullRowRange])
@@ -4643,7 +4649,7 @@ function applyExpiringCertsFormatting(sheet, dataRows) {
 
   // 6. OK (Status Column H only - Green)
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=OR($H2="OK", AND(LEFT($H2,7)="Non-CDL", ISNUMBER($G2), $G2>60))')
+    .whenFormulaSatisfied('=OR($H2="OK", AND(ISNUMBER(SEARCH("Non-CDL",$H2)), ISNUMBER($G2), $G2>60))')
     .setBackground('#34a853')
     .setFontColor('#ffffff')
     .setRanges([statusRange])
@@ -4657,15 +4663,30 @@ function applyExpiringCertsFormatting(sheet, dataRows) {
     .setRanges([fullRowRange])
     .build());
 
-  // 8. No Date Set (Full Row A-I - Gray)
+  // 8. No Date Set & NOT REQUIRED (Full Row A-I - Gray)
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=OR($H2="No Date Set", AND(LEFT($H2,7)="Non-CDL", OR($G2="N/A", ISBLANK($G2))))')
+    .whenFormulaSatisfied('=OR($H2="No Date Set", $H2="NOT REQUIRED", AND(ISNUMBER(SEARCH("Non-CDL",$H2)), OR($G2="N/A", ISBLANK($G2))))')
     .setBackground('#757575')
     .setFontColor('#ffffff')
     .setRanges([fullRowRange])
     .build());
 
   sheet.setConditionalFormatRules(rules);
+}
+
+/**
+ * Menu action to force-refresh conditional formatting colors on Expiring Certs sheet.
+ */
+function menuFixExpiringCertsFormatting() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Expiring Certs');
+  if (!sheet || sheet.getLastRow() < 2) {
+    SpreadsheetApp.getUi().alert('Expiring Certs sheet is missing or empty.');
+    return;
+  }
+  sortExpiringCertsSheet(sheet);
+  applyExpiringCertsFormatting(sheet, sheet.getLastRow() - 1);
+  SpreadsheetApp.getUi().alert('✅ Expiring Certs Formatting Refreshed', 'Conditional formatting colors and rules have been re-applied to all rows.', SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
 /**
