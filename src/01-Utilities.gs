@@ -729,23 +729,26 @@ function getNonCdlEmployeeSet(ss) {
   if (expiringSheet && expiringSheet.getLastRow() >= 2) {
     var data = expiringSheet.getDataRange().getValues();
     var headers = data[0];
-    var empCol = -1, itemCol = -1, statusCol = -1;
+    var empCol = -1, itemCol = -1, statusCol = -1, expCol = -1;
 
     for (var h = 0; h < headers.length; h++) {
       var hdr = String(headers[h]).toLowerCase().trim();
       if (hdr === 'employee name' || hdr === 'name') empCol = h;
       if (hdr === 'item type' || hdr === 'cert type' || hdr === 'certification type') itemCol = h;
       if (hdr === 'status') statusCol = h;
+      if (hdr === 'expiration date' || hdr === 'exp date') expCol = h;
     }
 
-    if (empCol !== -1 && itemCol !== -1 && statusCol !== -1) {
+    if (empCol !== -1 && itemCol !== -1) {
       for (var r = 1; r < data.length; r++) {
         var emp = String(data[r][empCol] || '').trim();
         var item = String(data[r][itemCol] || '').trim().toLowerCase();
-        var status = String(data[r][statusCol] || '').trim().toLowerCase();
+        var status = statusCol !== -1 ? String(data[r][statusCol] || '').trim().toLowerCase() : '';
+        var expStr = expCol !== -1 ? String(data[r][expCol] || '').trim().toLowerCase() : '';
 
         if (emp && (item === 'dl' || item === 'drivers license' || item === "driver's license")) {
-          if (status.indexOf('non-cdl') !== -1 || status === 'non cdl') {
+          if (status.indexOf('non-cdl') !== -1 || status === 'non cdl' ||
+              expStr.indexOf('non-cdl') !== -1 || expStr === 'non cdl') {
             nonCdlSet[emp.toLowerCase()] = true;
           }
         }
@@ -758,23 +761,26 @@ function getNonCdlEmployeeSet(ss) {
   if (metaSheet && metaSheet.getLastRow() >= 2) {
     var mData = metaSheet.getDataRange().getValues();
     var mHeaders = mData[0];
-    var mEmpCol = -1, mItemCol = -1, mStatusCol = -1;
+    var mEmpCol = -1, mItemCol = -1, mStatusCol = -1, mNotesCol = -1;
 
     for (var mh = 0; mh < mHeaders.length; mh++) {
       var mHdr = String(mHeaders[mh]).toLowerCase().trim();
       if (mHdr === 'employee') mEmpCol = mh;
       if (mHdr === 'itemtype') mItemCol = mh;
       if (mHdr === 'status') mStatusCol = mh;
+      if (mHdr === 'notes') mNotesCol = mh;
     }
 
-    if (mEmpCol !== -1 && mItemCol !== -1 && mStatusCol !== -1) {
+    if (mEmpCol !== -1 && mItemCol !== -1) {
       for (var mr = 1; mr < mData.length; mr++) {
         var mEmp = String(mData[mr][mEmpCol] || '').trim();
         var mItem = String(mData[mr][mItemCol] || '').trim().toLowerCase();
-        var mStatus = String(mData[mr][mStatusCol] || '').trim().toLowerCase();
+        var mStatus = mStatusCol !== -1 ? String(mData[mr][mStatusCol] || '').trim().toLowerCase() : '';
+        var mNotes = mNotesCol !== -1 ? String(mData[mr][mNotesCol] || '').trim().toLowerCase() : '';
 
         if (mEmp && (mItem === 'dl' || mItem === 'drivers license' || mItem === "driver's license")) {
-          if (mStatus.indexOf('non-cdl') !== -1 || mStatus === 'non cdl') {
+          if (mStatus.indexOf('non-cdl') !== -1 || mStatus === 'non cdl' ||
+              mNotes.indexOf('non-cdl') !== -1 || mNotes === 'non cdl') {
             nonCdlSet[mEmp.toLowerCase()] = true;
           }
         }
@@ -784,5 +790,3 @@ function getNonCdlEmployeeSet(ss) {
 
   return nonCdlSet;
 }
-
-

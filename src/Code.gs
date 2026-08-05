@@ -2659,9 +2659,8 @@ function setEmployeeDriverLicenseType(employeeName, isNonCdl) {
     if (!employeeName) return { success: false, message: 'Employee name is required' };
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var empLower = String(employeeName).trim().toLowerCase();
-    var dlStatusVal = isNonCdl ? 'Non-CDL' : 'Active';
 
-    // 1. Update Expiring Certs sheet
+    // 1. Update Expiring Certs sheet (Column H is Status, Column D is Expiration Date)
     var expiringSheet = ss.getSheetByName('Expiring Certs');
     if (expiringSheet && expiringSheet.getLastRow() >= 2) {
       var data = expiringSheet.getDataRange().getValues();
@@ -2683,13 +2682,14 @@ function setEmployeeDriverLicenseType(employeeName, isNonCdl) {
 
           if (rEmp === empLower) {
             if (rItem === 'dl' || rItem === 'drivers license' || rItem === "driver's license") {
-              expiringSheet.getRange(r + 1, statusCol + 1).setValue(dlStatusVal);
+              var newDlStatus = isNonCdl ? 'Non-CDL' : 'OK';
+              expiringSheet.getRange(r + 1, statusCol + 1).setValue(newDlStatus);
             } else if (rItem === 'mec expiration' || rItem === 'mec') {
               if (isNonCdl) {
-                expiringSheet.getRange(r + 1, statusCol + 1).setValue('N/A (Non-CDL)');
+                expiringSheet.getRange(r + 1, statusCol + 1).setValue('NOT REQUIRED');
                 if (daysCol !== -1) expiringSheet.getRange(r + 1, daysCol + 1).setValue('N/A');
               } else {
-                expiringSheet.getRange(r + 1, statusCol + 1).setValue('Unassigned');
+                expiringSheet.getRange(r + 1, statusCol + 1).setValue('MISSING');
               }
             }
           }
@@ -2697,12 +2697,13 @@ function setEmployeeDriverLicenseType(employeeName, isNonCdl) {
       }
     }
 
-    // 2. Update Task Metadata sheet
+    // 2. Update Task Metadata sheet safely
+    // Column O (Status) data validation ONLY allows: Unassigned, Assigned, Complete, Overdue, Deferred
     var metaSheet = ss.getSheetByName('Task Metadata');
     if (metaSheet && metaSheet.getLastRow() >= 2) {
       var mData = metaSheet.getDataRange().getValues();
       var mHeaders = mData[0];
-      var mEmpCol = -1, mItemCol = -1, mStatusCol = -1, mListCol = -1;
+      var mEmpCol = -1, mItemCol = -1, mStatusCol = -1, mListCol = -1, mNotesCol = -1;
 
       for (var mh = 0; mh < mHeaders.length; mh++) {
         var mHdr = String(mHeaders[mh]).toLowerCase().trim();
@@ -2710,22 +2711,28 @@ function setEmployeeDriverLicenseType(employeeName, isNonCdl) {
         if (mHdr === 'itemtype') mItemCol = mh;
         if (mHdr === 'status') mStatusCol = mh;
         if (mHdr === 'intasklist' || mHdr === 'in task list') mListCol = mh;
+        if (mHdr === 'notes') mNotesCol = mh;
       }
 
-      if (mEmpCol !== -1 && mItemCol !== -1 && mStatusCol !== -1) {
+      if (mEmpCol !== -1 && mItemCol !== -1) {
         for (var mr = 1; mr < mData.length; mr++) {
           var mrEmp = String(mData[mr][mEmpCol] || '').trim().toLowerCase();
           var mrItem = String(mData[mr][mItemCol] || '').trim().toLowerCase();
 
           if (mrEmp === empLower) {
             if (mrItem === 'dl' || mrItem === 'drivers license' || mrItem === "driver's license") {
-              metaSheet.getRange(mr + 1, mStatusCol + 1).setValue(dlStatusVal);
+              if (mNotesCol !== -1) {
+                var currentNotes = String(mData[mr][mNotesCol] || '').trim();
+                var newNotes = isNonCdl ? 'Non-CDL' : currentNotes.replace('Non-CDL', '').trim();
+                metaSheet.getRange(mr + 1, mNotesCol + 1).setValue(newNotes);
+              }
             } else if (mrItem === 'mec expiration' || mrItem === 'mec') {
               if (isNonCdl) {
-                metaSheet.getRange(mr + 1, mStatusCol + 1).setValue('N/A (Non-CDL)');
+                if (mStatusCol !== -1) metaSheet.getRange(mr + 1, mStatusCol + 1).setValue('Deferred');
                 if (mListCol !== -1) metaSheet.getRange(mr + 1, mListCol + 1).setValue('');
+                if (mNotesCol !== -1) metaSheet.getRange(mr + 1, mNotesCol + 1).setValue('Non-CDL - MEC Not Required');
               } else {
-                metaSheet.getRange(mr + 1, mStatusCol + 1).setValue('Unassigned');
+                if (mStatusCol !== -1) metaSheet.getRange(mr + 1, mStatusCol + 1).setValue('Unassigned');
               }
             }
           }
@@ -2735,7 +2742,7 @@ function setEmployeeDriverLicenseType(employeeName, isNonCdl) {
 
     return {
       success: true,
-      message: 'Updated ' + employeeName + ' to ' + dlStatusVal + '. MEC Expiration ' + (isNonCdl ? 'set to N/A' : 'restored') + '.',
+      message: 'Updated ' + employeeName + ' to ' + (isNonCdl ? 'Non-CDL' : 'CDL') + '. MEC Expiration ' + (isNonCdl ? 'set to Not Required' : 'restored') + '.',
       employee: employeeName,
       isNonCdl: isNonCdl
     };
