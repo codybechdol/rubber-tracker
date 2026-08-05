@@ -1444,6 +1444,13 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
     Logger.log('collectExpiringCertTasks: Error loading getExpiringCertsSetupConfig: ' + configErr);
   }
 
+  var dlNonCdlActive = false;
+  if ((certExpectationMap['dl'] && certExpectationMap['dl'].nonCdl === true) ||
+      (certExpectationMap['drivers license'] && certExpectationMap['drivers license'].nonCdl === true) ||
+      (certExpectationMap["driver's license"] && certExpectationMap["driver's license"].nonCdl === true)) {
+    dlNonCdlActive = true;
+  }
+
   // Pre-scan: build Crane Cert validity and Crane Evaluation date maps
   // Used to detect employees who have a valid Crane Cert but no Crane Evaluation form date
   var craneCertValidSet = {};   // empNameLower → canonical employee name
@@ -1495,6 +1502,10 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
     var daysUntil = daysUntilCol !== -1 ? row[daysUntilCol] : null;
 
     if (!employee || !certType || isNonEmployeeName(employee)) continue;
+
+    // Skip MEC Expiration tasks if DL is set to Non-CDL
+    var cTypeLower = certType.toLowerCase();
+    if (dlNonCdlActive && (cTypeLower === 'mec expiration' || cTypeLower === 'mec')) continue;
 
     // Skip pending new hire employees (future Hire Date)
     if (pendingEmps[employee.toLowerCase()]) continue;

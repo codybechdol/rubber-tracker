@@ -2527,8 +2527,8 @@ function calculateCertAcquiredDate(certType, expirationDate) {
  */
 function showExpiringCertsSetupDialog() {
   var html = HtmlService.createHtmlOutputFromFile('ExpiringCertsSetup')
-    .setWidth(1050)
-    .setHeight(800)
+    .setWidth(1450)
+    .setHeight(900)
     .setTitle('Expiring Certifications Setup');
   SpreadsheetApp.getUi().showModalDialog(html, '📜 Expiring Certifications Setup');
 }
@@ -2561,7 +2561,7 @@ function getExpiringCertsSetupConfig() {
           { name: 'Forklift Operator Safety Training', category: 'standard', termMonths: 36, requireRehireReevaluation: true, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'JRY OP', 'EO 1', 'EO 2', 'WT'], allowDeclined: true },
           { name: 'Crane Cert', category: 'standard', termMonths: 60, requireRehireReevaluation: false, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'JRY OP', 'EO 1', 'EO 2'], allowDeclined: true },
           { name: 'MEC Expiration', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'all', requiredJobClasses: [], allowDeclined: false },
-          { name: 'DL', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'all', requiredJobClasses: [], allowDeclined: false },
+          { name: 'DL', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'all', requiredJobClasses: [], allowDeclined: false, nonCdl: false },
           { name: 'Crane Evaluation', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: true, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'JRY OP', 'EO 1', 'EO 2'], allowDeclined: true },
           { name: 'OSHA 1910', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'all', requiredJobClasses: [], allowDeclined: false },
           { name: 'BNSF', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'optional', requiredJobClasses: [], allowDeclined: true },
@@ -2609,6 +2609,7 @@ function getExpiringCertsSetupConfig() {
           if (typeof c.allowDeclined !== 'boolean') {
             c.allowDeclined = (nameLower !== 'dl' && nameLower !== 'mec expiration' && nameLower !== '1st aid' && nameLower !== 'cpr' && nameLower !== 'first aid');
           }
+          if (typeof c.nonCdl !== 'boolean') c.nonCdl = false;
           if (typeof c.active !== 'boolean') c.active = true;
         });
 
@@ -2880,7 +2881,19 @@ function syncExpiringCertsSheetFullRoster() {
 
     // Get Cert Rules configuration
     var configObj = getExpiringCertsSetupConfig();
-    var activeCerts = (configObj.certs || []).filter(function(c) { return c.active !== false; });
+    var allCertsList = configObj.certs || [];
+    var dlCert = allCertsList.find(function(c) {
+      var n = String(c.name || '').trim().toLowerCase();
+      return n === 'dl' || n === 'drivers license' || n === "driver's license";
+    });
+    var isDlNonCdlActive = dlCert ? (dlCert.nonCdl === true) : false;
+
+    var activeCerts = allCertsList.filter(function(c) {
+      if (c.active === false) return false;
+      var n = String(c.name || '').trim().toLowerCase();
+      if (isDlNonCdlActive && (n === 'mec expiration' || n === 'mec')) return false;
+      return true;
+    });
 
     // Read existing data from Expiring Certs sheet to preserve dates, declined state, and SMS status
     var existingRowMap = {};
@@ -15659,6 +15672,13 @@ function getTasksWithMetadata() {
     Logger.log('getTasksWithMetadata: Error loading getExpiringCertsSetupConfig: ' + configErr);
   }
 
+  var isDlNonCdlActive = false;
+  if ((certExpectationMap['dl'] && certExpectationMap['dl'].nonCdl === true) ||
+      (certExpectationMap['drivers license'] && certExpectationMap['drivers license'].nonCdl === true) ||
+      (certExpectationMap["driver's license"] && certExpectationMap["driver's license"].nonCdl === true)) {
+    isDlNonCdlActive = true;
+  }
+
   var taskListAdditions = 0;
   var skippedStaleCerts = 0;
   var addedCertKeys = {};
@@ -15678,8 +15698,13 @@ function getTasksWithMetadata() {
     // CRITICAL FIX: For Cert Expiring tasks NOT already collected, verify cert is STILL expiring
     // This prevents stale cert tasks from reappearing when the expiration date was updated to far future
     if (metadata.taskType === 'Cert Expiring' && (metadata.sourceSheet === 'Expiring Certs' || metadata.sourceSheet === 'Task Metadata')) {
-      var certLookupKey = String(metadata.employee || '').trim().toLowerCase() + '_' +
-                          String(metadata.itemType || '').trim().toLowerCase();
+      var itemTypeLower = String(metadata.itemType || '').trim().toLowerCase();
+      if (isDlNonCdlActive && (itemTypeLower === 'mec expiration' || itemTypeLower === 'mec')) {
+        Logger.log('getTasksWithMetadata: Rejecting static MEC task for ' + metadata.employee + ' (DL Non-CDL active)');
+        continue;
+      }
+
+      var certLookupKey = String(metadata.employee || '').trim().toLowerCase() + '_' + itemTypeLower;
 
       // Deduplicate: If we already added a task for this employee + cert type combo, skip duplicate rows!
       if (addedCertKeys[certLookupKey]) {

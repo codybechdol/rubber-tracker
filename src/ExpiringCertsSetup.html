@@ -114,14 +114,15 @@
             <th style="width: 80px;">Term</th>
             <th style="width: 180px;">Requirement Scope</th>
             <th>Required Job Classifications</th>
-            <th style="width: 110px;" class="text-center">Allow Decline</th>
-            <th style="width: 110px;" class="text-center">Rehire Reset</th>
+            <th style="width: 100px;" class="text-center">Allow Decline</th>
+            <th style="width: 100px;" class="text-center" title="If active for DL, no MEC Expiration cert task is assigned to employees">Non-CDL</th>
+            <th style="width: 100px;" class="text-center">Rehire Reset</th>
             <th style="width: 70px;" class="text-center">Active</th>
             <th style="width: 60px;" class="text-center">Action</th>
           </tr>
         </thead>
         <tbody id="certTableBody">
-          <tr><td colspan="9" class="text-center py-4 text-muted"><div class="spinner-border spinner-border-sm me-2"></div> Loading certification configuration...</td></tr>
+          <tr><td colspan="10" class="text-center py-4 text-muted"><div class="spinner-border spinner-border-sm me-2"></div> Loading certification configuration...</td></tr>
         </tbody>
       </table>
     </div>
@@ -248,6 +249,22 @@
         html += '</div>';
         html += '</td>';
 
+        // Non-CDL (applies to DL / Driver's License)
+        var nameLowerStr = String(c.name || '').trim().toLowerCase();
+        var isDlRow = (nameLowerStr === 'dl' || nameLowerStr === 'drivers license' || nameLowerStr === "driver's license");
+        html += '<td class="text-center">';
+        if (isDlRow) {
+          html += '<div class="form-check form-switch d-inline-block" title="Enable Non-CDL (suppresses MEC Expiration cert requirements)">';
+          html += '<input class="form-check-input" type="checkbox" id="noncdl_' + index + '" ' + (c.nonCdl ? 'checked' : '') + ' onchange="updateCertNonCdl(' + index + ', this.checked)">';
+          html += '</div>';
+          if (c.nonCdl) {
+            html += '<div class="badge bg-warning text-dark mt-1 d-block" style="font-size: 9px;">No MEC Required</div>';
+          }
+        } else {
+          html += '<span class="text-muted small">—</span>';
+        }
+        html += '</td>';
+
         // Rehire Reset
         html += '<td class="text-center">';
         html += '<div class="form-check form-switch d-inline-block">';
@@ -268,6 +285,11 @@
       });
 
       tbody.innerHTML = html;
+    }
+
+    function updateCertNonCdl(index, checked) {
+      currentConfig.certs[index].nonCdl = checked;
+      renderCertTable();
     }
 
     function updateCertRequirementScope(index, scope) {
@@ -376,6 +398,7 @@
         requirementScope: requirementScope,
         requiredJobClasses: [],
         allowDeclined: allowDeclined,
+        nonCdl: false,
         requireRehireReevaluation: false,
         active: true
       });
