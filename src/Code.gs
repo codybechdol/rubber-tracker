@@ -5032,6 +5032,7 @@ function sortExpiringCertsSheet(sheet) {
   var formulas = [];
   var smsValues = [];
   var smsValidations = [];
+  var nonCdlSet = getNonCdlEmployeeSet(SpreadsheetApp.getActiveSpreadsheet());
   var ruleCheckbox = SpreadsheetApp.newDataValidation().requireCheckbox(true, "💬 Send SMS").build();
 
   for (var f = 0; f < values.length; f++) {
@@ -5041,7 +5042,10 @@ function sortExpiringCertsSheet(sheet) {
     var cTypeLower = certType.toLowerCase();
     var isNonExpiring = nonExpiringList.indexOf(certType) !== -1;
     var isDlCert = (cTypeLower === 'dl' || cTypeLower === 'drivers license' || cTypeLower === "driver's license");
-    var isNonCdlStatus = String(values[f][7] || '').trim().toLowerCase().indexOf('non-cdl') !== -1;
+    var isMecCert = (cTypeLower === 'mec expiration' || cTypeLower === 'mec');
+    var isNonCdlEmp = !!nonCdlSet[empName.toLowerCase()];
+    var isNonCdlStatus = String(values[f][7] || '').trim().toLowerCase().indexOf('non-cdl') !== -1 ||
+                         String(values[f][3] || '').trim().toLowerCase().indexOf('non-cdl') !== -1;
 
     // Formulas for Column G (7) and Column H (8)
     if (isNonExpiring) {
@@ -5049,10 +5053,15 @@ function sortExpiringCertsSheet(sheet) {
         '="N/A"',
         '=IF(AND(ISBLANK(C' + rowNum + '),OR(D' + rowNum + '="",D' + rowNum + '="N/A")),"No Date Set","OK")'
       ]);
-    } else if (isDlCert && isNonCdlStatus) {
+    } else if (isDlCert && (isNonCdlStatus || isNonCdlEmp)) {
       formulas.push([
-        '=IF(ISBLANK(D' + rowNum + '),"N/A",DAYS(D' + rowNum + ',TODAY()))',
+        '=IF(ISBLANK(D' + rowNum + '),"N/A",IF(D' + rowNum + '="Non-CDL","N/A",DAYS(D' + rowNum + ',TODAY())))',
         '="Non-CDL"'
+      ]);
+    } else if (isMecCert && (isNonCdlEmp || isNonCdlStatus)) {
+      formulas.push([
+        '="N/A"',
+        '="NOT REQUIRED"'
       ]);
     } else {
       formulas.push([

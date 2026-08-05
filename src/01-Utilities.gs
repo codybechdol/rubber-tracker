@@ -746,10 +746,18 @@ function getNonCdlEmployeeSet(ss) {
         var status = statusCol !== -1 ? String(data[r][statusCol] || '').trim().toLowerCase() : '';
         var expStr = expCol !== -1 ? String(data[r][expCol] || '').trim().toLowerCase() : '';
 
-        if (emp && (item === 'dl' || item === 'drivers license' || item === "driver's license")) {
-          if (status.indexOf('non-cdl') !== -1 || status === 'non cdl' ||
-              expStr.indexOf('non-cdl') !== -1 || expStr === 'non cdl') {
-            nonCdlSet[emp.toLowerCase()] = true;
+        if (emp) {
+          if (item === 'dl' || item === 'drivers license' || item === "driver's license") {
+            if (status.indexOf('non-cdl') !== -1 || status === 'non cdl' ||
+                expStr.indexOf('non-cdl') !== -1 || expStr === 'non cdl') {
+              nonCdlSet[emp.toLowerCase()] = true;
+            }
+          }
+          if (item === 'mec expiration' || item === 'mec') {
+            if (status.indexOf('not required') !== -1 || status === 'not required' ||
+                expStr.indexOf('non-cdl') !== -1 || expStr === 'non cdl') {
+              nonCdlSet[emp.toLowerCase()] = true;
+            }
           }
         }
       }
@@ -778,9 +786,8 @@ function getNonCdlEmployeeSet(ss) {
         var mStatus = mStatusCol !== -1 ? String(mData[mr][mStatusCol] || '').trim().toLowerCase() : '';
         var mNotes = mNotesCol !== -1 ? String(mData[mr][mNotesCol] || '').trim().toLowerCase() : '';
 
-        if (mEmp && (mItem === 'dl' || mItem === 'drivers license' || mItem === "driver's license")) {
-          if (mStatus.indexOf('non-cdl') !== -1 || mStatus === 'non cdl' ||
-              mNotes.indexOf('non-cdl') !== -1 || mNotes === 'non cdl') {
+        if (mEmp) {
+          if (mStatus.indexOf('non-cdl') !== -1 || mNotes.indexOf('non-cdl') !== -1 || mNotes.indexOf('mec not required') !== -1) {
             nonCdlSet[mEmp.toLowerCase()] = true;
           }
         }
