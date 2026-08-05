@@ -4611,7 +4611,7 @@ function applyExpiringCertsFormatting(sheet, dataRows) {
 
   // 2. EXPIRED (Full Row A-I - Red)
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=$H2="EXPIRED"')
+    .whenFormulaSatisfied('=OR($H2="EXPIRED", AND(LEFT($H2,7)="Non-CDL", ISNUMBER($G2), $G2<0))')
     .setBackground('#ea4335')
     .setFontColor('#ffffff')
     .setRanges([fullRowRange])
@@ -4619,7 +4619,7 @@ function applyExpiringCertsFormatting(sheet, dataRows) {
 
   // 3. CRITICAL (Full Row A-I - Dark Orange)
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=$H2="CRITICAL"')
+    .whenFormulaSatisfied('=OR($H2="CRITICAL", AND(LEFT($H2,7)="Non-CDL", ISNUMBER($G2), $G2>=0, $G2<=7))')
     .setBackground('#ff6d00')
     .setFontColor('#ffffff')
     .setRanges([fullRowRange])
@@ -4627,7 +4627,7 @@ function applyExpiringCertsFormatting(sheet, dataRows) {
 
   // 4. WARNING (Full Row A-I - Yellow)
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=$H2="WARNING"')
+    .whenFormulaSatisfied('=OR($H2="WARNING", AND(LEFT($H2,7)="Non-CDL", ISNUMBER($G2), $G2>7, $G2<=30))')
     .setBackground('#fbbc04')
     .setFontColor('#000000')
     .setRanges([fullRowRange])
@@ -4635,7 +4635,7 @@ function applyExpiringCertsFormatting(sheet, dataRows) {
 
   // 5. UPCOMING (Full Row A-I - Soft Blue)
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=$H2="UPCOMING"')
+    .whenFormulaSatisfied('=OR($H2="UPCOMING", AND(LEFT($H2,7)="Non-CDL", ISNUMBER($G2), $G2>30, $G2<=60))')
     .setBackground('#4285f4')
     .setFontColor('#ffffff')
     .setRanges([fullRowRange])
@@ -4643,7 +4643,7 @@ function applyExpiringCertsFormatting(sheet, dataRows) {
 
   // 6. OK (Status Column H only - Green)
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenTextEqualTo('OK')
+    .whenFormulaSatisfied('=OR($H2="OK", AND(LEFT($H2,7)="Non-CDL", ISNUMBER($G2), $G2>60))')
     .setBackground('#34a853')
     .setFontColor('#ffffff')
     .setRanges([statusRange])
@@ -4659,7 +4659,7 @@ function applyExpiringCertsFormatting(sheet, dataRows) {
 
   // 8. No Date Set (Full Row A-I - Gray)
   rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=$H2="No Date Set"')
+    .whenFormulaSatisfied('=OR($H2="No Date Set", AND(LEFT($H2,7)="Non-CDL", OR($G2="N/A", ISBLANK($G2))))')
     .setBackground('#757575')
     .setFontColor('#ffffff')
     .setRanges([fullRowRange])
@@ -4994,13 +4994,20 @@ function sortExpiringCertsSheet(sheet) {
     var rowNum = f + 2;
     var empName = String(values[f][0] || '').trim();
     var certType = String(values[f][1] || '').trim();
-    var isNonExpiring = nonExpiringList.indexOf(certType) !== -1;
+    var cTypeLower = certType.toLowerCase();
+    var isDlCert = (cTypeLower === 'dl' || cTypeLower === 'drivers license' || cTypeLower === "driver's license");
+    var isNonCdlStatus = String(values[f][7] || '').trim().toLowerCase().indexOf('non-cdl') !== -1;
 
     // Formulas for Column G (7) and Column H (8)
     if (isNonExpiring) {
       formulas.push([
         '="N/A"',
         '=IF(AND(ISBLANK(C' + rowNum + '),OR(D' + rowNum + '="",D' + rowNum + '="N/A")),"No Date Set","OK")'
+      ]);
+    } else if (isDlCert && isNonCdlStatus) {
+      formulas.push([
+        '=IF(ISBLANK(D' + rowNum + '),"N/A",DAYS(D' + rowNum + ',TODAY()))',
+        '="Non-CDL"'
       ]);
     } else {
       formulas.push([
