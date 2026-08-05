@@ -161,16 +161,17 @@ const isStatusLocation = (location) => {
 };
 
 /**
- * Checks if a string represents a non-employee value (e.g. equipment locations/statuses like "Not Repairable", "On Shelf", "In Testing", etc.)
+ * Checks if a string represents a non-employee value (e.g. equipment locations/statuses like "Not Repairable", "On Shelf", "In Testing", "Lost", etc.)
  * @param {string} name - The name to check
  * @returns {boolean} - True if name is a non-employee value
  */
 const isNonEmployeeName = (name) => {
   if (!name) return true;
   const str = String(name).trim().toLowerCase();
-  if (!str || str === 'n/a' || str === 'none' || str === 'unknown') return true;
+  if (!str || str === 'n/a' || str === 'none' || str === 'unknown' || str === 'null' || str === 'undefined') return true;
 
   const nonEmpList = [
+    'lost',
     'on shelf',
     'not repairable',
     'in testing',
@@ -179,7 +180,10 @@ const isNonEmployeeName = (name) => {
     'destroyed',
     'failed rubber',
     'reclaimed',
-    'previous employee'
+    'previous employee',
+    'unassigned',
+    'blank',
+    'spare'
   ];
 
   if (nonEmpList.indexOf(str) !== -1) return true;

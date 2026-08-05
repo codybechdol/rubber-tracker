@@ -14894,6 +14894,7 @@ function generateTaskMetadata() {
     var recSourceSheet = rec[1];
     var recSourceRow = rec[2];
     var recEmployee = String(rec[3] || '').trim().toLowerCase();
+    if (!recEmployee || isNonEmployeeName(recEmployee)) continue; // Skip non-employee placeholders (Lost, Destroyed, etc.)
     var recTaskType = String(rec[4] || '').trim().toLowerCase();
     var recItemType = String(rec[5] || '').trim().toLowerCase();
     
@@ -15668,6 +15669,9 @@ function getTasksWithMetadata() {
 
     // Skip if already included from source collection
     if (includedKeys[metaKey]) continue;
+
+    // Skip non-employee placeholder tasks (e.g. Lost, Failed Rubber, Destroyed, etc.)
+    if (!metadata.employee || isNonEmployeeName(metadata.employee)) continue;
 
     // Only include if InTaskList is TRUE
     if (!metadata.inTaskList) continue;

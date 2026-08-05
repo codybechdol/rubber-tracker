@@ -943,6 +943,7 @@ function collectSwapTasks(ss, sheetName, itemType, tasksByLocation, employeeLoca
       if (employee.toLowerCase() === 'stage') continue; // Skip stage headers
       if (employee.toLowerCase().indexOf('no swaps') !== -1) continue; // Skip "No swaps due" message
       if (employee.toLowerCase().indexOf('pick list') !== -1) continue; // Skip sub-headers
+      if (isNonEmployeeName(employee)) continue; // Skip non-employee placeholders like Lost, Failed Rubber, Destroyed, etc.
 
       // Get picked status and date changed
       var pickedValue = pickedCol !== -1 ? row[pickedCol] : false;
@@ -1219,8 +1220,8 @@ function collectEquipmentSwapTasks(ss, sheetName, itemType, tasksByLocation, emp
     var daysLeftValue = daysLeftCol !== -1 ? row[daysLeftCol] : '';
     var status = statusCol !== -1 ? String(row[statusCol] || '').trim() : '';
 
-    // Skip "On Shelf" items or items without an assignment
-    if (!assignedTo || assignedTo.toLowerCase() === 'on shelf') continue;
+    // Skip "On Shelf" items or items assigned to non-employee placeholders (Lost, Destroyed, etc.)
+    if (!assignedTo || assignedTo.toLowerCase() === 'on shelf' || isNonEmployeeName(assignedTo)) continue;
 
     // Parse due date
     var dueDate = null;
@@ -1494,7 +1495,7 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
     var expDate = expDateCol !== -1 ? row[expDateCol] : null;
     var daysUntil = daysUntilCol !== -1 ? row[daysUntilCol] : null;
 
-    if (!employee || !certType) continue;
+    if (!employee || !certType || isNonEmployeeName(employee)) continue;
 
     // Skip pending new hire employees (future Hire Date)
     if (pendingEmps[employee.toLowerCase()]) continue;
