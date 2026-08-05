@@ -1600,20 +1600,8 @@ function collectExpiringCertTasks(ss, tasksByLocation, employeeLocations, employ
       if (scope === 'optional') {
         isRequiredForEmp = false;
       } else if (scope === 'job_class') {
-        isRequiredForEmp = false;
         var empJobClass = employeeJobClasses[employee.toLowerCase()] || '';
-        var reqClasses = (certRule.requiredJobClasses || []).map(function(cls) { return String(cls).trim().toUpperCase(); });
-        if (empJobClass && reqClasses.indexOf(empJobClass) !== -1) {
-          isRequiredForEmp = true;
-        } else if (empJobClass) {
-          // Apprentice partial match check (e.g. "AP 7-1" matches "AP 4", "AP 1", etc.)
-          for (var rc = 0; rc < reqClasses.length; rc++) {
-            if (reqClasses[rc] === 'AP 7-1' && empJobClass.indexOf('AP') !== -1) {
-              isRequiredForEmp = true;
-              break;
-            }
-          }
-        }
+        isRequiredForEmp = isJobClassMatching(empJobClass, certRule.requiredJobClasses);
       }
     }
 

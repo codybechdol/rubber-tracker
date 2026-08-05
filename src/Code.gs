@@ -2980,18 +2980,7 @@ function syncExpiringCertsSheetFullRoster() {
         if (scope === 'all') {
           isRequired = true;
         } else if (scope === 'job_class') {
-          var reqClasses = (certRule.requiredJobClasses || []).map(function(cls) { return String(cls).trim().toUpperCase(); });
-          if (empJobClass && reqClasses.indexOf(empJobClass) !== -1) {
-            isRequired = true;
-          } else {
-            // Check partial matching for Apprentice group
-            for (var rc = 0; rc < reqClasses.length; rc++) {
-              if (reqClasses[rc] === 'AP 7-1' && empJobClass.indexOf('AP') !== -1) {
-                isRequired = true;
-                break;
-              }
-            }
-          }
+          isRequired = isJobClassMatching(empJobClass, certRule.requiredJobClasses);
         }
 
         // 2. Evaluate dates & days until expiration
@@ -15722,19 +15711,7 @@ function getTasksWithMetadata() {
           continue;
         } else if (scope === 'job_class') {
           var empClass = employeeJobClasses[String(metadata.employee || '').trim().toLowerCase()] || '';
-          var reqClasses = (certRule.requiredJobClasses || []).map(function(cls) { return String(cls).trim().toUpperCase(); });
-          var isRequiredForEmp = false;
-          if (empClass && reqClasses.indexOf(empClass) !== -1) {
-            isRequiredForEmp = true;
-          } else if (empClass) {
-            for (var rc = 0; rc < reqClasses.length; rc++) {
-              if (reqClasses[rc] === 'AP 7-1' && empClass.indexOf('AP') !== -1) {
-                isRequiredForEmp = true;
-                break;
-              }
-            }
-          }
-          if (!isRequiredForEmp) {
+          if (!isJobClassMatching(empClass, certRule.requiredJobClasses)) {
             Logger.log('getTasksWithMetadata: Skipping cert task NOT REQUIRED for job classification - ' + metadata.employee + ' (' + empClass + ') ' + metadata.itemType);
             skippedStaleCerts++;
             continue;

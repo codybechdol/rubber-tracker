@@ -669,4 +669,48 @@ function normalizeDirection(input) {
   return dirMap[str] || null;
 }
 
+/**
+ * Checks whether an employee's job classification satisfies a requirement rule's required job classes list.
+ * Handles exact matches, Apprentice (AP 1-7), Sub Tech (ST 1-7), and full classification aliases.
+ *
+ * @param {string} empClass - The employee's job classification (e.g. 'ST 1', 'AP 4', 'JRY', 'F', 'FOREMAN')
+ * @param {Array<string>} reqClasses - List of required job class codes (e.g. ['F', 'GTO F', 'GF', 'JRY', 'WT', 'GTO', 'AP 7-1'])
+ * @return {boolean} True if the employee's classification matches requirement rule
+ */
+function isJobClassMatching(empClass, reqClasses) {
+  if (!empClass) return false;
+  if (!Array.isArray(reqClasses) || reqClasses.length === 0) return true;
+
+  var normEmpClass = String(empClass).trim().toUpperCase();
+  var normReqClasses = reqClasses.map(function(cls) { return String(cls).trim().toUpperCase(); });
+
+  // 1. Direct exact match (e.g. "JRY" === "JRY", "F" === "F")
+  if (normReqClasses.indexOf(normEmpClass) !== -1) return true;
+
+  // 2. Apprentice & Sub Tech rule ("AP 7-1" or "AP" or "ST" in required classes)
+  var hasApRule = normReqClasses.indexOf('AP 7-1') !== -1 ||
+                  normReqClasses.indexOf('AP') !== -1 ||
+                  normReqClasses.indexOf('ST') !== -1;
+
+  if (hasApRule) {
+    // Match any Apprentice or Sub Tech code (AP 1-7, ST 1-7, AP-1, ST-1, AP1, ST1, APPRENTICE, SUB TECH, etc.)
+    if (normEmpClass.indexOf('AP') === 0 ||
+        normEmpClass.indexOf('ST') === 0 ||
+        normEmpClass.indexOf('APP') === 0 ||
+        normEmpClass.indexOf('SUB') === 0) {
+      return true;
+    }
+  }
+
+  // 3. Common expanded alias mappings
+  if (normReqClasses.indexOf('F') !== -1 && (normEmpClass === 'FOREMAN' || normEmpClass === 'CREW LEAD')) return true;
+  if (normReqClasses.indexOf('GF') !== -1 && normEmpClass === 'GENERAL FOREMAN') return true;
+  if (normReqClasses.indexOf('JRY') !== -1 && (normEmpClass === 'JOURNEYMAN' || normEmpClass === 'JOURNEYMAN LINEMAN' || normEmpClass === 'JOURNEYMAN LINEMAN/FOREMAN')) return true;
+  if (normReqClasses.indexOf('GTO F') !== -1 && (normEmpClass === 'GTO FOREMAN' || normEmpClass === 'GTO F')) return true;
+  if (normReqClasses.indexOf('WT') !== -1 && normEmpClass === 'WHITE TICKET') return true;
+  if (normReqClasses.indexOf('SUP') !== -1 && (normEmpClass === 'SUPERVISOR' || normEmpClass === 'SUPERINTENDENT')) return true;
+
+  return false;
+}
+
 
