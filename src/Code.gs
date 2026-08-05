@@ -5002,7 +5002,7 @@ function sortExpiringCertsSheet(sheet) {
   }
 
   // Get employee phones and alternate names map
-  var empPhones = getEmployeePhonesCached(true);
+  var empPhones = getEmployeePhonesCached(false);
   var empList = getEmployeeNamesForMatching();
   var alternateNameMap = buildAlternateNameMap(empList);
 
@@ -7318,14 +7318,8 @@ function updateCertExpirationFromTask(employee, certType, newExpiration, task, a
       Logger.log('updateCertExpirationFromTask: Created new row for ' + employee + ' - ' + certType);
     }
 
-    // Clear row groups, apply custom sorting, and format the sheet
-    var totalRows = expiringSheet.getLastRow();
-    if (totalRows > 1) {
-      var numDataRows = totalRows - 1;
-      clearAllRowGroups(expiringSheet);
-      sortExpiringCertsSheet(expiringSheet);
-      applyExpiringCertsFormatting(expiringSheet, numDataRows);
-    }
+    // Note: Skipping full-sheet re-sorting (sortExpiringCertsSheet) on individual cert updates for fast response times.
+    // Formulas in Col G and Col H update automatically in Google Sheets when Col C/D change.
 
     // Mark task as complete in Task Metadata if task provided
     if (task) {
@@ -17588,7 +17582,7 @@ function getEmployeePhonesCached(forceRefresh) {
 
   for (var h = 0; h < headers.length; h++) {
     var hdr = String(headers[h]).toLowerCase().trim();
-    if (hdr === 'name') nameCol = h;
+    if (hdr === 'name' || hdr === 'employee name' || hdr === 'employee') nameCol = h;
     // Match various phone column header formats
     if (hdr === 'phone number' || hdr === 'phone' || hdr === 'phone #' || hdr === 'cell' || hdr === 'cell phone') phoneCol = h;
   }
