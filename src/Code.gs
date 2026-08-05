@@ -2561,7 +2561,7 @@ function getExpiringCertsSetupConfig() {
           { name: 'Forklift Operator Safety Training', category: 'standard', termMonths: 36, requireRehireReevaluation: true, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'JRY OP', 'EO 1', 'EO 2', 'WT'], allowDeclined: true },
           { name: 'Crane Cert', category: 'standard', termMonths: 60, requireRehireReevaluation: false, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'JRY OP', 'EO 1', 'EO 2'], allowDeclined: true },
           { name: 'MEC Expiration', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'all', requiredJobClasses: [], allowDeclined: false },
-          { name: 'DL', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'all', requiredJobClasses: [], allowDeclined: false, nonCdl: false },
+          { name: 'DL', category: 'variable', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'all', requiredJobClasses: [], allowDeclined: false },
           { name: 'Crane Evaluation', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: true, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'JRY OP', 'EO 1', 'EO 2'], allowDeclined: true },
           { name: 'OSHA 1910', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'all', requiredJobClasses: [], allowDeclined: false },
           { name: 'BNSF', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'optional', requiredJobClasses: [], allowDeclined: true },
@@ -2643,6 +2643,106 @@ function getExpiringCertsSetupConfig() {
   ];
 
   return { certs: defaultCerts };
+}
+
+/**
+ * Sets an employee's Driver's License status to Non-CDL or CDL.
+ * Updates Expiring Certs sheet and Task Metadata sheet.
+ * If Non-CDL, sets MEC Expiration to 'N/A (Non-CDL)'.
+ *
+ * @param {string} employeeName - Employee name
+ * @param {boolean} isNonCdl - True if Non-CDL, false if CDL
+ * @return {Object} Status result object
+ */
+function setEmployeeDriverLicenseType(employeeName, isNonCdl) {
+  try {
+    if (!employeeName) return { success: false, message: 'Employee name is required' };
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var empLower = String(employeeName).trim().toLowerCase();
+    var dlStatusVal = isNonCdl ? 'Non-CDL' : 'Active';
+
+    // 1. Update Expiring Certs sheet
+    var expiringSheet = ss.getSheetByName('Expiring Certs');
+    if (expiringSheet && expiringSheet.getLastRow() >= 2) {
+      var data = expiringSheet.getDataRange().getValues();
+      var headers = data[0];
+      var empCol = -1, itemCol = -1, daysCol = -1, statusCol = -1;
+
+      for (var h = 0; h < headers.length; h++) {
+        var hdr = String(headers[h]).toLowerCase().trim();
+        if (hdr === 'employee name' || hdr === 'name') empCol = h;
+        if (hdr === 'item type' || hdr === 'cert type' || hdr === 'certification type') itemCol = h;
+        if (hdr === 'days until expiration' || hdr === 'days until') daysCol = h;
+        if (hdr === 'status') statusCol = h;
+      }
+
+      if (empCol !== -1 && itemCol !== -1 && statusCol !== -1) {
+        for (var r = 1; r < data.length; r++) {
+          var rEmp = String(data[r][empCol] || '').trim().toLowerCase();
+          var rItem = String(data[r][itemCol] || '').trim().toLowerCase();
+
+          if (rEmp === empLower) {
+            if (rItem === 'dl' || rItem === 'drivers license' || rItem === "driver's license") {
+              expiringSheet.getRange(r + 1, statusCol + 1).setValue(dlStatusVal);
+            } else if (rItem === 'mec expiration' || rItem === 'mec') {
+              if (isNonCdl) {
+                expiringSheet.getRange(r + 1, statusCol + 1).setValue('N/A (Non-CDL)');
+                if (daysCol !== -1) expiringSheet.getRange(r + 1, daysCol + 1).setValue('N/A');
+              } else {
+                expiringSheet.getRange(r + 1, statusCol + 1).setValue('Unassigned');
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 2. Update Task Metadata sheet
+    var metaSheet = ss.getSheetByName('Task Metadata');
+    if (metaSheet && metaSheet.getLastRow() >= 2) {
+      var mData = metaSheet.getDataRange().getValues();
+      var mHeaders = mData[0];
+      var mEmpCol = -1, mItemCol = -1, mStatusCol = -1, mListCol = -1;
+
+      for (var mh = 0; mh < mHeaders.length; mh++) {
+        var mHdr = String(mHeaders[mh]).toLowerCase().trim();
+        if (mHdr === 'employee') mEmpCol = mh;
+        if (mHdr === 'itemtype') mItemCol = mh;
+        if (mHdr === 'status') mStatusCol = mh;
+        if (mHdr === 'intasklist' || mHdr === 'in task list') mListCol = mh;
+      }
+
+      if (mEmpCol !== -1 && mItemCol !== -1 && mStatusCol !== -1) {
+        for (var mr = 1; mr < mData.length; mr++) {
+          var mrEmp = String(mData[mr][mEmpCol] || '').trim().toLowerCase();
+          var mrItem = String(mData[mr][mItemCol] || '').trim().toLowerCase();
+
+          if (mrEmp === empLower) {
+            if (mrItem === 'dl' || mrItem === 'drivers license' || mrItem === "driver's license") {
+              metaSheet.getRange(mr + 1, mStatusCol + 1).setValue(dlStatusVal);
+            } else if (mrItem === 'mec expiration' || mrItem === 'mec') {
+              if (isNonCdl) {
+                metaSheet.getRange(mr + 1, mStatusCol + 1).setValue('N/A (Non-CDL)');
+                if (mListCol !== -1) metaSheet.getRange(mr + 1, mListCol + 1).setValue('');
+              } else {
+                metaSheet.getRange(mr + 1, mStatusCol + 1).setValue('Unassigned');
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return {
+      success: true,
+      message: 'Updated ' + employeeName + ' to ' + dlStatusVal + '. MEC Expiration ' + (isNonCdl ? 'set to N/A' : 'restored') + '.',
+      employee: employeeName,
+      isNonCdl: isNonCdl
+    };
+  } catch (err) {
+    Logger.log('Error in setEmployeeDriverLicenseType: ' + err);
+    return { success: false, message: err.message };
+  }
 }
 
 /**
@@ -2881,19 +2981,8 @@ function syncExpiringCertsSheetFullRoster() {
 
     // Get Cert Rules configuration
     var configObj = getExpiringCertsSetupConfig();
-    var allCertsList = configObj.certs || [];
-    var dlCert = allCertsList.find(function(c) {
-      var n = String(c.name || '').trim().toLowerCase();
-      return n === 'dl' || n === 'drivers license' || n === "driver's license";
-    });
-    var isDlNonCdlActive = dlCert ? (dlCert.nonCdl === true) : false;
-
-    var activeCerts = allCertsList.filter(function(c) {
-      if (c.active === false) return false;
-      var n = String(c.name || '').trim().toLowerCase();
-      if (isDlNonCdlActive && (n === 'mec expiration' || n === 'mec')) return false;
-      return true;
-    });
+    var activeCerts = (configObj.certs || []).filter(function(c) { return c.active !== false; });
+    var nonCdlSet = getNonCdlEmployeeSet(ss);
 
     // Read existing data from Expiring Certs sheet to preserve dates, declined state, and SMS status
     var existingRowMap = {};
@@ -15661,12 +15750,7 @@ function getTasksWithMetadata() {
     Logger.log('getTasksWithMetadata: Error loading getExpiringCertsSetupConfig: ' + configErr);
   }
 
-  var isDlNonCdlActive = false;
-  if ((certExpectationMap['dl'] && certExpectationMap['dl'].nonCdl === true) ||
-      (certExpectationMap['drivers license'] && certExpectationMap['drivers license'].nonCdl === true) ||
-      (certExpectationMap["driver's license"] && certExpectationMap["driver's license"].nonCdl === true)) {
-    isDlNonCdlActive = true;
-  }
+  var nonCdlSet = getNonCdlEmployeeSet(ss);
 
   var taskListAdditions = 0;
   var skippedStaleCerts = 0;
@@ -15688,8 +15772,10 @@ function getTasksWithMetadata() {
     // This prevents stale cert tasks from reappearing when the expiration date was updated to far future
     if (metadata.taskType === 'Cert Expiring' && (metadata.sourceSheet === 'Expiring Certs' || metadata.sourceSheet === 'Task Metadata')) {
       var itemTypeLower = String(metadata.itemType || '').trim().toLowerCase();
-      if (isDlNonCdlActive && (itemTypeLower === 'mec expiration' || itemTypeLower === 'mec')) {
-        Logger.log('getTasksWithMetadata: Rejecting static MEC task for ' + metadata.employee + ' (DL Non-CDL active)');
+      var empLowerStr = String(metadata.employee || '').trim().toLowerCase();
+
+      if ((itemTypeLower === 'mec expiration' || itemTypeLower === 'mec') && nonCdlSet[empLowerStr]) {
+        Logger.log('getTasksWithMetadata: Rejecting static MEC task for Non-CDL employee: ' + metadata.employee);
         continue;
       }
 

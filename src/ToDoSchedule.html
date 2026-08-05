@@ -6682,6 +6682,17 @@
         // Re-add to Task List button - allows scheduling for a future class
         html += '<button class="btn btn-outline-primary btn-sm" onclick="event.stopPropagation(); reAddDeclinedCertToTaskList(\'' + escapeQuotes(cert.employee) + '\', \'' + escapeQuotes(cert.certType) + '\', \'' + escapeQuotes(cert.expirationDate) + '\', \'' + escapeQuotes(cert.location) + '\', \'' + phoneNumber + '\', ' + cert.rowIndex + ')" title="Re-add for future class"><i class="bi bi-arrow-counterclockwise"></i> Re-add</button>';
       } else {
+        // CDL / Non-CDL toggle button for DL certs
+        var cTypeLower = String(cert.certType || '').trim().toLowerCase();
+        if (cTypeLower === 'dl' || cTypeLower === 'drivers license' || cTypeLower === "driver's license") {
+          var isCurrentNonCdl = String(cert.status || '').trim().toLowerCase() === 'non-cdl';
+          if (isCurrentNonCdl) {
+            html += '<button class="btn btn-outline-secondary btn-sm me-1" onclick="event.stopPropagation(); toggleEmpCdl(\'' + escapeQuotes(cert.employee) + '\', false)" title="Currently Non-CDL. Click to restore CDL status"><i class="bi bi-car-front"></i> Non-CDL</button>';
+          } else {
+            html += '<button class="btn btn-outline-dark btn-sm me-1" onclick="event.stopPropagation(); toggleEmpCdl(\'' + escapeQuotes(cert.employee) + '\', true)" title="Currently CDL. Click to set as Non-CDL (No MEC Required)"><i class="bi bi-truck"></i> CDL</button>';
+          }
+        }
+
         // Show action buttons for ALL certs (not just expired/expiring)
         if (hasPhone) {
           // Stage 1: SMS Notify button
@@ -6714,6 +6725,29 @@
 
       html += '</div></div></div>';
       return html;
+    }
+
+    function toggleEmpCdl(empName, setToNonCdl) {
+      var actionText = setToNonCdl ? 'Non-CDL' : 'CDL';
+      if (!confirm('Change ' + empName + ' to ' + actionText + '?\n\n' +
+          (setToNonCdl ? 'Setting to Non-CDL removes MEC Expiration requirements for this employee.' : 'Setting to CDL restores MEC Expiration requirements.'))) {
+        return;
+      }
+      showToast('Updating ' + empName + ' to ' + actionText + '...', 'info');
+      google.script.run
+        .withSuccessHandler(function(res) {
+          if (res && res.success) {
+            showToast('✓ ' + res.message);
+            loadExpiringCerts();
+            loadAllData();
+          } else {
+            showToast('❌ Failed: ' + (res ? res.message : 'Unknown error'));
+          }
+        })
+        .withFailureHandler(function(err) {
+          showToast('❌ Error: ' + err.message);
+        })
+        .setEmployeeDriverLicenseType(empName, setToNonCdl);
     }
 
     function escapeQuotes(str) {
