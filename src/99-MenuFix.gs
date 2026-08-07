@@ -132,11 +132,25 @@ function _buildGloveManagerMenu() {
           .addItem('📊 Show All Sleeve Swaps', 'runSleeveSwapDiagnostic')
           .addItem('🔍 Diagnose Compliance', 'diagnoseSafetyCompliance')
           .addItem('🔍 Audit CreditedTo Values', 'auditCreditedToAccuracy')
-          .addItem('🗑️ Clear Background Triggers', 'clearAllBackgroundTriggers')))
+          .addItem('🗑️ Clear Background Triggers', 'clearAllBackgroundTriggers')
+          .addItem('🔄 Reset Stuck Background Statuses', 'menuResetBackgroundStatuses')))
 
       .addSeparator()
       .addItem('Close & Save History', 'closeAndSaveHistory')
       .addToUi();
+}
+
+/**
+ * Menu wrapper to reset background job statuses and script properties.
+ */
+function menuResetBackgroundStatuses() {
+  var result = clearAllBackgroundStatuses();
+  var ui = SpreadsheetApp.getUi();
+  if (result && result.success) {
+    ui.alert('🔄 Background Statuses Reset', 'Successfully cleared all background job status flags in ScriptProperties.', ui.ButtonSet.OK);
+  } else {
+    ui.alert('❌ Error', 'Could not clear background statuses: ' + (result ? result.error : 'Unknown error'), ui.ButtonSet.OK);
+  }
 }
 
 /**

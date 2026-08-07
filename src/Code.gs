@@ -18809,6 +18809,13 @@ function generateAllReportsPart1() {
   generateBlanketSwaps(true);
   generateMackSwaps(true);
 
+  // Sync Expiring Certs roster & purge former employees during full report generation
+  try {
+    syncExpiringCertsSheetFullRoster();
+  } catch (certErr) {
+    Logger.log('generateAllReportsPart1: Error syncing Expiring Certs: ' + certErr);
+  }
+
   logEvent('generateAllReports Part 1: Complete.');
   return { success: true };
 }
@@ -18913,7 +18920,9 @@ function generateAllReportsPart3() {
  */
 function startGenerateAllReportsInBackground() {
   try {
+    var nowStr = new Date().getTime().toString();
     PropertiesService.getScriptProperties().setProperty('GENERATE_ALL_REPORTS_STATUS', 'RUNNING');
+    PropertiesService.getScriptProperties().setProperty('GENERATE_ALL_REPORTS_START_TIME', nowStr);
 
     ScriptApp.newTrigger('executeGenerateAllReportsBackgroundJob')
       .timeBased()
@@ -18955,7 +18964,15 @@ function getAllBackgroundStatuses() {
       var status = props.getProperty(statusKey) || 'IDLE';
       if (status === 'RUNNING') {
         var startTs = parseInt(props.getProperty(timeKey) || '0', 10);
-        if (startTs > 0 && (now - startTs) > maxRunningTime) {
+        // If start time was missing (0) or exceeded 10 minutes, auto-reset stale status
+        if (startTs === 0 || (now - startTs) > maxRunningTime) {
+          props.deleteProperty(statusKey);
+          props.deleteProperty(timeKey);
+          return 'IDLE';
+        }
+      } else if (status === 'COMPLETE' || status.indexOf('ERROR') === 0) {
+        var startTs = parseInt(props.getProperty(timeKey) || '0', 10);
+        if (startTs === 0 || (now - startTs) > 30000) { // Clear complete/error status after 30s
           props.deleteProperty(statusKey);
           props.deleteProperty(timeKey);
           return 'IDLE';
