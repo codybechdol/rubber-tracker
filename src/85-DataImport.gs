@@ -2525,6 +2525,13 @@ function addNewEmployeeFromImport(employeeData) {
     Logger.log('Added new employee: ' + employeeData.name + ' at row ' + newRowIndex);
     logEvent('New Employee Import: Added ' + employeeData.name + ' from Crew Makeup Import');
 
+    // Auto-sync Expiring Certs matrix
+    try {
+      syncExpiringCertsSheetFullRoster();
+    } catch (certErr) {
+      Logger.log('addNewEmployeeFromImport: Error syncing Expiring Certs: ' + certErr);
+    }
+
     return {
       success: true,
       message: 'Employee added successfully',
@@ -2732,6 +2739,13 @@ function rehireEmployeeFromImport(employeeData) {
       Logger.log('Error invalidating certs on rehire for ' + employeeData.name + ': ' + e.message);
     }
 
+    // Auto-sync Expiring Certs matrix
+    try {
+      syncExpiringCertsSheetFullRoster();
+    } catch (certErr) {
+      Logger.log('rehireEmployeeFromImport: Error syncing Expiring Certs: ' + certErr);
+    }
+
     return {
       success: true,
       message: 'Employee rehired successfully',
@@ -2850,6 +2864,13 @@ function markEmployeeAsPrevious(data) {
 
     Logger.log('Marked ' + data.name + ' as Previous Employee and deleted from sheet');
     logEvent('Crew Import: Marked ' + data.name + ' as Previous Employee (' + data.status + ')');
+
+    // Auto-sync Expiring Certs matrix to purge separated employee
+    try {
+      syncExpiringCertsSheetFullRoster();
+    } catch (certErr) {
+      Logger.log('markEmployeeAsPrevious: Error syncing Expiring Certs: ' + certErr);
+    }
 
     return { success: true, message: 'Employee marked as Previous Employee and removed from sheet' };
 

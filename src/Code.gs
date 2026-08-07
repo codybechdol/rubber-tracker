@@ -21862,6 +21862,13 @@ function saveNewEmployeeData(data) {
     Logger.log('Error tracking new employee in history: ' + histErr);
   }
 
+  // Auto-sync Expiring Certs matrix so new employee gets cert rows immediately
+  try {
+    syncExpiringCertsSheetFullRoster();
+  } catch (certErr) {
+    Logger.log('saveNewEmployeeData: Error syncing Expiring Certs: ' + certErr);
+  }
+
   return { success: true, isPending: isPending };
 }
 

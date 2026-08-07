@@ -522,12 +522,9 @@ function handleLastDayReasonChange(ss, sheet, editedRow, newValue) {
 
     // Purge terminated employee from Expiring Certs sheet
     try {
-      var expSheet = ss.getSheetByName('Expiring Certs');
-      if (expSheet) {
-        sortExpiringCertsSheet(expSheet);
-      }
+      syncExpiringCertsSheetFullRoster();
     } catch (expErr) {
-      Logger.log('handleLastDayReasonChange: Error sorting Expiring Certs: ' + expErr);
+      Logger.log('handleLastDayReasonChange: Error syncing Expiring Certs: ' + expErr);
     }
 
   } catch (e) {

@@ -1158,12 +1158,22 @@ function processEdit(e) {
       return;
     }
 
-    // Handle Location, Job Number, or Hire Date change - track in history
+    // Handle Location, Job Number, Hire Date, or Name change - track in history and auto-sync Expiring Certs
+    var isNameCol = (editedCol === 1);
     if ((locationColIdx !== -1 && editedCol === locationColIdx) ||
         (jobNumberColIdx !== -1 && editedCol === jobNumberColIdx) ||
-        (hireDateColIdx !== -1 && editedCol === hireDateColIdx)) {
+        (hireDateColIdx !== -1 && editedCol === hireDateColIdx) ||
+        isNameCol) {
       var oldValue = e.oldValue || '';
-      trackEmployeeChange(ss, sheet, editedRow, editedCol, newValue, oldValue, locationColIdx, jobNumberColIdx, hireDateColIdx);
+      if (!isNameCol) {
+        trackEmployeeChange(ss, sheet, editedRow, editedCol, newValue, oldValue, locationColIdx, jobNumberColIdx, hireDateColIdx);
+      }
+      // Auto-sync Expiring Certs matrix so employee additions, location updates, and Previous Employee removals update immediately
+      try {
+        syncExpiringCertsSheetFullRoster();
+      } catch (certErr) {
+        Logger.log('processEdit: Error syncing Expiring Certs on Employees sheet edit: ' + certErr);
+      }
     }
     return;
   }
