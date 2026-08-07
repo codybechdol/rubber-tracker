@@ -424,13 +424,11 @@
           // 1. Generate All Reports status (Step 3)
           var step3 = document.getElementById('step3');
           if (step3) {
-            if (res.generateAllReports === 'RUNNING' || (step3.classList.contains('running') && res.generateAllReports !== 'COMPLETE')) {
+            if (res.generateAllReports === 'RUNNING') {
               anyRunning = true;
               step3.classList.remove('done');
               step3.classList.add('running');
-              if (res.generateAllReports === 'RUNNING') {
-                showStatus('⚡ Generate All Reports running in background...');
-              }
+              showStatus('⚡ Generate All Reports running in background...');
             } else if (res.generateAllReports === 'COMPLETE') {
               step3.classList.remove('running');
               step3.classList.add('done');
@@ -438,9 +436,13 @@
               setTimeout(hideStatus, 4000);
               // Clear completed status so it doesn't re-trigger when re-opening workbook later
               google.script.run.clearAllBackgroundStatuses();
-            } else if (step3.classList.contains('running')) {
-              step3.classList.remove('running');
-              hideStatus();
+            } else {
+              // Status is IDLE - if step button was marked running, clear running class and set to done
+              if (step3.classList.contains('running')) {
+                step3.classList.remove('running');
+                step3.classList.add('done');
+                hideStatus();
+              }
             }
           }
 
@@ -479,7 +481,7 @@
 
     function updateStepStatus(stepNum, isRunning, isComplete, label, filterType) {
       var btn = document.getElementById('step' + stepNum);
-      if (!btn) return isRunning;
+      if (!btn) return false;
 
       if (isRunning) {
         btn.classList.remove('done');
@@ -496,12 +498,15 @@
           google.script.run.showProcessSafetyEmailsDialogWithResults(filterType);
         }, 1200);
         return false;
-      } else if (btn.classList.contains('running')) {
-        // Step button is in active/pending state (dialog open or background task starting)
-        // Keep polling active so background execution is picked up smoothly
-        return true;
+      } else {
+        // Status is IDLE - clear running state on button if present
+        if (btn.classList.contains('running')) {
+          btn.classList.remove('running');
+          btn.classList.add('done');
+          hideStatus();
+        }
+        return false;
       }
-      return false;
     }
 
     function startModalOpenPolling() {
