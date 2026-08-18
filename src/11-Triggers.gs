@@ -460,6 +460,30 @@ function onEditHandler(e) {
     }
 
     // =========================================================================
+    // JOB TRACKING STATUS EDIT (Column J / Col 10 = Status)
+    // =========================================================================
+    if (sheetName === 'Job Tracking' && editedCol === 10 && editedRow >= 2) {
+      var jobStatusVal = String(e.range.getValue() || '').trim();
+      Logger.log('onEditHandler: Job Tracking row ' + editedRow + ' status changed to: ' + jobStatusVal);
+      if (jobStatusVal.toLowerCase() === 'completed') {
+        try {
+          var jobNumVal = String(sheet.getRange(editedRow, 1).getValue() || '').trim();
+          var actualEndDateCell = sheet.getRange(editedRow, 9); // Actual End Date (I)
+          if (!actualEndDateCell.getValue()) {
+            actualEndDateCell.setValue(new Date());
+          }
+          if (jobNumVal) {
+            autoSyncCompletedJobToTraining(jobNumVal, new Date());
+          }
+          cleanupCompletedSecondaryJobNumbers(SpreadsheetApp.getActiveSpreadsheet());
+        } catch (jobComplErr) {
+          Logger.log('onEditHandler error on Job Tracking completion: ' + jobComplErr);
+        }
+      }
+      return; // Handled
+    }
+
+    // =========================================================================
     // EXECUTIVE DASHBOARD & EXPIRING CERTS SMS NOTIFY CHECKBOXES
     // =========================================================================
 

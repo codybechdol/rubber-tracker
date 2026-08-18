@@ -1,0 +1,27 @@
+{
+  "name": "safety-assistant-desktop",
+  "version": "1.0.0",
+  "description": "Safety Assistant - Offline Field Desktop Application",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win"
+  },
+  "keywords": ["safety", "ppe", "offline", "field"],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "dexie": "^4.0.10"
+  },
+  "build": {
+    "appId": "com.safetyassistant.desktop",
+    "productName": "Safety Assistant",
+    "win": {
+      "target": ["nsis", "portable"]
+    }
+  }
+}

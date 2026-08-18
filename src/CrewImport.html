@@ -3564,10 +3564,22 @@
         cleanText = cleanText.replace(vacDayMatch[0], '').trim();
       }
 
-      // Strip schedule change annotations that appear after role codes
-      // Example: "Waco Worts F Crew to 5 10's this wk" → "Waco Worts F"
-      // "Crew to X XX's..." means a temporary schedule change (can be ignored)
-      cleanText = cleanText.replace(/\s+Crew\s+to\s+.*$/i, '').trim();
+      // Strip "Friday Only", "Monday Only" etc. - day-restriction annotations meaning the employee
+      // only works that day (e.g., "Jimmy Bailey F Friday Only" → "Jimmy Bailey F", "Ryan Taylor F Crew Here Mon Only" → "Ryan Taylor F")
+      var dayOnlyMatch = cleanText.match(/\s+(Mon(?:day)?|Tue(?:s(?:day)?)?|Wed(?:nesday)?|Thu(?:rs(?:day)?)?|Fri(?:day)?|Sat(?:urday)?|Sun(?:day)?)\s+Only\b.*$/i);
+      if (dayOnlyMatch) {
+        var dayExtract = dayOnlyMatch[0].match(/(Mon(?:day)?|Tue(?:s(?:day)?)?|Wed(?:nesday)?|Thu(?:rs(?:day)?)?|Fri(?:day)?|Sat(?:urday)?|Sun(?:day)?)\s+Only/i);
+        if (dayExtract) {
+          result.scheduleNote = dayExtract[1] + ' Only';
+        }
+        cleanText = cleanText.replace(dayOnlyMatch[0], '').trim();
+      }
+
+      // Strip schedule change and crew location annotations that appear after role codes
+      // Examples: "Waco Worts F Crew to 5 10's this wk" → "Waco Worts F"
+      //           "Ryan Taylor F Crew Here Mon Only" → "Ryan Taylor F"
+      //           "John Doe JL Crew in Bozeman" → "John Doe JL"
+      cleanText = cleanText.replace(/\s+Crew\s+(Here|to|in|at|back|working|staying|coming|returning|for|from)\b.*$/i, '').trim();
 
       // Strip cutover annotations that appear after role codes
       // Example: "Waco Worts F Cutover set up Sat 7-18" → "Waco Worts F"
@@ -3586,14 +3598,6 @@
       // Strip "crane class [day]" annotation: "Matt Miller F crane class Mon" → "Matt Miller F"
       // This appears after the role code and prevents Foreman detection (F must be at string end)
       cleanText = cleanText.replace(/\s+crane\s+class\b.*$/i, '').trim();
-
-      // Strip "Friday Only", "Monday Only" etc. - day-restriction annotations meaning the employee
-      // only works that day (e.g., "Jimmy Bailey F Friday Only" → "Jimmy Bailey F")
-      var dayOnlyMatch = cleanText.match(/\s+(Mon(?:day)?|Tue(?:s(?:day)?)?|Wed(?:nesday)?|Thu(?:rs(?:day)?)?|Fri(?:day)?|Sat(?:urday)?|Sun(?:day)?)\s+Only\s*$/i);
-      if (dayOnlyMatch) {
-        result.scheduleNote = dayOnlyMatch[1] + ' Only';
-        cleanText = cleanText.replace(dayOnlyMatch[0], '').trim();
-      }
 
       // Strip trailing annotations that appear AFTER the classification and confuse role detection
       // Examples: "Christian Najarro 3 ap Hot" - "Hot" is not a role
@@ -4734,8 +4738,26 @@
         var specialLocationNames = ['Weeds', 'Light Duty', 'Vacation', 'Leave'];
         for (var i = 0; i < currentEmployees.length; i++) {
           var emp = currentEmployees[i];
+          var empNameLower = (emp.name || '').toLowerCase().trim();
           var empLocation = (emp.location || '').trim();
           var empJobNum = (emp.jobNumber || '').trim();
+
+          // Skip if employee was processed in Special Circumstances as Quit/Layoff/Fired/Resigned/Previous Employee
+          var isTerminatedInSpecial = false;
+          if (typeof specialCircumstances !== 'undefined' && specialCircumstances && specialCircumstances.length > 0) {
+            for (var sc = 0; sc < specialCircumstances.length; sc++) {
+              var spec = specialCircumstances[sc];
+              if (spec && (spec.name || '').toLowerCase().trim() === empNameLower) {
+                var specStatus = spec.status || '';
+                var specLoc = spec.newLocation || spec.savedLocation || '';
+                if (['Quit', 'Layoff', 'Fired', 'Resigned', 'Previous Employee'].indexOf(specStatus) !== -1 || specLoc === 'Previous Employee') {
+                  isTerminatedInSpecial = true;
+                  break;
+                }
+              }
+            }
+          }
+          if (isTerminatedInSpecial) continue;
 
           // Check if this employee is in a special location by location name
           // OR by 005-26 job prefix (Light Duty employees now have Location = "Helena")
@@ -4758,7 +4780,7 @@
               }
 
               var exists = specialLocationEmployees[matchedSpecialLoc].some(function(e) {
-                return e.name.toLowerCase() === (emp.name || '').toLowerCase();
+                return e.name.toLowerCase() === empNameLower;
               });
 
               if (!exists) {
@@ -6115,16 +6137,33 @@
 
             // Track this employee in special locations for display
             // Note: Light Duty employees now get Location = Helena, so we check STATUS too
-            var specialStatuses = ['Light Duty', 'Weeds', 'Vacation', 'Leave', 'Time Off'];
-            var specialLocs = ['Weeds', 'Vacation', 'Leave', 'Time Off'];
-            var isSpecial = (specialLocs.indexOf(newLocation) !== -1 || specialStatuses.indexOf(status) !== -1);
-            if (isSpecial) {
-              var displayLoc = (status === 'Light Duty') ? 'Light Duty' : (newLocation || status);
-              addToSpecialLocation(displayLoc, {
-                name: name,
-                classification: classification || '',
-                notes: notes || ''
-              });
+            var isTerminated = (newLocation === 'Previous Employee' || ['Quit', 'Layoff', 'Fired', 'Resigned'].indexOf(status) !== -1);
+            if (isTerminated) {
+              var nameLower = name.toLowerCase().trim();
+              for (var ce = currentEmployees.length - 1; ce >= 0; ce--) {
+                if ((currentEmployees[ce].name || '').toLowerCase().trim() === nameLower) {
+                  currentEmployees.splice(ce, 1);
+                  break;
+                }
+              }
+              for (var slLoc in specialLocationEmployees) {
+                specialLocationEmployees[slLoc] = (specialLocationEmployees[slLoc] || []).filter(function(e) {
+                  return (e.name || '').toLowerCase().trim() !== nameLower;
+                });
+              }
+              renderSpecialLocationCards();
+            } else {
+              var specialStatuses = ['Light Duty', 'Weeds', 'Vacation', 'Leave', 'Time Off'];
+              var specialLocs = ['Weeds', 'Vacation', 'Leave', 'Time Off'];
+              var isSpecial = (specialLocs.indexOf(newLocation) !== -1 || specialStatuses.indexOf(status) !== -1);
+              if (isSpecial) {
+                var displayLoc = (status === 'Light Duty') ? 'Light Duty' : (newLocation || status);
+                addToSpecialLocation(displayLoc, {
+                  name: name,
+                  classification: classification || '',
+                  notes: notes || ''
+                });
+              }
             }
 
             removeSpecialCard(specIndex);
@@ -6214,15 +6253,31 @@
 
           console.log('Auto-applying: ' + spec.name + ' → ' + spec.savedLocation);
 
-          // Track this employee in special locations for display
-          var specialLocs = ['Light Duty', 'Weeds', 'Vacation', 'Leave', 'Time Off'];
-          if (specialLocs.indexOf(spec.savedLocation) !== -1 || specialLocs.indexOf(spec.savedStatus) !== -1) {
-            var displayLoc = spec.savedLocation || spec.savedStatus;
-            addToSpecialLocation(displayLoc, {
-              name: spec.name,
-              classification: spec.classification || '',
-              notes: spec.notes || ''
-            });
+          var isAutoTerminated = (spec.savedLocation === 'Previous Employee' || ['Quit', 'Layoff', 'Fired', 'Resigned'].indexOf(spec.savedStatus) !== -1);
+          if (isAutoTerminated) {
+            for (var ce = currentEmployees.length - 1; ce >= 0; ce--) {
+              if ((currentEmployees[ce].name || '').toLowerCase().trim() === empKey) {
+                currentEmployees.splice(ce, 1);
+                break;
+              }
+            }
+            for (var slLoc in specialLocationEmployees) {
+              specialLocationEmployees[slLoc] = (specialLocationEmployees[slLoc] || []).filter(function(e) {
+                return (e.name || '').toLowerCase().trim() !== empKey;
+              });
+            }
+            renderSpecialLocationCards();
+          } else {
+            // Track this employee in special locations for display
+            var specialLocs = ['Light Duty', 'Weeds', 'Vacation', 'Leave', 'Time Off'];
+            if (specialLocs.indexOf(spec.savedLocation) !== -1 || specialLocs.indexOf(spec.savedStatus) !== -1) {
+              var displayLoc = spec.savedLocation || spec.savedStatus;
+              addToSpecialLocation(displayLoc, {
+                name: spec.name,
+                classification: spec.classification || '',
+                notes: spec.notes || ''
+              });
+            }
           }
 
           var updateData = {
@@ -6289,6 +6344,19 @@
         .withSuccessHandler(function(result) {
           if (result.success) {
             showNotification('✓ <strong>' + spec.name + '</strong> marked as Previous Employee', 'success', 'Employee Updated');
+            var empNameClean = (spec.name || '').toLowerCase().trim();
+            for (var ce = currentEmployees.length - 1; ce >= 0; ce--) {
+              if ((currentEmployees[ce].name || '').toLowerCase().trim() === empNameClean) {
+                currentEmployees.splice(ce, 1);
+                break;
+              }
+            }
+            for (var slLoc in specialLocationEmployees) {
+              specialLocationEmployees[slLoc] = (specialLocationEmployees[slLoc] || []).filter(function(e) {
+                return (e.name || '').toLowerCase().trim() !== empNameClean;
+              });
+            }
+            renderSpecialLocationCards();
             removeSpecialCard(specIndex);
           } else {
             showNotification(result.message, 'error', 'Update Failed');
@@ -7440,7 +7508,6 @@
             secondaryJobNums.push(secEmp.fullJobNumber);
           }
         }
-        if (secondaryJobNums.length === 0) continue;
         var newSecondaryJobNumber = secondaryJobNums.join(', ');
 
         // Find or create the proposedChange for this employee's primary assignment
@@ -7480,6 +7547,75 @@
                 jobChanged: false,
                 classificationChanged: false,
                 newSecondaryJobNumber: newSecondaryJobNumber,
+                secondaryJobChanged: true,
+                apply: true
+              });
+            }
+          }
+        }
+      }
+
+      // Check if any matched employee has an oldSecondary that belongs to a completed job
+      // and isn't already handled in duplicateEmployees
+      for (var ci = 0; ci < parsedCrews.length; ci++) {
+        var cCrew = parsedCrews[ci];
+        if (!cCrew || !cCrew.employees) continue;
+        for (var ei = 0; ei < cCrew.employees.length; ei++) {
+          var cEmp = cCrew.employees[ei];
+          var cMatch = cEmp && cEmp.matchedEmployee;
+          if (!cMatch || !cMatch.employeeData) continue;
+          var oldSec = String(cMatch.employeeData.secondaryJobNum || '').trim();
+          if (!oldSec) continue;
+
+          var handledInDup = false;
+          for (var d = 0; d < duplicateEmployees.length; d++) {
+            if (duplicateEmployees[d] && duplicateEmployees[d].employeeName.toLowerCase() === cMatch.employeeName.toLowerCase()) {
+              handledInDup = true;
+              break;
+            }
+          }
+          if (handledInDup) continue;
+
+          var oldParts = oldSec.split(',').map(function(p) { return p.trim(); }).filter(Boolean);
+          var activeParts = [];
+          var hasCompletedSec = false;
+          for (var op = 0; op < oldParts.length; op++) {
+            var oPart = oldParts[op];
+            var baseOJob = oPart.split('.')[0].trim();
+            var oJobInfo = jobTrackingData[baseOJob];
+            if (oJobInfo && oJobInfo.isCompleted) {
+              hasCompletedSec = true;
+            } else {
+              activeParts.push(oPart);
+            }
+          }
+
+          if (hasCompletedSec) {
+            var updatedSec = activeParts.join(', ');
+            var foundChg = false;
+            for (var p2 = 0; p2 < proposedChanges.length; p2++) {
+              if (proposedChanges[p2].match && proposedChanges[p2].match.employeeName.toLowerCase() === cMatch.employeeName.toLowerCase()) {
+                proposedChanges[p2].newSecondaryJobNumber = updatedSec;
+                proposedChanges[p2].secondaryJobChanged = true;
+                foundChg = true;
+                break;
+              }
+            }
+            if (!foundChg) {
+              proposedChanges.push({
+                employee: cEmp,
+                crew: cCrew,
+                match: cMatch,
+                oldLocation: cMatch.employeeData.location || '',
+                newLocation: cCrew.mappedLocation,
+                oldJobNumber: cMatch.employeeData.jobNum || '',
+                newJobNumber: cEmp.fullJobNumber,
+                oldClassification: cMatch.employeeData.jobClassification || '',
+                newClassification: cEmp.classification || '',
+                locationChanged: false,
+                jobChanged: false,
+                classificationChanged: false,
+                newSecondaryJobNumber: updatedSec,
                 secondaryJobChanged: true,
                 apply: true
               });
@@ -8132,6 +8268,8 @@
             html += '<span class="text-unchanged">' + (ch.oldClassification || 'None') + '</span> → <span class="text-changed">' + ch.newClassification + '</span>';
           } else if (ch.newClassification) {
             html += '<span class="text-muted">' + ch.newClassification + '</span>';
+          } else if (ch.oldClassification) {
+            html += '<span class="text-muted">' + ch.oldClassification + '</span>';
           } else {
             html += '<span class="text-muted">-</span>';
           }

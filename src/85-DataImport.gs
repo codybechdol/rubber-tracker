@@ -584,6 +584,9 @@ function applyCrewChanges(changes) {
     batchWriteCount++;
   }
   Logger.log('applyCrewChanges: Batch wrote ' + batchWriteCount + ' column(s) to Employees sheet');
+  if (batchWriteCount > 0) {
+    SpreadsheetApp.flush();
+  }
 
   // ========== BATCH WRITE: Write all history rows at once ==========
   if (historyRows.length > 0 && historySheet) {
@@ -1220,11 +1223,9 @@ function setJobActivationDate(jobNumber, activationDateStr) {
         if (status === 'On Hold') {
           // Save to Estimated Return (G, column 7)
           jobSheet.getRange(rowIdx, 7).setValue(dateObj);
-          try { jobSheet.getRange(rowIdx, 7).setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) { Logger.log('setNumberFormat skipped (typed column): ' + fmtErr); }
         } else if (status === 'Pending Start') {
           // Save to Start Date (E, column 5)
           jobSheet.getRange(rowIdx, 5).setValue(dateObj);
-          try { jobSheet.getRange(rowIdx, 5).setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) { Logger.log('setNumberFormat skipped (typed column): ' + fmtErr); }
         } else {
           return { success: false, message: 'Job ' + jobNumber + ' is "' + status + '", not On Hold or Pending Start' };
         }
@@ -1284,37 +1285,51 @@ function setJobOnHoldFromImport(jobNumber, holdDateStr, estimatedReturnStr) {
     }
 
     var data = jobSheet.getDataRange().getValues();
+    var found = false;
+    var rowIdx = -1;
+
     for (var i = 1; i < data.length; i++) {
       if (String(data[i][0] || '').trim() === jobNumber) {
-        var rowIdx = i + 1;
-        var timestamp = new Date();
-
-        jobSheet.getRange(rowIdx, 10).setValue('On Hold');   // Status (J)
-        jobSheet.getRange(rowIdx, 6).setValue(holdDateObj);  // Put On Hold Date (F)
-        try { jobSheet.getRange(rowIdx, 6).setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) { Logger.log('setNumberFormat skipped (typed column): ' + fmtErr); }
-
-        if (returnDateObj) {
-          jobSheet.getRange(rowIdx, 7).setValue(returnDateObj);  // Estimated Return (G)
-          try { jobSheet.getRange(rowIdx, 7).setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) { Logger.log('setNumberFormat skipped (typed column): ' + fmtErr); }
-        } else {
-          jobSheet.getRange(rowIdx, 7).setValue('');
-        }
-
-        var currentNotes = String(data[i][10] || '');
-        var holdNote = 'Set On Hold via Crew Import on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy');
-        jobSheet.getRange(rowIdx, 11).setValue(currentNotes ? currentNotes + '; ' + holdNote : holdNote);  // Notes (K)
-        jobSheet.getRange(rowIdx, 21).setValue(timestamp);  // Last Updated (U)
-
-        return {
-          success: true,
-          message: 'Job ' + jobNumber + ' set to On Hold',
-          holdDate: Utilities.formatDate(holdDateObj, Session.getScriptTimeZone(), 'MM/dd/yyyy'),
-          estimatedReturn: returnDateObj ? Utilities.formatDate(returnDateObj, Session.getScriptTimeZone(), 'MM/dd/yyyy') : ''
-        };
+        rowIdx = i + 1;
+        found = true;
+        break;
       }
     }
 
-    return { success: false, message: 'Job ' + jobNumber + ' not found in Job Tracking' };
+    // If job doesn't exist in Job Tracking yet, add it
+    if (!found) {
+      var addRes = addOrUpdateJobTracking(jobNumber, '', '', 0, '', 'On Hold');
+      if (addRes && addRes.success && addRes.row) {
+        rowIdx = addRes.row;
+        found = true;
+        data = jobSheet.getDataRange().getValues();
+      } else {
+        return { success: false, message: 'Could not add job ' + jobNumber + ' to Job Tracking' };
+      }
+    }
+
+    var timestamp = new Date();
+
+    jobSheet.getRange(rowIdx, 10).setValue('On Hold');   // Status (J)
+    jobSheet.getRange(rowIdx, 6).setValue(holdDateObj);  // Put On Hold Date (F)
+
+    if (returnDateObj) {
+      jobSheet.getRange(rowIdx, 7).setValue(returnDateObj);  // Estimated Return (G)
+    } else {
+      jobSheet.getRange(rowIdx, 7).clearContent();
+    }
+
+    var currentNotes = (rowIdx - 1 < data.length) ? String(data[rowIdx - 1][10] || '') : '';
+    var holdNote = 'Set On Hold via Crew Import on ' + Utilities.formatDate(timestamp, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+    jobSheet.getRange(rowIdx, 11).setValue(currentNotes ? currentNotes + '; ' + holdNote : holdNote);  // Notes (K)
+    jobSheet.getRange(rowIdx, 21).setValue(timestamp);  // Last Updated (U)
+
+    return {
+      success: true,
+      message: 'Job ' + jobNumber + ' set to On Hold',
+      holdDate: Utilities.formatDate(holdDateObj, Session.getScriptTimeZone(), 'MM/dd/yyyy'),
+      estimatedReturn: returnDateObj ? Utilities.formatDate(returnDateObj, Session.getScriptTimeZone(), 'MM/dd/yyyy') : ''
+    };
   } catch (e) {
     Logger.log('setJobOnHoldFromImport error: ' + e.toString());
     return { success: false, message: 'Error: ' + e.toString() };
@@ -1609,6 +1624,16 @@ function markJobCompletedFromImport(jobNumber, completionDateStr) {
     Logger.log('markJobCompletedFromImport: Deleted ' + trainingDeleted + ' future training rows');
   } catch (err) {
     Logger.log('markJobCompletedFromImport: Error syncing training: ' + err);
+  }
+
+  // Clear completed secondary job numbers from Employees sheet
+  try {
+    var clearedSec = cleanupCompletedSecondaryJobNumbers(ss);
+    if (clearedSec > 0) {
+      Logger.log('markJobCompletedFromImport: Cleared completed secondary job numbers for ' + clearedSec + ' employee(s)');
+    }
+  } catch (secErr) {
+    Logger.log('markJobCompletedFromImport: Error cleaning completed secondary jobs: ' + secErr);
   }
 
   return {

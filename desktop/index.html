@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Safety Assistant (Offline Field App)</title>
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+  <!-- App Header -->
+  <header class="app-header">
+    <div class="brand-section">
+      <div class="brand-title">
+        <span>🛡️</span> Safety Assistant
+      </div>
+      <span class="brand-badge">Field Edition</span>
+    </div>
+
+    <div class="header-actions">
+      <div class="sync-status-badge">
+        <span class="status-dot" id="sync-status-dot"></span>
+        <span id="sync-status-text">Checking status...</span>
+      </div>
+
+      <button class="btn btn-secondary" onclick="window.syncEngine.importLocalSnapshotFile()">
+        📁 Import Snapshot
+      </button>
+
+      <button class="btn" id="sync-btn" onclick="window.syncEngine.syncWithGoogleSheets()">
+        🔄 Sync with Google Sheets
+      </button>
+    </div>
+  </header>
+
+  <!-- App Body -->
+  <div class="app-body">
+
+    <!-- Sidebar Navigation -->
+    <aside class="app-sidebar">
+      <div class="nav-group">
+        <div class="nav-group-title">Main Workspaces</div>
+        <div class="nav-item active" data-view="sheets-view">
+          <span class="nav-item-icon">🧭</span> Sheet Tabs Grid
+        </div>
+        <div class="nav-item" data-view="trip-planner-view">
+          <span class="nav-item-icon">🗺️</span> Trip Planner
+        </div>
+        <div class="nav-item" data-view="tasks-view">
+          <span class="nav-item-icon">📋</span> Tasks & Calendar
+        </div>
+        <div class="nav-item" data-view="lookup-view">
+          <span class="nav-item-icon">🔍</span> Lookup & Search
+        </div>
+      </div>
+
+      <div class="nav-group">
+        <div class="nav-group-title">Settings & Storage</div>
+        <div class="nav-item" data-view="settings-view">
+          <span class="nav-item-icon">⚙️</span> Sync Settings
+        </div>
+      </div>
+
+      <div style="margin-top: auto; padding: 16px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-color);">
+        Safety Assistant v2026.1<br>
+        100% Offline Capable
+      </div>
+    </aside>
+
+    <!-- Main Content Views -->
+    <main class="app-content">
+
+      <!-- View 1: Sheet Tabs Grid -->
+      <section id="sheets-view" class="view-container active">
+        <div class="sheet-tabs-bar" id="sheet-tabs-bar"></div>
+        <div class="sheet-toolbar">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <h2 id="current-sheet-title" style="font-size: 16px;">👥 Employees</h2>
+            <span class="brand-badge" id="sheet-row-count">0 rows</span>
+          </div>
+          <input type="text" id="sheet-search-input" class="sheet-search" placeholder="Filter rows in this sheet...">
+        </div>
+        <div class="grid-wrapper" id="sheet-grid-container"></div>
+      </section>
+
+      <!-- View 2: Trip Planner -->
+      <section id="trip-planner-view" class="view-container">
+        <div class="sheet-toolbar">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <h2 style="font-size: 16px;">🗺️ Trip Planner & Route Scheduler</h2>
+          </div>
+          <div style="font-size: 12px; color: var(--text-secondary);">
+            Drag location cards onto work days to schedule field visits
+          </div>
+        </div>
+        <div style="display: flex; flex: 1; overflow: hidden;">
+          <div style="width: 220px; background-color: var(--bg-secondary); border-right: 1px solid var(--border-color); padding: 16px; overflow-y: auto;">
+            <div style="font-weight: 700; font-size: 13px; margin-bottom: 12px; color: var(--text-muted); text-transform: uppercase;">Available Cities</div>
+            <div id="available-locations-list"></div>
+          </div>
+          <div class="trip-planner-board" id="trip-planner-board"></div>
+        </div>
+      </section>
+
+      <!-- View 3: Tasks & Calendar -->
+      <section id="tasks-view" class="view-container">
+        <div class="sheet-toolbar">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <h2 style="font-size: 16px;">📋 Tasks & Scheduled Swaps</h2>
+            <span class="brand-badge" id="tasks-total-badge">0 tasks</span>
+          </div>
+        </div>
+        <div style="flex: 1; padding: 20px; overflow-y: auto;" id="tasks-list-container"></div>
+      </section>
+
+      <!-- View 4: Lookup & Search -->
+      <section id="lookup-view" class="view-container">
+        <div class="sheet-toolbar">
+          <input type="text" id="global-lookup-input" class="sheet-search" style="width: 400px;" placeholder="Search employee name, phone, item serial number...">
+        </div>
+        <div style="flex: 1; padding: 20px; overflow-y: auto;" id="lookup-results-container"></div>
+      </section>
+
+      <!-- View 5: Settings -->
+      <section id="settings-view" class="view-container">
+        <div style="max-width: 600px; padding: 30px;">
+          <h2 style="margin-bottom: 20px;">⚙️ Google Sheets Sync Configuration</h2>
+          <div style="margin-bottom: 16px;">
+            <label style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px;">Google Apps Script Web App URL</label>
+            <input type="text" id="sync-url-input" class="sheet-search" style="width: 100%;" placeholder="https://script.google.com/macros/s/.../exec">
+            <small style="color: var(--text-muted); display: block; margin-top: 6px;">
+              Deploy your Apps Script project as a Web App (Access: Anyone with link) and paste the URL here.
+            </small>
+          </div>
+          <button class="btn" onclick="saveSyncSettings()">Save Settings & Test Connection</button>
+        </div>
+      </section>
+
+    </main>
+
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/db.js"></script>
+  <script src="js/sync.js"></script>
+  <script src="js/sheets.js"></script>
+  <script src="js/trip-planner.js"></script>
+  <script src="js/tasks.js"></script>
+  <script src="js/lookup.js"></script>
+
+  <script>
+    // Navigation routing
+    document.querySelectorAll('.nav-item').forEach(item => {
+      item.addEventListener('click', () => {
+        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+        document.querySelectorAll('.view-container').forEach(v => v.classList.remove('active'));
+
+        item.classList.add('active');
+        const viewId = item.dataset.view;
+        const viewEl = document.getElementById(viewId);
+        if (viewEl) viewEl.classList.add('active');
+
+        if (viewId === 'trip-planner-view') window.tripPlanner.renderPlanner();
+        if (viewId === 'tasks-view') window.taskManager.renderTasks();
+        if (viewId === 'sheets-view') window.sheetNavigator.renderCurrentSheet();
+      });
+    });
+
+    function saveSyncSettings() {
+      const url = document.getElementById('sync-url-input').value;
+      window.syncEngine.setSyncUrl(url);
+      window.syncEngine.testConnection().then(res => {
+        if (res.success) {
+          alert('✅ Connected successfully to Google Sheets Web App!');
+          window.syncEngine.syncWithGoogleSheets();
+        } else {
+          alert('❌ Connection failed: ' + res.message);
+        }
+      });
+    }
+
+    // App Initialization
+    window.addEventListener('DOMContentLoaded', async () => {
+      document.getElementById('sync-url-input').value = window.syncEngine.getSyncUrl();
+      const snapshot = await window.localDB.init();
+
+      window.sheetNavigator.init();
+      window.tripPlanner.init();
+      window.taskManager.init();
+      window.lookupApp.init();
+
+      if (snapshot) {
+        window.syncEngine.updateStatusUI('synced', `Snapshot Loaded (${new Date(snapshot.exportedAt).toLocaleDateString()})`);
+      } else {
+        window.syncEngine.updateStatusUI('offline', 'No data loaded (Import or Sync)');
+      }
+    });
+  </script>
+</body>
+</html>

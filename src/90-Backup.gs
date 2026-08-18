@@ -35,6 +35,15 @@ function createBackupSnapshot() {
     // Log the backup
     logEvent('Backup created: ' + backupName, 'INFO');
 
+    // Generate fresh offline sync snapshot for desktop app
+    try {
+      if (typeof generateAndStoreSyncSnapshot === 'function') {
+        generateAndStoreSyncSnapshot();
+      }
+    } catch (syncSnapErr) {
+      Logger.log('createBackupSnapshot: Error generating sync snapshot: ' + syncSnapErr);
+    }
+
     // Show success message with link
     var htmlOutput = HtmlService
       .createHtmlOutput(

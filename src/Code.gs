@@ -9660,7 +9660,9 @@ function handlePickedCheckboxChange(ss, swapSheet, inventorySheet, editedRow, ne
 
     var pickListRow = -1;
     for (var i = 1; i < inventoryData.length; i++) {
-      if (String(inventoryData[i][0]).trim() === String(pickListNum).trim()) {
+      var itm = String(inventoryData[i][0]).trim();
+      var esl = String(inventoryData[i][1] || '').trim();
+      if (itm === String(pickListNum).trim() || (esl && esl === String(pickListNum).trim())) {
         pickListRow = i + 1;
         break;
       }
@@ -9698,13 +9700,15 @@ function handlePickedCheckboxChange(ss, swapSheet, inventorySheet, editedRow, ne
         // Uncheck the checkbox
         swapSheet.getRange(editedRow, 9).setValue(false);
 
-        // Show error message to user
-        SpreadsheetApp.getUi().alert(
-          '⚠️ Cannot Pick Item',
-          'Item ' + pickListNum + ' is currently "In Testing" and cannot be picked for delivery.\n\n' +
-          'Please wait until testing is complete and the item status changes to "Ready For Delivery".',
-          SpreadsheetApp.getUi().ButtonSet.OK
-        );
+        // Show error message to user if running in interactive UI
+        try {
+          SpreadsheetApp.getUi().alert(
+            '⚠️ Cannot Pick Item',
+            'Item ' + pickListNum + ' is currently "In Testing" and cannot be picked for delivery.\n\n' +
+            'Please wait until testing is complete and the item status changes to "Ready For Delivery".',
+            SpreadsheetApp.getUi().ButtonSet.OK
+          );
+        } catch (uiErr) { /* ignore in non-UI / sync context */ }
         return;
       }
 
@@ -11719,6 +11723,15 @@ function saveHistoryFast(silent) {
     }
 
     var totalTime = new Date().getTime() - startTime;
+
+    // Generate fresh offline sync snapshot for desktop app
+    try {
+      if (typeof generateAndStoreSyncSnapshot === 'function') {
+        generateAndStoreSyncSnapshot();
+      }
+    } catch (syncSnapErr) {
+      Logger.log('saveHistoryFast: Error generating sync snapshot: ' + syncSnapErr);
+    }
 
     if (silent) {
       PropertiesService.getUserProperties().setProperty('historySavedThisSession', 'true');
@@ -31136,9 +31149,55 @@ function doGet(e) {
       var certType = e.parameter.cert || '';
       markCertNotifiedAndReload(employeeName, certType);
       return ContentService.createTextOutput("Logged").setMimeType(ContentService.MimeType.TEXT);
+    } else if (action === 'ping') {
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'ok',
+        serverTime: new Date().toISOString()
+      })).setMimeType(ContentService.MimeType.JSON);
+    } else if (action === 'getSnapshot' || !action) {
+      var snapshot = exportFullDatabaseSnapshot();
+      return ContentService.createTextOutput(JSON.stringify(snapshot))
+        .setMimeType(ContentService.MimeType.JSON);
     }
+
+    return ContentService.createTextOutput(JSON.stringify({ status: 'ok' }))
+      .setMimeType(ContentService.MimeType.JSON);
+
   } catch (err) {
-    return HtmlService.createHtmlOutput("Error: " + err.message);
+    return ContentService.createTextOutput(JSON.stringify({ error: err.toString() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+/**
+ * Handles HTTP POST requests to the Web App (Desktop App synchronization mutations).
+ */
+function doPost(e) {
+  try {
+    var rawBody = e.postData ? e.postData.contents : '{}';
+    var payload = JSON.parse(rawBody);
+    var action = payload.action || 'sync';
+
+    if (action === 'applyMutations') {
+      var result = applyBatchSyncMutations(payload.mutations || []);
+      return ContentService.createTextOutput(JSON.stringify(result))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (action === 'getSnapshot') {
+      var snapshot = exportFullDatabaseSnapshot();
+      return ContentService.createTextOutput(JSON.stringify(snapshot))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    return ContentService.createTextOutput(JSON.stringify({
+      error: 'Unknown action: ' + action
+    })).setMimeType(ContentService.MimeType.JSON);
+
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({
+      error: err.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
   }
 }
 

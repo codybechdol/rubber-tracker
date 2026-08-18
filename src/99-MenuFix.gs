@@ -63,6 +63,7 @@ function _buildGloveManagerMenu() {
       .addSubMenu(ui.createMenu('💾 Save & Backup')
         .addItem('💾 Save Current State to History', 'saveHistoryFast')
         .addItem('💾 Create Backup Snapshot', 'createBackupSnapshot')
+        .addItem('🔄 Export Offline Snapshot (Desktop App)', 'menuExportSyncSnapshot')
         .addItem('📂 View Backup Folder', 'openBackupFolder')
         .addItem('📤 Send Report Now', 'sendEmailReport'))
 
@@ -115,6 +116,7 @@ function _buildGloveManagerMenu() {
           .addItem('🔄 Refresh Job Tracking', 'refreshJobTrackingFromEmployees')
           .addItem('👤 Refresh Job Tracking Foremen', 'refreshJobTrackingForemen')
           .addItem('✅ Mark Job Complete', 'markJobComplete')
+          .addItem('🧹 Clean Completed Secondary Jobs', 'menuCleanupCompletedSecondaryJobs')
           .addItem('➕ Add Future Job', 'addFutureJob'))
 
         .addSubMenu(ui.createMenu('📚 Training & Calendar')

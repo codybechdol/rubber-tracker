@@ -1831,6 +1831,12 @@ function syncCrews(silent) {
     }
   }
 
+  try {
+    cleanupCompletedSecondaryJobNumbers(ss);
+  } catch (secErr) {
+    Logger.log('syncCrews: Error cleaning up completed secondary jobs: ' + secErr);
+  }
+
   var summary = {
     success: true,
     foremanUpdates: foremanUpdates,
@@ -1854,6 +1860,104 @@ function syncCrews(silent) {
   }
 
   return summary;
+}
+
+/**
+ * Cleans up secondary job numbers on the Employees sheet for any jobs that are marked "Completed" in Job Tracking.
+ * If an employee's Secondary Job Number (col O) matches a completed job (e.g., "046-26" or "046-26.4"),
+ * that completed job is stripped/cleared.
+ *
+ * @param {Spreadsheet} ss - Active spreadsheet (optional)
+ * @return {number} Count of employees whose secondary job numbers were cleared/updated
+ */
+function cleanupCompletedSecondaryJobNumbers(ss) {
+  ss = ss || SpreadsheetApp.getActiveSpreadsheet();
+  var jobSheet = ss.getSheetByName('Job Tracking');
+  var empSheet = ss.getSheetByName(typeof SHEET_EMPLOYEES !== 'undefined' ? SHEET_EMPLOYEES : 'Employees');
+  if (!jobSheet || !empSheet) return 0;
+
+  var jobData = jobSheet.getDataRange().getValues();
+  var completedJobs = {};
+  for (var j = 1; j < jobData.length; j++) {
+    var jobNum = String(jobData[j][0] || '').trim();
+    var status = String(jobData[j][9] || '').trim(); // Status (col J = index 9)
+    if (jobNum && status.toLowerCase() === 'completed') {
+      var baseJob = jobNum.split('.')[0].trim();
+      completedJobs[baseJob] = true;
+    }
+  }
+
+  if (Object.keys(completedJobs).length === 0) return 0;
+
+  var empData = empSheet.getDataRange().getValues();
+  if (empData.length <= 1) return 0;
+  var headers = empData[0];
+  var secJobCol = -1;
+  for (var h = 0; h < headers.length; h++) {
+    var hdr = String(headers[h]).toLowerCase().trim();
+    if (hdr === 'secondary job number' || hdr === 'secondary job') {
+      secJobCol = h;
+      break;
+    }
+  }
+  if (secJobCol === -1) return 0;
+
+  var updatedCount = 0;
+  var colValues = [];
+
+  for (var i = 1; i < empData.length; i++) {
+    var rawSec = String(empData[i][secJobCol] || '').trim();
+    if (!rawSec) {
+      colValues.push([rawSec]);
+      continue;
+    }
+
+    // Handle comma-separated secondary job numbers (e.g., "046-26.4, 040-26.1")
+    var parts = rawSec.split(',').map(function(p) { return p.trim(); }).filter(Boolean);
+    var remainingParts = [];
+    var modified = false;
+
+    for (var p = 0; p < parts.length; p++) {
+      var part = parts[p];
+      var basePart = part.split('.')[0].trim();
+      if (completedJobs[basePart]) {
+        modified = true;
+        Logger.log('cleanupCompletedSecondaryJobNumbers: Removing completed secondary job ' + part + ' from employee ' + (empData[i][0] || ('row ' + (i + 1))));
+      } else {
+        remainingParts.push(part);
+      }
+    }
+
+    if (modified) {
+      var newSec = remainingParts.join(', ');
+      colValues.push([newSec]);
+      empData[i][secJobCol] = newSec;
+      updatedCount++;
+    } else {
+      colValues.push([rawSec]);
+    }
+  }
+
+  if (updatedCount > 0) {
+    empSheet.getRange(2, secJobCol + 1, colValues.length, 1).setValues(colValues);
+    SpreadsheetApp.flush();
+    Logger.log('cleanupCompletedSecondaryJobNumbers: Cleared completed secondary job numbers for ' + updatedCount + ' employee(s)');
+  }
+
+  return updatedCount;
+}
+
+/**
+ * Menu function to clean up completed secondary job numbers on Employees sheet.
+ */
+function menuCleanupCompletedSecondaryJobs() {
+  var count = cleanupCompletedSecondaryJobNumbers();
+  var ui = SpreadsheetApp.getUi();
+  if (count > 0) {
+    ui.alert('✅ Secondary Jobs Cleaned', 'Cleared completed secondary job numbers for ' + count + ' employee(s).', ui.ButtonSet.OK);
+  } else {
+    ui.alert('ℹ️ No Changes', 'No employees had secondary job numbers assigned to completed jobs.', ui.ButtonSet.OK);
+  }
 }
 
 /**
@@ -1946,12 +2050,23 @@ function markJobComplete() {
   // Auto-remove future training rows for this completed job
   var trainingRowsDeleted = autoSyncCompletedJobToTraining(jobNumber, today);
 
+  // Auto-clean completed secondary jobs from Employees sheet
+  var clearedSec = 0;
+  try {
+    clearedSec = cleanupCompletedSecondaryJobNumbers(ss);
+  } catch (secErr) {
+    Logger.log('markJobComplete: Error cleaning up completed secondary jobs: ' + secErr);
+  }
+
   var message = 'Job "' + jobNumber + '" has been marked as Completed.\n\n' +
     'Actual End Date: ' + Utilities.formatDate(today, Session.getScriptTimeZone(), 'MM/dd/yyyy');
 
   if (trainingRowsDeleted > 0) {
     message += '\n\n📚 Training Tracking: Removed ' + trainingRowsDeleted + ' future training row(s).\n' +
       '(Historical completed training records preserved)';
+  }
+  if (clearedSec > 0) {
+    message += '\n\n👥 Employees Sheet: Cleared completed secondary job numbers for ' + clearedSec + ' employee(s).';
   }
 
   ui.alert('✅ Job Marked Complete', message, ui.ButtonSet.OK);
