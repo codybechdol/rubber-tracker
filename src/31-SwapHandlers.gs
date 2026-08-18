@@ -50,7 +50,9 @@ function handlePickedCheckboxChange(ss, swapSheet, inventorySheet, editedRow, ne
 
     var pickListRow = -1;
     for (var i = 1; i < inventoryData.length; i++) {
-      if (String(inventoryData[i][0]).trim() === String(pickListNum).trim()) {
+      var itm = String(inventoryData[i][0]).trim();
+      var esl = String(inventoryData[i][1] || '').trim();
+      if (itm === String(pickListNum).trim() || (esl && esl === String(pickListNum).trim())) {
         pickListRow = i + 1;
         break;
       }
@@ -61,11 +63,12 @@ function handlePickedCheckboxChange(ss, swapSheet, inventorySheet, editedRow, ne
       return;
     }
 
-    var invColDateAssigned = 5;
-    var invColLocation = 6;
-    var invColStatus = 7;
-    var invColAssignedTo = 8;
-    var invColPickedFor = 10;
+    var invColDateAssigned = COLS.INVENTORY.DATE_ASSIGNED;
+    var invColLocation = COLS.INVENTORY.LOCATION;
+    var invColStatus = COLS.INVENTORY.STATUS;
+    var invColAssignedTo = COLS.INVENTORY.ASSIGNED_TO;
+    var invColChangeOutDate = COLS.INVENTORY.CHANGE_OUT_DATE;
+    var invColPickedFor = COLS.INVENTORY.PICKED_FOR;
 
     var today = new Date();
     var todayStr = Utilities.formatDate(today, ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd');
@@ -85,13 +88,15 @@ function handlePickedCheckboxChange(ss, swapSheet, inventorySheet, editedRow, ne
         // Uncheck the checkbox
         swapSheet.getRange(editedRow, 9).setValue(false);
 
-        // Show error message to user
-        SpreadsheetApp.getUi().alert(
-          '⚠️ Cannot Pick Item',
-          'Item ' + pickListNum + ' is currently "In Testing" and cannot be picked for delivery.\n\n' +
-          'Please wait until testing is complete and the item status changes to "Ready For Delivery".',
-          SpreadsheetApp.getUi().ButtonSet.OK
-        );
+        // Show error message to user if interactive
+        try {
+          SpreadsheetApp.getUi().alert(
+            '⚠️ Cannot Pick Item',
+            'Item ' + pickListNum + ' is currently "In Testing" and cannot be picked for delivery.\n\n' +
+            'Please wait until testing is complete and the item status changes to "Ready For Delivery".',
+            SpreadsheetApp.getUi().ButtonSet.OK
+          );
+        } catch (uiErr) { /* ignore in non-UI context */ }
         return;
       }
 
@@ -115,7 +120,6 @@ function handlePickedCheckboxChange(ss, swapSheet, inventorySheet, editedRow, ne
 
       var changeOutDate = calculateChangeOutDate(today, "Cody's Truck", 'Packed For Delivery', isSleeve);
       if (changeOutDate && changeOutDate !== 'N/A') {
-        var invColChangeOutDate = 9;
         var changeOutCell = inventorySheet.getRange(pickListRow, invColChangeOutDate);
         try {
           changeOutCell.setNumberFormat('MM/dd/yyyy');
@@ -148,7 +152,6 @@ function handlePickedCheckboxChange(ss, swapSheet, inventorySheet, editedRow, ne
       var revertAssignedTo = stage1AssignedTo || 'On Shelf';
       var revertLocation = 'Helena';
       var isSleeve = !isGloveSwaps;
-      var invColChangeOutDate = 9;
 
       inventorySheet.getRange(pickListRow, invColStatus).setValue(revertStatus);
       inventorySheet.getRange(pickListRow, invColAssignedTo).setValue(revertAssignedTo);
@@ -248,10 +251,11 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
 
   for (var i = 1; i < inventoryData.length; i++) {
     var itemNum = String(inventoryData[i][0]).trim();
-    if (itemNum === String(pickListNum).trim()) {
+    var esl = String(inventoryData[i][1] || '').trim();
+    if (itemNum === String(pickListNum).trim() || (esl && esl === String(pickListNum).trim())) {
       pickListRow = i + 1;
     }
-    if (oldItemNum && itemNum === String(oldItemNum).trim()) {
+    if (oldItemNum && (itemNum === String(oldItemNum).trim() || (esl && esl === String(oldItemNum).trim()))) {
       oldItemRow = i + 1;
     }
   }
@@ -272,6 +276,13 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
       }
     }
   }
+
+  var invColDateAssigned = COLS.INVENTORY.DATE_ASSIGNED;
+  var invColLocation = COLS.INVENTORY.LOCATION;
+  var invColStatus = COLS.INVENTORY.STATUS;
+  var invColAssignedTo = COLS.INVENTORY.ASSIGNED_TO;
+  var invColChangeOutDate = COLS.INVENTORY.CHANGE_OUT_DATE;
+  var invColPickedFor = COLS.INVENTORY.PICKED_FOR;
 
   if (hasDate) {
     // STAGE 3: Date Changed entered - complete the swap
@@ -315,14 +326,14 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
     swapSheet.getRange(editedRow, 8).setValue('Assigned').setFontWeight('bold').setFontColor('#2e7d32');
     swapSheet.getRange(editedRow, 6).setValue('Assigned').setFontWeight('bold').setFontColor('#2e7d32');
 
-    inventorySheet.getRange(pickListRow, 7).setValue('Assigned');
-    inventorySheet.getRange(pickListRow, 8).setValue(employeeName);
-    var dateAssignedCell = inventorySheet.getRange(pickListRow, 5);
+    inventorySheet.getRange(pickListRow, invColStatus).setValue('Assigned');
+    inventorySheet.getRange(pickListRow, invColAssignedTo).setValue(employeeName);
+    var dateAssignedCell = inventorySheet.getRange(pickListRow, invColDateAssigned);
     try { dateAssignedCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) { /* Ignore */ }
     dateAssignedCell.setValue(dateChanged);
-    inventorySheet.getRange(pickListRow, 6).setValue(employeeLocation);
+    inventorySheet.getRange(pickListRow, invColLocation).setValue(employeeLocation);
 
-    var changeOutCell = inventorySheet.getRange(pickListRow, 9);
+    var changeOutCell = inventorySheet.getRange(pickListRow, invColChangeOutDate);
     if (changeOutDate === 'N/A') {
       try { changeOutCell.setNumberFormat('@'); } catch (fmtErr) { /* Ignore */ }
       changeOutCell.setValue('N/A');
@@ -330,18 +341,18 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
       try { changeOutCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) { /* Ignore */ }
       changeOutCell.setValue(changeOutDate);
     }
-    inventorySheet.getRange(pickListRow, 10).setValue('');
+    inventorySheet.getRange(pickListRow, invColPickedFor).setValue('');
 
     if (oldItemRow > 0) {
-      inventorySheet.getRange(oldItemRow, 7).setValue('Ready For Test');
-      inventorySheet.getRange(oldItemRow, 8).setValue('Packed For Testing');
-      var oldDateAssignedCell = inventorySheet.getRange(oldItemRow, 5);
+      inventorySheet.getRange(oldItemRow, invColStatus).setValue('Ready For Test');
+      inventorySheet.getRange(oldItemRow, invColAssignedTo).setValue('Packed For Testing');
+      var oldDateAssignedCell = inventorySheet.getRange(oldItemRow, invColDateAssigned);
       try { oldDateAssignedCell.setNumberFormat('MM/dd/yyyy'); } catch (fmtErr) { /* Ignore */ }
       oldDateAssignedCell.setValue(dateChanged);
-      inventorySheet.getRange(oldItemRow, 6).setValue("Cody's Truck");
+      inventorySheet.getRange(oldItemRow, invColLocation).setValue("Cody's Truck");
 
       var oldItemChangeOutDate = calculateChangeOutDate(dateChanged, "Cody's Truck", 'Packed For Testing', isSleeve);
-      var oldItemChangeOutCell = inventorySheet.getRange(oldItemRow, 9);
+      var oldItemChangeOutCell = inventorySheet.getRange(oldItemRow, invColChangeOutDate);
       if (oldItemChangeOutDate === 'N/A') {
         try { oldItemChangeOutCell.setNumberFormat('@'); } catch (fmtErr) { /* Ignore */ }
         oldItemChangeOutCell.setValue('N/A');
@@ -368,17 +379,17 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
       swapSheet.getRange(editedRow, 6).setValue(daysLeftText).setFontColor(daysLeftColor);
     }
 
-    inventorySheet.getRange(pickListRow, 7).setValue(stage2Status || 'Ready For Delivery');
-    inventorySheet.getRange(pickListRow, 8).setValue(stage2AssignedTo || 'Packed For Delivery');
+    inventorySheet.getRange(pickListRow, invColStatus).setValue(stage2Status || 'Ready For Delivery');
+    inventorySheet.getRange(pickListRow, invColAssignedTo).setValue(stage2AssignedTo || 'Packed For Delivery');
 
     if (stage2DateAssigned) {
       var stage2Date = new Date(stage2DateAssigned);
       if (!isNaN(stage2Date)) {
         var stage2DateFormatted = Utilities.formatDate(stage2Date, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
-        inventorySheet.getRange(pickListRow, 5).setValue(stage2DateFormatted);
+        inventorySheet.getRange(pickListRow, invColDateAssigned).setValue(stage2DateFormatted);
 
         var pickListChangeOut = calculateChangeOutDate(stage2Date, "Cody's Truck", 'Packed For Delivery', isSleeve);
-        var pickListChangeOutCell = inventorySheet.getRange(pickListRow, 9);
+        var pickListChangeOutCell = inventorySheet.getRange(pickListRow, invColChangeOutDate);
         if (pickListChangeOut === 'N/A') {
           try { pickListChangeOutCell.setNumberFormat('@'); } catch (fmtErr) { /* Ignore */ }
           pickListChangeOutCell.setValue('N/A');
@@ -387,26 +398,26 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
           pickListChangeOutCell.setValue(pickListChangeOut);
         }
       } else {
-        inventorySheet.getRange(pickListRow, 5).setValue(stage2DateAssigned);
+        inventorySheet.getRange(pickListRow, invColDateAssigned).setValue(stage2DateAssigned);
       }
     }
 
-    inventorySheet.getRange(pickListRow, 6).setValue("Cody's Truck");
-    inventorySheet.getRange(pickListRow, 10).setValue(stage2PickedFor || '');
+    inventorySheet.getRange(pickListRow, invColLocation).setValue("Cody's Truck");
+    inventorySheet.getRange(pickListRow, invColPickedFor).setValue(stage2PickedFor || '');
 
     if (oldItemRow > 0 && oldGloveStatus) {
-      inventorySheet.getRange(oldItemRow, 7).setValue(oldGloveStatus);
-      inventorySheet.getRange(oldItemRow, 8).setValue(oldGloveAssignedTo);
-      inventorySheet.getRange(oldItemRow, 6).setValue(employeeLocation);
+      inventorySheet.getRange(oldItemRow, invColStatus).setValue(oldGloveStatus);
+      inventorySheet.getRange(oldItemRow, invColAssignedTo).setValue(oldGloveAssignedTo);
+      inventorySheet.getRange(oldItemRow, invColLocation).setValue(employeeLocation);
 
       if (oldGloveDateAssigned) {
         var oldGloveDate = new Date(oldGloveDateAssigned);
         if (!isNaN(oldGloveDate)) {
           var oldGloveDateFormatted = Utilities.formatDate(oldGloveDate, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
-          inventorySheet.getRange(oldItemRow, 5).setValue(oldGloveDateFormatted);
+          inventorySheet.getRange(oldItemRow, invColDateAssigned).setValue(oldGloveDateFormatted);
 
           var oldItemChangeOut = calculateChangeOutDate(oldGloveDate, employeeLocation, oldGloveAssignedTo, isSleeve);
-          var oldItemChangeOutCell = inventorySheet.getRange(oldItemRow, 9);
+          var oldItemChangeOutCell = inventorySheet.getRange(oldItemRow, invColChangeOutDate);
           if (oldItemChangeOut === 'N/A') {
             try { oldItemChangeOutCell.setNumberFormat('@'); } catch (fmtErr) { /* Ignore */ }
             oldItemChangeOutCell.setValue('N/A');
@@ -415,7 +426,7 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
             oldItemChangeOutCell.setValue(oldItemChangeOut);
           }
         } else {
-          inventorySheet.getRange(oldItemRow, 5).setValue(oldGloveDateAssigned);
+          inventorySheet.getRange(oldItemRow, invColDateAssigned).setValue(oldGloveDateAssigned);
         }
       }
     }
