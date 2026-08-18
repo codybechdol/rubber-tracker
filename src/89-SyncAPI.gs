@@ -246,20 +246,83 @@ function applyBatchSyncMutations(mutations) {
 
                 // Column I is col 9 (Picked checkbox)
                 if (mut.col === 9 || hLower.includes('picked') || mut.value === true || mut.value === 'TRUE' || mut.value === false || mut.value === 'FALSE') {
+                  var isChecked = (mut.value === true || mut.value === 'TRUE' || mut.value === 'true');
+
+                  // 1. Run standard Apps Script trigger handler
                   if (invSheet) {
-                    if ((isGlove || isSleeve) && typeof handlePickedCheckboxChange === 'function') {
-                      handlePickedCheckboxChange(ss, sheet, invSheet, mut.row, mut.value, isGlove);
-                    } else if (isBlanket && typeof handleBlanketPickedCheckboxChange === 'function') {
-                      handleBlanketPickedCheckboxChange(ss, sheet, invSheet, mut.row, mut.value);
+                    try {
+                      if ((isGlove || isSleeve) && typeof handlePickedCheckboxChange === 'function') {
+                        handlePickedCheckboxChange(ss, sheet, invSheet, mut.row, mut.value, isGlove);
+                      } else if (isBlanket && typeof handleBlanketPickedCheckboxChange === 'function') {
+                        handleBlanketPickedCheckboxChange(ss, sheet, invSheet, mut.row, mut.value);
+                      }
+                    } catch (hErr) {
+                      Logger.log('handlePickedCheckboxChange error: ' + hErr);
                     }
                   }
+
+                  // 2. Direct guarantee update on swap sheet and inventory sheet
+                  var empName = String(sheet.getRange(mut.row, 1).getValue() || '').trim();
+                  var pickListNum = String(sheet.getRange(mut.row, 7).getValue() || '').trim();
+                  var today = new Date();
+                  var todayStr = Utilities.formatDate(today, ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd');
+                  var todayFormatted = Utilities.formatDate(today, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+
+                  sheet.getRange(mut.row, 8).setValue(isChecked ? 'Ready For Delivery 🚚' : 'In Stock ✅');
+
+                  if (invSheet && pickListNum && pickListNum !== '—' && pickListNum !== '-') {
+                    var invData = invSheet.getDataRange().getValues();
+                    var invRowIdx = -1;
+                    for (var rIdx = 1; rIdx < invData.length; rIdx++) {
+                      var itm = String(invData[rIdx][0]).trim();
+                      var esl = String(invData[rIdx][1] || '').trim();
+                      if (itm === pickListNum || (esl && esl === pickListNum)) {
+                        invRowIdx = rIdx + 1;
+                        break;
+                      }
+                    }
+
+                    if (invRowIdx !== -1) {
+                      var colLoc = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.LOCATION : 7;
+                      var colStat = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.STATUS : 8;
+                      var colAssigned = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.ASSIGNED_TO : 9;
+                      var colDate = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.DATE_ASSIGNED : 6;
+                      var colChangeOut = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.CHANGE_OUT_DATE : 10;
+                      var colPicked = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.PICKED_FOR : 11;
+
+                      if (isChecked) {
+                        invSheet.getRange(invRowIdx, colLoc).setValue("Cody's Truck");
+                        invSheet.getRange(invRowIdx, colStat).setValue('Ready For Delivery');
+                        invSheet.getRange(invRowIdx, colAssigned).setValue('Packed For Delivery');
+                        invSheet.getRange(invRowIdx, colDate).setValue(todayFormatted);
+                        invSheet.getRange(invRowIdx, colPicked).setValue(empName + ' Picked On ' + todayStr);
+
+                        var chgDate = typeof calculateChangeOutDate === 'function' ? calculateChangeOutDate(today, "Cody's Truck", 'Packed For Delivery', isSleeve) : null;
+                        if (chgDate && chgDate !== 'N/A') {
+                          invSheet.getRange(invRowIdx, colChangeOut).setValue(chgDate);
+                        }
+                      } else {
+                        invSheet.getRange(invRowIdx, colLoc).setValue('Helena');
+                        invSheet.getRange(invRowIdx, colStat).setValue('In Stock');
+                        invSheet.getRange(invRowIdx, colAssigned).setValue('On Shelf');
+                        invSheet.getRange(invRowIdx, colDate).setValue('');
+                        invSheet.getRange(invRowIdx, colPicked).setValue('');
+                        invSheet.getRange(invRowIdx, colChangeOut).setValue('');
+                      }
+                    }
+                  }
+
                 } else if (mut.col === 10 || hLower.includes('changed')) {
                   if (invSheet) {
                     var dVal = sheet.getRange(mut.row, mut.col).getValue();
-                    if ((isGlove || isSleeve) && typeof handleDateChangedEdit === 'function') {
-                      handleDateChangedEdit(ss, sheet, invSheet, mut.row, dVal, isGlove);
-                    } else if (isBlanket && typeof handleBlanketDateChangedEdit === 'function') {
-                      handleBlanketDateChangedEdit(ss, sheet, invSheet, mut.row, dVal);
+                    try {
+                      if ((isGlove || isSleeve) && typeof handleDateChangedEdit === 'function') {
+                        handleDateChangedEdit(ss, sheet, invSheet, mut.row, dVal, isGlove);
+                      } else if (isBlanket && typeof handleBlanketDateChangedEdit === 'function') {
+                        handleBlanketDateChangedEdit(ss, sheet, invSheet, mut.row, dVal);
+                      }
+                    } catch (dErr) {
+                      Logger.log('handleDateChangedEdit error: ' + dErr);
                     }
                   }
                 }

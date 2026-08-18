@@ -118,16 +118,16 @@ const DOCK_TO_CITY_MAP = {
   'texas dock': 'Texas'
 };
 
-const getPhysicalLocation = (location) => {
+function getPhysicalLocation(location) {
   if (!location) return '';
-  let locStr = String(location).trim();
-  const parenIdx = locStr.indexOf('(');
+  var locStr = String(location).trim();
+  var parenIdx = locStr.indexOf('(');
   if (parenIdx !== -1) {
     locStr = locStr.substring(0, parenIdx).trim();
   }
-  const mapped = DOCK_TO_CITY_MAP[locStr.toLowerCase()];
+  var mapped = DOCK_TO_CITY_MAP[locStr.toLowerCase()];
   return mapped || locStr;
-};
+}
 
 /**
  * Checks if a location value is actually an employee status, not a physical city,
@@ -136,29 +136,29 @@ const getPhysicalLocation = (location) => {
  * @param {string} location - The location string to check
  * @returns {boolean} - True if the location represents a status or contains a status suffix
  */
-const isStatusLocation = (location) => {
+function isStatusLocation(location) {
   if (!location) return false;
-  const loc = String(location).trim().toLowerCase();
+  var loc = String(location).trim().toLowerCase();
   
   // 1. Direct match (old format)
-  if (STATUS_LOCATIONS.indexOf(loc) !== -1) {
+  if (typeof STATUS_LOCATIONS !== 'undefined' && STATUS_LOCATIONS.indexOf(loc) !== -1) {
     return true;
   }
   
   // 2. Check parenthesized status suffix (new format: e.g. "Helena (Vacation)")
-  const parenIdx = loc.indexOf('(');
+  var parenIdx = loc.indexOf('(');
   if (parenIdx !== -1) {
-    const endParenIdx = loc.indexOf(')', parenIdx);
+    var endParenIdx = loc.indexOf(')', parenIdx);
     if (endParenIdx !== -1) {
-      const status = loc.substring(parenIdx + 1, endParenIdx).trim();
-      if (STATUS_LOCATIONS.indexOf(status) !== -1) {
+      var status = loc.substring(parenIdx + 1, endParenIdx).trim();
+      if (typeof STATUS_LOCATIONS !== 'undefined' && STATUS_LOCATIONS.indexOf(status) !== -1) {
         return true;
       }
     }
   }
   
   return false;
-};
+}
 
 /**
  * Checks if a string represents a non-employee value (e.g. equipment locations/statuses like "Not Repairable", "On Shelf", "In Testing", "Lost", etc.)
