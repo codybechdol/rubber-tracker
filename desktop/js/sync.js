@@ -280,14 +280,24 @@ class SyncEngine {
             this.updateStatusUI('pending', 'Sync error / Pending changes');
             this.isSyncing = false;
             return { success: false, errors: pushResult.errors };
-          } else {
+          } else if (pushResult && pushResult.success) {
             // Clear outbox once successfully sent to server
             await this.db.clearOutbox();
             this.renderModalChanges(outbox, `✅ Pushed ${outbox.length} change(s) successfully! Downloading fresh snapshot...`, 'success', false);
+          } else {
+            console.warn('Invalid server response during push:', pushResult);
+            const msg = (pushResult && pushResult.error) ? pushResult.error : 'Web App returned non-JSON response. Please verify in Google Sheets: Extensions > Apps Script > Deploy > Manage deployments, and ensure "Who has access" is set to "Anyone".';
+            this.renderModalChanges(outbox, `❌ Push failed: ${msg}`, 'error', true);
+            this.updateStatusUI('pending', 'Sync failed / Pending changes');
+            this.isSyncing = false;
+            return { success: false, error: msg };
           }
         } catch (pushErr) {
           console.warn('Sync push error:', pushErr);
-          this.renderModalChanges(outbox, `⚠️ Push notice: ${pushErr.message}. Downloading latest database...`, 'error', true);
+          this.renderModalChanges(outbox, `❌ Push error: ${pushErr.message}. Changes remain saved offline.`, 'error', true);
+          this.updateStatusUI('pending', 'Push error / Pending changes');
+          this.isSyncing = false;
+          return { success: false, error: pushErr.message };
         }
       }
 
