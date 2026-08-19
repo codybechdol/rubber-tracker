@@ -326,6 +326,20 @@ class SheetNavigator {
         return;
       }
 
+      const isSubHeader = firstCell === 'Employee' || (rowArr[3] && String(rowArr[3]).includes('Current'));
+
+      // Check if this row is an actual employee data row or a header/banner
+      const hasItemData = Boolean(
+        String(rowArr[1] || '').trim() ||
+        String(rowArr[2] || '').trim() ||
+        String(rowArr[3] || '').trim() ||
+        String(rowArr[4] || '').trim() ||
+        String(rowArr[5] || '').trim() ||
+        String(rowArr[6] || '').trim() ||
+        String(rowArr[7] || '').trim()
+      );
+
+      // Level 1: Main Section Headers
       const isClassHeader = firstCell.includes('Class ') && (firstCell.includes('Swaps') || firstCell.includes('Sleeves') || firstCell.includes('Blankets') || firstCell.includes('MACKs'));
       const isPrevEmpHeader = firstCell.includes('Previous Employee');
       const isClassReclaimHeader = firstCell.includes('Class Reclaims');
@@ -336,15 +350,27 @@ class SheetNavigator {
       else if (isClassReclaimHeader) currentSection = 'class_reclaim';
       else if (isLostHeader) currentSection = 'lost';
 
-      const isSubHeader = firstCell === 'Employee' || (rowArr[3] && String(rowArr[3]).includes('Current'));
-      const isCityHeader = firstCell.startsWith('📍') || firstCell.startsWith('📍 ') || (rowArr[0] && rowArr[0].includes('📍'));
-      const isForemanHeader = firstCell.startsWith('👤') || (rowArr[0] && rowArr[0].includes('👤'));
+      // Level 3: Foreman / Crew Lead Header
+      const isForemanHeader = !isSubHeader && (
+        firstCell.includes('👤') ||
+        firstCell.includes('👷') ||
+        firstCell.toLowerCase().includes('foreman') ||
+        (String(rowArr[0] || '').startsWith('   ') && !hasItemData)
+      );
+
+      // Level 2: Location Header
+      const isCityHeader = !isSubHeader && !isForemanHeader && (
+        firstCell.includes('📍') ||
+        firstCell.includes('🔍') ||
+        firstCell.toLowerCase().includes('location') ||
+        (!hasItemData && !isClassHeader && !isPrevEmpHeader && !isClassReclaimHeader && !isLostHeader)
+      );
 
       if (this.searchTerm) {
         const rowMatches = visibleColIndices.some(c => 
           String(rowArr[c] || '').toLowerCase().includes(this.searchTerm)
         );
-        if (!rowMatches && !isClassHeader && !isPrevEmpHeader && !isClassReclaimHeader && !isLostHeader && !isCityHeader) return;
+        if (!rowMatches && !isClassHeader && !isPrevEmpHeader && !isClassReclaimHeader && !isLostHeader && !isCityHeader && !isForemanHeader) return;
       }
 
       visibleRowCount++;
@@ -353,33 +379,55 @@ class SheetNavigator {
 
       const colSpan = visibleColIndices.length;
 
+      // 1. Level 1: Main Section Headers (Primary Banner)
       if (isClassHeader) {
-        html += `<td colspan="${colSpan}" style="font-size: 14px; font-weight: 800; color: #93c5fd; background: linear-gradient(90deg, #1e3a8a 0%, #1e293b 100%); padding: 8px 14px; text-align: left; border-top: 2px solid #3b82f6; border-bottom: 2px solid #3b82f6;">${this.escapeHtml(firstCell)}</td></tr>`;
+        html += `<td colspan="${colSpan}" style="font-size: 13.5px; font-weight: 800; color: #93c5fd; background: linear-gradient(90deg, #1e3a8a 0%, #0f172a 100%); padding: 9px 14px; text-align: left; border-top: 2px solid #3b82f6; border-bottom: 2px solid #3b82f6; letter-spacing: 0.5px; text-transform: uppercase;">${this.escapeHtml(firstCell)}</td></tr>`;
         return;
       }
 
       if (isPrevEmpHeader) {
-        html += `<td colspan="${colSpan}" style="font-size: 14px; font-weight: 800; color: #fca5a5; background: linear-gradient(90deg, #7f1d1d 0%, #1e293b 100%); padding: 8px 14px; text-align: left; border-top: 2px solid #ef4444; border-bottom: 2px solid #ef4444;">${this.escapeHtml(firstCell)}</td></tr>`;
+        html += `<td colspan="${colSpan}" style="font-size: 13.5px; font-weight: 800; color: #fca5a5; background: linear-gradient(90deg, #7f1d1d 0%, #0f172a 100%); padding: 9px 14px; text-align: left; border-top: 2px solid #ef4444; border-bottom: 2px solid #ef4444; letter-spacing: 0.5px; text-transform: uppercase;">${this.escapeHtml(firstCell)}</td></tr>`;
         return;
       }
 
       if (isClassReclaimHeader) {
-        html += `<td colspan="${colSpan}" style="font-size: 14px; font-weight: 800; color: #fdba74; background: linear-gradient(90deg, #7c2d12 0%, #1e293b 100%); padding: 8px 14px; text-align: left; border-top: 2px solid #f97316; border-bottom: 2px solid #f97316;">${this.escapeHtml(firstCell)}</td></tr>`;
+        html += `<td colspan="${colSpan}" style="font-size: 13.5px; font-weight: 800; color: #fdba74; background: linear-gradient(90deg, #7c2d12 0%, #0f172a 100%); padding: 9px 14px; text-align: left; border-top: 2px solid #f97316; border-bottom: 2px solid #f97316; letter-spacing: 0.5px; text-transform: uppercase;">${this.escapeHtml(firstCell)}</td></tr>`;
         return;
       }
 
       if (isLostHeader) {
-        html += `<td colspan="${colSpan}" style="font-size: 14px; font-weight: 800; color: #fde047; background: linear-gradient(90deg, #713f12 0%, #1e293b 100%); padding: 8px 14px; text-align: left; border-top: 2px solid #eab308; border-bottom: 2px solid #eab308;">${this.escapeHtml(firstCell)}</td></tr>`;
+        html += `<td colspan="${colSpan}" style="font-size: 13.5px; font-weight: 800; color: #fde047; background: linear-gradient(90deg, #713f12 0%, #0f172a 100%); padding: 9px 14px; text-align: left; border-top: 2px solid #eab308; border-bottom: 2px solid #eab308; letter-spacing: 0.5px; text-transform: uppercase;">${this.escapeHtml(firstCell)}</td></tr>`;
         return;
       }
 
+      // 2. Level 2: Location Header (Clear & Distinct, Subordinate to Main Class Header)
       if (isCityHeader) {
-        html += `<td colspan="${colSpan}" style="font-weight: 800; color: #c4b5fd; background-color: rgba(139, 92, 246, 0.2); font-size: 13px; text-align: left; padding: 6px 12px; border-left: 3px solid #8b5cf6;">${this.escapeHtml(firstCell)}</td></tr>`;
+        let cleanCity = firstCell.replace(/^[📍🔍\s]+/, '').trim();
+        html += `<td colspan="${colSpan}" style="font-size: 12.5px; font-weight: 700; color: #c7d2fe; background: linear-gradient(90deg, rgba(99, 102, 241, 0.16) 0%, rgba(15, 23, 42, 0.6) 100%); padding: 7px 14px; text-align: left; border-left: 4px solid #6366f1; border-top: 1px solid rgba(99, 102, 241, 0.2); border-bottom: 1px solid rgba(99, 102, 241, 0.2);">
+          <span style="font-size: 13px; margin-right: 6px;">📍</span>
+          <span style="letter-spacing: 0.3px;">${this.escapeHtml(cleanCity || firstCell)}</span>
+        </td></tr>`;
         return;
       }
 
+      // 3. Level 3: Foreman / Crew Lead Header (Subtle & Indented, Subordinate to Location)
       if (isForemanHeader) {
-        html += `<td colspan="${colSpan}" style="font-weight: 700; color: #f472b6; background-color: rgba(244, 114, 182, 0.15); font-size: 12px; text-align: left; padding: 6px 12px; border-left: 3px solid #ec4899;">${this.escapeHtml(firstCell)}</td></tr>`;
+        let cleanForeman = firstCell.replace(/^[👤👷\s]+/, '').trim();
+        html += `<td colspan="${colSpan}" style="font-size: 11.5px; font-weight: 600; color: #f472b6; background-color: rgba(255, 255, 255, 0.02); padding: 5px 12px 5px 32px; text-align: left; border-left: 2px solid rgba(244, 114, 182, 0.4); border-bottom: 1px solid rgba(255, 255, 255, 0.04);">
+          <span style="font-size: 12px; margin-right: 5px; opacity: 0.9;">👤</span>
+          <span style="color: var(--text-secondary); font-size: 11px; margin-right: 4px;">Foreman:</span>
+          <span style="font-weight: 700; color: #f472b6;">${this.escapeHtml(cleanForeman || firstCell)}</span>
+        </td></tr>`;
+        return;
+      }
+
+      // 4. Subheader (Table column names)
+      if (isSubHeader) {
+        visibleColIndices.forEach((c, idx) => {
+          let val = rowArr[c] !== undefined ? String(rowArr[c]).trim() : '';
+          html += `<td style="font-weight: 700; color: #93c5fd; background-color: #1e293b; font-size: 12px; text-align: center; border-bottom: 1px solid var(--border-color);">${this.escapeHtml(val)}</td>`;
+        });
+        html += `</tr>`;
         return;
       }
 
