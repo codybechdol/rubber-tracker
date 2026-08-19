@@ -166,7 +166,7 @@ class LocalDatabase {
           const pickItemNum = String(table.rawGrid[rowIdx][colPickList] || '').trim();
           const daysLeft = String(table.rawGrid[rowIdx][5] || '').trim().toUpperCase();
 
-          const isPrevEmpRow = (daysLeft === 'PREV EMP' || (!pickItemNum || pickItemNum === '—' || pickItemNum === '-'));
+          const isPrevEmpRow = (daysLeft === 'PREV EMP' || daysLeft.includes('PREV'));
           const isLostRow = (daysLeft === 'LOST-LOCATE');
 
           // Find matching inventory table (gloves, sleeves, blankets, macks)

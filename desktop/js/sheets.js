@@ -485,7 +485,7 @@ class SheetNavigator {
             let vLower = val.toLowerCase().trim();
 
             // Self-healing / section detection for Previous Employee rows:
-            const isPrevEmpRow = currentSection === 'prev_emp' || String(rowArr[5] || '').toUpperCase().includes('PREV EMP') || (String(rowArr[6] || '').trim() === '—' && currentSection !== 'lost');
+            const isPrevEmpRow = currentSection === 'prev_emp' || String(rowArr[5] || '').toUpperCase().includes('PREV EMP');
             if (isPrevEmpRow) {
               const pVal = String(rowArr[8] || '').trim().toUpperCase();
               const isChecked = (pVal === 'TRUE' || pVal === '1' || rowArr[8] === true);
