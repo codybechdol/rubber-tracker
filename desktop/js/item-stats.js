@@ -1,6 +1,6 @@
 /**
  * item-stats.js - Item Lifecycle Analytics & Visualizer Engine for Desktop App
- * Computes lifespan, time breakdown (field vs shelf vs testing vs packed for testing vs packed for delivery),
+ * Computes lifespan, time breakdown (field vs shelf vs testing vs packed for testing vs packed for delivery vs lost),
  * test turnaround cycles, and renders interactive visual timeline steppers.
  */
 
@@ -53,17 +53,15 @@ class ItemStatsEngine {
     const sLoc = String(location || '').toLowerCase().trim();
     const sStatus = String(status || '').toLowerCase().trim();
 
-    // 1. Retired / Failed
+    // 1. Retired / Failed (End of life only)
     if (
       sAssigned === 'failed rubber' ||
       sAssigned === 'failed' ||
       sAssigned === 'not repairable' ||
       sAssigned === 'destroyed' ||
-      sAssigned === 'lost' ||
-      sAssigned === 'previous employee' ||
       sStatus === 'failed rubber' ||
       sStatus === 'failed' ||
-      sStatus === 'lost' ||
+      sStatus === 'not repairable' ||
       sStatus === 'destroyed'
     ) {
       return {
@@ -75,7 +73,25 @@ class ItemStatsEngine {
       };
     }
 
-    // 2. Packed For Testing (Truck staging for testing lab)
+    // 2. Lost / Missing (Location unknown / Needs locating)
+    if (
+      sAssigned === 'lost' ||
+      sLoc === 'lost' ||
+      sStatus === 'lost' ||
+      sAssigned.includes('lost') ||
+      sLoc.includes('lost') ||
+      sStatus.includes('lost')
+    ) {
+      return {
+        key: 'LOST',
+        label: 'Lost (Missing)',
+        badgeClass: 'badge-lost',
+        color: '#eab308',
+        icon: '🔍'
+      };
+    }
+
+    // 3. Packed For Testing (Truck staging for testing lab)
     if (
       sAssigned === 'packed for testing' ||
       sStatus === 'packed for testing' ||
@@ -90,7 +106,7 @@ class ItemStatsEngine {
       };
     }
 
-    // 3. Packed For Delivery (Truck staging for field delivery)
+    // 4. Packed For Delivery (Truck staging for field delivery)
     if (
       sAssigned === 'packed for delivery' ||
       sStatus === 'packed for delivery' ||
@@ -106,7 +122,7 @@ class ItemStatsEngine {
       };
     }
 
-    // 4. In Testing (Lab)
+    // 5. In Testing (Lab)
     if (
       sAssigned === 'in testing' ||
       sAssigned === 'arnett' ||
@@ -129,15 +145,21 @@ class ItemStatsEngine {
       };
     }
 
-    // 5. On Shelf / Storage
+    // 6. On Shelf / Storage / Unassigned
     if (
       sAssigned === 'on shelf' ||
       sAssigned === 'storage' ||
       sAssigned === 'available' ||
       sAssigned === 'unassigned' ||
       sAssigned === 'shelf' ||
+      sAssigned === 'previous employee' ||
+      sAssigned === 'n/a' ||
+      sAssigned === 'none' ||
+      sAssigned === 'unknown' ||
+      !sAssigned ||
       sStatus === 'on shelf' ||
-      sStatus === 'in stock'
+      sStatus === 'in stock' ||
+      (sLoc === 'helena' && (!sAssigned || sAssigned === 'n/a' || sAssigned === 'helena'))
     ) {
       return {
         key: 'SHELF',
@@ -148,7 +170,7 @@ class ItemStatsEngine {
       };
     }
 
-    // 6. Default: Field Service (Assigned to Lineman)
+    // 7. Default: Field Service (Assigned to Lineman)
     return {
       key: 'FIELD',
       label: 'Field Service (Assigned)',
@@ -180,6 +202,7 @@ class ItemStatsEngine {
     let testingDays = 0;
     let packedTestingDays = 0;
     let packedDeliveryDays = 0;
+    let lostDays = 0;
     let retiredDays = 0;
 
     let testCyclesCount = 0;
@@ -230,7 +253,7 @@ class ItemStatsEngine {
       if (state.key === 'FIELD') {
         fieldDays += days;
         const linemanName = assignedTo.trim();
-        if (linemanName) {
+        if (linemanName && linemanName.toLowerCase() !== 'n/a' && linemanName.toLowerCase() !== 'unknown') {
           linemenMap[linemanName] = (linemenMap[linemanName] || 0) + days;
         }
       } else if (state.key === 'SHELF') {
@@ -242,6 +265,8 @@ class ItemStatsEngine {
         packedTestingDays += days;
       } else if (state.key === 'PACKED_DELIVERY') {
         packedDeliveryDays += days;
+      } else if (state.key === 'LOST') {
+        lostDays += days;
       } else if (state.key === 'RETIRED') {
         retiredDays += days;
       }
@@ -263,13 +288,14 @@ class ItemStatsEngine {
     }
 
     const lastMilestone = milestones[milestones.length - 1];
-    const totalDays = Math.max(1, fieldDays + shelfDays + testingDays + packedTestingDays + packedDeliveryDays);
+    const totalDays = Math.max(1, fieldDays + shelfDays + testingDays + packedTestingDays + packedDeliveryDays + lostDays);
 
     const fieldPct = Math.round((fieldDays / totalDays) * 100);
     const shelfPct = Math.round((shelfDays / totalDays) * 100);
     const testingPct = Math.round((testingDays / totalDays) * 100);
     const packedTestingPct = Math.round((packedTestingDays / totalDays) * 100);
-    const packedDeliveryPct = Math.max(0, 100 - fieldPct - shelfPct - testingPct - packedTestingPct);
+    const packedDeliveryPct = Math.round((packedDeliveryDays / totalDays) * 100);
+    const lostPct = Math.max(0, 100 - fieldPct - shelfPct - testingPct - packedTestingPct - packedDeliveryPct);
 
     // Linemen list sorted by longest days
     const linemenList = Object.keys(linemenMap).map(name => {
@@ -302,12 +328,14 @@ class ItemStatsEngine {
       packedTestingPct: packedTestingPct,
       packedDeliveryDays: packedDeliveryDays,
       packedDeliveryPct: packedDeliveryPct,
+      lostDays: lostDays,
+      lostPct: lostPct,
       testCyclesCount: testCyclesCount,
       linemenList: linemenList,
       milestones: milestones,
       currentHolder: isRetired ? 'Retired' : (lastMilestone ? lastMilestone.assignedTo : 'Unassigned'),
       currentLocation: lastMilestone ? lastMilestone.location : 'Helena',
-      currentState: isRetired ? { key: 'RETIRED', label: 'Retired', color: '#ef4444' } : (lastMilestone ? lastMilestone.state : { key: 'SHELF', label: 'On Shelf', color: '#f59e0b' })
+      currentState: isRetired ? { key: 'RETIRED', label: 'Retired / Failed', color: '#ef4444' } : (lastMilestone ? lastMilestone.state : { key: 'SHELF', label: 'On Shelf', color: '#f59e0b' })
     };
   }
 
@@ -321,6 +349,7 @@ class ItemStatsEngine {
           ${stats.testingPct > 0 ? `<div style="width: ${stats.testingPct}%; background-color: #a855f7;" title="In Testing: ${stats.testingDays}d (${stats.testingPct}%)"></div>` : ''}
           ${stats.packedTestingPct > 0 ? `<div style="width: ${stats.packedTestingPct}%; background-color: #f97316;" title="Packed For Testing: ${stats.packedTestingDays}d (${stats.packedTestingPct}%)"></div>` : ''}
           ${stats.packedDeliveryPct > 0 ? `<div style="width: ${stats.packedDeliveryPct}%; background-color: #06b6d4;" title="Packed For Delivery: ${stats.packedDeliveryDays}d (${stats.packedDeliveryPct}%)"></div>` : ''}
+          ${stats.lostPct > 0 ? `<div style="width: ${stats.lostPct}%; background-color: #eab308;" title="Lost / Missing: ${stats.lostDays}d (${stats.lostPct}%)"></div>` : ''}
           ${stats.isRetired ? `<div style="width: 4px; background-color: #ef4444;" title="Retired / Failed"></div>` : ''}
         </div>
       </div>
@@ -345,6 +374,10 @@ class ItemStatsEngine {
         ${stats.packedDeliveryDays > 0 ? `
           <span style="color: var(--text-muted);">•</span>
           <span title="Packed For Delivery (Truck)" style="color: #22d3ee;">🚚 <strong>Packed Delivery:</strong> ${stats.packedDeliveryDays}d (${stats.packedDeliveryPct}%)</span>
+        ` : ''}
+        ${stats.lostDays > 0 ? `
+          <span style="color: var(--text-muted);">•</span>
+          <span title="Time marked as Lost / Missing" style="color: #facc15;">🔍 <strong>Lost:</strong> ${stats.lostDays}d (${stats.lostPct}%)</span>
         ` : ''}
         <span style="color: var(--text-muted);">•</span>
         <span title="Completed Turnaround Test Cycles">🔄 <strong>${stats.testCyclesCount}</strong> ${stats.testCyclesCount === 1 ? 'Test Cycle' : 'Test Cycles'}</span>
@@ -504,7 +537,7 @@ class ItemStatsEngine {
               <div style="display: flex; align-items: center; gap: 8px;">
                 <span style="font-size: 15px;">${m.state.icon}</span>
                 <span style="font-weight: 700; font-size: 13px; color: var(--text-primary);">${m.state.label}</span>
-                ${m.isCurrent ? `<span class="brand-badge" style="background: rgba(34, 197, 94, 0.2); color: #4ade80; font-size: 10px;">Current</span>` : ''}
+                ${m.isCurrent ? `<span class="brand-badge" style="background: rgba(234, 179, 8, 0.2); color: #facc15; font-size: 10px;">Current</span>` : ''}
               </div>
               <span style="font-size: 11px; font-weight: 600; color: #60a5fa;">${m.durationFormatted}</span>
             </div>
