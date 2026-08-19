@@ -329,18 +329,42 @@ class ItemStatsEngine {
 
     const groupCol = headers.find(h => {
       const hl = h.toLowerCase();
-      return hl.includes('item') || hl.includes('serial') || hl.includes('name');
+      return (
+        hl.includes('item') ||
+        hl.includes('serial') ||
+        hl.includes('glove') ||
+        hl.includes('sleeve') ||
+        hl.includes('blanket') ||
+        hl.includes('mack') ||
+        hl.includes('name')
+      );
     }) || headers[1] || headers[0];
 
-    const groupRows = rows.filter(r => String(r[groupCol] || '').trim() === String(itemKey).trim());
-    const stats = this.analyzeLifecycle(itemKey, groupRows);
+    const cleanItemKey = String(itemKey || '').trim();
+    const groupRows = rows.filter(r => {
+      const val = String(r[groupCol] || '').trim();
+      if (val === cleanItemKey) return true;
+      const numVal = parseInt(val, 10);
+      const numKey = parseInt(cleanItemKey, 10);
+      if (!isNaN(numVal) && !isNaN(numKey) && String(numVal) === val && String(numKey) === cleanItemKey && numVal === numKey) return true;
+      return false;
+    });
+
+    const stats = this.analyzeLifecycle(cleanItemKey, groupRows);
+    const sheetTitle = sheetKey.replace('_history', '').replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
 
     if (titleEl) {
-      titleEl.innerHTML = `<span>📊</span> Item #${itemKey} Complete Lifecycle Dossier`;
+      titleEl.innerHTML = `<span>📊</span> ${sheetTitle} #${cleanItemKey} Lifecycle Dossier`;
     }
 
     if (!stats) {
-      body.innerHTML = `<div style="padding: 30px; text-align: center; color: var(--text-muted);">No history data found for Item #${itemKey}</div>`;
+      body.innerHTML = `
+        <div style="padding: 40px; text-align: center; color: var(--text-muted);">
+          <div style="font-size: 32px; margin-bottom: 8px;">📜</div>
+          <div style="font-size: 15px; font-weight: 600; color: var(--text-primary);">No history records found for ${sheetTitle} #${cleanItemKey}</div>
+          <div style="font-size: 12px; margin-top: 6px;">Sync with Google Sheets or check the <strong>📜 History Records</strong> workspace.</div>
+        </div>
+      `;
       modal.classList.add('active');
       return;
     }

@@ -937,11 +937,17 @@ class SheetNavigator {
           }
         }
 
-        // Equipment Sheet Formatting (Clickable Item # for Lifecycle Dossier)
-        if (['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(this.currentSheetKey) && (hLower === 'item #' || hLower === 'item' || hLower === 'serial #' || hLower === 'esl id')) {
+        // Equipment Sheet Formatting (Clickable Glove / Sleeve / Item # for Lifecycle Dossier)
+        const isEquipmentSheet = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(this.currentSheetKey);
+        const isPrimaryItemCol = ['glove', 'glove #', 'sleeve', 'sleeve #', 'blanket', 'blanket #', 'mack', 'mack #', 'item #', 'item', 'serial #'].includes(hLower);
+
+        if (isEquipmentSheet && isPrimaryItemCol && val) {
           const itemKey = val;
           const histKey = this.currentSheetKey + '_history';
-          customCellHtml = `<span style="font-weight: 700; color: #60a5fa; cursor: pointer; text-decoration: underline dotted;" title="Click to inspect complete lifecycle dossier" onclick="window.itemStatsEngine ? window.itemStatsEngine.openDossierModal('${this.escapeHtml(itemKey)}', '${this.escapeHtml(histKey)}') : null">${this.escapeHtml(val)}</span>`;
+          customCellHtml = `<span style="font-weight: 700; color: #60a5fa; cursor: pointer; text-decoration: underline dotted;" title="Click to inspect lifecycle dossier for ${this.escapeHtml(h)} #${this.escapeHtml(itemKey)}" onclick="window.itemStatsEngine ? window.itemStatsEngine.openDossierModal('${this.escapeHtml(itemKey)}', '${this.escapeHtml(histKey)}') : null">${this.escapeHtml(val)}</span>`;
+        } else if (isEquipmentSheet && hLower === 'esl id' && val) {
+          // ESL ID is an electronic tracking tag barcode (not linked to item lifecycle)
+          customCellHtml = `<span style="font-family: monospace; font-size: 11px; color: #94a3b8; font-weight: 500;">${this.escapeHtml(val)}</span>`;
         }
 
         // Employee Sheet Formatting
