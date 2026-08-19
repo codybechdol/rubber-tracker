@@ -96,7 +96,9 @@ function _buildGloveManagerMenu() {
           .addItem('🧱 View MACKs', 'openMacksSheet')
           .addItem('⚡ View Grounds', 'openGroundsSheet')
           .addItem('🗄️ Archive Lost & Failed Items', 'showArchiveLostFailedDialog')
-          .addItem('↩️ Restore Item from Archive', 'showRestoreFromArchiveDialog'))
+          .addItem('↩️ Restore Item from Archive', 'showRestoreFromArchiveDialog')
+          .addSeparator()
+          .addItem('🧹 Clean Up Located Items & Formatting', 'menuCleanupLocatedItems'))
 
         .addSubMenu(ui.createMenu('🛒 Purchase Orders')
           .addItem('📝 Create Purchase Order', 'showPurchaseOrderDialog')

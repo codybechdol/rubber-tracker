@@ -12087,9 +12087,15 @@ function cleanupLocatedItemsFromSwaps() {
         if (notes.indexOf('LOST-LOCATE') !== -1 || notes.indexOf('LOST LOCATE') !== -1 || notes === 'LOCATE') {
           invSheet.getRange(r + 1, cfg.notesCol).setValue('');
         }
-        var rowRange = invSheet.getRange(r + 1, 1, 1, Math.min(invSheet.getLastColumn() || 12, 12));
-        var bg = rowRange.getBackground();
-        if (bg && (bg.toLowerCase() === '#ffccbc' || bg.toLowerCase() === '#f87171' || bg.toLowerCase() === '#ef4444' || bg.toLowerCase().startsWith('#ffcc'))) {
+        var numCols = Math.min(invSheet.getLastColumn() || 12, 12);
+        var rowRange = invSheet.getRange(r + 1, 1, 1, numCols);
+        var backgrounds = rowRange.getBackgrounds()[0];
+        var hasHighlight = backgrounds.some(function(b) {
+          if (!b) return false;
+          var bLower = String(b).toLowerCase();
+          return bLower === '#ffccbc' || bLower === '#f87171' || bLower === '#ef4444' || bLower.startsWith('#ffcc') || bLower.startsWith('#fca') || bLower.startsWith('#f87');
+        });
+        if (hasHighlight) {
           rowRange.setBackground(null);
           invSheet.getRange(r + 1, cfg.notesCol).setFontWeight('normal').setFontColor(null);
         }
@@ -12111,6 +12117,14 @@ function cleanupLocatedItemsFromSwaps() {
 
   logEvent('cleanupLocatedItemsFromSwaps: Removed ' + cleanedCount + ' located items from swap sheets', 'INFO');
   return cleanedCount;
+}
+
+/**
+ * Menu item wrapper for manual cleanup of located items & formatting.
+ */
+function menuCleanupLocatedItems() {
+  var count = cleanupLocatedItemsFromSwaps();
+  SpreadsheetApp.getActiveSpreadsheet().toast('Cleaned up ' + count + ' located item(s) and cleared lost formatting.', '🧹 Clean Up Complete', 5);
 }
 
 /**
