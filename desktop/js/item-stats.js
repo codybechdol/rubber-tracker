@@ -48,20 +48,23 @@ class ItemStatsEngine {
     return `${yrs} yrs (${days}d)`;
   }
 
-  classifyState(assignedTo, location, notes) {
+  classifyState(assignedTo, location, notes, status) {
     const sAssigned = String(assignedTo || '').toLowerCase().trim();
     const sLoc = String(location || '').toLowerCase().trim();
-    const sNotes = String(notes || '').toLowerCase().trim();
-    const combo = `${sAssigned} ${sLoc} ${sNotes}`;
+    const sStatus = String(status || '').toLowerCase().trim();
 
     // 1. Retired / Failed
     if (
-      combo.includes('failed rubber') ||
-      combo.includes('failed') ||
-      combo.includes('not repairable') ||
-      combo.includes('destroyed') ||
-      combo.includes('lost') ||
-      sAssigned === 'previous employee'
+      sAssigned === 'failed rubber' ||
+      sAssigned === 'failed' ||
+      sAssigned === 'not repairable' ||
+      sAssigned === 'destroyed' ||
+      sAssigned === 'lost' ||
+      sAssigned === 'previous employee' ||
+      sStatus === 'failed rubber' ||
+      sStatus === 'failed' ||
+      sStatus === 'lost' ||
+      sStatus === 'destroyed'
     ) {
       return {
         key: 'RETIRED',
@@ -72,31 +75,17 @@ class ItemStatsEngine {
       };
     }
 
-    // 2. Testing / Lab
+    // 2. Transit / Truck
     if (
-      combo.includes('in testing') ||
-      combo.includes('arnett') ||
-      combo.includes('jm test') ||
-      combo.includes('lab') ||
-      sLoc.includes('testing') ||
-      sAssigned.includes('testing')
-    ) {
-      return {
-        key: 'TESTING',
-        label: 'In Testing (Lab)',
-        badgeClass: 'badge-testing',
-        color: '#a855f7',
-        icon: '🔬'
-      };
-    }
-
-    // 3. Transit / Truck
-    if (
-      combo.includes('packed for delivery') ||
-      combo.includes('packed for testing') ||
-      combo.includes("cody's truck") ||
-      combo.includes('truck') ||
-      combo.includes('transit')
+      sAssigned === 'packed for delivery' ||
+      sAssigned === 'packed for testing' ||
+      sAssigned === "cody's truck" ||
+      sAssigned === 'truck' ||
+      sAssigned === 'transit' ||
+      sLoc === "cody's truck" ||
+      sStatus === 'packed for delivery' ||
+      sStatus === 'packed for testing' ||
+      sStatus === 'ready for delivery'
     ) {
       return {
         key: 'TRANSIT',
@@ -107,14 +96,38 @@ class ItemStatsEngine {
       };
     }
 
+    // 3. Testing / Lab
+    if (
+      sAssigned === 'in testing' ||
+      sAssigned === 'arnett' ||
+      sAssigned === 'jm test' ||
+      sAssigned === 'arnett / jm test' ||
+      sAssigned === 'lab' ||
+      sAssigned === 'testing' ||
+      sLoc === 'arnett / jm test' ||
+      sLoc === 'arnett' ||
+      sLoc === 'jm test' ||
+      sStatus === 'in testing' ||
+      sStatus === 'ready for test'
+    ) {
+      return {
+        key: 'TESTING',
+        label: 'In Testing (Lab)',
+        badgeClass: 'badge-testing',
+        color: '#a855f7',
+        icon: '🔬'
+      };
+    }
+
     // 4. Shelf / Storage
     if (
-      combo.includes('on shelf') ||
-      combo.includes('storage') ||
-      combo.includes('available') ||
-      combo.includes('unassigned') ||
-      sAssigned === 'helena' ||
-      sAssigned === 'shelf'
+      sAssigned === 'on shelf' ||
+      sAssigned === 'storage' ||
+      sAssigned === 'available' ||
+      sAssigned === 'unassigned' ||
+      sAssigned === 'shelf' ||
+      sStatus === 'on shelf' ||
+      sStatus === 'in stock'
     ) {
       return {
         key: 'SHELF',
@@ -125,7 +138,7 @@ class ItemStatsEngine {
       };
     }
 
-    // 5. Field Service (Assigned to Lineman)
+    // 5. Default: Field Service (Assigned to Lineman)
     return {
       key: 'FIELD',
       label: 'Field Service (Assigned)',
@@ -176,8 +189,9 @@ class ItemStatsEngine {
       const assignedTo = current['Assigned To'] || current['Employee Name'] || current['Employee'] || '';
       const location = current['Location'] || '';
       const notes = current['Notes'] || current['Note'] || '';
+      const status = current['Status'] || '';
 
-      const state = this.classifyState(assignedTo, location, notes);
+      const state = this.classifyState(assignedTo, location, notes, status);
 
       let endDate;
       if (next) {
