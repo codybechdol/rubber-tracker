@@ -286,6 +286,8 @@ class SheetNavigator {
           } else if (isStatusCol) {
             if (val === 'Ready For Delivery' || val.includes('Ready')) {
               customContent = `<span class="badge" style="background-color: #15803d; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">🚚 ${this.escapeHtml(val)}</span>`;
+            } else if (val === 'Assigned' || val.includes('Assigned')) {
+              customContent = `<span class="badge" style="background-color: #16a34a; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;">✅ ${this.escapeHtml(val)}</span>`;
             } else if (val === 'In Stock' || val.includes('In Stock')) {
               customContent = `<span class="badge" style="background-color: #0369a1; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">📦 ${this.escapeHtml(val)}</span>`;
             } else if (val === 'OVERDUE') {
@@ -349,6 +351,11 @@ class SheetNavigator {
           header: header,
           value: newVal
         });
+
+        // Re-render swap grid if Date Changed was edited to update status pill immediately
+        if (header && (header.toLowerCase().includes('changed') || header.toLowerCase().includes('date'))) {
+          this.renderCurrentSheet();
+        }
       });
 
       td.addEventListener('keydown', (e) => {

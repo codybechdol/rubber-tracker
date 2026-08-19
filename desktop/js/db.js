@@ -127,6 +127,8 @@ class LocalDatabase {
           const headerLower = String(mut.header || '').toLowerCase();
           const isPickedCol = headerLower.includes('picked') || colIdx === colPick;
 
+          const isDateChangedCol = headerLower.includes('changed') || colIdx === 9;
+
           if (isPickedCol) {
             const isChecked = (mut.value === true || mut.value === 'TRUE' || mut.value === 'true');
             const empName = String(table.rawGrid[rowIdx][0] || '').trim();
@@ -181,6 +183,87 @@ class LocalDatabase {
                   invRow['Picked For'] = '';
                   invRow['Change Out Date'] = '';
                 }
+              }
+            }
+          } else if (isDateChangedCol) {
+            const hasDate = (mut.value !== null && mut.value !== undefined && String(mut.value).trim() !== '');
+            const empName = String(table.rawGrid[rowIdx][0] || '').trim();
+            const oldItemNum = String(table.rawGrid[rowIdx][1] || '').trim();
+            const pickItemNum = String(table.rawGrid[rowIdx][colPickList] || '').trim();
+
+            if (hasDate) {
+              // Update status badge and days left on swap sheet
+              if (colStat !== -1) {
+                table.rawGrid[rowIdx][colStat] = 'Assigned';
+              }
+              if (table.rawGrid[rowIdx][5] !== undefined) {
+                table.rawGrid[rowIdx][5] = 'Assigned';
+              }
+
+              // Look up employee location from employees table
+              let empLoc = 'Helena';
+              const empTable = this.snapshot.tables['employees'];
+              if (empTable && empTable.rows) {
+                const emp = empTable.rows.find(e => String(e['Name'] || e['Employee Name'] || '').trim().toLowerCase() === empName.toLowerCase());
+                if (emp && emp['Location']) empLoc = emp['Location'];
+              }
+
+              // Update Pick List item in inventory table (New sleeve/glove/blanket/mack)
+              let invTableKey = 'gloves';
+              if (sheetNameLower.includes('sleeve')) invTableKey = 'sleeves';
+              else if (sheetNameLower.includes('blanket')) invTableKey = 'blankets';
+              else if (sheetNameLower.includes('mack')) invTableKey = 'macks';
+
+              const invTable = this.snapshot.tables[invTableKey];
+              if (invTable && invTable.rows) {
+                // 1. Pick list item -> Assigned
+                if (pickItemNum && pickItemNum !== '—' && pickItemNum !== '-') {
+                  const pickRow = invTable.rows.find(r => {
+                    const itemKeys = Object.keys(r);
+                    const firstKey = itemKeys[0] || 'Item #';
+                    const iNum = String(r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['ESL ID'] || r['Serial #'] || r[firstKey] || '').trim();
+                    const esl = String(r['ESL ID'] || '').trim();
+                    return iNum === pickItemNum || esl === pickItemNum;
+                  });
+                  if (pickRow) {
+                    pickRow['Location'] = empLoc;
+                    pickRow['Status'] = 'Assigned';
+                    pickRow['Assigned To'] = empName;
+                    pickRow['Date Assigned'] = String(mut.value);
+                    pickRow['Picked For'] = ''; // Clear Picked For note!
+
+                    let months = 12;
+                    if (sheetNameLower.includes('glove')) months = (empLoc.toLowerCase() === 'helena' ? 3 : 6);
+                    pickRow['Change Out Date'] = addMonths(String(mut.value), months);
+                  }
+                }
+
+                // 2. Old item -> Ready For Test
+                if (oldItemNum && oldItemNum !== '—' && oldItemNum !== '-') {
+                  const oldRow = invTable.rows.find(r => {
+                    const itemKeys = Object.keys(r);
+                    const firstKey = itemKeys[0] || 'Item #';
+                    const iNum = String(r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['ESL ID'] || r['Serial #'] || r[firstKey] || '').trim();
+                    const esl = String(r['ESL ID'] || '').trim();
+                    return iNum === oldItemNum || esl === oldItemNum;
+                  });
+                  if (oldRow) {
+                    oldRow['Location'] = "Cody's Truck";
+                    oldRow['Status'] = 'Ready For Test';
+                    oldRow['Assigned To'] = 'Packed For Testing';
+                    oldRow['Date Assigned'] = String(mut.value);
+                    oldRow['Picked For'] = '';
+
+                    let months = 12;
+                    if (sheetNameLower.includes('glove')) months = 3;
+                    oldRow['Change Out Date'] = addMonths(String(mut.value), months);
+                  }
+                }
+              }
+            } else {
+              // Date Changed cleared -> Revert to Ready For Delivery
+              if (colStat !== -1) {
+                table.rawGrid[rowIdx][colStat] = 'Ready For Delivery 🚚';
               }
             }
           }

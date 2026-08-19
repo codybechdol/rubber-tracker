@@ -521,8 +521,11 @@ function applyBatchSyncMutations(mutations) {
                   }
 
                 } else if (mut.col === 10 || hLower === 'date changed' || hLower.includes('changed')) {
+                  var dVal = sheet.getRange(mut.row, mut.col).getValue();
+                  var hasDate = (dVal !== null && dVal !== undefined && String(dVal).trim() !== '');
+
+                  // 1. Run standard Apps Script trigger handler
                   if (invSheet) {
-                    var dVal = sheet.getRange(mut.row, mut.col).getValue();
                     try {
                       if ((isGlove || isSleeve) && typeof handleDateChangedEdit === 'function') {
                         handleDateChangedEdit(ss, sheet, invSheet, mut.row, dVal, isGlove);
@@ -533,6 +536,115 @@ function applyBatchSyncMutations(mutations) {
                       }
                     } catch (dErr) {
                       Logger.log('handleDateChangedEdit error: ' + dErr);
+                    }
+                  }
+
+                  // 2. Direct guarantee fallback update
+                  var empName = String(sheet.getRange(mut.row, 1).getValue() || '').trim();
+                  var oldItemNum = String(sheet.getRange(mut.row, 2).getValue() || '').trim();
+                  var pickListNum = String(sheet.getRange(mut.row, 7).getValue() || '').trim();
+
+                  if (hasDate) {
+                    // Update Swap Sheet Status and Days Left
+                    sheet.getRange(mut.row, 8).setValue('Assigned');
+                    sheet.getRange(mut.row, 6).setValue('Assigned');
+
+                    // Look up employee location
+                    var empLocation = 'Helena';
+                    var empSheet = ss.getSheetByName(typeof SHEET_EMPLOYEES !== 'undefined' ? SHEET_EMPLOYEES : 'Employees');
+                    if (empSheet) {
+                      var empData = empSheet.getDataRange().getValues();
+                      for (var er = 1; er < empData.length; er++) {
+                        if (String(empData[er][0] || '').trim().toLowerCase() === empName.toLowerCase()) {
+                          var rawLoc = String(empData[er][2] || '').trim();
+                          empLocation = typeof getPhysicalLocation === 'function' ? getPhysicalLocation(rawLoc) : rawLoc;
+                          break;
+                        }
+                      }
+                    }
+
+                    // Format dates
+                    var dObj = (dVal instanceof Date) ? dVal : new Date(dVal);
+                    if (isNaN(dObj.getTime())) dObj = new Date();
+                    var dFormatted = Utilities.formatDate(dObj, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+                    var dIso = Utilities.formatDate(dObj, ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd');
+
+                    // Store Stage 3 values in columns U-W (indices 21-23)
+                    var chgOutFormatted = '';
+                    if (typeof calculateChangeOutDate === 'function') {
+                      var calcDate = calculateChangeOutDate(dObj, empLocation, empName, isSleeve);
+                      if (calcDate && calcDate !== 'N/A') {
+                        chgOutFormatted = (calcDate instanceof Date) ? Utilities.formatDate(calcDate, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy') : String(calcDate);
+                      } else if (calcDate === 'N/A') {
+                        chgOutFormatted = 'N/A';
+                      }
+                    }
+                    try {
+                      sheet.getRange(mut.row, 21, 1, 3).setValues([[empName, dIso, chgOutFormatted]]);
+                    } catch (stg3Err) { /* ignore */ }
+
+                    if (invSheet) {
+                      var invData = invSheet.getDataRange().getValues();
+                      var pickRowIdx = -1;
+                      var oldRowIdx = -1;
+
+                      for (var r = 1; r < invData.length; r++) {
+                        var itm = String(invData[r][0] || '').trim();
+                        var esl = String(invData[r][1] || '').trim();
+                        if (pickListNum && (itm === pickListNum || esl === pickListNum)) {
+                          pickRowIdx = r + 1;
+                        }
+                        if (oldItemNum && oldItemNum !== '—' && oldItemNum !== '-' && (itm === oldItemNum || esl === oldItemNum)) {
+                          oldRowIdx = r + 1;
+                        }
+                      }
+
+                      var colLoc, colStat, colAssigned, colDate, colChangeOut, colPicked;
+                      if (isBlanket) {
+                        colLoc = typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.LOCATION : 6;
+                        colStat = typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.STATUS : 7;
+                        colAssigned = typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.ASSIGNED_TO : 8;
+                        colDate = typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.DATE_ASSIGNED : 5;
+                        colChangeOut = typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.CHANGE_OUT_DATE : 9;
+                        colPicked = typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.PICKED_FOR : 10;
+                      } else {
+                        // Gloves, Sleeves, MACKs
+                        colLoc = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.LOCATION : 7;
+                        colStat = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.STATUS : 8;
+                        colAssigned = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.ASSIGNED_TO : 9;
+                        colDate = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.DATE_ASSIGNED : 6;
+                        colChangeOut = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.CHANGE_OUT_DATE : 10;
+                        colPicked = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.PICKED_FOR : 11;
+                      }
+
+                      // Update Pick List item (New item -> Assigned)
+                      if (pickRowIdx !== -1) {
+                        invSheet.getRange(pickRowIdx, colLoc).setValue(empLocation);
+                        invSheet.getRange(pickRowIdx, colStat).setValue('Assigned');
+                        invSheet.getRange(pickRowIdx, colAssigned).setValue(empName);
+                        invSheet.getRange(pickRowIdx, colDate).setValue(dFormatted);
+                        invSheet.getRange(pickRowIdx, colPicked).setValue(''); // Clear Picked For note!
+                        if (chgOutFormatted) {
+                          invSheet.getRange(pickRowIdx, colChangeOut).setValue(chgOutFormatted);
+                        }
+                      }
+
+                      // Update Old item (Old item -> Ready For Test)
+                      if (oldRowIdx !== -1) {
+                        invSheet.getRange(oldRowIdx, colLoc).setValue("Cody's Truck");
+                        invSheet.getRange(oldRowIdx, colStat).setValue('Ready For Test');
+                        invSheet.getRange(oldRowIdx, colAssigned).setValue('Packed For Testing');
+                        invSheet.getRange(oldRowIdx, colDate).setValue(dFormatted);
+                        invSheet.getRange(oldRowIdx, colPicked).setValue('');
+
+                        var oldChgOut = null;
+                        if (typeof calculateChangeOutDate === 'function') {
+                          oldChgOut = calculateChangeOutDate(dObj, "Cody's Truck", 'Packed For Testing', isSleeve);
+                        }
+                        if (oldChgOut && oldChgOut !== 'N/A') {
+                          invSheet.getRange(oldRowIdx, colChangeOut).setValue(oldChgOut);
+                        }
+                      }
                     }
                   }
                 }
