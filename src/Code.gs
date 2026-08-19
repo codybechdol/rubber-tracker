@@ -12616,6 +12616,15 @@ function cleanAndRepairHistorySheets(silent) {
     var removedCount = 0;
 
     var itemKeys = Object.keys(itemGroups);
+    itemKeys.sort(function(a, b) {
+      var numA = parseInt(a, 10);
+      var numB = parseInt(b, 10);
+      if (!isNaN(numA) && !isNaN(numB) && String(numA) === String(a).trim() && String(numB) === String(b).trim()) {
+        return numA - numB;
+      }
+      return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+    });
+
     for (var k = 0; k < itemKeys.length; k++) {
       var group = itemGroups[itemKeys[k]];
 
