@@ -12123,20 +12123,28 @@ function parseAndImportItemHistoryLog(equipmentType, itemNum, logText) {
 
     if (rowsToAdd.length > 0) {
       var startRow = histSheet.getLastRow() + 1;
-      histSheet.getRange(startRow, 1, rowsToAdd.length, histHeaders.length).setValues(rowsToAdd);
+      for (var r = 0; r < rowsToAdd.length; r++) {
+        if (typeof safeWriteRowToTable === 'function') {
+          safeWriteRowToTable(histSheet, startRow + r, rowsToAdd[r], histHeaders);
+        } else {
+          histSheet.appendRow(rowsToAdd[r]);
+        }
+      }
       
       // Auto clean and sort history sheet
       try {
-        cleanAndRepairHistorySheets();
+        cleanAndRepairHistorySheets(true);
       } catch (errSort) {
         Logger.log('cleanAndRepairHistorySheets warning: ' + errSort);
       }
 
       // Re-generate sync snapshot for offline desktop app
       try {
-        generateSyncSnapshot();
+        if (typeof generateAndStoreSyncSnapshot === 'function') {
+          generateAndStoreSyncSnapshot();
+        }
       } catch (errSnap) {
-        Logger.log('generateSyncSnapshot warning: ' + errSnap);
+        Logger.log('generateAndStoreSyncSnapshot warning: ' + errSnap);
       }
     }
 
@@ -12532,10 +12540,15 @@ function menuCleanupLocatedItems() {
 function cleanAndRepairHistorySheets(silent) {
   silent = silent || false;
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var ui = SpreadsheetApp.getUi();
+  var ui = null;
+  try {
+    ui = SpreadsheetApp.getUi();
+  } catch (eUi) {
+    silent = true; // Web App execution has no UI
+  }
 
-  if (!silent) {
-    ss.toast('Cleaning & repairing history sheets...', '🧹 Please wait', -1);
+  if (!silent && ss) {
+    try { ss.toast('Cleaning & repairing history sheets...', '🧹 Please wait', -1); } catch (eToast) {}
   }
 
   // 1. Build Name -> Physical Location map from Employees
@@ -13113,13 +13126,15 @@ function cleanAndRepairHistorySheets(silent) {
     reportSummary.push(cfg.label + ': Repaired ' + repairedCount + ' rows, removed ' + removedCount + ' duplicate/location noise rows (' + cleanRows.length + ' entries kept)');
   }
 
-  if (!silent) {
-    ss.toast('History cleanup & repair complete!', '✅ Complete', 4);
-    var alertMsg = '🧹 History Sheets Cleanup & Repair Complete\n\n' +
-      reportSummary.join('\n') +
-      '\n\nTotal rows repaired: ' + totalRepaired +
-      '\nTotal duplicate / location noise rows removed: ' + totalRemoved;
-    ui.alert(alertMsg);
+  if (!silent && ui) {
+    try {
+      ss.toast('History cleanup & repair complete!', '✅ Complete', 4);
+      var alertMsg = '🧹 History Sheets Cleanup & Repair Complete\n\n' +
+        reportSummary.join('\n') +
+        '\n\nTotal rows repaired: ' + totalRepaired +
+        '\nTotal duplicate / location noise rows removed: ' + totalRemoved;
+      ui.alert(alertMsg);
+    } catch (eAlert) {}
   }
 
   Logger.log('cleanAndRepairHistorySheets: ' + reportSummary.join(' | '));
