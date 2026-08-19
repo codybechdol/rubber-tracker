@@ -12184,6 +12184,25 @@ function cleanAndRepairHistorySheets(silent) {
   nameToLocation['not repairable'] = 'Destroyed';
   nameToLocation['lost'] = 'Lost';
 
+  function formatItemNum(val) {
+    if (val === null || val === undefined || val === '') return '';
+    if (val instanceof Date) return String(val);
+    return String(val);
+  }
+
+  function formatClass(val) {
+    if (val === null || val === undefined || val === '') return '';
+    if (val instanceof Date) return String(val);
+    var strVal = String(val).trim();
+    if (strVal === '1/1/1900') return 2;
+    if (strVal === '1/2/1900') return 2;
+    if (strVal === '1/3/1900') return 3;
+    if (strVal === '12/30/1899' || strVal === '12/31/1899') return 0;
+    var num = parseInt(strVal, 10);
+    if (!isNaN(num) && num >= 0 && num <= 4) return num;
+    return strVal;
+  }
+
   // 2. Build metadata lookups from active inventory sheets
   function buildMetaLookup(sheetName, itemNumColIdx, metaBuilder) {
     var map = {};
