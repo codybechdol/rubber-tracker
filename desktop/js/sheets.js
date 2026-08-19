@@ -299,8 +299,8 @@ class SheetNavigator {
               const isChecked = (pVal === 'TRUE' || pVal === '1' || rowArr[8] === true);
               const dVal = String(rowArr[9] || '').trim();
               if (dVal && !dVal.includes('Stock') && !dVal.includes('Ready')) {
-                val = 'On Shelf';
-                vLower = 'on shelf';
+                val = 'Packed For Testing';
+                vLower = 'packed for testing';
               } else if (isChecked) {
                 val = 'Ready For Test';
                 vLower = 'ready for test';
@@ -315,7 +315,9 @@ class SheetNavigator {
 
             if (vLower === 'return to shelf' || vLower.includes('return to shelf') || vLower.includes('return')) {
               customContent = `<span class="badge" style="background-color: #475569; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">↩️ Return to Shelf</span>`;
-            } else if (vLower === 'ready for test' || vLower.includes('ready for test') || vLower.includes('packed for testing')) {
+            } else if (vLower === 'packed for testing' || vLower.includes('packed for testing')) {
+              customContent = `<span class="badge" style="background-color: #4f46e5; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">🔬 Packed For Testing</span>`;
+            } else if (vLower === 'ready for test' || vLower.includes('ready for test')) {
               customContent = `<span class="badge" style="background-color: #6366f1; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">🔬 Ready For Test</span>`;
             } else if (vLower === 'ready for delivery' || vLower.includes('ready for delivery') || vLower.includes('delivery') || val.includes('🚚')) {
               customContent = `<span class="badge" style="background-color: #15803d; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">🚚 ${this.escapeHtml(val)}</span>`;

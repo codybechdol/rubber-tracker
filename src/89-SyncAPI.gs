@@ -624,7 +624,7 @@ function applyBatchSyncMutations(mutations) {
                   var isPrevEmp = (daysLeftVal === 'PREV EMP' || (!pickListNum || pickListNum === '—' || pickListNum === '-'));
 
                   if (isPrevEmp) {
-                    sheet.getRange(mut.row, 8).setValue(hasDate ? 'On Shelf' : 'Return to Shelf');
+                    sheet.getRange(mut.row, 8).setValue(hasDate ? 'Packed For Testing' : 'Return to Shelf');
                     if (invSheet && oldItemNum && oldItemNum !== '—' && oldItemNum !== '-') {
                       var invData = invSheet.getDataRange().getValues();
                       for (var r = 1; r < invData.length; r++) {
@@ -633,16 +633,19 @@ function applyBatchSyncMutations(mutations) {
                         if (itm === oldItemNum || esl === oldItemNum) {
                           var oldRowIdx = r + 1;
                           if (hasDate) {
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.STATUS).setValue('On Shelf');
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.ASSIGNED_TO).setValue('On Shelf');
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.LOCATION).setValue('Helena');
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.DATE_ASSIGNED).setValue('');
+                            var dObj = (dVal instanceof Date) ? dVal : new Date(dVal);
+                            var dFormatted = Utilities.formatDate(dObj, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.STATUS).setValue('Ready For Test');
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.ASSIGNED_TO).setValue('Packed For Testing');
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.LOCATION).setValue("Cody's Truck");
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.DATE_ASSIGNED).setValue(dFormatted);
                             invSheet.getRange(oldRowIdx, COLS.INVENTORY.CHANGE_OUT_DATE).setValue('N/A');
                             invSheet.getRange(oldRowIdx, COLS.INVENTORY.PICKED_FOR).setValue('');
                           } else {
                             invSheet.getRange(oldRowIdx, COLS.INVENTORY.STATUS).setValue('Ready For Test');
                             invSheet.getRange(oldRowIdx, COLS.INVENTORY.ASSIGNED_TO).setValue('Packed For Testing');
                             invSheet.getRange(oldRowIdx, COLS.INVENTORY.LOCATION).setValue("Cody's Truck");
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.DATE_ASSIGNED).setValue('');
                             invSheet.getRange(oldRowIdx, COLS.INVENTORY.PICKED_FOR).setValue('');
                           }
                           break;

@@ -231,7 +231,7 @@ class LocalDatabase {
             if (isPrevEmpRow) {
               // PREVIOUS EMPLOYEE ROW DATE CHANGED
               if (colStat !== -1) {
-                table.rawGrid[rowIdx][colStat] = hasDate ? 'On Shelf' : 'Return to Shelf';
+                table.rawGrid[rowIdx][colStat] = hasDate ? 'Packed For Testing' : 'Return to Shelf';
               }
               if (invTable && invTable.rows && oldItemNum && oldItemNum !== '—' && oldItemNum !== '-') {
                 const oldRow = invTable.rows.find(r => {
@@ -243,16 +243,17 @@ class LocalDatabase {
                 });
                 if (oldRow) {
                   if (hasDate) {
-                    oldRow['Location'] = 'Helena';
-                    oldRow['Status'] = 'On Shelf';
-                    oldRow['Assigned To'] = 'On Shelf';
-                    oldRow['Date Assigned'] = '';
+                    oldRow['Location'] = "Cody's Truck";
+                    oldRow['Status'] = 'Ready For Test';
+                    oldRow['Assigned To'] = 'Packed For Testing';
+                    oldRow['Date Assigned'] = String(mut.value);
                     oldRow['Change Out Date'] = 'N/A';
                     oldRow['Picked For'] = '';
                   } else {
                     oldRow['Location'] = "Cody's Truck";
                     oldRow['Status'] = 'Ready For Test';
                     oldRow['Assigned To'] = 'Packed For Testing';
+                    oldRow['Date Assigned'] = '';
                     oldRow['Picked For'] = '';
                   }
                 }

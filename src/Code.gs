@@ -9862,6 +9862,7 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
     if (employeeName && oldItemNum && oldItemNum !== '—' && oldItemNum !== '-') {
       // Handle previous employee reclaim date changed
       handlePreviousEmployeeReclaimDateChanged(ss, inventorySheet, oldItemNum, employeeName, hasDate, newValue);
+      swapSheet.getRange(editedRow, colStatusIdx + 1).setValue(hasDate ? 'Packed For Testing' : (isPicked ? 'Ready For Test' : 'Return to Shelf'));
       return;
     }
     Logger.log('processEdit: No Pick List item for row ' + editedRow);
@@ -10117,7 +10118,7 @@ function handlePreviousEmployeeReclaimPicked(ss, inventorySheet, itemNum, employ
 
 /**
  * Handles Date Changed for a Previous Employee reclaim row.
- * Completes the reclaim: returns the item to "On Shelf" in Helena.
+ * Completes the reclaim: sets the item to "Packed For Testing" on Cody's Truck with the date entered.
  */
 function handlePreviousEmployeeReclaimDateChanged(ss, inventorySheet, itemNum, employeeName, hasDate, newValue) {
   try {
@@ -10135,19 +10136,22 @@ function handlePreviousEmployeeReclaimDateChanged(ss, inventorySheet, itemNum, e
     }
 
     if (hasDate) {
-      // Reclaim complete - return item to shelf
-      inventorySheet.getRange(itemRow, COLS.INVENTORY.STATUS).setValue('On Shelf');
-      inventorySheet.getRange(itemRow, COLS.INVENTORY.ASSIGNED_TO).setValue('On Shelf');
-      inventorySheet.getRange(itemRow, COLS.INVENTORY.LOCATION).setValue('Helena');
-      inventorySheet.getRange(itemRow, COLS.INVENTORY.DATE_ASSIGNED).setValue('');
+      // Reclaim complete - update item to Packed For Testing on Cody's Truck with the date entered
+      var dateObj = (newValue instanceof Date) ? newValue : new Date(newValue);
+      var dateFormatted = Utilities.formatDate(dateObj, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+      inventorySheet.getRange(itemRow, COLS.INVENTORY.STATUS).setValue('Ready For Test');
+      inventorySheet.getRange(itemRow, COLS.INVENTORY.ASSIGNED_TO).setValue('Packed For Testing');
+      inventorySheet.getRange(itemRow, COLS.INVENTORY.LOCATION).setValue("Cody's Truck");
+      inventorySheet.getRange(itemRow, COLS.INVENTORY.DATE_ASSIGNED).setValue(dateFormatted);
       inventorySheet.getRange(itemRow, COLS.INVENTORY.CHANGE_OUT_DATE).setNumberFormat('@').setValue('N/A');
       inventorySheet.getRange(itemRow, COLS.INVENTORY.PICKED_FOR).setValue('');
-      logEvent('Previous Employee item ' + itemNum + ' returned to On Shelf (Helena)');
+      logEvent('Previous Employee item ' + itemNum + ' marked Packed For Testing on Cody\'s Truck (Date Assigned: ' + dateFormatted + ')');
     } else {
       // Date removed - revert to Ready For Test (Stage 2)
       inventorySheet.getRange(itemRow, COLS.INVENTORY.STATUS).setValue('Ready For Test');
       inventorySheet.getRange(itemRow, COLS.INVENTORY.ASSIGNED_TO).setValue('Packed For Testing');
       inventorySheet.getRange(itemRow, COLS.INVENTORY.LOCATION).setValue("Cody's Truck");
+      inventorySheet.getRange(itemRow, COLS.INVENTORY.DATE_ASSIGNED).setValue('');
       logEvent('Previous Employee item ' + itemNum + ' reverted to Ready For Test');
     }
   } catch (e) {
