@@ -9881,10 +9881,11 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
 
   for (var i = 1; i < inventoryData.length; i++) {
     var itemNum = String(inventoryData[i][0]).trim();
-    if (itemNum === String(pickListNum).trim()) {
+    var esl = String(inventoryData[i][1] || '').trim();
+    if (itemNum === String(pickListNum).trim() || (esl && esl === String(pickListNum).trim())) {
       pickListRow = i + 1;
     }
-    if (oldItemNum && itemNum === String(oldItemNum).trim()) {
+    if (oldItemNum && (itemNum === String(oldItemNum).trim() || (esl && esl === String(oldItemNum).trim()))) {
       oldItemRow = i + 1;
     }
   }

@@ -222,13 +222,197 @@ function applyBatchSyncMutations(mutations) {
                 typeof SHEET_HOT_STICKS !== 'undefined' ? SHEET_HOT_STICKS : 'Hot Sticks'
               ].indexOf(sheetName) !== -1;
 
-              // If Date Assigned or Assigned To was edited on an inventory sheet
-              if (isEquipmentSheet && (hLower.includes('assigned') || hLower === 'assigned to' || hLower === 'date assigned')) {
-                // Trigger auto change-out date recalculation and location sync
-                if (typeof fixChangeOutDatesSilent === 'function') fixChangeOutDatesSilent();
-                if (typeof fixBlanketChangeOutDatesSilent === 'function') fixBlanketChangeOutDatesSilent();
-                if (typeof fixMackChangeOutDates === 'function') fixMackChangeOutDates();
-                if (typeof syncInventoryLocations === 'function') syncInventoryLocations();
+              if (isEquipmentSheet) {
+                var isGlove = (sheetName === (typeof SHEET_GLOVES !== 'undefined' ? SHEET_GLOVES : 'Gloves'));
+                var isSleeve = (sheetName === (typeof SHEET_SLEEVES !== 'undefined' ? SHEET_SLEEVES : 'Sleeves'));
+                var isBlanket = (sheetName === (typeof SHEET_BLANKETS !== 'undefined' ? SHEET_BLANKETS : 'Blankets'));
+                var isMack = (sheetName === (typeof SHEET_MACKS !== 'undefined' ? SHEET_MACKS : 'MACKs'));
+                var isHVTester = (sheetName === (typeof SHEET_HV_TESTERS !== 'undefined' ? SHEET_HV_TESTERS : 'HV Testers'));
+                var isPhasingSet = (sheetName === (typeof SHEET_PHASING_SETS !== 'undefined' ? SHEET_PHASING_SETS : 'Phasing Sets'));
+                var isAED = (sheetName === (typeof SHEET_AED !== 'undefined' ? SHEET_AED : 'AED'));
+                var isGrounds = (sheetName === (typeof SHEET_GROUNDS !== 'undefined' ? SHEET_GROUNDS : 'Grounds'));
+                var isHotSticks = (sheetName === (typeof SHEET_HOT_STICKS !== 'undefined' ? SHEET_HOT_STICKS : 'Hot Sticks'));
+
+                // Identify column indices for this equipment sheet
+                var eqColAssignedTo, eqColStatus, eqColLocation, eqColDateAssigned, eqColChangeOutDate, eqColTestDate;
+                if (isGlove || isSleeve) {
+                  eqColAssignedTo = COLS.INVENTORY.ASSIGNED_TO;     // 9
+                  eqColStatus = COLS.INVENTORY.STATUS;              // 8
+                  eqColLocation = COLS.INVENTORY.LOCATION;          // 7
+                  eqColDateAssigned = COLS.INVENTORY.DATE_ASSIGNED; // 6
+                  eqColChangeOutDate = COLS.INVENTORY.CHANGE_OUT_DATE; // 10
+                  eqColTestDate = COLS.INVENTORY.TEST_DATE;         // 5
+                } else if (isBlanket) {
+                  eqColAssignedTo = COLS.BLANKETS.ASSIGNED_TO;      // 8
+                  eqColStatus = COLS.BLANKETS.STATUS;               // 7
+                  eqColLocation = COLS.BLANKETS.LOCATION;           // 6
+                  eqColDateAssigned = COLS.BLANKETS.DATE_ASSIGNED;  // 5
+                  eqColChangeOutDate = COLS.BLANKETS.CHANGE_OUT_DATE; // 9
+                  eqColTestDate = COLS.BLANKETS.TEST_DATE;          // 4
+                } else if (isMack) {
+                  eqColAssignedTo = COLS.MACKS.ASSIGNED_TO;         // 9
+                  eqColStatus = COLS.MACKS.STATUS;                  // 8
+                  eqColLocation = COLS.MACKS.LOCATION;              // 7
+                  eqColDateAssigned = COLS.MACKS.DATE_ASSIGNED;     // 6
+                  eqColChangeOutDate = COLS.MACKS.CHANGE_OUT_DATE;  // 10
+                  eqColTestDate = COLS.MACKS.TEST_DATE;             // 5
+                } else if (isHVTester || isPhasingSet) {
+                  eqColAssignedTo = COLS.HV_TESTERS.ASSIGNED_TO;    // 9
+                  eqColStatus = COLS.HV_TESTERS.STATUS;             // 8
+                  eqColLocation = COLS.HV_TESTERS.LOCATION;         // 7
+                  eqColDateAssigned = COLS.HV_TESTERS.DATE_ASSIGNED;// 6
+                  eqColChangeOutDate = COLS.HV_TESTERS.CHANGE_OUT_DATE; // 10
+                  eqColTestDate = COLS.HV_TESTERS.CALIBRATION_DATE; // 5
+                } else if (isAED) {
+                  eqColAssignedTo = COLS.AED.ASSIGNED_TO;           // 8
+                  eqColStatus = COLS.AED.STATUS;                    // 7
+                  eqColLocation = COLS.AED.LOCATION;                // 6
+                  eqColDateAssigned = COLS.AED.DATE_ASSIGNED;       // 5
+                  eqColChangeOutDate = COLS.AED.PAD_EXPIRATION;     // 4
+                  eqColTestDate = COLS.AED.PAD_EXPIRATION;          // 4
+                } else if (isGrounds) {
+                  eqColAssignedTo = COLS.GROUNDS.ASSIGNED_TO;       // 10
+                  eqColStatus = COLS.GROUNDS.STATUS;                // 9
+                  eqColLocation = COLS.GROUNDS.LOCATION;            // 8
+                  eqColDateAssigned = COLS.GROUNDS.DATE_ASSIGNED;   // 7
+                  eqColChangeOutDate = COLS.GROUNDS.CHANGE_OUT_DATE;// 11
+                  eqColTestDate = COLS.GROUNDS.TEST_DATE;           // 6
+                } else if (isHotSticks) {
+                  eqColAssignedTo = COLS.HOT_STICKS.ASSIGNED_TO;    // 8
+                  eqColStatus = COLS.HOT_STICKS.STATUS;             // 7
+                  eqColLocation = COLS.HOT_STICKS.LOCATION;         // 6
+                  eqColDateAssigned = COLS.HOT_STICKS.DATE_ASSIGNED;// 5
+                  eqColChangeOutDate = COLS.HOT_STICKS.CHANGE_OUT_DATE; // 9
+                  eqColTestDate = COLS.HOT_STICKS.TEST_DATE;        // 4
+                }
+
+                var isAssignedToEdit = (mut.col === eqColAssignedTo || hLower === 'assigned to' || hLower === 'assigned_to');
+
+                if (isAssignedToEdit) {
+                  var assignedVal = String(mut.value || '').trim();
+                  var assignedValLower = assignedVal.toLowerCase();
+
+                  // 1. Run standard Apps Script trigger handler
+                  try {
+                    if ((isGlove || isSleeve) && typeof handleInventoryAssignedToChange === 'function') {
+                      handleInventoryAssignedToChange(ss, sheet, sheetName, mut.row, mut.value);
+                    } else if (isBlanket && typeof handleBlanketAssignedToChange === 'function') {
+                      handleBlanketAssignedToChange(ss, sheet, mut.row, mut.value);
+                    } else if (isMack && typeof handleMackAssignedToChange === 'function') {
+                      handleMackAssignedToChange(ss, sheet, mut.row, mut.value);
+                    } else if (isHVTester && typeof handleHVTesterAssignedToChange === 'function') {
+                      handleHVTesterAssignedToChange(ss, sheet, mut.row, mut.value);
+                    } else if (isPhasingSet && typeof handlePhasingSetAssignedToChange === 'function') {
+                      handlePhasingSetAssignedToChange(ss, sheet, mut.row, mut.value);
+                    } else if (isAED && typeof handleAEDAssignedToChange === 'function') {
+                      handleAEDAssignedToChange(ss, sheet, mut.row, mut.value);
+                    } else if (isGrounds && typeof handleGroundAssignedToChange === 'function') {
+                      handleGroundAssignedToChange(ss, sheet, mut.row, mut.value);
+                    } else if (isHotSticks && typeof handleHotStickAssignedToChange === 'function') {
+                      handleHotStickAssignedToChange(ss, sheet, mut.row, mut.value);
+                    }
+                  } catch (assignedHandlerErr) {
+                    Logger.log('AssignedTo handler error on ' + sheetName + ': ' + assignedHandlerErr);
+                  }
+
+                  // 2. Direct guarantee update for Status and Location
+                  var newStatus = '';
+                  var newLocation = '';
+
+                  if (assignedValLower === 'on shelf') {
+                    newStatus = 'On Shelf';
+                    newLocation = 'Helena';
+                  } else if (assignedValLower === 'packed for delivery') {
+                    newStatus = 'Ready For Delivery';
+                    newLocation = "Cody's Truck";
+                  } else if (assignedValLower === 'packed for testing') {
+                    newStatus = 'Ready For Test';
+                    newLocation = "Cody's Truck";
+                  } else if (assignedValLower === 'in testing') {
+                    newStatus = 'In Testing';
+                    newLocation = 'Arnett / JM Test';
+                  } else if (assignedValLower === 'failed rubber' || assignedValLower === 'not repairable') {
+                    newStatus = 'Failed Rubber';
+                    newLocation = 'Destroyed';
+                  } else if (assignedValLower === 'lost') {
+                    newStatus = 'Lost';
+                    newLocation = 'Lost';
+                  } else if (assignedVal !== '') {
+                    // Regular employee assignment: look up in Employees sheet
+                    newStatus = 'Assigned';
+                    var empSheet = ss.getSheetByName(typeof SHEET_EMPLOYEES !== 'undefined' ? SHEET_EMPLOYEES : 'Employees');
+                    if (empSheet) {
+                      var empData = empSheet.getDataRange().getValues();
+                      var empNameIdx = 0;
+                      var empLocIdx = 2; // Default C
+                      for (var eh = 0; eh < empData[0].length; eh++) {
+                        var ehStr = String(empData[0][eh]).toLowerCase().trim();
+                        if (ehStr === 'location') empLocIdx = eh;
+                      }
+                      for (var er = 1; er < empData.length; er++) {
+                        var eName = String(empData[er][empNameIdx] || '').trim().toLowerCase();
+                        if (eName === assignedValLower) {
+                          var rawEmpLoc = String(empData[er][empLocIdx] || '').trim();
+                          newLocation = typeof getPhysicalLocation === 'function' ? getPhysicalLocation(rawEmpLoc) : rawEmpLoc;
+                          break;
+                        }
+                      }
+                    }
+                    if (!newLocation) {
+                      newLocation = 'Helena'; // Fallback
+                    }
+                  }
+
+                  if (newStatus && eqColStatus) {
+                    sheet.getRange(mut.row, eqColStatus).setValue(newStatus);
+                  }
+                  if (newLocation && eqColLocation) {
+                    sheet.getRange(mut.row, eqColLocation).setValue(newLocation);
+                  }
+
+                  // Recalculate Change Out Date if Date Assigned exists
+                  if (eqColDateAssigned && eqColChangeOutDate) {
+                    var dateAssignedVal = sheet.getRange(mut.row, eqColDateAssigned).getValue();
+                    if (dateAssignedVal) {
+                      var chgOut = null;
+                      if (isBlanket && typeof calculateBlanketChangeOutDate === 'function') {
+                        var bTest = sheet.getRange(mut.row, eqColTestDate).getValue();
+                        chgOut = calculateBlanketChangeOutDate(bTest);
+                      } else if (isMack && typeof calculateMackChangeOutDate === 'function') {
+                        var mTest = sheet.getRange(mut.row, eqColTestDate).getValue();
+                        chgOut = calculateMackChangeOutDate(mTest);
+                      } else if (typeof calculateChangeOutDate === 'function') {
+                        chgOut = calculateChangeOutDate(dateAssignedVal, newLocation, assignedVal, isSleeve);
+                      }
+                      if (chgOut && chgOut !== 'N/A') {
+                        sheet.getRange(mut.row, eqColChangeOutDate).setValue(chgOut);
+                      }
+                    }
+                  }
+                }
+
+                // If Date Assigned was edited directly
+                var isDateAssignedEdit = (mut.col === eqColDateAssigned || hLower.includes('date assigned') || hLower === 'date assigned');
+                if (isDateAssignedEdit && eqColChangeOutDate) {
+                  var curLoc = sheet.getRange(mut.row, eqColLocation).getValue();
+                  var curAssigned = sheet.getRange(mut.row, eqColAssignedTo).getValue();
+                  var dateVal = mut.value;
+                  if (dateVal) {
+                    var chgOut = null;
+                    if (isBlanket && typeof calculateBlanketChangeOutDate === 'function') {
+                      var bTest = sheet.getRange(mut.row, eqColTestDate).getValue();
+                      chgOut = calculateBlanketChangeOutDate(bTest);
+                    } else if (isMack && typeof calculateMackChangeOutDate === 'function') {
+                      var mTest = sheet.getRange(mut.row, eqColTestDate).getValue();
+                      chgOut = calculateMackChangeOutDate(mTest);
+                    } else if (typeof calculateChangeOutDate === 'function') {
+                      chgOut = calculateChangeOutDate(dateVal, curLoc, curAssigned, isSleeve);
+                    }
+                    if (chgOut && chgOut !== 'N/A') {
+                      sheet.getRange(mut.row, eqColChangeOutDate).setValue(chgOut);
+                    }
+                  }
+                }
               }
 
               var sheetLower = sheetName.toLowerCase();
@@ -238,14 +422,16 @@ function applyBatchSyncMutations(mutations) {
                 var isGlove = sheetLower.includes('glove');
                 var isSleeve = sheetLower.includes('sleeve');
                 var isBlanket = sheetLower.includes('blanket');
+                var isMack = sheetLower.includes('mack');
 
                 var invSheet = null;
                 if (isGlove) invSheet = ss.getSheetByName(typeof SHEET_GLOVES !== 'undefined' ? SHEET_GLOVES : 'Gloves');
                 else if (isSleeve) invSheet = ss.getSheetByName(typeof SHEET_SLEEVES !== 'undefined' ? SHEET_SLEEVES : 'Sleeves');
                 else if (isBlanket) invSheet = ss.getSheetByName(typeof SHEET_BLANKETS !== 'undefined' ? SHEET_BLANKETS : 'Blankets');
+                else if (isMack) invSheet = ss.getSheetByName(typeof SHEET_MACKS !== 'undefined' ? SHEET_MACKS : 'MACKs');
 
-                // Column I is col 9 (Picked checkbox)
-                if (mut.col === 9 || hLower.includes('picked') || mut.value === true || mut.value === 'TRUE' || mut.value === false || mut.value === 'FALSE') {
+                // Picked checkbox (Col 9 / Picked header)
+                if (mut.col === 9 || hLower === 'picked' || hLower.includes('picked')) {
                   var isChecked = (mut.value === true || mut.value === 'TRUE' || mut.value === 'true');
 
                   // 1. Run standard Apps Script trigger handler
@@ -255,6 +441,8 @@ function applyBatchSyncMutations(mutations) {
                         handlePickedCheckboxChange(ss, sheet, invSheet, mut.row, mut.value, isGlove);
                       } else if (isBlanket && typeof handleBlanketPickedCheckboxChange === 'function') {
                         handleBlanketPickedCheckboxChange(ss, sheet, invSheet, mut.row, mut.value);
+                      } else if (isMack && typeof handleMackPickedCheckboxChange === 'function') {
+                        handleMackPickedCheckboxChange(ss, sheet, invSheet, mut.row, mut.value);
                       }
                     } catch (hErr) {
                       Logger.log('handlePickedCheckboxChange error: ' + hErr);
@@ -283,12 +471,23 @@ function applyBatchSyncMutations(mutations) {
                     }
 
                     if (invRowIdx !== -1) {
-                      var colLoc = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.LOCATION : 7;
-                      var colStat = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.STATUS : 8;
-                      var colAssigned = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.ASSIGNED_TO : 9;
-                      var colDate = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.DATE_ASSIGNED : 6;
-                      var colChangeOut = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.CHANGE_OUT_DATE : 10;
-                      var colPicked = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.PICKED_FOR : 11;
+                      var colLoc, colStat, colAssigned, colDate, colChangeOut, colPicked;
+                      if (isBlanket) {
+                        colLoc = typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.LOCATION : 6;
+                        colStat = typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.STATUS : 7;
+                        colAssigned = typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.ASSIGNED_TO : 8;
+                        colDate = typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.DATE_ASSIGNED : 5;
+                        colChangeOut = typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.CHANGE_OUT_DATE : 9;
+                        colPicked = typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.PICKED_FOR : 10;
+                      } else {
+                        // Gloves, Sleeves, MACKs
+                        colLoc = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.LOCATION : 7;
+                        colStat = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.STATUS : 8;
+                        colAssigned = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.ASSIGNED_TO : 9;
+                        colDate = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.DATE_ASSIGNED : 6;
+                        colChangeOut = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.CHANGE_OUT_DATE : 10;
+                        colPicked = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.PICKED_FOR : 11;
+                      }
 
                       if (isChecked) {
                         invSheet.getRange(invRowIdx, colLoc).setValue("Cody's Truck");
@@ -297,7 +496,16 @@ function applyBatchSyncMutations(mutations) {
                         invSheet.getRange(invRowIdx, colDate).setValue(todayFormatted);
                         invSheet.getRange(invRowIdx, colPicked).setValue(empName + ' Picked On ' + todayStr);
 
-                        var chgDate = typeof calculateChangeOutDate === 'function' ? calculateChangeOutDate(today, "Cody's Truck", 'Packed For Delivery', isSleeve) : null;
+                        var chgDate = null;
+                        if (isBlanket && typeof calculateBlanketChangeOutDate === 'function') {
+                          var testDate = invSheet.getRange(invRowIdx, COLS.BLANKETS.TEST_DATE).getValue();
+                          chgDate = calculateBlanketChangeOutDate(testDate);
+                        } else if (isMack && typeof calculateMackChangeOutDate === 'function') {
+                          var mTestDate = invSheet.getRange(invRowIdx, COLS.MACKS.TEST_DATE).getValue();
+                          chgDate = calculateMackChangeOutDate(mTestDate);
+                        } else if (typeof calculateChangeOutDate === 'function') {
+                          chgDate = calculateChangeOutDate(today, "Cody's Truck", 'Packed For Delivery', isSleeve);
+                        }
                         if (chgDate && chgDate !== 'N/A') {
                           invSheet.getRange(invRowIdx, colChangeOut).setValue(chgDate);
                         }
@@ -312,7 +520,7 @@ function applyBatchSyncMutations(mutations) {
                     }
                   }
 
-                } else if (mut.col === 10 || hLower.includes('changed')) {
+                } else if (mut.col === 10 || hLower === 'date changed' || hLower.includes('changed')) {
                   if (invSheet) {
                     var dVal = sheet.getRange(mut.row, mut.col).getValue();
                     try {
@@ -320,6 +528,8 @@ function applyBatchSyncMutations(mutations) {
                         handleDateChangedEdit(ss, sheet, invSheet, mut.row, dVal, isGlove);
                       } else if (isBlanket && typeof handleBlanketDateChangedEdit === 'function') {
                         handleBlanketDateChangedEdit(ss, sheet, invSheet, mut.row, dVal);
+                      } else if (isMack && typeof handleMackDateChangedEdit === 'function') {
+                        handleMackDateChangedEdit(ss, sheet, invSheet, mut.row, dVal);
                       }
                     } catch (dErr) {
                       Logger.log('handleDateChangedEdit error: ' + dErr);
