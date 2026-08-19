@@ -1,6 +1,6 @@
 /**
  * item-stats.js - Item Lifecycle Analytics & Visualizer Engine for Desktop App
- * Computes lifespan, time breakdown (field vs shelf vs testing vs transit),
+ * Computes lifespan, time breakdown (field vs shelf vs testing vs packed for testing vs packed for delivery),
  * test turnaround cycles, and renders interactive visual timeline steppers.
  */
 
@@ -75,28 +75,38 @@ class ItemStatsEngine {
       };
     }
 
-    // 2. Transit / Truck
+    // 2. Packed For Testing (Truck staging for testing lab)
     if (
-      sAssigned === 'packed for delivery' ||
       sAssigned === 'packed for testing' ||
-      sAssigned === "cody's truck" ||
-      sAssigned === 'truck' ||
-      sAssigned === 'transit' ||
-      sLoc === "cody's truck" ||
-      sStatus === 'packed for delivery' ||
       sStatus === 'packed for testing' ||
-      sStatus === 'ready for delivery'
+      (sStatus === 'ready for test' && sLoc === "cody's truck")
     ) {
       return {
-        key: 'TRANSIT',
-        label: 'In Transit / Truck',
-        badgeClass: 'badge-transit',
+        key: 'PACKED_TESTING',
+        label: 'Packed For Testing',
+        badgeClass: 'badge-packed-testing',
         color: '#f97316',
         icon: '🚚'
       };
     }
 
-    // 3. Testing / Lab
+    // 3. Packed For Delivery (Truck staging for field delivery)
+    if (
+      sAssigned === 'packed for delivery' ||
+      sStatus === 'packed for delivery' ||
+      sStatus === 'ready for delivery' ||
+      (sLoc === "cody's truck" && !sAssigned.includes('testing'))
+    ) {
+      return {
+        key: 'PACKED_DELIVERY',
+        label: 'Packed For Delivery',
+        badgeClass: 'badge-packed-delivery',
+        color: '#06b6d4',
+        icon: '🚚'
+      };
+    }
+
+    // 4. In Testing (Lab)
     if (
       sAssigned === 'in testing' ||
       sAssigned === 'arnett' ||
@@ -119,7 +129,7 @@ class ItemStatsEngine {
       };
     }
 
-    // 4. Shelf / Storage
+    // 5. On Shelf / Storage
     if (
       sAssigned === 'on shelf' ||
       sAssigned === 'storage' ||
@@ -138,7 +148,7 @@ class ItemStatsEngine {
       };
     }
 
-    // 5. Default: Field Service (Assigned to Lineman)
+    // 6. Default: Field Service (Assigned to Lineman)
     return {
       key: 'FIELD',
       label: 'Field Service (Assigned)',
@@ -168,7 +178,8 @@ class ItemStatsEngine {
     let fieldDays = 0;
     let shelfDays = 0;
     let testingDays = 0;
-    let transitDays = 0;
+    let packedTestingDays = 0;
+    let packedDeliveryDays = 0;
     let retiredDays = 0;
 
     let testCyclesCount = 0;
@@ -227,8 +238,10 @@ class ItemStatsEngine {
       } else if (state.key === 'TESTING') {
         testingDays += days;
         testCyclesCount++;
-      } else if (state.key === 'TRANSIT') {
-        transitDays += days;
+      } else if (state.key === 'PACKED_TESTING') {
+        packedTestingDays += days;
+      } else if (state.key === 'PACKED_DELIVERY') {
+        packedDeliveryDays += days;
       } else if (state.key === 'RETIRED') {
         retiredDays += days;
       }
@@ -250,12 +263,13 @@ class ItemStatsEngine {
     }
 
     const lastMilestone = milestones[milestones.length - 1];
-    const totalDays = Math.max(1, fieldDays + shelfDays + testingDays + transitDays);
+    const totalDays = Math.max(1, fieldDays + shelfDays + testingDays + packedTestingDays + packedDeliveryDays);
 
     const fieldPct = Math.round((fieldDays / totalDays) * 100);
     const shelfPct = Math.round((shelfDays / totalDays) * 100);
     const testingPct = Math.round((testingDays / totalDays) * 100);
-    const transitPct = Math.max(0, 100 - fieldPct - shelfPct - testingPct);
+    const packedTestingPct = Math.round((packedTestingDays / totalDays) * 100);
+    const packedDeliveryPct = Math.max(0, 100 - fieldPct - shelfPct - testingPct - packedTestingPct);
 
     // Linemen list sorted by longest days
     const linemenList = Object.keys(linemenMap).map(name => {
@@ -284,8 +298,10 @@ class ItemStatsEngine {
       shelfPct: shelfPct,
       testingDays: testingDays,
       testingPct: testingPct,
-      transitDays: transitDays,
-      transitPct: transitPct,
+      packedTestingDays: packedTestingDays,
+      packedTestingPct: packedTestingPct,
+      packedDeliveryDays: packedDeliveryDays,
+      packedDeliveryPct: packedDeliveryPct,
       testCyclesCount: testCyclesCount,
       linemenList: linemenList,
       milestones: milestones,
@@ -303,7 +319,8 @@ class ItemStatsEngine {
           ${stats.fieldPct > 0 ? `<div style="width: ${stats.fieldPct}%; background-color: #3b82f6;" title="Field Service: ${stats.fieldDays}d (${stats.fieldPct}%)"></div>` : ''}
           ${stats.shelfPct > 0 ? `<div style="width: ${stats.shelfPct}%; background-color: #f59e0b;" title="On Shelf: ${stats.shelfDays}d (${stats.shelfPct}%)"></div>` : ''}
           ${stats.testingPct > 0 ? `<div style="width: ${stats.testingPct}%; background-color: #a855f7;" title="In Testing: ${stats.testingDays}d (${stats.testingPct}%)"></div>` : ''}
-          ${stats.transitPct > 0 ? `<div style="width: ${stats.transitPct}%; background-color: #f97316;" title="In Transit: ${stats.transitDays}d (${stats.transitPct}%)"></div>` : ''}
+          ${stats.packedTestingPct > 0 ? `<div style="width: ${stats.packedTestingPct}%; background-color: #f97316;" title="Packed For Testing: ${stats.packedTestingDays}d (${stats.packedTestingPct}%)"></div>` : ''}
+          ${stats.packedDeliveryPct > 0 ? `<div style="width: ${stats.packedDeliveryPct}%; background-color: #06b6d4;" title="Packed For Delivery: ${stats.packedDeliveryDays}d (${stats.packedDeliveryPct}%)"></div>` : ''}
           ${stats.isRetired ? `<div style="width: 4px; background-color: #ef4444;" title="Retired / Failed"></div>` : ''}
         </div>
       </div>
@@ -321,12 +338,16 @@ class ItemStatsEngine {
         <span title="Time in Storage / Shelf" style="color: #fbbf24;">📦 <strong>Shelf:</strong> ${stats.shelfDays}d (${stats.shelfPct}%)</span>
         <span style="color: var(--text-muted);">•</span>
         <span title="Time in Test Lab" style="color: #c084fc;">🔬 <strong>Testing:</strong> ${stats.testingDays}d (${stats.testingPct}%)</span>
+        ${stats.packedTestingDays > 0 ? `
+          <span style="color: var(--text-muted);">•</span>
+          <span title="Packed For Testing (Truck)" style="color: #fb923c;">🚚 <strong>Packed Testing:</strong> ${stats.packedTestingDays}d (${stats.packedTestingPct}%)</span>
+        ` : ''}
+        ${stats.packedDeliveryDays > 0 ? `
+          <span style="color: var(--text-muted);">•</span>
+          <span title="Packed For Delivery (Truck)" style="color: #22d3ee;">🚚 <strong>Packed Delivery:</strong> ${stats.packedDeliveryDays}d (${stats.packedDeliveryPct}%)</span>
+        ` : ''}
         <span style="color: var(--text-muted);">•</span>
         <span title="Completed Turnaround Test Cycles">🔄 <strong>${stats.testCyclesCount}</strong> ${stats.testCyclesCount === 1 ? 'Test Cycle' : 'Test Cycles'}</span>
-        ${stats.linemenList.length > 0 ? `
-          <span style="color: var(--text-muted);">•</span>
-          <span title="Unique Linemen Served">👥 <strong>${stats.linemenList.length}</strong> ${stats.linemenList.length === 1 ? 'Lineman' : 'Linemen'}</span>
-        ` : ''}
       </div>
     `;
   }
@@ -399,7 +420,7 @@ class ItemStatsEngine {
           <div style="display: flex; align-items: center; gap: 10px;">
             <span style="font-size: 24px;">📦</span>
             <div>
-              <div style="font-size: 18px; font-weight: 700; color: var(--text-primary);">Item #${stats.itemKey}</div>
+              <div style="font-size: 18px; font-weight: 700; color: var(--text-primary);">${sheetTitle} #${stats.itemKey}</div>
               <div style="display: flex; align-items: center; gap: 6px; margin-top: 2px;">
                 ${metaChips.join('')}
               </div>
@@ -413,28 +434,45 @@ class ItemStatsEngine {
           </div>
         </div>
 
-        <!-- 4-Card KPI Stat Grid -->
+        <!-- 6-Card KPI Stat Grid -->
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 14px;">
+          
           <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
             <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">⏳ Total Lifespan</div>
             <div style="font-size: 16px; font-weight: 700; color: var(--text-primary);">${stats.lifespanFormatted}</div>
             <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">Since ${stats.firstDateFormatted}</div>
           </div>
+
           <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
             <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">👷 Field Service</div>
             <div style="font-size: 16px; font-weight: 700; color: #60a5fa;">${stats.fieldDays} Days</div>
             <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${stats.fieldPct}% of total life</div>
           </div>
+
           <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
             <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">📦 Shelf / Storage</div>
             <div style="font-size: 16px; font-weight: 700; color: #fbbf24;">${stats.shelfDays} Days</div>
             <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${stats.shelfPct}% of total life</div>
           </div>
+
           <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
             <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">🔬 Lab Testing</div>
             <div style="font-size: 16px; font-weight: 700; color: #c084fc;">${stats.testingDays} Days</div>
             <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${stats.testCyclesCount} completed cycles</div>
           </div>
+
+          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
+            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">🚚 Packed For Testing</div>
+            <div style="font-size: 16px; font-weight: 700; color: #fb923c;">${stats.packedTestingDays} Days</div>
+            <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${stats.packedTestingPct}% on truck</div>
+          </div>
+
+          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
+            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">🚚 Packed For Delivery</div>
+            <div style="font-size: 16px; font-weight: 700; color: #22d3ee;">${stats.packedDeliveryDays} Days</div>
+            <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${stats.packedDeliveryPct}% on truck</div>
+          </div>
+
         </div>
 
         <!-- Segmented Horizontal Lifespan Bar -->
