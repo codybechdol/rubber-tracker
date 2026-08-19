@@ -635,17 +635,22 @@ function applyBatchSyncMutations(mutations) {
                           if (hasDate) {
                             var dObj = (dVal instanceof Date) ? dVal : new Date(dVal);
                             var dFormatted = Utilities.formatDate(dObj, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+                            var chgOutDate = new Date(dObj.getTime());
+                            chgOutDate.setFullYear(chgOutDate.getFullYear() + 1);
+                            var chgOutFormatted = Utilities.formatDate(chgOutDate, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+
                             invSheet.getRange(oldRowIdx, COLS.INVENTORY.STATUS).setValue('Ready For Test');
                             invSheet.getRange(oldRowIdx, COLS.INVENTORY.ASSIGNED_TO).setValue('Packed For Testing');
                             invSheet.getRange(oldRowIdx, COLS.INVENTORY.LOCATION).setValue("Cody's Truck");
                             invSheet.getRange(oldRowIdx, COLS.INVENTORY.DATE_ASSIGNED).setValue(dFormatted);
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.CHANGE_OUT_DATE).setValue('N/A');
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.CHANGE_OUT_DATE).setValue(chgOutFormatted);
                             invSheet.getRange(oldRowIdx, COLS.INVENTORY.PICKED_FOR).setValue('');
                           } else {
                             invSheet.getRange(oldRowIdx, COLS.INVENTORY.STATUS).setValue('Ready For Test');
                             invSheet.getRange(oldRowIdx, COLS.INVENTORY.ASSIGNED_TO).setValue('Packed For Testing');
                             invSheet.getRange(oldRowIdx, COLS.INVENTORY.LOCATION).setValue("Cody's Truck");
                             invSheet.getRange(oldRowIdx, COLS.INVENTORY.DATE_ASSIGNED).setValue('');
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.CHANGE_OUT_DATE).setValue('');
                             invSheet.getRange(oldRowIdx, COLS.INVENTORY.PICKED_FOR).setValue('');
                           }
                           break;

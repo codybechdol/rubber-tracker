@@ -10143,15 +10143,21 @@ function handlePreviousEmployeeReclaimDateChanged(ss, inventorySheet, itemNum, e
       inventorySheet.getRange(itemRow, COLS.INVENTORY.ASSIGNED_TO).setValue('Packed For Testing');
       inventorySheet.getRange(itemRow, COLS.INVENTORY.LOCATION).setValue("Cody's Truck");
       inventorySheet.getRange(itemRow, COLS.INVENTORY.DATE_ASSIGNED).setValue(dateFormatted);
-      inventorySheet.getRange(itemRow, COLS.INVENTORY.CHANGE_OUT_DATE).setNumberFormat('@').setValue('N/A');
+      
+      // Calculate Change Out Date (+12 months / 1 year)
+      var changeOut = new Date(dateObj.getTime());
+      changeOut.setFullYear(changeOut.getFullYear() + 1);
+      var changeOutFormatted = Utilities.formatDate(changeOut, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+      inventorySheet.getRange(itemRow, COLS.INVENTORY.CHANGE_OUT_DATE).setNumberFormat('MM/dd/yyyy').setValue(changeOutFormatted);
       inventorySheet.getRange(itemRow, COLS.INVENTORY.PICKED_FOR).setValue('');
-      logEvent('Previous Employee item ' + itemNum + ' marked Packed For Testing on Cody\'s Truck (Date Assigned: ' + dateFormatted + ')');
+      logEvent('Previous Employee item ' + itemNum + ' marked Packed For Testing on Cody\'s Truck (Date Assigned: ' + dateFormatted + ', Change Out Date: ' + changeOutFormatted + ')');
     } else {
       // Date removed - revert to Ready For Test (Stage 2)
       inventorySheet.getRange(itemRow, COLS.INVENTORY.STATUS).setValue('Ready For Test');
       inventorySheet.getRange(itemRow, COLS.INVENTORY.ASSIGNED_TO).setValue('Packed For Testing');
       inventorySheet.getRange(itemRow, COLS.INVENTORY.LOCATION).setValue("Cody's Truck");
       inventorySheet.getRange(itemRow, COLS.INVENTORY.DATE_ASSIGNED).setValue('');
+      inventorySheet.getRange(itemRow, COLS.INVENTORY.CHANGE_OUT_DATE).setValue('');
       logEvent('Previous Employee item ' + itemNum + ' reverted to Ready For Test');
     }
   } catch (e) {

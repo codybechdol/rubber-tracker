@@ -247,13 +247,14 @@ class LocalDatabase {
                     oldRow['Status'] = 'Ready For Test';
                     oldRow['Assigned To'] = 'Packed For Testing';
                     oldRow['Date Assigned'] = String(mut.value);
-                    oldRow['Change Out Date'] = 'N/A';
+                    oldRow['Change Out Date'] = addMonths(String(mut.value), 12);
                     oldRow['Picked For'] = '';
                   } else {
                     oldRow['Location'] = "Cody's Truck";
                     oldRow['Status'] = 'Ready For Test';
                     oldRow['Assigned To'] = 'Packed For Testing';
                     oldRow['Date Assigned'] = '';
+                    oldRow['Change Out Date'] = '';
                     oldRow['Picked For'] = '';
                   }
                 }
