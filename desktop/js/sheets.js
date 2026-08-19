@@ -93,29 +93,141 @@ class SheetNavigator {
   }
 
   setPresetSort(type) {
-    if (type === 'location') {
-      this.sortCol = 'Location';
-      this.sortDir = 'asc';
+    const tableData = this.db.getTable(this.currentSheetKey);
+    const headers = tableData ? (tableData.headers || []) : [];
+
+    const findCol = (candidates) => {
+      for (const c of candidates) {
+        const cLower = c.toLowerCase();
+        const found = headers.find(h => {
+          const hLower = String(h || '').toLowerCase().trim();
+          return hLower === cLower || hLower.startsWith(cLower) || hLower.includes(cLower);
+        });
+        if (found) return found;
+      }
+      return candidates[0];
+    };
+
+    if (type === 'itemNum') {
+      const col = findCol(['glove', 'sleeve', 'blanket', 'mack', 'item #', 'item', 'serial #', 'esl id']);
+      if (this.sortCol === col) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.sortCol = col;
+        this.sortDir = 'asc';
+      }
       this.multiSort = null;
-    } else if (type === 'jobNumber') {
-      this.sortCol = 'Job Number';
-      this.sortDir = 'asc';
+    } else if (type === 'size') {
+      const col = findCol(['size']);
+      if (this.sortCol === col) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.sortCol = col;
+        this.sortDir = 'asc';
+      }
+      this.multiSort = null;
+    } else if (type === 'class') {
+      const col = findCol(['class']);
+      if (this.sortCol === col) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.sortCol = col;
+        this.sortDir = 'asc';
+      }
+      this.multiSort = null;
+    } else if (type === 'classSize') {
+      const classCol = findCol(['class']);
+      const sizeCol = findCol(['size']);
+      if (this.multiSort && this.multiSort[0] === classCol && this.multiSort[1] === sizeCol) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.multiSort = [classCol, sizeCol];
+        this.sortCol = null;
+        this.sortDir = 'asc';
+      }
+    } else if (type === 'location') {
+      const col = findCol(['location']);
+      if (this.sortCol === col) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.sortCol = col;
+        this.sortDir = 'asc';
+      }
       this.multiSort = null;
     } else if (type === 'status') {
-      this.sortCol = 'Status';
-      this.sortDir = 'asc';
+      const col = findCol(['status', 'item status', 'job status']);
+      if (this.sortCol === col) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.sortCol = col;
+        this.sortDir = 'asc';
+      }
+      this.multiSort = null;
+    } else if (type === 'assignedTo') {
+      const col = findCol(['assigned to', 'assigned', 'crew lead']);
+      if (this.sortCol === col) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.sortCol = col;
+        this.sortDir = 'asc';
+      }
+      this.multiSort = null;
+    } else if (type === 'changeOutDate') {
+      const col = findCol(['change out date', 'change out', 'changeout']);
+      if (this.sortCol === col) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.sortCol = col;
+        this.sortDir = 'asc';
+      }
+      this.multiSort = null;
+    } else if (type === 'type') {
+      const col = findCol(['type']);
+      if (this.sortCol === col) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.sortCol = col;
+        this.sortDir = 'asc';
+      }
+      this.multiSort = null;
+    } else if (type === 'kv') {
+      const col = findCol(['kv']);
+      if (this.sortCol === col) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.sortCol = col;
+        this.sortDir = 'asc';
+      }
+      this.multiSort = null;
+    } else if (type === 'jobNumber') {
+      const col = findCol(['job number', 'job #']);
+      if (this.sortCol === col) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.sortCol = col;
+        this.sortDir = 'asc';
+      }
       this.multiSort = null;
     } else if (type === 'statusJob') {
-      this.multiSort = ['Status', 'Job Number'];
+      const statusCol = findCol(['status', 'job status']);
+      const jobCol = findCol(['job number', 'job #']);
+      this.multiSort = [statusCol, jobCol];
       this.sortCol = null;
       this.sortDir = 'asc';
     } else if (type === 'locationJob') {
-      this.multiSort = ['Location', 'Job Number'];
+      const locCol = findCol(['location']);
+      const jobCol = findCol(['job number', 'job #']);
+      this.multiSort = [locCol, jobCol];
       this.sortCol = null;
       this.sortDir = 'asc';
     } else if (type === 'name') {
-      this.sortCol = 'Name';
-      this.sortDir = 'asc';
+      const col = findCol(['employee name', 'name', 'employee']);
+      if (this.sortCol === col) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.sortCol = col;
+        this.sortDir = 'asc';
+      }
       this.multiSort = null;
     }
     this.renderCurrentSheet();
@@ -480,12 +592,25 @@ class SheetNavigator {
       });
     }
 
-    // Custom status ranking for Job Tracking
+    // Custom status ranking for Job Tracking & Inventory
     const statusRank = {
+      'in service': 1,
+      'assigned': 1,
       'active': 1,
+      'ready for delivery': 2,
       'pending start': 2,
+      'on shelf': 3,
       'on hold': 3,
-      'completed': 4
+      'ready for test': 4,
+      'in testing': 5,
+      'in calibration': 5,
+      'failed rubber': 6,
+      'failed': 6,
+      'not repairable': 6,
+      'lost': 7,
+      'out of service': 8,
+      'retired': 9,
+      'completed': 10
     };
 
     const compareValues = (col, valA, valB) => {
@@ -493,21 +618,55 @@ class SheetNavigator {
       const sB = String(valB || '').trim();
       const colLower = String(col || '').toLowerCase();
 
-      if (colLower === 'status' || colLower === 'job status') {
+      // Empty / N/A values sort to the bottom
+      if (!sA && sB) return 1;
+      if (sA && !sB) return -1;
+      if (!sA && !sB) return 0;
+      if (sA.toUpperCase() === 'N/A' && sB.toUpperCase() !== 'N/A') return 1;
+      if (sA.toUpperCase() !== 'N/A' && sB.toUpperCase() === 'N/A') return -1;
+
+      // Date comparison (handles MM/DD/YYYY, YYYY-MM-DD, ISO)
+      if (colLower.includes('date') || colLower.includes('expiration') || colLower.includes('pad')) {
+        const parseDate = (dStr) => {
+          if (!dStr || dStr === 'N/A') return NaN;
+          if (dStr.includes('/')) {
+            const parts = dStr.split('/');
+            if (parts.length === 3) {
+              const m = parseInt(parts[0], 10) - 1;
+              const d = parseInt(parts[1], 10);
+              const y = parseInt(parts[2], 10);
+              return new Date(y, m, d, 12, 0, 0).getTime();
+            }
+          }
+          const t = new Date(dStr).getTime();
+          return isNaN(t) ? NaN : t;
+        };
+
+        const dA = parseDate(sA);
+        const dB = parseDate(sB);
+        if (!isNaN(dA) && !isNaN(dB)) {
+          return dA - dB;
+        }
+      }
+
+      // Custom status ranking
+      if (colLower === 'status' || colLower === 'job status' || colLower === 'item status') {
         const rA = statusRank[sA.toLowerCase()] || 99;
         const rB = statusRank[sB.toLowerCase()] || 99;
         if (rA !== rB) return rA - rB;
       }
+
       return sA.localeCompare(sB, undefined, { numeric: true, sensitivity: 'base' });
     };
 
     // Sort logic
     if (this.multiSort && this.multiSort.length > 0) {
       const [colA, colB] = this.multiSort;
+      const dir = this.sortDir === 'asc' ? 1 : -1;
       rows.sort((a, b) => {
         const cmp1 = compareValues(colA, a[colA], b[colA]);
-        if (cmp1 !== 0) return cmp1;
-        return compareValues(colB, a[colB], b[colB]);
+        if (cmp1 !== 0) return dir * cmp1;
+        return dir * compareValues(colB, a[colB], b[colB]);
       });
     } else if (this.sortCol) {
       const col = this.sortCol;
@@ -519,26 +678,120 @@ class SheetNavigator {
 
     if (countBadge) countBadge.textContent = `${rows.length} rows`;
 
-    // Presets bar for Employees, Job Tracking, or Safety Compliance
+    // Presets bar for Employees, Job Tracking, Gloves, Sleeves, Blankets, MACKs, etc.
     let presetBarHtml = '';
-    if (this.currentSheetKey === 'employees') {
+    const dirArrow = (active) => active ? (this.sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+
+    if (this.currentSheetKey === 'gloves' || this.currentSheetKey === 'sleeves') {
+      const isItemSorted = this.sortCol && ['glove', 'sleeve', 'item #', 'item'].some(k => this.sortCol.toLowerCase().includes(k));
+      const isSizeSorted = this.sortCol && this.sortCol.toLowerCase().includes('size');
+      const isClassSorted = this.sortCol && this.sortCol.toLowerCase().includes('class');
+      const isClassSizeSorted = this.multiSort && this.multiSort[0]?.toLowerCase().includes('class') && this.multiSort[1]?.toLowerCase().includes('size');
+      const isLocSorted = this.sortCol && this.sortCol.toLowerCase().includes('location');
+      const isStatSorted = this.sortCol && this.sortCol.toLowerCase().includes('status');
+      const isAssignedSorted = this.sortCol && this.sortCol.toLowerCase().includes('assigned');
+      const isChangeOutSorted = this.sortCol && (this.sortCol.toLowerCase().includes('change out') || this.sortCol.toLowerCase().includes('changeout'));
+
+      presetBarHtml = `
+        <div style="padding: 8px 16px; background-color: var(--bg-secondary); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 6px; font-size: 12px; overflow-x: auto; flex-wrap: wrap;">
+          <span style="color: var(--text-muted); font-weight: 600; white-space: nowrap;">⚡ Quick Sort:</span>
+          <button class="btn btn-secondary ${isItemSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('itemNum')">🔢 Item #${dirArrow(isItemSorted)}</button>
+          <button class="btn btn-secondary ${isSizeSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('size')">📏 Size${dirArrow(isSizeSorted)}</button>
+          <button class="btn btn-secondary ${isClassSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('class')">⚡ Class${dirArrow(isClassSorted)}</button>
+          <button class="btn btn-secondary ${isClassSizeSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('classSize')">⚡+📏 Class then Size${dirArrow(isClassSizeSorted)}</button>
+          <button class="btn btn-secondary ${isLocSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('location')">📍 Location${dirArrow(isLocSorted)}</button>
+          <button class="btn btn-secondary ${isStatSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('status')">🏷️ Status${dirArrow(isStatSorted)}</button>
+          <button class="btn btn-secondary ${isAssignedSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('assignedTo')">👤 Assigned To${dirArrow(isAssignedSorted)}</button>
+          <button class="btn btn-secondary ${isChangeOutSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('changeOutDate')">📅 Changeout Date${dirArrow(isChangeOutSorted)}</button>
+        </div>
+      `;
+    } else if (this.currentSheetKey === 'blankets') {
+      const isItemSorted = this.sortCol && ['blanket', 'item #', 'item'].some(k => this.sortCol.toLowerCase().includes(k));
+      const isTypeSorted = this.sortCol && this.sortCol.toLowerCase().includes('type');
+      const isClassSorted = this.sortCol && this.sortCol.toLowerCase().includes('class');
+      const isLocSorted = this.sortCol && this.sortCol.toLowerCase().includes('location');
+      const isStatSorted = this.sortCol && this.sortCol.toLowerCase().includes('status');
+      const isAssignedSorted = this.sortCol && this.sortCol.toLowerCase().includes('assigned');
+      const isChangeOutSorted = this.sortCol && (this.sortCol.toLowerCase().includes('change out') || this.sortCol.toLowerCase().includes('changeout'));
+
+      presetBarHtml = `
+        <div style="padding: 8px 16px; background-color: var(--bg-secondary); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 6px; font-size: 12px; overflow-x: auto; flex-wrap: wrap;">
+          <span style="color: var(--text-muted); font-weight: 600; white-space: nowrap;">⚡ Quick Sort:</span>
+          <button class="btn btn-secondary ${isItemSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('itemNum')">🔢 Item #${dirArrow(isItemSorted)}</button>
+          <button class="btn btn-secondary ${isTypeSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('type')">🔲 Type${dirArrow(isTypeSorted)}</button>
+          <button class="btn btn-secondary ${isClassSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('class')">⚡ Class${dirArrow(isClassSorted)}</button>
+          <button class="btn btn-secondary ${isLocSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('location')">📍 Location${dirArrow(isLocSorted)}</button>
+          <button class="btn btn-secondary ${isStatSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('status')">🏷️ Status${dirArrow(isStatSorted)}</button>
+          <button class="btn btn-secondary ${isAssignedSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('assignedTo')">👤 Assigned To${dirArrow(isAssignedSorted)}</button>
+          <button class="btn btn-secondary ${isChangeOutSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('changeOutDate')">📅 Changeout Date${dirArrow(isChangeOutSorted)}</button>
+        </div>
+      `;
+    } else if (this.currentSheetKey === 'macks') {
+      const isItemSorted = this.sortCol && ['mack', 'esl id', 'item #', 'item'].some(k => this.sortCol.toLowerCase().includes(k));
+      const isKvSorted = this.sortCol && this.sortCol.toLowerCase().includes('kv');
+      const isSizeSorted = this.sortCol && this.sortCol.toLowerCase().includes('size');
+      const isLocSorted = this.sortCol && this.sortCol.toLowerCase().includes('location');
+      const isStatSorted = this.sortCol && this.sortCol.toLowerCase().includes('status');
+      const isAssignedSorted = this.sortCol && this.sortCol.toLowerCase().includes('assigned');
+      const isChangeOutSorted = this.sortCol && (this.sortCol.toLowerCase().includes('change out') || this.sortCol.toLowerCase().includes('changeout'));
+
+      presetBarHtml = `
+        <div style="padding: 8px 16px; background-color: var(--bg-secondary); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 6px; font-size: 12px; overflow-x: auto; flex-wrap: wrap;">
+          <span style="color: var(--text-muted); font-weight: 600; white-space: nowrap;">⚡ Quick Sort:</span>
+          <button class="btn btn-secondary ${isItemSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('itemNum')">🔢 ESL ID${dirArrow(isItemSorted)}</button>
+          <button class="btn btn-secondary ${isKvSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('kv')">⚡ KV${dirArrow(isKvSorted)}</button>
+          <button class="btn btn-secondary ${isSizeSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('size')">📏 Size${dirArrow(isSizeSorted)}</button>
+          <button class="btn btn-secondary ${isLocSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('location')">📍 Location${dirArrow(isLocSorted)}</button>
+          <button class="btn btn-secondary ${isStatSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('status')">🏷️ Status${dirArrow(isStatSorted)}</button>
+          <button class="btn btn-secondary ${isAssignedSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('assignedTo')">👤 Assigned To${dirArrow(isAssignedSorted)}</button>
+          <button class="btn btn-secondary ${isChangeOutSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('changeOutDate')">📅 Changeout Date${dirArrow(isChangeOutSorted)}</button>
+        </div>
+      `;
+    } else if (['hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(this.currentSheetKey)) {
+      const isItemSorted = this.sortCol && ['item #', 'item', 'serial #'].some(k => this.sortCol.toLowerCase().includes(k));
+      const isLocSorted = this.sortCol && this.sortCol.toLowerCase().includes('location');
+      const isStatSorted = this.sortCol && this.sortCol.toLowerCase().includes('status');
+      const isAssignedSorted = this.sortCol && this.sortCol.toLowerCase().includes('assigned');
+      const isChangeOutSorted = this.sortCol && (this.sortCol.toLowerCase().includes('change out') || this.sortCol.toLowerCase().includes('changeout') || this.sortCol.toLowerCase().includes('pad'));
+
+      presetBarHtml = `
+        <div style="padding: 8px 16px; background-color: var(--bg-secondary); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 6px; font-size: 12px; overflow-x: auto; flex-wrap: wrap;">
+          <span style="color: var(--text-muted); font-weight: 600; white-space: nowrap;">⚡ Quick Sort:</span>
+          <button class="btn btn-secondary ${isItemSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('itemNum')">🔢 Item #${dirArrow(isItemSorted)}</button>
+          <button class="btn btn-secondary ${isLocSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('location')">📍 Location${dirArrow(isLocSorted)}</button>
+          <button class="btn btn-secondary ${isStatSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('status')">🏷️ Status${dirArrow(isStatSorted)}</button>
+          <button class="btn btn-secondary ${isAssignedSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('assignedTo')">👤 Assigned To${dirArrow(isAssignedSorted)}</button>
+          <button class="btn btn-secondary ${isChangeOutSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('changeOutDate')">📅 Changeout Date${dirArrow(isChangeOutSorted)}</button>
+        </div>
+      `;
+    } else if (this.currentSheetKey === 'employees') {
+      const isLocSorted = this.sortCol === 'Location';
+      const isJobSorted = this.sortCol === 'Job Number';
+      const isLocJobSorted = this.multiSort && this.multiSort[0] === 'Location';
+      const isNameSorted = this.sortCol === 'Name';
+
       presetBarHtml = `
         <div style="padding: 8px 16px; background-color: var(--bg-secondary); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 8px; font-size: 12px;">
           <span style="color: var(--text-muted); font-weight: 600;">⚡ Quick Sort:</span>
-          <button class="btn btn-secondary ${this.sortCol === 'Location' ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px;" onclick="window.sheetNavigator.setPresetSort('location')">📍 Location</button>
-          <button class="btn btn-secondary ${this.sortCol === 'Job Number' ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px;" onclick="window.sheetNavigator.setPresetSort('jobNumber')">🔢 Job #</button>
-          <button class="btn btn-secondary ${this.multiSort ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px;" onclick="window.sheetNavigator.setPresetSort('locationJob')">📍+🔢 Location then Job #</button>
-          <button class="btn btn-secondary ${this.sortCol === 'Name' ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px;" onclick="window.sheetNavigator.setPresetSort('name')">👤 Name</button>
+          <button class="btn btn-secondary ${isLocSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px;" onclick="window.sheetNavigator.setPresetSort('location')">📍 Location${dirArrow(isLocSorted)}</button>
+          <button class="btn btn-secondary ${isJobSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px;" onclick="window.sheetNavigator.setPresetSort('jobNumber')">🔢 Job #${dirArrow(isJobSorted)}</button>
+          <button class="btn btn-secondary ${isLocJobSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px;" onclick="window.sheetNavigator.setPresetSort('locationJob')">📍+🔢 Location then Job #${dirArrow(isLocJobSorted)}</button>
+          <button class="btn btn-secondary ${isNameSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px;" onclick="window.sheetNavigator.setPresetSort('name')">👤 Name${dirArrow(isNameSorted)}</button>
         </div>
       `;
     } else if (this.currentSheetKey === 'job_tracking') {
+      const isStatSorted = this.sortCol === 'Status';
+      const isJobSorted = this.sortCol === 'Job Number';
+      const isStatJobSorted = this.multiSort && this.multiSort[0] === 'Status';
+      const isLocSorted = this.sortCol === 'Location';
+
       presetBarHtml = `
         <div style="padding: 8px 16px; background-color: var(--bg-secondary); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 8px; font-size: 12px;">
           <span style="color: var(--text-muted); font-weight: 600;">⚡ Quick Sort:</span>
-          <button class="btn btn-secondary ${this.sortCol === 'Status' ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px;" onclick="window.sheetNavigator.setPresetSort('status')">🏷️ Status</button>
-          <button class="btn btn-secondary ${this.sortCol === 'Job Number' ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px;" onclick="window.sheetNavigator.setPresetSort('jobNumber')">🔢 Job #</button>
-          <button class="btn btn-secondary ${this.multiSort && this.multiSort[0] === 'Status' ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px;" onclick="window.sheetNavigator.setPresetSort('statusJob')">🏷️+🔢 Status then Job #</button>
-          <button class="btn btn-secondary ${this.sortCol === 'Location' ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px;" onclick="window.sheetNavigator.setPresetSort('location')">📍 Location</button>
+          <button class="btn btn-secondary ${isStatSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px;" onclick="window.sheetNavigator.setPresetSort('status')">🏷️ Status${dirArrow(isStatSorted)}</button>
+          <button class="btn btn-secondary ${isJobSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px;" onclick="window.sheetNavigator.setPresetSort('jobNumber')">🔢 Job #${dirArrow(isJobSorted)}</button>
+          <button class="btn btn-secondary ${isStatJobSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px;" onclick="window.sheetNavigator.setPresetSort('statusJob')">🏷️+🔢 Status then Job #${dirArrow(isStatJobSorted)}</button>
+          <button class="btn btn-secondary ${isLocSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px;" onclick="window.sheetNavigator.setPresetSort('location')">📍 Location${dirArrow(isLocSorted)}</button>
         </div>
       `;
     } else if (this.currentSheetKey === 'safety_compliance') {
