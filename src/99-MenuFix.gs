@@ -62,6 +62,7 @@ function _buildGloveManagerMenu() {
       // === STEP 5: SAVE & BACKUP ===
       .addSubMenu(ui.createMenu('💾 Save & Backup')
         .addItem('💾 Save Current State to History', 'saveHistoryFast')
+        .addItem('🧹 Clean & Repair History Sheets', 'menuCleanHistorySheets')
         .addItem('💾 Create Backup Snapshot', 'createBackupSnapshot')
         .addItem('🔄 Export Offline Snapshot (Desktop App)', 'menuExportSyncSnapshot')
         .addItem('📂 View Backup Folder', 'openBackupFolder')
@@ -98,6 +99,7 @@ function _buildGloveManagerMenu() {
           .addItem('🗄️ Archive Lost & Failed Items', 'showArchiveLostFailedDialog')
           .addItem('↩️ Restore Item from Archive', 'showRestoreFromArchiveDialog')
           .addSeparator()
+          .addItem('🧹 Clean & Repair History Sheets', 'menuCleanHistorySheets')
           .addItem('🧹 Clean Up Located Items & Formatting', 'menuCleanupLocatedItems'))
 
         .addSubMenu(ui.createMenu('🛒 Purchase Orders')

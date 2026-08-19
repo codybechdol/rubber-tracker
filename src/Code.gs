@@ -11271,42 +11271,37 @@ function saveHistoryFast(silent) {
 
     /**
      * Check if entry is duplicate using in-memory lookup (O(1) instead of O(n))
-     * Only tracks Location + AssignedTo changes - if neither changed, it's a duplicate.
-     * DateAssigned changes alone do NOT trigger a new history entry.
+     * ONLY tracks AssignedTo changes - if AssignedTo is unchanged, it's a duplicate.
+     * Location changes or DateAssigned changes alone do NOT trigger a new history entry.
      */
-    function isDuplicateFast(lookup, itemNum, assignedTo, dateAssigned, location) {
+    function isDuplicateFast(lookup, itemNum, assignedTo) {
       var lastEntry = lookup[itemNum];
       if (!lastEntry) return false;
 
       var newAssignedTo = String(assignedTo || '').toLowerCase().trim();
-      var newLocation = String(location || '').toLowerCase().trim();
-
-      // Duplicate if BOTH assignedTo AND location are unchanged
-      return lastEntry.assignedTo === newAssignedTo &&
-             lastEntry.location === newLocation;
+      return lastEntry.assignedTo === newAssignedTo;
     }
 
     /**
      * Enhanced duplicate check that also returns change type/note
      * Returns: {isDuplicate: boolean, note: string}
-     * Only logs when Location or AssignedTo changes - DateAssigned changes alone are ignored.
+     * ONLY logs when AssignedTo changes.
      */
     function getChangeTypeFast(lookup, itemNum, assignedTo, dateAssigned, location, itemType) {
       var lastEntry = lookup[itemNum];
       var newAssignedTo = String(assignedTo || '').toLowerCase().trim();
-      var newLocation = String(location || '').toLowerCase().trim();
 
       // No previous entry - this is a new assignment
       if (!lastEntry) {
         return { isDuplicate: false, note: 'New Assignment' };
       }
 
-      // Check if BOTH location AND assignedTo are unchanged = duplicate (no log needed)
-      if (lastEntry.assignedTo === newAssignedTo && lastEntry.location === newLocation) {
+      // If AssignedTo is unchanged, it is a duplicate (no new log needed)
+      if (lastEntry.assignedTo === newAssignedTo) {
         return { isDuplicate: true, note: '' };
       }
 
-      // Not a duplicate - determine the type of change
+      // Not a duplicate - AssignedTo has changed
       var note = '';
 
       // Check for Previous Employee
@@ -11318,7 +11313,7 @@ function saveHistoryFast(silent) {
       }
 
       // Check for returned/unassigned items
-      var returnedKeywords = ['on shelf', 'storage', 'unassigned', 'available', 'lab'];
+      var returnedKeywords = ['on shelf', 'storage', 'unassigned', 'available', 'lab', 'packed for delivery', 'packed for testing'];
       for (var r = 0; r < returnedKeywords.length; r++) {
         if (newAssignedTo.indexOf(returnedKeywords[r]) !== -1 && lastEntry.assignedTo.indexOf(returnedKeywords[r]) === -1) {
           return {
@@ -11328,17 +11323,11 @@ function saveHistoryFast(silent) {
         }
       }
 
-      // Both changed
-      if (lastEntry.assignedTo !== newAssignedTo && lastEntry.location !== newLocation) {
+      // Reassigned from previous holder (include location if available)
+      if (lastEntry.location && lastEntry.location !== 'unknown') {
         note = 'Reassigned: ' + lastEntry.assignedTo + ' (' + lastEntry.location + ')';
-      }
-      // Only assignedTo changed
-      else if (lastEntry.assignedTo !== newAssignedTo) {
+      } else {
         note = 'Reassigned from ' + lastEntry.assignedTo;
-      }
-      // Only location changed
-      else if (lastEntry.location !== newLocation) {
-        note = 'Location change: ' + lastEntry.location + ' → ' + location;
       }
 
       return { isDuplicate: false, note: note };
@@ -12138,142 +12127,600 @@ function menuCleanupLocatedItems() {
  * we only want to keep the most recent location, not every location change.
  * Keeps only the LAST entry per unique combination (which has the current location).
  */
-function cleanupDuplicateItemHistory() {
+/**
+ * Master cleanup & repair function for all equipment history sheets:
+ * 1. Repairs corrupted/shifted columns (e.g. Size empty, Class holding Size, Location holding Date, AssignedTo holding 'Assigned').
+ * 2. Purges location-change-only noise and duplicate rows (only changes in Assigned To are kept).
+ * 3. Restores missing equipment metadata (Size, Class, Model, KV, Serial#, Length) from source inventory sheets.
+ * 4. Normalizes and standardizes Notes.
+ * 5. Rewrites clean data and applies proper date formatting.
+ *
+ * Covers: Gloves History, Sleeves History, Blankets History, MACKs History,
+ * HV Testers History, Phasing Sets History, AED History, Grounds History, Hot Sticks History.
+ *
+ * @param {boolean} silent - If true, suppresses UI alerts
+ * @returns {Object} { repaired: number, removed: number }
+ */
+function cleanAndRepairHistorySheets(silent) {
+  silent = silent || false;
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var ui = SpreadsheetApp.getUi();
 
-  ss.toast('Cleaning up duplicate history entries...', '💾 Please wait', -1);
-
-  // Each sheet definition includes:
-  //   name: sheet constant, label: display name,
-  //   numCols: total columns to read/write,
-  //   assignedToCol: 0-based index of AssignedTo column for dedup key
-  var sheets = [
-    { name: SHEET_GLOVES_HISTORY, label: 'Gloves History', numCols: 7, assignedToCol: 5 },
-    { name: SHEET_SLEEVES_HISTORY, label: 'Sleeves History', numCols: 7, assignedToCol: 5 },
-    { name: SHEET_BLANKETS_HISTORY, label: 'Blankets History', numCols: 7, assignedToCol: 5 },
-    { name: SHEET_HV_TESTERS_HISTORY, label: 'HV Testers History', numCols: 7, assignedToCol: 5 },
-    { name: SHEET_PHASING_SETS_HISTORY, label: 'Phasing Sets History', numCols: 8, assignedToCol: 6 },
-    { name: SHEET_AED_HISTORY, label: 'AED History', numCols: 6, assignedToCol: 4 }
-  ];
-
-  var totalRemoved = 0;
-  var results = [];
-
-  // Helper to normalize dates for comparison
-  function normalizeDate(dateStr) {
-    if (!dateStr) return '';
-    var str = String(dateStr).trim();
-    var d = new Date(str);
-    if (!isNaN(d.getTime())) {
-      var month = d.getMonth() + 1;
-      var day = d.getDate();
-      var year = d.getFullYear();
-      return month + '/' + day + '/' + year;
-    }
-    return str;
+  if (!silent) {
+    ss.toast('Cleaning & repairing history sheets...', '🧹 Please wait', -1);
   }
 
-  for (var s = 0; s < sheets.length; s++) {
-    var sheetInfo = sheets[s];
-    var sheet = ss.getSheetByName(sheetInfo.name);
+  // 1. Build Name -> Physical Location map from Employees
+  var nameToLocation = {};
+  var employeesSheet = ss.getSheetByName('Employees');
+  if (employeesSheet && employeesSheet.getLastRow() > 1) {
+    var empData = employeesSheet.getDataRange().getValues();
+    var empHeaders = empData[0];
+    var empNameIdx = 0;
+    var empLocIdx = -1;
+    for (var eh = 0; eh < empHeaders.length; eh++) {
+      if (String(empHeaders[eh]).trim().toLowerCase().indexOf('location') !== -1) {
+        empLocIdx = eh;
+        break;
+      }
+    }
+    if (empLocIdx === -1) empLocIdx = 2; // Column C fallback
+    for (var er = 1; er < empData.length; er++) {
+      var eName = String(empData[er][empNameIdx] || '').trim().toLowerCase();
+      var rawLoc = String(empData[er][empLocIdx] || '').trim();
+      var physLoc = typeof getPhysicalLocation === 'function' ? getPhysicalLocation(rawLoc) : rawLoc;
+      if (eName && physLoc) {
+        nameToLocation[eName] = physLoc;
+      }
+    }
+  }
 
+  // Standard shelf/special location map
+  nameToLocation['on shelf'] = 'Helena';
+  nameToLocation['packed for delivery'] = "Cody's Truck";
+  nameToLocation['packed for testing'] = "Cody's Truck";
+  nameToLocation['in testing'] = 'Arnett / JM Test';
+  nameToLocation['failed rubber'] = 'Destroyed';
+  nameToLocation['not repairable'] = 'Destroyed';
+  nameToLocation['lost'] = 'Lost';
+
+  // 2. Build metadata lookups from active inventory sheets
+  function buildMetaLookup(sheetName, itemNumColIdx, metaBuilder) {
+    var map = {};
+    var sheet = ss.getSheetByName(sheetName);
+    if (!sheet || sheet.getLastRow() < 2) return map;
+    var data = sheet.getDataRange().getValues();
+    for (var r = 1; r < data.length; r++) {
+      var itemNum = String(data[r][itemNumColIdx] || '').trim();
+      if (!itemNum) continue;
+      map[itemNum] = metaBuilder(data[r]);
+      map[itemNum.toLowerCase()] = map[itemNum];
+    }
+    return map;
+  }
+
+  var gloveMeta = buildMetaLookup(SHEET_GLOVES, COLS.INVENTORY.ITEM_NUM - 1, function(row) {
+    return {
+      size: String(row[COLS.INVENTORY.SIZE - 1] || '').trim(),
+      classVal: formatClass(row[COLS.INVENTORY.CLASS - 1]),
+      location: String(row[COLS.INVENTORY.LOCATION - 1] || '').trim(),
+      assignedTo: String(row[COLS.INVENTORY.ASSIGNED_TO - 1] || '').trim()
+    };
+  });
+
+  var sleeveMeta = buildMetaLookup(SHEET_SLEEVES, COLS.INVENTORY.ITEM_NUM - 1, function(row) {
+    return {
+      size: String(row[COLS.INVENTORY.SIZE - 1] || '').trim(),
+      classVal: formatClass(row[COLS.INVENTORY.CLASS - 1]),
+      location: String(row[COLS.INVENTORY.LOCATION - 1] || '').trim(),
+      assignedTo: String(row[COLS.INVENTORY.ASSIGNED_TO - 1] || '').trim()
+    };
+  });
+
+  var blanketMeta = buildMetaLookup(SHEET_BLANKETS, 0, function(row) {
+    return {
+      type: String(row[1] || '').trim(),
+      classVal: formatClass(row[2]),
+      location: String(row[5] || '').trim(),
+      assignedTo: String(row[7] || '').trim()
+    };
+  });
+
+  var mackMeta = buildMetaLookup(SHEET_MACKS, 0, function(row) {
+    return {
+      kv: String(row[1] || '').trim(),
+      size: String(row[2] || '').trim(),
+      length: String(row[3] || '').trim(),
+      location: String(row[6] || '').trim(),
+      assignedTo: String(row[8] || '').trim()
+    };
+  });
+
+  var hvMeta = buildMetaLookup(SHEET_HV_TESTERS, 0, function(row) {
+    return {
+      model: String(row[1] || '').trim(),
+      serialNum: String(row[3] || '').trim(),
+      location: String(row[6] || '').trim(),
+      assignedTo: String(row[8] || '').trim()
+    };
+  });
+
+  var psMeta = buildMetaLookup(SHEET_PHASING_SETS, 0, function(row) {
+    return {
+      model: String(row[1] || '').trim(),
+      kv: String(row[2] || '').trim(),
+      serialNum: String(row[3] || '').trim(),
+      location: String(row[6] || '').trim(),
+      assignedTo: String(row[8] || '').trim()
+    };
+  });
+
+  var aedMeta = buildMetaLookup(SHEET_AED, 0, function(row) {
+    return {
+      model: String(row[1] || '').trim(),
+      location: String(row[3] || '').trim(),
+      assignedTo: String(row[4] || '').trim()
+    };
+  });
+
+  var groundsMeta = buildMetaLookup(SHEET_GROUNDS, 0, function(row) {
+    return {
+      type: String(row[1] || '').trim(),
+      size: String(row[2] || '').trim(),
+      kv: String(row[3] || '').trim(),
+      length: String(row[4] || '').trim(),
+      location: String(row[7] || '').trim(),
+      assignedTo: String(row[9] || '').trim()
+    };
+  });
+
+  var hotSticksMeta = buildMetaLookup(SHEET_HOT_STICKS, 0, function(row) {
+    return {
+      type: String(row[1] || '').trim(),
+      length: String(row[2] || '').trim(),
+      location: String(row[5] || '').trim(),
+      assignedTo: String(row[7] || '').trim()
+    };
+  });
+
+  // 3. Define sheet configurations
+  var sheetConfigs = [
+    { name: SHEET_GLOVES_HISTORY, type: 'gloves', numCols: 7, itemIdx: 1, locIdx: 4, assignedIdx: 5, notesIdx: 6, meta: gloveMeta, label: 'Gloves History' },
+    { name: SHEET_SLEEVES_HISTORY, type: 'sleeves', numCols: 7, itemIdx: 1, locIdx: 4, assignedIdx: 5, notesIdx: 6, meta: sleeveMeta, label: 'Sleeves History' },
+    { name: SHEET_BLANKETS_HISTORY, type: 'blankets', numCols: 7, itemIdx: 1, locIdx: 4, assignedIdx: 5, notesIdx: 6, meta: blanketMeta, label: 'Blankets History' },
+    { name: SHEET_MACKS_HISTORY, type: 'macks', numCols: 8, itemIdx: 1, locIdx: 5, assignedIdx: 6, notesIdx: 7, meta: mackMeta, label: 'MACKs History' },
+    { name: SHEET_HV_TESTERS_HISTORY, type: 'hv_testers', numCols: 7, itemIdx: 1, locIdx: 4, assignedIdx: 5, notesIdx: 6, meta: hvMeta, label: 'HV Testers History' },
+    { name: SHEET_PHASING_SETS_HISTORY, type: 'phasing_sets', numCols: 8, itemIdx: 1, locIdx: 5, assignedIdx: 6, notesIdx: 7, meta: psMeta, label: 'Phasing Sets History' },
+    { name: SHEET_AED_HISTORY, type: 'aed', numCols: 6, itemIdx: 1, locIdx: 3, assignedIdx: 4, notesIdx: 5, meta: aedMeta, label: 'AED History' },
+    { name: SHEET_GROUNDS_HISTORY, type: 'grounds', numCols: 6, itemIdx: 1, locIdx: 3, assignedIdx: 4, notesIdx: 5, meta: groundsMeta, label: 'Grounds History' },
+    { name: SHEET_HOT_STICKS_HISTORY, type: 'hot_sticks', numCols: 7, itemIdx: 1, locIdx: 4, assignedIdx: 5, notesIdx: 6, meta: hotSticksMeta, label: 'Hot Sticks History' }
+  ];
+
+  function parseTimestamp(val) {
+    if (!val) return 0;
+    if (val instanceof Date) return val.getTime();
+    var s = String(val).trim();
+    if (s.indexOf('/') !== -1) {
+      var parts = s.split('/');
+      if (parts.length === 3) {
+        var m = parseInt(parts[0], 10) - 1;
+        var d = parseInt(parts[1], 10);
+        var y = parseInt(parts[2], 10);
+        return new Date(y, m, d, 12, 0, 0).getTime();
+      }
+    }
+    var t = new Date(s).getTime();
+    return isNaN(t) ? 0 : t;
+  }
+
+  function formatDateStr(val) {
+    if (!val) return '';
+    if (val instanceof Date) {
+      return (val.getMonth() + 1) + '/' + val.getDate() + '/' + val.getFullYear();
+    }
+    var s = String(val).trim();
+    if (s.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/)) return s;
+    var d = new Date(s);
+    if (!isNaN(d.getTime())) {
+      return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
+    }
+    return s;
+  }
+
+  function titleCase(str) {
+    if (!str) return '';
+    return String(str).toLowerCase().replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+  }
+
+  var totalRepaired = 0;
+  var totalRemoved = 0;
+  var reportSummary = [];
+
+  var returnedKeywords = ['on shelf', 'storage', 'unassigned', 'available', 'lab', 'packed for delivery', 'packed for testing'];
+
+  for (var sc = 0; sc < sheetConfigs.length; sc++) {
+    var cfg = sheetConfigs[sc];
+    var sheet = ss.getSheetByName(cfg.name);
     if (!sheet || sheet.getLastRow() < 2) {
-      results.push(sheetInfo.label + ': No data or not found');
+      reportSummary.push(cfg.label + ': No data or sheet not found');
       continue;
     }
 
-    var numCols = sheetInfo.numCols;
-    var assignedToIdx = sheetInfo.assignedToCol;
+    var lastRow = sheet.getLastRow();
+    var lastCol = sheet.getLastColumn();
+    var numRows = lastRow - 1;
+    var readCols = Math.max(cfg.numCols, lastCol);
+    var rawData = sheet.getRange(2, 1, numRows, readCols).getValues();
+    var displayData = sheet.getRange(2, 1, numRows, readCols).getDisplayValues();
 
-    var numRows = sheet.getLastRow() - 1;
-    var data = sheet.getRange(2, 1, numRows, numCols).getValues();
+    var repairedCount = 0;
+    var rawRows = [];
 
-    // First pass: find the LAST entry for each unique key (item + date + assignedTo)
-    // This ensures we keep the most current location
-    var lastEntryForKey = {};  // key -> row index
+    // Step A: Parse and repair individual rows
+    for (var r = 0; r < rawData.length; r++) {
+      var row = rawData[r];
+      var dispRow = displayData[r];
 
-    for (var i = 0; i < data.length; i++) {
-      var row = data[i];
-      // Column 0 = Date Assigned, Column 1 = Item#, assignedToIdx varies by sheet type
-      var dateAssigned = normalizeDate(row[0]);
-      var itemNum = String(row[1] || '').trim();
-      var assignedTo = String(row[assignedToIdx] || '').toLowerCase().trim();
+      var dateRaw = row[0];
+      var dateDisp = dispRow[0];
+      var itemNum = String(dispRow[cfg.itemIdx] || '').trim();
+      if (!itemNum) continue;
 
-      if (!itemNum) continue;  // Skip empty rows
+      var itemMeta = cfg.meta[itemNum] || cfg.meta[itemNum.toLowerCase()] || {};
 
-      // Key does NOT include location - we want to dedupe across location changes
-      var key = itemNum + '|' + dateAssigned + '|' + assignedTo;
+      if (cfg.type === 'gloves' || cfg.type === 'sleeves') {
+        var sizeVal = String(dispRow[2] || '').trim();
+        var classVal = String(dispRow[3] || '').trim();
+        var locVal = String(dispRow[4] || '').trim();
+        var assignedVal = String(dispRow[5] || '').trim();
+        var notesVal = String(dispRow[6] || '').trim();
 
-      // Always update to the latest index - so we keep the LAST occurrence
-      lastEntryForKey[key] = i;
+        if (!notesVal && readCols > 7) {
+          for (var oc = 7; oc < readCols; oc++) {
+            if (String(dispRow[oc] || '').trim()) {
+              notesVal = String(dispRow[oc] || '').trim();
+              break;
+            }
+          }
+        }
+
+        var isShifted = false;
+        var sizeWords = ['regular', 'large', 'small', 'extra large', 'split', '8', '8.5', '9', '9.5', '10', '10.5', '11', '12'];
+        var classLower = classVal.toLowerCase();
+        if (!sizeVal && sizeWords.indexOf(classLower) !== -1) {
+          isShifted = true;
+        }
+        if (locVal.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/) || row[4] instanceof Date) {
+          isShifted = true;
+        }
+        if (['assigned', 'in service', 'ready for delivery'].indexOf(assignedVal.toLowerCase()) !== -1) {
+          isShifted = true;
+        }
+
+        if (isShifted) {
+          repairedCount++;
+          if (sizeWords.indexOf(classLower) !== -1) {
+            sizeVal = titleCase(classVal);
+          } else {
+            sizeVal = itemMeta.size || sizeVal;
+          }
+          classVal = itemMeta.classVal || (classVal.match(/^[0-4]$/) ? classVal : '2');
+
+          var parsedFromNote = false;
+          if (notesVal) {
+            var reassignMatch = notesVal.match(/reassigned:\s*([^\(]+)(?:\(([^)]+)\))?/i);
+            if (reassignMatch) {
+              assignedVal = titleCase(reassignMatch[1].trim());
+              if (reassignMatch[2]) {
+                locVal = titleCase(reassignMatch[2].trim());
+              }
+              parsedFromNote = true;
+            }
+          }
+
+          if (!parsedFromNote && ['assigned', 'in service', ''].indexOf(assignedVal.toLowerCase()) !== -1) {
+            assignedVal = itemMeta.assignedTo || 'On Shelf';
+          }
+
+          if (locVal.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/) || row[4] instanceof Date || !locVal || locVal.toLowerCase() === 'unknown') {
+            locVal = nameToLocation[assignedVal.toLowerCase()] || itemMeta.location || 'Helena';
+          }
+        } else {
+          if (!sizeVal && itemMeta.size) sizeVal = itemMeta.size;
+          if (!classVal && itemMeta.classVal !== undefined) classVal = itemMeta.classVal;
+          classVal = formatClass(classVal);
+        }
+
+        rawRows.push({
+          dateRaw: dateRaw,
+          dateDisp: formatDateStr(dateDisp || dateRaw),
+          timestamp: parseTimestamp(dateDisp || dateRaw),
+          itemNum: itemNum,
+          size: sizeVal,
+          classVal: classVal,
+          location: locVal,
+          assignedTo: assignedVal,
+          notes: notesVal
+        });
+      } else if (cfg.type === 'blankets') {
+        var bType = String(dispRow[2] || '').trim() || itemMeta.type || 'Regular';
+        var bClass = formatClass(dispRow[3] || itemMeta.classVal || 2);
+        var bLoc = String(dispRow[4] || '').trim();
+        var bAssigned = String(dispRow[5] || '').trim();
+        var bNotes = String(dispRow[6] || '').trim();
+
+        if (!bLoc || bLoc.toLowerCase() === 'unknown') bLoc = nameToLocation[bAssigned.toLowerCase()] || itemMeta.location || 'Helena';
+
+        rawRows.push({
+          dateRaw: dateRaw,
+          dateDisp: formatDateStr(dateDisp || dateRaw),
+          timestamp: parseTimestamp(dateDisp || dateRaw),
+          itemNum: itemNum,
+          typeVal: bType,
+          classVal: bClass,
+          location: bLoc,
+          assignedTo: bAssigned,
+          notes: bNotes
+        });
+      } else if (cfg.type === 'macks') {
+        var mKV = String(dispRow[2] || '').trim() || itemMeta.kv || '';
+        var mSize = String(dispRow[3] || '').trim() || itemMeta.size || '';
+        var mLength = String(dispRow[4] || '').trim() || itemMeta.length || '';
+        var mLoc = String(dispRow[5] || '').trim();
+        var mAssigned = String(dispRow[6] || '').trim();
+        var mNotes = String(dispRow[7] || '').trim();
+
+        if (!mLoc || mLoc.toLowerCase() === 'unknown') mLoc = nameToLocation[mAssigned.toLowerCase()] || itemMeta.location || 'Helena';
+
+        rawRows.push({
+          dateRaw: dateRaw,
+          dateDisp: formatDateStr(dateDisp || dateRaw),
+          timestamp: parseTimestamp(dateDisp || dateRaw),
+          itemNum: itemNum,
+          kv: mKV,
+          size: mSize,
+          length: mLength,
+          location: mLoc,
+          assignedTo: mAssigned,
+          notes: mNotes
+        });
+      } else if (cfg.type === 'hv_testers') {
+        var hvModel = String(dispRow[2] || '').trim() || itemMeta.model || '';
+        var hvSerial = String(dispRow[3] || '').trim() || itemMeta.serialNum || '';
+        var hvLoc = String(dispRow[4] || '').trim();
+        var hvAssigned = String(dispRow[5] || '').trim();
+        var hvNotes = String(dispRow[6] || '').trim();
+
+        if (!hvLoc || hvLoc.toLowerCase() === 'unknown') hvLoc = nameToLocation[hvAssigned.toLowerCase()] || itemMeta.location || 'Helena';
+
+        rawRows.push({
+          dateRaw: dateRaw,
+          dateDisp: formatDateStr(dateDisp || dateRaw),
+          timestamp: parseTimestamp(dateDisp || dateRaw),
+          itemNum: itemNum,
+          model: hvModel,
+          serialNum: hvSerial,
+          location: hvLoc,
+          assignedTo: hvAssigned,
+          notes: hvNotes
+        });
+      } else if (cfg.type === 'phasing_sets') {
+        var psModel = String(dispRow[2] || '').trim() || itemMeta.model || '';
+        var psKV = String(dispRow[3] || '').trim() || itemMeta.kv || '';
+        var psSerial = String(dispRow[4] || '').trim() || itemMeta.serialNum || '';
+        var psLoc = String(dispRow[5] || '').trim();
+        var psAssigned = String(dispRow[6] || '').trim();
+        var psNotes = String(dispRow[7] || '').trim();
+
+        if (!psLoc || psLoc.toLowerCase() === 'unknown') psLoc = nameToLocation[psAssigned.toLowerCase()] || itemMeta.location || 'Helena';
+
+        rawRows.push({
+          dateRaw: dateRaw,
+          dateDisp: formatDateStr(dateDisp || dateRaw),
+          timestamp: parseTimestamp(dateDisp || dateRaw),
+          itemNum: itemNum,
+          model: psModel,
+          kv: psKV,
+          serialNum: psSerial,
+          location: psLoc,
+          assignedTo: psAssigned,
+          notes: psNotes
+        });
+      } else if (cfg.type === 'aed') {
+        var aedModel = String(dispRow[2] || '').trim() || itemMeta.model || '';
+        var aedLoc = String(dispRow[3] || '').trim();
+        var aedAssigned = String(dispRow[4] || '').trim();
+        var aedNotes = String(dispRow[5] || '').trim();
+
+        if (!aedLoc || aedLoc.toLowerCase() === 'unknown') aedLoc = nameToLocation[aedAssigned.toLowerCase()] || itemMeta.location || 'Helena';
+
+        rawRows.push({
+          dateRaw: dateRaw,
+          dateDisp: formatDateStr(dateDisp || dateRaw),
+          timestamp: parseTimestamp(dateDisp || dateRaw),
+          itemNum: itemNum,
+          model: aedModel,
+          location: aedLoc,
+          assignedTo: aedAssigned,
+          notes: aedNotes
+        });
+      } else if (cfg.type === 'grounds') {
+        var gType = String(dispRow[2] || '').trim() || itemMeta.type || '';
+        var gLoc = String(dispRow[3] || '').trim();
+        var gAssigned = String(dispRow[4] || '').trim();
+        var gNotes = String(dispRow[5] || '').trim();
+
+        if (!gLoc || gLoc.toLowerCase() === 'unknown') gLoc = nameToLocation[gAssigned.toLowerCase()] || itemMeta.location || 'Helena';
+
+        rawRows.push({
+          dateRaw: dateRaw,
+          dateDisp: formatDateStr(dateDisp || dateRaw),
+          timestamp: parseTimestamp(dateDisp || dateRaw),
+          itemNum: itemNum,
+          typeVal: gType,
+          location: gLoc,
+          assignedTo: gAssigned,
+          notes: gNotes
+        });
+      } else if (cfg.type === 'hot_sticks') {
+        var hsType = String(dispRow[2] || '').trim() || itemMeta.type || '';
+        var hsLength = String(dispRow[3] || '').trim() || itemMeta.length || '';
+        var hsLoc = String(dispRow[4] || '').trim();
+        var hsAssigned = String(dispRow[5] || '').trim();
+        var hsNotes = String(dispRow[6] || '').trim();
+
+        if (!hsLoc || hsLoc.toLowerCase() === 'unknown') hsLoc = nameToLocation[hsAssigned.toLowerCase()] || itemMeta.location || 'Helena';
+
+        rawRows.push({
+          dateRaw: dateRaw,
+          dateDisp: formatDateStr(dateDisp || dateRaw),
+          timestamp: parseTimestamp(dateDisp || dateRaw),
+          itemNum: itemNum,
+          typeVal: hsType,
+          length: hsLength,
+          location: hsLoc,
+          assignedTo: hsAssigned,
+          notes: hsNotes
+        });
+      }
     }
 
-    // Second pass: collect only the rows we want to keep
-    var uniqueRows = [];
-    var duplicateCount = 0;
-
-    for (var j = 0; j < data.length; j++) {
-      var row = data[j];
-      var dateAssigned = normalizeDate(row[0]);
-      var itemNum = String(row[1] || '').trim();
-      var assignedTo = String(row[assignedToIdx] || '').toLowerCase().trim();
-
-      if (!itemNum) {
-        // Keep rows without item numbers (probably empty or malformed)
-        uniqueRows.push(row);
-        continue;
-      }
-
-      var key = itemNum + '|' + dateAssigned + '|' + assignedTo;
-
-      // Only keep this row if it's the LAST entry for this key
-      if (lastEntryForKey[key] === j) {
-        uniqueRows.push(row);
-      } else {
-        duplicateCount++;
-      }
+    // Step B: Group by itemNum, sort chronologically, and deduplicate by Assigned To
+    var itemGroups = {};
+    for (var i = 0; i < rawRows.length; i++) {
+      var itemKey = rawRows[i].itemNum;
+      if (!itemGroups[itemKey]) itemGroups[itemKey] = [];
+      itemGroups[itemKey].push(rawRows[i]);
     }
 
-    // Only rewrite if we found duplicates
-    if (duplicateCount > 0) {
-      // Clear ALL data rows including any overflow columns (prevents orphaned data in extra columns)
-      if (numRows > 0) {
-        var lastCol = sheet.getLastColumn();
-        var clearCols = Math.max(numCols, lastCol);
-        sheet.getRange(2, 1, numRows, clearCols).clearContent();
-      }
+    var cleanRows = [];
+    var removedCount = 0;
 
-      // Write back unique rows
-      if (uniqueRows.length > 0) {
-        sheet.getRange(2, 1, uniqueRows.length, numCols).setValues(uniqueRows);
-      }
+    var itemKeys = Object.keys(itemGroups);
+    for (var k = 0; k < itemKeys.length; k++) {
+      var group = itemGroups[itemKeys[k]];
 
-      // Delete overflow columns entirely if they exist (avoids Table header issues)
-      var sheetLastCol = sheet.getLastColumn();
-      if (sheetLastCol > numCols) {
-        try {
-          sheet.deleteColumns(numCols + 1, sheetLastCol - numCols);
-        } catch (delErr) {
-          Logger.log('cleanupDuplicateItemHistory: Could not delete overflow cols for ' + sheetInfo.label + ': ' + delErr);
+      group.sort(function(a, b) {
+        return a.timestamp - b.timestamp;
+      });
+
+      var prevEntry = null;
+
+      for (var g = 0; g < group.length; g++) {
+        var entry = group[g];
+        var curAssignedLower = String(entry.assignedTo || '').toLowerCase().trim();
+
+        if (prevEntry) {
+          var prevAssignedLower = String(prevEntry.assignedTo || '').toLowerCase().trim();
+
+          if (curAssignedLower === prevAssignedLower) {
+            removedCount++;
+            if (entry.location && entry.location.toLowerCase() !== 'unknown') {
+              prevEntry.location = entry.location;
+            }
+            continue;
+          }
+        }
+
+        // Generate clean note
+        if (!prevEntry) {
+          if (!entry.notes || entry.notes.toLowerCase().indexOf('location change') !== -1 || entry.notes.toLowerCase().indexOf('reassigned: assigned') !== -1) {
+            entry.notes = 'New Assignment';
+          }
+        } else {
+          var isReturned = false;
+          for (var rk = 0; rk < returnedKeywords.length; rk++) {
+            if (curAssignedLower.indexOf(returnedKeywords[rk]) !== -1 && prevAssignedLower.indexOf(returnedKeywords[rk]) === -1) {
+              isReturned = true;
+              break;
+            }
+          }
+
+          if (isReturned) {
+            entry.notes = 'Returned from ' + prevEntry.assignedTo;
+          } else if (curAssignedLower === 'previous employee') {
+            entry.notes = 'Last working location: ' + (entry.location || 'Unknown');
+          } else {
+            if (prevEntry.location && prevEntry.location.toLowerCase() !== 'unknown') {
+              entry.notes = 'Reassigned: ' + prevEntry.assignedTo + ' (' + prevEntry.location + ')';
+            } else {
+              entry.notes = 'Reassigned from ' + prevEntry.assignedTo;
+            }
+          }
+        }
+
+        prevEntry = entry;
+
+        if (cfg.type === 'gloves' || cfg.type === 'sleeves') {
+          cleanRows.push([entry.dateDisp, entry.itemNum, entry.size, entry.classVal, entry.location, entry.assignedTo, entry.notes]);
+        } else if (cfg.type === 'blankets') {
+          cleanRows.push([entry.dateDisp, entry.itemNum, entry.typeVal, entry.classVal, entry.location, entry.assignedTo, entry.notes]);
+        } else if (cfg.type === 'macks') {
+          cleanRows.push([entry.dateDisp, entry.itemNum, entry.kv, entry.size, entry.length, entry.location, entry.assignedTo, entry.notes]);
+        } else if (cfg.type === 'hv_testers') {
+          cleanRows.push([entry.dateDisp, entry.itemNum, entry.model, entry.serialNum, entry.location, entry.assignedTo, entry.notes]);
+        } else if (cfg.type === 'phasing_sets') {
+          cleanRows.push([entry.dateDisp, entry.itemNum, entry.model, entry.kv, entry.serialNum, entry.location, entry.assignedTo, entry.notes]);
+        } else if (cfg.type === 'aed') {
+          cleanRows.push([entry.dateDisp, entry.itemNum, entry.model, entry.location, entry.assignedTo, entry.notes]);
+        } else if (cfg.type === 'grounds') {
+          cleanRows.push([entry.dateDisp, entry.itemNum, entry.typeVal, entry.location, entry.assignedTo, entry.notes]);
+        } else if (cfg.type === 'hot_sticks') {
+          cleanRows.push([entry.dateDisp, entry.itemNum, entry.typeVal, entry.length, entry.location, entry.assignedTo, entry.notes]);
         }
       }
     }
 
-    results.push(sheetInfo.label + ': Removed ' + duplicateCount + ' duplicates');
-    totalRemoved += duplicateCount;
+    // Step C: Rewrite clean data to sheet
+    if (numRows > 0) {
+      sheet.getRange(2, 1, numRows, readCols).clearContent();
+    }
+
+    if (cleanRows.length > 0) {
+      sheet.getRange(2, 1, cleanRows.length, cfg.numCols).setValues(cleanRows);
+      try {
+        sheet.getRange(2, 1, cleanRows.length, 1).setNumberFormat('MM/dd/yyyy');
+      } catch (fmtErr) { /* ignore */ }
+    }
+
+    if (lastCol > cfg.numCols) {
+      try {
+        sheet.deleteColumns(cfg.numCols + 1, lastCol - cfg.numCols);
+      } catch (delErr) {
+        Logger.log('Could not delete overflow cols for ' + cfg.label + ': ' + delErr);
+      }
+    }
+
+    totalRepaired += repairedCount;
+    totalRemoved += removedCount;
+    reportSummary.push(cfg.label + ': Repaired ' + repairedCount + ' rows, removed ' + removedCount + ' duplicate/location noise rows (' + cleanRows.length + ' entries kept)');
   }
 
-  ss.toast('Cleanup complete!', '✅ Done', 3);
+  if (!silent) {
+    ss.toast('History cleanup & repair complete!', '✅ Complete', 4);
+    var alertMsg = '🧹 History Sheets Cleanup & Repair Complete\n\n' +
+      reportSummary.join('\n') +
+      '\n\nTotal rows repaired: ' + totalRepaired +
+      '\nTotal duplicate / location noise rows removed: ' + totalRemoved;
+    ui.alert(alertMsg);
+  }
 
-  var message = '🧹 Duplicate History Cleanup Complete\n\n';
-  message += results.join('\n');
-  message += '\n\nTotal removed: ' + totalRemoved;
+  Logger.log('cleanAndRepairHistorySheets: ' + reportSummary.join(' | '));
+  return { repaired: totalRepaired, removed: totalRemoved };
+}
 
-  ui.alert(message);
-  Logger.log('cleanupDuplicateItemHistory: ' + message.replace(/\n/g, ' | '));
+/**
+ * Menu wrapper for cleanAndRepairHistorySheets.
+ */
+function menuCleanHistorySheets() {
+  cleanAndRepairHistorySheets(false);
+}
 
-  return totalRemoved;
+/**
+ * Alias for cleanAndRepairHistorySheets.
+ */
+function cleanupDuplicateItemHistory() {
+  return cleanAndRepairHistorySheets(false);
 }
 
 // NOTE: formatDateForHistory() is defined later in this file (around line 4826)
