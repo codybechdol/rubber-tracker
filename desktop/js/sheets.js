@@ -198,6 +198,7 @@ class SheetNavigator {
     html += `</tr></thead><tbody>`;
 
     let visibleRowCount = 0;
+    let currentSection = 'standard';
 
     grid.forEach((rowArr, rowIdx) => {
       const hasContent = visibleColIndices.some(c => String(rowArr[c] || '').trim() !== '');
@@ -217,6 +218,11 @@ class SheetNavigator {
       const isPrevEmpHeader = firstCell.includes('Previous Employee');
       const isClassReclaimHeader = firstCell.includes('Class Reclaims');
       const isLostHeader = (firstCell.includes('Lost ') && firstCell.includes('Locate')) || firstCell.includes('Lost Glove') || firstCell.includes('Lost Sleeve') || firstCell.includes('Lost Blanket') || firstCell.includes('Lost MACK');
+
+      if (isClassHeader) currentSection = 'class';
+      else if (isPrevEmpHeader) currentSection = 'prev_emp';
+      else if (isClassReclaimHeader) currentSection = 'class_reclaim';
+      else if (isLostHeader) currentSection = 'lost';
 
       const isSubHeader = firstCell === 'Employee' || (rowArr[3] && String(rowArr[3]).includes('Current'));
       const isCityHeader = firstCell.startsWith('📍') || firstCell.startsWith('📍 ') || (rowArr[0] && rowArr[0].includes('📍'));
@@ -284,7 +290,29 @@ class SheetNavigator {
             const isChecked = (val === 'TRUE' || val === 'true' || val === true);
             customContent = `<span style="cursor: pointer; font-size: 14px;" data-toggle-checkbox="${rowIdx + 1}" data-col="${c + 1}" data-sheet="${this.escapeHtml(tableData.name)}" data-header="${this.escapeHtml(colLabel)}">${isChecked ? '☑️' : '⬜'}</span>`;
           } else if (isStatusCol) {
-            const vLower = val.toLowerCase().trim();
+            let vLower = val.toLowerCase().trim();
+
+            // Self-healing / section detection for Previous Employee rows:
+            const isPrevEmpRow = currentSection === 'prev_emp' || String(rowArr[5] || '').toUpperCase().includes('PREV EMP') || (String(rowArr[6] || '').trim() === '—' && currentSection !== 'lost');
+            if (isPrevEmpRow) {
+              const pVal = String(rowArr[8] || '').trim().toUpperCase();
+              const isChecked = (pVal === 'TRUE' || pVal === '1' || rowArr[8] === true);
+              const dVal = String(rowArr[9] || '').trim();
+              if (dVal && !dVal.includes('Stock') && !dVal.includes('Ready')) {
+                val = 'On Shelf';
+                vLower = 'on shelf';
+              } else if (isChecked) {
+                val = 'Ready For Test';
+                vLower = 'ready for test';
+              } else {
+                val = 'Return to Shelf';
+                vLower = 'return to shelf';
+              }
+              if (tableData.rawGrid && tableData.rawGrid[rowIdx]) {
+                tableData.rawGrid[rowIdx][c] = val;
+              }
+            }
+
             if (vLower === 'return to shelf' || vLower.includes('return to shelf') || vLower.includes('return')) {
               customContent = `<span class="badge" style="background-color: #475569; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">↩️ Return to Shelf</span>`;
             } else if (vLower === 'ready for test' || vLower.includes('ready for test') || vLower.includes('packed for testing')) {
