@@ -41,7 +41,16 @@
       <div class="nav-group">
         <div class="nav-group-title">Main Workspaces</div>
         <div class="nav-item active" data-view="sheets-view">
-          <span class="nav-item-icon">🧭</span> Active Inventory & Swaps
+          <span class="nav-item-icon">📦</span> Active Inventory & Swaps
+        </div>
+        <div class="nav-item" data-view="safety-compliance-view">
+          <span class="nav-item-icon">🛡️</span> Safety Compliance
+        </div>
+        <div class="nav-item" data-view="expiring-certs-view">
+          <span class="nav-item-icon">📜</span> Expiring Certs
+        </div>
+        <div class="nav-item" data-view="training-view">
+          <span class="nav-item-icon">🎓</span> Training
         </div>
         <div class="nav-item" data-view="history-view">
           <span class="nav-item-icon">📜</span> History Records
@@ -84,6 +93,42 @@
           <input type="text" id="sheet-search-input" class="sheet-search" placeholder="Filter rows in this sheet...">
         </div>
         <div class="grid-wrapper" id="sheet-grid-container"></div>
+      </section>
+
+      <!-- View: Safety Compliance Workspace -->
+      <section id="safety-compliance-view" class="view-container">
+        <div class="sheet-toolbar">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <h2 style="font-size: 16px;">🛡️ Safety Compliance Tracker</h2>
+            <span class="brand-badge" id="safety-compliance-row-count">0 rows</span>
+          </div>
+          <input type="text" id="safety-compliance-search-input" class="sheet-search" placeholder="Filter crews, weeks, or status...">
+        </div>
+        <div class="grid-wrapper" id="safety-compliance-grid-container"></div>
+      </section>
+
+      <!-- View: Expiring Certs Workspace -->
+      <section id="expiring-certs-view" class="view-container">
+        <div class="sheet-toolbar">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <h2 style="font-size: 16px;">📜 Expiring Certifications</h2>
+            <span class="brand-badge" id="expiring-certs-row-count">0 records</span>
+          </div>
+          <input type="text" id="expiring-certs-search-input" class="sheet-search" placeholder="Filter employees, cert types, job #...">
+        </div>
+        <div class="grid-wrapper" id="expiring-certs-grid-container"></div>
+      </section>
+
+      <!-- View: Training Workspace -->
+      <section id="training-view" class="view-container">
+        <div class="sheet-toolbar">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <h2 style="font-size: 16px;">🎓 Training Tracking</h2>
+            <span class="brand-badge" id="training-row-count">0 rows</span>
+          </div>
+          <input type="text" id="training-search-input" class="sheet-search" placeholder="Filter training records...">
+        </div>
+        <div class="grid-wrapper" id="training-grid-container"></div>
       </section>
 
       <!-- View 1B: History Records Grid -->
@@ -290,7 +335,11 @@
         if (viewId === 'trip-planner-view') window.tripPlanner.renderPlanner();
         if (viewId === 'tasks-view') window.taskManager.renderTasks();
         if (viewId === 'sheets-view') window.sheetNavigator.renderCurrentSheet();
+        if (viewId === 'safety-compliance-view') window.sheetNavigator.renderSafetyCompliance();
+        if (viewId === 'expiring-certs-view') window.sheetNavigator.renderExpiringCerts();
+        if (viewId === 'training-view') window.sheetNavigator.renderTraining();
         if (viewId === 'history-view') window.historyNavigator.renderCurrentHistory();
+        if (viewId === 'lookup-view') window.lookupApp.init();
       });
     });
 

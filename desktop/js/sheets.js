@@ -30,10 +30,7 @@ class SheetNavigator {
       { key: 'grounds', label: '⚡ Grounds', icon: '⚡', isSwap: false },
       { key: 'ground_swaps', label: '🔄 Ground Swaps', icon: '🔄', isSwap: true },
       { key: 'hot_sticks', label: '🔴 Hot Sticks', icon: '🔴', isSwap: false },
-      { key: 'hot_stick_swaps', label: '🔄 Hot Stick Swaps', icon: '🔄', isSwap: true },
-      { key: 'safety_compliance', label: '🛡️ Safety Compliance', icon: '🛡️', isSwap: false },
-      { key: 'expiring_certs', label: '📜 Expiring Certs', icon: '📜', isSwap: false },
-      { key: 'training_tracking', label: '📚 Training', icon: '📚', isSwap: false }
+      { key: 'hot_stick_swaps', label: '🔄 Hot Stick Swaps', icon: '🔄', isSwap: true }
     ];
   }
 
@@ -89,7 +86,16 @@ class SheetNavigator {
       this.sortDir = 'asc';
     }
     this.multiSort = null;
-    this.renderCurrentSheet();
+    
+    const activeView = document.querySelector('.view-container.active');
+    if (activeView) {
+      if (activeView.id === 'safety-compliance-view') this.renderSafetyCompliance();
+      else if (activeView.id === 'expiring-certs-view') this.renderExpiringCerts();
+      else if (activeView.id === 'training-view') this.renderTraining();
+      else this.renderCurrentSheet();
+    } else {
+      this.renderCurrentSheet();
+    }
   }
 
   setPresetSort(type) {
@@ -235,7 +241,66 @@ class SheetNavigator {
 
   setComplianceWeek(weekStr) {
     this.selectedComplianceWeek = weekStr;
-    this.renderCurrentSheet();
+    const isDedicated = document.getElementById('safety-compliance-view') && document.getElementById('safety-compliance-view').classList.contains('active');
+    if (isDedicated) {
+      this.renderSafetyCompliance();
+    } else {
+      this.renderCurrentSheet();
+    }
+  }
+
+  renderSafetyCompliance() {
+    this.currentSheetKey = 'safety_compliance';
+    const container = document.getElementById('safety-compliance-grid-container');
+    const countBadge = document.getElementById('safety-compliance-row-count');
+    const searchInput = document.getElementById('safety-compliance-search-input');
+    if (!container) return;
+
+    if (searchInput && !searchInput.dataset.bound) {
+      searchInput.dataset.bound = 'true';
+      searchInput.addEventListener('input', (e) => {
+        this.searchTerm = e.target.value.toLowerCase().trim();
+        this.renderSafetyCompliance();
+      });
+    }
+
+    this.renderStandardTable(container, countBadge);
+  }
+
+  renderExpiringCerts() {
+    this.currentSheetKey = 'expiring_certs';
+    const container = document.getElementById('expiring-certs-grid-container');
+    const countBadge = document.getElementById('expiring-certs-row-count');
+    const searchInput = document.getElementById('expiring-certs-search-input');
+    if (!container) return;
+
+    if (searchInput && !searchInput.dataset.bound) {
+      searchInput.dataset.bound = 'true';
+      searchInput.addEventListener('input', (e) => {
+        this.searchTerm = e.target.value.toLowerCase().trim();
+        this.renderExpiringCerts();
+      });
+    }
+
+    this.renderStandardTable(container, countBadge);
+  }
+
+  renderTraining() {
+    this.currentSheetKey = 'training_tracking';
+    const container = document.getElementById('training-grid-container');
+    const countBadge = document.getElementById('training-row-count');
+    const searchInput = document.getElementById('training-search-input');
+    if (!container) return;
+
+    if (searchInput && !searchInput.dataset.bound) {
+      searchInput.dataset.bound = 'true';
+      searchInput.addEventListener('input', (e) => {
+        this.searchTerm = e.target.value.toLowerCase().trim();
+        this.renderTraining();
+      });
+    }
+
+    this.renderStandardTable(container, countBadge);
   }
 
   renderCurrentSheet() {
