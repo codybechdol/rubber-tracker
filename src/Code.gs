@@ -8632,7 +8632,7 @@ function handleInventoryAssignedToChange(ss, sheet, sheetName, editedRow, newVal
 
     // Find Location column dynamically
     for (var h = 0; h < empHeaders.length; h++) {
-      if (String(empHeaders[h]).trim().toLowerCase() === 'location') {
+      if (String(empHeaders[h]).trim().toLowerCase().indexOf('location') !== -1) {
         locationColIdx = h;
         break;
       }
@@ -8646,7 +8646,8 @@ function handleInventoryAssignedToChange(ss, sheet, sheetName, editedRow, newVal
     var nameToLocation = {};
     for (var i = 1; i < empData.length; i++) {
       var name = (empData[i][nameColIdx] || '').toString().trim().toLowerCase();
-      var loc = empData[i][locationColIdx] || '';
+      var rawLoc = (empData[i][locationColIdx] || '').toString().trim();
+      var loc = typeof getPhysicalLocation === 'function' ? getPhysicalLocation(rawLoc) : rawLoc;
       if (name) nameToLocation[name] = loc;
     }
 
@@ -8848,7 +8849,7 @@ function handleBlanketAssignedToChange(ss, sheet, editedRow, newValue) {
 
     // Find Location column dynamically
     for (var h = 0; h < empHeaders.length; h++) {
-      if (String(empHeaders[h]).trim().toLowerCase() === 'location') {
+      if (String(empHeaders[h]).trim().toLowerCase().indexOf('location') !== -1) {
         locationColIdx = h;
         break;
       }
@@ -8856,13 +8857,14 @@ function handleBlanketAssignedToChange(ss, sheet, editedRow, newValue) {
 
     if (locationColIdx === -1) {
       logEvent('handleBlanketAssignedToChange: Location column not found in Employees sheet!', 'ERROR');
-      locationColIdx = 1; // Fallback to column B
+      locationColIdx = 2; // Fallback to column C
     }
 
     var nameToLocation = {};
     for (var i = 1; i < empData.length; i++) {
       var name = (empData[i][nameColIdx] || '').toString().trim().toLowerCase();
-      var loc = empData[i][locationColIdx] || '';
+      var rawLoc = (empData[i][locationColIdx] || '').toString().trim();
+      var loc = typeof getPhysicalLocation === 'function' ? getPhysicalLocation(rawLoc) : rawLoc;
       if (name) nameToLocation[name] = loc;
     }
 
@@ -8999,19 +9001,20 @@ function handleHVTesterAssignedToChange(ss, sheet, editedRow, newValue) {
     var nameColIdx = 0;
     var locationColIdx = -1;
     for (var h = 0; h < empHeaders.length; h++) {
-      if (String(empHeaders[h]).trim().toLowerCase() === 'location') {
+      if (String(empHeaders[h]).trim().toLowerCase().indexOf('location') !== -1) {
         locationColIdx = h;
         break;
       }
     }
     if (locationColIdx === -1) {
       logEvent('handleHVTesterAssignedToChange: Location column not found in Employees sheet!', 'ERROR');
-      locationColIdx = 1;
+      locationColIdx = 2; // Fallback to column C
     }
     var nameToLocation = {};
     for (var i = 1; i < empData.length; i++) {
       var name = (empData[i][nameColIdx] || '').toString().trim().toLowerCase();
-      var loc = empData[i][locationColIdx] || '';
+      var rawLoc = (empData[i][locationColIdx] || '').toString().trim();
+      var loc = typeof getPhysicalLocation === 'function' ? getPhysicalLocation(rawLoc) : rawLoc;
       if (name) nameToLocation[name] = loc;
     }
     // Prefer the live sheet value; fall back to the event value if cell is blank
@@ -9110,7 +9113,7 @@ function handlePhasingSetAssignedToChange(ss, sheet, editedRow, newValue) {
     var locationColIdx = -1;
 
     for (var h = 0; h < empHeaders.length; h++) {
-      if (String(empHeaders[h]).trim().toLowerCase() === 'location') {
+      if (String(empHeaders[h]).trim().toLowerCase().indexOf('location') !== -1) {
         locationColIdx = h;
         break;
       }
@@ -9118,13 +9121,14 @@ function handlePhasingSetAssignedToChange(ss, sheet, editedRow, newValue) {
 
     if (locationColIdx === -1) {
       logEvent('handlePhasingSetAssignedToChange: Location column not found in Employees sheet!', 'ERROR');
-      locationColIdx = 1;
+      locationColIdx = 2; // Fallback to column C
     }
 
     var nameToLocation = {};
     for (var i = 1; i < empData.length; i++) {
       var name = (empData[i][nameColIdx] || '').toString().trim().toLowerCase();
-      var loc = empData[i][locationColIdx] || '';
+      var rawLoc = (empData[i][locationColIdx] || '').toString().trim();
+      var loc = typeof getPhysicalLocation === 'function' ? getPhysicalLocation(rawLoc) : rawLoc;
       if (name) nameToLocation[name] = loc;
     }
 
@@ -24128,7 +24132,7 @@ function handleMackAssignedToChange(ss, sheet, editedRow, newValue) {
     var locationColIdx = -1;
 
     for (var h = 0; h < empHeaders.length; h++) {
-      if (String(empHeaders[h]).trim().toLowerCase() === 'location') {
+      if (String(empHeaders[h]).trim().toLowerCase().indexOf('location') !== -1) {
         locationColIdx = h;
         break;
       }
@@ -24136,13 +24140,14 @@ function handleMackAssignedToChange(ss, sheet, editedRow, newValue) {
 
     if (locationColIdx === -1) {
       logEvent('handleMackAssignedToChange: Location column not found in Employees sheet!', 'ERROR');
-      locationColIdx = 1; // Fallback to column B
+      locationColIdx = 2; // Fallback to column C
     }
 
     var nameToLocation = {};
     for (var i = 1; i < empData.length; i++) {
       var name = (empData[i][nameColIdx] || '').toString().trim().toLowerCase();
-      var loc = empData[i][locationColIdx] || '';
+      var rawLoc = (empData[i][locationColIdx] || '').toString().trim();
+      var loc = typeof getPhysicalLocation === 'function' ? getPhysicalLocation(rawLoc) : rawLoc;
       if (name) nameToLocation[name] = loc;
     }
 

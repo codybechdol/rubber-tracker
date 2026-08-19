@@ -31,7 +31,7 @@ function syncInventoryLocations() {
 
     // Find Location column
     for (var h = 0; h < empHeaders.length; h++) {
-      if (String(empHeaders[h]).trim().toLowerCase() === 'location') {
+      if (String(empHeaders[h]).trim().toLowerCase().indexOf('location') !== -1) {
         locationColIdx = h;
         break;
       }
@@ -39,7 +39,7 @@ function syncInventoryLocations() {
 
     if (locationColIdx === -1) {
       logEvent('syncInventoryLocations: Location column not found in Employees sheet!', 'ERROR');
-      return;
+      locationColIdx = 2;
     }
 
     // Build name -> location map (case-insensitive)
@@ -156,7 +156,7 @@ function syncSheetLocations(ss, sheetName, nameToLocation) {
 
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).trim().toLowerCase();
-    if (header === 'location') locationColIdx = h;
+    if (header.indexOf('location') !== -1) locationColIdx = h;
     if (header === 'assigned to' || header === 'employee name' || header === 'employee') assignedToColIdx = h;
   }
 

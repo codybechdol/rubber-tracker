@@ -366,7 +366,10 @@ function applyBatchSyncMutations(mutations) {
                       var empLocIdx = 2; // Default C
                       for (var eh = 0; eh < empData[0].length; eh++) {
                         var ehStr = String(empData[0][eh]).toLowerCase().trim();
-                        if (ehStr === 'location') empLocIdx = eh;
+                        if (ehStr.indexOf('location') !== -1) {
+                          empLocIdx = eh;
+                          break;
+                        }
                       }
                       for (var er = 1; er < empData.length; er++) {
                         var eName = String(empData[er][empNameIdx] || '').trim().toLowerCase();

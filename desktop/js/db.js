@@ -378,9 +378,21 @@ class LocalDatabase {
               // Look up employee location from employees table
               const empTable = this.snapshot.tables['employees'];
               if (empTable && empTable.rows) {
-                const emp = empTable.rows.find(e => String(e['Name'] || e['Employee Name'] || '').trim().toLowerCase() === assignedLower);
-                if (emp && emp['Location']) {
-                  newLocation = emp['Location'];
+                const emp = empTable.rows.find(e => {
+                  const nameVal = String(e['Name'] || e['Employee Name'] || e['Employee'] || Object.values(e)[0] || '').trim().toLowerCase();
+                  return nameVal === assignedLower;
+                });
+                if (emp) {
+                  for (const k of Object.keys(emp)) {
+                    if (k.toLowerCase().includes('location')) {
+                      let rawL = String(emp[k] || '').trim();
+                      if (rawL.includes('(') && rawL.includes(')')) {
+                        rawL = rawL.replace(/\s*\([^)]*\)/, '').trim();
+                      }
+                      newLocation = rawL;
+                      break;
+                    }
+                  }
                 }
               }
               if (!newLocation) newLocation = 'Helena';
@@ -395,8 +407,24 @@ class LocalDatabase {
               }
             }
 
-            if (newStatus) row['Status'] = newStatus;
-            if (newLocation) row['Location'] = newLocation;
+            if (newStatus) {
+              row['Status'] = newStatus;
+              if (table.rawGrid && table.rawGrid[mut.row - 1]) {
+                const statColIdx = table.headers.findIndex(h => h.toLowerCase().includes('status'));
+                if (statColIdx !== -1) table.rawGrid[mut.row - 1][statColIdx] = newStatus;
+              }
+            }
+            if (newLocation) {
+              row['Location'] = newLocation;
+              if (table.rawGrid && table.rawGrid[mut.row - 1]) {
+                const locColIdx = table.headers.findIndex(h => h.toLowerCase().includes('location'));
+                if (locColIdx !== -1) table.rawGrid[mut.row - 1][locColIdx] = newLocation;
+              }
+            }
+            if (row['Change Out Date'] && table.rawGrid && table.rawGrid[mut.row - 1]) {
+              const chgColIdx = table.headers.findIndex(h => h.toLowerCase().includes('change out'));
+              if (chgColIdx !== -1) table.rawGrid[mut.row - 1][chgColIdx] = row['Change Out Date'];
+            }
           }
 
           // B. If Status was edited directly
