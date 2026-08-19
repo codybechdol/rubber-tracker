@@ -18,7 +18,7 @@
     </div>
 
     <div class="header-actions">
-      <div class="sync-status-badge">
+      <div class="sync-status-badge" id="sync-status-badge" style="cursor: pointer;" title="Click to view offline changes" onclick="window.syncEngine.showPendingChangesModal()">
         <span class="status-dot" id="sync-status-dot"></span>
         <span id="sync-status-text">Checking status...</span>
       </div>
@@ -170,6 +170,26 @@
 
     </main>
 
+  </div>
+
+  <!-- Sync Progress & Offline Changes Modal -->
+  <div id="sync-modal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 680px; width: 90%;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span id="sync-modal-icon" style="font-size: 18px;">🔄</span>
+          <span id="sync-modal-title">Syncing Offline Changes</span>
+        </div>
+        <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; cursor: pointer;" onclick="window.syncEngine.closeSyncModal()">✕</button>
+      </div>
+      <div class="modal-body" id="sync-modal-body" style="max-height: 60vh; overflow-y: auto; padding: 16px;">
+        <!-- Injected dynamically by sync.js -->
+      </div>
+      <div class="modal-footer" id="sync-modal-footer">
+        <button class="btn btn-secondary" id="sync-modal-clear-btn" style="display: none;" onclick="window.syncEngine.clearPendingOutbox()">🗑️ Clear Outbox</button>
+        <button class="btn btn-primary" id="sync-modal-close-btn" onclick="window.syncEngine.closeSyncModal()">Close</button>
+      </div>
+    </div>
   </div>
 
   <!-- Scripts -->
