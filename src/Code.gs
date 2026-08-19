@@ -12122,21 +12122,11 @@ function parseAndImportItemHistoryLog(equipmentType, itemNum, logText) {
     }
 
     if (rowsToAdd.length > 0) {
-      var startRow = histSheet.getLastRow() + 1;
       for (var r = 0; r < rowsToAdd.length; r++) {
-        if (typeof safeWriteRowToTable === 'function') {
-          safeWriteRowToTable(histSheet, startRow + r, rowsToAdd[r], histHeaders);
-        } else {
-          histSheet.appendRow(rowsToAdd[r]);
-        }
+        histSheet.appendRow(rowsToAdd[r]);
       }
       
-      // Auto clean and sort history sheet
-      try {
-        cleanAndRepairHistorySheets(true);
-      } catch (errSort) {
-        Logger.log('cleanAndRepairHistorySheets warning: ' + errSort);
-      }
+      SpreadsheetApp.flush();
 
       // Re-generate sync snapshot for offline desktop app
       try {

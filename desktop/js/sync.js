@@ -274,9 +274,14 @@ class SyncEngine {
             console.log('Raw push response:', parseE);
           }
 
-          // Clear outbox once successfully sent to server
-          await this.db.clearOutbox();
-          this.renderModalChanges(outbox, `✅ Pushed ${outbox.length} change(s) successfully! Downloading fresh snapshot...`, 'success', false);
+          if (pushResult && pushResult.errors && pushResult.errors.length > 0) {
+            console.warn('Sync server errors:', pushResult.errors);
+            this.renderModalChanges(outbox, `⚠️ Server notice: ${pushResult.errors.join('; ')}`, 'error', true);
+          } else {
+            // Clear outbox once successfully sent to server
+            await this.db.clearOutbox();
+            this.renderModalChanges(outbox, `✅ Pushed ${outbox.length} change(s) successfully! Downloading fresh snapshot...`, 'success', false);
+          }
         } catch (pushErr) {
           console.warn('Sync push error:', pushErr);
           this.renderModalChanges(outbox, `⚠️ Push notice: ${pushErr.message}. Downloading latest database...`, 'error', true);
