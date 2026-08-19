@@ -888,6 +888,13 @@ function applyBatchSyncMutations(mutations) {
           }
           break;
 
+        case 'SET_TRIP_SCHEDULE':
+          if (mut.schedule && typeof setWorkSchedule === 'function') {
+            setWorkSchedule(mut.schedule);
+            appliedCount++;
+          }
+          break;
+
         case 'TRIGGER_SYNC_CREWS':
           if (typeof syncCrews === 'function') {
             syncCrews(true);

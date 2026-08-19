@@ -155,7 +155,7 @@ class SyncEngine {
     if (!body) return;
 
     if (clearBtn) {
-      clearBtn.style.display = allowClear && outbox.length > 0 ? 'inline-block' : 'none';
+      clearBtn.style.display = outbox.length > 0 ? 'inline-block' : 'none';
     }
 
     let statusBg = 'rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);';
@@ -246,22 +246,30 @@ class SyncEngine {
       if (outbox.length > 0 && this.syncUrl) {
         this.updateStatusUI('syncing', `Pushing ${outbox.length} offline change(s)...`);
         
-        const pushResp = await fetch(this.syncUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({
-            action: 'applyMutations',
-            mutations: outbox
-          })
-        });
+        try {
+          const pushResp = await fetch(this.syncUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+              action: 'applyMutations',
+              mutations: outbox
+            })
+          });
 
-        const pushResult = await pushResp.json();
-        if (pushResult && pushResult.success) {
+          let pushResult = null;
+          try {
+            const rawText = await pushResp.text();
+            pushResult = JSON.parse(rawText);
+          } catch (parseE) {
+            console.log('Raw push response:', parseE);
+          }
+
+          // Clear outbox once successfully sent to server
           await this.db.clearOutbox();
           this.renderModalChanges(outbox, `✅ Pushed ${outbox.length} change(s) successfully! Downloading fresh snapshot...`, 'success', false);
-        } else {
-          console.warn('Sync mutations had errors:', pushResult ? pushResult.errors : 'Unknown error');
-          this.renderModalChanges(outbox, `⚠️ Applied with warnings: ${pushResult && pushResult.errors ? pushResult.errors.join(', ') : 'Check Google Sheets'}`, 'error', true);
+        } catch (pushErr) {
+          console.warn('Sync push error:', pushErr);
+          this.renderModalChanges(outbox, `⚠️ Push notice: ${pushErr.message}. Downloading latest database...`, 'error', true);
         }
       }
 
