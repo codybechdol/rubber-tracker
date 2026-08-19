@@ -302,7 +302,6 @@ class SheetNavigator {
     }
 
     let html = `<table class="data-table"><thead><tr>`;
-    html += `<th style="width: 45px; text-align: center;">Row</th>`;
 
     colLabels.forEach((label) => {
       html += `<th>${this.escapeHtml(label)}</th>`;
@@ -375,7 +374,6 @@ class SheetNavigator {
 
       visibleRowCount++;
       html += `<tr>`;
-      html += `<td style="text-align: center; color: var(--text-muted); font-size: 11px; font-weight: bold; background-color: var(--bg-tertiary);">${rowIdx + 1}</td>`;
 
       const colSpan = visibleColIndices.length;
 
@@ -877,7 +875,6 @@ class SheetNavigator {
     }
 
     let html = presetBarHtml + `<table class="data-table"><thead><tr>`;
-    html += `<th style="width: 40px; text-align: center;">#</th>`;
 
     tableData.headers.forEach((h) => {
       let sortIndicator = '';
@@ -911,7 +908,7 @@ class SheetNavigator {
         lastRenderedWeek = currentWeekVal;
         html += `
           <tr style="background: linear-gradient(90deg, #1e3a8a 0%, #1e293b 100%);">
-            <td colspan="${tableData.headers.length + 1}" style="padding: 8px 16px; font-size: 13px; font-weight: 800; color: #93c5fd; text-align: left; border-top: 3px solid #3b82f6; border-bottom: 1px solid #3b82f6;">
+            <td colspan="${tableData.headers.length}" style="padding: 8px 16px; font-size: 13px; font-weight: 800; color: #93c5fd; text-align: left; border-top: 3px solid #3b82f6; border-bottom: 1px solid #3b82f6;">
               📅 Week of ${this.escapeHtml(currentWeekVal)}
             </td>
           </tr>
@@ -924,7 +921,7 @@ class SheetNavigator {
         lastRenderedLoc = currentLocVal;
         html += `
           <tr style="background: linear-gradient(90deg, #4c1d95 0%, #1e293b 100%);">
-            <td colspan="${tableData.headers.length + 1}" style="padding: 8px 16px; font-size: 13px; font-weight: 800; color: #c4b5fd; text-align: left; border-top: 3px solid #8b5cf6; border-bottom: 1px solid #8b5cf6;">
+            <td colspan="${tableData.headers.length}" style="padding: 8px 16px; font-size: 13px; font-weight: 800; color: #c4b5fd; text-align: left; border-top: 3px solid #8b5cf6; border-bottom: 1px solid #8b5cf6;">
               📍 Location: ${this.escapeHtml(currentLocVal)}
             </td>
           </tr>
@@ -937,7 +934,7 @@ class SheetNavigator {
         lastRenderedJob = currentJobVal;
         html += `
           <tr style="background: linear-gradient(90deg, #1e3a8a 0%, #1e293b 100%);">
-            <td colspan="${tableData.headers.length + 1}" style="padding: 8px 16px; font-size: 13px; font-weight: 800; color: #93c5fd; text-align: left; border-top: 3px solid #3b82f6; border-bottom: 1px solid #3b82f6;">
+            <td colspan="${tableData.headers.length}" style="padding: 8px 16px; font-size: 13px; font-weight: 800; color: #93c5fd; text-align: left; border-top: 3px solid #3b82f6; border-bottom: 1px solid #3b82f6;">
               🔢 Job #${this.escapeHtml(currentJobVal)}
             </td>
           </tr>
@@ -945,7 +942,6 @@ class SheetNavigator {
       }
 
       html += `<tr>`;
-      html += `<td style="text-align: center; color: var(--text-muted); font-size: 10px;">${sheetRowIdx}</td>`;
 
       tableData.headers.forEach((h, colIdx) => {
         let val = row[h] !== undefined ? row[h] : '';

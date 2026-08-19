@@ -314,7 +314,6 @@ class HistoryNavigator {
       if (countBadge) countBadge.textContent = `${rows.length} rows (${sortedItemKeys.length} items)`;
 
       let html = presetBarHtml + `<table class="data-table"><thead><tr>`;
-      html += `<th style="width: 40px; text-align: center;">#</th>`;
 
       headers.forEach(h => {
         let sortIndicator = '';
@@ -324,8 +323,6 @@ class HistoryNavigator {
         html += `<th onclick="window.historyNavigator.setSort('${this.escapeHtml(h)}')">${this.escapeHtml(h)}<span class="sort-indicator">${sortIndicator}</span></th>`;
       });
       html += `</tr></thead><tbody>`;
-
-      let globalRowIdx = 1;
 
       sortedItemKeys.forEach((itemKey, groupIdx) => {
         const groupRows = itemGroups[itemKey];
@@ -347,7 +344,7 @@ class HistoryNavigator {
         const topMargin = groupIdx > 0 ? 'border-top: 3px solid #3b82f6;' : '';
         html += `
           <tr class="history-item-group-header" style="background: linear-gradient(90deg, #1e293b 0%, #0f172a 100%); ${topMargin}">
-            <td colspan="${headers.length + 1}" style="padding: 12px 16px; border-bottom: 1px solid rgba(59, 130, 246, 0.3);">
+            <td colspan="${headers.length}" style="padding: 12px 16px; border-bottom: 1px solid rgba(59, 130, 246, 0.3);">
               <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 6px;">
                 <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                   <span style="background-color: #3b82f6; color: #ffffff; font-weight: 700; font-size: 12px; padding: 3px 10px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.3); display: inline-flex; align-items: center; gap: 5px; cursor: pointer;" title="Click to view complete lifecycle dossier" onclick="window.itemStatsEngine.openDossierModal('${this.escapeHtml(itemKey)}', '${this.currentSheetKey}')">
@@ -384,7 +381,7 @@ class HistoryNavigator {
           const isLastInGroup = rowInGroupIdx === groupRows.length - 1;
           const groupRowStyle = `border-left: 3px solid rgba(59, 130, 246, 0.5); ${isLastInGroup ? 'border-bottom: 2px solid var(--border-color);' : ''}`;
 
-          html += `<tr style="${groupRowStyle}"><td style="text-align: center; color: var(--text-muted); font-size: 11px;">${globalRowIdx++}</td>`;
+          html += `<tr style="${groupRowStyle}">`;
           
           headers.forEach(h => {
             const val = row[h] !== undefined && row[h] !== null ? row[h] : '';
@@ -441,7 +438,6 @@ class HistoryNavigator {
     if (countBadge) countBadge.textContent = `${rows.length} rows`;
 
     let html = presetBarHtml + `<table class="data-table"><thead><tr>`;
-    html += `<th style="width: 40px; text-align: center;">#</th>`;
 
     headers.forEach((h) => {
       let sortIndicator = '';
@@ -453,7 +449,7 @@ class HistoryNavigator {
     html += `</tr></thead><tbody>`;
 
     rows.forEach((row, idx) => {
-      html += `<tr><td style="text-align: center; color: var(--text-muted); font-size: 11px;">${idx + 1}</td>`;
+      html += `<tr>`;
       headers.forEach(h => {
         const val = row[h] !== undefined && row[h] !== null ? row[h] : '';
         const hLower = h.toLowerCase();
