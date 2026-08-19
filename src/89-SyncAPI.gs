@@ -210,6 +210,8 @@ function applyBatchSyncMutations(mutations) {
   for (var m = 0; m < mutations.length; m++) {
     var mut = mutations[m];
     try {
+      var sheetName = mut.sheetName || '';
+      var sheet = sheetName ? ss.getSheetByName(sheetName) : null;
       var actionsWithoutSheet = ['TRIGGER_SYNC_CREWS', 'SET_HOLIDAYS', 'SET_TRIP_SCHEDULE', 'IMPORT_HISTORY_LOG'];
       if (!sheet && actionsWithoutSheet.indexOf(mut.action) === -1) {
         errors.push('Sheet not found: ' + sheetName);
@@ -899,6 +901,7 @@ function applyBatchSyncMutations(mutations) {
             var importRes = parseAndImportItemHistoryLog(mut.equipmentType, mut.itemNum, mut.logText);
             if (importRes && importRes.success) {
               appliedCount++;
+              if (mut.sheetName) sheetsModified[mut.sheetName] = true;
             } else if (importRes && importRes.error) {
               errors.push('History import error: ' + importRes.error);
             }
@@ -937,7 +940,11 @@ function applyBatchSyncMutations(mutations) {
   }
 
   // Regenerate snapshot file so next sync is instantly up-to-date
-  generateAndStoreSyncSnapshot();
+  try {
+    generateAndStoreSyncSnapshot();
+  } catch (snapErr) {
+    Logger.log('applyBatchSyncMutations snapshot error: ' + snapErr);
+  }
 
   return {
     success: errors.length === 0,

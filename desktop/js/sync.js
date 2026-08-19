@@ -276,7 +276,10 @@ class SyncEngine {
 
           if (pushResult && pushResult.errors && pushResult.errors.length > 0) {
             console.warn('Sync server errors:', pushResult.errors);
-            this.renderModalChanges(outbox, `⚠️ Server notice: ${pushResult.errors.join('; ')}`, 'error', true);
+            this.renderModalChanges(outbox, `⚠️ Server error: ${pushResult.errors.join('; ')}`, 'error', true);
+            this.updateStatusUI('pending', 'Sync error / Pending changes');
+            this.isSyncing = false;
+            return { success: false, errors: pushResult.errors };
           } else {
             // Clear outbox once successfully sent to server
             await this.db.clearOutbox();

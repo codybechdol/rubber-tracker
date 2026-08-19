@@ -12122,8 +12122,26 @@ function parseAndImportItemHistoryLog(equipmentType, itemNum, logText) {
     }
 
     if (rowsToAdd.length > 0) {
-      for (var r = 0; r < rowsToAdd.length; r++) {
-        histSheet.appendRow(rowsToAdd[r]);
+      var writeSucceeded = false;
+      try {
+        var startRow = histSheet.getLastRow() + 1;
+        histSheet.getRange(startRow, 1, rowsToAdd.length, histHeaders.length).setValues(rowsToAdd);
+        writeSucceeded = true;
+      } catch (batchErr) {
+        Logger.log('parseAndImportItemHistoryLog batch setValues note: ' + batchErr);
+      }
+
+      if (!writeSucceeded) {
+        for (var r = 0; r < rowsToAdd.length; r++) {
+          try {
+            histSheet.appendRow(rowsToAdd[r]);
+          } catch (appErr) {
+            var targetRow = histSheet.getLastRow() + 1;
+            if (typeof safeWriteRowToTable === 'function') {
+              safeWriteRowToTable(histSheet, targetRow, rowsToAdd[r], histHeaders);
+            }
+          }
+        }
       }
       
       SpreadsheetApp.flush();
