@@ -434,8 +434,8 @@ class ItemStatsEngine {
           </div>
         </div>
 
-        <!-- 6-Card KPI Stat Grid -->
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 14px;">
+        <!-- 6-Card KPI Stat Grid (Single Horizontal Line) -->
+        <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-top: 14px;">
           
           <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
             <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">⏳ Total Lifespan</div>
