@@ -937,6 +937,13 @@ class SheetNavigator {
           }
         }
 
+        // Equipment Sheet Formatting (Clickable Item # for Lifecycle Dossier)
+        if (['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(this.currentSheetKey) && (hLower === 'item #' || hLower === 'item' || hLower === 'serial #' || hLower === 'esl id')) {
+          const itemKey = val;
+          const histKey = this.currentSheetKey + '_history';
+          customCellHtml = `<span style="font-weight: 700; color: #60a5fa; cursor: pointer; text-decoration: underline dotted;" title="Click to inspect complete lifecycle dossier" onclick="window.itemStatsEngine ? window.itemStatsEngine.openDossierModal('${this.escapeHtml(itemKey)}', '${this.escapeHtml(histKey)}') : null">${this.escapeHtml(val)}</span>`;
+        }
+
         // Employee Sheet Formatting
         if (this.currentSheetKey === 'employees') {
           if (hLower === 'job number' || hLower === 'job #') {

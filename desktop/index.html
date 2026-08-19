@@ -192,9 +192,29 @@
     </div>
   </div>
 
+  <!-- Item Lifecycle Dossier Modal -->
+  <div id="item-lifecycle-modal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 860px; width: 92%;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 18px;">📊</span>
+          <span id="item-lifecycle-modal-title">Item Lifecycle Dossier</span>
+        </div>
+        <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; cursor: pointer;" onclick="window.itemStatsEngine.closeDossierModal()">✕</button>
+      </div>
+      <div class="modal-body" id="item-lifecycle-modal-body" style="max-height: 75vh; overflow-y: auto; padding: 20px;">
+        <!-- Injected dynamically by item-stats.js -->
+      </div>
+      <div class="modal-footer" id="item-lifecycle-modal-footer">
+        <button class="btn btn-primary" onclick="window.itemStatsEngine.closeDossierModal()">Close Dossier</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Scripts -->
   <script src="js/db.js"></script>
   <script src="js/sync.js"></script>
+  <script src="js/item-stats.js"></script>
   <script src="js/sheets.js"></script>
   <script src="js/history.js"></script>
   <script src="js/trip-planner.js"></script>

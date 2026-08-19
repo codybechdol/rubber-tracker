@@ -340,14 +340,17 @@ class HistoryNavigator {
           }
         });
 
-        // Group Header Banner with distinct visual separation
+        // Calculate lifecycle stats for this item group
+        const stats = window.itemStatsEngine ? window.itemStatsEngine.analyzeLifecycle(itemKey, groupRows) : null;
+
+        // Group Header Banner with distinct visual separation & Lifecycle Stats
         const topMargin = groupIdx > 0 ? 'border-top: 3px solid #3b82f6;' : '';
         html += `
           <tr class="history-item-group-header" style="background: linear-gradient(90deg, #1e293b 0%, #0f172a 100%); ${topMargin}">
-            <td colspan="${headers.length + 1}" style="padding: 10px 14px; border-bottom: 1px solid rgba(59, 130, 246, 0.3);">
-              <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+            <td colspan="${headers.length + 1}" style="padding: 12px 16px; border-bottom: 1px solid rgba(59, 130, 246, 0.3);">
+              <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 6px;">
                 <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-                  <span style="background-color: #3b82f6; color: #ffffff; font-weight: 700; font-size: 12px; padding: 3px 10px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.3); display: inline-flex; align-items: center; gap: 5px;">
+                  <span style="background-color: #3b82f6; color: #ffffff; font-weight: 700; font-size: 12px; padding: 3px 10px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.3); display: inline-flex; align-items: center; gap: 5px; cursor: pointer;" title="Click to view complete lifecycle dossier" onclick="window.itemStatsEngine.openDossierModal('${this.escapeHtml(itemKey)}', '${this.currentSheetKey}')">
                     <span>${sheetMeta?.icon || '📦'}</span> ${this.escapeHtml(groupCol)}: ${this.escapeHtml(itemKey)}
                   </span>
                   ${metaDetails.length > 0 ? `
@@ -356,12 +359,22 @@ class HistoryNavigator {
                     </div>
                   ` : ''}
                 </div>
-                <div style="display: flex; align-items: center; gap: 6px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;" onclick="window.itemStatsEngine.openDossierModal('${this.escapeHtml(itemKey)}', '${this.currentSheetKey}')">
+                    <span>🔍</span> Inspect Lifecycle
+                  </button>
                   <span class="brand-badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 11px; font-weight: 600;">
                     ${groupRows.length} ${groupRows.length === 1 ? 'record' : 'lifecycle records'}
                   </span>
                 </div>
               </div>
+
+              ${stats ? `
+                <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 6px; padding: 8px 12px; margin-top: 6px;">
+                  ${window.itemStatsEngine.renderKpiChipsHtml(stats)}
+                  ${window.itemStatsEngine.renderSegmentedBarHtml(stats)}
+                </div>
+              ` : ''}
             </td>
           </tr>
         `;
