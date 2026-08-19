@@ -493,71 +493,106 @@ function applyBatchSyncMutations(mutations) {
 
                   // 2. Direct guarantee update on swap sheet and inventory sheet
                   var empName = String(sheet.getRange(mut.row, 1).getValue() || '').trim();
+                  var oldItemNum = String(sheet.getRange(mut.row, 2).getValue() || '').trim();
+                  var daysLeftVal = String(sheet.getRange(mut.row, 6).getValue() || '').trim().toUpperCase();
                   var pickListNum = String(sheet.getRange(mut.row, 7).getValue() || '').trim();
+                  var isPrevEmp = (daysLeftVal === 'PREV EMP' || (!pickListNum || pickListNum === '—' || pickListNum === '-'));
                   var today = new Date();
                   var todayStr = Utilities.formatDate(today, ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd');
                   var todayFormatted = Utilities.formatDate(today, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
 
-                  sheet.getRange(mut.row, 8).setValue(isChecked ? 'Ready For Delivery 🚚' : 'In Stock ✅');
-
-                  if (invSheet && pickListNum && pickListNum !== '—' && pickListNum !== '-') {
-                    var invData = invSheet.getDataRange().getValues();
-                    var invRowIdx = -1;
-                    for (var rIdx = 1; rIdx < invData.length; rIdx++) {
-                      var itm = String(invData[rIdx][0]).trim();
-                      var esl = String(invData[rIdx][1] || '').trim();
-                      if (itm === pickListNum || (esl && esl === pickListNum)) {
-                        invRowIdx = rIdx + 1;
-                        break;
+                  if (isPrevEmp) {
+                    sheet.getRange(mut.row, 8).setValue(isChecked ? 'Ready For Test' : 'Return to Shelf');
+                    if (invSheet && oldItemNum && oldItemNum !== '—' && oldItemNum !== '-') {
+                      var invData = invSheet.getDataRange().getValues();
+                      for (var rIdx = 1; rIdx < invData.length; rIdx++) {
+                        var itm = String(invData[rIdx][0]).trim();
+                        var esl = String(invData[rIdx][1] || '').trim();
+                        if (itm === oldItemNum || esl === oldItemNum) {
+                          var oldRowIdx = rIdx + 1;
+                          if (isChecked) {
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.STATUS).setValue('Ready For Test');
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.ASSIGNED_TO).setValue('Packed For Testing');
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.LOCATION).setValue("Cody's Truck");
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.PICKED_FOR).setValue('');
+                          } else {
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.STATUS).setValue('Assigned');
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.ASSIGNED_TO).setValue(empName);
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.LOCATION).setValue('Previous Employee');
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.PICKED_FOR).setValue('');
+                          }
+                          break;
+                        }
                       }
                     }
+                  } else {
+                    sheet.getRange(mut.row, 8).setValue(isChecked ? 'Ready For Delivery 🚚' : 'In Stock ✅');
 
-                    if (invRowIdx !== -1) {
-                      var colLoc, colStat, colAssigned, colDate, colChangeOut, colPicked;
-                      if (isBlanket) {
-                        colLoc = typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.LOCATION : 6;
-                        colStat = typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.STATUS : 7;
-                        colAssigned = typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.ASSIGNED_TO : 8;
-                        colDate = typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.DATE_ASSIGNED : 5;
-                        colChangeOut = typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.CHANGE_OUT_DATE : 9;
-                        colPicked = typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.PICKED_FOR : 10;
-                      } else {
-                        // Gloves, Sleeves, MACKs
-                        colLoc = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.LOCATION : 7;
-                        colStat = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.STATUS : 8;
-                        colAssigned = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.ASSIGNED_TO : 9;
-                        colDate = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.DATE_ASSIGNED : 6;
-                        colChangeOut = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.CHANGE_OUT_DATE : 10;
-                        colPicked = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.PICKED_FOR : 11;
+                    if (invSheet && pickListNum && pickListNum !== '—' && pickListNum !== '-') {
+                      var invData = invSheet.getDataRange().getValues();
+                      var invRowIdx = -1;
+                      for (var rIdx = 1; rIdx < invData.length; rIdx++) {
+                        var itm = String(invData[rIdx][0]).trim();
+                        var esl = String(invData[rIdx][1] || '').trim();
+                        if (itm === pickListNum || (esl && esl === pickListNum)) {
+                          invRowIdx = rIdx + 1;
+                          break;
+                        }
                       }
 
-                      if (isChecked) {
-                        invSheet.getRange(invRowIdx, colLoc).setValue("Cody's Truck");
-                        invSheet.getRange(invRowIdx, colStat).setValue('Ready For Delivery');
-                        invSheet.getRange(invRowIdx, colAssigned).setValue('Packed For Delivery');
-                        invSheet.getRange(invRowIdx, colDate).setValue(todayFormatted);
-                        invSheet.getRange(invRowIdx, colPicked).setValue(empName + ' Picked On ' + todayStr);
+                      if (invRowIdx !== -1) {
+                        var colLoc, colStat, colAssigned, colDate, colChangeOut, colPicked;
+                        if (isBlanket) {
+                          colLoc = typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.LOCATION : 6;
+                          colStat = typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.STATUS : 7;
+                          colAssigned = typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.ASSIGNED_TO : 8;
+                          colDate = typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.DATE_ASSIGNED : 5;
+                          colChangeOut = typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.CHANGE_OUT_DATE : 9;
+                          colPicked = typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.PICKED_FOR : 10;
+                        } else if (isMack) {
+                          colLoc = typeof COLS !== 'undefined' && COLS.MACKS ? COLS.MACKS.LOCATION : 7;
+                          colStat = typeof COLS !== 'undefined' && COLS.MACKS ? COLS.MACKS.STATUS : 8;
+                          colAssigned = typeof COLS !== 'undefined' && COLS.MACKS ? COLS.MACKS.ASSIGNED_TO : 9;
+                          colDate = typeof COLS !== 'undefined' && COLS.MACKS ? COLS.MACKS.DATE_ASSIGNED : 6;
+                          colChangeOut = typeof COLS !== 'undefined' && COLS.MACKS ? COLS.MACKS.CHANGE_OUT_DATE : 10;
+                          colPicked = typeof COLS !== 'undefined' && COLS.MACKS ? COLS.MACKS.PICKED_FOR : 11;
+                        } else {
+                          colLoc = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.LOCATION : 7;
+                          colStat = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.STATUS : 8;
+                          colAssigned = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.ASSIGNED_TO : 9;
+                          colDate = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.DATE_ASSIGNED : 6;
+                          colChangeOut = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.CHANGE_OUT_DATE : 10;
+                          colPicked = typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.PICKED_FOR : 11;
+                        }
 
-                        var chgDate = null;
-                        if (isBlanket && typeof calculateBlanketChangeOutDate === 'function') {
-                          var testDate = invSheet.getRange(invRowIdx, COLS.BLANKETS.TEST_DATE).getValue();
-                          chgDate = calculateBlanketChangeOutDate(testDate);
-                        } else if (isMack && typeof calculateMackChangeOutDate === 'function') {
-                          var mTestDate = invSheet.getRange(invRowIdx, COLS.MACKS.TEST_DATE).getValue();
-                          chgDate = calculateMackChangeOutDate(mTestDate);
-                        } else if (typeof calculateChangeOutDate === 'function') {
-                          chgDate = calculateChangeOutDate(today, "Cody's Truck", 'Packed For Delivery', isSleeve);
+                        if (isChecked) {
+                          invSheet.getRange(invRowIdx, colLoc).setValue("Cody's Truck");
+                          invSheet.getRange(invRowIdx, colStat).setValue('Ready For Delivery');
+                          invSheet.getRange(invRowIdx, colAssigned).setValue('Packed For Delivery');
+                          invSheet.getRange(invRowIdx, colDate).setValue(todayFormatted);
+                          invSheet.getRange(invRowIdx, colPicked).setValue(empName + ' Picked On ' + todayStr);
+
+                          var chgDate = null;
+                          if (isBlanket && typeof calculateBlanketChangeOutDate === 'function') {
+                            var bTest = invSheet.getRange(invRowIdx, COLS.BLANKETS.TEST_DATE).getValue();
+                            chgDate = calculateBlanketChangeOutDate(bTest);
+                          } else if (isMack && typeof calculateMackChangeOutDate === 'function') {
+                            var mTest = invSheet.getRange(invRowIdx, COLS.MACKS.TEST_DATE).getValue();
+                            chgDate = calculateMackChangeOutDate(mTest);
+                          } else if (typeof calculateChangeOutDate === 'function') {
+                            chgDate = calculateChangeOutDate(today, "Cody's Truck", 'Packed For Delivery', isSleeve);
+                          }
+                          if (chgDate && chgDate !== 'N/A') {
+                            invSheet.getRange(invRowIdx, colChangeOut).setValue(chgDate);
+                          }
+                        } else {
+                          invSheet.getRange(invRowIdx, colLoc).setValue('Helena');
+                          invSheet.getRange(invRowIdx, colStat).setValue('In Stock');
+                          invSheet.getRange(invRowIdx, colAssigned).setValue('On Shelf');
+                          invSheet.getRange(invRowIdx, colDate).setValue('');
+                          invSheet.getRange(invRowIdx, colPicked).setValue('');
+                          invSheet.getRange(invRowIdx, colChangeOut).setValue('');
                         }
-                        if (chgDate && chgDate !== 'N/A') {
-                          invSheet.getRange(invRowIdx, colChangeOut).setValue(chgDate);
-                        }
-                      } else {
-                        invSheet.getRange(invRowIdx, colLoc).setValue('Helena');
-                        invSheet.getRange(invRowIdx, colStat).setValue('In Stock');
-                        invSheet.getRange(invRowIdx, colAssigned).setValue('On Shelf');
-                        invSheet.getRange(invRowIdx, colDate).setValue('');
-                        invSheet.getRange(invRowIdx, colPicked).setValue('');
-                        invSheet.getRange(invRowIdx, colChangeOut).setValue('');
                       }
                     }
                   }
@@ -584,9 +619,37 @@ function applyBatchSyncMutations(mutations) {
                   // 2. Direct guarantee fallback update
                   var empName = String(sheet.getRange(mut.row, 1).getValue() || '').trim();
                   var oldItemNum = String(sheet.getRange(mut.row, 2).getValue() || '').trim();
+                  var daysLeftVal = String(sheet.getRange(mut.row, 6).getValue() || '').trim().toUpperCase();
                   var pickListNum = String(sheet.getRange(mut.row, 7).getValue() || '').trim();
+                  var isPrevEmp = (daysLeftVal === 'PREV EMP' || (!pickListNum || pickListNum === '—' || pickListNum === '-'));
 
-                  if (hasDate) {
+                  if (isPrevEmp) {
+                    sheet.getRange(mut.row, 8).setValue(hasDate ? 'On Shelf' : 'Return to Shelf');
+                    if (invSheet && oldItemNum && oldItemNum !== '—' && oldItemNum !== '-') {
+                      var invData = invSheet.getDataRange().getValues();
+                      for (var r = 1; r < invData.length; r++) {
+                        var itm = String(invData[r][0] || '').trim();
+                        var esl = String(invData[r][1] || '').trim();
+                        if (itm === oldItemNum || esl === oldItemNum) {
+                          var oldRowIdx = r + 1;
+                          if (hasDate) {
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.STATUS).setValue('On Shelf');
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.ASSIGNED_TO).setValue('On Shelf');
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.LOCATION).setValue('Helena');
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.DATE_ASSIGNED).setValue('');
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.CHANGE_OUT_DATE).setValue('N/A');
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.PICKED_FOR).setValue('');
+                          } else {
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.STATUS).setValue('Ready For Test');
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.ASSIGNED_TO).setValue('Packed For Testing');
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.LOCATION).setValue("Cody's Truck");
+                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.PICKED_FOR).setValue('');
+                          }
+                          break;
+                        }
+                      }
+                    }
+                  } else if (hasDate) {
                     // Update Swap Sheet Status and Days Left
                     sheet.getRange(mut.row, 8).setValue('Assigned');
                     sheet.getRange(mut.row, 6).setValue('Assigned');

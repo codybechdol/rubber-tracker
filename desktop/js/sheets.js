@@ -284,18 +284,23 @@ class SheetNavigator {
             const isChecked = (val === 'TRUE' || val === 'true' || val === true);
             customContent = `<span style="cursor: pointer; font-size: 14px;" data-toggle-checkbox="${rowIdx + 1}" data-col="${c + 1}" data-sheet="${this.escapeHtml(tableData.name)}" data-header="${this.escapeHtml(colLabel)}">${isChecked ? '☑️' : '⬜'}</span>`;
           } else if (isStatusCol) {
-            if (val === 'Ready For Delivery' || val.includes('Ready')) {
-              customContent = `<span class="badge" style="background-color: #15803d; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">🚚 ${this.escapeHtml(val)}</span>`;
-            } else if (val === 'Assigned' || val.includes('Assigned')) {
-              customContent = `<span class="badge" style="background-color: #16a34a; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;">✅ ${this.escapeHtml(val)}</span>`;
-            } else if (val === 'In Stock' || val.includes('In Stock')) {
-              customContent = `<span class="badge" style="background-color: #0369a1; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">📦 ${this.escapeHtml(val)}</span>`;
-            } else if (val === 'OVERDUE') {
-              customContent = `<span class="badge" style="background-color: #b91c1c; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;">⚠️ OVERDUE</span>`;
-            } else if (val === 'Need to Purchase') {
-              customContent = `<span class="badge" style="background-color: #b45309; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">🛒 ${this.escapeHtml(val)}</span>`;
-            } else if (val === 'Return to Shelf') {
+            const vLower = val.toLowerCase().trim();
+            if (vLower === 'return to shelf' || vLower.includes('return to shelf') || vLower.includes('return')) {
               customContent = `<span class="badge" style="background-color: #475569; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">↩️ Return to Shelf</span>`;
+            } else if (vLower === 'ready for test' || vLower.includes('ready for test') || vLower.includes('packed for testing')) {
+              customContent = `<span class="badge" style="background-color: #6366f1; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">🔬 Ready For Test</span>`;
+            } else if (vLower === 'ready for delivery' || vLower.includes('ready for delivery') || vLower.includes('delivery') || val.includes('🚚')) {
+              customContent = `<span class="badge" style="background-color: #15803d; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">🚚 ${this.escapeHtml(val)}</span>`;
+            } else if (vLower === 'assigned' || vLower.includes('assigned') || val.includes('✅')) {
+              customContent = `<span class="badge" style="background-color: #16a34a; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;">✅ ${this.escapeHtml(val)}</span>`;
+            } else if (vLower === 'in stock' || vLower.includes('in stock') || val.includes('📦')) {
+              customContent = `<span class="badge" style="background-color: #0369a1; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">📦 ${this.escapeHtml(val)}</span>`;
+            } else if (vLower === 'overdue' || vLower.includes('overdue')) {
+              customContent = `<span class="badge" style="background-color: #b91c1c; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;">⚠️ OVERDUE</span>`;
+            } else if (vLower === 'need to purchase' || vLower.includes('purchase')) {
+              customContent = `<span class="badge" style="background-color: #b45309; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">🛒 ${this.escapeHtml(val)}</span>`;
+            } else if (vLower.includes('locate')) {
+              customContent = `<span class="badge" style="background-color: #d97706; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">🔍 ${this.escapeHtml(val)}</span>`;
             } else {
               customContent = this.escapeHtml(val);
             }
