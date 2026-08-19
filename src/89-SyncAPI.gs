@@ -57,7 +57,17 @@ function exportFullDatabaseSnapshot() {
     { key: 'hot_stick_swaps', name: 'Hot Stick Swaps' },
     { key: 'safety_compliance', name: typeof SHEET_SAFETY_COMPLIANCE !== 'undefined' ? SHEET_SAFETY_COMPLIANCE : 'Safety Compliance' },
     { key: 'expiring_certs', name: 'Expiring Certs' },
-    { key: 'training_tracking', name: 'Training Tracking' }
+    { key: 'training_tracking', name: 'Training Tracking' },
+    { key: 'gloves_history', name: typeof SHEET_GLOVES_HISTORY !== 'undefined' ? SHEET_GLOVES_HISTORY : 'Gloves History' },
+    { key: 'sleeves_history', name: typeof SHEET_SLEEVES_HISTORY !== 'undefined' ? SHEET_SLEEVES_HISTORY : 'Sleeves History' },
+    { key: 'blankets_history', name: typeof SHEET_BLANKETS_HISTORY !== 'undefined' ? SHEET_BLANKETS_HISTORY : 'Blankets History' },
+    { key: 'macks_history', name: typeof SHEET_MACKS_HISTORY !== 'undefined' ? SHEET_MACKS_HISTORY : 'MACKs History' },
+    { key: 'hv_testers_history', name: typeof SHEET_HV_TESTERS_HISTORY !== 'undefined' ? SHEET_HV_TESTERS_HISTORY : 'HV Testers History' },
+    { key: 'phasing_sets_history', name: typeof SHEET_PHASING_SETS_HISTORY !== 'undefined' ? SHEET_PHASING_SETS_HISTORY : 'Phasing Sets History' },
+    { key: 'aed_history', name: typeof SHEET_AED_HISTORY !== 'undefined' ? SHEET_AED_HISTORY : 'AED History' },
+    { key: 'grounds_history', name: typeof SHEET_GROUNDS_HISTORY !== 'undefined' ? SHEET_GROUNDS_HISTORY : 'Grounds History' },
+    { key: 'hot_sticks_history', name: typeof SHEET_HOT_STICKS_HISTORY !== 'undefined' ? SHEET_HOT_STICKS_HISTORY : 'Hot Sticks History' },
+    { key: 'employee_history', name: typeof SHEET_EMPLOYEE_HISTORY !== 'undefined' ? SHEET_EMPLOYEE_HISTORY : 'Employee History' }
   ];
 
   var tables = {};

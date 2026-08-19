@@ -79,6 +79,10 @@ class SyncEngine {
         const freshSnapshot = await getResp.json();
         if (freshSnapshot && freshSnapshot.tables) {
           await this.db.setSnapshot(freshSnapshot);
+          if (window.sheetNavigator) window.sheetNavigator.renderCurrentSheet();
+          if (window.historyNavigator) window.historyNavigator.renderCurrentHistory();
+          if (window.tripPlanner) window.tripPlanner.renderPlanner();
+          if (window.taskManager) window.taskManager.renderTasks();
           this.updateStatusUI('synced', 'All Synced with Google Sheets');
           this.isSyncing = false;
           return { success: true, snapshot: freshSnapshot };
@@ -102,6 +106,10 @@ class SyncEngine {
       const data = await window.desktopAPI.selectSnapshotFile();
       if (data && data.tables) {
         await this.db.setSnapshot(data);
+        if (window.sheetNavigator) window.sheetNavigator.renderCurrentSheet();
+        if (window.historyNavigator) window.historyNavigator.renderCurrentHistory();
+        if (window.tripPlanner) window.tripPlanner.renderPlanner();
+        if (window.taskManager) window.taskManager.renderTasks();
         this.updateStatusUI('synced', 'Loaded local snapshot');
         return { success: true };
       } else if (data && data.error) {

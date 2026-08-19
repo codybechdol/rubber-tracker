@@ -41,7 +41,10 @@
       <div class="nav-group">
         <div class="nav-group-title">Main Workspaces</div>
         <div class="nav-item active" data-view="sheets-view">
-          <span class="nav-item-icon">🧭</span> Sheet Tabs Grid
+          <span class="nav-item-icon">🧭</span> Active Inventory & Swaps
+        </div>
+        <div class="nav-item" data-view="history-view">
+          <span class="nav-item-icon">📜</span> History Records
         </div>
         <div class="nav-item" data-view="trip-planner-view">
           <span class="nav-item-icon">🗺️</span> Trip Planner
@@ -70,7 +73,7 @@
     <!-- Main Content Views -->
     <main class="app-content">
 
-      <!-- View 1: Sheet Tabs Grid -->
+      <!-- View 1: Sheet Tabs Grid (Active Inventory & Swaps) -->
       <section id="sheets-view" class="view-container active">
         <div class="sheet-tabs-bar" id="sheet-tabs-bar"></div>
         <div class="sheet-toolbar">
@@ -81,6 +84,19 @@
           <input type="text" id="sheet-search-input" class="sheet-search" placeholder="Filter rows in this sheet...">
         </div>
         <div class="grid-wrapper" id="sheet-grid-container"></div>
+      </section>
+
+      <!-- View 1B: History Records Grid -->
+      <section id="history-view" class="view-container">
+        <div class="sheet-tabs-bar" id="history-tabs-bar"></div>
+        <div class="sheet-toolbar">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <h2 id="current-history-title" style="font-size: 16px;">🧤 Gloves History</h2>
+            <span class="brand-badge" id="history-row-count">0 rows</span>
+          </div>
+          <input type="text" id="history-search-input" class="sheet-search" placeholder="Filter history records...">
+        </div>
+        <div class="grid-wrapper" id="history-grid-container"></div>
       </section>
 
       <!-- View 2: Trip Planner -->
@@ -118,21 +134,37 @@
         <div class="sheet-toolbar">
           <input type="text" id="global-lookup-input" class="sheet-search" style="width: 400px;" placeholder="Search employee name, phone, item serial number...">
         </div>
-        <div style="flex: 1; padding: 20px; overflow-y: auto;" id="lookup-results-container"></div>
+        <div style="flex: 1; padding: 20px; overflow-y: auto;">
+          <div id="lookup-results-summary" style="margin-bottom: 16px; font-weight: 600; color: var(--text-secondary);"></div>
+          <div id="lookup-results-container"></div>
+        </div>
       </section>
 
-      <!-- View 5: Settings -->
+      <!-- View 5: Sync Settings -->
       <section id="settings-view" class="view-container">
-        <div style="max-width: 600px; padding: 30px;">
-          <h2 style="margin-bottom: 20px;">⚙️ Google Sheets Sync Configuration</h2>
-          <div style="margin-bottom: 16px;">
-            <label style="display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px;">Google Apps Script Web App URL</label>
-            <input type="text" id="sync-url-input" class="sheet-search" style="width: 100%;" placeholder="https://script.google.com/macros/s/.../exec">
-            <small style="color: var(--text-muted); display: block; margin-top: 6px;">
-              Deploy your Apps Script project as a Web App (Access: Anyone with link) and paste the URL here.
-            </small>
+        <div class="sheet-toolbar">
+          <h2 style="font-size: 16px;">⚙️ Sync & Database Settings</h2>
+        </div>
+        <div style="padding: 24px; max-width: 600px;">
+          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="font-size: 14px; margin-bottom: 12px;">Google Sheets Sync Endpoint</h3>
+            <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 16px;">
+              Enter the Web App URL deployed from your Google Apps Script project.
+            </p>
+            <input type="text" id="sync-url-input" class="sheet-search" style="width: 100%; margin-bottom: 12px;" placeholder="https://script.google.com/macros/s/.../exec">
+            <button class="btn btn-primary" onclick="saveSyncSettings()">💾 Save & Connect</button>
           </div>
-          <button class="btn" onclick="saveSyncSettings()">Save Settings & Test Connection</button>
+
+          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px;">
+            <h3 style="font-size: 14px; margin-bottom: 12px;">Local Database Management</h3>
+            <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 16px;">
+              Manage your offline storage snapshot cached in IndexedDB.
+            </p>
+            <div style="display: flex; gap: 10px;">
+              <button class="btn btn-secondary" onclick="window.localDB.clear(); location.reload();">🗑️ Clear Offline Cache</button>
+              <button class="btn btn-primary" onclick="window.syncEngine.syncWithGoogleSheets()">🔄 Force Full Sync</button>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -144,6 +176,7 @@
   <script src="js/db.js"></script>
   <script src="js/sync.js"></script>
   <script src="js/sheets.js"></script>
+  <script src="js/history.js"></script>
   <script src="js/trip-planner.js"></script>
   <script src="js/tasks.js"></script>
   <script src="js/lookup.js"></script>
@@ -163,6 +196,7 @@
         if (viewId === 'trip-planner-view') window.tripPlanner.renderPlanner();
         if (viewId === 'tasks-view') window.taskManager.renderTasks();
         if (viewId === 'sheets-view') window.sheetNavigator.renderCurrentSheet();
+        if (viewId === 'history-view') window.historyNavigator.renderCurrentHistory();
       });
     });
 
@@ -185,6 +219,7 @@
       const snapshot = await window.localDB.init();
 
       window.sheetNavigator.init();
+      window.historyNavigator.init();
       window.tripPlanner.init();
       window.taskManager.init();
       window.lookupApp.init();
