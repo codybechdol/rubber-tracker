@@ -648,7 +648,7 @@ class ItemStatsEngine {
     if (modal) modal.classList.remove('active');
   }
 
-  submitImportLog() {
+  async submitImportLog() {
     const itemNumEl = document.getElementById('dt-history-item-num');
     const eqTypeEl = document.getElementById('dt-history-eq-type');
     const logTextEl = document.getElementById('dt-history-log-text');
@@ -874,13 +874,22 @@ class ItemStatsEngine {
       'hot_sticks_history': 'Hot Sticks'
     };
 
-    this.db.addMutation({
+    const targetEq = eqNameMap[sheetKey] || 'Gloves';
+    const targetSheet = targetEq + ' History';
+
+    await this.db.addMutation({
       action: 'IMPORT_HISTORY_LOG',
-      equipmentType: eqNameMap[sheetKey] || 'Gloves',
+      equipmentType: targetEq,
+      sheetName: targetSheet,
       itemNum: itemNum,
       logText: logText,
       timestamp: new Date().toISOString()
     });
+
+    // Explicitly persist updated in-memory snapshot
+    if (this.db.snapshot) {
+      await this.db.setSnapshot(this.db.snapshot);
+    }
 
     this.closeImportLogModal();
 

@@ -125,6 +125,16 @@ class SyncEngine {
       };
     }
 
+    if (mut.action === 'IMPORT_HISTORY_LOG') {
+      return {
+        icon: '📥',
+        sheet: `${mut.equipmentType || 'Equipment'} History`,
+        title: `Imported Log • Item #${mut.itemNum}`,
+        desc: `Imported multi-line history assignment log`,
+        time: timeStr
+      };
+    }
+
     return {
       icon: '🔄',
       sheet: mut.sheetName || 'System',
