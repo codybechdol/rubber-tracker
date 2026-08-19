@@ -2,6 +2,8 @@ const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
+app.setAppUserModelId('com.safetyassistant.desktop');
+
 let mainWindow;
 
 function createWindow() {
