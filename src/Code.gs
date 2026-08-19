@@ -12691,15 +12691,16 @@ function cleanAndRepairHistorySheets(silent) {
     }
 
     // Step C: Rewrite clean data to sheet
-    if (numRows > 0) {
-      sheet.getRange(2, 1, numRows, readCols).clearContent();
-    }
-
     if (cleanRows.length > 0) {
       sheet.getRange(2, 1, cleanRows.length, cfg.numCols).setValues(cleanRows);
+    }
+
+    if (numRows > cleanRows.length) {
       try {
-        sheet.getRange(2, 1, cleanRows.length, 1).setNumberFormat('MM/dd/yyyy');
-      } catch (fmtErr) { /* ignore */ }
+        sheet.deleteRows(cleanRows.length + 2, numRows - cleanRows.length);
+      } catch (delRowsErr) {
+        sheet.getRange(cleanRows.length + 2, 1, numRows - cleanRows.length, readCols).clearContent();
+      }
     }
 
     if (lastCol > cfg.numCols) {
