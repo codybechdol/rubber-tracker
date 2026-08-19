@@ -467,43 +467,49 @@ class ItemStatsEngine {
           </div>
         </div>
 
-        <!-- 6-Card KPI Stat Grid (Single Horizontal Line) -->
-        <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-top: 14px;">
+        <!-- 7-Card KPI Stat Grid (Single Horizontal Line) -->
+        <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-top: 14px;">
           
-          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
+          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 8px;">
             <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">⏳ Total Lifespan</div>
-            <div style="font-size: 16px; font-weight: 700; color: var(--text-primary);">${stats.lifespanFormatted}</div>
+            <div style="font-size: 15px; font-weight: 700; color: var(--text-primary);">${stats.lifespanFormatted}</div>
             <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">Since ${stats.firstDateFormatted}</div>
           </div>
 
-          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
+          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 8px;">
             <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">👷 Field Service</div>
-            <div style="font-size: 16px; font-weight: 700; color: #60a5fa;">${stats.fieldDays} Days</div>
+            <div style="font-size: 15px; font-weight: 700; color: #60a5fa;">${stats.fieldDays} Days</div>
             <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${stats.fieldPct}% of total life</div>
           </div>
 
-          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
+          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 8px;">
             <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">📦 Shelf / Storage</div>
-            <div style="font-size: 16px; font-weight: 700; color: #fbbf24;">${stats.shelfDays} Days</div>
+            <div style="font-size: 15px; font-weight: 700; color: #fbbf24;">${stats.shelfDays} Days</div>
             <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${stats.shelfPct}% of total life</div>
           </div>
 
-          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
+          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 8px;">
             <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">🔬 Lab Testing</div>
-            <div style="font-size: 16px; font-weight: 700; color: #c084fc;">${stats.testingDays} Days</div>
-            <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${stats.testCyclesCount} completed cycles</div>
+            <div style="font-size: 15px; font-weight: 700; color: #c084fc;">${stats.testingDays} Days</div>
+            <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${stats.testCyclesCount} completed</div>
           </div>
 
-          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
-            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">🚚 Packed For Testing</div>
-            <div style="font-size: 16px; font-weight: 700; color: #fb923c;">${stats.packedTestingDays} Days</div>
+          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 8px;">
+            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">🚚 Packed Testing</div>
+            <div style="font-size: 15px; font-weight: 700; color: #fb923c;">${stats.packedTestingDays} Days</div>
             <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${stats.packedTestingPct}% on truck</div>
           </div>
 
-          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
-            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">🚚 Packed For Delivery</div>
-            <div style="font-size: 16px; font-weight: 700; color: #22d3ee;">${stats.packedDeliveryDays} Days</div>
+          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 8px;">
+            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">🚚 Packed Delivery</div>
+            <div style="font-size: 15px; font-weight: 700; color: #22d3ee;">${stats.packedDeliveryDays} Days</div>
             <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${stats.packedDeliveryPct}% on truck</div>
+          </div>
+
+          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 8px;">
+            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">🔍 Lost / Missing</div>
+            <div style="font-size: 15px; font-weight: 700; color: #facc15;">${stats.lostDays} Days</div>
+            <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${stats.lostPct}% of total life</div>
           </div>
 
         </div>
