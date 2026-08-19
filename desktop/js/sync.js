@@ -305,7 +305,15 @@ class SyncEngine {
       if (this.syncUrl) {
         this.updateStatusUI('syncing', 'Downloading latest snapshot...');
         const getResp = await fetch(`${this.syncUrl}?action=getSnapshot`, { method: 'GET' });
-        const freshSnapshot = await getResp.json();
+        const rawText = await getResp.text();
+        let freshSnapshot = null;
+        try {
+          freshSnapshot = JSON.parse(rawText);
+        } catch (parseE) {
+          console.warn('Failed to parse snapshot JSON:', parseE, rawText);
+          throw new Error('Web App returned HTML/login redirect instead of JSON. In Google Sheets: go to Extensions > Apps Script > Deploy > Manage deployments > Edit > set "Who has access: Anyone" > Deploy.');
+        }
+
         if (freshSnapshot && freshSnapshot.tables) {
           await this.db.setSnapshot(freshSnapshot);
           if (window.sheetNavigator) window.sheetNavigator.renderCurrentSheet();
@@ -325,6 +333,8 @@ class SyncEngine {
 
           this.isSyncing = false;
           return { success: true, snapshot: freshSnapshot };
+        } else if (freshSnapshot && freshSnapshot.error) {
+          throw new Error(freshSnapshot.error);
         }
       }
 
@@ -337,10 +347,11 @@ class SyncEngine {
 
     } catch (err) {
       console.error('Sync failed:', err);
-      this.updateStatusUI('offline', 'Offline / Connection error');
-      if (outbox.length > 0) {
-        this.renderModalChanges(outbox, `❌ Sync failed: ${err.message}`, 'error', true);
-      }
+      const isAuthError = err.message && (err.message.includes('HTML') || err.message.includes('Anyone') || err.message.includes('deployments'));
+      const statusLabel = isAuthError ? 'Auth Error (Check Web App Access)' : 'Offline / Connection error';
+      this.updateStatusUI('offline', statusLabel);
+      this.openSyncModal('Sync Error', '⚠️');
+      this.renderModalChanges(outbox, `❌ Sync failed: ${err.message}`, 'error', true);
       this.isSyncing = false;
       return { success: false, error: err.message };
     }
