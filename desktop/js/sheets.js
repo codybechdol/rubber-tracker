@@ -271,6 +271,40 @@ class SheetNavigator {
         return;
       }
 
+      // If this row is in the Lost Items section, verify if the item is still lost
+      if (currentSection === 'lost') {
+        const itemNum = String(rowArr[1] || '').trim();
+        if (itemNum && itemNum !== '—' && itemNum !== '-') {
+          let invSheetKey = 'gloves';
+          const sNameLower = String(tableData.name || '').toLowerCase();
+          if (sNameLower.includes('sleeve')) invSheetKey = 'sleeves';
+          else if (sNameLower.includes('blanket')) invSheetKey = 'blankets';
+          else if (sNameLower.includes('mack')) invSheetKey = 'macks';
+
+          const invTable = this.db.getTable(invSheetKey);
+          if (invTable && invTable.rows) {
+            const invItem = invTable.rows.find(r => {
+              const itemKeys = Object.keys(r);
+              const firstKey = itemKeys[0] || 'Item #';
+              const iNum = String(r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['ESL ID'] || r['Serial #'] || r[firstKey] || '').trim();
+              const esl = String(r['ESL ID'] || '').trim();
+              return iNum === itemNum || esl === itemNum;
+            });
+            if (invItem) {
+              const statLower = String(invItem['Status'] || '').toLowerCase();
+              const locLower = String(invItem['Location'] || '').toLowerCase();
+              const assignedLower = String(invItem['Assigned To'] || '').toLowerCase();
+              const notesUpper = String(invItem['Notes'] || '').toUpperCase();
+              const isStillLost = statLower === 'lost' || locLower === 'lost' || assignedLower === 'lost' || notesUpper.includes('LOST-LOCATE') || notesUpper.includes('LOST LOCATE');
+              if (!isStillLost) {
+                // Item is located! Skip rendering in Lost section
+                return;
+              }
+            }
+          }
+        }
+      }
+
       visibleColIndices.forEach((c, idx) => {
         let val = rowArr[c] !== undefined ? String(rowArr[c]).trim() : '';
         let cellStyle = 'text-align: center;';

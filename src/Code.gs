@@ -8753,6 +8753,44 @@ function handleInventoryAssignedToChange(ss, sheet, sheetName, editedRow, newVal
       }
     }
 
+    // If item is no longer Lost, clear highlighting, clear LOST-LOCATE notes, and remove from Swaps sheet
+    if (assignedToLower !== 'lost' && newStatus !== 'Lost') {
+      try {
+        var numCols = Math.min(sheet.getLastColumn() || 12, 12);
+        sheet.getRange(editedRow, 1, 1, numCols).setBackground(null);
+        var colNotes = COLS.INVENTORY.NOTES || 12;
+        sheet.getRange(editedRow, colNotes).setFontWeight('normal').setFontColor(null);
+        var curNotes = String(sheet.getRange(editedRow, colNotes).getValue() || '').trim().toUpperCase();
+        if (curNotes.indexOf('LOST-LOCATE') !== -1 || curNotes.indexOf('LOST LOCATE') !== -1 || curNotes === 'LOCATE') {
+          sheet.getRange(editedRow, colNotes).setValue('');
+        }
+
+        var itemNum = String(sheet.getRange(editedRow, 1).getValue() || '').trim();
+        var swapSheetName = '';
+        if (sheetName === SHEET_GLOVES) swapSheetName = SHEET_GLOVE_SWAPS;
+        else if (sheetName === SHEET_SLEEVES) swapSheetName = SHEET_SLEEVE_SWAPS;
+        else if (sheetName === SHEET_BLANKETS) swapSheetName = SHEET_BLANKET_SWAPS;
+        else if (sheetName === SHEET_MACKS) swapSheetName = SHEET_MACK_SWAPS;
+
+        if (swapSheetName && itemNum) {
+          var swSheet = ss.getSheetByName(swapSheetName);
+          if (swSheet) {
+            var swData = swSheet.getDataRange().getValues();
+            for (var sr = swData.length - 1; sr >= 1; sr--) {
+              var swItem = String(swData[sr][1] || '').trim();
+              var swDays = String(swData[sr][5] || '').trim().toUpperCase();
+              if (swItem === itemNum && (swDays === 'LOST-LOCATE' || swDays.includes('LOST'))) {
+                swSheet.deleteRow(sr + 1);
+                logEvent('Removed located item ' + itemNum + ' from ' + swapSheetName + ' row ' + (sr + 1), 'INFO');
+              }
+            }
+          }
+        }
+      } catch (locErr) {
+        logEvent('Error clearing lost status for item: ' + locErr, 'WARNING');
+      }
+    }
+
   } catch (e) {
     logEvent('handleInventoryAssignedToChange error: ' + e, 'ERROR');
   } finally {
@@ -12012,6 +12050,67 @@ function createBackupSnapshotFast() {
     ss.toast('Backup failed: ' + e.message, '❌ Error', 10);
     return null;
   }
+}
+
+/**
+ * Scans Gloves, Sleeves, Blankets, and MACKs sheets.
+ * If an item is NOT Lost, clears any orange/red LOST highlighting from inventory,
+ * clears LOST-LOCATE from Notes, and removes it from the companion Swap sheet's Lost section.
+ */
+function cleanupLocatedItemsFromSwaps() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var configs = [
+    { inv: typeof SHEET_GLOVES !== 'undefined' ? SHEET_GLOVES : 'Gloves', swap: typeof SHEET_GLOVE_SWAPS !== 'undefined' ? SHEET_GLOVE_SWAPS : 'Glove Swaps', notesCol: (typeof COLS !== 'undefined' && COLS.INVENTORY && COLS.INVENTORY.NOTES) ? COLS.INVENTORY.NOTES : 12, statCol: (typeof COLS !== 'undefined' && COLS.INVENTORY && COLS.INVENTORY.STATUS) ? COLS.INVENTORY.STATUS : 8, assignedCol: (typeof COLS !== 'undefined' && COLS.INVENTORY && COLS.INVENTORY.ASSIGNED_TO) ? COLS.INVENTORY.ASSIGNED_TO : 9 },
+    { inv: typeof SHEET_SLEEVES !== 'undefined' ? SHEET_SLEEVES : 'Sleeves', swap: typeof SHEET_SLEEVE_SWAPS !== 'undefined' ? SHEET_SLEEVE_SWAPS : 'Sleeve Swaps', notesCol: (typeof COLS !== 'undefined' && COLS.INVENTORY && COLS.INVENTORY.NOTES) ? COLS.INVENTORY.NOTES : 12, statCol: (typeof COLS !== 'undefined' && COLS.INVENTORY && COLS.INVENTORY.STATUS) ? COLS.INVENTORY.STATUS : 8, assignedCol: (typeof COLS !== 'undefined' && COLS.INVENTORY && COLS.INVENTORY.ASSIGNED_TO) ? COLS.INVENTORY.ASSIGNED_TO : 9 },
+    { inv: typeof SHEET_BLANKETS !== 'undefined' ? SHEET_BLANKETS : 'Blankets', swap: typeof SHEET_BLANKET_SWAPS !== 'undefined' ? SHEET_BLANKET_SWAPS : 'Blanket Swaps', notesCol: (typeof COLS !== 'undefined' && COLS.BLANKETS && COLS.BLANKETS.NOTES) ? COLS.BLANKETS.NOTES : 11, statCol: (typeof COLS !== 'undefined' && COLS.BLANKETS && COLS.BLANKETS.STATUS) ? COLS.BLANKETS.STATUS : 7, assignedCol: (typeof COLS !== 'undefined' && COLS.BLANKETS && COLS.BLANKETS.ASSIGNED_TO) ? COLS.BLANKETS.ASSIGNED_TO : 8 },
+    { inv: typeof SHEET_MACKS !== 'undefined' ? SHEET_MACKS : 'MACKs', swap: typeof SHEET_MACK_SWAPS !== 'undefined' ? SHEET_MACK_SWAPS : 'MACK Swaps', notesCol: (typeof COLS !== 'undefined' && COLS.MACKS && COLS.MACKS.NOTES) ? COLS.MACKS.NOTES : 12, statCol: (typeof COLS !== 'undefined' && COLS.MACKS && COLS.MACKS.STATUS) ? COLS.MACKS.STATUS : 8, assignedCol: (typeof COLS !== 'undefined' && COLS.MACKS && COLS.MACKS.ASSIGNED_TO) ? COLS.MACKS.ASSIGNED_TO : 9 }
+  ];
+
+  var cleanedCount = 0;
+  configs.forEach(function(cfg) {
+    var invSheet = ss.getSheetByName(cfg.inv);
+    var swapSheet = ss.getSheetByName(cfg.swap);
+    if (!invSheet) return;
+
+    var invData = invSheet.getDataRange().getValues();
+    var locatedItems = new Set();
+
+    for (var r = 1; r < invData.length; r++) {
+      var itemNum = String(invData[r][0] || '').trim();
+      var stat = String(invData[r][cfg.statCol - 1] || '').trim().toLowerCase();
+      var assigned = String(invData[r][cfg.assignedCol - 1] || '').trim().toLowerCase();
+      var notes = String(invData[r][cfg.notesCol - 1] || '').trim().toUpperCase();
+
+      if (stat !== 'lost' && assigned !== 'lost') {
+        locatedItems.add(itemNum);
+        // Clear highlighting & LOST-LOCATE notes if still present
+        if (notes.indexOf('LOST-LOCATE') !== -1 || notes.indexOf('LOST LOCATE') !== -1 || notes === 'LOCATE') {
+          invSheet.getRange(r + 1, cfg.notesCol).setValue('');
+        }
+        var rowRange = invSheet.getRange(r + 1, 1, 1, Math.min(invSheet.getLastColumn() || 12, 12));
+        var bg = rowRange.getBackground();
+        if (bg && (bg.toLowerCase() === '#ffccbc' || bg.toLowerCase() === '#f87171' || bg.toLowerCase() === '#ef4444' || bg.toLowerCase().startsWith('#ffcc'))) {
+          rowRange.setBackground(null);
+          invSheet.getRange(r + 1, cfg.notesCol).setFontWeight('normal').setFontColor(null);
+        }
+      }
+    }
+
+    if (swapSheet && locatedItems.size > 0) {
+      var swData = swapSheet.getDataRange().getValues();
+      for (var sr = swData.length - 1; sr >= 1; sr--) {
+        var swItem = String(swData[sr][1] || '').trim();
+        var swDays = String(swData[sr][5] || '').trim().toUpperCase();
+        if (locatedItems.has(swItem) && (swDays === 'LOST-LOCATE' || swDays.includes('LOST'))) {
+          swapSheet.deleteRow(sr + 1);
+          cleanedCount++;
+        }
+      }
+    }
+  });
+
+  logEvent('cleanupLocatedItemsFromSwaps: Removed ' + cleanedCount + ' located items from swap sheets', 'INFO');
+  return cleanedCount;
 }
 
 /**

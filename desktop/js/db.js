@@ -426,6 +426,32 @@ class LocalDatabase {
               row['Location'] = 'Lost';
               row['Change Out Date'] = 'N/A';
             }
+
+            // If item is no longer Lost, clear LOST-LOCATE notes and remove from companion swap sheet table
+            const statLower = String(row['Status'] || '').toLowerCase();
+            const assignedLower = String(row['Assigned To'] || '').toLowerCase();
+            if (statLower !== 'lost' && assignedLower !== 'lost') {
+              if (row['Notes'] && (row['Notes'].toUpperCase().includes('LOST-LOCATE') || row['Notes'].toUpperCase().includes('LOST LOCATE') || row['Notes'].toUpperCase() === 'LOCATE')) {
+                row['Notes'] = '';
+              }
+              const swapSheetKey = sheetNameLower.includes('glove') ? 'glove_swaps' :
+                                  sheetNameLower.includes('sleeve') ? 'sleeve_swaps' :
+                                  sheetNameLower.includes('blanket') ? 'blanket_swaps' :
+                                  sheetNameLower.includes('mack') ? 'mack_swaps' : null;
+              if (swapSheetKey && this.snapshot.tables[swapSheetKey]) {
+                const swTable = this.snapshot.tables[swapSheetKey];
+                const itemKeys = Object.keys(row);
+                const firstKey = itemKeys[0] || 'Item #';
+                const iNum = String(row['Item #'] || row['Glove'] || row['Sleeve'] || row['Blanket'] || row['ESL ID'] || row['Serial #'] || row[firstKey] || '').trim();
+                if (swTable.rawGrid && iNum) {
+                  swTable.rawGrid = swTable.rawGrid.filter(rArr => {
+                    const curItem = String(rArr[1] || '').trim();
+                    const daysLeft = String(rArr[5] || '').trim().toUpperCase();
+                    return !(curItem === iNum && (daysLeft === 'LOST-LOCATE' || daysLeft.includes('LOST')));
+                  });
+                }
+              }
+            }
           }
 
           // C. If Date Assigned / Test Date was edited
