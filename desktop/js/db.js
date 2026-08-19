@@ -52,6 +52,37 @@ class LocalDatabase {
   }
 
   async addMutation(mutation) {
+    if (!mutation) return null;
+
+    // Discard redundant cell edits where oldValue === value
+    if (mutation.action === 'UPDATE_CELL' && mutation.oldValue !== undefined && mutation.oldValue === mutation.value) {
+      return null;
+    }
+
+    // Coalesce / update existing pending cell edit in outbox if present
+    if (mutation.action === 'UPDATE_CELL') {
+      const existingIdx = this.outbox.findIndex(m => 
+        m.action === 'UPDATE_CELL' &&
+        m.sheetName === mutation.sheetName &&
+        m.row === mutation.row &&
+        m.col === mutation.col
+      );
+      if (existingIdx !== -1) {
+        this.outbox[existingIdx].value = mutation.value;
+        this.outbox[existingIdx].timestamp = new Date().toISOString();
+        this.applyLocalMutation(mutation);
+        if (window.desktopAPI) {
+          await window.desktopAPI.saveLocalOutbox(this.outbox);
+          await window.desktopAPI.saveLocalSnapshot(this.snapshot);
+        } else {
+          localStorage.setItem('sa_outbox', JSON.stringify(this.outbox));
+          localStorage.setItem('sa_snapshot', JSON.stringify(this.snapshot));
+        }
+        this.notify();
+        return this.outbox[existingIdx];
+      }
+    }
+
     const mutRecord = {
       id: 'mut_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
       timestamp: new Date().toISOString(),

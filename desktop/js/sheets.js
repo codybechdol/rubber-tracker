@@ -512,8 +512,15 @@ class SheetNavigator {
 
     // Attach inline edit handlers for swap reports
     container.querySelectorAll('td.editable').forEach(td => {
+      let initialVal = '';
+      td.addEventListener('focus', (e) => {
+        initialVal = e.target.textContent.trim();
+      });
+
       td.addEventListener('blur', async (e) => {
         const newVal = e.target.textContent.trim();
+        if (newVal === initialVal) return; // No change made!
+
         const sheetName = e.target.dataset.sheet;
         const row = parseInt(e.target.dataset.row, 10);
         const col = parseInt(e.target.dataset.col, 10);
@@ -530,6 +537,7 @@ class SheetNavigator {
           row: row,
           col: col,
           header: header,
+          oldValue: initialVal,
           value: newVal
         });
 
@@ -976,8 +984,15 @@ class SheetNavigator {
 
     // Attach inline edit handlers
     container.querySelectorAll('td.editable').forEach(td => {
+      let initialVal = '';
+      td.addEventListener('focus', (e) => {
+        initialVal = e.target.textContent.trim();
+      });
+
       td.addEventListener('blur', async (e) => {
         const newVal = e.target.textContent.trim();
+        if (newVal === initialVal) return; // No change made!
+
         const sheetName = e.target.dataset.sheet;
         const row = parseInt(e.target.dataset.row, 10);
         const col = parseInt(e.target.dataset.col, 10);
@@ -989,6 +1004,7 @@ class SheetNavigator {
           row: row,
           col: col,
           header: header,
+          oldValue: initialVal,
           value: newVal
         });
 
