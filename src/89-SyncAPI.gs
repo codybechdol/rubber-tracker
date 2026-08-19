@@ -234,7 +234,7 @@ function applyBatchSyncMutations(mutations) {
                 var isHotSticks = (sheetName === (typeof SHEET_HOT_STICKS !== 'undefined' ? SHEET_HOT_STICKS : 'Hot Sticks'));
 
                 // Identify column indices for this equipment sheet
-                var eqColAssignedTo, eqColStatus, eqColLocation, eqColDateAssigned, eqColChangeOutDate, eqColTestDate;
+                var eqColAssignedTo, eqColStatus, eqColLocation, eqColDateAssigned, eqColChangeOutDate, eqColTestDate, eqColPicked;
                 if (isGlove || isSleeve) {
                   eqColAssignedTo = COLS.INVENTORY.ASSIGNED_TO;     // 9
                   eqColStatus = COLS.INVENTORY.STATUS;              // 8
@@ -242,6 +242,7 @@ function applyBatchSyncMutations(mutations) {
                   eqColDateAssigned = COLS.INVENTORY.DATE_ASSIGNED; // 6
                   eqColChangeOutDate = COLS.INVENTORY.CHANGE_OUT_DATE; // 10
                   eqColTestDate = COLS.INVENTORY.TEST_DATE;         // 5
+                  eqColPicked = COLS.INVENTORY.PICKED_FOR;          // 11
                 } else if (isBlanket) {
                   eqColAssignedTo = COLS.BLANKETS.ASSIGNED_TO;      // 8
                   eqColStatus = COLS.BLANKETS.STATUS;               // 7
@@ -249,6 +250,7 @@ function applyBatchSyncMutations(mutations) {
                   eqColDateAssigned = COLS.BLANKETS.DATE_ASSIGNED;  // 5
                   eqColChangeOutDate = COLS.BLANKETS.CHANGE_OUT_DATE; // 9
                   eqColTestDate = COLS.BLANKETS.TEST_DATE;          // 4
+                  eqColPicked = COLS.BLANKETS.PICKED_FOR;           // 10
                 } else if (isMack) {
                   eqColAssignedTo = COLS.MACKS.ASSIGNED_TO;         // 9
                   eqColStatus = COLS.MACKS.STATUS;                  // 8
@@ -256,6 +258,7 @@ function applyBatchSyncMutations(mutations) {
                   eqColDateAssigned = COLS.MACKS.DATE_ASSIGNED;     // 6
                   eqColChangeOutDate = COLS.MACKS.CHANGE_OUT_DATE;  // 10
                   eqColTestDate = COLS.MACKS.TEST_DATE;             // 5
+                  eqColPicked = COLS.MACKS.PICKED_FOR;              // 11
                 } else if (isHVTester || isPhasingSet) {
                   eqColAssignedTo = COLS.HV_TESTERS.ASSIGNED_TO;    // 9
                   eqColStatus = COLS.HV_TESTERS.STATUS;             // 8
@@ -263,6 +266,7 @@ function applyBatchSyncMutations(mutations) {
                   eqColDateAssigned = COLS.HV_TESTERS.DATE_ASSIGNED;// 6
                   eqColChangeOutDate = COLS.HV_TESTERS.CHANGE_OUT_DATE; // 10
                   eqColTestDate = COLS.HV_TESTERS.CALIBRATION_DATE; // 5
+                  eqColPicked = COLS.HV_TESTERS.PICKED_FOR;         // 11
                 } else if (isAED) {
                   eqColAssignedTo = COLS.AED.ASSIGNED_TO;           // 8
                   eqColStatus = COLS.AED.STATUS;                    // 7
@@ -270,6 +274,7 @@ function applyBatchSyncMutations(mutations) {
                   eqColDateAssigned = COLS.AED.DATE_ASSIGNED;       // 5
                   eqColChangeOutDate = COLS.AED.PAD_EXPIRATION;     // 4
                   eqColTestDate = COLS.AED.PAD_EXPIRATION;          // 4
+                  eqColPicked = COLS.AED.PICKED_FOR;                // 10
                 } else if (isGrounds) {
                   eqColAssignedTo = COLS.GROUNDS.ASSIGNED_TO;       // 10
                   eqColStatus = COLS.GROUNDS.STATUS;                // 9
@@ -277,6 +282,7 @@ function applyBatchSyncMutations(mutations) {
                   eqColDateAssigned = COLS.GROUNDS.DATE_ASSIGNED;   // 7
                   eqColChangeOutDate = COLS.GROUNDS.CHANGE_OUT_DATE;// 11
                   eqColTestDate = COLS.GROUNDS.TEST_DATE;           // 6
+                  eqColPicked = COLS.GROUNDS.PICKED_FOR;            // 12
                 } else if (isHotSticks) {
                   eqColAssignedTo = COLS.HOT_STICKS.ASSIGNED_TO;    // 8
                   eqColStatus = COLS.HOT_STICKS.STATUS;             // 7
@@ -284,6 +290,7 @@ function applyBatchSyncMutations(mutations) {
                   eqColDateAssigned = COLS.HOT_STICKS.DATE_ASSIGNED;// 5
                   eqColChangeOutDate = COLS.HOT_STICKS.CHANGE_OUT_DATE; // 9
                   eqColTestDate = COLS.HOT_STICKS.TEST_DATE;        // 4
+                  eqColPicked = COLS.HOT_STICKS.PICKED_FOR;         // 10
                 }
 
                 var isAssignedToEdit = (mut.col === eqColAssignedTo || hLower === 'assigned to' || hLower === 'assigned_to');
@@ -322,6 +329,7 @@ function applyBatchSyncMutations(mutations) {
                   if (assignedValLower === 'on shelf') {
                     newStatus = 'On Shelf';
                     newLocation = 'Helena';
+                    if (eqColPicked) sheet.getRange(mut.row, eqColPicked).setValue('');
                   } else if (assignedValLower === 'packed for delivery') {
                     newStatus = 'Ready For Delivery';
                     newLocation = "Cody's Truck";
@@ -334,9 +342,13 @@ function applyBatchSyncMutations(mutations) {
                   } else if (assignedValLower === 'failed rubber' || assignedValLower === 'not repairable') {
                     newStatus = 'Failed Rubber';
                     newLocation = 'Destroyed';
+                    if (eqColChangeOutDate) sheet.getRange(mut.row, eqColChangeOutDate).setValue('N/A');
+                    if (eqColPicked) sheet.getRange(mut.row, eqColPicked).setValue('');
                   } else if (assignedValLower === 'lost') {
                     newStatus = 'Lost';
                     newLocation = 'Lost';
+                    if (eqColChangeOutDate) sheet.getRange(mut.row, eqColChangeOutDate).setValue('N/A');
+                    if (eqColPicked) sheet.getRange(mut.row, eqColPicked).setValue('');
                   } else if (assignedVal !== '') {
                     // Regular employee assignment: look up in Employees sheet
                     newStatus = 'Assigned';
@@ -371,7 +383,7 @@ function applyBatchSyncMutations(mutations) {
                   }
 
                   // Recalculate Change Out Date if Date Assigned exists
-                  if (eqColDateAssigned && eqColChangeOutDate) {
+                  if (eqColDateAssigned && eqColChangeOutDate && assignedValLower !== 'failed rubber' && assignedValLower !== 'lost') {
                     var dateAssignedVal = sheet.getRange(mut.row, eqColDateAssigned).getValue();
                     if (dateAssignedVal) {
                       var chgOut = null;
@@ -388,6 +400,36 @@ function applyBatchSyncMutations(mutations) {
                         sheet.getRange(mut.row, eqColChangeOutDate).setValue(chgOut);
                       }
                     }
+                  }
+                }
+
+                // If Status was edited directly
+                var isStatusEdit = (mut.col === eqColStatus || hLower === 'status' || hLower === 'item status');
+                if (isStatusEdit) {
+                  var statVal = String(mut.value || '').trim().toLowerCase();
+                  if (statVal === 'on shelf') {
+                    if (eqColAssignedTo) sheet.getRange(mut.row, eqColAssignedTo).setValue('On Shelf');
+                    if (eqColLocation) sheet.getRange(mut.row, eqColLocation).setValue('Helena');
+                    if (eqColPicked) sheet.getRange(mut.row, eqColPicked).setValue('');
+                  } else if (statVal === 'ready for delivery') {
+                    if (eqColAssignedTo) sheet.getRange(mut.row, eqColAssignedTo).setValue('Packed For Delivery');
+                    if (eqColLocation) sheet.getRange(mut.row, eqColLocation).setValue("Cody's Truck");
+                  } else if (statVal === 'ready for test') {
+                    if (eqColAssignedTo) sheet.getRange(mut.row, eqColAssignedTo).setValue('Packed For Testing');
+                    if (eqColLocation) sheet.getRange(mut.row, eqColLocation).setValue("Cody's Truck");
+                  } else if (statVal === 'in testing') {
+                    if (eqColAssignedTo) sheet.getRange(mut.row, eqColAssignedTo).setValue('In Testing');
+                    if (eqColLocation) sheet.getRange(mut.row, eqColLocation).setValue('Arnett / JM Test');
+                  } else if (statVal === 'failed rubber' || statVal === 'not repairable') {
+                    if (eqColAssignedTo) sheet.getRange(mut.row, eqColAssignedTo).setValue('Failed Rubber');
+                    if (eqColLocation) sheet.getRange(mut.row, eqColLocation).setValue('Destroyed');
+                    if (eqColChangeOutDate) sheet.getRange(mut.row, eqColChangeOutDate).setValue('N/A');
+                    if (eqColPicked) sheet.getRange(mut.row, eqColPicked).setValue('');
+                  } else if (statVal === 'lost') {
+                    if (eqColAssignedTo) sheet.getRange(mut.row, eqColAssignedTo).setValue('Lost');
+                    if (eqColLocation) sheet.getRange(mut.row, eqColLocation).setValue('Lost');
+                    if (eqColChangeOutDate) sheet.getRange(mut.row, eqColChangeOutDate).setValue('N/A');
+                    if (eqColPicked) sheet.getRange(mut.row, eqColPicked).setValue('');
                   }
                 }
 

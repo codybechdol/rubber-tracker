@@ -282,38 +282,94 @@ class LocalDatabase {
           // A. If Assigned To was edited
           if (hLower === 'assigned to' || hLower.includes('assigned to')) {
             const assignedName = String(mut.value || '').trim();
-            if (assignedName && assignedName !== 'On Shelf' && assignedName !== 'Failed Rubber') {
-              row['Status'] = 'Assigned';
+            const assignedLower = assignedName.toLowerCase();
 
-              // Look up employee location
+            let newStatus = '';
+            let newLocation = '';
+
+            if (assignedLower === 'on shelf') {
+              newStatus = 'On Shelf';
+              newLocation = 'Helena';
+              row['Picked For'] = '';
+            } else if (assignedLower === 'packed for delivery') {
+              newStatus = 'Ready For Delivery';
+              newLocation = "Cody's Truck";
+            } else if (assignedLower === 'packed for testing') {
+              newStatus = 'Ready For Test';
+              newLocation = "Cody's Truck";
+            } else if (assignedLower === 'in testing') {
+              newStatus = 'In Testing';
+              newLocation = 'Arnett / JM Test';
+            } else if (assignedLower === 'failed rubber' || assignedLower === 'not repairable') {
+              newStatus = 'Failed Rubber';
+              newLocation = 'Destroyed';
+              row['Change Out Date'] = 'N/A';
+            } else if (assignedLower === 'lost') {
+              newStatus = 'Lost';
+              newLocation = 'Lost';
+              row['Change Out Date'] = 'N/A';
+            } else if (assignedName) {
+              newStatus = 'Assigned';
+              // Look up employee location from employees table
               const empTable = this.snapshot.tables['employees'];
               if (empTable && empTable.rows) {
-                const emp = empTable.rows.find(e => String(e['Name'] || e['Employee Name'] || '').trim().toLowerCase() === assignedName.toLowerCase());
+                const emp = empTable.rows.find(e => String(e['Name'] || e['Employee Name'] || '').trim().toLowerCase() === assignedLower);
                 if (emp && emp['Location']) {
-                  row['Location'] = emp['Location'];
+                  newLocation = emp['Location'];
                 }
               }
+              if (!newLocation) newLocation = 'Helena';
 
               // Calculate Change Out Date if Date Assigned exists
               const dateAssigned = row['Date Assigned'] || row['Calibration Date'] || row['Test Date'];
               if (dateAssigned) {
                 let months = 12;
-                if (sheetNameLower.includes('glove')) months = 3;
+                if (sheetNameLower.includes('glove')) months = (newLocation.toLowerCase() === 'helena' ? 3 : 6);
                 else if (sheetNameLower.includes('hot_stick') || sheetNameLower.includes('hot stick')) months = 24;
                 row['Change Out Date'] = addMonths(dateAssigned, months);
               }
-            } else if (!assignedName || assignedName === 'On Shelf') {
-              row['Status'] = 'In Stock';
-              row['Change Out Date'] = '';
+            }
+
+            if (newStatus) row['Status'] = newStatus;
+            if (newLocation) row['Location'] = newLocation;
+          }
+
+          // B. If Status was edited directly
+          if (hLower === 'status' || hLower === 'item status') {
+            const statusVal = String(mut.value || '').trim();
+            const statusLower = statusVal.toLowerCase();
+
+            if (statusLower === 'on shelf') {
+              row['Assigned To'] = 'On Shelf';
+              row['Location'] = 'Helena';
+              row['Picked For'] = '';
+            } else if (statusLower === 'ready for delivery') {
+              row['Assigned To'] = 'Packed For Delivery';
+              row['Location'] = "Cody's Truck";
+            } else if (statusLower === 'ready for test') {
+              row['Assigned To'] = 'Packed For Testing';
+              row['Location'] = "Cody's Truck";
+            } else if (statusLower === 'in testing') {
+              row['Assigned To'] = 'In Testing';
+              row['Location'] = 'Arnett / JM Test';
+            } else if (statusLower === 'failed rubber' || statusLower === 'not repairable') {
+              row['Assigned To'] = 'Failed Rubber';
+              row['Location'] = 'Destroyed';
+              row['Change Out Date'] = 'N/A';
+            } else if (statusLower === 'lost') {
+              row['Assigned To'] = 'Lost';
+              row['Location'] = 'Lost';
+              row['Change Out Date'] = 'N/A';
             }
           }
 
-          // B. If Date Assigned / Test Date was edited
+          // C. If Date Assigned / Test Date was edited
           if (hLower.includes('date assigned') || hLower.includes('calibration') || hLower.includes('test date')) {
             const dateAssigned = String(mut.value || '').trim();
             if (dateAssigned) {
+              const loc = String(row['Location'] || '').toLowerCase();
               let months = 12;
-              if (sheetNameLower.includes('glove')) months = 3;
+              if (sheetNameLower.includes('glove')) months = (loc === 'helena' ? 3 : 6);
               else if (sheetNameLower.includes('hot_stick') || sheetNameLower.includes('hot stick')) months = 24;
               row['Change Out Date'] = addMonths(dateAssigned, months);
             }
