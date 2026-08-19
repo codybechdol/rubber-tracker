@@ -11809,6 +11809,394 @@ function saveHistoryFast(silent) {
 }
 
 /**
+ * Shows the Import Item History Log modal dialog
+ */
+function showImportItemHistoryDialog() {
+  var html = HtmlService.createHtmlOutputFromFile('ImportItemHistory')
+    .setWidth(560)
+    .setHeight(480);
+  SpreadsheetApp.getUi().showModalDialog(html, '📥 Import Item History Log');
+}
+
+/**
+ * Parses a multiline text log and inserts chronological records into the corresponding history sheet.
+ *
+ * @param {string} equipmentType - "Gloves", "Sleeves", "Blankets", "MACKs", "HV Testers", "Phasing Sets", "AED", "Grounds", "Hot Sticks"
+ * @param {string} itemNum - Item number or serial number
+ * @param {string} logText - Multi-line string with "Date - Holder/Status" per line
+ * @return {object} { success: boolean, count: number, error: string }
+ */
+function parseAndImportItemHistoryLog(equipmentType, itemNum, logText) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (!equipmentType || !itemNum || !logText) {
+      return { success: false, error: 'Equipment type, item number, and log text are required.' };
+    }
+
+    itemNum = String(itemNum).trim();
+    equipmentType = String(equipmentType).trim();
+
+    // Map equipment type to sheets
+    var invSheetName = '';
+    var histSheetName = '';
+    var eqKey = equipmentType.toLowerCase().replace(/[^a-z]/g, '');
+
+    if (eqKey.includes('glove')) {
+      invSheetName = SHEET_GLOVES;
+      histSheetName = SHEET_GLOVES_HISTORY;
+    } else if (eqKey.includes('sleeve')) {
+      invSheetName = SHEET_SLEEVES;
+      histSheetName = SHEET_SLEEVES_HISTORY;
+    } else if (eqKey.includes('blanket')) {
+      invSheetName = SHEET_BLANKETS;
+      histSheetName = SHEET_BLANKETS_HISTORY;
+    } else if (eqKey.includes('mack')) {
+      invSheetName = SHEET_MACKS;
+      histSheetName = SHEET_MACKS_HISTORY;
+    } else if (eqKey.includes('hv') || eqKey.includes('tester')) {
+      invSheetName = SHEET_HV_TESTERS;
+      histSheetName = SHEET_HV_TESTERS_HISTORY;
+    } else if (eqKey.includes('phasing')) {
+      invSheetName = SHEET_PHASING_SETS;
+      histSheetName = SHEET_PHASING_SETS_HISTORY;
+    } else if (eqKey.includes('aed')) {
+      invSheetName = SHEET_AED;
+      histSheetName = SHEET_AED_HISTORY;
+    } else if (eqKey.includes('ground')) {
+      invSheetName = SHEET_GROUNDS;
+      histSheetName = SHEET_GROUNDS_HISTORY;
+    } else if (eqKey.includes('stick') || eqKey.includes('hot')) {
+      invSheetName = SHEET_HOT_STICKS;
+      histSheetName = SHEET_HOT_STICKS_HISTORY;
+    } else {
+      invSheetName = equipmentType;
+      histSheetName = equipmentType + ' History';
+    }
+
+    var histSheet = ss.getSheetByName(histSheetName);
+    if (!histSheet) {
+      ensureSeparateHistorySheets();
+      histSheet = ss.getSheetByName(histSheetName);
+      if (!histSheet) {
+        histSheet = ss.insertSheet(histSheetName);
+        histSheet.appendRow(['Date Assigned', 'Item #', 'Size', 'Class', 'Location', 'Assigned To', 'Notes']);
+      }
+    }
+
+    // Lookup metadata from inventory sheet if available
+    var invSheet = ss.getSheetByName(invSheetName);
+    var itemMeta = { size: '', classVal: '', model: '', kv: '', serial: '', length: '', type: '', location: 'Helena' };
+
+    if (invSheet && invSheet.getLastRow() > 1) {
+      var invData = invSheet.getDataRange().getValues();
+      var invHeaders = invData[0].map(function(h) { return String(h).toLowerCase().trim(); });
+      
+      var itemCol = invHeaders.indexOf('item #');
+      if (itemCol === -1) itemCol = invHeaders.indexOf('glove');
+      if (itemCol === -1) itemCol = invHeaders.indexOf('sleeve');
+      if (itemCol === -1) itemCol = invHeaders.indexOf('blanket');
+      if (itemCol === -1) itemCol = invHeaders.indexOf('mack');
+      if (itemCol === -1) itemCol = invHeaders.indexOf('serial #');
+      if (itemCol === -1) itemCol = 0;
+
+      for (var r = 1; r < invData.length; r++) {
+        var rowVal = String(invData[r][itemCol] || '').trim();
+        var eslVal = invHeaders.indexOf('esl id') !== -1 ? String(invData[r][invHeaders.indexOf('esl id')] || '').trim() : '';
+        if (rowVal === itemNum || eslVal === itemNum) {
+          if (invHeaders.indexOf('size') !== -1) itemMeta.size = String(invData[r][invHeaders.indexOf('size')] || '');
+          if (invHeaders.indexOf('class') !== -1) itemMeta.classVal = String(invData[r][invHeaders.indexOf('class')] || '');
+          if (invHeaders.indexOf('model') !== -1) itemMeta.model = String(invData[r][invHeaders.indexOf('model')] || '');
+          if (invHeaders.indexOf('kv') !== -1) itemMeta.kv = String(invData[r][invHeaders.indexOf('kv')] || '');
+          if (invHeaders.indexOf('length') !== -1) itemMeta.length = String(invData[r][invHeaders.indexOf('length')] || '');
+          if (invHeaders.indexOf('type') !== -1) itemMeta.type = String(invData[r][invHeaders.indexOf('type')] || '');
+          if (invHeaders.indexOf('serial #') !== -1) itemMeta.serial = String(invData[r][invHeaders.indexOf('serial #')] || '');
+          if (invHeaders.indexOf('location') !== -1) itemMeta.location = String(invData[r][invHeaders.indexOf('location')] || 'Helena');
+          break;
+        }
+      }
+    }
+
+    // Build employee lookup from Employees sheet (full name and abbreviated initial matching)
+    var empLookup = {};
+    var empSheet = ss.getSheetByName(SHEET_EMPLOYEES || 'Employees');
+    if (empSheet && empSheet.getLastRow() > 1) {
+      var empData = empSheet.getDataRange().getValues();
+      var empHeaders = empData[0].map(function(h) { return String(h).toLowerCase().trim(); });
+      var nameCol = empHeaders.indexOf('employee name');
+      if (nameCol === -1) nameCol = empHeaders.indexOf('name');
+      if (nameCol === -1) nameCol = 0;
+      var locCol = empHeaders.indexOf('location');
+
+      for (var e = 1; e < empData.length; e++) {
+        var fullName = String(empData[e][nameCol] || '').trim();
+        var empLoc = locCol !== -1 ? String(empData[e][locCol] || '').trim() : 'Helena';
+        if (!fullName) continue;
+
+        var cleanFull = fullName.toLowerCase();
+        empLookup[cleanFull] = { name: fullName, location: empLoc };
+
+        // Generate initial abbreviations: "K. Powell", "K Powell", "Kyle P."
+        var parts = fullName.split(/\s+/);
+        if (parts.length >= 2) {
+          var first = parts[0];
+          var last = parts[parts.length - 1];
+          empLookup[(first.charAt(0) + '. ' + last).toLowerCase()] = { name: fullName, location: empLoc };
+          empLookup[(first.charAt(0) + ' ' + last).toLowerCase()] = { name: fullName, location: empLoc };
+          empLookup[(first.charAt(0) + '.' + last).toLowerCase()] = { name: fullName, location: empLoc };
+          empLookup[(first + ' ' + last.charAt(0) + '.').toLowerCase()] = { name: fullName, location: empLoc };
+          empLookup[(first + ' ' + last.charAt(0)).toLowerCase()] = { name: fullName, location: empLoc };
+        }
+      }
+    }
+
+    // Read existing history rows to prevent duplicates
+    var existingLookup = {};
+    if (histSheet.getLastRow() > 1) {
+      var existingData = histSheet.getDataRange().getValues();
+      var hHeaders = existingData[0].map(function(h) { return String(h).toLowerCase().trim(); });
+      var hDateCol = hHeaders.indexOf('date assigned');
+      if (hDateCol === -1) hDateCol = 0;
+      var hItemCol = hHeaders.indexOf('item #');
+      if (hItemCol === -1) hItemCol = hHeaders.indexOf('serial #');
+      if (hItemCol === -1) hItemCol = 1;
+      var hAssignedCol = hHeaders.indexOf('assigned to');
+      if (hAssignedCol === -1) hAssignedCol = 5;
+
+      for (var ex = 1; ex < existingData.length; ex++) {
+        var exDate = formatDateNoonOrRaw(existingData[ex][hDateCol]);
+        var exItem = String(existingData[ex][hItemCol] || '').trim();
+        var exAssigned = String(existingData[ex][hAssignedCol] || '').toLowerCase().trim();
+        if (exItem === itemNum) {
+          existingLookup[exDate + '|' + exAssigned] = true;
+        }
+      }
+    }
+
+    // Parse lines from logText
+    var lines = logText.split(/[\r\n]+/);
+    var parsedEntries = [];
+
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].trim();
+      if (!line) continue;
+
+      // Match Date at beginning of line
+      var dateMatch = line.match(/^(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})\s*[-–—:]\s*(.+)$/);
+      
+      var dateStr = '';
+      var rawTarget = '';
+
+      if (dateMatch) {
+        dateStr = dateMatch[1].trim();
+        rawTarget = dateMatch[2].trim();
+      } else {
+        var spaceSplit = line.split(/\s+/);
+        if (spaceSplit.length >= 2 && parseDateStringFlex(spaceSplit[0])) {
+          dateStr = spaceSplit[0];
+          rawTarget = line.substring(dateStr.length).replace(/^[-–—:]\s*/, '').trim();
+        } else {
+          continue; // Cannot parse date from this line
+        }
+      }
+
+      var parsedDate = parseDateStringFlex(dateStr);
+      if (!parsedDate) continue;
+
+      var formattedDate = Utilities.formatDate(parsedDate, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+      var targetLower = rawTarget.toLowerCase();
+
+      var assignedTo = rawTarget;
+      var location = 'Helena';
+      var notes = '';
+
+      // Classify state / holder
+      if (targetLower.includes('failed visual')) {
+        assignedTo = 'Failed Rubber';
+        notes = 'Failed Visual';
+        location = 'Helena';
+      } else if (targetLower.includes('failed rubber') || targetLower.includes('failed test') || targetLower === 'failed') {
+        assignedTo = 'Failed Rubber';
+        notes = 'Failed Test';
+        location = 'Helena';
+      } else if (targetLower.includes('destroyed') || targetLower.includes('not repairable')) {
+        assignedTo = 'Failed Rubber';
+        notes = 'Destroyed';
+        location = 'Helena';
+      } else if (targetLower.includes('lost') || targetLower.includes('missing')) {
+        assignedTo = 'Lost';
+        location = 'Lost';
+        notes = 'Lost';
+      } else if (targetLower.includes('packed for testing') || targetLower.includes('ready for test')) {
+        assignedTo = 'Packed For Testing';
+        location = "Cody's Truck";
+        notes = 'Packed on truck';
+      } else if (targetLower.includes('packed for delivery') || targetLower.includes('ready for delivery')) {
+        assignedTo = 'Packed For Delivery';
+        location = "Cody's Truck";
+        notes = 'Packed on truck';
+      } else if (targetLower.includes('in testing') || targetLower.includes('lab') || targetLower.includes('arnett') || targetLower.includes('jm test')) {
+        assignedTo = 'In Testing';
+        location = 'Arnett / JM Test';
+        notes = 'Sent to lab';
+      } else if (targetLower.includes('on shelf') || targetLower === 'shelf' || targetLower === 'storage' || targetLower === 'unassigned') {
+        assignedTo = 'On Shelf';
+        location = 'Helena';
+        notes = 'On Shelf';
+      } else {
+        // Lineman Assignment
+        var matchedEmp = empLookup[targetLower];
+        if (matchedEmp) {
+          assignedTo = matchedEmp.name;
+          location = matchedEmp.location || 'Helena';
+          notes = 'Assigned to ' + matchedEmp.name;
+        } else {
+          assignedTo = rawTarget;
+          location = 'Helena';
+          notes = 'Assigned';
+        }
+      }
+
+      parsedEntries.push({
+        dateObj: parsedDate,
+        dateFormatted: formattedDate,
+        assignedTo: assignedTo,
+        location: location,
+        notes: notes
+      });
+    }
+
+    if (parsedEntries.length === 0) {
+      return { success: false, error: 'No valid "Date - Holder/Status" lines could be parsed from the provided text.' };
+    }
+
+    // Sort chronologically (oldest first)
+    parsedEntries.sort(function(a, b) {
+      return a.dateObj.getTime() - b.dateObj.getTime();
+    });
+
+    // Build rows according to target history sheet layout
+    var rowsToAdd = [];
+    var histHeaders = histSheet.getRange(1, 1, 1, histSheet.getLastColumn()).getValues()[0].map(function(h) {
+      return String(h).toLowerCase().trim();
+    });
+
+    for (var p = 0; p < parsedEntries.length; p++) {
+      var entry = parsedEntries[p];
+      var dupeKey = entry.dateFormatted + '|' + entry.assignedTo.toLowerCase().trim();
+      if (existingLookup[dupeKey]) {
+        continue; // Skip already recorded entry
+      }
+
+      var rowData = [];
+      for (var col = 0; col < histHeaders.length; col++) {
+        var hName = histHeaders[col];
+        if (hName.includes('date')) {
+          rowData.push(entry.dateFormatted);
+        } else if (hName.includes('item') || hName.includes('serial') || hName.includes('glove') || hName.includes('sleeve') || hName.includes('blanket') || hName.includes('mack')) {
+          rowData.push(itemNum);
+        } else if (hName === 'size') {
+          rowData.push(itemMeta.size);
+        } else if (hName === 'class') {
+          rowData.push(itemMeta.classVal);
+        } else if (hName === 'model') {
+          rowData.push(itemMeta.model);
+        } else if (hName === 'kv') {
+          rowData.push(itemMeta.kv);
+        } else if (hName === 'length') {
+          rowData.push(itemMeta.length);
+        } else if (hName === 'type') {
+          rowData.push(itemMeta.type);
+        } else if (hName === 'location') {
+          rowData.push(entry.location);
+        } else if (hName === 'assigned to') {
+          rowData.push(entry.assignedTo);
+        } else if (hName === 'notes') {
+          rowData.push(entry.notes);
+        } else {
+          rowData.push('');
+        }
+      }
+
+      rowsToAdd.push(rowData);
+      existingLookup[dupeKey] = true;
+    }
+
+    if (rowsToAdd.length > 0) {
+      var startRow = histSheet.getLastRow() + 1;
+      histSheet.getRange(startRow, 1, rowsToAdd.length, histHeaders.length).setValues(rowsToAdd);
+      
+      // Auto clean and sort history sheet
+      try {
+        cleanAndRepairHistorySheets();
+      } catch (errSort) {
+        Logger.log('cleanAndRepairHistorySheets warning: ' + errSort);
+      }
+
+      // Re-generate sync snapshot for offline desktop app
+      try {
+        generateSyncSnapshot();
+      } catch (errSnap) {
+        Logger.log('generateSyncSnapshot warning: ' + errSnap);
+      }
+    }
+
+    return {
+      success: true,
+      count: rowsToAdd.length,
+      totalParsed: parsedEntries.length,
+      skippedDuplicates: parsedEntries.length - rowsToAdd.length
+    };
+
+  } catch (e) {
+    Logger.log('Error in parseAndImportItemHistoryLog: ' + e);
+    return { success: false, error: e.message || String(e) };
+  }
+}
+
+/**
+ * Flexible Date parser helper
+ */
+function parseDateStringFlex(str) {
+  if (!str) return null;
+  if (str instanceof Date) return isNaN(str.getTime()) ? null : str;
+  str = String(str).trim();
+
+  // Try standard split MM/DD/YYYY or M/D/YY
+  var slashParts = str.split(/[\/\-\.]/);
+  if (slashParts.length === 3) {
+    var p0 = parseInt(slashParts[0], 10);
+    var p1 = parseInt(slashParts[1], 10);
+    var p2 = parseInt(slashParts[2], 10);
+
+    if (p0 > 1000) {
+      // YYYY-MM-DD
+      var dt = new Date(p0, p1 - 1, p2, 12, 0, 0);
+      return isNaN(dt.getTime()) ? null : dt;
+    } else {
+      // MM/DD/YYYY or MM/DD/YY
+      var yr = p2;
+      if (yr < 100) {
+        yr = yr < 50 ? 2000 + yr : 1900 + yr;
+      }
+      var dt = new Date(yr, p0 - 1, p1, 12, 0, 0);
+      return isNaN(dt.getTime()) ? null : dt;
+    }
+  }
+
+  var directDate = new Date(str);
+  return isNaN(directDate.getTime()) ? null : directDate;
+}
+
+function formatDateNoonOrRaw(val) {
+  if (!val) return '';
+  if (val instanceof Date) {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    return Utilities.formatDate(val, ss ? ss.getSpreadsheetTimeZone() : 'America/Denver', 'MM/dd/yyyy');
+  }
+  return String(val).trim();
+}
+
+/**
  * FAST: Saves employee history with batch operations.
  * Builds in-memory duplicate lookup from history data already loaded.
  * Batches all new entries for single write operation.

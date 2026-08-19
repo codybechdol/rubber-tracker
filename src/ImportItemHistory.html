@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    :root {
+      --bg-primary: #0f172a;
+      --bg-secondary: #1e293b;
+      --bg-tertiary: #334155;
+      --text-primary: #f8fafc;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --border: #334155;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    body {
+      background-color: var(--bg-primary);
+      color: var(--text-primary);
+      padding: 20px;
+      font-size: 13px;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .header-icon {
+      font-size: 24px;
+    }
+
+    .header-title {
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .header-subtitle {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .form-group.full-width {
+      grid-column: 1 / -1;
+    }
+
+    label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+
+    select, input, textarea {
+      background-color: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-primary);
+      padding: 8px 10px;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    select:focus, input:focus, textarea:focus {
+      border-color: var(--accent);
+    }
+
+    textarea {
+      font-family: monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      resize: vertical;
+      min-height: 180px;
+      white-space: pre;
+    }
+
+    .helper-text {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .button-group {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+    }
+
+    button {
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: background 0.2s, opacity 0.2s;
+    }
+
+    .btn-secondary {
+      background-color: var(--bg-secondary);
+      color: var(--text-primary);
+      border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover {
+      background-color: var(--bg-tertiary);
+    }
+
+    .btn-primary {
+      background-color: var(--accent);
+      color: #ffffff;
+    }
+
+    .btn-primary:hover {
+      background-color: var(--accent-hover);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .alert {
+      padding: 10px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      margin-top: 12px;
+      display: none;
+    }
+
+    .alert-success {
+      background-color: rgba(34, 197, 94, 0.15);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      color: #4ade80;
+    }
+
+    .alert-danger {
+      background-color: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #f87171;
+    }
+
+    .alert-info {
+      background-color: rgba(59, 130, 246, 0.15);
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      color: #60a5fa;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="header-icon">📥</div>
+    <div>
+      <div class="header-title">Import Item History Log</div>
+      <div class="header-subtitle">Parse multi-line assignment notes into chronological history records</div>
+    </div>
+  </div>
+
+  <div class="form-grid">
+    <div class="form-group">
+      <label for="eq-type">Equipment Category</label>
+      <select id="eq-type">
+        <option value="Gloves" selected>🧤 Gloves</option>
+        <option value="Sleeves">🧥 Sleeves</option>
+        <option value="Blankets">🟨 Blankets</option>
+        <option value="MACKs">⚡ MACKs</option>
+        <option value="HV Testers">🔬 HV Testers</option>
+        <option value="Phasing Sets">⚡ Phasing Sets</option>
+        <option value="AED">🏥 AED</option>
+        <option value="Grounds">⚡ Grounds</option>
+        <option value="Hot Sticks">🔴 Hot Sticks</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label for="item-num">Item # or Serial #</label>
+      <input type="text" id="item-num" placeholder="e.g. 96, 414, 1006" required>
+    </div>
+
+    <div class="form-group full-width">
+      <label for="log-text">History Log Text (One entry per line: Date - Holder/Status)</label>
+      <textarea id="log-text" placeholder="01/17/2022 - K. Powell
+07/11/2022 - C. Cliff
+10/31/2022 - K. Powell
+04/26/2023 - E. Hughes
+09/13/2023 - D Doane
+12/21/2023 - On Shelf
+06/03/2024 - R Taylor
+08/21/2024 - In Testing
+09/03/2024 - On Shelf
+10/07/2024 - C Sapeta
+02/04/2025 - In Testing
+02/11/2025 - On Shelf
+05/12/2025 - J. Collins
+06/17/2025 - In Testing
+07/17/2025 - On Shelf
+07/22/2025 - T. Goff
+10/24/2025 - In Testing
+11/19/2025 - Packed for Delivery
+12/09/2025 - O. Canavan
+05/05/2026 - In Testing
+06/04/2026 - Failed Visual"></textarea>
+      <div class="helper-text">Accepts formats like <code>MM/DD/YYYY - Name</code>, <code>M/D/YY: Status</code>, etc. Status keywords (On Shelf, In Testing, Packed, Failed) are auto-categorized.</div>
+    </div>
+  </div>
+
+  <div id="status-alert" class="alert"></div>
+
+  <div class="button-group">
+    <button type="button" class="btn-secondary" onclick="google.script.host.close()">Cancel</button>
+    <button type="button" id="submit-btn" class="btn-primary" onclick="submitImport()">📥 Parse & Import</button>
+  </div>
+
+  <script>
+    function showAlert(msg, type) {
+      const el = document.getElementById('status-alert');
+      el.className = 'alert alert-' + type;
+      el.innerHTML = msg;
+      el.style.display = 'block';
+    }
+
+    function submitImport() {
+      const eqType = document.getElementById('eq-type').value;
+      const itemNum = document.getElementById('item-num').value.trim();
+      const logText = document.getElementById('log-text').value.trim();
+      const btn = document.getElementById('submit-btn');
+
+      if (!itemNum) {
+        showAlert('Please enter an Item # or Serial #.', 'danger');
+        return;
+      }
+
+      if (!logText) {
+        showAlert('Please paste history log text to import.', 'danger');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '⏳ Importing...';
+      showAlert('Parsing and writing records to history sheet...', 'info');
+
+      google.script.run
+        .withSuccessHandler(function(res) {
+          btn.disabled = false;
+          btn.innerHTML = '📥 Parse & Import';
+          if (res && res.success) {
+            showAlert('✅ Successfully imported <strong>' + res.count + '</strong> history records for ' + eqType + ' #' + itemNum + '!', 'success');
+            setTimeout(function() {
+              google.script.host.close();
+            }, 2500);
+          } else {
+            showAlert('❌ ' + (res && res.error ? res.error : 'Import failed.'), 'danger');
+          }
+        })
+        .withFailureHandler(function(err) {
+          btn.disabled = false;
+          btn.innerHTML = '📥 Parse & Import';
+          showAlert('❌ Error: ' + err.message, 'danger');
+        })
+        .parseAndImportItemHistoryLog(eqType, itemNum, logText);
+    }
+  </script>
+</body>
+</html>

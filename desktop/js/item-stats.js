@@ -409,6 +409,8 @@ class ItemStatsEngine {
     }) || headers[1] || headers[0];
 
     const cleanItemKey = String(itemKey || '').trim();
+    this.currentActiveItemKey = cleanItemKey;
+    this.currentActiveSheetKey = sheetKey;
     const groupRows = rows.filter(r => {
       const val = String(r[groupCol] || '').trim();
       if (val === cleanItemKey) return true;
@@ -615,6 +617,275 @@ class ItemStatsEngine {
   closeDossierModal() {
     const modal = document.getElementById('item-lifecycle-modal');
     if (modal) modal.classList.remove('active');
+  }
+
+  openImportLogModal(prefillItemKey, prefillSheetKey) {
+    const modal = document.getElementById('import-history-log-modal');
+    if (!modal) return;
+
+    const itemNumEl = document.getElementById('dt-history-item-num');
+    const eqTypeEl = document.getElementById('dt-history-eq-type');
+    const logTextEl = document.getElementById('dt-history-log-text');
+    const alertEl = document.getElementById('dt-history-import-alert');
+
+    if (alertEl) {
+      alertEl.style.display = 'none';
+      alertEl.innerHTML = '';
+    }
+
+    const itemToUse = prefillItemKey || this.currentActiveItemKey || '';
+    const sheetToUse = prefillSheetKey || this.currentActiveSheetKey || 'gloves_history';
+
+    if (itemNumEl) itemNumEl.value = itemToUse;
+    if (eqTypeEl) eqTypeEl.value = sheetToUse;
+    if (logTextEl) logTextEl.value = '';
+
+    modal.classList.add('active');
+  }
+
+  closeImportLogModal() {
+    const modal = document.getElementById('import-history-log-modal');
+    if (modal) modal.classList.remove('active');
+  }
+
+  submitImportLog() {
+    const itemNumEl = document.getElementById('dt-history-item-num');
+    const eqTypeEl = document.getElementById('dt-history-eq-type');
+    const logTextEl = document.getElementById('dt-history-log-text');
+    const alertEl = document.getElementById('dt-history-import-alert');
+
+    const itemNum = itemNumEl ? itemNumEl.value.trim() : '';
+    const sheetKey = eqTypeEl ? eqTypeEl.value : 'gloves_history';
+    const logText = logTextEl ? logTextEl.value.trim() : '';
+
+    if (!itemNum) {
+      if (alertEl) {
+        alertEl.className = 'alert alert-danger';
+        alertEl.style.display = 'block';
+        alertEl.style.background = 'rgba(239, 68, 68, 0.15)';
+        alertEl.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+        alertEl.style.color = '#f87171';
+        alertEl.innerHTML = 'Please enter an Item # or Serial #.';
+      }
+      return;
+    }
+
+    if (!logText) {
+      if (alertEl) {
+        alertEl.className = 'alert alert-danger';
+        alertEl.style.display = 'block';
+        alertEl.style.background = 'rgba(239, 68, 68, 0.15)';
+        alertEl.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+        alertEl.style.color = '#f87171';
+        alertEl.innerHTML = 'Please paste history log text to import.';
+      }
+      return;
+    }
+
+    // Parse lines client-side
+    const lines = logText.split(/[\r\n]+/);
+    const parsedEntries = [];
+
+    // Build employee lookup from local DB
+    const empTable = this.db.getTable('employees');
+    const empRows = empTable ? (empTable.rows || []) : [];
+    const empLookup = {};
+
+    empRows.forEach(emp => {
+      const name = String(emp['Employee Name'] || emp['Name'] || Object.values(emp)[0] || '').trim();
+      const loc = String(emp['Location'] || 'Helena').trim();
+      if (!name) return;
+      empLookup[name.toLowerCase()] = { name: name, location: loc };
+      const parts = name.split(/\s+/);
+      if (parts.length >= 2) {
+        const first = parts[0];
+        const last = parts[parts.length - 1];
+        empLookup[(first.charAt(0) + '. ' + last).toLowerCase()] = { name: name, location: loc };
+        empLookup[(first.charAt(0) + ' ' + last).toLowerCase()] = { name: name, location: loc };
+        empLookup[(first.charAt(0) + '.' + last).toLowerCase()] = { name: name, location: loc };
+        empLookup[(first + ' ' + last.charAt(0) + '.').toLowerCase()] = { name: name, location: loc };
+        empLookup[(first + ' ' + last.charAt(0)).toLowerCase()] = { name: name, location: loc };
+      }
+    });
+
+    // Lookup metadata from local inventory table
+    const invSheetKey = sheetKey.replace('_history', '');
+    const invTable = this.db.getTable(invSheetKey);
+    const invRows = invTable ? (invTable.rows || []) : [];
+    let itemMeta = { size: '', classVal: '', model: '', kv: '', serial: '', length: '', type: '', location: 'Helena' };
+
+    const foundInv = invRows.find(r => {
+      const firstVal = String(Object.values(r)[0] || '').trim();
+      const iNum = String(r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['ESL ID'] || r['Serial #'] || firstVal).trim();
+      const esl = String(r['ESL ID'] || '').trim();
+      return iNum === itemNum || esl === itemNum;
+    });
+
+    if (foundInv) {
+      itemMeta.size = String(foundInv['Size'] || '');
+      itemMeta.classVal = String(foundInv['Class'] || '');
+      itemMeta.model = String(foundInv['Model'] || '');
+      itemMeta.kv = String(foundInv['KV'] || '');
+      itemMeta.length = String(foundInv['Length'] || '');
+      itemMeta.type = String(foundInv['Type'] || '');
+      itemMeta.serial = String(foundInv['Serial #'] || '');
+      itemMeta.location = String(foundInv['Location'] || 'Helena');
+    }
+
+    lines.forEach(line => {
+      line = line.trim();
+      if (!line) return;
+
+      const dateMatch = line.match(/^(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})\s*[-–—:]\s*(.+)$/);
+      let dateStr = '';
+      let rawTarget = '';
+
+      if (dateMatch) {
+        dateStr = dateMatch[1].trim();
+        rawTarget = dateMatch[2].trim();
+      } else {
+        const spaceSplit = line.split(/\s+/);
+        if (spaceSplit.length >= 2 && this.parseDate(spaceSplit[0])) {
+          dateStr = spaceSplit[0];
+          rawTarget = line.substring(dateStr.length).replace(/^[-–—:]\s*/, '').trim();
+        } else {
+          return;
+        }
+      }
+
+      const parsedDate = this.parseDate(dateStr);
+      if (!parsedDate) return;
+
+      const formattedDate = this.formatDate(parsedDate);
+      const targetLower = rawTarget.toLowerCase();
+
+      let assignedTo = rawTarget;
+      let location = 'Helena';
+      let notes = '';
+
+      if (targetLower.includes('failed visual')) {
+        assignedTo = 'Failed Rubber';
+        notes = 'Failed Visual';
+        location = 'Helena';
+      } else if (targetLower.includes('failed rubber') || targetLower.includes('failed test') || targetLower === 'failed') {
+        assignedTo = 'Failed Rubber';
+        notes = 'Failed Test';
+        location = 'Helena';
+      } else if (targetLower.includes('destroyed') || targetLower.includes('not repairable')) {
+        assignedTo = 'Failed Rubber';
+        notes = 'Destroyed';
+        location = 'Helena';
+      } else if (targetLower.includes('lost') || targetLower.includes('missing')) {
+        assignedTo = 'Lost';
+        location = 'Lost';
+        notes = 'Lost';
+      } else if (targetLower.includes('packed for testing') || targetLower.includes('ready for test')) {
+        assignedTo = 'Packed For Testing';
+        location = "Cody's Truck";
+        notes = 'Packed on truck';
+      } else if (targetLower.includes('packed for delivery') || targetLower.includes('ready for delivery')) {
+        assignedTo = 'Packed For Delivery';
+        location = "Cody's Truck";
+        notes = 'Packed on truck';
+      } else if (targetLower.includes('in testing') || targetLower.includes('lab') || targetLower.includes('arnett') || targetLower.includes('jm test')) {
+        assignedTo = 'In Testing';
+        location = 'Arnett / JM Test';
+        notes = 'Sent to lab';
+      } else if (targetLower.includes('on shelf') || targetLower === 'shelf' || targetLower === 'storage' || targetLower === 'unassigned') {
+        assignedTo = 'On Shelf';
+        location = 'Helena';
+        notes = 'On Shelf';
+      } else {
+        const matchedEmp = empLookup[targetLower];
+        if (matchedEmp) {
+          assignedTo = matchedEmp.name;
+          location = matchedEmp.location || 'Helena';
+          notes = 'Assigned to ' + matchedEmp.name;
+        } else {
+          assignedTo = rawTarget;
+          location = 'Helena';
+          notes = 'Assigned';
+        }
+      }
+
+      parsedEntries.push({
+        dateObj: parsedDate,
+        dateFormatted: formattedDate,
+        assignedTo: assignedTo,
+        location: location,
+        notes: notes
+      });
+    });
+
+    if (parsedEntries.length === 0) {
+      if (alertEl) {
+        alertEl.className = 'alert alert-danger';
+        alertEl.style.display = 'block';
+        alertEl.style.background = 'rgba(239, 68, 68, 0.15)';
+        alertEl.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+        alertEl.style.color = '#f87171';
+        alertEl.innerHTML = 'No valid "Date - Holder/Status" lines could be parsed.';
+      }
+      return;
+    }
+
+    parsedEntries.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
+
+    // Insert into local history table
+    const histTable = this.db.getTable(sheetKey);
+    let addedCount = 0;
+    if (histTable && histTable.rows) {
+      parsedEntries.forEach(entry => {
+        const isDupe = histTable.rows.some(r => {
+          const rDate = String(r['Date Assigned'] || r['Date'] || Object.values(r)[0] || '').trim();
+          const rAssigned = String(r['Assigned To'] || '').trim().toLowerCase();
+          const rItem = String(r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['Serial #'] || '').trim();
+          return rDate === entry.dateFormatted && rAssigned === entry.assignedTo.toLowerCase() && rItem === itemNum;
+        });
+
+        if (!isDupe) {
+          const newRowObj = {
+            'Date Assigned': entry.dateFormatted,
+            'Item #': itemNum,
+            'Size': itemMeta.size,
+            'Class': itemMeta.classVal,
+            'Location': entry.location,
+            'Assigned To': entry.assignedTo,
+            'Notes': entry.notes
+          };
+          if (sheetKey.includes('mack')) newRowObj['KV'] = itemMeta.kv;
+          if (sheetKey.includes('hv_tester') || sheetKey.includes('phasing')) newRowObj['Model'] = itemMeta.model;
+          histTable.rows.push(newRowObj);
+          addedCount++;
+        }
+      });
+    }
+
+    // Queue mutation to outbox for sync
+    const eqNameMap = {
+      'gloves_history': 'Gloves',
+      'sleeves_history': 'Sleeves',
+      'blankets_history': 'Blankets',
+      'macks_history': 'MACKs',
+      'hv_testers_history': 'HV Testers',
+      'phasing_sets_history': 'Phasing Sets',
+      'aed_history': 'AED',
+      'grounds_history': 'Grounds',
+      'hot_sticks_history': 'Hot Sticks'
+    };
+
+    this.db.addMutation({
+      action: 'IMPORT_HISTORY_LOG',
+      equipmentType: eqNameMap[sheetKey] || 'Gloves',
+      itemNum: itemNum,
+      logText: logText,
+      timestamp: new Date().toISOString()
+    });
+
+    this.closeImportLogModal();
+
+    // Re-render open Dossier modal
+    this.openDossierModal(itemNum, sheetKey);
   }
 }
 

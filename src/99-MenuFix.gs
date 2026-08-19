@@ -62,6 +62,7 @@ function _buildGloveManagerMenu() {
       // === STEP 5: SAVE & BACKUP ===
       .addSubMenu(ui.createMenu('💾 Save & Backup')
         .addItem('💾 Save Current State to History', 'saveHistoryFast')
+        .addItem('📥 Import Item History Log', 'showImportItemHistoryDialog')
         .addItem('🧹 Clean & Repair History Sheets', 'menuCleanHistorySheets')
         .addItem('💾 Create Backup Snapshot', 'createBackupSnapshot')
         .addItem('🔄 Export Offline Snapshot (Desktop App)', 'menuExportSyncSnapshot')

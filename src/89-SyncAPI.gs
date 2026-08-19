@@ -895,6 +895,17 @@ function applyBatchSyncMutations(mutations) {
           }
           break;
 
+        case 'IMPORT_HISTORY_LOG':
+          if (mut.equipmentType && mut.itemNum && mut.logText && typeof parseAndImportItemHistoryLog === 'function') {
+            var importRes = parseAndImportItemHistoryLog(mut.equipmentType, mut.itemNum, mut.logText);
+            if (importRes && importRes.success) {
+              appliedCount++;
+            } else if (importRes && importRes.error) {
+              errors.push('History import error: ' + importRes.error);
+            }
+          }
+          break;
+
         case 'TRIGGER_SYNC_CREWS':
           if (typeof syncCrews === 'function') {
             syncCrews(true);
