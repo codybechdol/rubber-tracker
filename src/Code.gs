@@ -12093,10 +12093,10 @@ function parseAndImportItemHistoryLog(equipmentType, itemNum, logText) {
       if (!line) continue;
 
       // Check if this line is an Item Header (e.g. "Item 1024:", "Glove #1024", "1024:", "[1024]")
-      var itemHeaderMatch = line.match(/^(?:item\s*#?|glove\s*#?|sleeve\s*#?|blanket\s*#?|mack\s*#?|serial\s*#?|tester\s*#?|phasing\s*#?|aed\s*#?|#)\s*([A-Za-z0-9\-\.]+)\s*[:\-]?$/i) ||
+      var itemHeaderMatch = line.match(/^(?:item\s*#?|glove\s*#?|sleeve\s*#?|blanket\s*#?|mack\s*#?|serial\s*#?|tester\s*#?|phasing\s*#?|aed\s*#?|ground\s*#?|stick\s*#?|#)\s*([A-Za-z0-9\-\.]+)\s*[:\-]?$/i) ||
                             line.match(/^\[([A-Za-z0-9\-\.]+)\]$/) ||
                             line.match(/^([A-Za-z0-9\-\.]+)\s*:\s*$/);
-      if (itemHeaderMatch && !parseDateStringFlex(itemHeaderMatch[1]) && !line.match(/^\d{1,2}[\/\-\.]\d{1,2}/)) {
+      if (itemHeaderMatch && !line.match(/^\d{1,2}[\/\-\.]\d{1,2}/)) {
         currentItemNum = itemHeaderMatch[1].trim();
         continue;
       }
@@ -12429,12 +12429,19 @@ function parseDateStringFlex(str) {
   if (str instanceof Date) return isNaN(str.getTime()) ? null : str;
   str = String(str).trim();
 
-  // Try standard split MM/DD/YYYY or M/D/YY
+  // A pure number (like "1027", "96") is an item number, NOT a date
+  if (/^\d{1,6}$/.test(str)) {
+    return null;
+  }
+
+  // Try standard split MM/DD/YYYY, M/D/YY, or YYYY-MM-DD
   var slashParts = str.split(/[\/\-\.]/);
   if (slashParts.length === 3) {
     var p0 = parseInt(slashParts[0], 10);
     var p1 = parseInt(slashParts[1], 10);
     var p2 = parseInt(slashParts[2], 10);
+
+    if (isNaN(p0) || isNaN(p1) || isNaN(p2)) return null;
 
     if (p0 > 1000) {
       // YYYY-MM-DD
@@ -12451,8 +12458,23 @@ function parseDateStringFlex(str) {
     }
   }
 
-  var directDate = new Date(str);
-  return isNaN(directDate.getTime()) ? null : directDate;
+  if (slashParts.length === 2) {
+    var m = parseInt(slashParts[0], 10);
+    var d = parseInt(slashParts[1], 10);
+    if (!isNaN(m) && !isNaN(d) && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      var yr = new Date().getFullYear();
+      var dt = new Date(yr, m - 1, d, 12, 0, 0);
+      return isNaN(dt.getTime()) ? null : dt;
+    }
+  }
+
+  // Only try direct Date parse if it contains words/letters (e.g. "Jan 15, 2025")
+  if (/[a-zA-Z]/.test(str) && /[\s,]/.test(str)) {
+    var directDate = new Date(str);
+    return isNaN(directDate.getTime()) ? null : directDate;
+  }
+
+  return null;
 }
 
 function formatDateNoonOrRaw(val) {
