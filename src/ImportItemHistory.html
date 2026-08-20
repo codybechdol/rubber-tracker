@@ -271,8 +271,15 @@ Item 1025:
           nextBtn.disabled = false;
           if (res && res.success) {
             const timeStr = res.elapsedSeconds ? ' in ' + res.elapsedSeconds + 's' : '';
-            const itemsStr = res.itemsCount && res.itemsCount > 1 ? res.itemsCount + ' items (' + res.count + ' records)' : res.count + ' records for ' + (itemNum ? eqType + ' #' + itemNum : eqType);
-            showAlert('✅ Successfully imported <strong>' + itemsStr + '</strong>' + timeStr + '!', 'success');
+            let msg = '';
+            if (res.count === 0 && res.skippedDuplicates > 0) {
+              msg = 'ℹ️ All <strong>' + res.skippedDuplicates + '</strong> records already exist in history sheet (no duplicates added).' + (res.activeUpdatedCount ? ' Active inventory synced!' : '');
+            } else {
+              const itemsStr = res.itemsCount && res.itemsCount > 1 ? res.itemsCount + ' items (' + res.count + ' records)' : res.count + ' records for ' + (itemNum ? eqType + ' #' + itemNum : eqType);
+              const dupeNote = res.skippedDuplicates ? ' (' + res.skippedDuplicates + ' existing skipped)' : '';
+              msg = '✅ Successfully imported <strong>' + itemsStr + '</strong>' + dupeNote + timeStr + '!' + (res.activeUpdatedCount ? ' Active inventory synced.' : '');
+            }
+            showAlert(msg, res.count > 0 ? 'success' : 'info');
             
             if (isNextMode) {
               logTextEl.value = '';
@@ -287,7 +294,7 @@ Item 1025:
             } else {
               setTimeout(function() {
                 google.script.host.close();
-              }, 1800);
+              }, 2200);
             }
           } else {
             showAlert('❌ ' + (res && res.error ? res.error : 'Import failed.'), 'danger');

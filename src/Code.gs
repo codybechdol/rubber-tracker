@@ -11880,13 +11880,14 @@ function saveHistoryFast(silent) {
 }
 
 /**
- * Shows the Import Item History Log modal dialog
+ * Shows the Import Item History Log modeless (non-blocking) dialog
+ * Allows scrolling and editing the spreadsheet concurrently while open.
  */
 function showImportItemHistoryDialog() {
   var html = HtmlService.createHtmlOutputFromFile('ImportItemHistory')
     .setWidth(620)
     .setHeight(680);
-  SpreadsheetApp.getUi().showModalDialog(html, '📥 Import Item History Log');
+  SpreadsheetApp.getUi().showModelessDialog(html, '📥 Import Item History Log');
 }
 
 /**
@@ -12092,10 +12093,10 @@ function parseAndImportItemHistoryLog(equipmentType, itemNum, logText) {
       if (!line) continue;
 
       // Check if this line is an Item Header (e.g. "Item 1024:", "Glove #1024", "1024:", "[1024]")
-      var itemHeaderMatch = line.match(/^(?:item\s*#?|glove\s*#?|sleeve\s*#?|blanket\s*#?|mack\s*#?|serial\s*#?|#)\s*([A-Za-z0-9\-\.]+)\s*[:\-]?$/i) ||
+      var itemHeaderMatch = line.match(/^(?:item\s*#?|glove\s*#?|sleeve\s*#?|blanket\s*#?|mack\s*#?|serial\s*#?|tester\s*#?|phasing\s*#?|aed\s*#?|#)\s*([A-Za-z0-9\-\.]+)\s*[:\-]?$/i) ||
                             line.match(/^\[([A-Za-z0-9\-\.]+)\]$/) ||
                             line.match(/^([A-Za-z0-9\-\.]+)\s*:\s*$/);
-      if (itemHeaderMatch && !line.match(/^\d{1,2}[\/\-\.]\d{1,2}/)) {
+      if (itemHeaderMatch && !parseDateStringFlex(itemHeaderMatch[1]) && !line.match(/^\d{1,2}[\/\-\.]\d{1,2}/)) {
         currentItemNum = itemHeaderMatch[1].trim();
         continue;
       }
@@ -12104,8 +12105,8 @@ function parseAndImportItemHistoryLog(equipmentType, itemNum, logText) {
         continue; // No item specified for this line
       }
 
-      // Match Date at beginning of line
-      var dateMatch = line.match(/^(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})\s*[-–—:]\s*(.+)$/);
+      // Match Date at beginning of line (e.g. "06/27/2024 - D Swann", "01/28/2025- In Testing", "2024-06-27: On Shelf", "6/27/24 D Swann")
+      var dateMatch = line.match(/^(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})(?:\s*[-–—:]\s*|\s+)(.+)$/);
       
       var dateStr = '';
       var rawTarget = '';
@@ -12251,15 +12252,155 @@ function parseAndImportItemHistoryLog(equipmentType, itemNum, logText) {
     }
 
     if (rowsToAdd.length > 0) {
+      var startRow = histSheet.getLastRow() + 1;
+      var neededRows = startRow + rowsToAdd.length - 1;
+      if (neededRows > histSheet.getMaxRows()) {
+        histSheet.insertRowsAfter(histSheet.getMaxRows(), neededRows - histSheet.getMaxRows() + 50);
+      }
+
       try {
-        var startRow = histSheet.getLastRow() + 1;
         histSheet.getRange(startRow, 1, rowsToAdd.length, histHeaders.length).setValues(rowsToAdd);
       } catch (batchErr) {
+        Logger.log('Batch setValues failed: ' + batchErr + ', writing safely...');
         for (var r = 0; r < rowsToAdd.length; r++) {
-          histSheet.appendRow(rowsToAdd[r]);
+          safeWriteRowToTable(histSheet, startRow + r, rowsToAdd[r], histHeaders);
+        }
+      }
+
+      // Sort the history sheet by Item# and Date so new rows are organized with their item block
+      try {
+        if (histSheet.getLastRow() > 2) {
+          var dataRange = histSheet.getRange(2, 1, histSheet.getLastRow() - 1, histHeaders.length);
+          var sortItemCol = histHeaders.indexOf('item #');
+          if (sortItemCol === -1) sortItemCol = histHeaders.indexOf('serial #');
+          if (sortItemCol === -1) sortItemCol = 1;
+          var sortDateCol = histHeaders.indexOf('date assigned');
+          if (sortDateCol === -1) sortDateCol = 0;
+
+          dataRange.sort([
+            { column: sortItemCol + 1, ascending: true },
+            { column: sortDateCol + 1, ascending: false }
+          ]);
+        }
+      } catch (sortErr) {
+        Logger.log('History sheet sort note: ' + sortErr);
+      }
+    }
+
+    // Update active inventory sheet for each distinct item with the newest entry from the log
+    var activeUpdatedCount = 0;
+    if (invSheet && invSheet.getLastRow() > 1 && Object.keys(distinctItems).length > 0) {
+      var invLastRow = invSheet.getLastRow();
+      var invLastCol = invSheet.getLastColumn();
+      var invDataRange = invSheet.getRange(1, 1, invLastRow, invLastCol);
+      var invValues = invDataRange.getValues();
+      var invH = invValues[0].map(function(h) { return String(h).toLowerCase().trim(); });
+
+      var invItemCol = invH.indexOf('item #');
+      if (invItemCol === -1) invItemCol = invH.indexOf('glove');
+      if (invItemCol === -1) invItemCol = invH.indexOf('sleeve');
+      if (invItemCol === -1) invItemCol = invH.indexOf('blanket');
+      if (invItemCol === -1) invItemCol = invH.indexOf('mack');
+      if (invItemCol === -1) invItemCol = invH.indexOf('serial #');
+      if (invItemCol === -1) invItemCol = 0;
+
+      var invEslCol = invH.indexOf('esl id');
+      var invDateCol = invH.indexOf('date assigned');
+      var invLocCol = invH.indexOf('location');
+      var invStatCol = invH.indexOf('status');
+      var invAssignedCol = invH.indexOf('assigned to');
+      var invChgCol = invH.indexOf('change out date');
+
+      var isSleeve = eqKey.includes('sleeve');
+      var isBlanket = eqKey.includes('blanket');
+      var isMack = eqKey.includes('mack');
+
+      // Group newest entry per item
+      var newestByItem = {};
+      for (var ne = 0; ne < parsedEntries.length; ne++) {
+        var pEntry = parsedEntries[ne];
+        if (!newestByItem[pEntry.itemNum] || pEntry.dateObj.getTime() >= newestByItem[pEntry.itemNum].dateObj.getTime()) {
+          newestByItem[pEntry.itemNum] = pEntry;
+        }
+      }
+
+      for (var ir = 1; ir < invValues.length; ir++) {
+        var rowItemNum = String(invValues[ir][invItemCol] || '').trim();
+        var rowEsl = invEslCol !== -1 ? String(invValues[ir][invEslCol] || '').trim() : '';
+        var matchingNewest = newestByItem[rowItemNum] || (rowEsl ? newestByItem[rowEsl] : null);
+
+        if (matchingNewest) {
+          var rowIndex1Based = ir + 1;
+          var newStatus = matchingNewest.assignedTo;
+          var newAssignedTo = matchingNewest.assignedTo;
+          var newLoc = matchingNewest.location || 'Helena';
+          var newDateStr = matchingNewest.dateFormatted;
+          var newDateObj = matchingNewest.dateObj;
+
+          // Normalize Status vs Assigned To
+          var assLower = newAssignedTo.toLowerCase();
+          if (assLower === 'failed rubber' || assLower.includes('failed')) {
+            newStatus = 'Failed Rubber';
+            newAssignedTo = 'Failed Rubber';
+            newLoc = 'Helena';
+          } else if (assLower === 'lost') {
+            newStatus = 'Lost';
+            newAssignedTo = 'Lost';
+            newLoc = 'Lost';
+          } else if (assLower === 'in testing') {
+            newStatus = 'In Testing';
+            newAssignedTo = 'In Testing';
+            newLoc = 'Arnett / JM Test';
+          } else if (assLower === 'on shelf' || assLower === 'unassigned') {
+            newStatus = 'On Shelf';
+            newAssignedTo = 'On Shelf';
+            newLoc = 'Helena';
+          } else if (assLower === 'new') {
+            newStatus = 'On Shelf';
+            newAssignedTo = 'New';
+            newLoc = 'Helena';
+          } else if (assLower.includes('packed for testing')) {
+            newStatus = 'Packed For Testing';
+            newAssignedTo = 'Packed For Testing';
+            newLoc = "Cody's Truck";
+          } else if (assLower.includes('packed for delivery')) {
+            newStatus = 'Packed For Delivery';
+            newAssignedTo = 'Packed For Delivery';
+            newLoc = "Cody's Truck";
+          } else {
+            newStatus = 'Assigned';
+          }
+
+          if (invDateCol !== -1) invSheet.getRange(rowIndex1Based, invDateCol + 1).setValue(newDateStr);
+          if (invLocCol !== -1) invSheet.getRange(rowIndex1Based, invLocCol + 1).setValue(newLoc);
+          if (invStatCol !== -1) invSheet.getRange(rowIndex1Based, invStatCol + 1).setValue(newStatus);
+          if (invAssignedCol !== -1) invSheet.getRange(rowIndex1Based, invAssignedCol + 1).setValue(newAssignedTo);
+
+          // Change-out date calculation
+          if (invChgCol !== -1) {
+            var calcChg = null;
+            if (isBlanket && typeof calculateBlanketChangeOutDate === 'function') {
+              var testDateVal = invH.indexOf('test date') !== -1 ? invValues[ir][invH.indexOf('test date')] : null;
+              if (testDateVal) calcChg = calculateBlanketChangeOutDate(testDateVal, newDateObj, newLoc, newAssignedTo);
+            } else if (isMack && typeof calculateMackChangeOutDate === 'function') {
+              var mTestDateVal = invH.indexOf('test date') !== -1 ? invValues[ir][invH.indexOf('test date')] : null;
+              if (mTestDateVal) calcChg = calculateMackChangeOutDate(mTestDateVal, newDateObj, newLoc, newAssignedTo);
+            } else if (typeof calculateChangeOutDate === 'function') {
+              calcChg = calculateChangeOutDate(newDateObj, newLoc, newAssignedTo, isSleeve);
+            }
+
+            if (calcChg) {
+              var chgStr = calcChg instanceof Date ? Utilities.formatDate(calcChg, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy') : String(calcChg);
+              invSheet.getRange(rowIndex1Based, invChgCol + 1).setValue(chgStr);
+            }
+          }
+
+          activeUpdatedCount++;
         }
       }
     }
+
+    SpreadsheetApp.flush();
 
     var elapsed = ((new Date().getTime() - t0) / 1000).toFixed(1);
     var itemCount = Object.keys(distinctItems).length;
@@ -12268,6 +12409,7 @@ function parseAndImportItemHistoryLog(equipmentType, itemNum, logText) {
       success: true,
       count: rowsToAdd.length,
       itemsCount: itemCount,
+      activeUpdatedCount: activeUpdatedCount,
       totalParsed: parsedEntries.length,
       skippedDuplicates: parsedEntries.length - rowsToAdd.length,
       elapsedSeconds: elapsed
