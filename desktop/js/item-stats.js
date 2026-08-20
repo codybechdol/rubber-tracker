@@ -51,7 +51,30 @@ class ItemStatsEngine {
   classifyState(assignedTo, location, notes, status) {
     const sAssigned = String(assignedTo || '').toLowerCase().trim();
     const sLoc = String(location || '').toLowerCase().trim();
+    const sNotes = String(notes || '').toLowerCase().trim();
     const sStatus = String(status || '').toLowerCase().trim();
+
+    // 0. Brand New Purchase (Initial acquisition / On Shelf from new)
+    if (
+      sAssigned === 'new' ||
+      sAssigned === 'newly purchased' ||
+      sAssigned === 'brand new' ||
+      sAssigned === 'new purchase' ||
+      sAssigned === 'new item' ||
+      sAssigned.startsWith('new (') ||
+      sNotes.includes('new purchase') ||
+      sNotes.includes('initial purchase') ||
+      sNotes.includes('newly purchased')
+    ) {
+      return {
+        key: 'NEW_PURCHASE',
+        label: 'Brand New (On Shelf)',
+        badgeClass: 'badge-new-purchase',
+        color: '#10b981',
+        icon: '✨',
+        isPurchaseEntry: true
+      };
+    }
 
     // 1. Retired / Failed (End of life only)
     if (
@@ -197,6 +220,17 @@ class ItemStatsEngine {
     let firstDate = this.parseDate(sorted[0]['Date Assigned'] || sorted[0]['Date'] || Object.values(sorted[0])[0]) || new Date();
     const now = new Date();
 
+    // Check if earliest entry represents a known brand-new purchase
+    const firstRawAssigned = String(sorted[0]['Assigned To'] || sorted[0]['Employee Name'] || sorted[0]['Employee'] || '').toLowerCase().trim();
+    const firstRawNotes = String(sorted[0]['Notes'] || sorted[0]['Note'] || '').toLowerCase().trim();
+    const isPurchaseOrigin = firstRawAssigned === 'new' ||
+                             firstRawAssigned === 'newly purchased' ||
+                             firstRawAssigned === 'brand new' ||
+                             firstRawAssigned === 'new purchase' ||
+                             firstRawAssigned.startsWith('new (') ||
+                             firstRawNotes.includes('new purchase') ||
+                             firstRawNotes.includes('initial purchase');
+
     let fieldDays = 0;
     let shelfDays = 0;
     let testingDays = 0;
@@ -253,11 +287,11 @@ class ItemStatsEngine {
       if (state.key === 'FIELD') {
         fieldDays += days;
         const linemanName = assignedTo.trim();
-        if (linemanName && linemanName.toLowerCase() !== 'n/a' && linemanName.toLowerCase() !== 'unknown') {
+        if (linemanName && !['new', 'n/a', 'unknown', 'none', 'shelf', 'storage'].includes(linemanName.toLowerCase())) {
           linemenMap[linemanName] = (linemenMap[linemanName] || 0) + days;
         }
-      } else if (state.key === 'SHELF') {
-        shelfDays += days;
+      } else if (state.key === 'SHELF' || state.key === 'NEW_PURCHASE') {
+        shelfDays += days; // "New" items on shelf count towards shelf/storage duration
       } else if (state.key === 'TESTING') {
         testingDays += days;
         testCyclesCount++;
@@ -280,10 +314,12 @@ class ItemStatsEngine {
         days: days,
         durationFormatted: this.formatDuration(days),
         state: state,
-        assignedTo: assignedTo,
-        location: location,
+        assignedTo: state.key === 'NEW_PURCHASE' ? 'New (Purchased)' : assignedTo,
+        location: location || 'Helena',
         notes: notes,
-        isCurrent: i === sorted.length - 1 && !isRetired
+        isCurrent: i === sorted.length - 1 && !isRetired,
+        isOriginRecord: i === 0,
+        isPurchaseOrigin: i === 0 && isPurchaseOrigin
       });
     }
 
@@ -312,6 +348,15 @@ class ItemStatsEngine {
       itemKey: itemKey,
       firstDate: firstDate,
       firstDateFormatted: this.formatDate(firstDate),
+      hasKnownPurchaseDate: isPurchaseOrigin,
+      lifecycleType: isPurchaseOrigin ? 'KNOWN_PURCHASE' : 'TRACKING_START_UNKNOWN_PURCHASE',
+      purchaseDate: isPurchaseOrigin ? firstDate : null,
+      purchaseDateFormatted: isPurchaseOrigin ? this.formatDate(firstDate) : 'Unknown',
+      provenanceLabel: isPurchaseOrigin ? 'Known Purchase Date' : 'Tracking Start Date (Purchase Date Unknown)',
+      provenanceBadgeText: isPurchaseOrigin ? `✨ Purchased: ${this.formatDate(firstDate)}` : `⏳ Tracking Start: ${this.formatDate(firstDate)} (Purchase Unknown)`,
+      provenanceDescription: isPurchaseOrigin
+        ? `Full lifecycle tracked from original purchase date on ${this.formatDate(firstDate)}. Initial stage was On Shelf until first deployment.`
+        : `Initial recorded tracking began on ${this.formatDate(firstDate)}. Original purchase date and prior history before this record are unknown.`,
       lastDate: isRetired ? retiredDate : now,
       lastDateFormatted: this.formatDate(isRetired ? retiredDate : now),
       isRetired: isRetired,
@@ -361,12 +406,21 @@ class ItemStatsEngine {
     return `
       <div class="kpi-cards-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 8px; margin-bottom: 8px;">
         
-        <div class="kpi-stat-card" style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);">
-          <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px; display: flex; align-items: center; gap: 4px;">
-            <span>⏳</span> Total Lifespan
+        <div class="kpi-stat-card" style="background-color: var(--bg-secondary); border: 1px solid ${stats.hasKnownPurchaseDate ? 'rgba(16, 185, 129, 0.4)' : 'rgba(245, 158, 11, 0.4)'}; border-radius: 8px; padding: 8px 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);">
+          <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
+            <span style="display: flex; align-items: center; gap: 4px;"><span>${stats.hasKnownPurchaseDate ? '⏳' : '⏱️'}</span> ${stats.hasKnownPurchaseDate ? 'Total Lifespan' : 'Tracked Lifespan'}</span>
           </div>
-          <div style="font-size: 14px; font-weight: 700; color: var(--text-primary);">${stats.lifespanFormatted}</div>
-          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">Since ${stats.firstDateFormatted}</div>
+          <div style="font-size: 14px; font-weight: 700; color: ${stats.hasKnownPurchaseDate ? '#34d399' : '#fbbf24'};">${stats.lifespanFormatted}</div>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">
+            ${stats.hasKnownPurchaseDate ? `Purchased ${stats.firstDateFormatted}` : `Since ${stats.firstDateFormatted}`}
+          </div>
+          <div style="margin-top: 4px;">
+            ${stats.hasKnownPurchaseDate ? `
+              <span class="brand-badge" style="font-size: 9px; padding: 1px 5px; background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4);">✨ Known Purchase</span>
+            ` : `
+              <span class="brand-badge" style="font-size: 9px; padding: 1px 5px; background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4);">⚠️ Purchase Date Unknown</span>
+            `}
+          </div>
         </div>
 
         <div class="kpi-stat-card" style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);">
@@ -508,8 +562,19 @@ class ItemStatsEngine {
           <div style="display: flex; align-items: center; gap: 10px;">
             <span style="font-size: 24px;">📦</span>
             <div>
-              <div style="font-size: 18px; font-weight: 700; color: var(--text-primary);">${sheetTitle} #${stats.itemKey}</div>
-              <div style="display: flex; align-items: center; gap: 6px; margin-top: 2px;">
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <span style="font-size: 18px; font-weight: 700; color: var(--text-primary);">${sheetTitle} #${stats.itemKey}</span>
+                ${stats.hasKnownPurchaseDate ? `
+                  <span class="brand-badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;" title="Full lifecycle history tracked from initial purchase on ${stats.firstDateFormatted}">
+                    <span>✨</span> Known Purchase: ${stats.firstDateFormatted}
+                  </span>
+                ` : `
+                  <span class="brand-badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;" title="Tracking began on ${stats.firstDateFormatted}. Original purchase date is unrecorded.">
+                    <span>⏳</span> Tracking Start: ${stats.firstDateFormatted} (Purchase Date Unknown)
+                  </span>
+                `}
+              </div>
+              <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
                 ${metaChips.join('')}
               </div>
             </div>
@@ -519,6 +584,17 @@ class ItemStatsEngine {
             <span class="brand-badge" style="background-color: ${stats.currentState.color}22; color: ${stats.currentState.color}; border: 1px solid ${stats.currentState.color}55; font-size: 12px; font-weight: 600;">
               ${stats.currentState.label}
             </span>
+          </div>
+        </div>
+
+        <!-- Provenance Baseline Notice -->
+        <div style="font-size: 11px; color: ${stats.hasKnownPurchaseDate ? '#94a3b8' : '#cbd5e1'}; background: ${stats.hasKnownPurchaseDate ? 'rgba(16, 185, 129, 0.08)' : 'rgba(245, 158, 11, 0.1)'}; border-left: 3px solid ${stats.hasKnownPurchaseDate ? '#10b981' : '#f59e0b'}; padding: 6px 12px; border-radius: 4px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+          <div>
+            ${stats.hasKnownPurchaseDate ? `
+              <strong>✨ Full Lifecycle Tracking:</strong> Recorded as <strong>Brand New</strong> on ${stats.firstDateFormatted} and remained On Shelf until initial field deployment. Lifespan metrics reflect the complete duration since purchase.
+            ` : `
+              <strong>⚠️ Tracking Baseline Notice:</strong> Original purchase date is <strong>unknown</strong>. Tracking history begins on ${stats.firstDateFormatted} (initial assignment to <strong>${this.escapeHtml(stats.milestones[0]?.assignedTo || 'lineman')}</strong>). Metrics reflect time tracked since this baseline.
+            `}
           </div>
         </div>
 
@@ -544,17 +620,22 @@ class ItemStatsEngine {
     const reversedMilestones = [...stats.milestones].reverse();
     reversedMilestones.forEach((m, mIdx) => {
       const nodeColor = m.state.color;
+      const isOrigin = m.isOriginRecord;
+      const isPurchaseOrigin = m.isPurchaseOrigin;
+
       html += `
         <div style="position: relative; margin-bottom: 20px;">
           <!-- Node circle on timeline -->
           <div style="position: absolute; left: -27px; top: 0px; width: 14px; height: 14px; border-radius: 50%; background-color: ${nodeColor}; border: 3px solid var(--bg-secondary); box-shadow: 0 0 0 2px ${nodeColor}88;"></div>
           
-          <div style="background-color: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; gap: 8px;">
-              <div style="display: flex; align-items: center; gap: 8px;">
+          <div style="background-color: var(--bg-primary); border: 1px solid ${isPurchaseOrigin ? 'rgba(16, 185, 129, 0.4)' : (isOrigin && !stats.hasKnownPurchaseDate ? 'rgba(245, 158, 11, 0.4)' : 'var(--border-color)')}; border-radius: 8px; padding: 12px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; gap: 8px; flex-wrap: wrap;">
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                 <span style="font-size: 15px;">${m.state.icon}</span>
                 <span style="font-weight: 700; font-size: 13px; color: var(--text-primary);">${m.state.label}</span>
                 ${m.isCurrent ? `<span class="brand-badge" style="background: rgba(234, 179, 8, 0.2); color: #facc15; font-size: 10px;">Current</span>` : ''}
+                ${isPurchaseOrigin ? `<span class="brand-badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 10px; font-weight: 700;">✨ Lifecycle Origin (Purchased New)</span>` : ''}
+                ${isOrigin && !stats.hasKnownPurchaseDate ? `<span class="brand-badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; font-size: 10px;">⏳ Tracking Baseline (Purchase Unknown)</span>` : ''}
               </div>
               <span style="font-size: 11px; font-weight: 600; color: #60a5fa;">${m.durationFormatted}</span>
             </div>
@@ -565,13 +646,24 @@ class ItemStatsEngine {
 
             ${m.assignedTo ? `
               <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">
-                <strong>Holder:</strong> <span style="color: var(--text-primary); font-weight: 600;">${m.assignedTo}</span> ${m.location ? `(${m.location})` : ''}
+                <strong>Holder:</strong> 
+                ${m.state.key === 'NEW_PURCHASE' ? `
+                  <span style="color: #34d399; font-weight: 700;">New Item (In Stock - On Shelf)</span> ${m.location ? `(${m.location})` : ''}
+                ` : `
+                  <span style="color: var(--text-primary); font-weight: 600;">${m.assignedTo}</span> ${m.location ? `(${m.location})` : ''}
+                `}
               </div>
             ` : ''}
 
             ${m.notes ? `
               <div style="font-size: 11px; color: var(--text-muted); background: var(--bg-secondary); padding: 4px 8px; border-radius: 4px; margin-top: 6px; border-left: 2px solid ${nodeColor};">
                 ${m.notes}
+              </div>
+            ` : ''}
+
+            ${isOrigin && !stats.hasKnownPurchaseDate ? `
+              <div style="font-size: 10px; color: #fbbf24; margin-top: 6px; padding: 4px 8px; background: rgba(245, 158, 11, 0.08); border-radius: 4px;">
+                *Earliest history entry on record. Original purchase date prior to this entry is unrecorded.
               </div>
             ` : ''}
           </div>
@@ -804,6 +896,10 @@ class ItemStatsEngine {
         assignedTo = 'On Shelf';
         location = 'Helena';
         notes = 'On Shelf';
+      } else if (targetLower === 'new' || targetLower === 'newly purchased' || targetLower === 'brand new' || targetLower === 'new purchase' || targetLower.startsWith('new (')) {
+        assignedTo = 'New';
+        location = 'Helena';
+        notes = 'Initial Purchase (On Shelf)';
       } else {
         const matchedEmp = empLookup[targetLower];
         if (matchedEmp) {

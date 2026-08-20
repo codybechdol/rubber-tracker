@@ -350,6 +350,15 @@ class HistoryNavigator {
                   <span style="background-color: #3b82f6; color: #ffffff; font-weight: 700; font-size: 12px; padding: 3px 10px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.3); display: inline-flex; align-items: center; gap: 5px; cursor: pointer;" title="Click to view complete lifecycle dossier" onclick="window.itemStatsEngine.openDossierModal('${this.escapeHtml(itemKey)}', '${this.currentSheetKey}')">
                     <span>${sheetMeta?.icon || '📦'}</span> ${this.escapeHtml(groupCol)}: ${this.escapeHtml(itemKey)}
                   </span>
+                  ${stats ? (stats.hasKnownPurchaseDate ? `
+                    <span class="brand-badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
+                      <span>✨</span> Known Purchase: ${stats.firstDateFormatted}
+                    </span>
+                  ` : `
+                    <span class="brand-badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
+                      <span>⏳</span> Tracking Start: ${stats.firstDateFormatted} (Purchase Unknown)
+                    </span>
+                  `) : ''}
                   ${metaDetails.length > 0 ? `
                     <div style="display: flex; align-items: center; gap: 12px; font-size: 11px; color: var(--text-secondary); background: rgba(255,255,255,0.04); padding: 3px 10px; border-radius: 6px; border: 1px solid var(--border-color);">
                       ${metaDetails.join('<span style="color: var(--text-muted);">•</span>')}
@@ -387,12 +396,14 @@ class HistoryNavigator {
           headers.forEach(h => {
             const val = row[h] !== undefined && row[h] !== null ? row[h] : '';
             const hLower = h.toLowerCase();
+            const valStr = String(val || '').trim();
 
             // Style Notes with clean pill badge
             if (hLower === 'notes' || hLower === 'note' || hLower === 'action') {
-              const valStr = String(val || '').trim();
               let pillStyle = 'background-color: var(--bg-tertiary); color: var(--text-secondary);';
-              if (valStr.toLowerCase().startsWith('new')) {
+              if (valStr.toLowerCase().includes('initial purchase') || valStr.toLowerCase().includes('new purchase')) {
+                pillStyle = 'background-color: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);';
+              } else if (valStr.toLowerCase().startsWith('new')) {
                 pillStyle = 'background-color: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);';
               } else if (valStr.toLowerCase().startsWith('return')) {
                 pillStyle = 'background-color: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);';
@@ -403,7 +414,11 @@ class HistoryNavigator {
             } else if (hLower === 'item #' || hLower === 'serial #' || hLower === 'item') {
               html += `<td style="font-weight: 700; color: #60a5fa;">${this.escapeHtml(String(val))}</td>`;
             } else if (hLower === 'assigned to' || hLower === 'employee name') {
-              html += `<td style="font-weight: 600; color: var(--text-primary);">${this.escapeHtml(String(val))}</td>`;
+              if (valStr.toLowerCase() === 'new' || valStr.toLowerCase() === 'newly purchased' || valStr.toLowerCase() === 'brand new') {
+                html += `<td><span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); padding: 2px 8px; border-radius: 6px; font-weight: 700; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;"><span>✨</span> NEW (Purchased)</span></td>`;
+              } else {
+                html += `<td style="font-weight: 600; color: var(--text-primary);">${this.escapeHtml(String(val))}</td>`;
+              }
             } else if (hLower === 'location') {
               html += `<td><span style="display: inline-flex; align-items: center; gap: 4px;"><span>📍</span> ${this.escapeHtml(String(val))}</span></td>`;
             } else {
@@ -454,12 +469,14 @@ class HistoryNavigator {
       headers.forEach(h => {
         const val = row[h] !== undefined && row[h] !== null ? row[h] : '';
         const hLower = h.toLowerCase();
+        const valStr = String(val || '').trim();
 
         // Style Notes with clean pill badge
         if (hLower === 'notes' || hLower === 'note' || hLower === 'action') {
-          const valStr = String(val || '').trim();
           let pillStyle = 'background-color: var(--bg-tertiary); color: var(--text-secondary);';
-          if (valStr.toLowerCase().startsWith('new')) {
+          if (valStr.toLowerCase().includes('initial purchase') || valStr.toLowerCase().includes('new purchase')) {
+            pillStyle = 'background-color: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);';
+          } else if (valStr.toLowerCase().startsWith('new')) {
             pillStyle = 'background-color: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);';
           } else if (valStr.toLowerCase().startsWith('return')) {
             pillStyle = 'background-color: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);';
@@ -470,7 +487,11 @@ class HistoryNavigator {
         } else if (hLower === 'item #' || hLower === 'serial #' || hLower === 'item') {
           html += `<td style="font-weight: 600; color: var(--text-primary);">${this.escapeHtml(String(val))}</td>`;
         } else if (hLower === 'assigned to' || hLower === 'employee name') {
-          html += `<td style="font-weight: 500;">${this.escapeHtml(String(val))}</td>`;
+          if (valStr.toLowerCase() === 'new' || valStr.toLowerCase() === 'newly purchased' || valStr.toLowerCase() === 'brand new') {
+            html += `<td><span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); padding: 2px 8px; border-radius: 6px; font-weight: 700; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;"><span>✨</span> NEW (Purchased)</span></td>`;
+          } else {
+            html += `<td style="font-weight: 500;">${this.escapeHtml(String(val))}</td>`;
+          }
         } else {
           html += `<td>${this.escapeHtml(String(val))}</td>`;
         }

@@ -100,6 +100,7 @@ function _buildGloveManagerMenu() {
           .addItem('🗄️ Archive Lost & Failed Items', 'showArchiveLostFailedDialog')
           .addItem('↩️ Restore Item from Archive', 'showRestoreFromArchiveDialog')
           .addSeparator()
+          .addItem('📥 Import Item History Log', 'showImportItemHistoryDialog')
           .addItem('🧹 Clean & Repair History Sheets', 'menuCleanHistorySheets')
           .addItem('🧹 Clean Up Located Items & Formatting', 'menuCleanupLocatedItems'))
 

@@ -206,42 +206,37 @@
     </div>
 
     <div class="form-group">
-      <label for="item-num">Item # or Serial #</label>
-      <input type="text" id="item-num" placeholder="e.g. 96, 414, 1006" required>
+      <label for="item-num">Item # or Serial # <span style="font-size: 11px; font-weight: normal; color: var(--text-muted);">(Optional if defined in text)</span></label>
+      <input type="text" id="item-num" placeholder="e.g. 1024 (or paste batch text below)">
     </div>
 
     <div class="form-group full-width">
       <label for="log-text">History Log Text (One entry per line: Date - Holder/Status)</label>
-      <textarea id="log-text" placeholder="01/17/2022 - K. Powell
-07/11/2022 - C. Cliff
-10/31/2022 - K. Powell
-04/26/2023 - E. Hughes
-09/13/2023 - D Doane
-12/21/2023 - On Shelf
-06/03/2024 - R Taylor
-08/21/2024 - In Testing
-09/03/2024 - On Shelf
-10/07/2024 - C Sapeta
-02/04/2025 - In Testing
-02/11/2025 - On Shelf
-05/12/2025 - J. Collins
-06/17/2025 - In Testing
-07/17/2025 - On Shelf
-07/22/2025 - T. Goff
-10/24/2025 - In Testing
-11/19/2025 - Packed for Delivery
-12/09/2025 - O. Canavan
-05/05/2026 - In Testing
-06/04/2026 - Failed Visual"></textarea>
-      <div class="helper-text">Accepts formats like <code>MM/DD/YYYY - Name</code>, <code>M/D/YY: Status</code>, etc. Status keywords (On Shelf, In Testing, Packed, Failed) are auto-categorized.</div>
+      <textarea id="log-text" placeholder="Single item:
+06/27/2024 - D Swann
+10/15/2024 - In Testing
+10/22/2024 - On Shelf
+
+Or Multi-Item Batch (paste all items at once!):
+Item 1024:
+06/27/2024 - D Swann
+10/15/2024 - In Testing
+
+Item 1025:
+05/10/2024 - J Doe
+08/11/2024 - In Testing"></textarea>
+      <div class="helper-text" style="display: flex; justify-content: space-between; align-items: center;">
+        <span>💡 <strong>Batch Mode:</strong> You can paste multiple items at once by prefixing with <code>Item 1024:</code>, <code>#1025:</code>, etc.</span>
+      </div>
     </div>
   </div>
 
   <div id="status-alert" class="alert"></div>
 
   <div class="button-group">
-    <button type="button" class="btn-secondary" onclick="google.script.host.close()">Cancel</button>
-    <button type="button" id="submit-btn" class="btn-primary" onclick="submitImport()">📥 Parse & Import</button>
+    <button type="button" class="btn-secondary" onclick="google.script.host.close()">Close</button>
+    <button type="button" id="next-btn" class="btn-secondary" style="border-color: rgba(59, 130, 246, 0.4); color: #60a5fa;" onclick="submitImport(true)">⚡ Import & Next Item</button>
+    <button type="button" id="submit-btn" class="btn-primary" onclick="submitImport(false)">📥 Import & Close</button>
   </div>
 
   <script>
@@ -252,42 +247,55 @@
       el.style.display = 'block';
     }
 
-    function submitImport() {
+    function submitImport(isNextMode) {
       const eqType = document.getElementById('eq-type').value;
-      const itemNum = document.getElementById('item-num').value.trim();
-      const logText = document.getElementById('log-text').value.trim();
-      const btn = document.getElementById('submit-btn');
-
-      if (!itemNum) {
-        showAlert('Please enter an Item # or Serial #.', 'danger');
-        return;
-      }
+      const itemNumEl = document.getElementById('item-num');
+      const itemNum = itemNumEl.value.trim();
+      const logTextEl = document.getElementById('log-text');
+      const logText = logTextEl.value.trim();
+      const submitBtn = document.getElementById('submit-btn');
+      const nextBtn = document.getElementById('next-btn');
 
       if (!logText) {
         showAlert('Please paste history log text to import.', 'danger');
         return;
       }
 
-      btn.disabled = true;
-      btn.innerHTML = '⏳ Importing...';
-      showAlert('Parsing and writing records to history sheet...', 'info');
+      submitBtn.disabled = true;
+      nextBtn.disabled = true;
+      showAlert('⚡ Parsing and writing records...', 'info');
 
       google.script.run
         .withSuccessHandler(function(res) {
-          btn.disabled = false;
-          btn.innerHTML = '📥 Parse & Import';
+          submitBtn.disabled = false;
+          nextBtn.disabled = false;
           if (res && res.success) {
-            showAlert('✅ Successfully imported <strong>' + res.count + '</strong> history records for ' + eqType + ' #' + itemNum + '!', 'success');
-            setTimeout(function() {
-              google.script.host.close();
-            }, 2500);
+            const timeStr = res.elapsedSeconds ? ' in ' + res.elapsedSeconds + 's' : '';
+            const itemsStr = res.itemsCount && res.itemsCount > 1 ? res.itemsCount + ' items (' + res.count + ' records)' : res.count + ' records for ' + (itemNum ? eqType + ' #' + itemNum : eqType);
+            showAlert('✅ Successfully imported <strong>' + itemsStr + '</strong>' + timeStr + '!', 'success');
+            
+            if (isNextMode) {
+              logTextEl.value = '';
+              // If itemNum is numeric, try incrementing it as a helpful suggestion
+              const numVal = parseInt(itemNum, 10);
+              if (!isNaN(numVal) && String(numVal) === itemNum) {
+                itemNumEl.value = numVal + 1;
+              } else {
+                itemNumEl.value = '';
+              }
+              itemNumEl.focus();
+            } else {
+              setTimeout(function() {
+                google.script.host.close();
+              }, 1800);
+            }
           } else {
             showAlert('❌ ' + (res && res.error ? res.error : 'Import failed.'), 'danger');
           }
         })
         .withFailureHandler(function(err) {
-          btn.disabled = false;
-          btn.innerHTML = '📥 Parse & Import';
+          submitBtn.disabled = false;
+          nextBtn.disabled = false;
           showAlert('❌ Error: ' + err.message, 'danger');
         })
         .parseAndImportItemHistoryLog(eqType, itemNum, logText);
