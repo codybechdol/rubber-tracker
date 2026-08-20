@@ -288,7 +288,7 @@ class SyncEngine {
             // If the server returned the fresh snapshot in the same response, consume it immediately (single round-trip!)
             if (pushResult.snapshot && pushResult.snapshot.tables) {
               await this.db.setSnapshot(pushResult.snapshot);
-              if (window.sheetNavigator) window.sheetNavigator.renderCurrentSheet();
+              if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
               if (window.historyNavigator) window.historyNavigator.renderCurrentHistory();
               if (window.tripPlanner) window.tripPlanner.renderPlanner();
               if (window.taskManager) window.taskManager.renderTasks();
@@ -336,7 +336,7 @@ class SyncEngine {
 
         if (freshSnapshot && freshSnapshot.tables) {
           await this.db.setSnapshot(freshSnapshot);
-          if (window.sheetNavigator) window.sheetNavigator.renderCurrentSheet();
+          if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
           if (window.historyNavigator) window.historyNavigator.renderCurrentHistory();
           if (window.tripPlanner) window.tripPlanner.renderPlanner();
           if (window.taskManager) window.taskManager.renderTasks();
@@ -382,7 +382,7 @@ class SyncEngine {
       const data = await window.desktopAPI.selectSnapshotFile();
       if (data && data.tables) {
         await this.db.setSnapshot(data);
-        if (window.sheetNavigator) window.sheetNavigator.renderCurrentSheet();
+        if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
         if (window.historyNavigator) window.historyNavigator.renderCurrentHistory();
         if (window.tripPlanner) window.tripPlanner.renderPlanner();
         if (window.taskManager) window.taskManager.renderTasks();

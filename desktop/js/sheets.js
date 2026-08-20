@@ -78,6 +78,20 @@ class SheetNavigator {
     });
   }
 
+  renderActiveView() {
+    const activeView = document.querySelector('.view-container.active');
+    if (activeView) {
+      if (activeView.id === 'safety-compliance-view') return this.renderSafetyCompliance();
+      if (activeView.id === 'expiring-certs-view') return this.renderExpiringCerts();
+      if (activeView.id === 'training-view') return this.renderTraining();
+      if (activeView.id === 'history-view' && window.historyNavigator) return window.historyNavigator.renderCurrentHistory();
+      if (activeView.id === 'trip-planner-view' && window.tripPlanner) return window.tripPlanner.renderPlanner();
+      if (activeView.id === 'tasks-view' && window.taskManager) return window.taskManager.renderTasks();
+      if (activeView.id === 'lookup-view' && window.lookupApp) return window.lookupApp.init();
+    }
+    this.renderCurrentSheet();
+  }
+
   setSort(colName) {
     if (this.sortCol === colName) {
       this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
@@ -86,16 +100,7 @@ class SheetNavigator {
       this.sortDir = 'asc';
     }
     this.multiSort = null;
-    
-    const activeView = document.querySelector('.view-container.active');
-    if (activeView) {
-      if (activeView.id === 'safety-compliance-view') this.renderSafetyCompliance();
-      else if (activeView.id === 'expiring-certs-view') this.renderExpiringCerts();
-      else if (activeView.id === 'training-view') this.renderTraining();
-      else this.renderCurrentSheet();
-    } else {
-      this.renderCurrentSheet();
-    }
+    this.renderActiveView();
   }
 
   setPresetSort(type) {
@@ -161,7 +166,7 @@ class SheetNavigator {
       }
       this.multiSort = null;
     } else if (type === 'status') {
-      const col = findCol(['status', 'item status', 'job status']);
+      const col = findCol(['status', 'item status', 'job status', 'training status']);
       if (this.sortCol === col) {
         this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
       } else {
@@ -170,7 +175,7 @@ class SheetNavigator {
       }
       this.multiSort = null;
     } else if (type === 'assignedTo') {
-      const col = findCol(['assigned to', 'assigned', 'crew lead']);
+      const col = findCol(['assigned to', 'assigned', 'crew lead', 'lead', 'foreman']);
       if (this.sortCol === col) {
         this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
       } else {
@@ -179,7 +184,7 @@ class SheetNavigator {
       }
       this.multiSort = null;
     } else if (type === 'changeOutDate') {
-      const col = findCol(['change out date', 'change out', 'changeout']);
+      const col = findCol(['change out date', 'change out', 'changeout', 'expiration date', 'expiration', 'exp date']);
       if (this.sortCol === col) {
         this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
       } else {
@@ -188,7 +193,25 @@ class SheetNavigator {
       }
       this.multiSort = null;
     } else if (type === 'type') {
-      const col = findCol(['type']);
+      const col = findCol(['item type', 'cert type', 'certification type', 'training topic', 'topic', 'type']);
+      if (this.sortCol === col) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.sortCol = col;
+        this.sortDir = 'asc';
+      }
+      this.multiSort = null;
+    } else if (type === 'month') {
+      const col = findCol(['month', 'scheduled month', 'date']);
+      if (this.sortCol === col) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.sortCol = col;
+        this.sortDir = 'asc';
+      }
+      this.multiSort = null;
+    } else if (type === 'daysLeft') {
+      const col = findCol(['days until expiration', 'days until', 'days left', 'days']);
       if (this.sortCol === col) {
         this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
       } else {
@@ -206,7 +229,7 @@ class SheetNavigator {
       }
       this.multiSort = null;
     } else if (type === 'jobNumber') {
-      const col = findCol(['job number', 'job #']);
+      const col = findCol(['job number', 'job #', 'crew', 'crew #', 'crew number']);
       if (this.sortCol === col) {
         this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
       } else {
@@ -236,17 +259,12 @@ class SheetNavigator {
       }
       this.multiSort = null;
     }
-    this.renderCurrentSheet();
+    this.renderActiveView();
   }
 
   setComplianceWeek(weekStr) {
     this.selectedComplianceWeek = weekStr;
-    const isDedicated = document.getElementById('safety-compliance-view') && document.getElementById('safety-compliance-view').classList.contains('active');
-    if (isDedicated) {
-      this.renderSafetyCompliance();
-    } else {
-      this.renderCurrentSheet();
-    }
+    this.renderActiveView();
   }
 
   renderSafetyCompliance() {
@@ -256,15 +274,21 @@ class SheetNavigator {
     const searchInput = document.getElementById('safety-compliance-search-input');
     if (!container) return;
 
-    if (searchInput && !searchInput.dataset.bound) {
-      searchInput.dataset.bound = 'true';
-      searchInput.addEventListener('input', (e) => {
-        this.searchTerm = e.target.value.toLowerCase().trim();
-        this.renderSafetyCompliance();
-      });
+    if (searchInput) {
+      this.searchTerm = (searchInput.value || '').toLowerCase().trim();
+      if (!searchInput.dataset.bound) {
+        searchInput.dataset.bound = 'true';
+        searchInput.addEventListener('input', (e) => {
+          this.searchTerm = e.target.value.toLowerCase().trim();
+          this.renderSafetyCompliance();
+        });
+      }
+    } else {
+      this.searchTerm = '';
     }
 
-    this.renderStandardTable(container, countBadge);
+    const tableData = this.db.getTable(this.currentSheetKey);
+    this.renderStandardTable(container, countBadge, tableData);
   }
 
   renderExpiringCerts() {
@@ -274,15 +298,21 @@ class SheetNavigator {
     const searchInput = document.getElementById('expiring-certs-search-input');
     if (!container) return;
 
-    if (searchInput && !searchInput.dataset.bound) {
-      searchInput.dataset.bound = 'true';
-      searchInput.addEventListener('input', (e) => {
-        this.searchTerm = e.target.value.toLowerCase().trim();
-        this.renderExpiringCerts();
-      });
+    if (searchInput) {
+      this.searchTerm = (searchInput.value || '').toLowerCase().trim();
+      if (!searchInput.dataset.bound) {
+        searchInput.dataset.bound = 'true';
+        searchInput.addEventListener('input', (e) => {
+          this.searchTerm = e.target.value.toLowerCase().trim();
+          this.renderExpiringCerts();
+        });
+      }
+    } else {
+      this.searchTerm = '';
     }
 
-    this.renderStandardTable(container, countBadge);
+    const tableData = this.db.getTable(this.currentSheetKey);
+    this.renderStandardTable(container, countBadge, tableData);
   }
 
   renderTraining() {
@@ -292,22 +322,33 @@ class SheetNavigator {
     const searchInput = document.getElementById('training-search-input');
     if (!container) return;
 
-    if (searchInput && !searchInput.dataset.bound) {
-      searchInput.dataset.bound = 'true';
-      searchInput.addEventListener('input', (e) => {
-        this.searchTerm = e.target.value.toLowerCase().trim();
-        this.renderTraining();
-      });
+    if (searchInput) {
+      this.searchTerm = (searchInput.value || '').toLowerCase().trim();
+      if (!searchInput.dataset.bound) {
+        searchInput.dataset.bound = 'true';
+        searchInput.addEventListener('input', (e) => {
+          this.searchTerm = e.target.value.toLowerCase().trim();
+          this.renderTraining();
+        });
+      }
+    } else {
+      this.searchTerm = '';
     }
 
-    this.renderStandardTable(container, countBadge);
+    const tableData = this.db.getTable(this.currentSheetKey);
+    this.renderStandardTable(container, countBadge, tableData);
   }
 
   renderCurrentSheet() {
     const container = document.getElementById('sheet-grid-container');
     const title = document.getElementById('current-sheet-title');
     const countBadge = document.getElementById('sheet-row-count');
+    const searchInput = document.getElementById('sheet-search-input');
     if (!container) return;
+
+    if (searchInput) {
+      this.searchTerm = (searchInput.value || '').toLowerCase().trim();
+    }
 
     const tableData = this.db.getTable(this.currentSheetKey);
     const sheetMeta = this.sheetList.find(s => s.key === this.currentSheetKey);
@@ -316,8 +357,9 @@ class SheetNavigator {
     if (!tableData || (!tableData.rows?.length && !tableData.rawGrid?.length)) {
       container.innerHTML = `
         <div style="padding: 40px; text-align: center; color: var(--text-muted);">
-          <h3>No data loaded for this sheet</h3>
-          <p style="margin-top: 8px;">Click "Sync with Google Sheets" or "Import Snapshot" to load your data.</p>
+          <div style="font-size: 32px; margin-bottom: 12px;">📂</div>
+          <h3 style="color: var(--text-primary); font-size: 16px;">No data loaded for this sheet</h3>
+          <p style="margin-top: 8px; font-size: 13px;">Click <strong>"Sync with Google Sheets"</strong> or <strong>"Import Snapshot"</strong> to load your data.</p>
         </div>
       `;
       if (countBadge) countBadge.textContent = '0 rows';
@@ -700,7 +742,24 @@ class SheetNavigator {
   }
 
   renderStandardTable(container, countBadge, tableData) {
+    if (!tableData) {
+      tableData = this.db.getTable(this.currentSheetKey) || { headers: [], rows: [] };
+    }
+    const headers = tableData.headers || [];
     let rows = [...(tableData.rows || [])];
+
+    if (!headers.length && !rows.length) {
+      const sheetName = tableData.name || (this.currentSheetKey === 'safety_compliance' ? 'Safety Compliance' : (this.currentSheetKey === 'expiring_certs' ? 'Expiring Certs' : (this.currentSheetKey === 'training_tracking' ? 'Training Tracking' : 'this sheet')));
+      container.innerHTML = `
+        <div style="padding: 40px; text-align: center; color: var(--text-muted);">
+          <div style="font-size: 32px; margin-bottom: 12px;">📂</div>
+          <h3 style="color: var(--text-primary); font-size: 16px;">No records loaded for ${this.escapeHtml(sheetName)}</h3>
+          <p style="margin-top: 8px; font-size: 13px;">Click <strong>"Sync with Google Sheets"</strong> or <strong>"Import Snapshot"</strong> in the top right to download or load your data.</p>
+        </div>
+      `;
+      if (countBadge) countBadge.textContent = '0 rows';
+      return;
+    }
 
     // Search filter
     if (this.searchTerm) {
@@ -711,8 +770,9 @@ class SheetNavigator {
       });
     }
 
-    // Custom status ranking for Job Tracking & Inventory
+    // Custom status ranking for Job Tracking, Inventory, Expiring Certs, Training
     const statusRank = {
+      // Inventory / Jobs
       'in service': 1,
       'assigned': 1,
       'active': 1,
@@ -729,7 +789,23 @@ class SheetNavigator {
       'lost': 7,
       'out of service': 8,
       'retired': 9,
-      'completed': 10
+      'completed': 10,
+      'complete': 10,
+      'done': 10,
+      // Expiring Certs
+      'expired': 1,
+      'critical': 2,
+      'warning': 3,
+      'missing': 4,
+      'upcoming': 5,
+      'ok': 6,
+      'declined': 7,
+      'not required': 8,
+      // Training
+      'scheduled': 1,
+      'pending': 1,
+      'cancelled': 12,
+      'canceled': 12
     };
 
     const compareValues = (col, valA, valB) => {
@@ -768,8 +844,17 @@ class SheetNavigator {
         }
       }
 
+      // Numeric comparison (Days Until Expiration, Size, Hours, etc.)
+      if (colLower.includes('days') || colLower.includes('size') || colLower.includes('hours') || colLower.includes('count')) {
+        const nA = parseFloat(sA.replace(/[^0-9.-]/g, ''));
+        const nB = parseFloat(sB.replace(/[^0-9.-]/g, ''));
+        if (!isNaN(nA) && !isNaN(nB)) {
+          return nA - nB;
+        }
+      }
+
       // Custom status ranking
-      if (colLower === 'status' || colLower === 'job status' || colLower === 'item status') {
+      if (colLower === 'status' || colLower === 'job status' || colLower === 'item status' || colLower === 'training status') {
         const rA = statusRank[sA.toLowerCase()] || 99;
         const rB = statusRank[sB.toLowerCase()] || 99;
         if (rA !== rB) return rA - rB;
@@ -795,9 +880,12 @@ class SheetNavigator {
       });
     }
 
-    if (countBadge) countBadge.textContent = `${rows.length} rows`;
+    if (countBadge) {
+      const unitLabel = this.currentSheetKey === 'expiring_certs' ? 'records' : 'rows';
+      countBadge.textContent = `${rows.length} ${unitLabel}`;
+    }
 
-    // Presets bar for Employees, Job Tracking, Gloves, Sleeves, Blankets, MACKs, etc.
+    // Presets bar for Employees, Job Tracking, Gloves, Sleeves, Blankets, MACKs, Expiring Certs, Training, etc.
     let presetBarHtml = '';
     const dirArrow = (active) => active ? (this.sortDir === 'asc' ? ' ▲' : ' ▼') : '';
 
@@ -937,11 +1025,49 @@ class SheetNavigator {
           `).join('')}
         </div>
       `;
+    } else if (this.currentSheetKey === 'expiring_certs') {
+      const isNameSorted = this.sortCol && (this.sortCol.toLowerCase().includes('name') || this.sortCol.toLowerCase().includes('employee'));
+      const isCertSorted = this.sortCol && (this.sortCol.toLowerCase().includes('type') || this.sortCol.toLowerCase().includes('cert'));
+      const isExpSorted = this.sortCol && this.sortCol.toLowerCase().includes('expiration');
+      const isDaysSorted = this.sortCol && this.sortCol.toLowerCase().includes('days');
+      const isStatSorted = this.sortCol && this.sortCol.toLowerCase().includes('status');
+      const isLocSorted = this.sortCol && this.sortCol.toLowerCase().includes('location');
+      const isJobSorted = this.sortCol && (this.sortCol.toLowerCase().includes('job') || this.sortCol.toLowerCase().includes('crew'));
+
+      presetBarHtml = `
+        <div style="padding: 8px 16px; background-color: var(--bg-secondary); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 6px; font-size: 12px; overflow-x: auto; flex-wrap: wrap;">
+          <span style="color: var(--text-muted); font-weight: 600; white-space: nowrap;">⚡ Quick Sort:</span>
+          <button class="btn btn-secondary ${isNameSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('name')">👤 Employee${dirArrow(isNameSorted)}</button>
+          <button class="btn btn-secondary ${isCertSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('type')">📜 Cert Type${dirArrow(isCertSorted)}</button>
+          <button class="btn btn-secondary ${isExpSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('changeOutDate')">📅 Expiration Date${dirArrow(isExpSorted)}</button>
+          <button class="btn btn-secondary ${isDaysSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('daysLeft')">⏳ Days Left${dirArrow(isDaysSorted)}</button>
+          <button class="btn btn-secondary ${isStatSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('status')">🏷️ Status${dirArrow(isStatSorted)}</button>
+          <button class="btn btn-secondary ${isLocSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('location')">📍 Location${dirArrow(isLocSorted)}</button>
+          <button class="btn btn-secondary ${isJobSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('jobNumber')">🔢 Job #${dirArrow(isJobSorted)}</button>
+        </div>
+      `;
+    } else if (this.currentSheetKey === 'training_tracking') {
+      const isMonthSorted = this.sortCol && this.sortCol.toLowerCase().includes('month');
+      const isJobSorted = this.sortCol && (this.sortCol.toLowerCase().includes('job') || this.sortCol.toLowerCase().includes('crew'));
+      const isTopicSorted = this.sortCol && (this.sortCol.toLowerCase().includes('topic') || this.sortCol.toLowerCase().includes('training'));
+      const isLeadSorted = this.sortCol && (this.sortCol.toLowerCase().includes('lead') || this.sortCol.toLowerCase().includes('foreman'));
+      const isStatSorted = this.sortCol && this.sortCol.toLowerCase().includes('status');
+
+      presetBarHtml = `
+        <div style="padding: 8px 16px; background-color: var(--bg-secondary); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 6px; font-size: 12px; overflow-x: auto; flex-wrap: wrap;">
+          <span style="color: var(--text-muted); font-weight: 600; white-space: nowrap;">⚡ Quick Sort:</span>
+          <button class="btn btn-secondary ${isMonthSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('month')">📅 Month${dirArrow(isMonthSorted)}</button>
+          <button class="btn btn-secondary ${isJobSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('jobNumber')">🔢 Crew #${dirArrow(isJobSorted)}</button>
+          <button class="btn btn-secondary ${isTopicSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('type')">🎓 Topic${dirArrow(isTopicSorted)}</button>
+          <button class="btn btn-secondary ${isLeadSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('assignedTo')">👤 Lead${dirArrow(isLeadSorted)}</button>
+          <button class="btn btn-secondary ${isStatSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('status')">🏷️ Status${dirArrow(isStatSorted)}</button>
+        </div>
+      `;
     }
 
     let html = presetBarHtml + `<table class="data-table"><thead><tr>`;
 
-    tableData.headers.forEach((h) => {
+    headers.forEach((h) => {
       let sortIndicator = '';
       if (this.sortCol === h) {
         sortIndicator = this.sortDir === 'asc' ? ' ▲' : ' ▼';
@@ -958,23 +1084,39 @@ class SheetNavigator {
     const isJobTracking = this.currentSheetKey === 'job_tracking';
     const isCompliance = this.currentSheetKey === 'safety_compliance';
     const isEmployees = this.currentSheetKey === 'employees';
+    const isTraining = this.currentSheetKey === 'training_tracking';
     let lastRenderedWeek = null;
     let lastRenderedLoc = null;
     let lastRenderedJob = null;
+    let lastRenderedMonth = null;
 
     rows.forEach((row, rowIdx) => {
       const sheetRowIdx = row._rowIdx || (rowIdx + 2);
       const currentWeekVal = String(row['Week Start'] || row['Week'] || '').trim();
       const currentLocVal = String(row['Location'] || '').trim();
-      const currentJobVal = String(row['Job Number'] || '').trim();
+      const currentJobVal = String(row['Job Number'] || row['Crew'] || row['Job #'] || '').trim();
+      const currentMonthVal = String(row['Month'] || row['Scheduled Month'] || '').trim();
 
       // Week Divider Banner for Safety Compliance
       if (isCompliance && currentWeekVal && currentWeekVal !== lastRenderedWeek) {
         lastRenderedWeek = currentWeekVal;
         html += `
           <tr style="background: linear-gradient(90deg, #1e3a8a 0%, #1e293b 100%);">
-            <td colspan="${tableData.headers.length}" style="padding: 8px 16px; font-size: 13px; font-weight: 800; color: #93c5fd; text-align: left; border-top: 3px solid #3b82f6; border-bottom: 1px solid #3b82f6;">
+            <td colspan="${headers.length}" style="padding: 8px 16px; font-size: 13px; font-weight: 800; color: #93c5fd; text-align: left; border-top: 3px solid #3b82f6; border-bottom: 1px solid #3b82f6;">
               📅 Week of ${this.escapeHtml(currentWeekVal)}
+            </td>
+          </tr>
+        `;
+      }
+
+      // Month Divider Banner for Training Tracking
+      const isSortedByMonth = isTraining && this.sortCol && this.sortCol.toLowerCase().includes('month');
+      if (isSortedByMonth && currentMonthVal && currentMonthVal !== lastRenderedMonth) {
+        lastRenderedMonth = currentMonthVal;
+        html += `
+          <tr style="background: linear-gradient(90deg, #312e81 0%, #1e293b 100%);">
+            <td colspan="${headers.length}" style="padding: 8px 16px; font-size: 13px; font-weight: 800; color: #a5b4fc; text-align: left; border-top: 3px solid #6366f1; border-bottom: 1px solid #6366f1;">
+              📅 Month: ${this.escapeHtml(currentMonthVal)}
             </td>
           </tr>
         `;
@@ -986,7 +1128,7 @@ class SheetNavigator {
         lastRenderedLoc = currentLocVal;
         html += `
           <tr style="background: linear-gradient(90deg, #4c1d95 0%, #1e293b 100%);">
-            <td colspan="${tableData.headers.length}" style="padding: 8px 16px; font-size: 13px; font-weight: 800; color: #c4b5fd; text-align: left; border-top: 3px solid #8b5cf6; border-bottom: 1px solid #8b5cf6;">
+            <td colspan="${headers.length}" style="padding: 8px 16px; font-size: 13px; font-weight: 800; color: #c4b5fd; text-align: left; border-top: 3px solid #8b5cf6; border-bottom: 1px solid #8b5cf6;">
               📍 Location: ${this.escapeHtml(currentLocVal)}
             </td>
           </tr>
@@ -999,7 +1141,7 @@ class SheetNavigator {
         lastRenderedJob = currentJobVal;
         html += `
           <tr style="background: linear-gradient(90deg, #1e3a8a 0%, #1e293b 100%);">
-            <td colspan="${tableData.headers.length}" style="padding: 8px 16px; font-size: 13px; font-weight: 800; color: #93c5fd; text-align: left; border-top: 3px solid #3b82f6; border-bottom: 1px solid #3b82f6;">
+            <td colspan="${headers.length}" style="padding: 8px 16px; font-size: 13px; font-weight: 800; color: #93c5fd; text-align: left; border-top: 3px solid #3b82f6; border-bottom: 1px solid #3b82f6;">
               🔢 Job #${this.escapeHtml(currentJobVal)}
             </td>
           </tr>
@@ -1008,7 +1150,7 @@ class SheetNavigator {
 
       html += `<tr>`;
 
-      tableData.headers.forEach((h, colIdx) => {
+      headers.forEach((h, colIdx) => {
         let val = row[h] !== undefined ? row[h] : '';
         const hLower = h.toLowerCase();
         let customCellHtml = null;
@@ -1051,6 +1193,77 @@ class SheetNavigator {
             customCellHtml = `<span class="badge" style="background-color: ${color}; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">${this.escapeHtml(vStr)}</span>`;
           } else if (hLower.includes('crew') || hLower.includes('job')) {
             customCellHtml = `<span style="font-family: monospace; font-weight: bold; color: #60a5fa;">${this.escapeHtml(val)}</span>`;
+          }
+        }
+
+        // Expiring Certs Formatting
+        if (this.currentSheetKey === 'expiring_certs') {
+          const vStr = String(val || '').trim();
+          const sUpper = vStr.toUpperCase();
+          if (hLower === 'status') {
+            if (sUpper === 'OK' || sUpper.includes('OK')) {
+              customCellHtml = `<span class="badge" style="background-color: #15803d; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">🟢 OK</span>`;
+            } else if (sUpper === 'UPCOMING') {
+              customCellHtml = `<span class="badge" style="background-color: #0284c7; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">🔵 Upcoming</span>`;
+            } else if (sUpper === 'WARNING') {
+              customCellHtml = `<span class="badge" style="background-color: #d97706; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">🟡 Warning</span>`;
+            } else if (sUpper === 'CRITICAL') {
+              customCellHtml = `<span class="badge" style="background-color: #ea580c; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">🟠 Critical</span>`;
+            } else if (sUpper === 'EXPIRED') {
+              customCellHtml = `<span class="badge" style="background-color: #dc2626; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">🔴 Expired</span>`;
+            } else if (sUpper === 'MISSING') {
+              customCellHtml = `<span class="badge" style="background-color: #991b1b; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">❌ Missing</span>`;
+            } else if (sUpper === 'DECLINED') {
+              customCellHtml = `<span class="badge" style="background-color: #475569; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">🚫 Declined</span>`;
+            } else if (sUpper === 'NOT REQUIRED' || sUpper.includes('NOT REQ')) {
+              customCellHtml = `<span class="badge" style="background-color: #334155; color: #94a3b8; padding: 2px 8px; border-radius: 4px; font-weight: 600;">⚪ Not Required</span>`;
+            }
+          } else if (hLower.includes('days')) {
+            const num = parseFloat(vStr);
+            if (!isNaN(num)) {
+              if (num <= 0) {
+                customCellHtml = `<span style="color: #ef4444; font-weight: 800;">${this.escapeHtml(vStr)}d</span>`;
+              } else if (num <= 30) {
+                customCellHtml = `<span style="color: #f97316; font-weight: 700;">${this.escapeHtml(vStr)}d</span>`;
+              } else if (num <= 60) {
+                customCellHtml = `<span style="color: #eab308; font-weight: 600;">${this.escapeHtml(vStr)}d</span>`;
+              } else {
+                customCellHtml = `<span style="color: #4ade80;">${this.escapeHtml(vStr)}d</span>`;
+              }
+            }
+          } else if (hLower.includes('employee') || hLower === 'name') {
+            customCellHtml = `<span style="font-weight: 600; color: #f8fafc;">👤 ${this.escapeHtml(val)}</span>`;
+          } else if (hLower.includes('job') || hLower === 'job #') {
+            customCellHtml = `<span style="font-family: monospace; font-weight: bold; color: #60a5fa;">${this.escapeHtml(val)}</span>`;
+          } else if (hLower.includes('sms')) {
+            if (vStr && vStr.toLowerCase() !== 'false' && vStr !== '⬜') {
+              customCellHtml = `<span class="badge" style="background-color: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.4); padding: 2px 6px; font-size: 11px;">📱 ${this.escapeHtml(val)}</span>`;
+            } else {
+              customCellHtml = `<span style="color: #64748b; font-size: 11px;">—</span>`;
+            }
+          }
+        }
+
+        // Training Tracking Formatting
+        if (this.currentSheetKey === 'training_tracking') {
+          const vStr = String(val || '').trim();
+          const sLower = vStr.toLowerCase();
+          if (hLower === 'status' || hLower === 'training status') {
+            if (sLower === 'completed' || sLower === 'complete' || sLower === 'done') {
+              customCellHtml = `<span class="badge" style="background-color: #15803d; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">✅ Completed</span>`;
+            } else if (sLower === 'scheduled' || sLower === 'pending') {
+              customCellHtml = `<span class="badge" style="background-color: #d97706; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">⏳ Scheduled</span>`;
+            } else if (sLower === 'on hold' || sLower === 'postponed') {
+              customCellHtml = `<span class="badge" style="background-color: #7c3aed; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 600;">⏸️ On Hold</span>`;
+            } else if (sLower === 'cancelled' || sLower === 'canceled') {
+              customCellHtml = `<span class="badge" style="background-color: #475569; color: #cbd5e1; padding: 2px 8px; border-radius: 4px; font-weight: 600;">❌ Cancelled</span>`;
+            }
+          } else if (hLower.includes('month')) {
+            customCellHtml = `<span style="font-weight: 700; color: #a78bfa;">📅 ${this.escapeHtml(val)}</span>`;
+          } else if (hLower.includes('crew') || hLower.includes('job')) {
+            customCellHtml = `<span style="font-family: monospace; font-weight: bold; color: #60a5fa;">${this.escapeHtml(val)}</span>`;
+          } else if (hLower.includes('size') || hLower.includes('hours')) {
+            customCellHtml = `<span style="font-weight: 600; color: #94a3b8;">${this.escapeHtml(val)}</span>`;
           }
         }
 
@@ -1117,8 +1330,8 @@ class SheetNavigator {
           value: newVal
         });
 
-        // Re-render sheet to immediately reflect auto-calculated Location, Status, and Change Out Dates
-        this.renderCurrentSheet();
+        // Re-render active view to immediately reflect updates
+        this.renderActiveView();
       });
 
       td.addEventListener('keydown', (e) => {
@@ -1151,7 +1364,7 @@ class SheetNavigator {
           value: newBool
         });
 
-        this.renderCurrentSheet();
+        this.renderActiveView();
       });
     });
   }

@@ -356,31 +356,84 @@ class ItemStatsEngine {
     `;
   }
 
-  renderKpiChipsHtml(stats) {
+  renderKpiCardsHtml(stats) {
     if (!stats) return '';
     return `
-      <div style="display: flex; align-items: center; gap: 10px; font-size: 11px; flex-wrap: wrap; color: var(--text-secondary);">
-        <span title="Total Lifespan">⏳ <strong>Lifespan:</strong> ${stats.lifespanFormatted}</span>
-        <span style="color: var(--text-muted);">•</span>
-        <span title="Time with Linemen in Field" style="color: #60a5fa;">👷 <strong>Field:</strong> ${stats.fieldDays}d (${stats.fieldPct}%)</span>
-        <span style="color: var(--text-muted);">•</span>
-        <span title="Time in Storage / Shelf" style="color: #fbbf24;">📦 <strong>Shelf:</strong> ${stats.shelfDays}d (${stats.shelfPct}%)</span>
-        <span style="color: var(--text-muted);">•</span>
-        <span title="Time in Test Lab" style="color: #c084fc;">🔬 <strong>Testing:</strong> ${stats.testingDays}d (${stats.testingPct}%)</span>
-        ${stats.packedTestingDays > 0 ? `
-          <span style="color: var(--text-muted);">•</span>
-          <span title="Packed For Testing (Truck)" style="color: #fb923c;">🚚 <strong>Packed Testing:</strong> ${stats.packedTestingDays}d (${stats.packedTestingPct}%)</span>
-        ` : ''}
-        ${stats.packedDeliveryDays > 0 ? `
-          <span style="color: var(--text-muted);">•</span>
-          <span title="Packed For Delivery (Truck)" style="color: #22d3ee;">🚚 <strong>Packed Delivery:</strong> ${stats.packedDeliveryDays}d (${stats.packedDeliveryPct}%)</span>
-        ` : ''}
-        ${stats.lostDays > 0 ? `
-          <span style="color: var(--text-muted);">•</span>
-          <span title="Time marked as Lost / Missing" style="color: #facc15;">🔍 <strong>Lost:</strong> ${stats.lostDays}d (${stats.lostPct}%)</span>
-        ` : ''}
-        <span style="color: var(--text-muted);">•</span>
-        <span title="Completed Turnaround Test Cycles">🔄 <strong>${stats.testCyclesCount}</strong> ${stats.testCyclesCount === 1 ? 'Test Cycle' : 'Test Cycles'}</span>
+      <div class="kpi-cards-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-top: 8px; margin-bottom: 8px;">
+        
+        <div class="kpi-stat-card" style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);">
+          <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px; display: flex; align-items: center; gap: 4px;">
+            <span>⏳</span> Total Lifespan
+          </div>
+          <div style="font-size: 14px; font-weight: 700; color: var(--text-primary);">${stats.lifespanFormatted}</div>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">Since ${stats.firstDateFormatted}</div>
+        </div>
+
+        <div class="kpi-stat-card" style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);">
+          <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px; display: flex; align-items: center; gap: 4px;">
+            <span>👷</span> Field Service
+          </div>
+          <div style="font-size: 14px; font-weight: 700; color: #60a5fa;">${stats.fieldDays} Days</div>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${stats.fieldPct}% of total life</div>
+        </div>
+
+        <div class="kpi-stat-card" style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);">
+          <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px; display: flex; align-items: center; gap: 4px;">
+            <span>📦</span> Shelf / Storage
+          </div>
+          <div style="font-size: 14px; font-weight: 700; color: #fbbf24;">${stats.shelfDays} Days</div>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${stats.shelfPct}% of total life</div>
+        </div>
+
+        <div class="kpi-stat-card" style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);">
+          <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px; display: flex; align-items: center; gap: 4px;">
+            <span>🔬</span> Lab Testing
+          </div>
+          <div style="font-size: 14px; font-weight: 700; color: #c084fc;">${stats.testingDays} Days</div>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${stats.testCyclesCount} completed</div>
+        </div>
+
+        <div class="kpi-stat-card" style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);">
+          <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px; display: flex; align-items: center; gap: 4px;">
+            <span>🚚</span> Packed Testing
+          </div>
+          <div style="font-size: 14px; font-weight: 700; color: #fb923c;">${stats.packedTestingDays} Days</div>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${stats.packedTestingPct}% on truck</div>
+        </div>
+
+        <div class="kpi-stat-card" style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);">
+          <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px; display: flex; align-items: center; gap: 4px;">
+            <span>🚚</span> Packed Delivery
+          </div>
+          <div style="font-size: 14px; font-weight: 700; color: #22d3ee;">${stats.packedDeliveryDays} Days</div>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${stats.packedDeliveryPct}% on truck</div>
+        </div>
+
+        <div class="kpi-stat-card" style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);">
+          <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px; display: flex; align-items: center; gap: 4px;">
+            <span>🔍</span> Lost / Missing
+          </div>
+          <div style="font-size: 14px; font-weight: 700; color: #facc15;">${stats.lostDays} Days</div>
+          <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${stats.lostPct}% of total life</div>
+        </div>
+
+      </div>
+    `;
+  }
+
+  renderLinemenSummaryHtml(stats) {
+    if (!stats || !stats.linemenList || stats.linemenList.length === 0) return '';
+    const chips = stats.linemenList.map(l => {
+      return `<span style="background: rgba(255,255,255,0.04); border: 1px solid var(--border-color); padding: 2px 8px; border-radius: 6px; font-size: 11px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 4px;">
+        <strong style="color: var(--text-primary);">${l.name}</strong>: ${l.durationFormatted} (${l.pct}%)
+        ${l.isCurrent ? '<span class="brand-badge" style="font-size: 9px; padding: 1px 4px; background: rgba(34, 197, 94, 0.2); color: #4ade80;">Active</span>' : ''}
+      </span>`;
+    }).join(' ');
+
+    return `
+      <div style="display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11px; color: var(--text-muted); flex-wrap: wrap;">
+        <span style="font-weight: 600; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 4px;"><span>👥</span> Linemen:</span>
+        ${chips}
       </div>
     `;
   }
@@ -470,51 +523,7 @@ class ItemStatsEngine {
         </div>
 
         <!-- 7-Card KPI Stat Grid (Single Horizontal Line) -->
-        <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-top: 14px;">
-          
-          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 8px;">
-            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">⏳ Total Lifespan</div>
-            <div style="font-size: 15px; font-weight: 700; color: var(--text-primary);">${stats.lifespanFormatted}</div>
-            <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">Since ${stats.firstDateFormatted}</div>
-          </div>
-
-          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 8px;">
-            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">👷 Field Service</div>
-            <div style="font-size: 15px; font-weight: 700; color: #60a5fa;">${stats.fieldDays} Days</div>
-            <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${stats.fieldPct}% of total life</div>
-          </div>
-
-          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 8px;">
-            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">📦 Shelf / Storage</div>
-            <div style="font-size: 15px; font-weight: 700; color: #fbbf24;">${stats.shelfDays} Days</div>
-            <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${stats.shelfPct}% of total life</div>
-          </div>
-
-          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 8px;">
-            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">🔬 Lab Testing</div>
-            <div style="font-size: 15px; font-weight: 700; color: #c084fc;">${stats.testingDays} Days</div>
-            <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${stats.testCyclesCount} completed</div>
-          </div>
-
-          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 8px;">
-            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">🚚 Packed Testing</div>
-            <div style="font-size: 15px; font-weight: 700; color: #fb923c;">${stats.packedTestingDays} Days</div>
-            <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${stats.packedTestingPct}% on truck</div>
-          </div>
-
-          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 8px;">
-            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">🚚 Packed Delivery</div>
-            <div style="font-size: 15px; font-weight: 700; color: #22d3ee;">${stats.packedDeliveryDays} Days</div>
-            <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${stats.packedDeliveryPct}% on truck</div>
-          </div>
-
-          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 8px;">
-            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">🔍 Lost / Missing</div>
-            <div style="font-size: 15px; font-weight: 700; color: #facc15;">${stats.lostDays} Days</div>
-            <div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">${stats.lostPct}% of total life</div>
-          </div>
-
-        </div>
+        ${this.renderKpiCardsHtml(stats)}
 
         <!-- Segmented Horizontal Lifespan Bar -->
         ${this.renderSegmentedBarHtml(stats)}

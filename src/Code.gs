@@ -11813,8 +11813,8 @@ function saveHistoryFast(silent) {
  */
 function showImportItemHistoryDialog() {
   var html = HtmlService.createHtmlOutputFromFile('ImportItemHistory')
-    .setWidth(560)
-    .setHeight(480);
+    .setWidth(620)
+    .setHeight(680);
   SpreadsheetApp.getUi().showModalDialog(html, '📥 Import Item History Log');
 }
 

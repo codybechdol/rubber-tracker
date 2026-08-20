@@ -367,9 +367,10 @@ class HistoryNavigator {
               </div>
 
               ${stats ? `
-                <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.05); border-radius: 6px; padding: 8px 12px; margin-top: 6px;">
-                  ${window.itemStatsEngine.renderKpiChipsHtml(stats)}
+                <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 10px 12px; margin-top: 6px;">
+                  ${window.itemStatsEngine.renderKpiCardsHtml(stats)}
                   ${window.itemStatsEngine.renderSegmentedBarHtml(stats)}
+                  ${window.itemStatsEngine.renderLinemenSummaryHtml(stats)}
                 </div>
               ` : ''}
             </td>
