@@ -262,7 +262,8 @@ class SyncEngine {
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
             body: JSON.stringify({
               action: 'applyMutations',
-              mutations: outbox
+              mutations: outbox,
+              returnSnapshot: true
             })
           });
 
@@ -283,6 +284,25 @@ class SyncEngine {
           } else if (pushResult && pushResult.success) {
             // Clear outbox once successfully sent to server
             await this.db.clearOutbox();
+
+            // If the server returned the fresh snapshot in the same response, consume it immediately (single round-trip!)
+            if (pushResult.snapshot && pushResult.snapshot.tables) {
+              await this.db.setSnapshot(pushResult.snapshot);
+              if (window.sheetNavigator) window.sheetNavigator.renderCurrentSheet();
+              if (window.historyNavigator) window.historyNavigator.renderCurrentHistory();
+              if (window.tripPlanner) window.tripPlanner.renderPlanner();
+              if (window.taskManager) window.taskManager.renderTasks();
+
+              this.updateStatusUI('synced', `Synced (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
+              this.renderModalChanges([], `✅ All ${outbox.length} changes pushed and latest database loaded!`, 'success', false);
+              setTimeout(() => {
+                this.closeSyncModal();
+              }, 2500);
+
+              this.isSyncing = false;
+              return { success: true, snapshot: pushResult.snapshot };
+            }
+
             this.renderModalChanges(outbox, `✅ Pushed ${outbox.length} change(s) successfully! Downloading fresh snapshot...`, 'success', false);
           } else {
             console.warn('Invalid server response during push:', pushResult);
@@ -301,7 +321,7 @@ class SyncEngine {
         }
       }
 
-      // Step 2: Pull fresh database snapshot
+      // Step 2: Pull fresh database snapshot (for pull-only sync or fallback)
       if (this.syncUrl) {
         this.updateStatusUI('syncing', 'Downloading latest snapshot...');
         const getResp = await fetch(`${this.syncUrl}?action=getSnapshot`, { method: 'GET' });

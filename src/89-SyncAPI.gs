@@ -18,12 +18,15 @@ var SYNC_SNAPSHOT_FILENAME = 'SafetyAssistant_Sync_Snapshot.json';
 /**
  * Exports a complete, structured snapshot of all database sheets and configurations.
  * Optimized for local SQLite / IndexedDB consumption in the desktop app.
+ * Uses a single-pass getValues() read per sheet with fast in-memory formatting
+ * to eliminate getDisplayValues() RPC overhead across all 34 sheets.
  *
  * @return {Object} The complete database snapshot
  */
 function exportFullDatabaseSnapshot() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var timestamp = new Date();
+  var tz = ss.getSpreadsheetTimeZone() || 'America/Denver';
 
   // Clean up any located items from swap sheets and clear stray Lost highlighting
   try {
@@ -76,42 +79,61 @@ function exportFullDatabaseSnapshot() {
     var cfg = sheetConfigs[i];
     var sheet = ss.getSheetByName(cfg.name);
     if (!sheet || sheet.getLastRow() < 1) {
-      tables[cfg.key] = { name: cfg.name, headers: [], rows: [] };
+      tables[cfg.key] = { name: cfg.name, headers: [], rows: [], rawGrid: [], rowCount: 0, maxRows: 0, maxCols: 0 };
       continue;
     }
 
     var lastRow = sheet.getLastRow();
     var lastCol = sheet.getLastColumn();
     var data = sheet.getRange(1, 1, lastRow, lastCol).getValues();
-    var displayData = sheet.getRange(1, 1, lastRow, lastCol).getDisplayValues();
 
     var headers = data[0].map(function(h) { return String(h || '').trim(); });
     var rows = [];
+    var rawGrid = [];
 
-    for (var r = 1; r < data.length; r++) {
-      var rowObj = { _rowIdx: r + 1 };
-      for (var c = 0; c < headers.length; c++) {
-        var hName = headers[c];
-        if (!hName) continue;
-        var rawVal = data[r][c];
-        var dispVal = displayData[r][c];
+    for (var r = 0; r < data.length; r++) {
+      var rowArray = data[r];
+      var gridRow = [];
+      var rowObj = (r > 0) ? { _rowIdx: r + 1 } : null;
 
-        // Format dates as ISO strings or YYYY-MM-DD
+      for (var c = 0; c < lastCol; c++) {
+        var rawVal = rowArray[c];
+        var formattedStr = '';
+
         if (rawVal instanceof Date) {
-          rowObj[hName] = dispVal; // Use display value for clean UI representation
-          rowObj[hName + '_raw'] = rawVal.toISOString();
+          formattedStr = Utilities.formatDate(rawVal, tz, 'MM/dd/yyyy');
+        } else if (rawVal === null || rawVal === undefined) {
+          formattedStr = '';
         } else {
-          rowObj[hName] = rawVal;
+          formattedStr = String(rawVal);
+        }
+
+        gridRow.push(formattedStr);
+
+        if (r > 0 && c < headers.length) {
+          var hName = headers[c];
+          if (hName) {
+            if (rawVal instanceof Date) {
+              rowObj[hName] = formattedStr;
+              rowObj[hName + '_raw'] = rawVal.toISOString();
+            } else {
+              rowObj[hName] = rawVal;
+            }
+          }
         }
       }
-      rows.push(rowObj);
+
+      rawGrid.push(gridRow);
+      if (r > 0) {
+        rows.push(rowObj);
+      }
     }
 
     tables[cfg.key] = {
       name: cfg.name,
       headers: headers,
       rows: rows,
-      rawGrid: displayData,
+      rawGrid: rawGrid,
       rowCount: rows.length,
       maxRows: lastRow,
       maxCols: lastCol
@@ -159,26 +181,52 @@ function exportFullDatabaseSnapshot() {
  * Generates the offline sync snapshot and saves it as a JSON file in the Drive Backup folder.
  * Called automatically every time "Save & Backup" runs in Google Sheets.
  *
+ * @param {Object} [existingSnapshot] - Optional pre-computed snapshot object to avoid re-exporting
  * @return {File|null} The saved snapshot file in Google Drive
  */
-function generateAndStoreSyncSnapshot() {
+function generateAndStoreSyncSnapshot(existingSnapshot) {
   try {
     var startTime = new Date().getTime();
-    var snapshot = exportFullDatabaseSnapshot();
+    var snapshot = existingSnapshot || exportFullDatabaseSnapshot();
     var jsonStr = JSON.stringify(snapshot, null, 2);
 
-    // Save snapshot to backup folder
-    var folder = getOrCreateBackupFolder();
-    var files = folder.getFilesByName(SYNC_SNAPSHOT_FILENAME);
-    var file;
+    var props = PropertiesService.getScriptProperties();
+    var fileId = props.getProperty('SYNC_SNAPSHOT_FILE_ID');
+    var file = null;
 
-    if (files.hasNext()) {
-      file = files.next();
-      file.setContent(jsonStr);
-      Logger.log('generateAndStoreSyncSnapshot: Updated existing ' + SYNC_SNAPSHOT_FILENAME);
-    } else {
-      file = folder.createFile(SYNC_SNAPSHOT_FILENAME, jsonStr, MimeType.PLAIN_TEXT);
-      Logger.log('generateAndStoreSyncSnapshot: Created new ' + SYNC_SNAPSHOT_FILENAME);
+    if (fileId) {
+      try {
+        file = DriveApp.getFileById(fileId);
+        if (file.isTrashed()) {
+          file = null;
+        } else {
+          file.setContent(jsonStr);
+          Logger.log('generateAndStoreSyncSnapshot: Updated cached ' + SYNC_SNAPSHOT_FILENAME + ' (ID: ' + fileId + ')');
+        }
+      } catch (idErr) {
+        file = null;
+      }
+    }
+
+    if (!file) {
+      // Save snapshot to backup folder
+      var folder = getOrCreateBackupFolder();
+      var files = folder.getFilesByName(SYNC_SNAPSHOT_FILENAME);
+
+      if (files.hasNext()) {
+        file = files.next();
+        file.setContent(jsonStr);
+        Logger.log('generateAndStoreSyncSnapshot: Updated existing ' + SYNC_SNAPSHOT_FILENAME);
+      } else {
+        file = folder.createFile(SYNC_SNAPSHOT_FILENAME, jsonStr, MimeType.PLAIN_TEXT);
+        Logger.log('generateAndStoreSyncSnapshot: Created new ' + SYNC_SNAPSHOT_FILENAME);
+      }
+
+      if (file) {
+        try {
+          props.setProperty('SYNC_SNAPSHOT_FILE_ID', file.getId());
+        } catch (saveIdErr) { /* ignore */ }
+      }
     }
 
     var elapsed = new Date().getTime() - startTime;
@@ -197,15 +245,64 @@ function generateAndStoreSyncSnapshot() {
  * @param {Array<Object>} mutations - Array of mutation objects from the offline outbox
  * @return {Object} Result summary with success count and errors
  */
-function applyBatchSyncMutations(mutations) {
+function applyBatchSyncMutations(mutations, returnSnapshot) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (returnSnapshot === undefined) returnSnapshot = true;
   if (!mutations || !Array.isArray(mutations) || mutations.length === 0) {
-    return { success: true, appliedCount: 0, errors: [] };
+    var emptySnap = returnSnapshot ? exportFullDatabaseSnapshot() : null;
+    return { success: true, appliedCount: 0, errors: [], snapshot: emptySnap };
   }
 
   var appliedCount = 0;
   var errors = [];
   var sheetsModified = {};
+
+  // In-memory lookup caches to avoid repeated O(N) sheet reads across mutations
+  var empLocationCache = null;
+  function getEmpLocationFast(empName) {
+    if (!empName) return 'Helena';
+    if (!empLocationCache) {
+      empLocationCache = {};
+      var empSheet = ss.getSheetByName(typeof SHEET_EMPLOYEES !== 'undefined' ? SHEET_EMPLOYEES : 'Employees');
+      if (empSheet && empSheet.getLastRow() > 1) {
+        var empData = empSheet.getDataRange().getValues();
+        var empLocIdx = 2; // Default C
+        for (var eh = 0; eh < empData[0].length; eh++) {
+          var ehStr = String(empData[0][eh]).toLowerCase().trim();
+          if (ehStr.indexOf('location') !== -1) {
+            empLocIdx = eh;
+            break;
+          }
+        }
+        for (var er = 1; er < empData.length; er++) {
+          var nameKey = String(empData[er][0] || '').trim().toLowerCase();
+          if (nameKey) {
+            var rawEmpLoc = String(empData[er][empLocIdx] || '').trim();
+            empLocationCache[nameKey] = typeof getPhysicalLocation === 'function' ? getPhysicalLocation(rawEmpLoc) : rawEmpLoc;
+          }
+        }
+      }
+    }
+    return empLocationCache[String(empName).trim().toLowerCase()] || 'Helena';
+  }
+
+  var invItemIndexCache = {};
+  function getInvItemRowIndexFast(targetSheet, targetSheetName, itemNum) {
+    if (!itemNum || itemNum === '—' || itemNum === '-') return -1;
+    if (!invItemIndexCache[targetSheetName]) {
+      invItemIndexCache[targetSheetName] = {};
+      if (targetSheet && targetSheet.getLastRow() > 1) {
+        var d = targetSheet.getDataRange().getValues();
+        for (var r = 1; r < d.length; r++) {
+          var itm = String(d[r][0] || '').trim();
+          var esl = String(d[r][1] || '').trim();
+          if (itm) invItemIndexCache[targetSheetName][itm] = r + 1;
+          if (esl) invItemIndexCache[targetSheetName][esl] = r + 1;
+        }
+      }
+    }
+    return invItemIndexCache[targetSheetName][itemNum] || -1;
+  }
 
   for (var m = 0; m < mutations.length; m++) {
     var mut = mutations[m];
@@ -368,32 +465,9 @@ function applyBatchSyncMutations(mutations) {
                     if (eqColChangeOutDate) sheet.getRange(mut.row, eqColChangeOutDate).setValue('N/A');
                     if (eqColPicked) sheet.getRange(mut.row, eqColPicked).setValue('');
                   } else if (assignedVal !== '') {
-                    // Regular employee assignment: look up in Employees sheet
+                    // Regular employee assignment: look up in fast in-memory Employees cache
                     newStatus = 'Assigned';
-                    var empSheet = ss.getSheetByName(typeof SHEET_EMPLOYEES !== 'undefined' ? SHEET_EMPLOYEES : 'Employees');
-                    if (empSheet) {
-                      var empData = empSheet.getDataRange().getValues();
-                      var empNameIdx = 0;
-                      var empLocIdx = 2; // Default C
-                      for (var eh = 0; eh < empData[0].length; eh++) {
-                        var ehStr = String(empData[0][eh]).toLowerCase().trim();
-                        if (ehStr.indexOf('location') !== -1) {
-                          empLocIdx = eh;
-                          break;
-                        }
-                      }
-                      for (var er = 1; er < empData.length; er++) {
-                        var eName = String(empData[er][empNameIdx] || '').trim().toLowerCase();
-                        if (eName === assignedValLower) {
-                          var rawEmpLoc = String(empData[er][empLocIdx] || '').trim();
-                          newLocation = typeof getPhysicalLocation === 'function' ? getPhysicalLocation(rawEmpLoc) : rawEmpLoc;
-                          break;
-                        }
-                      }
-                    }
-                    if (!newLocation) {
-                      newLocation = 'Helena'; // Fallback
-                    }
+                    newLocation = getEmpLocationFast(assignedVal);
                   }
 
                   if (newStatus && eqColStatus) {
@@ -526,10 +600,11 @@ function applyBatchSyncMutations(mutations) {
                 var isMack = sheetLower.includes('mack');
 
                 var invSheet = null;
-                if (isGlove) invSheet = ss.getSheetByName(typeof SHEET_GLOVES !== 'undefined' ? SHEET_GLOVES : 'Gloves');
-                else if (isSleeve) invSheet = ss.getSheetByName(typeof SHEET_SLEEVES !== 'undefined' ? SHEET_SLEEVES : 'Sleeves');
-                else if (isBlanket) invSheet = ss.getSheetByName(typeof SHEET_BLANKETS !== 'undefined' ? SHEET_BLANKETS : 'Blankets');
-                else if (isMack) invSheet = ss.getSheetByName(typeof SHEET_MACKS !== 'undefined' ? SHEET_MACKS : 'MACKs');
+                var invSheetName = '';
+                if (isGlove) { invSheetName = typeof SHEET_GLOVES !== 'undefined' ? SHEET_GLOVES : 'Gloves'; invSheet = ss.getSheetByName(invSheetName); }
+                else if (isSleeve) { invSheetName = typeof SHEET_SLEEVES !== 'undefined' ? SHEET_SLEEVES : 'Sleeves'; invSheet = ss.getSheetByName(invSheetName); }
+                else if (isBlanket) { invSheetName = typeof SHEET_BLANKETS !== 'undefined' ? SHEET_BLANKETS : 'Blankets'; invSheet = ss.getSheetByName(invSheetName); }
+                else if (isMack) { invSheetName = typeof SHEET_MACKS !== 'undefined' ? SHEET_MACKS : 'MACKs'; invSheet = ss.getSheetByName(invSheetName); }
 
                 // Picked checkbox (Col 9 / Picked header)
                 if (mut.col === 9 || hLower === 'picked' || hLower.includes('picked')) {
@@ -563,24 +638,18 @@ function applyBatchSyncMutations(mutations) {
                   if (isPrevEmp) {
                     sheet.getRange(mut.row, 8).setValue(isChecked ? 'Ready For Test' : 'Return to Shelf');
                     if (invSheet && oldItemNum && oldItemNum !== '—' && oldItemNum !== '-') {
-                      var invData = invSheet.getDataRange().getValues();
-                      for (var rIdx = 1; rIdx < invData.length; rIdx++) {
-                        var itm = String(invData[rIdx][0]).trim();
-                        var esl = String(invData[rIdx][1] || '').trim();
-                        if (itm === oldItemNum || esl === oldItemNum) {
-                          var oldRowIdx = rIdx + 1;
-                          if (isChecked) {
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.STATUS).setValue('Ready For Test');
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.ASSIGNED_TO).setValue('Packed For Testing');
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.LOCATION).setValue("Cody's Truck");
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.PICKED_FOR).setValue('');
-                          } else {
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.STATUS).setValue('Assigned');
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.ASSIGNED_TO).setValue(empName);
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.LOCATION).setValue('Previous Employee');
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.PICKED_FOR).setValue('');
-                          }
-                          break;
+                      var oldRowIdx = getInvItemRowIndexFast(invSheet, invSheetName, oldItemNum);
+                      if (oldRowIdx !== -1) {
+                        if (isChecked) {
+                          invSheet.getRange(oldRowIdx, COLS.INVENTORY.STATUS).setValue('Ready For Test');
+                          invSheet.getRange(oldRowIdx, COLS.INVENTORY.ASSIGNED_TO).setValue('Packed For Testing');
+                          invSheet.getRange(oldRowIdx, COLS.INVENTORY.LOCATION).setValue("Cody's Truck");
+                          invSheet.getRange(oldRowIdx, COLS.INVENTORY.PICKED_FOR).setValue('');
+                        } else {
+                          invSheet.getRange(oldRowIdx, COLS.INVENTORY.STATUS).setValue('Assigned');
+                          invSheet.getRange(oldRowIdx, COLS.INVENTORY.ASSIGNED_TO).setValue(empName);
+                          invSheet.getRange(oldRowIdx, COLS.INVENTORY.LOCATION).setValue('Previous Employee');
+                          invSheet.getRange(oldRowIdx, COLS.INVENTORY.PICKED_FOR).setValue('');
                         }
                       }
                     }
@@ -588,16 +657,7 @@ function applyBatchSyncMutations(mutations) {
                     sheet.getRange(mut.row, 8).setValue(isChecked ? 'Ready For Delivery 🚚' : 'In Stock ✅');
 
                     if (invSheet && pickListNum && pickListNum !== '—' && pickListNum !== '-') {
-                      var invData = invSheet.getDataRange().getValues();
-                      var invRowIdx = -1;
-                      for (var rIdx = 1; rIdx < invData.length; rIdx++) {
-                        var itm = String(invData[rIdx][0]).trim();
-                        var esl = String(invData[rIdx][1] || '').trim();
-                        if (itm === pickListNum || (esl && esl === pickListNum)) {
-                          invRowIdx = rIdx + 1;
-                          break;
-                        }
-                      }
+                      var invRowIdx = getInvItemRowIndexFast(invSheet, invSheetName, pickListNum);
 
                       if (invRowIdx !== -1) {
                         var colLoc, colStat, colAssigned, colDate, colChangeOut, colPicked;
@@ -685,34 +745,28 @@ function applyBatchSyncMutations(mutations) {
                   if (isPrevEmp) {
                     sheet.getRange(mut.row, 8).setValue(hasDate ? 'Packed For Testing' : 'Return to Shelf');
                     if (invSheet && oldItemNum && oldItemNum !== '—' && oldItemNum !== '-') {
-                      var invData = invSheet.getDataRange().getValues();
-                      for (var r = 1; r < invData.length; r++) {
-                        var itm = String(invData[r][0] || '').trim();
-                        var esl = String(invData[r][1] || '').trim();
-                        if (itm === oldItemNum || esl === oldItemNum) {
-                          var oldRowIdx = r + 1;
-                          if (hasDate) {
-                            var dObj = (dVal instanceof Date) ? dVal : new Date(dVal);
-                            var dFormatted = Utilities.formatDate(dObj, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
-                            var chgOutDate = new Date(dObj.getTime());
-                            chgOutDate.setFullYear(chgOutDate.getFullYear() + 1);
-                            var chgOutFormatted = Utilities.formatDate(chgOutDate, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+                      var oldRowIdx = getInvItemRowIndexFast(invSheet, invSheetName, oldItemNum);
+                      if (oldRowIdx !== -1) {
+                        if (hasDate) {
+                          var dObj = (dVal instanceof Date) ? dVal : new Date(dVal);
+                          var dFormatted = Utilities.formatDate(dObj, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
+                          var chgOutDate = new Date(dObj.getTime());
+                          chgOutDate.setFullYear(chgOutDate.getFullYear() + 1);
+                          var chgOutFormatted = Utilities.formatDate(chgOutDate, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
 
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.STATUS).setValue('Ready For Test');
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.ASSIGNED_TO).setValue('Packed For Testing');
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.LOCATION).setValue("Cody's Truck");
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.DATE_ASSIGNED).setValue(dFormatted);
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.CHANGE_OUT_DATE).setValue(chgOutFormatted);
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.PICKED_FOR).setValue('');
-                          } else {
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.STATUS).setValue('Ready For Test');
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.ASSIGNED_TO).setValue('Packed For Testing');
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.LOCATION).setValue("Cody's Truck");
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.DATE_ASSIGNED).setValue('');
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.CHANGE_OUT_DATE).setValue('');
-                            invSheet.getRange(oldRowIdx, COLS.INVENTORY.PICKED_FOR).setValue('');
-                          }
-                          break;
+                          invSheet.getRange(oldRowIdx, COLS.INVENTORY.STATUS).setValue('Ready For Test');
+                          invSheet.getRange(oldRowIdx, COLS.INVENTORY.ASSIGNED_TO).setValue('Packed For Testing');
+                          invSheet.getRange(oldRowIdx, COLS.INVENTORY.LOCATION).setValue("Cody's Truck");
+                          invSheet.getRange(oldRowIdx, COLS.INVENTORY.DATE_ASSIGNED).setValue(dFormatted);
+                          invSheet.getRange(oldRowIdx, COLS.INVENTORY.CHANGE_OUT_DATE).setValue(chgOutFormatted);
+                          invSheet.getRange(oldRowIdx, COLS.INVENTORY.PICKED_FOR).setValue('');
+                        } else {
+                          invSheet.getRange(oldRowIdx, COLS.INVENTORY.STATUS).setValue('Ready For Test');
+                          invSheet.getRange(oldRowIdx, COLS.INVENTORY.ASSIGNED_TO).setValue('Packed For Testing');
+                          invSheet.getRange(oldRowIdx, COLS.INVENTORY.LOCATION).setValue("Cody's Truck");
+                          invSheet.getRange(oldRowIdx, COLS.INVENTORY.DATE_ASSIGNED).setValue('');
+                          invSheet.getRange(oldRowIdx, COLS.INVENTORY.CHANGE_OUT_DATE).setValue('');
+                          invSheet.getRange(oldRowIdx, COLS.INVENTORY.PICKED_FOR).setValue('');
                         }
                       }
                     }
@@ -721,19 +775,8 @@ function applyBatchSyncMutations(mutations) {
                     sheet.getRange(mut.row, 8).setValue('Assigned');
                     sheet.getRange(mut.row, 6).setValue('Assigned');
 
-                    // Look up employee location
-                    var empLocation = 'Helena';
-                    var empSheet = ss.getSheetByName(typeof SHEET_EMPLOYEES !== 'undefined' ? SHEET_EMPLOYEES : 'Employees');
-                    if (empSheet) {
-                      var empData = empSheet.getDataRange().getValues();
-                      for (var er = 1; er < empData.length; er++) {
-                        if (String(empData[er][0] || '').trim().toLowerCase() === empName.toLowerCase()) {
-                          var rawLoc = String(empData[er][2] || '').trim();
-                          empLocation = typeof getPhysicalLocation === 'function' ? getPhysicalLocation(rawLoc) : rawLoc;
-                          break;
-                        }
-                      }
-                    }
+                    // Look up employee location fast from in-memory cache
+                    var empLocation = getEmpLocationFast(empName);
 
                     // Format dates
                     var dObj = (dVal instanceof Date) ? dVal : new Date(dVal);
@@ -756,20 +799,8 @@ function applyBatchSyncMutations(mutations) {
                     } catch (stg3Err) { /* ignore */ }
 
                     if (invSheet) {
-                      var invData = invSheet.getDataRange().getValues();
-                      var pickRowIdx = -1;
-                      var oldRowIdx = -1;
-
-                      for (var r = 1; r < invData.length; r++) {
-                        var itm = String(invData[r][0] || '').trim();
-                        var esl = String(invData[r][1] || '').trim();
-                        if (pickListNum && (itm === pickListNum || esl === pickListNum)) {
-                          pickRowIdx = r + 1;
-                        }
-                        if (oldItemNum && oldItemNum !== '—' && oldItemNum !== '-' && (itm === oldItemNum || esl === oldItemNum)) {
-                          oldRowIdx = r + 1;
-                        }
-                      }
+                      var pickRowIdx = pickListNum ? getInvItemRowIndexFast(invSheet, invSheetName, pickListNum) : -1;
+                      var oldRowIdx = (oldItemNum && oldItemNum !== '—' && oldItemNum !== '-') ? getInvItemRowIndexFast(invSheet, invSheetName, oldItemNum) : -1;
 
                       var colLoc, colStat, colAssigned, colDate, colChangeOut, colPicked;
                       if (isBlanket) {
@@ -939,17 +970,28 @@ function applyBatchSyncMutations(mutations) {
     }
   }
 
-  // Regenerate snapshot file so next sync is instantly up-to-date
+  // Generate fresh snapshot ONCE (if requested for single-round-trip push)
+  var snapshot = null;
+  if (returnSnapshot) {
+    try {
+      snapshot = exportFullDatabaseSnapshot();
+    } catch (expErr) {
+      Logger.log('applyBatchSyncMutations snapshot export error: ' + expErr);
+    }
+  }
+
+  // Save snapshot file to Drive (reusing the already generated snapshot!)
   try {
-    generateAndStoreSyncSnapshot();
+    generateAndStoreSyncSnapshot(snapshot);
   } catch (snapErr) {
-    Logger.log('applyBatchSyncMutations snapshot error: ' + snapErr);
+    Logger.log('applyBatchSyncMutations Drive snapshot error: ' + snapErr);
   }
 
   return {
     success: errors.length === 0,
     appliedCount: appliedCount,
-    errors: errors
+    errors: errors,
+    snapshot: snapshot
   };
 }
 
@@ -988,7 +1030,8 @@ function doPost(e) {
     var action = payload.action || 'sync';
 
     if (action === 'applyMutations') {
-      var result = applyBatchSyncMutations(payload.mutations || []);
+      var returnSnap = payload.returnSnapshot !== false;
+      var result = applyBatchSyncMutations(payload.mutations || [], returnSnap);
       return ContentService.createTextOutput(JSON.stringify(result))
         .setMimeType(ContentService.MimeType.JSON);
     }

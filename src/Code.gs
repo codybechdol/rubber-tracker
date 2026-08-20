@@ -11255,7 +11255,7 @@ function saveHistoryFast(silent) {
 
       // Read enough columns to cover the widest layout (Phasing Sets = 8)
       var maxCol = Math.max(itemNumCol, locationCol, assignedToCol) + 1;
-      var data = historySheet.getRange(2, 1, numRows, maxCol).getDisplayValues();
+      var data = historySheet.getRange(2, 1, numRows, maxCol).getValues();
       for (var i = 0; i < data.length; i++) {
         var itemNum = String(data[i][itemNumCol] || '').trim();
         if (!itemNum) continue;
@@ -32195,7 +32195,8 @@ function doPost(e) {
     var action = payload.action || 'sync';
 
     if (action === 'applyMutations') {
-      var result = applyBatchSyncMutations(payload.mutations || []);
+      var returnSnap = payload.returnSnapshot !== false;
+      var result = applyBatchSyncMutations(payload.mutations || [], returnSnap);
       return ContentService.createTextOutput(JSON.stringify(result))
         .setMimeType(ContentService.MimeType.JSON);
     }
