@@ -11273,16 +11273,16 @@ function saveHistoryFast(silent) {
 
       for (var c = 0; c < headerRow.length; c++) {
         var h = String(headerRow[c] || '').toLowerCase().trim();
-        if (dateCol === -1 && (h.indexOf('date') !== -1)) {
+        if (dateCol === -1 && (h === 'date' || h === 'date assigned' || h.indexOf('date') !== -1)) {
           dateCol = c;
         }
-        if (itemNumCol === -1 && (h.indexOf('item') !== -1 || h.indexOf('serial') !== -1 || h.indexOf('glove') !== -1 || h.indexOf('sleeve') !== -1 || h.indexOf('blanket') !== -1 || h.indexOf('mack') !== -1)) {
+        if (itemNumCol === -1 && (h === 'item #' || h === 'serial #' || h.indexOf('item') !== -1 || h.indexOf('serial') !== -1 || h.indexOf('glove') !== -1 || h.indexOf('sleeve') !== -1 || h.indexOf('blanket') !== -1 || h.indexOf('mack') !== -1)) {
           itemNumCol = c;
         }
-        if (assignedToCol === -1 && (h.indexOf('assigned') !== -1 || h.indexOf('employee') !== -1 || h.indexOf('holder') !== -1)) {
+        if (assignedToCol === -1 && (h === 'assigned to' || h === 'employee' || h === 'holder' || (h.indexOf('assigned') !== -1 && h.indexOf('date') === -1))) {
           assignedToCol = c;
         }
-        if (locationCol === -1 && (h.indexOf('location') !== -1 || h.indexOf('city') !== -1)) {
+        if (locationCol === -1 && (h === 'location' || h.indexOf('location') !== -1 || h.indexOf('city') !== -1)) {
           locationCol = c;
         }
       }
@@ -13000,7 +13000,13 @@ function cleanAndRepairHistorySheets(silent) {
 
   function parseTimestamp(val) {
     if (!val) return 0;
-    if (val instanceof Date) return val.getTime();
+    if (val instanceof Date) {
+      var yr = val.getFullYear();
+      if (yr > 2100 && yr >= 20200 && yr <= 20300) {
+        val = new Date(Math.floor(yr / 10), val.getMonth(), val.getDate(), 12, 0, 0);
+      }
+      return val.getTime();
+    }
     var s = String(val).trim();
     if (s.indexOf('/') !== -1) {
       var parts = s.split('/');
@@ -13008,6 +13014,7 @@ function cleanAndRepairHistorySheets(silent) {
         var m = parseInt(parts[0], 10) - 1;
         var d = parseInt(parts[1], 10);
         var y = parseInt(parts[2], 10);
+        if (y > 2100 && y >= 20200 && y <= 20300) y = Math.floor(y / 10);
         return new Date(y, m, d, 12, 0, 0).getTime();
       }
     }
@@ -13018,13 +13025,22 @@ function cleanAndRepairHistorySheets(silent) {
   function formatDateStr(val) {
     if (!val) return '';
     if (val instanceof Date) {
-      return (val.getMonth() + 1) + '/' + val.getDate() + '/' + val.getFullYear();
+      var yr = val.getFullYear();
+      if (yr > 2100 && yr >= 20200 && yr <= 20300) yr = Math.floor(yr / 10);
+      return (val.getMonth() + 1) + '/' + val.getDate() + '/' + yr;
     }
     var s = String(val).trim();
-    if (s.match(/^\d{1,2}\/\d{1,2}\/\d{4}$/)) return s;
+    var mdyMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4,5})$/);
+    if (mdyMatch) {
+      var y = parseInt(mdyMatch[3], 10);
+      if (y > 2100 && y >= 20200 && y <= 20300) y = Math.floor(y / 10);
+      return mdyMatch[1] + '/' + mdyMatch[2] + '/' + y;
+    }
     var d = new Date(s);
     if (!isNaN(d.getTime())) {
-      return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
+      var yr2 = d.getFullYear();
+      if (yr2 > 2100 && yr2 >= 20200 && yr2 <= 20300) yr2 = Math.floor(yr2 / 10);
+      return (d.getMonth() + 1) + '/' + d.getDate() + '/' + yr2;
     }
     return s;
   }
@@ -13335,7 +13351,9 @@ function cleanAndRepairHistorySheets(silent) {
 
         // Generate clean note
         if (!prevEntry) {
-          if (!entry.notes || entry.notes.toLowerCase().indexOf('location change') !== -1 || entry.notes.toLowerCase().indexOf('reassigned: assigned') !== -1) {
+          if (curAssignedLower === 'new') {
+            entry.notes = 'Initial Purchase (On Shelf)';
+          } else if (!entry.notes || entry.notes.toLowerCase().indexOf('location change') !== -1 || entry.notes.toLowerCase().indexOf('reassigned: assigned') !== -1 || entry.notes.toLowerCase().indexOf('gmt') !== -1) {
             entry.notes = 'New Assignment';
           }
         } else {
@@ -13351,6 +13369,8 @@ function cleanAndRepairHistorySheets(silent) {
             entry.notes = 'Returned from ' + prevEntry.assignedTo;
           } else if (curAssignedLower === 'previous employee') {
             entry.notes = 'Last working location: ' + (entry.location || 'Unknown');
+          } else if (curAssignedLower === 'new') {
+            entry.notes = 'Initial Purchase (On Shelf)';
           } else {
             if (prevEntry.location && prevEntry.location.toLowerCase() !== 'unknown') {
               entry.notes = 'Reassigned: ' + prevEntry.assignedTo + ' (' + prevEntry.location + ')';
