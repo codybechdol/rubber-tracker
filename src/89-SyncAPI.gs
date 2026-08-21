@@ -337,7 +337,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot) {
     try {
       var sheetName = mut.sheetName || '';
       var sheet = sheetName ? ss.getSheetByName(sheetName) : null;
-      var actionsWithoutSheet = ['SET_TASK_STATUS', 'TRIGGER_SYNC_CREWS', 'SET_HOLIDAYS', 'SET_TRIP_SCHEDULE', 'SCHEDULE_CREW_VISIT', 'SAVE_PLANNED_TRIPS', 'IMPORT_HISTORY_LOG'];
+      var actionsWithoutSheet = ['DELETE_TASK', 'SET_TASK_STATUS', 'TRIGGER_SYNC_CREWS', 'SET_HOLIDAYS', 'SET_TRIP_SCHEDULE', 'SCHEDULE_CREW_VISIT', 'SAVE_PLANNED_TRIPS', 'IMPORT_HISTORY_LOG'];
       if (!sheet && actionsWithoutSheet.indexOf(mut.action) === -1) {
         errors.push('Sheet not found: ' + sheetName);
         continue;
@@ -1000,6 +1000,91 @@ function applyBatchSyncMutations(mutations, returnSnapshot) {
               if (mut.sheetName) sheetsModified[mut.sheetName] = true;
             } else if (importRes && importRes.error) {
               errors.push('History import error: ' + importRes.error);
+            }
+          }
+          break;
+
+        case 'DELETE_TASK':
+          if (mut.taskId) {
+            var metaSheetDel = ss.getSheetByName('Task Metadata');
+            if (metaSheetDel) {
+              var mDataDel = metaSheetDel.getDataRange().getValues();
+              var mHeadersDel = mDataDel[0];
+              var idColDel = -1;
+              var srcSheetColDel = -1;
+              var srcRowColDel = -1;
+              for (var hDel = 0; hDel < mHeadersDel.length; hDel++) {
+                var hNameDel = String(mHeadersDel[hDel] || '').trim();
+                if (hNameDel === 'TaskID' || hNameDel === 'Task ID') idColDel = hDel;
+                else if (hNameDel === 'SourceSheet' || hNameDel === 'Source Sheet') srcSheetColDel = hDel;
+                else if (hNameDel === 'SourceRow' || hNameDel === 'Source Row') srcRowColDel = hDel;
+              }
+              if (idColDel !== -1) {
+                for (var rDel = mDataDel.length - 1; rDel >= 1; rDel--) {
+                  var rowTaskIdDel = String(mDataDel[rDel][idColDel] || '').trim();
+                  var rowKeyDel = (srcSheetColDel !== -1 && srcRowColDel !== -1) ? (mDataDel[rDel][srcSheetColDel] + '_' + mDataDel[rDel][srcRowColDel]) : '';
+                  if (rowTaskIdDel === String(mut.taskId).trim() || rowKeyDel === String(mut.taskId).trim()) {
+                    var srcSheetNameDel = srcSheetColDel !== -1 ? String(mDataDel[rDel][srcSheetColDel] || '').trim() : '';
+                    var srcRowNumDel = srcRowColDel !== -1 ? parseInt(mDataDel[rDel][srcRowColDel], 10) : -1;
+                    
+                    // If source sheet is Safety Equipment Needs, delete the source row too
+                    if (srcSheetNameDel && srcRowNumDel > 1) {
+                      var srcSheetDel = ss.getSheetByName(srcSheetNameDel);
+                      if (srcSheetDel && srcRowNumDel <= srcSheetDel.getLastRow()) {
+                        try {
+                          srcSheetDel.deleteRow(srcRowNumDel);
+                          sheetsModified[srcSheetNameDel] = true;
+                        } catch (eSrc) {
+                          Logger.log('Could not delete from source sheet ' + srcSheetNameDel + ': ' + eSrc);
+                        }
+                      }
+                    }
+
+                    metaSheetDel.deleteRow(rDel + 1);
+                    sheetsModified['Task Metadata'] = true;
+                    appliedCount++;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+          break;
+
+        case 'SET_TASK_STATUS':
+          if (mut.taskId) {
+            var metaSheetStatus = ss.getSheetByName('Task Metadata');
+            if (metaSheetStatus) {
+              var mDataSt = metaSheetStatus.getDataRange().getValues();
+              var mHeadersSt = mDataSt[0];
+              var idColSt = -1;
+              var statColSt = -1;
+              var compColSt = -1;
+              var srcSheetColSt = -1;
+              var srcRowColSt = -1;
+              for (var hSt = 0; hSt < mHeadersSt.length; hSt++) {
+                var hNameSt = String(mHeadersSt[hSt] || '').trim();
+                if (hNameSt === 'TaskID' || hNameSt === 'Task ID') idColSt = hSt;
+                else if (hNameSt === 'Status') statColSt = hSt;
+                else if (hNameSt === 'CompletedDate' || hNameSt === 'Completed Date') compColSt = hSt;
+                else if (hNameSt === 'SourceSheet' || hNameSt === 'Source Sheet') srcSheetColSt = hSt;
+                else if (hNameSt === 'SourceRow' || hNameSt === 'Source Row') srcRowColSt = hSt;
+              }
+              if (idColSt !== -1 && statColSt !== -1) {
+                for (var rSt = 1; rSt < mDataSt.length; rSt++) {
+                  var rowTaskIdSt = String(mDataSt[rSt][idColSt] || '').trim();
+                  var rowKeySt = (srcSheetColSt !== -1 && srcRowColSt !== -1) ? (mDataSt[rSt][srcSheetColSt] + '_' + mDataSt[rSt][srcRowColSt]) : '';
+                  if (rowTaskIdSt === String(mut.taskId).trim() || rowKeySt === String(mut.taskId).trim()) {
+                    metaSheetStatus.getRange(rSt + 1, statColSt + 1).setValue(mut.status || 'Complete');
+                    if (compColSt !== -1) {
+                      metaSheetStatus.getRange(rSt + 1, compColSt + 1).setValue(mut.completedDate || new Date());
+                    }
+                    sheetsModified['Task Metadata'] = true;
+                    appliedCount++;
+                    break;
+                  }
+                }
+              }
             }
           }
           break;

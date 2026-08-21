@@ -666,6 +666,35 @@ class LocalDatabase {
       }
     }
 
+    // Task deletion / dismissal
+    if (mut.action === 'DELETE_TASK') {
+      const taskTable = this.snapshot.tables['task_metadata'];
+      if (taskTable) {
+        if (taskTable.rows) {
+          const idx = taskTable.rows.findIndex(t => 
+            String(t['TaskID'] || t['Task ID'] || t['id'] || '').trim() === String(mut.taskId || '').trim() ||
+            String(t['SourceSheet'] + '_' + t['SourceRow']) === String(mut.taskId || '').trim()
+          );
+          if (idx !== -1) {
+            taskTable.rows.splice(idx, 1);
+          }
+        }
+        if (taskTable.rawGrid && taskTable.headers) {
+          const idColIdx = taskTable.headers.findIndex(h => String(h || '').toLowerCase().includes('task'));
+          const targetCol = idColIdx !== -1 ? idColIdx : 0;
+          for (let r = 1; r < taskTable.rawGrid.length; r++) {
+            const rowId = String(taskTable.rawGrid[r][targetCol] || '').trim();
+            if (rowId === String(mut.taskId || '').trim()) {
+              taskTable.rawGrid.splice(r, 1);
+              break;
+            }
+          }
+        }
+      }
+
+      this.addDismissedTask(mut.taskId);
+    }
+
     // Task completion
     if (mut.action === 'SET_TASK_STATUS') {
       const taskTable = this.snapshot.tables['task_metadata'];
@@ -695,6 +724,37 @@ class LocalDatabase {
         }
       }
     }
+  }
+
+  isTaskDismissed(taskId) {
+    if (!taskId) return false;
+    if (!this.dismissedTaskIds) {
+      this.dismissedTaskIds = new Set();
+      const saved = localStorage.getItem('sa_dismissed_tasks');
+      if (saved) {
+        try {
+          JSON.parse(saved).forEach(id => this.dismissedTaskIds.add(id));
+        } catch (e) {}
+      }
+    }
+    return this.dismissedTaskIds.has(String(taskId).trim());
+  }
+
+  addDismissedTask(taskId) {
+    if (!taskId) return;
+    if (!this.dismissedTaskIds) {
+      this.dismissedTaskIds = new Set();
+      const saved = localStorage.getItem('sa_dismissed_tasks');
+      if (saved) {
+        try {
+          JSON.parse(saved).forEach(id => this.dismissedTaskIds.add(id));
+        } catch (e) {}
+      }
+    }
+    this.dismissedTaskIds.add(String(taskId).trim());
+    try {
+      localStorage.setItem('sa_dismissed_tasks', JSON.stringify(Array.from(this.dismissedTaskIds)));
+    } catch (e) {}
   }
 
   async clearOutbox() {

@@ -144,6 +144,13 @@ class TaskManagerApp {
       metaTable.rows.forEach((r, idx) => {
         const taskId = String(r['TaskID'] || r['Task ID'] || r['id'] || `task_${idx}`).trim();
         const sourceSheet = String(r['SourceSheet'] || r['Source Sheet'] || '').trim();
+        const sourceRow = String(r['SourceRow'] || r['Source Row'] || '').trim();
+        const rowKey = `${sourceSheet}_${sourceRow}`;
+
+        if (this.db.isTaskDismissed(taskId) || this.db.isTaskDismissed(rowKey)) {
+          return; // Skip deleted/dismissed tasks
+        }
+
         const rawType = String(r['TaskType'] || r['Task Type'] || r['Type'] || sourceSheet || 'Equipment Swap').trim();
         const employee = String(r['Employee'] || r['Assigned Worker'] || r['Name'] || '').trim();
         const itemType = String(r['ItemType'] || r['Item Type'] || r['Item'] || '').trim();
@@ -172,6 +179,9 @@ class TaskManagerApp {
 
         // Status & Completion evaluation
         const statusLower = status.toLowerCase();
+        if (statusLower.includes('dismiss') || statusLower.includes('delete')) {
+          return; // Skip dismissed tasks
+        }
         const isComplete = statusLower.includes('complete') || statusLower.includes('resolved');
         let isOverdue = !isComplete && (statusLower === 'overdue' || this.checkIfOverdue(dueDate));
         if (!isComplete && category === 'Training' && (this.isPastTrainingMonth(dueDate, targetDate) || this.isPastTrainingMonth(currentItem, targetDate))) {
@@ -226,6 +236,7 @@ class TaskManagerApp {
         };
 
         const taskKey = `${taskObj.type}_${taskObj.employee}_${taskObj.itemType}_${taskObj.dueDate}`.toLowerCase();
+        if (this.db.isTaskDismissed(taskKey)) return;
         if (!seenTaskKeys.has(taskKey)) {
           seenTaskKeys.add(taskKey);
           allTasks.push(taskObj);
@@ -712,7 +723,7 @@ class TaskManagerApp {
           ` : ''}
         </div>
 
-        <div style="display: flex; align-items: center; gap: 10px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
           <span class="badge" style="background: ${isComplete ? '#15803d' : (isOverdue ? '#b91c1c' : '#d97706')}; color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px;">
             ${isComplete ? '✅ Complete' : (isOverdue ? '🔴 Overdue' : '⏳ Pending')}
           </span>
@@ -720,8 +731,14 @@ class TaskManagerApp {
             <button class="btn" style="background-color: #10b981; color: #fff; padding: 4px 10px; font-size: 11px; font-weight: 700; border-radius: 4px; cursor: pointer;" onclick="window.taskManager.completeTask('${this.escapeHtml(task.id)}')">
               ✓ Mark Complete
             </button>
+            <button class="btn btn-secondary" style="color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); padding: 4px 8px; font-size: 11px; font-weight: 700; border-radius: 4px; cursor: pointer;" onclick="window.taskManager.deleteTask('${this.escapeHtml(task.id)}', '${this.escapeHtml(task.sourceSheet)}')">
+              🗑️ Delete
+            </button>
           ` : `
             <span style="color: var(--text-muted); font-size: 11px;">✓ Completed</span>
+            <button class="btn btn-secondary" style="color: #94a3b8; border: 1px solid rgba(255, 255, 255, 0.1); padding: 2px 6px; font-size: 10px; border-radius: 4px; cursor: pointer;" onclick="window.taskManager.deleteTask('${this.escapeHtml(task.id)}', '${this.escapeHtml(task.sourceSheet)}')">
+              🗑️
+            </button>
           `}
         </div>
 
@@ -741,6 +758,23 @@ class TaskManagerApp {
     });
 
     this.renderTasks();
+    if (window.tripPlanner) window.tripPlanner.renderPlanner();
+  }
+
+  deleteTask(taskId, sourceSheet = '') {
+    if (!window.confirm('Are you sure you want to delete this task? It will be removed from all task lists.')) {
+      return;
+    }
+
+    // Optimistically update local database
+    this.db.addMutation({
+      action: 'DELETE_TASK',
+      taskId: taskId,
+      sourceSheet: sourceSheet
+    });
+
+    this.renderTasks();
+    if (window.tripPlanner) window.tripPlanner.renderPlanner();
   }
 
   escapeHtml(str) {

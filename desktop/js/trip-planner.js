@@ -958,7 +958,7 @@ class TripPlannerApp {
                 ` : ''}
               </div>
 
-              <div style="display: flex; align-items: center; gap: 10px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
                 <span class="badge" style="background: ${isComplete ? '#15803d' : (isOverdue ? '#b91c1c' : '#d97706')}; color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px;">
                   ${isComplete ? '✅ Complete' : (isOverdue ? '🔴 Overdue' : '⏳ Pending')}
                 </span>
@@ -966,8 +966,14 @@ class TripPlannerApp {
                   <button class="btn" style="background-color: #10b981; color: #fff; padding: 4px 10px; font-size: 11px; font-weight: 700; border-radius: 4px; cursor: pointer;" onclick="window.tripPlanner.completeTaskInModal('${this.escapeHtml(t.id)}', '${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}')">
                     ✓ Mark Complete
                   </button>
+                  <button class="btn btn-secondary" style="color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); padding: 4px 8px; font-size: 11px; font-weight: 700; border-radius: 4px; cursor: pointer;" onclick="window.tripPlanner.deleteTaskInModal('${this.escapeHtml(t.id)}', '${this.escapeHtml(t.sourceSheet)}', '${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}')">
+                    🗑️ Delete
+                  </button>
                 ` : `
                   <span style="color: var(--text-muted); font-size: 11px;">✓ Completed</span>
+                  <button class="btn btn-secondary" style="color: #94a3b8; border: 1px solid rgba(255, 255, 255, 0.1); padding: 2px 6px; font-size: 10px; border-radius: 4px; cursor: pointer;" onclick="window.tripPlanner.deleteTaskInModal('${this.escapeHtml(t.id)}', '${this.escapeHtml(t.sourceSheet)}', '${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}')">
+                    🗑️
+                  </button>
                 `}
               </div>
             </div>
@@ -992,6 +998,14 @@ class TripPlannerApp {
   completeTaskInModal(taskId, crewId, location) {
     if (window.taskManager) {
       window.taskManager.completeTask(taskId);
+      this.openCrewTasksModal(crewId, location, this.activeModalCat, this.activeModalDateKey);
+      this.renderPlanner();
+    }
+  }
+
+  deleteTaskInModal(taskId, sourceSheet, crewId, location) {
+    if (window.taskManager) {
+      window.taskManager.deleteTask(taskId, sourceSheet);
       this.openCrewTasksModal(crewId, location, this.activeModalCat, this.activeModalDateKey);
       this.renderPlanner();
     }
