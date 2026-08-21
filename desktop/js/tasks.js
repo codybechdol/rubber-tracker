@@ -108,8 +108,38 @@ class TaskManagerApp {
       });
     }
 
-    // 1. Ingest tasks from Task Metadata
+    // Pre-scan Task Metadata to build a crew -> verified truck/unit numbers map
     const metaTable = this.db.getTable('task_metadata');
+    const crewTruckMap = {};
+    if (metaTable && metaTable.rows) {
+      metaTable.rows.forEach(r => {
+        const empName = String(r['Employee'] || '').toLowerCase().trim();
+        const empInfo = empLookup[empName] || {};
+        const rawCrew = String(r['Job Number'] || r['Crew'] || empInfo.crewId || '').trim();
+        const sigCrew = this.getSignificantJobNumber(rawCrew);
+
+        const text = `${r['Notes'] || ''} ${r['CurrentItem'] || ''} ${r['Description'] || ''}`;
+        let unitVal = '';
+        const unitMatch = text.match(/(?:Unit\s*#?|Truck\s*#?|Vehicle\s*#?)\s*[:#]?\s*([0-9A-Za-z\-]+)/i);
+        if (unitMatch && unitMatch[1]) {
+          const v = unitMatch[1].trim();
+          if (!['not', 'signs', 'comments', 'are', 'date', 'test', 'yes', 'no', 'na', 'none', 'good', 'bad', 'sign'].includes(v.toLowerCase())) {
+            unitVal = v;
+          }
+        }
+        if (!unitVal) {
+          const pdfMatch = text.match(/(?:\[PDF[^\]]*\]\s*)?([0-9]{3,5})[­\-\s]+[0-9]{3}[­\-\s]+[0-9]{2}/i);
+          if (pdfMatch && pdfMatch[1]) unitVal = pdfMatch[1];
+        }
+
+        if (unitVal && sigCrew) {
+          if (!crewTruckMap[sigCrew]) crewTruckMap[sigCrew] = new Set();
+          crewTruckMap[sigCrew].add(unitVal);
+        }
+      });
+    }
+
+    // 1. Ingest tasks from Task Metadata
     if (metaTable && metaTable.rows) {
       metaTable.rows.forEach((r, idx) => {
         const taskId = String(r['TaskID'] || r['Task ID'] || r['id'] || `task_${idx}`).trim();
@@ -148,19 +178,30 @@ class TaskManagerApp {
           isOverdue = true;
         }
 
-        // Extract Truck / Vehicle Number for Safety Equipment & tasks
-        const rawTruck = String(r['Vehicle Number'] || r['VehicleNumber'] || r['Vehicle #'] || r['Truck #'] || r['Truck'] || r['Unit #'] || '').trim();
-        const textForTruck = `${currentItem} ${notes} ${r['Description'] || ''}`;
-        let truckNumber = rawTruck;
+        // Extract Truck / Vehicle Number for Safety Equipment & Tool tasks
+        let truckNumber = '';
+        const textForTruck = `${notes} ${currentItem} ${r['Description'] || ''}`;
+
+        // 1. Direct unit match in this specific task row
+        const unitM = textForTruck.match(/(?:Unit\s*#?|Truck\s*#?|Vehicle\s*#?)\s*[:#]?\s*([0-9A-Za-z\-]+)/i);
+        if (unitM && unitM[1]) {
+          const v = unitM[1].trim();
+          if (!['not', 'signs', 'comments', 'are', 'date', 'test', 'yes', 'no', 'na', 'none', 'good', 'bad', 'sign'].includes(v.toLowerCase())) {
+            truckNumber = `Unit ${v}`;
+          }
+        }
         if (!truckNumber) {
-          const unitM = textForTruck.match(/(?:Unit\s*#?|Truck\s*#?|Vehicle\s*#?)\s*([A-Za-z0-9\-_]+)/i);
-          if (unitM && unitM[0]) {
-            truckNumber = unitM[0].trim();
-          } else {
-            const codeM = textForTruck.match(/\b(4\d{2}-\d+)\b/);
-            if (codeM && codeM[1]) {
-              truckNumber = `Truck ${codeM[1]}`;
-            }
+          const pdfMatch = textForTruck.match(/(?:\[PDF[^\]]*\]\s*)?([0-9]{3,5})[­\-\s]+[0-9]{3}[­\-\s]+[0-9]{2}/i);
+          if (pdfMatch && pdfMatch[1]) {
+            truckNumber = `Unit ${pdfMatch[1]}`;
+          }
+        }
+
+        // 2. Fallback to crew's known inspected units for equipment tasks
+        if (!truckNumber && (category === 'Equipment' || rawType.toLowerCase().includes('safety equipment') || sourceSheet === 'Safety Equipment Needs')) {
+          const sigCrew = this.getSignificantJobNumber(crewId);
+          if (sigCrew && crewTruckMap[sigCrew] && crewTruckMap[sigCrew].size > 0) {
+            truckNumber = `Unit ${Array.from(crewTruckMap[sigCrew]).join(', ')}`;
           }
         }
 

@@ -16333,7 +16333,7 @@ function generateTaskMetadata() {
         'FALSE',                   // T: IsRegistered
         'FALSE',                   // U: IsDeclined
         '',                        // V: CompletedDate
-        task.notes || '',          // W: Notes
+        (task.vehicleNumber && !(task.notes || '').toLowerCase().includes('unit') ? 'Unit #: ' + task.vehicleNumber + (task.notes ? ' • ' + task.notes : '') : (task.notes || '')), // W: Notes
         createdDateFormatted,      // X: CreatedDate
         lastModified               // Y: LastModified
       ];

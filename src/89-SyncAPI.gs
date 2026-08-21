@@ -71,6 +71,7 @@ function exportFullDatabaseSnapshot() {
     { key: 'grounds_history', name: typeof SHEET_GROUNDS_HISTORY !== 'undefined' ? SHEET_GROUNDS_HISTORY : 'Grounds History' },
     { key: 'hot_sticks_history', name: typeof SHEET_HOT_STICKS_HISTORY !== 'undefined' ? SHEET_HOT_STICKS_HISTORY : 'Hot Sticks History' },
     { key: 'employee_history', name: typeof SHEET_EMPLOYEE_HISTORY !== 'undefined' ? SHEET_EMPLOYEE_HISTORY : 'Employee History' },
+    { key: 'safety_equipment_needs', name: 'Safety Equipment Needs' },
     { key: 'locations', name: 'Locations' },
     { key: 'drive_time_routes', name: 'Drive Time Routes' }
   ];
