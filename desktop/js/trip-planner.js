@@ -345,7 +345,8 @@ class TripPlannerApp {
         const status = String(r['Status'] || r['Job Status'] || '').trim();
         const rawLoc = String(r['Location'] || '').trim();
         const loc = this.cleanPhysicalLocation(rawLoc);
-        const crewId = String(r['Job Number'] || r['Crew'] || r['Job #'] || '').trim();
+        const rawCrewId = String(r['Job Number'] || r['Crew'] || r['Job #'] || '').trim();
+        const crewId = this.getSignificantJobNumber(rawCrewId);
         const foreman = String(r['Foreman'] || r['Crew Lead'] || r['Lead'] || '').trim();
         const crewSize = parseInt(r['Crew Size'] || r['Size'] || 0, 10) || 0;
         const jobName = String(r['Job Name'] || '').trim();
@@ -353,13 +354,14 @@ class TripPlannerApp {
         if (loc && !this.isStatusLocation(loc)) {
           allKnownLocations.add(loc);
           const sLower = status.toLowerCase();
-          if (sLower === 'active' || sLower === 'pending start' || (!sLower.includes('completed') && !sLower.includes('on hold') && status !== '')) {
+          const isExcludedPrefix = crewId.startsWith('002') || crewId.startsWith('005');
+          if (!isExcludedPrefix && (sLower === 'active' || sLower === 'pending start' || (!sLower.includes('completed') && !sLower.includes('on hold') && status !== ''))) {
             if (!activeCrewsByLoc[loc]) {
               activeCrewsByLoc[loc] = [];
             }
-            if (!activeCrewsByLoc[loc].some(c => c.crewId === crewId)) {
+            if (crewId && !activeCrewsByLoc[loc].some(c => c.crewId === crewId)) {
               activeCrewsByLoc[loc].push({
-                crewId: crewId || 'N/A',
+                crewId: crewId,
                 foreman: foreman || 'Lead',
                 crewSize: crewSize,
                 jobName: jobName,
@@ -371,36 +373,7 @@ class TripPlannerApp {
       });
     }
 
-    // 2. Scan Employees sheet for any additional active crews and locations
-    const empTable = this.db.getTable('employees');
-    if (empTable && empTable.rows) {
-      empTable.rows.forEach(r => {
-        const rawLoc = String(r['Location'] || '').trim();
-        const loc = this.cleanPhysicalLocation(rawLoc);
-        const crewId = String(r['Job Number'] || r['Job #'] || r['Crew'] || '').trim();
-        const foreman = String(r['Foreman'] || r['Crew Lead'] || r['Lead'] || '').trim();
-
-        if (loc && !this.isStatusLocation(loc)) {
-          allKnownLocations.add(loc);
-          if (crewId && crewId !== 'N/A' && crewId !== 'Unassigned') {
-            if (!activeCrewsByLoc[loc]) {
-              activeCrewsByLoc[loc] = [];
-            }
-            if (!activeCrewsByLoc[loc].some(c => c.crewId === crewId)) {
-              activeCrewsByLoc[loc].push({
-                crewId: crewId,
-                foreman: foreman || 'Lead',
-                crewSize: 1,
-                jobName: '',
-                status: 'Active'
-              });
-            }
-          }
-        }
-      });
-    }
-
-    // 3. Scan Locations master table from snapshot if present
+    // 2. Scan Locations master table from snapshot if present
     const locTable = this.db.getTable('locations');
     if (locTable && locTable.rows) {
       locTable.rows.forEach(r => {
@@ -447,6 +420,13 @@ class TripPlannerApp {
     };
   }
 
+  getSignificantJobNumber(jobNum) {
+    if (!jobNum) return '';
+    const str = String(jobNum).trim();
+    const match = str.match(/^(\d+-\d+)/);
+    return match ? match[1] : str;
+  }
+
   cleanPhysicalLocation(loc) {
     if (!loc) return '';
     let clean = String(loc).trim();
@@ -457,7 +437,11 @@ class TripPlannerApp {
 
   isStatusLocation(loc) {
     const lower = String(loc || '').toLowerCase().trim();
-    const statusValues = ['vacation', 'light duty', 'weeds', 'leave', 'previous employee', 'medical', "worker's comp", 'unknown', 'in testing'];
+    const statusValues = [
+      'vacation', 'light duty', 'weeds', 'leave', 'previous employee', 'medical', 
+      "worker's comp", 'unknown', 'in testing', 'location', 'lost', 'destroyed', 
+      "cody's truck", 'arnett / jm test', 'arnett'
+    ];
     return statusValues.some(s => lower === s || lower.includes(`(${s})`));
   }
 
