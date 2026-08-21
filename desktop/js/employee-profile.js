@@ -117,6 +117,69 @@ class EmployeeProfileEngine {
   }
 
   /**
+   * Extracts the certification / license name from an expiring certs row
+   */
+  getCertType(c, tableHeaders) {
+    if (!c) return 'Certification';
+
+    const knownKeys = [
+      'Item Type', 'ItemType', 'Item_Type', 'Cert Type', 'CertType', 'Cert_Type',
+      'Certification', 'Cert', 'License', 'Course', 'Qualification', 'Type'
+    ];
+
+    for (let k of knownKeys) {
+      if (c[k] !== undefined && c[k] !== '') {
+        const val = String(c[k]).trim();
+        if (val) return val;
+      }
+    }
+
+    // Check case-insensitively across non-metadata keys
+    for (let k of Object.keys(c)) {
+      if (k.startsWith('_')) continue;
+      const kl = k.toLowerCase();
+      if ((kl.includes('item') && kl.includes('type')) || kl.includes('cert') || kl.includes('license') || kl.includes('course') || kl === 'type') {
+        const val = String(c[k]).trim();
+        if (val) return val;
+      }
+    }
+
+    // Try second column from table headers if available (Col B is usually Item Type in Expiring Certs)
+    if (tableHeaders && tableHeaders.length > 1) {
+      const secondCol = tableHeaders[1];
+      if (secondCol && c[secondCol] !== undefined && c[secondCol] !== '') {
+        const val = String(c[secondCol]).trim();
+        if (val) return val;
+      }
+    }
+
+    return 'General Cert';
+  }
+
+  /**
+   * Returns a recognizable icon for a certification / license
+   */
+  getCertIcon(certType) {
+    const ct = String(certType || '').toLowerCase();
+    if (ct.includes('dl') || ct.includes('driver')) return '🪪';
+    if (ct.includes('mec') || ct.includes('med') || ct.includes('physical')) return '🩺';
+    if (ct.includes('cpr') || ct.includes('aed')) return '🫀';
+    if (ct.includes('1st aid') || ct.includes('first aid')) return '🩹';
+    if (ct.includes('crane')) return '🏗️';
+    if (ct.includes('digger') || ct.includes('derrick')) return '🚜';
+    if (ct.includes('bucket')) return '🚚';
+    if (ct.includes('pole') || ct.includes('rescue')) return '🪜';
+    if (ct.includes('osha')) return '🦺';
+    if (ct.includes('harass') || ct.includes('hr')) return '🛡️';
+    if (ct.includes('bnsf') || ct.includes('rail')) return '🚆';
+    if (ct.includes('msha') || ct.includes('mine') || ct.includes('mining')) return '⛏️';
+    if (ct.includes('heli') || ct.includes('eica')) return '🚁';
+    if (ct.includes('flag') || ct.includes('traffic')) return '🚩';
+    if (ct.includes('climb')) return '🧗';
+    return '📜';
+  }
+
+  /**
    * Opens the Employee Profile & Certifications Modal
    */
   openProfileModal(employeeName) {
@@ -222,20 +285,45 @@ class EmployeeProfileEngine {
       certsTable.rows.forEach(c => {
         const cEmp = String(c['Employee'] || c['Name'] || c['Employee Name'] || '').trim();
         if (this.isNameMatch(cEmp, displayName)) {
-          const certType = String(c['Cert Type'] || c['Type'] || c['Certification'] || 'General Cert').trim();
+          const certType = this.getCertType(c, certsTable.headers);
           const expDate = String(c['Expiration Date'] || c['Expiration'] || c['Change Out Date'] || 'N/A').trim();
-          const testDate = String(c['Test Date'] || c['Date'] || 'N/A').trim();
-          const daysLeftStr = String(c['Days Left'] || c['Days'] || '').trim();
-          const daysLeft = parseFloat(daysLeftStr);
-          const status = String(c['Status'] || 'OK').trim();
-          const smsStatus = String(c['SMS Sent'] || c['SMS'] || '').trim();
+          const testDate = String(c['Date Acquired'] || c['Acquired Date'] || c['Test Date'] || c['Issue Date'] || c['Issued Date'] || c['Date'] || 'N/A').trim();
+          
+          let daysLeft = null;
+          const rawDays = String(c['Days Until Expiration'] || c['Days Left'] || c['Days'] || c['Days Remaining'] || '').trim();
+          if (rawDays && rawDays !== 'N/A' && rawDays !== '—') {
+            const parsed = parseFloat(rawDays);
+            if (!isNaN(parsed)) daysLeft = parsed;
+          }
+          if (daysLeft === null && expDate && expDate !== 'N/A') {
+            const d = this.parseDate(expDate);
+            if (d && !isNaN(d.getTime())) {
+              const diffMs = d.getTime() - new Date().setHours(0, 0, 0, 0);
+              daysLeft = Math.round(diffMs / (1000 * 60 * 60 * 24));
+            }
+          }
+
+          let status = String(c['Status'] || '').trim();
+          if (!status || status === 'N/A') {
+            if (daysLeft !== null) {
+              if (daysLeft <= 0) status = 'Expired';
+              else if (daysLeft <= 30) status = 'Critical';
+              else if (daysLeft <= 60) status = 'Warning';
+              else if (daysLeft <= 90) status = 'Upcoming';
+              else status = 'OK';
+            } else {
+              status = 'No Date Set';
+            }
+          }
+
+          const smsStatus = String(c['SMS'] || c['SMS Sent'] || c['SMS Status'] || '').trim();
           const notes = String(c['Notes'] || '').trim();
 
           certifications.push({
             certType: certType,
             expDate: expDate,
             testDate: testDate,
-            daysLeft: isNaN(daysLeft) ? null : daysLeft,
+            daysLeft: daysLeft,
             status: status,
             smsStatus: smsStatus,
             notes: notes
@@ -356,7 +444,7 @@ class EmployeeProfileEngine {
       const parsed = this.parseDate(c.expDate);
       if (parsed && parsed.getTime() < earliestTime) {
         earliestTime = parsed.getTime();
-        earliestDueDate = `📜 ${c.certType}: ${c.expDate}`;
+        earliestDueDate = `${this.getCertIcon(c.certType)} ${c.certType}: ${c.expDate}`;
       }
     });
 
@@ -581,7 +669,7 @@ class EmployeeProfileEngine {
                 <th style="text-align: center;">Expiration Date</th>
                 <th style="text-align: center;">Days Remaining</th>
                 <th style="text-align: center;">Status</th>
-                <th style="text-align: center;">Test / Issued Date</th>
+                <th style="text-align: center;">Date Acquired</th>
                 <th style="text-align: center;">SMS Notification</th>
                 <th style="text-align: left;">Notes</th>
               </tr>
@@ -605,6 +693,8 @@ class EmployeeProfileEngine {
           statusBadge = `<span class="badge" style="background-color: #991b1b; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">❌ Missing</span>`;
         } else if (sLower === 'declined') {
           statusBadge = `<span class="badge" style="background-color: #475569; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">🚫 Declined</span>`;
+        } else if (sLower === 'no date set' || sLower.includes('no date')) {
+          statusBadge = `<span class="badge" style="background-color: #334155; color: #94a3b8; padding: 2px 8px; border-radius: 4px; font-weight: 600;">⚪ No Date Set</span>`;
         } else if (sLower.includes('not req')) {
           statusBadge = `<span class="badge" style="background-color: #334155; color: #94a3b8; padding: 2px 8px; border-radius: 4px; font-weight: 600;">⚪ Not Required</span>`;
         }
@@ -625,7 +715,7 @@ class EmployeeProfileEngine {
         html += `
           <tr>
             <td style="font-weight: 700; text-align: left; color: #f8fafc;">
-              📜 ${this.escapeHtml(c.certType)}
+              ${this.getCertIcon(c.certType)} ${this.escapeHtml(c.certType)}
             </td>
             <td style="text-align: center; font-weight: 700;">
               ${this.escapeHtml(c.expDate)}
