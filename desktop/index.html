@@ -310,10 +310,30 @@
     </div>
   </div>
 
+  <!-- Employee Profile & Certifications Modal -->
+  <div id="employee-profile-modal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 1260px; width: 95%; max-height: 88vh;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 18px;">👤</span>
+          <span id="employee-profile-modal-title">Employee Profile</span>
+        </div>
+        <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; cursor: pointer;" onclick="window.employeeProfileEngine.closeProfileModal()">✕</button>
+      </div>
+      <div class="modal-body" id="employee-profile-modal-body" style="max-height: 75vh; overflow-y: auto; padding: 20px;">
+        <!-- Injected dynamically by employee-profile.js -->
+      </div>
+      <div class="modal-footer" id="employee-profile-modal-footer">
+        <button class="btn btn-primary" onclick="window.employeeProfileEngine.closeProfileModal()">Close Profile</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Scripts -->
   <script src="js/db.js"></script>
   <script src="js/sync.js"></script>
   <script src="js/item-stats.js"></script>
+  <script src="js/employee-profile.js"></script>
   <script src="js/sheets.js"></script>
   <script src="js/history.js"></script>
   <script src="js/trip-planner.js"></script>
@@ -366,6 +386,7 @@
       window.tripPlanner.init();
       window.taskManager.init();
       window.lookupApp.init();
+      if (window.employeeProfileEngine) window.employeeProfileEngine.init();
 
       if (snapshot) {
         window.syncEngine.updateStatusUI('synced', `Snapshot Loaded (${new Date(snapshot.exportedAt).toLocaleDateString()})`);

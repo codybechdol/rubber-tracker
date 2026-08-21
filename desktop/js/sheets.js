@@ -644,7 +644,14 @@ class SheetNavigator {
             }
             const isReadOnly = colLower.includes('change out') || colLower.includes('days');
             isCellEditable = !isReadOnly;
-            customContent = this.escapeHtml(displayVal);
+            
+            const isEmployeeCol = (c === 0 || colLower === 'employee');
+            if (isEmployeeCol && displayVal && !displayVal.includes('STAGE') && !displayVal.includes('Class ') && !displayVal.includes('Previous Employee')) {
+              customContent = `<span style="font-weight: 700; color: #60a5fa; cursor: pointer; text-decoration: underline dotted;" title="Click to view full profile, assignments & certs for ${this.escapeHtml(displayVal)}" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeHtml(displayVal)}');}">👤 ${this.escapeHtml(displayVal)}</span>`;
+              isCellEditable = false;
+            } else {
+              customContent = this.escapeHtml(displayVal);
+            }
           }
         }
 
@@ -1232,7 +1239,12 @@ class SheetNavigator {
               }
             }
           } else if (hLower.includes('employee') || hLower === 'name') {
-            customCellHtml = `<span style="font-weight: 600; color: #f8fafc;">👤 ${this.escapeHtml(val)}</span>`;
+            const empNameStr = String(val).trim();
+            if (empNameStr) {
+              customCellHtml = `<span style="font-weight: 600; color: #60a5fa; cursor: pointer; text-decoration: underline dotted;" title="Click to view full profile, assignments & certs for ${this.escapeHtml(empNameStr)}" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeHtml(empNameStr)}');}">👤 ${this.escapeHtml(val)}</span>`;
+            } else {
+              customCellHtml = `<span style="color: var(--text-muted);">—</span>`;
+            }
           } else if (hLower.includes('job') || hLower === 'job #') {
             customCellHtml = `<span style="font-family: monospace; font-weight: bold; color: #60a5fa;">${this.escapeHtml(val)}</span>`;
           } else if (hLower.includes('sms')) {
@@ -1258,6 +1270,11 @@ class SheetNavigator {
             } else if (sLower === 'cancelled' || sLower === 'canceled') {
               customCellHtml = `<span class="badge" style="background-color: #475569; color: #cbd5e1; padding: 2px 8px; border-radius: 4px; font-weight: 600;">❌ Cancelled</span>`;
             }
+          } else if (hLower.includes('lead') || hLower.includes('foreman')) {
+            const leadName = String(val).trim();
+            if (leadName) {
+              customCellHtml = `<span style="font-weight: 600; color: #60a5fa; cursor: pointer; text-decoration: underline dotted;" title="Click to view profile & certs for ${this.escapeHtml(leadName)}" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeHtml(leadName)}');}">👤 ${this.escapeHtml(val)}</span>`;
+            }
           } else if (hLower.includes('month')) {
             customCellHtml = `<span style="font-weight: 700; color: #a78bfa;">📅 ${this.escapeHtml(val)}</span>`;
           } else if (hLower.includes('crew') || hLower.includes('job')) {
@@ -1278,18 +1295,30 @@ class SheetNavigator {
         } else if (isEquipmentSheet && hLower === 'esl id' && val) {
           // ESL ID is an electronic tracking tag barcode (not linked to item lifecycle)
           customCellHtml = `<span style="font-family: monospace; font-size: 11px; color: #94a3b8; font-weight: 500;">${this.escapeHtml(val)}</span>`;
+        } else if (isEquipmentSheet && (hLower === 'assigned to' || hLower === 'assigned' || hLower === 'holder') && val) {
+          const nonEmpHolders = ['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'failed rubber', 'failed', 'lost', 'destroyed', 'new', 'unassigned', 'n/a', '—', '-'];
+          const holderLower = String(val).toLowerCase().trim();
+          if (!nonEmpHolders.includes(holderLower)) {
+            customCellHtml = `<span style="color: #60a5fa; cursor: pointer; text-decoration: underline dotted; font-weight: 600;" title="Click to view assignments & certs for ${this.escapeHtml(val)}" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeHtml(val)}');}">👤 ${this.escapeHtml(val)}</span>`;
+          }
         }
 
         // Employee Sheet Formatting
+        const isEmployeeNameCol = (this.currentSheetKey === 'employees' && (colIdx === 0 || hLower === 'employee name' || hLower === 'name' || hLower === 'employee'));
         if (this.currentSheetKey === 'employees') {
-          if (hLower === 'job number' || hLower === 'job #') {
+          if (isEmployeeNameCol) {
+            const empNameStr = String(val).trim();
+            if (empNameStr) {
+              customCellHtml = `<span style="font-weight: 700; color: #60a5fa; cursor: pointer; text-decoration: underline dotted; display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px; border-radius: 4px;" title="Click to view full profile, equipment assignments & certs for ${this.escapeHtml(empNameStr)}" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeHtml(empNameStr)}');}">👤 ${this.escapeHtml(val)}</span>`;
+            }
+          } else if (hLower === 'job number' || hLower === 'job #') {
             customCellHtml = `<span style="font-family: monospace; font-weight: bold; color: #60a5fa;">${this.escapeHtml(val)}</span>`;
           } else if (hLower === 'location') {
             customCellHtml = `<span style="font-weight: 600; color: #a78bfa;">📍 ${this.escapeHtml(val)}</span>`;
           }
         }
 
-        const isEditable = !isPrimaryItemCol && !hLower.includes('change out') && !hLower.startsWith('skip ');
+        const isEditable = !isPrimaryItemCol && !isEmployeeNameCol && !hLower.includes('change out') && !hLower.startsWith('skip ');
 
         html += `<td class="${isEditable ? 'editable' : ''}" 
                      contenteditable="${isEditable}" 

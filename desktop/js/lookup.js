@@ -71,14 +71,23 @@ class LookupApp {
     if (matchedEmployees.length > 0) {
       html += `<h4 style="margin: 16px 0 10px 0; color: var(--accent);">Employees (${matchedEmployees.length})</h4>`;
       matchedEmployees.forEach(emp => {
+        const empName = emp['Name'] || emp['Employee Name'] || '';
         html += `
-          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; margin-bottom: 8px;">
-            <div style="font-weight: 700; font-size: 15px;">👤 ${emp['Name']}</div>
-            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
-              Location: <strong>${emp['Location']}</strong> &nbsp;|&nbsp; 
-              Primary Job: <strong>${emp['Job Number']}</strong> &nbsp;|&nbsp; 
-              Secondary Job: <strong>${emp['Secondary Job Number'] || 'None'}</strong> &nbsp;|&nbsp; 
-              Role: <strong>${emp['Job Classification'] || 'N/A'}</strong>
+          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; margin-bottom: 8px; cursor: pointer; transition: all 0.15s ease;"
+               onmouseover="this.style.borderColor='var(--accent)';" 
+               onmouseout="this.style.borderColor='var(--border-color)';"
+               onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeHtml(empName)}');}">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <div style="font-weight: 700; font-size: 15px; color: #60a5fa;">👤 ${this.escapeHtml(empName)}</div>
+              <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 11px; padding: 2px 8px; border-radius: 4px;">
+                View Profile & Certs ➔
+              </span>
+            </div>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 6px;">
+              Location: <strong>${this.escapeHtml(emp['Location'] || 'Unknown')}</strong> &nbsp;|&nbsp; 
+              Primary Job: <strong>${this.escapeHtml(emp['Job Number'] || 'N/A')}</strong> &nbsp;|&nbsp; 
+              Secondary Job: <strong>${this.escapeHtml(emp['Secondary Job Number'] || 'None')}</strong> &nbsp;|&nbsp; 
+              Role: <strong>${this.escapeHtml(emp['Job Classification'] || 'N/A')}</strong>
             </div>
           </div>
         `;
@@ -88,14 +97,23 @@ class LookupApp {
     if (matchedItems.length > 0) {
       html += `<h4 style="margin: 20px 0 10px 0; color: var(--success);">Equipment & Inventory (${matchedItems.length})</h4>`;
       matchedItems.forEach(item => {
+        const histKey = item.type.toLowerCase().replace(/\s+/g, '_') + '_history';
         html += `
-          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; margin-bottom: 8px;">
-            <div style="font-weight: 700; font-size: 15px;">📦 ${item.type} — ${item.itemNum}</div>
-            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
-              Assigned To: <strong>${item.assignedTo}</strong> &nbsp;|&nbsp; 
-              Location: <strong>${item.location}</strong> &nbsp;|&nbsp; 
-              Status: <strong>${item.status}</strong> &nbsp;|&nbsp; 
-              Change Out Date: <strong>${item.changeOutDate}</strong>
+          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; margin-bottom: 8px; cursor: pointer; transition: all 0.15s ease;"
+               onmouseover="this.style.borderColor='var(--success)';" 
+               onmouseout="this.style.borderColor='var(--border-color)';"
+               onclick="if(window.itemStatsEngine){window.itemStatsEngine.openDossierModal('${this.escapeHtml(item.itemNum)}', '${this.escapeHtml(histKey)}');}">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <div style="font-weight: 700; font-size: 15px; color: #34d399;">📦 ${this.escapeHtml(item.type)} — #${this.escapeHtml(item.itemNum)}</div>
+              <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 11px; padding: 2px 8px; border-radius: 4px;">
+                View Lifecycle Dossier ➔
+              </span>
+            </div>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 6px;">
+              Assigned To: <strong>${this.escapeHtml(item.assignedTo)}</strong> &nbsp;|&nbsp; 
+              Location: <strong>${this.escapeHtml(item.location)}</strong> &nbsp;|&nbsp; 
+              Status: <strong>${this.escapeHtml(item.status)}</strong> &nbsp;|&nbsp; 
+              Change Out Date: <strong>${this.escapeHtml(item.changeOutDate)}</strong>
             </div>
           </div>
         `;
@@ -112,6 +130,16 @@ class LookupApp {
     }
 
     resultsContainer.innerHTML = html;
+  }
+
+  escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
   }
 }
 
