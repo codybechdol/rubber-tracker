@@ -146,18 +146,37 @@
 
       <!-- View 2: Trip Planner -->
       <section id="trip-planner-view" class="view-container">
-        <div class="sheet-toolbar">
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <h2 style="font-size: 16px;">🗺️ Trip Planner & Route Scheduler</h2>
+        <div class="sheet-toolbar" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <h2 style="font-size: 16px; margin: 0;">🗺️ Trip Planner & Route Scheduler</h2>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="window.tripPlanner.prevWeek()" title="Previous Week">◀ Prev</button>
+              <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="window.tripPlanner.currentWeek()" title="Current Week">Today</button>
+              <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="window.tripPlanner.nextWeek()" title="Next Week">Next ▶</button>
+              <span id="trip-planner-week-label" style="font-weight: 700; font-size: 12px; color: #93c5fd; margin-left: 4px;"></span>
+            </div>
           </div>
-          <div style="font-size: 12px; color: var(--text-secondary);">
-            Drag location cards onto work days to schedule field visits
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <span class="brand-badge" id="trip-planner-schedule-badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 11px; font-weight: 700;">
+              🗓️ Mon-Thu Schedule
+            </span>
+            <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px; color: #f87171;" onclick="window.tripPlanner.clearWeekTrips()" title="Clear planned trips for this week">🗑️ Clear Week</button>
           </div>
         </div>
         <div style="display: flex; flex: 1; overflow: hidden;">
-          <div style="width: 220px; background-color: var(--bg-secondary); border-right: 1px solid var(--border-color); padding: 16px; overflow-y: auto;">
-            <div style="font-weight: 700; font-size: 13px; margin-bottom: 12px; color: var(--text-muted); text-transform: uppercase;">Available Cities</div>
-            <div id="available-locations-list"></div>
+          <div style="width: 280px; min-width: 280px; background-color: var(--bg-secondary); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; overflow: hidden;">
+            <div style="padding: 12px 14px; border-bottom: 1px solid var(--border-color); background: rgba(0,0,0,0.1);">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-weight: 800; font-size: 12px; color: var(--text-muted); text-transform: uppercase;">Available Cities</span>
+                <span class="badge" id="active-cities-count-badge" style="background: rgba(34, 197, 94, 0.2); color: #4ade80; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 10px;">0 Active</span>
+              </div>
+              <input type="text" id="trip-location-search" placeholder="🔍 Search city or crew #..." style="width: 100%; box-sizing: border-box; padding: 6px 10px; font-size: 11.5px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+              <div style="display: flex; gap: 4px; margin-top: 8px;">
+                <button class="btn btn-secondary active" id="btn-filter-active-cities" style="flex: 1; padding: 3px 6px; font-size: 10.5px; font-weight: 700;" onclick="window.tripPlanner.setCityFilter('active')">🟢 Active Crews</button>
+                <button class="btn btn-secondary" id="btn-filter-all-cities" style="flex: 1; padding: 3px 6px; font-size: 10.5px;" onclick="window.tripPlanner.setCityFilter('all')">🌐 All Cities</button>
+              </div>
+            </div>
+            <div id="available-locations-list" style="flex: 1; padding: 12px; overflow-y: auto;"></div>
           </div>
           <div class="trip-planner-board" id="trip-planner-board"></div>
         </div>

@@ -6,18 +6,65 @@ class TripPlannerApp {
   constructor(db) {
     this.db = db;
     this.currentDate = new Date();
-    this.activeSchedule = 'Mon-Thu';
+    this.activeSchedule = 'Mon-Thu'; // 'Mon-Thu' or 'Tue-Fri'
+    this.cityFilter = 'active'; // 'active' or 'all'
+    this.searchTerm = '';
     this.plannedTrips = {}; // { 'YYYY-MM-DD': { location: 'Bozeman', crew: '013-26' } }
-    this.locations = [
-      'Helena', 'Bozeman', 'Great Falls', 'Billings', 'Butte', 
-      'Missoula', 'Glendive', 'Sidney', 'Kalispell', 'Anaconda',
-      'Big Sky', 'Livingston', 'Lolo', 'Miles City', 'Stanford'
-    ];
+
+    // Master list of standard Montana service towns, hubs, and subs with distance & drive times from Helena HQ
+    this.masterLocations = {
+      'Helena': { mins: 0, time: '0m', desc: 'Base HQ (0 mi)', dir: 'Center' },
+      'Elliston': { mins: 25, time: '25m', desc: '25m (22 mi)', dir: 'West' },
+      'Deer Lodge': { mins: 50, time: '50m', desc: '50m (45 mi)', dir: 'West' },
+      'Butte': { mins: 70, time: '1h 10m', desc: '1h 10m (68 mi)', dir: 'South' },
+      'Three Forks': { mins: 75, time: '1h 15m', desc: '1h 15m (72 mi)', dir: 'East' },
+      'Three Rivers Sub': { mins: 75, time: '1h 15m', desc: '1h 15m (72 mi)', dir: 'East' },
+      'Anaconda': { mins: 75, time: '1h 15m', desc: '1h 15m (75 mi)', dir: 'West' },
+      'Anaconda City Sub': { mins: 75, time: '1h 15m', desc: '1h 15m (75 mi)', dir: 'West' },
+      'Manhattan': { mins: 80, time: '1h 20m', desc: '1h 20m (80 mi)', dir: 'East' },
+      'Great Falls': { mins: 85, time: '1h 25m', desc: '1h 25m (89 mi)', dir: 'North' },
+      'Bozeman': { mins: 95, time: '1h 35m', desc: '1h 35m (98 mi)', dir: 'East' },
+      'Glen': { mins: 105, time: '1h 45m', desc: '1h 45m (110 mi)', dir: 'Southwest' },
+      'Raynesford Sub': { mins: 105, time: '1h 45m', desc: '1h 45m (115 mi)', dir: 'North' },
+      'Ennis': { mins: 105, time: '1h 45m', desc: '1h 45m (105 mi)', dir: 'South' },
+      'Missoula': { mins: 105, time: '1h 45m', desc: '1h 45m (114 mi)', dir: 'West' },
+      'Dillon': { mins: 115, time: '1h 55m', desc: '1h 55m (120 mi)', dir: 'Southwest' },
+      'Lolo': { mins: 115, time: '1h 55m', desc: '1h 55m (120 mi)', dir: 'West' },
+      'Livingston': { mins: 120, time: '2h 00m', desc: '2h 00m (125 mi)', dir: 'East' },
+      'Stanford': { mins: 120, time: '2h 00m', desc: '2h 00m (135 mi)', dir: 'North' },
+      'Big Sky': { mins: 135, time: '2h 15m', desc: '2h 15m (145 mi)', dir: 'East' },
+      'Hamilton': { mins: 135, time: '2h 15m', desc: '2h 15m (145 mi)', dir: 'West' },
+      'Melville': { mins: 135, time: '2h 15m', desc: '2h 15m (140 mi)', dir: 'East' },
+      'Darby': { mins: 165, time: '2h 45m', desc: '2h 45m (175 mi)', dir: 'West' },
+      'Laurel': { mins: 190, time: '3h 10m', desc: '3h 10m (215 mi)', dir: 'East' },
+      'Kalispell': { mins: 195, time: '3h 15m', desc: '3h 15m (190 mi)', dir: 'Northwest' },
+      'Billings': { mins: 200, time: '3h 20m', desc: '3h 20m (230 mi)', dir: 'East' },
+      'Post Falls': { mins: 225, time: '3h 45m', desc: '3h 45m (245 mi)', dir: 'West' },
+      'Northern Lights': { mins: 270, time: '4h 30m', desc: '4h 30m (280 mi)', dir: 'North' },
+      'Miles City': { mins: 290, time: '4h 50m', desc: '4h 50m (340 mi)', dir: 'East' },
+      'Glendive': { mins: 390, time: '6h 30m', desc: '6h 30m (450 mi)', dir: 'East' },
+      'Sidney': { mins: 435, time: '7h 15m', desc: '7h 15m (500 mi)', dir: 'East' },
+      'South Dakota': { mins: 480, time: '8h 00m', desc: '8h 00m (550 mi)', dir: 'Far' },
+      'California': { mins: 840, time: '14h 00m', desc: '14h 00m (900 mi)', dir: 'Far' },
+      'California Sub': { mins: 840, time: '14h 00m', desc: '14h 00m (900 mi)', dir: 'Far' }
+    };
   }
 
   init() {
     this.loadSavedTrips();
+    this.setupSearchListeners();
     this.renderPlanner();
+  }
+
+  setupSearchListeners() {
+    const searchInput = document.getElementById('trip-location-search');
+    if (searchInput && !searchInput.dataset.bound) {
+      searchInput.dataset.bound = 'true';
+      searchInput.addEventListener('input', (e) => {
+        this.searchTerm = (e.target.value || '').toLowerCase().trim();
+        this.renderAvailableLocations();
+      });
+    }
   }
 
   loadSavedTrips() {
@@ -31,41 +78,279 @@ class TripPlannerApp {
     localStorage.setItem('sa_planned_trips', JSON.stringify(this.plannedTrips));
   }
 
+  prevWeek() {
+    this.currentDate.setDate(this.currentDate.getDate() - 7);
+    this.renderPlanner();
+  }
+
+  nextWeek() {
+    this.currentDate.setDate(this.currentDate.getDate() + 7);
+    this.renderPlanner();
+  }
+
+  currentWeek() {
+    this.currentDate = new Date();
+    this.renderPlanner();
+  }
+
+  setCityFilter(filter) {
+    this.cityFilter = filter;
+    const btnActive = document.getElementById('btn-filter-active-cities');
+    const btnAll = document.getElementById('btn-filter-all-cities');
+    if (btnActive && btnAll) {
+      if (filter === 'active') {
+        btnActive.classList.add('active');
+        btnAll.classList.remove('active');
+      } else {
+        btnActive.classList.remove('active');
+        btnAll.classList.add('active');
+      }
+    }
+    this.renderAvailableLocations();
+  }
+
+  clearWeekTrips() {
+    const weekDays = this.getDaysForCurrentWeek();
+    weekDays.forEach(d => {
+      delete this.plannedTrips[d.dateKey];
+    });
+    this.saveTrips();
+    this.renderPlanner();
+  }
+
+  /**
+   * Discovers and builds structured location objects from Job Tracking, Employees, and Master list
+   */
+  getLocationData() {
+    const activeCrewsByLoc = {};
+    const allKnownLocations = new Set(Object.keys(this.masterLocations));
+
+    // 1. Scan Job Tracking for all active crews and locations
+    const jobTable = this.db.getTable('job_tracking');
+    if (jobTable && jobTable.rows) {
+      jobTable.rows.forEach(r => {
+        const status = String(r['Status'] || r['Job Status'] || '').trim();
+        const rawLoc = String(r['Location'] || '').trim();
+        const loc = this.cleanPhysicalLocation(rawLoc);
+        const crewId = String(r['Job Number'] || r['Crew'] || r['Job #'] || '').trim();
+        const foreman = String(r['Foreman'] || r['Crew Lead'] || r['Lead'] || '').trim();
+        const crewSize = parseInt(r['Crew Size'] || r['Size'] || 0, 10) || 0;
+        const jobName = String(r['Job Name'] || '').trim();
+
+        if (loc && !this.isStatusLocation(loc)) {
+          allKnownLocations.add(loc);
+          if (status === 'Active' || status === 'Pending Start' || (!status.toLowerCase().includes('completed') && !status.toLowerCase().includes('on hold') && status !== '')) {
+            if (!activeCrewsByLoc[loc]) {
+              activeCrewsByLoc[loc] = [];
+            }
+            activeCrewsByLoc[loc].push({
+              crewId: crewId || 'N/A',
+              foreman: foreman || 'Lead',
+              crewSize: crewSize,
+              jobName: jobName,
+              status: status
+            });
+          }
+        }
+      });
+    }
+
+    // 2. Scan Employees sheet for any additional active locations
+    const empTable = this.db.getTable('employees');
+    if (empTable && empTable.rows) {
+      empTable.rows.forEach(r => {
+        const rawLoc = String(r['Location'] || '').trim();
+        const loc = this.cleanPhysicalLocation(rawLoc);
+        if (loc && !this.isStatusLocation(loc)) {
+          allKnownLocations.add(loc);
+        }
+      });
+    }
+
+    // 3. Scan Locations master table from snapshot if present
+    const locTable = this.db.getTable('locations');
+    if (locTable && locTable.rows) {
+      locTable.rows.forEach(r => {
+        const rawLoc = String(r['Location'] || '').trim();
+        const loc = this.cleanPhysicalLocation(rawLoc);
+        if (loc && !this.isStatusLocation(loc)) {
+          allKnownLocations.add(loc);
+        }
+      });
+    }
+
+    // 4. Build unified location cards list
+    const locationList = [];
+    allKnownLocations.forEach(locName => {
+      const activeCrews = activeCrewsByLoc[locName] || [];
+      const driveInfo = this.getDriveTime(locName);
+      locationList.push({
+        name: locName,
+        activeCrews: activeCrews,
+        isActive: activeCrews.length > 0,
+        driveTime: driveInfo.time,
+        driveDesc: driveInfo.desc,
+        mins: driveInfo.mins,
+        dir: driveInfo.dir
+      });
+    });
+
+    // Sort: Active locations first (ordered by crew count desc, then distance asc), then inactive locations
+    locationList.sort((a, b) => {
+      if (a.isActive && !b.isActive) return -1;
+      if (!a.isActive && b.isActive) return 1;
+      if (a.isActive && b.isActive) {
+        if (b.activeCrews.length !== a.activeCrews.length) {
+          return b.activeCrews.length - a.activeCrews.length;
+        }
+        return a.mins - b.mins;
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+    return {
+      locations: locationList,
+      activeCount: Object.keys(activeCrewsByLoc).length
+    };
+  }
+
+  cleanPhysicalLocation(loc) {
+    if (!loc) return '';
+    let clean = String(loc).trim();
+    // Strip parenthesized status like "Helena (Vacation)" -> "Helena"
+    const parenMatch = clean.match(/^([^(]+)\s*\([^)]+\)$/);
+    if (parenMatch) {
+      clean = parenMatch[1].trim();
+    }
+    // Proper capital casing
+    return clean.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  }
+
+  isStatusLocation(loc) {
+    const lower = String(loc || '').toLowerCase().trim();
+    const statusValues = ['vacation', 'light duty', 'weeds', 'leave', 'previous employee', 'medical', "worker's comp", 'unknown', 'in testing'];
+    return statusValues.some(s => lower === s || lower.includes(`(${s})`));
+  }
+
+  getDriveTime(loc) {
+    const snap = this.db.getSnapshot();
+    const locLower = String(loc).toLowerCase().trim();
+
+    // Check if snapshot contains driveTimeMap from Google Sheets
+    if (snap && snap.configs && snap.configs.driveTimeMap) {
+      const dMap = snap.configs.driveTimeMap;
+      if (dMap[locLower] !== undefined && typeof dMap[locLower] === 'number') {
+        const mins = dMap[locLower];
+        const h = Math.floor(mins / 60);
+        const m = mins % 60;
+        const timeStr = h > 0 ? `${h}h ${m.toString().padStart(2, '0')}m` : `${m}m`;
+        return {
+          mins: mins,
+          time: timeStr,
+          desc: `${timeStr} from Helena`,
+          dir: 'MT'
+        };
+      }
+    }
+
+    // Match against built-in master locations dictionary
+    for (const [mName, mInfo] of Object.entries(this.masterLocations)) {
+      if (mName.toLowerCase() === locLower) {
+        return mInfo;
+      }
+    }
+
+    return {
+      mins: 90,
+      time: '1h 30m',
+      desc: '1h 30m from Helena Base',
+      dir: 'Montana'
+    };
+  }
+
   renderPlanner() {
     const board = document.getElementById('trip-planner-board');
+    const weekLabel = document.getElementById('trip-planner-week-label');
+    const scheduleBadge = document.getElementById('trip-planner-schedule-badge');
     if (!board) return;
     board.innerHTML = '';
 
-    const weekDays = this.getDaysForCurrentWeek();
+    const snap = this.db.getSnapshot();
+    const workSchedule = (snap && snap.configs && snap.configs.workSchedule) || this.activeSchedule;
+    if (scheduleBadge) {
+      scheduleBadge.textContent = `🗓️ ${workSchedule} Schedule`;
+    }
+
+    const weekDays = this.getDaysForCurrentWeek(workSchedule);
+
+    if (weekLabel && weekDays.length > 0) {
+      const firstDay = weekDays[0];
+      const lastDay = weekDays[weekDays.length - 1];
+      weekLabel.textContent = `Week of ${firstDay.formattedDate} - ${lastDay.formattedDate}`;
+    }
+
+    const { locations } = this.getLocationData();
+    const locMap = {};
+    locations.forEach(l => { locMap[l.name] = l; });
 
     weekDays.forEach(day => {
       const dateKey = day.dateKey;
       const trip = this.plannedTrips[dateKey] || null;
       const isHoliday = this.isDayHoliday(dateKey);
+      const locInfo = trip ? locMap[trip.location] : null;
 
       const col = document.createElement('div');
       col.className = 'day-column';
 
       col.innerHTML = `
-        <div class="day-header">
-          <span>${day.dayName}, ${day.formattedDate}</span>
-          <span style="font-size: 11px; font-weight: normal; color: var(--text-muted);">
-            ${isHoliday ? '🏖️ Holiday' : (day.isWorkDay ? 'Work Day' : 'Off')}
-          </span>
+        <div class="day-header" style="background: ${isHoliday ? 'linear-gradient(90deg, #854d0e 0%, #1e293b 100%)' : '#1e293b'};">
+          <div>
+            <span style="font-weight: 800; color: #f8fafc;">${day.dayName}, ${day.formattedDate}</span>
+          </div>
+          <div>
+            <span class="badge" style="background: ${isHoliday ? '#ca8a04' : (day.isWorkDay ? '#0284c7' : '#475569')}; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px;">
+              ${isHoliday ? '🏖️ Holiday' : (day.isWorkDay ? 'Work Day' : 'Scheduled Off')}
+            </span>
+          </div>
         </div>
-        <div class="card-drop-zone" data-date="${dateKey}">
+        <div class="card-drop-zone" data-date="${dateKey}" style="background: ${isHoliday ? 'rgba(202, 138, 4, 0.04)' : 'transparent'};">
           ${trip ? `
-            <div class="location-card" draggable="true" data-date="${dateKey}" data-location="${trip.location}">
-              <div class="location-card-title">📍 ${trip.location}</div>
-              <div class="location-card-meta">
-                Drive Time: ${this.getDriveTime(trip.location)}<br>
-                Scheduled Visits: ${trip.crew || 'All Active Crews'}
+            <div class="location-card" draggable="true" data-date="${dateKey}" data-location="${this.escapeHtml(trip.location)}" style="border-left: 4px solid #38bdf8; background: var(--bg-primary);">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+                <div class="location-card-title" style="color: #60a5fa; font-size: 15px; font-weight: 800; display: flex; align-items: center; gap: 4px;">
+                  📍 ${this.escapeHtml(trip.location)}
+                </div>
+                <span class="badge" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">
+                  🚗 ${this.escapeHtml(this.getDriveTime(trip.location).time)}
+                </span>
               </div>
-              <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 10px; margin-top: 8px;" onclick="window.tripPlanner.removeTrip('${dateKey}')">Remove</button>
+              
+              <div class="location-card-meta" style="line-height: 1.4; margin-bottom: 8px;">
+                <div style="color: #94a3b8; font-size: 11px;">Distance: <strong>${this.escapeHtml(this.getDriveTime(trip.location).desc)}</strong></div>
+                ${locInfo && locInfo.activeCrews.length > 0 ? `
+                  <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.08);">
+                    <div style="font-size: 11px; font-weight: 700; color: #4ade80; margin-bottom: 4px;">
+                      🟢 Active Crews (${locInfo.activeCrews.length}):
+                    </div>
+                    ${locInfo.activeCrews.map(c => `
+                      <div style="font-size: 11px; color: #cbd5e1; display: flex; justify-content: space-between;">
+                        <span><strong>Crew ${this.escapeHtml(c.crewId)}</strong> (${this.escapeHtml(c.foreman)})</span>
+                        <span style="color: #94a3b8;">${c.crewSize ? `${c.crewSize} wkr` : ''}</span>
+                      </div>
+                    `).join('')}
+                  </div>
+                ` : `
+                  <div style="margin-top: 4px; font-size: 11px; color: #94a3b8;">Base / Non-crew visit</div>
+                `}
+              </div>
+
+              <div style="display: flex; justify-content: flex-end; margin-top: 6px;">
+                <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 10px; color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);" onclick="window.tripPlanner.removeTrip('${dateKey}')">❌ Remove</button>
+              </div>
             </div>
           ` : `
-            <div style="color: var(--text-muted); font-size: 12px; text-align: center; margin-top: 40px;">
-              Drag a city card here to schedule a trip
+            <div style="color: var(--text-muted); font-size: 12px; text-align: center; margin-top: 40px; border: 1px dashed var(--border-color); border-radius: 6px; padding: 16px;">
+              ${isHoliday ? '🏖️ Holiday Day' : 'Drag a city card here to schedule'}
             </div>
           `}
         </div>
@@ -75,7 +360,7 @@ class TripPlannerApp {
       const dropZone = col.querySelector('.card-drop-zone');
       dropZone.addEventListener('dragover', (e) => {
         e.preventDefault();
-        dropZone.style.backgroundColor = 'rgba(59, 130, 246, 0.1)';
+        dropZone.style.backgroundColor = 'rgba(59, 130, 246, 0.15)';
       });
       dropZone.addEventListener('dragleave', () => {
         dropZone.style.backgroundColor = '';
@@ -97,21 +382,83 @@ class TripPlannerApp {
 
   renderAvailableLocations() {
     const list = document.getElementById('available-locations-list');
+    const countBadge = document.getElementById('active-cities-count-badge');
     if (!list) return;
     list.innerHTML = '';
 
-    this.locations.forEach(loc => {
+    const { locations, activeCount } = this.getLocationData();
+
+    if (countBadge) {
+      countBadge.textContent = `${activeCount} Active`;
+    }
+
+    let filtered = locations;
+
+    // Apply category filter
+    if (this.cityFilter === 'active') {
+      filtered = filtered.filter(l => l.isActive);
+    }
+
+    // Apply search keyword filter
+    if (this.searchTerm) {
+      const q = this.searchTerm;
+      filtered = filtered.filter(l => {
+        const nameMatch = l.name.toLowerCase().includes(q);
+        const crewMatch = l.activeCrews.some(c => 
+          c.crewId.toLowerCase().includes(q) || 
+          c.foreman.toLowerCase().includes(q) || 
+          c.jobName.toLowerCase().includes(q)
+        );
+        return nameMatch || crewMatch;
+      });
+    }
+
+    if (filtered.length === 0) {
+      list.innerHTML = `
+        <div style="padding: 20px 10px; text-align: center; color: var(--text-muted); font-size: 12px;">
+          No matching locations found.
+        </div>
+      `;
+      return;
+    }
+
+    filtered.forEach(loc => {
       const card = document.createElement('div');
       card.className = 'location-card';
       card.draggable = true;
       card.style.marginBottom = '8px';
+      card.style.borderLeft = loc.isActive ? '4px solid #10b981' : '4px solid #64748b';
+      card.style.background = 'var(--bg-primary)';
+
+      const totalWorkers = loc.activeCrews.reduce((sum, c) => sum + (c.crewSize || 0), 0);
+
       card.innerHTML = `
-        <div class="location-card-title">📍 ${loc}</div>
-        <div class="location-card-meta">From Helena: ${this.getDriveTime(loc)}</div>
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 2px;">
+          <div class="location-card-title" style="color: #f8fafc; font-size: 13.5px; font-weight: 700;">📍 ${this.escapeHtml(loc.name)}</div>
+          <span style="font-size: 10px; color: #93c5fd; font-weight: 700;">${this.escapeHtml(loc.driveTime)}</span>
+        </div>
+        
+        <div class="location-card-meta" style="font-size: 11px; margin-top: 4px;">
+          <div style="color: var(--text-muted); font-size: 10.5px;">${this.escapeHtml(loc.driveDesc)}</div>
+          
+          ${loc.isActive ? `
+            <div style="margin-top: 6px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 4px; padding: 4px 6px;">
+              <div style="color: #4ade80; font-weight: 700; font-size: 10.5px; display: flex; justify-content: space-between;">
+                <span>🟢 ${loc.activeCrews.length} Active Crew${loc.activeCrews.length > 1 ? 's' : ''}</span>
+                ${totalWorkers > 0 ? `<span>${totalWorkers} Linemen</span>` : ''}
+              </div>
+              <div style="color: #cbd5e1; font-size: 10px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${loc.activeCrews.map(c => `Crew ${c.crewId} (${c.foreman})`).join(', ')}">
+                ${loc.activeCrews.map(c => `<strong>${this.escapeHtml(c.crewId)}</strong> (${this.escapeHtml(c.foreman)})`).join(', ')}
+              </div>
+            </div>
+          ` : `
+            <div style="margin-top: 4px; color: #64748b; font-size: 10.5px;">⚪ Standby Location</div>
+          `}
+        </div>
       `;
 
       card.addEventListener('dragstart', (e) => {
-        e.dataTransfer.setData('text/plain', loc);
+        e.dataTransfer.setData('text/plain', loc.name);
       });
 
       list.appendChild(card);
@@ -122,7 +469,7 @@ class TripPlannerApp {
     this.plannedTrips[dateKey] = { location, crew: '' };
     this.saveTrips();
 
-    // Record mutation
+    // Record mutation for sync
     this.db.addMutation({
       action: 'SET_TRIP_SCHEDULE',
       date: dateKey,
@@ -138,26 +485,41 @@ class TripPlannerApp {
     this.renderPlanner();
   }
 
-  getDaysForCurrentWeek() {
+  getDaysForCurrentWeek(schedule = 'Mon-Thu') {
     const days = [];
     const curr = new Date(this.currentDate);
-    const first = curr.getDate() - curr.getDay() + 1; // Monday
+    const dayOfWeek = curr.getDay(); // 0 is Sun, 1 is Mon
+    const distanceToMon = (dayOfWeek === 0 ? -6 : 1) - dayOfWeek;
+    const monday = new Date(curr.setDate(curr.getDate() + distanceToMon));
 
-    for (let i = 0; i < 5; i++) { // Mon - Fri
-      const d = new Date(curr.setDate(first + i));
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+    for (let i = 0; i < 5; i++) { // Mon, Tue, Wed, Thu, Fri
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+
       const yyyy = d.getFullYear();
       const mm = String(d.getMonth() + 1).padStart(2, '0');
       const dd = String(d.getDate()).padStart(2, '0');
       const dateKey = `${yyyy}-${mm}-${dd}`;
-      const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const dayIndex = d.getDay(); // 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri
+
+      // Work day logic based on schedule config
+      let isWorkDay = false;
+      if (schedule === 'Tue-Fri') {
+        isWorkDay = (dayIndex >= 2 && dayIndex <= 5); // Tue-Fri
+      } else {
+        isWorkDay = (dayIndex >= 1 && dayIndex <= 4); // Mon-Thu
+      }
 
       days.push({
         dateKey,
-        dayName: dayNames[d.getDay()],
+        dayName: dayNames[dayIndex],
         formattedDate: `${d.getMonth() + 1}/${d.getDate()}`,
-        isWorkDay: i < 4 // Mon-Thu
+        isWorkDay: isWorkDay
       });
     }
+
     return days;
   }
 
@@ -169,21 +531,14 @@ class TripPlannerApp {
     return false;
   }
 
-  getDriveTime(loc) {
-    const times = {
-      'Bozeman': '1h 35m (98 mi)',
-      'Great Falls': '1h 25m (89 mi)',
-      'Billings': '3h 20m (230 mi)',
-      'Butte': '1h 10m (68 mi)',
-      'Missoula': '1h 45m (114 mi)',
-      'Kalispell': '3h 15m (190 mi)',
-      'Glendive': '6h 30m (450 mi)',
-      'Sidney': '7h 15m (500 mi)',
-      'Anaconda': '1h 15m (75 mi)',
-      'Big Sky': '2h 15m (145 mi)',
-      'Livingston': '2h 00m (125 mi)'
-    };
-    return times[loc] || '1h 00m (Helena Base)';
+  escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
   }
 }
 

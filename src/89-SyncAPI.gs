@@ -70,7 +70,9 @@ function exportFullDatabaseSnapshot() {
     { key: 'aed_history', name: typeof SHEET_AED_HISTORY !== 'undefined' ? SHEET_AED_HISTORY : 'AED History' },
     { key: 'grounds_history', name: typeof SHEET_GROUNDS_HISTORY !== 'undefined' ? SHEET_GROUNDS_HISTORY : 'Grounds History' },
     { key: 'hot_sticks_history', name: typeof SHEET_HOT_STICKS_HISTORY !== 'undefined' ? SHEET_HOT_STICKS_HISTORY : 'Hot Sticks History' },
-    { key: 'employee_history', name: typeof SHEET_EMPLOYEE_HISTORY !== 'undefined' ? SHEET_EMPLOYEE_HISTORY : 'Employee History' }
+    { key: 'employee_history', name: typeof SHEET_EMPLOYEE_HISTORY !== 'undefined' ? SHEET_EMPLOYEE_HISTORY : 'Employee History' },
+    { key: 'locations', name: 'Locations' },
+    { key: 'drive_time_routes', name: 'Drive Time Routes' }
   ];
 
   var tables = {};
