@@ -75,6 +75,15 @@ class TripPlannerApp {
     this.plannedTrips = this.db.getPlannedTrips() || {};
   }
 
+  getTripsForDate(dateKey) {
+    if (!this.plannedTrips) return [];
+    const entry = this.plannedTrips[dateKey];
+    if (!entry) return [];
+    if (Array.isArray(entry)) return entry;
+    if (typeof entry === 'object' && entry.location) return [entry];
+    return [];
+  }
+
   saveTrips() {
     this.db.savePlannedTrips(this.plannedTrips);
   }
@@ -462,7 +471,7 @@ class TripPlannerApp {
       const lastDay = weekDays[weekDays.length - 1];
       const weekDateKey = firstDay.dateKey;
 
-      const tripsInWeek = weekDays.filter(d => this.plannedTrips[d.dateKey]).length;
+      const tripsInWeek = weekDays.reduce((sum, d) => sum + this.getTripsForDate(d.dateKey).length, 0);
 
       const section = document.createElement('div');
       section.className = 'trip-planner-week-section';
@@ -487,7 +496,7 @@ class TripPlannerApp {
 
           <div style="display: flex; align-items: center; gap: 10px;">
             <span style="font-size: 11.5px; color: ${tripsInWeek > 0 ? '#4ade80' : 'var(--text-muted)'}; font-weight: 600;">
-              ${tripsInWeek > 0 ? `🚗 ${tripsInWeek} Trip${tripsInWeek > 1 ? 's' : ''} Scheduled` : '⚪ No trips scheduled'}
+              ${tripsInWeek > 0 ? `🚗 ${tripsInWeek} City Visit${tripsInWeek > 1 ? 's' : ''} Scheduled` : '⚪ No trips scheduled'}
             </span>
             ${tripsInWeek > 0 ? `
               <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 10.5px; color: #f87171;" onclick="window.tripPlanner.clearWeekTrips('${weekDateKey}')" title="Clear scheduled trips for this week">
@@ -505,38 +514,31 @@ class TripPlannerApp {
 
       weekDays.forEach(day => {
         const dateKey = day.dateKey;
-        const trip = this.plannedTrips[dateKey] || null;
+        const trips = this.getTripsForDate(dateKey);
         const isHoliday = this.isDayHoliday(dateKey);
-        const locInfo = trip ? locMap[trip.location] : null;
 
         const col = document.createElement('div');
         col.className = 'day-column';
 
-        col.innerHTML = `
-          <div class="day-header" style="background: ${isHoliday ? 'linear-gradient(90deg, #854d0e 0%, #1e293b 100%)' : '#1e293b'};">
-            <div>
-              <span style="font-weight: 800; color: #f8fafc;">${day.dayName}, ${day.formattedDate}</span>
-            </div>
-            <div>
-              <span class="badge" style="background: ${isHoliday ? '#ca8a04' : (day.isWorkDay ? '#0284c7' : '#475569')}; color: #fff; font-size: 9.5px; padding: 2px 5px; border-radius: 4px;">
-                ${isHoliday ? '🏖️ Holiday' : (day.isWorkDay ? 'Work' : 'Off')}
-              </span>
-            </div>
-          </div>
-          <div class="card-drop-zone" data-date="${dateKey}" style="background: ${isHoliday ? 'rgba(202, 138, 4, 0.04)' : 'transparent'};">
-            ${trip ? `
-              <div class="location-card" draggable="true" data-date="${dateKey}" data-location="${this.escapeHtml(trip.location)}" style="border-left: 4px solid #38bdf8; background: var(--bg-primary);">
+        let cardsHtml = '';
+        if (trips.length > 0) {
+          cardsHtml = trips.map(trip => {
+            const locInfo = locMap[trip.location] || null;
+            const drive = this.getDriveTime(trip.location);
+
+            return `
+              <div class="location-card" draggable="true" data-date="${dateKey}" data-location="${this.escapeHtml(trip.location)}" style="border-left: 4px solid #38bdf8; background: var(--bg-primary); margin-bottom: 8px;">
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
-                  <div class="location-card-title" style="color: #60a5fa; font-size: 14.5px; font-weight: 800; display: flex; align-items: center; gap: 4px;">
+                  <div class="location-card-title" style="color: #60a5fa; font-size: 14px; font-weight: 800; display: flex; align-items: center; gap: 4px;">
                     📍 ${this.escapeHtml(trip.location)}
                   </div>
                   <span class="badge" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">
-                    🚗 ${this.escapeHtml(this.getDriveTime(trip.location).time)}
+                    🚗 ${this.escapeHtml(drive.time)}
                   </span>
                 </div>
                 
                 <div class="location-card-meta" style="line-height: 1.4; margin-bottom: 8px;">
-                  <div style="color: #94a3b8; font-size: 11px;">Distance: <strong>${this.escapeHtml(this.getDriveTime(trip.location).desc)}</strong></div>
+                  <div style="color: #94a3b8; font-size: 11px;">Distance: <strong>${this.escapeHtml(drive.desc)}</strong></div>
                   ${locInfo && locInfo.activeCrews.length > 0 ? `
                     <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.08);">
                       <div style="font-size: 11px; font-weight: 700; color: #4ade80; margin-bottom: 6px;">
@@ -584,14 +586,40 @@ class TripPlannerApp {
                 </div>
 
                 <div style="display: flex; justify-content: flex-end; margin-top: 6px;">
-                  <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 10px; color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);" onclick="window.tripPlanner.removeTrip('${dateKey}')">❌ Remove</button>
+                  <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 10px; color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);" onclick="window.tripPlanner.removeTrip('${dateKey}', '${this.escapeHtml(trip.location)}')">❌ Remove</button>
                 </div>
               </div>
-            ` : `
-              <div style="color: var(--text-muted); font-size: 11.5px; text-align: center; margin-top: 30px; border: 1px dashed var(--border-color); border-radius: 6px; padding: 14px;">
-                ${isHoliday ? '🏖️ Holiday Day' : 'Drag city here'}
+            `;
+          }).join('');
+
+          if (!isHoliday) {
+            cardsHtml += `
+              <div style="color: var(--text-muted); font-size: 11px; text-align: center; border: 1px dashed rgba(255,255,255,0.1); border-radius: 6px; padding: 8px; margin-top: 4px; opacity: 0.85;">
+                + Drop another city here
               </div>
-            `}
+            `;
+          }
+        } else {
+          cardsHtml = `
+            <div style="color: var(--text-muted); font-size: 11.5px; text-align: center; margin-top: 30px; border: 1px dashed var(--border-color); border-radius: 6px; padding: 14px;">
+              ${isHoliday ? '🏖️ Holiday Day' : 'Drag city here'}
+            </div>
+          `;
+        }
+
+        col.innerHTML = `
+          <div class="day-header" style="background: ${isHoliday ? 'linear-gradient(90deg, #854d0e 0%, #1e293b 100%)' : '#1e293b'};">
+            <div>
+              <span style="font-weight: 800; color: #f8fafc;">${day.dayName}, ${day.formattedDate}</span>
+            </div>
+            <div>
+              <span class="badge" style="background: ${isHoliday ? '#ca8a04' : (day.isWorkDay ? '#0284c7' : '#475569')}; color: #fff; font-size: 9.5px; padding: 2px 5px; border-radius: 4px;">
+                ${isHoliday ? '🏖️ Holiday' : (day.isWorkDay ? 'Work' : 'Off')}
+              </span>
+            </div>
+          </div>
+          <div class="card-drop-zone" data-date="${dateKey}" style="background: ${isHoliday ? 'rgba(202, 138, 4, 0.04)' : 'transparent'};">
+            ${cardsHtml}
           </div>
         `;
 
@@ -928,8 +956,14 @@ class TripPlannerApp {
     }
   }
 
-  setTrip(dateKey, location) {
-    this.plannedTrips[dateKey] = { location, crew: '' };
+  addTrip(dateKey, location) {
+    if (!location) return;
+    const currentList = [...this.getTripsForDate(dateKey)];
+    // Prevent duplicate of same city on the exact same day
+    if (!currentList.some(t => t.location.toLowerCase() === location.toLowerCase())) {
+      currentList.push({ location, crew: '' });
+    }
+    this.plannedTrips[dateKey] = currentList;
     this.saveTrips();
 
     // Record mutation for sync
@@ -943,14 +977,28 @@ class TripPlannerApp {
     this.renderPlanner();
   }
 
-  removeTrip(dateKey) {
-    delete this.plannedTrips[dateKey];
+  setTrip(dateKey, location) {
+    this.addTrip(dateKey, location);
+  }
+
+  removeTrip(dateKey, locationToRemove = null) {
+    if (!locationToRemove) {
+      delete this.plannedTrips[dateKey];
+    } else {
+      const currentList = this.getTripsForDate(dateKey);
+      const updated = currentList.filter(t => t.location.toLowerCase() !== locationToRemove.toLowerCase());
+      if (updated.length === 0) {
+        delete this.plannedTrips[dateKey];
+      } else {
+        this.plannedTrips[dateKey] = updated;
+      }
+    }
     this.saveTrips();
 
     this.db.addMutation({
       action: 'SET_TRIP_SCHEDULE',
       date: dateKey,
-      location: '',
+      location: locationToRemove || '',
       trips: this.plannedTrips
     });
 
