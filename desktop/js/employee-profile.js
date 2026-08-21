@@ -267,9 +267,9 @@ class EmployeeProfileEngine {
 
     // 1. Try specific known column headers for item / serial identifier
     const knownKeys = [
-      'Item #', 'Item#', 'Item', 'Items',
       'HVT #', 'HVT#', 'HVT', 'HV Tester #', 'HV Tester',
       'PS #', 'PS#', 'Phasing Set #', 'Phasing Set',
+      'Item #', 'Item#', 'Item', 'Items',
       'Glove #', 'Glove#', 'Glove', 'Gloves #', 'Gloves',
       'Sleeve #', 'Sleeve#', 'Sleeve', 'Sleeves #', 'Sleeves',
       'Blanket #', 'Blanket#', 'Blanket', 'Blankets #', 'Blankets',
@@ -283,7 +283,9 @@ class EmployeeProfileEngine {
     for (let k of knownKeys) {
       if (item[k] !== undefined && item[k] !== null && String(item[k]).trim() !== '') {
         const val = String(item[k]).trim();
-        return val;
+        if (!this.isDateString(val)) {
+          return val;
+        }
       }
     }
 
@@ -296,29 +298,24 @@ class EmployeeProfileEngine {
         }
         if (hl.includes('item') || hl.includes('#') || hl.includes('serial') || hl.includes('hvt') || hl.includes('ps') || hl.includes('tag')) {
           if (item[h] !== undefined && item[h] !== null && String(item[h]).trim() !== '') {
-            return String(item[h]).trim();
+            const val = String(item[h]).trim();
+            if (!this.isDateString(val)) {
+              return val;
+            }
           }
         }
       }
     }
 
-    // 3. Fallback: check first column if it does not look like a date or status
-    if (tableHeaders && tableHeaders.length > 0) {
-      const firstCol = tableHeaders[0];
-      const fl = String(firstCol).toLowerCase();
-      if (!fl.includes('date') && !fl.includes('assign') && !fl.includes('time') && !fl.includes('status') && !fl.includes('location')) {
-        const val = String(item[firstCol] || '').trim();
-        if (val) return val;
-      }
-    }
-
-    // 4. Return first non-metadata value that does not look like a date
+    // 3. Fallback: check other non-metadata keys
     for (let k of Object.keys(item)) {
       if (k.startsWith('_')) continue;
       const kl = k.toLowerCase();
-      if (kl.includes('date') || kl.includes('assign') || kl.includes('time') || kl.includes('status') || kl.includes('location')) continue;
+      if (kl.includes('date') || kl.includes('assign') || kl.includes('time') || kl.includes('status') || kl.includes('location') || kl.includes('note') || kl.includes('spec') || kl.includes('name') || kl.includes('emp')) continue;
       const val = String(item[k]).trim();
-      if (val) return val;
+      if (val && !this.isDateString(val)) {
+        return val;
+      }
     }
 
     return 'N/A';
@@ -793,10 +790,18 @@ class EmployeeProfileEngine {
     }
   }
 
+  isDateString(val) {
+    if (!val || val === 'N/A') return false;
+    if (val instanceof Date) return true;
+    const s = String(val).trim();
+    if (/^\d{1,4}[-/]\d{1,2}[-/]\d{1,4}/.test(s)) return true;
+    return false;
+  }
+
   /**
    * Helper to render compact 4-column history tables (Item#, Specifications, Issue Date, Return Date)
    */
-  renderCompactHistoryTable(historyList, emptyMessage) {
+  renderCompactHistoryTable(historyList, emptyMessage, showEquipmentCol = false) {
     if (!historyList || historyList.length === 0) {
       return `
         <div style="padding: 24px; text-align: center; color: var(--text-muted); font-size: 12px; background: rgba(0,0,0,0.15); border-radius: 6px; border: 1px dashed var(--border-color);">
@@ -810,6 +815,7 @@ class EmployeeProfileEngine {
         <table class="data-table" style="width: 100%; font-size: 12px;">
           <thead>
             <tr>
+              ${showEquipmentCol ? `<th style="text-align: left; width: 140px;">Equipment</th>` : ''}
               <th style="text-align: center; width: 85px;">Item #</th>
               <th style="text-align: left;">Specifications</th>
               <th style="text-align: center; width: 105px;">Issue Date</th>
@@ -819,6 +825,11 @@ class EmployeeProfileEngine {
           <tbody>
             ${historyList.map(h => `
               <tr>
+                ${showEquipmentCol ? `
+                  <td style="font-weight: 700; text-align: left;">
+                    <span style="margin-right: 4px;">${h.eqIcon}</span> ${this.escapeHtml(h.eqType)}
+                  </td>
+                ` : ''}
                 <td style="text-align: center; font-family: monospace; font-weight: 800; color: #60a5fa;">
                   <button class="btn-link" style="background: none; border: none; font-family: inherit; font-size: inherit; font-weight: inherit; color: #60a5fa; cursor: pointer; text-decoration: underline; padding: 0;" title="Click to view lifecycle dossier" onclick="if(window.itemStatsEngine){window.itemStatsEngine.openDossierModal('${this.escapeHtml(h.itemNum)}', '${this.escapeHtml(h.histKey)}');}">
                     ${this.escapeHtml(h.itemNum)}
@@ -917,6 +928,7 @@ class EmployeeProfileEngine {
       }
 
       const activeCat = categories.find(c => c.key === this.currentEquipmentFilter) || categories[0];
+      const showActiveEqCol = this.currentEquipmentFilter === 'all';
 
       let html = `
         <!-- Equipment Category Sub-Tabs -->
@@ -950,7 +962,7 @@ class EmployeeProfileEngine {
               <table class="data-table" style="width: 100%; font-size: 12.5px;">
                 <thead>
                   <tr>
-                    <th style="text-align: left;">Equipment Type</th>
+                    ${showActiveEqCol ? `<th style="text-align: left;">Equipment Type</th>` : ''}
                     <th style="text-align: center;">Item # / Tag</th>
                     <th style="text-align: left;">Specifications</th>
                     <th style="text-align: center;">Test / Cal Date</th>
@@ -967,9 +979,11 @@ class EmployeeProfileEngine {
         filteredEquipment.forEach(item => {
           html += `
             <tr>
-              <td style="font-weight: 700; text-align: left;">
-                <span style="margin-right: 6px;">${item.eqIcon}</span> ${this.escapeHtml(item.eqType)}
-              </td>
+              ${showActiveEqCol ? `
+                <td style="font-weight: 700; text-align: left;">
+                  <span style="margin-right: 6px;">${item.eqIcon}</span> ${this.escapeHtml(item.eqType)}
+                </td>
+              ` : ''}
               <td style="text-align: center; font-family: monospace; font-weight: 800; color: #60a5fa;">
                 ${this.escapeHtml(item.itemNum)}
                 ${item.eslId ? `<div style="font-size: 10px; color: #94a3b8; font-weight: normal;">ESL: ${this.escapeHtml(item.eslId)}</div>` : ''}
@@ -1040,7 +1054,7 @@ class EmployeeProfileEngine {
                     ${filteredHistory.filter(h => h.eqKey === 'gloves').length} Records
                   </span>
                 </div>
-                ${this.renderCompactHistoryTable(filteredHistory.filter(h => h.eqKey === 'gloves'), 'No glove assignment records logged for this employee.')}
+                ${this.renderCompactHistoryTable(filteredHistory.filter(h => h.eqKey === 'gloves'), 'No glove assignment records logged for this employee.', false)}
               </div>
 
               <!-- Right Side: Rubber Sleeves -->
@@ -1053,14 +1067,14 @@ class EmployeeProfileEngine {
                     ${filteredHistory.filter(h => h.eqKey === 'sleeves').length} Records
                   </span>
                 </div>
-                ${this.renderCompactHistoryTable(filteredHistory.filter(h => h.eqKey === 'sleeves'), 'No sleeve assignment records logged for this employee.')}
+                ${this.renderCompactHistoryTable(filteredHistory.filter(h => h.eqKey === 'sleeves'), 'No sleeve assignment records logged for this employee.', false)}
               </div>
 
             </div>
           ` : `
-            <!-- Single Table for other categories -->
+            <!-- Single Table for specific categories -->
             <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
-              ${this.renderCompactHistoryTable(filteredHistory, `No ${activeCat.title} assignment records logged for this employee.`)}
+              ${this.renderCompactHistoryTable(filteredHistory, `No ${activeCat.title} assignment records logged for this employee.`, showActiveEqCol)}
             </div>
           `}
         </div>
