@@ -538,11 +538,11 @@ class TripPlannerApp {
                         🟢 Active Crews & Tasks (${locInfo.activeCrews.length}):
                       </div>
                       ${locInfo.activeCrews.map(c => {
-                        const crewTasks = window.taskManager ? window.taskManager.getTasksByCrew(c.crewId) : [];
+                        const crewTasks = window.taskManager ? window.taskManager.getTasksByCrew(c.crewId, weekMonday) : [];
                         const summary = this.getCrewTaskSummary(crewTasks);
 
                         return `
-                          <div class="crew-task-box" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(c.crewId)}', '${this.escapeHtml(trip.location)}')" title="Click to view all tasks for Crew ${this.escapeHtml(c.crewId)}">
+                          <div class="crew-task-box" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(c.crewId)}', '${this.escapeHtml(trip.location)}', 'All', '${dateKey}')" title="Click to view all tasks for Crew ${this.escapeHtml(c.crewId)}">
                             <div style="font-size: 11px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                               <span><strong style="color: #60a5fa;">Crew ${this.escapeHtml(c.crewId)}</strong> (${this.escapeHtml(c.foreman)})</span>
                               <div style="display: flex; align-items: center; gap: 4px;">
@@ -733,9 +733,10 @@ class TripPlannerApp {
   /**
    * Opens the full task checklist modal for a specific crew
    */
-  openCrewTasksModal(crewId, location = '', filterCat = 'All') {
+  openCrewTasksModal(crewId, location = '', filterCat = 'All', targetDateKey = null) {
     this.activeModalCrewId = crewId;
     this.activeModalCat = filterCat;
+    this.activeModalDateKey = targetDateKey;
 
     const modal = document.getElementById('crew-tasks-modal');
     const title = document.getElementById('crew-tasks-modal-title');
@@ -743,8 +744,10 @@ class TripPlannerApp {
     const footerMeta = document.getElementById('crew-tasks-modal-footer-meta');
     if (!modal || !body) return;
 
+    const targetDate = targetDateKey ? this.parseDate(targetDateKey) : this.currentDate;
+
     // Get all tasks for this crew
-    const allCrewTasks = window.taskManager ? window.taskManager.getTasksByCrew(crewId) : [];
+    const allCrewTasks = window.taskManager ? window.taskManager.getTasksByCrew(crewId, targetDate) : [];
     const summary = this.getCrewTaskSummary(allCrewTasks);
 
     // Get crew details from Job Tracking
@@ -780,6 +783,8 @@ class TripPlannerApp {
       filtered = filtered.filter(t => t.category === 'Certs' || (t.type || '').toLowerCase().includes('cert'));
     }
 
+    const safeDateKey = this.escapeHtml(targetDateKey || '');
+
     body.innerHTML = `
       <!-- Crew Header Banner -->
       <div style="background: linear-gradient(90deg, #1e293b 0%, #0f172a 100%); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px 18px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
@@ -809,19 +814,19 @@ class TripPlannerApp {
 
       <!-- Category Filter Pills -->
       <div style="display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap;">
-        <button class="btn btn-secondary ${filterCat === 'All' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px; font-weight: 700;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'All')">
+        <button class="btn btn-secondary ${filterCat === 'All' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px; font-weight: 700;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'All', '${safeDateKey}')">
           All Tasks (${allCrewTasks.length})
         </button>
-        <button class="btn btn-secondary ${filterCat === 'PPE' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'PPE')">
+        <button class="btn btn-secondary ${filterCat === 'PPE' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'PPE', '${safeDateKey}')">
           🧤 PPE Swaps (${summary.gloves + summary.sleeves + summary.blankets})
         </button>
-        <button class="btn btn-secondary ${filterCat === 'Equipment' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'Equipment')">
+        <button class="btn btn-secondary ${filterCat === 'Equipment' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'Equipment', '${safeDateKey}')">
           ⚡ Tool & Equipment (${summary.macks + summary.equipment})
         </button>
-        <button class="btn btn-secondary ${filterCat === 'Training' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'Training')">
+        <button class="btn btn-secondary ${filterCat === 'Training' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'Training', '${safeDateKey}')">
           🎓 Safety Training (${summary.training})
         </button>
-        <button class="btn btn-secondary ${filterCat === 'Certs' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'Certs')">
+        <button class="btn btn-secondary ${filterCat === 'Certs' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'Certs', '${safeDateKey}')">
           📜 Certifications (${summary.certs})
         </button>
       </div>
@@ -904,7 +909,7 @@ class TripPlannerApp {
   completeTaskInModal(taskId, crewId, location) {
     if (window.taskManager) {
       window.taskManager.completeTask(taskId);
-      this.openCrewTasksModal(crewId, location, this.activeModalCat);
+      this.openCrewTasksModal(crewId, location, this.activeModalCat, this.activeModalDateKey);
       this.renderPlanner();
     }
   }

@@ -70,7 +70,7 @@ class TaskManagerApp {
   /**
    * Collects, enriches, and normalizes all tasks across Task Metadata, Swap Sheets, Training, and Expiring Certs
    */
-  collectAllTasks() {
+  collectAllTasks(targetDate = new Date()) {
     const allTasks = [];
     const seenTaskKeys = new Set();
 
@@ -125,13 +125,24 @@ class TaskManagerApp {
         const status = String(r['Status'] || 'Unassigned').trim();
         const notes = String(r['Notes'] || '').trim();
 
+        const category = this.categorizeTask(rawType, sourceSheet);
+
+        // Filter out future monthly training until the month arrives
+        if (category === 'Training' || sourceSheet === 'Training Tracking' || rawType.toLowerCase().includes('training')) {
+          if (this.isFutureTrainingMonth(dueDate, targetDate) || this.isFutureTrainingMonth(currentItem, targetDate)) {
+            return; // Skip future month training
+          }
+        }
+
         const empInfo = empLookup[employee.toLowerCase()] || {};
         const crewId = empInfo.crewId || 'Unassigned Crew';
         if (!loc || loc === 'Unknown') loc = empInfo.location || (jobLookup[crewId]?.location) || 'Helena';
         if (!foreman) foreman = empInfo.foreman || (jobLookup[crewId]?.foreman) || 'Lead';
 
-        const category = this.categorizeTask(rawType, sourceSheet);
-        const isOverdue = status.toLowerCase() === 'overdue' || this.checkIfOverdue(dueDate);
+        let isOverdue = status.toLowerCase() === 'overdue' || this.checkIfOverdue(dueDate);
+        if (category === 'Training' && (this.isPastTrainingMonth(dueDate, targetDate) || this.isPastTrainingMonth(currentItem, targetDate))) {
+          if (!status.toLowerCase().includes('complete')) isOverdue = true;
+        }
 
         const taskObj = {
           id: taskId,
@@ -146,7 +157,7 @@ class TaskManagerApp {
           location: this.cleanLocation(loc),
           dueDate: dueDate,
           scheduledDate: scheduledDate,
-          status: status,
+          status: isOverdue ? 'Overdue' : status,
           isOverdue: isOverdue,
           notes: notes
         };
@@ -214,7 +225,7 @@ class TaskManagerApp {
       }
     });
 
-    // 3. Harvest Scheduled / Pending Training from Training Tracking
+    // 3. Harvest Scheduled / Pending Training from Training Tracking (Excluding Future Months)
     const trainTable = this.db.getTable('training_tracking');
     if (trainTable && trainTable.rows) {
       trainTable.rows.forEach((r, idx) => {
@@ -225,31 +236,40 @@ class TaskManagerApp {
         const lead = String(r['Lead'] || r['Crew Lead'] || r['Foreman'] || '').trim();
         const attendees = String(r['Attendees'] || r['Crew Members'] || '').trim();
 
-        if (status.toLowerCase().includes('scheduled') || status.toLowerCase().includes('pending') || !status) {
-          const loc = (jobLookup[crewId]?.location) || 'Helena';
-          const foreman = lead || (jobLookup[crewId]?.foreman) || 'Lead';
-          const taskKey = `training_${crewId}_${topic}_${month}`.toLowerCase();
+        // Skip completed or N/A
+        if (status.toLowerCase() === 'complete' || status.toLowerCase() === 'n/a') return;
 
-          if (!seenTaskKeys.has(taskKey) && crewId) {
-            seenTaskKeys.add(taskKey);
-            allTasks.push({
-              id: `training_${idx + 1}`,
-              sourceSheet: 'Training Tracking',
-              category: 'Training',
-              type: '🎓 Safety Training',
-              itemType: topic,
-              currentItem: `Month: ${month}`,
-              employee: attendees ? `Crew Members: ${attendees}` : (foreman ? `Lead: ${foreman}` : `Crew ${crewId}`),
-              crewId: crewId,
-              foreman: foreman,
-              location: this.cleanLocation(loc),
-              dueDate: month || 'Current Month',
-              scheduledDate: '',
-              status: 'Scheduled',
-              isOverdue: false,
-              notes: `Topic: ${topic} (${month})`
-            });
-          }
+        // Skip future months until that month arrives
+        if (this.isFutureTrainingMonth(month, targetDate)) {
+          return;
+        }
+
+        const isPastMonth = this.isPastTrainingMonth(month, targetDate);
+        const isOverdue = isPastMonth && !status.toLowerCase().includes('complete');
+
+        const loc = (jobLookup[crewId]?.location) || 'Helena';
+        const foreman = lead || (jobLookup[crewId]?.foreman) || 'Lead';
+        const taskKey = `training_${crewId}_${topic}_${month}`.toLowerCase();
+
+        if (!seenTaskKeys.has(taskKey) && crewId) {
+          seenTaskKeys.add(taskKey);
+          allTasks.push({
+            id: `training_${idx + 1}`,
+            sourceSheet: 'Training Tracking',
+            category: 'Training',
+            type: '🎓 Safety Training',
+            itemType: topic,
+            currentItem: `Month: ${month}`,
+            employee: attendees ? `Crew Members: ${attendees}` : (foreman ? `Lead: ${foreman}` : `Crew ${crewId}`),
+            crewId: crewId,
+            foreman: foreman,
+            location: this.cleanLocation(loc),
+            dueDate: month || 'Current Month',
+            scheduledDate: '',
+            status: isOverdue ? 'Overdue' : 'Scheduled',
+            isOverdue: isOverdue,
+            notes: `Topic: ${topic} (${month})`
+          });
         }
       });
     }
@@ -299,6 +319,61 @@ class TaskManagerApp {
     return allTasks;
   }
 
+  isFutureTrainingMonth(monthStr, targetDate = new Date()) {
+    if (!monthStr) return false;
+    const monthLower = String(monthStr).toLowerCase().trim();
+    const MONTH_MAP = {
+      'january': 0, 'jan': 0,
+      'february': 1, 'feb': 1,
+      'march': 2, 'mar': 2,
+      'april': 3, 'apr': 3,
+      'may': 4,
+      'june': 5, 'jun': 5,
+      'july': 6, 'jul': 6,
+      'august': 7, 'aug': 7,
+      'september': 8, 'sep': 8, 'sept': 8,
+      'october': 9, 'oct': 9,
+      'november': 10, 'nov': 10,
+      'december': 11, 'dec': 11
+    };
+
+    // Extract month name if inside string like "Month: September"
+    for (const [mName, mIdx] of Object.entries(MONTH_MAP)) {
+      if (monthLower === mName || monthLower.includes(mName)) {
+        const targetMonthIdx = targetDate.getMonth();
+        return mIdx > targetMonthIdx;
+      }
+    }
+    return false;
+  }
+
+  isPastTrainingMonth(monthStr, targetDate = new Date()) {
+    if (!monthStr) return false;
+    const monthLower = String(monthStr).toLowerCase().trim();
+    const MONTH_MAP = {
+      'january': 0, 'jan': 0,
+      'february': 1, 'feb': 1,
+      'march': 2, 'mar': 2,
+      'april': 3, 'apr': 3,
+      'may': 4,
+      'june': 5, 'jun': 5,
+      'july': 6, 'jul': 6,
+      'august': 7, 'aug': 7,
+      'september': 8, 'sep': 8, 'sept': 8,
+      'october': 9, 'oct': 9,
+      'november': 10, 'nov': 10,
+      'december': 11, 'dec': 11
+    };
+
+    for (const [mName, mIdx] of Object.entries(MONTH_MAP)) {
+      if (monthLower === mName || monthLower.includes(mName)) {
+        const targetMonthIdx = targetDate.getMonth();
+        return mIdx < targetMonthIdx;
+      }
+    }
+    return false;
+  }
+
   categorizeTask(taskType, sourceSheet) {
     const combined = `${taskType} ${sourceSheet}`.toLowerCase();
     if (combined.includes('glove') || combined.includes('sleeve') || combined.includes('blanket')) return 'PPE';
@@ -345,15 +420,15 @@ class TaskManagerApp {
     return isNaN(d.getTime()) ? null : d;
   }
 
-  getTasksByLocation(location) {
+  getTasksByLocation(location, targetDate = new Date()) {
     const locClean = this.cleanLocation(location).toLowerCase();
-    const tasks = this.collectAllTasks();
+    const tasks = this.collectAllTasks(targetDate);
     return tasks.filter(t => t.location.toLowerCase() === locClean);
   }
 
-  getTasksByCrew(crewId) {
+  getTasksByCrew(crewId, targetDate = new Date()) {
     const cClean = String(crewId).toLowerCase().trim();
-    const tasks = this.collectAllTasks();
+    const tasks = this.collectAllTasks(targetDate);
     return tasks.filter(t => t.crewId.toLowerCase() === cClean);
   }
 
