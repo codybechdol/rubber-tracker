@@ -6,8 +6,7 @@ class TripPlannerApp {
   constructor(db) {
     this.db = db;
     this.currentDate = new Date();
-    let saved = parseInt(localStorage.getItem('sa_trip_planner_weeks'), 10);
-    this.weeksToShow = (saved && [1, 2, 4, 6, 8].includes(saved)) ? saved : 8;
+    this.weeksToShow = 8;
     this.activeSchedule = 'Mon-Thu'; // 'Mon-Thu' or 'Tue-Fri'
     this.cityFilter = 'active'; // 'active' or 'all'
     this.searchTerm = '';
@@ -58,8 +57,7 @@ class TripPlannerApp {
     this.loadSavedTrips();
     this.setupSearchListeners();
     this.populateWeekDropdown();
-    let saved = parseInt(localStorage.getItem('sa_trip_planner_weeks'), 10);
-    this.setWeeksToShow(saved && [1, 2, 4, 6, 8].includes(saved) ? saved : 8);
+    this.setWeeksToShow(8);
   }
 
   setupSearchListeners() {
