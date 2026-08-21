@@ -60,6 +60,63 @@ class EmployeeProfileEngine {
   }
 
   /**
+   * Extracts the full, accurate item number / serial number from an inventory row
+   */
+  getItemNum(item, tableHeaders) {
+    if (!item) return 'N/A';
+
+    // 1. Try table's first column header (Column A is always Item# / Serial# / HVT# / PS# in inventory sheets)
+    if (tableHeaders && tableHeaders.length > 0) {
+      const firstColHeader = tableHeaders[0];
+      if (firstColHeader && item[firstColHeader] !== undefined && item[firstColHeader] !== '') {
+        const val = String(item[firstColHeader]).trim();
+        if (val) return val;
+      }
+    }
+
+    // 2. Try specific known column headers
+    const knownKeys = [
+      'HVT #', 'HVT#', 'HVT', 'HV Tester #', 'HV Tester',
+      'PS #', 'PS#', 'Phasing Set #', 'Phasing Set',
+      'Item #', 'Item#', 'Item', 'Items',
+      'Glove', 'Glove #', 'Glove#', 'Gloves',
+      'Sleeve', 'Sleeve #', 'Sleeve#', 'Sleeves',
+      'Blanket', 'Blanket #', 'Blanket#', 'Blankets',
+      'MACK', 'MACK #', 'MACK#', 'MACKs',
+      'Serial #', 'Serial#', 'Serial', 'Serial Number',
+      'ESL ID', 'ESLID', 'ESL_ID', 'Tag #', 'Tag',
+      'Ground #', 'Grounds #', 'Grounds', 'Ground',
+      'Hot Stick #', 'Hot Stick', 'Hot Sticks'
+    ];
+
+    for (let k of knownKeys) {
+      if (item[k] !== undefined && item[k] !== '') {
+        const val = String(item[k]).trim();
+        if (val) return val;
+      }
+    }
+
+    // 3. Search case-insensitively across all keys in item (skipping metadata like _rowIdx)
+    for (let k of Object.keys(item)) {
+      if (k.startsWith('_')) continue;
+      const kl = k.toLowerCase();
+      if (kl.includes('hvt') || kl.includes('item') || kl.includes('glove') || kl.includes('sleeve') || kl.includes('blanket') || kl.includes('mack') || kl.includes('serial') || kl.includes('phasing') || kl.includes('stick') || kl.includes('ground') || kl.includes('tag')) {
+        const val = String(item[k]).trim();
+        if (val) return val;
+      }
+    }
+
+    // 4. Return first non-empty value of non-metadata key
+    for (let k of Object.keys(item)) {
+      if (k.startsWith('_')) continue;
+      const val = String(item[k]).trim();
+      if (val) return val;
+    }
+
+    return 'N/A';
+  }
+
+  /**
    * Opens the Employee Profile & Certifications Modal
    */
   openProfileModal(employeeName) {
@@ -115,13 +172,15 @@ class EmployeeProfileEngine {
         t.rows.forEach(item => {
           const assignedTo = String(item['Assigned To'] || item['Assigned'] || item['Holder'] || '').trim();
           if (this.isNameMatch(assignedTo, displayName)) {
-            const itemNum = String(item['Item #'] || item['Glove'] || item['Sleeve'] || item['Blanket'] || item['Serial #'] || item['ESL ID'] || Object.values(item)[0] || 'N/A').trim();
+            const itemNum = this.getItemNum(item, t.headers);
             const eslId = String(item['ESL ID'] || '').trim();
             const size = String(item['Size'] || '').trim();
             const classVal = String(item['Class'] || '').trim();
             const kv = String(item['KV'] || '').trim();
-            const type = String(item['Type'] || item['Model'] || '').trim();
+            const model = String(item['Model'] || '').trim();
+            const type = String(item['Type'] || '').trim();
             const length = String(item['Length'] || '').trim();
+            const serial = String(item['Serial #'] || item['Serial'] || '').trim();
             const dateAssigned = String(item['Date Assigned'] || item['Date'] || 'N/A').trim();
             const changeOutDate = String(item['Change Out Date'] || item['Changeout Date'] || item['Pad Expiration'] || 'N/A').trim();
             const testDate = String(item['Test Date'] || item['Calibration Date'] || 'N/A').trim();
@@ -129,11 +188,13 @@ class EmployeeProfileEngine {
             const itemLoc = String(item['Location'] || location).trim();
 
             let specs = [];
+            if (model) specs.push(`Model: ${model}`);
+            if (type && type !== model) specs.push(`Type: ${type}`);
             if (size) specs.push(`Size: ${size}`);
             if (classVal) specs.push(`Class: ${classVal}`);
             if (kv) specs.push(`KV: ${kv}`);
-            if (type) specs.push(`Type: ${type}`);
             if (length) specs.push(`Len: ${length}`);
+            if (serial && serial !== itemNum) specs.push(`SN: ${serial}`);
 
             assignedEquipment.push({
               eqType: eq.title,
