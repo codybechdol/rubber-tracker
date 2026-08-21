@@ -90,7 +90,7 @@ class TripPlannerApp {
 
   setWeeksToShow(weeks) {
     this.weeksToShow = parseInt(weeks, 10) || 1;
-    [1, 2, 3, 4].forEach(w => {
+    [1, 2, 4, 6, 8].forEach(w => {
       const btn = document.getElementById(`btn-span-${w}w`);
       if (btn) {
         if (w === this.weeksToShow) btn.classList.add('active');
@@ -153,10 +153,27 @@ class TripPlannerApp {
     const today = new Date();
     const dayOfWeek = today.getDay();
     const distToMon = (dayOfWeek === 0 ? -6 : 1) - dayOfWeek;
-    const baseMonday = new Date(today.setDate(today.getDate() + distToMon));
+    const baseMonday = new Date(today.getFullYear(), today.getMonth(), today.getDate() + distToMon, 12, 0, 0);
 
-    // Generate next 16 weeks options
-    for (let w = -2; w <= 14; w++) {
+    // Discover the full range of scheduled trips in past & future
+    let minPastWeeks = -26; // 6 months back default
+    let maxFutureWeeks = 26; // 6 months forward default
+
+    if (this.plannedTrips) {
+      Object.keys(this.plannedTrips).forEach(dateKey => {
+        const tripDate = this.parseDate(dateKey);
+        if (tripDate) {
+          const tripMonday = this.getMondayForDate(tripDate);
+          const diffMs = tripMonday.getTime() - baseMonday.getTime();
+          const diffWeeks = Math.round(diffMs / (7 * 24 * 60 * 60 * 1000));
+          if (diffWeeks < minPastWeeks) minPastWeeks = Math.max(-52, diffWeeks - 2);
+          if (diffWeeks > maxFutureWeeks) maxFutureWeeks = Math.min(52, diffWeeks + 4);
+        }
+      });
+    }
+
+    // Generate week options spanning all past scheduled history and future planning window
+    for (let w = minPastWeeks; w <= maxFutureWeeks; w++) {
       const mon = new Date(baseMonday);
       mon.setDate(baseMonday.getDate() + (w * 7));
       const fri = new Date(mon);
@@ -167,12 +184,25 @@ class TripPlannerApp {
       const dd = String(mon.getDate()).padStart(2, '0');
       const key = `${yyyy}-${mm}-${dd}`;
 
-      let label = `${mon.getMonth() + 1}/${mon.getDate()} - ${fri.getMonth() + 1}/${fri.getDate()}`;
-      if (w === 0) label += ' (This Week)';
+      // Check if this week has any scheduled trips
+      let tripsCount = 0;
+      for (let i = 0; i < 5; i++) {
+        const d = new Date(mon);
+        d.setDate(mon.getDate() + i);
+        const dKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        tripsCount += (this.getTripsForDate(dKey) || []).length;
+      }
+
+      let label = `${mon.getMonth() + 1}/${mon.getDate()} - ${fri.getMonth() + 1}/${fri.getDate()}, ${yyyy}`;
+      if (w === 0) label += ' ★ (This Week)';
       else if (w === 1) label += ' (+1 Wk)';
       else if (w > 1) label += ` (+${w} Wks)`;
-      else if (w === -1) label += ' (Last Week)';
+      else if (w === -1) label += ' (-1 Wk)';
       else if (w < -1) label += ` (${w} Wks)`;
+
+      if (tripsCount > 0) {
+        label += ` 🚗 [${tripsCount} Trip${tripsCount > 1 ? 's' : ''}]`;
+      }
 
       const opt = document.createElement('option');
       opt.value = key;

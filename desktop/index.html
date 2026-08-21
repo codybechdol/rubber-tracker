@@ -156,18 +156,21 @@
                 <span style="font-size: 10.5px; color: var(--text-muted); font-weight: 700; margin: 0 4px;">VIEW:</span>
                 <button class="btn btn-secondary active" id="btn-span-1w" style="padding: 2px 6px; font-size: 10.5px; font-weight: 700;" onclick="window.tripPlanner.setWeeksToShow(1)">1 Wk</button>
                 <button class="btn btn-secondary" id="btn-span-2w" style="padding: 2px 6px; font-size: 10.5px;" onclick="window.tripPlanner.setWeeksToShow(2)">2 Wks</button>
-                <button class="btn btn-secondary" id="btn-span-3w" style="padding: 2px 6px; font-size: 10.5px;" onclick="window.tripPlanner.setWeeksToShow(3)">3 Wks</button>
-                <button class="btn btn-secondary" id="btn-span-4w" style="padding: 2px 6px; font-size: 10.5px;" onclick="window.tripPlanner.setWeeksToShow(4)">4 Wks (Month)</button>
+                <button class="btn btn-secondary" id="btn-span-4w" style="padding: 2px 6px; font-size: 10.5px;" onclick="window.tripPlanner.setWeeksToShow(4)">4 Wks</button>
+                <button class="btn btn-secondary" id="btn-span-6w" style="padding: 2px 6px; font-size: 10.5px;" onclick="window.tripPlanner.setWeeksToShow(6)">6 Wks</button>
+                <button class="btn btn-secondary" id="btn-span-8w" style="padding: 2px 6px; font-size: 10.5px;" onclick="window.tripPlanner.setWeeksToShow(8)">8 Wks (2 Mos)</button>
               </div>
             </div>
 
             <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
               <!-- Navigation Controls -->
               <div style="display: flex; align-items: center; gap: 4px;">
+                <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="window.tripPlanner.jumpWeeks(-4)" title="Jump 4 Weeks Backward">◀◀ -4 Wks</button>
                 <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="window.tripPlanner.prevWeek()" title="Previous Week">◀ Prev</button>
                 <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="window.tripPlanner.currentWeek()" title="Current Week">Today</button>
                 <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="window.tripPlanner.nextWeek()" title="Next Week">Next ▶</button>
-                <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="window.tripPlanner.jumpWeeks(2)" title="Jump 2 Weeks Forward">+2 Wks ▶▶</button>
+                <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="window.tripPlanner.jumpWeeks(4)" title="Jump 4 Weeks Forward">+4 Wks ▶▶</button>
+                <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="window.tripPlanner.jumpWeeks(8)" title="Jump 8 Weeks Forward">+8 Wks ▶▶▶</button>
               </div>
 
               <!-- Quick Week Jumper Select -->
