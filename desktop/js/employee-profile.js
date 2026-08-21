@@ -6,6 +6,7 @@ class EmployeeProfileEngine {
   constructor(db) {
     this.db = db;
     this.currentActiveTab = 'equipment'; // 'equipment' | 'certs' | 'history'
+    this.currentEquipmentFilter = 'all'; // 'all' | 'gloves_sleeves' | 'blankets' | 'macks' | 'grounds' | 'hot_sticks' | 'hv_testers' | 'aed'
     this.currentEmployeeData = null;
   }
 
@@ -193,6 +194,9 @@ class EmployeeProfileEngine {
 
     const rawEmpName = String(employeeName || '').trim();
     if (!rawEmpName) return;
+
+    this.currentActiveTab = 'equipment';
+    this.currentEquipmentFilter = 'all';
 
     // 1. Locate Employee Record in Employees table
     const empTable = snap.tables['employees'];
@@ -568,6 +572,17 @@ class EmployeeProfileEngine {
   }
 
   /**
+   * Switches equipment sub-category filter tab
+   */
+  setEquipmentFilter(filterKey) {
+    this.currentEquipmentFilter = filterKey;
+    const body = document.getElementById('employee-profile-modal-body');
+    if (body && this.currentEmployeeData) {
+      this.renderModalContent(body);
+    }
+  }
+
+  /**
    * Renders the current selected tab body
    */
   renderActiveTabContent() {
@@ -575,7 +590,8 @@ class EmployeeProfileEngine {
     if (!data) return '';
 
     if (this.currentActiveTab === 'equipment') {
-      if (data.assignedEquipment.length === 0) {
+      const allEq = data.assignedEquipment || [];
+      if (allEq.length === 0) {
         return `
           <div style="padding: 40px; text-align: center; color: var(--text-muted); background: var(--bg-primary); border-radius: 8px; border: 1px dashed var(--border-color);">
             <div style="font-size: 32px; margin-bottom: 10px;">📦</div>
@@ -585,7 +601,80 @@ class EmployeeProfileEngine {
         `;
       }
 
+      // Calculate counts for each equipment category
+      const countAll = allEq.length;
+      const countGlovesSleeves = allEq.filter(e => e.eqKey === 'gloves' || e.eqKey === 'sleeves').length;
+      const countBlankets = allEq.filter(e => e.eqKey === 'blankets').length;
+      const countMacks = allEq.filter(e => e.eqKey === 'macks').length;
+      const countGrounds = allEq.filter(e => e.eqKey === 'grounds').length;
+      const countSticks = allEq.filter(e => e.eqKey === 'hot_sticks').length;
+      const countHvTesters = allEq.filter(e => e.eqKey === 'hv_testers' || e.eqKey === 'phasing_sets').length;
+      const countAed = allEq.filter(e => e.eqKey === 'aed').length;
+
+      const categories = [
+        { key: 'all', title: 'All Equipment', icon: '📦', count: countAll },
+        { key: 'gloves_sleeves', title: 'Gloves & Sleeves', icon: '🧤', count: countGlovesSleeves },
+        { key: 'blankets', title: 'Blankets', icon: '🔲', count: countBlankets },
+        { key: 'macks', title: 'MACKs', icon: '🧱', count: countMacks },
+        { key: 'grounds', title: 'Grounds', icon: '⚡', count: countGrounds },
+        { key: 'hot_sticks', title: 'Sticks', icon: '🔴', count: countSticks },
+        { key: 'hv_testers', title: 'HV Tester', icon: '⚡', count: countHvTesters },
+        { key: 'aed', title: 'AED', icon: '🏥', count: countAed }
+      ];
+
+      // Filter items according to active category
+      let filteredEquipment = allEq;
+      if (this.currentEquipmentFilter === 'gloves_sleeves') {
+        filteredEquipment = allEq.filter(e => e.eqKey === 'gloves' || e.eqKey === 'sleeves');
+      } else if (this.currentEquipmentFilter === 'blankets') {
+        filteredEquipment = allEq.filter(e => e.eqKey === 'blankets');
+      } else if (this.currentEquipmentFilter === 'macks') {
+        filteredEquipment = allEq.filter(e => e.eqKey === 'macks');
+      } else if (this.currentEquipmentFilter === 'grounds') {
+        filteredEquipment = allEq.filter(e => e.eqKey === 'grounds');
+      } else if (this.currentEquipmentFilter === 'hot_sticks') {
+        filteredEquipment = allEq.filter(e => e.eqKey === 'hot_sticks');
+      } else if (this.currentEquipmentFilter === 'hv_testers') {
+        filteredEquipment = allEq.filter(e => e.eqKey === 'hv_testers' || e.eqKey === 'phasing_sets');
+      } else if (this.currentEquipmentFilter === 'aed') {
+        filteredEquipment = allEq.filter(e => e.eqKey === 'aed');
+      }
+
+      const activeCat = categories.find(c => c.key === this.currentEquipmentFilter) || categories[0];
+
       let html = `
+        <!-- Equipment Category Sub-Tabs -->
+        <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; padding: 6px; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color);">
+          ${categories.map(cat => {
+            const isActive = this.currentEquipmentFilter === cat.key;
+            const hasItems = cat.count > 0;
+            return `
+              <button class="btn" 
+                      style="padding: 6px 12px; font-size: 12px; font-weight: ${isActive ? '800' : '600'}; border-radius: 6px; display: inline-flex; align-items: center; gap: 6px; transition: all 0.15s ease; cursor: pointer; ${isActive ? 'background: var(--accent); color: #fff; border: 1px solid var(--accent); box-shadow: 0 2px 6px rgba(59, 130, 246, 0.4);' : (hasItems ? 'background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color);' : 'background: transparent; color: var(--text-muted); border: 1px dashed rgba(255,255,255,0.1); opacity: 0.6;')}" 
+                      onclick="window.employeeProfileEngine.setEquipmentFilter('${cat.key}')">
+                <span>${cat.icon}</span>
+                <span>${this.escapeHtml(cat.title)}</span>
+                <span class="badge" style="background: ${isActive ? 'rgba(255,255,255,0.25)' : (hasItems ? 'rgba(59, 130, 246, 0.2)' : 'rgba(255,255,255,0.05)')}; color: ${isActive ? '#fff' : (hasItems ? '#93c5fd' : 'inherit')}; padding: 1px 6px; border-radius: 10px; font-size: 11px; font-weight: 700;">
+                  ${cat.count}
+                </span>
+              </button>
+            `;
+          }).join('')}
+        </div>
+      `;
+
+      if (filteredEquipment.length === 0) {
+        html += `
+          <div style="padding: 36px; text-align: center; color: var(--text-muted); background: var(--bg-primary); border-radius: 8px; border: 1px dashed var(--border-color);">
+            <div style="font-size: 32px; margin-bottom: 8px;">${activeCat.icon}</div>
+            <h4 style="color: var(--text-primary); font-size: 15px; margin-bottom: 4px;">No ${this.escapeHtml(activeCat.title)} Assigned</h4>
+            <p style="font-size: 13px;">${this.escapeHtml(data.displayName)} does not currently have any items assigned in this category.</p>
+          </div>
+        `;
+        return html;
+      }
+
+      html += `
         <div style="overflow-x: auto;">
           <table class="data-table" style="width: 100%; font-size: 12.5px;">
             <thead>
@@ -604,7 +693,7 @@ class EmployeeProfileEngine {
             <tbody>
       `;
 
-      data.assignedEquipment.forEach(item => {
+      filteredEquipment.forEach(item => {
         html += `
           <tr>
             <td style="font-weight: 700; text-align: left;">
