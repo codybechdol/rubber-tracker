@@ -140,9 +140,28 @@ class TaskManagerApp {
         if (!loc || loc === 'Unknown') loc = empInfo.location || (jobLookup[crewId]?.location) || 'Helena';
         if (!foreman) foreman = empInfo.foreman || (jobLookup[crewId]?.foreman) || 'Lead';
 
-        let isOverdue = status.toLowerCase() === 'overdue' || this.checkIfOverdue(dueDate);
-        if (category === 'Training' && (this.isPastTrainingMonth(dueDate, targetDate) || this.isPastTrainingMonth(currentItem, targetDate))) {
-          if (!status.toLowerCase().includes('complete')) isOverdue = true;
+        // Status & Completion evaluation
+        const statusLower = status.toLowerCase();
+        const isComplete = statusLower.includes('complete') || statusLower.includes('resolved');
+        let isOverdue = !isComplete && (statusLower === 'overdue' || this.checkIfOverdue(dueDate));
+        if (!isComplete && category === 'Training' && (this.isPastTrainingMonth(dueDate, targetDate) || this.isPastTrainingMonth(currentItem, targetDate))) {
+          isOverdue = true;
+        }
+
+        // Extract Truck / Vehicle Number for Safety Equipment & tasks
+        const rawTruck = String(r['Vehicle Number'] || r['VehicleNumber'] || r['Vehicle #'] || r['Truck #'] || r['Truck'] || r['Unit #'] || '').trim();
+        const textForTruck = `${currentItem} ${notes} ${r['Description'] || ''}`;
+        let truckNumber = rawTruck;
+        if (!truckNumber) {
+          const unitM = textForTruck.match(/(?:Unit\s*#?|Truck\s*#?|Vehicle\s*#?)\s*([A-Za-z0-9\-_]+)/i);
+          if (unitM && unitM[0]) {
+            truckNumber = unitM[0].trim();
+          } else {
+            const codeM = textForTruck.match(/\b(4\d{2}-\d+)\b/);
+            if (codeM && codeM[1]) {
+              truckNumber = `Truck ${codeM[1]}`;
+            }
+          }
         }
 
         const taskObj = {
@@ -152,15 +171,17 @@ class TaskManagerApp {
           type: this.cleanTaskType(rawType, sourceSheet),
           itemType: itemType,
           currentItem: currentItem,
+          truckNumber: truckNumber,
           employee: employee || 'Unassigned',
           crewId: crewId,
           foreman: foreman,
           location: this.cleanLocation(loc),
           dueDate: dueDate,
           scheduledDate: scheduledDate,
-          status: isOverdue ? 'Overdue' : status,
+          status: isComplete ? 'Complete' : (isOverdue ? 'Overdue' : status),
           isOverdue: isOverdue,
-          notes: notes
+          notes: notes,
+          _rawRow: r
         };
 
         const taskKey = `${taskObj.type}_${taskObj.employee}_${taskObj.itemType}_${taskObj.dueDate}`.toLowerCase();
@@ -607,6 +628,11 @@ class TaskManagerApp {
             <span style="font-weight: 800; font-size: 13.5px; color: #f8fafc;">
               ${this.escapeHtml(task.type)}: ${this.escapeHtml(task.itemType)}
             </span>
+            ${task.truckNumber ? `
+              <span class="badge" style="background: rgba(234, 179, 8, 0.15); color: #fde047; border: 1px solid rgba(234, 179, 8, 0.35); font-weight: 700; font-size: 11px; padding: 2px 7px;">
+                🚛 ${this.escapeHtml(task.truckNumber)}
+              </span>
+            ` : ''}
             ${task.currentItem ? `
               <span class="badge" style="background: rgba(255,255,255,0.06); color: #93c5fd; font-family: monospace; font-size: 11px; padding: 1px 6px;">
                 ${this.escapeHtml(task.currentItem)}
@@ -618,6 +644,11 @@ class TaskManagerApp {
             <span>
               👤 Assigned to: <strong style="color: #60a5fa; cursor: pointer; text-decoration: underline dotted;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeHtml(task.employee)}');}">${this.escapeHtml(task.employee)}</strong>
             </span>
+            ${task.truckNumber ? `
+              <span>
+                🚛 Truck: <strong style="color: #fde047;">${this.escapeHtml(task.truckNumber)}</strong>
+              </span>
+            ` : ''}
             <span>
               🚚 Crew: <strong>${this.escapeHtml(task.crewId)}</strong>
             </span>

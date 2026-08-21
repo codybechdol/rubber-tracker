@@ -927,13 +927,34 @@ function applyBatchSyncMutations(mutations, returnSnapshot) {
           if (taskMetaSheet) {
             var metaData = taskMetaSheet.getDataRange().getValues();
             for (var tm = 1; tm < metaData.length; tm++) {
-              if (String(metaData[tm][0] || '').trim() === mut.taskId) {
+              var tId = String(metaData[tm][0] || '').trim();
+              if (tId === mut.taskId || (mut.taskId && (tId.indexOf(mut.taskId) === 0 || mut.taskId.indexOf(tId) === 0))) {
                 taskMetaSheet.getRange(tm + 1, 15).setValue(mut.status || 'Complete'); // Status (O)
                 if (mut.completedDate) {
                   taskMetaSheet.getRange(tm + 1, 22).setValue(parseDateNoon(mut.completedDate) || new Date()); // CompletedDate (V)
                 }
                 sheetsModified['Task Metadata'] = true;
                 appliedCount++;
+
+                // If source sheet is Safety Equipment Needs, also mark Resolved in source
+                var srcSheetName = String(metaData[tm][1] || '').trim();
+                var srcRowIdx = parseInt(metaData[tm][2], 10);
+                if (srcSheetName === 'Safety Equipment Needs' && srcRowIdx > 1) {
+                  var eqSheet = ss.getSheetByName('Safety Equipment Needs');
+                  if (eqSheet && srcRowIdx <= eqSheet.getLastRow()) {
+                    var eqHeaders = eqSheet.getRange(1, 1, 1, eqSheet.getLastColumn()).getValues()[0];
+                    var eqStatusCol = -1;
+                    var eqResolvedCol = -1;
+                    for (var eh = 0; eh < eqHeaders.length; eh++) {
+                      var ehName = String(eqHeaders[eh] || '').toLowerCase().trim();
+                      if (ehName === 'status') eqStatusCol = eh + 1;
+                      if (ehName === 'resolved on') eqResolvedCol = eh + 1;
+                    }
+                    if (eqStatusCol !== -1) eqSheet.getRange(srcRowIdx, eqStatusCol).setValue('Resolved');
+                    if (eqResolvedCol !== -1) eqSheet.getRange(srcRowIdx, eqResolvedCol).setValue(new Date());
+                    sheetsModified['Safety Equipment Needs'] = true;
+                  }
+                }
                 break;
               }
             }

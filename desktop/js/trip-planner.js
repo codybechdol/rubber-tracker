@@ -889,10 +889,15 @@ class TripPlannerApp {
           return `
             <div style="background-color: var(--bg-primary); border: 1px solid var(--border-color); border-left: 4px solid ${badgeColor}; border-radius: 6px; padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
               <div style="flex: 1; min-width: 260px;">
-                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap;">
                   <span style="font-weight: 800; font-size: 14px; color: #f8fafc;">
                     ${this.escapeHtml(t.type)}: ${this.escapeHtml(t.itemType)}
                   </span>
+                  ${t.truckNumber ? `
+                    <span class="badge" style="background: rgba(234, 179, 8, 0.15); color: #fde047; border: 1px solid rgba(234, 179, 8, 0.35); font-weight: 700; font-size: 11px; padding: 2px 7px;">
+                      🚛 ${this.escapeHtml(t.truckNumber)}
+                    </span>
+                  ` : ''}
                   ${t.currentItem ? `
                     <span class="badge" style="background: rgba(255,255,255,0.06); color: #93c5fd; font-family: monospace; font-size: 11px; padding: 1px 6px;">
                       ${this.escapeHtml(t.currentItem)}
@@ -904,6 +909,11 @@ class TripPlannerApp {
                   <span>
                     👤 Lineman: <strong style="color: #60a5fa; cursor: pointer; text-decoration: underline dotted;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeHtml(t.employee)}');}">${this.escapeHtml(t.employee)}</strong>
                   </span>
+                  ${t.truckNumber ? `
+                    <span>
+                      🚛 Truck: <strong style="color: #fde047;">${this.escapeHtml(t.truckNumber)}</strong>
+                    </span>
+                  ` : ''}
                   <span style="color: ${isOverdue ? '#f87171' : 'var(--text-secondary)'}; font-weight: ${isOverdue ? '700' : 'normal'};">
                     📅 Due: <strong>${this.escapeHtml(t.dueDate)}</strong>
                   </span>

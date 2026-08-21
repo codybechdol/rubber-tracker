@@ -669,11 +669,29 @@ class LocalDatabase {
     // Task completion
     if (mut.action === 'SET_TASK_STATUS') {
       const taskTable = this.snapshot.tables['task_metadata'];
-      if (taskTable && taskTable.rows) {
-        const task = taskTable.rows.find(t => t['Task ID'] === mut.taskId);
-        if (task) {
-          task['Status'] = mut.status || 'Complete';
-          if (mut.completedDate) task['Completed Date'] = mut.completedDate;
+      if (taskTable) {
+        if (taskTable.rows) {
+          const task = taskTable.rows.find(t => 
+            String(t['TaskID'] || t['Task ID'] || t['id'] || '').trim() === String(mut.taskId || '').trim()
+          );
+          if (task) {
+            task['Status'] = mut.status || 'Complete';
+            task['CompletedDate'] = mut.completedDate || new Date().toISOString().split('T')[0];
+            task['Completed Date'] = mut.completedDate || new Date().toISOString().split('T')[0];
+          }
+        }
+        if (taskTable.rawGrid && taskTable.headers) {
+          const statusColIdx = taskTable.headers.findIndex(h => String(h || '').toLowerCase().trim() === 'status');
+          const idColIdx = taskTable.headers.findIndex(h => String(h || '').toLowerCase().includes('task'));
+          if (statusColIdx !== -1) {
+            for (let r = 1; r < taskTable.rawGrid.length; r++) {
+              const rowId = String(taskTable.rawGrid[r][idColIdx !== -1 ? idColIdx : 0] || '').trim();
+              if (rowId === String(mut.taskId || '').trim()) {
+                taskTable.rawGrid[r][statusColIdx] = mut.status || 'Complete';
+                break;
+              }
+            }
+          }
         }
       }
     }
