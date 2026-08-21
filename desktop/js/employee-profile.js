@@ -60,6 +60,205 @@ class EmployeeProfileEngine {
     return false;
   }
 
+  parseDate(val) {
+    if (!val || val === 'N/A') return null;
+    if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+    const s = String(val).trim();
+    if (s.includes('/')) {
+      const parts = s.split('/');
+      if (parts.length === 3) {
+        const m = parseInt(parts[0], 10) - 1;
+        const d = parseInt(parts[1], 10);
+        let y = parseInt(parts[2], 10);
+        if (y < 100) y += 2000;
+        const dt = new Date(y, m, d, 12, 0, 0);
+        return isNaN(dt.getTime()) ? null : dt;
+      }
+    }
+    const dt = new Date(s);
+    return isNaN(dt.getTime()) ? null : dt;
+  }
+
+  formatDateDisplay(d) {
+    if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    return `${mm}/${dd}/${yyyy}`;
+  }
+
+  formatDuration(days) {
+    days = Math.max(0, Math.round(days || 0));
+    if (days === 0) return '< 1 day';
+    if (days === 1) return '1 day';
+    if (days < 30) return `${days} days`;
+    if (days < 365) {
+      const mos = (days / 30.4375).toFixed(1);
+      return `${days} days (~${mos} mos)`;
+    }
+    const yrs = (days / 365.25).toFixed(1);
+    return `${days} days (~${yrs} yrs)`;
+  }
+
+  /**
+   * Scans history tables to extract full assignment lifecycle for this employee with issue and return dates
+   */
+  extractEquipmentHistory(snap, displayName, assignedEquipment) {
+    const historyDefs = [
+      { key: 'gloves', title: 'Rubber Gloves', icon: '🧤', histKey: 'gloves_history' },
+      { key: 'sleeves', title: 'Rubber Sleeves', icon: '🦾', histKey: 'sleeves_history' },
+      { key: 'blankets', title: 'Rubber Blankets', icon: '🔲', histKey: 'blankets_history' },
+      { key: 'macks', title: 'MACKs', icon: '🧱', histKey: 'macks_history' },
+      { key: 'hv_testers', title: 'HV Testers', icon: '⚡', histKey: 'hv_testers_history' },
+      { key: 'phasing_sets', title: 'Phasing Sets', icon: '⚡', histKey: 'phasing_sets_history' },
+      { key: 'aed', title: 'AED Units', icon: '🏥', histKey: 'aed_history' },
+      { key: 'grounds', title: 'Grounds', icon: '⚡', histKey: 'grounds_history' },
+      { key: 'hot_sticks', title: 'Hot Sticks', icon: '🔴', histKey: 'hot_sticks_history' }
+    ];
+
+    const results = [];
+
+    historyDefs.forEach(def => {
+      const histTable = snap.tables[def.histKey];
+      if (!histTable || !histTable.rows || histTable.rows.length === 0) return;
+
+      const headers = histTable.headers || [];
+
+      // Group rows by item number
+      const itemMap = new Map(); // itemKey -> [row1, row2, ...]
+
+      histTable.rows.forEach(r => {
+        const itemNum = this.getItemNum(r, headers);
+        if (!itemNum || itemNum === 'N/A') return;
+        const normKey = String(itemNum).toLowerCase().trim();
+        if (!itemMap.has(normKey)) {
+          itemMap.set(normKey, []);
+        }
+        itemMap.get(normKey).push(r);
+      });
+
+      // Process each item chronologically
+      itemMap.forEach((rows, itemKey) => {
+        // Sort oldest to newest
+        const sorted = [...rows].sort((a, b) => {
+          const dateA = this.parseDate(a['Date Assigned'] || a['Date'] || Object.values(a)[0]);
+          const dateB = this.parseDate(b['Date Assigned'] || b['Date'] || Object.values(b)[0]);
+          const tA = dateA ? dateA.getTime() : 0;
+          const tB = dateB ? dateB.getTime() : 0;
+          return tA - tB;
+        });
+
+        for (let i = 0; i < sorted.length; i++) {
+          const row = sorted[i];
+          const assignedTo = String(row['Assigned To'] || row['Employee Name'] || row['Employee'] || '').trim();
+
+          if (this.isNameMatch(assignedTo, displayName)) {
+            const itemNum = this.getItemNum(row, headers);
+            const rawIssueDate = row['Date Assigned'] || row['Date'] || Object.values(row)[0] || '';
+            const issueDateObj = this.parseDate(rawIssueDate);
+            const issueDateStr = issueDateObj ? this.formatDateDisplay(issueDateObj) : String(rawIssueDate || 'N/A').trim();
+
+            const size = String(row['Size'] || '').trim();
+            const classVal = String(row['Class'] || '').trim();
+            const kv = String(row['KV'] || '').trim();
+            const model = String(row['Model'] || '').trim();
+            const type = String(row['Type'] || '').trim();
+            const length = String(row['Length'] || '').trim();
+            const location = String(row['Location'] || '').trim();
+            const notes = String(row['Notes'] || row['Note'] || '').trim();
+
+            let specs = [];
+            if (model) specs.push(`Model: ${model}`);
+            if (type && type !== model) specs.push(`Type: ${type}`);
+            if (size) specs.push(`Size: ${size}`);
+            if (classVal) specs.push(`Class: ${classVal}`);
+            if (kv) specs.push(`KV: ${kv}`);
+            if (length) specs.push(`Len: ${length}`);
+
+            let returnDateStr = '';
+            let returnStatus = '';
+            let isCurrent = false;
+            let durationStr = '';
+
+            const next = i < sorted.length - 1 ? sorted[i + 1] : null;
+
+            if (next) {
+              const rawReturnDate = next['Date Assigned'] || next['Date'] || Object.values(next)[0] || '';
+              const returnDateObj = this.parseDate(rawReturnDate);
+              returnDateStr = returnDateObj ? this.formatDateDisplay(returnDateObj) : String(rawReturnDate).trim();
+
+              const nextAssigned = String(next['Assigned To'] || next['Employee Name'] || '').trim();
+              const nextLoc = String(next['Location'] || '').trim();
+              const nextNotes = String(next['Notes'] || '').trim();
+
+              const nextAssignedLower = nextAssigned.toLowerCase();
+              const nextLocLower = nextLoc.toLowerCase();
+
+              if (nextAssignedLower.includes('shelf') || nextLocLower.includes('shelf')) {
+                returnStatus = 'Returned to Shelf';
+              } else if (nextAssignedLower.includes('test') || nextLocLower.includes('test')) {
+                returnStatus = 'Sent to Testing';
+              } else if (nextAssignedLower.includes('retir') || nextNotes.toLowerCase().includes('retir')) {
+                returnStatus = 'Retired / Condemned';
+              } else if (nextAssignedLower.includes('lost') || nextNotes.toLowerCase().includes('lost')) {
+                returnStatus = 'Lost / Destroyed';
+              } else if (nextAssigned) {
+                returnStatus = `Reassigned to ${nextAssigned}`;
+              } else {
+                returnStatus = 'Returned';
+              }
+
+              if (issueDateObj && returnDateObj) {
+                const days = Math.max(0, Math.round((returnDateObj.getTime() - issueDateObj.getTime()) / (1000 * 60 * 60 * 24)));
+                durationStr = this.formatDuration(days);
+              }
+            } else {
+              // Check if currently active in assignedEquipment
+              const isCurrentlyAssigned = assignedEquipment.some(ae => ae.histKey === def.histKey && ae.itemNum === itemNum);
+              if (isCurrentlyAssigned) {
+                returnDateStr = 'Present';
+                returnStatus = 'Currently Active';
+                isCurrent = true;
+
+                if (issueDateObj) {
+                  const now = new Date();
+                  const days = Math.max(0, Math.round((now.getTime() - issueDateObj.getTime()) / (1000 * 60 * 60 * 24)));
+                  durationStr = this.formatDuration(days);
+                }
+              } else {
+                returnDateStr = '—';
+                returnStatus = 'Past Assignment';
+                durationStr = '—';
+              }
+            }
+
+            results.push({
+              eqType: def.title,
+              eqIcon: def.icon,
+              eqKey: def.key,
+              histKey: def.histKey,
+              itemNum: itemNum,
+              specs: specs.join(' · ') || 'Standard',
+              issueDate: issueDateStr,
+              issueTimestamp: issueDateObj ? issueDateObj.getTime() : 0,
+              returnDate: returnDateStr,
+              returnStatus: returnStatus,
+              isCurrent: isCurrent,
+              duration: durationStr || '—',
+              location: location,
+              notes: notes
+            });
+          }
+        }
+      });
+    });
+
+    // Sort all historical assignments newest issue date first
+    results.sort((a, b) => b.issueTimestamp - a.issueTimestamp);
+
+    return results;
+  }
+
   /**
    * Extracts the full, accurate item number / serial number from an inventory row
    */
@@ -380,6 +579,9 @@ class EmployeeProfileEngine {
       });
     }
 
+    // 6. Scan Equipment History for complete assignment and return lifecycle
+    const equipmentHistory = this.extractEquipmentHistory(snap, displayName, assignedEquipment);
+
     // Store state for tab switching
     this.currentEmployeeData = {
       displayName,
@@ -392,6 +594,7 @@ class EmployeeProfileEngine {
       mpEmail,
       notifEmail,
       assignedEquipment,
+      equipmentHistory,
       certifications,
       trainingList,
       employeeHistory
@@ -591,17 +794,19 @@ class EmployeeProfileEngine {
 
     if (this.currentActiveTab === 'equipment') {
       const allEq = data.assignedEquipment || [];
-      if (allEq.length === 0) {
+      const allHist = data.equipmentHistory || [];
+
+      if (allEq.length === 0 && allHist.length === 0) {
         return `
           <div style="padding: 40px; text-align: center; color: var(--text-muted); background: var(--bg-primary); border-radius: 8px; border: 1px dashed var(--border-color);">
             <div style="font-size: 32px; margin-bottom: 10px;">📦</div>
-            <h4 style="color: var(--text-primary); font-size: 15px; margin-bottom: 6px;">No Equipment Currently Assigned</h4>
-            <p style="font-size: 13px;">This employee does not have any gloves, sleeves, blankets, or safety equipment checked out in active inventory.</p>
+            <h4 style="color: var(--text-primary); font-size: 15px; margin-bottom: 6px;">No Equipment Records Found</h4>
+            <p style="font-size: 13px;">This employee does not have any active equipment checked out or recorded in equipment history.</p>
           </div>
         `;
       }
 
-      // Calculate counts for each equipment category
+      // Calculate counts for each equipment category (Active)
       const countAll = allEq.length;
       const countGlovesSleeves = allEq.filter(e => e.eqKey === 'gloves' || e.eqKey === 'sleeves').length;
       const countBlankets = allEq.filter(e => e.eqKey === 'blankets').length;
@@ -622,29 +827,38 @@ class EmployeeProfileEngine {
         { key: 'aed', title: 'AED', icon: '🏥', count: countAed }
       ];
 
-      // Filter items according to active category
+      // Filter active items and history items according to active category
       let filteredEquipment = allEq;
+      let filteredHistory = allHist;
+
       if (this.currentEquipmentFilter === 'gloves_sleeves') {
         filteredEquipment = allEq.filter(e => e.eqKey === 'gloves' || e.eqKey === 'sleeves');
+        filteredHistory = allHist.filter(h => h.eqKey === 'gloves' || h.eqKey === 'sleeves');
       } else if (this.currentEquipmentFilter === 'blankets') {
         filteredEquipment = allEq.filter(e => e.eqKey === 'blankets');
+        filteredHistory = allHist.filter(h => h.eqKey === 'blankets');
       } else if (this.currentEquipmentFilter === 'macks') {
         filteredEquipment = allEq.filter(e => e.eqKey === 'macks');
+        filteredHistory = allHist.filter(h => h.eqKey === 'macks');
       } else if (this.currentEquipmentFilter === 'grounds') {
         filteredEquipment = allEq.filter(e => e.eqKey === 'grounds');
+        filteredHistory = allHist.filter(h => h.eqKey === 'grounds');
       } else if (this.currentEquipmentFilter === 'hot_sticks') {
         filteredEquipment = allEq.filter(e => e.eqKey === 'hot_sticks');
+        filteredHistory = allHist.filter(h => h.eqKey === 'hot_sticks');
       } else if (this.currentEquipmentFilter === 'hv_testers') {
         filteredEquipment = allEq.filter(e => e.eqKey === 'hv_testers' || e.eqKey === 'phasing_sets');
+        filteredHistory = allHist.filter(h => h.eqKey === 'hv_testers' || h.eqKey === 'phasing_sets');
       } else if (this.currentEquipmentFilter === 'aed') {
         filteredEquipment = allEq.filter(e => e.eqKey === 'aed');
+        filteredHistory = allHist.filter(h => h.eqKey === 'aed');
       }
 
       const activeCat = categories.find(c => c.key === this.currentEquipmentFilter) || categories[0];
 
       let html = `
         <!-- Equipment Category Sub-Tabs -->
-        <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; padding: 6px; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color);">
+        <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; padding: 6px; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color);">
           ${categories.map(cat => {
             const isActive = this.currentEquipmentFilter === cat.key;
             const hasItems = cat.count > 0;
@@ -663,78 +877,168 @@ class EmployeeProfileEngine {
         </div>
       `;
 
-      if (filteredEquipment.length === 0) {
+      // 1. Currently Active Equipment Section
+      if (filteredEquipment.length > 0) {
         html += `
-          <div style="padding: 36px; text-align: center; color: var(--text-muted); background: var(--bg-primary); border-radius: 8px; border: 1px dashed var(--border-color);">
-            <div style="font-size: 32px; margin-bottom: 8px;">${activeCat.icon}</div>
-            <h4 style="color: var(--text-primary); font-size: 15px; margin-bottom: 4px;">No ${this.escapeHtml(activeCat.title)} Assigned</h4>
-            <p style="font-size: 13px;">${this.escapeHtml(data.displayName)} does not currently have any items assigned in this category.</p>
+          <div style="margin-bottom: 24px;">
+            <div style="font-size: 13px; font-weight: 800; color: #4ade80; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+              <span>🟢</span> Currently Active ${this.escapeHtml(activeCat.title)} (${filteredEquipment.length})
+            </div>
+            <div style="overflow-x: auto;">
+              <table class="data-table" style="width: 100%; font-size: 12.5px;">
+                <thead>
+                  <tr>
+                    <th style="text-align: left;">Equipment Type</th>
+                    <th style="text-align: center;">Item # / Tag</th>
+                    <th style="text-align: left;">Specifications</th>
+                    <th style="text-align: center;">Test / Cal Date</th>
+                    <th style="text-align: center;">Date Assigned</th>
+                    <th style="text-align: center;">Change Out Date</th>
+                    <th style="text-align: center;">Location</th>
+                    <th style="text-align: center;">Status</th>
+                    <th style="text-align: center;">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+        `;
+
+        filteredEquipment.forEach(item => {
+          html += `
+            <tr>
+              <td style="font-weight: 700; text-align: left;">
+                <span style="margin-right: 6px;">${item.eqIcon}</span> ${this.escapeHtml(item.eqType)}
+              </td>
+              <td style="text-align: center; font-family: monospace; font-weight: 800; color: #60a5fa;">
+                ${this.escapeHtml(item.itemNum)}
+                ${item.eslId ? `<div style="font-size: 10px; color: #94a3b8; font-weight: normal;">ESL: ${this.escapeHtml(item.eslId)}</div>` : ''}
+              </td>
+              <td style="text-align: left; color: var(--text-secondary); font-size: 11.5px;">
+                ${this.escapeHtml(item.specs)}
+              </td>
+              <td style="text-align: center; color: var(--text-secondary);">
+                ${this.escapeHtml(item.testDate)}
+              </td>
+              <td style="text-align: center; color: var(--text-secondary);">
+                ${this.escapeHtml(item.dateAssigned)}
+              </td>
+              <td style="text-align: center; font-weight: 700; color: #facc15;">
+                ${this.escapeHtml(item.changeOutDate)}
+              </td>
+              <td style="text-align: center;">
+                <span class="badge" style="background: rgba(139, 92, 246, 0.2); color: #c4b5fd; padding: 2px 6px; border-radius: 4px; font-size: 11px;">
+                  📍 ${this.escapeHtml(item.location)}
+                </span>
+              </td>
+              <td style="text-align: center;">
+                <span class="badge" style="background: #16a34a; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">
+                  ✅ ${this.escapeHtml(item.status)}
+                </span>
+              </td>
+              <td style="text-align: center;">
+                <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px;" title="Inspect item lifecycle dossier" onclick="if(window.itemStatsEngine){window.itemStatsEngine.openDossierModal('${this.escapeHtml(item.itemNum)}', '${this.escapeHtml(item.histKey)}');}">
+                  📊 Dossier
+                </button>
+              </td>
+            </tr>
+          `;
+        });
+
+        html += `</tbody></table></div></div>`;
+      } else {
+        html += `
+          <div style="padding: 16px 20px; text-align: center; color: var(--text-muted); background: var(--bg-primary); border-radius: 8px; border: 1px dashed var(--border-color); margin-bottom: 24px;">
+            <div style="font-size: 13px; color: var(--text-secondary);">No active <strong>${this.escapeHtml(activeCat.title)}</strong> currently checked out to this employee.</div>
           </div>
         `;
-        return html;
       }
 
+      // 2. Assignment History & Return Log Section
       html += `
-        <div style="overflow-x: auto;">
-          <table class="data-table" style="width: 100%; font-size: 12.5px;">
-            <thead>
-              <tr>
-                <th style="text-align: left;">Equipment Type</th>
-                <th style="text-align: center;">Item # / Tag</th>
-                <th style="text-align: left;">Specifications</th>
-                <th style="text-align: center;">Test / Cal Date</th>
-                <th style="text-align: center;">Date Assigned</th>
-                <th style="text-align: center;">Change Out Date</th>
-                <th style="text-align: center;">Location</th>
-                <th style="text-align: center;">Status</th>
-                <th style="text-align: center;">Action</th>
-              </tr>
-            </thead>
-            <tbody>
+        <div style="margin-top: 10px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; border-bottom: 1px solid var(--border-color); padding-bottom: 6px; flex-wrap: wrap; gap: 6px;">
+            <div style="font-size: 13px; font-weight: 800; color: #93c5fd; display: flex; align-items: center; gap: 6px;">
+              <span>📜</span> ${this.escapeHtml(activeCat.title)} Assignment & Return History (${filteredHistory.length} Logged Record${filteredHistory.length === 1 ? '' : 's'})
+            </div>
+            <div style="font-size: 11px; color: var(--text-muted);">
+              Chronological log with issue dates, return dates, and duration held
+            </div>
+          </div>
+
+          ${filteredHistory.length === 0 ? `
+            <div style="padding: 24px; text-align: center; color: var(--text-muted); background: var(--bg-primary); border-radius: 8px; border: 1px dashed var(--border-color);">
+              <p style="font-size: 12.5px; margin: 0;">No previous return logs or archived assignments found in ${this.escapeHtml(activeCat.title)} history.</p>
+            </div>
+          ` : `
+            <div style="overflow-x: auto;">
+              <table class="data-table" style="width: 100%; font-size: 12px;">
+                <thead>
+                  <tr>
+                    <th style="text-align: left;">Equipment</th>
+                    <th style="text-align: center;">Item #</th>
+                    <th style="text-align: left;">Specifications</th>
+                    <th style="text-align: center;">Issue Date</th>
+                    <th style="text-align: center;">Return Date</th>
+                    <th style="text-align: center;">Duration</th>
+                    <th style="text-align: left;">Return Destination / Status</th>
+                    <th style="text-align: center;">Location</th>
+                    <th style="text-align: left;">Notes</th>
+                    <th style="text-align: center;">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${filteredHistory.map(h => `
+                    <tr>
+                      <td style="font-weight: 700; text-align: left;">
+                        <span style="margin-right: 4px;">${h.eqIcon}</span> ${this.escapeHtml(h.eqType)}
+                      </td>
+                      <td style="text-align: center; font-family: monospace; font-weight: 800; color: #60a5fa;">
+                        ${this.escapeHtml(h.itemNum)}
+                      </td>
+                      <td style="text-align: left; color: var(--text-secondary); font-size: 11px;">
+                        ${this.escapeHtml(h.specs)}
+                      </td>
+                      <td style="text-align: center; font-weight: 700; color: #94a3b8;">
+                        📅 ${this.escapeHtml(h.issueDate)}
+                      </td>
+                      <td style="text-align: center; font-weight: 700;">
+                        ${h.isCurrent ? `
+                          <span class="badge" style="background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4); padding: 2px 8px; border-radius: 4px;">
+                            🟢 Present (Active)
+                          </span>
+                        ` : (h.returnDate && h.returnDate !== '—' ? `
+                          <span style="color: #f87171;">↩️ ${this.escapeHtml(h.returnDate)}</span>
+                        ` : `<span style="color: var(--text-muted);">—</span>`)}
+                      </td>
+                      <td style="text-align: center; font-weight: 600; color: #cbd5e1;">
+                        ${this.escapeHtml(h.duration)}
+                      </td>
+                      <td style="text-align: left;">
+                        <span class="badge" style="background: ${h.isCurrent ? 'rgba(34, 197, 94, 0.15)' : 'rgba(148, 163, 184, 0.15)'}; color: ${h.isCurrent ? '#4ade80' : '#cbd5e1'}; padding: 2px 6px; border-radius: 4px; font-size: 11px;">
+                          ${this.escapeHtml(h.returnStatus)}
+                        </span>
+                      </td>
+                      <td style="text-align: center;">
+                        <span class="badge" style="background: rgba(139, 92, 246, 0.15); color: #c4b5fd; padding: 2px 6px; border-radius: 4px; font-size: 11px;">
+                          📍 ${this.escapeHtml(h.location || '—')}
+                        </span>
+                      </td>
+                      <td style="text-align: left; font-size: 11px; color: var(--text-muted); max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${this.escapeHtml(h.notes || '')}">
+                        ${this.escapeHtml(h.notes || '—')}
+                      </td>
+                      <td style="text-align: center;">
+                        <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 11px;" title="View item complete lifecycle" onclick="if(window.itemStatsEngine){window.itemStatsEngine.openDossierModal('${this.escapeHtml(h.itemNum)}', '${this.escapeHtml(h.histKey)}');}">
+                          📊 Dossier
+                        </button>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          `}
+        </div>
       `;
 
-      filteredEquipment.forEach(item => {
-        html += `
-          <tr>
-            <td style="font-weight: 700; text-align: left;">
-              <span style="margin-right: 6px;">${item.eqIcon}</span> ${this.escapeHtml(item.eqType)}
-            </td>
-            <td style="text-align: center; font-family: monospace; font-weight: 800; color: #60a5fa;">
-              ${this.escapeHtml(item.itemNum)}
-              ${item.eslId ? `<div style="font-size: 10px; color: #94a3b8; font-weight: normal;">ESL: ${this.escapeHtml(item.eslId)}</div>` : ''}
-            </td>
-            <td style="text-align: left; color: var(--text-secondary); font-size: 11.5px;">
-              ${this.escapeHtml(item.specs)}
-            </td>
-            <td style="text-align: center; color: var(--text-secondary);">
-              ${this.escapeHtml(item.testDate)}
-            </td>
-            <td style="text-align: center; color: var(--text-secondary);">
-              ${this.escapeHtml(item.dateAssigned)}
-            </td>
-            <td style="text-align: center; font-weight: 700; color: #facc15;">
-              ${this.escapeHtml(item.changeOutDate)}
-            </td>
-            <td style="text-align: center;">
-              <span class="badge" style="background: rgba(139, 92, 246, 0.2); color: #c4b5fd; padding: 2px 6px; border-radius: 4px; font-size: 11px;">
-                📍 ${this.escapeHtml(item.location)}
-              </span>
-            </td>
-            <td style="text-align: center;">
-              <span class="badge" style="background: #16a34a; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 11px;">
-                ✅ ${this.escapeHtml(item.status)}
-              </span>
-            </td>
-            <td style="text-align: center;">
-              <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px;" title="Inspect item lifecycle dossier" onclick="if(window.itemStatsEngine){window.itemStatsEngine.openDossierModal('${this.escapeHtml(item.itemNum)}', '${this.escapeHtml(item.histKey)}');}">
-                📊 Dossier
-              </button>
-            </td>
-          </tr>
-        `;
-      });
-
-      html += `</tbody></table></div>`;
       return html;
     }
 
