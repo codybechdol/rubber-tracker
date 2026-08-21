@@ -118,3 +118,74 @@ ipcMain.handle('select-snapshot-file', async () => {
   }
   return null;
 });
+
+// Native HTTPS Sync Bridge (bypasses browser CORS & redirects seamlessly)
+const https = require('https');
+
+function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null) {
+  return new Promise((resolve, reject) => {
+    function requestWithRedirect(currentUrl, currentMethod, currentData, redirectCount = 0) {
+      if (redirectCount > 5) {
+        return reject(new Error('Too many redirects'));
+      }
+
+      const parsedUrl = new URL(currentUrl);
+      const isPost = currentMethod === 'POST';
+      const postBody = currentData ? (typeof currentData === 'string' ? currentData : JSON.stringify(currentData)) : null;
+
+      const options = {
+        hostname: parsedUrl.hostname,
+        path: parsedUrl.pathname + parsedUrl.search,
+        method: currentMethod,
+        headers: {}
+      };
+
+      if (isPost && postBody) {
+        options.headers['Content-Type'] = 'text/plain;charset=utf-8';
+        options.headers['Content-Length'] = Buffer.byteLength(postBody);
+      }
+
+      const req = https.request(options, (res) => {
+        // Automatically follow Google Apps Script 302/307 redirects to echo URL
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          let redirectUrl = res.headers.location;
+          if (!redirectUrl.startsWith('http')) {
+            redirectUrl = new URL(redirectUrl, currentUrl).href;
+          }
+          return requestWithRedirect(redirectUrl, 'GET', null, redirectCount + 1);
+        }
+
+        let responseBody = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => { responseBody += chunk; });
+        res.on('end', () => {
+          try {
+            const json = JSON.parse(responseBody);
+            resolve({ success: true, statusCode: res.statusCode, data: json });
+          } catch (e) {
+            resolve({ success: false, statusCode: res.statusCode, raw: responseBody, error: 'Web App returned non-JSON response. Please verify in Google Sheets: Extensions > Apps Script > Deploy > Manage deployments, and ensure "Who has access" is set to "Anyone".' });
+          }
+        });
+      });
+
+      req.on('error', (err) => {
+        reject(err);
+      });
+
+      if (isPost && postBody) {
+        req.write(postBody);
+      }
+      req.end();
+    }
+
+    requestWithRedirect(targetUrl, method, data);
+  });
+}
+
+ipcMain.handle('send-sync-request', async (event, { url, method, body }) => {
+  try {
+    return await makeGoogleAppsScriptRequest(url, method, body);
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});

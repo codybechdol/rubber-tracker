@@ -20,6 +20,34 @@ class SyncEngine {
     localStorage.setItem('sa_sync_url', this.syncUrl);
   }
 
+  async executeNetworkRequest(url, method = 'GET', body = null) {
+    // 1. If running inside Electron desktop app, use native Node HTTPS bridge
+    if (window.desktopAPI && typeof window.desktopAPI.sendSyncRequest === 'function') {
+      try {
+        const res = await window.desktopAPI.sendSyncRequest({ url, method, body });
+        if (res && res.success && res.data) {
+          return res.data;
+        } else if (res && res.data) {
+          return res.data;
+        } else if (res && res.error) {
+          throw new Error(res.error);
+        }
+      } catch (ipcErr) {
+        console.warn('Native Electron sync bridge error, trying browser fetch fallback:', ipcErr);
+      }
+    }
+
+    // 2. Browser fetch fallback
+    const options = { method };
+    if (method === 'POST' && body) {
+      options.headers = { 'Content-Type': 'text/plain;charset=utf-8' };
+      options.body = typeof body === 'string' ? body : JSON.stringify(body);
+    }
+    const resp = await fetch(url, options);
+    const text = await resp.text();
+    return JSON.parse(text);
+  }
+
   async testConnection() {
     if (!this.syncUrl) return { success: false, message: 'Please enter your Google Apps Script Web App URL.' };
     
@@ -31,19 +59,13 @@ class SyncEngine {
     }
 
     try {
-      const resp = await fetch(`${this.syncUrl}?action=ping`, { method: 'GET' });
-      const text = await resp.text();
-      try {
-        const data = JSON.parse(text);
-        return { success: data.status === 'ok', data };
-      } catch (parseErr) {
-        return { 
-          success: false, 
-          message: 'The URL did not return a valid Apps Script response. Make sure the Web App deployment has "Who has access" set to "Anyone".' 
-        };
-      }
+      const data = await this.executeNetworkRequest(`${this.syncUrl}?action=ping`, 'GET');
+      return { success: data && (data.status === 'ok' || data.success === true), data };
     } catch (e) {
-      return { success: false, message: e.message };
+      return { 
+        success: false, 
+        message: e.message || 'Connection failed. Please ensure "Who has access" is set to "Anyone" in Deploy > Manage deployments.' 
+      };
     }
   }
 
@@ -287,44 +309,24 @@ class SyncEngine {
         this.updateStatusUI('syncing', `Pushing ${outbox.length} offline change(s)...`);
         
         let pushResult = null;
-        let pushSucceeded = false;
-
-        // Attempt 1: Try HTTP POST
         try {
-          const pushResp = await fetch(this.syncUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({
-              action: 'applyMutations',
-              mutations: outbox,
-              returnSnapshot: true
-            })
+          pushResult = await this.executeNetworkRequest(this.syncUrl, 'POST', {
+            action: 'applyMutations',
+            mutations: outbox,
+            returnSnapshot: false
           });
-          const rawText = await pushResp.text();
+        } catch (pushErr) {
+          console.warn('POST sync failed, trying GET sync:', pushErr);
           try {
-            pushResult = JSON.parse(rawText);
-            if (pushResult && (pushResult.success === true || pushResult.status === 'ok' || pushResult.appliedCount !== undefined)) {
-              pushSucceeded = true;
-            }
-          } catch (parseE) { /* ignore to try GET fallback */ }
-        } catch (postE) {
-          console.warn('POST sync attempt failed, trying GET fallback:', postE);
-        }
-
-        // Attempt 2: Fallback to HTTP GET (bypasses Google Apps Script POST auth issues)
-        if (!pushSucceeded) {
-          try {
-            const getUrl = `${this.syncUrl}?action=applyMutations&mutations=${encodeURIComponent(JSON.stringify(outbox))}&returnSnapshot=true`;
-            const getResp = await fetch(getUrl, { method: 'GET' });
-            const rawGetText = await getResp.text();
-            pushResult = JSON.parse(rawGetText);
-            if (pushResult && (pushResult.success === true || pushResult.status === 'ok' || pushResult.appliedCount !== undefined)) {
-              pushSucceeded = true;
-            }
-          } catch (getE) {
-            console.warn('GET sync fallback failed:', getE);
+            const getUrl = `${this.syncUrl}?action=applyMutations&mutations=${encodeURIComponent(JSON.stringify(outbox))}&returnSnapshot=false`;
+            pushResult = await this.executeNetworkRequest(getUrl, 'GET');
+          } catch (getErr) {
+            console.error('All push attempts failed:', getErr);
+            throw new Error(getErr.message || pushErr.message || 'Push failed');
           }
         }
+
+        const isSuccess = pushResult && (pushResult.success === true || pushResult.status === 'ok' || pushResult.appliedCount !== undefined);
 
         if (pushResult && pushResult.errors && pushResult.errors.length > 0) {
           console.warn('Sync server errors:', pushResult.errors);
@@ -332,7 +334,7 @@ class SyncEngine {
           this.updateStatusUI('pending', 'Sync error / Pending changes');
           this.isSyncing = false;
           return { success: false, errors: pushResult.errors };
-        } else if (pushSucceeded) {
+        } else if (isSuccess) {
           // Clear outbox once successfully sent to server
           await this.db.clearOutbox();
 
@@ -368,15 +370,7 @@ class SyncEngine {
       // Step 2: Pull fresh database snapshot (for pull-only sync or fallback)
       if (this.syncUrl) {
         this.updateStatusUI('syncing', 'Downloading latest snapshot...');
-        const getResp = await fetch(`${this.syncUrl}?action=getSnapshot`, { method: 'GET' });
-        const rawText = await getResp.text();
-        let freshSnapshot = null;
-        try {
-          freshSnapshot = JSON.parse(rawText);
-        } catch (parseE) {
-          console.warn('Failed to parse snapshot JSON:', parseE, rawText);
-          throw new Error('Web App returned HTML/login redirect instead of JSON. In Google Sheets: go to Extensions > Apps Script > Deploy > Manage deployments > Edit > set "Who has access: Anyone" > Deploy.');
-        }
+        const freshSnapshot = await this.executeNetworkRequest(`${this.syncUrl}?action=getSnapshot`, 'GET');
 
         if (freshSnapshot && freshSnapshot.tables) {
           await this.db.setSnapshot(freshSnapshot);
@@ -399,6 +393,8 @@ class SyncEngine {
           return { success: true, snapshot: freshSnapshot };
         } else if (freshSnapshot && freshSnapshot.error) {
           throw new Error(freshSnapshot.error);
+        } else {
+          throw new Error('Web App returned non-JSON response. Please verify in Google Sheets: Extensions > Apps Script > Deploy > Manage deployments, and ensure "Who has access" is set to "Anyone".');
         }
       }
 

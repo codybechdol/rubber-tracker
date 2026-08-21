@@ -1045,11 +1045,13 @@ function applyBatchSyncMutations(mutations, returnSnapshot) {
     }
   }
 
-  // Save snapshot file to Drive (reusing the already generated snapshot!)
-  try {
-    generateAndStoreSyncSnapshot(snapshot);
-  } catch (snapErr) {
-    Logger.log('applyBatchSyncMutations Drive snapshot error: ' + snapErr);
+  // Save snapshot file to Drive ONLY if snapshot was generated
+  if (snapshot) {
+    try {
+      generateAndStoreSyncSnapshot(snapshot);
+    } catch (snapErr) {
+      Logger.log('applyBatchSyncMutations Drive snapshot error: ' + snapErr);
+    }
   }
 
   return {
@@ -1084,6 +1086,7 @@ function doGet(e) {
         .setMimeType(ContentService.MimeType.JSON);
     } catch (mutErr) {
       return ContentService.createTextOutput(JSON.stringify({
+        status: 'error',
         success: false,
         error: mutErr.toString()
       })).setMimeType(ContentService.MimeType.JSON);
@@ -1097,6 +1100,7 @@ function doGet(e) {
       .setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
     return ContentService.createTextOutput(JSON.stringify({
+      status: 'error',
       error: err.toString()
     })).setMimeType(ContentService.MimeType.JSON);
   }
@@ -1109,10 +1113,10 @@ function doPost(e) {
   try {
     var rawBody = e.postData ? e.postData.contents : '{}';
     var payload = JSON.parse(rawBody);
-    var action = payload.action || 'sync';
+    var action = payload.action || 'applyMutations';
 
-    if (action === 'applyMutations') {
-      var returnSnap = payload.returnSnapshot !== false;
+    if (action === 'applyMutations' || action === 'sync') {
+      var returnSnap = payload.returnSnapshot === true;
       var result = applyBatchSyncMutations(payload.mutations || [], returnSnap);
       return ContentService.createTextOutput(JSON.stringify(result))
         .setMimeType(ContentService.MimeType.JSON);

@@ -5,5 +5,6 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   saveLocalSnapshot: (snapshot) => ipcRenderer.invoke('save-local-snapshot', snapshot),
   getLocalOutbox: () => ipcRenderer.invoke('get-local-outbox'),
   saveLocalOutbox: (outbox) => ipcRenderer.invoke('save-local-outbox', outbox),
-  selectSnapshotFile: () => ipcRenderer.invoke('select-snapshot-file')
+  selectSnapshotFile: () => ipcRenderer.invoke('select-snapshot-file'),
+  sendSyncRequest: (options) => ipcRenderer.invoke('send-sync-request', options)
 });
