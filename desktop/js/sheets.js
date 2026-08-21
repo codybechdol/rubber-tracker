@@ -1056,7 +1056,12 @@ class SheetNavigator {
         return dB - dA;
       });
 
-      const selectedWeek = this.selectedComplianceWeek || 'ALL';
+      // Default to latest week on open if not explicitly selected
+      if (this.selectedComplianceWeek === undefined && uniqueWeeks.length > 0) {
+        this.selectedComplianceWeek = uniqueWeeks[0];
+      }
+
+      const selectedWeek = this.selectedComplianceWeek || (uniqueWeeks[0] || 'ALL');
       if (selectedWeek !== 'ALL') {
         rows = rows.filter(r => String(r['Week Start'] || r['Week'] || '').trim() === selectedWeek);
       }
@@ -1067,11 +1072,14 @@ class SheetNavigator {
       }
 
       // Compute KPI summary metrics for active view
-      const totalAll = (tableData.rows || []).length;
-      const compAll = (tableData.rows || []).filter(r => String(r['Status'] || '').toLowerCase() === 'complete').length;
-      const missingAll = (tableData.rows || []).filter(r => String(r['Status'] || '').toLowerCase().includes('missing')).length;
-      const pendingAll = (tableData.rows || []).filter(r => String(r['Status'] || '').toLowerCase() === 'pending').length;
-      const resolvedAll = (tableData.rows || []).filter(r => String(r['Status'] || '').toLowerCase() === 'resolved').length;
+      const activeRows = selectedWeek !== 'ALL' 
+        ? (tableData.rows || []).filter(r => String(r['Week Start'] || r['Week'] || '').trim() === selectedWeek)
+        : (tableData.rows || []);
+      const totalAll = activeRows.length;
+      const compAll = activeRows.filter(r => String(r['Status'] || '').toLowerCase() === 'complete').length;
+      const missingAll = activeRows.filter(r => String(r['Status'] || '').toLowerCase().includes('missing')).length;
+      const pendingAll = activeRows.filter(r => String(r['Status'] || '').toLowerCase() === 'pending').length;
+      const resolvedAll = activeRows.filter(r => String(r['Status'] || '').toLowerCase() === 'resolved').length;
       const pctAll = totalAll > 0 ? Math.round((compAll / totalAll) * 100) : 0;
 
       presetBarHtml = `
