@@ -1053,6 +1053,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot) {
   }
 
   return {
+    status: errors.length === 0 ? 'ok' : 'error',
     success: errors.length === 0,
     appliedCount: appliedCount,
     errors: errors,

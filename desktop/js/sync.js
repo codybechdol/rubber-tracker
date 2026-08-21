@@ -303,7 +303,7 @@ class SyncEngine {
           const rawText = await pushResp.text();
           try {
             pushResult = JSON.parse(rawText);
-            if (pushResult && (pushResult.success || pushResult.appliedCount !== undefined)) {
+            if (pushResult && (pushResult.success === true || pushResult.status === 'ok' || pushResult.appliedCount !== undefined)) {
               pushSucceeded = true;
             }
           } catch (parseE) { /* ignore to try GET fallback */ }
@@ -318,7 +318,7 @@ class SyncEngine {
             const getResp = await fetch(getUrl, { method: 'GET' });
             const rawGetText = await getResp.text();
             pushResult = JSON.parse(rawGetText);
-            if (pushResult && (pushResult.success || pushResult.appliedCount !== undefined)) {
+            if (pushResult && (pushResult.success === true || pushResult.status === 'ok' || pushResult.appliedCount !== undefined)) {
               pushSucceeded = true;
             }
           } catch (getE) {
@@ -332,12 +332,12 @@ class SyncEngine {
           this.updateStatusUI('pending', 'Sync error / Pending changes');
           this.isSyncing = false;
           return { success: false, errors: pushResult.errors };
-        } else if (pushSucceeded && pushResult) {
+        } else if (pushSucceeded) {
           // Clear outbox once successfully sent to server
           await this.db.clearOutbox();
 
           // If the server returned the fresh snapshot in the same response, consume it immediately (single round-trip!)
-          if (pushResult.snapshot && pushResult.snapshot.tables) {
+          if (pushResult && pushResult.snapshot && pushResult.snapshot.tables) {
             await this.db.setSnapshot(pushResult.snapshot);
             if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
             if (window.historyNavigator) window.historyNavigator.renderCurrentHistory();
@@ -354,7 +354,7 @@ class SyncEngine {
             return { success: true, snapshot: pushResult.snapshot };
           }
 
-          this.renderModalChanges(outbox, `✅ Pushed ${outbox.length} change(s) successfully! Downloading fresh snapshot...`, 'success', false);
+          this.renderModalChanges(outbox, `✅ Pushed ${outbox.length} change(s) successfully! Downloading fresh snapshot...`, 'syncing', false);
         } else {
           console.warn('Invalid server response during push:', pushResult);
           const msg = (pushResult && pushResult.error) ? pushResult.error : 'Web App returned non-JSON response. Please verify in Google Sheets: Extensions > Apps Script > Deploy > Manage deployments, and ensure "Who has access" is set to "Anyone".';
