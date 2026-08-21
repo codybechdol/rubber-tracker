@@ -329,15 +329,37 @@ class TripPlannerApp {
                 <div style="color: #94a3b8; font-size: 11px;">Distance: <strong>${this.escapeHtml(this.getDriveTime(trip.location).desc)}</strong></div>
                 ${locInfo && locInfo.activeCrews.length > 0 ? `
                   <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.08);">
-                    <div style="font-size: 11px; font-weight: 700; color: #4ade80; margin-bottom: 4px;">
-                      🟢 Active Crews (${locInfo.activeCrews.length}):
+                    <div style="font-size: 11px; font-weight: 700; color: #4ade80; margin-bottom: 6px;">
+                      🟢 Active Crews & Field Tasks (${locInfo.activeCrews.length}):
                     </div>
-                    ${locInfo.activeCrews.map(c => `
-                      <div style="font-size: 11px; color: #cbd5e1; display: flex; justify-content: space-between;">
-                        <span><strong>Crew ${this.escapeHtml(c.crewId)}</strong> (${this.escapeHtml(c.foreman)})</span>
-                        <span style="color: #94a3b8;">${c.crewSize ? `${c.crewSize} wkr` : ''}</span>
-                      </div>
-                    `).join('')}
+                    ${locInfo.activeCrews.map(c => {
+                      const crewTasks = window.taskManager ? window.taskManager.getTasksByCrew(c.crewId) : [];
+                      return `
+                        <div style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.06); border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
+                          <div style="font-size: 11.5px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                            <span><strong style="color: #60a5fa;">Crew ${this.escapeHtml(c.crewId)}</strong> (${this.escapeHtml(c.foreman)})</span>
+                            <span class="badge" style="background: ${crewTasks.length > 0 ? 'rgba(245, 158, 11, 0.2)' : 'rgba(16, 185, 129, 0.2)'}; color: ${crewTasks.length > 0 ? '#facc15' : '#4ade80'}; font-size: 10px; padding: 1px 6px;">
+                              ${crewTasks.length > 0 ? `📋 ${crewTasks.length} task${crewTasks.length > 1 ? 's' : ''}` : '✓ Current'}
+                            </span>
+                          </div>
+                          ${crewTasks.length > 0 ? `
+                            <div style="display: flex; flex-direction: column; gap: 3px; margin-top: 4px; padding-left: 4px; border-left: 2px solid rgba(245, 158, 11, 0.5);">
+                              ${crewTasks.slice(0, 4).map(t => `
+                                <div style="font-size: 10.5px; color: ${t.isOverdue ? '#f87171' : '#e2e8f0'}; display: flex; justify-content: space-between;">
+                                  <span>• ${this.escapeHtml(t.type)}: ${this.escapeHtml(t.itemType)} (${this.escapeHtml(t.employee)})</span>
+                                  <span style="font-size: 9.5px; color: var(--text-muted);">${this.escapeHtml(t.dueDate)}</span>
+                                </div>
+                              `).join('')}
+                              ${crewTasks.length > 4 ? `
+                                <div style="font-size: 10px; color: #93c5fd; font-style: italic;">+ ${crewTasks.length - 4} more tasks (see Tasks & Calendar)</div>
+                              ` : ''}
+                            </div>
+                          ` : `
+                            <div style="font-size: 10px; color: #94a3b8; font-style: italic;">No pending swaps or trainings</div>
+                          `}
+                        </div>
+                      `;
+                    }).join('')}
                   </div>
                 ` : `
                   <div style="margin-top: 4px; font-size: 11px; color: #94a3b8;">Base / Non-crew visit</div>
@@ -431,6 +453,8 @@ class TripPlannerApp {
       card.style.background = 'var(--bg-primary)';
 
       const totalWorkers = loc.activeCrews.reduce((sum, c) => sum + (c.crewSize || 0), 0);
+      const locTasks = window.taskManager ? window.taskManager.getTasksByLocation(loc.name) : [];
+      const overdueTasks = locTasks.filter(t => t.isOverdue).length;
 
       card.innerHTML = `
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 2px;">
@@ -450,6 +474,12 @@ class TripPlannerApp {
               <div style="color: #cbd5e1; font-size: 10px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${loc.activeCrews.map(c => `Crew ${c.crewId} (${c.foreman})`).join(', ')}">
                 ${loc.activeCrews.map(c => `<strong>${this.escapeHtml(c.crewId)}</strong> (${this.escapeHtml(c.foreman)})`).join(', ')}
               </div>
+              ${locTasks.length > 0 ? `
+                <div style="margin-top: 4px; padding-top: 3px; border-top: 1px solid rgba(255,255,255,0.06); font-size: 10px; color: ${overdueTasks > 0 ? '#f87171' : '#facc15'}; display: flex; justify-content: space-between;">
+                  <span>📋 ${locTasks.length} task${locTasks.length > 1 ? 's' : ''} pending</span>
+                  ${overdueTasks > 0 ? `<span>(${overdueTasks} overdue)</span>` : ''}
+                </div>
+              ` : ''}
             </div>
           ` : `
             <div style="margin-top: 4px; color: #64748b; font-size: 10.5px;">⚪ Standby Location</div>

@@ -184,10 +184,37 @@
 
       <!-- View 3: Tasks & Calendar -->
       <section id="tasks-view" class="view-container">
-        <div class="sheet-toolbar">
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <h2 style="font-size: 16px;">📋 Tasks & Scheduled Swaps</h2>
-            <span class="brand-badge" id="tasks-total-badge">0 tasks</span>
+        <div class="sheet-toolbar" style="display: flex; flex-direction: column; gap: 10px; padding: 12px 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <h2 style="font-size: 16px; margin: 0;">📋 Tasks & Crew Work Checklist</h2>
+              <span class="brand-badge" id="tasks-total-badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 11px; font-weight: 700;">0 tasks</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <input type="text" id="tasks-search-input" placeholder="🔍 Search tasks, crew #, worker, or city..." style="width: 280px; padding: 6px 12px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+              <div style="display: flex; gap: 4px;">
+                <button class="btn btn-secondary active" id="btn-group-crew" style="padding: 5px 10px; font-size: 11px; font-weight: 700;" onclick="window.taskManager.setGrouping('crew')" title="Group tasks by Crew and Location">🏢 Group by Crew</button>
+                <button class="btn btn-secondary" id="btn-group-list" style="padding: 5px 10px; font-size: 11px;" onclick="window.taskManager.setGrouping('list')" title="Standard flat list view">📋 Flat List</button>
+              </div>
+            </div>
+          </div>
+          <!-- Filter Controls Row -->
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 11.5px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px;">
+            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+              <span style="color: var(--text-muted); font-weight: 600;">Category:</span>
+              <button class="btn btn-secondary active" id="task-cat-all" style="padding: 2px 8px; font-size: 11px;" onclick="window.taskManager.setCategory('All')">All Categories</button>
+              <button class="btn btn-secondary" id="task-cat-ppe" style="padding: 2px 8px; font-size: 11px;" onclick="window.taskManager.setCategory('PPE')">🧤 PPE Swaps</button>
+              <button class="btn btn-secondary" id="task-cat-equipment" style="padding: 2px 8px; font-size: 11px;" onclick="window.taskManager.setCategory('Equipment')">⚡ Tool & Equipment</button>
+              <button class="btn btn-secondary" id="task-cat-training" style="padding: 2px 8px; font-size: 11px;" onclick="window.taskManager.setCategory('Training')">🎓 Safety Training</button>
+              <button class="btn btn-secondary" id="task-cat-certs" style="padding: 2px 8px; font-size: 11px;" onclick="window.taskManager.setCategory('Certs')">📜 Certifications</button>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+              <span style="color: var(--text-muted); font-weight: 600;">Status:</span>
+              <button class="btn btn-secondary active" id="task-status-all" style="padding: 2px 8px; font-size: 11px;" onclick="window.taskManager.setStatus('All')">All Statuses</button>
+              <button class="btn btn-secondary" id="task-status-overdue" style="padding: 2px 8px; font-size: 11px; color: #f87171;" onclick="window.taskManager.setStatus('Overdue')">🔴 Overdue</button>
+              <button class="btn btn-secondary" id="task-status-unassigned" style="padding: 2px 8px; font-size: 11px; color: #facc15;" onclick="window.taskManager.setStatus('Unassigned')">⏳ Pending</button>
+              <button class="btn btn-secondary" id="task-status-complete" style="padding: 2px 8px; font-size: 11px; color: #4ade80;" onclick="window.taskManager.setStatus('Complete')">✅ Completed</button>
+            </div>
           </div>
         </div>
         <div style="flex: 1; padding: 20px; overflow-y: auto;" id="tasks-list-container"></div>
@@ -383,8 +410,8 @@
   <script src="js/employee-profile.js"></script>
   <script src="js/sheets.js"></script>
   <script src="js/history.js"></script>
-  <script src="js/trip-planner.js"></script>
   <script src="js/tasks.js"></script>
+  <script src="js/trip-planner.js"></script>
   <script src="js/lookup.js"></script>
 
   <script>
