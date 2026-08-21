@@ -258,12 +258,35 @@ class SheetNavigator {
         this.sortDir = 'asc';
       }
       this.multiSort = null;
+    } else if (type === 'weekStart') {
+      const col = findCol(['week start', 'week of', 'week']);
+      if (this.sortCol === col) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.sortCol = col;
+        this.sortDir = 'desc';
+      }
+      this.multiSort = null;
+    } else if (type === 'foreman') {
+      const col = findCol(['foreman', 'crew lead', 'lead']);
+      if (this.sortCol === col) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.sortCol = col;
+        this.sortDir = 'asc';
+      }
+      this.multiSort = null;
     }
     this.renderActiveView();
   }
 
   setComplianceWeek(weekStr) {
     this.selectedComplianceWeek = weekStr;
+    this.renderActiveView();
+  }
+
+  setComplianceStatus(statusStr) {
+    this.selectedComplianceStatus = statusStr;
     this.renderActiveView();
   }
 
@@ -885,6 +908,18 @@ class SheetNavigator {
       rows.sort((a, b) => {
         return dir * compareValues(col, a[col], b[col]);
       });
+    } else if (this.currentSheetKey === 'safety_compliance') {
+      // Default sort for Safety Compliance matching Google Sheets: Week Start (descending), then Job Number (ascending)
+      rows.sort((a, b) => {
+        const wA = String(a['Week Start'] || a['Week'] || '').trim();
+        const wB = String(b['Week Start'] || b['Week'] || '').trim();
+        const dateA = new Date(wA).getTime() || 0;
+        const dateB = new Date(wB).getTime() || 0;
+        if (dateA !== dateB) return dateB - dateA; // Most recent week first
+        const jA = String(a['Job Number'] || a['Crew'] || a['Job #'] || '').trim();
+        const jB = String(b['Job Number'] || b['Crew'] || b['Job #'] || '').trim();
+        return jA.localeCompare(jB, undefined, { numeric: true, sensitivity: 'base' });
+      });
     }
 
     if (countBadge) {
@@ -1009,11 +1044,16 @@ class SheetNavigator {
         </div>
       `;
     } else if (this.currentSheetKey === 'safety_compliance') {
-      // Find all unique weeks
+      // Find all unique weeks and sort descending (most recent first)
       const uniqueWeeks = [];
       (tableData.rows || []).forEach(r => {
         const w = String(r['Week Start'] || r['Week'] || '').trim();
         if (w && !uniqueWeeks.includes(w)) uniqueWeeks.push(w);
+      });
+      uniqueWeeks.sort((a, b) => {
+        const dA = new Date(a).getTime() || 0;
+        const dB = new Date(b).getTime() || 0;
+        return dB - dA;
       });
 
       const selectedWeek = this.selectedComplianceWeek || 'ALL';
@@ -1021,15 +1061,89 @@ class SheetNavigator {
         rows = rows.filter(r => String(r['Week Start'] || r['Week'] || '').trim() === selectedWeek);
       }
 
+      const selectedStatus = this.selectedComplianceStatus || 'ALL';
+      if (selectedStatus !== 'ALL') {
+        rows = rows.filter(r => String(r['Status'] || '').toLowerCase().includes(selectedStatus.toLowerCase()));
+      }
+
+      // Compute KPI summary metrics for active view
+      const totalAll = (tableData.rows || []).length;
+      const compAll = (tableData.rows || []).filter(r => String(r['Status'] || '').toLowerCase() === 'complete').length;
+      const missingAll = (tableData.rows || []).filter(r => String(r['Status'] || '').toLowerCase().includes('missing')).length;
+      const pendingAll = (tableData.rows || []).filter(r => String(r['Status'] || '').toLowerCase() === 'pending').length;
+      const resolvedAll = (tableData.rows || []).filter(r => String(r['Status'] || '').toLowerCase() === 'resolved').length;
+      const pctAll = totalAll > 0 ? Math.round((compAll / totalAll) * 100) : 0;
+
       presetBarHtml = `
-        <div style="padding: 8px 16px; background-color: var(--bg-secondary); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 6px; font-size: 12px; overflow-x: auto;">
-          <span style="color: var(--text-muted); font-weight: 600; white-space: nowrap;">📅 Filter Week:</span>
-          <button class="btn btn-secondary ${selectedWeek === 'ALL' ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px;" onclick="window.sheetNavigator.setComplianceWeek('ALL')">All Weeks</button>
-          ${uniqueWeeks.map(w => `
-            <button class="btn btn-secondary ${selectedWeek === w ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setComplianceWeek('${this.escapeHtml(w)}')">
-              Week of ${this.escapeHtml(w)}
-            </button>
-          `).join('')}
+        <div style="background: var(--bg-secondary); border-bottom: 1px solid var(--border-color);">
+          <!-- Top KPI Metrics Banner -->
+          <div style="padding: 10px 16px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(0,0,0,0.15);">
+            <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 4px 10px; display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 14px;">🚚</span>
+              <div>
+                <div style="font-size: 9.5px; text-transform: uppercase; color: var(--text-muted); font-weight: 700;">Total Rows</div>
+                <div style="font-size: 13px; font-weight: 800; color: #fff;">${totalAll}</div>
+              </div>
+            </div>
+            <div style="background: var(--bg-primary); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 6px; padding: 4px 10px; display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 14px;">✅</span>
+              <div>
+                <div style="font-size: 9.5px; text-transform: uppercase; color: #4ade80; font-weight: 700;">Compliant</div>
+                <div style="font-size: 13px; font-weight: 800; color: #4ade80;">${compAll}</div>
+              </div>
+            </div>
+            <div style="background: var(--bg-primary); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; padding: 4px 10px; display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 14px;">❌</span>
+              <div>
+                <div style="font-size: 9.5px; text-transform: uppercase; color: #f87171; font-weight: 700;">Missing</div>
+                <div style="font-size: 13px; font-weight: 800; color: #f87171;">${missingAll}</div>
+              </div>
+            </div>
+            <div style="background: var(--bg-primary); border: 1px solid rgba(234, 179, 8, 0.3); border-radius: 6px; padding: 4px 10px; display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 14px;">⏳</span>
+              <div>
+                <div style="font-size: 9.5px; text-transform: uppercase; color: #facc15; font-weight: 700;">Pending</div>
+                <div style="font-size: 13px; font-weight: 800; color: #facc15;">${pendingAll}</div>
+              </div>
+            </div>
+            ${resolvedAll > 0 ? `
+              <div style="background: var(--bg-primary); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; padding: 4px 10px; display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 14px;">🔵</span>
+                <div>
+                  <div style="font-size: 9.5px; text-transform: uppercase; color: #93c5fd; font-weight: 700;">Resolved</div>
+                  <div style="font-size: 13px; font-weight: 800; color: #93c5fd;">${resolvedAll}</div>
+                </div>
+              </div>
+            ` : ''}
+            <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 4px 10px; display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 14px;">📈</span>
+              <div>
+                <div style="font-size: 9.5px; text-transform: uppercase; color: #93c5fd; font-weight: 700;">Rate</div>
+                <div style="font-size: 13px; font-weight: 800; color: ${pctAll >= 100 ? '#4ade80' : (pctAll >= 80 ? '#60a5fa' : '#f87171')};">${pctAll}%</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Week Navigation & Filter Controls -->
+          <div style="padding: 8px 16px; display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; gap: 6px; overflow-x: auto; flex-wrap: wrap;">
+              <span style="color: var(--text-muted); font-weight: 600; white-space: nowrap;">📅 Filter Week:</span>
+              <button class="btn btn-secondary ${selectedWeek === 'ALL' ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setComplianceWeek('ALL')">All Weeks</button>
+              ${uniqueWeeks.map((w, idx) => `
+                <button class="btn btn-secondary ${selectedWeek === w ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setComplianceWeek('${this.escapeHtml(w)}')">
+                  ${idx === 0 ? '🟢 ' : ''}Week of ${this.escapeHtml(w)}${idx === 0 ? ' (Latest)' : ''}
+                </button>
+              `).join('')}
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+              <span style="color: var(--text-muted); font-weight: 600; white-space: nowrap;">⚡ Status:</span>
+              <button class="btn btn-secondary ${selectedStatus === 'ALL' ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px;" onclick="window.sheetNavigator.setComplianceStatus('ALL')">All</button>
+              <button class="btn btn-secondary ${selectedStatus === 'Missing' ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; color: #f87171;" onclick="window.sheetNavigator.setComplianceStatus('Missing')">❌ Missing</button>
+              <button class="btn btn-secondary ${selectedStatus === 'Pending' ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; color: #facc15;" onclick="window.sheetNavigator.setComplianceStatus('Pending')">⏳ Pending</button>
+              <button class="btn btn-secondary ${selectedStatus === 'Complete' ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; color: #4ade80;" onclick="window.sheetNavigator.setComplianceStatus('Complete')">✅ Complete</button>
+            </div>
+          </div>
         </div>
       `;
     } else if (this.currentSheetKey === 'expiring_certs') {
@@ -1107,10 +1221,36 @@ class SheetNavigator {
       // Week Divider Banner for Safety Compliance
       if (isCompliance && currentWeekVal && currentWeekVal !== lastRenderedWeek) {
         lastRenderedWeek = currentWeekVal;
+        
+        // Calculate stats for this specific week from all raw rows in this week
+        const weekRows = (tableData.rows || []).filter(r => String(r['Week Start'] || r['Week'] || '').trim() === currentWeekVal);
+        const totalInWeek = weekRows.length;
+        const compInWeek = weekRows.filter(r => String(r['Status'] || '').toLowerCase() === 'complete').length;
+        const missingInWeek = weekRows.filter(r => String(r['Status'] || '').toLowerCase().includes('missing')).length;
+        const pendingInWeek = weekRows.filter(r => String(r['Status'] || '').toLowerCase() === 'pending').length;
+        const resolvedInWeek = weekRows.filter(r => String(r['Status'] || '').toLowerCase() === 'resolved').length;
+        const pctInWeek = totalInWeek > 0 ? Math.round((compInWeek / totalInWeek) * 100) : 0;
+
         html += `
-          <tr style="background: linear-gradient(90deg, #1e3a8a 0%, #1e293b 100%);">
-            <td colspan="${headers.length}" style="padding: 8px 16px; font-size: 13px; font-weight: 800; color: #93c5fd; text-align: left; border-top: 3px solid #3b82f6; border-bottom: 1px solid #3b82f6;">
-              📅 Week of ${this.escapeHtml(currentWeekVal)}
+          <tr style="background: linear-gradient(90deg, #1e3a8a 0%, #0f172a 100%);">
+            <td colspan="${headers.length}" style="padding: 10px 16px; border-top: 3px solid #3b82f6; border-bottom: 2px solid #3b82f6;">
+              <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                <div style="font-size: 13.5px; font-weight: 800; color: #93c5fd; display: flex; align-items: center; gap: 8px;">
+                  <span>📅</span> Week of ${this.escapeHtml(currentWeekVal)}
+                  <span class="badge" style="background: rgba(59, 130, 246, 0.3); color: #bfdbfe; font-size: 11px; padding: 2px 8px; border-radius: 12px;">
+                    ${totalInWeek} Crews
+                  </span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px; font-size: 11.5px; flex-wrap: wrap;">
+                  <span style="color: #4ade80; font-weight: 700;">✅ ${compInWeek} Compliant</span>
+                  ${missingInWeek > 0 ? `<span style="color: #f87171; font-weight: 700;">❌ ${missingInWeek} Missing</span>` : ''}
+                  ${pendingInWeek > 0 ? `<span style="color: #facc15; font-weight: 700;">⏳ ${pendingInWeek} Pending</span>` : ''}
+                  ${resolvedInWeek > 0 ? `<span style="color: #60a5fa; font-weight: 700;">🔵 ${resolvedInWeek} Resolved</span>` : ''}
+                  <span class="badge" style="background: ${pctInWeek >= 100 ? '#15803d' : (pctInWeek >= 80 ? '#0369a1' : '#b91c1c')}; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 800;">
+                    ${pctInWeek}% Compliant
+                  </span>
+                </div>
+              </div>
             </td>
           </tr>
         `;
@@ -1186,20 +1326,37 @@ class SheetNavigator {
         // Safety Compliance Formatting
         if (this.currentSheetKey === 'safety_compliance') {
           const vStr = String(val).trim();
-          if (vStr === '✅' || vStr.includes('✅')) {
-            customCellHtml = `<span style="font-size: 14px;">✅</span>`;
-          } else if (vStr === '❌' || vStr.includes('❌')) {
-            customCellHtml = `<span style="font-size: 14px;">❌</span>`;
+          if (vStr === '✅' || vStr === '✅L' || vStr.startsWith('✅')) {
+            const isLate = vStr.includes('L');
+            customCellHtml = `<span style="font-size: 14px; display: inline-flex; align-items: center; justify-content: center; gap: 2px;" title="${isLate ? 'Completed Late (Received after deadline)' : 'Submitted on time'}">✅${isLate ? '<span style="font-size: 9.5px; font-weight: 800; color: #f59e0b;">L</span>' : ''}</span>`;
+          } else if (vStr === '❌' || vStr === '❌W' || vStr.startsWith('❌')) {
+            const isWarning = vStr.includes('W');
+            customCellHtml = `<span style="font-size: 14px; display: inline-flex; align-items: center; justify-content: center; gap: 2px;" title="${isWarning ? 'Missing Report Warning' : 'Missing Report'}">❌${isWarning ? '<span style="font-size: 9.5px; font-weight: 800; color: #ef4444;">W</span>' : ''}</span>`;
           } else if (vStr === '⏳' || vStr.includes('⏳')) {
-            customCellHtml = `<span style="font-size: 14px;">⏳</span>`;
+            customCellHtml = `<span style="font-size: 14px;" title="Pending / Not yet submitted">⏳</span>`;
           } else if (vStr === 'N/A' || vStr === 'n/a') {
-            customCellHtml = `<span style="color: #64748b; font-size: 11px; font-weight: 600;">N/A</span>`;
+            customCellHtml = `<span style="color: #64748b; font-size: 11px; font-weight: 600;" title="Not Applicable / Scheduled Off">N/A</span>`;
+          } else if (hLower === 'status') {
+            if (vStr === 'Complete') {
+              customCellHtml = `<span class="badge" style="background-color: #15803d; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">✅ Complete</span>`;
+            } else if (vStr === 'Missing Reports') {
+              customCellHtml = `<span class="badge" style="background-color: #dc2626; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">❌ Missing Reports</span>`;
+            } else if (vStr === 'Pending') {
+              customCellHtml = `<span class="badge" style="background-color: #d97706; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">⏳ Pending</span>`;
+            } else if (vStr === 'Resolved') {
+              customCellHtml = `<span class="badge" style="background-color: #2563eb; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">🔵 Resolved</span>`;
+            }
           } else if (vStr.endsWith('%')) {
             const pct = parseFloat(vStr);
             const color = pct >= 100 ? '#15803d' : (pct >= 80 ? '#0369a1' : '#b91c1c');
             customCellHtml = `<span class="badge" style="background-color: ${color}; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">${this.escapeHtml(vStr)}</span>`;
           } else if (hLower.includes('crew') || hLower.includes('job')) {
             customCellHtml = `<span style="font-family: monospace; font-weight: bold; color: #60a5fa;">${this.escapeHtml(val)}</span>`;
+          } else if (hLower.includes('foreman') || hLower.includes('lead')) {
+            const foremanStr = String(val).trim();
+            if (foremanStr) {
+              customCellHtml = `<span style="font-weight: 600; color: #93c5fd; cursor: pointer; text-decoration: underline dotted;" title="Click to view profile for ${this.escapeHtml(foremanStr)}" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeHtml(foremanStr)}');}">👤 ${this.escapeHtml(val)}</span>`;
+            }
           }
         }
 
