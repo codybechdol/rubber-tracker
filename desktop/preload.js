@@ -6,5 +6,6 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   getLocalOutbox: () => ipcRenderer.invoke('get-local-outbox'),
   saveLocalOutbox: (outbox) => ipcRenderer.invoke('save-local-outbox', outbox),
   selectSnapshotFile: () => ipcRenderer.invoke('select-snapshot-file'),
-  sendSyncRequest: (options) => ipcRenderer.invoke('send-sync-request', options)
+  sendSyncRequest: (options) => ipcRenderer.invoke('send-sync-request', options),
+  openExternal: (url) => ipcRenderer.invoke('open-external', url)
 });
