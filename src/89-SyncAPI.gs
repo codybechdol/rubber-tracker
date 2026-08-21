@@ -336,8 +336,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot) {
     var mut = mutations[m];
     try {
       var sheetName = mut.sheetName || '';
-      var sheet = sheetName ? ss.getSheetByName(sheetName) : null;
-      var actionsWithoutSheet = ['TRIGGER_SYNC_CREWS', 'SET_HOLIDAYS', 'SET_TRIP_SCHEDULE', 'IMPORT_HISTORY_LOG'];
+      var actionsWithoutSheet = ['SET_TASK_STATUS', 'TRIGGER_SYNC_CREWS', 'SET_HOLIDAYS', 'SET_TRIP_SCHEDULE', 'SCHEDULE_CREW_VISIT', 'SAVE_PLANNED_TRIPS', 'IMPORT_HISTORY_LOG'];
       if (!sheet && actionsWithoutSheet.indexOf(mut.action) === -1) {
         errors.push('Sheet not found: ' + sheetName);
         continue;
