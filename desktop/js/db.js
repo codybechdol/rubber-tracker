@@ -20,6 +20,9 @@ class LocalDatabase {
       const storedOutbox = localStorage.getItem('sa_outbox');
       if (storedOutbox) this.outbox = JSON.parse(storedOutbox);
     }
+    if (this.snapshot) {
+      this.normalizeSnapshot(this.snapshot);
+    }
     this.notify();
     return this.snapshot;
   }
@@ -29,6 +32,9 @@ class LocalDatabase {
   }
 
   async setSnapshot(snapshot) {
+    if (snapshot) {
+      this.normalizeSnapshot(snapshot);
+    }
     this.snapshot = snapshot;
     if (window.desktopAPI) {
       await window.desktopAPI.saveLocalSnapshot(snapshot);
@@ -40,7 +46,107 @@ class LocalDatabase {
 
   getTable(tableKey) {
     if (!this.snapshot || !this.snapshot.tables) return { headers: [], rows: [] };
-    return this.snapshot.tables[tableKey] || { headers: [], rows: [] };
+    const table = this.snapshot.tables[tableKey] || { headers: [], rows: [] };
+    return this.normalizeTableData(table, tableKey);
+  }
+
+  normalizeSnapshot(snapshot) {
+    if (!snapshot || !snapshot.tables) return snapshot;
+    Object.keys(snapshot.tables).forEach(key => {
+      this.normalizeTableData(snapshot.tables[key], key);
+    });
+    return snapshot;
+  }
+
+  normalizeTableData(table, tableKey) {
+    if (!table) return { headers: [], rows: [] };
+    if (table._normalized) return table;
+
+    // Check if headers has title row issue (e.g. only 1 non-empty header while rawGrid has more columns)
+    const validHeaders = (table.headers || []).filter(h => String(h || '').trim() !== '');
+    const isTraining = tableKey === 'training_tracking';
+
+    if ((validHeaders.length <= 2 || isTraining) && table.rawGrid && table.rawGrid.length > 1) {
+      let headerIdx = -1;
+
+      // 1. Check for known header keywords (especially Training Tracking)
+      for (let i = 0; i < Math.min(table.rawGrid.length, 10); i++) {
+        const row = table.rawGrid[i];
+        let matches = 0;
+        for (let c = 0; c < row.length; c++) {
+          const val = String(row[c] || '').toLowerCase().trim();
+          if ([
+            'month', 'scheduled month',
+            'crew #', 'crew', 'job number', 'job #', 'crew number',
+            'training topic', 'topic', 'training',
+            'lead', 'crew lead', 'foreman',
+            'status', 'training status',
+            'attendees', 'crew members',
+            'completion date', 'date completed', 'hours'
+          ].includes(val)) {
+            matches++;
+          }
+        }
+        if (matches >= 2) {
+          headerIdx = i;
+          break;
+        }
+      }
+
+      // 2. If not found by keyword, look for row with the highest number of non-empty cells
+      if (headerIdx === -1 && validHeaders.length <= 1) {
+        let maxCount = 0;
+        let bestIdx = -1;
+        for (let i = 0; i < Math.min(table.rawGrid.length, 6); i++) {
+          const count = table.rawGrid[i].filter(v => String(v || '').trim() !== '').length;
+          if (count > maxCount && count >= 3) {
+            maxCount = count;
+            bestIdx = i;
+          }
+        }
+        if (bestIdx !== -1 && bestIdx !== 0) {
+          headerIdx = bestIdx;
+        }
+      }
+
+      // If a better header row was discovered
+      if (headerIdx !== -1 && headerIdx !== 0) {
+        const rawHeaderRow = table.rawGrid[headerIdx];
+        // Trim trailing empty header columns
+        let lastHeaderCol = rawHeaderRow.length - 1;
+        while (lastHeaderCol >= 0 && String(rawHeaderRow[lastHeaderCol] || '').trim() === '') {
+          lastHeaderCol--;
+        }
+
+        const newHeaders = [];
+        for (let c = 0; c <= lastHeaderCol; c++) {
+          const hName = String(rawHeaderRow[c] || '').trim();
+          newHeaders.push(hName || `Column ${c + 1}`);
+        }
+
+        const newRows = [];
+        for (let r = headerIdx + 1; r < table.rawGrid.length; r++) {
+          const gridRow = table.rawGrid[r];
+          if (!gridRow || !gridRow.some(v => String(v || '').trim() !== '')) continue;
+
+          const rowObj = { _rowIdx: r + 1 };
+          for (let c = 0; c < newHeaders.length; c++) {
+            const h = newHeaders[c];
+            if (h) {
+              rowObj[h] = gridRow[c] !== undefined ? gridRow[c] : '';
+            }
+          }
+          newRows.push(rowObj);
+        }
+
+        table.headers = newHeaders;
+        table.rows = newRows;
+        table.rowCount = newRows.length;
+      }
+    }
+
+    table._normalized = true;
+    return table;
   }
 
   getOutbox() {

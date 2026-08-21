@@ -87,14 +87,28 @@ function exportFullDatabaseSnapshot() {
     var lastCol = sheet.getLastColumn();
     var data = sheet.getRange(1, 1, lastRow, lastCol).getValues();
 
-    var headers = data[0].map(function(h) { return String(h || '').trim(); });
+    var headerRowIdx = 0;
+    if (cfg.key === 'training_tracking' && typeof findTrainingTrackingHeaderRow === 'function') {
+      headerRowIdx = findTrainingTrackingHeaderRow(data);
+    } else {
+      var row0Count = data[0].filter(function(v) { return String(v || '').trim() !== ''; }).length;
+      if (row0Count <= 2 && data.length > 1) {
+        var row1Count = data[1].filter(function(v) { return String(v || '').trim() !== ''; }).length;
+        if (row1Count >= 3) {
+          headerRowIdx = 1;
+        }
+      }
+    }
+
+    var headers = data[headerRowIdx].map(function(h) { return String(h || '').trim(); });
     var rows = [];
     var rawGrid = [];
 
     for (var r = 0; r < data.length; r++) {
       var rowArray = data[r];
       var gridRow = [];
-      var rowObj = (r > 0) ? { _rowIdx: r + 1 } : null;
+      var isDataRow = r > headerRowIdx;
+      var rowObj = isDataRow ? { _rowIdx: r + 1 } : null;
 
       for (var c = 0; c < lastCol; c++) {
         var rawVal = rowArray[c];
@@ -110,7 +124,7 @@ function exportFullDatabaseSnapshot() {
 
         gridRow.push(formattedStr);
 
-        if (r > 0 && c < headers.length) {
+        if (isDataRow && c < headers.length) {
           var hName = headers[c];
           if (hName) {
             if (rawVal instanceof Date) {
@@ -124,7 +138,7 @@ function exportFullDatabaseSnapshot() {
       }
 
       rawGrid.push(gridRow);
-      if (r > 0) {
+      if (isDataRow) {
         rows.push(rowObj);
       }
     }
