@@ -566,23 +566,105 @@ class EmployeeProfileEngine {
       });
     }
 
-    // 5. Scan Employee History
+    // 5. Scan Employee History & Certifications for Career Milestones (Location changes and Cert updates only)
     const historyTable = snap.tables['employee_history'];
     const employeeHistory = [];
+
+    // A. Location Changes & Cert Updates from Employee History
     if (historyTable && historyTable.rows) {
       historyTable.rows.forEach(h => {
         const hName = String(h['Employee Name'] || h['Name'] || h['Employee'] || '').trim();
         if (this.isNameMatch(hName, displayName)) {
-          employeeHistory.push({
-            date: String(h['Date'] || h['Date Changed'] || 'N/A').trim(),
-            event: String(h['Event'] || h['Event Type'] || h['Action'] || 'Assignment Change').trim(),
-            details: String(h['Details'] || h['Notes'] || h['Description'] || '').trim(),
-            location: String(h['Location'] || '').trim(),
-            job: String(h['Job Number'] || '').trim()
-          });
+          const rawEvent = String(h['Event'] || h['Event Type'] || h['Action'] || '').trim();
+          const rawDetails = String(h['Details'] || h['Notes'] || h['Description'] || '').trim();
+          const rawLoc = String(h['Location'] || '').trim();
+          const rawJob = String(h['Job Number'] || '').trim();
+          const dateStr = String(h['Date'] || h['Date Changed'] || 'N/A').trim();
+
+          const eventLower = rawEvent.toLowerCase();
+          const detailsLower = rawDetails.toLowerCase();
+
+          // Check if this is a location change event
+          const isLocEvent = eventLower.includes('location') || eventLower.includes('rezone') || eventLower.includes('transfer');
+          const detailsHasLoc = detailsLower.includes('location') || detailsLower.includes('rezone') || detailsLower.includes('moved to') || detailsLower.includes('transfer') || detailsLower.includes('changed from');
+
+          // Check if this is a cert update in history
+          const isCertEvent = eventLower.includes('cert') || eventLower.includes('cpr') || eventLower.includes('first aid') || eventLower.includes('osha') || eventLower.includes('crane') || eventLower.includes('license') || eventLower.includes('medical');
+          const detailsHasCert = detailsLower.includes('cert') || detailsLower.includes('cpr') || detailsLower.includes('first aid') || detailsLower.includes('osha') || detailsLower.includes('crane') || detailsLower.includes('license') || detailsLower.includes('medical');
+
+          if (isLocEvent || (eventLower.includes('change') && detailsHasLoc)) {
+            let locDetails = rawDetails;
+            if (rawDetails.includes('Location:')) {
+              const match = rawDetails.match(/Location:\s*([^;,\n]+)/i);
+              if (match) locDetails = `Location: ${match[1].trim()}`;
+            } else if (rawDetails.includes('Changed from')) {
+              locDetails = rawDetails;
+            } else if (rawLoc) {
+              locDetails = `Location: ${rawLoc}${rawJob ? ` (Job ${rawJob})` : ''}`;
+            }
+
+            employeeHistory.push({
+              type: 'location',
+              date: dateStr,
+              event: '📍 Location Change',
+              details: locDetails || `Location: ${rawLoc || 'Updated'}`,
+              location: rawLoc,
+              job: rawJob
+            });
+          } else if (isCertEvent || detailsHasCert) {
+            employeeHistory.push({
+              type: 'cert',
+              date: dateStr,
+              event: rawEvent.startsWith('📜') ? rawEvent : `📜 ${rawEvent}`,
+              details: rawDetails || 'Certification updated',
+              location: rawLoc,
+              job: rawJob
+            });
+          }
         }
       });
     }
+
+    // B. Cert Updates from Certifications List
+    if (certifications && certifications.length > 0) {
+      certifications.forEach(c => {
+        const certName = c.certType || 'Certification';
+        const dateUpdated = (c.testDate && c.testDate !== 'N/A') ? c.testDate : ((c.expDate && c.expDate !== 'N/A') ? c.expDate : null);
+        if (dateUpdated) {
+          // Avoid duplicate if already logged from employee_history on same date
+          const isDup = employeeHistory.some(e => e.type === 'cert' && e.date === dateUpdated && e.details.toLowerCase().includes(certName.toLowerCase()));
+          if (!isDup) {
+            let certDetail = `Valid · ${certName}`;
+            if (c.testDate && c.testDate !== 'N/A' && c.expDate && c.expDate !== 'N/A') {
+              certDetail = `Updated / Acquired: ${c.testDate} · Expires: ${c.expDate}`;
+            } else if (c.expDate && c.expDate !== 'N/A') {
+              certDetail = `Expires: ${c.expDate}`;
+            } else if (c.testDate && c.testDate !== 'N/A') {
+              certDetail = `Date Acquired: ${c.testDate}`;
+            }
+
+            employeeHistory.push({
+              type: 'cert',
+              date: dateUpdated,
+              event: `📜 Cert Updated: ${certName}`,
+              details: certDetail,
+              location: location,
+              job: jobNumber
+            });
+          }
+        }
+      });
+    }
+
+    // Sort Milestones chronologically (most recent first)
+    employeeHistory.sort((a, b) => {
+      const dA = this.parseDate(a.date);
+      const dB = this.parseDate(b.date);
+      if (dA && dB) return dB.getTime() - dA.getTime();
+      if (dA) return -1;
+      if (dB) return 1;
+      return 0;
+    });
 
     // 6. Scan Equipment History for complete assignment and return lifecycle
     const equipmentHistory = this.extractEquipmentHistory(snap, displayName, assignedEquipment);
@@ -1224,21 +1306,29 @@ class EmployeeProfileEngine {
             </h4>
             ${data.employeeHistory.length === 0 ? `
               <div style="padding: 20px; text-align: center; color: var(--text-muted); background: var(--bg-primary); border-radius: 6px; border: 1px dashed var(--border-color); font-size: 12px;">
-                No employee history events logged.
+                No location changes or cert updates logged.
               </div>
             ` : `
               <div style="display: flex; flex-direction: column; gap: 8px;">
-                ${data.employeeHistory.map(h => `
-                  <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 12px; font-size: 12px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                      <span style="font-weight: 700; color: #f8fafc;">${this.escapeHtml(h.event)}</span>
-                      <span style="color: #60a5fa; font-size: 11px; font-weight: 600;">${this.escapeHtml(h.date)}</span>
+                ${data.employeeHistory.map(h => {
+                  const isLoc = h.type === 'location';
+                  const titleColor = isLoc ? '#60a5fa' : '#f59e0b';
+                  const borderColor = isLoc ? 'rgba(59, 130, 246, 0.3)' : 'rgba(245, 158, 11, 0.3)';
+
+                  return `
+                    <div style="background: var(--bg-primary); border: 1px solid ${borderColor}; border-radius: 6px; padding: 10px 12px; font-size: 12px;">
+                      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                        <span style="font-weight: 700; color: ${titleColor}; display: flex; align-items: center; gap: 4px;">
+                          ${this.escapeHtml(h.event)}
+                        </span>
+                        <span style="color: #94a3b8; font-size: 11px; font-weight: 600;">📅 ${this.escapeHtml(h.date)}</span>
+                      </div>
+                      <div style="color: var(--text-secondary); font-size: 11.5px; line-height: 1.4;">
+                        ${this.escapeHtml(h.details || '')}
+                      </div>
                     </div>
-                    <div style="color: var(--text-secondary); font-size: 11px;">
-                      ${h.details ? this.escapeHtml(h.details) : `Location: ${this.escapeHtml(h.location || 'N/A')} · Job: ${this.escapeHtml(h.job || 'N/A')}`}
-                    </div>
-                  </div>
-                `).join('')}
+                  `;
+                }).join('')}
               </div>
             `}
           </div>
