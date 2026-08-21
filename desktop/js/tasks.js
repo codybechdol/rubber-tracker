@@ -135,7 +135,8 @@ class TaskManagerApp {
         }
 
         const empInfo = empLookup[employee.toLowerCase()] || {};
-        const crewId = empInfo.crewId || 'Unassigned Crew';
+        let crewId = String(r['Job Number'] || r['Crew'] || r['Job #'] || r['Crew #'] || empInfo.crewId || '').trim();
+        if (!crewId) crewId = 'Unassigned Crew';
         if (!loc || loc === 'Unknown') loc = empInfo.location || (jobLookup[crewId]?.location) || 'Helena';
         if (!foreman) foreman = empInfo.foreman || (jobLookup[crewId]?.foreman) || 'Lead';
 
@@ -377,11 +378,12 @@ class TaskManagerApp {
   categorizeTask(taskType, sourceSheet) {
     const combined = `${taskType} ${sourceSheet}`.toLowerCase();
     if (combined.includes('glove') || combined.includes('sleeve') || combined.includes('blanket')) return 'PPE';
-    if (combined.includes('mack') || combined.includes('tester') || combined.includes('phasing') || combined.includes('aed') || combined.includes('ground') || combined.includes('stick')) return 'Equipment';
+    if (combined.includes('mack') || combined.includes('tester') || combined.includes('phasing') || combined.includes('aed') || combined.includes('ground') || combined.includes('stick') || combined.includes('safety equipment') || combined.includes('equipment') || combined.includes('jumper') || combined.includes('cone') || combined.includes('first aid')) return 'Equipment';
     if (combined.includes('training')) return 'Training';
-    if (combined.includes('cert') || combined.includes('cpr') || combined.includes('crane')) return 'Certs';
+    if (combined.includes('cert') || combined.includes('cpr') || combined.includes('crane') || combined.includes('rescue')) return 'Certs';
+    if (combined.includes('safety report') || combined.includes('meeting') || combined.includes('compliance') || combined.includes('jha') || combined.includes('checklist')) return 'Safety Reports';
     if (combined.includes('reclaim')) return 'Reclaim';
-    return 'PPE';
+    return 'Equipment';
   }
 
   cleanTaskType(rawType, sourceSheet) {
@@ -420,16 +422,36 @@ class TaskManagerApp {
     return isNaN(d.getTime()) ? null : d;
   }
 
+  getSignificantJobNumber(jobNum) {
+    if (!jobNum) return '';
+    const str = String(jobNum).trim();
+    const match = str.match(/^(\d+-\d+)/);
+    return match ? match[1] : str;
+  }
+
+  isCrewMatch(crewA, crewB) {
+    if (!crewA || !crewB) return false;
+    const a = String(crewA).toLowerCase().trim();
+    const b = String(crewB).toLowerCase().trim();
+    if (a === b) return true;
+    const sigA = this.getSignificantJobNumber(a);
+    const sigB = this.getSignificantJobNumber(b);
+    if (sigA && sigB && sigA === sigB) return true;
+    return a.startsWith(b) || b.startsWith(a);
+  }
+
   getTasksByLocation(location, targetDate = new Date()) {
     const locClean = this.cleanLocation(location).toLowerCase();
     const tasks = this.collectAllTasks(targetDate);
-    return tasks.filter(t => t.location.toLowerCase() === locClean);
+    return tasks.filter(t => {
+      const tLoc = this.cleanLocation(t.location).toLowerCase();
+      return tLoc === locClean || tLoc.includes(locClean) || locClean.includes(tLoc);
+    });
   }
 
   getTasksByCrew(crewId, targetDate = new Date()) {
-    const cClean = String(crewId).toLowerCase().trim();
     const tasks = this.collectAllTasks(targetDate);
-    return tasks.filter(t => t.crewId.toLowerCase() === cClean);
+    return tasks.filter(t => this.isCrewMatch(t.crewId, crewId));
   }
 
   renderTasks() {

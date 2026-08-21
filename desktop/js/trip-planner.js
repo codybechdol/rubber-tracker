@@ -243,6 +243,7 @@ class TripPlannerApp {
     let equipment = 0;
     let training = 0;
     let certs = 0;
+    let reports = 0;
     let overdue = 0;
 
     crewTasks.forEach(t => {
@@ -259,14 +260,16 @@ class TripPlannerApp {
         blankets++;
       } else if (type.includes('mack') || item.includes('mack')) {
         macks++;
-      } else if (cat === 'equipment' || type.includes('tester') || type.includes('phasing') || type.includes('aed') || type.includes('ground') || type.includes('stick')) {
+      } else if (cat === 'equipment' || type.includes('tester') || type.includes('phasing') || type.includes('aed') || type.includes('ground') || type.includes('stick') || type.includes('equipment') || type.includes('jumper') || type.includes('cone') || type.includes('first aid')) {
         equipment++;
       } else if (cat === 'training' || type.includes('training')) {
         training++;
-      } else if (cat === 'certs' || type.includes('cert') || type.includes('cpr') || type.includes('crane')) {
+      } else if (cat === 'certs' || type.includes('cert') || type.includes('cpr') || type.includes('crane') || type.includes('rescue')) {
         certs++;
+      } else if (cat === 'safety reports' || type.includes('safety report') || type.includes('meeting') || type.includes('compliance') || type.includes('jha') || type.includes('checklist')) {
+        reports++;
       } else {
-        gloves++;
+        equipment++;
       }
     });
 
@@ -279,7 +282,8 @@ class TripPlannerApp {
       macks,
       equipment,
       training,
-      certs
+      certs,
+      reports
     };
   }
 
@@ -566,6 +570,7 @@ class TripPlannerApp {
                               ${summary.equipment > 0 ? `<span class="badge" style="background: rgba(20, 184, 166, 0.15); color: #5eead4; font-size: 9.5px; padding: 1px 5px; border: 1px solid rgba(20, 184, 166, 0.3);">🧰 ${summary.equipment} Equip</span>` : ''}
                               ${summary.training > 0 ? `<span class="badge" style="background: rgba(34, 197, 94, 0.15); color: #86efac; font-size: 9.5px; padding: 1px 5px; border: 1px solid rgba(34, 197, 94, 0.3);">🎓 ${summary.training} Training</span>` : ''}
                               ${summary.certs > 0 ? `<span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #fca5a5; font-size: 9.5px; padding: 1px 5px; border: 1px solid rgba(239, 68, 68, 0.3);">📜 ${summary.certs} Cert${summary.certs > 1 ? 's' : ''}</span>` : ''}
+                              ${summary.reports > 0 ? `<span class="badge" style="background: rgba(249, 115, 22, 0.15); color: #fdba74; font-size: 9.5px; padding: 1px 5px; border: 1px solid rgba(249, 115, 22, 0.3);">📋 ${summary.reports} Report${summary.reports > 1 ? 's' : ''}</span>` : ''}
                               ${summary.total === 0 ? `<span style="font-size: 9.5px; color: #94a3b8; font-style: italic;">✓ No pending tasks</span>` : ''}
                             </div>
                           </div>
@@ -703,6 +708,7 @@ class TripPlannerApp {
                         ${summary.training > 0 ? `<span style="font-size: 9px; color: #86efac;">🎓${summary.training}</span>` : ''}
                         ${summary.certs > 0 ? `<span style="font-size: 9px; color: #fca5a5;">📜${summary.certs}</span>` : ''}
                         ${summary.equipment > 0 || summary.macks > 0 ? `<span style="font-size: 9px; color: #5eead4;">⚡${summary.equipment + summary.macks}</span>` : ''}
+                        ${summary.reports > 0 ? `<span style="font-size: 9px; color: #fdba74;">📋${summary.reports}</span>` : ''}
                       </div>
                     </div>
                   `;
@@ -776,11 +782,13 @@ class TripPlannerApp {
     if (filterCat === 'PPE') {
       filtered = filtered.filter(t => t.category === 'PPE' || (t.type || '').toLowerCase().includes('glove') || (t.type || '').toLowerCase().includes('sleeve') || (t.type || '').toLowerCase().includes('blanket'));
     } else if (filterCat === 'Equipment') {
-      filtered = filtered.filter(t => t.category === 'Equipment' || (t.type || '').toLowerCase().includes('mack') || (t.type || '').toLowerCase().includes('tester') || (t.type || '').toLowerCase().includes('phasing') || (t.type || '').toLowerCase().includes('aed') || (t.type || '').toLowerCase().includes('ground') || (t.type || '').toLowerCase().includes('stick'));
+      filtered = filtered.filter(t => t.category === 'Equipment' || (t.type || '').toLowerCase().includes('mack') || (t.type || '').toLowerCase().includes('tester') || (t.type || '').toLowerCase().includes('phasing') || (t.type || '').toLowerCase().includes('aed') || (t.type || '').toLowerCase().includes('ground') || (t.type || '').toLowerCase().includes('stick') || (t.type || '').toLowerCase().includes('equipment') || (t.type || '').toLowerCase().includes('jumper') || (t.type || '').toLowerCase().includes('cone') || (t.type || '').toLowerCase().includes('first aid'));
     } else if (filterCat === 'Training') {
       filtered = filtered.filter(t => t.category === 'Training' || (t.type || '').toLowerCase().includes('training'));
     } else if (filterCat === 'Certs') {
-      filtered = filtered.filter(t => t.category === 'Certs' || (t.type || '').toLowerCase().includes('cert'));
+      filtered = filtered.filter(t => t.category === 'Certs' || (t.type || '').toLowerCase().includes('cert') || (t.type || '').toLowerCase().includes('cpr') || (t.type || '').toLowerCase().includes('crane') || (t.type || '').toLowerCase().includes('rescue'));
+    } else if (filterCat === 'Reports') {
+      filtered = filtered.filter(t => t.category === 'Safety Reports' || (t.type || '').toLowerCase().includes('safety report') || (t.type || '').toLowerCase().includes('meeting') || (t.type || '').toLowerCase().includes('compliance') || (t.type || '').toLowerCase().includes('jha') || (t.type || '').toLowerCase().includes('checklist'));
     }
 
     const safeDateKey = this.escapeHtml(targetDateKey || '');
@@ -829,6 +837,11 @@ class TripPlannerApp {
         <button class="btn btn-secondary ${filterCat === 'Certs' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'Certs', '${safeDateKey}')">
           📜 Certifications (${summary.certs})
         </button>
+        ${summary.reports > 0 ? `
+          <button class="btn btn-secondary ${filterCat === 'Reports' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'Reports', '${safeDateKey}')">
+            📋 Safety Reports (${summary.reports})
+          </button>
+        ` : ''}
       </div>
 
       <!-- Task Checklist Items -->
