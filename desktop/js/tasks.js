@@ -108,6 +108,20 @@ class TaskManagerApp {
       });
     }
 
+    // Build Safety Equipment Needs lookup cache by SourceRow / _rowIdx
+    const needsTable = this.db.getTable('safety_equipment_needs');
+    const needsLookup = {};
+    if (needsTable && needsTable.rows) {
+      needsTable.rows.forEach((nr, idx) => {
+        const rowNum = nr._rowIdx || (idx + 2);
+        const veh = String(nr['Vehicle Number'] || nr['VehicleNumber'] || nr['Vehicle'] || nr['Truck'] || nr['Unit'] || '').trim();
+        if (veh) {
+          needsLookup[rowNum] = veh;
+          needsLookup[String(rowNum)] = veh;
+        }
+      });
+    }
+
     // 1. Ingest tasks from Task Metadata
     const metaTable = this.db.getTable('task_metadata');
     if (metaTable && metaTable.rows) {
@@ -164,19 +178,55 @@ class TaskManagerApp {
         if (directVeh) {
           truckNumber = directVeh.toLowerCase().startsWith('unit') ? directVeh : `Unit ${directVeh}`;
         }
-        if (!truckNumber) {
-          const textForTruck = `${notes} ${currentItem} ${r['Description'] || ''}`;
-          const unitM = textForTruck.match(/(?:Unit\s*#?|Truck\s*#?|Vehicle\s*#?)\s*[:#]?\s*([0-9A-Za-z\-]+)/i);
-          if (unitM && unitM[1]) {
-            const v = unitM[1].trim();
-            if (!['not', 'signs', 'comments', 'are', 'date', 'test', 'yes', 'no', 'na', 'none', 'good', 'bad', 'sign'].includes(v.toLowerCase())) {
-              truckNumber = `Unit ${v}`;
+
+        // 1. Direct lookup from safety_equipment_needs table by sourceRow
+        if (!truckNumber && sourceSheet.toLowerCase().includes('safety equipment') && sourceRow) {
+          const vehFromNeeds = needsLookup[sourceRow] || needsLookup[parseInt(sourceRow, 10)];
+          if (vehFromNeeds) {
+            truckNumber = String(vehFromNeeds).toLowerCase().startsWith('unit') ? String(vehFromNeeds) : `Unit ${vehFromNeeds}`;
+          }
+        }
+
+        // 2. Multi-field matching against safety_equipment_needs table by Foreman + Equipment Type + Date / Notes
+        if (!truckNumber && sourceSheet.toLowerCase().includes('safety equipment') && needsTable && needsTable.rows) {
+          const rForeman = String(foreman || employee || '').toLowerCase().trim();
+          const rType = String(itemType || '').toLowerCase().trim();
+          const rNotes = String(notes || '').toLowerCase().trim();
+          const rCur = String(currentItem || '').toLowerCase().trim();
+
+          const matchedRow = needsTable.rows.find(nr => {
+            const nForeman = String(nr['Foreman'] || '').toLowerCase().trim();
+            const nType = String(nr['Equipment Type'] || '').toLowerCase().trim();
+            const nDesc = String(nr['Issue Description'] || '').toLowerCase().trim();
+            const nNotes = String(nr['Notes'] || '').toLowerCase().trim();
+
+            const foremanMatch = rForeman && nForeman && (rForeman.includes(nForeman) || nForeman.includes(rForeman));
+            const typeMatch = rType && nType && (rType === nType || rType.includes(nType) || nType.includes(rType));
+            const textMatch = (rNotes && nNotes && (rNotes.includes(nNotes) || nNotes.includes(rNotes))) ||
+                              (rCur && nDesc && (rCur.includes(nDesc) || nDesc.includes(rCur)));
+
+            return (foremanMatch && typeMatch && textMatch) || (foremanMatch && textMatch);
+          });
+
+          if (matchedRow) {
+            const veh = String(matchedRow['Vehicle Number'] || matchedRow['Vehicle'] || '').trim();
+            if (veh) {
+              truckNumber = veh.toLowerCase().startsWith('unit') ? veh : `Unit ${veh}`;
             }
           }
+        }
+
+        // 3. Regex extraction from notes, description, currentItem, email subject
+        if (!truckNumber) {
+          const textForTruck = `${notes} ${currentItem} ${r['Description'] || ''} ${r['Email Subject'] || ''}`;
+          const unitM = textForTruck.match(/(?:Unit\s*#?|Truck\s*#?|Vehicle\s*#?)\s*[:#]?\s*([0-9]{3,5})/i);
+          if (unitM && unitM[1]) {
+            truckNumber = `Unit ${unitM[1]}`;
+          }
           if (!truckNumber) {
-            const pdfMatch = textForTruck.match(/(?:\[PDF[^\]]*\]\s*)?([0-9]{3,5})[­\-\s]+[0-9]{3}[­\-\s]+[0-9]{2}/i);
-            if (pdfMatch && pdfMatch[1]) {
-              truckNumber = `Unit ${pdfMatch[1]}`;
+            const subjM = textForTruck.match(/\b([0-9]{3,5})[\­\-\s]+[0-9]{3}[\­\-\s]+[0-9]{2}\b/);
+            if (subjM && subjM[1]) {
+              truckNumber = `Unit ${subjM[1]}`;
             }
           }
         }
