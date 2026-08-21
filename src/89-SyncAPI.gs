@@ -1089,6 +1089,18 @@ function applyBatchSyncMutations(mutations, returnSnapshot) {
           }
           break;
 
+        case 'SAVE_PLANNED_TRIPS':
+        case 'SET_TRIP_SCHEDULE':
+          if (mut.trips) {
+            try {
+              PropertiesService.getScriptProperties().setProperty('PLANNED_TRIPS', JSON.stringify(mut.trips));
+              appliedCount++;
+            } catch (eTr) {
+              errors.push('Error saving planned trips: ' + eTr);
+            }
+          }
+          break;
+
         case 'TRIGGER_SYNC_CREWS':
           if (typeof syncCrews === 'function') {
             syncCrews(true);

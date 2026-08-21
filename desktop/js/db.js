@@ -45,21 +45,32 @@ class LocalDatabase {
   }
 
   getPlannedTrips() {
-    if (this.snapshot && this.snapshot.configs && this.snapshot.configs.plannedTrips) {
-      return this.snapshot.configs.plannedTrips;
-    }
+    let trips = {};
     const stored = localStorage.getItem('sa_planned_trips');
     if (stored) {
-      try { return JSON.parse(stored); } catch (e) {}
+      try {
+        const parsed = JSON.parse(stored);
+        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
+          trips = { ...parsed };
+        }
+      } catch (e) {}
     }
-    return {};
+    if (this.snapshot && this.snapshot.configs && this.snapshot.configs.plannedTrips) {
+      const snapTrips = this.snapshot.configs.plannedTrips;
+      if (snapTrips && typeof snapTrips === 'object' && Object.keys(snapTrips).length > 0) {
+        trips = { ...trips, ...snapTrips };
+      }
+    }
+    return trips;
   }
 
   async savePlannedTrips(trips) {
     if (!this.snapshot) this.snapshot = { configs: {}, tables: {} };
     if (!this.snapshot.configs) this.snapshot.configs = {};
     this.snapshot.configs.plannedTrips = trips;
-    localStorage.setItem('sa_planned_trips', JSON.stringify(trips));
+    try {
+      localStorage.setItem('sa_planned_trips', JSON.stringify(trips));
+    } catch (e) {}
     if (window.desktopAPI) {
       await window.desktopAPI.saveLocalSnapshot(this.snapshot);
     }
