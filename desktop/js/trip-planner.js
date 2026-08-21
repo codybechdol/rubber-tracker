@@ -335,8 +335,8 @@ class TripPlannerApp {
    * Discovers and builds structured location objects from Job Tracking, Employees, and Master list
    */
   getLocationData() {
+    const allKnownLocations = new Set(Object.keys(this.masterLocations || {}));
     const activeCrewsByLoc = {};
-    const allKnownLocations = new Set(Object.keys(this.masterLocations));
 
     // 1. Scan Job Tracking for all active crews and locations
     const jobTable = this.db.getTable('job_tracking');
@@ -352,30 +352,50 @@ class TripPlannerApp {
 
         if (loc && !this.isStatusLocation(loc)) {
           allKnownLocations.add(loc);
-          if (status === 'Active' || status === 'Pending Start' || (!status.toLowerCase().includes('completed') && !status.toLowerCase().includes('on hold') && status !== '')) {
+          const sLower = status.toLowerCase();
+          if (sLower === 'active' || sLower === 'pending start' || (!sLower.includes('completed') && !sLower.includes('on hold') && status !== '')) {
             if (!activeCrewsByLoc[loc]) {
               activeCrewsByLoc[loc] = [];
             }
-            activeCrewsByLoc[loc].push({
-              crewId: crewId || 'N/A',
-              foreman: foreman || 'Lead',
-              crewSize: crewSize,
-              jobName: jobName,
-              status: status
-            });
+            if (!activeCrewsByLoc[loc].some(c => c.crewId === crewId)) {
+              activeCrewsByLoc[loc].push({
+                crewId: crewId || 'N/A',
+                foreman: foreman || 'Lead',
+                crewSize: crewSize,
+                jobName: jobName,
+                status: status
+              });
+            }
           }
         }
       });
     }
 
-    // 2. Scan Employees sheet for any additional active locations
+    // 2. Scan Employees sheet for any additional active crews and locations
     const empTable = this.db.getTable('employees');
     if (empTable && empTable.rows) {
       empTable.rows.forEach(r => {
         const rawLoc = String(r['Location'] || '').trim();
         const loc = this.cleanPhysicalLocation(rawLoc);
+        const crewId = String(r['Job Number'] || r['Job #'] || r['Crew'] || '').trim();
+        const foreman = String(r['Foreman'] || r['Crew Lead'] || r['Lead'] || '').trim();
+
         if (loc && !this.isStatusLocation(loc)) {
           allKnownLocations.add(loc);
+          if (crewId && crewId !== 'N/A' && crewId !== 'Unassigned') {
+            if (!activeCrewsByLoc[loc]) {
+              activeCrewsByLoc[loc] = [];
+            }
+            if (!activeCrewsByLoc[loc].some(c => c.crewId === crewId)) {
+              activeCrewsByLoc[loc].push({
+                crewId: crewId,
+                foreman: foreman || 'Lead',
+                crewSize: 1,
+                jobName: '',
+                status: 'Active'
+              });
+            }
+          }
         }
       });
     }
