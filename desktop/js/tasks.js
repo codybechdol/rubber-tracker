@@ -109,6 +109,7 @@ class TaskManagerApp {
     }
 
     // 1. Ingest tasks from Task Metadata
+    const metaTable = this.db.getTable('task_metadata');
     if (metaTable && metaTable.rows) {
       metaTable.rows.forEach((r, idx) => {
         const taskId = String(r['TaskID'] || r['Task ID'] || r['id'] || `task_${idx}`).trim();
