@@ -48,6 +48,16 @@ class ItemStatsEngine {
     return `${yrs} yrs (${days}d)`;
   }
 
+  escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
   classifyState(assignedTo, location, notes, status) {
     const sAssigned = String(assignedTo || '').toLowerCase().trim();
     const sLoc = String(location || '').toLowerCase().trim();
@@ -502,32 +512,85 @@ class ItemStatsEngine {
     const rows = tableData ? (tableData.rows || []) : [];
     const headers = tableData ? (tableData.headers || []) : [];
 
-    const groupCol = headers.find(h => {
-      const hl = h.toLowerCase();
-      return (
-        hl.includes('item') ||
-        hl.includes('serial') ||
-        hl.includes('glove') ||
-        hl.includes('sleeve') ||
-        hl.includes('blanket') ||
-        hl.includes('mack') ||
-        hl.includes('name')
-      );
-    }) || headers[1] || headers[0];
-
     const cleanItemKey = String(itemKey || '').trim();
     this.currentActiveItemKey = cleanItemKey;
     this.currentActiveSheetKey = sheetKey;
-    const groupRows = rows.filter(r => {
-      const val = String(r[groupCol] || '').trim();
-      if (val === cleanItemKey) return true;
-      const numVal = parseInt(val, 10);
-      const numKey = parseInt(cleanItemKey, 10);
-      if (!isNaN(numVal) && !isNaN(numKey) && String(numVal) === val && String(numKey) === cleanItemKey && numVal === numKey) return true;
+
+    const numKey = parseInt(cleanItemKey, 10);
+    const isPureNumKey = !isNaN(numKey) && String(numKey) === cleanItemKey;
+
+    let groupRows = rows.filter(r => {
+      for (const k in r) {
+        const kl = k.toLowerCase();
+        if (
+          kl.includes('item') ||
+          kl.includes('glove') ||
+          kl.includes('sleeve') ||
+          kl.includes('blanket') ||
+          kl.includes('mack') ||
+          kl.includes('serial') ||
+          kl.includes('esl') ||
+          kl === 'id'
+        ) {
+          const val = String(r[k] || '').trim();
+          if (!val) continue;
+          if (val.toLowerCase() === cleanItemKey.toLowerCase()) return true;
+          if (isPureNumKey) {
+            const rNum = parseInt(val, 10);
+            if (!isNaN(rNum) && String(rNum) === val && rNum === numKey) return true;
+          }
+        }
+      }
       return false;
     });
 
-    const stats = this.analyzeLifecycle(cleanItemKey, groupRows);
+    // If no history entries exist yet, synthesize an active baseline record from the active inventory sheet
+    const activeSheetKey = sheetKey.replace('_history', '');
+    const activeTable = this.db.getTable(activeSheetKey);
+    let foundActive = null;
+    if (activeTable && activeTable.rows) {
+      foundActive = activeTable.rows.find(r => {
+        for (const k in r) {
+          const kl = k.toLowerCase();
+          if (
+            kl.includes('item') ||
+            kl.includes('glove') ||
+            kl.includes('sleeve') ||
+            kl.includes('blanket') ||
+            kl.includes('mack') ||
+            kl.includes('serial') ||
+            kl.includes('esl')
+          ) {
+            const val = String(r[k] || '').trim();
+            if (!val) continue;
+            if (val.toLowerCase() === cleanItemKey.toLowerCase()) return true;
+            if (isPureNumKey && parseInt(val, 10) === numKey) return true;
+          }
+        }
+        return false;
+      });
+    }
+
+    if (groupRows.length === 0 && foundActive) {
+      const activeDateStr = foundActive['Date Assigned'] || foundActive['Date'] || foundActive['Test Date'] || new Date().toISOString();
+      const synthRow = {
+        'Date Assigned': activeDateStr,
+        'Item #': cleanItemKey,
+        'Size': foundActive['Size'] || '',
+        'Class': foundActive['Class'] || '',
+        'Location': foundActive['Location'] || 'Helena',
+        'Assigned To': foundActive['Assigned To'] || foundActive['Status'] || 'On Shelf',
+        'Status': foundActive['Status'] || 'On Shelf',
+        'Notes': foundActive['Notes'] || 'Current Active Inventory Status'
+      };
+      if (foundActive['Model']) synthRow['Model'] = foundActive['Model'];
+      if (foundActive['KV']) synthRow['KV'] = foundActive['KV'];
+      if (foundActive['Type']) synthRow['Type'] = foundActive['Type'];
+      if (foundActive['Length']) synthRow['Length'] = foundActive['Length'];
+      groupRows.push(synthRow);
+    }
+
+    const stats = this.analyzeLifecycle(cleanItemKey, groupRows, foundActive);
     const sheetTitle = sheetKey.replace('_history', '').replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
 
     if (titleEl) {
@@ -538,7 +601,7 @@ class ItemStatsEngine {
       body.innerHTML = `
         <div style="padding: 40px; text-align: center; color: var(--text-muted);">
           <div style="font-size: 32px; margin-bottom: 8px;">📜</div>
-          <div style="font-size: 15px; font-weight: 600; color: var(--text-primary);">No history records found for ${sheetTitle} #${cleanItemKey}</div>
+          <div style="font-size: 15px; font-weight: 600; color: var(--text-primary);">No history or inventory records found for ${sheetTitle} #${cleanItemKey}</div>
           <div style="font-size: 12px; margin-top: 6px;">Sync with Google Sheets or check the <strong>📜 History Records</strong> workspace.</div>
         </div>
       `;

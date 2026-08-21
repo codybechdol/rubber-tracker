@@ -11308,6 +11308,7 @@ function saveHistoryFast(silent) {
         var rowTimestamp = rowDateParsed ? rowDateParsed.getTime() : 0;
         var rowAssignedTo = String(data[i][assignedToCol] || '').toLowerCase().trim();
         var rowLocation = String(data[i][locationCol] || '').toLowerCase().trim();
+        var rowDateStr = rowDateParsed ? (rowDateParsed.getMonth() + 1) + '/' + rowDateParsed.getDate() + '/' + rowDateParsed.getFullYear() : String(rowDateRaw).trim();
 
         if (!lookup[itemNum]) {
           lookup[itemNum] = {
@@ -11315,23 +11316,28 @@ function saveHistoryFast(silent) {
             location: rowLocation,
             timestamp: rowTimestamp,
             dateRaw: rowDateRaw,
-            allAssignedOnLatestDate: [rowAssignedTo]
+            allAssignedOnLatestDate: [rowAssignedTo],
+            historyKeys: {}
           };
-        } else {
-          // If this row has a STRICTLY NEWER date:
-          if (rowTimestamp > lookup[itemNum].timestamp) {
-            lookup[itemNum] = {
-              assignedTo: rowAssignedTo,
-              location: rowLocation,
-              timestamp: rowTimestamp,
-              dateRaw: rowDateRaw,
-              allAssignedOnLatestDate: [rowAssignedTo]
-            };
-          } else if (rowTimestamp === lookup[itemNum].timestamp) {
-            // Same date - track all assignments on this latest date
-            if (lookup[itemNum].allAssignedOnLatestDate.indexOf(rowAssignedTo) === -1) {
-              lookup[itemNum].allAssignedOnLatestDate.push(rowAssignedTo);
-            }
+        }
+
+        // Record this entry in historyKeys set to prevent any duplicate re-addition
+        lookup[itemNum].historyKeys[rowDateStr + '|' + rowAssignedTo] = true;
+        if (rowTimestamp) {
+          lookup[itemNum].historyKeys[rowTimestamp + '|' + rowAssignedTo] = true;
+        }
+
+        // If this row has a STRICTLY NEWER date:
+        if (rowTimestamp > lookup[itemNum].timestamp) {
+          lookup[itemNum].assignedTo = rowAssignedTo;
+          lookup[itemNum].location = rowLocation;
+          lookup[itemNum].timestamp = rowTimestamp;
+          lookup[itemNum].dateRaw = rowDateRaw;
+          lookup[itemNum].allAssignedOnLatestDate = [rowAssignedTo];
+        } else if (rowTimestamp === lookup[itemNum].timestamp) {
+          // Same date - track all assignments on this latest date
+          if (lookup[itemNum].allAssignedOnLatestDate.indexOf(rowAssignedTo) === -1) {
+            lookup[itemNum].allAssignedOnLatestDate.push(rowAssignedTo);
           }
         }
       }
@@ -11362,12 +11368,37 @@ function saveHistoryFast(silent) {
 
       // No previous entry - this is a new assignment
       if (!lastEntry) {
+        if (newAssignedTo === 'new' || newAssignedTo === 'initial purchase' || newAssignedTo === 'brand new') {
+          return { isDuplicate: false, note: 'Initial Purchase (On Shelf)' };
+        }
         return { isDuplicate: false, note: 'New Assignment' };
       }
 
-      // If AssignedTo is unchanged or ALREADY recorded on the latest history date, it is a duplicate!
+      var curDateParsed = parseDateStringFlex(dateAssigned);
+      var curTimestamp = curDateParsed ? curDateParsed.getTime() : 0;
+      var curDateStr = curDateParsed ? (curDateParsed.getMonth() + 1) + '/' + curDateParsed.getDate() + '/' + curDateParsed.getFullYear() : String(dateAssigned).trim();
+
+      // 1. Check if this exact date + holder record already exists anywhere in history
+      if (lastEntry.historyKeys) {
+        if (lastEntry.historyKeys[curDateStr + '|' + newAssignedTo] || (curTimestamp && lastEntry.historyKeys[curTimestamp + '|' + newAssignedTo])) {
+          return { isDuplicate: true, note: '' };
+        }
+      }
+
+      // 2. If AssignedTo is unchanged or ALREADY recorded on the latest history date, it is a duplicate!
       if (lastEntry.assignedTo === newAssignedTo || (lastEntry.allAssignedOnLatestDate && lastEntry.allAssignedOnLatestDate.indexOf(newAssignedTo) !== -1)) {
         return { isDuplicate: true, note: '' };
+      }
+
+      // 3. If active sheet still has 'New' (initial purchase) but history already has records with newer dates:
+      // Active item is just an un-synced initial purchase date, do not append a fake reassignment!
+      if ((newAssignedTo === 'new' || newAssignedTo === 'initial purchase' || newAssignedTo === 'brand new') && lastEntry.timestamp > curTimestamp) {
+        return { isDuplicate: true, note: '' };
+      }
+
+      // 4. If assignedTo is 'new', it should ALWAYS have the note 'Initial Purchase (On Shelf)'
+      if (newAssignedTo === 'new' || newAssignedTo === 'initial purchase' || newAssignedTo === 'brand new') {
+        return { isDuplicate: false, note: 'Initial Purchase (On Shelf)' };
       }
 
       // Not a duplicate - AssignedTo has changed
@@ -13328,7 +13359,14 @@ function cleanAndRepairHistorySheets(silent) {
       var group = itemGroups[itemKeys[k]];
 
       group.sort(function(a, b) {
-        return a.timestamp - b.timestamp;
+        if (a.timestamp !== b.timestamp) {
+          return a.timestamp - b.timestamp;
+        }
+        var aAssigned = String(a.assignedTo || '').toLowerCase().trim();
+        var bAssigned = String(b.assignedTo || '').toLowerCase().trim();
+        if (aAssigned === 'new' && bAssigned !== 'new') return -1;
+        if (bAssigned === 'new' && aAssigned !== 'new') return 1;
+        return 0;
       });
 
       var prevEntry = null;
@@ -13340,7 +13378,8 @@ function cleanAndRepairHistorySheets(silent) {
         if (prevEntry) {
           var prevAssignedLower = String(prevEntry.assignedTo || '').toLowerCase().trim();
 
-          if (curAssignedLower === prevAssignedLower) {
+          // If identical assigned to or redundant same-day New entry
+          if (curAssignedLower === prevAssignedLower || (curAssignedLower === 'new' && entry.timestamp <= prevEntry.timestamp)) {
             removedCount++;
             if (entry.location && entry.location.toLowerCase() !== 'unknown') {
               prevEntry.location = entry.location;

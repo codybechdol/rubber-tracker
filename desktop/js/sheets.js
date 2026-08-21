@@ -1269,12 +1269,12 @@ class SheetNavigator {
 
         // Equipment Sheet Formatting (Clickable Glove / Sleeve / Item # for Lifecycle Dossier)
         const isEquipmentSheet = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(this.currentSheetKey);
-        const isPrimaryItemCol = ['glove', 'glove #', 'sleeve', 'sleeve #', 'blanket', 'blanket #', 'mack', 'mack #', 'item #', 'item', 'serial #'].includes(hLower);
+        const isPrimaryItemCol = isEquipmentSheet && (colIdx === 0 || ['glove', 'gloves', 'glove #', 'glove#', 'sleeve', 'sleeves', 'sleeve #', 'sleeve#', 'blanket', 'blankets', 'blanket #', 'blanket#', 'mack', 'macks', 'mack #', 'item #', 'item#', 'item', 'items', 'item number', 'item num', 'serial #', 'serial#', 'serial'].includes(hLower));
 
         if (isEquipmentSheet && isPrimaryItemCol && val) {
-          const itemKey = val;
-          const histKey = this.currentSheetKey + '_history';
-          customCellHtml = `<span style="font-weight: 700; color: #60a5fa; cursor: pointer; text-decoration: underline dotted;" title="Click to inspect lifecycle dossier for ${this.escapeHtml(h)} #${this.escapeHtml(itemKey)}" onclick="window.itemStatsEngine ? window.itemStatsEngine.openDossierModal('${this.escapeHtml(itemKey)}', '${this.escapeHtml(histKey)}') : null">${this.escapeHtml(val)}</span>`;
+          const itemKey = String(val).trim();
+          const histKey = this.currentSheetKey.endsWith('_history') ? this.currentSheetKey : (this.currentSheetKey + '_history');
+          customCellHtml = `<span style="font-weight: 700; color: #60a5fa; cursor: pointer; text-decoration: underline dotted; display: inline-block; padding: 2px 4px; border-radius: 4px;" title="Click to inspect lifecycle dossier for #${this.escapeHtml(itemKey)}" onclick="if(window.itemStatsEngine){window.itemStatsEngine.openDossierModal('${this.escapeHtml(itemKey)}', '${this.escapeHtml(histKey)}');}">${this.escapeHtml(val)}</span>`;
         } else if (isEquipmentSheet && hLower === 'esl id' && val) {
           // ESL ID is an electronic tracking tag barcode (not linked to item lifecycle)
           customCellHtml = `<span style="font-family: monospace; font-size: 11px; color: #94a3b8; font-weight: 500;">${this.escapeHtml(val)}</span>`;
@@ -1289,7 +1289,7 @@ class SheetNavigator {
           }
         }
 
-        const isEditable = !hLower.includes('change out') && !hLower.startsWith('skip ');
+        const isEditable = !isPrimaryItemCol && !hLower.includes('change out') && !hLower.startsWith('skip ');
 
         html += `<td class="${isEditable ? 'editable' : ''}" 
                      contenteditable="${isEditable}" 
