@@ -119,6 +119,7 @@ class SMSDialogEngine {
 
     const certLower = String(certType || '').toLowerCase();
     const isFirstAidCpr = certLower.includes('cpr') || certLower.includes('1st aid') || certLower.includes('first aid');
+    const isCraneCert = certLower.includes('crane');
 
     this.currentContext = {
       type: 'cert',
@@ -130,6 +131,7 @@ class SMSDialogEngine {
       phone,
       cleanPhone,
       isFirstAidCpr,
+      isCraneCert,
       defaultMsg,
       rowIdx,
       colIdx,
@@ -139,7 +141,7 @@ class SMSDialogEngine {
     this.renderModalUI(body);
     modal.classList.add('active');
 
-    if (isFirstAidCpr) {
+    if (isFirstAidCpr || isCraneCert) {
       setTimeout(() => this.updateNotifyMessage(), 50);
     }
   }
@@ -177,6 +179,28 @@ class SMSDialogEngine {
           `}
         </div>
       </div>
+
+      ${ctx.isCraneCert ? `
+        <!-- Crane Class Interactive Dates Section -->
+        <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+          <div style="font-size: 13px; font-weight: 700; color: #f59e0b; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+            <span>🏗️</span> Upcoming MSLCAT Crane Class Dates:
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div>
+              <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px; font-weight: 600;">Class Start Date</label>
+              <input type="date" id="dt-sms-crane-start" onchange="window.smsDialogEngine.updateNotifyMessage()" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 7px 10px; font-size: 13px;">
+            </div>
+            <div>
+              <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px; font-weight: 600;">Class End Date</label>
+              <input type="date" id="dt-sms-crane-end" onchange="window.smsDialogEngine.updateNotifyMessage()" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 7px 10px; font-size: 13px;">
+            </div>
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted); margin-top: 8px;">
+            💡 Entering the class start & end dates automatically inserts them into the SMS template below.
+          </div>
+        </div>
+      ` : ''}
 
       ${ctx.isFirstAidCpr ? `
         <!-- 1st Aid / CPR Interactive Options Section -->
@@ -268,15 +292,41 @@ class SMSDialogEngine {
   }
 
   /**
-   * Dynamically formats 1st Aid / CPR text message based on user option selections
+   * Dynamically formats 1st Aid / CPR / Crane Cert text message based on user option selections
    */
   updateNotifyMessage() {
     const ctx = this.currentContext;
-    if (!ctx || !ctx.isFirstAidCpr) return;
+    if (!ctx) return;
 
     // Skip regeneration if manual edit mode is turned on
     const isManualEdit = document.getElementById('dt-sms-edit-toggle')?.checked;
     if (isManualEdit) return;
+
+    if (ctx.isCraneCert) {
+      const rawStart = document.getElementById('dt-sms-crane-start')?.value;
+      const rawEnd = document.getElementById('dt-sms-crane-end')?.value;
+      const startStr = rawStart ? this.formatDateMMDDYYYY(rawStart) : '';
+      const endStr = rawEnd ? this.formatDateMMDDYYYY(rawEnd) : '';
+
+      let dateScheduleText = '';
+      if (startStr && endStr) {
+        dateScheduleText = `starting ${startStr} and ending ${endStr}`;
+      } else if (startStr) {
+        dateScheduleText = `starting ${startStr}`;
+      } else if (endStr) {
+        dateScheduleText = `ending ${endStr}`;
+      } else {
+        dateScheduleText = `starting soon and ending soon`;
+      }
+
+      let message = `Hi ${ctx.firstName}, your Crane Cert is expiring and needs to be renewed. There is a class at MSLCAT ${dateScheduleText}. You will need to contact MSLCAT directly to register: Phone: (801) 562-2929 Email: office@mslcat.org Website: mslcat.org (Mon-Fri 7:30am-4pm MT). Have your Name, Email Address, and last 4 of your SSN ready when you call. Let me know when you get signed up!`;
+
+      const textarea = document.getElementById('dt-sms-message-text');
+      if (textarea) textarea.value = message;
+      return;
+    }
+
+    if (!ctx.isFirstAidCpr) return;
 
     const onlineChecked = document.getElementById('dt-sms-opt-online')?.checked;
     const inPersonChecked = document.getElementById('dt-sms-opt-inperson')?.checked;
