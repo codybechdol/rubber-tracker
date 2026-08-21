@@ -260,29 +260,20 @@ class EmployeeProfileEngine {
   }
 
   /**
-   * Extracts the full, accurate item number / serial number from an inventory row
+   * Extracts the full, accurate item number / serial number from an inventory or history row
    */
   getItemNum(item, tableHeaders) {
     if (!item) return 'N/A';
 
-    // 1. Try table's first column header (Column A is always Item# / Serial# / HVT# / PS# in inventory sheets)
-    if (tableHeaders && tableHeaders.length > 0) {
-      const firstColHeader = tableHeaders[0];
-      if (firstColHeader && item[firstColHeader] !== undefined && item[firstColHeader] !== '') {
-        const val = String(item[firstColHeader]).trim();
-        if (val) return val;
-      }
-    }
-
-    // 2. Try specific known column headers
+    // 1. Try specific known column headers for item / serial identifier
     const knownKeys = [
+      'Item #', 'Item#', 'Item', 'Items',
       'HVT #', 'HVT#', 'HVT', 'HV Tester #', 'HV Tester',
       'PS #', 'PS#', 'Phasing Set #', 'Phasing Set',
-      'Item #', 'Item#', 'Item', 'Items',
-      'Glove', 'Glove #', 'Glove#', 'Gloves',
-      'Sleeve', 'Sleeve #', 'Sleeve#', 'Sleeves',
-      'Blanket', 'Blanket #', 'Blanket#', 'Blankets',
-      'MACK', 'MACK #', 'MACK#', 'MACKs',
+      'Glove #', 'Glove#', 'Glove', 'Gloves #', 'Gloves',
+      'Sleeve #', 'Sleeve#', 'Sleeve', 'Sleeves #', 'Sleeves',
+      'Blanket #', 'Blanket#', 'Blanket', 'Blankets #', 'Blankets',
+      'MACK #', 'MACK#', 'MACK', 'MACKs #', 'MACKs',
       'Serial #', 'Serial#', 'Serial', 'Serial Number',
       'ESL ID', 'ESLID', 'ESL_ID', 'Tag #', 'Tag',
       'Ground #', 'Grounds #', 'Grounds', 'Ground',
@@ -290,25 +281,42 @@ class EmployeeProfileEngine {
     ];
 
     for (let k of knownKeys) {
-      if (item[k] !== undefined && item[k] !== '') {
+      if (item[k] !== undefined && item[k] !== null && String(item[k]).trim() !== '') {
         const val = String(item[k]).trim();
+        return val;
+      }
+    }
+
+    // 2. Check tableHeaders for column containing 'item' or '#' or 'serial' or 'hvt' or 'ps' (excluding dates/status/location/size/class)
+    if (tableHeaders && tableHeaders.length > 0) {
+      for (let h of tableHeaders) {
+        const hl = String(h).toLowerCase();
+        if (hl.includes('date') || hl.includes('status') || hl.includes('location') || hl.includes('assign') || hl.includes('note') || hl.includes('size') || hl.includes('class') || hl.includes('kv') || hl.includes('model') || hl.includes('length')) {
+          continue;
+        }
+        if (hl.includes('item') || hl.includes('#') || hl.includes('serial') || hl.includes('hvt') || hl.includes('ps') || hl.includes('tag')) {
+          if (item[h] !== undefined && item[h] !== null && String(item[h]).trim() !== '') {
+            return String(item[h]).trim();
+          }
+        }
+      }
+    }
+
+    // 3. Fallback: check first column if it does not look like a date or status
+    if (tableHeaders && tableHeaders.length > 0) {
+      const firstCol = tableHeaders[0];
+      const fl = String(firstCol).toLowerCase();
+      if (!fl.includes('date') && !fl.includes('assign') && !fl.includes('time') && !fl.includes('status') && !fl.includes('location')) {
+        const val = String(item[firstCol] || '').trim();
         if (val) return val;
       }
     }
 
-    // 3. Search case-insensitively across all keys in item (skipping metadata like _rowIdx)
+    // 4. Return first non-metadata value that does not look like a date
     for (let k of Object.keys(item)) {
       if (k.startsWith('_')) continue;
       const kl = k.toLowerCase();
-      if (kl.includes('hvt') || kl.includes('item') || kl.includes('glove') || kl.includes('sleeve') || kl.includes('blanket') || kl.includes('mack') || kl.includes('serial') || kl.includes('phasing') || kl.includes('stick') || kl.includes('ground') || kl.includes('tag')) {
-        const val = String(item[k]).trim();
-        if (val) return val;
-      }
-    }
-
-    // 4. Return first non-empty value of non-metadata key
-    for (let k of Object.keys(item)) {
-      if (k.startsWith('_')) continue;
+      if (kl.includes('date') || kl.includes('assign') || kl.includes('time') || kl.includes('status') || kl.includes('location')) continue;
       const val = String(item[k]).trim();
       if (val) return val;
     }
@@ -786,6 +794,60 @@ class EmployeeProfileEngine {
   }
 
   /**
+   * Helper to render compact 4-column history tables (Item#, Specifications, Issue Date, Return Date)
+   */
+  renderCompactHistoryTable(historyList, emptyMessage) {
+    if (!historyList || historyList.length === 0) {
+      return `
+        <div style="padding: 24px; text-align: center; color: var(--text-muted); font-size: 12px; background: rgba(0,0,0,0.15); border-radius: 6px; border: 1px dashed var(--border-color);">
+          ${this.escapeHtml(emptyMessage)}
+        </div>
+      `;
+    }
+
+    return `
+      <div style="overflow-x: auto;">
+        <table class="data-table" style="width: 100%; font-size: 12px;">
+          <thead>
+            <tr>
+              <th style="text-align: center; width: 85px;">Item #</th>
+              <th style="text-align: left;">Specifications</th>
+              <th style="text-align: center; width: 105px;">Issue Date</th>
+              <th style="text-align: center; width: 115px;">Return Date</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${historyList.map(h => `
+              <tr>
+                <td style="text-align: center; font-family: monospace; font-weight: 800; color: #60a5fa;">
+                  <button class="btn-link" style="background: none; border: none; font-family: inherit; font-size: inherit; font-weight: inherit; color: #60a5fa; cursor: pointer; text-decoration: underline; padding: 0;" title="Click to view lifecycle dossier" onclick="if(window.itemStatsEngine){window.itemStatsEngine.openDossierModal('${this.escapeHtml(h.itemNum)}', '${this.escapeHtml(h.histKey)}');}">
+                    ${this.escapeHtml(h.itemNum)}
+                  </button>
+                </td>
+                <td style="text-align: left; color: var(--text-secondary); font-size: 11px;">
+                  ${this.escapeHtml(h.specs)}
+                </td>
+                <td style="text-align: center; font-weight: 600; color: #94a3b8;">
+                  ${this.escapeHtml(h.issueDate)}
+                </td>
+                <td style="text-align: center; font-weight: 700;">
+                  ${h.isCurrent ? `
+                    <span class="badge" style="background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4); padding: 1px 6px; border-radius: 4px; font-size: 10.5px;">
+                      🟢 Present
+                    </span>
+                  ` : (h.returnDate && h.returnDate !== '—' ? `
+                    <span style="color: #f87171; font-size: 11px;">↩️ ${this.escapeHtml(h.returnDate)}</span>
+                  ` : `<span style="color: var(--text-muted);">—</span>`)}
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  /**
    * Renders the current selected tab body
    */
   renderActiveTabContent() {
@@ -954,86 +1016,51 @@ class EmployeeProfileEngine {
 
       // 2. Assignment History & Return Log Section
       html += `
-        <div style="margin-top: 10px;">
+        <div style="margin-top: 14px;">
           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; border-bottom: 1px solid var(--border-color); padding-bottom: 6px; flex-wrap: wrap; gap: 6px;">
             <div style="font-size: 13px; font-weight: 800; color: #93c5fd; display: flex; align-items: center; gap: 6px;">
-              <span>📜</span> ${this.escapeHtml(activeCat.title)} Assignment & Return History (${filteredHistory.length} Logged Record${filteredHistory.length === 1 ? '' : 's'})
+              <span>📜</span> ${this.escapeHtml(activeCat.title)} Assignment & Return History (${filteredHistory.length} Total)
             </div>
             <div style="font-size: 11px; color: var(--text-muted);">
-              Chronological log with issue dates, return dates, and duration held
+              Chronological assignment records (Item #, Specifications, Issue Date, and Return Date)
             </div>
           </div>
 
-          ${filteredHistory.length === 0 ? `
-            <div style="padding: 24px; text-align: center; color: var(--text-muted); background: var(--bg-primary); border-radius: 8px; border: 1px dashed var(--border-color);">
-              <p style="font-size: 12.5px; margin: 0;">No previous return logs or archived assignments found in ${this.escapeHtml(activeCat.title)} history.</p>
+          ${this.currentEquipmentFilter === 'gloves_sleeves' ? `
+            <!-- Side-by-Side Layout: Gloves Left, Sleeves Right -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+              
+              <!-- Left Side: Rubber Gloves -->
+              <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; display: flex; flex-direction: column;">
+                <div style="font-size: 13px; font-weight: 800; color: #c084fc; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 6px;">
+                  <span style="display: flex; align-items: center; gap: 6px;">
+                    <span>🧤</span> Gloves Assignment History
+                  </span>
+                  <span class="badge" style="background: rgba(192, 132, 252, 0.2); color: #d8b4fe; font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 700;">
+                    ${filteredHistory.filter(h => h.eqKey === 'gloves').length} Records
+                  </span>
+                </div>
+                ${this.renderCompactHistoryTable(filteredHistory.filter(h => h.eqKey === 'gloves'), 'No glove assignment records logged for this employee.')}
+              </div>
+
+              <!-- Right Side: Rubber Sleeves -->
+              <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; display: flex; flex-direction: column;">
+                <div style="font-size: 13px; font-weight: 800; color: #60a5fa; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 6px;">
+                  <span style="display: flex; align-items: center; gap: 6px;">
+                    <span>🦾</span> Sleeves Assignment History
+                  </span>
+                  <span class="badge" style="background: rgba(96, 165, 250, 0.2); color: #93c5fd; font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 700;">
+                    ${filteredHistory.filter(h => h.eqKey === 'sleeves').length} Records
+                  </span>
+                </div>
+                ${this.renderCompactHistoryTable(filteredHistory.filter(h => h.eqKey === 'sleeves'), 'No sleeve assignment records logged for this employee.')}
+              </div>
+
             </div>
           ` : `
-            <div style="overflow-x: auto;">
-              <table class="data-table" style="width: 100%; font-size: 12px;">
-                <thead>
-                  <tr>
-                    <th style="text-align: left;">Equipment</th>
-                    <th style="text-align: center;">Item #</th>
-                    <th style="text-align: left;">Specifications</th>
-                    <th style="text-align: center;">Issue Date</th>
-                    <th style="text-align: center;">Return Date</th>
-                    <th style="text-align: center;">Duration</th>
-                    <th style="text-align: left;">Return Destination / Status</th>
-                    <th style="text-align: center;">Location</th>
-                    <th style="text-align: left;">Notes</th>
-                    <th style="text-align: center;">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${filteredHistory.map(h => `
-                    <tr>
-                      <td style="font-weight: 700; text-align: left;">
-                        <span style="margin-right: 4px;">${h.eqIcon}</span> ${this.escapeHtml(h.eqType)}
-                      </td>
-                      <td style="text-align: center; font-family: monospace; font-weight: 800; color: #60a5fa;">
-                        ${this.escapeHtml(h.itemNum)}
-                      </td>
-                      <td style="text-align: left; color: var(--text-secondary); font-size: 11px;">
-                        ${this.escapeHtml(h.specs)}
-                      </td>
-                      <td style="text-align: center; font-weight: 700; color: #94a3b8;">
-                        📅 ${this.escapeHtml(h.issueDate)}
-                      </td>
-                      <td style="text-align: center; font-weight: 700;">
-                        ${h.isCurrent ? `
-                          <span class="badge" style="background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4); padding: 2px 8px; border-radius: 4px;">
-                            🟢 Present (Active)
-                          </span>
-                        ` : (h.returnDate && h.returnDate !== '—' ? `
-                          <span style="color: #f87171;">↩️ ${this.escapeHtml(h.returnDate)}</span>
-                        ` : `<span style="color: var(--text-muted);">—</span>`)}
-                      </td>
-                      <td style="text-align: center; font-weight: 600; color: #cbd5e1;">
-                        ${this.escapeHtml(h.duration)}
-                      </td>
-                      <td style="text-align: left;">
-                        <span class="badge" style="background: ${h.isCurrent ? 'rgba(34, 197, 94, 0.15)' : 'rgba(148, 163, 184, 0.15)'}; color: ${h.isCurrent ? '#4ade80' : '#cbd5e1'}; padding: 2px 6px; border-radius: 4px; font-size: 11px;">
-                          ${this.escapeHtml(h.returnStatus)}
-                        </span>
-                      </td>
-                      <td style="text-align: center;">
-                        <span class="badge" style="background: rgba(139, 92, 246, 0.15); color: #c4b5fd; padding: 2px 6px; border-radius: 4px; font-size: 11px;">
-                          📍 ${this.escapeHtml(h.location || '—')}
-                        </span>
-                      </td>
-                      <td style="text-align: left; font-size: 11px; color: var(--text-muted); max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${this.escapeHtml(h.notes || '')}">
-                        ${this.escapeHtml(h.notes || '—')}
-                      </td>
-                      <td style="text-align: center;">
-                        <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 11px;" title="View item complete lifecycle" onclick="if(window.itemStatsEngine){window.itemStatsEngine.openDossierModal('${this.escapeHtml(h.itemNum)}', '${this.escapeHtml(h.histKey)}');}">
-                          📊 Dossier
-                        </button>
-                      </td>
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
+            <!-- Single Table for other categories -->
+            <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px;">
+              ${this.renderCompactHistoryTable(filteredHistory, `No ${activeCat.title} assignment records logged for this employee.`)}
             </div>
           `}
         </div>
