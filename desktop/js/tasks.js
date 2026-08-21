@@ -108,37 +108,6 @@ class TaskManagerApp {
       });
     }
 
-    // Pre-scan Task Metadata to build a crew -> verified truck/unit numbers map
-    const metaTable = this.db.getTable('task_metadata');
-    const crewTruckMap = {};
-    if (metaTable && metaTable.rows) {
-      metaTable.rows.forEach(r => {
-        const empName = String(r['Employee'] || '').toLowerCase().trim();
-        const empInfo = empLookup[empName] || {};
-        const rawCrew = String(r['Job Number'] || r['Crew'] || empInfo.crewId || '').trim();
-        const sigCrew = this.getSignificantJobNumber(rawCrew);
-
-        const text = `${r['Notes'] || ''} ${r['CurrentItem'] || ''} ${r['Description'] || ''}`;
-        let unitVal = '';
-        const unitMatch = text.match(/(?:Unit\s*#?|Truck\s*#?|Vehicle\s*#?)\s*[:#]?\s*([0-9A-Za-z\-]+)/i);
-        if (unitMatch && unitMatch[1]) {
-          const v = unitMatch[1].trim();
-          if (!['not', 'signs', 'comments', 'are', 'date', 'test', 'yes', 'no', 'na', 'none', 'good', 'bad', 'sign'].includes(v.toLowerCase())) {
-            unitVal = v;
-          }
-        }
-        if (!unitVal) {
-          const pdfMatch = text.match(/(?:\[PDF[^\]]*\]\s*)?([0-9]{3,5})[­\-\s]+[0-9]{3}[­\-\s]+[0-9]{2}/i);
-          if (pdfMatch && pdfMatch[1]) unitVal = pdfMatch[1];
-        }
-
-        if (unitVal && sigCrew) {
-          if (!crewTruckMap[sigCrew]) crewTruckMap[sigCrew] = new Set();
-          crewTruckMap[sigCrew].add(unitVal);
-        }
-      });
-    }
-
     // 1. Ingest tasks from Task Metadata
     if (metaTable && metaTable.rows) {
       metaTable.rows.forEach((r, idx) => {
@@ -188,30 +157,26 @@ class TaskManagerApp {
           isOverdue = true;
         }
 
-        // Extract Truck / Vehicle Number for Safety Equipment & Tool tasks
+        // Extract Truck / Vehicle Number strictly for THIS specific task row
         let truckNumber = '';
-        const textForTruck = `${notes} ${currentItem} ${r['Description'] || ''}`;
-
-        // 1. Direct unit match in this specific task row
-        const unitM = textForTruck.match(/(?:Unit\s*#?|Truck\s*#?|Vehicle\s*#?)\s*[:#]?\s*([0-9A-Za-z\-]+)/i);
-        if (unitM && unitM[1]) {
-          const v = unitM[1].trim();
-          if (!['not', 'signs', 'comments', 'are', 'date', 'test', 'yes', 'no', 'na', 'none', 'good', 'bad', 'sign'].includes(v.toLowerCase())) {
-            truckNumber = `Unit ${v}`;
-          }
+        const directVeh = String(r['Vehicle Number'] || r['VehicleNumber'] || r['Vehicle'] || r['Truck'] || r['Unit'] || '').trim();
+        if (directVeh) {
+          truckNumber = directVeh.toLowerCase().startsWith('unit') ? directVeh : `Unit ${directVeh}`;
         }
         if (!truckNumber) {
-          const pdfMatch = textForTruck.match(/(?:\[PDF[^\]]*\]\s*)?([0-9]{3,5})[­\-\s]+[0-9]{3}[­\-\s]+[0-9]{2}/i);
-          if (pdfMatch && pdfMatch[1]) {
-            truckNumber = `Unit ${pdfMatch[1]}`;
+          const textForTruck = `${notes} ${currentItem} ${r['Description'] || ''}`;
+          const unitM = textForTruck.match(/(?:Unit\s*#?|Truck\s*#?|Vehicle\s*#?)\s*[:#]?\s*([0-9A-Za-z\-]+)/i);
+          if (unitM && unitM[1]) {
+            const v = unitM[1].trim();
+            if (!['not', 'signs', 'comments', 'are', 'date', 'test', 'yes', 'no', 'na', 'none', 'good', 'bad', 'sign'].includes(v.toLowerCase())) {
+              truckNumber = `Unit ${v}`;
+            }
           }
-        }
-
-        // 2. Fallback to crew's known inspected units for equipment tasks
-        if (!truckNumber && (category === 'Equipment' || rawType.toLowerCase().includes('safety equipment') || sourceSheet === 'Safety Equipment Needs')) {
-          const sigCrew = this.getSignificantJobNumber(crewId);
-          if (sigCrew && crewTruckMap[sigCrew] && crewTruckMap[sigCrew].size > 0) {
-            truckNumber = `Unit ${Array.from(crewTruckMap[sigCrew]).join(', ')}`;
+          if (!truckNumber) {
+            const pdfMatch = textForTruck.match(/(?:\[PDF[^\]]*\]\s*)?([0-9]{3,5})[­\-\s]+[0-9]{3}[­\-\s]+[0-9]{2}/i);
+            if (pdfMatch && pdfMatch[1]) {
+              truckNumber = `Unit ${pdfMatch[1]}`;
+            }
           }
         }
 
@@ -235,7 +200,7 @@ class TaskManagerApp {
           _rawRow: r
         };
 
-        const taskKey = `${taskObj.type}_${taskObj.employee}_${taskObj.itemType}_${taskObj.dueDate}`.toLowerCase();
+        const taskKey = taskId ? taskId.toLowerCase() : `${sourceSheet}_${sourceRow}_${taskObj.type}_${taskObj.employee}_${taskObj.itemType}_${truckNumber}_${taskObj.dueDate}`.toLowerCase();
         if (this.db.isTaskDismissed(taskKey)) return;
         if (!seenTaskKeys.has(taskKey)) {
           seenTaskKeys.add(taskKey);
@@ -386,6 +351,58 @@ class TaskManagerApp {
               notes: `Expiring Cert: ${certType} (Expires: ${expDate})`
             });
           }
+        }
+      });
+    }
+
+    // 5. Harvest Safety Equipment Needs directly (individual task per vehicle/report)
+    const safetyEquipTable = this.db.getTable('safety_equipment_needs');
+    if (safetyEquipTable && safetyEquipTable.rows) {
+      safetyEquipTable.rows.forEach((r, idx) => {
+        const status = String(r['Status'] || '').trim();
+        if (status.toLowerCase().includes('resolve') || status.toLowerCase().includes('complete')) return;
+
+        const equipType = String(r['Equipment Type'] || r['Equipment'] || r['Type'] || '').trim();
+        if (!equipType || equipType.toLowerCase() === 'no issues') return;
+
+        const rowKey = `Safety Equipment Needs_${idx + 2}`;
+        const taskId = `safety_equip_${idx + 2}`;
+        if (this.db.isTaskDismissed(taskId) || this.db.isTaskDismissed(rowKey)) return;
+
+        const worker = String(r['Foreman'] || r['Worker'] || r['Employee'] || r['Name'] || '').trim();
+        const crewId = String(r['Job Number'] || r['Job #'] || r['Crew'] || '').trim() || 'Unassigned Crew';
+        const vehNum = String(r['Vehicle Number'] || r['Vehicle #'] || r['Truck'] || r['Unit'] || '').trim();
+        const reportDate = String(r['Report Date'] || r['Date'] || '').trim();
+        const notes = String(r['Notes'] || r['Issue Description'] || r['Comments'] || '').trim();
+
+        const empInfo = empLookup[worker.toLowerCase()] || {};
+        const loc = empInfo.location || (jobLookup[crewId]?.location) || 'Helena';
+        const foreman = empInfo.foreman || (jobLookup[crewId]?.foreman) || worker;
+
+        const truckNumber = vehNum ? (vehNum.toLowerCase().startsWith('unit') ? vehNum : `Unit ${vehNum}`) : '';
+        const taskKey = `safety_equipment_${crewId}_${worker}_${equipType}_${vehNum}_${reportDate}`.toLowerCase();
+
+        if (!seenTaskKeys.has(taskKey) && !seenTaskKeys.has(rowKey.toLowerCase()) && !seenTaskKeys.has(taskId.toLowerCase())) {
+          seenTaskKeys.add(taskKey);
+          const isOverdue = this.checkIfOverdue(reportDate);
+          allTasks.push({
+            id: rowKey,
+            sourceSheet: 'Safety Equipment Needs',
+            category: 'Equipment',
+            type: `Safety Equipment: ${equipType}`,
+            itemType: equipType,
+            currentItem: notes || equipType,
+            truckNumber: truckNumber,
+            employee: worker || 'Unassigned',
+            crewId: crewId,
+            foreman: foreman,
+            location: this.cleanLocation(loc),
+            dueDate: reportDate,
+            scheduledDate: '',
+            status: isOverdue ? 'Overdue' : 'Needs Attention',
+            isOverdue: isOverdue,
+            notes: notes ? `${notes} (Vehicle: ${vehNum})` : (vehNum ? `Vehicle: ${vehNum}` : '')
+          });
         }
       });
     }
