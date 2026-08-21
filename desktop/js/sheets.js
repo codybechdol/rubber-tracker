@@ -1248,10 +1248,14 @@ class SheetNavigator {
           } else if (hLower.includes('job') || hLower === 'job #') {
             customCellHtml = `<span style="font-family: monospace; font-weight: bold; color: #60a5fa;">${this.escapeHtml(val)}</span>`;
           } else if (hLower.includes('sms')) {
-            if (vStr && vStr.toLowerCase() !== 'false' && vStr !== '⬜') {
-              customCellHtml = `<span class="badge" style="background-color: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.4); padding: 2px 6px; font-size: 11px;">📱 ${this.escapeHtml(val)}</span>`;
+            const rowEmp = String(row['Employee Name'] || row['Employee'] || row['Name'] || '').trim();
+            const certType = String(row['Item Type'] || row['Cert Type'] || row['Type'] || '').trim();
+            const expDate = String(row['Expiration Date'] || row['Expiration'] || '').trim();
+
+            if (vStr.includes('Sent') || vStr.includes('Notified')) {
+              customCellHtml = `<button class="btn btn-secondary" style="font-size: 11px; padding: 2px 8px; background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); cursor: pointer; border-radius: 4px;" title="Notification logged (${this.escapeHtml(vStr)}). Click to resend SMS." onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeHtml(rowEmp)}', '${this.escapeHtml(certType)}', '${this.escapeHtml(expDate)}', ${sheetRowIdx}, ${colIdx + 1});}">📱 ${this.escapeHtml(val)}</button>`;
             } else {
-              customCellHtml = `<span style="color: #64748b; font-size: 11px;">—</span>`;
+              customCellHtml = `<button class="btn btn-primary" style="font-size: 11px; padding: 2px 8px; background-color: #f59e0b; border: 1px solid #d97706; color: #fff; font-weight: 700; cursor: pointer; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);" title="Send SMS reminder to ${this.escapeHtml(rowEmp)}" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeHtml(rowEmp)}', '${this.escapeHtml(certType)}', '${this.escapeHtml(expDate)}', ${sheetRowIdx}, ${colIdx + 1});}">💬 Send SMS</button>`;
             }
           }
         }
@@ -1318,7 +1322,8 @@ class SheetNavigator {
           }
         }
 
-        const isEditable = !isPrimaryItemCol && !isEmployeeNameCol && !hLower.includes('change out') && !hLower.startsWith('skip ');
+        const isSmsCol = hLower.includes('sms');
+        const isEditable = !isPrimaryItemCol && !isEmployeeNameCol && !isSmsCol && !hLower.includes('change out') && !hLower.startsWith('skip ');
 
         html += `<td class="${isEditable ? 'editable' : ''}" 
                      contenteditable="${isEditable}" 
