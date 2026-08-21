@@ -146,21 +146,42 @@
 
       <!-- View 2: Trip Planner -->
       <section id="trip-planner-view" class="view-container">
-        <div class="sheet-toolbar" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-            <h2 style="font-size: 16px; margin: 0;">🗺️ Trip Planner & Route Scheduler</h2>
-            <div style="display: flex; align-items: center; gap: 6px;">
-              <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="window.tripPlanner.prevWeek()" title="Previous Week">◀ Prev</button>
-              <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="window.tripPlanner.currentWeek()" title="Current Week">Today</button>
-              <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="window.tripPlanner.nextWeek()" title="Next Week">Next ▶</button>
-              <span id="trip-planner-week-label" style="font-weight: 700; font-size: 12px; color: #93c5fd; margin-left: 4px;"></span>
+        <div class="sheet-toolbar" style="display: flex; flex-direction: column; gap: 8px; padding: 10px 16px;">
+          <!-- Top Row: Title, Week Span, Navigation, and Jump Dropdown -->
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <h2 style="font-size: 16px; margin: 0;">🗺️ Trip Planner & Route Scheduler</h2>
+              <!-- Week Span Selector -->
+              <div style="display: flex; align-items: center; gap: 3px; background: var(--bg-primary); padding: 2px 4px; border-radius: 6px; border: 1px solid var(--border-color);">
+                <span style="font-size: 10.5px; color: var(--text-muted); font-weight: 700; margin: 0 4px;">VIEW:</span>
+                <button class="btn btn-secondary active" id="btn-span-1w" style="padding: 2px 6px; font-size: 10.5px; font-weight: 700;" onclick="window.tripPlanner.setWeeksToShow(1)">1 Wk</button>
+                <button class="btn btn-secondary" id="btn-span-2w" style="padding: 2px 6px; font-size: 10.5px;" onclick="window.tripPlanner.setWeeksToShow(2)">2 Wks</button>
+                <button class="btn btn-secondary" id="btn-span-3w" style="padding: 2px 6px; font-size: 10.5px;" onclick="window.tripPlanner.setWeeksToShow(3)">3 Wks</button>
+                <button class="btn btn-secondary" id="btn-span-4w" style="padding: 2px 6px; font-size: 10.5px;" onclick="window.tripPlanner.setWeeksToShow(4)">4 Wks (Month)</button>
+              </div>
             </div>
-          </div>
-          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-            <span class="brand-badge" id="trip-planner-schedule-badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 11px; font-weight: 700;">
-              🗓️ Mon-Thu Schedule
-            </span>
-            <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px; color: #f87171;" onclick="window.tripPlanner.clearWeekTrips()" title="Clear planned trips for this week">🗑️ Clear Week</button>
+
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <!-- Navigation Controls -->
+              <div style="display: flex; align-items: center; gap: 4px;">
+                <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="window.tripPlanner.prevWeek()" title="Previous Week">◀ Prev</button>
+                <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="window.tripPlanner.currentWeek()" title="Current Week">Today</button>
+                <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="window.tripPlanner.nextWeek()" title="Next Week">Next ▶</button>
+                <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="window.tripPlanner.jumpWeeks(2)" title="Jump 2 Weeks Forward">+2 Wks ▶▶</button>
+              </div>
+
+              <!-- Quick Week Jumper Select -->
+              <select id="trip-planner-week-select" style="padding: 4px 8px; font-size: 11px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #93c5fd; font-weight: 700;" onchange="window.tripPlanner.onWeekSelectChange(this.value)">
+                <!-- Populated dynamically -->
+              </select>
+
+              <!-- Date Picker Input for instant date jump -->
+              <input type="date" id="trip-planner-date-picker" style="padding: 3px 6px; font-size: 11px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;" onchange="window.tripPlanner.onDatePickerChange(this.value)" title="Jump directly to any date">
+
+              <span class="brand-badge" id="trip-planner-schedule-badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 11px; font-weight: 700;">
+                🗓️ Mon-Thu Schedule
+              </span>
+            </div>
           </div>
         </div>
         <div style="display: flex; flex: 1; overflow: hidden;">

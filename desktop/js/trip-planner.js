@@ -1,11 +1,12 @@
 /**
- * trip-planner.js - Offline Trip Planner & Route Scheduler
+ * trip-planner.js - Multi-Week Offline Trip Planner & Route Scheduler
  */
 
 class TripPlannerApp {
   constructor(db) {
     this.db = db;
     this.currentDate = new Date();
+    this.weeksToShow = 1; // 1, 2, 3, or 4 weeks
     this.activeSchedule = 'Mon-Thu'; // 'Mon-Thu' or 'Tue-Fri'
     this.cityFilter = 'active'; // 'active' or 'all'
     this.searchTerm = '';
@@ -53,6 +54,7 @@ class TripPlannerApp {
   init() {
     this.loadSavedTrips();
     this.setupSearchListeners();
+    this.populateWeekDropdown();
     this.renderPlanner();
   }
 
@@ -78,19 +80,124 @@ class TripPlannerApp {
     localStorage.setItem('sa_planned_trips', JSON.stringify(this.plannedTrips));
   }
 
+  setWeeksToShow(weeks) {
+    this.weeksToShow = parseInt(weeks, 10) || 1;
+    [1, 2, 3, 4].forEach(w => {
+      const btn = document.getElementById(`btn-span-${w}w`);
+      if (btn) {
+        if (w === this.weeksToShow) btn.classList.add('active');
+        else btn.classList.remove('active');
+      }
+    });
+    this.renderPlanner();
+  }
+
   prevWeek() {
     this.currentDate.setDate(this.currentDate.getDate() - 7);
+    this.updateDropdownValue();
     this.renderPlanner();
   }
 
   nextWeek() {
     this.currentDate.setDate(this.currentDate.getDate() + 7);
+    this.updateDropdownValue();
+    this.renderPlanner();
+  }
+
+  jumpWeeks(n) {
+    this.currentDate.setDate(this.currentDate.getDate() + (n * 7));
+    this.updateDropdownValue();
     this.renderPlanner();
   }
 
   currentWeek() {
     this.currentDate = new Date();
+    this.updateDropdownValue();
     this.renderPlanner();
+  }
+
+  onWeekSelectChange(dateKey) {
+    if (dateKey) {
+      const parts = dateKey.split('-');
+      if (parts.length === 3) {
+        this.currentDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 12, 0, 0);
+        this.renderPlanner();
+      }
+    }
+  }
+
+  onDatePickerChange(dateVal) {
+    if (dateVal) {
+      const parts = dateVal.split('-');
+      if (parts.length === 3) {
+        this.currentDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 12, 0, 0);
+        this.updateDropdownValue();
+        this.renderPlanner();
+      }
+    }
+  }
+
+  populateWeekDropdown() {
+    const select = document.getElementById('trip-planner-week-select');
+    if (!select) return;
+    select.innerHTML = '';
+
+    const today = new Date();
+    const dayOfWeek = today.getDay();
+    const distToMon = (dayOfWeek === 0 ? -6 : 1) - dayOfWeek;
+    const baseMonday = new Date(today.setDate(today.getDate() + distToMon));
+
+    // Generate next 16 weeks options
+    for (let w = -2; w <= 14; w++) {
+      const mon = new Date(baseMonday);
+      mon.setDate(baseMonday.getDate() + (w * 7));
+      const fri = new Date(mon);
+      fri.setDate(mon.getDate() + 4);
+
+      const yyyy = mon.getFullYear();
+      const mm = String(mon.getMonth() + 1).padStart(2, '0');
+      const dd = String(mon.getDate()).padStart(2, '0');
+      const key = `${yyyy}-${mm}-${dd}`;
+
+      let label = `${mon.getMonth() + 1}/${mon.getDate()} - ${fri.getMonth() + 1}/${fri.getDate()}`;
+      if (w === 0) label += ' (This Week)';
+      else if (w === 1) label += ' (+1 Wk)';
+      else if (w > 1) label += ` (+${w} Wks)`;
+      else if (w === -1) label += ' (Last Week)';
+      else if (w < -1) label += ` (${w} Wks)`;
+
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = label;
+      select.appendChild(opt);
+    }
+
+    this.updateDropdownValue();
+  }
+
+  updateDropdownValue() {
+    const select = document.getElementById('trip-planner-week-select');
+    const datePicker = document.getElementById('trip-planner-date-picker');
+    const monday = this.getMondayForDate(this.currentDate);
+    const yyyy = monday.getFullYear();
+    const mm = String(monday.getMonth() + 1).padStart(2, '0');
+    const dd = String(monday.getDate()).padStart(2, '0');
+    const key = `${yyyy}-${mm}-${dd}`;
+
+    if (select) {
+      select.value = key;
+    }
+    if (datePicker) {
+      datePicker.value = key;
+    }
+  }
+
+  getMondayForDate(date) {
+    const d = new Date(date);
+    const day = d.getDay();
+    const diff = (day === 0 ? -6 : 1) - day;
+    d.setDate(d.getDate() + diff);
+    return d;
   }
 
   setCityFilter(filter) {
@@ -109,11 +216,16 @@ class TripPlannerApp {
     this.renderAvailableLocations();
   }
 
-  clearWeekTrips() {
-    const weekDays = this.getDaysForCurrentWeek();
-    weekDays.forEach(d => {
-      delete this.plannedTrips[d.dateKey];
-    });
+  clearWeekTrips(startMondayKey) {
+    const monday = startMondayKey ? this.parseDate(startMondayKey) : this.getMondayForDate(this.currentDate);
+    for (let i = 0; i < 5; i++) {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      delete this.plannedTrips[`${yyyy}-${mm}-${dd}`];
+    }
     this.saveTrips();
     this.renderPlanner();
   }
@@ -217,12 +329,8 @@ class TripPlannerApp {
   cleanPhysicalLocation(loc) {
     if (!loc) return '';
     let clean = String(loc).trim();
-    // Strip parenthesized status like "Helena (Vacation)" -> "Helena"
     const parenMatch = clean.match(/^([^(]+)\s*\([^)]+\)$/);
-    if (parenMatch) {
-      clean = parenMatch[1].trim();
-    }
-    // Proper capital casing
+    if (parenMatch) clean = parenMatch[1].trim();
     return clean.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   }
 
@@ -270,7 +378,6 @@ class TripPlannerApp {
 
   renderPlanner() {
     const board = document.getElementById('trip-planner-board');
-    const weekLabel = document.getElementById('trip-planner-week-label');
     const scheduleBadge = document.getElementById('trip-planner-schedule-badge');
     if (!board) return;
     board.innerHTML = '';
@@ -281,123 +388,171 @@ class TripPlannerApp {
       scheduleBadge.textContent = `🗓️ ${workSchedule} Schedule`;
     }
 
-    const weekDays = this.getDaysForCurrentWeek(workSchedule);
-
-    if (weekLabel && weekDays.length > 0) {
-      const firstDay = weekDays[0];
-      const lastDay = weekDays[weekDays.length - 1];
-      weekLabel.textContent = `Week of ${firstDay.formattedDate} - ${lastDay.formattedDate}`;
-    }
-
     const { locations } = this.getLocationData();
     const locMap = {};
     locations.forEach(l => { locMap[l.name] = l; });
 
-    weekDays.forEach(day => {
-      const dateKey = day.dateKey;
-      const trip = this.plannedTrips[dateKey] || null;
-      const isHoliday = this.isDayHoliday(dateKey);
-      const locInfo = trip ? locMap[trip.location] : null;
+    const baseMonday = this.getMondayForDate(this.currentDate);
 
-      const col = document.createElement('div');
-      col.className = 'day-column';
+    // Render multi-week sections based on weeksToShow
+    for (let w = 0; w < this.weeksToShow; w++) {
+      const weekMonday = new Date(baseMonday);
+      weekMonday.setDate(baseMonday.getDate() + (w * 7));
+      const weekDays = this.getDaysForWeek(weekMonday, workSchedule);
 
-      col.innerHTML = `
-        <div class="day-header" style="background: ${isHoliday ? 'linear-gradient(90deg, #854d0e 0%, #1e293b 100%)' : '#1e293b'};">
-          <div>
-            <span style="font-weight: 800; color: #f8fafc;">${day.dayName}, ${day.formattedDate}</span>
-          </div>
-          <div>
-            <span class="badge" style="background: ${isHoliday ? '#ca8a04' : (day.isWorkDay ? '#0284c7' : '#475569')}; color: #fff; font-size: 10px; padding: 2px 6px; border-radius: 4px;">
-              ${isHoliday ? '🏖️ Holiday' : (day.isWorkDay ? 'Work Day' : 'Scheduled Off')}
+      const firstDay = weekDays[0];
+      const lastDay = weekDays[weekDays.length - 1];
+      const weekDateKey = firstDay.dateKey;
+
+      const tripsInWeek = weekDays.filter(d => this.plannedTrips[d.dateKey]).length;
+
+      const section = document.createElement('div');
+      section.className = 'trip-planner-week-section';
+
+      section.innerHTML = `
+        <!-- Week Header -->
+        <div class="trip-planner-week-header">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 15px; font-weight: 800; color: #93c5fd;">
+              📅 Week ${w + 1}: ${firstDay.formattedDate} – ${lastDay.formattedDate}, ${firstDay.year}
             </span>
+            ${w === 0 ? `
+              <span class="badge" style="background: rgba(59, 130, 246, 0.25); color: #60a5fa; font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 10px;">
+                Current View Base
+              </span>
+            ` : `
+              <span class="badge" style="background: rgba(255, 255, 255, 0.08); color: #cbd5e1; font-size: 10.5px; padding: 2px 8px; border-radius: 10px;">
+                +${w} Week${w > 1 ? 's' : ''} Out
+              </span>
+            `}
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 11.5px; color: ${tripsInWeek > 0 ? '#4ade80' : 'var(--text-muted)'}; font-weight: 600;">
+              ${tripsInWeek > 0 ? `🚗 ${tripsInWeek} Trip${tripsInWeek > 1 ? 's' : ''} Scheduled` : '⚪ No trips scheduled'}
+            </span>
+            ${tripsInWeek > 0 ? `
+              <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 10.5px; color: #f87171;" onclick="window.tripPlanner.clearWeekTrips('${weekDateKey}')" title="Clear scheduled trips for this week">
+                🗑️ Clear Week
+              </button>
+            ` : ''}
           </div>
         </div>
-        <div class="card-drop-zone" data-date="${dateKey}" style="background: ${isHoliday ? 'rgba(202, 138, 4, 0.04)' : 'transparent'};">
-          ${trip ? `
-            <div class="location-card" draggable="true" data-date="${dateKey}" data-location="${this.escapeHtml(trip.location)}" style="border-left: 4px solid #38bdf8; background: var(--bg-primary);">
-              <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
-                <div class="location-card-title" style="color: #60a5fa; font-size: 15px; font-weight: 800; display: flex; align-items: center; gap: 4px;">
-                  📍 ${this.escapeHtml(trip.location)}
-                </div>
-                <span class="badge" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">
-                  🚗 ${this.escapeHtml(this.getDriveTime(trip.location).time)}
-                </span>
-              </div>
-              
-              <div class="location-card-meta" style="line-height: 1.4; margin-bottom: 8px;">
-                <div style="color: #94a3b8; font-size: 11px;">Distance: <strong>${this.escapeHtml(this.getDriveTime(trip.location).desc)}</strong></div>
-                ${locInfo && locInfo.activeCrews.length > 0 ? `
-                  <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.08);">
-                    <div style="font-size: 11px; font-weight: 700; color: #4ade80; margin-bottom: 6px;">
-                      🟢 Active Crews & Field Tasks (${locInfo.activeCrews.length}):
-                    </div>
-                    ${locInfo.activeCrews.map(c => {
-                      const crewTasks = window.taskManager ? window.taskManager.getTasksByCrew(c.crewId) : [];
-                      return `
-                        <div style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.06); border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
-                          <div style="font-size: 11.5px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                            <span><strong style="color: #60a5fa;">Crew ${this.escapeHtml(c.crewId)}</strong> (${this.escapeHtml(c.foreman)})</span>
-                            <span class="badge" style="background: ${crewTasks.length > 0 ? 'rgba(245, 158, 11, 0.2)' : 'rgba(16, 185, 129, 0.2)'}; color: ${crewTasks.length > 0 ? '#facc15' : '#4ade80'}; font-size: 10px; padding: 1px 6px;">
-                              ${crewTasks.length > 0 ? `📋 ${crewTasks.length} task${crewTasks.length > 1 ? 's' : ''}` : '✓ Current'}
-                            </span>
-                          </div>
-                          ${crewTasks.length > 0 ? `
-                            <div style="display: flex; flex-direction: column; gap: 3px; margin-top: 4px; padding-left: 4px; border-left: 2px solid rgba(245, 158, 11, 0.5);">
-                              ${crewTasks.slice(0, 4).map(t => `
-                                <div style="font-size: 10.5px; color: ${t.isOverdue ? '#f87171' : '#e2e8f0'}; display: flex; justify-content: space-between;">
-                                  <span>• ${this.escapeHtml(t.type)}: ${this.escapeHtml(t.itemType)} (${this.escapeHtml(t.employee)})</span>
-                                  <span style="font-size: 9.5px; color: var(--text-muted);">${this.escapeHtml(t.dueDate)}</span>
-                                </div>
-                              `).join('')}
-                              ${crewTasks.length > 4 ? `
-                                <div style="font-size: 10px; color: #93c5fd; font-style: italic;">+ ${crewTasks.length - 4} more tasks (see Tasks & Calendar)</div>
-                              ` : ''}
-                            </div>
-                          ` : `
-                            <div style="font-size: 10px; color: #94a3b8; font-style: italic;">No pending swaps or trainings</div>
-                          `}
-                        </div>
-                      `;
-                    }).join('')}
-                  </div>
-                ` : `
-                  <div style="margin-top: 4px; font-size: 11px; color: #94a3b8;">Base / Non-crew visit</div>
-                `}
-              </div>
 
-              <div style="display: flex; justify-content: flex-end; margin-top: 6px;">
-                <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 10px; color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);" onclick="window.tripPlanner.removeTrip('${dateKey}')">❌ Remove</button>
-              </div>
-            </div>
-          ` : `
-            <div style="color: var(--text-muted); font-size: 12px; text-align: center; margin-top: 40px; border: 1px dashed var(--border-color); border-radius: 6px; padding: 16px;">
-              ${isHoliday ? '🏖️ Holiday Day' : 'Drag a city card here to schedule'}
-            </div>
-          `}
-        </div>
+        <!-- 5-Day Grid -->
+        <div class="trip-planner-week-grid" id="grid-week-${w}"></div>
       `;
 
-      // Setup drop zone
-      const dropZone = col.querySelector('.card-drop-zone');
-      dropZone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dropZone.style.backgroundColor = 'rgba(59, 130, 246, 0.15)';
-      });
-      dropZone.addEventListener('dragleave', () => {
-        dropZone.style.backgroundColor = '';
-      });
-      dropZone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropZone.style.backgroundColor = '';
-        const location = e.dataTransfer.getData('text/plain');
-        if (location) {
-          this.setTrip(dateKey, location);
-        }
+      const grid = section.querySelector(`#grid-week-${w}`);
+
+      weekDays.forEach(day => {
+        const dateKey = day.dateKey;
+        const trip = this.plannedTrips[dateKey] || null;
+        const isHoliday = this.isDayHoliday(dateKey);
+        const locInfo = trip ? locMap[trip.location] : null;
+
+        const col = document.createElement('div');
+        col.className = 'day-column';
+
+        col.innerHTML = `
+          <div class="day-header" style="background: ${isHoliday ? 'linear-gradient(90deg, #854d0e 0%, #1e293b 100%)' : '#1e293b'};">
+            <div>
+              <span style="font-weight: 800; color: #f8fafc;">${day.dayName}, ${day.formattedDate}</span>
+            </div>
+            <div>
+              <span class="badge" style="background: ${isHoliday ? '#ca8a04' : (day.isWorkDay ? '#0284c7' : '#475569')}; color: #fff; font-size: 9.5px; padding: 2px 5px; border-radius: 4px;">
+                ${isHoliday ? '🏖️ Holiday' : (day.isWorkDay ? 'Work' : 'Off')}
+              </span>
+            </div>
+          </div>
+          <div class="card-drop-zone" data-date="${dateKey}" style="background: ${isHoliday ? 'rgba(202, 138, 4, 0.04)' : 'transparent'};">
+            ${trip ? `
+              <div class="location-card" draggable="true" data-date="${dateKey}" data-location="${this.escapeHtml(trip.location)}" style="border-left: 4px solid #38bdf8; background: var(--bg-primary);">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+                  <div class="location-card-title" style="color: #60a5fa; font-size: 14.5px; font-weight: 800; display: flex; align-items: center; gap: 4px;">
+                    📍 ${this.escapeHtml(trip.location)}
+                  </div>
+                  <span class="badge" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">
+                    🚗 ${this.escapeHtml(this.getDriveTime(trip.location).time)}
+                  </span>
+                </div>
+                
+                <div class="location-card-meta" style="line-height: 1.4; margin-bottom: 8px;">
+                  <div style="color: #94a3b8; font-size: 11px;">Distance: <strong>${this.escapeHtml(this.getDriveTime(trip.location).desc)}</strong></div>
+                  ${locInfo && locInfo.activeCrews.length > 0 ? `
+                    <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.08);">
+                      <div style="font-size: 11px; font-weight: 700; color: #4ade80; margin-bottom: 6px;">
+                        🟢 Active Crews & Tasks (${locInfo.activeCrews.length}):
+                      </div>
+                      ${locInfo.activeCrews.map(c => {
+                        const crewTasks = window.taskManager ? window.taskManager.getTasksByCrew(c.crewId) : [];
+                        return `
+                          <div style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.06); border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
+                            <div style="font-size: 11px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
+                              <span><strong style="color: #60a5fa;">Crew ${this.escapeHtml(c.crewId)}</strong> (${this.escapeHtml(c.foreman)})</span>
+                              <span class="badge" style="background: ${crewTasks.length > 0 ? 'rgba(245, 158, 11, 0.2)' : 'rgba(16, 185, 129, 0.2)'}; color: ${crewTasks.length > 0 ? '#facc15' : '#4ade80'}; font-size: 9.5px; padding: 1px 5px;">
+                                ${crewTasks.length > 0 ? `📋 ${crewTasks.length} task${crewTasks.length > 1 ? 's' : ''}` : '✓ Current'}
+                              </span>
+                            </div>
+                            ${crewTasks.length > 0 ? `
+                              <div style="display: flex; flex-direction: column; gap: 2px; margin-top: 3px; padding-left: 4px; border-left: 2px solid rgba(245, 158, 11, 0.5);">
+                                ${crewTasks.slice(0, 3).map(t => `
+                                  <div style="font-size: 10px; color: ${t.isOverdue ? '#f87171' : '#e2e8f0'}; display: flex; justify-content: space-between;">
+                                    <span>• ${this.escapeHtml(t.type)}: ${this.escapeHtml(t.itemType)}</span>
+                                    <span style="font-size: 9px; color: var(--text-muted);">${this.escapeHtml(t.dueDate)}</span>
+                                  </div>
+                                `).join('')}
+                                ${crewTasks.length > 3 ? `
+                                  <div style="font-size: 9.5px; color: #93c5fd; font-style: italic;">+ ${crewTasks.length - 3} more tasks</div>
+                                ` : ''}
+                              </div>
+                            ` : `
+                              <div style="font-size: 9.5px; color: #94a3b8; font-style: italic;">No pending tasks</div>
+                            `}
+                          </div>
+                        `;
+                      }).join('')}
+                    </div>
+                  ` : `
+                    <div style="margin-top: 4px; font-size: 11px; color: #94a3b8;">Base / Non-crew visit</div>
+                  `}
+                </div>
+
+                <div style="display: flex; justify-content: flex-end; margin-top: 6px;">
+                  <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 10px; color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);" onclick="window.tripPlanner.removeTrip('${dateKey}')">❌ Remove</button>
+                </div>
+              </div>
+            ` : `
+              <div style="color: var(--text-muted); font-size: 11.5px; text-align: center; margin-top: 30px; border: 1px dashed var(--border-color); border-radius: 6px; padding: 14px;">
+                ${isHoliday ? '🏖️ Holiday Day' : 'Drag city here'}
+              </div>
+            `}
+          </div>
+        `;
+
+        // Setup drop zone
+        const dropZone = col.querySelector('.card-drop-zone');
+        dropZone.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          dropZone.style.backgroundColor = 'rgba(59, 130, 246, 0.15)';
+        });
+        dropZone.addEventListener('dragleave', () => {
+          dropZone.style.backgroundColor = '';
+        });
+        dropZone.addEventListener('drop', (e) => {
+          e.preventDefault();
+          dropZone.style.backgroundColor = '';
+          const location = e.dataTransfer.getData('text/plain');
+          if (location) {
+            this.setTrip(dateKey, location);
+          }
+        });
+
+        grid.appendChild(col);
       });
 
-      board.appendChild(col);
-    });
+      board.appendChild(section);
+    }
 
     this.renderAvailableLocations();
   }
@@ -515,18 +670,13 @@ class TripPlannerApp {
     this.renderPlanner();
   }
 
-  getDaysForCurrentWeek(schedule = 'Mon-Thu') {
+  getDaysForWeek(mondayDate, schedule = 'Mon-Thu') {
     const days = [];
-    const curr = new Date(this.currentDate);
-    const dayOfWeek = curr.getDay(); // 0 is Sun, 1 is Mon
-    const distanceToMon = (dayOfWeek === 0 ? -6 : 1) - dayOfWeek;
-    const monday = new Date(curr.setDate(curr.getDate() + distanceToMon));
-
     const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
     for (let i = 0; i < 5; i++) { // Mon, Tue, Wed, Thu, Fri
-      const d = new Date(monday);
-      d.setDate(monday.getDate() + i);
+      const d = new Date(mondayDate);
+      d.setDate(mondayDate.getDate() + i);
 
       const yyyy = d.getFullYear();
       const mm = String(d.getMonth() + 1).padStart(2, '0');
@@ -546,6 +696,7 @@ class TripPlannerApp {
         dateKey,
         dayName: dayNames[dayIndex],
         formattedDate: `${d.getMonth() + 1}/${d.getDate()}`,
+        year: yyyy,
         isWorkDay: isWorkDay
       });
     }
@@ -559,6 +710,18 @@ class TripPlannerApp {
       return snap.configs.holidays.some(h => h.date === dateKey);
     }
     return false;
+  }
+
+  parseDate(str) {
+    if (!str || str === 'N/A') return new Date();
+    if (str.includes('-')) {
+      const parts = str.split('-');
+      if (parts.length === 3) {
+        return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 12, 0, 0);
+      }
+    }
+    const d = new Date(str);
+    return isNaN(d.getTime()) ? new Date() : d;
   }
 
   escapeHtml(str) {

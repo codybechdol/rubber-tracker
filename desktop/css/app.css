@@ -340,11 +340,37 @@ body {
 /* Trip Planner Board */
 .trip-planner-board {
   flex: 1;
-  padding: 20px;
+  padding: 16px 20px;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.trip-planner-week-section {
+  background-color: rgba(15, 23, 42, 0.4);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.trip-planner-week-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.trip-planner-week-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+  grid-template-columns: repeat(5, minmax(200px, 1fr));
+  gap: 14px;
 }
 
 .day-column {
@@ -353,16 +379,21 @@ body {
   border-radius: 8px;
   display: flex;
   flex-direction: column;
-  min-height: 400px;
+  min-height: 280px;
+  transition: border-color 0.2s ease;
+}
+
+.day-column:hover {
+  border-color: rgba(59, 130, 246, 0.5);
 }
 
 .day-header {
-  padding: 12px;
-  background-color: #243247;
+  padding: 10px 12px;
+  background-color: #1e293b;
   border-bottom: 1px solid var(--border-color);
   border-radius: 8px 8px 0 0;
   font-weight: 700;
-  font-size: 14px;
+  font-size: 13px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -370,11 +401,12 @@ body {
 
 .card-drop-zone {
   flex: 1;
-  padding: 12px;
+  padding: 10px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  min-height: 200px;
+  min-height: 180px;
+  transition: background-color 0.15s ease;
 }
 
 .location-card {
