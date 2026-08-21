@@ -72,14 +72,11 @@ class TripPlannerApp {
   }
 
   loadSavedTrips() {
-    const saved = localStorage.getItem('sa_planned_trips');
-    if (saved) {
-      try { this.plannedTrips = JSON.parse(saved); } catch (e) {}
-    }
+    this.plannedTrips = this.db.getPlannedTrips() || {};
   }
 
   saveTrips() {
-    localStorage.setItem('sa_planned_trips', JSON.stringify(this.plannedTrips));
+    this.db.savePlannedTrips(this.plannedTrips);
   }
 
   setWeeksToShow(weeks) {
@@ -229,6 +226,10 @@ class TripPlannerApp {
       delete this.plannedTrips[`${yyyy}-${mm}-${dd}`];
     }
     this.saveTrips();
+    this.db.addMutation({
+      action: 'SAVE_PLANNED_TRIPS',
+      trips: this.plannedTrips
+    });
     this.renderPlanner();
   }
 
@@ -935,7 +936,8 @@ class TripPlannerApp {
     this.db.addMutation({
       action: 'SET_TRIP_SCHEDULE',
       date: dateKey,
-      location: location
+      location: location,
+      trips: this.plannedTrips
     });
 
     this.renderPlanner();
@@ -944,6 +946,14 @@ class TripPlannerApp {
   removeTrip(dateKey) {
     delete this.plannedTrips[dateKey];
     this.saveTrips();
+
+    this.db.addMutation({
+      action: 'SET_TRIP_SCHEDULE',
+      date: dateKey,
+      location: '',
+      trips: this.plannedTrips
+    });
+
     this.renderPlanner();
   }
 

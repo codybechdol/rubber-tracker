@@ -178,6 +178,16 @@ function exportFullDatabaseSnapshot() {
     Logger.log('exportFullDatabaseSnapshot: Error reading driveTimeMap: ' + e);
   }
 
+  var plannedTrips = {};
+  try {
+    var rawTrips = PropertiesService.getScriptProperties().getProperty('PLANNED_TRIPS');
+    if (rawTrips) {
+      plannedTrips = JSON.parse(rawTrips);
+    }
+  } catch (e) {
+    Logger.log('exportFullDatabaseSnapshot: Error reading plannedTrips: ' + e);
+  }
+
   return {
     version: '2026.1.0',
     spreadsheetId: ss.getId(),
@@ -187,7 +197,8 @@ function exportFullDatabaseSnapshot() {
     configs: {
       holidays: holidays,
       workSchedule: workSchedule,
-      driveTimeMap: driveTimeMap
+      driveTimeMap: driveTimeMap,
+      plannedTrips: plannedTrips
     },
     tables: tables
   };
@@ -936,9 +947,25 @@ function applyBatchSyncMutations(mutations, returnSnapshot) {
           }
           break;
 
+        case 'SAVE_PLANNED_TRIPS':
+        case 'SCHEDULE_CREW_VISIT':
         case 'SET_TRIP_SCHEDULE':
           if (mut.schedule && typeof setWorkSchedule === 'function') {
             setWorkSchedule(mut.schedule);
+            appliedCount++;
+          }
+          if (mut.trips) {
+            var tripsStr = typeof mut.trips === 'string' ? mut.trips : JSON.stringify(mut.trips);
+            PropertiesService.getScriptProperties().setProperty('PLANNED_TRIPS', tripsStr);
+            appliedCount++;
+          } else if (mut.date && mut.location) {
+            var rawTrips = PropertiesService.getScriptProperties().getProperty('PLANNED_TRIPS');
+            var tripsObj = {};
+            if (rawTrips) {
+              try { tripsObj = JSON.parse(rawTrips); } catch (e) {}
+            }
+            tripsObj[mut.date] = { location: mut.location, crew: mut.crew || '' };
+            PropertiesService.getScriptProperties().setProperty('PLANNED_TRIPS', JSON.stringify(tripsObj));
             appliedCount++;
           }
           break;

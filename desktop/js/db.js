@@ -44,6 +44,27 @@ class LocalDatabase {
     this.notify();
   }
 
+  getPlannedTrips() {
+    if (this.snapshot && this.snapshot.configs && this.snapshot.configs.plannedTrips) {
+      return this.snapshot.configs.plannedTrips;
+    }
+    const stored = localStorage.getItem('sa_planned_trips');
+    if (stored) {
+      try { return JSON.parse(stored); } catch (e) {}
+    }
+    return {};
+  }
+
+  async savePlannedTrips(trips) {
+    if (!this.snapshot) this.snapshot = { configs: {}, tables: {} };
+    if (!this.snapshot.configs) this.snapshot.configs = {};
+    this.snapshot.configs.plannedTrips = trips;
+    localStorage.setItem('sa_planned_trips', JSON.stringify(trips));
+    if (window.desktopAPI) {
+      await window.desktopAPI.saveLocalSnapshot(this.snapshot);
+    }
+  }
+
   getTable(tableKey) {
     if (!this.snapshot || !this.snapshot.tables) return { headers: [], rows: [] };
     const table = this.snapshot.tables[tableKey] || { headers: [], rows: [] };

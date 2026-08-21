@@ -239,8 +239,36 @@ class SyncEngine {
 
   async syncWithGoogleSheets() {
     if (this.isSyncing) return;
-    this.isSyncing = true;
 
+    if (!this.syncUrl) {
+      this.openSyncModal('Connect to Google Sheets', '⚙️');
+      const body = document.getElementById('sync-modal-body');
+      if (body) {
+        body.innerHTML = `
+          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px;">
+            <h3 style="font-size: 14px; margin-bottom: 10px; color: #f8fafc;">Setup Google Sheets Sync</h3>
+            <p style="font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 14px;">
+              To sync your offline changes and Trip Planner directly with Google Sheets, enter your Apps Script Web App URL below:
+            </p>
+            <div style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; padding: 12px 14px; margin-bottom: 16px; font-size: 11.5px; color: #cbd5e1; line-height: 1.6;">
+              <strong style="color: #60a5fa;">How to get your Web App URL in Google Sheets:</strong><br>
+              1. In your Google Sheet, click <strong>Extensions > Apps Script</strong><br>
+              2. Click <strong>Deploy</strong> (top right) > <strong>Manage Deployments</strong> (or <em>New Deployment > Web App</em>)<br>
+              3. Set <em>"Who has access"</em> to <strong>"Anyone"</strong><br>
+              4. Copy the Web App URL (starts with <code>https://script.google.com/macros/s/.../exec</code>)
+            </div>
+            <input type="text" id="modal-sync-url-input" class="sheet-search" style="width: 100%; margin-bottom: 14px;" placeholder="https://script.google.com/macros/s/.../exec">
+            <div style="display: flex; justify-content: flex-end; gap: 8px;">
+              <button class="btn btn-secondary" onclick="window.syncEngine.closeSyncModal()">Cancel</button>
+              <button class="btn btn-primary" onclick="const val = document.getElementById('modal-sync-url-input').value; if(val){ window.syncEngine.setSyncUrl(val); const inEl = document.getElementById('sync-url-input'); if(inEl) inEl.value = val; window.syncEngine.syncWithGoogleSheets(); }">💾 Save & Sync Now</button>
+            </div>
+          </div>
+        `;
+      }
+      return;
+    }
+
+    this.isSyncing = true;
     const outbox = [...(this.db.getOutbox() || [])];
 
     // If there are pending changes, show the modal listing them
