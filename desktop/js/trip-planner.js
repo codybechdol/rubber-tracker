@@ -6,7 +6,7 @@ class TripPlannerApp {
   constructor(db) {
     this.db = db;
     this.currentDate = new Date();
-    this.weeksToShow = 1; // 1, 2, 3, or 4 weeks
+    this.weeksToShow = parseInt(localStorage.getItem('sa_trip_planner_weeks'), 10) || 8; // Default to 8 weeks
     this.activeSchedule = 'Mon-Thu'; // 'Mon-Thu' or 'Tue-Fri'
     this.cityFilter = 'active'; // 'active' or 'all'
     this.searchTerm = '';
@@ -57,7 +57,7 @@ class TripPlannerApp {
     this.loadSavedTrips();
     this.setupSearchListeners();
     this.populateWeekDropdown();
-    this.renderPlanner();
+    this.setWeeksToShow(this.weeksToShow);
   }
 
   setupSearchListeners() {
@@ -89,7 +89,10 @@ class TripPlannerApp {
   }
 
   setWeeksToShow(weeks) {
-    this.weeksToShow = parseInt(weeks, 10) || 1;
+    this.weeksToShow = parseInt(weeks, 10) || 8;
+    try {
+      localStorage.setItem('sa_trip_planner_weeks', this.weeksToShow);
+    } catch (e) {}
     [1, 2, 4, 6, 8].forEach(w => {
       const btn = document.getElementById(`btn-span-${w}w`);
       if (btn) {
