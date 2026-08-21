@@ -443,30 +443,47 @@ class TripPlannerApp {
 
   getDriveTime(loc) {
     const snap = this.db.getSnapshot();
-    const locLower = String(loc).toLowerCase().trim();
+    const locLower = String(loc || '').toLowerCase().trim();
 
-    // Check if snapshot contains driveTimeMap from Google Sheets
+    // 1. Look up in master verified locations dictionary
+    let masterInfo = null;
+    for (const [mName, mInfo] of Object.entries(this.masterLocations)) {
+      if (mName.toLowerCase() === locLower) {
+        masterInfo = mInfo;
+        break;
+      }
+    }
+
+    // 2. Check if snapshot contains driveTimeMap from Google Sheets
     if (snap && snap.configs && snap.configs.driveTimeMap) {
       const dMap = snap.configs.driveTimeMap;
       if (dMap[locLower] !== undefined && typeof dMap[locLower] === 'number') {
-        const mins = dMap[locLower];
+        let mins = dMap[locLower];
+
+        // Sanity check: If non-Helena location has mins <= 10, it was entered as hours (e.g., 3 hrs = 180 min)
+        if (mins > 0 && mins <= 10 && locLower !== 'helena' && locLower !== 'base' && locLower !== 'office') {
+          mins = mins * 60;
+        }
+
+        // If masterInfo has an exact verified route and sheet value is unreasonable (e.g. < 20 min when master is >= 45 min), use master
+        if (masterInfo && masterInfo.mins >= 45 && mins < 20) {
+          mins = masterInfo.mins;
+        }
+
         const h = Math.floor(mins / 60);
         const m = mins % 60;
-        const timeStr = h > 0 ? `${h}h ${m.toString().padStart(2, '0')}m` : `${m}m`;
+        const timeStr = h > 0 ? (m > 0 ? `${h}h ${m.toString().padStart(2, '0')}m` : `${h}h`) : `${m}m`;
         return {
           mins: mins,
-          time: timeStr,
-          desc: `${timeStr} from Helena`,
-          dir: 'MT'
+          time: masterInfo ? masterInfo.time : timeStr,
+          desc: masterInfo ? masterInfo.desc : `${timeStr} from Helena`,
+          dir: masterInfo ? masterInfo.dir : 'Montana'
         };
       }
     }
 
-    // Match against built-in master locations dictionary
-    for (const [mName, mInfo] of Object.entries(this.masterLocations)) {
-      if (mName.toLowerCase() === locLower) {
-        return mInfo;
-      }
+    if (masterInfo) {
+      return masterInfo;
     }
 
     return {
