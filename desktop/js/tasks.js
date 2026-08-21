@@ -502,18 +502,19 @@ class TaskManagerApp {
     return a.startsWith(b) || b.startsWith(a);
   }
 
-  getTasksByLocation(location, targetDate = new Date()) {
+  getTasksByLocation(location, targetDate = new Date(), includeCompleted = false) {
     const locClean = this.cleanLocation(location).toLowerCase();
     const tasks = this.collectAllTasks(targetDate);
     return tasks.filter(t => {
       const tLoc = this.cleanLocation(t.location).toLowerCase();
-      return tLoc === locClean || tLoc.includes(locClean) || locClean.includes(tLoc);
+      const matches = (tLoc === locClean || tLoc.includes(locClean) || locClean.includes(tLoc));
+      return matches && (includeCompleted || t.status.toLowerCase() !== 'complete');
     });
   }
 
-  getTasksByCrew(crewId, targetDate = new Date()) {
+  getTasksByCrew(crewId, targetDate = new Date(), includeCompleted = false) {
     const tasks = this.collectAllTasks(targetDate);
-    return tasks.filter(t => this.isCrewMatch(t.crewId, crewId));
+    return tasks.filter(t => this.isCrewMatch(t.crewId, crewId) && (includeCompleted || t.status.toLowerCase() !== 'complete'));
   }
 
   renderTasks() {
@@ -536,6 +537,9 @@ class TaskManagerApp {
       filtered = filtered.filter(t => t.status.toLowerCase().includes('unassigned') || t.status.toLowerCase().includes('scheduled') || t.status.toLowerCase().includes('pending'));
     } else if (this.filterStatus === 'Complete') {
       filtered = filtered.filter(t => t.status.toLowerCase() === 'complete');
+    } else {
+      // Default 'All' shows all open/pending/overdue tasks (hiding already completed tasks)
+      filtered = filtered.filter(t => t.status.toLowerCase() !== 'complete');
     }
 
     // Apply Search Query

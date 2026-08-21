@@ -246,6 +246,7 @@ class TripPlannerApp {
    * Calculates concise task count breakdown for a crew
    */
   getCrewTaskSummary(crewTasks) {
+    const activeTasks = (crewTasks || []).filter(t => String(t.status || '').toLowerCase() !== 'complete');
     let gloves = 0;
     let sleeves = 0;
     let blankets = 0;
@@ -256,7 +257,7 @@ class TripPlannerApp {
     let reports = 0;
     let overdue = 0;
 
-    crewTasks.forEach(t => {
+    activeTasks.forEach(t => {
       if (t.isOverdue || String(t.status || '').toLowerCase() === 'overdue') overdue++;
       const type = String(t.type || '').toLowerCase();
       const item = String(t.itemType || '').toLowerCase();
@@ -284,7 +285,7 @@ class TripPlannerApp {
     });
 
     return {
-      total: crewTasks.length,
+      total: activeTasks.length,
       overdue,
       gloves,
       sleeves,
@@ -781,8 +782,8 @@ class TripPlannerApp {
 
     const targetDate = targetDateKey ? this.parseDate(targetDateKey) : this.currentDate;
 
-    // Get all tasks for this crew
-    const allCrewTasks = window.taskManager ? window.taskManager.getTasksByCrew(crewId, targetDate) : [];
+    // Get active (non-completed) tasks for this crew
+    const allCrewTasks = window.taskManager ? window.taskManager.getTasksByCrew(crewId, targetDate, false) : [];
     const summary = this.getCrewTaskSummary(allCrewTasks);
 
     // Get crew details from Job Tracking
@@ -806,8 +807,8 @@ class TripPlannerApp {
       title.innerHTML = `🚚 Crew ${this.escapeHtml(crewId)} — ${this.escapeHtml(foreman)} <span style="color: #93c5fd; font-size: 12px; font-weight: normal; margin-left: 8px;">📍 ${this.escapeHtml(loc)}</span>`;
     }
 
-    // Filter tasks for active category tab
-    let filtered = allCrewTasks;
+    // Filter tasks for active category tab (ignoring completed tasks)
+    let filtered = allCrewTasks.filter(t => String(t.status || '').toLowerCase() !== 'complete');
     if (filterCat === 'PPE') {
       filtered = filtered.filter(t => t.category === 'PPE' || (t.type || '').toLowerCase().includes('glove') || (t.type || '').toLowerCase().includes('sleeve') || (t.type || '').toLowerCase().includes('blanket'));
     } else if (filterCat === 'Equipment') {
@@ -844,7 +845,7 @@ class TripPlannerApp {
             </span>
           ` : ''}
           <span class="badge" style="background: rgba(59, 130, 246, 0.25); color: #93c5fd; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 4px; border: 1px solid rgba(59, 130, 246, 0.4);">
-            ${allCrewTasks.length} Total Task${allCrewTasks.length > 1 ? 's' : ''}
+            ${allCrewTasks.length} Active Task${allCrewTasks.length > 1 ? 's' : ''}
           </span>
         </div>
       </div>
@@ -852,7 +853,7 @@ class TripPlannerApp {
       <!-- Category Filter Pills -->
       <div style="display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap;">
         <button class="btn btn-secondary ${filterCat === 'All' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px; font-weight: 700;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'All', '${safeDateKey}')">
-          All Tasks (${allCrewTasks.length})
+          All Active (${allCrewTasks.length})
         </button>
         <button class="btn btn-secondary ${filterCat === 'PPE' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'PPE', '${safeDateKey}')">
           🧤 PPE Swaps (${summary.gloves + summary.sleeves + summary.blankets})
@@ -877,9 +878,9 @@ class TripPlannerApp {
       <div style="display: flex; flex-direction: column; gap: 8px;">
         ${filtered.length === 0 ? `
           <div style="padding: 40px 20px; text-align: center; color: var(--text-muted); background: var(--bg-secondary); border-radius: 8px; border: 1px dashed var(--border-color);">
-            <div style="font-size: 28px; margin-bottom: 6px;">✓</div>
-            <h4 style="font-size: 14px; font-weight: 700; color: #f8fafc; margin-bottom: 4px;">No tasks in this category</h4>
-            <p style="font-size: 12px; color: var(--text-secondary);">All assignments are current or completed.</p>
+            <div style="font-size: 28px; margin-bottom: 6px;">🎉</div>
+            <h4 style="font-size: 14px; font-weight: 700; color: #f8fafc; margin-bottom: 4px;">All Tasks Complete!</h4>
+            <p style="font-size: 12px; color: var(--text-secondary);">All assignments in this category are up to date.</p>
           </div>
         ` : filtered.map(t => {
           const isComplete = String(t.status || '').toLowerCase() === 'complete';
