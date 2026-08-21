@@ -10,6 +10,8 @@ class TripPlannerApp {
     this.activeSchedule = 'Mon-Thu'; // 'Mon-Thu' or 'Tue-Fri'
     this.cityFilter = 'active'; // 'active' or 'all'
     this.searchTerm = '';
+    this.activeModalCrewId = null;
+    this.activeModalCat = 'All';
     this.plannedTrips = {}; // { 'YYYY-MM-DD': { location: 'Bozeman', crew: '013-26' } }
 
     // Master list of standard Montana service towns, hubs, and subs with distance & drive times from Helena HQ
@@ -228,6 +230,57 @@ class TripPlannerApp {
     }
     this.saveTrips();
     this.renderPlanner();
+  }
+
+  /**
+   * Calculates concise task count breakdown for a crew
+   */
+  getCrewTaskSummary(crewTasks) {
+    let gloves = 0;
+    let sleeves = 0;
+    let blankets = 0;
+    let macks = 0;
+    let equipment = 0;
+    let training = 0;
+    let certs = 0;
+    let overdue = 0;
+
+    crewTasks.forEach(t => {
+      if (t.isOverdue || String(t.status || '').toLowerCase() === 'overdue') overdue++;
+      const type = String(t.type || '').toLowerCase();
+      const item = String(t.itemType || '').toLowerCase();
+      const cat = String(t.category || '').toLowerCase();
+
+      if (type.includes('glove') || item.includes('glove')) {
+        gloves++;
+      } else if (type.includes('sleeve') || item.includes('sleeve')) {
+        sleeves++;
+      } else if (type.includes('blanket') || item.includes('blanket')) {
+        blankets++;
+      } else if (type.includes('mack') || item.includes('mack')) {
+        macks++;
+      } else if (cat === 'equipment' || type.includes('tester') || type.includes('phasing') || type.includes('aed') || type.includes('ground') || type.includes('stick')) {
+        equipment++;
+      } else if (cat === 'training' || type.includes('training')) {
+        training++;
+      } else if (cat === 'certs' || type.includes('cert') || type.includes('cpr') || type.includes('crane')) {
+        certs++;
+      } else {
+        gloves++;
+      }
+    });
+
+    return {
+      total: crewTasks.length,
+      overdue,
+      gloves,
+      sleeves,
+      blankets,
+      macks,
+      equipment,
+      training,
+      certs
+    };
   }
 
   /**
@@ -486,29 +539,35 @@ class TripPlannerApp {
                       </div>
                       ${locInfo.activeCrews.map(c => {
                         const crewTasks = window.taskManager ? window.taskManager.getTasksByCrew(c.crewId) : [];
+                        const summary = this.getCrewTaskSummary(crewTasks);
+
                         return `
-                          <div style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.06); border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
-                            <div style="font-size: 11px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
+                          <div class="crew-task-box" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(c.crewId)}', '${this.escapeHtml(trip.location)}')" title="Click to view all tasks for Crew ${this.escapeHtml(c.crewId)}">
+                            <div style="font-size: 11px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                               <span><strong style="color: #60a5fa;">Crew ${this.escapeHtml(c.crewId)}</strong> (${this.escapeHtml(c.foreman)})</span>
-                              <span class="badge" style="background: ${crewTasks.length > 0 ? 'rgba(245, 158, 11, 0.2)' : 'rgba(16, 185, 129, 0.2)'}; color: ${crewTasks.length > 0 ? '#facc15' : '#4ade80'}; font-size: 9.5px; padding: 1px 5px;">
-                                ${crewTasks.length > 0 ? `📋 ${crewTasks.length} task${crewTasks.length > 1 ? 's' : ''}` : '✓ Current'}
-                              </span>
-                            </div>
-                            ${crewTasks.length > 0 ? `
-                              <div style="display: flex; flex-direction: column; gap: 2px; margin-top: 3px; padding-left: 4px; border-left: 2px solid rgba(245, 158, 11, 0.5);">
-                                ${crewTasks.slice(0, 3).map(t => `
-                                  <div style="font-size: 10px; color: ${t.isOverdue ? '#f87171' : '#e2e8f0'}; display: flex; justify-content: space-between;">
-                                    <span>• ${this.escapeHtml(t.type)}: ${this.escapeHtml(t.itemType)}</span>
-                                    <span style="font-size: 9px; color: var(--text-muted);">${this.escapeHtml(t.dueDate)}</span>
-                                  </div>
-                                `).join('')}
-                                ${crewTasks.length > 3 ? `
-                                  <div style="font-size: 9.5px; color: #93c5fd; font-style: italic;">+ ${crewTasks.length - 3} more tasks</div>
+                              <div style="display: flex; align-items: center; gap: 4px;">
+                                ${summary.overdue > 0 ? `
+                                  <span class="badge" style="background: #ef4444; color: #fff; font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px;">
+                                    🔴 ${summary.overdue}
+                                  </span>
                                 ` : ''}
+                                <span class="badge" style="background: ${summary.total > 0 ? 'rgba(59, 130, 246, 0.25)' : 'rgba(16, 185, 129, 0.2)'}; color: ${summary.total > 0 ? '#93c5fd' : '#4ade80'}; font-size: 9px; font-weight: 700; padding: 1px 5px;">
+                                  ${summary.total > 0 ? `${summary.total} Tasks 🔍` : '✓ Current'}
+                                </span>
                               </div>
-                            ` : `
-                              <div style="font-size: 9.5px; color: #94a3b8; font-style: italic;">No pending tasks</div>
-                            `}
+                            </div>
+
+                            <!-- Task Count Overview Pills -->
+                            <div style="display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px;">
+                              ${summary.gloves > 0 ? `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-size: 9.5px; padding: 1px 5px; border: 1px solid rgba(59, 130, 246, 0.3);">🧤 ${summary.gloves} Glove${summary.gloves > 1 ? 's' : ''}</span>` : ''}
+                              ${summary.sleeves > 0 ? `<span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #d8b4fe; font-size: 9.5px; padding: 1px 5px; border: 1px solid rgba(168, 85, 247, 0.3);">🧤 ${summary.sleeves} Sleeve${summary.sleeves > 1 ? 's' : ''}</span>` : ''}
+                              ${summary.blankets > 0 ? `<span class="badge" style="background: rgba(236, 72, 153, 0.15); color: #f472b6; font-size: 9.5px; padding: 1px 5px; border: 1px solid rgba(236, 72, 153, 0.3);">🛏️ ${summary.blankets} Blanket${summary.blankets > 1 ? 's' : ''}</span>` : ''}
+                              ${summary.macks > 0 ? `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fcd34d; font-size: 9.5px; padding: 1px 5px; border: 1px solid rgba(245, 158, 11, 0.3);">⚡ ${summary.macks} MACK${summary.macks > 1 ? 's' : ''}</span>` : ''}
+                              ${summary.equipment > 0 ? `<span class="badge" style="background: rgba(20, 184, 166, 0.15); color: #5eead4; font-size: 9.5px; padding: 1px 5px; border: 1px solid rgba(20, 184, 166, 0.3);">🧰 ${summary.equipment} Equip</span>` : ''}
+                              ${summary.training > 0 ? `<span class="badge" style="background: rgba(34, 197, 94, 0.15); color: #86efac; font-size: 9.5px; padding: 1px 5px; border: 1px solid rgba(34, 197, 94, 0.3);">🎓 ${summary.training} Training</span>` : ''}
+                              ${summary.certs > 0 ? `<span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #fca5a5; font-size: 9.5px; padding: 1px 5px; border: 1px solid rgba(239, 68, 68, 0.3);">📜 ${summary.certs} Cert${summary.certs > 1 ? 's' : ''}</span>` : ''}
+                              ${summary.total === 0 ? `<span style="font-size: 9.5px; color: #94a3b8; font-style: italic;">✓ No pending tasks</span>` : ''}
+                            </div>
                           </div>
                         `;
                       }).join('')}
@@ -626,12 +685,33 @@ class TripPlannerApp {
                 <span>🟢 ${loc.activeCrews.length} Active Crew${loc.activeCrews.length > 1 ? 's' : ''}</span>
                 ${totalWorkers > 0 ? `<span>${totalWorkers} Linemen</span>` : ''}
               </div>
-              <div style="color: #cbd5e1; font-size: 10px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${loc.activeCrews.map(c => `Crew ${c.crewId} (${c.foreman})`).join(', ')}">
-                ${loc.activeCrews.map(c => `<strong>${this.escapeHtml(c.crewId)}</strong> (${this.escapeHtml(c.foreman)})`).join(', ')}
+              
+              <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 5px;">
+                ${loc.activeCrews.map(c => {
+                  const crewTasks = window.taskManager ? window.taskManager.getTasksByCrew(c.crewId) : [];
+                  const summary = this.getCrewTaskSummary(crewTasks);
+
+                  return `
+                    <div class="crew-task-box" style="margin-bottom: 0; padding: 4px 6px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(c.crewId)}', '${this.escapeHtml(loc.name)}')" title="Click to view tasks for Crew ${this.escapeHtml(c.crewId)}">
+                      <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 10.5px; color: #cbd5e1;"><strong style="color: #60a5fa;">${this.escapeHtml(c.crewId)}</strong> (${this.escapeHtml(c.foreman)})</span>
+                        <span style="font-size: 9.5px; color: ${summary.total > 0 ? '#93c5fd' : '#4ade80'};">${summary.total} tasks</span>
+                      </div>
+                      <div style="display: flex; flex-wrap: wrap; gap: 2px; margin-top: 2px;">
+                        ${summary.gloves > 0 ? `<span style="font-size: 9px; color: #93c5fd;">🧤${summary.gloves}</span>` : ''}
+                        ${summary.sleeves > 0 ? `<span style="font-size: 9px; color: #d8b4fe;">🧤${summary.sleeves}</span>` : ''}
+                        ${summary.training > 0 ? `<span style="font-size: 9px; color: #86efac;">🎓${summary.training}</span>` : ''}
+                        ${summary.certs > 0 ? `<span style="font-size: 9px; color: #fca5a5;">📜${summary.certs}</span>` : ''}
+                        ${summary.equipment > 0 || summary.macks > 0 ? `<span style="font-size: 9px; color: #5eead4;">⚡${summary.equipment + summary.macks}</span>` : ''}
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
               </div>
+
               ${locTasks.length > 0 ? `
                 <div style="margin-top: 4px; padding-top: 3px; border-top: 1px solid rgba(255,255,255,0.06); font-size: 10px; color: ${overdueTasks > 0 ? '#f87171' : '#facc15'}; display: flex; justify-content: space-between;">
-                  <span>📋 ${locTasks.length} task${locTasks.length > 1 ? 's' : ''} pending</span>
+                  <span>📋 ${locTasks.length} task${locTasks.length > 1 ? 's' : ''} total</span>
                   ${overdueTasks > 0 ? `<span>(${overdueTasks} overdue)</span>` : ''}
                 </div>
               ` : ''}
@@ -648,6 +728,185 @@ class TripPlannerApp {
 
       list.appendChild(card);
     });
+  }
+
+  /**
+   * Opens the full task checklist modal for a specific crew
+   */
+  openCrewTasksModal(crewId, location = '', filterCat = 'All') {
+    this.activeModalCrewId = crewId;
+    this.activeModalCat = filterCat;
+
+    const modal = document.getElementById('crew-tasks-modal');
+    const title = document.getElementById('crew-tasks-modal-title');
+    const body = document.getElementById('crew-tasks-modal-body');
+    const footerMeta = document.getElementById('crew-tasks-modal-footer-meta');
+    if (!modal || !body) return;
+
+    // Get all tasks for this crew
+    const allCrewTasks = window.taskManager ? window.taskManager.getTasksByCrew(crewId) : [];
+    const summary = this.getCrewTaskSummary(allCrewTasks);
+
+    // Get crew details from Job Tracking
+    const jobTable = this.db.getTable('job_tracking');
+    let foreman = 'Lead';
+    let loc = location || 'Helena';
+    let crewSize = 0;
+    let jobName = '';
+
+    if (jobTable && jobTable.rows) {
+      const jobRow = jobTable.rows.find(r => String(r['Job Number'] || r['Crew'] || r['Job #'] || '').trim() === String(crewId).trim());
+      if (jobRow) {
+        foreman = String(jobRow['Foreman'] || jobRow['Crew Lead'] || jobRow['Lead'] || 'Lead').trim();
+        loc = String(jobRow['Location'] || loc).trim();
+        crewSize = parseInt(jobRow['Crew Size'] || jobRow['Size'] || 0, 10) || 0;
+        jobName = String(jobRow['Job Name'] || '').trim();
+      }
+    }
+
+    if (title) {
+      title.innerHTML = `🚚 Crew ${this.escapeHtml(crewId)} — ${this.escapeHtml(foreman)} <span style="color: #93c5fd; font-size: 12px; font-weight: normal; margin-left: 8px;">📍 ${this.escapeHtml(loc)}</span>`;
+    }
+
+    // Filter tasks for active category tab
+    let filtered = allCrewTasks;
+    if (filterCat === 'PPE') {
+      filtered = filtered.filter(t => t.category === 'PPE' || (t.type || '').toLowerCase().includes('glove') || (t.type || '').toLowerCase().includes('sleeve') || (t.type || '').toLowerCase().includes('blanket'));
+    } else if (filterCat === 'Equipment') {
+      filtered = filtered.filter(t => t.category === 'Equipment' || (t.type || '').toLowerCase().includes('mack') || (t.type || '').toLowerCase().includes('tester') || (t.type || '').toLowerCase().includes('phasing') || (t.type || '').toLowerCase().includes('aed') || (t.type || '').toLowerCase().includes('ground') || (t.type || '').toLowerCase().includes('stick'));
+    } else if (filterCat === 'Training') {
+      filtered = filtered.filter(t => t.category === 'Training' || (t.type || '').toLowerCase().includes('training'));
+    } else if (filterCat === 'Certs') {
+      filtered = filtered.filter(t => t.category === 'Certs' || (t.type || '').toLowerCase().includes('cert'));
+    }
+
+    body.innerHTML = `
+      <!-- Crew Header Banner -->
+      <div style="background: linear-gradient(90deg, #1e293b 0%, #0f172a 100%); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px 18px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <div>
+          <div style="font-size: 16px; font-weight: 800; color: #f8fafc;">
+            Crew ${this.escapeHtml(crewId)} Work Checklist
+          </div>
+          <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
+            Foreman: <strong style="color: #fff;">${this.escapeHtml(foreman)}</strong> &nbsp;•&nbsp; 
+            Location: <strong style="color: #93c5fd;">${this.escapeHtml(loc)}</strong> &nbsp;•&nbsp; 
+            ${crewSize > 0 ? `Crew Size: <strong>${crewSize} Linemen</strong> &nbsp;•&nbsp;` : ''}
+            ${jobName ? `Site: <strong>${this.escapeHtml(jobName)}</strong>` : ''}
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 8px; align-items: center;">
+          ${summary.overdue > 0 ? `
+            <span class="badge" style="background: #ef4444; color: #fff; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 4px;">
+              🔴 ${summary.overdue} Overdue
+            </span>
+          ` : ''}
+          <span class="badge" style="background: rgba(59, 130, 246, 0.25); color: #93c5fd; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 4px; border: 1px solid rgba(59, 130, 246, 0.4);">
+            ${allCrewTasks.length} Total Task${allCrewTasks.length > 1 ? 's' : ''}
+          </span>
+        </div>
+      </div>
+
+      <!-- Category Filter Pills -->
+      <div style="display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap;">
+        <button class="btn btn-secondary ${filterCat === 'All' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px; font-weight: 700;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'All')">
+          All Tasks (${allCrewTasks.length})
+        </button>
+        <button class="btn btn-secondary ${filterCat === 'PPE' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'PPE')">
+          🧤 PPE Swaps (${summary.gloves + summary.sleeves + summary.blankets})
+        </button>
+        <button class="btn btn-secondary ${filterCat === 'Equipment' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'Equipment')">
+          ⚡ Tool & Equipment (${summary.macks + summary.equipment})
+        </button>
+        <button class="btn btn-secondary ${filterCat === 'Training' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'Training')">
+          🎓 Safety Training (${summary.training})
+        </button>
+        <button class="btn btn-secondary ${filterCat === 'Certs' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'Certs')">
+          📜 Certifications (${summary.certs})
+        </button>
+      </div>
+
+      <!-- Task Checklist Items -->
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        ${filtered.length === 0 ? `
+          <div style="padding: 40px 20px; text-align: center; color: var(--text-muted); background: var(--bg-secondary); border-radius: 8px; border: 1px dashed var(--border-color);">
+            <div style="font-size: 28px; margin-bottom: 6px;">✓</div>
+            <h4 style="font-size: 14px; font-weight: 700; color: #f8fafc; margin-bottom: 4px;">No tasks in this category</h4>
+            <p style="font-size: 12px; color: var(--text-secondary);">All assignments are current or completed.</p>
+          </div>
+        ` : filtered.map(t => {
+          const isComplete = String(t.status || '').toLowerCase() === 'complete';
+          const isOverdue = t.isOverdue || String(t.status || '').toLowerCase() === 'overdue';
+          const badgeColor = isComplete ? '#10b981' : (isOverdue ? '#ef4444' : '#f59e0b');
+
+          return `
+            <div style="background-color: var(--bg-primary); border: 1px solid var(--border-color); border-left: 4px solid ${badgeColor}; border-radius: 6px; padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+              <div style="flex: 1; min-width: 260px;">
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                  <span style="font-weight: 800; font-size: 14px; color: #f8fafc;">
+                    ${this.escapeHtml(t.type)}: ${this.escapeHtml(t.itemType)}
+                  </span>
+                  ${t.currentItem ? `
+                    <span class="badge" style="background: rgba(255,255,255,0.06); color: #93c5fd; font-family: monospace; font-size: 11px; padding: 1px 6px;">
+                      ${this.escapeHtml(t.currentItem)}
+                    </span>
+                  ` : ''}
+                </div>
+
+                <div style="font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                  <span>
+                    👤 Lineman: <strong style="color: #60a5fa; cursor: pointer; text-decoration: underline dotted;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeHtml(t.employee)}');}">${this.escapeHtml(t.employee)}</strong>
+                  </span>
+                  <span style="color: ${isOverdue ? '#f87171' : 'var(--text-secondary)'}; font-weight: ${isOverdue ? '700' : 'normal'};">
+                    📅 Due: <strong>${this.escapeHtml(t.dueDate)}</strong>
+                  </span>
+                  ${t.scheduledDate ? `<span>🗓️ Scheduled: <strong>${this.escapeHtml(t.scheduledDate)}</strong></span>` : ''}
+                </div>
+
+                ${t.notes ? `
+                  <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+                    📝 ${this.escapeHtml(t.notes)}
+                  </div>
+                ` : ''}
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <span class="badge" style="background: ${isComplete ? '#15803d' : (isOverdue ? '#b91c1c' : '#d97706')}; color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px;">
+                  ${isComplete ? '✅ Complete' : (isOverdue ? '🔴 Overdue' : '⏳ Pending')}
+                </span>
+                ${!isComplete ? `
+                  <button class="btn" style="background-color: #10b981; color: #fff; padding: 4px 10px; font-size: 11px; font-weight: 700; border-radius: 4px; cursor: pointer;" onclick="window.tripPlanner.completeTaskInModal('${this.escapeHtml(t.id)}', '${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}')">
+                    ✓ Mark Complete
+                  </button>
+                ` : `
+                  <span style="color: var(--text-muted); font-size: 11px;">✓ Completed</span>
+                `}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+
+    if (footerMeta) {
+      footerMeta.textContent = `Showing ${filtered.length} of ${allCrewTasks.length} tasks for Crew ${crewId}`;
+    }
+
+    modal.classList.add('active');
+  }
+
+  closeCrewTasksModal() {
+    const modal = document.getElementById('crew-tasks-modal');
+    if (modal) modal.classList.remove('active');
+    this.activeModalCrewId = null;
+  }
+
+  completeTaskInModal(taskId, crewId, location) {
+    if (window.taskManager) {
+      window.taskManager.completeTask(taskId);
+      this.openCrewTasksModal(crewId, location, this.activeModalCat);
+      this.renderPlanner();
+    }
   }
 
   setTrip(dateKey, location) {
