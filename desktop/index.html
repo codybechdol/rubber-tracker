@@ -497,7 +497,7 @@
         const viewEl = document.getElementById(viewId);
         if (viewEl) viewEl.classList.add('active');
 
-        if (viewId === 'trip-planner-view') window.tripPlanner.renderPlanner();
+        if (viewId === 'trip-planner-view') window.tripPlanner.setWeeksToShow(window.tripPlanner.weeksToShow || 8);
         if (viewId === 'tasks-view') window.taskManager.renderTasks();
         if (viewId === 'sheets-view') window.sheetNavigator.renderCurrentSheet();
         if (viewId === 'safety-compliance-view') window.sheetNavigator.renderSafetyCompliance();

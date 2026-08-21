@@ -6,7 +6,8 @@ class TripPlannerApp {
   constructor(db) {
     this.db = db;
     this.currentDate = new Date();
-    this.weeksToShow = parseInt(localStorage.getItem('sa_trip_planner_weeks'), 10) || 8; // Default to 8 weeks
+    let saved = parseInt(localStorage.getItem('sa_trip_planner_weeks'), 10);
+    this.weeksToShow = (saved && [1, 2, 4, 6, 8].includes(saved)) ? saved : 8;
     this.activeSchedule = 'Mon-Thu'; // 'Mon-Thu' or 'Tue-Fri'
     this.cityFilter = 'active'; // 'active' or 'all'
     this.searchTerm = '';
@@ -57,7 +58,8 @@ class TripPlannerApp {
     this.loadSavedTrips();
     this.setupSearchListeners();
     this.populateWeekDropdown();
-    this.setWeeksToShow(this.weeksToShow);
+    let saved = parseInt(localStorage.getItem('sa_trip_planner_weeks'), 10);
+    this.setWeeksToShow(saved && [1, 2, 4, 6, 8].includes(saved) ? saved : 8);
   }
 
   setupSearchListeners() {
@@ -499,6 +501,15 @@ class TripPlannerApp {
     const scheduleBadge = document.getElementById('trip-planner-schedule-badge');
     if (!board) return;
     board.innerHTML = '';
+
+    // Synchronize UI active button with current weeksToShow
+    [1, 2, 4, 6, 8].forEach(w => {
+      const btn = document.getElementById(`btn-span-${w}w`);
+      if (btn) {
+        if (w === this.weeksToShow) btn.classList.add('active');
+        else btn.classList.remove('active');
+      }
+    });
 
     const snap = this.db.getSnapshot();
     const workSchedule = (snap && snap.configs && snap.configs.workSchedule) || this.activeSchedule;
