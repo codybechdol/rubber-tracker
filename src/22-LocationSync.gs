@@ -82,14 +82,17 @@ function syncInventoryLocations() {
     // Add previous employees from Employee History
     var employeeHistorySheet = ss.getSheetByName('Employee History');
     if (employeeHistorySheet && employeeHistorySheet.getLastRow() > 2) {
-      var historyData = employeeHistorySheet.getRange(3, 1, employeeHistorySheet.getLastRow() - 2, 10).getValues();
-      for (var hi = 0; hi < historyData.length; hi++) {
-        var histName = (historyData[hi][1] || '').toString().trim();
-        var histNameLower = histName.toLowerCase();
-        var histLocation = (historyData[hi][3] || '').toString().trim().toLowerCase();
+      var lastCol = Math.min(employeeHistorySheet.getLastColumn(), 10);
+      if (lastCol > 3) {
+        var historyData = employeeHistorySheet.getRange(3, 1, employeeHistorySheet.getLastRow() - 2, lastCol).getValues();
+        for (var hi = 0; hi < historyData.length; hi++) {
+          var histName = (historyData[hi][1] || '').toString().trim();
+          var histNameLower = histName.toLowerCase();
+          var histLocation = (historyData[hi][3] || '').toString().trim().toLowerCase();
 
-        if (histLocation === 'previous employee' && histName && !nameToLocation[histNameLower]) {
-          nameToLocation[histNameLower] = 'Previous Employee';
+          if (histLocation === 'previous employee' && histName && !nameToLocation[histNameLower]) {
+            nameToLocation[histNameLower] = 'Previous Employee';
+          }
         }
       }
     }
@@ -129,7 +132,7 @@ function syncInventoryLocations() {
     logEvent('syncInventoryLocations: Updated ' + updateCount + ' item locations');
 
   } catch (e) {
-    logEvent('Error in syncInventoryLocations: ' + e, 'ERROR');
+    Logger.log('Error in syncInventoryLocations: ' + e);
   }
 }
 
@@ -161,12 +164,13 @@ function syncSheetLocations(ss, sheetName, nameToLocation) {
   }
 
   if (locationColIdx === -1 || assignedToColIdx === -1) {
-    logEvent('syncSheetLocations: Required columns not found in ' + sheetName, 'ERROR');
+    Logger.log('syncSheetLocations: Required columns not found in ' + sheetName);
     return 0;
   }
 
   var updateCount = 0;
   var locationColumnValues = [];
+  var changes = [];
 
   // Process each row in memory
   for (var i = 1; i < data.length; i++) {
@@ -191,29 +195,35 @@ function syncSheetLocations(ss, sheetName, nameToLocation) {
 
     if (correctLocation && currentLocation !== correctLocation) {
       locationColumnValues.push([correctLocation]);
+      changes.push({ row: i + 1, location: correctLocation });
       updateCount++;
     } else {
       locationColumnValues.push([currentLocation]);
     }
   }
 
-  // Apply all location updates in a SINGLE setValues call
+  // Apply location updates
   if (updateCount > 0) {
+    var batchSuccess = false;
     try {
       sheet.getRange(2, locationColIdx + 1, locationColumnValues.length, 1).setValues(locationColumnValues);
       logEvent('syncSheetLocations: ' + sheetName + ' - Batch updated ' + updateCount + ' location(s)', 'INFO');
+      batchSuccess = true;
     } catch (err) {
-      logEvent('syncSheetLocations: Validation blocked setValues on ' + sheetName + ' (' + err.message + '). Clearing validation & retrying...', 'WARNING');
-      try {
-        var lastRow = sheet.getMaxRows();
-        if (lastRow > 1) {
-          sheet.getRange(2, locationColIdx + 1, lastRow - 1, 1).clearDataValidations();
+      Logger.log('syncSheetLocations: Batch setValues failed on ' + sheetName + ' (' + err.message + '). Falling back to cell-by-cell update...');
+    }
+
+    if (!batchSuccess) {
+      var cellSuccessCount = 0;
+      for (var c = 0; c < changes.length; c++) {
+        try {
+          sheet.getRange(changes[c].row, locationColIdx + 1).setValue(changes[c].location);
+          cellSuccessCount++;
+        } catch (cellErr) {
+          Logger.log('syncSheetLocations: Failed to set location for row ' + changes[c].row + ' on ' + sheetName + ': ' + cellErr.message);
         }
-        sheet.getRange(2, locationColIdx + 1, locationColumnValues.length, 1).setValues(locationColumnValues);
-        logEvent('syncSheetLocations: ' + sheetName + ' - Batch updated ' + updateCount + ' location(s) after clearing validation', 'INFO');
-      } catch (retryErr) {
-        logEvent('syncSheetLocations: Fallback failed on ' + sheetName + ': ' + retryErr.message, 'ERROR');
       }
+      logEvent('syncSheetLocations: ' + sheetName + ' - Cell-by-cell updated ' + cellSuccessCount + ' of ' + updateCount + ' location(s)', 'INFO');
     }
   }
 

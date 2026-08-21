@@ -65,6 +65,7 @@ function _buildGloveManagerMenu() {
         .addItem('📥 Import Item History Log', 'showImportItemHistoryDialog')
         .addItem('🧹 Clean & Repair History Sheets', 'menuCleanHistorySheets')
         .addItem('💾 Create Backup Snapshot', 'createBackupSnapshot')
+        .addItem('↩️ Restore Gloves from Backup...', 'menuRestoreGlovesFromBackup')
         .addItem('🔄 Export Offline Snapshot (Desktop App)', 'menuExportSyncSnapshot')
         .addItem('📂 View Backup Folder', 'openBackupFolder')
         .addItem('📤 Send Report Now', 'sendEmailReport'))

@@ -1485,7 +1485,7 @@ function markScheduleTaskComplete(taskIndexOrTask) {
     var isGloveSwaps = (source === 'Glove Swaps');
     if (swapSheet && inventorySheet && task.rowIndex) {
       var completionDate = new Date();
-      swapSheet.getRange(task.rowIndex, 10).setNumberFormat('MM/dd/yyyy').setValue(completionDate);
+      safeSetNumberFormat(swapSheet.getRange(task.rowIndex, 10), 'MM/dd/yyyy').setValue(completionDate);
       handleDateChangedEdit(ss, swapSheet, inventorySheet, task.rowIndex, completionDate, isGloveSwaps);
       Logger.log('Swap completion: wrote Date Changed and ran Stage 3 for ' + source + ' row ' + task.rowIndex);
       updated = true;
@@ -4962,7 +4962,7 @@ function sortExpiringCertsSheet(sheet) {
   }
 
   // Set number format for Date Acquired (Col C) and Expiration Date (Col D) to yyyy-mm-dd
-  sheet.getRange(2, 3, values.length, 2).setNumberFormat('yyyy-mm-dd');
+  safeSetNumberFormat(sheet.getRange(2, 3, values.length, 2), 'yyyy-mm-dd');
 
   // Get notified tasks from Task Metadata once for efficiency
   var metaSheet = sheet.getParent().getSheetByName('Task Metadata');
@@ -6948,7 +6948,7 @@ function refreshCrewVisitConfigFromEmployees() {
     sheet.getRange(2, 1, crewRows.length, headers.length).setValues(crewRows);
 
     // Format date columns
-    sheet.getRange(2, 7, crewRows.length, 2).setNumberFormat('mm/dd/yyyy');
+    safeSetNumberFormat(sheet.getRange(2, 7, crewRows.length, 2), 'mm/dd/yyyy');
   }
 
   sheet.setFrozenRows(1);
@@ -7046,7 +7046,7 @@ function saveTrainingConfigData(trainings) {
 
   // Format date columns
   if (trainings.length > 0) {
-    sheet.getRange(2, 5, trainings.length, 2).setNumberFormat('mm/dd/yyyy');
+    safeSetNumberFormat(sheet.getRange(2, 5, trainings.length, 2), 'mm/dd/yyyy');
   }
 
   SpreadsheetApp.flush();
@@ -7152,7 +7152,7 @@ function saveTrainingTrackingData(records) {
   // Format date column
   var lastRow = sheet.getLastRow();
   if (lastRow > 2) {
-    sheet.getRange(3, 6, lastRow - 2, 1).setNumberFormat('mm/dd/yyyy');
+    safeSetNumberFormat(sheet.getRange(3, 6, lastRow - 2, 1), 'mm/dd/yyyy');
   }
 
   SpreadsheetApp.flush();
@@ -10012,14 +10012,14 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
     // Update the Pick List item (NEW glove/sleeve) in inventory - assign to employee
     inventorySheet.getRange(pickListRow, COLS.INVENTORY.STATUS).setValue('Assigned');           // Status (after ESL ID col shift)
     inventorySheet.getRange(pickListRow, COLS.INVENTORY.ASSIGNED_TO).setValue(employeeName);         // Assigned To (after ESL ID col shift)
-    inventorySheet.getRange(pickListRow, COLS.INVENTORY.DATE_ASSIGNED).setNumberFormat('MM/dd/yyyy').setValue(dateChanged); // Date Assigned (after ESL ID col shift)
+    safeSetNumberFormat(inventorySheet.getRange(pickListRow, COLS.INVENTORY.DATE_ASSIGNED), 'MM/dd/yyyy').setValue(dateChanged); // Date Assigned (after ESL ID col shift)
     inventorySheet.getRange(pickListRow, COLS.INVENTORY.LOCATION).setValue(employeeLocation);     // Location (after ESL ID col shift)
     // Write Change Out Date to inventory with proper formatting
     var changeOutCell = inventorySheet.getRange(pickListRow, COLS.INVENTORY.CHANGE_OUT_DATE); // Change Out Date (after ESL ID col shift)
     if (changeOutDate === 'N/A') {
-      changeOutCell.setNumberFormat('@').setValue('N/A');  // Plain text for N/A
+      safeSetNumberFormat(changeOutCell, '@').setValue('N/A');  // Plain text for N/A
     } else if (changeOutDate) {
-      changeOutCell.setNumberFormat('MM/dd/yyyy').setValue(changeOutDate);  // Date object
+      safeSetNumberFormat(changeOutCell, 'MM/dd/yyyy').setValue(changeOutDate);  // Date object
     }
     inventorySheet.getRange(pickListRow, COLS.INVENTORY.PICKED_FOR).setValue('');                  // Clear Picked For (after ESL ID col shift)
 
@@ -10027,16 +10027,16 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
     if (oldItemRow > 0) {
       inventorySheet.getRange(oldItemRow, COLS.INVENTORY.STATUS).setValue('Ready For Test');    // Status (after ESL ID col shift)
       inventorySheet.getRange(oldItemRow, COLS.INVENTORY.ASSIGNED_TO).setValue('Packed For Testing');// Assigned To (after ESL ID col shift)
-      inventorySheet.getRange(oldItemRow, COLS.INVENTORY.DATE_ASSIGNED).setNumberFormat('MM/dd/yyyy').setValue(dateChanged); // Date Assigned (after ESL ID col shift)
+      safeSetNumberFormat(inventorySheet.getRange(oldItemRow, COLS.INVENTORY.DATE_ASSIGNED), 'MM/dd/yyyy').setValue(dateChanged); // Date Assigned (after ESL ID col shift)
       inventorySheet.getRange(oldItemRow, COLS.INVENTORY.LOCATION).setValue("Cody's Truck");      // Location (after ESL ID col shift)
 
       // Calculate Change Out Date for old item (Packed For Testing = 3 months for gloves, 12 months for sleeves)
       var oldItemChangeOutDate = calculateChangeOutDate(dateChanged, "Cody's Truck", 'Packed For Testing', isSleeve);
       var oldItemChangeOutCell = inventorySheet.getRange(oldItemRow, COLS.INVENTORY.CHANGE_OUT_DATE); // Change Out Date (after ESL ID col shift)
       if (oldItemChangeOutDate === 'N/A') {
-        oldItemChangeOutCell.setNumberFormat('@').setValue('N/A');
+        safeSetNumberFormat(oldItemChangeOutCell, '@').setValue('N/A');
       } else if (oldItemChangeOutDate) {
-        oldItemChangeOutCell.setNumberFormat('MM/dd/yyyy').setValue(oldItemChangeOutDate);
+        safeSetNumberFormat(oldItemChangeOutCell, 'MM/dd/yyyy').setValue(oldItemChangeOutDate);
       }
       Logger.log('Stage 3: Set old item ' + oldItemNum + ' Change Out Date to ' + oldItemChangeOutDate);
     }
@@ -10076,9 +10076,9 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
         var pickListChangeOut = calculateChangeOutDate(stage2Date, "Cody's Truck", 'Packed For Delivery', isSleeve);
         var pickListChangeOutCell = inventorySheet.getRange(pickListRow, COLS.INVENTORY.CHANGE_OUT_DATE);
         if (pickListChangeOut === 'N/A') {
-          pickListChangeOutCell.setNumberFormat('@').setValue('N/A');
+          safeSetNumberFormat(pickListChangeOutCell, '@').setValue('N/A');
         } else if (pickListChangeOut) {
-          pickListChangeOutCell.setNumberFormat('MM/dd/yyyy').setValue(pickListChangeOut);
+          safeSetNumberFormat(pickListChangeOutCell, 'MM/dd/yyyy').setValue(pickListChangeOut);
         }
       } else {
         inventorySheet.getRange(pickListRow, COLS.INVENTORY.DATE_ASSIGNED).setValue(stage2DateAssigned);   // Use as-is if not a valid date
@@ -10104,9 +10104,9 @@ function handleDateChangedEdit(ss, swapSheet, inventorySheet, editedRow, newValu
           var oldItemChangeOut = calculateChangeOutDate(oldGloveDate, employeeLocation, oldGloveAssignedTo, isSleeve);
           var oldItemChangeOutCell = inventorySheet.getRange(oldItemRow, COLS.INVENTORY.CHANGE_OUT_DATE);
           if (oldItemChangeOut === 'N/A') {
-            oldItemChangeOutCell.setNumberFormat('@').setValue('N/A');
+            safeSetNumberFormat(oldItemChangeOutCell, '@').setValue('N/A');
           } else if (oldItemChangeOut) {
-            oldItemChangeOutCell.setNumberFormat('MM/dd/yyyy').setValue(oldItemChangeOut);
+            safeSetNumberFormat(oldItemChangeOutCell, 'MM/dd/yyyy').setValue(oldItemChangeOut);
           }
         } else {
           inventorySheet.getRange(oldItemRow, COLS.INVENTORY.DATE_ASSIGNED).setValue(oldGloveDateAssigned);  // Use as-is if not valid
@@ -10149,7 +10149,7 @@ function handlePreviousEmployeeReclaimPicked(ss, inventorySheet, itemNum, employ
       // Calculate Change Out Date for Packed For Testing (3 months)
       var changeOut = calculateChangeOutDate(today, "Cody's Truck", 'Packed For Testing', isSleeve);
       if (changeOut && changeOut !== 'N/A') {
-        inventorySheet.getRange(itemRow, COLS.INVENTORY.CHANGE_OUT_DATE).setNumberFormat('MM/dd/yyyy').setValue(changeOut);
+        safeSetNumberFormat(inventorySheet.getRange(itemRow, COLS.INVENTORY.CHANGE_OUT_DATE), 'MM/dd/yyyy').setValue(changeOut);
       }
       logEvent('Previous Employee item ' + itemNum + ' marked Picked (Ready For Test on Cody\'s Truck)');
     } else {
@@ -10196,7 +10196,7 @@ function handlePreviousEmployeeReclaimDateChanged(ss, inventorySheet, itemNum, e
       var changeOut = new Date(dateObj.getTime());
       changeOut.setFullYear(changeOut.getFullYear() + 1);
       var changeOutFormatted = Utilities.formatDate(changeOut, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy');
-      inventorySheet.getRange(itemRow, COLS.INVENTORY.CHANGE_OUT_DATE).setNumberFormat('MM/dd/yyyy').setValue(changeOutFormatted);
+      safeSetNumberFormat(inventorySheet.getRange(itemRow, COLS.INVENTORY.CHANGE_OUT_DATE), 'MM/dd/yyyy').setValue(changeOutFormatted);
       inventorySheet.getRange(itemRow, COLS.INVENTORY.PICKED_FOR).setValue('');
       logEvent('Previous Employee item ' + itemNum + ' marked Packed For Testing on Cody\'s Truck (Date Assigned: ' + dateFormatted + ', Change Out Date: ' + changeOutFormatted + ')');
     } else {
@@ -12318,119 +12318,6 @@ function parseAndImportItemHistoryLog(equipmentType, itemNum, logText) {
       }
     }
 
-    // Update active inventory sheet for each distinct item with the newest entry from the log
-    var activeUpdatedCount = 0;
-    if (invSheet && invSheet.getLastRow() > 1 && Object.keys(distinctItems).length > 0) {
-      var invLastRow = invSheet.getLastRow();
-      var invLastCol = invSheet.getLastColumn();
-      var invDataRange = invSheet.getRange(1, 1, invLastRow, invLastCol);
-      var invValues = invDataRange.getValues();
-      var invH = invValues[0].map(function(h) { return String(h).toLowerCase().trim(); });
-
-      var invItemCol = invH.indexOf('item #');
-      if (invItemCol === -1) invItemCol = invH.indexOf('glove');
-      if (invItemCol === -1) invItemCol = invH.indexOf('sleeve');
-      if (invItemCol === -1) invItemCol = invH.indexOf('blanket');
-      if (invItemCol === -1) invItemCol = invH.indexOf('mack');
-      if (invItemCol === -1) invItemCol = invH.indexOf('serial #');
-      if (invItemCol === -1) invItemCol = 0;
-
-      var invEslCol = invH.indexOf('esl id');
-      var invDateCol = invH.indexOf('date assigned');
-      var invLocCol = invH.indexOf('location');
-      var invStatCol = invH.indexOf('status');
-      var invAssignedCol = invH.indexOf('assigned to');
-      var invChgCol = invH.indexOf('change out date');
-
-      var isSleeve = eqKey.includes('sleeve');
-      var isBlanket = eqKey.includes('blanket');
-      var isMack = eqKey.includes('mack');
-
-      // Group newest entry per item
-      var newestByItem = {};
-      for (var ne = 0; ne < parsedEntries.length; ne++) {
-        var pEntry = parsedEntries[ne];
-        if (!newestByItem[pEntry.itemNum] || pEntry.dateObj.getTime() >= newestByItem[pEntry.itemNum].dateObj.getTime()) {
-          newestByItem[pEntry.itemNum] = pEntry;
-        }
-      }
-
-      for (var ir = 1; ir < invValues.length; ir++) {
-        var rowItemNum = String(invValues[ir][invItemCol] || '').trim();
-        var rowEsl = invEslCol !== -1 ? String(invValues[ir][invEslCol] || '').trim() : '';
-        var matchingNewest = newestByItem[rowItemNum] || (rowEsl ? newestByItem[rowEsl] : null);
-
-        if (matchingNewest) {
-          var rowIndex1Based = ir + 1;
-          var newStatus = matchingNewest.assignedTo;
-          var newAssignedTo = matchingNewest.assignedTo;
-          var newLoc = matchingNewest.location || 'Helena';
-          var newDateStr = matchingNewest.dateFormatted;
-          var newDateObj = matchingNewest.dateObj;
-
-          // Normalize Status vs Assigned To
-          var assLower = newAssignedTo.toLowerCase();
-          if (assLower === 'failed rubber' || assLower.includes('failed')) {
-            newStatus = 'Failed Rubber';
-            newAssignedTo = 'Failed Rubber';
-            newLoc = 'Helena';
-          } else if (assLower === 'lost') {
-            newStatus = 'Lost';
-            newAssignedTo = 'Lost';
-            newLoc = 'Lost';
-          } else if (assLower === 'in testing') {
-            newStatus = 'In Testing';
-            newAssignedTo = 'In Testing';
-            newLoc = 'Arnett / JM Test';
-          } else if (assLower === 'on shelf' || assLower === 'unassigned') {
-            newStatus = 'On Shelf';
-            newAssignedTo = 'On Shelf';
-            newLoc = 'Helena';
-          } else if (assLower === 'new') {
-            newStatus = 'On Shelf';
-            newAssignedTo = 'New';
-            newLoc = 'Helena';
-          } else if (assLower.includes('packed for testing')) {
-            newStatus = 'Packed For Testing';
-            newAssignedTo = 'Packed For Testing';
-            newLoc = "Cody's Truck";
-          } else if (assLower.includes('packed for delivery')) {
-            newStatus = 'Packed For Delivery';
-            newAssignedTo = 'Packed For Delivery';
-            newLoc = "Cody's Truck";
-          } else {
-            newStatus = 'Assigned';
-          }
-
-          if (invDateCol !== -1) invSheet.getRange(rowIndex1Based, invDateCol + 1).setValue(newDateStr);
-          if (invLocCol !== -1) invSheet.getRange(rowIndex1Based, invLocCol + 1).setValue(newLoc);
-          if (invStatCol !== -1) invSheet.getRange(rowIndex1Based, invStatCol + 1).setValue(newStatus);
-          if (invAssignedCol !== -1) invSheet.getRange(rowIndex1Based, invAssignedCol + 1).setValue(newAssignedTo);
-
-          // Change-out date calculation
-          if (invChgCol !== -1) {
-            var calcChg = null;
-            if (isBlanket && typeof calculateBlanketChangeOutDate === 'function') {
-              var testDateVal = invH.indexOf('test date') !== -1 ? invValues[ir][invH.indexOf('test date')] : null;
-              if (testDateVal) calcChg = calculateBlanketChangeOutDate(testDateVal, newDateObj, newLoc, newAssignedTo);
-            } else if (isMack && typeof calculateMackChangeOutDate === 'function') {
-              var mTestDateVal = invH.indexOf('test date') !== -1 ? invValues[ir][invH.indexOf('test date')] : null;
-              if (mTestDateVal) calcChg = calculateMackChangeOutDate(mTestDateVal, newDateObj, newLoc, newAssignedTo);
-            } else if (typeof calculateChangeOutDate === 'function') {
-              calcChg = calculateChangeOutDate(newDateObj, newLoc, newAssignedTo, isSleeve);
-            }
-
-            if (calcChg) {
-              var chgStr = calcChg instanceof Date ? Utilities.formatDate(calcChg, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy') : String(calcChg);
-              invSheet.getRange(rowIndex1Based, invChgCol + 1).setValue(chgStr);
-            }
-          }
-
-          activeUpdatedCount++;
-        }
-      }
-    }
-
     SpreadsheetApp.flush();
 
     var elapsed = ((new Date().getTime() - t0) / 1000).toFixed(1);
@@ -12440,7 +12327,6 @@ function parseAndImportItemHistoryLog(equipmentType, itemNum, logText) {
       success: true,
       count: rowsToAdd.length,
       itemsCount: itemCount,
-      activeUpdatedCount: activeUpdatedCount,
       totalParsed: parsedEntries.length,
       skippedDuplicates: parsedEntries.length - rowsToAdd.length,
       elapsedSeconds: elapsed
@@ -12449,6 +12335,124 @@ function parseAndImportItemHistoryLog(equipmentType, itemNum, logText) {
   } catch (e) {
     Logger.log('Error in parseAndImportItemHistoryLog: ' + e);
     return { success: false, error: e.message || String(e) };
+  }
+}
+
+/**
+ * Restores an entire sheet (e.g. 'Gloves', 'Sleeves', etc.) from a specified Google Drive backup spreadsheet.
+ * 
+ * @param {string} sheetName - The sheet name to restore (e.g. 'Gloves')
+ * @param {string} [backupIdentifier] - Optional backup file name or file ID. If omitted, uses the latest backup in the backup folder.
+ * @return {Object} Result object with row count and status.
+ */
+function restoreSheetFromBackup(sheetName, backupIdentifier) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  sheetName = sheetName || SHEET_GLOVES;
+  
+  var targetSheet = ss.getSheetByName(sheetName);
+  if (!targetSheet) {
+    throw new Error('Target sheet "' + sheetName + '" not found in current spreadsheet.');
+  }
+
+  var backupFile = null;
+  if (backupIdentifier) {
+    // Try by ID first
+    try {
+      backupFile = DriveApp.getFileById(backupIdentifier);
+    } catch (idErr) {
+      // Try by exact name
+      var filesByName = DriveApp.getFilesByName(backupIdentifier);
+      if (filesByName.hasNext()) {
+        backupFile = filesByName.next();
+      }
+    }
+  }
+
+  // If still not found, search in backup folder
+  if (!backupFile) {
+    var backupFolder = getOrCreateBackupFolder();
+    var files = backupFolder.getFiles();
+    var latestTime = 0;
+    while (files.hasNext()) {
+      var f = files.next();
+      var fName = f.getName();
+      if (backupIdentifier && fName.indexOf(backupIdentifier) !== -1) {
+        backupFile = f;
+        break;
+      }
+      var updated = f.getLastUpdated().getTime();
+      if (updated > latestTime) {
+        latestTime = updated;
+        backupFile = f;
+      }
+    }
+  }
+
+  if (!backupFile) {
+    throw new Error('Backup file not found' + (backupIdentifier ? ' for "' + backupIdentifier + '"' : ' in backup folder') + '.');
+  }
+
+  var backupSS = SpreadsheetApp.openById(backupFile.getId());
+  var backupSheet = backupSS.getSheetByName(sheetName);
+  if (!backupSheet) {
+    throw new Error('Sheet "' + sheetName + '" not found in backup file "' + backupFile.getName() + '".');
+  }
+
+  var backupData = backupSheet.getDataRange().getValues();
+  if (backupData.length < 1) {
+    throw new Error('Backup sheet "' + sheetName + '" contains no data.');
+  }
+
+  // Ensure enough rows/cols in target sheet
+  var neededRows = backupData.length;
+  var neededCols = backupData[0].length;
+  if (targetSheet.getMaxRows() < neededRows) {
+    targetSheet.insertRowsAfter(targetSheet.getMaxRows(), neededRows - targetSheet.getMaxRows() + 10);
+  }
+  if (targetSheet.getMaxColumns() < neededCols) {
+    targetSheet.insertColumnsAfter(targetSheet.getMaxColumns(), neededCols - targetSheet.getMaxColumns() + 2);
+  }
+
+  // Clear existing content from row 2 onwards
+  if (targetSheet.getLastRow() > 1) {
+    targetSheet.getRange(2, 1, targetSheet.getLastRow() - 1, targetSheet.getMaxColumns()).clearContent();
+  }
+
+  // Write all rows from backup
+  if (backupData.length > 1) {
+    var dataRows = backupData.slice(1);
+    targetSheet.getRange(2, 1, dataRows.length, neededCols).setValues(dataRows);
+  }
+
+  SpreadsheetApp.flush();
+  logEvent('Restored ' + (backupData.length - 1) + ' rows to "' + sheetName + '" from backup "' + backupFile.getName() + '"', 'INFO');
+
+  return {
+    success: true,
+    sheetName: sheetName,
+    backupName: backupFile.getName(),
+    rowCount: backupData.length - 1
+  };
+}
+
+/**
+ * Menu handler to restore the Gloves sheet from a backup.
+ */
+function menuRestoreGlovesFromBackup() {
+  var ui = SpreadsheetApp.getUi();
+  var response = ui.prompt(
+    'Restore Gloves Sheet from Backup',
+    'Enter the backup file name (e.g. "Safety Assistant - Backup 2026-08-20_16-44-36") or leave blank to restore from the latest backup:',
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+
+  var backupIdentifier = response.getResponseText().trim();
+  try {
+    var res = restoreSheetFromBackup(SHEET_GLOVES, backupIdentifier);
+    ui.alert('✅ Restore Complete', 'Successfully restored ' + res.rowCount + ' rows to the "' + res.sheetName + '" sheet from:\n' + res.backupName, ui.ButtonSet.OK);
+  } catch (err) {
+    ui.alert('❌ Restore Error', err.message || String(err), ui.ButtonSet.OK);
   }
 }
 
@@ -17794,7 +17798,7 @@ function markCertDeclinedAndRemove(taskKey, employee, certType) {
       if (rowEmployee === searchEmp && rowCertType === searchCert) {
         // Found the row - write declined date
         expiringSheet.getRange(i + 1, declinedColIndex).setValue(today);
-        expiringSheet.getRange(i + 1, declinedColIndex).setNumberFormat('yyyy-mm-dd');
+        safeSetNumberFormat(expiringSheet.getRange(i + 1, declinedColIndex), 'yyyy-mm-dd');
         Logger.log('markCertDeclinedAndRemove: Set declined date at row ' + (i + 1));
         break;
       }

@@ -273,11 +273,11 @@ Item 1025:
             const timeStr = res.elapsedSeconds ? ' in ' + res.elapsedSeconds + 's' : '';
             let msg = '';
             if (res.count === 0 && res.skippedDuplicates > 0) {
-              msg = 'ℹ️ All <strong>' + res.skippedDuplicates + '</strong> records already exist in history sheet (no duplicates added).' + (res.activeUpdatedCount ? ' Active inventory synced!' : '');
+              msg = 'ℹ️ All <strong>' + res.skippedDuplicates + '</strong> records already exist in history sheet (no duplicates added).';
             } else {
               const itemsStr = res.itemsCount && res.itemsCount > 1 ? res.itemsCount + ' items (' + res.count + ' records)' : res.count + ' records for ' + (itemNum ? eqType + ' #' + itemNum : eqType);
               const dupeNote = res.skippedDuplicates ? ' (' + res.skippedDuplicates + ' existing skipped)' : '';
-              msg = '✅ Successfully imported <strong>' + itemsStr + '</strong>' + dupeNote + timeStr + '!' + (res.activeUpdatedCount ? ' Active inventory synced.' : '');
+              msg = '✅ Successfully imported <strong>' + itemsStr + '</strong>' + dupeNote + timeStr + '!';
             }
             showAlert(msg, res.count > 0 ? 'success' : 'info');
             
