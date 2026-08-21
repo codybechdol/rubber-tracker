@@ -1073,6 +1073,22 @@ function doGet(e) {
     })).setMimeType(ContentService.MimeType.JSON);
   }
 
+  if (action === 'applyMutations') {
+    try {
+      var mutationsJson = (e && e.parameter && e.parameter.mutations) || '[]';
+      var mutations = JSON.parse(mutationsJson);
+      var returnSnap = (e && e.parameter && e.parameter.returnSnapshot) === 'true';
+      var result = applyBatchSyncMutations(mutations, returnSnap);
+      return ContentService.createTextOutput(JSON.stringify(result))
+        .setMimeType(ContentService.MimeType.JSON);
+    } catch (mutErr) {
+      return ContentService.createTextOutput(JSON.stringify({
+        success: false,
+        error: mutErr.toString()
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+
   // Return full database snapshot
   try {
     var snapshot = exportFullDatabaseSnapshot();

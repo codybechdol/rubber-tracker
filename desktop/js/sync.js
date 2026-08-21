@@ -284,6 +284,10 @@ class SyncEngine {
       if (outbox.length > 0 && this.syncUrl) {
         this.updateStatusUI('syncing', `Pushing ${outbox.length} offline change(s)...`);
         
+        let pushResult = null;
+        let pushSucceeded = false;
+
+        // Attempt 1: Try HTTP POST
         try {
           const pushResp = await fetch(this.syncUrl, {
             method: 'POST',
@@ -294,58 +298,68 @@ class SyncEngine {
               returnSnapshot: true
             })
           });
-
-          let pushResult = null;
+          const rawText = await pushResp.text();
           try {
-            const rawText = await pushResp.text();
             pushResult = JSON.parse(rawText);
-          } catch (parseE) {
-            console.log('Raw push response:', parseE);
-          }
-
-          if (pushResult && pushResult.errors && pushResult.errors.length > 0) {
-            console.warn('Sync server errors:', pushResult.errors);
-            this.renderModalChanges(outbox, `⚠️ Server error: ${pushResult.errors.join('; ')}`, 'error', true);
-            this.updateStatusUI('pending', 'Sync error / Pending changes');
-            this.isSyncing = false;
-            return { success: false, errors: pushResult.errors };
-          } else if (pushResult && pushResult.success) {
-            // Clear outbox once successfully sent to server
-            await this.db.clearOutbox();
-
-            // If the server returned the fresh snapshot in the same response, consume it immediately (single round-trip!)
-            if (pushResult.snapshot && pushResult.snapshot.tables) {
-              await this.db.setSnapshot(pushResult.snapshot);
-              if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
-              if (window.historyNavigator) window.historyNavigator.renderCurrentHistory();
-              if (window.tripPlanner) window.tripPlanner.renderPlanner();
-              if (window.taskManager) window.taskManager.renderTasks();
-
-              this.updateStatusUI('synced', `Synced (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
-              this.renderModalChanges([], `✅ All ${outbox.length} changes pushed and latest database loaded!`, 'success', false);
-              setTimeout(() => {
-                this.closeSyncModal();
-              }, 2500);
-
-              this.isSyncing = false;
-              return { success: true, snapshot: pushResult.snapshot };
+            if (pushResult && (pushResult.success || pushResult.appliedCount !== undefined)) {
+              pushSucceeded = true;
             }
+          } catch (parseE) { /* ignore to try GET fallback */ }
+        } catch (postE) {
+          console.warn('POST sync attempt failed, trying GET fallback:', postE);
+        }
 
-            this.renderModalChanges(outbox, `✅ Pushed ${outbox.length} change(s) successfully! Downloading fresh snapshot...`, 'success', false);
-          } else {
-            console.warn('Invalid server response during push:', pushResult);
-            const msg = (pushResult && pushResult.error) ? pushResult.error : 'Web App returned non-JSON response. Please verify in Google Sheets: Extensions > Apps Script > Deploy > Manage deployments, and ensure "Who has access" is set to "Anyone".';
-            this.renderModalChanges(outbox, `❌ Push failed: ${msg}`, 'error', true);
-            this.updateStatusUI('pending', 'Sync failed / Pending changes');
-            this.isSyncing = false;
-            return { success: false, error: msg };
+        // Attempt 2: Fallback to HTTP GET (bypasses Google Apps Script POST auth issues)
+        if (!pushSucceeded) {
+          try {
+            const getUrl = `${this.syncUrl}?action=applyMutations&mutations=${encodeURIComponent(JSON.stringify(outbox))}&returnSnapshot=true`;
+            const getResp = await fetch(getUrl, { method: 'GET' });
+            const rawGetText = await getResp.text();
+            pushResult = JSON.parse(rawGetText);
+            if (pushResult && (pushResult.success || pushResult.appliedCount !== undefined)) {
+              pushSucceeded = true;
+            }
+          } catch (getE) {
+            console.warn('GET sync fallback failed:', getE);
           }
-        } catch (pushErr) {
-          console.warn('Sync push error:', pushErr);
-          this.renderModalChanges(outbox, `❌ Push error: ${pushErr.message}. Changes remain saved offline.`, 'error', true);
-          this.updateStatusUI('pending', 'Push error / Pending changes');
+        }
+
+        if (pushResult && pushResult.errors && pushResult.errors.length > 0) {
+          console.warn('Sync server errors:', pushResult.errors);
+          this.renderModalChanges(outbox, `⚠️ Server error: ${pushResult.errors.join('; ')}`, 'error', true);
+          this.updateStatusUI('pending', 'Sync error / Pending changes');
           this.isSyncing = false;
-          return { success: false, error: pushErr.message };
+          return { success: false, errors: pushResult.errors };
+        } else if (pushSucceeded && pushResult) {
+          // Clear outbox once successfully sent to server
+          await this.db.clearOutbox();
+
+          // If the server returned the fresh snapshot in the same response, consume it immediately (single round-trip!)
+          if (pushResult.snapshot && pushResult.snapshot.tables) {
+            await this.db.setSnapshot(pushResult.snapshot);
+            if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
+            if (window.historyNavigator) window.historyNavigator.renderCurrentHistory();
+            if (window.tripPlanner) window.tripPlanner.renderPlanner();
+            if (window.taskManager) window.taskManager.renderTasks();
+
+            this.updateStatusUI('synced', `Synced (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
+            this.renderModalChanges([], `✅ All ${outbox.length} changes pushed and latest database loaded!`, 'success', false);
+            setTimeout(() => {
+              this.closeSyncModal();
+            }, 2500);
+
+            this.isSyncing = false;
+            return { success: true, snapshot: pushResult.snapshot };
+          }
+
+          this.renderModalChanges(outbox, `✅ Pushed ${outbox.length} change(s) successfully! Downloading fresh snapshot...`, 'success', false);
+        } else {
+          console.warn('Invalid server response during push:', pushResult);
+          const msg = (pushResult && pushResult.error) ? pushResult.error : 'Web App returned non-JSON response. Please verify in Google Sheets: Extensions > Apps Script > Deploy > Manage deployments, and ensure "Who has access" is set to "Anyone".';
+          this.renderModalChanges(outbox, `❌ Push failed: ${msg}`, 'error', true);
+          this.updateStatusUI('pending', 'Sync failed / Pending changes');
+          this.isSyncing = false;
+          return { success: false, error: msg };
         }
       }
 
