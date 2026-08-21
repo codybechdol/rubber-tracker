@@ -54,8 +54,8 @@ function _buildGloveManagerMenu() {
 
       // === STEP 4: REVIEW & SCHEDULE ===
       .addSubMenu(ui.createMenu('📅 Review & Schedule')
-        .addItem('📋 Tasks & Calendar', 'showToDoSchedule')
-        .addItem('🗺️ Trip Planner', 'showTripPlannerDialog')
+        .addItem('🗺️ Trip Planner (Desktop App)', 'showTripPlannerDialog')
+        .addItem('📋 Tasks & Calendar (Desktop App)', 'showToDoSchedule')
         .addItem('⚙️ Schedule Config', 'showToDoConfig')
         .addItem('📝 Daily Accomplishments', 'showTimeBreakdownDialog'))
 

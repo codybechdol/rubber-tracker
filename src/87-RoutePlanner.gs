@@ -192,14 +192,28 @@ function parseDateAsLocal(dateValue) {
 // ============================================================================
 
 /**
- * Shows the Trip Planner dialog.
- * Menu item: Glove Manager → Schedule → 🗺️ Trip Planner
+ * Shows the Trip Planner dialog - now redirected to Desktop App
  */
 function showTripPlannerDialog() {
-  var html = HtmlService.createHtmlOutputFromFile('TripPlanner')
-    .setWidth(1800)
-    .setHeight(1000)
-    .setTitle('Trip Planner');
+  var html = HtmlService.createHtmlOutput(
+    '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; padding: 24px 28px; text-align: center; color: #1e293b; background: #ffffff;">' +
+    '<div style="font-size: 44px; margin-bottom: 12px;">🗺️</div>' +
+    '<h3 style="margin: 0 0 8px 0; color: #0f172a; font-size: 18px; font-weight: 700;">Trip Planner & Field Scheduling</h3>' +
+    '<p style="font-size: 13px; color: #64748b; line-height: 1.6; margin: 0 0 20px 0;">' +
+    'Trip planning, route scheduling, and crew work checklists are now managed directly in the dedicated <strong>Safety Assistant Desktop App</strong>.' +
+    '</p>' +
+    '<div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; text-align: left; font-size: 12px; color: #475569; line-height: 1.7; margin-bottom: 20px;">' +
+    '⚡ <strong>Desktop App Advantages:</strong><br>' +
+    '• <strong>100% Offline Capable:</strong> Drag-and-drop schedule trips anywhere without internet delays.<br>' +
+    '• <strong>Multi-City Support:</strong> Drop multiple cities onto any work day with automatic route drive times.<br>' +
+    '• <strong>Crew Work Checklists:</strong> View live vehicle numbers (Unit 3017, 5015) and Mark Complete with 1 click.<br>' +
+    '• <strong>One-Click Sync:</strong> Seamlessly syncs all task completions back to Google Sheets.' +
+    '</div>' +
+    '<div style="display: flex; justify-content: center; gap: 10px;">' +
+    '<button style="background: #2563eb; color: #ffffff; border: none; border-radius: 6px; padding: 8px 18px; font-size: 13px; font-weight: 600; cursor: pointer;" onclick="google.script.host.close()">Got it</button>' +
+    '</div>' +
+    '</div>'
+  ).setWidth(520).setHeight(360);
   SpreadsheetApp.getUi().showModalDialog(html, '🗺️ Trip Planner');
 }
 

@@ -166,14 +166,28 @@ function openQuickActionsSidebar() {
 }
 
 /**
- * Opens the To Do Schedule dialog
- * Called from QuickActions sidebar
+ * Opens the To Do Schedule dialog - now redirected to Desktop App
  */
 function showToDoSchedule() {
-  var html = HtmlService.createHtmlOutputFromFile('ToDoSchedule')
-    .setWidth(1400)
-    .setHeight(900);
-  SpreadsheetApp.getUi().showModalDialog(html, '📅 To Do Schedule');
+  var html = HtmlService.createHtmlOutput(
+    '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; padding: 24px 28px; text-align: center; color: #1e293b; background: #ffffff;">' +
+    '<div style="font-size: 44px; margin-bottom: 12px;">📋</div>' +
+    '<h3 style="margin: 0 0 8px 0; color: #0f172a; font-size: 18px; font-weight: 700;">Tasks & Crew Work Checklist</h3>' +
+    '<p style="font-size: 13px; color: #64748b; line-height: 1.6; margin: 0 0 20px 0;">' +
+    'Crew task checklists, PPE swaps, and vehicle equipment tracking are now managed in the dedicated <strong>Safety Assistant Desktop App</strong>.' +
+    '</p>' +
+    '<div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; text-align: left; font-size: 12px; color: #475569; line-height: 1.7; margin-bottom: 20px;">' +
+    '⚡ <strong>Desktop App Checklist Features:</strong><br>' +
+    '• Group tasks by Crew, City, or Category (PPE, Tools, Training, Certs)<br>' +
+    '• Automatic vehicle detection and truck badges (Unit 3017, Unit 5015)<br>' +
+    '• One-click Mark Complete that pushes to Task Metadata' +
+    '</div>' +
+    '<div style="display: flex; justify-content: center; gap: 10px;">' +
+    '<button style="background: #2563eb; color: #ffffff; border: none; border-radius: 6px; padding: 8px 18px; font-size: 13px; font-weight: 600; cursor: pointer;" onclick="google.script.host.close()">Got it</button>' +
+    '</div>' +
+    '</div>'
+  ).setWidth(520).setHeight(340);
+  SpreadsheetApp.getUi().showModalDialog(html, '📋 Tasks & Checklist');
 }
 
 /**
