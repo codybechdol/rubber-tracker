@@ -8,12 +8,18 @@ class EmployeeProfileEngine {
     this.currentActiveTab = 'equipment'; // 'equipment' | 'certs' | 'history'
     this.currentEquipmentFilter = 'all'; // 'all' | 'gloves_sleeves' | 'blankets' | 'macks' | 'grounds' | 'hot_sticks' | 'hv_testers' | 'aed'
     this.currentEmployeeData = null;
+    this.activeEditCert = null;
   }
 
   init() {
-    // Escape key closes modal
+    // Escape key closes modals
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
+        const editModal = document.getElementById('edit-cert-dates-modal');
+        if (editModal && editModal.classList.contains('active')) {
+          this.closeEditCertModal();
+          return;
+        }
         this.closeProfileModal();
       }
     });
@@ -71,6 +77,16 @@ class EmployeeProfileEngine {
         const d = parseInt(parts[1], 10);
         let y = parseInt(parts[2], 10);
         if (y < 100) y += 2000;
+        const dt = new Date(y, m, d, 12, 0, 0);
+        return isNaN(dt.getTime()) ? null : dt;
+      }
+    }
+    if (s.includes('-')) {
+      const parts = s.split('-');
+      if (parts.length === 3) {
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10) - 1;
+        const d = parseInt(parts[2], 10);
         const dt = new Date(y, m, d, 12, 0, 0);
         return isNaN(dt.getTime()) ? null : dt;
       }
@@ -528,6 +544,8 @@ class EmployeeProfileEngine {
           const notes = String(c['Notes'] || '').trim();
 
           certifications.push({
+            rowIdx: c._rowIdx || null,
+            rawRow: c,
             certType: certType,
             expDate: expDate,
             testDate: testDate,
@@ -1234,7 +1252,10 @@ class EmployeeProfileEngine {
               ${this.getCertIcon(c.certType)} ${this.escapeHtml(c.certType)}
             </td>
             <td style="text-align: center; font-weight: 700;">
-              ${this.escapeHtml(c.expDate)}
+              <button class="btn-cell-edit" title="Click to edit Expiration Date" onclick="window.employeeProfileEngine.openEditCertModal('${this.escapeHtml(data.displayName)}', '${this.escapeHtml(c.certType)}')">
+                <span style="font-weight: 700; color: ${c.expDate && c.expDate !== 'N/A' ? '#facc15' : 'inherit'};">${this.escapeHtml(c.expDate)}</span>
+                <span class="edit-icon">✏️</span>
+              </button>
             </td>
             <td style="text-align: center;">
               ${daysHtml}
@@ -1242,19 +1263,27 @@ class EmployeeProfileEngine {
             <td style="text-align: center;">
               ${statusBadge}
             </td>
-            <td style="text-align: center; color: var(--text-secondary);">
-              ${this.escapeHtml(c.testDate)}
+            <td style="text-align: center;">
+              <button class="btn-cell-edit" title="Click to edit Date Acquired" onclick="window.employeeProfileEngine.openEditCertModal('${this.escapeHtml(data.displayName)}', '${this.escapeHtml(c.certType)}')">
+                <span style="color: var(--text-secondary);">${this.escapeHtml(c.testDate)}</span>
+                <span class="edit-icon">✏️</span>
+              </button>
             </td>
             <td style="text-align: center;">
-              ${c.smsStatus && (c.smsStatus.includes('Sent') || c.smsStatus.includes('Notified')) ? `
-                <button class="btn btn-secondary" style="font-size: 11px; padding: 2px 6px; background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); cursor: pointer; border-radius: 4px;" title="Notification logged (${this.escapeHtml(c.smsStatus)}). Click to resend SMS." onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeHtml(data.displayName)}', '${this.escapeHtml(c.certType)}', '${this.escapeHtml(c.expDate)}');}">
-                  📱 ${this.escapeHtml(c.smsStatus)}
+              <div style="display: flex; align-items: center; justify-content: center; gap: 6px;">
+                <button class="btn btn-secondary" style="font-size: 11px; padding: 2px 7px; display: inline-flex; align-items: center; gap: 4px; border-color: rgba(59, 130, 246, 0.4); color: #93c5fd;" title="Edit Date Acquired and Expiration Date for ${this.escapeHtml(c.certType)}" onclick="window.employeeProfileEngine.openEditCertModal('${this.escapeHtml(data.displayName)}', '${this.escapeHtml(c.certType)}')">
+                  <span>✏️</span> Edit
                 </button>
-              ` : `
-                <button class="btn btn-primary" style="font-size: 11px; padding: 2px 8px; background-color: #f59e0b; border: 1px solid #d97706; color: #fff; font-weight: 700; cursor: pointer; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);" title="Send SMS reminder to ${this.escapeHtml(data.displayName)}" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeHtml(data.displayName)}', '${this.escapeHtml(c.certType)}', '${this.escapeHtml(c.expDate)}');}">
-                  💬 Send SMS
-                </button>
-              `}
+                ${c.smsStatus && (c.smsStatus.includes('Sent') || c.smsStatus.includes('Notified')) ? `
+                  <button class="btn btn-secondary" style="font-size: 11px; padding: 2px 6px; background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); cursor: pointer; border-radius: 4px;" title="Notification logged (${this.escapeHtml(c.smsStatus)}). Click to resend SMS." onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeHtml(data.displayName)}', '${this.escapeHtml(c.certType)}', '${this.escapeHtml(c.expDate)}');}">
+                    📱 ${this.escapeHtml(c.smsStatus)}
+                  </button>
+                ` : `
+                  <button class="btn btn-primary" style="font-size: 11px; padding: 2px 8px; background-color: #f59e0b; border: 1px solid #d97706; color: #fff; font-weight: 700; cursor: pointer; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);" title="Send SMS reminder to ${this.escapeHtml(data.displayName)}" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeHtml(data.displayName)}', '${this.escapeHtml(c.certType)}', '${this.escapeHtml(c.expDate)}');}">
+                    💬 Send SMS
+                  </button>
+                `}
+              </div>
             </td>
             <td style="text-align: left; font-size: 11px; color: var(--text-muted);">
               ${this.escapeHtml(c.notes || '')}
@@ -1340,19 +1369,592 @@ class EmployeeProfileEngine {
     return '';
   }
 
-  parseDate(str) {
-    if (!str || str === 'N/A') return null;
-    if (str.includes('/')) {
-      const parts = str.split('/');
-      if (parts.length === 3) {
-        const m = parseInt(parts[0], 10) - 1;
-        const d = parseInt(parts[1], 10);
-        const y = parseInt(parts[2], 10);
-        return new Date(y, m, d, 12, 0, 0);
+  /**
+   * Identifies non-expiring certifications and qualifications
+   */
+  isNonExpiringCert(certType) {
+    const ct = String(certType || '').trim().toLowerCase();
+    return ct.includes('osha') || 
+           ct.includes('crane eval') || 
+           ct.includes('bnsf') || 
+           ct.includes('msha') || 
+           ct.includes('eica') || 
+           ct.includes('helicopter');
+  }
+
+  /**
+   * Returns validity cycle length and descriptive label for a certification
+   */
+  getCertCycleInfo(certType) {
+    if (this.isNonExpiringCert(certType)) {
+      return { isExpiring: false, years: null, label: 'Non-Expiring Qualification' };
+    }
+    const ct = String(certType || '').trim().toLowerCase();
+    if (ct.includes('pole top') || ct.includes('harass') || ct.includes('coin cpr') || ct.includes('annual')) {
+      return { isExpiring: true, years: 1, label: '1-Year Cycle (Annual)' };
+    }
+    if (ct.includes('cpr') || ct.includes('1st aid') || ct.includes('first aid')) {
+      return { isExpiring: true, years: 2, label: '2-Year Cycle' };
+    }
+    if (ct.includes('forklift') || ct.includes('trench') || ct.includes('rigging')) {
+      return { isExpiring: true, years: 3, label: '3-Year Cycle' };
+    }
+    if (ct.includes('crane')) {
+      return { isExpiring: true, years: 5, label: '5-Year Cycle' };
+    }
+    if (ct.includes('dl') || ct.includes('driver')) {
+      return { isExpiring: true, years: 8, label: '8-Year Cycle' };
+    }
+    if (ct.includes('mec') || ct.includes('dot') || ct.includes('medical') || ct.includes('physical')) {
+      return { isExpiring: true, years: 2, label: '2-Year Cycle (DOT)' };
+    }
+    return { isExpiring: true, years: 1, label: 'Standard Cycle (1-Year)' };
+  }
+
+  /**
+   * Auto-calculates expiration date from acquired date
+   */
+  calculateCertExpDate(certType, acqDate) {
+    if (!acqDate || this.isNonExpiringCert(certType)) return null;
+    const parsed = (acqDate instanceof Date) ? acqDate : this.parseDate(acqDate);
+    if (!parsed) return null;
+    const cycle = this.getCertCycleInfo(certType);
+    if (!cycle.isExpiring || !cycle.years) return null;
+    const exp = new Date(parsed.getTime());
+    exp.setFullYear(exp.getFullYear() + cycle.years);
+    return exp;
+  }
+
+  /**
+   * Auto-calculates acquired date from expiration date
+   */
+  calculateCertAcqDate(certType, expDate) {
+    if (!expDate || this.isNonExpiringCert(certType)) return null;
+    const parsed = (expDate instanceof Date) ? expDate : this.parseDate(expDate);
+    if (!parsed) return null;
+    const cycle = this.getCertCycleInfo(certType);
+    if (!cycle.isExpiring || !cycle.years) return null;
+    const acq = new Date(parsed.getTime());
+    acq.setFullYear(acq.getFullYear() - cycle.years);
+    return acq;
+  }
+
+  /**
+   * Calculates days remaining and standardized status string for a certification
+   */
+  calculateCertDaysAndStatus(certType, expDateStr, acqDateStr) {
+    const isNonExp = this.isNonExpiringCert(certType);
+    if (isNonExp) {
+      const hasAcq = acqDateStr && acqDateStr !== 'N/A' && String(acqDateStr).trim() !== '';
+      return {
+        daysLeft: null,
+        status: hasAcq ? 'OK' : 'No Date Set'
+      };
+    }
+
+    if (!expDateStr || expDateStr === 'N/A' || String(expDateStr).trim() === '') {
+      return {
+        daysLeft: null,
+        status: 'No Date Set'
+      };
+    }
+
+    const expDt = this.parseDate(expDateStr);
+    if (!expDt) {
+      return {
+        daysLeft: null,
+        status: 'No Date Set'
+      };
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diffMs = expDt.getTime() - today.getTime();
+    const daysLeft = Math.round(diffMs / (1000 * 60 * 60 * 24));
+    let status = 'OK';
+    if (daysLeft < 0) status = 'Expired';
+    else if (daysLeft <= 7) status = 'Critical';
+    else if (daysLeft <= 30) status = 'Warning';
+    else if (daysLeft <= 60) status = 'Upcoming';
+    else status = 'OK';
+
+    return { daysLeft, status };
+  }
+
+  /**
+   * Formats a date into YYYY-MM-DD format for HTML <input type="date">
+   */
+  formatDateInput(val) {
+    if (!val || val === 'N/A') return '';
+    if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val.trim())) return val.trim();
+    const d = (val instanceof Date) ? val : this.parseDate(val);
+    if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  /**
+   * Opens the Edit Certification Dates Modal
+   */
+  openEditCertModal(employeeName, certType) {
+    const modal = document.getElementById('edit-cert-dates-modal');
+    const body = document.getElementById('edit-cert-dates-modal-body');
+    const titleEl = document.getElementById('edit-cert-dates-modal-title');
+    if (!modal || !body) return;
+
+    const data = this.currentEmployeeData;
+    const empName = employeeName || (data ? data.displayName : '');
+    if (!empName || !certType) return;
+
+    let certObj = null;
+    if (data && data.certifications) {
+      certObj = data.certifications.find(c => c.certType === certType || this.normalizeName(c.certType) === this.normalizeName(certType));
+    }
+
+    const currentAcq = certObj ? certObj.testDate : '';
+    const currentExp = certObj ? certObj.expDate : '';
+    const currentNotes = certObj ? certObj.notes : '';
+
+    const acqIso = this.formatDateInput(currentAcq);
+    const expIso = this.formatDateInput(currentExp);
+
+    const cycle = this.getCertCycleInfo(certType);
+
+    this.activeEditCert = {
+      employeeName: empName,
+      certType: certType,
+      certObj: certObj
+    };
+
+    if (titleEl) {
+      titleEl.innerHTML = `Edit Certification Dates: <strong>${this.escapeHtml(certType)}</strong>`;
+    }
+
+    body.innerHTML = `
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        <!-- Cert Info Header Card -->
+        <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div style="font-size: 26px;">${this.getCertIcon(certType)}</div>
+            <div>
+              <div style="font-size: 15px; font-weight: 800; color: #f8fafc;">${this.escapeHtml(certType)}</div>
+              <div style="font-size: 12px; color: #60a5fa; font-weight: 600;">👤 ${this.escapeHtml(empName)}</div>
+            </div>
+          </div>
+          <div>
+            <span class="badge" style="background: ${cycle.isExpiring ? 'rgba(59, 130, 246, 0.2)' : 'rgba(16, 185, 129, 0.2)'}; color: ${cycle.isExpiring ? '#93c5fd' : '#4ade80'}; border: 1px solid ${cycle.isExpiring ? 'rgba(59, 130, 246, 0.4)' : 'rgba(16, 185, 129, 0.4)'}; padding: 4px 10px; border-radius: 20px; font-size: 11.5px; font-weight: 700;">
+              ${cycle.label}
+            </span>
+          </div>
+        </div>
+
+        <!-- Date Inputs Grid -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+          <!-- Date Acquired -->
+          <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
+            <label style="font-size: 12px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; justify-content: space-between;">
+              <span>📅 Date Acquired / Class Date</span>
+            </label>
+            <input type="date" id="cert-edit-acq-date" value="${acqIso}" style="width: 100%; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 10px; font-size: 13px; outline: none;">
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px;">
+              <button type="button" class="btn-preset" onclick="window.employeeProfileEngine.quickSetAcqDate('today')">📅 Today</button>
+              <button type="button" class="btn-preset" onclick="window.employeeProfileEngine.quickSetAcqDate('clear')">✕ Clear</button>
+            </div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">
+              ${cycle.isExpiring ? `Setting Acquired date auto-calculates Expiration (${cycle.years} yrs).` : 'Evaluations & one-time certs record completion date.'}
+            </div>
+          </div>
+
+          <!-- Expiration Date -->
+          <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
+            <label style="font-size: 12px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; justify-content: space-between;">
+              <span>⏳ Expiration Date</span>
+            </label>
+            <input type="date" id="cert-edit-exp-date" value="${expIso}" ${!cycle.isExpiring ? 'disabled placeholder="N/A (Non-Expiring)"' : ''} style="width: 100%; background: ${!cycle.isExpiring ? 'rgba(0,0,0,0.2)' : 'var(--bg-primary)'}; border: 1px solid var(--border-color); border-radius: 6px; color: ${!cycle.isExpiring ? 'var(--text-muted)' : 'var(--text-primary)'}; padding: 8px 10px; font-size: 13px; outline: none;">
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px;">
+              ${cycle.isExpiring ? `
+                <button type="button" class="btn-preset" onclick="window.employeeProfileEngine.quickSetExpDate('auto')">🔄 Auto-Calc</button>
+                <button type="button" class="btn-preset" onclick="window.employeeProfileEngine.quickSetExpDate('+1yr')">+1 Yr</button>
+                <button type="button" class="btn-preset" onclick="window.employeeProfileEngine.quickSetExpDate('+2yr')">+2 Yrs</button>
+                <button type="button" class="btn-preset" onclick="window.employeeProfileEngine.quickSetExpDate('+5yr')">+5 Yrs</button>
+                <button type="button" class="btn-preset" onclick="window.employeeProfileEngine.quickSetExpDate('clear')">✕ Clear</button>
+              ` : `
+                <span style="font-size: 11px; color: var(--text-muted); padding: 4px 0;">Non-expiring qualification (N/A)</span>
+              `}
+            </div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">
+              ${cycle.isExpiring ? 'Enter custom expiration or choose preset.' : 'Expiration date is not required.'}
+            </div>
+          </div>
+        </div>
+
+        <!-- Real-Time Dynamic Status & Days Preview Card -->
+        <div class="cert-live-preview" id="cert-edit-live-preview">
+          <!-- Updated dynamically -->
+        </div>
+
+        <!-- Notes Field -->
+        <div class="form-group" style="display: flex; flex-direction: column; gap: 6px;">
+          <label style="font-size: 12px; font-weight: 700; color: var(--text-primary);">
+            📝 Notes / Reference # (Optional)
+          </label>
+          <input type="text" id="cert-edit-notes" value="${this.escapeHtml(currentNotes || '')}" placeholder="e.g. Card #, Evaluation notes, Instructor..." style="width: 100%; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 10px; font-size: 12.5px; outline: none;">
+        </div>
+      </div>
+    `;
+
+    // Attach real-time calculation listeners
+    const acqInput = document.getElementById('cert-edit-acq-date');
+    const expInput = document.getElementById('cert-edit-exp-date');
+
+    if (acqInput) {
+      acqInput.addEventListener('change', () => {
+        const acqVal = acqInput.value;
+        if (acqVal && cycle.isExpiring && expInput) {
+          const expDate = this.calculateCertExpDate(certType, acqVal);
+          if (expDate) {
+            expInput.value = this.formatDateInput(expDate);
+          }
+        }
+        this.updateLiveCertPreview();
+      });
+      acqInput.addEventListener('input', () => this.updateLiveCertPreview());
+    }
+
+    if (expInput) {
+      expInput.addEventListener('change', () => this.updateLiveCertPreview());
+      expInput.addEventListener('input', () => this.updateLiveCertPreview());
+    }
+
+    this.updateLiveCertPreview();
+    modal.classList.add('active');
+  }
+
+  /**
+   * Closes the Edit Certification Dates Modal
+   */
+  closeEditCertModal() {
+    const modal = document.getElementById('edit-cert-dates-modal');
+    if (modal) modal.classList.remove('active');
+    this.activeEditCert = null;
+  }
+
+  /**
+   * Quick preset button handler for Date Acquired
+   */
+  quickSetAcqDate(preset) {
+    const acqInput = document.getElementById('cert-edit-acq-date');
+    const expInput = document.getElementById('cert-edit-exp-date');
+    if (!acqInput || !this.activeEditCert) return;
+
+    const certType = this.activeEditCert.certType;
+    const cycle = this.getCertCycleInfo(certType);
+
+    if (preset === 'today') {
+      const today = new Date();
+      const todayIso = this.formatDateInput(today);
+      acqInput.value = todayIso;
+      if (cycle.isExpiring && expInput) {
+        const expDate = this.calculateCertExpDate(certType, today);
+        if (expDate) expInput.value = this.formatDateInput(expDate);
+      }
+    } else if (preset === 'clear') {
+      acqInput.value = '';
+    }
+    this.updateLiveCertPreview();
+  }
+
+  /**
+   * Quick preset button handler for Expiration Date
+   */
+  quickSetExpDate(preset) {
+    const acqInput = document.getElementById('cert-edit-acq-date');
+    const expInput = document.getElementById('cert-edit-exp-date');
+    if (!expInput || !this.activeEditCert) return;
+
+    const certType = this.activeEditCert.certType;
+
+    if (preset === 'auto') {
+      const acqVal = acqInput ? acqInput.value : '';
+      if (acqVal) {
+        const expDate = this.calculateCertExpDate(certType, acqVal);
+        if (expDate) expInput.value = this.formatDateInput(expDate);
+      }
+    } else if (preset.startsWith('+')) {
+      const years = parseInt(preset.replace('+', '').replace('yr', '').replace('yrs', ''), 10) || 1;
+      const baseDate = (acqInput && acqInput.value) ? this.parseDate(acqInput.value) : new Date();
+      if (baseDate) {
+        const target = new Date(baseDate.getTime());
+        target.setFullYear(target.getFullYear() + years);
+        expInput.value = this.formatDateInput(target);
+      }
+    } else if (preset === 'clear') {
+      expInput.value = '';
+    }
+    this.updateLiveCertPreview();
+  }
+
+  /**
+   * Updates the dynamic live preview card inside the Edit Certification Dates Modal
+   */
+  updateLiveCertPreview() {
+    const container = document.getElementById('cert-edit-live-preview');
+    if (!container || !this.activeEditCert) return;
+
+    const certType = this.activeEditCert.certType;
+    const acqInput = document.getElementById('cert-edit-acq-date');
+    const expInput = document.getElementById('cert-edit-exp-date');
+
+    const acqVal = acqInput ? acqInput.value : '';
+    const expVal = expInput ? expInput.value : '';
+
+    const isNonExp = this.isNonExpiringCert(certType);
+
+    const expDisplay = expVal ? this.formatDateDisplay(this.parseDate(expVal)) : 'N/A';
+    const acqDisplay = acqVal ? this.formatDateDisplay(this.parseDate(acqVal)) : 'N/A';
+
+    const { daysLeft, status } = this.calculateCertDaysAndStatus(certType, expDisplay, acqDisplay);
+
+    let statusBadge = `<span class="badge" style="background-color: #15803d; color: #fff; padding: 3px 10px; border-radius: 4px; font-weight: 700; font-size: 12px;">🟢 OK</span>`;
+    const sLower = status.toLowerCase();
+
+    if (sLower === 'upcoming') {
+      statusBadge = `<span class="badge" style="background-color: #0284c7; color: #fff; padding: 3px 10px; border-radius: 4px; font-weight: 700; font-size: 12px;">🔵 Upcoming</span>`;
+    } else if (sLower === 'warning') {
+      statusBadge = `<span class="badge" style="background-color: #d97706; color: #fff; padding: 3px 10px; border-radius: 4px; font-weight: 700; font-size: 12px;">🟡 Warning</span>`;
+    } else if (sLower === 'critical') {
+      statusBadge = `<span class="badge" style="background-color: #ea580c; color: #fff; padding: 3px 10px; border-radius: 4px; font-weight: 700; font-size: 12px;">🟠 Critical</span>`;
+    } else if (sLower === 'expired') {
+      statusBadge = `<span class="badge" style="background-color: #dc2626; color: #fff; padding: 3px 10px; border-radius: 4px; font-weight: 700; font-size: 12px;">🔴 Expired</span>`;
+    } else if (sLower === 'no date set' || sLower.includes('no date')) {
+      statusBadge = `<span class="badge" style="background-color: #334155; color: #94a3b8; padding: 3px 10px; border-radius: 4px; font-weight: 600; font-size: 12px;">⚪ No Date Set</span>`;
+    }
+
+    let daysText = '—';
+    if (daysLeft !== null) {
+      if (daysLeft < 0) {
+        daysText = `<span style="color: #ef4444; font-weight: 800;">${Math.abs(daysLeft)} days overdue (${daysLeft}d)</span>`;
+      } else {
+        daysText = `<span style="color: ${daysLeft <= 30 ? '#f97316' : (daysLeft <= 60 ? '#eab308' : '#4ade80')}; font-weight: 700;">${daysLeft} days remaining</span>`;
+      }
+    } else if (isNonExp) {
+      daysText = `<span style="color: var(--text-secondary);">${acqVal ? 'Permanent / Valid' : 'No Date Set'}</span>`;
+    }
+
+    container.innerHTML = `
+      <div>
+        <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; margin-bottom: 3px;">Calculated Status</div>
+        <div>${statusBadge}</div>
+      </div>
+      <div style="text-align: right;">
+        <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; margin-bottom: 3px;">Time Remaining</div>
+        <div style="font-size: 13px;">${daysText}</div>
+      </div>
+    `;
+  }
+
+  /**
+   * Saves updated certification dates to local database and triggers background sync mutations
+   */
+  async saveCertDates() {
+    if (!this.activeEditCert) return;
+
+    const { employeeName, certType } = this.activeEditCert;
+    const acqInput = document.getElementById('cert-edit-acq-date');
+    const expInput = document.getElementById('cert-edit-exp-date');
+    const notesInput = document.getElementById('cert-edit-notes');
+
+    const rawAcqVal = acqInput ? acqInput.value : '';
+    const rawExpVal = expInput ? expInput.value : '';
+    const newNotes = notesInput ? notesInput.value.trim() : '';
+
+    const isNonExp = this.isNonExpiringCert(certType);
+
+    let formattedAcq = 'N/A';
+    if (rawAcqVal) {
+      const d = this.parseDate(rawAcqVal);
+      formattedAcq = d ? this.formatDateDisplay(d) : rawAcqVal;
+    }
+
+    let formattedExp = 'N/A';
+    if (!isNonExp && rawExpVal) {
+      const d = this.parseDate(rawExpVal);
+      formattedExp = d ? this.formatDateDisplay(d) : rawExpVal;
+    }
+
+    const { daysLeft, status } = this.calculateCertDaysAndStatus(certType, formattedExp, formattedAcq);
+
+    const snap = this.db.getSnapshot();
+    const certsTable = snap && snap.tables ? snap.tables['expiring_certs'] : null;
+
+    if (certsTable) {
+      const headers = certsTable.headers || [];
+      let colAcq = -1;
+      let colExp = -1;
+      let colDays = -1;
+      let colStat = -1;
+      let colSms = -1;
+      let colNotes = -1;
+
+      headers.forEach((h, idx) => {
+        const hl = String(h || '').toLowerCase().trim();
+        if (/date.*acq|acq.*date|test.*date|issue.*date|class.*date/.test(hl) && colAcq === -1) colAcq = idx + 1;
+        else if (/expir.*date|expir/.test(hl) && colExp === -1) colExp = idx + 1;
+        else if (/days/.test(hl) && colDays === -1) colDays = idx + 1;
+        else if (/^status$/.test(hl) && colStat === -1) colStat = idx + 1;
+        else if (/sms/.test(hl) && colSms === -1) colSms = idx + 1;
+        else if (/note/.test(hl) && colNotes === -1) colNotes = idx + 1;
+      });
+
+      if (colAcq === -1) colAcq = 3;
+      if (colExp === -1) colExp = 4;
+      if (colDays === -1) colDays = 7;
+      if (colStat === -1) colStat = 8;
+      if (colSms === -1) colSms = 9;
+
+      // Find row in certsTable.rows
+      let matchedRow = null;
+      if (certsTable.rows) {
+        matchedRow = certsTable.rows.find(r => {
+          const emp = r['Employee Name'] || r['Employee'] || r['Name'] || '';
+          const cType = this.getCertType(r, headers);
+          return this.isNameMatch(emp, employeeName) && (cType === certType || this.normalizeName(cType) === this.normalizeName(certType));
+        });
+      }
+
+      if (matchedRow) {
+        const rowIdx = matchedRow._rowIdx;
+        const oldAcq = matchedRow['Date Acquired'] || matchedRow['Acquired Date'] || '';
+        const oldExp = matchedRow['Expiration Date'] || matchedRow['Expiration'] || '';
+        const oldStat = matchedRow['Status'] || '';
+        const oldNotes = matchedRow['Notes'] || '';
+
+        const acqValueToSave = formattedAcq !== 'N/A' ? formattedAcq : '';
+        const expValueToSave = formattedExp !== 'N/A' ? formattedExp : (isNonExp ? 'N/A' : '');
+
+        // Mutations for offline outbox & sync back to Google Sheets
+        if (rowIdx) {
+          if (acqValueToSave !== oldAcq) {
+            await this.db.addMutation({
+              action: 'UPDATE_CELL',
+              sheetName: 'Expiring Certs',
+              row: rowIdx,
+              col: colAcq,
+              header: headers[colAcq - 1] || 'Date Acquired',
+              oldValue: oldAcq,
+              value: acqValueToSave
+            });
+          }
+          if (expValueToSave !== oldExp) {
+            await this.db.addMutation({
+              action: 'UPDATE_CELL',
+              sheetName: 'Expiring Certs',
+              row: rowIdx,
+              col: colExp,
+              header: headers[colExp - 1] || 'Expiration Date',
+              oldValue: oldExp,
+              value: expValueToSave
+            });
+          }
+          if (status !== oldStat) {
+            await this.db.addMutation({
+              action: 'UPDATE_CELL',
+              sheetName: 'Expiring Certs',
+              row: rowIdx,
+              col: colStat,
+              header: headers[colStat - 1] || 'Status',
+              oldValue: oldStat,
+              value: status
+            });
+          }
+          if (colNotes !== -1 && newNotes !== oldNotes) {
+            await this.db.addMutation({
+              action: 'UPDATE_CELL',
+              sheetName: 'Expiring Certs',
+              row: rowIdx,
+              col: colNotes,
+              header: headers[colNotes - 1] || 'Notes',
+              oldValue: oldNotes,
+              value: newNotes
+            });
+          }
+        }
+
+        // Optimistically update in-memory row
+        matchedRow['Date Acquired'] = acqValueToSave;
+        matchedRow['Expiration Date'] = expValueToSave;
+        matchedRow['Days Until Expiration'] = daysLeft !== null ? String(daysLeft) : (isNonExp ? 'N/A' : '');
+        matchedRow['Status'] = status;
+        if (colNotes !== -1) matchedRow['Notes'] = newNotes;
+        matchedRow['SMS'] = '';
+
+        // Also update rawGrid if present
+        if (certsTable.rawGrid && rowIdx && certsTable.rawGrid[rowIdx - 1]) {
+          certsTable.rawGrid[rowIdx - 1][colAcq - 1] = acqValueToSave;
+          certsTable.rawGrid[rowIdx - 1][colExp - 1] = expValueToSave;
+          if (colDays !== -1) certsTable.rawGrid[rowIdx - 1][colDays - 1] = daysLeft !== null ? String(daysLeft) : (isNonExp ? 'N/A' : '');
+          certsTable.rawGrid[rowIdx - 1][colStat - 1] = status;
+          if (colNotes !== -1) certsTable.rawGrid[rowIdx - 1][colNotes - 1] = newNotes;
+          if (colSms !== -1) certsTable.rawGrid[rowIdx - 1][colSms - 1] = '';
+        }
       }
     }
-    const d = new Date(str);
-    return isNaN(d.getTime()) ? null : d;
+
+    // Update in-memory state in currentEmployeeData
+    if (this.currentEmployeeData && this.currentEmployeeData.certifications) {
+      const certItem = this.currentEmployeeData.certifications.find(c => c.certType === certType || this.normalizeName(c.certType) === this.normalizeName(certType));
+      if (certItem) {
+        certItem.testDate = formattedAcq;
+        certItem.expDate = formattedExp;
+        certItem.daysLeft = daysLeft;
+        certItem.status = status;
+        certItem.notes = newNotes;
+        certItem.smsStatus = '';
+      }
+
+      // Update career milestones in currentEmployeeData.employeeHistory
+      const milestoneDate = formattedAcq !== 'N/A' ? formattedAcq : (formattedExp !== 'N/A' ? formattedExp : null);
+      if (milestoneDate && this.currentEmployeeData.employeeHistory) {
+        const existingHist = this.currentEmployeeData.employeeHistory.find(h => h.type === 'cert' && h.event.includes(certType));
+        let milestoneDetail = `Valid · ${certType}`;
+        if (formattedAcq !== 'N/A' && formattedExp !== 'N/A') {
+          milestoneDetail = `Updated / Acquired: ${formattedAcq} · Expires: ${formattedExp}`;
+        } else if (formattedExp !== 'N/A') {
+          milestoneDetail = `Expires: ${formattedExp}`;
+        } else if (formattedAcq !== 'N/A') {
+          milestoneDetail = `Date Acquired: ${formattedAcq}`;
+        }
+
+        if (existingHist) {
+          existingHist.date = milestoneDate;
+          existingHist.details = milestoneDetail;
+        } else {
+          this.currentEmployeeData.employeeHistory.unshift({
+            type: 'cert',
+            date: milestoneDate,
+            event: `📜 Cert Updated: ${certType}`,
+            details: milestoneDetail,
+            location: this.currentEmployeeData.location,
+            job: this.currentEmployeeData.jobNumber
+          });
+        }
+      }
+    }
+
+    this.closeEditCertModal();
+
+    // Re-render the profile modal body immediately to show updated dates & badges
+    const modalBody = document.getElementById('employee-profile-modal-body');
+    if (modalBody) {
+      this.renderModalContent(modalBody);
+    }
+
+    // Refresh sheetNavigator view if Expiring Certs is open in background
+    if (window.sheetNavigator && window.sheetNavigator.currentSheetKey === 'expiring_certs') {
+      window.sheetNavigator.renderExpiringCerts();
+    }
   }
 
   escapeHtml(str) {

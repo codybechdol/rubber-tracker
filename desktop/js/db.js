@@ -504,9 +504,14 @@ class LocalDatabase {
         }
       }
 
-      // 2. If edit is on an Inventory Sheet (Gloves, Sleeves, Blankets, MACKs, HV Testers, Phasing Sets, AED, Grounds, Hot Sticks)
+      // 2. Direct rawGrid update for any sheet if present
+      if (table && table.rawGrid && table.rawGrid[mut.row - 1]) {
+        table.rawGrid[mut.row - 1][mut.col - 1] = mut.value;
+      }
+
+      // 3. If edit is on an Inventory or Data Sheet (Gloves, Sleeves, Blankets, MACKs, Expiring Certs, etc.)
       if (table && table.rows && table.headers) {
-        const row = table.rows[mut.row - 2]; // 1-based sheet row (row 1 is header)
+        const row = table.rows.find(r => r._rowIdx === mut.row) || table.rows[mut.row - 2]; // 1-based sheet row (row 1 is header)
         const colHeader = mut.header || table.headers[mut.col - 1];
         if (row && colHeader) {
           row[colHeader] = mut.value;

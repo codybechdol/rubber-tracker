@@ -880,6 +880,16 @@ function applyBatchSyncMutations(mutations, returnSnapshot) {
                   }
                 }
               }
+              
+              if (sheetLower === 'expiring certs' || sheetLower.indexOf('expiring cert') !== -1) {
+                try {
+                  if (typeof handleExpiringCertDateChange === 'function') {
+                    handleExpiringCertDateChange(ss, sheet, mut.row, mut.col);
+                  }
+                } catch (certErr) {
+                  Logger.log('applyBatchSyncMutations Expiring Certs handler error: ' + certErr);
+                }
+              }
             } catch (swapErr) {
               Logger.log('applyBatchSyncMutations handler error: ' + swapErr);
             }
