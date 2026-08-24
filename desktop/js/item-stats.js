@@ -64,6 +64,45 @@ class ItemStatsEngine {
     const sNotes = String(notes || '').toLowerCase().trim();
     const sStatus = String(status || '').toLowerCase().trim();
 
+    // 1. Retired / Failed (End of life only)
+    if (
+      sAssigned === 'failed rubber' ||
+      sAssigned === 'failed' ||
+      sAssigned === 'not repairable' ||
+      sAssigned === 'destroyed' ||
+      sStatus === 'failed rubber' ||
+      sStatus === 'failed' ||
+      sStatus === 'not repairable' ||
+      sStatus === 'destroyed' ||
+      sLoc === 'destroyed'
+    ) {
+      return {
+        key: 'RETIRED',
+        label: 'Retired / Failed',
+        badgeClass: 'badge-retired',
+        color: '#ef4444',
+        icon: '❌'
+      };
+    }
+
+    // 2. Lost / Missing (Location unknown / Needs locating)
+    if (
+      sAssigned === 'lost' ||
+      sLoc === 'lost' ||
+      sStatus === 'lost' ||
+      sAssigned.includes('lost') ||
+      sLoc.includes('lost') ||
+      sStatus.includes('lost')
+    ) {
+      return {
+        key: 'LOST',
+        label: 'Lost (Missing)',
+        badgeClass: 'badge-lost',
+        color: '#eab308',
+        icon: '🔍'
+      };
+    }
+
     // 0. Brand New Purchase (Initial acquisition / On Shelf from new)
     if (
       sAssigned === 'new' ||
@@ -72,9 +111,8 @@ class ItemStatsEngine {
       sAssigned === 'new purchase' ||
       sAssigned === 'new item' ||
       sAssigned.startsWith('new (') ||
-      sNotes.includes('new purchase') ||
-      sNotes.includes('initial purchase') ||
-      sNotes.includes('newly purchased')
+      ((sNotes.includes('new purchase') || sNotes.includes('initial purchase') || sNotes.includes('newly purchased')) &&
+       (!sAssigned || sAssigned === 'on shelf' || sAssigned === 'in stock' || sStatus === 'in stock' || sStatus === 'on shelf'))
     ) {
       return {
         key: 'NEW_PURCHASE',
@@ -86,23 +124,33 @@ class ItemStatsEngine {
       };
     }
 
-    // 1. Retired / Failed (End of life only)
+    // 0A. Made From Failed Pairs (Gloves/Sleeves paired from good singles)
     if (
-      sAssigned === 'failed rubber' ||
-      sAssigned === 'failed' ||
-      sAssigned === 'not repairable' ||
-      sAssigned === 'destroyed' ||
-      sStatus === 'failed rubber' ||
-      sStatus === 'failed' ||
-      sStatus === 'not repairable' ||
-      sStatus === 'destroyed'
+      (sNotes.includes('made from failed pairs') || sNotes.includes('failed pairs') || sNotes.includes('failed pair') || sAssigned.includes('failed pair')) &&
+      (!sAssigned || sAssigned === 'on shelf' || sAssigned === 'in stock' || sStatus === 'in stock' || sStatus === 'on shelf')
     ) {
       return {
-        key: 'RETIRED',
-        label: 'Retired / Failed',
-        badgeClass: 'badge-retired',
-        color: '#ef4444',
-        icon: '❌'
+        key: 'FAILED_PAIR_REPAIR',
+        label: 'Made From Failed Pairs',
+        badgeClass: 'badge-new-purchase',
+        color: '#8b5cf6',
+        icon: '🧤',
+        isPurchaseEntry: true
+      };
+    }
+
+    // 0B. Lost Item Found (Recovered / Located inventory)
+    if (
+      (sNotes.includes('lost item found') || sNotes.includes('item found') || sNotes.includes('found item')) &&
+      (!sAssigned || sAssigned === 'on shelf' || sAssigned === 'in stock' || sStatus === 'in stock' || sStatus === 'on shelf')
+    ) {
+      return {
+        key: 'LOST_FOUND',
+        label: 'Lost Item Found',
+        badgeClass: 'badge-new-purchase',
+        color: '#06b6d4',
+        icon: '🔍',
+        isPurchaseEntry: true
       };
     }
 
@@ -224,7 +272,29 @@ class ItemStatsEngine {
       const dateB = this.parseDate(b['Date Assigned'] || b['Date'] || Object.values(b)[0]);
       const tA = dateA ? dateA.getTime() : 0;
       const tB = dateB ? dateB.getTime() : 0;
-      return tA - tB;
+      if (tA !== tB) return tA - tB;
+
+      // Same-day tie-breaker using canonical lifecycle state sequence
+      const stateA = this.classifyState(a['Assigned To'], a['Location'], a['Notes'], a['Status']);
+      const stateB = this.classifyState(b['Assigned To'], b['Location'], b['Notes'], b['Status']);
+      
+      const statePrecedence = {
+        'NEW_PURCHASE': 1,
+        'SHELF': 2,
+        'PACKED_DELIVERY': 3,
+        'FIELD': 4,
+        'PACKED_TESTING': 5,
+        'TESTING': 6,
+        'LOST': 7,
+        'RETIRED': 8
+      };
+      const rankA = statePrecedence[stateA.key] || 4;
+      const rankB = statePrecedence[stateB.key] || 4;
+      if (rankA !== rankB) return rankA - rankB;
+
+      if (stateA.isPurchaseEntry && !stateB.isPurchaseEntry) return -1;
+      if (!stateA.isPurchaseEntry && stateB.isPurchaseEntry) return 1;
+      return 0;
     });
 
     let firstDate = this.parseDate(sorted[0]['Date Assigned'] || sorted[0]['Date'] || Object.values(sorted[0])[0]) || new Date();
@@ -329,7 +399,8 @@ class ItemStatsEngine {
         notes: notes,
         isCurrent: i === sorted.length - 1 && !isRetired,
         isOriginRecord: i === 0,
-        isPurchaseOrigin: i === 0 && isPurchaseOrigin
+        isPurchaseOrigin: i === 0 && isPurchaseOrigin,
+        rawRow: current
       });
     }
 
@@ -571,23 +642,53 @@ class ItemStatsEngine {
       });
     }
 
-    if (groupRows.length === 0 && foundActive) {
-      const activeDateStr = foundActive['Date Assigned'] || foundActive['Date'] || foundActive['Test Date'] || new Date().toISOString();
-      const synthRow = {
-        'Date Assigned': activeDateStr,
-        'Item #': cleanItemKey,
-        'Size': foundActive['Size'] || '',
-        'Class': foundActive['Class'] || '',
-        'Location': foundActive['Location'] || 'Helena',
-        'Assigned To': foundActive['Assigned To'] || foundActive['Status'] || 'On Shelf',
-        'Status': foundActive['Status'] || 'On Shelf',
-        'Notes': foundActive['Notes'] || 'Current Active Inventory Status'
-      };
-      if (foundActive['Model']) synthRow['Model'] = foundActive['Model'];
-      if (foundActive['KV']) synthRow['KV'] = foundActive['KV'];
-      if (foundActive['Type']) synthRow['Type'] = foundActive['Type'];
-      if (foundActive['Length']) synthRow['Length'] = foundActive['Length'];
-      groupRows.push(synthRow);
+    if (foundActive) {
+      const activeStatus = String(foundActive['Status'] || '').trim().toLowerCase();
+      const activeAssigned = String(foundActive['Assigned To'] || '').trim().toLowerCase();
+      const activeLoc = String(foundActive['Location'] || '').trim().toLowerCase();
+      const activeNotes = String(foundActive['Notes'] || '').trim();
+      const hasOriginNote = activeNotes.toLowerCase().includes('new purchase') ||
+                            activeNotes.toLowerCase().includes('failed pair') ||
+                            activeNotes.toLowerCase().includes('item found') ||
+                            activeNotes.toLowerCase().includes('initial purchase');
+
+      if (groupRows.length === 0) {
+        if (hasOriginNote && (activeStatus === 'failed rubber' || activeStatus === 'destroyed' || activeStatus === 'lost' || activeStatus === 'assigned' || activeStatus === 'in testing' || activeStatus === 'ready for delivery' || activeStatus === 'ready for test')) {
+          // Event 1: Origin Purchase on shelf
+          groupRows.push({
+            'Date Assigned': foundActive['Test Date'] || foundActive['Date Assigned'] || new Date().toISOString(),
+            'Item #': cleanItemKey,
+            'Size': foundActive['Size'] || '',
+            'Class': foundActive['Class'] || '',
+            'Location': 'Helena',
+            'Assigned To': 'On Shelf',
+            'Status': 'In Stock',
+            'Notes': activeNotes
+          });
+          // Event 2: Current Status
+          groupRows.push({
+            'Date Assigned': foundActive['Date Assigned'] || new Date().toISOString(),
+            'Item #': cleanItemKey,
+            'Size': foundActive['Size'] || '',
+            'Class': foundActive['Class'] || '',
+            'Location': foundActive['Location'] || (activeStatus.includes('failed') ? 'Destroyed' : (activeStatus.includes('lost') ? 'Lost' : 'Helena')),
+            'Assigned To': foundActive['Assigned To'] || foundActive['Status'] || 'Failed Rubber',
+            'Status': foundActive['Status'] || 'Failed Rubber',
+            'Notes': (foundActive['Status'] === 'Failed Rubber' ? 'Failed Rubber' : (foundActive['Status'] === 'Lost' ? 'Lost' : ''))
+          });
+        } else {
+          groupRows.push({
+            'Date Assigned': foundActive['Date Assigned'] || foundActive['Test Date'] || new Date().toISOString(),
+            'Item #': cleanItemKey,
+            'Size': foundActive['Size'] || '',
+            'Class': foundActive['Class'] || '',
+            'Location': foundActive['Location'] || 'Helena',
+            'Assigned To': foundActive['Assigned To'] || foundActive['Status'] || 'On Shelf',
+            'Status': foundActive['Status'] || 'On Shelf',
+            'Notes': activeNotes || 'Current Active Inventory Status'
+          });
+        }
+      }
     }
 
     const stats = this.analyzeLifecycle(cleanItemKey, groupRows, foundActive);
@@ -700,7 +801,12 @@ class ItemStatsEngine {
                 ${isPurchaseOrigin ? `<span class="brand-badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 10px; font-weight: 700;">✨ Lifecycle Origin (Purchased New)</span>` : ''}
                 ${isOrigin && !stats.hasKnownPurchaseDate ? `<span class="brand-badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; font-size: 10px;">⏳ Tracking Baseline (Purchase Unknown)</span>` : ''}
               </div>
-              <span style="font-size: 11px; font-weight: 600; color: #60a5fa;">${m.durationFormatted}</span>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 11px; font-weight: 600; color: #60a5fa;">${m.durationFormatted}</span>
+                <button class="btn btn-sm" title="Delete this history record" style="padding: 2px 6px; font-size: 11px; background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 4px; cursor: pointer;" onclick="window.itemStatsEngine.deleteMilestoneRecord('${this.escapeHtml(sheetKey)}', '${this.escapeHtml(cleanItemKey)}', ${reversedMilestones.length - 1 - mIdx})">
+                  🗑️ Delete
+                </button>
+              </div>
             </div>
 
             <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">
@@ -768,6 +874,20 @@ class ItemStatsEngine {
     }
 
     html += `
+        <!-- Action Bar -->
+        <div style="margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+          <div>
+            <button class="btn btn-secondary" style="color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.1); font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;" onclick="window.inventoryManager.promptDeleteItem('${this.escapeHtml(cleanItemKey)}', '${this.escapeHtml(activeSheetKey)}')">
+              🗑️ Delete Item #${this.escapeHtml(cleanItemKey)}
+            </button>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button class="btn btn-secondary" style="font-size: 12px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer;" onclick="window.itemStatsEngine.openImportLogModal('${this.escapeHtml(cleanItemKey)}', '${this.escapeHtml(sheetKey)}')">
+              📥 Import History Log
+            </button>
+            <button class="btn btn-primary" style="font-size: 12px; cursor: pointer;" onclick="window.itemStatsEngine.closeDossierModal()">
+              Done
+            </button>
           </div>
         </div>
 
@@ -1063,6 +1183,63 @@ class ItemStatsEngine {
 
     // Re-render open Dossier modal
     this.openDossierModal(itemNum, sheetKey);
+  }
+
+  /**
+   * Deletes a single history milestone event from a dossier view
+   */
+  async deleteMilestoneRecord(sheetKey, itemKey, milestoneIdx) {
+    const histKey = sheetKey.endsWith('_history') ? sheetKey : `${sheetKey}_history`;
+    const histTable = this.db.getTable(histKey);
+    if (!histTable || !histTable.rows) return;
+
+    const activeKey = histKey.replace('_history', '');
+    const activeTable = this.db.getTable(activeKey);
+    const cleanItemKey = String(itemKey || '').trim();
+
+    const groupRows = histTable.rows.filter(r => {
+      for (const k of Object.keys(r)) {
+        const kl = k.toLowerCase();
+        if (kl.includes('item') || kl.includes('serial') || kl.includes('glove') || kl.includes('sleeve') || kl.includes('blanket') || kl.includes('mack')) {
+          if (String(r[k] || '').trim() === cleanItemKey) return true;
+        }
+      }
+      return false;
+    });
+
+    const foundActive = activeTable && activeTable.rows ? activeTable.rows.find(r => {
+      for (const k of Object.keys(r)) {
+        const kl = k.toLowerCase();
+        if (kl.includes('item') || kl.includes('serial') || kl.includes('glove') || kl.includes('sleeve') || kl.includes('blanket') || kl.includes('mack')) {
+          if (String(r[k] || '').trim() === cleanItemKey) return true;
+        }
+      }
+      return false;
+    }) : null;
+
+    const stats = this.analyzeLifecycle(cleanItemKey, groupRows, foundActive);
+    if (!stats || !stats.milestones || !stats.milestones[milestoneIdx]) return;
+
+    const m = stats.milestones[milestoneIdx];
+    const confirmMsg = `🗑️ Delete History Record?\n\n• Item: #${itemKey}\n• Date: ${m.startDateFormatted}\n• Status / Holder: ${m.assignedTo || m.state.label}\n• Notes: ${m.notes || 'None'}\n\nAre you sure you want to permanently delete this entry?`;
+    
+    if (!confirm(confirmMsg)) return;
+
+    if (m.rawRow) {
+      await this.db.deleteHistoryRow(histKey, m.rawRow);
+    } else {
+      await this.db.deleteHistoryRow(histKey, r => {
+        const d = String(r['Date Assigned'] || r['Date'] || Object.values(r)[0] || '').trim();
+        const a = String(r['Assigned To'] || r['Employee Name'] || '').trim();
+        return d === m.startDateFormatted && a === m.assignedTo;
+      });
+    }
+
+    // Refresh UI
+    this.openDossierModal(itemKey, histKey);
+    if (window.historyNavigator) {
+      window.historyNavigator.renderCurrentHistory();
+    }
   }
 }
 

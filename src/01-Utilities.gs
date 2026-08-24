@@ -1,9 +1,20 @@
+const SPREADSHEET_ID = '1MqqJdQ5rFW8VN-ZlCebJ7dbzEfc0NoX32RXtBdkEJKg';
+
 /**
- * Glove Manager – Utility Functions
- *
- * Common utility functions used throughout the application.
- * Pure functions with no side effects (except logging).
+ * Safely gets active spreadsheet, falling back to openById for headless Web App executions.
  */
+function getActiveSpreadsheetSafe() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (ss) return ss;
+  } catch (e) {}
+  try {
+    return SpreadsheetApp.openById(SPREADSHEET_ID);
+  } catch (e2) {
+    Logger.log('getActiveSpreadsheetSafe error: ' + e2);
+    return null;
+  }
+}
 
 /**
  * Logging utility for consistent logs and error tracking.
@@ -96,8 +107,10 @@ const getSignificantJobNumber = (jobNumber) => {
  */
 const DOCK_TO_CITY_MAP = {
   'livingston dock': 'Livingston',
-  'belgrade dock': 'Bozeman',
-  'belgrade': 'Bozeman',
+  'belgrade dock': 'Belgrade',
+  'belgrade': 'Belgrade',
+  'bozeman dock': 'Belgrade',
+  'bozeman': 'Belgrade',
   'helena trans dock': 'Helena',
   'great falls dock': 'Great Falls',
   'butte dock': 'Butte',
@@ -432,15 +445,30 @@ const getTrainingTrackingColIndices = (headers) => {
  */
 function safeWriteRowToTable(sheet, rowIndex, rowData, headers) {
   if (!headers) {
-    headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    var lastCol = sheet.getLastColumn();
+    headers = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
   }
+  
+  // Ensure sheet has enough rows and columns
+  if (sheet.getMaxRows() < rowIndex) {
+    sheet.insertRowsAfter(sheet.getMaxRows(), rowIndex - sheet.getMaxRows());
+  }
+  if (sheet.getMaxColumns() < rowData.length) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), rowData.length - sheet.getMaxColumns());
+  }
+
   Logger.log('safeWriteRowToTable: Writing row ' + rowIndex + ' with ' + rowData.length + ' columns to sheet "' + sheet.getName() + '"');
   for (var col = 0; col < rowData.length; col++) {
     var val = rowData[col];
     if (val === undefined || val === '') continue;
     var cell = sheet.getRange(rowIndex, col + 1);
     try {
-      cell.setValue(val);
+      if (typeof val === 'string' && /^0\d+$/.test(val)) {
+        try { cell.setNumberFormat('@'); } catch (nfErr) {}
+        cell.setValue("'" + val);
+      } else {
+        cell.setValue(val);
+      }
     } catch (err) {
       var headerName = headers[col] || ('Col ' + (col + 1));
       Logger.log('safeWriteRowToTable warning: Col ' + (col + 1) + ' (' + headerName + ') value "' + val + '" threw: ' + err.toString());

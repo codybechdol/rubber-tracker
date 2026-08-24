@@ -158,6 +158,221 @@ function fixLastDayReasonValidation() {
   );
 }
 
+/**
+ * Organizes and formats the Employees sheet:
+ * 1. Groups and sorts rows by Location (Active physical cities first alphabetically, status locations at bottom).
+ * 2. Within each location, sorts by Job Number (numerical/hierarchical order).
+ * 3. Within each job number, sorts by Classification rank (Foremen/Journeymen first, Apprentices last).
+ * 4. Applies clean visual definitions:
+ *    - Prominent top border separating different locations.
+ *    - Subtle solid top border separating different crews/job numbers within each location.
+ *    - Cleans extra ghost rows and formats dates.
+ *
+ * Called from: Glove Manager → 👥 Employees → 📋 Organize & Format Employees Sheet
+ *
+ * @param {boolean} [silent=false] If true, suppresses UI alert dialogs
+ */
+// eslint-disable-next-line no-unused-vars
+function organizeAndFormatEmployeesSheet(silent) {
+  var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(typeof SHEET_EMPLOYEES !== 'undefined' ? SHEET_EMPLOYEES : 'Employees');
+  if (!sheet) {
+    if (!silent) SpreadsheetApp.getUi().alert('❌ Error', 'Employees sheet not found.', SpreadsheetApp.getUi().ButtonSet.OK);
+    return { success: false, error: 'Employees sheet not found' };
+  }
+
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  if (lastRow <= 1 || lastCol < 1) {
+    if (!silent) SpreadsheetApp.getUi().alert('ℹ️ Empty', 'Employees sheet has no data rows.', SpreadsheetApp.getUi().ButtonSet.OK);
+    return { success: true, count: 0 };
+  }
+
+  var data = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  var headers = data[0].map(function(h) { return String(h || '').trim(); });
+
+  var nameColIdx = -1;
+  var locColIdx = -1;
+  var jobNumColIdx = -1;
+  var classColIdx = -1;
+  var hireDateColIdx = -1;
+  var lastDayColIdx = -1;
+  var lastDayReasonColIdx = -1;
+
+  for (var h = 0; h < headers.length; h++) {
+    var hLower = headers[h].toLowerCase();
+    if (hLower === 'employee name' || hLower === 'name') nameColIdx = h;
+    else if (hLower === 'location') locColIdx = h;
+    else if (hLower === 'job number' || hLower === 'job #') jobNumColIdx = h;
+    else if (hLower === 'job classification' || hLower === 'classification') classColIdx = h;
+    else if (hLower === 'hire date') hireDateColIdx = h;
+    else if (hLower === 'last day') lastDayColIdx = h;
+    else if (hLower === 'last day reason') lastDayReasonColIdx = h;
+  }
+
+  if (nameColIdx === -1) nameColIdx = 0;
+  if (locColIdx === -1) locColIdx = 2;
+  if (jobNumColIdx === -1) jobNumColIdx = 3;
+
+  var statusLocations = ['vacation', 'light duty', 'weeds', 'leave', 'previous employee', 'medical', "worker's comp", 'lost', 'unknown'];
+
+  function isStatusLoc(loc) {
+    if (!loc) return false;
+    var l = String(loc).toLowerCase().trim();
+    for (var s = 0; s < statusLocations.length; s++) {
+      if (l.indexOf(statusLocations[s]) !== -1) return true;
+    }
+    return false;
+  }
+
+  var classPriority = {
+    'SUP': 1, 'GF': 2, 'F': 3, 'GTO F': 4, 'JRY': 5, 'JRY OP': 6, 'WT': 7,
+    'GTO': 8, 'EO 1': 9, 'EO 2': 10, 'AP 7': 11, 'AP 6': 12, 'AP 5': 13,
+    'AP 4': 14, 'AP 3': 15, 'AP 2': 16, 'AP 1': 17, 'ST 7': 11, 'ST 6': 12,
+    'ST 5': 13, 'ST 4': 14, 'ST 3': 15, 'ST 2': 16, 'ST 1': 17
+  };
+
+  function getClassRank(cls) {
+    if (!cls) return 99;
+    var cStr = String(cls).trim().toUpperCase();
+    return classPriority[cStr] || 50;
+  }
+
+  // Filter valid employee rows (ignoring completely blank or 'Active' placeholder ghost rows)
+  var rows = [];
+  for (var r = 1; r < data.length; r++) {
+    var row = data[r];
+    var empName = String(row[nameColIdx] || '').trim();
+    if (!empName || empName.toLowerCase() === 'active') continue;
+    rows.push(row);
+  }
+
+  // Sort rows cleanly
+  rows.sort(function(a, b) {
+    var locA = String(a[locColIdx] || '').trim();
+    var locB = String(b[locColIdx] || '').trim();
+    var isStatA = isStatusLoc(locA);
+    var isStatB = isStatusLoc(locB);
+
+    // 1. Regular physical cities first, status locations at the bottom
+    if (!isStatA && isStatB) return -1;
+    if (isStatA && !isStatB) return 1;
+
+    var locCmp = locA.localeCompare(locB, undefined, { sensitivity: 'base' });
+    if (locCmp !== 0) return locCmp;
+
+    // 2. Job Number within location
+    var jobA = String(a[jobNumColIdx] || '').trim();
+    var jobB = String(b[jobNumColIdx] || '').trim();
+    if (!jobA && jobB) return 1;
+    if (jobA && !jobB) return -1;
+
+    var jobCmp = jobA.localeCompare(jobB, undefined, { numeric: true, sensitivity: 'base' });
+    if (jobCmp !== 0) return jobCmp;
+
+    // 3. Classification rank within crew
+    var clsA = classColIdx !== -1 ? String(a[classColIdx] || '').trim() : '';
+    var clsB = classColIdx !== -1 ? String(b[classColIdx] || '').trim() : '';
+    var rankA = getClassRank(clsA);
+    var rankB = getClassRank(clsB);
+    if (rankA !== rankB) return rankA - rankB;
+
+    // 4. Employee name alphabetical fallback
+    var nameA = String(a[nameColIdx] || '').trim();
+    var nameB = String(b[nameColIdx] || '').trim();
+    return nameA.localeCompare(nameB, undefined, { sensitivity: 'base' });
+  });
+
+  // Re-write sorted rows
+  var totalRows = rows.length;
+  if (totalRows > 0) {
+    // Format dates and dropdowns before writing
+    for (var rIdx = 0; rIdx < rows.length; rIdx++) {
+      if (hireDateColIdx !== -1 && rows[rIdx][hireDateColIdx]) {
+        var hd = rows[rIdx][hireDateColIdx];
+        if (typeof hd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(hd)) {
+          rows[rIdx][hireDateColIdx] = typeof parseDateNoon === 'function' ? parseDateNoon(hd) : new Date(hd);
+        }
+      }
+      if (lastDayColIdx !== -1 && rows[rIdx][lastDayColIdx]) {
+        var ld = rows[rIdx][lastDayColIdx];
+        if (typeof ld === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(ld)) {
+          rows[rIdx][lastDayColIdx] = typeof parseDateNoon === 'function' ? parseDateNoon(ld) : new Date(ld);
+        }
+      }
+      if (lastDayReasonColIdx !== -1 && rows[rIdx][lastDayReasonColIdx]) {
+        var ldr = String(rows[rIdx][lastDayReasonColIdx]).toLowerCase().trim();
+        if (ldr.indexOf('quit') !== -1) rows[rIdx][lastDayReasonColIdx] = 'Quit';
+        else if (ldr.indexOf('fire') !== -1) rows[rIdx][lastDayReasonColIdx] = 'Fired';
+        else if (ldr.indexOf('layoff') !== -1 || ldr.indexOf('laid') !== -1) rows[rIdx][lastDayReasonColIdx] = 'Layoff';
+        else if (ldr.indexOf('resign') !== -1) rows[rIdx][lastDayReasonColIdx] = 'Resigned';
+        else if (ldr) rows[rIdx][lastDayReasonColIdx] = 'Quit';
+      }
+    }
+
+    try {
+      sheet.getRange(2, 1, totalRows, lastCol).setValues(rows);
+    } catch (setErr) {
+      Logger.log('organizeAndFormatEmployeesSheet setValues warning, using safeWriteRowToTable: ' + setErr);
+      for (var sRow = 0; sRow < rows.length; sRow++) {
+        if (typeof safeWriteRowToTable === 'function') {
+          safeWriteRowToTable(sheet, sRow + 2, rows[sRow], headers);
+        }
+      }
+    }
+
+    // Clear any extra ghost rows below totalRows
+    if (lastRow > totalRows + 1) {
+      try {
+        sheet.getRange(totalRows + 2, 1, lastRow - (totalRows + 1), lastCol).clearContent();
+      } catch (cErr) {}
+    }
+
+    // Apply clean visual definitions between locations and crews
+    var dataRange = sheet.getRange(2, 1, totalRows, lastCol);
+    // Reset all internal horizontal borders to default subtle lines
+    dataRange.setBorder(false, false, false, false, null, true, '#e2e8f0', SpreadsheetApp.BorderStyle.SOLID);
+
+    var prevLoc = '';
+    var prevJob = '';
+
+    for (var i = 0; i < rows.length; i++) {
+      var rowNum = i + 2; // 1-based sheet row
+      var curLoc = String(rows[i][locColIdx] || '').trim();
+      var curJob = String(rows[i][jobNumColIdx] || '').trim();
+
+      if (i > 0 && curLoc !== prevLoc) {
+        // Distinct Location boundary: Solid medium top border
+        sheet.getRange(rowNum, 1, 1, lastCol).setBorder(
+          true, null, null, null, null, null,
+          '#1e293b', SpreadsheetApp.BorderStyle.SOLID_MEDIUM
+        );
+      } else if (i > 0 && curJob !== prevJob && curJob !== '') {
+        // Crew boundary within same location: Subtle solid top border
+        sheet.getRange(rowNum, 1, 1, lastCol).setBorder(
+          true, null, null, null, null, null,
+          '#64748b', SpreadsheetApp.BorderStyle.SOLID
+        );
+      }
+
+      prevLoc = curLoc;
+      prevJob = curJob;
+    }
+
+    SpreadsheetApp.flush();
+  }
+
+  if (!silent) {
+    SpreadsheetApp.getUi().alert(
+      '✅ Employees Sheet Organized',
+      'Successfully organized ' + totalRows + ' employees by Location and Job Number with clean visual dividers between locations and crews.',
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+  }
+
+  return { success: true, count: totalRows };
+}
+
 // ============================================================================
 // JOB/CREW TRACKING SHEET
 // ============================================================================

@@ -206,13 +206,75 @@ class HistoryNavigator {
 
     const headers = tableData.headers || [];
     let rows = [...(tableData.rows || [])];
+    const groupCol = this.getGroupCol(headers);
+
+    // Merge active inventory items if not yet recorded in history table
+    const activeSheetKey = this.currentSheetKey.replace('_history', '');
+    const activeTable = this.db.getTable(activeSheetKey);
+    if (activeTable && activeTable.rows && groupCol) {
+      const existingItemNums = new Set(rows.map(r => String(r[groupCol] || '').trim().toLowerCase()));
+      activeTable.rows.forEach(ar => {
+        const itemNum = String(ar['Item #'] || ar['Glove'] || ar['Sleeve'] || ar['Blanket'] || ar['MACK'] || ar['Serial #'] || Object.values(ar)[0] || '').trim();
+        if (itemNum && !existingItemNums.has(itemNum.toLowerCase())) {
+          const arNotes = String(ar['Notes'] || '').trim();
+          const arStatus = String(ar['Status'] || '').trim().toLowerCase();
+          const hasOriginNote = arNotes.toLowerCase().includes('new purchase') || arNotes.toLowerCase().includes('failed pair') || arNotes.toLowerCase().includes('item found');
+          
+          if (hasOriginNote && (arStatus === 'failed rubber' || arStatus === 'destroyed' || arStatus === 'lost' || arStatus === 'assigned' || arStatus === 'in testing' || arStatus === 'ready for delivery' || arStatus === 'ready for test')) {
+            rows.push({
+              'Date Assigned': ar['Test Date'] || ar['Date Assigned'] || new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
+              [groupCol]: itemNum,
+              'Size': ar['Size'] || '',
+              'Class': ar['Class'] || '',
+              'Location': 'Helena',
+              'Assigned To': 'On Shelf',
+              'Notes': arNotes
+            });
+            rows.push({
+              'Date Assigned': ar['Date Assigned'] || new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
+              [groupCol]: itemNum,
+              'Size': ar['Size'] || '',
+              'Class': ar['Class'] || '',
+              'Location': ar['Location'] || 'Destroyed',
+              'Assigned To': ar['Assigned To'] || ar['Status'] || 'Failed Rubber',
+              'Notes': (ar['Status'] === 'Failed Rubber' ? 'Failed Rubber' : '')
+            });
+          } else {
+            rows.push({
+              'Date Assigned': ar['Date Assigned'] || ar['Test Date'] || new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
+              [groupCol]: itemNum,
+              'Size': ar['Size'] || '',
+              'Class': ar['Class'] || '',
+              'Location': ar['Location'] || 'Helena',
+              'Assigned To': ar['Assigned To'] || ar['Status'] || 'On Shelf',
+              'Notes': arNotes || 'Initial Inventory Status'
+            });
+          }
+        }
+      });
+    }
 
     // Search filter
     if (this.searchTerm) {
+      const term = this.searchTerm;
+      const isNumSearch = /^\d+$/.test(term);
+      const searchNum = isNumSearch ? parseInt(term, 10) : null;
+
       rows = rows.filter(row => {
-        return Object.values(row).some(val => 
-          String(val || '').toLowerCase().includes(this.searchTerm)
-        );
+        const itemVal = String(row[groupCol] || row['Item #'] || row['Serial #'] || '').trim();
+        if (isNumSearch) {
+          if (itemVal.toLowerCase() === term) return true;
+          if (/^\d+$/.test(itemVal) && parseInt(itemVal, 10) === searchNum) return true;
+        }
+
+        return Object.entries(row).some(([colKey, val]) => {
+          if (val === null || val === undefined) return false;
+          const s = String(val).toLowerCase().trim();
+          if (isNumSearch && term.length <= 2 && colKey.toLowerCase().includes('date')) {
+            return false; // Don't match year '2026' when typing single digit item # '2'
+          }
+          return s.includes(term);
+        });
       });
     }
 
@@ -247,7 +309,6 @@ class HistoryNavigator {
       return sA.localeCompare(sB, undefined, { numeric: true, sensitivity: 'base' });
     };
 
-    const groupCol = this.getGroupCol(headers);
     const dateCol = headers.find(h => h.toLowerCase().includes('date')) || headers[0];
 
     // Presets bar for History sheets
@@ -294,6 +355,12 @@ class HistoryNavigator {
 
       // Sort item groups
       sortedItemKeys.sort((a, b) => {
+        if (this.searchTerm) {
+          const aExact = a.toLowerCase() === this.searchTerm || (parseInt(a, 10) === parseInt(this.searchTerm, 10));
+          const bExact = b.toLowerCase() === this.searchTerm || (parseInt(b, 10) === parseInt(this.searchTerm, 10));
+          if (aExact && !bExact) return -1;
+          if (!aExact && bExact) return 1;
+        }
         const numA = parseInt(a, 10);
         const numB = parseInt(b, 10);
         if (!isNaN(numA) && !isNaN(numB) && String(numA) === a && String(numB) === b) {
@@ -307,7 +374,23 @@ class HistoryNavigator {
         itemGroups[key].sort((a, b) => {
           const tA = this.parseDateToTimestamp(a[dateCol]);
           const tB = this.parseDateToTimestamp(b[dateCol]);
-          return tB - tA; // Newest entry on top within group
+          if (tB !== tA) return tB - tA; // Newest entry on top within group
+
+          // Same-day tie-breaker (newest on top, oldest at bottom)
+          if (window.itemStatsEngine) {
+            const stateA = window.itemStatsEngine.classifyState(a['Assigned To'], a['Location'], a['Notes'], a['Status']);
+            const stateB = window.itemStatsEngine.classifyState(b['Assigned To'], b['Location'], b['Notes'], b['Status']);
+            
+            // Purchase/Origin entries are the oldest in an item's lifecycle -> place at bottom (+1)
+            if (stateA.isPurchaseEntry && !stateB.isPurchaseEntry) return 1;
+            if (!stateA.isPurchaseEntry && stateB.isPurchaseEntry) return -1;
+
+            // Retired / Failed entries are the latest in an item's lifecycle -> place at top (-1)
+            if (stateA.key === 'RETIRED' && stateB.key !== 'RETIRED') return -1;
+            if (stateA.key !== 'RETIRED' && stateB.key === 'RETIRED') return 1;
+          }
+
+          return 0;
         });
       });
 
@@ -322,7 +405,7 @@ class HistoryNavigator {
         }
         html += `<th onclick="window.historyNavigator.setSort('${this.escapeHtml(h)}')">${this.escapeHtml(h)}<span class="sort-indicator">${sortIndicator}</span></th>`;
       });
-      html += `</tr></thead><tbody>`;
+      html += `<th style="width: 50px; text-align: center;">Actions</th></tr></thead><tbody>`;
 
       sortedItemKeys.forEach((itemKey, groupIdx) => {
         const groupRows = itemGroups[itemKey];
@@ -344,7 +427,7 @@ class HistoryNavigator {
         const topMargin = groupIdx > 0 ? 'border-top: 3px solid #3b82f6;' : '';
         html += `
           <tr class="history-item-group-header" style="background: linear-gradient(90deg, #1e293b 0%, #0f172a 100%); ${topMargin}">
-            <td colspan="${headers.length}" style="padding: 12px 16px; border-bottom: 1px solid rgba(59, 130, 246, 0.3);">
+            <td colspan="${headers.length + 1}" style="padding: 12px 16px; border-bottom: 1px solid rgba(59, 130, 246, 0.3);">
               <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 6px;">
                 <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                   <span style="background-color: #3b82f6; color: #ffffff; font-weight: 700; font-size: 12px; padding: 3px 10px; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.3); display: inline-flex; align-items: center; gap: 5px; cursor: pointer;" title="Click to view complete lifecycle dossier" onclick="window.itemStatsEngine.openDossierModal('${this.escapeHtml(itemKey)}', '${this.currentSheetKey}')">
@@ -425,6 +508,21 @@ class HistoryNavigator {
               html += `<td>${this.escapeHtml(String(val))}</td>`;
             }
           });
+
+          // Action column delete button
+          const itVal = row['Item #'] || row['Item'] || row['Serial #'] || row['Glove'] || row['Sleeve'] || row['Blanket'] || '';
+          const dtVal = row['Date Assigned'] || row['Date'] || Object.values(row)[0] || '';
+          const asVal = row['Assigned To'] || row['Employee Name'] || '';
+          const ntVal = row['Notes'] || row['Note'] || '';
+
+          html += `
+            <td style="text-align: center;">
+              <button class="btn btn-sm" title="Delete this history record" style="padding: 2px 6px; font-size: 11px; background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 4px; cursor: pointer;" onclick="window.historyNavigator.deleteHistoryEntry('${this.currentSheetKey}', '${this.escapeHtml(itVal)}', '${this.escapeHtml(dtVal)}', '${this.escapeHtml(asVal)}', '${this.escapeHtml(ntVal)}')">
+                🗑️
+              </button>
+            </td>
+          `;
+
           html += `</tr>`;
         });
       });
@@ -462,7 +560,7 @@ class HistoryNavigator {
       }
       html += `<th onclick="window.historyNavigator.setSort('${this.escapeHtml(h)}')">${this.escapeHtml(h)}<span class="sort-indicator">${sortIndicator}</span></th>`;
     });
-    html += `</tr></thead><tbody>`;
+    html += `<th style="width: 50px; text-align: center;">Actions</th></tr></thead><tbody>`;
 
     rows.forEach((row, idx) => {
       html += `<tr>`;
@@ -496,11 +594,52 @@ class HistoryNavigator {
           html += `<td>${this.escapeHtml(String(val))}</td>`;
         }
       });
+
+      const itVal = row['Item #'] || row['Item'] || row['Serial #'] || row['Glove'] || row['Sleeve'] || row['Blanket'] || '';
+      const dtVal = row['Date Assigned'] || row['Date'] || Object.values(row)[0] || '';
+      const asVal = row['Assigned To'] || row['Employee Name'] || '';
+      const ntVal = row['Notes'] || row['Note'] || '';
+
+      html += `
+        <td style="text-align: center;">
+          <button class="btn btn-sm" title="Delete this history record" style="padding: 2px 6px; font-size: 11px; background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 4px; cursor: pointer;" onclick="window.historyNavigator.deleteHistoryEntry('${this.currentSheetKey}', '${this.escapeHtml(itVal)}', '${this.escapeHtml(dtVal)}', '${this.escapeHtml(asVal)}', '${this.escapeHtml(ntVal)}')">
+            🗑️
+          </button>
+        </td>
+      `;
+
       html += `</tr>`;
     });
 
     html += `</tbody></table>`;
     container.innerHTML = html;
+  }
+
+  /**
+   * Deletes a single history record and re-renders the workspace
+   */
+  async deleteHistoryEntry(sheetKey, itemNum, dateAssigned, assignedTo, notes) {
+    const table = this.db.getTable(sheetKey);
+    if (!table || !table.rows) return;
+
+    const confirmMsg = `🗑️ Delete History Record?\n\n• Sheet: ${table.name}\n• Item: #${itemNum || '—'}\n• Date: ${dateAssigned || '—'}\n• Holder: ${assignedTo || '—'}\n• Notes: ${notes || 'None'}\n\nAre you sure you want to permanently delete this entry?`;
+    if (!confirm(confirmMsg)) return;
+
+    await this.db.deleteHistoryRow(sheetKey, r => {
+      const rItem = String(r['Item #'] || r['Item'] || r['Serial #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || '').trim();
+      const rDate = String(r['Date Assigned'] || r['Date'] || Object.values(r)[0] || '').trim();
+      const rAssigned = String(r['Assigned To'] || r['Employee Name'] || '').trim();
+      const rNotes = String(r['Notes'] || r['Note'] || '').trim();
+
+      const itemMatch = itemNum ? rItem === itemNum : true;
+      const dateMatch = dateAssigned ? rDate === dateAssigned : true;
+      const assignedMatch = assignedTo ? rAssigned === assignedTo : true;
+      const notesMatch = notes ? rNotes === notes : true;
+
+      return itemMatch && dateMatch && assignedMatch && notesMatch;
+    });
+
+    this.renderCurrentHistory();
   }
 
   escapeHtml(text) {

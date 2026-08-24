@@ -22,6 +22,11 @@ class LocalDatabase {
     }
     if (this.snapshot) {
       this.normalizeSnapshot(this.snapshot);
+      if (window.desktopAPI) {
+        await window.desktopAPI.saveLocalSnapshot(this.snapshot);
+      } else {
+        localStorage.setItem('sa_snapshot', JSON.stringify(this.snapshot));
+      }
     }
     this.notify();
     return this.snapshot;
@@ -92,92 +97,229 @@ class LocalDatabase {
 
   normalizeTableData(table, tableKey) {
     if (!table) return { headers: [], rows: [] };
-    if (table._normalized) return table;
 
-    // Check if headers has title row issue (e.g. only 1 non-empty header while rawGrid has more columns)
-    const validHeaders = (table.headers || []).filter(h => String(h || '').trim() !== '');
-    const isTraining = tableKey === 'training_tracking';
-
-    if ((validHeaders.length <= 2 || isTraining) && table.rawGrid && table.rawGrid.length > 1) {
-      let headerIdx = -1;
-
-      // 1. Check for known header keywords (especially Training Tracking)
-      for (let i = 0; i < Math.min(table.rawGrid.length, 10); i++) {
-        const row = table.rawGrid[i];
-        let matches = 0;
-        for (let c = 0; c < row.length; c++) {
-          const val = String(row[c] || '').toLowerCase().trim();
-          if ([
-            'month', 'scheduled month',
-            'crew #', 'crew', 'job number', 'job #', 'crew number',
-            'training topic', 'topic', 'training',
-            'lead', 'crew lead', 'foreman',
-            'status', 'training status',
-            'attendees', 'crew members',
-            'completion date', 'date completed', 'hours'
-          ].includes(val)) {
-            matches++;
+    // 1. Employee healing & cleaning (ALWAYS RUNS on every call)
+    if (table.rows && tableKey === 'employees') {
+      const nameKey = (table.headers || []).find(h => /^(employee\s*name|name)$/i.test(h.trim())) || (table.headers ? table.headers[0] : null);
+      if (nameKey) {
+        // Remove ghost duplicate 'Active' rows created by prior bug runs
+        table.rows = table.rows.filter(r => {
+          const name = String(r[nameKey] || '').trim();
+          if (name.toLowerCase() === 'active' && !r['Phone Number'] && !r['Email Address'] && !r['MP Email']) {
+            return false;
           }
-        }
-        if (matches >= 2) {
-          headerIdx = i;
-          break;
-        }
-      }
+          return true;
+        });
+        table.rowCount = table.rows.length;
 
-      // 2. If not found by keyword, look for row with the highest number of non-empty cells
-      if (headerIdx === -1 && validHeaders.length <= 1) {
-        let maxCount = 0;
-        let bestIdx = -1;
-        for (let i = 0; i < Math.min(table.rawGrid.length, 6); i++) {
-          const count = table.rawGrid[i].filter(v => String(v || '').trim() !== '').length;
-          if (count > maxCount && count >= 3) {
-            maxCount = count;
-            bestIdx = i;
-          }
-        }
-        if (bestIdx !== -1 && bestIdx !== 0) {
-          headerIdx = bestIdx;
-        }
-      }
-
-      // If a better header row was discovered
-      if (headerIdx !== -1 && headerIdx !== 0) {
-        const rawHeaderRow = table.rawGrid[headerIdx];
-        // Trim trailing empty header columns
-        let lastHeaderCol = rawHeaderRow.length - 1;
-        while (lastHeaderCol >= 0 && String(rawHeaderRow[lastHeaderCol] || '').trim() === '') {
-          lastHeaderCol--;
-        }
-
-        const newHeaders = [];
-        for (let c = 0; c <= lastHeaderCol; c++) {
-          const hName = String(rawHeaderRow[c] || '').trim();
-          newHeaders.push(hName || `Column ${c + 1}`);
-        }
-
-        const newRows = [];
-        for (let r = headerIdx + 1; r < table.rawGrid.length; r++) {
-          const gridRow = table.rawGrid[r];
-          if (!gridRow || !gridRow.some(v => String(v || '').trim() !== '')) continue;
-
-          const rowObj = { _rowIdx: r + 1 };
-          for (let c = 0; c < newHeaders.length; c++) {
-            const h = newHeaders[c];
-            if (h) {
-              rowObj[h] = gridRow[c] !== undefined ? gridRow[c] : '';
+        // Heal and restore real employee names
+        table.rows.forEach(r => {
+          let val = String(r[nameKey] || '').trim();
+          if (val && (/^active\s*\|\s*/i.test(val) || /\blast\s*day\b/i.test(val) || /\bquitting\b/i.test(val))) {
+            let cleaned = val.replace(/^active\s*\|\s*/i, '').trim();
+            const nameMatch = cleaned.match(/^([A-Za-z]+(?:\s+[A-Za-z]+)+?)(?:\s+(?:JL|JRY|F|SUP|GF|AP|\d+\s*ap|EO|WT|GTO|Last\s*day|Quit|off\b))/i);
+            if (nameMatch && nameMatch[1]) {
+              val = nameMatch[1].trim();
             }
           }
-          newRows.push(rowObj);
+          if (!val || val.toLowerCase() === 'active') {
+            const jNum = String(r['Job Number'] || '').trim();
+            const loc = String(r['Location'] || '').trim().toLowerCase();
+            if (jNum === '029-26.04' || (loc === 'belgrade' && (jNum === '029-26.4' || jNum === '029-26.04'))) {
+              val = 'Owen Hunter';
+            } else if (jNum === '049-26.04' || (loc === 'butte' && (jNum === '049-26.4' || jNum === '049-26.04'))) {
+              val = 'Lucas Kovalsky';
+            } else if (jNum === '052-26.03' || (loc === 'melville' && (jNum === '052-26.3' || jNum === '052-26.03'))) {
+              val = 'Caleb Cook';
+            } else if (table.rawGrid && r._rowIdx && table.rawGrid[r._rowIdx - 1]) {
+              const rawVal = String(table.rawGrid[r._rowIdx - 1][0] || '').trim();
+              if (rawVal && rawVal.toLowerCase() !== 'active') {
+                val = rawVal;
+              }
+            }
+          }
+          if (val) {
+            r[nameKey] = val;
+            if (val === 'Owen Hunter' && r['Hire Date'] === '08/22/2026') {
+              r['Hire Date'] = '08/24/2026';
+            }
+            if (table.rawGrid && r._rowIdx && table.rawGrid[r._rowIdx - 1]) {
+              table.rawGrid[r._rowIdx - 1][0] = val;
+              if (val === 'Owen Hunter' && r['Hire Date'] === '08/24/2026') {
+                const hireIdx = (table.headers || []).findIndex(h => /hire\s*date/i.test(h));
+                if (hireIdx !== -1) {
+                  table.rawGrid[r._rowIdx - 1][hireIdx] = '08/24/2026';
+                }
+              }
+            }
+          }
+        });
+
+        // Deduplicate employee rows (e.g. If an employee was added multiple times during test runs)
+        const seenEmployees = new Map();
+        const rowsToRemove = new Set();
+        table.rows.forEach(r => {
+          const empName = String(r[nameKey] || '').trim();
+          if (empName && empName.toLowerCase() !== 'active') {
+            const key = empName.toLowerCase();
+            if (seenEmployees.has(key)) {
+              const existing = seenEmployees.get(key);
+              // If current row has hire date 08/24/2026 and existing has 08/22/2026, keep current and remove existing
+              if (r['Hire Date'] === '08/24/2026' && existing['Hire Date'] !== '08/24/2026') {
+                rowsToRemove.add(existing);
+                seenEmployees.set(key, r);
+              } else {
+                rowsToRemove.add(r);
+              }
+            } else {
+              seenEmployees.set(key, r);
+            }
+          }
+        });
+
+        if (rowsToRemove.size > 0) {
+          table.rows = table.rows.filter(r => !rowsToRemove.has(r));
+          table.rowCount = table.rows.length;
+          if (table.rawGrid) {
+            const rowIndicesToRemove = new Set([...rowsToRemove].map(r => r._rowIdx).filter(Boolean));
+            table.rawGrid = table.rawGrid.filter((gridRow, idx) => !rowIndicesToRemove.has(idx + 1));
+          }
         }
 
-        table.headers = newHeaders;
-        table.rows = newRows;
-        table.rowCount = newRows.length;
+        // Sanitize Last Day Reason to match Google Sheets dropdown validation (Quit, Fired, Layoff, Resigned)
+        table.rows.forEach(r => {
+          const ldr = String(r['Last Day Reason'] || '').trim().toLowerCase();
+          if (ldr) {
+            if (ldr.includes('quit')) r['Last Day Reason'] = 'Quit';
+            else if (ldr.includes('fire')) r['Last Day Reason'] = 'Fired';
+            else if (ldr.includes('layoff') || ldr.includes('laid')) r['Last Day Reason'] = 'Layoff';
+            else if (ldr.includes('resign')) r['Last Day Reason'] = 'Resigned';
+            else r['Last Day Reason'] = 'Quit';
+          }
+        });
       }
     }
 
-    table._normalized = true;
+    // 2. Normalize equipment status and location consistency (Bozeman -> Belgrade)
+    if (table.rows) {
+      const locKey = (table.headers || []).find(h => /^location$/i.test(String(h || '').trim())) || 'Location';
+      const locIdx = (table.headers || []).findIndex(h => /^location$/i.test(String(h || '').trim()));
+
+      table.rows.forEach(r => {
+        if (['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(tableKey)) {
+          if (r['Status'] === 'In Stock') {
+            r['Status'] = 'On Shelf';
+          }
+        }
+
+        const locVal = String(r[locKey] || r['Location'] || '').trim();
+        if (/^bozeman/i.test(locVal)) {
+          const newLoc = locVal.replace(/^bozeman/i, 'Belgrade');
+          if (r[locKey] !== undefined) r[locKey] = newLoc;
+          r['Location'] = newLoc;
+          if (table.rawGrid && r._rowIdx && table.rawGrid[r._rowIdx - 1] && locIdx !== -1) {
+            table.rawGrid[r._rowIdx - 1][locIdx] = newLoc;
+          }
+        }
+      });
+    }
+
+    // 3. Header finding logic (guarded so it only runs if headers need re-indexing)
+    if (!table._headersNormalized) {
+      const validHeaders = (table.headers || []).filter(h => String(h || '').trim() !== '');
+      const isTraining = tableKey === 'training_tracking';
+
+      if ((validHeaders.length <= 2 || isTraining) && table.rawGrid && table.rawGrid.length > 1) {
+        let headerIdx = -1;
+
+        // Check for known header keywords
+        for (let i = 0; i < Math.min(table.rawGrid.length, 10); i++) {
+          const row = table.rawGrid[i];
+          let matches = 0;
+          for (let c = 0; c < row.length; c++) {
+            const val = String(row[c] || '').toLowerCase().trim();
+            if ([
+              'month', 'scheduled month',
+              'crew #', 'crew', 'job number', 'job #', 'crew number',
+              'training topic', 'topic', 'training',
+              'lead', 'crew lead', 'foreman',
+              'status', 'training status',
+              'attendees', 'crew members',
+              'completion date', 'date completed', 'hours'
+            ].includes(val)) {
+              matches++;
+            }
+          }
+          if (matches >= 2) {
+            headerIdx = i;
+            break;
+          }
+        }
+
+        // If not found by keyword, look for row with highest non-empty cells
+        if (headerIdx === -1 && validHeaders.length <= 1) {
+          let maxCount = 0;
+          let bestIdx = -1;
+          for (let i = 0; i < Math.min(table.rawGrid.length, 6); i++) {
+            const count = table.rawGrid[i].filter(v => String(v || '').trim() !== '').length;
+            if (count > maxCount && count >= 3) {
+              maxCount = count;
+              bestIdx = i;
+            }
+          }
+          if (bestIdx !== -1 && bestIdx !== 0) {
+            headerIdx = bestIdx;
+          }
+        }
+
+        if (headerIdx !== -1 && headerIdx !== 0) {
+          const rawHeaderRow = table.rawGrid[headerIdx];
+          let lastHeaderCol = rawHeaderRow.length - 1;
+          while (lastHeaderCol >= 0 && String(rawHeaderRow[lastHeaderCol] || '').trim() === '') {
+            lastHeaderCol--;
+          }
+
+          const newHeaders = [];
+          for (let c = 0; c <= lastHeaderCol; c++) {
+            const hName = String(rawHeaderRow[c] || '').trim();
+            newHeaders.push(hName || `Column ${c + 1}`);
+          }
+
+          const newRows = [];
+          for (let r = headerIdx + 1; r < table.rawGrid.length; r++) {
+            const gridRow = table.rawGrid[r];
+            if (!gridRow || !gridRow.some(v => String(v || '').trim() !== '')) continue;
+
+            const rowObj = { _rowIdx: r + 1 };
+            for (let c = 0; c < newHeaders.length; c++) {
+              const h = newHeaders[c];
+              if (h) {
+                rowObj[h] = gridRow[c] !== undefined ? gridRow[c] : '';
+              }
+            }
+            newRows.push(rowObj);
+          }
+
+          table.headers = newHeaders;
+          table.rows = newRows;
+          table.rowCount = newRows.length;
+        }
+      }
+      table._headersNormalized = true;
+    }
+
+    if (table.rows && table.headers && (tableKey === 'employees' || tableKey === 'job_tracking')) {
+      table.rawGrid = [
+        table.headers,
+        ...table.rows.map((r, i) => {
+          r._rowIdx = i + 2;
+          return table.headers.map(h => r[h] !== undefined ? r[h] : '');
+        })
+      ];
+      table.rowCount = table.rows.length;
+      table.maxRows = table.rawGrid.length;
+    }
+
     return table;
   }
 
@@ -187,6 +329,355 @@ class LocalDatabase {
 
   getPendingCount() {
     return this.outbox.length;
+  }
+
+  async queueMutation(mutation) {
+    return await this.addMutation(mutation);
+  }
+
+  async addRow(tableKey, rowObj) {
+    if (!this.snapshot) this.snapshot = { tables: {}, configs: {} };
+    if (!this.snapshot.tables) this.snapshot.tables = {};
+
+    let table = this.snapshot.tables[tableKey];
+    if (!table) {
+      const sheetNameMap = {
+        gloves: 'Gloves',
+        sleeves: 'Sleeves',
+        blankets: 'Blankets',
+        macks: 'MACKs',
+        hv_testers: 'HV Testers',
+        phasing_sets: 'Phasing Sets',
+        aed: 'AED',
+        grounds: 'Grounds',
+        hot_sticks: 'Hot Sticks',
+        employees: 'Employees',
+        job_tracking: 'Job Tracking'
+      };
+      const name = sheetNameMap[tableKey] || tableKey;
+      table = { name: name, headers: Object.keys(rowObj), rows: [], rawGrid: [Object.keys(rowObj)], rowCount: 0, _normalized: true };
+      this.snapshot.tables[tableKey] = table;
+    }
+
+    if (!table.rows) table.rows = [];
+    if (!table.rawGrid) table.rawGrid = [table.headers || Object.keys(rowObj)];
+
+    // Ensure headers exist
+    if (!table.headers || table.headers.length === 0) {
+      table.headers = Object.keys(rowObj);
+      table.rawGrid[0] = table.headers;
+    }
+
+    // Add to rows array (insert at the beginning so newly added items appear at the top)
+    table.rows.unshift({ ...rowObj });
+    table.rowCount = table.rows.length;
+
+    // Add to rawGrid array right after header row (index 1)
+    const gridRow = table.headers.map(h => rowObj[h] !== undefined ? rowObj[h] : '');
+    table.rawGrid.splice(1, 0, gridRow);
+    table.maxRows = table.rawGrid.length;
+
+    // Queue ADD_ROW mutation for Google Sheets sync
+    await this.addMutation({
+      action: 'ADD_ROW',
+      sheetName: table.name,
+      tableKey: tableKey,
+      rowData: rowObj
+    });
+
+    // Auto-record initial History entry if this is an inventory sheet
+    await this.recordItemHistoryEvent(table.name, rowObj, rowObj['Notes'] || 'New Purchase');
+
+    return rowObj;
+  }
+
+  /**
+   * Records an item state transition event to the corresponding History table and syncs to Google Sheets
+   */
+  async recordItemHistoryEvent(sheetName, itemRow, reasonNote = '') {
+    if (!itemRow || !this.snapshot || !this.snapshot.tables) return;
+    const sNameLower = String(sheetName || '').toLowerCase().trim();
+    const invMap = {
+      'gloves': 'gloves_history',
+      'sleeves': 'sleeves_history',
+      'blankets': 'blankets_history',
+      'macks': 'macks_history',
+      'hv testers': 'hv_testers_history',
+      'hv_testers': 'hv_testers_history',
+      'phasing sets': 'phasing_sets_history',
+      'phasing_sets': 'phasing_sets_history',
+      'aed': 'aed_history',
+      'grounds': 'grounds_history',
+      'hot sticks': 'hot_sticks_history',
+      'hot_sticks': 'hot_sticks_history'
+    };
+    const histTableKey = invMap[sNameLower];
+    if (!histTableKey) return;
+
+    const histSheetName = sheetName.includes('History') ? sheetName : `${sheetName} History`;
+    let histTable = this.snapshot.tables[histTableKey];
+    if (!histTable) {
+      histTable = { name: histSheetName, headers: ['Date Assigned', 'Item #', 'Size', 'Class', 'Location', 'Assigned To', 'Notes'], rows: [], rawGrid: [], rowCount: 0, _normalized: true };
+      this.snapshot.tables[histTableKey] = histTable;
+    }
+
+    const todayStr = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+    const itemNum = String(itemRow['Item #'] || itemRow['Glove'] || itemRow['Sleeve'] || itemRow['Blanket'] || itemRow['MACK'] || itemRow['Serial #'] || Object.values(itemRow)[0] || '').trim();
+    if (!itemNum) return;
+
+    const assignedTo = String(itemRow['Assigned To'] || itemRow['Status'] || 'On Shelf').trim();
+    const location = String(itemRow['Location'] || 'Helena').trim();
+    const notes = reasonNote || itemRow['Notes'] || '';
+
+    // Check if the latest history entry for this item already has the identical assignedTo and location
+    if (histTable.rows && histTable.rows.length > 0) {
+      const isNum = /^\d+$/.test(itemNum);
+      const parsedNum = isNum ? parseInt(itemNum, 10) : null;
+      const latest = histTable.rows.find(r => {
+        const rNum = String(r['Item #'] || r['Serial #'] || Object.values(r)[1] || Object.values(r)[0] || '').trim();
+        if (rNum.toLowerCase() === itemNum.toLowerCase()) return true;
+        if (isNum && /^\d+$/.test(rNum) && parseInt(rNum, 10) === parsedNum) return true;
+        return false;
+      });
+      if (latest) {
+        const lAssigned = String(latest['Assigned To'] || latest['Status'] || '').trim().toLowerCase();
+        const lLoc = String(latest['Location'] || '').trim().toLowerCase();
+        if (lAssigned === assignedTo.toLowerCase() && lLoc === location.toLowerCase()) {
+          return; // Already recorded
+        }
+      }
+    }
+
+    const histRow = {
+      'Date Assigned': itemRow['Date Assigned'] || todayStr,
+      'Item #': itemNum,
+      'Location': location,
+      'Assigned To': assignedTo,
+      'Notes': notes
+    };
+    if (itemRow['Size']) histRow['Size'] = itemRow['Size'];
+    if (itemRow['Class']) histRow['Class'] = itemRow['Class'];
+    if (itemRow['Type']) histRow['Type'] = itemRow['Type'];
+    if (itemRow['KV']) histRow['KV'] = itemRow['KV'];
+    if (itemRow['Model']) histRow['Model'] = itemRow['Model'];
+    if (itemRow['Length']) histRow['Length'] = itemRow['Length'];
+    if (itemRow['Serial #'] && !histRow['Serial #']) histRow['Serial #'] = itemRow['Serial #'];
+
+    if (!histTable.rows) histTable.rows = [];
+    histTable.rows.unshift({ ...histRow });
+    histTable.rowCount = histTable.rows.length;
+
+    if (histTable.rawGrid && histTable.headers) {
+      const gridRow = histTable.headers.map(h => histRow[h] !== undefined ? histRow[h] : '');
+      histTable.rawGrid.splice(1, 0, gridRow);
+      histTable.maxRows = histTable.rawGrid.length;
+    }
+
+    // Queue mutation for Google Sheets sync
+    await this.addMutation({
+      action: 'ADD_ROW',
+      sheetName: histSheetName,
+      tableKey: histTableKey,
+      rowData: histRow
+    });
+  }
+
+  /**
+   * Deletes an item row from local table and queues DELETE_ROW mutation
+   */
+  async deleteRow(tableKey, itemIdentifier) {
+    const table = this.getTable(tableKey);
+    if (!table || !table.rows) return false;
+
+    const cleanId = String(itemIdentifier).trim().toLowerCase();
+    const rowIdx = table.rows.findIndex(r => {
+      const firstKey = Object.keys(r)[0] || 'Item #';
+      const num = String(r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['Serial #'] || r['ESL ID'] || r[firstKey] || '').trim().toLowerCase();
+      const esl = String(r['ESL ID'] || '').trim().toLowerCase();
+      return num === cleanId || esl === cleanId;
+    });
+
+    if (rowIdx === -1) return false;
+
+    const removedRow = table.rows.splice(rowIdx, 1)[0];
+    table.rowCount = table.rows.length;
+
+    // Remove from rawGrid as well (offset +1 for header)
+    if (table.rawGrid) {
+      const gridIdx = table.rawGrid.findIndex((gr, idx) => {
+        if (idx === 0) return false; // Header
+        return gr.some(cell => String(cell).trim().toLowerCase() === cleanId);
+      });
+      if (gridIdx > 0) {
+        table.rawGrid.splice(gridIdx, 1);
+        table.maxRows = table.rawGrid.length;
+      }
+    }
+
+    // Queue DELETE_ROW mutation for active inventory table
+    await this.addMutation({
+      action: 'DELETE_ROW',
+      sheetName: table.name,
+      tableKey: tableKey,
+      itemIdentifier: itemIdentifier,
+      rowData: removedRow
+    });
+
+    // Cascade delete all history records for this item from the corresponding history table
+    const invMap = {
+      'gloves': 'gloves_history',
+      'sleeves': 'sleeves_history',
+      'blankets': 'blankets_history',
+      'macks': 'macks_history',
+      'hv_testers': 'hv_testers_history',
+      'phasing_sets': 'phasing_sets_history',
+      'aed': 'aed_history',
+      'grounds': 'grounds_history',
+      'hot_sticks': 'hot_sticks_history'
+    };
+    const histKey = invMap[tableKey] || (tableKey.endsWith('_history') ? null : `${tableKey}_history`);
+    if (histKey) {
+      const histTable = this.getTable(histKey);
+      if (histTable && histTable.rows) {
+        const matchingHistRows = histTable.rows.filter(r => {
+          const num = String(r['Item #'] || r['Item'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['Serial #'] || r['ESL ID'] || Object.values(r)[1] || Object.values(r)[0] || '').trim().toLowerCase();
+          return num === cleanId;
+        });
+
+        if (matchingHistRows.length > 0) {
+          for (const hRow of matchingHistRows) {
+            const hIdx = histTable.rows.indexOf(hRow);
+            if (hIdx !== -1) {
+              histTable.rows.splice(hIdx, 1);
+            }
+          }
+          histTable.rowCount = histTable.rows.length;
+
+          if (histTable.rawGrid) {
+            histTable.rawGrid = histTable.rawGrid.filter((gr, idx) => {
+              if (idx === 0) return true; // Keep header
+              const cellVal = String(gr[1] || gr[0] || '').trim().toLowerCase();
+              return cellVal !== cleanId;
+            });
+            histTable.maxRows = histTable.rawGrid.length;
+          }
+
+          // Queue DELETE_ROW mutation for the history table
+          await this.addMutation({
+            action: 'DELETE_ROW',
+            sheetName: histTable.name,
+            tableKey: histKey,
+            itemIdentifier: itemIdentifier
+          });
+        }
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * Deletes a single history record from a history table and queues DELETE_ROW mutation
+   */
+  async deleteHistoryRow(historyTableKey, matchFnOrRowObj) {
+    const table = this.getTable(historyTableKey);
+    if (!table || !table.rows) return false;
+
+    let rowIdx = -1;
+    if (typeof matchFnOrRowObj === 'function') {
+      rowIdx = table.rows.findIndex(matchFnOrRowObj);
+    } else if (typeof matchFnOrRowObj === 'object') {
+      rowIdx = table.rows.indexOf(matchFnOrRowObj);
+      if (rowIdx === -1) {
+        const obj = matchFnOrRowObj;
+        const oDate = String(obj['Date Assigned'] || obj['Date'] || obj['Action Date'] || '').trim();
+        const oItem = String(obj['Item #'] || obj['Item'] || obj['Serial #'] || obj['Glove'] || obj['Sleeve'] || obj['Blanket'] || '').trim();
+        const oAssigned = String(obj['Assigned To'] || obj['Employee Name'] || obj['Employee'] || '').trim();
+        const oNotes = String(obj['Notes'] || obj['Note'] || '').trim();
+
+        rowIdx = table.rows.findIndex(r => {
+          const rDate = String(r['Date Assigned'] || r['Date'] || r['Action Date'] || '').trim();
+          const rItem = String(r['Item #'] || r['Item'] || r['Serial #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || '').trim();
+          const rAssigned = String(r['Assigned To'] || r['Employee Name'] || r['Employee'] || '').trim();
+          const rNotes = String(r['Notes'] || r['Note'] || '').trim();
+          return rDate === oDate && rItem === oItem && rAssigned === oAssigned && (oNotes ? rNotes === oNotes : true);
+        });
+      }
+    }
+
+    if (rowIdx === -1) return false;
+
+    const removedRow = table.rows.splice(rowIdx, 1)[0];
+    table.rowCount = table.rows.length;
+
+    // Remove from rawGrid as well
+    if (table.rawGrid) {
+      const oDate = String(removedRow['Date Assigned'] || removedRow['Date'] || '').trim();
+      const oItem = String(removedRow['Item #'] || removedRow['Item'] || removedRow['Serial #'] || '').trim();
+      const oAssigned = String(removedRow['Assigned To'] || '').trim();
+
+      const gridIdx = table.rawGrid.findIndex((gr, idx) => {
+        if (idx === 0) return false;
+        const grDate = String(gr[0] || '').trim();
+        const grItem = String(gr[1] || '').trim();
+        const grAssigned = String(gr[5] || gr[4] || gr[3] || '').trim();
+        return (oDate ? grDate === oDate : true) && (oItem ? grItem === oItem : true);
+      });
+      if (gridIdx > 0) {
+        table.rawGrid.splice(gridIdx, 1);
+        table.maxRows = table.rawGrid.length;
+      }
+    }
+
+    // Queue DELETE_ROW mutation
+    await this.addMutation({
+      action: 'DELETE_ROW',
+      sheetName: table.name,
+      tableKey: historyTableKey,
+      rowData: removedRow
+    });
+
+    return true;
+  }
+
+  async replaceSwapTable(tableKey, rawGrid, headers, rows) {
+    if (!this.snapshot) this.snapshot = { tables: {}, configs: {} };
+    if (!this.snapshot.tables) this.snapshot.tables = {};
+
+    const sheetNameMap = {
+      glove_swaps: 'Glove Swaps',
+      sleeve_swaps: 'Sleeve Swaps',
+      blanket_swaps: 'Blanket Swaps',
+      mack_swaps: 'MACK Swaps',
+      hv_tester_swaps: 'HV Tester Swaps',
+      phasing_set_swaps: 'Phasing Set Swaps',
+      aed_swaps: 'AED Swaps',
+      ground_swaps: 'Ground Swaps',
+      hot_stick_swaps: 'Hot Stick Swaps'
+    };
+    const name = sheetNameMap[tableKey] || tableKey;
+
+    this.snapshot.tables[tableKey] = {
+      name: name,
+      headers: headers,
+      rawGrid: rawGrid,
+      rows: rows,
+      rowCount: rows.length,
+      maxRows: rawGrid.length,
+      maxCols: headers.length,
+      _normalized: true
+    };
+
+    // Queue REPLACE_SWAP_TABLE mutation
+    await this.addMutation({
+      action: 'REPLACE_SWAP_TABLE',
+      sheetName: name,
+      tableKey: tableKey,
+      rawGrid: rawGrid
+    });
+
+    this.notify();
+    return this.snapshot.tables[tableKey];
   }
 
   async addMutation(mutation) {
@@ -208,7 +699,7 @@ class LocalDatabase {
       if (existingIdx !== -1) {
         this.outbox[existingIdx].value = mutation.value;
         this.outbox[existingIdx].timestamp = new Date().toISOString();
-        this.applyLocalMutation(mutation);
+        await this.applyLocalMutation(mutation);
         if (window.desktopAPI) {
           await window.desktopAPI.saveLocalOutbox(this.outbox);
           await window.desktopAPI.saveLocalSnapshot(this.snapshot);
@@ -230,7 +721,7 @@ class LocalDatabase {
     this.outbox.push(mutRecord);
 
     // Apply mutation optimistically to local in-memory snapshot
-    this.applyLocalMutation(mutation);
+    await this.applyLocalMutation(mutation);
 
     if (window.desktopAPI) {
       await window.desktopAPI.saveLocalOutbox(this.outbox);
@@ -244,7 +735,7 @@ class LocalDatabase {
     return mutRecord;
   }
 
-  applyLocalMutation(mut) {
+  async applyLocalMutation(mut) {
     if (!this.snapshot || !this.snapshot.tables) return;
 
     const addMonths = (dateStr, months) => {
@@ -351,7 +842,7 @@ class LocalDatabase {
             } else {
               // STANDARD SWAP OR CLASS RECLAIM
               if (colStat !== -1) {
-                table.rawGrid[rowIdx][colStat] = isChecked ? 'Ready For Delivery 🚚' : 'In Stock';
+                table.rawGrid[rowIdx][colStat] = isChecked ? 'Ready For Delivery 🚚' : 'In Stock ✅';
               }
 
               if (invTable && invTable.rows && pickItemNum && pickItemNum !== '—' && pickItemNum !== '-') {
@@ -364,14 +855,14 @@ class LocalDatabase {
                 });
 
                 if (invRow) {
-                  if (isChecked) {
-                    const now = new Date();
-                    const mm = String(now.getMonth() + 1).padStart(2, '0');
-                    const dd = String(now.getDate()).padStart(2, '0');
-                    const yyyy = now.getFullYear();
-                    const todayFormatted = `${mm}/${dd}/${yyyy}`;
-                    const todayIso = `${yyyy}-${mm}-${dd}`;
+                  const now = new Date();
+                  const mm = String(now.getMonth() + 1).padStart(2, '0');
+                  const dd = String(now.getDate()).padStart(2, '0');
+                  const yyyy = now.getFullYear();
+                  const todayFormatted = `${mm}/${dd}/${yyyy}`;
+                  const todayIso = `${yyyy}-${mm}-${dd}`;
 
+                  if (isChecked) {
                     invRow['Location'] = "Cody's Truck";
                     invRow['Status'] = 'Ready For Delivery';
                     invRow['Assigned To'] = 'Packed For Delivery';
@@ -385,11 +876,16 @@ class LocalDatabase {
                   } else {
                     // Stage 5 Revert
                     invRow['Location'] = 'Helena';
-                    invRow['Status'] = 'In Stock';
+                    invRow['Status'] = 'On Shelf';
                     invRow['Assigned To'] = 'On Shelf';
-                    invRow['Date Assigned'] = '';
                     invRow['Picked For'] = '';
-                    invRow['Change Out Date'] = '';
+
+                    const origDateAssigned = invRow['Date Assigned'] || invRow['Test Date'] || todayFormatted;
+                    invRow['Date Assigned'] = origDateAssigned;
+
+                    let months = 12;
+                    if (sheetNameLower.includes('hot_stick') || sheetNameLower.includes('hot stick')) months = 24;
+                    invRow['Change Out Date'] = addMonths(invRow['Test Date'] || origDateAssigned, months);
                   }
                 }
               }
@@ -465,7 +961,9 @@ class LocalDatabase {
                       pickRow['Picked For'] = ''; // Clear Picked For note!
 
                       let months = 12;
-                      if (sheetNameLower.includes('glove')) months = (empLoc.toLowerCase() === 'helena' ? 3 : 6);
+                      if (sheetNameLower.includes('glove')) {
+                        months = empLoc.toLowerCase().includes('northern lights') ? 6 : 3;
+                      }
                       pickRow['Change Out Date'] = addMonths(String(mut.value), months);
                     }
                   }
@@ -575,8 +1073,11 @@ class LocalDatabase {
               const dateAssigned = row['Date Assigned'] || row['Calibration Date'] || row['Test Date'];
               if (dateAssigned) {
                 let months = 12;
-                if (sheetNameLower.includes('glove')) months = (newLocation.toLowerCase() === 'helena' ? 3 : 6);
-                else if (sheetNameLower.includes('hot_stick') || sheetNameLower.includes('hot stick')) months = 24;
+                if (sheetNameLower.includes('glove')) {
+                  months = newLocation.toLowerCase().includes('northern lights') ? 6 : 3;
+                } else if (sheetNameLower.includes('hot_stick') || sheetNameLower.includes('hot stick')) {
+                  months = 24;
+                }
                 row['Change Out Date'] = addMonths(dateAssigned, months);
               }
             }
@@ -662,10 +1163,22 @@ class LocalDatabase {
             if (dateAssigned) {
               const loc = String(row['Location'] || '').toLowerCase();
               let months = 12;
-              if (sheetNameLower.includes('glove')) months = (loc === 'helena' ? 3 : 6);
-              else if (sheetNameLower.includes('hot_stick') || sheetNameLower.includes('hot stick')) months = 24;
+              if (sheetNameLower.includes('glove')) {
+                months = loc.includes('northern lights') ? 6 : 3;
+              } else if (sheetNameLower.includes('hot_stick') || sheetNameLower.includes('hot stick')) {
+                months = 24;
+              }
               row['Change Out Date'] = addMonths(dateAssigned, months);
             }
+          }
+
+          // D. If status, location, or assigned to changed on an inventory sheet, auto-record history transition
+          if (hLower === 'status' || hLower === 'item status' || hLower === 'assigned to' || hLower.includes('assigned to') || hLower === 'location') {
+            const reason = (row['Status'] === 'Failed Rubber' || row['Assigned To'] === 'Failed Rubber') ? 'Failed Rubber' :
+                           (row['Status'] === 'Lost' || row['Assigned To'] === 'Lost') ? 'Lost' :
+                           (row['Status'] === 'In Testing' || row['Assigned To'] === 'In Testing') ? 'In Testing' :
+                           row['Notes'] || '';
+            await this.recordItemHistoryEvent(table.name, row, reason);
           }
         }
       }
@@ -735,6 +1248,59 @@ class LocalDatabase {
                 taskTable.rawGrid[r][statusColIdx] = mut.status || 'Complete';
                 break;
               }
+            }
+          }
+        }
+      }
+    }
+
+    // Add Row mutation replay
+    if (mut.action === 'ADD_ROW' && mut.rowData) {
+      const table = Object.values(this.snapshot.tables).find(t => t.name === mut.sheetName) || this.snapshot.tables[mut.tableKey];
+      if (table) {
+        if (!table.rows) table.rows = [];
+        if (!table.rawGrid) table.rawGrid = [table.headers || Object.keys(mut.rowData)];
+        
+        // Find item identifier
+        const firstKey = Object.keys(mut.rowData)[0] || 'Item #';
+        const itemIdentifier = String(mut.rowData['Item #'] || mut.rowData['Glove'] || mut.rowData['Sleeve'] || mut.rowData['Blanket'] || mut.rowData['Serial #'] || mut.rowData['ESL ID'] || mut.rowData[firstKey] || '').trim();
+        
+        const exists = table.rows.some(r => {
+          const rKey = String(r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['Serial #'] || r['ESL ID'] || Object.values(r)[0] || '').trim();
+          return rKey === itemIdentifier;
+        });
+
+        if (!exists) {
+          table.rows.unshift({ ...mut.rowData });
+          table.rowCount = table.rows.length;
+          const gridRow = table.headers.map(h => mut.rowData[h] !== undefined ? mut.rowData[h] : '');
+          table.rawGrid.splice(1, 0, gridRow);
+          table.maxRows = table.rawGrid.length;
+        }
+      }
+    }
+
+    // Delete Row mutation replay
+    if (mut.action === 'DELETE_ROW' && mut.itemIdentifier) {
+      const table = Object.values(this.snapshot.tables).find(t => t.name === mut.sheetName) || this.snapshot.tables[mut.tableKey];
+      if (table) {
+        const idLower = String(mut.itemIdentifier).trim().toLowerCase();
+        if (table.rows) {
+          const rowIdx = table.rows.findIndex(r => {
+            return Object.values(r).some(val => String(val || '').trim().toLowerCase() === idLower);
+          });
+          if (rowIdx !== -1) {
+            table.rows.splice(rowIdx, 1);
+            table.rowCount = table.rows.length;
+          }
+        }
+        if (table.rawGrid) {
+          for (let r = 1; r < table.rawGrid.length; r++) {
+            const match = table.rawGrid[r].some(val => String(val || '').trim().toLowerCase() === idLower);
+            if (match) {
+              table.rawGrid.splice(r, 1);
+              table.maxRows = table.rawGrid.length;
+              break;
             }
           }
         }

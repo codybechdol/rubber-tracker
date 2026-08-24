@@ -804,8 +804,10 @@
     // These are FALLBACK mappings for jobs not yet in Job Tracking.
     // Job Tracking is the primary source of location data (looked up by job number).
     var locationMappings = {
-      'Belgrade Dock': 'Bozeman',
-      'Belgrade': 'Bozeman',
+      'Belgrade Dock': 'Belgrade',
+      'Belgrade': 'Belgrade',
+      'Bozeman Dock': 'Belgrade',
+      'Bozeman': 'Belgrade',
       'Big Sky Dock': 'Big Sky',
       'Big Sky': 'Big Sky',
       'Helena Trans Dock': 'Helena',
@@ -1332,11 +1334,18 @@
         return { type: 'Secondary', label: 'Weekend', badgeColor: 'bg-warning text-dark' };
       }
       // Partial week patterns
+      if (text.match(/\b(Mon\s*Only|Monday\s*Only)\b/i)) {
+        return { type: 'Split', label: 'Mon Only', badgeColor: 'bg-warning text-dark' };
+      }
       if (text.match(/Mon-Wed|Monday.*Wednesday/i)) {
         return { type: 'Split', label: 'Mon-Wed', badgeColor: 'bg-info' };
       }
       if (text.match(/Thu-Fri|Thursday.*Friday/i)) {
         return { type: 'Split', label: 'Thu-Fri', badgeColor: 'bg-info' };
+      }
+      // 5 10's (Monday-Friday 5 10-hour days)
+      if (text.match(/5\s*10'?s/i) || text.match(/(M-F|Mon-Fri|Monday.*Friday).*(5\s*10|10\s*hr)/i)) {
+        return { type: 'Primary', label: 'Mon-Fri (5 10s)', badgeColor: 'bg-success' };
       }
       // Standard workweek patterns (4 10's, 5 8's) without weekend mention
       if (text.match(/[45]\s*(10|8)'?s/i) && !text.match(/Fri\s*&\s*Sat|Sat\s*&\s*Sun|weekend/i)) {
@@ -6692,8 +6701,10 @@
      */
     function getDefaultLocationMappings() {
       return {
-        'Belgrade Dock': 'Bozeman',
-        'Belgrade': 'Bozeman',
+        'Belgrade Dock': 'Belgrade',
+        'Belgrade': 'Belgrade',
+        'Bozeman Dock': 'Belgrade',
+        'Bozeman': 'Belgrade',
         'Big Sky Dock': 'Big Sky',
         'Big Sky': 'Big Sky',
         'Helena Trans Dock': 'Helena',

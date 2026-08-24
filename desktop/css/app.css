@@ -213,6 +213,13 @@ body {
   display: flex;
 }
 
+#crew-import-view {
+  overflow-y: auto !important;
+  overflow-x: hidden;
+  height: 100%;
+  flex: 1;
+}
+
 /* Sheet Grid View */
 .sheet-toolbar {
   padding: 12px 20px;

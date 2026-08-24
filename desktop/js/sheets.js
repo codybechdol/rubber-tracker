@@ -78,6 +78,13 @@ class SheetNavigator {
     });
   }
 
+  openCrewImport() {
+    const navItem = document.querySelector('.nav-item[data-view="crew-import-view"]');
+    if (navItem) {
+      navItem.click();
+    }
+  }
+
   renderActiveView() {
     const activeView = document.querySelector('.view-container.active');
     if (activeView) {
@@ -377,6 +384,35 @@ class SheetNavigator {
     const sheetMeta = this.sheetList.find(s => s.key === this.currentSheetKey);
     if (title && sheetMeta) title.textContent = sheetMeta.label;
 
+    // Toggle Action Buttons in Toolbar
+    const btnNewItem = document.getElementById('btn-new-item');
+    const btnGenSwaps = document.getElementById('btn-generate-swaps');
+    const btnFixDates = document.getElementById('btn-fix-changeout-dates');
+    const btnImportCrews = document.getElementById('btn-import-crews');
+
+    const isInventorySheet = !sheetMeta?.isSwap && sheetMeta?.key !== 'employees' && sheetMeta?.key !== 'job_tracking';
+    const isSwapSheet = Boolean(sheetMeta?.isSwap);
+    const isEmployeeOrJobSheet = sheetMeta?.key === 'employees' || sheetMeta?.key === 'job_tracking';
+
+    if (btnImportCrews) {
+      btnImportCrews.style.display = isEmployeeOrJobSheet ? 'inline-block' : 'none';
+    }
+
+    if (btnNewItem) {
+      btnNewItem.style.display = isInventorySheet ? 'inline-block' : 'none';
+      if (isInventorySheet) {
+        btnNewItem.innerHTML = `➕ New ${sheetMeta.label.replace(/^.*? /, '').replace(/s$/, '')}`;
+      }
+    }
+
+    if (btnGenSwaps) {
+      btnGenSwaps.style.display = (isSwapSheet || isInventorySheet) ? 'inline-block' : 'none';
+    }
+
+    if (btnFixDates) {
+      btnFixDates.style.display = isInventorySheet ? 'inline-block' : 'none';
+    }
+
     if (!tableData || (!tableData.rows?.length && !tableData.rawGrid?.length)) {
       container.innerHTML = `
         <div style="padding: 40px; text-align: center; color: var(--text-muted);">
@@ -643,7 +679,7 @@ class SheetNavigator {
               customContent = `<span class="badge" style="background-color: #6366f1; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">🔬 Ready For Test</span>`;
             } else if (vLower === 'ready for delivery' || vLower.includes('ready for delivery') || vLower.includes('delivery') || val.includes('🚚')) {
               customContent = `<span class="badge" style="background-color: #15803d; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">🚚 ${this.escapeHtml(val)}</span>`;
-            } else if (vLower === 'assigned' || vLower.includes('assigned') || val.includes('✅')) {
+            } else if (vLower === 'assigned' || vLower.includes('assigned') || vLower.includes('delivered') || vLower.includes('complete') || val.includes('✅')) {
               customContent = `<span class="badge" style="background-color: #16a34a; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;">✅ ${this.escapeHtml(val)}</span>`;
             } else if (vLower === 'in stock' || vLower.includes('in stock') || val.includes('📦')) {
               customContent = `<span class="badge" style="background-color: #0369a1; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">📦 ${this.escapeHtml(val)}</span>`;
@@ -724,6 +760,11 @@ class SheetNavigator {
           value: newVal
         });
 
+        // If this is a Swap sheet and Date Changed was edited, trigger Stage 3
+        if (window.swapEngine && this.currentSheetKey.includes('_swaps') && header && header.toLowerCase().includes('changed')) {
+          await window.swapEngine.handleDateChangedEdit(this.currentSheetKey, row - 1, newVal);
+        }
+
         // Re-render swap grid if Date Changed was edited to update status pill immediately
         if (header && (header.toLowerCase().includes('changed') || header.toLowerCase().includes('date'))) {
           this.renderCurrentSheet();
@@ -765,6 +806,11 @@ class SheetNavigator {
           value: newBool
         });
 
+        // Trigger Stage 1 / Stage 2 in swapEngine
+        if (window.swapEngine && this.currentSheetKey.includes('_swaps')) {
+          await window.swapEngine.handlePickCheckboxToggle(this.currentSheetKey, row - 1, newBool);
+        }
+
         // Re-render swap grid to update status pill
         this.renderCurrentSheet();
       });
@@ -793,10 +839,20 @@ class SheetNavigator {
 
     // Search filter
     if (this.searchTerm) {
+      const term = this.searchTerm;
+      const isNumSearch = /^\d+$/.test(term);
+      const parsedSearchNum = isNumSearch ? parseInt(term, 10) : null;
+
       rows = rows.filter(row => {
-        return Object.values(row).some(val => 
-          String(val || '').toLowerCase().includes(this.searchTerm)
-        );
+        return Object.values(row).some(val => {
+          if (val === null || val === undefined) return false;
+          const strVal = String(val).toLowerCase().trim();
+          if (strVal.includes(term)) return true;
+          if (isNumSearch && /^\d+$/.test(strVal)) {
+            return parseInt(strVal, 10) === parsedSearchNum;
+          }
+          return false;
+        });
       });
     }
 
@@ -1314,15 +1370,20 @@ class SheetNavigator {
         if (isJobTracking) {
           if (hLower === 'status' || hLower === 'job status') {
             const statusStr = String(val).trim();
-            if (statusStr === 'Active') {
-              customCellHtml = `<span class="badge" style="background-color: #15803d; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">🚚 Active</span>`;
-            } else if (statusStr === 'Pending Start') {
-              customCellHtml = `<span class="badge" style="background-color: #b45309; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">⏳ Pending Start</span>`;
-            } else if (statusStr === 'Completed') {
-              customCellHtml = `<span class="badge" style="background-color: #0369a1; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 600;">✓ Completed</span>`;
-            } else if (statusStr === 'On Hold') {
-              customCellHtml = `<span class="badge" style="background-color: #7c3aed; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 600;">⏸️ On Hold</span>`;
-            }
+            const jobNum = String(row['Job Number'] || row['Job #'] || row['Crew'] || '').trim();
+            let badgeBg = '#15803d';
+            let icon = '🟢';
+            if (statusStr === 'Active') { badgeBg = '#15803d'; icon = '🟢'; }
+            else if (statusStr === 'Pending Start') { badgeBg = '#b45309'; icon = '🟡'; }
+            else if (statusStr === 'Completed') { badgeBg = '#0369a1'; icon = '🏁'; }
+            else if (statusStr === 'On Hold') { badgeBg = '#64748b'; icon = '⏸️'; }
+
+            customCellHtml = `
+              <div style="display: inline-flex; align-items: center; gap: 6px;">
+                <span class="badge" style="background-color: ${badgeBg}; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">${icon} ${this.escapeHtml(statusStr)}</span>
+                <button class="btn btn-secondary" style="padding: 1px 5px; font-size: 10px; border-radius: 3px; cursor: pointer;" title="Manage Job Lifecycle / Schedule" onclick="window.sheetNavigator.showJobLifecycleModal('${this.escapeHtml(jobNum)}')">⚙️</button>
+              </div>
+            `;
           } else if (hLower.startsWith('skip ')) {
             const isChecked = val === true || val === 'TRUE' || val === 'true';
             customCellHtml = `<span style="cursor: pointer; font-size: 14px;" data-toggle-checkbox="${sheetRowIdx}" data-col="${colIdx + 1}" data-sheet="${this.escapeHtml(tableData.name)}" data-header="${this.escapeHtml(h)}">${isChecked ? '☑️' : '⬜'}</span>`;
@@ -1566,6 +1627,251 @@ class SheetNavigator {
         this.renderActiveView();
       });
     });
+  }
+
+  showJobLifecycleModal(jobNum) {
+    const jtTable = this.db.getTable('job_tracking');
+    if (!jtTable || !jtTable.rows) return;
+
+    const row = jtTable.rows.find(j => {
+      const jn = String(j['Job Number'] || j['Job #'] || Object.values(j)[0] || '').trim();
+      return jn === String(jobNum).trim();
+    });
+
+    if (!row) {
+      alert(`Job ${jobNum} not found in Job Tracking.`);
+      return;
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    const todayFormatted = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+    const currentStatus = String(row['Status'] || 'Active').trim();
+    const loc = row['Location'] || '';
+    const foreman = row['Foreman'] || '';
+
+    const isSkipSun = row['Skip Sun'] === true || row['Skip Sun'] === 'TRUE';
+    const isSkipMon = row['Skip Mon'] === true || row['Skip Mon'] === 'TRUE';
+    const isSkipTue = row['Skip Tue'] === true || row['Skip Tue'] === 'TRUE';
+    const isSkipWed = row['Skip Wed'] === true || row['Skip Wed'] === 'TRUE';
+    const isSkipThu = row['Skip Thu'] === true || row['Skip Thu'] === 'TRUE';
+    const isSkipFri = row['Skip Fri'] === true || row['Skip Fri'] === 'TRUE';
+    const isSkipSat = row['Skip Sat'] === true || row['Skip Sat'] === 'TRUE';
+    const isSkipMtg = row['Skip Weekly Meeting'] === true || row['Skip Weekly Meeting'] === 'TRUE';
+    const isSkipChk = row['Skip Monthly Checklist'] === true || row['Skip Monthly Checklist'] === 'TRUE';
+
+    const modalHtml = `
+      <div id="job-lifecycle-sheet-modal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 10000; display: flex; align-items: center; justify-content: center;">
+        <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 12px; padding: 24px; max-width: 520px; width: 90%; box-shadow: 0 12px 40px rgba(0,0,0,0.6); max-height: 90vh; overflow-y: auto;">
+          
+          <!-- Header -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
+            <div>
+              <h3 style="font-size: 17px; font-weight: 800; color: var(--text-primary); margin: 0; display: flex; align-items: center; gap: 8px;">
+                <span>⚙️</span> Job ${this.escapeHtml(jobNum)} — ${this.escapeHtml(loc)}
+              </h3>
+              <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+                Foreman: <strong>${this.escapeHtml(foreman || 'Unassigned')}</strong> | Current Status: <strong>${this.escapeHtml(currentStatus)}</strong>
+              </div>
+            </div>
+            <button onclick="document.getElementById('job-lifecycle-sheet-modal').remove()" style="background: none; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer;">✕</button>
+          </div>
+
+          <!-- Status Selector -->
+          <div style="margin-bottom: 16px;">
+            <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 6px;">Target Status:</label>
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+              <label style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; cursor: pointer;">
+                <input type="radio" name="job-target-status" value="Active" ${currentStatus === 'Active' ? 'checked' : ''} onchange="window.sheetNavigator.handleJobStatusRadioChange('Active')">
+                <span style="font-size: 13px; font-weight: 700; color: #10b981;">🟢 Active</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; cursor: pointer;">
+                <input type="radio" name="job-target-status" value="Pending Start" ${currentStatus === 'Pending Start' ? 'checked' : ''} onchange="window.sheetNavigator.handleJobStatusRadioChange('Pending Start')">
+                <span style="font-size: 13px; font-weight: 700; color: #f59e0b;">🟡 Pending Start</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; cursor: pointer;">
+                <input type="radio" name="job-target-status" value="On Hold" ${currentStatus === 'On Hold' ? 'checked' : ''} onchange="window.sheetNavigator.handleJobStatusRadioChange('On Hold')">
+                <span style="font-size: 13px; font-weight: 700; color: #94a3b8;">⏸️ On Hold</span>
+              </label>
+              <label style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; cursor: pointer;">
+                <input type="radio" name="job-target-status" value="Completed" ${currentStatus === 'Completed' ? 'checked' : ''} onchange="window.sheetNavigator.handleJobStatusRadioChange('Completed')">
+                <span style="font-size: 13px; font-weight: 700; color: #60a5fa;">🏁 Completed</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Dynamic Date Inputs Area -->
+          <div id="job-modal-dates-area" style="background: var(--bg-primary); border-radius: 8px; padding: 12px; margin-bottom: 16px; border: 1px solid var(--border-color);">
+            <div id="field-on-hold" style="display: ${currentStatus === 'On Hold' ? 'block' : 'none'}; margin-bottom: 10px;">
+              <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 4px;">Put On Hold Date:</label>
+              <input type="date" id="input-hold-date" class="form-control" value="${row['Put On Hold Date'] || today}" style="width: 100%; padding: 6px 10px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px;">
+              <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-top: 8px; margin-bottom: 4px;">Estimated Return Date:</label>
+              <input type="date" id="input-return-date" class="form-control" value="${row['Estimated Return'] || ''}" style="width: 100%; padding: 6px 10px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px;">
+            </div>
+
+            <div id="field-pending-start" style="display: ${currentStatus === 'Pending Start' ? 'block' : 'none'}; margin-bottom: 10px;">
+              <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 4px;">Estimated Start Date:</label>
+              <input type="date" id="input-start-date" class="form-control" value="${row['Start Date'] || today}" style="width: 100%; padding: 6px 10px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px;">
+            </div>
+
+            <div id="field-completed" style="display: ${currentStatus === 'Completed' ? 'block' : 'none'}; margin-bottom: 10px;">
+              <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 4px;">Actual End Date:</label>
+              <input type="date" id="input-end-date" class="form-control" value="${row['Actual End Date'] || today}" style="width: 100%; padding: 6px 10px; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px;">
+            </div>
+
+            <div id="field-active-notice" style="display: ${currentStatus === 'Active' ? 'block' : 'none'}; font-size: 12px; color: #10b981;">
+              ✓ Crew is active and included in all weekly safety compliance tracking.
+            </div>
+          </div>
+
+          <!-- Schedule & Skip Days Section -->
+          <div style="background: var(--bg-primary); border-radius: 8px; padding: 12px; margin-bottom: 20px; border: 1px solid var(--border-color);">
+            <div style="font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 8px;">Compliance Schedule & Skip Days:</div>
+            
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 8px;">
+              <label style="font-size: 11px; display: flex; align-items: center; gap: 4px; color: var(--text-primary);">
+                <input type="checkbox" id="skip-sun" ${isSkipSun ? 'checked' : ''}> Skip Sun
+              </label>
+              <label style="font-size: 11px; display: flex; align-items: center; gap: 4px; color: var(--text-primary);">
+                <input type="checkbox" id="skip-mon" ${isSkipMon ? 'checked' : ''}> Skip Mon
+              </label>
+              <label style="font-size: 11px; display: flex; align-items: center; gap: 4px; color: var(--text-primary);">
+                <input type="checkbox" id="skip-tue" ${isSkipTue ? 'checked' : ''}> Skip Tue
+              </label>
+              <label style="font-size: 11px; display: flex; align-items: center; gap: 4px; color: var(--text-primary);">
+                <input type="checkbox" id="skip-wed" ${isSkipWed ? 'checked' : ''}> Skip Wed
+              </label>
+              <label style="font-size: 11px; display: flex; align-items: center; gap: 4px; color: var(--text-primary);">
+                <input type="checkbox" id="skip-thu" ${isSkipThu ? 'checked' : ''}> Skip Thu
+              </label>
+              <label style="font-size: 11px; display: flex; align-items: center; gap: 4px; color: var(--text-primary);">
+                <input type="checkbox" id="skip-fri" ${isSkipFri ? 'checked' : ''}> Skip Fri
+              </label>
+              <label style="font-size: 11px; display: flex; align-items: center; gap: 4px; color: var(--text-primary);">
+                <input type="checkbox" id="skip-sat" ${isSkipSat ? 'checked' : ''}> Skip Sat
+              </label>
+            </div>
+
+            <div style="display: flex; gap: 16px; border-top: 1px dashed rgba(255,255,255,0.1); padding-top: 8px;">
+              <label style="font-size: 11px; display: flex; align-items: center; gap: 4px; color: var(--text-primary);">
+                <input type="checkbox" id="skip-meeting" ${isSkipMtg ? 'checked' : ''}> Skip Weekly Mtg
+              </label>
+              <label style="font-size: 11px; display: flex; align-items: center; gap: 4px; color: var(--text-primary);">
+                <input type="checkbox" id="skip-checklist" ${isSkipChk ? 'checked' : ''}> Skip Monthly Chk
+              </label>
+            </div>
+          </div>
+
+          <!-- Bottom Actions -->
+          <div style="display: flex; justify-content: flex-end; gap: 10px;">
+            <button class="btn btn-secondary" onclick="document.getElementById('job-lifecycle-sheet-modal').remove()">Cancel</button>
+            <button class="btn btn-primary" onclick="window.sheetNavigator.saveJobLifecycleModal('${this.escapeHtml(jobNum)}')">💾 Save Changes</button>
+          </div>
+
+        </div>
+      </div>
+    `;
+
+    const oldModal = document.getElementById('job-lifecycle-sheet-modal');
+    if (oldModal) oldModal.remove();
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+  }
+
+  handleJobStatusRadioChange(status) {
+    const onHold = document.getElementById('field-on-hold');
+    const pending = document.getElementById('field-pending-start');
+    const completed = document.getElementById('field-completed');
+    const active = document.getElementById('field-active-notice');
+
+    if (onHold) onHold.style.display = status === 'On Hold' ? 'block' : 'none';
+    if (pending) pending.style.display = status === 'Pending Start' ? 'block' : 'none';
+    if (completed) completed.style.display = status === 'Completed' ? 'block' : 'none';
+    if (active) active.style.display = status === 'Active' ? 'block' : 'none';
+  }
+
+  async saveJobLifecycleModal(jobNum) {
+    const jtTable = this.db.getTable('job_tracking');
+    if (!jtTable || !jtTable.rows) return;
+
+    const row = jtTable.rows.find(j => {
+      const jn = String(j['Job Number'] || j['Job #'] || Object.values(j)[0] || '').trim();
+      return jn === String(jobNum).trim();
+    });
+    if (!row) return;
+
+    const selectedRadio = document.querySelector('input[name="job-target-status"]:checked');
+    const targetStatus = selectedRadio ? selectedRadio.value : 'Active';
+    const todayFormatted = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+
+    row['Status'] = targetStatus;
+    row['Skip Sun'] = document.getElementById('skip-sun').checked;
+    row['Skip Mon'] = document.getElementById('skip-mon').checked;
+    row['Skip Tue'] = document.getElementById('skip-tue').checked;
+    row['Skip Wed'] = document.getElementById('skip-wed').checked;
+    row['Skip Thu'] = document.getElementById('skip-thu').checked;
+    row['Skip Fri'] = document.getElementById('skip-fri').checked;
+    row['Skip Sat'] = document.getElementById('skip-sat').checked;
+    row['Skip Weekly Meeting'] = document.getElementById('skip-meeting').checked;
+    row['Skip Monthly Checklist'] = document.getElementById('skip-checklist').checked;
+    row['Last Updated'] = todayFormatted;
+
+    if (targetStatus === 'On Hold') {
+      row['Put On Hold Date'] = document.getElementById('input-hold-date').value || todayFormatted;
+      row['Estimated Return'] = document.getElementById('input-return-date').value || '';
+    } else if (targetStatus === 'Pending Start') {
+      row['Start Date'] = document.getElementById('input-start-date').value || '';
+    } else if (targetStatus === 'Completed') {
+      row['Actual End Date'] = document.getElementById('input-end-date').value || todayFormatted;
+    } else if (targetStatus === 'Active') {
+      if (!row['Start Date']) row['Start Date'] = todayFormatted;
+      row['Put On Hold Date'] = '';
+      row['Estimated Return'] = '';
+    }
+
+    // Sync raw grid
+    if (jtTable.rawGrid && jtTable.headers) {
+      const idKey = jtTable.headers[0];
+      const gridIdx = jtTable.rawGrid.findIndex((gr, idx) => {
+        if (idx === 0) return false;
+        return String(gr[0] || '').trim() === String(jobNum).trim();
+      });
+      if (gridIdx > 0) {
+        jtTable.rawGrid[gridIdx] = jtTable.headers.map(h => row[h] !== undefined ? row[h] : '');
+      }
+    }
+
+    // Queue update mutation
+    await this.db.addMutation({
+      action: 'UPDATE_ROW',
+      sheetName: jtTable.name,
+      tableKey: 'job_tracking',
+      itemIdentifier: jobNum,
+      updatedFields: {
+        'Status': row['Status'],
+        'Skip Sun': row['Skip Sun'],
+        'Skip Mon': row['Skip Mon'],
+        'Skip Tue': row['Skip Tue'],
+        'Skip Wed': row['Skip Wed'],
+        'Skip Thu': row['Skip Thu'],
+        'Skip Fri': row['Skip Fri'],
+        'Skip Sat': row['Skip Sat'],
+        'Skip Weekly Meeting': row['Skip Weekly Meeting'],
+        'Skip Monthly Checklist': row['Skip Monthly Checklist'],
+        'Put On Hold Date': row['Put On Hold Date'] || '',
+        'Estimated Return': row['Estimated Return'] || '',
+        'Start Date': row['Start Date'] || '',
+        'Actual End Date': row['Actual End Date'] || '',
+        'Last Updated': todayFormatted
+      }
+    });
+
+    if (typeof this.db.setSnapshot === 'function') {
+      await this.db.setSnapshot(this.db.snapshot);
+    }
+
+    const modal = document.getElementById('job-lifecycle-sheet-modal');
+    if (modal) modal.remove();
+
+    this.renderCurrentSheet();
   }
 
   escapeHtml(str) {

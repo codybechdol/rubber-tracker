@@ -24,9 +24,9 @@ var SYNC_SNAPSHOT_FILENAME = 'SafetyAssistant_Sync_Snapshot.json';
  * @return {Object} The complete database snapshot
  */
 function exportFullDatabaseSnapshot() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
   var timestamp = new Date();
-  var tz = ss.getSpreadsheetTimeZone() || 'America/Denver';
+  var tz = ss ? (ss.getSpreadsheetTimeZone() || 'America/Denver') : 'America/Denver';
 
   // Clean up any located items from swap sheets and clear stray Lost highlighting
   try {
@@ -274,7 +274,7 @@ function generateAndStoreSyncSnapshot(existingSnapshot) {
  * @return {Object} Result summary with success count and errors
  */
 function applyBatchSyncMutations(mutations, returnSnapshot) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
   if (returnSnapshot === undefined) returnSnapshot = true;
   if (!mutations || !Array.isArray(mutations) || mutations.length === 0) {
     var emptySnap = returnSnapshot ? exportFullDatabaseSnapshot() : null;
@@ -337,7 +337,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot) {
     try {
       var sheetName = mut.sheetName || '';
       var sheet = sheetName ? ss.getSheetByName(sheetName) : null;
-      var actionsWithoutSheet = ['DELETE_TASK', 'SET_TASK_STATUS', 'TRIGGER_SYNC_CREWS', 'SET_HOLIDAYS', 'SET_TRIP_SCHEDULE', 'SCHEDULE_CREW_VISIT', 'SAVE_PLANNED_TRIPS', 'IMPORT_HISTORY_LOG'];
+      var actionsWithoutSheet = ['DELETE_TASK', 'SET_TASK_STATUS', 'TRIGGER_SYNC_CREWS', 'SET_HOLIDAYS', 'SET_TRIP_SCHEDULE', 'SCHEDULE_CREW_VISIT', 'SAVE_PLANNED_TRIPS', 'IMPORT_HISTORY_LOG', 'RECALCULATE_CHANGE_OUT_DATES'];
       if (!sheet && actionsWithoutSheet.indexOf(mut.action) === -1) {
         errors.push('Sheet not found: ' + sheetName);
         continue;
@@ -896,6 +896,72 @@ function applyBatchSyncMutations(mutations, returnSnapshot) {
           }
           break;
 
+        case 'UPDATE_ROW':
+        case 'UPDATE_JOB_TRACKING':
+          // mut: { sheetName, itemIdentifier, updatedFields, tableKey }
+          if (sheet && (mut.updatedFields || mut.updates)) {
+            var data = sheet.getDataRange().getValues();
+            if (data && data.length > 0) {
+              var headers = data[0].map(function(h) { return String(h || '').trim(); });
+              var fields = mut.updatedFields || mut.updates;
+              var idStr = String(mut.itemIdentifier || mut.jobNumber || mut.keyValue || '').trim().toLowerCase();
+              var isEmpSheet = (sheetName.toLowerCase() === 'employees' || (typeof SHEET_EMPLOYEES !== 'undefined' && sheetName === SHEET_EMPLOYEES));
+              
+              var targetRowIdx = -1;
+              if (idStr) {
+                for (var r = 1; r < data.length; r++) {
+                  var c0 = String(data[r][0] || '').trim().toLowerCase();
+                  if (c0 === idStr) {
+                    targetRowIdx = r + 1; // 1-based sheet row
+                    break;
+                  }
+                  // For non-employees sheets (like Job Tracking or inventory), check secondary identifiers
+                  if (!isEmpSheet) {
+                    var c1 = String(data[r][1] || '').trim().toLowerCase();
+                    var c3 = (data[r].length > 3) ? String(data[r][3] || '').trim().toLowerCase() : '';
+                    if (c1 === idStr || c3 === idStr) {
+                      targetRowIdx = r + 1;
+                      break;
+                    }
+                  }
+                }
+              }
+
+              if (targetRowIdx !== -1) {
+                for (var colName in fields) {
+                  var fldVal = fields[colName];
+                  var fldLower = colName.toLowerCase().trim();
+                  var cIdx = -1;
+                  for (var h = 0; h < headers.length; h++) {
+                    if (headers[h].toLowerCase().trim() === fldLower) {
+                      cIdx = h;
+                      break;
+                    }
+                  }
+                  if (cIdx !== -1) {
+                    if (fldLower === 'last day reason' && typeof fldVal === 'string' && fldVal.trim() !== '') {
+                      var ldrLower = fldVal.toLowerCase().trim();
+                      if (ldrLower.indexOf('quit') !== -1) fldVal = 'Quit';
+                      else if (ldrLower.indexOf('fire') !== -1) fldVal = 'Fired';
+                      else if (ldrLower.indexOf('layoff') !== -1 || ldrLower.indexOf('laid') !== -1) fldVal = 'Layoff';
+                      else if (ldrLower.indexOf('resign') !== -1) fldVal = 'Resigned';
+                      else fldVal = 'Quit';
+                    }
+                    if (typeof fldVal === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(fldVal)) {
+                      fldVal = typeof parseDateNoon === 'function' ? parseDateNoon(fldVal) : new Date(fldVal);
+                    }
+                    sheet.getRange(targetRowIdx, cIdx + 1).setValue(fldVal);
+                  }
+                }
+                sheetsModified[sheetName] = true;
+                appliedCount++;
+              } else {
+                errors.push('Could not find row for ' + (mut.itemIdentifier || mut.jobNumber || 'item') + ' in ' + sheetName);
+              }
+            }
+          }
+          break;
+
         case 'UPDATE_ROW_BY_KEY':
           // mut: { sheetName, keyColName, keyValue, updates: { ColName: NewVal } }
           var data = sheet.getDataRange().getValues();
@@ -1118,6 +1184,211 @@ function applyBatchSyncMutations(mutations, returnSnapshot) {
           }
           break;
 
+        case 'ADD_ROW':
+          if (sheet && mut.rowData) {
+            var lastRow = sheet.getLastRow();
+            var lastCol = sheet.getLastColumn();
+            var headers = [];
+            if (lastRow >= 1 && lastCol >= 1) {
+              headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h) { return String(h || '').trim(); });
+            }
+            if (headers.length === 0) {
+              headers = Object.keys(mut.rowData);
+              sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+              lastRow = 1;
+            }
+
+            var rowArray = headers.map(function(h) {
+              var cleanH = String(h || '').trim();
+              var hLower = cleanH.toLowerCase();
+              
+              // 1. Direct match
+              if (mut.rowData[cleanH] !== undefined) return mut.rowData[cleanH];
+              
+              // 2. Case-insensitive match in rowData
+              for (var k in mut.rowData) {
+                if (k.trim().toLowerCase() === hLower) return mut.rowData[k];
+              }
+              
+              // 3. Known alias matches
+              if (['item #', 'item', 'glove', 'sleeve', 'blanket', 'mack', 'serial #', 'serial', 'item number'].indexOf(hLower) !== -1) {
+                return mut.rowData['Item #'] || mut.rowData['Glove'] || mut.rowData['Sleeve'] || mut.rowData['Blanket'] || mut.rowData['Serial #'] || mut.rowData['ESL ID'] || '';
+              }
+              if (['esl id', 'esl', 'barcode'].indexOf(hLower) !== -1) {
+                return mut.rowData['ESL ID'] || mut.rowData['ESL'] || mut.rowData['Barcode'] || '';
+              }
+              if (['size', 'type', 'model'].indexOf(hLower) !== -1) {
+                return mut.rowData['Size'] || mut.rowData['Type'] || mut.rowData['Model'] || '';
+              }
+              if (['class', 'kv'].indexOf(hLower) !== -1) {
+                return mut.rowData['Class'] || mut.rowData['KV'] || '';
+              }
+              if (['test date', 'cal date', 'calibration date', 'pad expiration'].indexOf(hLower) !== -1) {
+                return mut.rowData['Test Date'] || mut.rowData['Calibration Date'] || mut.rowData['Pad Expiration'] || '';
+              }
+              if (['change out date', 'changeout date', 'due date'].indexOf(hLower) !== -1) {
+                return mut.rowData['Change Out Date'] || mut.rowData['Pad Expiration'] || '';
+              }
+              
+              return '';
+            }).map(function(val) {
+              if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val)) {
+                return typeof parseDateNoon === 'function' ? parseDateNoon(val) : new Date(val);
+              }
+              return val;
+            });
+
+            var newRowIdx = lastRow + 1;
+            if (sheet.getMaxRows() < newRowIdx) {
+              sheet.insertRowsAfter(sheet.getMaxRows(), newRowIdx - sheet.getMaxRows());
+            }
+
+            if (typeof safeWriteRowToTable === 'function') {
+              safeWriteRowToTable(sheet, newRowIdx, rowArray, headers);
+            } else {
+              sheet.getRange(newRowIdx, 1, 1, rowArray.length).setValues([rowArray]);
+            }
+            sheetsModified[sheetName] = true;
+            appliedCount++;
+          }
+          break;
+
+        case 'DELETE_ROW':
+          if (sheet) {
+            var data = sheet.getDataRange().getValues();
+            var idStr = String(mut.itemIdentifier || '').trim().toLowerCase();
+            if (idStr) {
+              // Delete in reverse order to cleanly remove all matching rows (e.g. history records)
+              for (var r = data.length - 1; r >= 1; r--) {
+                var rowVals = data[r].map(function(c) { return String(c || '').trim().toLowerCase(); });
+                if (rowVals.indexOf(idStr) !== -1) {
+                  sheet.deleteRow(r + 1); // 1-indexed for Sheets
+                  sheetsModified[sheetName] = true;
+                  appliedCount++;
+                }
+              }
+            } else if (mut.rowData) {
+              var rDate = String(mut.rowData['Date Assigned'] || mut.rowData['Date'] || '').trim().toLowerCase();
+              var rItem = String(mut.rowData['Item #'] || mut.rowData['Item'] || mut.rowData['Serial #'] || '').trim().toLowerCase();
+              var rAssigned = String(mut.rowData['Assigned To'] || '').trim().toLowerCase();
+
+              for (var r = data.length - 1; r >= 1; r--) {
+                var rowVals = data[r].map(function(c) { return String(c || '').trim().toLowerCase(); });
+                var matchDate = rDate ? (rowVals[0] === rDate || rowVals.indexOf(rDate) !== -1) : true;
+                var matchItem = rItem ? (rowVals[1] === rItem || rowVals.indexOf(rItem) !== -1) : true;
+                var matchAssigned = rAssigned ? (rowVals.indexOf(rAssigned) !== -1) : true;
+                if (matchDate && matchItem && matchAssigned) {
+                  sheet.deleteRow(r + 1);
+                  sheetsModified[sheetName] = true;
+                  appliedCount++;
+                  break;
+                }
+              }
+            }
+          }
+          break;
+
+        case 'REPLACE_SWAP_TABLE':
+        case 'REPLACE_TABLE_DATA':
+        case 'SYNC_FULL_TABLE':
+          if (sheet && (mut.rawGrid || mut.rows)) {
+            var gridToWrite = [];
+            var sheetHeaders = [];
+
+            if (mut.rawGrid && Array.isArray(mut.rawGrid) && mut.rawGrid.length > 0) {
+              gridToWrite = mut.rawGrid;
+              sheetHeaders = mut.rawGrid[0];
+            } else if (mut.headers && mut.rows && Array.isArray(mut.rows)) {
+              sheetHeaders = mut.headers;
+              gridToWrite = [sheetHeaders];
+              for (var rIdx = 0; rIdx < mut.rows.length; rIdx++) {
+                var rowObj = mut.rows[rIdx];
+                var rowArr = sheetHeaders.map(function(h) {
+                  var v = rowObj[h];
+                  if (v === undefined || v === null) v = '';
+                  return v;
+                });
+                gridToWrite.push(rowArr);
+              }
+            }
+
+            if (gridToWrite.length > 0) {
+              var targetRows = gridToWrite.length;
+              var targetCols = gridToWrite[0].length;
+
+              // Ensure sheet has enough columns and rows
+              if (sheet.getMaxColumns() < targetCols) {
+                sheet.insertColumnsAfter(sheet.getMaxColumns(), targetCols - sheet.getMaxColumns());
+              }
+              if (sheet.getMaxRows() < targetRows) {
+                sheet.insertRowsAfter(sheet.getMaxRows(), targetRows - sheet.getMaxRows());
+              }
+
+              // Format date strings to Date objects if needed
+              var lastDayReasonColIdx = -1;
+              if (sheetName.toLowerCase() === 'employees' || sheetName === (typeof SHEET_EMPLOYEES !== 'undefined' ? SHEET_EMPLOYEES : 'Employees')) {
+                for (var sh = 0; sh < sheetHeaders.length; sh++) {
+                  if (String(sheetHeaders[sh] || '').toLowerCase().trim() === 'last day reason') {
+                    lastDayReasonColIdx = sh;
+                    break;
+                  }
+                }
+              }
+
+              var formattedGrid = gridToWrite.map(function(rowArr, rowNum) {
+                if (rowNum === 0) return rowArr; // headers
+                return rowArr.map(function(cellVal, cIdx) {
+                  if (cIdx === lastDayReasonColIdx && typeof cellVal === 'string' && cellVal.trim() !== '') {
+                    var ldrLower = cellVal.toLowerCase().trim();
+                    if (ldrLower.indexOf('quit') !== -1) return 'Quit';
+                    if (ldrLower.indexOf('fire') !== -1) return 'Fired';
+                    if (ldrLower.indexOf('layoff') !== -1 || ldrLower.indexOf('laid') !== -1) return 'Layoff';
+                    if (ldrLower.indexOf('resign') !== -1) return 'Resigned';
+                    return 'Quit';
+                  }
+                  if (typeof cellVal === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(cellVal)) {
+                    return typeof parseDateNoon === 'function' ? parseDateNoon(cellVal) : new Date(cellVal);
+                  }
+                  return cellVal;
+                });
+              });
+
+              var currentLastRow = sheet.getLastRow();
+              try {
+                sheet.getRange(1, 1, targetRows, targetCols).setValues(formattedGrid);
+              } catch (setValErr) {
+                Logger.log('REPLACE_TABLE_DATA setValues error, falling back to safeWriteRowToTable: ' + setValErr);
+                for (var fRow = 1; fRow < formattedGrid.length; fRow++) {
+                  if (typeof safeWriteRowToTable === 'function') {
+                    safeWriteRowToTable(sheet, fRow + 1, formattedGrid[fRow], sheetHeaders);
+                  }
+                }
+              }
+              if (currentLastRow > targetRows) {
+                try {
+                  sheet.getRange(targetRows + 1, 1, currentLastRow - targetRows, targetCols).clearContent();
+                } catch (clearErr) {
+                  Logger.log('REPLACE_TABLE_DATA clearContent warning: ' + clearErr);
+                }
+              }
+
+              sheetsModified[sheetName] = true;
+              appliedCount++;
+            }
+          }
+          break;
+
+        case 'RECALCULATE_CHANGE_OUT_DATES':
+          try {
+            if (typeof fixChangeOutDatesSilent === 'function') fixChangeOutDatesSilent();
+            if (typeof fixBlanketChangeOutDatesSilent === 'function') fixBlanketChangeOutDatesSilent();
+            if (typeof fixMackChangeOutDates === 'function') fixMackChangeOutDates();
+            appliedCount++;
+          } catch (eChg) {
+            Logger.log('RECALCULATE_CHANGE_OUT_DATES error: ' + eChg);
+          }
+          break;
+
         default:
           Logger.log('applyBatchSyncMutations: Unknown mutation action ' + mut.action);
           break;
@@ -1132,9 +1403,10 @@ function applyBatchSyncMutations(mutations, returnSnapshot) {
   // Force spreadsheet to commit all pending writes
   SpreadsheetApp.flush();
 
-  // Run crew synchronization & completed secondary job cleanups if employee/job sheets were touched
+  // Run crew synchronization & formatting if employee/job sheets were touched
   if (sheetsModified['Employees'] || sheetsModified['Job Tracking']) {
     try {
+      if (typeof organizeAndFormatEmployeesSheet === 'function') organizeAndFormatEmployeesSheet(true);
       if (typeof syncCrews === 'function') syncCrews(true);
       if (typeof cleanupCompletedSecondaryJobNumbers === 'function') cleanupCompletedSecondaryJobNumbers(ss);
     } catch (syncErr) {

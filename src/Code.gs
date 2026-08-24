@@ -32526,6 +32526,18 @@ function doGet(e) {
         status: 'ok',
         serverTime: new Date().toISOString()
       })).setMimeType(ContentService.MimeType.JSON);
+    } else if (action === 'applyMutations') {
+      var mutationsStr = e.parameter.mutations || '[]';
+      var mutations = [];
+      try {
+        mutations = JSON.parse(mutationsStr);
+      } catch (parseErr) {
+        mutations = [];
+      }
+      var returnSnap = e.parameter.returnSnapshot !== 'false';
+      var result = applyBatchSyncMutations(mutations, returnSnap);
+      return ContentService.createTextOutput(JSON.stringify(result))
+        .setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'getSnapshot' || !action) {
       var snapshot = exportFullDatabaseSnapshot();
       return ContentService.createTextOutput(JSON.stringify(snapshot))

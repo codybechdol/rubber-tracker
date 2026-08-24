@@ -412,11 +412,25 @@ class EmployeeProfileEngine {
     const snap = this.db.getSnapshot();
     if (!snap || !snap.tables) return;
 
-    const rawEmpName = String(employeeName || '').trim();
-    if (!rawEmpName) return;
+    const profileData = this.compileProfileData(snap, employeeName);
+    if (!profileData) return;
 
     this.currentActiveTab = 'equipment';
     this.currentEquipmentFilter = 'all';
+    this.currentEmployeeData = profileData;
+
+    if (titleEl) {
+      titleEl.innerHTML = `<span style="font-size: 18px;">👤</span> Employee Profile: <strong>${this.escapeHtml(profileData.displayName)}</strong>`;
+    }
+
+    this.renderModalContent(body);
+    modal.classList.add('active');
+  }
+
+  compileProfileData(snap, employeeName) {
+    if (!snap || !snap.tables) return null;
+    const rawEmpName = String(employeeName || '').trim();
+    if (!rawEmpName) return null;
 
     // 1. Locate Employee Record in Employees table
     const empTable = snap.tables['employees'];
@@ -437,6 +451,7 @@ class EmployeeProfileEngine {
     const email = empRow ? (empRow['Email Address'] || empRow['Email'] || '') : '';
     const mpEmail = empRow ? (empRow['MP Email'] || '') : '';
     const notifEmail = empRow ? (empRow['Notification Emails'] || '') : '';
+    const hireDate = empRow ? (empRow['Hire Date'] || empRow['Hire'] || '') : '';
 
     // 2. Scan ALL equipment sheets for items currently assigned to this employee
     const equipmentSheets = [
@@ -584,11 +599,11 @@ class EmployeeProfileEngine {
       });
     }
 
-    // 5. Scan Employee History & Certifications for Career Milestones (Location changes and Cert updates only)
+    // 5. Scan Employee History & Certifications for Career Milestones
     const historyTable = snap.tables['employee_history'];
     const employeeHistory = [];
 
-    // A. Location Changes & Cert Updates from Employee History
+    // A. Lifecycle events from Employee History
     if (historyTable && historyTable.rows) {
       historyTable.rows.forEach(h => {
         const hName = String(h['Employee Name'] || h['Name'] || h['Employee'] || '').trim();
@@ -602,15 +617,52 @@ class EmployeeProfileEngine {
           const eventLower = rawEvent.toLowerCase();
           const detailsLower = rawDetails.toLowerCase();
 
-          // Check if this is a location change event
+          const isHire = eventLower.includes('new hire') || (eventLower.includes('hire') && !eventLower.includes('rehire'));
+          const isRehire = eventLower.includes('rehire');
+          const isTerm = eventLower.includes('term') || eventLower.includes('quit') || eventLower.includes('departure') || eventLower.includes('layoff');
+          const isRole = eventLower.includes('role') || eventLower.includes('promotion') || eventLower.includes('class');
           const isLocEvent = eventLower.includes('location') || eventLower.includes('rezone') || eventLower.includes('transfer');
           const detailsHasLoc = detailsLower.includes('location') || detailsLower.includes('rezone') || detailsLower.includes('moved to') || detailsLower.includes('transfer') || detailsLower.includes('changed from');
-
-          // Check if this is a cert update in history
           const isCertEvent = eventLower.includes('cert') || eventLower.includes('cpr') || eventLower.includes('first aid') || eventLower.includes('osha') || eventLower.includes('crane') || eventLower.includes('license') || eventLower.includes('medical');
           const detailsHasCert = detailsLower.includes('cert') || detailsLower.includes('cpr') || detailsLower.includes('first aid') || detailsLower.includes('osha') || detailsLower.includes('crane') || detailsLower.includes('license') || detailsLower.includes('medical');
 
-          if (isLocEvent || (eventLower.includes('change') && detailsHasLoc)) {
+          if (isHire) {
+            employeeHistory.push({
+              type: 'hire',
+              date: dateStr,
+              event: '🎉 New Hire',
+              details: rawDetails || `Hired at ${rawLoc || location || 'Helena'}${rawJob || jobNumber ? ` (Job ${rawJob || jobNumber})` : ''}`,
+              location: rawLoc,
+              job: rawJob
+            });
+          } else if (isRehire) {
+            employeeHistory.push({
+              type: 'rehire',
+              date: dateStr,
+              event: '🔄 Rehired',
+              details: rawDetails || `Rehired at ${rawLoc || location || 'Helena'}${rawJob || jobNumber ? ` (Job ${rawJob || jobNumber})` : ''}`,
+              location: rawLoc,
+              job: rawJob
+            });
+          } else if (isTerm) {
+            employeeHistory.push({
+              type: 'term',
+              date: dateStr,
+              event: '🚪 Departure / Termination',
+              details: rawDetails || `Separated from employment`,
+              location: rawLoc,
+              job: rawJob
+            });
+          } else if (isRole) {
+            employeeHistory.push({
+              type: 'role',
+              date: dateStr,
+              event: '⭐ Role & Classification Change',
+              details: rawDetails || `Role updated`,
+              location: rawLoc,
+              job: rawJob
+            });
+          } else if (isLocEvent || (eventLower.includes('change') && detailsHasLoc)) {
             let locDetails = rawDetails;
             if (rawDetails.includes('Location:')) {
               const match = rawDetails.match(/Location:\s*([^;,\n]+)/i);
@@ -641,6 +693,21 @@ class EmployeeProfileEngine {
           }
         }
       });
+    }
+
+    // Synthesize Hire Milestone from Employees table Hire Date if not already logged in history
+    if (hireDate && hireDate !== 'N/A') {
+      const hasHireInHistory = employeeHistory.some(e => e.type === 'hire' || e.type === 'rehire');
+      if (!hasHireInHistory) {
+        employeeHistory.push({
+          type: 'hire',
+          date: hireDate,
+          event: '🎉 New Hire / Start Date',
+          details: `Hired as ${role || 'Lineworker'} at ${location || 'Helena'}${jobNumber ? ` (Job ${jobNumber})` : ''}`,
+          location: location,
+          job: jobNumber
+        });
+      }
     }
 
     // B. Cert Updates from Certifications List
@@ -678,9 +745,11 @@ class EmployeeProfileEngine {
     employeeHistory.sort((a, b) => {
       const dA = this.parseDate(a.date);
       const dB = this.parseDate(b.date);
-      if (dA && dB) return dB.getTime() - dA.getTime();
-      if (dA) return -1;
-      if (dB) return 1;
+      if (dA && dB && !isNaN(dA.getTime()) && !isNaN(dB.getTime())) {
+        return dB.getTime() - dA.getTime();
+      }
+      if (dA && !isNaN(dA.getTime())) return -1;
+      if (dB && !isNaN(dB.getTime())) return 1;
       return 0;
     });
 
@@ -688,7 +757,7 @@ class EmployeeProfileEngine {
     const equipmentHistory = this.extractEquipmentHistory(snap, displayName, assignedEquipment);
 
     // Store state for tab switching
-    this.currentEmployeeData = {
+    return {
       displayName,
       location,
       jobNumber,
@@ -698,19 +767,13 @@ class EmployeeProfileEngine {
       email,
       mpEmail,
       notifEmail,
+      hireDate,
       assignedEquipment,
       equipmentHistory,
       certifications,
       trainingList,
       employeeHistory
     };
-
-    if (titleEl) {
-      titleEl.innerHTML = `<span style="font-size: 18px;">👤</span> Employee Profile: <strong>${this.escapeHtml(displayName)}</strong>`;
-    }
-
-    this.renderModalContent(body);
-    modal.classList.add('active');
   }
 
   closeProfileModal() {
@@ -1335,19 +1398,25 @@ class EmployeeProfileEngine {
             </h4>
             ${data.employeeHistory.length === 0 ? `
               <div style="padding: 20px; text-align: center; color: var(--text-muted); background: var(--bg-primary); border-radius: 6px; border: 1px dashed var(--border-color); font-size: 12px;">
-                No location changes or cert updates logged.
+                No career milestones, location changes, or cert updates logged.
               </div>
             ` : `
               <div style="display: flex; flex-direction: column; gap: 8px;">
                 ${data.employeeHistory.map(h => {
-                  const isLoc = h.type === 'location';
-                  const titleColor = isLoc ? '#60a5fa' : '#f59e0b';
-                  const borderColor = isLoc ? 'rgba(59, 130, 246, 0.3)' : 'rgba(245, 158, 11, 0.3)';
+                  const styleMap = {
+                    hire: { titleColor: '#10b981', borderColor: 'rgba(16, 185, 129, 0.35)', bg: 'rgba(16, 185, 129, 0.05)' },
+                    rehire: { titleColor: '#f97316', borderColor: 'rgba(249, 115, 22, 0.35)', bg: 'rgba(249, 115, 22, 0.05)' },
+                    location: { titleColor: '#60a5fa', borderColor: 'rgba(59, 130, 246, 0.35)', bg: 'var(--bg-primary)' },
+                    role: { titleColor: '#a855f7', borderColor: 'rgba(168, 85, 247, 0.35)', bg: 'rgba(168, 85, 247, 0.05)' },
+                    term: { titleColor: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.35)', bg: 'rgba(239, 68, 68, 0.05)' },
+                    cert: { titleColor: '#f59e0b', borderColor: 'rgba(245, 158, 11, 0.35)', bg: 'var(--bg-primary)' }
+                  };
+                  const s = styleMap[h.type] || styleMap.location;
 
                   return `
-                    <div style="background: var(--bg-primary); border: 1px solid ${borderColor}; border-radius: 6px; padding: 10px 12px; font-size: 12px;">
+                    <div style="background: ${s.bg}; border: 1px solid ${s.borderColor}; border-radius: 6px; padding: 10px 12px; font-size: 12px;">
                       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                        <span style="font-weight: 700; color: ${titleColor}; display: flex; align-items: center; gap: 4px;">
+                        <span style="font-weight: 700; color: ${s.titleColor}; display: flex; align-items: center; gap: 4px;">
                           ${this.escapeHtml(h.event)}
                         </span>
                         <span style="color: #94a3b8; font-size: 11px; font-weight: 600;">📅 ${this.escapeHtml(h.date)}</span>
@@ -1968,4 +2037,7 @@ class EmployeeProfileEngine {
   }
 }
 
-window.employeeProfileEngine = new EmployeeProfileEngine(window.localDB);
+if (typeof window !== 'undefined') {
+  window.EmployeeProfileEngine = EmployeeProfileEngine;
+  window.employeeProfileEngine = new EmployeeProfileEngine(window.localDB);
+}

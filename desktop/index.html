@@ -23,12 +23,16 @@
         <span id="sync-status-text">Checking status...</span>
       </div>
 
-      <button class="btn btn-secondary" onclick="window.syncEngine.importLocalSnapshotFile()">
+      <button class="btn btn-secondary" onclick="window.syncEngine.importLocalSnapshotFile()" title="Import database snapshot from local JSON file">
         📁 Import Snapshot
       </button>
 
-      <button class="btn" id="sync-btn" onclick="window.syncEngine.syncWithGoogleSheets()">
-        🔄 Sync with Google Sheets
+      <button class="btn btn-secondary" id="download-snapshot-btn" onclick="window.syncEngine.downloadLatestSnapshot()" title="Download fresh database snapshot from Google Sheets (Replaces local data)">
+        ⬇️ Download Snapshot
+      </button>
+
+      <button class="btn btn-primary" id="push-changes-btn" onclick="window.syncEngine.pushChangesToGoogleSheets()" title="Push pending offline changes to Google Sheets">
+        ⬆️ Push Changes to Sheets
       </button>
     </div>
   </header>
@@ -42,6 +46,9 @@
         <div class="nav-group-title">Main Workspaces</div>
         <div class="nav-item active" data-view="sheets-view">
           <span class="nav-item-icon">📦</span> Active Inventory & Swaps
+        </div>
+        <div class="nav-item" data-view="crew-import-view">
+          <span class="nav-item-icon">👥</span> Crew Import (Excel)
         </div>
         <div class="nav-item" data-view="safety-compliance-view">
           <span class="nav-item-icon">🛡️</span> Safety Compliance
@@ -93,7 +100,21 @@
             <h2 id="current-sheet-title" style="font-size: 16px;">👥 Employees</h2>
             <span class="brand-badge" id="sheet-row-count">0 rows</span>
           </div>
-          <input type="text" id="sheet-search-input" class="sheet-search" placeholder="Filter rows in this sheet...">
+          <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
+            <button class="btn" id="btn-import-crews" style="display: none; background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 6px 14px; font-size: 12px; font-weight: 700;" onclick="window.sheetNavigator.openCrewImport()">
+              👥 Import Crews
+            </button>
+            <button class="btn btn-secondary" id="btn-fix-changeout-dates" style="display: none; padding: 6px 12px; font-size: 12px;" onclick="window.inventoryManager.recalculateAllChangeOutDates(window.sheetNavigator.currentSheetKey)">
+              🔄 Fix Due Dates
+            </button>
+            <button class="btn" id="btn-generate-swaps" style="display: none; background: linear-gradient(135deg, #0284c7, #0369a1); color: white; padding: 6px 14px; font-size: 12px;" onclick="window.swapEngine.generateAllSwaps()">
+              ⚡ Generate Swaps
+            </button>
+            <button class="btn" id="btn-new-item" style="background: #2563eb; color: white; padding: 6px 14px; font-size: 12px;" onclick="window.inventoryManager.showNewItemModal(window.sheetNavigator.currentSheetKey)">
+              ➕ New Item
+            </button>
+            <input type="text" id="sheet-search-input" class="sheet-search" placeholder="Filter rows in this sheet...">
+          </div>
         </div>
         <div class="grid-wrapper" id="sheet-grid-container"></div>
       </section>
@@ -298,16 +319,23 @@
           </div>
 
           <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px;">
-            <h3 style="font-size: 14px; margin-bottom: 12px;">Local Database Management</h3>
+            <h3 style="font-size: 14px; margin-bottom: 12px;">Local Database & Sync Controls</h3>
             <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 16px;">
-              Manage your offline storage snapshot cached in IndexedDB.
+              Manage your offline storage snapshot and synchronize independently with Google Sheets.
             </p>
-            <div style="display: flex; gap: 10px;">
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
               <button class="btn btn-secondary" onclick="window.localDB.clear(); location.reload();">🗑️ Clear Offline Cache</button>
-              <button class="btn btn-primary" onclick="window.syncEngine.syncWithGoogleSheets()">🔄 Force Full Sync</button>
+              <button class="btn btn-secondary" onclick="window.syncEngine.downloadLatestSnapshot()">⬇️ Download Fresh Snapshot</button>
+              <button class="btn btn-primary" onclick="window.syncEngine.pushChangesToGoogleSheets()">⬆️ Push Offline Changes</button>
+              <button class="btn btn-secondary" style="border-color: #f59e0b; color: #fbbf24;" onclick="window.syncEngine.pushAllCleanData()" title="Directly overwrite Google Sheets Employees and Job Tracking with your clean, organized local data">🧹 Overwrite Sheets with Clean Local Tables</button>
             </div>
           </div>
         </div>
+      </section>
+
+      <!-- Crew Import Workspace -->
+      <section id="crew-import-view" class="view-container" style="overflow-y: auto; height: 100%;">
+        <!-- Injected dynamically by crew-import.js -->
       </section>
 
     </main>
@@ -495,9 +523,15 @@
     </div>
   </div>
 
+  <!-- SheetJS for client-side Excel Parsing -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+
   <!-- Scripts -->
   <script src="js/db.js"></script>
   <script src="js/sync.js"></script>
+  <script src="js/inventory.js"></script>
+  <script src="js/swaps.js"></script>
+  <script src="js/crew-import.js"></script>
   <script src="js/item-stats.js"></script>
   <script src="js/sms-dialog.js"></script>
   <script src="js/employee-profile.js"></script>
@@ -522,6 +556,7 @@
         if (viewId === 'trip-planner-view') window.tripPlanner.setWeeksToShow(window.tripPlanner.weeksToShow || 8);
         if (viewId === 'tasks-view') window.taskManager.renderTasks();
         if (viewId === 'sheets-view') window.sheetNavigator.renderCurrentSheet();
+        if (viewId === 'crew-import-view') window.crewImportEngine.render();
         if (viewId === 'safety-compliance-view') window.sheetNavigator.renderSafetyCompliance();
         if (viewId === 'expiring-certs-view') window.sheetNavigator.renderExpiringCerts();
         if (viewId === 'training-view') window.sheetNavigator.renderTraining();
@@ -548,6 +583,8 @@
       document.getElementById('sync-url-input').value = window.syncEngine.getSyncUrl();
       const snapshot = await window.localDB.init();
 
+      if (window.inventoryManager) window.inventoryManager.init();
+      if (window.crewImportEngine) window.crewImportEngine.init();
       window.sheetNavigator.init();
       window.historyNavigator.init();
       window.taskManager.init();

@@ -111,6 +111,7 @@ function _buildGloveManagerMenu() {
           .addItem('⚙️ Manage Vendors', 'showVendorConfigDialog'))
 
         .addSubMenu(ui.createMenu('👥 Employees')
+          .addItem('📋 Organize & Format Employees Sheet', 'organizeAndFormatEmployeesSheet')
           .addItem('📝 Update Location Validation', 'updateEmployeesLocationValidation')
           .addItem('📤 Archive Previous Employees', 'archivePreviousEmployees')
           .addItem('🔄 Restore Deleted Employee', 'showRestoreEmployeeDialog')

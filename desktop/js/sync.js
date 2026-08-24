@@ -261,7 +261,10 @@ class SyncEngine {
     }
   }
 
-  async syncWithGoogleSheets() {
+  /**
+   * Pushes pending offline changes to Google Sheets WITHOUT downloading or overwriting local database
+   */
+  async pushChangesToGoogleSheets() {
     if (this.isSyncing) return;
 
     if (!this.syncUrl) {
@@ -272,7 +275,7 @@ class SyncEngine {
           <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px;">
             <h3 style="font-size: 14px; margin-bottom: 10px; color: #f8fafc;">Setup Google Sheets Sync</h3>
             <p style="font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 14px;">
-              To sync your offline changes and Trip Planner directly with Google Sheets, enter your Apps Script Web App URL below:
+              To push your offline changes directly to Google Sheets, enter your Apps Script Web App URL below:
             </p>
             <div style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; padding: 12px 14px; margin-bottom: 16px; font-size: 11.5px; color: #cbd5e1; line-height: 1.6;">
               <strong style="color: #60a5fa;">How to get your Web App URL in Google Sheets:</strong><br>
@@ -284,7 +287,7 @@ class SyncEngine {
             <input type="text" id="modal-sync-url-input" class="sheet-search" style="width: 100%; margin-bottom: 14px;" placeholder="https://script.google.com/macros/s/.../exec">
             <div style="display: flex; justify-content: flex-end; gap: 8px;">
               <button class="btn btn-secondary" onclick="window.syncEngine.closeSyncModal()">Cancel</button>
-              <button class="btn btn-primary" onclick="const val = document.getElementById('modal-sync-url-input').value; if(val){ window.syncEngine.setSyncUrl(val); const inEl = document.getElementById('sync-url-input'); if(inEl) inEl.value = val; window.syncEngine.syncWithGoogleSheets(); }">💾 Save & Sync Now</button>
+              <button class="btn btn-primary" onclick="const val = document.getElementById('modal-sync-url-input').value; if(val){ window.syncEngine.setSyncUrl(val); const inEl = document.getElementById('sync-url-input'); if(inEl) inEl.value = val; window.syncEngine.pushChangesToGoogleSheets(); }">💾 Save & Push Now</button>
             </div>
           </div>
         `;
@@ -292,129 +295,253 @@ class SyncEngine {
       return;
     }
 
-    this.isSyncing = true;
     const outbox = [...(this.db.getOutbox() || [])];
 
-    // If there are pending changes, show the modal listing them
-    if (outbox.length > 0) {
-      this.openSyncModal('Pushing Offline Changes', '🔄');
-      this.renderModalChanges(outbox, `Pushing ${outbox.length} offline change(s) to Google Sheets...`, 'syncing', false);
-    } else {
-      this.updateStatusUI('syncing', 'Syncing with Google Sheets...');
+    // If outbox is empty, inform the user cleanly
+    if (outbox.length === 0) {
+      this.openSyncModal('Push Offline Changes', '⬆️');
+      this.renderModalChanges([], '✅ Everything is in sync! There are 0 offline changes waiting to push.', 'success', false);
+      this.updateStatusUI('synced', `Synced (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
+      setTimeout(() => {
+        this.closeSyncModal();
+      }, 2000);
+      return { success: true, count: 0 };
     }
 
+    this.isSyncing = true;
+
+    // Auto-reconcile any active items that lack history records before pushing
+    const invCategories = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'];
+    if (this.db.snapshot && this.db.snapshot.tables) {
+      for (const cat of invCategories) {
+        const activeTable = this.db.getTable(cat);
+        const histTable = this.db.getTable(`${cat}_history`);
+        if (activeTable && activeTable.rows && histTable) {
+          const histItemNums = new Set((histTable.rows || []).map(r => {
+            const firstK = Object.keys(r)[1] || Object.keys(r)[0] || 'Item #';
+            return String(r['Item #'] || r['Serial #'] || r[firstK] || '').trim().toLowerCase();
+          }));
+          for (const ar of activeTable.rows) {
+            const firstK = Object.keys(ar)[0] || 'Item #';
+            const itemNum = String(ar['Item #'] || ar['Glove'] || ar['Sleeve'] || ar['Blanket'] || ar['MACK'] || ar['Serial #'] || ar[firstK] || '').trim();
+            if (itemNum && !histItemNums.has(itemNum.toLowerCase())) {
+              const notes = String(ar['Notes'] || '').trim();
+              const hasOrigin = notes.toLowerCase().includes('new purchase') || notes.toLowerCase().includes('failed pair') || notes.toLowerCase().includes('item found');
+              if (hasOrigin || ar['Status'] === 'Failed Rubber' || ar['Status'] === 'Lost') {
+                if (hasOrigin) {
+                  await this.db.recordItemHistoryEvent(activeTable.name, {
+                    ...ar,
+                    'Location': 'Helena',
+                    'Assigned To': 'On Shelf',
+                    'Status': 'In Stock'
+                  }, notes || 'New Purchase');
+                }
+                if (ar['Status'] && ar['Status'] !== 'In Stock' && ar['Status'] !== 'On Shelf') {
+                  await this.db.recordItemHistoryEvent(activeTable.name, ar, ar['Status'] === 'Failed Rubber' ? 'Failed Rubber' : ar['Notes']);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    const currentOutbox = [...(this.db.getOutbox() || [])];
+    this.openSyncModal('Pushing Changes to Google Sheets', '⬆️');
+    this.renderModalChanges(currentOutbox, `Pushing ${currentOutbox.length} offline change(s) to Google Sheets...`, 'syncing', false);
+    this.updateStatusUI('syncing', `Pushing ${currentOutbox.length} change(s)...`);
+
     try {
-      // Step 1: If we have pending offline mutations, push them first
-      if (outbox.length > 0 && this.syncUrl) {
-        this.updateStatusUI('syncing', `Pushing ${outbox.length} offline change(s)...`);
-        
-        let pushResult = null;
-        try {
-          pushResult = await this.executeNetworkRequest(this.syncUrl, 'POST', {
-            action: 'applyMutations',
-            mutations: outbox,
-            returnSnapshot: false
-          });
-        } catch (pushErr) {
-          console.warn('POST sync failed, trying GET sync:', pushErr);
-          try {
-            const getUrl = `${this.syncUrl}?action=applyMutations&mutations=${encodeURIComponent(JSON.stringify(outbox))}&returnSnapshot=false`;
-            pushResult = await this.executeNetworkRequest(getUrl, 'GET');
-          } catch (getErr) {
-            console.error('All push attempts failed:', getErr);
-            throw new Error(getErr.message || pushErr.message || 'Push failed');
-          }
-        }
-
-        const isSuccess = pushResult && (pushResult.success === true || pushResult.status === 'ok' || pushResult.appliedCount !== undefined);
-
-        if (pushResult && pushResult.errors && pushResult.errors.length > 0) {
-          console.warn('Sync server errors:', pushResult.errors);
-          this.renderModalChanges(outbox, `⚠️ Server error: ${pushResult.errors.join('; ')}`, 'error', true);
-          this.updateStatusUI('pending', 'Sync error / Pending changes');
-          this.isSyncing = false;
-          return { success: false, errors: pushResult.errors };
-        } else if (isSuccess) {
-          // Clear outbox once successfully sent to server
-          await this.db.clearOutbox();
-
-          // If the server returned the fresh snapshot in the same response, consume it immediately (single round-trip!)
-          if (pushResult && pushResult.snapshot && pushResult.snapshot.tables) {
-            await this.db.setSnapshot(pushResult.snapshot);
-            if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
-            if (window.historyNavigator) window.historyNavigator.renderCurrentHistory();
-            if (window.tripPlanner) window.tripPlanner.renderPlanner();
-            if (window.taskManager) window.taskManager.renderTasks();
-
-            this.updateStatusUI('synced', `Synced (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
-            this.renderModalChanges([], `✅ All ${outbox.length} changes pushed and latest database loaded!`, 'success', false);
-            setTimeout(() => {
-              this.closeSyncModal();
-            }, 2500);
-
-            this.isSyncing = false;
-            return { success: true, snapshot: pushResult.snapshot };
-          }
-
-          this.renderModalChanges(outbox, `✅ Pushed ${outbox.length} change(s) successfully! Downloading fresh snapshot...`, 'syncing', false);
-        } else {
-          console.warn('Invalid server response during push:', pushResult);
-          const msg = (pushResult && pushResult.error) ? pushResult.error : 'Web App returned non-JSON response. Please verify in Google Sheets: Extensions > Apps Script > Deploy > Manage deployments, and ensure "Who has access" is set to "Anyone".';
-          this.renderModalChanges(outbox, `❌ Push failed: ${msg}`, 'error', true);
-          this.updateStatusUI('pending', 'Sync failed / Pending changes');
-          this.isSyncing = false;
-          return { success: false, error: msg };
-        }
+      let pushResult = null;
+      try {
+        pushResult = await this.executeNetworkRequest(this.syncUrl, 'POST', {
+          action: 'applyMutations',
+          mutations: currentOutbox,
+          returnSnapshot: false // PUSH ONLY: preserve local database state
+        });
+      } catch (pushErr) {
+        console.warn('POST push failed, trying GET fallback:', pushErr);
+        const getUrl = `${this.syncUrl}?action=applyMutations&mutations=${encodeURIComponent(JSON.stringify(currentOutbox))}&returnSnapshot=false`;
+        pushResult = await this.executeNetworkRequest(getUrl, 'GET');
       }
 
-      // Step 2: Pull fresh database snapshot (for pull-only sync or fallback)
-      if (this.syncUrl) {
-        this.updateStatusUI('syncing', 'Downloading latest snapshot...');
-        const freshSnapshot = await this.executeNetworkRequest(`${this.syncUrl}?action=getSnapshot`, 'GET');
+      const isSuccess = pushResult && (pushResult.success === true || pushResult.status === 'ok' || pushResult.appliedCount !== undefined);
 
-        if (freshSnapshot && freshSnapshot.tables) {
-          await this.db.setSnapshot(freshSnapshot);
-          if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
-          if (window.historyNavigator) window.historyNavigator.renderCurrentHistory();
-          if (window.tripPlanner) window.tripPlanner.renderPlanner();
-          if (window.taskManager) window.taskManager.renderTasks();
+      if (pushResult && pushResult.errors && pushResult.errors.length > 0) {
+        console.warn('Push server errors:', pushResult.errors);
+        this.renderModalChanges(currentOutbox, `⚠️ Server error: ${pushResult.errors.join('; ')}`, 'error', true);
+        this.updateStatusUI('pending', 'Push error / Pending changes');
+        this.isSyncing = false;
+        return { success: false, errors: pushResult.errors };
+      } else if (isSuccess) {
+        // Clear outbox after successful push
+        await this.db.clearOutbox();
 
-          this.updateStatusUI('synced', `Synced (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
-          
-          if (outbox.length > 0) {
-            this.renderModalChanges([], `✅ All ${outbox.length} changes pushed and latest database loaded!`, 'success', false);
-            // Auto close modal after 2.5 seconds on success
-            setTimeout(() => {
-              this.closeSyncModal();
-            }, 2500);
-          }
+        this.updateStatusUI('synced', `Synced (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
+        this.renderModalChanges([], `✅ Successfully pushed all ${currentOutbox.length} change(s) to Google Sheets!`, 'success', false);
 
-          this.isSyncing = false;
-          return { success: true, snapshot: freshSnapshot };
-        } else if (freshSnapshot && freshSnapshot.error) {
-          throw new Error(freshSnapshot.error);
-        } else {
-          throw new Error('Web App returned non-JSON response. Please verify in Google Sheets: Extensions > Apps Script > Deploy > Manage deployments, and ensure "Who has access" is set to "Anyone".');
-        }
+        // Auto-close modal after 2 seconds
+        setTimeout(() => {
+          this.closeSyncModal();
+        }, 2000);
+
+        this.isSyncing = false;
+        return { success: true, count: currentOutbox.length };
+      } else {
+        console.warn('Invalid server response during push:', pushResult);
+        const msg = (pushResult && pushResult.error) ? pushResult.error : 'Push failed. Please verify your Google Apps Script Web App deployment.';
+        this.renderModalChanges(currentOutbox, `❌ Push failed: ${msg}`, 'error', true);
+        this.updateStatusUI('pending', 'Push failed / Pending changes');
+        this.isSyncing = false;
+        return { success: false, error: msg };
       }
-
-      this.updateStatusUI('synced', 'Offline mode active');
-      this.isSyncing = false;
-      if (outbox.length > 0) {
-        setTimeout(() => { this.closeSyncModal(); }, 2000);
-      }
-      return { success: true };
-
     } catch (err) {
-      console.error('Sync failed:', err);
+      console.error('Push failed:', err);
       const isAuthError = err.message && (err.message.includes('HTML') || err.message.includes('Anyone') || err.message.includes('deployments'));
       const statusLabel = isAuthError ? 'Auth Error (Check Web App Access)' : 'Offline / Connection error';
       this.updateStatusUI('offline', statusLabel);
-      this.openSyncModal('Sync Error', '⚠️');
-      this.renderModalChanges(outbox, `❌ Sync failed: ${err.message}`, 'error', true);
+      this.openSyncModal('Push Error', '⚠️');
+      this.renderModalChanges(currentOutbox, `❌ Push failed: ${err.message}`, 'error', true);
       this.isSyncing = false;
       return { success: false, error: err.message };
     }
+  }
+
+  /**
+   * Pushes a full clean table replacement (Employees, Job Tracking, etc.) directly to Google Sheets
+   */
+  async pushFullCleanTable(tableKey = 'employees') {
+    const table = this.db.getTable(tableKey);
+    if (!table || !table.rows) return { success: false, error: 'Table not found' };
+
+    await this.db.addMutation({
+      action: 'REPLACE_TABLE_DATA',
+      sheetName: table.name || (tableKey === 'employees' ? 'Employees' : 'Job Tracking'),
+      tableKey: tableKey,
+      rawGrid: table.rawGrid,
+      headers: table.headers,
+      rows: table.rows
+    });
+
+    return await this.pushChangesToGoogleSheets();
+  }
+
+  /**
+   * Pushes both Employees and Job Tracking clean tables to Google Sheets
+   */
+  async pushAllCleanData() {
+    const empTable = this.db.getTable('employees');
+    const jtTable = this.db.getTable('job_tracking');
+
+    if (empTable) {
+      await this.db.addMutation({
+        action: 'REPLACE_TABLE_DATA',
+        sheetName: empTable.name || 'Employees',
+        tableKey: 'employees',
+        rawGrid: empTable.rawGrid,
+        headers: empTable.headers,
+        rows: empTable.rows
+      });
+    }
+
+    if (jtTable) {
+      await this.db.addMutation({
+        action: 'REPLACE_TABLE_DATA',
+        sheetName: jtTable.name || 'Job Tracking',
+        tableKey: 'job_tracking',
+        rawGrid: jtTable.rawGrid,
+        headers: jtTable.headers,
+        rows: jtTable.rows
+      });
+    }
+
+    return await this.pushChangesToGoogleSheets();
+  }
+
+  /**
+   * Downloads the latest database snapshot from Google Sheets and updates local database
+   */
+  async downloadLatestSnapshot(force = false) {
+    if (this.isSyncing) return;
+
+    if (!this.syncUrl) {
+      this.openSyncModal('Connect to Google Sheets', '⚙️');
+      const body = document.getElementById('sync-modal-body');
+      if (body) {
+        body.innerHTML = `
+          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px;">
+            <h3 style="font-size: 14px; margin-bottom: 10px; color: #f8fafc;">Setup Google Sheets Connection</h3>
+            <p style="font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 14px;">
+              To download the latest database snapshot from Google Sheets, enter your Apps Script Web App URL below:
+            </p>
+            <input type="text" id="modal-sync-url-input" class="sheet-search" style="width: 100%; margin-bottom: 14px;" placeholder="https://script.google.com/macros/s/.../exec">
+            <div style="display: flex; justify-content: flex-end; gap: 8px;">
+              <button class="btn btn-secondary" onclick="window.syncEngine.closeSyncModal()">Cancel</button>
+              <button class="btn btn-primary" onclick="const val = document.getElementById('modal-sync-url-input').value; if(val){ window.syncEngine.setSyncUrl(val); const inEl = document.getElementById('sync-url-input'); if(inEl) inEl.value = val; window.syncEngine.downloadLatestSnapshot(); }">💾 Save & Download Now</button>
+            </div>
+          </div>
+        `;
+      }
+      return;
+    }
+
+    const outbox = this.db.getOutbox() || [];
+    if (outbox.length > 0 && !force) {
+      const proceed = confirm(
+        `⚠️ Warning: You have ${outbox.length} pending offline change(s) that haven't been pushed to Google Sheets yet.\n\n` +
+        `Downloading the latest snapshot will replace your local database with the current Google Sheets version.\n\n` +
+        `• Click "OK" to download snapshot (overwriting local data).\n` +
+        `• Click "Cancel" to go back and click "Push Changes to Sheets" first.`
+      );
+      if (!proceed) return { success: false, cancelled: true };
+    }
+
+    this.isSyncing = true;
+    this.openSyncModal('Downloading Latest Snapshot', '⬇️');
+    this.renderModalChanges([], 'Connecting to Google Sheets and downloading fresh database snapshot...', 'syncing', false);
+    this.updateStatusUI('syncing', 'Downloading snapshot...');
+
+    try {
+      const freshSnapshot = await this.executeNetworkRequest(`${this.syncUrl}?action=getSnapshot`, 'GET');
+
+      if (freshSnapshot && freshSnapshot.tables) {
+        await this.db.setSnapshot(freshSnapshot);
+        if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
+        if (window.historyNavigator) window.historyNavigator.renderCurrentHistory();
+        if (window.tripPlanner) window.tripPlanner.renderPlanner();
+        if (window.taskManager) window.taskManager.renderTasks();
+
+        this.updateStatusUI('synced', `Synced (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
+        this.renderModalChanges([], '✅ Latest database snapshot successfully downloaded and loaded!', 'success', false);
+
+        setTimeout(() => {
+          this.closeSyncModal();
+        }, 2000);
+
+        this.isSyncing = false;
+        return { success: true, snapshot: freshSnapshot };
+      } else if (freshSnapshot && freshSnapshot.error) {
+        throw new Error(freshSnapshot.error);
+      } else {
+        throw new Error('Web App returned non-JSON response. Please verify in Google Sheets: Extensions > Apps Script > Deploy > Manage deployments, and ensure "Who has access" is set to "Anyone".');
+      }
+    } catch (err) {
+      console.error('Download snapshot failed:', err);
+      const isAuthError = err.message && (err.message.includes('HTML') || err.message.includes('Anyone') || err.message.includes('deployments'));
+      const statusLabel = isAuthError ? 'Auth Error (Check Web App Access)' : 'Offline / Connection error';
+      this.updateStatusUI('offline', statusLabel);
+      this.openSyncModal('Download Error', '⚠️');
+      this.renderModalChanges([], `❌ Download failed: ${err.message}`, 'error', true);
+      this.isSyncing = false;
+      return { success: false, error: err.message };
+    }
+  }
+
+  /**
+   * Backwards-compatible alias for pushChangesToGoogleSheets
+   */
+  async syncWithGoogleSheets() {
+    return await this.pushChangesToGoogleSheets();
   }
 
   async importLocalSnapshotFile() {
@@ -448,4 +575,7 @@ class SyncEngine {
   }
 }
 
-window.syncEngine = new SyncEngine(window.localDB);
+if (typeof window !== 'undefined') {
+  window.SyncEngine = SyncEngine;
+  window.syncEngine = new SyncEngine(window.localDB);
+}

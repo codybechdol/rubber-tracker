@@ -26,6 +26,8 @@ class TripPlannerApp {
       'Anaconda City Sub': { mins: 75, time: '1h 15m', desc: '1h 15m (75 mi)', dir: 'West' },
       'Manhattan': { mins: 80, time: '1h 20m', desc: '1h 20m (80 mi)', dir: 'East' },
       'Great Falls': { mins: 85, time: '1h 25m', desc: '1h 25m (89 mi)', dir: 'North' },
+      'Belgrade': { mins: 85, time: '1h 25m', desc: '1h 25m (87 mi)', dir: 'East' },
+      'Belgrade Dock': { mins: 85, time: '1h 25m', desc: '1h 25m (87 mi)', dir: 'East' },
       'Bozeman': { mins: 95, time: '1h 35m', desc: '1h 35m (98 mi)', dir: 'East' },
       'Glen': { mins: 105, time: '1h 45m', desc: '1h 45m (110 mi)', dir: 'Southwest' },
       'Raynesford Sub': { mins: 105, time: '1h 45m', desc: '1h 45m (115 mi)', dir: 'North' },
