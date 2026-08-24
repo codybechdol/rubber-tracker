@@ -557,4 +557,264 @@ class ProcurementEngine {
       modal.style.display = 'flex';
     }
   }
+
+  openManageVendorsModal() {
+    this.activeModalVendorIdx = (this.activeModalVendorIdx !== undefined && this.activeModalVendorIdx < this.vendors.length) ? this.activeModalVendorIdx : 0;
+    this.renderVendorModal();
+    const modal = document.getElementById('manage-vendors-modal');
+    if (modal) modal.style.display = 'flex';
+  }
+
+  closeManageVendorsModal() {
+    const modal = document.getElementById('manage-vendors-modal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  renderVendorModal() {
+    const body = document.getElementById('manage-vendors-modal-body');
+    if (!body) return;
+
+    if (!this.vendors || this.vendors.length === 0) {
+      this.vendors = this.getDefaultVendors();
+    }
+
+    const currentV = this.vendors[this.activeModalVendorIdx] || this.vendors[0];
+
+    let html = `
+      <div style="display: grid; grid-template-columns: 280px 1fr; gap: 20px; min-height: 480px;">
+        <!-- Left Column: Vendors List -->
+        <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 12px;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="font-weight: 700; font-size: 13px; color: #93c5fd;">🏢 Vendors (${this.vendors.length})</div>
+            <button class="btn btn-primary" style="font-size: 11px; padding: 4px 8px;" onclick="window.procurementEngine.addVendor()">➕ Add</button>
+          </div>
+          <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; max-height: 420px;">
+    `;
+
+    this.vendors.forEach((v, idx) => {
+      const isSelected = idx === this.activeModalVendorIdx;
+      html += `
+        <div style="padding: 10px; border-radius: 6px; cursor: pointer; border: 1px solid ${isSelected ? '#3b82f6' : 'var(--border-color)'}; background: ${isSelected ? 'rgba(59, 130, 246, 0.15)' : 'rgba(30, 41, 59, 0.4)'}; display: flex; justify-content: space-between; align-items: center;" onclick="window.procurementEngine.selectModalVendor(${idx})">
+          <div>
+            <div style="font-weight: ${isSelected ? '700' : '500'}; color: ${isSelected ? '#fff' : 'var(--text-primary)'}; font-size: 12.5px;">${v.name || 'Unnamed Vendor'}</div>
+            <div style="font-size: 11px; color: var(--text-muted);">${(v.items || []).length} catalog items</div>
+          </div>
+          <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 11px; color: #f87171;" title="Delete Vendor" onclick="event.stopPropagation(); window.procurementEngine.deleteVendor(${idx})">🗑️</button>
+        </div>
+      `;
+    });
+
+    html += `
+          </div>
+        </div>
+
+        <!-- Right Column: Vendor Details & Product Catalog -->
+        <div style="display: flex; flex-direction: column; gap: 16px; overflow-y: auto;">
+          <!-- Vendor Contact Info -->
+          <div style="background: rgba(30, 41, 59, 0.5); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px;">
+            <div style="font-weight: 700; font-size: 13px; color: #93c5fd; margin-bottom: 10px;">👤 Vendor Contact Details</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <div>
+                <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 3px;">Vendor Name</label>
+                <input type="text" value="${currentV.name || ''}" class="form-input" style="width: 100%; font-size: 12px; padding: 6px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 4px; color: #fff;" onchange="window.procurementEngine.updateCurrentVendorField('name', this.value)">
+              </div>
+              <div>
+                <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 3px;">Contact Person</label>
+                <input type="text" value="${currentV.contact || ''}" class="form-input" style="width: 100%; font-size: 12px; padding: 6px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 4px; color: #fff;" onchange="window.procurementEngine.updateCurrentVendorField('contact', this.value)">
+              </div>
+              <div>
+                <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 3px;">Email Address</label>
+                <input type="email" value="${currentV.email || ''}" class="form-input" style="width: 100%; font-size: 12px; padding: 6px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 4px; color: #fff;" onchange="window.procurementEngine.updateCurrentVendorField('email', this.value)">
+              </div>
+              <div>
+                <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 3px;">Phone Number</label>
+                <input type="text" value="${currentV.phone || ''}" class="form-input" style="width: 100%; font-size: 12px; padding: 6px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 4px; color: #fff;" onchange="window.procurementEngine.updateCurrentVendorField('phone', this.value)">
+              </div>
+            </div>
+          </div>
+
+          <!-- Product Catalog Section -->
+          <div style="background: rgba(30, 41, 59, 0.5); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; flex: 1; display: flex; flex-direction: column;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+              <div style="font-weight: 700; font-size: 13px; color: #93c5fd;">📦 Product Catalog & Pricing</div>
+              <button class="btn btn-primary" style="font-size: 11px; padding: 4px 10px;" onclick="window.procurementEngine.addCatalogItem()">➕ Add Item</button>
+            </div>
+
+            <div style="flex: 1; max-height: 280px; overflow-y: auto;">
+              <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                <thead>
+                  <tr style="border-bottom: 1px solid var(--border-color); color: var(--text-muted); text-align: left;">
+                    <th style="padding: 6px;">Item Description</th>
+                    <th style="padding: 6px; width: 160px;">Part / Item #</th>
+                    <th style="padding: 6px; width: 110px; text-align: right;">Unit Price ($)</th>
+                    <th style="padding: 6px; width: 40px;"></th>
+                  </tr>
+                </thead>
+                <tbody>
+    `;
+
+    if (!currentV.items || currentV.items.length === 0) {
+      html += `<tr><td colspan="4" style="text-align: center; padding: 20px; color: var(--text-muted);">No catalog items. Click "➕ Add Item" to add pricing.</td></tr>`;
+    } else {
+      currentV.items.forEach((it, iIdx) => {
+        html += `
+          <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+            <td style="padding: 6px;">
+              <input type="text" value="${it.item || ''}" placeholder="e.g. Class 0 Glove, Class 4 Blanket" style="width: 100%; font-size: 12px; padding: 4px 6px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 4px; color: #fff;" onchange="window.procurementEngine.updateCatalogItem(${iIdx}, 'item', this.value)">
+            </td>
+            <td style="padding: 6px;">
+              <input type="text" value="${it.itemNumber || ''}" placeholder="e.g. WS-GLV-0" style="width: 100%; font-size: 12px; padding: 4px 6px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 4px; color: #fff;" onchange="window.procurementEngine.updateCatalogItem(${iIdx}, 'itemNumber', this.value)">
+            </td>
+            <td style="padding: 6px; text-align: right;">
+              <input type="number" step="0.01" min="0" value="${it.price || 0}" style="width: 90px; text-align: right; font-size: 12px; padding: 4px 6px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 4px; color: #4ade80;" onchange="window.procurementEngine.updateCatalogItem(${iIdx}, 'price', parseFloat(this.value)||0)">
+            </td>
+            <td style="padding: 6px; text-align: center;">
+              <button class="btn btn-secondary" style="padding: 2px 5px; font-size: 11px; color: #f87171;" title="Delete Item" onclick="window.procurementEngine.deleteCatalogItem(${iIdx})">✕</button>
+            </td>
+          </tr>
+        `;
+      });
+    }
+
+    html += `
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    body.innerHTML = html;
+  }
+
+  selectModalVendor(idx) {
+    this.activeModalVendorIdx = idx;
+    this.renderVendorModal();
+  }
+
+  addVendor() {
+    const newName = prompt('Enter new vendor name:');
+    if (!newName || !newName.trim()) return;
+    this.vendors.push({
+      name: newName.trim(),
+      contact: '',
+      email: '',
+      phone: '',
+      notes: '',
+      items: [
+        { item: 'Class 0 Glove', itemNumber: '', price: 0 },
+        { item: 'Class 2 Glove', itemNumber: '', price: 0 },
+        { item: 'Class 2 Sleeve', itemNumber: '', price: 0 },
+        { item: 'Class 4 Blanket', itemNumber: '', price: 0 }
+      ]
+    });
+    this.activeModalVendorIdx = this.vendors.length - 1;
+    this.renderVendorModal();
+  }
+
+  deleteVendor(idx) {
+    const v = this.vendors[idx];
+    if (!v) return;
+    if (confirm(`Are you sure you want to delete vendor "${v.name}"?`)) {
+      this.vendors.splice(idx, 1);
+      if (this.activeModalVendorIdx >= this.vendors.length) {
+        this.activeModalVendorIdx = Math.max(0, this.vendors.length - 1);
+      }
+      this.renderVendorModal();
+    }
+  }
+
+  updateCurrentVendorField(field, val) {
+    const currentV = this.vendors[this.activeModalVendorIdx];
+    if (currentV) {
+      currentV[field] = val;
+    }
+  }
+
+  addCatalogItem() {
+    const currentV = this.vendors[this.activeModalVendorIdx];
+    if (!currentV) return;
+    if (!currentV.items) currentV.items = [];
+    currentV.items.push({
+      item: 'New Item',
+      itemNumber: '',
+      price: 0
+    });
+    this.renderVendorModal();
+  }
+
+  deleteCatalogItem(iIdx) {
+    const currentV = this.vendors[this.activeModalVendorIdx];
+    if (!currentV || !currentV.items) return;
+    currentV.items.splice(iIdx, 1);
+    this.renderVendorModal();
+  }
+
+  updateCatalogItem(iIdx, field, val) {
+    const currentV = this.vendors[this.activeModalVendorIdx];
+    if (currentV && currentV.items && currentV.items[iIdx]) {
+      currentV.items[iIdx][field] = val;
+    }
+  }
+
+  async saveVendorsToDB() {
+    const saveBtn = document.getElementById('btn-save-vendors');
+    if (saveBtn) saveBtn.textContent = '⏳ Saving...';
+
+    const headers = ['Vendor Name', 'Contact Name', 'Email', 'Phone', 'Notes', 'Item', 'Item Number', 'Price'];
+    const rows = [];
+    const rawGrid = [headers];
+
+    this.vendors.forEach(v => {
+      if (v.items && v.items.length > 0) {
+        v.items.forEach(it => {
+          const rowObj = {
+            'Vendor Name': v.name,
+            'Contact Name': v.contact,
+            'Email': v.email,
+            'Phone': v.phone,
+            'Notes': v.notes,
+            'Item': it.item,
+            'Item Number': it.itemNumber,
+            'Price': it.price
+          };
+          rows.push(rowObj);
+          rawGrid.push([v.name, v.contact, v.email, v.phone, v.notes, it.item, it.itemNumber, it.price]);
+        });
+      } else {
+        const rowObj = {
+          'Vendor Name': v.name,
+          'Contact Name': v.contact,
+          'Email': v.email,
+          'Phone': v.phone,
+          'Notes': v.notes,
+          'Item': '',
+          'Item Number': '',
+          'Price': 0
+        };
+        rows.push(rowObj);
+        rawGrid.push([v.name, v.contact, v.email, v.phone, v.notes, '', '', 0]);
+      }
+    });
+
+    const vTable = {
+      name: 'Vendors',
+      headers: headers,
+      rows: rows,
+      rawGrid: rawGrid,
+      rowCount: rows.length,
+      maxRows: rows.length + 1,
+      maxCols: 8
+    };
+
+    await this.db.saveTable('vendors', vTable);
+
+    this.updatePricing();
+    this.render();
+    this.closeManageVendorsModal();
+
+    if (saveBtn) saveBtn.innerHTML = '<span>💾</span> Save Vendor Changes';
+    alert('✅ Vendor catalog saved successfully! Click "Push Changes to Sheets" at the top whenever you wish to sync changes back to Google Sheets.');
+  }
 }

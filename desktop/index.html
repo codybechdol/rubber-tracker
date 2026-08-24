@@ -343,10 +343,13 @@
               0 items
             </span>
           </div>
-          <div style="display: flex; align-items: center; gap: 12px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
             <select id="procurement-vendor-select" style="padding: 6px 12px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; min-width: 200px;">
               <option value="">Select a vendor...</option>
             </select>
+            <button class="btn btn-secondary" id="btn-procurement-manage-vendors" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px;" onclick="window.procurementEngine.openManageVendorsModal()">
+              <span>⚙️</span> Manage Vendors
+            </button>
             <button class="btn btn-primary" id="btn-procurement-gen-po" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 14px;">
               <span>📝</span> Generate PO Text
             </button>
@@ -613,6 +616,28 @@
         <button class="btn btn-secondary" onclick="document.getElementById('procurement-po-modal').style.display='none'">Close</button>
         <button class="btn btn-primary" id="btn-procurement-copy-po" style="font-weight: 700; display: inline-flex; align-items: center; gap: 6px;">
           <span>📋</span> Copy to Clipboard
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manage Vendors & Product Catalogs Modal -->
+  <div id="manage-vendors-modal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 1000px; width: 95%; max-height: 90vh;">
+      <div class="modal-header" style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); color: white;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 18px;">⚙️</span>
+          <span style="font-weight: 800; font-size: 15px;">Manage Vendors & Product Catalogs</span>
+        </div>
+        <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.2); border: none; color: white; cursor: pointer;" onclick="window.procurementEngine.closeManageVendorsModal()">✕</button>
+      </div>
+      <div class="modal-body" id="manage-vendors-modal-body" style="max-height: 75vh; overflow-y: auto; padding: 20px;">
+        <!-- Injected dynamically by procurement.js -->
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <button class="btn btn-secondary" onclick="window.procurementEngine.closeManageVendorsModal()">Cancel</button>
+        <button class="btn btn-primary" id="btn-save-vendors" onclick="window.procurementEngine.saveVendorsToDB()" style="font-weight: 700; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(37, 99, 235, 0.4);">
+          <span>💾</span> Save Vendor Changes
         </button>
       </div>
     </div>
