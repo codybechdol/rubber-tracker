@@ -42,6 +42,8 @@ function _buildGloveManagerMenu() {
         .addItem('🧱 Generate MACK Swaps', 'menuGenerateMackSwaps')
         .addItem('⚡ Generate HV Tester Swaps', 'menuGenerateHVTesterSwaps')
         .addItem('⚡ Generate Phasing Set Swaps', 'menuGeneratePhasingSetSwaps')
+        .addItem('⚡ Generate Ground Swaps', 'menuGenerateGroundSwaps')
+        .addItem('🔴 Generate Hot Stick Swaps', 'menuGenerateHotStickSwaps')
         .addItem('🏥 Generate AED Swaps', 'menuGenerateAEDSwaps'))
 
       // === STEP 3: PROCESS SAFETY EMAILS ===

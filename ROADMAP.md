@@ -70,14 +70,14 @@
 
 ---
 
-### Phase 5: Extended Equipment Tracking 👈 *(Next Focus)*
+### Phase 5: Extended Equipment Tracking ✅ *(Completed)*
 *Expanding beyond gloves/sleeves to all field rigging, test instruments, and rescue apparatus.*
 - [x] ✅ Rubber Blankets tracking, swap generation, and companion history
 - [x] ✅ HV Testers & Phasing Sets calibration tracking and swap generation
 - [x] ✅ AED unit pad & battery expiration tracking
 - [x] ✅ MACKs (Mechanical Jumpers) 12-column layout and swap generation
 - [x] ✅ Grounds & Hot Sticks sheet schemas, test intervals, and constants
-- [ ] ⬜ Finalize Apps Script backend swap generation menu triggers for Grounds & Hot Sticks
+- [x] ✅ **Finalize Apps Script backend swap generation menu triggers for Grounds & Hot Sticks** (`Code.gs`, `99-MenuFix.gs`)
 
 ---
 
