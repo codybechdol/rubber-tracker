@@ -450,6 +450,7 @@ class InventoryAgingEngine {
           itemNum = first;
 
           if (cat.key === 'gloves' || cat.key === 'sleeves') {
+            // Gloves/Sleeves layout (A-L): Item#, ESL ID, Size, Class, Test Date, Date Assigned, Location, Status, Assigned To, Change Out Date, Picked For, Notes
             size = String(row[2] || '—').trim();
             classVal = String(row[3] || '—').trim();
             testDate = this.parseDate(row[4]);
@@ -459,24 +460,79 @@ class InventoryAgingEngine {
             assignedTo = String(row[8] || '—').trim();
             changeOutDate = this.parseDate(row[9]);
             notes = String(row[11] || '').trim();
-          } else {
-            classVal = String(row[1] || row[2] || '—').trim();
-            testDate = this.parseDate(row[4] || row[5]);
-            dateAssigned = this.parseDate(row[5] || row[6]);
-            location = String(row[6] || row[7] || '—').trim();
-            status = String(row[7] || row[8] || 'On Shelf').trim();
-            assignedTo = String(row[8] || row[9] || '—').trim();
-            changeOutDate = this.parseDate(row[9] || row[10]);
-            notes = String(row[10] || row[11] || '').trim();
+          } else if (cat.key === 'blankets') {
+            // Blankets layout (A-K): Item#, Type, Class, Test Date, Date Assigned, Location, Status, Assigned To, Change Out Date, Picked For, Notes
+            classVal = String(row[2] || '—').trim();
+            size = String(row[1] || '—').trim();
+            testDate = this.parseDate(row[3]);
+            dateAssigned = this.parseDate(row[4]);
+            location = String(row[5] || '—').trim();
+            status = String(row[6] || 'On Shelf').trim();
+            assignedTo = String(row[7] || '—').trim();
+            changeOutDate = this.parseDate(row[8]);
+            notes = String(row[10] || '').trim();
+          } else if (cat.key === 'macks') {
+            // MACKs layout (A-L): Item#, KV, Size, Length, Test Date, Date Assigned, Location, Status, Assigned To, Change Out Date, Picked For, Notes
+            classVal = String(row[1] || '—').trim();
+            size = String(row[2] || '—').trim();
+            testDate = this.parseDate(row[4]);
+            dateAssigned = this.parseDate(row[5]);
+            location = String(row[6] || '—').trim();
+            status = String(row[7] || 'On Shelf').trim();
+            assignedTo = String(row[8] || '—').trim();
+            changeOutDate = this.parseDate(row[9]);
+            notes = String(row[11] || '').trim();
+          } else if (cat.key === 'hv_testers' || cat.key === 'phasing_sets') {
+            // HV Testers & Phasing Sets layout (A-L): Item#, Model, KV, Serial#, Calibration Date, Date Assigned, Location, Status, Assigned To, Change Out Date, Picked For, Notes
+            classVal = String(row[2] || row[1] || '—').trim();
+            testDate = this.parseDate(row[4]);
+            dateAssigned = this.parseDate(row[5]);
+            location = String(row[6] || '—').trim();
+            status = String(row[7] || 'On Shelf').trim();
+            assignedTo = String(row[8] || '—').trim();
+            changeOutDate = this.parseDate(row[9]);
+            notes = String(row[11] || '').trim();
+          } else if (cat.key === 'grounds') {
+            // Grounds layout (A-M): Serial#, Type(OH/UG), Size, KV, Length, Test Date, Date Assigned, Location, Status, Assigned To, Change Out Date, Picked For, Notes
+            size = String(row[2] || '—').trim();
+            classVal = String(row[3] || row[1] || '—').trim();
+            testDate = this.parseDate(row[5]);
+            dateAssigned = this.parseDate(row[6]);
+            location = String(row[7] || '—').trim();
+            status = String(row[8] || 'On Shelf').trim();
+            assignedTo = String(row[9] || '—').trim();
+            changeOutDate = this.parseDate(row[10]);
+            notes = String(row[12] || '').trim();
+          } else if (cat.key === 'hot_sticks') {
+            // Hot Sticks layout (A-K): Item#, Type, Length, Test Date, Date Assigned, Location, Status, Assigned To, Change Out Date, Picked For, Notes
+            classVal = String(row[1] || '—').trim();
+            size = String(row[2] || '—').trim();
+            testDate = this.parseDate(row[3]);
+            dateAssigned = this.parseDate(row[4]);
+            location = String(row[5] || '—').trim();
+            status = String(row[6] || 'On Shelf').trim();
+            assignedTo = String(row[7] || '—').trim();
+            changeOutDate = this.parseDate(row[8]);
+            notes = String(row[10] || '').trim();
+          } else if (cat.key === 'aed') {
+            // AED layout (A-K): Item#, Model, Unused, Inspection Date, Date Assigned, Location, Status, Assigned To, Unused, Picked For, Notes
+            classVal = String(row[1] || '—').trim();
+            testDate = this.parseDate(row[3]);
+            dateAssigned = this.parseDate(row[4]);
+            location = String(row[5] || '—').trim();
+            status = String(row[6] || 'On Shelf').trim();
+            assignedTo = String(row[7] || '—').trim();
+            changeOutDate = this.parseDate(row[8]);
+            notes = String(row[10] || '').trim();
           }
         } else if (typeof row === 'object' && row !== null) {
           const keys = Object.keys(row);
           itemNum = String(row['Item #'] || row['Serial #'] || row['ESL ID'] || row[keys[0]] || '').trim();
           if (!itemNum || itemNum.toLowerCase().includes('item')) return;
 
-          size = String(row['Size'] || '—').trim();
+          size = String(row['Size'] || row['Type'] || '—').trim();
           classVal = String(row['Class'] || row['KV'] || row['Model'] || row['Type'] || '—').trim();
-          testDate = this.parseDate(row['Test Date'] || row['Calibration Date']);
+          testDate = this.parseDate(row['Test Date'] || row['Calibration Date'] || row['Inspection Date'] || row['Pad Expiration']);
           dateAssigned = this.parseDate(row['Date Assigned']);
           location = String(row['Location'] || '—').trim();
           status = String(row['Status'] || 'On Shelf').trim();

@@ -1026,14 +1026,48 @@ function getInventoryAgingData() {
         status = String(row[COLS.MACKS.STATUS - 1] || 'On Shelf').trim();
         assignedTo = String(row[COLS.MACKS.ASSIGNED_TO - 1] || '—').trim();
         changeOutDate = row[COLS.MACKS.CHANGE_OUT_DATE - 1] instanceof Date ? row[COLS.MACKS.CHANGE_OUT_DATE - 1] : null;
+      } else if (cat.type === 'Grounds') {
+        // Grounds layout (A-M): Serial#, Type, Size, KV, Length, Test Date, Date Assigned, Location, Status, Assigned To, Change Out Date, Picked For, Notes
+        size = String(row[COLS.GROUNDS.SIZE - 1] || row[COLS.GROUNDS.TYPE - 1] || '—').trim();
+        classVal = String(row[COLS.GROUNDS.KV - 1] || row[COLS.GROUNDS.TYPE - 1] || '—').trim();
+        testDate = row[COLS.GROUNDS.TEST_DATE - 1] instanceof Date ? row[COLS.GROUNDS.TEST_DATE - 1] : null;
+        dateAssigned = row[COLS.GROUNDS.DATE_ASSIGNED - 1] instanceof Date ? row[COLS.GROUNDS.DATE_ASSIGNED - 1] : null;
+        location = String(row[COLS.GROUNDS.LOCATION - 1] || '—').trim();
+        status = String(row[COLS.GROUNDS.STATUS - 1] || 'On Shelf').trim();
+        assignedTo = String(row[COLS.GROUNDS.ASSIGNED_TO - 1] || '—').trim();
+        changeOutDate = row[COLS.GROUNDS.CHANGE_OUT_DATE - 1] instanceof Date ? row[COLS.GROUNDS.CHANGE_OUT_DATE - 1] : null;
+        notes = String(row[COLS.GROUNDS.NOTES - 1] || '').trim();
+      } else if (cat.type === 'Hot Sticks') {
+        // Hot Sticks layout (A-K): Item#, Type, Length, Test Date, Date Assigned, Location, Status, Assigned To, Change Out Date, Picked For, Notes
+        classVal = String(row[COLS.HOT_STICKS.TYPE - 1] || '—').trim();
+        size = String(row[COLS.HOT_STICKS.LENGTH - 1] || '—').trim();
+        testDate = row[COLS.HOT_STICKS.TEST_DATE - 1] instanceof Date ? row[COLS.HOT_STICKS.TEST_DATE - 1] : null;
+        dateAssigned = row[COLS.HOT_STICKS.DATE_ASSIGNED - 1] instanceof Date ? row[COLS.HOT_STICKS.DATE_ASSIGNED - 1] : null;
+        location = String(row[COLS.HOT_STICKS.LOCATION - 1] || '—').trim();
+        status = String(row[COLS.HOT_STICKS.STATUS - 1] || 'On Shelf').trim();
+        assignedTo = String(row[COLS.HOT_STICKS.ASSIGNED_TO - 1] || '—').trim();
+        changeOutDate = row[COLS.HOT_STICKS.CHANGE_OUT_DATE - 1] instanceof Date ? row[COLS.HOT_STICKS.CHANGE_OUT_DATE - 1] : null;
+        notes = String(row[COLS.HOT_STICKS.NOTES - 1] || '').trim();
+      } else if (cat.type === 'HV Testers' || cat.type === 'Phasing Sets') {
+        // HV Testers / Phasing Sets layout (A-L): Item#, Model, KV, Serial#, Calibration Date, Date Assigned, Location, Status, Assigned To, Change Out Date, Picked For, Notes
+        classVal = String(row[COLS.HV_TESTERS.KV - 1] || row[COLS.HV_TESTERS.MODEL - 1] || '—').trim();
+        testDate = row[COLS.HV_TESTERS.CALIBRATION_DATE - 1] instanceof Date ? row[COLS.HV_TESTERS.CALIBRATION_DATE - 1] : null;
+        dateAssigned = row[COLS.HV_TESTERS.DATE_ASSIGNED - 1] instanceof Date ? row[COLS.HV_TESTERS.DATE_ASSIGNED - 1] : null;
+        location = String(row[COLS.HV_TESTERS.LOCATION - 1] || '—').trim();
+        status = String(row[COLS.HV_TESTERS.STATUS - 1] || 'On Shelf').trim();
+        assignedTo = String(row[COLS.HV_TESTERS.ASSIGNED_TO - 1] || '—').trim();
+        changeOutDate = row[COLS.HV_TESTERS.CHANGE_OUT_DATE - 1] instanceof Date ? row[COLS.HV_TESTERS.CHANGE_OUT_DATE - 1] : null;
+        notes = String(row[COLS.HV_TESTERS.NOTES - 1] || '').trim();
       } else {
-        classVal = String(row[1] || '—').trim();
-        testDate = row[4] instanceof Date ? row[4] : null;
-        dateAssigned = row[5] instanceof Date ? row[5] : null;
-        location = String(row[6] || '—').trim();
-        status = String(row[7] || 'On Shelf').trim();
-        assignedTo = String(row[8] || '—').trim();
-        changeOutDate = row[9] instanceof Date ? row[9] : null;
+        // AED layout (A-K): Item#, Model, Unused, Inspection Date, Date Assigned, Location, Status, Assigned To, Unused, Picked For, Notes
+        classVal = String(row[COLS.AED.MODEL - 1] || '—').trim();
+        testDate = row[COLS.AED.PAD_EXPIRATION - 1] instanceof Date ? row[COLS.AED.PAD_EXPIRATION - 1] : null;
+        dateAssigned = row[COLS.AED.DATE_ASSIGNED - 1] instanceof Date ? row[COLS.AED.DATE_ASSIGNED - 1] : null;
+        location = String(row[COLS.AED.LOCATION - 1] || '—').trim();
+        status = String(row[COLS.AED.STATUS - 1] || 'On Shelf').trim();
+        assignedTo = String(row[COLS.AED.ASSIGNED_TO - 1] || '—').trim();
+        changeOutDate = row[COLS.AED.CHANGE_OUT_DATE - 1] instanceof Date ? row[COLS.AED.CHANGE_OUT_DATE - 1] : null;
+        notes = String(row[COLS.AED.NOTES - 1] || '').trim();
       }
 
       // Age calculation
