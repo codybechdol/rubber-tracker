@@ -38,14 +38,21 @@ class SyncEngine {
     }
 
     // 2. Browser fetch fallback
-    const options = { method };
+    const options = { method, redirect: 'follow' };
     if (method === 'POST' && body) {
       options.headers = { 'Content-Type': 'text/plain;charset=utf-8' };
       options.body = typeof body === 'string' ? body : JSON.stringify(body);
     }
     const resp = await fetch(url, options);
     const text = await resp.text();
-    return JSON.parse(text);
+    try {
+      return JSON.parse(text);
+    } catch (parseErr) {
+      if (text.includes('<!DOCTYPE') || text.includes('<html')) {
+        throw new Error('Google returned a login/access page. You can either:\n1. Click "📁 Import Snapshot" at the top and select SafetyAssistant_Sync_Snapshot.json from your Google Drive/Downloads, or\n2. In Google Sheets: Extensions > Apps Script > Deploy > Manage Deployments, ensure "Who has access" is set to "Anyone".');
+      }
+      throw parseErr;
+    }
   }
 
   async testConnection() {
