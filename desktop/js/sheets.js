@@ -9,7 +9,10 @@ class SheetNavigator {
     this.searchTerm = '';
     this.sortCol = null;
     this.sortDir = 'asc';
-    this.multiSort = ['Location', 'Job Number']; // Default automatic sort for Employees
+    this.filterSize = 'all';
+    this.filterClass = 'all';
+    this.filterLocation = 'all';
+    this.filterStatus = 'all';
     this.sheetList = [
       { key: 'employees', label: '👥 Employees', icon: '👤', isSwap: false },
       { key: 'job_tracking', label: '📋 Job Tracking', icon: '📋', isSwap: false },
@@ -40,6 +43,50 @@ class SheetNavigator {
     this.renderCurrentSheet();
   }
 
+  setSizeFilter(val) {
+    this.filterSize = val;
+    this.renderCurrentSheet();
+  }
+
+  setClassFilter(val) {
+    this.filterClass = val;
+    this.renderCurrentSheet();
+  }
+
+  setLocationFilter(val) {
+    this.filterLocation = val;
+    this.renderCurrentSheet();
+  }
+
+  setStatusFilter(val) {
+    this.filterStatus = val;
+    this.updateStatusPillUI();
+    this.renderCurrentSheet();
+  }
+
+  updateStatusPillUI() {
+    const pills = document.querySelectorAll('#filter-status-pills .filter-pill');
+    pills.forEach(p => {
+      if (p.dataset.status === this.filterStatus) {
+        p.classList.add('active');
+      } else {
+        p.classList.remove('active');
+      }
+    });
+  }
+
+  resetFilters() {
+    this.filterSize = 'all';
+    this.filterClass = 'all';
+    this.filterLocation = 'all';
+    this.filterStatus = 'all';
+    this.searchTerm = '';
+    const sInput = document.getElementById('sheet-search-input');
+    if (sInput) sInput.value = '';
+    this.updateStatusPillUI();
+    this.renderCurrentSheet();
+  }
+
   renderTabsBar() {
     const bar = document.getElementById('sheet-tabs-bar');
     if (!bar) return;
@@ -51,6 +98,13 @@ class SheetNavigator {
       btn.innerHTML = `<span>${sheet.icon}</span> ${sheet.label.replace(/^.*? /, '')}`;
       btn.onclick = () => {
         this.currentSheetKey = sheet.key;
+        this.filterSize = 'all';
+        this.filterClass = 'all';
+        this.filterLocation = 'all';
+        this.filterStatus = 'all';
+        this.searchTerm = '';
+        const sInput = document.getElementById('sheet-search-input');
+        if (sInput) sInput.value = '';
         if (sheet.key === 'employees') {
           this.multiSort = ['Location', 'Job Number'];
           this.sortCol = null;
@@ -413,6 +467,9 @@ class SheetNavigator {
       btnFixDates.style.display = isInventorySheet ? 'inline-block' : 'none';
     }
 
+    // Update dynamic multi-filter bar for inventory sheets
+    this.updateFilterBar(tableData, isInventorySheet);
+
     if (!tableData || (!tableData.rows?.length && !tableData.rawGrid?.length)) {
       container.innerHTML = `
         <div style="padding: 40px; text-align: center; color: var(--text-muted);">
@@ -433,6 +490,124 @@ class SheetNavigator {
 
     // Standard tabular grid renderer (Employees, Gloves, Job Tracking, etc.)
     this.renderStandardTable(container, countBadge, tableData);
+  }
+
+  updateFilterBar(tableData, isInventorySheet) {
+    const filterBar = document.getElementById('inventory-filter-bar');
+    if (!filterBar) return;
+
+    if (!isInventorySheet || !tableData || !tableData.rows || tableData.rows.length === 0) {
+      filterBar.style.display = 'none';
+      return;
+    }
+
+    filterBar.style.display = 'flex';
+
+    // Find columns dynamically
+    const headers = tableData.headers || [];
+    const sizeCol = headers.find(h => h.toLowerCase() === 'size');
+    const classCol = headers.find(h => {
+      const hl = h.toLowerCase();
+      return hl === 'class' || hl === 'kv' || hl === 'model' || hl === 'type';
+    });
+    const locCol = headers.find(h => h.toLowerCase() === 'location');
+
+    // 1. Size Dropdown
+    const sizeGroup = document.getElementById('filter-group-size');
+    const sizeSelect = document.getElementById('filter-size-select');
+    if (sizeGroup && sizeSelect) {
+      if (sizeCol) {
+        sizeGroup.style.display = 'flex';
+        const sizeCounts = {};
+        tableData.rows.forEach(r => {
+          const s = String(r[sizeCol] || '').trim();
+          if (s && s !== 'N/A' && s !== '—' && s !== '-') {
+            sizeCounts[s] = (sizeCounts[s] || 0) + 1;
+          }
+        });
+        const sortedSizes = Object.keys(sizeCounts).sort((a, b) => {
+          const numA = parseFloat(a);
+          const numB = parseFloat(b);
+          if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+          return a.localeCompare(b, undefined, { numeric: true });
+        });
+
+        let opts = `<option value="all">All Sizes (${tableData.rows.length})</option>`;
+        sortedSizes.forEach(s => {
+          opts += `<option value="${this.escapeHtml(s)}">${this.escapeHtml(s)} (${sizeCounts[s]})</option>`;
+        });
+        sizeSelect.innerHTML = opts;
+        sizeSelect.value = this.filterSize;
+      } else {
+        sizeGroup.style.display = 'none';
+      }
+    }
+
+    // 2. Class / KV Dropdown
+    const classGroup = document.getElementById('filter-group-class');
+    const classSelect = document.getElementById('filter-class-select');
+    const classLabel = document.getElementById('filter-class-label');
+    if (classGroup && classSelect) {
+      if (classCol) {
+        classGroup.style.display = 'flex';
+        if (classLabel) {
+          classLabel.textContent = (classCol.toLowerCase() === 'kv' ? 'KV:' : (classCol.toLowerCase() === 'model' ? 'Model:' : (classCol.toLowerCase() === 'type' ? 'Type:' : 'Class:')));
+        }
+        const classCounts = {};
+        tableData.rows.forEach(r => {
+          const c = String(r[classCol] || '').trim();
+          if (c && c !== 'N/A' && c !== '—' && c !== '-') {
+            classCounts[c] = (classCounts[c] || 0) + 1;
+          }
+        });
+        const sortedClasses = Object.keys(classCounts).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
+        let opts = `<option value="all">All (${tableData.rows.length})</option>`;
+        sortedClasses.forEach(c => {
+          opts += `<option value="${this.escapeHtml(c)}">${this.escapeHtml(c)} (${classCounts[c]})</option>`;
+        });
+        classSelect.innerHTML = opts;
+        classSelect.value = this.filterClass;
+      } else {
+        classGroup.style.display = 'none';
+      }
+    }
+
+    // 3. Location Dropdown
+    const locGroup = document.getElementById('filter-group-location');
+    const locSelect = document.getElementById('filter-location-select');
+    if (locGroup && locSelect) {
+      if (locCol) {
+        locGroup.style.display = 'flex';
+        const locCounts = {};
+        tableData.rows.forEach(r => {
+          const l = String(r[locCol] || '').trim();
+          if (l && l !== 'N/A' && l !== '—' && l !== '-') {
+            locCounts[l] = (locCounts[l] || 0) + 1;
+          }
+        });
+        const sortedLocs = Object.keys(locCounts).sort((a, b) => a.localeCompare(b));
+
+        let opts = `<option value="all">All Locations (${tableData.rows.length})</option>`;
+        sortedLocs.forEach(l => {
+          opts += `<option value="${this.escapeHtml(l)}">${this.escapeHtml(l)} (${locCounts[l]})</option>`;
+        });
+        locSelect.innerHTML = opts;
+        locSelect.value = this.filterLocation;
+      } else {
+        locGroup.style.display = 'none';
+      }
+    }
+
+    // 4. Update status pills UI
+    this.updateStatusPillUI();
+
+    // 5. Clear button visibility
+    const btnClear = document.getElementById('btn-clear-filters');
+    const isFiltered = (this.filterSize !== 'all' || this.filterClass !== 'all' || this.filterLocation !== 'all' || this.filterStatus !== 'all' || Boolean(this.searchTerm));
+    if (btnClear) {
+      btnClear.style.display = isFiltered ? 'inline-flex' : 'none';
+    }
   }
 
   renderSwapReportGrid(container, countBadge, tableData) {
@@ -854,6 +1029,73 @@ class SheetNavigator {
           return false;
         });
       });
+    }
+
+    // Multi-criteria filtering for inventory sheets
+    const isInventorySheet = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(this.currentSheetKey);
+
+    if (isInventorySheet) {
+      // 1. Size Filter
+      if (this.filterSize && this.filterSize !== 'all') {
+        const targetSize = this.filterSize.toLowerCase();
+        rows = rows.filter(r => String(r['Size'] || '').trim().toLowerCase() === targetSize);
+      }
+
+      // 2. Class / KV / Model / Type Filter
+      if (this.filterClass && this.filterClass !== 'all') {
+        const targetClass = this.filterClass.toLowerCase();
+        rows = rows.filter(r => {
+          const cVal = String(r['Class'] || r['KV'] || r['Model'] || r['Type'] || '').trim().toLowerCase();
+          return cVal === targetClass;
+        });
+      }
+
+      // 3. Location Filter
+      if (this.filterLocation && this.filterLocation !== 'all') {
+        const targetLoc = this.filterLocation.toLowerCase();
+        rows = rows.filter(r => String(r['Location'] || '').trim().toLowerCase() === targetLoc);
+      }
+
+      // 4. Status Filter
+      if (this.filterStatus && this.filterStatus !== 'all') {
+        const now = new Date().getTime();
+        rows = rows.filter(r => {
+          const stat = String(r['Status'] || '').trim().toLowerCase();
+          const assigned = String(r['Assigned To'] || '').trim().toLowerCase();
+          const chgOutStr = String(r['Change Out Date'] || r['Pad Expiration'] || '').trim();
+
+          if (this.filterStatus === 'on_shelf') {
+            return stat === 'on shelf' || assigned === 'on shelf';
+          }
+          if (this.filterStatus === 'assigned') {
+            return (stat === 'assigned' || stat === 'in service' || stat === 'active') &&
+                   assigned !== 'on shelf' && assigned !== 'in testing' && assigned !== 'failed rubber' &&
+                   assigned !== 'lost' && assigned !== 'ready for test';
+          }
+          if (this.filterStatus === 'in_testing') {
+            return stat === 'in testing' || assigned === 'in testing' || stat === 'ready for test' || assigned === 'packed for testing';
+          }
+          if (this.filterStatus === 'ready_delivery') {
+            return stat === 'ready for delivery' || assigned === 'packed for delivery';
+          }
+          if (this.filterStatus === 'expiring_soon' || this.filterStatus === 'overdue') {
+            if (!chgOutStr || chgOutStr === 'N/A') return false;
+            let dTime = NaN;
+            if (chgOutStr.includes('/')) {
+              const p = chgOutStr.split('/');
+              if (p.length === 3) dTime = new Date(parseInt(p[2], 10), parseInt(p[0], 10) - 1, parseInt(p[1], 10), 12, 0, 0).getTime();
+            } else if (/^\d{4}-\d{2}-\d{2}$/.test(chgOutStr)) {
+              const p = chgOutStr.split('-');
+              dTime = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10), 12, 0, 0).getTime();
+            }
+            if (isNaN(dTime)) return false;
+            const daysLeft = (dTime - now) / (1000 * 60 * 60 * 24);
+            if (this.filterStatus === 'expiring_soon') return daysLeft >= 0 && daysLeft <= 30;
+            if (this.filterStatus === 'overdue') return daysLeft < 0;
+          }
+          return true;
+        });
+      }
     }
 
     // Custom status ranking for Job Tracking, Inventory, Expiring Certs, Training

@@ -116,6 +116,33 @@
             <input type="text" id="sheet-search-input" class="sheet-search" placeholder="Filter rows in this sheet...">
           </div>
         </div>
+        <!-- Dynamic Filter Bar for Inventory Drilldown & Multi-Criteria Filtering -->
+        <div class="filter-bar" id="inventory-filter-bar" style="display: none;">
+          <div class="filter-group" id="filter-group-size">
+            <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Size:</label>
+            <select id="filter-size-select" class="filter-select" onchange="window.sheetNavigator.setSizeFilter(this.value)"></select>
+          </div>
+          <div class="filter-group" id="filter-group-class">
+            <label id="filter-class-label" style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Class:</label>
+            <select id="filter-class-select" class="filter-select" onchange="window.sheetNavigator.setClassFilter(this.value)"></select>
+          </div>
+          <div class="filter-group" id="filter-group-location">
+            <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Location:</label>
+            <select id="filter-location-select" class="filter-select" onchange="window.sheetNavigator.setLocationFilter(this.value)"></select>
+          </div>
+          <div class="filter-pills" id="filter-status-pills">
+            <button class="filter-pill active" data-status="all" onclick="window.sheetNavigator.setStatusFilter('all')">All</button>
+            <button class="filter-pill" data-status="on_shelf" onclick="window.sheetNavigator.setStatusFilter('on_shelf')">📦 On Shelf</button>
+            <button class="filter-pill" data-status="assigned" onclick="window.sheetNavigator.setStatusFilter('assigned')">👤 Assigned</button>
+            <button class="filter-pill" data-status="in_testing" onclick="window.sheetNavigator.setStatusFilter('in_testing')">🧪 In Testing</button>
+            <button class="filter-pill" data-status="ready_delivery" onclick="window.sheetNavigator.setStatusFilter('ready_delivery')">🚚 Ready For Delivery</button>
+            <button class="filter-pill" data-status="expiring_soon" onclick="window.sheetNavigator.setStatusFilter('expiring_soon')">⚠️ Expiring (<30d)</button>
+            <button class="filter-pill" data-status="overdue" onclick="window.sheetNavigator.setStatusFilter('overdue')">❌ Overdue</button>
+          </div>
+          <button class="btn btn-secondary" id="btn-clear-filters" style="margin-left: auto; padding: 4px 10px; font-size: 11px; display: none;" onclick="window.sheetNavigator.resetFilters()">
+            ✕ Clear Filters
+          </button>
+        </div>
         <div class="grid-wrapper" id="sheet-grid-container"></div>
       </section>
 
