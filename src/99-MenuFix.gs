@@ -34,6 +34,7 @@ function _buildGloveManagerMenu() {
       .addSubMenu(ui.createMenu('📊 Generate All Reports')
         .addItem('⚡ Generate All Reports', 'generateAllReports')
         .addItem('📊 Deploy Swaps Dashboards', 'deploySwapsDashboards')
+        .addItem('⏳ Inventory Aging & Fleet Lifecycle', 'showInventoryAgingReportDialog')
         .addSeparator()
         .addItem('Generate Glove Swaps', 'generateGloveSwaps')
         .addItem('Generate Sleeve Swaps', 'generateSleeveSwaps')

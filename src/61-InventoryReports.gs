@@ -898,3 +898,169 @@ function processItemSourceLogging(formData, itemNum, itemType, sheetName, ss, ro
 
   ss.toast('Item #' + itemNum + ' added as ' + source, '✅ Item Added', 3);
 }
+
+/**
+ * Aggregates fleet aging, recertification status, and lifecycle data across all equipment categories.
+ * @return {Object} Fleet aging analytics payload
+ */
+function getInventoryAgingData() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var today = new Date();
+  today.setHours(12, 0, 0, 0);
+
+  var categories = [
+    { name: SHEET_GLOVES, type: 'Gloves', label: '🧤 Gloves' },
+    { name: SHEET_SLEEVES, type: 'Sleeves', label: '🦺 Sleeves' },
+    { name: SHEET_BLANKETS, type: 'Blankets', label: '🧱 Blankets' },
+    { name: SHEET_MACKS, type: 'MACKs', label: '🧱 MACKs' },
+    { name: SHEET_HV_TESTERS, type: 'HV Testers', label: '⚡ HV Testers' },
+    { name: SHEET_PHASING_SETS, type: 'Phasing Sets', label: '⚡ Phasing Sets' },
+    { name: SHEET_AED, type: 'AED', label: '🏥 AED Units' }
+  ];
+
+  var allItems = [];
+
+  categories.forEach(function(cat) {
+    var sheet = ss.getSheetByName(cat.name);
+    if (!sheet || sheet.getLastRow() < 2) return;
+
+    var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+
+    data.forEach(function(row) {
+      var itemNum = String(row[0] || '').trim();
+      if (!itemNum || itemNum.toLowerCase().indexOf('item') !== -1) return;
+
+      var size = '—';
+      var classVal = '—';
+      var testDate = null;
+      var dateAssigned = null;
+      var changeOutDate = null;
+      var location = '—';
+      var status = 'On Shelf';
+      var assignedTo = '—';
+      var notes = '';
+
+      if (cat.type === 'Gloves' || cat.type === 'Sleeves') {
+        size = String(row[COLS.INVENTORY.SIZE - 1] || '—').trim();
+        classVal = String(row[COLS.INVENTORY.CLASS - 1] || '—').trim();
+        testDate = row[COLS.INVENTORY.TEST_DATE - 1] instanceof Date ? row[COLS.INVENTORY.TEST_DATE - 1] : null;
+        dateAssigned = row[COLS.INVENTORY.DATE_ASSIGNED - 1] instanceof Date ? row[COLS.INVENTORY.DATE_ASSIGNED - 1] : null;
+        location = String(row[COLS.INVENTORY.LOCATION - 1] || '—').trim();
+        status = String(row[COLS.INVENTORY.STATUS - 1] || 'On Shelf').trim();
+        assignedTo = String(row[COLS.INVENTORY.ASSIGNED_TO - 1] || '—').trim();
+        changeOutDate = row[COLS.INVENTORY.CHANGE_OUT_DATE - 1] instanceof Date ? row[COLS.INVENTORY.CHANGE_OUT_DATE - 1] : null;
+        notes = String(row[COLS.INVENTORY.NOTES - 1] || '').trim();
+      } else if (cat.type === 'Blankets') {
+        classVal = String(row[COLS.BLANKETS.CLASS - 1] || '—').trim();
+        size = String(row[COLS.BLANKETS.SIZE - 1] || '—').trim();
+        testDate = row[COLS.BLANKETS.TEST_DATE - 1] instanceof Date ? row[COLS.BLANKETS.TEST_DATE - 1] : null;
+        dateAssigned = row[COLS.BLANKETS.DATE_ASSIGNED - 1] instanceof Date ? row[COLS.BLANKETS.DATE_ASSIGNED - 1] : null;
+        location = String(row[COLS.BLANKETS.LOCATION - 1] || '—').trim();
+        status = String(row[COLS.BLANKETS.STATUS - 1] || 'On Shelf').trim();
+        assignedTo = String(row[COLS.BLANKETS.ASSIGNED_TO - 1] || '—').trim();
+        changeOutDate = row[COLS.BLANKETS.CHANGE_OUT_DATE - 1] instanceof Date ? row[COLS.BLANKETS.CHANGE_OUT_DATE - 1] : null;
+        notes = String(row[COLS.BLANKETS.NOTES - 1] || '').trim();
+      } else if (cat.type === 'MACKs') {
+        classVal = String(row[COLS.MACKS.KV - 1] || '—').trim();
+        size = String(row[COLS.MACKS.SIZE - 1] || '—').trim();
+        testDate = row[COLS.MACKS.TEST_DATE - 1] instanceof Date ? row[COLS.MACKS.TEST_DATE - 1] : null;
+        dateAssigned = row[COLS.MACKS.DATE_ASSIGNED - 1] instanceof Date ? row[COLS.MACKS.DATE_ASSIGNED - 1] : null;
+        location = String(row[COLS.MACKS.LOCATION - 1] || '—').trim();
+        status = String(row[COLS.MACKS.STATUS - 1] || 'On Shelf').trim();
+        assignedTo = String(row[COLS.MACKS.ASSIGNED_TO - 1] || '—').trim();
+        changeOutDate = row[COLS.MACKS.CHANGE_OUT_DATE - 1] instanceof Date ? row[COLS.MACKS.CHANGE_OUT_DATE - 1] : null;
+      } else {
+        // HV Testers, Phasing Sets, AED
+        classVal = String(row[1] || '—').trim();
+        testDate = row[4] instanceof Date ? row[4] : null;
+        dateAssigned = row[5] instanceof Date ? row[5] : null;
+        location = String(row[6] || '—').trim();
+        status = String(row[7] || 'On Shelf').trim();
+        assignedTo = String(row[8] || '—').trim();
+        changeOutDate = row[9] instanceof Date ? row[9] : null;
+      }
+
+      var earliestDate = testDate || dateAssigned || changeOutDate;
+      var ageDays = 180;
+      if (earliestDate && !isNaN(earliestDate.getTime())) {
+        ageDays = Math.max(0, Math.floor((today.getTime() - earliestDate.getTime()) / (1000 * 60 * 60 * 24)));
+      }
+      var ageYears = (ageDays / 365.25).toFixed(1);
+
+      var daysUntil = 999;
+      if (changeOutDate && !isNaN(changeOutDate.getTime())) {
+        daysUntil = Math.floor((changeOutDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      }
+
+      var tier = 'FRESH';
+      var tierLabel = '🟢 Fresh (<1 yr)';
+      var tierColor = '#10b981';
+
+      if (ageDays >= 1825) {
+        tier = 'CRITICAL';
+        tierLabel = '🔴 EOL (>5 yrs)';
+        tierColor = '#ef4444';
+      } else if (ageDays >= 1095) {
+        tier = 'AGING';
+        tierLabel = '🟠 Aging (3-5 yrs)';
+        tierColor = '#f97316';
+      } else if (ageDays >= 365) {
+        tier = 'MID_LIFE';
+        tierLabel = '🟡 Mid-Life (1-3 yrs)';
+        tierColor = '#eab308';
+      }
+
+      var recertStatus = 'CURRENT';
+      var recertLabel = '🟢 Current';
+      if (daysUntil < 0) {
+        recertStatus = 'OVERDUE';
+        recertLabel = '🔴 Overdue (' + Math.abs(daysUntil) + 'd)';
+      } else if (daysUntil <= 30) {
+        recertStatus = 'DUE_SOON';
+        recertLabel = '🟠 Due in ' + daysUntil + 'd';
+      }
+
+      allItems.push({
+        itemNum: itemNum,
+        category: cat.type,
+        categoryLabel: cat.label,
+        size: size,
+        classVal: classVal,
+        location: location,
+        status: status,
+        assignedTo: assignedTo,
+        recertDateStr: changeOutDate ? Utilities.formatDate(changeOutDate, Session.getScriptTimeZone(), 'MM/dd/yyyy') : '—',
+        daysUntil: daysUntil,
+        ageDays: ageDays,
+        ageYears: ageYears,
+        tier: tier,
+        tierLabel: tierLabel,
+        tierColor: tierColor,
+        recertStatus: recertStatus,
+        recertLabel: recertLabel,
+        notes: notes
+      });
+    });
+  });
+
+  return {
+    items: allItems,
+    totalFleet: allItems.length,
+    criticalCount: allItems.filter(function(i) { return i.tier === 'CRITICAL'; }).length,
+    agingCount: allItems.filter(function(i) { return i.tier === 'AGING'; }).length,
+    overdueCount: allItems.filter(function(i) { return i.recertStatus === 'OVERDUE'; }).length,
+    dueSoonCount: allItems.filter(function(i) { return i.recertStatus === 'DUE_SOON'; }).length
+  };
+}
+
+/**
+ * Shows the Inventory Aging & Fleet Lifecycle report modal dialog in Google Sheets.
+ */
+function showInventoryAgingReportDialog() {
+  var html = HtmlService.createHtmlOutputFromFile('InventoryAgingDialog')
+    .setWidth(1100)
+    .setHeight(750)
+    .setTitle('📊 Inventory Aging & Fleet Lifecycle');
+  SpreadsheetApp.getUi().showModalDialog(html, '📊 Inventory Aging & Fleet Lifecycle');
+}
+

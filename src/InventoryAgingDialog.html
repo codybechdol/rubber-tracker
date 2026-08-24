@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    :root {
+      --bg-primary: #0f172a;
+      --bg-secondary: #1e293b;
+      --bg-tertiary: #334155;
+      --border-color: #475569;
+      --text-primary: #f8fafc;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --accent: #3b82f6;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: var(--bg-primary); color: var(--text-primary); padding: 18px; font-size: 13px; }
+
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .header-title { font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px; color: #93c5fd; }
+
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
+    .kpi-card { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 14px; }
+    .kpi-title { font-size: 11px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; }
+    .kpi-value { font-size: 18px; font-weight: 800; margin-top: 4px; font-family: monospace; }
+
+    .filter-bar { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; background: var(--bg-secondary); padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); align-items: center; }
+    .filter-btn { background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-secondary); padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 11.5px; font-weight: 600; }
+    .filter-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
+
+    .search-box { flex: 1; min-width: 200px; padding: 6px 10px; border-radius: 6px; background: var(--bg-primary); border: 1px solid var(--border-color); color: white; font-size: 12px; }
+
+    .table-container { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; overflow-y: auto; max-height: 440px; }
+    table { width: 100%; border-collapse: collapse; text-align: left; }
+    th { background: rgba(0,0,0,0.3); padding: 10px; font-size: 11.5px; color: var(--text-secondary); border-bottom: 1px solid var(--border-color); position: sticky; top: 0; }
+    td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 12px; }
+    tr:hover { background: rgba(255,255,255,0.03); }
+
+    .badge { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 700; }
+    .badge-critical { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); }
+    .badge-aging { background: rgba(249, 115, 22, 0.2); color: #fb923c; border: 1px solid rgba(249, 115, 22, 0.4); }
+    .badge-mid { background: rgba(234, 179, 8, 0.2); color: #facc15; border: 1px solid rgba(234, 179, 8, 0.4); }
+    .badge-fresh { background: rgba(16, 185, 129, 0.2); color: #4ade80; border: 1px solid rgba(16, 185, 129, 0.4); }
+
+    .loading { text-align: center; padding: 40px; color: var(--text-muted); }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <div class="header-title">
+      <span>📊</span> Fleet Aging & Lifecycle Analytics
+    </div>
+    <div id="results-count" style="font-size: 12px; color: var(--text-muted);">Loading fleet...</div>
+  </div>
+
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-title">Total Active Fleet</div>
+      <div class="kpi-value" id="kpi-total" style="color: #93c5fd;">—</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-title">Avg Fleet Age</div>
+      <div class="kpi-value" id="kpi-avg" style="color: #a78bfa;">—</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-title">🔴 EOL (>5 yrs)</div>
+      <div class="kpi-value" id="kpi-critical" style="color: #f87171;">—</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-title">⚠️ Overdue Recert</div>
+      <div class="kpi-value" id="kpi-overdue" style="color: #ef4444;">—</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-title">🟠 Due Soon (<30d)</div>
+      <div class="kpi-value" id="kpi-due-soon" style="color: #fb923c;">—</div>
+    </div>
+  </div>
+
+  <div class="filter-bar">
+    <span style="font-size: 11px; color: var(--text-muted); font-weight: 600;">Category:</span>
+    <button class="filter-btn active cat-btn" data-cat="all" onclick="setCategory('all')">All</button>
+    <button class="filter-btn cat-btn" data-cat="Gloves" onclick="setCategory('Gloves')">🧤 Gloves</button>
+    <button class="filter-btn cat-btn" data-cat="Sleeves" onclick="setCategory('Sleeves')">🦺 Sleeves</button>
+    <button class="filter-btn cat-btn" data-cat="Blankets" onclick="setCategory('Blankets')">🧱 Blankets</button>
+    <button class="filter-btn cat-btn" data-cat="MACKs" onclick="setCategory('MACKs')">🧱 MACKs</button>
+    <button class="filter-btn cat-btn" data-cat="HV Testers" onclick="setCategory('HV Testers')">⚡ Testers</button>
+    <button class="filter-btn cat-btn" data-cat="AED" onclick="setCategory('AED')">🏥 AED</button>
+
+    <input type="text" id="search-box" class="search-box" placeholder="🔍 Search item, worker, location..." oninput="onSearch(this.value)">
+  </div>
+
+  <div class="table-container" id="table-container">
+    <div class="loading">Loading fleet equipment data...</div>
+  </div>
+
+  <script>
+    let rawItems = [];
+    let activeCategory = 'all';
+    let searchQuery = '';
+
+    window.onload = function() {
+      google.script.run
+        .withSuccessHandler(renderData)
+        .withFailureHandler(err => {
+          document.getElementById('table-container').innerHTML = '<div class="loading" style="color: #ef4444;">Failed to load: ' + err + '</div>';
+        })
+        .getInventoryAgingData();
+    };
+
+    function renderData(data) {
+      rawItems = data.items || [];
+
+      document.getElementById('kpi-total').textContent = data.totalFleet || '0';
+      const avgYears = rawItems.length ? (rawItems.reduce((s, i) => s + i.ageDays, 0) / rawItems.length / 365.25).toFixed(1) : '0.0';
+      document.getElementById('kpi-avg').textContent = avgYears + ' yrs';
+      document.getElementById('kpi-critical').textContent = data.criticalCount || '0';
+      document.getElementById('kpi-overdue').textContent = data.overdueCount || '0';
+      document.getElementById('kpi-due-soon').textContent = data.dueSoonCount || '0';
+
+      renderTable();
+    }
+
+    function setCategory(cat) {
+      activeCategory = cat;
+      document.querySelectorAll('.cat-btn').forEach(b => b.classList.toggle('active', b.dataset.cat === cat));
+      renderTable();
+    }
+
+    function onSearch(q) {
+      searchQuery = (q || '').toLowerCase().trim();
+      renderTable();
+    }
+
+    function renderTable() {
+      const filtered = rawItems.filter(i => {
+        if (activeCategory !== 'all' && i.category !== activeCategory) return false;
+        if (searchQuery) {
+          const str = (i.itemNum + ' ' + i.category + ' ' + i.size + ' ' + i.classVal + ' ' + i.location + ' ' + i.assignedTo + ' ' + i.status).toLowerCase();
+          if (!str.includes(searchQuery)) return false;
+        }
+        return true;
+      }).sort((a, b) => b.ageDays - a.ageDays);
+
+      document.getElementById('results-count').textContent = filtered.length + ' of ' + rawItems.length + ' items';
+
+      if (filtered.length === 0) {
+        document.getElementById('table-container').innerHTML = '<div class="loading">No matching items found.</div>';
+        return;
+      }
+
+      let html = `
+        <table>
+          <thead>
+            <tr>
+              <th>Item #</th>
+              <th>Category</th>
+              <th>Size / KV</th>
+              <th>Location</th>
+              <th>Assigned To</th>
+              <th>Recert Date</th>
+              <th>Status</th>
+              <th>Est. Age</th>
+              <th>Lifecycle Tier</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
+
+      filtered.forEach(i => {
+        let badgeClass = 'badge-fresh';
+        if (i.tier === 'CRITICAL') badgeClass = 'badge-critical';
+        else if (i.tier === 'AGING') badgeClass = 'badge-aging';
+        else if (i.tier === 'MID_LIFE') badgeClass = 'badge-mid';
+
+        html += `
+          <tr>
+            <td style="font-weight: 700; color: #60a5fa; font-family: monospace;">${i.itemNum}</td>
+            <td>${i.categoryLabel}</td>
+            <td>${i.size !== '—' ? i.size : ''} ${i.classVal !== '—' ? i.classVal : ''}</td>
+            <td>${i.location}</td>
+            <td style="color: ${i.assignedTo !== '—' ? '#f472b6' : 'var(--text-muted)'}; font-weight: ${i.assignedTo !== '—' ? '600' : '400'};">${i.assignedTo}</td>
+            <td style="font-family: monospace;">${i.recertDateStr}</td>
+            <td><span class="badge ${i.recertStatus === 'OVERDUE' ? 'badge-critical' : (i.recertStatus === 'DUE_SOON' ? 'badge-aging' : 'badge-fresh')}">${i.recertLabel}</span></td>
+            <td style="font-weight: 700; color: ${i.tierColor}; font-family: monospace;">${i.ageYears} yrs</td>
+            <td><span class="badge ${badgeClass}">${i.tierLabel}</span></td>
+          </tr>
+        `;
+      });
+
+      html += '</tbody></table>';
+      document.getElementById('table-container').innerHTML = html;
+    }
+  </script>
+</body>
+</html>

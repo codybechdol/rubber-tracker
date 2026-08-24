@@ -74,6 +74,9 @@
         <div class="nav-item" data-view="procurement-view">
           <span class="nav-item-icon">🛒</span> Purchase Needs & POs
         </div>
+        <div class="nav-item" data-view="aging-view">
+          <span class="nav-item-icon">📊</span> Fleet Aging & EOL
+        </div>
         <div class="nav-item" data-view="nwe-fire-view">
           <span class="nav-item-icon">🔥</span> NWE Fire Info
         </div>
@@ -376,6 +379,96 @@
         </div>
       </section>
 
+      <!-- View 4D: Inventory Aging & Fleet Lifecycle -->
+      <section id="aging-view" class="view-container">
+        <div class="sheet-toolbar" style="display: flex; flex-direction: column; gap: 10px; padding: 12px 18px; background: #1e293b; border-bottom: 1px solid var(--border-color);">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 18px;">📊</span>
+              <h2 style="font-size: 15px; margin: 0; font-weight: 800; color: #f8fafc;">Inventory Aging & Fleet Lifecycle</h2>
+              <span class="brand-badge" id="aging-results-count" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 11px; font-weight: 700;">
+                0 items
+              </span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <input type="text" id="aging-search-input" placeholder="🔍 Search item #, worker, city, notes..." style="width: 260px; padding: 6px 12px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+              <select id="aging-sort-select" style="padding: 6px 12px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+                <option value="age_desc">⏳ Oldest Fleet Age First</option>
+                <option value="age_asc">🌱 Newest Items First</option>
+                <option value="due_asc">🚨 Soonest Recertification Due</option>
+                <option value="cycles_desc">🔄 Most Service Cycles</option>
+                <option value="item_asc">🔢 Item # / Serial #</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- KPI Summary Cards -->
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-top: 4px;">
+            <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px;">
+              <div style="font-size: 11px; color: var(--text-muted); font-weight: 600;">Total Active Fleet</div>
+              <div id="aging-stat-total" style="font-size: 16px; font-weight: 800; color: #93c5fd; font-family: monospace;">0 items</div>
+            </div>
+            <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px;">
+              <div style="font-size: 11px; color: var(--text-muted); font-weight: 600;">Average Fleet Age</div>
+              <div id="aging-stat-avg-age" style="font-size: 16px; font-weight: 800; color: #a78bfa; font-family: monospace;">0.0 yrs</div>
+            </div>
+            <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(248, 113, 113, 0.3); border-radius: 6px; padding: 8px 12px;">
+              <div style="font-size: 11px; color: #fca5a5; font-weight: 600;">🔴 EOL Candidates (>5 yrs)</div>
+              <div id="aging-stat-critical" style="font-size: 16px; font-weight: 800; color: #f87171; font-family: monospace;">0 items</div>
+            </div>
+            <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; padding: 8px 12px;">
+              <div style="font-size: 11px; color: #fca5a5; font-weight: 600;">⚠️ Overdue Recert</div>
+              <div id="aging-stat-overdue" style="font-size: 16px; font-weight: 800; color: #ef4444; font-family: monospace;">0 items</div>
+            </div>
+            <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(251, 146, 60, 0.3); border-radius: 6px; padding: 8px 12px;">
+              <div style="font-size: 11px; color: #fed7aa; font-weight: 600;">🟠 Due Soon (< 30d)</div>
+              <div id="aging-stat-due-soon" style="font-size: 16px; font-weight: 800; color: #fb923c; font-family: monospace;">0 items</div>
+            </div>
+          </div>
+
+          <!-- Multi-tier Filter Bar -->
+          <div style="display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px;">
+            <!-- Category Pills -->
+            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+              <span style="color: var(--text-muted); font-weight: 600; min-width: 65px;">Category:</span>
+              <button class="btn btn-secondary aging-cat-btn active" data-cat="all" style="padding: 2px 8px; font-size: 11px;" onclick="window.inventoryAging.setCategory('all')">All Fleet</button>
+              <button class="btn btn-secondary aging-cat-btn" data-cat="gloves" style="padding: 2px 8px; font-size: 11px;" onclick="window.inventoryAging.setCategory('gloves')">🧤 Gloves</button>
+              <button class="btn btn-secondary aging-cat-btn" data-cat="sleeves" style="padding: 2px 8px; font-size: 11px;" onclick="window.inventoryAging.setCategory('sleeves')">🦺 Sleeves</button>
+              <button class="btn btn-secondary aging-cat-btn" data-cat="blankets" style="padding: 2px 8px; font-size: 11px;" onclick="window.inventoryAging.setCategory('blankets')">🧱 Blankets</button>
+              <button class="btn btn-secondary aging-cat-btn" data-cat="macks" style="padding: 2px 8px; font-size: 11px;" onclick="window.inventoryAging.setCategory('macks')">🧱 MACKs</button>
+              <button class="btn btn-secondary aging-cat-btn" data-cat="hv_testers" style="padding: 2px 8px; font-size: 11px;" onclick="window.inventoryAging.setCategory('hv_testers')">⚡ HV Testers</button>
+              <button class="btn btn-secondary aging-cat-btn" data-cat="phasing_sets" style="padding: 2px 8px; font-size: 11px;" onclick="window.inventoryAging.setCategory('phasing_sets')">⚡ Phasing Sets</button>
+              <button class="btn btn-secondary aging-cat-btn" data-cat="grounds" style="padding: 2px 8px; font-size: 11px;" onclick="window.inventoryAging.setCategory('grounds')">⚡ Grounds</button>
+              <button class="btn btn-secondary aging-cat-btn" data-cat="hot_sticks" style="padding: 2px 8px; font-size: 11px;" onclick="window.inventoryAging.setCategory('hot_sticks')">🔴 Hot Sticks</button>
+              <button class="btn btn-secondary aging-cat-btn" data-cat="aed" style="padding: 2px 8px; font-size: 11px;" onclick="window.inventoryAging.setCategory('aed')">🏥 AED Units</button>
+            </div>
+
+            <!-- Age Tier & Recertification Row -->
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+              <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                <span style="color: var(--text-muted); font-weight: 600; min-width: 65px;">Age Tier:</span>
+                <button class="btn btn-secondary aging-tier-btn active" data-tier="all" style="padding: 2px 8px; font-size: 11px;" onclick="window.inventoryAging.setTier('all')">All Ages</button>
+                <button class="btn btn-secondary aging-tier-btn" data-tier="CRITICAL" style="padding: 2px 8px; font-size: 11px; color: #f87171;" onclick="window.inventoryAging.setTier('CRITICAL')">🔴 EOL (>5 yrs)</button>
+                <button class="btn btn-secondary aging-tier-btn" data-tier="AGING" style="padding: 2px 8px; font-size: 11px; color: #fb923c;" onclick="window.inventoryAging.setTier('AGING')">🟠 Aging (3-5 yrs)</button>
+                <button class="btn btn-secondary aging-tier-btn" data-tier="MID_LIFE" style="padding: 2px 8px; font-size: 11px; color: #facc15;" onclick="window.inventoryAging.setTier('MID_LIFE')">🟡 Mid-Life (1-3 yrs)</button>
+                <button class="btn btn-secondary aging-tier-btn" data-tier="FRESH" style="padding: 2px 8px; font-size: 11px; color: #4ade80;" onclick="window.inventoryAging.setTier('FRESH')">🟢 Fresh (<1 yr)</button>
+              </div>
+              <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                <span style="color: var(--text-muted); font-weight: 600;">Recert:</span>
+                <button class="btn btn-secondary aging-recert-btn active" data-recert="all" style="padding: 2px 8px; font-size: 11px;" onclick="window.inventoryAging.setRecert('all')">All</button>
+                <button class="btn btn-secondary aging-recert-btn" data-recert="OVERDUE" style="padding: 2px 8px; font-size: 11px; color: #f87171;" onclick="window.inventoryAging.setRecert('OVERDUE')">🔴 Overdue</button>
+                <button class="btn btn-secondary aging-recert-btn" data-recert="DUE_SOON" style="padding: 2px 8px; font-size: 11px; color: #fb923c;" onclick="window.inventoryAging.setRecert('DUE_SOON')">🟠 <30d</button>
+                <button class="btn btn-secondary aging-recert-btn" data-recert="CURRENT" style="padding: 2px 8px; font-size: 11px; color: #4ade80;" onclick="window.inventoryAging.setRecert('CURRENT')">🟢 Current</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style="flex: 1; padding: 16px 20px; overflow-y: auto;" id="aging-table-container">
+          <!-- Injected dynamically by aging.js -->
+        </div>
+      </section>
+
       <!-- View 5: Sync Settings -->
       <section id="settings-view" class="view-container">
         <div class="sheet-toolbar">
@@ -661,6 +754,7 @@
   <script src="js/trip-planner.js"></script>
   <script src="js/lookup.js"></script>
   <script src="js/procurement.js"></script>
+  <script src="js/aging.js"></script>
 
   <script>
     // Navigation routing
@@ -684,6 +778,7 @@
         if (viewId === 'history-view') window.historyNavigator.renderCurrentHistory();
         if (viewId === 'lookup-view') window.lookupApp.init();
         if (viewId === 'procurement-view') window.procurementEngine.loadData();
+        if (viewId === 'aging-view') window.inventoryAging.loadData();
       });
     });
 
@@ -707,6 +802,9 @@
 
       window.procurementEngine = new ProcurementEngine(window.localDB);
       window.procurementEngine.init();
+
+      window.inventoryAging = new InventoryAgingEngine(window.localDB);
+      window.inventoryAging.init();
 
       if (window.inventoryManager) window.inventoryManager.init();
       if (window.crewImportEngine) window.crewImportEngine.init();
