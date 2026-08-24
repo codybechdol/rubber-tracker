@@ -55,17 +55,7 @@ function _buildGloveManagerMenu() {
         .addItem('🔗 Restore Email Links (All Logs)', 'menuApplyAllEmailLinks')
         .addItem('📊 Gmail Status', 'showGmailStatus'))
 
-      // === STEP 4: SAVE & BACKUP ===
-      .addSubMenu(ui.createMenu('💾 Save & Backup')
-        .addItem('💾 Save Current State to History', 'saveHistoryFast')
-        .addItem('📥 Import Item History Log', 'showImportItemHistoryDialog')
-        .addItem('🧹 Clean & Repair History Sheets', 'menuCleanHistorySheets')
-        .addItem('💾 Create Backup Snapshot', 'createBackupSnapshot')
-        .addItem('↩️ Restore Gloves from Backup...', 'menuRestoreGlovesFromBackup')
-        .addItem('🔄 Export Offline Snapshot (Desktop App)', 'menuExportSyncSnapshot')
-        .addItem('📂 View Backup Folder', 'openBackupFolder'))
-
-      // === STEP 5: REVIEW & SCHEDULE ===
+      // === STEP 4: REVIEW & SCHEDULE ===
       .addSubMenu(ui.createMenu('📅 Review & Schedule')
         .addItem('🗺️ Trip Planner (Desktop App)', 'showTripPlannerDialog')
         .addItem('📋 Tasks & Calendar (Desktop App)', 'showToDoSchedule')
@@ -78,6 +68,16 @@ function _buildGloveManagerMenu() {
           .addItem('👁️ Preview My Report', 'previewEmailReport')
           .addItem('📤 Send Report Now', 'sendEmailReport')
           .addItem('🛑 Cancel Scheduled Auto-Send', 'removeEmailTrigger')))
+
+      // === STEP 5: SAVE & BACKUP ===
+      .addSubMenu(ui.createMenu('💾 Save & Backup')
+        .addItem('💾 Save Current State to History', 'saveHistoryFast')
+        .addItem('📥 Import Item History Log', 'showImportItemHistoryDialog')
+        .addItem('🧹 Clean & Repair History Sheets', 'menuCleanHistorySheets')
+        .addItem('💾 Create Backup Snapshot', 'createBackupSnapshot')
+        .addItem('↩️ Restore Gloves from Backup...', 'menuRestoreGlovesFromBackup')
+        .addItem('🔄 Export Offline Snapshot (Desktop App)', 'menuExportSyncSnapshot')
+        .addItem('📂 View Backup Folder', 'openBackupFolder'))
 
       .addSeparator()
 
