@@ -476,9 +476,11 @@ function getItemsToOrder() {
       var pickStatus = cols.pickStatus !== -1 ? String(row[cols.pickStatus] || '').trim() : '';
       var pickItem = cols.pickItem !== -1 ? String(row[cols.pickItem] || '').trim() : '';
       var pickStatusLower = pickStatus.toLowerCase();
+      var isSizeUp = pickStatusLower.includes('size up');
 
       var isNeedToPurchase = pickStatusLower.includes('purchase') ||
                              pickStatusLower.includes('need to purchase') ||
+                             isSizeUp ||
                              pickItem === '—' ||
                              (pickItem === '' && pickStatusLower.includes('unassigned'));
 
@@ -507,8 +509,9 @@ function getItemsToOrder() {
       }
 
       aggregatedMap[key].quantity += 1;
-      if (emp && aggregatedMap[key].employees.indexOf(emp) === -1) {
-        aggregatedMap[key].employees.push(emp);
+      var empLabel = isSizeUp ? (emp ? emp + ' (Size Up)' : '') : emp;
+      if (empLabel && aggregatedMap[key].employees.indexOf(empLabel) === -1) {
+        aggregatedMap[key].employees.push(empLabel);
       }
       if (loc) {
         aggregatedMap[key].locations[loc] = (aggregatedMap[key].locations[loc] || 0) + 1;

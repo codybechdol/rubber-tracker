@@ -241,8 +241,10 @@ class ProcurementEngine {
         }
 
         const statLower = status.toLowerCase();
+        const isSizeUp = statLower.includes('size up');
         const isNeedToPurchase = statLower.includes('need to purchase') ||
                                  statLower.includes('purchase') ||
+                                 isSizeUp ||
                                  pickItem === '—' ||
                                  (pickItem === '' && statLower.includes('unassigned'));
 
@@ -258,6 +260,7 @@ class ProcurementEngine {
             classVal: currentClass,
             quantity: 0,
             employees: [],
+            sizeUpCount: 0,
             minDaysLeft: daysLeft,
             selected: true,
             price: 0,
@@ -266,8 +269,10 @@ class ProcurementEngine {
         }
 
         aggregated[aggKey].quantity += 1;
-        if (emp && !aggregated[aggKey].employees.includes(emp)) {
-          aggregated[aggKey].employees.push(emp);
+        if (isSizeUp) aggregated[aggKey].sizeUpCount += 1;
+        const empLabel = isSizeUp ? `${emp} (Size Up Picked)` : emp;
+        if (emp && !aggregated[aggKey].employees.includes(empLabel)) {
+          aggregated[aggKey].employees.push(empLabel);
         }
         if (daysLeft < aggregated[aggKey].minDaysLeft) {
           aggregated[aggKey].minDaysLeft = daysLeft;
