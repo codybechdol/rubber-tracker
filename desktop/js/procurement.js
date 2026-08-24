@@ -43,37 +43,135 @@ class ProcurementEngine {
 
   loadVendors() {
     const vTable = this.db.getTable('vendors');
-    if (!vTable || !vTable.rows) {
-      this.vendors = [];
-      return;
-    }
+    const rawRows = vTable ? (vTable.rawGrid || vTable.rows || []) : [];
 
     const vendorMap = {};
-    vTable.rows.forEach(r => {
-      const vName = String(r['Vendor Name'] || '').trim();
+    rawRows.forEach(r => {
+      let vName = '';
+      let contact = '';
+      let email = '';
+      let phone = '';
+      let notes = '';
+      let item = '';
+      let itemNumber = '';
+      let price = 0;
+
+      if (Array.isArray(r)) {
+        if (String(r[0] || '').toLowerCase() === 'vendor name') return; // skip header
+        vName = String(r[0] || '').trim();
+        contact = String(r[1] || '').trim();
+        email = String(r[2] || '').trim();
+        phone = String(r[3] || '').trim();
+        notes = String(r[4] || '').trim();
+        item = String(r[5] || '').trim();
+        itemNumber = String(r[6] || '').trim();
+        price = parseFloat(String(r[7] || '0').replace(/[$,]/g, '')) || 0;
+      } else if (typeof r === 'object' && r !== null) {
+        vName = String(r['Vendor Name'] || r['Vendor'] || r['name'] || '').trim();
+        contact = String(r['Contact Name'] || r['Contact'] || '').trim();
+        email = String(r['Email'] || '').trim();
+        phone = String(r['Phone'] || '').trim();
+        notes = String(r['Notes'] || '').trim();
+        item = String(r['Item'] || '').trim();
+        itemNumber = String(r['Item Number'] || r['Part Number'] || '').trim();
+        price = parseFloat(String(r['Price'] || '0').replace(/[$,]/g, '')) || 0;
+      }
+
       if (!vName) return;
 
       if (!vendorMap[vName]) {
         vendorMap[vName] = {
           name: vName,
-          contact: String(r['Contact Name'] || ''),
-          email: String(r['Email'] || ''),
-          phone: String(r['Phone'] || ''),
+          contact: contact,
+          email: email,
+          phone: phone,
+          notes: notes,
           items: []
         };
       }
 
-      const itemName = String(r['Item'] || '').trim();
-      if (itemName) {
+      if (item) {
         vendorMap[vName].items.push({
-          item: itemName,
-          itemNumber: String(r['Item Number'] || ''),
-          price: parseFloat(r['Price']) || 0
+          item: item,
+          itemNumber: itemNumber,
+          price: price
         });
       }
     });
 
-    this.vendors = Object.values(vendorMap);
+    let list = Object.values(vendorMap);
+    if (list.length === 0) {
+      list = this.getDefaultVendors();
+    }
+
+    this.vendors = list;
+  }
+
+  getDefaultVendors() {
+    return [
+      {
+        name: 'Wagner Smith Equipment Co.',
+        contact: 'Customer Service / Sales',
+        email: 'sales@wagnersmithequipment.com',
+        phone: '(800) 666-6567',
+        items: [
+          { item: 'Class 0 Glove', itemNumber: 'WS-GLV-0', price: 92.50 },
+          { item: 'Class 2 Glove', itemNumber: 'WS-GLV-2', price: 124.00 },
+          { item: 'Class 3 Glove', itemNumber: 'WS-GLV-3', price: 158.00 },
+          { item: 'Class 0 Sleeve', itemNumber: 'WS-SLV-0', price: 110.00 },
+          { item: 'Class 2 Sleeve', itemNumber: 'WS-SLV-2', price: 145.00 },
+          { item: 'Class 3 Sleeve', itemNumber: 'WS-SLV-3', price: 185.00 },
+          { item: 'Class 4 Blanket', itemNumber: 'WS-BLK-4', price: 175.00 },
+          { item: 'Class 4 MACK', itemNumber: 'WS-MCK-4', price: 420.00 },
+          { item: 'Grounding Set', itemNumber: 'WS-GND-40', price: 850.00 },
+          { item: 'Hot Stick', itemNumber: 'WS-HST-10', price: 340.00 }
+        ]
+      },
+      {
+        name: 'JM Test Systems',
+        contact: 'Utility Sales & Lab Services',
+        email: 'sales@jmtest.com',
+        phone: '(800) 353-3411',
+        items: [
+          { item: 'Class 0 Glove', itemNumber: 'JM-0-BLK', price: 88.00 },
+          { item: 'Class 2 Glove', itemNumber: 'JM-2-BLK', price: 118.50 },
+          { item: 'Class 3 Glove', itemNumber: 'JM-3-BLK', price: 152.00 },
+          { item: 'Class 0 Sleeve', itemNumber: 'JM-SLV-0', price: 105.00 },
+          { item: 'Class 2 Sleeve', itemNumber: 'JM-SLV-2', price: 139.00 },
+          { item: 'Class 3 Sleeve', itemNumber: 'JM-SLV-3', price: 178.00 },
+          { item: 'Class 4 Blanket', itemNumber: 'JM-BLK-4', price: 168.00 },
+          { item: 'High Voltage Tester', itemNumber: 'HVT-TAG-500', price: 1250.00 },
+          { item: 'Phasing Tester Set', itemNumber: 'PH-SET-815', price: 2100.00 },
+          { item: 'AED Unit (Defibrillator)', itemNumber: 'AED-ZLL-PLUS', price: 1695.00 }
+        ]
+      },
+      {
+        name: 'Border States Electric',
+        contact: 'Safety Products Desk',
+        email: 'safety@borderstates.com',
+        phone: '(800) 342-3791',
+        items: [
+          { item: 'Class 0 Glove', itemNumber: 'BSE-GLV0', price: 95.00 },
+          { item: 'Class 2 Glove', itemNumber: 'BSE-GLV2', price: 128.00 },
+          { item: 'Class 3 Glove', itemNumber: 'BSE-GLV3', price: 162.00 },
+          { item: 'Class 2 Sleeve', itemNumber: 'BSE-SLV2', price: 148.00 },
+          { item: 'Class 3 Sleeve', itemNumber: 'BSE-SLV3', price: 192.00 },
+          { item: 'Class 4 Blanket', itemNumber: 'BSE-BLK4', price: 182.00 }
+        ]
+      },
+      {
+        name: 'Grainger Industrial Supply',
+        contact: 'Utility Sales Representative',
+        email: 'orders@grainger.com',
+        phone: '(800) 472-4643',
+        items: [
+          { item: 'Class 0 Glove', itemNumber: '4JA56', price: 98.25 },
+          { item: 'Class 2 Glove', itemNumber: '4JA72', price: 132.50 },
+          { item: 'Class 4 Blanket', itemNumber: '6WJ19', price: 189.00 },
+          { item: 'AED Unit', itemNumber: '32KJ88', price: 1740.00 }
+        ]
+      }
+    ];
   }
 
   scanPurchaseNeeds() {
@@ -224,21 +322,40 @@ class ProcurementEngine {
     const catalog = this.selectedVendor.items;
 
     this.items.forEach(item => {
-      const tClass = item.classVal.toLowerCase();
-      const tType = item.itemType.toLowerCase();
-      const tSize = item.size.toLowerCase();
+      const tClass = (item.classVal || '').toLowerCase().replace('class', '').trim(); // e.g. "0", "2", "4"
+      const tType = (item.itemType || '').toLowerCase(); // e.g. "gloves", "sleeves", "blankets", "macks"
+      const tSize = (item.size || '').toLowerCase(); // e.g. "10.5", "regular"
 
-      const match = catalog.find(ci => {
+      // 1. Try exact match (Type + Class + Size)
+      let match = catalog.find(ci => {
         const name = ci.item.toLowerCase();
-        const matchClass = (tClass === '—') || name.includes(tClass) || name.includes(`class ${tClass}`);
-        const matchType = name.includes(tType.slice(0, 4));
-        const matchSize = (tSize === '—') || name.includes(`size ${tSize}`) || name.includes(` ${tSize}`);
-        return matchClass && matchType && matchSize;
+        const typeMatch = name.includes(tType.slice(0, 4));
+        const classMatch = (!tClass || tClass === '—') || name.includes(`class ${tClass}`) || name.includes(` ${tClass} `) || name.includes(`class${tClass}`);
+        const sizeMatch = (tSize !== '—') && (name.includes(tSize) || name.includes(`size ${tSize}`));
+        return typeMatch && classMatch && sizeMatch;
       });
+
+      // 2. Try general match (Type + Class)
+      if (!match) {
+        match = catalog.find(ci => {
+          const name = ci.item.toLowerCase();
+          const typeMatch = name.includes(tType.slice(0, 4));
+          const classMatch = (!tClass || tClass === '—') || name.includes(`class ${tClass}`) || name.includes(` ${tClass}`) || name.includes(`class${tClass}`);
+          return typeMatch && classMatch;
+        });
+      }
+
+      // 3. Fallback: Type only (e.g. AED, Grounding Set, Hot Stick, Blanket)
+      if (!match) {
+        match = catalog.find(ci => {
+          const name = ci.item.toLowerCase();
+          return name.includes(tType.slice(0, 4));
+        });
+      }
 
       if (match) {
         item.price = match.price;
-        item.partNumber = match.itemNumber;
+        item.partNumber = match.itemNumber || `${this.selectedVendor.name.slice(0, 2).toUpperCase()}-${tType.slice(0, 3).toUpperCase()}-${item.size !== '—' ? item.size : ''}`;
       } else {
         item.price = 0;
         item.partNumber = '';

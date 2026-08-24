@@ -73,7 +73,9 @@ function exportFullDatabaseSnapshot() {
     { key: 'employee_history', name: typeof SHEET_EMPLOYEE_HISTORY !== 'undefined' ? SHEET_EMPLOYEE_HISTORY : 'Employee History' },
     { key: 'safety_equipment_needs', name: 'Safety Equipment Needs' },
     { key: 'locations', name: 'Locations' },
-    { key: 'drive_time_routes', name: 'Drive Time Routes' }
+    { key: 'drive_time_routes', name: 'Drive Time Routes' },
+    { key: 'vendors', name: 'Vendors' },
+    { key: 'purchase_orders', name: 'Purchase Orders' }
   ];
 
   var tables = {};
