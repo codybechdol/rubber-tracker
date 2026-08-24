@@ -99,79 +99,7 @@ class ProcurementEngine {
       }
     });
 
-    let list = Object.values(vendorMap);
-    if (list.length === 0) {
-      list = this.getDefaultVendors();
-    }
-
-    this.vendors = list;
-  }
-
-  getDefaultVendors() {
-    return [
-      {
-        name: 'Wagner Smith Equipment Co.',
-        contact: 'Customer Service / Sales',
-        email: 'sales@wagnersmithequipment.com',
-        phone: '(800) 666-6567',
-        items: [
-          { item: 'Class 0 Glove', itemNumber: 'WS-GLV-0', price: 92.50 },
-          { item: 'Class 2 Glove', itemNumber: 'WS-GLV-2', price: 124.00 },
-          { item: 'Class 3 Glove', itemNumber: 'WS-GLV-3', price: 158.00 },
-          { item: 'Class 0 Sleeve', itemNumber: 'WS-SLV-0', price: 110.00 },
-          { item: 'Class 2 Sleeve', itemNumber: 'WS-SLV-2', price: 145.00 },
-          { item: 'Class 3 Sleeve', itemNumber: 'WS-SLV-3', price: 185.00 },
-          { item: 'Class 4 Blanket', itemNumber: 'WS-BLK-4', price: 175.00 },
-          { item: 'Class 4 MACK', itemNumber: 'WS-MCK-4', price: 420.00 },
-          { item: 'Grounding Set', itemNumber: 'WS-GND-40', price: 850.00 },
-          { item: 'Hot Stick', itemNumber: 'WS-HST-10', price: 340.00 }
-        ]
-      },
-      {
-        name: 'JM Test Systems',
-        contact: 'Utility Sales & Lab Services',
-        email: 'sales@jmtest.com',
-        phone: '(800) 353-3411',
-        items: [
-          { item: 'Class 0 Glove', itemNumber: 'JM-0-BLK', price: 88.00 },
-          { item: 'Class 2 Glove', itemNumber: 'JM-2-BLK', price: 118.50 },
-          { item: 'Class 3 Glove', itemNumber: 'JM-3-BLK', price: 152.00 },
-          { item: 'Class 0 Sleeve', itemNumber: 'JM-SLV-0', price: 105.00 },
-          { item: 'Class 2 Sleeve', itemNumber: 'JM-SLV-2', price: 139.00 },
-          { item: 'Class 3 Sleeve', itemNumber: 'JM-SLV-3', price: 178.00 },
-          { item: 'Class 4 Blanket', itemNumber: 'JM-BLK-4', price: 168.00 },
-          { item: 'High Voltage Tester', itemNumber: 'HVT-TAG-500', price: 1250.00 },
-          { item: 'Phasing Tester Set', itemNumber: 'PH-SET-815', price: 2100.00 },
-          { item: 'AED Unit (Defibrillator)', itemNumber: 'AED-ZLL-PLUS', price: 1695.00 }
-        ]
-      },
-      {
-        name: 'Border States Electric',
-        contact: 'Safety Products Desk',
-        email: 'safety@borderstates.com',
-        phone: '(800) 342-3791',
-        items: [
-          { item: 'Class 0 Glove', itemNumber: 'BSE-GLV0', price: 95.00 },
-          { item: 'Class 2 Glove', itemNumber: 'BSE-GLV2', price: 128.00 },
-          { item: 'Class 3 Glove', itemNumber: 'BSE-GLV3', price: 162.00 },
-          { item: 'Class 2 Sleeve', itemNumber: 'BSE-SLV2', price: 148.00 },
-          { item: 'Class 3 Sleeve', itemNumber: 'BSE-SLV3', price: 192.00 },
-          { item: 'Class 4 Blanket', itemNumber: 'BSE-BLK4', price: 182.00 }
-        ]
-      },
-      {
-        name: 'Grainger Industrial Supply',
-        contact: 'Utility Sales Representative',
-        email: 'orders@grainger.com',
-        phone: '(800) 472-4643',
-        items: [
-          { item: 'Class 0 Glove', itemNumber: '4JA56', price: 98.25 },
-          { item: 'Class 2 Glove', itemNumber: '4JA72', price: 132.50 },
-          { item: 'Class 4 Blanket', itemNumber: '6WJ19', price: 189.00 },
-          { item: 'AED Unit', itemNumber: '32KJ88', price: 1740.00 }
-        ]
-      }
-    ];
+    this.vendors = Object.values(vendorMap);
   }
 
   scanPurchaseNeeds() {
@@ -327,30 +255,37 @@ class ProcurementEngine {
     const catalog = this.selectedVendor.items;
 
     this.items.forEach(item => {
-      const tClass = (item.classVal || '').toLowerCase().replace('class', '').trim(); // e.g. "0", "2", "4"
+      const tClassNum = (item.classVal || '').replace(/[^0-9]/g, '').trim(); // e.g. "0", "2", "4"
       const tType = (item.itemType || '').toLowerCase(); // e.g. "gloves", "sleeves", "blankets", "macks"
-      const tSize = (item.size || '').toLowerCase(); // e.g. "10.5", "regular"
+      const tSize = (item.size || '').toLowerCase().trim(); // e.g. "10.5", "9", "regular"
 
-      // 1. Try exact match (Type + Class + Size)
+      // 1. Exact Match (Type + Class + Size) - e.g. "Glove CL2 9.5", "Glove Class 2 9.5"
       let match = catalog.find(ci => {
         const name = ci.item.toLowerCase();
-        const typeMatch = name.includes(tType.slice(0, 4));
-        const classMatch = (!tClass || tClass === '—') || name.includes(`class ${tClass}`) || name.includes(` ${tClass} `) || name.includes(`class${tClass}`);
-        const sizeMatch = (tSize !== '—') && (name.includes(tSize) || name.includes(`size ${tSize}`));
+        const typeMatch = name.includes(tType.slice(0, 4)) || (tType.startsWith('glove') && name.includes('glove')) || (tType.startsWith('sleeve') && name.includes('sleeve')) || (tType.startsWith('blanket') && name.includes('blanket'));
+        const classMatch = !tClassNum || name.includes(`cl${tClassNum}`) || name.includes(`class ${tClassNum}`) || name.includes(`class${tClassNum}`) || name.includes(` ${tClassNum} `) || name.endsWith(` ${tClassNum}`);
+        const sizeMatch = (tSize !== '—' && tSize !== '') && (
+          name.endsWith(` ${tSize}`) ||
+          name.includes(` ${tSize} `) ||
+          name.includes(` ${tSize}`) ||
+          name.includes(`size ${tSize}`) ||
+          name.includes(` ${tSize}h`) ||
+          name.includes(tSize)
+        );
         return typeMatch && classMatch && sizeMatch;
       });
 
-      // 2. Try general match (Type + Class)
+      // 2. Type + Class Match (e.g. "Class 2 Sleeve", "Blanket CL4")
       if (!match) {
         match = catalog.find(ci => {
           const name = ci.item.toLowerCase();
-          const typeMatch = name.includes(tType.slice(0, 4));
-          const classMatch = (!tClass || tClass === '—') || name.includes(`class ${tClass}`) || name.includes(` ${tClass}`) || name.includes(`class${tClass}`);
+          const typeMatch = name.includes(tType.slice(0, 4)) || (tType.startsWith('glove') && name.includes('glove')) || (tType.startsWith('sleeve') && name.includes('sleeve')) || (tType.startsWith('blanket') && name.includes('blanket'));
+          const classMatch = !tClassNum || name.includes(`cl${tClassNum}`) || name.includes(`class ${tClassNum}`) || name.includes(`class${tClassNum}`);
           return typeMatch && classMatch;
         });
       }
 
-      // 3. Fallback: Type only (e.g. AED, Grounding Set, Hot Stick, Blanket)
+      // 3. Fallback Type Match (e.g. "AED", "Grounding", "Hot Stick")
       if (!match) {
         match = catalog.find(ci => {
           const name = ci.item.toLowerCase();
@@ -360,7 +295,7 @@ class ProcurementEngine {
 
       if (match) {
         item.price = match.price;
-        item.partNumber = match.itemNumber || `${this.selectedVendor.name.slice(0, 2).toUpperCase()}-${tType.slice(0, 3).toUpperCase()}-${item.size !== '—' ? item.size : ''}`;
+        item.partNumber = match.itemNumber || '';
       } else {
         item.price = 0;
         item.partNumber = '';
@@ -575,7 +510,17 @@ class ProcurementEngine {
     if (!body) return;
 
     if (!this.vendors || this.vendors.length === 0) {
-      this.vendors = this.getDefaultVendors();
+      body.innerHTML = `
+        <div style="padding: 50px 20px; text-align: center; color: var(--text-muted);">
+          <div style="font-size: 36px; margin-bottom: 10px;">🏢</div>
+          <h3 style="color: var(--text-primary); font-size: 16px; margin-bottom: 6px;">No Vendors Configured</h3>
+          <p style="font-size: 13px; max-width: 440px; margin: 0 auto 16px;">
+            Click <strong>"➕ Add Vendor"</strong> to create a vendor, or click <strong>"Download Snapshot"</strong> to sync with Google Sheets.
+          </p>
+          <button class="btn btn-primary" style="font-size: 12px; padding: 6px 16px;" onclick="window.procurementEngine.addVendor()">➕ Add Vendor</button>
+        </div>
+      `;
+      return;
     }
 
     const currentV = this.vendors[this.activeModalVendorIdx] || this.vendors[0];
