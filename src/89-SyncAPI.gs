@@ -1585,6 +1585,33 @@ function doGet(e) {
     }
   }
 
+  if (action === 'processSafetyEmails') {
+    try {
+      var daysBack = parseInt((e && e.parameter && e.parameter.daysBack) || '7', 10);
+      var reportTypeFilter = (e && e.parameter && e.parameter.reportTypeFilter) || 'ALL';
+      var newOnlyMode = (e && e.parameter && e.parameter.newOnlyMode) !== 'false';
+      var skipPdfExtraction = (e && e.parameter && e.parameter.skipPdfExtraction) === 'true';
+      var endDate = (e && e.parameter && e.parameter.endDate) || null;
+
+      var result = executeSyncApiProcessSafetyEmails({
+        daysBack: daysBack,
+        reportTypeFilter: reportTypeFilter,
+        newOnlyMode: newOnlyMode,
+        skipPdfExtraction: skipPdfExtraction,
+        endDate: endDate
+      });
+
+      return ContentService.createTextOutput(JSON.stringify(result))
+        .setMimeType(ContentService.MimeType.JSON);
+    } catch (procErr) {
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'error',
+        success: false,
+        error: procErr.toString()
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+
   // Return full database snapshot
   try {
     var snapshot = exportFullDatabaseSnapshot();
@@ -1599,7 +1626,7 @@ function doGet(e) {
 }
 
 /**
- * Web App POST endpoint: Handles batch mutation pushes from the Tauri Desktop App.
+ * Web App POST endpoint: Handles batch mutation pushes and action execution from Desktop App.
  */
 function doPost(e) {
   try {
@@ -1618,6 +1645,18 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
 
+    if (action === 'processSafetyEmails') {
+      var procResult = executeSyncApiProcessSafetyEmails({
+        daysBack: payload.daysBack || 7,
+        reportTypeFilter: payload.reportTypeFilter || 'ALL',
+        newOnlyMode: payload.newOnlyMode !== false,
+        skipPdfExtraction: payload.skipPdfExtraction === true,
+        endDate: payload.endDate || null
+      });
+      return ContentService.createTextOutput(JSON.stringify(procResult))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
     if (action === 'getSnapshot') {
       var snapshot = exportFullDatabaseSnapshot();
       return ContentService.createTextOutput(JSON.stringify(snapshot))
@@ -1633,6 +1672,52 @@ function doPost(e) {
       error: err.toString()
     })).setMimeType(ContentService.MimeType.JSON);
   }
+}
+
+/**
+ * Executes safety email processing and returns structured results with refreshed snapshot.
+ */
+function executeSyncApiProcessSafetyEmails(options) {
+  options = options || {};
+  var daysBack = options.daysBack || 7;
+  var batchSize = options.batchSize || 50;
+  var newOnlyMode = options.newOnlyMode !== false;
+  var skipPdfExtraction = options.skipPdfExtraction === true;
+  var endDate = options.endDate || null;
+  var reportTypeFilter = options.reportTypeFilter || 'ALL';
+
+  if (typeof processSafetyEmails !== 'function') {
+    return { success: false, error: 'processSafetyEmails function not found in backend' };
+  }
+
+  var result = processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction, endDate, reportTypeFilter);
+  
+  var postResult = result;
+  if (typeof runSafetyEmailPostProcessing === 'function') {
+    try {
+      postResult = runSafetyEmailPostProcessing(reportTypeFilter, result);
+    } catch (ePost) {
+      Logger.log('executeSyncApiProcessSafetyEmails post processing error: ' + ePost);
+    }
+  }
+
+  SpreadsheetApp.flush();
+
+  var freshSnapshot = null;
+  if (typeof exportFullDatabaseSnapshot === 'function') {
+    try {
+      freshSnapshot = exportFullDatabaseSnapshot();
+    } catch (eSnap) {
+      Logger.log('executeSyncApiProcessSafetyEmails snapshot error: ' + eSnap);
+    }
+  }
+
+  return {
+    status: 'ok',
+    success: true,
+    result: postResult || result,
+    snapshot: freshSnapshot
+  };
 }
 
 /**

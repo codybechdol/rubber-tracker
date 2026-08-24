@@ -159,7 +159,12 @@
             <h2 style="font-size: 16px;">🛡️ Safety Compliance Tracker</h2>
             <span class="brand-badge" id="safety-compliance-row-count">0 rows</span>
           </div>
-          <input type="text" id="safety-compliance-search-input" class="sheet-search" placeholder="Filter crews, weeks, or status...">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button class="btn btn-primary" id="btn-process-safety-emails" style="font-size: 12px; font-weight: 700; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(16, 185, 129, 0.3);" onclick="window.safetyComplianceEngine.openProcessEmailsModal()">
+              <span>📥</span> Process Safety Emails
+            </button>
+            <input type="text" id="safety-compliance-search-input" class="sheet-search" placeholder="Filter crews, weeks, or status...">
+          </div>
         </div>
         <div class="grid-wrapper" id="safety-compliance-grid-container"></div>
       </section>
@@ -786,6 +791,28 @@
     </div>
   </div>
 
+  <!-- Process Safety Emails Modal -->
+  <div id="process-safety-emails-modal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 740px; width: 92%; max-height: 90vh;">
+      <div class="modal-header" style="background: linear-gradient(135deg, #065f46 0%, #064e3b 100%); color: white;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 18px;">📬</span>
+          <span style="font-weight: 800; font-size: 15px;">Process Safety Emails (Gmail Scanner)</span>
+        </div>
+        <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.2); border: none; color: white; cursor: pointer;" onclick="window.safetyComplianceEngine.closeProcessEmailsModal()">✕</button>
+      </div>
+      <div class="modal-body" id="process-safety-emails-modal-body" style="max-height: 75vh; overflow-y: auto; padding: 20px;">
+        <!-- Injected dynamically by safety-emails.js -->
+      </div>
+      <div class="modal-footer" id="process-safety-emails-modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <button class="btn btn-secondary" onclick="window.safetyComplianceEngine.closeProcessEmailsModal()">Cancel</button>
+        <button class="btn btn-primary" id="btn-start-process-emails" onclick="window.safetyComplianceEngine.runProcessEmails()" style="font-weight: 700; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);">
+          <span>🚀</span> Process Safety Emails Now
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- SheetJS for client-side Excel Parsing -->
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 
@@ -798,6 +825,7 @@
   <script src="js/item-stats.js"></script>
   <script src="js/sms-dialog.js"></script>
   <script src="js/employee-profile.js"></script>
+  <script src="js/safety-emails.js"></script>
   <script src="js/sheets.js"></script>
   <script src="js/history.js"></script>
   <script src="js/tasks.js"></script>
@@ -855,6 +883,9 @@
 
       window.inventoryAging = new InventoryAgingEngine(window.localDB);
       window.inventoryAging.init();
+
+      window.safetyComplianceEngine = new SafetyEmailsEngine(window.localDB);
+      window.safetyComplianceEngine.init();
 
       if (window.inventoryManager) window.inventoryManager.init();
       if (window.crewImportEngine) window.crewImportEngine.init();
