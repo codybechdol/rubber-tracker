@@ -235,7 +235,7 @@ class SafetyEmailsEngine {
 
         // Update local database snapshot if fresh snapshot returned
         if (response.snapshot) {
-          await window.localDB.saveSnapshot(response.snapshot);
+          await window.localDB.setSnapshot(response.snapshot);
           if (window.sheetNavigator) {
             window.sheetNavigator.renderSafetyCompliance();
           }

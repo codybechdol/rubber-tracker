@@ -32526,6 +32526,23 @@ function doGet(e) {
         status: 'ok',
         serverTime: new Date().toISOString()
       })).setMimeType(ContentService.MimeType.JSON);
+    } else if (action === 'processSafetyEmails') {
+      var daysBack = parseInt(e.parameter.daysBack || '7', 10);
+      var reportTypeFilter = e.parameter.reportTypeFilter || 'ALL';
+      var newOnlyMode = e.parameter.newOnlyMode !== 'false';
+      var skipPdfExtraction = e.parameter.skipPdfExtraction === 'true';
+      var endDate = e.parameter.endDate || null;
+
+      var result = executeSyncApiProcessSafetyEmails({
+        daysBack: daysBack,
+        reportTypeFilter: reportTypeFilter,
+        newOnlyMode: newOnlyMode,
+        skipPdfExtraction: skipPdfExtraction,
+        endDate: endDate
+      });
+
+      return ContentService.createTextOutput(JSON.stringify(result))
+        .setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'applyMutations') {
       var mutationsStr = e.parameter.mutations || '[]';
       var mutations = [];
@@ -32534,8 +32551,10 @@ function doGet(e) {
       } catch (parseErr) {
         mutations = [];
       }
-      var returnSnap = e.parameter.returnSnapshot !== 'false';
-      var result = applyBatchSyncMutations(mutations, returnSnap);
+      var returnSnap = e.parameter.returnSnapshot === 'true';
+      var force = e.parameter.force === 'true';
+      var detectConflicts = e.parameter.detectConflicts !== 'false';
+      var result = applyBatchSyncMutations(mutations, returnSnap, { detectConflicts: detectConflicts, force: force });
       return ContentService.createTextOutput(JSON.stringify(result))
         .setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'getSnapshot' || !action) {
@@ -32554,7 +32573,7 @@ function doGet(e) {
 }
 
 /**
- * Handles HTTP POST requests to the Web App (Desktop App synchronization mutations).
+ * Handles HTTP POST requests to the Web App (Desktop App synchronization mutations & actions).
  */
 function doPost(e) {
   try {
@@ -32562,10 +32581,26 @@ function doPost(e) {
     var payload = JSON.parse(rawBody);
     var action = payload.action || 'sync';
 
-    if (action === 'applyMutations') {
-      var returnSnap = payload.returnSnapshot !== false;
-      var result = applyBatchSyncMutations(payload.mutations || [], returnSnap);
+    if (action === 'applyMutations' || action === 'sync') {
+      var returnSnap = payload.returnSnapshot === true;
+      var options = {
+        detectConflicts: payload.detectConflicts !== false,
+        force: payload.force === true
+      };
+      var result = applyBatchSyncMutations(payload.mutations || [], returnSnap, options);
       return ContentService.createTextOutput(JSON.stringify(result))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (action === 'processSafetyEmails') {
+      var procResult = executeSyncApiProcessSafetyEmails({
+        daysBack: payload.daysBack || 7,
+        reportTypeFilter: payload.reportTypeFilter || 'ALL',
+        newOnlyMode: payload.newOnlyMode !== false,
+        skipPdfExtraction: payload.skipPdfExtraction === true,
+        endDate: payload.endDate || null
+      });
+      return ContentService.createTextOutput(JSON.stringify(procResult))
         .setMimeType(ContentService.MimeType.JSON);
     }
 
