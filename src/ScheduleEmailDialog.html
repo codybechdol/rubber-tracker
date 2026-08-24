@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+    body { margin: 0; padding: 24px; background: #f8fafc; color: #1e293b; }
+    h2 { margin: 0 0 4px 0; color: #0f172a; font-size: 20px; display: flex; align-items: center; gap: 8px; }
+    .subtitle { color: #64748b; font-size: 13px; margin-bottom: 20px; }
+    
+    .card { background: white; border-radius: 8px; border: 1px solid #e2e8f0; padding: 18px 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .card-title { font-size: 13px; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; }
+    
+    .status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+    .status-enabled { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+    .status-disabled { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
+    
+    .form-row { display: flex; gap: 16px; margin-bottom: 12px; }
+    .form-group { flex: 1; }
+    label { display: block; font-size: 12px; font-weight: 600; color: #475569; margin-bottom: 6px; }
+    select, input { width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; background: white; color: #0f172a; outline: none; }
+    select:focus, input:focus { border-color: #2563eb; ring: 2px solid rgba(37,99,235,0.1); }
+    
+    .recipient-list { max-height: 120px; overflow-y: auto; font-size: 12px; color: #334155; border: 1px solid #f1f5f9; border-radius: 6px; padding: 6px 10px; background: #f8fafc; }
+    .recipient-item { padding: 4px 0; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; gap: 6px; }
+    .recipient-item:last-child { border-bottom: none; }
+    
+    .actions-bar { display: flex; align-items: center; justify-content: space-between; margin-top: 24px; gap: 10px; }
+    .btn { padding: 9px 18px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: all 0.15s ease; display: inline-flex; align-items: center; gap: 6px; }
+    .btn-primary { background: #2563eb; color: white; }
+    .btn-primary:hover { background: #1d4ed8; }
+    .btn-secondary { background: #e2e8f0; color: #334155; }
+    .btn-secondary:hover { background: #cbd5e1; }
+    .btn-danger { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+    .btn-danger:hover { background: #fca5a5; }
+    
+    .loading { text-align: center; padding: 30px; color: #64748b; }
+    .spinner { border: 3px solid #e2e8f0; border-top: 3px solid #2563eb; border-radius: 50%; width: 24px; height: 24px; animation: spin 0.8s linear infinite; margin: 0 auto 10px; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+  <h2>📧 Automated Weekly Email Reports</h2>
+  <div class="subtitle">Schedule automated delivery of weekly status reports, equipment swaps, certifications, and compliance summaries.</div>
+
+  <div id="loading-view" class="loading">
+    <div class="spinner"></div>
+    Loading schedule configuration...
+  </div>
+
+  <div id="main-view" style="display: none;">
+    <!-- Active Status Card -->
+    <div class="card">
+      <div class="card-title">
+        <span>Current Schedule Status</span>
+        <span id="status-pill" class="status-pill status-disabled">🔴 Disabled</span>
+      </div>
+      <div id="status-desc" style="font-size: 13px; color: #475569; line-height: 1.5;">
+        Automated weekly email report is currently disabled. Configure day and time below to schedule.
+      </div>
+    </div>
+
+    <!-- Schedule Form Card -->
+    <div class="card">
+      <div class="card-title">Schedule Settings</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Delivery Day:</label>
+          <select id="schedule-day">
+            <option value="MONDAY">Monday (Recommended)</option>
+            <option value="TUESDAY">Tuesday</option>
+            <option value="WEDNESDAY">Wednesday</option>
+            <option value="THURSDAY">Thursday</option>
+            <option value="FRIDAY">Friday</option>
+            <option value="SATURDAY">Saturday</option>
+            <option value="SUNDAY">Sunday</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Delivery Time:</label>
+          <select id="schedule-hour">
+            <option value="5">5:00 AM</option>
+            <option value="6" selected>6:00 AM (Early Rollout)</option>
+            <option value="7">7:00 AM</option>
+            <option value="8">8:00 AM</option>
+            <option value="9">9:00 AM</option>
+            <option value="12">12:00 PM (Noon)</option>
+            <option value="17">5:00 PM</option>
+          </select>
+        </div>
+      </div>
+      <div style="font-size: 11px; color: #64748b; margin-top: 4px;">
+        💡 Tip: Setting delivery to Monday at 6:00 AM provides crew leads and superintendents with upcoming swaps before the work week begins.
+      </div>
+    </div>
+
+    <!-- Recipients & Sections Summary Card -->
+    <div class="card">
+      <div class="card-title">
+        <span>Active Recipients</span>
+        <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="google.script.run.setupEmailReportConfig(); google.script.host.close();">⚙️ Configure Recipients</button>
+      </div>
+      <div class="recipient-list" id="recipients-container">
+        <div style="color: #64748b; font-style: italic;">Loading recipients...</div>
+      </div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="actions-bar">
+      <button class="btn btn-danger" id="btn-disable" onclick="disableSchedule()">🛑 Cancel Schedule</button>
+      <div style="display: flex; gap: 8px;">
+        <button class="btn btn-secondary" onclick="previewReport()">👁️ Preview</button>
+        <button class="btn btn-secondary" onclick="sendNow()">📤 Send Now</button>
+        <button class="btn btn-primary" onclick="saveSchedule()">💾 Save & Enable Schedule</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function init() {
+      google.script.run
+        .withSuccessHandler(function(data) {
+          document.getElementById('loading-view').style.display = 'none';
+          document.getElementById('main-view').style.display = 'block';
+
+          // Set status pill
+          const pill = document.getElementById('status-pill');
+          const desc = document.getElementById('status-desc');
+          const btnDisable = document.getElementById('btn-disable');
+
+          if (data.isScheduled) {
+            pill.className = 'status-pill status-enabled';
+            pill.innerHTML = '🟢 Active & Scheduled';
+            desc.innerHTML = '<strong>Enabled:</strong> Sending weekly reports every <strong>' + data.dayName + ' at ' + data.hourFormatted + '</strong>.<br>' +
+              (data.lastSent ? '<span style="font-size: 11px; color: #64748b;">Last sent: ' + data.lastSent + '</span>' : '');
+            btnDisable.style.display = 'inline-flex';
+          } else {
+            pill.className = 'status-pill status-disabled';
+            pill.innerHTML = '🔴 Inactive';
+            desc.innerHTML = 'Automated weekly emails are currently inactive. Click <strong>"Save & Enable Schedule"</strong> below to activate.';
+            btnDisable.style.display = 'none';
+          }
+
+          if (data.configuredDay) {
+            document.getElementById('schedule-day').value = data.configuredDay;
+          }
+          if (data.configuredHour !== undefined) {
+            document.getElementById('schedule-hour').value = String(data.configuredHour);
+          }
+
+          // Populate recipients
+          const rContainer = document.getElementById('recipients-container');
+          if (data.recipients && data.recipients.length > 0) {
+            let html = '';
+            data.recipients.forEach(function(r) {
+              html += '<div class="recipient-item"><span>📧</span> <strong>' + r.email + '</strong> <span style="color: #64748b; font-size: 11px; margin-left: auto;">(' + r.sectionsCount + ' sections enabled)</span></div>';
+            });
+            rContainer.innerHTML = html;
+          } else {
+            rContainer.innerHTML = '<div style="color: #ef4444; font-size: 12px;">⚠️ No recipients configured. Click "Configure Recipients" to add email addresses.</div>';
+          }
+        })
+        .withFailureHandler(function(err) {
+          document.getElementById('loading-view').innerHTML = '<div style="color: #ef4444;">Error loading schedule: ' + err + '</div>';
+        })
+        .getWeeklyEmailScheduleStatus();
+    }
+
+    function saveSchedule() {
+      const day = document.getElementById('schedule-day').value;
+      const hour = parseInt(document.getElementById('schedule-hour').value, 10);
+
+      document.getElementById('main-view').style.opacity = '0.5';
+
+      google.script.run
+        .withSuccessHandler(function() {
+          alert('✅ Weekly email report scheduled successfully!');
+          google.script.host.close();
+        })
+        .withFailureHandler(function(err) {
+          document.getElementById('main-view').style.opacity = '1';
+          alert('❌ Error saving schedule: ' + err);
+        })
+        .createWeeklyEmailTrigger(day, hour, true);
+    }
+
+    function disableSchedule() {
+      if (!confirm('Are you sure you want to cancel the scheduled weekly email report?')) return;
+      document.getElementById('main-view').style.opacity = '0.5';
+
+      google.script.run
+        .withSuccessHandler(function() {
+          alert('🛑 Scheduled email trigger cancelled.');
+          google.script.host.close();
+        })
+        .withFailureHandler(function(err) {
+          document.getElementById('main-view').style.opacity = '1';
+          alert('❌ Error disabling schedule: ' + err);
+        })
+        .removeEmailTrigger(true);
+    }
+
+    function previewReport() {
+      google.script.run.previewEmailReport();
+    }
+
+    function sendNow() {
+      if (!confirm('Send weekly email report to all configured recipients now?')) return;
+      google.script.run
+        .withSuccessHandler(function() {
+          alert('✅ Weekly email reports dispatched!');
+        })
+        .withFailureHandler(function(err) {
+          alert('❌ Error sending report: ' + err);
+        })
+        .sendEmailReport();
+    }
+
+    window.onload = init;
+  </script>
+</body>
+</html>

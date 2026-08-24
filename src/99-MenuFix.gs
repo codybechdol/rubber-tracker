@@ -57,7 +57,14 @@ function _buildGloveManagerMenu() {
         .addItem('🗺️ Trip Planner (Desktop App)', 'showTripPlannerDialog')
         .addItem('📋 Tasks & Calendar (Desktop App)', 'showToDoSchedule')
         .addItem('⚙️ Schedule Config', 'showToDoConfig')
-        .addItem('📝 Daily Accomplishments', 'showTimeBreakdownDialog'))
+        .addItem('📝 Daily Accomplishments', 'showTimeBreakdownDialog')
+        .addSeparator()
+        .addSubMenu(ui.createMenu('📧 Weekly Email Reports')
+          .addItem('⏰ Schedule Weekly Auto-Send...', 'showScheduleWeeklyEmailDialog')
+          .addItem('⚙️ Configure Recipients & Sections', 'setupEmailReportConfig')
+          .addItem('👁️ Preview My Report', 'previewEmailReport')
+          .addItem('📤 Send Report Now', 'sendEmailReport')
+          .addItem('🛑 Cancel Scheduled Auto-Send', 'removeEmailTrigger')))
 
       // === STEP 5: SAVE & BACKUP ===
       .addSubMenu(ui.createMenu('💾 Save & Backup')
@@ -67,8 +74,7 @@ function _buildGloveManagerMenu() {
         .addItem('💾 Create Backup Snapshot', 'createBackupSnapshot')
         .addItem('↩️ Restore Gloves from Backup...', 'menuRestoreGlovesFromBackup')
         .addItem('🔄 Export Offline Snapshot (Desktop App)', 'menuExportSyncSnapshot')
-        .addItem('📂 View Backup Folder', 'openBackupFolder')
-        .addItem('📤 Send Report Now', 'sendEmailReport'))
+        .addItem('📂 View Backup Folder', 'openBackupFolder'))
 
       .addSeparator()
 

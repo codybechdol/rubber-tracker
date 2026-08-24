@@ -641,46 +641,49 @@ function buildInventorySummarySection(ss, styles) {
   var content = '';
 
   try {
-    var glovesSheet = ss.getSheetByName('Gloves');
-    var sleevesSheet = ss.getSheetByName('Sleeves');
+    var inventoryItems = [
+      { name: 'Gloves', label: '🧤 Gloves', sheetName: typeof SHEET_GLOVES !== 'undefined' ? SHEET_GLOVES : 'Gloves' },
+      { name: 'Sleeves', label: '🦺 Sleeves', sheetName: typeof SHEET_SLEEVES !== 'undefined' ? SHEET_SLEEVES : 'Sleeves' },
+      { name: 'Blankets', label: '🧱 Blankets', sheetName: typeof SHEET_BLANKETS !== 'undefined' ? SHEET_BLANKETS : 'Blankets' },
+      { name: 'MACKs', label: '🧱 MACKs', sheetName: typeof SHEET_MACKS !== 'undefined' ? SHEET_MACKS : 'MACKs' },
+      { name: 'HV Testers', label: '⚡ HV Testers', sheetName: typeof SHEET_HV_TESTERS !== 'undefined' ? SHEET_HV_TESTERS : 'HV Testers' },
+      { name: 'Phasing Sets', label: '⚡ Phasing Sets', sheetName: typeof SHEET_PHASING_SETS !== 'undefined' ? SHEET_PHASING_SETS : 'Phasing Sets' },
+      { name: 'Grounds', label: '⚡ Grounds', sheetName: typeof SHEET_GROUNDS !== 'undefined' ? SHEET_GROUNDS : 'Grounds' },
+      { name: 'Hot Sticks', label: '🔴 Hot Sticks', sheetName: typeof SHEET_HOT_STICKS !== 'undefined' ? SHEET_HOT_STICKS : 'Hot Sticks' },
+      { name: 'AED', label: '🏥 AED Units', sheetName: typeof SHEET_AED !== 'undefined' ? SHEET_AED : 'AED' }
+    ];
 
-    var gloveStats = glovesSheet ? getInventoryStats(glovesSheet) : null;
-    var sleeveStats = sleevesSheet ? getInventoryStats(sleevesSheet) : null;
-
-    // Summary table
-    content += '<table style="width: 100%; border-collapse: collapse; font-size: 14px;">';
+    content += '<table style="width: 100%; border-collapse: collapse; font-size: 13px;">';
     content += '<tr style="background: ' + styles.subHeaderBg + ';">';
-    content += '<th style="padding: 10px; text-align: left; border-bottom: 2px solid ' + styles.borderColor + ';">Item Type</th>';
-    content += '<th style="padding: 10px; text-align: center; border-bottom: 2px solid ' + styles.borderColor + ';">Total</th>';
-    content += '<th style="padding: 10px; text-align: center; border-bottom: 2px solid ' + styles.borderColor + ';">Assigned</th>';
-    content += '<th style="padding: 10px; text-align: center; border-bottom: 2px solid ' + styles.borderColor + ';">On Shelf</th>';
-    content += '<th style="padding: 10px; text-align: center; border-bottom: 2px solid ' + styles.borderColor + ';">Testing</th>';
+    content += '<th style="padding: 9px 10px; text-align: left; border-bottom: 2px solid ' + styles.borderColor + ';">Item Category</th>';
+    content += '<th style="padding: 9px 10px; text-align: center; border-bottom: 2px solid ' + styles.borderColor + ';">Total</th>';
+    content += '<th style="padding: 9px 10px; text-align: center; border-bottom: 2px solid ' + styles.borderColor + ';">Assigned / In Service</th>';
+    content += '<th style="padding: 9px 10px; text-align: center; border-bottom: 2px solid ' + styles.borderColor + ';">On Shelf</th>';
+    content += '<th style="padding: 9px 10px; text-align: center; border-bottom: 2px solid ' + styles.borderColor + ';">In Testing / Lab</th>';
     content += '</tr>';
 
-    if (gloveStats) {
-      content += '<tr>';
-      content += '<td style="padding: 10px; border-bottom: 1px solid ' + styles.borderColor + ';">🧤 Gloves</td>';
-      content += '<td style="padding: 10px; text-align: center; border-bottom: 1px solid ' + styles.borderColor + '; font-weight: bold;">' + gloveStats.total + '</td>';
-      content += '<td style="padding: 10px; text-align: center; border-bottom: 1px solid ' + styles.borderColor + '; color: ' + styles.successColor + ';">' + gloveStats.assigned + '</td>';
-      content += '<td style="padding: 10px; text-align: center; border-bottom: 1px solid ' + styles.borderColor + '; color: ' + styles.infoColor + ';">' + gloveStats.onShelf + '</td>';
-      content += '<td style="padding: 10px; text-align: center; border-bottom: 1px solid ' + styles.borderColor + '; color: ' + styles.warningColor + ';">' + gloveStats.testing + '</td>';
-      content += '</tr>';
-    }
+    var rowIdx = 0;
+    inventoryItems.forEach(function(item) {
+      var sheet = ss.getSheetByName(item.sheetName);
+      if (!sheet || sheet.getLastRow() < 2) return;
 
-    if (sleeveStats) {
-      content += '<tr style="background: ' + styles.altRowBg + ';">';
-      content += '<td style="padding: 10px; border-bottom: 1px solid ' + styles.borderColor + ';">💪 Sleeves</td>';
-      content += '<td style="padding: 10px; text-align: center; border-bottom: 1px solid ' + styles.borderColor + '; font-weight: bold;">' + sleeveStats.total + '</td>';
-      content += '<td style="padding: 10px; text-align: center; border-bottom: 1px solid ' + styles.borderColor + '; color: ' + styles.successColor + ';">' + sleeveStats.assigned + '</td>';
-      content += '<td style="padding: 10px; text-align: center; border-bottom: 1px solid ' + styles.borderColor + '; color: ' + styles.infoColor + ';">' + sleeveStats.onShelf + '</td>';
-      content += '<td style="padding: 10px; text-align: center; border-bottom: 1px solid ' + styles.borderColor + '; color: ' + styles.warningColor + ';">' + sleeveStats.testing + '</td>';
+      var stats = getInventoryStats(sheet);
+      var rowBg = (rowIdx % 2 === 1) ? ('background: ' + styles.altRowBg + ';') : '';
+
+      content += '<tr style="' + rowBg + '">';
+      content += '<td style="padding: 8px 10px; border-bottom: 1px solid ' + styles.borderColor + '; font-weight: 600;">' + item.label + '</td>';
+      content += '<td style="padding: 8px 10px; text-align: center; border-bottom: 1px solid ' + styles.borderColor + '; font-weight: bold;">' + stats.total + '</td>';
+      content += '<td style="padding: 8px 10px; text-align: center; border-bottom: 1px solid ' + styles.borderColor + '; color: ' + styles.successColor + '; font-weight: 600;">' + stats.assigned + '</td>';
+      content += '<td style="padding: 8px 10px; text-align: center; border-bottom: 1px solid ' + styles.borderColor + '; color: ' + styles.infoColor + ';">' + stats.onShelf + '</td>';
+      content += '<td style="padding: 8px 10px; text-align: center; border-bottom: 1px solid ' + styles.borderColor + '; color: ' + (stats.testing > 0 ? styles.warningColor : '#64748b') + ';">' + stats.testing + '</td>';
       content += '</tr>';
-    }
+      rowIdx++;
+    });
 
     content += '</table>';
 
   } catch (e) {
-    content = '<p style="color: #666; text-align: center;">Unable to load inventory data.</p>';
+    content = '<p style="color: #666; text-align: center;">Unable to load inventory summary data.</p>';
     Logger.log('Error building inventory section: ' + e);
   }
 
@@ -1382,38 +1385,138 @@ function buildChartsSection(chartImages, styles, useBase64) {
 // TRIGGER MANAGEMENT
 // ============================================================================
 
+// ============================================================================
+// TRIGGER & AUTOMATED SCHEDULE MANAGEMENT
+// ============================================================================
+
 /**
- * Creates a weekly time-driven trigger to send email reports.
- * Menu item: Glove Manager → Email Reports → Schedule Weekly Email
+ * Opens the Schedule Weekly Email modal dialog.
+ * Menu item: Glove Manager → Email Reports → ⏰ Schedule Weekly Auto-Send...
  */
-function createWeeklyEmailTrigger() {
+// eslint-disable-next-line no-unused-vars
+function showScheduleWeeklyEmailDialog() {
+  var html = HtmlService.createHtmlOutputFromFile('ScheduleEmailDialog')
+    .setWidth(620)
+    .setHeight(520);
+  SpreadsheetApp.getUi().showModalDialog(html, '📧 Schedule Weekly Email Report');
+}
+
+/**
+ * Returns current schedule status, configured day/hour, and active recipient count.
+ */
+// eslint-disable-next-line no-unused-vars
+function getWeeklyEmailScheduleStatus() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var activeTrigger = null;
+
+  for (var i = 0; i < triggers.length; i++) {
+    var fn = triggers[i].getHandlerFunction();
+    if (fn === 'automatedWeeklyEmailJob' || fn === 'sendEmailReport') {
+      activeTrigger = triggers[i];
+      break;
+    }
+  }
+
+  var props = PropertiesService.getScriptProperties();
+  var savedScheduleStr = props.getProperty('WEEKLY_EMAIL_SCHEDULE');
+  var savedSchedule = savedScheduleStr ? JSON.parse(savedScheduleStr) : null;
+  var lastSent = props.getProperty('WEEKLY_EMAIL_LAST_SENT') || '';
+
+  var dayNames = {
+    'MONDAY': 'Monday',
+    'TUESDAY': 'Tuesday',
+    'WEDNESDAY': 'Wednesday',
+    'THURSDAY': 'Thursday',
+    'FRIDAY': 'Friday',
+    'SATURDAY': 'Saturday',
+    'SUNDAY': 'Sunday'
+  };
+
+  var dayKey = savedSchedule && savedSchedule.day ? savedSchedule.day : 'MONDAY';
+  var hourVal = savedSchedule && savedSchedule.hour !== undefined ? savedSchedule.hour : 6;
+  var hourFormatted = (hourVal === 0 ? '12:00 AM' : (hourVal < 12 ? hourVal + ':00 AM' : (hourVal === 12 ? '12:00 PM' : (hourVal - 12) + ':00 PM')));
+
+  var configs = getEmailReportConfig() || [];
+  var recipients = configs.map(function(c) {
+    var enabledSections = Object.keys(c.sections || {}).filter(function(k) { return c.sections[k]; }).length;
+    return { email: c.email, sectionsCount: enabledSections };
+  });
+
+  return {
+    isScheduled: Boolean(activeTrigger),
+    configuredDay: dayKey,
+    configuredHour: hourVal,
+    dayName: dayNames[dayKey] || dayKey,
+    hourFormatted: hourFormatted,
+    lastSent: lastSent,
+    recipients: recipients
+  };
+}
+
+/**
+ * Creates or updates a weekly time-driven trigger to automatically send email reports.
+ *
+ * @param {string} [dayStr='MONDAY'] MONDAY, TUESDAY, etc.
+ * @param {number} [hourNum=6] 0-23 (e.g. 6 = 6:00 AM)
+ * @param {boolean} [silent=false] Suppresses alerts if true
+ */
+function createWeeklyEmailTrigger(dayStr, hourNum, silent) {
   try {
     removeEmailTrigger(true);
 
-    ScriptApp.newTrigger('sendEmailReport')
+    var dayMap = {
+      'MONDAY': ScriptApp.WeekDay.MONDAY,
+      'TUESDAY': ScriptApp.WeekDay.TUESDAY,
+      'WEDNESDAY': ScriptApp.WeekDay.WEDNESDAY,
+      'THURSDAY': ScriptApp.WeekDay.THURSDAY,
+      'FRIDAY': ScriptApp.WeekDay.FRIDAY,
+      'SATURDAY': ScriptApp.WeekDay.SATURDAY,
+      'SUNDAY': ScriptApp.WeekDay.SUNDAY
+    };
+
+    var selectedDayStr = (dayStr || 'MONDAY').toUpperCase().trim();
+    var selectedDay = dayMap[selectedDayStr] || ScriptApp.WeekDay.MONDAY;
+    var selectedHour = (hourNum !== undefined && hourNum !== null) ? parseInt(hourNum, 10) : 6;
+
+    ScriptApp.newTrigger('automatedWeeklyEmailJob')
       .timeBased()
-      .onWeekDay(ScriptApp.WeekDay.MONDAY)
-      .atHour(12)
+      .onWeekDay(selectedDay)
+      .atHour(selectedHour)
       .create();
 
-    logEvent('Weekly email report trigger created for Monday at 12 PM');
-    SpreadsheetApp.getUi().alert(
-      '✅ Weekly Email Scheduled!\n\n' +
-      'Reports will be sent every Monday at 12 PM.\n\n' +
-      'Configure recipients via: Email Reports → ⚙️ Configure Email Reports'
-    );
+    // Persist configuration in ScriptProperties
+    var props = PropertiesService.getScriptProperties();
+    props.setProperty('WEEKLY_EMAIL_SCHEDULE', JSON.stringify({
+      day: selectedDayStr,
+      hour: selectedHour,
+      enabled: true,
+      updatedAt: new Date().toISOString()
+    }));
+
+    var hourFormatted = (selectedHour === 0 ? '12:00 AM' : (selectedHour < 12 ? selectedHour + ':00 AM' : (selectedHour === 12 ? '12:00 PM' : (selectedHour - 12) + ':00 PM')));
+    logEvent('Weekly email report trigger created for ' + selectedDayStr + ' at ' + hourFormatted);
+
+    if (!silent) {
+      SpreadsheetApp.getUi().alert(
+        '✅ Weekly Email Scheduled!\n\n' +
+        'Reports will be sent automatically every ' + selectedDayStr + ' at ' + hourFormatted + '.\n\n' +
+        'Recipients can be customized via: Email Reports → ⚙️ Configure Recipients'
+      );
+    }
 
   } catch (e) {
     logEvent('Error creating weekly email trigger: ' + e, 'ERROR');
-    SpreadsheetApp.getUi().alert('❌ Error setting up weekly email: ' + e);
+    if (!silent) {
+      SpreadsheetApp.getUi().alert('❌ Error setting up weekly email: ' + e);
+    }
+    throw e;
   }
 }
 
 /**
- * Removes the weekly email report trigger.
- * Menu item: Glove Manager → Email Reports → Remove Scheduled Email
+ * Removes all active weekly email report triggers.
  *
- * @param {boolean} silent - If true, don't show UI alerts
+ * @param {boolean} [silent=false] Suppresses alerts if true
  */
 function removeEmailTrigger(silent) {
   try {
@@ -1421,11 +1524,16 @@ function removeEmailTrigger(silent) {
     var removed = 0;
 
     triggers.forEach(function(trigger) {
-      if (trigger.getHandlerFunction() === 'sendEmailReport') {
+      var fn = trigger.getHandlerFunction();
+      if (fn === 'sendEmailReport' || fn === 'automatedWeeklyEmailJob') {
         ScriptApp.deleteTrigger(trigger);
         removed++;
       }
     });
+
+    // Update ScriptProperties
+    var props = PropertiesService.getScriptProperties();
+    props.deleteProperty('WEEKLY_EMAIL_SCHEDULE');
 
     if (removed > 0) {
       logEvent('Removed ' + removed + ' email report trigger(s)');
@@ -1444,6 +1552,42 @@ function removeEmailTrigger(silent) {
     if (!silent) {
       SpreadsheetApp.getUi().alert('❌ Error removing scheduled email: ' + e);
     }
+  }
+}
+
+/**
+ * Automated scheduled job executed by the time-based trigger:
+ * 1. Checks and activates scheduled on-hold jobs.
+ * 2. Recalculates change out dates.
+ * 3. Dispatches personalized weekly email reports to all configured recipients.
+ * 4. Records last sent timestamp.
+ */
+// eslint-disable-next-line no-unused-vars
+function automatedWeeklyEmailJob() {
+  logEvent('automatedWeeklyEmailJob: Starting scheduled weekly email pipeline...');
+  try {
+    // 1. Auto-activate scheduled jobs
+    if (typeof checkAndActivateScheduledJobs === 'function') {
+      try { checkAndActivateScheduledJobs(); } catch (actErr) { Logger.log('Auto activate error: ' + actErr); }
+    }
+
+    // 2. Fix change out dates
+    if (typeof fixChangeOutDatesSilent === 'function') {
+      try { fixChangeOutDatesSilent(); } catch (fixErr) { Logger.log('Fix change out dates error: ' + fixErr); }
+    }
+
+    // 3. Send email reports
+    sendEmailReport();
+
+    // 4. Record timestamp
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var tz = ss.getSpreadsheetTimeZone();
+    var nowFormatted = Utilities.formatDate(new Date(), tz, 'MM/dd/yyyy h:mm a');
+    PropertiesService.getScriptProperties().setProperty('WEEKLY_EMAIL_LAST_SENT', nowFormatted);
+
+    logEvent('automatedWeeklyEmailJob: Weekly email job completed successfully at ' + nowFormatted);
+  } catch (err) {
+    logEvent('automatedWeeklyEmailJob failed: ' + err, 'ERROR');
   }
 }
 

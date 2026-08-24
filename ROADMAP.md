@@ -52,7 +52,7 @@
 - [x] ✅ Employee Organization & Visual Divider Tool (`organizeAndFormatEmployeesSheet`)
 - [x] ✅ Upsized notes fix and manual override capabilities
 - [x] ✅ **Per-Item Drilldown & Filter Views:** Instant filtering by size, class, and warehouse location
-- [ ] ⬜ **Automated Weekly Email Reports:** Schedule-based automated delivery of upcoming swaps
+- [x] ✅ **Automated Weekly Email Reports:** Schedule-based automated delivery of upcoming swaps
 - [ ] ⬜ **Purchase Needs UI Redesign:** Unified procurement view with direct vendor catalog integration
 - [ ] ⬜ **Inventory Aging Reports:** Highlighting oldest items approaching end-of-life or recertification
 
