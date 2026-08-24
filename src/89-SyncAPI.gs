@@ -275,12 +275,81 @@ function generateAndStoreSyncSnapshot(existingSnapshot) {
  * @param {Array<Object>} mutations - Array of mutation objects from the offline outbox
  * @return {Object} Result summary with success count and errors
  */
-function applyBatchSyncMutations(mutations, returnSnapshot) {
+function applyBatchSyncMutations(mutations, returnSnapshot, options) {
   var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+  if (typeof returnSnapshot === 'object' && returnSnapshot !== null && options === undefined) {
+    options = returnSnapshot;
+    returnSnapshot = options.returnSnapshot !== false;
+  }
   if (returnSnapshot === undefined) returnSnapshot = true;
+  options = options || {};
+
+  var detectConflicts = options.detectConflicts === true;
+  var force = options.force === true;
+
   if (!mutations || !Array.isArray(mutations) || mutations.length === 0) {
     var emptySnap = returnSnapshot ? exportFullDatabaseSnapshot() : null;
     return { success: true, appliedCount: 0, errors: [], snapshot: emptySnap };
+  }
+
+  // 1. Conflict Detection Pre-Pass
+  function normalizeValForComparison(v) {
+    if (v === null || v === undefined) return '';
+    if (v instanceof Date) {
+      if (isNaN(v.getTime())) return '';
+      return Utilities.formatDate(v, ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd');
+    }
+    var s = String(v).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) {
+      var dObj = typeof parseDateNoon === 'function' ? parseDateNoon(s) : new Date(s);
+      if (!isNaN(dObj.getTime())) return Utilities.formatDate(dObj, ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd');
+    }
+    return s.toLowerCase();
+  }
+
+  var conflicts = [];
+  if (detectConflicts && !force) {
+    for (var cm = 0; cm < mutations.length; cm++) {
+      var cMut = mutations[cm];
+      if (cMut.force) continue;
+      var cSheetName = cMut.sheetName || '';
+      var cSheet = cSheetName ? ss.getSheetByName(cSheetName) : null;
+      if (!cSheet) continue;
+
+      if (cMut.action === 'UPDATE_CELL' && cMut.row && cMut.col && cMut.oldValue !== undefined && cMut.oldValue !== null) {
+        var curVal = cSheet.getRange(cMut.row, cMut.col).getValue();
+        var curNorm = normalizeValForComparison(curVal);
+        var oldNorm = normalizeValForComparison(cMut.oldValue);
+        var newNorm = normalizeValForComparison(cMut.value);
+
+        if (curNorm !== oldNorm && curNorm !== newNorm) {
+          conflicts.push({
+            mutationIndex: cm,
+            action: cMut.action,
+            sheetName: cSheetName,
+            row: cMut.row,
+            col: cMut.col,
+            header: cMut.header || cMut.colName || ('Col ' + cMut.col),
+            itemIdentifier: cMut.itemIdentifier || '',
+            serverValue: (curVal instanceof Date && !isNaN(curVal.getTime())) ? Utilities.formatDate(curVal, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy') : String(curVal || ''),
+            localValue: (cMut.value instanceof Date && !isNaN(cMut.value.getTime())) ? Utilities.formatDate(cMut.value, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy') : String(cMut.value || ''),
+            expectedValue: (cMut.oldValue instanceof Date && !isNaN(cMut.oldValue.getTime())) ? Utilities.formatDate(cMut.oldValue, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy') : String(cMut.oldValue || '')
+          });
+        }
+      }
+    }
+
+    if (conflicts.length > 0) {
+      return {
+        status: 'conflict',
+        success: false,
+        conflict: true,
+        conflicts: conflicts,
+        appliedCount: 0,
+        message: 'Detected ' + conflicts.length + ' simultaneous edit conflict(s) with Google Sheets.'
+      };
+    }
   }
 
   var appliedCount = 0;
@@ -1462,7 +1531,9 @@ function doGet(e) {
       var mutationsJson = (e && e.parameter && e.parameter.mutations) || '[]';
       var mutations = JSON.parse(mutationsJson);
       var returnSnap = (e && e.parameter && e.parameter.returnSnapshot) === 'true';
-      var result = applyBatchSyncMutations(mutations, returnSnap);
+      var force = (e && e.parameter && e.parameter.force) === 'true';
+      var detectConflicts = (e && e.parameter && e.parameter.detectConflicts) !== 'false';
+      var result = applyBatchSyncMutations(mutations, returnSnap, { detectConflicts: detectConflicts, force: force });
       return ContentService.createTextOutput(JSON.stringify(result))
         .setMimeType(ContentService.MimeType.JSON);
     } catch (mutErr) {
@@ -1498,7 +1569,11 @@ function doPost(e) {
 
     if (action === 'applyMutations' || action === 'sync') {
       var returnSnap = payload.returnSnapshot === true;
-      var result = applyBatchSyncMutations(payload.mutations || [], returnSnap);
+      var options = {
+        detectConflicts: payload.detectConflicts !== false,
+        force: payload.force === true
+      };
+      var result = applyBatchSyncMutations(payload.mutations || [], returnSnap, options);
       return ContentService.createTextOutput(JSON.stringify(result))
         .setMimeType(ContentService.MimeType.JSON);
     }

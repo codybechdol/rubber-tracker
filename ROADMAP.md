@@ -58,19 +58,19 @@
 
 ---
 
-### Phase 4: Standalone Desktop App & Offline Engine 👈 *(Current Focus)*
+### Phase 4: Standalone Desktop App & Offline Engine ✅ *(Completed)*
 *High-performance local desktop app with offline capability, instant responsiveness, and modern UI.*
 - [x] ✅ Standalone Chromium/Node desktop runtime (`desktop/`)
 - [x] ✅ Dark glassmorphic interface with real-time UI components
 - [x] ✅ Excel Crew Import module with SheetJS, roster diffing, and onboarding (`desktop/js/crew-import.js`)
 - [x] ✅ Two-Way Sync API with mutation batching and validation guards (`89-SyncAPI.gs`)
 - [x] ✅ Interactive Employee Profile view with certification timeline and equipment history
-- [ ] ⬜ **Offline conflict resolution prompt for simultaneous multi-user edits**
-- [ ] ⬜ **Standalone installer package (.exe / installer build)**
+- [x] ✅ **Offline conflict resolution prompt for simultaneous multi-user edits** (`sync.js`, `89-SyncAPI.gs`)
+- [x] ✅ **Standalone installer package (.exe / installer build)** (`desktop/package.json`, `build-desktop-app.bat`)
 
 ---
 
-### Phase 5: Extended Equipment Tracking
+### Phase 5: Extended Equipment Tracking 👈 *(Next Focus)*
 *Expanding beyond gloves/sleeves to all field rigging, test instruments, and rescue apparatus.*
 - [x] ✅ Rubber Blankets tracking, swap generation, and companion history
 - [x] ✅ HV Testers & Phasing Sets calibration tracking and swap generation

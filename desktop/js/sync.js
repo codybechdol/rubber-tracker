@@ -364,12 +364,23 @@ class SyncEngine {
         pushResult = await this.executeNetworkRequest(this.syncUrl, 'POST', {
           action: 'applyMutations',
           mutations: currentOutbox,
+          detectConflicts: true,
+          force: false,
           returnSnapshot: false // PUSH ONLY: preserve local database state
         });
       } catch (pushErr) {
         console.warn('POST push failed, trying GET fallback:', pushErr);
-        const getUrl = `${this.syncUrl}?action=applyMutations&mutations=${encodeURIComponent(JSON.stringify(currentOutbox))}&returnSnapshot=false`;
+        const getUrl = `${this.syncUrl}?action=applyMutations&mutations=${encodeURIComponent(JSON.stringify(currentOutbox))}&detectConflicts=true&force=false&returnSnapshot=false`;
         pushResult = await this.executeNetworkRequest(getUrl, 'GET');
+      }
+
+      // 1. Handle Multi-User Edit Conflicts
+      if (pushResult && pushResult.conflict && Array.isArray(pushResult.conflicts) && pushResult.conflicts.length > 0) {
+        this.closeSyncModal();
+        this.updateStatusUI('pending', `⚠️ ${pushResult.conflicts.length} conflict(s) detected`);
+        this.openConflictModal(pushResult.conflicts, currentOutbox);
+        this.isSyncing = false;
+        return { success: false, conflict: true, conflicts: pushResult.conflicts };
       }
 
       const isSuccess = pushResult && (pushResult.success === true || pushResult.status === 'ok' || pushResult.appliedCount !== undefined);
@@ -411,6 +422,178 @@ class SyncEngine {
       this.renderModalChanges(currentOutbox, `❌ Push failed: ${err.message}`, 'error', true);
       this.isSyncing = false;
       return { success: false, error: err.message };
+    }
+  }
+
+  /**
+   * Opens the Multi-User Conflict Resolution Modal with side-by-side diffs
+   */
+  openConflictModal(conflicts, outbox) {
+    this.activeConflicts = conflicts;
+    this.activeOutbox = outbox;
+
+    const modal = document.getElementById('conflict-resolution-modal');
+    const body = document.getElementById('conflict-modal-body');
+    if (!modal || !body) return;
+
+    let html = `
+      <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 8px; padding: 12px 16px;">
+        <div style="font-size: 13px; font-weight: 700; color: #fca5a5; margin-bottom: 4px;">
+          Simultaneous Edits on Google Sheets (${conflicts.length} Conflict${conflicts.length > 1 ? 's' : ''})
+        </div>
+        <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.4;">
+          The following cell(s) were modified on Google Sheets by another user or session while you were editing offline. Select which version to keep for each item:
+        </div>
+      </div>
+
+      <!-- Quick Batch Actions Bar -->
+      <div style="display: flex; gap: 10px; align-items: center; justify-content: flex-end; padding: 6px 0;">
+        <span style="font-size: 11px; color: var(--text-muted); font-weight: 600;">QUICK SELECT:</span>
+        <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px; border-color: rgba(16, 185, 129, 0.4); color: #34d399;" onclick="window.syncEngine.selectAllConflictChoices('local')">
+          ⚡ Keep All My Offline Edits
+        </button>
+        <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px; border-color: rgba(59, 130, 246, 0.4); color: #60a5fa;" onclick="window.syncEngine.selectAllConflictChoices('remote')">
+          ☁️ Accept All Google Sheets Values
+        </button>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+    `;
+
+    conflicts.forEach((conf, idx) => {
+      const sheetName = conf.sheetName || 'Sheet';
+      const fieldName = conf.header || conf.field || `Col ${conf.col}`;
+      const itemTitle = conf.itemIdentifier ? `Item ${conf.itemIdentifier}` : `Row ${conf.row}`;
+      const expectedVal = conf.expectedValue !== undefined && String(conf.expectedValue).trim() !== '' ? conf.expectedValue : '(Empty)';
+      const localVal = conf.localValue !== undefined && String(conf.localValue).trim() !== '' ? conf.localValue : '(Empty)';
+      const serverVal = conf.serverValue !== undefined && String(conf.serverValue).trim() !== '' ? conf.serverValue : '(Empty)';
+
+      html += `
+        <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="brand-badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 11px;">
+                ${sheetName}
+              </span>
+              <span style="font-size: 13px; font-weight: 700; color: #f8fafc;">
+                ${itemTitle} • <span style="color: #cbd5e1;">${fieldName}</span>
+              </span>
+            </div>
+            <span style="font-size: 11px; color: var(--text-muted);">Original Base: <em>${expectedVal}</em></span>
+          </div>
+
+          <!-- Comparison Columns -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <!-- Choice 1: Local Edit -->
+            <label style="cursor: pointer; display: flex; flex-direction: column; gap: 6px; background: rgba(16, 185, 129, 0.08); border: 1.5px solid rgba(16, 185, 129, 0.35); border-radius: 6px; padding: 10px 12px; transition: all 0.15s ease;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 11px; font-weight: 700; color: #34d399; text-transform: uppercase;">
+                  🟢 My Offline Edit
+                </span>
+                <input type="radio" name="conflict_choice_${idx}" value="local" checked style="accent-color: #10b981; cursor: pointer;">
+              </div>
+              <div style="font-size: 14px; font-weight: 700; color: #f8fafc; word-break: break-all;">
+                ${localVal}
+              </div>
+              <span style="font-size: 10.5px; color: #6ee7b7;">Overwrite Google Sheets with this edit</span>
+            </label>
+
+            <!-- Choice 2: Server Value -->
+            <label style="cursor: pointer; display: flex; flex-direction: column; gap: 6px; background: rgba(59, 130, 246, 0.08); border: 1.5px solid rgba(59, 130, 246, 0.35); border-radius: 6px; padding: 10px 12px; transition: all 0.15s ease;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 11px; font-weight: 700; color: #60a5fa; text-transform: uppercase;">
+                  🔵 Google Sheets Value
+                </span>
+                <input type="radio" name="conflict_choice_${idx}" value="remote" style="accent-color: #3b82f6; cursor: pointer;">
+              </div>
+              <div style="font-size: 14px; font-weight: 700; color: #f8fafc; word-break: break-all;">
+                ${serverVal}
+              </div>
+              <span style="font-size: 10.5px; color: #93c5fd;">Discard my edit & adopt Google Sheets value</span>
+            </label>
+          </div>
+        </div>
+      `;
+    });
+
+    html += `</div>`;
+    body.innerHTML = html;
+    modal.classList.add('active');
+  }
+
+  selectAllConflictChoices(choice = 'local') {
+    if (!this.activeConflicts) return;
+    this.activeConflicts.forEach((_, idx) => {
+      const radios = document.getElementsByName(`conflict_choice_${idx}`);
+      for (const r of radios) {
+        if (r.value === choice) r.checked = true;
+      }
+    });
+  }
+
+  closeConflictModal() {
+    const modal = document.getElementById('conflict-resolution-modal');
+    if (modal) modal.classList.remove('active');
+    this.activeConflicts = null;
+  }
+
+  async applyConflictResolutions() {
+    if (!this.activeConflicts || !this.activeOutbox) {
+      this.closeConflictModal();
+      return;
+    }
+
+    const conflicts = this.activeConflicts;
+    let outbox = [...this.activeOutbox];
+    const mutationsToDrop = new Set();
+
+    conflicts.forEach((conf, idx) => {
+      const radios = document.getElementsByName(`conflict_choice_${idx}`);
+      let selected = 'local';
+      for (const r of radios) {
+        if (r.checked) selected = r.value;
+      }
+
+      const mutIdx = conf.mutationIndex;
+      if (selected === 'local') {
+        // User wants to keep local offline edit: mark mutation to force write
+        if (outbox[mutIdx]) {
+          outbox[mutIdx].force = true;
+        }
+      } else {
+        // User wants to accept Google Sheets value: drop local mutation and update local DB
+        mutationsToDrop.add(mutIdx);
+
+        // Update local IndexedDB so local workspace reflects the Google Sheets value
+        if (conf.sheetName && conf.row && conf.col) {
+          const tableKey = this.db.getTableKeyForSheet(conf.sheetName);
+          const table = tableKey ? this.db.getTable(tableKey) : null;
+          if (table && table.rows && table.rows[conf.row - 2]) {
+            const header = conf.header;
+            if (header && table.rows[conf.row - 2][header] !== undefined) {
+              table.rows[conf.row - 2][header] = conf.serverValue;
+            }
+          }
+        }
+      }
+    });
+
+    // Filter out dropped mutations
+    const resolvedOutbox = outbox.filter((_, i) => !mutationsToDrop.has(i));
+    await this.db.saveOutbox(resolvedOutbox);
+
+    this.closeConflictModal();
+
+    // Refresh active views so user sees immediate state
+    if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
+    if (window.inventoryAging) window.inventoryAging.loadData();
+
+    if (resolvedOutbox.length > 0) {
+      // Re-push resolved mutations to Google Sheets
+      await this.pushChangesToGoogleSheets();
+    } else {
+      this.updateStatusUI('synced', `Synced (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
+      alert('✅ All conflict resolutions applied! Your local data has been synchronized with Google Sheets.');
     }
   }
 
