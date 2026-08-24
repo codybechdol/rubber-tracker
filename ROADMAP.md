@@ -46,7 +46,7 @@
 
 ---
 
-### Phase 3: Core Enhancements & Workflow Optimization 👈 *(Current Focus)*
+### Phase 3: Core Enhancements & Workflow Optimization ✅ *(Completed)*
 *Advanced reporting, per-item filtering, automated notifications, and refined purchase workflows.*
 - [x] ✅ Interactive Employee & Item Lookup Dialog (`LookupDialog.html`)
 - [x] ✅ Employee Organization & Visual Divider Tool (`organizeAndFormatEmployeesSheet`)
@@ -58,15 +58,15 @@
 
 ---
 
-### Phase 4: Standalone Desktop App & Offline Engine
+### Phase 4: Standalone Desktop App & Offline Engine 👈 *(Current Focus)*
 *High-performance local desktop app with offline capability, instant responsiveness, and modern UI.*
 - [x] ✅ Standalone Chromium/Node desktop runtime (`desktop/`)
 - [x] ✅ Dark glassmorphic interface with real-time UI components
 - [x] ✅ Excel Crew Import module with SheetJS, roster diffing, and onboarding (`desktop/js/crew-import.js`)
 - [x] ✅ Two-Way Sync API with mutation batching and validation guards (`89-SyncAPI.gs`)
 - [x] ✅ Interactive Employee Profile view with certification timeline and equipment history
-- [ ] ⬜ Standalone installer package (.exe / installer build)
-- [ ] ⬜ Offline conflict resolution prompt for simultaneous multi-user edits
+- [ ] ⬜ **Offline conflict resolution prompt for simultaneous multi-user edits**
+- [ ] ⬜ **Standalone installer package (.exe / installer build)**
 
 ---
 
