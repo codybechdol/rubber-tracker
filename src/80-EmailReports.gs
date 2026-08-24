@@ -321,41 +321,86 @@ function sendEmailReport() {
 }
 
 /**
- * Previews the email report for the current user.
+ * Returns complete rendered HTML string for email preview.
+ * Safe for client-side dialog fetching and iframe rendering.
+ *
+ * @param {string} [targetEmail] Optional specific recipient email to preview for
+ * @return {string} Full HTML email preview
+ */
+// eslint-disable-next-line no-unused-vars
+function getEmailReportPreviewHtml(targetEmail) {
+  try {
+    var userEmail = targetEmail || '';
+    if (!userEmail) {
+      try {
+        userEmail = Session.getActiveUser().getEmail() || '';
+      } catch (e) {
+        userEmail = '';
+      }
+    }
+
+    var configs = [];
+    try {
+      configs = getEmailReportConfig() || [];
+    } catch (e) {
+      Logger.log('Warning loading email config in preview: ' + e);
+    }
+
+    // Find config for current user, or use all sections as preview
+    var userConfig = null;
+    if (userEmail) {
+      for (var i = 0; i < configs.length; i++) {
+        if (configs[i].email && configs[i].email.toLowerCase() === userEmail.toLowerCase()) {
+          userConfig = configs[i];
+          break;
+        }
+      }
+    }
+
+    // Default to all sections for preview
+    var sections = {};
+    EMAIL_REPORT_SECTIONS.forEach(function(s) {
+      sections[s] = true;
+    });
+
+    if (userConfig && userConfig.sections) {
+      sections = userConfig.sections;
+    }
+
+    var chartImages = null;
+    try {
+      chartImages = generateChartImages(SpreadsheetApp.getActiveSpreadsheet());
+    } catch (chartErr) {
+      Logger.log('Chart generation warning in preview: ' + chartErr);
+    }
+
+    return buildPremiumEmailHtml(userEmail || 'preview@safetyassistant.internal', sections, chartImages, true);
+  } catch (err) {
+    Logger.log('Error in getEmailReportPreviewHtml: ' + err);
+    return '<div style="padding: 30px; font-family: sans-serif; color: #b91c1c;"><h3>❌ Error Generating Email Preview</h3><p>' + err + '</p></div>';
+  }
+}
+
+/**
+ * Previews the email report for the current user in a Google Sheets modal dialog.
  * Menu item: Glove Manager → Email Reports → 👁️ Preview My Report
  */
 function previewEmailReport() {
-  var userEmail = Session.getActiveUser().getEmail();
-  var configs = getEmailReportConfig();
+  try {
+    var html = getEmailReportPreviewHtml();
+    var htmlOutput = HtmlService.createHtmlOutput(html)
+      .setWidth(950)
+      .setHeight(700);
 
-  // Find config for current user, or use all sections as preview
-  var userConfig = null;
-  for (var i = 0; i < configs.length; i++) {
-    if (configs[i].email.toLowerCase() === userEmail.toLowerCase()) {
-      userConfig = configs[i];
-      break;
+    SpreadsheetApp.getUi().showModalDialog(htmlOutput, '👁️ Email Report Preview');
+  } catch (e) {
+    logEvent('Error in previewEmailReport: ' + e, 'ERROR');
+    try {
+      SpreadsheetApp.getUi().alert('❌ Error opening email preview: ' + e);
+    } catch (uiErr) {
+      Logger.log('UI alert failed: ' + uiErr);
     }
   }
-
-  // Default to all sections for preview
-  var sections = {};
-  EMAIL_REPORT_SECTIONS.forEach(function(s) {
-    sections[s] = true;
-  });
-
-  if (userConfig) {
-    sections = userConfig.sections;
-  }
-
-  var chartImages = generateChartImages(SpreadsheetApp.getActiveSpreadsheet());
-  var html = buildPremiumEmailHtml(userEmail, sections, chartImages, true); // true = use base64 for preview
-
-  // Show in modal dialog
-  var htmlOutput = HtmlService.createHtmlOutput(html)
-    .setWidth(950)
-    .setHeight(700);
-
-  SpreadsheetApp.getUi().showModalDialog(htmlOutput, '👁️ Email Report Preview');
 }
 
 // ============================================================================

@@ -110,9 +110,24 @@
     <div class="actions-bar">
       <button class="btn btn-danger" id="btn-disable" onclick="disableSchedule()">🛑 Cancel Schedule</button>
       <div style="display: flex; gap: 8px;">
-        <button class="btn btn-secondary" onclick="previewReport()">👁️ Preview</button>
+        <button class="btn btn-secondary" id="btn-preview" onclick="previewReport()">👁️ Preview</button>
         <button class="btn btn-secondary" onclick="sendNow()">📤 Send Now</button>
         <button class="btn btn-primary" onclick="saveSchedule()">💾 Save & Enable Schedule</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Fullscreen Preview Overlay -->
+  <div id="preview-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(15, 23, 42, 0.75); z-index: 9999; padding: 16px; flex-direction: column;">
+    <div style="background: #ffffff; border-radius: 8px; flex: 1; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3);">
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; border-bottom: 1px solid #e2e8f0; background: #f8fafc;">
+        <div style="font-weight: 700; font-size: 14px; color: #0f172a; display: flex; align-items: center; gap: 8px;">
+          <span>👁️ Weekly Email Report Preview</span>
+        </div>
+        <button class="btn btn-secondary" style="padding: 4px 12px; font-size: 12px;" onclick="closePreview()">✕ Close Preview</button>
+      </div>
+      <div id="preview-frame-container" style="flex: 1; position: relative; background: #eef1f5;">
+        <iframe id="preview-iframe" style="width: 100%; height: 100%; border: none;"></iframe>
       </div>
     </div>
   </div>
@@ -202,7 +217,35 @@
     }
 
     function previewReport() {
-      google.script.run.previewEmailReport();
+      const btnPreview = document.getElementById('btn-preview');
+      const originalText = btnPreview.innerHTML;
+      btnPreview.innerHTML = '⏳ Loading...';
+      btnPreview.disabled = true;
+
+      google.script.run
+        .withSuccessHandler(function(htmlContent) {
+          btnPreview.innerHTML = originalText;
+          btnPreview.disabled = false;
+
+          const modal = document.getElementById('preview-modal');
+          const iframe = document.getElementById('preview-iframe');
+          modal.style.display = 'flex';
+
+          const doc = iframe.contentDocument || iframe.contentWindow.document;
+          doc.open();
+          doc.write(htmlContent);
+          doc.close();
+        })
+        .withFailureHandler(function(err) {
+          btnPreview.innerHTML = originalText;
+          btnPreview.disabled = false;
+          alert('❌ Error loading preview: ' + err);
+        })
+        .getEmailReportPreviewHtml();
+    }
+
+    function closePreview() {
+      document.getElementById('preview-modal').style.display = 'none';
     }
 
     function sendNow() {
