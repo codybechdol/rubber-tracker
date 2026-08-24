@@ -1,16 +1,170 @@
 /**
- * aging.js - Inventory Aging & Fleet Lifecycle Analytics Engine (Phase 3 Step 4)
+ * aging.js - Inventory Aging & Fleet Lifecycle Analytics Engine (Phase 3 Step 4 Rework)
+ * 
+ * Features:
+ * - Data-driven EOL calculation based on historical failed items per category.
+ * - Accurate recertification calculations per utility specs (Gloves: 1yr shelf / 3mo assigned;
+ *   Sleeves: 1yr assigned; Blankets/MACKs/Grounds: 1yr test; HV/Phasing: 10yr calib; Hot Sticks: 2yr; AED: N/A).
+ * - Full manual configuration and override modal for Recert, Fresh, Mid-Life, Aging, and EOL thresholds.
+ * - Horizontal KPI summary cards layout.
  */
 
 class InventoryAgingEngine {
   constructor(db) {
     this.db = db;
     this.items = [];
+    this.categoryEOLStats = {}; // { [catKey]: { avgDays, avgYears, count, hasData } }
+    this.rules = this.loadRules();
     this.selectedCategory = 'all';
     this.selectedTier = 'all';
     this.selectedRecert = 'all';
     this.searchTerm = '';
-    this.sortBy = 'age_desc'; // age_desc, age_asc, due_asc, item_asc
+    this.sortBy = 'age_desc';
+    this.activeConfigCategory = 'gloves';
+  }
+
+  getDefaultRules() {
+    return {
+      gloves: {
+        recertMode: 'GLOVES_DEFAULT', // 1 yr on shelf, 3 mo assigned
+        customRecertDays: 90,
+        eolMode: 'DATA_DRIVEN', // DATA_DRIVEN or MANUAL
+        manualEolYears: 5.0,
+        freshRatio: 0.25,
+        midLifeRatio: 0.70,
+        agingRatio: 1.0,
+        manualFreshYears: 1.0,
+        manualMidLifeYears: 3.0,
+        manualAgingYears: 5.0
+      },
+      sleeves: {
+        recertMode: 'SLEEVES_DEFAULT', // 1 yr past Date Assigned
+        customRecertDays: 365,
+        eolMode: 'DATA_DRIVEN',
+        manualEolYears: 5.0,
+        freshRatio: 0.25,
+        midLifeRatio: 0.70,
+        agingRatio: 1.0,
+        manualFreshYears: 1.0,
+        manualMidLifeYears: 3.0,
+        manualAgingYears: 5.0
+      },
+      blankets: {
+        recertMode: 'TEST_1YR', // 1 yr past Test Date
+        customRecertDays: 365,
+        eolMode: 'DATA_DRIVEN',
+        manualEolYears: 5.0,
+        freshRatio: 0.25,
+        midLifeRatio: 0.70,
+        agingRatio: 1.0,
+        manualFreshYears: 1.0,
+        manualMidLifeYears: 3.0,
+        manualAgingYears: 5.0
+      },
+      macks: {
+        recertMode: 'TEST_1YR', // 1 yr past Test Date
+        customRecertDays: 365,
+        eolMode: 'DATA_DRIVEN',
+        manualEolYears: 5.0,
+        freshRatio: 0.25,
+        midLifeRatio: 0.70,
+        agingRatio: 1.0,
+        manualFreshYears: 1.0,
+        manualMidLifeYears: 3.0,
+        manualAgingYears: 5.0
+      },
+      grounds: {
+        recertMode: 'TEST_1YR', // 1 yr past Test Date
+        customRecertDays: 365,
+        eolMode: 'DATA_DRIVEN',
+        manualEolYears: 5.0,
+        freshRatio: 0.25,
+        midLifeRatio: 0.70,
+        agingRatio: 1.0,
+        manualFreshYears: 1.0,
+        manualMidLifeYears: 3.0,
+        manualAgingYears: 5.0
+      },
+      hv_testers: {
+        recertMode: 'CALIB_10YR', // 10 yrs past Calibration Date
+        customRecertDays: 3652,
+        eolMode: 'DATA_DRIVEN',
+        manualEolYears: 15.0,
+        freshRatio: 0.25,
+        midLifeRatio: 0.70,
+        agingRatio: 1.0,
+        manualFreshYears: 3.0,
+        manualMidLifeYears: 8.0,
+        manualAgingYears: 15.0
+      },
+      phasing_sets: {
+        recertMode: 'CALIB_10YR', // 10 yrs past Calibration Date
+        customRecertDays: 3652,
+        eolMode: 'DATA_DRIVEN',
+        manualEolYears: 15.0,
+        freshRatio: 0.25,
+        midLifeRatio: 0.70,
+        agingRatio: 1.0,
+        manualFreshYears: 3.0,
+        manualMidLifeYears: 8.0,
+        manualAgingYears: 15.0
+      },
+      hot_sticks: {
+        recertMode: 'TEST_2YR', // 2 yrs past Test Date
+        customRecertDays: 730,
+        eolMode: 'DATA_DRIVEN',
+        manualEolYears: 10.0,
+        freshRatio: 0.25,
+        midLifeRatio: 0.70,
+        agingRatio: 1.0,
+        manualFreshYears: 2.0,
+        manualMidLifeYears: 5.0,
+        manualAgingYears: 10.0
+      },
+      aed: {
+        recertMode: 'NA', // AED has no recertification date
+        customRecertDays: 0,
+        eolMode: 'DATA_DRIVEN',
+        manualEolYears: 8.0,
+        freshRatio: 0.25,
+        midLifeRatio: 0.70,
+        agingRatio: 1.0,
+        manualFreshYears: 2.0,
+        manualMidLifeYears: 5.0,
+        manualAgingYears: 8.0
+      }
+    };
+  }
+
+  loadRules() {
+    try {
+      const saved = localStorage.getItem('sa_aging_rules_config');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const defaults = this.getDefaultRules();
+        return { ...defaults, ...parsed };
+      }
+    } catch (e) {
+      console.warn('Failed to load aging rules from localStorage:', e);
+    }
+    return this.getDefaultRules();
+  }
+
+  saveRules(newRules) {
+    this.rules = newRules;
+    try {
+      localStorage.setItem('sa_aging_rules_config', JSON.stringify(this.rules));
+    } catch (e) {
+      console.error('Failed to save aging rules to localStorage:', e);
+    }
+    this.loadData();
+  }
+
+  resetRulesToDefault() {
+    this.rules = this.getDefaultRules();
+    localStorage.removeItem('sa_aging_rules_config');
+    this.loadData();
+    this.renderConfigModal();
   }
 
   init() {
@@ -36,8 +190,191 @@ class InventoryAgingEngine {
   }
 
   loadData() {
+    this.calculateAllCategoriesEOL();
     this.scanInventoryAging();
     this.render();
+  }
+
+  parseDate(val) {
+    if (!val || val === 'N/A' || val === '—') return null;
+    if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+    const s = String(val).trim();
+    if (s.includes('/')) {
+      const parts = s.split('/');
+      if (parts.length === 3) {
+        const m = parseInt(parts[0], 10) - 1;
+        const d = parseInt(parts[1], 10);
+        let y = parseInt(parts[2], 10);
+        if (y < 100) y += 2000;
+        const dt = new Date(y, m, d, 12, 0, 0);
+        return isNaN(dt.getTime()) ? null : dt;
+      }
+    }
+    const dt = new Date(s);
+    return isNaN(dt.getTime()) ? null : dt;
+  }
+
+  isFailedStatusOrNote(status, assignedTo, location, notes) {
+    const s = `${status || ''} ${assignedTo || ''} ${location || ''} ${notes || ''}`.toLowerCase();
+    return (
+      s.includes('failed') ||
+      s.includes('fail') ||
+      s.includes('destroyed') ||
+      s.includes('not repairable') ||
+      s.includes('damaged') ||
+      s.includes('retired')
+    );
+  }
+
+  /**
+   * Calculates empirical data-driven EOL per category based on historical failed items.
+   * Scans 1st entry date and failure date for all failed items of that category.
+   */
+  calculateAllCategoriesEOL() {
+    const categories = [
+      { key: 'gloves', histKey: 'gloves_history' },
+      { key: 'sleeves', histKey: 'sleeves_history' },
+      { key: 'blankets', histKey: 'blankets_history' },
+      { key: 'macks', histKey: 'macks_history' },
+      { key: 'hv_testers', histKey: 'hv_testers_history' },
+      { key: 'phasing_sets', histKey: 'phasing_sets_history' },
+      { key: 'grounds', histKey: 'grounds_history' },
+      { key: 'hot_sticks', histKey: 'hot_sticks_history' },
+      { key: 'aed', histKey: 'aed_history' }
+    ];
+
+    const today = new Date();
+
+    categories.forEach(cat => {
+      const histTable = this.db.getTable(cat.histKey);
+      const rawHist = histTable ? (histTable.rawGrid || histTable.rows || []) : [];
+
+      const currentTable = this.db.getTable(cat.key);
+      const rawCurrent = currentTable ? (currentTable.rawGrid || currentTable.rows || []) : [];
+
+      // Group history records by item
+      const itemLogs = {};
+
+      rawHist.forEach(hr => {
+        let iNum = '';
+        let dateVal = null;
+        let note = '';
+        let assigned = '';
+        let loc = '';
+
+        if (Array.isArray(hr)) {
+          iNum = String(hr[0] || '').trim();
+          dateVal = this.parseDate(hr[1]);
+          note = String(hr[hr.length - 1] || '');
+          assigned = String(hr[hr.length - 2] || '');
+          loc = String(hr[hr.length - 3] || '');
+        } else if (typeof hr === 'object' && hr !== null) {
+          const keys = Object.keys(hr);
+          iNum = String(hr['Item #'] || hr['Serial #'] || hr['ESL ID'] || hr[keys[0]] || '').trim();
+          dateVal = this.parseDate(hr['Date'] || hr['Date Assigned'] || hr['Test Date']);
+          note = String(hr['Notes'] || hr['Note'] || '');
+          assigned = String(hr['Assigned To'] || hr['Assigned'] || '');
+          loc = String(hr['Location'] || '');
+        }
+
+        if (!iNum || iNum.toLowerCase().includes('item') || iNum.toLowerCase().includes('serial')) return;
+
+        if (!itemLogs[iNum]) {
+          itemLogs[iNum] = [];
+        }
+
+        if (dateVal) {
+          itemLogs[iNum].push({
+            date: dateVal,
+            note: note,
+            assigned: assigned,
+            location: loc,
+            isFailed: this.isFailedStatusOrNote('', assigned, loc, note)
+          });
+        }
+      });
+
+      // Also check current table rows for currently failed items
+      rawCurrent.forEach(row => {
+        let iNum = '';
+        let testDate = null;
+        let assignDate = null;
+        let status = '';
+        let assigned = '';
+        let loc = '';
+        let notes = '';
+
+        if (Array.isArray(row)) {
+          iNum = String(row[0] || '').trim();
+          testDate = this.parseDate(row[4] || row[3]);
+          assignDate = this.parseDate(row[5] || row[4]);
+          loc = String(row[6] || '');
+          status = String(row[7] || '');
+          assigned = String(row[8] || '');
+          notes = String(row[row.length - 1] || '');
+        } else if (typeof row === 'object' && row !== null) {
+          const keys = Object.keys(row);
+          iNum = String(row['Item #'] || row['Serial #'] || row['ESL ID'] || row[keys[0]] || '').trim();
+          testDate = this.parseDate(row['Test Date'] || row['Calibration Date']);
+          assignDate = this.parseDate(row['Date Assigned']);
+          loc = String(row['Location'] || '');
+          status = String(row['Status'] || '');
+          assigned = String(row['Assigned To'] || '');
+          notes = String(row['Notes'] || '');
+        }
+
+        if (!iNum || iNum.toLowerCase().includes('item')) return;
+
+        if (this.isFailedStatusOrNote(status, assigned, loc, notes)) {
+          if (!itemLogs[iNum]) itemLogs[iNum] = [];
+          const entryDate = testDate || assignDate || today;
+          itemLogs[iNum].push({
+            date: today,
+            note: notes || status,
+            assigned: assigned,
+            location: loc,
+            isFailed: true,
+            initialDate: entryDate
+          });
+        }
+      });
+
+      // Compute failure durations for each failed item
+      const failureDurations = [];
+
+      Object.keys(itemLogs).forEach(iNum => {
+        const logs = itemLogs[iNum].sort((a, b) => a.date - b.date);
+        if (!logs.length) return;
+
+        const firstDate = logs[0].initialDate || logs[0].date;
+        const failedLog = logs.find(l => l.isFailed);
+
+        if (failedLog && firstDate) {
+          const diffDays = Math.floor((failedLog.date - firstDate) / (1000 * 60 * 60 * 24));
+          if (diffDays > 30) { // filter out immediate data entry errors
+            failureDurations.push(diffDays);
+          }
+        }
+      });
+
+      if (failureDurations.length > 0) {
+        const avgDays = Math.round(failureDurations.reduce((sum, d) => sum + d, 0) / failureDurations.length);
+        const avgYears = (avgDays / 365.25).toFixed(1);
+        this.categoryEOLStats[cat.key] = {
+          avgDays: avgDays,
+          avgYears: avgYears,
+          count: failureDurations.length,
+          hasData: true
+        };
+      } else {
+        this.categoryEOLStats[cat.key] = {
+          avgDays: null,
+          avgYears: null,
+          count: 0,
+          hasData: false
+        };
+      }
+    });
   }
 
   scanInventoryAging() {
@@ -68,34 +405,34 @@ class InventoryAgingEngine {
       const histTable = this.db.getTable(cat.histKey);
       const historyRows = histTable ? (histTable.rawGrid || histTable.rows || []) : [];
 
-      // Build history lookup for initial service date and cycle count
       const historyMap = {};
       historyRows.forEach(hr => {
         let iNum = '';
         let dateVal = null;
         if (Array.isArray(hr)) {
           iNum = String(hr[0] || '').trim();
-          dateVal = hr[1] ? new Date(hr[1]) : null;
+          dateVal = this.parseDate(hr[1]);
         } else if (typeof hr === 'object' && hr !== null) {
           const keys = Object.keys(hr);
           iNum = String(hr['Item #'] || hr['Serial #'] || hr['ESL ID'] || hr[keys[0]] || '').trim();
-          dateVal = hr['Date'] ? new Date(hr['Date']) : null;
+          dateVal = this.parseDate(hr['Date']);
         }
 
-        if (iNum && iNum !== 'Item #' && iNum !== 'Serial #') {
+        if (iNum && !iNum.toLowerCase().includes('item') && !iNum.toLowerCase().includes('serial')) {
           if (!historyMap[iNum]) {
             historyMap[iNum] = { earliestDate: null, count: 0 };
           }
           historyMap[iNum].count++;
-          if (dateVal && !isNaN(dateVal.getTime())) {
-            if (!historyMap[iNum].earliestDate || dateVal < historyMap[iNum].earliestDate) {
-              historyMap[iNum].earliestDate = dateVal;
-            }
+          if (dateVal && (!historyMap[iNum].earliestDate || dateVal < historyMap[iNum].earliestDate)) {
+            historyMap[iNum].earliestDate = dateVal;
           }
         }
       });
 
-      rawRows.forEach((row, rIdx) => {
+      const rule = this.rules[cat.key] || this.getDefaultRules()[cat.key] || {};
+      const catEOL = this.categoryEOLStats[cat.key] || { hasData: false };
+
+      rawRows.forEach((row) => {
         let itemNum = '';
         let size = '—';
         let classVal = '—';
@@ -111,102 +448,170 @@ class InventoryAgingEngine {
           const first = String(row[0] || '').trim();
           if (first.toLowerCase().includes('item') || first.toLowerCase().includes('serial') || !first) return;
           itemNum = first;
-          // Standard 11/12/13 column layouts
+
           if (cat.key === 'gloves' || cat.key === 'sleeves') {
             size = String(row[2] || '—').trim();
             classVal = String(row[3] || '—').trim();
-            testDate = row[4] ? new Date(row[4]) : null;
-            dateAssigned = row[5] ? new Date(row[5]) : null;
+            testDate = this.parseDate(row[4]);
+            dateAssigned = this.parseDate(row[5]);
             location = String(row[6] || '—').trim();
             status = String(row[7] || 'On Shelf').trim();
             assignedTo = String(row[8] || '—').trim();
-            changeOutDate = row[9] ? new Date(row[9]) : null;
+            changeOutDate = this.parseDate(row[9]);
             notes = String(row[11] || '').trim();
           } else {
-            // General equipment
             classVal = String(row[1] || row[2] || '—').trim();
-            testDate = row[4] || row[5] ? new Date(row[4] || row[5]) : null;
-            dateAssigned = row[5] || row[6] ? new Date(row[5] || row[6]) : null;
+            testDate = this.parseDate(row[4] || row[5]);
+            dateAssigned = this.parseDate(row[5] || row[6]);
             location = String(row[6] || row[7] || '—').trim();
             status = String(row[7] || row[8] || 'On Shelf').trim();
             assignedTo = String(row[8] || row[9] || '—').trim();
-            changeOutDate = row[9] || row[10] ? new Date(row[9] || row[10]) : null;
+            changeOutDate = this.parseDate(row[9] || row[10]);
             notes = String(row[10] || row[11] || '').trim();
           }
         } else if (typeof row === 'object' && row !== null) {
           const keys = Object.keys(row);
-          itemNum = String(row['Item #'] || row['Serial #'] || row['ESL ID'] || row['Glove'] || row['Sleeve'] || row[keys[0]] || '').trim();
+          itemNum = String(row['Item #'] || row['Serial #'] || row['ESL ID'] || row[keys[0]] || '').trim();
           if (!itemNum || itemNum.toLowerCase().includes('item')) return;
 
           size = String(row['Size'] || '—').trim();
           classVal = String(row['Class'] || row['KV'] || row['Model'] || row['Type'] || '—').trim();
-          testDate = row['Test Date'] || row['Calibration Date'] ? new Date(row['Test Date'] || row['Calibration Date']) : null;
-          dateAssigned = row['Date Assigned'] ? new Date(row['Date Assigned']) : null;
+          testDate = this.parseDate(row['Test Date'] || row['Calibration Date']);
+          dateAssigned = this.parseDate(row['Date Assigned']);
           location = String(row['Location'] || '—').trim();
           status = String(row['Status'] || 'On Shelf').trim();
           assignedTo = String(row['Assigned To'] || '—').trim();
-          changeOutDate = row['Change Out Date'] ? new Date(row['Change Out Date']) : null;
+          changeOutDate = this.parseDate(row['Change Out Date']);
           notes = String(row['Notes'] || '').trim();
         }
 
         if (!itemNum) return;
 
-        // Determine earliest recorded date for age
+        // 1. Calculate Age (from earliest seen date)
         let earliestDate = testDate || dateAssigned || changeOutDate;
         const histInfo = historyMap[itemNum];
         if (histInfo && histInfo.earliestDate && (!earliestDate || histInfo.earliestDate < earliestDate)) {
           earliestDate = histInfo.earliestDate;
         }
 
-        let ageDays = 180; // default conservative estimate if no date
+        let ageDays = 180;
         if (earliestDate && !isNaN(earliestDate.getTime())) {
           ageDays = Math.max(0, Math.floor((today - earliestDate) / (1000 * 60 * 60 * 24)));
         }
-
         const ageYears = (ageDays / 365.25).toFixed(1);
 
-        // Days until next test
+        // 2. Calculate Recertification Date based on user-defined specification & overrides
+        let calculatedRecertDate = null;
+        let recertIsNA = false;
+
+        const isShelf = status.toLowerCase() === 'on shelf' || assignedTo.toLowerCase() === 'on shelf' || assignedTo === '—' || !assignedTo;
+
+        if (rule.recertMode === 'NA' || cat.key === 'aed') {
+          recertIsNA = true;
+        } else if (rule.recertMode === 'GLOVES_DEFAULT' || (cat.key === 'gloves' && !rule.recertMode)) {
+          // Gloves: 1 yr on shelf, 3 months assigned to employee
+          if (isShelf) {
+            const baseDate = testDate || today;
+            calculatedRecertDate = new Date(baseDate.getTime() + 365.25 * 24 * 60 * 60 * 1000);
+          } else {
+            const baseDate = dateAssigned || testDate || today;
+            calculatedRecertDate = new Date(baseDate.getTime() + 91.3 * 24 * 60 * 60 * 1000); // 3 months
+          }
+        } else if (rule.recertMode === 'SLEEVES_DEFAULT' || (cat.key === 'sleeves' && !rule.recertMode)) {
+          // Sleeves: 1 year past Date Assigned all of the time, no matter assigned to value
+          const baseDate = dateAssigned || testDate || today;
+          calculatedRecertDate = new Date(baseDate.getTime() + 365.25 * 24 * 60 * 60 * 1000);
+        } else if (rule.recertMode === 'CALIB_10YR' || ((cat.key === 'hv_testers' || cat.key === 'phasing_sets') && !rule.recertMode)) {
+          // HV Testers & Phasing Sets: 10 years past last Calibration Date
+          const baseDate = testDate || today;
+          calculatedRecertDate = new Date(baseDate.getTime() + 3652.5 * 24 * 60 * 60 * 1000);
+        } else if (rule.recertMode === 'TEST_2YR' || (cat.key === 'hot_sticks' && !rule.recertMode)) {
+          // Hot Sticks: 2 years past Test Date
+          const baseDate = testDate || today;
+          calculatedRecertDate = new Date(baseDate.getTime() + 730.5 * 24 * 60 * 60 * 1000);
+        } else if (rule.recertMode === 'TEST_1YR' || ((cat.key === 'blankets' || cat.key === 'macks' || cat.key === 'grounds') && !rule.recertMode)) {
+          // Blankets, MACKs, Grounds: 1 year past Test Date
+          const baseDate = testDate || today;
+          calculatedRecertDate = new Date(baseDate.getTime() + 365.25 * 24 * 60 * 60 * 1000);
+        } else if (rule.recertMode === 'CUSTOM') {
+          const daysToAdd = parseInt(rule.customRecertDays, 10) || 365;
+          const baseDate = testDate || dateAssigned || today;
+          calculatedRecertDate = new Date(baseDate.getTime() + daysToAdd * 24 * 60 * 60 * 1000);
+        }
+
+        // If sheet had explicit Change Out Date and no specific override requested, use calculatedRecertDate
+        const finalRecertDate = calculatedRecertDate || changeOutDate;
+
         let daysUntil = 999;
-        if (changeOutDate && !isNaN(changeOutDate.getTime())) {
-          daysUntil = Math.floor((changeOutDate - today) / (1000 * 60 * 60 * 24));
-        }
-
-        // Determine Age Tier
-        let tier = 'FRESH';
-        let tierLabel = '🟢 Fresh (<1 yr)';
-        let tierColor = '#4ade80';
-
-        if (ageDays >= 1825) { // 5 years
-          tier = 'CRITICAL';
-          tierLabel = '🔴 EOL Candidate (>5 yrs)';
-          tierColor = '#f87171';
-        } else if (ageDays >= 1095) { // 3 - 5 years
-          tier = 'AGING';
-          tierLabel = '🟠 Aging (3-5 yrs)';
-          tierColor = '#fb923c';
-        } else if (ageDays >= 365) { // 1 - 3 years
-          tier = 'MID_LIFE';
-          tierLabel = '🟡 Mid-Life (1-3 yrs)';
-          tierColor = '#facc15';
-        }
-
-        // Recertification status
         let recertStatus = 'CURRENT';
         let recertLabel = '🟢 Current';
         let recertBadgeClass = 'badge-success';
 
-        if (daysUntil < 0) {
-          recertStatus = 'OVERDUE';
-          recertLabel = `🔴 Overdue (${Math.abs(daysUntil)}d)`;
-          recertBadgeClass = 'badge-danger';
-        } else if (daysUntil <= 30) {
-          recertStatus = 'DUE_SOON';
-          recertLabel = `🟠 Due in ${daysUntil}d`;
-          recertBadgeClass = 'badge-warning';
-        } else if (daysUntil <= 60) {
-          recertStatus = 'DUE_60D';
-          recertLabel = `🟡 Due in ${daysUntil}d`;
+        if (recertIsNA) {
+          recertStatus = 'NA';
+          recertLabel = 'N/A';
           recertBadgeClass = 'badge-secondary';
+        } else if (finalRecertDate && !isNaN(finalRecertDate.getTime())) {
+          daysUntil = Math.floor((finalRecertDate - today) / (1000 * 60 * 60 * 24));
+          if (daysUntil < 0) {
+            recertStatus = 'OVERDUE';
+            recertLabel = `🔴 Overdue (${Math.abs(daysUntil)}d)`;
+            recertBadgeClass = 'badge-danger';
+          } else if (daysUntil <= 30) {
+            recertStatus = 'DUE_SOON';
+            recertLabel = `🟠 Due in ${daysUntil}d`;
+            recertBadgeClass = 'badge-warning';
+          } else if (daysUntil <= 60) {
+            recertStatus = 'DUE_60D';
+            recertLabel = `🟡 Due in ${daysUntil}d`;
+            recertBadgeClass = 'badge-secondary';
+          }
+        }
+
+        // 3. Calculate Lifecycle Tier (Data-Driven from Failed Items vs Manual)
+        let effectiveEOLDays = null;
+        let isMoreDataNeeded = false;
+
+        if (rule.eolMode === 'MANUAL') {
+          effectiveEOLDays = (parseFloat(rule.manualEolYears) || 5.0) * 365.25;
+        } else {
+          if (catEOL.hasData && catEOL.avgDays) {
+            effectiveEOLDays = catEOL.avgDays;
+          } else {
+            isMoreDataNeeded = true;
+          }
+        }
+
+        let tier = 'FRESH';
+        let tierLabel = '🟢 Fresh';
+        let tierColor = '#4ade80';
+
+        if (isMoreDataNeeded) {
+          tier = 'MORE_DATA';
+          tierLabel = 'ℹ️ More Data Needed';
+          tierColor = '#94a3b8';
+        } else {
+          const freshThreshDays = effectiveEOLDays * (rule.freshRatio || 0.25);
+          const midLifeThreshDays = effectiveEOLDays * (rule.midLifeRatio || 0.70);
+          const agingThreshDays = effectiveEOLDays * (rule.agingRatio || 1.0);
+
+          if (ageDays >= agingThreshDays) {
+            tier = 'CRITICAL';
+            tierLabel = `🔴 EOL Candidate (>${(agingThreshDays / 365.25).toFixed(1)}y)`;
+            tierColor = '#f87171';
+          } else if (ageDays >= midLifeThreshDays) {
+            tier = 'AGING';
+            tierLabel = `🟠 Aging (${(midLifeThreshDays / 365.25).toFixed(1)}-${(agingThreshDays / 365.25).toFixed(1)}y)`;
+            tierColor = '#fb923c';
+          } else if (ageDays >= freshThreshDays) {
+            tier = 'MID_LIFE';
+            tierLabel = `🟡 Mid-Life (${(freshThreshDays / 365.25).toFixed(1)}-${(midLifeThreshDays / 365.25).toFixed(1)}y)`;
+            tierColor = '#facc15';
+          } else {
+            tier = 'FRESH';
+            tierLabel = `🟢 Fresh (<${(freshThreshDays / 365.25).toFixed(1)}y)`;
+            tierColor = '#4ade80';
+          }
         }
 
         allItems.push({
@@ -220,12 +625,12 @@ class InventoryAgingEngine {
           location,
           status,
           assignedTo,
-          testDateStr: testDate && !isNaN(testDate.getTime()) ? testDate.toLocaleDateString() : '—',
-          dateAssignedStr: dateAssigned && !isNaN(dateAssigned.getTime()) ? dateAssigned.toLocaleDateString() : '—',
-          changeOutDateStr: changeOutDate && !isNaN(changeOutDate.getTime()) ? changeOutDate.toLocaleDateString() : '—',
+          testDateStr: testDate ? testDate.toLocaleDateString() : '—',
+          dateAssignedStr: dateAssigned ? dateAssigned.toLocaleDateString() : '—',
+          recertDateStr: recertIsNA ? 'N/A' : (finalRecertDate ? finalRecertDate.toLocaleDateString() : '—'),
+          daysUntil: recertIsNA ? 9999 : daysUntil,
           ageDays,
           ageYears,
-          daysUntil,
           cycleCount: histInfo ? histInfo.count : 1,
           tier,
           tierLabel,
@@ -267,16 +672,10 @@ class InventoryAgingEngine {
 
   getFilteredItems() {
     return this.items.filter(it => {
-      // Category filter
       if (this.selectedCategory !== 'all' && it.categoryKey !== this.selectedCategory) return false;
-
-      // Tier filter
       if (this.selectedTier !== 'all' && it.tier !== this.selectedTier) return false;
-
-      // Recertification filter
       if (this.selectedRecert !== 'all' && it.recertStatus !== this.selectedRecert) return false;
 
-      // Search filter
       if (this.searchTerm) {
         const str = `${it.itemNum} ${it.categoryType} ${it.size} ${it.classVal} ${it.location} ${it.status} ${it.assignedTo} ${it.notes}`.toLowerCase();
         if (!str.includes(this.searchTerm)) return false;
@@ -303,7 +702,6 @@ class InventoryAgingEngine {
     if (totalFleet === 0) return;
 
     const criticalCount = this.items.filter(i => i.tier === 'CRITICAL').length;
-    const agingCount = this.items.filter(i => i.tier === 'AGING').length;
     const overdueCount = this.items.filter(i => i.recertStatus === 'OVERDUE').length;
     const dueSoonCount = this.items.filter(i => i.recertStatus === 'DUE_SOON').length;
 
@@ -355,7 +753,7 @@ class InventoryAgingEngine {
             <th style="padding: 10px; text-align: center; width: 110px;">Recert Date</th>
             <th style="padding: 10px; text-align: center; width: 130px;">Recert Urgency</th>
             <th style="padding: 10px; text-align: center; width: 110px;">Est. Fleet Age</th>
-            <th style="padding: 10px; text-align: center; width: 160px;">Lifecycle Tier</th>
+            <th style="padding: 10px; text-align: center; width: 170px;">Lifecycle Tier</th>
           </tr>
         </thead>
         <tbody>
@@ -380,7 +778,7 @@ class InventoryAgingEngine {
             <div style="font-size: 11px; color: var(--text-muted);">${item.status}</div>
           </td>
           <td style="padding: 8px 10px; text-align: center; font-family: monospace; font-size: 12px;">
-            ${item.changeOutDateStr}
+            ${item.recertDateStr}
           </td>
           <td style="padding: 8px 10px; text-align: center;">
             <span class="badge ${item.recertBadgeClass}" style="font-size: 11px; font-weight: 700;">${item.recertLabel}</span>
@@ -400,5 +798,204 @@ class InventoryAgingEngine {
 
     html += '</tbody></table>';
     container.innerHTML = html;
+  }
+
+  /* ========================================================
+   * Rules Configuration Modal
+   * ======================================================== */
+  openConfigModal() {
+    this.renderConfigModal();
+    const modal = document.getElementById('aging-config-modal');
+    if (modal) modal.style.display = 'flex';
+  }
+
+  closeConfigModal() {
+    const modal = document.getElementById('aging-config-modal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  selectConfigCategory(catKey) {
+    this.activeConfigCategory = catKey;
+    this.renderConfigModal();
+  }
+
+  renderConfigModal() {
+    const body = document.getElementById('aging-config-modal-body');
+    if (!body) return;
+
+    const categories = [
+      { key: 'gloves', label: '🧤 Gloves' },
+      { key: 'sleeves', label: '🦺 Sleeves' },
+      { key: 'blankets', label: '🧱 Blankets' },
+      { key: 'macks', label: '🧱 MACKs' },
+      { key: 'grounds', label: '⚡ Grounds' },
+      { key: 'hv_testers', label: '⚡ HV Testers' },
+      { key: 'phasing_sets', label: '⚡ Phasing Sets' },
+      { key: 'hot_sticks', label: '🔴 Hot Sticks' },
+      { key: 'aed', label: '🏥 AED Units' }
+    ];
+
+    const currentCat = this.activeConfigCategory || 'gloves';
+    const rule = this.rules[currentCat] || this.getDefaultRules()[currentCat];
+    const eolStat = this.categoryEOLStats[currentCat] || { hasData: false };
+
+    let html = `
+      <div style="display: grid; grid-template-columns: 240px 1fr; gap: 20px; min-height: 480px;">
+        <!-- Left: Category Selector List -->
+        <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px;">
+          <div style="font-weight: 700; font-size: 13px; color: #93c5fd; margin-bottom: 6px;">Equipment Categories</div>
+    `;
+
+    categories.forEach(c => {
+      const isActive = c.key === currentCat;
+      html += `
+        <button class="btn ${isActive ? 'btn-primary' : 'btn-secondary'}" style="text-align: left; padding: 8px 12px; font-size: 12px; font-weight: 600; display: flex; justify-content: space-between; align-items: center;" onclick="window.inventoryAging.selectConfigCategory('${c.key}')">
+          <span>${c.label}</span>
+          ${this.categoryEOLStats[c.key]?.hasData ? '<span style="font-size: 10px; background: rgba(16,185,129,0.2); color: #4ade80; padding: 1px 4px; border-radius: 3px;">Data</span>' : '<span style="font-size: 10px; color: var(--text-muted);">No fail data</span>'}
+        </button>
+      `;
+    });
+
+    html += `
+        </div>
+
+        <!-- Right: Rule Configuration Form for Active Category -->
+        <div style="display: flex; flex-direction: column; gap: 16px; overflow-y: auto; max-height: 520px; padding-right: 6px;">
+          
+          <!-- Recertification Rule Section -->
+          <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px;">
+            <div style="font-weight: 700; font-size: 14px; color: #60a5fa; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+              <span>⚡</span> Recertification Calculation Rule
+            </div>
+            <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+              Defines when this equipment is flagged as overdue or due for physical / dielectric recertification.
+            </p>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+              <div>
+                <label style="font-size: 11.5px; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 4px;">Recertification Interval:</label>
+                <select id="config-recert-mode" style="width: 100%; padding: 8px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: white; font-size: 12px;" onchange="window.inventoryAging.onRecertModeChange(this.value)">
+                  <option value="GLOVES_DEFAULT" ${rule.recertMode === 'GLOVES_DEFAULT' ? 'selected' : ''}>🧤 Gloves Default (1 Yr On Shelf / 3 Mos Assigned)</option>
+                  <option value="SLEEVES_DEFAULT" ${rule.recertMode === 'SLEEVES_DEFAULT' ? 'selected' : ''}>🦺 Sleeves Default (1 Yr Past Date Assigned)</option>
+                  <option value="TEST_1YR" ${rule.recertMode === 'TEST_1YR' ? 'selected' : ''}>📅 1 Year Past Test Date (Blankets/MACKs/Grounds)</option>
+                  <option value="CALIB_10YR" ${rule.recertMode === 'CALIB_10YR' ? 'selected' : ''}>⚡ 10 Years Past Calibration (HV/Phasing)</option>
+                  <option value="TEST_2YR" ${rule.recertMode === 'TEST_2YR' ? 'selected' : ''}>🔴 2 Years Past Test Date (Hot Sticks)</option>
+                  <option value="CUSTOM" ${rule.recertMode === 'CUSTOM' ? 'selected' : ''}>✏️ Custom Interval (Enter Days)</option>
+                  <option value="NA" ${rule.recertMode === 'NA' ? 'selected' : ''}>🚫 N/A (No Recertification - e.g. AEDs)</option>
+                </select>
+              </div>
+              <div id="config-custom-recert-container" style="${rule.recertMode === 'CUSTOM' ? 'display: block;' : 'display: none;'}">
+                <label style="font-size: 11.5px; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 4px;">Custom Interval (Days):</label>
+                <input type="number" id="config-custom-recert-days" value="${rule.customRecertDays || 365}" style="width: 100%; padding: 8px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: white; font-size: 12px;">
+              </div>
+            </div>
+          </div>
+
+          <!-- End-of-Life (EOL) Calculation Section -->
+          <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px;">
+            <div style="font-weight: 700; font-size: 14px; color: #f87171; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+              <span>⏳</span> End-of-Life (EOL) & Retirement Lifespan
+            </div>
+            <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+              Determines the fleet useful lifespan before equipment is flagged for replacement.
+            </p>
+
+            <div style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 10px 14px; margin-bottom: 12px; font-size: 12px;">
+              <div style="font-weight: 600; color: #93c5fd; margin-bottom: 4px;">📊 Historical Failure Data Analysis:</div>
+              ${eolStat.hasData ? `
+                <div style="color: #4ade80; font-weight: 700;">✅ Calculated Average EOL: ${eolStat.avgYears} Years (${eolStat.avgDays} days)</div>
+                <div style="color: var(--text-muted); font-size: 11px; margin-top: 2px;">Based on ${eolStat.count} failed / destroyed equipment history records.</div>
+              ` : `
+                <div style="color: #facc15; font-weight: 600;">ℹ️ Status: More Data Needed</div>
+                <div style="color: var(--text-muted); font-size: 11px; margin-top: 2px;">No historical failed items recorded yet for this category. You can set a manual lifespan below or wait for historical fail records.</div>
+              `}
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+              <div>
+                <label style="font-size: 11.5px; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 4px;">EOL Method:</label>
+                <select id="config-eol-mode" style="width: 100%; padding: 8px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: white; font-size: 12px;" onchange="window.inventoryAging.onEolModeChange(this.value)">
+                  <option value="DATA_DRIVEN" ${rule.eolMode === 'DATA_DRIVEN' ? 'selected' : ''}>📈 Data-Driven (Average from Failed Items)</option>
+                  <option value="MANUAL" ${rule.eolMode === 'MANUAL' ? 'selected' : ''}>✏️ Manual Lifespan Override</option>
+                </select>
+              </div>
+              <div id="config-manual-eol-container" style="${rule.eolMode === 'MANUAL' ? 'display: block;' : 'display: none;'}">
+                <label style="font-size: 11.5px; color: var(--text-muted); font-weight: 600; display: block; margin-bottom: 4px;">Manual EOL Lifespan (Years):</label>
+                <input type="number" step="0.5" id="config-manual-eol-years" value="${rule.manualEolYears || 5.0}" style="width: 100%; padding: 8px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: white; font-size: 12px;">
+              </div>
+            </div>
+          </div>
+
+          <!-- Lifecycle Tier Thresholds -->
+          <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px;">
+            <div style="font-weight: 700; font-size: 14px; color: #a78bfa; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+              <span>🏷️</span> Fresh, Mid-Life & Aging Thresholds (% of EOL)
+            </div>
+            <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+              Calculates lifecycle progression tiers proportionally from the category EOL lifespan.
+            </p>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+              <div>
+                <label style="font-size: 11px; color: #4ade80; font-weight: 700; display: block; margin-bottom: 4px;">🟢 Fresh Tier (< % EOL):</label>
+                <input type="number" step="5" min="10" max="50" id="config-fresh-ratio" value="${Math.round((rule.freshRatio || 0.25) * 100)}" style="width: 100%; padding: 8px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: white; font-size: 12px;">
+                <span style="font-size: 10.5px; color: var(--text-muted);">Default: 25% of EOL</span>
+              </div>
+              <div>
+                <label style="font-size: 11px; color: #facc15; font-weight: 700; display: block; margin-bottom: 4px;">🟡 Mid-Life Tier (% EOL):</label>
+                <input type="number" step="5" min="25" max="85" id="config-mid-ratio" value="${Math.round((rule.midLifeRatio || 0.70) * 100)}" style="width: 100%; padding: 8px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: white; font-size: 12px;">
+                <span style="font-size: 10.5px; color: var(--text-muted);">Default: 70% of EOL</span>
+              </div>
+              <div>
+                <label style="font-size: 11px; color: #fb923c; font-weight: 700; display: block; margin-bottom: 4px;">🟠 Aging Tier (% EOL):</label>
+                <input type="number" step="5" min="50" max="100" id="config-aging-ratio" value="${Math.round((rule.agingRatio || 1.0) * 100)}" style="width: 100%; padding: 8px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: white; font-size: 12px;">
+                <span style="font-size: 10.5px; color: var(--text-muted);">Default: 100% of EOL</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    `;
+
+    body.innerHTML = html;
+  }
+
+  onRecertModeChange(mode) {
+    const customCont = document.getElementById('config-custom-recert-container');
+    if (customCont) {
+      customCont.style.display = mode === 'CUSTOM' ? 'block' : 'none';
+    }
+  }
+
+  onEolModeChange(mode) {
+    const manualCont = document.getElementById('config-manual-eol-container');
+    if (manualCont) {
+      manualCont.style.display = mode === 'MANUAL' ? 'block' : 'none';
+    }
+  }
+
+  saveActiveCategoryRule() {
+    const currentCat = this.activeConfigCategory || 'gloves';
+    const recertMode = document.getElementById('config-recert-mode')?.value || 'GLOVES_DEFAULT';
+    const customDays = parseInt(document.getElementById('config-custom-recert-days')?.value, 10) || 365;
+    const eolMode = document.getElementById('config-eol-mode')?.value || 'DATA_DRIVEN';
+    const manualYears = parseFloat(document.getElementById('config-manual-eol-years')?.value) || 5.0;
+
+    const freshRatio = (parseFloat(document.getElementById('config-fresh-ratio')?.value) || 25) / 100;
+    const midRatio = (parseFloat(document.getElementById('config-mid-ratio')?.value) || 70) / 100;
+    const agingRatio = (parseFloat(document.getElementById('config-aging-ratio')?.value) || 100) / 100;
+
+    const newRules = { ...this.rules };
+    newRules[currentCat] = {
+      recertMode,
+      customRecertDays: customDays,
+      eolMode,
+      manualEolYears: manualYears,
+      freshRatio,
+      midLifeRatio: midRatio,
+      agingRatio
+    };
+
+    this.saveRules(newRules);
+    this.closeConfigModal();
   }
 }

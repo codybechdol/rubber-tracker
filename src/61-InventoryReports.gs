@@ -909,15 +909,71 @@ function getInventoryAgingData() {
   today.setHours(12, 0, 0, 0);
 
   var categories = [
-    { name: SHEET_GLOVES, type: 'Gloves', label: '🧤 Gloves' },
-    { name: SHEET_SLEEVES, type: 'Sleeves', label: '🦺 Sleeves' },
-    { name: SHEET_BLANKETS, type: 'Blankets', label: '🧱 Blankets' },
-    { name: SHEET_MACKS, type: 'MACKs', label: '🧱 MACKs' },
-    { name: SHEET_HV_TESTERS, type: 'HV Testers', label: '⚡ HV Testers' },
-    { name: SHEET_PHASING_SETS, type: 'Phasing Sets', label: '⚡ Phasing Sets' },
-    { name: SHEET_AED, type: 'AED', label: '🏥 AED Units' }
+    { name: SHEET_GLOVES, histName: SHEET_GLOVES_HISTORY, type: 'Gloves', label: '🧤 Gloves' },
+    { name: SHEET_SLEEVES, histName: SHEET_SLEEVES_HISTORY, type: 'Sleeves', label: '🦺 Sleeves' },
+    { name: SHEET_BLANKETS, histName: SHEET_BLANKETS_HISTORY, type: 'Blankets', label: '🧱 Blankets' },
+    { name: SHEET_MACKS, histName: SHEET_MACKS_HISTORY, type: 'MACKs', label: '🧱 MACKs' },
+    { name: SHEET_HV_TESTERS, histName: SHEET_HV_TESTERS_HISTORY, type: 'HV Testers', label: '⚡ HV Testers' },
+    { name: SHEET_PHASING_SETS, histName: SHEET_PHASING_SETS_HISTORY, type: 'Phasing Sets', label: '⚡ Phasing Sets' },
+    { name: SHEET_GROUNDS, histName: SHEET_GROUNDS_HISTORY, type: 'Grounds', label: '⚡ Grounds' },
+    { name: SHEET_HOT_STICKS, histName: SHEET_HOT_STICKS_HISTORY, type: 'Hot Sticks', label: '🔴 Hot Sticks' },
+    { name: SHEET_AED, histName: SHEET_AED_HISTORY, type: 'AED', label: '🏥 AED Units' }
   ];
 
+  // 1. Calculate Data-Driven EOL per Category
+  var categoryEOL = {};
+  categories.forEach(function(cat) {
+    var histSheet = ss.getSheetByName(cat.histName);
+    var failureDurations = [];
+
+    if (histSheet && histSheet.getLastRow() >= 2) {
+      var histData = histSheet.getRange(2, 1, histSheet.getLastRow() - 1, histSheet.getLastColumn()).getValues();
+      var itemHistMap = {};
+
+      histData.forEach(function(hr) {
+        var iNum = String(hr[0] || '').trim();
+        var dVal = hr[1] instanceof Date ? hr[1] : null;
+        var fullRowStr = hr.join(' ').toLowerCase();
+        var isFail = fullRowStr.indexOf('fail') !== -1 || fullRowStr.indexOf('destroy') !== -1 || fullRowStr.indexOf('not repairable') !== -1 || fullRowStr.indexOf('damage') !== -1;
+
+        if (iNum && iNum.toLowerCase().indexOf('item') === -1) {
+          if (!itemHistMap[iNum]) itemHistMap[iNum] = [];
+          if (dVal) itemHistMap[iNum].push({ date: dVal, isFail: isFail });
+        }
+      });
+
+      Object.keys(itemHistMap).forEach(function(iNum) {
+        var logs = itemHistMap[iNum].sort(function(a, b) { return a.date - b.date; });
+        if (logs.length > 0) {
+          var firstD = logs[0].date;
+          var failLog = logs.find(function(l) { return l.isFail; });
+          if (failLog && firstD) {
+            var diff = Math.floor((failLog.date.getTime() - firstD.getTime()) / (1000 * 60 * 60 * 24));
+            if (diff > 30) failureDurations.push(diff);
+          }
+        }
+      });
+    }
+
+    if (failureDurations.length > 0) {
+      var avgDays = Math.round(failureDurations.reduce(function(a, b) { return a + b; }, 0) / failureDurations.length);
+      categoryEOL[cat.type] = {
+        avgDays: avgDays,
+        avgYears: (avgDays / 365.25).toFixed(1),
+        count: failureDurations.length,
+        hasData: true
+      };
+    } else {
+      categoryEOL[cat.type] = {
+        avgDays: null,
+        avgYears: null,
+        count: 0,
+        hasData: false
+      };
+    }
+  });
+
+  // 2. Scan Equipment Items
   var allItems = [];
 
   categories.forEach(function(cat) {
@@ -925,6 +981,7 @@ function getInventoryAgingData() {
     if (!sheet || sheet.getLastRow() < 2) return;
 
     var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+    var eolInfo = categoryEOL[cat.type] || { hasData: false };
 
     data.forEach(function(row) {
       var itemNum = String(row[0] || '').trim();
@@ -970,7 +1027,6 @@ function getInventoryAgingData() {
         assignedTo = String(row[COLS.MACKS.ASSIGNED_TO - 1] || '—').trim();
         changeOutDate = row[COLS.MACKS.CHANGE_OUT_DATE - 1] instanceof Date ? row[COLS.MACKS.CHANGE_OUT_DATE - 1] : null;
       } else {
-        // HV Testers, Phasing Sets, AED
         classVal = String(row[1] || '—').trim();
         testDate = row[4] instanceof Date ? row[4] : null;
         dateAssigned = row[5] instanceof Date ? row[5] : null;
@@ -980,6 +1036,7 @@ function getInventoryAgingData() {
         changeOutDate = row[9] instanceof Date ? row[9] : null;
       }
 
+      // Age calculation
       var earliestDate = testDate || dateAssigned || changeOutDate;
       var ageDays = 180;
       if (earliestDate && !isNaN(earliestDate.getTime())) {
@@ -987,37 +1044,83 @@ function getInventoryAgingData() {
       }
       var ageYears = (ageDays / 365.25).toFixed(1);
 
-      var daysUntil = 999;
-      if (changeOutDate && !isNaN(changeOutDate.getTime())) {
-        daysUntil = Math.floor((changeOutDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      // Recertification date calculation
+      var calculatedRecert = null;
+      var isNA = false;
+      var isShelf = status.toLowerCase() === 'on shelf' || assignedTo.toLowerCase() === 'on shelf' || assignedTo === '—' || !assignedTo;
+
+      if (cat.type === 'AED') {
+        isNA = true;
+      } else if (cat.type === 'Gloves') {
+        if (isShelf) {
+          var bDate = testDate || today;
+          calculatedRecert = new Date(bDate.getTime() + 365.25 * 24 * 60 * 60 * 1000);
+        } else {
+          var bDate = dateAssigned || testDate || today;
+          calculatedRecert = new Date(bDate.getTime() + 91.3 * 24 * 60 * 60 * 1000);
+        }
+      } else if (cat.type === 'Sleeves') {
+        var bDate = dateAssigned || testDate || today;
+        calculatedRecert = new Date(bDate.getTime() + 365.25 * 24 * 60 * 60 * 1000);
+      } else if (cat.type === 'HV Testers' || cat.type === 'Phasing Sets') {
+        var bDate = testDate || today;
+        calculatedRecert = new Date(bDate.getTime() + 3652.5 * 24 * 60 * 60 * 1000);
+      } else if (cat.type === 'Hot Sticks') {
+        var bDate = testDate || today;
+        calculatedRecert = new Date(bDate.getTime() + 730.5 * 24 * 60 * 60 * 1000);
+      } else {
+        // Blankets, MACKs, Grounds
+        var bDate = testDate || today;
+        calculatedRecert = new Date(bDate.getTime() + 365.25 * 24 * 60 * 60 * 1000);
       }
 
-      var tier = 'FRESH';
-      var tierLabel = '🟢 Fresh (<1 yr)';
-      var tierColor = '#10b981';
-
-      if (ageDays >= 1825) {
-        tier = 'CRITICAL';
-        tierLabel = '🔴 EOL (>5 yrs)';
-        tierColor = '#ef4444';
-      } else if (ageDays >= 1095) {
-        tier = 'AGING';
-        tierLabel = '🟠 Aging (3-5 yrs)';
-        tierColor = '#f97316';
-      } else if (ageDays >= 365) {
-        tier = 'MID_LIFE';
-        tierLabel = '🟡 Mid-Life (1-3 yrs)';
-        tierColor = '#eab308';
-      }
-
+      var finalRecert = calculatedRecert || changeOutDate;
+      var daysUntil = 9999;
       var recertStatus = 'CURRENT';
       var recertLabel = '🟢 Current';
-      if (daysUntil < 0) {
-        recertStatus = 'OVERDUE';
-        recertLabel = '🔴 Overdue (' + Math.abs(daysUntil) + 'd)';
-      } else if (daysUntil <= 30) {
-        recertStatus = 'DUE_SOON';
-        recertLabel = '🟠 Due in ' + daysUntil + 'd';
+
+      if (isNA) {
+        recertStatus = 'NA';
+        recertLabel = 'N/A';
+      } else if (finalRecert && !isNaN(finalRecert.getTime())) {
+        daysUntil = Math.floor((finalRecert.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        if (daysUntil < 0) {
+          recertStatus = 'OVERDUE';
+          recertLabel = '🔴 Overdue (' + Math.abs(daysUntil) + 'd)';
+        } else if (daysUntil <= 30) {
+          recertStatus = 'DUE_SOON';
+          recertLabel = '🟠 Due in ' + daysUntil + 'd';
+        }
+      }
+
+      // Lifecycle Tier calculation
+      var tier = 'FRESH';
+      var tierLabel = '🟢 Fresh';
+      var tierColor = '#10b981';
+
+      if (!eolInfo.hasData || !eolInfo.avgDays) {
+        tier = 'MORE_DATA';
+        tierLabel = 'ℹ️ More Data Needed';
+        tierColor = '#94a3b8';
+      } else {
+        var eDays = eolInfo.avgDays;
+        var freshThresh = eDays * 0.25;
+        var midThresh = eDays * 0.70;
+        var agingThresh = eDays * 1.0;
+
+        if (ageDays >= agingThresh) {
+          tier = 'CRITICAL';
+          tierLabel = '🔴 EOL Candidate';
+          tierColor = '#ef4444';
+        } else if (ageDays >= midThresh) {
+          tier = 'AGING';
+          tierLabel = '🟠 Aging';
+          tierColor = '#f97316';
+        } else if (ageDays >= freshThresh) {
+          tier = 'MID_LIFE';
+          tierLabel = '🟡 Mid-Life';
+          tierColor = '#eab308';
+        }
       }
 
       allItems.push({
@@ -1029,7 +1132,7 @@ function getInventoryAgingData() {
         location: location,
         status: status,
         assignedTo: assignedTo,
-        recertDateStr: changeOutDate ? Utilities.formatDate(changeOutDate, Session.getScriptTimeZone(), 'MM/dd/yyyy') : '—',
+        recertDateStr: isNA ? 'N/A' : (finalRecert ? Utilities.formatDate(finalRecert, Session.getScriptTimeZone(), 'MM/dd/yyyy') : '—'),
         daysUntil: daysUntil,
         ageDays: ageDays,
         ageYears: ageYears,
