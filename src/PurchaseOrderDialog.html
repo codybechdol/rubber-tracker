@@ -938,6 +938,11 @@
       status.textContent = msg;
       status.className = 'status show' + (type ? ' ' + type : '');
     }
+
+    function openVendorConfig() {
+      google.script.run.showVendorConfigDialog();
+      google.script.host.close();
+    }
   </script>
 </body>
 </html>

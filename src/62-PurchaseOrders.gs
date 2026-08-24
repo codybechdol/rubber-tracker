@@ -415,144 +415,154 @@ function saveVendors(vendors) {
  * Each item includes its category so the dialog can display them grouped.
  * @returns {Array} Array of items with category info
  */
+/**
+ * Dynamically scans ALL equipment swap sheets (Gloves, Sleeves, Blankets, MACKs, HV Testers, Phasing Sets, AED, Grounds, Hot Sticks)
+ * to find items requiring procurement (where Pick List Status = 'Need to Purchase ❌' or Picked Item = '—').
+ * Aggregates by Item Type, Size, Class/Rating, and calculates priority based on swap due dates.
+ *
+ * @returns {Array} Array of items needing purchase
+ */
 function getItemsToOrder() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('Purchase Needs');
+  var swapSheetDefs = [
+    { type: 'Gloves', sheetName: typeof SHEET_GLOVE_SWAPS !== 'undefined' ? SHEET_GLOVE_SWAPS : 'Glove Swaps' },
+    { type: 'Sleeves', sheetName: typeof SHEET_SLEEVE_SWAPS !== 'undefined' ? SHEET_SLEEVE_SWAPS : 'Sleeve Swaps' },
+    { type: 'Blankets', sheetName: typeof SHEET_BLANKET_SWAPS !== 'undefined' ? SHEET_BLANKET_SWAPS : 'Blanket Swaps' },
+    { type: 'MACKs', sheetName: typeof SHEET_MACK_SWAPS !== 'undefined' ? SHEET_MACK_SWAPS : 'MACK Swaps' },
+    { type: 'HV Testers', sheetName: typeof SHEET_HV_TESTER_SWAPS !== 'undefined' ? SHEET_HV_TESTER_SWAPS : 'HV Tester Swaps' },
+    { type: 'Phasing Sets', sheetName: typeof SHEET_PHASING_SET_SWAPS !== 'undefined' ? SHEET_PHASING_SET_SWAPS : 'Phasing Set Swaps' },
+    { type: 'Grounds', sheetName: typeof SHEET_GROUND_SWAPS !== 'undefined' ? SHEET_GROUND_SWAPS : 'Ground Swaps' },
+    { type: 'Hot Sticks', sheetName: typeof SHEET_HOT_STICK_SWAPS !== 'undefined' ? SHEET_HOT_STICK_SWAPS : 'Hot Stick Swaps' },
+    { type: 'AED', sheetName: typeof SHEET_AED_SWAPS !== 'undefined' ? SHEET_AED_SWAPS : 'AED Swaps' }
+  ];
 
-  if (!sheet) {
-    console.log('getItemsToOrder: Purchase Needs sheet not found');
-    return [];
-  }
+  var aggregatedMap = {};
 
-  var lastRow = sheet.getLastRow();
-  console.log('getItemsToOrder: Sheet has ' + lastRow + ' rows');
+  swapSheetDefs.forEach(function(def) {
+    var sheet = ss.getSheetByName(def.sheetName);
+    if (!sheet || sheet.getLastRow() < 2) return;
 
-  if (lastRow < 3) {
-    console.log('getItemsToOrder: Sheet has less than 3 rows, returning empty');
-    return [];
-  }
+    var data = sheet.getDataRange().getValues();
+    var headers = data[0];
 
-  var data = sheet.getDataRange().getValues();
-  var items = [];
+    // Find column indexes dynamically
+    var cols = {
+      empName: -1,
+      crew: -1,
+      location: -1,
+      size: -1,
+      classVal: -1,
+      daysLeft: -1,
+      pickItem: -1,
+      pickStatus: -1,
+      notes: -1
+    };
 
-  // Track current section and header row
-  var currentSection = null;
-  var headerRowIndex = -1;
+    for (var h = 0; h < headers.length; h++) {
+      var hStr = String(headers[h] || '').toLowerCase().trim();
+      if (hStr.includes('employee') || hStr.includes('assigned to')) cols.empName = h;
+      else if (hStr.includes('crew') || hStr.includes('job')) cols.crew = h;
+      else if (hStr.includes('location') || hStr.includes('city')) cols.location = h;
+      else if (hStr.includes('size')) cols.size = h;
+      else if (hStr.includes('class') || hStr.includes('kv') || hStr.includes('model') || hStr.includes('type')) cols.classVal = h;
+      else if (hStr.includes('days left')) cols.daysLeft = h;
+      else if (hStr.includes('pick') && (hStr.includes('#') || hStr.includes('item') || hStr.includes('glove') || hStr.includes('sleeve'))) cols.pickItem = h;
+      else if (hStr.includes('status') || hStr.includes('pick list')) cols.pickStatus = h;
+      else if (hStr.includes('note')) cols.notes = h;
+    }
 
-  // Section definitions for matching (simplified 3-tier system)
-  var sectionInfo = {
-    'HIGH PRIORITY': { priority: 1, timeframe: 'Immediate', emoji: '🔴' },
-    'MEDIUM PRIORITY': { priority: 2, timeframe: 'Soon', emoji: '🟠' },
-    'LOW PRIORITY': { priority: 3, timeframe: 'Consider', emoji: '🟢' }
-  };
+    for (var r = 1; r < data.length; r++) {
+      var row = data[r];
+      var pickStatus = cols.pickStatus !== -1 ? String(row[cols.pickStatus] || '').trim() : '';
+      var pickItem = cols.pickItem !== -1 ? String(row[cols.pickItem] || '').trim() : '';
+      var pickStatusLower = pickStatus.toLowerCase();
 
-  // Column indices (will be set when we find each header row)
-  var cols = {
-    priority: -1,
-    itemType: -1,
-    size: -1,
-    classNum: -1,
-    onShelf: -1,
-    quantity: -1,
-    reason: -1,
-    status: -1,
-    notes: -1
-  };
+      var isNeedToPurchase = pickStatusLower.includes('purchase') ||
+                             pickStatusLower.includes('need to purchase') ||
+                             pickItem === '—' ||
+                             (pickItem === '' && pickStatusLower.includes('unassigned'));
 
-  console.log('getItemsToOrder: Scanning all sections in Purchase Needs sheet');
+      if (!isNeedToPurchase) continue;
 
-  for (var i = 0; i < data.length; i++) {
-    var row = data[i];
-    var firstCell = String(row[0] || '').trim();
+      var size = cols.size !== -1 ? String(row[cols.size] || '').trim() : '—';
+      var classVal = cols.classVal !== -1 ? String(row[cols.classVal] || '').trim() : '—';
+      var emp = cols.empName !== -1 ? String(row[cols.empName] || '').trim() : '';
+      var loc = cols.location !== -1 ? String(row[cols.location] || '').trim() : '';
+      var daysLeft = cols.daysLeft !== -1 ? parseInt(row[cols.daysLeft], 10) : 30;
+      if (isNaN(daysLeft)) daysLeft = 30;
 
-    // Check if this is a section header
-    var foundSection = null;
-    for (var sectionName in sectionInfo) {
-      if (firstCell.indexOf(sectionName) !== -1) {
-        foundSection = sectionName;
-        break;
+      var key = def.type + '|' + size + '|' + classVal;
+
+      if (!aggregatedMap[key]) {
+        aggregatedMap[key] = {
+          itemType: def.type,
+          size: size,
+          classNum: classVal,
+          quantity: 0,
+          employees: [],
+          minDaysLeft: daysLeft,
+          locations: {},
+          sheetName: def.sheetName
+        };
+      }
+
+      aggregatedMap[key].quantity += 1;
+      if (emp && aggregatedMap[key].employees.indexOf(emp) === -1) {
+        aggregatedMap[key].employees.push(emp);
+      }
+      if (loc) {
+        aggregatedMap[key].locations[loc] = (aggregatedMap[key].locations[loc] || 0) + 1;
+      }
+      if (daysLeft < aggregatedMap[key].minDaysLeft) {
+        aggregatedMap[key].minDaysLeft = daysLeft;
       }
     }
-
-    if (foundSection) {
-      currentSection = foundSection;
-      headerRowIndex = -1; // Reset header for new section
-      console.log('getItemsToOrder: Found section "' + currentSection + '" at row ' + (i + 1));
-      continue;
-    }
-
-    // Detect header row within section (check for "Priority" case-insensitive)
-    if (currentSection && (firstCell === 'Priority' || firstCell.toLowerCase() === 'priority')) {
-      headerRowIndex = i;
-      // Map columns
-      for (var c = 0; c < row.length; c++) {
-        var header = String(row[c]).toLowerCase().trim();
-        if (header === 'priority') cols.priority = c;
-        if (header === 'item type') cols.itemType = c;
-        if (header === 'size') cols.size = c;
-        if (header === 'class') cols.classNum = c;
-        if (header === 'on shelf') cols.onShelf = c;
-        if (header === 'qty to order') cols.quantity = c;
-        if (header === 'reason') cols.reason = c;
-        if (header === 'status') cols.status = c;
-        if (header === 'notes') cols.notes = c;
-      }
-      continue;
-    }
-
-    // Check for TOTAL row (end of section data)
-    if (currentSection && headerRowIndex !== -1 && (firstCell === 'TOTAL' || firstCell.indexOf('TOTAL') !== -1)) {
-      // Section ended, but continue to look for more sections
-      headerRowIndex = -1;
-      continue;
-    }
-
-    // Skip if not in section or no header found
-    if (!currentSection || headerRowIndex === -1) continue;
-
-    // Skip empty rows
-    if (!firstCell || firstCell === '') continue;
-
-    // Skip if already ordered
-    var status = cols.status !== -1 ? String(row[cols.status] || '') : '';
-    if (status.indexOf('ORDERED') !== -1) {
-      continue;
-    }
-
-    // Read item data
-    var itemType = cols.itemType !== -1 ? String(row[cols.itemType] || '').trim() : '';
-    var size = cols.size !== -1 ? String(row[cols.size] || '').trim() : '';
-    var classNum = cols.classNum !== -1 ? String(row[cols.classNum] || '').trim() : '';
-    var quantity = cols.quantity !== -1 ? parseInt(row[cols.quantity]) || 0 : 0;
-    var notes = cols.notes !== -1 ? String(row[cols.notes] || '').trim() : '';
-    var reason = cols.reason !== -1 ? String(row[cols.reason] || '').trim() : '';
-
-    if (itemType && size && classNum && quantity > 0) {
-      var info = sectionInfo[currentSection] || { priority: 99, timeframe: 'Unknown', emoji: '' };
-      items.push({
-        itemType: itemType,
-        size: size,
-        classNum: parseInt(classNum),
-        quantity: quantity,
-        notes: notes,
-        rowIndex: i + 1, // 1-based for sheet operations
-        key: itemType + '|' + size + '|' + classNum,
-        category: currentSection,
-        categoryEmoji: info.emoji,
-        timeframe: info.timeframe,
-        priority: info.priority,
-        reason: reason,
-        isSizeUp: currentSection.indexOf('LOW PRIORITY') !== -1
-      });
-    }
-  }
-
-  // Sort by priority (most urgent first)
-  items.sort(function(a, b) {
-    return a.priority - b.priority;
   });
 
-  console.log('getItemsToOrder: Found ' + items.length + ' total items across all sections');
+  var items = [];
+  for (var k in aggregatedMap) {
+    var entry = aggregatedMap[k];
+    var priority = 3;
+    var timeframe = 'Consider / Future';
+    var emoji = '🟢';
+    var category = 'LOW PRIORITY';
+
+    if (entry.minDaysLeft <= 14) {
+      priority = 1;
+      timeframe = 'Immediate (< 14d)';
+      emoji = '🔴';
+      category = 'HIGH PRIORITY';
+    } else if (entry.minDaysLeft <= 30) {
+      priority = 2;
+      timeframe = 'Soon (15-30d)';
+      emoji = '🟠';
+      category = 'MEDIUM PRIORITY';
+    }
+
+    var notesText = entry.employees.length > 0
+      ? 'Needed for: ' + entry.employees.slice(0, 3).join(', ') + (entry.employees.length > 3 ? ' +' + (entry.employees.length - 3) + ' more' : '')
+      : 'Stock replenishment';
+
+    items.push({
+      itemType: entry.itemType,
+      size: entry.size,
+      classNum: entry.classNum,
+      quantity: entry.quantity,
+      notes: notesText,
+      key: k,
+      category: category,
+      categoryEmoji: emoji,
+      timeframe: timeframe,
+      priority: priority,
+      reason: entry.minDaysLeft < 0 ? 'Overdue swap' : (entry.minDaysLeft <= 14 ? 'Due soon' : 'Upcoming rotation'),
+      isSizeUp: false
+    });
+  }
+
+  items.sort(function(a, b) {
+    return a.priority - b.priority || b.quantity - a.quantity;
+  });
+
   return items;
 }
 

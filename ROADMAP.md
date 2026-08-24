@@ -53,7 +53,7 @@
 - [x] ✅ Upsized notes fix and manual override capabilities
 - [x] ✅ **Per-Item Drilldown & Filter Views:** Instant filtering by size, class, and warehouse location
 - [x] ✅ **Automated Weekly Email Reports:** Schedule-based automated delivery of upcoming swaps
-- [ ] ⬜ **Purchase Needs UI Redesign:** Unified procurement view with direct vendor catalog integration
+- [x] ✅ **Purchase Needs UI Redesign:** Unified procurement view with direct vendor catalog integration
 - [ ] ⬜ **Inventory Aging Reports:** Highlighting oldest items approaching end-of-life or recertification
 
 ---
