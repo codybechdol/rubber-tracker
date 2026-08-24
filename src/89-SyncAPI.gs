@@ -183,9 +183,9 @@ function exportFullDatabaseSnapshot() {
 
   var plannedTrips = {};
   try {
-    var rawTrips = PropertiesService.getScriptProperties().getProperty('PLANNED_TRIPS');
+    var rawTrips = (typeof getChunkedScriptProperty === 'function') ? getChunkedScriptProperty('PLANNED_TRIPS') : PropertiesService.getScriptProperties().getProperty('PLANNED_TRIPS');
     if (rawTrips) {
-      plannedTrips = JSON.parse(rawTrips);
+      plannedTrips = typeof rawTrips === 'string' ? JSON.parse(rawTrips) : rawTrips;
     }
   } catch (e) {
     Logger.log('exportFullDatabaseSnapshot: Error reading plannedTrips: ' + e);
@@ -408,7 +408,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
     try {
       var sheetName = mut.sheetName || '';
       var sheet = sheetName ? ss.getSheetByName(sheetName) : null;
-      var actionsWithoutSheet = ['DELETE_TASK', 'SET_TASK_STATUS', 'TRIGGER_SYNC_CREWS', 'SET_HOLIDAYS', 'SET_TRIP_SCHEDULE', 'SCHEDULE_CREW_VISIT', 'SAVE_PLANNED_TRIPS', 'IMPORT_HISTORY_LOG', 'RECALCULATE_CHANGE_OUT_DATES'];
+      var actionsWithoutSheet = ['DELETE_TASK', 'SET_TASK_STATUS', 'TRIGGER_SYNC_CREWS', 'SET_HOLIDAYS', 'SET_TRIP_SCHEDULE', 'SCHEDULE_CREW_VISIT', 'UNSCHEDULE_CREW_VISIT', 'SAVE_PLANNED_TRIPS', 'SAVE_TASK', 'ADD_LOCATION_OVERRIDE', 'IMPORT_HISTORY_LOG', 'RECALCULATE_CHANGE_OUT_DATES'];
       if (!sheet && actionsWithoutSheet.indexOf(mut.action) === -1) {
         errors.push('Sheet not found: ' + sheetName);
         continue;
@@ -1118,6 +1118,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
 
         case 'SAVE_PLANNED_TRIPS':
         case 'SCHEDULE_CREW_VISIT':
+        case 'UNSCHEDULE_CREW_VISIT':
         case 'SET_TRIP_SCHEDULE':
           if (mut.schedule && typeof setWorkSchedule === 'function') {
             setWorkSchedule(mut.schedule);
@@ -1125,17 +1126,56 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
           }
           if (mut.trips) {
             var tripsStr = typeof mut.trips === 'string' ? mut.trips : JSON.stringify(mut.trips);
-            PropertiesService.getScriptProperties().setProperty('PLANNED_TRIPS', tripsStr);
+            if (typeof setChunkedScriptProperty === 'function') {
+              setChunkedScriptProperty('PLANNED_TRIPS', tripsStr);
+            } else {
+              PropertiesService.getScriptProperties().setProperty('PLANNED_TRIPS', tripsStr);
+            }
             appliedCount++;
-          } else if (mut.date && mut.location) {
-            var rawTrips = PropertiesService.getScriptProperties().getProperty('PLANNED_TRIPS');
+          } else if (mut.date) {
+            var rawTrips = (typeof getChunkedScriptProperty === 'function') ? getChunkedScriptProperty('PLANNED_TRIPS') : PropertiesService.getScriptProperties().getProperty('PLANNED_TRIPS');
             var tripsObj = {};
             if (rawTrips) {
               try { tripsObj = JSON.parse(rawTrips); } catch (e) {}
             }
-            tripsObj[mut.date] = { location: mut.location, crew: mut.crew || '' };
-            PropertiesService.getScriptProperties().setProperty('PLANNED_TRIPS', JSON.stringify(tripsObj));
+            if (mut.action === 'UNSCHEDULE_CREW_VISIT' && !mut.location) {
+              delete tripsObj[mut.date];
+            } else if (mut.action === 'UNSCHEDULE_CREW_VISIT' && mut.location && Array.isArray(tripsObj[mut.date])) {
+              tripsObj[mut.date] = tripsObj[mut.date].filter(function(t) { return String(t.location || '').toLowerCase() !== String(mut.location).toLowerCase(); });
+              if (tripsObj[mut.date].length === 0) delete tripsObj[mut.date];
+            } else if (mut.location) {
+              tripsObj[mut.date] = { location: mut.location, crew: mut.crew || '' };
+            }
+            var updatedStr = JSON.stringify(tripsObj);
+            if (typeof setChunkedScriptProperty === 'function') {
+              setChunkedScriptProperty('PLANNED_TRIPS', updatedStr);
+            } else {
+              PropertiesService.getScriptProperties().setProperty('PLANNED_TRIPS', updatedStr);
+            }
             appliedCount++;
+          }
+          break;
+
+        case 'SAVE_TASK':
+          var taskMetaSheetSave = ss.getSheetByName('Task Metadata');
+          if (taskMetaSheetSave && mut.taskId) {
+            var metaDataSave = taskMetaSheetSave.getDataRange().getValues();
+            var foundRowSave = -1;
+            for (var tmS = 1; tmS < metaDataSave.length; tmS++) {
+              var tIdS = String(metaDataSave[tmS][0] || '').trim();
+              if (tIdS === String(mut.taskId).trim()) {
+                foundRowSave = tmS + 1;
+                break;
+              }
+            }
+            if (foundRowSave !== -1) {
+              if (mut.scheduledDate) taskMetaSheetSave.getRange(foundRowSave, 16).setValue(mut.scheduledDate); // ScheduledDate (P)
+              if (mut.startTime) taskMetaSheetSave.getRange(foundRowSave, 17).setValue(mut.startTime); // StartTime (Q)
+              if (mut.endTime) taskMetaSheetSave.getRange(foundRowSave, 18).setValue(mut.endTime); // EndTime (R)
+              if (mut.status) taskMetaSheetSave.getRange(foundRowSave, 15).setValue(mut.status); // Status (O)
+              sheetsModified['Task Metadata'] = true;
+              appliedCount++;
+            }
           }
           break;
 
