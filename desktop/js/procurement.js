@@ -78,14 +78,14 @@ class ProcurementEngine {
 
   scanPurchaseNeeds() {
     const swapSheets = [
-      { key: 'gloves_swaps', type: 'Gloves', label: '🧤 Gloves' },
-      { key: 'sleeves_swaps', type: 'Sleeves', label: '🦺 Sleeves' },
-      { key: 'blankets_swaps', type: 'Blankets', label: '🧱 Blankets' },
-      { key: 'macks_swaps', type: 'MACKs', label: '🧱 MACKs' },
-      { key: 'hv_testers_swaps', type: 'HV Testers', label: '⚡ HV Testers' },
-      { key: 'phasing_sets_swaps', type: 'Phasing Sets', label: '⚡ Phasing Sets' },
-      { key: 'grounds_swaps', type: 'Grounds', label: '⚡ Grounds' },
-      { key: 'hot_sticks_swaps', type: 'Hot Sticks', label: '🔴 Hot Sticks' },
+      { key: 'glove_swaps', type: 'Gloves', label: '🧤 Gloves' },
+      { key: 'sleeve_swaps', type: 'Sleeves', label: '🦺 Sleeves' },
+      { key: 'blanket_swaps', type: 'Blankets', label: '🧱 Blankets' },
+      { key: 'mack_swaps', type: 'MACKs', label: '🧱 MACKs' },
+      { key: 'hv_tester_swaps', type: 'HV Testers', label: '⚡ HV Testers' },
+      { key: 'phasing_set_swaps', type: 'Phasing Sets', label: '⚡ Phasing Sets' },
+      { key: 'ground_swaps', type: 'Grounds', label: '⚡ Grounds' },
+      { key: 'hot_stick_swaps', type: 'Hot Sticks', label: '🔴 Hot Sticks' },
       { key: 'aed_swaps', type: 'AED', label: '🏥 AED Units' }
     ];
 
@@ -93,35 +93,74 @@ class ProcurementEngine {
 
     swapSheets.forEach(s => {
       const table = this.db.getTable(s.key);
-      if (!table || !table.rows) return;
+      if (!table) return;
 
-      table.rows.forEach(r => {
-        const pickStatus = String(r['Status'] || r['Pick List Status'] || '').toLowerCase();
-        const pickItem = String(r['Pick Item #'] || r['Item #'] || r['Glove'] || r['Sleeve'] || '').trim();
+      const rawRows = table.rawGrid || table.rows || [];
+      if (!rawRows.length) return;
 
-        const isNeedToPurchase = pickStatus.includes('purchase') ||
-                                 pickStatus.includes('need to purchase') ||
+      let currentClass = 'Class 0';
+      if (s.type === 'Sleeves') currentClass = 'Class 2';
+      else if (s.type === 'Blankets') currentClass = 'Class 4';
+      else if (s.type === 'MACKs') currentClass = 'Class 4';
+
+      rawRows.forEach((row, rowIdx) => {
+        let emp = '';
+        let itemNum = '';
+        let size = '—';
+        let pickItem = '';
+        let status = '';
+        let daysLeft = 30;
+
+        if (Array.isArray(row)) {
+          const firstCell = String(row[0] || '').trim();
+          if (firstCell.toUpperCase().includes('CLASS 0')) currentClass = 'Class 0';
+          else if (firstCell.toUpperCase().includes('CLASS 2')) currentClass = 'Class 2';
+          else if (firstCell.toUpperCase().includes('CLASS 3')) currentClass = 'Class 3';
+          else if (firstCell.toUpperCase().includes('CLASS 4')) currentClass = 'Class 4';
+
+          // Skip section headers or subheaders
+          if (firstCell.includes('📍') || firstCell.includes('👤') || firstCell.includes('👷') ||
+              firstCell.includes('Foreman:') || firstCell.includes('Swaps') || firstCell === 'Employee' || firstCell === 'Item #') {
+            return;
+          }
+
+          emp = firstCell;
+          itemNum = String(row[1] || '').trim();
+          size = String(row[2] || '—').trim();
+          const daysVal = parseInt(row[5], 10);
+          if (!isNaN(daysVal)) daysLeft = daysVal;
+          pickItem = String(row[6] || '').trim();
+          status = String(row[7] || '').trim();
+        } else if (typeof row === 'object' && row !== null) {
+          emp = String(row['Employee'] || row['Employee Name'] || row['Assigned To'] || '').trim();
+          itemNum = String(row['Current Item #'] || row['Item #'] || '').trim();
+          size = String(row['Size'] || '—').trim();
+          const daysVal = parseInt(row['Days Left'] || row['Days Remaining'], 10);
+          if (!isNaN(daysVal)) daysLeft = daysVal;
+          pickItem = String(row['Pick List Item #'] || row['Pick Item #'] || '').trim();
+          status = String(row['Status'] || row['Pick List Status'] || '').trim();
+          if (row['Class'] || row['KV']) currentClass = String(row['Class'] || row['KV']);
+        }
+
+        const statLower = status.toLowerCase();
+        const isNeedToPurchase = statLower.includes('need to purchase') ||
+                                 statLower.includes('purchase') ||
                                  pickItem === '—' ||
-                                 (pickItem === '' && pickStatus.includes('unassigned'));
+                                 (pickItem === '' && statLower.includes('unassigned'));
 
-        if (!isNeedToPurchase) return;
+        if (!isNeedToPurchase || !emp) return;
 
-        const size = String(r['Size'] || '—').trim();
-        const classVal = String(r['Class'] || r['KV'] || r['Model'] || r['Type'] || '—').trim();
-        const emp = String(r['Employee Name'] || r['Assigned To'] || '').trim();
-        const daysLeft = parseInt(r['Days Left'] || r['Days Remaining'] || 30, 10);
-
-        const aggKey = `${s.type}|${size}|${classVal}`;
+        const aggKey = `${s.type}|${size}|${currentClass}`;
 
         if (!aggregated[aggKey]) {
           aggregated[aggKey] = {
             itemType: s.type,
             typeLabel: s.label,
             size: size,
-            classVal: classVal,
+            classVal: currentClass,
             quantity: 0,
             employees: [],
-            minDaysLeft: isNaN(daysLeft) ? 30 : daysLeft,
+            minDaysLeft: daysLeft,
             selected: true,
             price: 0,
             partNumber: ''
@@ -132,7 +171,7 @@ class ProcurementEngine {
         if (emp && !aggregated[aggKey].employees.includes(emp)) {
           aggregated[aggKey].employees.push(emp);
         }
-        if (!isNaN(daysLeft) && daysLeft < aggregated[aggKey].minDaysLeft) {
+        if (daysLeft < aggregated[aggKey].minDaysLeft) {
           aggregated[aggKey].minDaysLeft = daysLeft;
         }
       });
