@@ -111,6 +111,9 @@ class SheetNavigator {
         } else if (sheet.key === 'job_tracking') {
           this.multiSort = ['Status', 'Job Number'];
           this.sortCol = null;
+        } else if (sheet.key === 'grounds') {
+          this.multiSort = ['Type', 'Serial #'];
+          this.sortCol = null;
         } else {
           this.sortCol = null;
           this.multiSort = null;
@@ -262,6 +265,16 @@ class SheetNavigator {
         this.sortDir = 'asc';
       }
       this.multiSort = null;
+    } else if (type === 'typeSerial') {
+      const typeCol = findCol(['type (oh/ug)', 'type(oh/ug)', 'type', 'oh/ug', 'oh / ug', 'ground type']);
+      const serialCol = findCol(['serial #', 'serial', 'item #', 'item']);
+      if (this.multiSort && this.multiSort[0] === typeCol && this.multiSort[1] === serialCol) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.multiSort = [typeCol, serialCol];
+        this.sortCol = null;
+        this.sortDir = 'asc';
+      }
     } else if (type === 'typeSize') {
       const typeCol = findCol(['type (oh/ug)', 'type(oh/ug)', 'type', 'oh/ug', 'oh / ug', 'ground type', 'class']);
       const sizeCol = findCol(['size']);
@@ -1285,6 +1298,23 @@ class SheetNavigator {
       rows.sort((a, b) => {
         return dir * compareValues(col, a[col], b[col]);
       });
+    } else if (this.currentSheetKey === 'grounds' && !this.sortCol && !this.multiSort) {
+      // Default sort for Grounds: Type (OH/UG), then Serial #
+      const tCol = headers.find(h => {
+        const hl = String(h || '').toLowerCase().trim();
+        return hl === 'type' || hl === 'type (oh/ug)' || hl === 'type(oh/ug)';
+      }) || 'Type';
+      const sCol = headers.find(h => {
+        const hl = String(h || '').toLowerCase().trim();
+        return hl === 'serial #' || hl === 'serial' || hl === 'item #' || hl === 'item';
+      }) || 'Serial #';
+      this.multiSort = [tCol, sCol];
+      const dir = 1;
+      rows.sort((a, b) => {
+        const cmp1 = compareValues(tCol, a[tCol], b[tCol]);
+        if (cmp1 !== 0) return dir * cmp1;
+        return dir * compareValues(sCol, a[sCol], b[sCol]);
+      });
     } else if (this.currentSheetKey === 'safety_compliance') {
       // Default sort for Safety Compliance matching Google Sheets: Week Start (descending), then Job Number (ascending)
       rows.sort((a, b) => {
@@ -1374,7 +1404,8 @@ class SheetNavigator {
         </div>
       `;
     } else if (this.currentSheetKey === 'grounds') {
-      const isTypeSorted = this.sortCol && ['type', 'oh', 'ug'].some(k => this.sortCol.toLowerCase().includes(k));
+      const isTypeSerialSorted = this.multiSort && this.multiSort[0]?.toLowerCase().includes('type') && (this.multiSort[1]?.toLowerCase().includes('serial') || this.multiSort[1]?.toLowerCase().includes('item'));
+      const isTypeSorted = !isTypeSerialSorted && this.sortCol && ['type', 'oh', 'ug'].some(k => this.sortCol.toLowerCase().includes(k));
       const isTypeSizeSorted = this.multiSort && this.multiSort[0]?.toLowerCase().includes('type') && this.multiSort[1]?.toLowerCase().includes('size');
       const isItemSorted = this.sortCol && ['item #', 'item', 'serial #', 'serial'].some(k => this.sortCol.toLowerCase().includes(k));
       const isSizeSorted = this.sortCol && this.sortCol.toLowerCase() === 'size';
@@ -1389,6 +1420,7 @@ class SheetNavigator {
       presetBarHtml = `
         <div style="padding: 8px 16px; background-color: var(--bg-secondary); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 6px; font-size: 12px; overflow-x: auto; flex-wrap: wrap;">
           <span style="color: var(--text-muted); font-weight: 600; white-space: nowrap;">⚡ Quick Sort:</span>
+          <button class="btn btn-secondary ${isTypeSerialSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('typeSerial')">⚡+🔢 Type then Serial #${dirArrow(isTypeSerialSorted)}</button>
           <button class="btn btn-secondary ${isTypeSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('type')">⚡ Type (OH / UG)${dirArrow(isTypeSorted)}</button>
           <button class="btn btn-secondary ${isTypeSizeSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('typeSize')">⚡+📏 Type then Size${dirArrow(isTypeSizeSorted)}</button>
           <button class="btn btn-secondary ${isItemSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('itemNum')">🔢 Serial #${dirArrow(isItemSorted)}</button>
