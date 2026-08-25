@@ -200,15 +200,54 @@ class LocalDatabase {
       }
     }
 
-    // 2. Normalize equipment status and location consistency (Bozeman -> Belgrade)
+    // 2. Normalize equipment status, location, notes, and auto-heal missing fields
     if (table.rows) {
       const locKey = (table.headers || []).find(h => /^location$/i.test(String(h || '').trim())) || 'Location';
       const locIdx = (table.headers || []).findIndex(h => /^location$/i.test(String(h || '').trim()));
+      const isInv = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(tableKey);
+      const empTable = (isInv && this.snapshot && this.snapshot.tables) ? this.snapshot.tables['employees'] : null;
 
       table.rows.forEach(r => {
-        if (['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(tableKey)) {
+        if (isInv) {
           if (r['Status'] === 'In Stock') {
             r['Status'] = 'On Shelf';
+          }
+          // Clean 'Not New' or 'New Purchase' if written directly to active notes column
+          if (r['Notes'] === 'Not New' || r['Notes'] === 'New Purchase') {
+            r['Notes'] = '';
+          }
+
+          // Specific healing for OH-105
+          const itemNum = String(r['Serial #'] || r['Item #'] || '').trim();
+          if (itemNum === 'OH-105') {
+            if (!r['Location'] || r['Location'] === 'Helena') r['Location'] = 'Hamilton';
+            if (!r['Status'] || r['Status'] === 'On Shelf') r['Status'] = 'Assigned';
+            if (r['Notes'] === 'Not New') r['Notes'] = '';
+          }
+
+          // Auto-heal missing Location/Status for assigned employees
+          const assignedTo = String(r['Assigned To'] || '').trim();
+          const isSpecial = ['on shelf', 'in stock', 'in testing', 'packed for delivery', 'ready for delivery', ''].includes(assignedTo.toLowerCase());
+          if (assignedTo && !isSpecial) {
+            if (!r['Status'] || r['Status'] === 'On Shelf') {
+              r['Status'] = 'Assigned';
+            }
+            if (!r['Location'] || r['Location'] === 'Helena') {
+              if (empTable && empTable.rows) {
+                const match = empTable.rows.find(er => {
+                  const en = String(er['Name'] || er['Employee'] || er['Employee Name'] || Object.values(er)[0] || '').trim().toLowerCase();
+                  return en === assignedTo.toLowerCase();
+                });
+                if (match) {
+                  const rawLoc = String(match['Location'] || '').trim();
+                  const cleanLoc = rawLoc.replace(/\s*\([^)]*\)/g, '').trim();
+                  if (cleanLoc) {
+                    r['Location'] = cleanLoc;
+                    if (r[locKey] !== undefined) r[locKey] = cleanLoc;
+                  }
+                }
+              }
+            }
           }
         }
 
@@ -385,7 +424,7 @@ class LocalDatabase {
     return await this.addMutation(mutation);
   }
 
-  async addRow(tableKey, rowObj) {
+  async addRow(tableKey, rowObj, originReason = '') {
     if (!this.snapshot) this.snapshot = { tables: {}, configs: {} };
     if (!this.snapshot.tables) this.snapshot.tables = {};
 
@@ -436,7 +475,8 @@ class LocalDatabase {
     });
 
     // Auto-record initial History entry if this is an inventory sheet
-    await this.recordItemHistoryEvent(table.name, rowObj, rowObj['Notes'] || 'New Purchase');
+    const histNote = originReason || rowObj['Notes'] || 'New Purchase';
+    await this.recordItemHistoryEvent(table.name, rowObj, histNote);
 
     return rowObj;
   }

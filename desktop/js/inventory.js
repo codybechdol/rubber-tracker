@@ -322,7 +322,7 @@ class InventoryManager {
     const today = new Date();
     const todayIso = today.toISOString().split('T')[0];
 
-    // Build employees list for assignment dropdown
+    // Build employees list for assignment dropdown / datalist
     const empTable = this.db.getTable('employees');
     const employees = (empTable && empTable.rows) ? empTable.rows : [];
     const empOptions = employees
@@ -330,10 +330,12 @@ class InventoryManager {
         const name = String(e['Name'] || e['Employee Name'] || '').trim();
         const loc = String(e['Location'] || '').trim();
         const crew = String(e['Job Number'] || e['Job #'] || '').trim();
-        return name ? `<option value="${name}" data-location="${loc}" data-crew="${crew}">${name} (${loc || 'No Loc'}${crew ? ' • ' + crew : ''})</option>` : '';
+        return name ? `<option value="${name}">${name} (${loc || 'No Loc'}${crew ? ' • ' + crew : ''})</option>` : '';
       })
       .filter(Boolean)
       .join('');
+
+    const empDatalistHtml = `<datalist id="new-item-employees-datalist">${empOptions}</datalist>`;
 
     let fieldsHtml = '';
 
@@ -407,7 +409,7 @@ class InventoryManager {
         <div style="margin-bottom: 12px;" id="assigned-to-group">
           <label style="display: block; font-size: 11.5px; font-weight: 700; margin-bottom: 4px;">ASSIGNED TO</label>
           <div id="assigned-to-control-wrapper">
-            <input type="text" id="f-assigned-to" class="form-control" value="On Shelf" oninput="window.inventoryManager.updatePreview()">
+            <input type="text" id="f-assigned-to" list="new-item-employees-datalist" class="form-control" value="On Shelf" oninput="window.inventoryManager.onAssignedToChanged()">
           </div>
         </div>
 
@@ -466,7 +468,7 @@ class InventoryManager {
 
         <div style="margin-bottom: 12px;">
           <label style="display: block; font-size: 11.5px; font-weight: 700; margin-bottom: 4px;">ASSIGNED TO / CREW LEAD</label>
-          <input type="text" id="f-assigned-to" class="form-control" value="On Shelf" oninput="window.inventoryManager.updatePreview()">
+          <input type="text" id="f-assigned-to" list="new-item-employees-datalist" class="form-control" value="On Shelf" oninput="window.inventoryManager.onAssignedToChanged()">
         </div>
 
         <div style="margin-bottom: 12px;">
@@ -523,7 +525,7 @@ class InventoryManager {
           </div>
           <div>
             <label style="display: block; font-size: 11.5px; font-weight: 700; margin-bottom: 4px;">ASSIGNED TO / CREW LEAD</label>
-            <input type="text" id="f-assigned-to" class="form-control" value="On Shelf" oninput="window.inventoryManager.updatePreview()">
+            <input type="text" id="f-assigned-to" list="new-item-employees-datalist" class="form-control" value="On Shelf" oninput="window.inventoryManager.onAssignedToChanged()">
           </div>
         </div>
 
@@ -588,7 +590,7 @@ class InventoryManager {
           </div>
           <div>
             <label style="display: block; font-size: 11.5px; font-weight: 700; margin-bottom: 4px;">ASSIGNED TO / CREW LEAD</label>
-            <input type="text" id="f-assigned-to" class="form-control" value="On Shelf" oninput="window.inventoryManager.updatePreview()">
+            <input type="text" id="f-assigned-to" list="new-item-employees-datalist" class="form-control" value="On Shelf" oninput="window.inventoryManager.onAssignedToChanged()">
           </div>
         </div>
 
@@ -640,7 +642,7 @@ class InventoryManager {
 
         <div style="margin-bottom: 12px;">
           <label style="display: block; font-size: 11.5px; font-weight: 700; margin-bottom: 4px;">ASSIGNED TO / CREW LEAD</label>
-          <input type="text" id="f-assigned-to" class="form-control" value="On Shelf" oninput="window.inventoryManager.updatePreview()">
+          <input type="text" id="f-assigned-to" list="new-item-employees-datalist" class="form-control" value="On Shelf" oninput="window.inventoryManager.onAssignedToChanged()">
         </div>
 
         <div style="margin-bottom: 12px;">
@@ -710,7 +712,7 @@ class InventoryManager {
           </div>
           <div>
             <label style="display: block; font-size: 11.5px; font-weight: 700; margin-bottom: 4px;">ASSIGNED TO / CREW LEAD</label>
-            <input type="text" id="f-assigned-to" class="form-control" value="On Shelf" oninput="window.inventoryManager.updatePreview()">
+            <input type="text" id="f-assigned-to" list="new-item-employees-datalist" class="form-control" value="On Shelf" oninput="window.inventoryManager.onAssignedToChanged()">
           </div>
         </div>
 
@@ -768,7 +770,7 @@ class InventoryManager {
 
         <div style="margin-bottom: 12px;">
           <label style="display: block; font-size: 11.5px; font-weight: 700; margin-bottom: 4px;">ASSIGNED TO / CREW LEAD</label>
-          <input type="text" id="f-assigned-to" class="form-control" value="On Shelf" oninput="window.inventoryManager.updatePreview()">
+          <input type="text" id="f-assigned-to" list="new-item-employees-datalist" class="form-control" value="On Shelf" oninput="window.inventoryManager.onAssignedToChanged()">
         </div>
 
         <div style="margin-bottom: 12px;">
@@ -778,7 +780,7 @@ class InventoryManager {
       `;
     }
 
-    container.innerHTML = fieldsHtml;
+    container.innerHTML = fieldsHtml + empDatalistHtml;
     this.updatePreview();
   }
 
@@ -916,6 +918,44 @@ class InventoryManager {
     this.updatePreview();
   }
 
+  onAssignedToChanged() {
+    const assignedInput = document.getElementById('f-assigned-to');
+    const assignedVal = (assignedInput ? assignedInput.value : '').trim();
+    const locInput = document.getElementById('f-location');
+    const statusSelect = document.getElementById('f-status');
+
+    if (!assignedVal || assignedVal.toLowerCase() === 'on shelf' || assignedVal.toLowerCase() === 'in stock') {
+      if (locInput) locInput.value = 'Helena';
+      if (statusSelect) statusSelect.value = 'On Shelf';
+    } else if (assignedVal.toLowerCase() === 'in testing') {
+      if (locInput) locInput.value = 'Arnett / JM Test';
+      if (statusSelect) statusSelect.value = 'In Testing';
+    } else if (assignedVal.toLowerCase() === 'packed for delivery') {
+      if (locInput) locInput.value = "Cody's Truck";
+      if (statusSelect) statusSelect.value = 'Ready For Delivery';
+    } else {
+      // An employee name was selected or typed
+      const empTable = this.db.getTable('employees');
+      if (empTable && empTable.rows) {
+        const match = empTable.rows.find(r => {
+          const name = String(r['Name'] || r['Employee'] || r['Employee Name'] || Object.values(r)[0] || '').trim().toLowerCase();
+          return name === assignedVal.toLowerCase();
+        });
+        if (match) {
+          const rawLoc = String(match['Location'] || '').trim();
+          const cleanLoc = rawLoc.replace(/\s*\([^)]*\)/g, '').trim();
+          if (locInput && cleanLoc) {
+            locInput.value = cleanLoc;
+          }
+        }
+      }
+      if (statusSelect && (statusSelect.value === 'On Shelf' || !statusSelect.value)) {
+        statusSelect.value = 'Assigned';
+      }
+    }
+    this.updatePreview();
+  }
+
   updatePreview() {
     const cat = document.getElementById('new-item-category') ? document.getElementById('new-item-category').value : 'gloves';
     const previewEl = document.getElementById('new-item-preview-change-out');
@@ -966,20 +1006,36 @@ class InventoryManager {
     }
 
     const assignedTo = document.getElementById('f-assigned-to') ? document.getElementById('f-assigned-to').value.trim() : 'On Shelf';
-    const location = document.getElementById('f-location') ? document.getElementById('f-location').value.trim() : 'Helena';
-    const status = document.getElementById('f-status') ? document.getElementById('f-status').value.trim() : 'On Shelf';
+    let location = document.getElementById('f-location') ? document.getElementById('f-location').value.trim() : 'Helena';
+    let status = document.getElementById('f-status') ? document.getElementById('f-status').value.trim() : 'On Shelf';
     
-    // Process Origin Reason and Notes for 1st entry
-    const originReason = document.getElementById('new-item-origin-reason') ? document.getElementById('new-item-origin-reason').value.trim() : 'New Purchase';
-    const userNotes = document.getElementById('f-notes') ? document.getElementById('f-notes').value.trim() : '';
-    let notes = originReason;
-    if (userNotes) {
-      if (userNotes.toLowerCase().includes(originReason.toLowerCase())) {
-        notes = userNotes;
-      } else {
-        notes = `${originReason} - ${userNotes}`;
+    // Auto-reconcile location and status if an employee was assigned
+    const isSpecialAssigned = ['on shelf', 'in stock', 'in testing', 'packed for delivery', 'ready for delivery', ''].includes(assignedTo.toLowerCase());
+    if (assignedTo && !isSpecialAssigned) {
+      if (!status || status === 'On Shelf') {
+        status = 'Assigned';
+      }
+      if (!location || location === 'Helena') {
+        const empTable = this.db.getTable('employees');
+        if (empTable && empTable.rows) {
+          const match = empTable.rows.find(r => {
+            const name = String(r['Name'] || r['Employee'] || r['Employee Name'] || Object.values(r)[0] || '').trim().toLowerCase();
+            return name === assignedTo.toLowerCase();
+          });
+          if (match) {
+            const cleanLoc = String(match['Location'] || '').replace(/\s*\([^)]*\)/g, '').trim();
+            if (cleanLoc) location = cleanLoc;
+          }
+        }
       }
     }
+
+    // Process Origin Reason and Notes:
+    // The Notes column in active inventory should ONLY contain what user entered in Notes input.
+    // 'New Purchase' / 'Not New' is origin tracking for history and accounting, not active item notes.
+    const originReason = document.getElementById('new-item-origin-reason') ? document.getElementById('new-item-origin-reason').value.trim() : 'New Purchase';
+    const userNotes = document.getElementById('f-notes') ? document.getElementById('f-notes').value.trim() : '';
+    const notes = userNotes;
 
     const rawTestDate = document.getElementById('f-test-date') ? document.getElementById('f-test-date').value : '';
     const rawDateAssigned = document.getElementById('f-date-assigned') ? document.getElementById('f-date-assigned').value : '';
@@ -1148,8 +1204,8 @@ class InventoryManager {
       };
     }
 
-    // Add row to LocalDatabase
-    await this.db.addRow(cat, newRow);
+    // Add row to LocalDatabase with originReason for history tracking
+    await this.db.addRow(cat, newRow, originReason);
 
     this.closeModal();
 
