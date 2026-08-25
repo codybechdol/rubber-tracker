@@ -327,6 +327,56 @@ class LocalDatabase {
     return this.outbox;
   }
 
+  async saveOutbox(newOutbox) {
+    this.outbox = Array.isArray(newOutbox) ? newOutbox : [];
+    if (window.desktopAPI) {
+      await window.desktopAPI.saveLocalOutbox(this.outbox);
+    } else {
+      localStorage.setItem('sa_outbox', JSON.stringify(this.outbox));
+    }
+    this.notify();
+  }
+
+  getTableKeyForSheet(sheetName) {
+    if (!sheetName) return null;
+    const clean = String(sheetName).trim().toLowerCase();
+    const map = {
+      'gloves': 'gloves',
+      'sleeves': 'sleeves',
+      'blankets': 'blankets',
+      'macks': 'macks',
+      'hv testers': 'hv_testers',
+      'hv_testers': 'hv_testers',
+      'phasing sets': 'phasing_sets',
+      'phasing_sets': 'phasing_sets',
+      'aed': 'aed',
+      'grounds': 'grounds',
+      'hot sticks': 'hot_sticks',
+      'hot_sticks': 'hot_sticks',
+      'employees': 'employees',
+      'job tracking': 'job_tracking',
+      'job_tracking': 'job_tracking',
+      'safety compliance': 'safety_compliance',
+      'safety_compliance': 'safety_compliance',
+      'jha log': 'jha_log',
+      'jha_log': 'jha_log',
+      'weekly safety log': 'weekly_safety_log',
+      'weekly_safety_log': 'weekly_safety_log',
+      'monthly checklist log': 'monthly_checklist_log',
+      'monthly_checklist_log': 'monthly_checklist_log'
+    };
+    if (map[clean]) return map[clean];
+
+    if (this.snapshot && this.snapshot.tables) {
+      for (const key of Object.keys(this.snapshot.tables)) {
+        const tbl = this.snapshot.tables[key];
+        if (tbl && tbl.name && tbl.name.toLowerCase() === clean) return key;
+        if (key.toLowerCase() === clean.replace(/\s+/g, '_')) return key;
+      }
+    }
+    return clean.replace(/\s+/g, '_');
+  }
+
   getPendingCount() {
     return this.outbox.length;
   }

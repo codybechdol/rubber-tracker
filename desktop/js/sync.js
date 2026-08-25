@@ -533,67 +533,76 @@ class SyncEngine {
 
   closeConflictModal() {
     const modal = document.getElementById('conflict-resolution-modal');
-    if (modal) modal.classList.remove('active');
+    if (modal) {
+      modal.classList.remove('active');
+      modal.style.display = 'none';
+    }
     this.activeConflicts = null;
   }
 
   async applyConflictResolutions() {
-    if (!this.activeConflicts || !this.activeOutbox) {
-      this.closeConflictModal();
-      return;
-    }
-
-    const conflicts = this.activeConflicts;
-    let outbox = [...this.activeOutbox];
-    const mutationsToDrop = new Set();
-
-    conflicts.forEach((conf, idx) => {
-      const radios = document.getElementsByName(`conflict_choice_${idx}`);
-      let selected = 'local';
-      for (const r of radios) {
-        if (r.checked) selected = r.value;
+    try {
+      if (!this.activeConflicts || !this.activeOutbox) {
+        this.closeConflictModal();
+        return;
       }
 
-      const mutIdx = conf.mutationIndex;
-      if (selected === 'local') {
-        // User wants to keep local offline edit: mark mutation to force write
-        if (outbox[mutIdx]) {
-          outbox[mutIdx].force = true;
-        }
-      } else {
-        // User wants to accept Google Sheets value: drop local mutation and update local DB
-        mutationsToDrop.add(mutIdx);
+      const conflicts = this.activeConflicts;
+      let outbox = [...this.activeOutbox];
+      const mutationsToDrop = new Set();
 
-        // Update local IndexedDB so local workspace reflects the Google Sheets value
-        if (conf.sheetName && conf.row && conf.col) {
-          const tableKey = this.db.getTableKeyForSheet(conf.sheetName);
-          const table = tableKey ? this.db.getTable(tableKey) : null;
-          if (table && table.rows && table.rows[conf.row - 2]) {
-            const header = conf.header;
-            if (header && table.rows[conf.row - 2][header] !== undefined) {
-              table.rows[conf.row - 2][header] = conf.serverValue;
+      conflicts.forEach((conf, idx) => {
+        const radios = document.getElementsByName(`conflict_choice_${idx}`);
+        let selected = 'local';
+        for (const r of radios) {
+          if (r.checked) selected = r.value;
+        }
+
+        const mutIdx = conf.mutationIndex;
+        if (selected === 'local') {
+          // User wants to keep local offline edit: mark mutation to force write
+          if (outbox[mutIdx]) {
+            outbox[mutIdx].force = true;
+          }
+        } else {
+          // User wants to accept Google Sheets value: drop local mutation and update local DB
+          mutationsToDrop.add(mutIdx);
+
+          // Update local workspace so local view reflects the Google Sheets value
+          if (conf.sheetName && conf.row && conf.col) {
+            const tableKey = this.db.getTableKeyForSheet ? this.db.getTableKeyForSheet(conf.sheetName) : conf.sheetName.toLowerCase().replace(/\s+/g, '_');
+            const table = tableKey ? this.db.getTable(tableKey) : null;
+            if (table && table.rows && table.rows[conf.row - 2]) {
+              const header = conf.header;
+              if (header && table.rows[conf.row - 2][header] !== undefined) {
+                table.rows[conf.row - 2][header] = conf.serverValue;
+              }
             }
           }
         }
+      });
+
+      // Filter out dropped mutations
+      const resolvedOutbox = outbox.filter((_, i) => !mutationsToDrop.has(i));
+      await this.db.saveOutbox(resolvedOutbox);
+
+      this.closeConflictModal();
+
+      // Refresh active views so user sees immediate state
+      if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
+      if (window.inventoryAging) window.inventoryAging.loadData();
+      if (window.safetyComplianceEngine) window.safetyComplianceEngine.renderMatrix();
+
+      if (resolvedOutbox.length > 0) {
+        // Re-push resolved mutations to Google Sheets
+        await this.pushChangesToGoogleSheets();
+      } else {
+        this.updateStatusUI('synced', `Synced (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
+        alert('✅ All conflict resolutions applied! Your local data has been synchronized with Google Sheets.');
       }
-    });
-
-    // Filter out dropped mutations
-    const resolvedOutbox = outbox.filter((_, i) => !mutationsToDrop.has(i));
-    await this.db.saveOutbox(resolvedOutbox);
-
-    this.closeConflictModal();
-
-    // Refresh active views so user sees immediate state
-    if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
-    if (window.inventoryAging) window.inventoryAging.loadData();
-
-    if (resolvedOutbox.length > 0) {
-      // Re-push resolved mutations to Google Sheets
-      await this.pushChangesToGoogleSheets();
-    } else {
-      this.updateStatusUI('synced', `Synced (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
-      alert('✅ All conflict resolutions applied! Your local data has been synchronized with Google Sheets.');
+    } catch (err) {
+      console.error('Error applying conflict resolutions:', err);
+      alert('Error applying conflict resolutions: ' + err.message);
     }
   }
 
