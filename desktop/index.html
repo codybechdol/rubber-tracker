@@ -142,6 +142,9 @@
             <button class="btn" id="btn-new-item" style="background: #2563eb; color: white; padding: 6px 14px; font-size: 12px;" onclick="window.inventoryManager.showNewItemModal(window.sheetNavigator.currentSheetKey)">
               ➕ New Item
             </button>
+            <button class="btn btn-secondary" id="btn-push-clean-sheet" style="display: none; padding: 6px 12px; font-size: 12px;" onclick="window.syncEngine.pushFullCleanTable(window.sheetNavigator.currentSheetKey)" title="Push this full clean table directly to Google Sheets">
+              📤 Sync Sheet to Google
+            </button>
             <input type="text" id="sheet-search-input" class="sheet-search" placeholder="Filter rows in this sheet...">
           </div>
         </div>

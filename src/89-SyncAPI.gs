@@ -302,8 +302,14 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
       var cSheet = cSheetName && ss ? ss.getSheetByName(cSheetName) : null;
       if (!cSheet) continue;
 
-      if (cMut.action === 'UPDATE_CELL' && cMut.row && cMut.col && cMut.oldValue !== undefined && cMut.oldValue !== null) {
-        var curVal = cSheet.getRange(cMut.row, cMut.col).getValue();
+      var targetRow = cMut.row;
+      if (cMut.itemIdentifier) {
+        var idRow = getInvItemRowIndexFast(cSheet, cSheetName, cMut.itemIdentifier);
+        if (idRow !== -1) targetRow = idRow;
+      }
+
+      if (cMut.action === 'UPDATE_CELL' && targetRow && cMut.col && cMut.oldValue !== undefined && cMut.oldValue !== null) {
+        var curVal = cSheet.getRange(targetRow, cMut.col).getValue();
         var curNorm = normalizeValForComparison(curVal);
         var oldNorm = normalizeValForComparison(cMut.oldValue);
         var newNorm = normalizeValForComparison(cMut.value);
@@ -313,7 +319,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
             mutationIndex: cm,
             action: cMut.action,
             sheetName: cSheetName,
-            row: cMut.row,
+            row: targetRow,
             col: cMut.col,
             header: cMut.header || cMut.colName || ('Col ' + cMut.col),
             itemIdentifier: cMut.itemIdentifier || '',
@@ -373,19 +379,21 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
   var invItemIndexCache = {};
   function getInvItemRowIndexFast(targetSheet, targetSheetName, itemNum) {
     if (!itemNum || itemNum === '—' || itemNum === '-') return -1;
-    if (!invItemIndexCache[targetSheetName]) {
-      invItemIndexCache[targetSheetName] = {};
+    var sName = targetSheetName || (targetSheet ? targetSheet.getName() : '');
+    if (!invItemIndexCache[sName]) {
+      invItemIndexCache[sName] = {};
       if (targetSheet && targetSheet.getLastRow() > 1) {
         var d = targetSheet.getDataRange().getValues();
         for (var r = 1; r < d.length; r++) {
-          var itm = String(d[r][0] || '').trim();
-          var esl = String(d[r][1] || '').trim();
-          if (itm) invItemIndexCache[targetSheetName][itm] = r + 1;
-          if (esl) invItemIndexCache[targetSheetName][esl] = r + 1;
+          var itm = String(d[r][0] || '').trim().toLowerCase();
+          var esl = (d[r].length > 1) ? String(d[r][1] || '').trim().toLowerCase() : '';
+          if (itm) invItemIndexCache[sName][itm] = r + 1;
+          if (esl) invItemIndexCache[sName][esl] = r + 1;
         }
       }
     }
-    return invItemIndexCache[targetSheetName][itemNum] || -1;
+    var cleanKey = String(itemNum).trim().toLowerCase();
+    return invItemIndexCache[sName] ? (invItemIndexCache[sName][cleanKey] || -1) : -1;
   }
 
   for (var m = 0; m < mutations.length; m++) {
@@ -428,14 +436,19 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
 
       switch (mut.action) {
         case 'UPDATE_CELL':
-          if (mut.row && mut.col) {
+          var targetRow = mut.row;
+          if (mut.itemIdentifier) {
+            var foundRow = getInvItemRowIndexFast(sheet, sheetName, mut.itemIdentifier);
+            if (foundRow !== -1) targetRow = foundRow;
+          }
+          if (targetRow && mut.col) {
             var valToWrite = mut.value;
             if (valToWrite === 'True' || valToWrite === 'true') {
               valToWrite = true;
             } else if (valToWrite === 'False' || valToWrite === 'false') {
               valToWrite = false;
             }
-            sheet.getRange(mut.row, mut.col).setValue(valToWrite);
+            sheet.getRange(targetRow, mut.col).setValue(valToWrite);
             sheetsModified[sheetName] = true;
             appliedCount++;
 
@@ -1623,12 +1636,14 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
   // Auto Save & Backup on Push:
   // 1. Run targeted fast history save and location sync on modified equipment sheets
   if (appliedCount > 0) {
-    try {
-      if (typeof syncInventoryLocations === 'function') {
-        syncInventoryLocations();
+    if (sheetsModified['Employees']) {
+      try {
+        if (typeof syncInventoryLocations === 'function') {
+          syncInventoryLocations();
+        }
+      } catch (locErr) {
+        Logger.log('applyBatchSyncMutations auto syncInventoryLocations error: ' + locErr);
       }
-    } catch (locErr) {
-      Logger.log('applyBatchSyncMutations auto syncInventoryLocations error: ' + locErr);
     }
 
     try {

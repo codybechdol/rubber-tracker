@@ -522,10 +522,18 @@ class SheetNavigator {
     const btnFixDates = document.getElementById('btn-fix-changeout-dates');
     const btnReconcileHist = document.getElementById('btn-reconcile-history');
     const btnImportCrews = document.getElementById('btn-import-crews');
+    const btnPushClean = document.getElementById('btn-push-clean-sheet');
 
     const isInventorySheet = !sheetMeta?.isSwap && sheetMeta?.key !== 'employees' && sheetMeta?.key !== 'job_tracking';
     const isSwapSheet = Boolean(sheetMeta?.isSwap);
     const isEmployeeOrJobSheet = sheetMeta?.key === 'employees' || sheetMeta?.key === 'job_tracking';
+
+    if (btnPushClean) {
+      btnPushClean.style.display = (tableData && tableData.rows) ? 'inline-block' : 'none';
+      if (sheetMeta) {
+        btnPushClean.title = `Push full clean ${sheetMeta.label} table directly to Google Sheets`;
+      }
+    }
 
     if (btnImportCrews) {
       btnImportCrews.style.display = isEmployeeOrJobSheet ? 'inline-block' : 'none';
