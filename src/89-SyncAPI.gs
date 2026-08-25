@@ -391,7 +391,34 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
     try {
       var sheetName = mut.sheetName || '';
       var sheet = sheetName ? ss.getSheetByName(sheetName) : null;
-      var actionsWithoutSheet = ['DELETE_TASK', 'SET_TASK_STATUS', 'TRIGGER_SYNC_CREWS', 'SET_HOLIDAYS', 'SET_TRIP_SCHEDULE', 'SCHEDULE_CREW_VISIT', 'UNSCHEDULE_CREW_VISIT', 'SAVE_PLANNED_TRIPS', 'SAVE_TASK', 'ADD_LOCATION_OVERRIDE', 'IMPORT_HISTORY_LOG', 'RECALCULATE_CHANGE_OUT_DATES'];
+      var actionsWithoutSheet = [
+        'DELETE_TASK',
+        'SET_TASK_STATUS',
+        'TRIGGER_SYNC_CREWS',
+        'SET_HOLIDAYS',
+        'SET_TRIP_SCHEDULE',
+        'SCHEDULE_CREW_VISIT',
+        'UNSCHEDULE_CREW_VISIT',
+        'SAVE_PLANNED_TRIPS',
+        'SAVE_TASK',
+        'ADD_LOCATION_OVERRIDE',
+        'IMPORT_HISTORY_LOG',
+        'RECALCULATE_CHANGE_OUT_DATES',
+        'FIELD_GPS_CHECK_IN',
+        'FIELD_EQUIPMENT_SWAP',
+        'RECLAIM_ITEM'
+      ];
+
+      // If this is a table replacement mutation and the sheet doesn't exist yet, automatically create it
+      if (!sheet && (mut.action === 'REPLACE_SWAP_TABLE' || mut.action === 'REPLACE_TABLE_DATA' || mut.action === 'SYNC_FULL_TABLE') && sheetName) {
+        try {
+          sheet = ss.insertSheet(sheetName);
+          Logger.log('Auto-created missing sheet for sync: ' + sheetName);
+        } catch (insErr) {
+          Logger.log('Could not insert sheet ' + sheetName + ': ' + insErr);
+        }
+      }
+
       if (!sheet && actionsWithoutSheet.indexOf(mut.action) === -1) {
         errors.push('Sheet not found: ' + sheetName);
         continue;
@@ -400,7 +427,13 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
       switch (mut.action) {
         case 'UPDATE_CELL':
           if (mut.row && mut.col) {
-            sheet.getRange(mut.row, mut.col).setValue(mut.value);
+            var valToWrite = mut.value;
+            if (valToWrite === 'True' || valToWrite === 'true') {
+              valToWrite = true;
+            } else if (valToWrite === 'False' || valToWrite === 'false') {
+              valToWrite = false;
+            }
+            sheet.getRange(mut.row, mut.col).setValue(valToWrite);
             sheetsModified[sheetName] = true;
             appliedCount++;
 
@@ -1480,6 +1513,26 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
             appliedCount++;
           } catch (eChg) {
             Logger.log('RECALCULATE_CHANGE_OUT_DATES error: ' + eChg);
+          }
+          break;
+
+        case 'FIELD_GPS_CHECK_IN':
+          try {
+            var checkIn = mut.data || {};
+            logEvent('Field GPS Check-In: ' + (checkIn.locationLabel || '') + ' (' + (checkIn.gpsCoordinates || '') + ') for job ' + (checkIn.jobName || ''), 'INFO');
+            appliedCount++;
+          } catch (gpsErr) {
+            Logger.log('FIELD_GPS_CHECK_IN error: ' + gpsErr);
+          }
+          break;
+
+        case 'FIELD_EQUIPMENT_SWAP':
+        case 'RECLAIM_ITEM':
+          try {
+            logEvent(mut.action + ': Item ' + (mut.itemNum || '') + ' (' + (mut.gpsStamp || '') + ')', 'INFO');
+            appliedCount++;
+          } catch (eFld) {
+            Logger.log(mut.action + ' error: ' + eFld);
           }
           break;
 
