@@ -1055,3 +1055,6 @@ class InventoryAgingEngine {
     this.closeConfigModal();
   }
 }
+
+// Attach globally
+window.InventoryAgingEngine = InventoryAgingEngine;

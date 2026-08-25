@@ -512,13 +512,13 @@
                 <button class="btn btn-secondary aging-tier-btn" data-tier="CRITICAL" style="padding: 2px 8px; font-size: 11px; color: #f87171;" onclick="window.inventoryAging.setTier('CRITICAL')">🔴 EOL (>5 yrs)</button>
                 <button class="btn btn-secondary aging-tier-btn" data-tier="AGING" style="padding: 2px 8px; font-size: 11px; color: #fb923c;" onclick="window.inventoryAging.setTier('AGING')">🟠 Aging (3-5 yrs)</button>
                 <button class="btn btn-secondary aging-tier-btn" data-tier="MID_LIFE" style="padding: 2px 8px; font-size: 11px; color: #facc15;" onclick="window.inventoryAging.setTier('MID_LIFE')">🟡 Mid-Life (1-3 yrs)</button>
-                <button class="btn btn-secondary aging-tier-btn" data-tier="FRESH" style="padding: 2px 8px; font-size: 11px; color: #4ade80;" onclick="window.inventoryAging.setTier('FRESH')">🟢 Fresh (<1 yr)</button>
+                <button class="btn btn-secondary aging-tier-btn" data-tier="FRESH" style="padding: 2px 8px; font-size: 11px; color: #4ade80;" onclick="window.inventoryAging.setTier('FRESH')">🟢 Fresh (&lt;1 yr)</button>
               </div>
               <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
                 <span style="color: var(--text-muted); font-weight: 600;">Recert:</span>
                 <button class="btn btn-secondary aging-recert-btn active" data-recert="all" style="padding: 2px 8px; font-size: 11px;" onclick="window.inventoryAging.setRecert('all')">All</button>
                 <button class="btn btn-secondary aging-recert-btn" data-recert="OVERDUE" style="padding: 2px 8px; font-size: 11px; color: #f87171;" onclick="window.inventoryAging.setRecert('OVERDUE')">🔴 Overdue</button>
-                <button class="btn btn-secondary aging-recert-btn" data-recert="DUE_SOON" style="padding: 2px 8px; font-size: 11px; color: #fb923c;" onclick="window.inventoryAging.setRecert('DUE_SOON')">🟠 <30d</button>
+                <button class="btn btn-secondary aging-recert-btn" data-recert="DUE_SOON" style="padding: 2px 8px; font-size: 11px; color: #fb923c;" onclick="window.inventoryAging.setRecert('DUE_SOON')">🟠 &lt;30d</button>
                 <button class="btn btn-secondary aging-recert-btn" data-recert="CURRENT" style="padding: 2px 8px; font-size: 11px; color: #4ade80;" onclick="window.inventoryAging.setRecert('CURRENT')">🟢 Current</button>
               </div>
             </div>
@@ -966,7 +966,12 @@
       <div class="modal-body" id="time-breakdown-modal-body" style="max-height: 75vh; overflow-y: auto; padding: 20px;">
         <!-- Injected dynamically by time-breakdown.js -->
       </div>
-      <div class="modal-footer" id="time-breakdown-modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+      <div class="modal-footer" id="time-breakdown-modal-footer" style="display: flex; justify-content: flex-end; align-items: center;">
+        <button class="btn btn-secondary" onclick="window.timeBreakdownEngine.closeModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Live Camera ESL Barcode & QR Scanner Modal -->
   <div id="camera-scanner-modal" class="modal-overlay">
     <div class="modal-box" style="max-width: 650px; width: 92%; max-height: 90vh;">
@@ -1146,8 +1151,8 @@
 
     // App Initialization
     window.addEventListener('DOMContentLoaded', async () => {
-      // Register Service Worker for PWA / offline caching
-      if ('serviceWorker' in navigator) {
+      // Register Service Worker for PWA / offline caching on Web/Tablet
+      if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
         navigator.serviceWorker.register('./sw.js').catch(err => {
           console.warn('Service Worker registration warning:', err);
         });

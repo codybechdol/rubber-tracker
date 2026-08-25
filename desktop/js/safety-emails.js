@@ -1202,3 +1202,6 @@ class SafetyEmailsEngine {
       .replace(/'/g, '&#039;');
   }
 }
+
+// Attach globally
+window.SafetyEmailsEngine = SafetyEmailsEngine;

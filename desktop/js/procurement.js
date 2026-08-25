@@ -826,3 +826,6 @@ class ProcurementEngine {
     URL.revokeObjectURL(url);
   }
 }
+
+// Attach globally
+window.ProcurementEngine = ProcurementEngine;

@@ -25,10 +25,13 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
 
-  // Enable Ctrl+R / F5 refresh
+  // Enable Ctrl+R / F5 refresh and F12 / Ctrl+Shift+I for DevTools
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.key === 'F5' || (input.control && input.key.toLowerCase() === 'r')) {
       mainWindow.reload();
+    }
+    if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
+      mainWindow.webContents.toggleDevTools();
     }
   });
 
