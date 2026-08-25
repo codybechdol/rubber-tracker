@@ -223,43 +223,23 @@ function generateAndStoreSyncSnapshot(existingSnapshot) {
     var snapshot = existingSnapshot || exportFullDatabaseSnapshot();
     var jsonStr = JSON.stringify(snapshot, null, 2);
 
-    var props = PropertiesService.getScriptProperties();
-    var fileId = props.getProperty('SYNC_SNAPSHOT_FILE_ID');
+    var folder = getOrCreateBackupFolder();
+    var files = folder.getFilesByName(SYNC_SNAPSHOT_FILENAME);
     var file = null;
 
-    if (fileId) {
-      try {
-        file = DriveApp.getFileById(fileId);
-        if (file.isTrashed()) {
-          file = null;
-        } else {
-          file.setContent(jsonStr);
-          Logger.log('generateAndStoreSyncSnapshot: Updated cached ' + SYNC_SNAPSHOT_FILENAME + ' (ID: ' + fileId + ')');
-        }
-      } catch (idErr) {
-        file = null;
-      }
+    if (files.hasNext()) {
+      file = files.next();
+      file.setContent(jsonStr);
+      Logger.log('generateAndStoreSyncSnapshot: Updated existing ' + SYNC_SNAPSHOT_FILENAME + ' in backup folder: ' + folder.getName());
+    } else {
+      file = folder.createFile(SYNC_SNAPSHOT_FILENAME, jsonStr, MimeType.PLAIN_TEXT);
+      Logger.log('generateAndStoreSyncSnapshot: Created new ' + SYNC_SNAPSHOT_FILENAME + ' in backup folder: ' + folder.getName());
     }
 
-    if (!file) {
-      // Save snapshot to backup folder
-      var folder = getOrCreateBackupFolder();
-      var files = folder.getFilesByName(SYNC_SNAPSHOT_FILENAME);
-
-      if (files.hasNext()) {
-        file = files.next();
-        file.setContent(jsonStr);
-        Logger.log('generateAndStoreSyncSnapshot: Updated existing ' + SYNC_SNAPSHOT_FILENAME);
-      } else {
-        file = folder.createFile(SYNC_SNAPSHOT_FILENAME, jsonStr, MimeType.PLAIN_TEXT);
-        Logger.log('generateAndStoreSyncSnapshot: Created new ' + SYNC_SNAPSHOT_FILENAME);
-      }
-
-      if (file) {
-        try {
-          props.setProperty('SYNC_SNAPSHOT_FILE_ID', file.getId());
-        } catch (saveIdErr) { /* ignore */ }
-      }
+    if (file) {
+      try {
+        PropertiesService.getScriptProperties().setProperty('SYNC_SNAPSHOT_FILE_ID', file.getId());
+      } catch (saveIdErr) { /* ignore */ }
     }
 
     var elapsed = new Date().getTime() - startTime;
@@ -1528,6 +1508,25 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
     }
   }
 
+  // Auto Save & Backup: Whenever offline changes are pushed and applied,
+  // automatically record history changes and create a Drive backup snapshot.
+  if (appliedCount > 0) {
+    try {
+      if (typeof saveHistoryFast === 'function') {
+        saveHistoryFast(true);
+      }
+    } catch (histErr) {
+      Logger.log('applyBatchSyncMutations auto saveHistoryFast error: ' + histErr);
+    }
+    try {
+      if (typeof createBackupSnapshotFast === 'function') {
+        createBackupSnapshotFast();
+      }
+    } catch (bkErr) {
+      Logger.log('applyBatchSyncMutations auto createBackupSnapshotFast error: ' + bkErr);
+    }
+  }
+
   // Generate fresh snapshot ONCE (if requested for single-round-trip push)
   var snapshot = null;
   if (returnSnapshot) {
@@ -1584,6 +1583,22 @@ function doGet(e) {
         status: 'error',
         success: false,
         error: mutErr.toString()
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+
+  if (action === 'reconcileInventoryFromHistory') {
+    try {
+      var recResult = (typeof reconcileInventoryFromHistory === 'function')
+        ? reconcileInventoryFromHistory(true)
+        : { success: false, message: 'reconcileInventoryFromHistory not defined' };
+      return ContentService.createTextOutput(JSON.stringify(recResult))
+        .setMimeType(ContentService.MimeType.JSON);
+    } catch (recErr) {
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'error',
+        success: false,
+        error: recErr.toString()
       })).setMimeType(ContentService.MimeType.JSON);
     }
   }
@@ -1651,6 +1666,13 @@ function doGet(e) {
 
   if (action === 'getSnapshot' || !action) {
     var snapshot = exportFullDatabaseSnapshot();
+    try {
+      if (typeof generateAndStoreSyncSnapshot === 'function') {
+        generateAndStoreSyncSnapshot(snapshot);
+      }
+    } catch (snapStoreErr) {
+      Logger.log('doGet getSnapshot store error: ' + snapStoreErr);
+    }
     return ContentService.createTextOutput(JSON.stringify(snapshot))
       .setMimeType(ContentService.MimeType.JSON);
   }
@@ -1681,6 +1703,14 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
 
+    if (action === 'reconcileInventoryFromHistory') {
+      var recResult = (typeof reconcileInventoryFromHistory === 'function')
+        ? reconcileInventoryFromHistory(true)
+        : { success: false, message: 'reconcileInventoryFromHistory not defined' };
+      return ContentService.createTextOutput(JSON.stringify(recResult))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
     if (action === 'processSafetyEmails') {
       var procResult = executeSyncApiProcessSafetyEmails({
         daysBack: payload.daysBack || 7,
@@ -1701,6 +1731,13 @@ function doPost(e) {
 
     if (action === 'getSnapshot') {
       var snapshot = exportFullDatabaseSnapshot();
+      try {
+        if (typeof generateAndStoreSyncSnapshot === 'function') {
+          generateAndStoreSyncSnapshot(snapshot);
+        }
+      } catch (snapStoreErr) {
+        Logger.log('doPost getSnapshot store error: ' + snapStoreErr);
+      }
       return ContentService.createTextOutput(JSON.stringify(snapshot))
         .setMimeType(ContentService.MimeType.JSON);
     }

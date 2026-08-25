@@ -479,6 +479,7 @@ class SheetNavigator {
     const btnNewItem = document.getElementById('btn-new-item');
     const btnGenSwaps = document.getElementById('btn-generate-swaps');
     const btnFixDates = document.getElementById('btn-fix-changeout-dates');
+    const btnReconcileHist = document.getElementById('btn-reconcile-history');
     const btnImportCrews = document.getElementById('btn-import-crews');
 
     const isInventorySheet = !sheetMeta?.isSwap && sheetMeta?.key !== 'employees' && sheetMeta?.key !== 'job_tracking';
@@ -502,6 +503,10 @@ class SheetNavigator {
 
     if (btnFixDates) {
       btnFixDates.style.display = isInventorySheet ? 'inline-block' : 'none';
+    }
+
+    if (btnReconcileHist) {
+      btnReconcileHist.style.display = isInventorySheet ? 'inline-block' : 'none';
     }
 
     // Update dynamic multi-filter bar for inventory sheets

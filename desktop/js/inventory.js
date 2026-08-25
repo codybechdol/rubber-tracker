@@ -1251,6 +1251,371 @@ class InventoryManager {
     this.showToast(`Fixed ${fixedCount} Change Out Date(s) across inventory.`);
     return fixedCount;
   }
+
+  /**
+   * Reconciles active inventory sheets against their History tables.
+   * Detects items whose latest history event shows they were returned, sent to testing, on shelf,
+   * lost, or reassigned (with a newer date than the active row), and automatically fixes the active
+   * inventory row to match true reality.
+   */
+  async reconcileInventoryWithHistory(tableKey = null) {
+    const categories = [
+      { key: 'gloves', histKey: 'gloves_history', name: 'Gloves', label: 'Rubber Gloves' },
+      { key: 'sleeves', histKey: 'sleeves_history', name: 'Sleeves', label: 'Rubber Sleeves' },
+      { key: 'blankets', histKey: 'blankets_history', name: 'Blankets', label: 'Blankets' },
+      { key: 'macks', histKey: 'macks_history', name: 'MACKs', label: 'MACKs' },
+      { key: 'hv_testers', histKey: 'hv_testers_history', name: 'HV Testers', label: 'HV Testers' },
+      { key: 'phasing_sets', histKey: 'phasing_sets_history', name: 'Phasing Sets', label: 'Phasing Sets' },
+      { key: 'aed', histKey: 'aed_history', name: 'AED', label: 'AED Units' },
+      { key: 'grounds', histKey: 'grounds_history', name: 'Grounds', label: 'Grounds' },
+      { key: 'hot_sticks', histKey: 'hot_sticks_history', name: 'Hot Sticks', label: 'Hot Sticks' }
+    ];
+
+    const targetCategories = tableKey
+      ? categories.filter(c => c.key === tableKey || c.name.toLowerCase() === String(tableKey).toLowerCase())
+      : categories;
+
+    const reconciledItems = [];
+
+    const getItemIdentifier = (r, headers) => {
+      const keys = ['Item #', 'Item#', 'Item', 'Items', 'Glove', 'Sleeve', 'Blanket', 'MACK', 'Serial #', 'Serial', 'Tag #', 'ESL ID'];
+      for (const k of keys) {
+        if (r[k] !== undefined && r[k] !== null && String(r[k]).trim() !== '') {
+          return String(r[k]).trim();
+        }
+      }
+      if (headers && headers.length > 0 && r[headers[0]] !== undefined) {
+        return String(r[headers[0]]).trim();
+      }
+      return '';
+    };
+
+    targetCategories.forEach(cat => {
+      const activeTable = this.db.getTable(cat.key);
+      const histTable = this.db.getTable(cat.histKey);
+
+      if (!activeTable || !activeTable.rows || activeTable.rows.length === 0) return;
+      if (!histTable || !histTable.rows || histTable.rows.length === 0) return;
+
+      const histHeaders = histTable.headers || [];
+      const activeHeaders = activeTable.headers || [];
+
+      // 1. Group history rows by item number and determine latest chronological event
+      const historyMap = new Map(); // normItemNum -> latestEvent
+      const histItemGroups = new Map(); // normItemNum -> [row1, row2, ...]
+
+      histTable.rows.forEach(hr => {
+        const itemNum = getItemIdentifier(hr, histHeaders);
+        if (!itemNum || itemNum === 'N/A' || itemNum === '—' || itemNum === '-') return;
+        const normKey = itemNum.toLowerCase().trim();
+        if (!histItemGroups.has(normKey)) histItemGroups.set(normKey, []);
+        histItemGroups.get(normKey).push(hr);
+      });
+
+      histItemGroups.forEach((rows, normKey) => {
+        // Sort chronologically (oldest to newest)
+        const sorted = [...rows].sort((a, b) => {
+          const rawA = a['Date Assigned'] || a['Date'] || Object.values(a)[0] || '';
+          const rawB = b['Date Assigned'] || b['Date'] || Object.values(b)[0] || '';
+          const dtA = this.parseDate(rawA);
+          const dtB = this.parseDate(rawB);
+          const tA = dtA ? dtA.getTime() : 0;
+          const tB = dtB ? dtB.getTime() : 0;
+          return tA - tB;
+        });
+
+        const latest = sorted[sorted.length - 1];
+        const rawDate = latest['Date Assigned'] || latest['Date'] || Object.values(latest)[0] || '';
+        const dtObj = this.parseDate(rawDate);
+        const assignedTo = String(latest['Assigned To'] || latest['Employee Name'] || latest['Employee'] || '').trim();
+        const loc = String(latest['Location'] || '').trim();
+        const notes = String(latest['Notes'] || latest['Note'] || '').trim();
+
+        historyMap.set(normKey, {
+          itemNum: getItemIdentifier(latest, histHeaders),
+          dateObj: dtObj,
+          dateFormatted: dtObj ? this.formatDate(dtObj) : String(rawDate).trim(),
+          assignedTo: assignedTo,
+          location: loc,
+          notes: notes,
+          allRows: sorted
+        });
+      });
+
+      // 2. Compare each active inventory row against latest history state
+      activeTable.rows.forEach((row, rIdx) => {
+        const itemNum = getItemIdentifier(row, activeHeaders);
+        if (!itemNum) return;
+        const normKey = itemNum.toLowerCase().trim();
+        const latestHist = historyMap.get(normKey);
+        if (!latestHist) return;
+
+        const curAssignedTo = String(row['Assigned To'] || '').trim();
+        const curStatus = String(row['Status'] || '').trim();
+        const curLocation = String(row['Location'] || '').trim();
+        const curDateAssigned = String(row['Date Assigned'] || row['Date'] || '').trim();
+        const curDateObj = this.parseDate(curDateAssigned);
+
+        const histAssignedLower = latestHist.assignedTo.toLowerCase();
+        const histLocLower = latestHist.location.toLowerCase();
+        const histNotesLower = latestHist.notes.toLowerCase();
+        const curAssignedLower = curAssignedTo.toLowerCase();
+
+        // Check if history shows a terminated/testing/shelf state that active sheet missed
+        const isHistTesting = histAssignedLower.includes('test') || histLocLower.includes('test') || histNotesLower.includes('test') || histLocLower.includes('arnett') || histLocLower.includes('jm test');
+        const isHistShelf = histAssignedLower.includes('shelf') || histLocLower.includes('shelf') || histNotesLower.includes('shelf');
+        const isHistLost = histAssignedLower.includes('lost') || histNotesLower.includes('lost');
+        const isHistFailed = histAssignedLower.includes('fail') || histNotesLower.includes('fail');
+        const isHistRetired = histAssignedLower.includes('retir') || histNotesLower.includes('retir') || histAssignedLower.includes('destroy') || histNotesLower.includes('destroy');
+        const isHistReturned = histNotesLower.includes('returned') || isHistTesting || isHistShelf || isHistLost || isHistFailed || isHistRetired;
+
+        const isCurActiveEmployee = curAssignedTo && !['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'ready for delivery', 'ready for test', 'lost', 'failed rubber', 'destroyed', 'unassigned', 'n/a', '—', '-'].includes(curAssignedLower);
+
+        // Needs reconciliation if:
+        // A. Active sheet has item assigned to an employee, but history shows it was returned / sent to testing / on shelf
+        // B. Latest history date is strictly newer than active sheet date assigned
+        // C. Status/AssignedTo in active sheet is out-of-sync with latest history event
+        let needsFix = false;
+        let newStatus = curStatus;
+        let newAssignedTo = curAssignedTo;
+        let newLocation = curLocation;
+        let newDateAssigned = curDateAssigned;
+
+        if (isCurActiveEmployee && isHistReturned) {
+          needsFix = true;
+        } else if (latestHist.dateObj && curDateObj && latestHist.dateObj.getTime() > curDateObj.getTime()) {
+          if (curAssignedLower !== histAssignedLower || curStatus.toLowerCase() !== histAssignedLower) {
+            needsFix = true;
+          }
+        }
+
+        if (needsFix) {
+          if (isHistTesting) {
+            newStatus = 'In Testing';
+            newAssignedTo = 'In Testing';
+            newLocation = latestHist.location || 'Arnett / JM Test';
+          } else if (isHistShelf) {
+            newStatus = 'On Shelf';
+            newAssignedTo = 'On Shelf';
+            newLocation = latestHist.location || 'Helena';
+          } else if (isHistLost) {
+            newStatus = 'Lost';
+            newAssignedTo = 'Lost';
+            newLocation = latestHist.location || 'Unknown';
+          } else if (isHistFailed) {
+            newStatus = 'Failed Rubber';
+            newAssignedTo = 'Failed Rubber';
+            newLocation = latestHist.location || 'Helena';
+          } else if (isHistRetired) {
+            newStatus = 'Destroyed';
+            newAssignedTo = 'Destroyed';
+            newLocation = latestHist.location || 'Helena';
+          } else if (latestHist.assignedTo && !isHistReturned) {
+            newStatus = 'Assigned';
+            newAssignedTo = latestHist.assignedTo;
+            newLocation = latestHist.location || curLocation;
+          }
+
+          newDateAssigned = latestHist.dateFormatted || curDateAssigned;
+
+          // Calculate correct new Change Out Date
+          const newChangeOut = this.calculateChangeOutDate(newDateAssigned, newLocation, newAssignedTo, cat.key, {
+            testDate: row['Test Date'],
+            calibrationDate: row['Calibration Date'],
+            padExpiration: row['Pad Expiration'],
+            batteryExpiration: row['Battery Expiration']
+          });
+
+          // Apply changes to local row object
+          const oldAssignedSummary = `${curAssignedTo} (${curStatus})`;
+          const newAssignedSummary = `${newAssignedTo} (${newStatus})`;
+
+          row['Status'] = newStatus;
+          row['Assigned To'] = newAssignedTo;
+          row['Location'] = newLocation;
+          row['Date Assigned'] = newDateAssigned;
+          row['Change Out Date'] = newChangeOut;
+          row['Picked For'] = '';
+
+          // Sync to rawGrid if table uses rawGrid array
+          if (activeTable.rawGrid && activeTable.rawGrid[rIdx + 1]) {
+            const gridRow = activeTable.rawGrid[rIdx + 1];
+            activeHeaders.forEach((h, hIdx) => {
+              if (row[h] !== undefined) {
+                gridRow[hIdx] = row[h];
+              }
+            });
+          }
+
+          // Queue database mutations for each updated column
+          const sheetRow = rIdx + 2;
+          const queueColUpdate = (headerName, oldVal, newVal) => {
+            const colIdx = activeHeaders.indexOf(headerName) + 1;
+            if (colIdx > 0 && String(oldVal || '') !== String(newVal || '')) {
+              this.db.queueMutation({
+                action: 'UPDATE_CELL',
+                sheetName: activeTable.name,
+                row: sheetRow,
+                col: colIdx,
+                header: headerName,
+                itemIdentifier: itemNum,
+                oldValue: oldVal,
+                value: newVal
+              });
+            }
+          };
+
+          queueColUpdate('Status', curStatus, newStatus);
+          queueColUpdate('Assigned To', curAssignedTo, newAssignedTo);
+          queueColUpdate('Location', curLocation, newLocation);
+          queueColUpdate('Date Assigned', curDateAssigned, newDateAssigned);
+          queueColUpdate('Change Out Date', row['Change Out Date'], newChangeOut);
+          queueColUpdate('Picked For', row['Picked For'], '');
+
+          reconciledItems.push({
+            category: cat.label,
+            itemNum: itemNum,
+            from: oldAssignedSummary,
+            to: newAssignedSummary,
+            date: newDateAssigned,
+            location: newLocation
+          });
+        }
+      });
+    });
+
+    if (window.sheetNavigator) {
+      window.sheetNavigator.renderActiveView();
+    }
+
+    if (window.syncEngine) {
+      window.syncEngine.renderOutboxBadge();
+    }
+
+    // Show detailed reconciliation modal/toast
+    this.showReconciliationSummaryModal(reconciledItems);
+    return reconciledItems;
+  }
+
+  /**
+   * Helper to parse flexible date strings
+   */
+  parseDate(val) {
+    if (!val || val === 'N/A' || val === '—' || val === '-') return null;
+    if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+    const s = String(val).trim();
+    if (s.includes('/')) {
+      const parts = s.split('/');
+      if (parts.length === 3) {
+        const m = parseInt(parts[0], 10) - 1;
+        const d = parseInt(parts[1], 10);
+        let y = parseInt(parts[2], 10);
+        if (y < 100) y += 2000;
+        const dt = new Date(y, m, d, 12, 0, 0);
+        return isNaN(dt.getTime()) ? null : dt;
+      }
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      const parts = s.split('-');
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10) - 1;
+      const d = parseInt(parts[2], 10);
+      const dt = new Date(y, m, d, 12, 0, 0);
+      return isNaN(dt.getTime()) ? null : dt;
+    }
+    const dt = new Date(s);
+    return isNaN(dt.getTime()) ? null : dt;
+  }
+
+  /**
+   * Helper to format Date object as MM/DD/YYYY
+   */
+  formatDate(d) {
+    if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    return `${mm}/${dd}/${yyyy}`;
+  }
+
+  /**
+   * Displays modal summarizing reconciled items
+   */
+  showReconciliationSummaryModal(items) {
+    let modal = document.getElementById('reconcile-summary-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'reconcile-summary-modal';
+      modal.className = 'modal-backdrop';
+      modal.innerHTML = `
+        <div class="modal-dialog" style="max-width: 680px; background: #0f172a; border: 1px solid #334155; border-radius: 12px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6); overflow: hidden;">
+          <div class="modal-header" style="padding: 16px 20px; background: #1e293b; border-bottom: 1px solid #334155; display: flex; align-items: center; justify-content: space-between;">
+            <h3 style="font-size: 15px; font-weight: 700; color: #f8fafc; margin: 0; display: flex; align-items: center; gap: 8px;">
+              <span>🔄</span> Inventory History Reconciliation
+            </h3>
+            <button onclick="document.getElementById('reconcile-summary-modal').classList.remove('active')" style="background: none; border: none; color: #94a3b8; font-size: 18px; cursor: pointer;">✕</button>
+          </div>
+          <div id="reconcile-summary-body" style="padding: 20px; max-height: 480px; overflow-y: auto;"></div>
+          <div class="modal-footer" style="padding: 14px 20px; background: #1e293b; border-top: 1px solid #334155; display: flex; justify-content: flex-end; gap: 10px;">
+            <button class="btn btn-secondary" onclick="document.getElementById('reconcile-summary-modal').classList.remove('active')">Close</button>
+            <button class="btn btn-primary" onclick="document.getElementById('reconcile-summary-modal').classList.remove('active'); window.syncEngine.pushChangesToGoogleSheets();">⬆️ Push Changes to Sheets</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+    }
+
+    const body = document.getElementById('reconcile-summary-body');
+    if (body) {
+      if (items.length === 0) {
+        body.innerHTML = `
+          <div style="text-align: center; padding: 30px 20px;">
+            <div style="font-size: 40px; margin-bottom: 12px;">✅</div>
+            <h4 style="font-size: 16px; font-weight: 700; color: #10b981; margin-bottom: 6px;">All Inventory is 100% In Sync!</h4>
+            <p style="font-size: 13px; color: #94a3b8;">Every active equipment item matches its latest recorded History event.</p>
+          </div>
+        `;
+      } else {
+        const rowsHtml = items.map(it => `
+          <tr style="border-bottom: 1px solid #1e293b; font-size: 12px;">
+            <td style="padding: 8px 10px; font-weight: 700; color: #60a5fa;">${it.itemNum}</td>
+            <td style="padding: 8px 10px; color: #cbd5e1;">${it.category}</td>
+            <td style="padding: 8px 10px; color: #ef4444;"><del>${it.from}</del></td>
+            <td style="padding: 8px 10px; color: #10b981; font-weight: 600;">➔ ${it.to}</td>
+            <td style="padding: 8px 10px; color: #94a3b8;">${it.date}</td>
+          </tr>
+        `).join('');
+
+        body.innerHTML = `
+          <div style="margin-bottom: 14px;">
+            <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px;">
+              <strong style="color: #10b981; font-size: 13px;">✅ Reconciled ${items.length} Out-of-Sync Item(s)</strong>
+              <p style="font-size: 12px; color: #cbd5e1; margin: 4px 0 0 0;">
+                The items below had newer return/testing events recorded in History that were not reflected in the active inventory sheets. They have now been updated in local database and queued to sync with Google Sheets.
+              </p>
+            </div>
+            <table style="width: 100%; border-collapse: collapse; text-align: left;">
+              <thead>
+                <tr style="border-bottom: 1px solid #334155; font-size: 11px; text-transform: uppercase; color: #94a3b8;">
+                  <th style="padding: 6px 10px;">Item #</th>
+                  <th style="padding: 6px 10px;">Category</th>
+                  <th style="padding: 6px 10px;">Previous State</th>
+                  <th style="padding: 6px 10px;">Reconciled State</th>
+                  <th style="padding: 6px 10px;">Event Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rowsHtml}
+              </tbody>
+            </table>
+          </div>
+        `;
+      }
+    }
+
+    modal.classList.add('active');
+  }
 }
 
 window.inventoryManager = new InventoryManager(window.localDB);
+

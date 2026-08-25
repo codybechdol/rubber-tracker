@@ -133,6 +133,9 @@
             <button class="btn btn-secondary" id="btn-fix-changeout-dates" style="display: none; padding: 6px 12px; font-size: 12px;" onclick="window.inventoryManager.recalculateAllChangeOutDates(window.sheetNavigator.currentSheetKey)">
               🔄 Fix Due Dates
             </button>
+            <button class="btn btn-secondary" id="btn-reconcile-history" style="display: none; padding: 6px 12px; font-size: 12px;" onclick="window.inventoryManager.reconcileInventoryWithHistory(window.sheetNavigator.currentSheetKey)" title="Reconcile active inventory with latest History records">
+              🔄 Reconcile from History
+            </button>
             <button class="btn" id="btn-generate-swaps" style="display: none; background: linear-gradient(135deg, #0284c7, #0369a1); color: white; padding: 6px 14px; font-size: 12px;" onclick="window.swapEngine.generateAllSwaps()">
               ⚡ Generate Swaps
             </button>

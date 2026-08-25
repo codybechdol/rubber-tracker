@@ -304,6 +304,15 @@ class EmployeeProfileEngine {
     // Sort all historical assignments newest issue date first
     results.sort((a, b) => b.issueTimestamp - a.issueTimestamp);
 
+    // Prune any items from assignedEquipment that history confirms were returned / sent to testing / reassigned
+    for (let j = assignedEquipment.length - 1; j >= 0; j--) {
+      const ae = assignedEquipment[j];
+      const matchingHist = results.find(h => h.histKey === ae.histKey && String(h.itemNum).toLowerCase().trim() === String(ae.itemNum).toLowerCase().trim());
+      if (matchingHist && !matchingHist.isCurrent) {
+        assignedEquipment.splice(j, 1);
+      }
+    }
+
     return results;
   }
 

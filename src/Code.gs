@@ -8578,6 +8578,389 @@ function restoreInventoryAssignedTo() {
   ui.alert(msg);
 }
 
+/**
+ * Reconciles all active equipment inventory sheets against their respective History sheets.
+ * For every item, if the latest chronological event in History is newer than the active inventory
+ * sheet's date assigned, or if the active sheet lists an item as Assigned when History proves it was
+ * returned / in testing / on shelf / lost / retired, this function automatically updates the active
+ * inventory row to match reality.
+ *
+ * @param {boolean} silent - If true, runs without UI alerts
+ * @return {Object} Results object with counts and fixed item details
+ */
+function reconcileInventoryFromHistory(silent) {
+  silent = silent || false;
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var totalFixed = 0;
+  var summaryLines = [];
+  var fixedItems = [];
+
+  var categories = [
+    {
+      sheetName: typeof SHEET_GLOVES !== 'undefined' ? SHEET_GLOVES : 'Gloves',
+      histSheetName: typeof SHEET_GLOVES_HISTORY !== 'undefined' ? SHEET_GLOVES_HISTORY : 'Gloves History',
+      label: 'Gloves',
+      isSleeve: false,
+      itemCol: typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.ITEM_NUM : 1,
+      dateCol: typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.DATE_ASSIGNED : 6,
+      locCol: typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.LOCATION : 7,
+      statusCol: typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.STATUS : 8,
+      assignedCol: typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.ASSIGNED_TO : 9,
+      chgOutCol: typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.CHANGE_OUT_DATE : 10,
+      pickedCol: typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.PICKED_FOR : 11
+    },
+    {
+      sheetName: typeof SHEET_SLEEVES !== 'undefined' ? SHEET_SLEEVES : 'Sleeves',
+      histSheetName: typeof SHEET_SLEEVES_HISTORY !== 'undefined' ? SHEET_SLEEVES_HISTORY : 'Sleeves History',
+      label: 'Sleeves',
+      isSleeve: true,
+      itemCol: typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.ITEM_NUM : 1,
+      dateCol: typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.DATE_ASSIGNED : 6,
+      locCol: typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.LOCATION : 7,
+      statusCol: typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.STATUS : 8,
+      assignedCol: typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.ASSIGNED_TO : 9,
+      chgOutCol: typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.CHANGE_OUT_DATE : 10,
+      pickedCol: typeof COLS !== 'undefined' && COLS.INVENTORY ? COLS.INVENTORY.PICKED_FOR : 11
+    },
+    {
+      sheetName: typeof SHEET_BLANKETS !== 'undefined' ? SHEET_BLANKETS : 'Blankets',
+      histSheetName: typeof SHEET_BLANKETS_HISTORY !== 'undefined' ? SHEET_BLANKETS_HISTORY : 'Blankets History',
+      label: 'Blankets',
+      isBlanket: true,
+      itemCol: typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.ITEM_NUM : 1,
+      testDateCol: typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.TEST_DATE : 4,
+      dateCol: typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.DATE_ASSIGNED : 5,
+      locCol: typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.LOCATION : 6,
+      statusCol: typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.STATUS : 7,
+      assignedCol: typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.ASSIGNED_TO : 8,
+      chgOutCol: typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.CHANGE_OUT_DATE : 9,
+      pickedCol: typeof COLS !== 'undefined' && COLS.BLANKETS ? COLS.BLANKETS.PICKED_FOR : 10
+    },
+    {
+      sheetName: typeof SHEET_MACKS !== 'undefined' ? SHEET_MACKS : 'MACKs',
+      histSheetName: typeof SHEET_MACKS_HISTORY !== 'undefined' ? SHEET_MACKS_HISTORY : 'MACKs History',
+      label: 'MACKs',
+      isMack: true,
+      itemCol: typeof COLS !== 'undefined' && COLS.MACKS ? COLS.MACKS.ITEM_NUM : 1,
+      testDateCol: typeof COLS !== 'undefined' && COLS.MACKS ? COLS.MACKS.TEST_DATE : 5,
+      dateCol: typeof COLS !== 'undefined' && COLS.MACKS ? COLS.MACKS.DATE_ASSIGNED : 6,
+      locCol: typeof COLS !== 'undefined' && COLS.MACKS ? COLS.MACKS.LOCATION : 7,
+      statusCol: typeof COLS !== 'undefined' && COLS.MACKS ? COLS.MACKS.STATUS : 8,
+      assignedCol: typeof COLS !== 'undefined' && COLS.MACKS ? COLS.MACKS.ASSIGNED_TO : 9,
+      chgOutCol: typeof COLS !== 'undefined' && COLS.MACKS ? COLS.MACKS.CHANGE_OUT_DATE : 10,
+      pickedCol: typeof COLS !== 'undefined' && COLS.MACKS ? COLS.MACKS.PICKED_FOR : 11
+    },
+    {
+      sheetName: typeof SHEET_HV_TESTERS !== 'undefined' ? SHEET_HV_TESTERS : 'HV Testers',
+      histSheetName: typeof SHEET_HV_TESTERS_HISTORY !== 'undefined' ? SHEET_HV_TESTERS_HISTORY : 'HV Testers History',
+      label: 'HV Testers',
+      isHVTester: true,
+      itemCol: 1,
+      dateCol: 6,
+      locCol: 7,
+      statusCol: 8,
+      assignedCol: 9,
+      chgOutCol: 10,
+      pickedCol: 11
+    },
+    {
+      sheetName: typeof SHEET_PHASING_SETS !== 'undefined' ? SHEET_PHASING_SETS : 'Phasing Sets',
+      histSheetName: typeof SHEET_PHASING_SETS_HISTORY !== 'undefined' ? SHEET_PHASING_SETS_HISTORY : 'Phasing Sets History',
+      label: 'Phasing Sets',
+      isPhasingSet: true,
+      itemCol: 1,
+      dateCol: 6,
+      locCol: 7,
+      statusCol: 8,
+      assignedCol: 9,
+      chgOutCol: 10,
+      pickedCol: 11
+    },
+    {
+      sheetName: typeof SHEET_AED !== 'undefined' ? SHEET_AED : 'AED',
+      histSheetName: typeof SHEET_AED_HISTORY !== 'undefined' ? SHEET_AED_HISTORY : 'AED History',
+      label: 'AED Units',
+      isAED: true,
+      itemCol: 1,
+      dateCol: 6,
+      locCol: 7,
+      statusCol: 8,
+      assignedCol: 9,
+      chgOutCol: 10,
+      pickedCol: 11
+    },
+    {
+      sheetName: typeof SHEET_GROUNDS !== 'undefined' ? SHEET_GROUNDS : 'Grounds',
+      histSheetName: typeof SHEET_GROUNDS_HISTORY !== 'undefined' ? SHEET_GROUNDS_HISTORY : 'Grounds History',
+      label: 'Grounds',
+      isGrounds: true,
+      itemCol: 1,
+      dateCol: 7,
+      locCol: 8,
+      statusCol: 9,
+      assignedCol: 10,
+      chgOutCol: 11,
+      pickedCol: 12
+    },
+    {
+      sheetName: typeof SHEET_HOT_STICKS !== 'undefined' ? SHEET_HOT_STICKS : 'Hot Sticks',
+      histSheetName: typeof SHEET_HOT_STICKS_HISTORY !== 'undefined' ? SHEET_HOT_STICKS_HISTORY : 'Hot Sticks History',
+      label: 'Hot Sticks',
+      isHotSticks: true,
+      itemCol: 1,
+      dateCol: 5,
+      locCol: 6,
+      statusCol: 7,
+      assignedCol: 8,
+      chgOutCol: 9,
+      pickedCol: 10
+    }
+  ];
+
+  function parseDateHelper(val) {
+    if (!val || val === 'N/A' || val === '—' || val === '-') return null;
+    if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+    var s = String(val).trim();
+    if (s.indexOf('/') !== -1) {
+      var parts = s.split('/');
+      if (parts.length === 3) {
+        var m = parseInt(parts[0], 10) - 1;
+        var d = parseInt(parts[1], 10);
+        var y = parseInt(parts[2], 10);
+        if (y < 100) y += 2000;
+        var dt = new Date(y, m, d, 12, 0, 0);
+        return isNaN(dt.getTime()) ? null : dt;
+      }
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      var parts = s.split('-');
+      var y = parseInt(parts[0], 10);
+      var m = parseInt(parts[1], 10) - 1;
+      var d = parseInt(parts[2], 10);
+      var dt = new Date(y, m, d, 12, 0, 0);
+      return isNaN(dt.getTime()) ? null : dt;
+    }
+    var dt = new Date(s);
+    return isNaN(dt.getTime()) ? null : dt;
+  }
+
+  for (var c = 0; c < categories.length; c++) {
+    var cat = categories[c];
+    var invSheet = ss.getSheetByName(cat.sheetName);
+    var histSheet = ss.getSheetByName(cat.histSheetName);
+
+    if (!invSheet || invSheet.getLastRow() < 2) continue;
+    if (!histSheet || histSheet.getLastRow() < 2) continue;
+
+    var histData = histSheet.getDataRange().getValues();
+    var histHeaders = histData[0];
+
+    // Find column positions in History sheet
+    var hDateCol = -1;
+    var hItemCol = -1;
+    var hLocCol = -1;
+    var hAssignedCol = -1;
+    var hNotesCol = -1;
+
+    for (var h = 0; h < histHeaders.length; h++) {
+      var hName = String(histHeaders[h] || '').toLowerCase().trim();
+      if (hDateCol === -1 && (hName === 'date assigned' || hName === 'date' || hName.indexOf('date') !== -1)) hDateCol = h;
+      if (hItemCol === -1 && (hName === 'item #' || hName === 'serial #' || hName.indexOf('item') !== -1 || hName.indexOf('serial') !== -1 || hName.indexOf('glove') !== -1 || hName.indexOf('sleeve') !== -1 || hName.indexOf('blanket') !== -1 || hName.indexOf('mack') !== -1)) hItemCol = h;
+      if (hLocCol === -1 && (hName === 'location' || hName.indexOf('loc') !== -1)) hLocCol = h;
+      if (hAssignedCol === -1 && (hName === 'assigned to' || hName === 'employee' || hName === 'holder' || (hName.indexOf('assign') !== -1 && hName.indexOf('date') === -1))) hAssignedCol = h;
+      if (hNotesCol === -1 && (hName === 'notes' || hName === 'note' || hName.indexOf('note') !== -1)) hNotesCol = h;
+    }
+
+    if (hDateCol === -1) hDateCol = 0;
+    if (hItemCol === -1) hItemCol = 1;
+    if (hLocCol === -1) hLocCol = 4;
+    if (hAssignedCol === -1) hAssignedCol = 5;
+
+    // Group history entries by item number and determine latest event
+    var historyLookup = {}; // normItemKey -> { itemNum, dateObj, dateFormatted, assignedTo, location, notes }
+    for (var hr = 1; hr < histData.length; hr++) {
+      var hItemRaw = String(histData[hr][hItemCol] || '').trim();
+      if (!hItemRaw || hItemRaw === 'N/A' || hItemRaw === '—' || hItemRaw === '-') continue;
+      var hNormKey = hItemRaw.toLowerCase();
+
+      var hRawDate = histData[hr][hDateCol];
+      var hDateObj = parseDateHelper(hRawDate);
+      var hTimestamp = hDateObj ? hDateObj.getTime() : 0;
+      var hAssignedTo = String(histData[hr][hAssignedCol] || '').trim();
+      var hLoc = (hLocCol !== -1 && histData[hr][hLocCol] !== undefined) ? String(histData[hr][hLocCol] || '').trim() : '';
+      var hNotes = (hNotesCol !== -1 && histData[hr][hNotesCol] !== undefined) ? String(histData[hr][hNotesCol] || '').trim() : '';
+
+      if (!historyLookup[hNormKey] || hTimestamp > (historyLookup[hNormKey].timestamp || 0)) {
+        historyLookup[hNormKey] = {
+          itemNum: hItemRaw,
+          dateObj: hDateObj,
+          timestamp: hTimestamp,
+          dateFormatted: hDateObj ? Utilities.formatDate(hDateObj, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy') : String(hRawDate).trim(),
+          assignedTo: hAssignedTo,
+          location: hLoc,
+          notes: hNotes
+        };
+      }
+    }
+
+    // Read active inventory data
+    var invLastRow = invSheet.getLastRow();
+    var invLastCol = invSheet.getLastColumn();
+    var invData = invSheet.getRange(2, 1, invLastRow - 1, invLastCol).getValues();
+
+    var catFixedCount = 0;
+
+    for (var r = 0; r < invData.length; r++) {
+      var activeRow = invData[r];
+      var activeItemNum = String(activeRow[cat.itemCol - 1] || '').trim();
+      if (!activeItemNum) continue;
+
+      var normKey = activeItemNum.toLowerCase();
+      var latestHist = historyLookup[normKey];
+      if (!latestHist) continue;
+
+      var curStatus = String(activeRow[cat.statusCol - 1] || '').trim();
+      var curAssignedTo = String(activeRow[cat.assignedCol - 1] || '').trim();
+      var curLocation = String(activeRow[cat.locCol - 1] || '').trim();
+      var curDateAssignedRaw = activeRow[cat.dateCol - 1];
+      var curDateObj = parseDateHelper(curDateAssignedRaw);
+
+      var curAssignedLower = curAssignedTo.toLowerCase();
+      var histAssignedLower = latestHist.assignedTo.toLowerCase();
+      var histLocLower = latestHist.location.toLowerCase();
+      var histNotesLower = latestHist.notes.toLowerCase();
+
+      var isHistTesting = histAssignedLower.indexOf('test') !== -1 || histLocLower.indexOf('test') !== -1 || histNotesLower.indexOf('test') !== -1 || histLocLower.indexOf('arnett') !== -1 || histLocLower.indexOf('jm test') !== -1;
+      var isHistShelf = histAssignedLower.indexOf('shelf') !== -1 || histLocLower.indexOf('shelf') !== -1 || histNotesLower.indexOf('shelf') !== -1;
+      var isHistLost = histAssignedLower.indexOf('lost') !== -1 || histNotesLower.indexOf('lost') !== -1;
+      var isHistFailed = histAssignedLower.indexOf('fail') !== -1 || histNotesLower.indexOf('fail') !== -1;
+      var isHistRetired = histAssignedLower.indexOf('retir') !== -1 || histNotesLower.indexOf('retir') !== -1 || histAssignedLower.indexOf('destroy') !== -1 || histNotesLower.indexOf('destroy') !== -1;
+      var isHistReturned = histNotesLower.indexOf('returned') !== -1 || isHistTesting || isHistShelf || isHistLost || isHistFailed || isHistRetired;
+
+      var nonEmpHolders = ['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'ready for delivery', 'ready for test', 'lost', 'failed rubber', 'destroyed', 'unassigned', 'n/a', '—', '-'];
+      var isCurActiveEmployee = curAssignedTo && nonEmpHolders.indexOf(curAssignedLower) === -1;
+
+      var needsFix = false;
+      if (isCurActiveEmployee && isHistReturned) {
+        needsFix = true;
+      } else if (latestHist.dateObj && curDateObj && latestHist.dateObj.getTime() > curDateObj.getTime()) {
+        if (curAssignedLower !== histAssignedLower || curStatus.toLowerCase() !== histAssignedLower) {
+          needsFix = true;
+        }
+      }
+
+      if (needsFix) {
+        var newStatus = curStatus;
+        var newAssignedTo = curAssignedTo;
+        var newLocation = curLocation;
+
+        if (isHistTesting) {
+          newStatus = 'In Testing';
+          newAssignedTo = 'In Testing';
+          newLocation = latestHist.location || 'Arnett / JM Test';
+        } else if (isHistShelf) {
+          newStatus = 'On Shelf';
+          newAssignedTo = 'On Shelf';
+          newLocation = latestHist.location || 'Helena';
+        } else if (isHistLost) {
+          newStatus = 'Lost';
+          newAssignedTo = 'Lost';
+          newLocation = latestHist.location || 'Unknown';
+        } else if (isHistFailed) {
+          newStatus = 'Failed Rubber';
+          newAssignedTo = 'Failed Rubber';
+          newLocation = latestHist.location || 'Helena';
+        } else if (isHistRetired) {
+          newStatus = 'Destroyed';
+          newAssignedTo = 'Destroyed';
+          newLocation = latestHist.location || 'Helena';
+        } else if (latestHist.assignedTo && !isHistReturned) {
+          newStatus = 'Assigned';
+          newAssignedTo = latestHist.assignedTo;
+          newLocation = latestHist.location || curLocation;
+        }
+
+        var sheetRow = r + 2;
+        var newDateObj = latestHist.dateObj || curDateObj || new Date();
+
+        // 1. Update Status
+        invSheet.getRange(sheetRow, cat.statusCol).setValue(newStatus);
+        // 2. Update Assigned To
+        invSheet.getRange(sheetRow, cat.assignedCol).setValue(newAssignedTo);
+        // 3. Update Location
+        invSheet.getRange(sheetRow, cat.locCol).setValue(newLocation);
+        // 4. Update Date Assigned
+        safeSetNumberFormat(invSheet.getRange(sheetRow, cat.dateCol), 'MM/dd/yyyy').setValue(newDateObj);
+        // 5. Update Change Out Date
+        var chgOutDate = null;
+        if (cat.isSleeve !== undefined && typeof calculateChangeOutDate === 'function') {
+          chgOutDate = calculateChangeOutDate(newDateObj, newLocation, newAssignedTo, cat.isSleeve);
+        } else if (cat.isBlanket && typeof calculateBlanketChangeOut === 'function') {
+          var tDate = activeRow[cat.testDateCol - 1] || newDateObj;
+          chgOutDate = calculateBlanketChangeOut(tDate, newAssignedTo, newLocation);
+        } else if (cat.isMack && typeof calculateMackChangeOut === 'function') {
+          var mDate = activeRow[cat.testDateCol - 1] || newDateObj;
+          chgOutDate = calculateMackChangeOut(mDate, newAssignedTo, newLocation);
+        }
+
+        if (chgOutDate === 'N/A') {
+          safeSetNumberFormat(invSheet.getRange(sheetRow, cat.chgOutCol), '@').setValue('N/A');
+        } else if (chgOutDate) {
+          safeSetNumberFormat(invSheet.getRange(sheetRow, cat.chgOutCol), 'MM/dd/yyyy').setValue(chgOutDate);
+        }
+
+        // 6. Clear Picked For
+        if (cat.pickedCol) {
+          invSheet.getRange(sheetRow, cat.pickedCol).setValue('');
+        }
+
+        catFixedCount++;
+        totalFixed++;
+        fixedItems.push({
+          category: cat.label,
+          itemNum: activeItemNum,
+          from: curAssignedTo + ' (' + curStatus + ')',
+          to: newAssignedTo + ' (' + newStatus + ')',
+          location: newLocation,
+          date: latestHist.dateFormatted
+        });
+      }
+    }
+
+    if (catFixedCount > 0) {
+      summaryLines.push(cat.label + ': Reconciled ' + catFixedCount + ' item(s)');
+    }
+  }
+
+  SpreadsheetApp.flush();
+
+  var resultObj = {
+    success: true,
+    fixedCount: totalFixed,
+    summary: summaryLines.join(', '),
+    fixedItems: fixedItems
+  };
+
+  logEvent('reconcileInventoryFromHistory complete: ' + totalFixed + ' item(s) reconciled', 'INFO');
+
+  if (!silent) {
+    var ui = SpreadsheetApp.getUi();
+    if (totalFixed === 0) {
+      ui.alert('🔄 Inventory Reconciliation\n\n✅ All inventory sheets are 100% in sync with History records!');
+    } else {
+      var itemDetails = fixedItems.slice(0, 15).map(function(it) {
+        return '• ' + it.category + ' #' + it.itemNum + ': ' + it.from + ' ➔ ' + it.to + ' [' + it.date + ']';
+      }).join('\n');
+      if (fixedItems.length > 15) {
+        itemDetails += '\n... and ' + (fixedItems.length - 15) + ' more items.';
+      }
+      ui.alert('🔄 Inventory Reconciliation Complete!\n\nReconciled ' + totalFixed + ' out-of-sync item(s):\n\n' + itemDetails);
+    }
+  }
+
+  return resultObj;
+}
+
 function ensurePickedForColumn() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
@@ -12759,6 +13142,15 @@ function createBackupSnapshotFast() {
     var backupFile = DriveApp.getFileById(ss.getId()).makeCopy(backupName, backupFolder);
 
     logEvent('Backup created: ' + backupName, 'INFO');
+
+    // Generate fresh offline sync snapshot JSON in the same backup folder
+    try {
+      if (typeof generateAndStoreSyncSnapshot === 'function') {
+        generateAndStoreSyncSnapshot();
+      }
+    } catch (syncSnapErr) {
+      Logger.log('createBackupSnapshotFast: Error generating sync snapshot: ' + syncSnapErr);
+    }
 
     // Clear the toast and show success
     ss.toast('Backup created: ' + backupName, '✅ Backup Complete', 5);
@@ -20184,6 +20576,7 @@ function generateAllReportsPart1() {
     Logger.log('Part1: Auto-activation check failed (non-critical): ' + e);
   }
 
+  reconcileInventoryFromHistory(true);
   fixChangeOutDatesSilent();
   fixBlanketChangeOutDatesSilent();
   fixMackChangeOutDatesSilent();
@@ -32594,8 +32987,19 @@ function doGet(e) {
       var pdfRes = getSafetyEmailPdf(emailId, subject);
       return ContentService.createTextOutput(JSON.stringify(pdfRes))
         .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === 'reconcileInventoryFromHistory') {
+      var recRes = reconcileInventoryFromHistory(true);
+      return ContentService.createTextOutput(JSON.stringify(recRes))
+        .setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'getSnapshot' || !action) {
       var snapshot = exportFullDatabaseSnapshot();
+      try {
+        if (typeof generateAndStoreSyncSnapshot === 'function') {
+          generateAndStoreSyncSnapshot(snapshot);
+        }
+      } catch (snapStoreErr) {
+        Logger.log('doGet getSnapshot store error: ' + snapStoreErr);
+      }
       return ContentService.createTextOutput(JSON.stringify(snapshot))
         .setMimeType(ContentService.MimeType.JSON);
     }
@@ -32626,6 +33030,12 @@ function doPost(e) {
       };
       var result = applyBatchSyncMutations(payload.mutations || [], returnSnap, options);
       return ContentService.createTextOutput(JSON.stringify(result))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (action === 'reconcileInventoryFromHistory') {
+      var recRes = reconcileInventoryFromHistory(true);
+      return ContentService.createTextOutput(JSON.stringify(recRes))
         .setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -32663,6 +33073,13 @@ function doPost(e) {
 
     if (action === 'getSnapshot') {
       var snapshot = exportFullDatabaseSnapshot();
+      try {
+        if (typeof generateAndStoreSyncSnapshot === 'function') {
+          generateAndStoreSyncSnapshot(snapshot);
+        }
+      } catch (snapStoreErr) {
+        Logger.log('doPost getSnapshot store error: ' + snapStoreErr);
+      }
       return ContentService.createTextOutput(JSON.stringify(snapshot))
         .setMimeType(ContentService.MimeType.JSON);
     }

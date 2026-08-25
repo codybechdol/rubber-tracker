@@ -72,6 +72,7 @@ function _buildGloveManagerMenu() {
       // === STEP 5: SAVE & BACKUP ===
       .addSubMenu(ui.createMenu('💾 Save & Backup')
         .addItem('💾 Save Current State to History', 'saveHistoryFast')
+        .addItem('🔄 Reconcile Inventory with History', 'reconcileInventoryFromHistory')
         .addItem('📥 Import Item History Log', 'showImportItemHistoryDialog')
         .addItem('🧹 Clean & Repair History Sheets', 'menuCleanHistorySheets')
         .addItem('💾 Create Backup Snapshot', 'createBackupSnapshot')
@@ -107,6 +108,7 @@ function _buildGloveManagerMenu() {
           .addItem('🏥 View AED', 'openAEDSheet')
           .addItem('🧱 View MACKs', 'openMacksSheet')
           .addItem('⚡ View Grounds', 'openGroundsSheet')
+          .addItem('🔄 Reconcile Inventory with History', 'reconcileInventoryFromHistory')
           .addItem('🗄️ Archive Lost & Failed Items', 'showArchiveLostFailedDialog')
           .addItem('↩️ Restore Item from Archive', 'showRestoreFromArchiveDialog')
           .addSeparator()
