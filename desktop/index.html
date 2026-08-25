@@ -179,7 +179,15 @@
             <h2 style="font-size: 16px;">📜 Expiring Certifications</h2>
             <span class="brand-badge" id="expiring-certs-row-count">0 records</span>
           </div>
-          <input type="text" id="expiring-certs-search-input" class="sheet-search" placeholder="Filter employees, cert types, job #...">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button class="btn btn-secondary" id="btn-cpr-roster-certs" style="font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;" onclick="window.cprRosterEngine.openCprRosterModal()" title="Generate and export Red Cross CPR & 1st Aid roster CSV">
+              <span>🚑</span> Red Cross CPR CSV
+            </button>
+            <button class="btn btn-primary" id="btn-import-certs" style="font-size: 12px; font-weight: 700; background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); border: none; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(59, 130, 246, 0.3);" onclick="window.certsImportEngine.openImportModal()" title="Import or update certifications matrix from Excel/CSV">
+              <span>📥</span> Import Certs
+            </button>
+            <input type="text" id="expiring-certs-search-input" class="sheet-search" placeholder="Filter employees, cert types, job #...">
+          </div>
         </div>
         <div class="grid-wrapper" id="expiring-certs-grid-container"></div>
       </section>
@@ -191,7 +199,15 @@
             <h2 style="font-size: 16px;">🎓 Training Tracking</h2>
             <span class="brand-badge" id="training-row-count">0 rows</span>
           </div>
-          <input type="text" id="training-search-input" class="sheet-search" placeholder="Filter training records...">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button class="btn btn-secondary" id="btn-cpr-roster-training" style="font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;" onclick="window.cprRosterEngine.openCprRosterModal()" title="Generate and export Red Cross CPR & 1st Aid roster CSV">
+              <span>🚑</span> Red Cross CPR CSV
+            </button>
+            <button class="btn btn-primary" id="btn-sync-attendees" style="font-size: 12px; font-weight: 700; background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); border: none; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(99, 102, 241, 0.3);" onclick="window.sheetNavigator.syncAttendees()" title="Synchronize training attendees with active crew rosters">
+              <span>🔄</span> Sync Attendees
+            </button>
+            <input type="text" id="training-search-input" class="sheet-search" placeholder="Filter training records...">
+          </div>
         </div>
         <div class="grid-wrapper" id="training-grid-container"></div>
       </section>
@@ -846,6 +862,44 @@
     </div>
   </div>
 
+  <!-- Red Cross CPR & 1st Aid Roster Modal -->
+  <div id="cpr-roster-modal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 1100px; width: 95%; max-height: 90vh;">
+      <div class="modal-header" style="background: linear-gradient(135deg, #991b1b 0%, #7f1d1d 100%); color: white;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 18px;">🚑</span>
+          <span style="font-weight: 800; font-size: 15px;">Red Cross CPR & 1st Aid Class Roster</span>
+        </div>
+        <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.2); border: none; color: white; cursor: pointer;" onclick="window.cprRosterEngine.closeCprRosterModal()">✕</button>
+      </div>
+      <div class="modal-body" id="cpr-roster-modal-body" style="max-height: 78vh; overflow-y: auto; padding: 20px;">
+        <!-- Injected dynamically by cpr-roster.js -->
+      </div>
+      <div class="modal-footer" id="cpr-roster-modal-footer" style="display: flex; justify-content: flex-end; align-items: center;">
+        <button class="btn btn-secondary" onclick="window.cprRosterEngine.closeCprRosterModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Expiring Certifications Import Modal -->
+  <div id="certs-import-modal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 920px; width: 92%; max-height: 90vh;">
+      <div class="modal-header" style="background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%); color: white;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 18px;">📥</span>
+          <span style="font-weight: 800; font-size: 15px;">Import Certifications Matrix (Excel / CSV)</span>
+        </div>
+        <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.2); border: none; color: white; cursor: pointer;" onclick="window.certsImportEngine.closeImportModal()">✕</button>
+      </div>
+      <div class="modal-body" id="certs-import-modal-body" style="max-height: 75vh; overflow-y: auto; padding: 20px;">
+        <!-- Injected dynamically by certs-import.js -->
+      </div>
+      <div class="modal-footer" id="certs-import-modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <button class="btn btn-secondary" onclick="window.certsImportEngine.closeImportModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- SheetJS for client-side Excel Parsing -->
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 
@@ -859,6 +913,8 @@
   <script src="js/sms-dialog.js"></script>
   <script src="js/employee-profile.js"></script>
   <script src="js/safety-emails.js"></script>
+  <script src="js/cpr-roster.js"></script>
+  <script src="js/certs-import.js"></script>
   <script src="js/sheets.js"></script>
   <script src="js/history.js"></script>
   <script src="js/tasks.js"></script>
@@ -919,6 +975,9 @@
 
       window.safetyComplianceEngine = new SafetyEmailsEngine(window.localDB);
       window.safetyComplianceEngine.init();
+
+      window.cprRosterEngine = new CprRosterEngine(window.localDB);
+      window.certsImportEngine = new CertsImportEngine(window.localDB);
 
       if (window.inventoryManager) window.inventoryManager.init();
       if (window.crewImportEngine) window.crewImportEngine.init();

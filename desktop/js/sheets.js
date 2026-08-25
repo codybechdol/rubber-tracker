@@ -423,6 +423,43 @@ class SheetNavigator {
     this.renderStandardTable(container, countBadge, tableData);
   }
 
+  async syncAttendees() {
+    if (!confirm('🔄 Synchronize training attendees and crew leads with current active crew rosters?')) return;
+    
+    const syncUrl = window.syncEngine ? window.syncEngine.getSyncUrl() : '';
+    if (!syncUrl) {
+      alert('⚠️ Sync URL is not configured in Settings.');
+      return;
+    }
+
+    const btn = document.getElementById('btn-sync-attendees');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span>⏳</span> Syncing...';
+    }
+
+    try {
+      const res = await fetch(`${syncUrl}?action=syncTrainingAttendees`);
+      const json = await res.json();
+      if (json && (json.success || json.status === 'ok')) {
+        alert('✅ Training attendees and crew leads successfully synchronized with active crew rosters!');
+      } else {
+        alert('⚠️ Sync response: ' + (json.message || json.error || 'Synced'));
+      }
+    } catch (err) {
+      console.warn('Sync trigger error, performing full sync:', err);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<span>🔄</span> Sync Attendees';
+      }
+      if (window.syncEngine) {
+        await window.syncEngine.syncWithGoogleSheets();
+      }
+      this.renderTraining();
+    }
+  }
+
   renderCurrentSheet() {
     const container = document.getElementById('sheet-grid-container');
     const title = document.getElementById('current-sheet-title');

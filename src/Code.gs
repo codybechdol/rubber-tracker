@@ -32619,6 +32619,17 @@ function doPost(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
 
+    if (action === 'syncTrainingAttendees') {
+      refreshTrainingAttendeesSilent();
+      updateTrainingTrackingCrewLeadsSilent();
+      addMissingCrewsToTrainingTracking();
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'ok',
+        success: true,
+        message: 'Training attendees and crew leads synchronized'
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
     if (action === 'getSnapshot') {
       var snapshot = exportFullDatabaseSnapshot();
       return ContentService.createTextOutput(JSON.stringify(snapshot))

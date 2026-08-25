@@ -1615,6 +1615,25 @@ function doGet(e) {
     }
   }
 
+  if (action === 'syncTrainingAttendees') {
+    try {
+      refreshTrainingAttendeesSilent();
+      updateTrainingTrackingCrewLeadsSilent();
+      addMissingCrewsToTrainingTracking();
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'ok',
+        success: true,
+        message: 'Training attendees and crew leads synchronized'
+      })).setMimeType(ContentService.MimeType.JSON);
+    } catch (syncErr) {
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'error',
+        success: false,
+        error: syncErr.toString()
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+
   if (action === 'getSafetyPdf') {
     try {
       var emailId = (e && e.parameter && e.parameter.emailId) || '';
