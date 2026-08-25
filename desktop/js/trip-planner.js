@@ -75,6 +75,67 @@ class TripPlannerApp {
 
   loadSavedTrips() {
     this.plannedTrips = this.db.getPlannedTrips() || {};
+    this.holidaysMap = this.loadHolidays();
+    try {
+      const savedSchedule = localStorage.getItem('sa_work_schedule');
+      if (savedSchedule) this.activeSchedule = savedSchedule;
+    } catch (e) {}
+  }
+
+  loadHolidays() {
+    try {
+      const raw = localStorage.getItem('sa_holidays');
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+
+    // Default US / Company holidays
+    return {
+      '2026-01-01': "New Year's Day",
+      '2026-05-25': "Memorial Day",
+      '2026-07-03': "Independence Day (Observed)",
+      '2026-07-04': "Independence Day",
+      '2026-09-07': "Labor Day",
+      '2026-11-26': "Thanksgiving Day",
+      '2026-11-27': "Day After Thanksgiving",
+      '2026-12-24': "Christmas Eve",
+      '2026-12-25': "Christmas Day"
+    };
+  }
+
+  saveHolidays(holidays) {
+    this.holidaysMap = holidays;
+    try {
+      localStorage.setItem('sa_holidays', JSON.stringify(holidays));
+    } catch (e) {}
+  }
+
+  isDayHoliday(dateKey) {
+    if (!this.holidaysMap) this.holidaysMap = this.loadHolidays();
+    return !!this.holidaysMap[dateKey];
+  }
+
+  getHolidayName(dateKey) {
+    if (!this.holidaysMap) this.holidaysMap = this.loadHolidays();
+    return this.holidaysMap[dateKey] || 'Holiday';
+  }
+
+  toggleHoliday(dateKey, name = 'Holiday') {
+    if (!this.holidaysMap) this.holidaysMap = this.loadHolidays();
+    if (this.holidaysMap[dateKey]) {
+      delete this.holidaysMap[dateKey];
+    } else {
+      this.holidaysMap[dateKey] = name;
+    }
+    this.saveHolidays(this.holidaysMap);
+    this.renderPlanner();
+  }
+
+  toggleWorkSchedule() {
+    this.activeSchedule = this.activeSchedule === 'Mon-Thu' ? 'Tue-Fri' : 'Mon-Thu';
+    try {
+      localStorage.setItem('sa_work_schedule', this.activeSchedule);
+    } catch (e) {}
+    this.renderPlanner();
   }
 
   getTripsForDate(dateKey) {
@@ -86,8 +147,155 @@ class TripPlannerApp {
     return [];
   }
 
+  setTrip(dateKey, location) {
+    if (!dateKey || !location) return;
+
+    if (this.isDayHoliday(dateKey)) {
+      const hName = this.getHolidayName(dateKey);
+      alert(`🏖️ ${dateKey} is marked as a holiday (${hName}). Field crew visits cannot be scheduled on holiday days.`);
+      return;
+    }
+
+    if (!this.plannedTrips[dateKey]) {
+      this.plannedTrips[dateKey] = [];
+    } else if (!Array.isArray(this.plannedTrips[dateKey])) {
+      this.plannedTrips[dateKey] = [this.plannedTrips[dateKey]];
+    }
+
+    const exists = this.plannedTrips[dateKey].some(t => t && t.location === location);
+    if (!exists) {
+      this.plannedTrips[dateKey].push({ location: location });
+      this.saveTrips();
+      this.renderPlanner();
+    }
+  }
+
+  removeTrip(dateKey, location) {
+    if (!this.plannedTrips[dateKey]) return;
+    if (Array.isArray(this.plannedTrips[dateKey])) {
+      this.plannedTrips[dateKey] = this.plannedTrips[dateKey].filter(t => t && t.location !== location);
+      if (this.plannedTrips[dateKey].length === 0) {
+        delete this.plannedTrips[dateKey];
+      }
+    } else {
+      delete this.plannedTrips[dateKey];
+    }
+    this.saveTrips();
+    this.renderPlanner();
+  }
+
+  clearWeekTrips(weekDateKey) {
+    if (!confirm('🗑️ Clear all scheduled trips for this week?')) return;
+    const baseDate = this.parseDate(weekDateKey);
+    if (!baseDate) return;
+
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(baseDate);
+      d.setDate(baseDate.getDate() + i);
+      const dKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      delete this.plannedTrips[dKey];
+    }
+    this.saveTrips();
+    this.renderPlanner();
+  }
+
   saveTrips() {
     this.db.savePlannedTrips(this.plannedTrips);
+  }
+
+  openHolidaysModal() {
+    const modal = document.getElementById('holidays-modal');
+    if (!modal) return;
+    this.renderHolidaysModalContent();
+    modal.style.display = 'flex';
+  }
+
+  closeHolidaysModal() {
+    const modal = document.getElementById('holidays-modal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  renderHolidaysModalContent() {
+    const body = document.getElementById('holidays-modal-body');
+    if (!body) return;
+
+    if (!this.holidaysMap) this.holidaysMap = this.loadHolidays();
+    const sortedKeys = Object.keys(this.holidaysMap).sort();
+
+    body.innerHTML = `
+      <div style="display: flex; flex-direction: column; gap: 14px;">
+        <div style="background: linear-gradient(135deg, rgba(202, 138, 4, 0.15) 0%, rgba(161, 98, 7, 0.05) 100%); border: 1px solid rgba(202, 138, 4, 0.35); border-radius: 8px; padding: 12px 16px;">
+          <div style="font-size: 14px; font-weight: 700; color: #fde047; margin-bottom: 2px;">
+            🏖️ Holiday & Blackout Day Manager
+          </div>
+          <div style="font-size: 12px; color: var(--text-secondary);">
+            Holidays protect work days from trip drops and adjust safety compliance and timesheet calculations.
+          </div>
+        </div>
+
+        <!-- Add Custom Holiday Row -->
+        <div style="display: flex; gap: 8px; align-items: center; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px;">
+          <input type="date" id="new-holiday-date" style="padding: 5px 8px; font-size: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: #fff;">
+          <input type="text" id="new-holiday-name" placeholder="Holiday name (e.g. Memorial Day)" style="flex: 1; padding: 5px 8px; font-size: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: #fff;">
+          <button class="btn btn-primary" onclick="window.tripPlanner.addNewHolidayFromModal()" style="font-size: 12px; font-weight: 700; background: #ca8a04; border: none; padding: 6px 12px;">
+            ➕ Add Holiday
+          </button>
+        </div>
+
+        <!-- Current Holidays List -->
+        <div style="max-height: 300px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-primary);">
+          <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 12.5px;">
+            <thead>
+              <tr style="position: sticky; top: 0; background: #1e293b; z-index: 2;">
+                <th style="width: 130px;">Date</th>
+                <th>Holiday / Blackout Name</th>
+                <th style="width: 80px; text-align: center;">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${sortedKeys.length === 0 ? `
+                <tr><td colspan="3" style="padding: 20px; text-align: center; color: var(--text-muted);">No holidays configured.</td></tr>
+              ` : sortedKeys.map(dKey => `
+                <tr>
+                  <td style="font-weight: 700; color: #fde047; font-family: monospace;">${dKey}</td>
+                  <td style="font-weight: 600; color: #f8fafc;">${this.escapeHtml(this.holidaysMap[dKey])}</td>
+                  <td style="text-align: center;">
+                    <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 11px; color: #f87171;" onclick="window.tripPlanner.deleteHolidayFromModal('${dKey}')">
+                      🗑️
+                    </button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
+  addNewHolidayFromModal() {
+    const dateInput = document.getElementById('new-holiday-date');
+    const nameInput = document.getElementById('new-holiday-name');
+    if (!dateInput || !dateInput.value) {
+      alert('⚠️ Please choose a date.');
+      return;
+    }
+    const dKey = dateInput.value;
+    const name = (nameInput && nameInput.value.trim()) ? nameInput.value.trim() : 'Company Holiday';
+
+    this.toggleHoliday(dKey, name);
+    this.renderHolidaysModalContent();
+    dateInput.value = '';
+    if (nameInput) nameInput.value = '';
+  }
+
+  deleteHolidayFromModal(dKey) {
+    if (this.holidaysMap && this.holidaysMap[dKey]) {
+      delete this.holidaysMap[dKey];
+      this.saveHolidays(this.holidaysMap);
+      this.renderHolidaysModalContent();
+      this.renderPlanner();
+    }
   }
 
   setWeeksToShow(weeks) {

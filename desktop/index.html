@@ -262,9 +262,17 @@
               <!-- Date Picker Input for instant date jump -->
               <input type="date" id="trip-planner-date-picker" style="padding: 3px 6px; font-size: 11px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;" onchange="window.tripPlanner.onDatePickerChange(this.value)" title="Jump directly to any date">
 
-              <span class="brand-badge" id="trip-planner-schedule-badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 11px; font-weight: 700;">
+              <button class="btn btn-secondary" id="trip-planner-schedule-badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 11px; font-weight: 700; cursor: pointer;" onclick="window.tripPlanner.toggleWorkSchedule()" title="Click to toggle between Mon-Thu (4x10) and Tue-Fri (4x10) work schedules">
                 🗓️ Mon-Thu Schedule
-              </span>
+              </button>
+
+              <button class="btn btn-secondary" onclick="window.tripPlanner.openHolidaysModal()" style="font-size: 11px; font-weight: 700; color: #fde047; border: 1px solid rgba(234, 179, 8, 0.35);" title="Manage company holidays and blackout dates">
+                🏖️ Holidays
+              </button>
+
+              <button class="btn btn-primary" onclick="window.timeBreakdownEngine.openModal()" style="font-size: 11px; font-weight: 700; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; display: flex; align-items: center; gap: 4px; box-shadow: 0 2px 6px rgba(16, 185, 129, 0.3);" title="Generate daily accomplishments breakdown for timesheet">
+                <span>📝</span> Accomplishments
+              </button>
             </div>
           </div>
         </div>
@@ -900,6 +908,44 @@
     </div>
   </div>
 
+  <!-- Holiday & Blackout Day Manager Modal -->
+  <div id="holidays-modal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 650px; width: 90%; max-height: 90vh;">
+      <div class="modal-header" style="background: linear-gradient(135deg, #854d0e 0%, #713f12 100%); color: white;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 18px;">🏖️</span>
+          <span style="font-weight: 800; font-size: 15px;">Manage Holidays & Blackout Days</span>
+        </div>
+        <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.2); border: none; color: white; cursor: pointer;" onclick="window.tripPlanner.closeHolidaysModal()">✕</button>
+      </div>
+      <div class="modal-body" id="holidays-modal-body" style="max-height: 75vh; overflow-y: auto; padding: 20px;">
+        <!-- Injected dynamically by trip-planner.js -->
+      </div>
+      <div class="modal-footer" id="holidays-modal-footer" style="display: flex; justify-content: flex-end; align-items: center;">
+        <button class="btn btn-secondary" onclick="window.tripPlanner.closeHolidaysModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Daily Accomplishments & Time Breakdown Modal -->
+  <div id="time-breakdown-modal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 900px; width: 92%; max-height: 90vh;">
+      <div class="modal-header" style="background: linear-gradient(135deg, #065f46 0%, #064e3b 100%); color: white;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 18px;">📝</span>
+          <span style="font-weight: 800; font-size: 15px;">Daily Accomplishments & Timesheet Breakdown</span>
+        </div>
+        <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.2); border: none; color: white; cursor: pointer;" onclick="window.timeBreakdownEngine.closeModal()">✕</button>
+      </div>
+      <div class="modal-body" id="time-breakdown-modal-body" style="max-height: 75vh; overflow-y: auto; padding: 20px;">
+        <!-- Injected dynamically by time-breakdown.js -->
+      </div>
+      <div class="modal-footer" id="time-breakdown-modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <button class="btn btn-secondary" onclick="window.timeBreakdownEngine.closeModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
   <!-- SheetJS for client-side Excel Parsing -->
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 
@@ -915,6 +961,7 @@
   <script src="js/safety-emails.js"></script>
   <script src="js/cpr-roster.js"></script>
   <script src="js/certs-import.js"></script>
+  <script src="js/time-breakdown.js"></script>
   <script src="js/sheets.js"></script>
   <script src="js/history.js"></script>
   <script src="js/tasks.js"></script>
@@ -978,6 +1025,7 @@
 
       window.cprRosterEngine = new CprRosterEngine(window.localDB);
       window.certsImportEngine = new CertsImportEngine(window.localDB);
+      window.timeBreakdownEngine = new TimeBreakdownEngine(window.localDB);
 
       if (window.inventoryManager) window.inventoryManager.init();
       if (window.crewImportEngine) window.crewImportEngine.init();
