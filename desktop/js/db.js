@@ -1247,18 +1247,49 @@ class LocalDatabase {
             }
           }
 
-          // C. If Date Assigned / Test Date was edited
-          if (hLower.includes('date assigned') || hLower.includes('calibration') || hLower.includes('test date')) {
-            const dateAssigned = String(mut.value || '').trim();
-            if (dateAssigned) {
-              const loc = String(row['Location'] || '').toLowerCase();
-              let months = 12;
-              if (sheetNameLower.includes('glove')) {
-                months = loc.includes('northern lights') ? 6 : 3;
-              } else if (sheetNameLower.includes('hot_stick') || sheetNameLower.includes('hot stick')) {
-                months = 24;
+          // C. If Date Assigned / Test Date / Calibration Date / Pad Expiration was edited
+          if (hLower.includes('date assigned') || hLower.includes('calibration') || hLower.includes('test date') || hLower.includes('pad expiration') || hLower.includes('battery expiration')) {
+            const tableKey = this.getTableKeyForSheet(sheetNameLower);
+            const isInv = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(tableKey);
+
+            if (isInv) {
+              const dAssigned = row['Date Assigned'] || '';
+              const tDate = row['Test Date'] || row['Date Tested'] || row['Calibration Date'] || '';
+              const padExp = row['Pad Expiration'] || '';
+              const batExp = row['Battery Expiration'] || '';
+              const loc = row['Location'] || '';
+              const assignedTo = row['Assigned To'] || '';
+
+              let newChgOut = '';
+              if (window.inventoryManager && typeof window.inventoryManager.calculateChangeOutDate === 'function') {
+                newChgOut = window.inventoryManager.calculateChangeOutDate(
+                  dAssigned || tDate || padExp, loc, assignedTo, tableKey, {
+                    testDate: tDate,
+                    calibrationDate: row['Calibration Date'] || tDate,
+                    padExpiration: padExp,
+                    batteryExpiration: batExp
+                  }
+                );
+              } else {
+                const dateAssigned = dAssigned || tDate || mut.value;
+                if (dateAssigned) {
+                  let months = 12;
+                  if (sheetNameLower.includes('glove')) {
+                    months = loc.toLowerCase().includes('northern lights') ? 6 : 3;
+                  } else if (sheetNameLower.includes('hot_stick') || sheetNameLower.includes('hot stick')) {
+                    months = 24;
+                  }
+                  newChgOut = addMonths(dateAssigned, months);
+                }
               }
-              row['Change Out Date'] = addMonths(dateAssigned, months);
+
+              if (newChgOut && newChgOut !== 'N/A') {
+                row['Change Out Date'] = newChgOut;
+                if (table.rawGrid && table.rawGrid[mut.row - 1]) {
+                  const chgColIdx = table.headers.findIndex(h => h.toLowerCase().includes('change out'));
+                  if (chgColIdx !== -1) table.rawGrid[mut.row - 1][chgColIdx] = newChgOut;
+                }
+              }
             }
           }
 

@@ -1921,14 +1921,74 @@ class SheetNavigator {
         initialVal = e.target.textContent.trim();
       });
 
+      // Quick calendar picker on double-click for date cells
+      td.addEventListener('dblclick', (e) => {
+        const header = (e.currentTarget.dataset.header || '').toLowerCase();
+        if (header.includes('date') || header.includes('expiration') || header.includes('calibration')) {
+          const currentText = e.currentTarget.textContent.trim();
+          let isoVal = '';
+          if (/^\d{4}-\d{2}-\d{2}$/.test(currentText)) isoVal = currentText;
+          else if (currentText.includes('/')) {
+            const p = currentText.split('/');
+            if (p.length === 3) {
+              const m = String(parseInt(p[0], 10)).padStart(2, '0');
+              const d = String(parseInt(p[1], 10)).padStart(2, '0');
+              let y = parseInt(p[2], 10);
+              if (y < 100) y = 2000 + y;
+              isoVal = `${y}-${m}-${d}`;
+            }
+          }
+          const picker = document.createElement('input');
+          picker.type = 'date';
+          picker.value = isoVal || new Date().toISOString().split('T')[0];
+          picker.style.position = 'absolute';
+          picker.style.opacity = '0';
+          picker.style.pointerEvents = 'none';
+          document.body.appendChild(picker);
+          picker.addEventListener('change', () => {
+            if (picker.value) {
+              const p = picker.value.split('-');
+              const mdY = `${p[1]}/${p[2]}/${p[0]}`;
+              e.currentTarget.textContent = mdY;
+              e.currentTarget.blur();
+            }
+            picker.remove();
+          });
+          if (typeof picker.showPicker === 'function') {
+            try { picker.showPicker(); } catch (_) { picker.click(); }
+          }
+        }
+      });
+
       td.addEventListener('blur', async (e) => {
-        const newVal = e.target.textContent.trim();
+        let newVal = e.target.textContent.trim();
+        const header = e.target.dataset.header || '';
+        const hLower = header.toLowerCase();
+        const isDateCol = hLower.includes('date') || hLower.includes('expiration') || hLower.includes('calibration');
+
+        if (isDateCol && newVal) {
+          // Normalize date to MM/DD/YYYY format
+          if (newVal.includes('/')) {
+            const p = newVal.split('/');
+            if (p.length === 3) {
+              const m = String(parseInt(p[0], 10)).padStart(2, '0');
+              const d = String(parseInt(p[1], 10)).padStart(2, '0');
+              let y = parseInt(p[2], 10);
+              if (y < 100) y = 2000 + y;
+              newVal = `${m}/${d}/${y}`;
+            }
+          } else if (/^\d{4}-\d{2}-\d{2}$/.test(newVal)) {
+            const p = newVal.split('-');
+            newVal = `${p[1]}/${p[2]}/${p[0]}`;
+          }
+          e.target.textContent = newVal;
+        }
+
         if (newVal === initialVal) return; // No change made!
 
         const sheetName = e.target.dataset.sheet;
         const row = parseInt(e.target.dataset.row, 10);
         const col = parseInt(e.target.dataset.col, 10);
-        const header = e.target.dataset.header;
 
         await this.db.addMutation({
           action: 'UPDATE_CELL',

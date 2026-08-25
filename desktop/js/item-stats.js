@@ -762,6 +762,51 @@ class ItemStatsEngine {
           </div>
         </div>
 
+        <!-- Quick Edit Dates & Assignment Panel -->
+        <div id="dossier-edit-panel" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; gap: 6px;">
+            <span style="font-weight: 700; font-size: 13px; color: var(--text-primary); display: flex; align-items: center; gap: 6px;">
+              <span>✏️</span> Change Test Date, Date Assigned & Status
+            </span>
+            <span style="font-size: 11px; color: #60a5fa; font-weight: 600;">Auto-recalculates Change Out Date</span>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 10px; align-items: end;">
+            <div>
+              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px;">TEST / CAL DATE</label>
+              <input type="date" id="dossier-edit-test-date" class="form-control" value="${testDateIso}">
+            </div>
+            <div>
+              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px;">DATE ASSIGNED</label>
+              <input type="date" id="dossier-edit-date-assigned" class="form-control" value="${dateAssignedIso}">
+            </div>
+            <div>
+              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px;">STATUS</label>
+              <select id="dossier-edit-status" class="form-control">
+                <option value="On Shelf" ${curStatus.toLowerCase() === 'on shelf' ? 'selected' : ''}>On Shelf</option>
+                <option value="Assigned" ${curStatus.toLowerCase() === 'assigned' ? 'selected' : ''}>Assigned</option>
+                <option value="Ready For Delivery" ${curStatus.toLowerCase() === 'ready for delivery' ? 'selected' : ''}>Ready For Delivery</option>
+                <option value="Ready For Test" ${curStatus.toLowerCase() === 'ready for test' ? 'selected' : ''}>Ready For Test</option>
+                <option value="In Testing" ${curStatus.toLowerCase() === 'in testing' ? 'selected' : ''}>In Testing</option>
+                <option value="Failed Rubber" ${curStatus.toLowerCase() === 'failed rubber' ? 'selected' : ''}>Failed Rubber</option>
+                <option value="Lost" ${curStatus.toLowerCase() === 'lost' ? 'selected' : ''}>Lost</option>
+              </select>
+            </div>
+            <div>
+              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px;">LOCATION</label>
+              <input type="text" id="dossier-edit-location" class="form-control" value="${this.escapeHtml(curLocation)}">
+            </div>
+            <div>
+              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px;">ASSIGNED TO</label>
+              <input type="text" id="dossier-edit-assigned-to" list="new-item-employees-datalist" class="form-control" value="${this.escapeHtml(curAssignedTo)}">
+            </div>
+            <div>
+              <button class="btn btn-primary" style="width: 100%; font-weight: 700; padding: 7px 12px; display: flex; align-items: center; justify-content: center; gap: 6px;" onclick="window.itemStatsEngine.saveDossierItemEdits('${this.escapeHtml(sheetKey)}', '${this.escapeHtml(cleanItemKey)}')">
+                💾 Save Dates
+              </button>
+            </div>
+          </div>
+        </div>
+
         <!-- 7-Card KPI Stat Grid (Single Horizontal Line) -->
         ${this.renderKpiCardsHtml(stats)}
 
@@ -1239,6 +1284,135 @@ class ItemStatsEngine {
     this.openDossierModal(itemKey, histKey);
     if (window.historyNavigator) {
       window.historyNavigator.renderCurrentHistory();
+    }
+  }
+
+  /**
+   * Saves updated dates, status, location, or assignment from the Dossier modal
+   */
+  async saveDossierItemEdits(sheetKey, cleanItemKey) {
+    const activeSheetKey = sheetKey.replace('_history', '');
+    const table = this.db.getTable(activeSheetKey);
+    if (!table || !table.rows) {
+      alert('Could not find active inventory sheet table.');
+      return;
+    }
+
+    const testDateInput = document.getElementById('dossier-edit-test-date');
+    const dateAssignedInput = document.getElementById('dossier-edit-date-assigned');
+    const statusSelect = document.getElementById('dossier-edit-status');
+    const locationInput = document.getElementById('dossier-edit-location');
+    const assignedToInput = document.getElementById('dossier-edit-assigned-to');
+
+    const numKey = parseInt(cleanItemKey, 10);
+    const isPureNumKey = !isNaN(numKey) && String(numKey) === cleanItemKey;
+
+    const row = table.rows.find(r => {
+      for (const k in r) {
+        const kl = k.toLowerCase();
+        if (kl.includes('item') || kl.includes('glove') || kl.includes('sleeve') || kl.includes('blanket') || kl.includes('mack') || kl.includes('serial') || kl.includes('esl')) {
+          const val = String(r[k] || '').trim();
+          if (val.toLowerCase() === cleanItemKey.toLowerCase()) return true;
+          if (isPureNumKey && parseInt(val, 10) === numKey) return true;
+        }
+      }
+      return false;
+    });
+
+    if (!row) {
+      alert('Item record not found in active inventory.');
+      return;
+    }
+
+    const formatToMdY = (dStr) => {
+      if (!dStr) return '';
+      if (dStr.includes('/')) return dStr;
+      const parts = dStr.split('-');
+      if (parts.length === 3) return `${parts[1]}/${parts[2]}/${parts[0]}`;
+      return dStr;
+    };
+
+    const newTestDate = testDateInput ? formatToMdY(testDateInput.value.trim()) : '';
+    const newDateAssigned = dateAssignedInput ? formatToMdY(dateAssignedInput.value.trim()) : '';
+    const newStatus = statusSelect ? statusSelect.value.trim() : (row['Status'] || '');
+    const newLocation = locationInput ? locationInput.value.trim() : (row['Location'] || '');
+    const newAssignedTo = assignedToInput ? assignedToInput.value.trim() : (row['Assigned To'] || '');
+
+    // Identify which header names exist on this sheet
+    const testHeader = table.headers.find(h => /test\s*date|calibration|pad\s*exp/i.test(h)) || 'Test Date';
+    const dateAssignedHeader = table.headers.find(h => /date\s*assigned/i.test(h)) || 'Date Assigned';
+    const statusHeader = table.headers.find(h => /^status$/i.test(h)) || 'Status';
+    const locationHeader = table.headers.find(h => /^location$/i.test(h)) || 'Location';
+    const assignedToHeader = table.headers.find(h => /assigned\s*to/i.test(h)) || 'Assigned To';
+    const changeOutHeader = table.headers.find(h => /change\s*out/i.test(h)) || 'Change Out Date';
+
+    // Calculate new Change Out Date
+    let newChgOut = '';
+    if (window.inventoryManager && typeof window.inventoryManager.calculateChangeOutDate === 'function') {
+      newChgOut = window.inventoryManager.calculateChangeOutDate(
+        newDateAssigned || newTestDate, newLocation, newAssignedTo, activeSheetKey, {
+          testDate: newTestDate,
+          calibrationDate: newTestDate,
+          padExpiration: newTestDate,
+          batteryExpiration: row['Battery Expiration'] || ''
+        }
+      );
+    }
+
+    // Apply updates to row object
+    if (newTestDate && testHeader) row[testHeader] = newTestDate;
+    if (newDateAssigned && dateAssignedHeader) row[dateAssignedHeader] = newDateAssigned;
+    if (newStatus && statusHeader) row[statusHeader] = newStatus;
+    if (newLocation && locationHeader) row[locationHeader] = newLocation;
+    if (newAssignedTo && assignedToHeader) row[assignedToHeader] = newAssignedTo;
+    if (newChgOut && changeOutHeader) row[changeOutHeader] = newChgOut;
+
+    // Apply to rawGrid if exists
+    const rowIdx = row._rowIdx;
+    if (table.rawGrid && rowIdx && table.rawGrid[rowIdx - 1]) {
+      const gRow = table.rawGrid[rowIdx - 1];
+      table.headers.forEach((h, colIdx) => {
+        if (row[h] !== undefined) gRow[colIdx] = row[h];
+      });
+    }
+
+    // Queue UPDATE_CELL mutations for sync
+    const sheetName = table.name || activeSheetKey;
+    const addCellMutation = async (hName, val) => {
+      if (!hName || val === undefined) return;
+      const colIdx = table.headers.indexOf(hName);
+      if (colIdx !== -1 && rowIdx) {
+        await this.db.addMutation({
+          action: 'UPDATE_CELL',
+          sheetName: sheetName,
+          row: rowIdx,
+          col: colIdx + 1,
+          header: hName,
+          value: val
+        });
+      }
+    };
+
+    if (newTestDate && testHeader) await addCellMutation(testHeader, newTestDate);
+    if (newDateAssigned && dateAssignedHeader) await addCellMutation(dateAssignedHeader, newDateAssigned);
+    if (newStatus && statusHeader) await addCellMutation(statusHeader, newStatus);
+    if (newLocation && locationHeader) await addCellMutation(locationHeader, newLocation);
+    if (newAssignedTo && assignedToHeader) await addCellMutation(assignedToHeader, newAssignedTo);
+    if (newChgOut && changeOutHeader) await addCellMutation(changeOutHeader, newChgOut);
+
+    // Auto-record history transition if status/assigned changed
+    await this.db.recordItemHistoryEvent(sheetName, row, row['Notes'] || `Dates updated`);
+
+    // Refresh views
+    if (window.sheetNavigator) {
+      window.sheetNavigator.renderActiveView();
+    }
+    this.openDossierModal(cleanItemKey, sheetKey);
+
+    if (window.inventoryManager && typeof window.inventoryManager.showToast === 'function') {
+      window.inventoryManager.showToast(`✅ Successfully updated dates & details for #${cleanItemKey}!`);
+    } else {
+      alert(`✅ Successfully updated #${cleanItemKey}!`);
     }
   }
 }

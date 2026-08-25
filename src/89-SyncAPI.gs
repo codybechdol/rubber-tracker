@@ -682,26 +682,64 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
                   }
                 }
 
-                // If Date Assigned was edited directly
+                // If Date Assigned or Test Date or Calibration Date was edited directly
                 var isDateAssignedEdit = (mut.col === eqColDateAssigned || hLower.includes('date assigned') || hLower === 'date assigned');
-                if (isDateAssignedEdit && eqColChangeOutDate) {
-                  var curLoc = sheet.getRange(mut.row, eqColLocation).getValue();
-                  var curAssigned = sheet.getRange(mut.row, eqColAssignedTo).getValue();
-                  var dateVal = mut.value;
-                  if (dateVal) {
-                    var chgOut = null;
-                    if (isBlanket && typeof calculateBlanketChangeOutDate === 'function') {
-                      var bTest = sheet.getRange(mut.row, eqColTestDate).getValue();
-                      chgOut = calculateBlanketChangeOutDate(bTest);
-                    } else if (isMack && typeof calculateMackChangeOutDate === 'function') {
-                      var mTest = sheet.getRange(mut.row, eqColTestDate).getValue();
-                      chgOut = calculateMackChangeOutDate(mTest);
-                    } else if (typeof calculateChangeOutDate === 'function') {
-                      chgOut = calculateChangeOutDate(dateVal, curLoc, curAssigned, isSleeve);
+                var isTestDateEdit = (mut.col === eqColTestDate || hLower.includes('test date') || hLower.includes('calibration') || hLower.includes('pad expiration'));
+
+                if ((isDateAssignedEdit || isTestDateEdit) && eqColChangeOutDate) {
+                  var curLoc = eqColLocation ? sheet.getRange(mut.row, eqColLocation).getValue() : 'Helena';
+                  var curAssigned = eqColAssignedTo ? sheet.getRange(mut.row, eqColAssignedTo).getValue() : 'On Shelf';
+                  var curDateAssigned = eqColDateAssigned ? sheet.getRange(mut.row, eqColDateAssigned).getValue() : '';
+                  var curTestDate = eqColTestDate ? sheet.getRange(mut.row, eqColTestDate).getValue() : '';
+                  
+                  var chgOut = null;
+                  if (isBlanket && typeof calculateBlanketChangeOutDate === 'function') {
+                    chgOut = calculateBlanketChangeOutDate(curTestDate || mut.value);
+                  } else if (isMack && typeof calculateMackChangeOutDate === 'function') {
+                    chgOut = calculateMackChangeOutDate(curTestDate || mut.value);
+                  } else if (isGrounds) {
+                    var gDate = curTestDate || curDateAssigned || mut.value;
+                    if (gDate) {
+                      var gd = new Date(gDate);
+                      if (!isNaN(gd.getTime())) {
+                        gd.setFullYear(gd.getFullYear() + 1);
+                        chgOut = Utilities.formatDate(gd, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+                      }
                     }
-                    if (chgOut && chgOut !== 'N/A') {
-                      sheet.getRange(mut.row, eqColChangeOutDate).setValue(chgOut);
+                  } else if (isHotSticks) {
+                    var hdDate = curTestDate || curDateAssigned || mut.value;
+                    if (hdDate) {
+                      var hd = new Date(hdDate);
+                      if (!isNaN(hd.getTime())) {
+                        hd.setFullYear(hd.getFullYear() + 2);
+                        chgOut = Utilities.formatDate(hd, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+                      }
                     }
+                  } else if (isHVTester || isPhasingSet) {
+                    var calD = curTestDate || curDateAssigned || mut.value;
+                    if (calD) {
+                      var cd = new Date(calD);
+                      if (!isNaN(cd.getTime())) {
+                        cd.setFullYear(cd.getFullYear() + 10);
+                        chgOut = Utilities.formatDate(cd, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+                      }
+                    }
+                  } else if (isAED) {
+                    var padD = curTestDate || curDateAssigned || mut.value;
+                    if (padD) {
+                      var pd = new Date(padD);
+                      if (!isNaN(pd.getTime())) {
+                        chgOut = Utilities.formatDate(pd, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+                      }
+                    }
+                  } else if (typeof calculateChangeOutDate === 'function') {
+                    var baseDate = curDateAssigned || curTestDate || mut.value;
+                    if (baseDate) {
+                      chgOut = calculateChangeOutDate(baseDate, curLoc, curAssigned, isSleeve);
+                    }
+                  }
+                  if (chgOut && chgOut !== 'N/A') {
+                    sheet.getRange(mut.row, eqColChangeOutDate).setValue(chgOut);
                   }
                 }
               }
