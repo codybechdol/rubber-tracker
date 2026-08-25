@@ -21105,6 +21105,22 @@ function generateSwaps(itemType) {
         var assignedTo = (assignedToRaw || '').toString().trim().toLowerCase();
         if (!assignedTo || ignoreNames.indexOf(assignedTo) !== -1) return;
 
+        var status = (item[COLS.INVENTORY.STATUS - 1] || '').toString().trim();
+        var statusLower = status.toLowerCase();
+
+        // ONLY active in-service/assigned items can generate a swap!
+        // Items that are on shelf, in testing, packed for delivery, ready for delivery, lost, destroyed, failed, or retired must NEVER generate a swap!
+        var inactiveStatuses = [
+          'on shelf', 'available', 'in stock',
+          'in testing', 'packed for testing', 'ready for test',
+          'packed for delivery', 'ready for delivery',
+          'lost', 'destroyed', 'failed rubber', 'not repairable',
+          'retired', 'out of service'
+        ];
+        if (inactiveStatuses.indexOf(statusLower) !== -1) {
+          return; // Skip inactive inventory items
+        }
+
         // If not a current employee, try location-based fallback (old-style: AssignedTo = city name)
         if (!empMap[assignedTo]) {
           if (assignedTo === 'previous employee') return; // Handled by Reclaims, not Swaps
@@ -21128,22 +21144,27 @@ function generateSwaps(itemType) {
         var size = item[COLS.INVENTORY.SIZE - 1];
         var dateAssigned = item[COLS.INVENTORY.DATE_ASSIGNED - 1];
         var changeOutDate = item[COLS.INVENTORY.CHANGE_OUT_DATE - 1];
-        var status = item[COLS.INVENTORY.STATUS - 1];
         var daysLeft = '';
         var daysLeftCell = {};
 
-        if (changeOutDate && !isNaN(new Date(changeOutDate))) {
-          var diff = (new Date(changeOutDate) - today) / (1000*60*60*24);
-          var days = Math.ceil(diff);
-          if (days < 0) {
-            daysLeft = 'OVERDUE';
-            daysLeftCell = {bold: true, color: '#ff5252'};
-          } else if (days <= 14) {
-            daysLeft = days;
-            daysLeftCell = {bold: true, color: '#ff9800'};
-          } else {
-            daysLeft = days;
-            daysLeftCell = {bold: false, color: '#388e3c'};
+        if (changeOutDate) {
+          var chgDate = (changeOutDate instanceof Date) ? changeOutDate : new Date(changeOutDate);
+          if (!isNaN(chgDate.getTime())) {
+            // Compare dates at midnight to avoid intra-day time offsets
+            var tMidnight = new Date(chgDate.getFullYear(), chgDate.getMonth(), chgDate.getDate());
+            var nowMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+            var diffDays = Math.round((tMidnight - nowMidnight) / (1000 * 60 * 60 * 24));
+
+            if (diffDays < 0) {
+              daysLeft = 'OVERDUE';
+              daysLeftCell = {bold: true, color: '#ff5252'};
+            } else if (diffDays <= 14) {
+              daysLeft = diffDays;
+              daysLeftCell = {bold: true, color: '#ff9800'};
+            } else {
+              daysLeft = diffDays;
+              daysLeftCell = {bold: false, color: '#388e3c'};
+            }
           }
         }
 
@@ -26670,13 +26691,16 @@ function generateBlanketSwaps(silent) {
     var changeOutDate = row[8];
 
     // Skip if not in service or no change out date
-    if (status !== 'In Service' || !changeOutDate || changeOutDate === 'N/A') continue;
+    var statusLower = status.toLowerCase();
+    if ((statusLower !== 'in service' && statusLower !== 'assigned') || !changeOutDate || changeOutDate === 'N/A') continue;
 
     // Calculate days left
     var changeOut = changeOutDate instanceof Date ? changeOutDate : new Date(changeOutDate);
     if (isNaN(changeOut.getTime())) continue;
 
-    var daysLeft = Math.ceil((changeOut - now) / (1000 * 60 * 60 * 24));
+    var chgMidnight = new Date(changeOut.getFullYear(), changeOut.getMonth(), changeOut.getDate());
+    var nowMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var daysLeft = Math.round((chgMidnight - nowMidnight) / (1000 * 60 * 60 * 24));
 
     // Include if due within 30 days or overdue
     if (daysLeft <= 30) {
@@ -27110,12 +27134,15 @@ function generateMackSwaps(silent) {
     var assignedTo = row[8];
     var changeOutDate = row[9];
 
-    if (status !== 'In Service' || !changeOutDate || changeOutDate === 'N/A') continue;
+    var statusLower = status.toLowerCase();
+    if ((statusLower !== 'in service' && statusLower !== 'assigned') || !changeOutDate || changeOutDate === 'N/A') continue;
 
     var changeOut = changeOutDate instanceof Date ? changeOutDate : new Date(changeOutDate);
     if (isNaN(changeOut.getTime())) continue;
 
-    var daysLeft = Math.ceil((changeOut - now) / (1000 * 60 * 60 * 24));
+    var chgMidnight = new Date(changeOut.getFullYear(), changeOut.getMonth(), changeOut.getDate());
+    var nowMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var daysLeft = Math.round((chgMidnight - nowMidnight) / (1000 * 60 * 60 * 24));
 
     if (daysLeft <= 30) {
       var assignedToLower = (assignedTo || '').toString().trim().toLowerCase();
@@ -27521,9 +27548,11 @@ function generateHVTesterSwaps(silent) {
 
     // Check if in service and approaching replacement
     // Skip equipment assigned to pending new hires
-    if (pendingEmployeeNames[assignedTo.toLowerCase()]) continue;
-    if (status.toLowerCase() === 'in service' && changeOutDate instanceof Date) {
-      var daysUntilReplacement = Math.floor((changeOutDate - now) / (1000 * 60 * 60 * 24));
+    var stLower = status.toLowerCase();
+    if ((stLower === 'in service' || stLower === 'assigned') && changeOutDate instanceof Date) {
+      var chgMid = new Date(changeOutDate.getFullYear(), changeOutDate.getMonth(), changeOutDate.getDate());
+      var nowMid = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      var daysUntilReplacement = Math.round((chgMid - nowMid) / (1000 * 60 * 60 * 24));
 
       if (daysUntilReplacement <= lookAheadDays) {
         testersNeedingReplacement.push({
@@ -27727,9 +27756,11 @@ function generatePhasingSetSwaps(silent) {
 
     // Check if in service and approaching change out
     // Skip equipment assigned to pending new hires
-    if (pendingEmployeeNames[assignedTo.toLowerCase()]) continue;
-    if (status.toLowerCase() === 'in service' && changeOutDate instanceof Date) {
-      var daysUntilReplacement = Math.floor((changeOutDate - now) / (1000 * 60 * 60 * 24));
+    var stLower = status.toLowerCase();
+    if ((stLower === 'in service' || stLower === 'assigned') && changeOutDate instanceof Date) {
+      var chgMid = new Date(changeOutDate.getFullYear(), changeOutDate.getMonth(), changeOutDate.getDate());
+      var nowMid = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      var daysUntilReplacement = Math.round((chgMid - nowMid) / (1000 * 60 * 60 * 24));
 
       if (daysUntilReplacement <= lookAheadDays) {
         setsNeedingReplacement.push({

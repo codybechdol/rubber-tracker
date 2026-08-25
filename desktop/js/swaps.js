@@ -356,6 +356,22 @@ class SwapGenerationEngine {
         const iClass = parseInt(item['Class'] || '0', 10);
         if (iClass !== itemClass) return;
 
+        const status = String(item['Status'] || '').trim();
+        const statusLower = status.toLowerCase();
+
+        // ONLY active in-service/assigned items can generate a swap!
+        // Items that are on shelf, in testing, packed for delivery, ready for delivery, lost, destroyed, failed, or retired must NEVER generate a swap!
+        const inactiveStatuses = [
+          'on shelf', 'available', 'in stock',
+          'in testing', 'packed for testing', 'ready for test',
+          'packed for delivery', 'ready for delivery',
+          'lost', 'destroyed', 'failed rubber', 'not repairable',
+          'retired', 'out of service'
+        ];
+        if (inactiveStatuses.includes(statusLower)) {
+          return; // Skip inactive inventory items
+        }
+
         let assignedToRaw = item['Assigned To'];
         if (!assignedToRaw) return;
         let assignedTo = String(assignedToRaw).trim().toLowerCase();
@@ -381,7 +397,6 @@ class SwapGenerationEngine {
         const size = String(item['Size'] || '').trim();
         const dateAssigned = item['Date Assigned'];
         const changeOutDate = item['Change Out Date'];
-        const status = String(item['Status'] || '').trim();
 
         let daysLeft = '';
         let daysLeftColor = '#388e3c';
@@ -750,11 +765,11 @@ class SwapGenerationEngine {
       const chgOut = this.parseDate(r['Change Out Date']);
       const assignedTo = String(r['Assigned To'] || '').trim();
 
-      if (status === 'on shelf' || status === 'in stock') {
+      if (status === 'on shelf' || status === 'in stock' || status === 'available') {
         shelfBlankets.push(r);
-      } else if (assignedTo && chgOut) {
+      } else if ((status === 'in service' || status === 'assigned') && assignedTo && chgOut) {
         const daysLeft = this.getDaysDifference(chgOut, today);
-        if (daysLeft < 32 || daysLeft < 0) {
+        if (daysLeft < 32) {
           blanketsNeedingSwap.push({
             itemNum: itemNum,
             type: r['Type'] || 'Regular',
@@ -822,11 +837,11 @@ class SwapGenerationEngine {
       const chgOut = this.parseDate(r['Change Out Date']);
       const assignedTo = String(r['Assigned To'] || '').trim();
 
-      if (status === 'on shelf' || status === 'in stock') {
+      if (status === 'on shelf' || status === 'in stock' || status === 'available') {
         shelfMacks.push(r);
-      } else if (assignedTo && chgOut) {
+      } else if ((status === 'in service' || status === 'assigned') && assignedTo && chgOut) {
         const daysLeft = this.getDaysDifference(chgOut, today);
-        if (daysLeft < 32 || daysLeft < 0) {
+        if (daysLeft < 32) {
           macksNeedingSwap.push({
             itemNum: itemNum,
             kv: r['KV'] || '',
@@ -886,14 +901,14 @@ class SwapGenerationEngine {
     invTable.rows.forEach(r => {
       const itemNum = String(r['Item #'] || Object.values(r)[0] || '').trim();
       const status = String(r['Status'] || '').trim().toLowerCase();
-      const chgOut = this.parseDate(r['Change Out Date']);
+      const chgOut = this.parseDate(r['Change Out Date'] || r['Calibration Date']);
       const assignedTo = String(r['Assigned To'] || '').trim();
 
-      if (status === 'on shelf' || status === 'in stock') {
+      if (status === 'on shelf' || status === 'in stock' || status === 'available') {
         shelfItems.push(r);
-      } else if (assignedTo && chgOut) {
+      } else if ((status === 'in service' || status === 'assigned') && assignedTo && chgOut) {
         const daysLeft = this.getDaysDifference(chgOut, today);
-        if (daysLeft < 32 || daysLeft < 0) {
+        if (daysLeft < 32) {
           needingSwap.push({
             itemNum: itemNum,
             model: r['Model'] || '',
@@ -955,11 +970,11 @@ class SwapGenerationEngine {
       const padExp = this.parseDate(r['Pad Expiration'] || r['Change Out Date']);
       const assignedTo = String(r['Assigned To'] || '').trim();
 
-      if (status === 'on shelf' || status === 'in stock') {
+      if (status === 'on shelf' || status === 'in stock' || status === 'available') {
         shelfItems.push(r);
-      } else if (assignedTo && padExp) {
+      } else if ((status === 'in service' || status === 'assigned') && assignedTo && padExp) {
         const daysLeft = this.getDaysDifference(padExp, today);
-        if (daysLeft < 32 || daysLeft < 0) {
+        if (daysLeft < 32) {
           needingSwap.push({
             itemNum: itemNum,
             model: r['Model'] || '',
@@ -1018,11 +1033,11 @@ class SwapGenerationEngine {
       const chgOut = this.parseDate(r['Change Out Date']);
       const assignedTo = String(r['Assigned To'] || '').trim();
 
-      if (status === 'on shelf' || status === 'in stock') {
+      if (status === 'on shelf' || status === 'in stock' || status === 'available') {
         shelfItems.push(r);
-      } else if (assignedTo && chgOut) {
+      } else if ((status === 'in service' || status === 'assigned') && assignedTo && chgOut) {
         const daysLeft = this.getDaysDifference(chgOut, today);
-        if (daysLeft < 32 || daysLeft < 0) {
+        if (daysLeft < 32) {
           needingSwap.push({
             itemNum: itemNum,
             type: r['Type'] || 'OH',
@@ -1085,11 +1100,11 @@ class SwapGenerationEngine {
       const chgOut = this.parseDate(r['Change Out Date']);
       const assignedTo = String(r['Assigned To'] || '').trim();
 
-      if (status === 'on shelf' || status === 'in stock') {
+      if (status === 'on shelf' || status === 'in stock' || status === 'available') {
         shelfItems.push(r);
-      } else if (assignedTo && chgOut) {
+      } else if ((status === 'in service' || status === 'assigned') && assignedTo && chgOut) {
         const daysLeft = this.getDaysDifference(chgOut, today);
-        if (daysLeft < 32 || daysLeft < 0) {
+        if (daysLeft < 32) {
           needingSwap.push({
             itemNum: itemNum,
             type: r['Type'] || '',
