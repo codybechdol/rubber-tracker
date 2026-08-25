@@ -304,7 +304,6 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
     return s.toLowerCase();
   }
 
-  var conflicts = [];
   function getSheetCaseInsensitive(name) {
     if (!name || !ss) return null;
     var exact = ss.getSheetByName(name);
@@ -320,6 +319,60 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
     return null;
   }
 
+  // In-memory lookup caches declared AT TOP of applyBatchSyncMutations
+  var empLocationCache = {};
+  function getEmpLocationFast(empName) {
+    if (!empName) return 'Helena';
+    if (!empLocationCache || Object.keys(empLocationCache).length === 0) {
+      empLocationCache = {};
+      var empSheet = getSheetCaseInsensitive(typeof SHEET_EMPLOYEES !== 'undefined' ? SHEET_EMPLOYEES : 'Employees');
+      if (empSheet && empSheet.getLastRow() > 1) {
+        var empData = empSheet.getDataRange().getValues();
+        var empLocIdx = 2; // Default C
+        for (var eh = 0; eh < empData[0].length; eh++) {
+          if (String(empData[0][eh]).toLowerCase().includes('location')) {
+            empLocIdx = eh;
+            break;
+          }
+        }
+        for (var er = 1; er < empData.length; er++) {
+          var eName = String(empData[er][0] || '').trim().toLowerCase();
+          var eLoc = String(empData[er][empLocIdx] || '').trim();
+          if (eName && eLoc) {
+            if (typeof getPhysicalLocation === 'function') eLoc = getPhysicalLocation(eLoc);
+            empLocationCache[eName] = eLoc;
+          }
+        }
+      }
+    }
+    var cleanEmp = String(empName).trim().toLowerCase();
+    return empLocationCache[cleanEmp] || 'Helena';
+  }
+
+  var invItemIndexCache = {};
+  function getInvItemRowIndexFast(targetSheet, targetSheetName, itemNum) {
+    if (!itemNum || itemNum === '—' || itemNum === '-') return -1;
+    if (!invItemIndexCache) invItemIndexCache = {};
+    var sName = targetSheetName || (targetSheet ? targetSheet.getName() : '');
+    if (!sName) return -1;
+    if (!invItemIndexCache[sName]) {
+      invItemIndexCache[sName] = {};
+      if (targetSheet && targetSheet.getLastRow() > 1) {
+        var d = targetSheet.getDataRange().getValues();
+        for (var r = 1; r < d.length; r++) {
+          var itm = String(d[r][0] || '').trim().toLowerCase();
+          var esl = (d[r].length > 1) ? String(d[r][1] || '').trim().toLowerCase() : '';
+          if (itm) invItemIndexCache[sName][itm] = r + 1;
+          if (esl) invItemIndexCache[sName][esl] = r + 1;
+        }
+      }
+    }
+    var cleanKey = String(itemNum).trim().toLowerCase();
+    return invItemIndexCache[sName] ? (invItemIndexCache[sName][cleanKey] || -1) : -1;
+  }
+
+  // 1. Conflict Detection Pre-Pass
+  var conflicts = [];
   if (detectConflicts && !force) {
     for (var cm = 0; cm < mutations.length; cm++) {
       var cMut = mutations[cm];
@@ -372,56 +425,6 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
   var appliedCount = 0;
   var errors = [];
   var sheetsModified = {};
-
-  // In-memory lookup caches to avoid repeated O(N) sheet reads across mutations
-  var empLocationCache = null;
-  function getEmpLocationFast(empName) {
-    if (!empName) return 'Helena';
-    if (!empLocationCache) {
-      empLocationCache = {};
-      var empSheet = getSheetCaseInsensitive(typeof SHEET_EMPLOYEES !== 'undefined' ? SHEET_EMPLOYEES : 'Employees');
-      if (empSheet && empSheet.getLastRow() > 1) {
-        var empData = empSheet.getDataRange().getValues();
-        var empLocIdx = 2; // Default C
-        for (var eh = 0; eh < empData[0].length; eh++) {
-          if (String(empData[0][eh]).toLowerCase().includes('location')) {
-            empLocIdx = eh;
-            break;
-          }
-        }
-        for (var er = 1; er < empData.length; er++) {
-          var eName = String(empData[er][0] || '').trim().toLowerCase();
-          var eLoc = String(empData[er][empLocIdx] || '').trim();
-          if (eName && eLoc) {
-            if (typeof getPhysicalLocation === 'function') eLoc = getPhysicalLocation(eLoc);
-            empLocationCache[eName] = eLoc;
-          }
-        }
-      }
-    }
-    var cleanEmp = String(empName).trim().toLowerCase();
-    return empLocationCache[cleanEmp] || 'Helena';
-  }
-
-  var invItemIndexCache = {};
-  function getInvItemRowIndexFast(targetSheet, targetSheetName, itemNum) {
-    if (!itemNum || itemNum === '—' || itemNum === '-') return -1;
-    var sName = targetSheetName || (targetSheet ? targetSheet.getName() : '');
-    if (!invItemIndexCache[sName]) {
-      invItemIndexCache[sName] = {};
-      if (targetSheet && targetSheet.getLastRow() > 1) {
-        var d = targetSheet.getDataRange().getValues();
-        for (var r = 1; r < d.length; r++) {
-          var itm = String(d[r][0] || '').trim().toLowerCase();
-          var esl = (d[r].length > 1) ? String(d[r][1] || '').trim().toLowerCase() : '';
-          if (itm) invItemIndexCache[sName][itm] = r + 1;
-          if (esl) invItemIndexCache[sName][esl] = r + 1;
-        }
-      }
-    }
-    var cleanKey = String(itemNum).trim().toLowerCase();
-    return invItemIndexCache[sName] ? (invItemIndexCache[sName][cleanKey] || -1) : -1;
-  }
 
   for (var m = 0; m < mutations.length; m++) {
     var mut = mutations[m];
