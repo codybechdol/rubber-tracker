@@ -345,6 +345,8 @@ class SafetyEmailsEngine {
       this.activeCategoryFilter = 'all';
       this.searchQuery = '';
 
+      const totalLogs = (cumulativeLogs.jha || 0) + (cumulativeLogs.weekly || 0) + (cumulativeLogs.monthly || 0);
+
       if (body) {
         this.renderCompletionModalContent(body, {
           totalThreads: totalThreads || totalProcessed + totalSkipped,
