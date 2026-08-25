@@ -735,28 +735,39 @@ class SafetyEmailsEngine {
     if (!snap || !snap.tables) return [];
     const all = [];
 
-    function fmtBaseId(msgId) {
-      if (!msgId) return '';
-      return String(msgId).trim().split('_')[0];
+    function buildLogUrl(subject, emailId, jobNum, type) {
+      if (subject && String(subject).trim()) {
+        return `https://mail.google.com/mail/#search/${encodeURIComponent('subject:"' + String(subject).trim() + '"')}`;
+      }
+      if (emailId) {
+        const baseId = String(emailId).trim().split('_')[0];
+        if (baseId) return `https://mail.google.com/mail/#all/${baseId}`;
+      }
+      if (jobNum) {
+        return `https://mail.google.com/mail/#search/${encodeURIComponent(jobNum + (type ? (' ' + type) : ''))}`;
+      }
+      return '';
     }
 
     // JHA Log
     const jhaTbl = snap.tables.jha_log;
     if (jhaTbl && jhaTbl.rows) {
       jhaTbl.rows.slice(-100).reverse().forEach((r, idx) => {
-        const baseId = fmtBaseId(r['Email ID'] || r.email_id || '');
+        const emailId = r['Email ID'] || r.email_id || '';
+        const subject = r['Email Subject'] || r.email_subject || '';
+        const jobNum = r['Job Number'] || r.job_number || '';
         all.push({
-          id: 'jha_' + (idx + 1),
+          id: 'jha_' + (r._rowIdx || (idx + 1)),
           sheetName: 'JHA Log',
           type: 'JHA',
-          rowIndex: idx + 2,
+          rowIndex: r._rowIdx || (idx + 2),
           dateReceived: r['Date Received'] || '',
           date: r['Date Created'] || '',
-          jobNumber: r['Job Number'] || '',
+          jobNumber: jobNum,
           foreman: r['Foreman'] || '',
-          subject: r['Email Subject'] || '',
-          emailId: r['Email ID'] || '',
-          gmailUrl: baseId ? `https://mail.google.com/mail/#all/${baseId}` : '',
+          subject: subject,
+          emailId: emailId,
+          gmailUrl: buildLogUrl(subject, emailId, jobNum, 'JHA'),
           status: r['Status'] || 'Credited',
           creditedTo: r['Credited To'] || '',
           notes: r['Notes'] || ''
@@ -768,19 +779,21 @@ class SafetyEmailsEngine {
     const wklyTbl = snap.tables.weekly_safety_log;
     if (wklyTbl && wklyTbl.rows) {
       wklyTbl.rows.slice(-100).reverse().forEach((r, idx) => {
-        const baseId = fmtBaseId(r['Email ID'] || r.email_id || '');
+        const emailId = r['Email ID'] || r.email_id || '';
+        const subject = r['Email Subject'] || r.email_subject || '';
+        const jobNum = r['Job Number'] || r.job_number || '';
         all.push({
-          id: 'weekly_' + (idx + 1),
+          id: 'weekly_' + (r._rowIdx || (idx + 1)),
           sheetName: 'Weekly Safety Log',
           type: 'Weekly Safety Meeting',
-          rowIndex: idx + 2,
+          rowIndex: r._rowIdx || (idx + 2),
           dateReceived: r['Date Received'] || '',
           date: r['Week Of'] || '',
-          jobNumber: r['Job Number'] || '',
+          jobNumber: jobNum,
           foreman: r['Foreman'] || '',
-          subject: r['Email Subject'] || '',
-          emailId: r['Email ID'] || '',
-          gmailUrl: baseId ? `https://mail.google.com/mail/#all/${baseId}` : '',
+          subject: subject,
+          emailId: emailId,
+          gmailUrl: buildLogUrl(subject, emailId, jobNum, 'Safety Meeting'),
           status: r['Status'] || 'Credited',
           creditedTo: r['Credited To'] || '',
           notes: r['Notes'] || ''
@@ -792,20 +805,22 @@ class SafetyEmailsEngine {
     const monTbl = snap.tables.monthly_checklist_log;
     if (monTbl && monTbl.rows) {
       monTbl.rows.slice(-100).reverse().forEach((r, idx) => {
-        const baseId = fmtBaseId(r['Email ID'] || r.email_id || '');
+        const emailId = r['Email ID'] || r.email_id || '';
+        const subject = r['Email Subject'] || r.email_subject || '';
+        const jobNum = r['Job Number'] || r.job_number || '';
         all.push({
-          id: 'monthly_' + (idx + 1),
+          id: 'monthly_' + (r._rowIdx || (idx + 1)),
           sheetName: 'Monthly Checklist Log',
           type: 'Monthly Checklist',
-          rowIndex: idx + 2,
+          rowIndex: r._rowIdx || (idx + 2),
           dateReceived: r['Date Received'] || '',
           date: r['Report Date'] || '',
-          jobNumber: r['Job Number'] || '',
+          jobNumber: jobNum,
           foreman: r['Foreman'] || '',
           vehicleNumber: r['Vehicle Number'] || '',
-          subject: r['Email Subject'] || '',
-          emailId: r['Email ID'] || '',
-          gmailUrl: baseId ? `https://mail.google.com/mail/#all/${baseId}` : '',
+          subject: subject,
+          emailId: emailId,
+          gmailUrl: buildLogUrl(subject, emailId, jobNum, 'Safety Checklist'),
           status: r['Status'] || 'Credited',
           creditedTo: r['Credited To'] || '',
           hasEquipmentIssues: r['Has Equipment Issues'] || 'No',

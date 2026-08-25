@@ -1815,9 +1815,15 @@ function getRecentSafetyLogs(limit) {
     return String(d);
   }
 
-  function getBaseEmailId(emailId) {
-    if (!emailId) return '';
-    return String(emailId).trim().split('_')[0];
+  function buildLogUrl(subject, emailId) {
+    if (subject && String(subject).trim()) {
+      return 'https://mail.google.com/mail/#search/' + encodeURIComponent('subject:"' + String(subject).trim() + '"');
+    }
+    if (emailId) {
+      var baseId = String(emailId).trim().split('_')[0];
+      if (baseId) return 'https://mail.google.com/mail/#all/' + baseId;
+    }
+    return '';
   }
 
   // 1. JHA Log
@@ -1828,7 +1834,7 @@ function getRecentSafetyLogs(limit) {
     for (var r = jData.length - 1; r >= startJ; r--) {
       var row = jData[r];
       var emailId = String(row[5] || '').trim();
-      var baseId = getBaseEmailId(emailId);
+      var subject = String(row[4] || '').trim();
       allLogs.push({
         id: 'jha_' + (r + 1),
         sheetName: 'JHA Log',
@@ -1838,9 +1844,9 @@ function getRecentSafetyLogs(limit) {
         date: fmtDate(row[1], false),
         jobNumber: String(row[2] || '').trim(),
         foreman: String(row[3] || '').trim(),
-        subject: String(row[4] || '').trim(),
+        subject: subject,
         emailId: emailId,
-        gmailUrl: baseId ? ('https://mail.google.com/mail/#all/' + baseId) : '',
+        gmailUrl: buildLogUrl(subject, emailId),
         source: String(row[6] || '').trim(),
         status: String(row[7] || '').trim(),
         creditedTo: String(row[8] || '').trim(),
@@ -1857,7 +1863,7 @@ function getRecentSafetyLogs(limit) {
     for (var rw = wData.length - 1; rw >= startW; rw--) {
       var wRow = wData[rw];
       var wEmailId = String(wRow[5] || '').trim();
-      var wBaseId = getBaseEmailId(wEmailId);
+      var wSubject = String(wRow[4] || '').trim();
       allLogs.push({
         id: 'weekly_' + (rw + 1),
         sheetName: 'Weekly Safety Log',
@@ -1867,9 +1873,9 @@ function getRecentSafetyLogs(limit) {
         date: fmtDate(wRow[1], false),
         jobNumber: String(wRow[2] || '').trim(),
         foreman: String(wRow[3] || '').trim(),
-        subject: String(wRow[4] || '').trim(),
+        subject: wSubject,
         emailId: wEmailId,
-        gmailUrl: wBaseId ? ('https://mail.google.com/mail/#all/' + wBaseId) : '',
+        gmailUrl: buildLogUrl(wSubject, wEmailId),
         status: String(wRow[6] || '').trim(),
         creditedTo: String(wRow[7] || '').trim(),
         notes: String(wRow[8] || '').trim()
@@ -1885,7 +1891,7 @@ function getRecentSafetyLogs(limit) {
     for (var rm = mData.length - 1; rm >= startM; rm--) {
       var mRow = mData[rm];
       var mEmailId = String(mRow[6] || '').trim();
-      var mBaseId = getBaseEmailId(mEmailId);
+      var mSubject = String(mRow[5] || '').trim();
       allLogs.push({
         id: 'monthly_' + (rm + 1),
         sheetName: 'Monthly Checklist Log',
@@ -1896,9 +1902,9 @@ function getRecentSafetyLogs(limit) {
         jobNumber: String(mRow[2] || '').trim(),
         foreman: String(mRow[3] || '').trim(),
         vehicleNumber: String(mRow[4] || '').trim(),
-        subject: String(mRow[5] || '').trim(),
+        subject: mSubject,
         emailId: mEmailId,
-        gmailUrl: mBaseId ? ('https://mail.google.com/mail/#all/' + mBaseId) : '',
+        gmailUrl: buildLogUrl(mSubject, mEmailId),
         status: String(mRow[7] || '').trim(),
         creditedTo: String(mRow[8] || '').trim(),
         hasEquipmentIssues: String(mRow[9] || '').trim(),
