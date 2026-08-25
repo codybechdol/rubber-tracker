@@ -326,6 +326,69 @@ class SafetyEmailsEngine {
     return this.sortLogs(logs, this.activeSortOption || 'date_desc');
   }
 
+  renderLogsTableHtml() {
+    const logs = this.getFilteredLogs();
+    if (!logs || logs.length === 0) {
+      return `
+        <div style="padding: 32px 16px; text-align: center; color: var(--text-muted); font-size: 12.5px;">
+          No log entries match the selected filter.
+        </div>
+      `;
+    }
+
+    return `
+      <table class="safety-log-table">
+        <thead>
+          <tr>
+            <th style="width: 105px;">Type</th>
+            <th style="width: 85px;">Report Date</th>
+            <th style="width: 110px;">Date Received</th>
+            <th style="width: 75px;">Job #</th>
+            <th>Foreman</th>
+            <th style="width: 80px;">Credited</th>
+            <th style="width: 75px;">Status</th>
+            <th style="width: 160px; text-align: center;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${logs.map((log, index) => {
+            const typeClass = log.type === 'JHA' ? 'jha' : (log.type === 'Weekly Safety Meeting' ? 'weekly' : (log.type === 'Monthly Checklist' ? 'monthly' : 'equipment'));
+            const typeLabel = log.type === 'JHA' ? '📋 JHA' : (log.type === 'Weekly Safety Meeting' ? '🗣️ Meeting' : (log.type === 'Monthly Checklist' ? '🚛 Checklist' : '⚠️ Issue'));
+            const statusColor = log.status === 'Credited' ? '#34d399' : (log.status === 'Unknown Job' ? '#f59e0b' : '#94a3b8');
+
+            return `
+              <tr>
+                <td>
+                  <span class="badge-log-type ${typeClass}">${typeLabel}</span>
+                </td>
+                <td style="font-weight: 600; color: #f8fafc;">${this.escapeHtml(log.date || '—')}</td>
+                <td style="font-size: 11.5px; color: #94a3b8; font-family: monospace;">${this.escapeHtml(log.dateReceived || '—')}</td>
+                <td><span style="font-family: monospace; font-weight: 700; color: #60a5fa;">${this.escapeHtml(log.jobNumber || '—')}</span></td>
+                <td style="font-weight: 600;">${this.escapeHtml(log.foreman || 'UNKNOWN')}</td>
+                <td><span style="font-family: monospace; color: #cbd5e1;">${this.escapeHtml(log.creditedTo || '—')}</span></td>
+                <td>
+                  <span style="color: ${statusColor}; font-weight: 700; font-size: 11px;">
+                    ${this.escapeHtml(log.status || 'Logged')}
+                  </span>
+                </td>
+                <td style="text-align: center;">
+                  <div style="display: inline-flex; align-items: center; gap: 6px;">
+                    <button class="btn-pdf-link" onclick="window.safetyComplianceEngine.openPdfViewer('${this.escapeHtml(log.id || (log.sheetName + '_' + log.rowIndex))}')" title="Preview original attached PDF document directly in the app">
+                      📄 View PDF
+                    </button>
+                    <button class="btn-edit-log-row" onclick="window.safetyComplianceEngine.openEditLogModal('${this.escapeHtml(log.id || (log.sheetName + '_' + log.rowIndex))}')" title="Edit log info (fix typos)">
+                      ✏️ Edit
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    `;
+  }
+
   openProcessEmailsModal() {
     const modal = document.getElementById('process-safety-emails-modal');
     const modalBox = document.getElementById('process-safety-emails-modal-box');
