@@ -78,8 +78,15 @@ class TripPlannerApp {
     this.holidaysMap = this.loadHolidays();
     try {
       const savedSchedule = localStorage.getItem('sa_work_schedule');
-      if (savedSchedule) this.activeSchedule = savedSchedule;
-    } catch (e) {}
+      if (savedSchedule) {
+        this.activeSchedule = savedSchedule;
+      } else {
+        const snap = this.db.getSnapshot();
+        this.activeSchedule = (snap && snap.configs && snap.configs.workSchedule) || 'Mon-Thu';
+      }
+    } catch (e) {
+      this.activeSchedule = 'Mon-Thu';
+    }
   }
 
   loadHolidays() {
@@ -724,7 +731,7 @@ class TripPlannerApp {
     });
 
     const snap = this.db.getSnapshot();
-    const workSchedule = (snap && snap.configs && snap.configs.workSchedule) || this.activeSchedule;
+    const workSchedule = this.activeSchedule || (snap && snap.configs && snap.configs.workSchedule) || 'Mon-Thu';
     if (scheduleBadge) {
       scheduleBadge.textContent = `🗓️ ${workSchedule} Schedule`;
     }
@@ -1335,14 +1342,6 @@ class TripPlannerApp {
     }
 
     return days;
-  }
-
-  isDayHoliday(dateKey) {
-    const snap = this.db.getSnapshot();
-    if (snap && snap.configs && snap.configs.holidays) {
-      return snap.configs.holidays.some(h => h.date === dateKey);
-    }
-    return false;
   }
 
   parseDate(str) {
