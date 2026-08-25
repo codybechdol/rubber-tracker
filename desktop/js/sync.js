@@ -250,6 +250,10 @@ class SyncEngine {
   }
 
   showPendingChangesModal() {
+    if (this.activeConflicts && this.activeConflicts.length > 0) {
+      this.openConflictModal(this.activeConflicts, this.activeOutbox || this.db.getOutbox());
+      return;
+    }
     const outbox = this.db.getOutbox();
     this.openSyncModal('Pending Offline Changes', '📋');
     this.renderModalChanges(
@@ -588,6 +592,7 @@ class SyncEngine {
 
     html += `</div>`;
     body.innerHTML = html;
+    modal.style.display = 'flex';
     modal.classList.add('active');
   }
 
@@ -607,7 +612,13 @@ class SyncEngine {
       modal.classList.remove('active');
       modal.style.display = 'none';
     }
-    this.activeConflicts = null;
+  }
+
+  async forcePushChangesToGoogleSheets() {
+    const outbox = this.db.getOutbox() || [];
+    outbox.forEach(m => { m.force = true; });
+    await this.db.saveOutbox(outbox);
+    return await this.pushChangesToGoogleSheets();
   }
 
   async applyConflictResolutions() {

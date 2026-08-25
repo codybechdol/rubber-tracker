@@ -560,6 +560,7 @@
               <button class="btn btn-secondary" onclick="window.localDB.clear(); location.reload();">🗑️ Clear Offline Cache</button>
               <button class="btn btn-secondary" onclick="window.syncEngine.downloadLatestSnapshot()">⬇️ Download Fresh Snapshot</button>
               <button class="btn btn-primary" onclick="window.syncEngine.pushChangesToGoogleSheets()">⬆️ Push Offline Changes</button>
+              <button class="btn btn-secondary" style="border-color: #10b981; color: #34d399;" onclick="window.syncEngine.forcePushChangesToGoogleSheets()" title="Push all offline changes to Google Sheets, overriding any detected conflicts">⚡ Force Push (Overwrite Conflicts)</button>
               <button class="btn btn-secondary" style="border-color: #f59e0b; color: #fbbf24;" onclick="window.syncEngine.pushAllCleanData()" title="Directly overwrite Google Sheets Employees and Job Tracking with your clean, organized local data">🧹 Overwrite Sheets with Clean Local Tables</button>
             </div>
           </div>
