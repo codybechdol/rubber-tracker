@@ -228,7 +228,7 @@ class CprRosterEngine {
       }
 
       // Candidate if overdue, expiring within 90 days, scheduled, or has no record
-      const isCandidate = isScheduled || isExpired || isExpiringSoon || status === 'none';
+      const isCandidate = isScheduled || status === 'expired' || status === 'expiring' || status === 'none';
 
       this.employeesData.push({
         id: idx,
