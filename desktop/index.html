@@ -1151,11 +1151,17 @@
 
     // App Initialization
     window.addEventListener('DOMContentLoaded', async () => {
-      // Register Service Worker for PWA / offline caching on Web/Tablet
-      if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
-        navigator.serviceWorker.register('./sw.js').catch(err => {
-          console.warn('Service Worker registration warning:', err);
-        });
+      // Service Worker handling: Register on Web/PWA (http/https), unregister on Desktop (file://)
+      if ('serviceWorker' in navigator) {
+        if (window.location.protocol.startsWith('http')) {
+          navigator.serviceWorker.register('./sw.js').catch(err => {
+            console.warn('Service Worker registration warning:', err);
+          });
+        } else {
+          navigator.serviceWorker.getRegistrations().then(regs => {
+            for (const reg of regs) reg.unregister();
+          }).catch(() => {});
+        }
       }
 
       // Initialize Role Mode
