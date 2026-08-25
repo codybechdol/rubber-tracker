@@ -9,118 +9,118 @@
 // =============================================================================
 // SHEET/TAB NAME CONSTANTS
 // =============================================================================
-const SHEET_DASHBOARD = 'Dashboard';
-const SHEET_EMPLOYEES = 'Employees';
-const SHEET_GLOVES = 'Gloves';
-const SHEET_SLEEVES = 'Sleeves';
-const SHEET_GLOVE_SWAPS = 'Glove Swaps';
-const SHEET_SLEEVE_SWAPS = 'Sleeve Swaps';
-const SHEET_RECLAIMS = 'Reclaims';
-const SHEET_ITEM_HISTORY_LOOKUP = 'Item History Lookup';
-const SHEET_GLOVES_HISTORY = 'Gloves History';
-const SHEET_SLEEVES_HISTORY = 'Sleeves History';
+var SHEET_DASHBOARD = 'Dashboard';
+var SHEET_EMPLOYEES = 'Employees';
+var SHEET_GLOVES = 'Gloves';
+var SHEET_SLEEVES = 'Sleeves';
+var SHEET_GLOVE_SWAPS = 'Glove Swaps';
+var SHEET_SLEEVE_SWAPS = 'Sleeve Swaps';
+var SHEET_RECLAIMS = 'Reclaims';
+var SHEET_ITEM_HISTORY_LOOKUP = 'Item History Lookup';
+var SHEET_GLOVES_HISTORY = 'Gloves History';
+var SHEET_SLEEVES_HISTORY = 'Sleeves History';
 
 // Phase 1: Blankets (March 2026)
-const SHEET_BLANKETS = 'Blankets';
-const SHEET_BLANKET_SWAPS = 'Blanket Swaps';
-const SHEET_BLANKETS_HISTORY = 'Blankets History';
+var SHEET_BLANKETS = 'Blankets';
+var SHEET_BLANKET_SWAPS = 'Blanket Swaps';
+var SHEET_BLANKETS_HISTORY = 'Blankets History';
 
 // Phase 6: MACKs (July 2026)
-const SHEET_MACKS = 'MACKs';
-const SHEET_MACK_SWAPS = 'MACK Swaps';
-const SHEET_MACKS_HISTORY = 'MACKs History';
+var SHEET_MACKS = 'MACKs';
+var SHEET_MACK_SWAPS = 'MACK Swaps';
+var SHEET_MACKS_HISTORY = 'MACKs History';
 
 // Phase 2: HV Testers & Phasing Sets (Future)
-const SHEET_HV_TESTERS = 'HV Testers';
-const SHEET_HV_TESTER_SWAPS = 'HV Tester Swaps';
-const SHEET_HV_TESTERS_HISTORY = 'HV Testers History';
-const SHEET_PHASING_SETS = 'Phasing Sets';
-const SHEET_PHASING_SET_SWAPS = 'Phasing Set Swaps';
-const SHEET_PHASING_SETS_HISTORY = 'Phasing Sets History';
+var SHEET_HV_TESTERS = 'HV Testers';
+var SHEET_HV_TESTER_SWAPS = 'HV Tester Swaps';
+var SHEET_HV_TESTERS_HISTORY = 'HV Testers History';
+var SHEET_PHASING_SETS = 'Phasing Sets';
+var SHEET_PHASING_SET_SWAPS = 'Phasing Set Swaps';
+var SHEET_PHASING_SETS_HISTORY = 'Phasing Sets History';
 
 // Phase 3: AED (Future)
-const SHEET_AED = 'AED';
-const SHEET_AED_SWAPS = 'AED Swaps';
-const SHEET_AED_HISTORY = 'AED History';
+var SHEET_AED = 'AED';
+var SHEET_AED_SWAPS = 'AED Swaps';
+var SHEET_AED_HISTORY = 'AED History';
 
 // Phase 4: Grounds (Overhead/Underground electrical grounds)
-const SHEET_GROUNDS = 'Grounds';
-const SHEET_GROUND_SWAPS = 'Ground Swaps';
-const SHEET_GROUNDS_HISTORY = 'Grounds History';
+var SHEET_GROUNDS = 'Grounds';
+var SHEET_GROUND_SWAPS = 'Ground Swaps';
+var SHEET_GROUNDS_HISTORY = 'Grounds History';
 
 // Phase 5: Hot Sticks (live-line tools, 1-year test cycle)
-const SHEET_HOT_STICKS = 'Hot Sticks';
-const SHEET_HOT_STICK_SWAPS = 'Hot Stick Swaps';
-const SHEET_HOT_STICKS_HISTORY = 'Hot Sticks History';
+var SHEET_HOT_STICKS = 'Hot Sticks';
+var SHEET_HOT_STICK_SWAPS = 'Hot Stick Swaps';
+var SHEET_HOT_STICKS_HISTORY = 'Hot Sticks History';
 
 // =============================================================================
 // VISUAL CONSTANTS
 // =============================================================================
 // Header background color for swap tables
-const HEADER_BG_COLOR = '#1565c0';
+var HEADER_BG_COLOR = '#1565c0';
 
 // =============================================================================
 // BUSINESS LOGIC CONSTANTS
 // =============================================================================
 // Change-out intervals (months) for Gloves/Sleeves
-const INTERVAL_HELENA = 3;
-const INTERVAL_DEFAULT = 6;
+var INTERVAL_HELENA = 3;
+var INTERVAL_DEFAULT = 6;
 
 // Blanket test interval (months) - 1 year from test date
-const INTERVAL_BLANKET_TEST = 12;
+var INTERVAL_BLANKET_TEST = 12;
 
 // MACK test interval (months) - 1 year from test date
-const INTERVAL_MACK_TEST = 12;
+var INTERVAL_MACK_TEST = 12;
 
 // HV Tester/Phasing Set calibration interval (years) - Phase 2
-const INTERVAL_CALIBRATION_YEARS = 10;
+var INTERVAL_CALIBRATION_YEARS = 10;
 
 // AED pad replacement lookahead (days) - Phase 3
 // Show AEDs with pads expiring within 30 days on the AED Swaps report
-const AED_SWAP_LOOKAHEAD_DAYS = 30;
+var AED_SWAP_LOOKAHEAD_DAYS = 30;
 
 // Grounds test interval (months) - Phase 4
 // Grounds must be pulled for testing 1 year after their test date
-const INTERVAL_GROUNDS_TEST = 12;
+var INTERVAL_GROUNDS_TEST = 12;
 
 // Hot Stick test interval (months) - Phase 5
 // Hot sticks (live-line tools) must be tested every 2 years per OSHA 1910.269 / ASTM F711
-const INTERVAL_HOT_STICK_TEST = 24;
+var INTERVAL_HOT_STICK_TEST = 24;
 
 // Location values that represent employee STATUS, not physical cities.
 // These should NOT be used as crew locations in Job Tracking.
-const STATUS_LOCATIONS = ['vacation', 'light duty', 'weeds', 'leave', 'previous employee', 'medical', "worker's comp", 'unknown', 'on shelf', 'not repairable', 'in testing', 'packed for testing', 'packed for delivery', 'destroyed', 'failed rubber', 'reclaimed'];
+var STATUS_LOCATIONS = ['vacation', 'light duty', 'weeds', 'leave', 'previous employee', 'medical', "worker's comp", 'unknown', 'on shelf', 'not repairable', 'in testing', 'packed for testing', 'packed for delivery', 'destroyed', 'failed rubber', 'reclaimed'];
 
 // Alternating colors for history grouping
-const HISTORY_COLOR_GLOVE_1 = '#e3f2fd';  // Light blue
-const HISTORY_COLOR_GLOVE_2 = '#ffffff';  // White
-const HISTORY_COLOR_SLEEVE_1 = '#e8f5e9'; // Light green
-const HISTORY_COLOR_SLEEVE_2 = '#ffffff'; // White
-const HISTORY_COLOR_BLANKET_1 = '#fff3e0'; // Light orange
-const HISTORY_COLOR_BLANKET_2 = '#ffffff'; // White
+var HISTORY_COLOR_GLOVE_1 = '#e3f2fd';  // Light blue
+var HISTORY_COLOR_GLOVE_2 = '#ffffff';  // White
+var HISTORY_COLOR_SLEEVE_1 = '#e8f5e9'; // Light green
+var HISTORY_COLOR_SLEEVE_2 = '#ffffff'; // White
+var HISTORY_COLOR_BLANKET_1 = '#fff3e0'; // Light orange
+var HISTORY_COLOR_BLANKET_2 = '#ffffff'; // White
 
 // Alternating colors for MACK history grouping
-const HISTORY_COLOR_MACK_1 = '#e0f2f1'; // Light teal
-const HISTORY_COLOR_MACK_2 = '#ffffff'; // White
-const HISTORY_COLOR_HV_TESTER_1 = '#f3e5f5'; // Light purple
-const HISTORY_COLOR_HV_TESTER_2 = '#ffffff'; // White
-const HISTORY_COLOR_PHASING_SET_1 = '#e0f7fa'; // Light cyan
-const HISTORY_COLOR_PHASING_SET_2 = '#ffffff'; // White
-const HISTORY_COLOR_AED_1 = '#ffebee'; // Light red
-const HISTORY_COLOR_AED_2 = '#ffffff'; // White
-const HISTORY_COLOR_GROUNDS_1 = '#fffde7'; // Light yellow
-const HISTORY_COLOR_GROUNDS_2 = '#ffffff'; // White
-const HISTORY_COLOR_HOT_STICK_1 = '#e8eaf6'; // Light indigo
-const HISTORY_COLOR_HOT_STICK_2 = '#ffffff'; // White
+var HISTORY_COLOR_MACK_1 = '#e0f2f1'; // Light teal
+var HISTORY_COLOR_MACK_2 = '#ffffff'; // White
+var HISTORY_COLOR_HV_TESTER_1 = '#f3e5f5'; // Light purple
+var HISTORY_COLOR_HV_TESTER_2 = '#ffffff'; // White
+var HISTORY_COLOR_PHASING_SET_1 = '#e0f7fa'; // Light cyan
+var HISTORY_COLOR_PHASING_SET_2 = '#ffffff'; // White
+var HISTORY_COLOR_AED_1 = '#ffebee'; // Light red
+var HISTORY_COLOR_AED_2 = '#ffffff'; // White
+var HISTORY_COLOR_GROUNDS_1 = '#fffde7'; // Light yellow
+var HISTORY_COLOR_GROUNDS_2 = '#ffffff'; // White
+var HISTORY_COLOR_HOT_STICK_1 = '#e8eaf6'; // Light indigo
+var HISTORY_COLOR_HOT_STICK_2 = '#ffffff'; // White
 
 // Backup folder name in Google Drive
-const BACKUP_FOLDER_NAME = 'Glove Manager Backups';
+var BACKUP_FOLDER_NAME = 'Glove Manager Backups';
 
 // =============================================================================
 // COLUMN CONSTANTS - Per Workflow_and_Sheet_Expectations.md
 // These columns are FIXED per the documentation and should be used directly
 // =============================================================================
-const COLS = {
+var COLS = {
   // Gloves & Sleeves Sheet (identical structure)
   // ⚠️ ESL ID column (B) added April 2026 - all columns after A shifted +1
   INVENTORY: {
@@ -349,7 +349,7 @@ const COLS = {
   }
 };
 
-const DEFAULT_LOCATION_APPROVALS = {
+var DEFAULT_LOCATION_APPROVALS = {
   'Big Sky': 'CL3',
   'Billings': 'CL2',
   'Bozeman': 'CL2',

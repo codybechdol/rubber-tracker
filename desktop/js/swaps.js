@@ -1303,7 +1303,8 @@ class SwapGenerationEngine {
         invRow['Picked For'] = `${empName} Picked On ${todayIso}`;
 
         this.syncRowToRawGrid(invTable, invRow);
-        await this.db.recordItemHistoryEvent(invTable.name, invRow, `Packed For Delivery (${empName})`);
+        const invSheetName = (invTable && invTable.name) ? invTable.name : (this.db.getSheetNameForTableKey(invTableKey) || invTableKey);
+        await this.db.recordItemHistoryEvent(invSheetName, invRow, `Packed For Delivery (${empName})`);
       }
     } else {
       // Uncheck Picked -> Revert to On Shelf
@@ -1486,7 +1487,8 @@ class SwapGenerationEngine {
         oldRow['Date Assigned'] = dateFormatted;
         oldRow['Picked For'] = '';
         this.syncRowToRawGrid(invTable, oldRow);
-        await this.db.recordItemHistoryEvent(invTable.name, oldRow, `Returned from ${empName} (Swap Completed)`);
+        const invSheetName = (invTable && invTable.name) ? invTable.name : (this.db.getSheetNameForTableKey(invTableKey) || invTableKey);
+        await this.db.recordItemHistoryEvent(invSheetName, oldRow, `Returned from ${empName} (Swap Completed)`);
       }
 
       // 2. Assign New Replacement Item -> Employee / Assigned / Active Location
@@ -1515,7 +1517,7 @@ class SwapGenerationEngine {
           return itNum === pickNum && (assignedTo.includes('Packed For Delivery') || notes.includes('Packed For Delivery'));
         });
 
-        await this.db.recordItemHistoryEvent(invTable.name, newRow, `Assigned to ${empName}`);
+        await this.db.recordItemHistoryEvent(invSheetName, newRow, `Assigned to ${empName}`);
       }
     } else {
       // STAGE 4: Date Changed removed -> Revert to Stage 2 (Ready For Delivery)
@@ -1549,7 +1551,8 @@ class SwapGenerationEngine {
         });
 
         // Re-record Stage 2 "Packed For Delivery" history entry
-        await this.db.recordItemHistoryEvent(invTable.name, newRow, `Packed For Delivery (${empName})`);
+        const invSheetName = (invTable && invTable.name) ? invTable.name : (this.db.getSheetNameForTableKey(invTableKey) || invTableKey);
+        await this.db.recordItemHistoryEvent(invSheetName, newRow, `Packed For Delivery (${empName})`);
       }
 
       // 2. Revert Old Item -> Employee / Assigned

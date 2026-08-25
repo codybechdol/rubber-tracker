@@ -15,6 +15,17 @@
 
 var SYNC_SNAPSHOT_FILENAME = 'SafetyAssistant_Sync_Snapshot.json';
 
+var COLS_SAFE = (typeof COLS !== 'undefined' && COLS) ? COLS : {
+  INVENTORY: { ITEM_NUM: 1, ESL_ID: 2, SIZE: 3, CLASS: 4, TEST_DATE: 5, DATE_ASSIGNED: 6, LOCATION: 7, STATUS: 8, ASSIGNED_TO: 9, CHANGE_OUT_DATE: 10, PICKED_FOR: 11, NOTES: 12 },
+  BLANKETS: { ITEM_NUM: 1, TYPE: 2, CLASS: 3, TEST_DATE: 4, DATE_ASSIGNED: 5, LOCATION: 6, STATUS: 7, ASSIGNED_TO: 8, CHANGE_OUT_DATE: 9, PICKED_FOR: 10, NOTES: 11 },
+  MACKS: { ITEM_NUM: 1, KV: 2, SIZE: 3, LENGTH: 4, TEST_DATE: 5, DATE_ASSIGNED: 6, LOCATION: 7, STATUS: 8, ASSIGNED_TO: 9, CHANGE_OUT_DATE: 10, PICKED_FOR: 11, NOTES: 12 },
+  HV_TESTERS: { ITEM_NUM: 1, MODEL: 2, KV: 3, SERIAL_NUM: 4, CALIBRATION_DATE: 5, DATE_ASSIGNED: 6, LOCATION: 7, STATUS: 8, ASSIGNED_TO: 9, CHANGE_OUT_DATE: 10, PICKED_FOR: 11, NOTES: 12 },
+  PHASING_SETS: { ITEM_NUM: 1, MODEL: 2, KV: 3, SERIAL_NUM: 4, CALIBRATION_DATE: 5, DATE_ASSIGNED: 6, LOCATION: 7, STATUS: 8, ASSIGNED_TO: 9, CHANGE_OUT_DATE: 10, PICKED_FOR: 11, NOTES: 12 },
+  AED: { ITEM_NUM: 1, MODEL: 2, UNUSED_C: 3, PAD_EXPIRATION: 4, DATE_ASSIGNED: 5, LOCATION: 6, STATUS: 7, ASSIGNED_TO: 8, UNUSED_I: 9, PICKED_FOR: 10, NOTES: 11 },
+  GROUNDS: { SERIAL_NUM: 1, TYPE: 2, SIZE: 3, KV: 4, LENGTH: 5, TEST_DATE: 6, DATE_ASSIGNED: 7, LOCATION: 8, STATUS: 9, ASSIGNED_TO: 10, CHANGE_OUT_DATE: 11, PICKED_FOR: 12, NOTES: 13 },
+  HOT_STICKS: { ITEM_NUM: 1, TYPE: 2, LENGTH: 3, TEST_DATE: 4, DATE_ASSIGNED: 5, LOCATION: 6, STATUS: 7, ASSIGNED_TO: 8, CHANGE_OUT_DATE: 9, PICKED_FOR: 10, NOTES: 11 }
+};
+
 /**
  * Exports a complete, structured snapshot of all database sheets and configurations.
  * Optimized for local SQLite / IndexedDB consumption in the desktop app.
@@ -294,12 +305,27 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
   }
 
   var conflicts = [];
+  function getSheetCaseInsensitive(name) {
+    if (!name || !ss) return null;
+    var exact = ss.getSheetByName(name);
+    if (exact) return exact;
+    var nameLower = String(name).toLowerCase().trim().replace(/_/g, ' ');
+    var all = ss.getSheets();
+    for (var s = 0; s < all.length; s++) {
+      var sName = all[s].getName().toLowerCase().trim();
+      if (sName === nameLower || sName.replace(/_/g, ' ') === nameLower) {
+        return all[s];
+      }
+    }
+    return null;
+  }
+
   if (detectConflicts && !force) {
     for (var cm = 0; cm < mutations.length; cm++) {
       var cMut = mutations[cm];
       if (cMut.force) continue;
       var cSheetName = cMut.sheetName || '';
-      var cSheet = cSheetName && ss ? ss.getSheetByName(cSheetName) : null;
+      var cSheet = cSheetName && ss ? getSheetCaseInsensitive(cSheetName) : null;
       if (!cSheet) continue;
 
       var targetRow = cMut.row;
@@ -353,27 +379,28 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
     if (!empName) return 'Helena';
     if (!empLocationCache) {
       empLocationCache = {};
-      var empSheet = ss.getSheetByName(typeof SHEET_EMPLOYEES !== 'undefined' ? SHEET_EMPLOYEES : 'Employees');
+      var empSheet = getSheetCaseInsensitive(typeof SHEET_EMPLOYEES !== 'undefined' ? SHEET_EMPLOYEES : 'Employees');
       if (empSheet && empSheet.getLastRow() > 1) {
         var empData = empSheet.getDataRange().getValues();
         var empLocIdx = 2; // Default C
         for (var eh = 0; eh < empData[0].length; eh++) {
-          var ehStr = String(empData[0][eh]).toLowerCase().trim();
-          if (ehStr.indexOf('location') !== -1) {
+          if (String(empData[0][eh]).toLowerCase().includes('location')) {
             empLocIdx = eh;
             break;
           }
         }
         for (var er = 1; er < empData.length; er++) {
-          var nameKey = String(empData[er][0] || '').trim().toLowerCase();
-          if (nameKey) {
-            var rawEmpLoc = String(empData[er][empLocIdx] || '').trim();
-            empLocationCache[nameKey] = typeof getPhysicalLocation === 'function' ? getPhysicalLocation(rawEmpLoc) : rawEmpLoc;
+          var eName = String(empData[er][0] || '').trim().toLowerCase();
+          var eLoc = String(empData[er][empLocIdx] || '').trim();
+          if (eName && eLoc) {
+            if (typeof getPhysicalLocation === 'function') eLoc = getPhysicalLocation(eLoc);
+            empLocationCache[eName] = eLoc;
           }
         }
       }
     }
-    return empLocationCache[String(empName).trim().toLowerCase()] || 'Helena';
+    var cleanEmp = String(empName).trim().toLowerCase();
+    return empLocationCache[cleanEmp] || 'Helena';
   }
 
   var invItemIndexCache = {};
@@ -400,7 +427,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
     var mut = mutations[m];
     try {
       var sheetName = mut.sheetName || '';
-      var sheet = sheetName ? ss.getSheetByName(sheetName) : null;
+      var sheet = sheetName ? getSheetCaseInsensitive(sheetName) : null;
       var actionsWithoutSheet = [
         'DELETE_TASK',
         'SET_TASK_STATUS',
@@ -480,62 +507,63 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
 
                 // Identify column indices for this equipment sheet
                 var eqColAssignedTo, eqColStatus, eqColLocation, eqColDateAssigned, eqColChangeOutDate, eqColTestDate, eqColPicked;
+                var colsRef = (typeof COLS !== 'undefined' && COLS) ? COLS : COLS_SAFE;
                 if (isGlove || isSleeve) {
-                  eqColAssignedTo = COLS.INVENTORY.ASSIGNED_TO;     // 9
-                  eqColStatus = COLS.INVENTORY.STATUS;              // 8
-                  eqColLocation = COLS.INVENTORY.LOCATION;          // 7
-                  eqColDateAssigned = COLS.INVENTORY.DATE_ASSIGNED; // 6
-                  eqColChangeOutDate = COLS.INVENTORY.CHANGE_OUT_DATE; // 10
-                  eqColTestDate = COLS.INVENTORY.TEST_DATE;         // 5
-                  eqColPicked = COLS.INVENTORY.PICKED_FOR;          // 11
+                  eqColAssignedTo = colsRef.INVENTORY ? colsRef.INVENTORY.ASSIGNED_TO : 9;     // 9
+                  eqColStatus = colsRef.INVENTORY ? colsRef.INVENTORY.STATUS : 8;              // 8
+                  eqColLocation = colsRef.INVENTORY ? colsRef.INVENTORY.LOCATION : 7;          // 7
+                  eqColDateAssigned = colsRef.INVENTORY ? colsRef.INVENTORY.DATE_ASSIGNED : 6; // 6
+                  eqColChangeOutDate = colsRef.INVENTORY ? colsRef.INVENTORY.CHANGE_OUT_DATE : 10; // 10
+                  eqColTestDate = colsRef.INVENTORY ? colsRef.INVENTORY.TEST_DATE : 5;         // 5
+                  eqColPicked = colsRef.INVENTORY ? colsRef.INVENTORY.PICKED_FOR : 11;          // 11
                 } else if (isBlanket) {
-                  eqColAssignedTo = COLS.BLANKETS.ASSIGNED_TO;      // 8
-                  eqColStatus = COLS.BLANKETS.STATUS;               // 7
-                  eqColLocation = COLS.BLANKETS.LOCATION;           // 6
-                  eqColDateAssigned = COLS.BLANKETS.DATE_ASSIGNED;  // 5
-                  eqColChangeOutDate = COLS.BLANKETS.CHANGE_OUT_DATE; // 9
-                  eqColTestDate = COLS.BLANKETS.TEST_DATE;          // 4
-                  eqColPicked = COLS.BLANKETS.PICKED_FOR;           // 10
+                  eqColAssignedTo = colsRef.BLANKETS ? colsRef.BLANKETS.ASSIGNED_TO : 8;      // 8
+                  eqColStatus = colsRef.BLANKETS ? colsRef.BLANKETS.STATUS : 7;               // 7
+                  eqColLocation = colsRef.BLANKETS ? colsRef.BLANKETS.LOCATION : 6;           // 6
+                  eqColDateAssigned = colsRef.BLANKETS ? colsRef.BLANKETS.DATE_ASSIGNED : 5;  // 5
+                  eqColChangeOutDate = colsRef.BLANKETS ? colsRef.BLANKETS.CHANGE_OUT_DATE : 9; // 9
+                  eqColTestDate = colsRef.BLANKETS ? colsRef.BLANKETS.TEST_DATE : 4;          // 4
+                  eqColPicked = colsRef.BLANKETS ? colsRef.BLANKETS.PICKED_FOR : 10;           // 10
                 } else if (isMack) {
-                  eqColAssignedTo = COLS.MACKS.ASSIGNED_TO;         // 9
-                  eqColStatus = COLS.MACKS.STATUS;                  // 8
-                  eqColLocation = COLS.MACKS.LOCATION;              // 7
-                  eqColDateAssigned = COLS.MACKS.DATE_ASSIGNED;     // 6
-                  eqColChangeOutDate = COLS.MACKS.CHANGE_OUT_DATE;  // 10
-                  eqColTestDate = COLS.MACKS.TEST_DATE;             // 5
-                  eqColPicked = COLS.MACKS.PICKED_FOR;              // 11
+                  eqColAssignedTo = colsRef.MACKS ? colsRef.MACKS.ASSIGNED_TO : 9;         // 9
+                  eqColStatus = colsRef.MACKS ? colsRef.MACKS.STATUS : 8;                  // 8
+                  eqColLocation = colsRef.MACKS ? colsRef.MACKS.LOCATION : 7;              // 7
+                  eqColDateAssigned = colsRef.MACKS ? colsRef.MACKS.DATE_ASSIGNED : 6;     // 6
+                  eqColChangeOutDate = colsRef.MACKS ? colsRef.MACKS.CHANGE_OUT_DATE : 10;  // 10
+                  eqColTestDate = colsRef.MACKS ? colsRef.MACKS.TEST_DATE : 5;             // 5
+                  eqColPicked = colsRef.MACKS ? colsRef.MACKS.PICKED_FOR : 11;              // 11
                 } else if (isHVTester || isPhasingSet) {
-                  eqColAssignedTo = COLS.HV_TESTERS.ASSIGNED_TO;    // 9
-                  eqColStatus = COLS.HV_TESTERS.STATUS;             // 8
-                  eqColLocation = COLS.HV_TESTERS.LOCATION;         // 7
-                  eqColDateAssigned = COLS.HV_TESTERS.DATE_ASSIGNED;// 6
-                  eqColChangeOutDate = COLS.HV_TESTERS.CHANGE_OUT_DATE; // 10
-                  eqColTestDate = COLS.HV_TESTERS.CALIBRATION_DATE; // 5
-                  eqColPicked = COLS.HV_TESTERS.PICKED_FOR;         // 11
+                  eqColAssignedTo = colsRef.HV_TESTERS ? colsRef.HV_TESTERS.ASSIGNED_TO : 9;    // 9
+                  eqColStatus = colsRef.HV_TESTERS ? colsRef.HV_TESTERS.STATUS : 8;             // 8
+                  eqColLocation = colsRef.HV_TESTERS ? colsRef.HV_TESTERS.LOCATION : 7;         // 7
+                  eqColDateAssigned = colsRef.HV_TESTERS ? colsRef.HV_TESTERS.DATE_ASSIGNED : 6;// 6
+                  eqColChangeOutDate = colsRef.HV_TESTERS ? colsRef.HV_TESTERS.CHANGE_OUT_DATE : 10; // 10
+                  eqColTestDate = colsRef.HV_TESTERS ? colsRef.HV_TESTERS.CALIBRATION_DATE : 5; // 5
+                  eqColPicked = colsRef.HV_TESTERS ? colsRef.HV_TESTERS.PICKED_FOR : 11;         // 11
                 } else if (isAED) {
-                  eqColAssignedTo = COLS.AED.ASSIGNED_TO;           // 8
-                  eqColStatus = COLS.AED.STATUS;                    // 7
-                  eqColLocation = COLS.AED.LOCATION;                // 6
-                  eqColDateAssigned = COLS.AED.DATE_ASSIGNED;       // 5
-                  eqColChangeOutDate = COLS.AED.PAD_EXPIRATION;     // 4
-                  eqColTestDate = COLS.AED.PAD_EXPIRATION;          // 4
-                  eqColPicked = COLS.AED.PICKED_FOR;                // 10
+                  eqColAssignedTo = colsRef.AED ? colsRef.AED.ASSIGNED_TO : 8;           // 8
+                  eqColStatus = colsRef.AED ? colsRef.AED.STATUS : 7;                    // 7
+                  eqColLocation = colsRef.AED ? colsRef.AED.LOCATION : 6;                // 6
+                  eqColDateAssigned = colsRef.AED ? colsRef.AED.DATE_ASSIGNED : 5;       // 5
+                  eqColChangeOutDate = colsRef.AED ? colsRef.AED.PAD_EXPIRATION : 4;     // 4
+                  eqColTestDate = colsRef.AED ? colsRef.AED.PAD_EXPIRATION : 4;          // 4
+                  eqColPicked = colsRef.AED ? colsRef.AED.PICKED_FOR : 10;                // 10
                 } else if (isGrounds) {
-                  eqColAssignedTo = COLS.GROUNDS.ASSIGNED_TO;       // 10
-                  eqColStatus = COLS.GROUNDS.STATUS;                // 9
-                  eqColLocation = COLS.GROUNDS.LOCATION;            // 8
-                  eqColDateAssigned = COLS.GROUNDS.DATE_ASSIGNED;   // 7
-                  eqColChangeOutDate = COLS.GROUNDS.CHANGE_OUT_DATE;// 11
-                  eqColTestDate = COLS.GROUNDS.TEST_DATE;           // 6
-                  eqColPicked = COLS.GROUNDS.PICKED_FOR;            // 12
+                  eqColAssignedTo = colsRef.GROUNDS ? colsRef.GROUNDS.ASSIGNED_TO : 10;       // 10
+                  eqColStatus = colsRef.GROUNDS ? colsRef.GROUNDS.STATUS : 9;                // 9
+                  eqColLocation = colsRef.GROUNDS ? colsRef.GROUNDS.LOCATION : 8;            // 8
+                  eqColDateAssigned = colsRef.GROUNDS ? colsRef.GROUNDS.DATE_ASSIGNED : 7;   // 7
+                  eqColChangeOutDate = colsRef.GROUNDS ? colsRef.GROUNDS.CHANGE_OUT_DATE : 11;// 11
+                  eqColTestDate = colsRef.GROUNDS ? colsRef.GROUNDS.TEST_DATE : 6;           // 6
+                  eqColPicked = colsRef.GROUNDS ? colsRef.GROUNDS.PICKED_FOR : 12;            // 12
                 } else if (isHotSticks) {
-                  eqColAssignedTo = COLS.HOT_STICKS.ASSIGNED_TO;    // 8
-                  eqColStatus = COLS.HOT_STICKS.STATUS;             // 7
-                  eqColLocation = COLS.HOT_STICKS.LOCATION;         // 6
-                  eqColDateAssigned = COLS.HOT_STICKS.DATE_ASSIGNED;// 5
-                  eqColChangeOutDate = COLS.HOT_STICKS.CHANGE_OUT_DATE; // 9
-                  eqColTestDate = COLS.HOT_STICKS.TEST_DATE;        // 4
-                  eqColPicked = COLS.HOT_STICKS.PICKED_FOR;         // 10
+                  eqColAssignedTo = colsRef.HOT_STICKS ? colsRef.HOT_STICKS.ASSIGNED_TO : 8;    // 8
+                  eqColStatus = colsRef.HOT_STICKS ? colsRef.HOT_STICKS.STATUS : 7;             // 7
+                  eqColLocation = colsRef.HOT_STICKS ? colsRef.HOT_STICKS.LOCATION : 6;         // 6
+                  eqColDateAssigned = colsRef.HOT_STICKS ? colsRef.HOT_STICKS.DATE_ASSIGNED : 5;// 5
+                  eqColChangeOutDate = colsRef.HOT_STICKS ? colsRef.HOT_STICKS.CHANGE_OUT_DATE : 9; // 9
+                  eqColTestDate = colsRef.HOT_STICKS ? colsRef.HOT_STICKS.TEST_DATE : 4;        // 4
+                  eqColPicked = colsRef.HOT_STICKS ? colsRef.HOT_STICKS.PICKED_FOR : 10;         // 10
                 }
 
                 var isAssignedToEdit = (mut.col === eqColAssignedTo || hLower === 'assigned to' || hLower === 'assigned_to');
@@ -1856,15 +1884,17 @@ function doPost(e) {
   try {
     var rawBody = e.postData ? e.postData.contents : '{}';
     var payload = JSON.parse(rawBody);
-    var action = payload.action || 'applyMutations';
+    var isArray = Array.isArray(payload);
+    var action = isArray ? 'applyMutations' : (payload.action || 'applyMutations');
+    var mutations = isArray ? payload : (payload.mutations || []);
 
     if (action === 'applyMutations' || action === 'sync') {
-      var returnSnap = payload.returnSnapshot === true;
+      var returnSnap = isArray ? false : (payload.returnSnapshot === true);
       var options = {
-        detectConflicts: payload.detectConflicts !== false,
-        force: payload.force === true
+        detectConflicts: isArray ? true : (payload.detectConflicts !== false),
+        force: isArray ? false : (payload.force === true)
       };
-      var result = applyBatchSyncMutations(payload.mutations || [], returnSnap, options);
+      var result = applyBatchSyncMutations(mutations, returnSnap, options);
       return ContentService.createTextOutput(JSON.stringify(result))
         .setMimeType(ContentService.MimeType.JSON);
     }

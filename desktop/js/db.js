@@ -98,6 +98,10 @@ class LocalDatabase {
   normalizeTableData(table, tableKey) {
     if (!table) return { headers: [], rows: [] };
 
+    if (!table.name && tableKey) {
+      table.name = this.getSheetNameForTableKey(tableKey) || tableKey;
+    }
+
     // 1. Employee healing & cleaning (ALWAYS RUNS on every call)
     if (table.rows && tableKey === 'employees') {
       const nameKey = (table.headers || []).find(h => /^(employee\s*name|name)$/i.test(h.trim())) || (table.headers ? table.headers[0] : null);
@@ -419,6 +423,63 @@ class LocalDatabase {
       }
     }
     return clean.replace(/\s+/g, '_');
+  }
+
+  getSheetNameForTableKey(tableKey) {
+    if (!tableKey) return '';
+    const clean = String(tableKey).trim().toLowerCase();
+    const map = {
+      'gloves': 'Gloves',
+      'sleeves': 'Sleeves',
+      'blankets': 'Blankets',
+      'macks': 'MACKs',
+      'hv_testers': 'HV Testers',
+      'hv testers': 'HV Testers',
+      'phasing_sets': 'Phasing Sets',
+      'phasing sets': 'Phasing Sets',
+      'aed': 'AED',
+      'grounds': 'Grounds',
+      'hot_sticks': 'Hot Sticks',
+      'hot sticks': 'Hot Sticks',
+      'glove_swaps': 'Glove Swaps',
+      'sleeve_swaps': 'Sleeve Swaps',
+      'blanket_swaps': 'Blanket Swaps',
+      'mack_swaps': 'MACK Swaps',
+      'hv_tester_swaps': 'HV Tester Swaps',
+      'phasing_set_swaps': 'Phasing Set Swaps',
+      'aed_swaps': 'AED Swaps',
+      'ground_swaps': 'Ground Swaps',
+      'hot_stick_swaps': 'Hot Stick Swaps',
+      'employees': 'Employees',
+      'job_tracking': 'Job Tracking',
+      'safety_compliance': 'Safety Compliance',
+      'expiring_certs': 'Expiring Certs',
+      'training_tracking': 'Training Tracking',
+      'gloves_history': 'Gloves History',
+      'sleeves_history': 'Sleeves History',
+      'blankets_history': 'Blankets History',
+      'macks_history': 'MACKs History',
+      'hv_testers_history': 'HV Testers History',
+      'phasing_sets_history': 'Phasing Sets History',
+      'aed_history': 'AED History',
+      'grounds_history': 'Grounds History',
+      'hot_sticks_history': 'Hot Sticks History',
+      'employee_history': 'Employee History',
+      'safety_equipment_needs': 'Safety Equipment Needs',
+      'jha_log': 'JHA Log',
+      'weekly_safety_log': 'Weekly Safety Log',
+      'monthly_checklist_log': 'Monthly Checklist Log',
+      'locations': 'Locations',
+      'drive_time_routes': 'Drive Time Routes',
+      'vendors': 'Vendors',
+      'purchase_orders': 'Purchase Orders'
+    };
+    if (map[clean]) return map[clean];
+    if (this.snapshot && this.snapshot.tables && this.snapshot.tables[clean]) {
+      const tbl = this.snapshot.tables[clean];
+      if (tbl && tbl.name) return tbl.name;
+    }
+    return clean.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
   }
 
   getPendingCount() {

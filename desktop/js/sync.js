@@ -335,8 +335,9 @@ class SyncEngine {
               const notes = String(ar['Notes'] || '').trim();
               const hasOrigin = notes.toLowerCase().includes('new purchase') || notes.toLowerCase().includes('failed pair') || notes.toLowerCase().includes('item found');
               if (hasOrigin || ar['Status'] === 'Failed Rubber' || ar['Status'] === 'Lost') {
+                const targetSheetName = (activeTable && activeTable.name) ? activeTable.name : (this.db.getSheetNameForTableKey(cat) || cat);
                 if (hasOrigin) {
-                  await this.db.recordItemHistoryEvent(activeTable.name, {
+                  await this.db.recordItemHistoryEvent(targetSheetName, {
                     ...ar,
                     'Location': 'Helena',
                     'Assigned To': 'On Shelf',
@@ -344,7 +345,7 @@ class SyncEngine {
                   }, notes || 'New Purchase');
                 }
                 if (ar['Status'] && ar['Status'] !== 'In Stock' && ar['Status'] !== 'On Shelf') {
-                  await this.db.recordItemHistoryEvent(activeTable.name, ar, ar['Status'] === 'Failed Rubber' ? 'Failed Rubber' : ar['Notes']);
+                  await this.db.recordItemHistoryEvent(targetSheetName, ar, ar['Status'] === 'Failed Rubber' ? 'Failed Rubber' : ar['Notes']);
                 }
               }
             }
