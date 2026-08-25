@@ -224,6 +224,7 @@ class InventoryManager {
               <label style="display: block; font-size: 11.5px; font-weight: 700; color: var(--text-muted); margin-bottom: 5px;">ADDITION REASON / ORIGIN *</label>
               <select id="new-item-origin-reason" class="form-control" style="width: 100%; padding: 8px 10px; border-radius: 6px; background: var(--bg-secondary); color: var(--text-main); border: 1px solid var(--border-color); font-size: 13px; font-weight: 600;" onchange="window.inventoryManager.onOriginReasonChanged()">
                 <option value="New Purchase">✨ New Purchase</option>
+                <option value="Not New">🔄 Not New</option>
                 <option value="Made From Failed Pairs" id="opt-failed-pairs">🧤 Made From Failed Pairs</option>
                 <option value="Lost Item Found">🔍 Lost Item Found</option>
               </select>
@@ -659,19 +660,26 @@ class InventoryManager {
           </div>
           <div>
             <label style="display: block; font-size: 11.5px; font-weight: 700; margin-bottom: 4px;">TYPE *</label>
-            <select id="f-type" class="form-control">
-              <option value="OH">OH (Overhead)</option>
+            <select id="f-type" class="form-control" onchange="window.inventoryManager.onGroundTypeChanged()">
+              <option value="OH" selected>OH (Overhead)</option>
               <option value="UG">UG (Underground)</option>
             </select>
           </div>
         </div>
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
-          <div>
-            <label style="display: block; font-size: 11.5px; font-weight: 700; margin-bottom: 4px;">SIZE / CONDUCTOR</label>
+          <div id="group-ground-size">
+            <label style="display: block; font-size: 11.5px; font-weight: 700; margin-bottom: 4px;">SIZE / CONDUCTOR (OH)</label>
             <select id="f-size" class="form-control">
-              <option value="2/0">2/0</option>
               <option value="4/0" selected>4/0</option>
+              <option value="2/0">2/0</option>
+            </select>
+          </div>
+          <div id="group-ground-kv" style="display: none;">
+            <label style="display: block; font-size: 11.5px; font-weight: 700; margin-bottom: 4px;">VOLTAGE RATING (UG)</label>
+            <select id="f-kv" class="form-control">
+              <option value="15KV" selected>15KV</option>
+              <option value="25KV">25KV</option>
             </select>
           </div>
           <div>
@@ -682,7 +690,7 @@ class InventoryManager {
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
           <div>
-            <label style="display: block; font-size: 11.5px; font-weight: 700; margin-bottom: 4px;">TEST DATE *</label>
+            <label style="display: block; font-size: 11.5px; font-weight: 700; margin-bottom: 4px;">TEST DATE * (1-YR CYCLE)</label>
             <input type="date" id="f-test-date" class="form-control" value="${todayIso}" onchange="window.inventoryManager.updatePreview()">
           </div>
           <div>
@@ -855,9 +863,28 @@ class InventoryManager {
         notesInput.placeholder = 'Optional details (e.g., Paired from glove #1024)...';
       } else if (originVal === 'Lost Item Found') {
         notesInput.placeholder = 'Optional details (e.g., Found in truck #4 / Bozeman dock)...';
+      } else if (originVal === 'Not New') {
+        notesInput.placeholder = 'Optional details (e.g., Existing ground set, transferred, re-entered)...';
       } else {
         notesInput.placeholder = 'Optional additional notes (e.g., PO #)...';
       }
+    }
+    this.updatePreview();
+  }
+
+  onGroundTypeChanged() {
+    const typeVal = document.getElementById('f-type') ? document.getElementById('f-type').value : 'OH';
+    const sizeGroup = document.getElementById('group-ground-size');
+    const kvGroup = document.getElementById('group-ground-kv');
+    const lengthInput = document.getElementById('f-length');
+    if (typeVal === 'OH') {
+      if (sizeGroup) sizeGroup.style.display = 'block';
+      if (kvGroup) kvGroup.style.display = 'none';
+      if (lengthInput && lengthInput.value === "6'") lengthInput.value = "6 ft";
+    } else if (typeVal === 'UG') {
+      if (sizeGroup) sizeGroup.style.display = 'none';
+      if (kvGroup) kvGroup.style.display = 'block';
+      if (lengthInput) lengthInput.value = "6 ft";
     }
     this.updatePreview();
   }
@@ -1081,15 +1108,17 @@ class InventoryManager {
       };
     } else if (cat === 'grounds') {
       const gType = document.getElementById('f-type') ? document.getElementById('f-type').value : 'OH';
-      const size = document.getElementById('f-size') ? document.getElementById('f-size').value : '4/0';
+      const size = (gType === 'OH' && document.getElementById('f-size')) ? document.getElementById('f-size').value : '';
+      const kv = (gType === 'UG' && document.getElementById('f-kv')) ? document.getElementById('f-kv').value : '';
       const len = document.getElementById('f-length') ? document.getElementById('f-length').value.trim() : '6 ft';
 
       newRow = {
         'Serial #': itemNum,
         'Item #': itemNum,
         'Type': gType,
+        'Type (OH/UG)': gType,
         'Size': size,
-        'KV': '',
+        'KV': kv,
         'Length': len,
         'Test Date': testDate,
         'Date Assigned': dateAssigned || testDate,

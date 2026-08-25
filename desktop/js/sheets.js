@@ -253,8 +253,36 @@ class SheetNavigator {
         this.sortDir = 'asc';
       }
       this.multiSort = null;
-    } else if (type === 'type') {
-      const col = findCol(['item type', 'cert type', 'certification type', 'training topic', 'topic', 'type']);
+    } else if (type === 'type' || type === 'typeOHUG') {
+      const col = findCol(['type (oh/ug)', 'type(oh/ug)', 'type', 'oh/ug', 'oh / ug', 'ground type', 'item type', 'cert type', 'certification type', 'training topic', 'topic']);
+      if (this.sortCol === col) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.sortCol = col;
+        this.sortDir = 'asc';
+      }
+      this.multiSort = null;
+    } else if (type === 'typeSize') {
+      const typeCol = findCol(['type (oh/ug)', 'type(oh/ug)', 'type', 'oh/ug', 'oh / ug', 'ground type', 'class']);
+      const sizeCol = findCol(['size']);
+      if (this.multiSort && this.multiSort[0] === typeCol && this.multiSort[1] === sizeCol) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.multiSort = [typeCol, sizeCol];
+        this.sortCol = null;
+        this.sortDir = 'asc';
+      }
+    } else if (type === 'length') {
+      const col = findCol(['length', 'len']);
+      if (this.sortCol === col) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.sortCol = col;
+        this.sortDir = 'asc';
+      }
+      this.multiSort = null;
+    } else if (type === 'testDate') {
+      const col = findCol(['test date', 'test', 'cal date', 'calibration date']);
       if (this.sortCol === col) {
         this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
       } else {
@@ -550,7 +578,7 @@ class SheetNavigator {
     const sizeCol = headers.find(h => h.toLowerCase() === 'size');
     const classCol = headers.find(h => {
       const hl = h.toLowerCase();
-      return hl === 'class' || hl === 'kv' || hl === 'model' || hl === 'type';
+      return hl === 'class' || hl === 'kv' || hl === 'model' || hl === 'type' || hl.includes('type') || hl.includes('oh/ug');
     });
     const locCol = headers.find(h => h.toLowerCase() === 'location');
 
@@ -585,7 +613,7 @@ class SheetNavigator {
       }
     }
 
-    // 2. Class / KV Dropdown
+    // 2. Class / KV / Type Dropdown
     const classGroup = document.getElementById('filter-group-class');
     const classSelect = document.getElementById('filter-class-select');
     const classLabel = document.getElementById('filter-class-label');
@@ -593,7 +621,16 @@ class SheetNavigator {
       if (classCol) {
         classGroup.style.display = 'flex';
         if (classLabel) {
-          classLabel.textContent = (classCol.toLowerCase() === 'kv' ? 'KV:' : (classCol.toLowerCase() === 'model' ? 'Model:' : (classCol.toLowerCase() === 'type' ? 'Type:' : 'Class:')));
+          const clLower = classCol.toLowerCase();
+          if (clLower.includes('oh/ug') || clLower === 'type' || clLower.includes('type')) {
+            classLabel.textContent = (this.currentSheetKey === 'grounds' ? 'Type (OH/UG):' : 'Type:');
+          } else if (clLower === 'kv') {
+            classLabel.textContent = 'KV:';
+          } else if (clLower === 'model') {
+            classLabel.textContent = 'Model:';
+          } else {
+            classLabel.textContent = 'Class:';
+          }
         }
         const classCounts = {};
         tableData.rows.forEach(r => {
@@ -1087,7 +1124,7 @@ class SheetNavigator {
       if (this.filterClass && this.filterClass !== 'all') {
         const targetClass = this.filterClass.toLowerCase();
         rows = rows.filter(r => {
-          const cVal = String(r['Class'] || r['KV'] || r['Model'] || r['Type'] || '').trim().toLowerCase();
+          const cVal = String(r['Class'] || r['KV'] || r['Model'] || r['Type'] || r['Type (OH/UG)'] || r['Type(OH/UG)'] || '').trim().toLowerCase();
           return cVal === targetClass;
         });
       }
@@ -1336,7 +1373,36 @@ class SheetNavigator {
           <button class="btn btn-secondary ${isChangeOutSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('changeOutDate')">📅 Changeout Date${dirArrow(isChangeOutSorted)}</button>
         </div>
       `;
-    } else if (['hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(this.currentSheetKey)) {
+    } else if (this.currentSheetKey === 'grounds') {
+      const isTypeSorted = this.sortCol && ['type', 'oh', 'ug'].some(k => this.sortCol.toLowerCase().includes(k));
+      const isTypeSizeSorted = this.multiSort && this.multiSort[0]?.toLowerCase().includes('type') && this.multiSort[1]?.toLowerCase().includes('size');
+      const isItemSorted = this.sortCol && ['item #', 'item', 'serial #', 'serial'].some(k => this.sortCol.toLowerCase().includes(k));
+      const isSizeSorted = this.sortCol && this.sortCol.toLowerCase() === 'size';
+      const isKvSorted = this.sortCol && this.sortCol.toLowerCase() === 'kv';
+      const isLengthSorted = this.sortCol && this.sortCol.toLowerCase().includes('length');
+      const isLocSorted = this.sortCol && this.sortCol.toLowerCase().includes('location');
+      const isStatSorted = this.sortCol && this.sortCol.toLowerCase().includes('status');
+      const isAssignedSorted = this.sortCol && this.sortCol.toLowerCase().includes('assigned');
+      const isTestSorted = this.sortCol && (this.sortCol.toLowerCase().includes('test date') || this.sortCol.toLowerCase() === 'test');
+      const isChangeOutSorted = this.sortCol && (this.sortCol.toLowerCase().includes('change out') || this.sortCol.toLowerCase().includes('changeout'));
+
+      presetBarHtml = `
+        <div style="padding: 8px 16px; background-color: var(--bg-secondary); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 6px; font-size: 12px; overflow-x: auto; flex-wrap: wrap;">
+          <span style="color: var(--text-muted); font-weight: 600; white-space: nowrap;">⚡ Quick Sort:</span>
+          <button class="btn btn-secondary ${isTypeSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('type')">⚡ Type (OH / UG)${dirArrow(isTypeSorted)}</button>
+          <button class="btn btn-secondary ${isTypeSizeSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('typeSize')">⚡+📏 Type then Size${dirArrow(isTypeSizeSorted)}</button>
+          <button class="btn btn-secondary ${isItemSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('itemNum')">🔢 Serial #${dirArrow(isItemSorted)}</button>
+          <button class="btn btn-secondary ${isSizeSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('size')">📏 Size${dirArrow(isSizeSorted)}</button>
+          <button class="btn btn-secondary ${isKvSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('kv')">⚡ KV${dirArrow(isKvSorted)}</button>
+          <button class="btn btn-secondary ${isLengthSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('length')">📐 Length${dirArrow(isLengthSorted)}</button>
+          <button class="btn btn-secondary ${isLocSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('location')">📍 Location${dirArrow(isLocSorted)}</button>
+          <button class="btn btn-secondary ${isStatSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('status')">🏷️ Status${dirArrow(isStatSorted)}</button>
+          <button class="btn btn-secondary ${isAssignedSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('assignedTo')">👤 Assigned To${dirArrow(isAssignedSorted)}</button>
+          <button class="btn btn-secondary ${isTestSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('testDate')">📅 Test Date${dirArrow(isTestSorted)}</button>
+          <button class="btn btn-secondary ${isChangeOutSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('changeOutDate')">📅 Changeout Date${dirArrow(isChangeOutSorted)}</button>
+        </div>
+      `;
+    } else if (['hv_testers', 'phasing_sets', 'aed', 'hot_sticks'].includes(this.currentSheetKey)) {
       const isItemSorted = this.sortCol && ['item #', 'item', 'serial #'].some(k => this.sortCol.toLowerCase().includes(k));
       const isLocSorted = this.sortCol && this.sortCol.toLowerCase().includes('location');
       const isStatSorted = this.sortCol && this.sortCol.toLowerCase().includes('status');
