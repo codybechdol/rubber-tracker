@@ -328,9 +328,16 @@ class SafetyEmailsEngine {
 
   openProcessEmailsModal() {
     const modal = document.getElementById('process-safety-emails-modal');
+    const modalBox = document.getElementById('process-safety-emails-modal-box');
+    const titleEl = document.getElementById('process-safety-emails-modal-title');
+    const iconEl = document.getElementById('process-safety-emails-modal-icon');
     const body = document.getElementById('process-safety-emails-modal-body');
     const footer = document.getElementById('process-safety-emails-modal-footer');
     if (!modal || !body) return;
+
+    if (modalBox) modalBox.style.maxWidth = '740px';
+    if (titleEl) titleEl.textContent = 'Process Safety Emails (Gmail Scanner)';
+    if (iconEl) iconEl.textContent = '📬';
 
     const complianceTable = this.db.getTable('safety_compliance');
     const jhaTable = this.db.getTable('jha_log');
@@ -1083,6 +1090,7 @@ class SafetyEmailsEngine {
    * Opens the Safety Logs viewer modal directly from the toolbar.
    */
   openSafetyLogsModal() {
+    this.isProcessing = false;
     this.currentLogs = this.extractLogsFromLocalDB();
     this.activeCategoryFilter = 'all';
     this.selectedMonthFilter = 'all';
@@ -1090,9 +1098,16 @@ class SafetyEmailsEngine {
     this.searchQuery = '';
 
     const modal = document.getElementById('process-safety-emails-modal');
+    const modalBox = document.getElementById('process-safety-emails-modal-box');
+    const titleEl = document.getElementById('process-safety-emails-modal-title');
+    const iconEl = document.getElementById('process-safety-emails-modal-icon');
     const body = document.getElementById('process-safety-emails-modal-body');
     const footer = document.getElementById('process-safety-emails-modal-footer');
     if (!modal || !body) return;
+
+    if (modalBox) modalBox.style.maxWidth = '1120px';
+    if (titleEl) titleEl.textContent = 'Safety Documentation & Complete Audit Log';
+    if (iconEl) iconEl.textContent = '📋';
 
     modal.style.display = 'flex';
 

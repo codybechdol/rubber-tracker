@@ -794,13 +794,13 @@
     </div>
   </div>
 
-  <!-- Process Safety Emails Modal -->
+  <!-- Process Safety Emails & Safety Logs Modal -->
   <div id="process-safety-emails-modal" class="modal-overlay">
-    <div class="modal-box" style="max-width: 740px; width: 92%; max-height: 90vh;">
+    <div class="modal-box" id="process-safety-emails-modal-box" style="max-width: 1120px; width: 95%; max-height: 90vh;">
       <div class="modal-header" style="background: linear-gradient(135deg, #065f46 0%, #064e3b 100%); color: white;">
         <div style="display: flex; align-items: center; gap: 8px;">
-          <span style="font-size: 18px;">📬</span>
-          <span style="font-weight: 800; font-size: 15px;">Process Safety Emails (Gmail Scanner)</span>
+          <span id="process-safety-emails-modal-icon" style="font-size: 18px;">📋</span>
+          <span id="process-safety-emails-modal-title" style="font-weight: 800; font-size: 15px;">Safety Documentation & Audit Logs</span>
         </div>
         <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.2); border: none; color: white; cursor: pointer;" onclick="window.safetyComplianceEngine.closeProcessEmailsModal()">✕</button>
       </div>
