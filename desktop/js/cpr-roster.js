@@ -47,40 +47,28 @@ class CprRosterEngine {
     const tasksTable = this.db.getTable('tasks');
     const snap = this.db.getSnapshot ? this.db.getSnapshot() : null;
 
-    // 1. Build map of CPR / 1st Aid cert dates from expiring_certs (supporting both wide and tall formats)
-    const certsMap = {};
+    // 1. Build comprehensive map of CPR / 1st Aid cert records from expiring_certs
+    // expiring_certs rows typically have: Employee Name, Item Type (CPR, 1st Aid), Expiration Date, Status, Days Until Expiration
+    const certsList = [];
     if (certsTable && certsTable.rows) {
       certsTable.rows.forEach(r => {
-        const name = this.extractEmployeeName(r).toLowerCase();
-        if (!name) return;
+        const empName = this.extractEmployeeName(r);
+        if (!empName) return;
 
-        if (!certsMap[name]) {
-          certsMap[name] = { cpr: null, firstAid: null };
-        }
+        const itemType = String(r['Item Type'] || r['Item'] || r['Cert Type'] || r['Type'] || r['Cert'] || '').trim();
+        const expDate = r['Expiration Date'] || r['Expiration'] || r['Exp Date'] || r['Change Out Date'] || r['Date'] || null;
+        const acqDate = r['Date Acquired'] || r['Acquired Date'] || r['Test Date'] || r['Issue Date'] || null;
+        const rawDays = r['Days Until Expiration'] || r['Days Left'] || r['Days'] || null;
+        const status = String(r['Status'] || '').trim();
 
-        // Check if tall format (row per cert)
-        const certType = String(r['Cert Type'] || r['Type'] || r['Cert'] || '').toLowerCase();
-        const expDate = r['Expiration Date'] || r['Expiration'] || r['Change Out Date'] || r['Date'] || null;
-        if (certType) {
-          if (certType.includes('cpr')) certsMap[name].cpr = expDate;
-          if (certType.includes('1st aid') || certType.includes('first aid')) certsMap[name].firstAid = expDate;
-        }
-
-        // Check wide format (columns for each cert)
-        Object.keys(r).forEach(k => {
-          const kLow = k.toLowerCase();
-          if (kLow === 'cpr' || kLow === 'cpr exp' || kLow === 'cpr expiration') {
-            if (r[k]) certsMap[name].cpr = r[k];
-          }
-          if (kLow === '1st aid' || kLow === 'first aid' || kLow === '1st aid exp' || kLow === 'first aid exp') {
-            if (r[k]) certsMap[name].firstAid = r[k];
-          }
-          if (kLow.includes('1st aid / cpr') || kLow.includes('cpr / 1st aid') || kLow.includes('cpr/1st aid')) {
-            if (r[k]) {
-              certsMap[name].cpr = r[k];
-              certsMap[name].firstAid = r[k];
-            }
-          }
+        certsList.push({
+          employeeName: empName,
+          itemType: itemType,
+          expDate: expDate,
+          acqDate: acqDate,
+          rawDays: rawDays,
+          status: status,
+          row: r
         });
       });
     }
@@ -96,10 +84,10 @@ class CprRosterEngine {
 
         if (status !== 'completed' && status !== 'complete') {
           if (topic.includes('cpr') || topic.includes('first aid') || topic.includes('1st aid')) {
-            if (lead) scheduledMap[lead] = true;
+            if (lead) scheduledMap[lead.toLowerCase().trim()] = true;
             if (attendees) {
               attendees.split(',').forEach(a => {
-                const aName = a.trim();
+                const aName = a.toLowerCase().trim();
                 if (aName) scheduledMap[aName] = true;
               });
             }
@@ -123,7 +111,7 @@ class CprRosterEngine {
       });
     }
 
-    // 3. Collect employee roster from employees table or expiring_certs
+    // 3. Collect raw employees from employees table or expiring_certs
     let rawEmployees = [];
     if (empTable && empTable.rows && empTable.rows.length > 0) {
       rawEmployees = empTable.rows;
@@ -142,43 +130,101 @@ class CprRosterEngine {
       const rawName = this.extractEmployeeName(r);
       if (!rawName) return;
 
-      const normName = rawName.toLowerCase();
+      const normName = this.normalizeName(rawName);
       if (seenNames.has(normName)) return;
       seenNames.add(normName);
 
       const location = String(r['Location'] || r['City'] || r['Area'] || '').trim();
       const locLower = location.toLowerCase();
 
-      // Skip previous employees
+      // Skip previous employees and dummy system rows
       if (locLower === 'previous employee' || locLower.includes('previous')) return;
+      if (normName === 'lost' || normName === 'in testing' || normName.includes('system placeholder')) return;
 
       const jobNumber = String(r['Job Number'] || r['Job #'] || r['Crew'] || r['Crew #'] || '').trim();
+      if (jobNumber.startsWith('002-') && (normName === 'lost' || normName.includes('destroyed'))) return;
+
       const phone = String(r['Phone Number'] || r['Phone'] || r['Cell Phone'] || r['Cell'] || r['Phone #'] || '').trim();
       const email = String(r['Email Address'] || r['Email'] || r['MP Email'] || r['Notification Emails'] || '').trim();
 
       // Parse first & last name
       const nameParts = this.parseEmployeeName(rawName);
 
-      // Lookup cert info
-      const certInfo = certsMap[normName] || certsMap[`${nameParts.lastName.toLowerCase()}, ${nameParts.firstName.toLowerCase()}`] || certsMap[`${nameParts.firstName.toLowerCase()} ${nameParts.lastName.toLowerCase()}`] || {};
+      // Correlate with all CPR & 1st Aid cert records using flexible fuzzy name matching
+      let cprCert = null;
+      let firstAidCert = null;
 
-      const cprDateStr = certInfo.cpr || null;
-      const firstAidDateStr = certInfo.firstAid || null;
+      certsList.forEach(c => {
+        if (this.isNameMatch(c.employeeName, rawName)) {
+          const tLow = c.itemType.toLowerCase();
+          if (tLow.includes('cpr') && !cprCert) {
+            cprCert = c;
+          }
+          if ((tLow.includes('1st aid') || tLow.includes('first aid')) && !firstAidCert) {
+            firstAidCert = c;
+          }
+          // Also check composite or wide columns if present on row
+          if (!cprCert && (c.row['CPR'] || c.row['CPR Exp'])) {
+            cprCert = { expDate: c.row['CPR'] || c.row['CPR Exp'], status: '' };
+          }
+          if (!firstAidCert && (c.row['1st Aid'] || c.row['First Aid'] || c.row['1st Aid Exp'])) {
+            firstAidCert = { expDate: c.row['1st Aid'] || c.row['First Aid'] || c.row['1st Aid Exp'], status: '' };
+          }
+        }
+      });
+
+      const cprDateStr = cprCert ? String(cprCert.expDate || '').trim() : '';
+      const firstAidDateStr = firstAidCert ? String(firstAidCert.expDate || '').trim() : '';
 
       const cprDate = this.parseDate(cprDateStr);
-      const isExpired = cprDate ? (cprDate < now) : false;
-      const isExpiringSoon = cprDate ? (cprDate <= ninetyDaysFromNow && !isExpired) : false;
-      const isScheduled = scheduledMap[normName] || scheduledMap[`${nameParts.firstName.toLowerCase()} ${nameParts.lastName.toLowerCase()}`] || false;
+      const firstAidDate = this.parseDate(firstAidDateStr);
+
+      // Check if scheduled
+      const isScheduled = !!(scheduledMap[normName] || scheduledMap[`${nameParts.firstName.toLowerCase()} ${nameParts.lastName.toLowerCase()}`] || scheduledMap[rawName.toLowerCase()]);
+
+      // Calculate status for CPR and 1st Aid
+      const cprExpired = cprDate ? (cprDate < now) : (cprCert && String(cprCert.status || '').toLowerCase().includes('expired'));
+      const cprExpiringSoon = cprDate ? (cprDate <= ninetyDaysFromNow && !cprExpired) : (cprCert && (String(cprCert.status || '').toLowerCase().includes('warning') || String(cprCert.status || '').toLowerCase().includes('upcoming')));
+
+      const faExpired = firstAidDate ? (firstAidDate < now) : (firstAidCert && String(firstAidCert.status || '').toLowerCase().includes('expired'));
+      const faExpiringSoon = firstAidDate ? (firstAidDate <= ninetyDaysFromNow && !faExpired) : (firstAidCert && (String(firstAidCert.status || '').toLowerCase().includes('warning') || String(firstAidCert.status || '').toLowerCase().includes('upcoming')));
 
       let status = 'none';
+      let statusDetails = '';
+
       if (isScheduled) {
         status = 'scheduled';
-      } else if (isExpired) {
+        statusDetails = 'Scheduled in Training';
+      } else if (cprExpired || faExpired) {
         status = 'expired';
-      } else if (isExpiringSoon) {
+        if (cprExpired && faExpired) {
+          statusDetails = `CPR: ${cprDateStr || 'Expired'} · 1st Aid: ${firstAidDateStr || 'Expired'}`;
+        } else if (cprExpired) {
+          statusDetails = `CPR: ${cprDateStr || 'Expired'}`;
+        } else {
+          statusDetails = `1st Aid: ${firstAidDateStr || 'Expired'}`;
+        }
+      } else if (cprExpiringSoon || faExpiringSoon) {
         status = 'expiring';
-      } else if (cprDate) {
+        if (cprExpiringSoon && faExpiringSoon) {
+          statusDetails = `CPR: ${cprDateStr} · 1st Aid: ${firstAidDateStr}`;
+        } else if (cprExpiringSoon) {
+          statusDetails = `CPR: ${cprDateStr}`;
+        } else {
+          statusDetails = `1st Aid: ${firstAidDateStr}`;
+        }
+      } else if (cprDate || firstAidDate) {
         status = 'valid';
+        if (cprDate && firstAidDate) {
+          statusDetails = `CPR: ${cprDateStr} · 1st Aid: ${firstAidDateStr}`;
+        } else if (cprDate) {
+          statusDetails = `CPR: ${cprDateStr}`;
+        } else {
+          statusDetails = `1st Aid: ${firstAidDateStr}`;
+        }
+      } else {
+        status = 'none';
+        statusDetails = 'No Date on File';
       }
 
       // Candidate if overdue, expiring within 90 days, scheduled, or has no record
@@ -196,8 +242,9 @@ class CprRosterEngine {
         cprDateStr: cprDateStr,
         firstAidDateStr: firstAidDateStr,
         status: status,
+        statusDetails: statusDetails,
         isCandidate: isCandidate,
-        selected: isCandidate // Pre-select candidates by default
+        selected: (status === 'expired' || status === 'expiring' || status === 'scheduled') // Pre-select overdue/expiring by default
       });
     });
 
@@ -207,24 +254,33 @@ class CprRosterEngine {
         const rawName = this.extractEmployeeName(r);
         if (!rawName) return;
 
-        const normName = rawName.toLowerCase();
+        const normName = this.normalizeName(rawName);
         if (seenNames.has(normName)) return;
         seenNames.add(normName);
 
+        if (normName === 'lost' || normName === 'in testing' || normName.includes('placeholder')) return;
+
         const nameParts = this.parseEmployeeName(rawName);
-        const certInfo = certsMap[normName] || {};
-        const cprDateStr = certInfo.cpr || null;
-        const firstAidDateStr = certInfo.firstAid || null;
-        const cprDate = this.parseDate(cprDateStr);
-        const isExpired = cprDate ? (cprDate < now) : false;
-        const isExpiringSoon = cprDate ? (cprDate <= ninetyDaysFromNow && !isExpired) : false;
+        const itemType = String(r['Item Type'] || r['Type'] || '').toLowerCase();
+        const expDate = r['Expiration Date'] || r['Expiration'] || r['Change Out Date'] || null;
+        const d = this.parseDate(expDate);
 
         let status = 'none';
-        if (isExpired) status = 'expired';
-        else if (isExpiringSoon) status = 'expiring';
-        else if (cprDate) status = 'valid';
+        let statusDetails = '';
+        if (itemType.includes('cpr') || itemType.includes('1st aid') || itemType.includes('first aid')) {
+          if (d && d < now) {
+            status = 'expired';
+            statusDetails = `${r['Item Type'] || 'Cert'}: ${expDate || 'Expired'}`;
+          } else if (d && d <= ninetyDaysFromNow) {
+            status = 'expiring';
+            statusDetails = `${r['Item Type'] || 'Cert'}: ${expDate}`;
+          } else if (d) {
+            status = 'valid';
+            statusDetails = `${r['Item Type'] || 'Cert'}: ${expDate}`;
+          }
+        }
 
-        const isCandidate = isExpired || isExpiringSoon || status === 'none';
+        const isCandidate = status === 'expired' || status === 'expiring' || status === 'none';
 
         this.employeesData.push({
           id: 10000 + idx,
@@ -235,11 +291,12 @@ class CprRosterEngine {
           phone: String(r['Phone'] || '').trim(),
           location: String(r['Location'] || '').trim(),
           jobNumber: String(r['Job Number'] || r['Job #'] || '').trim(),
-          cprDateStr: cprDateStr,
-          firstAidDateStr: firstAidDateStr,
+          cprDateStr: expDate,
+          firstAidDateStr: '',
           status: status,
+          statusDetails: statusDetails || 'No Date on File',
           isCandidate: isCandidate,
-          selected: isCandidate
+          selected: (status === 'expired' || status === 'expiring')
         });
       });
     }
@@ -263,21 +320,53 @@ class CprRosterEngine {
     ).trim();
   }
 
+  normalizeName(name) {
+    if (!name) return '';
+    return String(name)
+      .toLowerCase()
+      .replace(/\(.*?\)/g, '')
+      .replace(/[^a-z0-9]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  isNameMatch(nameA, nameB) {
+    if (!nameA || !nameB) return false;
+    const normA = this.normalizeName(nameA);
+    const normB = this.normalizeName(nameB);
+    if (!normA || !normB) return false;
+    if (normA === normB) return true;
+
+    const partsA = normA.split(' ').filter(Boolean);
+    const partsB = normB.split(' ').filter(Boolean);
+
+    if (partsA.length >= 2 && partsB.length >= 2) {
+      if (partsA[0] === partsB[partsB.length - 1] && partsA[partsA.length - 1] === partsB[0]) return true;
+      if (partsA.join(' ') === partsB.reverse().join(' ')) return true;
+    }
+
+    if (normA.length > 5 && normB.length > 5) {
+      if (normA.includes(normB) || normB.includes(normA)) return true;
+    }
+
+    return false;
+  }
+
   /**
    * Splits employee name into first & last name.
    */
   parseEmployeeName(rawName) {
     if (!rawName) return { firstName: '', lastName: '' };
-    const str = rawName.trim();
+    const cleanStr = String(rawName).replace(/\(.*?\)/g, '').trim();
 
-    if (str.includes(',')) {
-      const parts = str.split(',');
+    if (cleanStr.includes(',')) {
+      const parts = cleanStr.split(',');
       const lastName = parts[0].trim();
       const firstName = (parts[1] || '').trim();
       return { firstName, lastName };
     }
 
-    const parts = str.split(/\s+/);
+    const parts = cleanStr.split(/\s+/);
     if (parts.length === 1) {
       return { firstName: parts[0], lastName: '' };
     }
@@ -291,8 +380,20 @@ class CprRosterEngine {
    * Safe date parser.
    */
   parseDate(val) {
-    if (!val) return null;
+    if (!val || val === 'N/A' || val === '—') return null;
     if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+    const s = String(val).trim();
+    if (s.includes('/')) {
+      const parts = s.split('/');
+      if (parts.length === 3) {
+        const m = parseInt(parts[0], 10) - 1;
+        const d = parseInt(parts[1], 10);
+        let y = parseInt(parts[2], 10);
+        if (y < 100) y += 2000;
+        const dt = new Date(y, m, d, 12, 0, 0);
+        return isNaN(dt.getTime()) ? null : dt;
+      }
+    }
     const d = new Date(val);
     return isNaN(d.getTime()) ? null : d;
   }
@@ -353,7 +454,7 @@ class CprRosterEngine {
           <!-- Selection Controls -->
           <div style="display: flex; align-items: center; gap: 4px;">
             <button class="btn btn-secondary" onclick="window.cprRosterEngine.selectCandidatesOnly()" style="font-size: 11px; font-weight: 600;" title="Pre-select all overdue and expiring employees">
-              ⚡ Pre-Select Candidates
+              ⚡ Select Overdue / Expiring
             </button>
             <button class="btn btn-secondary" onclick="window.cprRosterEngine.selectAll(true)" style="font-size: 11px;">
               ☑️ Select All
@@ -382,7 +483,7 @@ class CprRosterEngine {
                 <th>Email Address</th>
                 <th>Phone Number</th>
                 <th>Location / Crew</th>
-                <th style="width: 160px;">CPR / 1st Aid Status</th>
+                <th style="width: 220px;">CPR / 1st Aid Status</th>
               </tr>
             </thead>
             <tbody id="cpr-table-body">
@@ -426,7 +527,8 @@ class CprRosterEngine {
                (e.location && e.location.toLowerCase().includes(q)) ||
                (e.jobNumber && e.jobNumber.toLowerCase().includes(q)) ||
                (e.email && e.email.toLowerCase().includes(q)) ||
-               (e.phone && e.phone.includes(q));
+               (e.phone && e.phone.includes(q)) ||
+               (e.statusDetails && e.statusDetails.toLowerCase().includes(q));
       });
     }
     return list;
@@ -450,13 +552,13 @@ class CprRosterEngine {
     return list.map(emp => {
       let badgeHtml = '';
       if (emp.status === 'scheduled') {
-        badgeHtml = '<span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 11px;">📅 Scheduled</span>';
+        badgeHtml = `<span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 11px; font-weight: 700;">📅 Scheduled</span>`;
       } else if (emp.status === 'expired') {
-        badgeHtml = `<span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); font-size: 11px;">❌ Overdue (${emp.cprDateStr || 'Expired'})</span>`;
+        badgeHtml = `<span class="badge" style="background: rgba(239, 68, 68, 0.25); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.5); font-size: 11px; font-weight: 700;">🔴 Overdue (${this.escapeHtml(emp.statusDetails)})</span>`;
       } else if (emp.status === 'expiring') {
-        badgeHtml = `<span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fde68a; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 11px;">⏳ Expiring (${emp.cprDateStr || '< 90d'})</span>`;
+        badgeHtml = `<span class="badge" style="background: rgba(245, 158, 11, 0.25); color: #fde68a; border: 1px solid rgba(245, 158, 11, 0.5); font-size: 11px; font-weight: 700;">⏳ Expiring (${this.escapeHtml(emp.statusDetails)})</span>`;
       } else if (emp.status === 'valid') {
-        badgeHtml = `<span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #a7f3d0; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 11px;">✅ Valid (${emp.cprDateStr})</span>`;
+        badgeHtml = `<span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #a7f3d0; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 11px;">✅ Valid (${this.escapeHtml(emp.statusDetails)})</span>`;
       } else {
         badgeHtml = '<span class="badge" style="background: rgba(100, 116, 139, 0.2); color: #cbd5e1; border: 1px solid rgba(100, 116, 139, 0.3); font-size: 11px;">⚪ No Date on File</span>';
       }
@@ -526,11 +628,12 @@ class CprRosterEngine {
 
   selectCandidatesOnly() {
     this.employeesData.forEach(e => {
-      e.selected = e.isCandidate;
+      const shouldSelect = (e.status === 'expired' || e.status === 'expiring' || e.status === 'scheduled');
+      e.selected = shouldSelect;
       const row = document.getElementById(`cpr-row-${e.id}`);
-      if (row) row.style.background = e.isCandidate ? 'rgba(239, 68, 68, 0.08)' : '';
+      if (row) row.style.background = shouldSelect ? 'rgba(239, 68, 68, 0.08)' : '';
       const cb = document.querySelector(`.cpr-emp-checkbox[data-id="${e.id}"]`);
-      if (cb) cb.checked = e.isCandidate;
+      if (cb) cb.checked = shouldSelect;
     });
     const masterCb = document.getElementById('cpr-master-checkbox');
     if (masterCb) masterCb.checked = false;
