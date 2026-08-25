@@ -229,9 +229,16 @@ class EmployeeProfileEngine {
                 durationStr = this.formatDuration(days);
               }
             } else {
-              // Check if currently active in assignedEquipment
-              const isCurrentlyAssigned = assignedEquipment.some(ae => ae.histKey === def.histKey && ae.itemNum === itemNum);
-              if (isCurrentlyAssigned) {
+              // This is the latest historical event for this item
+              const rowAssignedLower = assignedTo.toLowerCase();
+              const rowNotesLower = (notes || '').toLowerCase();
+              const rowLocLower = (location || '').toLowerCase();
+              const isTerminatedState = rowAssignedLower.includes('shelf') || rowLocLower.includes('shelf') ||
+                                        rowAssignedLower.includes('test') || rowLocLower.includes('test') ||
+                                        rowAssignedLower.includes('retir') || rowNotesLower.includes('retir') ||
+                                        rowAssignedLower.includes('lost') || rowNotesLower.includes('lost');
+
+              if (!isTerminatedState) {
                 returnDateStr = 'Present';
                 returnStatus = 'Currently Active';
                 isCurrent = true;
@@ -240,6 +247,31 @@ class EmployeeProfileEngine {
                   const now = new Date();
                   const days = Math.max(0, Math.round((now.getTime() - issueDateObj.getTime()) / (1000 * 60 * 60 * 24)));
                   durationStr = this.formatDuration(days);
+                }
+
+                // Ensure item is present in assignedEquipment list so it appears in active section
+                const alreadyInAssigned = assignedEquipment.some(ae => ae.histKey === def.histKey && ae.itemNum === itemNum);
+                if (!alreadyInAssigned) {
+                  const eslId = String(row['ESL ID'] || row['ESLID'] || '').trim();
+                  const changeOutDate = String(row['Change Out Date'] || row['Changeout Date'] || row['Pad Expiration'] || 'N/A').trim();
+                  const testDate = String(row['Test Date'] || row['Calibration Date'] || 'N/A').trim();
+                  const itemStatus = String(row['Status'] || 'Assigned').trim();
+                  const itemLoc = String(row['Location'] || location || '').trim();
+
+                  assignedEquipment.push({
+                    eqType: def.title,
+                    eqIcon: def.icon,
+                    eqKey: def.key,
+                    histKey: def.histKey,
+                    itemNum: itemNum,
+                    eslId: eslId,
+                    specs: specs.join(' · ') || 'Standard',
+                    dateAssigned: issueDateStr,
+                    changeOutDate: changeOutDate,
+                    testDate: testDate,
+                    status: itemStatus,
+                    location: itemLoc
+                  });
                 }
               } else {
                 returnDateStr = '—';

@@ -845,7 +845,7 @@ class SafetyEmailsEngine {
     const footer = document.getElementById('process-safety-emails-modal-footer');
     if (!modal || !body) return;
 
-    modal.classList.remove('hidden');
+    modal.style.display = 'flex';
 
     const jhaCount = this.currentLogs.filter(l => l.type === 'JHA').length;
     const weeklyCount = this.currentLogs.filter(l => l.type === 'Weekly Safety Meeting').length;
