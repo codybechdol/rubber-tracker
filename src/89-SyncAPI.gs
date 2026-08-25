@@ -1470,13 +1470,17 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
 
             var newRowIdx = lastRow + 1;
             if (sheet.getMaxRows() < newRowIdx) {
-              sheet.insertRowsAfter(sheet.getMaxRows(), newRowIdx - sheet.getMaxRows());
+              sheet.insertRowsAfter(sheet.getMaxRows(), Math.max(newRowIdx - sheet.getMaxRows(), 50));
             }
 
-            if (typeof safeWriteRowToTable === 'function') {
-              safeWriteRowToTable(sheet, newRowIdx, rowArray, headers);
-            } else {
+            try {
               sheet.getRange(newRowIdx, 1, 1, rowArray.length).setValues([rowArray]);
+            } catch (wErr) {
+              if (typeof safeWriteRowToTable === 'function') {
+                safeWriteRowToTable(sheet, newRowIdx, rowArray, headers);
+              } else {
+                sheet.appendRow(rowArray);
+              }
             }
             sheetsModified[sheetName] = true;
             appliedCount++;

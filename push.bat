@@ -68,7 +68,8 @@ echo.
 
 if %PUSH_RESULT% EQU 0 (
     echo [Step 4/4] Updating Web App Deployment...
-    call "%APPDATA%\npm\clasp.cmd" deploy -i AKfycby_F6C-8NnJnZZqem7KrMvslUK8G2pf3x65EqY1_DgDepNRlTTbYoVGb2soDd3PoAnR -d "Auto deployed by push.bat"
+    call "%APPDATA%\npm\clasp.cmd" deploy -i AKfycbxxU4x-0uNOmUZqX9ysD8xXenjadVSirVtueBAwTQ2tkR1EUxnk8-2NcWkxb5oNSpMt -d "Auto deployed by push.bat"
+    call "%APPDATA%\npm\clasp.cmd" deploy -i AKfycby_F6C-8NnJnZZqem7KrMvslUK8G2pf3x65EqY1_DgDepNRlTTbYoVGb2soDd3PoAnR -d "Auto deployed by push.bat" >nul 2>&1
     echo.
     echo ========================================
     echo SUCCESS! Files pushed and Web App deployed.
