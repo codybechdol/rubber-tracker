@@ -719,6 +719,34 @@ class ItemStatsEngine {
       }
     });
 
+    const activeItemRow = foundActive || groupRows[groupRows.length - 1] || {};
+    const curTestDate = activeItemRow['Test Date'] || activeItemRow['Calibration Date'] || activeItemRow['Date Tested'] || '';
+    const curDateAssigned = activeItemRow['Date Assigned'] || '';
+    const curStatus = activeItemRow['Status'] || (stats.currentState ? stats.currentState.label : 'On Shelf');
+    const curLocation = activeItemRow['Location'] || 'Helena';
+    const curAssignedTo = activeItemRow['Assigned To'] || curStatus;
+
+    const toIsoDate = (dStr) => {
+      if (!dStr || dStr === 'N/A') return '';
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dStr)) return dStr;
+      if (dStr.includes('/')) {
+        const parts = dStr.split('/');
+        if (parts.length === 3) {
+          const m = String(parseInt(parts[0], 10)).padStart(2, '0');
+          const d = String(parseInt(parts[1], 10)).padStart(2, '0');
+          let y = parseInt(parts[2], 10);
+          if (y < 100) y = 2000 + y;
+          return `${y}-${m}-${d}`;
+        }
+      }
+      const dt = new Date(dStr);
+      if (!isNaN(dt.getTime())) return dt.toISOString().split('T')[0];
+      return '';
+    };
+
+    const testDateIso = toIsoDate(curTestDate);
+    const dateAssignedIso = toIsoDate(curDateAssigned);
+
     let html = `
       <!-- Header Banner & Metadata -->
       <div style="background-color: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 10px; padding: 16px; margin-bottom: 20px;">
@@ -1368,7 +1396,7 @@ class ItemStatsEngine {
     if (newChgOut && changeOutHeader) row[changeOutHeader] = newChgOut;
 
     // Apply to rawGrid if exists
-    const rowIdx = row._rowIdx;
+    const rowIdx = row._rowIdx || (table.rows.indexOf(row) !== -1 ? table.rows.indexOf(row) + 2 : null);
     if (table.rawGrid && rowIdx && table.rawGrid[rowIdx - 1]) {
       const gRow = table.rawGrid[rowIdx - 1];
       table.headers.forEach((h, colIdx) => {
@@ -1402,6 +1430,11 @@ class ItemStatsEngine {
 
     // Auto-record history transition if status/assigned changed
     await this.db.recordItemHistoryEvent(sheetName, row, row['Notes'] || `Dates updated`);
+
+    // Persist snapshot to storage
+    if (this.db.snapshot) {
+      await this.db.setSnapshot(this.db.snapshot);
+    }
 
     // Refresh views
     if (window.sheetNavigator) {

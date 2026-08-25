@@ -700,6 +700,13 @@ class InventoryManager {
             <input type="date" id="f-test-date" class="form-control" value="${todayIso}" onchange="window.inventoryManager.updatePreview()">
           </div>
           <div>
+            <label style="display: block; font-size: 11.5px; font-weight: 700; margin-bottom: 4px;">DATE ASSIGNED</label>
+            <input type="date" id="f-date-assigned" class="form-control" value="${todayIso}" onchange="window.inventoryManager.updatePreview()">
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+          <div>
             <label style="display: block; font-size: 11.5px; font-weight: 700; margin-bottom: 4px;">STATUS</label>
             <select id="f-status" class="form-control" onchange="window.inventoryManager.onStatusChanged()">
               <option value="On Shelf" selected>On Shelf (Helena Stock)</option>
@@ -707,17 +714,15 @@ class InventoryManager {
               <option value="In Testing">In Testing</option>
             </select>
           </div>
-        </div>
-
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
           <div>
             <label style="display: block; font-size: 11.5px; font-weight: 700; margin-bottom: 4px;">LOCATION</label>
             <input type="text" id="f-location" class="form-control" value="Helena" oninput="window.inventoryManager.updatePreview()">
           </div>
-          <div>
-            <label style="display: block; font-size: 11.5px; font-weight: 700; margin-bottom: 4px;">ASSIGNED TO / CREW LEAD</label>
-            <input type="text" id="f-assigned-to" list="new-item-employees-datalist" class="form-control" value="On Shelf" oninput="window.inventoryManager.onAssignedToChanged()">
-          </div>
+        </div>
+
+        <div style="margin-bottom: 12px;">
+          <label style="display: block; font-size: 11.5px; font-weight: 700; margin-bottom: 4px;">ASSIGNED TO / CREW LEAD</label>
+          <input type="text" id="f-assigned-to" list="new-item-employees-datalist" class="form-control" value="On Shelf" oninput="window.inventoryManager.onAssignedToChanged()">
         </div>
 
         <div style="margin-bottom: 12px;">
@@ -759,6 +764,10 @@ class InventoryManager {
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
           <div>
+            <label style="display: block; font-size: 11.5px; font-weight: 700; margin-bottom: 4px;">DATE ASSIGNED</label>
+            <input type="date" id="f-date-assigned" class="form-control" value="${todayIso}" onchange="window.inventoryManager.updatePreview()">
+          </div>
+          <div>
             <label style="display: block; font-size: 11.5px; font-weight: 700; margin-bottom: 4px;">STATUS</label>
             <select id="f-status" class="form-control" onchange="window.inventoryManager.onStatusChanged()">
               <option value="On Shelf" selected>On Shelf (Helena Stock)</option>
@@ -766,15 +775,17 @@ class InventoryManager {
               <option value="In Testing">In Testing</option>
             </select>
           </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
           <div>
             <label style="display: block; font-size: 11.5px; font-weight: 700; margin-bottom: 4px;">LOCATION</label>
             <input type="text" id="f-location" class="form-control" value="Helena" oninput="window.inventoryManager.updatePreview()">
           </div>
-        </div>
-
-        <div style="margin-bottom: 12px;">
-          <label style="display: block; font-size: 11.5px; font-weight: 700; margin-bottom: 4px;">ASSIGNED TO / CREW LEAD</label>
-          <input type="text" id="f-assigned-to" list="new-item-employees-datalist" class="form-control" value="On Shelf" oninput="window.inventoryManager.onAssignedToChanged()">
+          <div>
+            <label style="display: block; font-size: 11.5px; font-weight: 700; margin-bottom: 4px;">ASSIGNED TO / CREW LEAD</label>
+            <input type="text" id="f-assigned-to" list="new-item-employees-datalist" class="form-control" value="On Shelf" oninput="window.inventoryManager.onAssignedToChanged()">
+          </div>
         </div>
 
         <div style="margin-bottom: 12px;">
