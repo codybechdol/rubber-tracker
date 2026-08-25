@@ -92,23 +92,24 @@
 
 ---
 
-### Phase 7: Training Tracking, Attendee Sync & Certifications Matrix
+### Phase 7: Training Tracking, Attendee Sync & Certifications Matrix ✅ *(Completed)*
 *Tracking certifications, annual refreshers, CPR/First Aid, and monthly training rosters.*
-- [x] ✅ `Training Tracking` sheet with dynamic header discovery
-- [x] ✅ Automated attendee list synchronization based on active crew rosters
-- [x] ✅ `Expiring Certs` matrix with visual traffic-light indicators (Red < 30 days, Yellow < 60 days)
-- [x] ✅ SMS notification dialog for expiring certifications (`DashboardSMSDialog.html`)
-- [x] ✅ Red Cross CPR CSV import and compliance verification
+- [x] ✅ `Training Tracking` sheet with dynamic header discovery and monthly dividers
+- [x] ✅ Automated attendee list and crew lead synchronization based on active crew rosters (`🔄 Sync Attendees` trigger)
+- [x] ✅ `Expiring Certs` matrix with visual traffic-light indicators (Red < 30 days, Yellow < 60 days) and multi-field quick sorters
+- [x] ✅ Standalone Red Cross CPR & 1st Aid CSV Class Roster Generator (`desktop/js/cpr-roster.js`, `RedCrossCprDialog.html`)
+- [x] ✅ Excel / CSV Certifications Matrix Importer with SheetJS, diff preview, and newer date preservation (`desktop/js/certs-import.js`, `ExpiringCertsImport.html`)
+- [x] ✅ SMS notification dialog with 1-click text templates for expiring certifications (`DashboardSMSDialog.html`, `sms-dialog.js`)
 
 ---
 
-### Phase 8: Smart Trip Planner & Route Optimization
+### Phase 8: Smart Trip Planner & Route Optimization ✅ *(Completed)*
 *Intelligent route planning, crew visit scheduling, and travel optimization across Montana.*
-- [x] ✅ Interactive visual Trip Planner (`TripPlanner.html` and desktop `trip-planner.js`)
-- [x] ✅ Configurable work schedules (`Mon-Thu` 4x10s vs `Tue-Fri` 4x10s)
-- [x] ✅ Montana drive-time matrix and return-to-Helena constraint solver
-- [x] ✅ Holiday / Blackout Day system with drag-and-drop protection
-- [x] ✅ Daily Accomplishments / Time Breakdown tracking
+- [x] ✅ Interactive visual Trip Planner with multi-week spanning (1 to 8 weeks) (`TripPlanner.html` and desktop `trip-planner.js`)
+- [x] ✅ Configurable work schedules (`Mon-Thu` 4x10s vs `Tue-Fri` 4x10s) with 1-click live toolbar toggle
+- [x] ✅ Montana drive-time matrix (35+ service towns) and return-to-Helena constraint solver
+- [x] ✅ Holiday / Blackout Day system with drag-and-drop protection and interactive manager (`🏖️ Holidays`)
+- [x] ✅ Daily Accomplishments / Timesheet Breakdown Generator with 1-click copy to clipboard (`desktop/js/time-breakdown.js`, `TimeBreakdown.html`)
 
 ---
 
