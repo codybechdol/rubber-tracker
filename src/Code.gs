@@ -11617,7 +11617,8 @@ function saveHistoryFast(silent, targetSheets) {
   }
 
   try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss) return;
     var glovesSheet = checkGloves ? ss.getSheetByName(SHEET_GLOVES) : null;
     var sleevesSheet = checkSleeves ? ss.getSheetByName(SHEET_SLEEVES) : null;
     var blanketsSheet = checkBlankets ? ss.getSheetByName(SHEET_BLANKETS) : null;
@@ -12961,7 +12962,8 @@ function formatDateNoonOrRaw(val) {
  * @return {number} Number of new entries added
  */
 function saveEmployeeHistoryFast() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) return 0;
   var employeesSheet = ss.getSheetByName('Employees');
   var historySheet = ss.getSheetByName('Employee History');
 
@@ -13162,7 +13164,8 @@ function saveEmployeeHistoryFast() {
  * @return {File} The backup file, or null on error
  */
 function createBackupSnapshotFast(forceFullCopy) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) return null;
 
   try {
     var ssName = ss.getName();
@@ -13178,12 +13181,12 @@ function createBackupSnapshotFast(forceFullCopy) {
     var backupFile = null;
 
     if (forceFullCopy === true || !lastBackupTime || (nowTime - lastBackupTime) > backupThrottleMs) {
-      ss.toast('Creating backup snapshot...', '💾 Backup in Progress', -1);
+      try { ss.toast('Creating backup snapshot...', '💾 Backup in Progress', -1); } catch (tErr) {}
       var backupFolder = getOrCreateBackupFolder();
       backupFile = DriveApp.getFileById(ss.getId()).makeCopy(backupName, backupFolder);
       scriptProps.setProperty('LAST_FULL_DRIVE_BACKUP_TIME', String(nowTime));
       logEvent('Full Drive Backup created: ' + backupName, 'INFO');
-      ss.toast('Backup created: ' + backupName, '✅ Backup Complete', 5);
+      try { ss.toast('Backup created: ' + backupName, '✅ Backup Complete', 5); } catch (tErr) {}
     } else {
       Logger.log('createBackupSnapshotFast: Full Drive copy throttled (last created ' + ((nowTime - lastBackupTime) / 1000).toFixed(0) + 's ago).');
     }
@@ -23371,15 +23374,16 @@ function archivePreviousEmployees() {
 function formatDateForHistory(dateValue) {
   if (!dateValue) return '';
   try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var tz = ss.getSpreadsheetTimeZone();
+    var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+    var tz = ss ? ss.getSpreadsheetTimeZone() : 'America/Denver';
 
     if (dateValue instanceof Date) {
+      if (isNaN(dateValue.getTime())) return '';
       return Utilities.formatDate(dateValue, tz, 'MM/dd/yyyy');
     }
 
-    var d = new Date(dateValue);
-    if (!isNaN(d.getTime())) {
+    var d = typeof parseDateNoon === 'function' ? parseDateNoon(dateValue) : new Date(dateValue);
+    if (d && !isNaN(d.getTime())) {
       return Utilities.formatDate(d, tz, 'MM/dd/yyyy');
     }
 

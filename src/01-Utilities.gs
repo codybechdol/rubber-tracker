@@ -224,18 +224,62 @@ const isEmployeePending = (hireDate) => {
 };
 
 /**
- * Parses a YYYY-MM-DD string into a Date at noon to avoid timezone shifting.
+ * Parses a date string (YYYY-MM-DD, MM/DD/YYYY, M/D/YY) or Date object into a Date at noon to avoid timezone shifting.
  * Google Apps Script runs in UTC but spreadsheets use local timezone.
  * Creating dates at midnight UTC can shift back one day in US timezones.
- * @param {string} dateStr - Date string in YYYY-MM-DD format
+ * @param {string|Date} dateStr - Date string or Date object
  * @returns {Date|null} - Parsed date at noon, or null if invalid
  */
 const parseDateNoon = (dateStr) => {
   if (!dateStr) return null;
-  const parts = String(dateStr).split('-');
-  if (parts.length !== 3) return null;
-  const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 12, 0, 0, 0);
-  return isNaN(d.getTime()) ? null : d;
+  if (dateStr instanceof Date) {
+    if (isNaN(dateStr.getTime())) return null;
+    return new Date(dateStr.getFullYear(), dateStr.getMonth(), dateStr.getDate(), 12, 0, 0, 0);
+  }
+  const str = String(dateStr).trim();
+  if (!str || str.toLowerCase() === 'n/a' || str === '-' || str === '—') return null;
+
+  // Handle slash-separated dates (MM/DD/YYYY, M/D/YY)
+  if (str.includes('/')) {
+    const parts = str.split('/');
+    if (parts.length === 3) {
+      const m = parseInt(parts[0], 10);
+      const d = parseInt(parts[1], 10);
+      let y = parseInt(parts[2], 10);
+      if (y < 100) y = y < 50 ? 2000 + y : 1900 + y;
+      if (!isNaN(m) && !isNaN(d) && !isNaN(y)) {
+        const dt = new Date(y, m - 1, d, 12, 0, 0, 0);
+        return isNaN(dt.getTime()) ? null : dt;
+      }
+    }
+  }
+
+  // Handle hyphen-separated dates (YYYY-MM-DD or MM-DD-YYYY)
+  if (str.includes('-')) {
+    const parts = str.split('-');
+    if (parts.length === 3) {
+      const p0 = parseInt(parts[0], 10);
+      const p1 = parseInt(parts[1], 10);
+      const p2 = parseInt(parts[2], 10);
+      if (p0 > 1000) {
+        // YYYY-MM-DD
+        const dt = new Date(p0, p1 - 1, p2, 12, 0, 0, 0);
+        return isNaN(dt.getTime()) ? null : dt;
+      } else {
+        // MM-DD-YYYY
+        let y = p2;
+        if (y < 100) y = y < 50 ? 2000 + y : 1900 + y;
+        const dt = new Date(y, p0 - 1, p1, 12, 0, 0, 0);
+        return isNaN(dt.getTime()) ? null : dt;
+      }
+    }
+  }
+
+  const fallback = new Date(str);
+  if (!isNaN(fallback.getTime())) {
+    return new Date(fallback.getFullYear(), fallback.getMonth(), fallback.getDate(), 12, 0, 0, 0);
+  }
+  return null;
 };
 
 /**

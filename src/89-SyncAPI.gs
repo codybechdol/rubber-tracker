@@ -277,17 +277,18 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
   }
 
   // 1. Conflict Detection Pre-Pass
+  var tz = ss ? (ss.getSpreadsheetTimeZone() || 'America/Denver') : 'America/Denver';
   function normalizeValForComparison(v) {
     if (v === null || v === undefined) return '';
     if (v instanceof Date) {
       if (isNaN(v.getTime())) return '';
-      return Utilities.formatDate(v, ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd');
+      return Utilities.formatDate(v, tz, 'yyyy-MM-dd');
     }
     var s = String(v).trim();
     if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s)) {
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(s) || s.includes('/')) {
       var dObj = typeof parseDateNoon === 'function' ? parseDateNoon(s) : new Date(s);
-      if (!isNaN(dObj.getTime())) return Utilities.formatDate(dObj, ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd');
+      if (dObj && !isNaN(dObj.getTime())) return Utilities.formatDate(dObj, tz, 'yyyy-MM-dd');
     }
     return s.toLowerCase();
   }
@@ -298,7 +299,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
       var cMut = mutations[cm];
       if (cMut.force) continue;
       var cSheetName = cMut.sheetName || '';
-      var cSheet = cSheetName ? ss.getSheetByName(cSheetName) : null;
+      var cSheet = cSheetName && ss ? ss.getSheetByName(cSheetName) : null;
       if (!cSheet) continue;
 
       if (cMut.action === 'UPDATE_CELL' && cMut.row && cMut.col && cMut.oldValue !== undefined && cMut.oldValue !== null) {
@@ -316,9 +317,9 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
             col: cMut.col,
             header: cMut.header || cMut.colName || ('Col ' + cMut.col),
             itemIdentifier: cMut.itemIdentifier || '',
-            serverValue: (curVal instanceof Date && !isNaN(curVal.getTime())) ? Utilities.formatDate(curVal, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy') : String(curVal || ''),
-            localValue: (cMut.value instanceof Date && !isNaN(cMut.value.getTime())) ? Utilities.formatDate(cMut.value, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy') : String(cMut.value || ''),
-            expectedValue: (cMut.oldValue instanceof Date && !isNaN(cMut.oldValue.getTime())) ? Utilities.formatDate(cMut.oldValue, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy') : String(cMut.oldValue || '')
+            serverValue: (curVal instanceof Date && !isNaN(curVal.getTime())) ? Utilities.formatDate(curVal, tz, 'MM/dd/yyyy') : String(curVal || ''),
+            localValue: (cMut.value instanceof Date && !isNaN(cMut.value.getTime())) ? Utilities.formatDate(cMut.value, tz, 'MM/dd/yyyy') : String(cMut.value || ''),
+            expectedValue: (cMut.oldValue instanceof Date && !isNaN(cMut.oldValue.getTime())) ? Utilities.formatDate(cMut.oldValue, tz, 'MM/dd/yyyy') : String(cMut.oldValue || '')
           });
         }
       }
@@ -700,36 +701,36 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
                   } else if (isGrounds) {
                     var gDate = curTestDate || curDateAssigned || mut.value;
                     if (gDate) {
-                      var gd = new Date(gDate);
-                      if (!isNaN(gd.getTime())) {
+                      var gd = typeof parseDateNoon === 'function' ? parseDateNoon(gDate) : new Date(gDate);
+                      if (gd && !isNaN(gd.getTime())) {
                         gd.setFullYear(gd.getFullYear() + 1);
-                        chgOut = Utilities.formatDate(gd, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+                        chgOut = Utilities.formatDate(gd, tz, 'MM/dd/yyyy');
                       }
                     }
                   } else if (isHotSticks) {
                     var hdDate = curTestDate || curDateAssigned || mut.value;
                     if (hdDate) {
-                      var hd = new Date(hdDate);
-                      if (!isNaN(hd.getTime())) {
+                      var hd = typeof parseDateNoon === 'function' ? parseDateNoon(hdDate) : new Date(hdDate);
+                      if (hd && !isNaN(hd.getTime())) {
                         hd.setFullYear(hd.getFullYear() + 2);
-                        chgOut = Utilities.formatDate(hd, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+                        chgOut = Utilities.formatDate(hd, tz, 'MM/dd/yyyy');
                       }
                     }
                   } else if (isHVTester || isPhasingSet) {
                     var calD = curTestDate || curDateAssigned || mut.value;
                     if (calD) {
-                      var cd = new Date(calD);
-                      if (!isNaN(cd.getTime())) {
+                      var cd = typeof parseDateNoon === 'function' ? parseDateNoon(calD) : new Date(calD);
+                      if (cd && !isNaN(cd.getTime())) {
                         cd.setFullYear(cd.getFullYear() + 10);
-                        chgOut = Utilities.formatDate(cd, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+                        chgOut = Utilities.formatDate(cd, tz, 'MM/dd/yyyy');
                       }
                     }
                   } else if (isAED) {
                     var padD = curTestDate || curDateAssigned || mut.value;
                     if (padD) {
-                      var pd = new Date(padD);
-                      if (!isNaN(pd.getTime())) {
-                        chgOut = Utilities.formatDate(pd, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+                      var pd = typeof parseDateNoon === 'function' ? parseDateNoon(padD) : new Date(padD);
+                      if (pd && !isNaN(pd.getTime())) {
+                        chgOut = Utilities.formatDate(pd, tz, 'MM/dd/yyyy');
                       }
                     }
                   } else if (typeof calculateChangeOutDate === 'function') {
