@@ -1358,249 +1358,302 @@ class InventoryManager {
    * lost, or reassigned (with a newer date than the active row), and automatically fixes the active
    * inventory row to match true reality.
    */
-  async reconcileInventoryWithHistory(tableKey = null) {
-    const categories = [
-      { key: 'gloves', histKey: 'gloves_history', name: 'Gloves', label: 'Rubber Gloves' },
-      { key: 'sleeves', histKey: 'sleeves_history', name: 'Sleeves', label: 'Rubber Sleeves' },
-      { key: 'blankets', histKey: 'blankets_history', name: 'Blankets', label: 'Blankets' },
-      { key: 'macks', histKey: 'macks_history', name: 'MACKs', label: 'MACKs' },
-      { key: 'hv_testers', histKey: 'hv_testers_history', name: 'HV Testers', label: 'HV Testers' },
-      { key: 'phasing_sets', histKey: 'phasing_sets_history', name: 'Phasing Sets', label: 'Phasing Sets' },
-      { key: 'aed', histKey: 'aed_history', name: 'AED', label: 'AED Units' },
-      { key: 'grounds', histKey: 'grounds_history', name: 'Grounds', label: 'Grounds' },
-      { key: 'hot_sticks', histKey: 'hot_sticks_history', name: 'Hot Sticks', label: 'Hot Sticks' }
-    ];
+  async reconcileInventoryWithHistory(tableKey = null, silent = false) {
+    try {
+      console.log('🔄 reconcileInventoryWithHistory started with tableKey:', tableKey);
 
-    const targetCategories = tableKey
-      ? categories.filter(c => c.key === tableKey || c.name.toLowerCase() === String(tableKey).toLowerCase())
-      : categories;
+      const categories = [
+        { key: 'gloves', histKey: 'gloves_history', name: 'Gloves', label: 'Rubber Gloves' },
+        { key: 'sleeves', histKey: 'sleeves_history', name: 'Sleeves', label: 'Rubber Sleeves' },
+        { key: 'blankets', histKey: 'blankets_history', name: 'Blankets', label: 'Blankets' },
+        { key: 'macks', histKey: 'macks_history', name: 'MACKs', label: 'MACKs' },
+        { key: 'hv_testers', histKey: 'hv_testers_history', name: 'HV Testers', label: 'HV Testers' },
+        { key: 'phasing_sets', histKey: 'phasing_sets_history', name: 'Phasing Sets', label: 'Phasing Sets' },
+        { key: 'aed', histKey: 'aed_history', name: 'AED', label: 'AED Units' },
+        { key: 'grounds', histKey: 'grounds_history', name: 'Grounds', label: 'Grounds' },
+        { key: 'hot_sticks', histKey: 'hot_sticks_history', name: 'Hot Sticks', label: 'Hot Sticks' }
+      ];
 
-    const reconciledItems = [];
+      // Normalize sheet/table key to match category
+      let cleanKey = String(tableKey || '').toLowerCase().trim().replace(/_swaps?$/, '').replace(/_history$/, '');
+      if (cleanKey === 'glove') cleanKey = 'gloves';
+      if (cleanKey === 'sleeve') cleanKey = 'sleeves';
+      if (cleanKey === 'blanket') cleanKey = 'blankets';
+      if (cleanKey === 'mack') cleanKey = 'macks';
+      if (cleanKey === 'ground') cleanKey = 'grounds';
+      if (cleanKey === 'hot_stick' || cleanKey === 'stick' || cleanKey === 'hotsticks') cleanKey = 'hot_sticks';
+      if (cleanKey === 'hv' || cleanKey === 'hv_tester') cleanKey = 'hv_testers';
+      if (cleanKey === 'phasing' || cleanKey === 'phasing_set') cleanKey = 'phasing_sets';
 
-    const getItemIdentifier = (r, headers) => {
-      const keys = ['Item #', 'Item#', 'Item', 'Items', 'Glove', 'Sleeve', 'Blanket', 'MACK', 'Serial #', 'Serial', 'Tag #', 'ESL ID'];
-      for (const k of keys) {
-        if (r[k] !== undefined && r[k] !== null && String(r[k]).trim() !== '') {
-          return String(r[k]).trim();
+      let targetCategories = cleanKey && cleanKey !== 'all' && cleanKey !== 'employees' && cleanKey !== 'job_tracking'
+        ? categories.filter(c => c.key === cleanKey || c.name.toLowerCase() === cleanKey)
+        : categories;
+
+      if (!targetCategories || targetCategories.length === 0) {
+        targetCategories = categories;
+      }
+
+      const reconciledItems = [];
+
+      const getItemIdentifier = (r, headers) => {
+        if (!r) return '';
+        const keys = ['Item #', 'Item#', 'Item', 'Items', 'Glove', 'Glove #', 'Sleeve', 'Sleeve #', 'Blanket', 'Blanket #', 'MACK', 'MACK #', 'Serial #', 'Serial', 'Tag #', 'ESL ID', 'ESLID'];
+        for (const k of keys) {
+          if (r[k] !== undefined && r[k] !== null && String(r[k]).trim() !== '') {
+            return String(r[k]).trim();
+          }
         }
-      }
-      if (headers && headers.length > 0 && r[headers[0]] !== undefined) {
-        return String(r[headers[0]]).trim();
-      }
-      return '';
-    };
+        for (const k in r) {
+          if (/item|glove|sleeve|blanket|mack|serial|tag/i.test(k) && r[k] !== undefined && r[k] !== null && String(r[k]).trim() !== '') {
+            return String(r[k]).trim();
+          }
+        }
+        if (headers && headers.length > 1 && r[headers[1]] !== undefined && String(r[headers[1]]).trim() !== '') {
+          return String(r[headers[1]]).trim();
+        }
+        if (headers && headers.length > 0 && r[headers[0]] !== undefined && String(r[headers[0]]).trim() !== '') {
+          return String(r[headers[0]]).trim();
+        }
+        return '';
+      };
 
-    targetCategories.forEach(cat => {
-      const activeTable = this.db.getTable(cat.key);
-      const histTable = this.db.getTable(cat.histKey);
+      for (const cat of targetCategories) {
+        const activeTable = this.db.getTable(cat.key);
+        const histTable = this.db.getTable(cat.histKey);
 
-      if (!activeTable || !activeTable.rows || activeTable.rows.length === 0) return;
-      if (!histTable || !histTable.rows || histTable.rows.length === 0) return;
+        if (!activeTable || !activeTable.rows || activeTable.rows.length === 0) continue;
+        if (!histTable || !histTable.rows || histTable.rows.length === 0) continue;
 
-      const histHeaders = histTable.headers || [];
-      const activeHeaders = activeTable.headers || [];
+        const histHeaders = histTable.headers || [];
+        const activeHeaders = activeTable.headers || [];
 
-      // 1. Group history rows by item number and determine latest chronological event
-      const historyMap = new Map(); // normItemNum -> latestEvent
-      const histItemGroups = new Map(); // normItemNum -> [row1, row2, ...]
+        // 1. Group history rows by item number and determine latest chronological event
+        const historyMap = new Map(); // normItemNum -> latestEvent
+        const histItemGroups = new Map(); // normItemNum -> [row1, row2, ...]
 
-      histTable.rows.forEach(hr => {
-        const itemNum = getItemIdentifier(hr, histHeaders);
-        if (!itemNum || itemNum === 'N/A' || itemNum === '—' || itemNum === '-') return;
-        const normKey = itemNum.toLowerCase().trim();
-        if (!histItemGroups.has(normKey)) histItemGroups.set(normKey, []);
-        histItemGroups.get(normKey).push(hr);
-      });
-
-      histItemGroups.forEach((rows, normKey) => {
-        // Sort chronologically (oldest to newest)
-        const sorted = [...rows].sort((a, b) => {
-          const rawA = a['Date Assigned'] || a['Date'] || Object.values(a)[0] || '';
-          const rawB = b['Date Assigned'] || b['Date'] || Object.values(b)[0] || '';
-          const dtA = this.parseDate(rawA);
-          const dtB = this.parseDate(rawB);
-          const tA = dtA ? dtA.getTime() : 0;
-          const tB = dtB ? dtB.getTime() : 0;
-          return tA - tB;
+        histTable.rows.forEach(hr => {
+          const itemNum = getItemIdentifier(hr, histHeaders);
+          if (!itemNum || itemNum === 'N/A' || itemNum === '—' || itemNum === '-') return;
+          const normKey = itemNum.toLowerCase().trim();
+          if (!histItemGroups.has(normKey)) histItemGroups.set(normKey, []);
+          histItemGroups.get(normKey).push(hr);
         });
 
-        const latest = sorted[sorted.length - 1];
-        const rawDate = latest['Date Assigned'] || latest['Date'] || Object.values(latest)[0] || '';
-        const dtObj = this.parseDate(rawDate);
-        const assignedTo = String(latest['Assigned To'] || latest['Employee Name'] || latest['Employee'] || '').trim();
-        const loc = String(latest['Location'] || '').trim();
-        const notes = String(latest['Notes'] || latest['Note'] || '').trim();
+        histItemGroups.forEach((rows, normKey) => {
+          // Sort chronologically (oldest to newest)
+          const sorted = [...rows].sort((a, b) => {
+            const rawA = a['Date Assigned'] || a['Date'] || Object.values(a)[0] || '';
+            const rawB = b['Date Assigned'] || b['Date'] || Object.values(b)[0] || '';
+            const dtA = this.parseDate(rawA);
+            const dtB = this.parseDate(rawB);
+            const tA = dtA ? dtA.getTime() : 0;
+            const tB = dtB ? dtB.getTime() : 0;
+            return tA - tB;
+          });
 
-        historyMap.set(normKey, {
-          itemNum: getItemIdentifier(latest, histHeaders),
-          dateObj: dtObj,
-          dateFormatted: dtObj ? this.formatDate(dtObj) : String(rawDate).trim(),
-          assignedTo: assignedTo,
-          location: loc,
-          notes: notes,
-          allRows: sorted
+          const latest = sorted[sorted.length - 1];
+          const rawDate = latest['Date Assigned'] || latest['Date'] || Object.values(latest)[0] || '';
+          const dtObj = this.parseDate(rawDate);
+          const assignedTo = String(latest['Assigned To'] || latest['Employee Name'] || latest['Employee'] || '').trim();
+          const loc = String(latest['Location'] || '').trim();
+          const notes = String(latest['Notes'] || latest['Note'] || '').trim();
+
+          historyMap.set(normKey, {
+            itemNum: getItemIdentifier(latest, histHeaders),
+            dateObj: dtObj,
+            dateFormatted: dtObj ? this.formatDate(dtObj) : String(rawDate).trim(),
+            assignedTo: assignedTo,
+            location: loc,
+            notes: notes,
+            allRows: sorted
+          });
         });
-      });
 
-      // 2. Compare each active inventory row against latest history state
-      activeTable.rows.forEach((row, rIdx) => {
-        const itemNum = getItemIdentifier(row, activeHeaders);
-        if (!itemNum) return;
-        const normKey = itemNum.toLowerCase().trim();
-        const latestHist = historyMap.get(normKey);
-        if (!latestHist) return;
+        // 2. Compare each active inventory row against latest history state
+        for (let rIdx = 0; rIdx < activeTable.rows.length; rIdx++) {
+          const row = activeTable.rows[rIdx];
+          const itemNum = getItemIdentifier(row, activeHeaders);
+          if (!itemNum) continue;
+          const normKey = itemNum.toLowerCase().trim();
+          const latestHist = historyMap.get(normKey);
+          if (!latestHist) continue;
 
-        const curAssignedTo = String(row['Assigned To'] || '').trim();
-        const curStatus = String(row['Status'] || '').trim();
-        const curLocation = String(row['Location'] || '').trim();
-        const curDateAssigned = String(row['Date Assigned'] || row['Date'] || '').trim();
-        const curDateObj = this.parseDate(curDateAssigned);
+          const curAssignedTo = String(row['Assigned To'] || '').trim();
+          const curStatus = String(row['Status'] || '').trim();
+          const curLocation = String(row['Location'] || '').trim();
+          const curDateAssigned = String(row['Date Assigned'] || row['Date'] || '').trim();
+          const curDateObj = this.parseDate(curDateAssigned);
 
-        const histAssignedLower = latestHist.assignedTo.toLowerCase();
-        const histLocLower = latestHist.location.toLowerCase();
-        const histNotesLower = latestHist.notes.toLowerCase();
-        const curAssignedLower = curAssignedTo.toLowerCase();
+          const histAssignedLower = latestHist.assignedTo.toLowerCase();
+          const histLocLower = latestHist.location.toLowerCase();
+          const histNotesLower = latestHist.notes.toLowerCase();
+          const curAssignedLower = curAssignedTo.toLowerCase();
 
-        // Check if history shows a terminated/testing/shelf state that active sheet missed
-        const isHistTesting = histAssignedLower.includes('test') || histLocLower.includes('test') || histNotesLower.includes('test') || histLocLower.includes('arnett') || histLocLower.includes('jm test');
-        const isHistShelf = histAssignedLower.includes('shelf') || histLocLower.includes('shelf') || histNotesLower.includes('shelf');
-        const isHistLost = histAssignedLower.includes('lost') || histNotesLower.includes('lost');
-        const isHistFailed = histAssignedLower.includes('fail') || histNotesLower.includes('fail');
-        const isHistRetired = histAssignedLower.includes('retir') || histNotesLower.includes('retir') || histAssignedLower.includes('destroy') || histNotesLower.includes('destroy');
-        const isHistReturned = histNotesLower.includes('returned') || isHistTesting || isHistShelf || isHistLost || isHistFailed || isHistRetired;
+          // Check if history shows a terminated/testing/shelf state that active sheet missed
+          const isHistTesting = histAssignedLower.includes('test') || histLocLower.includes('test') || histNotesLower.includes('test') || histLocLower.includes('arnett') || histLocLower.includes('jm test');
+          const isHistShelf = histAssignedLower.includes('shelf') || histLocLower.includes('shelf') || histNotesLower.includes('shelf');
+          const isHistLost = histAssignedLower.includes('lost') || histNotesLower.includes('lost');
+          const isHistFailed = histAssignedLower.includes('fail') || histNotesLower.includes('fail');
+          const isHistRetired = histAssignedLower.includes('retir') || histNotesLower.includes('retir') || histAssignedLower.includes('destroy') || histNotesLower.includes('destroy');
+          const isHistReturned = histNotesLower.includes('returned') || isHistTesting || isHistShelf || isHistLost || isHistFailed || isHistRetired;
 
-        const isCurActiveEmployee = curAssignedTo && !['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'ready for delivery', 'ready for test', 'lost', 'failed rubber', 'destroyed', 'unassigned', 'n/a', '—', '-'].includes(curAssignedLower);
+          const isCurActiveEmployee = curAssignedTo && !['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'ready for delivery', 'ready for test', 'lost', 'failed rubber', 'destroyed', 'unassigned', 'n/a', '—', '-'].includes(curAssignedLower);
 
-        // Needs reconciliation if:
-        // A. Active sheet has item assigned to an employee, but history shows it was returned / sent to testing / on shelf
-        // B. Latest history date is strictly newer than active sheet date assigned
-        // C. Status/AssignedTo in active sheet is out-of-sync with latest history event
-        let needsFix = false;
-        let newStatus = curStatus;
-        let newAssignedTo = curAssignedTo;
-        let newLocation = curLocation;
-        let newDateAssigned = curDateAssigned;
+          // Needs reconciliation if:
+          // A. Active sheet has item assigned to an employee, but history shows it was returned / sent to testing / on shelf
+          // B. Latest history date is strictly newer than active sheet date assigned
+          // C. Different employee is assigned in history than on active sheet
+          // D. Status/AssignedTo in active sheet is out-of-sync with latest history event
+          let needsFix = false;
+          let newStatus = curStatus;
+          let newAssignedTo = curAssignedTo;
+          let newLocation = curLocation;
+          let newDateAssigned = curDateAssigned;
 
-        if (isCurActiveEmployee && isHistReturned) {
-          needsFix = true;
-        } else if (latestHist.dateObj && curDateObj && latestHist.dateObj.getTime() > curDateObj.getTime()) {
-          if (curAssignedLower !== histAssignedLower || curStatus.toLowerCase() !== histAssignedLower) {
+          if (isCurActiveEmployee && isHistReturned) {
+            needsFix = true;
+          } else if (latestHist.dateObj && curDateObj && latestHist.dateObj.getTime() > curDateObj.getTime()) {
+            if (curAssignedLower !== histAssignedLower || curStatus.toLowerCase() !== histAssignedLower) {
+              needsFix = true;
+            }
+          } else if (latestHist.assignedTo && curAssignedLower !== histAssignedLower) {
+            needsFix = true;
+          } else if (latestHist.dateObj && !curDateObj) {
             needsFix = true;
           }
-        }
 
-        if (needsFix) {
-          if (isHistTesting) {
-            newStatus = 'In Testing';
-            newAssignedTo = 'In Testing';
-            newLocation = latestHist.location || 'Arnett / JM Test';
-          } else if (isHistShelf) {
-            newStatus = 'On Shelf';
-            newAssignedTo = 'On Shelf';
-            newLocation = latestHist.location || 'Helena';
-          } else if (isHistLost) {
-            newStatus = 'Lost';
-            newAssignedTo = 'Lost';
-            newLocation = latestHist.location || 'Unknown';
-          } else if (isHistFailed) {
-            newStatus = 'Failed Rubber';
-            newAssignedTo = 'Failed Rubber';
-            newLocation = latestHist.location || 'Helena';
-          } else if (isHistRetired) {
-            newStatus = 'Destroyed';
-            newAssignedTo = 'Destroyed';
-            newLocation = latestHist.location || 'Helena';
-          } else if (latestHist.assignedTo && !isHistReturned) {
-            newStatus = 'Assigned';
-            newAssignedTo = latestHist.assignedTo;
-            newLocation = latestHist.location || curLocation;
-          }
+          if (needsFix) {
+            if (isHistTesting) {
+              newStatus = 'In Testing';
+              newAssignedTo = 'In Testing';
+              newLocation = latestHist.location || 'Arnett / JM Test';
+            } else if (isHistShelf) {
+              newStatus = 'On Shelf';
+              newAssignedTo = 'On Shelf';
+              newLocation = latestHist.location || 'Helena';
+            } else if (isHistLost) {
+              newStatus = 'Lost';
+              newAssignedTo = 'Lost';
+              newLocation = latestHist.location || 'Unknown';
+            } else if (isHistFailed) {
+              newStatus = 'Failed Rubber';
+              newAssignedTo = 'Failed Rubber';
+              newLocation = latestHist.location || 'Helena';
+            } else if (isHistRetired) {
+              newStatus = 'Destroyed';
+              newAssignedTo = 'Destroyed';
+              newLocation = latestHist.location || 'Helena';
+            } else if (latestHist.assignedTo && !isHistReturned) {
+              newStatus = 'Assigned';
+              newAssignedTo = latestHist.assignedTo;
+              newLocation = latestHist.location || curLocation;
+            }
 
-          newDateAssigned = latestHist.dateFormatted || curDateAssigned;
+            newDateAssigned = latestHist.dateFormatted || curDateAssigned;
 
-          // Calculate correct new Change Out Date
-          const newChangeOut = this.calculateChangeOutDate(newDateAssigned, newLocation, newAssignedTo, cat.key, {
-            testDate: row['Test Date'],
-            calibrationDate: row['Calibration Date'],
-            padExpiration: row['Pad Expiration'],
-            batteryExpiration: row['Battery Expiration']
-          });
-
-          // Apply changes to local row object
-          const oldAssignedSummary = `${curAssignedTo} (${curStatus})`;
-          const newAssignedSummary = `${newAssignedTo} (${newStatus})`;
-
-          row['Status'] = newStatus;
-          row['Assigned To'] = newAssignedTo;
-          row['Location'] = newLocation;
-          row['Date Assigned'] = newDateAssigned;
-          row['Change Out Date'] = newChangeOut;
-          row['Picked For'] = '';
-
-          // Sync to rawGrid if table uses rawGrid array
-          if (activeTable.rawGrid && activeTable.rawGrid[rIdx + 1]) {
-            const gridRow = activeTable.rawGrid[rIdx + 1];
-            activeHeaders.forEach((h, hIdx) => {
-              if (row[h] !== undefined) {
-                gridRow[hIdx] = row[h];
-              }
+            // Calculate correct new Change Out Date
+            const newChangeOut = this.calculateChangeOutDate(newDateAssigned, newLocation, newAssignedTo, cat.key, {
+              testDate: row['Test Date'],
+              calibrationDate: row['Calibration Date'],
+              padExpiration: row['Pad Expiration'],
+              batteryExpiration: row['Battery Expiration']
             });
-          }
 
-          // Queue database mutations for each updated column
-          const sheetRow = rIdx + 2;
-          const queueColUpdate = (headerName, oldVal, newVal) => {
-            const colIdx = activeHeaders.indexOf(headerName) + 1;
-            if (colIdx > 0 && String(oldVal || '') !== String(newVal || '')) {
-              this.db.queueMutation({
-                action: 'UPDATE_CELL',
-                sheetName: activeTable.name,
-                row: sheetRow,
-                col: colIdx,
-                header: headerName,
-                itemIdentifier: itemNum,
-                oldValue: oldVal,
-                value: newVal
+            // Apply changes to local row object
+            const oldAssignedSummary = `${curAssignedTo} (${curStatus})`;
+            const newAssignedSummary = `${newAssignedTo} (${newStatus})`;
+
+            row['Status'] = newStatus;
+            row['Assigned To'] = newAssignedTo;
+            row['Location'] = newLocation;
+            row['Date Assigned'] = newDateAssigned;
+            row['Change Out Date'] = newChangeOut;
+            row['Picked For'] = '';
+
+            // Sync to rawGrid if table uses rawGrid array
+            if (activeTable.rawGrid && activeTable.rawGrid[rIdx + 1]) {
+              const gridRow = activeTable.rawGrid[rIdx + 1];
+              activeHeaders.forEach((h, hIdx) => {
+                if (row[h] !== undefined) {
+                  gridRow[hIdx] = row[h];
+                }
               });
             }
-          };
 
-          queueColUpdate('Status', curStatus, newStatus);
-          queueColUpdate('Assigned To', curAssignedTo, newAssignedTo);
-          queueColUpdate('Location', curLocation, newLocation);
-          queueColUpdate('Date Assigned', curDateAssigned, newDateAssigned);
-          queueColUpdate('Change Out Date', row['Change Out Date'], newChangeOut);
-          queueColUpdate('Picked For', row['Picked For'], '');
+            // Queue database mutations for each updated column
+            const sheetRow = row._rowIdx || (rIdx + 2);
+            const queueColUpdate = async (headerName, oldVal, newVal) => {
+              const colIdx = activeHeaders.indexOf(headerName) + 1;
+              if (colIdx > 0 && String(oldVal || '') !== String(newVal || '')) {
+                await this.db.addMutation({
+                  action: 'UPDATE_CELL',
+                  sheetName: cat.name,
+                  row: sheetRow,
+                  col: colIdx,
+                  header: headerName,
+                  itemIdentifier: itemNum,
+                  oldValue: oldVal,
+                  value: newVal
+                });
+              }
+            };
 
-          if (row['Notes'] === 'Not New' || row['Notes'] === 'New Purchase') {
-            const oldNotes = row['Notes'];
-            row['Notes'] = '';
-            queueColUpdate('Notes', oldNotes, '');
+            await queueColUpdate('Status', curStatus, newStatus);
+            await queueColUpdate('Assigned To', curAssignedTo, newAssignedTo);
+            await queueColUpdate('Location', curLocation, newLocation);
+            await queueColUpdate('Date Assigned', curDateAssigned, newDateAssigned);
+            await queueColUpdate('Change Out Date', row['Change Out Date'], newChangeOut);
+            await queueColUpdate('Picked For', row['Picked For'], '');
+
+            if (row['Notes'] === 'Not New' || row['Notes'] === 'New Purchase') {
+              const oldNotes = row['Notes'];
+              row['Notes'] = '';
+              await queueColUpdate('Notes', oldNotes, '');
+            }
+
+            reconciledItems.push({
+              category: cat.label,
+              itemNum: itemNum,
+              from: oldAssignedSummary,
+              to: newAssignedSummary,
+              date: newDateAssigned,
+              location: newLocation
+            });
           }
-
-          reconciledItems.push({
-            category: cat.label,
-            itemNum: itemNum,
-            from: oldAssignedSummary,
-            to: newAssignedSummary,
-            date: newDateAssigned,
-            location: newLocation
-          });
         }
-      });
-    });
+      }
 
-    if (window.sheetNavigator) {
-      window.sheetNavigator.renderActiveView();
+      if (window.sheetNavigator) {
+        window.sheetNavigator.renderActiveView();
+      }
+
+      if (window.syncEngine) {
+        window.syncEngine.renderOutboxBadge();
+      }
+
+      // Persist snapshot to local storage
+      if (this.db.snapshot) {
+        await this.db.setSnapshot(this.db.snapshot);
+      }
+
+      // Show toast message
+      if (reconciledItems.length > 0) {
+        this.showToast(`🔄 Reconciled ${reconciledItems.length} item(s) with History!`);
+      } else if (!silent) {
+        this.showToast(`✅ All inventory items are 100% in sync with History.`);
+      }
+
+      // Show detailed reconciliation modal if not silent
+      if (!silent) {
+        this.showReconciliationSummaryModal(reconciledItems);
+      }
+      return reconciledItems;
+    } catch (err) {
+      console.error('❌ Error during reconcileInventoryWithHistory:', err);
+      alert('Error during reconciliation: ' + (err.message || err));
+      this.showToast('⚠️ Reconciliation error: ' + (err.message || err));
+      return [];
     }
-
-    if (window.syncEngine) {
-      window.syncEngine.renderOutboxBadge();
-    }
-
-    // Show detailed reconciliation modal/toast
-    this.showReconciliationSummaryModal(reconciledItems);
-    return reconciledItems;
   }
 
   /**
@@ -1652,23 +1705,26 @@ class InventoryManager {
     if (!modal) {
       modal = document.createElement('div');
       modal.id = 'reconcile-summary-modal';
-      modal.className = 'modal-backdrop';
+      modal.className = 'modal-overlay active';
+      modal.style.cssText = 'display: flex; position: fixed; inset: 0; z-index: 10000; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(4px);';
       modal.innerHTML = `
-        <div class="modal-dialog" style="max-width: 680px; background: #0f172a; border: 1px solid #334155; border-radius: 12px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6); overflow: hidden;">
-          <div class="modal-header" style="padding: 16px 20px; background: #1e293b; border-bottom: 1px solid #334155; display: flex; align-items: center; justify-content: space-between;">
-            <h3 style="font-size: 15px; font-weight: 700; color: #f8fafc; margin: 0; display: flex; align-items: center; gap: 8px;">
+        <div class="modal-box" style="max-width: 680px; width: 92%; max-height: 88vh; display: flex; flex-direction: column; overflow: hidden; background: #0f172a; border: 1px solid #334155; border-radius: 12px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.7);">
+          <div class="modal-header" style="padding: 16px 20px; background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border-bottom: 1px solid #334155; display: flex; align-items: center; justify-content: space-between;">
+            <h3 style="font-size: 16px; font-weight: 700; color: #f8fafc; margin: 0; display: flex; align-items: center; gap: 8px;">
               <span>🔄</span> Inventory History Reconciliation
             </h3>
-            <button onclick="document.getElementById('reconcile-summary-modal').classList.remove('active')" style="background: none; border: none; color: #94a3b8; font-size: 18px; cursor: pointer;">✕</button>
+            <button class="modal-close-btn" onclick="document.getElementById('reconcile-summary-modal').style.display = 'none'" style="background: none; border: none; font-size: 22px; color: #94a3b8; cursor: pointer; line-height: 1;">&times;</button>
           </div>
-          <div id="reconcile-summary-body" style="padding: 20px; max-height: 480px; overflow-y: auto;"></div>
+          <div id="reconcile-summary-body" style="padding: 20px; overflow-y: auto; flex: 1;"></div>
           <div class="modal-footer" style="padding: 14px 20px; background: #1e293b; border-top: 1px solid #334155; display: flex; justify-content: flex-end; gap: 10px;">
-            <button class="btn btn-secondary" onclick="document.getElementById('reconcile-summary-modal').classList.remove('active')">Close</button>
-            <button class="btn btn-primary" onclick="document.getElementById('reconcile-summary-modal').classList.remove('active'); window.syncEngine.pushChangesToGoogleSheets();">⬆️ Push Changes to Sheets</button>
+            <button class="btn btn-secondary" onclick="document.getElementById('reconcile-summary-modal').style.display = 'none'">Close</button>
+            <button class="btn btn-primary" onclick="document.getElementById('reconcile-summary-modal').style.display = 'none'; window.syncEngine.pushChangesToGoogleSheets();">⬆️ Push Changes to Sheets</button>
           </div>
         </div>
       `;
       document.body.appendChild(modal);
+    } else {
+      modal.style.display = 'flex';
     }
 
     const body = document.getElementById('reconcile-summary-body');
@@ -1697,7 +1753,7 @@ class InventoryManager {
             <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px;">
               <strong style="color: #10b981; font-size: 13px;">✅ Reconciled ${items.length} Out-of-Sync Item(s)</strong>
               <p style="font-size: 12px; color: #cbd5e1; margin: 4px 0 0 0;">
-                The items below had newer return/testing events recorded in History that were not reflected in the active inventory sheets. They have now been updated in local database and queued to sync with Google Sheets.
+                The items below had newer return/testing/reassignment events in History that were not reflected in the active inventory sheets. They have now been updated in the local database and queued to sync with Google Sheets.
               </p>
             </div>
             <table style="width: 100%; border-collapse: collapse; text-align: left;">
@@ -1718,8 +1774,6 @@ class InventoryManager {
         `;
       }
     }
-
-    modal.classList.add('active');
   }
 }
 

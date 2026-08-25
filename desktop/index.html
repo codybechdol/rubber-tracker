@@ -133,7 +133,7 @@
             <button class="btn btn-secondary" id="btn-fix-changeout-dates" style="display: none; padding: 6px 12px; font-size: 12px;" onclick="window.inventoryManager.recalculateAllChangeOutDates(window.sheetNavigator.currentSheetKey)">
               🔄 Fix Due Dates
             </button>
-            <button class="btn btn-secondary" id="btn-reconcile-history" style="display: none; padding: 6px 12px; font-size: 12px;" onclick="window.inventoryManager.reconcileInventoryWithHistory(window.sheetNavigator.currentSheetKey)" title="Reconcile active inventory with latest History records">
+            <button class="btn btn-secondary" id="btn-reconcile-history" style="display: none; padding: 6px 12px; font-size: 12px;" onclick="window.inventoryManager.reconcileInventoryWithHistory(window.sheetNavigator ? window.sheetNavigator.currentSheetKey : 'gloves')" title="Reconcile active inventory with latest History records">
               🔄 Reconcile from History
             </button>
             <button class="btn" id="btn-generate-swaps" style="display: none; background: linear-gradient(135deg, #0284c7, #0369a1); color: white; padding: 6px 14px; font-size: 12px;" onclick="window.swapEngine.generateAllSwaps()">
@@ -1025,27 +1025,27 @@
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 
   <!-- Scripts -->
-  <script src="js/db.js"></script>
-  <script src="js/sync.js"></script>
-  <script src="js/gps.js"></script>
-  <script src="js/scanner.js"></script>
-  <script src="js/inventory.js"></script>
-  <script src="js/swaps.js"></script>
-  <script src="js/crew-import.js"></script>
-  <script src="js/item-stats.js"></script>
-  <script src="js/sms-dialog.js"></script>
-  <script src="js/employee-profile.js"></script>
-  <script src="js/safety-emails.js"></script>
-  <script src="js/cpr-roster.js"></script>
-  <script src="js/certs-import.js"></script>
-  <script src="js/time-breakdown.js"></script>
-  <script src="js/sheets.js"></script>
-  <script src="js/history.js"></script>
-  <script src="js/tasks.js"></script>
-  <script src="js/trip-planner.js"></script>
-  <script src="js/lookup.js"></script>
-  <script src="js/procurement.js"></script>
-  <script src="js/aging.js"></script>
+  <script src="js/db.js?v=20260825_2"></script>
+  <script src="js/sync.js?v=20260825_2"></script>
+  <script src="js/gps.js?v=20260825_2"></script>
+  <script src="js/scanner.js?v=20260825_2"></script>
+  <script src="js/inventory.js?v=20260825_2"></script>
+  <script src="js/swaps.js?v=20260825_2"></script>
+  <script src="js/crew-import.js?v=20260825_2"></script>
+  <script src="js/item-stats.js?v=20260825_2"></script>
+  <script src="js/sms-dialog.js?v=20260825_2"></script>
+  <script src="js/employee-profile.js?v=20260825_2"></script>
+  <script src="js/safety-emails.js?v=20260825_2"></script>
+  <script src="js/cpr-roster.js?v=20260825_2"></script>
+  <script src="js/certs-import.js?v=20260825_2"></script>
+  <script src="js/time-breakdown.js?v=20260825_2"></script>
+  <script src="js/sheets.js?v=20260825_2"></script>
+  <script src="js/history.js?v=20260825_2"></script>
+  <script src="js/tasks.js?v=20260825_2"></script>
+  <script src="js/trip-planner.js?v=20260825_2"></script>
+  <script src="js/lookup.js?v=20260825_2"></script>
+  <script src="js/procurement.js?v=20260825_2"></script>
+  <script src="js/aging.js?v=20260825_2"></script>
 
   <script>
     // Navigation routing for desktop & mobile

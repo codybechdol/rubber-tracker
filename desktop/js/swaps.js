@@ -152,6 +152,16 @@ class SwapGenerationEngine {
    */
   async generateAllSwaps() {
     const startTime = performance.now();
+
+    // 0. Auto-reconcile active inventory with latest history records first (avoids phantom swaps for returned/reassigned gear)
+    if (window.inventoryManager && typeof window.inventoryManager.reconcileInventoryWithHistory === 'function') {
+      try {
+        await window.inventoryManager.reconcileInventoryWithHistory(null, true);
+      } catch (err) {
+        console.warn('Auto-reconciliation before swap generation warning:', err);
+      }
+    }
+
     const stats = {
       gloves: 0,
       sleeves: 0,

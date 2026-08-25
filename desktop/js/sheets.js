@@ -555,7 +555,7 @@ class SheetNavigator {
     }
 
     if (btnReconcileHist) {
-      btnReconcileHist.style.display = isInventorySheet ? 'inline-block' : 'none';
+      btnReconcileHist.style.display = (isInventorySheet || isSwapSheet) ? 'inline-block' : 'none';
     }
 
     // Update dynamic multi-filter bar for inventory sheets

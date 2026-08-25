@@ -1252,6 +1252,15 @@ class ItemStatsEngine {
       await this.db.setSnapshot(this.db.snapshot);
     }
 
+    // Auto-reconcile active inventory table so it reflects the imported history immediately
+    if (window.inventoryManager && typeof window.inventoryManager.reconcileInventoryWithHistory === 'function') {
+      try {
+        await window.inventoryManager.reconcileInventoryWithHistory(invSheetKey, true);
+      } catch (err) {
+        console.warn('Auto-reconcile after history import warning:', err);
+      }
+    }
+
     this.closeImportLogModal();
 
     // Re-render open Dossier modal
