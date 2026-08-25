@@ -1821,7 +1821,7 @@ function executeSyncApiProcessSafetyEmails(options) {
  * @return {Array<Object>} List of recent log objects
  */
 function getRecentSafetyLogs(limit) {
-  limit = limit || 100;
+  limit = limit || 10000;
   var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
   if (!ss) return [];
   var tz = ss.getSpreadsheetTimeZone() || 'America/Denver';

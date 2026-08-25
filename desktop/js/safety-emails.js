@@ -3,14 +3,326 @@
  * Handles Gmail scanning for JHAs, Weekly Safety Meetings, and Monthly Checklists directly from the Desktop App.
  */
 
-class SafetyEmailsEngine {
   constructor(db) {
     this.db = db;
     this.isProcessing = false;
+    this.activeCategoryFilter = 'all';
+    this.selectedMonthFilter = 'all';
+    this.activeSortOption = 'date_desc';
+    this.searchQuery = '';
+    this.pdfCache = new Map();
   }
 
   init() {
     console.log('SafetyEmailsEngine initialized');
+  }
+
+  parseDate(val) {
+    if (!val || val === 'N/A' || val === '—') return null;
+    if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+    const s = String(val).trim();
+    if (s.includes('/')) {
+      const parts = s.split(' ')[0].split('/');
+      if (parts.length === 3) {
+        const m = parseInt(parts[0], 10) - 1;
+        const d = parseInt(parts[1], 10);
+        let y = parseInt(parts[2], 10);
+        if (y < 100) y += 2000;
+        const dt = new Date(y, m, d, 12, 0, 0);
+        return isNaN(dt.getTime()) ? null : dt;
+      }
+    }
+    if (s.includes('-')) {
+      const parts = s.split(' ')[0].split('-');
+      if (parts.length === 3) {
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10) - 1;
+        const d = parseInt(parts[2], 10);
+        const dt = new Date(y, m, d, 12, 0, 0);
+        return isNaN(dt.getTime()) ? null : dt;
+      }
+    }
+    const dt = new Date(s);
+    return isNaN(dt.getTime()) ? null : dt;
+  }
+
+  getAvailableMonths() {
+    const monthMap = new Map();
+    (this.currentLogs || []).forEach(log => {
+      const dStr = log.date || log.dateReceived;
+      const d = this.parseDate(dStr);
+      if (d) {
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const key = `${yyyy}-${mm}`;
+        if (!monthMap.has(key)) {
+          const monthName = d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+          monthMap.set(key, { key: key, label: monthName });
+        }
+      }
+    });
+
+    const months = Array.from(monthMap.values());
+    months.sort((a, b) => b.key.localeCompare(a.key)); // Newest month first
+    return months;
+  }
+
+  sortLogs(logs, sortOption) {
+    const parseLogDate = (log) => {
+      const dStr = log.date || log.dateReceived;
+      if (!dStr) return 0;
+      const d = this.parseDate(dStr);
+      return d ? d.getTime() : 0;
+    };
+
+    const parseReceivedDate = (log) => {
+      const dStr = log.dateReceived || log.date;
+      if (!dStr) return 0;
+      const d = this.parseDate(dStr);
+      return d ? d.getTime() : 0;
+    };
+
+    const getMonthKey = (log) => {
+      const dStr = log.date || log.dateReceived;
+      const d = this.parseDate(dStr);
+      if (!d) return '9999-99';
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      return `${yyyy}-${mm}`;
+    };
+
+    const getJobKey = (log) => {
+      const j = String(log.jobNumber || '').trim().toLowerCase();
+      const f = String(log.foreman || '').trim().toLowerCase();
+      return `${j}|${f}`;
+    };
+
+    return [...logs].sort((a, b) => {
+      if (sortOption === 'job_foreman') {
+        const jA = getJobKey(a);
+        const jB = getJobKey(b);
+        if (jA !== jB) return jA.localeCompare(jB);
+        return parseLogDate(b) - parseLogDate(a);
+      }
+
+      if (sortOption === 'month_job_foreman') {
+        const mA = getMonthKey(a);
+        const mB = getMonthKey(b);
+        if (mA !== mB) return mB.localeCompare(mA);
+        const jA = getJobKey(a);
+        const jB = getJobKey(b);
+        if (jA !== jB) return jA.localeCompare(jB);
+        return parseLogDate(b) - parseLogDate(a);
+      }
+
+      if (sortOption === 'month_asc') {
+        const mA = getMonthKey(a);
+        const mB = getMonthKey(b);
+        if (mA !== mB) return mA.localeCompare(mB);
+        return parseLogDate(a) - parseLogDate(b);
+      }
+
+      if (sortOption === 'month_desc') {
+        const mA = getMonthKey(a);
+        const mB = getMonthKey(b);
+        if (mA !== mB) return mB.localeCompare(mA);
+        return parseLogDate(b) - parseLogDate(a);
+      }
+
+      if (sortOption === 'date_asc') {
+        return parseLogDate(a) - parseLogDate(b);
+      }
+
+      if (sortOption === 'received_desc') {
+        return parseReceivedDate(b) - parseReceivedDate(a);
+      }
+
+      // Default: date_desc
+      return parseLogDate(b) - parseLogDate(a);
+    });
+  }
+
+  /**
+   * Renders the interactive completion view with clickable category cards, sorting options, and live drill-down log table.
+   */
+  renderCompletionModalContent(container, stats) {
+    const availableMonths = this.getAvailableMonths();
+
+    container.innerHTML = `
+      <div style="display: flex; flex-direction: column; gap: 14px;">
+        <div style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(5, 150, 105, 0.05) 100%); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 8px; padding: 12px 18px; text-align: center;">
+          <div style="font-size: 24px; margin-bottom: 4px;">✅</div>
+          <h3 style="color: #6ee7b7; font-size: 15px; font-weight: 800; margin-bottom: 2px;">Safety Emails & Complete Audit Log</h3>
+          <p style="color: var(--text-secondary); font-size: 12px; margin: 0;">
+            Inspect original email PDFs, filter by month, sort by crew, or correct typos directly in the log.
+          </p>
+        </div>
+
+        <!-- Interactive Summary Breakdown Cards -->
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+          <div class="stat-card-clickable ${this.activeCategoryFilter === 'all' ? 'active' : ''}" onclick="window.safetyComplianceEngine.setCategoryFilter('all')" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px;">
+            <span class="view-hint">🔍 View</span>
+            <div style="font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">✨ All Logs</div>
+            <div style="font-size: 18px; font-weight: 800; color: #34d399; margin-top: 2px;">${stats.totalLogs}</div>
+          </div>
+          <div class="stat-card-clickable ${this.activeCategoryFilter === 'jha' ? 'active' : ''}" onclick="window.safetyComplianceEngine.setCategoryFilter('jha')" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px;">
+            <span class="view-hint">🔍 View</span>
+            <div style="font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">📋 Daily JHAs</div>
+            <div style="font-size: 18px; font-weight: 700; color: #60a5fa; margin-top: 2px;">${stats.cumulativeLogs.jha || 0}</div>
+          </div>
+          <div class="stat-card-clickable ${this.activeCategoryFilter === 'weekly' ? 'active' : ''}" onclick="window.safetyComplianceEngine.setCategoryFilter('weekly')" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px;">
+            <span class="view-hint">🔍 View</span>
+            <div style="font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">🗣️ Weekly Meetings</div>
+            <div style="font-size: 18px; font-weight: 700; color: #a78bfa; margin-top: 2px;">${stats.cumulativeLogs.weekly || 0}</div>
+          </div>
+          <div class="stat-card-clickable ${this.activeCategoryFilter === 'monthly' ? 'active' : ''}" onclick="window.safetyComplianceEngine.setCategoryFilter('monthly')" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px;">
+            <span class="view-hint">🔍 View</span>
+            <div style="font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">🚛 Monthly Checklists</div>
+            <div style="font-size: 18px; font-weight: 700; color: #34d399; margin-top: 2px;">${stats.cumulativeLogs.monthly || 0}</div>
+          </div>
+          <div class="stat-card-clickable ${this.activeCategoryFilter === 'equipment' ? 'active' : ''}" onclick="window.safetyComplianceEngine.setCategoryFilter('equipment')" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px;">
+            <span class="view-hint">🔍 View</span>
+            <div style="font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">⚠️ Equipment Needs</div>
+            <div style="font-size: 18px; font-weight: 700; color: #f59e0b; margin-top: 2px;">${stats.totalIssues}</div>
+          </div>
+          <div class="stat-card-clickable" onclick="window.safetyComplianceEngine.setCategoryFilter('all')" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px;">
+            <div style="font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">📬 Total Emails</div>
+            <div style="font-size: 18px; font-weight: 800; color: #f8fafc; margin-top: 2px;">${stats.totalThreads}</div>
+          </div>
+        </div>
+
+        <!-- Filter bar, Month selector & Sort Controls -->
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: 2px;">
+          <input type="text" id="safety-log-search" placeholder="🔍 Search foreman, job #, date..." value="${this.escapeHtml(this.searchQuery)}" oninput="window.safetyComplianceEngine.onSearchInput(this.value)" style="flex: 1; min-width: 180px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 12px; color: var(--text-primary); font-size: 12px;" />
+          
+          <!-- Month Filter Selector -->
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span style="font-size: 11px; color: var(--text-muted); font-weight: 600;">Month:</span>
+            <select id="safety-log-month-filter" onchange="window.safetyComplianceEngine.setMonthFilter(this.value)" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: #60a5fa; font-size: 12px; font-weight: 600;">
+              <option value="all" ${this.selectedMonthFilter === 'all' ? 'selected' : ''}>🗓️ All Months (Full Year)</option>
+              ${availableMonths.map(m => `
+                <option value="${m.key}" ${this.selectedMonthFilter === m.key ? 'selected' : ''}>${m.label}</option>
+              `).join('')}
+            </select>
+          </div>
+
+          <!-- Sort Order Selector -->
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span style="font-size: 11px; color: var(--text-muted); font-weight: 600;">Sort By:</span>
+            <select id="safety-log-sort-filter" onchange="window.safetyComplianceEngine.setSortOption(this.value)" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 10px; color: #34d399; font-size: 12px; font-weight: 600;">
+              <option value="date_desc" ${this.activeSortOption === 'date_desc' ? 'selected' : ''}>📅 Date (Newest First)</option>
+              <option value="date_asc" ${this.activeSortOption === 'date_asc' ? 'selected' : ''}>📅 Date (Oldest First)</option>
+              <option value="month_desc" ${this.activeSortOption === 'month_desc' ? 'selected' : ''}>🗓️ Month (Newest to Oldest)</option>
+              <option value="month_asc" ${this.activeSortOption === 'month_asc' ? 'selected' : ''}>🗓️ Month (Oldest to Newest)</option>
+              <option value="job_foreman" ${this.activeSortOption === 'job_foreman' ? 'selected' : ''}>👷 Job # / Foreman</option>
+              <option value="month_job_foreman" ${this.activeSortOption === 'month_job_foreman' ? 'selected' : ''}>🗓️👷 Month, then Job # / Foreman</option>
+              <option value="received_desc" ${this.activeSortOption === 'received_desc' ? 'selected' : ''}>📥 Date Received (Newest)</option>
+            </select>
+          </div>
+
+          <span id="log-count-indicator" style="font-size: 11.5px; color: var(--text-muted); font-weight: 600;"></span>
+        </div>
+
+        <!-- Drill-down log items list -->
+        <div class="safety-logs-container" id="safety-logs-table-container">
+          ${this.renderLogsTableHtml()}
+        </div>
+      </div>
+    `;
+    this.updateLogCountIndicator();
+  }
+
+  setCategoryFilter(category) {
+    this.activeCategoryFilter = category;
+    const body = document.getElementById('process-safety-emails-modal-body');
+    if (body) {
+      const cards = body.querySelectorAll('.stat-card-clickable');
+      cards.forEach(card => card.classList.remove('active'));
+      const container = document.getElementById('safety-logs-table-container');
+      if (container) {
+        container.innerHTML = this.renderLogsTableHtml();
+        this.updateLogCountIndicator();
+      }
+    }
+  }
+
+  setMonthFilter(monthKey) {
+    this.selectedMonthFilter = monthKey || 'all';
+    const container = document.getElementById('safety-logs-table-container');
+    if (container) {
+      container.innerHTML = this.renderLogsTableHtml();
+      this.updateLogCountIndicator();
+    }
+  }
+
+  setSortOption(sortKey) {
+    this.activeSortOption = sortKey || 'date_desc';
+    const container = document.getElementById('safety-logs-table-container');
+    if (container) {
+      container.innerHTML = this.renderLogsTableHtml();
+      this.updateLogCountIndicator();
+    }
+  }
+
+  onSearchInput(val) {
+    this.searchQuery = val || '';
+    const container = document.getElementById('safety-logs-table-container');
+    if (container) {
+      container.innerHTML = this.renderLogsTableHtml();
+      this.updateLogCountIndicator();
+    }
+  }
+
+  updateLogCountIndicator() {
+    const ind = document.getElementById('log-count-indicator');
+    if (ind) {
+      const filtered = this.getFilteredLogs();
+      ind.textContent = `Showing ${filtered.length} item(s)`;
+    }
+  }
+
+  getFilteredLogs() {
+    let logs = this.currentLogs || [];
+
+    // Category filter
+    if (this.activeCategoryFilter === 'jha') {
+      logs = logs.filter(l => l.type === 'JHA' || l.sheetName === 'JHA Log');
+    } else if (this.activeCategoryFilter === 'weekly') {
+      logs = logs.filter(l => l.type === 'Weekly Safety Meeting' || l.sheetName === 'Weekly Safety Log');
+    } else if (this.activeCategoryFilter === 'monthly') {
+      logs = logs.filter(l => l.type === 'Monthly Checklist' || l.sheetName === 'Monthly Checklist Log');
+    } else if (this.activeCategoryFilter === 'equipment') {
+      logs = logs.filter(l => l.hasEquipmentIssues === 'Yes' || l.type === 'Equipment');
+    }
+
+    // Month filter
+    if (this.selectedMonthFilter && this.selectedMonthFilter !== 'all') {
+      logs = logs.filter(l => {
+        const dStr = l.date || l.dateReceived;
+        const d = this.parseDate(dStr);
+        if (!d) return false;
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        return `${yyyy}-${mm}` === this.selectedMonthFilter;
+      });
+    }
+
+    // Search query filter
+    if (this.searchQuery && this.searchQuery.trim()) {
+      const q = this.searchQuery.toLowerCase().trim();
+      logs = logs.filter(l => {
+        return (l.foreman && l.foreman.toLowerCase().includes(q)) ||
+               (l.jobNumber && l.jobNumber.toLowerCase().includes(q)) ||
+               (l.creditedTo && l.creditedTo.toLowerCase().includes(q)) ||
+               (l.date && l.date.toLowerCase().includes(q)) ||
+               (l.dateReceived && l.dateReceived.toLowerCase().includes(q)) ||
+               (l.subject && l.subject.toLowerCase().includes(q)) ||
+               (l.notes && l.notes.toLowerCase().includes(q));
+      });
+    }
+
+    // Apply active sort
+    return this.sortLogs(logs, this.activeSortOption || 'date_desc');
   }
 
   openProcessEmailsModal() {
@@ -868,7 +1180,7 @@ class SafetyEmailsEngine {
     // JHA Log
     const jhaTbl = snap.tables.jha_log;
     if (jhaTbl && jhaTbl.rows) {
-      jhaTbl.rows.slice(-100).reverse().forEach((r, idx) => {
+      [...jhaTbl.rows].reverse().forEach((r, idx) => {
         const emailId = r['Email ID'] || r.email_id || '';
         const subject = r['Email Subject'] || r.email_subject || '';
         const jobNum = r['Job Number'] || r.job_number || '';
@@ -894,7 +1206,7 @@ class SafetyEmailsEngine {
     // Weekly Safety Log
     const wklyTbl = snap.tables.weekly_safety_log;
     if (wklyTbl && wklyTbl.rows) {
-      wklyTbl.rows.slice(-100).reverse().forEach((r, idx) => {
+      [...wklyTbl.rows].reverse().forEach((r, idx) => {
         const emailId = r['Email ID'] || r.email_id || '';
         const subject = r['Email Subject'] || r.email_subject || '';
         const jobNum = r['Job Number'] || r.job_number || '';
@@ -920,7 +1232,7 @@ class SafetyEmailsEngine {
     // Monthly Checklist Log
     const monTbl = snap.tables.monthly_checklist_log;
     if (monTbl && monTbl.rows) {
-      monTbl.rows.slice(-100).reverse().forEach((r, idx) => {
+      [...monTbl.rows].reverse().forEach((r, idx) => {
         const emailId = r['Email ID'] || r.email_id || '';
         const subject = r['Email Subject'] || r.email_subject || '';
         const jobNum = r['Job Number'] || r.job_number || '';
@@ -954,6 +1266,8 @@ class SafetyEmailsEngine {
   openSafetyLogsModal() {
     this.currentLogs = this.extractLogsFromLocalDB();
     this.activeCategoryFilter = 'all';
+    this.selectedMonthFilter = 'all';
+    this.activeSortOption = 'date_desc';
     this.searchQuery = '';
 
     const modal = document.getElementById('process-safety-emails-modal');
