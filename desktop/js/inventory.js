@@ -1561,6 +1561,12 @@ class InventoryManager {
           queueColUpdate('Change Out Date', row['Change Out Date'], newChangeOut);
           queueColUpdate('Picked For', row['Picked For'], '');
 
+          if (row['Notes'] === 'Not New' || row['Notes'] === 'New Purchase') {
+            const oldNotes = row['Notes'];
+            row['Notes'] = '';
+            queueColUpdate('Notes', oldNotes, '');
+          }
+
           reconciledItems.push({
             category: cat.label,
             itemNum: itemNum,

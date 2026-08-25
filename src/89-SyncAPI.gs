@@ -1365,6 +1365,25 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
               lastRow = 1;
             }
 
+            // Reconcile and clean inventory fields
+            var assignedVal = String(mut.rowData['Assigned To'] || '').trim();
+            var assignedValLower = assignedVal.toLowerCase();
+            var isSpecial = ['on shelf', 'in stock', 'in testing', 'packed for delivery', 'packed for testing', 'ready for delivery', 'ready for test', 'lost', 'failed rubber', 'not repairable', ''].indexOf(assignedValLower) !== -1;
+
+            if (assignedVal && !isSpecial) {
+              if (!mut.rowData['Status'] || mut.rowData['Status'] === 'On Shelf' || mut.rowData['Status'] === 'In Stock') {
+                mut.rowData['Status'] = 'Assigned';
+              }
+              var empLoc = getEmpLocationFast(assignedVal);
+              if (empLoc && (!mut.rowData['Location'] || mut.rowData['Location'] === 'Helena' || mut.rowData['Location'] === 'Unknown')) {
+                mut.rowData['Location'] = empLoc;
+              }
+            }
+
+            if (mut.rowData['Notes'] === 'Not New' || mut.rowData['Notes'] === 'New Purchase') {
+              mut.rowData['Notes'] = '';
+            }
+
             var rowArray = headers.map(function(h) {
               var cleanH = String(h || '').trim();
               var hLower = cleanH.toLowerCase();
@@ -1602,8 +1621,16 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
   }
 
   // Auto Save & Backup on Push:
-  // 1. Run targeted fast history save only on modified equipment sheets
+  // 1. Run targeted fast history save and location sync on modified equipment sheets
   if (appliedCount > 0) {
+    try {
+      if (typeof syncInventoryLocations === 'function') {
+        syncInventoryLocations();
+      }
+    } catch (locErr) {
+      Logger.log('applyBatchSyncMutations auto syncInventoryLocations error: ' + locErr);
+    }
+
     try {
       if (typeof saveHistoryFast === 'function') {
         saveHistoryFast(true, sheetsModified);

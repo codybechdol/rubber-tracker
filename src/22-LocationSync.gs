@@ -156,11 +156,15 @@ function syncSheetLocations(ss, sheetName, nameToLocation) {
   // Find column indices
   var locationColIdx = -1;
   var assignedToColIdx = -1;
+  var statusColIdx = -1;
+  var notesColIdx = -1;
 
   for (var h = 0; h < headers.length; h++) {
     var header = String(headers[h]).trim().toLowerCase();
     if (header.indexOf('location') !== -1) locationColIdx = h;
     if (header === 'assigned to' || header === 'employee name' || header === 'employee') assignedToColIdx = h;
+    if (header === 'status' || header === 'item status') statusColIdx = h;
+    if (header === 'notes' || header === 'note') notesColIdx = h;
   }
 
   if (locationColIdx === -1 || assignedToColIdx === -1) {
@@ -199,6 +203,25 @@ function syncSheetLocations(ss, sheetName, nameToLocation) {
       updateCount++;
     } else {
       locationColumnValues.push([currentLocation]);
+    }
+
+    // Reconcile Status if assigned to an active employee
+    if (statusColIdx !== -1) {
+      var currentStatus = (data[i][statusColIdx] || '').toString().trim();
+      var isSpecial = ['on shelf', 'in stock', 'in testing', 'packed for delivery', 'packed for testing', 'ready for delivery', 'ready for test', 'lost', 'failed rubber', 'not repairable', ''].indexOf(assignedToLower) !== -1;
+      if (assignedTo && !isSpecial) {
+        if (!currentStatus || currentStatus === 'On Shelf' || currentStatus === 'In Stock') {
+          try { sheet.getRange(i + 1, statusColIdx + 1).setValue('Assigned'); } catch (stErr) {}
+        }
+      }
+    }
+
+    // Clean origin notes from active inventory Notes column
+    if (notesColIdx !== -1) {
+      var currentNote = (data[i][notesColIdx] || '').toString().trim();
+      if (currentNote === 'Not New' || currentNote === 'New Purchase') {
+        try { sheet.getRange(i + 1, notesColIdx + 1).setValue(''); } catch (ntErr) {}
+      }
     }
   }
 
