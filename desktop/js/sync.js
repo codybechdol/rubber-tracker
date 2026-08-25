@@ -658,9 +658,15 @@ class SyncEngine {
       this.closeConflictModal();
 
       // Refresh active views so user sees immediate state
-      if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
-      if (window.inventoryAging) window.inventoryAging.loadData();
-      if (window.safetyComplianceEngine) window.safetyComplianceEngine.renderMatrix();
+      if (window.sheetNavigator && typeof window.sheetNavigator.renderActiveView === 'function') {
+        window.sheetNavigator.renderActiveView();
+      }
+      if (window.inventoryAging && typeof window.inventoryAging.loadData === 'function') {
+        window.inventoryAging.loadData();
+      }
+      if (window.safetyComplianceEngine && typeof window.safetyComplianceEngine.renderSafetyLogs === 'function') {
+        window.safetyComplianceEngine.renderSafetyLogs();
+      }
 
       if (resolvedOutbox.length > 0) {
         // Re-push resolved mutations to Google Sheets
