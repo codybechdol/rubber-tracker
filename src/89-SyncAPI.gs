@@ -1615,17 +1615,31 @@ function doGet(e) {
     }
   }
 
-  // Return full database snapshot
-  try {
+  if (action === 'getSafetyPdf') {
+    try {
+      var emailId = (e && e.parameter && e.parameter.emailId) || '';
+      var subject = (e && e.parameter && e.parameter.subject) || '';
+      var pdfRes = getSafetyEmailPdf(emailId, subject);
+      return ContentService.createTextOutput(JSON.stringify(pdfRes))
+        .setMimeType(ContentService.MimeType.JSON);
+    } catch (pdfErr) {
+      return ContentService.createTextOutput(JSON.stringify({
+        success: false,
+        error: pdfErr.toString()
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+
+  if (action === 'getSnapshot' || !action) {
     var snapshot = exportFullDatabaseSnapshot();
     return ContentService.createTextOutput(JSON.stringify(snapshot))
       .setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({
-      status: 'error',
-      error: err.toString()
-    })).setMimeType(ContentService.MimeType.JSON);
   }
+
+  return ContentService.createTextOutput(JSON.stringify({
+    status: 'ok',
+    message: 'Action ' + action + ' received'
+  })).setMimeType(ContentService.MimeType.JSON);
 }
 
 /**
@@ -1657,6 +1671,12 @@ function doPost(e) {
         endDate: payload.endDate || null
       });
       return ContentService.createTextOutput(JSON.stringify(procResult))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (action === 'getSafetyPdf') {
+      var pdfResult = getSafetyEmailPdf(payload.emailId, payload.subject);
+      return ContentService.createTextOutput(JSON.stringify(pdfResult))
         .setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -1914,6 +1934,79 @@ function getRecentSafetyLogs(limit) {
   }
 
   return allLogs;
+}
+
+/**
+ * Retrieves the base64-encoded PDF binary of a safety email attachment directly by email ID or subject.
+ * Enables the Tauri Desktop App to display the attached PDF document directly in an embedded viewer.
+ *
+ * @param {string} emailId - Gmail message ID (supports composite IDs like "19cb..._0")
+ * @param {string} subject - Email subject for fallback lookup
+ * @return {Object} { success: boolean, filename: string, base64: string, sizeBytes: number, contentType: string }
+ */
+function getSafetyEmailPdf(emailId, subject) {
+  try {
+    var message = null;
+    if (emailId) {
+      var baseId = String(emailId).trim().split('_')[0];
+      try {
+        message = GmailApp.getMessageById(baseId);
+      } catch (e) {
+        Logger.log('getSafetyEmailPdf: Could not find message by ID ' + baseId + ': ' + e);
+      }
+    }
+
+    if (!message && subject && String(subject).trim()) {
+      try {
+        var cleanSubj = String(subject).trim();
+        var threads = GmailApp.search('subject:"' + cleanSubj + '"', 0, 1);
+        if (threads && threads.length > 0) {
+          var msgs = threads[0].getMessages();
+          message = msgs[msgs.length - 1];
+        }
+      } catch (searchErr) {
+        Logger.log('getSafetyEmailPdf search error: ' + searchErr);
+      }
+    }
+
+    if (!message) {
+      return { success: false, error: 'Email message not found in Gmail' };
+    }
+
+    var attachments = message.getAttachments();
+    var pdfAttachment = null;
+
+    for (var i = 0; i < attachments.length; i++) {
+      var att = attachments[i];
+      var name = att.getName().toLowerCase();
+      var cType = att.getContentType();
+      if (cType === 'application/pdf' || name.endsWith('.pdf')) {
+        pdfAttachment = att;
+        break;
+      }
+    }
+
+    if (!pdfAttachment && attachments.length > 0) {
+      pdfAttachment = attachments[0];
+    }
+
+    if (!pdfAttachment) {
+      return { success: false, error: 'No PDF attachment found in this email' };
+    }
+
+    var bytes = pdfAttachment.getBytes();
+    var base64 = Utilities.base64Encode(bytes);
+
+    return {
+      success: true,
+      filename: pdfAttachment.getName(),
+      sizeBytes: bytes.length,
+      contentType: pdfAttachment.getContentType() || 'application/pdf',
+      base64: base64
+    };
+  } catch (err) {
+    return { success: false, error: err.toString() };
+  }
 }
 
 /**

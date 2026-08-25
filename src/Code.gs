@@ -32557,6 +32557,12 @@ function doGet(e) {
       var result = applyBatchSyncMutations(mutations, returnSnap, { detectConflicts: detectConflicts, force: force });
       return ContentService.createTextOutput(JSON.stringify(result))
         .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === 'getSafetyPdf') {
+      var emailId = e.parameter.emailId || '';
+      var subject = e.parameter.subject || '';
+      var pdfRes = getSafetyEmailPdf(emailId, subject);
+      return ContentService.createTextOutput(JSON.stringify(pdfRes))
+        .setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'getSnapshot' || !action) {
       var snapshot = exportFullDatabaseSnapshot();
       return ContentService.createTextOutput(JSON.stringify(snapshot))
@@ -32604,6 +32610,12 @@ function doPost(e) {
         prevResult: payload.prevResult || null
       });
       return ContentService.createTextOutput(JSON.stringify(procResult))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (action === 'getSafetyPdf') {
+      var pdfResult = getSafetyEmailPdf(payload.emailId, payload.subject);
+      return ContentService.createTextOutput(JSON.stringify(pdfResult))
         .setMimeType(ContentService.MimeType.JSON);
     }
 

@@ -816,6 +816,36 @@
     </div>
   </div>
 
+  <!-- Safety PDF Document Viewer Modal -->
+  <div id="safety-pdf-modal" class="modal-backdrop hidden" style="display: none; align-items: center; justify-content: center; z-index: 10000;">
+    <div class="modal-content" style="max-width: 95vw; width: 1100px; height: 92vh; display: flex; flex-direction: column; background: #0f172a; border: 1px solid #334155; border-radius: 12px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7); overflow: hidden;">
+      <div class="modal-header" style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); color: white; padding: 12px 18px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155;">
+        <div style="display: flex; align-items: center; gap: 10px; overflow: hidden;">
+          <span style="font-size: 20px;">📄</span>
+          <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+            <div id="safety-pdf-modal-title" style="font-weight: 800; font-size: 14px; color: #f8fafc;">Safety Document PDF</div>
+            <div id="safety-pdf-modal-subtitle" style="font-size: 11px; color: #94a3b8;">Loading document preview...</div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <a id="safety-pdf-btn-newtab" href="#" target="_blank" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 4px; text-decoration: none;" title="Open in New Browser Tab">
+            ↗️ Pop Out
+          </a>
+          <a id="safety-pdf-btn-download" href="#" download class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 4px; text-decoration: none;" title="Download PDF directly">
+            💾 Download
+          </a>
+          <a id="safety-pdf-btn-gmail" href="#" target="_blank" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 4px; text-decoration: none;" title="Open email thread in Gmail">
+            ✉️ Open in Gmail
+          </a>
+          <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 13px; background: rgba(255,255,255,0.1); border: none; color: white; cursor: pointer;" onclick="window.safetyComplianceEngine.closePdfModal()">✕</button>
+        </div>
+      </div>
+      <div class="modal-body" id="safety-pdf-modal-body" style="flex: 1; padding: 0; position: relative; background: #1e293b; overflow: hidden; display: flex; align-items: center; justify-content: center;">
+        <!-- Embedded PDF iframe / spinner -->
+      </div>
+    </div>
+  </div>
+
   <!-- SheetJS for client-side Excel Parsing -->
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 

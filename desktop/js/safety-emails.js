@@ -531,13 +531,14 @@ class SafetyEmailsEngine {
       <table class="safety-log-table">
         <thead>
           <tr>
-            <th style="width: 110px;">Type</th>
-            <th style="width: 85px;">Date</th>
+            <th style="width: 105px;">Type</th>
+            <th style="width: 85px;">Report Date</th>
+            <th style="width: 110px;">Date Received</th>
             <th style="width: 75px;">Job #</th>
             <th>Foreman</th>
             <th style="width: 80px;">Credited</th>
             <th style="width: 75px;">Status</th>
-            <th style="width: 155px; text-align: center;">Actions</th>
+            <th style="width: 160px; text-align: center;">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -551,7 +552,8 @@ class SafetyEmailsEngine {
                 <td>
                   <span class="badge-log-type ${typeClass}">${typeLabel}</span>
                 </td>
-                <td style="font-weight: 600; color: #f8fafc;">${this.escapeHtml(log.date || log.dateReceived || '—')}</td>
+                <td style="font-weight: 600; color: #f8fafc;">${this.escapeHtml(log.date || '—')}</td>
+                <td style="font-size: 11.5px; color: #94a3b8; font-family: monospace;">${this.escapeHtml(log.dateReceived || '—')}</td>
                 <td><span style="font-family: monospace; font-weight: 700; color: #60a5fa;">${this.escapeHtml(log.jobNumber || '—')}</span></td>
                 <td style="font-weight: 600;">${this.escapeHtml(log.foreman || 'UNKNOWN')}</td>
                 <td><span style="font-family: monospace; color: #cbd5e1;">${this.escapeHtml(log.creditedTo || '—')}</span></td>
@@ -562,15 +564,9 @@ class SafetyEmailsEngine {
                 </td>
                 <td style="text-align: center;">
                   <div style="display: inline-flex; align-items: center; gap: 6px;">
-                    ${log.gmailUrl ? `
-                      <a href="${this.escapeHtml(log.gmailUrl)}" target="_blank" class="btn-pdf-link" title="Open Gmail thread with attached PDF">
-                        📄 View PDF
-                      </a>
-                    ` : `
-                      <button class="btn-pdf-link" disabled style="opacity: 0.4; cursor: not-allowed;" title="No Gmail ID">
-                        📄 PDF
-                      </button>
-                    `}
+                    <button class="btn-pdf-link" onclick="window.safetyComplianceEngine.openPdfViewer('${this.escapeHtml(log.id || (log.sheetName + '_' + log.rowIndex))}')" title="Preview original attached PDF document directly in the app">
+                      📄 View PDF
+                    </button>
                     <button class="btn-edit-log-row" onclick="window.safetyComplianceEngine.openEditLogModal('${this.escapeHtml(log.id || (log.sheetName + '_' + log.rowIndex))}')" title="Edit log info (fix typos)">
                       ✏️ Edit
                     </button>
@@ -582,6 +578,126 @@ class SafetyEmailsEngine {
         </tbody>
       </table>
     `;
+  }
+
+  /**
+   * Opens the In-App PDF Document Viewer Modal to render the attached safety PDF immediately.
+   */
+  async openPdfViewer(logId) {
+    const log = (this.currentLogs || []).find(l => (l.id === logId || (l.sheetName + '_' + l.rowIndex) === logId));
+    if (!log) {
+      alert('Log record not found.');
+      return;
+    }
+
+    const modal = document.getElementById('safety-pdf-modal');
+    const body = document.getElementById('safety-pdf-modal-body');
+    const titleEl = document.getElementById('safety-pdf-modal-title');
+    const subtitleEl = document.getElementById('safety-pdf-modal-subtitle');
+    const gmailBtn = document.getElementById('safety-pdf-btn-gmail');
+    const downloadBtn = document.getElementById('safety-pdf-btn-download');
+    const popoutBtn = document.getElementById('safety-pdf-btn-newtab');
+
+    if (!modal || !body) return;
+
+    modal.style.display = 'flex';
+
+    if (titleEl) titleEl.textContent = `${log.type} · Job ${log.jobNumber || 'N/A'}`;
+    if (subtitleEl) subtitleEl.textContent = `Foreman: ${log.foreman || 'UNKNOWN'} | Report Date: ${log.date || 'N/A'} | Received: ${log.dateReceived || 'N/A'}`;
+
+    if (gmailBtn) {
+      gmailBtn.href = log.gmailUrl || '#';
+      gmailBtn.style.display = log.gmailUrl ? 'inline-flex' : 'none';
+    }
+
+    body.innerHTML = `
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: var(--text-secondary); padding: 40px;">
+        <div class="loading-spinner" style="width: 40px; height: 40px; border: 3px solid rgba(16, 185, 129, 0.2); border-top-color: #10b981; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+        <div style="font-size: 13.5px; font-weight: 700; color: #f8fafc;">Retrieving attached PDF directly from Gmail...</div>
+        <div style="font-size: 11.5px; color: #94a3b8;">${this.escapeHtml(log.subject || log.jobNumber)}</div>
+      </div>
+    `;
+
+    try {
+      const syncUrl = window.syncEngine ? window.syncEngine.getSyncUrl() : '';
+      if (!syncUrl) {
+        throw new Error('Sync URL not configured.');
+      }
+
+      if (!this.pdfCache) this.pdfCache = new Map();
+      const cacheKey = log.emailId || log.subject || (log.sheetName + '_' + log.rowIndex);
+      let pdfData = this.pdfCache.get(cacheKey);
+
+      if (!pdfData) {
+        const response = await fetch(syncUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'getSafetyPdf',
+            emailId: log.emailId || '',
+            subject: log.subject || ''
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`Server returned HTTP ${response.status}`);
+        }
+
+        const resJson = await response.json();
+        if (!resJson.success || !resJson.base64) {
+          throw new Error(resJson.error || 'Failed to extract PDF attachment.');
+        }
+
+        pdfData = resJson;
+        this.pdfCache.set(cacheKey, pdfData);
+      }
+
+      // Convert base64 to Blob URL
+      const byteCharacters = atob(pdfData.base64);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: pdfData.contentType || 'application/pdf' });
+      const blobUrl = URL.createObjectURL(blob);
+
+      if (downloadBtn) {
+        downloadBtn.href = blobUrl;
+        downloadBtn.download = pdfData.filename || `${log.type.replace(/\s+/g, '_')}_${log.jobNumber}.pdf`;
+      }
+
+      if (popoutBtn) {
+        popoutBtn.href = blobUrl;
+      }
+
+      if (subtitleEl) {
+        subtitleEl.textContent = `${pdfData.filename || 'Document.pdf'} (${Math.round((pdfData.sizeBytes || 0)/1024)} KB) · Foreman: ${log.foreman || 'UNKNOWN'} · Date: ${log.date || 'N/A'} · Received: ${log.dateReceived || 'N/A'}`;
+      }
+
+      body.innerHTML = `
+        <iframe src="${blobUrl}#view=FitH" style="width: 100%; height: 100%; border: none; background: #1e293b;"></iframe>
+      `;
+
+    } catch (err) {
+      body.innerHTML = `
+        <div style="padding: 30px; text-align: center; max-width: 500px; color: #f87171;">
+          <div style="font-size: 32px; margin-bottom: 12px;">⚠️</div>
+          <div style="font-size: 14px; font-weight: 700; margin-bottom: 6px;">Could not load PDF document directly</div>
+          <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 20px; line-height: 1.5;">${this.escapeHtml(err.message || 'Unknown error')}</div>
+          ${log.gmailUrl ? `
+            <a href="${this.escapeHtml(log.gmailUrl)}" target="_blank" class="btn btn-primary" style="font-weight: 700; background: #10b981; border: none; display: inline-flex; align-items: center; gap: 6px; padding: 8px 18px; text-decoration: none;">
+              <span>✉️</span> Open Email in Gmail Instead
+            </a>
+          ` : ''}
+        </div>
+      `;
+    }
+  }
+
+  closePdfModal() {
+    const modal = document.getElementById('safety-pdf-modal');
+    if (modal) modal.style.display = 'none';
   }
 
   /**
