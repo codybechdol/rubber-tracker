@@ -1685,13 +1685,66 @@ function executeSyncApiProcessSafetyEmails(options) {
   var skipPdfExtraction = options.skipPdfExtraction === true;
   var endDate = options.endDate || null;
   var reportTypeFilter = options.reportTypeFilter || 'ALL';
+  var isPostProcessingStep = options.isPostProcessing === true;
 
   if (typeof processSafetyEmails !== 'function') {
     return { success: false, error: 'processSafetyEmails function not found in backend' };
   }
 
+  // If client explicitly requests the final post-processing step
+  if (isPostProcessingStep) {
+    var postResult = {};
+    if (typeof runSafetyEmailPostProcessing === 'function') {
+      try {
+        postResult = runSafetyEmailPostProcessing(reportTypeFilter, options.prevResult || {});
+      } catch (ePost) {
+        Logger.log('executeSyncApiProcessSafetyEmails post processing error: ' + ePost);
+        postResult = { complete: true, error: ePost.toString() };
+      }
+    }
+    SpreadsheetApp.flush();
+    var freshSnapshot = null;
+    if (typeof exportFullDatabaseSnapshot === 'function') {
+      try {
+        freshSnapshot = exportFullDatabaseSnapshot();
+      } catch (eSnap) {
+        Logger.log('executeSyncApiProcessSafetyEmails snapshot error: ' + eSnap);
+      }
+    }
+    return {
+      status: 'ok',
+      success: true,
+      complete: true,
+      result: postResult,
+      snapshot: freshSnapshot
+    };
+  }
+
   var result = processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction, endDate, reportTypeFilter);
-  
+
+  // If there are more email batches remaining, return batch status immediately so client can show progress
+  if (!result.complete && !result.isPostProcessing) {
+    return {
+      status: 'ok',
+      success: true,
+      complete: false,
+      isPostProcessing: false,
+      result: result
+    };
+  }
+
+  // If all email threads scanned and ready for post-processing:
+  if (result.isPostProcessing) {
+    return {
+      status: 'ok',
+      success: true,
+      complete: false,
+      isPostProcessing: true,
+      result: result
+    };
+  }
+
+  // If completed directly in single step:
   var postResult = result;
   if (typeof runSafetyEmailPostProcessing === 'function') {
     try {
@@ -1715,6 +1768,7 @@ function executeSyncApiProcessSafetyEmails(options) {
   return {
     status: 'ok',
     success: true,
+    complete: true,
     result: postResult || result,
     snapshot: freshSnapshot
   };

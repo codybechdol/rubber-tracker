@@ -744,7 +744,7 @@ function syncJobTrackingAfterImport(ss, jobNameMap, earlyActivatedJobs, crewSche
   var empData = employeesSheet.getDataRange().getValues();
   var empHeaders = empData[0];
 
-  var nameCol = -1, jobNumCol = -1, locationCol = -1, classificationCol = -1, lastDayCol = -1;
+  var nameCol = -1, jobNumCol = -1, locationCol = -1, classificationCol = -1, lastDayCol = -1, secJobCol = -1;
   for (var h = 0; h < empHeaders.length; h++) {
     var header = String(empHeaders[h]).toLowerCase().trim();
     if (header === 'name') nameCol = h;
@@ -752,9 +752,27 @@ function syncJobTrackingAfterImport(ss, jobNameMap, earlyActivatedJobs, crewSche
     if (header === 'location') locationCol = h;
     if (header === 'job classification') classificationCol = h;
     if (header === 'last day') lastDayCol = h;
+    if (header === 'secondary job number' || header === 'secondary job') secJobCol = h;
   }
 
   if (jobNumCol === -1) return null;
+
+  // Collect all secondary job numbers from Employees sheet
+  var secondaryJobNumbers = {};
+  if (secJobCol !== -1) {
+    for (var ei = 1; ei < empData.length; ei++) {
+      var rawSec = String(empData[ei][secJobCol] || '').trim();
+      if (rawSec) {
+        var secParts = rawSec.split(',').map(function(p) { return p.trim(); });
+        for (var sp = 0; sp < secParts.length; sp++) {
+          var baseSec = secParts[sp].split('.')[0].trim();
+          if (baseSec) {
+            secondaryJobNumbers[baseSec] = true;
+          }
+        }
+      }
+    }
+  }
 
   // Build current crew data from Employees
   var crewMap = {};
@@ -896,6 +914,7 @@ function syncJobTrackingAfterImport(ss, jobNameMap, earlyActivatedJobs, crewSche
       delete existingJobs[crewNum];
     } else {
       // New crew - add to Job Tracking (21 columns: A-U)
+      var isSecondaryImport = !!secondaryJobNumbers[crewNum];
       newRows.push([
         crewNum,                    // Job Number (A)
         crew.location || 'Unknown', // Location (B)
@@ -915,8 +934,8 @@ function syncJobTrackingAfterImport(ss, jobNameMap, earlyActivatedJobs, crewSche
         false,                      // Skip Thu (P)
         true,                       // Skip Fri (Q) - DEFAULT Mon-Thu
         true,                       // Skip Sat (R) - DEFAULT Mon-Thu
-        false,                      // Skip Weekly Meeting (S)
-        false,                      // Skip Monthly Checklist (T)
+        isSecondaryImport ? true : false, // Skip Weekly Meeting (S) - Default N/A for secondary jobs
+        isSecondaryImport ? true : false, // Skip Monthly Checklist (T) - Default N/A for secondary jobs
         timestamp                   // Last Updated (U)
       ]);
       addedCount++;

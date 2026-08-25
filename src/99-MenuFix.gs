@@ -132,6 +132,7 @@ function _buildGloveManagerMenu() {
           .addItem('📂 View Job Tracking', 'openJobTrackingSheet')
           .addItem('🔄 Refresh Job Tracking', 'refreshJobTrackingFromEmployees')
           .addItem('👤 Refresh Job Tracking Foremen', 'refreshJobTrackingForemen')
+          .addItem('📐 Auto-Configure Secondary Jobs (Mark N/A)', 'menuAutoConfigureSecondaryJobs')
           .addItem('✅ Mark Job Complete', 'markJobComplete')
           .addItem('🧹 Clean Completed Secondary Jobs', 'menuCleanupCompletedSecondaryJobs')
           .addItem('➕ Add Future Job', 'addFutureJob'))

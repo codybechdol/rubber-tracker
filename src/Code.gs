@@ -32595,10 +32595,13 @@ function doPost(e) {
     if (action === 'processSafetyEmails') {
       var procResult = executeSyncApiProcessSafetyEmails({
         daysBack: payload.daysBack || 7,
+        batchSize: payload.batchSize || 50,
         reportTypeFilter: payload.reportTypeFilter || 'ALL',
         newOnlyMode: payload.newOnlyMode !== false,
         skipPdfExtraction: payload.skipPdfExtraction === true,
-        endDate: payload.endDate || null
+        endDate: payload.endDate || null,
+        isPostProcessing: payload.isPostProcessing === true,
+        prevResult: payload.prevResult || null
       });
       return ContentService.createTextOutput(JSON.stringify(procResult))
         .setMimeType(ContentService.MimeType.JSON);

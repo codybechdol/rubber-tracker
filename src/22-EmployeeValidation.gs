@@ -1818,7 +1818,7 @@ function syncCrews(silent) {
   var empHeaders = empData[0];
 
   // Find employee columns
-  var nameCol = -1, jobNumCol = -1, locationCol = -1, classificationCol = -1, lastDayCol = -1, crewLeadCol = -1;
+  var nameCol = -1, jobNumCol = -1, locationCol = -1, classificationCol = -1, lastDayCol = -1, crewLeadCol = -1, secJobCol = -1;
   for (var h = 0; h < empHeaders.length; h++) {
     var header = String(empHeaders[h]).toLowerCase().trim();
     if (header === 'job number') jobNumCol = h;
@@ -1826,6 +1826,7 @@ function syncCrews(silent) {
     if (header === 'job classification') classificationCol = h;
     if (header === 'last day') lastDayCol = h;
     if (header === 'crew lead') crewLeadCol = h;
+    if (header === 'secondary job number' || header === 'secondary job') secJobCol = h;
   }
   nameCol = getEmployeeNameColumnIndex(empHeaders);
 
@@ -1834,6 +1835,23 @@ function syncCrews(silent) {
       ui.alert('❌ Error', 'Job Number column not found in Employees sheet!', ui.ButtonSet.OK);
     }
     return { success: false, error: 'Job Number column not found' };
+  }
+
+  // Collect all secondary job numbers from Employees sheet
+  var secondaryJobNumbers = {};
+  if (secJobCol !== -1) {
+    for (var ei = 1; ei < empData.length; ei++) {
+      var rawSec = String(empData[ei][secJobCol] || '').trim();
+      if (rawSec) {
+        var secParts = rawSec.split(',').map(function(p) { return p.trim(); });
+        for (var sp = 0; sp < secParts.length; sp++) {
+          var baseSec = secParts[sp].split('.')[0].trim();
+          if (baseSec) {
+            secondaryJobNumbers[baseSec] = true;
+          }
+        }
+      }
+    }
   }
 
   // Classification hierarchy (lower number = higher priority)
@@ -1942,6 +1960,7 @@ function syncCrews(silent) {
 
   for (var crewNum in crewMap) {
     var crew = crewMap[crewNum];
+    var isSecondaryCrew = !!secondaryJobNumbers[crewNum];
     processedCrews[crewNum] = true;
 
     if (existingJobs[crewNum]) {
@@ -1967,11 +1986,11 @@ function syncCrews(silent) {
         jobData[dataIdx][colIndices.skipThu] = false;
         jobData[dataIdx][colIndices.skipFri] = true;
         jobData[dataIdx][colIndices.skipSat] = true;
-        jobData[dataIdx][colIndices.skipWeeklyMeeting] = false;
-        jobData[dataIdx][colIndices.skipMonthlyChecklist] = false;
+        jobData[dataIdx][colIndices.skipWeeklyMeeting] = isSecondaryCrew ? true : false;
+        jobData[dataIdx][colIndices.skipMonthlyChecklist] = isSecondaryCrew ? true : false;
         scheduleDefaults++;
         jobDataModified = true;
-        Logger.log('syncCrews: Set default schedule (Mon-Thu) for ' + crewNum);
+        Logger.log('syncCrews: Set default schedule (Mon-Thu) for ' + crewNum + ' (secondary=' + isSecondaryCrew + ')');
       }
 
       // Update Last Updated
@@ -2008,6 +2027,7 @@ function syncCrews(silent) {
   for (var cn in crewMap) {
     if (!existingJobs[cn]) {
       var crewData = crewMap[cn];
+      var isSecondaryNew = !!secondaryJobNumbers[cn];
       newCrewRows.push([
         cn,                         // Job Number (A)
         crewData.location || 'Unknown', // Location (B)
@@ -2027,8 +2047,8 @@ function syncCrews(silent) {
         false,                      // Skip Thu (P)
         true,                       // Skip Fri (Q)
         true,                       // Skip Sat (R)
-        false,                      // Skip Weekly Meeting (S)
-        false,                      // Skip Monthly Checklist (T)
+        isSecondaryNew ? true : false, // Skip Weekly Meeting (S) - Default N/A for secondary jobs
+        isSecondaryNew ? true : false, // Skip Monthly Checklist (T) - Default N/A for secondary jobs
         timestamp                   // Last Updated (U)
       ]);
     }
@@ -2172,6 +2192,76 @@ function menuCleanupCompletedSecondaryJobs() {
     ui.alert('✅ Secondary Jobs Cleaned', 'Cleared completed secondary job numbers for ' + count + ' employee(s).', ui.ButtonSet.OK);
   } else {
     ui.alert('ℹ️ No Changes', 'No employees had secondary job numbers assigned to completed jobs.', ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * Automatically sets Skip Weekly Meeting and Skip Monthly Checklist to true (N/A)
+ * for all secondary jobs in Job Tracking. Checkboxes can be unchecked at any time to make them active.
+ */
+function autoConfigureSecondaryJobsInJobTracking(ss) {
+  ss = ss || SpreadsheetApp.getActiveSpreadsheet();
+  var jobSheet = ss.getSheetByName('Job Tracking');
+  var empSheet = ss.getSheetByName(typeof SHEET_EMPLOYEES !== 'undefined' ? SHEET_EMPLOYEES : 'Employees');
+  if (!jobSheet || !empSheet) return 0;
+
+  var empData = empSheet.getDataRange().getValues();
+  var empHeaders = empData[0];
+  var secJobCol = -1;
+  for (var h = 0; h < empHeaders.length; h++) {
+    var hdr = String(empHeaders[h]).toLowerCase().trim();
+    if (hdr === 'secondary job number' || hdr === 'secondary job') {
+      secJobCol = h;
+      break;
+    }
+  }
+  if (secJobCol === -1) return 0;
+
+  var secondaryJobNumbers = {};
+  for (var i = 1; i < empData.length; i++) {
+    var rawSec = String(empData[i][secJobCol] || '').trim();
+    if (rawSec) {
+      var parts = rawSec.split(',').map(function(p) { return p.trim(); });
+      for (var p = 0; p < parts.length; p++) {
+        var baseSec = parts[p].split('.')[0].trim();
+        if (baseSec) secondaryJobNumbers[baseSec] = true;
+      }
+    }
+  }
+
+  var jobData = jobSheet.getDataRange().getValues();
+  var updatedCount = 0;
+  for (var j = 1; j < jobData.length; j++) {
+    var jobNum = String(jobData[j][0] || '').trim();
+    var baseJob = jobNum.split('.')[0].trim();
+    if (secondaryJobNumbers[baseJob] || secondaryJobNumbers[jobNum]) {
+      // Column S = index 18 (Skip Weekly Meeting), Column T = index 19 (Skip Monthly Checklist)
+      var currentSkipWeekly = !!jobData[j][18];
+      var currentSkipMonthly = !!jobData[j][19];
+      if (!currentSkipWeekly || !currentSkipMonthly) {
+        jobSheet.getRange(j + 1, 19).setValue(true); // Col S
+        jobSheet.getRange(j + 1, 20).setValue(true); // Col T
+        updatedCount++;
+        Logger.log('autoConfigureSecondaryJobsInJobTracking: Marked secondary job ' + jobNum + ' as Skip Meeting/Checklist (N/A)');
+      }
+    }
+  }
+  if (updatedCount > 0) {
+    SpreadsheetApp.flush();
+  }
+  return updatedCount;
+}
+
+/**
+ * Menu function to auto-configure secondary jobs in Job Tracking.
+ */
+function menuAutoConfigureSecondaryJobs() {
+  var count = autoConfigureSecondaryJobsInJobTracking();
+  var ui = SpreadsheetApp.getUi();
+  if (count > 0) {
+    ui.alert('✅ Secondary Jobs Configured', 'Auto-configured ' + count + ' secondary job(s) in Job Tracking.\nWeekly Safety Meeting and Monthly Checklist have been marked N/A.\n\nYou can uncheck the boxes on Job Tracking at any time to make them active.', ui.ButtonSet.OK);
+  } else {
+    ui.alert('ℹ️ All Set', 'All secondary jobs in Job Tracking are already configured.', ui.ButtonSet.OK);
   }
 }
 
