@@ -833,4 +833,139 @@ body {
   color: #93c5fd;
 }
 
+/* ==========================================================================
+   Phase 9: Mobile Responsive, PWA, Scanner & Role Mode Styling
+   ========================================================================== */
+
+/* Scanner Laser Animation */
+@keyframes scanner-laser {
+  0% { transform: translateY(-50px); opacity: 0.9; }
+  50% { transform: translateY(50px); opacity: 0.9; }
+  100% { transform: translateY(-50px); opacity: 0.9; }
+}
+
+/* Field Inspector Mode */
+body.inspector-mode .admin-only-control {
+  display: none !important;
+}
+
+body.inspector-mode .app-header {
+  border-bottom: 2px solid #10b981;
+}
+
+body.inspector-mode .brand-badge {
+  background-color: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border-color: #10b981;
+}
+
+/* Mobile Bottom Navigation Bar */
+.mobile-bottom-nav {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 58px;
+  background: #1e293b;
+  border-top: 1px solid var(--border-color);
+  z-index: 1000;
+  justify-content: space-around;
+  align-items: center;
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.mobile-nav-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex: 1;
+  height: 100%;
+  font-size: 10px;
+  gap: 2px;
+  transition: color 0.15s ease;
+  user-select: none;
+}
+
+.mobile-nav-btn.active {
+  color: #38bdf8;
+  font-weight: 700;
+}
+
+.mobile-nav-btn:hover {
+  color: #f8fafc;
+}
+
+.mobile-nav-icon {
+  font-size: 17px;
+}
+
+.mobile-scan-action {
+  color: #60a5fa;
+  font-weight: 800;
+}
+
+.mobile-scan-action .mobile-nav-icon {
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  color: white;
+  padding: 6px;
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.5);
+  margin-top: -10px;
+  font-size: 18px;
+}
+
+/* Tablet & Mobile Media Queries */
+@media (max-width: 900px) {
+  .mobile-menu-btn {
+    display: inline-flex !important;
+  }
+
+  .app-sidebar {
+    position: fixed;
+    top: var(--header-height);
+    left: -290px;
+    bottom: 58px;
+    width: 280px;
+    z-index: 999;
+    transition: left 0.25s ease;
+    box-shadow: 4px 0 20px rgba(0, 0, 0, 0.6);
+    background-color: var(--bg-secondary);
+  }
+
+  .app-sidebar.mobile-open {
+    left: 0;
+  }
+
+  .mobile-bottom-nav {
+    display: flex;
+  }
+
+  .app-content {
+    margin-bottom: 58px;
+  }
+
+  .brand-title {
+    font-size: 15px;
+  }
+
+  .header-actions {
+    gap: 6px;
+  }
+}
+
+@media (max-width: 640px) {
+  .brand-badge {
+    display: none;
+  }
+  
+  .sync-status-badge span#sync-status-text {
+    display: none;
+  }
+}
+
+
 

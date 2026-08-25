@@ -762,4 +762,67 @@ class ProcurementEngine {
     if (saveBtn) saveBtn.innerHTML = '<span>💾</span> Save Vendor Changes';
     alert('✅ Vendor catalog saved successfully! Click "Push Changes to Sheets" at the top whenever you wish to sync changes back to Google Sheets.');
   }
+
+  /**
+   * Generates formatted PO Email via mailto:
+   */
+  sendPoEmail() {
+    const activeItems = (this.items || []).filter(i => i.selected && i.quantity > 0);
+    if (activeItems.length === 0) {
+      alert('⚠️ No purchase items selected.');
+      return;
+    }
+
+    const v = this.selectedVendor;
+    const recipient = v ? v.email : '';
+    const subject = encodeURIComponent(`Purchase Order Request - PPE & Equipment (${new Date().toLocaleDateString()})`);
+    
+    let bodyText = `Dear ${v ? (v.contact || v.name) : 'Vendor'},\n\nPlease process the following purchase order for Mountain Power:\n\n`;
+    bodyText += `========================================================\n`;
+    bodyText += `ITEM DESCRIPTION | SPEC | PART # | QTY | UNIT PRICE | TOTAL\n`;
+    bodyText += `========================================================\n`;
+
+    let grandTotal = 0;
+    activeItems.forEach(item => {
+      const lineTotal = item.price > 0 ? (item.price * item.quantity) : 0;
+      grandTotal += lineTotal;
+      bodyText += `${item.itemType} | Size: ${item.size} (${item.classVal}) | Part: ${item.partNumber || 'N/A'} | Qty: ${item.quantity} | Unit: $${item.price.toFixed(2)} | Total: $${lineTotal.toFixed(2)}\n`;
+    });
+
+    bodyText += `========================================================\n`;
+    bodyText += `ESTIMATED GRAND TOTAL: $${grandTotal.toFixed(2)}\n\n`;
+    bodyText += `Ship To:\nMountain Power - Helena Base\nSafety & PPE Operations\nHelena, MT\n\nThank you,\nSafety Department`;
+
+    const mailtoUrl = `mailto:${encodeURIComponent(recipient)}?subject=${subject}&body=${encodeURIComponent(bodyText)}`;
+    window.open(mailtoUrl, '_blank');
+  }
+
+  /**
+   * Downloads formatted CSV for purchasing system import.
+   */
+  downloadPoCsv() {
+    const activeItems = (this.items || []).filter(i => i.selected && i.quantity > 0);
+    if (activeItems.length === 0) {
+      alert('⚠️ No purchase items selected.');
+      return;
+    }
+
+    const lines = ['Item Category,Size,Class / KV,Part Number,Quantity,Unit Price,Subtotal,Assigned Personnel'];
+    activeItems.forEach(i => {
+      const sub = (i.price * i.quantity).toFixed(2);
+      const emps = `"${i.employees.join('; ')}"`;
+      lines.push(`"${i.itemType}","${i.size}","${i.classVal}","${i.partNumber}",${i.quantity},$${i.price.toFixed(2)},$${sub},${emps}`);
+    });
+
+    const csvContent = lines.join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Purchase_Order_${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
 }
