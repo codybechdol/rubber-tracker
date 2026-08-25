@@ -210,7 +210,7 @@ class SyncEngine {
 
     let html = `
       <div style="padding: 10px 14px; border-radius: 8px; font-size: 13px; font-weight: 500; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; ${statusBg}">
-        <span>${statusMessage}</span>
+        <span id="sync-modal-subtitle">${statusMessage}</span>
         <span class="brand-badge" style="background: rgba(255,255,255,0.1);">${outbox.length} change${outbox.length === 1 ? '' : 's'}</span>
       </div>
     `;
