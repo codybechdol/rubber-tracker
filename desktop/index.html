@@ -160,6 +160,9 @@
             <span class="brand-badge" id="safety-compliance-row-count">0 rows</span>
           </div>
           <div style="display: flex; align-items: center; gap: 8px;">
+            <button class="btn btn-secondary" id="btn-view-safety-logs" style="font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;" onclick="window.safetyComplianceEngine.openSafetyLogsModal()" title="View and edit recent safety logs (JHAs, Safety Meetings, Checklists) and open PDF attachments">
+              <span>📋</span> Logs & PDFs
+            </button>
             <button class="btn btn-primary" id="btn-process-safety-emails" style="font-size: 12px; font-weight: 700; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(16, 185, 129, 0.3);" onclick="window.safetyComplianceEngine.openProcessEmailsModal()">
               <span>📥</span> Process Safety Emails
             </button>

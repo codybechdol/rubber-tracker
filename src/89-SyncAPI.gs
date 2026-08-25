@@ -72,6 +72,9 @@ function exportFullDatabaseSnapshot() {
     { key: 'hot_sticks_history', name: typeof SHEET_HOT_STICKS_HISTORY !== 'undefined' ? SHEET_HOT_STICKS_HISTORY : 'Hot Sticks History' },
     { key: 'employee_history', name: typeof SHEET_EMPLOYEE_HISTORY !== 'undefined' ? SHEET_EMPLOYEE_HISTORY : 'Employee History' },
     { key: 'safety_equipment_needs', name: 'Safety Equipment Needs' },
+    { key: 'jha_log', name: 'JHA Log' },
+    { key: 'weekly_safety_log', name: 'Weekly Safety Log' },
+    { key: 'monthly_checklist_log', name: 'Monthly Checklist Log' },
     { key: 'locations', name: 'Locations' },
     { key: 'drive_time_routes', name: 'Drive Time Routes' },
     { key: 'vendors', name: 'Vendors' },
@@ -1702,6 +1705,14 @@ function executeSyncApiProcessSafetyEmails(options) {
         postResult = { complete: true, error: ePost.toString() };
       }
     }
+    // Attach recent log entries for interactive viewer & editing
+    try {
+      postResult.recentLogs = getRecentSafetyLogs(100);
+    } catch (eLogs) {
+      Logger.log('getRecentSafetyLogs error: ' + eLogs);
+      postResult.recentLogs = [];
+    }
+
     SpreadsheetApp.flush();
     var freshSnapshot = null;
     if (typeof exportFullDatabaseSnapshot === 'function') {
@@ -1754,6 +1765,14 @@ function executeSyncApiProcessSafetyEmails(options) {
     }
   }
 
+  // Attach recent log entries for interactive viewer & editing
+  try {
+    postResult.recentLogs = getRecentSafetyLogs(100);
+  } catch (eLogs) {
+    Logger.log('getRecentSafetyLogs error: ' + eLogs);
+    postResult.recentLogs = [];
+  }
+
   SpreadsheetApp.flush();
 
   var freshSnapshot = null;
@@ -1772,6 +1791,123 @@ function executeSyncApiProcessSafetyEmails(options) {
     result: postResult || result,
     snapshot: freshSnapshot
   };
+}
+
+/**
+ * Extracts recent log rows from JHA Log, Weekly Safety Log, and Monthly Checklist Log
+ * for interactive viewing, editing, and direct PDF viewing in the Desktop App.
+ *
+ * @param {number} limit - Maximum entries to fetch per sheet
+ * @return {Array<Object>} List of recent log objects
+ */
+function getRecentSafetyLogs(limit) {
+  limit = limit || 100;
+  var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) return [];
+  var tz = ss.getSpreadsheetTimeZone() || 'America/Denver';
+  var allLogs = [];
+
+  function fmtDate(d, withTime) {
+    if (!d) return '';
+    if (d instanceof Date) {
+      return Utilities.formatDate(d, tz, withTime ? 'MM/dd/yyyy HH:mm' : 'MM/dd/yyyy');
+    }
+    return String(d);
+  }
+
+  function getBaseEmailId(emailId) {
+    if (!emailId) return '';
+    return String(emailId).trim().split('_')[0];
+  }
+
+  // 1. JHA Log
+  var jhaSheet = ss.getSheetByName('JHA Log');
+  if (jhaSheet && jhaSheet.getLastRow() > 1) {
+    var jData = jhaSheet.getDataRange().getValues();
+    var startJ = Math.max(1, jData.length - limit);
+    for (var r = jData.length - 1; r >= startJ; r--) {
+      var row = jData[r];
+      var emailId = String(row[5] || '').trim();
+      var baseId = getBaseEmailId(emailId);
+      allLogs.push({
+        id: 'jha_' + (r + 1),
+        sheetName: 'JHA Log',
+        type: 'JHA',
+        rowIndex: r + 1,
+        dateReceived: fmtDate(row[0], true),
+        date: fmtDate(row[1], false),
+        jobNumber: String(row[2] || '').trim(),
+        foreman: String(row[3] || '').trim(),
+        subject: String(row[4] || '').trim(),
+        emailId: emailId,
+        gmailUrl: baseId ? ('https://mail.google.com/mail/#all/' + baseId) : '',
+        source: String(row[6] || '').trim(),
+        status: String(row[7] || '').trim(),
+        creditedTo: String(row[8] || '').trim(),
+        notes: String(row[9] || '').trim()
+      });
+    }
+  }
+
+  // 2. Weekly Safety Log
+  var weeklySheet = ss.getSheetByName('Weekly Safety Log');
+  if (weeklySheet && weeklySheet.getLastRow() > 1) {
+    var wData = weeklySheet.getDataRange().getValues();
+    var startW = Math.max(1, wData.length - limit);
+    for (var rw = wData.length - 1; rw >= startW; rw--) {
+      var wRow = wData[rw];
+      var wEmailId = String(wRow[5] || '').trim();
+      var wBaseId = getBaseEmailId(wEmailId);
+      allLogs.push({
+        id: 'weekly_' + (rw + 1),
+        sheetName: 'Weekly Safety Log',
+        type: 'Weekly Safety Meeting',
+        rowIndex: rw + 1,
+        dateReceived: fmtDate(wRow[0], true),
+        date: fmtDate(wRow[1], false),
+        jobNumber: String(wRow[2] || '').trim(),
+        foreman: String(wRow[3] || '').trim(),
+        subject: String(wRow[4] || '').trim(),
+        emailId: wEmailId,
+        gmailUrl: wBaseId ? ('https://mail.google.com/mail/#all/' + wBaseId) : '',
+        status: String(wRow[6] || '').trim(),
+        creditedTo: String(wRow[7] || '').trim(),
+        notes: String(wRow[8] || '').trim()
+      });
+    }
+  }
+
+  // 3. Monthly Checklist Log
+  var monthlySheet = ss.getSheetByName('Monthly Checklist Log');
+  if (monthlySheet && monthlySheet.getLastRow() > 1) {
+    var mData = monthlySheet.getDataRange().getValues();
+    var startM = Math.max(1, mData.length - limit);
+    for (var rm = mData.length - 1; rm >= startM; rm--) {
+      var mRow = mData[rm];
+      var mEmailId = String(mRow[6] || '').trim();
+      var mBaseId = getBaseEmailId(mEmailId);
+      allLogs.push({
+        id: 'monthly_' + (rm + 1),
+        sheetName: 'Monthly Checklist Log',
+        type: 'Monthly Checklist',
+        rowIndex: rm + 1,
+        dateReceived: fmtDate(mRow[0], true),
+        date: fmtDate(mRow[1], false),
+        jobNumber: String(mRow[2] || '').trim(),
+        foreman: String(mRow[3] || '').trim(),
+        vehicleNumber: String(mRow[4] || '').trim(),
+        subject: String(mRow[5] || '').trim(),
+        emailId: mEmailId,
+        gmailUrl: mBaseId ? ('https://mail.google.com/mail/#all/' + mBaseId) : '',
+        status: String(mRow[7] || '').trim(),
+        creditedTo: String(mRow[8] || '').trim(),
+        hasEquipmentIssues: String(mRow[9] || '').trim(),
+        notes: String(mRow[10] || '').trim()
+      });
+    }
+  }
+
+  return allLogs;
 }
 
 /**
