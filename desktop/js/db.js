@@ -347,16 +347,21 @@ class LocalDatabase {
       table._headersNormalized = true;
     }
 
-    if (table.rows && table.headers && (tableKey === 'employees' || tableKey === 'job_tracking')) {
-      table.rawGrid = [
-        table.headers,
-        ...table.rows.map((r, i) => {
-          r._rowIdx = i + 2;
-          return table.headers.map(h => r[h] !== undefined ? r[h] : '');
-        })
-      ];
+    if (table.rows && table.headers) {
+      table.rows.forEach((r, i) => {
+        if (!r._rowIdx) r._rowIdx = i + 2;
+      });
+      if (!table.rawGrid || table.rawGrid.length <= 1) {
+        table.rawGrid = [
+          table.headers,
+          ...table.rows.map((r, i) => {
+            r._rowIdx = i + 2;
+            return table.headers.map(h => r[h] !== undefined ? r[h] : '');
+          })
+        ];
+      }
       table.rowCount = table.rows.length;
-      table.maxRows = table.rawGrid.length;
+      table.maxRows = table.rawGrid ? table.rawGrid.length : table.rows.length + 1;
     }
 
     return table;
@@ -458,7 +463,11 @@ class LocalDatabase {
     }
 
     // Add to rows array (insert at the beginning so newly added items appear at the top)
+    rowObj._rowIdx = 2;
     table.rows.unshift({ ...rowObj });
+    table.rows.forEach((r, idx) => {
+      r._rowIdx = idx + 2;
+    });
     table.rowCount = table.rows.length;
 
     // Add to rawGrid array right after header row (index 1)
@@ -841,7 +850,7 @@ class LocalDatabase {
 
     // Direct cell edit
     if (mut.action === 'UPDATE_CELL') {
-      const table = Object.values(this.snapshot.tables).find(t => t.name === mut.sheetName);
+      const table = Object.values(this.snapshot.tables).find(t => (t.name && t.name.toLowerCase() === String(mut.sheetName || '').toLowerCase())) || this.snapshot.tables[this.getTableKeyForSheet(mut.sheetName)] || this.snapshot.tables[mut.sheetName];
       const sheetNameLower = (mut.sheetName || '').toLowerCase();
 
       // 1. If edit is on a Swap Sheet (Glove Swaps, Sleeve Swaps, Blanket Swaps, MACK Swaps)
@@ -1092,17 +1101,46 @@ class LocalDatabase {
         }
       }
 
-      // 2. Direct rawGrid update for any sheet if present
-      if (table && table.rawGrid && table.rawGrid[mut.row - 1]) {
-        table.rawGrid[mut.row - 1][mut.col - 1] = mut.value;
-      }
-
-      // 3. If edit is on an Inventory or Data Sheet (Gloves, Sleeves, Blankets, MACKs, Expiring Certs, etc.)
+      // 2. Direct rawGrid and row update for Inventory or Data Sheets (Gloves, Sleeves, Blankets, MACKs, Grounds, etc.)
       if (table && table.rows && table.headers) {
-        const row = table.rows.find(r => r._rowIdx === mut.row) || table.rows[mut.row - 2]; // 1-based sheet row (row 1 is header)
+        let row = null;
+        if (mut.itemIdentifier) {
+          const idClean = String(mut.itemIdentifier).trim().toLowerCase();
+          row = table.rows.find(r => {
+            for (const k in r) {
+              const kl = k.toLowerCase();
+              if (kl.includes('item') || kl.includes('serial') || kl.includes('glove') || kl.includes('sleeve') || kl.includes('blanket') || kl.includes('mack') || kl.includes('employee') || kl.includes('name') || kl.includes('job') || kl === 'id') {
+                if (String(r[k] || '').trim().toLowerCase() === idClean) return true;
+              }
+            }
+            return false;
+          });
+        }
+        if (!row && mut.row) {
+          row = table.rows.find(r => r._rowIdx === mut.row);
+        }
+        if (!row && typeof mut.row === 'number' && mut.row >= 2 && table.rows[mut.row - 2]) {
+          row = table.rows[mut.row - 2];
+        }
+
         const colHeader = mut.header || table.headers[mut.col - 1];
         if (row && colHeader) {
           row[colHeader] = mut.value;
+
+          let gridRowIdx = (row._rowIdx && row._rowIdx >= 2) ? (row._rowIdx - 1) : -1;
+          if (gridRowIdx === -1 && mut.itemIdentifier && table.rawGrid) {
+            const idClean = String(mut.itemIdentifier).trim().toLowerCase();
+            gridRowIdx = table.rawGrid.findIndex((gr, idx) => idx > 0 && String(gr[0] || '').trim().toLowerCase() === idClean);
+          }
+          if (gridRowIdx === -1 && typeof mut.row === 'number' && mut.row >= 2) {
+            gridRowIdx = mut.row - 1;
+          }
+          if (gridRowIdx !== -1 && table.rawGrid && table.rawGrid[gridRowIdx]) {
+            const colIdx = (typeof mut.col === 'number' && mut.col >= 1) ? (mut.col - 1) : table.headers.indexOf(colHeader);
+            if (colIdx !== -1) {
+              table.rawGrid[gridRowIdx][colIdx] = mut.value;
+            }
+          }
 
           const hLower = colHeader.toLowerCase();
 
@@ -1285,9 +1323,10 @@ class LocalDatabase {
 
               if (newChgOut && newChgOut !== 'N/A') {
                 row['Change Out Date'] = newChgOut;
-                if (table.rawGrid && table.rawGrid[mut.row - 1]) {
+                let chgGridIdx = (row._rowIdx && row._rowIdx >= 2) ? (row._rowIdx - 1) : (typeof mut.row === 'number' ? mut.row - 1 : -1);
+                if (chgGridIdx !== -1 && table.rawGrid && table.rawGrid[chgGridIdx]) {
                   const chgColIdx = table.headers.findIndex(h => h.toLowerCase().includes('change out'));
-                  if (chgColIdx !== -1) table.rawGrid[mut.row - 1][chgColIdx] = newChgOut;
+                  if (chgColIdx !== -1) table.rawGrid[chgGridIdx][chgColIdx] = newChgOut;
                 }
               }
             }

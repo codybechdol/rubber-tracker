@@ -1658,7 +1658,21 @@ class SheetNavigator {
     let lastRenderedMonth = null;
 
     rows.forEach((row, rowIdx) => {
-      const sheetRowIdx = row._rowIdx || (rowIdx + 2);
+      let sheetRowIdx = row._rowIdx;
+      if (!sheetRowIdx && tableData.rawGrid) {
+        const itemVal = String(row['Serial #'] || row['Item #'] || row['Glove'] || row['Sleeve'] || row['Blanket'] || row['MACK'] || row['Name'] || row['Employee Name'] || row['Job Number'] || Object.values(row)[0] || '').trim().toLowerCase();
+        if (itemVal) {
+          const gIdx = tableData.rawGrid.findIndex((gr, idx) => idx > 0 && String(gr[0] || '').trim().toLowerCase() === itemVal);
+          if (gIdx !== -1) sheetRowIdx = gIdx + 1;
+        }
+      }
+      if (!sheetRowIdx && tableData.rows) {
+        const rIdx = tableData.rows.indexOf(row);
+        if (rIdx !== -1) sheetRowIdx = rIdx + 2;
+      }
+      if (!sheetRowIdx) sheetRowIdx = rowIdx + 2;
+      row._rowIdx = sheetRowIdx;
+
       const currentWeekVal = String(row['Week Start'] || row['Week'] || '').trim();
       const currentLocVal = String(row['Location'] || '').trim();
       const currentJobVal = String(row['Job Number'] || row['Crew'] || row['Job #'] || '').trim();
@@ -1932,12 +1946,14 @@ class SheetNavigator {
 
         const isSmsCol = hLower.includes('sms');
         const isEditable = !isPrimaryItemCol && !isEmployeeNameCol && !isSmsCol && !hLower.includes('change out') && !hLower.startsWith('skip ');
+        const itemIdentifier = String(row['Serial #'] || row['Item #'] || row['Glove'] || row['Sleeve'] || row['Blanket'] || row['MACK'] || row['Name'] || row['Employee Name'] || row['Job Number'] || Object.values(row)[0] || '').trim();
 
         html += `<td class="${isEditable ? 'editable' : ''}" 
                      contenteditable="${isEditable}" 
                      data-row="${sheetRowIdx}" 
                      data-col="${colIdx + 1}" 
                      data-header="${this.escapeHtml(h)}"
+                     data-item="${this.escapeHtml(itemIdentifier)}"
                      data-sheet="${this.escapeHtml(tableData.name)}">${customCellHtml !== null ? customCellHtml : this.escapeHtml(val)}</td>`;
       });
       html += `</tr>`;
@@ -2021,6 +2037,7 @@ class SheetNavigator {
         const sheetName = e.target.dataset.sheet;
         const row = parseInt(e.target.dataset.row, 10);
         const col = parseInt(e.target.dataset.col, 10);
+        const itemIdentifier = e.target.dataset.item || '';
 
         await this.db.addMutation({
           action: 'UPDATE_CELL',
@@ -2028,6 +2045,7 @@ class SheetNavigator {
           row: row,
           col: col,
           header: header,
+          itemIdentifier: itemIdentifier,
           oldValue: initialVal,
           value: newVal
         });
