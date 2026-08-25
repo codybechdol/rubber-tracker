@@ -259,6 +259,7 @@ function generateAndStoreSyncSnapshot(existingSnapshot) {
  * @return {Object} Result summary with success count and errors
  */
 function applyBatchSyncMutations(mutations, returnSnapshot, options) {
+  var pushStartTime = new Date().getTime();
   var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
   if (typeof returnSnapshot === 'object' && returnSnapshot !== null && options === undefined) {
     options = returnSnapshot;
@@ -1561,19 +1562,21 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
     }
   }
 
-  // Auto Save & Backup: Whenever offline changes are pushed and applied,
-  // automatically record history changes and create a Drive backup snapshot.
+  // Auto Save & Backup on Push:
+  // 1. Run targeted fast history save only on modified equipment sheets
   if (appliedCount > 0) {
     try {
       if (typeof saveHistoryFast === 'function') {
-        saveHistoryFast(true);
+        saveHistoryFast(true, sheetsModified);
       }
     } catch (histErr) {
       Logger.log('applyBatchSyncMutations auto saveHistoryFast error: ' + histErr);
     }
+
+    // 2. Refresh backup (throttles heavy full-file Google Drive cloning to max once per 15 min)
     try {
       if (typeof createBackupSnapshotFast === 'function') {
-        createBackupSnapshotFast();
+        createBackupSnapshotFast(options.forceBackup === true);
       }
     } catch (bkErr) {
       Logger.log('applyBatchSyncMutations auto createBackupSnapshotFast error: ' + bkErr);
@@ -1585,18 +1588,36 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
   if (returnSnapshot) {
     try {
       snapshot = exportFullDatabaseSnapshot();
+      if (snapshot && typeof generateAndStoreSyncSnapshot === 'function') {
+        generateAndStoreSyncSnapshot(snapshot);
+      }
     } catch (expErr) {
       Logger.log('applyBatchSyncMutations snapshot export error: ' + expErr);
     }
   }
 
-  // Save snapshot file to Drive ONLY if snapshot was generated
-  if (snapshot) {
-    try {
-      generateAndStoreSyncSnapshot(snapshot);
-    } catch (snapErr) {
-      Logger.log('applyBatchSyncMutations Drive snapshot error: ' + snapErr);
+  var pushEndTime = new Date().getTime();
+  var durationSec = ((pushEndTime - pushStartTime) / 1000).toFixed(2);
+  var telemetryData = {
+    status: errors.length > 0 ? 'COMPLETED_WITH_ERRORS' : 'COMPLETED_SUCCESSFULLY',
+    startTime: new Date(pushStartTime).toISOString(),
+    endTime: new Date(pushEndTime).toISOString(),
+    durationSeconds: parseFloat(durationSec),
+    durationText: durationSec + 's',
+    mutationsCount: mutations.length,
+    appliedCount: appliedCount,
+    errorCount: errors.length,
+    errors: errors.slice(0, 10),
+    sheetsModified: Object.keys(sheetsModified)
+  };
+
+  try {
+    PropertiesService.getScriptProperties().setProperty('LAST_SYNC_PUSH', JSON.stringify(telemetryData));
+    if (typeof logEvent === 'function') {
+      logEvent('Sync Push: ' + appliedCount + '/' + mutations.length + ' mutations applied in ' + durationSec + 's' + (errors.length > 0 ? ' (' + errors.length + ' errors)' : ''), errors.length > 0 ? 'WARNING' : 'INFO');
     }
+  } catch (propErr) {
+    Logger.log('Error saving push telemetry: ' + propErr);
   }
 
   return {
@@ -1604,6 +1625,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
     success: errors.length === 0,
     appliedCount: appliedCount,
     errors: errors,
+    telemetry: telemetryData,
     snapshot: snapshot
   };
 }
@@ -1617,6 +1639,16 @@ function doGet(e) {
   if (action === 'ping') {
     return ContentService.createTextOutput(JSON.stringify({
       status: 'ok',
+      serverTime: new Date().toISOString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+
+  if (action === 'getPushStatus' || action === 'getTelemetry') {
+    var rawTelemetry = PropertiesService.getScriptProperties().getProperty('LAST_SYNC_PUSH');
+    var telemetry = rawTelemetry ? JSON.parse(rawTelemetry) : null;
+    return ContentService.createTextOutput(JSON.stringify({
+      status: 'ok',
+      lastPush: telemetry,
       serverTime: new Date().toISOString()
     })).setMimeType(ContentService.MimeType.JSON);
   }

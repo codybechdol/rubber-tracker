@@ -11578,71 +11578,102 @@ function saveAndBackup() {
  *
  * @param {boolean} silent - If true, no UI alerts shown
  */
-function saveHistoryFast(silent) {
+function saveHistoryFast(silent, targetSheets) {
   silent = silent || false;
   var startTime = new Date().getTime();
 
-  if (silent) {
+  // Normalize targetSheets map if passed as array or object
+  var targetMap = null;
+  if (targetSheets) {
+    targetMap = {};
+    if (Array.isArray(targetSheets)) {
+      targetSheets.forEach(function(s) { targetMap[String(s || '').toLowerCase().trim()] = true; });
+    } else if (typeof targetSheets === 'object') {
+      Object.keys(targetSheets).forEach(function(k) { targetMap[String(k || '').toLowerCase().trim()] = true; });
+    }
+  }
+
+  function shouldCheck(sheetNames) {
+    if (!targetMap) return true;
+    for (var sn = 0; sn < sheetNames.length; sn++) {
+      if (targetMap[sheetNames[sn].toLowerCase()]) return true;
+    }
+    return false;
+  }
+
+  var checkGloves = shouldCheck(['Gloves', 'Glove Swaps']);
+  var checkSleeves = shouldCheck(['Sleeves', 'Sleeve Swaps']);
+  var checkBlankets = shouldCheck(['Blankets', 'Blanket Swaps']);
+  var checkMacks = shouldCheck(['MACKs', 'MACK Swaps']);
+  var checkHVTesters = shouldCheck(['HV Testers', 'HV Tester Swaps']);
+  var checkPhasingSets = shouldCheck(['Phasing Sets', 'Phasing Set Swaps']);
+  var checkAED = shouldCheck(['AED', 'AED Swaps']);
+  var checkGrounds = shouldCheck(['Grounds', 'Ground Swaps']);
+  var checkHotSticks = shouldCheck(['Hot Sticks', 'Hot Stick Swaps']);
+  var checkEmployees = shouldCheck(['Employees', 'Job Tracking']);
+
+  if (silent && !targetSheets) {
     ensureSeparateHistorySheets();
   }
 
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var glovesSheet = ss.getSheetByName(SHEET_GLOVES);
-    var sleevesSheet = ss.getSheetByName(SHEET_SLEEVES);
-    var blanketsSheet = ss.getSheetByName(SHEET_BLANKETS);
-    var macksSheet = ss.getSheetByName(SHEET_MACKS);
-    var hvTestersSheet = ss.getSheetByName(SHEET_HV_TESTERS);
-    var phasingSetsSheet = ss.getSheetByName(SHEET_PHASING_SETS);
-    var aedSheet = ss.getSheetByName(SHEET_AED);
-    var groundsSheet = ss.getSheetByName(SHEET_GROUNDS);
-    var hotSticksSheet = ss.getSheetByName(SHEET_HOT_STICKS);
-    var glovesHistorySheet = silent ?
+    var glovesSheet = checkGloves ? ss.getSheetByName(SHEET_GLOVES) : null;
+    var sleevesSheet = checkSleeves ? ss.getSheetByName(SHEET_SLEEVES) : null;
+    var blanketsSheet = checkBlankets ? ss.getSheetByName(SHEET_BLANKETS) : null;
+    var macksSheet = checkMacks ? ss.getSheetByName(SHEET_MACKS) : null;
+    var hvTestersSheet = checkHVTesters ? ss.getSheetByName(SHEET_HV_TESTERS) : null;
+    var phasingSetsSheet = checkPhasingSets ? ss.getSheetByName(SHEET_PHASING_SETS) : null;
+    var aedSheet = checkAED ? ss.getSheetByName(SHEET_AED) : null;
+    var groundsSheet = checkGrounds ? ss.getSheetByName(SHEET_GROUNDS) : null;
+    var hotSticksSheet = checkHotSticks ? ss.getSheetByName(SHEET_HOT_STICKS) : null;
+
+    var glovesHistorySheet = checkGloves ? (silent ?
       ss.getSheetByName(SHEET_GLOVES_HISTORY) :
-      (ss.getSheetByName('Gloves History') || ss.insertSheet('Gloves History'));
-    var sleevesHistorySheet = silent ?
+      (ss.getSheetByName('Gloves History') || ss.insertSheet('Gloves History'))) : null;
+    var sleevesHistorySheet = checkSleeves ? (silent ?
       ss.getSheetByName(SHEET_SLEEVES_HISTORY) :
-      (ss.getSheetByName('Sleeves History') || ss.insertSheet('Sleeves History'));
-    var blanketsHistorySheet = ss.getSheetByName(SHEET_BLANKETS_HISTORY);
-    var macksHistorySheet = ss.getSheetByName(SHEET_MACKS_HISTORY);
-    var hvTestersHistorySheet = ss.getSheetByName(SHEET_HV_TESTERS_HISTORY);
-    var phasingSetsHistorySheet = ss.getSheetByName(SHEET_PHASING_SETS_HISTORY);
-    var aedHistorySheet = ss.getSheetByName(SHEET_AED_HISTORY);
-    var groundsHistorySheet = ss.getSheetByName(SHEET_GROUNDS_HISTORY);
-    var hotSticksHistorySheet = ss.getSheetByName(SHEET_HOT_STICKS_HISTORY);
+      (ss.getSheetByName('Sleeves History') || ss.insertSheet('Sleeves History'))) : null;
+    var blanketsHistorySheet = checkBlankets ? ss.getSheetByName(SHEET_BLANKETS_HISTORY) : null;
+    var macksHistorySheet = checkMacks ? ss.getSheetByName(SHEET_MACKS_HISTORY) : null;
+    var hvTestersHistorySheet = checkHVTesters ? ss.getSheetByName(SHEET_HV_TESTERS_HISTORY) : null;
+    var phasingSetsHistorySheet = checkPhasingSets ? ss.getSheetByName(SHEET_PHASING_SETS_HISTORY) : null;
+    var aedHistorySheet = checkAED ? ss.getSheetByName(SHEET_AED_HISTORY) : null;
+    var groundsHistorySheet = checkGrounds ? ss.getSheetByName(SHEET_GROUNDS_HISTORY) : null;
+    var hotSticksHistorySheet = checkHotSticks ? ss.getSheetByName(SHEET_HOT_STICKS_HISTORY) : null;
 
     // Ensure Blankets History sheet exists (only if source sheet exists)
-    if (!blanketsHistorySheet && blanketsSheet) {
+    if (!blanketsHistorySheet && blanketsSheet && checkBlankets) {
       blanketsHistorySheet = ensureBlanketHistorySheet();
     }
 
     // Ensure MACKs History sheet exists (only if source sheet exists)
-    if (!macksHistorySheet && macksSheet) {
+    if (!macksHistorySheet && macksSheet && checkMacks) {
       macksHistorySheet = ensureMackHistorySheet();
     }
 
     // Ensure HV Testers History sheet exists (only if source sheet exists)
-    if (!hvTestersHistorySheet && hvTestersSheet) {
+    if (!hvTestersHistorySheet && hvTestersSheet && checkHVTesters) {
       hvTestersHistorySheet = ensureHVTestersHistorySheet();
     }
 
     // Ensure Phasing Sets History sheet exists (only if source sheet exists)
-    if (!phasingSetsHistorySheet && phasingSetsSheet) {
+    if (!phasingSetsHistorySheet && phasingSetsSheet && checkPhasingSets) {
       phasingSetsHistorySheet = ensurePhasingSetsHistorySheet();
     }
 
     // Ensure AED History sheet exists (only if AED source sheet exists)
-    if (!aedHistorySheet && aedSheet) {
+    if (!aedHistorySheet && aedSheet && checkAED) {
       aedHistorySheet = ensureAEDHistorySheet();
     }
 
     // Ensure Grounds History sheet exists (only if source sheet exists)
-    if (!groundsHistorySheet && groundsSheet) {
+    if (!groundsHistorySheet && groundsSheet && checkGrounds) {
       groundsHistorySheet = ensureGroundsHistorySheet();
     }
 
     // Ensure Hot Sticks History sheet exists (only if source sheet exists)
-    if (!hotSticksHistorySheet && hotSticksSheet) {
+    if (!hotSticksHistorySheet && hotSticksSheet && checkHotSticks) {
       hotSticksHistorySheet = ensureHotSticksHistorySheet();
     }
     /**
@@ -11862,15 +11893,15 @@ function saveHistoryFast(silent) {
     // AED: Date[0], Item#[1], Model[2], Location[3], AssignedTo[4]
     // Grounds: Date[0], Serial#[1], Type[2], Location[3], AssignedTo[4]
     // Hot Sticks: Date[0], Item#[1], Type[2], Length[3], Location[4], AssignedTo[5]
-    var glovesLookup = buildHistoryLookup(glovesHistorySheet, 1, 4, 5);         // defaults: 1, 4, 5
-    var sleevesLookup = buildHistoryLookup(sleevesHistorySheet, 1, 4, 5);       // defaults: 1, 4, 5
-    var blanketsLookup = buildHistoryLookup(blanketsHistorySheet, 1, 4, 5);     // defaults: 1, 4, 5
-    var macksLookup = buildHistoryLookup(macksHistorySheet, 1, 5, 6);           // MACKs layout: 1, 5, 6
-    var hvTestersLookup = buildHistoryLookup(hvTestersHistorySheet, 1, 4, 5);   // defaults: 1, 4, 5
-    var phasingSetsLookup = buildHistoryLookup(phasingSetsHistorySheet, 1, 5, 6); // Phasing Sets layout: 1, 5, 6
-    var aedLookup = buildHistoryLookup(aedHistorySheet, 1, 3, 4);               // AED layout: 1, 3, 4
-    var groundsLookup = buildHistoryLookup(groundsHistorySheet, 1, 3, 4);       // Grounds: 1, 3, 4
-    var hotSticksLookup = buildHistoryLookup(hotSticksHistorySheet, 1, 4, 5);   // Hot Sticks: 1, 4, 5
+    var glovesLookup = checkGloves ? buildHistoryLookup(glovesHistorySheet, 1, 4, 5) : {};
+    var sleevesLookup = checkSleeves ? buildHistoryLookup(sleevesHistorySheet, 1, 4, 5) : {};
+    var blanketsLookup = checkBlankets ? buildHistoryLookup(blanketsHistorySheet, 1, 4, 5) : {};
+    var macksLookup = checkMacks ? buildHistoryLookup(macksHistorySheet, 1, 5, 6) : {};
+    var hvTestersLookup = checkHVTesters ? buildHistoryLookup(hvTestersHistorySheet, 1, 4, 5) : {};
+    var phasingSetsLookup = checkPhasingSets ? buildHistoryLookup(phasingSetsHistorySheet, 1, 5, 6) : {};
+    var aedLookup = checkAED ? buildHistoryLookup(aedHistorySheet, 1, 3, 4) : {};
+    var groundsLookup = checkGrounds ? buildHistoryLookup(groundsHistorySheet, 1, 3, 4) : {};
+    var hotSticksLookup = checkHotSticks ? buildHistoryLookup(hotSticksHistorySheet, 1, 4, 5) : {};
     Logger.log('saveHistoryFast: Built lookups in ' + (new Date().getTime() - startTime) + 'ms');
 
     // Collect new entries in arrays for batch write
@@ -12255,23 +12286,27 @@ function saveHistoryFast(silent) {
 
     Logger.log('saveHistoryFast: All inventory types processed in ' + (new Date().getTime() - startTime) + 'ms');
 
-    // Save Employee History (uses its own optimized function)
+    // Save Employee History (only if relevant sheets were touched or full save)
     var newEmployeeEntries = 0;
-    try {
-      newEmployeeEntries = saveEmployeeHistoryFast();
-    } catch (empErr) {
-      Logger.log('Error saving employee history: ' + empErr);
+    if (checkEmployees) {
+      try {
+        newEmployeeEntries = saveEmployeeHistoryFast();
+      } catch (empErr) {
+        Logger.log('Error saving employee history: ' + empErr);
+      }
     }
 
     var totalTime = new Date().getTime() - startTime;
 
-    // Generate fresh offline sync snapshot for desktop app
-    try {
-      if (typeof generateAndStoreSyncSnapshot === 'function') {
-        generateAndStoreSyncSnapshot();
+    // Generate fresh offline sync snapshot for desktop app (only if manual UI save, not targeted push)
+    if (!silent && !targetSheets) {
+      try {
+        if (typeof generateAndStoreSyncSnapshot === 'function') {
+          generateAndStoreSyncSnapshot();
+        }
+      } catch (syncSnapErr) {
+        Logger.log('saveHistoryFast: Error generating sync snapshot: ' + syncSnapErr);
       }
-    } catch (syncSnapErr) {
-      Logger.log('saveHistoryFast: Error generating sync snapshot: ' + syncSnapErr);
     }
 
     if (silent) {
@@ -13126,22 +13161,32 @@ function saveEmployeeHistoryFast() {
  *
  * @return {File} The backup file, or null on error
  */
-function createBackupSnapshotFast() {
+function createBackupSnapshotFast(forceFullCopy) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
   try {
     var ssName = ss.getName();
     var now = new Date();
+    var nowTime = now.getTime();
     var timestamp = Utilities.formatDate(now, ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd_HH-mm-ss');
     var backupName = ssName + ' - Backup ' + timestamp;
 
-    // Use toast instead of blocking alert (toast doesn't block execution)
-    ss.toast('Creating backup snapshot...', '💾 Backup in Progress', -1);
+    var scriptProps = PropertiesService.getScriptProperties();
+    var lastBackupStr = scriptProps.getProperty('LAST_FULL_DRIVE_BACKUP_TIME');
+    var lastBackupTime = lastBackupStr ? parseInt(lastBackupStr, 10) : 0;
+    var backupThrottleMs = 15 * 60 * 1000; // 15 minutes throttle for heavy DriveApp.makeCopy()
+    var backupFile = null;
 
-    var backupFolder = getOrCreateBackupFolder();
-    var backupFile = DriveApp.getFileById(ss.getId()).makeCopy(backupName, backupFolder);
-
-    logEvent('Backup created: ' + backupName, 'INFO');
+    if (forceFullCopy === true || !lastBackupTime || (nowTime - lastBackupTime) > backupThrottleMs) {
+      ss.toast('Creating backup snapshot...', '💾 Backup in Progress', -1);
+      var backupFolder = getOrCreateBackupFolder();
+      backupFile = DriveApp.getFileById(ss.getId()).makeCopy(backupName, backupFolder);
+      scriptProps.setProperty('LAST_FULL_DRIVE_BACKUP_TIME', String(nowTime));
+      logEvent('Full Drive Backup created: ' + backupName, 'INFO');
+      ss.toast('Backup created: ' + backupName, '✅ Backup Complete', 5);
+    } else {
+      Logger.log('createBackupSnapshotFast: Full Drive copy throttled (last created ' + ((nowTime - lastBackupTime) / 1000).toFixed(0) + 's ago).');
+    }
 
     // Generate fresh offline sync snapshot JSON in the same backup folder
     try {
@@ -13151,9 +13196,6 @@ function createBackupSnapshotFast() {
     } catch (syncSnapErr) {
       Logger.log('createBackupSnapshotFast: Error generating sync snapshot: ' + syncSnapErr);
     }
-
-    // Clear the toast and show success
-    ss.toast('Backup created: ' + backupName, '✅ Backup Complete', 5);
 
     return backupFile;
 

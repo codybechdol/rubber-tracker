@@ -354,9 +354,18 @@ class SyncEngine {
     }
 
     const currentOutbox = [...(this.db.getOutbox() || [])];
+    const pushStartTime = Date.now();
     this.openSyncModal('Pushing Changes to Google Sheets', '⬆️');
-    this.renderModalChanges(currentOutbox, `Pushing ${currentOutbox.length} offline change(s) to Google Sheets...`, 'syncing', false);
+    this.renderModalChanges(currentOutbox, `Pushing ${currentOutbox.length} offline change(s) to Google Sheets... (0.0s)`, 'syncing', false);
     this.updateStatusUI('syncing', `Pushing ${currentOutbox.length} change(s)...`);
+
+    const pushTimerInterval = setInterval(() => {
+      const elapsed = ((Date.now() - pushStartTime) / 1000).toFixed(1);
+      const subTitleEl = document.getElementById('sync-modal-subtitle');
+      if (subTitleEl) {
+        subTitleEl.textContent = `Pushing ${currentOutbox.length} offline change(s) to Google Sheets... (${elapsed}s)`;
+      }
+    }, 150);
 
     try {
       let pushResult = null;
@@ -374,6 +383,9 @@ class SyncEngine {
         pushResult = await this.executeNetworkRequest(getUrl, 'GET');
       }
 
+      clearInterval(pushTimerInterval);
+      const durationSec = ((Date.now() - pushStartTime) / 1000).toFixed(1);
+
       // 1. Handle Multi-User Edit Conflicts
       if (pushResult && pushResult.conflict && Array.isArray(pushResult.conflicts) && pushResult.conflicts.length > 0) {
         this.closeSyncModal();
@@ -387,6 +399,13 @@ class SyncEngine {
 
       if (pushResult && pushResult.errors && pushResult.errors.length > 0) {
         console.warn('Push server errors:', pushResult.errors);
+        this.savePushTelemetry({
+          timestamp: new Date().toISOString(),
+          durationSeconds: parseFloat(durationSec),
+          mutationsCount: currentOutbox.length,
+          status: 'ERROR',
+          errors: pushResult.errors
+        });
         this.renderModalChanges(currentOutbox, `⚠️ Server error: ${pushResult.errors.join('; ')}`, 'error', true);
         this.updateStatusUI('pending', 'Push error / Pending changes');
         this.isSyncing = false;
@@ -395,8 +414,17 @@ class SyncEngine {
         // Clear outbox after successful push
         await this.db.clearOutbox();
 
-        this.updateStatusUI('synced', `Synced (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
-        this.renderModalChanges([], `✅ Successfully pushed all ${currentOutbox.length} change(s) to Google Sheets!`, 'success', false);
+        const serverDur = pushResult && pushResult.telemetry && pushResult.telemetry.durationText ? ` (Server: ${pushResult.telemetry.durationText})` : '';
+        this.savePushTelemetry({
+          timestamp: new Date().toISOString(),
+          durationSeconds: parseFloat(durationSec),
+          mutationsCount: currentOutbox.length,
+          status: 'SUCCESS',
+          serverTelemetry: pushResult ? pushResult.telemetry : null
+        });
+
+        this.updateStatusUI('synced', `Synced in ${durationSec}s`);
+        this.renderModalChanges([], `✅ Successfully pushed all ${currentOutbox.length} change(s) in ${durationSec}s!${serverDur}`, 'success', false);
 
         // Auto-close modal after 2 seconds
         setTimeout(() => {
@@ -404,24 +432,65 @@ class SyncEngine {
         }, 2000);
 
         this.isSyncing = false;
-        return { success: true, count: currentOutbox.length };
+        return { success: true, count: currentOutbox.length, durationSeconds: parseFloat(durationSec) };
       } else {
         console.warn('Invalid server response during push:', pushResult);
         const msg = (pushResult && pushResult.error) ? pushResult.error : 'Push failed. Please verify your Google Apps Script Web App deployment.';
+        this.savePushTelemetry({
+          timestamp: new Date().toISOString(),
+          durationSeconds: parseFloat(durationSec),
+          mutationsCount: currentOutbox.length,
+          status: 'FAILED',
+          error: msg
+        });
         this.renderModalChanges(currentOutbox, `❌ Push failed: ${msg}`, 'error', true);
         this.updateStatusUI('pending', 'Push failed / Pending changes');
         this.isSyncing = false;
         return { success: false, error: msg };
       }
     } catch (err) {
+      clearInterval(pushTimerInterval);
+      const durationSec = ((Date.now() - pushStartTime) / 1000).toFixed(1);
       console.error('Push failed:', err);
       const isAuthError = err.message && (err.message.includes('HTML') || err.message.includes('Anyone') || err.message.includes('deployments'));
       const statusLabel = isAuthError ? 'Auth Error (Check Web App Access)' : 'Offline / Connection error';
+      this.savePushTelemetry({
+        timestamp: new Date().toISOString(),
+        durationSeconds: parseFloat(durationSec),
+        mutationsCount: currentOutbox.length,
+        status: 'FAILED',
+        error: err.message
+      });
       this.updateStatusUI('offline', statusLabel);
       this.openSyncModal('Push Error', '⚠️');
       this.renderModalChanges(currentOutbox, `❌ Push failed: ${err.message}`, 'error', true);
       this.isSyncing = false;
       return { success: false, error: err.message };
+    }
+  }
+
+  /**
+   * Records sync telemetry to localStorage for audit history
+   */
+  savePushTelemetry(record) {
+    try {
+      const raw = localStorage.getItem('SAFETY_ASSISTANT_SYNC_TELEMETRY');
+      const list = raw ? JSON.parse(raw) : [];
+      list.unshift(record);
+      if (list.length > 30) list.length = 30;
+      localStorage.setItem('SAFETY_ASSISTANT_SYNC_TELEMETRY', JSON.stringify(list));
+    } catch (e) { /* ignore */ }
+  }
+
+  /**
+   * Retrieves recent push history telemetry
+   */
+  getRecentPushTelemetry() {
+    try {
+      const raw = localStorage.getItem('SAFETY_ASSISTANT_SYNC_TELEMETRY');
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      return [];
     }
   }
 
