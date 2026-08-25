@@ -253,10 +253,22 @@ class EmployeeProfileEngine {
                 const alreadyInAssigned = assignedEquipment.some(ae => ae.histKey === def.histKey && ae.itemNum === itemNum);
                 if (!alreadyInAssigned) {
                   const eslId = String(row['ESL ID'] || row['ESLID'] || '').trim();
-                  const changeOutDate = String(row['Change Out Date'] || row['Changeout Date'] || row['Pad Expiration'] || 'N/A').trim();
+                  let changeOutDate = String(row['Change Out Date'] || row['Changeout Date'] || row['Pad Expiration'] || '').trim();
                   const testDate = String(row['Test Date'] || row['Calibration Date'] || 'N/A').trim();
                   const itemStatus = String(row['Status'] || 'Assigned').trim();
                   const itemLoc = String(row['Location'] || location || '').trim();
+
+                  if ((!changeOutDate || changeOutDate === 'N/A') && issueDateStr && issueDateStr !== 'N/A') {
+                    if (window.inventoryManager && typeof window.inventoryManager.calculateChangeOutDate === 'function') {
+                      const calc = window.inventoryManager.calculateChangeOutDate(
+                        issueDateStr, itemLoc, displayName, def.key, { testDate: testDate !== 'N/A' ? testDate : '' }
+                      );
+                      if (calc && calc !== 'N/A') {
+                        changeOutDate = calc;
+                      }
+                    }
+                  }
+                  if (!changeOutDate) changeOutDate = 'N/A';
 
                   assignedEquipment.push({
                     eqType: def.title,
@@ -524,11 +536,28 @@ class EmployeeProfileEngine {
             const type = String(item['Type'] || '').trim();
             const length = String(item['Length'] || '').trim();
             const serial = String(item['Serial #'] || item['Serial'] || '').trim();
+            let changeOutDate = String(item['Change Out Date'] || item['Changeout Date'] || item['Pad Expiration'] || '').trim();
             const dateAssigned = String(item['Date Assigned'] || item['Date'] || 'N/A').trim();
-            const changeOutDate = String(item['Change Out Date'] || item['Changeout Date'] || item['Pad Expiration'] || 'N/A').trim();
             const testDate = String(item['Test Date'] || item['Calibration Date'] || 'N/A').trim();
             const status = String(item['Status'] || 'Assigned').trim();
             const itemLoc = String(item['Location'] || location).trim();
+
+            // Calculate Change Out Date if N/A or empty but Date Assigned / Test Date is present
+            if ((!changeOutDate || changeOutDate === 'N/A') && (dateAssigned !== 'N/A' || testDate !== 'N/A')) {
+              if (window.inventoryManager && typeof window.inventoryManager.calculateChangeOutDate === 'function') {
+                const calc = window.inventoryManager.calculateChangeOutDate(
+                  dateAssigned !== 'N/A' ? dateAssigned : testDate,
+                  itemLoc,
+                  assignedTo,
+                  eq.key,
+                  { testDate: testDate !== 'N/A' ? testDate : '' }
+                );
+                if (calc && calc !== 'N/A') {
+                  changeOutDate = calc;
+                }
+              }
+            }
+            if (!changeOutDate) changeOutDate = 'N/A';
 
             let specs = [];
             if (model) specs.push(`Model: ${model}`);

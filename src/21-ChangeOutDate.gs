@@ -25,13 +25,13 @@
  * @param {boolean} isSleeve - True if this is a sleeve, false if glove
  * @return {Date|string|null} The calculated change out date, 'N/A', or null if invalid
  */
-function calculateChangeOutDate(dateAssigned, location, assignedTo, isSleeve) {
-  if (!dateAssigned) return null;
+function calculateChangeOutDate(dateAssigned, location, assignedTo, isSleeve, testDate) {
+  if (!dateAssigned && !testDate) return null;
 
   var assignedToLower = (assignedTo || '').toString().trim().toLowerCase();
-  var locationLower = getPhysicalLocation(location).toLowerCase();
+  var locationLower = typeof getPhysicalLocation === 'function' ? getPhysicalLocation(location).toLowerCase() : String(location || '').toLowerCase();
 
-  // SLEEVES: Always 12 months (hardcoded)
+  // SLEEVES: Always 12 months (hardcoded from Date Assigned)
   if (isSleeve) {
     // Lost, Failed Rubber, and Previous Employee sleeves get N/A
     if (assignedToLower === 'lost' || assignedToLower === 'failed rubber' ||
@@ -39,8 +39,9 @@ function calculateChangeOutDate(dateAssigned, location, assignedTo, isSleeve) {
         locationLower === 'destroyed' || locationLower === 'lost') {
       return 'N/A';
     }
-    var d = new Date(dateAssigned);
-    if (isNaN(d.getTime())) return null;
+    var baseDate = dateAssigned || testDate;
+    var d = typeof parseDateNoon === 'function' ? parseDateNoon(baseDate) : new Date(baseDate);
+    if (!d || isNaN(d.getTime())) return null;
     d.setMonth(d.getMonth() + 12);
     return d;
   }
@@ -53,8 +54,11 @@ function calculateChangeOutDate(dateAssigned, location, assignedTo, isSleeve) {
     return 'N/A';
   }
 
-  var d = new Date(dateAssigned);
-  if (isNaN(d.getTime())) return null;
+  // If On Shelf, shelf life is 1 year from Test Date (or Date Assigned)
+  // If Assigned to Employee, wear cycle is 3 months from Date Assigned (6 months for Northern Lights)
+  var baseDate = (assignedToLower === 'on shelf' && testDate) ? testDate : (dateAssigned || testDate);
+  var d = typeof parseDateNoon === 'function' ? parseDateNoon(baseDate) : new Date(baseDate);
+  if (!d || isNaN(d.getTime())) return null;
 
   var months;
 

@@ -163,13 +163,17 @@ class InventoryManager {
     }
 
     // 6. Gloves
-    const aDate = parseToDate(dateAssigned);
+    let baseDate = dateAssigned;
+    if (sAssigned === 'on shelf' && extra.testDate) {
+      baseDate = extra.testDate;
+    }
+    const aDate = parseToDate(baseDate);
     if (!aDate) return '';
     const d = new Date(aDate);
 
-    let months = 3; // Default employee assigned
+    let months = 3; // Default employee assigned (+3 months from Date Assigned)
     if (sAssigned === 'on shelf') {
-      months = 12;
+      months = 12; // On shelf: 1 year from Test Date (or Date Assigned)
     } else if (sLoc === 'northern lights' || sLoc.includes('northern lights')) {
       months = 6;
     } else if (
