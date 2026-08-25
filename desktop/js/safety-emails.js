@@ -3,6 +3,7 @@
  * Handles Gmail scanning for JHAs, Weekly Safety Meetings, and Monthly Checklists directly from the Desktop App.
  */
 
+class SafetyEmailsEngine {
   constructor(db) {
     this.db = db;
     this.isProcessing = false;
