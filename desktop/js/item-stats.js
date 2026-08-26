@@ -790,6 +790,25 @@ class ItemStatsEngine {
           </div>
         </div>
 
+        ${(() => {
+          const latestM = (stats.milestones && stats.milestones.length > 0) ? stats.milestones[stats.milestones.length - 1] : null;
+          const hasDisc = latestM && (
+            (latestM.assignedTo && latestM.assignedTo.toLowerCase() !== curAssignedTo.toLowerCase()) ||
+            (latestM.state.key === 'FIELD' && curStatus.toLowerCase() === 'on shelf')
+          );
+          if (!hasDisc) return '';
+          return `
+            <div style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
+              <div style="font-size: 12px; color: #fbbf24;">
+                <strong>⚠️ Active Record Discrepancy:</strong> History records show this item is currently assigned to <strong>${this.escapeHtml(latestM.assignedTo)}</strong> (${this.escapeHtml(latestM.location || 'Unknown')}), but Active Sheet has <strong>${this.escapeHtml(curAssignedTo)}</strong> (${this.escapeHtml(curStatus)}).
+              </div>
+              <button class="btn btn-sm" style="font-size: 11px; font-weight: 700; background: #f59e0b; color: #1e293b; border: none; border-radius: 6px; padding: 6px 14px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;" onclick="window.itemStatsEngine.syncActiveFromHistory('${this.escapeHtml(sheetKey)}', '${this.escapeHtml(cleanItemKey)}')">
+                ⚡ Sync Active Record with History
+              </button>
+            </div>
+          `;
+        })()}
+
         <!-- Quick Edit Dates & Assignment Panel -->
         <div id="dossier-edit-panel" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; gap: 6px;">
@@ -1455,6 +1474,14 @@ class ItemStatsEngine {
       window.inventoryManager.showToast(`✅ Successfully updated dates & details for #${cleanItemKey}!`);
     } else {
       alert(`✅ Successfully updated #${cleanItemKey}!`);
+    }
+  }
+
+  async syncActiveFromHistory(sheetKey, cleanItemKey) {
+    const activeKey = sheetKey.replace('_history', '');
+    if (window.inventoryManager && typeof window.inventoryManager.reconcileInventoryWithHistory === 'function') {
+      await window.inventoryManager.reconcileInventoryWithHistory(activeKey, false);
+      this.openDossierModal(cleanItemKey, sheetKey);
     }
   }
 }

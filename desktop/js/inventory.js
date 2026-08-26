@@ -1448,7 +1448,16 @@ class InventoryManager {
             const dtB = this.parseDate(rawB);
             const tA = dtA ? dtA.getTime() : 0;
             const tB = dtB ? dtB.getTime() : 0;
-            return tA - tB;
+            if (tA !== tB) return tA - tB;
+
+            // Same-day tie-breaker: Active Lineman assignment takes precedence over shelf/storage entry
+            const assignA = String(a['Assigned To'] || a['Employee Name'] || '').toLowerCase().trim();
+            const assignB = String(b['Assigned To'] || b['Employee Name'] || '').toLowerCase().trim();
+            const isSpecialA = ['on shelf', 'shelf', 'in stock', 'storage', 'unassigned', ''].includes(assignA);
+            const isSpecialB = ['on shelf', 'shelf', 'in stock', 'storage', 'unassigned', ''].includes(assignB);
+            if (!isSpecialA && isSpecialB) return 1;
+            if (isSpecialA && !isSpecialB) return -1;
+            return 0;
           });
 
           const latest = sorted[sorted.length - 1];
