@@ -1490,35 +1490,56 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
           break;
 
         case 'DELETE_ROW':
-          if (sheet) {
+          if (sheet && sheet.getLastRow() >= 1) {
             var data = sheet.getDataRange().getValues();
-            var idStr = String(mut.itemIdentifier || '').trim().toLowerCase();
-            if (idStr) {
-              // Delete in reverse order to cleanly remove all matching rows (e.g. history records)
-              for (var r = data.length - 1; r >= 1; r--) {
+            if (data.length > 0) {
+              var idStr = String(mut.itemIdentifier || '').trim().toLowerCase();
+              var rDate = mut.rowData ? String(mut.rowData['Date Assigned'] || mut.rowData['Date'] || '').trim().toLowerCase() : '';
+              var rItem = mut.rowData ? String(mut.rowData['Item #'] || mut.rowData['Item'] || mut.rowData['Serial #'] || '').trim().toLowerCase() : '';
+              var rAssigned = mut.rowData ? String(mut.rowData['Assigned To'] || '').trim().toLowerCase() : '';
+
+              var rowsToKeep = [data[0]]; // Always preserve headers
+              var deletedCount = 0;
+
+              for (var r = 1; r < data.length; r++) {
                 var rowVals = data[r].map(function(c) { return String(c || '').trim().toLowerCase(); });
-                if (rowVals.indexOf(idStr) !== -1) {
-                  sheet.deleteRow(r + 1); // 1-indexed for Sheets
-                  sheetsModified[sheetName] = true;
-                  appliedCount++;
+                var isMatch = false;
+                if (idStr) {
+                  isMatch = (rowVals.indexOf(idStr) !== -1);
+                } else if (mut.rowData) {
+                  var matchDate = rDate ? (rowVals[0] === rDate || rowVals.indexOf(rDate) !== -1) : true;
+                  var matchItem = rItem ? (rowVals[1] === rItem || rowVals.indexOf(rItem) !== -1) : true;
+                  var matchAssigned = rAssigned ? (rowVals.indexOf(rAssigned) !== -1) : true;
+                  isMatch = (matchDate && matchItem && matchAssigned);
+                }
+
+                if (isMatch) {
+                  deletedCount++;
+                } else {
+                  rowsToKeep.push(data[r]);
                 }
               }
-            } else if (mut.rowData) {
-              var rDate = String(mut.rowData['Date Assigned'] || mut.rowData['Date'] || '').trim().toLowerCase();
-              var rItem = String(mut.rowData['Item #'] || mut.rowData['Item'] || mut.rowData['Serial #'] || '').trim().toLowerCase();
-              var rAssigned = String(mut.rowData['Assigned To'] || '').trim().toLowerCase();
 
-              for (var r = data.length - 1; r >= 1; r--) {
-                var rowVals = data[r].map(function(c) { return String(c || '').trim().toLowerCase(); });
-                var matchDate = rDate ? (rowVals[0] === rDate || rowVals.indexOf(rDate) !== -1) : true;
-                var matchItem = rItem ? (rowVals[1] === rItem || rowVals.indexOf(rItem) !== -1) : true;
-                var matchAssigned = rAssigned ? (rowVals.indexOf(rAssigned) !== -1) : true;
-                if (matchDate && matchItem && matchAssigned) {
-                  sheet.deleteRow(r + 1);
-                  sheetsModified[sheetName] = true;
-                  appliedCount++;
-                  break;
+              if (deletedCount > 0) {
+                var numCols = data[0].length;
+                try {
+                  sheet.getRange(1, 1, rowsToKeep.length, numCols).setValues(rowsToKeep);
+                } catch (setValErr) {
+                  for (var rk = 1; rk < rowsToKeep.length; rk++) {
+                    if (typeof safeWriteRowToTable === 'function') {
+                      safeWriteRowToTable(sheet, rk + 1, rowsToKeep[rk], rowsToKeep[0]);
+                    }
+                  }
                 }
+                if (data.length > rowsToKeep.length) {
+                  try {
+                    sheet.getRange(rowsToKeep.length + 1, 1, data.length - rowsToKeep.length, numCols).clearContent();
+                  } catch (clrErr) {
+                    Logger.log('DELETE_ROW clearContent warning: ' + clrErr);
+                  }
+                }
+                sheetsModified[sheetName] = true;
+                appliedCount += deletedCount;
               }
             }
           }
