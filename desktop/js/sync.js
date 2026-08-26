@@ -393,7 +393,7 @@ class SyncEngine {
     }, 200);
 
     try {
-      const CHUNK_SIZE = 15;
+      const CHUNK_SIZE = 5;
       const totalCount = currentOutbox.length;
       let totalPushed = 0;
       let lastPushResult = null;
