@@ -1498,28 +1498,35 @@ class InventoryManager {
           const histNotesLower = latestHist.notes.toLowerCase();
           const curAssignedLower = curAssignedTo.toLowerCase();
 
-          // Check if history shows a terminated/testing/shelf state that active sheet missed
-          const isHistTesting = histAssignedLower.includes('test') || histLocLower.includes('test') || histNotesLower.includes('test') || histLocLower.includes('arnett') || histLocLower.includes('jm test');
-          const isHistShelf = histAssignedLower.includes('shelf') || histLocLower.includes('shelf') || histNotesLower.includes('shelf');
-          const isHistLost = histAssignedLower.includes('lost') || histNotesLower.includes('lost');
-          const isHistFailed = histAssignedLower.includes('fail') || histNotesLower.includes('fail');
-          const isHistRetired = histAssignedLower.includes('retir') || histNotesLower.includes('retir') || histAssignedLower.includes('destroy') || histNotesLower.includes('destroy');
-          const isHistReturned = histNotesLower.includes('returned') || isHistTesting || isHistShelf || isHistLost || isHistFailed || isHistRetired;
+          // Check if history shows an active lineman assignment vs a special status (shelf, testing, lost, etc.)
+          const isSpecialHistAssign = ['on shelf', 'shelf', 'in stock', 'storage', 'in testing', 'arnett', 'jm test', 'arnett / jm test', 'packed for testing', 'packed for delivery', 'ready for delivery', 'ready for test', 'lost', 'failed rubber', 'failed', 'destroyed', 'not repairable', 'unassigned', 'n/a', 'none', 'unknown', '—', '-', ''].includes(histAssignedLower);
+          const isHistLineman = Boolean(latestHist.assignedTo) && !isSpecialHistAssign;
+
+          const isHistTesting = !isHistLineman && (histAssignedLower.includes('test') || histLocLower.includes('test') || histLocLower.includes('arnett') || histLocLower.includes('jm test'));
+          const isHistShelf = !isHistLineman && (histAssignedLower.includes('shelf') || histAssignedLower === 'in stock' || histAssignedLower === 'storage' || histAssignedLower === 'unassigned' || !histAssignedLower);
+          const isHistLost = !isHistLineman && (histAssignedLower.includes('lost') || histLocLower.includes('lost'));
+          const isHistFailed = !isHistLineman && (histAssignedLower.includes('fail') || histAssignedLower === 'not repairable');
+          const isHistRetired = !isHistLineman && (histAssignedLower.includes('retir') || histAssignedLower.includes('destroy') || histLocLower.includes('destroyed'));
+          const isHistReturned = !isHistLineman && (isHistTesting || isHistShelf || isHistLost || isHistFailed || isHistRetired);
 
           const isCurActiveEmployee = curAssignedTo && !['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'ready for delivery', 'ready for test', 'lost', 'failed rubber', 'destroyed', 'unassigned', 'n/a', '—', '-'].includes(curAssignedLower);
 
           // Needs reconciliation if:
-          // A. Active sheet has item assigned to an employee, but history shows it was returned / sent to testing / on shelf
-          // B. Latest history date is strictly newer than active sheet date assigned
-          // C. Different employee is assigned in history than on active sheet
-          // D. Status/AssignedTo in active sheet is out-of-sync with latest history event
+          // A. History shows an active Lineman assignment that differs from active sheet (e.g. active sheet was left On Shelf)
+          // B. Active sheet has item assigned to an employee, but history shows it was returned / sent to testing / on shelf
+          // C. Latest history date is newer than active sheet date assigned
+          // D. Different employee is assigned in history than on active sheet
           let needsFix = false;
           let newStatus = curStatus;
           let newAssignedTo = curAssignedTo;
           let newLocation = curLocation;
           let newDateAssigned = curDateAssigned;
 
-          if (isCurActiveEmployee && isHistReturned) {
+          if (isHistLineman) {
+            if (curAssignedLower !== histAssignedLower || curStatus.toLowerCase() !== 'assigned') {
+              needsFix = true;
+            }
+          } else if (isCurActiveEmployee && isHistReturned) {
             needsFix = true;
           } else if (latestHist.dateObj && curDateObj && latestHist.dateObj.getTime() > curDateObj.getTime()) {
             if (curAssignedLower !== histAssignedLower || curStatus.toLowerCase() !== histAssignedLower) {
@@ -1532,7 +1539,11 @@ class InventoryManager {
           }
 
           if (needsFix) {
-            if (isHistTesting) {
+            if (isHistLineman) {
+              newStatus = 'Assigned';
+              newAssignedTo = latestHist.assignedTo;
+              newLocation = latestHist.location || curLocation || 'Helena';
+            } else if (isHistTesting) {
               newStatus = 'In Testing';
               newAssignedTo = 'In Testing';
               newLocation = latestHist.location || 'Arnett / JM Test';
@@ -1552,10 +1563,6 @@ class InventoryManager {
               newStatus = 'Destroyed';
               newAssignedTo = 'Destroyed';
               newLocation = latestHist.location || 'Helena';
-            } else if (latestHist.assignedTo && !isHistReturned) {
-              newStatus = 'Assigned';
-              newAssignedTo = latestHist.assignedTo;
-              newLocation = latestHist.location || curLocation;
             }
 
             newDateAssigned = latestHist.dateFormatted || curDateAssigned;
