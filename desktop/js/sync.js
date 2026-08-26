@@ -420,7 +420,10 @@ class SyncEngine {
           clearInterval(pushTimerInterval);
           this.closeSyncModal();
           this.updateStatusUI('pending', `⚠️ ${pushResult.conflicts.length} conflict(s) detected`);
-          this.openConflictModal(pushResult.conflicts, currentOutbox);
+          const remainingOutbox = currentOutbox.slice(i);
+          await this.db.saveOutbox(remainingOutbox);
+          this.renderOutboxBadge();
+          this.openConflictModal(pushResult.conflicts, remainingOutbox);
           this.isSyncing = false;
           return { success: false, conflict: true, conflicts: pushResult.conflicts };
         }
@@ -430,6 +433,8 @@ class SyncEngine {
           clearInterval(pushTimerInterval);
           console.warn('Push server errors:', pushResult.errors);
           const remaining = currentOutbox.slice(i);
+          await this.db.saveOutbox(remaining);
+          this.renderOutboxBadge();
           this.renderModalChanges(remaining, `⚠️ Server error on batch ${batchNum}: ${pushResult.errors.join('; ')}`, 'error', true);
           this.updateStatusUI('pending', 'Push error / Pending changes');
           this.isSyncing = false;
@@ -439,6 +444,7 @@ class SyncEngine {
         // 3. Update local outbox on disk immediately
         const remainingOutbox = currentOutbox.slice(i + chunk.length);
         await this.db.saveOutbox(remainingOutbox);
+        this.renderOutboxBadge();
         totalPushed += chunk.length;
       }
 
@@ -651,15 +657,26 @@ class SyncEngine {
           if (r.checked) selected = r.value;
         }
 
-        const mutIdx = conf.mutationIndex;
+        let mutIdx = conf.mutationIndex;
+        // Verify mutIdx matches or find by itemIdentifier / sheetName / col / row
+        if (mutIdx === undefined || !outbox[mutIdx] || (conf.itemIdentifier && String(outbox[mutIdx].itemIdentifier || '').trim().toLowerCase() !== String(conf.itemIdentifier).trim().toLowerCase())) {
+          const foundIdx = outbox.findIndex(m => 
+            (conf.itemIdentifier && String(m.itemIdentifier || '').trim().toLowerCase() === String(conf.itemIdentifier).trim().toLowerCase() && m.col === conf.col) ||
+            (m.sheetName === conf.sheetName && m.row === conf.row && m.col === conf.col)
+          );
+          if (foundIdx !== -1) mutIdx = foundIdx;
+        }
+
         if (selected === 'local') {
           // User wants to keep local offline edit: mark mutation to force write
-          if (outbox[mutIdx]) {
+          if (mutIdx !== -1 && outbox[mutIdx]) {
             outbox[mutIdx].force = true;
           }
         } else {
           // User wants to accept Google Sheets value: drop local mutation and update local DB
-          mutationsToDrop.add(mutIdx);
+          if (mutIdx !== -1 && outbox[mutIdx]) {
+            mutationsToDrop.add(mutIdx);
+          }
 
           // Update local workspace so local view reflects the Google Sheets value
           if (conf.sheetName && conf.row && conf.col) {
@@ -678,6 +695,7 @@ class SyncEngine {
       // Filter out dropped mutations
       const resolvedOutbox = outbox.filter((_, i) => !mutationsToDrop.has(i));
       await this.db.saveOutbox(resolvedOutbox);
+      this.renderOutboxBadge();
 
       this.closeConflictModal();
 
