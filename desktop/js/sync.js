@@ -366,17 +366,19 @@ class SyncEngine {
 
     const currentOutbox = [...(this.db.getOutbox() || [])];
     const pushStartTime = Date.now();
+    let currentBatchText = `Pushing ${currentOutbox.length} offline change(s) to Google Sheets...`;
+
     this.openSyncModal('Pushing Changes to Google Sheets', '⬆️');
-    this.renderModalChanges(currentOutbox, `Pushing ${currentOutbox.length} offline change(s) to Google Sheets... (0.0s)`, 'syncing', false);
+    this.renderModalChanges(currentOutbox, `${currentBatchText} (${this.formatDuration(0)})`, 'syncing', false);
     this.updateStatusUI('syncing', `Pushing ${currentOutbox.length} change(s)...`);
 
     const pushTimerInterval = setInterval(() => {
-      const elapsed = ((Date.now() - pushStartTime) / 1000).toFixed(1);
+      const elapsedMs = Date.now() - pushStartTime;
       const subTitleEl = document.getElementById('sync-modal-subtitle');
-      if (subTitleEl && !subTitleEl.textContent.includes('batch')) {
-        subTitleEl.textContent = `Pushing ${currentOutbox.length} offline change(s) to Google Sheets... (${elapsed}s)`;
+      if (subTitleEl) {
+        subTitleEl.textContent = `${currentBatchText} (${this.formatDuration(elapsedMs)})`;
       }
-    }, 150);
+    }, 200);
 
     try {
       const CHUNK_SIZE = 40;
@@ -390,10 +392,10 @@ class SyncEngine {
         const batchNum = Math.floor(i / CHUNK_SIZE) + 1;
         const totalBatches = Math.ceil(totalCount / CHUNK_SIZE);
 
-        const elapsed = ((Date.now() - pushStartTime) / 1000).toFixed(1);
+        currentBatchText = `Pushing batch ${batchNum}/${totalBatches} (${Math.min(i + chunk.length, totalCount)}/${totalCount} changes)...`;
         const subTitleEl = document.getElementById('sync-modal-subtitle');
         if (subTitleEl) {
-          subTitleEl.textContent = `Pushing batch ${batchNum}/${totalBatches} (${Math.min(i + chunk.length, totalCount)}/${totalCount} changes)... (${elapsed}s)`;
+          subTitleEl.textContent = `${currentBatchText} (${this.formatDuration(Date.now() - pushStartTime)})`;
         }
         this.updateStatusUI('syncing', `Pushing batch ${batchNum}/${totalBatches} (${Math.min(i + chunk.length, totalCount)}/${totalCount})...`);
 
@@ -449,20 +451,24 @@ class SyncEngine {
       }
 
       clearInterval(pushTimerInterval);
-      const durationSec = ((Date.now() - pushStartTime) / 1000).toFixed(1);
+      const totalElapsedMs = Date.now() - pushStartTime;
+      const durationFormatted = this.formatDuration(totalElapsedMs);
+      const durationSec = (totalElapsedMs / 1000).toFixed(1);
 
       // Successfully pushed all chunks
       await this.db.clearOutbox();
+      this.renderOutboxBadge();
 
       this.savePushTelemetry({
         timestamp: new Date().toISOString(),
         durationSeconds: parseFloat(durationSec),
+        durationFormatted: durationFormatted,
         mutationsCount: totalCount,
         status: 'SUCCESS'
       });
 
-      this.updateStatusUI('synced', `Synced in ${durationSec}s`);
-      this.renderModalChanges([], `✅ Successfully pushed all ${totalCount} change(s) in ${durationSec}s!`, 'success', false);
+      this.updateStatusUI('synced', `Synced in ${durationFormatted}`);
+      this.renderModalChanges([], `✅ Successfully pushed all ${totalCount} change(s) in ${durationFormatted}!`, 'success', false);
 
       // Auto-close modal after 2 seconds
       setTimeout(() => {
@@ -470,23 +476,26 @@ class SyncEngine {
       }, 2000);
 
       this.isSyncing = false;
-      return { success: true, count: totalCount, durationSeconds: parseFloat(durationSec) };
+      return { success: true, count: totalCount, durationFormatted: durationFormatted, durationSeconds: parseFloat(durationSec) };
     } catch (err) {
       clearInterval(pushTimerInterval);
-      const durationSec = ((Date.now() - pushStartTime) / 1000).toFixed(1);
+      const totalElapsedMs = Date.now() - pushStartTime;
+      const durationFormatted = this.formatDuration(totalElapsedMs);
+      const durationSec = (totalElapsedMs / 1000).toFixed(1);
       console.error('Push failed:', err);
       const isAuthError = err.message && (err.message.includes('HTML') || err.message.includes('Anyone') || err.message.includes('deployments'));
       const statusLabel = isAuthError ? 'Auth Error (Check Web App Access)' : 'Offline / Connection error';
       this.savePushTelemetry({
         timestamp: new Date().toISOString(),
         durationSeconds: parseFloat(durationSec),
+        durationFormatted: durationFormatted,
         mutationsCount: currentOutbox.length,
         status: 'FAILED',
         error: err.message
       });
       this.updateStatusUI('offline', statusLabel);
       this.openSyncModal('Push Error', '⚠️');
-      this.renderModalChanges(currentOutbox, `❌ Push failed: ${err.message}`, 'error', true);
+      this.renderModalChanges(currentOutbox, `❌ Push failed (${durationFormatted}): ${err.message}`, 'error', true);
       this.isSyncing = false;
       return { success: false, error: err.message };
     }
@@ -813,12 +822,25 @@ class SyncEngine {
     }
 
     this.isSyncing = true;
+    const downloadStartTime = Date.now();
+    const baseDownloadMsg = 'Connecting to Google Sheets and downloading fresh database snapshot...';
     this.openSyncModal('Downloading Latest Snapshot', '⬇️');
-    this.renderModalChanges([], 'Connecting to Google Sheets and downloading fresh database snapshot...', 'syncing', false);
+    this.renderModalChanges([], `${baseDownloadMsg} (${this.formatDuration(0)})`, 'syncing', false);
     this.updateStatusUI('syncing', 'Downloading snapshot...');
+
+    const downloadTimerInterval = setInterval(() => {
+      const elapsedMs = Date.now() - downloadStartTime;
+      const subTitleEl = document.getElementById('sync-modal-subtitle');
+      if (subTitleEl) {
+        subTitleEl.textContent = `${baseDownloadMsg} (${this.formatDuration(elapsedMs)})`;
+      }
+    }, 200);
 
     try {
       const freshSnapshot = await this.executeNetworkRequest(`${this.syncUrl}?action=getSnapshot`, 'GET');
+      clearInterval(downloadTimerInterval);
+      const totalElapsedMs = Date.now() - downloadStartTime;
+      const durationFormatted = this.formatDuration(totalElapsedMs);
 
       if (freshSnapshot && freshSnapshot.tables) {
         await this.db.setSnapshot(freshSnapshot);
@@ -827,8 +849,8 @@ class SyncEngine {
         if (window.tripPlanner) window.tripPlanner.renderPlanner();
         if (window.taskManager) window.taskManager.renderTasks();
 
-        this.updateStatusUI('synced', `Synced (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
-        this.renderModalChanges([], '✅ Latest database snapshot successfully downloaded and loaded!', 'success', false);
+        this.updateStatusUI('synced', `Synced in ${durationFormatted}`);
+        this.renderModalChanges([], `✅ Latest database snapshot successfully downloaded and loaded in ${durationFormatted}!`, 'success', false);
 
         setTimeout(() => {
           this.closeSyncModal();
@@ -842,12 +864,15 @@ class SyncEngine {
         throw new Error('Web App returned non-JSON response. Please verify in Google Sheets: Extensions > Apps Script > Deploy > Manage deployments, and ensure "Who has access" is set to "Anyone".');
       }
     } catch (err) {
+      clearInterval(downloadTimerInterval);
+      const totalElapsedMs = Date.now() - downloadStartTime;
+      const durationFormatted = this.formatDuration(totalElapsedMs);
       console.error('Download snapshot failed:', err);
       const isAuthError = err.message && (err.message.includes('HTML') || err.message.includes('Anyone') || err.message.includes('deployments'));
       const statusLabel = isAuthError ? 'Auth Error (Check Web App Access)' : 'Offline / Connection error';
       this.updateStatusUI('offline', statusLabel);
       this.openSyncModal('Download Error', '⚠️');
-      this.renderModalChanges([], `❌ Download failed: ${err.message}`, 'error', true);
+      this.renderModalChanges([], `❌ Download failed (${durationFormatted}): ${err.message}`, 'error', true);
       this.isSyncing = false;
       return { success: false, error: err.message };
     }
@@ -929,6 +954,13 @@ class SyncEngine {
       return res;
     }
     return null;
+  }
+
+  formatDuration(ms) {
+    const totalSec = Math.max(0, Math.floor(ms / 1000));
+    const mins = Math.floor(totalSec / 60);
+    const secs = totalSec % 60;
+    return `${mins}m ${secs < 10 ? '0' : ''}${secs}s`;
   }
 }
 
