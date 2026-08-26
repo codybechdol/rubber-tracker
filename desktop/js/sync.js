@@ -9,6 +9,12 @@ class SyncEngine {
     this.db = db;
     this.syncUrl = localStorage.getItem('sa_sync_url') || DEFAULT_SYNC_URL;
     this.isSyncing = false;
+    if (this.db && typeof this.db.subscribe === 'function') {
+      this.db.subscribe(() => this.renderOutboxBadge());
+    }
+    setTimeout(() => {
+      this.renderOutboxBadge();
+    }, 150);
   }
 
   getSyncUrl() {
@@ -864,6 +870,47 @@ class SyncEngine {
     if (status === 'offline') dot.classList.add('offline');
 
     text.textContent = label;
+  }
+
+  renderOutboxBadge() {
+    const outbox = (this.db && typeof this.db.getOutbox === 'function') ? (this.db.getOutbox() || []) : [];
+    const count = outbox.length;
+
+    const pushBtn = document.getElementById('push-changes-btn');
+    if (pushBtn) {
+      pushBtn.innerHTML = count > 0
+        ? `⬆️ Push Changes to Sheets <span class="badge" style="background: rgba(255,255,255,0.25); color: #fff; font-size: 11px; padding: 1px 6px; border-radius: 10px; margin-left: 4px;">${count}</span>`
+        : `⬆️ Push Changes to Sheets`;
+    }
+
+    if (!this.isSyncing) {
+      if (count > 0) {
+        this.updateStatusUI('pending', `${count} pending change${count === 1 ? '' : 's'}`);
+      } else {
+        const text = document.getElementById('sync-status-text');
+        if (text && text.textContent && text.textContent.includes('pending')) {
+          this.updateStatusUI('synced', `Synced (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
+        }
+      }
+    }
+  }
+
+  async queueMutation(mutation) {
+    if (this.db && typeof this.db.addMutation === 'function') {
+      const res = await this.db.addMutation(mutation);
+      this.renderOutboxBadge();
+      return res;
+    }
+    return null;
+  }
+
+  async addMutation(mutation) {
+    if (this.db && typeof this.db.addMutation === 'function') {
+      const res = await this.db.addMutation(mutation);
+      this.renderOutboxBadge();
+      return res;
+    }
+    return null;
   }
 }
 
