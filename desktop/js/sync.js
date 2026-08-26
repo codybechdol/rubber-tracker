@@ -666,14 +666,33 @@ class SyncEngine {
           if (r.checked) selected = r.value;
         }
 
-        let mutIdx = conf.mutationIndex;
-        // Verify mutIdx matches or find by itemIdentifier / sheetName / col / row
-        if (mutIdx === undefined || !outbox[mutIdx] || (conf.itemIdentifier && String(outbox[mutIdx].itemIdentifier || '').trim().toLowerCase() !== String(conf.itemIdentifier).trim().toLowerCase())) {
-          const foundIdx = outbox.findIndex(m => 
-            (conf.itemIdentifier && String(m.itemIdentifier || '').trim().toLowerCase() === String(conf.itemIdentifier).trim().toLowerCase() && m.col === conf.col) ||
-            (m.sheetName === conf.sheetName && m.row === conf.row && m.col === conf.col)
+        // Locate the exact matching mutation in outbox
+        let mutIdx = -1;
+
+        // 1. Direct match by sheetName, row, and col
+        if (conf.sheetName && conf.row && conf.col) {
+          mutIdx = outbox.findIndex(m => 
+            String(m.sheetName || '').trim().toLowerCase() === String(conf.sheetName || '').trim().toLowerCase() &&
+            Number(m.row) === Number(conf.row) &&
+            Number(m.col) === Number(conf.col)
           );
-          if (foundIdx !== -1) mutIdx = foundIdx;
+        }
+
+        // 2. If not found, match by itemIdentifier + col + sheetName
+        if (mutIdx === -1 && conf.itemIdentifier) {
+          const cleanId = String(conf.itemIdentifier).trim().toLowerCase();
+          mutIdx = outbox.findIndex(m => 
+            m.itemIdentifier && String(m.itemIdentifier).trim().toLowerCase() === cleanId &&
+            Number(m.col) === Number(conf.col)
+          );
+        }
+
+        // 3. Fallback to mutationIndex if valid and matching sheetName
+        if (mutIdx === -1 && conf.mutationIndex !== undefined && outbox[conf.mutationIndex]) {
+          const cand = outbox[conf.mutationIndex];
+          if (!conf.sheetName || String(cand.sheetName || '').trim().toLowerCase() === String(conf.sheetName || '').trim().toLowerCase()) {
+            mutIdx = conf.mutationIndex;
+          }
         }
 
         if (selected === 'local') {

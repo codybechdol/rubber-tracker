@@ -611,7 +611,10 @@
       </div>
       <div class="modal-footer" id="conflict-modal-footer" style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-secondary); border-top: 1px solid var(--border-color); padding: 12px 18px;">
         <button class="btn btn-secondary" onclick="window.syncEngine.closeConflictModal()">Cancel</button>
-        <button class="btn btn-primary" id="conflict-apply-btn" style="background: #2563eb; border-color: #3b82f6;" onclick="window.syncEngine.applyConflictResolutions()">💾 Apply Resolutions & Push</button>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-secondary" style="border-color: #10b981; color: #34d399; font-weight: 600;" onclick="window.syncEngine.selectAllConflictChoices('local'); window.syncEngine.applyConflictResolutions();" title="Keep all offline edits and push immediately">⚡ Overwrite All & Push</button>
+          <button class="btn btn-primary" id="conflict-apply-btn" style="background: #2563eb; border-color: #3b82f6;" onclick="window.syncEngine.applyConflictResolutions()">💾 Apply Resolutions & Push</button>
+        </div>
       </div>
     </div>
   </div>
