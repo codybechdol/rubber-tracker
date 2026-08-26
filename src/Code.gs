@@ -25573,7 +25573,8 @@ function fixBlanketChangeOutDatesSilent() {
  * Creates the sheet if it doesn't exist.
  */
 function ensureBlanketHistorySheet() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) return null;
   var historySheet = ss.getSheetByName(SHEET_BLANKETS_HISTORY);
 
   if (!historySheet) {
@@ -25616,7 +25617,8 @@ function ensureBlanketHistorySheet() {
  * Creates the sheet if it doesn't exist.
  */
 function ensureMackHistorySheet() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) return null;
   var historySheet = ss.getSheetByName(SHEET_MACKS_HISTORY);
 
   if (!historySheet) {
@@ -25925,7 +25927,8 @@ function handleMackAssignedToChange(ss, sheet, editedRow, newValue) {
  * Creates the sheet if it doesn't exist.
  */
 function ensureHVTestersHistorySheet() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) return null;
   var historySheet = ss.getSheetByName(SHEET_HV_TESTERS_HISTORY);
 
   if (!historySheet) {
@@ -25968,7 +25971,8 @@ function ensureHVTestersHistorySheet() {
  * Creates the sheet if it doesn't exist.
  */
 function ensurePhasingSetsHistorySheet() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) return null;
   var historySheet = ss.getSheetByName(SHEET_PHASING_SETS_HISTORY);
 
   if (!historySheet) {
@@ -29880,7 +29884,8 @@ function handleAEDAssignedToChange(ss, sheet, editedRow, newValue) {
  * @return {Sheet} The AED History sheet
  */
 function ensureAEDHistorySheet() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) return null;
   var historySheet = ss.getSheetByName(SHEET_AED_HISTORY);
 
   if (!historySheet) {
@@ -29922,7 +29927,8 @@ function ensureAEDHistorySheet() {
  * Ensures the Grounds History sheet exists with proper headers.
  */
 function ensureGroundsHistorySheet() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) return null;
   var historySheet = ss.getSheetByName(SHEET_GROUNDS_HISTORY);
   if (!historySheet) {
     historySheet = ss.insertSheet(SHEET_GROUNDS_HISTORY);
@@ -29949,7 +29955,8 @@ function ensureGroundsHistorySheet() {
  * Ensures the Hot Sticks History sheet exists with proper headers.
  */
 function ensureHotSticksHistorySheet() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) return null;
   var historySheet = ss.getSheetByName(SHEET_HOT_STICKS_HISTORY);
   if (!historySheet) {
     historySheet = ss.insertSheet(SHEET_HOT_STICKS_HISTORY);

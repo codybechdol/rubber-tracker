@@ -422,9 +422,14 @@ class SyncEngine {
             returnSnapshot: false
           });
         } catch (pushErr) {
-          console.warn('POST push failed, trying GET fallback:', pushErr);
-          const getUrl = `${this.syncUrl}?action=applyMutations&mutations=${encodeURIComponent(JSON.stringify(chunk))}&detectConflicts=${options.detectConflicts !== false}&force=${options.force === true}&skipPostProcessing=${!isLastChunk}&returnSnapshot=false`;
-          pushResult = await this.executeNetworkRequest(getUrl, 'GET');
+          const encodedChunk = encodeURIComponent(JSON.stringify(chunk));
+          if (encodedChunk.length < 1800) {
+            console.warn('POST push failed, trying GET fallback:', pushErr);
+            const getUrl = `${this.syncUrl}?action=applyMutations&mutations=${encodedChunk}&detectConflicts=${options.detectConflicts !== false}&force=${options.force === true}&skipPostProcessing=${!isLastChunk}&returnSnapshot=false`;
+            pushResult = await this.executeNetworkRequest(getUrl, 'GET');
+          } else {
+            throw pushErr;
+          }
         }
 
         lastPushResult = pushResult;
