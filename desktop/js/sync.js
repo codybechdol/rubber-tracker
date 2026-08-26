@@ -43,9 +43,9 @@ class SyncEngine {
       }
     }
 
-    // 2. Browser fetch fallback (with 45s timeout)
+    // 2. Browser fetch fallback (with 90s timeout)
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 45000);
+    const timeoutId = setTimeout(() => controller.abort(), 90000);
     try {
       const options = { method, redirect: 'follow', signal: controller.signal };
       if (method === 'POST' && body) {
@@ -66,7 +66,7 @@ class SyncEngine {
     } catch (fetchErr) {
       clearTimeout(timeoutId);
       if (fetchErr.name === 'AbortError') {
-        throw new Error('Sync network request timed out after 45 seconds.');
+        throw new Error('Sync network request timed out after 90 seconds.');
       }
       throw fetchErr;
     }
@@ -393,7 +393,7 @@ class SyncEngine {
     }, 200);
 
     try {
-      const CHUNK_SIZE = 40;
+      const CHUNK_SIZE = 15;
       const totalCount = currentOutbox.length;
       let totalPushed = 0;
       let lastPushResult = null;
