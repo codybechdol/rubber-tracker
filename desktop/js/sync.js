@@ -367,92 +367,98 @@ class SyncEngine {
     const pushTimerInterval = setInterval(() => {
       const elapsed = ((Date.now() - pushStartTime) / 1000).toFixed(1);
       const subTitleEl = document.getElementById('sync-modal-subtitle');
-      if (subTitleEl) {
+      if (subTitleEl && !subTitleEl.textContent.includes('batch')) {
         subTitleEl.textContent = `Pushing ${currentOutbox.length} offline change(s) to Google Sheets... (${elapsed}s)`;
       }
     }, 150);
 
     try {
-      let pushResult = null;
-      try {
-        pushResult = await this.executeNetworkRequest(this.syncUrl, 'POST', {
-          action: 'applyMutations',
-          mutations: currentOutbox,
-          detectConflicts: true,
-          force: false,
-          returnSnapshot: false // PUSH ONLY: preserve local database state
-        });
-      } catch (pushErr) {
-        console.warn('POST push failed, trying GET fallback:', pushErr);
-        const getUrl = `${this.syncUrl}?action=applyMutations&mutations=${encodeURIComponent(JSON.stringify(currentOutbox))}&detectConflicts=true&force=false&returnSnapshot=false`;
-        pushResult = await this.executeNetworkRequest(getUrl, 'GET');
+      const CHUNK_SIZE = 40;
+      const totalCount = currentOutbox.length;
+      let totalPushed = 0;
+      let lastPushResult = null;
+
+      for (let i = 0; i < totalCount; i += CHUNK_SIZE) {
+        const chunk = currentOutbox.slice(i, i + CHUNK_SIZE);
+        const isLastChunk = (i + CHUNK_SIZE >= totalCount);
+        const batchNum = Math.floor(i / CHUNK_SIZE) + 1;
+        const totalBatches = Math.ceil(totalCount / CHUNK_SIZE);
+
+        const elapsed = ((Date.now() - pushStartTime) / 1000).toFixed(1);
+        const subTitleEl = document.getElementById('sync-modal-subtitle');
+        if (subTitleEl) {
+          subTitleEl.textContent = `Pushing batch ${batchNum}/${totalBatches} (${Math.min(i + chunk.length, totalCount)}/${totalCount} changes)... (${elapsed}s)`;
+        }
+        this.updateStatusUI('syncing', `Pushing batch ${batchNum}/${totalBatches} (${Math.min(i + chunk.length, totalCount)}/${totalCount})...`);
+
+        let pushResult = null;
+        try {
+          pushResult = await this.executeNetworkRequest(this.syncUrl, 'POST', {
+            action: 'applyMutations',
+            mutations: chunk,
+            detectConflicts: options.detectConflicts !== false,
+            force: options.force === true,
+            skipPostProcessing: !isLastChunk,
+            returnSnapshot: false
+          });
+        } catch (pushErr) {
+          console.warn('POST push failed, trying GET fallback:', pushErr);
+          const getUrl = `${this.syncUrl}?action=applyMutations&mutations=${encodeURIComponent(JSON.stringify(chunk))}&detectConflicts=${options.detectConflicts !== false}&force=${options.force === true}&skipPostProcessing=${!isLastChunk}&returnSnapshot=false`;
+          pushResult = await this.executeNetworkRequest(getUrl, 'GET');
+        }
+
+        lastPushResult = pushResult;
+
+        // 1. Handle Edit Conflicts
+        if (pushResult && pushResult.conflict && Array.isArray(pushResult.conflicts) && pushResult.conflicts.length > 0) {
+          clearInterval(pushTimerInterval);
+          this.closeSyncModal();
+          this.updateStatusUI('pending', `⚠️ ${pushResult.conflicts.length} conflict(s) detected`);
+          this.openConflictModal(pushResult.conflicts, currentOutbox);
+          this.isSyncing = false;
+          return { success: false, conflict: true, conflicts: pushResult.conflicts };
+        }
+
+        // 2. Handle Errors
+        if (pushResult && pushResult.errors && pushResult.errors.length > 0) {
+          clearInterval(pushTimerInterval);
+          console.warn('Push server errors:', pushResult.errors);
+          const remaining = currentOutbox.slice(i);
+          this.renderModalChanges(remaining, `⚠️ Server error on batch ${batchNum}: ${pushResult.errors.join('; ')}`, 'error', true);
+          this.updateStatusUI('pending', 'Push error / Pending changes');
+          this.isSyncing = false;
+          return { success: false, errors: pushResult.errors };
+        }
+
+        // 3. Update local outbox on disk immediately
+        const remainingOutbox = currentOutbox.slice(i + chunk.length);
+        await this.db.saveOutbox(remainingOutbox);
+        totalPushed += chunk.length;
       }
 
       clearInterval(pushTimerInterval);
       const durationSec = ((Date.now() - pushStartTime) / 1000).toFixed(1);
 
-      // 1. Handle Multi-User Edit Conflicts
-      if (pushResult && pushResult.conflict && Array.isArray(pushResult.conflicts) && pushResult.conflicts.length > 0) {
+      // Successfully pushed all chunks
+      await this.db.clearOutbox();
+
+      this.savePushTelemetry({
+        timestamp: new Date().toISOString(),
+        durationSeconds: parseFloat(durationSec),
+        mutationsCount: totalCount,
+        status: 'SUCCESS'
+      });
+
+      this.updateStatusUI('synced', `Synced in ${durationSec}s`);
+      this.renderModalChanges([], `✅ Successfully pushed all ${totalCount} change(s) in ${durationSec}s!`, 'success', false);
+
+      // Auto-close modal after 2 seconds
+      setTimeout(() => {
         this.closeSyncModal();
-        this.updateStatusUI('pending', `⚠️ ${pushResult.conflicts.length} conflict(s) detected`);
-        this.openConflictModal(pushResult.conflicts, currentOutbox);
-        this.isSyncing = false;
-        return { success: false, conflict: true, conflicts: pushResult.conflicts };
-      }
+      }, 2000);
 
-      const isSuccess = pushResult && (pushResult.success === true || pushResult.status === 'ok' || pushResult.appliedCount !== undefined);
-
-      if (pushResult && pushResult.errors && pushResult.errors.length > 0) {
-        console.warn('Push server errors:', pushResult.errors);
-        this.savePushTelemetry({
-          timestamp: new Date().toISOString(),
-          durationSeconds: parseFloat(durationSec),
-          mutationsCount: currentOutbox.length,
-          status: 'ERROR',
-          errors: pushResult.errors
-        });
-        this.renderModalChanges(currentOutbox, `⚠️ Server error: ${pushResult.errors.join('; ')}`, 'error', true);
-        this.updateStatusUI('pending', 'Push error / Pending changes');
-        this.isSyncing = false;
-        return { success: false, errors: pushResult.errors };
-      } else if (isSuccess) {
-        // Clear outbox after successful push
-        await this.db.clearOutbox();
-
-        const serverDur = pushResult && pushResult.telemetry && pushResult.telemetry.durationText ? ` (Server: ${pushResult.telemetry.durationText})` : '';
-        this.savePushTelemetry({
-          timestamp: new Date().toISOString(),
-          durationSeconds: parseFloat(durationSec),
-          mutationsCount: currentOutbox.length,
-          status: 'SUCCESS',
-          serverTelemetry: pushResult ? pushResult.telemetry : null
-        });
-
-        this.updateStatusUI('synced', `Synced in ${durationSec}s`);
-        this.renderModalChanges([], `✅ Successfully pushed all ${currentOutbox.length} change(s) in ${durationSec}s!${serverDur}`, 'success', false);
-
-        // Auto-close modal after 2 seconds
-        setTimeout(() => {
-          this.closeSyncModal();
-        }, 2000);
-
-        this.isSyncing = false;
-        return { success: true, count: currentOutbox.length, durationSeconds: parseFloat(durationSec) };
-      } else {
-        console.warn('Invalid server response during push:', pushResult);
-        const msg = (pushResult && pushResult.error) ? pushResult.error : 'Push failed. Please verify your Google Apps Script Web App deployment.';
-        this.savePushTelemetry({
-          timestamp: new Date().toISOString(),
-          durationSeconds: parseFloat(durationSec),
-          mutationsCount: currentOutbox.length,
-          status: 'FAILED',
-          error: msg
-        });
-        this.renderModalChanges(currentOutbox, `❌ Push failed: ${msg}`, 'error', true);
-        this.updateStatusUI('pending', 'Push failed / Pending changes');
-        this.isSyncing = false;
-        return { success: false, error: msg };
-      }
+      this.isSyncing = false;
+      return { success: true, count: totalCount, durationSeconds: parseFloat(durationSec) };
     } catch (err) {
       clearInterval(pushTimerInterval);
       const durationSec = ((Date.now() - pushStartTime) / 1000).toFixed(1);

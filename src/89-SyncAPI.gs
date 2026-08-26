@@ -1657,8 +1657,10 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
   // Force spreadsheet to commit all pending writes
   SpreadsheetApp.flush();
 
+  var skipPostProcessing = options && options.skipPostProcessing === true;
+
   // Run crew synchronization & formatting if employee/job sheets were touched
-  if (sheetsModified['Employees'] || sheetsModified['Job Tracking']) {
+  if (!skipPostProcessing && (sheetsModified['Employees'] || sheetsModified['Job Tracking'])) {
     try {
       if (typeof organizeAndFormatEmployeesSheet === 'function') organizeAndFormatEmployeesSheet(true);
       if (typeof syncCrews === 'function') syncCrews(true);
@@ -1670,7 +1672,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
 
   // Auto Save & Backup on Push:
   // 1. Run targeted fast history save and location sync on modified equipment sheets
-  if (appliedCount > 0) {
+  if (!skipPostProcessing && appliedCount > 0) {
     if (sheetsModified['Employees']) {
       try {
         if (typeof syncInventoryLocations === 'function') {
