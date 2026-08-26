@@ -184,6 +184,10 @@ function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null) {
         });
       });
 
+      req.setTimeout(45000, () => {
+        req.destroy(new Error('Sync network request timed out after 45 seconds. Please check your internet connection or Web App deployment.'));
+      });
+
       req.on('error', (err) => {
         reject(err);
       });

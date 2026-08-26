@@ -689,38 +689,40 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
                   }
                 }
 
-                // If item is not Lost, clear highlighting and remove from Swaps sheet
-                var curStat = String(sheet.getRange(mut.row, eqColStatus).getValue() || '').trim().toLowerCase();
-                var curAssigned = String(sheet.getRange(mut.row, eqColAssignedTo).getValue() || '').trim().toLowerCase();
-                if (curStat !== 'lost' && curAssigned !== 'lost') {
-                  try {
-                    sheet.getRange(mut.row, 1, 1, sheet.getLastColumn()).setBackground(null);
-                    if (eqColNotes) {
-                      sheet.getRange(mut.row, eqColNotes).setFontWeight('normal').setFontColor(null);
-                      var curNotes = String(sheet.getRange(mut.row, eqColNotes).getValue() || '').trim().toUpperCase();
-                      if (curNotes.indexOf('LOST-LOCATE') !== -1 || curNotes.indexOf('LOST LOCATE') !== -1 || curNotes === 'LOCATE') {
-                        sheet.getRange(mut.row, eqColNotes).setValue('');
+                // If Status or Assigned To was edited: if item is not Lost, clear highlighting and remove from Swaps sheet
+                if (isStatusEdit || isAssignedToEdit) {
+                  var curStat = String(sheet.getRange(mut.row, eqColStatus).getValue() || '').trim().toLowerCase();
+                  var curAssigned = String(sheet.getRange(mut.row, eqColAssignedTo).getValue() || '').trim().toLowerCase();
+                  if (curStat !== 'lost' && curAssigned !== 'lost') {
+                    try {
+                      sheet.getRange(mut.row, 1, 1, sheet.getLastColumn()).setBackground(null);
+                      if (eqColNotes) {
+                        sheet.getRange(mut.row, eqColNotes).setFontWeight('normal').setFontColor(null);
+                        var curNotes = String(sheet.getRange(mut.row, eqColNotes).getValue() || '').trim().toUpperCase();
+                        if (curNotes.indexOf('LOST-LOCATE') !== -1 || curNotes.indexOf('LOST LOCATE') !== -1 || curNotes === 'LOCATE') {
+                          sheet.getRange(mut.row, eqColNotes).setValue('');
+                        }
                       }
-                    }
-                  } catch (clrErr) { /* ignore */ }
+                    } catch (clrErr) { /* ignore */ }
 
-                  // Remove from companion swap sheet's Lost section
-                  var itemNum = String(sheet.getRange(mut.row, 1).getValue() || '').trim();
-                  var swapSheetName = '';
-                  if (sheetName.toLowerCase().includes('glove')) swapSheetName = typeof SHEET_GLOVE_SWAPS !== 'undefined' ? SHEET_GLOVE_SWAPS : 'Glove Swaps';
-                  else if (sheetName.toLowerCase().includes('sleeve')) swapSheetName = typeof SHEET_SLEEVE_SWAPS !== 'undefined' ? SHEET_SLEEVE_SWAPS : 'Sleeve Swaps';
-                  else if (sheetName.toLowerCase().includes('blanket')) swapSheetName = typeof SHEET_BLANKET_SWAPS !== 'undefined' ? SHEET_BLANKET_SWAPS : 'Blanket Swaps';
-                  else if (sheetName.toLowerCase().includes('mack')) swapSheetName = typeof SHEET_MACK_SWAPS !== 'undefined' ? SHEET_MACK_SWAPS : 'MACK Swaps';
+                    // Remove from companion swap sheet's Lost section
+                    var itemNum = String(sheet.getRange(mut.row, 1).getValue() || '').trim();
+                    var swapSheetName = '';
+                    if (sheetName.toLowerCase().includes('glove')) swapSheetName = typeof SHEET_GLOVE_SWAPS !== 'undefined' ? SHEET_GLOVE_SWAPS : 'Glove Swaps';
+                    else if (sheetName.toLowerCase().includes('sleeve')) swapSheetName = typeof SHEET_SLEEVE_SWAPS !== 'undefined' ? SHEET_SLEEVE_SWAPS : 'Sleeve Swaps';
+                    else if (sheetName.toLowerCase().includes('blanket')) swapSheetName = typeof SHEET_BLANKET_SWAPS !== 'undefined' ? SHEET_BLANKET_SWAPS : 'Blanket Swaps';
+                    else if (sheetName.toLowerCase().includes('mack')) swapSheetName = typeof SHEET_MACK_SWAPS !== 'undefined' ? SHEET_MACK_SWAPS : 'MACK Swaps';
 
-                  if (swapSheetName && itemNum) {
-                    var swSheet = ss.getSheetByName(swapSheetName);
-                    if (swSheet) {
-                      var swData = swSheet.getDataRange().getValues();
-                      for (var sr = swData.length - 1; sr >= 1; sr--) {
-                        var swItem = String(swData[sr][1] || '').trim();
-                        var swDays = String(swData[sr][5] || '').trim().toUpperCase();
-                        if (swItem === itemNum && (swDays === 'LOST-LOCATE' || swDays.includes('LOST'))) {
-                          swSheet.deleteRow(sr + 1);
+                    if (swapSheetName && itemNum) {
+                      var swSheet = ss.getSheetByName(swapSheetName);
+                      if (swSheet) {
+                        var swData = swSheet.getDataRange().getValues();
+                        for (var sr = swData.length - 1; sr >= 1; sr--) {
+                          var swItem = String(swData[sr][1] || '').trim();
+                          var swDays = String(swData[sr][5] || '').trim().toUpperCase();
+                          if (swItem === itemNum && (swDays === 'LOST-LOCATE' || swDays.includes('LOST'))) {
+                            swSheet.deleteRow(sr + 1);
+                          }
                         }
                       }
                     }
@@ -1691,13 +1693,15 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
       Logger.log('applyBatchSyncMutations auto saveHistoryFast error: ' + histErr);
     }
 
-    // 2. Refresh backup (throttles heavy full-file Google Drive cloning to max once per 15 min)
-    try {
-      if (typeof createBackupSnapshotFast === 'function') {
-        createBackupSnapshotFast(options.forceBackup === true);
+    // 2. Refresh backup (only if explicitly requested to prevent HTTP timeout on Google Apps Script)
+    if (options && options.forceBackup === true) {
+      try {
+        if (typeof createBackupSnapshotFast === 'function') {
+          createBackupSnapshotFast(true);
+        }
+      } catch (bkErr) {
+        Logger.log('applyBatchSyncMutations auto createBackupSnapshotFast error: ' + bkErr);
       }
-    } catch (bkErr) {
-      Logger.log('applyBatchSyncMutations auto createBackupSnapshotFast error: ' + bkErr);
     }
   }
 

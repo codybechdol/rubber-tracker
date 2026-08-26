@@ -43,21 +43,32 @@ class SyncEngine {
       }
     }
 
-    // 2. Browser fetch fallback
-    const options = { method, redirect: 'follow' };
-    if (method === 'POST' && body) {
-      options.headers = { 'Content-Type': 'text/plain;charset=utf-8' };
-      options.body = typeof body === 'string' ? body : JSON.stringify(body);
-    }
-    const resp = await fetch(url, options);
-    const text = await resp.text();
+    // 2. Browser fetch fallback (with 45s timeout)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
     try {
-      return JSON.parse(text);
-    } catch (parseErr) {
-      if (text.includes('<!DOCTYPE') || text.includes('<html')) {
-        throw new Error('Google returned a login/access page. You can either:\n1. Click "📁 Import Snapshot" at the top and select SafetyAssistant_Sync_Snapshot.json from your Google Drive/Downloads, or\n2. In Google Sheets: Extensions > Apps Script > Deploy > Manage Deployments, ensure "Who has access" is set to "Anyone".');
+      const options = { method, redirect: 'follow', signal: controller.signal };
+      if (method === 'POST' && body) {
+        options.headers = { 'Content-Type': 'text/plain;charset=utf-8' };
+        options.body = typeof body === 'string' ? body : JSON.stringify(body);
       }
-      throw parseErr;
+      const resp = await fetch(url, options);
+      clearTimeout(timeoutId);
+      const text = await resp.text();
+      try {
+        return JSON.parse(text);
+      } catch (parseErr) {
+        if (text.includes('<!DOCTYPE') || text.includes('<html')) {
+          throw new Error('Google returned a login/access page. You can either:\n1. Click "📁 Import Snapshot" at the top and select SafetyAssistant_Sync_Snapshot.json from your Google Drive/Downloads, or\n2. In Google Sheets: Extensions > Apps Script > Deploy > Manage Deployments, ensure "Who has access" is set to "Anyone".');
+        }
+        throw parseErr;
+      }
+    } catch (fetchErr) {
+      clearTimeout(timeoutId);
+      if (fetchErr.name === 'AbortError') {
+        throw new Error('Sync network request timed out after 45 seconds.');
+      }
+      throw fetchErr;
     }
   }
 
@@ -194,6 +205,7 @@ class SyncEngine {
   closeSyncModal() {
     const modal = document.getElementById('sync-modal');
     if (modal) modal.classList.remove('active');
+    this.isSyncing = false;
   }
 
   renderModalChanges(outbox, statusMessage, statusType = 'syncing', allowClear = false) {
