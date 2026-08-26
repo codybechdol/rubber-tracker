@@ -33024,7 +33024,8 @@ function doGet(e) {
       var returnSnap = e.parameter.returnSnapshot === 'true';
       var force = e.parameter.force === 'true';
       var detectConflicts = e.parameter.detectConflicts !== 'false';
-      var result = applyBatchSyncMutations(mutations, returnSnap, { detectConflicts: detectConflicts, force: force });
+      var skipPostProcessing = e.parameter.skipPostProcessing === 'true';
+      var result = applyBatchSyncMutations(mutations, returnSnap, { detectConflicts: detectConflicts, force: force, skipPostProcessing: skipPostProcessing });
       return ContentService.createTextOutput(JSON.stringify(result))
         .setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'getSafetyPdf') {
@@ -33072,7 +33073,8 @@ function doPost(e) {
       var returnSnap = payload.returnSnapshot === true;
       var options = {
         detectConflicts: payload.detectConflicts !== false,
-        force: payload.force === true
+        force: payload.force === true,
+        skipPostProcessing: payload.skipPostProcessing === true
       };
       var result = applyBatchSyncMutations(payload.mutations || [], returnSnap, options);
       return ContentService.createTextOutput(JSON.stringify(result))

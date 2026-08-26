@@ -275,7 +275,7 @@ class SyncEngine {
   /**
    * Pushes pending offline changes to Google Sheets WITHOUT downloading or overwriting local database
    */
-  async pushChangesToGoogleSheets() {
+  async pushChangesToGoogleSheets(options = {}) {
     if (this.isSyncing) return;
 
     if (!this.syncUrl) {
@@ -624,7 +624,7 @@ class SyncEngine {
     const outbox = this.db.getOutbox() || [];
     outbox.forEach(m => { m.force = true; });
     await this.db.saveOutbox(outbox);
-    return await this.pushChangesToGoogleSheets();
+    return await this.pushChangesToGoogleSheets({ force: true, detectConflicts: false });
   }
 
   async applyConflictResolutions() {

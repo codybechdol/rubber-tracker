@@ -1778,7 +1778,8 @@ function doGet(e) {
       var returnSnap = (e && e.parameter && e.parameter.returnSnapshot) === 'true';
       var force = (e && e.parameter && e.parameter.force) === 'true';
       var detectConflicts = (e && e.parameter && e.parameter.detectConflicts) !== 'false';
-      var result = applyBatchSyncMutations(mutations, returnSnap, { detectConflicts: detectConflicts, force: force });
+      var skipPostProcessing = (e && e.parameter && e.parameter.skipPostProcessing) === 'true';
+      var result = applyBatchSyncMutations(mutations, returnSnap, { detectConflicts: detectConflicts, force: force, skipPostProcessing: skipPostProcessing });
       return ContentService.createTextOutput(JSON.stringify(result))
         .setMimeType(ContentService.MimeType.JSON);
     } catch (mutErr) {
@@ -1901,7 +1902,8 @@ function doPost(e) {
       var returnSnap = isArray ? false : (payload.returnSnapshot === true);
       var options = {
         detectConflicts: isArray ? true : (payload.detectConflicts !== false),
-        force: isArray ? false : (payload.force === true)
+        force: isArray ? false : (payload.force === true),
+        skipPostProcessing: isArray ? false : (payload.skipPostProcessing === true)
       };
       var result = applyBatchSyncMutations(mutations, returnSnap, options);
       return ContentService.createTextOutput(JSON.stringify(result))
