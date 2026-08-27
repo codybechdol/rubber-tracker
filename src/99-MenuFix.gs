@@ -89,6 +89,7 @@ function _buildGloveManagerMenu() {
           .addItem('🔄 Sync Full Certs Matrix (All Employees)', 'syncExpiringCertsSheetFullRoster')
           .addItem('🎨 Fix Expiring Certs Colors & Formatting', 'menuFixExpiringCertsFormatting')
           .addItem('🧹 Purge Non-Employee Rows (Expiring Certs)', 'menuCleanExpiringCertsSheet')
+          .addItem('🚀 Streamline Database (Flatten Formulas)', 'flattenAllFormulasAndCleanDatabase')
           .addSeparator()
           .addItem('🏗️ Build Sheets', 'buildSheets')
           .addItem('📅 Fiscal Year Config', 'showFiscalYearConfig')

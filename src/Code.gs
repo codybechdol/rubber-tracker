@@ -33051,6 +33051,10 @@ function doGet(e) {
       var recRes = reconcileInventoryFromHistory(true);
       return ContentService.createTextOutput(JSON.stringify(recRes))
         .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === 'flattenDatabase') {
+      var flatRes = flattenAllFormulasAndCleanDatabase(true);
+      return ContentService.createTextOutput(JSON.stringify(flatRes))
+        .setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'getSnapshot' || !action) {
       var snapshot = exportFullDatabaseSnapshot();
       try {
