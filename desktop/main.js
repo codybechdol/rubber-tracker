@@ -1,6 +1,11 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const dns = require('dns');
+
+try {
+  dns.setDefaultResultOrder('ipv4first');
+} catch (e) {}
 
 app.setAppUserModelId('com.safetyassistant.desktop');
 
@@ -150,6 +155,7 @@ function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null) {
         hostname: parsedUrl.hostname,
         path: parsedUrl.pathname + parsedUrl.search,
         method: currentMethod,
+        family: 4,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) SafetyAssistant/2026.1 Chrome/120.0.0.0 Safari/537.36',
           'Accept': 'application/json, text/plain, */*'
