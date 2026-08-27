@@ -14,26 +14,26 @@ class CertsImportEngine {
     this.fileName = '';
     this.preserveNewerDates = true;
 
-    // Supported certification types and aliases
-    this.certDefinitions = [
-      { key: 'First Aid', label: 'First Aid / 1st Aid', aliases: ['1st aid', 'first aid', 'fa', '1st aid/cpr', 'first aid / cpr'], nonExpiring: false },
-      { key: 'CPR', label: 'CPR / AED', aliases: ['cpr', 'cpr/aed', 'aed/cpr', 'cardiopulmonary'], nonExpiring: false },
-      { key: 'DL', label: "Driver's License (DL)", aliases: ['dl', 'driver', 'drivers license', "driver's license", 'license', 'cdl'], nonExpiring: false },
-      { key: 'Medical Card', label: 'Medical Card (DOT)', aliases: ['medical card', 'med card', 'med', 'dot', 'dot card', 'dot physical'], nonExpiring: false },
-      { key: 'Crane Cert', label: 'Crane Certification', aliases: ['crane cert', 'crane certification', 'ncco', 'crane license', 'crane'], nonExpiring: false },
-      { key: 'Crane Evaluation', label: 'Crane Evaluation', aliases: ['crane eval', 'crane evaluation', 'crane assessment'], nonExpiring: true, isIssuedDate: true },
-      { key: 'OSHA 1910', label: 'OSHA 1910 / 10 / 30', aliases: ['osha 1910', 'osha 10', 'osha 30', 'osha 10/30', 'osha', 'et&d', 'osha etd'], nonExpiring: true, isIssuedDate: true },
-      { key: 'BNSF', label: 'BNSF Rail Safety', aliases: ['bnsf', 'bnsf rail', 'bnsf safety', 'railroad'], nonExpiring: true, isIssuedDate: true },
-      { key: 'MSHA', label: 'MSHA Mine Safety', aliases: ['msha', 'msha 46', 'msha 48', 'mine safety'], nonExpiring: true, isIssuedDate: true },
-      { key: 'OSHA Trench Comp Person', label: 'OSHA Trench Competent Person', aliases: ['trench', 'trenching', 'trench comp person', 'trench competent', 'excavation'], nonExpiring: true, isIssuedDate: true },
-      { key: 'Forklift', label: 'Forklift Certification', aliases: ['forklift', 'fork lift', 'pit', 'powered industrial truck'], nonExpiring: false },
-      { key: 'Forklift Operator Safety Training', label: 'Forklift Safety Training', aliases: ['forklift operator safety training', 'forklift training', 'forklift eval'], nonExpiring: true, isIssuedDate: true },
-      { key: 'Rigging & Signaling', label: 'Rigging & Signaling', aliases: ['rigging', 'rigging & signaling', 'rigging and signaling', 'rigger', 'signal person'], nonExpiring: false },
-      { key: 'Harassment Training', label: 'Harassment Prevention', aliases: ['harassment', 'harassment training', 'anti-harassment', 'dei'], nonExpiring: false },
-      { key: 'EICA Basic Helicopter Line Construction Safety', label: 'EICA Basic Helicopter Safety', aliases: ['eica', 'helicopter', 'helo', 'eica basic helo', 'helo safety'], nonExpiring: true, isIssuedDate: true },
-      { key: 'Pole Top Rescue', label: 'Pole Top Rescue', aliases: ['pole top', 'pole top rescue', 'bucket rescue', 'tower rescue'], nonExpiring: false },
-      { key: 'Dig Safe', label: 'Dig Safe / 811', aliases: ['dig safe', 'digsafe', '811', 'utility locate'], nonExpiring: false }
-    ];
+    // Supported certification types definition lookup
+    this.certDefinitions = {
+      'First Aid': { key: 'First Aid', label: 'First Aid / 1st Aid', nonExpiring: false },
+      'CPR': { key: 'CPR', label: 'CPR / AED', nonExpiring: false },
+      'DL': { key: 'DL', label: "Driver's License (DL)", nonExpiring: false },
+      'Medical Card': { key: 'Medical Card', label: 'Medical Card (DOT)', nonExpiring: false },
+      'Crane Cert': { key: 'Crane Cert', label: 'Crane Certification', nonExpiring: false },
+      'Crane Evaluation': { key: 'Crane Evaluation', label: 'Crane Evaluation', nonExpiring: true, isIssuedDate: true },
+      'OSHA 1910': { key: 'OSHA 1910', label: 'OSHA 1910 / 10 / 30', nonExpiring: true, isIssuedDate: true },
+      'BNSF': { key: 'BNSF', label: 'BNSF Rail Safety', nonExpiring: true, isIssuedDate: true },
+      'MSHA': { key: 'MSHA', label: 'MSHA Mine Safety', nonExpiring: true, isIssuedDate: true },
+      'OSHA Trench Comp Person': { key: 'OSHA Trench Comp Person', label: 'OSHA Trench Competent Person', nonExpiring: true, isIssuedDate: true },
+      'Forklift': { key: 'Forklift', label: 'Forklift Certification', nonExpiring: false },
+      'Forklift Operator Safety Training': { key: 'Forklift Operator Safety Training', label: 'Forklift Safety Training', nonExpiring: true, isIssuedDate: true },
+      'Rigging & Signaling': { key: 'Rigging & Signaling', label: 'Rigging & Signaling', nonExpiring: false },
+      'Harassment Training': { key: 'Harassment Training', label: 'Harassment Prevention', nonExpiring: false },
+      'EICA Basic Helicopter Line Construction Safety': { key: 'EICA Basic Helicopter Line Construction Safety', label: 'EICA Basic Helicopter Safety', nonExpiring: true, isIssuedDate: true },
+      'Pole Top Rescue': { key: 'Pole Top Rescue', label: 'Pole Top Rescue', nonExpiring: false },
+      'Dig Safe': { key: 'Dig Safe', label: 'Dig Safe / 811', nonExpiring: false }
+    };
   }
 
   /**
@@ -142,9 +142,9 @@ class CertsImportEngine {
         if (certSheetCandidate) sheetName = certSheetCandidate;
 
         const worksheet = workbook.Sheets[sheetName];
-        const rawJson = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+        const grid = this.extractGridFromWorksheet(worksheet);
 
-        this.processRawSheetData(rawJson);
+        this.processRawSheetData(grid);
       } catch (err) {
         console.error('Failed to parse Excel file:', err);
         alert('❌ Error reading file: ' + err.message);
@@ -154,81 +154,181 @@ class CertsImportEngine {
   }
 
   /**
+   * Robust cell extraction handling SheetJS text, date objects, and Excel serial numbers.
+   */
+  extractGridFromWorksheet(worksheet) {
+    if (!worksheet || !worksheet['!ref']) return [];
+    const range = XLSX.utils.decode_range(worksheet['!ref']);
+    const grid = [];
+
+    for (let r = range.s.r; r <= range.e.r; r++) {
+      const row = [];
+      let hasData = false;
+
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const cellAddr = XLSX.utils.encode_cell({ r: r, c: c });
+        const cell = worksheet[cellAddr];
+        let val = '';
+
+        if (cell) {
+          if (cell.w) {
+            val = String(cell.w).trim();
+          } else if (cell.v instanceof Date) {
+            val = this.formatDateObj(cell.v);
+          } else if (typeof cell.v === 'number' && cell.v > 25000 && cell.v < 60000) {
+            // Excel date serial number (year 1968 to 2064)
+            if (XLSX.SSF && XLSX.SSF.parse_date_code) {
+              const dateObj = XLSX.SSF.parse_date_code(cell.v);
+              if (dateObj) {
+                const mm = String(dateObj.m).padStart(2, '0');
+                const dd = String(dateObj.d).padStart(2, '0');
+                val = `${mm}/${dd}/${dateObj.y}`;
+              }
+            } else {
+              const d = new Date((cell.v - 25569) * 86400 * 1000);
+              val = this.formatDateObj(d);
+            }
+          } else if (cell.v !== undefined && cell.v !== null) {
+            val = String(cell.v).trim();
+          }
+        }
+
+        if (val) hasData = true;
+        row.push(val);
+      }
+
+      if (hasData) {
+        grid.push(row);
+      }
+    }
+    return grid;
+  }
+
+  /**
+   * Matches header string to canonical Cert Definition key.
+   */
+  matchCertHeader(hClean) {
+    if (!hClean) return null;
+    const clean = hClean.toLowerCase().trim();
+
+    // Skip employee name, job, location columns
+    if (['name', 'employee', 'first name', 'last name', 'worker', 'lineman', 'location', 'job', 'job #', 'job#', 'crew', 'city'].includes(clean)) return null;
+
+    if (clean.includes('1st aid') || clean.includes('first aid') || clean === 'fa') return 'First Aid';
+    if (clean === 'cpr' || clean.includes('cpr/aed') || clean.includes('cpr') || clean.includes('cardiopulmonary')) return 'CPR';
+    if (clean === 'dl' || clean.includes("driver's license") || clean.includes('drivers license') || clean === 'driver' || clean === 'cdl') return 'DL';
+    if (clean.includes('medical') || clean.includes('med card') || clean.includes('mec') || clean === 'dot' || clean.includes('dot card') || clean.includes('dot physical')) return 'Medical Card';
+    if (clean.includes('crane eval') || clean.includes('crane assessment') || clean.includes('crane evaluation')) return 'Crane Evaluation';
+    if ((clean.includes('crane') && (clean.includes('cert') || clean.includes('ncco') || clean.includes('license'))) || clean === 'crane') return 'Crane Cert';
+    if (clean.includes('trench') || clean.includes('excavation')) return 'OSHA Trench Comp Person';
+    if (clean.includes('osha 1910') || clean.includes('osha 10') || clean.includes('osha 30') || clean.includes('osha') || clean.includes('et&d')) return 'OSHA 1910';
+    if (clean.includes('bnsf')) return 'BNSF';
+    if (clean.includes('msha')) return 'MSHA';
+    if (clean.includes('forklift') && (clean.includes('safety') || clean.includes('training') || clean.includes('operator') || clean.includes('eval'))) return 'Forklift Operator Safety Training';
+    if (clean.includes('forklift') || clean === 'pit') return 'Forklift';
+    if (clean.includes('rigging') || clean.includes('rigger') || clean.includes('signalperson') || clean.includes('spotter')) return 'Rigging & Signaling';
+    if (clean.includes('harassment')) return 'Harassment Training';
+    if (clean.includes('helo') || clean.includes('helicopter') || clean.includes('eica')) return 'EICA Basic Helicopter Line Construction Safety';
+    if (clean.includes('pole top') || clean.includes('poletop') || clean.includes('bucket rescue')) return 'Pole Top Rescue';
+    if (clean.includes('dig safe') || clean.includes('digsafe') || clean.includes('811')) return 'Dig Safe';
+
+    return null;
+  }
+
+  /**
    * Normalizes spreadsheet rows, locates header row and maps cert columns to 9-column expiring_certs table.
    */
-  processRawSheetData(rows) {
-    if (!rows || rows.length < 2) {
+  processRawSheetData(grid) {
+    if (!grid || grid.length < 1) {
       alert('⚠️ The selected file contains no data rows.');
       return;
     }
 
-    // Header keywords to search for
-    const nameKeywords = ['name', 'employee', 'employee name', 'last name', 'first name', 'worker', 'lineman'];
-
-    // 1. Find header row (search first 20 rows)
+    // 1. Find header row (search first 15 rows for matching cert columns)
     let headerIdx = -1;
-    for (let r = 0; r < Math.min(25, rows.length); r++) {
-      const row = rows[r].map(c => String(c || '').toLowerCase().trim());
-      if (row.some(c => nameKeywords.includes(c) || c.includes('first aid') || c.includes('1st aid') || c === 'cpr' || c === 'dl')) {
+    let colToCertMap = {};
+    let nameCol = -1;
+    let jobCol = -1;
+    let locCol = -1;
+
+    for (let r = 0; r < Math.min(15, grid.length); r++) {
+      const row = grid[r];
+      let certMatches = 0;
+      const testMap = {};
+      let testNameCol = -1;
+      let testJobCol = -1;
+      let testLocCol = -1;
+
+      row.forEach((cell, cIdx) => {
+        const cClean = String(cell || '').toLowerCase().trim();
+        if (!cClean) return;
+
+        if (cClean === 'name' || cClean === 'employee' || cClean === 'employee name' || cClean === 'full name' || cClean === 'last name, first name') {
+          testNameCol = cIdx;
+        } else if (cClean.includes('job') || cClean === 'crew' || cClean === 'job #') {
+          testJobCol = cIdx;
+        } else if (cClean.includes('location') || cClean === 'city') {
+          testLocCol = cIdx;
+        } else {
+          const certKey = this.matchCertHeader(cClean);
+          if (certKey && this.certDefinitions[certKey]) {
+            testMap[cIdx] = this.certDefinitions[certKey];
+            certMatches++;
+          }
+        }
+      });
+
+      if (certMatches >= 2) {
         headerIdx = r;
+        colToCertMap = testMap;
+        nameCol = testNameCol !== -1 ? testNameCol : 0;
+        jobCol = testJobCol;
+        locCol = testLocCol;
         break;
       }
     }
 
-    let headers = [];
     let dataRows = [];
 
     if (headerIdx >= 0) {
-      headers = rows[headerIdx].map(c => String(c || '').trim());
-      dataRows = rows.slice(headerIdx + 1);
+      dataRows = grid.slice(headerIdx + 1);
     } else {
-      headers = rows[0].map(c => String(c || '').trim());
-      dataRows = rows.slice(1);
-    }
+      // Standard default company positional mapping:
+      // A(0)=Name, B(1)=Job#, C(2)=Location, D(3)=DL, E(4)=Medical Card, F(5)=1st Aid, G(6)=CPR, H(7)=Crane Cert, I(8)=Crane Eval...
+      nameCol = 0;
+      jobCol = 1;
+      locCol = 2;
+      const positionalList = [
+        { col: 3, key: 'DL' },
+        { col: 4, key: 'Medical Card' },
+        { col: 5, key: 'First Aid' },
+        { col: 6, key: 'CPR' },
+        { col: 7, key: 'Crane Cert' },
+        { col: 8, key: 'Crane Evaluation' },
+        { col: 9, key: 'OSHA 1910' },
+        { col: 10, key: 'BNSF' },
+        { col: 11, key: 'MSHA' },
+        { col: 12, key: 'OSHA Trench Comp Person' },
+        { col: 13, key: 'Forklift' },
+        { col: 14, key: 'Forklift Operator Safety Training' },
+        { col: 15, key: 'Rigging & Signaling' },
+        { col: 16, key: 'Harassment Training' },
+        { col: 17, key: 'EICA Basic Helicopter Line Construction Safety' },
+        { col: 18, key: 'Pole Top Rescue' }
+      ];
 
-    // 2. Identify column indices for Employee Name, Job#, Location, and Certifications
-    let nameCol = -1;
-    let firstNameCol = -1;
-    let lastNameCol = -1;
-    let jobCol = -1;
-    let locCol = -1;
-
-    // Map columnIndex -> Cert Definition
-    const colToCertMap = {};
-
-    headers.forEach((h, idx) => {
-      const hClean = String(h || '').toLowerCase().trim();
-      if (!hClean) return;
-
-      if (hClean === 'name' || hClean === 'employee' || hClean === 'employee name' || hClean === 'full name') {
-        nameCol = idx;
-      } else if (hClean === 'first name' || hClean === 'first') {
-        firstNameCol = idx;
-      } else if (hClean === 'last name' || hClean === 'last') {
-        lastNameCol = idx;
-      } else if (hClean.includes('job') || hClean === 'crew' || hClean === 'job #') {
-        jobCol = idx;
-      } else if (hClean.includes('location') || hClean === 'city') {
-        locCol = idx;
-      } else {
-        // Check cert definitions
-        for (const def of this.certDefinitions) {
-          const isMatch = def.aliases.some(alias => {
-            return hClean === alias || hClean.includes(alias) || alias.includes(hClean);
-          });
-          if (isMatch) {
-            colToCertMap[idx] = def;
-            break;
-          }
+      positionalList.forEach(p => {
+        if (this.certDefinitions[p.key]) {
+          colToCertMap[p.col] = this.certDefinitions[p.key];
         }
-      }
-    });
+      });
 
-    if (nameCol === -1 && (firstNameCol === -1 || lastNameCol === -1)) {
-      nameCol = 0; // Default column 0 as Name
+      dataRows = grid;
     }
 
-    // 3. Load existing Employees and existing Expiring Certs table
+    // 2. Load existing Employees and existing Expiring Certs table
+    if (!this.db) this.db = window.localDB || window.safetyDB;
+
     const employeesTable = this.db ? this.db.getTable('employees') : null;
     const empList = employeesTable && employeesTable.rows ? employeesTable.rows : [];
     const empLookup = {};
@@ -252,20 +352,14 @@ class CertsImportEngine {
 
     this.mappedData = [];
 
-    // 4. Process each row in Excel
+    // 3. Process each row in Excel
     dataRows.forEach(row => {
-      let rawName = '';
-      if (nameCol !== -1 && row[nameCol]) {
-        rawName = String(row[nameCol]).trim();
-      } else if (firstNameCol !== -1 && lastNameCol !== -1) {
-        rawName = `${row[firstNameCol]} ${row[lastNameCol]}`.trim();
-      }
-
+      let rawName = nameCol !== -1 && row[nameCol] ? String(row[nameCol]).trim() : '';
       if (!rawName) return;
 
       // Filter out repeat header rows or section dividers
       const rawLower = rawName.toLowerCase();
-      if (['name', 'employee', 'location', 'total', 'active', 'inactive', 'subtotal'].includes(rawLower)) return;
+      if (['name', 'employee', 'employee name', 'location', 'total', 'active', 'inactive', 'subtotal', 'department'].includes(rawLower)) return;
 
       // Convert "LastName, FirstName" -> "FirstName LastName"
       let formattedName = rawName;
@@ -297,6 +391,7 @@ class CertsImportEngine {
         const cellVal = row[cIdx];
         if (cellVal === undefined || cellVal === null || String(cellVal).trim() === '') return;
 
+        // Strict Date Validation (must return a valid date or 'Need Copy', not text like employee name)
         const dateStr = this.formatDateStr(cellVal);
         if (!dateStr) return;
 
@@ -304,8 +399,8 @@ class CertsImportEngine {
         const existingEntry = existingCertMap[lookupKey];
         const existingRow = existingEntry ? existingEntry.row : null;
 
-        const currentExpDate = existingRow ? this.formatDateStr(existingRow['Expiration Date'] || '') : '';
-        const currentAcqDate = existingRow ? this.formatDateStr(existingRow['Date Acquired'] || '') : '';
+        const currentExpDate = existingRow ? (this.formatDateStr(existingRow['Expiration Date']) || '') : '';
+        const currentAcqDate = existingRow ? (this.formatDateStr(existingRow['Date Acquired']) || '') : '';
 
         // Determine if change is needed
         let isChange = false;
@@ -316,7 +411,7 @@ class CertsImportEngine {
           // For non-expiring certs (OSHA, Crane Eval, BNSF, MSHA), compare Date Acquired
           changeOldDate = currentAcqDate;
           if (!currentAcqDate || currentAcqDate !== dateStr) {
-            if (this.preserveNewerDates && currentAcqDate) {
+            if (this.preserveNewerDates && currentAcqDate && currentAcqDate !== 'Need Copy' && dateStr !== 'Need Copy') {
               const oldD = new Date(currentAcqDate);
               const newD = new Date(dateStr);
               if (!isNaN(oldD.getTime()) && !isNaN(newD.getTime()) && oldD > newD) {
@@ -329,7 +424,7 @@ class CertsImportEngine {
           // For expiring certs, compare Expiration Date
           changeOldDate = currentExpDate;
           if (!currentExpDate || currentExpDate !== dateStr) {
-            if (this.preserveNewerDates && currentExpDate) {
+            if (this.preserveNewerDates && currentExpDate && currentExpDate !== 'Need Copy' && dateStr !== 'Need Copy') {
               const oldD = new Date(currentExpDate);
               const newD = new Date(dateStr);
               if (!isNaN(oldD.getTime()) && !isNaN(newD.getTime()) && oldD > newD) {
@@ -365,49 +460,68 @@ class CertsImportEngine {
     this.renderPreviewScreen();
   }
 
+  /**
+   * Strictly validates and formats date strings as MM/DD/YYYY or 'Need Copy'. Returns null for non-date text.
+   */
   formatDateStr(val) {
-    if (!val) return '';
+    if (!val && val !== 0) return null;
     if (val instanceof Date) {
-      if (isNaN(val.getTime())) return '';
+      if (isNaN(val.getTime())) return null;
       const mm = String(val.getMonth() + 1).padStart(2, '0');
       const dd = String(val.getDate()).padStart(2, '0');
       const yyyy = val.getFullYear();
+      if (yyyy < 1990 || yyyy > 2100) return null;
       return `${mm}/${dd}/${yyyy}`;
     }
     const str = String(val).trim();
-    if (!str) return '';
+    if (!str) return null;
 
     // Handle "Need Copy"
     if (str.toLowerCase().includes('need copy')) return 'Need Copy';
 
-    // Handle MM/DD/YYYY or MM.DD.YYYY
-    const slashMatch = str.match(/^(\d{1,2})[\/\.](\d{1,2})[\/\.](\d{2,4})/);
+    // Handle MM/DD/YYYY, MM/DD/YY, MM.DD.YYYY, MM-DD-YYYY
+    const slashMatch = str.match(/^(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{2,4})$/);
     if (slashMatch) {
-      const mm = String(slashMatch[1]).padStart(2, '0');
-      const dd = String(slashMatch[2]).padStart(2, '0');
-      let yr = slashMatch[3];
-      if (yr.length === 2) yr = '20' + yr;
-      return `${mm}/${dd}/${yr}`;
+      let m = parseInt(slashMatch[1], 10);
+      let d = parseInt(slashMatch[2], 10);
+      let y = parseInt(slashMatch[3], 10);
+      if (y < 100) y += 2000;
+      if (m >= 1 && m <= 12 && d >= 1 && d <= 31 && y >= 1990 && y <= 2100) {
+        return `${String(m).padStart(2, '0')}/${String(d).padStart(2, '0')}/${y}`;
+      }
     }
 
     // Handle YYYY-MM-DD
-    const dashMatch = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-    if (dashMatch) {
-      const yyyy = dashMatch[1];
-      const mm = String(dashMatch[2]).padStart(2, '0');
-      const dd = String(dashMatch[3]).padStart(2, '0');
-      return `${mm}/${dd}/${yyyy}`;
+    const isoMatch = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (isoMatch) {
+      let y = parseInt(isoMatch[1], 10);
+      let m = parseInt(isoMatch[2], 10);
+      let d = parseInt(isoMatch[3], 10);
+      if (m >= 1 && m <= 12 && d >= 1 && d <= 31 && y >= 1990 && y <= 2100) {
+        return `${String(m).padStart(2, '0')}/${String(d).padStart(2, '0')}/${y}`;
+      }
     }
 
-    const d = new Date(str);
-    if (!isNaN(d.getTime()) && d.getFullYear() > 1990) {
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      const dd = String(d.getDate()).padStart(2, '0');
-      const yyyy = d.getFullYear();
-      return `${mm}/${dd}/${yyyy}`;
+    const parsed = new Date(str);
+    if (!isNaN(parsed.getTime())) {
+      const y = parsed.getFullYear();
+      if (y >= 1990 && y <= 2100) {
+        const mm = String(parsed.getMonth() + 1).padStart(2, '0');
+        const dd = String(parsed.getDate()).padStart(2, '0');
+        return `${mm}/${dd}/${y}`;
+      }
     }
 
-    return str;
+    // Invalid non-date text
+    return null;
+  }
+
+  formatDateObj(d) {
+    if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    return `${mm}/${dd}/${yyyy}`;
   }
 
   /**
@@ -551,7 +665,7 @@ class CertsImportEngine {
           if (certDef.nonExpiring) {
             const oldVal = row['Date Acquired'] || '';
             row['Date Acquired'] = ch.newDate;
-            if (this.db) {
+            if (this.db && typeof this.db.addMutation === 'function') {
               await this.db.addMutation({
                 action: 'UPDATE_CELL',
                 sheetName: 'Expiring Certs',
@@ -570,7 +684,7 @@ class CertsImportEngine {
             row['Days Until Expiration'] = statusCalc.daysUntil;
             row['Status'] = statusCalc.status;
 
-            if (this.db) {
+            if (this.db && typeof this.db.addMutation === 'function') {
               await this.db.addMutation({
                 action: 'UPDATE_CELL',
                 sheetName: 'Expiring Certs',
@@ -607,7 +721,7 @@ class CertsImportEngine {
             certsTable.maxRows = certsTable.rawGrid.length;
           }
 
-          if (this.db) {
+          if (this.db && typeof this.db.addMutation === 'function') {
             await this.db.addMutation({
               action: 'ADD_ROW',
               sheetName: 'Expiring Certs',
@@ -621,16 +735,24 @@ class CertsImportEngine {
       }
     }
 
-    // Save updated table to IndexedDB
+    // Save updated database snapshot
     if (this.db) {
-      await this.db.saveTable('expiring_certs', certsTable);
+      if (typeof this.db.setSnapshot === 'function' && this.db.snapshot) {
+        await this.db.setSnapshot(this.db.snapshot);
+      } else if (window.desktopAPI) {
+        await window.desktopAPI.saveLocalSnapshot(this.db.snapshot);
+      }
     }
 
     this.closeImportModal();
 
     // Refresh active views
-    if (window.sheetNavigator && typeof window.sheetNavigator.renderActiveView === 'function') {
-      window.sheetNavigator.renderActiveView();
+    if (window.sheetNavigator) {
+      if (typeof window.sheetNavigator.renderSheet === 'function') {
+        window.sheetNavigator.renderSheet('expiring_certs');
+      } else if (typeof window.sheetNavigator.renderActiveView === 'function') {
+        window.sheetNavigator.renderActiveView();
+      }
     }
     if (window.syncEngine && typeof window.syncEngine.renderOutboxBadge === 'function') {
       window.syncEngine.renderOutboxBadge();
@@ -651,5 +773,5 @@ class CertsImportEngine {
 }
 
 // Attach globally
-window.certsImportEngine = new CertsImportEngine(window.safetyDB || null);
+window.certsImportEngine = new CertsImportEngine(window.localDB || window.safetyDB || null);
 window.CertsImportEngine = CertsImportEngine;
