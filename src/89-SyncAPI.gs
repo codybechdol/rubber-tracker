@@ -420,6 +420,9 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
             col: cMut.col,
             header: cMut.header || cMut.colName || ('Col ' + cMut.col),
             itemIdentifier: cMut.itemIdentifier || '',
+            employeeName: cMut.employeeName || '',
+            certName: cMut.certName || cMut.itemType || '',
+            itemNumber: cMut.itemNumber || cMut.itemNum || '',
             serverValue: (curVal instanceof Date && !isNaN(curVal.getTime())) ? Utilities.formatDate(curVal, tz, 'MM/dd/yyyy') : String(curVal || ''),
             localValue: (cMut.value instanceof Date && !isNaN(cMut.value.getTime())) ? Utilities.formatDate(cMut.value, tz, 'MM/dd/yyyy') : String(cMut.value || ''),
             expectedValue: (cMut.oldValue instanceof Date && !isNaN(cMut.oldValue.getTime())) ? Utilities.formatDate(cMut.oldValue, tz, 'MM/dd/yyyy') : String(cMut.oldValue || '')

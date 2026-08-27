@@ -96,19 +96,87 @@ class SyncEngine {
   formatMutation(mut) {
     if (!mut) return { title: 'Unknown Change', desc: '', icon: '✏️', sheet: 'System', time: '' };
     const timeStr = mut.timestamp ? new Date(mut.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
-    
+    const sheet = mut.sheetName || 'Sheet';
+
+    // Resolve context from local db row or mutation payload
+    let employeeName = mut.employeeName || mut.empName || '';
+    let itemNumber = mut.itemNumber || mut.itemNum || mut.serialNum || mut.itemIdentifier || '';
+    let certName = mut.certName || mut.certType || mut.itemType || '';
+    let fieldHeader = mut.header || mut.colName || (mut.col ? `Column ${mut.col}` : 'Field');
+    let rowData = mut.rowData || {};
+
+    const tableKey = mut.tableKey || (this.db && typeof this.db.getTableKeyForSheet === 'function' ? this.db.getTableKeyForSheet(sheet) : sheet.toLowerCase().replace(/\s+/g, '_'));
+    const table = this.db && typeof this.db.getTable === 'function' ? this.db.getTable(tableKey) : null;
+
+    if (table && table.rows && mut.row && table.rows[mut.row - 2]) {
+      const rowObj = table.rows[mut.row - 2];
+      if (!employeeName) employeeName = rowObj['Employee Name'] || rowObj['Name'] || rowObj['Assigned To'] || rowObj['Worker'] || '';
+      if (!itemNumber) itemNumber = rowObj['Item #'] || rowObj['Serial #'] || rowObj['Glove'] || rowObj['Sleeve'] || rowObj['Blanket'] || rowObj['MACK'] || '';
+      if (!certName) certName = rowObj['Item Type'] || rowObj['Cert Type'] || rowObj['Type'] || '';
+      if ((!mut.header || mut.header.startsWith('Column ')) && table.headers && mut.col && table.headers[mut.col - 1]) {
+        fieldHeader = table.headers[mut.col - 1];
+      }
+    } else if (rowData && Object.keys(rowData).length > 0) {
+      if (!employeeName) employeeName = rowData['Employee Name'] || rowData['Name'] || rowData['Assigned To'] || '';
+      if (!itemNumber) itemNumber = rowData['Item #'] || rowData['Serial #'] || '';
+      if (!certName) certName = rowData['Item Type'] || rowData['Cert Type'] || '';
+    }
+
     if (mut.action === 'UPDATE_CELL') {
-      const sheet = mut.sheetName || 'Sheet';
-      const col = mut.colName || `Column ${mut.col}`;
       const row = mut.row;
-      const oldVal = mut.oldValue !== undefined && mut.oldValue !== null && String(mut.oldValue).trim() !== '' ? `"${mut.oldValue}"` : 'empty';
-      const newVal = mut.value !== undefined && mut.value !== null && String(mut.value).trim() !== '' ? `"${mut.value}"` : 'empty';
+      const oldVal = mut.oldValue !== undefined && mut.oldValue !== null && String(mut.oldValue).trim() !== '' ? `"${mut.oldValue}"` : '(Empty)';
+      const newVal = mut.value !== undefined && mut.value !== null && String(mut.value).trim() !== '' ? `"${mut.value}"` : '(Empty)';
       
+      let title = '';
+      let desc = '';
+
+      if (employeeName && certName) {
+        title = `👤 ${employeeName} — 📜 ${certName}`;
+        desc = `<span style="color: var(--text-muted); font-size: 11px;">${fieldHeader} (Row ${row}):</span> ${oldVal} → <strong style="color: #60a5fa;">${newVal}</strong>`;
+      } else if (employeeName) {
+        title = `👤 ${employeeName} • ${fieldHeader}`;
+        desc = `<span style="color: var(--text-muted); font-size: 11px;">Row ${row}:</span> ${oldVal} → <strong style="color: #60a5fa;">${newVal}</strong>`;
+      } else if (itemNumber) {
+        title = `🧤 Item #${itemNumber}${employeeName ? ` (${employeeName})` : ''} • ${fieldHeader}`;
+        desc = `<span style="color: var(--text-muted); font-size: 11px;">Row ${row}:</span> ${oldVal} → <strong style="color: #60a5fa;">${newVal}</strong>`;
+      } else {
+        title = `Row ${row} • ${fieldHeader}`;
+        desc = `${oldVal} → <strong style="color: #60a5fa;">${newVal}</strong>`;
+      }
+
       return {
         icon: '✏️',
         sheet: sheet,
-        title: `Row ${row} • ${col}`,
-        desc: `${oldVal} → <strong style="color: #60a5fa;">${newVal}</strong>`,
+        title: title,
+        desc: desc,
+        time: timeStr
+      };
+    }
+
+    if (mut.action === 'ADD_ROW') {
+      let title = 'Add New Record';
+      let desc = '';
+
+      if (employeeName && certName) {
+        const expDate = rowData['Expiration Date'] || rowData['Date Acquired'] || mut.value || '';
+        title = `✨ New Cert: 👤 ${employeeName} — 📜 ${certName}`;
+        desc = `Date: <strong style="color: #34d399;">${expDate || 'N/A'}</strong> • Loc: ${rowData['Location'] || 'Helena'}`;
+      } else if (itemNumber) {
+        title = `✨ New Item: #${itemNumber}`;
+        desc = `Status: ${rowData['Status'] || 'In Stock'} • Loc: ${rowData['Location'] || 'Helena'}`;
+      } else if (employeeName) {
+        title = `✨ New Employee: 👤 ${employeeName}`;
+        desc = `Job: ${rowData['Job Number'] || 'N/A'} • Loc: ${rowData['Location'] || 'Helena'}`;
+      } else {
+        title = `✨ Added Row to ${sheet}`;
+        desc = Object.entries(rowData).slice(0, 3).map(([k, v]) => `${k}: <strong>${v}</strong>`).join(' • ');
+      }
+
+      return {
+        icon: '➕',
+        sheet: sheet,
+        title: title,
+        desc: desc,
         time: timeStr
       };
     }
@@ -615,22 +683,47 @@ class SyncEngine {
 
     conflicts.forEach((conf, idx) => {
       const sheetName = conf.sheetName || 'Sheet';
-      const fieldName = conf.header || conf.field || `Col ${conf.col}`;
-      const itemTitle = conf.itemIdentifier ? `Item ${conf.itemIdentifier}` : `Row ${conf.row}`;
+
+      // Look up local db row to get rich contextual info (Employee name, cert type, item number)
+      const tableKey = this.db && typeof this.db.getTableKeyForSheet === 'function' ? this.db.getTableKeyForSheet(sheetName) : sheetName.toLowerCase().replace(/\s+/g, '_');
+      const table = this.db && typeof this.db.getTable === 'function' ? this.db.getTable(tableKey) : null;
+      let rowObj = (table && table.rows && conf.row && table.rows[conf.row - 2]) ? table.rows[conf.row - 2] : {};
+
+      let employeeName = conf.employeeName || rowObj['Employee Name'] || rowObj['Name'] || rowObj['Assigned To'] || rowObj['Worker'] || '';
+      let certName = conf.certName || conf.itemType || rowObj['Item Type'] || rowObj['Cert Type'] || rowObj['Type'] || '';
+      let itemNumber = conf.itemNumber || conf.itemIdentifier || rowObj['Item #'] || rowObj['Serial #'] || rowObj['Glove'] || rowObj['Sleeve'] || '';
+      let fieldName = conf.header || conf.field || (table && table.headers && conf.col ? table.headers[conf.col - 1] : '') || `Column ${conf.col}`;
+
+      let itemTitle = '';
+      if (employeeName && certName) {
+        itemTitle = `👤 ${employeeName} — 📜 ${certName}`;
+      } else if (employeeName) {
+        itemTitle = `👤 ${employeeName}`;
+      } else if (itemNumber) {
+        itemTitle = `🧤 Item #${itemNumber}${employeeName ? ` (${employeeName})` : ''}`;
+      } else {
+        itemTitle = conf.itemIdentifier ? `Item ${conf.itemIdentifier}` : `Row ${conf.row}`;
+      }
+
       const expectedVal = conf.expectedValue !== undefined && String(conf.expectedValue).trim() !== '' ? conf.expectedValue : '(Empty)';
       const localVal = conf.localValue !== undefined && String(conf.localValue).trim() !== '' ? conf.localValue : '(Empty)';
       const serverVal = conf.serverValue !== undefined && String(conf.serverValue).trim() !== '' ? conf.serverValue : '(Empty)';
 
       html += `
         <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 10px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <span class="brand-badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 11px;">
-                ${sheetName}
-              </span>
-              <span style="font-size: 13px; font-weight: 700; color: #f8fafc;">
-                ${itemTitle} • <span style="color: #cbd5e1;">${fieldName}</span>
-              </span>
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px; flex-wrap: wrap; gap: 6px;">
+            <div style="display: flex; flex-direction: column; gap: 3px;">
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <span class="brand-badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 11px;">
+                  ${sheetName}
+                </span>
+                <span style="font-size: 13.5px; font-weight: 700; color: #f8fafc;">
+                  ${itemTitle}
+                </span>
+              </div>
+              <div style="font-size: 11.5px; color: #94a3b8; margin-left: 2px;">
+                Field: <strong style="color: #60a5fa;">${fieldName}</strong> <span style="color: var(--text-muted); font-size: 10.5px;">(Row ${conf.row}, Col ${conf.col})</span>
+              </div>
             </div>
             <span style="font-size: 11px; color: var(--text-muted);">Original Base: <em>${expectedVal}</em></span>
           </div>

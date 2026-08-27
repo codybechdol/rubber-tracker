@@ -881,7 +881,10 @@ class CertsImportEngine {
                 col: 3, // Col C: Date Acquired
                 header: 'Date Acquired',
                 value: ch.newDate,
-                oldValue: oldVal
+                oldValue: oldVal,
+                employeeName: emp.employeeName,
+                certName: cKey,
+                itemType: cKey
               });
             }
           } else {
@@ -900,7 +903,10 @@ class CertsImportEngine {
                 col: 4, // Col D: Expiration Date
                 header: 'Expiration Date',
                 value: ch.newDate,
-                oldValue: oldVal
+                oldValue: oldVal,
+                employeeName: emp.employeeName,
+                certName: cKey,
+                itemType: cKey
               });
             }
           }
@@ -933,7 +939,10 @@ class CertsImportEngine {
               action: 'ADD_ROW',
               sheetName: 'Expiring Certs',
               tableKey: 'expiring_certs',
-              rowData: newRow
+              rowData: newRow,
+              employeeName: emp.employeeName,
+              certName: cKey,
+              itemType: cKey
             });
           }
 
