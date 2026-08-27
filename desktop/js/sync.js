@@ -500,8 +500,8 @@ class SyncEngine {
 
       while (i < totalCount) {
         batchNum++;
-        // 25 changes per chunk runs in ~1-2 seconds on formula-free plain database sheets
-        const chunkSize = 25;
+        // 1 change per request for 100% steady, reliable execution
+        const chunkSize = 1;
         const chunk = currentOutbox.slice(i, i + chunkSize);
         const isLastChunk = (i + chunk.length >= totalCount);
 
