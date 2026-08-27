@@ -206,6 +206,9 @@
             <span class="brand-badge" id="expiring-certs-row-count">0 records</span>
           </div>
           <div style="display: flex; align-items: center; gap: 8px;">
+            <button class="btn btn-secondary" id="btn-ensure-all-certs" style="font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;" onclick="window.sheetNavigator.ensureAllEmployeeCertsExist()" title="Ensure all 16 standard certification rows exist for every active employee">
+              <span>➕</span> Ensure All 16 Certs
+            </button>
             <button class="btn btn-secondary" id="btn-cpr-roster-certs" style="font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;" onclick="window.cprRosterEngine.openCprRosterModal()" title="Generate and export Red Cross CPR & 1st Aid roster CSV">
               <span>🚑</span> Red Cross CPR CSV
             </button>

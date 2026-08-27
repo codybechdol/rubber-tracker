@@ -162,12 +162,28 @@ class CertsImportEngine {
         const data = new Uint8Array(e.target.result);
         const workbook = XLSX.read(data, { type: 'array', cellDates: true });
         
-        // Pick first worksheet or one named Certs/Training if available
-        let sheetName = workbook.SheetNames[0];
-        const certSheetCandidate = workbook.SheetNames.find(s => s.toLowerCase().includes('cert') || s.toLowerCase().includes('matrix') || s.toLowerCase().includes('training'));
-        if (certSheetCandidate) sheetName = certSheetCandidate;
+        // Scan all sheets and select the one with the highest number of matched cert headers
+        let bestSheetName = workbook.SheetNames[0];
+        let maxCertScore = -1;
 
-        const worksheet = workbook.Sheets[sheetName];
+        for (const sName of workbook.SheetNames) {
+          const ws = workbook.Sheets[sName];
+          if (!ws || !ws['!ref']) continue;
+          const sampleGrid = this.extractGridFromWorksheet(ws, 15);
+          let sheetScore = 0;
+          sampleGrid.forEach(row => {
+            row.forEach(cell => {
+              const str = String(cell || '').toLowerCase().trim();
+              if (this.matchCertHeader(str)) sheetScore++;
+            });
+          });
+          if (sheetScore > maxCertScore) {
+            maxCertScore = sheetScore;
+            bestSheetName = sName;
+          }
+        }
+
+        const worksheet = workbook.Sheets[bestSheetName];
         const grid = this.extractGridFromWorksheet(worksheet);
 
         this.processRawSheetData(grid);
@@ -182,12 +198,13 @@ class CertsImportEngine {
   /**
    * Robust cell extraction handling SheetJS text, date objects, and Excel serial numbers.
    */
-  extractGridFromWorksheet(worksheet) {
+  extractGridFromWorksheet(worksheet, maxRows = Infinity) {
     if (!worksheet || !worksheet['!ref']) return [];
     const range = XLSX.utils.decode_range(worksheet['!ref']);
     const grid = [];
+    const endRow = Math.min(range.e.r, range.s.r + maxRows - 1);
 
-    for (let r = range.s.r; r <= range.e.r; r++) {
+    for (let r = range.s.r; r <= endRow; r++) {
       const row = [];
       let hasData = false;
 
@@ -235,7 +252,7 @@ class CertsImportEngine {
    */
   matchCertHeader(hClean) {
     if (!hClean) return null;
-    const clean = hClean.toLowerCase().trim();
+    const clean = hClean.toLowerCase().replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
 
     // Skip employee name, job, location columns
     if (['name', 'employee', 'first name', 'last name', 'worker', 'lineman', 'location', 'job', 'job #', 'job#', 'crew', 'city', 'hire date', 'status', 'title', 'trade', 'class'].includes(clean)) return null;
@@ -243,10 +260,10 @@ class CertsImportEngine {
     if (clean.includes('1st aid') || clean.includes('first aid') || clean === 'fa') return '1st Aid';
     if (clean === 'cpr' || clean.includes('cpr/aed') || clean.includes('cpr') || clean.includes('cardiopulmonary')) return 'CPR';
     if (clean === 'dl' || clean.includes("driver's license") || clean.includes('drivers license') || clean === 'driver' || clean === 'cdl') return 'DL';
-    if (clean.includes('medical') || clean.includes('med card') || clean.includes('mec') || clean.includes('dot')) return 'MEC Expiration';
+    if (clean === 'med' || clean.includes('med ') || clean.includes('medical') || clean.includes('med card') || clean.includes('mec') || clean.includes('dot')) return 'MEC Expiration';
     if (clean.includes('crane eval') || clean.includes('crane assessment') || clean.includes('crane evaluation')) return 'Crane Evaluation';
     if ((clean.includes('crane') && (clean.includes('cert') || clean.includes('ncco') || clean.includes('license'))) || clean === 'crane') return 'Crane Cert';
-    if (clean.includes('trench') || clean.includes('excavation')) return 'OSHA Trench Comp Person';
+    if (clean.includes('trench') || clean.includes('excavation') || clean.includes('comp person')) return 'OSHA Trench Comp Person';
     if (clean.includes('osha 1910') || clean.includes('osha 10') || clean.includes('osha 30') || clean.includes('osha') || clean.includes('et&d')) return 'OSHA 1910';
     if (clean.includes('bnsf')) return 'BNSF';
     if (clean.includes('msha')) return 'MSHA';

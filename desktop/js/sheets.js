@@ -475,6 +475,140 @@ class SheetNavigator {
     this.renderStandardTable(container, countBadge, tableData);
   }
 
+  /**
+   * Initializes all 16 company certification records for all active employees if missing in expiring_certs.
+   */
+  async ensureAllEmployeeCertsExist(silent = false) {
+    if (!this.db) this.db = window.localDB || window.safetyDB;
+    if (!this.db) return;
+
+    let certsTable = this.db.getTable('expiring_certs');
+    const empTable = this.db.getTable('employees');
+    if (!empTable || !empTable.rows) return;
+
+    const headers = ['Employee Name', 'Item Type', 'Date Acquired', 'Expiration Date', 'Location', 'Job #', 'Days Until Expiration', 'Status', 'SMS'];
+    if (!certsTable || !certsTable.rows) {
+      certsTable = { name: 'Expiring Certs', headers: headers, rows: [], rawGrid: [headers], rowCount: 0, _normalized: true };
+      if (this.db.snapshot && this.db.snapshot.tables) {
+        this.db.snapshot.tables['expiring_certs'] = certsTable;
+      }
+    }
+
+    const allCertTypes = [
+      'DL',
+      'MEC Expiration',
+      '1st Aid',
+      'CPR',
+      'Pole Top Rescue',
+      'Harassment Training',
+      'Crane Cert',
+      'Crane Evaluation',
+      'OSHA 1910',
+      'BNSF',
+      'MSHA',
+      'OSHA Trench Comp Person',
+      'Forklift',
+      'Forklift Operator Safety Training',
+      'Rigging & Signaling/Signalperson & Spotter Cert',
+      'EICA Basic Helicopter Line Construction Safety'
+    ];
+
+    const nonExpiringTypes = new Set([
+      'Crane Evaluation',
+      'OSHA 1910',
+      'BNSF',
+      'MSHA',
+      'OSHA Trench Comp Person',
+      'Forklift Operator Safety Training',
+      'EICA Basic Helicopter Line Construction Safety'
+    ]);
+
+    const normalizeCert = (c) => {
+      if (window.certsImportEngine && typeof window.certsImportEngine.normalizeCertKey === 'function') {
+        return window.certsImportEngine.normalizeCertKey(c);
+      }
+      return String(c || '').toLowerCase().trim();
+    };
+
+    // Build existing lookup set
+    const existingSet = new Set();
+    (certsTable.rows || []).forEach(r => {
+      const eName = String(r['Employee Name'] || r['Name'] || '').toLowerCase().trim();
+      const cType = normalizeCert(r['Item Type'] || r['Cert Type'] || r['Type'] || '');
+      if (eName && cType) existingSet.add(`${eName}_${cType}`);
+    });
+
+    let addedCount = 0;
+
+    for (const emp of empTable.rows) {
+      const empName = String(emp['Name'] || emp['Employee Name'] || '').trim();
+      if (!empName) continue;
+      const empLower = empName.toLowerCase().trim();
+      const loc = emp['Location'] || 'Helena';
+      const job = emp['Job Number'] || emp['Job #'] || '';
+
+      for (const cType of allCertTypes) {
+        const cTypeNorm = normalizeCert(cType);
+        const key = `${empLower}_${cTypeNorm}`;
+
+        if (!existingSet.has(key)) {
+          const isNonExp = nonExpiringTypes.has(cType);
+          const newRow = {
+            'Employee Name': empName,
+            'Item Type': cType,
+            'Date Acquired': '',
+            'Expiration Date': '',
+            'Location': loc,
+            'Job #': job,
+            'Days Until Expiration': '',
+            'Status': isNonExp ? 'OK' : 'MISSING',
+            'SMS': ''
+          };
+
+          certsTable.rows.push(newRow);
+          existingSet.add(key);
+
+          if (certsTable.rawGrid) {
+            const gridArr = headers.map(h => newRow[h] !== undefined ? newRow[h] : '');
+            certsTable.rawGrid.push(gridArr);
+            certsTable.maxRows = certsTable.rawGrid.length;
+          }
+
+          if (typeof this.db.addMutation === 'function') {
+            await this.db.addMutation({
+              action: 'ADD_ROW',
+              sheetName: 'Expiring Certs',
+              tableKey: 'expiring_certs',
+              rowData: newRow
+            });
+          }
+
+          addedCount++;
+        }
+      }
+    }
+
+    if (addedCount > 0) {
+      certsTable.rowCount = certsTable.rows.length;
+      if (typeof this.db.setSnapshot === 'function' && this.db.snapshot) {
+        await this.db.setSnapshot(this.db.snapshot);
+      } else if (window.desktopAPI) {
+        await window.desktopAPI.saveLocalSnapshot(this.db.snapshot);
+      }
+      this.renderExpiringCerts();
+      if (window.syncEngine && typeof window.syncEngine.renderOutboxBadge === 'function') {
+        window.syncEngine.renderOutboxBadge();
+      }
+      if (!silent) {
+        alert(`🎉 Initialized ${addedCount} missing certification record(s) across all active employees!\n\nAll 16 standard certification types are now present and ready to track.`);
+      }
+    } else {
+      if (!silent) {
+        alert('✅ All active employees already have all 16 certification types in the system.');
+      }
+    }
+  }
+
   renderTraining() {
     this.currentSheetKey = 'training_tracking';
     const container = document.getElementById('training-grid-container');
