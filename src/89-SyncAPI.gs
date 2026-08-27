@@ -438,6 +438,17 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
         message: 'Detected ' + conflicts.length + ' simultaneous edit conflict(s) with Google Sheets.'
       };
     }
+
+    if (options && options.checkConflictsOnly === true) {
+      return {
+        status: 'ok',
+        success: true,
+        conflict: false,
+        conflicts: [],
+        appliedCount: 0,
+        message: 'No conflicts detected across ' + mutations.length + ' offline mutations.'
+      };
+    }
   }
 
   var appliedCount = 0;

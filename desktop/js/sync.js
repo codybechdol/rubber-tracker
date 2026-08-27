@@ -392,6 +392,37 @@ class SyncEngine {
       }
     }, 200);
 
+    // 1. Pre-Flight Conflict Scan across the ENTIRE outbox upfront
+    if (options.force !== true && options.detectConflicts !== false && currentOutbox.length > 0) {
+      currentBatchText = `Checking for simultaneous edit conflicts (${currentOutbox.length} changes)...`;
+      const subTitleEl = document.getElementById('sync-modal-subtitle');
+      if (subTitleEl) subTitleEl.textContent = `${currentBatchText} (${this.formatDuration(Date.now() - pushStartTime)})`;
+      this.updateStatusUI('syncing', `Scanning for conflicts...`);
+
+      try {
+        const checkRes = await this.executeNetworkRequest(this.syncUrl, 'POST', {
+          action: 'checkConflicts',
+          mutations: currentOutbox,
+          detectConflicts: true,
+          checkConflictsOnly: true,
+          force: false,
+          skipPostProcessing: true,
+          returnSnapshot: false
+        });
+
+        if (checkRes && checkRes.conflict && Array.isArray(checkRes.conflicts) && checkRes.conflicts.length > 0) {
+          clearInterval(pushTimerInterval);
+          this.closeSyncModal();
+          this.updateStatusUI('pending', `⚠️ ${checkRes.conflicts.length} conflict(s) detected`);
+          this.openConflictModal(checkRes.conflicts, currentOutbox);
+          this.isSyncing = false;
+          return { success: false, conflict: true, conflicts: checkRes.conflicts };
+        }
+      } catch (checkErr) {
+        console.warn('Pre-flight conflict check error (continuing with chunked push):', checkErr);
+      }
+    }
+
     try {
       const totalCount = currentOutbox.length;
       let totalPushed = 0;
@@ -419,8 +450,8 @@ class SyncEngine {
           pushResult = await this.executeNetworkRequest(this.syncUrl, 'POST', {
             action: 'applyMutations',
             mutations: chunk,
-            detectConflicts: options.detectConflicts !== false,
-            force: options.force === true,
+            detectConflicts: false,
+            force: true,
             skipPostProcessing: !isLastChunk,
             returnSnapshot: false
           });
@@ -428,7 +459,7 @@ class SyncEngine {
           const encodedChunk = encodeURIComponent(JSON.stringify(chunk));
           if (encodedChunk.length < 1800) {
             console.warn('POST push failed, trying GET fallback:', pushErr);
-            const getUrl = `${this.syncUrl}?action=applyMutations&mutations=${encodedChunk}&detectConflicts=${options.detectConflicts !== false}&force=${options.force === true}&skipPostProcessing=${!isLastChunk}&returnSnapshot=false`;
+            const getUrl = `${this.syncUrl}?action=applyMutations&mutations=${encodedChunk}&detectConflicts=false&force=true&skipPostProcessing=${!isLastChunk}&returnSnapshot=false`;
             pushResult = await this.executeNetworkRequest(getUrl, 'GET');
           } else {
             throw pushErr;
@@ -437,7 +468,7 @@ class SyncEngine {
 
         lastPushResult = pushResult;
 
-        // 1. Handle Edit Conflicts
+        // 1. Handle Edit Conflicts (fallback)
         if (pushResult && pushResult.conflict && Array.isArray(pushResult.conflicts) && pushResult.conflicts.length > 0) {
           clearInterval(pushTimerInterval);
           this.closeSyncModal();
@@ -760,8 +791,8 @@ class SyncEngine {
       }
 
       if (resolvedOutbox.length > 0) {
-        // Re-push resolved mutations to Google Sheets
-        await this.pushChangesToGoogleSheets();
+        // Re-push resolved mutations to Google Sheets without re-triggering conflict modal
+        await this.pushChangesToGoogleSheets({ force: true, detectConflicts: false });
       } else {
         this.updateStatusUI('synced', `Synced (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
         alert('✅ All conflict resolutions applied! Your local data has been synchronized with Google Sheets.');

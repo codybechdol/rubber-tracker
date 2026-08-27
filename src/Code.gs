@@ -33020,7 +33020,7 @@ function doGet(e) {
 
       return ContentService.createTextOutput(JSON.stringify(result))
         .setMimeType(ContentService.MimeType.JSON);
-    } else if (action === 'applyMutations') {
+    } else if (action === 'applyMutations' || action === 'checkConflicts') {
       var mutationsStr = e.parameter.mutations || '[]';
       var mutations = [];
       try {
@@ -33031,8 +33031,14 @@ function doGet(e) {
       var returnSnap = e.parameter.returnSnapshot === 'true';
       var force = e.parameter.force === 'true';
       var detectConflicts = e.parameter.detectConflicts !== 'false';
+      var checkConflictsOnly = e.parameter.checkConflictsOnly === 'true' || action === 'checkConflicts';
       var skipPostProcessing = e.parameter.skipPostProcessing === 'true';
-      var result = applyBatchSyncMutations(mutations, returnSnap, { detectConflicts: detectConflicts, force: force, skipPostProcessing: skipPostProcessing });
+      var result = applyBatchSyncMutations(mutations, returnSnap, { 
+        detectConflicts: detectConflicts, 
+        checkConflictsOnly: checkConflictsOnly,
+        force: force, 
+        skipPostProcessing: skipPostProcessing 
+      });
       return ContentService.createTextOutput(JSON.stringify(result))
         .setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'getSafetyPdf') {
@@ -33076,10 +33082,11 @@ function doPost(e) {
     var payload = JSON.parse(rawBody);
     var action = payload.action || 'sync';
 
-    if (action === 'applyMutations' || action === 'sync') {
+    if (action === 'applyMutations' || action === 'sync' || action === 'checkConflicts') {
       var returnSnap = payload.returnSnapshot === true;
       var options = {
         detectConflicts: payload.detectConflicts !== false,
+        checkConflictsOnly: payload.checkConflictsOnly === true || action === 'checkConflicts',
         force: payload.force === true,
         skipPostProcessing: payload.skipPostProcessing === true
       };
