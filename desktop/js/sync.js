@@ -43,9 +43,9 @@ class SyncEngine {
       }
     }
 
-    // 2. Browser fetch fallback (with 90s timeout)
+    // 2. Browser fetch fallback (with 180s timeout)
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 90000);
+    const timeoutId = setTimeout(() => controller.abort(), 180000);
     try {
       const options = { method, redirect: 'follow', signal: controller.signal };
       if (method === 'POST' && body) {
@@ -66,7 +66,7 @@ class SyncEngine {
     } catch (fetchErr) {
       clearTimeout(timeoutId);
       if (fetchErr.name === 'AbortError') {
-        throw new Error('Sync network request timed out after 90 seconds.');
+        throw new Error('Sync network request timed out after 180 seconds.');
       }
       throw fetchErr;
     }
@@ -393,23 +393,26 @@ class SyncEngine {
     }, 200);
 
     try {
-      const CHUNK_SIZE = 5;
       const totalCount = currentOutbox.length;
       let totalPushed = 0;
       let lastPushResult = null;
+      let i = 0;
+      let batchNum = 0;
 
-      for (let i = 0; i < totalCount; i += CHUNK_SIZE) {
-        const chunk = currentOutbox.slice(i, i + CHUNK_SIZE);
-        const isLastChunk = (i + CHUNK_SIZE >= totalCount);
-        const batchNum = Math.floor(i / CHUNK_SIZE) + 1;
-        const totalBatches = Math.ceil(totalCount / CHUNK_SIZE);
+      while (i < totalCount) {
+        batchNum++;
+        // If current item is on Expiring Certs (1,000+ rows of formulas), use chunk size of 2 so Google server finishes in ~35s
+        const isExpiringCerts = String(currentOutbox[i]?.sheetName || '').toLowerCase().includes('cert');
+        const chunkSize = isExpiringCerts ? 2 : 15;
+        const chunk = currentOutbox.slice(i, i + chunkSize);
+        const isLastChunk = (i + chunk.length >= totalCount);
 
-        currentBatchText = `Pushing batch ${batchNum}/${totalBatches} (${Math.min(i + chunk.length, totalCount)}/${totalCount} changes)...`;
+        currentBatchText = `Pushing batch ${batchNum} (${Math.min(i + chunk.length, totalCount)}/${totalCount} changes)...`;
         const subTitleEl = document.getElementById('sync-modal-subtitle');
         if (subTitleEl) {
           subTitleEl.textContent = `${currentBatchText} (${this.formatDuration(Date.now() - pushStartTime)})`;
         }
-        this.updateStatusUI('syncing', `Pushing batch ${batchNum}/${totalBatches} (${Math.min(i + chunk.length, totalCount)}/${totalCount})...`);
+        this.updateStatusUI('syncing', `Pushing batch ${batchNum} (${Math.min(i + chunk.length, totalCount)}/${totalCount})...`);
 
         let pushResult = null;
         try {
@@ -465,6 +468,7 @@ class SyncEngine {
         await this.db.saveOutbox(remainingOutbox);
         this.renderOutboxBadge();
         totalPushed += chunk.length;
+        i += chunk.length;
       }
 
       clearInterval(pushTimerInterval);
