@@ -14,12 +14,12 @@ class CertsImportEngine {
     this.fileName = '';
     this.preserveNewerDates = true;
 
-    // Supported certification types definition lookup
+    // Supported certification types definition lookup (exact Google Sheets keys)
     this.certDefinitions = {
-      'First Aid': { key: 'First Aid', label: 'First Aid / 1st Aid', nonExpiring: false },
+      '1st Aid': { key: '1st Aid', label: '1st Aid / First Aid', nonExpiring: false },
       'CPR': { key: 'CPR', label: 'CPR / AED', nonExpiring: false },
       'DL': { key: 'DL', label: "Driver's License (DL)", nonExpiring: false },
-      'Medical Card': { key: 'Medical Card', label: 'Medical Card (DOT)', nonExpiring: false },
+      'MEC Expiration': { key: 'MEC Expiration', label: 'MEC Expiration (Medical Card)', nonExpiring: false },
       'Crane Cert': { key: 'Crane Cert', label: 'Crane Certification', nonExpiring: false },
       'Crane Evaluation': { key: 'Crane Evaluation', label: 'Crane Evaluation', nonExpiring: true, isIssuedDate: true },
       'OSHA 1910': { key: 'OSHA 1910', label: 'OSHA 1910 / 10 / 30', nonExpiring: true, isIssuedDate: true },
@@ -28,12 +28,38 @@ class CertsImportEngine {
       'OSHA Trench Comp Person': { key: 'OSHA Trench Comp Person', label: 'OSHA Trench Competent Person', nonExpiring: true, isIssuedDate: true },
       'Forklift': { key: 'Forklift', label: 'Forklift Certification', nonExpiring: false },
       'Forklift Operator Safety Training': { key: 'Forklift Operator Safety Training', label: 'Forklift Safety Training', nonExpiring: true, isIssuedDate: true },
-      'Rigging & Signaling': { key: 'Rigging & Signaling', label: 'Rigging & Signaling', nonExpiring: false },
+      'Rigging & Signaling/Signalperson & Spotter Cert': { key: 'Rigging & Signaling/Signalperson & Spotter Cert', label: 'Rigging & Signaling', nonExpiring: false },
       'Harassment Training': { key: 'Harassment Training', label: 'Harassment Prevention', nonExpiring: false },
       'EICA Basic Helicopter Line Construction Safety': { key: 'EICA Basic Helicopter Line Construction Safety', label: 'EICA Basic Helicopter Safety', nonExpiring: true, isIssuedDate: true },
       'Pole Top Rescue': { key: 'Pole Top Rescue', label: 'Pole Top Rescue', nonExpiring: false },
       'Dig Safe': { key: 'Dig Safe', label: 'Dig Safe / 811', nonExpiring: false }
     };
+  }
+
+  /**
+   * Normalizes any cert string for comparison (handling aliases like "First Aid" vs "1st Aid").
+   */
+  normalizeCertKey(cType) {
+    if (!cType) return '';
+    const clean = String(cType).toLowerCase().trim();
+    if (clean.includes('1st aid') || clean.includes('first aid') || clean === 'fa') return '1st aid';
+    if (clean.includes('medical') || clean.includes('med card') || clean.includes('mec') || clean.includes('dot')) return 'mec expiration';
+    if (clean.includes('rigging') || clean.includes('rigger') || clean.includes('signalperson') || clean.includes('spotter')) return 'rigging & signaling/signalperson & spotter cert';
+    if (clean.includes('helo') || clean.includes('helicopter') || clean.includes('eica')) return 'eica basic helicopter line construction safety';
+    if (clean.includes('crane eval') || clean.includes('crane evaluation')) return 'crane evaluation';
+    if (clean.includes('crane')) return 'crane cert';
+    if (clean.includes('forklift') && (clean.includes('safety') || clean.includes('operator') || clean.includes('training') || clean.includes('eval'))) return 'forklift operator safety training';
+    if (clean.includes('forklift') || clean === 'pit') return 'forklift';
+    if (clean.includes('trench') || clean.includes('excavation')) return 'osha trench comp person';
+    if (clean.includes('osha 1910') || clean.includes('osha 10') || clean.includes('osha 30') || clean.includes('osha') || clean.includes('et&d')) return 'osha 1910';
+    if (clean.includes('bnsf')) return 'bnsf';
+    if (clean.includes('msha')) return 'msha';
+    if (clean.includes('pole top') || clean.includes('poletop') || clean.includes('bucket rescue')) return 'pole top rescue';
+    if (clean.includes('harassment')) return 'harassment training';
+    if (clean.includes('dig safe') || clean.includes('digsafe') || clean.includes('811')) return 'dig safe';
+    if (clean === 'dl' || clean.includes('driver') || clean === 'cdl') return 'dl';
+    if (clean === 'cpr' || clean.includes('cpr')) return 'cpr';
+    return clean;
   }
 
   /**
@@ -212,12 +238,12 @@ class CertsImportEngine {
     const clean = hClean.toLowerCase().trim();
 
     // Skip employee name, job, location columns
-    if (['name', 'employee', 'first name', 'last name', 'worker', 'lineman', 'location', 'job', 'job #', 'job#', 'crew', 'city'].includes(clean)) return null;
+    if (['name', 'employee', 'first name', 'last name', 'worker', 'lineman', 'location', 'job', 'job #', 'job#', 'crew', 'city', 'hire date', 'status', 'title', 'trade', 'class'].includes(clean)) return null;
 
-    if (clean.includes('1st aid') || clean.includes('first aid') || clean === 'fa') return 'First Aid';
+    if (clean.includes('1st aid') || clean.includes('first aid') || clean === 'fa') return '1st Aid';
     if (clean === 'cpr' || clean.includes('cpr/aed') || clean.includes('cpr') || clean.includes('cardiopulmonary')) return 'CPR';
     if (clean === 'dl' || clean.includes("driver's license") || clean.includes('drivers license') || clean === 'driver' || clean === 'cdl') return 'DL';
-    if (clean.includes('medical') || clean.includes('med card') || clean.includes('mec') || clean === 'dot' || clean.includes('dot card') || clean.includes('dot physical')) return 'Medical Card';
+    if (clean.includes('medical') || clean.includes('med card') || clean.includes('mec') || clean.includes('dot')) return 'MEC Expiration';
     if (clean.includes('crane eval') || clean.includes('crane assessment') || clean.includes('crane evaluation')) return 'Crane Evaluation';
     if ((clean.includes('crane') && (clean.includes('cert') || clean.includes('ncco') || clean.includes('license'))) || clean === 'crane') return 'Crane Cert';
     if (clean.includes('trench') || clean.includes('excavation')) return 'OSHA Trench Comp Person';
@@ -226,7 +252,7 @@ class CertsImportEngine {
     if (clean.includes('msha')) return 'MSHA';
     if (clean.includes('forklift') && (clean.includes('safety') || clean.includes('training') || clean.includes('operator') || clean.includes('eval'))) return 'Forklift Operator Safety Training';
     if (clean.includes('forklift') || clean === 'pit') return 'Forklift';
-    if (clean.includes('rigging') || clean.includes('rigger') || clean.includes('signalperson') || clean.includes('spotter')) return 'Rigging & Signaling';
+    if (clean.includes('rigging') || clean.includes('rigger') || clean.includes('signalperson') || clean.includes('spotter')) return 'Rigging & Signaling/Signalperson & Spotter Cert';
     if (clean.includes('harassment')) return 'Harassment Training';
     if (clean.includes('helo') || clean.includes('helicopter') || clean.includes('eica')) return 'EICA Basic Helicopter Line Construction Safety';
     if (clean.includes('pole top') || clean.includes('poletop') || clean.includes('bucket rescue')) return 'Pole Top Rescue';
@@ -294,14 +320,14 @@ class CertsImportEngine {
       dataRows = grid.slice(headerIdx + 1);
     } else {
       // Standard default company positional mapping:
-      // A(0)=Name, B(1)=Job#, C(2)=Location, D(3)=DL, E(4)=Medical Card, F(5)=1st Aid, G(6)=CPR, H(7)=Crane Cert, I(8)=Crane Eval...
+      // A(0)=Name, B(1)=Job#, C(2)=Location, D(3)=DL, E(4)=MEC Expiration, F(5)=1st Aid, G(6)=CPR, H(7)=Crane Cert, I(8)=Crane Eval...
       nameCol = 0;
       jobCol = 1;
       locCol = 2;
       const positionalList = [
         { col: 3, key: 'DL' },
-        { col: 4, key: 'Medical Card' },
-        { col: 5, key: 'First Aid' },
+        { col: 4, key: 'MEC Expiration' },
+        { col: 5, key: '1st Aid' },
         { col: 6, key: 'CPR' },
         { col: 7, key: 'Crane Cert' },
         { col: 8, key: 'Crane Evaluation' },
@@ -311,7 +337,7 @@ class CertsImportEngine {
         { col: 12, key: 'OSHA Trench Comp Person' },
         { col: 13, key: 'Forklift' },
         { col: 14, key: 'Forklift Operator Safety Training' },
-        { col: 15, key: 'Rigging & Signaling' },
+        { col: 15, key: 'Rigging & Signaling/Signalperson & Spotter Cert' },
         { col: 16, key: 'Harassment Training' },
         { col: 17, key: 'EICA Basic Helicopter Line Construction Safety' },
         { col: 18, key: 'Pole Top Rescue' }
@@ -340,11 +366,11 @@ class CertsImportEngine {
     const certsTable = this.db ? this.db.getTable('expiring_certs') : null;
     const existingCertRows = certsTable && certsTable.rows ? certsTable.rows : [];
     
-    // Map: "empNameLower_certTypeLower" -> rowObj
+    // Map: "empNameLower_certTypeNormalized" -> rowObj
     const existingCertMap = {};
     existingCertRows.forEach((r, rIdx) => {
       const eName = String(r['Employee Name'] || r['Name'] || '').toLowerCase().trim();
-      const cType = String(r['Item Type'] || r['Cert Type'] || r['Type'] || '').toLowerCase().trim();
+      const cType = this.normalizeCertKey(r['Item Type'] || r['Cert Type'] || r['Type'] || '');
       if (eName && cType) {
         existingCertMap[`${eName}_${cType}`] = { row: r, index: rIdx };
       }
@@ -395,7 +421,7 @@ class CertsImportEngine {
         const dateStr = this.formatDateStr(cellVal);
         if (!dateStr) return;
 
-        const lookupKey = `${finalEmpName.toLowerCase()}_${certDef.key.toLowerCase()}`;
+        const lookupKey = `${finalEmpName.toLowerCase()}_${this.normalizeCertKey(certDef.key)}`;
         const existingEntry = existingCertMap[lookupKey];
         const existingRow = existingEntry ? existingEntry.row : null;
 
@@ -457,6 +483,49 @@ class CertsImportEngine {
       }
     });
 
+    // Extract available cert types and counts
+    this.typeCountMap = {};
+    this.mappedData.forEach(m => {
+      Object.keys(m.changes).forEach(cKey => {
+        this.typeCountMap[cKey] = (this.typeCountMap[cKey] || 0) + 1;
+      });
+    });
+    this.availableImportCertTypes = Object.keys(this.typeCountMap).sort();
+    this.selectedImportCertTypes = new Set(this.availableImportCertTypes);
+    this.previewSearchTerm = '';
+
+    this.renderPreviewScreen();
+  }
+
+  /**
+   * Toggles a single certification type on/off for import.
+   */
+  toggleImportCertType(cKey, isChecked) {
+    if (isChecked) {
+      this.selectedImportCertTypes.add(cKey);
+    } else {
+      this.selectedImportCertTypes.delete(cKey);
+    }
+    this.renderPreviewScreen();
+  }
+
+  /**
+   * Selects all or none of the certification types for import.
+   */
+  selectAllImportCertTypes(select) {
+    if (select) {
+      this.selectedImportCertTypes = new Set(this.availableImportCertTypes);
+    } else {
+      this.selectedImportCertTypes.clear();
+    }
+    this.renderPreviewScreen();
+  }
+
+  /**
+   * Live filters preview table by employee name.
+   */
+  setPreviewSearch(val) {
+    this.previewSearchTerm = (val || '').toLowerCase().trim();
     this.renderPreviewScreen();
   }
 
@@ -553,19 +622,50 @@ class CertsImportEngine {
     const footer = document.getElementById('certs-import-modal-footer');
     if (!body) return;
 
-    let totalUpdatedCerts = 0;
-    this.mappedData.forEach(m => { totalUpdatedCerts += Object.keys(m.changes).length; });
+    if (!this.selectedImportCertTypes) {
+      this.selectedImportCertTypes = new Set(this.availableImportCertTypes || []);
+    }
+
+    // Filter employees and changes according to search term and selected cert types
+    const filteredEmployees = [];
+    let selectedUpdatesCount = 0;
+
+    this.mappedData.forEach(emp => {
+      if (this.previewSearchTerm) {
+        const matchName = emp.employeeName.toLowerCase().includes(this.previewSearchTerm);
+        const matchLoc = (emp.location || '').toLowerCase().includes(this.previewSearchTerm);
+        if (!matchName && !matchLoc) return;
+      }
+
+      const matchingChanges = {};
+      Object.keys(emp.changes).forEach(cKey => {
+        if (this.selectedImportCertTypes.has(cKey)) {
+          matchingChanges[cKey] = emp.changes[cKey];
+          selectedUpdatesCount++;
+        }
+      });
+
+      if (Object.keys(matchingChanges).length > 0) {
+        filteredEmployees.push({
+          employeeName: emp.employeeName,
+          location: emp.location,
+          jobNum: emp.jobNum,
+          changes: matchingChanges
+        });
+      }
+    });
 
     body.innerHTML = `
-      <div style="display: flex; flex-direction: column; gap: 14px;">
-        <!-- Summary Stats -->
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        
+        <!-- Summary Banner -->
         <div style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(5, 150, 105, 0.05) 100%); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 12px 18px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
           <div>
             <div style="font-size: 14px; font-weight: 800; color: #6ee7b7; display: flex; align-items: center; gap: 8px;">
-              <span>✅</span> Ready to Import from <code>${this.escapeHtml(this.fileName)}</code>
+              <span>✅</span> Import Preview: <code>${this.escapeHtml(this.fileName)}</code>
             </div>
             <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
-              Found <strong>${this.mappedData.length}</strong> employee(s) with <strong>${totalUpdatedCerts}</strong> new or updated certification date(s).
+              Detected <strong>${this.mappedData.length}</strong> employee(s) with <strong>${selectedUpdatesCount}</strong> selected update(s) across <strong>${(this.availableImportCertTypes || []).length}</strong> certification types.
             </div>
           </div>
           <button class="btn btn-secondary" onclick="window.certsImportEngine.renderUploadView()" style="font-size: 11.5px;">
@@ -573,34 +673,69 @@ class CertsImportEngine {
           </button>
         </div>
 
+        <!-- Interactive Cert Types Selector Bar -->
+        ${(this.availableImportCertTypes && this.availableImportCertTypes.length > 0) ? `
+          <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+              <span style="font-size: 12px; font-weight: 700; color: #93c5fd; display: flex; align-items: center; gap: 6px;">
+                <span>📜</span> Select Certification Types to Import:
+              </span>
+              <div style="display: flex; gap: 6px;">
+                <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px;" onclick="window.certsImportEngine.selectAllImportCertTypes(true)">Select All</button>
+                <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px;" onclick="window.certsImportEngine.selectAllImportCertTypes(false)">Deselect All</button>
+              </div>
+            </div>
+            
+            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+              ${this.availableImportCertTypes.map(cKey => {
+                const isChecked = this.selectedImportCertTypes.has(cKey);
+                const count = (this.typeCountMap && this.typeCountMap[cKey]) || 0;
+                return `
+                  <label style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: ${isChecked ? 'rgba(59, 130, 246, 0.18)' : 'rgba(255,255,255,0.04)'}; border: 1px solid ${isChecked ? '#3b82f6' : 'var(--border-color)'}; border-radius: 6px; font-size: 11.5px; color: ${isChecked ? '#93c5fd' : 'var(--text-muted)'}; cursor: pointer; user-select: none;">
+                    <input type="checkbox" ${isChecked ? 'checked' : ''} style="accent-color: #3b82f6;" onchange="window.certsImportEngine.toggleImportCertType('${this.escapeHtml(cKey)}', this.checked)">
+                    <span style="font-weight: 600;">${this.escapeHtml(cKey)}</span>
+                    <span style="background: rgba(0,0,0,0.3); padding: 1px 5px; border-radius: 4px; font-size: 10px; font-weight: 700;">${count}</span>
+                  </label>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        ` : ''}
+
+        <!-- Search Bar -->
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+          <input type="text" placeholder="🔍 Search employee name or location..." value="${this.escapeHtml(this.previewSearchTerm)}" style="width: 100%; max-width: 320px; padding: 6px 12px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);" oninput="window.certsImportEngine.setPreviewSearch(this.value)">
+          <div style="font-size: 12px; color: var(--text-muted);">Showing <strong>${filteredEmployees.length}</strong> employee(s)</div>
+        </div>
+
         <!-- Diff Preview Table -->
-        <div style="max-height: 440px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-primary);">
+        <div style="max-height: 380px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-primary);">
           <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 12px;">
             <thead>
               <tr style="position: sticky; top: 0; background: #1e293b; z-index: 5; border-bottom: 2px solid #334155;">
-                <th style="width: 220px; padding: 10px 12px;">Employee</th>
-                <th style="padding: 10px 12px;">Certification Type</th>
-                <th style="width: 130px; padding: 10px 12px;">Current Date</th>
-                <th style="width: 30px; text-align: center; padding: 10px 4px;">→</th>
-                <th style="width: 130px; padding: 10px 12px;">New Date</th>
-                <th style="width: 100px; text-align: center; padding: 10px 12px;">Action</th>
+                <th style="width: 200px; padding: 8px 12px;">Employee</th>
+                <th style="padding: 8px 12px;">Certification Type</th>
+                <th style="width: 120px; padding: 8px 12px;">Current Date</th>
+                <th style="width: 30px; text-align: center; padding: 8px 4px;">→</th>
+                <th style="width: 120px; padding: 8px 12px;">New Date</th>
+                <th style="width: 90px; text-align: center; padding: 8px 12px;">Action</th>
               </tr>
             </thead>
             <tbody>
-              ${this.mappedData.length === 0 ? `
-                <tr><td colspan="6" style="padding: 36px 16px; text-align: center; color: var(--text-muted);">No new date changes detected in this file. All certifications are up to date.</td></tr>
-              ` : this.mappedData.map(emp => {
+              ${filteredEmployees.length === 0 ? `
+                <tr><td colspan="6" style="padding: 36px 16px; text-align: center; color: var(--text-muted);">No matching certification updates found. Check your filters above.</td></tr>
+              ` : filteredEmployees.map(emp => {
                 const changeKeys = Object.keys(emp.changes);
                 return changeKeys.map((cKey, idx) => {
                   const ch = emp.changes[cKey];
                   return `
                     <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                      ${idx === 0 ? `<td rowspan="${changeKeys.length}" style="font-weight: 700; color: #f8fafc; border-right: 1px solid var(--border-color); padding: 10px 12px; vertical-align: top;">${this.escapeHtml(emp.employeeName)}</td>` : ''}
-                      <td style="font-weight: 600; color: #93c5fd; padding: 10px 12px;">${this.escapeHtml(cKey)}</td>
-                      <td style="color: var(--text-muted); font-family: monospace; padding: 10px 12px;">${this.escapeHtml(ch.oldDate || '—')}</td>
-                      <td style="text-align: center; color: #34d399; font-weight: bold; padding: 10px 4px;">→</td>
-                      <td style="font-weight: 700; color: #34d399; font-family: monospace; padding: 10px 12px;">${this.escapeHtml(ch.newDate)}</td>
-                      <td style="text-align: center; padding: 10px 12px;">
+                      ${idx === 0 ? `<td rowspan="${changeKeys.length}" style="font-weight: 700; color: #f8fafc; border-right: 1px solid var(--border-color); padding: 8px 12px; vertical-align: top;">${this.escapeHtml(emp.employeeName)}</td>` : ''}
+                      <td style="font-weight: 600; color: #93c5fd; padding: 8px 12px;">${this.escapeHtml(cKey)}</td>
+                      <td style="color: var(--text-muted); font-family: monospace; padding: 8px 12px;">${this.escapeHtml(ch.oldDate || '—')}</td>
+                      <td style="text-align: center; color: #34d399; font-weight: bold; padding: 8px 4px;">→</td>
+                      <td style="font-weight: 700; color: #34d399; font-family: monospace; padding: 8px 12px;">${this.escapeHtml(ch.newDate)}</td>
+                      <td style="text-align: center; padding: 8px 12px;">
                         <span class="badge" style="background: ${ch.isNewRecord ? 'rgba(59, 130, 246, 0.2)' : 'rgba(16, 185, 129, 0.2)'}; color: ${ch.isNewRecord ? '#93c5fd' : '#6ee7b7'}; border: 1px solid ${ch.isNewRecord ? 'rgba(59, 130, 246, 0.4)' : 'rgba(16, 185, 129, 0.4)'}; font-size: 10.5px;">
                           ${ch.isNewRecord ? '✨ New' : '🔄 Update'}
                         </span>
@@ -618,8 +753,8 @@ class CertsImportEngine {
     if (footer) {
       footer.innerHTML = `
         <button class="btn btn-secondary" onclick="window.certsImportEngine.closeImportModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="window.certsImportEngine.confirmImport()" style="font-weight: 700; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);" ${this.mappedData.length === 0 ? 'disabled' : ''}>
-          <span>🚀</span> Apply & Save ${totalUpdatedCerts} Cert Updates
+        <button class="btn btn-primary" onclick="window.certsImportEngine.confirmImport()" style="font-weight: 700; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);" ${selectedUpdatesCount === 0 ? 'disabled' : ''}>
+          <span>🚀</span> Apply & Save ${selectedUpdatesCount} Cert Updates
         </button>
       `;
     }
@@ -647,14 +782,20 @@ class CertsImportEngine {
 
     for (const emp of this.mappedData) {
       for (const cKey of Object.keys(emp.changes)) {
+        // Only apply if user kept this cert type selected
+        if (this.selectedImportCertTypes && !this.selectedImportCertTypes.has(cKey)) {
+          continue;
+        }
+
         const ch = emp.changes[cKey];
         const certDef = ch.certDef;
 
-        // Check if row already exists in table
+        // Check if row already exists in table (using fuzzy/canonical key lookup)
+        const targetNormalized = this.normalizeCertKey(cKey);
         let targetRowIdx = certsTable.rows.findIndex(r => {
           const rEmp = String(r['Employee Name'] || r['Name'] || '').toLowerCase().trim();
-          const rType = String(r['Item Type'] || r['Cert Type'] || r['Type'] || '').toLowerCase().trim();
-          return rEmp === emp.employeeName.toLowerCase().trim() && rType === cKey.toLowerCase().trim();
+          const rType = this.normalizeCertKey(r['Item Type'] || r['Cert Type'] || r['Type'] || '');
+          return rEmp === emp.employeeName.toLowerCase().trim() && rType === targetNormalized;
         });
 
         if (targetRowIdx !== -1) {

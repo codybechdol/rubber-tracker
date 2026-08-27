@@ -13,6 +13,10 @@ class SheetNavigator {
     this.filterClass = 'all';
     this.filterLocation = 'all';
     this.filterStatus = 'all';
+    this.filterCertType = 'all';
+    this.filterCertEmployee = 'all';
+    this.filterCertStatus = 'all';
+    this.filterCertLocation = 'all';
     this.sheetList = [
       { key: 'employees', label: '👥 Employees', icon: '👤', isSwap: false },
       { key: 'job_tracking', label: '📋 Job Tracking', icon: '📋', isSwap: false },
@@ -62,6 +66,37 @@ class SheetNavigator {
     this.filterStatus = val;
     this.updateStatusPillUI();
     this.renderCurrentSheet();
+  }
+
+  setCertTypeFilter(val) {
+    this.filterCertType = val;
+    this.renderExpiringCerts();
+  }
+
+  setCertEmployeeFilter(val) {
+    this.filterCertEmployee = val;
+    this.renderExpiringCerts();
+  }
+
+  setCertStatusFilter(val) {
+    this.filterCertStatus = val;
+    this.renderExpiringCerts();
+  }
+
+  setCertLocationFilter(val) {
+    this.filterCertLocation = val;
+    this.renderExpiringCerts();
+  }
+
+  resetCertFilters() {
+    this.filterCertType = 'all';
+    this.filterCertEmployee = 'all';
+    this.filterCertStatus = 'all';
+    this.filterCertLocation = 'all';
+    this.searchTerm = '';
+    const sInput = document.getElementById('expiring-certs-search-input');
+    if (sInput) sInput.value = '';
+    this.renderExpiringCerts();
   }
 
   updateStatusPillUI() {
@@ -1198,6 +1233,65 @@ class SheetNavigator {
       }
     }
 
+    // Multi-criteria filtering for Expiring Certs
+    if (this.currentSheetKey === 'expiring_certs') {
+      // 1. Employee Filter
+      if (this.filterCertEmployee && this.filterCertEmployee !== 'all') {
+        const targetEmp = this.filterCertEmployee.toLowerCase().trim();
+        rows = rows.filter(r => {
+          const eName = String(r['Employee Name'] || r['Name'] || '').toLowerCase().trim();
+          return eName === targetEmp;
+        });
+      }
+
+      // 2. Certification Type Filter
+      if (this.filterCertType && this.filterCertType !== 'all') {
+        if (this.filterCertType === 'expiring_soon') {
+          rows = rows.filter(r => {
+            const stat = String(r['Status'] || '').toUpperCase().trim();
+            const days = parseFloat(r['Days Until Expiration'] || r['Days Until'] || '');
+            return stat === 'CRITICAL' || stat === 'WARNING' || stat === 'UPCOMING' || stat === 'EXPIRED' || (!isNaN(days) && days <= 90);
+          });
+        } else if (this.filterCertType === 'crane_all') {
+          rows = rows.filter(r => String(r['Item Type'] || '').toLowerCase().includes('crane'));
+        } else if (this.filterCertType === 'forklift_all') {
+          rows = rows.filter(r => String(r['Item Type'] || '').toLowerCase().includes('forklift'));
+        } else if (this.filterCertType === 'osha_all') {
+          rows = rows.filter(r => {
+            const t = String(r['Item Type'] || '').toLowerCase();
+            return t.includes('osha') || t.includes('trench') || t.includes('bnsf') || t.includes('msha');
+          });
+        } else {
+          const targetType = this.filterCertType.toLowerCase().trim();
+          rows = rows.filter(r => {
+            const cType = String(r['Item Type'] || r['Cert Type'] || r['Type'] || '').toLowerCase().trim();
+            return cType === targetType || cType.includes(targetType);
+          });
+        }
+      }
+
+      // 3. Status Filter
+      if (this.filterCertStatus && this.filterCertStatus !== 'all') {
+        const targetStat = this.filterCertStatus.toUpperCase().trim();
+        rows = rows.filter(r => {
+          const stat = String(r['Status'] || '').toUpperCase().trim();
+          if (targetStat === 'EXPIRED') return stat === 'EXPIRED';
+          if (targetStat === 'CRITICAL') return stat === 'CRITICAL';
+          if (targetStat === 'WARNING') return stat === 'WARNING';
+          if (targetStat === 'UPCOMING') return stat === 'UPCOMING';
+          if (targetStat === 'OK') return stat === 'OK';
+          if (targetStat === 'MISSING') return stat === 'MISSING' || stat === 'NEED COPY' || !r['Expiration Date'];
+          return stat.includes(targetStat);
+        });
+      }
+
+      // 4. Location Filter
+      if (this.filterCertLocation && this.filterCertLocation !== 'all') {
+        const targetLoc = this.filterCertLocation.toLowerCase().trim();
+        rows = rows.filter(r => String(r['Location'] || '').toLowerCase().trim() === targetLoc);
+      }
+    }
+
     // Custom status ranking for Job Tracking, Inventory, Expiring Certs, Training
     const statusRank = {
       // Inventory / Jobs
@@ -1601,6 +1695,37 @@ class SheetNavigator {
         </div>
       `;
     } else if (this.currentSheetKey === 'expiring_certs') {
+      const allRows = tableData.rows || [];
+      const totalAll = allRows.length;
+      const okAll = allRows.filter(r => (String(r['Status'] || '').toUpperCase() === 'OK')).length;
+      const upAll = allRows.filter(r => (String(r['Status'] || '').toUpperCase() === 'UPCOMING')).length;
+      const warnAll = allRows.filter(r => (String(r['Status'] || '').toUpperCase() === 'WARNING')).length;
+      const critAll = allRows.filter(r => (String(r['Status'] || '').toUpperCase() === 'CRITICAL')).length;
+      const expAll = allRows.filter(r => (String(r['Status'] || '').toUpperCase() === 'EXPIRED')).length;
+      const missAll = allRows.filter(r => {
+        const s = String(r['Status'] || '').toUpperCase();
+        return s === 'MISSING' || s === 'NEED COPY' || !r['Expiration Date'];
+      }).length;
+
+      // Extract unique list of employees, cert types, and locations for interactive selectors
+      const empSet = new Set();
+      const typeSet = new Set();
+      const locSet = new Set();
+      allRows.forEach(r => {
+        const emp = String(r['Employee Name'] || r['Name'] || '').trim();
+        if (emp) empSet.add(emp);
+        const typ = String(r['Item Type'] || r['Cert Type'] || r['Type'] || '').trim();
+        if (typ) typeSet.add(typ);
+        const loc = String(r['Location'] || '').trim();
+        if (loc && loc !== 'N/A' && loc !== '—') locSet.add(loc);
+      });
+
+      const uniqueEmps = Array.from(empSet).sort((a, b) => a.localeCompare(b));
+      const uniqueTypes = Array.from(typeSet).sort((a, b) => a.localeCompare(b));
+      const uniqueLocs = Array.from(locSet).sort((a, b) => a.localeCompare(b));
+
+      const isFiltered = this.filterCertType !== 'all' || this.filterCertEmployee !== 'all' || this.filterCertStatus !== 'all' || this.filterCertLocation !== 'all' || Boolean(this.searchTerm);
+
       const isNameSorted = this.sortCol && (this.sortCol.toLowerCase().includes('name') || this.sortCol.toLowerCase().includes('employee'));
       const isCertSorted = this.sortCol && (this.sortCol.toLowerCase().includes('type') || this.sortCol.toLowerCase().includes('cert'));
       const isExpSorted = this.sortCol && this.sortCol.toLowerCase().includes('expiration');
@@ -1610,15 +1735,128 @@ class SheetNavigator {
       const isJobSorted = this.sortCol && (this.sortCol.toLowerCase().includes('job') || this.sortCol.toLowerCase().includes('crew'));
 
       presetBarHtml = `
-        <div style="padding: 8px 16px; background-color: var(--bg-secondary); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 6px; font-size: 12px; overflow-x: auto; flex-wrap: wrap;">
-          <span style="color: var(--text-muted); font-weight: 600; white-space: nowrap;">⚡ Quick Sort:</span>
-          <button class="btn btn-secondary ${isNameSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('name')">👤 Employee${dirArrow(isNameSorted)}</button>
-          <button class="btn btn-secondary ${isCertSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('type')">📜 Cert Type${dirArrow(isCertSorted)}</button>
-          <button class="btn btn-secondary ${isExpSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('changeOutDate')">📅 Expiration Date${dirArrow(isExpSorted)}</button>
-          <button class="btn btn-secondary ${isDaysSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('daysLeft')">⏳ Days Left${dirArrow(isDaysSorted)}</button>
-          <button class="btn btn-secondary ${isStatSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('status')">🏷️ Status${dirArrow(isStatSorted)}</button>
-          <button class="btn btn-secondary ${isLocSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('location')">📍 Location${dirArrow(isLocSorted)}</button>
-          <button class="btn btn-secondary ${isJobSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('jobNumber')">🔢 Job #${dirArrow(isJobSorted)}</button>
+        <div style="background: var(--bg-secondary); border-bottom: 1px solid var(--border-color);">
+          <!-- Top KPI Metrics Banner -->
+          <div style="padding: 8px 16px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(0,0,0,0.15);">
+            <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 4px 8px; display: flex; align-items: center; gap: 6px; cursor: pointer;" onclick="window.sheetNavigator.setCertStatusFilter('all')" title="Click to show all cert records">
+              <span style="font-size: 13px;">📜</span>
+              <div>
+                <div style="font-size: 9px; text-transform: uppercase; color: var(--text-muted); font-weight: 700;">Total</div>
+                <div style="font-size: 12px; font-weight: 800; color: #fff;">${totalAll}</div>
+              </div>
+            </div>
+            <div style="background: var(--bg-primary); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 6px; padding: 4px 8px; display: flex; align-items: center; gap: 6px; cursor: pointer;" onclick="window.sheetNavigator.setCertStatusFilter('OK')" title="Click to show valid OK certs">
+              <span style="font-size: 13px;">🟢</span>
+              <div>
+                <div style="font-size: 9px; text-transform: uppercase; color: #4ade80; font-weight: 700;">Valid OK</div>
+                <div style="font-size: 12px; font-weight: 800; color: #4ade80;">${okAll}</div>
+              </div>
+            </div>
+            <div style="background: var(--bg-primary); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; padding: 4px 8px; display: flex; align-items: center; gap: 6px; cursor: pointer;" onclick="window.sheetNavigator.setCertStatusFilter('UPCOMING')" title="Click to show certs expiring in &lt;90 days">
+              <span style="font-size: 13px;">🔵</span>
+              <div>
+                <div style="font-size: 9px; text-transform: uppercase; color: #60a5fa; font-weight: 700;">&lt;90 Days</div>
+                <div style="font-size: 12px; font-weight: 800; color: #60a5fa;">${upAll}</div>
+              </div>
+            </div>
+            <div style="background: var(--bg-primary); border: 1px solid rgba(234, 179, 8, 0.3); border-radius: 6px; padding: 4px 8px; display: flex; align-items: center; gap: 6px; cursor: pointer;" onclick="window.sheetNavigator.setCertStatusFilter('WARNING')" title="Click to show certs expiring in &lt;60 days">
+              <span style="font-size: 13px;">🟡</span>
+              <div>
+                <div style="font-size: 9px; text-transform: uppercase; color: #facc15; font-weight: 700;">&lt;60 Days</div>
+                <div style="font-size: 12px; font-weight: 800; color: #facc15;">${warnAll}</div>
+              </div>
+            </div>
+            <div style="background: var(--bg-primary); border: 1px solid rgba(249, 115, 22, 0.3); border-radius: 6px; padding: 4px 8px; display: flex; align-items: center; gap: 6px; cursor: pointer;" onclick="window.sheetNavigator.setCertStatusFilter('CRITICAL')" title="Click to show certs expiring in &lt;30 days">
+              <span style="font-size: 13px;">🟠</span>
+              <div>
+                <div style="font-size: 9px; text-transform: uppercase; color: #fb923c; font-weight: 700;">&lt;30 Days</div>
+                <div style="font-size: 12px; font-weight: 800; color: #fb923c;">${critAll}</div>
+              </div>
+            </div>
+            <div style="background: var(--bg-primary); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; padding: 4px 8px; display: flex; align-items: center; gap: 6px; cursor: pointer;" onclick="window.sheetNavigator.setCertStatusFilter('EXPIRED')" title="Click to show expired certs">
+              <span style="font-size: 13px;">🔴</span>
+              <div>
+                <div style="font-size: 9px; text-transform: uppercase; color: #f87171; font-weight: 700;">Expired</div>
+                <div style="font-size: 12px; font-weight: 800; color: #f87171;">${expAll}</div>
+              </div>
+            </div>
+            <div style="background: var(--bg-primary); border: 1px solid rgba(148, 163, 184, 0.3); border-radius: 6px; padding: 4px 8px; display: flex; align-items: center; gap: 6px; cursor: pointer;" onclick="window.sheetNavigator.setCertStatusFilter('MISSING')" title="Click to show missing/need copy certs">
+              <span style="font-size: 13px;">❌</span>
+              <div>
+                <div style="font-size: 9px; text-transform: uppercase; color: #cbd5e1; font-weight: 700;">Missing</div>
+                <div style="font-size: 12px; font-weight: 800; color: #cbd5e1;">${missAll}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Interactive Filter Selectors Row -->
+          <div style="padding: 8px 16px; display: flex; align-items: center; gap: 10px; font-size: 12px; flex-wrap: wrap; border-bottom: 1px solid rgba(255,255,255,0.05);">
+            
+            <!-- Cert Type Selector -->
+            <div style="display: flex; align-items: center; gap: 4px;">
+              <span style="color: var(--text-muted); font-weight: 600; white-space: nowrap;">📜 Cert Type:</span>
+              <select style="padding: 4px 8px; font-size: 11px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px;" onchange="window.sheetNavigator.setCertTypeFilter(this.value)">
+                <option value="all" ${this.filterCertType === 'all' ? 'selected' : ''}>🌟 All Certifications (${totalAll})</option>
+                <option value="expiring_soon" ${this.filterCertType === 'expiring_soon' ? 'selected' : ''}>🔔 Expiring Soon / Expired Only</option>
+                <option value="crane_all" ${this.filterCertType === 'crane_all' ? 'selected' : ''}>🏗️ All Crane (Cert & Eval)</option>
+                <option value="forklift_all" ${this.filterCertType === 'forklift_all' ? 'selected' : ''}>🚜 All Forklift (Cert & Safety)</option>
+                <option value="osha_all" ${this.filterCertType === 'osha_all' ? 'selected' : ''}>🛡️ OSHA & Rail/Mine Safety</option>
+                <optgroup label="Individual Certifications">
+                  ${uniqueTypes.map(t => `<option value="${this.escapeHtml(t)}" ${this.filterCertType === t ? 'selected' : ''}>${this.escapeHtml(t)}</option>`).join('')}
+                </optgroup>
+              </select>
+            </div>
+
+            <!-- Employee Selector -->
+            <div style="display: flex; align-items: center; gap: 4px;">
+              <span style="color: var(--text-muted); font-weight: 600; white-space: nowrap;">👤 Employee:</span>
+              <select style="padding: 4px 8px; font-size: 11px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; max-width: 180px;" onchange="window.sheetNavigator.setCertEmployeeFilter(this.value)">
+                <option value="all" ${this.filterCertEmployee === 'all' ? 'selected' : ''}>All Employees (${uniqueEmps.length})</option>
+                ${uniqueEmps.map(e => `<option value="${this.escapeHtml(e)}" ${this.filterCertEmployee.toLowerCase() === e.toLowerCase() ? 'selected' : ''}>${this.escapeHtml(e)}</option>`).join('')}
+              </select>
+            </div>
+
+            <!-- Status Selector -->
+            <div style="display: flex; align-items: center; gap: 4px;">
+              <span style="color: var(--text-muted); font-weight: 600; white-space: nowrap;">🏷️ Status:</span>
+              <select style="padding: 4px 8px; font-size: 11px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px;" onchange="window.sheetNavigator.setCertStatusFilter(this.value)">
+                <option value="all" ${this.filterCertStatus === 'all' ? 'selected' : ''}>All Statuses</option>
+                <option value="OK" ${this.filterCertStatus === 'OK' ? 'selected' : ''}>🟢 OK</option>
+                <option value="UPCOMING" ${this.filterCertStatus === 'UPCOMING' ? 'selected' : ''}>🔵 Upcoming (&lt;90d)</option>
+                <option value="WARNING" ${this.filterCertStatus === 'WARNING' ? 'selected' : ''}>🟡 Warning (&lt;60d)</option>
+                <option value="CRITICAL" ${this.filterCertStatus === 'CRITICAL' ? 'selected' : ''}>🟠 Critical (&lt;30d)</option>
+                <option value="EXPIRED" ${this.filterCertStatus === 'EXPIRED' ? 'selected' : ''}>🔴 Expired</option>
+                <option value="MISSING" ${this.filterCertStatus === 'MISSING' ? 'selected' : ''}>❌ Missing</option>
+              </select>
+            </div>
+
+            <!-- Location Selector -->
+            ${uniqueLocs.length > 0 ? `
+              <div style="display: flex; align-items: center; gap: 4px;">
+                <span style="color: var(--text-muted); font-weight: 600; white-space: nowrap;">📍 Location:</span>
+                <select style="padding: 4px 8px; font-size: 11px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px;" onchange="window.sheetNavigator.setCertLocationFilter(this.value)">
+                  <option value="all" ${this.filterCertLocation === 'all' ? 'selected' : ''}>All Locations (${uniqueLocs.length})</option>
+                  ${uniqueLocs.map(l => `<option value="${this.escapeHtml(l)}" ${this.filterCertLocation.toLowerCase() === l.toLowerCase() ? 'selected' : ''}>${this.escapeHtml(l)}</option>`).join('')}
+                </select>
+              </div>
+            ` : ''}
+
+            ${isFiltered ? `
+              <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px; color: #f87171;" onclick="window.sheetNavigator.resetCertFilters()">❌ Clear Filters</button>
+            ` : ''}
+          </div>
+
+          <!-- Quick Sort Row -->
+          <div style="padding: 6px 16px; display: flex; align-items: center; gap: 6px; font-size: 11px; overflow-x: auto; flex-wrap: wrap;">
+            <span style="color: var(--text-muted); font-weight: 600; white-space: nowrap;">⚡ Quick Sort:</span>
+            <button class="btn btn-secondary ${isNameSorted ? 'active' : ''}" style="padding: 2px 7px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('name')">👤 Employee${dirArrow(isNameSorted)}</button>
+            <button class="btn btn-secondary ${isCertSorted ? 'active' : ''}" style="padding: 2px 7px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('type')">📜 Cert Type${dirArrow(isCertSorted)}</button>
+            <button class="btn btn-secondary ${isExpSorted ? 'active' : ''}" style="padding: 2px 7px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('changeOutDate')">📅 Expiration Date${dirArrow(isExpSorted)}</button>
+            <button class="btn btn-secondary ${isDaysSorted ? 'active' : ''}" style="padding: 2px 7px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('daysLeft')">⏳ Days Left${dirArrow(isDaysSorted)}</button>
+            <button class="btn btn-secondary ${isStatSorted ? 'active' : ''}" style="padding: 2px 7px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('status')">🏷️ Status${dirArrow(isStatSorted)}</button>
+            <button class="btn btn-secondary ${isLocSorted ? 'active' : ''}" style="padding: 2px 7px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('location')">📍 Location${dirArrow(isLocSorted)}</button>
+            <button class="btn btn-secondary ${isJobSorted ? 'active' : ''}" style="padding: 2px 7px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('jobNumber')">🔢 Job #${dirArrow(isJobSorted)}</button>
+          </div>
         </div>
       `;
     } else if (this.currentSheetKey === 'training_tracking') {
