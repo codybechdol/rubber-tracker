@@ -401,7 +401,7 @@ class SyncEngine {
 
       try {
         const checkRes = await this.executeNetworkRequest(this.syncUrl, 'POST', {
-          action: 'checkConflicts',
+          action: 'applyMutations',
           mutations: currentOutbox,
           detectConflicts: true,
           checkConflictsOnly: true,
