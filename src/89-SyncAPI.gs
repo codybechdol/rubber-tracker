@@ -304,19 +304,25 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
     return s.toLowerCase();
   }
 
+  var sheetObjectMap = null;
   function getSheetCaseInsensitive(name) {
     if (!name || !ss) return null;
-    var exact = ss.getSheetByName(name);
-    if (exact) return exact;
-    var nameLower = String(name).toLowerCase().trim().replace(/_/g, ' ');
-    var all = ss.getSheets();
-    for (var s = 0; s < all.length; s++) {
-      var sName = all[s].getName().toLowerCase().trim();
-      if (sName === nameLower || sName.replace(/_/g, ' ') === nameLower) {
-        return all[s];
+    if (!sheetObjectMap) {
+      sheetObjectMap = {};
+      var all = ss.getSheets();
+      for (var s = 0; s < all.length; s++) {
+        var sh = all[s];
+        var sName = sh.getName();
+        sheetObjectMap[sName] = sh;
+        sheetObjectMap[sName.toLowerCase().trim()] = sh;
+        sheetObjectMap[sName.toLowerCase().trim().replace(/_/g, ' ')] = sh;
       }
     }
-    return null;
+    var clean = String(name).trim();
+    if (sheetObjectMap[clean]) return sheetObjectMap[clean];
+    var cleanLower = clean.toLowerCase();
+    if (sheetObjectMap[cleanLower]) return sheetObjectMap[cleanLower];
+    return sheetObjectMap[cleanLower.replace(/_/g, ' ')] || null;
   }
 
   // In-memory lookup caches declared AT TOP of applyBatchSyncMutations

@@ -460,9 +460,9 @@ class SyncEngine {
       }
     }, 200);
 
-    // 1. Pre-Flight Conflict Scan across the ENTIRE outbox upfront
-    if (options.force !== true && options.detectConflicts !== false && currentOutbox.length > 0) {
-      currentBatchText = `Checking for simultaneous edit conflicts (${currentOutbox.length} changes)...`;
+    // 1. Pre-Flight Conflict Scan (only for small outboxes <= 15 items to prevent large payload timeouts)
+    if (options.force !== true && options.detectConflicts !== false && currentOutbox.length > 0 && currentOutbox.length <= 15) {
+      currentBatchText = `Checking for conflicts (${currentOutbox.length} change${currentOutbox.length === 1 ? '' : 's'})...`;
       const subTitleEl = document.getElementById('sync-modal-subtitle');
       if (subTitleEl) subTitleEl.textContent = `${currentBatchText} (${this.formatDuration(Date.now() - pushStartTime)})`;
       this.updateStatusUI('syncing', `Scanning for conflicts...`);
@@ -500,8 +500,8 @@ class SyncEngine {
 
       while (i < totalCount) {
         batchNum++;
-        // Fast batching (25 mutations per chunk completes ~600 changes in under 1-2 minutes)
-        const chunkSize = 25;
+        // 12 mutations per chunk finishes in ~2.5s per HTTP request, preventing any network timeouts
+        const chunkSize = 12;
         const chunk = currentOutbox.slice(i, i + chunkSize);
         const isLastChunk = (i + chunk.length >= totalCount);
 
