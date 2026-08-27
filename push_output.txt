@@ -1,1 +1,1 @@
-Script is already up to date.
+request to https://script.googleapis.com/v1/projects/12U9JReRFpWfYVAx7jLuK7n-RyIT2Gb28I_hBKzm-vsh1bgbxRZFN0Doq/content failed, reason: getaddrinfo ENOTFOUND script.googleapis.com
