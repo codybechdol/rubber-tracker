@@ -463,6 +463,8 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
   var appliedCount = 0;
   var errors = [];
   var sheetsModified = {};
+  var bulkSheetUpdates = {};
+  var bulkSheetAddRows = {};
 
   for (var m = 0; m < mutations.length; m++) {
     var mut = mutations[m];
@@ -516,9 +518,19 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
             } else if (valToWrite === 'False' || valToWrite === 'false') {
               valToWrite = false;
             }
-            sheet.getRange(targetRow, mut.col).setValue(valToWrite);
-            sheetsModified[sheetName] = true;
-            appliedCount++;
+
+            var isCertSheet = String(sheetName || '').toLowerCase().includes('cert');
+            if (isCertSheet) {
+              var sKey = sheet.getName();
+              if (!bulkSheetUpdates[sKey]) bulkSheetUpdates[sKey] = [];
+              bulkSheetUpdates[sKey].push({ row: targetRow, col: mut.col, val: valToWrite });
+              sheetsModified[sheetName] = true;
+              appliedCount++;
+            } else {
+              sheet.getRange(targetRow, mut.col).setValue(valToWrite);
+              sheetsModified[sheetName] = true;
+              appliedCount++;
+            }
 
             // Trigger Swap Stages when Picked checkbox or Date Changed is synced
             try {
@@ -1508,22 +1520,31 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
               return val;
             });
 
-            var newRowIdx = lastRow + 1;
-            if (sheet.getMaxRows() < newRowIdx) {
-              sheet.insertRowsAfter(sheet.getMaxRows(), Math.max(newRowIdx - sheet.getMaxRows(), 50));
-            }
-
-            try {
-              sheet.getRange(newRowIdx, 1, 1, rowArray.length).setValues([rowArray]);
-            } catch (wErr) {
-              if (typeof safeWriteRowToTable === 'function') {
-                safeWriteRowToTable(sheet, newRowIdx, rowArray, headers);
-              } else {
-                sheet.appendRow(rowArray);
+            var isCertSheet = String(sheetName || '').toLowerCase().includes('cert');
+            if (isCertSheet) {
+              var sKey = sheet.getName();
+              if (!bulkSheetAddRows[sKey]) bulkSheetAddRows[sKey] = [];
+              bulkSheetAddRows[sKey].push(rowArray);
+              sheetsModified[sheetName] = true;
+              appliedCount++;
+            } else {
+              var newRowIdx = lastRow + 1;
+              if (sheet.getMaxRows() < newRowIdx) {
+                sheet.insertRowsAfter(sheet.getMaxRows(), Math.max(newRowIdx - sheet.getMaxRows(), 50));
               }
+
+              try {
+                sheet.getRange(newRowIdx, 1, 1, rowArray.length).setValues([rowArray]);
+              } catch (wErr) {
+                if (typeof safeWriteRowToTable === 'function') {
+                  safeWriteRowToTable(sheet, newRowIdx, rowArray, headers);
+                } else {
+                  sheet.appendRow(rowArray);
+                }
+              }
+              sheetsModified[sheetName] = true;
+              appliedCount++;
             }
-            sheetsModified[sheetName] = true;
-            appliedCount++;
           }
           break;
 
@@ -1712,6 +1733,41 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
     } catch (mutErr) {
       Logger.log('applyBatchSyncMutations error on mutation ' + m + ': ' + mutErr);
       errors.push('Error on mutation ' + m + ': ' + mutErr.toString());
+    }
+  }
+
+  // 1. Commit all buffered bulk cell updates in 1 single setValues operation per sheet
+  for (var bSheetName in bulkSheetUpdates) {
+    var bSheet = getSheetCaseInsensitive(bSheetName);
+    var bUpdates = bulkSheetUpdates[bSheetName];
+    if (bSheet && bUpdates && bUpdates.length > 0 && bSheet.getLastRow() > 1) {
+      var dRange = bSheet.getDataRange();
+      var dVals = dRange.getValues();
+      for (var bu = 0; bu < bUpdates.length; bu++) {
+        var bUpd = bUpdates[bu];
+        if (bUpd.row <= dVals.length && bUpd.col <= dVals[0].length) {
+          var fVal = bUpd.val;
+          if (typeof fVal === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(fVal)) {
+            fVal = typeof parseDateNoon === 'function' ? parseDateNoon(fVal) : new Date(fVal);
+          }
+          dVals[bUpd.row - 1][bUpd.col - 1] = fVal;
+        }
+      }
+      dRange.setValues(dVals);
+    }
+  }
+
+  // 2. Commit all buffered bulk ADD_ROWs in 1 single setValues operation per sheet
+  for (var aSheetName in bulkSheetAddRows) {
+    var aSheet = getSheetCaseInsensitive(aSheetName);
+    var aRows = bulkSheetAddRows[aSheetName];
+    if (aSheet && aRows && aRows.length > 0) {
+      var startRow = aSheet.getLastRow() + 1;
+      var numCols = aRows[0].length;
+      if (aSheet.getMaxRows() < startRow + aRows.length - 1) {
+        aSheet.insertRowsAfter(aSheet.getMaxRows(), aRows.length + 50);
+      }
+      aSheet.getRange(startRow, 1, aRows.length, numCols).setValues(aRows);
     }
   }
 
