@@ -500,8 +500,8 @@ class SyncEngine {
 
       while (i < totalCount) {
         batchNum++;
-        // 15 mutations per chunk finishes in ~1-2s per HTTP request with bulk in-memory writes
-        const chunkSize = 15;
+        // Process 1 change per request for 100% reliability and steady progress
+        const chunkSize = 1;
         const chunk = currentOutbox.slice(i, i + chunkSize);
         const isLastChunk = (i + chunk.length >= totalCount);
 
