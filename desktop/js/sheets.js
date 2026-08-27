@@ -543,9 +543,21 @@ class SheetNavigator {
     for (const emp of empTable.rows) {
       const empName = String(emp['Name'] || emp['Employee Name'] || '').trim();
       if (!empName) continue;
+
+      const loc = String(emp['Location'] || 'Helena').trim();
+      const status = String(emp['Status'] || '').toLowerCase().trim();
+      const job = String(emp['Job Number'] || emp['Job #'] || '').trim();
+      const locLower = loc.toLowerCase();
+      const jobLower = job.toLowerCase();
+
+      // Skip previous/inactive employees
+      if (locLower === 'previous employee' || locLower.includes('previous') ||
+          status === 'previous employee' || status.includes('inactive') || status.includes('terminated') ||
+          jobLower.startsWith('002-') || jobLower.includes('previous')) {
+        continue;
+      }
+
       const empLower = empName.toLowerCase().trim();
-      const loc = emp['Location'] || 'Helena';
-      const job = emp['Job Number'] || emp['Job #'] || '';
 
       for (const cType of allCertTypes) {
         const cTypeNorm = normalizeCert(cType);

@@ -374,10 +374,29 @@ class CertsImportEngine {
 
     const employeesTable = this.db ? this.db.getTable('employees') : null;
     const empList = employeesTable && employeesTable.rows ? employeesTable.rows : [];
-    const empLookup = {};
+    
+    // Build lookup of ONLY current active employees (filtering out previous employees and inactive records)
+    const activeEmpLookup = {};
+    const activeEmpList = [];
+
     empList.forEach(e => {
-      const n = String(e['Name'] || e['Employee Name'] || '').toLowerCase().trim();
-      if (n) empLookup[n] = e;
+      const name = String(e['Name'] || e['Employee Name'] || '').trim();
+      if (!name) return;
+
+      const loc = String(e['Location'] || '').toLowerCase().trim();
+      const status = String(e['Status'] || '').toLowerCase().trim();
+      const job = String(e['Job Number'] || e['Job #'] || '').toLowerCase().trim();
+
+      // Filter out Previous Employee records
+      if (loc === 'previous employee' || loc.includes('previous') ||
+          status === 'previous employee' || status.includes('inactive') || status.includes('terminated') ||
+          job.startsWith('002-') || job.includes('previous')) {
+        return;
+      }
+
+      const norm = name.toLowerCase().replace(/\s+/g, ' ').trim();
+      activeEmpLookup[norm] = e;
+      activeEmpList.push({ name: name, norm: norm, obj: e });
     });
 
     const certsTable = this.db ? this.db.getTable('expiring_certs') : null;
@@ -402,7 +421,7 @@ class CertsImportEngine {
 
       // Filter out repeat header rows or section dividers
       const rawLower = rawName.toLowerCase();
-      if (['name', 'employee', 'employee name', 'location', 'total', 'active', 'inactive', 'subtotal', 'department'].includes(rawLower)) return;
+      if (['name', 'employee', 'employee name', 'location', 'total', 'active', 'inactive', 'subtotal', 'department', 'previous employee', 'previous employees'].includes(rawLower)) return;
 
       // Convert "LastName, FirstName" -> "FirstName LastName"
       let formattedName = rawName;
@@ -411,17 +430,47 @@ class CertsImportEngine {
         if (parts.length >= 2) formattedName = `${parts[1]} ${parts[0]}`.trim();
       }
 
-      const normName = formattedName.toLowerCase();
+      const normName = formattedName.toLowerCase().replace(/\s+/g, ' ').trim();
 
-      // Find matched employee from DB (to resolve proper casing and location)
-      const matchedEmp = empLookup[normName] || Object.values(empLookup).find(e => {
-        const dbName = String(e['Name'] || e['Employee Name'] || '').toLowerCase().trim();
-        return dbName.includes(normName) || normName.includes(dbName);
-      });
+      // Find matched CURRENT ACTIVE employee from DB
+      let matchedEmp = activeEmpLookup[normName];
 
-      const finalEmpName = matchedEmp ? String(matchedEmp['Name'] || matchedEmp['Employee Name'] || formattedName).trim() : formattedName;
-      const empLocation = (locCol !== -1 && row[locCol]) ? String(row[locCol]).trim() : (matchedEmp ? (matchedEmp['Location'] || 'Helena') : 'Helena');
-      const empJobNum = (jobCol !== -1 && row[jobCol]) ? String(row[jobCol]).trim() : (matchedEmp ? (matchedEmp['Job Number'] || '') : '');
+      if (!matchedEmp) {
+        // Try reversed name: "LastName FirstName" -> "FirstName LastName"
+        const nameParts = normName.split(' ');
+        if (nameParts.length >= 2) {
+          const revName = `${nameParts[nameParts.length - 1]} ${nameParts.slice(0, -1).join(' ')}`;
+          matchedEmp = activeEmpLookup[revName];
+        }
+      }
+
+      if (!matchedEmp) {
+        // Fuzzy token matching (handles minor spelling differences like Aaron vs Aarron)
+        matchedEmp = activeEmpList.find(e => {
+          if (e.norm === normName || e.norm.includes(normName) || normName.includes(e.norm)) return true;
+          const eTokens = e.norm.split(' ');
+          const nTokens = normName.split(' ');
+          if (eTokens.length >= 2 && nTokens.length >= 2) {
+            const eLast = eTokens[eTokens.length - 1];
+            const nLast = nTokens[nTokens.length - 1];
+            const eFirst = eTokens[0];
+            const nFirst = nTokens[0];
+            if (eLast === nLast && (eFirst.startsWith(nFirst.slice(0, 3)) || nFirst.startsWith(eFirst.slice(0, 3)))) {
+              return true;
+            }
+          }
+          return false;
+        })?.obj;
+      }
+
+      // CRITICAL: If this person is NOT a current active employee on the Employees page, SKIP THEM!
+      if (!matchedEmp) {
+        return; // Exclude previous employees and non-company records
+      }
+
+      const finalEmpName = String(matchedEmp['Name'] || matchedEmp['Employee Name'] || formattedName).trim();
+      const empLocation = matchedEmp['Location'] || (locCol !== -1 && row[locCol] ? String(row[locCol]).trim() : 'Helena');
+      const empJobNum = matchedEmp['Job Number'] || (jobCol !== -1 && row[jobCol] ? String(row[jobCol]).trim() : '');
 
       // Check each cert column on this row
       const certChanges = {};
