@@ -273,7 +273,7 @@ class SyncEngine {
   closeSyncModal() {
     const modal = document.getElementById('sync-modal');
     if (modal) modal.classList.remove('active');
-    this.isSyncing = false;
+    // Does not cancel the background sync loop; user can continue working while push runs
   }
 
   renderModalChanges(outbox, statusMessage, statusType = 'syncing', allowClear = false) {
@@ -500,9 +500,8 @@ class SyncEngine {
 
       while (i < totalCount) {
         batchNum++;
-        // If current item is on Expiring Certs (1,000+ rows of formulas), use chunk size of 2 so Google server finishes in ~35s
-        const isExpiringCerts = String(currentOutbox[i]?.sheetName || '').toLowerCase().includes('cert');
-        const chunkSize = isExpiringCerts ? 2 : 15;
+        // Fast batching (25 mutations per chunk completes ~600 changes in under 1-2 minutes)
+        const chunkSize = 25;
         const chunk = currentOutbox.slice(i, i + chunkSize);
         const isLastChunk = (i + chunk.length >= totalCount);
 
@@ -562,9 +561,13 @@ class SyncEngine {
           return { success: false, errors: pushResult.errors };
         }
 
-        // 3. Update local outbox on disk immediately
-        const remainingOutbox = currentOutbox.slice(i + chunk.length);
-        await this.db.saveOutbox(remainingOutbox);
+        // 3. Remove ONLY the successfully pushed mutations by ID (safely preserves any new edits made while pushing)
+        const pushedIds = new Set(chunk.map(m => m.id).filter(Boolean));
+        const liveOutbox = this.db.getOutbox() || [];
+        const newRemaining = pushedIds.size > 0 
+          ? liveOutbox.filter(m => !pushedIds.has(m.id))
+          : liveOutbox.slice(chunk.length);
+        await this.db.saveOutbox(newRemaining);
         this.renderOutboxBadge();
         totalPushed += chunk.length;
         i += chunk.length;
@@ -575,10 +578,6 @@ class SyncEngine {
       const durationFormatted = this.formatDuration(totalElapsedMs);
       const durationSec = (totalElapsedMs / 1000).toFixed(1);
 
-      // Successfully pushed all chunks
-      await this.db.clearOutbox();
-      this.renderOutboxBadge();
-
       this.savePushTelemetry({
         timestamp: new Date().toISOString(),
         durationSeconds: parseFloat(durationSec),
@@ -587,13 +586,21 @@ class SyncEngine {
         status: 'SUCCESS'
       });
 
-      this.updateStatusUI('synced', `Synced in ${durationFormatted}`);
-      this.renderModalChanges([], `✅ Successfully pushed all ${totalCount} change(s) in ${durationFormatted}!`, 'success', false);
+      const finalRemaining = this.db.getOutbox() || [];
+      if (finalRemaining.length === 0) {
+        this.updateStatusUI('synced', `Synced in ${durationFormatted}`);
+        this.renderModalChanges([], `✅ Successfully pushed all ${totalCount} change(s) in ${durationFormatted}!`, 'success', false);
+      } else {
+        this.updateStatusUI('pending', `${finalRemaining.length} new change(s) queued`);
+        this.renderModalChanges(finalRemaining, `✅ Pushed ${totalCount} change(s). ${finalRemaining.length} new change(s) queued for next push.`, 'info', true);
+      }
 
-      // Auto-close modal after 2 seconds
-      setTimeout(() => {
-        this.closeSyncModal();
-      }, 2000);
+      // Auto-close modal after 2 seconds if everything was pushed
+      if (finalRemaining.length === 0) {
+        setTimeout(() => {
+          this.closeSyncModal();
+        }, 2000);
+      }
 
       this.isSyncing = false;
       return { success: true, count: totalCount, durationFormatted: durationFormatted, durationSeconds: parseFloat(durationSec) };
