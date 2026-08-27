@@ -373,6 +373,21 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
 
   // 1. Conflict Detection Pre-Pass
   var conflicts = [];
+  var sheetDataCache = {};
+
+  function getCachedSheetData(sName, sheetObj) {
+    if (!sName || !sheetObj) return null;
+    var k = String(sName).toLowerCase().trim();
+    if (!sheetDataCache[k]) {
+      try {
+        sheetDataCache[k] = sheetObj.getDataRange().getValues();
+      } catch (cacheErr) {
+        sheetDataCache[k] = null;
+      }
+    }
+    return sheetDataCache[k];
+  }
+
   if (detectConflicts && !force) {
     for (var cm = 0; cm < mutations.length; cm++) {
       var cMut = mutations[cm];
@@ -388,7 +403,10 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
       }
 
       if (cMut.action === 'UPDATE_CELL' && targetRow && cMut.col && cMut.oldValue !== undefined && cMut.oldValue !== null) {
-        var curVal = cSheet.getRange(targetRow, cMut.col).getValue();
+        var sData = getCachedSheetData(cSheetName, cSheet);
+        var curVal = (sData && targetRow <= sData.length && cMut.col <= sData[0].length) 
+          ? sData[targetRow - 1][cMut.col - 1] 
+          : cSheet.getRange(targetRow, cMut.col).getValue();
         var curNorm = normalizeValForComparison(curVal);
         var oldNorm = normalizeValForComparison(cMut.oldValue);
         var newNorm = normalizeValForComparison(cMut.value);
