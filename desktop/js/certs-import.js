@@ -1,8 +1,9 @@
 /**
  * certs-import.js - Excel / CSV Expiring Certifications Matrix Importer
  * 
- * Provides interactive file parsing via SheetJS, column auto-mapping,
- * diff comparison, and local database updating with sync queue mutations.
+ * Provides interactive file parsing via SheetJS, comprehensive column auto-mapping
+ * across all 17+ certification types, multi-row diff comparison against the 9-column
+ * expiring_certs table, and local database updating with sync queue mutations.
  */
 
 class CertsImportEngine {
@@ -12,6 +13,27 @@ class CertsImportEngine {
     this.mappedData = [];
     this.fileName = '';
     this.preserveNewerDates = true;
+
+    // Supported certification types and aliases
+    this.certDefinitions = [
+      { key: 'First Aid', label: 'First Aid / 1st Aid', aliases: ['1st aid', 'first aid', 'fa', '1st aid/cpr', 'first aid / cpr'], nonExpiring: false },
+      { key: 'CPR', label: 'CPR / AED', aliases: ['cpr', 'cpr/aed', 'aed/cpr', 'cardiopulmonary'], nonExpiring: false },
+      { key: 'DL', label: "Driver's License (DL)", aliases: ['dl', 'driver', 'drivers license', "driver's license", 'license', 'cdl'], nonExpiring: false },
+      { key: 'Medical Card', label: 'Medical Card (DOT)', aliases: ['medical card', 'med card', 'med', 'dot', 'dot card', 'dot physical'], nonExpiring: false },
+      { key: 'Crane Cert', label: 'Crane Certification', aliases: ['crane cert', 'crane certification', 'ncco', 'crane license', 'crane'], nonExpiring: false },
+      { key: 'Crane Evaluation', label: 'Crane Evaluation', aliases: ['crane eval', 'crane evaluation', 'crane assessment'], nonExpiring: true, isIssuedDate: true },
+      { key: 'OSHA 1910', label: 'OSHA 1910 / 10 / 30', aliases: ['osha 1910', 'osha 10', 'osha 30', 'osha 10/30', 'osha', 'et&d', 'osha etd'], nonExpiring: true, isIssuedDate: true },
+      { key: 'BNSF', label: 'BNSF Rail Safety', aliases: ['bnsf', 'bnsf rail', 'bnsf safety', 'railroad'], nonExpiring: true, isIssuedDate: true },
+      { key: 'MSHA', label: 'MSHA Mine Safety', aliases: ['msha', 'msha 46', 'msha 48', 'mine safety'], nonExpiring: true, isIssuedDate: true },
+      { key: 'OSHA Trench Comp Person', label: 'OSHA Trench Competent Person', aliases: ['trench', 'trenching', 'trench comp person', 'trench competent', 'excavation'], nonExpiring: true, isIssuedDate: true },
+      { key: 'Forklift', label: 'Forklift Certification', aliases: ['forklift', 'fork lift', 'pit', 'powered industrial truck'], nonExpiring: false },
+      { key: 'Forklift Operator Safety Training', label: 'Forklift Safety Training', aliases: ['forklift operator safety training', 'forklift training', 'forklift eval'], nonExpiring: true, isIssuedDate: true },
+      { key: 'Rigging & Signaling', label: 'Rigging & Signaling', aliases: ['rigging', 'rigging & signaling', 'rigging and signaling', 'rigger', 'signal person'], nonExpiring: false },
+      { key: 'Harassment Training', label: 'Harassment Prevention', aliases: ['harassment', 'harassment training', 'anti-harassment', 'dei'], nonExpiring: false },
+      { key: 'EICA Basic Helicopter Line Construction Safety', label: 'EICA Basic Helicopter Safety', aliases: ['eica', 'helicopter', 'helo', 'eica basic helo', 'helo safety'], nonExpiring: true, isIssuedDate: true },
+      { key: 'Pole Top Rescue', label: 'Pole Top Rescue', aliases: ['pole top', 'pole top rescue', 'bucket rescue', 'tower rescue'], nonExpiring: false },
+      { key: 'Dig Safe', label: 'Dig Safe / 811', aliases: ['dig safe', 'digsafe', '811', 'utility locate'], nonExpiring: false }
+    ];
   }
 
   /**
@@ -53,7 +75,7 @@ class CertsImportEngine {
             <span>📥</span> Import Employee Certifications Matrix
           </div>
           <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.5;">
-            Upload your company certification spreadsheet (Excel <code>.xlsx</code>, <code>.xls</code> or <code>.csv</code>) to update First Aid, CPR, OSHA, Driver's License, Medical Card, Crane, Forklift, and Rigging records.
+            Upload your company certification spreadsheet (Excel <code>.xlsx</code>, <code>.xls</code> or <code>.csv</code>) to update First Aid, CPR, OSHA, Driver's License, Medical Card, Crane, Forklift, Rigging, and other safety records.
           </div>
         </div>
 
@@ -68,10 +90,10 @@ class CertsImportEngine {
         <!-- Import Options -->
         <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 16px;">
           <label style="display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: #f8fafc; cursor: pointer;">
-            <input type="checkbox" id="certs-preserve-newer" checked style="accent-color: #3b82f6;" onchange="window.certsImportEngine.preserveNewerDates = this.checked">
+            <input type="checkbox" id="certs-preserve-newer" ${this.preserveNewerDates ? 'checked' : ''} style="accent-color: #3b82f6;" onchange="window.certsImportEngine.preserveNewerDates = this.checked">
             <div>
               <div style="font-weight: 700;">🔒 Preserve newer expiration dates</div>
-              <div style="font-size: 11px; color: var(--text-muted);">If local records already have a newer expiration date than the Excel file, keep the newer date.</div>
+              <div style="font-size: 11px; color: var(--text-muted);">If existing records already have a newer expiration date than the Excel file, keep the newer date.</div>
             </div>
           </label>
         </div>
@@ -114,8 +136,11 @@ class CertsImportEngine {
         const data = new Uint8Array(e.target.result);
         const workbook = XLSX.read(data, { type: 'array', cellDates: true });
         
-        // Pick first worksheet
-        const sheetName = workbook.SheetNames[0];
+        // Pick first worksheet or one named Certs/Training if available
+        let sheetName = workbook.SheetNames[0];
+        const certSheetCandidate = workbook.SheetNames.find(s => s.toLowerCase().includes('cert') || s.toLowerCase().includes('matrix') || s.toLowerCase().includes('training'));
+        if (certSheetCandidate) sheetName = certSheetCandidate;
+
         const worksheet = workbook.Sheets[sheetName];
         const rawJson = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
 
@@ -129,7 +154,7 @@ class CertsImportEngine {
   }
 
   /**
-   * Normalizes spreadsheet rows, locates header row and maps cert columns.
+   * Normalizes spreadsheet rows, locates header row and maps cert columns to 9-column expiring_certs table.
    */
   processRawSheetData(rows) {
     if (!rows || rows.length < 2) {
@@ -137,11 +162,14 @@ class CertsImportEngine {
       return;
     }
 
-    // Find header row (search first 10 rows for 'Name' or 'Employee')
+    // Header keywords to search for
+    const nameKeywords = ['name', 'employee', 'employee name', 'last name', 'first name', 'worker', 'lineman'];
+
+    // 1. Find header row (search first 20 rows)
     let headerIdx = -1;
-    for (let r = 0; r < Math.min(15, rows.length); r++) {
+    for (let r = 0; r < Math.min(25, rows.length); r++) {
       const row = rows[r].map(c => String(c || '').toLowerCase().trim());
-      if (row.some(c => c === 'name' || c.includes('employee') || c === 'first name' || c === 'last name')) {
+      if (row.some(c => nameKeywords.includes(c) || c.includes('first aid') || c.includes('1st aid') || c === 'cpr' || c === 'dl')) {
         headerIdx = r;
         break;
       }
@@ -154,99 +182,182 @@ class CertsImportEngine {
       headers = rows[headerIdx].map(c => String(c || '').trim());
       dataRows = rows.slice(headerIdx + 1);
     } else {
-      // Default standard positional mapping (A=Name, B=Job#, C=Location, D=DL, E=Med, F=1st Aid, G=CPR...)
-      headers = ['Name', 'Job Number', 'Location', 'DL', 'Medical Card', '1st Aid', 'CPR', 'Crane Cert', 'Crane Evaluation', 'OSHA 10/30', 'Forklift', 'Rigging'];
-      dataRows = rows;
+      headers = rows[0].map(c => String(c || '').trim());
+      dataRows = rows.slice(1);
     }
 
-    // Identify column indices
-    const colMap = {};
+    // 2. Identify column indices for Employee Name, Job#, Location, and Certifications
+    let nameCol = -1;
+    let firstNameCol = -1;
+    let lastNameCol = -1;
+    let jobCol = -1;
+    let locCol = -1;
+
+    // Map columnIndex -> Cert Definition
+    const colToCertMap = {};
+
     headers.forEach((h, idx) => {
-      const hLow = h.toLowerCase();
-      if (hLow.includes('employee') || hLow === 'name' || hLow.includes('full name')) colMap.name = idx;
-      else if (hLow.includes('first name')) colMap.firstName = idx;
-      else if (hLow.includes('last name')) colMap.lastName = idx;
-      else if (hLow.includes('1st aid') || hLow.includes('first aid')) colMap.firstAid = idx;
-      else if (hLow.includes('cpr')) colMap.cpr = idx;
-      else if (hLow.includes('dl') || hLow.includes('driver')) colMap.dl = idx;
-      else if (hLow.includes('med') || hLow.includes('dot')) colMap.med = idx;
-      else if (hLow.includes('crane cert')) colMap.craneCert = idx;
-      else if (hLow.includes('crane eval')) colMap.craneEval = idx;
-      else if (hLow.includes('osha')) colMap.osha = idx;
-      else if (hLow.includes('forklift')) colMap.forklift = idx;
-      else if (hLow.includes('rigging')) colMap.rigging = idx;
-      else if (hLow.includes('harassment')) colMap.harassment = idx;
-      else if (hLow.includes('pole top')) colMap.poleTop = idx;
-      else if (hLow.includes('dig safe')) colMap.digSafe = idx;
+      const hClean = String(h || '').toLowerCase().trim();
+      if (!hClean) return;
+
+      if (hClean === 'name' || hClean === 'employee' || hClean === 'employee name' || hClean === 'full name') {
+        nameCol = idx;
+      } else if (hClean === 'first name' || hClean === 'first') {
+        firstNameCol = idx;
+      } else if (hClean === 'last name' || hClean === 'last') {
+        lastNameCol = idx;
+      } else if (hClean.includes('job') || hClean === 'crew' || hClean === 'job #') {
+        jobCol = idx;
+      } else if (hClean.includes('location') || hClean === 'city') {
+        locCol = idx;
+      } else {
+        // Check cert definitions
+        for (const def of this.certDefinitions) {
+          const isMatch = def.aliases.some(alias => {
+            return hClean === alias || hClean.includes(alias) || alias.includes(hClean);
+          });
+          if (isMatch) {
+            colToCertMap[idx] = def;
+            break;
+          }
+        }
+      }
     });
 
-    if (colMap.name === undefined && (colMap.firstName === undefined || colMap.lastName === undefined)) {
-      colMap.name = 0; // Default column 0
+    if (nameCol === -1 && (firstNameCol === -1 || lastNameCol === -1)) {
+      nameCol = 0; // Default column 0 as Name
     }
 
-    // Map existing records from local DB
-    const certsTable = this.db.getTable('expiring_certs');
-    const existingMap = {};
-    if (certsTable && certsTable.rows) {
-      certsTable.rows.forEach(r => {
-        const name = String(r['Employee Name'] || r['Name'] || '').toLowerCase().trim();
-        if (name) existingMap[name] = r;
-      });
-    }
+    // 3. Load existing Employees and existing Expiring Certs table
+    const employeesTable = this.db ? this.db.getTable('employees') : null;
+    const empList = employeesTable && employeesTable.rows ? employeesTable.rows : [];
+    const empLookup = {};
+    empList.forEach(e => {
+      const n = String(e['Name'] || e['Employee Name'] || '').toLowerCase().trim();
+      if (n) empLookup[n] = e;
+    });
+
+    const certsTable = this.db ? this.db.getTable('expiring_certs') : null;
+    const existingCertRows = certsTable && certsTable.rows ? certsTable.rows : [];
+    
+    // Map: "empNameLower_certTypeLower" -> rowObj
+    const existingCertMap = {};
+    existingCertRows.forEach((r, rIdx) => {
+      const eName = String(r['Employee Name'] || r['Name'] || '').toLowerCase().trim();
+      const cType = String(r['Item Type'] || r['Cert Type'] || r['Type'] || '').toLowerCase().trim();
+      if (eName && cType) {
+        existingCertMap[`${eName}_${cType}`] = { row: r, index: rIdx };
+      }
+    });
 
     this.mappedData = [];
 
+    // 4. Process each row in Excel
     dataRows.forEach(row => {
-      let empName = '';
-      if (colMap.name !== undefined && row[colMap.name]) {
-        empName = String(row[colMap.name]).trim();
-      } else if (colMap.firstName !== undefined && colMap.lastName !== undefined) {
-        empName = `${row[colMap.firstName]} ${row[colMap.lastName]}`.trim();
+      let rawName = '';
+      if (nameCol !== -1 && row[nameCol]) {
+        rawName = String(row[nameCol]).trim();
+      } else if (firstNameCol !== -1 && lastNameCol !== -1) {
+        rawName = `${row[firstNameCol]} ${row[lastNameCol]}`.trim();
       }
 
-      if (!empName) return;
+      if (!rawName) return;
 
-      const normName = empName.toLowerCase();
-      const existing = existingMap[normName] || {};
+      // Filter out repeat header rows or section dividers
+      const rawLower = rawName.toLowerCase();
+      if (['name', 'employee', 'location', 'total', 'active', 'inactive', 'subtotal'].includes(rawLower)) return;
 
-      // Extract dates
+      // Convert "LastName, FirstName" -> "FirstName LastName"
+      let formattedName = rawName;
+      if (rawName.includes(',')) {
+        const parts = rawName.split(',').map(p => p.trim());
+        if (parts.length >= 2) formattedName = `${parts[1]} ${parts[0]}`.trim();
+      }
+
+      const normName = formattedName.toLowerCase();
+
+      // Find matched employee from DB (to resolve proper casing and location)
+      const matchedEmp = empLookup[normName] || Object.values(empLookup).find(e => {
+        const dbName = String(e['Name'] || e['Employee Name'] || '').toLowerCase().trim();
+        return dbName.includes(normName) || normName.includes(dbName);
+      });
+
+      const finalEmpName = matchedEmp ? String(matchedEmp['Name'] || matchedEmp['Employee Name'] || formattedName).trim() : formattedName;
+      const empLocation = (locCol !== -1 && row[locCol]) ? String(row[locCol]).trim() : (matchedEmp ? (matchedEmp['Location'] || 'Helena') : 'Helena');
+      const empJobNum = (jobCol !== -1 && row[jobCol]) ? String(row[jobCol]).trim() : (matchedEmp ? (matchedEmp['Job Number'] || '') : '');
+
+      // Check each cert column on this row
       const certChanges = {};
-      const checkDateChange = (key, rawVal) => {
-        if (!rawVal) return;
-        const formatted = this.formatDateStr(rawVal);
-        if (!formatted) return;
 
-        const oldDateStr = existing[key] || '';
-        if (this.preserveNewerDates && oldDateStr) {
-          const oldD = new Date(oldDateStr);
-          const newD = new Date(formatted);
-          if (!isNaN(oldD.getTime()) && !isNaN(newD.getTime()) && oldD > newD) {
-            return; // Keep existing newer date
+      Object.keys(colToCertMap).forEach(colIdxStr => {
+        const cIdx = parseInt(colIdxStr, 10);
+        const certDef = colToCertMap[cIdx];
+        if (!certDef) return;
+
+        const cellVal = row[cIdx];
+        if (cellVal === undefined || cellVal === null || String(cellVal).trim() === '') return;
+
+        const dateStr = this.formatDateStr(cellVal);
+        if (!dateStr) return;
+
+        const lookupKey = `${finalEmpName.toLowerCase()}_${certDef.key.toLowerCase()}`;
+        const existingEntry = existingCertMap[lookupKey];
+        const existingRow = existingEntry ? existingEntry.row : null;
+
+        const currentExpDate = existingRow ? this.formatDateStr(existingRow['Expiration Date'] || '') : '';
+        const currentAcqDate = existingRow ? this.formatDateStr(existingRow['Date Acquired'] || '') : '';
+
+        // Determine if change is needed
+        let isChange = false;
+        let changeOldDate = '';
+        let changeNewDate = dateStr;
+
+        if (certDef.nonExpiring) {
+          // For non-expiring certs (OSHA, Crane Eval, BNSF, MSHA), compare Date Acquired
+          changeOldDate = currentAcqDate;
+          if (!currentAcqDate || currentAcqDate !== dateStr) {
+            if (this.preserveNewerDates && currentAcqDate) {
+              const oldD = new Date(currentAcqDate);
+              const newD = new Date(dateStr);
+              if (!isNaN(oldD.getTime()) && !isNaN(newD.getTime()) && oldD > newD) {
+                return; // Keep existing newer date
+              }
+            }
+            isChange = true;
+          }
+        } else {
+          // For expiring certs, compare Expiration Date
+          changeOldDate = currentExpDate;
+          if (!currentExpDate || currentExpDate !== dateStr) {
+            if (this.preserveNewerDates && currentExpDate) {
+              const oldD = new Date(currentExpDate);
+              const newD = new Date(dateStr);
+              if (!isNaN(oldD.getTime()) && !isNaN(newD.getTime()) && oldD > newD) {
+                return; // Keep existing newer date
+              }
+            }
+            isChange = true;
           }
         }
 
-        if (oldDateStr !== formatted) {
-          certChanges[key] = { oldDate: oldDateStr, newDate: formatted };
+        if (isChange) {
+          certChanges[certDef.key] = {
+            certDef: certDef,
+            oldDate: changeOldDate,
+            newDate: changeNewDate,
+            isNewRecord: !existingRow,
+            existingRowIndex: existingEntry ? existingEntry.index : -1
+          };
         }
-      };
-
-      if (colMap.firstAid !== undefined) checkDateChange('1st Aid', row[colMap.firstAid]);
-      if (colMap.cpr !== undefined) checkDateChange('CPR', row[colMap.cpr]);
-      if (colMap.dl !== undefined) checkDateChange('DL', row[colMap.dl]);
-      if (colMap.med !== undefined) checkDateChange('Medical Card', row[colMap.med]);
-      if (colMap.craneCert !== undefined) checkDateChange('Crane Cert', row[colMap.craneCert]);
-      if (colMap.craneEval !== undefined) checkDateChange('Crane Evaluation', row[colMap.craneEval]);
-      if (colMap.osha !== undefined) checkDateChange('OSHA 10/30', row[colMap.osha]);
-      if (colMap.forklift !== undefined) checkDateChange('Forklift', row[colMap.forklift]);
-      if (colMap.rigging !== undefined) checkDateChange('Rigging & Signaling', row[colMap.rigging]);
+      });
 
       const changeKeys = Object.keys(certChanges);
       if (changeKeys.length > 0) {
         this.mappedData.push({
-          employeeName: empName,
-          changes: certChanges,
-          isNewEmployee: !existingMap[normName],
-          existingRecord: existing
+          employeeName: finalEmpName,
+          location: empLocation,
+          jobNum: empJobNum,
+          changes: certChanges
         });
       }
     });
@@ -258,21 +369,66 @@ class CertsImportEngine {
     if (!val) return '';
     if (val instanceof Date) {
       if (isNaN(val.getTime())) return '';
-      const yyyy = val.getFullYear();
       const mm = String(val.getMonth() + 1).padStart(2, '0');
       const dd = String(val.getDate()).padStart(2, '0');
-      return `${yyyy}-${mm}-${dd}`;
+      const yyyy = val.getFullYear();
+      return `${mm}/${dd}/${yyyy}`;
     }
     const str = String(val).trim();
-    if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.substring(0, 10);
+    if (!str) return '';
+
+    // Handle "Need Copy"
+    if (str.toLowerCase().includes('need copy')) return 'Need Copy';
+
+    // Handle MM/DD/YYYY or MM.DD.YYYY
+    const slashMatch = str.match(/^(\d{1,2})[\/\.](\d{1,2})[\/\.](\d{2,4})/);
+    if (slashMatch) {
+      const mm = String(slashMatch[1]).padStart(2, '0');
+      const dd = String(slashMatch[2]).padStart(2, '0');
+      let yr = slashMatch[3];
+      if (yr.length === 2) yr = '20' + yr;
+      return `${mm}/${dd}/${yr}`;
+    }
+
+    // Handle YYYY-MM-DD
+    const dashMatch = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (dashMatch) {
+      const yyyy = dashMatch[1];
+      const mm = String(dashMatch[2]).padStart(2, '0');
+      const dd = String(dashMatch[3]).padStart(2, '0');
+      return `${mm}/${dd}/${yyyy}`;
+    }
+
     const d = new Date(str);
-    if (!isNaN(d.getTime())) {
-      const yyyy = d.getFullYear();
+    if (!isNaN(d.getTime()) && d.getFullYear() > 1990) {
       const mm = String(d.getMonth() + 1).padStart(2, '0');
       const dd = String(d.getDate()).padStart(2, '0');
-      return `${yyyy}-${mm}-${dd}`;
+      const yyyy = d.getFullYear();
+      return `${mm}/${dd}/${yyyy}`;
     }
+
     return str;
+  }
+
+  /**
+   * Calculates local status and days until expiration for UI rendering
+   */
+  calculateLocalCertStatus(expDateStr) {
+    if (!expDateStr || expDateStr === 'Need Copy') return { daysUntil: '', status: 'MISSING' };
+    const d = new Date(expDateStr);
+    if (isNaN(d.getTime())) return { daysUntil: '', status: 'OK' };
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diffDays = Math.ceil((d.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+    let status = 'OK';
+    if (diffDays < 0) status = 'EXPIRED';
+    else if (diffDays <= 30) status = 'CRITICAL';
+    else if (diffDays <= 60) status = 'WARNING';
+    else if (diffDays <= 90) status = 'UPCOMING';
+
+    return { daysUntil: diffDays, status: status };
   }
 
   /**
@@ -295,7 +451,7 @@ class CertsImportEngine {
               <span>✅</span> Ready to Import from <code>${this.escapeHtml(this.fileName)}</code>
             </div>
             <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
-              Found <strong>${this.mappedData.length}</strong> employee(s) with <strong>${totalUpdatedCerts}</strong> new or updated certification dates.
+              Found <strong>${this.mappedData.length}</strong> employee(s) with <strong>${totalUpdatedCerts}</strong> new or updated certification date(s).
             </div>
           </div>
           <button class="btn btn-secondary" onclick="window.certsImportEngine.renderUploadView()" style="font-size: 11.5px;">
@@ -308,31 +464,31 @@ class CertsImportEngine {
           <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 12px;">
             <thead>
               <tr style="position: sticky; top: 0; background: #1e293b; z-index: 5; border-bottom: 2px solid #334155;">
-                <th style="width: 220px;">Employee</th>
-                <th>Certification Type</th>
-                <th style="width: 120px;">Current Date</th>
-                <th style="width: 40px; text-align: center;">→</th>
-                <th style="width: 130px;">New Date</th>
-                <th style="width: 90px; text-align: center;">Action</th>
+                <th style="width: 220px; padding: 10px 12px;">Employee</th>
+                <th style="padding: 10px 12px;">Certification Type</th>
+                <th style="width: 130px; padding: 10px 12px;">Current Date</th>
+                <th style="width: 30px; text-align: center; padding: 10px 4px;">→</th>
+                <th style="width: 130px; padding: 10px 12px;">New Date</th>
+                <th style="width: 100px; text-align: center; padding: 10px 12px;">Action</th>
               </tr>
             </thead>
             <tbody>
               ${this.mappedData.length === 0 ? `
-                <tr><td colspan="6" style="padding: 32px 16px; text-align: center; color: var(--text-muted);">No new date changes detected in this file.</td></tr>
+                <tr><td colspan="6" style="padding: 36px 16px; text-align: center; color: var(--text-muted);">No new date changes detected in this file. All certifications are up to date.</td></tr>
               ` : this.mappedData.map(emp => {
                 const changeKeys = Object.keys(emp.changes);
                 return changeKeys.map((cKey, idx) => {
                   const ch = emp.changes[cKey];
                   return `
-                    <tr>
-                      ${idx === 0 ? `<td rowspan="${changeKeys.length}" style="font-weight: 700; color: #f8fafc; border-right: 1px solid var(--border-color);">${this.escapeHtml(emp.employeeName)}</td>` : ''}
-                      <td style="font-weight: 600; color: #93c5fd;">${this.escapeHtml(cKey)}</td>
-                      <td style="color: var(--text-muted); font-family: monospace;">${this.escapeHtml(ch.oldDate || '—')}</td>
-                      <td style="text-align: center; color: #34d399; font-weight: bold;">→</td>
-                      <td style="font-weight: 700; color: #34d399; font-family: monospace;">${this.escapeHtml(ch.newDate)}</td>
-                      <td style="text-align: center;">
-                        <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 10.5px;">
-                          ${ch.oldDate ? '🔄 Update' : '✨ New'}
+                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                      ${idx === 0 ? `<td rowspan="${changeKeys.length}" style="font-weight: 700; color: #f8fafc; border-right: 1px solid var(--border-color); padding: 10px 12px; vertical-align: top;">${this.escapeHtml(emp.employeeName)}</td>` : ''}
+                      <td style="font-weight: 600; color: #93c5fd; padding: 10px 12px;">${this.escapeHtml(cKey)}</td>
+                      <td style="color: var(--text-muted); font-family: monospace; padding: 10px 12px;">${this.escapeHtml(ch.oldDate || '—')}</td>
+                      <td style="text-align: center; color: #34d399; font-weight: bold; padding: 10px 4px;">→</td>
+                      <td style="font-weight: 700; color: #34d399; font-family: monospace; padding: 10px 12px;">${this.escapeHtml(ch.newDate)}</td>
+                      <td style="text-align: center; padding: 10px 12px;">
+                        <span class="badge" style="background: ${ch.isNewRecord ? 'rgba(59, 130, 246, 0.2)' : 'rgba(16, 185, 129, 0.2)'}; color: ${ch.isNewRecord ? '#93c5fd' : '#6ee7b7'}; border: 1px solid ${ch.isNewRecord ? 'rgba(59, 130, 246, 0.4)' : 'rgba(16, 185, 129, 0.4)'}; font-size: 10.5px;">
+                          ${ch.isNewRecord ? '✨ New' : '🔄 Update'}
                         </span>
                       </td>
                     </tr>
@@ -349,7 +505,7 @@ class CertsImportEngine {
       footer.innerHTML = `
         <button class="btn btn-secondary" onclick="window.certsImportEngine.closeImportModal()">Cancel</button>
         <button class="btn btn-primary" onclick="window.certsImportEngine.confirmImport()" style="font-weight: 700; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);" ${this.mappedData.length === 0 ? 'disabled' : ''}>
-          <span>🚀</span> Apply & Sync ${totalUpdatedCerts} Cert Updates
+          <span>🚀</span> Apply & Save ${totalUpdatedCerts} Cert Updates
         </button>
       `;
     }
@@ -361,47 +517,126 @@ class CertsImportEngine {
   async confirmImport() {
     if (this.mappedData.length === 0) return;
 
-    let certsTable = this.db.getTable('expiring_certs');
-    if (!certsTable) {
-      certsTable = { name: 'Expiring Certs', headers: ['Employee Name', '1st Aid', 'CPR', 'DL', 'Medical Card', 'Crane Cert', 'Crane Evaluation', 'OSHA 10/30', 'Forklift', 'Rigging & Signaling'], rows: [] };
+    if (!this.db) this.db = window.localDB || window.safetyDB;
+
+    let certsTable = this.db ? this.db.getTable('expiring_certs') : null;
+    const headers = ['Employee Name', 'Item Type', 'Date Acquired', 'Expiration Date', 'Location', 'Job #', 'Days Until Expiration', 'Status', 'SMS'];
+
+    if (!certsTable || !certsTable.rows) {
+      certsTable = { name: 'Expiring Certs', headers: headers, rows: [], rawGrid: [headers], rowCount: 0, _normalized: true };
+      if (this.db && this.db.snapshot && this.db.snapshot.tables) {
+        this.db.snapshot.tables['expiring_certs'] = certsTable;
+      }
     }
 
     let appliedCount = 0;
 
-    this.mappedData.forEach(item => {
-      let row = certsTable.rows.find(r => String(r['Employee Name'] || r['Name'] || '').toLowerCase().trim() === item.employeeName.toLowerCase().trim());
-      if (!row) {
-        row = { 'Employee Name': item.employeeName };
-        certsTable.rows.push(row);
+    for (const emp of this.mappedData) {
+      for (const cKey of Object.keys(emp.changes)) {
+        const ch = emp.changes[cKey];
+        const certDef = ch.certDef;
+
+        // Check if row already exists in table
+        let targetRowIdx = certsTable.rows.findIndex(r => {
+          const rEmp = String(r['Employee Name'] || r['Name'] || '').toLowerCase().trim();
+          const rType = String(r['Item Type'] || r['Cert Type'] || r['Type'] || '').toLowerCase().trim();
+          return rEmp === emp.employeeName.toLowerCase().trim() && rType === cKey.toLowerCase().trim();
+        });
+
+        if (targetRowIdx !== -1) {
+          // 1. UPDATE existing row in expiring_certs
+          const row = certsTable.rows[targetRowIdx];
+          const sheetRowNumber = targetRowIdx + 2; // Row 1 = Headers
+
+          if (certDef.nonExpiring) {
+            const oldVal = row['Date Acquired'] || '';
+            row['Date Acquired'] = ch.newDate;
+            if (this.db) {
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: 'Expiring Certs',
+                tableKey: 'expiring_certs',
+                row: sheetRowNumber,
+                col: 3, // Col C: Date Acquired
+                header: 'Date Acquired',
+                value: ch.newDate,
+                oldValue: oldVal
+              });
+            }
+          } else {
+            const oldVal = row['Expiration Date'] || '';
+            row['Expiration Date'] = ch.newDate;
+            const statusCalc = this.calculateLocalCertStatus(ch.newDate);
+            row['Days Until Expiration'] = statusCalc.daysUntil;
+            row['Status'] = statusCalc.status;
+
+            if (this.db) {
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: 'Expiring Certs',
+                tableKey: 'expiring_certs',
+                row: sheetRowNumber,
+                col: 4, // Col D: Expiration Date
+                header: 'Expiration Date',
+                value: ch.newDate,
+                oldValue: oldVal
+              });
+            }
+          }
+          appliedCount++;
+        } else {
+          // 2. ADD new row to expiring_certs
+          const newRow = {
+            'Employee Name': emp.employeeName,
+            'Item Type': cKey,
+            'Date Acquired': certDef.nonExpiring ? ch.newDate : '',
+            'Expiration Date': certDef.nonExpiring ? '' : ch.newDate,
+            'Location': emp.location || 'Helena',
+            'Job #': emp.jobNum || '',
+            'Days Until Expiration': certDef.nonExpiring ? '' : this.calculateLocalCertStatus(ch.newDate).daysUntil,
+            'Status': certDef.nonExpiring ? 'OK' : this.calculateLocalCertStatus(ch.newDate).status,
+            'SMS': ''
+          };
+
+          certsTable.rows.push(newRow);
+          certsTable.rowCount = certsTable.rows.length;
+
+          if (certsTable.rawGrid) {
+            const gridArr = headers.map(h => newRow[h] !== undefined ? newRow[h] : '');
+            certsTable.rawGrid.push(gridArr);
+            certsTable.maxRows = certsTable.rawGrid.length;
+          }
+
+          if (this.db) {
+            await this.db.addMutation({
+              action: 'ADD_ROW',
+              sheetName: 'Expiring Certs',
+              tableKey: 'expiring_certs',
+              rowData: newRow
+            });
+          }
+
+          appliedCount++;
+        }
       }
+    }
 
-      Object.keys(item.changes).forEach(cKey => {
-        row[cKey] = item.changes[cKey].newDate;
-        appliedCount++;
-      });
-    });
-
-    // Save updated table locally
-    this.db.saveTable('expiring_certs', certsTable);
-
-    // Queue mutation for two-way sync
-    if (window.syncEngine) {
-      window.syncEngine.queueMutation({
-        type: 'UPDATE_TABLE',
-        sheet: 'Expiring Certs',
-        data: certsTable.rows,
-        timestamp: Date.now()
-      });
+    // Save updated table to IndexedDB
+    if (this.db) {
+      await this.db.saveTable('expiring_certs', certsTable);
     }
 
     this.closeImportModal();
 
-    // Refresh views
-    if (window.sheetNavigator) {
-      window.sheetNavigator.renderExpiringCerts();
+    // Refresh active views
+    if (window.sheetNavigator && typeof window.sheetNavigator.renderActiveView === 'function') {
+      window.sheetNavigator.renderActiveView();
+    }
+    if (window.syncEngine && typeof window.syncEngine.renderOutboxBadge === 'function') {
+      window.syncEngine.renderOutboxBadge();
     }
 
-    alert(`🎉 Successfully imported ${appliedCount} certification updates!\n\nChanges have been saved locally and will synchronize with Google Sheets.`);
+    alert(`🎉 Successfully imported ${appliedCount} certification update(s)!\n\nChanges are saved locally and queued in your Outbox to push to Google Sheets.`);
   }
 
   escapeHtml(str) {
@@ -416,4 +651,5 @@ class CertsImportEngine {
 }
 
 // Attach globally
+window.certsImportEngine = new CertsImportEngine(window.safetyDB || null);
 window.CertsImportEngine = CertsImportEngine;
