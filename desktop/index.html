@@ -206,8 +206,11 @@
             <span class="brand-badge" id="expiring-certs-row-count">0 records</span>
           </div>
           <div style="display: flex; align-items: center; gap: 8px;">
-            <button class="btn btn-secondary" id="btn-ensure-all-certs" style="font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;" onclick="window.sheetNavigator.ensureAllEmployeeCertsExist()" title="Ensure all 16 standard certification rows exist for every active employee">
-              <span>➕</span> Ensure All 16 Certs
+            <button class="btn btn-secondary" id="btn-config-certs" style="font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px; border-color: #3b82f6; color: #93c5fd;" onclick="window.certsConfigEngine.openConfigModal()" title="Configure role requirements per certification and add custom certifications">
+              <span>⚙️</span> Requirements & Roles
+            </button>
+            <button class="btn btn-secondary" id="btn-ensure-all-certs" style="font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;" onclick="window.sheetNavigator.ensureAllEmployeeCertsExist()" title="Ensure all standard certification rows exist for active employees">
+              <span>➕</span> Ensure All Certs
             </button>
             <button class="btn btn-secondary" id="btn-cpr-roster-certs" style="font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;" onclick="window.cprRosterEngine.openCprRosterModal()" title="Generate and export Red Cross CPR & 1st Aid roster CSV">
               <span>🚑</span> Red Cross CPR CSV
@@ -1004,6 +1007,79 @@
     </div>
   </div>
 
+  <!-- Certification Requirements & Role Matrix Modal -->
+  <div id="certs-config-modal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 950px; width: 94%; max-height: 90vh; display: flex; flex-direction: column;">
+      <div class="modal-header" style="background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%); color: white;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 18px;">⚙️</span>
+          <span style="font-weight: 800; font-size: 15px;">Certification Requirements & Job Role Matrix</span>
+        </div>
+        <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.2); border: none; color: white; cursor: pointer;" onclick="window.certsConfigEngine.closeConfigModal()">✕</button>
+      </div>
+      <div class="modal-body" id="certs-config-modal-body" style="max-height: 75vh; overflow-y: auto; padding: 18px;">
+        <!-- Injected dynamically by certs-config.js -->
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-secondary); border-top: 1px solid var(--border-color); padding: 12px 18px;">
+        <button class="btn btn-secondary" onclick="window.certsConfigEngine.closeConfigModal()">Close</button>
+        <button class="btn btn-primary" onclick="window.certsConfigEngine.applyRequirementsToMatrix(true)" style="background: #10b981; border-color: #059669; font-weight: 700;">
+          <span>💾</span> Save & Apply Requirements to Matrix
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add New Certification Modal -->
+  <div id="add-cert-modal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 520px; width: 90%;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 18px;">➕</span>
+          <span style="font-weight: 700;">Add New Certification</span>
+        </div>
+        <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; cursor: pointer;" onclick="window.certsConfigEngine.closeAddCertModal()">✕</button>
+      </div>
+      <div class="modal-body" style="padding: 18px; display: flex; flex-direction: column; gap: 14px;">
+        <div class="form-group">
+          <label style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; display: block;">Certification Name (Sheet Key)</label>
+          <input type="text" id="new-cert-name" placeholder="e.g. Confined Space Entry, Traffic Control" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 13px;" />
+          <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">This will match Excel column headers and populate the Expiring Certs table.</div>
+        </div>
+
+        <div class="form-group">
+          <label style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; display: block;">Display Label (Optional)</label>
+          <input type="text" id="new-cert-label" placeholder="e.g. Confined Space Entry (OSHA)" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 13px;" />
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div class="form-group">
+            <label style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; display: block;">Validity Term</label>
+            <select id="new-cert-term" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 12.5px;">
+              <option value="12">1 Year (12 months)</option>
+              <option value="24">2 Years (24 months)</option>
+              <option value="36" selected>3 Years (36 months)</option>
+              <option value="60">5 Years (60 months)</option>
+              <option value="0">Non-Expiring (Issue Date)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; display: block;">Requirement Scope</label>
+            <select id="new-cert-scope" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 12.5px;">
+              <option value="all">👥 All Active Employees</option>
+              <option value="job_class" selected>👷 Specific Job Roles</option>
+              <option value="optional">⭐ Optional / As-Acquired</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 8px; background: var(--bg-secondary); border-top: 1px solid var(--border-color); padding: 12px 18px;">
+        <button class="btn btn-secondary" onclick="window.certsConfigEngine.closeAddCertModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="window.certsConfigEngine.submitNewCert()" style="background: #2563eb; font-weight: 700;">Add Certification</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Mobile Bottom Navigation Bar (Visible on tablets & mobile screens) -->
   <nav class="mobile-bottom-nav" id="mobile-bottom-nav">
     <div class="mobile-nav-btn active" data-view="sheets-view">
@@ -1043,6 +1119,7 @@
   <script src="js/sms-dialog.js?v=20260825_2"></script>
   <script src="js/employee-profile.js?v=20260825_2"></script>
   <script src="js/safety-emails.js?v=20260825_2"></script>
+  <script src="js/certs-config.js?v=20260825_2"></script>
   <script src="js/cpr-roster.js?v=20260825_2"></script>
   <script src="js/certs-import.js?v=20260825_2"></script>
   <script src="js/time-breakdown.js?v=20260825_2"></script>
@@ -1199,6 +1276,7 @@
       window.safetyComplianceEngine = new SafetyEmailsEngine(window.localDB);
       window.safetyComplianceEngine.init();
 
+      window.certsConfigEngine = new CertsConfigEngine(window.localDB);
       window.cprRosterEngine = new CprRosterEngine(window.localDB);
       window.certsImportEngine = new CertsImportEngine(window.localDB);
       window.timeBreakdownEngine = new TimeBreakdownEngine(window.localDB);

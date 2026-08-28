@@ -14,30 +14,38 @@ class CertsImportEngine {
     this.fileName = '';
     this.preserveNewerDates = true;
 
-    // Supported certification types definition lookup (exact Google Sheets keys)
-    this.certDefinitions = {
-      '1st Aid': { key: '1st Aid', label: '1st Aid / First Aid', nonExpiring: false },
-      'CPR': { key: 'CPR', label: 'CPR / AED', nonExpiring: false },
-      'DL': { key: 'DL', label: "Driver's License (DL)", nonExpiring: false },
-      'MEC Expiration': { key: 'MEC Expiration', label: 'MEC Expiration (Medical Card)', nonExpiring: false },
-      'Crane Cert': { key: 'Crane Cert', label: 'Crane Certification', nonExpiring: false },
-      'Crane Evaluation': { key: 'Crane Evaluation', label: 'Crane Evaluation', nonExpiring: true, isIssuedDate: true },
-      'OSHA 1910': { key: 'OSHA 1910', label: 'OSHA 1910 / 10 / 30', nonExpiring: true, isIssuedDate: true },
-      'BNSF': { key: 'BNSF', label: 'BNSF Rail Safety', nonExpiring: true, isIssuedDate: true },
-      'MSHA': { key: 'MSHA', label: 'MSHA Mine Safety', nonExpiring: true, isIssuedDate: true },
-      'OSHA Trench Comp Person': { key: 'OSHA Trench Comp Person', label: 'OSHA Trench Competent Person', nonExpiring: true, isIssuedDate: true },
-      'Forklift': { key: 'Forklift', label: 'Forklift Certification', nonExpiring: false },
-      'Forklift Operator Safety Training': { key: 'Forklift Operator Safety Training', label: 'Forklift Safety Training', nonExpiring: true, isIssuedDate: true },
-      'Rigging & Signaling/Signalperson & Spotter Cert': { key: 'Rigging & Signaling/Signalperson & Spotter Cert', label: 'Rigging & Signaling', nonExpiring: false },
-      'Harassment Training': { key: 'Harassment Training', label: 'Harassment Prevention', nonExpiring: false },
-      'EICA Basic Helicopter Line Construction Safety': { key: 'EICA Basic Helicopter Line Construction Safety', label: 'EICA Basic Helicopter Safety', nonExpiring: true, isIssuedDate: true },
-      'Pole Top Rescue': { key: 'Pole Top Rescue', label: 'Pole Top Rescue', nonExpiring: false },
-      'Dig Safe': { key: 'Dig Safe', label: 'Dig Safe / 811', nonExpiring: false }
-    };
+    // Get supported certification types dynamically from CertsConfigEngine
+    this.refreshCertDefinitions();
+  }
+
+  refreshCertDefinitions() {
+    if (window.certsConfigEngine && typeof window.certsConfigEngine.getCertDefinitions === 'function') {
+      this.certDefinitions = window.certsConfigEngine.getCertDefinitions();
+    } else {
+      this.certDefinitions = {
+        '1st Aid': { key: '1st Aid', label: '1st Aid / First Aid', nonExpiring: false },
+        'CPR': { key: 'CPR', label: 'CPR / AED', nonExpiring: false },
+        'DL': { key: 'DL', label: "Driver's License (DL)", nonExpiring: false },
+        'MEC Expiration': { key: 'MEC Expiration', label: 'MEC Expiration (Medical Card)', nonExpiring: false },
+        'Crane Cert': { key: 'Crane Cert', label: 'Crane Certification', nonExpiring: false },
+        'Crane Evaluation': { key: 'Crane Evaluation', label: 'Crane Evaluation', nonExpiring: true, isIssuedDate: true },
+        'OSHA 1910': { key: 'OSHA 1910', label: 'OSHA 1910 / 10 / 30', nonExpiring: true, isIssuedDate: true },
+        'BNSF': { key: 'BNSF', label: 'BNSF Rail Safety', nonExpiring: true, isIssuedDate: true },
+        'MSHA': { key: 'MSHA', label: 'MSHA Mine Safety', nonExpiring: true, isIssuedDate: true },
+        'OSHA Trench Comp Person': { key: 'OSHA Trench Comp Person', label: 'OSHA Trench Competent Person', nonExpiring: true, isIssuedDate: true },
+        'Forklift': { key: 'Forklift', label: 'Forklift Certification', nonExpiring: false },
+        'Forklift Operator Safety Training': { key: 'Forklift Operator Safety Training', label: 'Forklift Safety Training', nonExpiring: true, isIssuedDate: true },
+        'Rigging & Signaling/Signalperson & Spotter Cert': { key: 'Rigging & Signaling/Signalperson & Spotter Cert', label: 'Rigging & Signaling', nonExpiring: false },
+        'Harassment Training': { key: 'Harassment Training', label: 'Harassment Prevention', nonExpiring: false },
+        'EICA Basic Helicopter Line Construction Safety': { key: 'EICA Basic Helicopter Line Construction Safety', label: 'EICA Basic Helicopter Safety', nonExpiring: true, isIssuedDate: true },
+        'Pole Top Rescue': { key: 'Pole Top Rescue', label: 'Pole Top Rescue', nonExpiring: false },
+        'Dig Safe': { key: 'Dig Safe', label: 'Dig Safe / 811', nonExpiring: false }
+      };
+    }
   }
 
   /**
-   * Normalizes any cert string for comparison (handling aliases like "First Aid" vs "1st Aid").
+   * Normalizes any cert string for comparison (handling aliases like "First Aid" vs "1st Aid" and dynamic custom certs).
    */
   normalizeCertKey(cType) {
     if (!cType) return '';
@@ -59,6 +67,16 @@ class CertsImportEngine {
     if (clean.includes('dig safe') || clean.includes('digsafe') || clean.includes('811')) return 'dig safe';
     if (clean === 'dl' || clean.includes('driver') || clean === 'cdl') return 'dl';
     if (clean === 'cpr' || clean.includes('cpr')) return 'cpr';
+
+    // Match dynamic custom certs
+    if (this.certDefinitions) {
+      for (let k of Object.keys(this.certDefinitions)) {
+        if (clean === k.toLowerCase() || clean.includes(k.toLowerCase())) {
+          return k.toLowerCase();
+        }
+      }
+    }
+
     return clean;
   }
 

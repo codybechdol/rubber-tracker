@@ -19,6 +19,7 @@ const ASSETS_TO_CACHE = [
   './js/employee-profile.js',
   './js/safety-emails.js',
   './js/cpr-roster.js',
+  './js/certs-config.js',
   './js/certs-import.js',
   './js/time-breakdown.js',
   './js/sheets.js',

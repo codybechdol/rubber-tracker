@@ -479,20 +479,13 @@ class SheetNavigator {
    * Initializes all 16 company certification records for all active employees if missing in expiring_certs.
    */
   async ensureAllEmployeeCertsExist(silent = false) {
+    if (window.certsConfigEngine && typeof window.certsConfigEngine.applyRequirementsToMatrix === 'function') {
+      await window.certsConfigEngine.applyRequirementsToMatrix(!silent);
+      this.renderCurrentSheet();
+      return;
+    }
     if (!this.db) this.db = window.localDB || window.safetyDB;
     if (!this.db) return;
-
-    let certsTable = this.db.getTable('expiring_certs');
-    const empTable = this.db.getTable('employees');
-    if (!empTable || !empTable.rows) return;
-
-    const headers = ['Employee Name', 'Item Type', 'Date Acquired', 'Expiration Date', 'Location', 'Job #', 'Days Until Expiration', 'Status', 'SMS'];
-    if (!certsTable || !certsTable.rows) {
-      certsTable = { name: 'Expiring Certs', headers: headers, rows: [], rawGrid: [headers], rowCount: 0, _normalized: true };
-      if (this.db.snapshot && this.db.snapshot.tables) {
-        this.db.snapshot.tables['expiring_certs'] = certsTable;
-      }
-    }
 
     const allCertTypes = [
       'DL',
