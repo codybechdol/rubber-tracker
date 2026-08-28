@@ -33057,13 +33057,6 @@ function doGet(e) {
         .setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'getSnapshot' || !action) {
       var snapshot = exportFullDatabaseSnapshot();
-      try {
-        if (typeof generateAndStoreSyncSnapshot === 'function') {
-          generateAndStoreSyncSnapshot(snapshot);
-        }
-      } catch (snapStoreErr) {
-        Logger.log('doGet getSnapshot store error: ' + snapStoreErr);
-      }
       return ContentService.createTextOutput(JSON.stringify(snapshot))
         .setMimeType(ContentService.MimeType.JSON);
     }
@@ -33139,13 +33132,6 @@ function doPost(e) {
 
     if (action === 'getSnapshot') {
       var snapshot = exportFullDatabaseSnapshot();
-      try {
-        if (typeof generateAndStoreSyncSnapshot === 'function') {
-          generateAndStoreSyncSnapshot(snapshot);
-        }
-      } catch (snapStoreErr) {
-        Logger.log('doPost getSnapshot store error: ' + snapStoreErr);
-      }
       return ContentService.createTextOutput(JSON.stringify(snapshot))
         .setMimeType(ContentService.MimeType.JSON);
     }
