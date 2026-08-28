@@ -264,6 +264,34 @@ function generateAndStoreSyncSnapshot(existingSnapshot) {
 }
 
 /**
+ * Fast snapshot retrieval from pre-generated Google Drive JSON snapshot file,
+ * avoiding expensive 42-sheet scans during web/mobile download calls.
+ *
+ * @return {string} JSON string of snapshot
+ */
+function getFastSnapshotFromDriveOrExport() {
+  try {
+    var fileId = PropertiesService.getScriptProperties().getProperty('SYNC_SNAPSHOT_FILE_ID');
+    if (fileId) {
+      var file = DriveApp.getFileById(fileId);
+      if (file && !file.isTrashed()) {
+        var content = file.getBlob().getDataAsString();
+        if (content && content.length > 50) {
+          Logger.log('getFastSnapshotFromDriveOrExport: Served from Drive cache (' + (content.length / 1024).toFixed(1) + ' KB)');
+          return content;
+        }
+      }
+    }
+  } catch (driveErr) {
+    Logger.log('getFastSnapshotFromDriveOrExport: Drive read error: ' + driveErr);
+  }
+
+  // Fallback to live export
+  var snapshot = exportFullDatabaseSnapshot();
+  return JSON.stringify(snapshot);
+}
+
+/**
  * Applies a batch of mutations (edits, creations, updates) from the offline desktop app back into Google Sheets.
  *
  * @param {Array<Object>} mutations - Array of mutation objects from the offline outbox
