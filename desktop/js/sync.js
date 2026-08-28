@@ -500,8 +500,8 @@ class SyncEngine {
 
       while (i < totalCount) {
         batchNum++;
-        // 1 change per request for 100% steady, reliable execution
-        const chunkSize = 1;
+        // 10 changes per request for fast streaming on flattened formula-free sheets
+        const chunkSize = 10;
         const chunk = currentOutbox.slice(i, i + chunkSize);
         const isLastChunk = (i + chunk.length >= totalCount);
 
