@@ -644,7 +644,10 @@ class SafetyEmailsEngine {
         console.log(`Safety email batch #${batchIndex} response:`, response);
 
         if (!response || !response.success) {
-          throw new Error((response && response.error) ? response.error : 'Unknown server error during safety email batch.');
+          const errMsg = (response && (response.error || response.message)) 
+            ? (response.error || response.message) 
+            : (response ? JSON.stringify(response) : 'No response from Apps Script server.');
+          throw new Error(errMsg);
         }
 
         const res = response.result || {};

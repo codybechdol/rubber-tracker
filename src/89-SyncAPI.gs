@@ -2106,7 +2106,17 @@ function executeSyncApiProcessSafetyEmails(options) {
     };
   }
 
-  var result = processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction, endDate, reportTypeFilter);
+  var result = null;
+  try {
+    result = processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction, endDate, reportTypeFilter);
+  } catch (err) {
+    Logger.log('executeSyncApiProcessSafetyEmails batch error: ' + err.toString());
+    return {
+      status: 'error',
+      success: false,
+      error: 'Gmail processing error: ' + err.toString()
+    };
+  }
 
   // If there are more email batches remaining, return batch status immediately so client can show progress
   if (!result.complete && !result.isPostProcessing) {
