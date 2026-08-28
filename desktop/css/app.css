@@ -42,23 +42,28 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 20px;
+  padding: 0 16px;
   z-index: 100;
+  gap: 10px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .brand-section {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  flex-shrink: 0;
 }
 
 .brand-title {
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 700;
   color: var(--text-primary);
   display: flex;
   align-items: center;
   gap: 8px;
+  white-space: nowrap;
 }
 
 .brand-badge {
@@ -69,12 +74,31 @@ body {
   padding: 2px 8px;
   border-radius: 12px;
   border: 1px solid var(--accent);
+  white-space: nowrap;
 }
 
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  white-space: nowrap;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-end;
+  padding: 4px 0;
+}
+
+.header-actions::-webkit-scrollbar {
+  display: none;
+}
+
+.header-actions > * {
+  flex-shrink: 0;
 }
 
 .sync-status-badge {
@@ -84,8 +108,10 @@ body {
   background-color: var(--bg-tertiary);
   padding: 6px 12px;
   border-radius: 20px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .status-dot {
@@ -920,6 +946,11 @@ body.inspector-mode .brand-badge {
 
 /* Tablet & Mobile Media Queries */
 @media (max-width: 900px) {
+  .app-header {
+    padding: 0 10px;
+    gap: 8px;
+  }
+
   .mobile-menu-btn {
     display: inline-flex !important;
   }
@@ -954,15 +985,38 @@ body.inspector-mode .brand-badge {
 
   .header-actions {
     gap: 6px;
+    justify-content: flex-start;
+  }
+
+  .header-actions .btn {
+    padding: 6px 10px;
+    font-size: 11.5px;
   }
 }
 
 @media (max-width: 640px) {
+  .app-header {
+    padding: 0 8px;
+  }
+
+  .brand-title span:last-child {
+    display: none;
+  }
+
   .brand-badge {
     display: none;
   }
   
+  .sync-status-badge {
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+
   .sync-status-badge span#sync-status-text {
+    display: none;
+  }
+
+  .admin-only-control {
     display: none;
   }
 }

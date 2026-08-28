@@ -62,6 +62,25 @@
 
     <!-- Sidebar Navigation -->
     <aside class="app-sidebar">
+      <!-- Mobile Quick Sync Panel -->
+      <div class="mobile-sync-card" style="margin: 10px 12px 14px 12px; background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(59, 130, 246, 0.35); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 11px; font-weight: 700; color: #93c5fd; text-transform: uppercase;">Cloud Sync</span>
+          <span class="status-dot" id="mobile-sync-dot" style="width: 8px; height: 8px; border-radius: 50%; background: #10b981;"></span>
+        </div>
+        <button class="btn btn-primary" onclick="window.syncEngine.pushChangesToGoogleSheets(); window.toggleMobileSidebar();" style="width: 100%; justify-content: center; font-size: 12px; font-weight: 700; background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);">
+          ⬆️ Push Changes to Sheets
+        </button>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+          <button class="btn btn-secondary" onclick="window.syncEngine.downloadLatestSnapshot(); window.toggleMobileSidebar();" style="justify-content: center; font-size: 11px; padding: 5px 2px;">
+            ⬇️ Download
+          </button>
+          <button class="btn btn-secondary" onclick="window.syncEngine.syncWithGoogleSheets(); window.toggleMobileSidebar();" style="justify-content: center; font-size: 11px; padding: 5px 2px; color: #34d399;">
+            🔄 Fast Sync
+          </button>
+        </div>
+      </div>
+
       <div class="nav-group">
         <div class="nav-group-title">Main Workspaces</div>
         <div class="nav-item active" data-view="sheets-view">
@@ -1094,13 +1113,13 @@
       <span class="mobile-nav-icon">📷</span>
       <span class="mobile-nav-label">Scan ESL</span>
     </div>
-    <div class="mobile-nav-btn" data-view="tasks-view">
-      <span class="mobile-nav-icon">📋</span>
-      <span class="mobile-nav-label">Tasks</span>
+    <div class="mobile-nav-btn" data-view="expiring-certs-view">
+      <span class="mobile-nav-icon">📜</span>
+      <span class="mobile-nav-label">Certs</span>
     </div>
-    <div class="mobile-nav-btn" data-view="training-view">
-      <span class="mobile-nav-icon">🎓</span>
-      <span class="mobile-nav-label">Training</span>
+    <div class="mobile-nav-btn" onclick="window.syncEngine.pushChangesToGoogleSheets()" title="Push offline changes to Google Sheets">
+      <span class="mobile-nav-icon" id="mobile-bottom-sync-icon">⬆️</span>
+      <span class="mobile-nav-label">Push Sync</span>
     </div>
   </nav>
 
