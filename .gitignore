@@ -3,3 +3,4 @@ desktop/node_modules/
 .clasp.json
 *.log
 scratch/
+push_output.txt
