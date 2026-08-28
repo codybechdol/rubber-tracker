@@ -43,9 +43,9 @@ class SyncEngine {
       }
     }
 
-    // 2. Browser fetch fallback (with 180s timeout)
+    // 2. Browser fetch fallback (with 300s timeout for safety email batch scanning)
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 180000);
+    const timeoutId = setTimeout(() => controller.abort(), 300000);
     try {
       const options = { method, redirect: 'follow', signal: controller.signal };
       if (method === 'POST' && body) {
