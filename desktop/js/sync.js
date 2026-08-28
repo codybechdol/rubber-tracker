@@ -1070,8 +1070,50 @@ class SyncEngine {
       } else if (data && data.error) {
         alert('Error loading file: ' + data.error);
       }
+      return { success: false };
     }
-    return { success: false };
+
+    // Web & Mobile File Picker Fallback
+    return new Promise((resolve) => {
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = '.json,application/json';
+      fileInput.style.display = 'none';
+
+      fileInput.onchange = async (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) {
+          resolve({ success: false });
+          return;
+        }
+
+        try {
+          const text = await file.text();
+          const data = JSON.parse(text);
+          if (data && data.tables) {
+            await this.db.setSnapshot(data);
+            if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
+            if (window.historyNavigator) window.historyNavigator.renderCurrentHistory();
+            if (window.tripPlanner) window.tripPlanner.renderPlanner();
+            if (window.taskManager) window.taskManager.renderTasks();
+            this.updateStatusUI('synced', `Loaded ${file.name}`);
+            alert(`✅ Successfully loaded snapshot from "${file.name}"!`);
+            resolve({ success: true, data });
+          } else {
+            alert('⚠️ Invalid snapshot file. Missing "tables" property.');
+            resolve({ success: false });
+          }
+        } catch (err) {
+          alert('❌ Could not parse JSON file: ' + err.message);
+          resolve({ success: false, error: err.message });
+        } finally {
+          fileInput.remove();
+        }
+      };
+
+      document.body.appendChild(fileInput);
+      fileInput.click();
+    });
   }
 
   updateStatusUI(status, label) {
