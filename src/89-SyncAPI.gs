@@ -37,14 +37,14 @@ var COLS_SAFE = (typeof COLS !== 'undefined' && COLS) ? COLS : {
 function exportFullDatabaseSnapshot() {
   var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
   var timestamp = new Date();
-  var tz = ss ? (ss.getSpreadsheetTimeZone() || 'America/Denver') : 'America/Denver';
 
-  // Clean up any located items from swap sheets and clear stray Lost highlighting
-  try {
-    if (typeof cleanupLocatedItemsFromSwaps === 'function') {
-      cleanupLocatedItemsFromSwaps();
-    }
-  } catch (cleanErr) { /* ignore */ }
+  function fastDateString(d) {
+    if (!(d instanceof Date) || isNaN(d.getTime())) return '';
+    var m = d.getMonth() + 1;
+    var day = d.getDate();
+    var yr = d.getFullYear();
+    return (m < 10 ? '0' + m : m) + '/' + (day < 10 ? '0' + day : day) + '/' + yr;
+  }
 
   // List of all sheets to sync with their offline table keys
   var sheetConfigs = [
@@ -134,7 +134,7 @@ function exportFullDatabaseSnapshot() {
         var formattedStr = '';
 
         if (rawVal instanceof Date) {
-          formattedStr = Utilities.formatDate(rawVal, tz, 'MM/dd/yyyy');
+          formattedStr = fastDateString(rawVal);
         } else if (rawVal === null || rawVal === undefined) {
           formattedStr = '';
         } else {
@@ -1872,217 +1872,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
   };
 }
 
-/**
- * Web App GET endpoint: Handles snapshot requests from the Tauri Desktop App.
- */
-function doGet(e) {
-  var action = (e && e.parameter && e.parameter.action) || 'getSnapshot';
-
-  if (action === 'ping') {
-    return ContentService.createTextOutput(JSON.stringify({
-      status: 'ok',
-      serverTime: new Date().toISOString()
-    })).setMimeType(ContentService.MimeType.JSON);
-  }
-
-  if (action === 'getPushStatus' || action === 'getTelemetry') {
-    var rawTelemetry = PropertiesService.getScriptProperties().getProperty('LAST_SYNC_PUSH');
-    var telemetry = rawTelemetry ? JSON.parse(rawTelemetry) : null;
-    return ContentService.createTextOutput(JSON.stringify({
-      status: 'ok',
-      lastPush: telemetry,
-      serverTime: new Date().toISOString()
-    })).setMimeType(ContentService.MimeType.JSON);
-  }
-
-  if (action === 'applyMutations') {
-    try {
-      var mutationsJson = (e && e.parameter && e.parameter.mutations) || '[]';
-      var mutations = JSON.parse(mutationsJson);
-      var returnSnap = (e && e.parameter && e.parameter.returnSnapshot) === 'true';
-      var force = (e && e.parameter && e.parameter.force) === 'true';
-      var detectConflicts = (e && e.parameter && e.parameter.detectConflicts) !== 'false';
-      var skipPostProcessing = (e && e.parameter && e.parameter.skipPostProcessing) === 'true';
-      var result = applyBatchSyncMutations(mutations, returnSnap, { detectConflicts: detectConflicts, force: force, skipPostProcessing: skipPostProcessing });
-      return ContentService.createTextOutput(JSON.stringify(result))
-        .setMimeType(ContentService.MimeType.JSON);
-    } catch (mutErr) {
-      return ContentService.createTextOutput(JSON.stringify({
-        status: 'error',
-        success: false,
-        error: mutErr.toString()
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
-  }
-
-  if (action === 'reconcileInventoryFromHistory') {
-    try {
-      var recResult = (typeof reconcileInventoryFromHistory === 'function')
-        ? reconcileInventoryFromHistory(true)
-        : { success: false, message: 'reconcileInventoryFromHistory not defined' };
-      return ContentService.createTextOutput(JSON.stringify(recResult))
-        .setMimeType(ContentService.MimeType.JSON);
-    } catch (recErr) {
-      return ContentService.createTextOutput(JSON.stringify({
-        status: 'error',
-        success: false,
-        error: recErr.toString()
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
-  }
-
-  if (action === 'processSafetyEmails') {
-    try {
-      var daysBack = parseInt((e && e.parameter && e.parameter.daysBack) || '7', 10);
-      var reportTypeFilter = (e && e.parameter && e.parameter.reportTypeFilter) || 'ALL';
-      var newOnlyMode = (e && e.parameter && e.parameter.newOnlyMode) !== 'false';
-      var skipPdfExtraction = (e && e.parameter && e.parameter.skipPdfExtraction) === 'true';
-      var endDate = (e && e.parameter && e.parameter.endDate) || null;
-
-      var result = executeSyncApiProcessSafetyEmails({
-        daysBack: daysBack,
-        reportTypeFilter: reportTypeFilter,
-        newOnlyMode: newOnlyMode,
-        skipPdfExtraction: skipPdfExtraction,
-        endDate: endDate
-      });
-
-      return ContentService.createTextOutput(JSON.stringify(result))
-        .setMimeType(ContentService.MimeType.JSON);
-    } catch (procErr) {
-      return ContentService.createTextOutput(JSON.stringify({
-        status: 'error',
-        success: false,
-        error: procErr.toString()
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
-  }
-
-  if (action === 'syncTrainingAttendees') {
-    try {
-      refreshTrainingAttendeesSilent();
-      updateTrainingTrackingCrewLeadsSilent();
-      addMissingCrewsToTrainingTracking();
-      return ContentService.createTextOutput(JSON.stringify({
-        status: 'ok',
-        success: true,
-        message: 'Training attendees and crew leads synchronized'
-      })).setMimeType(ContentService.MimeType.JSON);
-    } catch (syncErr) {
-      return ContentService.createTextOutput(JSON.stringify({
-        status: 'error',
-        success: false,
-        error: syncErr.toString()
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
-  }
-
-  if (action === 'getSafetyPdf') {
-    try {
-      var emailId = (e && e.parameter && e.parameter.emailId) || '';
-      var subject = (e && e.parameter && e.parameter.subject) || '';
-      var pdfRes = getSafetyEmailPdf(emailId, subject);
-      return ContentService.createTextOutput(JSON.stringify(pdfRes))
-        .setMimeType(ContentService.MimeType.JSON);
-    } catch (pdfErr) {
-      return ContentService.createTextOutput(JSON.stringify({
-        success: false,
-        error: pdfErr.toString()
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
-  }
-
-  if (action === 'getSnapshot' || !action) {
-    var snapshot = exportFullDatabaseSnapshot();
-    try {
-      if (typeof generateAndStoreSyncSnapshot === 'function') {
-        generateAndStoreSyncSnapshot(snapshot);
-      }
-    } catch (snapStoreErr) {
-      Logger.log('doGet getSnapshot store error: ' + snapStoreErr);
-    }
-    return ContentService.createTextOutput(JSON.stringify(snapshot))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-
-  return ContentService.createTextOutput(JSON.stringify({
-    status: 'ok',
-    message: 'Action ' + action + ' received'
-  })).setMimeType(ContentService.MimeType.JSON);
-}
-
-/**
- * Web App POST endpoint: Handles batch mutation pushes and action execution from Desktop App.
- */
-function doPost(e) {
-  try {
-    var rawBody = e.postData ? e.postData.contents : '{}';
-    var payload = JSON.parse(rawBody);
-    var isArray = Array.isArray(payload);
-    var action = isArray ? 'applyMutations' : (payload.action || 'applyMutations');
-    var mutations = isArray ? payload : (payload.mutations || []);
-
-    if (action === 'applyMutations' || action === 'sync') {
-      var returnSnap = isArray ? false : (payload.returnSnapshot === true);
-      var options = {
-        detectConflicts: isArray ? true : (payload.detectConflicts !== false),
-        force: isArray ? false : (payload.force === true),
-        skipPostProcessing: isArray ? false : (payload.skipPostProcessing === true)
-      };
-      var result = applyBatchSyncMutations(mutations, returnSnap, options);
-      return ContentService.createTextOutput(JSON.stringify(result))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-
-    if (action === 'reconcileInventoryFromHistory') {
-      var recResult = (typeof reconcileInventoryFromHistory === 'function')
-        ? reconcileInventoryFromHistory(true)
-        : { success: false, message: 'reconcileInventoryFromHistory not defined' };
-      return ContentService.createTextOutput(JSON.stringify(recResult))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-
-    if (action === 'processSafetyEmails') {
-      var procResult = executeSyncApiProcessSafetyEmails({
-        daysBack: payload.daysBack || 7,
-        reportTypeFilter: payload.reportTypeFilter || 'ALL',
-        newOnlyMode: payload.newOnlyMode !== false,
-        skipPdfExtraction: payload.skipPdfExtraction === true,
-        endDate: payload.endDate || null
-      });
-      return ContentService.createTextOutput(JSON.stringify(procResult))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-
-    if (action === 'getSafetyPdf') {
-      var pdfResult = getSafetyEmailPdf(payload.emailId, payload.subject);
-      return ContentService.createTextOutput(JSON.stringify(pdfResult))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-
-    if (action === 'getSnapshot') {
-      var snapshot = exportFullDatabaseSnapshot();
-      try {
-        if (typeof generateAndStoreSyncSnapshot === 'function') {
-          generateAndStoreSyncSnapshot(snapshot);
-        }
-      } catch (snapStoreErr) {
-        Logger.log('doPost getSnapshot store error: ' + snapStoreErr);
-      }
-      return ContentService.createTextOutput(JSON.stringify(snapshot))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-
-    return ContentService.createTextOutput(JSON.stringify({
-      error: 'Unknown action: ' + action
-    })).setMimeType(ContentService.MimeType.JSON);
-
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({
-      error: err.toString()
-    })).setMimeType(ContentService.MimeType.JSON);
-  }
-}
+// Note: Canonical Web App doGet and doPost handlers are located in Code.gs
 
 /**
  * Executes safety email processing and returns structured results with refreshed snapshot.
