@@ -68,12 +68,8 @@ echo.
 
 if %PUSH_RESULT% EQU 0 (
     echo.
-    echo [Step 4/4] Redeploying Web App deployment...
-    echo ----------------------------------------
-    call "%APPDATA%\npm\clasp.cmd" deploy -i AKfycbwiNHntFllJB-7fWT4HMF4-ruFxdX6hjSXkYQbtcEYcQQKn0fXW_4BK5qjfjTfSGbiI -d "Auto deployed by push.bat"
-    echo.
     echo ========================================
-    echo SUCCESS! Files pushed and Web App deployed.
+    echo SUCCESS! Files pushed to Apps Script.
     echo ========================================
 ) else (
     echo.
