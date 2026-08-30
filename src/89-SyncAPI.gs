@@ -123,7 +123,18 @@ function exportFullDatabaseSnapshot() {
     var rows = [];
     var rawGrid = [];
 
+    var isLogOrHistory = cfg.key.indexOf('history') !== -1 || cfg.key.indexOf('_log') !== -1;
+    var maxHistoryRows = 300;
+    var startRowIndex = 0;
+    if (isLogOrHistory && data.length > maxHistoryRows + 10) {
+      startRowIndex = data.length - maxHistoryRows;
+    }
+
     for (var r = 0; r < data.length; r++) {
+      if (r > headerRowIdx && isLogOrHistory && r < startRowIndex) {
+        continue;
+      }
+
       var rowArray = data[r];
       var gridRow = [];
       var isDataRow = r > headerRowIdx;
@@ -146,12 +157,7 @@ function exportFullDatabaseSnapshot() {
         if (isDataRow && c < headers.length) {
           var hName = headers[c];
           if (hName) {
-            if (rawVal instanceof Date) {
-              rowObj[hName] = formattedStr;
-              rowObj[hName + '_raw'] = rawVal.toISOString();
-            } else {
-              rowObj[hName] = rawVal;
-            }
+            rowObj[hName] = rawVal instanceof Date ? formattedStr : rawVal;
           }
         }
       }
@@ -245,12 +251,6 @@ function generateAndStoreSyncSnapshot(existingSnapshot) {
     } else {
       file = folder.createFile(SYNC_SNAPSHOT_FILENAME, jsonStr, MimeType.PLAIN_TEXT);
       Logger.log('generateAndStoreSyncSnapshot: Created new ' + SYNC_SNAPSHOT_FILENAME);
-    }
-
-    if (file) {
-      try {
-        file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-      } catch (shErr) { /* ignore */ }
     }
 
     var elapsed = new Date().getTime() - startTime;
