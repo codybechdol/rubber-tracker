@@ -2,7 +2,7 @@
  * sync.js - Google Sheets Synchronization Client with Live Offline Changes Modal
  */
 
-const DEFAULT_SYNC_URL = 'https://script.google.com/macros/s/AKfycby_F6C-8NnJnZZqem7KrMvslUK8G2pf3x65EqY1_DgDepNRlTTbYoVGb2soDd3PoAnR/exec';
+const DEFAULT_SYNC_URL = 'https://script.google.com/macros/s/AKfycbwiNHntFllJB-7fWT4HMF4-ruFxdX6hjSXkYQbtcEYcQQKn0fXW_4BK5qjfjTfSGbiI/exec';
 
 class SyncEngine {
   constructor(db) {
