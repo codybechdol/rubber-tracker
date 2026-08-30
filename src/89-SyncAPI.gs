@@ -232,7 +232,7 @@ function generateAndStoreSyncSnapshot(existingSnapshot) {
   try {
     var startTime = new Date().getTime();
     var snapshot = existingSnapshot || exportFullDatabaseSnapshot();
-    var jsonStr = JSON.stringify(snapshot, null, 2);
+    var jsonStr = JSON.stringify(snapshot);
 
     var folder = getOrCreateBackupFolder();
     var files = folder.getFilesByName(SYNC_SNAPSHOT_FILENAME);
@@ -241,16 +241,16 @@ function generateAndStoreSyncSnapshot(existingSnapshot) {
     if (files.hasNext()) {
       file = files.next();
       file.setContent(jsonStr);
-      Logger.log('generateAndStoreSyncSnapshot: Updated existing ' + SYNC_SNAPSHOT_FILENAME + ' in backup folder: ' + folder.getName());
+      Logger.log('generateAndStoreSyncSnapshot: Updated existing ' + SYNC_SNAPSHOT_FILENAME);
     } else {
       file = folder.createFile(SYNC_SNAPSHOT_FILENAME, jsonStr, MimeType.PLAIN_TEXT);
-      Logger.log('generateAndStoreSyncSnapshot: Created new ' + SYNC_SNAPSHOT_FILENAME + ' in backup folder: ' + folder.getName());
+      Logger.log('generateAndStoreSyncSnapshot: Created new ' + SYNC_SNAPSHOT_FILENAME);
     }
 
     if (file) {
       try {
-        PropertiesService.getScriptProperties().setProperty('SYNC_SNAPSHOT_FILE_ID', file.getId());
-      } catch (saveIdErr) { /* ignore */ }
+        file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      } catch (shErr) { /* ignore */ }
     }
 
     var elapsed = new Date().getTime() - startTime;
