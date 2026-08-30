@@ -7,7 +7,13 @@ const DEFAULT_SYNC_URL = 'https://script.google.com/macros/s/AKfycbwiNHntFllJB-7
 class SyncEngine {
   constructor(db) {
     this.db = db;
-    this.syncUrl = localStorage.getItem('sa_sync_url') || DEFAULT_SYNC_URL;
+    let savedUrl = localStorage.getItem('sa_sync_url');
+    // If savedUrl is missing, empty, or points to any old non-working deployment URL, auto-migrate to DEFAULT_SYNC_URL!
+    if (!savedUrl || savedUrl.includes('AKfycby_F6C') || savedUrl.includes('AKfycbxs') || savedUrl.includes('AKfycbxx') || savedUrl.includes('AKfycbycoq') || !savedUrl.includes('AKfycbwiNHntFllJB')) {
+      savedUrl = DEFAULT_SYNC_URL;
+      localStorage.setItem('sa_sync_url', DEFAULT_SYNC_URL);
+    }
+    this.syncUrl = savedUrl;
     this.isSyncing = false;
     if (this.db && typeof this.db.subscribe === 'function') {
       this.db.subscribe(() => this.renderOutboxBadge());
@@ -73,9 +79,8 @@ class SyncEngine {
   }
 
   async testConnection() {
-    if (!this.syncUrl) return { success: false, message: 'Please enter your Google Apps Script Web App URL.' };
-    
-    if (this.syncUrl.includes('docs.google.com/spreadsheets')) {
+    let activeUrl = this.syncUrl || DEFAULT_SYNC_URL;
+    if (activeUrl.includes('docs.google.com/spreadsheets')) {
       return { 
         success: false, 
         message: 'You entered a Google Spreadsheet link instead of the Apps Script Web App URL.\n\nTo get your Web App URL:\n1. Open your Google Sheet\n2. Click Extensions > Apps Script\n3. Click Deploy (top right) > Manage Deployments (or New Deployment > Web App)\n4. Copy the Web App URL (starts with https://script.google.com/macros/s/.../exec)' 
@@ -83,9 +88,18 @@ class SyncEngine {
     }
 
     try {
-      const data = await this.executeNetworkRequest(`${this.syncUrl}?action=ping`, 'GET');
+      const data = await this.executeNetworkRequest(`${activeUrl}?action=ping`, 'GET');
       return { success: data && (data.status === 'ok' || data.success === true), data };
     } catch (e) {
+      if (activeUrl !== DEFAULT_SYNC_URL) {
+        try {
+          const fallbackData = await this.executeNetworkRequest(`${DEFAULT_SYNC_URL}?action=ping`, 'GET');
+          if (fallbackData && (fallbackData.status === 'ok' || fallbackData.success === true)) {
+            this.setSyncUrl(DEFAULT_SYNC_URL);
+            return { success: true, data: fallbackData };
+          }
+        } catch (fErr) { /* ignore */ }
+      }
       return { 
         success: false, 
         message: e.message || 'Connection failed. Please ensure "Who has access" is set to "Anyone" in Deploy > Manage deployments.' 
@@ -1008,7 +1022,20 @@ class SyncEngine {
     }, 200);
 
     try {
-      const freshSnapshot = await this.executeNetworkRequest(`${this.syncUrl}?action=getSnapshot`, 'GET');
+      let activeUrl = this.syncUrl || DEFAULT_SYNC_URL;
+      let freshSnapshot = null;
+      try {
+        freshSnapshot = await this.executeNetworkRequest(`${activeUrl}?action=getSnapshot`, 'GET');
+      } catch (reqErr) {
+        if (activeUrl !== DEFAULT_SYNC_URL) {
+          console.warn('Custom syncUrl failed, falling back to default working URL:', reqErr);
+          this.setSyncUrl(DEFAULT_SYNC_URL);
+          freshSnapshot = await this.executeNetworkRequest(`${DEFAULT_SYNC_URL}?action=getSnapshot`, 'GET');
+        } else {
+          throw reqErr;
+        }
+      }
+
       clearInterval(downloadTimerInterval);
       const totalElapsedMs = Date.now() - downloadStartTime;
       const durationFormatted = this.formatDuration(totalElapsedMs);
