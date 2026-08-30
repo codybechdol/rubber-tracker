@@ -2408,16 +2408,58 @@ function getSafetyEmailPdf(emailId, subject) {
 
 /**
  * Menu item to manually export/update the offline sync snapshot.
+ * Displays a direct 1-click download button and updates Google Drive.
  */
 function menuExportSyncSnapshot() {
   var ui = SpreadsheetApp.getUi();
   try {
-    var file = generateAndStoreSyncSnapshot();
-    if (file) {
-      ui.alert('✅ Offline Snapshot Created', 'The sync snapshot for the Tauri Desktop App has been updated in Google Drive:\n\n' + file.getName() + '\n\nUpdated: ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MM/dd/yyyy hh:mm a'), ui.ButtonSet.OK);
-    } else {
-      ui.alert('❌ Error', 'Could not create sync snapshot.', ui.ButtonSet.OK);
+    var snapshot = exportFullDatabaseSnapshot();
+    var jsonStr = JSON.stringify(snapshot);
+
+    // Save to Google Drive in the background (wrapped so quota errors don't block the direct download)
+    try {
+      if (typeof generateAndStoreSyncSnapshot === 'function') {
+        generateAndStoreSyncSnapshot(snapshot);
+      }
+    } catch (dErr) {
+      Logger.log('menuExportSyncSnapshot: Drive save warning: ' + dErr);
     }
+
+    var base64Json = Utilities.base64Encode(Utilities.newBlob(jsonStr).getBytes());
+    var htmlContent = [
+      '<!DOCTYPE html>',
+      '<html>',
+      '<head>',
+      '  <style>',
+      '    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; background: #0f172a; color: #f8fafc; text-align: center; margin: 0; }',
+      '    .btn { background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); color: white; border: none; padding: 12px 24px; border-radius: 8px; font-weight: 700; font-size: 14px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 12px rgba(59,130,246,0.3); margin: 16px 0; width: 85%; }',
+      '    .btn:hover { background: #2563eb; }',
+      '    .info-box { background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.3); border-radius: 8px; padding: 12px 14px; font-size: 12px; color: #94a3b8; text-align: left; line-height: 1.5; margin-top: 10px; }',
+      '  </style>',
+      '</head>',
+      '<body>',
+      '  <div style="font-size: 32px; margin-bottom: 6px;">💾</div>',
+      '  <h3 style="margin: 0 0 6px 0; font-size: 17px; color: #34d399;">Snapshot Generated Successfully!</h3>',
+      '  <p style="font-size: 12px; color: #94a3b8; margin: 0;">Size: ' + (jsonStr.length / 1024).toFixed(1) + ' KB | ' + (snapshot.tables ? Object.keys(snapshot.tables).length : 0) + ' Tables</p>',
+      '  <a id="dl-link" class="btn" href="data:application/json;base64,' + base64Json + '" download="SafetyAssistant_Sync_Snapshot.json">📥 Download Snapshot File</a>',
+      '  <div class="info-box">',
+      '    <strong>📱 How to load onto your iPad / Phone:</strong><br>',
+      '    1. Click <strong>Download Snapshot File</strong> above to save it to your computer.<br>',
+      '    2. AirDrop, email, or save the downloaded file to your iPad/iPhone.<br>',
+      '    3. Open the Safety Assistant app on your tablet, tap <strong>📁 Import Snapshot</strong>, and pick the file.',
+      '  </div>',
+      '  <div style="margin-top: 14px;">',
+      '    <button style="background: transparent; border: 1px solid #475569; color: #94a3b8; padding: 6px 16px; border-radius: 6px; cursor: pointer; font-size: 12px;" onclick="google.script.host.close()">Close</button>',
+      '  </div>',
+      '</body>',
+      '</html>'
+    ].join('\n');
+
+    var htmlOutput = HtmlService.createHtmlOutput(htmlContent)
+      .setWidth(450)
+      .setHeight(340);
+    ui.showModalDialog(htmlOutput, 'Offline Snapshot Ready');
+
   } catch (e) {
     ui.alert('❌ Error', 'Error creating sync snapshot: ' + e.toString(), ui.ButtonSet.OK);
   }

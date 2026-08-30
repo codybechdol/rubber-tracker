@@ -1089,6 +1089,11 @@ class SyncEngine {
 
         try {
           const text = await file.text();
+          if (text.includes('quota') || text.includes('Quota') || text.startsWith('<!DOCTYPE') || text.startsWith('<html')) {
+            alert('⚠️ This file is not a valid snapshot file. It contains an error message or rate limit notice from Google Drive:\n\n"' + text.substring(0, 140).trim() + '..."\n\nPlease export a fresh snapshot directly from Google Sheets: Glove Manager > 💾 Save & Backup > 🔄 Export Offline Snapshot (Desktop App).');
+            resolve({ success: false, error: 'Quota exceeded in downloaded file' });
+            return;
+          }
           const data = JSON.parse(text);
           if (data && data.tables) {
             await this.db.setSnapshot(data);
