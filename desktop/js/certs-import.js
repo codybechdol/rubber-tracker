@@ -125,7 +125,7 @@ class CertsImportEngine {
 
         <!-- Drag & Drop Upload Box -->
         <div id="certs-drop-zone" style="border: 2px dashed #3b82f6; border-radius: 10px; background: rgba(15, 23, 42, 0.6); padding: 36px 20px; text-align: center; cursor: pointer; transition: all 0.2s ease;">
-          <input type="file" id="certs-file-input" accept=".xlsx, .xls, .csv" style="display: none;" onchange="window.certsImportEngine.handleFileSelected(this.files[0])" />
+          <input type="file" id="certs-file-input" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,*/*" style="display: none;" onchange="window.certsImportEngine.handleFileSelected(this.files[0])" />
           <div style="font-size: 38px; margin-bottom: 8px;">📁</div>
           <div style="font-size: 14px; font-weight: 700; color: #f8fafc; margin-bottom: 4px;">Click to Browse or Drag & Drop File Here</div>
           <div style="font-size: 11.5px; color: var(--text-muted);">Supports .xlsx, .xls, and .csv formats</div>

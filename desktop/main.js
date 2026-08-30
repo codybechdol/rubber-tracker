@@ -124,7 +124,7 @@ ipcMain.handle('save-local-outbox', async (event, outbox) => {
 ipcMain.handle('select-snapshot-file', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile'],
-    filters: [{ name: 'JSON Snapshot', extensions: ['json'] }]
+    filters: [{ name: 'JSON/Text Snapshot', extensions: ['json', 'txt'] }]
   });
   if (!result.canceled && result.filePaths.length > 0) {
     try {

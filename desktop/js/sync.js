@@ -1077,7 +1077,7 @@ class SyncEngine {
     return new Promise((resolve) => {
       const fileInput = document.createElement('input');
       fileInput.type = 'file';
-      fileInput.accept = '.json,application/json';
+      // Do not set accept on iOS/mobile: iOS UIDocumentPicker greys out files with unrecognized UTIs if accept is specified.
       fileInput.style.display = 'none';
 
       fileInput.onchange = async (e) => {

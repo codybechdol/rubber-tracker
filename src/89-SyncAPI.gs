@@ -272,22 +272,54 @@ function generateAndStoreSyncSnapshot(existingSnapshot) {
 function getFastSnapshotFromDriveOrExport() {
   try {
     var fileId = PropertiesService.getScriptProperties().getProperty('SYNC_SNAPSHOT_FILE_ID');
+    var file = null;
     if (fileId) {
-      var file = DriveApp.getFileById(fileId);
-      if (file && !file.isTrashed()) {
-        var content = file.getBlob().getDataAsString();
-        if (content && content.length > 50) {
-          Logger.log('getFastSnapshotFromDriveOrExport: Served from Drive cache (' + (content.length / 1024).toFixed(1) + ' KB)');
-          return content;
+      try {
+        file = DriveApp.getFileById(fileId);
+      } catch (fErr) { file = null; }
+    }
+
+    // Auto-discover existing snapshot file in the backup folder if property wasn't set
+    if (!file || file.isTrashed()) {
+      try {
+        var folder = getOrCreateBackupFolder();
+        var files = folder.getFilesByName(SYNC_SNAPSHOT_FILENAME);
+        if (files.hasNext()) {
+          file = files.next();
+        } else {
+          var txtFiles = folder.getFilesByName('snapshot.txt');
+          if (txtFiles.hasNext()) {
+            file = txtFiles.next();
+          }
         }
+        if (file && !file.isTrashed()) {
+          PropertiesService.getScriptProperties().setProperty('SYNC_SNAPSHOT_FILE_ID', file.getId());
+        }
+      } catch (findErr) {
+        Logger.log('getFastSnapshotFromDriveOrExport: Folder search error: ' + findErr);
+      }
+    }
+
+    if (file && !file.isTrashed()) {
+      var content = file.getBlob().getDataAsString();
+      if (content && content.length > 50) {
+        Logger.log('getFastSnapshotFromDriveOrExport: Served from Drive cache (' + (content.length / 1024).toFixed(1) + ' KB)');
+        return content;
       }
     }
   } catch (driveErr) {
     Logger.log('getFastSnapshotFromDriveOrExport: Drive read error: ' + driveErr);
   }
 
-  // Fallback to live export
+  // Fallback to live export and auto-save to Drive cache
   var snapshot = exportFullDatabaseSnapshot();
+  try {
+    if (typeof generateAndStoreSyncSnapshot === 'function') {
+      generateAndStoreSyncSnapshot(snapshot);
+    }
+  } catch (saveErr) {
+    Logger.log('getFastSnapshotFromDriveOrExport: Auto-store snapshot error: ' + saveErr);
+  }
   return JSON.stringify(snapshot);
 }
 

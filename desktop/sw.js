@@ -3,7 +3,7 @@
  * Provides offline caching, network-first strategy, and background sync support.
  */
 
-const CACHE_NAME = 'safety-assistant-v1';
+const CACHE_NAME = 'safety-assistant-v2';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -63,10 +63,17 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   if (!event.request.url.startsWith('http://') && !event.request.url.startsWith('https://')) return;
 
+  // IMPORTANT: Only handle requests to the SAME origin (local static assets like app.css, js, html).
+  // Cross-origin network requests (such as Google Apps Script syncUrl, script.google.com, Google Drive)
+  // MUST NOT be intercepted by the Service Worker.
+  if (!event.request.url.startsWith(self.location.origin)) {
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
-        // Return cached asset and update in background
+        // Return cached asset and refresh cache in background
         fetch(event.request).then((networkResponse) => {
           if (networkResponse && networkResponse.status === 200) {
             caches.open(CACHE_NAME).then((cache) => {
@@ -78,17 +85,24 @@ self.addEventListener('fetch', (event) => {
       }
 
       return fetch(event.request).then((networkResponse) => {
-        if (networkResponse && networkResponse.status === 200 && event.request.url.startsWith(self.location.origin)) {
+        if (networkResponse && networkResponse.status === 200) {
           const clonedResponse = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
             cache.put(event.request, clonedResponse);
           });
         }
         return networkResponse;
-      }).catch(() => {
+      }).catch((fetchErr) => {
         if (event.request.headers.get('accept') && event.request.headers.get('accept').includes('text/html')) {
-          return caches.match('./index.html');
+          return caches.match('./index.html').then((indexFallback) => {
+            return indexFallback || new Response('Offline', { status: 503, statusText: 'Offline' });
+          });
         }
+        return new Response(JSON.stringify({ error: 'Offline', details: fetchErr ? fetchErr.message : 'Network error' }), {
+          status: 503,
+          statusText: 'Service Unavailable',
+          headers: { 'Content-Type': 'application/json' }
+        });
       });
     })
   );

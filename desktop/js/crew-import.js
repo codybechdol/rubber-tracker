@@ -2086,7 +2086,7 @@ class CrewImportEngine {
           <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">
             Supports .xlsx, .xls, and .csv formats. Client-side processing (instant & offline).
           </p>
-          <input type="file" id="crew-import-file-input" accept=".xlsx,.xls,.csv" style="display: none;" onchange="window.crewImportEngine.handleFileSelected(event)">
+          <input type="file" id="crew-import-file-input" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,*/*" style="display: none;" onchange="window.crewImportEngine.handleFileSelected(event)">
           <button class="btn btn-primary" style="font-size: 13px; font-weight: 700; pointer-events: none;">
             Browse File
           </button>
