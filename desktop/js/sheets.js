@@ -2605,11 +2605,18 @@ class SheetNavigator {
         const isFailedRubber = valLower === 'failed rubber' || valLower === 'failed' || valLower === 'not repairable';
 
         if ((isAssignedCol || isStatusCol) && isFailedRubber) {
-          const reason = await this.promptFailedRubberReason(itemIdentifier);
-          if (!reason) {
+          const curTestDate = String((tableRow && (tableRow['Test Date'] || tableRow['Calibration Date'])) || '').trim();
+          const failResult = await this.promptFailedRubberReason(itemIdentifier, curTestDate);
+          if (!failResult) {
             e.target.textContent = initialVal;
             return;
           }
+
+          const reason = typeof failResult === 'object' ? failResult.reason : failResult;
+          const failTestDate = (typeof failResult === 'object' && failResult.testDate) ? failResult.testDate : '';
+
+          const today = new Date();
+          const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
 
           newVal = 'Failed Rubber';
           e.target.textContent = newVal;
@@ -2617,6 +2624,8 @@ class SheetNavigator {
           const assignedColName = (tableData.headers || []).find(h => /assigned\s*to|^assigned$|^holder$/i.test(h));
           const statusColName = (tableData.headers || []).find(h => /^status$|^item\s*status$/i.test(h));
           const locationColName = (tableData.headers || []).find(h => /^location$/i.test(h));
+          const dateAssignedColName = (tableData.headers || []).find(h => /date\s*assigned/i.test(h));
+          const testDateColName = (tableData.headers || []).find(h => /test\s*date|calibration/i.test(h));
           const chgOutColName = (tableData.headers || []).find(h => /change\s*out/i.test(h));
           const pickedColName = (tableData.headers || []).find(h => /picked\s*for/i.test(h));
           const notesColName = (tableData.headers || []).find(h => /^notes$|^note$/i.test(h));
@@ -2625,6 +2634,8 @@ class SheetNavigator {
             if (assignedColName) tableRow[assignedColName] = 'Failed Rubber';
             if (statusColName) tableRow[statusColName] = 'Failed Rubber';
             if (locationColName) tableRow[locationColName] = 'Destroyed';
+            if (dateAssignedColName) tableRow[dateAssignedColName] = todayFormatted;
+            if (testDateColName && failTestDate) tableRow[testDateColName] = failTestDate;
             if (chgOutColName) tableRow[chgOutColName] = 'N/A';
             if (pickedColName) tableRow[pickedColName] = '';
             if (notesColName) tableRow[notesColName] = reason;
@@ -2635,9 +2646,13 @@ class SheetNavigator {
           if (assignedColName) await queueCell(assignedColName, 'Failed Rubber');
           if (statusColName) await queueCell(statusColName, 'Failed Rubber');
           if (locationColName) await queueCell(locationColName, 'Destroyed');
+          if (dateAssignedColName) await queueCell(dateAssignedColName, todayFormatted);
+          if (testDateColName && failTestDate) await queueCell(testDateColName, failTestDate);
           if (chgOutColName) await queueCell(chgOutColName, 'N/A');
           if (pickedColName) await queueCell(pickedColName, '');
           if (notesColName) await queueCell(notesColName, reason);
+
+          await this.db.recordItemHistoryEvent(sheetName, tableRow, `Marked Failed Rubber: ${reason}`);
 
           if (typeof this.db.setSnapshot === 'function' && this.db.snapshot) {
             await this.db.setSnapshot(this.db.snapshot);
@@ -2820,16 +2835,24 @@ class SheetNavigator {
     });
   }
 
-  promptFailedRubberReason(itemIdentifier) {
+  promptFailedRubberReason(itemIdentifier, currentTestDate = '') {
     return new Promise((resolve) => {
       const modal = document.getElementById('failed-rubber-reason-modal');
+      const today = new Date();
+      const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+      const todayIso = today.toISOString().split('T')[0];
+
       if (!modal) {
-        const choice = prompt(`Item ${itemIdentifier || ''} marked as Failed Rubber.\nHow did it fail?\n1 - Electrical\n2 - Visual\n3 - Damaged In Field`, 'Visual');
+        let defaultTest = currentTestDate || todayFormatted;
+        const testPrompt = prompt(`Item ${itemIdentifier || ''} marked as Failed Rubber.\nEnter Fail / Test Date (MM/DD/YYYY):`, defaultTest);
+        if (!testPrompt) return resolve(null);
+        const choice = prompt(`How did it fail?\n1 - Electrical\n2 - Visual\n3 - Damaged In Field`, 'Visual');
         if (!choice) return resolve(null);
-        if (choice === '1' || choice.toLowerCase() === 'electrical') return resolve('Electrical');
-        if (choice === '2' || choice.toLowerCase() === 'visual') return resolve('Visual');
-        if (choice === '3' || choice.toLowerCase().includes('damage') || choice.toLowerCase().includes('field')) return resolve('Damaged In Field');
-        return resolve(choice);
+        let finalChoice = choice;
+        if (choice === '1' || choice.toLowerCase() === 'electrical') finalChoice = 'Electrical';
+        else if (choice === '2' || choice.toLowerCase() === 'visual') finalChoice = 'Visual';
+        else if (choice === '3' || choice.toLowerCase().includes('damage') || choice.toLowerCase().includes('field')) finalChoice = 'Damaged In Field';
+        return resolve({ reason: finalChoice, testDate: testPrompt.trim() });
       }
 
       const titleEl = document.getElementById('failed-rubber-item-title');
@@ -2837,7 +2860,37 @@ class SheetNavigator {
         titleEl.textContent = itemIdentifier ? `Item #${itemIdentifier} Marked as Failed Rubber` : `Item Marked as Failed Rubber`;
       }
 
+      const testInput = document.getElementById('failed-rubber-test-date');
+      const testPicker = document.getElementById('failed-rubber-test-date-picker');
       const notesInput = document.getElementById('failed-rubber-custom-notes');
+
+      const initialTest = currentTestDate || todayFormatted;
+      if (testInput) testInput.value = initialTest;
+      if (testPicker) {
+        if (/^\d{2}\/\d{2}\/\d{4}$/.test(initialTest)) {
+          const p = initialTest.split('/');
+          testPicker.value = `${p[2]}-${p[0]}-${p[1]}`;
+        } else {
+          testPicker.value = todayIso;
+        }
+      }
+
+      if (testPicker && testInput) {
+        testPicker.onchange = () => {
+          if (testPicker.value) {
+            const p = testPicker.value.split('-');
+            testInput.value = `${p[1]}/${p[2]}/${p[0]}`;
+          }
+        };
+        testInput.oninput = () => {
+          const val = testInput.value.trim();
+          if (/^\d{2}\/\d{2}\/\d{4}$/.test(val)) {
+            const p = val.split('/');
+            testPicker.value = `${p[2]}-${p[0]}-${p[1]}`;
+          }
+        };
+      }
+
       if (notesInput) {
         notesInput.value = '';
       }
@@ -2851,6 +2904,8 @@ class SheetNavigator {
         modal.style.display = 'none';
         if (closeBtn) closeBtn.onclick = null;
         if (cancelBtn) cancelBtn.onclick = null;
+        if (testPicker) testPicker.onchange = null;
+        if (testInput) testInput.oninput = null;
         optionBtns.forEach(b => b.onclick = null);
         document.removeEventListener('keydown', handleEsc);
       };
@@ -2863,10 +2918,20 @@ class SheetNavigator {
       };
 
       const handleSelect = (reason) => {
+        let tDate = testInput ? testInput.value.trim() : '';
+        if (!tDate) tDate = todayFormatted;
+        if (tDate.includes('-')) {
+          const p = tDate.split('-');
+          if (p.length === 3) tDate = `${p[1]}/${p[2]}/${p[0]}`;
+        }
+
         const extraNotes = notesInput ? notesInput.value.trim() : '';
         const finalNote = extraNotes ? `${reason} - ${extraNotes}` : reason;
         cleanup();
-        resolve(finalNote);
+        resolve({
+          reason: finalNote,
+          testDate: tDate
+        });
       };
 
       const handleCancel = () => {
@@ -2887,7 +2952,10 @@ class SheetNavigator {
 
       modal.classList.add('active');
       modal.style.display = 'flex';
-      if (notesInput) notesInput.focus();
+      if (testInput) {
+        testInput.focus();
+        testInput.select();
+      }
     });
   }
 

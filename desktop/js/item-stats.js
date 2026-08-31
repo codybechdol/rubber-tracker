@@ -1400,11 +1400,15 @@ class ItemStatsEngine {
       newStatus = 'Failed Rubber';
       newAssignedTo = 'Failed Rubber';
       newLocation = 'Destroyed';
+      const today = new Date();
+      newDateAssigned = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
       if (window.sheetNavigator && typeof window.sheetNavigator.promptFailedRubberReason === 'function') {
-        const curNote = String(row['Notes'] || '').trim();
-        if (!curNote || !/electrical|visual|damaged in field/i.test(curNote)) {
-          failedReason = await window.sheetNavigator.promptFailedRubberReason(cleanItemKey);
-          if (!failedReason) return; // Cancelled
+        const curTestDate = newTestDate || String(row['Test Date'] || '').trim();
+        const failResult = await window.sheetNavigator.promptFailedRubberReason(cleanItemKey, curTestDate);
+        if (!failResult) return; // Cancelled
+        failedReason = typeof failResult === 'object' ? failResult.reason : failResult;
+        if (typeof failResult === 'object' && failResult.testDate) {
+          newTestDate = failResult.testDate;
         }
       }
     }

@@ -142,23 +142,33 @@ function handleInventoryAssignedToChange(ss, sheet, sheetName, editedRow, newVal
     } else if (assignedToLower === 'failed rubber' || assignedToLower === 'failed' || assignedToLower === 'not repairable') {
       newStatus = 'Failed Rubber';
       newLocation = 'Destroyed';
+      var todayFormatted = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MM/dd/yyyy');
+      sheet.getRange(editedRow, COLS.INVENTORY.DATE_ASSIGNED).setValue(todayFormatted);
       try {
         var ui = SpreadsheetApp.getUi();
         var currentNote = sheet.getRange(editedRow, COLS.INVENTORY.NOTES).getValue();
         if (!currentNote || currentNote.toString().trim() === '') {
           var resp = ui.prompt(
-            'Failed Rubber Reason',
-            'How did this item fail?\n1 = Electrical\n2 = Visual\n3 = Damaged In Field\n(Or type description):',
+            'Failed Rubber Reason & Test Date',
+            'How did this item fail?\n1 = Electrical\n2 = Visual\n3 = Damaged In Field\n\nFormat: [Reason], [Test Date]\n(e.g., 2, ' + todayFormatted + '):',
             ui.ButtonSet.OK_CANCEL
           );
           if (resp && resp.getSelectedButton() === ui.Button.OK) {
             var input = (resp.getResponseText() || '').trim();
+            var parts = input.split(/[,;]+/);
+            var reasonPart = (parts[0] || '').trim();
+            var datePart = (parts[1] || '').trim();
+
             var finalReason = 'Visual';
-            if (input === '1' || input.toLowerCase() === 'electrical') finalReason = 'Electrical';
-            else if (input === '2' || input.toLowerCase() === 'visual') finalReason = 'Visual';
-            else if (input === '3' || input.toLowerCase().indexOf('damage') !== -1 || input.toLowerCase().indexOf('field') !== -1) finalReason = 'Damaged In Field';
-            else if (input) finalReason = input;
+            if (reasonPart === '1' || reasonPart.toLowerCase() === 'electrical') finalReason = 'Electrical';
+            else if (reasonPart === '2' || reasonPart.toLowerCase() === 'visual') finalReason = 'Visual';
+            else if (reasonPart === '3' || reasonPart.toLowerCase().indexOf('damage') !== -1 || reasonPart.toLowerCase().indexOf('field') !== -1) finalReason = 'Damaged In Field';
+            else if (reasonPart) finalReason = reasonPart;
             sheet.getRange(editedRow, COLS.INVENTORY.NOTES).setValue(finalReason);
+
+            if (datePart && (datePart.indexOf('/') !== -1 || datePart.indexOf('-') !== -1)) {
+              sheet.getRange(editedRow, COLS.INVENTORY.TEST_DATE).setValue(datePart);
+            }
           }
         }
       } catch (uiErr) {
