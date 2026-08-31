@@ -451,12 +451,21 @@ class SheetNavigator {
     this.renderStandardTable(container, countBadge, tableData);
   }
 
-  renderExpiringCerts() {
+  async renderExpiringCerts() {
     this.currentSheetKey = 'expiring_certs';
     const container = document.getElementById('expiring-certs-grid-container');
     const countBadge = document.getElementById('expiring-certs-row-count');
     const searchInput = document.getElementById('expiring-certs-search-input');
     if (!container) return;
+
+    // Automatically ensure all active employees have their required certification rows
+    if (window.certsConfigEngine && typeof window.certsConfigEngine.applyRequirementsToMatrix === 'function') {
+      try {
+        await window.certsConfigEngine.applyRequirementsToMatrix(false);
+      } catch (e) {
+        console.warn('Could not auto-apply cert requirements:', e);
+      }
+    }
 
     if (searchInput) {
       this.searchTerm = (searchInput.value || '').toLowerCase().trim();
@@ -486,6 +495,11 @@ class SheetNavigator {
     }
     if (!this.db) this.db = window.localDB || window.safetyDB;
     if (!this.db) return;
+
+    const empTable = this.db.getTable('employees');
+    const certsTable = this.db.getTable('expiring_certs');
+    if (!empTable || !certsTable) return;
+    const headers = certsTable.headers || ['Employee Name', 'Item Type', 'Date Acquired', 'Expiration Date', 'Location', 'Job #', 'Days Until Expiration', 'Status', 'SMS'];
 
     const allCertTypes = [
       'DL',
@@ -526,15 +540,15 @@ class SheetNavigator {
     // Build existing lookup set
     const existingSet = new Set();
     (certsTable.rows || []).forEach(r => {
-      const eName = String(r['Employee Name'] || r['Name'] || '').toLowerCase().trim();
+      const eName = String(r['Employee Name'] || r['Name'] || Object.values(r)[0] || '').toLowerCase().trim();
       const cType = normalizeCert(r['Item Type'] || r['Cert Type'] || r['Type'] || '');
       if (eName && cType) existingSet.add(`${eName}_${cType}`);
     });
 
     let addedCount = 0;
 
-    for (const emp of empTable.rows) {
-      const empName = String(emp['Name'] || emp['Employee Name'] || '').trim();
+    for (const emp of (empTable.rows || [])) {
+      const empName = String(emp['Employee Name'] || emp['Name'] || Object.values(emp)[0] || '').trim();
       if (!empName) continue;
 
       const loc = String(emp['Location'] || 'Helena').trim();

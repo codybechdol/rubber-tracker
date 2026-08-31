@@ -452,29 +452,39 @@ class CertsConfigEngine {
     if (!empTable || !certTable) return;
 
     const activeEmployees = (empTable.rows || []).filter(e => {
-      const name = String(e['Name'] || '').trim();
+      const name = String(e['Employee Name'] || e['Name'] || Object.values(e)[0] || '').trim();
       const loc = String(e['Location'] || '').trim().toLowerCase();
-      return name && loc !== 'previous employee' && !name.toLowerCase().includes('former');
+      const status = String(e['Status'] || '').trim().toLowerCase();
+      const job = String(e['Job Number'] || e['Job #'] || '').trim().toLowerCase();
+      return name && loc !== 'previous employee' && !loc.includes('previous') &&
+             status !== 'previous employee' && !status.includes('inactive') && !status.includes('terminated') &&
+             !name.toLowerCase().includes('former') && !job.startsWith('002-') && !job.includes('previous');
     });
+
+    // Ensure certTable headers exist
+    if (!certTable.headers || certTable.headers.length === 0) {
+      certTable.headers = ['Employee Name', 'Item Type', 'Date Acquired', 'Expiration Date', 'Location', 'Job #', 'Days Until Expiration', 'Status', 'SMS'];
+    }
+    if (!certTable.rows) certTable.rows = [];
+    if (!certTable.rawGrid) certTable.rawGrid = [certTable.headers];
 
     // Build existing employee|cert map
     const existingMap = new Set();
     (certTable.rows || []).forEach(r => {
-      const eName = String(r['Employee Name'] || r['Name'] || '').trim().toLowerCase();
-      const cType = String(r['Item Type'] || r['Certification'] || '').trim().toLowerCase();
+      const eName = String(r['Employee Name'] || r['Name'] || Object.values(r)[0] || '').trim().toLowerCase();
+      const cType = String(r['Item Type'] || r['Certification'] || r['Cert Type'] || '').trim().toLowerCase();
       if (eName && cType) {
         existingMap.add(`${eName}|${cType}`);
       }
     });
 
     const newRowsToAdd = [];
-    const now = new Date();
 
     for (let emp of activeEmployees) {
-      const empName = String(emp['Name'] || '').trim();
+      const empName = String(emp['Employee Name'] || emp['Name'] || Object.values(emp)[0] || '').trim();
       const empLoc = String(emp['Location'] || 'Helena').trim();
-      const empJob = String(emp['Job Number'] || '').trim();
-      const jobClass = String(emp['Job Classification'] || '').trim();
+      const empJob = String(emp['Job Number'] || emp['Job #'] || '').trim();
+      const jobClass = String(emp['Job Classification'] || emp['Classification'] || emp['Role'] || '').trim();
 
       for (let cert of this.certs) {
         const certKey = cert.key || cert.name;
@@ -484,17 +494,19 @@ class CertsConfigEngine {
         if (!existingMap.has(lookupKey)) {
           const isRequired = this.isCertRequiredForEmployee(certKey, jobClass);
           if (isRequired) {
-            newRowsToAdd.push({
+            const isNonExp = cert.isIssuedDate || cert.termMonths === 0;
+            const newRow = {
               'Employee Name': empName,
               'Item Type': certKey,
               'Date Acquired': '',
               'Expiration Date': '',
               'Location': empLoc,
               'Job #': empJob,
-              'Days Until Expiration': 'MISSING',
-              'Status': 'MISSING',
+              'Days Until Expiration': isNonExp ? '' : 'MISSING',
+              'Status': isNonExp ? 'OK' : 'MISSING',
               'SMS': ''
-            });
+            };
+            newRowsToAdd.push(newRow);
             existingMap.add(lookupKey);
           }
         }
@@ -505,18 +517,27 @@ class CertsConfigEngine {
       console.log(`Adding ${newRowsToAdd.length} missing required cert rows to local database...`);
       for (let newRow of newRowsToAdd) {
         certTable.rows.push(newRow);
+        if (certTable.rawGrid && certTable.headers) {
+          const gridArr = certTable.headers.map(h => newRow[h] !== undefined ? newRow[h] : '');
+          certTable.rawGrid.push(gridArr);
+          certTable.maxRows = certTable.rawGrid.length;
+        }
         // Queue for sync to Google Sheets
-        if (window.syncEngine) {
-          window.syncEngine.queueLocalMutation({
+        if (this.db && typeof this.db.addMutation === 'function') {
+          await this.db.addMutation({
             action: 'ADD_ROW',
             sheetName: 'Expiring Certs',
+            tableKey: 'expiring_certs',
             rowData: newRow
           });
         }
       }
-      await this.db.saveTable('expiring_certs', certTable);
-      if (window.sheetNavigator && window.sheetNavigator.currentSheetKey === 'expiring_certs') {
-        window.sheetNavigator.renderSheet();
+      certTable.rowCount = certTable.rows.length;
+      if (typeof this.db.setSnapshot === 'function' && this.db.snapshot) {
+        await this.db.setSnapshot(this.db.snapshot);
+      }
+      if (window.sheetNavigator && (window.sheetNavigator.currentSheetKey === 'expiring_certs' || document.getElementById('expiring-certs-view')?.classList.contains('active'))) {
+        window.sheetNavigator.renderExpiringCerts();
       }
     }
 

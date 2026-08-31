@@ -2057,6 +2057,15 @@ class CrewImportEngine {
       });
     }
 
+    // Ensure all required cert rows exist in Expiring Certs for new hires
+    if (window.certsConfigEngine && typeof window.certsConfigEngine.applyRequirementsToMatrix === 'function') {
+      try {
+        await window.certsConfigEngine.applyRequirementsToMatrix(false);
+      } catch (certErr) {
+        console.warn('Could not auto-apply cert requirements after crew import:', certErr);
+      }
+    }
+
     // Save database state
     if (this.db && typeof this.db.setSnapshot === 'function') {
       await this.db.setSnapshot(this.db.snapshot);
