@@ -41,6 +41,41 @@ class SheetNavigator {
     ];
   }
 
+  parseDate(val) {
+    if (!val || val === 'N/A' || val === '—' || val === '-') return null;
+    if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+    const s = String(val).trim();
+    if (s.includes('/')) {
+      const parts = s.split('/');
+      if (parts.length === 3) {
+        const m = parseInt(parts[0], 10) - 1;
+        const d = parseInt(parts[1], 10);
+        let y = parseInt(parts[2], 10);
+        if (y < 100) y += 2000;
+        const dt = new Date(y, m, d, 12, 0, 0);
+        return isNaN(dt.getTime()) ? null : dt;
+      }
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      const parts = s.split('-');
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10) - 1;
+      const d = parseInt(parts[2], 10);
+      const dt = new Date(y, m, d, 12, 0, 0);
+      return isNaN(dt.getTime()) ? null : dt;
+    }
+    const dt = new Date(s);
+    return isNaN(dt.getTime()) ? null : dt;
+  }
+
+  formatDate(d) {
+    if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    return `${mm}/${dd}/${yyyy}`;
+  }
+
   init() {
     this.renderTabsBar();
     this.setupSearch();
@@ -2505,8 +2540,6 @@ class SheetNavigator {
           e.target.textContent = newVal;
         }
 
-        if (newVal === initialVal) return; // No change made!
-
         const sheetName = e.target.dataset.sheet;
         const row = parseInt(e.target.dataset.row, 10);
         const col = parseInt(e.target.dataset.col, 10);
@@ -2534,6 +2567,16 @@ class SheetNavigator {
           }
         }
 
+        const isAssignedCol = (hLower.includes('assigned') || hLower === 'holder') && !hLower.includes('date');
+        const isStatusCol = hLower === 'status' || hLower === 'item status';
+        const valLower = newVal.toLowerCase();
+        const isInventorySheet = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(this.currentSheetKey);
+        const isOnShelf = valLower === 'on shelf' || valLower === 'onshelf' || valLower === 'shelf';
+
+        const isUnreconciledShelf = (isAssignedCol || isStatusCol) && isOnShelf && isInventorySheet && tableRow && (tableRow['Status'] !== 'On Shelf' || tableRow['Location'] !== 'Helena');
+
+        if (newVal === initialVal && !isUnreconciledShelf) return; // No change made!
+
         const queueCell = async (hName, val) => {
           if (!hName || val === undefined || !tableData) return;
           const cIdx = (tableData.headers || []).indexOf(hName);
@@ -2559,9 +2602,6 @@ class SheetNavigator {
           }
         };
 
-        const isAssignedCol = (hLower.includes('assigned') || hLower === 'holder') && !hLower.includes('date');
-        const isStatusCol = hLower === 'status' || hLower === 'item status';
-        const valLower = newVal.toLowerCase();
         const isFailedRubber = valLower === 'failed rubber' || valLower === 'failed' || valLower === 'not repairable';
 
         if ((isAssignedCol || isStatusCol) && isFailedRubber) {
@@ -2607,9 +2647,6 @@ class SheetNavigator {
           return;
         }
 
-        const isInventorySheet = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(this.currentSheetKey);
-        const isOnShelf = valLower === 'on shelf' || valLower === 'onshelf' || valLower === 'shelf';
-
         if ((isAssignedCol || isStatusCol) && isOnShelf && isInventorySheet) {
           const curTestDate = String((tableRow && (tableRow['Test Date'] || tableRow['Calibration Date'])) || '').trim();
           const curEslId = String((tableRow && tableRow['ESL ID']) || '').trim();
@@ -2644,7 +2681,7 @@ class SheetNavigator {
             const nextChg = new Date(parsedTest);
             const intervalYears = this.currentSheetKey.includes('hot_stick') ? 2 : 1;
             nextChg.setFullYear(nextChg.getFullYear() + intervalYears);
-            calculatedShelfDate = `${String(nextChg.getMonth() + 1).padStart(2, '0')}/${String(nextChg.getDate()).padStart(2, '0')}/${nextChg.getFullYear()}`;
+            calculatedShelfDate = this.formatDate(nextChg);
           }
 
           if (tableRow) {
