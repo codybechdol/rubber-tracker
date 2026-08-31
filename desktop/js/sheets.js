@@ -2184,6 +2184,48 @@ class SheetNavigator {
             });
           }
         }
+
+        // Auto-reconcile On Shelf rows that still have previous status/location (e.g. In Testing / Arnett)
+        const rowLoc = String(row['Location'] || '').trim();
+        if (rowAssigned.toLowerCase() === 'on shelf' && (rowLoc !== 'Helena' || rowStatus !== 'On Shelf')) {
+          row['Location'] = 'Helena';
+          row['Status'] = 'On Shelf';
+          const locHName = (headers || []).find(h => /^location$/i.test(h));
+          const statHName = (headers || []).find(h => /^status$|^item\s*status$/i.test(h));
+          if (tableData.rawGrid && tableData.rawGrid[sheetRowIdx - 1]) {
+            if (locHName) {
+              const lIdx = headers.indexOf(locHName);
+              if (lIdx !== -1) tableData.rawGrid[sheetRowIdx - 1][lIdx] = 'Helena';
+            }
+            if (statHName) {
+              const sIdx = headers.indexOf(statHName);
+              if (sIdx !== -1) tableData.rawGrid[sheetRowIdx - 1][sIdx] = 'On Shelf';
+            }
+          }
+          const itemIdentifier = String(row['Serial #'] || row['Item #'] || row['Glove'] || row['Sleeve'] || row['Blanket'] || row['MACK'] || Object.values(row)[0] || '').trim();
+          if (locHName) {
+            this.db.addMutation({
+              action: 'UPDATE_CELL',
+              sheetName: tableData.name || this.currentSheetKey,
+              row: sheetRowIdx,
+              col: headers.indexOf(locHName) + 1,
+              header: locHName,
+              itemIdentifier: itemIdentifier,
+              value: 'Helena'
+            });
+          }
+          if (statHName) {
+            this.db.addMutation({
+              action: 'UPDATE_CELL',
+              sheetName: tableData.name || this.currentSheetKey,
+              row: sheetRowIdx,
+              col: headers.indexOf(statHName) + 1,
+              header: statHName,
+              itemIdentifier: itemIdentifier,
+              value: 'On Shelf'
+            });
+          }
+        }
       }
 
       html += `<tr>`;
@@ -2470,6 +2512,53 @@ class SheetNavigator {
         const col = parseInt(e.target.dataset.col, 10);
         const itemIdentifier = e.target.dataset.item || '';
 
+        const tableData = this.db.getTable(this.currentSheetKey);
+        let tableRow = null;
+        let actualRowIdx = row;
+
+        if (tableData) {
+          if (itemIdentifier && tableData.rows) {
+            tableRow = tableData.rows.find(r => {
+              const id = String(r['Serial #'] || r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Name'] || r['Employee Name'] || r['Job Number'] || Object.values(r)[0] || '').trim();
+              return id.toLowerCase() === itemIdentifier.toLowerCase();
+            });
+          }
+          if (itemIdentifier && tableData.rawGrid) {
+            const gIdx = tableData.rawGrid.findIndex((gr, idx) => idx > 0 && String(gr[0] || '').trim().toLowerCase() === itemIdentifier.toLowerCase());
+            if (gIdx !== -1) {
+              actualRowIdx = gIdx + 1;
+            }
+          }
+          if (!tableRow && tableData.rows && tableData.rows[actualRowIdx - 2]) {
+            tableRow = tableData.rows[actualRowIdx - 2];
+          }
+        }
+
+        const queueCell = async (hName, val) => {
+          if (!hName || val === undefined || !tableData) return;
+          const cIdx = (tableData.headers || []).indexOf(hName);
+          if (cIdx !== -1) {
+            await this.db.addMutation({
+              action: 'UPDATE_CELL',
+              sheetName: sheetName,
+              row: actualRowIdx,
+              col: cIdx + 1,
+              header: hName,
+              itemIdentifier: itemIdentifier,
+              value: val
+            });
+          }
+        };
+
+        const syncTableRowToGrid = () => {
+          if (tableData && tableData.rawGrid && tableData.rawGrid[actualRowIdx - 1] && tableRow) {
+            const gRow = tableData.rawGrid[actualRowIdx - 1];
+            (tableData.headers || []).forEach((h, cIdx) => {
+              if (tableRow[h] !== undefined) gRow[cIdx] = tableRow[h];
+            });
+          }
+        };
+
         const isAssignedCol = (hLower.includes('assigned') || hLower === 'holder') && !hLower.includes('date');
         const isStatusCol = hLower === 'status' || hLower === 'item status';
         const valLower = newVal.toLowerCase();
@@ -2484,9 +2573,6 @@ class SheetNavigator {
 
           newVal = 'Failed Rubber';
           e.target.textContent = newVal;
-
-          const tableData = this.db.getTable(this.currentSheetKey);
-          const tableRow = (tableData.rows || [])[row - 2];
 
           const assignedColName = (tableData.headers || []).find(h => /assigned\s*to|^assigned$|^holder$/i.test(h));
           const statusColName = (tableData.headers || []).find(h => /^status$|^item\s*status$/i.test(h));
@@ -2504,28 +2590,7 @@ class SheetNavigator {
             if (notesColName) tableRow[notesColName] = reason;
           }
 
-          if (tableData.rawGrid && tableData.rawGrid[row - 1]) {
-            const gRow = tableData.rawGrid[row - 1];
-            (tableData.headers || []).forEach((h, cIdx) => {
-              if (tableRow && tableRow[h] !== undefined) gRow[cIdx] = tableRow[h];
-            });
-          }
-
-          const queueCell = async (hName, val) => {
-            if (!hName || val === undefined) return;
-            const cIdx = (tableData.headers || []).indexOf(hName);
-            if (cIdx !== -1) {
-              await this.db.addMutation({
-                action: 'UPDATE_CELL',
-                sheetName: sheetName,
-                row: row,
-                col: cIdx + 1,
-                header: hName,
-                itemIdentifier: itemIdentifier,
-                value: val
-              });
-            }
-          };
+          syncTableRowToGrid();
 
           if (assignedColName) await queueCell(assignedColName, 'Failed Rubber');
           if (statusColName) await queueCell(statusColName, 'Failed Rubber');
@@ -2546,9 +2611,6 @@ class SheetNavigator {
         const isOnShelf = valLower === 'on shelf' || valLower === 'onshelf' || valLower === 'shelf';
 
         if ((isAssignedCol || isStatusCol) && isOnShelf && isInventorySheet) {
-          const tableData = this.db.getTable(this.currentSheetKey);
-          const tableRow = (tableData.rows || [])[row - 2];
-
           const curTestDate = String((tableRow && (tableRow['Test Date'] || tableRow['Calibration Date'])) || '').trim();
           const curEslId = String((tableRow && tableRow['ESL ID']) || '').trim();
           const hasEsl = (tableData.headers || []).some(h => /^esl\s*id$/i.test(h));
@@ -2596,28 +2658,7 @@ class SheetNavigator {
             if (chgOutColName && calculatedShelfDate) tableRow[chgOutColName] = calculatedShelfDate;
           }
 
-          if (tableData.rawGrid && tableData.rawGrid[row - 1]) {
-            const gRow = tableData.rawGrid[row - 1];
-            (tableData.headers || []).forEach((h, cIdx) => {
-              if (tableRow && tableRow[h] !== undefined) gRow[cIdx] = tableRow[h];
-            });
-          }
-
-          const queueCell = async (hName, val) => {
-            if (!hName || val === undefined) return;
-            const cIdx = (tableData.headers || []).indexOf(hName);
-            if (cIdx !== -1) {
-              await this.db.addMutation({
-                action: 'UPDATE_CELL',
-                sheetName: sheetName,
-                row: row,
-                col: cIdx + 1,
-                header: hName,
-                itemIdentifier: itemIdentifier,
-                value: val
-              });
-            }
-          };
+          syncTableRowToGrid();
 
           if (assignedColName) await queueCell(assignedColName, 'On Shelf');
           if (statusColName) await queueCell(statusColName, 'On Shelf');
@@ -2638,9 +2679,6 @@ class SheetNavigator {
           return;
         }
 
-        const tableData = this.db.getTable(this.currentSheetKey);
-        const tableRow = tableData && tableData.rows ? (tableData.rows[row - 2] || null) : null;
-
         if (isInventorySheet && tableRow && tableData) {
           const assignedColName = (tableData.headers || []).find(h => /assigned\s*to|^assigned$|^holder$/i.test(h));
           const statusColName = (tableData.headers || []).find(h => /^status$|^item\s*status$/i.test(h));
@@ -2658,16 +2696,8 @@ class SheetNavigator {
               tableRow[pickedColName] = '';
               const pIdx = (tableData.headers || []).indexOf(pickedColName);
               if (pIdx !== -1) {
-                if (tableData.rawGrid && tableData.rawGrid[row - 1]) tableData.rawGrid[row - 1][pIdx] = '';
-                await this.db.addMutation({
-                  action: 'UPDATE_CELL',
-                  sheetName: sheetName,
-                  row: row,
-                  col: pIdx + 1,
-                  header: pickedColName,
-                  itemIdentifier: itemIdentifier,
-                  value: ''
-                });
+                if (tableData.rawGrid && tableData.rawGrid[actualRowIdx - 1]) tableData.rawGrid[actualRowIdx - 1][pIdx] = '';
+                await queueCell(pickedColName, '');
               }
             }
 
@@ -2677,16 +2707,8 @@ class SheetNavigator {
                 tableRow[statusColName] = 'Assigned';
                 const sIdx = (tableData.headers || []).indexOf(statusColName);
                 if (sIdx !== -1) {
-                  if (tableData.rawGrid && tableData.rawGrid[row - 1]) tableData.rawGrid[row - 1][sIdx] = 'Assigned';
-                  await this.db.addMutation({
-                    action: 'UPDATE_CELL',
-                    sheetName: sheetName,
-                    row: row,
-                    col: sIdx + 1,
-                    header: statusColName,
-                    itemIdentifier: itemIdentifier,
-                    value: 'Assigned'
-                  });
+                  if (tableData.rawGrid && tableData.rawGrid[actualRowIdx - 1]) tableData.rawGrid[actualRowIdx - 1][sIdx] = 'Assigned';
+                  await queueCell(statusColName, 'Assigned');
                 }
               }
               const empTable = this.db.getTable('employees');
@@ -2699,16 +2721,8 @@ class SheetNavigator {
                 tableRow[locationColName] = empLoc;
                 const lIdx = (tableData.headers || []).indexOf(locationColName);
                 if (lIdx !== -1) {
-                  if (tableData.rawGrid && tableData.rawGrid[row - 1]) tableData.rawGrid[row - 1][lIdx] = empLoc;
-                  await this.db.addMutation({
-                    action: 'UPDATE_CELL',
-                    sheetName: sheetName,
-                    row: row,
-                    col: lIdx + 1,
-                    header: locationColName,
-                    itemIdentifier: itemIdentifier,
-                    value: empLoc
-                  });
+                  if (tableData.rawGrid && tableData.rawGrid[actualRowIdx - 1]) tableData.rawGrid[actualRowIdx - 1][lIdx] = empLoc;
+                  await queueCell(locationColName, empLoc);
                 }
               }
             }
@@ -2718,7 +2732,7 @@ class SheetNavigator {
         await this.db.addMutation({
           action: 'UPDATE_CELL',
           sheetName: sheetName,
-          row: row,
+          row: actualRowIdx,
           col: col,
           header: header,
           itemIdentifier: itemIdentifier,
