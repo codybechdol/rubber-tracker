@@ -2640,7 +2640,6 @@ class SheetNavigator {
 
         const tableData = this.db.getTable(this.currentSheetKey);
         const tableRow = tableData && tableData.rows ? (tableData.rows[row - 2] || null) : null;
-        const isInventorySheet = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(this.currentSheetKey);
 
         if (isInventorySheet && tableRow && tableData) {
           const assignedColName = (tableData.headers || []).find(h => /assigned\s*to|^assigned$|^holder$/i.test(h));
