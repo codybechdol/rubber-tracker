@@ -1390,9 +1390,24 @@ class ItemStatsEngine {
 
     const newTestDate = testDateInput ? formatToMdY(testDateInput.value.trim()) : '';
     const newDateAssigned = dateAssignedInput ? formatToMdY(dateAssignedInput.value.trim()) : '';
-    const newStatus = statusSelect ? statusSelect.value.trim() : (row['Status'] || '');
-    const newLocation = locationInput ? locationInput.value.trim() : (row['Location'] || '');
-    const newAssignedTo = assignedToInput ? assignedToInput.value.trim() : (row['Assigned To'] || '');
+    let newStatus = statusSelect ? statusSelect.value.trim() : (row['Status'] || '');
+    let newLocation = locationInput ? locationInput.value.trim() : (row['Location'] || '');
+    let newAssignedTo = assignedToInput ? assignedToInput.value.trim() : (row['Assigned To'] || '');
+
+    const isFailedRubber = newStatus.toLowerCase() === 'failed rubber' || newAssignedTo.toLowerCase() === 'failed rubber';
+    let failedReason = '';
+    if (isFailedRubber) {
+      newStatus = 'Failed Rubber';
+      newAssignedTo = 'Failed Rubber';
+      newLocation = 'Destroyed';
+      if (window.sheetNavigator && typeof window.sheetNavigator.promptFailedRubberReason === 'function') {
+        const curNote = String(row['Notes'] || '').trim();
+        if (!curNote || !/electrical|visual|damaged in field/i.test(curNote)) {
+          failedReason = await window.sheetNavigator.promptFailedRubberReason(cleanItemKey);
+          if (!failedReason) return; // Cancelled
+        }
+      }
+    }
 
     // Identify which header names exist on this sheet
     const testHeader = table.headers.find(h => /test\s*date|calibration|pad\s*exp/i.test(h)) || 'Test Date';
@@ -1401,10 +1416,11 @@ class ItemStatsEngine {
     const locationHeader = table.headers.find(h => /^location$/i.test(h)) || 'Location';
     const assignedToHeader = table.headers.find(h => /assigned\s*to/i.test(h)) || 'Assigned To';
     const changeOutHeader = table.headers.find(h => /change\s*out/i.test(h)) || 'Change Out Date';
+    const notesHeader = table.headers.find(h => /^notes$|^note$/i.test(h)) || 'Notes';
 
     // Calculate new Change Out Date
-    let newChgOut = '';
-    if (window.inventoryManager && typeof window.inventoryManager.calculateChangeOutDate === 'function') {
+    let newChgOut = isFailedRubber ? 'N/A' : '';
+    if (!isFailedRubber && window.inventoryManager && typeof window.inventoryManager.calculateChangeOutDate === 'function') {
       newChgOut = window.inventoryManager.calculateChangeOutDate(
         newDateAssigned || newTestDate, newLocation, newAssignedTo, activeSheetKey, {
           testDate: newTestDate,
@@ -1455,6 +1471,10 @@ class ItemStatsEngine {
     if (newLocation && locationHeader) await addCellMutation(locationHeader, newLocation);
     if (newAssignedTo && assignedToHeader) await addCellMutation(assignedToHeader, newAssignedTo);
     if (newChgOut && changeOutHeader) await addCellMutation(changeOutHeader, newChgOut);
+    if (failedReason && notesHeader) {
+      row[notesHeader] = failedReason;
+      await addCellMutation(notesHeader, failedReason);
+    }
 
     // Auto-record history transition if status/assigned changed
     await this.db.recordItemHistoryEvent(sheetName, row, row['Notes'] || `Dates updated`);

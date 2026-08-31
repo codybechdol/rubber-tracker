@@ -9099,9 +9099,31 @@ function handleInventoryAssignedToChange(ss, sheet, sheetName, editedRow, newVal
     } else if (assignedToLower === 'in testing') {
       newStatus = 'In Testing';
       newLocation = nameToLocation['in testing'] || 'Arnett / JM Test';
-    } else if (assignedToLower === 'failed rubber' || assignedToLower === 'not repairable') {
+    } else if (assignedToLower === 'failed rubber' || assignedToLower === 'failed' || assignedToLower === 'not repairable') {
       newStatus = 'Failed Rubber';
       newLocation = 'Destroyed';
+      try {
+        var ui = SpreadsheetApp.getUi();
+        var currentNote = sheet.getRange(editedRow, COLS.INVENTORY.NOTES).getValue();
+        if (!currentNote || currentNote.toString().trim() === '') {
+          var resp = ui.prompt(
+            'Failed Rubber Reason',
+            'How did this item fail?\n1 = Electrical\n2 = Visual\n3 = Damaged In Field\n(Or type description):',
+            ui.ButtonSet.OK_CANCEL
+          );
+          if (resp && resp.getSelectedButton() === ui.Button.OK) {
+            var input = (resp.getResponseText() || '').trim();
+            var finalReason = 'Visual';
+            if (input === '1' || input.toLowerCase() === 'electrical') finalReason = 'Electrical';
+            else if (input === '2' || input.toLowerCase() === 'visual') finalReason = 'Visual';
+            else if (input === '3' || input.toLowerCase().indexOf('damage') !== -1 || input.toLowerCase().indexOf('field') !== -1) finalReason = 'Damaged In Field';
+            else if (input) finalReason = input;
+            sheet.getRange(editedRow, COLS.INVENTORY.NOTES).setValue(finalReason);
+          }
+        }
+      } catch (uiErr) {
+        // UI unavailable (e.g. background sync)
+      }
     } else if (assignedToLower === 'lost') {
       newStatus = 'Lost';
       newLocation = 'Lost';
@@ -9299,6 +9321,29 @@ function handleBlanketAssignedToChange(ss, sheet, editedRow, newValue) {
     } else if (assignedToLower === 'failed rubber' || assignedToLower === 'failed' || assignedToLower === 'not repairable') {
       newStatus = 'Failed';
       newLocation = 'Destroyed';
+      try {
+        var ui = SpreadsheetApp.getUi();
+        var colNotes = COLS.BLANKETS.NOTES; // col 11
+        var currentNote = sheet.getRange(editedRow, colNotes).getValue();
+        if (!currentNote || currentNote.toString().trim() === '') {
+          var resp = ui.prompt(
+            'Failed Rubber Reason',
+            'How did this item fail?\n1 = Electrical\n2 = Visual\n3 = Damaged In Field\n(Or type description):',
+            ui.ButtonSet.OK_CANCEL
+          );
+          if (resp && resp.getSelectedButton() === ui.Button.OK) {
+            var input = (resp.getResponseText() || '').trim();
+            var finalReason = 'Visual';
+            if (input === '1' || input.toLowerCase() === 'electrical') finalReason = 'Electrical';
+            else if (input === '2' || input.toLowerCase() === 'visual') finalReason = 'Visual';
+            else if (input === '3' || input.toLowerCase().indexOf('damage') !== -1 || input.toLowerCase().indexOf('field') !== -1) finalReason = 'Damaged In Field';
+            else if (input) finalReason = input;
+            sheet.getRange(editedRow, colNotes).setValue(finalReason);
+          }
+        }
+      } catch (uiErr) {
+        // UI unavailable
+      }
     } else if (assignedToLower === 'lost') {
       newStatus = 'Lost';
       newLocation = 'Lost';

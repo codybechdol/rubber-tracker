@@ -484,6 +484,23 @@ body {
   transform: translateY(-1px);
 }
 
+.failed-rubber-option-btn {
+  cursor: pointer;
+  outline: none;
+  text-decoration: none;
+  font-family: inherit;
+}
+
+.failed-rubber-option-btn:hover {
+  filter: brightness(1.28);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 14px -2px rgba(0, 0, 0, 0.4);
+}
+
+.failed-rubber-option-btn:active {
+  transform: translateY(0);
+}
+
 /* Modal */
 .modal-overlay {
   position: fixed;

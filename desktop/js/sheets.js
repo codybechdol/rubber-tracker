@@ -2438,6 +2438,78 @@ class SheetNavigator {
         const col = parseInt(e.target.dataset.col, 10);
         const itemIdentifier = e.target.dataset.item || '';
 
+        const isAssignedCol = (hLower.includes('assigned') || hLower === 'holder') && !hLower.includes('date');
+        const isStatusCol = hLower === 'status' || hLower === 'item status';
+        const valLower = newVal.toLowerCase();
+        const isFailedRubber = valLower === 'failed rubber' || valLower === 'failed' || valLower === 'not repairable';
+
+        if ((isAssignedCol || isStatusCol) && isFailedRubber) {
+          const reason = await this.promptFailedRubberReason(itemIdentifier);
+          if (!reason) {
+            e.target.textContent = initialVal;
+            return;
+          }
+
+          newVal = 'Failed Rubber';
+          e.target.textContent = newVal;
+
+          const tableData = this.db.getTable(this.currentSheetKey);
+          const tableRow = (tableData.rows || [])[row - 2];
+
+          const assignedColName = (tableData.headers || []).find(h => /assigned\s*to|^assigned$|^holder$/i.test(h));
+          const statusColName = (tableData.headers || []).find(h => /^status$|^item\s*status$/i.test(h));
+          const locationColName = (tableData.headers || []).find(h => /^location$/i.test(h));
+          const chgOutColName = (tableData.headers || []).find(h => /change\s*out/i.test(h));
+          const pickedColName = (tableData.headers || []).find(h => /picked\s*for/i.test(h));
+          const notesColName = (tableData.headers || []).find(h => /^notes$|^note$/i.test(h));
+
+          if (tableRow) {
+            if (assignedColName) tableRow[assignedColName] = 'Failed Rubber';
+            if (statusColName) tableRow[statusColName] = 'Failed Rubber';
+            if (locationColName) tableRow[locationColName] = 'Destroyed';
+            if (chgOutColName) tableRow[chgOutColName] = 'N/A';
+            if (pickedColName) tableRow[pickedColName] = '';
+            if (notesColName) tableRow[notesColName] = reason;
+          }
+
+          if (tableData.rawGrid && tableData.rawGrid[row - 1]) {
+            const gRow = tableData.rawGrid[row - 1];
+            (tableData.headers || []).forEach((h, cIdx) => {
+              if (tableRow && tableRow[h] !== undefined) gRow[cIdx] = tableRow[h];
+            });
+          }
+
+          const queueCell = async (hName, val) => {
+            if (!hName || val === undefined) return;
+            const cIdx = (tableData.headers || []).indexOf(hName);
+            if (cIdx !== -1) {
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: sheetName,
+                row: row,
+                col: cIdx + 1,
+                header: hName,
+                itemIdentifier: itemIdentifier,
+                value: val
+              });
+            }
+          };
+
+          if (assignedColName) await queueCell(assignedColName, 'Failed Rubber');
+          if (statusColName) await queueCell(statusColName, 'Failed Rubber');
+          if (locationColName) await queueCell(locationColName, 'Destroyed');
+          if (chgOutColName) await queueCell(chgOutColName, 'N/A');
+          if (pickedColName) await queueCell(pickedColName, '');
+          if (notesColName) await queueCell(notesColName, reason);
+
+          if (typeof this.db.setSnapshot === 'function' && this.db.snapshot) {
+            await this.db.setSnapshot(this.db.snapshot);
+          }
+
+          this.renderActiveView();
+          return;
+        }
+
         await this.db.addMutation({
           action: 'UPDATE_CELL',
           sheetName: sheetName,
@@ -2485,6 +2557,77 @@ class SheetNavigator {
 
         this.renderActiveView();
       });
+    });
+  }
+
+  promptFailedRubberReason(itemIdentifier) {
+    return new Promise((resolve) => {
+      const modal = document.getElementById('failed-rubber-reason-modal');
+      if (!modal) {
+        const choice = prompt(`Item ${itemIdentifier || ''} marked as Failed Rubber.\nHow did it fail?\n1 - Electrical\n2 - Visual\n3 - Damaged In Field`, 'Visual');
+        if (!choice) return resolve(null);
+        if (choice === '1' || choice.toLowerCase() === 'electrical') return resolve('Electrical');
+        if (choice === '2' || choice.toLowerCase() === 'visual') return resolve('Visual');
+        if (choice === '3' || choice.toLowerCase().includes('damage') || choice.toLowerCase().includes('field')) return resolve('Damaged In Field');
+        return resolve(choice);
+      }
+
+      const titleEl = document.getElementById('failed-rubber-item-title');
+      if (titleEl) {
+        titleEl.textContent = itemIdentifier ? `Item #${itemIdentifier} Marked as Failed Rubber` : `Item Marked as Failed Rubber`;
+      }
+
+      const notesInput = document.getElementById('failed-rubber-custom-notes');
+      if (notesInput) {
+        notesInput.value = '';
+      }
+
+      const closeBtn = document.getElementById('failed-rubber-modal-close');
+      const cancelBtn = document.getElementById('failed-rubber-modal-cancel');
+      const optionBtns = modal.querySelectorAll('.failed-rubber-option-btn');
+
+      const cleanup = () => {
+        modal.classList.remove('active');
+        modal.style.display = 'none';
+        if (closeBtn) closeBtn.onclick = null;
+        if (cancelBtn) cancelBtn.onclick = null;
+        optionBtns.forEach(b => b.onclick = null);
+        document.removeEventListener('keydown', handleEsc);
+      };
+
+      const handleEsc = (e) => {
+        if (e.key === 'Escape') {
+          cleanup();
+          resolve(null);
+        }
+      };
+
+      const handleSelect = (reason) => {
+        const extraNotes = notesInput ? notesInput.value.trim() : '';
+        const finalNote = extraNotes ? `${reason} - ${extraNotes}` : reason;
+        cleanup();
+        resolve(finalNote);
+      };
+
+      const handleCancel = () => {
+        cleanup();
+        resolve(null);
+      };
+
+      if (closeBtn) closeBtn.onclick = handleCancel;
+      if (cancelBtn) cancelBtn.onclick = handleCancel;
+      document.addEventListener('keydown', handleEsc);
+
+      optionBtns.forEach(btn => {
+        btn.onclick = () => {
+          const reason = btn.dataset.reason || 'Visual';
+          handleSelect(reason);
+        };
+      });
+
+      modal.classList.add('active');
+      modal.style.display = 'flex';
+      if (notesInput) notesInput.focus();
     });
   }
 
