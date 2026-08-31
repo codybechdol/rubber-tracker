@@ -1409,14 +1409,34 @@ class ItemStatsEngine {
       }
     }
 
+    const isOnShelf = newStatus.toLowerCase() === 'on shelf' || newAssignedTo.toLowerCase() === 'on shelf';
+    let shelfDetails = null;
+    if (isOnShelf && !isFailedRubber) {
+      newStatus = 'On Shelf';
+      newAssignedTo = 'On Shelf';
+      newLocation = 'Helena';
+      const today = new Date();
+      newDateAssigned = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+
+      const hasEsl = (table.headers || []).some(h => /^esl\s*id$/i.test(h));
+      const curEsl = row['ESL ID'] || '';
+      if (window.sheetNavigator && typeof window.sheetNavigator.promptOnShelfDetails === 'function') {
+        shelfDetails = await window.sheetNavigator.promptOnShelfDetails(cleanItemKey, newTestDate || row['Test Date'], curEsl, hasEsl);
+        if (!shelfDetails) return; // Cancelled
+        if (shelfDetails.testDate) newTestDate = shelfDetails.testDate;
+      }
+    }
+
     // Identify which header names exist on this sheet
     const testHeader = table.headers.find(h => /test\s*date|calibration|pad\s*exp/i.test(h)) || 'Test Date';
-    const dateAssignedHeader = table.headers.find(h => /date\s*assigned/i.test(h)) || 'Date Assigned';
+    let dateAssignedHeader = table.headers.find(h => /date\s*assigned/i.test(h)) || 'Date Assigned';
     const statusHeader = table.headers.find(h => /^status$/i.test(h)) || 'Status';
     const locationHeader = table.headers.find(h => /^location$/i.test(h)) || 'Location';
     const assignedToHeader = table.headers.find(h => /assigned\s*to/i.test(h)) || 'Assigned To';
     const changeOutHeader = table.headers.find(h => /change\s*out/i.test(h)) || 'Change Out Date';
     const notesHeader = table.headers.find(h => /^notes$|^note$/i.test(h)) || 'Notes';
+    const pickedHeader = table.headers.find(h => /^picked\s*for$/i.test(h));
+    const eslHeader = table.headers.find(h => /^esl\s*id$/i.test(h));
 
     // Calculate new Change Out Date
     let newChgOut = isFailedRubber ? 'N/A' : '';
@@ -1474,6 +1494,14 @@ class ItemStatsEngine {
     if (failedReason && notesHeader) {
       row[notesHeader] = failedReason;
       await addCellMutation(notesHeader, failedReason);
+    }
+    if (shelfDetails && shelfDetails.eslId && eslHeader) {
+      row[eslHeader] = shelfDetails.eslId;
+      await addCellMutation(eslHeader, shelfDetails.eslId);
+    }
+    if (isOnShelf && pickedHeader && row[pickedHeader]) {
+      row[pickedHeader] = '';
+      await addCellMutation(pickedHeader, '');
     }
 
     // Auto-record history transition if status/assigned changed

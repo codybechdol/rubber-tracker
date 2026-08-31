@@ -1153,6 +1153,57 @@
     </div>
   </div>
 
+  <!-- On Shelf Return Modal (New Test Date & ESL ID) -->
+  <div id="on-shelf-return-modal" class="modal-overlay" style="z-index: 1100; display: none;">
+    <div class="modal-box" style="max-width: 480px; width: 92%; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5); border: 1px solid rgba(59, 130, 246, 0.3);">
+      <div class="modal-header" style="background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%); color: white; border-bottom: 1px solid rgba(59, 130, 246, 0.4); padding: 12px 18px; display: flex; align-items: center; justify-content: space-between;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 20px;">📦</span>
+          <span style="font-weight: 800; font-size: 15px;">Return Item to Shelf</span>
+        </div>
+        <button id="on-shelf-modal-close" class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.25); border: none; color: white; cursor: pointer;">✕</button>
+      </div>
+      <div class="modal-body" style="padding: 20px 22px; display: flex; flex-direction: column; gap: 16px;">
+        <div>
+          <div id="on-shelf-item-title" style="font-size: 14px; font-weight: 700; color: #f8fafc; margin-bottom: 4px;">Item Returning to Shelf</div>
+          <div style="font-size: 12.5px; color: var(--text-muted);">Please provide the new test date and verify the ESL tracking ID:</div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 14px;">
+          <div>
+            <label style="font-size: 12px; font-weight: 700; color: #93c5fd; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between;">
+              <span>🧪 New Test Date <span style="color: #ef4444;">*</span></span>
+              <span style="font-size: 11px; font-weight: normal; color: var(--text-muted);">(MM/DD/YYYY)</span>
+            </label>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" id="on-shelf-test-date" placeholder="MM/DD/YYYY" style="flex: 1; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 13px; font-weight: 600;" />
+              <input type="date" id="on-shelf-test-date-picker" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 7px 10px; cursor: pointer;" title="Pick from calendar" />
+            </div>
+          </div>
+
+          <div id="on-shelf-esl-container">
+            <label style="font-size: 12px; font-weight: 700; color: #93c5fd; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between;">
+              <span>🏷️ ESL ID (Electronic Tag / Barcode)</span>
+              <span id="on-shelf-esl-badge" class="badge" style="font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; display: none;"></span>
+            </label>
+            <input type="text" id="on-shelf-esl-id" placeholder="Scan or enter ESL barcode (e.g. 5194269)" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 13px; font-family: monospace; font-weight: 600;" />
+            <div id="on-shelf-esl-help" style="font-size: 11px; color: #f59e0b; margin-top: 4px; display: none;">⚠️ This item does not have an ESL ID recorded. Please scan or enter its tag barcode.</div>
+          </div>
+
+          <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #cbd5e1; line-height: 1.5;">
+            <div style="font-weight: 700; color: #60a5fa; margin-bottom: 3px;">📋 Automatic Updates:</div>
+            <div style="font-size: 11.5px;">• <strong>Date Assigned</strong> will be updated to today: <strong id="on-shelf-today-preview" style="color: #34d399;"></strong></div>
+            <div style="font-size: 11.5px;">• <strong>Location</strong> ➔ Helena | <strong>Status</strong> ➔ On Shelf | <strong>Picked For</strong> ➔ Cleared</div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-secondary); border-top: 1px solid var(--border-color); padding: 12px 18px;">
+        <button id="on-shelf-modal-cancel" class="btn btn-secondary" style="font-size: 12.5px;">Cancel</button>
+        <button id="on-shelf-modal-confirm" class="btn btn-primary" style="font-size: 12.5px; font-weight: 700; background: #2563eb; border-color: #1d4ed8; padding: 8px 16px;">💾 Save & Return to Shelf</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Mobile Bottom Navigation Bar (Visible on tablets & mobile screens) -->
   <nav class="mobile-bottom-nav" id="mobile-bottom-nav">
     <div class="mobile-nav-btn active" data-view="sheets-view">

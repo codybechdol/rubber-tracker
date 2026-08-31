@@ -9087,9 +9087,33 @@ function handleInventoryAssignedToChange(ss, sheet, sheetName, editedRow, newVal
     var newStatus = '';
     var newLocation = '';
 
-    if (assignedToLower === 'on shelf') {
+    if (assignedToLower === 'on shelf' || assignedToLower === '') {
       newStatus = 'On Shelf';
       newLocation = nameToLocation['on shelf'] || 'Helena';
+      var todayFormatted = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MM/dd/yyyy');
+      sheet.getRange(editedRow, COLS.INVENTORY.DATE_ASSIGNED).setValue(todayFormatted);
+      if (COLS.INVENTORY.PICKED_FOR) sheet.getRange(editedRow, COLS.INVENTORY.PICKED_FOR).setValue('');
+      try {
+        var ui = SpreadsheetApp.getUi();
+        var curEsl = COLS.INVENTORY.ESL_ID ? sheet.getRange(editedRow, COLS.INVENTORY.ESL_ID).getValue() : '';
+        var msg = 'Enter New Test Date (MM/DD/YYYY):';
+        if (!curEsl || curEsl.toString().trim() === '') {
+          msg = 'Item has no ESL ID.\nEnter Test Date and ESL ID (e.g. ' + todayFormatted + ', 5194269):';
+        }
+        var resp = ui.prompt('Return to Shelf', msg, ui.ButtonSet.OK_CANCEL);
+        if (resp && resp.getSelectedButton() === ui.Button.OK) {
+          var respText = (resp.getResponseText() || '').trim();
+          if (respText) {
+            var parts = respText.split(/[,;\s]+/);
+            if (parts[0] && parts[0].indexOf('/') !== -1) {
+              sheet.getRange(editedRow, COLS.INVENTORY.TEST_DATE).setValue(parts[0]);
+            }
+            if (parts.length > 1 && parts[1] && COLS.INVENTORY.ESL_ID && (!curEsl || curEsl.toString().trim() === '')) {
+              sheet.getRange(editedRow, COLS.INVENTORY.ESL_ID).setValue(parts[1]);
+            }
+          }
+        }
+      } catch (uiErr) { /* non-interactive execution */ }
     } else if (assignedToLower === 'packed for delivery') {
       newStatus = 'Ready For Delivery';
       newLocation = nameToLocation['packed for delivery'] || "Cody's Truck";
@@ -9156,6 +9180,16 @@ function handleInventoryAssignedToChange(ss, sheet, sheetName, editedRow, newVal
     if (newLocation) {
       sheet.getRange(editedRow, colLocation).setValue(newLocation);
       logEvent('Set Location to "' + newLocation + '" at row ' + editedRow + ', col ' + colLocation, 'DEBUG');
+    }
+
+    // Clear Picked For when assigned to an employee or when moved off Ready For Delivery
+    if (newStatus === 'Assigned' || (newStatus && newStatus !== 'Ready For Delivery' && newStatus !== 'On Shelf' && newStatus !== 'In Testing')) {
+      try {
+        var colPicked = COLS.INVENTORY.PICKED_FOR;
+        if (colPicked) {
+          sheet.getRange(editedRow, colPicked).setValue('');
+        }
+      } catch (pErr) { /* ignore */ }
     }
 
     // Update Change Out Date based on Date Assigned
@@ -9371,6 +9405,14 @@ function handleBlanketAssignedToChange(ss, sheet, editedRow, newValue) {
     if (newStatus) {
       sheet.getRange(editedRow, colStatus).setValue(newStatus);
       logEvent('Set Status to "' + newStatus + '" at row ' + editedRow, 'DEBUG');
+    }
+
+    // Clear Picked For on assignment
+    if (newStatus === 'In Service' || newStatus === 'Failed' || newStatus === 'Lost') {
+      try {
+        var colPickedB = COLS.BLANKETS.PICKED_FOR;
+        if (colPickedB) sheet.getRange(editedRow, colPickedB).setValue('');
+      } catch (bpErr) { /* ignore */ }
     }
 
     // Update Change Out Date based on Test Date (if present)

@@ -705,6 +705,10 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
                     newStatus = 'On Shelf';
                     newLocation = 'Helena';
                     if (eqColPicked) sheet.getRange(mut.row, eqColPicked).setValue('');
+                    if (eqColDateAssigned) {
+                      var todayFormatted = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MM/dd/yyyy');
+                      sheet.getRange(mut.row, eqColDateAssigned).setValue(todayFormatted);
+                    }
                   } else if (assignedValLower === 'packed for delivery') {
                     newStatus = 'Ready For Delivery';
                     newLocation = "Cody's Truck";
@@ -728,6 +732,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
                     // Regular employee assignment: look up in fast in-memory Employees cache
                     newStatus = 'Assigned';
                     newLocation = getEmpLocationFast(assignedVal);
+                    if (eqColPicked) sheet.getRange(mut.row, eqColPicked).setValue('');
                   }
 
                   if (newStatus && eqColStatus) {
@@ -753,6 +758,9 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
                       }
                       if (chgOut && chgOut !== 'N/A') {
                         sheet.getRange(mut.row, eqColChangeOutDate).setValue(chgOut);
+                      }
+                      if (eqColPicked && assignedValLower !== 'on shelf' && assignedValLower !== 'in testing' && assignedValLower !== 'packed for delivery') {
+                        sheet.getRange(mut.row, eqColPicked).setValue('');
                       }
                     }
                   }

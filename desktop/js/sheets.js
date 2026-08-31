@@ -2154,6 +2154,38 @@ class SheetNavigator {
         `;
       }
 
+      // Auto-reconcile legacy assigned items with stale Picked For
+      const isEquipmentSheet = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(this.currentSheetKey);
+      if (isEquipmentSheet) {
+        const rowAssigned = String(row['Assigned To'] || row['Assigned'] || row['Holder'] || '').trim();
+        const rowStatus = String(row['Status'] || row['Item Status'] || '').trim();
+        const rowDate = String(row['Date Assigned'] || row['Date'] || '').trim();
+        const rowPicked = String(row['Picked For'] || '').trim();
+        const nonEmpHolders = ['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'failed rubber', 'failed', 'lost', 'destroyed', 'new', 'unassigned', 'n/a', '—', '-'];
+        const isAssignedWorker = (rowStatus.toLowerCase() === 'assigned' || (rowAssigned && !nonEmpHolders.includes(rowAssigned.toLowerCase())));
+
+        if (isAssignedWorker && rowDate && rowPicked) {
+          row['Picked For'] = '';
+          const pickedHName = (headers || []).find(h => /^picked\s*for$/i.test(h));
+          if (pickedHName) {
+            const pColIdx = headers.indexOf(pickedHName);
+            if (tableData.rawGrid && tableData.rawGrid[sheetRowIdx - 1] && pColIdx !== -1) {
+              tableData.rawGrid[sheetRowIdx - 1][pColIdx] = '';
+            }
+            const itemIdentifier = String(row['Serial #'] || row['Item #'] || row['Glove'] || row['Sleeve'] || row['Blanket'] || row['MACK'] || Object.values(row)[0] || '').trim();
+            this.db.addMutation({
+              action: 'UPDATE_CELL',
+              sheetName: tableData.name || this.currentSheetKey,
+              row: sheetRowIdx,
+              col: pColIdx + 1,
+              header: pickedHName,
+              itemIdentifier: itemIdentifier,
+              value: ''
+            });
+          }
+        }
+      }
+
       html += `<tr>`;
 
       headers.forEach((h, colIdx) => {
@@ -2510,6 +2542,180 @@ class SheetNavigator {
           return;
         }
 
+        const isInventorySheet = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(this.currentSheetKey);
+        const isOnShelf = valLower === 'on shelf' || valLower === 'onshelf' || valLower === 'shelf';
+
+        if ((isAssignedCol || isStatusCol) && isOnShelf && isInventorySheet) {
+          const tableData = this.db.getTable(this.currentSheetKey);
+          const tableRow = (tableData.rows || [])[row - 2];
+
+          const curTestDate = String((tableRow && (tableRow['Test Date'] || tableRow['Calibration Date'])) || '').trim();
+          const curEslId = String((tableRow && tableRow['ESL ID']) || '').trim();
+          const hasEsl = (tableData.headers || []).some(h => /^esl\s*id$/i.test(h));
+
+          const shelfDetails = await this.promptOnShelfDetails(itemIdentifier, curTestDate, curEslId, hasEsl);
+          if (!shelfDetails) {
+            e.target.textContent = initialVal;
+            return;
+          }
+
+          const today = new Date();
+          const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+
+          newVal = 'On Shelf';
+          e.target.textContent = newVal;
+
+          const assignedColName = (tableData.headers || []).find(h => /assigned\s*to|^assigned$|^holder$/i.test(h));
+          const statusColName = (tableData.headers || []).find(h => /^status$|^item\s*status$/i.test(h));
+          const locationColName = (tableData.headers || []).find(h => /^location$/i.test(h));
+          const dateAssignedColName = (tableData.headers || []).find(h => /date\s*assigned/i.test(h));
+          const testDateColName = (tableData.headers || []).find(h => /test\s*date|calibration/i.test(h));
+          const eslColName = (tableData.headers || []).find(h => /^esl\s*id$/i.test(h));
+          const chgOutColName = (tableData.headers || []).find(h => /change\s*out/i.test(h));
+          const pickedColName = (tableData.headers || []).find(h => /^picked\s*for$/i.test(h));
+
+          // Calculate Shelf Change Out Date (1 year from test date, 2 years for Hot Sticks)
+          let calculatedShelfDate = '';
+          const tDateToUse = shelfDetails.testDate || todayFormatted;
+          const parsedTest = this.parseDate(tDateToUse) || today;
+          if (parsedTest) {
+            const nextChg = new Date(parsedTest);
+            const intervalYears = this.currentSheetKey.includes('hot_stick') ? 2 : 1;
+            nextChg.setFullYear(nextChg.getFullYear() + intervalYears);
+            calculatedShelfDate = `${String(nextChg.getMonth() + 1).padStart(2, '0')}/${String(nextChg.getDate()).padStart(2, '0')}/${nextChg.getFullYear()}`;
+          }
+
+          if (tableRow) {
+            if (assignedColName) tableRow[assignedColName] = 'On Shelf';
+            if (statusColName) tableRow[statusColName] = 'On Shelf';
+            if (locationColName) tableRow[locationColName] = 'Helena';
+            if (dateAssignedColName) tableRow[dateAssignedColName] = todayFormatted;
+            if (testDateColName && shelfDetails.testDate) tableRow[testDateColName] = shelfDetails.testDate;
+            if (eslColName && shelfDetails.eslId) tableRow[eslColName] = shelfDetails.eslId;
+            if (pickedColName) tableRow[pickedColName] = '';
+            if (chgOutColName && calculatedShelfDate) tableRow[chgOutColName] = calculatedShelfDate;
+          }
+
+          if (tableData.rawGrid && tableData.rawGrid[row - 1]) {
+            const gRow = tableData.rawGrid[row - 1];
+            (tableData.headers || []).forEach((h, cIdx) => {
+              if (tableRow && tableRow[h] !== undefined) gRow[cIdx] = tableRow[h];
+            });
+          }
+
+          const queueCell = async (hName, val) => {
+            if (!hName || val === undefined) return;
+            const cIdx = (tableData.headers || []).indexOf(hName);
+            if (cIdx !== -1) {
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: sheetName,
+                row: row,
+                col: cIdx + 1,
+                header: hName,
+                itemIdentifier: itemIdentifier,
+                value: val
+              });
+            }
+          };
+
+          if (assignedColName) await queueCell(assignedColName, 'On Shelf');
+          if (statusColName) await queueCell(statusColName, 'On Shelf');
+          if (locationColName) await queueCell(locationColName, 'Helena');
+          if (dateAssignedColName) await queueCell(dateAssignedColName, todayFormatted);
+          if (testDateColName && shelfDetails.testDate) await queueCell(testDateColName, shelfDetails.testDate);
+          if (eslColName && shelfDetails.eslId) await queueCell(eslColName, shelfDetails.eslId);
+          if (pickedColName) await queueCell(pickedColName, '');
+          if (chgOutColName && calculatedShelfDate) await queueCell(chgOutColName, calculatedShelfDate);
+
+          await this.db.recordItemHistoryEvent(sheetName, tableRow, `Returned to Shelf (Test Date: ${shelfDetails.testDate || todayFormatted})`);
+
+          if (typeof this.db.setSnapshot === 'function' && this.db.snapshot) {
+            await this.db.setSnapshot(this.db.snapshot);
+          }
+
+          this.renderActiveView();
+          return;
+        }
+
+        const tableData = this.db.getTable(this.currentSheetKey);
+        const tableRow = tableData && tableData.rows ? (tableData.rows[row - 2] || null) : null;
+        const isInventorySheet = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(this.currentSheetKey);
+
+        if (isInventorySheet && tableRow && tableData) {
+          const assignedColName = (tableData.headers || []).find(h => /assigned\s*to|^assigned$|^holder$/i.test(h));
+          const statusColName = (tableData.headers || []).find(h => /^status$|^item\s*status$/i.test(h));
+          const locationColName = (tableData.headers || []).find(h => /^location$/i.test(h));
+          const pickedColName = (tableData.headers || []).find(h => /^picked\s*for$/i.test(h));
+
+          const curAssigned = isAssignedCol ? newVal : String(tableRow[assignedColName] || '').trim();
+          const curAssignedLower = curAssigned.toLowerCase();
+          const nonEmpHolders = ['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'failed rubber', 'failed', 'lost', 'destroyed', 'new', 'unassigned', 'n/a', '—', '-'];
+          const isAssignedToEmp = curAssigned && !nonEmpHolders.includes(curAssignedLower);
+
+          // When Assigned To is set or Date Assigned is entered for an assigned item, remove Picked For
+          if (isAssignedToEmp) {
+            if (pickedColName && tableRow[pickedColName]) {
+              tableRow[pickedColName] = '';
+              const pIdx = (tableData.headers || []).indexOf(pickedColName);
+              if (pIdx !== -1) {
+                if (tableData.rawGrid && tableData.rawGrid[row - 1]) tableData.rawGrid[row - 1][pIdx] = '';
+                await this.db.addMutation({
+                  action: 'UPDATE_CELL',
+                  sheetName: sheetName,
+                  row: row,
+                  col: pIdx + 1,
+                  header: pickedColName,
+                  itemIdentifier: itemIdentifier,
+                  value: ''
+                });
+              }
+            }
+
+            // Auto-update Status to Assigned and Location to employee location if Assigned To changed
+            if (isAssignedCol) {
+              if (statusColName && tableRow[statusColName] !== 'Assigned') {
+                tableRow[statusColName] = 'Assigned';
+                const sIdx = (tableData.headers || []).indexOf(statusColName);
+                if (sIdx !== -1) {
+                  if (tableData.rawGrid && tableData.rawGrid[row - 1]) tableData.rawGrid[row - 1][sIdx] = 'Assigned';
+                  await this.db.addMutation({
+                    action: 'UPDATE_CELL',
+                    sheetName: sheetName,
+                    row: row,
+                    col: sIdx + 1,
+                    header: statusColName,
+                    itemIdentifier: itemIdentifier,
+                    value: 'Assigned'
+                  });
+                }
+              }
+              const empTable = this.db.getTable('employees');
+              let empLoc = '';
+              if (empTable && empTable.rows) {
+                const empMatch = empTable.rows.find(e => String(e['Name'] || e['Employee Name'] || Object.values(e)[0] || '').trim().toLowerCase() === curAssignedLower);
+                if (empMatch) empLoc = String(empMatch['Location'] || '').trim();
+              }
+              if (empLoc && locationColName) {
+                tableRow[locationColName] = empLoc;
+                const lIdx = (tableData.headers || []).indexOf(locationColName);
+                if (lIdx !== -1) {
+                  if (tableData.rawGrid && tableData.rawGrid[row - 1]) tableData.rawGrid[row - 1][lIdx] = empLoc;
+                  await this.db.addMutation({
+                    action: 'UPDATE_CELL',
+                    sheetName: sheetName,
+                    row: row,
+                    col: lIdx + 1,
+                    header: locationColName,
+                    itemIdentifier: itemIdentifier,
+                    value: empLoc
+                  });
+                }
+              }
+            }
+          }
+        }
+
         await this.db.addMutation({
           action: 'UPDATE_CELL',
           sheetName: sheetName,
@@ -2520,6 +2726,10 @@ class SheetNavigator {
           oldValue: initialVal,
           value: newVal
         });
+
+        if (typeof this.db.setSnapshot === 'function' && this.db.snapshot) {
+          await this.db.setSnapshot(this.db.snapshot);
+        }
 
         // Re-render active view to immediately reflect updates
         this.renderActiveView();
@@ -2628,6 +2838,143 @@ class SheetNavigator {
       modal.classList.add('active');
       modal.style.display = 'flex';
       if (notesInput) notesInput.focus();
+    });
+  }
+
+  promptOnShelfDetails(itemIdentifier, currentTestDate = '', currentEslId = '', hasEslCol = true) {
+    return new Promise((resolve) => {
+      const modal = document.getElementById('on-shelf-return-modal');
+      const today = new Date();
+      const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+      const todayIso = today.toISOString().split('T')[0];
+
+      if (!modal) {
+        let defaultTest = currentTestDate || todayFormatted;
+        const testPrompt = prompt(`Item ${itemIdentifier || ''} returning to On Shelf.\nEnter New Test Date (MM/DD/YYYY):`, defaultTest);
+        if (!testPrompt) return resolve(null);
+        let eslPrompt = currentEslId;
+        if (hasEslCol && (!currentEslId || currentEslId === '—')) {
+          eslPrompt = prompt(`Item ${itemIdentifier || ''} has no ESL ID.\nEnter ESL ID:`, '');
+        }
+        return resolve({ testDate: testPrompt.trim(), eslId: (eslPrompt || '').trim() });
+      }
+
+      const titleEl = document.getElementById('on-shelf-item-title');
+      if (titleEl) {
+        titleEl.textContent = itemIdentifier ? `Item #${itemIdentifier} Returning to Shelf` : `Item Returning to Shelf`;
+      }
+
+      const todayPreview = document.getElementById('on-shelf-today-preview');
+      if (todayPreview) {
+        todayPreview.textContent = todayFormatted;
+      }
+
+      const testInput = document.getElementById('on-shelf-test-date');
+      const testPicker = document.getElementById('on-shelf-test-date-picker');
+      const eslContainer = document.getElementById('on-shelf-esl-container');
+      const eslInput = document.getElementById('on-shelf-esl-id');
+      const eslBadge = document.getElementById('on-shelf-esl-badge');
+      const eslHelp = document.getElementById('on-shelf-esl-help');
+
+      const initialTest = currentTestDate || todayFormatted;
+      if (testInput) testInput.value = initialTest;
+      if (testPicker) {
+        if (/^\d{2}\/\d{2}\/\d{4}$/.test(initialTest)) {
+          const p = initialTest.split('/');
+          testPicker.value = `${p[2]}-${p[0]}-${p[1]}`;
+        } else {
+          testPicker.value = todayIso;
+        }
+      }
+
+      if (testPicker && testInput) {
+        testPicker.onchange = () => {
+          if (testPicker.value) {
+            const p = testPicker.value.split('-');
+            testInput.value = `${p[1]}/${p[2]}/${p[0]}`;
+          }
+        };
+      }
+
+      if (eslContainer) {
+        if (hasEslCol) {
+          eslContainer.style.display = 'block';
+          if (eslInput) eslInput.value = (currentEslId && currentEslId !== '—') ? currentEslId : '';
+          if (eslBadge && eslHelp) {
+            if (currentEslId && currentEslId !== '—') {
+              eslBadge.style.display = 'inline-block';
+              eslBadge.style.backgroundColor = '#15803d';
+              eslBadge.style.color = '#fff';
+              eslBadge.textContent = 'Existing Tag';
+              eslHelp.style.display = 'none';
+            } else {
+              eslBadge.style.display = 'inline-block';
+              eslBadge.style.backgroundColor = '#d97706';
+              eslBadge.style.color = '#fff';
+              eslBadge.textContent = 'Tag Required';
+              eslHelp.style.display = 'block';
+            }
+          }
+        } else {
+          eslContainer.style.display = 'none';
+        }
+      }
+
+      const closeBtn = document.getElementById('on-shelf-modal-close');
+      const cancelBtn = document.getElementById('on-shelf-modal-cancel');
+      const confirmBtn = document.getElementById('on-shelf-modal-confirm');
+
+      const cleanup = () => {
+        modal.classList.remove('active');
+        modal.style.display = 'none';
+        if (closeBtn) closeBtn.onclick = null;
+        if (cancelBtn) cancelBtn.onclick = null;
+        if (confirmBtn) confirmBtn.onclick = null;
+        if (testPicker) testPicker.onchange = null;
+        document.removeEventListener('keydown', handleEsc);
+      };
+
+      const handleEsc = (e) => {
+        if (e.key === 'Escape') {
+          cleanup();
+          resolve(null);
+        }
+      };
+
+      const handleCancel = () => {
+        cleanup();
+        resolve(null);
+      };
+
+      const handleConfirm = () => {
+        let tDate = testInput ? testInput.value.trim() : '';
+        if (!tDate) tDate = todayFormatted;
+
+        // Normalize test date to MM/DD/YYYY
+        if (tDate.includes('-')) {
+          const p = tDate.split('-');
+          if (p.length === 3) tDate = `${p[1]}/${p[2]}/${p[0]}`;
+        }
+
+        const eId = eslInput ? eslInput.value.trim() : '';
+        cleanup();
+        resolve({
+          testDate: tDate,
+          eslId: eId
+        });
+      };
+
+      if (closeBtn) closeBtn.onclick = handleCancel;
+      if (cancelBtn) cancelBtn.onclick = handleCancel;
+      if (confirmBtn) confirmBtn.onclick = handleConfirm;
+      document.addEventListener('keydown', handleEsc);
+
+      modal.classList.add('active');
+      modal.style.display = 'flex';
+      if (testInput) {
+        testInput.focus();
+        testInput.select();
+      }
     });
   }
 

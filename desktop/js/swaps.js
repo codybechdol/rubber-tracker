@@ -1303,8 +1303,9 @@ class SwapGenerationEngine {
         invRow['Picked For'] = `${empName} Picked On ${todayIso}`;
 
         this.syncRowToRawGrid(invTable, invRow);
-        const invSheetName = (invTable && invTable.name) ? invTable.name : (this.db.getSheetNameForTableKey(invTableKey) || invTableKey);
+        const invSheetName = (invTable && invTable.name) ? invTable.name : (this.db.getSheetNameForTableKey(invKey) || invKey);
         await this.db.recordItemHistoryEvent(invSheetName, invRow, `Packed For Delivery (${empName})`);
+        await this.queueRowMutations(invKey, invRow);
       }
     } else {
       // Uncheck Picked -> Revert to On Shelf
@@ -1380,6 +1381,8 @@ class SwapGenerationEngine {
           const notes = String(r['Notes'] || '').trim();
           return itNum === pickNum && (assignedTo.includes('Packed For Delivery') || notes.includes('Packed For Delivery'));
         });
+
+        await this.queueRowMutations(invKey, invRow);
       }
     }
 
@@ -1487,8 +1490,9 @@ class SwapGenerationEngine {
         oldRow['Date Assigned'] = dateFormatted;
         oldRow['Picked For'] = '';
         this.syncRowToRawGrid(invTable, oldRow);
-        const invSheetName = (invTable && invTable.name) ? invTable.name : (this.db.getSheetNameForTableKey(invTableKey) || invTableKey);
+        const invSheetName = (invTable && invTable.name) ? invTable.name : (this.db.getSheetNameForTableKey(invKey) || invKey);
         await this.db.recordItemHistoryEvent(invSheetName, oldRow, `Returned from ${empName} (Swap Completed)`);
+        await this.queueRowMutations(invKey, oldRow);
       }
 
       // 2. Assign New Replacement Item -> Employee / Assigned / Active Location
@@ -1497,13 +1501,14 @@ class SwapGenerationEngine {
         newRow['Status'] = 'Assigned';
         newRow['Assigned To'] = empName;
         newRow['Date Assigned'] = dateFormatted;
-        newRow['Picked For'] = '';
+        newRow['Picked For'] = ''; // Clear Picked For completely!
 
-        // Recalculate Change Out Date (+3 months for gloves/sleeves in field)
+        // Recalculate Change Out Date (+3 months for gloves, +12 months for sleeves)
         const dObj = this.parseDate(dateFormatted);
         if (dObj) {
           const nextDate = new Date(dObj);
-          nextDate.setMonth(nextDate.getMonth() + 3);
+          const intervalMonths = invKey.includes('sleeve') || invKey.includes('blanket') || invKey.includes('mack') ? 12 : 3;
+          nextDate.setMonth(nextDate.getMonth() + intervalMonths);
           newRow['Change Out Date'] = this.formatDate(nextDate);
         }
 
@@ -1517,7 +1522,9 @@ class SwapGenerationEngine {
           return itNum === pickNum && (assignedTo.includes('Packed For Delivery') || notes.includes('Packed For Delivery'));
         });
 
+        const invSheetName = (invTable && invTable.name) ? invTable.name : (this.db.getSheetNameForTableKey(invKey) || invKey);
         await this.db.recordItemHistoryEvent(invSheetName, newRow, `Assigned to ${empName}`);
+        await this.queueRowMutations(invKey, newRow);
       }
     } else {
       // STAGE 4: Date Changed removed -> Revert to Stage 2 (Ready For Delivery)
@@ -1551,8 +1558,9 @@ class SwapGenerationEngine {
         });
 
         // Re-record Stage 2 "Packed For Delivery" history entry
-        const invSheetName = (invTable && invTable.name) ? invTable.name : (this.db.getSheetNameForTableKey(invTableKey) || invTableKey);
+        const invSheetName = (invTable && invTable.name) ? invTable.name : (this.db.getSheetNameForTableKey(invKey) || invKey);
         await this.db.recordItemHistoryEvent(invSheetName, newRow, `Packed For Delivery (${empName})`);
+        await this.queueRowMutations(invKey, newRow);
       }
 
       // 2. Revert Old Item -> Employee / Assigned
@@ -1571,10 +1579,53 @@ class SwapGenerationEngine {
           const notes = String(r['Notes'] || '').trim();
           return itNum === oldItemNum && (assignedTo.includes('Packed For Testing') || notes.includes(`Returned from ${empName}`));
         });
+
+        await this.queueRowMutations(invKey, oldRow);
       }
     }
 
     if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
+  }
+
+  syncRowToRawGrid(table, rowObj) {
+    if (!table || !table.headers || !rowObj) return;
+    const rowIdx = rowObj._rowIdx || (table.rows ? table.rows.indexOf(rowObj) + 2 : null);
+    if (table.rawGrid && rowIdx && table.rawGrid[rowIdx - 1]) {
+      const gRow = table.rawGrid[rowIdx - 1];
+      table.headers.forEach((h, cIdx) => {
+        if (rowObj[h] !== undefined) gRow[cIdx] = rowObj[h];
+      });
+    }
+  }
+
+  async queueRowMutations(tableKey, rowObj) {
+    if (!this.db || !rowObj) return;
+    const table = this.db.getTable(tableKey);
+    if (!table || !table.headers) return;
+    const sheetName = table.name || this.db.getSheetNameForTableKey(tableKey) || tableKey;
+    const rowIdx = rowObj._rowIdx || (table.rows ? table.rows.indexOf(rowObj) + 2 : null);
+    if (!rowIdx) return;
+
+    const itemIdentifier = String(rowObj['Item #'] || rowObj['Glove'] || rowObj['Sleeve'] || rowObj['Blanket'] || rowObj['MACK'] || rowObj['Serial #'] || rowObj['ESL ID'] || Object.values(rowObj)[0] || '').trim();
+
+    for (let cIdx = 0; cIdx < table.headers.length; cIdx++) {
+      const header = table.headers[cIdx];
+      const val = rowObj[header];
+      if (val !== undefined && typeof this.db.addMutation === 'function') {
+        await this.db.addMutation({
+          action: 'UPDATE_CELL',
+          sheetName: sheetName,
+          row: rowIdx,
+          col: cIdx + 1,
+          header: header,
+          itemIdentifier: itemIdentifier,
+          value: val
+        });
+      }
+    }
+    if (typeof this.db.setSnapshot === 'function' && this.db.snapshot) {
+      await this.db.setSnapshot(this.db.snapshot);
+    }
   }
 
   gridRowToObj(headers, rowArray) {
