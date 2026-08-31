@@ -140,6 +140,10 @@ function upgradePickListItems() {
             employeeName.indexOf('STAGE') !== -1 ||
             employeeName === 'No swaps due for this class' ||
             daysLeft === 'PREV EMP' ||
+            daysLeft.indexOf('PREV') !== -1 ||
+            pickListStatus.toLowerCase().indexOf('return to shelf') !== -1 ||
+            pickListStatus.toLowerCase().indexOf('packed for testing') !== -1 ||
+            pickListStatus.toLowerCase().indexOf('ready for test') !== -1 ||
             daysLeft === 'LOST-LOCATE') {
           continue;
         }

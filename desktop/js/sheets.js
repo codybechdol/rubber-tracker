@@ -1151,6 +1151,17 @@ class SheetNavigator {
             // Self-healing / section detection for Previous Employee rows:
             const isPrevEmpRow = currentSection === 'prev_emp' || String(rowArr[5] || '').toUpperCase().includes('PREV EMP');
             if (isPrevEmpRow) {
+              // Enforce Pick List Item # (column index 6) is ALWAYS '—' for previous employees!
+              if (rowArr[6] !== '—') {
+                rowArr[6] = '—';
+                if (tableData.rawGrid && tableData.rawGrid[rowIdx]) {
+                  tableData.rawGrid[rowIdx][6] = '—';
+                }
+                if (tableData.rows && tableData.rows[rowIdx - 1]) {
+                  tableData.rows[rowIdx - 1]['Pick List Item #'] = '—';
+                }
+              }
+
               const pVal = String(rowArr[8] || '').trim().toUpperCase();
               const isChecked = (pVal === 'TRUE' || pVal === '1' || rowArr[8] === true);
               const dVal = String(rowArr[9] || '').trim();

@@ -277,6 +277,21 @@ class SwapGenerationEngine {
     }
 
     // Build employee maps (Skip pending new hires)
+    // 0. Build list of previous employees from employee table and employee history
+    const previousEmployeeNames = new Set();
+    const employeeHistoryTable = this.db.getTable('employee_history') || this.db.getTable('Employee History');
+    if (employeeHistoryTable && employeeHistoryTable.rows) {
+      employeeHistoryTable.rows.forEach(hr => {
+        const hName = String(hr['Employee Name'] || hr['Name'] || Object.values(hr)[1] || '').trim().toLowerCase();
+        const hEvent = String(hr['Event Type'] || hr['Event'] || Object.values(hr)[2] || '').trim().toLowerCase();
+        const hLoc = String(hr['Location'] || Object.values(hr)[3] || '').trim().toLowerCase();
+        if (hEvent === 'terminated' || hLoc === 'previous employee' || hEvent.includes('inactive')) {
+          if (hName) previousEmployeeNames.add(hName);
+        }
+      });
+    }
+
+    // Build employee maps (Skip pending new hires and previous employees)
     const empMap = {};
     const empLocationMap = {};
     const empJobNumMap = {};
@@ -287,6 +302,14 @@ class SwapGenerationEngine {
       const name = String(row['Name'] || row['Employee Name'] || Object.values(row)[0] || '').trim();
       const nameLower = name.toLowerCase();
       if (!name || ignoreNames.includes(nameLower)) return;
+
+      const locLower = String(row['Location'] || '').trim().toLowerCase();
+      const statusLower = String(row['Status'] || '').trim().toLowerCase();
+      if (locLower === 'previous employee' || locLower.includes('previous') ||
+          statusLower === 'previous employee' || statusLower.includes('inactive') || statusLower.includes('terminated')) {
+        previousEmployeeNames.add(nameLower);
+        return; // Skip from active empMap
+      }
 
       const hireDateStr = row['Hire Date'];
       const hireDate = this.parseDate(hireDateStr);
@@ -358,6 +381,73 @@ class SwapGenerationEngine {
 
     const inventoryData = invTable.rows;
 
+    // Scan for Previous Employee items to reclaim (no replacement item assigned)
+    const prevEmpItems = [];
+    inventoryData.forEach(item => {
+      const itemNum = String(item['Item #'] || item['Glove'] || item['Sleeve'] || item['ESL ID'] || '').trim();
+      if (!itemNum) return;
+
+      const status = String(item['Status'] || '').trim();
+      const location = String(item['Location'] || '').trim();
+      const assignedTo = String(item['Assigned To'] || '').trim();
+      const pickedFor = String(item['Picked For'] || '').trim();
+      const locationLower = location.toLowerCase();
+      const assignedToLower = assignedTo.toLowerCase();
+      const pickedForLower = pickedFor.toLowerCase();
+
+      let isPrevEmpItem = false;
+      let isAlreadyPicked = false;
+      let employeeName = '';
+
+      if (locationLower === 'previous employee' || previousEmployeeNames.has(assignedToLower)) {
+        if (assignedTo && !ignoreNames.includes(assignedToLower)) {
+          isPrevEmpItem = true;
+          employeeName = assignedTo;
+        }
+      } else if (status.toLowerCase() === 'ready for test' && pickedForLower.includes('reclaim')) {
+        const suffixIdx = pickedForLower.indexOf(' reclaim');
+        if (suffixIdx !== -1) {
+          const empNameStr = pickedFor.substring(0, suffixIdx).trim();
+          if (previousEmployeeNames.has(empNameStr.toLowerCase())) {
+            isPrevEmpItem = true;
+            isAlreadyPicked = true;
+            employeeName = empNameStr;
+          }
+        }
+      }
+
+      if (isPrevEmpItem) {
+        const rowData = [
+          employeeName,
+          itemNum,
+          String(item['Size'] || '').trim(),
+          this.formatDate(item['Date Assigned']),
+          this.formatDate(item['Change Out Date']),
+          'PREV EMP',
+          '—', // Pick List Item # is ALWAYS '—' for previous employees!
+          isAlreadyPicked ? 'Ready For Delivery 🚚' : 'Return to Shelf',
+          isAlreadyPicked,
+          '',
+          // Stage 1 Pick
+          status, assignedTo, this.formatDate(item['Date Assigned']),
+          // Stage 1 Old
+          status, assignedTo, this.formatDate(item['Date Assigned']),
+          // Stage 2
+          isAlreadyPicked ? 'Ready For Test' : '',
+          isAlreadyPicked ? 'Packed For Testing' : '',
+          isAlreadyPicked ? this.formatDate(item['Date Assigned']) : '',
+          isAlreadyPicked ? pickedFor : '',
+          // Stage 3
+          '', '', ''
+        ];
+        prevEmpItems.push({
+          data: rowData,
+          employeeName: employeeName,
+          foreman: getForemanForEmployee(employeeName)
+        });
+      }
+    });
+
     classes.forEach(itemClass => {
       // Collect qualifying swap candidates for this class
       const swapMeta = [];
@@ -368,9 +458,10 @@ class SwapGenerationEngine {
 
         const status = String(item['Status'] || '').trim();
         const statusLower = status.toLowerCase();
+        const location = String(item['Location'] || '').trim();
+        const locationLower = location.toLowerCase();
 
         // ONLY active in-service/assigned items can generate a swap!
-        // Items that are on shelf, in testing, packed for delivery, ready for delivery, lost, destroyed, failed, or retired must NEVER generate a swap!
         const inactiveStatuses = [
           'on shelf', 'available', 'in stock',
           'in testing', 'packed for testing', 'ready for test',
@@ -387,9 +478,13 @@ class SwapGenerationEngine {
         let assignedTo = String(assignedToRaw).trim().toLowerCase();
         if (!assignedTo || ignoreNames.includes(assignedTo)) return;
 
+        // Skip Previous Employee items from active swap generation (handled in prevEmpItems)
+        if (assignedTo === 'previous employee' || previousEmployeeNames.has(assignedTo) || locationLower === 'previous employee') {
+          return;
+        }
+
         // Fallback for location-based AssignedTo
         if (!empMap[assignedTo]) {
-          if (assignedTo === 'previous employee') return;
           const fallbackLead = locationToLeadMap[assignedTo];
           if (!fallbackLead) return;
           assignedTo = fallbackLead;
@@ -733,6 +828,34 @@ class SwapGenerationEngine {
         rawGrid.push(['No swaps due for this class', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
       }
     });
+
+    // Write PREVIOUS EMPLOYEE section if items found to reclaim
+    if (prevEmpItems.length > 0) {
+      rawGrid.push(['PREVIOUS EMPLOYEE', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
+
+      const prevForemanGroups = {};
+      prevEmpItems.forEach(r => {
+        const form = r.foreman || 'Unknown';
+        if (!prevForemanGroups[form]) prevForemanGroups[form] = [];
+        prevForemanGroups[form].push(r);
+      });
+
+      const sortedPrevForemen = Object.keys(prevForemanGroups).sort();
+      sortedPrevForemen.forEach(foreman => {
+        if (sortedPrevForemen.length > 1 || foreman !== 'Unknown') {
+          rawGrid.push([`    👷 ${foreman}`, '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
+        }
+
+        prevForemanGroups[foreman].forEach(r => {
+          rawGrid.push(r.data);
+          const obj = this.gridRowToObj(allHeaders, r.data);
+          obj._location = 'PREVIOUS EMPLOYEE';
+          obj._foreman = foreman;
+          obj._daysLeftColor = '#ef4444';
+          swapRows.push(obj);
+        });
+      });
+    }
 
     // Save to local database
     this.db.replaceSwapTable(swapKey, rawGrid, allHeaders, swapRows);
@@ -1164,13 +1287,21 @@ class SwapGenerationEngine {
       const invTable = this.db.getTable(cfg.invKey);
       if (!swapTable || !invTable || !swapTable.rows || !invTable.rows) return;
 
-      const assignedPicks = new Set(swapTable.rows.map(r => String(r['Pick List Item #'] || '').trim()).filter(Boolean));
+      const assignedPicks = new Set(swapTable.rows.map(r => String(r['Pick List Item #'] || '').trim()).filter(p => p && p !== '—'));
 
       swapTable.rows.forEach(r => {
         const status = String(r['Status'] || '').toLowerCase();
         const pickNum = String(r['Pick List Item #'] || '').trim();
         const isPicked = r['Picked'] === true || r['Picked'] === 'TRUE';
         if (isPicked || r['_manualPick']) return;
+
+        // Skip previous employees, return to shelf items, lost items, and class reclaims
+        const daysLeftVal = String(r['Days Left'] || '').toUpperCase();
+        const isPrevEmp = status.includes('return to shelf') || status.includes('packed for testing') || status.includes('ready for test') || daysLeftVal.includes('PREV EMP') || r._location === 'PREVIOUS EMPLOYEE';
+        if (isPrevEmp || status.includes('locate') || daysLeftVal.includes('LOST')) {
+          r['Pick List Item #'] = '—';
+          return;
+        }
 
         if (status.includes('in testing') || status.includes('need to purchase') || pickNum === '—') {
           const empSize = r['Size'];
