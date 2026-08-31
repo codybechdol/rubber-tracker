@@ -294,10 +294,36 @@ class CrewImportEngine {
     return { label: 'Mon-Thu (4 10s)', skipSun: true, skipMon: false, skipTue: false, skipWed: false, skipThu: false, skipFri: true, skipSat: true, skipMeeting: false, skipChecklist: false };
   }
 
+  isPlaceholder(cellText) {
+    if (!cellText || typeof cellText !== 'string') return false;
+    const clean = cellText.trim();
+    if (clean.length === 0) return false;
+
+    // Direct placeholder keywords & open positions
+    if (clean.match(/\bOpen\s*Call\b/i)) return true;
+    if (clean.match(/^Open\s*$/i) || clean.match(/^Open\s*[-\/:]?\s*(Call|Position|Spot|Req|Seat|Line|Job|Hire|Man|Guy|JL|JRY|Journeyman|Foreman|F|GF|SUP|WT|GTO|EO|AP|\d+\s*ap|\d+\s*st|Lineman|Operator|Apprentice|Trainee|Truck|Driver)?\b/i)) return true;
+    if (clean.match(/^Coming\s+soon\b/i) || clean.match(/^To\s+be\s+(hired|determined|filled)\b/i) || clean.match(/^TB[HD]\b/i)) return true;
+    if (clean.match(/^(TBD|TBA|Pending|N\/A|Placeholder|Vacant|Unassigned)\b/i)) return true;
+    if (clean.match(/^Need\s/i)) return true;
+    if (clean.match(/^NEW\s*HIRE\s*(JL|F|GTO\s*F?|EO\s*\d|WT|Jry\s*Op|\d\s*ap|ST\s*\d|Lineman|Operator|Apprentice)?\s*$/i)) return true;
+    if (clean.match(/^Call\s*[-\/]?\s*(JL|JRY|Journeyman|Foreman|F|GF|SUP|WT|GTO|EO|AP|\d+\s*ap|\d+\s*st|Out)?\b/i)) return true;
+
+    // Schedule / rotation phrases that are not employees
+    if (clean.match(/\b\d+\s*days\s*straight\b/i) || clean.match(/\bwork\s*\d+\s*days\b/i)) return true;
+    if (clean.match(/\d{1,2}[-\/]\d{1,2}\s*(thru|to|-|–)\s*\d{1,2}[-\/]\d{1,2}/i) && clean.match(/\b(thru|days|wk|week|work|start|straight)\b/i)) return true;
+    if (clean.match(/\b(Aprox|Approx|Tentative|Starts?|Completed)\s+(start\s+)?(wk|week)\s+\d/i)) return true;
+    if (clean.match(/\b(Poles|Dock|Sub|Trans|Foundation|Distro|Cleanup)\b/i) && clean.match(/\b(Aprox|start|wk|week|thru|straight)\b/i)) return true;
+
+    return false;
+  }
+
   isEmployeeName(cellText) {
     if (!cellText || typeof cellText !== 'string') return false;
     const clean = cellText.trim();
     if (clean.length < 2 || clean.length > 80) return false;
+
+    // Reject placeholders & schedule notes immediately
+    if (this.isPlaceholder(clean)) return false;
 
     // Ignore pure job numbers (e.g. "013-26", "Helena Dock 009-26 4 10's M-Th")
     if (clean.match(/\d{3}-\d{2}/)) return false;
@@ -322,23 +348,28 @@ class CrewImportEngine {
     if (clean.match(/^(Light\s*Duty|Time\s*off|Quits?|Other|Layoffs?|Resigns?|Leave|Vacations?|MT\s*Misc|Weeds)/i)) return false;
     if (clean.match(/^(Time\s*off\s*upcoming|Time\s*off\/Quit\/Other|Upcoming\s*Time\s*off)/i)) return false;
 
+    // Ignore notes with 'thru' date ranges or schedule week annotations
+    if (clean.match(/\bthru\b/i) || clean.match(/\bwk\s+\d/i)) return false;
+    if (clean.match(/\b(Poles|Dock|Sub|Trans|Distro|Foundation)\b/i) && clean.match(/,/)) return false;
+
     // Recognize if it contains recognized roles, apprentices, operators, or annotations
     if (clean.match(/\b(SUP|GF|F|GTO\s*F|GTO|JL|JRY|WT|EO\s*[12]|EO[12]|\d+\s*ap|\d+\s*st|Op|Operator|Apprentice|Trainee|NEW\s*HIRE|NEWHIRE)\b/i)) {
       const firstWord = clean.split(/\s+/)[0];
-      if (firstWord.match(/^(off|back|next|wks?|as|due|baby|starts?|on|resume|set|fly|approved|to|from)$/i)) return false;
+      if (firstWord.match(/^(off|back|next|wks?|as|due|baby|starts?|on|resume|set|fly|approved|to|from|open|need|call|tbd|vacant|unassigned|placeholder|tbh|coming|work)$/i)) return false;
       return true;
     }
 
     // Name pattern: At least two words (First Last)
     const words = clean.split(/\s+/).filter(w => /^[A-Za-z]/.test(w));
     if (words.length < 2) return false;
-    if (words[0].match(/^(off|back|next|wks?|as|due|baby|starts?|on|resume|set|fly|approved|meeting|shop|to|from)$/i)) return false;
+    if (words[0].match(/^(off|back|next|wks?|as|due|baby|starts?|on|resume|set|fly|approved|meeting|shop|to|from|open|need|call|tbd|vacant|unassigned|placeholder|tbh|coming|work)$/i)) return false;
     return true;
   }
 
   parseEmployeeCell(cellText) {
     if (!cellText) return null;
     let clean = String(cellText).trim();
+    if (this.isPlaceholder(clean)) return null;
 
     // 1. Detect NEW HIRE flag
     const isNewHire = /\b(NEW\s*HIRE|NEWHIRE)\b/i.test(clean);
@@ -395,6 +426,10 @@ class CrewImportEngine {
       .replace(/[\*#\(\)]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
+
+    if (!name || name.length < 2 || this.isPlaceholder(name)) {
+      return null;
+    }
 
     // 4. Secondary / Split / Bid note detection
     const hasSecondaryNote = /\b(Crew\s+\d+[-\/]\d+|\bMon\s*Only\b|\bTue\s*Only\b|\bWed\s*Only\b|\bThu\s*Only\b|\bFri\s*Only\b|\bSat\s*Only\b|\bSun\s*Only\b|Mon\s*-\s*Wed|Thurs?\s*&\s*Fri|Fri\s*&\s*Sat|Secondary|Split|Temp|Covering)\b/i.test(notesPart);
@@ -520,11 +555,14 @@ class CrewImportEngine {
         // Stop if hitting another job header, dock, committee, or section break
         if (cell.match(/\d{3}-\d{2}/)) break;
         if (cell.match(/\b(Dock|Sub\s*Dock|Tran\s*Dock|Bid|Safety\s*Committ?ee|Committee)\b/i)) break;
-        if (cell.match(/^(Time\s*Off|Quit|Other|Layoff|Resign|Leave|Vacation|Light\s*Duty|Weeds|MT\s*Misc)\b/i)) break;
+        // Skip placeholders (Open Call, Need JL, Coming soon, TBD, etc.) - they are neither employees nor crew notes
+        if (this.isPlaceholder(cell)) {
+          continue;
+        }
 
         // Check if this cell is a crew-level note / description / instruction
-        if (cell.match(/^(NWE|Aprox|Tentative|Completed|On Hold|Approved|Starts?|Set Basements|Waiting|Crew\s+\d+[-\/]\d+|Shop\s*Note)/i) || !this.isEmployeeName(cell)) {
-          if (!crewNote) {
+        if (cell.match(/^(NWE|Aprox|Tentative|Completed|On Hold|Approved|Starts?|Set Basements|Waiting|Crew\s+\d+[-\/]\d+|Shop\s*Note|Poles|Work\s+\d+)/i) || !this.isEmployeeName(cell)) {
+          if (!crewNote && !this.isPlaceholder(cell)) {
             crewNote = cell;
           }
           continue;
@@ -532,7 +570,7 @@ class CrewImportEngine {
 
         if (this.isEmployeeName(cell)) {
           const emp = this.parseEmployeeCell(cell);
-          if (emp && emp.name) {
+          if (emp && emp.name && !this.isPlaceholder(emp.name)) {
             // If employee cell has a crew-wide prefix (e.g. "Crew 8-24 Mon Only"), elevate to crewNote
             if (emp.notes && emp.notes.match(/^Crew\s+\d+[-\/]\d+/i)) {
               if (!crewNote) {
@@ -808,6 +846,59 @@ class CrewImportEngine {
       occ.emp.isSecondary = !isPrimary;
     });
 
+    this.render();
+  }
+
+  removeNewHire(empName) {
+    if (!empName) return;
+    const cleanTarget = this.cleanNameForMatch(empName);
+
+    // Remove from newHireConfigs
+    delete this.newHireConfigs[empName];
+
+    // Remove employee from parsedCrews
+    for (const crew of this.parsedCrews) {
+      const beforeCount = crew.employees.length;
+      crew.employees = crew.employees.filter(e => this.cleanNameForMatch(e.name) !== cleanTarget);
+      if (crew.employees.length !== beforeCount) {
+        // Re-number crew positions
+        crew.employees.forEach((e, idx) => {
+          e.position = idx + 1;
+          const posStr = String(idx + 1).padStart(2, '0');
+          e.fullJobNumber = `${crew.jobNumber}.${posStr}`;
+        });
+        crew.crewSize = crew.employees.length;
+      }
+    }
+
+    // Re-filter multi-crew occurrences if needed
+    if (this.multiCrewEmployees) {
+      this.multiCrewEmployees = this.multiCrewEmployees.filter(m => this.cleanNameForMatch(m.employeeName) !== cleanTarget);
+    }
+
+    // Recompute deltas
+    this.computedDeltas = this.computeChangeDeltas();
+
+    // Re-render
+    this.render();
+  }
+
+  removeCrewEmployee(jobNumber, empName) {
+    if (!jobNumber || !empName) return;
+    const cleanTarget = this.cleanNameForMatch(empName);
+    const crew = this.parsedCrews.find(c => c.jobNumber === jobNumber);
+    if (crew) {
+      crew.employees = crew.employees.filter(e => this.cleanNameForMatch(e.name) !== cleanTarget);
+      crew.employees.forEach((e, idx) => {
+        e.position = idx + 1;
+        const posStr = String(idx + 1).padStart(2, '0');
+        e.fullJobNumber = `${crew.jobNumber}.${posStr}`;
+      });
+      crew.crewSize = crew.employees.length;
+    }
+
+    // Recompute deltas and re-render
+    this.computedDeltas = this.computeChangeDeltas();
     this.render();
   }
 
@@ -2161,15 +2252,23 @@ class CrewImportEngine {
 
               return `
                 <div class="new-hire-card" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-left: 4px solid #10b981; border-radius: 8px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.2);">
-                  <!-- Top Row: Name, Location, Job, Badges -->
-                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px;">
+                  <!-- Top Row: Name, Location, Job, Badges & Remove Button -->
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px; flex-wrap: wrap; gap: 8px;">
                     <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                       <span style="font-size: 15px; font-weight: 800; color: #f8fafc;">👤 ${this.escapeHtml(nh.name)}</span>
                       <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 10.5px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">NEW HIRE</span>
                       <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">📍 ${this.escapeHtml(nh.location)} — Job ${this.escapeHtml(nh.jobNumber)}</span>
                     </div>
-                    <div style="font-size: 11.5px; color: var(--text-muted);">
-                      Crew: <strong style="color: #60a5fa;">${this.escapeHtml(nh.jobNumber)}</strong>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                      <div style="font-size: 11.5px; color: var(--text-muted);">
+                        Crew: <strong style="color: #60a5fa;">${this.escapeHtml(nh.jobNumber)}</strong>
+                      </div>
+                      <button type="button" onclick="window.crewImportEngine.removeNewHire('${this.escapeJsString(nh.name)}')" 
+                        style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #f87171; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 5px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; transition: all 0.15s;"
+                        onmouseover="this.style.background='rgba(239, 68, 68, 0.3)'" onmouseout="this.style.background='rgba(239, 68, 68, 0.15)'"
+                        title="Remove this false positive from new hires">
+                        <span>✕</span> Not an Employee / Remove
+                      </button>
                     </div>
                   </div>
 
@@ -2538,9 +2637,15 @@ class CrewImportEngine {
 
                 ${e.notes ? `<span style="color: #f59e0b; font-size: 10px; font-weight: 600; background: rgba(245, 158, 11, 0.12); padding: 1px 5px; border-radius: 3px; border: 1px solid rgba(245, 158, 11, 0.25);">📝 ${this.escapeHtml(e.notes)}</span>` : ''}
               </div>
-              <span class="badge" style="background: var(--bg-tertiary); color: var(--text-muted); font-size: 10px; padding: 1px 5px; border-radius: 3px; font-weight: 700;">
-                ${e.classification || e.role || '—'}
-              </span>
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span class="badge" style="background: var(--bg-tertiary); color: var(--text-muted); font-size: 10px; padding: 1px 5px; border-radius: 3px; font-weight: 700;">
+                  ${e.classification || e.role || '—'}
+                </span>
+                <button type="button" onclick="window.crewImportEngine.removeCrewEmployee('${crew.jobNumber}', '${this.escapeJsString(e.name)}')"
+                  style="background: transparent; border: none; color: #64748b; font-size: 11px; cursor: pointer; padding: 0 3px;"
+                  onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='#64748b'"
+                  title="Remove employee row from crew">✕</button>
+              </div>
             </div>
           `).join('')}
         </div>
@@ -2559,7 +2664,25 @@ class CrewImportEngine {
     try {
       const sheetNames = await this.readWorkbook(file);
       if (sheetNames.length > 0) {
-        this.parseSheet(sheetNames[0]);
+        // Auto-select latest date tab if date tabs exist, otherwise default to the last tab in the workbook
+        let bestSheet = sheetNames[sheetNames.length - 1];
+        let latestDate = null;
+
+        for (const name of sheetNames) {
+          const dStr = this.parseRosterDate(name);
+          if (dStr) {
+            const d = new Date(dStr);
+            if (!isNaN(d.getTime())) {
+              if (!latestDate || d > latestDate) {
+                latestDate = d;
+                bestSheet = name;
+              }
+            }
+          }
+        }
+
+        this.parseSheet(bestSheet);
+        this.computedDeltas = this.computeChangeDeltas();
         this.goToStep(2);
       }
     } catch (e) {
@@ -2570,6 +2693,8 @@ class CrewImportEngine {
 
   switchSheetTab(sheetName) {
     this.parseSheet(sheetName);
+    this.newHireConfigs = {};
+    this.computedDeltas = this.computeChangeDeltas();
     this.render();
   }
 
@@ -2836,7 +2961,7 @@ class CrewImportEngine {
   goToStep(stepNum) {
     this.activeStep = stepNum;
     if (stepNum >= 2) {
-      this.computeChangeDeltas();
+      this.computedDeltas = this.computeChangeDeltas();
     }
     this.render();
   }

@@ -3457,12 +3457,19 @@
     function isEmployeeName(text) {
       if (!text || text.length < 4) return false;
       if (text.match(/^\d/)) return false; // Starts with number
+      // Skip "Open Call", "Open JL", "Open [role]" placeholders (unfilled job requisitions)
+      if (text.match(/\bOpen\s*Call\b/i) || text.match(/^Open\b/i)) return false;
+      // Skip "Coming soon", "TBH", etc. placeholders
+      if (text.match(/^Coming\s+soon\b/i) || text.match(/^To\s+be\s+(hired|determined|filled)\b/i) || text.match(/^TB[HD]\b/i)) return false;
       // Skip "Last day..." or "Return approx..." comments
       if (text.match(/\b(Last\s*day|Return\s*ap?rox|Back\s*ap?rox|Out\s*until|Off\s*until|Back\s*on)\b/i)) return false;
       // Skip "NEW HIRE [role]" placeholders with no actual name (e.g., "NEW HIRE JL", "NEW HIRE EO2")
       if (text.match(/^NEW\s*HIRE\s*(JL|F|GTO\s*F?|EO\s*\d|WT|Jry\s*Op|\d\s*ap)?\s*$/i)) return false;
       // Skip "Need [something]" placeholders (e.g., "Need Guy Here With CDL")
       if (text.match(/^Need\s/i)) return false;
+      // Skip schedule rotations & date range notes
+      if (text.match(/\b\d+\s*days\s*straight\b/i) || text.match(/\bwork\s*\d+\s*days\b/i)) return false;
+      if (text.match(/\b(Aprox|Approx|Tentative|Starts?|Completed)\s+(start\s+)?(wk|week)\s+\d/i)) return false;
       // Skip continuation text starting with lowercase prepositions (e.g., "of April, going south to work")
       if (text.match(/^(of|and|or|for|to|in|at|on|by|per|going|south|north|east|west)\s/i) && text[0] === text[0].toLowerCase()) return false;
       if (text.match(/^(NWE|Aprox|Tentative|Completed|On Hold|BID)/i)) return false;
@@ -3754,6 +3761,16 @@
         .replace(/\b(TEMP|TEMPORARY|CONTRACTOR|TRAINEE)\b/gi, '')
         .replace(/\s+/g, ' ')
         .trim();
+
+      // Reject if name part is a placeholder (e.g., "Open", "Open Call", "Need...", "Coming soon", etc.)
+      if (result.name && (
+        result.name.match(/^(Open|Need|NEW HIRE|TBD|Placeholder|Vacant|Unassigned|TBH|Call|Coming soon|Work\s+\d+|Poles)\b/i) ||
+        result.name.match(/\bOpen\s*Call\b/i) ||
+        result.name.match(/\bthru\b/i) ||
+        result.name.match(/\b\d+\s*days\s*straight\b/i)
+      )) {
+        result.name = '';
+      }
 
       return result;
     }
