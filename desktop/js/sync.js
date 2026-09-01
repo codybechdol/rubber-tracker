@@ -32,7 +32,7 @@ class SyncEngine {
     localStorage.setItem('sa_sync_url', this.syncUrl);
   }
 
-  async executeNetworkRequest(url, method = 'GET', body = null) {
+  async executeNetworkRequest(url, method = 'GET', body = null, timeoutMs = 30000) {
     // 1. If running inside Electron desktop app, use native Node HTTPS bridge
     if (window.desktopAPI && typeof window.desktopAPI.sendSyncRequest === 'function') {
       try {
@@ -49,9 +49,10 @@ class SyncEngine {
       }
     }
 
-    // 2. Browser fetch fallback (with 300s timeout for safety email batch scanning)
+    // 2. Try browser Fetch API first
+    let fetchError = null;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 300000);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const options = { method, redirect: 'follow', signal: controller.signal };
       if (method === 'POST' && body) {
@@ -65,17 +66,53 @@ class SyncEngine {
         return JSON.parse(text);
       } catch (parseErr) {
         if (text.includes('<!DOCTYPE') || text.includes('<html')) {
-          throw new Error('Google returned a login/access page. You can either:\n1. Click "📁 Import Snapshot" at the top and select SafetyAssistant_Sync_Snapshot.json from your Google Drive/Downloads, or\n2. In Google Sheets: Extensions > Apps Script > Deploy > Manage Deployments, ensure "Who has access" is set to "Anyone".');
+          throw new Error('Google returned a login/access page. Please verify in Google Sheets: Extensions > Apps Script > Deploy > Manage Deployments, and ensure "Who has access" is set to "Anyone".');
         }
         throw parseErr;
       }
-    } catch (fetchErr) {
+    } catch (err) {
       clearTimeout(timeoutId);
-      if (fetchErr.name === 'AbortError') {
-        throw new Error('Sync network request timed out after 180 seconds.');
-      }
-      throw fetchErr;
+      fetchError = err;
+      console.warn('fetch() attempt encountered an error, falling back to XMLHttpRequest:', err);
     }
+
+    // 3. Fallback to XMLHttpRequest (handles Safari iOS cross-origin redirects reliably)
+    return new Promise((resolve, reject) => {
+      try {
+        const xhr = new XMLHttpRequest();
+        xhr.open(method, url, true);
+        xhr.timeout = timeoutMs;
+        if (method === 'POST' && body) {
+          xhr.setRequestHeader('Content-Type', 'text/plain;charset=utf-8');
+        }
+        xhr.onload = function () {
+          if (xhr.status >= 200 && xhr.status < 400) {
+            try {
+              const data = JSON.parse(xhr.responseText);
+              resolve(data);
+            } catch (pErr) {
+              if (xhr.responseText.includes('<!DOCTYPE') || xhr.responseText.includes('<html')) {
+                reject(new Error('Google returned a login/access page. Please ensure "Who has access" is set to "Anyone".'));
+              } else {
+                reject(new Error('Invalid JSON response: ' + pErr.message));
+              }
+            }
+          } else {
+            reject(new Error(`Server returned HTTP ${xhr.status}: ${xhr.statusText}`));
+          }
+        };
+        xhr.onerror = function () {
+          reject(fetchError || new Error('Network request failed (Load failed / CORS error).'));
+        };
+        xhr.ontimeout = function () {
+          reject(new Error(`Network request timed out after ${(timeoutMs / 1000).toFixed(0)} seconds.`));
+        };
+        const payload = (method === 'POST' && body) ? (typeof body === 'string' ? body : JSON.stringify(body)) : null;
+        xhr.send(payload);
+      } catch (xhrErr) {
+        reject(fetchError || xhrErr);
+      }
+    });
   }
 
   async testConnection() {
