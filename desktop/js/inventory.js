@@ -1508,11 +1508,13 @@ class InventoryManager {
           const isHistFailed = !isHistLineman && (histAssignedLower.includes('fail') || histAssignedLower === 'not repairable');
           const isHistRetired = !isHistLineman && (histAssignedLower.includes('retir') || histAssignedLower.includes('destroy') || histLocLower.includes('destroyed'));
           const isHistReturned = !isHistLineman && (isHistTesting || isHistShelf || isHistLost || isHistFailed || isHistRetired);
+          const isCurActiveEmployee = curAssignedTo && !['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'ready for delivery', 'ready for test', 'lost', 'failed rubber', 'destroyed', 'unassigned', 'n/a', '—', '-'].includes(curAssignedLower);
 
           // Check if history employee is a known previous/inactive employee
           const isHistPreviousEmp = isHistLineman && (
             histLocLower === 'previous employee' ||
             histLocLower.includes('previous') ||
+            (window.previousEmployeesEngine && window.previousEmployeesEngine.isPreviousEmployee && window.previousEmployeesEngine.isPreviousEmployee(latestHist.assignedTo)) ||
             (window.previousEmployeeManager && window.previousEmployeeManager.isPreviousEmployee && window.previousEmployeeManager.isPreviousEmployee(latestHist.assignedTo))
           );
 

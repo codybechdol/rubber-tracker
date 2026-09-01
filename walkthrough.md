@@ -1,9 +1,7 @@
-- **Swap Generation Outbox Formatting & Push Optimization (`REPLACE_SWAP_TABLE`):**
-  - **What They Are:** When you click **Generate Swaps**, the app recalculates the 9 equipment swap schedules (`Glove Swaps`, `Sleeve Swaps`, `Blanket Swaps`, `MACK Swaps`, `HV Tester Swaps`, `Phasing Set Swaps`, `AED Swaps`, `Ground Swaps`, `Hot Stick Swaps`) and queues 9 full-table sync mutations to update Google Sheets.
-  - **Human-Readable Outbox Cards:** Added formatters in [sync.js](file:///c:/Users/codyb/WebstormProjects/Safety%20Assistant/desktop/js/sync.js) so instead of showing raw JSON (`{"id":"mut_...", ...}`), they clearly show:
-    - `🧤 Glove Swaps • Generated Swap Schedule` — `Generated 14 active equipment swaps for change-out cycle` (or `0 records if none due`).
-  - **Coalescing:** Updated `addMutation()` in [db.js](file:///c:/Users/codyb/WebstormProjects/Safety%20Assistant/desktop/js/db.js) to coalesce repeated swap generations so clicking "Generate Swaps" multiple times updates the existing pending swap table rather than stacking duplicate mutations.
-  - **Streaming 1-at-a-Time Push:** Updated `pushChangesToGoogleSheets()` in [sync.js](file:///c:/Users/codyb/WebstormProjects/Safety%20Assistant/desktop/js/sync.js) to stream large full-table replacements 1 at a time (and bypass single-cell pre-flight conflict scans) to ensure instant, reliable Google Sheets delivery without hitting Apps Script payload size limits.
+- **Swap Generation Engine Execution Resolution (`swaps.js`):**
+  - Resolved a duplicate `const invMap` declaration in `handleDateChangedEdit()` inside [desktop/js/swaps.js](file:///c:/Users/codyb/WebstormProjects/Safety%20Assistant/desktop/js/swaps.js) that caused a browser parse failure and prevented `window.swapEngine` from initializing.
+  - Verified full end-to-end execution of `generateAllSwaps()` across all 9 equipment swap sheet generators (`gloves`, `sleeves`, `blankets`, `macks`, `hv_testers`, `phasing_sets`, `aed`, `grounds`, `hot_sticks`).
+  - Added safe fallback dialog handling for `showSwapSummaryModal()`.
 
 # Walkthrough: Employee Sheet Organization & Visual Definition
 
